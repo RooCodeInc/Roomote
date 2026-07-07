@@ -1,0 +1,55 @@
+---
+title: Linear
+description: Turn Linear issues into scoped Roomote work.
+icon: 'https://api.iconify.design/simple-icons:linear.svg?color=currentColor'
+---
+
+The Linear integration lets Roomote receive work from Linear, post progress back
+to the issue or agent session, and keep the full run available in the Roomote
+task view.
+
+Linear is optional during onboarding. Connect it when your team wants Roomote to
+work from issues that already have product context, acceptance criteria,
+priority, or discussion.
+
+## Setup
+
+<Steps>
+  <Step title="Connect Linear">
+    In Roomote, go to **Settings > Integrations** and connect your Linear
+    workspace.
+  </Step>
+  <Step title="Link your user account">
+    Link your Linear identity when prompted so Roomote can associate issue
+    activity with your Roomote user.
+  </Step>
+  <Step title="Make sure an environment exists">
+    Roomote needs an environment that matches the repository or workspace the
+    issue refers to.
+  </Step>
+</Steps>
+
+## Starting work from Linear
+
+You can start Roomote work from a Linear agent session or by mentioning Roomote
+on an issue. Roomote uses the issue context and may ask you to confirm the
+workspace before it launches.
+
+Good Linear asks include:
+
+- draft an implementation plan for this issue
+- investigate whether this bug is reproducible
+- implement the smallest fix that satisfies the acceptance criteria
+- explain what code paths this issue touches
+- open a PR and link it back to the issue
+
+## Progress and follow-up
+
+Roomote can post status, plan updates, and final responses back to Linear. The
+Roomote task view remains the best place to inspect logs, diffs, artifacts, and
+previews.
+
+<Tip>
+  Put acceptance criteria and relevant repository links directly in the Linear
+  issue before starting agent work.
+</Tip>

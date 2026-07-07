@@ -1,0 +1,269 @@
+import { z } from 'zod';
+
+import { timePeriodFilterSchema, type TimePeriodFilter } from './time-period';
+
+export const analyticsObjects = ['pullRequests', 'tasks'] as const;
+export const analyticsObjectSchema = z.enum(analyticsObjects);
+export type AnalyticsObject = z.infer<typeof analyticsObjectSchema>;
+
+const analyticsDimensions = [
+  'user',
+  'project',
+  'source',
+  'status',
+  'repo',
+  'author',
+] as const;
+export const analyticsDimensionSchema = z.enum(analyticsDimensions);
+export type AnalyticsDimension = z.infer<typeof analyticsDimensionSchema>;
+
+const analyticsGranularities = ['day', 'week', 'month', 'year'] as const;
+export const analyticsGranularitySchema = z.enum(analyticsGranularities);
+export type AnalyticsGranularity = z.infer<typeof analyticsGranularitySchema>;
+
+const analyticsFilterValueSchema = z.array(z.string()).optional();
+
+export const analyticsFiltersSchema = z
+  .object({
+    user: analyticsFilterValueSchema,
+    project: analyticsFilterValueSchema,
+    source: analyticsFilterValueSchema,
+    status: analyticsFilterValueSchema,
+    repo: analyticsFilterValueSchema,
+    author: analyticsFilterValueSchema,
+  })
+  .partial();
+export type AnalyticsFilters = z.infer<typeof analyticsFiltersSchema>;
+
+export const analyticsChartInputSchema = z.object({
+  object: analyticsObjectSchema,
+  viewBy: analyticsDimensionSchema,
+  filters: analyticsFiltersSchema.optional(),
+  timePeriod: timePeriodFilterSchema.optional(),
+  granularity: analyticsGranularitySchema.optional(),
+});
+
+export const analyticsFilterOptionsInputSchema = z.object({
+  object: analyticsObjectSchema,
+  filters: analyticsFiltersSchema.optional(),
+  timePeriod: timePeriodFilterSchema.optional(),
+});
+
+export const analyticsDetailsInputSchema = z.object({
+  object: analyticsObjectSchema,
+  viewBy: analyticsDimensionSchema,
+  filters: analyticsFiltersSchema.optional(),
+  timePeriod: timePeriodFilterSchema.optional(),
+  granularity: analyticsGranularitySchema.optional(),
+  bucketKey: z.string(),
+  seriesKey: z.string(),
+});
+
+export const analyticsExportInputSchema = z.object({
+  object: analyticsObjectSchema,
+  viewBy: analyticsDimensionSchema,
+  filters: analyticsFiltersSchema.optional(),
+  timePeriod: timePeriodFilterSchema.optional(),
+  granularity: analyticsGranularitySchema.optional(),
+});
+
+export const pullRequestAnalyticsOverviewInputSchema = z.object({
+  viewBy: analyticsDimensionSchema,
+  filters: analyticsFiltersSchema.optional(),
+  timePeriod: timePeriodFilterSchema.optional(),
+  granularity: analyticsGranularitySchema.optional(),
+});
+
+export type AnalyticsFilterOption = {
+  value: string;
+  label: string;
+};
+
+export type AnalyticsSeries = {
+  key: string;
+  label: string;
+  total: number;
+};
+
+export type AnalyticsChartBucket = {
+  key: string;
+  label: string;
+  total: number;
+  segments: Record<string, number>;
+};
+
+export type AnalyticsChartResponse = {
+  object: AnalyticsObject;
+  viewBy: AnalyticsDimension;
+  series: AnalyticsSeries[];
+  buckets: AnalyticsChartBucket[];
+  total: number;
+};
+
+export type AnalyticsFilterOptionsResponse = {
+  filters: Partial<Record<AnalyticsDimension, AnalyticsFilterOption[]>>;
+  availableViewBy: AnalyticsDimension[];
+};
+
+export type AnalyticsDetailsColumn = {
+  key: string;
+  label: string;
+};
+
+export type AnalyticsDetailsRow = {
+  id: string;
+  values: Record<string, string>;
+  links?: Partial<Record<string, string>>;
+};
+
+export type AnalyticsDetailsResponse = {
+  object: AnalyticsObject;
+  bucketKey: string;
+  seriesKey: string;
+  columns: AnalyticsDetailsColumn[];
+  rows: AnalyticsDetailsRow[];
+  total: number;
+};
+
+export type AnalyticsExportResponse = {
+  object: AnalyticsObject;
+  viewBy: AnalyticsDimension;
+  columns: AnalyticsDetailsColumn[];
+  rows: AnalyticsDetailsRow[];
+  total: number;
+};
+
+export type PullRequestAnalyticsSummary = {
+  totalPullRequests: number;
+  roomotePullRequests: {
+    total: number;
+    percentage: number;
+  };
+  mergedRoomotePullRequests: {
+    total: number;
+    percentage: number;
+  };
+  authorCount: number;
+  pullRequestsPerAuthor: number | null;
+  pullRequestsPerAuthorPerPeriod: number | null;
+};
+
+export type PullRequestAnalyticsOverviewResponse = {
+  chart: AnalyticsChartResponse;
+  filterOptions: AnalyticsFilterOptionsResponse;
+  summary: PullRequestAnalyticsSummary;
+};
+
+export const ANALYTICS_OBJECT_CONFIG = {
+  tasks: {
+    label: 'Tasks',
+    axisLabel: 'Tasks',
+    filterDimensions: ['user', 'project', 'source'] as AnalyticsDimension[],
+    viewByDimensions: ['user', 'project', 'source'] as AnalyticsDimension[],
+    defaultViewBy: 'user' as AnalyticsDimension,
+  },
+  pullRequests: {
+    label: 'PRs',
+    axisLabel: 'PRs',
+    filterDimensions: [
+      'user',
+      'status',
+      'repo',
+      'author',
+    ] as AnalyticsDimension[],
+    viewByDimensions: [
+      'user',
+      'status',
+      'repo',
+      'author',
+    ] as AnalyticsDimension[],
+    defaultViewBy: 'user' as AnalyticsDimension,
+  },
+} as const satisfies Record<
+  AnalyticsObject,
+  {
+    label: string;
+    axisLabel: string;
+    filterDimensions: AnalyticsDimension[];
+    viewByDimensions: AnalyticsDimension[];
+    defaultViewBy: AnalyticsDimension;
+  }
+>;
+
+export const ANALYTICS_DIMENSION_LABELS: Record<AnalyticsDimension, string> = {
+  user: 'User',
+  project: 'Environment',
+  source: 'Source',
+  status: 'Status',
+  repo: 'Repo',
+  author: 'Author',
+};
+
+export const ANALYTICS_GRANULARITY_LABELS: Record<
+  AnalyticsGranularity,
+  string
+> = {
+  day: 'By Day',
+  week: 'By Week',
+  month: 'By Month',
+  year: 'By Year',
+};
+
+export const ANALYTICS_TIME_RANGE_OPTIONS = [
+  { value: 1, label: 'Today' },
+  { value: 7, label: 'Last 7 Days' },
+  { value: 30, label: 'Last 30 Days' },
+  { value: 90, label: 'Last 90 Days' },
+  { value: 'all', label: 'All Time' },
+] as const satisfies ReadonlyArray<{
+  value: TimePeriodFilter;
+  label: string;
+}>;
+
+export function getDefaultAnalyticsViewBy(
+  object: AnalyticsObject,
+): AnalyticsDimension {
+  return ANALYTICS_OBJECT_CONFIG[object].defaultViewBy;
+}
+
+export function isValidAnalyticsViewBy(
+  object: AnalyticsObject,
+  viewBy: string | null | undefined,
+): viewBy is AnalyticsDimension {
+  if (!viewBy) {
+    return false;
+  }
+
+  return ANALYTICS_OBJECT_CONFIG[object].viewByDimensions.includes(
+    viewBy as AnalyticsDimension,
+  );
+}
+
+export function getAvailableAnalyticsGranularities(
+  _timePeriod: TimePeriodFilter,
+): AnalyticsGranularity[] {
+  return ['day', 'week', 'month', 'year'];
+}
+
+export function getDefaultAnalyticsGranularity(
+  timePeriod: TimePeriodFilter,
+): AnalyticsGranularity {
+  if (timePeriod === 'all') {
+    return 'month';
+  }
+
+  return getAvailableAnalyticsGranularities(timePeriod)[0]!;
+}
+
+export function isValidAnalyticsGranularity(
+  timePeriod: TimePeriodFilter,
+  granularity: string | null | undefined,
+): granularity is AnalyticsGranularity {
+  if (!granularity) {
+    return false;
+  }
+
+  return getAvailableAnalyticsGranularities(timePeriod).includes(
+    granularity as AnalyticsGranularity,
+  );
+}

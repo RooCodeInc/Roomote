@@ -1,0 +1,83 @@
+name: Documentation issue
+description: Report missing, stale, confusing, or incorrect Roomote documentation.
+title: "[Docs]: "
+labels: ["documentation", "needs-triage"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Use this for public docs, setup docs, self-hosting docs, integration docs, and contributor guidance.
+  - type: checkboxes
+    id: preflight
+    attributes:
+      label: Preflight
+      options:
+        - label: I searched existing issues and docs before opening this.
+          required: true
+        - label: I am reporting a specific documentation gap, not asking for a broad generated rewrite.
+          required: true
+  - type: dropdown
+    id: doc-area
+    attributes:
+      label: Documentation area
+      options:
+        - Public docs
+        - Self-hosting or setup
+        - Upgrade or deployment
+        - Integrations
+        - Roomote agents
+        - API
+        - Contributor guidance
+        - Internal agent guidance
+        - Other
+    validations:
+      required: true
+  - type: input
+    id: location
+    attributes:
+      label: Page or file
+      description: Link to the page or path, if known.
+      placeholder: "Example: apps/docs/... or .agent-guidance/..."
+    validations:
+      required: false
+  - type: textarea
+    id: problem
+    attributes:
+      label: What is wrong or missing?
+      description: Describe the stale, confusing, missing, or incorrect information.
+    validations:
+      required: true
+  - type: textarea
+    id: what-tried
+    attributes:
+      label: What were you trying to do?
+      description: Include the task or setup flow that led you to the docs.
+    validations:
+      required: true
+  - type: textarea
+    id: expected-docs
+    attributes:
+      label: Expected documentation
+      description: What should the docs explain or clarify?
+    validations:
+      required: true
+  - type: dropdown
+    id: impact
+    attributes:
+      label: Impact
+      options:
+        - Blocks installation or upgrade
+        - Blocks integration setup
+        - Causes incorrect product usage
+        - Causes contributor confusion
+        - Minor typo or wording issue
+        - Other
+    validations:
+      required: true
+  - type: textarea
+    id: context
+    attributes:
+      label: Additional context
+      description: Include version, deployment context, screenshots, or related issues if helpful.
+    validations:
+      required: false

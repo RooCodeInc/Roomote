@@ -1,0 +1,444 @@
+const {
+  mockGenerateObject,
+  mockReadSourceControlPullRequest,
+  mockResolveRoute,
+  mockFormatMessage,
+  mockRecordTaskMessageEnvelope,
+  mockTrackSlackBotReply,
+  mockSetLatestSlackBotReply,
+} = vi.hoisted(() => ({
+  mockGenerateObject: vi.fn(),
+  mockReadSourceControlPullRequest: vi.fn(),
+  mockResolveRoute: vi.fn(),
+  mockFormatMessage: vi.fn(),
+  mockRecordTaskMessageEnvelope: vi.fn(),
+  mockTrackSlackBotReply: vi.fn(),
+  mockSetLatestSlackBotReply: vi.fn(),
+}));
+
+vi.mock('@roomote/cloud-agents/server/non-task-provider-usage', () => ({
+  generateTrackedNonTaskObject: mockGenerateObject,
+  NON_TASK_INFERENCE_SURFACES: {
+    prReviewNotificationTriage: 'pr_review_notification_triage',
+  },
+}));
+
+vi.mock('@roomote/cloud-agents/server', () => ({
+  REVIEW_SUMMARY_MARKER: '<!-- roomote-review-summary',
+  REVIEW_STATUS_START_MARKER: '<!-- roomote-review-status:start -->',
+  REVIEW_STATUS_END_MARKER: '<!-- roomote-review-status:end -->',
+  getMarkedSection: ({
+    content,
+    startMarker,
+    endMarker,
+  }: {
+    content: string;
+    startMarker: string;
+    endMarker: string;
+  }) => {
+    const start = content.indexOf(startMarker);
+    const end = content.indexOf(endMarker);
+
+    if (start === -1 || end === -1) {
+      return undefined;
+    }
+
+    return content.slice(start + startMarker.length, end);
+  },
+}));
+
+vi.mock('../../pull-requests/source-control-pull-request-reads', () => ({
+  readSourceControlPullRequestForCloudJob: mockReadSourceControlPullRequest,
+}));
+
+vi.mock('../pr-review-notification', async () => {
+  const actual = await vi.importActual<
+    typeof import('../pr-review-notification')
+  >('../pr-review-notification');
+
+  return {
+    ...actual,
+    resolvePrReviewNotificationRoute: mockResolveRoute,
+    formatPrReviewActivityMessage: mockFormatMessage,
+  };
+});
+
+vi.mock('../record-task-message-envelope', () => ({
+  recordTaskMessageEnvelope: mockRecordTaskMessageEnvelope,
+}));
+
+vi.mock('@roomote/slack', () => ({
+  trackSlackBotReply: mockTrackSlackBotReply,
+  setLatestSlackBotReply: mockSetLatestSlackBotReply,
+}));
+
+import type { CloudJob } from '@roomote/db/server';
+import type { PrReviewActivityEvent } from '../pr-review-notification';
+
+import {
+  gatherPrReviewTriageContext,
+  preparePrReviewNotificationDelivery,
+  recordPrReviewNotificationDeliveryBestEffort,
+  triagePrReviewActivity,
+} from '../pr-review-notification-delivery';
+
+const request = {
+  taskId: 'task-1',
+  repository: 'owner/repo',
+  prNumber: 42,
+  prUrl: 'https://github.com/owner/repo/pull/42',
+  deferrals: 0,
+};
+
+const cloudJob = { id: 1, payload: {} } as unknown as CloudJob;
+
+const events: PrReviewActivityEvent[] = [
+  { kind: 'review', authorLogin: 'alice', reviewState: 'approved' },
+  { kind: 'review_comment', authorLogin: 'bob' },
+  {
+    kind: 'review_summary',
+    authorLogin: 'roomote[bot]',
+    summary: '1 issue to consider. The change correctly follows the pattern',
+    url: 'https://github.com/owner/repo/pull/42#issuecomment-7',
+    roomoteAuthored: true,
+  },
+];
+
+const eventsWithoutSelfReview: PrReviewActivityEvent[] = events.slice(0, 2);
+
+describe('preparePrReviewNotificationDelivery', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+
+    mockResolveRoute.mockResolvedValue({
+      provider: 'slack',
+      channelId: 'C123',
+      threadId: '111.222',
+    });
+    mockReadSourceControlPullRequest.mockResolvedValue({
+      success: true,
+      provider: 'github',
+      repositoryFullName: 'owner/repo',
+      number: 42,
+      threads: [
+        { id: 't1', resolved: true, path: null, line: null, comments: [] },
+        { id: 't2', resolved: false, path: null, line: null, comments: [] },
+      ],
+      issueComments: [
+        {
+          id: 'c1',
+          author: 'openmote[bot]',
+          body: '<!-- roomote-review-summary sha=abc mode=initial -->\n<!-- roomote-review-status:start -->\n**All 1 issue addressed.** [See task](https://example.com)\n<!-- roomote-review-status:end -->',
+          createdAt: null,
+          url: null,
+        },
+      ],
+      warnings: [],
+    });
+    mockGenerateObject.mockResolvedValue({
+      object: {
+        worthNotifying: true,
+        summary:
+          'alice approved [owner/repo#42](https://github.com/owner/repo/pull/42).',
+      },
+    });
+    mockFormatMessage.mockReturnValue('formatted-message');
+  });
+
+  it('prepares a routed, formatted delivery from the shared SDK flow', async () => {
+    const result = await preparePrReviewNotificationDelivery({
+      cloudJob,
+      request,
+      events,
+    });
+
+    expect(result).toEqual({
+      post: true,
+      route: {
+        provider: 'slack',
+        channelId: 'C123',
+        threadId: '111.222',
+      },
+      text: 'formatted-message',
+    });
+    expect(mockFormatMessage).toHaveBeenCalledWith({
+      repository: 'owner/repo',
+      prNumber: 42,
+      prUrl: 'https://github.com/owner/repo/pull/42',
+      provider: 'slack',
+      summary:
+        'alice approved [owner/repo#42](https://github.com/owner/repo/pull/42).',
+    });
+  });
+
+  it('skips without triage when no conversation route can be resolved', async () => {
+    mockResolveRoute.mockResolvedValue(null);
+
+    await expect(
+      preparePrReviewNotificationDelivery({ cloudJob, request, events }),
+    ).resolves.toEqual({ post: false, reason: 'no_conversation_route' });
+    expect(mockGenerateObject).not.toHaveBeenCalled();
+  });
+
+  it('propagates a triage skip decision', async () => {
+    mockGenerateObject.mockResolvedValue({
+      object: { worthNotifying: false, summary: '' },
+    });
+
+    await expect(
+      preparePrReviewNotificationDelivery({
+        cloudJob,
+        request,
+        events: eventsWithoutSelfReview,
+      }),
+    ).resolves.toEqual({ post: false, reason: 'not_worth_notifying' });
+  });
+});
+
+describe('triagePrReviewActivity', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it('returns a post decision with the trimmed summary when the model finds the activity worth notifying', async () => {
+    mockGenerateObject.mockResolvedValue({
+      object: {
+        worthNotifying: true,
+        summary: '  alice approved and bob left one comment.  ',
+      },
+    });
+
+    const decision = await triagePrReviewActivity({ ...request, events });
+
+    expect(decision).toEqual({
+      post: true,
+      summary: 'alice approved and bob left one comment.',
+    });
+    expect(mockGenerateObject).toHaveBeenCalledWith(
+      expect.objectContaining({
+        taskId: 'task-1',
+        surface: 'pr_review_notification_triage',
+        prompt: expect.stringContaining(
+          '- alice submitted a review (state: approved)',
+        ),
+      }),
+    );
+
+    const prompt = mockGenerateObject.mock.calls[0]?.[0]?.prompt as string;
+
+    expect(prompt).toContain('Repository: owner/repo');
+    expect(prompt).toContain('Pull request: #42');
+    expect(prompt).toContain(
+      'Pull request URL: https://github.com/owner/repo/pull/42',
+    );
+    expect(prompt).toContain('- bob left an inline review comment');
+    expect(prompt).toContain(
+      '- you (this is your own review) finished reviewing the PR and reported: 1 issue to consider.',
+    );
+    expect(prompt).toContain(
+      '(URL: https://github.com/owner/repo/pull/42#issuecomment-7)',
+    );
+    expect(prompt).not.toContain('Current pull request state:');
+  });
+
+  it('includes the latest Roomote review summary comment verbatim for self-review results', async () => {
+    mockGenerateObject.mockResolvedValue({
+      object: { worthNotifying: true, summary: 'ok.' },
+    });
+
+    await triagePrReviewActivity({
+      ...request,
+      events,
+      context: {
+        resolvedThreadCount: 2,
+        unresolvedThreadCount: 2,
+        latestReviewStatus: '2 issues outstanding.',
+        latestReviewSummaryComment:
+          '<!-- roomote-review-summary sha=abc mode=initial -->\n<!-- roomote-review-checklist:start -->\n- [ ] `apps/api/src/foo.ts:10` - Handle null actor ids\n- [ ] `apps/api/src/bar.ts:20` - Rename the helper to match its return shape\n<!-- roomote-review-checklist:end -->',
+      },
+    });
+
+    const prompt = mockGenerateObject.mock.calls[0]?.[0]?.prompt as string;
+
+    expect(prompt).toContain(
+      'Latest Roomote review summary comment (verbatim):',
+    );
+    expect(prompt).toContain('Handle null actor ids');
+    expect(prompt).toContain('Rename the helper to match its return shape');
+    expect(prompt).not.toContain('- Latest automated review status:');
+    expect(prompt).not.toContain('Current pull request state:');
+  });
+
+  it('returns a skip decision when the model says the activity is not worth notifying', async () => {
+    mockGenerateObject.mockResolvedValue({
+      object: { worthNotifying: false, summary: '' },
+    });
+
+    await expect(
+      triagePrReviewActivity({ ...request, events: eventsWithoutSelfReview }),
+    ).resolves.toEqual({ post: false, reason: 'not_worth_notifying' });
+  });
+
+  it('always passes along self-review results even when the model says they are not worth notifying', async () => {
+    mockGenerateObject.mockResolvedValue({
+      object: {
+        worthNotifying: false,
+        summary: 'The automated review found no blocking issues.',
+      },
+    });
+
+    await expect(
+      triagePrReviewActivity({ ...request, events }),
+    ).resolves.toEqual({
+      post: true,
+      summary: 'The automated review found no blocking issues.',
+    });
+  });
+
+  it('throws when the model wants to notify but returns an empty summary', async () => {
+    mockGenerateObject.mockResolvedValue({
+      object: { worthNotifying: true, summary: '   ' },
+    });
+
+    await expect(
+      triagePrReviewActivity({ ...request, events }),
+    ).rejects.toThrow('empty summary');
+  });
+});
+
+describe('gatherPrReviewTriageContext', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+
+    mockReadSourceControlPullRequest.mockResolvedValue({
+      success: true,
+      provider: 'github',
+      repositoryFullName: 'owner/repo',
+      number: 42,
+      threads: [
+        { id: 't1', resolved: true, path: null, line: null, comments: [] },
+        { id: 't2', resolved: false, path: null, line: null, comments: [] },
+        { id: 't3', resolved: null, path: null, line: null, comments: [] },
+      ],
+      issueComments: [
+        {
+          id: 'c1',
+          author: 'openmote[bot]',
+          body: '<!-- roomote-review-summary sha=abc mode=initial -->\n<!-- roomote-review-status:start -->\n**All 1 issue addressed.** [See task](https://example.com)\n<!-- roomote-review-status:end -->',
+          createdAt: null,
+          url: null,
+        },
+      ],
+      warnings: [],
+    });
+  });
+
+  it('collects thread counts and the latest review status', async () => {
+    const context = await gatherPrReviewTriageContext({
+      cloudJob,
+      repository: request.repository,
+      prNumber: request.prNumber,
+    });
+
+    expect(context).toEqual({
+      resolvedThreadCount: 1,
+      unresolvedThreadCount: 1,
+      latestReviewStatus: 'All 1 issue addressed. See task',
+      latestReviewSummaryComment:
+        '<!-- roomote-review-summary sha=abc mode=initial -->\n<!-- roomote-review-status:start -->\n**All 1 issue addressed.** [See task](https://example.com)\n<!-- roomote-review-status:end -->',
+    });
+  });
+
+  it('degrades to null signals when gathering fails', async () => {
+    mockReadSourceControlPullRequest.mockRejectedValue(
+      new Error('github unavailable'),
+    );
+
+    const context = await gatherPrReviewTriageContext({
+      cloudJob,
+      repository: request.repository,
+      prNumber: request.prNumber,
+    });
+
+    expect(context).toEqual({
+      resolvedThreadCount: null,
+      unresolvedThreadCount: null,
+      latestReviewStatus: null,
+      latestReviewSummaryComment: null,
+    });
+  });
+});
+
+describe('recordPrReviewNotificationDeliveryBestEffort', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockRecordTaskMessageEnvelope.mockResolvedValue(undefined);
+    mockTrackSlackBotReply.mockResolvedValue(undefined);
+    mockSetLatestSlackBotReply.mockResolvedValue(undefined);
+  });
+
+  it('persists transcript state and out-of-band Slack reply tracking together', async () => {
+    await recordPrReviewNotificationDeliveryBestEffort({
+      cloudJobId: 1,
+      taskId: 'task-1',
+      route: { provider: 'slack', channelId: 'C123', threadId: '111.222' },
+      text: 'formatted-message',
+      messageTs: '999.888',
+    });
+
+    expect(mockRecordTaskMessageEnvelope).toHaveBeenCalledWith({
+      cloudJobId: 1,
+      taskId: 'task-1',
+      envelope: expect.objectContaining({
+        ts: 999888,
+        payload: {
+          text: 'formatted-message',
+          source: 'pr_review_notification',
+        },
+      }),
+    });
+    expect(mockTrackSlackBotReply).toHaveBeenCalledWith(
+      'C123',
+      '111.222',
+      '999.888',
+    );
+    expect(mockSetLatestSlackBotReply).toHaveBeenCalledWith(
+      'C123',
+      '111.222',
+      '999.888',
+      'formatted-message',
+      { outOfBand: true },
+    );
+  });
+
+  it('returns early for Slack replies without a message timestamp', async () => {
+    await recordPrReviewNotificationDeliveryBestEffort({
+      cloudJobId: 1,
+      taskId: 'task-1',
+      route: { provider: 'slack', channelId: 'C123', threadId: '111.222' },
+      text: 'formatted-message',
+    });
+
+    expect(mockRecordTaskMessageEnvelope).not.toHaveBeenCalled();
+    expect(mockTrackSlackBotReply).not.toHaveBeenCalled();
+    expect(mockSetLatestSlackBotReply).not.toHaveBeenCalled();
+  });
+
+  it('still persists non-Slack notifications into task history', async () => {
+    await recordPrReviewNotificationDeliveryBestEffort({
+      cloudJobId: 1,
+      taskId: 'task-1',
+      route: {
+        provider: 'teams',
+        channelId: '19:abc',
+        threadId: 'thread-1',
+        serviceUrl: 'https://smba.example.com',
+      },
+      text: 'formatted-message',
+    });
+
+    expect(mockRecordTaskMessageEnvelope).toHaveBeenCalled();
+    expect(mockTrackSlackBotReply).not.toHaveBeenCalled();
+    expect(mockSetLatestSlackBotReply).not.toHaveBeenCalled();
+  });
+});

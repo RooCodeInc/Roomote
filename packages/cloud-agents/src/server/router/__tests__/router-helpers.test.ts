@@ -1,0 +1,395 @@
+import { CloudAgentType } from '@roomote/types';
+
+import {
+  getAllowedRouterMcpToolNames,
+  getMissingRequiredRouterMcpToolGroups,
+  getRequiredRouterMcpToolGroups,
+  getRouterMcpServerPolicy,
+  getRouterMcpToolGroupToolNames,
+  getRouterMcpUpstreamConstraints,
+  isRouterMcpServerEnabled,
+  isRouterMcpToolAllowed,
+  shouldIncludeRoomoteRouterLookup,
+} from '../mcp-policy';
+import {
+  MCP_ROUTE_SUBMIT_TOOL,
+  buildMcpAssistedRoutingContextPrompt,
+  buildMcpAssistedRoutingSystemPrompt,
+} from '../prompts/mcp-assisted-routing-prompt';
+import {
+  buildContextMessages,
+  buildContextPrompt,
+  buildSourceContext,
+} from '../prompts/routing-context-prompt';
+import { buildWorkspaceRoutingPrompt } from '../prompts/routing-prompt';
+import {
+  mapWorkspace,
+  wasWorkspaceRemapped,
+  workspaceResponseSchema,
+} from '../routing-resolution';
+import type {
+  RoutingContext,
+  RoutableAgent,
+  RoutableEnvironment,
+} from '../types';
+import { PLATFORM_WORKSPACE_VALUE } from '../types';
+
+describe('router helpers', () => {
+  const baseDate = new Date('2024-01-01');
+  const agents: RoutableAgent[] = [
+    {
+      id: 'agent-1',
+      name: 'My Generalist',
+      type: CloudAgentType.StandardTask,
+      createdAt: baseDate,
+    },
+  ];
+
+  const environments: RoutableEnvironment[] = [
+    {
+      id: 'env-1',
+      name: 'Full Stack',
+      description: 'Complete development environment',
+      repositoryNames: ['acme/frontend', 'acme/backend'],
+    },
+  ];
+
+  const createContext = (
+    overrides: Partial<RoutingContext> = {},
+  ): RoutingContext => ({
+    taskDescription: 'Fix the login bug',
+    source: { type: 'slack', channelName: 'engineering' },
+    availableAgents: agents,
+    availableEnvironments: environments,
+    ...overrides,
+  });
+
+  it('builds the routing context prompt with environments', () => {
+    const prompt = buildContextPrompt(createContext());
+
+    expect(prompt).toContain('**Task Description**:');
+    expect(prompt).toContain('**Available Agents**:');
+    expect(prompt).toContain('**Available Environments**:');
+    expect(prompt).toContain(
+      `- ${PLATFORM_WORKSPACE_VALUE}: Generic Roomote platform questions about identity, capabilities, or getting started.`,
+    );
+  });
+
+  it('can omit the platform workspace from the available environments list', () => {
+    const prompt = buildContextPrompt(createContext(), {
+      includePlatformWorkspace: false,
+    });
+
+    expect(prompt).toContain('**Available Environments**:');
+    expect(prompt).not.toContain(`- ${PLATFORM_WORKSPACE_VALUE}:`);
+  });
+
+  it('builds the workspace-only routing prompt', () => {
+    const prompt = buildWorkspaceRoutingPrompt();
+
+    expect(prompt).toContain('You are a workspace routing assistant');
+    expect(prompt).toContain('forwarded to the Generalist agent');
+    expect(prompt).toContain(`## The ${PLATFORM_WORKSPACE_VALUE} Environment`);
+    expect(prompt).toContain('"What can you do?" → __platform__');
+    expect(prompt).toContain(
+      `"Who are you and what's your purpose?" → ${PLATFORM_WORKSPACE_VALUE}`,
+    );
+    expect(prompt).toContain('"List all features" → App');
+  });
+
+  it('includes model selection rules in the routing prompt', () => {
+    const prompt = buildWorkspaceRoutingPrompt();
+
+    expect(prompt).toContain('## Model Selection');
+    expect(prompt).toContain('requestedModelId');
+    expect(prompt).toContain('Available Models');
+  });
+
+  it('renders the enabled model catalog in the context prompt', () => {
+    const prompt = buildContextPrompt(
+      createContext({
+        taskModelSettings: {
+          models: [
+            {
+              id: 'openrouter/z-ai/glm-5.2',
+              displayName: 'GLM 5.2',
+              family: 'GLM',
+            },
+            {
+              id: 'openrouter/anthropic/claude-opus-4.8',
+              displayName: 'Opus 4.8',
+              family: 'Opus',
+            },
+          ],
+          allowedModelIds: [
+            'openrouter/z-ai/glm-5.2',
+            'openrouter/anthropic/claude-opus-4.8',
+          ],
+          defaultModelId: 'openrouter/z-ai/glm-5.2',
+        },
+      }),
+    );
+
+    expect(prompt).toContain('**Available Models**:');
+    expect(prompt).toContain('- GLM 5.2 [id: openrouter/z-ai/glm-5.2]');
+    expect(prompt).toContain(
+      '- Opus 4.8 [id: openrouter/anthropic/claude-opus-4.8]',
+    );
+    expect(prompt).toContain('- No model mentioned [id: __no_model__]');
+  });
+
+  it('renders the default model catalog when settings are null', () => {
+    const prompt = buildContextPrompt(
+      createContext({
+        taskModelSettings: null,
+      }),
+    );
+
+    expect(prompt).toContain('**Available Models**:');
+    expect(prompt).toContain(
+      '- Claude Sonnet 5 [id: openrouter/anthropic/claude-sonnet-5]',
+    );
+    expect(prompt).toContain('- GPT 5.4 [id: openrouter/openai/gpt-5.4]');
+    expect(prompt).toContain('- No model mentioned [id: __no_model__]');
+  });
+
+  it('omits the available models section when no settings are provided', () => {
+    const prompt = buildContextPrompt(createContext());
+
+    expect(prompt).not.toContain('**Available Models**:');
+  });
+
+  it('maps environments by exact or normalized name', () => {
+    expect(mapWorkspace('Full Stack', createContext())).toEqual({
+      type: 'environment',
+      id: 'env-1',
+      name: 'Full Stack',
+    });
+    expect(mapWorkspace('Fullstack', createContext())).toEqual({
+      type: 'environment',
+      id: 'env-1',
+      name: 'Full Stack',
+    });
+    expect(mapWorkspace('Unknown', createContext())).toBeNull();
+  });
+
+  it('defaults omitted external lookup fields to a no-lookup response', () => {
+    expect(
+      workspaceResponseSchema.parse({
+        workspaceValue: 'Full Stack',
+        reasoning: 'Best fit',
+        confidence: 0.9,
+      }),
+    ).toEqual({
+      workspaceValue: 'Full Stack',
+      reasoning: 'Best fit',
+      confidence: 0.9,
+      needsExternalLookup: false,
+      externalReference: null,
+      requestedModelId: null,
+      modelConfidence: null,
+    });
+  });
+
+  it('preserves exact free-form environment names before normalized parsing', () => {
+    const context = createContext({
+      availableEnvironments: [
+        ...environments,
+        {
+          id: 'env-2',
+          name: 'workspace: staging',
+          description: 'Prefixed environment name',
+          repositoryNames: ['acme/staging'],
+        },
+        {
+          id: 'env-3',
+          name: '[Prod]',
+          description: 'Wrapped environment name',
+          repositoryNames: ['acme/prod'],
+        },
+      ],
+    });
+
+    expect(mapWorkspace('workspace: staging', context)).toEqual({
+      type: 'environment',
+      id: 'env-2',
+      name: 'workspace: staging',
+    });
+    expect(mapWorkspace('[Prod]', context)).toEqual({
+      type: 'environment',
+      id: 'env-3',
+      name: '[Prod]',
+    });
+  });
+
+  it('detects when the final workspace was remapped', () => {
+    expect(wasWorkspaceRemapped('Unknown', null)).toBe(true);
+
+    expect(
+      wasWorkspaceRemapped('Fullstack', {
+        type: 'environment',
+        id: 'env-1',
+        name: 'Full Stack',
+      }),
+    ).toBe(false);
+
+    expect(
+      wasWorkspaceRemapped('Full Stack', {
+        type: 'environment',
+        id: 'env-1',
+        name: 'Full Stack',
+      }),
+    ).toBe(false);
+
+    expect(
+      wasWorkspaceRemapped('workspace: staging', {
+        type: 'environment',
+        id: 'env-2',
+        name: 'workspace: staging',
+      }),
+    ).toBe(false);
+
+    expect(
+      wasWorkspaceRemapped('[Prod]', {
+        type: 'environment',
+        id: 'env-3',
+        name: '[Prod]',
+      }),
+    ).toBe(false);
+  });
+
+  it('builds source-specific prompt fragments', () => {
+    const sourceContext = buildSourceContext({
+      type: 'github',
+      repository: 'acme/frontend',
+      headRefName: 'roomote/fix-ci',
+      prAuthorLogin: 'roomote[bot]',
+      issueOrPrTitle: 'Fix login',
+      issueOrPrBody: 'Line one\nLine two',
+      commentBody: '@roomote are all issues addressed?\nPlease check again.',
+    });
+
+    expect(sourceContext).toContain('**Repository**: acme/frontend');
+    expect(sourceContext).toContain('**Head Branch**: roomote/fix-ci');
+    expect(sourceContext).toContain('**PR Author**: roomote[bot]');
+    expect(sourceContext).toContain('**Body**:\n  Line one\n  Line two');
+    expect(sourceContext).toContain(
+      '**Comment**:\n  @roomote are all issues addressed?\n  Please check again.',
+    );
+    expect(sourceContext).not.toContain(
+      'omitted to stay within routing budget',
+    );
+  });
+
+  it('keeps GitHub routing context within the prompt budget using PR metadata and the mention body', () => {
+    const sourceContext = buildSourceContext({
+      type: 'github',
+      repository: 'acme/frontend',
+      headRefName: 'roomote/fix-ci',
+      prAuthorLogin: 'roomote[bot]',
+      issueOrPrTitle: 'Fix login',
+      issueOrPrBody: 'A'.repeat(160_000),
+      commentBody: 'B'.repeat(160_000),
+    });
+
+    expect(sourceContext.length).toBeLessThanOrEqual(250_000);
+    expect(sourceContext).toContain('**Body**:\n  AAAAA');
+    expect(sourceContext).toContain('**Comment**:\n  BBBBB');
+    expect(sourceContext).toContain(
+      '[GitHub routing context truncated to stay within routing budget]',
+    );
+  });
+
+  it('includes Slack image attachments in the prompt and multimodal messages', () => {
+    const context = createContext({
+      source: {
+        type: 'slack',
+        channelName: 'engineering',
+        images: ['data:image/png;base64,aGVsbG8='],
+      },
+    });
+
+    expect(buildSourceContext(context.source)).toContain(
+      '**Image Attachments**: 1 attached',
+    );
+
+    const [message] = buildContextMessages(context);
+    expect(message).toBeDefined();
+    expect(message?.role).toBe('user');
+    expect(message?.content).toEqual([
+      expect.objectContaining({ type: 'text' }),
+      expect.objectContaining({
+        type: 'image',
+        image: 'aGVsbG8=',
+        mediaType: 'image/png',
+      }),
+    ]);
+  });
+
+  it('renders Slack video attachment descriptions in the routing prompt', () => {
+    const context = createContext({
+      source: {
+        type: 'slack',
+        channelName: 'engineering',
+        videoDescriptions: [
+          'The user opens the settings panel and a save error appears.',
+        ],
+      },
+    });
+
+    expect(buildSourceContext(context.source)).toContain(
+      '**Video Attachment Descriptions**:',
+    );
+    expect(buildSourceContext(context.source)).toContain(
+      '- Video 1: The user opens the settings panel and a save error appears.',
+    );
+  });
+
+  it('builds MCP-assisted routing prompts', () => {
+    const systemPrompt = buildMcpAssistedRoutingSystemPrompt(
+      'Base prompt',
+      'LIN-123',
+    );
+    const contextPrompt = buildMcpAssistedRoutingContextPrompt(
+      'Base context',
+      ['linear'],
+      'LIN-123',
+    );
+
+    expect(systemPrompt).toContain(MCP_ROUTE_SUBMIT_TOOL);
+    expect(contextPrompt).toContain('External Reference To Fetch');
+  });
+
+  it('exposes the router MCP policy helpers', () => {
+    const policy = getRouterMcpServerPolicy('roomote');
+    const allowedTools = getAllowedRouterMcpToolNames('roomote');
+
+    expect(policy).toBeDefined();
+    expect(getRequiredRouterMcpToolGroups('roomote')).toBeDefined();
+    expect(getMissingRequiredRouterMcpToolGroups('roomote', [])).toBeDefined();
+    expect(allowedTools).toEqual(
+      expect.arrayContaining([
+        ...getRouterMcpToolGroupToolNames('roomote-platform-context'),
+        ...getRouterMcpToolGroupToolNames('roomote-slack-thread-context'),
+      ]),
+    );
+    expect(getRouterMcpUpstreamConstraints('roomote')).toBeUndefined();
+    expect(isRouterMcpServerEnabled('roomote')).toBe(true);
+    expect(isRouterMcpToolAllowed('roomote', allowedTools[0]!)).toBe(true);
+  });
+
+  it('includes Roomote lookup support only for Slack permalink references', () => {
+    expect(
+      shouldIncludeRoomoteRouterLookup(
+        'https://roomote.slack.com/archives/C08NY3HU5AR/p1776819983463289',
+      ),
+    ).toBe(true);
+    expect(
+      shouldIncludeRoomoteRouterLookup(
+        'https://app.slack.com/client/T123/C456/thread/C456-1776819983.463289',
+      ),
+    ).toBe(true);
+    expect(shouldIncludeRoomoteRouterLookup('LIN-123')).toBe(false);
+    expect(shouldIncludeRoomoteRouterLookup(null)).toBe(false);
+  });
+});

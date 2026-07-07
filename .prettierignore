@@ -1,0 +1,39 @@
+# Build outputs
+.next
+out
+dist
+build
+next-env.d.ts
+apps/codex-acp/target
+apps/marketing/.astro
+apps/web/.source
+# Dependencies
+node_modules
+.venv
+
+# Turbo
+.turbo
+
+# Docker (runtime data and logs only, not config/source files)
+.docker/data
+.docker/logs
+
+# Logs
+/logs/
+*.log
+
+# Environment files
+.env
+.env.*
+
+# Codebase indexing
+.qdrant
+
+# Vendored upstream mirrors preserved byte-for-byte
+packages/cloud-agents/src/server/workflows/skills/standard/agent-browser
+
+# VS Code
+.vscode
+
+# Git
+.git

@@ -1,0 +1,222 @@
+import { TRPCError } from '@trpc/server';
+import { z } from 'zod';
+
+import {
+  getTaskToolInvocation,
+  PRODUCT_NAME,
+  taskToolDispatchPayloadSchema,
+} from '@roomote/types';
+
+import { isActiveTaskPhase } from '../lib/harness-manager';
+import { publicProcedure } from '../trpc';
+import {
+  clearLatestUserMessageForSlackThreadQuote,
+  trackLatestUserMessageForSlackThreadQuote,
+} from './slackQuoteTracking';
+import { recordSandboxPromptSlackTurnStart } from './slackReplyTurnTracking';
+import { getFollowUpWorkflowPhase } from '../../run-task/workflow-phase';
+
+const sendPromptInputSchema = z
+  .object({
+    prompt: z.string().optional(),
+    taskTool: taskToolDispatchPayloadSchema.optional(),
+    images: z.array(z.string()).optional(),
+    /** Where this prompt originated from (e.g., 'web', 'slack'). */
+    source: z.string().optional(),
+    clientMessageId: z.string().optional(),
+    /** Display name of the sending user (for real-time avatar display). */
+    userName: z.string().optional(),
+    /** Avatar URL of the sending user (for real-time avatar display). */
+    userImageUrl: z.string().optional(),
+  })
+  .superRefine((data, ctx) => {
+    const hasPrompt =
+      typeof data.prompt === 'string' && data.prompt.trim().length > 0;
+    const hasImages = (data.images?.length ?? 0) > 0;
+
+    if (data.taskTool && (data.prompt !== undefined || hasImages)) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message:
+          'Task Tool dispatch must use only the structured taskTool payload',
+        path: ['taskTool'],
+      });
+    }
+
+    if (!data.taskTool && !hasPrompt && !hasImages) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message:
+          'Either prompt text, a Task Tool action, or images must be provided',
+        path: ['prompt'],
+      });
+    }
+  });
+
+/**
+ * Send a prompt/message to the running task.
+ *
+ * If the HarnessManager is in `waiting_for_prompt` phase with no existing task
+ * (first prompt in a Session job), this starts a new task using the stored
+ * base configuration. Otherwise it sends the message to the existing task
+ * via the harness — the runtime handles starting a new task internally.
+ */
+export const sendPrompt = publicProcedure
+  .input(sendPromptInputSchema)
+  .mutation(async ({ input, ctx }) => {
+    const userId =
+      ctx.auth && 'userId' in ctx.auth ? ctx.auth.userId : undefined;
+    const resolvedPrompt = input.taskTool
+      ? getTaskToolInvocation(input.taskTool.actionId, ctx.codingHarness)
+      : (input.prompt ?? '');
+    const workflowPhase = input.taskTool
+      ? input.taskTool.actionId
+      : getFollowUpWorkflowPhase(resolvedPrompt);
+
+    const status = ctx.harnessManager?.getStatus();
+
+    if (status?.phase === 'shutting_down') {
+      throw new TRPCError({
+        code: 'PRECONDITION_FAILED',
+        message: `${PRODUCT_NAME} is going to sleep. Please wait for the shutdown to complete.`,
+      });
+    }
+
+    const canDeliver =
+      (await ctx.prepareActorScopedTurn?.(userId, {
+        allowMcpReconnect: status
+          ? !isActiveTaskPhase(status.phase) || !status.isConnected
+          : true,
+      })) !== false;
+
+    if (!canDeliver) {
+      throw new TRPCError({
+        code: 'PRECONDITION_FAILED',
+        message:
+          'Failed to prepare actor-scoped credentials for this prompt. Please retry.',
+      });
+    }
+
+    if (status?.phase === 'waiting_for_prompt' && !status.sessionId) {
+      let trackedSlackQuote = false;
+
+      try {
+        if (input.source === 'web') {
+          trackedSlackQuote = await trackLatestUserMessageForSlackThreadQuote({
+            cloudJobId: ctx.cloudJobId,
+            text: resolvedPrompt,
+            userName: input.userName,
+            logPrefix: 'sendPrompt',
+            warn: (message) => ctx.harnessLogger?.warn(message),
+          });
+        }
+
+        const success = ctx.harnessManager!.startNewTaskFromPrompt({
+          prompt: resolvedPrompt,
+          images: input.images,
+          ...(workflowPhase ? { workflowPhase } : {}),
+          source: input.source,
+          userId,
+          clientMessageId: input.clientMessageId,
+          userName: input.userName,
+          userImageUrl: input.userImageUrl,
+        });
+
+        if (!success) {
+          throw new TRPCError({
+            code: 'INTERNAL_SERVER_ERROR',
+            message: 'Failed to start task: no base configuration available',
+          });
+        }
+
+        recordSandboxPromptSlackTurnStart({
+          clientMessageId: input.clientMessageId,
+          source: input.source,
+          stateFilePath: ctx.slackReplySatisfactionStateFile,
+        });
+
+        return { success: true };
+      } catch (error) {
+        if (trackedSlackQuote) {
+          await clearLatestUserMessageForSlackThreadQuote({
+            cloudJobId: ctx.cloudJobId,
+            logPrefix: 'sendPrompt',
+            warn: (message) => ctx.harnessLogger?.warn(message),
+          });
+        }
+
+        if (error instanceof TRPCError) {
+          throw error;
+        }
+
+        throw new TRPCError({
+          code: 'INTERNAL_SERVER_ERROR',
+          message: `Failed to send prompt: ${error instanceof Error ? error.message : String(error)}`,
+        });
+      }
+    }
+
+    let trackedSlackQuote = false;
+
+    try {
+      if (input.source === 'web') {
+        trackedSlackQuote = await trackLatestUserMessageForSlackThreadQuote({
+          cloudJobId: ctx.cloudJobId,
+          text: resolvedPrompt,
+          userName: input.userName,
+          logPrefix: 'sendPrompt',
+          warn: (message) => ctx.harnessLogger?.warn(message),
+        });
+      }
+
+      const success = ctx.harnessManager?.sendFollowUpPrompt({
+        prompt: resolvedPrompt,
+        images: input.images,
+        ...(workflowPhase ? { workflowPhase } : {}),
+        source: input.source,
+        userId,
+        userName: input.userName,
+        userImageUrl: input.userImageUrl,
+        clientMessageId: input.clientMessageId,
+      });
+
+      if (!success) {
+        if (!ctx.harness.isConnected) {
+          throw new TRPCError({
+            code: 'PRECONDITION_FAILED',
+            message: `${PRODUCT_NAME} is not connected. Please wait for the task to start.`,
+          });
+        }
+
+        throw new TRPCError({
+          code: 'INTERNAL_SERVER_ERROR',
+          message: `Failed to send prompt to ${PRODUCT_NAME}`,
+        });
+      }
+
+      recordSandboxPromptSlackTurnStart({
+        clientMessageId: input.clientMessageId,
+        source: input.source,
+        stateFilePath: ctx.slackReplySatisfactionStateFile,
+      });
+
+      return { success: true };
+    } catch (error) {
+      if (trackedSlackQuote) {
+        await clearLatestUserMessageForSlackThreadQuote({
+          cloudJobId: ctx.cloudJobId,
+          logPrefix: 'sendPrompt',
+          warn: (message) => ctx.harnessLogger?.warn(message),
+        });
+      }
+
+      if (error instanceof TRPCError) {
+        throw error;
+      }
+
+      throw new TRPCError({
+        code: 'INTERNAL_SERVER_ERROR',
+        message: `Failed to send prompt: ${error instanceof Error ? error.message : String(error)}`,
+      });
+    }
+  });

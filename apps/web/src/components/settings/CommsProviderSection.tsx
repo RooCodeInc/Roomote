@@ -1,0 +1,897 @@
+'use client';
+
+import { useEffect, useMemo, useState } from 'react';
+import Link from 'next/link';
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { toast } from 'sonner';
+import type { SetupAuthProviderStatus } from '@roomote/types';
+
+import { useTRPC } from '@/trpc/client';
+import {
+  useConnectSlack,
+  useDisconnectSlack,
+  useSlackInstallation,
+} from '@/hooks/slack';
+import { useTeamsIntegrationStatus } from '@/hooks/teams';
+import { SETTINGS_PATHS } from '@/lib/settings';
+
+type CommsProviderId = SetupAuthProviderStatus['id'] | 'telegram';
+type TelegramWebhookStatus = {
+  status: 'connected' | 'mismatch' | 'stale_updates' | 'unregistered' | 'error';
+  registeredUrl: string | null;
+  expectedUrl: string;
+  lastErrorMessage: string | null;
+};
+type TelegramCommsProviderStatus = Omit<SetupAuthProviderStatus, 'id'> & {
+  id: CommsProviderId;
+  telegramWebhook?: TelegramWebhookStatus | null;
+};
+
+const TELEGRAM_WEBHOOK_STATUS_COPY: Record<
+  TelegramWebhookStatus['status'],
+  { label: string; tone: 'ok' | 'warn' }
+> = {
+  connected: { label: 'Webhook connected', tone: 'ok' },
+  mismatch: {
+    label:
+      'Webhook points at a different URL — save again to re-register it for this deployment',
+    tone: 'warn',
+  },
+  stale_updates: {
+    label:
+      'Webhook is registered without button support — save again to refresh it',
+    tone: 'warn',
+  },
+  unregistered: {
+    label:
+      'Webhook not registered yet — it is registered automatically when you save',
+    tone: 'warn',
+  },
+  error: {
+    label: 'Could not reach the Telegram Bot API to check the webhook',
+    tone: 'warn',
+  },
+};
+
+import { buildSlackManifestPrefillUrl } from '@/lib/slack-app-manifest';
+import {
+  SLACK_APP_INSTALL_CALLBACK_PATH,
+  SLACK_SIGN_IN_CALLBACK_PATH,
+} from '@/lib/slack-callback-paths';
+import { getProviderSetupCopy } from '@/app/(onboarding)/setup/providerSetupCopy';
+import {
+  ArrowLeft,
+  BrandIcon,
+  Button,
+  Check,
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+  Download,
+  EnvVarsInfoNote,
+  ExternalLink,
+  Info,
+  Input,
+  Pencil,
+  Plug,
+  RefreshCw,
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  Sparkles,
+  Spinner,
+  Trash2,
+  TriangleAlert,
+} from '@/components/system';
+import { Section } from './Section';
+import { TelegramLinkAccountStep } from './TelegramLinkAccountStep';
+
+const MASKED_VALUE = '••••••••••••••••••••••••••••';
+
+function getProviderIconId(providerId: CommsProviderId): string {
+  return providerId === 'microsoft' ? 'teams' : providerId;
+}
+
+type SlackChannelOption = {
+  id: string;
+  name: string;
+  label: string;
+  isPrivate?: boolean;
+  isMember?: boolean | null;
+};
+
+const ROUTER_DEBUG_CHANNEL_NONE_VALUE = '__none__';
+
+function getChannelLabel(
+  channelId: string | null | undefined,
+  channels: SlackChannelOption[],
+) {
+  if (!channelId) {
+    return null;
+  }
+
+  return (
+    channels.find((channel) => channel.id === channelId)?.label ?? channelId
+  );
+}
+
+function buildRouterDebugChannelOptions({
+  channels,
+  selectedChannelId,
+  envFallbackChannelId,
+}: {
+  channels: SlackChannelOption[];
+  selectedChannelId: string | null;
+  envFallbackChannelId: string | null;
+}) {
+  const options = [...channels];
+  const optionIds = new Set(options.map((channel) => channel.id));
+
+  for (const channelId of [selectedChannelId, envFallbackChannelId]) {
+    if (channelId && !optionIds.has(channelId)) {
+      options.push({
+        id: channelId,
+        name: channelId,
+        label: channelId,
+        isMember: null,
+      });
+      optionIds.add(channelId);
+    }
+  }
+
+  return options;
+}
+
+function SlackWorkspaceAuthButton({ configured }: { configured: boolean }) {
+  const slackInstallation = useSlackInstallation();
+  const connectSlack = useConnectSlack(SETTINGS_PATHS.comms);
+  const disconnectSlack = useDisconnectSlack();
+
+  const isInstalled = Boolean(slackInstallation.data);
+  const isPending =
+    slackInstallation.isPending ||
+    connectSlack.isPending ||
+    disconnectSlack.isPending;
+
+  const handleClick = () => {
+    if (isInstalled) {
+      disconnectSlack.mutate(undefined, {
+        onSuccess: () => {
+          connectSlack.mutate(undefined, {
+            onSuccess: (url) => {
+              window.location.href = url;
+            },
+            onError: () =>
+              toast.error(
+                'Slack workspace removed, but re-auth could not start. Click Auth to retry.',
+              ),
+          });
+        },
+        onError: () =>
+          toast.error('Failed to replace Slack workspace connection.'),
+      });
+      return;
+    }
+
+    connectSlack.mutate(undefined, {
+      onSuccess: (url) => {
+        window.location.href = url;
+      },
+      onError: () =>
+        toast.error('Failed to start Slack workspace authorization.'),
+    });
+  };
+
+  if (!configured) {
+    return null;
+  }
+
+  return (
+    <Button
+      type="button"
+      variant="default"
+      size="sm"
+      aria-label={
+        isInstalled ? 'Re-auth Slack workspace' : 'Auth Slack workspace'
+      }
+      onClick={handleClick}
+      disabled={isPending}
+    >
+      {isPending ? <Spinner size="sm" /> : <Plug className="size-4" />}
+      {isInstalled ? 'Re-auth' : 'Auth'}
+    </Button>
+  );
+}
+
+function SlackDiagnosticsChannel() {
+  const trpc = useTRPC();
+  const queryClient = useQueryClient();
+  const routerDebugSettingsQueryKey = trpc.routerDebug.getSettings.queryKey();
+  const slackInstallation = useSlackInstallation();
+
+  const slackConnected = Boolean(slackInstallation.data);
+
+  const routerDebugSettings = useQuery(
+    trpc.routerDebug.getSettings.queryOptions(),
+  );
+  const slackChannelsQuery = useQuery(
+    trpc.automations.listSlackChannels.queryOptions(undefined, {
+      enabled: Boolean(slackConnected),
+    }),
+  );
+  const updateRouterDebugSettings = useMutation(
+    trpc.routerDebug.updateSettings.mutationOptions({
+      onSuccess: (settings) => {
+        queryClient.setQueryData(routerDebugSettingsQueryKey, settings);
+        setDraftChannelId(settings.routerDebugSlackChannelId);
+        toast.success('Diagnostics channel updated.');
+      },
+      onError: (error) => {
+        toast.error(error.message || 'Failed to update diagnostics channel.');
+      },
+    }),
+  );
+
+  const [draftChannelId, setDraftChannelId] = useState<string | null>(
+    routerDebugSettings.data?.routerDebugSlackChannelId ?? null,
+  );
+
+  useEffect(() => {
+    if (routerDebugSettings.data === undefined) {
+      return;
+    }
+
+    setDraftChannelId(routerDebugSettings.data.routerDebugSlackChannelId);
+  }, [routerDebugSettings.data]);
+
+  if (!slackConnected) {
+    return null;
+  }
+
+  const settings = routerDebugSettings.data;
+  const envFallbackChannelId = settings?.envFallbackSlackChannelId ?? null;
+  const effectiveChannelId =
+    settings?.effectiveRouterDebugSlackChannelId ?? null;
+  const channels = (slackChannelsQuery.data?.channels ??
+    []) as SlackChannelOption[];
+  const channelOptions = buildRouterDebugChannelOptions({
+    channels,
+    selectedChannelId: draftChannelId,
+    envFallbackChannelId,
+  });
+  const draftLabel = getChannelLabel(draftChannelId, channelOptions);
+  const effectiveLabel = getChannelLabel(effectiveChannelId, channelOptions);
+  const persistedChannelId = settings?.routerDebugSlackChannelId ?? null;
+  const dirty = draftChannelId !== persistedChannelId;
+  const selectDisabled =
+    routerDebugSettings.isPending ||
+    routerDebugSettings.isError ||
+    !slackConnected ||
+    updateRouterDebugSettings.isPending;
+  const saveDisabled =
+    !dirty ||
+    selectDisabled ||
+    slackChannelsQuery.isPending ||
+    slackChannelsQuery.isError;
+
+  return (
+    <div className="space-y-3 max-w-xl">
+      <div className="space-y-1">
+        <p className="text-sm font-medium">Diagnostics channel</p>
+        <p className="text-sm text-muted-foreground">
+          Slack channel that receives routing diagnostics posts.
+        </p>
+      </div>
+      <div className="grid gap-3 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-end">
+        <div className="space-y-2">
+          <Select
+            value={draftChannelId ?? ROUTER_DEBUG_CHANNEL_NONE_VALUE}
+            disabled={selectDisabled}
+            onValueChange={(value) => {
+              setDraftChannelId(
+                value === ROUTER_DEBUG_CHANNEL_NONE_VALUE ? null : value,
+              );
+            }}
+          >
+            <SelectTrigger
+              id="comms-slack-diagnostics-channel"
+              className="w-full"
+            >
+              <span className="truncate text-left">
+                {draftLabel ??
+                  (envFallbackChannelId
+                    ? `Use env fallback (${envFallbackChannelId})`
+                    : 'No diagnostics channel')}
+              </span>
+            </SelectTrigger>
+            <SelectContent align="start">
+              <SelectItem value={ROUTER_DEBUG_CHANNEL_NONE_VALUE}>
+                {envFallbackChannelId
+                  ? 'Use env fallback'
+                  : 'No diagnostics channel'}
+              </SelectItem>
+              {slackChannelsQuery.isPending ? (
+                <SelectItem value="__loading__" disabled>
+                  Loading channels...
+                </SelectItem>
+              ) : slackChannelsQuery.isError ? (
+                <SelectItem value="__error__" disabled>
+                  Could not load channels. Try refreshing.
+                </SelectItem>
+              ) : channelOptions.length > 0 ? (
+                channelOptions.map((channel) => (
+                  <SelectItem key={channel.id} value={channel.id}>
+                    {channel.label}
+                  </SelectItem>
+                ))
+              ) : (
+                <SelectItem value="__empty__" disabled>
+                  No channels found.
+                </SelectItem>
+              )}
+            </SelectContent>
+          </Select>
+        </div>
+        <Button
+          type="button"
+          variant="ghost"
+          size="icon"
+          aria-label="Refresh Slack channels"
+          title="Refresh Slack channels"
+          disabled={!slackConnected || slackChannelsQuery.isFetching}
+          onClick={() => {
+            void slackChannelsQuery.refetch();
+          }}
+        >
+          {slackChannelsQuery.isFetching ? (
+            <Spinner size="sm" />
+          ) : (
+            <RefreshCw />
+          )}
+        </Button>
+      </div>
+      {routerDebugSettings.isError ? (
+        <p className="text-sm text-destructive">
+          Failed to load diagnostics settings.
+        </p>
+      ) : (
+        <p className="text-sm text-muted-foreground">
+          {settings?.source === 'deployment' && effectiveLabel
+            ? `Diagnostics posts currently go to ${effectiveLabel}.`
+            : settings?.source === 'env' && effectiveLabel
+              ? `Diagnostics posts currently use the env fallback ${effectiveLabel}.`
+              : 'Diagnostics posts are disabled until a channel is selected.'}
+        </p>
+      )}
+      <div>
+        <Button
+          type="button"
+          disabled={saveDisabled}
+          onClick={() => {
+            updateRouterDebugSettings.mutate({
+              routerDebugSlackChannelId: draftChannelId,
+            });
+          }}
+        >
+          {updateRouterDebugSettings.isPending ? <Spinner size="sm" /> : null}
+          Save
+        </Button>
+      </div>
+    </div>
+  );
+}
+
+function TeamsBotStatus() {
+  const teamsIntegrationStatus = useTeamsIntegrationStatus();
+
+  if (teamsIntegrationStatus.isPending) {
+    return (
+      <p className="text-sm text-muted-foreground">
+        Checking Microsoft Teams bot configuration.
+      </p>
+    );
+  }
+
+  if (teamsIntegrationStatus.isError) {
+    return (
+      <p className="text-sm text-destructive">
+        Unable to read Microsoft Teams configuration.
+      </p>
+    );
+  }
+
+  const teamsStatus = teamsIntegrationStatus.data;
+  const teamsBotConfigured = Boolean(teamsStatus?.botConfigured);
+  const teamsOpenInTeamsUrl = teamsStatus?.openInTeamsUrl ?? null;
+
+  const statusCopy = teamsBotConfigured ? (
+    teamsStatus?.microsoftAuthConfigured ? (
+      <>
+        Bot configured. Team members can link Microsoft Teams accounts from{' '}
+        <Link
+          href={SETTINGS_PATHS.personal}
+          className="font-medium text-foreground underline-offset-2 hover:underline"
+        >
+          Personal settings
+        </Link>
+        .
+      </>
+    ) : (
+      'Bot configured for incoming Teams messages. Add ROOMOTE_AUTH_MICROSOFT_* env vars to enable personal account linking.'
+    )
+  ) : (
+    <>
+      Add TEAMS_BOT_APP_ID and TEAMS_BOT_APP_PASSWORD, then set the Azure Bot
+      messaging endpoint to{' '}
+      <span className="break-all font-mono">
+        {teamsStatus?.webhookUrl ?? '/api/webhooks/teams'}
+      </span>
+      .
+    </>
+  );
+
+  return (
+    <div className="space-y-2 mt-4">
+      <div className="flex items-start gap-2">
+        {!teamsBotConfigured ? (
+          <TriangleAlert className="size-4 mt-0.5 shrink-0 text-amber-600" />
+        ) : (
+          <Info className="size-4 mt-0.5 shrink-0" />
+        )}
+        <p className="text-sm text-muted-foreground">{statusCopy}</p>
+      </div>
+      {teamsOpenInTeamsUrl ? (
+        <div>
+          <Button asChild variant="outline" size="sm">
+            <a
+              href={teamsOpenInTeamsUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+            >
+              <ExternalLink className="size-4" />
+              Open in Teams
+            </a>
+          </Button>
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+type CommsProviderSectionProps = {
+  provider: TelegramCommsProviderStatus;
+  onSave: (provider: CommsProviderId, values: Record<string, string>) => void;
+  onClear: (provider: CommsProviderId) => void;
+  savePending: boolean;
+  clearPending: boolean;
+};
+
+export function CommsProviderSection({
+  provider,
+  onSave,
+  onClear,
+  savePending,
+  clearPending,
+}: CommsProviderSectionProps) {
+  const isMicrosoftProvider = provider.id === 'microsoft';
+  const teamsIntegrationStatus = useTeamsIntegrationStatus({
+    enabled: isMicrosoftProvider,
+  });
+  const teamsBotConfigured = Boolean(
+    teamsIntegrationStatus.data?.botConfigured,
+  );
+
+  const [expanded, setExpanded] = useState(
+    () =>
+      provider.runtimeSatisfied ||
+      provider.savedSatisfied ||
+      (isMicrosoftProvider && teamsBotConfigured),
+  );
+  const [values, setValues] = useState<Record<string, string>>({});
+  const [editingSavedValues, setEditingSavedValues] = useState<
+    Record<string, boolean>
+  >({});
+  const [showManualSlackValues, setShowManualSlackValues] = useState(false);
+  const [removeDialogOpen, setRemoveDialogOpen] = useState(false);
+
+  useEffect(() => {
+    setValues({});
+    setEditingSavedValues({});
+    setShowManualSlackValues(false);
+    setRemoveDialogOpen(false);
+  }, [provider.id, provider.runtimeSatisfied, provider.savedSatisfied]);
+
+  useEffect(() => {
+    setExpanded(
+      provider.runtimeSatisfied ||
+        provider.savedSatisfied ||
+        (isMicrosoftProvider && teamsBotConfigured),
+    );
+  }, [
+    provider.runtimeSatisfied,
+    provider.savedSatisfied,
+    isMicrosoftProvider,
+    teamsBotConfigured,
+  ]);
+
+  const providerSetupCopy = getProviderSetupCopy(provider.id);
+  const providerSetupLabel =
+    providerSetupCopy?.setupLabel ?? `${provider.label}`;
+  const publicOrigin =
+    typeof window === 'undefined'
+      ? 'https://your-deployment-url'
+      : window.location.origin;
+  const slackManifestPrefillUrl =
+    provider.id === 'slack'
+      ? buildSlackManifestPrefillUrl({ publicOrigin })
+      : null;
+
+  const providerSetupNotes = useMemo(() => {
+    if (provider.id === 'slack') {
+      return [
+        `Register these as authorized redirect URLs (under OAuth & Permissions):`,
+        `${publicOrigin}${SLACK_SIGN_IN_CALLBACK_PATH}`,
+        `${publicOrigin}${SLACK_APP_INSTALL_CALLBACK_PATH}`,
+      ];
+    }
+    if (provider.id === 'microsoft') {
+      return [
+        'These values are for the Microsoft Entra app Roomote uses for Teams — both user sign-in and the bot. Under Authentication, add a Web redirect URI:',
+        `${publicOrigin}/api/auth/oauth2/callback/microsoft-entra-id`,
+        'Create a client secret, then enter the Application (client) ID, the secret value, and the Directory (tenant) ID below.',
+        `Create a bot for the same app in the Teams Developer Portal (Tools → Bot management) with the messaging endpoint ${publicOrigin}/api/webhooks/teams, then download the app package below and upload it in Teams. Dedicated TEAMS_BOT_* env vars override these values for the bot.`,
+      ];
+    }
+    return providerSetupCopy?.notes ?? [];
+  }, [providerSetupCopy?.notes, publicOrigin, provider.id]);
+
+  const hasPendingValueChanges = provider.fields.some((field) => {
+    const nextValue = values[field.envVarName]?.trim() ?? '';
+    return !field.runtimeSatisfied && nextValue.length > 0;
+  });
+
+  const hasMissingRequiredValue = provider.fields.some((field) => {
+    const nextValue = values[field.envVarName]?.trim() ?? '';
+    return (
+      field.required !== false &&
+      !field.runtimeSatisfied &&
+      !field.savedSatisfied &&
+      nextValue.length === 0
+    );
+  });
+
+  const isActionDisabled = !hasPendingValueChanges || hasMissingRequiredValue;
+
+  const hasConfiguredValues =
+    provider.runtimeSatisfied || provider.savedSatisfied;
+  const hasEditableFields = provider.fields.some(
+    (field) => !field.runtimeSatisfied,
+  );
+
+  const isSlackCreateAppStep =
+    provider.id === 'slack' && !showManualSlackValues && !hasConfiguredValues;
+
+  const handleSave = () => {
+    onSave(provider.id, values);
+  };
+
+  const handleRemove = () => {
+    onClear(provider.id);
+  };
+
+  return (
+    <>
+      <Section
+        icon={
+          <BrandIcon
+            icon={getProviderIconId(provider.id)}
+            name=""
+            className="size-4 shrink-0"
+          />
+        }
+        title={provider.label}
+        action={
+          provider.id === 'slack' ? (
+            <SlackWorkspaceAuthButton configured={hasConfiguredValues} />
+          ) : null
+        }
+      >
+        {!expanded && !provider.runtimeSatisfied && !provider.savedSatisfied ? (
+          <p className="text-sm text-muted-foreground">
+            Not configured.{' '}
+            <button
+              type="button"
+              className="underline underline-offset-4 hover:text-accent-foreground cursor-pointer"
+              onClick={() => setExpanded(true)}
+            >
+              Set it up
+            </button>
+          </p>
+        ) : isSlackCreateAppStep ? (
+          <div className="space-y-3 max-w-xl py-2">
+            <p className="text-sm">
+              Create a Slack app from Roomote&apos;s manifest, then enter the
+              generated configuration values here.
+            </p>
+            <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+              <Button asChild>
+                <a
+                  href={slackManifestPrefillUrl ?? 'https://api.slack.com/apps'}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  onClick={() => setShowManualSlackValues(true)}
+                >
+                  <Sparkles />
+                  Create Slack app
+                </a>
+              </Button>
+              <Button
+                type="button"
+                variant="outline"
+                onClick={() => setShowManualSlackValues(true)}
+              >
+                <Pencil />
+                Enter values manually
+              </Button>
+            </div>
+          </div>
+        ) : (
+          <div className="space-y-8">
+            {!hasConfiguredValues && (
+              <div>
+                <p className="font-semibold text-sm">
+                  {providerSetupCopy ? (
+                    <>
+                      Create a new{' '}
+                      <a
+                        href={providerSetupCopy.creationHref}
+                        target="_blank"
+                        rel="noopener noreferrer underline"
+                      >
+                        {providerSetupCopy.setupLabel}.
+                        <ExternalLink className="inline size-4 -mt-1 ml-1" />
+                      </a>
+                    </>
+                  ) : (
+                    <>create a new {providerSetupLabel}.</>
+                  )}
+                </p>
+                <p className="text-sm text-muted-foreground mt-1">
+                  If you need our logo,{' '}
+                  <Link
+                    className="underline underline-offset-4 hover:text-foreground"
+                    href="/api/setup/roomote-logo"
+                  >
+                    download here
+                  </Link>
+                  .
+                </p>
+              </div>
+            )}
+
+            {providerSetupNotes.length > 0 && (
+              <p className="font-semibold text-sm">
+                {providerSetupNotes.map((note) => (
+                  <span className="block" key={note}>
+                    {note}
+                  </span>
+                ))}
+              </p>
+            )}
+
+            <div className="flex gap-2 items-start">
+              <div>
+                <p className="font-semibold text-sm">
+                  {hasConfiguredValues
+                    ? 'Configuration values'
+                    : 'Enter the values below:'}
+                </p>
+                <div className="space-y-2 mt-2">
+                  {provider.fields.map((field) => {
+                    const value = values[field.envVarName] ?? '';
+                    const shouldShowSavedValueMask =
+                      !field.runtimeSatisfied &&
+                      field.savedSatisfied &&
+                      value.length === 0 &&
+                      !editingSavedValues[field.envVarName];
+
+                    return (
+                      <div
+                        key={field.envVarName}
+                        className="grid gap-2 md:grid-cols-[180px_minmax(0,1fr)] md:items-center max-w-xl"
+                      >
+                        <div className="space-y-1">
+                          <div className="text-sm font-medium">
+                            {field.label}
+                            {field.required === false ? ' (optional)' : ''}
+                          </div>
+                        </div>
+                        <div>
+                          <div className="flex items-center gap-2">
+                            <Input
+                              secret={field.secret && !field.runtimeSatisfied}
+                              className="font-mono"
+                              value={
+                                field.runtimeSatisfied
+                                  ? MASKED_VALUE
+                                  : shouldShowSavedValueMask
+                                    ? MASKED_VALUE
+                                    : value
+                              }
+                              onFocus={() => {
+                                if (shouldShowSavedValueMask) {
+                                  setEditingSavedValues((current) => ({
+                                    ...current,
+                                    [field.envVarName]: true,
+                                  }));
+                                }
+                              }}
+                              onBlur={() => {
+                                if (
+                                  field.savedSatisfied &&
+                                  value.length === 0
+                                ) {
+                                  setEditingSavedValues((current) => ({
+                                    ...current,
+                                    [field.envVarName]: false,
+                                  }));
+                                }
+                              }}
+                              onChange={(event) => {
+                                const nextValue = event.target.value;
+                                setValues((current) => ({
+                                  ...current,
+                                  [field.envVarName]: nextValue,
+                                }));
+                              }}
+                              placeholder={
+                                field.runtimeSatisfied ? '' : field.label
+                              }
+                              disabled={savePending || field.runtimeSatisfied}
+                              data-1p-ignore
+                            />
+                            {(field.runtimeSatisfied ||
+                              field.savedSatisfied) && <Check />}
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })}
+
+                  <div className="space-y-2 text-sm text-muted-foreground">
+                    {provider.id === 'telegram' && provider.telegramWebhook && (
+                      <div className="flex items-start gap-2 mt-4">
+                        {TELEGRAM_WEBHOOK_STATUS_COPY[
+                          provider.telegramWebhook.status
+                        ].tone === 'ok' ? (
+                          <Check className="inline size-4 mt-0.5 shrink-0 text-green-600" />
+                        ) : (
+                          <Info className="inline size-4 mt-0.5 shrink-0 text-amber-600" />
+                        )}
+                        <p className="text-sm">
+                          {
+                            TELEGRAM_WEBHOOK_STATUS_COPY[
+                              provider.telegramWebhook.status
+                            ].label
+                          }
+                          {provider.telegramWebhook.lastErrorMessage
+                            ? ` Last delivery error: ${provider.telegramWebhook.lastErrorMessage}`
+                            : ''}
+                        </p>
+                      </div>
+                    )}
+                    {provider.id === 'telegram' && hasConfiguredValues && (
+                      <TelegramLinkAccountStep />
+                    )}
+                    {provider.id === 'microsoft' &&
+                      (hasConfiguredValues || teamsBotConfigured) && (
+                        <div className="space-y-2 mt-4">
+                          <p className="text-sm">
+                            Download the Teams app package (manifest + icons)
+                            and upload it in Teams under Apps → Manage your apps
+                            → Upload an app, or import it in the Developer
+                            Portal.
+                          </p>
+                          <Button asChild variant="outline" size="sm">
+                            <a href="/api/teams/app-package" download>
+                              <Download />
+                              Download Teams app package
+                            </a>
+                          </Button>
+                        </div>
+                      )}
+                    {provider.id === 'microsoft' &&
+                      (hasConfiguredValues || teamsBotConfigured) && (
+                        <TeamsBotStatus />
+                      )}
+                    {provider.id === 'slack' && hasConfiguredValues && (
+                      <SlackDiagnosticsChannel />
+                    )}
+                    <EnvVarsInfoNote
+                      runtimeConfigured={provider.runtimeSatisfied}
+                    >
+                      {!provider.runtimeSatisfied && provider.id === 'telegram'
+                        ? 'Roomote will generate the webhook secret if you leave it blank, register the webhook automatically when you save, and default Telegram task launches to the admin who saves this configuration.'
+                        : undefined}
+                    </EnvVarsInfoNote>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+              {provider.id === 'slack' && !hasConfiguredValues && (
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={() => setShowManualSlackValues(false)}
+                >
+                  <ArrowLeft />
+                  Back
+                </Button>
+              )}
+              {provider.savedSatisfied && (
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={() => setRemoveDialogOpen(true)}
+                  disabled={clearPending}
+                >
+                  <Trash2 />
+                  {clearPending ? 'Removing...' : 'Remove'}
+                  {clearPending ? <Spinner /> : null}
+                </Button>
+              )}
+              {hasEditableFields && (
+                <Button
+                  type="button"
+                  onClick={handleSave}
+                  disabled={isActionDisabled || savePending}
+                >
+                  <Check />
+                  {savePending ? 'Saving...' : 'Save'}
+                  {savePending ? <Spinner /> : null}
+                </Button>
+              )}
+            </div>
+          </div>
+        )}
+      </Section>
+      <Dialog open={removeDialogOpen} onOpenChange={setRemoveDialogOpen}>
+        <DialogContent size="sm">
+          <DialogHeader>
+            <DialogTitle>Remove {provider.label} credentials?</DialogTitle>
+            <DialogDescription>
+              Saved {provider.label} credentials will be removed from the
+              database. Configured environment variables are not affected.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => setRemoveDialogOpen(false)}
+              disabled={clearPending}
+            >
+              Cancel
+            </Button>
+            <Button
+              type="button"
+              variant="destructive"
+              onClick={handleRemove}
+              disabled={clearPending}
+            >
+              <Trash2 />
+              {clearPending ? 'Removing...' : 'Remove'}
+              {clearPending ? <Spinner /> : null}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    </>
+  );
+}

@@ -1,0 +1,17 @@
+export enum ScheduledJobName {
+  Heartbeat = 'Heartbeat',
+  RefreshSnapshots = 'RefreshSnapshots',
+  SleepCheck = 'SleepCheck',
+  Coach = 'Coach',
+  ConflictScan = 'ConflictScan',
+  Announcer = 'Announcer',
+  Suggester = 'Suggester',
+  ManagerStats = 'ManagerStats',
+  SentryTriage = 'SentryTriage',
+  DependabotTriage = 'DependabotTriage',
+  SecurityAuditor = 'SecurityAuditor',
+  CodeQualityAuditor = 'CodeQualityAuditor',
+  CiFailureTriage = 'CiFailureTriage',
+  PullRequestAnalyticsSync = 'PullRequestAnalyticsSync',
+  InstancePing = 'InstancePing',
+}

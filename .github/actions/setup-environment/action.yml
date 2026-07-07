@@ -1,0 +1,56 @@
+name: 'Setup Environment'
+description: 'Setup Node.js, pnpm, and install dependencies'
+inputs:
+  enable-turbo-cache:
+    description: 'Whether to restore and save the local Turborepo cache'
+    required: false
+    default: 'false'
+  frozen-lockfile:
+    description: 'Whether to use frozen lockfile for pnpm install'
+    required: false
+    default: 'false'
+  node-version:
+    description: 'Node.js version to use'
+    required: false
+    default: '24.13.1'
+  pnpm-version:
+    description: 'pnpm version to use'
+    required: false
+    default: '10.29.3'
+  turbo-cache-scope:
+    description: 'Cache key suffix for the local Turborepo cache'
+    required: false
+    default: 'default'
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Setup pnpm
+      uses: pnpm/action-setup@v4
+      with:
+        version: ${{ inputs.pnpm-version }}
+
+    - name: Setup Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: ${{ inputs.node-version }}
+        cache: pnpm
+
+    - name: Restore Turbo cache
+      if: inputs.enable-turbo-cache == 'true'
+      uses: actions/cache@v4
+      with:
+        path: .turbo
+        key: turbo-${{ runner.os }}-${{ runner.arch }}-${{ inputs.turbo-cache-scope }}-${{ github.ref_name }}-${{ github.sha }}
+        restore-keys: |
+          turbo-${{ runner.os }}-${{ runner.arch }}-${{ inputs.turbo-cache-scope }}-${{ github.ref_name }}-
+          turbo-${{ runner.os }}-${{ runner.arch }}-${{ inputs.turbo-cache-scope }}-
+
+    - name: Install dependencies
+      shell: bash
+      run: |
+        if [ "${{ inputs.frozen-lockfile }}" == "true" ]; then
+          pnpm install --frozen-lockfile
+        else
+          pnpm install
+        fi

@@ -1,0 +1,40 @@
+version: '1.0'
+
+commands:
+  - name: 'Install dependencies'
+    run: "echo 'Installing dependencies...'"
+    description: 'Install project dependencies'
+    timeout: 600
+  - name: 'Build project'
+    run: "echo 'Building project in $BUILD_ENV mode...'"
+    description: 'Build the project'
+    env:
+      BUILD_ENV: 'production'
+      NODE_ENV: 'production'
+  - name: 'Database migration'
+    run: "echo 'Running migrations on $DB_HOST:$DB_PORT...'"
+    description: 'Run database migrations'
+    continue_on_error: true
+    env:
+      DB_HOST: 'localhost'
+      DB_PORT: '5432'
+      DB_NAME: 'myapp'
+  - name: 'Cache warmup'
+    run: "echo 'Warming up cache with level $CACHE_LEVEL...'"
+    timeout: 120
+    env:
+      CACHE_LEVEL: 'aggressive'
+      CACHE_TTL: '3600'
+  - name: 'Deploy notification'
+    run: 'curl -X POST $WEBHOOK_URL -d "deployment=$DEPLOYMENT_ID"'
+    description: 'Send deployment notification'
+    env:
+      WEBHOOK_URL: 'https://hooks.example.com/deploy'
+      DEPLOYMENT_ID: 'v1.0.0'
+  - name: 'Git update'
+    run: |
+      git checkout main
+      git pull origin main
+      git status
+    description: 'Update repository to latest main branch'
+    timeout: 180

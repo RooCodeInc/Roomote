@@ -1,0 +1,62 @@
+#cloud-config
+package_update: true
+package_upgrade: false
+
+write_files:
+  - path: /opt/roomote/deployment.env
+    owner: root:root
+    permissions: '0600'
+    content: |
+      ROOMOTE_CUSTOMER_SLUG=${customer_slug}
+      ROOMOTE_VERSION=${roomote_version}
+      IMAGE_REGISTRY=${image_registry}
+      IMAGE_NAMESPACE=${image_namespace}
+  - path: /etc/systemd/system/roomote-compose.service
+    owner: root:root
+    permissions: '0644'
+    content: |
+      [Unit]
+      Description=Roomote Docker Compose stack
+      Requires=docker.service
+      After=docker.service network-online.target
+      Wants=network-online.target
+
+      [Service]
+      Type=oneshot
+      WorkingDirectory=/opt/roomote
+      RemainAfterExit=yes
+      ExecStart=/usr/bin/docker compose --env-file /opt/roomote/.env -f /opt/roomote/docker-compose.prod.yml up -d --wait --wait-timeout 600
+      ExecStop=/usr/bin/docker compose --env-file /opt/roomote/.env -f /opt/roomote/docker-compose.prod.yml down
+      TimeoutStartSec=0
+
+      [Install]
+      WantedBy=multi-user.target
+
+runcmd:
+  - |
+    set -eux
+    apt-get update
+    apt-get install -y ca-certificates curl gnupg
+    install -m 0755 -d /etc/apt/keyrings
+    curl -fsSL https://download.docker.com/linux/ubuntu/gpg | gpg --dearmor -o /etc/apt/keyrings/docker.gpg
+    chmod a+r /etc/apt/keyrings/docker.gpg
+    if [ "${enable_volume}" = "true" ] && [ -n "${volume_name}" ]; then
+      device="/dev/disk/by-id/scsi-0DO_Volume_${volume_name}"
+      if [ -e "$device" ]; then
+        install -d -m 0711 "${volume_mount_path}"
+        if ! blkid "$device"; then
+          mkfs.ext4 -F "$device"
+        fi
+        if ! grep -q "${volume_mount_path}" /etc/fstab; then
+          echo "$device ${volume_mount_path} ext4 defaults,nofail,discard 0 2" >> /etc/fstab
+        fi
+        mount "${volume_mount_path}" || true
+      fi
+    fi
+    . /etc/os-release
+    echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.gpg] https://download.docker.com/linux/ubuntu $VERSION_CODENAME stable" > /etc/apt/sources.list.d/docker.list
+    apt-get update
+    apt-get install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
+    systemctl enable --now docker
+    install -d -m 0700 /opt/roomote /opt/roomote/caddy /opt/roomote/backups
+    systemctl daemon-reload

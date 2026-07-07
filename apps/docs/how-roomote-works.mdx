@@ -1,0 +1,77 @@
+---
+title: How Roomote works
+icon: workflow
+description: Understand where work starts, how Roomote runs, and how results come back.
+---
+
+Roomote is designed to act like a shared teammate inside the workflow your team
+already has. It is not an IDE, a local copilot, or a desktop app. It is a
+reviewable cloud agent that is most at home in chat, where teammates can ask
+questions, assign work, and review updates from the conversations they already
+use.
+
+Roomote also works from your source-control provider, Linear, and the web
+dashboard, but a chat surface such as Slack is the primary day-to-day surface
+for most teams.
+
+## Shared engineering work
+
+Most natural-language work starts as a general Roomote task. The recommended
+first path is to mention Roomote in chat with a scoped ask. Use it for
+implementation, debugging, investigation, small refactors, test fixes,
+documentation updates, planning, and codebase questions.
+
+Good handoffs include:
+
+- the outcome you want
+- the repository, environment, or thread context Roomote should use
+- links to related issues, pull requests, logs, or screenshots
+- any constraints, such as "do not change the API contract" or "keep this
+  behind the existing feature flag"
+- how you want the result returned, such as a plan, explanation, patch, or PR
+
+## Work that starts itself
+
+Some work starts from repository events instead of a manual prompt. For
+example, Roomote can review pull requests, follow up on PR comments, or help
+with merge-conflict resolution when the relevant automation is enabled. Admins
+manage these in the web app under **Automations** — see
+[Automations](/automations).
+
+## Where work starts
+
+| Surface       | How work starts                                            | Where updates appear                    |
+| ------------- | ---------------------------------------------------------- | --------------------------------------- |
+| Slack         | Mention Roomote or reply in an active Roomote thread       | Slack thread and task view              |
+| Teams         | Mention the bot in a channel, group chat, or personal chat | Teams thread and task view              |
+| Telegram      | Mention the bot in a group chat or private chat            | Telegram chat and task view             |
+| Web dashboard | Submit a prompt from **Home**                              | Task view in Roomote                    |
+| Linear        | Start an agent session or mention Roomote on an issue      | Linear activity and task view           |
+| GitHub        | Pull request events or `@`-mentions in PR comments         | GitHub comments, reviews, and task view |
+| GitLab        | Repository or merge request follow-up when configured      | GitLab activity and task view           |
+| Gitea         | Repository or pull request follow-up when configured       | Gitea activity and task view            |
+| Azure DevOps  | Repository or pull request follow-up when configured       | Azure DevOps activity and task view     |
+
+Chat is the recommended surface for the first task after setup because it makes
+Roomote visible inside an existing team conversation. Use the dashboard when
+you want to choose the environment directly, inspect task details, review
+diffs, or continue with a richer task view.
+
+## How Roomote stays reviewable
+
+Roomote runs in an isolated sandbox and keeps the work visible. The task view
+gives your team the transcript, logs, diffs, previews, artifacts, and task
+metadata before anything ships.
+
+For code changes, Roomote hands work back through normal delivery paths such
+as a branch, pull request, or reviewable diff. For questions and planning, it
+gives a clear answer or next step without pretending code was changed.
+
+## Choosing an environment
+
+In chat, Roomote can suggest the right environment and ask for confirmation when
+needed. When you start from the dashboard, choose the environment yourself or
+use **Auto** when you want Roomote to route the task. Linear can also suggest
+an environment from issue context.
+
+For more detail, see [Environments](/environments).

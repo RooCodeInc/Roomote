@@ -1,0 +1,4 @@
+interface:
+  display_name: "Cleanup Stale PRs"
+  short_description: "GitHub stale PR cleanup with grouped dry-run review"
+  default_prompt: "Use $cleanup-stale-prs to review stale GitHub pull requests, summarize dry-run candidates by topic with counts, and optionally close the ones that should be cleaned up."

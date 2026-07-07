@@ -1,0 +1,459 @@
+# Basic test cases for LLM routing evaluation
+# These cover the fundamental routing scenarios
+
+- description: 'Clear coding task with explicit repository'
+  vars:
+    context: |
+      **Task Description**:
+      Fix the bug in the authentication flow where users are being logged out unexpectedly after 5 minutes.
+
+      **Source**: Slack
+      **Channel**: #backend-team
+
+      **Available Agents**:
+      - Coder [id: agent-coder-1]
+      - Explainer [id: agent-explainer-1]
+      - Planner [id: agent-planner-1]
+
+      **Available Repositories**:
+      - acme/auth-service: Authentication microservice handling user sessions
+      - acme/api-gateway: API gateway for routing requests
+      - acme/user-service: User management and profiles
+
+      **Available Environments**:
+      - Auth Platform: Core authentication services (repos: acme/auth-service, acme/api-gateway)
+      - User Accounts: User profile stack (repos: acme/user-service)
+    expectedAgentId: 'agent-coder-1'
+  assert:
+    - type: javascript
+      value: file://assertions/routing-assertions.ts:isValidRoutingJson
+
+- description: 'Explanation task - understanding code behavior'
+  vars:
+    context: |
+      **Task Description**:
+      Can you explain how the caching layer works in our API? I need to understand the TTL settings and invalidation strategy.
+
+      **Source**: Slack
+      **Channel**: #engineering
+
+      **Available Agents**:
+      - Coder [id: agent-coder-1]
+      - Explainer [id: agent-explainer-1]
+      - Planner [id: agent-planner-1]
+
+      **Available Repositories**:
+      - acme/api-gateway: API gateway with Redis caching layer
+      - acme/cache-utils: Shared caching utilities
+      - acme/docs: Internal documentation
+
+      **Available Environments**:
+      - API Gateway: Gateway + cache utilities (repos: acme/api-gateway, acme/cache-utils)
+      - Internal Docs: Documentation site (repos: acme/docs)
+    expectedAgentId: 'agent-explainer-1'
+  assert:
+    - type: javascript
+      value: file://assertions/routing-assertions.ts:isValidRoutingJson
+
+- description: 'Planning task - architecture design'
+  vars:
+    context: |
+      **Task Description**:
+      How should we approach migrating our monolith to microservices? We need a strategy for the database separation and API versioning.
+
+      **Source**: Linear
+      **Issue**: ARCH-123 - Microservices Migration Planning
+      **Project**: Platform Modernization
+      **Team**: Architecture
+
+      **Available Agents**:
+      - Coder [id: agent-coder-1]
+      - Explainer [id: agent-explainer-1]
+      - Planner [id: agent-planner-1]
+
+      **Available Repositories**:
+      - acme/monolith: Current monolithic application
+      - acme/shared-libs: Shared libraries
+
+      **Available Environments**:
+      - Monolith Platform: Monolith + shared libs (repos: acme/monolith, acme/shared-libs)
+    expectedAgentId: 'agent-planner-1'
+  assert:
+    - type: javascript
+      value: file://assertions/routing-assertions.ts:isValidRoutingJson
+
+- description: 'Ambiguous repository case'
+  vars:
+    context: |
+      **Task Description**:
+      There's a performance issue somewhere in our stack. Users are reporting slow page loads.
+
+      **Source**: Slack
+      **Channel**: #incidents
+
+      **Available Agents**:
+      - Coder [id: agent-coder-1]
+      - Explainer [id: agent-explainer-1]
+
+      **Available Repositories**:
+      - acme/frontend: React frontend application
+      - acme/backend-api: Node.js backend API
+      - acme/database-service: Database access layer
+      - acme/cdn-config: CDN configuration
+    expectedAgentId: 'agent-coder-1'
+  assert:
+    - type: javascript
+      value: file://assertions/routing-assertions.ts:isValidRoutingJson
+    # Should pick a specific repository (best guess), NOT all_repositories
+    - type: javascript
+      value: file://assertions/routing-assertions.ts:hasValidWorkspaceValue
+
+- description: 'Environment selection - multi-repo task'
+  vars:
+    context: |
+      **Task Description**:
+      Implement a new feature that requires changes to both the API and the frontend. We need to add a user preferences panel.
+
+      **Source**: Linear
+      **Issue**: FEAT-456 - User Preferences Panel
+      **Project**: User Experience
+      **Team**: Product
+
+      **Available Agents**:
+      - Coder [id: agent-coder-1]
+      - Planner [id: agent-planner-1]
+
+      **Available Repositories**:
+      - acme/frontend: React frontend application
+      - acme/backend-api: Backend REST API
+
+      **Available Environments**:
+      - Full Stack: Development environment for full-stack features (repos: acme/frontend, acme/backend-api)
+    expectedAgentId: 'agent-coder-1'
+  assert:
+    - type: javascript
+      value: file://assertions/routing-assertions.ts:isValidRoutingJson
+    - type: javascript
+      value: file://assertions/routing-assertions.ts:hasValidWorkspaceValue
+
+- description: 'GitHub source with clear repository context'
+  vars:
+    context: |
+      **Task Description**:
+      Fix the XSS vulnerability in the user registration form input validation.
+
+      **Source**: GitHub
+      **Repository**: acme/user-portal
+      **Title**: Security: Add XSS prevention to registration form
+      **Comment**: This is a P1 security issue. Please address ASAP.
+
+      **Available Agents**:
+      - Fixer [id: agent-fixer-1]
+      - Explainer [id: agent-explainer-1]
+
+      **Available Repositories**:
+      - acme/user-portal: User-facing portal with registration forms
+      - acme/admin-dashboard: Internal admin tools
+
+      **Available Environments**:
+      - User Portal: Customer-facing portal (repos: acme/user-portal)
+      - Admin Suite: Admin tooling (repos: acme/admin-dashboard)
+    expectedWorkspaceValue: 'acme/user-portal'
+    expectedAgentId: 'agent-fixer-1'
+  assert:
+    - type: javascript
+      value: file://assertions/routing-assertions.ts:isValidRoutingJson
+    - type: javascript
+      value: file://assertions/routing-assertions.ts:workspaceValueMatchesExpected
+
+- description: 'What is question - should route to Explainer'
+  vars:
+    context: |
+      **Task Description**:
+      What is the purpose of the middleware chain in our Express app? I'm new to the team and trying to understand the request flow.
+
+      **Source**: Slack
+      **Channel**: #onboarding
+
+      **Available Agents**:
+      - Coder [id: agent-coder-1]
+      - Explainer [id: agent-explainer-1]
+      - Planner [id: agent-planner-1]
+
+      **Available Repositories**:
+      - acme/express-api: Main Express.js API server
+      - acme/middleware-utils: Custom middleware utilities
+
+      **Available Environments**:
+      - Express API: API + middleware utils (repos: acme/express-api, acme/middleware-utils)
+    expectedAgentId: 'agent-explainer-1'
+  assert:
+    - type: javascript
+      value: file://assertions/routing-assertions.ts:isValidRoutingJson
+
+- description: 'Refactoring task - should route to Coder'
+  vars:
+    context: |
+      **Task Description**:
+      Refactor the notification delivery module to use the new messaging SDK. The current implementation uses deprecated methods.
+
+      **Source**: Linear
+      **Issue**: TECH-789 - Upgrade Messaging Integration
+      **Project**: Technical Debt
+      **Team**: Notifications
+
+      **Available Agents**:
+      - Coder [id: agent-coder-1]
+      - Explainer [id: agent-explainer-1]
+      - Planner [id: agent-planner-1]
+
+      **Available Repositories**:
+      - acme/notification-service: Notification delivery microservice
+      - acme/messaging-api: Message routing API
+      - acme/webhook-handlers: Webhook handlers
+
+      **Available Environments**:
+      - Notifications Platform: Notification and message routing services (repos: acme/notification-service, acme/messaging-api)
+      - Messaging Integrations: Webhook handlers (repos: acme/webhook-handlers)
+    expectedAgentId: 'agent-coder-1'
+  assert:
+    - type: javascript
+      value: file://assertions/routing-assertions.ts:isValidRoutingJson
+
+- description: 'Explicit project selection - user forces specific environment'
+  vars:
+    context: |
+      **Task Description**:
+      Fix the login button styling. Use the Mobile Development project for this task.
+
+      **Source**: Slack
+      **Channel**: #frontend
+
+      **Available Agents**:
+      - Coder [id: agent-coder-1]
+      - Explainer [id: agent-explainer-1]
+      - Planner [id: agent-planner-1]
+
+      **Available Repositories**:
+      - acme/web-app: Main web application
+      - acme/mobile-ios: iOS mobile application
+      - acme/mobile-android: Android mobile application
+
+      **Available Environments**:
+      - Web Development: Environment for web features (repos: acme/web-app)
+      - Mobile Development: Environment for mobile app features (repos: acme/mobile-ios, acme/mobile-android)
+    expectedWorkspaceValue: 'Mobile Development'
+  assert:
+    - type: javascript
+      value: file://assertions/routing-assertions.ts:isValidRoutingJson
+    - type: javascript
+      value: file://assertions/routing-assertions.ts:hasValidWorkspaceValue
+    - type: javascript
+      value: file://assertions/routing-assertions.ts:workspaceValueMatchesExpected
+
+- description: 'Explicit agent selection - user forces specific agent'
+  vars:
+    context: |
+      **Task Description**:
+      There's a bug in the signup flow but I want Explainer to analyze it first before we make any changes.
+
+      **Source**: Slack
+      **Channel**: #signup-team
+
+      **Available Agents**:
+      - Coder [id: agent-coder-1]
+      - Explainer [id: agent-explainer-1]
+      - Planner [id: agent-planner-1]
+
+      **Available Repositories**:
+      - acme/signup-service: Signup orchestration microservice
+      - acme/onboarding-flow: Onboarding UI and logic
+
+      **Available Environments**:
+      - Signup Experience: Signup and onboarding (repos: acme/signup-service, acme/onboarding-flow)
+    expectedWorkspaceValue: 'acme/signup-service'
+    expectedAgentId: 'agent-explainer-1'
+  assert:
+    - type: javascript
+      value: file://assertions/routing-assertions.ts:isValidRoutingJson
+    - type: javascript
+      value: file://assertions/routing-assertions.ts:workspaceValueMatchesExpected
+
+- description: 'Edge case - minimal context with single agent'
+  vars:
+    context: |
+      **Task Description**:
+      Make it work
+
+      **Source**: Slack
+      **Channel**: #random
+
+      **Available Agents**:
+      - Coder [id: agent-coder-1]
+
+      **Available Repositories**:
+      - acme/app: Main application
+    expectedAgentId: 'agent-coder-1'
+  assert:
+    - type: javascript
+      value: file://assertions/routing-assertions.ts:isValidRoutingJson
+
+- description: 'Investigative question about UI regression - should route to Explainer with cloud app environment'
+  vars:
+    context: |
+      **Task Description**:
+      Did we change something recently that made it so you don't see any progress for starting cloud jobs from the new task page (we used to have a modal that showed task start progress, and we still seem to in dev, but it's not here now...)
+
+      **Source**: Slack
+      **Channel**: #product-support
+
+      **Available Agents**:
+      - Coder [id: agent-coder-1]
+      - Explainer [id: agent-explainer-1]
+      - Planner [id: agent-planner-1]
+
+      **Available Repositories**:
+      - roomote/extension: Roomote VSCode extension
+      - roomote/cloud: Roomote platform
+      - roomote/docs: Roomote documentation site
+
+      **Available Environments**:
+      - app.roomote.example: The Roomote app (repos: roomote/cloud, roomote/extension)
+      - roomote.example: The marketing website (repos: roomote/docs)
+      - docs.roomote.example: The docs website (repos: roomote/docs)
+    expectedWorkspaceValue: 'app.roomote.example'
+    expectedAgentId: 'agent-explainer-1'
+  assert:
+    - type: javascript
+      value: file://assertions/routing-assertions.ts:isValidRoutingJson
+    - type: javascript
+      value: file://assertions/routing-assertions.ts:hasValidWorkspaceValue
+    - type: javascript
+      value: file://assertions/routing-assertions.ts:workspaceValueMatchesExpected
+
+- description: 'Investigative regression question with broken symptom details'
+  vars:
+    context: |
+      **Task Description**:
+      Why can't I use sign in via Google in the embedded preview? It tries to open the Google auth page in a new tab, but just opens about:blank. I think this was working in the past.
+
+      **Source**: Slack
+      **Channel**: #product-support
+
+      **Available Agents**:
+      - Coder [id: agent-coder-1]
+      - Explainer [id: agent-explainer-1]
+      - Planner [id: agent-planner-1]
+
+      **Available Repositories**:
+      - roomote/cloud: Roomote platform
+      - roomote/extension: Roomote VSCode extension
+      - roomote/docs: Roomote documentation site
+
+      **Available Environments**:
+      - app.roomote.example: The Roomote app (repos: roomote/cloud, roomote/extension)
+      - roomote.example: The marketing website (repos: roomote/docs)
+      - docs.roomote.example: The docs website (repos: roomote/docs)
+    expectedWorkspaceValue: 'app.roomote.example'
+    expectedAgentId: 'agent-explainer-1'
+  assert:
+    - type: javascript
+      value: file://assertions/routing-assertions.ts:isValidRoutingJson
+    - type: javascript
+      value: file://assertions/routing-assertions.ts:hasValidWorkspaceValue
+    - type: javascript
+      value: file://assertions/routing-assertions.ts:workspaceValueMatchesExpected
+
+- description: 'Diagnostic task mentioning external repo should still prefer owning environment'
+  vars:
+    context: |
+      **Task Description**:
+      I sometimes see RPC request to OpenCode time out.
+
+      What is controlling this timeout? Why do you think it's happening? Is there a way to get more diagnostic logging about it? How can we "prod" the agent to get it to start working again?
+
+      You might want to aid your exploration by pulling down an external repo and looking at the source code there.
+
+      **Source**: Slack
+      **Channel**: #product-support
+
+      **Available Agents**:
+      - Coder [id: agent-coder-1]
+      - Explainer [id: agent-explainer-1]
+      - Planner [id: agent-planner-1]
+
+      **Available Environments**:
+      - App: The main application and its runtime integrations (repos: roomote/cloud, roomote/extension)
+      - Marketing Site: Public marketing website (repos: roomote/docs)
+    expectedWorkspaceValue: 'App'
+    expectedAgentId: 'agent-explainer-1'
+  assert:
+    - type: javascript
+      value: file://assertions/routing-assertions.ts:isValidRoutingJson
+    - type: javascript
+      value: file://assertions/routing-assertions.ts:hasValidWorkspaceValue
+    - type: javascript
+      value: file://assertions/routing-assertions.ts:workspaceValueMatchesExpected
+
+- description: 'Marketing website copy update'
+  vars:
+    context: |
+      **Task Description**:
+      Update the homepage hero copy and CTA to better highlight our new AI features.
+
+      **Source**: Linear
+      **Issue**: MKT-101 - Homepage Copy Refresh
+      **Project**: Growth
+      **Team**: Marketing
+
+      **Available Agents**:
+      - Coder [id: agent-coder-1]
+      - Explainer [id: agent-explainer-1]
+
+      **Available Repositories**:
+      - acme/marketing-site: Marketing website and landing pages
+      - acme/web-app: Main application
+
+      **Available Environments**:
+      - Website: Public marketing site (repos: acme/marketing-site)
+      - Web App: Application UI (repos: acme/web-app)
+    expectedWorkspaceValue: 'Website'
+    expectedAgentId: 'agent-coder-1'
+  assert:
+    - type: javascript
+      value: file://assertions/routing-assertions.ts:isValidRoutingJson
+    - type: javascript
+      value: file://assertions/routing-assertions.ts:hasValidWorkspaceValue
+    - type: javascript
+      value: file://assertions/routing-assertions.ts:workspaceValueMatchesExpected
+
+- description: 'Marketing site investigation question'
+  vars:
+    context: |
+      **Task Description**:
+      Why did the conversion rate drop on the pricing page last week? I want to understand what changed.
+
+      **Source**: Slack
+      **Channel**: #marketing-ops
+
+      **Available Agents**:
+      - Coder [id: agent-coder-1]
+      - Explainer [id: agent-explainer-1]
+      - Planner [id: agent-planner-1]
+
+      **Available Repositories**:
+      - acme/marketing-site: Marketing website and landing pages
+      - acme/analytics: Marketing analytics pipelines
+
+      **Available Environments**:
+      - Website: Public marketing site (repos: acme/marketing-site)
+      - Analytics: Marketing analytics (repos: acme/analytics)
+    expectedWorkspaceValue: 'Website'
+    expectedAgentId: 'agent-explainer-1'
+  assert:
+    - type: javascript
+      value: file://assertions/routing-assertions.ts:isValidRoutingJson
+    - type: javascript
+      value: file://assertions/routing-assertions.ts:hasValidWorkspaceValue
+    - type: javascript
+      value: file://assertions/routing-assertions.ts:workspaceValueMatchesExpected

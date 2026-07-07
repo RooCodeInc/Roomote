@@ -1,0 +1,4 @@
+interface:
+  display_name: "Roomote Runtime"
+  short_description: "Roomote runtime and integrations"
+  default_prompt: "Use $roomote-runtime-integrations to trace how Roomote agents run through the controller, worker, queues, preview proxy, and integrations."

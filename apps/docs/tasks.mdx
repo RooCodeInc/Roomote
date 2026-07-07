@@ -1,0 +1,97 @@
+---
+title: Review a task
+icon: clipboard-check
+description: Inspect the transcript, logs, diffs, previews, and follow-up path before you trust the result.
+---
+
+A task is a single unit of Roomote work. It may start from chat, source
+control, Linear, or the web dashboard, but the task view gives your team one
+shared place to inspect what happened and decide what should happen next.
+
+Use the task view as the handoff point between Roomote and your normal review
+process. A task is complete only when the evidence is clear enough for a
+teammate to trust, continue, or reject the result.
+
+## What to check first
+
+Before you dive into details, check the basics:
+
+- what Roomote was asked to do
+- which environment or repository context it used
+- whether the task is still running, needs input, or has finished
+- whether Roomote used the expected model, source-control context, and
+  compute environment when those details matter
+- whether the end state matches the kind of outcome you wanted: answer, plan,
+  patch, branch, or PR
+
+## Task view
+
+The task view gives you the working context for a run:
+
+- conversation history and Roomote updates
+- terminal and runtime logs
+- generated artifacts
+- code diffs
+- previews for running apps
+- task metadata and links back to the surface that started the task
+
+If a task started from Slack, Teams, Telegram, Linear, or source control, use
+the task view when the chat or provider thread does not show enough detail to
+review the work.
+
+## Review the evidence
+
+Roomote is most useful when it can show its work. For implementation tasks,
+look for:
+
+- commands, tests, or checks it ran
+- logs or errors it used to make decisions
+- screenshots or live previews for UI changes
+- a diff or pull request for code changes
+- a clear explanation when something could not be verified
+
+| Surface           | What to look for                                                                           |
+| ----------------- | ------------------------------------------------------------------------------------------ |
+| Transcript        | Whether Roomote understood the ask, adapted to new context, and explained blockers clearly |
+| Terminal and logs | The concrete commands, errors, and runtime signals behind the final answer                 |
+| Diff or PR        | Whether the actual code change matches the requested outcome                               |
+| Preview           | Whether the visible result matches the claim for UI or workflow changes                    |
+| Artifacts         | Plans, reports, screenshots, or other outputs you may want to reuse or review              |
+
+## Continuing work
+
+You can send follow-up instructions while a task is active. If a task has
+completed and Roomote has a restorable snapshot, a follow-up can resume from
+that prior workspace instead of starting over.
+
+Good follow-ups are specific:
+
+- "Apply the second option and add a regression test."
+- "Use the existing settings card pattern instead of adding a new component."
+- "Open a PR with the fix."
+- "Explain the tradeoff before changing code."
+
+## When to resume versus start a new task
+
+- Resume the same task when the follow-up depends on the existing workspace,
+  context, or unfinished implementation.
+- Start a new task when the work is a separate objective, should use a
+  different environment, or would make the current task thread too broad.
+
+## Before you merge or ship
+
+Before you merge changes, review the diff and the verification Roomote ran.
+Roomote can move quickly, but your normal review process still matters. For
+implementation work, ask Roomote to include the tests or validation it ran in
+the final task message.
+
+If verification is missing, ask Roomote to run the specific command or explain
+why it cannot. If the task touched user-facing behavior, inspect the preview,
+screenshots, or product surface before shipping.
+
+## Multi-person tasks
+
+Different teammates can run separate tasks in parallel. Teammates can also
+join the same task conversation when the work needs shared context, for
+example when a PM clarifies requirements and an engineer reviews the
+implementation plan.

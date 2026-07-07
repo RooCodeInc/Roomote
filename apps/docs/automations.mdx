@@ -1,0 +1,168 @@
+---
+title: Automations
+icon: calendar-clock
+description: Set up background Roomote work for PR review, conflict resolution, recurring triage, and team updates.
+---
+
+Automations let Roomote work without waiting for a teammate to write a new
+prompt every time.
+
+Use them after your first environment, chat connection, and source-control
+connection are working well. Automations are most useful when your team
+already trusts the normal task review flow and wants Roomote to keep an eye on
+repeated work.
+
+## Before you turn them on
+
+Make sure the basics are in place:
+
+- source control is connected for PR and repository automations
+- Slack is connected for automations that post updates to channels
+- Roomote has at least one healthy environment for the repositories it should
+  work in
+- the team knows where automation output will appear
+
+Automations can create useful work quickly. Start with one or two that map to
+a real team habit, tell the team where output will appear, then expand once
+the signal is good.
+
+## Pull request automations
+
+These automations react to pull requests and repository state.
+
+| Automation               | What it does                                             | Good first use                                                         |
+| ------------------------ | -------------------------------------------------------- | ---------------------------------------------------------------------- |
+| **Review Code**          | Reviews pull requests automatically or on demand         | Add an extra reviewer for regressions, risky changes, and missed tests |
+| **Resolve PR Conflicts** | Looks for merge conflicts and helps fix them on open PRs | Keep long-running branches from getting stuck                          |
+
+For **Review Code**, decide whether Roomote should review new commits
+automatically and whether draft pull requests should be included. If your team
+treats drafts as active collaboration, include them. If drafts are noisy or
+half-formed, keep them out until they are ready.
+
+For **Resolve PR Conflicts**, pick a schedule, PR age cap, and label. The
+label is the team-controlled opt-in for scheduled scans. Make sure the label
+exists in your repositories, add it to PRs where you want Roomote to attempt
+conflict resolution, and remove it when a human should handle the conflict
+instead. Roomote only tries this on labeled PRs that are still active, and it
+skips PRs older than the age cap you set.
+
+## Slack automations
+
+The Slack section starts with **Auto-respond to Slack channels**.
+
+Use it to let Roomote start a task from new top-level messages in selected
+Slack channels, even when nobody mentions Roomote directly. You can add
+multiple channels, and each one can include its own optional instructions.
+
+Good first examples:
+
+- `#ask-engineering`
+- `#bugs`
+- `#support-inbound`
+- `#ops-requests`
+
+Invite Roomote to every auto-respond channel before you save it.
+
+Start with a low-risk channel first. Auto-response can feel noisy if the
+channel mixes casual discussion with requests that should become Roomote
+tasks.
+
+## Manager automations
+
+The manager section controls the shared Manager Channel plus recurring
+manager-facing updates and suggestions.
+
+| Automation                   | What it posts                                                    | Typical cadence                             |
+| ---------------------------- | ---------------------------------------------------------------- | ------------------------------------------- |
+| **Automation output**        | The shared Manager Channel destination                           | Configure once                              |
+| **Weekly Manager Stats**     | A weekly summary of Roomote activity                             | Weekly                                      |
+| **Triage Sentry Issues**     | Prioritized Sentry follow-up work                                | Daily or weekly                             |
+| **Triage Dependabot Alerts** | Suggested follow-up tasks for open dependency alerts             | Daily or weekly                             |
+| **Security Auditor**         | Security follow-up work from recently merged PRs                 | Every hour, every 6 hours, daily, or weekly |
+| **Code Quality Auditor**     | Code quality follow-up work from recently merged PRs             | Every hour, every 6 hours, daily, or weekly |
+| **Suggest Ideas**            | Useful coding work Roomote thinks the team could do              | Daily or weekly                             |
+| **CI Failure Triage**        | Automatic repro-and-fix tasks for failing default-branch CI runs | Immediate via webhook                       |
+| **Summarize Merged PRs**     | A digest of recently merged pull requests                        | Daily or weekly                             |
+
+Set **Automation output** first. This is the shared Slack channel for
+manager-facing posts, suggestions, summaries, and setup alerts. Invite Roomote
+to that channel before you save it.
+
+**Code Quality Auditor** inspects recently merged PR diffs and only posts
+high-confidence maintainability issues worth a real follow-up task. It is
+meant to catch confusing abstractions, file bloat, brittle branching, and other
+quality regressions, not correctness bugs or security issues.
+
+**Triage Sentry Issues** scans connected Sentry projects and posts the issues
+that look worth engineering follow-up. Leave project slugs blank to scan
+everything available to the configured token, or scope it to specific
+projects.
+
+**Triage Dependabot Alerts** scans open GitHub Dependabot alerts across your
+active repositories and suggests tightly scoped follow-up update tasks. It
+does not open PRs directly from the scheduled scan.
+
+**Security Auditor** reviews recently merged PRs for concrete security issues
+and secure-by-default gaps that are worth a real follow-up task.
+
+**CI Failure Triage** reacts the moment a CI workflow run fails on a
+repository's default branch. When a failure persists (it is not already fixed
+by a newer run and is not a one-off flake), Roomote starts a fix task that
+reproduces the failing job inside the repository's configured environment,
+finds the root cause, opens a PR with the fix, and posts one summary to the
+Manager Channel when it finishes. Only repositories that belong to a
+configured Roomote environment are triaged.
+
+## Add instructions to reduce noise
+
+Several automations include an **Additional instructions** field. Use it to
+tell Roomote what good signal looks like for your team.
+
+Helpful instructions are specific:
+
+```text
+Prioritize changes that reduce repeated support escalations.
+Skip suggestions that require product approval before engineering can start.
+For merged PR summaries, call out customer-visible changes first.
+```
+
+Avoid broad instructions such as "only send good ideas." Roomote needs to
+know what your team considers useful, risky, or out of scope.
+
+## Run an automation now
+
+Some automations include a **Run now** action. Use it when you want to test
+the current configuration before waiting for the next scheduled run.
+
+After you run one, check the destination channel and the task view. A healthy
+automation should leave enough context for a reviewer to understand why
+Roomote posted and what should happen next.
+
+If the automation creates a task, review the same evidence you would review for
+manual work: transcript, logs, diffs, previews, artifacts, and final summary.
+
+## Use Slack workflows for custom triggers
+
+For workflows that are specific to your team, use Slack's own workflow
+builder and end the workflow with a Roomote mention.
+
+Good custom triggers include:
+
+- send new bug-channel posts to Roomote for triage
+- turn operational requests from another system into Roomote tasks
+- ask Roomote to gather diagnostics when a support escalation arrives
+
+This keeps custom routing in Slack while still letting Roomote run a normal,
+reviewable task.
+
+## Possible issues
+
+- **Nothing posts to Slack.** Check that Slack is connected, Roomote is
+  invited to the Manager Channel, and the automation is enabled.
+- **Suggestions are too broad.** Add narrower instructions about what to
+  prioritize and what to ignore.
+- **Review Code comments on too much.** Turn off draft PR review or adjust
+  when automatic reviews run.
+- **Conflict resolution starts on the wrong PRs.** Use the configured label as
+  the opt-in boundary and remove it from PRs that need human handling.

@@ -1,0 +1,333 @@
+import { createTRPCProxyClient, httpBatchLink, httpLink } from '@trpc/client';
+import { DEFAULT_AUTH_BYPASS_HEADER_NAME } from '@roomote/types';
+import superjson from 'superjson';
+
+import { retryAsync } from './retry';
+import * as auth from '../auth';
+import * as githubInstallations from '../github-installations';
+import * as slackInstallations from '../slack-installations';
+import * as linearInstallations from '../linear-installations';
+import * as linearSessions from '../linear-sessions';
+import * as repositories from '../repositories';
+import * as cloudJobs from '../cloud-jobs';
+import * as environments from '../environments';
+import * as featureFlags from '../feature-flags';
+import * as mcpConnections from '../mcp-connections';
+import * as userApiKeys from '../user-api-keys';
+import type { AppRouter, AppRouterInput, AppRouterOutput } from '../types';
+
+export type { AppRouter, AppRouterInput, AppRouterOutput };
+export type { GithubInstallation } from '../github-installations';
+export type { SlackInstallation } from '../slack-installations';
+export type { LinearSessionConnection } from '../linear-sessions';
+export type { LinearInstallation } from '../linear-installations';
+export type { Repository } from '../repositories';
+export type { ParsedPR } from '../pull-request-links';
+export type {
+  CloudJob,
+  DequeuedCloudJob,
+  DequeuedResumeCloudJob,
+} from '../cloud-jobs';
+export type { Environment, EnvironmentListItem } from '../environments';
+export {
+  detectPullRequestsFromToolResultEnvelope,
+  parsePRFromOutput,
+  parsePRsFromAuthoritativeToolResultOutput,
+  parsePRsFromGhPrCheckoutToolResult,
+  parsePRsFromGhPrCreateToolResult,
+  parsePRsFromGhPrListToolResult,
+  parsePRsFromText,
+  parseRepoFromCommand,
+} from '../pull-request-links';
+
+export const sdk = {
+  auth,
+  githubInstallations,
+  slackInstallations,
+  linearInstallations,
+  linearSessions,
+  repositories,
+  cloudJobs,
+  environments,
+  featureFlags,
+  mcpConnections,
+  userApiKeys,
+};
+
+export interface CreateClientOptions {
+  /**
+   * The base URL for the tRPC API.
+   * Defaults to TRPC_URL env var or http://localhost:3001
+   */
+  url?: string;
+  /**
+   * Function that returns headers to include with each request.
+   * Use this to pass authentication tokens.
+   */
+  headers?: () => Record<string, string> | Promise<Record<string, string>>;
+}
+
+const WORKER_QUERY_RETRYABLE_STATUS_CODES = new Set([408, 429, 502, 503, 504]);
+const WORKER_QUERY_RETRY_MAX_ATTEMPTS = 4;
+const WORKER_QUERY_RETRY_BASE_DELAY_MS = 250;
+const RETRYABLE_WORKER_TRPC_MUTATION_PATHS = new Set([
+  'cloudJobs.recordMessageEnvelope',
+]);
+
+type FetchLike = typeof fetch;
+
+export interface WorkerQueryRetryOptions {
+  maxAttempts?: number;
+  baseDelayMs?: number;
+}
+
+function isQueryRequest(method?: string): boolean {
+  return (method ?? 'GET').toUpperCase() === 'GET';
+}
+
+function resolveApiUrl(baseUrl: string, path: string): string {
+  const normalizedBaseUrl = baseUrl.replace(/\/+$/, '');
+  const normalizedPath = path.startsWith('/') ? path : `/${path}`;
+
+  return `${normalizedBaseUrl}${normalizedPath}`;
+}
+
+function isPostRequest(method?: string): boolean {
+  return (method ?? 'GET').toUpperCase() === 'POST';
+}
+
+function getRequestMethod(
+  input: RequestInfo | URL,
+  init?: RequestInit,
+): string {
+  if (init?.method) {
+    return init.method;
+  }
+
+  return input instanceof Request ? input.method : 'GET';
+}
+
+function getRequestUrl(input: RequestInfo | URL): string {
+  if (typeof input === 'string') {
+    return input;
+  }
+
+  if (input instanceof URL) {
+    return input.toString();
+  }
+
+  return input.url;
+}
+
+function getWorkerTrpcProcedurePaths(requestUrl: string): string[] {
+  try {
+    const pathname = new URL(requestUrl, 'http://localhost').pathname;
+    const trpcPathIndex = pathname.indexOf('/trpc/');
+
+    if (trpcPathIndex === -1) {
+      return [];
+    }
+
+    return pathname
+      .slice(trpcPathIndex + '/trpc/'.length)
+      .split(',')
+      .map((path) => path.trim())
+      .filter((path) => path.length > 0);
+  } catch {
+    return [];
+  }
+}
+
+function isJsonContentType(contentType?: string | null): boolean {
+  if (!contentType) {
+    return false;
+  }
+
+  const mimeType = contentType.split(';', 1)[0]?.trim().toLowerCase();
+  if (!mimeType) {
+    return false;
+  }
+
+  return mimeType === 'application/json' || mimeType.endsWith('+json');
+}
+
+async function assertValidWorkerTrpcResponse(
+  response: Response,
+  requestUrl: string,
+): Promise<void> {
+  const contentType = response.headers.get('content-type');
+  if (isJsonContentType(contentType)) {
+    return;
+  }
+
+  throw new Error(
+    `Worker callback tRPC endpoint ${requestUrl} returned non-JSON content-type ${
+      contentType ? JSON.stringify(contentType) : '"missing"'
+    }.`,
+  );
+}
+
+function shouldRetryWorkerQueryResponse(status: number): boolean {
+  return WORKER_QUERY_RETRYABLE_STATUS_CODES.has(status);
+}
+
+function shouldRetryWorkerTrpcRequest(
+  method: string,
+  requestUrl: string,
+): boolean {
+  if (isQueryRequest(method)) {
+    return true;
+  }
+
+  if (!isPostRequest(method)) {
+    return false;
+  }
+
+  const procedurePaths = getWorkerTrpcProcedurePaths(requestUrl);
+
+  return (
+    procedurePaths.length > 0 &&
+    procedurePaths.every((path) =>
+      RETRYABLE_WORKER_TRPC_MUTATION_PATHS.has(path),
+    )
+  );
+}
+
+function getWorkerQueryRetryDelayMs(
+  attemptNumber: number,
+  baseDelayMs: number,
+): number {
+  return baseDelayMs * 2 ** (attemptNumber - 1);
+}
+
+export function createWorkerFetchWithRetry(
+  baseFetch: FetchLike = globalThis.fetch.bind(globalThis),
+  options: WorkerQueryRetryOptions = {},
+): FetchLike {
+  const maxAttempts = options.maxAttempts ?? WORKER_QUERY_RETRY_MAX_ATTEMPTS;
+  const baseDelayMs = options.baseDelayMs ?? WORKER_QUERY_RETRY_BASE_DELAY_MS;
+
+  return async (input, init) => {
+    const requestMethod = getRequestMethod(input, init);
+    const requestUrl = getRequestUrl(input);
+    const shouldRetryRequest = shouldRetryWorkerTrpcRequest(
+      requestMethod,
+      requestUrl,
+    );
+
+    if (!shouldRetryRequest || maxAttempts <= 1) {
+      const response = await baseFetch(input, init);
+
+      await assertValidWorkerTrpcResponse(response, requestUrl);
+      return response;
+    }
+
+    const response = await retryAsync(() => baseFetch(input, init), {
+      maxAttempts,
+      signal: init?.signal,
+      getDelayMs: (attemptNumber) =>
+        getWorkerQueryRetryDelayMs(attemptNumber, baseDelayMs),
+      shouldRetry: ({ error, result }) => {
+        if (error) {
+          return true;
+        }
+
+        if (!result) {
+          return false;
+        }
+
+        const contentType = result.headers.get('content-type');
+
+        return (
+          shouldRetryWorkerQueryResponse(result.status) ||
+          !isJsonContentType(contentType)
+        );
+      },
+    });
+
+    await assertValidWorkerTrpcResponse(response, requestUrl);
+    return response;
+  };
+}
+
+/**
+ * Create a tRPC client for calling the API.
+ *
+ * @example
+ * // In a Next.js server action
+ * const client = createClient({
+ *   headers: async () => {
+ *     const token = await getAuthToken();
+ *     return { Authorization: `Bearer ${token}` };
+ *   },
+ * });
+ *
+ * const result = await client.cloudJobs.createSnapshot.mutate({
+ *   cloudJobId: 123,
+ *   sandboxId: 'sandbox-abc',
+ * });
+ */
+export function createClient(options: CreateClientOptions = {}) {
+  const { url = process.env.TRPC_URL ?? 'http://localhost:3001', headers } =
+    options;
+
+  return createTRPCProxyClient<AppRouter>({
+    links: [
+      httpBatchLink({
+        url: resolveApiUrl(url, '/trpc'),
+        transformer: superjson,
+        headers: headers ?? (() => ({})),
+      }),
+    ],
+  });
+}
+
+function createWorkerLinkOptions() {
+  return {
+    url: resolveApiUrl(
+      process.env.TRPC_URL ?? 'http://localhost:3001',
+      '/trpc',
+    ),
+    transformer: superjson,
+    headers: () => buildWorkerHeaders(),
+    fetch: createWorkerFetchWithRetry(),
+  };
+}
+
+export function buildWorkerHeaders(
+  env: NodeJS.ProcessEnv = process.env,
+): Record<string, string> {
+  const headers: Record<string, string> = {};
+
+  if (env.AUTH_TOKEN) {
+    headers.Authorization = `Bearer ${env.AUTH_TOKEN}`;
+  }
+
+  const bypassValue = env.ROOMOTE_AUTH_BYPASS_VALUE?.trim();
+  if (bypassValue) {
+    const headerName =
+      env.ROOMOTE_AUTH_BYPASS_HEADER_NAME?.trim().toLowerCase() ||
+      DEFAULT_AUTH_BYPASS_HEADER_NAME;
+    headers[headerName] = bypassValue;
+  }
+
+  return headers;
+}
+
+/**
+ * Pre-configured client for worker processes that use AUTH_TOKEN env var.
+ */
+export const workerClient = createTRPCProxyClient<AppRouter>({
+  links: [httpBatchLink(createWorkerLinkOptions())],
+});
+
+/**
+ * Dedicated unbatched client for abort-sensitive worker mutations.
+ */
+export const workerHeartbeatClient = createTRPCProxyClient<AppRouter>({
+  links: [
+    // Heartbeats must abort their own transport even when other worker RPCs are
+    // still in flight, so this path cannot share the batched link.
+    httpLink(createWorkerLinkOptions()),
+  ],
+});

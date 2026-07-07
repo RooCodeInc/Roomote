@@ -1,0 +1,89 @@
+name: roomote
+
+services:
+  postgres:
+    container_name: roomote-postgres
+    image: postgres:17.5
+    # Publish datastore ports to loopback only so Postgres, Redis, and MinIO are
+    # never reachable from another host. The production Caddy overlay resets
+    # these to none; use an SSH tunnel or reverse proxy if remote access is
+    # genuinely needed.
+    ports:
+      - '127.0.0.1:15432:5432'
+    volumes:
+      - pg_data:/var/lib/postgresql/data
+      - ./.docker/scripts/postgres:/docker-entrypoint-initdb.d
+    environment:
+      - POSTGRES_USER=postgres
+      - POSTGRES_PASSWORD=password
+      - POSTGRES_DATABASES=roomote_test,roomote_development
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U postgres -d roomote_development']
+      interval: 5s
+      timeout: 30s
+      retries: 5
+      start_period: 30s
+
+  redis:
+    container_name: roomote-redis
+    image: redis:7-alpine
+    ports:
+      - '127.0.0.1:16379:6379'
+    volumes:
+      - redis_data:/data
+    command: redis-server --appendonly yes
+
+  minio:
+    container_name: roomote-minio
+    image: minio/minio:latest
+    ports:
+      - '127.0.0.1:19000:9000'
+      - '127.0.0.1:19001:9001'
+    volumes:
+      - minio_data:/data
+    environment:
+      MINIO_ROOT_USER: ${S3_ACCESS_KEY_ID:-roomote}
+      MINIO_ROOT_PASSWORD: ${S3_SECRET_ACCESS_KEY:-roomote-local-artifacts-password}
+    command: server /data --console-address ':9001'
+
+  minio-init:
+    image: minio/mc:latest
+    restart: 'no'
+    depends_on:
+      minio:
+        condition: service_started
+    environment:
+      MINIO_ROOT_USER: ${S3_ACCESS_KEY_ID:-roomote}
+      MINIO_ROOT_PASSWORD: ${S3_SECRET_ACCESS_KEY:-roomote-local-artifacts-password}
+      S3_BUCKET_ARTIFACTS: ${S3_BUCKET_ARTIFACTS:-roomote-artifacts}
+    entrypoint: ['/bin/sh', '-c']
+    command:
+      - |
+        until mc alias set roomote http://minio:9000 "$$MINIO_ROOT_USER" "$$MINIO_ROOT_PASSWORD"; do
+          sleep 1
+        done
+        mc mb --ignore-existing "roomote/$$S3_BUCKET_ARTIFACTS"
+
+  # Local dev edge mirroring the production Caddy routing: one origin serves
+  # the web app and proxies the reserved /_roomote-api/* prefix to the API.
+  # The dev CLI points the public tunnel at this port so hosted compute
+  # workers can reach the API through the public app URL.
+  caddy-dev:
+    container_name: roomote-caddy-dev
+    image: caddy:2.10-alpine
+    ports:
+      - '127.0.0.1:18080:18080'
+    volumes:
+      - ./.docker/caddy/Caddyfile:/etc/caddy/Caddyfile:ro
+    extra_hosts:
+      - 'host.docker.internal:host-gateway'
+
+volumes:
+  pg_data:
+  redis_data:
+  minio_data:
+
+networks:
+  default:
+    name: roomote_default
+    driver: bridge

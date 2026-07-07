@@ -1,0 +1,176 @@
+import {
+  resolveConfiguredComputeProviderResources,
+  resolveEffectiveModalBaseImageRef,
+  SANDBOX_DEFAULT_MEMORY_MIB,
+  SANDBOX_DEFAULT_VCPUS,
+} from '@roomote/types';
+
+import type {
+  ComputeProviderClient,
+  ComputeProviderFactoryOptions,
+  DaytonaConfig,
+  E2bConfig,
+  ModalConfig,
+} from './types';
+import { assertDefined } from './errors';
+import {
+  ModalClient,
+  DockerClient,
+  DaytonaClient,
+  E2bClient,
+} from './adapters';
+
+const MODAL_DEFAULT_MEMORY_LIMIT_MIB = SANDBOX_DEFAULT_MEMORY_MIB * 2;
+
+export { getComputeProviderCapabilities } from '@roomote/types';
+
+export function createComputeProviderClient(
+  options: ComputeProviderFactoryOptions,
+): ComputeProviderClient {
+  const envValue = (name: string): string | undefined =>
+    options.envFallback?.[name] ?? process.env[name];
+
+  switch (options.provider) {
+    case 'modal': {
+      const tokenId = options.config?.tokenId ?? envValue('MODAL_TOKEN_ID');
+
+      const tokenSecret =
+        options.config?.tokenSecret ?? envValue('MODAL_TOKEN_SECRET');
+
+      // The published worker image doubles as the Modal base image, so a
+      // missing ref falls back to the deployment's effective worker image
+      // (explicit DOCKER_WORKER_IMAGE, or derived from the baked
+      // RELEASE_VERSION on published app images), then the development-only
+      // public latest image.
+      const baseImageRef =
+        options.config?.baseImageRef ??
+        resolveEffectiveModalBaseImageRef({
+          MODAL_BASE_IMAGE_REF: envValue('MODAL_BASE_IMAGE_REF'),
+          DOCKER_WORKER_IMAGE: envValue('DOCKER_WORKER_IMAGE'),
+          RELEASE_VERSION: envValue('RELEASE_VERSION'),
+          ROOMOTE_WORKER_IMAGE_REPO: envValue('ROOMOTE_WORKER_IMAGE_REPO'),
+          APP_ENV: envValue('APP_ENV'),
+          NODE_ENV: envValue('NODE_ENV'),
+        }) ??
+        undefined;
+
+      const registryUsername =
+        options.config?.registryUsername ?? envValue('MODAL_REGISTRY_USERNAME');
+
+      const registryPassword =
+        options.config?.registryPassword ?? envValue('MODAL_REGISTRY_PASSWORD');
+
+      const modalEndpoint = envValue('MODAL_ENDPOINT');
+      const modalEnvironment = envValue('MODAL_ENVIRONMENT');
+      const modalAppName = envValue('MODAL_APP_NAME');
+      const modalEcrOidcRoleArn = envValue('MODAL_ECR_OIDC_ROLE_ARN');
+      const modalEcrRegion = envValue('MODAL_ECR_REGION');
+
+      assertDefined(tokenId, 'Missing MODAL_TOKEN_ID');
+      assertDefined(tokenSecret, 'Missing MODAL_TOKEN_SECRET');
+      assertDefined(baseImageRef, 'Missing MODAL_BASE_IMAGE_REF');
+
+      const configuredResources = resolveConfiguredComputeProviderResources({
+        provider: 'modal',
+        configuredCpuCores: options.config?.cpu,
+        configuredMemoryMiB: options.config?.memoryMiB,
+      });
+
+      const config: ModalConfig = {
+        ...(options.config ?? {}),
+        tokenId,
+        tokenSecret,
+        baseImageRef,
+        ...(options.config?.endpoint === undefined && modalEndpoint
+          ? { endpoint: modalEndpoint }
+          : {}),
+        ...(options.config?.environment === undefined && modalEnvironment
+          ? { environment: modalEnvironment }
+          : {}),
+        ...(options.config?.appName === undefined && modalAppName
+          ? { appName: modalAppName }
+          : {}),
+        ...(registryUsername ? { registryUsername } : {}),
+        ...(registryPassword ? { registryPassword } : {}),
+        ...(options.config?.ecrOidcRoleArn === undefined && modalEcrOidcRoleArn
+          ? { ecrOidcRoleArn: modalEcrOidcRoleArn }
+          : {}),
+        ...(options.config?.ecrRegion === undefined && modalEcrRegion
+          ? { ecrRegion: modalEcrRegion }
+          : {}),
+        ...(configuredResources.configuredCpuCores !== null
+          ? { cpu: configuredResources.configuredCpuCores }
+          : {}),
+        ...(options.config?.cpuLimit !== undefined
+          ? { cpuLimit: options.config.cpuLimit }
+          : { cpuLimit: SANDBOX_DEFAULT_VCPUS }),
+        ...(configuredResources.configuredMemoryMiB !== null
+          ? { memoryMiB: configuredResources.configuredMemoryMiB }
+          : {}),
+        ...(options.config?.memoryLimitMiB !== undefined
+          ? { memoryLimitMiB: options.config.memoryLimitMiB }
+          : { memoryLimitMiB: MODAL_DEFAULT_MEMORY_LIMIT_MIB }),
+      };
+
+      return new ModalClient(config);
+    }
+
+    case 'docker':
+      return new DockerClient();
+
+    case 'daytona': {
+      const apiKey = options.config?.apiKey ?? envValue('DAYTONA_API_KEY');
+
+      const snapshotName =
+        options.config?.snapshotName ?? envValue('DAYTONA_SNAPSHOT_NAME');
+
+      const daytonaApiUrl = envValue('DAYTONA_API_URL');
+      const daytonaTarget = envValue('DAYTONA_TARGET');
+
+      assertDefined(apiKey, 'Missing DAYTONA_API_KEY');
+      assertDefined(snapshotName, 'Missing DAYTONA_SNAPSHOT_NAME');
+
+      const config: DaytonaConfig = {
+        ...(options.config ?? {}),
+        apiKey,
+        snapshotName,
+        ...(options.config?.apiUrl === undefined && daytonaApiUrl
+          ? { apiUrl: daytonaApiUrl }
+          : {}),
+        ...(options.config?.target === undefined && daytonaTarget
+          ? { target: daytonaTarget }
+          : {}),
+      };
+
+      return new DaytonaClient(config);
+    }
+
+    case 'e2b': {
+      const apiKey = options.config?.apiKey ?? envValue('E2B_API_KEY');
+
+      const templateId =
+        options.config?.templateId ?? envValue('E2B_TEMPLATE_ID');
+
+      const e2bDomain = envValue('E2B_DOMAIN');
+
+      assertDefined(apiKey, 'Missing E2B_API_KEY');
+      assertDefined(templateId, 'Missing E2B_TEMPLATE_ID');
+
+      const config: E2bConfig = {
+        ...(options.config ?? {}),
+        apiKey,
+        templateId,
+        ...(options.config?.domain === undefined && e2bDomain
+          ? { domain: e2bDomain }
+          : {}),
+      };
+
+      return new E2bClient(config);
+    }
+
+    default: {
+      const _exhaustive: never = options;
+      throw new Error(`Unsupported provider: ${String(_exhaustive)}`);
+    }
+  }
+}

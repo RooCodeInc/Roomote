@@ -1,0 +1,145 @@
+---
+title: Users
+icon: users
+description: Manage who can sign in to a Roomote deployment, what role they have, and how password resets work.
+---
+
+Use **Settings > Users** to control who can access your Roomote deployment.
+
+Users are deployment-level. Roomote does not make each deployment manage
+separate organizations or workspaces inside the app. Instead, admins choose who
+can sign in, invite new people, assign roles, remove access, and create
+password reset links for email/password accounts.
+
+## Roles
+
+Roomote has two user roles:
+
+| Role   | What it can do                                                                                                                                     |
+| ------ | -------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Admin  | Configure the deployment, manage users, connect providers, edit environments, configure automations, and use Roomote.                              |
+| Member | Use Roomote without changing deployment-wide settings. Members can launch and review tasks, manage their own profile, and link their own accounts. |
+
+The first user in a deployment becomes the founding admin. After that, admins
+can invite people as either **Admin** or **Member**, and can change another
+user's role from the user list.
+
+Roomote protects the deployment from losing all admins:
+
+- you cannot change your own role
+- you cannot demote the last active admin
+- you cannot remove yourself
+- you cannot remove the last active admin
+
+If you need to step down as admin, promote another user first.
+
+## Who can sign in
+
+Roomote supports several sign-in paths. Which ones appear depends on how the
+deployment is configured.
+
+| Mechanism          | Who it is for                                                     | Notes                                                                                |
+| ------------------ | ----------------------------------------------------------------- | ------------------------------------------------------------------------------------ |
+| Invite links       | New users who should join the deployment directly                 | Admins create invite links from **Settings > Users**.                                |
+| Email and password | Users who join through an invite and want a local credential      | Existing email/password users can keep signing in with that credential.              |
+| Slack              | Deployments that use a Slack workspace as their identity boundary | Slack can admit users from the connected workspace when Slack sign-in is configured. |
+| Microsoft          | Deployments that use Microsoft Teams or Microsoft Entra accounts  | Microsoft sign-in can admit users from the configured Microsoft tenant.              |
+
+An invite link can be used with email/password or with any configured sign-in
+provider. This is useful when you want to invite someone who is outside your
+Slack workspace or Microsoft tenant, or when you want to grant a specific role
+at join time.
+
+Operators can also configure an email allowlist for a self-hosted deployment.
+When that allowlist is active, a user still needs to pass the normal sign-in
+rules and have an allowed email address.
+
+## License and seats
+
+A Roomote deployment is free for up to 10 users. Every registered user
+account in the deployment counts toward the limit, whichever sign-in path or
+surface they use. Removed users free their seat.
+
+To add more than 10 users, an admin enters a license key from the Roomote
+maintainers in **Settings > Users > License**. The License section shows the
+current seat usage, license status, and licensee. Keys are verified offline;
+the deployment never contacts a license server.
+
+When all seats are in use, existing users keep working normally — only new
+sign-ups are blocked until a seat is freed by removing a user or a license key
+with more seats is added.
+
+## Create invites
+
+Admins create invites from **Settings > Users**.
+
+Each invite has:
+
+- a label, such as the person or team it is for
+- a role, either **Admin** or **Member**
+- a maximum number of uses
+- a 14-day expiration
+
+When an invite is created, Roomote copies the link to your clipboard when the
+browser allows it. The full invite URL is only shown at creation time, so copy
+it before leaving the page.
+
+You can revoke an invite before it is used. Revoking an invite does not affect
+people who already joined with it.
+
+## Manage existing users
+
+The user list shows active users, their email address, join date, and current
+role.
+
+Admins can:
+
+- promote a member to admin
+- demote an admin to member, as long as another admin remains
+- remove a user from the deployment
+- create a password reset link for users with an email/password credential
+
+Removing a user signs them out immediately and removes their linked auth
+accounts. Their task history stays in Roomote so old work still has useful
+attribution. A removed person can join again later through a new invite or
+through an allowed organization sign-in path.
+
+## Password reset flow
+
+Roomote uses admin-created password reset links for email/password accounts.
+There is no public self-serve "forgot password" email flow.
+
+To reset a user's password:
+
+1. Open **Settings > Users**.
+2. Find the user.
+3. Click the reset password action.
+4. Create the reset link.
+5. Send the link to the user through your preferred secure channel.
+
+Reset links expire after one hour. When the user opens the link, they choose a
+new password on the Roomote reset page and then sign in again. Existing
+sessions are revoked after the password is reset.
+
+The reset action is only available for users who have an email/password
+credential. If a user signs in only through Slack, Microsoft, or another OAuth
+provider, reset their password in that provider instead.
+
+## Common issues
+
+- **A new teammate cannot create an account.** Send them an invite link, or
+  confirm they belong to the configured Slack workspace or Microsoft tenant.
+  If they see a message about the licensed user limit, the deployment is out
+  of seats — free one up or add a license key under **Settings > Users**.
+- **The invite link no longer works.** It may be expired, revoked, or used up.
+  Create a new invite from **Settings > Users**.
+- **The password reset action is disabled.** The user is OAuth-only. Reset their
+  password in Slack, Microsoft, or the identity provider they use.
+- **An admin cannot be demoted or removed.** Promote another active admin first.
+
+## Related setup
+
+- [Personal Settings](/personal-settings) covers profile details and linked
+  accounts for individual users.
+- [Communications Providers](/communications) explains how Slack and
+  Microsoft Teams can act as both chat surfaces and auth surfaces.

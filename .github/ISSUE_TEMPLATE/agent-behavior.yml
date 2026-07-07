@@ -1,0 +1,135 @@
+name: Roomote agent behavior issue
+description: Report a Roomote agent that routed, reasoned, acted, or responded incorrectly.
+title: "[Agent behavior]: "
+labels: ["agent-behavior", "needs-triage"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Use this when a Roomote agent did the wrong thing: routed incorrectly, ignored context, used the wrong tool, produced an unhelpful result, or handled a follow-up badly.
+
+        If the agent failed because the deployment is unhealthy, use the self-hosting issue instead.
+  - type: checkboxes
+    id: preflight
+    attributes:
+      label: Preflight
+      options:
+        - label: I searched existing issues and docs before opening this.
+          required: true
+        - label: I removed secrets, tokens, private keys, customer data, and private repository details from logs and screenshots.
+          required: true
+        - label: I am reporting observed Roomote behavior, not requesting a speculative rewrite.
+          required: true
+  - type: dropdown
+    id: agent-type
+    attributes:
+      label: Agent type
+      options:
+        - Generalist
+        - Code Reviewer
+        - PR Fixer
+        - Unknown
+    validations:
+      required: true
+  - type: dropdown
+    id: surface
+    attributes:
+      label: Interaction surface
+      options:
+        - Web dashboard
+        - Slack
+        - Teams
+        - Telegram
+        - Linear
+        - GitHub
+        - API
+        - Other
+    validations:
+      required: true
+  - type: dropdown
+    id: trigger
+    attributes:
+      label: Trigger type
+      options:
+        - Direct task
+        - Follow-up message
+        - Mention
+        - Pull request event
+        - Issue or comment event
+        - Linear event
+        - Scheduled or background behavior
+        - Other
+    validations:
+      required: true
+  - type: textarea
+    id: prompt
+    attributes:
+      label: Original instruction or event
+      description: Paste or summarize the instruction, mention, webhook event, or task that triggered the agent. Redact private data.
+      placeholder: What did the user or integration ask Roomote to do?
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected agent behavior
+      description: What should the agent have done?
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual agent behavior
+      description: What did the agent do instead?
+    validations:
+      required: true
+  - type: dropdown
+    id: suspected-area
+    attributes:
+      label: Suspected area
+      description: Pick your best guess.
+      options:
+        - Prompt or instruction following
+        - Agent or workspace routing
+        - Tool use
+        - Integration event handling
+        - Runtime or sandbox failure
+        - LLM output quality
+        - Unknown
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Roomote version
+      description: Commit SHA, release version, or Docker image tag.
+    validations:
+      required: true
+  - type: textarea
+    id: run-context
+    attributes:
+      label: Task, thread, run, or job context
+      description: Include IDs or links if shareable. Do not include private content.
+      placeholder: |
+        Task ID:
+        Thread ID:
+        Job ID:
+        Pull request or issue URL:
+        Approximate timestamp:
+    validations:
+      required: false
+  - type: textarea
+    id: diagnostics
+    attributes:
+      label: Diagnostics output
+      description: If available, paste output from the Roomote diagnostics page or command. Redact secrets and private data.
+    validations:
+      required: false
+  - type: textarea
+    id: logs
+    attributes:
+      label: Relevant logs or screenshots
+      description: Include the smallest useful excerpt around the agent run.
+      render: shell
+    validations:
+      required: false

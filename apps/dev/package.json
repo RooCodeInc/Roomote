@@ -1,0 +1,36 @@
+{
+  "name": "@roomote/dev",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
+    "lint": "eslint src --ext=ts --max-warnings=0",
+    "check-types": "tsc --noEmit",
+    "check-types:fast": "tsgo --noEmit",
+    "dev": "dotenvx run --quiet -f ../../.env.local -- tsx src/index.ts",
+    "doctor": "dotenvx run --quiet -f ../../.env.local -- tsx src/doctor.ts",
+    "bootstrap:github-installation": "dotenvx run --quiet -f ../../.env.local -- tsx src/bootstrap-github-installation.ts",
+    "build-worker-release": "dotenvx run --quiet -f ../../.env.local -- tsx src/build-worker-release.ts",
+    "test": "vitest",
+    "watch-worker-release": "dotenvx run --quiet -f ../../.env.local -- tsx src/worker-release-watcher.ts",
+    "clean": "rimraf .turbo"
+  },
+  "dependencies": {
+    "@roomote/db": "workspace:^",
+    "@roomote/env": "workspace:^",
+    "@roomote/github": "workspace:^",
+    "@roomote/types": "workspace:^",
+    "commander": "^14.0.2",
+    "dockerode": "^5.0.0",
+    "execa": "9.6.1",
+    "ora": "^8.2.0"
+  },
+  "devDependencies": {
+    "@roomote/config-eslint": "workspace:^",
+    "@roomote/config-typescript": "workspace:^",
+    "@types/dockerode": "^4.0.1",
+    "@types/node": "^24.10.13",
+    "vitest": "^4.1.1"
+  }
+}

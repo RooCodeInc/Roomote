@@ -1,0 +1,36 @@
+{
+  "name": "@roomote/slack",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts",
+    "./client": "./src/client.ts",
+    "./slack-notifier": "./src/slack-notifier.ts"
+  },
+  "scripts": {
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
+    "lint": "eslint src --ext=ts --max-warnings=0",
+    "check-types": "tsc --noEmit",
+    "check-types:fast": "tsgo --noEmit",
+    "mock:server": "dotenvx run -f ../../.env.local -- tsx scripts/run-mock-slack.ts",
+    "test": "dotenvx run -f ../../.env.test -- vitest",
+    "clean": "rimraf .turbo"
+  },
+  "dependencies": {
+    "@roomote/cloud-agents": "workspace:^",
+    "@roomote/communication": "workspace:^",
+    "@roomote/db": "workspace:^",
+    "@roomote/env": "workspace:^",
+    "@roomote/redis": "workspace:^",
+    "@roomote/types": "workspace:^",
+    "@slack/web-api": "^7.15.2",
+    "zod": "^3.25.76"
+  },
+  "devDependencies": {
+    "@roomote/config-eslint": "workspace:^",
+    "@roomote/config-typescript": "workspace:^",
+    "@types/node": "^24.10.13",
+    "vitest": "^4.1.1"
+  }
+}

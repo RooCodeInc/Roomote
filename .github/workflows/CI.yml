@@ -1,0 +1,199 @@
+name: CI
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main, develop]
+  workflow_dispatch:
+
+env:
+  NODE_VERSION: 24.13.1
+  PNPM_VERSION: 10.29.3
+
+jobs:
+  changes:
+    name: Detect changed paths
+    runs-on: blacksmith-4vcpu-ubuntu-2404
+    outputs:
+      docs_only: ${{ steps.changed-paths.outputs.docs_only }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Classify changed paths
+        id: changed-paths
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          if [ "$GITHUB_EVENT_NAME" = "workflow_dispatch" ]; then
+            echo "docs_only=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          if [ "$GITHUB_EVENT_NAME" = "pull_request" ]; then
+            base="${{ github.event.pull_request.base.sha }}"
+            head="${{ github.event.pull_request.head.sha }}"
+            changed_files="$(git diff --name-only "$base...$head")"
+          else
+            before="${{ github.event.before }}"
+            if [ "$before" = "0000000000000000000000000000000000000000" ]; then
+              changed_files="$(git diff-tree --no-commit-id --name-only -r "$GITHUB_SHA")"
+            elif git cat-file -e "$before" 2>/dev/null; then
+              changed_files="$(git diff --name-only "$before" "$GITHUB_SHA")"
+            else
+              # Force-pushed over the previous tip; the base is gone, so run everything.
+              echo "docs_only=false" >> "$GITHUB_OUTPUT"
+              exit 0
+            fi
+          fi
+
+          if [ -z "$changed_files" ]; then
+            echo "docs_only=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          docs_only=true
+          while IFS= read -r path; do
+            case "$path" in
+              apps/docs/*|.agent-guidance/*|*.md|*.mdx)
+                ;;
+              *)
+                docs_only=false
+                break
+                ;;
+            esac
+          done <<< "$changed_files"
+
+          echo "docs_only=$docs_only" >> "$GITHUB_OUTPUT"
+
+  lint:
+    name: Lint
+    needs: changes
+    if: ${{ needs.changes.outputs.docs_only != 'true' }}
+    runs-on: blacksmith-4vcpu-ubuntu-2404
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      - name: Setup environment
+        uses: ./.github/actions/setup-environment
+        with:
+          enable-turbo-cache: 'true'
+          frozen-lockfile: 'true'
+          node-version: ${{ env.NODE_VERSION }}
+          pnpm-version: ${{ env.PNPM_VERSION }}
+          turbo-cache-scope: lint
+      - name: Run lint workflow
+        run: pnpm lint
+
+  knip:
+    name: Knip
+    needs: changes
+    if: ${{ needs.changes.outputs.docs_only != 'true' }}
+    runs-on: blacksmith-4vcpu-ubuntu-2404
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      - name: Setup environment
+        uses: ./.github/actions/setup-environment
+        with:
+          frozen-lockfile: 'true'
+          node-version: ${{ env.NODE_VERSION }}
+          pnpm-version: ${{ env.PNPM_VERSION }}
+      - name: Check unused dependencies and files
+        run: pnpm knip
+
+  check-types:
+    name: Type Check
+    needs: changes
+    if: ${{ needs.changes.outputs.docs_only != 'true' }}
+    runs-on: blacksmith-4vcpu-ubuntu-2404
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      - name: Setup environment
+        uses: ./.github/actions/setup-environment
+        with:
+          enable-turbo-cache: 'true'
+          frozen-lockfile: 'true'
+          node-version: ${{ env.NODE_VERSION }}
+          pnpm-version: ${{ env.PNPM_VERSION }}
+          turbo-cache-scope: check-types
+      - name: Run type checker
+        run: pnpm check-types
+
+  test:
+    name: Test
+    needs: changes
+    if: ${{ needs.changes.outputs.docs_only != 'true' }}
+    runs-on: blacksmith-4vcpu-ubuntu-2404
+    services:
+      postgres:
+        image: postgres:17.5
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: password
+          POSTGRES_DB: test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d test"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+      redis:
+        image: redis:7
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      - name: Setup environment
+        uses: ./.github/actions/setup-environment
+        with:
+          enable-turbo-cache: 'true'
+          frozen-lockfile: 'true'
+          node-version: ${{ env.NODE_VERSION }}
+          pnpm-version: ${{ env.PNPM_VERSION }}
+          turbo-cache-scope: test
+      - name: Setup database schema
+        run: pnpm --filter @roomote/db db:push:test --force
+        env:
+          DATABASE_URL: postgres://postgres:password@localhost:5432/test
+      - name: Run unit tests
+        run: pnpm test:ci
+        env:
+          DATABASE_URL: postgres://postgres:password@localhost:5432/test
+          REDIS_URL: redis://localhost:6379
+
+  docker-build:
+    name: Docker Build (${{ matrix.app }})
+    needs: changes
+    if: ${{ needs.changes.outputs.docs_only != 'true' }}
+    runs-on: blacksmith-4vcpu-ubuntu-2404
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - app: app
+            dockerfile: .docker/app/Dockerfile
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+      - name: Build ${{ matrix.app }} Dockerfile
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ${{ matrix.dockerfile }}
+          push: false
+          build-args: APP_ENV=development
+          cache-from: type=gha,scope=${{ matrix.app }}

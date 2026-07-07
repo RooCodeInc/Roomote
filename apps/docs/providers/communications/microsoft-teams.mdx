@@ -1,0 +1,123 @@
+---
+title: Microsoft Teams
+icon: 'https://api.iconify.design/simple-icons:microsoftteams.svg?color=currentColor'
+description: Configure Microsoft sign-in and Microsoft Teams bot messaging for Roomote.
+---
+
+Microsoft can be used for Roomote sign-in through Microsoft Entra and for
+Teams messaging through a Microsoft Bot Framework bot. Configure sign-in when
+users should authenticate with Microsoft. Configure the Teams bot when Roomote
+should receive Teams messages, mentions, and replies.
+
+Use `<public-url>` below for your stable public Roomote URL.
+
+## Microsoft sign-in
+
+Create a Microsoft Entra app registration:
+
+1. open the [Microsoft Entra admin center](https://entra.microsoft.com/#view/Microsoft_AAD_RegisteredApps/ApplicationsListBlade)
+2. go to **Applications > App registrations > New registration**
+3. choose the tenant or account type this Roomote deployment should accept
+4. under **Authentication**, add this **Web** redirect URI:
+
+```text
+<public-url>/api/auth/oauth2/callback/microsoft-entra-id
+```
+
+5. under **Certificates & secrets**, create a client secret
+6. save the client ID, secret value, and tenant ID in Roomote setup or env vars
+
+```sh
+ROOMOTE_AUTH_MICROSOFT_CLIENT_ID=...
+ROOMOTE_AUTH_MICROSOFT_CLIENT_SECRET=...
+ROOMOTE_AUTH_MICROSOFT_TENANT_ID=...
+```
+
+Roomote enables Microsoft sign-in only when all three values are present.
+
+After Microsoft sign-in, **Settings > Linked Accounts** shows the Microsoft
+Teams account. Users who signed in with another provider can link Microsoft
+from that settings page.
+
+## Teams bot registration
+
+Create an [Azure Bot resource](https://learn.microsoft.com/en-us/azure/bot-service/abs-quickstart?view=azure-bot-service-4.0)
+in the Azure portal. Use one bot registration per Roomote deployment.
+
+Set the bot messaging endpoint to:
+
+```text
+<public-url>/api/webhooks/teams
+```
+
+Enable the Microsoft Teams channel in the bot resource, then save the bot
+values in Roomote setup or env vars:
+
+```sh
+TEAMS_BOT_APP_ID=<microsoft-app-id>
+TEAMS_BOT_APP_PASSWORD=<client-secret>
+```
+
+For a single-tenant bot, also set:
+
+```sh
+TEAMS_BOT_TENANT_ID=<tenant-id>
+```
+
+Advanced token overrides are available when your tenant or cloud environment
+requires custom Bot Framework token settings:
+
+```sh
+TEAMS_BOT_TOKEN_ENDPOINT=<token-endpoint-url>
+TEAMS_BOT_OAUTH_SCOPE=<oauth-scope>
+```
+
+Restart Roomote after changing Teams env vars.
+
+## Teams app package
+
+Create a Teams app package in the
+[Microsoft Teams Developer Portal](https://dev.teams.microsoft.com/apps). Add a
+bot capability that uses the same Microsoft App ID as `TEAMS_BOT_APP_ID`.
+
+Enable the scopes you want to support:
+
+- **Personal** - direct messages to the bot start tasks
+- **Team** - channel messages that mention the bot start tasks
+- **Group chat** - group-chat messages that mention the bot start tasks
+
+If you edit the manifest directly, the bot entry should include:
+
+```json
+{
+  "bots": [
+    {
+      "botId": "<TEAMS_BOT_APP_ID>",
+      "scopes": ["personal", "team", "groupchat"],
+      "supportsFiles": false,
+      "isNotificationOnly": false
+    }
+  ],
+  "validDomains": ["<public-host-without-scheme>"]
+}
+```
+
+Upload and install the app in the Teams tenant you are using. Install it
+personally to test DMs, and add it to a team or group chat to test mentions.
+
+## Verify setup
+
+1. run Roomote with the public URL you entered in Azure
+2. send a direct message to the bot, or mention the bot in a channel or group chat
+3. confirm Roomote starts a task and posts a Teams reply with the task link
+4. reply in the same Teams conversation to send a follow-up to the task
+
+When an inbound Teams activity includes a Microsoft Entra AAD object ID,
+Roomote can map it to an existing Microsoft sign-in account. If no mapping
+exists yet, Teams task launches use the deployment's fallback owner.
+
+## Local URL changes
+
+When the public URL changes, update the Azure Bot messaging endpoint, update
+the Teams app package if its valid domain changed, reinstall the app if the
+manifest changed, and restart Roomote with the matching URL.

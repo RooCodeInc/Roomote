@@ -1,0 +1,21 @@
+export const SETTINGS_PATHS = {
+  root: '/settings',
+  personal: '/settings/personal',
+  users: '/settings/users',
+  environments: '/settings/environments',
+  sourceControl: '/settings/source-control',
+  previews: '/settings/previews',
+  automations: '/automations',
+  agentGuidance: '/settings/agent-guidance',
+  integrations: '/settings/integrations',
+  comms: '/settings/comms',
+  compute: '/settings/compute',
+  models: '/settings/models',
+  skills: '/settings/skills',
+  vibes: '/settings/vibes',
+  experimental: '/settings/experimental',
+  misc: '/settings/misc',
+  newEnvironment: '/settings/environments/new',
+  editEnvironment: (environmentId: string) =>
+    `/settings/environments/${encodeURIComponent(environmentId)}/edit`,
+} as const;

@@ -1,0 +1,92 @@
+{
+  "name": "@roomote/cloud-agents",
+  "private": true,
+  "type": "module",
+  "main": "./src/index.ts",
+  "types": "./src/index.ts",
+  "exports": {
+    ".": {
+      "types": "./src/index.ts",
+      "import": "./src/index.ts",
+      "require": "./src/index.ts"
+    },
+    "./server": {
+      "types": "./src/server/index.ts",
+      "import": "./src/server/index.ts",
+      "require": "./src/server/index.ts"
+    },
+    "./server/non-task-provider-usage": {
+      "types": "./src/server/non-task-provider-usage.ts",
+      "import": "./src/server/non-task-provider-usage.ts",
+      "require": "./src/server/non-task-provider-usage.ts"
+    },
+    "./style-guidance-constants": {
+      "types": "./src/style-guidance-constants.ts",
+      "import": "./src/style-guidance-constants.ts",
+      "require": "./src/style-guidance-constants.ts"
+    },
+    "./router-mcp-policy": {
+      "types": "./src/router-mcp-policy.ts",
+      "import": "./src/router-mcp-policy.ts",
+      "require": "./src/router-mcp-policy.ts"
+    }
+  },
+  "typesVersions": {
+    "*": {
+      "server": [
+        "./src/server/index.ts"
+      ],
+      "server/non-task-provider-usage": [
+        "./src/server/non-task-provider-usage.ts"
+      ],
+      "style-guidance-constants": [
+        "./src/style-guidance-constants.ts"
+      ],
+      "router-mcp-policy": [
+        "./src/router-mcp-policy.ts"
+      ]
+    }
+  },
+  "scripts": {
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
+    "lint": "eslint src --ext=ts --max-warnings=0",
+    "check-types": "tsc --noEmit",
+    "check-types:fast": "tsgo --noEmit",
+    "test": "dotenvx run -f ../../.env.test -- vitest",
+    "test:router": "dotenvx run -f ../../.env.local -- tsx scripts/test-llm-router.ts",
+    "clean": "rimraf .turbo",
+    "eval:authorship": "dotenvx run -f ../../.env.local -- npx promptfoo@0.115.0 eval -c evals/authorship/promptfooconfig.ts --no-cache --table-cell-max-length 200",
+    "eval:router": "dotenvx run -f ../../.env.local -- npx promptfoo@0.115.0 eval -c evals/router/promptfooconfig.ts --no-cache --table-cell-max-length 200",
+    "eval:router:followup": "dotenvx run -f ../../.env.local -- npx promptfoo@0.115.0 eval -c evals/router/promptfooconfig.followup.ts --no-cache --table-cell-max-length 200",
+    "eval:router:view": "dotenvx run -f ../../.env.local -- npx promptfoo@0.115.0 view",
+    "eval:router:share": "dotenvx run -f ../../.env.local -- npx promptfoo@0.115.0 share -c evals/router/promptfooconfig.ts"
+  },
+  "dependencies": {
+    "@ai-sdk/mcp": "^1.0.25",
+    "@opencode-ai/sdk": "1.17.8",
+    "@roomote/auth": "workspace:^",
+    "@roomote/db": "workspace:^",
+    "@roomote/env": "workspace:^",
+    "@roomote/feature-flags": "workspace:^",
+    "@roomote/github": "workspace:^",
+    "@roomote/redis": "workspace:^",
+    "@roomote/telemetry": "workspace:^",
+    "@roomote/types": "workspace:^",
+    "ai": "^6.0.116",
+    "jszip": "^3.10.1",
+    "mammoth": "^1.11.0",
+    "pdfjs-dist": "^5.4.394",
+    "xlsx": "https://cdn.sheetjs.com/xlsx-0.20.2/xlsx-0.20.2.tgz",
+    "zod": "^3.25.76",
+    "zod-to-json-schema": "3.25.1"
+  },
+  "devDependencies": {
+    "@roomote/config-eslint": "workspace:^",
+    "@roomote/config-typescript": "workspace:^",
+    "@types/ioredis-mock": "^8.2.6",
+    "@types/node": "^24.10.13",
+    "ioredis-mock": "^8.13.1",
+    "vitest": "^4.1.1"
+  }
+}

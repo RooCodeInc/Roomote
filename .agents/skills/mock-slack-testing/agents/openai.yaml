@@ -1,0 +1,4 @@
+interface:
+  display_name: "Mock Slack Testing"
+  short_description: "Exercise Roomote Slack flows via the mock harness"
+  default_prompt: "Use $mock-slack-testing to exercise a Roomote Slack flow through the existing mock Slack harness instead of a real Slack workspace."

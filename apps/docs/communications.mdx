@@ -1,0 +1,77 @@
+---
+title: Communications
+icon: messages-square
+description: Connect Slack, Microsoft Teams, or Telegram so Roomote can start, continue, and summarize work from chat.
+---
+
+import { IntegrationName } from '/snippets/integration-name.jsx';
+
+Communications providers are the chat and collaboration surfaces where people
+already coordinate work.
+
+Roomote can run from the web dashboard alone, but a communications provider
+turns it into something you can reach from wherever work is happening. You can
+start tasks from chat, continue an existing task thread, receive updates while
+the agent works, and get proactive summaries when background work needs
+attention.
+
+## Supported providers
+
+| Provider | Best for | Setup |
+| -------- | -------- | ----- |
+| <IntegrationName href="/providers/communications/slack" icon="slack" name="Slack" /> | Teams that coordinate work in Slack channels and threads | Slack can also be used for Roomote sign-in. |
+| <IntegrationName href="/providers/communications/microsoft-teams" icon="microsoftteams" name="Microsoft Teams" /> | Teams that use Microsoft 365, Teams channels, and Microsoft Entra accounts | Microsoft can also be used for sign-in and account linking. |
+| <IntegrationName href="/providers/communications/telegram" icon="telegram" name="Telegram" /> | Lightweight personal, group, or forum-topic chat access | Telegram is a messaging provider, not a sign-in provider. |
+
+Configure communications providers from **Settings > Communications**.
+
+## Setup checklist
+
+Before connecting a communications provider, make sure your deployment has:
+
+1. a stable public HTTPS URL that the provider can call back into
+2. provider app or bot credentials
+3. at least one Roomote user who can sign in
+4. an environment that tasks can run against
+
+After connecting the provider, run a small task from chat and confirm that:
+
+- Roomote acknowledges the request in the same conversation
+- the task appears in the dashboard
+- replies in the thread continue the same task
+- final summaries and links are posted back to chat
+
+Use the same stable public URL for every provider app setting. If you change
+that URL, update the provider callback or webhook settings and restart Roomote
+with the matching deployment URL.
+
+## Authentication and linking
+
+Slack and Microsoft Teams can do two jobs:
+
+- they can be task surfaces where Roomote starts, resumes, and reports on work
+- they can be authentication surfaces so users sign in or link the same
+  workplace identity they use in chat
+
+Task ownership follows the person who asked for the work. When identities are
+linked, Roomote can attribute a task to the right user, respect access rules,
+and continue the right thread when someone replies later.
+
+If someone asks Roomote to do work from chat before their account is linked,
+Roomote prompts them to link the account and then continues once the link is
+complete.
+
+## Related setup
+
+Communications providers are only one part of a working Roomote deployment.
+Most deployments also need:
+
+- [Compute Providers](/compute), so tasks have sandboxes to run in
+- [Environments](/environments), so tasks know which repositories and setup
+  commands to use
+- [Source Control](/source-control), so tasks can clone repositories and open
+  reviewable changes
+- [Integrations](/integrations), so tasks can reach issue trackers,
+  monitoring, docs, and MCP-backed tools
+- [Automations](/automations), if you want proactive summaries and scheduled
+  work to post back into chat

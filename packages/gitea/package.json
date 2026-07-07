@@ -1,0 +1,26 @@
+{
+  "name": "@roomote/gitea",
+  "private": true,
+  "type": "module",
+  "exports": "./src/index.ts",
+  "scripts": {
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
+    "lint": "eslint src --ext=ts --max-warnings=0",
+    "check-types": "tsc --noEmit",
+    "check-types:fast": "tsgo --noEmit",
+    "test": "dotenvx run -f ../../.env.test -- vitest",
+    "clean": "rimraf .turbo"
+  },
+  "dependencies": {
+    "@roomote/db": "workspace:^",
+    "@roomote/types": "workspace:^",
+    "zod": "^3.25.76"
+  },
+  "devDependencies": {
+    "@roomote/config-eslint": "workspace:^",
+    "@roomote/config-typescript": "workspace:^",
+    "@types/node": "^24.10.13",
+    "vitest": "^4.1.1"
+  }
+}

@@ -1,0 +1,1187 @@
+// pnpm --filter @roomote/types test src/__tests__/cloud-jobs.test.ts
+
+import {
+  type CloudTaskPayload,
+  DEFAULT_CODING_HARNESS,
+  DEFAULT_LAUNCH_CODING_HARNESS,
+  getCommunicationChannelFromTaskPayload,
+  getCommunicationProviderFromTaskPayload,
+  getCommunicationServiceUrlFromTaskPayload,
+  getCommunicationThreadIdFromTaskPayload,
+  getSlackChannelFromTaskPayload,
+  getSlackThreadTsFromTaskPayload,
+  getTaskToolActionIdFromInvocation,
+  getTaskToolInvocation,
+  isHiddenCloudTaskType,
+  CloudTaskStatus,
+  CloudTaskType,
+  EXPIRED_SNAPSHOT_RESUME_ERROR,
+  bootingCloudTaskStatuses,
+  cloudTaskSchema,
+  coerceLaunchCodingHarness,
+  isActivelyRunningCloudTask,
+  isCloudTaskExecutingTurn,
+  isPrReviewJob,
+  isResumableCloudTaskType,
+  isLaunchCodingHarness,
+  isSnapshotResumable,
+  resolveCloudTaskWorkspace,
+  SUGGESTION_PRIORITY_EMOJIS,
+  SUGGESTION_PRIORITY_LABELS,
+  populateSnapshotResumeSlackMetadata,
+  populateSnapshotResumeCommunicationMetadata,
+  suggestionPrioritySet,
+  taskSuggestionStatusSet,
+  shouldUseAppTokenOnly,
+} from '../cloud-jobs';
+
+describe('isPrReviewJob', () => {
+  it('returns true for GithubPrReview type', () => {
+    const payload: CloudTaskPayload<CloudTaskType.GithubPrReview> = {
+      repo: 'owner/repo',
+      prNumber: 123,
+      prTitle: 'Test PR',
+      prUrl: 'https://github.com/owner/repo/pull/123',
+      headSha: 'abc123',
+    };
+
+    expect(isPrReviewJob(CloudTaskType.GithubPrReview, payload)).toBe(true);
+  });
+
+  it('returns true for GithubPrReviewSync type', () => {
+    const payload: CloudTaskPayload<CloudTaskType.GithubPrReviewSync> = {
+      repo: 'owner/repo',
+      prNumber: 123,
+      prTitle: 'Test PR',
+      prUrl: 'https://github.com/owner/repo/pull/123',
+      headSha: 'abc123',
+    };
+
+    expect(isPrReviewJob(CloudTaskType.GithubPrReviewSync, payload)).toBe(true);
+  });
+
+  it('returns false for non-PR review types', () => {
+    const payload: CloudTaskPayload<CloudTaskType.StandardTask> = {
+      repo: 'owner/repo',
+      description: 'Test task',
+    };
+
+    expect(isPrReviewJob(CloudTaskType.GithubIssueFix, payload)).toBe(false);
+    expect(isPrReviewJob(CloudTaskType.SlackAppMention, payload)).toBe(false);
+  });
+});
+
+describe('shouldUseAppTokenOnly', () => {
+  it('returns true for GithubPrReview', () => {
+    expect(shouldUseAppTokenOnly(CloudTaskType.GithubPrReview)).toBe(true);
+  });
+
+  it('returns true for GithubPrReviewSync', () => {
+    expect(shouldUseAppTokenOnly(CloudTaskType.GithubPrReviewSync)).toBe(true);
+  });
+
+  it('returns true for GithubPrReviewFollowUp (review follow-up)', () => {
+    expect(shouldUseAppTokenOnly(CloudTaskType.GithubPrReviewFollowUp)).toBe(
+      true,
+    );
+  });
+
+  it('returns false for StandardTask', () => {
+    expect(shouldUseAppTokenOnly(CloudTaskType.StandardTask)).toBe(false);
+  });
+
+  it('returns false for GithubIssueFix', () => {
+    expect(shouldUseAppTokenOnly(CloudTaskType.GithubIssueFix)).toBe(false);
+  });
+
+  it('returns false for LinearAgentSession', () => {
+    expect(shouldUseAppTokenOnly(CloudTaskType.LinearAgentSession)).toBe(false);
+  });
+
+  it('returns false for SlackAppMention', () => {
+    expect(shouldUseAppTokenOnly(CloudTaskType.SlackAppMention)).toBe(false);
+  });
+});
+
+describe('isResumableCloudTaskType', () => {
+  it('returns true for StandardTask jobs', () => {
+    expect(isResumableCloudTaskType(CloudTaskType.StandardTask)).toBe(true);
+  });
+
+  it('returns true for Suggested Tasks jobs', () => {
+    expect(isResumableCloudTaskType(CloudTaskType.SuggestedTasks)).toBe(true);
+  });
+
+  it('returns true for GithubIssueCommentRespond', () => {
+    expect(
+      isResumableCloudTaskType(CloudTaskType.GithubIssueCommentRespond),
+    ).toBe(true);
+  });
+
+  it('returns false for GithubPrReview', () => {
+    expect(isResumableCloudTaskType(CloudTaskType.GithubPrReview)).toBe(false);
+  });
+});
+
+describe('isHiddenCloudTaskType', () => {
+  it('returns true for hidden internal task types', () => {
+    expect(isHiddenCloudTaskType(CloudTaskType.SuggestedTasks)).toBe(true);
+    expect(isHiddenCloudTaskType(CloudTaskType.McpRecommendations)).toBe(true);
+    expect(isHiddenCloudTaskType(CloudTaskType.SnapshotEnvironment)).toBe(true);
+  });
+
+  it('returns false for user-visible task types', () => {
+    expect(isHiddenCloudTaskType(CloudTaskType.StandardTask)).toBe(false);
+    expect(isHiddenCloudTaskType(CloudTaskType.GithubPrReview)).toBe(false);
+  });
+});
+
+describe('coding harness defaults', () => {
+  it('uses opencode as the default launch harness', () => {
+    expect(DEFAULT_LAUNCH_CODING_HARNESS).toBe('opencode-server');
+  });
+
+  it('uses opencode as the default coding harness', () => {
+    expect(DEFAULT_CODING_HARNESS).toBe('opencode-server');
+  });
+
+  it('allows only opencode-server for new launch requests', () => {
+    expect(isLaunchCodingHarness('opencode-server')).toBe(true);
+    expect(isLaunchCodingHarness('custom-harness')).toBe(false);
+  });
+
+  it('coerces missing or invalid launch harness values to opencode', () => {
+    expect(coerceLaunchCodingHarness('opencode-server')).toBe(
+      'opencode-server',
+    );
+    expect(coerceLaunchCodingHarness('custom-harness')).toBe('opencode-server');
+    expect(coerceLaunchCodingHarness(undefined)).toBe('opencode-server');
+  });
+});
+
+describe('snapshot resume helpers', () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-05-20T00:00:00.000Z'));
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it('treats snapshots inside the ttl as resumable', () => {
+    expect(isSnapshotResumable(new Date('2026-05-14T00:00:00.000Z'))).toBe(
+      true,
+    );
+  });
+
+  it('treats expired or missing snapshots as not resumable', () => {
+    expect(isSnapshotResumable(new Date('2026-05-12T23:59:59.000Z'))).toBe(
+      false,
+    );
+    expect(isSnapshotResumable(null)).toBe(false);
+  });
+
+  it('exports a stable expired snapshot error message', () => {
+    expect(EXPIRED_SNAPSHOT_RESUME_ERROR).toBe(
+      'This task snapshot has expired and can no longer be resumed.',
+    );
+  });
+});
+
+describe('suggestion priority display constants', () => {
+  it('exports the priority labels, emojis, and validation set', () => {
+    expect(suggestionPrioritySet.has('P0')).toBe(true);
+    expect(suggestionPrioritySet.has('P1')).toBe(true);
+    expect(suggestionPrioritySet.has('P2')).toBe(true);
+    expect(suggestionPrioritySet.has('P3')).toBe(true);
+    expect(suggestionPrioritySet.has('unknown')).toBe(false);
+    expect(SUGGESTION_PRIORITY_LABELS.P0).toBe('P0');
+    expect(SUGGESTION_PRIORITY_EMOJIS.P3).toBe('🟢');
+  });
+});
+
+describe('task suggestion status constants', () => {
+  it('exports the lifecycle validation set', () => {
+    expect(taskSuggestionStatusSet.has('open')).toBe(true);
+    expect(taskSuggestionStatusSet.has('started')).toBe(true);
+    expect(taskSuggestionStatusSet.has('dismissed')).toBe(true);
+    expect(taskSuggestionStatusSet.has('unknown')).toBe(false);
+  });
+});
+
+describe('Task Tool invocation helpers', () => {
+  it('uses the packaged-skill delimiter for task tool invocations', () => {
+    expect(getTaskToolInvocation('review-code', 'opencode-server')).toBe(
+      '$review-code',
+    );
+  });
+
+  it('defaults to the OpenCode delimiter when no harness is provided', () => {
+    expect(getTaskToolInvocation('review-code')).toBe('$review-code');
+  });
+
+  it('parses task tool action IDs from either supported invocation delimiter', () => {
+    expect(getTaskToolActionIdFromInvocation('$address-pr-feedback')).toBe(
+      'address-pr-feedback',
+    );
+    expect(getTaskToolActionIdFromInvocation('/address-pr-feedback')).toBe(
+      'address-pr-feedback',
+    );
+    expect(getTaskToolActionIdFromInvocation('$capture-visual-proof')).toBe(
+      'capture-visual-proof',
+    );
+    expect(getTaskToolActionIdFromInvocation('/capture-visual-proof')).toBe(
+      'capture-visual-proof',
+    );
+  });
+
+  it('ignores non-task-tool text when parsing invocations', () => {
+    expect(getTaskToolActionIdFromInvocation('address-pr-feedback')).toBe(
+      undefined,
+    );
+    expect(getTaskToolActionIdFromInvocation('/not-a-task-tool')).toBe(
+      undefined,
+    );
+  });
+});
+
+describe('cloudTaskSchema', () => {
+  it('preserves sourceControlProvider on StandardTask payloads', () => {
+    const parsed = cloudTaskSchema.parse({
+      userId: 'user-1',
+      type: CloudTaskType.StandardTask,
+      payload: {
+        repo: 'group/repo',
+        sourceControlProvider: 'gitlab',
+        description: 'Investigate a GitLab-backed repository',
+      },
+    });
+
+    expect(parsed.type).toBe(CloudTaskType.StandardTask);
+
+    if (parsed.type !== CloudTaskType.StandardTask) {
+      throw new Error('Expected StandardTask payload');
+    }
+
+    expect(parsed.payload.sourceControlProvider).toBe('gitlab');
+  });
+
+  it('allows GitLab attribution override source and target branch metadata on PR review payloads', () => {
+    const parsed = cloudTaskSchema.parse({
+      type: CloudTaskType.GithubPrReview,
+      userId: 'user-1',
+      attributionOverride: {
+        kind: 'automatic',
+        sourceKind: 'gitlab',
+      },
+      payload: {
+        repo: 'acme/backend',
+        sourceControlProvider: 'gitlab',
+        prNumber: 42,
+        prTitle: 'Update backend',
+        prUrl: 'https://gitlab.com/acme/backend/-/merge_requests/42',
+        headSha: 'abc123',
+        branchName: 'feature/test',
+        targetBranch: 'main',
+      },
+    });
+
+    expect(parsed.attributionOverride?.sourceKind).toBe('gitlab');
+
+    if (parsed.type !== CloudTaskType.GithubPrReview) {
+      throw new Error('Expected GithubPrReview task');
+    }
+
+    expect(parsed.payload.targetBranch).toBe('main');
+  });
+
+  it('allows Gitea attribution override source and target branch metadata on PR review payloads', () => {
+    const parsed = cloudTaskSchema.parse({
+      type: CloudTaskType.GithubPrReview,
+      userId: 'user-1',
+      attributionOverride: {
+        kind: 'automatic',
+        sourceKind: 'gitea',
+      },
+      payload: {
+        repo: 'acme/backend',
+        sourceControlProvider: 'gitea',
+        prNumber: 42,
+        prTitle: 'Update backend',
+        prUrl: 'https://git.example.com/acme/backend/pulls/42',
+        headSha: 'abc123',
+        branchName: 'feature/test',
+        targetBranch: 'main',
+      },
+    });
+
+    expect(parsed.attributionOverride?.sourceKind).toBe('gitea');
+
+    if (parsed.type !== CloudTaskType.GithubPrReview) {
+      throw new Error('Expected GithubPrReview task');
+    }
+
+    expect(parsed.payload.sourceControlProvider).toBe('gitea');
+    expect(parsed.payload.targetBranch).toBe('main');
+  });
+
+  it('allows Azure DevOps attribution override source and target branch metadata on PR review payloads', () => {
+    const parsed = cloudTaskSchema.parse({
+      type: CloudTaskType.GithubPrReview,
+      userId: 'user-1',
+      attributionOverride: {
+        kind: 'automatic',
+        sourceKind: 'ado',
+      },
+      payload: {
+        repo: 'acme/Platform/backend',
+        sourceControlProvider: 'ado',
+        prNumber: 42,
+        prTitle: 'Update backend',
+        prUrl:
+          'https://dev.azure.com/acme/Platform/_git/backend/pullrequest/42',
+        headSha: 'abc123',
+        branchName: 'feature/test',
+        targetBranch: 'main',
+      },
+    });
+
+    expect(parsed.attributionOverride?.sourceKind).toBe('ado');
+
+    if (parsed.type !== CloudTaskType.GithubPrReview) {
+      throw new Error('Expected GithubPrReview task');
+    }
+
+    expect(parsed.payload.sourceControlProvider).toBe('ado');
+    expect(parsed.payload.targetBranch).toBe('main');
+  });
+
+  it('parses GithubPrReviewFollowUp payloads without any inner bootstrap mode', () => {
+    const parsed = cloudTaskSchema.parse({
+      userId: 'user-1',
+      type: CloudTaskType.GithubPrReviewFollowUp,
+      payload: {
+        repo: 'owner/repo',
+        prNumber: 123,
+        prTitle: 'Test PR',
+        commentBody: '@roomote explain why this happened',
+        followUpSource: 'github_mention',
+      },
+    });
+
+    expect(parsed.type).toBe(CloudTaskType.GithubPrReviewFollowUp);
+
+    if (parsed.type !== CloudTaskType.GithubPrReviewFollowUp) {
+      throw new Error('Expected GithubPrReviewFollowUp payload');
+    }
+
+    expect(parsed.payload.followUpSource).toBe('github_mention');
+  });
+
+  it('normalizes legacy explicit_fix GithubPrReviewFollowUp payloads for backward compatibility', () => {
+    const parsed = cloudTaskSchema.parse({
+      userId: 'user-1',
+      type: CloudTaskType.GithubPrReviewFollowUp,
+      payload: {
+        repo: 'owner/repo',
+        prNumber: 123,
+        prTitle: 'Test PR',
+        commentBody: 'Fix this specific issue:\n\nHandle the edge case',
+        followUpSource: 'explicit_fix',
+      },
+    });
+
+    expect(parsed.type).toBe(CloudTaskType.GithubPrReviewFollowUp);
+
+    if (parsed.type !== CloudTaskType.GithubPrReviewFollowUp) {
+      throw new Error('Expected GithubPrReviewFollowUp payload');
+    }
+
+    expect(parsed.payload.followUpSource).toBe('github_mention');
+  });
+
+  it('parses SuggestedTasks payloads', () => {
+    const parsed = cloudTaskSchema.parse({
+      userId: 'user-1',
+      type: CloudTaskType.SuggestedTasks,
+      payload: {
+        repo: 'owner/repo',
+        description: 'Suggest a few tasks',
+        trigger: 'scheduled',
+        notifySlack: true,
+        suggestionSource: 'sentry_triage',
+        historicalThreadFeedbackDebugSnippet:
+          '*Debug: historical Slack-thread signals included in this run*\n- Prior automation threads included: 1',
+      },
+    });
+
+    expect(parsed.type).toBe(CloudTaskType.SuggestedTasks);
+
+    if (parsed.type !== CloudTaskType.SuggestedTasks) {
+      throw new Error('Expected SuggestedTasks payload');
+    }
+
+    expect(parsed.payload.description).toBe('Suggest a few tasks');
+    expect(parsed.payload.trigger).toBe('scheduled');
+    expect(parsed.payload.notifySlack).toBe(true);
+    expect(parsed.payload.suggestionSource).toBe('sentry_triage');
+    expect(parsed.payload.historicalThreadFeedbackDebugSnippet).toContain(
+      'historical Slack-thread signals included in this run',
+    );
+  });
+
+  it('parses SuggestedTasks payloads with Slack routing metadata', () => {
+    const parsed = cloudTaskSchema.parse({
+      userId: 'user-1',
+      type: CloudTaskType.SuggestedTasks,
+      slackThreadTs: '111.222',
+      payload: {
+        repo: 'owner/repo',
+        description: 'Suggest a few tasks',
+        channel: 'C123',
+        slackChannel: 'C123',
+        thread_ts: '111.222',
+      },
+    });
+
+    if (parsed.type !== CloudTaskType.SuggestedTasks) {
+      throw new Error('Expected SuggestedTasks payload');
+    }
+
+    expect(parsed.payload.channel).toBe('C123');
+    expect(parsed.payload.slackChannel).toBe('C123');
+    expect(parsed.payload.thread_ts).toBe('111.222');
+  });
+
+  it('parses Dependabot suggestion sources on SuggestedTasks payloads', () => {
+    const parsed = cloudTaskSchema.parse({
+      userId: 'user-1',
+      type: CloudTaskType.SuggestedTasks,
+      payload: {
+        repo: 'owner/repo',
+        description: 'Suggest dependency updates',
+        trigger: 'scheduled',
+        notifySlack: true,
+        suggestionSource: 'dependabot_triage',
+      },
+    });
+
+    if (parsed.type !== CloudTaskType.SuggestedTasks) {
+      throw new Error('Expected SuggestedTasks payload');
+    }
+
+    expect(parsed.payload.suggestionSource).toBe('dependabot_triage');
+  });
+
+  it('parses McpRecommendations payloads', () => {
+    const parsed = cloudTaskSchema.parse({
+      userId: 'user-1',
+      type: CloudTaskType.McpRecommendations,
+      payload: {
+        repo: 'owner/repo',
+        environmentId: '14f1f7c4-b126-4b3f-a6a8-e37f7d299f4d',
+        description: 'Inspect the repo and submit MCP recommendations.',
+        visibleInTranscript: false,
+        sourceTaskId: 'task-setup-1',
+        slackChannel: 'D123',
+        installerUserId: 'user-1',
+        currentConfig: {
+          enabledIntegrationIds: ['github', 'slack'],
+          configuredCustomServerIds: ['redis'],
+        },
+      },
+    });
+
+    expect(parsed.type).toBe(CloudTaskType.McpRecommendations);
+
+    if (parsed.type !== CloudTaskType.McpRecommendations) {
+      throw new Error('Expected McpRecommendations payload');
+    }
+
+    expect(parsed.payload.environmentId).toBe(
+      '14f1f7c4-b126-4b3f-a6a8-e37f7d299f4d',
+    );
+    expect(parsed.payload.sourceTaskId).toBe('task-setup-1');
+    expect(parsed.payload.slackChannel).toBe('D123');
+    expect(parsed.payload.currentConfig?.enabledIntegrationIds).toEqual([
+      'github',
+      'slack',
+    ]);
+  });
+
+  it('parses SlackAppMention payloads with an optional web return path', () => {
+    const parsed = cloudTaskSchema.parse({
+      userId: 'user-1',
+      type: CloudTaskType.SlackAppMention,
+      payload: {
+        repo: 'owner/repo',
+        channel: 'C123',
+        user: 'U123',
+        text: 'Starting setup',
+        ts: '111.222',
+        thread_ts: '111.222',
+        webPath: '/setup',
+      },
+    });
+
+    expect(parsed.type).toBe(CloudTaskType.SlackAppMention);
+
+    if (parsed.type !== CloudTaskType.SlackAppMention) {
+      throw new Error('Expected SlackAppMention payload');
+    }
+
+    expect(parsed.payload.webPath).toBe('/setup');
+  });
+
+  it('parses StandardTask payloads', () => {
+    const parsed = cloudTaskSchema.parse({
+      userId: 'user-1',
+      type: CloudTaskType.StandardTask,
+      payload: {
+        repo: 'owner/repo',
+        description: 'Investigate this flow',
+      },
+    });
+
+    expect(parsed.type).toBe(CloudTaskType.StandardTask);
+
+    if (parsed.type !== CloudTaskType.StandardTask) {
+      throw new Error('Expected StandardTask payload');
+    }
+
+    expect(parsed.payload.description).toBe('Investigate this flow');
+  });
+
+  it('parses shared reasoningEffort overrides on task payloads', () => {
+    const parsed = cloudTaskSchema.parse({
+      userId: 'user-1',
+      type: CloudTaskType.StandardTask,
+      payload: {
+        repo: 'owner/repo',
+        description: 'Investigate this flow',
+        reasoningEffort: 'medium',
+      },
+    });
+
+    if (parsed.type !== CloudTaskType.StandardTask) {
+      throw new Error('Expected StandardTask payload');
+    }
+
+    expect(parsed.payload.reasoningEffort).toBe('medium');
+  });
+
+  it('parses xhigh reasoningEffort overrides on task payloads', () => {
+    const parsed = cloudTaskSchema.parse({
+      userId: 'user-1',
+      type: CloudTaskType.StandardTask,
+      payload: {
+        repo: 'owner/repo',
+        description: 'Investigate this flow',
+        reasoningEffort: 'xhigh',
+      },
+    });
+
+    if (parsed.type !== CloudTaskType.StandardTask) {
+      throw new Error('Expected StandardTask payload');
+    }
+
+    expect(parsed.payload.reasoningEffort).toBe('xhigh');
+  });
+
+  it('parses OpenCode harness model overrides on task payloads', () => {
+    const parsed = cloudTaskSchema.parse({
+      userId: 'user-1',
+      type: CloudTaskType.StandardTask,
+      payload: {
+        repo: 'owner/repo',
+        description: 'Investigate this flow',
+        harnessModelOverrides: {
+          'opencode-server': 'provider-id/model-id',
+        },
+      },
+    });
+
+    if (parsed.type !== CloudTaskType.StandardTask) {
+      throw new Error('Expected StandardTask payload');
+    }
+
+    expect(parsed.payload.harnessModelOverrides?.['opencode-server']).toBe(
+      'provider-id/model-id',
+    );
+  });
+
+  it('parses hidden StandardTask bootstrap metadata without changing the description', () => {
+    const parsed = cloudTaskSchema.parse({
+      userId: 'user-1',
+      harness: 'opencode-server',
+      type: CloudTaskType.StandardTask,
+      payload: {
+        repo: 'owner/repo',
+        description: 'Explain the failing deploy pipeline',
+        bootstrap: {
+          skill: 'explain-repo-code',
+          interactiveMode: true,
+        },
+      },
+    });
+
+    if (parsed.type !== CloudTaskType.StandardTask) {
+      throw new Error('Expected StandardTask payload');
+    }
+
+    expect(parsed.payload.description).toBe(
+      'Explain the failing deploy pipeline',
+    );
+    expect(parsed.payload.bootstrap).toEqual({
+      skill: 'explain-repo-code',
+      interactiveMode: true,
+    });
+  });
+
+  it('parses top-level requested work kind metadata on cloud tasks', () => {
+    const parsed = cloudTaskSchema.parse({
+      userId: 'user-1',
+      requestedWorkKindDecision: {
+        kind: 'plan',
+        source: 'llm_classifier',
+        confidence: 0.77,
+      },
+      type: CloudTaskType.StandardTask,
+      payload: {
+        repo: 'owner/repo',
+        description: 'Plan the migration',
+      },
+    });
+
+    expect(parsed.requestedWorkKindDecision).toEqual({
+      kind: 'plan',
+      source: 'llm_classifier',
+      confidence: 0.77,
+    });
+  });
+
+  it('parses multi-repo subset payloads', () => {
+    const parsed = cloudTaskSchema.parse({
+      userId: 'user-1',
+      type: CloudTaskType.StandardTask,
+      payload: {
+        repo: '__all_repositories__',
+        selectedRepositories: ['acme/api', 'acme/web'],
+        description: 'Inspect both repos',
+      },
+    });
+
+    if (parsed.type !== CloudTaskType.StandardTask) {
+      throw new Error('Expected StandardTask payload');
+    }
+
+    expect(parsed.payload.selectedRepositories).toEqual([
+      'acme/api',
+      'acme/web',
+    ]);
+  });
+
+  it('preserves visible prompt fields on SnapshotResume payloads', () => {
+    const parsed = cloudTaskSchema.parse({
+      userId: 'user-1',
+      type: CloudTaskType.SnapshotResume,
+      payload: {
+        repo: 'owner/repo',
+        sourceSnapshotId: 'snap-123',
+        sourceCloudJobId: 42,
+        commentBody: 'Fix this specific issue',
+        images: ['https://example.com/prompt.png'],
+        resumePromptImages: ['https://example.com/follow-up.png'],
+      },
+    });
+
+    if (parsed.type !== CloudTaskType.SnapshotResume) {
+      throw new Error('Expected SnapshotResume payload');
+    }
+
+    expect(parsed.payload.commentBody).toBe('Fix this specific issue');
+    expect(parsed.payload.images).toEqual(['https://example.com/prompt.png']);
+    expect(parsed.payload.resumePromptImages).toEqual([
+      'https://example.com/follow-up.png',
+    ]);
+  });
+
+  it('normalizes legacy SnapshotEnvironment row attachments without source identity', () => {
+    const parsed = cloudTaskSchema.parse({
+      userId: 'user-1',
+      computeProvider: 'modal',
+      type: CloudTaskType.SnapshotEnvironment,
+      payload: {
+        repo: '',
+        environmentId: '14f1f7c4-b126-4b3f-a6a8-e37f7d299f4d',
+        environmentSnapshotAttachment: {
+          source: 'active_snapshot_row',
+          environmentSnapshotId: '80e3ceee-7d21-491a-96d8-7b0c72b90b4e',
+        },
+      },
+    });
+
+    if (parsed.type !== CloudTaskType.SnapshotEnvironment) {
+      throw new Error('Expected SnapshotEnvironment payload');
+    }
+
+    expect(parsed.payload.environmentSnapshotAttachment).toEqual({
+      source: 'legacy_active_snapshot_row',
+      environmentSnapshotId: '80e3ceee-7d21-491a-96d8-7b0c72b90b4e',
+    });
+  });
+
+  it('parses SnapshotEnvironment pending-row attachments', () => {
+    const parsed = cloudTaskSchema.parse({
+      userId: 'user-1',
+      computeProvider: 'modal',
+      type: CloudTaskType.SnapshotEnvironment,
+      payload: {
+        repo: '',
+        environmentId: '14f1f7c4-b126-4b3f-a6a8-e37f7d299f4d',
+        environmentSnapshotAttachment: {
+          source: 'pending_snapshot_row',
+          environmentSnapshotId: '80e3ceee-7d21-491a-96d8-7b0c72b90b4e',
+          claimedAt: '2026-05-29T00:00:00.000Z',
+        },
+      },
+    });
+
+    if (parsed.type !== CloudTaskType.SnapshotEnvironment) {
+      throw new Error('Expected SnapshotEnvironment payload');
+    }
+
+    expect(parsed.payload.environmentSnapshotAttachment).toEqual({
+      source: 'pending_snapshot_row',
+      environmentSnapshotId: '80e3ceee-7d21-491a-96d8-7b0c72b90b4e',
+      claimedAt: '2026-05-29T00:00:00.000Z',
+    });
+  });
+
+  it('parses SnapshotResume payloads with canonical Slack routing metadata', () => {
+    const parsed = cloudTaskSchema.parse({
+      userId: 'user-1',
+      type: CloudTaskType.SnapshotResume,
+      payload: {
+        repo: 'owner/repo',
+        sourceSnapshotId: 'snap-123',
+        sourceCloudJobId: 42,
+        channel: 'C123',
+        slackChannel: 'C123',
+        thread_ts: '111.222',
+      },
+    });
+
+    if (parsed.type !== CloudTaskType.SnapshotResume) {
+      throw new Error('Expected SnapshotResume payload');
+    }
+
+    expect(parsed.payload.channel).toBe('C123');
+    expect(parsed.payload.slackChannel).toBe('C123');
+    expect(parsed.payload.thread_ts).toBe('111.222');
+  });
+
+  it.each([null, undefined])(
+    'accepts shared-task slackThreadTs when the value is %s',
+    (slackThreadTs) => {
+      const parsed = cloudTaskSchema.safeParse({
+        userId: 'user-1',
+        type: CloudTaskType.StandardTask,
+        slackThreadTs,
+        payload: {
+          repo: 'owner/repo',
+          description: 'Investigate the task',
+        },
+      });
+
+      expect(parsed.success).toBe(true);
+    },
+  );
+
+  it.each([null, undefined])(
+    'accepts snapshot resume slackThreadTs when the value is %s',
+    (slackThreadTs) => {
+      const parsed = cloudTaskSchema.safeParse({
+        userId: 'user-1',
+        type: CloudTaskType.SnapshotResume,
+        slackThreadTs,
+        payload: {
+          repo: 'owner/repo',
+          sourceSnapshotId: 'snap-123',
+          sourceCloudJobId: 42,
+        },
+      });
+
+      expect(parsed.success).toBe(true);
+    },
+  );
+
+  it('reads Slack routing fields from either canonical or legacy task payload keys', () => {
+    expect(
+      getSlackChannelFromTaskPayload({
+        channel: 'C123',
+        slackChannel: 'C999',
+      }),
+    ).toBe('C123');
+    expect(
+      getSlackChannelFromTaskPayload({
+        slackChannel: 'C999',
+      }),
+    ).toBe('C999');
+    expect(
+      getSlackThreadTsFromTaskPayload({
+        thread_ts: '111.222',
+        slackThreadTs: '333.444',
+      }),
+    ).toBe('111.222');
+    expect(
+      getSlackThreadTsFromTaskPayload({
+        slackThreadTs: '333.444',
+      }),
+    ).toBe('333.444');
+  });
+
+  it('reads provider-neutral communication metadata from Slack, Teams, and Telegram payloads', () => {
+    expect(
+      getCommunicationProviderFromTaskPayload({
+        channel: 'C123',
+        thread_ts: '111.222',
+      }),
+    ).toBe('slack');
+    expect(
+      getCommunicationProviderFromTaskPayload({
+        teamsChannelId: '19:channel',
+        teamsMessageId: 'activity-root',
+      }),
+    ).toBe('teams');
+    expect(
+      getCommunicationProviderFromTaskPayload({
+        communicationChannelId: 'ambiguous-channel',
+      }),
+    ).toBeNull();
+    expect(
+      getCommunicationProviderFromTaskPayload({
+        communicationProvider: 'teams',
+        communicationChannelId: '19:channel',
+      }),
+    ).toBe('teams');
+    expect(
+      getCommunicationProviderFromTaskPayload({
+        communicationProvider: 'telegram',
+        communicationChannelId: '-100456',
+      }),
+    ).toBe('telegram');
+    expect(
+      getCommunicationChannelFromTaskPayload({
+        communicationProvider: 'teams',
+        teamsChannelId: '19:channel',
+      }),
+    ).toBe('19:channel');
+    expect(
+      getCommunicationChannelFromTaskPayload({
+        communicationProvider: 'teams',
+        teamsConversationId: '19:conversation',
+        teamsChannelId: '19:channel',
+      }),
+    ).toBe('19:conversation');
+    expect(
+      getCommunicationServiceUrlFromTaskPayload({
+        teamsServiceUrl: 'https://smba.trafficmanager.net/amer/',
+      }),
+    ).toBe('https://smba.trafficmanager.net/amer/');
+    expect(
+      getCommunicationThreadIdFromTaskPayload({
+        communicationProvider: 'slack',
+        thread_ts: '111.222',
+      }),
+    ).toBe('111.222');
+  });
+
+  it('populates canonical SnapshotResume Slack metadata from a source payload', () => {
+    const payload: Record<string, unknown> = {
+      repo: 'owner/repo',
+      sourceSnapshotId: 'snap-123',
+      sourceCloudJobId: 42,
+    };
+
+    populateSnapshotResumeSlackMetadata(payload, {
+      sourcePayload: {
+        slackChannel: 'C123',
+        slackTeamDomain: 'acme-team',
+      },
+      threadTs: '111.222',
+    });
+
+    expect(payload).toMatchObject({
+      channel: 'C123',
+      slackChannel: 'C123',
+      teamDomain: 'acme-team',
+      thread_ts: '111.222',
+    });
+    expect(payload).not.toHaveProperty('slackTeamDomain');
+  });
+
+  it('populates SnapshotResume provider-neutral communication metadata', () => {
+    const payload: Record<string, unknown> = {
+      repo: 'owner/repo',
+      sourceSnapshotId: 'snap-123',
+      sourceCloudJobId: 42,
+    };
+
+    populateSnapshotResumeCommunicationMetadata(payload, {
+      sourcePayload: {
+        communicationProvider: 'telegram',
+        communicationChannelId: '-100456',
+        communicationThreadId: '7',
+        communicationMessageId: '42',
+      },
+    });
+
+    expect(payload).toMatchObject({
+      communicationProvider: 'telegram',
+      communicationChannelId: '-100456',
+      communicationThreadId: '7',
+      communicationMessageId: '42',
+    });
+  });
+
+  it('parses SnapshotResume payloads with queued provider-neutral messages', () => {
+    const parsed = cloudTaskSchema.safeParse({
+      userId: 'user-1',
+      type: CloudTaskType.SnapshotResume,
+      sourceSnapshotId: 'snap-123',
+      sourceCloudJobId: 42,
+      payload: {
+        repo: 'owner/repo',
+        sourceSnapshotId: 'snap-123',
+        sourceCloudJobId: 42,
+        communicationProvider: 'telegram',
+        communicationChannelId: '-100456',
+        communicationThreadId: '7',
+        queuedCommunicationMessages: [
+          {
+            provider: 'telegram',
+            text: 'resume this',
+            user: 'Ada Lovelace',
+            ts: '42',
+            channel: '-100456',
+            threadTs: '7',
+          },
+        ],
+      },
+    });
+
+    expect(parsed.success).toBe(true);
+  });
+
+  it('does not parse unknown delegated task payloads', () => {
+    const parsed = cloudTaskSchema.safeParse({
+      userId: 'user-1',
+      type: 'invalid.task',
+      payload: {
+        repo: 'owner/repo',
+        description: 'Fix this',
+      },
+    });
+
+    expect(parsed.success).toBe(false);
+  });
+
+  it('rejects invalid reasoningEffort values on shared task payloads', () => {
+    const parsed = cloudTaskSchema.safeParse({
+      userId: 'user-1',
+      type: CloudTaskType.StandardTask,
+      payload: {
+        repo: 'owner/repo',
+        description: 'Fix this',
+        reasoningEffort: 'max',
+      },
+    });
+
+    expect(parsed.success).toBe(false);
+  });
+
+  it('rejects non-OpenCode-format harness model overrides on task payloads', () => {
+    const parsed = cloudTaskSchema.safeParse({
+      userId: 'user-1',
+      type: CloudTaskType.StandardTask,
+      payload: {
+        repo: 'owner/repo',
+        description: 'Fix this',
+        harnessModelOverrides: {
+          'opencode-server': 'gpt-5.5',
+        },
+      },
+    });
+
+    expect(parsed.success).toBe(false);
+  });
+
+  it('resolves a repository workspace from a single repo payload', () => {
+    expect(
+      resolveCloudTaskWorkspace({
+        repo: 'owner/repo',
+        branch: 'main',
+        sha: 'abc1234',
+      }),
+    ).toEqual({
+      type: 'repository',
+      repo: 'owner/repo',
+      branch: 'main',
+      sha: 'abc1234',
+    });
+  });
+
+  it('resolves a repository_set workspace from a scoped all-repositories payload', () => {
+    expect(
+      resolveCloudTaskWorkspace({
+        repo: '__all_repositories__',
+        selectedRepositories: ['acme/api', 'acme/web', 'acme/api'],
+      }),
+    ).toEqual({
+      type: 'repository_set',
+      repositories: ['acme/api', 'acme/web'],
+    });
+  });
+
+  it('resolves an environment workspace while preserving source pin context', () => {
+    expect(
+      resolveCloudTaskWorkspace({
+        repo: 'acme/api',
+        branch: 'main',
+        sha: 'abc1234',
+        environmentId: '14f1f7c4-b126-4b3f-a6a8-e37f7d299f4d',
+      }),
+    ).toEqual({
+      type: 'environment',
+      environmentId: '14f1f7c4-b126-4b3f-a6a8-e37f7d299f4d',
+      sourceRepo: 'acme/api',
+      sourceBranch: 'main',
+      sourceSha: 'abc1234',
+    });
+  });
+});
+
+describe('isActivelyRunningCloudTask', () => {
+  it('returns false for undefined/null status', () => {
+    expect(isActivelyRunningCloudTask(undefined, null)).toBe(false);
+    expect(isActivelyRunningCloudTask(null, null)).toBe(false);
+  });
+
+  it('returns true for booting statuses regardless of taskPhase', () => {
+    const bootingStatuses = [...bootingCloudTaskStatuses];
+
+    for (const status of bootingStatuses) {
+      expect(isActivelyRunningCloudTask(status, null)).toBe(true);
+      expect(isActivelyRunningCloudTask(status, 'idle')).toBe(true);
+      expect(isActivelyRunningCloudTask(status, 'running')).toBe(true);
+    }
+  });
+
+  it('returns true for Running status with taskPhase "running"', () => {
+    expect(isActivelyRunningCloudTask(CloudTaskStatus.Running, 'running')).toBe(
+      true,
+    );
+  });
+
+  it('returns true for Running status with null taskPhase (backwards compat)', () => {
+    expect(isActivelyRunningCloudTask(CloudTaskStatus.Running, null)).toBe(
+      true,
+    );
+    expect(isActivelyRunningCloudTask(CloudTaskStatus.Running, undefined)).toBe(
+      true,
+    );
+  });
+
+  it('returns false for Running status with idle/waiting phases', () => {
+    expect(isActivelyRunningCloudTask(CloudTaskStatus.Running, 'idle')).toBe(
+      false,
+    );
+    expect(
+      isActivelyRunningCloudTask(CloudTaskStatus.Running, 'waiting_for_prompt'),
+    ).toBe(false);
+    expect(isActivelyRunningCloudTask(CloudTaskStatus.Running, 'stopped')).toBe(
+      false,
+    );
+    expect(
+      isActivelyRunningCloudTask(CloudTaskStatus.Running, 'shutting_down'),
+    ).toBe(false);
+  });
+
+  it('returns false for Idle status', () => {
+    expect(isActivelyRunningCloudTask(CloudTaskStatus.Idle, null)).toBe(false);
+    expect(isActivelyRunningCloudTask(CloudTaskStatus.Idle, 'running')).toBe(
+      false,
+    );
+  });
+
+  it('returns false for exited statuses', () => {
+    expect(isActivelyRunningCloudTask(CloudTaskStatus.Completed, null)).toBe(
+      false,
+    );
+    expect(isActivelyRunningCloudTask(CloudTaskStatus.Failed, null)).toBe(
+      false,
+    );
+    expect(isActivelyRunningCloudTask(CloudTaskStatus.Canceled, null)).toBe(
+      false,
+    );
+  });
+});
+
+describe('isCloudTaskExecutingTurn', () => {
+  it('returns false for undefined/null status', () => {
+    expect(isCloudTaskExecutingTurn(undefined, 'running')).toBe(false);
+    expect(isCloudTaskExecutingTurn(null, 'running')).toBe(false);
+  });
+
+  it('returns true for booting statuses regardless of taskPhase', () => {
+    for (const status of [...bootingCloudTaskStatuses]) {
+      expect(isCloudTaskExecutingTurn(status, null)).toBe(true);
+      expect(isCloudTaskExecutingTurn(status, 'waiting_for_prompt')).toBe(true);
+      expect(isCloudTaskExecutingTurn(status, 'running')).toBe(true);
+    }
+  });
+
+  it('returns true while a turn is executing regardless of Running/Idle status', () => {
+    expect(isCloudTaskExecutingTurn(CloudTaskStatus.Running, 'running')).toBe(
+      true,
+    );
+    // Follow-up turns on a live sandbox run with Idle status.
+    expect(isCloudTaskExecutingTurn(CloudTaskStatus.Idle, 'running')).toBe(
+      true,
+    );
+  });
+
+  it('returns true for Running status with no phase info yet', () => {
+    expect(isCloudTaskExecutingTurn(CloudTaskStatus.Running, null)).toBe(true);
+    expect(isCloudTaskExecutingTurn(CloudTaskStatus.Running, undefined)).toBe(
+      true,
+    );
+  });
+
+  it('returns false while the task waits between turns', () => {
+    expect(
+      isCloudTaskExecutingTurn(CloudTaskStatus.Idle, 'waiting_for_prompt'),
+    ).toBe(false);
+    expect(
+      isCloudTaskExecutingTurn(CloudTaskStatus.Running, 'waiting_for_prompt'),
+    ).toBe(false);
+    expect(isCloudTaskExecutingTurn(CloudTaskStatus.Idle, null)).toBe(false);
+    expect(
+      isCloudTaskExecutingTurn(CloudTaskStatus.Idle, 'waiting_for_user_input'),
+    ).toBe(false);
+  });
+
+  it('returns false for exited statuses even with a stale running phase', () => {
+    expect(isCloudTaskExecutingTurn(CloudTaskStatus.Completed, 'running')).toBe(
+      false,
+    );
+    expect(isCloudTaskExecutingTurn(CloudTaskStatus.Failed, 'running')).toBe(
+      false,
+    );
+    expect(isCloudTaskExecutingTurn(CloudTaskStatus.Canceled, 'running')).toBe(
+      false,
+    );
+  });
+});

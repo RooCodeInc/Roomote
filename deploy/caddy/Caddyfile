@@ -1,0 +1,51 @@
+{
+	on_demand_tls {
+		ask http://web:3000/api/caddy/ask
+	}
+}
+
+(roomote_proxy) {
+	encode zstd gzip
+	reverse_proxy {args[0]} {
+		lb_try_duration 10s
+		lb_try_interval 250ms
+	}
+}
+
+{$ROOMOTE_APP_DOMAIN} {
+	@artifact_storage {
+		path /{$S3_BUCKET_ARTIFACTS:roomote-artifacts} /{$S3_BUCKET_ARTIFACTS:roomote-artifacts}/*
+	}
+
+	handle @artifact_storage {
+		reverse_proxy minio:9000 {
+			# Presigned S3 URLs sign the bucket path and Host header.
+			header_up Host {http.request.host}
+		}
+	}
+
+	@api {
+		path /_roomote-api /_roomote-api/*
+	}
+
+	handle @api {
+		uri strip_prefix /_roomote-api
+		import roomote_proxy api:3001
+	}
+
+	handle {
+		import roomote_proxy web:3000
+	}
+}
+
+{$ROOMOTE_PREVIEW_DOMAIN} {
+	import roomote_proxy preview-proxy:8081
+}
+
+*.{$ROOMOTE_PREVIEW_DOMAIN} {
+	tls {
+		on_demand
+	}
+
+	import roomote_proxy preview-proxy:8081
+}

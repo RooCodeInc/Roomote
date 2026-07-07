@@ -1,0 +1,65 @@
+---
+title: Azure DevOps
+icon: 'https://api.iconify.design/simple-icons:azuredevops.svg?color=currentColor'
+description: Configure Azure DevOps repository sync for Roomote.
+---
+
+Azure DevOps support uses a deployment-owned personal access token and
+organization. There is no self-serve OAuth installation flow, service hook
+ingestion, or Review Code automation path yet, so an operator provides Azure
+DevOps credentials and syncs repositories from Settings.
+
+## Create an Azure DevOps PAT
+
+Create a dedicated Azure DevOps bot or service-account user and give it access
+to the organization, projects, or repositories Roomote should use. Create a PAT
+for that identity with Code read/write permissions appropriate for cloning,
+branch creation, and commits.
+
+Save the organization and token in setup, deployment env vars, or local
+`.env.local`:
+
+```sh
+ADO_ORGANIZATION=<azure-devops-organization>
+ADO_TOKEN=<azure-devops-pat>
+```
+
+Optional values:
+
+```sh
+ADO_BASE_URL=https://dev.azure.com
+ADO_USERNAME=ado
+```
+
+`ADO_BASE_URL` defaults to `https://dev.azure.com`. `ADO_USERNAME` defaults to
+`ado` and is used as the Git-over-HTTPS username paired with the PAT.
+
+## Sync repositories
+
+After the Azure DevOps values are available, open Settings, go to the
+Environments page, and use the Source Control section's Azure DevOps sync
+button. Roomote lists repositories from:
+
+```text
+https://dev.azure.com/<organization>/_apis/git/repositories?api-version=7.1
+```
+
+Roomote stores the results as Azure DevOps repository rows.
+
+Azure DevOps-backed tasks clone from the synced repository row, so sync must
+run before launching an Azure DevOps-backed task. Worker tasks write
+host- and clone-path-scoped Azure DevOps credentials into the file-backed Git
+credential helper instead of exporting `ADO_TOKEN` into task shells.
+
+## Current limits
+
+Azure DevOps service hook ingestion and Review Code automation are not
+implemented yet. Azure DevOps support currently covers repository sync and
+Azure DevOps-backed manual or environment launches.
+
+## Verify setup
+
+1. sync Azure DevOps repositories from Settings
+2. create or update an environment from a synced repository
+3. start a small task and confirm Roomote can clone the repository
+4. confirm Roomote can push a branch when the task produces changes

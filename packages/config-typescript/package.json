@@ -1,0 +1,7 @@
+{
+  "name": "@roomote/config-typescript",
+  "private": true,
+  "publishConfig": {
+    "access": "public"
+  }
+}

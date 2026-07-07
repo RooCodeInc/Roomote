@@ -1,0 +1,583 @@
+import type { ButtonHTMLAttributes, ReactNode } from 'react';
+import { fireEvent, render, screen } from '@testing-library/react';
+
+import { CommsProviderSection } from './CommsProviderSection';
+
+type CommsProviderStatus = {
+  id: 'slack' | 'microsoft' | 'telegram';
+  label: string;
+  fields: Array<{
+    envVarName: string;
+    acceptedEnvVarNames: string[];
+    label: string;
+    required?: boolean;
+    secret?: boolean;
+    runtimeSatisfied: boolean;
+    savedSatisfied: boolean;
+    satisfiedByEnvVarName: string | null;
+  }>;
+  runtimeSatisfied: boolean;
+  savedSatisfied: boolean;
+  setupSatisfied: boolean;
+  telegramWebhook?: null;
+};
+
+const state = vi.hoisted(() => ({
+  slackInstallation: null as null | { teamName?: string },
+  slackInstallationIsPending: false,
+  connectSlackIsPending: false,
+  disconnectSlackIsPending: false,
+  connectSlackUrl: 'https://slack.com/install' as string | null,
+  teamsStatus: {
+    botConfigured: false,
+    botUsesTenantSpecificTokenFlow: false,
+    microsoftAuthConfigured: false,
+    webhookUrl: 'https://openmote.dev/api/webhooks/teams',
+    openInTeamsUrl: null as string | null,
+  } as null | {
+    botConfigured: boolean;
+    botUsesTenantSpecificTokenFlow: boolean;
+    microsoftAuthConfigured: boolean;
+    webhookUrl: string;
+    openInTeamsUrl: string | null;
+  },
+  teamsStatusIsPending: false,
+  teamsStatusIsError: false,
+  routerDebugSettings: {
+    routerDebugSlackChannelId: null as string | null,
+    envFallbackSlackChannelId: null as string | null,
+    effectiveRouterDebugSlackChannelId: null as string | null,
+    source: 'none' as 'deployment' | 'env' | 'none',
+  },
+  routerDebugIsPending: false,
+  routerDebugIsError: false,
+  slackChannels: [] as Array<{
+    id: string;
+    name: string;
+    label: string;
+    isPrivate: boolean;
+    isMember: boolean;
+  }>,
+  slackChannelsIsPending: false,
+  slackChannelsIsError: false,
+  slackChannelsIsFetching: false,
+  updateRouterDebugIsPending: false,
+}));
+
+const mutations = vi.hoisted(() => ({
+  connectSlack: vi.fn(),
+  disconnectSlack: vi.fn(),
+  updateRouterDebug: vi.fn(),
+  refetchSlackChannels: vi.fn(),
+}));
+
+vi.mock('@tanstack/react-query', () => ({
+  useQuery: (options: { queryKey?: string[]; enabled?: boolean }) => {
+    void options;
+    if (options.queryKey?.[0] === 'routerDebug') {
+      return {
+        data: state.routerDebugSettings,
+        isPending: state.routerDebugIsPending,
+        isError: state.routerDebugIsError,
+      };
+    }
+    if (options.queryKey?.[0] === 'automations') {
+      return {
+        data:
+          options.enabled === false
+            ? undefined
+            : { channels: state.slackChannels },
+        isPending: state.slackChannelsIsPending,
+        isError: state.slackChannelsIsError,
+        isFetching: state.slackChannelsIsFetching,
+        refetch: mutations.refetchSlackChannels,
+      };
+    }
+    return {
+      data: undefined,
+      isPending: false,
+      isError: false,
+      isFetching: false,
+      refetch: vi.fn(),
+    };
+  },
+  useMutation: (options: {
+    onSuccess?: (settings: unknown) => void;
+    onError?: (error: Error) => void;
+  }) => ({
+    isPending: state.updateRouterDebugIsPending,
+    mutate: (input: unknown) => {
+      mutations.updateRouterDebug(input);
+      options.onSuccess?.({
+        routerDebugSlackChannelId:
+          (input as { routerDebugSlackChannelId: string | null })
+            .routerDebugSlackChannelId ?? null,
+      });
+    },
+  }),
+  useQueryClient: () => ({ setQueryData: vi.fn() }),
+}));
+
+vi.mock('@/hooks/slack', () => ({
+  useSlackInstallation: () => ({
+    data: state.slackInstallation,
+    isPending: state.slackInstallationIsPending,
+  }),
+  useConnectSlack: () => ({
+    isPending: state.connectSlackIsPending,
+    mutate: (
+      _input: unknown,
+      options?: { onSuccess?: (url: string) => void },
+    ) => {
+      mutations.connectSlack();
+      if (state.connectSlackUrl) {
+        options?.onSuccess?.(state.connectSlackUrl);
+      }
+    },
+  }),
+  useDisconnectSlack: () => ({
+    isPending: state.disconnectSlackIsPending,
+    mutate: (_input: unknown, options?: { onSuccess?: () => void }) => {
+      mutations.disconnectSlack();
+      options?.onSuccess?.();
+    },
+  }),
+}));
+
+vi.mock('@/hooks/teams', () => ({
+  useTeamsIntegrationStatus: (_options?: { enabled?: boolean }) => ({
+    data: state.teamsStatus,
+    isPending: state.teamsStatusIsPending,
+    isError: state.teamsStatusIsError,
+  }),
+}));
+
+vi.mock('@/trpc/client', () => ({
+  useTRPC: () => ({
+    slack: {
+      installation: { queryKey: () => ['slack', 'installation'] },
+    },
+    routerDebug: {
+      getSettings: {
+        queryKey: () => ['routerDebug', 'getSettings'],
+        queryOptions: () => ({ queryKey: ['routerDebug', 'getSettings'] }),
+      },
+      updateSettings: {
+        mutationOptions: (options: unknown) => options,
+      },
+    },
+    automations: {
+      listSlackChannels: {
+        queryOptions: (
+          _input?: undefined,
+          options?: { enabled?: boolean },
+        ) => ({
+          queryKey: ['automations', 'listSlackChannels'],
+          enabled: options?.enabled,
+        }),
+      },
+    },
+  }),
+}));
+
+vi.mock('sonner', () => ({ toast: { success: vi.fn(), error: vi.fn() } }));
+
+vi.mock('@/components/system', () => ({
+  ArrowLeft: () => <svg aria-hidden="true" />,
+  BrandIcon: ({ icon }: { icon: string }) => (
+    <svg aria-label={icon} role="img" />
+  ),
+  Button: ({ children, ...props }: ButtonHTMLAttributes<HTMLButtonElement>) => (
+    <button type="button" {...props}>
+      {children}
+    </button>
+  ),
+  Card: ({ children }: { children: ReactNode }) => <div>{children}</div>,
+  CardAction: ({ children }: { children: ReactNode }) => <div>{children}</div>,
+  CardContent: ({ children }: { children: ReactNode }) => <div>{children}</div>,
+  CardFooter: ({ children }: { children: ReactNode }) => <div>{children}</div>,
+  CardHeader: ({ children }: { children: ReactNode }) => <div>{children}</div>,
+  CardTitle: ({ children }: { children: ReactNode }) => <h3>{children}</h3>,
+  Check: () => <svg aria-hidden="true" />,
+  Dialog: ({ children, open }: { children: ReactNode; open: boolean }) =>
+    open ? <div>{children}</div> : null,
+  DialogContent: ({ children }: { children: ReactNode }) => (
+    <div>{children}</div>
+  ),
+  DialogDescription: ({ children }: { children: ReactNode }) => (
+    <p>{children}</p>
+  ),
+  DialogFooter: ({ children }: { children: ReactNode }) => (
+    <div>{children}</div>
+  ),
+  DialogHeader: ({ children }: { children: ReactNode }) => (
+    <div>{children}</div>
+  ),
+  DialogTitle: ({ children }: { children: ReactNode }) => <h2>{children}</h2>,
+  Download: () => <svg aria-hidden="true" />,
+  EnvVarsInfoNote: ({ children }: { children: ReactNode }) => (
+    <div>{children}</div>
+  ),
+  ExternalLink: () => <svg aria-hidden="true" />,
+  Info: () => <svg aria-hidden="true" />,
+  Input: (props: ButtonHTMLAttributes<HTMLInputElement>) => (
+    <input {...(props as object)} />
+  ),
+  Label: ({ children }: { children: ReactNode }) => <label>{children}</label>,
+  Pencil: () => <svg aria-hidden="true" />,
+  Plug: () => <svg aria-hidden="true" />,
+  RefreshCw: () => <svg aria-hidden="true" />,
+  Select: ({ children }: { children: ReactNode }) => <div>{children}</div>,
+  SelectContent: ({ children }: { children: ReactNode }) => (
+    <div>{children}</div>
+  ),
+  SelectItem: ({ children }: { children: ReactNode }) => (
+    <span>{children}</span>
+  ),
+  SelectTrigger: ({ children }: { children: ReactNode }) => (
+    <div>{children}</div>
+  ),
+  Sparkles: () => <svg aria-hidden="true" />,
+  Spinner: () => <span>loading</span>,
+  Trash2: () => <svg aria-hidden="true" />,
+  TriangleAlert: () => <svg aria-hidden="true" />,
+}));
+
+vi.mock('next/link', () => ({
+  default: ({ children, href }: { children: ReactNode; href: string }) => (
+    <a href={href}>{children}</a>
+  ),
+}));
+
+vi.mock('@/lib/slack-app-manifest', () => ({
+  buildSlackManifestPrefillUrl: () => 'https://slack.com/apps/new',
+}));
+vi.mock('@/lib/slack-callback-paths', () => ({
+  SLACK_APP_INSTALL_CALLBACK_PATH: '/api/slack/callback',
+  SLACK_SIGN_IN_CALLBACK_PATH: '/api/slack/signin',
+}));
+vi.mock('@/app/(onboarding)/setup/providerSetupCopy', () => ({
+  getProviderSetupCopy: () => null,
+}));
+vi.mock('@/lib/settings', () => ({
+  SETTINGS_PATHS: {
+    comms: '/settings/comms',
+    personal: '/settings/personal',
+  },
+}));
+
+function buildSlackProvider(
+  overrides: Partial<CommsProviderStatus> = {},
+): CommsProviderStatus {
+  return {
+    id: 'slack',
+    label: 'Slack',
+    fields: [
+      {
+        envVarName: 'SLACK_CLIENT_ID',
+        acceptedEnvVarNames: ['SLACK_CLIENT_ID'],
+        label: 'Slack Client ID',
+        runtimeSatisfied: false,
+        savedSatisfied: false,
+        satisfiedByEnvVarName: null,
+      },
+      {
+        envVarName: 'SLACK_CLIENT_SECRET',
+        acceptedEnvVarNames: ['SLACK_CLIENT_SECRET'],
+        label: 'Slack Client Secret',
+        secret: true,
+        runtimeSatisfied: false,
+        savedSatisfied: false,
+        satisfiedByEnvVarName: null,
+      },
+      {
+        envVarName: 'SLACK_SIGNING_SECRET',
+        acceptedEnvVarNames: ['SLACK_SIGNING_SECRET'],
+        label: 'Slack Signing Secret',
+        secret: true,
+        runtimeSatisfied: false,
+        savedSatisfied: false,
+        satisfiedByEnvVarName: null,
+      },
+    ],
+    runtimeSatisfied: false,
+    savedSatisfied: false,
+    setupSatisfied: false,
+    ...overrides,
+  };
+}
+
+function buildMicrosoftProvider(
+  overrides: Partial<CommsProviderStatus> = {},
+): CommsProviderStatus {
+  return {
+    id: 'microsoft',
+    label: 'Microsoft Teams',
+    fields: [
+      {
+        envVarName: 'ROOMOTE_AUTH_MICROSOFT_CLIENT_ID',
+        acceptedEnvVarNames: ['ROOMOTE_AUTH_MICROSOFT_CLIENT_ID'],
+        label: 'Microsoft Client ID',
+        runtimeSatisfied: false,
+        savedSatisfied: false,
+        satisfiedByEnvVarName: null,
+      },
+    ],
+    runtimeSatisfied: false,
+    savedSatisfied: false,
+    setupSatisfied: false,
+    ...overrides,
+  };
+}
+
+describe('CommsProviderSection', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    state.slackInstallation = null;
+    state.slackInstallationIsPending = false;
+    state.connectSlackIsPending = false;
+    state.disconnectSlackIsPending = false;
+    state.connectSlackUrl = 'https://slack.com/install';
+    state.teamsStatus = {
+      botConfigured: false,
+      botUsesTenantSpecificTokenFlow: false,
+      microsoftAuthConfigured: false,
+      webhookUrl: 'https://openmote.dev/api/webhooks/teams',
+      openInTeamsUrl: null,
+    };
+    state.teamsStatusIsPending = false;
+    state.teamsStatusIsError = false;
+    state.routerDebugSettings = {
+      routerDebugSlackChannelId: null,
+      envFallbackSlackChannelId: null,
+      effectiveRouterDebugSlackChannelId: null,
+      source: 'none',
+    };
+    state.routerDebugIsPending = false;
+    state.routerDebugIsError = false;
+    state.slackChannels = [];
+    state.slackChannelsIsPending = false;
+    state.slackChannelsIsError = false;
+    state.slackChannelsIsFetching = false;
+    state.updateRouterDebugIsPending = false;
+  });
+
+  describe('Slack workspace auth button', () => {
+    it('shows an Auth button when Slack is configured but not installed', () => {
+      render(
+        <CommsProviderSection
+          provider={buildSlackProvider({
+            savedSatisfied: true,
+            setupSatisfied: true,
+          })}
+          onSave={vi.fn()}
+          onClear={vi.fn()}
+          savePending={false}
+          clearPending={false}
+        />,
+      );
+
+      expect(
+        screen.getByRole('button', { name: 'Auth Slack workspace' }),
+      ).toBeInTheDocument();
+    });
+
+    it('shows a Re-auth button when Slack is installed', () => {
+      state.slackInstallation = { teamName: 'Roomote' };
+      render(
+        <CommsProviderSection
+          provider={buildSlackProvider({
+            savedSatisfied: true,
+            setupSatisfied: true,
+          })}
+          onSave={vi.fn()}
+          onClear={vi.fn()}
+          savePending={false}
+          clearPending={false}
+        />,
+      );
+
+      expect(
+        screen.getByRole('button', { name: 'Re-auth Slack workspace' }),
+      ).toBeInTheDocument();
+    });
+
+    it('hides the auth button when Slack is not configured', () => {
+      render(
+        <CommsProviderSection
+          provider={buildSlackProvider()}
+          onSave={vi.fn()}
+          onClear={vi.fn()}
+          savePending={false}
+          clearPending={false}
+        />,
+      );
+
+      expect(
+        screen.queryByRole('button', { name: 'Auth Slack workspace' }),
+      ).not.toBeInTheDocument();
+      expect(
+        screen.queryByRole('button', { name: 'Re-auth Slack workspace' }),
+      ).not.toBeInTheDocument();
+    });
+
+    it('starts Slack workspace authorization on Auth click', () => {
+      const originalHref = window.location.href;
+      Object.defineProperty(window, 'location', {
+        configurable: true,
+        value: new URL(originalHref),
+      });
+
+      render(
+        <CommsProviderSection
+          provider={buildSlackProvider({
+            savedSatisfied: true,
+            setupSatisfied: true,
+          })}
+          onSave={vi.fn()}
+          onClear={vi.fn()}
+          savePending={false}
+          clearPending={false}
+        />,
+      );
+
+      fireEvent.click(
+        screen.getByRole('button', { name: 'Auth Slack workspace' }),
+      );
+
+      expect(mutations.connectSlack).toHaveBeenCalled();
+    });
+  });
+
+  describe('Slack diagnostics channel', () => {
+    it('renders the diagnostics channel control when Slack is installed', () => {
+      state.slackInstallation = { teamName: 'Roomote' };
+      state.slackChannels = [
+        {
+          id: 'CDEBUG',
+          name: 'router-debug',
+          label: '#router-debug',
+          isPrivate: false,
+          isMember: true,
+        },
+      ];
+
+      render(
+        <CommsProviderSection
+          provider={buildSlackProvider({
+            savedSatisfied: true,
+            setupSatisfied: true,
+          })}
+          onSave={vi.fn()}
+          onClear={vi.fn()}
+          savePending={false}
+          clearPending={false}
+        />,
+      );
+
+      expect(screen.getByText('Diagnostics channel')).toBeInTheDocument();
+    });
+
+    it('hides the diagnostics channel control when Slack is not installed', () => {
+      render(
+        <CommsProviderSection
+          provider={buildSlackProvider({
+            savedSatisfied: true,
+            setupSatisfied: true,
+          })}
+          onSave={vi.fn()}
+          onClear={vi.fn()}
+          savePending={false}
+          clearPending={false}
+        />,
+      );
+
+      expect(screen.queryByText('Diagnostics channel')).not.toBeInTheDocument();
+    });
+  });
+
+  describe('Teams bot status', () => {
+    it('renders bot status and Open in Teams link when configured', () => {
+      state.teamsStatus = {
+        botConfigured: true,
+        botUsesTenantSpecificTokenFlow: true,
+        microsoftAuthConfigured: true,
+        webhookUrl: 'https://openmote.dev/api/webhooks/teams',
+        openInTeamsUrl: 'https://teams.microsoft.com/l/chat/0/0?users=28%3Abot',
+      };
+
+      render(
+        <CommsProviderSection
+          provider={buildMicrosoftProvider({
+            savedSatisfied: true,
+            setupSatisfied: true,
+          })}
+          onSave={vi.fn()}
+          onClear={vi.fn()}
+          savePending={false}
+          clearPending={false}
+        />,
+      );
+
+      expect(
+        screen.getByText(/Team members can link Microsoft Teams accounts/),
+      ).toBeInTheDocument();
+      expect(
+        screen.getByRole('button', { name: /Open in Teams/ }),
+      ).toBeInTheDocument();
+    });
+
+    it('renders the setup hint when the bot is not configured', () => {
+      render(
+        <CommsProviderSection
+          provider={buildMicrosoftProvider({
+            savedSatisfied: true,
+            setupSatisfied: true,
+          })}
+          onSave={vi.fn()}
+          onClear={vi.fn()}
+          savePending={false}
+          clearPending={false}
+        />,
+      );
+
+      expect(
+        screen.getByText(/TEAMS_BOT_APP_ID and TEAMS_BOT_APP_PASSWORD/),
+      ).toBeInTheDocument();
+    });
+
+    it('shows bot status and app-package download when only TEAMS_BOT_* is configured (no Microsoft sign-in)', () => {
+      state.teamsStatus = {
+        botConfigured: true,
+        botUsesTenantSpecificTokenFlow: true,
+        microsoftAuthConfigured: false,
+        webhookUrl: 'https://openmote.dev/api/webhooks/teams',
+        openInTeamsUrl: 'https://teams.microsoft.com/l/chat/0/0?users=28%3Abot',
+      };
+
+      render(
+        <CommsProviderSection
+          provider={buildMicrosoftProvider({
+            runtimeSatisfied: false,
+            savedSatisfied: false,
+            setupSatisfied: false,
+          })}
+          onSave={vi.fn()}
+          onClear={vi.fn()}
+          savePending={false}
+          clearPending={false}
+        />,
+      );
+
+      expect(
+        screen.getByText(/Bot configured for incoming Teams messages/),
+      ).toBeInTheDocument();
+      expect(
+        screen.getByRole('button', { name: /Open in Teams/ }),
+      ).toBeInTheDocument();
+      expect(
+        screen.getByRole('button', { name: /Download Teams app package/ }),
+      ).toBeInTheDocument();
+    });
+  });
+});

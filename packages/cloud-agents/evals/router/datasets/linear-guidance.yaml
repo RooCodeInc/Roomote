@@ -1,0 +1,162 @@
+# Linear guidance test cases for LLM routing evaluation
+# These verify that team guidance and session instructions from Linear
+# are correctly incorporated into the routing decision.
+# CLO-900: Linear guidance fields added to routing context
+
+- description: "Linear guidance - team guidance steers repo selection"
+  vars:
+    context: |
+      **Task Description**:
+      Refactor the authentication module to use OAuth2.
+
+      **Source**: Linear
+      **Issue**: ENG-456 - OAuth2 migration
+      **Team**: Backend
+      **Team Guidance**: Always use the acme/auth repository for authentication changes. The acme/api repo contains API routes only.
+
+      **Available Agents**:
+      - Coder [id: agent-coder-1]
+      - Explainer [id: agent-explainer-1]
+      - Planner [id: agent-planner-1]
+
+      **Available Repositories**:
+      - acme/auth: Authentication and authorization service
+      - acme/api: REST API endpoints
+      - acme/frontend: React frontend
+
+      **Available Environments**:
+      - Web App: Frontend and API (repos: acme/frontend, acme/api)
+    expectedWorkspaceValue: "acme/auth"
+    expectedAgentId: "agent-coder-1"
+  assert:
+    - type: javascript
+      value: file://assertions/routing-assertions.ts:isValidRoutingJson
+    # Team guidance says to use acme/auth for auth changes
+    - type: javascript
+      value: file://assertions/routing-assertions.ts:workspaceValueMatchesExpected
+
+- description: "Linear guidance - session instructions refine task scope"
+  vars:
+    context: |
+      **Task Description**:
+      Review the database queries for performance issues.
+
+      **Source**: Linear
+      **Issue**: PERF-789 - Slow query optimization
+      **Project**: Performance Sprint
+      **Team**: Data
+      **Session Instructions**: Focus only on the read replicas in acme/analytics. Do not touch the primary database in acme/api.
+
+      **Available Agents**:
+      - Coder [id: agent-coder-1]
+      - Explainer [id: agent-explainer-1]
+      - Planner [id: agent-planner-1]
+
+      **Available Repositories**:
+      - acme/analytics: Analytics and reporting with read replicas
+      - acme/api: Main API with primary database
+      - acme/data-pipeline: ETL and data processing
+
+      **Available Environments**:
+      - Data Platform: Analytics and data pipeline (repos: acme/analytics, acme/data-pipeline)
+    expectedWorkspaceValue: "acme/analytics"
+    expectedAgentId: "agent-explainer-1"
+  assert:
+    - type: javascript
+      value: file://assertions/routing-assertions.ts:isValidRoutingJson
+    # "review...for performance issues" is analysis/understanding
+    # Session instructions say to focus on acme/analytics
+    - type: javascript
+      value: file://assertions/routing-assertions.ts:workspaceValueMatchesExpected
+
+- description: "Linear guidance - team guidance suggests environment for cross-repo work"
+  vars:
+    context: |
+      **Task Description**:
+      Implement the new notification webhook handler.
+
+      **Source**: Linear
+      **Issue**: NOTIF-101 - Notification webhook integration
+      **Project**: Notifications V2
+      **Team**: Notifications
+      **Team Guidance**: Notification tasks always require both the API and frontend repos. Use the Notifications Stack environment.
+
+      **Available Agents**:
+      - Coder [id: agent-coder-1]
+      - Explainer [id: agent-explainer-1]
+
+      **Available Repositories**:
+      - acme/api: Backend API service
+      - acme/frontend: React frontend
+      - acme/notifications-lib: Notification delivery library
+
+      **Available Environments**:
+      - Notifications Stack: Notification development environment (repos: acme/api, acme/frontend, acme/notifications-lib)
+    expectedWorkspaceValue: "Notifications Stack"
+    expectedAgentId: "agent-coder-1"
+  assert:
+    - type: javascript
+      value: file://assertions/routing-assertions.ts:isValidRoutingJson
+    # Team guidance says to use the Notifications Stack environment
+    - type: javascript
+      value: file://assertions/routing-assertions.ts:hasValidWorkspaceValue
+    - type: javascript
+      value: file://assertions/routing-assertions.ts:workspaceValueMatchesExpected
+
+- description: "Linear guidance - both guidance and instructions present"
+  vars:
+    context: |
+      **Task Description**:
+      Add rate limiting to the API endpoints.
+
+      **Source**: Linear
+      **Issue**: SEC-202 - API rate limiting
+      **Team**: Security
+      **Team Guidance**: Security tasks should default to the acme/api-gateway repository. Check with the Platform team if changes affect shared middleware.
+      **Session Instructions**: This is a quick fix. Only add rate limiting to the /v2/uploads endpoint.
+
+      **Available Agents**:
+      - Coder [id: agent-coder-1]
+      - Explainer [id: agent-explainer-1]
+      - Planner [id: agent-planner-1]
+
+      **Available Repositories**:
+      - acme/api-gateway: API gateway with middleware and routing
+      - acme/api: Core API service
+      - acme/shared-middleware: Shared Express middleware
+
+      **Available Environments**:
+      - API Stack: Gateway and middleware (repos: acme/api-gateway, acme/shared-middleware)
+    expectedWorkspaceValue: "acme/api-gateway"
+    expectedAgentId: "agent-coder-1"
+  assert:
+    - type: javascript
+      value: file://assertions/routing-assertions.ts:isValidRoutingJson
+    # Team guidance says security tasks → acme/api-gateway
+    - type: javascript
+      value: file://assertions/routing-assertions.ts:workspaceValueMatchesExpected
+
+- description: "Linear guidance absent - should route normally without guidance"
+  vars:
+    context: |
+      **Task Description**:
+      Fix the broken CSS in the navigation header.
+
+      **Source**: Linear
+      **Issue**: UI-555 - Nav header CSS broken
+      **Team**: Frontend
+
+      **Available Agents**:
+      - Coder [id: agent-coder-1]
+      - Explainer [id: agent-explainer-1]
+
+      **Available Repositories**:
+      - acme/frontend: React frontend application
+      - acme/design-system: Shared UI component library
+    expectedAgentId: "agent-coder-1"
+  assert:
+    - type: javascript
+      value: file://assertions/routing-assertions.ts:isValidRoutingJson
+    # No guidance - should still pick the right repo from context
+    - type: javascript
+      value: file://assertions/routing-assertions.ts:hasValidWorkspaceValue

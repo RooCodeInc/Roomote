@@ -1,0 +1,640 @@
+import * as fs from 'node:fs';
+import { EventEmitter } from 'node:events';
+
+import { z } from 'zod';
+
+const {
+  createOpencodeClientMock,
+  createServerMock,
+  execFileMock,
+  execFileSyncMock,
+  mockResolveEffectiveModelRuntimeEnv,
+  spawnMock,
+  sessionCreateMock,
+  sessionPromptMock,
+} = vi.hoisted(() => ({
+  createOpencodeClientMock: vi.fn(),
+  createServerMock: vi.fn(),
+  execFileMock: vi.fn(),
+  execFileSyncMock: vi.fn(),
+  mockResolveEffectiveModelRuntimeEnv: vi.fn(),
+  spawnMock: vi.fn(),
+  sessionCreateMock: vi.fn(),
+  sessionPromptMock: vi.fn(),
+}));
+
+vi.mock('@opencode-ai/sdk/v2/client', () => ({
+  createOpencodeClient: createOpencodeClientMock,
+}));
+
+vi.mock('node:child_process', () => ({
+  execFile: execFileMock,
+  execFileSync: execFileSyncMock,
+  spawn: spawnMock,
+}));
+
+vi.mock('node:net', () => ({
+  createServer: createServerMock,
+}));
+
+vi.mock('@roomote/db/server', () => ({
+  resolveEffectiveModelRuntimeEnv: mockResolveEffectiveModelRuntimeEnv,
+}));
+
+import {
+  createOpenCodeSdkFetch,
+  resolveOpenCodeSmallModel,
+} from '../non-task-provider-usage';
+
+const DEFAULT_OPENCODE_CLI_VERSION = '1.17.8';
+
+type SpawnedServer = EventEmitter & {
+  stdout: EventEmitter;
+  stderr: EventEmitter;
+  exitCode: number | null;
+  signalCode: NodeJS.Signals | null;
+  kill: ReturnType<typeof vi.fn>;
+};
+
+const spawnedServers: SpawnedServer[] = [];
+
+function createReservedPortServer(port: number) {
+  const server = new EventEmitter() as EventEmitter & {
+    address: ReturnType<typeof vi.fn>;
+    close: ReturnType<typeof vi.fn>;
+    listen: ReturnType<typeof vi.fn>;
+  };
+  server.address = vi.fn(() => ({
+    address: '127.0.0.1',
+    family: 'IPv4',
+    port,
+  }));
+  server.close = vi.fn((callback?: (error?: Error) => void) => {
+    callback?.();
+    return server;
+  });
+  server.listen = vi.fn(
+    (_port: number, _hostname: string, callback: () => void) => {
+      queueMicrotask(callback);
+      return server;
+    },
+  );
+
+  return server;
+}
+
+function createSpawnedServer(): SpawnedServer {
+  const proc = new EventEmitter() as SpawnedServer;
+  proc.stdout = new EventEmitter();
+  proc.stderr = new EventEmitter();
+  proc.exitCode = null;
+  proc.signalCode = null;
+  proc.kill = vi.fn((signal: NodeJS.Signals = 'SIGTERM') => {
+    proc.signalCode = signal;
+    proc.emit('exit', null, signal);
+    return true;
+  });
+  spawnedServers.push(proc);
+  queueMicrotask(() => {
+    proc.stdout.emit('data', Buffer.from('opencode server booting\n'));
+  });
+  return proc;
+}
+
+function getOpenCodeCliVersionArg(dockerfile: string): string | undefined {
+  return /^ARG OPENCODE_CLI_VERSION=(\S+)$/mu.exec(dockerfile)?.[1];
+}
+
+describe('resolveOpenCodeSmallModel', () => {
+  const originalEnv = process.env;
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    process.env = originalEnv;
+    mockResolveEffectiveModelRuntimeEnv.mockResolvedValue({});
+    spawnedServers.length = 0;
+    let nextServerPort = 4100;
+    createServerMock.mockImplementation(() =>
+      createReservedPortServer(nextServerPort++),
+    );
+    spawnMock.mockImplementation(() => createSpawnedServer());
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response('ok'));
+    createOpencodeClientMock.mockReturnValue({
+      session: {
+        create: sessionCreateMock,
+        prompt: sessionPromptMock,
+      },
+    });
+    sessionCreateMock.mockResolvedValue({
+      data: { id: 'session-1' },
+      error: undefined,
+    });
+  });
+
+  afterEach(() => {
+    for (const server of spawnedServers) {
+      if (server.exitCode === null && server.signalCode === null) {
+        server.exitCode = 0;
+        server.emit('exit', 0, null);
+      }
+    }
+    process.env = originalEnv;
+    vi.restoreAllMocks();
+  });
+
+  it('uses the deployment small model when configured', () => {
+    process.env = {
+      ...originalEnv,
+      ROOMOTE_MODEL: 'openrouter/anthropic/claude-sonnet-4',
+      ROOMOTE_SMALL_MODEL: 'openrouter/openai/gpt-4.1-mini',
+    };
+
+    expect(resolveOpenCodeSmallModel()).toBe('openrouter/openai/gpt-4.1-mini');
+  });
+
+  it('falls back to the deployment task model', () => {
+    process.env = {
+      ...originalEnv,
+      ROOMOTE_MODEL: 'openrouter/anthropic/claude-sonnet-4',
+    };
+    delete process.env.ROOMOTE_SMALL_MODEL;
+
+    expect(resolveOpenCodeSmallModel()).toBe(
+      'openrouter/anthropic/claude-sonnet-4',
+    );
+  });
+
+  it('reuses a managed OpenCode SDK server for matching structured object calls', async () => {
+    process.env = {
+      ...originalEnv,
+    };
+    mockResolveEffectiveModelRuntimeEnv.mockResolvedValue({
+      ROOMOTE_MODEL: 'openrouter/z-ai/glm-5.2',
+      ROOMOTE_SMALL_MODEL: 'openrouter/openai/gpt-5.4',
+      OPENROUTER_API_KEY: 'test-key',
+    });
+    sessionPromptMock.mockResolvedValue({
+      data: {
+        info: {
+          structured: {
+            workspaceValue: 'Full Stack',
+            reasoning: 'Best fit',
+            confidence: 0.92,
+            needsExternalLookup: false,
+            externalReference: null,
+          },
+        },
+        parts: [],
+      },
+      error: undefined,
+    });
+
+    const { generateTrackedNonTaskObject, NON_TASK_INFERENCE_SURFACES } =
+      await import('../non-task-provider-usage.js');
+    const schema = z.object({
+      workspaceValue: z.string(),
+      reasoning: z.string(),
+      confidence: z.number(),
+      needsExternalLookup: z.boolean(),
+      externalReference: z.string().nullable(),
+    });
+
+    const result = await generateTrackedNonTaskObject({
+      surface: NON_TASK_INFERENCE_SURFACES.routerTaskRouting,
+      schema,
+      system: 'You route tasks.',
+      prompt: 'Choose a workspace.',
+    });
+    const secondResult = await generateTrackedNonTaskObject({
+      surface: NON_TASK_INFERENCE_SURFACES.routerTaskRouting,
+      schema,
+      system: 'You route tasks.',
+      prompt: 'Choose a workspace.',
+    });
+
+    expect(result.object.workspaceValue).toBe('Full Stack');
+    expect(secondResult.object.workspaceValue).toBe('Full Stack');
+    expect(spawnMock).toHaveBeenCalledTimes(1);
+    expect(spawnMock).toHaveBeenCalledWith(
+      'opencode',
+      ['serve', '--hostname=127.0.0.1', '--port=4100'],
+      expect.any(Object),
+    );
+    expect(spawnedServers[0]?.kill).not.toHaveBeenCalled();
+    expect(createOpencodeClientMock).toHaveBeenCalledTimes(2);
+    expect(createOpencodeClientMock).toHaveBeenNthCalledWith(1, {
+      baseUrl: 'http://127.0.0.1:4100',
+      fetch: expect.any(Function),
+    });
+    expect(createOpencodeClientMock).toHaveBeenNthCalledWith(2, {
+      baseUrl: 'http://127.0.0.1:4100',
+      fetch: expect.any(Function),
+    });
+    expect(sessionPromptMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        model: {
+          providerID: 'openrouter',
+          modelID: 'openai/gpt-5.4',
+        },
+      }),
+      expect.any(Object),
+    );
+  });
+
+  it('starts a separate managed OpenCode SDK server when model env changes', async () => {
+    process.env = {
+      ...originalEnv,
+    };
+    mockResolveEffectiveModelRuntimeEnv
+      .mockResolvedValueOnce({
+        ROOMOTE_MODEL: 'openrouter/z-ai/glm-5.2',
+        ROOMOTE_SMALL_MODEL: 'openrouter/openai/gpt-5.4',
+        OPENROUTER_API_KEY: 'test-key',
+      })
+      .mockResolvedValueOnce({
+        ROOMOTE_MODEL: 'openrouter/z-ai/glm-5.2',
+        ROOMOTE_SMALL_MODEL: 'openrouter/z-ai/glm-5.2',
+        OPENROUTER_API_KEY: 'test-key',
+      });
+    sessionPromptMock.mockResolvedValue({
+      data: {
+        info: {
+          structured: {
+            answer: 'ok',
+          },
+        },
+        parts: [],
+      },
+      error: undefined,
+    });
+
+    const { generateTrackedNonTaskObject, NON_TASK_INFERENCE_SURFACES } =
+      await import('../non-task-provider-usage.js');
+
+    await generateTrackedNonTaskObject({
+      surface: NON_TASK_INFERENCE_SURFACES.routerTaskRouting,
+      schema: z.object({ answer: z.string() }),
+      prompt: 'Answer.',
+    });
+    await generateTrackedNonTaskObject({
+      surface: NON_TASK_INFERENCE_SURFACES.routerTaskRouting,
+      schema: z.object({ answer: z.string() }),
+      prompt: 'Answer.',
+    });
+
+    expect(spawnMock).toHaveBeenCalledTimes(2);
+    expect(createOpencodeClientMock).toHaveBeenNthCalledWith(1, {
+      baseUrl: 'http://127.0.0.1:4100',
+      fetch: expect.any(Function),
+    });
+    expect(createOpencodeClientMock).toHaveBeenNthCalledWith(2, {
+      baseUrl: 'http://127.0.0.1:4101',
+      fetch: expect.any(Function),
+    });
+  });
+
+  it('uses the configured OpenCode SDK server URL without spawning a managed server', async () => {
+    process.env = {
+      ...originalEnv,
+      OPENCODE_SDK_SERVER_URL: 'http://127.0.0.1:4096',
+    };
+    mockResolveEffectiveModelRuntimeEnv.mockResolvedValue({
+      ROOMOTE_MODEL: 'openrouter/z-ai/glm-5.2',
+      ROOMOTE_SMALL_MODEL: 'openrouter/openai/gpt-5.4',
+    });
+    sessionPromptMock.mockResolvedValue({
+      data: {
+        info: {
+          structured: {
+            workspaceValue: 'Full Stack',
+            reasoning: 'Best fit',
+            confidence: 0.92,
+            needsExternalLookup: false,
+            externalReference: null,
+          },
+        },
+        parts: [],
+      },
+      error: undefined,
+    });
+
+    const { generateTrackedNonTaskObject, NON_TASK_INFERENCE_SURFACES } =
+      await import('../non-task-provider-usage.js');
+    const schema = z.object({
+      workspaceValue: z.string(),
+      reasoning: z.string(),
+      confidence: z.number(),
+      needsExternalLookup: z.boolean(),
+      externalReference: z.string().nullable(),
+    });
+
+    const result = await generateTrackedNonTaskObject({
+      surface: NON_TASK_INFERENCE_SURFACES.routerTaskRouting,
+      schema,
+      system: 'You route tasks.',
+      prompt: 'Choose a workspace.',
+    });
+
+    expect(result.object.workspaceValue).toBe('Full Stack');
+    expect(spawnMock).not.toHaveBeenCalled();
+    expect(createOpencodeClientMock).toHaveBeenCalledWith({
+      baseUrl: 'http://127.0.0.1:4096',
+      fetch: expect.any(Function),
+    });
+    expect(sessionCreateMock).toHaveBeenCalledWith(
+      {
+        directory: process.cwd(),
+        title: `Roomote ${NON_TASK_INFERENCE_SURFACES.routerTaskRouting}`,
+      },
+      expect.objectContaining({
+        signal: expect.any(AbortSignal),
+      }),
+    );
+    expect(sessionPromptMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        sessionID: 'session-1',
+        directory: process.cwd(),
+        model: {
+          providerID: 'openrouter',
+          modelID: 'openai/gpt-5.4',
+        },
+        system: 'You route tasks.',
+        format: expect.objectContaining({
+          type: 'json_schema',
+          retryCount: 2,
+          schema: expect.objectContaining({
+            type: 'object',
+            properties: expect.objectContaining({
+              workspaceValue: expect.any(Object),
+            }),
+          }),
+        }),
+        parts: [
+          {
+            type: 'text',
+            text: 'Choose a workspace.',
+          },
+        ],
+      }),
+      expect.objectContaining({
+        signal: expect.any(AbortSignal),
+      }),
+    );
+  });
+
+  it('rejects when the SDK response omits structured data', async () => {
+    process.env = {
+      ...originalEnv,
+      OPENCODE_SDK_SERVER_URL: 'http://127.0.0.1:4096',
+    };
+    mockResolveEffectiveModelRuntimeEnv.mockResolvedValue({
+      ROOMOTE_MODEL: 'openrouter/z-ai/glm-5.2',
+    });
+    sessionPromptMock.mockResolvedValue({
+      data: {
+        info: {},
+        parts: [
+          {
+            type: 'text',
+            text: '```json\n{"answer":"ok"}\n```',
+          },
+        ],
+      },
+      error: undefined,
+    });
+
+    const { generateTrackedNonTaskObject, NON_TASK_INFERENCE_SURFACES } =
+      await import('../non-task-provider-usage.js');
+
+    await expect(
+      generateTrackedNonTaskObject({
+        surface: NON_TASK_INFERENCE_SURFACES.routerTaskRouting,
+        schema: z.object({ answer: z.string() }),
+        prompt: 'Answer.',
+      }),
+    ).rejects.toThrow('OpenCode structured prompt returned no structured data');
+  });
+
+  it('rejects when the SDK structured call fails', async () => {
+    process.env = {
+      ...originalEnv,
+      OPENCODE_SDK_SERVER_URL: 'http://127.0.0.1:4096',
+    };
+    mockResolveEffectiveModelRuntimeEnv.mockResolvedValue({
+      ROOMOTE_MODEL: 'openrouter/z-ai/glm-5.2',
+    });
+    sessionPromptMock.mockResolvedValue({
+      data: undefined,
+      error: {
+        name: 'StructuredOutputError',
+        data: {
+          message: 'failed to satisfy schema',
+          retries: 2,
+        },
+      },
+    });
+
+    const { generateTrackedNonTaskObject, NON_TASK_INFERENCE_SURFACES } =
+      await import('../non-task-provider-usage.js');
+
+    await expect(
+      generateTrackedNonTaskObject({
+        surface: NON_TASK_INFERENCE_SURFACES.routerTaskRouting,
+        schema: z.object({ answer: z.string() }),
+        prompt: 'Answer.',
+      }),
+    ).rejects.toThrow(
+      'OpenCode structured prompt failed: StructuredOutputError: failed to satisfy schema',
+    );
+  });
+
+  it('returns the joined text parts from a plain SDK prompt', async () => {
+    process.env = {
+      ...originalEnv,
+      OPENCODE_SDK_SERVER_URL: 'http://127.0.0.1:4096',
+    };
+    mockResolveEffectiveModelRuntimeEnv.mockResolvedValue({
+      ROOMOTE_MODEL: 'openrouter/z-ai/glm-5.2',
+      ROOMOTE_SMALL_MODEL: 'openrouter/openai/gpt-5.4',
+    });
+    sessionPromptMock.mockResolvedValue({
+      data: {
+        info: { error: null },
+        parts: [
+          { type: 'text', text: 'clean answer' },
+          { type: 'tool', tool: 'read', state: { status: 'completed' } },
+        ],
+      },
+      error: undefined,
+    });
+
+    const { generateTrackedNonTaskText, NON_TASK_INFERENCE_SURFACES } =
+      await import('../non-task-provider-usage.js');
+
+    const result = await generateTrackedNonTaskText({
+      surface: NON_TASK_INFERENCE_SURFACES.taskSummaryGeneration,
+      system: 'You summarize.',
+      prompt: 'Summarize the change.',
+    });
+
+    expect(result).toBe('clean answer');
+    expect(sessionPromptMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        sessionID: 'session-1',
+        directory: process.cwd(),
+        model: {
+          providerID: 'openrouter',
+          modelID: 'openai/gpt-5.4',
+        },
+        system: 'You summarize.',
+        parts: [
+          {
+            type: 'text',
+            text: 'Summarize the change.',
+          },
+        ],
+      }),
+      expect.objectContaining({
+        signal: expect.any(AbortSignal),
+      }),
+    );
+    // Plain-text calls never send a structured-output format.
+    expect(sessionPromptMock.mock.calls[0]?.[0]).not.toHaveProperty('format');
+  });
+
+  it('rejects when the plain SDK prompt reports a message error', async () => {
+    process.env = {
+      ...originalEnv,
+      OPENCODE_SDK_SERVER_URL: 'http://127.0.0.1:4096',
+    };
+    mockResolveEffectiveModelRuntimeEnv.mockResolvedValue({
+      ROOMOTE_MODEL: 'openrouter/z-ai/glm-5.2',
+    });
+    sessionPromptMock.mockResolvedValue({
+      data: {
+        info: {
+          error: {
+            name: 'ProviderError',
+            data: { message: 'model unavailable' },
+          },
+        },
+        parts: [],
+      },
+      error: undefined,
+    });
+
+    const { generateTrackedNonTaskText, NON_TASK_INFERENCE_SURFACES } =
+      await import('../non-task-provider-usage.js');
+
+    await expect(
+      generateTrackedNonTaskText({
+        surface: NON_TASK_INFERENCE_SURFACES.taskSummaryGeneration,
+        prompt: 'Summarize the change.',
+      }),
+    ).rejects.toThrow(
+      'OpenCode text prompt failed: ProviderError: model unavailable',
+    );
+  });
+
+  it('uses explicit models while still carrying resolved provider env when available', async () => {
+    process.env = {
+      ...originalEnv,
+      OPENCODE_SDK_SERVER_URL: 'http://127.0.0.1:4096',
+    };
+    mockResolveEffectiveModelRuntimeEnv.mockResolvedValue({
+      ROOMOTE_MODEL: 'openrouter/openai/gpt-5.4',
+      OPENROUTER_API_KEY: 'test-key',
+    });
+    sessionPromptMock.mockResolvedValue({
+      data: {
+        info: {
+          structured: {
+            answer: 'ok',
+          },
+        },
+        parts: [],
+      },
+      error: undefined,
+    });
+
+    const { generateTrackedNonTaskObject, NON_TASK_INFERENCE_SURFACES } =
+      await import('../non-task-provider-usage.js');
+    const result = await generateTrackedNonTaskObject({
+      surface: NON_TASK_INFERENCE_SURFACES.routerTaskRouting,
+      model: 'openrouter/z-ai/glm-5.2',
+      schema: z.object({ answer: z.string() }),
+      prompt: 'Answer.',
+    });
+
+    expect(result.object.answer).toBe('ok');
+    expect(mockResolveEffectiveModelRuntimeEnv).toHaveBeenCalled();
+    expect(sessionPromptMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        model: {
+          providerID: 'openrouter',
+          modelID: 'z-ai/glm-5.2',
+        },
+      }),
+      expect.any(Object),
+    );
+  });
+});
+
+describe('createOpenCodeSdkFetch', () => {
+  it('normalizes Request objects before calling the underlying fetch', async () => {
+    const response = new Response('{}', { status: 200 });
+    const fetchImpl = vi.fn().mockResolvedValue(response);
+    const sdkFetch = createOpenCodeSdkFetch(
+      fetchImpl as unknown as typeof fetch,
+    );
+    const request = new Request(
+      'http://127.0.0.1:4096/session/session-1/message',
+      {
+        body: '{"ok":true}',
+        headers: { 'Content-Type': 'application/json' },
+        method: 'POST',
+      },
+    );
+
+    await expect(sdkFetch(request)).resolves.toBe(response);
+    expect(fetchImpl).toHaveBeenCalledWith(
+      'http://127.0.0.1:4096/session/session-1/message',
+      expect.objectContaining({
+        body: request.body,
+        duplex: 'half',
+        headers: request.headers,
+        method: 'POST',
+      }),
+    );
+  });
+});
+
+describe('non-task OpenCode image packaging', () => {
+  it('keeps the shared app image able to run the same OpenCode CLI as workers', () => {
+    const appDockerfile = fs.readFileSync(
+      new URL('../../../../../.docker/app/Dockerfile', import.meta.url),
+      'utf8',
+    );
+    const workerDockerfile = fs.readFileSync(
+      new URL('../../../../../apps/worker/Dockerfile', import.meta.url),
+      'utf8',
+    );
+
+    expect(getOpenCodeCliVersionArg(appDockerfile)).toBe(
+      DEFAULT_OPENCODE_CLI_VERSION,
+    );
+    expect(getOpenCodeCliVersionArg(appDockerfile)).toBe(
+      getOpenCodeCliVersionArg(workerDockerfile),
+    );
+    expect(appDockerfile).toContain(
+      'npm install --prefix /opt/opencode-cli --no-save --no-package-lock \\',
+    );
+    expect(appDockerfile).toContain('"opencode-ai@${OPENCODE_CLI_VERSION}"');
+    expect(appDockerfile).toContain(
+      'test "$(/opt/opencode-cli/node_modules/.bin/opencode --version)" = "${OPENCODE_CLI_VERSION}"',
+    );
+    expect(appDockerfile).toContain(
+      'ln -sf /opt/opencode-cli/node_modules/.bin/opencode /usr/local/bin/opencode',
+    );
+  });
+});

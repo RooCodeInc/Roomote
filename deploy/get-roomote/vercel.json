@@ -1,0 +1,11 @@
+{
+  "rewrites": [
+    { "source": "/", "destination": "/api/install" },
+    { "source": "/install.sh", "destination": "/api/install" },
+    { "source": "/latest-version", "destination": "/api/latest-version" },
+    {
+      "source": "/raw/:ref/:path*",
+      "destination": "/api/raw?ref=:ref&path=:path*"
+    }
+  ]
+}

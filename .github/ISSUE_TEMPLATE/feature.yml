@@ -1,0 +1,86 @@
+name: Feature request or product proposal
+description: Propose a focused Roomote feature or product change.
+title: "[Feature]: "
+labels: ["enhancement", "needs-triage"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Roomote currently prefers well-written issues over unsolicited pull requests. Please describe the problem and product shape before proposing implementation details.
+  - type: checkboxes
+    id: preflight
+    attributes:
+      label: Preflight
+      options:
+        - label: I searched existing issues and docs before opening this.
+          required: true
+        - label: This proposal is grounded in a real Roomote use case, not a broad generated feature list.
+          required: true
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem
+      description: What problem should Roomote solve?
+      placeholder: Who has this problem, and when do they hit it?
+    validations:
+      required: true
+  - type: textarea
+    id: current-workaround
+    attributes:
+      label: Current workaround
+      description: How do users handle this today?
+    validations:
+      required: true
+  - type: textarea
+    id: proposed-behavior
+    attributes:
+      label: Proposed behavior
+      description: What should Roomote do differently?
+    validations:
+      required: true
+  - type: dropdown
+    id: affected-surfaces
+    attributes:
+      label: Affected surfaces
+      multiple: true
+      options:
+        - Web dashboard
+        - Generalist agent
+        - Code Reviewer
+        - PR Fixer
+        - Slack
+        - Teams
+        - Telegram
+        - Linear
+        - GitHub
+        - GitLab
+        - Gitea
+        - Azure DevOps
+        - MCP
+        - API
+        - Self-hosting or deployment
+        - Docs
+        - Other
+    validations:
+      required: true
+  - type: textarea
+    id: self-hosting
+    attributes:
+      label: Self-hosting implications
+      description: Does this require new env vars, services, ports, credentials, storage, compute, migrations, or provider setup?
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+      description: What alternatives, smaller versions, or local customizations have you considered?
+    validations:
+      required: false
+  - type: textarea
+    id: docs
+    attributes:
+      label: Documentation impact
+      description: Which docs would need to change, if any?
+    validations:
+      required: false

@@ -1,0 +1,101 @@
+---
+title: Agent Guidance
+icon: scroll-text
+description: Add deployment-wide instructions that Roomote should consider across tasks.
+---
+
+Agent Guidance is shared instruction text that applies across Roomote tasks in
+your deployment.
+
+Use it for durable preferences that should follow Roomote everywhere:
+communication style, review expectations, delivery habits, and team-wide rules
+that are not tied to one repository.
+
+Use it after the first task flow works. Agent Guidance is most useful when you
+are steering repeated behavior, not trying to solve missing repository access,
+provider setup, or environment configuration.
+
+## What belongs here
+
+Agent Guidance is best for team-level expectations:
+
+- how Roomote should communicate progress and blockers
+- what kind of evidence final updates should include
+- when Roomote should ask before making a risky change
+- review or delivery habits your whole team expects
+- terminology your team uses across projects
+
+Good examples:
+
+```text
+When changing code, summarize the validation you ran before handing work back.
+Ask before changing public API behavior.
+Prefer small pull requests with focused explanations.
+Call out uncertainty instead of presenting guesses as facts.
+```
+
+## What should go somewhere else
+
+Do not use Agent Guidance as the place for everything Roomote might ever need.
+
+| Put it in                | Use it for                                                                            |
+| ------------------------ | ------------------------------------------------------------------------------------- |
+| **Agent Guidance**       | Deployment-wide expectations that apply to most tasks                                 |
+| **Environment guidance** | Repository setup, commands, ports, service dependencies, and workspace-specific rules |
+| **Automations**          | Instructions for a specific recurring automation                                      |
+| **Task prompt**          | Context or constraints that only apply to the current ask                             |
+| **Personal Settings**    | A teammate's own linked accounts, profile, and app preferences                        |
+
+Never put secrets, tokens, or temporary credentials in Agent Guidance. Use
+environment variables and integration setup for access.
+
+Agent Guidance should also avoid one-off project instructions. If the rule
+belongs to one repository or one recurring automation, put it closer to that
+workflow so other tasks do not inherit noise.
+
+## Keep it short enough to follow
+
+The best guidance is specific and compact. Roomote can use a short set of
+durable rules more reliably than a long policy document.
+
+Prefer:
+
+```text
+For code changes, include the tests or checks you ran. If you could not
+verify, say why and name the next best check.
+```
+
+Avoid:
+
+```text
+Be excellent. Follow best practices. Make sure everything is high quality.
+```
+
+If a rule only matters for one repository, move it to that environment
+instead. If a rule only matters for one automation, put it in that
+automation's additional instructions.
+
+## When to update it
+
+Update Agent Guidance when you notice a repeated behavior you want to steer
+for the whole team.
+
+Common reasons:
+
+- final task messages are missing validation details
+- Roomote is too eager or too cautious for your team's review process
+- teammates need a consistent handoff format
+- your team has a durable policy around risky changes
+
+After you save changes, start a small new task and check whether the guidance
+shows up in the behavior you expected. Running tasks keep the context they
+already started with.
+
+## Common issues
+
+- **The guidance is ignored in one repository.** Check whether environment
+  guidance or the task prompt conflicts with it.
+- **Roomote sounds constrained or repetitive.** Shorten the guidance and
+  remove broad style rules.
+- **The same instruction only matters for one workflow.** Move it to the
+  relevant environment, automation, or task prompt.

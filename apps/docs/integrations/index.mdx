@@ -1,0 +1,93 @@
+---
+title: Integrations
+icon: plug
+description: Connect the tools that give Roomote the right context inside tasks.
+---
+
+import { IntegrationName } from '/snippets/integration-name.jsx';
+
+Integrations give Roomote more context inside a task: tickets, docs,
+monitoring, analytics, data systems, customer history, deployment state, and
+shared memory.
+
+This section does not list provider categories that have their own setup paths:
+communications providers, source-control providers, inference providers, and
+compute providers. Configure those from the provider-specific docs instead.
+
+## Connection patterns
+
+You will usually see one of these setup models:
+
+- **Admin connection once**: an admin connects the integration for the
+  deployment from **Settings > Integrations**
+- **Enable first, then teammates link accounts**: an admin enables the
+  integration, then each teammate links their own account from
+  [Personal Settings](/personal-settings) when they need it
+- **Workspace plus user identity**: the deployment connects the integration,
+  then individual users link their identity so Roomote can associate actions
+  correctly
+
+## Manage available tools
+
+Some connected integrations expose a **Manage tools** action in
+**Settings > Integrations**. Admins can use it to restrict the types of
+operations Roomote can make with the service.
+
+Use this as a coarse permissions system, for example allowing only read
+operations or restricting access to a certain type of entity. The list varies
+depending on the integration.
+
+Some integrations can only list tools after the first user links their account
+from [Personal Settings](/personal-settings).
+
+## Supported integrations
+
+| Integration                                                                                                       | Best for                                          | Connection model                           |
+| ----------------------------------------------------------------------------------------------------------------- | ------------------------------------------------- | ------------------------------------------ |
+| <IntegrationName href="/integrations/asana" icon="asana" name="Asana" />                                          | Project and task context from Asana               | Admin connection once                      |
+| <IntegrationName href="/integrations/better-stack" icon="betterstack" name="Better Stack" />                      | Monitoring and incident context                   | Admin connection once                      |
+| <IntegrationName href="/integrations/braintrust" icon="braintrust" name="Braintrust" />                           | Prompts, runs, and evaluation context             | Enable first, then teammates link accounts |
+| <IntegrationName href="/integrations/grafana" icon="grafana" name="Grafana" />                                    | Dashboards, alerting, and monitoring context      | Admin connection once                      |
+| <IntegrationName href="/integrations/jira" icon="jira" name="Jira" />                                             | Issues, projects, and JQL-backed issue context    | Admin connection once                      |
+| <IntegrationName href="/integrations/linear" icon="linear" name="Linear" />                                       | Turning issues into Roomote work                  | Workspace plus user identity               |
+| <IntegrationName href="/integrations/neon" icon="neon" name="Neon" />                                             | Database inspection in Neon                       | Enable first, then teammates link accounts |
+| <IntegrationName href="/integrations/notion" icon="notion" name="Notion" />                                       | Shared docs and database context                  | Enable first, then teammates link accounts |
+| <IntegrationName href="/integrations/posthog" icon="posthog" name="PostHog" />                                    | Product analytics, experiments, and error context | Admin connection once                      |
+| <IntegrationName href="/integrations/pylon" icon="/logo/integrations/pylon.svg" name="Pylon" />                   | Customer issue and account context                | Admin connection once                      |
+| <IntegrationName href="/integrations/railway" icon="railway" name="Railway" />                                    | Project and service context from Railway          | Admin connection once                      |
+| <IntegrationName href="/integrations/sentry" icon="sentry" name="Sentry" />                                       | Error and performance investigation               | Admin connection once                      |
+| <IntegrationName href="/integrations/snowflake" icon="snowflake" name="Snowflake" />                              | Data warehouse exploration                        | Admin connection once                      |
+| <IntegrationName href="/integrations/supabase" icon="supabase" name="Supabase" />                                 | Read-only database access in Supabase             | Enable first, then teammates link accounts |
+| <IntegrationName href="/integrations/supermemory" icon="/logo/integrations/supermemory.svg" name="Supermemory" /> | Shared memory context across tasks                | Admin connection once                      |
+| <IntegrationName href="/integrations/vercel" icon="vercel" name="Vercel" />                                       | Deployments, logs, and domain availability        | Admin connection once                      |
+
+## Custom MCP servers
+
+Beyond the built-in catalog, environments can configure custom MCP servers so
+tasks can reach tools that are specific to your team. Add them in the YAML view
+of the environment editor. See [Environments](/environments).
+
+Use deployment or user-linked integrations when the tool is broadly useful
+across teams. Use an environment-level MCP server when the tool only makes
+sense for one workspace, repository set, or self-hosted service.
+
+## A practical order
+
+For most teams, this order works well:
+
+1. the required providers:
+   [Comms](/communications), [Source Control](/environments),
+   [Inference](/models), and [Compute](/compute)
+2. one task-tracking integration, such as Linear, Jira, or Asana, if your team
+   already works there
+3. one monitoring or deployment integration, such as Sentry, Grafana, Railway,
+   Better Stack, or Vercel, when investigations need it
+4. one knowledge-base integration, such as Notion, to get tasks done directly
+   from specs and runbooks
+5. one data integration, such as Snowflake, Supabase, or Neon, when tasks need
+   database or warehouse context
+6. Supermemory when you want durable team context to carry across tasks
+
+After each connection, run a small task that uses the new context. For example,
+ask Roomote to summarize a linked issue, inspect a monitoring alert, or explain
+which environment a support thread belongs to.

@@ -1,0 +1,72 @@
+{
+  "name": "@roomote/sdk",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": {
+      "import": "./src/index.ts",
+      "require": "./src/index.ts"
+    },
+    "./client": {
+      "import": "./src/client/index.ts",
+      "require": "./src/client/index.ts"
+    },
+    "./sandbox-router": {
+      "import": "./src/sandbox-router.ts",
+      "require": "./src/sandbox-router.ts"
+    },
+    "./server": {
+      "import": "./src/server/index.ts",
+      "require": "./src/server/index.ts"
+    },
+    "./server/slack-conversation-log": {
+      "import": "./src/server/lib/slack-conversation-log.ts",
+      "require": "./src/server/lib/slack-conversation-log.ts"
+    },
+    "./server/telegram-primary-chat": {
+      "import": "./src/server/lib/telegram-primary-chat.ts",
+      "require": "./src/server/lib/telegram-primary-chat.ts"
+    },
+    "./server/teams-primary-conversation": {
+      "import": "./src/server/lib/teams-primary-conversation.ts",
+      "require": "./src/server/lib/teams-primary-conversation.ts"
+    }
+  },
+  "scripts": {
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
+    "lint": "eslint src --ext=ts --max-warnings=0",
+    "check-types": "tsc --noEmit",
+    "check-types:fast": "tsgo --noEmit",
+    "test": "dotenvx run -f ../../.env.test -- vitest",
+    "clean": "rimraf .turbo"
+  },
+  "dependencies": {
+    "@roomote/ado": "workspace:^",
+    "@roomote/auth": "workspace:^",
+    "@roomote/cloud-agents": "workspace:^",
+    "@roomote/communication": "workspace:^",
+    "@roomote/compute-providers": "workspace:^",
+    "@roomote/db": "workspace:^",
+    "@roomote/feature-flags": "workspace:^",
+    "@roomote/gitea": "workspace:^",
+    "@roomote/github": "workspace:^",
+    "@roomote/gitlab": "workspace:^",
+    "@roomote/linear": "workspace:^",
+    "@roomote/redis": "workspace:^",
+    "@roomote/slack": "workspace:^",
+    "@roomote/telemetry": "workspace:^",
+    "@roomote/types": "workspace:^",
+    "@trpc/client": "^11.15.0",
+    "@trpc/server": "^11.15.0",
+    "bullmq": "^5.78.0",
+    "superjson": "^2.2.6",
+    "zod": "^3.25.76"
+  },
+  "devDependencies": {
+    "@roomote/config-eslint": "workspace:^",
+    "@roomote/config-typescript": "workspace:^",
+    "@types/node": "^24.10.13",
+    "vitest": "^4.1.1"
+  }
+}

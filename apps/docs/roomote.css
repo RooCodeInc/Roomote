@@ -1,0 +1,110 @@
+/*
+ * Roomote brand styling for the public Mintlify docs site.
+ *
+ * Mintlify automatically loads CSS files placed at the root of the docs
+ * workspace, so this file is picked up without a docs.json reference.
+ */
+
+/* Monaspace Neon powers inline code and code blocks, matching the app. */
+@font-face {
+  font-family: 'Monaspace Neon';
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url('/fonts/monaspace-neon-latin-400-normal.woff2') format('woff2');
+}
+
+@font-face {
+  font-family: 'Monaspace Neon';
+  font-style: normal;
+  font-weight: 500;
+  font-display: swap;
+  src: url('/fonts/monaspace-neon-latin-500-normal.woff2') format('woff2');
+}
+
+@font-face {
+  font-family: 'Monaspace Neon';
+  font-style: normal;
+  font-weight: 700;
+  font-display: swap;
+  src: url('/fonts/monaspace-neon-latin-700-normal.woff2') format('woff2');
+}
+
+:root {
+  --roomote-lime: #b0cd26;
+  --roomote-lime-light: #d6ee26;
+  --roomote-code-font:
+    'Monaspace Neon', ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas,
+    'Liberation Mono', 'Courier New', monospace;
+  --roomote-radius: 0.75rem;
+}
+
+/* Apply the Roomote code font to inline code and code blocks. */
+code,
+pre,
+kbd,
+samp,
+.font-mono,
+[class*='language-'] {
+  font-family: var(--roomote-code-font);
+}
+
+/* Slightly softer, more rounded surfaces to match the app chrome. */
+pre,
+img,
+.rounded-lg,
+.rounded-xl {
+  border-radius: var(--roomote-radius);
+}
+
+/* Keep the external-site cue after the Roomote link label. */
+nav a[href='https://roomote.dev'],
+.navbar a[href='https://roomote.dev'] {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+}
+
+nav a[href='https://roomote.dev'] svg,
+.navbar a[href='https://roomote.dev'] svg {
+  order: 2;
+}
+
+.integration-name {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  width: max-content;
+  max-width: 100%;
+  padding: 0;
+  border: 0 !important;
+  background: none !important;
+  line-height: 1.2;
+  vertical-align: middle;
+  box-shadow: none !important;
+}
+
+.integration-logo {
+  display: inline-block;
+  width: 1rem;
+  height: 1rem;
+  flex: 0 0 auto;
+  margin: 0 !important;
+  vertical-align: middle;
+}
+
+.integration-name [data-rmiz],
+.integration-name [data-rmiz-content] {
+  display: inline-flex !important;
+  align-items: center;
+  flex: 0 0 auto;
+  margin: 0 !important;
+}
+
+.dark img.integration-logo[src^='https://api.iconify.design/simple-icons:'] {
+  filter: invert(1);
+}
+
+.dark img.integration-logo[src^='/logo/integrations/'] {
+  filter: invert(1);
+}

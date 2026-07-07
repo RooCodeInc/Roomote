@@ -1,0 +1,85 @@
+import {
+  DEFAULT_MODEL_PROVIDER_ENV_KEYS,
+  OPENCODE_AUTH_CONTENT_ENV_VAR_NAME,
+  parseModelProviderEnvKeys,
+} from '@roomote/types';
+
+import { ALLOWED_ENV_VARS } from './constants';
+
+const ALLOWED_ENV_PREFIXES = ['MISE_'];
+const BLOCKED_HARNESS_ENV_KEYS = new Set([
+  'AUTH_TOKEN',
+  'TRPC_URL',
+  'ROOMOTE_APP_URL',
+  'JOB_AUTH_PRIVATE_KEY',
+  'JOB_AUTH_PUBLIC_KEY',
+  'PREVIEW_AUTH_PUBLIC_KEY',
+  'PREVIEW_AUTH_COOKIE_NAME',
+  'PREVIEW_PROXY_BASE_URL',
+  'PREVIEW_PROXY_SUBDOMAIN_SUFFIX',
+]);
+const MODEL_RUNTIME_ENV_KEYS = [
+  'ROOMOTE_MODEL',
+  'ROOMOTE_SMALL_MODEL',
+  'ROOMOTE_VISION_MODEL',
+  'ROOMOTE_CODE_REVIEW_MODEL',
+  'ROOMOTE_EXPLORE_MODEL',
+  'ROOMOTE_PLANNING_MODEL',
+  'ROOMOTE_MODEL_REASONING_EFFORT',
+  'ROOMOTE_SMALL_MODEL_REASONING_EFFORT',
+  'ROOMOTE_VISION_MODEL_REASONING_EFFORT',
+  'ROOMOTE_CODE_REVIEW_MODEL_REASONING_EFFORT',
+  'ROOMOTE_EXPLORE_MODEL_REASONING_EFFORT',
+  'ROOMOTE_PLANNING_MODEL_REASONING_EFFORT',
+  'ROOMOTE_MODEL_ENV_KEYS',
+  'OPENCODE_CONFIG_CONTENT',
+  'OPENCODE_COMMAND',
+  OPENCODE_AUTH_CONTENT_ENV_VAR_NAME,
+] as const;
+export function sanitizeEnv(
+  env: Record<string, string | undefined>,
+): Record<string, string> {
+  const allowedEnv = new Set(ALLOWED_ENV_VARS);
+
+  return Object.fromEntries(
+    Object.entries(env).filter(
+      ([key, value]) =>
+        typeof value !== 'undefined' &&
+        (allowedEnv.has(key) ||
+          ALLOWED_ENV_PREFIXES.some((prefix) => key.startsWith(prefix))),
+    ),
+  ) as Record<string, string>;
+}
+
+export function buildOpenCodeHarnessEnv(
+  env: Record<string, string | undefined>,
+): Record<string, string> {
+  const harnessEnv: Record<string, string> = {};
+
+  for (const key of MODEL_RUNTIME_ENV_KEYS) {
+    const value = env[key]?.trim();
+
+    if (value) {
+      harnessEnv[key] = value;
+    }
+  }
+
+  const providerKeys = new Set([
+    ...DEFAULT_MODEL_PROVIDER_ENV_KEYS,
+    ...parseModelProviderEnvKeys(env.ROOMOTE_MODEL_ENV_KEYS),
+  ]);
+
+  for (const key of providerKeys) {
+    if (BLOCKED_HARNESS_ENV_KEYS.has(key)) {
+      continue;
+    }
+
+    const value = env[key];
+
+    if (value !== undefined) {
+      harnessEnv[key] = value;
+    }
+  }
+
+  return harnessEnv;
+}

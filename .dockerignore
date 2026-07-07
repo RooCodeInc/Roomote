@@ -1,0 +1,52 @@
+# git
+.git
+
+# build artifacts
+bin/
+dist/
+**/dist/
+out/
+**/out/
+
+# dependencies
+node_modules/
+**/node_modules/
+
+# testing
+coverage/
+**/.vscode-test/
+**/mock/
+
+# devtools
+knip.json
+.husky/
+
+# monorepo
+.turbo/
+**/.turbo/
+apps/docs/
+
+# next.js
+**/.next/
+apps/web/.next/
+.vercel
+
+# browser automation artifacts
+.playwright-mcp/
+
+# docker
+.docker/logs
+.docker/data
+
+# logs
+logs/
+
+# env files — never send real secrets into the build context.
+# Keep *.example templates and the tracked apps/web/.env placeholder.
+**/.env.local
+**/.env.local.*
+!**/.env.local.example
+**/.env.development
+**/.env.preview
+**/.env.production
+**/.env.test

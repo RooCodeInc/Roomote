@@ -1,0 +1,65 @@
+---
+title: Daytona
+icon: '/logo/integrations/daytona.svg'
+description: Run Roomote tasks on Daytona-hosted sandboxes from a registered worker snapshot.
+---
+
+Daytona is a hosted compute provider with straightforward API-key setup.
+Roomote starts task sandboxes from a registered worker snapshot and destroys
+them when they are no longer needed.
+
+## When to use Daytona
+
+Use Daytona when:
+
+- task work should run outside the Roomote host
+- you want hosted sandboxes with simple credential setup
+- you can provide a Daytona API key and worker snapshot name
+- snapshot resume support is not required for your workflow
+
+## Configuration
+
+Add Daytona from **Settings > Compute**, or provide the values as deployment
+env vars:
+
+```sh
+DAYTONA_API_KEY=...
+DAYTONA_SNAPSHOT_NAME=roomote-worker
+```
+
+Optional values:
+
+```sh
+DAYTONA_API_URL=...
+DAYTONA_TARGET=...
+```
+
+Use `DAYTONA_API_URL` for custom Daytona endpoints. Use `DAYTONA_TARGET` when
+your account or deployment needs a specific target or region.
+
+## Worker snapshot expectations
+
+The Daytona snapshot should contain the Roomote worker runtime: system
+packages, browser tooling, language tools, command helpers, and the worker
+bootstrap used to connect back to Roomote.
+
+Roomote can register a provider snapshot from the configured worker image in
+supported setup flows. For production, keep the worker image or snapshot name
+pinned so task startup is predictable.
+
+## Verify setup
+
+1. save `DAYTONA_API_KEY` and `DAYTONA_SNAPSHOT_NAME`
+2. select Daytona as the default compute provider
+3. start a small task from an environment
+4. confirm the task starts, streams logs, and can run project commands
+5. verify preview links if the task starts a web app
+
+## Common issues
+
+- **Daytona reports a missing snapshot.** Confirm `DAYTONA_SNAPSHOT_NAME`
+  exists and is available to the configured API key.
+- **Tasks start with missing tools.** Refresh the worker snapshot from the
+  current Roomote worker image.
+- **The provider starts in the wrong region or target.** Set
+  `DAYTONA_TARGET` to the intended target.

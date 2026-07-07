@@ -1,0 +1,471 @@
+import { createComputeProviderClient } from '../factory';
+
+const { daytonaCreateMock, daytonaGetMock, daytonaListMock } = vi.hoisted(
+  () => ({
+    daytonaCreateMock: vi.fn(),
+    daytonaGetMock: vi.fn(),
+    daytonaListMock: vi.fn(),
+  }),
+);
+
+vi.mock('@daytonaio/sdk', () => ({
+  Daytona: class {
+    public create = daytonaCreateMock;
+    public get = daytonaGetMock;
+    public list = daytonaListMock;
+  },
+}));
+
+const {
+  e2bCreateMock,
+  e2bConnectMock,
+  e2bListMock,
+  e2bGetInfoMock,
+  e2bKillMock,
+  e2bCreateSnapshotMock,
+  E2bNotFoundError,
+  E2bCommandExitError,
+} = vi.hoisted(() => {
+  class E2bNotFoundError extends Error {}
+
+  class E2bCommandExitError extends Error {
+    public constructor(
+      public readonly exitCode: number,
+      public readonly stdout: string,
+      public readonly stderr: string,
+    ) {
+      super(`exit status ${exitCode}`);
+    }
+  }
+
+  return {
+    e2bCreateMock: vi.fn(),
+    e2bConnectMock: vi.fn(),
+    e2bListMock: vi.fn(),
+    e2bGetInfoMock: vi.fn(),
+    e2bKillMock: vi.fn(),
+    e2bCreateSnapshotMock: vi.fn(),
+    E2bNotFoundError,
+    E2bCommandExitError,
+  };
+});
+
+vi.mock('e2b', () => ({
+  Sandbox: {
+    create: e2bCreateMock,
+    connect: e2bConnectMock,
+    list: e2bListMock,
+    getInfo: e2bGetInfoMock,
+    kill: e2bKillMock,
+    createSnapshot: e2bCreateSnapshotMock,
+  },
+  NotFoundError: E2bNotFoundError,
+  CommandExitError: E2bCommandExitError,
+}));
+
+async function collectLogs<T>(iterable: AsyncIterable<T>): Promise<T[]> {
+  const entries: T[] = [];
+
+  for await (const item of iterable) {
+    entries.push(item);
+  }
+
+  return entries;
+}
+
+describe('compute provider adapter contracts', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it('daytona adapter satisfies create/run/stream/status/destroy contract', async () => {
+    const daytonaSandbox = {
+      id: 'dtn-1',
+      state: 'started',
+      createdAt: new Date().toISOString(),
+      getPreviewLink: vi.fn().mockImplementation(async (port: number) => {
+        if (port === 4040) {
+          throw new Error('No preview link for port 4040');
+        }
+
+        return { sandboxId: 'dtn-1', url: `https://${port}-dtn-1.proxy.test` };
+      }),
+      process: {
+        executeCommand: vi.fn().mockResolvedValue({
+          exitCode: 0,
+          result: 'hello',
+        }),
+        createSession: vi.fn().mockResolvedValue(undefined),
+        executeSessionCommand: vi.fn().mockResolvedValue({ cmdId: 'cmd-9' }),
+        getSessionCommand: vi.fn().mockResolvedValue({
+          id: 'cmd-9',
+          command: 'worker run 123',
+          exitCode: undefined,
+        }),
+        getSessionCommandLogs: vi
+          .fn()
+          .mockImplementation(
+            async (
+              _sessionId: string,
+              _cmdId: string,
+              onStdout?: (chunk: string) => void,
+              onStderr?: (chunk: string) => void,
+            ) => {
+              if (onStdout && onStderr) {
+                onStdout('line1');
+                onStderr('line2');
+                return undefined;
+              }
+
+              return { output: 'line1line2', stdout: 'line1', stderr: 'line2' };
+            },
+          ),
+      },
+      fs: {
+        uploadFiles: vi.fn().mockResolvedValue(undefined),
+      },
+      delete: vi.fn().mockResolvedValue(undefined),
+    };
+
+    daytonaCreateMock.mockResolvedValue(daytonaSandbox);
+    daytonaGetMock.mockResolvedValue(daytonaSandbox);
+    daytonaListMock.mockReturnValue(
+      (async function* () {
+        yield daytonaSandbox;
+      })(),
+    );
+
+    const client = createComputeProviderClient({
+      provider: 'daytona',
+      config: {
+        apiKey: 'daytona-key',
+        snapshotName: 'roomote-worker',
+        timeoutMs: 30 * 60_000,
+      },
+    });
+
+    expect(client.capabilities.supportsSnapshots).toBe(false);
+    expect(client.capabilities.supportsResume).toBe(false);
+    expect(client.capabilities.supportsCommandOutputStreaming).toBe(true);
+    expect(client.capabilities.supportsCommandOutputLookup).toBe(true);
+
+    const instances = await client.listInstances({});
+    expect(instances.map((instance) => instance.instanceId)).toEqual(['dtn-1']);
+
+    const created = await client.createInstance({
+      ports: [3000],
+      tags: { app_environment: 'development' },
+    });
+    expect(created.instanceId).toBe('dtn-1');
+    expect(created.domains).toEqual({
+      '3000': 'https://3000-dtn-1.proxy.test',
+    });
+    expect(daytonaCreateMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        snapshot: 'roomote-worker',
+        public: true,
+        autoStopInterval: 30,
+        labels: { app_environment: 'development' },
+      }),
+    );
+
+    const runResult = await client.runCommand({
+      instanceId: 'dtn-1',
+      cmd: 'echo',
+      args: ['hello'],
+    });
+    expect(runResult).toEqual({
+      commandId: undefined,
+      exitCode: 0,
+      stdout: 'hello',
+    });
+    expect(daytonaSandbox.process.executeCommand).toHaveBeenCalledWith(
+      'echo hello',
+      undefined,
+      expect.objectContaining({ HOME: '/home/roomote' }),
+    );
+
+    const detached = await client.runCommand({
+      instanceId: 'dtn-1',
+      cmd: 'worker',
+      args: ['run', '123'],
+      detached: true,
+    });
+    expect(detached.exitCode).toBeNull();
+    expect(detached.commandId).toMatch(/^roomote-.+::cmd-9$/);
+    expect(daytonaSandbox.process.executeSessionCommand).toHaveBeenCalledWith(
+      expect.stringMatching(/^roomote-/),
+      expect.objectContaining({
+        runAsync: true,
+        command: expect.stringContaining('worker run 123'),
+      }),
+    );
+
+    const logs = await collectLogs(
+      client.streamCommandOutput({
+        instanceId: 'dtn-1',
+        commandId: detached.commandId!,
+      }),
+    );
+    expect(logs).toEqual([
+      { stream: 'stdout', data: 'line1' },
+      { stream: 'stderr', data: 'line2' },
+    ]);
+
+    await expect(
+      client.getCommandOutput({
+        instanceId: 'dtn-1',
+        commandId: detached.commandId!,
+        stream: 'stdout',
+      }),
+    ).resolves.toBe('line1');
+
+    await client.writeFiles({
+      instanceId: 'dtn-1',
+      files: [{ path: '/sandbox/worker.tar.gz', content: Buffer.from('x') }],
+    });
+    expect(daytonaSandbox.fs.uploadFiles).toHaveBeenCalledWith([
+      {
+        source: expect.any(Buffer),
+        destination: '/sandbox/worker.tar.gz',
+      },
+    ]);
+
+    const status = await client.getInstanceStatus({ instanceId: 'dtn-1' });
+    expect(status.status).toBe('running');
+
+    expect(() => client.createSnapshot({ instanceId: 'dtn-1' })).toThrow(
+      'does not support operation: createSnapshot',
+    );
+
+    expect(() =>
+      client.resumeFromSnapshot({ sourceSnapshotId: 'snap-1' }),
+    ).toThrow('does not support operation: resumeFromSnapshot');
+
+    await client.destroyInstance({ instanceId: 'dtn-1' });
+    expect(daytonaSandbox.delete).toHaveBeenCalledTimes(1);
+  });
+
+  it('e2b adapter satisfies create/run/stream/status/destroy contract', async () => {
+    const now = Date.now();
+
+    // Fake per-sandbox filesystem backing detached command log lookups.
+    const sandboxFs = new Map<string, string>();
+
+    const runCommandMock = vi
+      .fn()
+      .mockImplementation(
+        async (command: string, opts?: { background?: boolean }) => {
+          if (opts?.background) {
+            return {
+              pid: 42,
+              disconnect: vi.fn().mockResolvedValue(undefined),
+            };
+          }
+
+          const tailMatch = command.match(/^tail -c \+(\d+) (\S+)/);
+
+          if (tailMatch) {
+            const content = sandboxFs.get(tailMatch[2]!) ?? '';
+            return {
+              exitCode: 0,
+              stdout: content.slice(Number(tailMatch[1]) - 1),
+              stderr: '',
+            };
+          }
+
+          if (command.includes('echo hello')) {
+            return { exitCode: 0, stdout: 'hello', stderr: '' };
+          }
+
+          return { exitCode: 0, stdout: '', stderr: '' };
+        },
+      );
+
+    const e2bSandbox = {
+      sandboxId: 'e2b-1',
+      getHost: (port: number) => `${port}-e2b-1.e2b.test`,
+      commands: { run: runCommandMock },
+      files: {
+        read: vi.fn().mockImplementation(async (path: string) => {
+          const content = sandboxFs.get(path);
+
+          if (content === undefined) {
+            throw new E2bNotFoundError(`file not found: ${path}`);
+          }
+
+          return content;
+        }),
+        write: vi.fn().mockResolvedValue(undefined),
+      },
+      kill: vi.fn().mockResolvedValue(undefined),
+    };
+
+    e2bCreateMock.mockResolvedValue(e2bSandbox);
+    e2bConnectMock.mockResolvedValue(e2bSandbox);
+    e2bKillMock.mockResolvedValue(true);
+    e2bGetInfoMock.mockResolvedValue({
+      sandboxId: 'e2b-1',
+      state: 'running',
+      startedAt: new Date(now - 5_000),
+      endAt: new Date(now + 60_000),
+    });
+
+    let listExhausted = false;
+    e2bListMock.mockReturnValue({
+      get hasNext() {
+        return !listExhausted;
+      },
+      nextItems: async () => {
+        listExhausted = true;
+        return [
+          {
+            sandboxId: 'e2b-1',
+            state: 'running',
+            startedAt: new Date(now - 5_000),
+            endAt: new Date(now + 60_000),
+          },
+        ];
+      },
+    });
+
+    const client = createComputeProviderClient({
+      provider: 'e2b',
+      config: {
+        apiKey: 'e2b-key',
+        templateId: 'roomote-worker',
+        timeoutMs: 30 * 60_000,
+      },
+    });
+
+    expect(client.capabilities.supportsSnapshots).toBe(true);
+    expect(client.capabilities.supportsResume).toBe(true);
+    expect(client.capabilities.supportsCommandOutputStreaming).toBe(true);
+    expect(client.capabilities.supportsCommandOutputLookup).toBe(true);
+
+    const instances = await client.listInstances({});
+    expect(instances.map((instance) => instance.instanceId)).toEqual(['e2b-1']);
+
+    const created = await client.createInstance({
+      ports: [3000],
+      tags: { app_environment: 'development' },
+    });
+    expect(created.instanceId).toBe('e2b-1');
+    expect(created.domains).toEqual({
+      '3000': 'https://3000-e2b-1.e2b.test',
+    });
+    expect(e2bCreateMock).toHaveBeenCalledWith(
+      'roomote-worker',
+      expect.objectContaining({
+        apiKey: 'e2b-key',
+        timeoutMs: 30 * 60_000,
+        metadata: { app_environment: 'development' },
+      }),
+    );
+
+    const runResult = await client.runCommand({
+      instanceId: 'e2b-1',
+      cmd: 'echo',
+      args: ['hello'],
+    });
+    expect(runResult).toEqual({
+      commandId: undefined,
+      exitCode: 0,
+      stdout: 'hello',
+    });
+    expect(runCommandMock).toHaveBeenCalledWith(
+      expect.stringMatching(/^env .*HOME=\/home\/roomote.* echo hello$/),
+      expect.objectContaining({ timeoutMs: 0, user: 'root' }),
+    );
+
+    const detached = await client.runCommand({
+      instanceId: 'e2b-1',
+      cmd: 'worker',
+      args: ['run', '123'],
+      detached: true,
+    });
+    expect(detached.exitCode).toBeNull();
+    expect(detached.commandId).toMatch(/^42::roomote-.+$/);
+    expect(runCommandMock).toHaveBeenCalledWith(
+      expect.stringContaining('worker run 123'),
+      expect.objectContaining({ background: true, user: 'root' }),
+    );
+
+    const logId = detached.commandId!.split('::')[1]!;
+    sandboxFs.set(`/tmp/roomote-commands/${logId}.exit`, '0\n');
+    sandboxFs.set(`/tmp/roomote-commands/${logId}.out`, 'line1');
+    sandboxFs.set(`/tmp/roomote-commands/${logId}.err`, 'line2');
+
+    const logs = await collectLogs(
+      client.streamCommandOutput({
+        instanceId: 'e2b-1',
+        commandId: detached.commandId!,
+      }),
+    );
+    expect(logs).toEqual([
+      { stream: 'stdout', data: 'line1' },
+      { stream: 'stderr', data: 'line2' },
+    ]);
+
+    await expect(
+      client.getCommandOutput({
+        instanceId: 'e2b-1',
+        commandId: detached.commandId!,
+        stream: 'stdout',
+      }),
+    ).resolves.toBe('line1');
+
+    await client.writeFiles({
+      instanceId: 'e2b-1',
+      files: [{ path: '/sandbox/worker.tar.gz', content: Buffer.from('x') }],
+    });
+    expect(e2bSandbox.files.write).toHaveBeenCalledWith(
+      '/sandbox/worker.tar.gz',
+      expect.any(Blob),
+      { user: 'root' },
+    );
+
+    const status = await client.getInstanceStatus({ instanceId: 'e2b-1' });
+    expect(status.status).toBe('running');
+    expect(status.timeoutRemainingMs).toBeGreaterThan(0);
+
+    e2bCreateSnapshotMock.mockResolvedValue({
+      snapshotId: 'snap-e2b-1:latest',
+      names: ['team/snap-e2b-1:latest'],
+    });
+
+    const snapshot = await client.createSnapshot({ instanceId: 'e2b-1' });
+    expect(snapshot).toEqual({ snapshotId: 'snap-e2b-1:latest' });
+    expect(e2bCreateSnapshotMock).toHaveBeenCalledWith(
+      'e2b-1',
+      expect.objectContaining({ apiKey: 'e2b-key' }),
+    );
+    // Snapshot creation kills the source sandbox to match the shared
+    // snapshot-destroys-sandbox contract.
+    expect(e2bKillMock).toHaveBeenCalledWith(
+      'e2b-1',
+      expect.objectContaining({ apiKey: 'e2b-key' }),
+    );
+
+    const resumed = await client.resumeFromSnapshot({
+      sourceSnapshotId: 'snap-e2b-1:latest',
+      ports: [3000],
+    });
+    expect(resumed.instanceId).toBe('e2b-1');
+    expect(resumed.sourceSnapshotId).toBe('snap-e2b-1:latest');
+    expect(resumed.domains).toEqual({
+      '3000': 'https://3000-e2b-1.e2b.test',
+    });
+    expect(e2bCreateMock).toHaveBeenLastCalledWith(
+      'snap-e2b-1:latest',
+      expect.objectContaining({ apiKey: 'e2b-key' }),
+    );
+
+    e2bKillMock.mockClear();
+    await client.destroyInstance({ instanceId: 'e2b-1' });
+    expect(e2bKillMock).toHaveBeenCalledWith(
+      'e2b-1',
+      expect.objectContaining({ apiKey: 'e2b-key' }),
+    );
+  });
+});

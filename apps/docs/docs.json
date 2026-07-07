@@ -1,0 +1,138 @@
+{
+  "$schema": "https://mintlify.com/docs.json",
+  "theme": "mint",
+  "name": "Roomote Docs",
+  "description": "Documentation for Roomote, the open, self-hostable platform for cloud coding agents.",
+  "colors": {
+    "primary": "#B0CD26",
+    "light": "#D6EE26",
+    "dark": "#B0CD26"
+  },
+  "favicon": "/favicon.png",
+  "logo": {
+    "light": "https://docs.roomote.dev/logo/light.svg",
+    "dark": "https://docs.roomote.dev/logo/dark.svg",
+    "href": "https://docs.roomote.dev"
+  },
+  "fonts": {
+    "family": "DM Sans"
+  },
+  "thumbnails": {
+    "appearance": "light",
+    "background": "data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 width=%221200%22 height=%22630%22%3E%3Crect width=%221200%22 height=%22630%22 fill=%22%23D6EE26%22/%3E%3C/svg%3E",
+    "fonts": {
+      "family": "DM Sans"
+    }
+  },
+  "icons": {
+    "library": "lucide"
+  },
+  "navigation": {
+    "groups": [
+      {
+        "group": "Getting Started",
+        "pages": ["index", "self-hosting"]
+      },
+      {
+        "group": "Using Roomote",
+        "pages": ["how-roomote-works", "use-cases", "tasks", "file-attachments"]
+      },
+      {
+        "group": "Provider Configuration",
+        "pages": [
+          {
+            "group": "Models and Inference",
+            "root": "models",
+            "pages": []
+          },
+          {
+            "group": "Communications",
+            "root": "communications",
+            "expanded": true,
+            "pages": [
+              "providers/communications/slack",
+              "providers/communications/microsoft-teams",
+              "providers/communications/telegram"
+            ]
+          },
+          {
+            "group": "Source Control",
+            "root": "source-control",
+            "expanded": true,
+            "pages": [
+              "providers/source-control/github",
+              "providers/source-control/gitlab",
+              "providers/source-control/gitea",
+              "providers/source-control/azure-devops"
+            ]
+          },
+          {
+            "group": "Compute",
+            "root": "compute",
+            "expanded": true,
+            "pages": [
+              "providers/compute/docker",
+              "providers/compute/modal",
+              "providers/compute/e2b",
+              "providers/compute/daytona"
+            ]
+          },
+          "environment-variables"
+        ]
+      },
+      {
+        "group": "Integrations",
+        "pages": [
+          "integrations/index",
+          "integrations/asana",
+          "integrations/better-stack",
+          "integrations/braintrust",
+          "integrations/grafana",
+          "integrations/jira",
+          "integrations/linear",
+          "integrations/neon",
+          "integrations/notion",
+          "integrations/posthog",
+          "integrations/pylon",
+          "integrations/railway",
+          "integrations/sentry",
+          "integrations/snowflake",
+          "integrations/supabase",
+          "integrations/supermemory",
+          "integrations/vercel"
+        ]
+      },
+      {
+        "group": "Roomote Configuration",
+        "pages": [
+          "environments",
+          "agent-guidance",
+          "skills",
+          "automations",
+          "users",
+          "vibes",
+          "anonymous-analytics",
+          "personal-settings"
+        ]
+      },
+      {
+        "group": "Development",
+        "pages": ["local-development", "architecture"]
+      }
+    ]
+  },
+  "navbar": {
+    "links": [
+      {
+        "label": "Go to roomote.dev",
+        "href": "https://roomote.dev",
+        "icon": "external-link"
+      }
+    ]
+  },
+  "footer": {
+    "socials": {
+      "github": "https://github.com/RooCodeInc/Roomote"
+    }
+  }
+}

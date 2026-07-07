@@ -1,0 +1,149 @@
+/*global process, module*/
+
+const useWorkerRelease = process.env.USE_WORKER_RELEASE === 'true';
+const DEFAULT_OPENCODE_PROVIDER_ENV_KEYS = [
+  'OPENROUTER_API_KEY',
+  'AI_GATEWAY_API_KEY',
+  'OPENAI_API_KEY',
+  'ANTHROPIC_API_KEY',
+  'MISTRAL_API_KEY',
+  'MOONSHOT_API_KEY',
+  'MINIMAX_API_KEY',
+  'OPENCODE_API_KEY',
+  'BASETEN_API_KEY',
+  'TOGETHER_API_KEY',
+  'GEMINI_API_KEY',
+  'GOOGLE_GENERATIVE_AI_API_KEY',
+  'AWS_BEARER_TOKEN_BEDROCK',
+  'AWS_REGION',
+  'GOOGLE_APPLICATION_CREDENTIALS',
+  'GOOGLE_VERTEX_PROJECT',
+  'GOOGLE_VERTEX_LOCATION',
+];
+const OPENCODE_RUNTIME_ENV_KEYS = [
+  'ROOMOTE_MODEL',
+  'ROOMOTE_SMALL_MODEL',
+  'ROOMOTE_VISION_MODEL',
+  'ROOMOTE_CODE_REVIEW_MODEL',
+  'ROOMOTE_EXPLORE_MODEL',
+  'ROOMOTE_MODEL_ENV_KEYS',
+  'OPENCODE_COMMAND',
+  'OPENCODE_PTY_PYTHON_COMMAND',
+];
+const localPorts = {
+  web: Number(process.env.ROOMOTE_WEB_PORT || 13000),
+  api: Number(process.env.ROOMOTE_API_PORT || 13001),
+  bullmq: Number(process.env.ROOMOTE_BULLMQ_PORT || 13002),
+  previewProxy: Number(process.env.ROOMOTE_PREVIEW_PROXY_PORT || 18081),
+};
+const publicUrl = process.env.ROOMOTE_PUBLIC_URL;
+
+const configuredModelProviderEnvKeysValue =
+  process.env.ROOMOTE_MODEL_ENV_KEYS || '';
+const configuredModelProviderEnvKeys = configuredModelProviderEnvKeysValue
+  ? configuredModelProviderEnvKeysValue
+      .split(/[,\s]+/u)
+      .map((key) => key.trim())
+      .filter(Boolean)
+  : [];
+const openCodeEnv = Object.fromEntries(
+  [
+    ...OPENCODE_RUNTIME_ENV_KEYS,
+    ...DEFAULT_OPENCODE_PROVIDER_ENV_KEYS,
+    ...configuredModelProviderEnvKeys,
+  ].map((key) => [key, process.env[key]]),
+);
+
+const defaultEnv = {
+  PORT: undefined,
+  USE_WORKER_RELEASE: process.env.USE_WORKER_RELEASE,
+  DEFAULT_COMPUTE_PROVIDER: process.env.DEFAULT_COMPUTE_PROVIDER || 'docker',
+  DOCKER_WORKER_IMAGE:
+    process.env.DOCKER_WORKER_IMAGE || 'roomote-worker:local',
+  // Host arch, so Apple Silicon dev machines run the worker natively.
+  DOCKER_WORKER_PLATFORM:
+    process.env.DOCKER_WORKER_PLATFORM ||
+    (process.arch === 'arm64' ? 'linux/arm64' : 'linux/amd64'),
+  ROOMOTE_PUBLIC_URL: publicUrl,
+  ROOMOTE_APP_URL: publicUrl,
+  // Set by `pnpm dev` to `<public-url>/_roomote-api` so workers on hosted
+  // compute providers reach the API through the Caddy dev edge, matching
+  // the deployed TRPC_URL contract.
+  TRPC_URL: process.env.TRPC_URL,
+
+  // GitHub app credentials:
+  NEXT_PUBLIC_GITHUB_APP_SLUG: process.env.NEXT_PUBLIC_GITHUB_APP_SLUG,
+  GITHUB_APP_ID: process.env.GITHUB_APP_ID,
+  GITHUB_APP_PRIVATE_KEY: process.env.GITHUB_APP_PRIVATE_KEY,
+  GITHUB_CLIENT_ID: process.env.GITHUB_CLIENT_ID,
+  GITHUB_CLIENT_SECRET: process.env.GITHUB_CLIENT_SECRET,
+  GITHUB_WEBHOOK_SECRET: process.env.GITHUB_WEBHOOK_SECRET,
+
+  // Slack app credentials:
+  SLACK_APP_ID: process.env.SLACK_APP_ID,
+  SLACK_CLIENT_ID: process.env.SLACK_CLIENT_ID,
+  SLACK_CLIENT_SECRET: process.env.SLACK_CLIENT_SECRET,
+  SLACK_REDIRECT_URI: publicUrl ? `${publicUrl}/api/slack/callback` : undefined,
+  SLACK_AUTH_URI: publicUrl ? `${publicUrl}/api/slack/auth` : undefined,
+  SLACK_SIGNING_SECRET: process.env.SLACK_SIGNING_SECRET,
+
+  // Linear app credentials:
+  LINEAR_CLIENT_ID: process.env.LINEAR_CLIENT_ID,
+  LINEAR_CLIENT_SECRET: process.env.LINEAR_CLIENT_SECRET,
+  LINEAR_REDIRECT_URI: publicUrl
+    ? `${publicUrl}/api/linear/callback`
+    : undefined,
+  LINEAR_WEBHOOK_SECRET: process.env.LINEAR_WEBHOOK_SECRET,
+
+  ...openCodeEnv,
+};
+
+const env = defaultEnv;
+
+const defaults = {
+  cwd: process.cwd(),
+  watch: false,
+  autorestart: true,
+  max_restarts: 5,
+  min_uptime: '10s',
+  time: true,
+};
+
+const logFiles = (name) => ({
+  log_file: `./logs/${name}.log`,
+  error_file: `./logs/${name}-error.log`,
+  out_file: `./logs/${name}-out.log`,
+});
+
+const app = (name, opts = {}) => ({
+  name: `roomote-${name}`,
+  script: 'mise',
+  args: `exec -- pnpm --filter @roomote/${name} dev`,
+  ...logFiles(`roomote-${name}`),
+  ...defaults,
+  env,
+  ...opts,
+});
+
+const apps = [
+  app('api', { env: { ...env, PORT: String(localPorts.api) } }),
+  app('web', { env: { ...env, PORT: String(localPorts.web) } }),
+  app('preview-proxy', {
+    env: { ...env, PORT: String(localPorts.previewProxy) },
+  }),
+  app('bullmq', { env: { ...env, PORT: String(localPorts.bullmq) } }),
+  app('controller', { startup_delay: 15000 }),
+];
+
+if (!useWorkerRelease) {
+  apps.push({
+    name: 'roomote-worker-release-watcher',
+    script: 'mise',
+    args: 'exec -- pnpm --filter @roomote/dev watch-worker-release',
+    ...logFiles('roomote-worker-release-watcher'),
+    ...defaults,
+    env,
+  });
+}
+
+module.exports = { apps };

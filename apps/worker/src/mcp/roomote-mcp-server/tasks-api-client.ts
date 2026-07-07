@@ -1,0 +1,464 @@
+import { buildApiHeaders, parseApiError } from './api-client.js';
+import type {
+  AutomationWorkItemDisposition,
+  SourceControlProvider,
+  SuggestionCategory,
+  SuggestionPriority,
+  TaskLaunchRequest,
+  WorkspaceReadiness,
+} from '@roomote/types';
+import type {
+  RoomoteConfig,
+  DescribeVideoResponse,
+  TaskSearchResponse,
+  TaskSummaryResponse,
+  TaskComputeLogsResponse,
+  TaskMessagesResponse,
+  LaunchTaskResponse,
+  CancelTaskResponse,
+  StopTaskResponse,
+  SendMessageResponse,
+  ListEnvironmentsResponse,
+  CreateEnvironmentResponse,
+  UpdateEnvironmentResponse,
+  SubmitAutomationWorkItemsResponse,
+  SubmitTaskSuggestionsResponse,
+  SourceControlPullRequestReadResponse,
+  SourceControlPullRequestResponse,
+} from './types.js';
+
+/**
+ * Authenticated fetch against the platform API.
+ * Handles error parsing and throws on non-2xx responses.
+ */
+async function apiFetch<T>(
+  config: RoomoteConfig,
+  path: string,
+  options: RequestInit = {},
+  errorPrefix: string,
+): Promise<T> {
+  const response = await fetch(`${config.platformApiUrl}${path}`, {
+    ...options,
+    headers: buildApiHeaders(config, {
+      ...(options.headers as Record<string, string> | undefined),
+    }),
+  });
+
+  if (!response.ok) {
+    const error = await parseApiError(response);
+    throw new Error(`${errorPrefix}: ${response.status} ${error}`);
+  }
+
+  return (await response.json()) as T;
+}
+
+function buildSearchParams(
+  params: Record<string, string | number | undefined>,
+): string {
+  const searchParams = new URLSearchParams();
+  for (const [key, value] of Object.entries(params)) {
+    if (value !== undefined) searchParams.set(key, String(value));
+  }
+  const qs = searchParams.toString();
+  return qs ? `?${qs}` : '';
+}
+
+/**
+ * Search tasks via the platform API.
+ */
+export async function searchTasks(
+  config: RoomoteConfig,
+  params: {
+    query?: string;
+    pullRequest?: string;
+    status?: string;
+    limit?: number;
+    cursor?: string;
+  },
+): Promise<TaskSearchResponse> {
+  const qs = buildSearchParams(params);
+  return apiFetch(config, `/api/mcp/tasks${qs}`, {}, 'Failed to search tasks');
+}
+
+/**
+ * Get a task summary via the platform API.
+ */
+export async function getTaskSummary(
+  config: RoomoteConfig,
+  taskId: string,
+): Promise<TaskSummaryResponse> {
+  return apiFetch(
+    config,
+    `/api/mcp/tasks/${encodeURIComponent(taskId)}/summary`,
+    {},
+    'Failed to get task summary',
+  );
+}
+
+/**
+ * Describe a task-local video through the platform API.
+ */
+export async function describeVideo(
+  config: RoomoteConfig,
+  taskId: string,
+  params: {
+    videoBytes: string;
+    mimeType: string;
+    userTextContext?: string;
+  },
+): Promise<DescribeVideoResponse> {
+  return apiFetch(
+    config,
+    `/api/mcp/tasks/${encodeURIComponent(taskId)}/describe_video`,
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(params),
+    },
+    'Failed to describe video',
+  );
+}
+
+/**
+ * Get task compute logs via the platform API.
+ */
+export async function getTaskComputeLogs(
+  config: RoomoteConfig,
+  taskId: string,
+): Promise<TaskComputeLogsResponse> {
+  return apiFetch(
+    config,
+    `/api/mcp/tasks/${encodeURIComponent(taskId)}/compute_logs`,
+    {},
+    'Failed to get task compute logs',
+  );
+}
+
+/**
+ * Get task messages via the platform API.
+ */
+export async function getTaskMessages(
+  config: RoomoteConfig,
+  taskId: string,
+  params?: { limit?: number; order?: 'asc' | 'desc' },
+): Promise<TaskMessagesResponse> {
+  const qs = buildSearchParams({
+    limit: params?.limit,
+    order: params?.order,
+  });
+  return apiFetch(
+    config,
+    `/api/mcp/tasks/${encodeURIComponent(taskId)}/messages${qs}`,
+    {},
+    'Failed to get task messages',
+  );
+}
+
+/**
+ * Launch a new task via the platform API.
+ */
+export async function launchTask(
+  config: RoomoteConfig,
+  params: TaskLaunchRequest,
+): Promise<LaunchTaskResponse> {
+  return apiFetch(
+    config,
+    '/api/mcp/tasks',
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(params),
+    },
+    'Failed to launch task',
+  );
+}
+
+/**
+ * Cancel a task via the platform API.
+ */
+export async function cancelTask(
+  config: RoomoteConfig,
+  taskId: string,
+): Promise<CancelTaskResponse> {
+  return apiFetch(
+    config,
+    `/api/mcp/tasks/${encodeURIComponent(taskId)}/cancel`,
+    { method: 'POST' },
+    'Failed to cancel task',
+  );
+}
+
+/**
+ * Stop a task via the platform API using the resumable sandbox stop path.
+ */
+export async function stopTask(
+  config: RoomoteConfig,
+  taskId: string,
+): Promise<StopTaskResponse> {
+  return apiFetch(
+    config,
+    `/api/mcp/tasks/${encodeURIComponent(taskId)}/stop`,
+    { method: 'POST' },
+    'Failed to stop task',
+  );
+}
+
+/**
+ * Send a message to a running task via the platform API.
+ */
+export async function sendMessageToTask(
+  config: RoomoteConfig,
+  taskId: string,
+  params: {
+    message: string;
+    images?: string[];
+    senderMode?: 'authenticated_user' | 'linked_review_handoff';
+  },
+): Promise<SendMessageResponse> {
+  return apiFetch(
+    config,
+    `/api/mcp/tasks/${encodeURIComponent(taskId)}/send_message`,
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(params),
+    },
+    'Failed to send message',
+  );
+}
+
+/**
+ * Mutate source-control state through the platform API.
+ */
+export async function manageSourceControl(
+  config: RoomoteConfig,
+  taskId: string,
+  params: {
+    action: 'create_or_update_pull_request';
+    repositoryFullName: string;
+    sourceBranch: string;
+    targetBranch: string;
+    title: string;
+    body: string;
+    labels?: string[];
+    assignees?: string[];
+    sourceControlProvider?: SourceControlProvider;
+  },
+): Promise<SourceControlPullRequestResponse> {
+  return apiFetch(
+    config,
+    `/api/mcp/tasks/${encodeURIComponent(taskId)}/source_control`,
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(params),
+    },
+    'Failed to manage source control',
+  );
+}
+
+/**
+ * Read pull request state through the platform API.
+ */
+export async function readSourceControl(
+  config: RoomoteConfig,
+  taskId: string,
+  params: {
+    action: 'get_pull_request' | 'list_pull_request_comments';
+    repositoryFullName: string;
+    prNumber: number;
+    sourceControlProvider?: SourceControlProvider;
+  },
+): Promise<SourceControlPullRequestReadResponse> {
+  return apiFetch(
+    config,
+    `/api/mcp/tasks/${encodeURIComponent(taskId)}/source_control`,
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(params),
+    },
+    'Failed to read source control state',
+  );
+}
+
+/**
+ * Write review interactions (replies, comments, thread resolution, reviews)
+ * through the platform API.
+ */
+export async function writeSourceControl(
+  config: RoomoteConfig,
+  taskId: string,
+  params: {
+    action:
+      | 'reply_to_pull_request_comment'
+      | 'create_pull_request_comment'
+      | 'resolve_pull_request_thread'
+      | 'submit_pull_request_review'
+      | 'update_pull_request_comment';
+    repositoryFullName: string;
+    prNumber: number;
+    threadId?: string;
+    commentId?: string;
+    body?: string;
+    resolved?: boolean;
+    reviewEvent?: 'approve' | 'request_changes' | 'comment';
+    sourceControlProvider?: SourceControlProvider;
+  },
+): Promise<SourceControlPullRequestReadResponse> {
+  return apiFetch(
+    config,
+    `/api/mcp/tasks/${encodeURIComponent(taskId)}/source_control`,
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(params),
+    },
+    'Failed to write source control state',
+  );
+}
+
+/**
+ * Submit task suggestions for the current task via the platform API.
+ */
+export async function submitTaskSuggestions(
+  config: RoomoteConfig,
+  taskId: string,
+  params: {
+    suggestions: Array<{
+      title: string;
+      brief: string;
+      category?: SuggestionCategory;
+      priority?: SuggestionPriority;
+      investigationContext?: string;
+      targetRepositoryFullName?: string;
+      targetEnvironmentId?: string;
+      workspaceReadiness?: WorkspaceReadiness;
+      readinessMessage?: string;
+    }>;
+  },
+): Promise<SubmitTaskSuggestionsResponse> {
+  return apiFetch(
+    config,
+    `/api/mcp/tasks/${encodeURIComponent(taskId)}/task_suggestions`,
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(params),
+    },
+    'Failed to submit task suggestions',
+  );
+}
+
+/**
+ * Submit automation work items for the current task via the platform API.
+ */
+export async function submitAutomationWorkItems(
+  config: RoomoteConfig,
+  taskId: string,
+  params: {
+    workItems: Array<{
+      title: string;
+      brief: string;
+      category?: SuggestionCategory;
+      priority?: SuggestionPriority;
+      actionKind: string;
+      disposition: AutomationWorkItemDisposition;
+      investigationContext?: string;
+      executionPrompt?: string;
+      fingerprint?: string;
+      targetRepositoryFullName?: string;
+      targetEnvironmentId?: string;
+      workspaceReadiness?: WorkspaceReadiness;
+      readinessMessage?: string;
+    }>;
+  },
+): Promise<SubmitAutomationWorkItemsResponse> {
+  return apiFetch(
+    config,
+    `/api/mcp/tasks/${encodeURIComponent(taskId)}/automation_work_items`,
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(params),
+    },
+    'Failed to submit automation work items',
+  );
+}
+
+/**
+ * Send a message to a running task via the platform API, steering when possible.
+ */
+export async function steerMessageToTask(
+  config: RoomoteConfig,
+  taskId: string,
+  params: {
+    message: string;
+    images?: string[];
+  },
+): Promise<SendMessageResponse> {
+  return apiFetch(
+    config,
+    `/api/mcp/tasks/${encodeURIComponent(taskId)}/steer_message`,
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(params),
+    },
+    'Failed to send message',
+  );
+}
+
+/**
+ * List environments via the platform API.
+ */
+export async function listEnvironments(
+  config: RoomoteConfig,
+): Promise<ListEnvironmentsResponse> {
+  return apiFetch(
+    config,
+    '/api/mcp/environments',
+    {},
+    'Failed to list environments',
+  );
+}
+
+/**
+ * Create a new environment via the platform API.
+ */
+export async function createEnvironment(
+  config: RoomoteConfig,
+  params: { config: unknown },
+): Promise<CreateEnvironmentResponse> {
+  return apiFetch(
+    config,
+    '/api/mcp/environments',
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(params),
+    },
+    'Failed to create environment',
+  );
+}
+
+/**
+ * Update an existing environment via the platform API.
+ */
+export async function updateEnvironment(
+  config: RoomoteConfig,
+  params: { environmentId: string; config: unknown },
+): Promise<UpdateEnvironmentResponse> {
+  return apiFetch(
+    config,
+    `/api/mcp/environments/${encodeURIComponent(params.environmentId)}`,
+    {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        config: params.config,
+      }),
+    },
+    'Failed to update environment',
+  );
+}

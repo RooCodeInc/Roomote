@@ -1,0 +1,27 @@
+---
+title: Grafana
+description: Let Roomote inspect shared Grafana dashboards, alerting state, annotations, and data sources during a task.
+icon: 'https://api.iconify.design/simple-icons:grafana.svg?color=currentColor'
+---
+
+Connect Grafana when your team uses it as the shared source of truth for
+dashboards, alerting, and operational annotations.
+
+## When to use it
+
+- Inspect dashboards and panel definitions while debugging an incident
+- Review alert rules plus current alert instances and states without leaving
+  the task
+- Pull annotation history and data source context into monitoring-heavy
+  investigations
+
+## How setup works
+
+Admins connect Grafana from **Settings > Integrations** with the Grafana
+instance URL and a shared service account token.
+
+## What to expect
+
+The current Grafana integration is read-only. It gives Roomote monitoring
+context during a task, but it does not create dashboards, edit alerts, or change
+Grafana configuration.

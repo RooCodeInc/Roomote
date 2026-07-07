@@ -1,0 +1,665 @@
+# Self-Hosting Roomote
+
+This guide covers the operator path for running one Roomote deployment. For
+day-to-day development, use `pnpm dev` from [README.md](README.md). For a
+containerized install, use the one-command installer or the Compose paths
+below.
+
+## Deployment Modes
+
+| Mode                       | Command                            | Use case                                                                                                   |
+| -------------------------- | ---------------------------------- | ---------------------------------------------------------------------------------------------------------- |
+| One-command install        | `curl get.roomote.dev \| bash`     | Fresh server, guided browser setup, published images (start here)                                          |
+| Local development          | `pnpm dev`                         | Fast source edits with PM2-managed local services                                                          |
+| Single-host production     | `docker compose ... up -d --build` | Put web, API, controller, queues, preview proxy, and Caddy on one host                                     |
+| Railway (PaaS)             | Railway template                   | Managed platform deploy with hosted compute; see [deploy/railway](deploy/railway/README.md)                |
+| Render (PaaS)              | Render Blueprint                   | Managed platform deploy with hosted compute; see [deploy/render](deploy/render/README.md)                  |
+| Coolify (self-hosted PaaS) | Docker Compose resource            | Run the published images on a Coolify-managed server; see [deploy/coolify](deploy/coolify/README.md)       |
+| Fly.io (PaaS)              | `flyctl` + maintained `fly.toml`   | One Fly app with managed Postgres/Redis/storage and hosted compute; see [deploy/fly](deploy/fly/README.md) |
+
+The application stack is web, API, controller, BullMQ, preview proxy,
+Postgres, Redis, and MinIO artifact storage. The production overlay adds Caddy
+as the HTTPS edge.
+
+## One-Command Install
+
+SSH into a fresh Ubuntu or Debian server (x86_64 or arm64, 4 GB+ RAM recommended) and
+run:
+
+```sh
+curl -fsSL https://get.roomote.dev | bash
+```
+
+Prefer to read what you are about to run as root? Download, inspect, then run
+the same script:
+
+```sh
+curl -fsSL https://get.roomote.dev -o install.sh
+less install.sh
+sudo bash install.sh
+```
+
+The installer brings up the full production stack from published GHCR images
+and prints a setup link like
+`https://roomote.203-0-113-7.sslip.io/setup?token=...`. Open it in a browser
+and the setup wizard walks through everything else: sign-in provider, GitHub
+App (created for you via GitHub's manifest flow), model provider and API key,
+Slack, repositories, and a first task. Nothing else needs to be edited on the
+server.
+
+What the script does:
+
+- installs Docker Engine and the Compose plugin if missing;
+- generates every secret (`openssl` keypairs, encryption and signing keys,
+  `DASHBOARD_PASSWORD`, and a one-time `SETUP_TOKEN`) into
+  `/opt/roomote/.env`;
+- defaults the domain to `roomote.<your-ip>.sslip.io`, which needs zero DNS
+  setup and still supports HTTPS and wildcard preview subdomains;
+- installs a `roomote-compose` systemd unit so the stack survives reboots;
+- installs the `roomote` host CLI for day-2 operations.
+
+For production, bring your own domain instead of the sslip.io default (sslip
+domains share public Let's Encrypt rate limits and are tied to the host IP):
+
+```sh
+curl -fsSL https://get.roomote.dev | bash -s -- --domain roomote.example.com
+```
+
+Point `<domain>`, `preview.<domain>`, and `*.preview.<domain>` A records at
+the server first; the installer waits briefly for DNS and Caddy retries
+certificates until the records are in place.
+
+Useful flags and env vars: `--version <tag>` pins a release, and
+`--preview-domain <host>` overrides the preview root. Both published images
+are public, so pulls need no credentials. Re-running the installer is safe:
+existing secrets and the existing domain are preserved.
+
+Day-2 operations go through the installed CLI:
+
+```sh
+roomote status              # service health
+roomote logs [service...]   # follow logs
+roomote setup-url           # re-print the tokenized /setup link
+roomote upgrade [version]   # upgrade or roll back by image tag
+roomote backup              # pg_dump into /opt/roomote/backups
+roomote restore <f> --yes   # restore a dump (overwrites the database)
+```
+
+`roomote upgrade` prunes old Roomote images after a successful upgrade. It
+keeps the current release plus the newest local Roomote image tags for a total
+of `ROOMOTE_IMAGE_RETENTION_RELEASES` retained tags (default `3`); set that
+environment variable before running the command when you want a larger or
+smaller rollback cache. Retention is best-effort: if Docker cleanup fails, the
+healthy upgrade remains in place and the command prints a warning.
+
+### Changing your domain later
+
+The domain is baked into OAuth apps created during setup (GitHub App, Slack
+app, sign-in provider redirects). To move a deployment to a new domain: update
+DNS, set `ROOMOTE_APP_DOMAIN`, `ROOMOTE_PREVIEW_DOMAIN`, and `TRPC_URL` in
+`/opt/roomote/.env`, run `roomote up`, then re-create or update the GitHub App
+and Slack app (both use manifest flows, so this is a few clicks) and update
+your sign-in provider's redirect URLs.
+
+## Prerequisites
+
+- Docker Engine with Compose.
+- A stable public HTTPS app origin.
+- A model provider account and API key.
+- A GitHub App installed on the repositories Roomote should use.
+- At least one sign-in provider: Slack or Microsoft Teams.
+- Docker socket access for the default single-host Docker compute provider, or
+  a hosted compute provider such as Vercel Sandbox or Modal.
+- Optional Slack and Linear apps if you want those integrations.
+
+For production-style use, also prepare:
+
+- A host with ports `80` and `443` reachable from the public internet.
+- An app domain, for example `roomote.example.com`.
+- A preview domain plus wildcard DNS, for example
+  `preview.roomote.example.com` and `*.preview.roomote.example.com`.
+- A backup plan for Postgres, Redis, and MinIO volumes.
+
+## Environment Files
+
+Use `.env.local` for local development and local self-host Compose:
+
+```sh
+cp .env.local.example .env.local
+```
+
+Use `.env.production` for the Caddy-backed production overlay:
+
+```sh
+cp .env.production.example .env.production
+```
+
+Do not commit real env files. Shell exports take precedence over values in
+these files.
+
+## Public URLs
+
+Roomote needs one stable public app origin for auth callbacks, webhooks, and
+links sent from Slack or GitHub.
+
+For local development, set `ROOMOTE_PUBLIC_URL`:
+
+```sh
+ROOMOTE_PUBLIC_URL=https://your-static-ngrok-domain.ngrok.app
+```
+
+If that URL is an ngrok domain, `pnpm dev` starts and reuses
+`ngrok http --url=<domain> 13000`.
+
+For production, set domains in `.env.production`:
+
+```sh
+ROOMOTE_APP_DOMAIN=roomote.example.com
+ROOMOTE_PREVIEW_DOMAIN=preview.roomote.example.com
+TRPC_URL=https://roomote.example.com/_roomote-api
+```
+
+The production Compose overlay derives these runtime URLs:
+
+| Runtime key              | Value                                      |
+| ------------------------ | ------------------------------------------ |
+| `ROOMOTE_PUBLIC_URL`     | `https://$ROOMOTE_APP_DOMAIN`              |
+| `ROOMOTE_APP_URL`        | `https://$ROOMOTE_APP_DOMAIN`              |
+| `TRPC_URL`               | `https://$ROOMOTE_APP_DOMAIN/_roomote-api` |
+| `PREVIEW_PROXY_BASE_URL` | `https://$ROOMOTE_PREVIEW_DOMAIN`          |
+| `PREVIEW_DOMAINS`        | `$ROOMOTE_PREVIEW_DOMAIN`                  |
+
+On production Caddy, `ROOMOTE_APP_DOMAIN` serves both the web app and the
+worker-facing API. Caddy routes the explicit `/_roomote-api/*` prefix to
+`api:3001` after stripping that prefix, routes `/$S3_BUCKET_ARTIFACTS/*`
+directly to MinIO for presigned artifact uploads and downloads, and sends all
+other paths, including web auth, browser tRPC, Slack OAuth, and UI routes, to
+`web:3000`.
+
+After those values are in place, use the admin **Settings → Live Previews**
+page to confirm the detected runtime config, validate the wildcard preview
+hostname, and opt previews in at the deployment and environment levels.
+
+## Model Provider
+
+Task execution requires a models.dev-style model id:
+
+```sh
+ROOMOTE_MODEL=openrouter/anthropic/claude-sonnet-4
+OPENROUTER_API_KEY=...
+```
+
+Set `ROOMOTE_SMALL_MODEL` for routing, title generation, summaries, and
+other lightweight calls:
+
+```sh
+ROOMOTE_SMALL_MODEL=openrouter/openai/gpt-4.1-mini
+```
+
+Set `ROOMOTE_VISION_MODEL` when image understanding and visual information
+extraction should use a different model from the active coding model. Roomote
+configures a hidden OpenCode `visual` subagent only when this model differs
+from the effective coding model for the task, and asks the parent agent to
+delegate screenshot, diagram, chart, rendered-document, and other visual
+inspection through it:
+
+```sh
+ROOMOTE_VISION_MODEL=openrouter/openai/gpt-5.5
+```
+
+Set `ROOMOTE_CODE_REVIEW_MODEL` when pull request and merge request review
+tasks, implementation judge passes, and other code-review-oriented analysis
+should use a different model from the active coding model. When unset, those
+review flows fall back to the default coding model:
+
+```sh
+ROOMOTE_CODE_REVIEW_MODEL=openrouter/openai/gpt-5.5
+```
+
+Set `ROOMOTE_EXPLORE_MODEL` when read-only codebase exploration through the
+OpenCode `explore` subagent should use a different model from the active coding
+model. When unset, exploration falls back to the task's active coding model:
+
+```sh
+ROOMOTE_EXPLORE_MODEL=openrouter/openai/gpt-5.4-mini
+```
+
+The provider is the first segment of the model id. Roomote forwards these
+common provider keys into worker containers:
+
+- `OPENROUTER_API_KEY`
+- `AI_GATEWAY_API_KEY` (Vercel AI Gateway, `vercel/...` models)
+- `OPENAI_API_KEY`
+- `ANTHROPIC_API_KEY`
+- `MISTRAL_API_KEY`
+- `MOONSHOT_API_KEY`
+- `MINIMAX_API_KEY`
+- `OPENCODE_API_KEY`
+
+If your provider uses another env var name, list it in
+`ROOMOTE_MODEL_ENV_KEYS`:
+
+```sh
+ROOMOTE_MODEL=custom-provider/custom-model
+ROOMOTE_MODEL_ENV_KEYS=CUSTOM_PROVIDER_API_KEY
+CUSTOM_PROVIDER_API_KEY=...
+```
+
+The checked-in Compose files forward the common provider keys above and the
+sample `CUSTOM_PROVIDER_API_KEY`. If you use a different custom provider key
+name in a Compose deployment, add that key to the service environment block or
+provide it through your deployment secret mechanism.
+
+## Artifact Storage
+
+Roomote stores generated artifacts, plans, and visual proof uploads in
+S3-compatible object storage. The Compose stack includes MinIO and creates
+`S3_BUCKET_ARTIFACTS` during startup.
+
+Local development defaults to:
+
+```sh
+S3_ENDPOINT=http://localhost:19000
+S3_PRESIGN_ENDPOINT=http://localhost:19000
+S3_REGION=us-east-1
+S3_ACCESS_KEY_ID=roomote
+S3_SECRET_ACCESS_KEY=roomote-local-artifacts-password
+S3_BUCKET_ARTIFACTS=roomote-artifacts
+```
+
+When a local Docker worker asks the API for a presigned artifact URL through
+`host.docker.internal`, the API signs the URL with that host so the worker can
+upload without invalidating the S3 signature. Local self-host keeps both
+`S3_ENDPOINT` and `S3_PRESIGN_ENDPOINT` on `http://minio:9000` inside the
+Compose network. Production Caddy keeps `S3_ENDPOINT=http://minio:9000` for
+server-side access, but defaults `S3_PRESIGN_ENDPOINT` to
+`https://$ROOMOTE_APP_DOMAIN`; Caddy forwards `/$S3_BUCKET_ARTIFACTS/*` to
+MinIO without stripping the bucket path so Docker, Modal, and other hosted
+workers can all reach presigned artifact URLs.
+
+## Sign-In Providers
+
+Roomote requires sign-in, but no sign-in provider is needed to get started:
+the installer's printed setup link acts as the first admin's invite, so you
+can create an email/password admin account immediately and configure single
+sign-on later. After that, bring in teammates with invite links from
+**Settings → Users** (invited users can also sign up with email and
+password), or configure one of these providers so your whole Slack workspace
+or Microsoft tenant can sign in:
+
+| Provider        | Env vars                                                                                                       | Redirect URL                                               |
+| --------------- | -------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------- |
+| Slack           | `ROOMOTE_AUTH_SLACK_CLIENT_ID`, `ROOMOTE_AUTH_SLACK_CLIENT_SECRET`                                             | `<public-url>/api/auth/oauth2/callback/slack`              |
+| Microsoft Teams | `ROOMOTE_AUTH_MICROSOFT_CLIENT_ID`, `ROOMOTE_AUTH_MICROSOFT_CLIENT_SECRET`, `ROOMOTE_AUTH_MICROSOFT_TENANT_ID` | `<public-url>/api/auth/oauth2/callback/microsoft-entra-id` |
+
+You can restrict access with:
+
+```sh
+ROOMOTE_ALLOWED_EMAILS=you@example.com,teammate@example.com
+```
+
+### Roles
+
+Users are either **admins** (manage deployment settings and users) or
+**members**. The first user to sign in becomes the founding admin; everyone
+after joins with the role their invite grants (member by default) until an
+admin changes it from **Settings → Users**. Admins can also remove users
+there: removal signs them out immediately, keeps their task history, and
+frees their email so they can be invited and sign up again later. Roomote refuses role changes that would leave the
+deployment without an admin, but if you ever lose admin access anyway (for
+example the only admin account is gone), promote a user directly in the
+database:
+
+```sh
+docker compose exec postgres \
+  psql -U postgres -d roomote_development -c \
+  "UPDATE users SET role = 'admin' WHERE email = 'you@example.com';"
+```
+
+Slack sign-in can reuse `SLACK_CLIENT_ID` and `SLACK_CLIENT_SECRET` from the
+Slack integration app if you use one Slack app for both sign-in and bot events.
+The `/setup` Slack step is the preferred path: choose **Create Slack app from
+manifest**, create the prefilled app in Slack, then paste the generated Client
+ID, Client Secret, and Signing Secret back into Roomote. Use **Enter values
+manually** for an existing Slack app or when production secret management owns
+the values.
+
+## GitHub App
+
+A GitHub App is required. Roomote uses it to discover repositories, clone
+code, create branches, and open or update pull requests. For local development
+and local self-hosting, open `/setup`, choose GitHub, and click **Create GitHub
+App**; Roomote uses GitHub's manifest flow to create the app settings and save
+the generated credentials automatically.
+
+Use the same public URL for all GitHub settings:
+
+| GitHub setting | Value                                           |
+| -------------- | ----------------------------------------------- |
+| Homepage URL   | `<public-url>`                                  |
+| Setup URL      | `<public-url>/github/callback`                  |
+| Callback URL   | `<public-url>/github/callback`                  |
+| Webhook URL    | `<public-url>/_roomote-api/api/webhooks/github` |
+
+Check **Redirect on update** in the GitHub App's Post installation settings so
+repository access changes return to Roomote.
+
+Use manual env vars when you already have a GitHub App or when production/shared
+self-host secret management should own the values:
+
+```sh
+NEXT_PUBLIC_GITHUB_APP_SLUG=<github-app-slug>
+GITHUB_APP_ID=<app-id>
+GITHUB_APP_PRIVATE_KEY="-----BEGIN RSA PRIVATE KEY-----\n...\n-----END RSA PRIVATE KEY-----"
+GITHUB_CLIENT_ID=<client-id>
+GITHUB_CLIENT_SECRET=<client-secret>
+GITHUB_WEBHOOK_SECRET=<webhook-secret>
+```
+
+The detailed GitHub manifest and manual permission checklist is in
+[README.md#github-app-setup](README.md#github-app-setup).
+
+## Slack Integration
+
+Slack integration is optional unless Slack is your sign-in provider or task
+entry surface. For local development and local self-hosting, open `/setup` and
+choose **Create Slack app from manifest**. Roomote opens Slack's create-app flow
+with the redirect, webhook, interactivity, scope, and event settings prefilled.
+After Slack creates the app, paste the generated credentials back into Roomote;
+workspace installation still happens later in the Slack connection step.
+
+For production self-hosting or manual review, use the same public URL for every
+Slack URL:
+
+| Slack setting              | Value                                          |
+| -------------------------- | ---------------------------------------------- |
+| OAuth redirect URL         | `<public-url>/api/slack/callback`              |
+| Event Subscriptions URL    | `<public-url>/_roomote-api/api/webhooks/slack` |
+| Interactivity request URL  | `<public-url>/_roomote-api/api/webhooks/slack` |
+| Slack sign-in redirect URL | `<public-url>/api/auth/oauth2/callback/slack`  |
+
+Required integration env vars:
+
+```sh
+SLACK_CLIENT_ID=...
+SLACK_CLIENT_SECRET=...
+SLACK_SIGNING_SECRET=...
+```
+
+`SLACK_APP_ID` is optional for manual preconfiguration. Roomote saves Slack's
+`app_id` from the OAuth installation response after the workspace install flow
+completes.
+
+The Slack manifest-prefill flow and manual scope list are in
+[README.md#slack-integration-app](README.md#slack-integration-app).
+
+To run the containerized stack on your own machine (without a public server),
+use the production compose overlay below with a local `.env.production` — it
+runs the same images in production mode with per-install secrets, rather than
+the source-checked-in development defaults. For fast source edits, use
+`pnpm dev` instead.
+
+## Production Compose With Caddy
+
+Set DNS before starting:
+
+| DNS name                   | Target              |
+| -------------------------- | ------------------- |
+| `ROOMOTE_APP_DOMAIN`       | The deployment host |
+| `ROOMOTE_PREVIEW_DOMAIN`   | The deployment host |
+| `*.ROOMOTE_PREVIEW_DOMAIN` | The deployment host |
+
+Generate fresh keys:
+
+```sh
+openssl ecparam -name prime256v1 -genkey -noout -out job-auth-private.pem
+openssl pkcs8 -topk8 -nocrypt -in job-auth-private.pem -out job-auth-private-pkcs8.pem
+openssl ec -in job-auth-private.pem -pubout -out job-auth-public.pem
+base64 < job-auth-private-pkcs8.pem | tr -d '\n' # JOB_AUTH_PRIVATE_KEY
+base64 < job-auth-public.pem | tr -d '\n'        # JOB_AUTH_PUBLIC_KEY
+
+openssl ecparam -name prime256v1 -genkey -noout -out preview-auth-private.pem
+openssl pkcs8 -topk8 -nocrypt -in preview-auth-private.pem -out preview-auth-private-pkcs8.pem
+openssl ec -in preview-auth-private.pem -pubout -out preview-auth-public.pem
+base64 < preview-auth-private-pkcs8.pem | tr -d '\n' # PREVIEW_AUTH_PRIVATE_KEY
+base64 < preview-auth-public.pem | tr -d '\n'        # PREVIEW_AUTH_PUBLIC_KEY
+
+openssl rand -base64 32 # ENCRYPTION_KEY
+openssl rand -base64 32 # ARTIFACT_SIGNING_KEY
+openssl rand -base64 24 # DASHBOARD_PASSWORD
+openssl rand -hex 16    # SETUP_TOKEN
+```
+
+If the deployment platform cannot run `openssl` during provisioning (for
+example PaaS platforms such as Railway or Render), leave the four
+`JOB_AUTH_*`/`PREVIEW_AUTH_*` values unset and set
+`ROOMOTE_AUTO_GENERATE_KEYS=true` instead. Roomote then generates the P-256
+keypairs once at first startup, stores them encrypted with `ENCRYPTION_KEY` in
+the database, and reuses them on every later boot. Env-provided key values
+always take precedence. The random string secrets (`ENCRYPTION_KEY`,
+`ARTIFACT_SIGNING_KEY`, `DASHBOARD_PASSWORD`, `SETUP_TOKEN`) are still
+required and can come from the platform's secret generator.
+
+### Port exposure and the queue dashboard
+
+Published container ports bind to `127.0.0.1` by default. This covers the
+datastores in `docker-compose.yml` (Postgres `15432`, Redis `16379`, MinIO
+`19000`/`19001`) and, in a standalone `docker-compose.self-host.yml` stack, the
+app ports (web `13000`, API `13001`, BullMQ `13002`, preview proxy `18081`).
+That keeps Postgres (default password), Redis (no auth), and the queue
+dashboard off other hosts. The production Caddy overlay below removes these
+published ports entirely and serves everything through Caddy on `80`/`443`. For
+a standalone self-host stack, front the web app with a reverse proxy on the same
+host (or add an explicit port override) rather than binding to all interfaces.
+
+The BullMQ `/admin` queue dashboard (Bull Board, with write access to every
+queue) is served **only when `DASHBOARD_PASSWORD` is set**, behind HTTP basic
+auth as user `admin`. This is gated on the password, not on `NODE_ENV`, so the
+`development`-flavored self-host services are still protected. With no
+`DASHBOARD_PASSWORD`, `/admin` returns `503` and the dashboard is disabled while
+the queue workers keep running.
+
+`PREVIEW_PROXY_BASE_URL` and `PREVIEW_DOMAINS` no longer block startup when
+unset: live previews simply report as not configured until you set the values
+via env or from **Settings → Live Previews**.
+
+`SETUP_TOKEN` protects the pre-auth `/setup` bootstrap wizard, which admits the
+deployment's first admin. Until initial setup completes, the wizard rejects
+visitors who do not present the token via `/setup?token=<value>` or the token
+entry step. **It is required on every non-local deployment** (any `APP_ENV`
+other than `development`): if it is unset, first-admin bootstrap stays closed
+and `/setup` blocks on the token step until you configure one — this prevents
+an attacker who reaches the URL before you from claiming the founding admin
+account. Only local development bootstraps without a token.
+
+Edit `.env.production`, then start:
+
+```sh
+docker compose --env-file .env.production \
+  -f docker-compose.yml \
+  -f docker-compose.self-host.yml \
+  -f docker-compose.compute-docker.yml \
+  -f docker-compose.production.yml \
+  up -d --build
+```
+
+Caddy is the only public entrypoint in this overlay. It serves the app/API
+domain, the preview domain, and one-label preview subdomains. Its
+certificates and ACME account state live in the `caddy_data` and `caddy_config`
+Docker volumes.
+MinIO has no direct host port; Caddy only proxies the configured artifact bucket
+path for presigned S3 requests.
+
+Stop the stack:
+
+```sh
+docker compose --env-file .env.production \
+  -f docker-compose.yml \
+  -f docker-compose.self-host.yml \
+  -f docker-compose.compute-docker.yml \
+  -f docker-compose.production.yml \
+  down
+```
+
+## Compute Provider
+
+`DEFAULT_COMPUTE_PROVIDER=docker` runs task workers as sibling Docker
+containers on the same host. Include `docker-compose.compute-docker.yml` when
+using Docker compute. That overlay:
+
+- builds the `DOCKER_WORKER_IMAGE` from `apps/worker/Dockerfile`;
+- mounts `/var/run/docker.sock` into the controller;
+- sets `DOCKER_WORKER_NETWORK=roomote_worker` so worker containers join a
+  dedicated network that reaches the API, controller, and preview proxy but not
+  Postgres, Redis, or MinIO;
+- points `DOCKER_WORKER_RELEASE_PATH` at the controller image's packaged worker
+  release archive.
+
+Docker compute is the simplest single-host deployment path:
+
+```sh
+DEFAULT_COMPUTE_PROVIDER=docker
+DOCKER_WORKER_IMAGE=roomote-worker:local
+# Optional: defaults to the host architecture (linux/amd64 or linux/arm64)
+DOCKER_WORKER_PLATFORM=linux/amd64
+```
+
+If you do not want the controller to access the host Docker socket, choose a
+hosted provider instead and omit `docker-compose.compute-docker.yml`:
+
+```sh
+# Modal
+DEFAULT_COMPUTE_PROVIDER=modal
+MODAL_TOKEN_ID=...
+MODAL_TOKEN_SECRET=...
+# Optional on published app images — see the worker image note below.
+MODAL_BASE_IMAGE_REF=...
+
+# E2B
+DEFAULT_COMPUTE_PROVIDER=e2b
+E2B_API_KEY=...
+E2B_TEMPLATE_ID=...
+
+# Daytona
+DEFAULT_COMPUTE_PROVIDER=daytona
+DAYTONA_API_KEY=...
+DAYTONA_SNAPSHOT_NAME=...
+```
+
+`E2B_TEMPLATE_ID` and `DAYTONA_SNAPSHOT_NAME` can also be provisioned
+automatically during setup when a registry-qualified `DOCKER_WORKER_IMAGE`
+is configured — the setup wizard and the Settings → Compute page build the
+worker base artifact in your provider account after credentials are saved.
+
+For quick-install and V1 deployer-managed hosts, leave `MODAL_BASE_IMAGE_REF`
+blank unless you need a custom Modal image. The installer and deployer sync it
+to the matching `DOCKER_WORKER_IMAGE` (the published worker image doubles as
+the Modal base image) and preserve a different non-empty value as an explicit
+override.
+
+When running the published `ghcr.io/roocodeinc/roomote-app` image, both
+`DOCKER_WORKER_IMAGE` and `MODAL_BASE_IMAGE_REF` are optional: if unset, the
+app derives `ghcr.io/roocodeinc/roomote-worker:<version>` from the release
+version baked into the app image, which the publish workflow tags in lockstep
+with the worker image. Set `ROOMOTE_WORKER_IMAGE_REPO` to derive from a
+different repository (forks, registry mirrors). Explicit values always win,
+and local source builds (where no published tag exists) still require the
+variables as before.
+
+Modal can also use:
+
+```sh
+MODAL_ENDPOINT=...
+MODAL_ENVIRONMENT=...
+MODAL_APP_NAME=...
+MODAL_ECR_OIDC_ROLE_ARN=...
+MODAL_ECR_REGION=...
+```
+
+## Verification Checklist
+
+After startup:
+
+1. Open the public app URL.
+2. Sign in with the configured provider.
+3. Visit `/setup` and confirm GitHub is connected.
+4. Confirm repositories appear in the environment picker.
+5. Start a small task, such as asking for the current time.
+6. Open the task terminal and logs panes.
+7. If Slack is configured, mention the app in Slack and confirm it creates or
+   resumes a task.
+8. Run `pnpm run doctor` from the repository root when testing locally.
+
+## Operations
+
+Logs:
+
+```sh
+docker compose --env-file .env.production \
+  -f docker-compose.yml \
+  -f docker-compose.self-host.yml \
+  -f docker-compose.compute-docker.yml \
+  -f docker-compose.production.yml \
+  logs -f web api controller bullmq preview-proxy caddy
+```
+
+Restart one service:
+
+```sh
+docker compose --env-file .env.production \
+  -f docker-compose.yml \
+  -f docker-compose.self-host.yml \
+  -f docker-compose.compute-docker.yml \
+  -f docker-compose.production.yml \
+  restart controller
+```
+
+Upgrade:
+
+```sh
+git pull --ff-only
+pnpm install
+docker compose --env-file .env.production \
+  -f docker-compose.yml \
+  -f docker-compose.self-host.yml \
+  -f docker-compose.compute-docker.yml \
+  -f docker-compose.production.yml \
+  up -d --build
+```
+
+Backups should include at minimum:
+
+- The Postgres database or `postgres_data` volume.
+- The Redis volume if you need queue/session recovery across host loss.
+- The MinIO `minio_data` volume, or the external object store bucket if you
+  replace bundled MinIO.
+- `.env.production` in your secret store.
+- Caddy volumes `caddy_data` and `caddy_config`.
+- Any Docker worker containers you intentionally keep for debugging are
+  ephemeral task runtime state, not source-of-truth data.
+
+## License And Seats
+
+Roomote is licensed under the Fair Core License 1.0 (FCL-1.0-ALv2, see
+[LICENSE](LICENSE)). A deployment is **free for up to 10 users** — every
+registered user account counts toward the limit, whichever sign-in path or
+surface it uses. Removing a user frees their seat.
+
+To go beyond 10 users, obtain a license key from the Roomote maintainers and
+enter it in **Settings → Users → License** as an admin. Keys are verified
+offline; your deployment never phones home.
+
+When a deployment is at its seat limit, existing users are unaffected — only
+new sign-ups are blocked until a seat is freed (Settings → Users → remove a
+user) or a license key with more seats is added. Per the license terms, the
+license key functionality may not be disabled or circumvented.
+
+## Current Limits
+
+- The first supported production shape is one self-managed host.
+- Docker compute is supported for that single-host shape. It is not a
+  multi-host scheduler and it relies on trusted controller access to the host
+  Docker socket.
+- Production monitoring, backup automation, and secret rotation are operator
+  responsibilities.
+- Hosted preview/prod deployment automation is not part of this repository yet.

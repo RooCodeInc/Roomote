@@ -1,0 +1,251 @@
+'use client';
+
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { toast } from 'sonner';
+import {
+  isSetupProvisionableComputeProvider,
+  type ComputeProvider,
+  type SetupComputeStatus,
+} from '@roomote/types';
+
+import { useTRPC } from '@/trpc/client';
+import {
+  Alert,
+  Cpu,
+  Info,
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+  Skeleton,
+} from '@/components/system';
+
+import { Section } from './Section';
+import { ComputeProviderSection } from './ComputeProviderSection';
+import { ComputeWorkerImageSection } from './ComputeWorkerImageSection';
+
+type ComputeProviderStatus = SetupComputeStatus['providers'][number];
+
+function getDefaultProviderDisabledLabel(provider: ComputeProviderStatus) {
+  if (provider.configSatisfied) {
+    return '';
+  }
+
+  if (!provider.infrastructureSatisfied) {
+    return ' (missing worker image)';
+  }
+
+  return ' (not configured)';
+}
+
+export function ComputeProviders() {
+  const trpc = useTRPC();
+  const queryClient = useQueryClient();
+  const statusQueryKey = trpc.compute.status.queryKey();
+  const envVarsQueryKey = trpc.environmentVariables.list.queryKey();
+
+  const status = useQuery(
+    trpc.compute.status.queryOptions(undefined, {
+      // Poll while a worker base-image provisioning run is in flight so the
+      // page advances to the provisioned state without a manual refresh.
+      refetchInterval: (query) =>
+        Object.values(query.state.data?.provisioning ?? {}).some(
+          (provisioning) => provisioning?.status === 'building',
+        )
+          ? 2_000
+          : false,
+    }),
+  );
+  const provisioningByProvider = status.data?.provisioning ?? {};
+
+  const invalidateComputeQueries = async () => {
+    await Promise.all([
+      queryClient.invalidateQueries({ queryKey: statusQueryKey }),
+      queryClient.invalidateQueries({ queryKey: envVarsQueryKey }),
+    ]);
+  };
+
+  const saveConfig = useMutation(
+    trpc.compute.saveConfig.mutationOptions({
+      onSuccess: async () => {
+        await invalidateComputeQueries();
+        toast.success('Compute provider credentials saved.');
+      },
+      onError: (error) => {
+        toast.error(error.message || 'Failed to save credentials.');
+      },
+    }),
+  );
+
+  const saveWorkerImage = useMutation(
+    trpc.compute.saveWorkerImage.mutationOptions({
+      onSuccess: async () => {
+        await invalidateComputeQueries();
+        toast.success('Worker image saved.');
+      },
+      onError: (error) => {
+        toast.error(error.message || 'Failed to save the worker image.');
+      },
+    }),
+  );
+
+  const clearWorkerImage = useMutation(
+    trpc.compute.clearWorkerImage.mutationOptions({
+      onSuccess: async () => {
+        await invalidateComputeQueries();
+        toast.success('Worker image cleared.');
+      },
+      onError: (error) => {
+        toast.error(error.message || 'Failed to clear the worker image.');
+      },
+    }),
+  );
+
+  const clearConfig = useMutation(
+    trpc.compute.clearConfig.mutationOptions({
+      onSuccess: async () => {
+        await invalidateComputeQueries();
+        toast.success('Compute provider credentials cleared.');
+      },
+      onError: (error) => {
+        toast.error(error.message || 'Failed to clear credentials.');
+      },
+    }),
+  );
+
+  const setDefaultProvider = useMutation(
+    trpc.compute.setDefaultProvider.mutationOptions({
+      onSuccess: async () => {
+        await queryClient.invalidateQueries({ queryKey: statusQueryKey });
+        toast.success('Default compute provider updated.');
+      },
+      onError: (error) => {
+        toast.error(error.message || 'Failed to update the default provider.');
+      },
+    }),
+  );
+
+  const providers: ComputeProviderStatus[] = status.data?.providers ?? [];
+  const effectiveDefaultProvider: ComputeProvider =
+    status.data?.persistedDefaultProvider ??
+    status.data?.runtimeDefaultProvider ??
+    'docker';
+  const defaultProviderStatus = providers.find(
+    (provider) => provider.provider === effectiveDefaultProvider,
+  );
+
+  const handleSave = (
+    provider: ComputeProvider,
+    values: Record<string, string>,
+  ) => {
+    saveConfig.mutate({ provider, values });
+  };
+
+  const handleClear = (provider: ComputeProvider) => {
+    clearConfig.mutate({ provider });
+  };
+
+  if (status.isPending) {
+    return (
+      <div className="space-y-4">
+        {Array.from({ length: 5 }).map((_, i) => (
+          <Skeleton key={i} className="h-16 w-full rounded-xl" />
+        ))}
+      </div>
+    );
+  }
+
+  if (status.isError) {
+    return (
+      <p className="text-sm text-destructive">
+        Failed to load compute provider status.
+      </p>
+    );
+  }
+
+  if (providers.length === 0) {
+    return (
+      <p className="text-sm text-muted-foreground">
+        No compute providers are available.
+      </p>
+    );
+  }
+
+  return (
+    <div className="space-y-4">
+      <Section icon={Cpu} title="Default compute provider">
+        <div className="max-w-xl space-y-3">
+          <p className="text-sm text-muted-foreground">
+            Roomote runs each task on an isolated machine. New tasks run on this
+            provider unless a task explicitly overrides it.
+          </p>
+          <Select
+            value={effectiveDefaultProvider}
+            onValueChange={(value) =>
+              setDefaultProvider.mutate({ provider: value as ComputeProvider })
+            }
+            disabled={setDefaultProvider.isPending}
+          >
+            <SelectTrigger className="w-full sm:w-72">
+              <SelectValue placeholder="Select a compute provider" />
+            </SelectTrigger>
+            <SelectContent>
+              {providers.map((provider) => (
+                <SelectItem
+                  key={provider.provider}
+                  value={provider.provider}
+                  disabled={!provider.configSatisfied}
+                >
+                  {provider.label}
+                  {getDefaultProviderDisabledLabel(provider)}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+          {defaultProviderStatus && !defaultProviderStatus.configSatisfied && (
+            <Alert variant="notice">
+              <Info className="size-4" />
+              <p>
+                {defaultProviderStatus.label} is the default compute provider
+                but is missing configuration. Tasks may fail to start until it
+                is configured or another default is selected.
+              </p>
+            </Alert>
+          )}
+        </div>
+      </Section>
+      {status.data ? (
+        <ComputeWorkerImageSection
+          workerImage={status.data.workerImage}
+          onSave={(value) => saveWorkerImage.mutate({ value })}
+          onClear={() => clearWorkerImage.mutate()}
+          savePending={saveWorkerImage.isPending}
+          clearPending={clearWorkerImage.isPending}
+        />
+      ) : null}
+      {providers.map((provider) => (
+        <ComputeProviderSection
+          key={provider.provider}
+          provider={provider}
+          isDefault={provider.provider === effectiveDefaultProvider}
+          provisioning={
+            isSetupProvisionableComputeProvider(provider.provider)
+              ? (provisioningByProvider[provider.provider] ?? null)
+              : null
+          }
+          onSave={handleSave}
+          onClear={handleClear}
+          savePending={
+            saveConfig.isPending &&
+            saveConfig.variables?.provider === provider.provider
+          }
+          clearPending={
+            clearConfig.isPending &&
+            clearConfig.variables?.provider === provider.provider
+          }
+        />
+      ))}
+    </div>
+  );
+}

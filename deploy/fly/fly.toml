@@ -1,0 +1,155 @@
+# Roomote Fly.io app definition.
+#
+# This file is the maintained source of truth for running Roomote as a
+# single Fly.io app. Fly has no template marketplace, so deploys are
+# flyctl-driven: copy this directory, replace the `roomote-CHANGEME`
+# placeholder with your globally unique app name (one `sed`, see README.md),
+# provision the managed resources, and `fly deploy`.
+#
+# Design notes:
+# - One shared `roomote-app` image runs web, api, controller, and bullmq as
+#   Fly process groups; each group runs in its own Machine and selects its
+#   process through the image's entrypoint dispatcher
+#   (`.docker/app/entrypoint.sh`). Fly process commands correspond to Docker
+#   CMD and do not replace the image ENTRYPOINT, so the bare service names
+#   (`web`, `api`, ...) are the correct commands here.
+# - Fly Proxy is the HTTPS edge. There is no bundled Caddy and no
+#   `/_roomote-api` path routing. A Fly app has one public hostname, and Fly
+#   Proxy routes by port, not process group, so the web app owns 443 and the
+#   API is exposed on port 8443 of the same hostname: `TRPC_URL` is
+#   `https://<app>.fly.dev:8443`. The `*.fly.dev` certificate covers
+#   TLS-handled ports other than 443, and GitHub webhooks and hosted-compute
+#   workers call that origin directly.
+# - Every process group gets the same `[env]` block (Fly has no per-process
+#   env), so all services share `PORT=8080` — safe because each group runs
+#   in its own Machine, and all app services honor `PORT` (the same pattern
+#   as the Railway template).
+# - Fly Machines have no Docker socket, so task execution must use a hosted
+#   compute provider (modal by default; e2b and daytona also work).
+#   EXCLUDED_COMPUTE_PROVIDERS=docker hides the unusable provider.
+# - Managed resources replace the bundled datastores: Fly Managed Postgres
+#   (`fly mpg create` + `fly mpg attach` sets DATABASE_URL), Upstash Redis
+#   (`fly redis create`, set REDIS_URL), and Tigris object storage
+#   (`fly storage create`) instead of a MinIO service. Tigris serves
+#   presigned artifact URLs directly, so no S3 service or public bucket
+#   domain is needed and S3_AUTO_CREATE_BUCKET stays unset (the bucket is
+#   created by `fly storage create`).
+# - No openssl provisioning step. `ROOMOTE_AUTO_GENERATE_KEYS=true` makes
+#   Roomote generate the `JOB_AUTH_*`/`PREVIEW_AUTH_*` P-256 keypairs at
+#   first boot and persist them encrypted (with `ENCRYPTION_KEY`) in
+#   Postgres. The remaining secrets are random strings set once with
+#   `fly secrets set` (see README.md).
+# - The config tracks the mutable `:develop` image alias and contains no
+#   version strings. `fly deploy` resolves the alias at deploy time, so
+#   redeploying is upgrading. The images bake RELEASE_VERSION; the app
+#   derives DOCKER_WORKER_IMAGE and MODAL_BASE_IMAGE_REF from it, and the
+#   controller reads the worker release version from the VERSION file inside
+#   worker-current.tar.gz. Production deployments can pin an immutable
+#   `v*` / `develop-<sha>` tag in `[build].image` instead; nothing else
+#   needs editing.
+# - Zero deploy-time provider inputs. Modal tokens and model provider keys
+#   are entered in the /setup wizard after first boot and stored encrypted
+#   in Postgres. The quick-deploy sequence generates a SETUP_TOKEN because
+#   fly.dev domains are publicly reachable.
+# - Live previews stay disabled by default. Preview subdomains need a
+#   wildcard domain on port 443, which the web service already owns in this
+#   app, so enabling previews means running the preview proxy as a second
+#   Fly app; see "Enabling live previews" in README.md.
+
+app = 'roomote-CHANGEME'
+primary_region = 'iad'
+
+# Give the controller time to finish or fail an in-flight worker spawn when
+# its Machine is replaced during a deploy (Fly caps this at 300s).
+kill_timeout = '5m'
+swap_size_mb = 512
+
+[build]
+  image = 'ghcr.io/roocodeinc/roomote-app:develop' # or pin an immutable v* / develop-<sha> tag
+
+[deploy]
+  # One-shot Drizzle migration run in a temporary Machine before each
+  # deploy's Machines are updated (the image entrypoint dispatches it).
+  release_command = 'db-migrate'
+
+# Shared by every process group. Secrets (ENCRYPTION_KEY,
+# ARTIFACT_SIGNING_KEY, DASHBOARD_PASSWORD, SETUP_TOKEN, DATABASE_URL,
+# REDIS_URL, S3_ACCESS_KEY_ID, S3_SECRET_ACCESS_KEY) are set with
+# `fly secrets set` and never live in this file.
+[env]
+  APP_ENV = 'production'
+  PORT = '8080'
+  ROOMOTE_DOCKER_LOAD_ENV_FILE = 'false'
+  ROOMOTE_AUTO_GENERATE_KEYS = 'true'
+  DEFAULT_COMPUTE_PROVIDER = 'modal'
+  EXCLUDED_COMPUTE_PROVIDERS = 'docker'
+  # The single canonical-origin knob: the URL users browse. To attach a
+  # custom domain, add the cert to this app and change only this value
+  # (ROOMOTE_PUBLIC_URL stays unset; the app falls back to ROOMOTE_APP_URL).
+  ROOMOTE_APP_URL = 'https://roomote-CHANGEME.fly.dev'
+  # Hosted-compute workers and GitHub webhooks call this origin directly;
+  # it is the api service on port 8443 of the same Fly hostname.
+  TRPC_URL = 'https://roomote-CHANGEME.fly.dev:8443'
+  # Tigris object storage (S3-compatible). `fly storage create` provisions
+  # the bucket and prints the credentials to copy into the S3_* secrets.
+  S3_ENDPOINT = 'https://fly.storage.tigris.dev'
+  S3_PRESIGN_ENDPOINT = 'https://fly.storage.tigris.dev'
+  S3_REGION = 'auto'
+  S3_BUCKET_ARTIFACTS = 'roomote-CHANGEME-artifacts'
+  # The worker release archive is baked into the app image; the controller
+  # uploads it into hosted-compute sandboxes at spawn time and reads the
+  # release version from the VERSION file inside the archive. Do not unset:
+  # the fallback is GitHub worker releases, which do not exist for develop
+  # builds. Only the controller consumes it; it is harmless elsewhere.
+  DOCKER_WORKER_RELEASE_PATH = '/roomote/releases/worker-current.tar.gz'
+
+[processes]
+  web = 'web'
+  api = 'api'
+  controller = 'controller'
+  bullmq = 'bullmq'
+
+# The app origin users open in the browser.
+[http_service]
+  processes = ['web']
+  internal_port = 8080
+  force_https = true
+  auto_stop_machines = 'off'
+  auto_start_machines = true
+  min_machines_running = 1
+
+  [[http_service.checks]]
+    grace_period = '30s'
+    interval = '15s'
+    timeout = '5s'
+    method = 'GET'
+    path = '/health'
+
+# The API, exposed on port 8443 of the app hostname. Fly Proxy routes by
+# port, so this cannot share 443 with the web service.
+[[services]]
+  processes = ['api']
+  protocol = 'tcp'
+  internal_port = 8080
+  auto_stop_machines = 'off'
+  auto_start_machines = true
+  min_machines_running = 1
+
+  [[services.ports]]
+    port = 8443
+    handlers = ['tls', 'http']
+
+  [[services.http_checks]]
+    grace_period = '30s'
+    interval = '15s'
+    timeout = '5s'
+    method = 'GET'
+    path = '/health/liveness'
+
+# Applies to every process group; scale a single group with
+# `fly scale memory 2048 --process-group <name>` or
+# `fly scale vm <size> --process-group <name>`.
+[[vm]]
+  cpu_kind = 'shared'
+  cpus = 1
+  memory = '1gb'

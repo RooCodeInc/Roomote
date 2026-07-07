@@ -1,0 +1,3154 @@
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+
+import {
+  ACP_ENVELOPE_EVENT_TYPES,
+  ACP_LIVE_EVENT_TYPES,
+  TaskEventName,
+  type AcpMessage,
+  type AcpPersistedEnvelope,
+  type AcpTurnCompletedEvent,
+  type TaskEvent,
+} from '@roomote/types';
+
+import { SLACK_STOP_HOOK_SCRIPT } from '../../../../run-task/slack-stop-hook-script';
+import { resolveOpenCodeModelSelection } from '../../../../run-task/opencode-model';
+import { TaskCommandName } from '../../harness';
+import type { HarnessInferenceUsageEvent } from '../../harness';
+import type { OpenCodeServerClient } from '../opencode-server/client';
+import {
+  buildOpenCodeSlackStopHookEnv,
+  OpenCodeServerHarness,
+} from '../opencode-server/harness';
+import type {
+  OpenCodeGlobalEvent,
+  OpenCodeSessionMessage,
+} from '../opencode-server/types';
+
+const TEST_OPENCODE_MODEL = 'test-provider/main-model';
+const TEST_OPENCODE_MODEL_SELECTION =
+  resolveOpenCodeModelSelection(TEST_OPENCODE_MODEL);
+
+class FakeOpenCodeServerClient {
+  private eventHandler:
+    | ((event: OpenCodeGlobalEvent) => void | Promise<void>)
+    | undefined;
+
+  health = vi.fn(async () => ({ healthy: true as const, version: 'test' }));
+  createSession = vi.fn(async () => ({ id: 'ses_1', title: 'test' }));
+  promptAsync = vi.fn(async (_options: unknown) => undefined);
+  messages = vi.fn(async () => [] as OpenCodeSessionMessage[]);
+  message = vi.fn<() => Promise<OpenCodeSessionMessage>>();
+  abort = vi.fn(async () => true);
+  streamEvents = vi.fn(
+    async (options: {
+      signal: AbortSignal;
+      onEvent: (event: OpenCodeGlobalEvent) => void | Promise<void>;
+    }) => {
+      this.eventHandler = options.onEvent;
+
+      await new Promise<void>((resolve) => {
+        if (options.signal.aborted) {
+          resolve();
+          return;
+        }
+
+        options.signal.addEventListener('abort', () => resolve(), {
+          once: true,
+        });
+      });
+    },
+  );
+
+  async emit(event: OpenCodeGlobalEvent): Promise<void> {
+    if (!this.eventHandler) {
+      throw new Error('OpenCode event stream is not subscribed.');
+    }
+
+    await this.eventHandler(event);
+  }
+}
+
+function createLogger() {
+  return {
+    info: vi.fn(),
+    warn: vi.fn(),
+    error: vi.fn(),
+  };
+}
+
+function createHarness(
+  client = new FakeOpenCodeServerClient(),
+  options: {
+    commandEnv?: Record<string, string>;
+    beforeQueuedPrompt?: (input: { userId?: string }) => Promise<void | {
+      shouldReconnect: boolean;
+      shouldBlockPrompt?: boolean;
+      reason?: string;
+    }>;
+    executeToolProgressInitialDelayMs?: number;
+    executeToolProgressIntervalMs?: number;
+    queuedPromptRetryDelayMs?: number;
+    mcpServerNames?: string[];
+    model?: string;
+  } = {},
+) {
+  const harness = new OpenCodeServerHarness({
+    client: client as unknown as OpenCodeServerClient,
+    workspacePath: '/tmp/workspace',
+    logger: createLogger(),
+    commandEnv: options.commandEnv,
+    model: options.model ?? TEST_OPENCODE_MODEL,
+    eventStreamReadyTimeoutMs: 100,
+    executeToolProgressInitialDelayMs:
+      options.executeToolProgressInitialDelayMs,
+    executeToolProgressIntervalMs: options.executeToolProgressIntervalMs,
+    queuedPromptRetryDelayMs: options.queuedPromptRetryDelayMs,
+    mcpServerNames: options.mcpServerNames,
+    beforeQueuedPrompt: options.beforeQueuedPrompt,
+  });
+
+  return { client, harness };
+}
+
+describe('buildOpenCodeSlackStopHookEnv', () => {
+  const originalEnv = { ...process.env };
+
+  afterEach(() => {
+    process.env = { ...originalEnv };
+  });
+
+  it('keeps command env while excluding broad launcher env', () => {
+    process.env.PATH = '/usr/bin';
+    process.env.HOME = '/home/worker';
+    process.env.ROOMOTE_SECRET_LAUNCHER_TOKEN = 'do-not-leak';
+    process.env.DATABASE_URL = 'postgres://do-not-leak';
+
+    const env = buildOpenCodeSlackStopHookEnv({
+      PATH: '/sandbox/bin',
+      ROOMOTE_SLACK_REPLY_SATISFACTION_STATE_FILE: '/tmp/state.json',
+      ROOMOTE_OPENCODE_SLACK_STOP_HOOK_SCRIPT: '/tmp/stop-hook.cjs',
+    });
+
+    expect(env).toMatchObject({
+      PATH: '/sandbox/bin',
+      HOME: '/home/worker',
+      ROOMOTE_SLACK_REPLY_SATISFACTION_STATE_FILE: '/tmp/state.json',
+      ROOMOTE_OPENCODE_SLACK_STOP_HOOK_SCRIPT: '/tmp/stop-hook.cjs',
+    });
+    expect(env.ROOMOTE_SECRET_LAUNCHER_TOKEN).toBeUndefined();
+    expect(env.DATABASE_URL).toBeUndefined();
+  });
+});
+
+async function connectHarness(
+  harness: OpenCodeServerHarness,
+  client: FakeOpenCodeServerClient,
+): Promise<void> {
+  const connectPromise = harness.connect();
+
+  await vi.waitFor(() => {
+    expect(client.streamEvents).toHaveBeenCalledTimes(1);
+  });
+  await client.emit({ type: 'server.connected' });
+  await connectPromise;
+}
+
+function createFinalAssistantMessage(): OpenCodeSessionMessage {
+  return {
+    info: {
+      id: 'msg_1',
+      sessionID: 'ses_1',
+      role: 'assistant',
+      providerID: 'openrouter',
+      modelID: 'openai/gpt-5.4',
+      mode: 'build',
+      time: {
+        created: 0,
+        completed: 1,
+      },
+      cost: 0.000123,
+      tokens: {
+        input: 5,
+        output: 2,
+        reasoning: 1,
+        cache: {
+          read: 3,
+          write: 4,
+        },
+      },
+    },
+    parts: [
+      {
+        id: 'part_1',
+        sessionID: 'ses_1',
+        messageID: 'msg_1',
+        type: 'text',
+        text: 'OK',
+      },
+    ],
+  };
+}
+
+describe('OpenCodeServerHarness', () => {
+  it('waits for the server.connected event before marking the harness connected', async () => {
+    const { client, harness } = createHarness();
+    const connectedEvents: string[] = [];
+    harness.on('connected', () => connectedEvents.push('connected'));
+
+    try {
+      const connectPromise = harness.connect();
+
+      await vi.waitFor(() => {
+        expect(client.streamEvents).toHaveBeenCalledTimes(1);
+      });
+      expect(harness.isConnected).toBe(false);
+      expect(connectedEvents).toEqual([]);
+
+      await client.emit({ type: 'server.connected' });
+      await connectPromise;
+
+      expect(harness.isConnected).toBe(true);
+      expect(connectedEvents).toEqual(['connected']);
+    } finally {
+      harness.dispose();
+    }
+  });
+
+  it('runs a prompt through OpenCode events and completes the turn after idle', async () => {
+    const { client, harness } = createHarness();
+    const runtimeOutputEvents: AcpMessage[] = [];
+    const persistedEnvelopes: AcpPersistedEnvelope[] = [];
+    const turnCompletedEvents: AcpTurnCompletedEvent[] = [];
+    const inferenceUsageEvents: HarnessInferenceUsageEvent[] = [];
+    const taskEvents: TaskEvent[] = [];
+
+    harness.subscribeRuntimeOutput((event) => runtimeOutputEvents.push(event));
+    harness.subscribeRuntimePersistedEnvelope((envelope) =>
+      persistedEnvelopes.push(envelope),
+    );
+    harness.subscribeRuntimeTurnCompleted((event) =>
+      turnCompletedEvents.push(event),
+    );
+    harness.subscribeRuntimeInferenceUsage((event) =>
+      inferenceUsageEvents.push(event),
+    );
+    harness.subscribe((event) => taskEvents.push(event));
+
+    try {
+      await connectHarness(harness, client);
+
+      expect(
+        harness.sendCommand({
+          commandName: TaskCommandName.StartNewTask,
+          data: {
+            text: 'Say exactly OK.',
+            visibleInTranscript: true,
+            source: 'web',
+            userId: 'user-1',
+          },
+        }),
+      ).toBe(true);
+
+      await vi.waitFor(() => {
+        expect(client.promptAsync).toHaveBeenCalledTimes(1);
+      });
+
+      expect(client.promptAsync.mock.calls[0]?.[0]).toMatchObject({
+        sessionId: 'ses_1',
+        request: {
+          model: {
+            providerID: TEST_OPENCODE_MODEL_SELECTION.providerID,
+            modelID: TEST_OPENCODE_MODEL_SELECTION.modelID,
+          },
+          agent: 'build',
+          parts: [{ type: 'text', text: 'Say exactly OK.' }],
+        },
+      });
+      expect(taskEvents[0]).toEqual({
+        eventName: TaskEventName.TaskStarted,
+        payload: ['ses_1'],
+      });
+      expect(
+        persistedEnvelopes.some(
+          (envelope) =>
+            envelope.eventType === ACP_ENVELOPE_EVENT_TYPES.UserPrompt &&
+            envelope.payload.text === 'Say exactly OK.',
+        ),
+      ).toBe(true);
+
+      client.message.mockResolvedValueOnce(createFinalAssistantMessage());
+
+      await client.emit({
+        type: 'message.part.updated',
+        properties: {
+          part: {
+            id: 'part_1',
+            sessionID: 'ses_1',
+            messageID: 'msg_1',
+            type: 'text',
+            text: 'O',
+          },
+          delta: 'O',
+        },
+      });
+      await client.emit({
+        type: 'message.part.updated',
+        properties: {
+          part: {
+            id: 'part_1',
+            sessionID: 'ses_1',
+            messageID: 'msg_1',
+            type: 'text',
+            text: 'OK',
+          },
+          delta: 'K',
+        },
+      });
+      await client.emit({
+        type: 'message.updated',
+        properties: {
+          info: {
+            id: 'msg_1',
+            sessionID: 'ses_1',
+            role: 'assistant',
+            time: {
+              completed: 1,
+            },
+          },
+        },
+      });
+      await client.emit({
+        type: 'session.idle',
+        properties: {
+          sessionID: 'ses_1',
+        },
+      });
+
+      await vi.waitFor(() => {
+        expect(turnCompletedEvents).toHaveLength(1);
+      });
+
+      expect(
+        runtimeOutputEvents
+          .filter(
+            (event) =>
+              event.eventType ===
+              ACP_ENVELOPE_EVENT_TYPES.AssistantMessageChunk,
+          )
+          .map((event) => event.text),
+      ).toEqual(['O', 'K']);
+      expect(
+        runtimeOutputEvents.some(
+          (event) =>
+            event.eventType === ACP_LIVE_EVENT_TYPES.UsageUpdate &&
+            event.payload.used === 15,
+        ),
+      ).toBe(true);
+      expect(
+        runtimeOutputEvents.some(
+          (event) =>
+            event.eventType === ACP_ENVELOPE_EVENT_TYPES.AssistantMessage,
+        ),
+      ).toBe(false);
+      expect(
+        persistedEnvelopes.some(
+          (envelope) =>
+            envelope.eventType === ACP_ENVELOPE_EVENT_TYPES.AssistantMessage &&
+            envelope.payload.text === 'OK',
+        ),
+      ).toBe(true);
+      expect(turnCompletedEvents[0]).toMatchObject({
+        sessionId: 'ses_1',
+        text: 'OK',
+      });
+
+      const taskCompletedEvent = taskEvents.find(
+        (event) => event.eventName === TaskEventName.TaskCompleted,
+      );
+      expect(taskCompletedEvent?.payload[1]).toMatchObject({
+        totalTokensIn: 5,
+        totalTokensOut: 2,
+        totalCacheReads: 3,
+        totalCacheWrites: 4,
+        contextTokens: 8,
+      });
+      expect(inferenceUsageEvents).toEqual([
+        {
+          sessionId: 'ses_1',
+          messageId: 'msg_1',
+          providerId: 'openrouter',
+          modelId: 'openai/gpt-5.4',
+          agent: 'build',
+          inputTokens: 5,
+          outputTokens: 2,
+          reasoningTokens: 1,
+          cacheReadTokens: 3,
+          cacheWriteTokens: 4,
+          totalTokens: 15,
+          contextTokens: 8,
+          costMicroUsd: 123,
+          costSource: 'opencode_message',
+          messageCreatedAt: new Date(0),
+          messageCompletedAt: new Date(1),
+        },
+      ]);
+    } finally {
+      harness.dispose();
+    }
+  });
+
+  it('records inference usage for completed child-session (subagent) assistant messages', async () => {
+    const { client, harness } = createHarness();
+    const inferenceUsageEvents: HarnessInferenceUsageEvent[] = [];
+
+    harness.subscribeRuntimeInferenceUsage((event) =>
+      inferenceUsageEvents.push(event),
+    );
+
+    try {
+      await connectHarness(harness, client);
+
+      harness.sendCommand({
+        commandName: TaskCommandName.StartNewTask,
+        data: {
+          text: 'Spawn a subagent.',
+          visibleInTranscript: true,
+          source: 'web',
+          userId: 'user-1',
+        },
+      });
+
+      await vi.waitFor(() => {
+        expect(client.promptAsync).toHaveBeenCalledTimes(1);
+      });
+
+      const childAssistantInfo = {
+        id: 'msg_child_1',
+        sessionID: 'ses_child_1',
+        role: 'assistant',
+        providerID: 'openrouter',
+        modelID: 'openai/gpt-5.4-mini',
+        mode: 'explore',
+        time: {
+          created: 10,
+          completed: 20,
+        },
+        cost: 0.000456,
+        tokens: {
+          input: 7,
+          output: 3,
+          reasoning: 0,
+          cache: {
+            read: 2,
+            write: 1,
+          },
+        },
+      };
+
+      // Incomplete child assistant messages are ignored.
+      await client.emit({
+        type: 'message.updated',
+        properties: {
+          info: {
+            ...childAssistantInfo,
+            time: { created: 10 },
+          },
+        },
+      });
+      expect(inferenceUsageEvents).toEqual([]);
+
+      await client.emit({
+        type: 'message.updated',
+        properties: { info: childAssistantInfo },
+      });
+      // Replayed completion events do not double-count the same message.
+      await client.emit({
+        type: 'message.updated',
+        properties: { info: childAssistantInfo },
+      });
+
+      expect(inferenceUsageEvents).toEqual([
+        {
+          sessionId: 'ses_child_1',
+          messageId: 'msg_child_1',
+          providerId: 'openrouter',
+          modelId: 'openai/gpt-5.4-mini',
+          agent: 'explore',
+          inputTokens: 7,
+          outputTokens: 3,
+          reasoningTokens: 0,
+          cacheReadTokens: 2,
+          cacheWriteTokens: 1,
+          totalTokens: 13,
+          contextTokens: 9,
+          costMicroUsd: 456,
+          costSource: 'opencode_message',
+          messageCreatedAt: new Date(10),
+          messageCompletedAt: new Date(20),
+        },
+      ]);
+      // Child-session usage never reaches the main-session transcript fetch.
+      expect(client.message).not.toHaveBeenCalled();
+    } finally {
+      harness.dispose();
+    }
+  });
+
+  it('persists a consolidated AssistantThought from reasoning parts', async () => {
+    const { client, harness } = createHarness();
+    const runtimeOutputEvents: AcpMessage[] = [];
+    const persistedEnvelopes: AcpPersistedEnvelope[] = [];
+    const turnCompletedEvents: AcpTurnCompletedEvent[] = [];
+
+    harness.subscribeRuntimeOutput((event) => runtimeOutputEvents.push(event));
+    harness.subscribeRuntimePersistedEnvelope((envelope) =>
+      persistedEnvelopes.push(envelope),
+    );
+    harness.subscribeRuntimeTurnCompleted((event) =>
+      turnCompletedEvents.push(event),
+    );
+
+    try {
+      await connectHarness(harness, client);
+
+      harness.sendCommand({
+        commandName: TaskCommandName.StartNewTask,
+        data: {
+          text: 'Think, then answer.',
+          visibleInTranscript: true,
+          source: 'web',
+          userId: 'user-1',
+        },
+      });
+
+      await vi.waitFor(() => {
+        expect(client.promptAsync).toHaveBeenCalledTimes(1);
+      });
+
+      // Streamed reasoning chunk (live only).
+      await client.emit({
+        type: 'message.part.updated',
+        properties: {
+          part: {
+            id: 'rpart_1',
+            sessionID: 'ses_1',
+            messageID: 'msg_1',
+            type: 'reasoning',
+            text: 'Because reasons.',
+          },
+          delta: 'Because reasons.',
+        },
+      });
+
+      // Completed message carries the reasoning part plus the answer.
+      client.message.mockResolvedValueOnce({
+        info: {
+          id: 'msg_1',
+          sessionID: 'ses_1',
+          role: 'assistant',
+          time: { completed: 1 },
+          tokens: { input: 5, output: 2, reasoning: 1, cache: { read: 3 } },
+        },
+        parts: [
+          {
+            id: 'rpart_1',
+            sessionID: 'ses_1',
+            messageID: 'msg_1',
+            type: 'reasoning',
+            text: 'Because reasons.',
+          },
+          {
+            id: 'part_1',
+            sessionID: 'ses_1',
+            messageID: 'msg_1',
+            type: 'text',
+            text: 'OK',
+          },
+        ],
+      });
+
+      await client.emit({
+        type: 'message.updated',
+        properties: {
+          info: {
+            id: 'msg_1',
+            sessionID: 'ses_1',
+            role: 'assistant',
+            time: { completed: 1 },
+          },
+        },
+      });
+      await client.emit({
+        type: 'session.idle',
+        properties: { sessionID: 'ses_1' },
+      });
+
+      await vi.waitFor(() => {
+        expect(turnCompletedEvents).toHaveLength(1);
+      });
+
+      // Live streaming chunk was emitted.
+      expect(
+        runtimeOutputEvents.some(
+          (event) =>
+            event.eventType ===
+              ACP_ENVELOPE_EVENT_TYPES.AssistantThoughtChunk &&
+            event.text === 'Because reasons.',
+        ),
+      ).toBe(true);
+
+      // The consolidated thought is not re-emitted live after the reasoning
+      // already streamed; a live re-emit would duplicate the "Thought" block.
+      expect(
+        runtimeOutputEvents.some(
+          (event) =>
+            event.eventType === ACP_ENVELOPE_EVENT_TYPES.AssistantThought,
+        ),
+      ).toBe(false);
+
+      // Consolidated thought is persisted with the full reasoning text...
+      const thought = persistedEnvelopes.find(
+        (envelope) =>
+          envelope.eventType === ACP_ENVELOPE_EVENT_TYPES.AssistantThought,
+      );
+      expect(thought?.payload.text).toBe('Because reasons.');
+
+      // ...and it lands before the answer message in the transcript.
+      const thoughtIndex = persistedEnvelopes.findIndex(
+        (envelope) =>
+          envelope.eventType === ACP_ENVELOPE_EVENT_TYPES.AssistantThought,
+      );
+      const messageIndex = persistedEnvelopes.findIndex(
+        (envelope) =>
+          envelope.eventType === ACP_ENVELOPE_EVENT_TYPES.AssistantMessage,
+      );
+      expect(thoughtIndex).toBeGreaterThanOrEqual(0);
+      expect(messageIndex).toBeGreaterThanOrEqual(0);
+      expect(thoughtIndex).toBeLessThan(messageIndex);
+    } finally {
+      harness.dispose();
+    }
+  });
+
+  it('emits the consolidated AssistantThought live when reasoning never streamed', async () => {
+    const { client, harness } = createHarness();
+    const runtimeOutputEvents: AcpMessage[] = [];
+    const persistedEnvelopes: AcpPersistedEnvelope[] = [];
+    const turnCompletedEvents: AcpTurnCompletedEvent[] = [];
+
+    harness.subscribeRuntimeOutput((event) => runtimeOutputEvents.push(event));
+    harness.subscribeRuntimePersistedEnvelope((envelope) =>
+      persistedEnvelopes.push(envelope),
+    );
+    harness.subscribeRuntimeTurnCompleted((event) =>
+      turnCompletedEvents.push(event),
+    );
+
+    try {
+      await connectHarness(harness, client);
+
+      harness.sendCommand({
+        commandName: TaskCommandName.StartNewTask,
+        data: {
+          text: 'Think, then answer.',
+          visibleInTranscript: true,
+          source: 'web',
+          userId: 'user-1',
+        },
+      });
+
+      await vi.waitFor(() => {
+        expect(client.promptAsync).toHaveBeenCalledTimes(1);
+      });
+
+      // Completed message carries reasoning that was never streamed as
+      // `message.part.updated` events (e.g. it only arrived on completion).
+      client.message.mockResolvedValueOnce({
+        info: {
+          id: 'msg_1',
+          sessionID: 'ses_1',
+          role: 'assistant',
+          time: { completed: 1 },
+          tokens: { input: 5, output: 2, reasoning: 1, cache: { read: 3 } },
+        },
+        parts: [
+          {
+            id: 'rpart_1',
+            sessionID: 'ses_1',
+            messageID: 'msg_1',
+            type: 'reasoning',
+            text: 'Because reasons.',
+          },
+          {
+            id: 'part_1',
+            sessionID: 'ses_1',
+            messageID: 'msg_1',
+            type: 'text',
+            text: 'OK',
+          },
+        ],
+      });
+
+      await client.emit({
+        type: 'message.updated',
+        properties: {
+          info: {
+            id: 'msg_1',
+            sessionID: 'ses_1',
+            role: 'assistant',
+            time: { completed: 1 },
+          },
+        },
+      });
+      await client.emit({
+        type: 'session.idle',
+        properties: { sessionID: 'ses_1' },
+      });
+
+      await vi.waitFor(() => {
+        expect(turnCompletedEvents).toHaveLength(1);
+      });
+
+      // Without streamed reasoning chunks, the consolidated thought must be
+      // emitted live so the transcript still shows the reasoning block.
+      expect(
+        runtimeOutputEvents.some(
+          (event) =>
+            event.eventType === ACP_ENVELOPE_EVENT_TYPES.AssistantThought &&
+            event.text === 'Because reasons.',
+        ),
+      ).toBe(true);
+
+      const thought = persistedEnvelopes.find(
+        (envelope) =>
+          envelope.eventType === ACP_ENVELOPE_EVENT_TYPES.AssistantThought,
+      );
+      expect(thought?.payload.text).toBe('Because reasons.');
+    } finally {
+      harness.dispose();
+    }
+  });
+
+  it('submits OpenCode model overrides with native provider and model IDs', async () => {
+    const { client, harness } = createHarness(undefined, {
+      model: 'provider-id/model-id',
+    });
+
+    try {
+      await connectHarness(harness, client);
+
+      expect(
+        harness.sendCommand({
+          commandName: TaskCommandName.StartNewTask,
+          data: {
+            text: 'Try GLM.',
+            visibleInTranscript: true,
+            source: 'web',
+          },
+        }),
+      ).toBe(true);
+
+      await vi.waitFor(() => {
+        expect(client.promptAsync).toHaveBeenCalledTimes(1);
+      });
+
+      expect(client.promptAsync.mock.calls[0]?.[0]).toMatchObject({
+        sessionId: 'ses_1',
+        request: {
+          model: {
+            providerID: 'provider-id',
+            modelID: 'model-id',
+          },
+          agent: 'build',
+          parts: [{ type: 'text', text: 'Try GLM.' }],
+        },
+      });
+    } finally {
+      harness.dispose();
+    }
+  });
+
+  it('materializes image prompts and adds a visual delegation reminder when the visual subagent is configured', async () => {
+    const imageDataUrl = 'data:image/png;base64,ZmFrZS1pbWFnZS1ieXRlcw==';
+    const { client, harness } = createHarness(undefined, {
+      commandEnv: {
+        OPENCODE_CONFIG_CONTENT: JSON.stringify({
+          agent: {
+            visual: {
+              mode: 'subagent',
+              hidden: true,
+            },
+          },
+        }),
+      },
+    });
+
+    try {
+      await connectHarness(harness, client);
+
+      expect(
+        harness.sendCommand({
+          commandName: TaskCommandName.StartNewTask,
+          data: {
+            text: 'What does this screenshot show?',
+            images: [imageDataUrl],
+            visibleInTranscript: true,
+            source: 'web',
+          },
+        }),
+      ).toBe(true);
+
+      await vi.waitFor(() => {
+        expect(client.promptAsync).toHaveBeenCalledTimes(1);
+      });
+
+      const promptCall = client.promptAsync.mock.calls[0]?.[0] as
+        | { request?: { agent?: string; parts?: Record<string, unknown>[] } }
+        | undefined;
+
+      expect(promptCall?.request?.agent).toBe('build');
+      expect(promptCall?.request?.parts).toEqual([
+        {
+          type: 'text',
+          text: expect.stringContaining('What does this screenshot show?'),
+        },
+      ]);
+      const promptText = promptCall?.request?.parts?.[0]?.text;
+      expect(promptText).toEqual(
+        expect.stringContaining('Do not say you cannot view images.'),
+      );
+      expect(promptText).toEqual(expect.stringContaining('agent "visual"'));
+      expect(promptText).toEqual(
+        expect.stringContaining('Pass these exact OpenCode file references'),
+      );
+
+      const imagePath = /^- @(.+\/image-1\.png)$/mu.exec(
+        typeof promptText === 'string' ? promptText : '',
+      )?.[1];
+
+      expect(imagePath).toBeDefined();
+      expect(fs.readFileSync(imagePath!)).toEqual(
+        Buffer.from('fake-image-bytes'),
+      );
+
+      client.message.mockResolvedValueOnce(createFinalAssistantMessage());
+      await client.emit({
+        type: 'message.updated',
+        properties: {
+          info: {
+            id: 'msg_1',
+            sessionID: 'ses_1',
+            role: 'assistant',
+            time: {
+              completed: 1,
+            },
+          },
+        },
+      });
+      await client.emit({
+        type: 'session.idle',
+        properties: {
+          sessionID: 'ses_1',
+        },
+      });
+
+      expect(fs.existsSync(imagePath!)).toBe(true);
+      harness.dispose();
+
+      await vi.waitFor(() => {
+        expect(fs.existsSync(imagePath!)).toBe(false);
+      });
+    } finally {
+      harness.dispose();
+    }
+  });
+
+  it('falls back without a visual reminder for non-inline image strings', async () => {
+    const tempDir = fs.mkdtempSync(
+      path.join(os.tmpdir(), 'roomote-opencode-visual-path-'),
+    );
+    const localImagePath = path.join(tempDir, 'local-image.png');
+    fs.writeFileSync(localImagePath, Buffer.from('local-image-bytes'));
+    const fetchSpy = vi.spyOn(globalThis, 'fetch');
+    const { client, harness } = createHarness(undefined, {
+      commandEnv: {
+        OPENCODE_CONFIG_CONTENT: JSON.stringify({
+          agent: {
+            visual: {
+              mode: 'subagent',
+              hidden: true,
+            },
+          },
+        }),
+      },
+    });
+
+    try {
+      await connectHarness(harness, client);
+
+      expect(
+        harness.sendCommand({
+          commandName: TaskCommandName.StartNewTask,
+          data: {
+            text: 'What do these images show?',
+            images: ['https://example.test/screenshot.png', localImagePath],
+            visibleInTranscript: true,
+            source: 'web',
+          },
+        }),
+      ).toBe(true);
+
+      await vi.waitFor(() => {
+        expect(client.promptAsync).toHaveBeenCalledTimes(1);
+      });
+
+      expect(fetchSpy).not.toHaveBeenCalled();
+      expect(client.promptAsync.mock.calls[0]?.[0]).toMatchObject({
+        request: {
+          agent: 'build',
+          parts: [
+            {
+              type: 'file',
+              mime: 'image/png',
+              filename: 'screenshot.png',
+              url: 'https://example.test/screenshot.png',
+            },
+            {
+              type: 'file',
+              mime: 'image/png',
+              filename: 'local-image.png',
+              url: localImagePath,
+            },
+            {
+              type: 'text',
+              text: 'What do these images show?',
+            },
+          ],
+        },
+      });
+    } finally {
+      fetchSpy.mockRestore();
+      harness.dispose();
+      fs.rmSync(tempDir, { recursive: true, force: true });
+    }
+  });
+
+  it('leaves image prompts unchanged when the visual subagent is not configured', async () => {
+    const imageDataUrl = 'data:image/png;base64,ZmFrZS1pbWFnZS1ieXRlcw==';
+    const { client, harness } = createHarness();
+
+    try {
+      await connectHarness(harness, client);
+
+      expect(
+        harness.sendCommand({
+          commandName: TaskCommandName.StartNewTask,
+          data: {
+            text: 'What does this screenshot show?',
+            images: [imageDataUrl],
+            visibleInTranscript: true,
+            source: 'web',
+          },
+        }),
+      ).toBe(true);
+
+      await vi.waitFor(() => {
+        expect(client.promptAsync).toHaveBeenCalledTimes(1);
+      });
+
+      expect(client.promptAsync.mock.calls[0]?.[0]).toMatchObject({
+        request: {
+          agent: 'build',
+          parts: [
+            {
+              type: 'file',
+              mime: 'image/png',
+              filename: 'image.png',
+              url: imageDataUrl,
+            },
+            {
+              type: 'text',
+              text: 'What does this screenshot show?',
+            },
+          ],
+        },
+      });
+    } finally {
+      harness.dispose();
+    }
+  });
+
+  it('keeps using the build agent after the primary session loads the plan skill when plan mode is disabled', async () => {
+    const { client, harness } = createHarness(new FakeOpenCodeServerClient());
+
+    try {
+      await connectHarness(harness, client);
+
+      expect(
+        harness.sendCommand({
+          commandName: TaskCommandName.StartNewTask,
+          data: {
+            text: 'Plan the rollout.',
+            visibleInTranscript: true,
+            source: 'web',
+          },
+        }),
+      ).toBe(true);
+
+      await vi.waitFor(() => {
+        expect(client.promptAsync).toHaveBeenCalledTimes(1);
+      });
+
+      // The routing turn itself starts on the default build agent.
+      expect(client.promptAsync.mock.calls[0]?.[0]).toMatchObject({
+        request: { agent: 'build' },
+      });
+
+      // A skill load from a child (subagent) session never changes the
+      // primary session's agent.
+      await client.emit({
+        type: 'message.part.updated',
+        properties: {
+          part: {
+            id: 'skill_part_child',
+            sessionID: 'ses_child',
+            messageID: 'msg_child',
+            type: 'tool',
+            callID: 'skill_call_child',
+            tool: 'skill',
+            state: {
+              status: 'completed',
+              input: { name: 'plan-repo-implementation' },
+              title: 'Load skill',
+            },
+          },
+        },
+      });
+
+      await client.emit({
+        type: 'message.part.updated',
+        properties: {
+          part: {
+            id: 'skill_part_1',
+            sessionID: 'ses_1',
+            messageID: 'msg_1',
+            type: 'tool',
+            callID: 'skill_call_1',
+            tool: 'skill',
+            state: {
+              status: 'completed',
+              input: { name: 'plan-repo-implementation' },
+              title: 'Load skill',
+            },
+          },
+        },
+      });
+
+      expect(
+        harness.sendCommand({
+          commandName: TaskCommandName.SendMessage,
+          data: {
+            text: 'Sounds good, keep planning.',
+            autoSteerWhenQueued: true,
+            visibleInTranscript: true,
+          },
+        }),
+      ).toBe(true);
+
+      await vi.waitFor(() => {
+        expect(client.promptAsync).toHaveBeenCalledTimes(2);
+      });
+
+      expect(client.promptAsync.mock.calls[1]?.[0]).toMatchObject({
+        request: { agent: 'build' },
+      });
+
+      // Loading another packaged workflow skill switches back to build.
+      await client.emit({
+        type: 'message.part.updated',
+        properties: {
+          part: {
+            id: 'skill_part_2',
+            sessionID: 'ses_1',
+            messageID: 'msg_2',
+            type: 'tool',
+            callID: 'skill_call_2',
+            tool: 'skill',
+            state: {
+              status: 'completed',
+              input: { name: 'implement-changes' },
+              title: 'Load skill',
+            },
+          },
+        },
+      });
+
+      expect(
+        harness.sendCommand({
+          commandName: TaskCommandName.SendMessage,
+          data: {
+            text: 'Now build it.',
+            autoSteerWhenQueued: true,
+            visibleInTranscript: true,
+          },
+        }),
+      ).toBe(true);
+
+      await vi.waitFor(() => {
+        expect(client.promptAsync).toHaveBeenCalledTimes(3);
+      });
+
+      expect(client.promptAsync.mock.calls[2]?.[0]).toMatchObject({
+        request: { agent: 'build' },
+      });
+    } finally {
+      harness.dispose();
+    }
+  });
+
+  it('switches to the architect agent after the primary session loads the plan skill when plan mode is enabled', async () => {
+    const { client, harness } = createHarness(new FakeOpenCodeServerClient(), {
+      commandEnv: { ROOMOTE_PLAN_MODE: 'true' },
+    });
+
+    try {
+      await connectHarness(harness, client);
+
+      expect(
+        harness.sendCommand({
+          commandName: TaskCommandName.StartNewTask,
+          data: {
+            text: 'Plan the rollout.',
+            visibleInTranscript: true,
+            source: 'web',
+          },
+        }),
+      ).toBe(true);
+
+      await vi.waitFor(() => {
+        expect(client.promptAsync).toHaveBeenCalledTimes(1);
+      });
+
+      expect(client.promptAsync.mock.calls[0]?.[0]).toMatchObject({
+        request: { agent: 'build' },
+      });
+
+      await client.emit({
+        type: 'message.part.updated',
+        properties: {
+          part: {
+            id: 'skill_part_child_enabled',
+            sessionID: 'ses_child',
+            messageID: 'msg_child_enabled',
+            type: 'tool',
+            callID: 'skill_call_child_enabled',
+            tool: 'skill',
+            state: {
+              status: 'completed',
+              input: { name: 'plan-repo-implementation' },
+              title: 'Load skill',
+            },
+          },
+        },
+      });
+
+      await client.emit({
+        type: 'message.part.updated',
+        properties: {
+          part: {
+            id: 'skill_part_1_enabled',
+            sessionID: 'ses_1',
+            messageID: 'msg_1_enabled',
+            type: 'tool',
+            callID: 'skill_call_1_enabled',
+            tool: 'skill',
+            state: {
+              status: 'completed',
+              input: { name: 'plan-repo-implementation' },
+              title: 'Load skill',
+            },
+          },
+        },
+      });
+
+      expect(
+        harness.sendCommand({
+          commandName: TaskCommandName.SendMessage,
+          data: {
+            text: 'Sounds good, keep planning.',
+            autoSteerWhenQueued: true,
+            visibleInTranscript: true,
+          },
+        }),
+      ).toBe(true);
+
+      await vi.waitFor(() => {
+        expect(client.promptAsync).toHaveBeenCalledTimes(2);
+      });
+
+      expect(client.promptAsync.mock.calls[1]?.[0]).toMatchObject({
+        request: { agent: 'architect' },
+      });
+      // Architect-agent prompts omit the request-level model so the
+      // agent-level planning model from the generated config can apply.
+      const architectPromptRequest = (
+        client.promptAsync.mock.calls[1]?.[0] as {
+          request: Record<string, unknown>;
+        }
+      ).request;
+      expect(architectPromptRequest).not.toHaveProperty('model');
+
+      await client.emit({
+        type: 'message.part.updated',
+        properties: {
+          part: {
+            id: 'skill_part_2_enabled',
+            sessionID: 'ses_1',
+            messageID: 'msg_2_enabled',
+            type: 'tool',
+            callID: 'skill_call_2_enabled',
+            tool: 'skill',
+            state: {
+              status: 'completed',
+              input: { name: 'implement-changes' },
+              title: 'Load skill',
+            },
+          },
+        },
+      });
+
+      expect(
+        harness.sendCommand({
+          commandName: TaskCommandName.SendMessage,
+          data: {
+            text: 'Now build it.',
+            autoSteerWhenQueued: true,
+            visibleInTranscript: true,
+          },
+        }),
+      ).toBe(true);
+
+      await vi.waitFor(() => {
+        expect(client.promptAsync).toHaveBeenCalledTimes(3);
+      });
+
+      expect(client.promptAsync.mock.calls[2]?.[0]).toMatchObject({
+        request: { agent: 'build' },
+      });
+    } finally {
+      harness.dispose();
+    }
+  });
+
+  it('auto-submits one hidden continuation on the build agent after an in-flight plan turn loads implement-changes', async () => {
+    const { client, harness } = createHarness(new FakeOpenCodeServerClient(), {
+      commandEnv: { ROOMOTE_PLAN_MODE: 'true' },
+    });
+    const runtimeOutputEvents: AcpMessage[] = [];
+
+    harness.subscribeRuntimeOutput((event) => runtimeOutputEvents.push(event));
+
+    try {
+      await connectHarness(harness, client);
+
+      expect(
+        harness.sendCommand({
+          commandName: TaskCommandName.StartNewTask,
+          data: {
+            text: 'Plan the rollout.',
+            visibleInTranscript: true,
+            source: 'web',
+          },
+        }),
+      ).toBe(true);
+
+      await vi.waitFor(() => {
+        expect(client.promptAsync).toHaveBeenCalledTimes(1);
+      });
+
+      await client.emit({
+        type: 'message.part.updated',
+        properties: {
+          part: {
+            id: 'skill_part_plan',
+            sessionID: 'ses_1',
+            messageID: 'msg_plan',
+            type: 'tool',
+            callID: 'skill_call_plan',
+            tool: 'skill',
+            state: {
+              status: 'completed',
+              input: { name: 'plan-repo-implementation' },
+              title: 'Load skill',
+            },
+          },
+        },
+      });
+
+      // The exit flip happens mid-turn; repeated completed skill-load events
+      // must queue at most one continuation.
+      for (const partId of ['skill_part_impl_1', 'skill_part_impl_2']) {
+        await client.emit({
+          type: 'message.part.updated',
+          properties: {
+            part: {
+              id: partId,
+              sessionID: 'ses_1',
+              messageID: 'msg_impl',
+              type: 'tool',
+              callID: `call_${partId}`,
+              tool: 'skill',
+              state: {
+                status: 'completed',
+                input: { name: 'implement-changes' },
+                title: 'Load skill',
+              },
+            },
+          },
+        });
+      }
+
+      client.message.mockResolvedValueOnce(createFinalAssistantMessage());
+      await client.emit({
+        type: 'message.updated',
+        properties: {
+          info: {
+            id: 'msg_1',
+            sessionID: 'ses_1',
+            role: 'assistant',
+            time: { completed: 1 },
+          },
+        },
+      });
+      await client.emit({
+        type: 'session.idle',
+        properties: { sessionID: 'ses_1' },
+      });
+
+      await vi.waitFor(() => {
+        expect(client.promptAsync).toHaveBeenCalledTimes(2);
+      });
+
+      expect(client.promptAsync.mock.calls[1]?.[0]).toMatchObject({
+        request: {
+          agent: 'build',
+          // The continuation runs on the writable agent, so the request-level
+          // model applies again.
+          model: {
+            providerID: TEST_OPENCODE_MODEL_SELECTION.providerID,
+            modelID: TEST_OPENCODE_MODEL_SELECTION.modelID,
+          },
+          parts: [
+            {
+              type: 'text',
+              text: 'The read-only planning restriction has been lifted. Continue immediately with the implementation the user requested; earlier edit denials no longer apply.',
+            },
+          ],
+        },
+      });
+
+      // The internal continuation must not surface as a user-visible queued
+      // message (web UI / Slack), but it still counts as deliverable so the
+      // task stays alive until the continuation turn drains.
+      const queuedMessagesUpdates = runtimeOutputEvents.filter(
+        (event) =>
+          event.eventType === ACP_ENVELOPE_EVENT_TYPES.QueuedMessagesUpdate,
+      );
+
+      expect(queuedMessagesUpdates).not.toEqual([]);
+      for (const update of queuedMessagesUpdates) {
+        const queuedMessages = Array.isArray(update.payload?.queuedMessages)
+          ? update.payload!.queuedMessages
+          : [];
+
+        expect(queuedMessages).not.toContainEqual(
+          expect.objectContaining({
+            text: expect.stringContaining(
+              'read-only planning restriction has been lifted',
+            ),
+          }),
+        );
+      }
+
+      expect(
+        harness
+          .getQueuedMessages()
+          .some((message) =>
+            message.text.includes(
+              'read-only planning restriction has been lifted',
+            ),
+          ),
+      ).toBe(false);
+    } finally {
+      harness.dispose();
+    }
+  });
+
+  it('does not queue a plan-exit continuation when plan mode is disabled', async () => {
+    const { client, harness } = createHarness(new FakeOpenCodeServerClient());
+
+    try {
+      await connectHarness(harness, client);
+
+      expect(
+        harness.sendCommand({
+          commandName: TaskCommandName.StartNewTask,
+          data: {
+            text: 'Plan the rollout.',
+            visibleInTranscript: true,
+            source: 'web',
+          },
+        }),
+      ).toBe(true);
+
+      await vi.waitFor(() => {
+        expect(client.promptAsync).toHaveBeenCalledTimes(1);
+      });
+
+      for (const skillName of [
+        'plan-repo-implementation',
+        'implement-changes',
+      ]) {
+        await client.emit({
+          type: 'message.part.updated',
+          properties: {
+            part: {
+              id: `skill_part_${skillName}`,
+              sessionID: 'ses_1',
+              messageID: 'msg_skill',
+              type: 'tool',
+              callID: `call_${skillName}`,
+              tool: 'skill',
+              state: {
+                status: 'completed',
+                input: { name: skillName },
+                title: 'Load skill',
+              },
+            },
+          },
+        });
+      }
+
+      client.message.mockResolvedValueOnce(createFinalAssistantMessage());
+      await client.emit({
+        type: 'message.updated',
+        properties: {
+          info: {
+            id: 'msg_1',
+            sessionID: 'ses_1',
+            role: 'assistant',
+            time: { completed: 1 },
+          },
+        },
+      });
+      await client.emit({
+        type: 'session.idle',
+        properties: { sessionID: 'ses_1' },
+      });
+
+      // The turn ends without a queued continuation: only the original
+      // prompt was submitted.
+      expect(client.promptAsync).toHaveBeenCalledTimes(1);
+    } finally {
+      harness.dispose();
+    }
+  });
+
+  it('does not emit submitted user prompt parts as assistant chunks', async () => {
+    const { client, harness } = createHarness();
+    const runtimeOutputEvents: AcpMessage[] = [];
+
+    harness.subscribeRuntimeOutput((event) => runtimeOutputEvents.push(event));
+
+    try {
+      await connectHarness(harness, client);
+
+      expect(
+        harness.sendCommand({
+          commandName: TaskCommandName.StartNewTask,
+          data: {
+            text: 'Hi there',
+            visibleInTranscript: true,
+            source: 'web',
+          },
+        }),
+      ).toBe(true);
+
+      await vi.waitFor(() => {
+        expect(client.promptAsync).toHaveBeenCalledTimes(1);
+      });
+
+      const promptRequest = client.promptAsync.mock.calls[0]?.[0] as
+        | { request?: { messageID?: string } }
+        | undefined;
+      const userMessageId = promptRequest?.request?.messageID;
+
+      expect(userMessageId).toMatch(/^msg_[a-f0-9]{12}0{14}$/);
+      expect(userMessageId).not.toContain('roomote');
+
+      const sameTickAssistantId = `${userMessageId!.slice(0, 16)}${'0'.repeat(13)}1`;
+      expect(userMessageId! < sameTickAssistantId).toBe(true);
+
+      await client.emit({
+        type: 'message.part.updated',
+        properties: {
+          part: {
+            id: 'user_part_1',
+            sessionID: 'ses_1',
+            messageID: userMessageId,
+            type: 'text',
+            text: 'Hi there',
+          },
+        },
+      });
+      await client.emit({
+        type: 'message.part.updated',
+        properties: {
+          info: {
+            id: 'opencode_user_msg_1',
+            sessionID: 'ses_1',
+            role: 'user',
+          },
+          part: {
+            id: 'user_part_2',
+            sessionID: 'ses_1',
+            messageID: 'opencode_user_msg_1',
+            type: 'text',
+            text: 'Hi there',
+          },
+        },
+      });
+      await client.emit({
+        type: 'message.part.updated',
+        properties: {
+          part: {
+            id: 'assistant_part_1',
+            sessionID: 'ses_1',
+            messageID: 'assistant_msg_1',
+            type: 'text',
+            text: 'Hey. What do you need help with?',
+          },
+          delta: 'Hey. What do you need help with?',
+        },
+      });
+
+      expect(
+        runtimeOutputEvents
+          .filter(
+            (event) =>
+              event.eventType ===
+              ACP_ENVELOPE_EVENT_TYPES.AssistantMessageChunk,
+          )
+          .map((event) => event.text),
+      ).toEqual(['Hey. What do you need help with?']);
+    } finally {
+      harness.dispose();
+    }
+  });
+
+  it('injects the Slack closeout reminder instead of completing when the OpenCode stop guard blocks', async () => {
+    const tempDir = fs.mkdtempSync(
+      path.join(os.tmpdir(), 'roomote-opencode-stop-guard-'),
+    );
+    const stateFilePath = path.join(tempDir, 'slack-state.json');
+    const stopHookPath = path.join(tempDir, 'stop-hook.cjs');
+
+    fs.writeFileSync(
+      stateFilePath,
+      JSON.stringify({
+        currentTurnMessageTs: '111.222',
+        currentTurnStartedAtMs: Date.now() - 1_000,
+      }),
+      'utf8',
+    );
+    fs.writeFileSync(stopHookPath, SLACK_STOP_HOOK_SCRIPT, 'utf8');
+
+    const { client, harness } = createHarness(new FakeOpenCodeServerClient(), {
+      commandEnv: {
+        ROOMOTE_SLACK_REPLY_SATISFACTION_STATE_FILE: stateFilePath,
+        ROOMOTE_OPENCODE_SLACK_STOP_HOOK_SCRIPT: stopHookPath,
+      },
+    });
+    const taskEvents: TaskEvent[] = [];
+
+    harness.subscribe((event) => taskEvents.push(event));
+
+    try {
+      await connectHarness(harness, client);
+
+      expect(
+        harness.sendCommand({
+          commandName: TaskCommandName.StartNewTask,
+          data: {
+            text: 'Do work.',
+            visibleInTranscript: true,
+          },
+        }),
+      ).toBe(true);
+
+      await vi.waitFor(() => {
+        expect(client.promptAsync).toHaveBeenCalledTimes(1);
+      });
+
+      client.message.mockResolvedValueOnce(createFinalAssistantMessage());
+
+      await client.emit({
+        type: 'message.updated',
+        properties: {
+          info: {
+            id: 'msg_1',
+            sessionID: 'ses_1',
+            role: 'assistant',
+            time: {
+              completed: 1,
+            },
+          },
+        },
+      });
+      await client.emit({
+        type: 'session.idle',
+        properties: {
+          sessionID: 'ses_1',
+        },
+      });
+
+      await vi.waitFor(() => {
+        expect(client.promptAsync).toHaveBeenCalledTimes(2);
+      });
+
+      expect(client.promptAsync.mock.calls[1]?.[0]).toMatchObject({
+        sessionId: 'ses_1',
+        request: {
+          parts: [
+            {
+              type: 'text',
+              text: expect.stringContaining(
+                'Before finalizing, post a terminal Slack-visible reply',
+              ),
+            },
+          ],
+        },
+      });
+      expect(
+        taskEvents.some(
+          (event) => event.eventName === TaskEventName.TaskCompleted,
+        ),
+      ).toBe(false);
+    } finally {
+      harness.dispose();
+      fs.rmSync(tempDir, { recursive: true, force: true });
+    }
+  });
+
+  it('completes the turn after exhausting Slack closeout reminders instead of aborting', async () => {
+    const tempDir = fs.mkdtempSync(
+      path.join(os.tmpdir(), 'roomote-opencode-stop-guard-give-up-'),
+    );
+    const stateFilePath = path.join(tempDir, 'slack-state.json');
+    const stopHookPath = path.join(tempDir, 'stop-hook.cjs');
+
+    fs.writeFileSync(
+      stateFilePath,
+      JSON.stringify({
+        currentTurnMessageTs: '111.222',
+        currentTurnStartedAtMs: Date.now() - 1_000,
+      }),
+      'utf8',
+    );
+    fs.writeFileSync(stopHookPath, SLACK_STOP_HOOK_SCRIPT, 'utf8');
+
+    const { client, harness } = createHarness(new FakeOpenCodeServerClient(), {
+      commandEnv: {
+        ROOMOTE_SLACK_REPLY_SATISFACTION_STATE_FILE: stateFilePath,
+        ROOMOTE_OPENCODE_SLACK_STOP_HOOK_SCRIPT: stopHookPath,
+      },
+    });
+    const taskEvents: TaskEvent[] = [];
+
+    harness.subscribe((event) => taskEvents.push(event));
+
+    try {
+      await connectHarness(harness, client);
+
+      expect(
+        harness.sendCommand({
+          commandName: TaskCommandName.StartNewTask,
+          data: {
+            text: 'Do work.',
+            visibleInTranscript: true,
+          },
+        }),
+      ).toBe(true);
+
+      await vi.waitFor(() => {
+        expect(client.promptAsync).toHaveBeenCalledTimes(1);
+      });
+
+      // The first three blocked turn-ends inject closeout reminders.
+      await client.emit({
+        type: 'session.idle',
+        properties: {
+          sessionID: 'ses_1',
+        },
+      });
+      await vi.waitFor(() => {
+        expect(client.promptAsync).toHaveBeenCalledTimes(2);
+      });
+
+      await client.emit({
+        type: 'session.idle',
+        properties: {
+          sessionID: 'ses_1',
+        },
+      });
+      await vi.waitFor(() => {
+        expect(client.promptAsync).toHaveBeenCalledTimes(3);
+      });
+
+      await client.emit({
+        type: 'session.idle',
+        properties: {
+          sessionID: 'ses_1',
+        },
+      });
+      await vi.waitFor(() => {
+        expect(client.promptAsync).toHaveBeenCalledTimes(4);
+      });
+
+      // The next blocked turn-end gives up and completes the turn instead of
+      // aborting the task or injecting more reminders.
+      await client.emit({
+        type: 'session.idle',
+        properties: {
+          sessionID: 'ses_1',
+        },
+      });
+
+      await vi.waitFor(() => {
+        expect(
+          taskEvents.some(
+            (event) => event.eventName === TaskEventName.TaskCompleted,
+          ),
+        ).toBe(true);
+      });
+      expect(
+        taskEvents.some(
+          (event) => event.eventName === TaskEventName.TaskAborted,
+        ),
+      ).toBe(false);
+      expect(client.promptAsync).toHaveBeenCalledTimes(4);
+    } finally {
+      harness.dispose();
+      fs.rmSync(tempDir, { recursive: true, force: true });
+    }
+  });
+
+  it('injects queued auto-steer into the active turn without aborting it', async () => {
+    const { client, harness } = createHarness();
+    const taskEvents: TaskEvent[] = [];
+
+    harness.subscribe((event) => taskEvents.push(event));
+
+    try {
+      await connectHarness(harness, client);
+
+      expect(
+        harness.sendCommand({
+          commandName: TaskCommandName.StartNewTask,
+          data: {
+            text: 'Start work.',
+            visibleInTranscript: true,
+          },
+        }),
+      ).toBe(true);
+
+      await vi.waitFor(() => {
+        expect(client.promptAsync).toHaveBeenCalledTimes(1);
+      });
+
+      expect(
+        harness.sendCommand({
+          commandName: TaskCommandName.SendMessage,
+          data: {
+            text: 'Use this newer instruction instead.',
+            autoSteerWhenQueued: true,
+            visibleInTranscript: true,
+          },
+        }),
+      ).toBe(true);
+
+      await vi.waitFor(() => {
+        expect(client.promptAsync).toHaveBeenCalledTimes(2);
+      });
+
+      // Native mid-turn steering: the prompt is injected into the running
+      // turn via prompt_async; the active work is NOT aborted.
+      expect(client.abort).toHaveBeenCalledTimes(0);
+      expect(client.promptAsync.mock.calls[1]?.[0]).toMatchObject({
+        sessionId: 'ses_1',
+        request: {
+          parts: [
+            {
+              type: 'text',
+              text: 'Use this newer instruction instead.',
+            },
+          ],
+        },
+      });
+      expect(harness.getQueuedMessages()).toEqual([]);
+      expect(
+        taskEvents.some(
+          (event) => event.eventName === TaskEventName.TaskAborted,
+        ),
+      ).toBe(false);
+    } finally {
+      harness.dispose();
+    }
+  });
+
+  it('advertises native turn steering so steers use the suppressed interrupt path', () => {
+    const { harness } = createHarness();
+
+    try {
+      // steerTask only routes an active turn through the suppressed
+      // interrupt-and-replay path when the harness reports native turn
+      // steering. Returning false here makes it fall back to a terminal
+      // cancel, which surfaces the abort error and emits TaskAborted.
+      expect(harness.supportsNativeTurnSteering).toBe(true);
+    } finally {
+      harness.dispose();
+    }
+  });
+
+  it('falls back to queued replay and suppresses the MessageAbortedError when injection fails', async () => {
+    const { client, harness } = createHarness();
+    const taskEvents: TaskEvent[] = [];
+    const persistedEnvelopes: AcpPersistedEnvelope[] = [];
+
+    harness.subscribe((event) => taskEvents.push(event));
+    harness.subscribeRuntimePersistedEnvelope((envelope) =>
+      persistedEnvelopes.push(envelope),
+    );
+
+    try {
+      await connectHarness(harness, client);
+
+      harness.sendCommand({
+        commandName: TaskCommandName.StartNewTask,
+        data: { text: 'Start work.', visibleInTranscript: true },
+      });
+      await vi.waitFor(() => {
+        expect(client.promptAsync).toHaveBeenCalledTimes(1);
+      });
+      await client.emit({
+        type: 'session.status',
+        properties: { sessionID: 'ses_1', status: { type: 'busy' } },
+      });
+
+      // Force the native injection to fail so the steer falls back to the
+      // queued abort-and-replay path.
+      client.promptAsync.mockRejectedValueOnce(new Error('injection refused'));
+
+      harness.sendCommand({
+        commandName: TaskCommandName.SendMessage,
+        data: {
+          text: 'Steer to this instead.',
+          autoSteerWhenQueued: true,
+          visibleInTranscript: true,
+        },
+      });
+      await vi.waitFor(() => {
+        expect(client.abort).toHaveBeenCalledTimes(1);
+        expect(client.promptAsync).toHaveBeenCalledTimes(3);
+      });
+
+      // OpenCode reports the aborted turn as a MessageAbortedError. The
+      // interrupt armed suppression, so this must NOT become a terminal abort
+      // or a user-visible "OpenCode session error" transcript message.
+      await client.emit({
+        type: 'session.error',
+        properties: {
+          sessionID: 'ses_1',
+          error: { name: 'MessageAbortedError', data: { message: 'Aborted' } },
+        },
+      });
+
+      expect(
+        taskEvents.some(
+          (event) => event.eventName === TaskEventName.TaskAborted,
+        ),
+      ).toBe(false);
+      expect(
+        persistedEnvelopes.some((envelope) =>
+          envelope.contentBlocks?.some(
+            (block) =>
+              block.type === 'text' &&
+              typeof block.text === 'string' &&
+              block.text.includes('OpenCode session error'),
+          ),
+        ),
+      ).toBe(false);
+    } finally {
+      harness.dispose();
+    }
+  });
+
+  it('clears queued prompts instead of draining them after a terminal session error', async () => {
+    const { client, harness } = createHarness();
+    const taskEvents: TaskEvent[] = [];
+
+    harness.subscribe((event) => taskEvents.push(event));
+
+    try {
+      await connectHarness(harness, client);
+
+      expect(
+        harness.sendCommand({
+          commandName: TaskCommandName.StartNewTask,
+          data: {
+            text: 'Start work.',
+            visibleInTranscript: true,
+          },
+        }),
+      ).toBe(true);
+
+      await vi.waitFor(() => {
+        expect(client.promptAsync).toHaveBeenCalledTimes(1);
+      });
+
+      expect(
+        harness.sendCommand({
+          commandName: TaskCommandName.SendMessage,
+          data: {
+            text: 'Queued follow-up.',
+            visibleInTranscript: true,
+          },
+        }),
+      ).toBe(true);
+      expect(harness.getQueuedMessages()).toHaveLength(1);
+
+      await client.emit({
+        type: 'session.error',
+        properties: {
+          sessionID: 'ses_1',
+          error: { message: 'boom' },
+        },
+      });
+
+      expect(
+        taskEvents.some(
+          (event) => event.eventName === TaskEventName.TaskAborted,
+        ),
+      ).toBe(true);
+      expect(harness.getQueuedMessages()).toEqual([]);
+      expect(client.promptAsync).toHaveBeenCalledTimes(1);
+    } finally {
+      harness.dispose();
+    }
+  });
+
+  it('records OpenCode question tool requests and delivers answers as a follow-up prompt', async () => {
+    const beforeQueuedPrompt = vi.fn(async () => undefined);
+    const { client, harness } = createHarness(undefined, {
+      beforeQueuedPrompt,
+    });
+    const persistedEnvelopes: AcpPersistedEnvelope[] = [];
+    const taskEvents: TaskEvent[] = [];
+
+    harness.subscribeRuntimePersistedEnvelope((envelope) =>
+      persistedEnvelopes.push(envelope),
+    );
+    harness.subscribe((event) => taskEvents.push(event));
+
+    try {
+      await connectHarness(harness, client);
+
+      expect(
+        harness.sendCommand({
+          commandName: TaskCommandName.StartNewTask,
+          data: {
+            text: 'Ask for input.',
+            visibleInTranscript: true,
+          },
+        }),
+      ).toBe(true);
+
+      await vi.waitFor(() => {
+        expect(client.promptAsync).toHaveBeenCalledTimes(1);
+      });
+
+      await client.emit({
+        type: 'message.part.updated',
+        properties: {
+          part: {
+            id: 'question_part_1',
+            sessionID: 'ses_1',
+            messageID: 'msg_question',
+            type: 'tool',
+            callID: 'question_call_1',
+            tool: 'question',
+            state: {
+              status: 'running',
+              input: {
+                questions: [
+                  {
+                    id: 'color',
+                    header: 'Color',
+                    question: 'Which color should I use?',
+                    options: [{ label: 'Blue', description: 'Use blue.' }],
+                  },
+                ],
+              },
+              title: 'Ask user',
+            },
+          },
+        },
+      });
+
+      const pendingRequest = harness.getPendingUserInputRequests()[0];
+      expect(pendingRequest).toMatchObject({
+        requestId: 'rui:ses_1:msg_question:question_call_1',
+        sessionId: 'ses_1',
+        turnId: 'msg_question',
+        callId: 'question_call_1',
+        questions: [
+          {
+            id: 'color',
+            header: 'Color',
+            question: 'Which color should I use?',
+            // OpenCode's question schema allows custom answers by default,
+            // so option-only questions must still accept free-form replies.
+            isOther: true,
+          },
+        ],
+      });
+      expect(
+        persistedEnvelopes.some(
+          (envelope) =>
+            envelope.eventType === ACP_ENVELOPE_EVENT_TYPES.RequestUserInput,
+        ),
+      ).toBe(true);
+
+      expect(
+        harness.sendCommand({
+          commandName: TaskCommandName.AnswerUserInputRequest,
+          data: {
+            requestId: pendingRequest!.requestId,
+            answers: {
+              color: { answers: ['Blue'] },
+            },
+            userId: 'answer-user-1',
+          },
+        }),
+      ).toBe(true);
+
+      await vi.waitFor(() => {
+        expect(client.abort).toHaveBeenCalledTimes(1);
+        expect(client.promptAsync).toHaveBeenCalledTimes(2);
+      });
+
+      await client.emit({
+        type: 'session.error',
+        properties: {
+          sessionID: 'ses_1',
+          error: {
+            name: 'MessageAbortedError',
+            data: { message: 'Aborted' },
+          },
+        },
+      });
+
+      expect(harness.getPendingUserInputRequests()).toEqual([]);
+      const responseEnvelope = persistedEnvelopes.find(
+        (envelope) =>
+          envelope.eventType ===
+            ACP_ENVELOPE_EVENT_TYPES.RequestUserInputResponse &&
+          envelope.payload.requestId === pendingRequest!.requestId,
+      );
+      expect(responseEnvelope?.payload).toMatchObject({
+        requestId: pendingRequest!.requestId,
+        resolution: 'submitted',
+      });
+      expect(beforeQueuedPrompt).toHaveBeenCalledWith({
+        userId: 'answer-user-1',
+      });
+      expect(client.promptAsync.mock.calls[1]?.[0]).toMatchObject({
+        sessionId: 'ses_1',
+        request: {
+          parts: [
+            {
+              type: 'text',
+              text: expect.stringContaining('Blue'),
+            },
+          ],
+        },
+      });
+      expect(
+        taskEvents.some(
+          (event) => event.eventName === TaskEventName.TaskAborted,
+        ),
+      ).toBe(false);
+      expect(
+        persistedEnvelopes.some(
+          (envelope) =>
+            envelope.eventType === ACP_ENVELOPE_EVENT_TYPES.AssistantMessage &&
+            String(envelope.payload.text ?? '').includes(
+              'OpenCode session error',
+            ),
+        ),
+      ).toBe(false);
+    } finally {
+      harness.dispose();
+    }
+  });
+
+  it('honors an explicit custom-answer opt-out on OpenCode question input', async () => {
+    const { client, harness } = createHarness();
+
+    try {
+      await connectHarness(harness, client);
+
+      expect(
+        harness.sendCommand({
+          commandName: TaskCommandName.StartNewTask,
+          data: {
+            text: 'Ask for input.',
+            visibleInTranscript: true,
+          },
+        }),
+      ).toBe(true);
+
+      await vi.waitFor(() => {
+        expect(client.promptAsync).toHaveBeenCalledTimes(1);
+      });
+
+      await client.emit({
+        type: 'message.part.updated',
+        properties: {
+          part: {
+            id: 'question_part_1',
+            sessionID: 'ses_1',
+            messageID: 'msg_question',
+            type: 'tool',
+            callID: 'question_call_1',
+            tool: 'question',
+            state: {
+              status: 'running',
+              input: {
+                questions: [
+                  {
+                    id: 'color',
+                    header: 'Color',
+                    question: 'Which color should I use?',
+                    options: [{ label: 'Blue', description: 'Use blue.' }],
+                    custom: false,
+                  },
+                  {
+                    id: 'shape',
+                    header: 'Shape',
+                    question: 'Which shape should I use?',
+                    options: [{ label: 'Circle', description: 'Use circle.' }],
+                    isOther: false,
+                  },
+                ],
+              },
+              title: 'Ask user',
+            },
+          },
+        },
+      });
+
+      expect(harness.getPendingUserInputRequests()[0]).toMatchObject({
+        questions: [
+          { id: 'color', isOther: false },
+          { id: 'shape', isOther: false },
+        ],
+      });
+    } finally {
+      harness.dispose();
+    }
+  });
+
+  it('updates OpenCode question requests when structured choices arrive after the initial tool event', async () => {
+    const { client, harness } = createHarness();
+    const runtimeOutputEvents: AcpMessage[] = [];
+    const persistedEnvelopes: AcpPersistedEnvelope[] = [];
+
+    harness.subscribeRuntimeOutput((event) => runtimeOutputEvents.push(event));
+    harness.subscribeRuntimePersistedEnvelope((envelope) =>
+      persistedEnvelopes.push(envelope),
+    );
+
+    try {
+      await connectHarness(harness, client);
+
+      await client.emit({
+        type: 'message.part.updated',
+        properties: {
+          part: {
+            id: 'question_part_1',
+            sessionID: 'ses_1',
+            messageID: 'msg_question',
+            type: 'tool',
+            callID: 'question_call_1',
+            tool: 'question',
+            state: {
+              status: 'running',
+            },
+          },
+        },
+      });
+
+      expect(harness.getPendingUserInputRequests()[0]).toMatchObject({
+        requestId: 'rui:ses_1:msg_question:question_call_1',
+        questions: [
+          {
+            id: 'response',
+            question: 'Provide the requested input.',
+            options: [],
+          },
+        ],
+      });
+
+      await client.emit({
+        type: 'message.part.updated',
+        properties: {
+          part: {
+            id: 'question_part_1',
+            sessionID: 'ses_1',
+            messageID: 'msg_question',
+            type: 'tool',
+            callID: 'question_call_1',
+            tool: 'question',
+            state: {
+              status: 'running',
+              input: {
+                questions: [
+                  {
+                    header: 'Smoke test',
+                    question: 'Continue tool-call smoke test?',
+                    options: [
+                      {
+                        label: 'Continue',
+                        description: 'Proceed with the tool-call sequence.',
+                      },
+                      {
+                        label: 'Cancel',
+                        description: 'Stop the smoke test.',
+                      },
+                    ],
+                  },
+                ],
+              },
+            },
+          },
+        },
+      });
+
+      const updatedRequest = harness.getPendingUserInputRequests()[0];
+      expect(updatedRequest).toMatchObject({
+        requestId: 'rui:ses_1:msg_question:question_call_1',
+        questions: [
+          {
+            id: 'question-1',
+            header: 'Smoke test',
+            question: 'Continue tool-call smoke test?',
+            options: [
+              {
+                label: 'Continue',
+                description: 'Proceed with the tool-call sequence.',
+              },
+              {
+                label: 'Cancel',
+                description: 'Stop the smoke test.',
+              },
+            ],
+          },
+        ],
+      });
+
+      const requestEnvelopes = persistedEnvelopes.filter(
+        (envelope) =>
+          envelope.eventType === ACP_ENVELOPE_EVENT_TYPES.RequestUserInput,
+      );
+
+      expect(requestEnvelopes).toHaveLength(2);
+      expect(
+        requestEnvelopes.map((envelope) => envelope.payload.requestId),
+      ).toEqual([
+        'rui:ses_1:msg_question:question_call_1',
+        'rui:ses_1:msg_question:question_call_1',
+      ]);
+      expect(requestEnvelopes.at(-1)?.payload).toMatchObject({
+        questions: [
+          {
+            question: 'Continue tool-call smoke test?',
+            options: [{ label: 'Continue' }, { label: 'Cancel' }],
+          },
+        ],
+      });
+      expect(
+        persistedEnvelopes.some(
+          (envelope) =>
+            envelope.eventType === ACP_ENVELOPE_EVENT_TYPES.ToolCall ||
+            envelope.eventType === ACP_ENVELOPE_EVENT_TYPES.ToolResult,
+        ),
+      ).toBe(false);
+      expect(
+        runtimeOutputEvents.some(
+          (event) =>
+            event.eventType === ACP_ENVELOPE_EVENT_TYPES.ToolCallUpdate,
+        ),
+      ).toBe(false);
+    } finally {
+      harness.dispose();
+    }
+  });
+
+  it('records cancelled OpenCode question responses when answers are empty', async () => {
+    const { client, harness } = createHarness();
+    const persistedEnvelopes: AcpPersistedEnvelope[] = [];
+
+    harness.subscribeRuntimePersistedEnvelope((envelope) =>
+      persistedEnvelopes.push(envelope),
+    );
+
+    try {
+      await connectHarness(harness, client);
+
+      expect(
+        harness.sendCommand({
+          commandName: TaskCommandName.StartNewTask,
+          data: {
+            text: 'Ask for input.',
+            visibleInTranscript: true,
+          },
+        }),
+      ).toBe(true);
+
+      await vi.waitFor(() => {
+        expect(client.promptAsync).toHaveBeenCalledTimes(1);
+      });
+
+      await client.emit({
+        type: 'message.part.updated',
+        properties: {
+          part: {
+            id: 'question_part_1',
+            sessionID: 'ses_1',
+            messageID: 'msg_question',
+            type: 'tool',
+            callID: 'question_call_1',
+            tool: 'question',
+            state: {
+              status: 'running',
+              input: {
+                questions: [
+                  {
+                    id: 'color',
+                    header: 'Color',
+                    question: 'Which color should I use?',
+                  },
+                ],
+              },
+              title: 'Ask user',
+            },
+          },
+        },
+      });
+
+      const pendingRequest = harness.getPendingUserInputRequests()[0];
+      expect(pendingRequest).toBeDefined();
+
+      expect(
+        harness.sendCommand({
+          commandName: TaskCommandName.AnswerUserInputRequest,
+          data: {
+            requestId: pendingRequest!.requestId,
+            answers: {
+              color: { answers: [] },
+            },
+          },
+        }),
+      ).toBe(true);
+
+      await vi.waitFor(() => {
+        expect(client.abort).toHaveBeenCalledTimes(1);
+      });
+
+      const responseEnvelope = persistedEnvelopes.find(
+        (envelope) =>
+          envelope.eventType ===
+            ACP_ENVELOPE_EVENT_TYPES.RequestUserInputResponse &&
+          envelope.payload.requestId === pendingRequest!.requestId,
+      );
+      expect(responseEnvelope?.payload).toMatchObject({
+        requestId: pendingRequest!.requestId,
+        resolution: 'cancelled',
+      });
+    } finally {
+      harness.dispose();
+    }
+  });
+
+  it('persists OpenCode tool starts and terminal results once', async () => {
+    const { client, harness } = createHarness();
+    const runtimeOutputEvents: AcpMessage[] = [];
+    const persistedEnvelopes: AcpPersistedEnvelope[] = [];
+
+    harness.subscribeRuntimeOutput((event) => runtimeOutputEvents.push(event));
+    harness.subscribeRuntimePersistedEnvelope((envelope) =>
+      persistedEnvelopes.push(envelope),
+    );
+
+    try {
+      await connectHarness(harness, client);
+
+      await client.emit({
+        type: 'message.part.updated',
+        properties: {
+          part: {
+            id: 'tool_part_1',
+            sessionID: 'ses_1',
+            messageID: 'msg_1',
+            type: 'tool',
+            callID: 'call_1',
+            tool: 'bash',
+            state: {
+              status: 'pending',
+              title: 'bash',
+            },
+          },
+        },
+      });
+      await client.emit({
+        type: 'message.part.updated',
+        properties: {
+          part: {
+            id: 'tool_part_1',
+            sessionID: 'ses_1',
+            messageID: 'msg_1',
+            type: 'tool',
+            callID: 'call_1',
+            tool: 'bash',
+            state: {
+              status: 'running',
+              input: { command: 'printf OK' },
+              title: 'Run shell command',
+              metadata: { cwd: '/tmp/workspace' },
+            },
+          },
+        },
+      });
+      await client.emit({
+        type: 'message.part.updated',
+        properties: {
+          part: {
+            id: 'tool_part_1',
+            sessionID: 'ses_1',
+            messageID: 'msg_1',
+            type: 'tool',
+            callID: 'call_1',
+            tool: 'bash',
+            state: {
+              status: 'completed',
+              input: { command: 'printf OK' },
+              output: 'OK\n',
+              title: 'Run shell command',
+              metadata: { exitCode: 0 },
+            },
+          },
+        },
+      });
+      await client.emit({
+        type: 'message.part.updated',
+        properties: {
+          part: {
+            id: 'tool_part_1',
+            sessionID: 'ses_1',
+            messageID: 'msg_1',
+            type: 'tool',
+            callID: 'call_1',
+            tool: 'bash',
+            state: {
+              status: 'completed',
+              input: { command: 'printf OK' },
+              output: 'OK\n',
+              title: 'Run shell command',
+              metadata: { exitCode: 0 },
+            },
+          },
+        },
+      });
+
+      const toolCalls = persistedEnvelopes.filter(
+        (envelope) => envelope.eventType === ACP_ENVELOPE_EVENT_TYPES.ToolCall,
+      );
+      const toolResults = persistedEnvelopes.filter(
+        (envelope) =>
+          envelope.eventType === ACP_ENVELOPE_EVENT_TYPES.ToolResult,
+      );
+
+      expect(toolCalls).toHaveLength(1);
+      expect(toolCalls[0]?.payload).toMatchObject({
+        sessionId: 'ses_1',
+        turnId: 'msg_1',
+        toolCallId: 'call_1',
+        kind: 'execute',
+        title: 'Run shell command',
+        status: 'in_progress',
+        isExecute: true,
+        command: 'printf OK',
+        rawInput: { command: 'printf OK' },
+      });
+      expect(toolResults).toHaveLength(1);
+      expect(toolResults[0]?.payload).toMatchObject({
+        sessionId: 'ses_1',
+        turnId: 'msg_1',
+        toolCallId: 'call_1',
+        kind: 'execute',
+        title: 'Run shell command',
+        status: 'completed',
+        isExecute: true,
+        command: 'printf OK',
+        exitCode: 0,
+        output: 'OK\n',
+      });
+      expect(
+        runtimeOutputEvents.some(
+          (event) =>
+            event.eventType === ACP_ENVELOPE_EVENT_TYPES.ToolCallUpdate &&
+            event.payload.status === 'completed' &&
+            event.payload.output === 'OK\n',
+        ),
+      ).toBe(true);
+    } finally {
+      harness.dispose();
+    }
+  });
+
+  it('emits live progress updates for running long-running OpenCode execute tools', async () => {
+    const { client, harness } = createHarness(undefined, {
+      executeToolProgressInitialDelayMs: 25,
+      executeToolProgressIntervalMs: 50,
+    });
+    const runtimeOutputEvents: AcpMessage[] = [];
+    const persistedEnvelopes: AcpPersistedEnvelope[] = [];
+
+    harness.subscribeRuntimeOutput((event) => runtimeOutputEvents.push(event));
+    harness.subscribeRuntimePersistedEnvelope((envelope) =>
+      persistedEnvelopes.push(envelope),
+    );
+
+    try {
+      await connectHarness(harness, client);
+      vi.useFakeTimers();
+
+      await client.emit({
+        type: 'message.part.updated',
+        properties: {
+          part: {
+            id: 'tool_part_progress',
+            sessionID: 'ses_1',
+            messageID: 'msg_progress',
+            type: 'tool',
+            callID: 'call_progress',
+            tool: 'bash',
+            state: {
+              status: 'pending',
+              input: { command: 'pnpm test' },
+              title: 'Run tests',
+            },
+          },
+        },
+      });
+
+      await vi.advanceTimersByTimeAsync(100);
+      expect(
+        runtimeOutputEvents.some(
+          (event) =>
+            event.eventType === ACP_ENVELOPE_EVENT_TYPES.ToolCallUpdate &&
+            event.payload.progressKind === 'execute_tool_heartbeat',
+        ),
+      ).toBe(false);
+
+      await client.emit({
+        type: 'message.part.updated',
+        properties: {
+          part: {
+            id: 'tool_part_progress',
+            sessionID: 'ses_1',
+            messageID: 'msg_progress',
+            type: 'tool',
+            callID: 'call_progress',
+            tool: 'bash',
+            state: {
+              status: 'running',
+              input: { command: 'pnpm test' },
+              title: 'Run tests',
+            },
+          },
+        },
+      });
+
+      await vi.advanceTimersByTimeAsync(24);
+      expect(
+        runtimeOutputEvents.some(
+          (event) =>
+            event.eventType === ACP_ENVELOPE_EVENT_TYPES.ToolCallUpdate &&
+            event.payload.progressKind === 'execute_tool_heartbeat',
+        ),
+      ).toBe(false);
+
+      await vi.advanceTimersByTimeAsync(1);
+
+      const progressUpdates = runtimeOutputEvents.filter(
+        (event) =>
+          event.eventType === ACP_ENVELOPE_EVENT_TYPES.ToolCallUpdate &&
+          event.payload.progressKind === 'execute_tool_heartbeat',
+      );
+      expect(progressUpdates).toHaveLength(1);
+      expect(progressUpdates[0]?.payload).toMatchObject({
+        sessionId: 'ses_1',
+        turnId: 'msg_progress',
+        toolCallId: 'call_progress',
+        name: 'bash',
+        status: 'in_progress',
+        running: true,
+        command: 'pnpm test',
+      });
+      expect(progressUpdates[0]?.payload.output).toContain(
+        'Command still running',
+      );
+      expect(progressUpdates[0]?.payload.output).toContain(
+        'Command: pnpm test',
+      );
+      expect(
+        persistedEnvelopes.some(
+          (envelope) =>
+            envelope.eventType === ACP_ENVELOPE_EVENT_TYPES.ToolResult,
+        ),
+      ).toBe(false);
+
+      await vi.advanceTimersByTimeAsync(50);
+      expect(
+        runtimeOutputEvents.filter(
+          (event) =>
+            event.eventType === ACP_ENVELOPE_EVENT_TYPES.ToolCallUpdate &&
+            event.payload.progressKind === 'execute_tool_heartbeat',
+        ),
+      ).toHaveLength(2);
+
+      await client.emit({
+        type: 'message.part.updated',
+        properties: {
+          part: {
+            id: 'tool_part_progress',
+            sessionID: 'ses_1',
+            messageID: 'msg_progress',
+            type: 'tool',
+            callID: 'call_progress',
+            tool: 'bash',
+            state: {
+              status: 'completed',
+              input: { command: 'pnpm test' },
+              output: 'Tests done\n',
+              title: 'Run tests',
+              metadata: { exitCode: 0 },
+            },
+          },
+        },
+      });
+
+      const heartbeatCountAfterCompletion = runtimeOutputEvents.filter(
+        (event) =>
+          event.eventType === ACP_ENVELOPE_EVENT_TYPES.ToolCallUpdate &&
+          event.payload.progressKind === 'execute_tool_heartbeat',
+      ).length;
+
+      await vi.advanceTimersByTimeAsync(150);
+
+      expect(
+        runtimeOutputEvents.filter(
+          (event) =>
+            event.eventType === ACP_ENVELOPE_EVENT_TYPES.ToolCallUpdate &&
+            event.payload.progressKind === 'execute_tool_heartbeat',
+        ),
+      ).toHaveLength(heartbeatCountAfterCompletion);
+      expect(
+        runtimeOutputEvents.some(
+          (event) =>
+            event.eventType === ACP_ENVELOPE_EVENT_TYPES.ToolCallUpdate &&
+            event.payload.status === 'completed' &&
+            event.payload.output === 'Tests done\n',
+        ),
+      ).toBe(true);
+    } finally {
+      harness.dispose();
+      vi.useRealTimers();
+    }
+  });
+
+  it('emits OpenCode todowrite parts as plan updates', async () => {
+    const { client, harness } = createHarness();
+    const runtimeOutputEvents: AcpMessage[] = [];
+    const persistedEnvelopes: AcpPersistedEnvelope[] = [];
+
+    harness.subscribeRuntimeOutput((event) => runtimeOutputEvents.push(event));
+    harness.subscribeRuntimePersistedEnvelope((envelope) =>
+      persistedEnvelopes.push(envelope),
+    );
+
+    const todos = [
+      {
+        id: 't1',
+        status: 'in_progress',
+        content: 'Discover repo guidance files for the Roomote repo',
+        priority: 'medium',
+      },
+      {
+        id: 't2',
+        status: 'pending',
+        content: 'Read a few representative project files',
+        priority: 'medium',
+      },
+    ];
+
+    try {
+      await connectHarness(harness, client);
+
+      await client.emit({
+        type: 'message.part.updated',
+        properties: {
+          part: {
+            id: 'tool_part_todos',
+            sessionID: 'ses_1',
+            messageID: 'msg_1',
+            type: 'tool',
+            callID: 'call_todos_1',
+            tool: 'todowrite',
+            state: {
+              status: 'running',
+              title: 'todowrite',
+            },
+          },
+        },
+      });
+      await client.emit({
+        type: 'message.part.updated',
+        properties: {
+          part: {
+            id: 'tool_part_todos',
+            sessionID: 'ses_1',
+            messageID: 'msg_1',
+            type: 'tool',
+            callID: 'call_todos_1',
+            tool: 'todowrite',
+            state: {
+              status: 'running',
+              input: { todos },
+              title: 'todowrite',
+            },
+          },
+        },
+      });
+      await client.emit({
+        type: 'message.part.updated',
+        properties: {
+          part: {
+            id: 'tool_part_todos',
+            sessionID: 'ses_1',
+            messageID: 'msg_1',
+            type: 'tool',
+            callID: 'call_todos_1',
+            tool: 'todowrite',
+            state: {
+              status: 'completed',
+              input: { todos },
+              output: todos,
+              title: 'todowrite',
+            },
+          },
+        },
+      });
+
+      const planEnvelopes = persistedEnvelopes.filter(
+        (envelope) => envelope.eventType === ACP_ENVELOPE_EVENT_TYPES.Plan,
+      );
+
+      expect(planEnvelopes).toHaveLength(1);
+      expect(planEnvelopes[0]).toMatchObject({
+        role: 'assistant',
+        metadata: {
+          source: 'plan',
+          sessionId: 'ses_1',
+          turnId: 'msg_1',
+        },
+        payload: {
+          entries: todos,
+        },
+      });
+      expect(planEnvelopes[0]?.contentBlocks).toEqual([
+        {
+          type: 'text',
+          text: '- [in_progress] Discover repo guidance files for the Roomote repo\n- [pending] Read a few representative project files',
+        },
+      ]);
+      expect(
+        persistedEnvelopes.some(
+          (envelope) =>
+            envelope.eventType === ACP_ENVELOPE_EVENT_TYPES.ToolCall ||
+            envelope.eventType === ACP_ENVELOPE_EVENT_TYPES.ToolResult,
+        ),
+      ).toBe(false);
+      expect(
+        runtimeOutputEvents.some(
+          (event) =>
+            event.eventType === ACP_ENVELOPE_EVENT_TYPES.ToolCallUpdate,
+        ),
+      ).toBe(false);
+      expect(
+        runtimeOutputEvents.some(
+          (event) => event.eventType === ACP_ENVELOPE_EVENT_TYPES.Plan,
+        ),
+      ).toBe(true);
+    } finally {
+      harness.dispose();
+    }
+  });
+
+  it('normalizes OpenCode read, search, and MCP tool categories', async () => {
+    const { client, harness } = createHarness(undefined, {
+      mcpServerNames: ['roomote'],
+    });
+    const persistedEnvelopes: AcpPersistedEnvelope[] = [];
+
+    harness.subscribeRuntimePersistedEnvelope((envelope) =>
+      persistedEnvelopes.push(envelope),
+    );
+
+    const cases = [
+      {
+        callId: 'call_read',
+        partId: 'tool_part_read',
+        tool: 'read',
+        title: 'src/app.ts',
+        input: { filePath: 'src/app.ts' },
+        output: '<file>export const value = 1;</file>',
+        expected: {
+          kind: 'read',
+          title: 'src/app.ts',
+          isRead: true,
+          isExecute: false,
+          isMcp: false,
+        },
+      },
+      {
+        callId: 'call_search',
+        partId: 'tool_part_search',
+        tool: 'grep',
+        title: 'grep',
+        input: { pattern: 'AcpToolMessage', path: 'apps/web/src' },
+        output: 'apps/web/src/example.ts:1:AcpToolMessage',
+        expected: {
+          kind: 'search',
+          title: 'grep',
+          isRead: false,
+          isExecute: false,
+          isMcp: false,
+        },
+      },
+      {
+        callId: 'call_mcp',
+        partId: 'tool_part_mcp',
+        tool: 'mcp:roomote/get_task',
+        title: 'roomote/get_task',
+        input: { taskId: 'task_1' },
+        output: { ok: true },
+        expected: {
+          kind: 'mcp',
+          title: 'roomote/get_task',
+          isRead: false,
+          isExecute: false,
+          isMcp: true,
+          mcpServerName: 'roomote',
+          mcpToolName: 'get_task',
+          serverName: 'roomote',
+          toolName: 'get_task',
+        },
+      },
+      {
+        callId: 'call_flattened_mcp',
+        partId: 'tool_part_flattened_mcp',
+        tool: 'roomote_send_chat_reply',
+        title: 'roomote_send_chat_reply',
+        input: { message: 'hello from Slack' },
+        output: { ok: true },
+        expected: {
+          kind: 'mcp',
+          title: 'roomote_send_chat_reply',
+          isRead: false,
+          isExecute: false,
+          isMcp: true,
+          mcpServerName: 'roomote',
+          mcpToolName: 'send_chat_reply',
+          serverName: 'roomote',
+          toolName: 'send_chat_reply',
+        },
+      },
+    ];
+
+    try {
+      await connectHarness(harness, client);
+
+      for (const testCase of cases) {
+        await client.emit({
+          type: 'message.part.updated',
+          properties: {
+            part: {
+              id: testCase.partId,
+              sessionID: 'ses_1',
+              messageID: 'msg_1',
+              type: 'tool',
+              callID: testCase.callId,
+              tool: testCase.tool,
+              state: {
+                status: 'completed',
+                input: testCase.input,
+                output: testCase.output,
+                title: testCase.title,
+              },
+            },
+          },
+        });
+      }
+
+      const toolResults = persistedEnvelopes.filter(
+        (envelope) =>
+          envelope.eventType === ACP_ENVELOPE_EVENT_TYPES.ToolResult,
+      );
+
+      expect(toolResults).toHaveLength(cases.length);
+
+      for (const testCase of cases) {
+        const result = toolResults.find(
+          (envelope) => envelope.payload.toolCallId === testCase.callId,
+        );
+
+        expect(result?.payload).toMatchObject({
+          sessionId: 'ses_1',
+          turnId: 'msg_1',
+          toolCallId: testCase.callId,
+          rawInput: testCase.input,
+          status: 'completed',
+          ...testCase.expected,
+        });
+      }
+    } finally {
+      harness.dispose();
+    }
+  });
+
+  it('persists OpenCode subtask parts as subagent tool calls', async () => {
+    const { client, harness } = createHarness();
+    const persistedEnvelopes: AcpPersistedEnvelope[] = [];
+
+    harness.subscribeRuntimePersistedEnvelope((envelope) =>
+      persistedEnvelopes.push(envelope),
+    );
+
+    try {
+      await connectHarness(harness, client);
+
+      const subtaskPart = {
+        id: 'subtask_part_1',
+        sessionID: 'ses_1',
+        messageID: 'msg_1',
+        type: 'subtask',
+        prompt: 'Inspect the failing tests.',
+        description: 'Test investigation',
+        agent: 'explorer',
+        model: {
+          providerID: 'openrouter',
+          modelID: 'gpt-test',
+        },
+      };
+
+      await client.emit({
+        type: 'message.part.updated',
+        properties: { part: subtaskPart },
+      });
+      await client.emit({
+        type: 'message.part.updated',
+        properties: { part: subtaskPart },
+      });
+
+      const toolCalls = persistedEnvelopes.filter(
+        (envelope) => envelope.eventType === ACP_ENVELOPE_EVENT_TYPES.ToolCall,
+      );
+      const toolResults = persistedEnvelopes.filter(
+        (envelope) =>
+          envelope.eventType === ACP_ENVELOPE_EVENT_TYPES.ToolResult,
+      );
+
+      expect(toolCalls).toHaveLength(1);
+      expect(toolCalls[0]?.payload).toMatchObject({
+        sessionId: 'ses_1',
+        turnId: 'msg_1',
+        toolCallId: 'subtask_part_1',
+        kind: 'subagent',
+        title: 'Test investigation',
+        status: 'in_progress',
+        isSubagentSpawn: true,
+        agentType: 'explorer',
+        model: 'openrouter/gpt-test',
+        prompt: 'Inspect the failing tests.',
+      });
+      expect(toolResults).toHaveLength(0);
+    } finally {
+      harness.dispose();
+    }
+  });
+
+  it('retries a blocked queued prompt instead of waiting for the next message', async () => {
+    const beforeQueuedPrompt = vi.fn<
+      () => Promise<void | {
+        shouldReconnect: boolean;
+        shouldBlockPrompt?: boolean;
+        reason?: string;
+      }>
+    >();
+    beforeQueuedPrompt
+      .mockResolvedValueOnce({
+        shouldReconnect: false,
+        shouldBlockPrompt: true,
+      })
+      .mockResolvedValue(undefined);
+    const { client, harness } = createHarness(undefined, {
+      beforeQueuedPrompt,
+      queuedPromptRetryDelayMs: 20,
+    });
+
+    try {
+      await connectHarness(harness, client);
+
+      harness.sendCommand({
+        commandName: TaskCommandName.StartNewTask,
+        data: { text: 'First.', visibleInTranscript: true },
+      });
+      await vi.waitFor(() => {
+        expect(client.promptAsync).toHaveBeenCalledTimes(1);
+      });
+
+      // Queue a follow-up while the first turn is in flight.
+      harness.sendCommand({
+        commandName: TaskCommandName.SendMessage,
+        data: { text: 'Second.', visibleInTranscript: true },
+      });
+
+      // Complete the first turn so the queue drains exactly once.
+      client.message.mockResolvedValueOnce(createFinalAssistantMessage());
+      await client.emit({
+        type: 'message.updated',
+        properties: {
+          info: {
+            id: 'msg_1',
+            sessionID: 'ses_1',
+            role: 'assistant',
+            time: { completed: 1 },
+          },
+        },
+      });
+      await client.emit({
+        type: 'session.idle',
+        properties: { sessionID: 'ses_1' },
+      });
+
+      // The first drain is blocked; the prompt is held, not delivered.
+      await vi.waitFor(() => {
+        expect(beforeQueuedPrompt).toHaveBeenCalledTimes(1);
+      });
+      expect(client.promptAsync).toHaveBeenCalledTimes(1);
+
+      // The scheduled retry drains the queue with no new user message.
+      await vi.waitFor(() => {
+        expect(client.promptAsync).toHaveBeenCalledTimes(2);
+      });
+      expect(beforeQueuedPrompt).toHaveBeenCalledTimes(2);
+      expect(client.promptAsync.mock.calls[1]?.[0]).toMatchObject({
+        sessionId: 'ses_1',
+        request: {
+          parts: [{ type: 'text', text: expect.stringContaining('Second.') }],
+        },
+      });
+    } finally {
+      harness.dispose();
+    }
+  });
+
+  it('validates and reuses a prior session on resume before its first prompt', async () => {
+    const { client, harness } = createHarness();
+
+    try {
+      await connectHarness(harness, client);
+
+      harness.sendCommand({
+        commandName: TaskCommandName.ResumeTask,
+        data: 'ses_prior',
+      });
+      harness.sendCommand({
+        commandName: TaskCommandName.SendMessage,
+        data: { text: 'Continue.', visibleInTranscript: true },
+      });
+      await vi.waitFor(() => {
+        expect(client.promptAsync).toHaveBeenCalledTimes(1);
+      });
+
+      // The prior session is validated server-side, then reused — no new
+      // session is created behind the user's back.
+      expect(client.messages).toHaveBeenCalledWith(
+        expect.objectContaining({ sessionId: 'ses_prior', limit: 1 }),
+      );
+      expect(client.createSession).not.toHaveBeenCalled();
+      expect(client.promptAsync.mock.calls[0]?.[0]).toMatchObject({
+        sessionId: 'ses_prior',
+      });
+    } finally {
+      harness.dispose();
+    }
+  });
+
+  it('drops an invalid prior session on resume so a fresh one is created', async () => {
+    const { client, harness } = createHarness();
+    client.messages.mockRejectedValueOnce(new Error('session not found'));
+
+    try {
+      await connectHarness(harness, client);
+
+      harness.sendCommand({
+        commandName: TaskCommandName.ResumeTask,
+        data: 'ses_stale',
+      });
+      harness.sendCommand({
+        commandName: TaskCommandName.SendMessage,
+        data: { text: 'Continue.', visibleInTranscript: true },
+      });
+      await vi.waitFor(() => {
+        expect(client.createSession).toHaveBeenCalledTimes(1);
+        expect(client.promptAsync).toHaveBeenCalledTimes(1);
+      });
+
+      // The stale id was validated, found gone, and dropped — the next prompt
+      // creates a fresh session rather than reusing an id the server no longer
+      // knows.
+      expect(client.messages).toHaveBeenCalledTimes(1);
+      expect(client.promptAsync.mock.calls[0]?.[0]).toMatchObject({
+        sessionId: 'ses_1',
+      });
+    } finally {
+      harness.dispose();
+    }
+  });
+});

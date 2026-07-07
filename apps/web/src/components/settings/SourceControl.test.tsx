@@ -1,0 +1,510 @@
+import type {
+  AnchorHTMLAttributes,
+  ButtonHTMLAttributes,
+  ReactNode,
+  SVGProps,
+} from 'react';
+import { fireEvent, render, screen } from '@testing-library/react';
+import { toast } from 'sonner';
+
+const state = vi.hoisted(() => ({
+  gitHubInstallations: [{ id: 'gh-1' }],
+  gitHubRepositories: [
+    {
+      id: 'repo-1',
+      fullName: 'Roomote/example-app',
+      htmlUrl: 'https://github.com/Roomote/example-app',
+    },
+  ],
+  gitLabRepositories: [
+    {
+      id: 'repo-2',
+      fullName: 'Roomote/gitlab-app',
+      htmlUrl: 'https://gitlab.com/Roomote/gitlab-app',
+    },
+  ],
+  giteaRepositories: [
+    {
+      id: 'repo-3',
+      fullName: 'Roomote/gitea-app',
+      htmlUrl: 'https://git.example.com/Roomote/gitea-app',
+    },
+  ],
+  adoRepositories: [
+    {
+      id: 'repo-4',
+      fullName: 'acme/Platform/backend',
+      htmlUrl: 'https://dev.azure.com/acme/Platform/_git/backend',
+    },
+  ],
+  searchParams: '',
+  configProviders: [
+    {
+      provider: 'gitlab',
+      fields: [{ runtimeSatisfied: false, savedSatisfied: true }],
+    },
+    {
+      provider: 'gitea',
+      fields: [{ runtimeSatisfied: false, savedSatisfied: true }],
+    },
+    {
+      provider: 'ado',
+      fields: [{ runtimeSatisfied: false, savedSatisfied: true }],
+    },
+  ],
+}));
+
+const mutations = vi.hoisted(() => ({
+  enableGitHub: vi.fn(),
+  syncGitHub: vi.fn(),
+  syncGitLab: vi.fn(),
+  syncGitea: vi.fn(),
+  syncAdo: vi.fn(),
+  setPrAction: vi.fn(),
+}));
+
+vi.mock('next/navigation', () => ({
+  usePathname: () => '/settings',
+  useSearchParams: () => new URLSearchParams(state.searchParams),
+}));
+
+vi.mock('next/link', () => ({
+  default: ({
+    children,
+    ...props
+  }: AnchorHTMLAttributes<HTMLAnchorElement>) => <a {...props}>{children}</a>,
+}));
+
+vi.mock('sonner', () => ({
+  toast: {
+    success: vi.fn(),
+    error: vi.fn(),
+  },
+}));
+
+vi.mock('@/hooks/useUser', () => ({
+  useAuthorizedUser: () => ({ isAdmin: true }),
+}));
+
+vi.mock('@/hooks/github', () => ({
+  useGitHubInstallations: () => ({
+    data: state.gitHubInstallations,
+    isPending: false,
+  }),
+  useEnableGitHubApp: () => ({
+    isPending: false,
+    mutate: mutations.enableGitHub,
+  }),
+  useSyncGitHubInstallations: () => ({
+    isPending: false,
+    mutate: mutations.syncGitHub,
+  }),
+}));
+
+vi.mock('@/hooks/source-control', () => ({
+  useRepositories: (input?: {
+    sourceControlProvider?: 'github' | 'gitlab' | 'gitea' | 'ado';
+  }) => {
+    switch (input?.sourceControlProvider) {
+      case 'gitlab':
+        return {
+          data: state.gitLabRepositories,
+          isPending: false,
+        };
+      case 'gitea':
+        return {
+          data: state.giteaRepositories,
+          isPending: false,
+        };
+      case 'ado':
+        return {
+          data: state.adoRepositories,
+          isPending: false,
+        };
+      case 'github':
+      default:
+        return {
+          data: state.gitHubRepositories,
+          isPending: false,
+        };
+    }
+  },
+  useSyncRepositories: (provider: 'gitlab' | 'gitea' | 'ado') => ({
+    isPending: false,
+    mutate:
+      provider === 'gitlab'
+        ? mutations.syncGitLab
+        : provider === 'gitea'
+          ? mutations.syncGitea
+          : mutations.syncAdo,
+  }),
+  usePrAction: () => ({
+    data: { prAction: 'draft' },
+    isLoading: false,
+  }),
+  useSetPrAction: () => ({
+    isPending: false,
+    mutate: mutations.setPrAction,
+  }),
+  useSourceControlConfigStatus: () => ({
+    data: {
+      selectedProvider: null,
+      preselectedProvider: 'github',
+      runtimeConfiguredProvider: null,
+      runtimeConfiguredProviders: [],
+      lockReason: null,
+      connectedProvider: null,
+      providers: state.configProviders,
+      setupSatisfied: false,
+      setupSatisfiedByRuntimeEnv: false,
+    },
+    isPending: false,
+  }),
+}));
+
+vi.mock('@/components/system', () => ({
+  Alert: ({ children }: { children: ReactNode }) => <div>{children}</div>,
+  AlertDescription: ({ children }: { children: ReactNode }) => (
+    <div>{children}</div>
+  ),
+  Badge: ({ children }: { children: ReactNode }) => <span>{children}</span>,
+  BrandIcon: ({
+    icon,
+    name,
+    className,
+  }: {
+    icon: string;
+    name: string;
+    className?: string;
+  }) => (
+    <svg
+      aria-hidden="true"
+      data-testid={`${icon}-icon`}
+      aria-label={name}
+      className={className}
+    />
+  ),
+  BookMarked: () => <svg aria-hidden="true" />,
+  Button: ({ children, ...props }: ButtonHTMLAttributes<HTMLButtonElement>) => (
+    <button type="button" {...props}>
+      {children}
+    </button>
+  ),
+  ChevronDown: () => <svg aria-hidden="true" />,
+  ChevronUp: () => <svg aria-hidden="true" />,
+  Code: (props: SVGProps<SVGSVGElement>) => (
+    <svg aria-hidden="true" {...props} />
+  ),
+  ExternalLink: (props: SVGProps<SVGSVGElement>) => (
+    <svg aria-hidden="true" {...props} />
+  ),
+  GitBranch: (props: SVGProps<SVGSVGElement>) => (
+    <svg aria-hidden="true" data-testid="git-branch-icon" {...props} />
+  ),
+  GitMerge: (props: SVGProps<SVGSVGElement>) => (
+    <svg aria-hidden="true" data-testid="git-merge-icon" {...props} />
+  ),
+  Github: (props: SVGProps<SVGSVGElement>) => (
+    <svg aria-hidden="true" data-testid="github-icon" {...props} />
+  ),
+  Pencil: (props: SVGProps<SVGSVGElement>) => (
+    <svg aria-hidden="true" {...props} />
+  ),
+  Plug: (props: SVGProps<SVGSVGElement>) => (
+    <svg aria-hidden="true" {...props} />
+  ),
+  RefreshCw: (props: SVGProps<SVGSVGElement>) => (
+    <svg aria-hidden="true" {...props} />
+  ),
+  Select: ({
+    children,
+    value,
+    onValueChange,
+  }: {
+    children: ReactNode;
+    value: string;
+    onValueChange: (value: string) => void;
+  }) => (
+    <div data-testid="pr-action-select" data-value={value}>
+      <button
+        type="button"
+        onClick={() => onValueChange('create')}
+        data-testid="pr-action-choose-create"
+      >
+        choose create
+      </button>
+      {children}
+    </div>
+  ),
+  SelectContent: ({ children }: { children: ReactNode }) => (
+    <div>{children}</div>
+  ),
+  SelectItem: ({ children, value }: { children: ReactNode; value: string }) => (
+    <div data-value={value}>{children}</div>
+  ),
+  SelectTrigger: ({ children }: { children: ReactNode }) => (
+    <div>{children}</div>
+  ),
+  SelectValue: () => <span />,
+  Settings2: (props: SVGProps<SVGSVGElement>) => (
+    <svg aria-hidden="true" {...props} />
+  ),
+}));
+
+vi.mock('@/components/settings', () => ({
+  Section: ({
+    icon,
+    title,
+    action,
+    children,
+  }: {
+    icon?: ReactNode | ((props: SVGProps<SVGSVGElement>) => ReactNode);
+    title: ReactNode;
+    action?: ReactNode;
+    children: ReactNode;
+  }) => (
+    <section>
+      <h2>
+        {typeof icon === 'function' ? icon({}) : icon}
+        {title}
+      </h2>
+      {action}
+      {children}
+    </section>
+  ),
+}));
+
+vi.mock('./SourceControlConfigForm', () => ({
+  SourceControlConfigForm: ({ provider }: { provider: string }) => (
+    <div data-testid={`source-control-config-${provider}`} />
+  ),
+}));
+
+import { SourceControl } from './SourceControl';
+
+describe('SourceControl settings', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    state.searchParams = '';
+    state.gitHubRepositories = [
+      {
+        id: 'repo-1',
+        fullName: 'Roomote/example-app',
+        htmlUrl: 'https://github.com/Roomote/example-app',
+      },
+    ];
+    state.gitLabRepositories = [
+      {
+        id: 'repo-2',
+        fullName: 'Roomote/gitlab-app',
+        htmlUrl: 'https://gitlab.com/Roomote/gitlab-app',
+      },
+    ];
+    state.giteaRepositories = [
+      {
+        id: 'repo-3',
+        fullName: 'Roomote/gitea-app',
+        htmlUrl: 'https://git.example.com/Roomote/gitea-app',
+      },
+    ];
+    state.adoRepositories = [
+      {
+        id: 'repo-4',
+        fullName: 'acme/Platform/backend',
+        htmlUrl: 'https://dev.azure.com/acme/Platform/_git/backend',
+      },
+    ];
+    state.configProviders = [
+      {
+        provider: 'gitlab',
+        fields: [{ runtimeSatisfied: false, savedSatisfied: true }],
+      },
+      {
+        provider: 'gitea',
+        fields: [{ runtimeSatisfied: false, savedSatisfied: true }],
+      },
+      {
+        provider: 'ado',
+        fields: [{ runtimeSatisfied: false, savedSatisfied: true }],
+      },
+    ];
+  });
+
+  it('renders source control providers with repo lists and controls', () => {
+    render(<SourceControl />);
+
+    expect(screen.getByText('Source Control Settings')).toBeInTheDocument();
+    expect(screen.getAllByText('GitHub')).not.toHaveLength(0);
+    expect(
+      screen.getByRole('link', { name: 'Roomote/example-app' }),
+    ).toHaveAttribute('href', 'https://github.com/Roomote/example-app');
+    expect(screen.getAllByText('GitLab')).not.toHaveLength(0);
+    expect(
+      screen.getByRole('link', { name: 'Roomote/gitlab-app' }),
+    ).toHaveAttribute('href', 'https://gitlab.com/Roomote/gitlab-app');
+    expect(screen.getAllByText('Gitea')).not.toHaveLength(0);
+    expect(
+      screen.getByRole('link', { name: 'Roomote/gitea-app' }),
+    ).toHaveAttribute('href', 'https://git.example.com/Roomote/gitea-app');
+    expect(screen.getAllByText('Azure DevOps')).not.toHaveLength(0);
+    expect(
+      screen.getByRole('link', { name: 'acme/Platform/backend' }),
+    ).toHaveAttribute(
+      'href',
+      'https://dev.azure.com/acme/Platform/_git/backend',
+    );
+    expect(
+      screen.getByRole('button', { name: 'Update GitHub' }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole('button', { name: 'Refresh GitHub' }),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByText('1. Connect the GitHub app'),
+    ).not.toBeInTheDocument();
+    expect(screen.queryByText('2. Sync repositories')).not.toBeInTheDocument();
+    expect(
+      screen.getByRole('button', { name: 'Refresh GitLab' }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole('button', { name: 'Refresh Gitea' }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole('button', { name: 'Refresh Azure DevOps' }),
+    ).toBeInTheDocument();
+    expect(screen.getByTestId('github-icon')).toHaveClass('shrink-0');
+    expect(
+      screen.getByTestId('source-control-config-gitlab'),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByRole('button', { name: 'Enable GitHub' }),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole('button', { name: 'Disable GitHub' }),
+    ).not.toBeInTheDocument();
+  });
+
+  it('shows the recommendation highlight copy when targeted from a setup link', () => {
+    state.searchParams = 'highlight=github';
+
+    render(<SourceControl />);
+
+    expect(document.getElementById('source-control')).toHaveTextContent(
+      'Continue with GitHub here. This section is the target for the setup recommendation link.',
+    );
+  });
+
+  it('requests the regular callback background when updating GitHub from settings', () => {
+    state.searchParams = 'tab=source-control';
+
+    render(<SourceControl />);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Update GitHub' }));
+
+    expect(mutations.enableGitHub).toHaveBeenCalledWith(
+      {
+        redirect: '/settings?tab=source-control',
+        callbackBackground: 'background',
+      },
+      expect.any(Object),
+    );
+  });
+
+  it('syncs GitLab repositories from the source control section', () => {
+    render(<SourceControl />);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Refresh GitLab' }));
+
+    expect(mutations.syncGitLab).toHaveBeenCalledOnce();
+  });
+
+  it('syncs Gitea repositories from the source control section', () => {
+    render(<SourceControl />);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Refresh Gitea' }));
+
+    expect(mutations.syncGitea).toHaveBeenCalledOnce();
+  });
+
+  it('syncs Azure DevOps repositories from the source control section', () => {
+    render(<SourceControl />);
+
+    fireEvent.click(
+      screen.getByRole('button', { name: 'Refresh Azure DevOps' }),
+    );
+
+    expect(mutations.syncAdo).toHaveBeenCalledOnce();
+  });
+
+  it('lets admins change the default pull request delivery mode', async () => {
+    render(<SourceControl />);
+
+    expect(screen.getByText('Pull request delivery')).toBeInTheDocument();
+    expect(screen.getByTestId('pr-action-select')).toHaveAttribute(
+      'data-value',
+      'draft',
+    );
+
+    fireEvent.click(screen.getByTestId('pr-action-choose-create'));
+
+    expect(mutations.setPrAction).toHaveBeenCalledWith(
+      'create',
+      expect.anything(),
+    );
+  });
+
+  it('shows setup links instead of sync for disconnected token providers', () => {
+    state.gitLabRepositories = [];
+    state.configProviders = [
+      {
+        provider: 'gitlab',
+        fields: [{ runtimeSatisfied: false, savedSatisfied: false }],
+      },
+      {
+        provider: 'gitea',
+        fields: [{ runtimeSatisfied: false, savedSatisfied: true }],
+      },
+      {
+        provider: 'ado',
+        fields: [{ runtimeSatisfied: false, savedSatisfied: true }],
+      },
+    ];
+
+    render(<SourceControl />);
+
+    expect(
+      screen.queryByRole('button', { name: 'Refresh GitLab' }),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.getByRole('button', { name: 'Set it up' }),
+    ).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Set it up' }));
+
+    expect(
+      screen.getByRole('link', { name: /GitLab access token/ }),
+    ).toHaveAttribute(
+      'href',
+      'https://gitlab.com/-/user_settings/personal_access_tokens',
+    );
+    expect(
+      screen.getByTestId('source-control-config-gitlab'),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByRole('button', { name: 'Hide config' }),
+    ).not.toBeInTheDocument();
+  });
+
+  it('shows a success toast when pull request delivery is saved', () => {
+    render(<SourceControl />);
+
+    fireEvent.click(screen.getByTestId('pr-action-choose-create'));
+
+    const options = mutations.setPrAction.mock.calls[0]?.[1];
+    options?.onSuccess?.();
+
+    expect(toast.success).toHaveBeenCalledWith(
+      'Source control settings saved.',
+    );
+  });
+});

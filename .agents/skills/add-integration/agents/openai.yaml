@@ -1,0 +1,4 @@
+interface:
+  display_name: 'Add Integration'
+  short_description: 'Add a new built-in MCP integration to Roomote'
+  default_prompt: "Use $add-integration to add a new third-party service to Roomote's built-in integrations catalog."

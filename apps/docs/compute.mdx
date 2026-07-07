@@ -1,0 +1,153 @@
+---
+title: Compute
+icon: cpu
+description: "Choose where Roomote runs task sandboxes: local Docker or a hosted compute backend."
+---
+
+import { IntegrationName } from '/snippets/integration-name.jsx';
+
+Compute providers decide where Roomote tasks actually run.
+
+When a Roomote agent starts work, it needs more than a model response. It needs
+a temporary workspace where it can clone repositories, install dependencies,
+run commands, start services, open previews, and collect evidence. Roomote calls
+that workspace a task sandbox.
+
+A compute provider is the backend that creates and manages those sandboxes.
+
+## What compute providers are for
+
+Think of a sandbox as a clean development machine for one task. It is separate
+from the web app, database, queue, and model provider. The model decides what
+to do; the compute provider gives the agent a place to do it.
+
+Roomote uses compute providers to:
+
+- start one workspace for each task
+- clone the repositories from the selected environment
+- run setup commands, tests, scripts, and background services
+- expose preview ports when a task starts a web app or API
+- stream logs back into the task view
+- stop, destroy, or snapshot the workspace when the task is done
+
+You configure compute providers during setup and can change them later from
+**Settings > Compute**.
+
+## Supported providers
+
+Roomote supports local and hosted compute backends:
+
+| Provider | Best for | Notes |
+| -------- | -------- | ----- |
+| <IntegrationName href="/providers/compute/docker" icon="docker" name="Docker" /> | Local development and trusted single-host self-hosting | Runs task sandboxes as Docker containers on the same machine as the deployment. |
+| <IntegrationName href="/providers/compute/modal" icon="modal" name="Modal" /> | Hosted task sandboxes with snapshot support | Uses a hosted runtime and can resume some sandboxes from snapshots. |
+| <IntegrationName href="/providers/compute/e2b" icon="e2b" name="E2B" /> | Hosted task sandboxes with snapshot support | Uses a hosted template created from the Roomote worker image. |
+| <IntegrationName href="/providers/compute/daytona" icon="daytona" name="Daytona" /> | Hosted task sandboxes with simple API-key setup | Runs fresh task sandboxes and destroys them when they are no longer needed. |
+
+Docker is the default because it works well for local development and simple
+self-hosted deployments. Hosted providers are useful when you want task work to
+run away from the Roomote server, scale beyond one host, or use provider-managed
+sandbox infrastructure.
+
+## Local Docker versus hosted compute
+
+Docker keeps the system easy to reason about. The controller starts a worker
+container on the same host, connects it to the local Docker network, and uses
+that container as the task sandbox.
+
+This is a good fit when:
+
+- you are developing Roomote locally
+- you run a trusted single-host deployment
+- your tasks are modest enough for the host machine
+- you want the fewest external provider accounts and credentials
+
+The tradeoff is that Docker uses the same host that runs the rest of your
+deployment. Heavy tasks can compete with the web app, API, database, queues, or
+other local services. Docker also depends on the controller having access to
+the host Docker socket, which is powerful and should be treated as trusted
+infrastructure. It is not a multi-host scheduler, and some resume or snapshot
+flows require a hosted provider.
+
+Hosted providers move the task sandbox into a provider-managed environment.
+Roomote still controls the task, streams logs, and connects previews, but the
+compute-heavy work happens outside your Roomote server.
+
+Hosted compute is a better fit when:
+
+- several people may run tasks at the same time
+- tasks need more CPU, memory, or isolation than your Roomote host should provide
+- you want task sandboxes to be easier to start, stop, and recover
+- you need snapshot-capable providers for faster resume flows
+- you are comfortable managing provider credentials and account-level limits
+
+The tradeoff is extra setup. Hosted providers need API credentials, network
+access back to your Roomote deployment, and a worker image or registered
+template that the provider can run.
+
+## Why worker images matter
+
+Every sandbox needs the same basic Roomote worker runtime: system packages,
+browser tooling, language tools, command helpers, and the small process that
+connects the sandbox back to Roomote.
+
+For Docker, that runtime comes from the worker Docker image available on the
+Roomote host.
+
+For hosted providers, the provider must be able to pull or start from a
+registry-qualified worker image. A local tag such as `roomote-worker:local`
+only exists on your machine, so a hosted provider cannot use it directly.
+
+That is why **Settings > Compute** includes a shared hosted compute worker
+image. Hosted providers use it to derive the provider-specific artifact they
+need:
+
+- Modal can use the worker image as its base image.
+- E2B builds a provider template from the worker image.
+- Daytona registers a provider snapshot from the worker image.
+
+Those registered images, templates, and snapshots are important because they
+make task startup predictable. Instead of rebuilding the full runtime for every
+task, the provider starts from a known base that already has the tools Roomote
+expects. That usually means faster startup, fewer missing-package failures, and
+less drift between tasks.
+
+For production deployments, prefer an immutable image tag, such as a release
+tag or commit-based tag, instead of `latest`. Immutable tags make it much
+clearer which worker runtime a sandbox used and avoid surprise changes during
+debugging or upgrades.
+
+## Choosing a default provider
+
+The default provider is the compute backend Roomote uses when a task does not
+explicitly choose one. New deployments can start with Docker, then add a hosted
+provider when concurrency, isolation, or snapshot support becomes important.
+
+A practical path is:
+
+1. Start with Docker if you are validating Roomote on one host
+2. Run a small task and confirm the environment can clone, install, test, and
+   open previews
+3. Add a hosted provider from **Settings > Compute** when the first task flow
+   feels stable
+4. Set the hosted provider as the default only after its credentials and worker
+   image or registered artifact are healthy
+
+Environment setup still matters no matter which provider you choose. The
+compute provider supplies the sandbox; the environment tells Roomote what to
+put inside it.
+
+## Common issues
+
+- **A hosted provider cannot start tasks.** Confirm its API credentials are
+  saved and the deployment URL is reachable from the provider.
+- **The worker image is not accepted.** Use a registry-qualified image that the
+  hosted provider can pull, not a local-only Docker tag.
+- **Tasks start slowly.** Check whether the hosted provider has a registered
+  template or snapshot ready, and whether the environment setup commands are
+  doing more work than necessary.
+- **Docker tasks affect the deployment host.** Move heavier or concurrent work
+  to a hosted provider, or give the host more CPU and memory.
+- **A task cannot run project commands.** Update the environment with missing
+  services, secrets, setup commands, or tool versions. The compute provider
+  only provides the machine; it does not know your repository setup by itself.

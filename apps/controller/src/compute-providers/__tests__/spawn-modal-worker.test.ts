@@ -1,0 +1,333 @@
+import type { CloudJob } from '@roomote/db/server';
+import { CloudTaskType } from '@roomote/types';
+
+const mockCreateModalMachine = vi.fn();
+const mockRunCommand = vi.fn();
+const mockCleanupModalInstance = vi.fn();
+const mockRecordMutation = vi.fn();
+const mockCreateComputeProviderClient = vi.fn((_arg?: unknown) => ({
+  runCommand: mockRunCommand,
+}));
+const mockCreateComputeProviderMutationEventRecorder = vi.fn(
+  () => mockRecordMutation,
+);
+const mockUpdateWhere = vi.fn().mockResolvedValue(undefined);
+const mockUpdateSet = vi.fn(() => ({ where: mockUpdateWhere }));
+const mockDbUpdate = vi.fn(() => ({ set: mockUpdateSet }));
+const mockUpdateCloudJobMachine = vi.fn();
+const mockGetNamedPortsForCloudJob = vi.fn();
+const mockShouldEnableAuthBypassForCloudJob = vi.fn(
+  (..._args: unknown[]) => true,
+);
+const mockPrimeEnvironmentOidcForMachine = vi.fn();
+
+function mockCloudJob(
+  overrides: Partial<CloudJob> & Pick<CloudJob, 'type'>,
+): CloudJob {
+  return {
+    id: 123,
+    vendor: 'modal',
+    sourceSnapshotId: null,
+    payload: { repo: 'test/repo' },
+    ...overrides,
+  } as unknown as CloudJob;
+}
+
+vi.mock('@roomote/db/server', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@roomote/db/server')>();
+
+  return {
+    ...actual,
+    db: {
+      ...actual.db,
+      update: () => mockDbUpdate(),
+    },
+    createComputeProviderMutationEventRecorder:
+      mockCreateComputeProviderMutationEventRecorder,
+  };
+});
+
+vi.mock('@roomote/compute-providers', () => ({
+  createModalMachine: (...args: unknown[]) => mockCreateModalMachine(...args),
+  createComputeProviderClient: (arg: unknown) =>
+    mockCreateComputeProviderClient(arg),
+  buildComputeProviderMutationDetails: vi.fn(
+    (_context: unknown, details: Record<string, unknown> = {}) => details,
+  ),
+  buildModalWorkerEnv: vi.fn(() => ({ AUTH_TOKEN: 'auth_token' })),
+  cleanupModalInstance: (...args: unknown[]) =>
+    mockCleanupModalInstance(...args),
+  resolveAuthBypassHeaderName: vi.fn(() => undefined),
+  resolveAuthBypassValue: vi.fn(() => undefined),
+}));
+
+vi.mock('../../utils', () => ({
+  getNamedPortsForCloudJob: (...args: unknown[]) =>
+    mockGetNamedPortsForCloudJob(...args),
+  shouldEnableAuthBypassForCloudJob: (...args: unknown[]) =>
+    mockShouldEnableAuthBypassForCloudJob(...args),
+  updateCloudJobMachine: (...args: unknown[]) =>
+    mockUpdateCloudJobMachine(...args),
+}));
+
+vi.mock('../../sandbox-oidc', () => ({
+  primeEnvironmentOidcForMachine: (...args: unknown[]) =>
+    mockPrimeEnvironmentOidcForMachine(...args),
+}));
+
+const { spawnModalWorker } = await import('../spawn-modal-worker');
+
+describe('spawnModalWorker', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockShouldEnableAuthBypassForCloudJob.mockReturnValue(true);
+    delete process.env.PREVIEW_PROXY_BASE_URL;
+
+    mockCreateModalMachine.mockResolvedValue({
+      machineId: 'modal-machine-123',
+      domain: vi.fn().mockReturnValue('modal.example.com'),
+      proxyPorts: {},
+    });
+    mockRunCommand.mockResolvedValue({
+      exitCode: null,
+      commandId: 'cmd_123',
+    });
+    mockGetNamedPortsForCloudJob.mockResolvedValue({
+      namedPorts: [{ name: 'SANDBOX_SERVER', port: 7777 }],
+      environmentSnapshotId: undefined,
+      environmentConfig: undefined,
+    });
+    mockPrimeEnvironmentOidcForMachine.mockResolvedValue(undefined);
+  });
+
+  it('primes environment OIDC before launching a fresh Modal worker when the environment defines OIDC targets', async () => {
+    mockGetNamedPortsForCloudJob.mockResolvedValue({
+      namedPorts: [{ name: 'SANDBOX_SERVER', port: 7777 }],
+      environmentSnapshotId: undefined,
+      environmentConfig: {
+        oidc: {
+          aws: {
+            role_arn: 'arn:aws:iam::123456789012:role/example',
+            token_file: '/home/roomote/.roomote/oidc/aws/token',
+          },
+        },
+      },
+    });
+
+    await spawnModalWorker(
+      mockCloudJob({
+        type: CloudTaskType.StandardTask,
+        payload: { repo: 'test/repo', environmentId: 'env_123' },
+      }),
+      'auth_token',
+      {
+        deploymentSlug: 'roomote',
+        modalTokenId: 'token-id',
+        modalTokenSecret: 'token-secret',
+        modalBaseImageRef: 'image-ref',
+        modalTimeoutMs: 60_000,
+      },
+    );
+
+    expect(mockPrimeEnvironmentOidcForMachine).toHaveBeenCalledWith({
+      environmentId: 'env_123',
+      environmentConfig: {
+        oidc: {
+          aws: {
+            role_arn: 'arn:aws:iam::123456789012:role/example',
+            token_file: '/home/roomote/.roomote/oidc/aws/token',
+          },
+        },
+      },
+      computeProvider: 'modal',
+      computeProviderId: 'modal-machine-123',
+      cloudJobId: 123,
+      context: 'Fresh Modal launch',
+    });
+  });
+
+  it('records only a failed terminal run_command event when the detached worker exits immediately', async () => {
+    mockRunCommand.mockResolvedValue({
+      exitCode: 17,
+      commandId: 'cmd_failed',
+      stderr: 'Unauthorized\n',
+      stdout: 'booting worker\n',
+    });
+
+    await expect(
+      spawnModalWorker(
+        mockCloudJob({
+          type: CloudTaskType.StandardTask,
+          payload: { repo: 'test/repo', environmentId: 'env_1' },
+        }),
+        'auth_token',
+        {
+          deploymentSlug: 'roomote',
+          modalTokenId: 'token-id',
+          modalTokenSecret: 'token-secret',
+          modalBaseImageRef: 'ghcr.io/roomote/modal-worker:test',
+          modalTimeoutMs: 60_000,
+        },
+      ),
+    ).rejects.toThrow('Detached "worker run" exited immediately with code 17');
+
+    expect(mockRecordMutation).toHaveBeenCalledWith(
+      expect.objectContaining({
+        operation: 'run_command',
+        eventType: 'failed',
+        instanceId: 'modal-machine-123',
+        details: expect.objectContaining({
+          command: 'worker',
+          args: ['run', '123'],
+          detached: true,
+          phase: 'launch_worker',
+          commandId: 'cmd_failed',
+          exitCode: 17,
+          stderr: 'Unauthorized',
+          stdout: 'booting worker',
+          error: 'Detached "worker run" exited immediately with code 17',
+        }),
+      }),
+    );
+    expect(mockRecordMutation).not.toHaveBeenCalledWith(
+      expect.objectContaining({
+        operation: 'run_command',
+        eventType: 'completed',
+        instanceId: 'modal-machine-123',
+      }),
+    );
+    expect(mockCleanupModalInstance).toHaveBeenCalledWith(
+      expect.objectContaining({
+        instanceId: 'modal-machine-123',
+        onMutation: expect.any(Function),
+      }),
+    );
+  });
+
+  it('does not resolve or persist a bypass when no exposed surface needs one', async () => {
+    mockShouldEnableAuthBypassForCloudJob.mockReturnValue(false);
+
+    const {
+      buildModalWorkerEnv,
+      resolveAuthBypassHeaderName,
+      resolveAuthBypassValue,
+    } = await import('@roomote/compute-providers');
+    vi.mocked(resolveAuthBypassValue).mockReturnValue('env-bypass-token');
+    vi.mocked(resolveAuthBypassHeaderName).mockReturnValue('x-env-bypass');
+
+    await spawnModalWorker(
+      mockCloudJob({
+        type: CloudTaskType.StandardTask,
+        taskId: 'innertask12345',
+        payload: { repo: 'test/repo', environmentId: 'env_1' },
+      }),
+      'auth_token',
+      {
+        deploymentSlug: 'roomote',
+        modalTokenId: 'token-id',
+        modalTokenSecret: 'token-secret',
+        modalBaseImageRef: 'ghcr.io/roomote/modal-worker:test',
+        modalTimeoutMs: 60_000,
+      },
+    );
+
+    expect(resolveAuthBypassValue).not.toHaveBeenCalled();
+    expect(resolveAuthBypassHeaderName).not.toHaveBeenCalled();
+
+    const extraEnv =
+      vi.mocked(buildModalWorkerEnv).mock.calls[0]?.[0]?.extraEnv;
+    expect(extraEnv).not.toHaveProperty('ROOMOTE_AUTH_BYPASS_VALUE');
+    expect(extraEnv).not.toHaveProperty('ROOMOTE_AUTH_BYPASS_HEADER_NAME');
+    expect(mockUpdateCloudJobMachine).toHaveBeenCalledWith(
+      expect.objectContaining({
+        authBypassValue: undefined,
+        authBypassHeaderName: undefined,
+      }),
+    );
+  });
+
+  it('uses task_snapshot launch mode for snapshot resume jobs', async () => {
+    await spawnModalWorker(
+      mockCloudJob({
+        type: CloudTaskType.SnapshotResume,
+        sourceSnapshotId: 'snap-task-123',
+        payload: { repo: 'test/repo', environmentId: 'env_1' },
+      }),
+      'auth_token',
+      {
+        deploymentSlug: 'roomote',
+        modalTokenId: 'token-id',
+        modalTokenSecret: 'token-secret',
+        modalBaseImageRef: 'ghcr.io/roomote/modal-worker:test',
+        modalTimeoutMs: 60_000,
+      },
+    );
+
+    expect(mockCreateModalMachine).toHaveBeenCalledWith(
+      expect.objectContaining({
+        launchMode: 'task_snapshot',
+        sourceSnapshotId: 'snap-task-123',
+      }),
+    );
+  });
+
+  it('forces fresh launches for snapshot environment jobs even when an environment snapshot exists', async () => {
+    mockGetNamedPortsForCloudJob.mockResolvedValue({
+      namedPorts: [{ name: 'SANDBOX_SERVER', port: 7777 }],
+      environmentSnapshotId: 'snap_env_123',
+      environmentConfig: undefined,
+    });
+
+    await spawnModalWorker(
+      mockCloudJob({
+        type: CloudTaskType.SnapshotEnvironment,
+        sourceSnapshotId: 'snap_job_ignored_123',
+        payload: { repo: 'test/repo', environmentId: 'env_1' },
+      }),
+      'auth_token',
+      {
+        deploymentSlug: 'roomote',
+        modalTokenId: 'token-id',
+        modalTokenSecret: 'token-secret',
+        modalBaseImageRef: 'ghcr.io/roomote/modal-worker:test',
+        modalTimeoutMs: 60_000,
+      },
+    );
+
+    expect(mockCreateModalMachine).toHaveBeenCalledWith(
+      expect.objectContaining({
+        launchMode: 'fresh',
+      }),
+    );
+
+    const createMachineOptions = mockCreateModalMachine.mock.calls[0]?.[0];
+    expect(createMachineOptions).not.toHaveProperty('sourceSnapshotId');
+    expect(mockUpdateCloudJobMachine).toHaveBeenCalledWith(
+      expect.objectContaining({
+        sourceSnapshotId: null,
+      }),
+    );
+  });
+
+  it('fails fast when a snapshot resume job is missing sourceSnapshotId', async () => {
+    await expect(
+      spawnModalWorker(
+        mockCloudJob({
+          type: CloudTaskType.SnapshotResume,
+          sourceSnapshotId: null,
+          payload: { repo: 'test/repo', environmentId: 'env_1' },
+        }),
+        'auth_token',
+        {
+          deploymentSlug: 'roomote',
+          modalTokenId: 'token-id',
+          modalTokenSecret: 'token-secret',
+          modalBaseImageRef: 'ghcr.io/roomote/modal-worker:test',
+          modalTimeoutMs: 60_000,
+        },
+      ),
+    ).rejects.toThrow('missing sourceSnapshotId');
+
+    expect(mockCreateModalMachine).not.toHaveBeenCalled();
+  });
+});

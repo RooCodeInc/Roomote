@@ -1,0 +1,24 @@
+name: roomote
+
+services:
+  worker-image:
+    image: ${DOCKER_WORKER_IMAGE:-roomote-worker:local}
+    container_name: roomote-worker-image
+    build:
+      context: .
+      dockerfile: apps/worker/Dockerfile
+    platform: ${DOCKER_WORKER_PLATFORM:-linux/amd64}
+    command: ['true']
+    restart: 'no'
+
+  controller:
+    environment:
+      DOCKER_WORKER_IMAGE: ${DOCKER_WORKER_IMAGE:-roomote-worker:local}
+      DOCKER_WORKER_PLATFORM: ${DOCKER_WORKER_PLATFORM:-linux/amd64}
+      DOCKER_WORKER_NETWORK: ${DOCKER_WORKER_NETWORK:-roomote_worker}
+      DOCKER_WORKER_RELEASE_PATH: ${DOCKER_WORKER_RELEASE_PATH:-/roomote/releases/worker-current.tar.gz}
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+    depends_on:
+      worker-image:
+        condition: service_completed_successfully

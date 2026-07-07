@@ -1,0 +1,147 @@
+name: Bug report
+description: Report broken behavior in Roomote.
+title: "[Bug]: "
+labels: ["bug", "needs-triage"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for taking the time to write a useful report. Roomote is self-hosted, so deployment context matters as much as the visible symptom.
+
+        Please search existing issues and docs before opening a new issue. Reports without enough detail to reproduce or investigate may be closed.
+  - type: checkboxes
+    id: preflight
+    attributes:
+      label: Preflight
+      options:
+        - label: I searched existing issues and docs before opening this.
+          required: true
+        - label: I removed secrets, tokens, private keys, customer data, and private repository details from logs and screenshots.
+          required: true
+        - label: This report describes observed behavior, not a speculative AI-generated rewrite request.
+          required: true
+  - type: textarea
+    id: summary
+    attributes:
+      label: Summary
+      description: What is broken?
+      placeholder: Briefly describe the bug and who it affects.
+    validations:
+      required: true
+  - type: dropdown
+    id: surface
+    attributes:
+      label: Affected surface
+      multiple: true
+      options:
+        - Web dashboard
+        - Roomote agent task
+        - Slack
+        - Teams
+        - Telegram
+        - Linear
+        - GitHub
+        - GitLab
+        - Gitea
+        - Azure DevOps
+        - MCP
+        - API
+        - Worker or controller
+        - Preview proxy
+        - Setup, deployment, or upgrade
+        - Other
+    validations:
+      required: true
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: Steps to reproduce
+      description: Provide exact steps someone else can follow.
+      placeholder: |
+        1. Start from...
+        2. Configure...
+        3. Trigger...
+        4. Observe...
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+      description: What should have happened?
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual behavior
+      description: What happened instead?
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Roomote version
+      description: Commit SHA, release version, or Docker image tag.
+      placeholder: "Example: main@abcdef0 or ghcr.io/roocodeinc/roomote:..."
+    validations:
+      required: true
+  - type: dropdown
+    id: install-method
+    attributes:
+      label: Installation method
+      options:
+        - Docker Compose
+        - Kubernetes
+        - Source checkout / development
+        - Other
+    validations:
+      required: true
+  - type: textarea
+    id: deployment
+    attributes:
+      label: Deployment context
+      description: Describe the self-hosted environment.
+      placeholder: |
+        Host OS / architecture:
+        Single machine, VM, Kubernetes, or other:
+        Postgres:
+        Redis:
+        Object storage:
+        Public URL / reverse proxy:
+        Compute provider:
+    validations:
+      required: true
+  - type: textarea
+    id: diagnostics
+    attributes:
+      label: Diagnostics output
+      description: If available, paste output from the Roomote diagnostics page or command. Redact secrets and private data.
+      placeholder: |
+        Roomote version:
+        Install method:
+        Public URL:
+        Database reachable:
+        Redis reachable:
+        Worker heartbeat:
+        Controller heartbeat:
+        Migration status:
+        Queue depth:
+        Recent failed jobs:
+    validations:
+      required: false
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs, screenshots, task IDs, or job IDs
+      description: Include the smallest useful excerpt around the failure.
+      render: shell
+    validations:
+      required: false
+  - type: textarea
+    id: notes
+    attributes:
+      label: Additional context
+      description: Include recent upgrades, config changes, workarounds tried, or links to related issues.
+    validations:
+      required: false

@@ -1,0 +1,19 @@
+{
+  "editor.tabSize": 2,
+  "editor.detectIndentation": false,
+  "editor.formatOnSave": false,
+
+  "search.exclude": {
+    "pnpm-lock.yaml": true
+  },
+
+  "typescript.tsdk": "node_modules/typescript/lib",
+  "typescript.enablePromptUseWorkspaceTsdk": true,
+  "typescript.preferences.preferTypeOnlyAutoImports": true,
+
+  "testing.automaticallyOpenTestResults": "neverOpen",
+
+  "prettier.enable": true,
+
+  "vitest.disableWorkspaceWarning": true
+}

@@ -1,0 +1,194 @@
+name: roomote
+
+# One shared application image ships web, api, controller, bullmq,
+# preview-proxy, and the db-migrate one-shot. db-migrate owns the build (it
+# runs first); every other service runs the same image with a different
+# entrypoint-dispatcher command (see .docker/app/entrypoint.sh).
+x-roomote-app-image: &roomote-app-image roomote-app:self-host
+
+x-roomote-env: &roomote-env
+  NODE_ENV: development
+  APP_ENV: development
+  ROOMOTE_DOCKER_LOAD_ENV_FILE: 'false'
+  HOST: 0.0.0.0
+  DATABASE_URL: postgres://postgres:password@postgres:5432/roomote_development
+  REDIS_URL: redis://redis:6379
+  S3_ENDPOINT: ${S3_ENDPOINT:-http://minio:9000}
+  S3_PRESIGN_ENDPOINT: ${S3_PRESIGN_ENDPOINT:-http://minio:9000}
+  S3_REGION: ${S3_REGION:-us-east-1}
+  S3_ACCESS_KEY_ID: ${S3_ACCESS_KEY_ID:-roomote}
+  S3_SECRET_ACCESS_KEY: ${S3_SECRET_ACCESS_KEY:-roomote-local-artifacts-password}
+  S3_BUCKET_ARTIFACTS: ${S3_BUCKET_ARTIFACTS:-roomote-artifacts}
+  ROOMOTE_APP_URL: ${ROOMOTE_PUBLIC_URL:-http://localhost:13000}
+  TRPC_URL: http://api:3001
+  PREVIEW_PROXY_BASE_URL: ${PREVIEW_PROXY_BASE_URL:-http://localhost:18081}
+  PREVIEW_DOMAINS: ${PREVIEW_DOMAINS:-localhost,127.0.0.1,roomotepreview.localhost}
+  ROOMOTE_PUBLIC_URL: ${ROOMOTE_PUBLIC_URL:-}
+  ROOMOTE_ALLOWED_EMAILS: ${ROOMOTE_ALLOWED_EMAILS:-}
+  ROOMOTE_AUTH_SLACK_CLIENT_ID: ${ROOMOTE_AUTH_SLACK_CLIENT_ID:-}
+  ROOMOTE_AUTH_SLACK_CLIENT_SECRET: ${ROOMOTE_AUTH_SLACK_CLIENT_SECRET:-}
+  ROOMOTE_MODEL: ${ROOMOTE_MODEL:-}
+  ROOMOTE_SMALL_MODEL: ${ROOMOTE_SMALL_MODEL:-}
+  ROOMOTE_CODE_REVIEW_MODEL: ${ROOMOTE_CODE_REVIEW_MODEL:-}
+  ROOMOTE_EXPLORE_MODEL: ${ROOMOTE_EXPLORE_MODEL:-}
+  ROOMOTE_MODEL_ENV_KEYS: ${ROOMOTE_MODEL_ENV_KEYS:-}
+  CUSTOM_PROVIDER_API_KEY: ${CUSTOM_PROVIDER_API_KEY:-}
+  OPENROUTER_API_KEY: ${OPENROUTER_API_KEY:-}
+  AI_GATEWAY_API_KEY: ${AI_GATEWAY_API_KEY:-}
+  OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+  ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+  GEMINI_API_KEY: ${GEMINI_API_KEY:-}
+  GOOGLE_GENERATIVE_AI_API_KEY: ${GOOGLE_GENERATIVE_AI_API_KEY:-}
+  AWS_BEARER_TOKEN_BEDROCK: ${AWS_BEARER_TOKEN_BEDROCK:-}
+  AWS_REGION: ${AWS_REGION:-}
+  GOOGLE_APPLICATION_CREDENTIALS: ${GOOGLE_APPLICATION_CREDENTIALS:-}
+  GOOGLE_VERTEX_PROJECT: ${GOOGLE_VERTEX_PROJECT:-}
+  GOOGLE_VERTEX_LOCATION: ${GOOGLE_VERTEX_LOCATION:-}
+  MISTRAL_API_KEY: ${MISTRAL_API_KEY:-}
+  MOONSHOT_API_KEY: ${MOONSHOT_API_KEY:-}
+  MINIMAX_API_KEY: ${MINIMAX_API_KEY:-}
+  OPENCODE_API_KEY: ${OPENCODE_API_KEY:-}
+  BASETEN_API_KEY: ${BASETEN_API_KEY:-}
+  TOGETHER_API_KEY: ${TOGETHER_API_KEY:-}
+  GITHUB_APP_ID: ${GITHUB_APP_ID:-}
+  GITHUB_APP_PRIVATE_KEY: ${GITHUB_APP_PRIVATE_KEY:-}
+  GITHUB_CLIENT_ID: ${GITHUB_CLIENT_ID:-}
+  GITHUB_CLIENT_SECRET: ${GITHUB_CLIENT_SECRET:-}
+  GITHUB_WEBHOOK_SECRET: ${GITHUB_WEBHOOK_SECRET:-}
+  SLACK_APP_ID: ${SLACK_APP_ID:-}
+  SLACK_CLIENT_ID: ${SLACK_CLIENT_ID:-}
+  SLACK_CLIENT_SECRET: ${SLACK_CLIENT_SECRET:-}
+  SLACK_SIGNING_SECRET: ${SLACK_SIGNING_SECRET:-}
+  TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN:-}
+  TELEGRAM_WEBHOOK_SECRET: ${TELEGRAM_WEBHOOK_SECRET:-}
+  TELEGRAM_BOT_USERNAME: ${TELEGRAM_BOT_USERNAME:-}
+  LINEAR_CLIENT_ID: ${LINEAR_CLIENT_ID:-}
+  LINEAR_CLIENT_SECRET: ${LINEAR_CLIENT_SECRET:-}
+  LINEAR_WEBHOOK_SECRET: ${LINEAR_WEBHOOK_SECRET:-}
+  NEXT_PUBLIC_GITHUB_APP_SLUG: ${NEXT_PUBLIC_GITHUB_APP_SLUG:-}
+  SETUP_TOKEN: ${SETUP_TOKEN:-}
+  DEFAULT_COMPUTE_PROVIDER: ${DEFAULT_COMPUTE_PROVIDER:-docker}
+
+x-roomote-service: &roomote-service
+  restart: unless-stopped
+  depends_on:
+    postgres:
+      condition: service_healthy
+    redis:
+      condition: service_started
+    minio-init:
+      condition: service_completed_successfully
+    db-migrate:
+      condition: service_completed_successfully
+  environment:
+    <<: *roomote-env
+
+services:
+  db-migrate:
+    restart: 'no'
+    container_name: roomote-db-migrate
+    image: *roomote-app-image
+    build:
+      context: .
+      dockerfile: .docker/app/Dockerfile
+      args:
+        APP_ENV: development
+        RELEASE_VERSION: ${RELEASE_VERSION:-self-host-local}
+    environment:
+      <<: *roomote-env
+    depends_on:
+      postgres:
+        condition: service_healthy
+    command: ['db-migrate']
+
+  web:
+    <<: *roomote-service
+    container_name: roomote-web
+    image: *roomote-app-image
+    command: ['web']
+    # Publish app ports to loopback only. Standalone self-host is meant to sit
+    # behind a reverse proxy on the same host (or the production Caddy overlay,
+    # which resets these to none); binding to all interfaces would expose the
+    # web app, API, queue dashboard, and preview proxy directly.
+    ports:
+      - '127.0.0.1:13000:3000'
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_started
+      minio-init:
+        condition: service_completed_successfully
+      db-migrate:
+        condition: service_completed_successfully
+      api:
+        condition: service_started
+    environment:
+      <<: *roomote-env
+      NODE_ENV: production
+
+  api:
+    <<: *roomote-service
+    container_name: roomote-api
+    image: *roomote-app-image
+    command: ['api']
+    # Reachable from task worker containers (worker -> API over TRPC_URL).
+    networks: [default, worker]
+    environment:
+      <<: *roomote-env
+      PORT: 3001
+    ports:
+      - '127.0.0.1:13001:3001'
+
+  controller:
+    <<: *roomote-service
+    container_name: roomote-controller
+    image: *roomote-app-image
+    command: ['controller']
+    # Spawns and reaches task worker containers on the worker network.
+    networks: [default, worker]
+    stop_grace_period: 7m
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_started
+      minio-init:
+        condition: service_completed_successfully
+      db-migrate:
+        condition: service_completed_successfully
+      api:
+        condition: service_started
+
+  bullmq:
+    <<: *roomote-service
+    container_name: roomote-bullmq
+    image: *roomote-app-image
+    command: ['bullmq']
+    environment:
+      <<: *roomote-env
+      PORT: 3002
+    ports:
+      - '127.0.0.1:13002:3002'
+
+  preview-proxy:
+    <<: *roomote-service
+    container_name: roomote-preview-proxy
+    image: *roomote-app-image
+    command: ['preview-proxy']
+    # Proxies preview traffic into task worker containers.
+    networks: [default, worker]
+    environment:
+      <<: *roomote-env
+      PORT: 8081
+    ports:
+      - '127.0.0.1:18081:8081'
+
+networks:
+  # Task worker containers (docker compute provider) join only this network
+  # via DOCKER_WORKER_NETWORK, so a task sandbox can reach the API, controller,
+  # and preview-proxy but not Postgres, Redis, or MinIO. The default network is
+  # implicit (roomote_default) and carries the datastores.
+  worker:
+    name: roomote_worker
+    driver: bridge

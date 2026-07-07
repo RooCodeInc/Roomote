@@ -1,0 +1,72 @@
+---
+title: Docker
+icon: 'https://api.iconify.design/simple-icons:docker.svg?color=currentColor'
+description: Run Roomote task sandboxes as Docker containers on the same host as the deployment.
+---
+
+Docker is the simplest compute provider for local development and trusted
+single-host self-hosting. Roomote starts one worker container per task, connects
+it to the configured Docker network, streams logs back to the task view, and
+stops the container when the task is finished.
+
+## When to use Docker
+
+Use Docker when:
+
+- you are developing Roomote locally
+- you are trying Roomote on one trusted host
+- task volume is modest enough for the host machine
+- you want the fewest external compute accounts and credentials
+
+Move to a hosted provider when multiple users run heavier tasks, when task
+work should not compete with the Roomote server, or when you need snapshot
+resume support.
+
+## Configuration
+
+Docker does not need provider API credentials. Select Docker during setup or
+from **Settings > Compute**.
+
+Common env vars:
+
+```sh
+DEFAULT_COMPUTE_PROVIDER=docker
+DOCKER_WORKER_IMAGE=roomote-worker:local
+# Optional: defaults to the host architecture (linux/amd64 or linux/arm64)
+DOCKER_WORKER_PLATFORM=linux/amd64
+DOCKER_WORKER_NETWORK=roomote_worker
+DOCKER_WORKER_RELEASE_PATH=/roomote/releases/worker-current.tar.gz
+```
+
+Local development builds `roomote-worker:local` automatically. Self-hosted
+Compose deployments normally use `docker-compose.compute-docker.yml`, which
+sets the worker image, platform, network, and release path for sibling worker
+containers.
+
+For production deployments, prefer an immutable registry-qualified worker image
+tag when workers need a published image instead of a local tag.
+
+## Security notes
+
+Docker compute requires the Roomote controller to create and manage worker
+containers. Treat the Docker host and Docker socket as trusted infrastructure.
+Do not use Docker compute as a multi-tenant isolation boundary for untrusted
+operators or repositories.
+
+## Verify setup
+
+1. select Docker as the compute provider
+2. start a small task from an environment
+3. confirm the task can clone the repository and run a simple command
+4. open task logs and verify output streams back to Roomote
+5. check that the worker container stops after the task completes
+
+## Common issues
+
+- **The worker image is missing.** Run the local dev server again, or publish
+  and configure a worker image for self-hosted production.
+- **The task cannot reach Roomote services.** Check `DOCKER_WORKER_NETWORK` and
+  the Compose network used by the API and controller.
+- **Tasks slow down the app.** Docker tasks share the deployment host's CPU,
+  memory, disk, and network. Use hosted compute or a larger host for heavier
+  workloads.

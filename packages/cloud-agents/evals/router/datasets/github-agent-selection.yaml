@@ -1,0 +1,456 @@
+# GitHub Agent Selection test cases for LLM routing evaluation
+# These cover the 4-way classification for GitHub-sourced tasks: Fixer, PrReviewer, Explainer, Planner
+
+# --- Fixer cases ---
+
+- description: "GitHub issue - explicit fix request"
+  vars:
+    context: |
+      **Task Description**:
+      @roomote fix the login page crash when password is empty
+
+      **Source**: GitHub
+      **Repository**: acme-corp/web-frontend
+      **Title**: Login page crashes on empty password
+      **Comment**: @roomote fix the login page crash when password is empty
+
+      **Available Agents**:
+      - Fixer [id: agent-fixer-1]
+      - PrReviewer [id: agent-reviewer-1]
+      - Explainer [id: agent-explainer-1]
+      - Planner [id: agent-planner-1]
+
+      **Available Repositories**:
+      - acme-corp/web-frontend: React frontend dashboard
+      - acme-corp/api-server: Node.js API backend
+      - acme-corp/shared-types: Shared TypeScript types
+    expectedAgentId: "agent-fixer-1"
+  assert:
+    - type: javascript
+      value: file://assertions/routing-assertions.ts:isValidRoutingJson
+
+- description: "GitHub issue - bug report without fix keyword"
+  vars:
+    context: |
+      **Task Description**:
+      @roomote the checkout page is throwing a 500 error after the latest deploy
+
+      **Source**: GitHub
+      **Repository**: acme-corp/web-frontend
+      **Title**: 500 error on checkout page
+      **Comment**: @roomote the checkout page is throwing a 500 error after the latest deploy
+
+      **Available Agents**:
+      - Fixer [id: agent-fixer-1]
+      - PrReviewer [id: agent-reviewer-1]
+      - Explainer [id: agent-explainer-1]
+      - Planner [id: agent-planner-1]
+
+      **Available Repositories**:
+      - acme-corp/web-frontend: React frontend dashboard
+      - acme-corp/api-server: Node.js API backend
+      - acme-corp/shared-types: Shared TypeScript types
+    expectedAgentId: "agent-fixer-1"
+  assert:
+    - type: javascript
+      value: file://assertions/routing-assertions.ts:isValidRoutingJson
+
+- description: "GitHub PR - implement request"
+  vars:
+    context: |
+      **Task Description**:
+      @roomote implement input validation for the email field
+
+      **Source**: GitHub
+      **Repository**: acme-corp/web-frontend
+      **Title**: Add email validation to signup form
+      **Comment**: @roomote implement input validation for the email field
+
+      **Available Agents**:
+      - Fixer [id: agent-fixer-1]
+      - PrReviewer [id: agent-reviewer-1]
+      - Explainer [id: agent-explainer-1]
+      - Planner [id: agent-planner-1]
+
+      **Available Repositories**:
+      - acme-corp/web-frontend: React frontend dashboard
+      - acme-corp/api-server: Node.js API backend
+      - acme-corp/shared-types: Shared TypeScript types
+    expectedAgentId: "agent-fixer-1"
+  assert:
+    - type: javascript
+      value: file://assertions/routing-assertions.ts:isValidRoutingJson
+
+- description: "GitHub issue - update/refactor request"
+  vars:
+    context: |
+      **Task Description**:
+      @roomote refactor the authentication middleware to use the new JWT library
+
+      **Source**: GitHub
+      **Repository**: acme-corp/api-server
+      **Title**: Migrate auth middleware to new JWT library
+      **Comment**: @roomote refactor the authentication middleware to use the new JWT library
+
+      **Available Agents**:
+      - Fixer [id: agent-fixer-1]
+      - PrReviewer [id: agent-reviewer-1]
+      - Explainer [id: agent-explainer-1]
+      - Planner [id: agent-planner-1]
+
+      **Available Repositories**:
+      - acme-corp/web-frontend: React frontend dashboard
+      - acme-corp/api-server: Node.js API backend
+      - acme-corp/shared-types: Shared TypeScript types
+    expectedAgentId: "agent-fixer-1"
+  assert:
+    - type: javascript
+      value: file://assertions/routing-assertions.ts:isValidRoutingJson
+
+- description: "GitHub issue - vague problem report"
+  vars:
+    context: |
+      **Task Description**:
+      @roomote something is broken in the user dashboard, customers are complaining
+
+      **Source**: GitHub
+      **Repository**: acme-corp/web-frontend
+      **Title**: User dashboard issues
+      **Comment**: @roomote something is broken in the user dashboard, customers are complaining
+
+      **Available Agents**:
+      - Fixer [id: agent-fixer-1]
+      - PrReviewer [id: agent-reviewer-1]
+      - Explainer [id: agent-explainer-1]
+      - Planner [id: agent-planner-1]
+
+      **Available Repositories**:
+      - acme-corp/web-frontend: React frontend dashboard
+      - acme-corp/api-server: Node.js API backend
+      - acme-corp/shared-types: Shared TypeScript types
+    expectedAgentId: "agent-fixer-1"
+  assert:
+    - type: javascript
+      value: file://assertions/routing-assertions.ts:isValidRoutingJson
+
+- description: "GitHub PR - address feedback"
+  vars:
+    context: |
+      **Task Description**:
+      @roomote please address the review comments and fix the failing tests
+
+      **Source**: GitHub
+      **Repository**: acme-corp/api-server
+      **Title**: Add rate limiting to API endpoints
+      **Comment**: @roomote please address the review comments and fix the failing tests
+
+      **Available Agents**:
+      - Fixer [id: agent-fixer-1]
+      - PrReviewer [id: agent-reviewer-1]
+      - Explainer [id: agent-explainer-1]
+      - Planner [id: agent-planner-1]
+
+      **Available Repositories**:
+      - acme-corp/web-frontend: React frontend dashboard
+      - acme-corp/api-server: Node.js API backend
+      - acme-corp/shared-types: Shared TypeScript types
+    expectedAgentId: "agent-fixer-1"
+  assert:
+    - type: javascript
+      value: file://assertions/routing-assertions.ts:isValidRoutingJson
+
+# --- PrReviewer cases ---
+
+- description: "GitHub PR - explicit review request"
+  vars:
+    context: |
+      **Task Description**:
+      @roomote review this PR
+
+      **Source**: GitHub
+      **Repository**: acme-corp/api-server
+      **Title**: Refactor database connection pooling
+      **Comment**: @roomote review this PR
+
+      **Available Agents**:
+      - Fixer [id: agent-fixer-1]
+      - PrReviewer [id: agent-reviewer-1]
+      - Explainer [id: agent-explainer-1]
+      - Planner [id: agent-planner-1]
+
+      **Available Repositories**:
+      - acme-corp/web-frontend: React frontend dashboard
+      - acme-corp/api-server: Node.js API backend
+      - acme-corp/shared-types: Shared TypeScript types
+    expectedAgentId: "agent-reviewer-1"
+  assert:
+    - type: javascript
+      value: file://assertions/routing-assertions.ts:isValidRoutingJson
+
+- description: "GitHub PR - review with context"
+  vars:
+    context: |
+      **Task Description**:
+      @roomote can you review the changes in this PR? I want to make sure the error handling is solid.
+
+      **Source**: GitHub
+      **Repository**: acme-corp/api-server
+      **Title**: Improve error handling in signup flow
+      **Comment**: @roomote can you review the changes in this PR? I want to make sure the error handling is solid.
+
+      **Available Agents**:
+      - Fixer [id: agent-fixer-1]
+      - PrReviewer [id: agent-reviewer-1]
+      - Explainer [id: agent-explainer-1]
+      - Planner [id: agent-planner-1]
+
+      **Available Repositories**:
+      - acme-corp/web-frontend: React frontend dashboard
+      - acme-corp/api-server: Node.js API backend
+      - acme-corp/shared-types: Shared TypeScript types
+    expectedAgentId: "agent-reviewer-1"
+  assert:
+    - type: javascript
+      value: file://assertions/routing-assertions.ts:isValidRoutingJson
+
+- description: "GitHub PR - implicit review (take a look)"
+  vars:
+    context: |
+      **Task Description**:
+      @roomote take a look at this and let me know if the approach looks good
+
+      **Source**: GitHub
+      **Repository**: acme-corp/shared-types
+      **Title**: Add generics to API response types
+      **Comment**: @roomote take a look at this and let me know if the approach looks good
+
+      **Available Agents**:
+      - Fixer [id: agent-fixer-1]
+      - PrReviewer [id: agent-reviewer-1]
+      - Explainer [id: agent-explainer-1]
+      - Planner [id: agent-planner-1]
+
+      **Available Repositories**:
+      - acme-corp/web-frontend: React frontend dashboard
+      - acme-corp/api-server: Node.js API backend
+      - acme-corp/shared-types: Shared TypeScript types
+    expectedAgentId: "agent-reviewer-1"
+  assert:
+    - type: javascript
+      value: file://assertions/routing-assertions.ts:isValidRoutingJson
+
+- description: "GitHub PR - assess code quality"
+  vars:
+    context: |
+      **Task Description**:
+      @roomote check this PR for any issues before we merge
+
+      **Source**: GitHub
+      **Repository**: acme-corp/web-frontend
+      **Title**: Migrate to React Server Components
+      **Comment**: @roomote check this PR for any issues before we merge
+
+      **Available Agents**:
+      - Fixer [id: agent-fixer-1]
+      - PrReviewer [id: agent-reviewer-1]
+      - Explainer [id: agent-explainer-1]
+      - Planner [id: agent-planner-1]
+
+      **Available Repositories**:
+      - acme-corp/web-frontend: React frontend dashboard
+      - acme-corp/api-server: Node.js API backend
+      - acme-corp/shared-types: Shared TypeScript types
+    expectedAgentId: "agent-reviewer-1"
+  assert:
+    - type: javascript
+      value: file://assertions/routing-assertions.ts:isValidRoutingJson
+
+# --- Explainer cases ---
+
+- description: "GitHub PR - explain how code works"
+  vars:
+    context: |
+      **Task Description**:
+      @roomote explain how the new caching middleware works
+
+      **Source**: GitHub
+      **Repository**: acme-corp/api-server
+      **Title**: Add Redis caching layer
+      **Comment**: @roomote explain how the new caching middleware works
+
+      **Available Agents**:
+      - Fixer [id: agent-fixer-1]
+      - PrReviewer [id: agent-reviewer-1]
+      - Explainer [id: agent-explainer-1]
+      - Planner [id: agent-planner-1]
+
+      **Available Repositories**:
+      - acme-corp/web-frontend: React frontend dashboard
+      - acme-corp/api-server: Node.js API backend
+      - acme-corp/shared-types: Shared TypeScript types
+    expectedAgentId: "agent-explainer-1"
+  assert:
+    - type: javascript
+      value: file://assertions/routing-assertions.ts:isValidRoutingJson
+
+- description: "GitHub issue - understand behavior"
+  vars:
+    context: |
+      **Task Description**:
+      @roomote can you walk me through how the rate limiter handles burst traffic?
+
+      **Source**: GitHub
+      **Repository**: acme-corp/api-server
+      **Title**: Rate limiter behavior under load
+      **Comment**: @roomote can you walk me through how the rate limiter handles burst traffic?
+
+      **Available Agents**:
+      - Fixer [id: agent-fixer-1]
+      - PrReviewer [id: agent-reviewer-1]
+      - Explainer [id: agent-explainer-1]
+      - Planner [id: agent-planner-1]
+
+      **Available Repositories**:
+      - acme-corp/web-frontend: React frontend dashboard
+      - acme-corp/api-server: Node.js API backend
+      - acme-corp/shared-types: Shared TypeScript types
+    expectedAgentId: "agent-explainer-1"
+  assert:
+    - type: javascript
+      value: file://assertions/routing-assertions.ts:isValidRoutingJson
+
+- description: "GitHub PR - investigate what changed"
+  vars:
+    context: |
+      **Task Description**:
+      @roomote what changed in this PR that could affect the websocket connections?
+
+      **Source**: GitHub
+      **Repository**: acme-corp/api-server
+      **Title**: Upgrade socket.io to v5
+      **Comment**: @roomote what changed in this PR that could affect the websocket connections?
+
+      **Available Agents**:
+      - Fixer [id: agent-fixer-1]
+      - PrReviewer [id: agent-reviewer-1]
+      - Explainer [id: agent-explainer-1]
+      - Planner [id: agent-planner-1]
+
+      **Available Repositories**:
+      - acme-corp/web-frontend: React frontend dashboard
+      - acme-corp/api-server: Node.js API backend
+      - acme-corp/shared-types: Shared TypeScript types
+    expectedAgentId: "agent-explainer-1"
+  assert:
+    - type: javascript
+      value: file://assertions/routing-assertions.ts:isValidRoutingJson
+
+# --- Planner cases ---
+
+- description: "GitHub issue - architecture planning"
+  vars:
+    context: |
+      **Task Description**:
+      @roomote how should we approach migrating this service from REST to GraphQL?
+
+      **Source**: GitHub
+      **Repository**: acme-corp/api-server
+      **Title**: Evaluate REST to GraphQL migration
+      **Comment**: @roomote how should we approach migrating this service from REST to GraphQL?
+
+      **Available Agents**:
+      - Fixer [id: agent-fixer-1]
+      - PrReviewer [id: agent-reviewer-1]
+      - Explainer [id: agent-explainer-1]
+      - Planner [id: agent-planner-1]
+
+      **Available Repositories**:
+      - acme-corp/web-frontend: React frontend dashboard
+      - acme-corp/api-server: Node.js API backend
+      - acme-corp/shared-types: Shared TypeScript types
+    expectedAgentId: "agent-planner-1"
+  assert:
+    - type: javascript
+      value: file://assertions/routing-assertions.ts:isValidRoutingJson
+
+- description: "GitHub issue - design strategy"
+  vars:
+    context: |
+      **Task Description**:
+      @roomote plan the refactoring strategy for splitting this monolith into separate packages
+
+      **Source**: GitHub
+      **Repository**: acme-corp/api-server
+      **Title**: Monolith decomposition plan
+      **Comment**: @roomote plan the refactoring strategy for splitting this monolith into separate packages
+
+      **Available Agents**:
+      - Fixer [id: agent-fixer-1]
+      - PrReviewer [id: agent-reviewer-1]
+      - Explainer [id: agent-explainer-1]
+      - Planner [id: agent-planner-1]
+
+      **Available Repositories**:
+      - acme-corp/web-frontend: React frontend dashboard
+      - acme-corp/api-server: Node.js API backend
+      - acme-corp/shared-types: Shared TypeScript types
+    expectedAgentId: "agent-planner-1"
+  assert:
+    - type: javascript
+      value: file://assertions/routing-assertions.ts:isValidRoutingJson
+
+# --- Edge cases ---
+
+- description: "GitHub - bare mention, no context"
+  vars:
+    context: |
+      **Task Description**:
+      @roomote
+
+      **Source**: GitHub
+      **Repository**: acme-corp/web-frontend
+      **Title**: Fix login bug
+      **Comment**: @roomote
+
+      **Available Agents**:
+      - Fixer [id: agent-fixer-1]
+      - PrReviewer [id: agent-reviewer-1]
+      - Explainer [id: agent-explainer-1]
+      - Planner [id: agent-planner-1]
+
+      **Available Repositories**:
+      - acme-corp/web-frontend: React frontend dashboard
+      - acme-corp/api-server: Node.js API backend
+      - acme-corp/shared-types: Shared TypeScript types
+    expectedAgentId: "agent-fixer-1"
+  assert:
+    - type: javascript
+      value: file://assertions/routing-assertions.ts:isValidRoutingJson
+    # Bare mention with "Fix login bug" title should default to Fixer
+
+- description: "GitHub - mixed review and fix"
+  vars:
+    context: |
+      **Task Description**:
+      @roomote review this and fix any issues you find
+
+      **Source**: GitHub
+      **Repository**: acme-corp/api-server
+      **Title**: Add input sanitization
+      **Comment**: @roomote review this and fix any issues you find
+
+      **Available Agents**:
+      - Fixer [id: agent-fixer-1]
+      - PrReviewer [id: agent-reviewer-1]
+      - Explainer [id: agent-explainer-1]
+      - Planner [id: agent-planner-1]
+
+      **Available Repositories**:
+      - acme-corp/web-frontend: React frontend dashboard
+      - acme-corp/api-server: Node.js API backend
+      - acme-corp/shared-types: Shared TypeScript types
+    expectedAgentId: "agent-fixer-1"
+  assert:
+    - type: javascript
+      value: file://assertions/routing-assertions.ts:isValidRoutingJson
+    # Action verb "fix" takes priority per the prompt's mixed intent rules

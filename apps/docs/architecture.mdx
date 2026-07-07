@@ -1,0 +1,52 @@
+---
+title: Architecture
+icon: network
+description: A contributor-oriented map of the apps and packages that make up Roomote.
+---
+
+This page is for contributors and operators who need a quick map of the source
+tree. It is intentionally high level. Public docs should explain how to run,
+configure, and use Roomote; deeper implementation contracts and agent-facing
+runbooks live in `.agent-guidance/`.
+
+Roomote is a pnpm + Turborepo monorepo with applications under `apps/` and
+shared libraries under `packages/`.
+
+## Applications
+
+| App                  | Description                                                                          |
+| -------------------- | ------------------------------------------------------------------------------------ |
+| `apps/web`           | Next.js web dashboard for setup, settings, tasks, and review.                        |
+| `apps/docs`          | Mintlify public documentation site published at `docs.roomote.dev`.                  |
+| `apps/api`           | Hono API server: webhooks, MCP and task-control routes, artifact APIs, backend tRPC. |
+| `apps/controller`    | Worker-dispatch control plane: dequeues jobs and launches sandbox workers.           |
+| `apps/worker`        | Task runtime that runs inside each sandbox and executes the agent.                   |
+| `apps/bullmq`        | Background workers and scheduled jobs on BullMQ.                                     |
+| `apps/preview-proxy` | Reverse proxy that exposes live previews from task sandboxes.                        |
+| `apps/dev`           | Local dev CLI that orchestrates the PM2-managed services (`pnpm dev`).               |
+
+## Packages
+
+| Package                                           | Description                                                         |
+| ------------------------------------------------- | ------------------------------------------------------------------- |
+| `packages/cloud-agents`                           | Agent definitions, prompt assembly, routing, workflows, and skills. |
+| `packages/db`                                     | Drizzle ORM schema and migrations.                                  |
+| `packages/sdk`                                    | Shared contract between API, controller, and worker.                |
+| `packages/auth`                                   | Authentication and session handling.                                |
+| `packages/compute-providers`                      | Sandbox compute provider integrations.                              |
+| `packages/github`, `gitlab`, `gitea`, `ado`       | Source-control provider integrations.                               |
+| `packages/slack`, `linear`, `communication`       | Conversation-surface and issue-tracker integrations.                |
+| `packages/redis`, `env`, `types`, `feature-flags` | Shared infrastructure utilities.                                    |
+
+## Request flow
+
+1. A task is created from the web dashboard, Slack, or another entry surface.
+2. The API records it and enqueues work; the controller dequeues and provisions
+   a sandbox with the selected compute provider.
+3. The worker runs inside the sandbox, executes the agent against your
+   repositories, and streams progress back.
+4. Live previews from the sandbox are exposed through the preview proxy, and
+   results are delivered back to the surface that started the task.
+
+For local setup, see [Local development](/local-development). For running a
+deployment, see [Self-hosting](/self-hosting).

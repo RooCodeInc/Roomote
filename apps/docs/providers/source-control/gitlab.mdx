@@ -1,0 +1,114 @@
+---
+title: GitLab
+icon: 'https://api.iconify.design/simple-icons:gitlab.svg?color=currentColor'
+description: Configure GitLab repository sync and merge request webhooks for Roomote.
+---
+
+GitLab support uses a deployment-owned token. There is no self-serve GitLab App
+or OAuth installation flow yet, so an operator provides a GitLab token, syncs
+repositories from Settings, and configures webhooks when review automation is
+needed.
+
+Use `<public-url>` below for your stable public Roomote URL.
+
+## Create a GitLab bot token
+
+Create a dedicated GitLab bot or service-account user and add it to the groups
+or projects Roomote should access. Create an access token for that identity
+with scopes that match the behavior you want:
+
+| Scope | Needed for |
+| ----- | ---------- |
+| `api` | project listing and repository sync through REST |
+| `read_repository` | cloning private repositories over Git-over-HTTPS |
+| `write_repository` | pushing branches or commits from Roomote tasks |
+
+Save the token in setup, deployment env vars, or local `.env.local`:
+
+```sh
+GITLAB_TOKEN=<gitlab-token>
+```
+
+For self-managed GitLab, also set `GITLAB_BASE_URL`.
+
+## Sync repositories
+
+After the token is available, open Settings, go to the Environments page, and
+use the Source Control section's GitLab sync button. Roomote lists the GitLab
+projects visible to the token and stores them as GitLab repository rows.
+
+GitLab-backed tasks clone from the synced repository row, so sync must run
+before launching a GitLab-backed task.
+
+## Configure webhooks
+
+Create a GitLab project or group webhook for merge request events.
+
+Webhook URL:
+
+```text
+<public-url>/api/webhooks/gitlab
+```
+
+Enable:
+
+- **Merge request events**
+
+Preferred verification uses GitLab signed webhook headers. Set a GitLab
+signing token on the webhook and save the same value in Roomote:
+
+```sh
+GITLAB_WEBHOOK_SIGNING_TOKEN=<signing-token>
+```
+
+Legacy secret-token verification is also supported:
+
+```sh
+GITLAB_WEBHOOK_SECRET=<legacy-secret-token>
+```
+
+## Enable merge request comment triggers (recommended)
+
+Users can trigger Roomote tasks by mentioning `@roomote` in merge request
+comments, but only after linking their personal GitLab account in Roomote's
+Personal settings. That linking flow requires a GitLab OAuth application, so
+create one even though the fields are optional:
+
+1. Open **Applications** in GitLab — on the bot account
+   (`/-/user_settings/applications`), a group, or the admin area for a
+   self-managed instance.
+2. Create an application with:
+   - **Name**: `Roomote` (upload the Roomote logo if you want)
+   - **Redirect URI**: `<public-url>/api/auth/oauth2/callback/gitlab`
+   - **Confidential**: enabled
+   - **Scopes**: `read_user` only
+3. Save the generated Application ID and Secret in setup, deployment env vars,
+   or local `.env.local`:
+
+```sh
+GITLAB_CLIENT_ID=<application-id>
+GITLAB_CLIENT_SECRET=<application-secret>
+```
+
+Once configured, a GitLab row appears under Personal settings > Linked
+Accounts, and users who link their account can trigger tasks from merge
+request comments. Without these credentials, automatic merge request review
+still works, but `@roomote` comment mentions reply with account-linking
+instructions instead of starting work.
+
+## Enable review automation
+
+GitLab merge-request reviews use the same Review Code automation targeting
+model as GitHub. After syncing repositories, associate the GitLab repository
+with the intended environment and enable Review Code automation for that target.
+
+Open or reopened merge request events enqueue initial review tasks. Update
+events enqueue sync reviews when GitLab includes `oldrev`, which indicates a
+code-related update.
+
+## Verify setup
+
+1. sync GitLab repositories from Settings
+2. create or update an environment from a synced repository
+3. start a small task and confirm Roomote can clone the repository
+4. open or update a merge request and confirm configured review automation runs

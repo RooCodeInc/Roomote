@@ -1,0 +1,116 @@
+---
+title: GitHub
+icon: 'https://api.iconify.design/simple-icons:github.svg?color=currentColor'
+description: Configure a GitHub App so Roomote can sync repositories, clone code, and work with pull requests.
+---
+
+Use GitHub when your Roomote environments should come from GitHub repositories.
+Roomote uses a GitHub App installation token to sync repositories, clone code,
+push branches, and work with pull requests.
+
+Use `<public-url>` below for your stable public Roomote URL.
+
+## Fast path
+
+Open `/setup`, choose GitHub, and click **Create GitHub App**. Roomote sends
+GitHub a manifest with the callback, webhook, permissions, and events
+preconfigured. After GitHub redirects back, Roomote saves the generated app ID,
+app slug, OAuth client credentials, webhook secret, and private key, then sends
+you to install the app on repositories.
+
+Use the manual steps only when you already have a GitHub App or want to manage
+these values in deployment environment variables yourself.
+
+## Manual GitHub App setup
+
+1. Go to [GitHub App settings](https://github.com/settings/apps/new). For an
+   organization-owned app, use the organization's **Developer settings > GitHub
+   Apps > New GitHub App** page.
+2. Set **GitHub App name** to a unique name.
+3. Keep **Identifying and authorizing users** enabled.
+4. Set **Homepage URL** to `<public-url>`.
+5. Set **Setup URL** to:
+
+```text
+<public-url>/github/callback
+```
+
+6. Check **Redirect on update**.
+7. Set **Callback URL** to:
+
+```text
+<public-url>/github/callback
+```
+
+8. Enable **Expire user authorization tokens**.
+9. Set **Webhook URL** to:
+
+```text
+<public-url>/api/webhooks/github
+```
+
+10. Generate a webhook secret and save the same value in Roomote:
+
+```sh
+openssl rand -hex 32
+```
+
+## Permissions and events
+
+Grant these repository permissions:
+
+- **Contents**: Read and write
+- **Issues**: Read and write
+- **Metadata**: Read-only
+- **Pull requests**: Read and write
+- **Workflows**: Read and write
+
+Subscribe to these events:
+
+- **Installation**
+- **Issue comment**
+- **Pull request**
+- **Pull request review comment**
+- **Push**
+- **Workflow run**
+
+## Save credentials
+
+Copy these values into the `/setup` manual form, deployment env vars, or your
+local `.env.local`:
+
+```sh
+GITHUB_APP_ID=<app-id>
+GITHUB_CLIENT_ID=<client-id>
+GITHUB_CLIENT_SECRET=<client-secret>
+GITHUB_WEBHOOK_SECRET=<webhook-secret>
+GITHUB_APP_PRIVATE_KEY="-----BEGIN RSA PRIVATE KEY-----\n...\n-----END RSA PRIVATE KEY-----"
+```
+
+`NEXT_PUBLIC_GITHUB_APP_SLUG` is optional when your GitHub App slug is not
+`roomote`.
+
+Generate a private key from the app's **Private keys** section. GitHub
+downloads a `.pem` file. Convert it to an escaped single-line value before
+saving it in an env var:
+
+```sh
+awk 'NF {sub(/\r/, ""); printf "%s\\n",$0;}' ~/Downloads/<your-key>.private-key.pem
+```
+
+Install the GitHub App on the repositories Roomote should use. Then sign in,
+complete the GitHub step in `/setup`, and confirm repository sync sees the
+expected repositories.
+
+## Verify setup
+
+1. connect GitHub in setup or Settings
+2. install the app on at least one repository
+3. create or update an environment from that repository
+4. start a small task and confirm Roomote can clone the repository
+5. finish the task and confirm Roomote can push a branch or open a pull request
+
+## URL changes
+
+Keep the public URL stable. If it changes, update both the GitHub App callback
+URL and webhook URL, then restart Roomote with the matching URL.

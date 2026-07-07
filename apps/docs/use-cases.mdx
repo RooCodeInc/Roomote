@@ -1,0 +1,76 @@
+---
+title: What to ask Roomote
+icon: messages-square
+description: Frame asks so Roomote can stay scoped, useful, and reviewable.
+---
+
+Roomote is built for the work that constantly pulls teams out of focus:
+questions, planning, investigations, bugfixes, review follow-up, and
+backlogged improvements.
+
+The best asks give a Roomote agent a clear first milestone. Teams usually start
+with codebase questions and small fixes, then move into bugfixes, PR review,
+and more complex implementation work once the workflow feels natural.
+
+## Good asks
+
+Start with work that is scoped, visible, and easy to verify:
+
+- explain how a part of the codebase works
+- investigate a failing test, flaky preview, or confusing error
+- make a small UI or API change
+- draft a plan for a larger feature
+- review a pull request for regressions
+- apply feedback from a source-control or Linear thread
+- clean up a small maintenance item that keeps falling off the backlog
+
+A good Roomote prompt includes the desired outcome, links to the relevant
+issue or pull request, and any constraints Roomote should respect.
+
+## What to include in the ask
+
+The strongest prompts usually include:
+
+- the outcome you want
+- the repository, environment, file path, issue, or PR Roomote should use
+- any constraints that matter, such as "do not change the API contract"
+- whether you want an explanation, a plan, implementation work, or review
+
+## Ask patterns that work well
+
+| Goal                 | Good prompt shape                                                               |
+| -------------------- | ------------------------------------------------------------------------------- |
+| Understand something | "Explain how this flow works and point to the code that matters."               |
+| Plan work            | "Read this issue and draft the smallest implementation plan that satisfies it." |
+| Investigate          | "Figure out why this test or preview is failing and show what you found."       |
+| Implement            | "Make this small change, run the relevant checks, and open a PR."               |
+| Review               | "Review this PR for regressions and call out anything risky."                   |
+
+## Who uses it
+
+Roomote is meant for the whole team, not just engineers sitting in an IDE.
+
+| Teammate         | Good uses                                                                             |
+| ---------------- | ------------------------------------------------------------------------------------- |
+| Engineers        | Start implementation, fix bugs, investigate failures, review diffs, resolve conflicts |
+| PMs and founders | Ask codebase questions, draft plans, turn backlog ideas into scoped tasks             |
+| Designers        | Request UI fixes, verify previews, ask how a flow is implemented                      |
+| Support and ops  | Investigate customer-reported issues, attach logs, ask for plain-English explanations |
+
+## What makes a task reviewable
+
+Roomote should leave you with enough evidence to decide what happens next:
+
+- the transcript of what it did and why
+- commands, tests, or checks it ran
+- logs and terminal output when relevant
+- screenshots or live previews for UI work
+- code diffs and artifacts
+- a pull request or clear next step when code changed
+
+## When to keep the task smaller
+
+Break work down when the ask spans many systems, has unclear product
+requirements, or needs human judgment before implementation. Roomote is useful
+for getting complex work started, but the best handoffs still give it a clear
+first milestone.

@@ -1,0 +1,50 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+script_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+
+usage() {
+  cat <<'EOF'
+usage: roomote-deploy <command> [options]
+
+Commands:
+  create    Provision a VM and start the Roomote stack
+  upgrade   Pull and run a new immutable image tag
+  destroy   Destroy the Terraform-managed deployment
+  backup    Dump Postgres data from a deployment
+  restore   Restore a SQL dump into a deployment
+EOF
+}
+
+if [ "$#" -lt 1 ]; then
+  usage
+  exit 2
+fi
+
+command="$1"
+shift
+
+case "$command" in
+  create)
+    exec "$script_dir/deploy.sh" "$@"
+    ;;
+  upgrade)
+    exec "$script_dir/upgrade.sh" "$@"
+    ;;
+  destroy | delete)
+    exec "$script_dir/destroy.sh" "$@"
+    ;;
+  backup)
+    exec "$script_dir/backup.sh" "$@"
+    ;;
+  restore)
+    exec "$script_dir/restore.sh" "$@"
+    ;;
+  help | --help | -h)
+    usage
+    ;;
+  *)
+    usage >&2
+    exit 2
+    ;;
+esac

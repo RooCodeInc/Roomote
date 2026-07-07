@@ -1,0 +1,76 @@
+# See https://help.github.com/articles/ignoring-files/ for more about ignoring files.
+
+# dependencies
+node_modules
+
+# misc
+.DS_Store
+*.pem
+Thumbs.db
+__pycache__/
+
+# .env
+.env.local
+.env.local.*
+.env.development
+.env.preview
+.env.production
+.env.test
+
+# deployment state
+deploy/state/
+deploy/providers/**/.terraform/
+deploy/providers/**/*.tfstate
+deploy/providers/**/*.tfstate.backup
+
+# turbo
+.turbo
+
+# build tooling scratch files
+**/tsup.config.bundled_*.mjs
+
+# vercel
+.vercel
+
+# docker
+**/.docker/data
+**/.docker/logs
+
+# logs
+*.log
+
+# project mcp config
+.roomote/mcp.json
+
+# codebase indexing
+.qdrant/
+
+# PRDs
+plans/
+
+# releases
+worker-*.tar.gz
+worker-*.tar.gz.sha256
+worker-vlocal-*
+worker-vnested-*
+codex-acp-v*.tar.gz
+codex-acp-v*.tar.gz.sha256
+codex-acp-v*.zip
+codex-acp-v*.zip.sha256
+releases/
+
+# promptfoo eval results
+packages/cloud-agents/evals/**/results/
+packages/cloud-agents/results/eval-results.json
+
+# local agent notes
+AGENTS.local.md
+
+# claude skills (tracked via .agents/, not through .claude symlink)
+.claude/skills/
+
+# temporary agent worktree checkouts (.agents/skills stays tracked)
+.agents/worktrees/
+
+# e2e
+artifacts/ci-e2e/

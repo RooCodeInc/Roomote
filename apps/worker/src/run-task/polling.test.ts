@@ -1,0 +1,195 @@
+import { CloudTaskType } from '@roomote/types';
+
+import type { HarnessLogger } from '../logging';
+import { startPolling } from './polling';
+import type { ListenerOptions, RunTaskState } from './types';
+
+const {
+  mockCreateCancelInterval,
+  mockCreateCommunicationMessageInterval,
+  mockCreateSlackMessageInterval,
+  mockCreateLinearMessageInterval,
+  mockCreateGitHubTokenRefreshInterval,
+} = vi.hoisted(() => ({
+  mockCreateCancelInterval: vi.fn(),
+  mockCreateCommunicationMessageInterval: vi.fn(),
+  mockCreateSlackMessageInterval: vi.fn(),
+  mockCreateLinearMessageInterval: vi.fn(),
+  mockCreateGitHubTokenRefreshInterval: vi.fn(),
+}));
+
+vi.mock('./polling/index', () => ({
+  createCancelInterval: mockCreateCancelInterval,
+  createCommunicationMessageInterval: mockCreateCommunicationMessageInterval,
+  createSlackMessageInterval: mockCreateSlackMessageInterval,
+  createLinearMessageInterval: mockCreateLinearMessageInterval,
+  createGitHubTokenRefreshInterval: mockCreateGitHubTokenRefreshInterval,
+}));
+
+function createLogger(): HarnessLogger {
+  return {
+    cloudJobId: 42,
+    filePath: '/tmp/harness.log',
+    log: vi.fn(),
+    info: vi.fn(),
+    warn: vi.fn(),
+    error: vi.fn(),
+  };
+}
+
+function createState(): RunTaskState {
+  return {
+    sessionId: 'task-1',
+    lastMessageAt: undefined,
+    lastActivityAt: undefined,
+    taskFinishedAt: undefined,
+    taskAbortedAt: undefined,
+    clientDisconnectedAt: undefined,
+    cancelTriggeredAt: undefined,
+    lastErrorMessage: undefined,
+    cancelInterval: undefined,
+    slackMessageInterval: undefined,
+    slackMessageCleanup: undefined,
+    linearMessageInterval: undefined,
+    githubTokenRefreshInterval: undefined,
+  };
+}
+
+function createListenerOptions(
+  cloudJob: Partial<ListenerOptions['cloudJob']>,
+): ListenerOptions {
+  return {
+    cloudJob: {
+      id: 42,
+      type: CloudTaskType.StandardTask,
+      slackThreadTs: null,
+      linearSessionId: null,
+      ...cloudJob,
+    } as ListenerOptions['cloudJob'],
+    state: createState(),
+    logger: createLogger(),
+    workingDirectory: '/tmp/workspace',
+    cancelTask: vi.fn(),
+    sendPrompt: vi.fn<ListenerOptions['sendPrompt']>(() => true),
+    answerUserInputRequest: vi.fn<ListenerOptions['answerUserInputRequest']>(
+      () => true,
+    ),
+    prepareActorScopedTurn: vi.fn(async () => true),
+  };
+}
+
+describe('startPolling', () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+    vi.clearAllMocks();
+    mockCreateCancelInterval.mockImplementation(() =>
+      setInterval(() => {}, 1_000),
+    );
+    mockCreateCommunicationMessageInterval.mockImplementation(() =>
+      setInterval(() => {}, 1_000),
+    );
+    mockCreateSlackMessageInterval.mockImplementation(() =>
+      setInterval(() => {}, 1_000),
+    );
+    mockCreateLinearMessageInterval.mockImplementation(() =>
+      setInterval(() => {}, 1_000),
+    );
+    mockCreateGitHubTokenRefreshInterval.mockImplementation(() =>
+      setInterval(() => {}, 1_000),
+    );
+  });
+
+  afterEach(() => {
+    vi.clearAllTimers();
+    vi.useRealTimers();
+  });
+
+  it('starts Slack message polling for any Slack-linked cloud job', () => {
+    const options = createListenerOptions({
+      type: CloudTaskType.SuggestedTasks,
+      slackThreadTs: '111.222',
+    });
+
+    startPolling(options);
+
+    expect(mockCreateSlackMessageInterval).toHaveBeenCalledWith(options);
+    expect(options.state.slackMessageInterval).toBeDefined();
+  });
+
+  it('starts Slack message polling for jobs with Slack channel metadata before a thread exists', () => {
+    const options = createListenerOptions({
+      type: CloudTaskType.SuggestedTasks,
+      slackThreadTs: null,
+      payload: {
+        repo: 'owner/repo',
+        description: 'Suggest follow-up tasks',
+        slackChannel: 'C123',
+      },
+    });
+
+    startPolling(options);
+
+    expect(mockCreateSlackMessageInterval).toHaveBeenCalledWith(options);
+    expect(options.state.slackMessageInterval).toBeDefined();
+  });
+
+  it('does not start Slack message polling without Slack thread or channel linkage', () => {
+    const options = createListenerOptions({
+      type: CloudTaskType.SuggestedTasks,
+      slackThreadTs: null,
+      payload: {
+        repo: 'owner/repo',
+        description: 'Suggest follow-up tasks',
+      },
+    });
+
+    startPolling(options);
+
+    expect(mockCreateSlackMessageInterval).not.toHaveBeenCalled();
+    expect(options.state.slackMessageInterval).toBeUndefined();
+  });
+
+  it('starts generic communication polling for Teams-linked cloud jobs', () => {
+    const options = createListenerOptions({
+      type: CloudTaskType.StandardTask,
+      payload: {
+        repo: 'owner/repo',
+        description: 'Teams-originated task',
+        communicationProvider: 'teams',
+        communicationChannelId: '19:channel',
+        communicationThreadId: 'activity-root',
+      },
+    });
+
+    startPolling(options);
+
+    expect(mockCreateSlackMessageInterval).not.toHaveBeenCalled();
+    expect(mockCreateCommunicationMessageInterval).toHaveBeenCalledWith({
+      provider: 'teams',
+      options,
+    });
+    expect(options.state.communicationMessageIntervals?.teams).toBeDefined();
+  });
+
+  it('starts generic communication polling for Telegram-linked cloud jobs', () => {
+    const options = createListenerOptions({
+      type: CloudTaskType.StandardTask,
+      payload: {
+        repo: 'owner/repo',
+        description: 'Telegram-originated task',
+        communicationProvider: 'telegram',
+        communicationChannelId: '-100456',
+        communicationThreadId: '7',
+      },
+    });
+
+    startPolling(options);
+
+    expect(mockCreateSlackMessageInterval).not.toHaveBeenCalled();
+    expect(mockCreateCommunicationMessageInterval).toHaveBeenCalledWith({
+      provider: 'telegram',
+      options,
+    });
+    expect(options.state.communicationMessageIntervals?.telegram).toBeDefined();
+  });
+});

@@ -1,0 +1,4 @@
+interface:
+  display_name: "Roomote Agent Product"
+  short_description: "Roomote agent model and surfaces"
+  default_prompt: "Use $roomote-agent-product to understand Roomote agents, agent types, and interaction surfaces before making product or architecture changes."

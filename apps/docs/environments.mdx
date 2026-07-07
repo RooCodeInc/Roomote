@@ -1,0 +1,186 @@
+---
+title: Environments
+icon: boxes
+description: Give Roomote the repositories, services, secrets, and guidance it needs to run and verify work.
+---
+
+An environment is the workspace configuration Roomote uses when it runs a
+task. It tells Roomote which repositories to clone, what services to start,
+what environment variables are available, and what guidance it should follow.
+
+This is what turns a Roomote agent from a generic coding tool into something
+grounded in your actual product.
+
+For the full YAML schema behind an environment, including every field and how
+it relates to Dev Containers, see the
+[environment definition reference](/environments/definition).
+
+## Start with one environment that can prove work
+
+The first environment matters more than the fifth. Start with one repository
+or repository set where Roomote can do real work and show enough evidence for
+your team to evaluate the result.
+
+A good first environment usually makes at least one of these possible:
+
+- run the main test command
+- start the app locally
+- open a preview
+- reproduce a bug with the services your team already uses
+- inspect the repositories that matter for a common support, product, or
+  engineering workflow
+
+## How the first environment is created
+
+During setup, you pick the repository or repositories for the first
+environment and add any setup guidance you already know. Roomote then starts
+an environment setup task that figures out how to run the app locally and
+prepare the workspace for future tasks.
+
+The setup task is meant to produce a working environment Roomote can reuse. If
+it cannot finish, adjust the input and try again from
+**Settings > Environments**.
+
+## What to include
+
+Add enough context for Roomote to start productively:
+
+- repositories and the default branch to use
+- setup commands, package manager expectations, and tool versions
+- services such as databases, caches, or local APIs
+- environment variables and secrets required for local development
+- named preview ports for web apps or APIs so Roomote can open a live preview
+- instructions that are specific to this workspace
+
+Environment changes apply to new tasks. Running tasks keep the workspace they
+already started with.
+
+## Edit an environment
+
+When you edit an existing environment, Roomote gives you three views of the
+same configuration:
+
+- **Editor** is the visual form for common environment settings.
+- **YAML** is the raw configuration for precise edits and advanced options.
+- **Preview** shows the saved structure in a more readable form before you use
+  it for new tasks.
+
+The visual editor is organized around the parts Roomote needs to prepare a
+workspace:
+
+- **Basics** set the environment name, description, and initial URL that
+  previews should open first.
+- **Services** add managed dependencies such as PostgreSQL, Redis, MySQL,
+  MariaDB, ClickHouse, or the AWS CLI before repository setup commands run.
+- **Repositories** choose the repositories to clone, optional branches,
+  repository-specific tool fallbacks, and setup commands for each repository.
+- **Environment Variables** provide values that tasks can read.
+- **Environment `.tool-versions`** writes a shared `.tool-versions` file at
+  the workspace root.
+- **Exposed Ports** name the local web apps or APIs Roomote should preview.
+- **Agent Instructions** add environment-specific guidance that every task in
+  this environment should receive.
+
+Less common options, such as custom MCP servers, are available in the YAML
+view.
+
+## Write guidance Roomote can act on
+
+Good environment guidance is specific, durable, and tied to the workspace.
+
+Prefer guidance like:
+
+```text
+Use pnpm for this repository.
+Start Postgres before running the API.
+The web app runs on port 3000 and the API on port 3001.
+Run the dashboard test suite before changing task review flows.
+```
+
+Avoid vague guidance like:
+
+```text
+Be careful.
+Use best practices.
+Follow the normal process.
+```
+
+If a repository has a known trap, say it plainly. Short warnings such as
+"Preview will not load unless Redis is running" are more useful than general
+preferences.
+
+## Choose setup commands
+
+Add commands that make the repository ready for useful work. Good setup
+commands are the same durable steps a teammate would run after cloning the
+repository, such as:
+
+- install dependencies, for example `pnpm install`, `npm ci`,
+  `bundle install`, or `pip install -r requirements.txt`
+- generate local code or clients, for example `pnpm prisma generate`
+- run database migrations or seed scripts when local services need them
+- start long-running services, for example `pnpm dev`, with
+  **Run in the background** enabled
+- write logs to a predictable file when a background process is important to
+  debug
+
+Keep commands focused on setup, not final verification. Put test expectations
+in agent instructions when you want Roomote to run them before finishing a
+task, and include the exact command, package, or path when it matters.
+
+Use **Don't block setup even if it fails** only for helpful-but-optional
+steps. If the app cannot run without the command, let setup fail so the issue
+is visible.
+
+## Set tool versions at the right level
+
+Use **Repo tool fallbacks** for tools one cloned repository still needs when
+they are not already pinned in that repository's own `.tool-versions`. This is a
+good fit when one repository needs an extra fallback version without changing
+the repository itself.
+
+Use **Environment `.tool-versions`** for tools that should exist at the shared
+workspace root. This is most useful for workspace-level scripts, shared MCP
+servers, or as a broad fallback when a repository does not already pin a tool
+locally.
+
+When a repository already includes its own `.tool-versions`, keep that file as the
+source of truth. Environment-configured repository tool versions are fallback
+entries, not overrides, so checked-in repository pins still win.
+
+## When to create multiple environments
+
+Use separate environments when work needs meaningfully different setup.
+Common examples:
+
+- one environment per product surface, such as web app, API, or background service
+- one environment for a monorepo service with heavy dependencies
+- one staging-style environment with extra credentials
+- one lightweight environment for code review, questions, and investigation
+
+## Make verification possible
+
+Roomote works best when the environment lets it prove what changed. Include
+the commands and services needed to run tests, start the app, and open
+previews. For UI work, configure preview ports so teammates can inspect the
+result without pulling the branch locally.
+
+## How to tell an environment is healthy
+
+An environment is in good shape when Roomote can do more than clone code:
+
+- setup finishes without manual intervention
+- the main commands it needs are discoverable and runnable
+- required services and secrets are available
+- previews or logs exist when the task should produce them
+- follow-up tasks can reuse the environment instead of rebuilding context from
+  scratch
+
+## Common issues
+
+- **Missing secrets or services** keep setup from getting to a runnable state.
+- **No preview ports** make UI work harder to verify.
+- **Too many repositories in one environment** can make the first setup slower
+  and harder to debug.
+- **Overly broad guidance** forces Roomote to guess what actually matters for
+  this workspace.

@@ -1,0 +1,10 @@
+{
+  "name": "@roomote/docs",
+  "private": true,
+  "scripts": {
+    "dev": "mint dev",
+    "validate": "mint validate",
+    "check-links": "mint broken-links",
+    "check": "mint validate && mint broken-links"
+  }
+}

@@ -1,0 +1,296 @@
+import type { SourceControlProvider, TaskArtifactType } from '@roomote/types';
+
+export interface ArtifactConfig {
+  token: string;
+  platformApiUrl: string;
+  workspacePath?: string;
+  authBypassHeaderName?: string;
+  authBypassHeaderValue?: string;
+}
+
+export interface RoomoteConfig {
+  token: string;
+  platformApiUrl: string;
+  authBypassHeaderName?: string;
+  authBypassHeaderValue?: string;
+}
+
+export interface TaskSearchResult {
+  id: string;
+  title: string | null;
+  mode: string | null;
+  completed: boolean;
+  repositoryName: string | null;
+  harness: string | null;
+  createdAt: number | null;
+  lastMessageAt: number | null;
+  cloudJobStatus: string | null;
+  taskPhase: string | null;
+  cloudJobError: string | null;
+}
+
+export interface TaskSearchResponse {
+  tasks: TaskSearchResult[];
+  hasMore: boolean;
+  nextCursor?: string;
+}
+
+export interface TaskSummaryResponse {
+  id: string;
+  title: string | null;
+  mode: string | null;
+  completed: boolean;
+  repositoryName: string | null;
+  harness: string | null;
+  createdAt: number | null;
+  cloudJobStatus: string | null;
+  taskPhase: string | null;
+  cloudJobError: string | null;
+  linkedEnvironmentId: string | null;
+  linkedEnvironmentName: string | null;
+}
+
+export interface TaskComputeLog {
+  id: number;
+  status: string;
+  vendor: string | null;
+  machineId: string | null;
+  sandboxCmdId: string | null;
+  output: string | null;
+  skippedReason: string | null;
+  error: string | null;
+}
+
+export interface TaskComputeLogsResponse {
+  taskId: string;
+  returned: number;
+  cloudJobs: TaskComputeLog[];
+}
+
+export interface SourceControlPullRequestResponse {
+  success: true;
+  action: 'created' | 'updated';
+  provider: SourceControlProvider;
+  repositoryFullName: string;
+  number: number;
+  url: string;
+  title: string;
+  draft: boolean;
+  warnings: string[];
+}
+
+export interface SourceControlPullRequestReadResponse {
+  success: true;
+  provider: SourceControlProvider;
+  repositoryFullName: string;
+  number: number;
+  warnings: string[];
+  [key: string]: unknown;
+}
+
+export interface LaunchTaskResponse {
+  success: boolean;
+  cloudJobId?: number;
+  taskId?: string;
+  error?: string;
+}
+
+export interface CreateEnvironmentResponse {
+  success: boolean;
+  environmentId: string;
+  name: string;
+  missingRepositories: string[];
+}
+
+export interface UpdateEnvironmentResponse {
+  success: boolean;
+  environmentId: string;
+  name: string;
+  missingRepositories: string[];
+}
+
+export interface SlackThreadReplyResponse {
+  messageTs: string;
+}
+
+export interface SlackChannelPostResponse {
+  messageTs: string;
+  channelId: string;
+}
+
+export interface SlackMutationResponse {
+  success: boolean;
+}
+
+export interface SlackReactionAddResponse {
+  channelId: string;
+  messageTs: string;
+  name: string;
+}
+
+export interface SlackThreadLookupMessage {
+  ts: string;
+  user: string;
+  username?: string;
+  botId?: string;
+  text: string;
+  fileCount: number;
+  files?: Array<{
+    id: string;
+    name: string;
+    mimetype: string;
+    filetype: string;
+    size: number;
+  }>;
+}
+
+export interface SlackThreadLookupResponse {
+  channelId: string;
+  requestedMessageTs: string;
+  threadTs: string;
+  matchedMessageIndex: number;
+  messageCount: number;
+  messages: SlackThreadLookupMessage[];
+}
+
+export interface SlackChannelMessagesResponse {
+  channelId: string;
+  requestedOldest?: string;
+  requestedLatest?: string;
+  messageCount: number;
+  messages: Array<{
+    ts: string;
+    user: string;
+    username?: string;
+    botId?: string;
+    threadTs?: string;
+    text: string;
+    fileCount: number;
+    files?: Array<{
+      id: string;
+      name: string;
+      mimetype: string;
+      filetype: string;
+      size: number;
+    }>;
+  }>;
+}
+
+export interface TaskMessage {
+  id: string;
+  taskId: string;
+  ts: number;
+  eventType: string;
+  role: 'user' | 'assistant' | 'system' | 'tool' | null;
+  text: string | null;
+  images: string[];
+  metadata: Record<string, unknown> | null;
+  visibleInTranscript?: boolean;
+}
+
+export interface TaskMessagesResponse {
+  messages: TaskMessage[];
+  returned: number;
+}
+
+export interface SendMessageResponse {
+  success: boolean;
+  result?: unknown;
+  error?: string;
+}
+
+export interface DescribeVideoResponse {
+  description: string;
+}
+
+export interface CancelTaskResponse {
+  success: boolean;
+  error?: string;
+}
+
+export interface SubmitTaskSuggestionsResponse {
+  success: boolean;
+  suggestionCount?: number;
+  error?: string;
+}
+
+export interface SubmitAutomationWorkItemsResponse {
+  success: boolean;
+  workItemCount?: number;
+  actedCount?: number;
+  launchedCount?: number;
+  failedCount?: number;
+  duplicateCount?: number;
+  error?: string;
+}
+
+export interface StopTaskResponse {
+  success: boolean;
+  error?: string;
+}
+
+interface RepoInfo {
+  id: number;
+  fullName: string;
+}
+
+export interface EnvironmentInfo {
+  id: string;
+  name: string;
+  description: string | null;
+  repositories: RepoInfo[];
+}
+
+export interface ListEnvironmentsResponse {
+  environments: EnvironmentInfo[];
+}
+
+export interface CreateArtifactResponse {
+  id: string;
+  version: number;
+  uploadUrl: string;
+  viewUrl: string;
+  artifactType: TaskArtifactType;
+  rawUrl?: string;
+}
+
+export interface ArtifactMetadata {
+  id: string;
+  taskId: string;
+  path: string;
+  version: number;
+  artifactType: TaskArtifactType;
+  contentType: string;
+  size: number;
+  uploaded: boolean;
+}
+
+export interface ListedArtifact {
+  id: string;
+  path: string;
+  version: number;
+  artifactType: TaskArtifactType;
+  contentType: string;
+  size: number;
+  createdAt: string;
+  viewUrl: string;
+  rawUrl?: string;
+}
+
+export interface ListArtifactsResponse {
+  taskId: string;
+  artifacts: ListedArtifact[];
+}
+
+export interface DownloadUrlResponse {
+  url: string;
+  path: string;
+  contentType: string;
+  size: number;
+}
+
+export interface ToolResult {
+  [key: string]: unknown;
+  content: Array<{ type: 'text'; text: string }>;
+  structuredContent?: Record<string, unknown>;
+}

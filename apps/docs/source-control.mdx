@@ -1,0 +1,56 @@
+---
+title: Source Control
+icon: git-branch
+description: Connect GitHub, GitLab, Gitea, or Azure DevOps so Roomote can clone repositories and open reviewable changes.
+---
+
+import { IntegrationName } from '/snippets/integration-name.jsx';
+
+Source-control providers give Roomote access to the repositories where your
+team's work happens.
+
+Roomote uses source control to sync repositories into environments, clone code
+inside task sandboxes, push branches, open or update pull requests, and respond
+to review events or comments when the provider supports them.
+
+## Supported providers
+
+| Provider | Best for | Setup model |
+| -------- | -------- | ----------- |
+| <IntegrationName href="/providers/source-control/github" icon="github" name="GitHub" /> | GitHub-hosted repositories and pull request review workflows | GitHub App installation. |
+| <IntegrationName href="/providers/source-control/gitlab" icon="gitlab" name="GitLab" /> | GitLab projects and merge request review workflows | Deployment-owned token and optional webhooks. |
+| <IntegrationName href="/providers/source-control/gitea" icon="gitea" name="Gitea" /> | Self-hosted Gitea repositories | Deployment-owned token and repository sync. |
+| <IntegrationName href="/providers/source-control/azure-devops" icon="azuredevops" name="Azure DevOps" /> | Azure DevOps repositories | Deployment-owned PAT and repository sync. |
+
+## Setup checklist
+
+Before connecting source control, make sure your deployment has:
+
+1. a stable public HTTPS URL for callbacks and webhooks
+2. an admin or bot identity with access to the repositories Roomote should use
+3. provider credentials saved in setup, Settings, or deployment environment
+   variables
+4. at least one environment that can use the synced repositories
+
+After setup, verify that Roomote can:
+
+- list the expected repositories
+- create or update an environment from a repository
+- clone the repository inside a task sandbox
+- push a branch or open a reviewable change when the task finishes
+
+## Public URLs
+
+Use the same deployment URL across source-control callbacks and webhooks. If
+the public URL changes, update the provider app settings and restart Roomote
+with the matching deployment URL before testing again.
+
+Local development commonly uses `ROOMOTE_PUBLIC_URL`. Production deployments
+usually derive callbacks from the public app URL configured by the installer or
+Compose environment.
+
+## Related setup
+
+- [Environment Variables](/environment-variables) lists source-control env vars.
+- [Environments](/environments) explains how repositories become task context.
+- [Tasks](/tasks) explains how to review output, logs, diffs, and previews.

@@ -1,0 +1,74 @@
+---
+title: File attachments
+icon: paperclip
+description: Attach files that Roomote can read directly in chat and the web app.
+---
+
+Roomote can read supported file attachments from the web app and from chat
+threads where you start or continue a Roomote task.
+
+Use attachments when the file itself is the fastest way to show the problem: a
+bug report export, a config file, a markdown handoff, a spreadsheet, or a PDF
+from a customer.
+
+Attachments work best when they are paired with a clear ask. Tell Roomote what
+the file is, which part matters, and what you want back: an explanation, a
+plan, a patch, or a follow-up question.
+
+## What works well
+
+Attach files when you want Roomote to:
+
+- inspect structured data without pasting it into the message
+- read logs, config files, or source snippets as-is
+- work from a spreadsheet or report export
+- use screenshots and other images as direct visual context
+
+If the attachments are large, Roomote reads them in the order you attach them
+and applies a shared text budget so the task stays responsive. Very large
+earlier files can leave later files included by name only.
+
+## Accepted file types
+
+| Content type    | File types                                                                                                                                    |
+| --------------- | --------------------------------------------------------------------------------------------------------------------------------------------- |
+| Pure text       | `.txt`, `.md`, `.markdown`                                                                                                                    |
+| Structured text | `.json`, `.yaml`, `.yml`, `.xml`, `.log`, `.conf`, `.config`, `.ini`, `.env`, `.sh`, `.bash`, `.zsh`, `.toml`, `.properties`                  |
+| Code            | `.html`, `.htm`, `.css`, `.js`, `.jsx`, `.ts`, `.tsx`, `.py`, `.rb`, `.go`, `.rs`, `.java`, `.c`, `.h`, `.cpp`, `.cc`, `.cxx`, `.hpp`, `.sql` |
+| Spreadsheets    | `.csv`, `.tsv`, `.xlsx`, `.xls`                                                                                                               |
+| Documents       | `.pdf`, `.docx`                                                                                                                               |
+| Presentations   | `.pptx`                                                                                                                                       |
+| Images          | `.png`, `.jpg`, `.jpeg`, `.gif`, `.webp`, `.svg`                                                                                              |
+
+## How Roomote uses them
+
+Text, code, spreadsheet, document, and presentation files are read into the
+task as attachment context. Images are passed through as image inputs so
+Roomote can inspect them directly, except `.svg` files, which are read as text
+markup instead of being sent as image inputs.
+
+That means you can ask things like:
+
+- "Compare this export to the expected format and tell me what is broken."
+- "Read this config and explain why the service is failing."
+- "Check this customer PDF and draft the fix plan."
+- "Look at this screenshot and tell me what UI state it shows."
+
+## Best practices
+
+- Attach the smallest file that shows the issue clearly.
+- Add one sentence explaining what you want Roomote to do with the file.
+- Remove secrets or credentials before attaching files unless your deployment
+  is explicitly configured to handle that material.
+- For spreadsheet or report exports, mention the tab, column, or row range
+  that matters most.
+- For PDFs and documents, call out the section or page if you already know it.
+
+## Common issues
+
+- **The attachment is huge.** Trim it down or export just the relevant sheet,
+  log window, or section.
+- **The attachment is a format not listed here.** Export it as one of the
+  accepted formats above.
+- **The task still needs more context.** Add a short prompt that explains the
+  question, expected behavior, or failure you want Roomote to investigate.

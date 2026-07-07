@@ -1,0 +1,96 @@
+import { sdk } from '@roomote/sdk/client';
+
+import {
+  applySourceControlTokenMetadata,
+  ensureSourceControlTokenEnvFiles,
+} from '../../lib';
+import type { HarnessLogger } from '../../logging';
+
+const GITHUB_TOKEN_REFRESH_TICK_MS = 60 * 1000;
+const GITHUB_TOKEN_REFRESH_RETRY_DELAY_MS = 5 * 60 * 1000;
+const DEFAULT_GITHUB_TOKEN_REFRESH_INTERVAL_MS = 45 * 60 * 1000;
+
+interface GitHubTokenRefreshOptions {
+  cloudJobId: number;
+  logger: HarnessLogger;
+}
+
+async function refreshGitHubToken({
+  cloudJobId,
+  logger,
+}: GitHubTokenRefreshOptions): Promise<
+  | {
+      nextRefreshAtMs: number;
+      source: 'user' | 'app';
+      expiresAt: string | null;
+    }
+  | { nextRefreshAtMs: number; source: null; expiresAt: null }
+> {
+  try {
+    logger.info(
+      `[githubTokenRefresh] Refreshing source control token for cloud job #${cloudJobId}`,
+    );
+
+    const result = await sdk.cloudJobs.refreshGitHubTokenWithMetadata({
+      cloudJobId,
+    });
+    ensureSourceControlTokenEnvFiles();
+    await applySourceControlTokenMetadata(result);
+
+    const parsedNextRefreshAtMs = Date.parse(result.nextRefreshAt);
+    const nextRefreshAtMs = Number.isNaN(parsedNextRefreshAtMs)
+      ? Date.now() + DEFAULT_GITHUB_TOKEN_REFRESH_INTERVAL_MS
+      : parsedNextRefreshAtMs;
+
+    logger.info(
+      `[githubTokenRefresh] Refreshed ${result.provider} token for cloud job #${cloudJobId} (source=${result.source}, nextRefreshAt=${result.nextRefreshAt}${result.expiresAt ? `, expiresAt=${result.expiresAt}` : ''})`,
+    );
+
+    return {
+      nextRefreshAtMs,
+      source: result.source,
+      expiresAt: result.expiresAt,
+    };
+  } catch (error) {
+    logger.error(
+      `[githubTokenRefresh] Failed to refresh source control token for cloud job #${cloudJobId}: ${
+        error instanceof Error ? error.message : String(error)
+      }`,
+    );
+
+    return {
+      nextRefreshAtMs: Date.now() + GITHUB_TOKEN_REFRESH_RETRY_DELAY_MS,
+      source: null,
+      expiresAt: null,
+    };
+  }
+}
+
+export function createGitHubTokenRefreshInterval(
+  options: GitHubTokenRefreshOptions,
+): NodeJS.Timeout {
+  let nextRefreshAtMs = Date.now();
+  let refreshInFlight = false;
+
+  const tick = async () => {
+    if (refreshInFlight || Date.now() < nextRefreshAtMs) {
+      return;
+    }
+
+    refreshInFlight = true;
+    try {
+      const result = await refreshGitHubToken(options);
+      nextRefreshAtMs = result.nextRefreshAtMs;
+    } finally {
+      refreshInFlight = false;
+    }
+  };
+
+  // Refresh once immediately so long workspace preparation time does not
+  // consume most of the token window before runtime polling starts.
+  void tick();
+
+  return setInterval(() => {
+    void tick();
+  }, GITHUB_TOKEN_REFRESH_TICK_MS);
+}

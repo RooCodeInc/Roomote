@@ -1,0 +1,158 @@
+'use client';
+
+import { useState } from 'react';
+import { useRouter } from 'next/navigation';
+import { useMutation, useQueryClient } from '@tanstack/react-query';
+import { PRODUCT_NAME } from '@roomote/types';
+import type { SourceControlProvider } from '@roomote/types';
+import { Button, Loader2, ArrowRight, Switch } from '@/components/system';
+import { useTRPC } from '@/trpc/client';
+import { useEnvironments } from '@/hooks/environments/useEnvironments';
+import { buildInvokeMethods } from '../invokeMethods';
+import { StepTitle } from './StepTitle';
+import { getSetupStepDefinition } from './types';
+import { CornerDownRight } from 'lucide-react';
+
+const INVOKE_STEP = getSetupStepDefinition('invoke');
+
+type CommunicationProviderId = 'slack' | 'microsoft' | 'telegram';
+
+export function StepInvoke({
+  onTryItOut,
+  linkSuggestedTasks = false,
+  communicationProviders = [],
+  sourceControlProviders = [],
+  includeLinear = false,
+}: {
+  onTryItOut?: () => void;
+  linkSuggestedTasks?: boolean;
+  communicationProviders?: readonly CommunicationProviderId[];
+  sourceControlProviders?: readonly SourceControlProvider[];
+  includeLinear?: boolean;
+} = {}) {
+  const router = useRouter();
+  const trpc = useTRPC();
+  const queryClient = useQueryClient();
+  const environments = useEnvironments();
+  const [anonymousAnalyticsEnabled, setAnonymousAnalyticsEnabled] =
+    useState(true);
+  const methods = buildInvokeMethods({
+    communicationProviders,
+    sourceControlProviders,
+    includeLinear,
+  });
+
+  const completeSetup = useMutation(
+    trpc.setup.complete.mutationOptions({
+      onSuccess: async () => {
+        // Optimistically mark setup as completed in the cache so the
+        // authenticated layout doesn't redirect back to /setup.
+        queryClient.setQueryData(trpc.setup.status.queryKey(), (old) =>
+          old ? { ...old, setupCompletedAt: new Date() } : old,
+        );
+        queryClient.setQueryData(trpc.onboarding.status.queryKey(), (old) =>
+          old ? { ...old, onboardingCompletedAt: new Date() } : old,
+        );
+
+        // setup.complete also marks onboarding as completed server-side.
+        // Invalidate both route guards so the next page load cannot reuse
+        // stale cached status and bounce the user back into onboarding.
+        await Promise.all([
+          queryClient.invalidateQueries({
+            queryKey: trpc.setup.status.queryKey(),
+          }),
+          queryClient.invalidateQueries({
+            queryKey: trpc.onboarding.status.queryKey(),
+          }),
+        ]);
+
+        // Remove cached query data that the Home page checks to decide
+        // whether to redirect to /tasks. We use removeQueries (not
+        // invalidateQueries) because invalidate only refetches *active*
+        // queries — there are no subscribers on the onboarding page, so
+        // invalidate would just mark stale data without clearing it.
+        // Removing forces a fresh fetch when Home mounts, starting from
+        // isPending: true so the redirect guard works correctly.
+        queryClient.removeQueries({
+          queryKey: trpc.github.installations.queryKey(),
+        });
+
+        const envs = environments.data;
+        const params = new URLSearchParams();
+        const targetEnv = envs?.[0];
+
+        if (targetEnv) {
+          params.set('environmentId', targetEnv.id);
+        }
+
+        if (linkSuggestedTasks) {
+          params.set('link_suggested', 'true');
+        }
+
+        const query = params.toString();
+        router.replace(query ? `/?${query}` : '/');
+      },
+    }),
+  );
+
+  return (
+    <div className="relative w-full max-w-xl space-y-6 py-2 md:py-0">
+      <StepTitle text={INVOKE_STEP.title} />
+      <p className="mb-4">How to work with {PRODUCT_NAME}:</p>
+      <div className="space-y-5">
+        {methods.map((method) => (
+          <div key={method.title} className="flex items-start gap-3 group">
+            <method.icon className="size-5 mt-0.5 shrink-0 text-foreground transition-transform group-hover:scale-120" />
+            <div className="space-y-0">
+              <p className="">
+                <span className="font-semibold">{method.title}: </span>
+                {method.description}
+              </p>
+              {'example' in method && (
+                <p className="text-[0.9em] text-foreground font-mono cursor-default group-hover:text-foreground py-1.5">
+                  <CornerDownRight className="inline size-4 mr-2 relative -top-0.5" />
+                  {method.example}
+                </p>
+              )}
+            </div>
+          </div>
+        ))}
+      </div>
+
+      <div className="mt-6 flex items-start justify-between gap-4 rounded-lg border p-3">
+        <div className="space-y-0.5">
+          <p className="text-sm font-semibold">Anonymous analytics</p>
+          <p className="text-sm text-muted-foreground">
+            Share anonymous usage analytics with the {PRODUCT_NAME} team,
+            identified only by random IDs. You can change this later in
+            Settings.
+          </p>
+        </div>
+        <Switch
+          aria-label="Toggle anonymous analytics"
+          checked={anonymousAnalyticsEnabled}
+          onCheckedChange={(checked) =>
+            setAnonymousAnalyticsEnabled(checked === true)
+          }
+        />
+      </div>
+
+      <div className="mt-3 flex">
+        <Button
+          className="w-full sm:w-auto"
+          onClick={() => {
+            onTryItOut?.();
+            completeSetup.mutate({ anonymousAnalyticsEnabled });
+          }}
+          disabled={completeSetup.isPending}
+        >
+          {completeSetup.isPending && (
+            <Loader2 className="animate-spin size-4 mr-2" />
+          )}
+          Let&apos;s go
+          <ArrowRight />
+        </Button>
+      </div>
+    </div>
+  );
+}

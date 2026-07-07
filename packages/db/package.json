@@ -1,0 +1,59 @@
+{
+  "name": "@roomote/db",
+  "private": true,
+  "type": "module",
+  "main": "./src/index.ts",
+  "types": "./src/index.ts",
+  "exports": {
+    ".": {
+      "import": "./src/index.ts",
+      "require": "./src/index.ts"
+    },
+    "./server": {
+      "import": "./src/server.ts",
+      "require": "./src/server.ts"
+    },
+    "./encryption": {
+      "import": "./src/encryption.ts",
+      "require": "./src/encryption.ts"
+    }
+  },
+  "scripts": {
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
+    "lint": "eslint src --ext=ts --max-warnings=0",
+    "check-types": "tsc --noEmit",
+    "check-types:fast": "tsgo --noEmit",
+    "test": "dotenvx run  -f ../../.env.test -- vitest",
+    "clean": "rimraf .turbo",
+    "drizzle-kit": "tsx node_modules/drizzle-kit/bin.cjs",
+    "drizzle-kit:test": "NODE_ENV=test dotenvx run --quiet --ignore=MISSING_ENV_FILE -f ../../.env.test -- sh -c 'DATABASE_URL=${DATABASE_URL:-postgres://postgres:password@localhost:15432/roomote_test} pnpm drizzle-kit \"$@\"' --",
+    "drizzle-kit:development": "NODE_ENV=development dotenvx run --quiet -f ../../.env.local -- pnpm drizzle-kit",
+    "db:generate": "pnpm drizzle-kit:development generate",
+    "db:migrate": "pnpm drizzle-kit:development migrate",
+    "db:migrate:standalone": "DRIZZLE_MIGRATIONS_FOLDER=drizzle tsx src/run-migrations.ts",
+    "db:push": "pnpm drizzle-kit:development push",
+    "db:push:test": "pnpm drizzle-kit:test push --force",
+    "db:seed": "dotenvx run --quiet -f ../../.env.local -- tsx src/fixtures/seed.ts",
+    "db:seed:demo": "dotenvx run --quiet --ignore=MISSING_ENV_FILE -f ../../.env.local -- tsx src/fixtures/seed-demo.ts",
+    "development:create-env-var": "dotenvx run --quiet -f ../../.env.local -- tsx scripts/create-env-var.ts"
+  },
+  "dependencies": {
+    "@roomote/env": "workspace:^",
+    "@roomote/types": "workspace:^",
+    "drizzle-orm": "^0.45.2",
+    "nanoid": "^5.1.16",
+    "postgres": "^3.4.8"
+  },
+  "devDependencies": {
+    "@faker-js/faker": "^8.4.1",
+    "@roomote/config-eslint": "workspace:^",
+    "@roomote/config-typescript": "workspace:^",
+    "@types/node": "^24.10.13",
+    "commander": "^14.0.2",
+    "drizzle-kit": "^0.31.9",
+    "fishery": "^2.4.0",
+    "vitest": "^4.1.1",
+    "zod": "^3.25.76"
+  }
+}

@@ -1,0 +1,310 @@
+import { readFile } from 'node:fs/promises';
+
+import { execa } from 'execa';
+
+import type { StartupLogger } from '../../../logging';
+
+const { mockIsCommandAvailable } = vi.hoisted(() => ({
+  mockIsCommandAvailable: vi.fn(),
+}));
+
+vi.mock('node:fs/promises', () => ({
+  readFile: vi.fn(),
+}));
+
+vi.mock('execa', () => ({
+  execa: vi.fn(),
+}));
+
+vi.mock('../command-availability', () => ({
+  isCommandAvailable: mockIsCommandAvailable,
+}));
+
+import { RIPGREP_VERSION, installMise, installRipgrep } from '../mise';
+
+const mockReadFile = vi.mocked(readFile);
+const mockExeca = vi.mocked(execa);
+
+const logger = {
+  userLog: { log: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn() },
+  debug: { log: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn() },
+} as unknown as StartupLogger;
+
+describe('installMise', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockReadFile.mockResolvedValue(
+      'nodejs = "22"\npnpm = "10"\nuv = "latest"' as never,
+    );
+  });
+
+  it('ensures ripgrep once mise is already available', async () => {
+    mockIsCommandAvailable.mockResolvedValue(true);
+    mockExeca
+      .mockResolvedValueOnce({
+        exitCode: 0,
+        stderr: '',
+      } as never)
+      .mockResolvedValueOnce({
+        exitCode: 0,
+        stderr: '',
+      } as never);
+
+    await installMise(logger);
+
+    expect(mockExeca).toHaveBeenCalledWith(
+      'python',
+      expect.any(Array),
+      expect.objectContaining({
+        reject: false,
+        stdin: 'ignore',
+      }),
+    );
+    expect(mockExeca).toHaveBeenCalledWith('rg', ['--version'], {
+      reject: false,
+      stdin: 'ignore',
+    });
+    expect(mockExeca).not.toHaveBeenCalledWith(
+      'bash',
+      ['-lc', 'curl -fsSL https://mise.run | sh'],
+      expect.anything(),
+    );
+  });
+
+  it('installs mise before ensuring ripgrep when mise is missing', async () => {
+    mockIsCommandAvailable
+      .mockResolvedValueOnce(false)
+      .mockResolvedValueOnce(true)
+      .mockResolvedValueOnce(true)
+      .mockResolvedValueOnce(true);
+    mockReadFile.mockRejectedValueOnce(new Error('missing config') as never);
+    mockExeca
+      .mockResolvedValueOnce({} as never)
+      .mockResolvedValueOnce({
+        exitCode: 0,
+        stderr: '',
+      } as never)
+      .mockResolvedValueOnce({
+        exitCode: 0,
+        stderr: '',
+      } as never)
+      .mockResolvedValueOnce({
+        exitCode: 0,
+        stderr: '',
+      } as never)
+      .mockResolvedValueOnce({
+        exitCode: 1,
+        stderr: '',
+      } as never)
+      .mockResolvedValueOnce({} as never)
+      .mockResolvedValueOnce({
+        exitCode: 1,
+        stderr: '',
+      } as never)
+      .mockResolvedValueOnce({
+        exitCode: 0,
+        stderr: '',
+      } as never)
+      .mockResolvedValueOnce({
+        exitCode: 0,
+        stderr: '',
+      } as never);
+
+    await installMise(logger);
+
+    expect(mockExeca).toHaveBeenCalledWith(
+      'bash',
+      ['-lc', 'curl -fsSL https://mise.run | sh'],
+      {
+        stdin: 'ignore',
+      },
+    );
+    expect(mockExeca).toHaveBeenCalledWith(
+      'bash',
+      ['-lc', 'mise use -g nodejs@22'],
+      {
+        cwd: expect.any(String),
+        stdin: 'ignore',
+      },
+    );
+    expect(mockExeca).toHaveBeenCalledWith(
+      'bash',
+      ['-lc', 'mise use -g pnpm@10'],
+      {
+        cwd: expect.any(String),
+        stdin: 'ignore',
+      },
+    );
+    expect(mockExeca).toHaveBeenCalledWith(
+      'bash',
+      ['-lc', 'mise use -g uv@latest'],
+      {
+        cwd: expect.any(String),
+        stdin: 'ignore',
+      },
+    );
+    expect(mockExeca).toHaveBeenCalledWith(
+      'bash',
+      [
+        '-lc',
+        expect.stringContaining('--system --break-system-packages "$package"'),
+        '_',
+        'openai',
+      ],
+      {
+        stdin: 'ignore',
+        stdout: 'ignore',
+        stderr: 'pipe',
+      },
+    );
+    expect(mockExeca).toHaveBeenCalledWith(
+      'bash',
+      ['-lc', `mise use -g ripgrep@${RIPGREP_VERSION}`],
+      {
+        reject: false,
+        stdin: 'ignore',
+      },
+    );
+  });
+
+  it('configures uv in mise global config when it is missing', async () => {
+    mockIsCommandAvailable.mockResolvedValue(true);
+    mockReadFile.mockResolvedValueOnce('nodejs = "22"\npnpm = "10"' as never);
+    mockExeca
+      .mockResolvedValueOnce({} as never)
+      .mockResolvedValueOnce({
+        exitCode: 0,
+        stderr: '',
+      } as never)
+      .mockResolvedValueOnce({
+        exitCode: 0,
+        stderr: '',
+      } as never);
+
+    await installMise(logger);
+
+    expect(mockExeca).toHaveBeenCalledWith(
+      'bash',
+      ['-lc', 'mise use -g uv@latest'],
+      {
+        cwd: expect.any(String),
+        stdin: 'ignore',
+      },
+    );
+    expect(mockExeca).toHaveBeenCalledWith('rg', ['--version'], {
+      reject: false,
+      stdin: 'ignore',
+    });
+  });
+
+  it('configures nodejs in mise global config when it is missing', async () => {
+    mockIsCommandAvailable.mockResolvedValue(true);
+    mockReadFile.mockResolvedValueOnce('pnpm = "10"\nuv = "latest"' as never);
+    mockExeca
+      .mockResolvedValueOnce({} as never)
+      .mockResolvedValueOnce({
+        exitCode: 0,
+        stderr: '',
+      } as never)
+      .mockResolvedValueOnce({
+        exitCode: 0,
+        stderr: '',
+      } as never);
+
+    await installMise(logger);
+
+    expect(mockExeca).toHaveBeenCalledWith(
+      'bash',
+      ['-lc', 'mise use -g nodejs@22'],
+      {
+        cwd: expect.any(String),
+        stdin: 'ignore',
+      },
+    );
+    expect(mockExeca).toHaveBeenCalledWith('rg', ['--version'], {
+      reject: false,
+      stdin: 'ignore',
+    });
+  });
+
+  it('installs default Python packages when they are missing', async () => {
+    mockIsCommandAvailable.mockResolvedValue(true);
+    mockExeca
+      .mockResolvedValueOnce({
+        exitCode: 1,
+        stderr: '',
+      } as never)
+      .mockResolvedValueOnce({} as never)
+      .mockResolvedValueOnce({
+        exitCode: 0,
+        stderr: '',
+      } as never);
+
+    await installMise(logger);
+
+    expect(mockExeca).toHaveBeenCalledWith(
+      'bash',
+      [
+        '-lc',
+        expect.stringContaining('--system --break-system-packages "$package"'),
+        '_',
+        'openai',
+      ],
+      {
+        stdin: 'ignore',
+        stdout: 'ignore',
+        stderr: 'pipe',
+      },
+    );
+  });
+});
+
+describe('installRipgrep', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it('returns immediately when ripgrep is already on PATH', async () => {
+    mockExeca.mockResolvedValueOnce({
+      exitCode: 0,
+      stderr: '',
+    } as never);
+
+    await installRipgrep(logger);
+
+    expect(mockIsCommandAvailable).not.toHaveBeenCalled();
+    expect(mockExeca).toHaveBeenCalledTimes(1);
+  });
+
+  it('falls back to the ubi spec when the first mise install fails', async () => {
+    mockExeca
+      .mockResolvedValueOnce({
+        exitCode: 1,
+        stderr: '',
+      } as never)
+      .mockResolvedValueOnce({
+        exitCode: 1,
+        stderr: 'first attempt failed',
+      } as never)
+      .mockResolvedValueOnce({
+        exitCode: 0,
+        stderr: '',
+      } as never)
+      .mockResolvedValueOnce({
+        exitCode: 0,
+        stderr: '',
+      } as never);
+    mockIsCommandAvailable.mockResolvedValue(true);
+
+    await installRipgrep(logger);
+
+    expect(mockExeca).toHaveBeenCalledWith(
+      'bash',
+      ['-lc', `mise use -g ubi:BurntSushi/ripgrep@${RIPGREP_VERSION}`],
+      {
+        reject: false,
+        stdin: 'ignore',
+      },
+    );
+  });
+});

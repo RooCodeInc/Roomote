@@ -1,0 +1,142 @@
+name: Self-hosting, setup, or upgrade issue
+description: Report install, upgrade, deployment, environment, queue, database, or worker problems.
+title: "[Self-hosting]: "
+labels: ["self-hosting", "needs-triage"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Use this for self-hosted Roomote issues: setup failures, upgrades, migrations, reverse proxy issues, database or Redis problems, worker/controller failures, queues, object storage, and compute provider problems.
+  - type: checkboxes
+    id: preflight
+    attributes:
+      label: Preflight
+      options:
+        - label: I searched existing issues and docs before opening this.
+          required: true
+        - label: I removed secrets, tokens, private keys, customer data, and private repository details from logs and screenshots.
+          required: true
+        - label: I included the exact command, service, or upgrade step that failed.
+          required: true
+  - type: textarea
+    id: summary
+    attributes:
+      label: Summary
+      description: What setup, deployment, or upgrade problem are you seeing?
+    validations:
+      required: true
+  - type: dropdown
+    id: problem-area
+    attributes:
+      label: Problem area
+      multiple: true
+      options:
+        - Fresh install
+        - Upgrade
+        - Database or migrations
+        - Redis or queues
+        - Worker or controller
+        - Web or API service
+        - Object storage or artifacts
+        - Preview proxy
+        - Reverse proxy, TLS, or public URL
+        - Compute provider or sandbox startup
+        - Environment variables or secrets
+        - Other
+    validations:
+      required: true
+  - type: dropdown
+    id: install-method
+    attributes:
+      label: Installation method
+      options:
+        - Docker Compose
+        - Kubernetes
+        - Source checkout / development
+        - Other
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Roomote version
+      description: Commit SHA, release version, or Docker image tag.
+    validations:
+      required: true
+  - type: input
+    id: previous-version
+    attributes:
+      label: Previous version
+      description: Required for upgrade issues. Use "not applicable" for fresh installs.
+      placeholder: "Example: not applicable, main@abcdef0, or v0.0.0"
+    validations:
+      required: true
+  - type: textarea
+    id: environment
+    attributes:
+      label: Environment
+      description: Describe the host and backing services.
+      placeholder: |
+        Host OS / architecture:
+        Container runtime:
+        Database:
+        Redis:
+        Object storage:
+        Public URL / reverse proxy:
+        Compute provider:
+        Any managed services:
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Command or upgrade path
+      description: Include the exact command, compose file change, migration, or upgrade path that failed.
+      render: shell
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual behavior
+    validations:
+      required: true
+  - type: textarea
+    id: diagnostics
+    attributes:
+      label: Diagnostics output
+      description: If available, paste output from the Roomote diagnostics page or command. Redact secrets and private data.
+      placeholder: |
+        Roomote version:
+        Install method:
+        Public URL:
+        Database reachable:
+        Redis reachable:
+        Worker heartbeat:
+        Controller heartbeat:
+        Migration status:
+        Queue depth:
+        Recent failed jobs:
+    validations:
+      required: false
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs
+      description: Include the smallest useful excerpt around the failure.
+      render: shell
+    validations:
+      required: false
+  - type: textarea
+    id: workaround
+    attributes:
+      label: Workarounds tried
+      description: Include rollback attempts, config changes, retries, or docs followed.
+    validations:
+      required: false

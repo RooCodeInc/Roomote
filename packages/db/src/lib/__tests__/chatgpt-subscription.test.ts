@@ -1,0 +1,329 @@
+import { describe, expect, it, vi } from 'vitest';
+
+vi.mock('../../encryption', () => ({
+  encryptJSON: (value: unknown) => JSON.stringify(value),
+  decryptSecrets: async (value: string) => JSON.parse(value) as unknown,
+}));
+
+import {
+  buildOpenCodeAuthContent,
+  extractAccountIdFromTokens,
+} from '../chatgpt-subscription';
+
+describe('extractAccountIdFromTokens', () => {
+  function makeJwt(payload: object): string {
+    const header = Buffer.from(JSON.stringify({ alg: 'none' })).toString(
+      'base64url',
+    );
+    const body = Buffer.from(JSON.stringify(payload)).toString('base64url');
+    return `${header}.${body}.sig`;
+  }
+
+  it('extracts chatgpt_account_id from the id_token claims', () => {
+    const idToken = makeJwt({ chatgpt_account_id: 'acct-123' });
+
+    expect(
+      extractAccountIdFromTokens({
+        id_token: idToken,
+        access_token: 'at',
+        refresh_token: 'rt',
+      }),
+    ).toBe('acct-123');
+  });
+
+  it('extracts from the namespaced auth claim', () => {
+    const idToken = makeJwt({
+      'https://api.openai.com/auth': { chatgpt_account_id: 'acct-ns' },
+    });
+
+    expect(
+      extractAccountIdFromTokens({
+        id_token: idToken,
+        access_token: 'at',
+        refresh_token: 'rt',
+      }),
+    ).toBe('acct-ns');
+  });
+
+  it('falls back to the first organization id', () => {
+    const idToken = makeJwt({ organizations: [{ id: 'org-1' }] });
+
+    expect(
+      extractAccountIdFromTokens({
+        id_token: idToken,
+        access_token: 'at',
+        refresh_token: 'rt',
+      }),
+    ).toBe('org-1');
+  });
+
+  it('returns undefined when no account id is present', () => {
+    expect(
+      extractAccountIdFromTokens({
+        access_token: 'at',
+        refresh_token: 'rt',
+      }),
+    ).toBeUndefined();
+  });
+});
+
+describe('buildOpenCodeAuthContent', () => {
+  it('produces the opencode OAuth auth record under the openai provider id', () => {
+    const content = buildOpenCodeAuthContent({
+      access: 'at',
+      refresh: 'rt',
+      expires: 1_700_000_000_000,
+      accountId: 'acct-1',
+    });
+
+    const parsed = JSON.parse(content) as Record<string, unknown>;
+
+    expect(parsed.openai).toMatchObject({
+      type: 'oauth',
+      refresh: 'rt',
+      access: 'at',
+      expires: 1_700_000_000_000,
+      accountId: 'acct-1',
+    });
+  });
+
+  it('omits accountId when not provided', () => {
+    const content = buildOpenCodeAuthContent({
+      access: 'at',
+      refresh: 'rt',
+      expires: 1_700_000_000_000,
+    });
+
+    const parsed = JSON.parse(content) as {
+      openai: { accountId?: string };
+    };
+
+    expect(parsed.openai.accountId).toBeUndefined();
+  });
+});
+
+describe('getChatGptSubscriptionStatus', () => {
+  function makeStatusExecutor(record: unknown) {
+    const limit = vi
+      .fn()
+      .mockResolvedValue(record ? [{ value: JSON.stringify(record) }] : []);
+    const where = vi.fn().mockReturnValue({ limit });
+    const from = vi.fn().mockReturnValue({ where });
+    const select = vi.fn().mockReturnValue({ from });
+    return { select } as never;
+  }
+
+  it('reports disconnected when no subscription record exists', async () => {
+    const { getChatGptSubscriptionStatus } =
+      await import('../chatgpt-subscription');
+
+    const status = await getChatGptSubscriptionStatus(makeStatusExecutor(null));
+
+    expect(status).toEqual({ connected: false, status: 'disconnected' });
+  });
+
+  it('reports connected when a connected record exists', async () => {
+    const { getChatGptSubscriptionStatus } =
+      await import('../chatgpt-subscription');
+
+    const status = await getChatGptSubscriptionStatus(
+      makeStatusExecutor({
+        refresh: 'rt',
+        access: 'at',
+        expires: 1,
+        status: 'connected',
+        accountId: 'acct',
+        email: 'a@b.com',
+        connectedAt: '2026-01-01T00:00:00.000Z',
+        updatedAt: '2026-01-01T00:00:00.000Z',
+      }),
+    );
+
+    expect(status).toMatchObject({
+      connected: true,
+      status: 'connected',
+      accountId: 'acct',
+      email: 'a@b.com',
+    });
+  });
+
+  it('reports errored when an errored record exists', async () => {
+    const { getChatGptSubscriptionStatus } =
+      await import('../chatgpt-subscription');
+
+    const status = await getChatGptSubscriptionStatus(
+      makeStatusExecutor({
+        refresh: 'rt',
+        access: 'at',
+        expires: 1,
+        status: 'error',
+        error: 'refresh failed',
+        connectedAt: '2026-01-01T00:00:00.000Z',
+        updatedAt: '2026-01-01T00:00:00.000Z',
+      }),
+    );
+
+    expect(status).toMatchObject({
+      connected: false,
+      status: 'error',
+      error: 'refresh failed',
+    });
+  });
+});
+
+describe('getFreshChatGptAccessToken', () => {
+  const mockRecord = {
+    refresh: 'rt-old',
+    access: 'at-old',
+    expires: Date.now() + 1000,
+    status: 'connected' as const,
+    connectedAt: '2026-01-01T00:00:00.000Z',
+    updatedAt: '2026-01-01T00:00:00.000Z',
+  };
+
+  function makeQueryChain(record: typeof mockRecord | null) {
+    const limit = vi
+      .fn()
+      .mockResolvedValue(record ? [{ value: JSON.stringify(record) }] : []);
+    const where = vi.fn().mockReturnValue({ limit });
+    const from = vi.fn().mockReturnValue({ where });
+    const select = vi.fn().mockReturnValue({ from });
+    const onConflictDoUpdate = vi.fn().mockResolvedValue(undefined);
+    const values = vi.fn().mockReturnValue({ onConflictDoUpdate });
+    const insert = vi.fn().mockReturnValue({ values });
+    return { select, insert, limit };
+  }
+
+  function makeExecutor(record: typeof mockRecord | null) {
+    const chain = makeQueryChain(record);
+    const tx = {
+      execute: vi.fn().mockResolvedValue(undefined),
+      select: chain.select,
+      insert: chain.insert,
+    };
+    const executor = {
+      transaction: vi.fn(async (cb: (tx: unknown) => Promise<void>) => cb(tx)),
+      select: chain.select,
+      insert: chain.insert,
+    };
+    return { executor, tx, chain };
+  }
+
+  it('returns null when no connected subscription exists', async () => {
+    const { executor } = makeExecutor(null);
+    const { getFreshChatGptAccessToken } =
+      await import('../chatgpt-subscription');
+
+    const result = await getFreshChatGptAccessToken({
+      executor: executor as never,
+      now: Date.now(),
+    });
+
+    expect(result).toBeNull();
+  });
+
+  it('refreshes an expiring token and persists the rotated tokens', async () => {
+    const { executor, chain } = makeExecutor(mockRecord);
+    const fetchImpl = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        access_token: 'at-new',
+        refresh_token: 'rt-new',
+        expires_in: 3600,
+        id_token: undefined,
+      }),
+    });
+    const { getFreshChatGptAccessToken } =
+      await import('../chatgpt-subscription');
+
+    const result = await getFreshChatGptAccessToken({
+      executor: executor as never,
+      fetchImpl: fetchImpl as never,
+      now: Date.now(),
+    });
+
+    expect(result).not.toBeNull();
+    expect(result!.access).toBe('at-new');
+    expect(result!.refresh).toBe('rt-new');
+    expect(fetchImpl).toHaveBeenCalled();
+    // The persisted record was updated inside the transaction.
+    expect(chain.insert).toHaveBeenCalled();
+  });
+
+  it('marks the record errored when refresh fails', async () => {
+    const { executor, chain } = makeExecutor(mockRecord);
+    const fetchImpl = vi.fn().mockResolvedValue({ ok: false, status: 401 });
+    const { getFreshChatGptAccessToken } =
+      await import('../chatgpt-subscription');
+
+    const result = await getFreshChatGptAccessToken({
+      executor: executor as never,
+      fetchImpl: fetchImpl as never,
+      now: Date.now(),
+    });
+
+    expect(result).toBeNull();
+    expect(chain.insert).toHaveBeenCalled();
+  });
+});
+
+describe('pollChatGptDeviceAuth', () => {
+  it('returns pending while the user has not authorized', async () => {
+    const fetchImpl = vi.fn().mockResolvedValue({ status: 403 });
+    const { pollChatGptDeviceAuth } = await import('../chatgpt-subscription');
+
+    const result = await pollChatGptDeviceAuth({
+      deviceAuthId: 'dev-1',
+      userCode: 'CODE',
+      fetchImpl: fetchImpl as never,
+    });
+
+    expect(result).toEqual({ status: 'pending' });
+  });
+
+  it('returns success after exchanging the device authorization code', async () => {
+    const fetchImpl = vi.fn();
+    fetchImpl
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({
+          authorization_code: 'auth-code',
+          code_verifier: 'verifier',
+        }),
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({
+          access_token: 'at',
+          refresh_token: 'rt',
+          expires_in: 3600,
+        }),
+      });
+    const { pollChatGptDeviceAuth } = await import('../chatgpt-subscription');
+
+    // Avoid persisting to a real DB: pass an executor whose save is a no-op.
+    const executor = {
+      select: vi.fn().mockReturnValue({
+        from: vi.fn().mockReturnValue({
+          where: vi.fn().mockReturnValue({
+            limit: vi.fn().mockResolvedValue([]),
+          }),
+        }),
+      }),
+      insert: vi.fn().mockReturnValue({
+        values: vi.fn().mockReturnValue({
+          onConflictDoUpdate: vi.fn().mockResolvedValue(undefined),
+        }),
+      }),
+    } as never;
+
+    const result = await pollChatGptDeviceAuth({
+      deviceAuthId: 'dev-1',
+      userCode: 'CODE',
+      fetchImpl: fetchImpl as never,
+      executor,
+    });
+
+    expect(result.status).toBe('success');
+  });
+});

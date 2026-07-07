@@ -1,0 +1,2081 @@
+import { z } from 'zod';
+import { publicAuthTokenTimeoutMsSchema } from '@roomote/auth';
+import { FeatureFlag } from '@roomote/feature-flags';
+
+import {
+  CONFLICT_RESOLUTION_MAX_PR_AGE_DAYS_OPTIONS,
+  launchCodingHarnesses,
+  computeProviders,
+  environmentConfigSchema,
+  ENVIRONMENT_DEFINITION_SETUP_GUIDANCE_MAX_LENGTH,
+  namedPortSchema,
+  REASONING_EFFORT_VALUES,
+  SCHEDULE_ONLY_BACKGROUND_AUTOMATION_IDS,
+  SCHEDULE_ONLY_BACKGROUND_AUTOMATION_FREQUENCIES,
+  SCHEDULE_ONLY_BACKGROUND_AUTOMATION_LIST,
+  SETUP_AUTH_PROVIDER_IDS,
+  SETUP_MODEL_PROVIDER_IDS,
+  SUGGESTER_ROUTING_MODES,
+  prActions,
+  sourceControlProviderSchema,
+  sourceControlTokenBackedProviderSchema,
+  standardTaskSchema,
+  taskModelMetadataSchema,
+  type ScheduleOnlyBackgroundAutomationFrequencyField,
+} from '@roomote/types';
+
+import {
+  analyticsChartInputSchema,
+  analyticsDetailsInputSchema,
+  analyticsExportInputSchema,
+  analyticsFilterOptionsInputSchema,
+  pullRequestAnalyticsOverviewInputSchema,
+  filterSchema,
+  saveAsanaConnectionSchema,
+  saveGrafanaConnectionSchema,
+  saveSnowflakeConnectionSchema,
+  saveVercelConnectionSchema,
+  timePeriodFilterSchema,
+  PERSONAL_COLOR_THEMES,
+} from '@/types';
+
+import { protectedProcedure, publicProcedure, createRouter } from '../init';
+
+import {
+  getTasksCommand,
+  generateTaskSummaryCommand,
+  getTaskMessageEnvelopesCommand,
+  getTaskByIdCommand,
+  getRecentPullRequestsCommand,
+  deleteTasksCommand,
+  searchTasksCommand,
+  updateTaskTitleCommand,
+  listPinnedTaskIdsCommand,
+  setTaskPinnedCommand,
+} from '../commands/tasks';
+import {
+  getArtifactByPathCommand,
+  getArtifactVersionsCommand,
+  getArtifactsForTaskCommand,
+} from '../commands/artifacts';
+import {
+  getGitHubInstallationsCommand,
+  getBranchesCommand,
+  getCollaboratorsCommand,
+  getIssuesCommand,
+  getPullRequestsCommand,
+  startCreateGitHubInstallationCommand,
+  startCreateGitHubAppManifestCommand,
+  enableGitHubAppCommand,
+  finishCreateGitHubInstallationCommand,
+  finishCreateGitHubAppManifestCommand,
+  startAuthenticateGitHubAccountCommand,
+  finishAuthenticateGitHubAccountCommand,
+  syncGitHubInstallationCommand,
+  syncGitHubInstallationsCommand,
+  disableGitHubAppCommand,
+  getPullRequestCommand,
+  executeRevertCommitCommand,
+} from '../commands/github';
+import {
+  getPrActionCommand,
+  getRepositoriesCommand,
+  getSourceControlConfigStatusCommand,
+  saveSourceControlConfigCommand,
+  setPrActionCommand,
+  syncRepositoriesCommand,
+} from '../commands/source-control';
+import {
+  routeHomeTaskCommand,
+  createStandardTaskCloudJobCommand,
+  cancelCloudJobCommand,
+} from '../commands/cloud-jobs';
+import {
+  exchangeSlackOAuthCodeCommand,
+  connectSlackAppCommand,
+  disconnectSlackAppCommand,
+  getSlackInstallationCommand,
+  startAuthenticateSlackAccountCommand,
+  finishAuthenticateSlackAccountCommand,
+  completePendingSlackAuthenticationCommand,
+} from '../commands/slack';
+import {
+  getLinearInstallationCommand,
+  disconnectLinearAppCommand,
+} from '../commands/linear';
+import { getTeamsIntegrationStatusCommand } from '../commands/teams';
+import {
+  getLinkedGitLabAccountCommand,
+  getLinkedGiteaAccountCommand,
+  getLinkedAdoAccountCommand,
+  getLinkedGitHubAccountCommand,
+  unlinkLinkedGitHubAccountCommand,
+  getLinkedLinearAccountCommand,
+  unlinkLinkedLinearAccountCommand,
+  getLinkedSlackAccountCommand,
+  unlinkLinkedSlackAccountCommand,
+  getLinkedTelegramAccountCommand,
+  createTelegramLinkCodeCommand,
+  unlinkLinkedTelegramAccountCommand,
+  getLinkedMicrosoftTeamsAccountCommand,
+} from '../commands/linked-accounts';
+import {
+  getPersonalPreferencesCommand,
+  updatePersonalPreferencesCommand,
+} from '../commands/preferences';
+import {
+  type EnvironmentConfigVersionDetail,
+  getActiveEnvironmentDefinitionTaskCommand,
+  getEnvironmentsCommand,
+  getEnvironmentNamesByIdsCommand,
+  getEnvironmentByIdCommand,
+  getEnvironmentConfigVersionCommand,
+  listEnvironmentConfigVersionsCommand,
+  createEnvironmentCommand,
+  updateEnvironmentCommand,
+  startEnvironmentDefinitionTaskCommand,
+  cancelEnvironmentDefinitionTaskCommand,
+  deleteEnvironmentCommand,
+  duplicateEnvironmentCommand,
+  validateConfigCommand,
+} from '../commands/environments';
+import {
+  getPreviewSettingsCommand,
+  setDeploymentPreviewEnabledCommand,
+  updatePreviewRuntimeConfigCommand,
+  updateEnvironmentPreviewCommand,
+} from '../commands/preview-settings';
+import {
+  getAuthTokenCommand,
+  getSandboxAuthTokenCommand,
+} from '../commands/auth';
+import {
+  createEnvironmentSnapshotCommand,
+  clearEnvironmentSnapshotCommand,
+  createCloudJobSnapshotCommand,
+  restoreCloudJobSnapshotCommand,
+} from '../commands/snapshots';
+import {
+  answerSandboxUserInputRequestCommand,
+  answerSandboxUserInputRequestInputSchema,
+  getSandboxSessionByTaskIdCommand,
+  saveDraftPromptCommand,
+  sendSandboxPromptCommand,
+  sendSandboxPromptInputSchema,
+  takeOverBrowserControlCommand,
+} from '../commands/sandbox-session';
+import {
+  getDeploymentMcpEnablementsCommand,
+  setDeploymentMcpEnabledCommand,
+  getUserMcpConnectionsCommand,
+  getAsanaConnectionCommand,
+  getGrafanaConnectionCommand,
+  getSnowflakeConnectionCommand,
+  getVercelConnectionCommand,
+  listDeploymentMcpIntegrationToolsCommand,
+  saveAsanaConnectionCommand,
+  saveGrafanaConnectionCommand,
+  saveSnowflakeConnectionCommand,
+  saveVercelConnectionCommand,
+  setDeploymentDisabledMcpIntegrationToolsCommand,
+  connectMcpCommand,
+  disconnectMcpCommand,
+} from '../commands/mcp-connections';
+
+import {
+  getEnvVarsCommand,
+  createEnvVarCommand,
+  deleteEnvVarCommand,
+  updateEnvVarCommand,
+} from '../commands/environment-variables';
+import {
+  fulfillTaskEnvVarRequestCommand,
+  fulfillTaskEnvVarRequestSchema,
+} from '../commands/task-env-var-requests';
+import {
+  getUsersOnlyForFilterCommand,
+  getEnvironmentsForFilterCommand,
+  getModelsForFilterCommand,
+  getRepositoriesForFilterCommand,
+  getPullRequestsForFilterCommand,
+} from '../commands/filters';
+import {
+  batchCreateEnvironmentsCommand,
+  autoCreateAgentsCommand,
+  completeSetupCommand,
+  getSetupStatusCommand,
+} from '../commands/setup';
+import {
+  getSetupNewStatusCommand,
+  getSetupBootstrapStatusCommand,
+  saveSetupBootstrapAuthConfigCommand,
+  saveSetupBootstrapAuthProviderChoiceCommand,
+  saveSetupNewAuthConfigCommand,
+  saveSetupNewAuthProviderChoiceCommand,
+  saveSetupNewComputeConfigCommand,
+  saveSetupNewComputeProviderChoiceCommand,
+  saveSetupNewModelConfigCommand,
+  saveSetupNewSourceControlConfigCommand,
+  saveSetupNewSourceControlProviderChoiceCommand,
+  saveSetupNewSelectionCommand,
+  saveSetupNewQueuedTasksCommand,
+  startSetupNewOnboardingTaskCommand,
+  cancelSetupNewOnboardingTaskCommand,
+  resetSetupNewSelectionCommand,
+  ensureSetupNewDefaultAgentsCommand,
+} from '../commands/setup-new';
+import {
+  getOnboardingStatusCommand,
+  completeOnboardingCommand,
+} from '../commands/onboarding';
+import { assessBrowserOriginCommand } from '../commands/deployment';
+import {
+  COMMS_PROVIDER_IDS,
+  getCommsStatusCommand,
+  saveCommsAuthConfigCommand,
+  clearCommsAuthConfigCommand,
+} from '../commands/comms';
+import {
+  getComputeStatusCommand,
+  saveComputeConfigCommand,
+  saveComputeWorkerImageCommand,
+  clearComputeWorkerImageCommand,
+  clearComputeConfigCommand,
+  setDefaultComputeProviderCommand,
+} from '../commands/compute';
+import {
+  getTaskSuggestionFilterOptionsCommand,
+  listTaskSuggestionsCommand,
+  listTaskSuggestionHistoryCommand,
+  dismissTaskSuggestionCommand,
+  implementTaskSuggestionCommand,
+  triggerTaskSuggestionsCommand,
+} from '../commands/task-suggestions';
+import {
+  getBackgroundAgentSettingsCommand,
+  listSlackChannelsCommand,
+  updateBackgroundAgentSettingsCommand,
+  triggerAgentCommand,
+} from '../commands/automations';
+import {
+  getAgentBehaviorSettingsCommand,
+  updateAgentBehaviorSettingsCommand,
+} from '../commands/agent-behavior';
+import {
+  getVibesSettingsCommand,
+  updateVibesSettingsCommand,
+} from '../commands/vibes';
+import {
+  createPasswordResetLinkCommand,
+  createInviteCommand,
+  getAccessPolicySettingsCommand,
+  removeUserCommand,
+  revokeInviteCommand,
+  setLicenseKeyCommand,
+  updateUserRoleCommand,
+} from '../commands/access-policy';
+import {
+  deleteTaskModelProviderCommand,
+  getLaunchTaskModelsCommand,
+  getTaskModelProviderSetupCommand,
+  getTaskModelSettingsCommand,
+  lookupTaskModelCommand,
+  refreshTaskModelMetadataCommand,
+  saveTaskModelProviderCommand,
+  suggestTaskModelsCommand,
+  updateTaskModelSettingsCommand,
+} from '../commands/task-models';
+import {
+  disconnectChatGptSubscriptionCommand,
+  getChatGptSubscriptionStatusCommand,
+  isChatGptSubscriptionConnectedCommand,
+  pollChatGptDeviceAuthCommand,
+  startChatGptDeviceAuthCommand,
+} from '../commands/chatgpt-subscription';
+import {
+  getRouterDebugSettingsCommand,
+  updateRouterDebugSettingsCommand,
+} from '../commands/router-debug';
+import {
+  listCustomSkillsCommand,
+  searchCustomSkillsCommand,
+  setCustomSkillAvailabilityCommand,
+  saveManualSkillCommand,
+  removeCustomSkillCommand,
+} from '../commands/custom-skills';
+import {
+  getAnalyticsChartCommand,
+  getAnalyticsDetailsCommand,
+  exportAnalyticsCommand,
+  getAnalyticsFiltersCommand,
+  getPullRequestAnalyticsOverviewCommand,
+} from '../commands/analytics';
+import {
+  getExperimentalFlagsCommand,
+  updateExperimentalFlagCommand,
+} from '../commands/feature-flags';
+import {
+  getMiscSettingsCommand,
+  setAnonymousAnalyticsCommand,
+} from '../commands/misc-settings';
+
+const standardTaskPayloadSchema = standardTaskSchema.shape.payload;
+const stateRecordSchema = z.record(z.string());
+
+const SCHEDULE_ONLY_BACKGROUND_AUTOMATION_FREQUENCY_SCHEMA = z.enum(
+  SCHEDULE_ONLY_BACKGROUND_AUTOMATION_FREQUENCIES,
+);
+
+const UPDATE_SETTINGS_SAVING_AGENT_VALUES = [
+  'channelAutoStart',
+  'managerChannel',
+  'managerStats',
+  'reviewer',
+  'conflictResolver',
+  'coach',
+  'suggester',
+  'sentryTriage',
+  'dependabotTriage',
+  ...SCHEDULE_ONLY_BACKGROUND_AUTOMATION_IDS,
+  'announcer',
+  'platformIssueAlerts',
+] as const;
+
+const TRIGGER_AGENT_VALUES = [
+  'conflictResolver',
+  'suggester',
+  'announcer',
+  'managerStats',
+  'sentryTriage',
+  'dependabotTriage',
+  ...SCHEDULE_ONLY_BACKGROUND_AUTOMATION_IDS,
+] as const;
+
+const SCHEDULE_ONLY_FREQUENCY_FIELD_SHAPE = Object.fromEntries(
+  SCHEDULE_ONLY_BACKGROUND_AUTOMATION_LIST.map((automation) => [
+    automation.frequencyField,
+    SCHEDULE_ONLY_BACKGROUND_AUTOMATION_FREQUENCY_SCHEMA,
+  ]),
+) as Record<
+  ScheduleOnlyBackgroundAutomationFrequencyField,
+  typeof SCHEDULE_ONLY_BACKGROUND_AUTOMATION_FREQUENCY_SCHEMA
+>;
+
+function createStringEnumSchema<T extends string>(values: readonly T[]) {
+  return z.custom<T>(
+    (value): value is T =>
+      typeof value === 'string' && values.includes(value as T),
+  );
+}
+
+const conflictResolverMaxPrAgeDaysSchema = z.union([
+  z.literal(CONFLICT_RESOLUTION_MAX_PR_AGE_DAYS_OPTIONS[0]),
+  z.literal(CONFLICT_RESOLUTION_MAX_PR_AGE_DAYS_OPTIONS[1]),
+  z.literal(CONFLICT_RESOLUTION_MAX_PR_AGE_DAYS_OPTIONS[2]),
+  z.literal(CONFLICT_RESOLUTION_MAX_PR_AGE_DAYS_OPTIONS[3]),
+]) as z.ZodType<(typeof CONFLICT_RESOLUTION_MAX_PR_AGE_DAYS_OPTIONS)[number]>;
+
+const automationsRouter = createRouter({
+  getSettings: protectedProcedure.query(({ ctx: { auth } }) =>
+    getBackgroundAgentSettingsCommand(auth),
+  ),
+
+  listSlackChannels: protectedProcedure.query(({ ctx: { auth } }) =>
+    listSlackChannelsCommand(auth),
+  ),
+
+  updateSettings: protectedProcedure
+    .input(
+      z.object({
+        savingAgent: createStringEnumSchema(
+          UPDATE_SETTINGS_SAVING_AGENT_VALUES,
+        ),
+        reviewerEnabled: z.boolean(),
+        reviewerEnvironmentScope: z.enum(['all', 'specific']),
+        reviewerEnvironmentIds: z.array(z.string().uuid()),
+        reviewerAuthorReviewMode: z.enum(['all', 'specific', 'none']),
+        reviewerCollaborators: z.array(z.string().trim().min(1).max(255)),
+        reviewerExcludedAuthors: z.string().max(8_000).nullable(),
+        reviewerReviewAllPullRequestAuthors: z.boolean(),
+        reviewerReviewOnCommit: z.boolean(),
+        reviewerReviewDraftPrs: z.boolean(),
+        reviewerRelayReviewResultsToTask: z.boolean(),
+        reviewerRelayUserIds: z.array(z.string()),
+        conflictResolverFrequency: z.enum([
+          'off',
+          'every_hour',
+          'every_6_hours',
+          'daily',
+        ]),
+        conflictResolverMaxPrAgeDays:
+          conflictResolverMaxPrAgeDaysSchema.optional(),
+        conflictResolverLabel: z.string().trim().min(1).max(255),
+        conflictResolverInstructions: z.string().max(8_000).nullable(),
+        channelAutoStartSlackChannels: z
+          .array(
+            z.object({
+              slackChannel: z.string().trim().max(160).nullable().default(null),
+              instructions: z.string().max(8_000).nullable().default(null),
+              launchMode: z.enum(['always_start']).default('always_start'),
+              launchCriteria: z.string().max(4_000).nullable().default(null),
+            }),
+          )
+          .default([]),
+        managerSlackChannel: z.string().trim().min(1).max(160).nullable(),
+        managerStatsFrequency: z.enum(['off', 'weekly']),
+        managerStatsSlackChannel: z.string().trim().min(1).max(160).nullable(),
+        sentryTriageFrequency: z.enum(['off', 'daily', 'weekly']),
+        sentryTriageSlackChannel: z.string().trim().min(1).max(160).nullable(),
+        sentryTriageProjectSlugs: z.string().max(4_000).nullable(),
+        dependabotTriageFrequency: z.enum(['off', 'daily', 'weekly']),
+        dependabotTriageSlackChannel: z
+          .string()
+          .trim()
+          .min(1)
+          .max(160)
+          .nullable(),
+        ...SCHEDULE_ONLY_FREQUENCY_FIELD_SHAPE,
+        coachFrequency: z.enum(['off', 'daily', 'weekly', 'biweekly']),
+        coachSlackChannel: z.string().trim().min(1).max(160).nullable(),
+        coachInstructions: z.string().max(8_000).nullable(),
+        suggesterFrequency: z.enum(['off', 'daily', 'weekly']),
+        suggesterSlackChannel: z.string().trim().min(1).max(160).nullable(),
+        suggesterInstructions: z.string().max(10_000).nullable(),
+        suggesterRoutingMode: z.enum(SUGGESTER_ROUTING_MODES),
+        suggesterRoutingInstructions: z.string().max(10_000).nullable(),
+        announcerFrequency: z.enum(['off', 'daily', 'weekly']),
+        announcerSlackChannel: z.string().trim().min(1).max(160).nullable(),
+        announcerInstructions: z.string().max(8_000).nullable(),
+        platformIssueSlackChannel: z.string().trim().min(1).max(160).nullable(),
+        securityAuditorSlackChannel: z
+          .string()
+          .trim()
+          .min(1)
+          .max(160)
+          .nullable(),
+        codeQualityAuditorSlackChannel: z
+          .string()
+          .trim()
+          .min(1)
+          .max(160)
+          .nullable(),
+        ciFailureTriageSlackChannel: z
+          .string()
+          .trim()
+          .min(1)
+          .max(160)
+          .nullable(),
+      }),
+    )
+    .mutation(({ ctx: { auth }, input }) =>
+      updateBackgroundAgentSettingsCommand(auth, input),
+    ),
+
+  triggerAgent: protectedProcedure
+    .input(
+      z.object({
+        agentType: createStringEnumSchema(TRIGGER_AGENT_VALUES),
+      }),
+    )
+    .mutation(({ ctx: { auth }, input }) => triggerAgentCommand(auth, input)),
+});
+
+export const appRouter = createRouter({
+  analytics: createRouter({
+    pullRequestOverview: protectedProcedure
+      .input(pullRequestAnalyticsOverviewInputSchema)
+      .query(({ ctx: { auth }, input }) =>
+        getPullRequestAnalyticsOverviewCommand(auth, input),
+      ),
+
+    chart: protectedProcedure
+      .input(analyticsChartInputSchema)
+      .query(({ ctx: { auth }, input }) =>
+        getAnalyticsChartCommand(auth, input),
+      ),
+
+    filters: protectedProcedure
+      .input(analyticsFilterOptionsInputSchema)
+      .query(({ ctx: { auth }, input }) =>
+        getAnalyticsFiltersCommand(auth, input),
+      ),
+
+    details: protectedProcedure
+      .input(analyticsDetailsInputSchema)
+      .query(({ ctx: { auth }, input }) =>
+        getAnalyticsDetailsCommand(auth, input),
+      ),
+
+    export: protectedProcedure
+      .input(analyticsExportInputSchema)
+      .query(({ ctx: { auth }, input }) => exportAnalyticsCommand(auth, input)),
+  }),
+
+  tasks: createRouter({
+    list: protectedProcedure
+      .input(
+        z.object({
+          limit: z.number().optional(),
+          cursor: z.union([z.string(), z.number()]).optional(),
+          filters: z.array(filterSchema).optional(),
+          timePeriod: timePeriodFilterSchema.optional(),
+        }),
+      )
+      .query(({ ctx: { auth }, input }) => getTasksCommand(auth, input)),
+
+    byId: protectedProcedure
+      .input(
+        z.object({
+          taskId: z.string(),
+          includeArtifacts: z.boolean().optional(),
+        }),
+      )
+      .query(({ ctx: { auth }, input }) => getTaskByIdCommand(auth, input)),
+
+    messageEnvelopes: protectedProcedure
+      .input(z.object({ taskId: z.string() }))
+      .query(({ ctx: { auth }, input }) =>
+        getTaskMessageEnvelopesCommand(auth, input),
+      ),
+
+    generateSummary: protectedProcedure
+      .input(z.object({ taskId: z.string() }))
+      .query(({ ctx: { auth }, input }) =>
+        generateTaskSummaryCommand(auth, input),
+      ),
+
+    recentPullRequests: protectedProcedure.query(({ ctx: { auth } }) =>
+      getRecentPullRequestsCommand(auth),
+    ),
+
+    delete: protectedProcedure
+      .input(z.object({ taskIds: z.array(z.string()).min(1) }))
+      .mutation(({ ctx: { auth }, input }) => deleteTasksCommand(auth, input)),
+
+    updateTitle: protectedProcedure
+      .input(
+        z.object({
+          taskId: z.string(),
+          title: z.string().trim().min(1),
+        }),
+      )
+      .mutation(({ ctx: { auth }, input }) =>
+        updateTaskTitleCommand(auth, input),
+      ),
+
+    search: protectedProcedure
+      .input(
+        z.object({
+          query: z.string().optional(),
+          limit: z.number().min(1).max(50).optional(),
+          includeIds: z.array(z.string()).max(20).optional(),
+        }),
+      )
+      .query(({ ctx: { auth }, input }) => searchTasksCommand(auth, input)),
+
+    pins: protectedProcedure.query(({ ctx: { auth } }) =>
+      listPinnedTaskIdsCommand(auth),
+    ),
+
+    setPinned: protectedProcedure
+      .input(
+        z.object({
+          taskId: z.string(),
+          pinned: z.boolean(),
+        }),
+      )
+      .mutation(({ ctx: { auth }, input }) =>
+        setTaskPinnedCommand(auth, input),
+      ),
+  }),
+
+  artifacts: createRouter({
+    byPath: protectedProcedure
+      .input(
+        z.object({
+          taskId: z.string(),
+          path: z.string(),
+          version: z.number().optional(),
+        }),
+      )
+      .query(({ ctx: { auth }, input }) =>
+        getArtifactByPathCommand(auth, input),
+      ),
+
+    versions: protectedProcedure
+      .input(z.object({ taskId: z.string(), path: z.string() }))
+      .query(({ ctx: { auth }, input }) =>
+        getArtifactVersionsCommand(auth, input),
+      ),
+
+    forTask: protectedProcedure
+      .input(z.object({ taskId: z.string() }))
+      .query(({ ctx: { auth }, input }) =>
+        getArtifactsForTaskCommand(auth, input),
+      ),
+  }),
+
+  cloudJobs: createRouter({
+    routeHomeTask: protectedProcedure
+      .input(
+        z.object({
+          description: z.string(),
+          images: z.array(z.string()).optional(),
+        }),
+      )
+      .mutation(({ ctx: { auth }, input }) =>
+        routeHomeTaskCommand(auth, input),
+      ),
+
+    createStandardTask: protectedProcedure
+      .input(
+        z.object({
+          harness: z.enum(launchCodingHarnesses).optional(),
+          model: z.string().trim().min(1).optional(),
+          computeProvider: z.enum(computeProviders).optional(),
+          sourceTaskId: z.string().optional(),
+          sourceArtifactId: z.string().uuid().optional(),
+          sourceArtifactPath: z.string().optional(),
+          sourceArtifactVersion: z.number().int().optional(),
+          payload: standardTaskPayloadSchema,
+        }),
+      )
+      .mutation(({ ctx: { auth }, input }) =>
+        createStandardTaskCloudJobCommand(auth, input),
+      ),
+
+    cancel: protectedProcedure
+      .input(
+        z.object({
+          taskId: z.string(),
+          cloudJobId: z.number().int().optional(),
+        }),
+      )
+      .mutation(({ ctx: { auth }, input }) =>
+        cancelCloudJobCommand(auth, input),
+      ),
+  }),
+
+  github: createRouter({
+    installations: protectedProcedure.query(({ ctx: { auth } }) =>
+      getGitHubInstallationsCommand(auth),
+    ),
+
+    branches: protectedProcedure
+      .input(z.object({ fullName: z.string() }))
+      .query(({ ctx: { auth }, input }) => getBranchesCommand(auth, input)),
+
+    collaborators: protectedProcedure.query(({ ctx: { auth } }) =>
+      getCollaboratorsCommand(auth),
+    ),
+
+    issues: protectedProcedure.query(({ ctx: { auth } }) =>
+      getIssuesCommand(auth),
+    ),
+
+    pullRequests: protectedProcedure.query(({ ctx: { auth } }) =>
+      getPullRequestsCommand(auth),
+    ),
+
+    startCreateInstallation: protectedProcedure
+      .input(z.object({ state: stateRecordSchema.optional() }).optional())
+      .mutation(({ ctx: { auth }, input }) =>
+        startCreateGitHubInstallationCommand(auth, input?.state),
+      ),
+
+    startCreateAppManifest: protectedProcedure
+      .input(
+        z
+          .object({
+            state: stateRecordSchema.optional(),
+            organization: z.string().optional(),
+          })
+          .optional(),
+      )
+      .mutation(({ ctx: { auth }, input }) =>
+        startCreateGitHubAppManifestCommand(
+          auth,
+          input?.state,
+          input?.organization,
+        ),
+      ),
+
+    enableApp: protectedProcedure
+      .input(z.object({ state: stateRecordSchema.optional() }).optional())
+      .mutation(({ ctx: { auth }, input }) =>
+        enableGitHubAppCommand(auth, input?.state),
+      ),
+
+    finishCreateInstallation: protectedProcedure
+      .input(z.object({ code: z.string().min(1) }))
+      .mutation(({ ctx: { auth }, input }) =>
+        finishCreateGitHubInstallationCommand(auth, input),
+      ),
+
+    finishCreateAppManifest: protectedProcedure
+      .input(z.object({ code: z.string().min(1) }))
+      .mutation(({ ctx: { auth }, input }) =>
+        finishCreateGitHubAppManifestCommand(auth, input),
+      ),
+
+    startAuthenticateAccount: protectedProcedure
+      .input(z.object({ state: stateRecordSchema.optional() }).optional())
+      .mutation(({ ctx: { auth }, input }) =>
+        startAuthenticateGitHubAccountCommand(auth, input?.state),
+      ),
+
+    finishAuthenticateAccount: protectedProcedure
+      .input(z.object({ code: z.string().min(1) }))
+      .mutation(({ ctx: { auth }, input }) =>
+        finishAuthenticateGitHubAccountCommand(auth, input),
+      ),
+
+    syncInstallation: protectedProcedure
+      .input(z.object({ installationId: z.number().int().positive() }))
+      .mutation(({ ctx: { auth }, input }) =>
+        syncGitHubInstallationCommand(auth, input),
+      ),
+
+    syncInstallations: protectedProcedure.mutation(({ ctx: { auth } }) =>
+      syncGitHubInstallationsCommand(auth),
+    ),
+
+    disableApp: protectedProcedure.mutation(({ ctx: { auth } }) =>
+      disableGitHubAppCommand(auth),
+    ),
+
+    pullRequest: protectedProcedure
+      .input(
+        z.object({
+          owner: z.string().min(1),
+          repo: z.string().min(1),
+          prNumber: z.number().int().positive(),
+        }),
+      )
+      .query(({ ctx: { auth }, input }) => getPullRequestCommand(auth, input)),
+
+    executeRevertCommit: protectedProcedure
+      .input(
+        z.object({
+          repo: z.string().min(1),
+          prNumber: z.number().int().positive(),
+          commitSha: z.string().min(1),
+        }),
+      )
+      .mutation(({ ctx: { auth }, input }) =>
+        executeRevertCommitCommand(auth, input),
+      ),
+  }),
+
+  sourceControl: createRouter({
+    repositories: protectedProcedure
+      .input(
+        z
+          .object({
+            includeEmptyState: z.boolean().optional(),
+            sourceControlProvider: sourceControlProviderSchema.optional(),
+          })
+          .optional(),
+      )
+      .query(({ ctx: { auth }, input }) => getRepositoriesCommand(auth, input)),
+
+    configStatus: protectedProcedure.query(({ ctx: { auth } }) =>
+      getSourceControlConfigStatusCommand(auth),
+    ),
+
+    prAction: protectedProcedure.query(({ ctx: { auth } }) =>
+      getPrActionCommand(auth),
+    ),
+
+    setPrAction: protectedProcedure
+      .input(z.object({ prAction: z.enum(prActions) }))
+      .mutation(({ ctx: { auth }, input }) => setPrActionCommand(auth, input)),
+
+    syncRepositories: protectedProcedure
+      .input(
+        z.object({
+          provider: sourceControlTokenBackedProviderSchema,
+        }),
+      )
+      .mutation(({ ctx: { auth }, input }) =>
+        syncRepositoriesCommand(auth, input),
+      ),
+
+    saveConfig: protectedProcedure
+      .input(
+        z.object({
+          provider: sourceControlProviderSchema,
+          values: z.record(z.string().trim()).optional(),
+        }),
+      )
+      .mutation(({ ctx: { auth }, input }) =>
+        saveSourceControlConfigCommand(auth, input),
+      ),
+  }),
+
+  slack: createRouter({
+    installation: protectedProcedure.query(({ ctx: { auth } }) =>
+      getSlackInstallationCommand(auth),
+    ),
+
+    connectApp: protectedProcedure
+      .input(z.object({ redirectPath: z.string().optional() }).optional())
+      .mutation(({ ctx: { auth }, input }) =>
+        connectSlackAppCommand(auth, input),
+      ),
+
+    disconnectApp: protectedProcedure.mutation(({ ctx: { auth } }) =>
+      disconnectSlackAppCommand(auth),
+    ),
+
+    startAuthenticateAccount: protectedProcedure
+      .input(z.object({ state: stateRecordSchema.optional() }).optional())
+      .mutation(({ ctx: { auth }, input }) =>
+        startAuthenticateSlackAccountCommand(auth, input?.state),
+      ),
+
+    finishAuthenticateAccount: protectedProcedure
+      .input(z.object({ code: z.string().min(1) }))
+      .mutation(({ ctx: { auth }, input }) =>
+        finishAuthenticateSlackAccountCommand(auth, input),
+      ),
+
+    exchangeOAuthCode: protectedProcedure
+      .input(z.object({ code: z.string().min(1), state: z.string().min(1) }))
+      .mutation(({ ctx: { auth }, input }) =>
+        exchangeSlackOAuthCodeCommand(auth, input),
+      ),
+
+    completePendingAuth: protectedProcedure
+      .input(z.object({ stateToken: z.string().min(1) }))
+      .mutation(({ ctx: { auth }, input }) =>
+        completePendingSlackAuthenticationCommand(auth, input),
+      ),
+  }),
+
+  linear: createRouter({
+    installation: protectedProcedure.query(({ ctx: { auth } }) =>
+      getLinearInstallationCommand(auth),
+    ),
+
+    disconnectApp: protectedProcedure.mutation(({ ctx: { auth } }) =>
+      disconnectLinearAppCommand(auth),
+    ),
+  }),
+
+  teams: createRouter({
+    integrationStatus: protectedProcedure.query(({ ctx: { auth } }) =>
+      getTeamsIntegrationStatusCommand(auth),
+    ),
+  }),
+
+  linkedAccounts: createRouter({
+    github: protectedProcedure.query(({ ctx: { auth } }) =>
+      getLinkedGitHubAccountCommand(auth),
+    ),
+
+    gitlab: protectedProcedure.query(({ ctx: { auth } }) =>
+      getLinkedGitLabAccountCommand(auth),
+    ),
+
+    gitea: protectedProcedure.query(({ ctx: { auth } }) =>
+      getLinkedGiteaAccountCommand(auth),
+    ),
+
+    ado: protectedProcedure.query(({ ctx: { auth } }) =>
+      getLinkedAdoAccountCommand(auth),
+    ),
+
+    unlinkGitHub: protectedProcedure.mutation(({ ctx: { auth } }) =>
+      unlinkLinkedGitHubAccountCommand(auth),
+    ),
+
+    linear: protectedProcedure.query(({ ctx: { auth } }) =>
+      getLinkedLinearAccountCommand(auth),
+    ),
+
+    unlinkLinear: protectedProcedure.mutation(({ ctx: { auth } }) =>
+      unlinkLinkedLinearAccountCommand(auth),
+    ),
+
+    slack: protectedProcedure.query(({ ctx: { auth } }) =>
+      getLinkedSlackAccountCommand(auth),
+    ),
+
+    unlinkSlack: protectedProcedure.mutation(({ ctx: { auth } }) =>
+      unlinkLinkedSlackAccountCommand(auth),
+    ),
+
+    microsoftTeams: protectedProcedure.query(({ ctx: { auth } }) =>
+      getLinkedMicrosoftTeamsAccountCommand(auth),
+    ),
+
+    telegram: protectedProcedure.query(({ ctx: { auth } }) =>
+      getLinkedTelegramAccountCommand(auth),
+    ),
+
+    createTelegramLinkCode: protectedProcedure.mutation(({ ctx: { auth } }) =>
+      createTelegramLinkCodeCommand(auth),
+    ),
+
+    unlinkTelegram: protectedProcedure.mutation(({ ctx: { auth } }) =>
+      unlinkLinkedTelegramAccountCommand(auth),
+    ),
+  }),
+
+  preferences: createRouter({
+    getPersonal: protectedProcedure.query(({ ctx: { auth } }) =>
+      getPersonalPreferencesCommand(auth),
+    ),
+    updatePersonal: protectedProcedure
+      .input(
+        z
+          .object({
+            colorTheme: z.enum(PERSONAL_COLOR_THEMES).optional(),
+            narrationMode: z.boolean().optional(),
+            showDebugUI: z.boolean().optional(),
+          })
+          .refine(
+            (input) =>
+              input.colorTheme !== undefined ||
+              input.narrationMode !== undefined ||
+              input.showDebugUI !== undefined,
+            {
+              message: 'Expected at least one personal preference to update.',
+            },
+          ),
+      )
+      .mutation(({ ctx: { auth }, input }) =>
+        updatePersonalPreferencesCommand(auth, input),
+      ),
+  }),
+
+  environments: createRouter({
+    list: protectedProcedure.query(({ ctx: { auth } }) =>
+      getEnvironmentsCommand(auth),
+    ),
+
+    namesByIds: protectedProcedure
+      .input(z.object({ ids: z.array(z.string()).max(20) }))
+      .query(({ ctx: { auth }, input }) =>
+        getEnvironmentNamesByIdsCommand(auth, input),
+      ),
+
+    byId: protectedProcedure
+      .input(z.object({ id: z.string() }))
+      .query(({ ctx: { auth }, input }) =>
+        getEnvironmentByIdCommand(auth, input),
+      ),
+
+    listConfigVersions: protectedProcedure
+      .input(z.object({ environmentId: z.string().uuid() }))
+      .query(({ ctx: { auth }, input }) =>
+        listEnvironmentConfigVersionsCommand(auth, input),
+      ),
+
+    getConfigVersion: protectedProcedure
+      .input(
+        z.object({
+          environmentId: z.string().uuid(),
+          version: z.number().int().min(1),
+        }),
+      )
+      .query(
+        ({
+          ctx: { auth },
+          input,
+        }): Promise<EnvironmentConfigVersionDetail | null> =>
+          getEnvironmentConfigVersionCommand(auth, input),
+      ),
+
+    activeDefinitionTask: protectedProcedure
+      .input(
+        z.object({
+          environmentId: z.string().uuid(),
+        }),
+      )
+      .query(({ ctx: { auth }, input }) =>
+        getActiveEnvironmentDefinitionTaskCommand(auth, input),
+      ),
+
+    create: protectedProcedure
+      .input(
+        z.object({
+          name: z.string().min(1),
+          description: z.string().optional(),
+          config: z.record(z.unknown()),
+        }),
+      )
+      .mutation(({ ctx: { auth }, input }) =>
+        createEnvironmentCommand(
+          auth,
+          input as Parameters<typeof createEnvironmentCommand>[1],
+        ),
+      ),
+
+    update: protectedProcedure
+      .input(
+        z.object({
+          id: z.string(),
+          name: z.string().min(1).optional(),
+          description: z.string().optional(),
+          agentInstructions: z.string().optional(),
+          config: z.record(z.unknown()).optional(),
+        }),
+      )
+      .mutation(({ ctx: { auth }, input }) =>
+        updateEnvironmentCommand(
+          auth,
+          input as Parameters<typeof updateEnvironmentCommand>[1],
+        ),
+      ),
+
+    startDefinitionTask: protectedProcedure
+      .input(
+        z.object({
+          repositoryIds: z.array(z.string().uuid()).min(1),
+          environmentId: z.string().optional(),
+          changeRequest: z.string().trim().min(1).max(8_000).optional(),
+        }),
+      )
+      .mutation(({ ctx: { auth }, input }) =>
+        startEnvironmentDefinitionTaskCommand(auth, input),
+      ),
+
+    cancelDefinitionTask: protectedProcedure
+      .input(z.object({ taskId: z.string() }))
+      .mutation(({ ctx: { auth }, input }) =>
+        cancelEnvironmentDefinitionTaskCommand(auth, input),
+      ),
+
+    delete: protectedProcedure
+      .input(z.object({ id: z.string() }))
+      .mutation(({ ctx: { auth }, input }) =>
+        deleteEnvironmentCommand(auth, input),
+      ),
+
+    duplicate: protectedProcedure
+      .input(z.object({ id: z.string(), newName: z.string().min(1) }))
+      .mutation(({ ctx: { auth }, input }) =>
+        duplicateEnvironmentCommand(auth, input),
+      ),
+
+    validateConfig: protectedProcedure
+      .input(z.object({ config: environmentConfigSchema }))
+      .mutation(({ ctx: { auth }, input }) =>
+        validateConfigCommand(auth, input),
+      ),
+  }),
+
+  previewSettings: createRouter({
+    get: protectedProcedure.query(({ ctx: { auth } }) =>
+      getPreviewSettingsCommand(auth),
+    ),
+
+    setDeploymentEnabled: protectedProcedure
+      .input(z.object({ enabled: z.boolean() }))
+      .mutation(({ ctx: { auth }, input }) =>
+        setDeploymentPreviewEnabledCommand(auth, input),
+      ),
+
+    updateRuntimeConfig: protectedProcedure
+      .input(
+        z.object({
+          previewProxyBaseUrl: z.string(),
+        }),
+      )
+      .mutation(({ ctx: { auth }, input }) =>
+        updatePreviewRuntimeConfigCommand(auth, input),
+      ),
+
+    updateEnvironmentPreview: protectedProcedure
+      .input(
+        z.object({
+          environmentId: z.string().uuid(),
+          previewsEnabled: z.boolean().optional(),
+          ports: z.array(namedPortSchema).optional(),
+        }),
+      )
+      .mutation(({ ctx: { auth }, input }) =>
+        updateEnvironmentPreviewCommand(auth, input),
+      ),
+  }),
+  snapshots: createRouter({
+    createEnvironment: protectedProcedure
+      .input(
+        z.object({
+          environmentId: z.string(),
+          provider: z.enum(computeProviders).optional(),
+        }),
+      )
+      .mutation(({ ctx: { auth }, input }) =>
+        createEnvironmentSnapshotCommand(auth, input),
+      ),
+
+    clearEnvironment: protectedProcedure
+      .input(
+        z.object({
+          environmentId: z.string(),
+          provider: z.enum(computeProviders).optional(),
+        }),
+      )
+      .mutation(({ ctx: { auth }, input }) =>
+        clearEnvironmentSnapshotCommand(auth, input),
+      ),
+
+    createCloudJob: protectedProcedure
+      .input(z.object({ cloudJobId: z.number() }))
+      .mutation(({ ctx: { auth }, input }) =>
+        createCloudJobSnapshotCommand(auth, input),
+      ),
+
+    restoreCloudJob: protectedProcedure
+      .input(
+        z.object({
+          sourceSnapshotId: z.string(),
+          sourceCloudJobId: z.number(),
+          description: z.string().optional(),
+          clientMessageId: z.string().optional(),
+          resumePrompt: z.string().max(50_000).optional(),
+          resumePromptImages: z.array(z.string()).optional(),
+        }),
+      )
+      .mutation(({ ctx: { auth }, input }) =>
+        restoreCloudJobSnapshotCommand(auth, input),
+      ),
+  }),
+
+  mcpConnections: createRouter({
+    deploymentEnablements: protectedProcedure.query(({ ctx: { auth } }) =>
+      getDeploymentMcpEnablementsCommand(auth),
+    ),
+
+    setDeploymentEnabled: protectedProcedure
+      .input(z.object({ mcpId: z.string(), enabled: z.boolean() }))
+      .mutation(({ ctx: { auth }, input }) =>
+        setDeploymentMcpEnabledCommand(auth, input),
+      ),
+
+    userConnections: protectedProcedure.query(({ ctx: { auth } }) =>
+      getUserMcpConnectionsCommand(auth),
+    ),
+
+    snowflakeConnection: protectedProcedure.query(({ ctx: { auth } }) =>
+      getSnowflakeConnectionCommand(auth),
+    ),
+
+    asanaConnection: protectedProcedure.query(({ ctx: { auth } }) =>
+      getAsanaConnectionCommand(auth),
+    ),
+
+    grafanaConnection: protectedProcedure.query(({ ctx: { auth } }) =>
+      getGrafanaConnectionCommand(auth),
+    ),
+
+    vercelConnection: protectedProcedure.query(({ ctx: { auth } }) =>
+      getVercelConnectionCommand(auth),
+    ),
+
+    listTools: protectedProcedure
+      .input(z.object({ mcpId: z.string() }))
+      .query(({ ctx: { auth }, input }) =>
+        listDeploymentMcpIntegrationToolsCommand(auth, input),
+      ),
+
+    setDisabledTools: protectedProcedure
+      .input(
+        z.object({
+          mcpId: z.string(),
+          disabledTools: z.array(z.string().min(1)),
+        }),
+      )
+      .mutation(({ ctx: { auth }, input }) =>
+        setDeploymentDisabledMcpIntegrationToolsCommand(auth, input),
+      ),
+
+    connect: protectedProcedure
+      .input(
+        z.object({
+          mcpId: z.string(),
+          redirectTo: z.string().optional(),
+          role: z
+            .enum(['default', 'linear_org_install', 'linear_user_link'])
+            .optional(),
+        }),
+      )
+      .mutation(({ ctx: { auth }, input }) => connectMcpCommand(auth, input)),
+
+    disconnect: protectedProcedure
+      .input(
+        z.object({
+          mcpId: z.string(),
+          role: z
+            .enum(['default', 'linear_org_install', 'linear_user_link'])
+            .optional(),
+        }),
+      )
+      .mutation(({ ctx: { auth }, input }) =>
+        disconnectMcpCommand(auth, input),
+      ),
+
+    saveSnowflakeConnection: protectedProcedure
+      .input(saveSnowflakeConnectionSchema)
+      .mutation(({ ctx: { auth }, input }) =>
+        saveSnowflakeConnectionCommand(auth, input),
+      ),
+
+    saveAsanaConnection: protectedProcedure
+      .input(saveAsanaConnectionSchema)
+      .mutation(({ ctx: { auth }, input }) =>
+        saveAsanaConnectionCommand(auth, input),
+      ),
+
+    saveGrafanaConnection: protectedProcedure
+      .input(saveGrafanaConnectionSchema)
+      .mutation(({ ctx: { auth }, input }) =>
+        saveGrafanaConnectionCommand(auth, input),
+      ),
+
+    saveVercelConnection: protectedProcedure
+      .input(saveVercelConnectionSchema)
+      .mutation(({ ctx: { auth }, input }) =>
+        saveVercelConnectionCommand(auth, input),
+      ),
+  }),
+
+  auth: createRouter({
+    token: protectedProcedure
+      .input(z.object({ timeoutMs: publicAuthTokenTimeoutMsSchema.optional() }))
+      .query(({ ctx: { auth }, input }) => getAuthTokenCommand(auth, input)),
+    sandboxToken: protectedProcedure
+      .input(
+        z.object({
+          cloudJobId: z.number(),
+          timeoutMs: z.number().optional(),
+        }),
+      )
+      .query(({ ctx: { auth }, input }) =>
+        getSandboxAuthTokenCommand(auth, input),
+      ),
+  }),
+
+  environmentVariables: createRouter({
+    list: protectedProcedure.query(({ ctx: { auth } }) =>
+      getEnvVarsCommand(auth),
+    ),
+
+    create: protectedProcedure
+      .input(
+        z.object({
+          name: z
+            .string()
+            .min(1)
+            .max(255)
+            .regex(/^[A-Z][A-Z0-9_]*$/),
+          value: z.string().min(1),
+        }),
+      )
+      .mutation(({ ctx: { auth }, input }) => createEnvVarCommand(auth, input)),
+
+    delete: protectedProcedure
+      .input(z.object({ id: z.string() }))
+      .mutation(({ ctx: { auth }, input }) => deleteEnvVarCommand(auth, input)),
+
+    update: protectedProcedure
+      .input(z.object({ id: z.string(), value: z.string().min(1) }))
+      .mutation(({ ctx: { auth }, input }) => updateEnvVarCommand(auth, input)),
+  }),
+
+  comms: createRouter({
+    status: protectedProcedure.query(({ ctx: { auth } }) =>
+      getCommsStatusCommand(auth),
+    ),
+
+    saveAuthConfig: protectedProcedure
+      .input(
+        z.object({
+          provider: z.enum(COMMS_PROVIDER_IDS),
+          values: z.record(z.string().trim()).optional(),
+        }),
+      )
+      .mutation(({ ctx: { auth }, input }) =>
+        saveCommsAuthConfigCommand(auth, input),
+      ),
+
+    clearAuthConfig: protectedProcedure
+      .input(z.object({ provider: z.enum(COMMS_PROVIDER_IDS) }))
+      .mutation(({ ctx: { auth }, input }) =>
+        clearCommsAuthConfigCommand(auth, input),
+      ),
+  }),
+
+  compute: createRouter({
+    status: protectedProcedure.query(({ ctx: { auth } }) =>
+      getComputeStatusCommand(auth),
+    ),
+
+    saveConfig: protectedProcedure
+      .input(
+        z.object({
+          provider: z.enum(computeProviders),
+          values: z.record(z.string().trim()).optional(),
+        }),
+      )
+      .mutation(({ ctx: { auth }, input }) =>
+        saveComputeConfigCommand(auth, input),
+      ),
+
+    clearConfig: protectedProcedure
+      .input(z.object({ provider: z.enum(computeProviders) }))
+      .mutation(({ ctx: { auth }, input }) =>
+        clearComputeConfigCommand(auth, input),
+      ),
+
+    saveWorkerImage: protectedProcedure
+      .input(z.object({ value: z.string().trim() }))
+      .mutation(({ ctx: { auth }, input }) =>
+        saveComputeWorkerImageCommand(auth, input),
+      ),
+
+    clearWorkerImage: protectedProcedure.mutation(({ ctx: { auth } }) =>
+      clearComputeWorkerImageCommand(auth),
+    ),
+
+    setDefaultProvider: protectedProcedure
+      .input(z.object({ provider: z.enum(computeProviders) }))
+      .mutation(({ ctx: { auth }, input }) =>
+        setDefaultComputeProviderCommand(auth, input),
+      ),
+  }),
+
+  taskEnvVarRequests: createRouter({
+    fulfill: protectedProcedure
+      .input(fulfillTaskEnvVarRequestSchema)
+      .mutation(({ ctx: { auth }, input }) =>
+        fulfillTaskEnvVarRequestCommand(auth, input),
+      ),
+  }),
+
+  sandboxSession: createRouter({
+    byTaskId: protectedProcedure
+      .input(z.object({ taskId: z.string() }))
+      .query(({ ctx: { auth }, input }) =>
+        getSandboxSessionByTaskIdCommand(auth, input),
+      ),
+
+    saveDraftPrompt: protectedProcedure
+      .input(
+        z.object({
+          cloudJobId: z.number(),
+          draftPrompt: z.string().max(50_000),
+        }),
+      )
+      .mutation(({ ctx: { auth }, input }) =>
+        saveDraftPromptCommand(auth, input),
+      ),
+
+    sendPrompt: protectedProcedure
+      .input(sendSandboxPromptInputSchema)
+      .mutation(({ ctx: { auth }, input }) =>
+        sendSandboxPromptCommand(auth, input),
+      ),
+
+    answerUserInputRequest: protectedProcedure
+      .input(answerSandboxUserInputRequestInputSchema)
+      .mutation(({ ctx: { auth }, input }) =>
+        answerSandboxUserInputRequestCommand(auth, input),
+      ),
+
+    takeOverBrowserControl: protectedProcedure
+      .input(
+        z.object({
+          taskId: z.string(),
+        }),
+      )
+      .mutation(({ ctx: { auth }, input }) =>
+        takeOverBrowserControlCommand(auth, input),
+      ),
+  }),
+
+  filters: createRouter({
+    users: protectedProcedure
+      .input(
+        z.object({
+          repositoryName: z.string().nullish(),
+          category: z.string().nullish(),
+          timePeriod: timePeriodFilterSchema.optional(),
+        }),
+      )
+      .query(({ ctx: { auth }, input }) =>
+        getUsersOnlyForFilterCommand(auth, input),
+      ),
+
+    environments: protectedProcedure.query(({ ctx: { auth } }) =>
+      getEnvironmentsForFilterCommand(auth),
+    ),
+
+    repositories: protectedProcedure
+      .input(
+        z.object({
+          userId: z.string().nullish(),
+          category: z.string().nullish(),
+          timePeriod: timePeriodFilterSchema.optional(),
+        }),
+      )
+      .query(({ ctx: { auth }, input }) =>
+        getRepositoriesForFilterCommand(auth, input),
+      ),
+
+    models: protectedProcedure
+      .input(
+        z.object({
+          userId: z.string().nullish(),
+          category: z.string().nullish(),
+          repositoryName: z.string().nullish(),
+          timePeriod: timePeriodFilterSchema.optional(),
+        }),
+      )
+      .query(({ ctx: { auth }, input }) =>
+        getModelsForFilterCommand(auth, input),
+      ),
+
+    pullRequests: protectedProcedure
+      .input(
+        z.object({
+          userId: z.string().nullish(),
+          category: z.string().nullish(),
+          repositoryName: z.string().nullish(),
+          timePeriod: timePeriodFilterSchema.optional(),
+          search: z.string().optional(),
+        }),
+      )
+      .query(({ ctx: { auth }, input }) =>
+        getPullRequestsForFilterCommand(auth, input),
+      ),
+  }),
+
+  taskModels: createRouter({
+    launchOptions: protectedProcedure.query(({ ctx: { auth } }) =>
+      getLaunchTaskModelsCommand(auth),
+    ),
+
+    get: protectedProcedure.query(({ ctx: { auth } }) =>
+      getTaskModelSettingsCommand(auth),
+    ),
+
+    providerSetup: protectedProcedure.query(({ ctx: { auth } }) =>
+      getTaskModelProviderSetupCommand(auth),
+    ),
+
+    saveProvider: protectedProcedure
+      .input(
+        z.object({
+          provider: z.enum(SETUP_MODEL_PROVIDER_IDS),
+          apiKey: z.string().trim().optional(),
+          additionalEnvValues: z.record(z.string().trim()).optional(),
+        }),
+      )
+      .mutation(({ ctx: { auth }, input }) =>
+        saveTaskModelProviderCommand(auth, input),
+      ),
+
+    deleteProvider: protectedProcedure
+      .input(
+        z.object({
+          provider: z.enum(SETUP_MODEL_PROVIDER_IDS),
+        }),
+      )
+      .mutation(({ ctx: { auth }, input }) =>
+        deleteTaskModelProviderCommand(auth, input),
+      ),
+
+    lookup: protectedProcedure
+      .input(
+        z.object({
+          modelId: z.string().trim().min(1),
+        }),
+      )
+      .mutation(({ ctx: { auth }, input }) =>
+        lookupTaskModelCommand(auth, input),
+      ),
+
+    suggest: protectedProcedure
+      .input(
+        z.object({
+          providerId: z.enum(SETUP_MODEL_PROVIDER_IDS),
+          query: z.string().trim(),
+        }),
+      )
+      .query(({ ctx: { auth }, input }) =>
+        suggestTaskModelsCommand(auth, input),
+      ),
+
+    refreshMetadata: protectedProcedure.mutation(({ ctx: { auth } }) =>
+      refreshTaskModelMetadataCommand(auth),
+    ),
+
+    update: protectedProcedure
+      .input(
+        z.object({
+          models: z.array(
+            z.object({
+              id: z.string().trim().min(1),
+              displayName: z.string().trim().min(1),
+              family: z.string().trim().min(1).optional(),
+              metadata: taskModelMetadataSchema.nullable().optional(),
+            }),
+          ),
+          allowedModelIds: z.array(z.string().trim().min(1)),
+          defaultModelId: z.string().trim().min(1),
+          helperModelId: z.string().trim().min(1).nullable(),
+          visionModelId: z.string().trim().min(1).nullable(),
+          codeReviewModelId: z.string().trim().min(1).nullable(),
+          exploreModelId: z.string().trim().min(1).nullable().optional(),
+          planningModelId: z.string().trim().min(1).nullable(),
+          codingModelReasoningEffort: z
+            .enum(REASONING_EFFORT_VALUES)
+            .nullable(),
+          helperModelReasoningEffort: z
+            .enum(REASONING_EFFORT_VALUES)
+            .nullable(),
+          visionModelReasoningEffort: z
+            .enum(REASONING_EFFORT_VALUES)
+            .nullable(),
+          codeReviewModelReasoningEffort: z
+            .enum(REASONING_EFFORT_VALUES)
+            .nullable(),
+          exploreModelReasoningEffort: z
+            .enum(REASONING_EFFORT_VALUES)
+            .nullable()
+            .optional(),
+          planningModelReasoningEffort: z
+            .enum(REASONING_EFFORT_VALUES)
+            .nullable(),
+        }),
+      )
+      .mutation(({ ctx: { auth }, input }) =>
+        updateTaskModelSettingsCommand(auth, input),
+      ),
+  }),
+
+  chatgptSubscription: createRouter({
+    status: protectedProcedure.query(({ ctx: { auth } }) =>
+      getChatGptSubscriptionStatusCommand(auth),
+    ),
+
+    isConnected: protectedProcedure.query(({ ctx: { auth } }) =>
+      isChatGptSubscriptionConnectedCommand(auth),
+    ),
+
+    startDeviceAuth: protectedProcedure.mutation(({ ctx: { auth } }) =>
+      startChatGptDeviceAuthCommand(auth),
+    ),
+
+    pollDeviceAuth: protectedProcedure
+      .input(
+        z.object({
+          deviceAuthId: z.string().min(1),
+          userCode: z.string().min(1),
+        }),
+      )
+      .mutation(({ ctx: { auth }, input }) =>
+        pollChatGptDeviceAuthCommand(auth, input),
+      ),
+
+    disconnect: protectedProcedure.mutation(({ ctx: { auth } }) =>
+      disconnectChatGptSubscriptionCommand(auth),
+    ),
+  }),
+
+  routerDebug: createRouter({
+    getSettings: protectedProcedure.query(({ ctx: { auth } }) =>
+      getRouterDebugSettingsCommand(auth),
+    ),
+
+    updateSettings: protectedProcedure
+      .input(
+        z.object({
+          routerDebugSlackChannelId: z
+            .string()
+            .trim()
+            .min(1)
+            .max(160)
+            .nullable(),
+        }),
+      )
+      .mutation(({ ctx: { auth }, input }) =>
+        updateRouterDebugSettingsCommand(auth, input),
+      ),
+  }),
+
+  setup: createRouter({
+    status: protectedProcedure.query(({ ctx: { auth } }) =>
+      getSetupStatusCommand(auth),
+    ),
+
+    batchCreateEnvironments: protectedProcedure
+      .input(
+        z.object({
+          environments: z
+            .array(
+              z.object({
+                name: z.string().min(1).max(100),
+                repositoryIds: z.array(z.string().uuid()).min(1),
+                installCommand: z.string().max(500).optional(),
+                testCommand: z.string().max(500).optional(),
+              }),
+            )
+            .min(1),
+        }),
+      )
+      .mutation(({ ctx: { auth }, input }) =>
+        batchCreateEnvironmentsCommand(auth, input),
+      ),
+
+    autoCreateAgents: protectedProcedure.mutation(({ ctx: { auth } }) =>
+      autoCreateAgentsCommand(auth),
+    ),
+
+    complete: protectedProcedure
+      .input(
+        z
+          .object({
+            anonymousAnalyticsEnabled: z.boolean().optional(),
+          })
+          .optional(),
+      )
+      .mutation(({ ctx: { auth }, input }) =>
+        completeSetupCommand(auth, input),
+      ),
+  }),
+
+  setupNew: createRouter({
+    status: protectedProcedure.query(({ ctx: { auth } }) =>
+      getSetupNewStatusCommand(auth),
+    ),
+
+    saveAuthProviderChoice: protectedProcedure
+      .input(
+        z.object({
+          provider: z.enum(SETUP_AUTH_PROVIDER_IDS),
+        }),
+      )
+      .mutation(({ ctx: { auth }, input }) =>
+        saveSetupNewAuthProviderChoiceCommand(auth, input),
+      ),
+
+    saveAuthConfig: protectedProcedure
+      .input(
+        z.object({
+          provider: z.enum(SETUP_AUTH_PROVIDER_IDS),
+          values: z.record(z.string().trim()).optional(),
+        }),
+      )
+      .mutation(({ ctx: { auth }, input }) =>
+        saveSetupNewAuthConfigCommand(auth, input),
+      ),
+
+    saveModelConfig: protectedProcedure
+      .input(
+        z.object({
+          provider: z.enum(SETUP_MODEL_PROVIDER_IDS),
+          apiKey: z.string().trim().optional(),
+          additionalEnvValues: z.record(z.string().trim()).optional(),
+        }),
+      )
+      .mutation(({ ctx: { auth }, input }) =>
+        saveSetupNewModelConfigCommand(auth, input),
+      ),
+
+    saveComputeProviderChoice: protectedProcedure
+      .input(
+        z.object({
+          provider: z.enum(computeProviders),
+        }),
+      )
+      .mutation(({ ctx: { auth }, input }) =>
+        saveSetupNewComputeProviderChoiceCommand(auth, input),
+      ),
+
+    saveComputeConfig: protectedProcedure
+      .input(
+        z.object({
+          provider: z.enum(computeProviders),
+          values: z.record(z.string().trim()).optional(),
+        }),
+      )
+      .mutation(({ ctx: { auth }, input }) =>
+        saveSetupNewComputeConfigCommand(auth, input),
+      ),
+
+    saveSourceControlProviderChoice: protectedProcedure
+      .input(
+        z.object({
+          provider: sourceControlProviderSchema,
+        }),
+      )
+      .mutation(({ ctx: { auth }, input }) =>
+        saveSetupNewSourceControlProviderChoiceCommand(auth, input),
+      ),
+
+    saveSourceControlConfig: protectedProcedure
+      .input(
+        z.object({
+          provider: sourceControlProviderSchema,
+          values: z.record(z.string().trim()).optional(),
+        }),
+      )
+      .mutation(({ ctx: { auth }, input }) =>
+        saveSetupNewSourceControlConfigCommand(auth, input),
+      ),
+
+    saveSelection: protectedProcedure
+      .input(
+        z.object({
+          repositoryIds: z.array(z.string().uuid()).min(1),
+          setupGuidance: z
+            .string()
+            .trim()
+            .max(ENVIRONMENT_DEFINITION_SETUP_GUIDANCE_MAX_LENGTH)
+            .optional(),
+          selectedModelId: z.string().trim().min(1).optional(),
+        }),
+      )
+      .mutation(({ ctx: { auth }, input }) =>
+        saveSetupNewSelectionCommand(auth, input),
+      ),
+
+    saveQueuedTasks: protectedProcedure
+      .input(
+        z.object({
+          selectedSuggestionIds: z.array(z.string().uuid()).max(5),
+          customTaskPrompt: z.string().trim().max(4_000).optional(),
+        }),
+      )
+      .mutation(({ ctx: { auth }, input }) =>
+        saveSetupNewQueuedTasksCommand(auth, input),
+      ),
+
+    startOnboardingTask: protectedProcedure.mutation(({ ctx: { auth } }) =>
+      startSetupNewOnboardingTaskCommand(auth),
+    ),
+
+    cancelOnboardingTask: protectedProcedure.mutation(({ ctx: { auth } }) =>
+      cancelSetupNewOnboardingTaskCommand(auth),
+    ),
+
+    resetSelection: protectedProcedure.mutation(({ ctx: { auth } }) =>
+      resetSetupNewSelectionCommand(auth),
+    ),
+
+    ensureDefaultAgents: protectedProcedure.mutation(({ ctx: { auth } }) =>
+      ensureSetupNewDefaultAgentsCommand(auth),
+    ),
+  }),
+
+  setupBootstrap: createRouter({
+    status: publicProcedure
+      .input(
+        z
+          .object({
+            setupToken: z.string().optional(),
+          })
+          .optional(),
+      )
+      .query(({ input }) => getSetupBootstrapStatusCommand(input)),
+
+    saveAuthProviderChoice: publicProcedure
+      .input(
+        z.object({
+          provider: z.enum(SETUP_AUTH_PROVIDER_IDS),
+          setupToken: z.string().optional(),
+        }),
+      )
+      .mutation(({ input }) =>
+        saveSetupBootstrapAuthProviderChoiceCommand(input),
+      ),
+
+    saveAuthConfig: publicProcedure
+      .input(
+        z.object({
+          provider: z.enum(SETUP_AUTH_PROVIDER_IDS),
+          values: z.record(z.string().trim()).optional(),
+          setupToken: z.string().optional(),
+        }),
+      )
+      .mutation(({ input }) => saveSetupBootstrapAuthConfigCommand(input)),
+  }),
+
+  deployment: createRouter({
+    // Public: pre-auth pages call this to detect a canonical-origin
+    // mismatch before auth requests fail. Reveals nothing beyond what a
+    // probing request to the auth endpoints would observe.
+    assessBrowserOrigin: publicProcedure
+      .input(
+        z.object({
+          browserOrigin: z.string().max(2048),
+        }),
+      )
+      .query(({ input }) => assessBrowserOriginCommand(input)),
+  }),
+
+  onboarding: createRouter({
+    status: protectedProcedure.query(({ ctx: { auth } }) =>
+      getOnboardingStatusCommand(auth),
+    ),
+
+    complete: protectedProcedure.mutation(({ ctx: { auth } }) =>
+      completeOnboardingCommand(auth),
+    ),
+  }),
+
+  taskSuggestions: createRouter({
+    list: protectedProcedure.query(({ ctx: { auth } }) =>
+      listTaskSuggestionsCommand(auth),
+    ),
+
+    history: protectedProcedure
+      .input(
+        z.object({
+          limit: z.number().int().min(1).max(30).default(30),
+          cursor: z.string().optional(),
+          automation: z
+            .enum([
+              'onboarding',
+              'suggest_ideas',
+              'sentry_triage',
+              'dependabot_triage',
+              'security_auditor',
+              'code_quality_auditor',
+            ])
+            .optional(),
+          repository: z.string().optional(),
+          status: z.enum(['proposed', 'accepted', 'ignored', 'all']).optional(),
+        }),
+      )
+      .query(({ ctx: { auth }, input }) =>
+        listTaskSuggestionHistoryCommand(auth, input),
+      ),
+
+    filterOptions: protectedProcedure.query(({ ctx: { auth } }) =>
+      getTaskSuggestionFilterOptionsCommand(auth),
+    ),
+
+    trigger: protectedProcedure.mutation(({ ctx: { auth } }) =>
+      triggerTaskSuggestionsCommand(auth),
+    ),
+
+    dismiss: protectedProcedure
+      .input(
+        z.object({
+          suggestionId: z.string().uuid(),
+        }),
+      )
+      .mutation(({ ctx: { auth }, input }) =>
+        dismissTaskSuggestionCommand(auth, input),
+      ),
+
+    implement: protectedProcedure
+      .input(
+        z.object({
+          suggestionId: z.string().uuid(),
+        }),
+      )
+      .mutation(({ ctx: { auth }, input }) =>
+        implementTaskSuggestionCommand(auth, input),
+      ),
+  }),
+
+  backgroundAgents: automationsRouter,
+  automations: automationsRouter,
+
+  agentBehavior: createRouter({
+    get: protectedProcedure.query(({ ctx: { auth } }) =>
+      getAgentBehaviorSettingsCommand(auth),
+    ),
+
+    update: protectedProcedure
+      .input(
+        z
+          .object({
+            globalAgentInstructions: z.string().max(10_000).nullable(),
+            authorshipInstructions: z.string().max(10_000).nullable(),
+          })
+          .partial(),
+      )
+      .mutation(({ ctx: { auth }, input }) =>
+        updateAgentBehaviorSettingsCommand(auth, input),
+      ),
+  }),
+
+  accessPolicy: createRouter({
+    get: protectedProcedure.query(({ ctx: { auth } }) =>
+      getAccessPolicySettingsCommand(auth),
+    ),
+
+    createInvite: protectedProcedure
+      .input(
+        z.object({
+          label: z.string().trim().max(200).optional(),
+          role: z.enum(['admin', 'member']).optional(),
+          maxUses: z.number().int().min(1).max(1000).optional(),
+          expiresInDays: z.number().int().min(1).max(365).nullish(),
+        }),
+      )
+      .mutation(({ ctx: { auth }, input }) => createInviteCommand(auth, input)),
+
+    revokeInvite: protectedProcedure
+      .input(
+        z.object({
+          inviteId: z.string().uuid(),
+        }),
+      )
+      .mutation(({ ctx: { auth }, input }) => revokeInviteCommand(auth, input)),
+
+    updateUserRole: protectedProcedure
+      .input(
+        z.object({
+          userId: z.string().min(1),
+          role: z.enum(['admin', 'member']),
+        }),
+      )
+      .mutation(({ ctx: { auth }, input }) =>
+        updateUserRoleCommand(auth, input),
+      ),
+
+    removeUser: protectedProcedure
+      .input(
+        z.object({
+          userId: z.string().min(1),
+        }),
+      )
+      .mutation(({ ctx: { auth }, input }) => removeUserCommand(auth, input)),
+
+    createPasswordResetLink: protectedProcedure
+      .input(
+        z.object({
+          userId: z.string().min(1),
+        }),
+      )
+      .mutation(({ ctx: { auth }, input }) =>
+        createPasswordResetLinkCommand(auth, input),
+      ),
+
+    setLicenseKey: protectedProcedure
+      .input(
+        z.object({
+          licenseKey: z.string().trim().max(10_000).nullable(),
+        }),
+      )
+      .mutation(({ ctx: { auth }, input }) =>
+        setLicenseKeyCommand(auth, input),
+      ),
+  }),
+
+  vibes: createRouter({
+    get: protectedProcedure.query(({ ctx: { auth } }) =>
+      getVibesSettingsCommand(auth),
+    ),
+
+    update: protectedProcedure
+      .input(
+        z
+          .object({
+            slackSummonEmoji: z.string().max(255).nullable(),
+            slackAckEmoji: z.string().max(255),
+            slackCompletionEmoji: z.string().max(255),
+            styleGuidance: z.string().max(400).nullable(),
+          })
+          .partial(),
+      )
+      .mutation(({ ctx: { auth }, input }) =>
+        updateVibesSettingsCommand(auth, input),
+      ),
+  }),
+
+  customSkills: createRouter({
+    list: protectedProcedure.query(({ ctx: { auth } }) =>
+      listCustomSkillsCommand(auth),
+    ),
+
+    search: protectedProcedure
+      .input(
+        z.object({
+          query: z.string().max(200),
+        }),
+      )
+      .query(({ ctx: { auth }, input }) =>
+        searchCustomSkillsCommand(auth, input),
+      ),
+
+    setAvailability: protectedProcedure
+      .input(
+        z.object({
+          skillId: z.string().min(3),
+          environmentIds: z.array(z.string().uuid()).min(1),
+        }),
+      )
+      .mutation(({ ctx: { auth }, input }) =>
+        setCustomSkillAvailabilityCommand(auth, input),
+      ),
+
+    saveManual: protectedProcedure
+      .input(
+        z.object({
+          name: z.string().min(1),
+          description: z.string().min(1),
+          content: z.string().min(1),
+          environmentIds: z.array(z.string().uuid()).min(1),
+          previousSkillId: z.string().min(3).optional(),
+        }),
+      )
+      .mutation(({ ctx: { auth }, input }) =>
+        saveManualSkillCommand(auth, input),
+      ),
+
+    remove: protectedProcedure
+      .input(
+        z.object({
+          skillId: z.string().min(3),
+        }),
+      )
+      .mutation(({ ctx: { auth }, input }) =>
+        removeCustomSkillCommand(auth, input),
+      ),
+  }),
+
+  featureFlags: createRouter({
+    getExperimental: protectedProcedure.query(({ ctx: { auth } }) =>
+      getExperimentalFlagsCommand(auth),
+    ),
+
+    setExperimental: protectedProcedure
+      .input(
+        z.object({
+          flag: z.nativeEnum(FeatureFlag),
+          value: z.boolean(),
+        }),
+      )
+      .mutation(({ ctx: { auth }, input }) =>
+        updateExperimentalFlagCommand(auth, input),
+      ),
+  }),
+
+  miscSettings: createRouter({
+    get: protectedProcedure.query(({ ctx: { auth } }) =>
+      getMiscSettingsCommand(auth),
+    ),
+
+    setAnonymousAnalytics: protectedProcedure
+      .input(
+        z.object({
+          enabled: z.boolean(),
+        }),
+      )
+      .mutation(({ ctx: { auth }, input }) =>
+        setAnonymousAnalyticsCommand(auth, input),
+      ),
+  }),
+});
+
+export type AppRouter = typeof appRouter;

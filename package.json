@@ -1,0 +1,131 @@
+{
+  "name": "roomote",
+  "license": "FCL-1.0-ALv2",
+  "packageManager": "pnpm@10.29.3",
+  "engines": {
+    "node": "22.x || 24.x",
+    "pnpm": "10.x"
+  },
+  "scripts": {
+    "prepare": "[ -d .git ] && husky || true",
+    "format": "prettier --write --ignore-unknown \"**/*.{js,jsx,ts,tsx,json,css}\"",
+    "format:check": "prettier --check --ignore-unknown \"**/*.{js,jsx,ts,tsx,json,css}\"",
+    "lint": "pnpm format:check && turbo lint --log-order grouped --output-logs new-only",
+    "lint:fast": "turbo lint --log-order grouped --output-logs new-only",
+    "check-types": "turbo check-types --log-order grouped --output-logs new-only",
+    "check-types:fast": "turbo check-types:fast --log-order grouped --output-logs new-only",
+    "test": "pnpm --silent --filter @roomote/db db:push:test && turbo test --concurrency=1 --log-order grouped --output-logs new-only",
+    "test:ci": "turbo test --concurrency=1 --log-order grouped --output-logs new-only",
+    "knip": "knip",
+    "check": "pnpm lint && pnpm check-types && pnpm test && pnpm knip",
+    "build": "turbo build --log-order grouped --output-logs new-only",
+    "clean": "turbo clean --log-order grouped --output-logs new-only && rimraf logs .docker/data/worker .turbo worker-*.tar.gz*",
+    "infra:up": "docker compose up postgres redis minio caddy-dev -d --wait && docker compose exec -T postgres /docker-entrypoint-initdb.d/create-databases.sh && docker compose up minio-init && pnpm --silent --filter @roomote/db db:migrate && pnpm --silent --filter @roomote/db db:push:test --force",
+    "infra:down": "docker compose down postgres redis minio minio-init caddy-dev",
+    "db:up": "docker compose up postgres redis minio -d --wait && docker compose exec -T postgres /docker-entrypoint-initdb.d/create-databases.sh && docker compose up minio-init && pnpm --silent --filter @roomote/db db:migrate && pnpm --silent --filter @roomote/db db:push:test --force",
+    "db:down": "docker compose down postgres redis minio minio-init",
+    "db:generate": "pnpm --silent --filter @roomote/db db:generate",
+    "db:migrate": "pnpm --silent --filter @roomote/db db:migrate",
+    "db:reset": "pnpm db:down && docker volume rm -f roomote_pg_data roomote_redis_data roomote_minio_data && pnpm db:up",
+    "db:seed": "pnpm --silent --filter @roomote/db db:seed",
+    "db:seed:demo": "pnpm --silent --filter @roomote/db db:seed:demo",
+    "dev": "pnpm --silent --filter @roomote/dev dev",
+    "doctor": "pnpm --filter @roomote/dev run doctor",
+    "knowledge:check": "node .agents/skills/agent-guidance-maintenance/scripts/knowledge-check.mjs",
+    "knowledge:garden": "node .agents/skills/agent-guidance-maintenance/scripts/knowledge-garden.mjs",
+    "knowledge:scorecard": "node .agents/skills/agent-guidance-maintenance/scripts/knowledge-scorecard.mjs",
+    "storybook": "pnpm --filter @roomote/web storybook",
+    "evals": "pnpm eval:router && pnpm eval:router:followup && pnpm eval:authorship",
+    "eval:authorship": "pnpm --filter @roomote/cloud-agents eval:authorship",
+    "eval:router": "pnpm --filter @roomote/cloud-agents eval:router",
+    "eval:router:followup": "pnpm --filter @roomote/cloud-agents eval:router:followup",
+    "eval:router:view": "pnpm --filter @roomote/cloud-agents eval:router:view",
+    "eval:router:share": "pnpm --filter @roomote/cloud-agents eval:router:share"
+  },
+  "devDependencies": {
+    "@dotenvx/dotenvx": "^1.52.0",
+    "@roomote/config-typescript": "workspace:^",
+    "@types/node": "^24.10.13",
+    "@typescript/native-preview": "7.0.0-dev.20260614.1",
+    "eslint": "^9.39.2",
+    "husky": "^9.1.7",
+    "knip": "^5.85.0",
+    "lint-staged": "^16.2.7",
+    "prettier": "^3.8.1",
+    "rimraf": "^6.1.2",
+    "tsx": "4.20.4",
+    "turbo": "^2.9.14",
+    "typescript": "^5.9.3"
+  },
+  "lint-staged": {
+    "*.{js,jsx,ts,tsx,json,css}": [
+      "prettier --write"
+    ],
+    "*.{yml,yaml}": []
+  },
+  "pnpm": {
+    "peerDependencyRules": {
+      "allowAny": [
+        "@smithy/node-http-handler",
+        "google-auth-library"
+      ],
+      "allowedVersions": {
+        "better-auth>better-sqlite3": "11.10.0",
+        "better-call>zod": "^4.3.6"
+      }
+    },
+    "packageExtensions": {
+      "streamdown@2.1.0": {
+        "dependencies": {
+          "shiki": "^3.19.0"
+        }
+      }
+    },
+    "overrides": {
+      "@eslint/eslintrc>ajv": "6.14.0",
+      "@opentelemetry/core": "2.8.0",
+      "@smithy/types": "^4.14.3",
+      "@vercel/routing-utils>ajv": "6.14.0",
+      "@vercel/routing-utils>path-to-regexp": "6.3.0",
+      "unicorn-magic": "0.2.0",
+      "dompurify": "3.4.9",
+      "esbuild": "^0.28.1",
+      "engine.io>ws": "8.21.0",
+      "eslint>ajv": "6.14.0",
+      "form-data": "4.0.6",
+      "vite": ">=7.3.2 <8",
+      "next>postcss": "^8.5.14",
+      "tmp": ">=0.2.6",
+      "glob": ">=13.0.3",
+      "http-proxy>follow-redirects": "1.16.0",
+      "ioredis": "5.10.1",
+      "better-auth>zod": "^4.3.6",
+      "@better-auth/core>zod": "^4.3.6",
+      "js-cookie": "3.0.7",
+      "js-yaml": "4.2.0",
+      "nise>path-to-regexp": "8.4.0",
+      "protobufjs": "7.6.3",
+      "qs": "6.15.2",
+      "router>path-to-regexp": "8.4.0",
+      "socket.io>socket.io-adapter": "2.5.8",
+      "socket.io-adapter>ws": "8.21.0",
+      "tar": "7.5.16",
+      "zod": "^3.25.76",
+      "astro>zod": "^4.3.6",
+      "knip>zod": "^4.1.11",
+      "@streamdown/mermaid>mermaid": "11.15.0",
+      "dagre-d3-es>lodash-es": "4.18.1",
+      "jws": ">=4.0.1",
+      "jayson>uuid": "11.1.1",
+      "preact": ">=10.26.10",
+      "smol-toml": "1.6.1",
+      "undici": "^7.28.0",
+      "diff": ">=5.2.2",
+      "flatted": "^3.4.2",
+      "@protobufjs/utf8": "1.1.1",
+      "tsx": "4.20.4",
+      "webpack": "5.104.1",
+      "yaml-language-server>yaml": "2.8.3"
+    }
+  }
+}

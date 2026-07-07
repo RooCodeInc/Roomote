@@ -1,0 +1,126 @@
+name: Integration issue
+description: Report problems with Slack, Teams, Telegram, Linear, GitHub, GitLab, Gitea, Azure DevOps, MCP, or source control integrations.
+title: "[Integration]: "
+labels: ["integration", "needs-triage"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Use this for integration setup, OAuth, webhook delivery, permissions, inbound event routing, outbound messages or comments, and integration-specific Roomote agent behavior.
+  - type: checkboxes
+    id: preflight
+    attributes:
+      label: Preflight
+      options:
+        - label: I searched existing issues and docs before opening this.
+          required: true
+        - label: I removed secrets, tokens, private keys, customer data, and private repository details from logs and screenshots.
+          required: true
+        - label: I checked the provider-side delivery logs or app installation status where available.
+          required: true
+  - type: dropdown
+    id: integration
+    attributes:
+      label: Integration
+      options:
+        - Slack
+        - Teams
+        - Telegram
+        - Linear
+        - GitHub
+        - GitLab
+        - Gitea
+        - Azure DevOps
+        - MCP
+        - Other
+    validations:
+      required: true
+  - type: dropdown
+    id: problem-area
+    attributes:
+      label: Problem area
+      multiple: true
+      options:
+        - Setup or installation
+        - OAuth or authentication
+        - Webhook delivery
+        - Inbound event routing
+        - Outbound message, comment, or status delivery
+        - Permissions
+        - Agent behavior after event receipt
+        - Callback URL or public URL
+        - Other
+    validations:
+      required: true
+  - type: textarea
+    id: summary
+    attributes:
+      label: Summary
+      description: What integration behavior is broken?
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Roomote version
+      description: Commit SHA, release version, or Docker image tag.
+    validations:
+      required: true
+  - type: textarea
+    id: setup
+    attributes:
+      label: Integration setup
+      description: Describe the relevant integration configuration without secrets.
+      placeholder: |
+        Self-hosted public URL:
+        Callback or webhook URL shape:
+        App installed or connected:
+        Workspace / org / repository scope:
+        Event or action attempted:
+    validations:
+      required: true
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: Steps to reproduce
+      description: Provide exact steps someone else can follow.
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual behavior
+    validations:
+      required: true
+  - type: textarea
+    id: provider-ids
+    attributes:
+      label: Provider-side details
+      description: Include delivery IDs, request IDs, event types, timestamps, or installation IDs if available. Redact private data.
+      placeholder: |
+        Event type:
+        Delivery/request ID:
+        Timestamp:
+        Provider status/error:
+    validations:
+      required: false
+  - type: textarea
+    id: diagnostics
+    attributes:
+      label: Diagnostics output
+      description: If available, paste output from the Roomote diagnostics page or command. Redact secrets and private data.
+    validations:
+      required: false
+  - type: textarea
+    id: logs
+    attributes:
+      label: Relevant logs or screenshots
+      render: shell
+    validations:
+      required: false

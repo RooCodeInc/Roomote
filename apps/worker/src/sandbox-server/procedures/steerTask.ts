@@ -1,0 +1,231 @@
+import { TRPCError } from '@trpc/server';
+import { z } from 'zod';
+import { isActiveTaskPhase } from '../lib/harness-manager';
+import { publicProcedure } from '../trpc';
+import { getFollowUpWorkflowPhase } from '../../run-task/workflow-phase';
+import {
+  clearLatestUserMessageForSlackThreadQuote,
+  trackLatestUserMessageForSlackThreadQuote,
+} from './slackQuoteTracking';
+import { recordSandboxPromptSlackTurnStart } from './slackReplyTurnTracking';
+
+/**
+ * Interrupt the current turn and immediately send a steering prompt in the
+ * same session.
+ */
+export const steerTask = publicProcedure
+  .input(
+    z
+      .object({
+        prompt: z.string(),
+        images: z.array(z.string()).optional(),
+        userName: z.string().optional(),
+      })
+      .refine(
+        (data) =>
+          data.prompt.trim().length > 0 ||
+          (data.images !== undefined && data.images.length > 0),
+        {
+          message: 'Either prompt text or images must be provided',
+          path: ['prompt'],
+        },
+      ),
+  )
+  .mutation(async ({ input, ctx }) => {
+    const workflowPhase = getFollowUpWorkflowPhase(input.prompt);
+
+    if (!ctx.harnessManager) {
+      throw new TRPCError({
+        code: 'PRECONDITION_FAILED',
+        message: 'Harness manager is not available',
+      });
+    }
+
+    const userId =
+      ctx.auth && 'userId' in ctx.auth ? ctx.auth.userId : undefined;
+
+    const status = ctx.harnessManager.getStatus();
+    const hasActiveTurn = isActiveTaskPhase(status.phase);
+
+    if (hasActiveTurn && ctx.harnessManager.supportsNativeTurnSteering) {
+      const canDeliver =
+        (await ctx.prepareActorScopedTurn?.(userId, {
+          allowMcpReconnect: false,
+        })) !== false;
+
+      if (!canDeliver) {
+        throw new TRPCError({
+          code: 'PRECONDITION_FAILED',
+          message:
+            'Failed to prepare actor-scoped credentials for this steering prompt. Please retry.',
+        });
+      }
+
+      let trackedSlackQuote = false;
+
+      try {
+        trackedSlackQuote = await trackLatestUserMessageForSlackThreadQuote({
+          cloudJobId: ctx.cloudJobId,
+          text: input.prompt,
+          userName: input.userName,
+          logPrefix: 'steerTask',
+          warn: (message) => ctx.harnessLogger?.warn(message),
+        });
+
+        const success = ctx.harnessManager.sendFollowUpPrompt({
+          prompt: input.prompt,
+          images: input.images,
+          ...(workflowPhase ? { workflowPhase } : {}),
+          autoSteerWhenQueued: true,
+          userId,
+        });
+
+        if (!success) {
+          throw new TRPCError({
+            code: 'INTERNAL_SERVER_ERROR',
+            message: 'Failed to steer task',
+          });
+        }
+
+        recordSandboxPromptSlackTurnStart({
+          source: 'steer',
+          stateFilePath: ctx.slackReplySatisfactionStateFile,
+        });
+      } catch (error) {
+        if (trackedSlackQuote) {
+          await clearLatestUserMessageForSlackThreadQuote({
+            cloudJobId: ctx.cloudJobId,
+            logPrefix: 'steerTask',
+            warn: (message) => ctx.harnessLogger?.warn(message),
+          });
+        }
+
+        throw error;
+      }
+
+      return { success: true };
+    }
+
+    if (!hasActiveTurn) {
+      const canDeliver = (await ctx.prepareActorScopedTurn?.(userId)) !== false;
+
+      if (!canDeliver) {
+        throw new TRPCError({
+          code: 'PRECONDITION_FAILED',
+          message:
+            'Failed to prepare actor-scoped credentials for this steering prompt. Please retry.',
+        });
+      }
+
+      let trackedSlackQuote = false;
+
+      try {
+        trackedSlackQuote = await trackLatestUserMessageForSlackThreadQuote({
+          cloudJobId: ctx.cloudJobId,
+          text: input.prompt,
+          userName: input.userName,
+          logPrefix: 'steerTask',
+          warn: (message) => ctx.harnessLogger?.warn(message),
+        });
+
+        const success = ctx.harnessManager.sendFollowUpPrompt({
+          prompt: input.prompt,
+          images: input.images,
+          ...(workflowPhase ? { workflowPhase } : {}),
+          userId,
+        });
+
+        if (!success) {
+          throw new TRPCError({
+            code: 'INTERNAL_SERVER_ERROR',
+            message: 'Failed to steer task',
+          });
+        }
+
+        recordSandboxPromptSlackTurnStart({
+          source: 'steer',
+          stateFilePath: ctx.slackReplySatisfactionStateFile,
+        });
+      } catch (error) {
+        if (trackedSlackQuote) {
+          await clearLatestUserMessageForSlackThreadQuote({
+            cloudJobId: ctx.cloudJobId,
+            logPrefix: 'steerTask',
+            warn: (message) => ctx.harnessLogger?.warn(message),
+          });
+        }
+
+        throw error;
+      }
+
+      return { success: true };
+    }
+
+    // Cancel the active turn and wait for it to fully exit before sending the
+    // steer prompt. Using the fire-and-forget cancelTask() races against the
+    // harness settling, causing sendFollowUpPrompt() to return false while the
+    // harness is still in a transitional state.
+    const didCancelActiveTurn =
+      await ctx.harnessManager.cancelTaskAndWaitForTurnExit();
+
+    if (!didCancelActiveTurn) {
+      throw new TRPCError({
+        code: 'PRECONDITION_FAILED',
+        message:
+          'Failed to interrupt the active turn before steering. Please retry.',
+      });
+    }
+
+    const canDeliver = (await ctx.prepareActorScopedTurn?.(userId)) !== false;
+
+    if (!canDeliver) {
+      throw new TRPCError({
+        code: 'PRECONDITION_FAILED',
+        message:
+          'Failed to prepare actor-scoped credentials for this steering prompt. Please retry.',
+      });
+    }
+
+    let trackedSlackQuote = false;
+
+    try {
+      trackedSlackQuote = await trackLatestUserMessageForSlackThreadQuote({
+        cloudJobId: ctx.cloudJobId,
+        text: input.prompt,
+        userName: input.userName,
+        logPrefix: 'steerTask',
+        warn: (message) => ctx.harnessLogger?.warn(message),
+      });
+
+      const success = ctx.harnessManager.sendFollowUpPrompt({
+        prompt: input.prompt,
+        images: input.images,
+        ...(workflowPhase ? { workflowPhase } : {}),
+        userId,
+      });
+
+      if (!success) {
+        throw new TRPCError({
+          code: 'INTERNAL_SERVER_ERROR',
+          message: 'Failed to steer task',
+        });
+      }
+
+      recordSandboxPromptSlackTurnStart({
+        source: 'steer',
+        stateFilePath: ctx.slackReplySatisfactionStateFile,
+      });
+    } catch (error) {
+      if (trackedSlackQuote) {
+        await clearLatestUserMessageForSlackThreadQuote({
+          cloudJobId: ctx.cloudJobId,
+          logPrefix: 'steerTask',
+          warn: (message) => ctx.harnessLogger?.warn(message),
+        });
+      }
+
+      throw error;
+    }
+
+    return { success: true };
+  });

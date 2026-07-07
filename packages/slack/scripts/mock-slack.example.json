@@ -1,0 +1,54 @@
+{
+  "port": 3012,
+  "roomoteTarget": {
+    "webhookUrl": "http://localhost:4000/api/webhooks/slack"
+  },
+  "_note": "roomoteTarget.signingSecret defaults to Env.SLACK_SIGNING_SECRET from the dotenvx-loaded environment when omitted.",
+  "state": {
+    "team": {
+      "id": "TROOMOTE",
+      "domain": "roomote-mock",
+      "timezone": "America/Los_Angeles"
+    },
+    "acceptedBotTokens": [],
+    "_acceptedBotTokensNote": "Empty array means accept all bot tokens. Set one or more explicit tokens only when you want auth validation.",
+    "botUserId": "BROOMOTE",
+    "channels": [
+      {
+        "id": "C123ABC456",
+        "name": "product-debug",
+        "type": "public_channel",
+        "isMember": true,
+        "members": ["UDAN", "UROOMOTE"]
+      }
+    ],
+    "users": [
+      {
+        "id": "UROOMOTE",
+        "name": "roomote",
+        "displayName": "Roomote"
+      },
+      {
+        "id": "UDAN",
+        "name": "dan",
+        "displayName": "Dan Riccio",
+        "email": "local@roomote.dev"
+      }
+    ],
+    "messages": []
+  },
+  "replay": [
+    {
+      "kind": "event_callback",
+      "eventId": "evt-1",
+      "event": {
+        "type": "app_mention",
+        "channel": "C123ABC456",
+        "user": "UDAN",
+        "text": "<@UROOMOTE> !fast what file handles Slack mentions?",
+        "ts": "1710000000.000100",
+        "channel_type": "channel"
+      }
+    }
+  ]
+}

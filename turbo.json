@@ -1,0 +1,24 @@
+{
+  "$schema": "https://turbo.build/schema.json",
+  "globalPassThroughEnv": [
+    "APP_ENV",
+    "DATABASE_URL",
+    "MISE_DATA_DIR",
+    "MISE_CACHE_DIR",
+    "SKIP_ENV_VALIDATION",
+    "PREVIEW_ALLOWED_ORG_IDS",
+    "ROUTER_DEBUG_CHANNEL_ID"
+  ],
+  "tasks": {
+    "format": {},
+    "format:check": {},
+    "lint": {},
+    "check-types": {},
+    "check-types:fast": {},
+    "test": {},
+    "build": {},
+    "clean": {
+      "cache": false
+    }
+  }
+}

@@ -1,0 +1,283 @@
+import type { ComputeProvider } from '@roomote/types';
+
+export type {
+  ComputeProviderMutationEvent,
+  ComputeProviderMutationObserver,
+  ComputeProviderMutationOperation,
+} from '@roomote/types';
+
+export type ComputeInstanceStatus =
+  | 'pending'
+  | 'running'
+  | 'stopping'
+  | 'stopped'
+  | 'failed'
+  | 'snapshotting'
+  | 'unknown';
+
+import type { ComputeProviderCapabilities } from '@roomote/types';
+
+export type { ComputeProviderCapabilities } from '@roomote/types';
+
+export interface CreateInstanceInput {
+  ports?: number[];
+  metadata?: Record<string, string>;
+  tags?: Record<string, string>;
+  signal?: AbortSignal;
+}
+
+export interface ResumeInstanceInput extends CreateInstanceInput {
+  sourceSnapshotId: string;
+}
+
+export interface CreatedInstance {
+  instanceId: string;
+  status?: ComputeInstanceStatus;
+  sourceSnapshotId?: string;
+  domains?: Record<string, string>;
+}
+
+export interface DestroyInstanceInput {
+  instanceId: string;
+  signal?: AbortSignal;
+}
+
+export interface ComputeUsageObservation {
+  activeCpuDurationMs?: number;
+  networkTransfer?: {
+    ingress: number;
+    egress: number;
+  };
+}
+
+export interface DestroyInstanceResult {
+  usageObservation?: ComputeUsageObservation;
+}
+
+export type OutputCallback = (event: CommandOutputEvent) => void;
+
+export interface RunCommandInput {
+  instanceId: string;
+  cmd: string;
+  args?: string[];
+  cwd?: string;
+  env?: Record<string, string>;
+  detached?: boolean;
+  signal?: AbortSignal;
+  onOutput?: OutputCallback;
+}
+
+export interface RunCommandResult {
+  commandId?: string;
+  exitCode: number | null;
+  stdout?: string;
+  stderr?: string;
+}
+
+export interface CommandOutputEvent {
+  stream: 'stdout' | 'stderr';
+  data: string;
+}
+
+export interface StreamCommandOutputInput {
+  instanceId: string;
+  commandId: string;
+  signal?: AbortSignal;
+}
+
+export interface GetCommandOutputInput {
+  instanceId: string;
+  commandId: string;
+  stream?: 'stdout' | 'stderr' | 'both';
+  signal?: AbortSignal;
+}
+
+export interface GetInstanceStatusInput {
+  instanceId: string;
+  signal?: AbortSignal;
+}
+
+export interface GetInstanceStatusResult {
+  status: ComputeInstanceStatus;
+  timeoutRemainingMs?: number;
+}
+
+export interface GetInstanceDomainsInput {
+  instanceId: string;
+  ports: number[];
+  signal?: AbortSignal;
+}
+
+export interface GetInstanceDomainsResult {
+  domains: Record<string, string>;
+}
+
+export interface WriteFileInput {
+  instanceId: string;
+  files: { path: string; content: Buffer }[];
+  signal?: AbortSignal;
+}
+
+export interface CreateSnapshotInput {
+  instanceId: string;
+  signal?: AbortSignal;
+}
+
+export interface CreateSnapshotResult {
+  snapshotId: string;
+  usageObservation?: ComputeUsageObservation;
+}
+
+export interface SourceInstanceSnapshot {
+  snapshotId: string;
+  sourceInstanceId: string;
+  status: 'created' | 'failed' | 'deleted';
+  createdAt: Date;
+  expiresAt?: Date;
+}
+
+export interface FindSnapshotBySourceInstanceInput {
+  instanceId: string;
+  since?: Date;
+  until?: Date;
+  signal?: AbortSignal;
+}
+
+export interface InstanceSummary {
+  instanceId: string;
+  status: ComputeInstanceStatus;
+  /** Milliseconds remaining before the instance times out. */
+  timeoutRemainingMs: number;
+  createdAt?: Date;
+}
+
+export interface ListInstancesInput {
+  signal?: AbortSignal;
+}
+
+export interface ComputeProviderClient {
+  readonly vendor: ComputeProvider;
+  readonly capabilities: ComputeProviderCapabilities;
+
+  listInstances(input: ListInstancesInput): Promise<InstanceSummary[]>;
+
+  getInstanceStatus(
+    input: GetInstanceStatusInput,
+  ): Promise<GetInstanceStatusResult>;
+  getInstanceDomains?(
+    input: GetInstanceDomainsInput,
+  ): Promise<GetInstanceDomainsResult>;
+  createInstance(input: CreateInstanceInput): Promise<CreatedInstance>;
+  destroyInstance(input: DestroyInstanceInput): Promise<DestroyInstanceResult>;
+
+  runCommand(input: RunCommandInput): Promise<RunCommandResult>;
+  streamCommandOutput(
+    input: StreamCommandOutputInput,
+  ): AsyncIterable<CommandOutputEvent>;
+  getCommandOutput(input: GetCommandOutputInput): Promise<string>;
+
+  writeFiles(input: WriteFileInput): Promise<void>;
+
+  createSnapshot(input: CreateSnapshotInput): Promise<CreateSnapshotResult>;
+  findSnapshotBySourceInstance?(
+    input: FindSnapshotBySourceInstanceInput,
+  ): Promise<SourceInstanceSnapshot | null>;
+  resumeFromSnapshot(input: ResumeInstanceInput): Promise<CreatedInstance>;
+}
+
+export interface ModalConfig {
+  /** Modal token ID (e.g. `ak-...`). */
+  tokenId: string;
+  /** Modal token secret (e.g. `as-...`). */
+  tokenSecret: string;
+  /** Custom gRPC endpoint for the Modal API. */
+  endpoint?: string;
+  /** Modal environment name. */
+  environment?: string;
+  /** Modal app name used to group sandboxes. Defaults to `"roomote"`. */
+  appName?: string;
+  /** Baked worker image reference for fresh sandboxes. */
+  baseImageRef: string;
+  /** Static username for private non-ECR registry pulls. */
+  registryUsername?: string;
+  /** Static access token or password for private non-ECR registry pulls. */
+  registryPassword?: string;
+  /** AWS IAM role ARN used by Modal OIDC for ECR pulls. */
+  ecrOidcRoleArn?: string;
+  /** AWS region for ECR pulls in OIDC mode. */
+  ecrRegion?: string;
+  /** Maximum sandbox lifetime in milliseconds. Modal defaults to 5 minutes if unset. */
+  timeoutMs?: number;
+  /** CPU core reservation (can be fractional, e.g. 8). */
+  cpu?: number;
+  /** Hard CPU cap in physical cores (can be fractional, e.g. 8). */
+  cpuLimit?: number;
+  /** Memory reservation in MiB (e.g. 16384 for 16 GB). */
+  memoryMiB?: number;
+  /** Hard memory cap in MiB (e.g. 16384 for 16 GB). */
+  memoryLimitMiB?: number;
+}
+
+export interface DockerConfig {
+  /** Local Docker image used for worker containers. */
+  image?: string;
+}
+
+export interface DaytonaConfig {
+  /** Daytona API key (`DAYTONA_API_KEY`). */
+  apiKey: string;
+  /** Custom Daytona API URL (`DAYTONA_API_URL`). Defaults to the Daytona cloud. */
+  apiUrl?: string;
+  /** Target region for new sandboxes (`DAYTONA_TARGET`). */
+  target?: string;
+  /**
+   * Name of the Daytona snapshot used as the base image for fresh sandboxes
+   * (`DAYTONA_SNAPSHOT_NAME`). The snapshot must exist in the authenticated
+   * Daytona organization and is typically registered once from the public
+   * Roomote worker image.
+   */
+  snapshotName: string;
+  /** Maximum sandbox lifetime in milliseconds, enforced via auto-stop. */
+  timeoutMs?: number;
+}
+
+export interface E2bConfig {
+  /** E2B API key (`E2B_API_KEY`). */
+  apiKey: string;
+  /** Custom E2B domain (`E2B_DOMAIN`) for self-hosted clusters. Defaults to the E2B cloud. */
+  domain?: string;
+  /**
+   * ID or name of the E2B template used as the base image for fresh sandboxes
+   * (`E2B_TEMPLATE_ID`). The template must exist in the authenticated E2B
+   * team and is typically built once from the public Roomote worker image.
+   */
+  templateId: string;
+  /** Maximum sandbox lifetime in milliseconds, enforced via the sandbox timeout. */
+  timeoutMs?: number;
+}
+
+export type ComputeProviderFactoryOptions = (
+  | {
+      provider: 'modal';
+      config?: ModalConfig;
+    }
+  | {
+      provider: 'docker';
+      config?: DockerConfig;
+    }
+  | {
+      provider: 'daytona';
+      config?: DaytonaConfig;
+    }
+  | {
+      provider: 'e2b';
+      config?: E2bConfig;
+    }
+) & {
+  /**
+   * Pre-resolved env values consulted before `process.env` when a config
+   * field is not set explicitly. Lets callers with database access supply
+   * deployment env vars saved during setup without mutating `process.env`.
+   */
+  envFallback?: Partial<Record<string, string>>;
+};

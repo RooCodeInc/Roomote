@@ -1,0 +1,222 @@
+const {
+  mockRepositoriesFindFirst,
+  mockAuthAccountsFindFirst,
+  mockSelectWhere,
+  mockGetReviewCodeAutomationSettings,
+  mockAnd,
+  mockEq,
+  mockOr,
+  mockDesc,
+} = vi.hoisted(() => ({
+  mockRepositoriesFindFirst: vi.fn(),
+  mockAuthAccountsFindFirst: vi.fn(),
+  mockSelectWhere: vi.fn(),
+  mockGetReviewCodeAutomationSettings: vi.fn(),
+  mockAnd: vi.fn((...args: unknown[]) => args),
+  mockEq: vi.fn((left: unknown, right: unknown) => ({ left, right })),
+  mockOr: vi.fn((...args: unknown[]) => args),
+  mockDesc: vi.fn((value: unknown) => value),
+}));
+
+vi.mock('@roomote/db/server', () => ({
+  db: {
+    query: {
+      repositories: {
+        findFirst: (arg: unknown) => mockRepositoriesFindFirst(arg),
+      },
+      authAccounts: {
+        findFirst: (arg: unknown) => mockAuthAccountsFindFirst(arg),
+      },
+    },
+    select: vi.fn(() => ({
+      from: vi.fn(() => ({
+        where: (...args: unknown[]) => mockSelectWhere(...args),
+      })),
+    })),
+  },
+  repositories: {
+    sourceControlProvider: 'repositories.sourceControlProvider',
+    isActive: 'repositories.isActive',
+    externalRepoId: 'repositories.externalRepoId',
+    fullName: 'repositories.fullName',
+  },
+  authAccounts: {
+    providerId: 'authAccounts.providerId',
+    accountId: 'authAccounts.accountId',
+    updatedAt: 'authAccounts.updatedAt',
+  },
+  environmentRepositoryMappings: {
+    environmentId: 'environmentRepositoryMappings.environmentId',
+    repositoryId: 'environmentRepositoryMappings.repositoryId',
+  },
+  getReviewCodeAutomationSettings: () => mockGetReviewCodeAutomationSettings(),
+  eq: (left: unknown, right: unknown) => mockEq(left, right),
+  and: (...args: unknown[]) => mockAnd(...args),
+  or: (...args: unknown[]) => mockOr(...args),
+  desc: (value: unknown) => mockDesc(value),
+}));
+
+import { CloudAgentType } from '@roomote/types';
+
+import { getGiteaAutomationTargets } from '../getGiteaAutomationTargets';
+
+describe('getGiteaAutomationTargets', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+
+    mockRepositoriesFindFirst.mockResolvedValue({
+      id: 'repo-1',
+      fullName: 'acme/backend',
+      linkedByUserId: 'repo-owner-1',
+    });
+    mockAuthAccountsFindFirst.mockResolvedValue(null);
+    mockSelectWhere.mockResolvedValue([{ environmentId: 'env-1' }]);
+    mockGetReviewCodeAutomationSettings.mockResolvedValue({
+      enabled: true,
+      reviewAllPullRequestAuthors: false,
+    });
+  });
+
+  it('returns reviewer targets for active synced Gitea repositories', async () => {
+    const result = await getGiteaAutomationTargets({
+      type: CloudAgentType.PrReviewer,
+      payload: {
+        repository: { id: 42, full_name: 'acme/backend' },
+        sender: { id: 987, login: 'roomote-bot' },
+      },
+    });
+
+    expect(result).toMatchObject({
+      status: 'ok',
+      targets: [
+        {
+          id: 'gitea:PR Reviewer:repo-1',
+          userId: 'repo-owner-1',
+        },
+      ],
+    });
+  });
+
+  it('enforces environment mapping for review automation', async () => {
+    mockSelectWhere.mockResolvedValue([]);
+
+    const result = await getGiteaAutomationTargets({
+      type: CloudAgentType.PrReviewer,
+      payload: {
+        repository: { id: 42, full_name: 'acme/backend' },
+        sender: { id: 987, login: 'roomote-bot' },
+      },
+    });
+
+    expect(result).toEqual({
+      status: 'error',
+      message:
+        'no environment mapping associated with [gitea:42, acme/backend]',
+    });
+  });
+
+  it('applies PR author policy unless explicitly ignored', async () => {
+    await expect(
+      getGiteaAutomationTargets({
+        type: CloudAgentType.PrReviewer,
+        payload: {
+          repository: { id: 42, full_name: 'acme/backend' },
+          sender: { id: 987, login: 'alice' },
+        },
+      }),
+    ).resolves.toEqual({
+      status: 'error',
+      message: 'Gitea PR author is not allowed: alice',
+    });
+
+    await expect(
+      getGiteaAutomationTargets({
+        type: CloudAgentType.PrReviewer,
+        payload: {
+          repository: { id: 42, full_name: 'acme/backend' },
+          sender: { id: 987, login: 'alice' },
+        },
+        ignoreAuthorPolicy: true,
+      }),
+    ).resolves.toMatchObject({ status: 'ok' });
+  });
+
+  it('uses the linked Gitea commenter account for comment-triggered work', async () => {
+    mockAuthAccountsFindFirst.mockResolvedValue({ userId: 'commenter-user-1' });
+
+    const result = await getGiteaAutomationTargets({
+      type: CloudAgentType.PrReviewer,
+      payload: {
+        repository: { id: 42, full_name: 'acme/backend' },
+        sender: { id: 10, login: 'repo-owner' },
+        commentAuthor: { id: 987, login: 'alice' },
+      },
+      ignoreAuthorPolicy: true,
+      requireLinkedSenderAccount: true,
+    });
+
+    expect(result).toMatchObject({
+      status: 'ok',
+      targets: [
+        {
+          id: 'gitea:PR Reviewer:repo-1',
+          userId: 'commenter-user-1',
+        },
+      ],
+    });
+    expect(mockAuthAccountsFindFirst).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.arrayContaining([
+          expect.objectContaining({
+            left: 'authAccounts.accountId',
+            right: '987',
+          }),
+        ]),
+      }),
+    );
+  });
+
+  it('returns account_link_required before environment gating for unlinked commenters', async () => {
+    mockSelectWhere.mockResolvedValue([]);
+
+    const result = await getGiteaAutomationTargets({
+      type: CloudAgentType.PrReviewer,
+      payload: {
+        repository: { id: 42, full_name: 'acme/backend' },
+        sender: { id: 10, login: 'repo-owner' },
+        commentAuthor: { id: 987, login: 'alice' },
+      },
+      ignoreAuthorPolicy: true,
+      requireLinkedSenderAccount: true,
+    });
+
+    expect(result).toEqual({
+      status: 'error',
+      code: 'account_link_required',
+      message: 'Gitea user alice is not linked to a Roomote user',
+    });
+    expect(mockGetReviewCodeAutomationSettings).not.toHaveBeenCalled();
+  });
+
+  it('still enforces environment mapping after a linked sender is resolved', async () => {
+    mockAuthAccountsFindFirst.mockResolvedValue({ userId: 'commenter-user-1' });
+    mockSelectWhere.mockResolvedValue([]);
+
+    const result = await getGiteaAutomationTargets({
+      type: CloudAgentType.PrReviewer,
+      payload: {
+        repository: { id: 42, full_name: 'acme/backend' },
+        sender: { id: 10, login: 'repo-owner' },
+        commentAuthor: { id: 987, login: 'alice' },
+      },
+      ignoreAuthorPolicy: true,
+      requireLinkedSenderAccount: true,
+    });
+
+    expect(result).toEqual({
+      status: 'error',
+      message:
+        'no environment mapping associated with [gitea:42, acme/backend]',
+    });
+  });
+});

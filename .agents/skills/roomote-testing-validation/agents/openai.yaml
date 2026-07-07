@@ -1,0 +1,4 @@
+interface:
+  display_name: "Roomote Testing"
+  short_description: "Roomote test and validation workflow"
+  default_prompt: "Use $roomote-testing-validation to choose the correct Roomote test, typecheck, and validation commands for this change."

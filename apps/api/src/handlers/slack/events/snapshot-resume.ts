@@ -1,0 +1,229 @@
+import {
+  ALL_REPOSITORIES,
+  CloudTaskType,
+  populateSnapshotResumeSlackMetadata,
+  restoreSnapshotResumeVisiblePromptFields,
+} from '@roomote/types';
+import { withContention } from '@roomote/redis';
+import { enqueueCloudTask } from '@roomote/cloud-agents/server';
+import {
+  appendSlackVideoDescriptionsToText,
+  clearLatestUserMessage,
+  collectAndProcessThreadImages,
+  getPromptReadyThreadMessages,
+  getLatestSlackBotReply,
+  queueSlackMessage,
+  resolveCurrentSlackMessageFiles,
+  SlackThreadDeliveryTracker,
+  type SlackEvent,
+  type SlackNotifier,
+} from '@roomote/slack';
+import { and, cloudJobs, db, desc, eq, gt } from '@roomote/db/server';
+import {
+  appendAttachmentTextsToPromptText,
+  stripLeadingRawSlackMention,
+  stripLeadingSlackProductMention,
+} from '@roomote/cloud-agents';
+
+import { apiLogger } from '../../../logging.js';
+import {
+  buildResolvedCurrentMessageText,
+  processSlackAttachments,
+} from '../helpers/attachments.js';
+import { getIsSlackDiverged } from '../helpers/thread-sync.js';
+
+type CompletedSlackJob = {
+  id: number;
+  userId: string | null;
+  snapshotId: string | null;
+  payload: unknown;
+  port: number | null;
+};
+
+export async function processSnapshotResume(
+  event: SlackEvent,
+  slack: SlackNotifier,
+  completedJob: CompletedSlackJob,
+  threadId: string,
+  userId: string,
+  ackEmoji: string,
+  completionEmoji: string,
+  botUserId?: string,
+): Promise<boolean> {
+  const deliveryTracker = new SlackThreadDeliveryTracker(
+    event.channel,
+    threadId,
+  );
+  const completedPayload = completedJob.payload as Record<string, unknown>;
+  const repo =
+    typeof completedPayload?.repo === 'string'
+      ? completedPayload.repo
+      : ALL_REPOSITORIES;
+  const environmentId =
+    typeof completedPayload?.environmentId === 'string'
+      ? completedPayload.environmentId
+      : undefined;
+  const logContext = `snapshot resume cloud job in ${event.channel}:${threadId}`;
+
+  const [promptReadyThreadMessages, normalizedMessageText, trackedBotReply] =
+    await Promise.all([
+      getPromptReadyThreadMessages({
+        slack,
+        channel: event.channel,
+        threadTs: threadId,
+        botUserId,
+        startedMessageJobId: completedJob.id,
+        logContext,
+      }),
+      slack.normalizeIncomingText(stripLeadingRawSlackMention(event.text)),
+      getLatestSlackBotReply(event.channel, threadId),
+    ]);
+  const messageText = stripLeadingSlackProductMention(normalizedMessageText);
+  const currentMessageFiles = resolveCurrentSlackMessageFiles({
+    currentMessageTs: event.ts,
+    eventFiles: event.files,
+    messages: promptReadyThreadMessages.messages,
+  });
+  const promptRelevantThreadMessages =
+    promptReadyThreadMessages.promptRelevantMessages;
+  const attachments = await processSlackAttachments({
+    slack,
+    files: currentMessageFiles,
+    userId: completedJob.userId ?? undefined,
+    userTextContext: stripLeadingSlackProductMention(
+      stripLeadingRawSlackMention(event.text),
+    ),
+  });
+  const currentMessageTextWithVideoDescriptions =
+    appendSlackVideoDescriptionsToText({
+      text: appendAttachmentTextsToPromptText({
+        text: messageText,
+        attachmentTexts: attachments.attachmentTexts,
+      }),
+      videoDescriptions: attachments.videoDescriptions,
+    });
+  const excludeFileIds = currentMessageFiles
+    ? new Set(currentMessageFiles.map((file) => file.id))
+    : undefined;
+  const isSlackDiverged = await getIsSlackDiverged({
+    cloudJobId: completedJob.id,
+    trackedBotReply,
+  });
+  const {
+    currentMessageText: messageTextWithVideoDescriptions,
+    claimedImageUris,
+    formattedPrompt,
+    turnPolicy,
+  } = await deliveryTracker.buildContinuationPrompt({
+    currentMessageTs: event.ts,
+    currentMessageText: currentMessageTextWithVideoDescriptions,
+    resolveCurrentMessageText: (claimedMessages) =>
+      buildResolvedCurrentMessageText({
+        slack,
+        claimedMessages,
+        excludeFileIds,
+        logContext,
+        userId: completedJob.userId ?? undefined,
+        messageText,
+        currentAttachmentTexts: attachments.attachmentTexts,
+        currentVideoDescriptions: attachments.videoDescriptions,
+      }),
+    fetchThreadMessages: async () => promptRelevantThreadMessages,
+    normalizeMessageText: (text) => slack.normalizeIncomingText(text),
+    processMessageFiles: (messages) =>
+      collectAndProcessThreadImages({
+        processSlackFiles: (files) => slack.processSlackFiles(files),
+        messages,
+        excludeFileIds,
+        logContext,
+      }),
+    getTrackedBotReply: async () => trackedBotReply,
+    isSlackDiverged,
+    botUserId,
+  });
+
+  try {
+    const allImages = [...attachments.images, ...claimedImageUris];
+    const queuedSlackMessage = {
+      text: messageTextWithVideoDescriptions,
+      user: event.user,
+      userId,
+      ts: event.ts,
+      images: allImages.length > 0 ? allImages : undefined,
+      formattedPrompt,
+      turnPolicy,
+    };
+    const payloadBase = {
+      repo,
+      environmentId,
+      port: completedJob.port ?? undefined,
+      sourceSnapshotId: completedJob.snapshotId!,
+      sourceCloudJobId: completedJob.id,
+      slackOriginMessageTs: event.ts,
+      ackEmoji,
+      completionEmoji,
+    };
+
+    const directPayload = { ...payloadBase };
+    populateSnapshotResumeSlackMetadata(directPayload, {
+      sourcePayload: completedPayload,
+      channel: event.channel,
+      threadTs: threadId,
+    });
+    restoreSnapshotResumeVisiblePromptFields(directPayload, completedPayload);
+
+    const { value: resumeJobId } = await withContention<number>(
+      `slack:resume-lock:${threadId}`,
+      {
+        ttlSeconds: 30,
+        poll: { intervalMs: 500, maxAttempts: 10 },
+        onAcquired: async () => {
+          const resumeLaunch = await enqueueCloudTask(
+            {
+              type: CloudTaskType.SnapshotResume,
+              userId,
+              slackThreadTs: threadId,
+              sourceSnapshotId: completedJob.snapshotId!,
+              sourceCloudJobId: completedJob.id,
+              payload: directPayload,
+            },
+            {},
+          );
+
+          apiLogger.debug(
+            `✅ Created SnapshotResume cloud job ${resumeLaunch.id} for thread ${threadId}`,
+          );
+
+          return resumeLaunch.id;
+        },
+        onContended: async () => {
+          const recent = await db.query.cloudJobs.findFirst({
+            where: and(
+              eq(cloudJobs.slackThreadTs, threadId),
+              eq(cloudJobs.type, CloudTaskType.SnapshotResume),
+              gt(cloudJobs.createdAt, new Date(Date.now() - 60_000)),
+            ),
+            orderBy: desc(cloudJobs.createdAt),
+            columns: { id: true },
+          });
+
+          return recent?.id;
+        },
+      },
+    );
+
+    if (resumeJobId === undefined) {
+      return false;
+    }
+
+    await queueSlackMessage(resumeJobId, queuedSlackMessage);
+    await clearLatestUserMessage(resumeJobId);
+    deliveryTracker.track(event.ts);
+    return true;
+  } catch (error) {
+    await deliveryTracker.rollback().catch(() => {});
+    throw error;
+  } finally {
+    await deliveryTracker.commit();
+  }
+}

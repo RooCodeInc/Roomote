@@ -1,0 +1,9 @@
+{
+  "extends": "@roomote/config-typescript/base.json",
+  "compilerOptions": {
+    "types": ["node", "vitest/globals"],
+    "outDir": "./dist"
+  },
+  "include": ["src/**/*.ts"],
+  "exclude": ["node_modules", "dist"]
+}

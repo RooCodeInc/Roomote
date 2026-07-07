@@ -1,0 +1,65 @@
+---
+title: E2B
+icon: '/logo/integrations/e2b.svg'
+description: Run Roomote tasks on E2B-hosted sandboxes using a Roomote worker template.
+---
+
+E2B is a hosted compute provider for running task sandboxes away from the
+Roomote server. Roomote uses an E2B template built from the Roomote worker
+runtime, then starts task sandboxes from that template.
+
+## When to use E2B
+
+Use E2B when:
+
+- task work should run outside the Roomote host
+- you want hosted sandboxes with snapshot support
+- you can provide an E2B API key and a worker template ID
+- your deployment can reach E2B and E2B task sandboxes can reach Roomote
+
+## Configuration
+
+Add E2B from **Settings > Compute**, or provide the values as deployment env
+vars:
+
+```sh
+E2B_API_KEY=...
+E2B_TEMPLATE_ID=roomote-worker
+```
+
+Optional values:
+
+```sh
+E2B_DOMAIN=e2b.app
+E2B_MAX_SANDBOX_TIMEOUT_MS=3600000
+```
+
+Use `E2B_DOMAIN` only for self-hosted or custom E2B clusters. The default E2B
+domain is enough for standard hosted E2B.
+
+## Worker template expectations
+
+The E2B template should contain the Roomote worker runtime: system packages,
+browser tooling, language tools, command helpers, and the worker bootstrap used
+to connect back to Roomote.
+
+Roomote can provision a template from the configured worker image in supported
+setup flows. For production, keep the worker image or template version pinned
+so task startup is predictable.
+
+## Verify setup
+
+1. save `E2B_API_KEY` and `E2B_TEMPLATE_ID`
+2. select E2B as the default compute provider
+3. start a small task from an environment
+4. confirm the task starts, streams logs, and can run project commands
+5. verify preview links if the task starts a web app
+
+## Common issues
+
+- **E2B reports a missing template.** Confirm `E2B_TEMPLATE_ID` matches a
+  template available to the configured API key.
+- **Tasks start with missing tools.** Rebuild or refresh the worker template
+  from the current Roomote worker image.
+- **Preview links fail.** Confirm the deployment URL and preview proxy are
+  reachable from hosted sandboxes.

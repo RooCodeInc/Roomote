@@ -1,0 +1,123 @@
+import type { Context } from 'hono';
+
+import { CloudTaskType } from '@roomote/types';
+import {
+  backgroundAutomationRuns,
+  cloudJobs,
+  db,
+  eq,
+} from '@roomote/db/server';
+
+import type { Variables } from '../../types';
+import type { McpAuth } from '../mcp/middleware';
+import { logHandlerError } from '../utils';
+import { submitAutoActWorkItems } from './automation-work-items/auto-act.js';
+import { AutomationWorkItemValidationError } from './automation-work-items/prepare.js';
+import { submitAutomationWorkItemsBodySchema } from './automation-work-items/schema.js';
+import { isAutomationWorkItemSource } from './automation-work-items/source.js';
+import type { SuggestedTasksPayload } from './automation-work-items/types.js';
+
+/**
+ * POST /api/mcp/tasks/:taskId/automation_work_items
+ */
+export async function submitAutomationWorkItems(
+  c: Context<{ Variables: Variables & { mcpAuth: McpAuth } }>,
+): Promise<Response> {
+  const auth = c.get('mcpAuth');
+  const taskId = c.req.param('taskId');
+
+  if (!taskId?.trim()) {
+    return c.json({ error: 'Task ID is required' }, 400);
+  }
+
+  let rawBody: unknown;
+
+  try {
+    rawBody = await c.req.json();
+  } catch {
+    return c.json({ error: 'Invalid JSON body' }, 400);
+  }
+
+  const parsedBody = submitAutomationWorkItemsBodySchema.safeParse(rawBody);
+
+  if (!parsedBody.success) {
+    return c.json(
+      { error: parsedBody.error.issues[0]?.message ?? 'Invalid request body' },
+      400,
+    );
+  }
+
+  try {
+    const [cloudJob, automationRun] = await Promise.all([
+      db.query.cloudJobs.findFirst({
+        where: eq(cloudJobs.taskId, taskId),
+        columns: {
+          type: true,
+          userId: true,
+          payload: true,
+        },
+      }),
+      db.query.backgroundAutomationRuns.findFirst({
+        where: eq(backgroundAutomationRuns.taskId, taskId),
+        columns: {
+          id: true,
+          automationKey: true,
+        },
+      }),
+    ]);
+
+    if (!cloudJob) {
+      return c.json({ error: 'Task not found' }, 404);
+    }
+
+    if (cloudJob.type !== CloudTaskType.SuggestedTasks) {
+      return c.json({ error: 'Task is not an automation scan task' }, 400);
+    }
+
+    const payload = cloudJob.payload as SuggestedTasksPayload;
+    const automationSource = payload.suggestionSource;
+
+    if (
+      !isAutomationWorkItemSource(automationSource) ||
+      automationSource !== automationRun?.automationKey
+    ) {
+      return c.json(
+        {
+          error: 'Automation work items are not supported for this task source',
+        },
+        400,
+      );
+    }
+
+    try {
+      return c.json(
+        await submitAutoActWorkItems({
+          userId: auth.userId ?? cloudJob.userId ?? null,
+          taskId,
+          automationRunId: automationRun.id,
+          automationKey: automationSource,
+          payload,
+          workItems: parsedBody.data.workItems,
+        }),
+      );
+    } catch (error) {
+      if (error instanceof AutomationWorkItemValidationError) {
+        return c.json({ error: error.message }, 400);
+      }
+
+      throw error;
+    }
+  } catch (error) {
+    logHandlerError('submitAutomationWorkItems', error);
+    return c.json(
+      {
+        success: false,
+        error:
+          error instanceof Error
+            ? error.message
+            : 'Failed to submit automation work items',
+      },
+      500,
+    );
+  }
+}

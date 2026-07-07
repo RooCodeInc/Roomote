@@ -1,0 +1,443 @@
+import { PRODUCT_NAME, type AcpRequestUserInputAnswers } from '@roomote/types';
+import { Env } from '@roomote/env';
+import {
+  db,
+  type SlackInstallation,
+  slackInstallations,
+  slackUserMappings,
+  and,
+  eq,
+} from '@roomote/db/server';
+
+import type { SlackInteractivePayload } from './types';
+import { queueSlackMessage } from './slack-messages';
+import { findActiveSlackJob } from './find-active-slack-job';
+import {
+  postSlackAccountLinkThreadReply,
+  promptSlackAccountLink,
+} from './block-kit';
+import { postSlackInteractiveResponse } from './interactive-response';
+import { SlackNotifier } from './slack-notifier';
+import {
+  buildSlackAnsweredRequestUserInputBlocks,
+  buildSlackRequestUserInputBlocks,
+  getSlackRequestUserInputCurrentQuestion,
+} from './request-user-input-blocks';
+import {
+  advancePendingSlackRequestUserInputQuestion,
+  clearPendingSlackRequestUserInput,
+  getPendingSlackRequestUserInput,
+  setPendingSlackRequestUserInputPromptMessageTs,
+  submitPendingSlackRequestUserInputAnswer,
+} from './request-user-input';
+import { getSlackThreadFooterText } from './thread-footer';
+
+interface StructuredRequestUserInputButtonValue {
+  requestId: string;
+  questionId?: string;
+  questionIndex?: number;
+  answer?: string;
+  cancel?: boolean;
+}
+
+const REQUEST_USER_INPUT_ALREADY_RECEIVED_TEXT =
+  'I already received your answer. Please wait for the agent to continue.';
+
+function buildSlackRequestUserInputTaskUrl(params: {
+  taskId: string | null | undefined;
+  payload?: unknown;
+}): string {
+  const origin = Env.ROOMOTE_APP_URL;
+  const payload =
+    params.payload && typeof params.payload === 'object'
+      ? (params.payload as { webPath?: unknown })
+      : null;
+  const webPath =
+    typeof payload?.webPath === 'string' && payload.webPath.startsWith('/')
+      ? payload.webPath
+      : null;
+  const baseUrl =
+    webPath || params.taskId
+      ? `${origin}${webPath ?? `/task/${params.taskId}`}`
+      : `${origin}/task`;
+  const url = new URL(baseUrl);
+
+  url.searchParams.set('utm_source', 'slack');
+  url.searchParams.set('utm_medium', 'integration');
+  url.searchParams.set('utm_campaign', 'request_user_input');
+
+  return url.toString();
+}
+
+async function postRequestUserInputAlreadyReceivedResponse(
+  responseUrl: string,
+): Promise<void> {
+  await postSlackInteractiveResponse(responseUrl, {
+    replace_original: false,
+    text: REQUEST_USER_INPUT_ALREADY_RECEIVED_TEXT,
+  });
+}
+
+function parseStructuredRequestUserInputButtonValue(
+  value: string,
+): StructuredRequestUserInputButtonValue | null {
+  try {
+    const parsed = JSON.parse(value) as Record<string, unknown>;
+
+    if (typeof parsed.requestId !== 'string' || parsed.requestId.length === 0) {
+      return null;
+    }
+
+    if (parsed.cancel === true) {
+      return {
+        requestId: parsed.requestId,
+        questionIndex:
+          typeof parsed.questionIndex === 'number' ? parsed.questionIndex : 0,
+        cancel: true,
+      };
+    }
+
+    if (
+      typeof parsed.questionId === 'string' &&
+      parsed.questionId.length > 0 &&
+      typeof parsed.answer === 'string' &&
+      parsed.answer.length > 0
+    ) {
+      return {
+        requestId: parsed.requestId,
+        questionId: parsed.questionId,
+        questionIndex:
+          typeof parsed.questionIndex === 'number' ? parsed.questionIndex : 0,
+        answer: parsed.answer,
+      };
+    }
+  } catch {
+    return null;
+  }
+
+  return null;
+}
+
+function mergeRequestUserInputAnswers(
+  existing: AcpRequestUserInputAnswers,
+  next: AcpRequestUserInputAnswers,
+): AcpRequestUserInputAnswers {
+  return {
+    ...existing,
+    ...next,
+  };
+}
+
+async function getSlackTeamContext(teamId: string): Promise<{
+  slack: SlackNotifier;
+  slackInstallation: SlackInstallation;
+}> {
+  const [slackInstallation] = await db
+    .select()
+    .from(slackInstallations)
+    .where(eq(slackInstallations.teamId, teamId))
+    .limit(1);
+
+  if (!slackInstallation) {
+    throw new Error('Slack installation not found');
+  }
+
+  return {
+    slack: new SlackNotifier(slackInstallation.botAccessToken),
+    slackInstallation,
+  };
+}
+
+export async function handleFollowupAnswer(payload: SlackInteractivePayload) {
+  try {
+    const threadId = payload.message.thread_ts || payload.message.ts;
+
+    const answerValue =
+      payload.actions[0]?.type === 'button'
+        ? payload.actions[0].value
+        : undefined;
+
+    if (!answerValue) {
+      console.error('❌ No answer found in followup button payload');
+      return;
+    }
+
+    const activeJob = await findActiveSlackJob(threadId);
+
+    if (!activeJob) {
+      console.error(
+        `❌ No active job found for thread ${threadId} to send followup answer`,
+      );
+
+      await postSlackInteractiveResponse(payload.response_url, {
+        replace_original: false,
+        text: 'This task is no longer active. Please ask the agent again in the thread.',
+      });
+      return;
+    }
+
+    const [userMapping] = await db
+      .select({ userId: slackUserMappings.userId })
+      .from(slackUserMappings)
+      .where(
+        and(
+          eq(slackUserMappings.slackUserId, payload.user.id),
+          eq(slackUserMappings.slackTeamId, payload.team.id),
+        ),
+      )
+      .limit(1);
+
+    if (!userMapping) {
+      const { slack, slackInstallation } = await getSlackTeamContext(
+        payload.team.id,
+      );
+
+      const promptResult = await promptSlackAccountLink({
+        slackUserId: payload.user.id,
+        channel: payload.channel.id,
+        threadTs: threadId,
+        originalText: answerValue,
+        slackInstallation,
+        slack,
+        resumeOriginalThread: false,
+      });
+
+      await postSlackAccountLinkThreadReply({
+        slack,
+        channel: payload.channel.id,
+        threadTs: threadId,
+        slackUserId: payload.user.id,
+        dmPromptSent: promptResult.dmPromptSent,
+      });
+
+      await postSlackInteractiveResponse(payload.response_url, {
+        replace_original: false,
+        text: `Please link your ${PRODUCT_NAME} account before using this button.`,
+      });
+
+      return;
+    }
+
+    console.log(
+      `✅ Queueing followup answer for job ${activeJob.id}: "${answerValue}"`,
+    );
+
+    const structuredAnswer =
+      parseStructuredRequestUserInputButtonValue(answerValue);
+
+    if (structuredAnswer) {
+      const pendingRequest = await getPendingSlackRequestUserInput(threadId);
+
+      if (
+        !pendingRequest ||
+        pendingRequest.requestId !== structuredAnswer.requestId
+      ) {
+        throw new Error(
+          'This question is no longer pending. Please ask the agent again.',
+        );
+      }
+
+      if (pendingRequest.status !== 'pending') {
+        await postRequestUserInputAlreadyReceivedResponse(payload.response_url);
+        return;
+      }
+
+      if (pendingRequest.cloudJobId !== activeJob.id) {
+        await clearPendingSlackRequestUserInput(threadId, {
+          requestId: pendingRequest.requestId,
+        }).catch(() => {});
+
+        throw new Error(
+          'This question belongs to an older task. Please ask the agent again.',
+        );
+      }
+
+      const { slack } = await getSlackTeamContext(payload.team.id);
+      const currentQuestion =
+        getSlackRequestUserInputCurrentQuestion(pendingRequest);
+
+      if (!currentQuestion) {
+        throw new Error(
+          'This question is no longer available. Please ask the agent again.',
+        );
+      }
+
+      if (
+        structuredAnswer.questionIndex !== undefined &&
+        structuredAnswer.questionIndex !== currentQuestion.questionIndex
+      ) {
+        throw new Error(
+          'This prompt is out of date. Please answer the newest question in the thread.',
+        );
+      }
+
+      if (structuredAnswer.cancel) {
+        const submitted = await submitPendingSlackRequestUserInputAnswer(
+          threadId,
+          pendingRequest,
+          {
+            answers: {},
+            user: payload.user.id,
+            userId: userMapping.userId,
+            ts: new Date().toISOString(),
+          },
+        );
+
+        if (!submitted) {
+          await postRequestUserInputAlreadyReceivedResponse(
+            payload.response_url,
+          );
+          return;
+        }
+
+        await slack.postMessage({
+          channel: payload.channel.id,
+          thread_ts: threadId,
+          blocks: [
+            {
+              type: 'markdown',
+              text: '**Cancelled the question.**',
+            },
+          ],
+        });
+
+        return;
+      }
+
+      if (structuredAnswer.questionId !== currentQuestion.question.id) {
+        throw new Error(
+          'This prompt is out of date. Please answer the newest question in the thread.',
+        );
+      }
+
+      const nextAnswers = mergeRequestUserInputAnswers(pendingRequest.answers, {
+        [structuredAnswer.questionId]: {
+          answers: [structuredAnswer.answer!],
+        },
+      });
+      const nextQuestionIndex = currentQuestion.questionIndex + 1;
+
+      if (nextQuestionIndex >= pendingRequest.questions.length) {
+        const submitted = await submitPendingSlackRequestUserInputAnswer(
+          threadId,
+          pendingRequest,
+          {
+            answers: nextAnswers,
+            user: payload.user.id,
+            userId: userMapping.userId,
+            ts: new Date().toISOString(),
+          },
+        );
+
+        if (!submitted) {
+          await postRequestUserInputAlreadyReceivedResponse(
+            payload.response_url,
+          );
+          return;
+        }
+
+        if (pendingRequest.promptMessageTs) {
+          await slack.updateMessage({
+            channel: payload.channel.id,
+            ts: pendingRequest.promptMessageTs,
+            message: {
+              blocks: buildSlackAnsweredRequestUserInputBlocks({
+                question: currentQuestion.question,
+                answer: structuredAnswer.answer!,
+              }),
+            },
+          });
+        }
+
+        return;
+      }
+
+      const advanced = await advancePendingSlackRequestUserInputQuestion(
+        threadId,
+        pendingRequest,
+        nextQuestionIndex,
+        nextAnswers,
+      );
+
+      if (!advanced) {
+        await postRequestUserInputAlreadyReceivedResponse(payload.response_url);
+        return;
+      }
+
+      if (pendingRequest.promptMessageTs) {
+        await slack.updateMessage({
+          channel: payload.channel.id,
+          ts: pendingRequest.promptMessageTs,
+          message: {
+            blocks: buildSlackAnsweredRequestUserInputBlocks({
+              question: currentQuestion.question,
+              answer: structuredAnswer.answer!,
+            }),
+          },
+        });
+      }
+
+      const nextPromptMessageTs = await slack.postMessage({
+        channel: payload.channel.id,
+        thread_ts: threadId,
+        blocks: buildSlackRequestUserInputBlocks({
+          requestId: pendingRequest.requestId,
+          questions: pendingRequest.questions,
+          currentQuestionIndex: nextQuestionIndex,
+          answers: nextAnswers,
+          footerText: await getSlackThreadFooterText({
+            taskUrl: buildSlackRequestUserInputTaskUrl({
+              taskId: activeJob.taskId,
+              payload: activeJob.payload,
+            }),
+            taskId: activeJob.taskId,
+            prRepo: activeJob.prRepo ?? null,
+            prNumber: activeJob.prNumber ?? null,
+            channelId: payload.channel.id,
+            threadTs: threadId,
+          }),
+        }),
+      });
+
+      if (nextPromptMessageTs) {
+        await setPendingSlackRequestUserInputPromptMessageTs(
+          threadId,
+          pendingRequest.requestId,
+          nextQuestionIndex,
+          nextPromptMessageTs,
+        );
+      }
+
+      return;
+    }
+
+    await queueSlackMessage(activeJob.id, {
+      text: answerValue,
+      user: payload.user.id,
+      userId: userMapping.userId,
+      ts: new Date().toISOString(),
+    });
+
+    const { slack } = await getSlackTeamContext(payload.team.id);
+
+    await slack.postMessage({
+      channel: payload.channel.id,
+      thread_ts: threadId,
+      blocks: [
+        {
+          type: 'markdown',
+          text: `**Selected:** ${answerValue}`,
+        },
+      ],
+    });
+  } catch (error) {
+    console.error(
+      `❌ Failed to handle followup answer: ${error instanceof Error ? error.message : String(error)}`,
+    );
+
+    await postSlackInteractiveResponse(payload.response_url, {
+      replace_original: false,
+      text: `❌ Failed to process answer: ${error instanceof Error ? error.message : 'Unknown error'}`,
+    });
+  }
+}

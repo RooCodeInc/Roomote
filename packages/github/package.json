@@ -1,0 +1,33 @@
+{
+  "name": "@roomote/github",
+  "private": true,
+  "type": "module",
+  "exports": "./src/index.ts",
+  "scripts": {
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
+    "lint": "eslint src --ext=ts --max-warnings=0",
+    "check-types": "tsc --noEmit",
+    "check-types:fast": "tsgo --noEmit",
+    "test": "dotenvx run -f ../../.env.test -- vitest",
+    "clean": "rimraf .turbo"
+  },
+  "dependencies": {
+    "@octokit/rest": "^22.0.1",
+    "@roomote/auth": "workspace:^",
+    "@roomote/db": "workspace:^",
+    "@roomote/env": "workspace:^",
+    "@roomote/types": "workspace:^",
+    "execa": "9.6.1",
+    "jsonwebtoken": "^9.0.3",
+    "p-map": "^7.0.4",
+    "zod": "^3.25.76"
+  },
+  "devDependencies": {
+    "@roomote/config-eslint": "workspace:^",
+    "@roomote/config-typescript": "workspace:^",
+    "@types/jsonwebtoken": "^9.0.10",
+    "@types/node": "^24.10.13",
+    "vitest": "^4.1.1"
+  }
+}

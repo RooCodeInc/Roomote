@@ -1,0 +1,395 @@
+---
+title: Environment definition
+icon: file-code
+description: "Understand the environment definition YAML: the schema, how it relates to Dev Containers, and how to write your own by hand or with a coding agent."
+---
+
+An environment definition is the YAML document that describes a Roomote
+[environment](/environments): which repositories to clone, which services to
+start, which tools and environment variables to provide, which ports to
+preview, and what guidance every task in that environment should receive.
+
+The visual editor and the onboarding setup agent both produce this same YAML.
+This page documents the format directly so you can read, review, and write a
+definition yourself, or point a local coding agent at these docs and have it
+generate a valid definition for you.
+
+## What the definition is for
+
+When a Roomote agent starts a task, the [compute provider](/compute) gives it a
+clean sandbox. The environment definition is what turns that empty sandbox into
+a workspace grounded in your product. It is applied in a predictable order:
+
+1. shared workspace tool versions are installed
+2. requested services (databases, caches) are started
+3. each repository is cloned onto the workspace, at its chosen branch
+4. each repository's setup commands run, in order
+5. named ports become live previews, and agent instructions are attached to
+   every task
+
+The definition is declarative and reproducible: the same YAML produces the same
+workspace shape for every task, and it is easy to review in a pull request or
+regenerate from scratch.
+
+## Relationship to Dev Containers
+
+If you have used [Dev Containers](https://containers.dev), the environment
+definition will feel familiar. Both describe a development workspace as a
+version-controllable, declarative file so that anyone (or any agent) gets the
+same setup. The concepts map closely:
+
+| Concept | Dev Container (`devcontainer.json`) | Roomote environment definition |
+| --- | --- | --- |
+| Base machine | [`image` / `build`](https://containers.dev/implementors/json_reference/#image-specific) | Provided by the [compute provider](/compute) worker image, not set here |
+| Extra tooling | [`features`](https://containers.dev/features) | `services` and `tool_versions` |
+| Setup steps | [`onCreateCommand` / `postCreateCommand`](https://containers.dev/implementors/json_reference/#lifecycle-scripts) | Repository `commands` |
+| Forwarded ports | [`forwardPorts` / `portsAttributes`](https://containers.dev/implementors/json_reference/#port-attributes) | `ports` |
+| Workspace env vars | [`containerEnv` / `remoteEnv`](https://containers.dev/implementors/json_reference/#variables-in-devcontainer-json) | `env` (and per-command `env`) |
+| Tool customizations | [`customizations`](https://containers.dev/supporting-tools) | `agentInstructions`, `mcpServers`, `skills` |
+
+The important difference: **Roomote uses its own schema and does not read
+`devcontainer.json`.** The comparison is conceptual. If a repository already has
+a Dev Container, treat it as a reference for which tools, services, and commands
+matter, then express those in the environment definition described below. For
+the Dev Container spec itself, see the
+[Dev Container specification](https://containers.dev/implementors/spec/) and the
+[metadata reference](https://containers.dev/implementors/json_reference/) rather
+than duplicating them here.
+
+## A complete example
+
+The definition below is a self-contained example that uses most of the
+available fields. Every field is explained in the reference sections that
+follow.
+
+```yaml
+name: Acme Web
+description: Web app and API for the Acme product.
+initialUrl: http://127.0.0.1:3000
+
+# Tools installed at the shared workspace root, as a broad fallback.
+tool_versions:
+  node: 22.14.0
+  pnpm: 9.12.0
+
+# Workspace-level environment variables available to every task.
+env:
+  NODE_ENV: development
+  LOG_LEVEL: debug
+
+# Managed services started before repository setup runs.
+services:
+  - postgres16
+  - name: redis7
+    port: 6380
+
+repositories:
+  - repository: acme/web
+    branch: main
+    # Per-repo tool fallbacks, used only when the repo does not pin them itself.
+    tool_versions:
+      python: 3.12.1
+    commands:
+      - name: Install dependencies
+        run: pnpm install
+      - name: Run migrations
+        run: pnpm db:migrate
+        timeout: 300
+      - name: Start dev server
+        run: pnpm dev
+        detached: true
+        logfile: /tmp/web-dev.log
+      - name: Optional cache warm
+        run: pnpm cache:warm
+        continue_on_error: true
+
+  - repository: acme/api
+    commands:
+      - name: Install dependencies
+        run: pnpm install
+
+# Named ports exposed as human-facing previews.
+ports:
+  - name: WEB
+    port: 3000
+    initial_path: /
+    primary: true
+  - name: API
+    port: 3001
+
+# Environment-specific guidance attached to every task.
+agentInstructions: |
+  This is a monorepo. The web app is in acme/web and the API is in acme/api.
+  Start Postgres and Redis before running the API.
+  Run `pnpm test` in acme/web before finishing UI changes.
+```
+
+## Top-level fields
+
+| Field | Type | Required | Notes |
+| --- | --- | --- | --- |
+| `name` | string | yes | Environment name, 1–100 characters. |
+| `description` | string | no | Short summary, up to 500 characters. |
+| `repositories` | list | yes | At least one repository. See [Repositories](#repositories). |
+| `initialUrl` | string | no | Absolute URL or `about:blank` that the preview surface opens first. |
+| `agentInstructions` | string | no | Guidance attached to every task, up to 10,000 characters. |
+| `tool_versions` | map | no | Tools installed at the shared workspace root via mise. |
+| `env` | map | no | Workspace environment variables available to every task. |
+| `services` | list | no | Managed services to start. See [Services](#services). |
+| `ports` | list | no | Named preview ports. See [Ports](#ports). |
+| `previews_enabled` | boolean | no | Explicitly enable or disable live previews without deleting port definitions. |
+| `oidc` | map | no | Sandbox OIDC targets. See [OIDC](#oidc). |
+| `mcpServers` | map | no | Custom MCP servers for this environment. See [MCP servers](#mcp-servers). |
+| `skills` | map | no | Installable skills by `owner/repo`. See [Skills](#skills). |
+| `manualSkills` | list | no | Inline skills defined in the environment. See [Skills](#skills). |
+| `auth_bypass_header` | boolean or string | no | Header-based auth bypass control for exposed authenticated previews. A fixed string secret must be at least 8 characters. |
+| `auth_bypass_header_name` | string | no | Custom bypass header name. Defaults to `x-bypass-roomote-auth`. |
+
+### Basics
+
+`name` is the only required top-level scalar. `description` and `initialUrl` are
+optional but recommended: `initialUrl` is the URL the shared preview surface
+opens first, so point it at the app entry a reviewer would expect, for example
+`http://127.0.0.1:3000`. Use `about:blank` when there is no default page.
+
+## Repositories
+
+`repositories` is a required list with at least one entry. Each repository is
+cloned onto the shared workspace.
+
+| Field | Type | Required | Notes |
+| --- | --- | --- | --- |
+| `repository` | string | yes | `owner/repo` format. |
+| `branch` | string | no | Branch to check out. Defaults to the repository's default branch. |
+| `tool_versions` | map | no | Repo-local tool fallbacks installed via mise. |
+| `commands` | list | no | Setup commands for this repository. See [Commands](#commands). |
+
+Keep the first environment focused. One repository, or a small set that must be
+cloned together, sets up faster and is easier to debug than a large multi-repo
+environment.
+
+All repositories in one environment must belong to the same source-control
+installation.
+
+### Commands
+
+Each entry in a repository's `commands` list runs in order after the repository
+is cloned. Commands are the durable setup steps a teammate would run after
+cloning: installing dependencies, generating code, running migrations, and
+starting long-running services.
+
+| Field | Type | Required | Notes |
+| --- | --- | --- | --- |
+| `name` | string | yes | Human-readable label for the step. |
+| `run` | string | yes | The shell command to run. |
+| `env` | map | no | Command-specific environment variables, merged over workspace `env`. |
+| `working_dir` | string | no | Directory to run the command in. |
+| `cwd` | string | no | Alias for `working_dir`. |
+| `timeout` | number | no | Seconds before the command is killed. Defaults to `600`. |
+| `retries` | integer | no | Extra attempts for a failing command, with a 1-second delay. Use only for idempotent commands. Defaults to `0`. |
+| `continue_on_error` | boolean | no | When `true`, setup continues even if this command fails. Defaults to `false`. |
+| `detached` | boolean | no | Run in the background under supervision. Use for long-running servers. Defaults to `false`. |
+| `logfile` | string | no | Path to capture stdout and stderr. Used with `detached: true`. |
+
+Guidance:
+
+- keep commands focused on setup, not final verification. Put "run the tests
+  before finishing" expectations in `agentInstructions` instead.
+- use `detached: true` with a `logfile` for servers such as `pnpm dev`, so the
+  process keeps running and its output is debuggable.
+- use `continue_on_error: true` only for helpful-but-optional steps. If the app
+  cannot run without a command, let it fail so the problem is visible.
+
+## Services
+
+`services` starts managed dependencies before repository setup runs. Each entry
+is either a service name string or an object with a name and a custom `port`.
+
+Supported services:
+
+| Service | Default port |
+| --- | --- |
+| `redis6`, `redis7` | 6379 |
+| `postgres15`, `postgres16`, `postgres17` | 5432 |
+| `mysql8`, `mariadb10` | 3306 |
+| `clickhouse` | 9000 |
+| `aws` | CLI tool, no port |
+
+```yaml
+services:
+  - postgres16          # default port 5432
+  - name: redis7
+    port: 6380          # custom port
+```
+
+A service name cannot collide with a port name in the same environment.
+
+## Ports
+
+`ports` declares the human-facing application URLs Roomote should expose as
+[live previews](/environments#make-verification-possible). Each named port gets
+a preview URL and a corresponding `ROOMOTE_<NAME>_HOST` environment variable
+inside the sandbox.
+
+| Field | Type | Required | Notes |
+| --- | --- | --- | --- |
+| `name` | string | yes | Starts with a letter; letters, numbers, and underscores only. Case-insensitive and unique. `SANDBOX_SERVER` and `EDITOR` are reserved. |
+| `port` | number | yes | The listening port, 1024–65535. |
+| `primary` | boolean | no | Marks the main preview surface. At most one port may be primary. |
+| `initial_path` | string | no | Path the preview opens first. Must start with `/`. |
+| `proxied` | boolean | no | Whether the port is served through the preview proxy. Defaults to proxied. |
+| `unauthenticated` | boolean | no | Allow access without the normal preview auth. |
+| `auth_bypass_paths` | list | no | Up to 20 paths (each starting with `/`) that skip preview auth. |
+| `subdomain` | string | no | DNS-safe subdomain prefix for the preview host. |
+| `wildcard_prefix` | boolean | no | Serve wildcard subdomains under the port. |
+
+Limits: at most 10 proxied ports and at most 2 non-proxied ports per
+environment.
+
+```yaml
+ports:
+  - name: WEB
+    port: 3000
+    initial_path: /dashboard
+    primary: true
+  - name: API
+    port: 3001
+```
+
+## Environment variables and tool versions
+
+`env` provides workspace-level variables that every task can read. These are
+workspace variables for the code Roomote is working on, distinct from the
+[deployment environment variables](/environment-variables) that configure
+Roomote itself. Secrets are typically added through the editor rather than
+committed to a definition you share.
+
+Tool versions can be set at two levels:
+
+- **`tool_versions` at the top level** installs tools at the shared workspace
+  root via mise. Use this for workspace-level scripts, shared MCP servers, or as
+  a broad fallback.
+- **`tool_versions` on a repository** provides fallbacks for a single
+  repository.
+
+In both cases, a repository's own checked-in `.tool-versions` stays
+authoritative. Environment-configured versions are fallbacks that fill in
+missing tools; they do not override repository-owned pins.
+
+```yaml
+tool_versions:
+  node: 22.14.0
+  python: 3.12.1
+```
+
+## Agent instructions
+
+`agentInstructions` is guidance delivered to every task in the environment.
+Good guidance is specific, durable, and tied to the workspace:
+
+```yaml
+agentInstructions: |
+  Use pnpm for this repository.
+  Start Postgres before running the API.
+  The web app runs on port 3000 and the API on port 3001.
+  Run the dashboard test suite before changing task review flows.
+```
+
+Avoid vague instructions like "be careful" or "use best practices." If a
+repository has a known trap, state it plainly.
+
+## MCP servers
+
+`mcpServers` adds environment-specific [MCP servers](/integrations) that are
+merged with built-in tools when a task starts. Each entry is either a streamable
+HTTP server (`url`, optional `headers`) or a stdio server (`command`, optional
+`args` and `env`).
+
+```yaml
+mcpServers:
+  linear:
+    url: https://mcp.linear.app/mcp
+  local-tool:
+    command: my-mcp-server
+    args:
+      - --stdio
+    env:
+      MY_TOKEN: value
+```
+
+## Skills
+
+`skills` installs published skills by source, keyed by `owner/repo`. The value
+is either `all` or a list of specific skill names.
+
+```yaml
+skills:
+  dbt-labs/dbt-agent-skills: all
+  anthropics/skills:
+    - frontend-design
+  vercel-labs/agent-skills:
+    - web-design-guidelines
+```
+
+`manualSkills` defines inline skills directly in the environment. Each entry
+needs a unique `name`, a `description`, and `content` with the skill
+instructions.
+
+```yaml
+manualSkills:
+  - name: acme-conventions
+    description: Adds Acme-specific coding conventions.
+    content: |
+      # Acme Conventions
+
+      Always use the shared logger from @acme/log.
+```
+
+## OIDC
+
+`oidc` declares sandbox OIDC targets. Roomote mints the tokens, writes them into
+the sandbox filesystem, and refreshes them while the sandbox is active. Use
+`aws` for an AWS role and `custom` for additional audiences.
+
+```yaml
+oidc:
+  aws:
+    role_arn: arn:aws:iam::123456789012:role/example
+    region: us-east-1
+  custom:
+    - audience: my-audience
+      token_file: /home/roomote/.roomote/oidc/custom/token
+```
+
+Each `token_file` must be an absolute path and must be unique across targets.
+
+## Write a definition with a coding agent
+
+Because this page fully describes the schema, you can have a local coding agent
+generate a definition as an alternative to the in-app setup agent. A reliable
+approach:
+
+1. give the agent this page as context, along with the repository you want to
+   set up
+2. ask it to infer the tools, services, setup commands, and preview ports from
+   the repository's own README, package manifests, lockfiles, CI config, and any
+   existing `devcontainer.json`
+3. have it emit a single YAML document that matches the schema above, starting
+   from `name` and `repositories`
+4. paste the result into the **YAML** view when you create or edit an
+   environment in **Settings > Environments**
+
+The editor validates the definition when you save, so schema mistakes are caught
+before the environment is used for a task.
+
+## Validate and iterate
+
+The visual **Editor**, **YAML**, and **Preview** views in the environment editor
+all operate on this same document, so you can switch between hand-written YAML
+and the form freely. Roomote validates the definition on save; fix any reported
+errors before the environment runs a task.
+
+After saving, the surest test is to run a real task. A healthy environment
+finishes setup without manual intervention, exposes the previews or logs a task
+needs, and can be reused by follow-up tasks. See
+[Environments](/environments) for the broader workflow and common failure modes.

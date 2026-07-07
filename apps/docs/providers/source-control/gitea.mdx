@@ -1,0 +1,88 @@
+---
+title: Gitea
+icon: 'https://api.iconify.design/simple-icons:gitea.svg?color=currentColor'
+description: Configure Gitea repository sync and pull request webhooks for Roomote.
+---
+
+Gitea support uses a deployment-owned token and instance URL. There is no
+self-serve OAuth or Gitea App installation flow yet, so an operator provides
+the Gitea instance details and syncs repositories from Settings.
+
+Repository sync can also create pull request webhooks, allowing Review Code
+automation and `@roomote` pull request comments to work for synced Gitea
+repositories.
+
+Use `<public-url>` below for your stable public Roomote URL.
+
+## Create a Gitea bot token
+
+Create a dedicated Gitea bot or service-account user and give it access to the
+organizations or repositories Roomote should use. Create an access token with
+repository read/write permissions appropriate for cloning, branch creation, and
+commits.
+
+If Roomote should configure webhooks automatically, the token identity also
+needs repository admin access for the synced repositories.
+
+Save the instance URL and token in setup, deployment env vars, or local
+`.env.local`:
+
+```sh
+GITEA_BASE_URL=https://git.example.com
+GITEA_TOKEN=<gitea-token>
+```
+
+Optional values:
+
+```sh
+GITEA_USERNAME=<token-owner-username>
+GITEA_WEBHOOK_SECRET=<webhook-secret>
+```
+
+When `GITEA_USERNAME` is omitted, Roomote resolves the token owner through the
+Gitea API and uses that login for Git-over-HTTPS credentials.
+
+## Sync repositories
+
+After the Gitea values are available, open Settings, go to the Environments
+page, and use the Source Control section's Gitea sync button. Roomote lists
+repositories from the Gitea API and stores them as Gitea repository rows.
+
+Gitea-backed tasks clone from the synced repository row, so sync must run
+before launching a Gitea-backed task. Worker tasks route selected Gitea HTTPS
+clone traffic through a local proxy instead of exporting `GITEA_TOKEN` into
+task shells.
+
+After repository sync, Roomote best-effort creates or refreshes a repository
+webhook for each synced Gitea repository. The webhook target is:
+
+```text
+<public-url>/api/webhooks/gitea
+```
+
+If only loopback Roomote URLs are configured, webhook setup is skipped and
+repository sync still succeeds. If `GITEA_WEBHOOK_SECRET` is missing, Roomote
+generates and persists one as an encrypted deployment environment variable.
+
+## Enable review automation
+
+Gitea pull request reviews use the same Review Code automation targeting model
+as GitHub and GitLab. After syncing repositories, associate the Gitea repository
+with the intended environment and enable Review Code automation for that target.
+
+Open or reopened PR events enqueue initial review tasks. PR sync events enqueue
+delta reviews. `@roomote` comments on Gitea pull requests route into the
+existing PR owner task when possible, or enqueue a new review task.
+
+## Current limits
+
+Gitea does not yet have a self-serve OAuth/App installation flow, personal
+linked-account flow, or repository permission delegation UI. Gitea support is
+deployment-token backed.
+
+## Verify setup
+
+1. sync Gitea repositories from Settings
+2. create or update an environment from a synced repository
+3. start a small task and confirm Roomote can clone the repository
+4. open or update a pull request and confirm configured review automation runs

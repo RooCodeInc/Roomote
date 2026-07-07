@@ -1,0 +1,183 @@
+# Roomote Railway template definition.
+#
+# This file is the maintained source of truth for the official Roomote
+# template on Railway's marketplace. Railway does not consume this file
+# directly: a maintainer mirrors it into Railway's Template Composer when
+# creating or updating the published template. Values in `${{ ... }}` use
+# Railway's reference-variable and template-function syntax and are resolved
+# by Railway at deploy time.
+#
+# Design notes:
+# - One shared `roomote-app` image runs web, api, controller, and bullmq;
+#   each service selects its process through the image entrypoint. Railway's
+#   custom start command bypasses the entrypoint, so every start command uses
+#   the full `/roomote/.docker/app/entrypoint.sh <service>` form (and minio
+#   uses `minio server ...`, not the bare `server ...` compose form).
+# - Railway's Template Composer has no environment-level shared variables.
+#   The api service is the anchor: it defines every shared value once
+#   (including all `${{secret(n)}}` generated secrets, which MUST NOT be
+#   pasted into more than one service), and the other app services reference
+#   them as `${{api.NAME}}`.
+# - The template tracks the mutable `:develop` image alias and contains no
+#   version strings. The images bake RELEASE_VERSION; the app derives
+#   DOCKER_WORKER_IMAGE and MODAL_BASE_IMAGE_REF from it, and the controller
+#   reads the worker release version from the VERSION file inside
+#   worker-current.tar.gz. Production deployments can pin an immutable tag
+#   in the four image fields instead; nothing else needs editing. Railway
+#   does not redeploy when a mutable alias moves; deployments that want
+#   every develop build automatically can enable the publish workflow's
+#   deploy-railway job (README.md "Auto-deploying every develop build").
+# - Railway has no Docker socket, so task execution must use a hosted
+#   compute provider (modal by default; e2b and daytona also work).
+#   EXCLUDED_COMPUTE_PROVIDERS=docker hides the unusable provider.
+# - Zero deploy-time inputs. Modal tokens and model provider keys are
+#   entered in the /setup wizard after first boot and stored encrypted in
+#   Postgres. Auth keypairs come from ROOMOTE_AUTO_GENERATE_KEYS=true.
+# - The api service must be publicly reachable: hosted compute workers and
+#   GitHub webhooks call `TRPC_URL` directly.
+# - Both published images are public on GHCR: Railway pulls roomote-app and
+#   hosted-compute builders pull roomote-worker anonymously, so no registry
+#   credentials are needed.
+# - ROOMOTE_APP_URL on api is the single canonical-origin knob; the other
+#   app services reference ${{api.ROOMOTE_APP_URL}}. Note api's own value
+#   is itself a reference (https://${{web.RAILWAY_PUBLIC_DOMAIN}}), so this
+#   is a reference to a reference — a pattern Railway's docs neither
+#   promise nor rule out. The mandatory scratch-project first-boot run (see
+#   "Maintaining the marketplace template" in README.md) must confirm the
+#   app services receive the resolved URL, not a literal ${{...}} string;
+#   if resolution ever fails, fall back to repeating the raw
+#   https://${{web.RAILWAY_PUBLIC_DOMAIN}} value per service and accept the
+#   multi-service edit when changing domains. Attaching a custom domain is
+#   otherwise a one-variable edit; see "Attaching a custom domain" in
+#   README.md. ROOMOTE_PUBLIC_URL is intentionally not set — the app falls
+#   back to ROOMOTE_APP_URL wherever it would apply. Railway does not
+#   update RAILWAY_PUBLIC_DOMAIN when a custom domain is attached, and
+#   browsing an origin the app was not told about fails auth with 403
+#   "Invalid origin".
+# - SETUP_TOKEN is intentionally unset for a simpler first run; /setup is
+#   open until the founding admin exists. Deployments that want to gate the
+#   wizard add SETUP_TOKEN=${{secret(16)}} on api (see README.md).
+# - Live previews stay disabled by default. They need a customer-owned
+#   wildcard custom domain; see the preview-proxy section in README.md.
+
+image:
+  app: ghcr.io/roocodeinc/roomote-app:develop # or pin an immutable v* / develop-<sha> tag
+  worker: derived # ghcr.io/roocodeinc/roomote-worker:<baked RELEASE_VERSION>, resolved by the app
+
+# The api service anchors every shared value. Other app services reference
+# them with `${{api.NAME}}`.
+services:
+  Postgres:
+    source: Railway managed PostgreSQL
+    notes: Provides `${{Postgres.DATABASE_URL}}`. Prefer the private-network URL.
+
+  Redis:
+    source: Railway managed Redis
+    notes: Provides `${{Redis.REDIS_URL}}`. Prefer the private-network URL.
+
+  minio:
+    image: minio/minio:latest
+    service_name: minio # rename from the default "minio/minio" — the slash breaks ${{minio.*}} references
+    start_command: minio server /data --console-address :9001
+    volume: /data
+    public_domain: http proxy port 9000 # S3 API; presigned artifact URLs use this domain
+    env:
+      MINIO_ROOT_USER: ${{api.S3_ACCESS_KEY_ID}}
+      MINIO_ROOT_PASSWORD: ${{api.S3_SECRET_ACCESS_KEY}}
+    notes: >
+      The artifact bucket is not auto-created. After the first deploy, create
+      `roomote-artifacts` once (see "Create the artifact bucket" in
+      README.md). Replacing MinIO with external S3/R2 is a config-only swap.
+
+  api:
+    image: app
+    start_command: /roomote/.docker/app/entrypoint.sh api
+    pre_deploy_command: /roomote/.docker/app/entrypoint.sh db-migrate
+    public_domain: http proxy port 8080 # hosted workers and GitHub webhooks call this origin
+    healthcheck_path: /health/liveness
+    env:
+      APP_ENV: production
+      ROOMOTE_DOCKER_LOAD_ENV_FILE: 'false'
+      ROOMOTE_AUTO_GENERATE_KEYS: 'true'
+      ENCRYPTION_KEY: ${{secret(32)}}
+      ARTIFACT_SIGNING_KEY: ${{secret(32)}}
+      DASHBOARD_PASSWORD: ${{secret(24)}}
+      S3_SECRET_ACCESS_KEY: ${{secret(32)}}
+      S3_ACCESS_KEY_ID: roomote
+      S3_REGION: us-east-1
+      S3_BUCKET_ARTIFACTS: roomote-artifacts
+      S3_AUTO_CREATE_BUCKET: 'true' # api creates the MinIO bucket at boot; no manual mc step
+      DEFAULT_COMPUTE_PROVIDER: modal
+      EXCLUDED_COMPUTE_PROVIDERS: docker
+      DATABASE_URL: ${{Postgres.DATABASE_URL}}
+      REDIS_URL: ${{Redis.REDIS_URL}}
+      # The single canonical-origin knob. To attach a custom domain, add it
+      # to the web service and change only this value to https://<domain>.
+      ROOMOTE_APP_URL: https://${{web.RAILWAY_PUBLIC_DOMAIN}}
+      TRPC_URL: https://${{api.RAILWAY_PUBLIC_DOMAIN}}
+      S3_ENDPOINT: http://${{minio.RAILWAY_PRIVATE_DOMAIN}}:9000
+      S3_PRESIGN_ENDPOINT: https://${{minio.RAILWAY_PUBLIC_DOMAIN}}
+
+  # The env block shared by web, controller, and bullmq. In the Template
+  # Composer, paste it into each service (Railway has no per-template YAML
+  # anchors).
+  web:
+    image: app
+    start_command: /roomote/.docker/app/entrypoint.sh web
+    public_domain: http proxy port 8080 # this is the app origin users open
+    healthcheck_path: /health
+    env: &app_service_env
+      APP_ENV: ${{api.APP_ENV}}
+      ROOMOTE_DOCKER_LOAD_ENV_FILE: ${{api.ROOMOTE_DOCKER_LOAD_ENV_FILE}}
+      ROOMOTE_AUTO_GENERATE_KEYS: ${{api.ROOMOTE_AUTO_GENERATE_KEYS}}
+      ENCRYPTION_KEY: ${{api.ENCRYPTION_KEY}}
+      ARTIFACT_SIGNING_KEY: ${{api.ARTIFACT_SIGNING_KEY}}
+      DASHBOARD_PASSWORD: ${{api.DASHBOARD_PASSWORD}}
+      S3_SECRET_ACCESS_KEY: ${{api.S3_SECRET_ACCESS_KEY}}
+      S3_ACCESS_KEY_ID: ${{api.S3_ACCESS_KEY_ID}}
+      S3_REGION: ${{api.S3_REGION}}
+      S3_BUCKET_ARTIFACTS: ${{api.S3_BUCKET_ARTIFACTS}}
+      DEFAULT_COMPUTE_PROVIDER: ${{api.DEFAULT_COMPUTE_PROVIDER}}
+      EXCLUDED_COMPUTE_PROVIDERS: ${{api.EXCLUDED_COMPUTE_PROVIDERS}}
+      DATABASE_URL: ${{Postgres.DATABASE_URL}}
+      REDIS_URL: ${{Redis.REDIS_URL}}
+      ROOMOTE_APP_URL: ${{api.ROOMOTE_APP_URL}}
+      TRPC_URL: ${{api.TRPC_URL}}
+      S3_ENDPOINT: ${{api.S3_ENDPOINT}}
+      S3_PRESIGN_ENDPOINT: ${{api.S3_PRESIGN_ENDPOINT}}
+
+  controller:
+    image: app
+    start_command: /roomote/.docker/app/entrypoint.sh controller
+    public_domain: no
+    env:
+      <<: *app_service_env
+      # The worker release archive is baked into the app image; the
+      # controller uploads it into hosted-compute sandboxes at spawn time.
+      # The version-less name works because the controller reads the release
+      # version from the VERSION file inside the archive. Do not unset: the
+      # fallback is GitHub worker releases, which do not exist for develop
+      # builds.
+      DOCKER_WORKER_RELEASE_PATH: /roomote/releases/worker-current.tar.gz
+
+  bullmq:
+    image: app
+    start_command: /roomote/.docker/app/entrypoint.sh bullmq
+    public_domain: no
+    env: *app_service_env
+
+  # Optional. Only add this service when the deployment enables live
+  # previews with a wildcard custom domain. See README.md. When enabling
+  # previews, set these three variables on the app services too — the web
+  # client builds preview links from NEXT_PUBLIC_PREVIEW_PROXY_BASE_URL, so
+  # the web service must have it.
+  preview-proxy:
+    image: app
+    start_command: /roomote/.docker/app/entrypoint.sh preview-proxy
+    public_domain: yes # plus a `*.previews.<your-domain>` wildcard custom domain
+    healthcheck_path: /health
+    env:
+      <<: *app_service_env
+      PREVIEW_PROXY_BASE_URL: https://previews.<your-domain>
+      NEXT_PUBLIC_PREVIEW_PROXY_BASE_URL: https://previews.<your-domain>
+      PREVIEW_DOMAINS: previews.<your-domain>

@@ -1,0 +1,4 @@
+/* This allows the switcher in Storybook to change the background color of the preview area */
+* div.docs-story {
+  background: var(--background) !important;
+}

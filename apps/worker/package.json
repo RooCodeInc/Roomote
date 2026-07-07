@@ -1,0 +1,61 @@
+{
+  "name": "@roomote/worker",
+  "private": true,
+  "type": "module",
+  "exports": {
+    "./sandbox-router": "./src/sandbox-server/routers/index.ts"
+  },
+  "scripts": {
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
+    "lint": "eslint src scripts --ext=ts --max-warnings=0",
+    "check-types": "tsc --noEmit",
+    "check-types:fast": "tsgo --noEmit",
+    "test": "dotenvx run -f ../../.env.test -- vitest",
+    "build": "tsup",
+    "clean": "rimraf .turbo dist",
+    "internal-deps": "pnpm list --filter @roomote/worker --depth Infinity 2>/dev/null | grep -E '@roomote/' | grep 'link:' | sed 's/.*@roomote/@roomote/' | sed 's/ link:.*//' | sort -u"
+  },
+  "dependencies": {
+    "@hono/node-server": "1.19.13",
+    "@modelcontextprotocol/sdk": "^1.29.0",
+    "@roomote/auth": "workspace:^",
+    "@roomote/cloud-agents": "workspace:^",
+    "@roomote/communication": "workspace:^",
+    "@roomote/feature-flags": "workspace:^",
+    "@roomote/linear": "workspace:^",
+    "@roomote/sdk": "workspace:^",
+    "@roomote/slack": "workspace:^",
+    "@roomote/types": "workspace:^",
+    "@sentry/node": "10.45.0",
+    "@trpc/client": "^11.15.0",
+    "@trpc/server": "^11.15.0",
+    "chokidar": "^4.0.3",
+    "commander": "^14.0.2",
+    "execa": "9.6.1",
+    "hono": "4.12.25",
+    "http-proxy": "^1.18.1",
+    "ignore": "^7.0.5",
+    "jsonwebtoken": "^9.0.3",
+    "mime-types": "^2.1.35",
+    "node-pty": "^1.1.0",
+    "p-limit": "^6.2.0",
+    "p-wait-for": "^5.0.2",
+    "parse-diff": "^0.11.1",
+    "superjson": "^2.2.6",
+    "ws": "^8.20.1",
+    "yaml": "^2.9.0",
+    "zod": "^3.25.76"
+  },
+  "devDependencies": {
+    "@roomote/config-eslint": "workspace:^",
+    "@roomote/config-typescript": "workspace:^",
+    "@types/http-proxy": "^1.17.17",
+    "@types/jsonwebtoken": "^9.0.10",
+    "@types/mime-types": "^2.1.4",
+    "@types/node": "^24.10.13",
+    "@types/ws": "^8.18.1",
+    "tsup": "^8.5.1",
+    "vitest": "^4.1.1"
+  }
+}

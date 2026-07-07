@@ -1,0 +1,322 @@
+import type { EnvironmentConfig } from '@roomote/types';
+
+import {
+  buildSandboxInstruction,
+  sanitizeEnvironmentConfigForPrompt,
+} from '../sandbox-instruction';
+
+describe('sanitizeEnvironmentConfigForPrompt', () => {
+  it('keeps only whitelisted prompt-safe fields', () => {
+    const environmentConfig: EnvironmentConfig = {
+      name: 'Sandbox',
+      description: 'Test environment',
+      initialUrl: 'http://127.0.0.1:3000/auth/dev-login',
+      ports: [
+        {
+          name: 'WEB',
+          port: 3000,
+          initial_path: '/auth/dev-login',
+          primary: true,
+          subdomain: 'app',
+          unauthenticated: false,
+          proxied: true,
+          wildcard_prefix: false,
+        },
+      ],
+      agentInstructions: 'Start with the web app',
+      tool_versions: {
+        node: '22.14.0',
+      },
+      env: {
+        ROOT_SECRET: 'root-secret',
+      },
+      auth_bypass_header: 'top-secret-bypass',
+      auth_bypass_header_name: 'x-custom-bypass',
+      repositories: [
+        {
+          repository: 'owner/repo',
+          branch: 'main',
+          tool_versions: {
+            node: '22.0.0',
+          },
+          commands: [
+            {
+              name: 'Install deps',
+              run: 'pnpm install',
+              timeout: 600,
+              continue_on_error: false,
+              env: {
+                NPM_TOKEN: 'npm-secret',
+              },
+            },
+            {
+              name: 'Start app',
+              run: 'pnpm dev',
+              timeout: 600,
+              continue_on_error: false,
+              detached: true,
+              logfile: '/tmp/web.log',
+              env: {
+                API_KEY: 'api-secret',
+              },
+            },
+          ],
+        },
+      ],
+      services: ['postgres17', { name: 'redis7', port: 6380 }],
+    };
+
+    expect(sanitizeEnvironmentConfigForPrompt(environmentConfig)).toEqual({
+      name: 'Sandbox',
+      description: 'Test environment',
+      initialUrl: 'http://127.0.0.1:3000/auth/dev-login',
+      ports: [
+        {
+          name: 'WEB',
+          port: 3000,
+          initial_path: '/auth/dev-login',
+          subdomain: 'app',
+          primary: true,
+          unauthenticated: false,
+          proxied: true,
+          wildcard_prefix: false,
+        },
+      ],
+      tool_versions: {
+        node: '22.14.0',
+      },
+      repositories: [
+        {
+          repository: 'owner/repo',
+          branch: 'main',
+          tool_versions: {
+            node: '22.0.0',
+          },
+          commands: [
+            {
+              name: 'Install deps',
+              run: 'pnpm install',
+              timeout: 600,
+              continue_on_error: false,
+            },
+            {
+              name: 'Start app',
+              run: 'pnpm dev',
+              timeout: 600,
+              continue_on_error: false,
+              detached: true,
+              logfile: '/tmp/web.log',
+            },
+          ],
+        },
+      ],
+      services: ['postgres17', { name: 'redis7', port: 6380 }],
+    });
+  });
+});
+
+describe('buildSandboxInstruction', () => {
+  it('does not leak non-whitelisted or secret fields into the serialized JSON block', () => {
+    const environmentConfig: EnvironmentConfig = {
+      name: 'Sandbox',
+      description: 'Test environment',
+      initialUrl: 'http://127.0.0.1:3000/auth/dev-login',
+      ports: [
+        {
+          name: 'WEB',
+          port: 3000,
+          initial_path: '/auth/dev-login',
+          primary: true,
+        },
+      ],
+      agentInstructions: 'Open the preview first',
+      tool_versions: {
+        node: '22.14.0',
+      },
+      env: {
+        ROOT_SECRET: 'root-secret',
+      },
+      auth_bypass_header: 'top-secret-bypass',
+      repositories: [
+        {
+          repository: 'owner/repo',
+          commands: [
+            {
+              name: 'Start app',
+              run: 'pnpm dev',
+              timeout: 600,
+              continue_on_error: false,
+              detached: true,
+              env: {
+                API_KEY: 'super-secret-value',
+              },
+            },
+          ],
+        },
+      ],
+    };
+
+    const instruction = buildSandboxInstruction(true, environmentConfig, {
+      envVars: {
+        ROOMOTE_WEB_HOST: 'https://task-123-web.preview.roomote.run',
+      },
+    });
+
+    expect(instruction).toContain('Environment configuration:');
+    expect(instruction).toContain(
+      'Repository setup commands from this environment configuration were already executed before your task started.',
+    );
+    expect(instruction).toContain(
+      'Any command marked `detached: true` was started in the background under PM2 supervision. Check its `logfile` and `pm2 status` before starting another copy.',
+    );
+    expect(instruction).toContain(
+      'This environment exposes a sandbox-local browser surface for delegated visual proof.',
+    );
+    expect(instruction).toContain(
+      "Use the exact hostname and port from the environment configuration's local browser URL for proof capture. Preserve `localhost` versus `127.0.0.1` exactly as configured, and treat configured external preview URLs as shareable links only.",
+    );
+    expect(instruction).not.toContain('super-secret-value');
+    expect(instruction).not.toContain('API_KEY');
+    expect(instruction).not.toContain('agentInstructions');
+    expect(instruction).not.toContain('ROOT_SECRET');
+    expect(instruction).not.toContain('top-secret-bypass');
+    expect(instruction).toContain('http://127.0.0.1:3000/auth/dev-login');
+    expect(instruction).toContain('Configured external preview URLs:');
+    expect(instruction).toContain(
+      '- WEB (primary): https://task-123-web.preview.roomote.run/auth/dev-login',
+    );
+    expect(instruction).toContain(
+      'Use these shareable preview URLs when referring to external previews in replies or proof. Do not share raw machine hosts instead.',
+    );
+  });
+
+  it('describes the sandbox browser surface without printing raw service URLs', () => {
+    const instruction = buildSandboxInstruction(true, {
+      name: 'Sandbox',
+      description: 'Test environment',
+      repositories: [],
+    });
+    const renderedInstruction = instruction ?? '';
+    const browserSurfaceLine =
+      'This environment exposes a sandbox-local browser surface for delegated visual proof.';
+    const localhostProofLine =
+      "Use the exact hostname and port from the environment configuration's local browser URL for proof capture. Preserve `localhost` versus `127.0.0.1` exactly as configured, and treat configured external preview URLs as shareable links only.";
+
+    expect(renderedInstruction).toContain(browserSurfaceLine);
+    expect(renderedInstruction).toContain(localhostProofLine);
+    expect(renderedInstruction.indexOf(browserSurfaceLine)).toBeLessThan(
+      renderedInstruction.indexOf(localhostProofLine),
+    );
+    expect(renderedInstruction).not.toContain(
+      'https://sandbox-web.preview.roomote.run',
+    );
+    expect(renderedInstruction).not.toContain('## Active Browser Session');
+    expect(renderedInstruction).not.toContain(
+      'agent-browser skills get core --full',
+    );
+  });
+
+  it('always includes the base sandbox context when no extra config is available', () => {
+    const instruction = buildSandboxInstruction(false);
+    const renderedInstruction = instruction ?? '';
+
+    expect(renderedInstruction).toContain(
+      'You are running inside a cloud sandbox. Your filesystem and processes are isolated to this sandbox instance.',
+    );
+    expect(renderedInstruction).not.toContain('Playwright');
+    expect(renderedInstruction).not.toContain('Environment configuration:');
+    expect(renderedInstruction).not.toContain('## Active Browser Session');
+    expect(renderedInstruction).not.toContain('agent-browser');
+  });
+
+  it('only mentions detached background processes when detached commands exist', () => {
+    const instruction = buildSandboxInstruction(false, {
+      name: 'Sandbox',
+      description: 'Test environment',
+      repositories: [
+        {
+          repository: 'owner/repo',
+          commands: [
+            {
+              name: 'Install deps',
+              run: 'pnpm install',
+              timeout: 600,
+              continue_on_error: false,
+            },
+          ],
+        },
+      ],
+    });
+    const renderedInstruction = instruction ?? '';
+
+    expect(renderedInstruction).toContain(
+      'Repository setup commands from this environment configuration were already executed before your task started.',
+    );
+    expect(renderedInstruction).not.toContain(
+      'Any command marked `detached: true` was started in the background under PM2 supervision.',
+    );
+  });
+
+  it('omits external preview URLs when configured hosts are unavailable', () => {
+    const instruction = buildSandboxInstruction(
+      false,
+      {
+        name: 'Sandbox',
+        description: 'Test environment',
+        ports: [
+          {
+            name: 'WEB',
+            port: 3000,
+            initial_path: '/auth/dev-login',
+            primary: true,
+          },
+        ],
+        repositories: [],
+      },
+      {
+        envVars: {},
+      },
+    );
+
+    expect(instruction).not.toContain('Configured external preview URLs:');
+  });
+
+  it('omits non-proxied hosts from the configured preview URL list', () => {
+    const instruction = buildSandboxInstruction(
+      false,
+      {
+        name: 'Sandbox',
+        description: 'Test environment',
+        ports: [
+          {
+            name: 'WEB',
+            port: 3000,
+            initial_path: '/auth/dev-login',
+            primary: true,
+            proxied: false,
+          },
+          {
+            name: 'API',
+            port: 4000,
+            initial_path: '/trpc',
+            proxied: true,
+          },
+        ],
+        repositories: [],
+      },
+      {
+        envVars: {
+          ROOMOTE_WEB_HOST: 'https://sandbox-raw-host.modal.host',
+          ROOMOTE_API_HOST: 'https://task-123-api.preview.roomote.run',
+        },
+      },
+    );
+
+    expect(instruction).toContain('Configured external preview URLs:');
+    expect(instruction).toContain(
+      '- API: https://task-123-api.preview.roomote.run/trpc',
+    );
+    expect(instruction).not.toContain('https://sandbox-raw-host.modal.host');
+    expect(instruction).not.toContain('- WEB (primary):');
+  });
+});

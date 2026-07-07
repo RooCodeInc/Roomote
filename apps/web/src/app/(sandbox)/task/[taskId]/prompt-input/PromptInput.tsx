@@ -1,0 +1,730 @@
+'use client';
+
+import {
+  forwardRef,
+  useCallback,
+  useEffect,
+  useImperativeHandle,
+  useRef,
+  useState,
+} from 'react';
+import { useMutation } from '@tanstack/react-query';
+import { toast } from 'sonner';
+
+import {
+  preparePromptAttachments,
+  ROOMOTE_FILE_ATTACHMENT_ACCEPT,
+} from '@/lib/prompt-attachments';
+
+import { useUser } from '@/hooks/useUser';
+import { useVoiceDictation } from '@/hooks/useVoiceDictation';
+import { useTRPC, useTRPCClient } from '@/trpc/client';
+
+import {
+  type PromptInputMessage,
+  PromptInput as PromptInputRoot,
+  PromptInputActionAddAttachments,
+  PromptInputActionAddCommand,
+  PromptInputActionAddContext,
+  PromptInputActionMenu,
+  PromptInputActionMenuContent,
+  PromptInputActionMenuTrigger,
+  PromptInputBody,
+  PromptInputFooter,
+  PromptInputTextarea,
+  PromptInputTools,
+  VoiceDictationButton,
+} from '@/components/ai-elements';
+import { BasicTooltip, Loader2 } from '@/components/system';
+
+import {
+  useSandboxClient,
+  useSandboxConnected,
+  useSandboxConnectionStatus,
+  useSandboxCurrentUserInfo,
+  useSandboxQueuedMessages,
+  useSandboxReadOnly,
+  useSandboxTaskPhase,
+} from '../hooks/SandboxProvider';
+import type { CloudJobDetail } from '@/lib/server/cloud-jobs';
+import { TaskToolsButton } from '../sidebar-actions/TaskToolsButton';
+import { shouldShowTaskToolsActions } from '../sidebar-actions/utils';
+import { useOptionalPendingUserInputRequestState } from '../PendingUserInputRequestPanel';
+import { isSteerablePhase } from '../steerable-phase';
+import { shouldSteerQueuedMessageOnEnter } from './enter-steer-utils';
+import { useOptimisticPromptSubmission } from './useOptimisticPromptSubmission';
+
+import { AttachmentsDisplay } from './AttachmentsDisplay';
+import { ContextUsage } from './ContextUsage';
+import { SubmitWithAttachments } from './SubmitWithAttachments';
+import { TaskStatus } from './TaskStatus';
+
+const DRAFT_SAVE_DEBOUNCE_MS = 1_000;
+const KEEPALIVE_TOUCH_THROTTLE_MS = 10_000;
+
+export interface PromptInputHandle {
+  focus: () => void;
+  insertFile: (path: string, insertPosition?: number | null) => void;
+  insertCommand: (name: string, insertPosition?: number | null) => void;
+}
+
+interface PromptInputProps {
+  initialPrompt?: string;
+  onFileSearchOpen: (insertPosition?: number) => void;
+  onCommandSearchOpen: (insertPosition?: number) => void;
+  scrollToBottom?: () => void;
+  cloudJob?: CloudJobDetail | null;
+  showTaskStatus?: boolean;
+  showContextIndicator?: boolean;
+  showTaskToolsMenu?: boolean;
+  showInputMenu?: boolean;
+  placeholder?: string;
+  hasTransportError?: boolean;
+}
+
+export const PromptInput = forwardRef<PromptInputHandle, PromptInputProps>(
+  function PromptInput(
+    {
+      initialPrompt = '',
+      onFileSearchOpen,
+      onCommandSearchOpen,
+      scrollToBottom,
+      cloudJob,
+      showTaskStatus = true,
+      showContextIndicator = true,
+      showTaskToolsMenu = true,
+      showInputMenu = true,
+      placeholder: placeholderProp,
+      hasTransportError = false,
+    },
+    ref,
+  ) {
+    const trpc = useTRPC();
+    const trpcClient = useTRPCClient();
+    const client = useSandboxClient();
+    const {
+      rollbackOptimisticPromptSubmission,
+      startOptimisticPromptSubmission,
+    } = useOptimisticPromptSubmission();
+    const connected = useSandboxConnected();
+    const { connectionError } = useSandboxConnectionStatus();
+    const taskPhase = useSandboxTaskPhase();
+    const queuedMessages = useSandboxQueuedMessages();
+    const readOnly = useSandboxReadOnly();
+    const currentUserInfo = useSandboxCurrentUserInfo();
+    const { user } = useUser();
+    const pendingUserInputState = useOptionalPendingUserInputRequestState();
+    const [prompt, setPrompt] = useState(initialPrompt);
+    const [sending, setSending] = useState(false);
+    const cancellingRef = useRef(false);
+    const steeringQueuedMessageRef = useRef(false);
+    const textareaRef = useRef<HTMLTextAreaElement | null>(null);
+    const cloudJobId = cloudJob?.id;
+
+    const draftSaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(
+      null,
+    );
+    const latestPromptRef = useRef(initialPrompt);
+    const lastSavedPromptRef = useRef(initialPrompt);
+    const lastKeepaliveTouchRef = useRef(0);
+    const activeCloudJobIdRef = useRef(cloudJobId);
+
+    const { mutate: saveDraft } = useMutation(
+      trpc.sandboxSession.saveDraftPrompt.mutationOptions({
+        onSuccess: (_data, variables) => {
+          if (variables.cloudJobId !== activeCloudJobIdRef.current) {
+            return;
+          }
+
+          lastSavedPromptRef.current = variables.draftPrompt;
+        },
+      }),
+    );
+
+    const isTaskRunning = taskPhase === 'running';
+    const canSteerQueuedMessages =
+      isSteerablePhase(taskPhase) &&
+      (taskPhase !== 'waiting_for_prompt' || connected);
+    const isIdleLikeTaskPhase =
+      taskPhase == null ||
+      taskPhase === 'idle' ||
+      taskPhase === 'waiting_for_prompt';
+    const userImageUrl =
+      currentUserInfo?.userImageUrl ?? user?.resource.imageUrl ?? undefined;
+    const steerableQueuedMessages = queuedMessages.filter(
+      (queuedMessage) => queuedMessage.optimistic !== true,
+    );
+
+    const focusTextarea = useCallback((selectionStart?: number) => {
+      const textarea = textareaRef.current;
+
+      if (!textarea) {
+        return;
+      }
+
+      textarea.focus();
+
+      if (typeof selectionStart === 'number') {
+        textarea.setSelectionRange(selectionStart, selectionStart);
+      }
+    }, []);
+
+    const touchKeepalive = useCallback(
+      (force = false) => {
+        const now = Date.now();
+
+        if (
+          !force &&
+          now - lastKeepaliveTouchRef.current < KEEPALIVE_TOUCH_THROTTLE_MS
+        ) {
+          return;
+        }
+
+        client?.commands.touchKeepalive.mutate().catch(() => {});
+        lastKeepaliveTouchRef.current = now;
+      },
+      [client],
+    );
+
+    const persistDraft = useCallback(
+      (
+        text: string,
+        options?: {
+          cloudJobIdOverride?: number;
+          force?: boolean;
+        },
+      ) => {
+        const targetCloudJobId = options?.cloudJobIdOverride ?? cloudJobId;
+
+        if (!targetCloudJobId) {
+          return;
+        }
+
+        if (!options?.force && text === lastSavedPromptRef.current) {
+          return;
+        }
+
+        saveDraft({ cloudJobId: targetCloudJobId, draftPrompt: text });
+      },
+      [cloudJobId, saveDraft],
+    );
+
+    const flushDraft = useCallback(
+      (options?: { cloudJobIdOverride?: number; force?: boolean }) => {
+        if (draftSaveTimerRef.current) {
+          clearTimeout(draftSaveTimerRef.current);
+          draftSaveTimerRef.current = null;
+        }
+
+        const latestPrompt = latestPromptRef.current;
+
+        if (!options?.force && latestPrompt === lastSavedPromptRef.current) {
+          return;
+        }
+
+        persistDraft(latestPrompt, options);
+      },
+      [persistDraft],
+    );
+
+    const scheduleDraftSave = useCallback(
+      (text: string) => {
+        if (draftSaveTimerRef.current) {
+          clearTimeout(draftSaveTimerRef.current);
+        }
+
+        draftSaveTimerRef.current = setTimeout(() => {
+          draftSaveTimerRef.current = null;
+          persistDraft(text);
+        }, DRAFT_SAVE_DEBOUNCE_MS);
+      },
+      [persistDraft],
+    );
+
+    const applyPromptChange = useCallback(
+      (nextPrompt: string) => {
+        latestPromptRef.current = nextPrompt;
+        setPrompt(nextPrompt);
+        touchKeepalive();
+        scheduleDraftSave(nextPrompt);
+      },
+      [scheduleDraftSave, touchKeepalive],
+    );
+
+    const handlePromptChange = useCallback(
+      (value: string) => {
+        applyPromptChange(value);
+      },
+      [applyPromptChange],
+    );
+
+    const handleMessageSent = useCallback(() => {
+      if (cloudJobId) {
+        latestPromptRef.current = '';
+        setPrompt('');
+        flushDraft({ force: true });
+      }
+    }, [cloudJobId, flushDraft]);
+
+    const updatePrompt = useCallback(
+      (
+        updater: (prev: string) => { nextPrompt: string; cursorTarget: number },
+      ) => {
+        const { nextPrompt, cursorTarget } = updater(latestPromptRef.current);
+        applyPromptChange(nextPrompt);
+
+        requestAnimationFrame(() => {
+          focusTextarea(cursorTarget);
+        });
+      },
+      [applyPromptChange, focusTextarea],
+    );
+
+    const insertFile = useCallback(
+      (path: string, insertPosition?: number | null) => {
+        const insertion = `/${path} `;
+
+        updatePrompt((prev) => {
+          if (
+            typeof insertPosition === 'number' &&
+            insertPosition <= prev.length
+          ) {
+            return {
+              nextPrompt:
+                prev.slice(0, insertPosition) +
+                insertion +
+                prev.slice(insertPosition),
+              cursorTarget: insertPosition + insertion.length,
+            };
+          }
+
+          const prefix = prev.length > 0 && !prev.endsWith(' ') ? ' ' : '';
+          const nextPrompt = `${prev}${prefix}@${insertion}`;
+
+          return {
+            nextPrompt,
+            cursorTarget: nextPrompt.length,
+          };
+        });
+      },
+      [updatePrompt],
+    );
+
+    const insertCommand = useCallback(
+      (name: string, insertPosition?: number | null) => {
+        const insertion = `${name} `;
+
+        updatePrompt((prev) => {
+          if (
+            typeof insertPosition === 'number' &&
+            insertPosition <= prev.length
+          ) {
+            const before = prev.slice(0, insertPosition - 1);
+            const after = prev.slice(insertPosition);
+            const nextPrompt = before + insertion + after;
+
+            return {
+              nextPrompt,
+              cursorTarget: before.length + insertion.length,
+            };
+          }
+
+          const prefix = prev.length > 0 && !prev.endsWith(' ') ? ' ' : '';
+          const nextPrompt = `${prev}${prefix}${insertion}`;
+
+          return {
+            nextPrompt,
+            cursorTarget: nextPrompt.length,
+          };
+        });
+      },
+      [updatePrompt],
+    );
+
+    useImperativeHandle(
+      ref,
+      () => ({
+        focus: () => focusTextarea(),
+        insertFile,
+        insertCommand,
+      }),
+      [focusTextarea, insertFile, insertCommand],
+    );
+
+    const handleCancel = useCallback(async () => {
+      if (cancellingRef.current) {
+        return;
+      }
+
+      cancellingRef.current = true;
+
+      try {
+        await client?.commands.cancelTask.mutate();
+      } catch (err) {
+        console.error('[sandbox] cancelTask error:', err);
+      } finally {
+        cancellingRef.current = false;
+      }
+    }, [client]);
+
+    const handleSubmit = useCallback(
+      async (message: PromptInputMessage) => {
+        const text = message.text.trim();
+        const hasAttachments = (message.files?.length ?? 0) > 0;
+        const shouldAnswerPendingFreeText =
+          taskPhase === 'waiting_for_user_input' &&
+          Boolean(pendingUserInputState?.activeFreeTextRequest) &&
+          !hasAttachments;
+
+        if (
+          (!text && !hasAttachments) ||
+          !client ||
+          !cloudJob?.taskId ||
+          sending
+        ) {
+          return;
+        }
+
+        handlePromptChange('');
+        setSending(true);
+        scrollToBottom?.();
+
+        let optimisticClientMessageId: string | null = null;
+        let optimisticLocation: 'transcript' | 'queue' | null = null;
+
+        try {
+          if (shouldAnswerPendingFreeText) {
+            const answered =
+              await pendingUserInputState!.submitFreeTextResponse(text);
+
+            if (answered) {
+              handleMessageSent();
+            }
+
+            return;
+          }
+
+          const preparedPrompt = await preparePromptAttachments({
+            text,
+            attachments: message.files,
+          });
+
+          optimisticLocation = isIdleLikeTaskPhase ? 'transcript' : 'queue';
+          const { clientMessageId } = startOptimisticPromptSubmission({
+            taskId: cloudJob.taskId,
+            prompt: preparedPrompt.text,
+            images: preparedPrompt.images,
+            location: optimisticLocation,
+          });
+          optimisticClientMessageId = clientMessageId;
+
+          await trpcClient.sandboxSession.sendPrompt.mutate({
+            taskId: cloudJob.taskId,
+            prompt: preparedPrompt.text,
+            images: preparedPrompt.images,
+            source: 'web',
+            clientMessageId,
+            userImageUrl,
+          });
+
+          handleMessageSent();
+        } catch (err) {
+          if (optimisticClientMessageId) {
+            const failedClientMessageId = optimisticClientMessageId;
+
+            if (optimisticLocation) {
+              rollbackOptimisticPromptSubmission({
+                taskId: cloudJob.taskId,
+                clientMessageId: failedClientMessageId,
+                location: optimisticLocation,
+              });
+            }
+          }
+          console.error('[sandbox] sendPrompt error:', err);
+          toast.error(
+            err instanceof Error ? err.message : 'Failed to send message.',
+          );
+        } finally {
+          setSending(false);
+        }
+      },
+      [
+        client,
+        pendingUserInputState,
+        sending,
+        handlePromptChange,
+        taskPhase,
+        scrollToBottom,
+        handleMessageSent,
+        cloudJob,
+        trpcClient,
+        isIdleLikeTaskPhase,
+        rollbackOptimisticPromptSubmission,
+        startOptimisticPromptSubmission,
+        userImageUrl,
+      ],
+    );
+
+    const handleChange = useCallback(
+      (e: React.ChangeEvent<HTMLTextAreaElement>) => {
+        const value = e.target.value;
+        const cursor = e.target.selectionStart;
+
+        handlePromptChange(value);
+
+        // Detect a newly typed "@" — the character just before the cursor.
+        if (
+          cursor > 0 &&
+          value[cursor - 1] === '@' &&
+          // Only trigger when the "@" is preceded by whitespace or is the
+          // first character, so we don't fire inside email addresses etc.
+          (cursor === 1 || /\s/.test(value[cursor - 2]!))
+        ) {
+          // Pass cursor position (right after the "@") so the selected
+          // file path will be inserted there.
+          onFileSearchOpen(cursor);
+        }
+
+        // Detect a newly typed "/" at the very start of the message.
+        if (cursor === 1 && value[0] === '/') {
+          onCommandSearchOpen(cursor);
+        }
+      },
+      [handlePromptChange, onFileSearchOpen, onCommandSearchOpen],
+    );
+
+    const voiceDictation = useVoiceDictation({
+      onTranscript: (text) => handlePromptChange(text),
+      getPrefix: () => prompt,
+      taskPhase: taskPhase ?? undefined,
+      disabled: !connected || sending,
+    });
+
+    useEffect(() => {
+      if (activeCloudJobIdRef.current === cloudJobId) {
+        return;
+      }
+
+      if (activeCloudJobIdRef.current) {
+        flushDraft({ cloudJobIdOverride: activeCloudJobIdRef.current });
+      }
+
+      activeCloudJobIdRef.current = cloudJobId;
+      latestPromptRef.current = initialPrompt;
+      lastSavedPromptRef.current = initialPrompt;
+      lastKeepaliveTouchRef.current = 0;
+      setPrompt(initialPrompt);
+
+      if (draftSaveTimerRef.current) {
+        clearTimeout(draftSaveTimerRef.current);
+        draftSaveTimerRef.current = null;
+      }
+    }, [cloudJobId, flushDraft, initialPrompt]);
+
+    useEffect(
+      () => () => {
+        flushDraft({ cloudJobIdOverride: activeCloudJobIdRef.current });
+      },
+      [flushDraft],
+    );
+
+    useEffect(() => {
+      function handleElementPicked(event: Event) {
+        const text = (event as CustomEvent<{ text: string }>).detail.text;
+        const currentPrompt = latestPromptRef.current;
+        const separator = currentPrompt.trim() ? '\n\n' : '';
+        applyPromptChange(currentPrompt + separator + text + '\n\n');
+
+        requestAnimationFrame(() => {
+          const textarea = textareaRef.current;
+
+          if (!textarea) {
+            return;
+          }
+
+          const length = textarea.value.length;
+          focusTextarea(length);
+        });
+      }
+
+      window.addEventListener('roomote-element-picked', handleElementPicked);
+
+      return () =>
+        window.removeEventListener(
+          'roomote-element-picked',
+          handleElementPicked,
+        );
+    }, [applyPromptChange, focusTextarea]);
+
+    // Re-focus the textarea after a message is sent. We use an effect rather
+    // than focusing in handleSubmit because the inner PromptInput component
+    // calls form.reset() *after* handleSubmit's promise resolves, which would
+    // steal focus away from a synchronous .focus() call.
+    const wasSendingRef = useRef(false);
+    useEffect(() => {
+      if (wasSendingRef.current && !sending) {
+        // Delay one frame so the inner form.reset() completes first.
+        requestAnimationFrame(() => focusTextarea());
+      }
+      wasSendingRef.current = sending;
+    }, [sending, focusTextarea]);
+
+    // Auto-focus the textarea when recording stops so the user can immediately
+    // press Enter / Cmd+Enter to send the dictated text.
+    const wasRecordingRef = useRef(false);
+    useEffect(() => {
+      if (wasRecordingRef.current && !voiceDictation.isRecording) {
+        focusTextarea();
+      }
+      wasRecordingRef.current = voiceDictation.isRecording;
+    }, [voiceDictation.isRecording, focusTextarea]);
+
+    const placeholder =
+      placeholderProp ?? 'Message agent - @ to add context, / for commands';
+    const showConnectingStatus =
+      !connected && !connectionError && !hasTransportError;
+
+    const handleTextareaKeyDown = useCallback(
+      (event: React.KeyboardEvent<HTMLTextAreaElement>) => {
+        const submitButton = event.currentTarget.form?.querySelector(
+          'button[type="submit"]',
+        ) as HTMLButtonElement | null;
+        const hasEnabledSubmitButton = Boolean(
+          submitButton && !submitButton.disabled,
+        );
+
+        if (
+          !shouldSteerQueuedMessageOnEnter({
+            key: event.key,
+            shiftKey: event.shiftKey,
+            metaKey: event.metaKey,
+            ctrlKey: event.ctrlKey,
+            altKey: event.altKey,
+            isComposing: event.nativeEvent.isComposing,
+            prompt,
+            hasEnabledSubmitButton,
+            hasClient: Boolean(client),
+            readOnly,
+            canSteerQueuedMessages,
+            queuedMessagesCount: steerableQueuedMessages.length,
+            steeringInFlight: steeringQueuedMessageRef.current,
+          })
+        ) {
+          return;
+        }
+
+        const oldestQueuedMessageId = steerableQueuedMessages[0]?.id;
+
+        if (!oldestQueuedMessageId || !client) {
+          return;
+        }
+
+        event.preventDefault();
+        steeringQueuedMessageRef.current = true;
+
+        void client.commands.steerQueuedMessage
+          .mutate({ queuedMessageId: oldestQueuedMessageId })
+          .catch((error) => {
+            console.error(
+              '[sandbox] steerQueuedMessage from prompt input error:',
+              error,
+            );
+          })
+          .finally(() => {
+            steeringQueuedMessageRef.current = false;
+          });
+      },
+      [
+        canSteerQueuedMessages,
+        client,
+        prompt,
+        readOnly,
+        steerableQueuedMessages,
+      ],
+    );
+
+    return (
+      <div className="2xl:max-w-5xl mx-auto w-full">
+        <PromptInputRoot
+          onSubmit={handleSubmit}
+          accept={ROOMOTE_FILE_ATTACHMENT_ACCEPT}
+          multiple
+        >
+          <AttachmentsDisplay />
+          <PromptInputBody>
+            <PromptInputTextarea
+              ref={textareaRef}
+              value={prompt}
+              onChange={handleChange}
+              onBlur={() => flushDraft()}
+              onKeyDown={handleTextareaKeyDown}
+              placeholder={placeholder}
+              disabled={!connected || sending}
+            />
+          </PromptInputBody>
+          <PromptInputFooter className="pt-0 pb-4 px-4">
+            <PromptInputTools>
+              {showInputMenu && (
+                <PromptInputActionMenu>
+                  <BasicTooltip content="Add to task">
+                    <PromptInputActionMenuTrigger
+                      aria-label="Add to task"
+                      className="hover:bg-secondary"
+                    />
+                  </BasicTooltip>
+                  <PromptInputActionMenuContent>
+                    <PromptInputActionAddAttachments />
+                    <PromptInputActionAddContext
+                      onSelect={() => onFileSearchOpen()}
+                    />
+                    <PromptInputActionAddCommand
+                      onSelect={() => onCommandSearchOpen()}
+                    />
+                  </PromptInputActionMenuContent>
+                </PromptInputActionMenu>
+              )}
+              {showTaskToolsMenu &&
+                cloudJob &&
+                shouldShowTaskToolsActions(cloudJob.type) && (
+                  <TaskToolsButton cloudJob={cloudJob} />
+                )}
+            </PromptInputTools>
+            <div className="flex items-center gap-2">
+              {showConnectingStatus && (
+                <div
+                  role="status"
+                  aria-live="polite"
+                  className="text-muted-foreground flex items-center gap-1.5 text-xs"
+                >
+                  <Loader2 className="size-3.5 shrink-0 animate-spin" />
+                  <span>Connecting...</span>
+                </div>
+              )}
+              {showTaskStatus && !showConnectingStatus && (
+                <TaskStatus cloudJob={cloudJob} />
+              )}
+              {showContextIndicator && (
+                <div className="hidden debug:block">
+                  <ContextUsage />
+                </div>
+              )}
+              <VoiceDictationButton
+                isRecording={voiceDictation.isRecording}
+                isSupported={voiceDictation.isSupported}
+                onClick={voiceDictation.toggle}
+                disabled={!connected || sending}
+              />
+              <SubmitWithAttachments
+                isTaskRunning={isTaskRunning}
+                connected={connected}
+                sending={sending}
+                prompt={prompt}
+                handleCancel={handleCancel}
+              />
+            </div>
+          </PromptInputFooter>
+        </PromptInputRoot>
+      </div>
+    );
+  },
+);

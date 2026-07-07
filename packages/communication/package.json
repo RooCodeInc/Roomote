@@ -1,0 +1,40 @@
+{
+  "name": "@roomote/communication",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts",
+    "./chat-messages": "./src/chat-messages.ts",
+    "./messages": "./src/messages.ts",
+    "./provider": "./src/provider.ts",
+    "./teams-activity": "./src/teams-activity.ts",
+    "./teams-bot-framework-client": "./src/teams-bot-framework-client.ts",
+    "./teams-graph-client": "./src/teams-graph-client.ts",
+    "./teams-provider": "./src/teams-provider.ts",
+    "./telegram-provider": "./src/telegram-provider.ts",
+    "./telegram-update": "./src/telegram-update.ts",
+    "./thread-reply-footer-state": "./src/thread-reply-footer-state.ts"
+  },
+  "scripts": {
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
+    "lint": "eslint src --ext=ts --max-warnings=0",
+    "check-types": "tsc --noEmit",
+    "check-types:fast": "tsgo --noEmit",
+    "test": "dotenvx run -f ../../.env.test -- vitest",
+    "clean": "rimraf .turbo"
+  },
+  "dependencies": {
+    "@roomote/db": "workspace:^",
+    "@roomote/env": "workspace:^",
+    "@roomote/redis": "workspace:^",
+    "@roomote/types": "workspace:^",
+    "zod": "^3.25.76"
+  },
+  "devDependencies": {
+    "@roomote/config-eslint": "workspace:^",
+    "@roomote/config-typescript": "workspace:^",
+    "@types/node": "^24.10.13",
+    "vitest": "^4.1.1"
+  }
+}

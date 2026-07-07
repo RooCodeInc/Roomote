@@ -1,0 +1,38 @@
+{
+  "name": "@roomote/controller",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
+    "lint": "eslint src --ext=ts --max-warnings=0",
+    "check-types": "tsc --noEmit",
+    "check-types:fast": "tsgo --noEmit",
+    "test": "dotenvx run -f ../../.env.test -- vitest",
+    "dev": "bash ./scripts/watchman.sh",
+    "dev:prepare": "rimraf dist",
+    "build": "tsup --clean",
+    "clean": "rimraf .turbo",
+    "internal-deps": "pnpm list --filter @roomote/controller --depth Infinity 2>/dev/null | grep -E '@roomote/' | grep 'link:' | sed 's/.*@roomote/@roomote/' | sed 's/ link:.*//' | sort -u"
+  },
+  "dependencies": {
+    "@roomote/auth": "workspace:^",
+    "@roomote/cloud-agents": "workspace:^",
+    "@roomote/compute-providers": "workspace:^",
+    "@roomote/db": "workspace:^",
+    "@roomote/env": "workspace:^",
+    "@roomote/feature-flags": "workspace:^",
+    "@roomote/redis": "workspace:^",
+    "@roomote/sdk": "workspace:^",
+    "@roomote/types": "workspace:^",
+    "@sentry/node": "10.45.0",
+    "form-data": "^4.0.4"
+  },
+  "devDependencies": {
+    "@roomote/config-eslint": "workspace:^",
+    "@roomote/config-typescript": "workspace:^",
+    "@types/node": "^24.10.13",
+    "tsup": "^8.5.1",
+    "vitest": "^4.1.1"
+  }
+}

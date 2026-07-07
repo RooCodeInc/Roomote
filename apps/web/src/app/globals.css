@@ -1,0 +1,912 @@
+@import 'tailwindcss';
+@import 'tw-animate-css';
+
+@source "../node_modules/streamdown/dist/*.js";
+
+@custom-variant dark (&:is(.dark *));
+@custom-variant debug (&:where([data-debug-ui='true'], [data-debug-ui='true'] *));
+
+@theme inline {
+  --color-background: var(--background);
+  --color-background-new: var(--background-new);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-accent-bright-foreground: var(--accent-bright-foreground);
+  --color-warning: var(--warning);
+  --color-warning-foreground: var(--warning-foreground);
+  --color-destructive: var(--destructive);
+  --color-destructive-foreground: var(--destructive-foreground);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --color-chart-1: var(--chart-1);
+  --color-chart-2: var(--chart-2);
+  --color-chart-3: var(--chart-3);
+  --color-chart-4: var(--chart-4);
+  --color-chart-5: var(--chart-5);
+  --color-chart-6: var(--chart-6);
+  --color-chart-7: var(--chart-7);
+  --color-sidebar: var(--sidebar);
+  --color-sidebar-foreground: var(--sidebar-foreground);
+  --color-sidebar-primary: var(--sidebar-primary);
+  --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
+  --color-sidebar-accent: var(--sidebar-accent);
+  --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
+  --color-sidebar-border: var(--sidebar-border);
+  --color-sidebar-ring: var(--sidebar-ring);
+
+  /* Custom z-index scale for layering UI elements */
+  --z-base: 10;
+  --z-floating-button: 20;
+  --z-message-input: 20;
+  --z-nav-header: 30;
+  --z-nav-drawer: 40;
+  --z-task-sticky-header: 60;
+  --z-dialog: 70;
+  --z-popover: 70;
+  --z-toast: 80;
+  --z-system: 90;
+  --z-max: 999;
+
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) + 4px);
+
+  --shadow-2xs: var(--shadow-2xs);
+  --shadow-xs: var(--shadow-xs);
+  --shadow-sm: var(--shadow-sm);
+  --shadow: var(--shadow);
+  --shadow-md: var(--shadow-md);
+  --shadow-lg: var(--shadow-lg);
+  --shadow-xl: var(--shadow-xl);
+  --shadow-2xl: var(--shadow-2xl);
+  --radius: 0.3rem;
+  --tracking-tighter: calc(var(--tracking-normal) - 0.05em);
+  --tracking-tight: calc(var(--tracking-normal) - 0.025em);
+  --tracking-wide: calc(var(--tracking-normal) + 0.025em);
+  --tracking-wider: calc(var(--tracking-normal) + 0.05em);
+  --tracking-widest: calc(var(--tracking-normal) + 0.1em);
+  --tracking-normal: var(--tracking-normal);
+  --letter-spacing: var(--letter-spacing);
+  --shadow-offset-y: var(--shadow-offset-y);
+  --shadow-offset-x: var(--shadow-offset-x);
+  --shadow-spread: var(--shadow-spread);
+  --shadow-blur: var(--shadow-blur);
+  --shadow-opacity: var(--shadow-opacity);
+  --color-shadow-color: var(--shadow-color);
+
+  --animate-hop: hop 0.8s ease-in-out infinite;
+
+  @keyframes skeleton-dash {
+    to {
+      stroke-dashoffset: calc(-1 * var(--skeleton-cycle, 6) * 1px);
+    }
+  }
+
+  @keyframes hop {
+    0%,
+    100% {
+      transform: none;
+      animation-timing-function: cubic-bezier(0.8, 0, 1, 1);
+    }
+    50% {
+      transform: translateY(-8px);
+      animation-timing-function: cubic-bezier(0, 0, 0.2, 1);
+    }
+  }
+
+  --animate-enter-up: enter-up 0.75s ease-out 1;
+
+  @keyframes enter-up {
+    0% {
+      opacity: 0;
+      transform: translateY(20px);
+    }
+    100% {
+      opacity: 1;
+      transform: translateY(0);
+    }
+  }
+
+  --animate-enter-down: enter-down 0.75s ease-out 1;
+
+  @keyframes enter-down {
+    0% {
+      opacity: 0;
+      transform: translateY(-20px);
+    }
+    100% {
+      opacity: 1;
+      transform: translateY(0);
+    }
+  }
+
+  --animate-exit-down: exit-down 0.75s ease-out 1;
+
+  @keyframes exit-down {
+    0% {
+      opacity: 1;
+      transform: translateY(0);
+    }
+    100% {
+      opacity: 0;
+      transform: translateY(-20px);
+    }
+  }
+
+  --animate-enter-message: enter-message 0.1s ease-out 1;
+
+  @keyframes enter-message {
+    0% {
+      opacity: 0;
+      transform: translateY(-5px);
+    }
+    100% {
+      opacity: 1;
+      transform: translateY(0);
+    }
+  }
+
+  --animate-enter-right: enter-right 0.25s ease-out 1;
+
+  @keyframes enter-right {
+    0% {
+      opacity: 0;
+      transform: translateX(-10px);
+    }
+    100% {
+      opacity: 1;
+      transform: translateX(0);
+    }
+  }
+
+  --animate-exit-right: exit-right 0.25s ease-out 1;
+
+  @keyframes exit-right {
+    0% {
+      opacity: 1;
+      transform: translateX(0);
+    }
+    100% {
+      opacity: 0;
+      transform: translateX(30px);
+    }
+  }
+
+  --animate-wiggle: wiggle 0.5s ease-in-out;
+
+  @keyframes wiggle {
+    0%,
+    100% {
+      transform: translate(0, 0);
+    }
+    10% {
+      transform: translate(-8px, -4px);
+    }
+    20% {
+      transform: translate(6px, 6px);
+    }
+    30% {
+      transform: translate(-5px, -4px);
+    }
+    40% {
+      transform: translate(4px, 2px);
+    }
+    50% {
+      transform: translate(-3px, -2px);
+    }
+    60% {
+      transform: translate(1px, 0);
+    }
+    70% {
+      transform: translate(0, 0);
+    }
+  }
+
+  --animate-sprout: sprout 1s linear infinite;
+
+  @keyframes sprout {
+    0% {
+      clip-path: inset(0 0 0 0);
+    }
+    40% {
+      clip-path: inset(0 0 100% 0);
+    }
+    60% {
+      clip-path: inset(100% 0 0 0);
+    }
+    100% {
+      clip-path: inset(0 0 0 0);
+    }
+  }
+
+  --animate-fade-in: fade-in 0.5s ease-out 1;
+
+  @keyframes fade-in {
+    0% {
+      opacity: 0;
+      filter: blur(5px);
+    }
+    100% {
+      opacity: 1;
+      filter: blur(0px);
+    }
+  }
+
+  --animate-pop-in: pop-in 0.35s ease-out 0.3s both;
+
+  @keyframes pop-in {
+    0% {
+      opacity: 0;
+      transform: scale(0);
+    }
+    80% {
+      opacity: 1;
+      transform: scale(1.2);
+    }
+    100% {
+      transform: scale(1);
+    }
+  }
+
+  --animate-circle-draw: circle-draw 0.5s ease-in-out forwards;
+
+  @keyframes circle-draw {
+    to {
+      stroke-dashoffset: 0;
+    }
+  }
+
+  --animate-icon-fade-in: fade-in 0.5s ease-out 0.5s forwards;
+
+  --animate-brief-appearance: brief-appearance 4s ease-in-out 1;
+
+  @keyframes brief-appearance {
+    0% {
+      opacity: 0;
+      filter: blur(5px);
+    }
+    20%,
+    80% {
+      opacity: 1;
+      filter: blur(0px);
+    }
+    100% {
+      opacity: 0;
+      filter: blur(5px);
+    }
+  }
+
+  --animate-fly-through: fly-through 0.25s ease-in-out;
+
+  @keyframes fly-through {
+    0% {
+      transform: translateX(0) scaleY(1);
+      opacity: 1;
+    }
+    30% {
+      transform: translateX(150%) scaleY(0.5);
+      opacity: 0.5;
+    }
+
+    31% {
+      transform: translateX(-150%) scaleY(0.8);
+      opacity: 0.5;
+    }
+    90% {
+      transform: translateX(10%) scaleY(1);
+      opacity: 1;
+    }
+    100% {
+      transform: translateX(0) scaleY(1);
+      opacity: 1;
+    }
+  }
+}
+
+/* Lucide icon defaults */
+.lucide {
+  stroke-width: 1.5;
+}
+
+:root,
+.light {
+  --background: oklch(0.96 0.005 120);
+  --background-new: oklch(0.911 0.185 117.691);
+  --foreground: oklch(0 0 0);
+  --card: oklch(1 0 0);
+  --card-foreground: oklch(0 0 0);
+  --popover: var(--card);
+  --popover-foreground: oklch(0 0 0);
+  --primary: oklch(0 0 0);
+  --primary-foreground: oklch(1 0 0);
+  --secondary: oklch(0.94 0 0);
+  --secondary-foreground: oklch(0.675 0.2 120);
+  --muted: oklch(0.95 0 0);
+  --muted-foreground: oklch(0 0 0 / 0.65);
+  --accent: var(--background);
+  --accent-foreground: oklch(0.8 0.18 120);
+  --accent-bright-foreground: oklch(0.9 0.18 120);
+  --warning: oklch(0.77 0.15 80);
+  --warning-foreground: oklch(0.25 0.06 85);
+  --destructive: oklch(0.65 0.2 25);
+  --destructive-foreground: oklch(0 0.2 25);
+  --border: oklch(0.85 0 0);
+  --input: oklch(0.85 0 0);
+  --ring: oklch(0 0 0);
+  --chart-1: #d8fb2b;
+  --chart-2: #2bd1b6;
+  --chart-3: #20bbc9;
+  --chart-4: #1887c9;
+  --chart-5: #7b42d9;
+  --chart-6: #de3d3d;
+  --chart-7: #ecb63a;
+  --sidebar: oklch(0.99 0 0);
+  --sidebar-foreground: oklch(0 0 0);
+  --sidebar-primary: oklch(0 0 0);
+  --sidebar-primary-foreground: oklch(1 0 0);
+  --sidebar-accent: oklch(0.94 0 0);
+  --sidebar-accent-foreground: oklch(0 0 0);
+  --sidebar-border: oklch(0 0 0);
+  --sidebar-ring: oklch(0 0 0);
+  --radius: 0.3rem;
+  --shadow-2xs: 0px 1.5px 9.5px 0.5px hsl(0 0% 0% / 0.01);
+  --shadow-xs: 0px 1.5px 9.5px 0.5px hsl(0 0% 0% / 0.01);
+  --shadow-sm:
+    0px 1.5px 9.5px 0.5px hsl(0 0% 0% / 0.03),
+    0px 1px 2px -0.5px hsl(0 0% 0% / 0.03);
+  --shadow:
+    0px 1.5px 9.5px 0.5px hsl(0 0% 0% / 0.03),
+    0px 1px 2px -0.5px hsl(0 0% 0% / 0.03);
+  --shadow-md:
+    0px 1.5px 9.5px 0.5px hsl(0 0% 0% / 0.03),
+    0px 2px 4px -0.5px hsl(0 0% 0% / 0.03);
+  --shadow-lg:
+    0px 1.5px 9.5px 0.5px hsl(0 0% 0% / 0.03),
+    0px 4px 6px -0.5px hsl(0 0% 0% / 0.03);
+  --shadow-xl:
+    0px 1.5px 9.5px 0.5px hsl(0 0% 0% / 0.03),
+    0px 8px 10px -0.5px hsl(0 0% 0% / 0.03);
+  --shadow-2xl: 0px 1.5px 9.5px 0.5px hsl(0 0% 0% / 0.07);
+  --shadow-color: hsl(0 0% 0%);
+  --shadow-opacity: 0.03;
+  --shadow-blur: 9.5px;
+  --shadow-spread: 0.5px;
+  --shadow-offset-x: 0px;
+  --shadow-offset-y: 1.5px;
+  --letter-spacing: 0em;
+  --spacing: 0.25rem;
+  --tracking-normal: 0em;
+
+  /* Code blocks */
+  --shiki-dark-bg: var(--color-zinc-800);
+
+  /* Container & Scrolling Architecture Variables */
+  --header-height: 48px;
+  --nav-drawer-height: 49px;
+
+  /* Responsive Viewport */
+  --viewport-height: 100vh;
+  /* Dynamic viewport height for mobile browsers */
+  @supports (height: 100dvh) {
+    --viewport-height: 100dvh;
+  }
+  --effective-viewport-height: var(--viewport-height);
+
+  /* Computed Heights */
+  --below-header: calc(var(--effective-viewport-height) - var(--header-height));
+
+  /* Sidebar Dimensions */
+  --sidebar-width: 280px;
+  --sidebar-collapsed-width: 64px;
+  color-scheme: light;
+}
+
+.dark {
+  --background: oklch(0.25 0.005 120);
+  --background-new: oklch(0.911 0.185 117.691);
+  --foreground: oklch(1 0 0);
+  --card: oklch(0 0 0);
+  --card-foreground: oklch(1 0 0);
+  --popover: var(--background);
+  --popover-foreground: oklch(1 0 0);
+  --primary: oklch(0.9 0.2 117);
+  --primary-foreground: oklch(0 0 0);
+  --secondary: oklch(0.25 0 0);
+  --secondary-foreground: oklch(0.9 0.18 120);
+  --muted: oklch(0.25 0 0);
+  --muted-foreground: oklch(1 0 0 / 0.65);
+  --accent: var(--background);
+  --accent-foreground: oklch(0.9 0.2 117);
+  --accent-bright-foreground: oklch(0.9 0.18 120);
+  --warning: oklch(0.77 0.15 80);
+  --warning-foreground: oklch(0.25 0.06 85);
+  --destructive: oklch(0.6 0.2 25);
+  --destructive-foreground: oklch(0 0.2 25);
+  --border: oklch(1 0 0 / 0.5);
+  --input: oklch(0.4 0 0);
+  --ring: var(--accent-foreground);
+  --chart-1: #d8fb2b;
+  --chart-2: #2bd1b6;
+  --chart-3: #20bbc9;
+  --chart-4: #1887c9;
+  --chart-5: #7b42d9;
+  --chart-6: #de3d3d;
+  --chart-7: #ecb63a;
+  --sidebar: oklch(0.18 0 0);
+  --sidebar-foreground: oklch(1 0 0);
+  --sidebar-primary: oklch(1 0 0);
+  --sidebar-primary-foreground: oklch(0 0 0);
+  --sidebar-accent: oklch(0.32 0 0);
+  --sidebar-accent-foreground: oklch(1 0 0);
+  --sidebar-border: oklch(1 0 0 / 0.5);
+  --sidebar-ring: oklch(0.72 0 0);
+  --radius: 0.3rem;
+  --shadow-2xs: 0px 1.5px 9.5px 0.5px hsl(0 0% 100% / 0.1);
+  --shadow-xs: 0px 1.5px 9.5px 0.5px hsl(0 0% 100% / 0.1);
+  --shadow-sm:
+    0px 1.5px 9.5px 0.5px hsl(0 0% 0% / 0.25),
+    0px 1px 2px -0.5px hsl(0 0% 0% / 0.25);
+  --shadow:
+    0px 1.5px 9.5px 0.5px hsl(0 0% 0% / 0.03),
+    0px 1px 2px -0.5px hsl(0 0% 0% / 0.03);
+  --shadow-md:
+    0px 1.5px 9.5px 0.5px hsl(0 0% 0% / 0.03),
+    0px 2px 4px -0.5px hsl(0 0% 0% / 0.03);
+  --shadow-lg:
+    0px 1.5px 9.5px 0.5px hsl(0 0% 0% / 0.03),
+    0px 4px 6px -0.5px hsl(0 0% 0% / 0.03);
+  --shadow-xl:
+    0px 1.5px 9.5px 0.5px hsl(0 0% 0% / 0.03),
+    0px 8px 10px -0.5px hsl(0 0% 0% / 0.03);
+  --shadow-2xl: 0px 1.5px 9.5px 0.5px hsl(0 0% 50% / 0.07);
+  --shadow-color: hsl(0 0% 0%);
+  --shadow-opacity: 0.03;
+  --shadow-blur: 9.5px;
+  --shadow-spread: 0.5px;
+  --shadow-offset-x: 0px;
+  --shadow-offset-y: 1.5px;
+  --letter-spacing: 0em;
+  --spacing: 0.25rem;
+}
+
+@layer base {
+  * {
+    @apply border-border outline-ring/50;
+  }
+  body {
+    @apply bg-background text-foreground;
+    letter-spacing: var(--tracking-normal);
+  }
+}
+
+@layer components {
+  /* Layout Utilities */
+  .h-viewport {
+    height: var(--viewport-height);
+  }
+
+  .h-below-header {
+    height: var(--below-header);
+  }
+
+  .min-h-viewport {
+    min-height: var(--viewport-height);
+  }
+
+  .h-effective-viewport {
+    height: var(--effective-viewport-height);
+  }
+
+  .min-h-effective-viewport {
+    min-height: var(--effective-viewport-height);
+  }
+
+  /*
+    Scroll Utilities for sidebar layout
+    # Height Utilities
+    - `.h-viewport` - Full viewport height
+    - `.h-effective-viewport` - Viewport minus active status banner
+    - `.h-below-header` - Viewport minus header
+    - `.min-h-viewport` - Minimum viewport height
+    - `.min-h-effective-viewport` - Minimum viewport minus active status banner
+
+    # Scroll Utilities
+    - `.scroll-stable` - Consistent scrolling with overscroll containment
+    - `.scroll-thin` - Thin scrollbar styling
+    - `.scroll-hidden` - Hide scrollbar but keep scrollable
+
+    # Container Utilities
+    - `.container-fixed-sidebar` - Adjusts margin for fixed sidebar
+    - `.container-centered` - Centers content with max-width
+    */
+  .scroll-stable {
+    overscroll-behavior: contain;
+    overflow-y: auto;
+    overflow-x: hidden;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  .scroll-hidden {
+    scrollbar-width: none;
+    &::-webkit-scrollbar {
+      display: none;
+    }
+  }
+
+  .scroll-thin {
+    scrollbar-width: thin;
+    scrollbar-color: transparent transparent;
+    transition: scrollbar-color 150ms ease;
+    &::-webkit-scrollbar {
+      width: 5px;
+      height: 5px;
+      margin-right: 2px;
+    }
+    &::-webkit-scrollbar-button {
+      display: none;
+      width: 0;
+      height: 0;
+    }
+    &::-webkit-scrollbar-track {
+      background: transparent;
+    }
+    &::-webkit-scrollbar-thumb {
+      @apply rounded-full;
+      background-color: transparent;
+      transition: background-color 150ms ease;
+    }
+    &:hover,
+    &:focus-within {
+      scrollbar-color: color-mix(
+          in oklab,
+          var(--color-muted-foreground) 20%,
+          transparent
+        )
+        transparent;
+    }
+    &:hover::-webkit-scrollbar-thumb,
+    &:focus-within::-webkit-scrollbar-thumb {
+      @apply bg-muted-foreground/20;
+    }
+    &:hover::-webkit-scrollbar-thumb:hover,
+    &:focus-within::-webkit-scrollbar-thumb:hover {
+      @apply bg-muted-foreground/40;
+    }
+  }
+
+  /* Sticky Elements in Scrollable Areas */
+  .sticky-in-scroll {
+    position: sticky;
+    top: 0;
+    z-index: var(--z-base);
+    background: var(--background);
+  }
+
+  /* Fade Edges for Scroll Indication */
+  .fade-scroll-edges {
+    mask-image: linear-gradient(
+      to bottom,
+      transparent 0%,
+      black 10%,
+      black 90%,
+      transparent 100%
+    );
+  }
+
+  .fade-scroll-edges-h {
+    mask-image: linear-gradient(
+      to right,
+      transparent 0%,
+      black 10%,
+      black 90%,
+      transparent 100%
+    );
+  }
+
+  /* Bottom fade for collapsible content overflow */
+  .mask-fade-bottom {
+    mask-image: linear-gradient(to bottom, black 90%, transparent 100%);
+  }
+  .mask-fade-right {
+    mask-image: linear-gradient(to right, black 95%, transparent 100%);
+  }
+
+  /* Scroll Shadows */
+  .scroll-shadow {
+    background:
+      linear-gradient(var(--background) 30%, transparent),
+      linear-gradient(transparent, var(--background) 70%) bottom,
+      radial-gradient(farthest-side at 50% 0, rgba(0, 0, 0, 0.2), transparent),
+      radial-gradient(
+          farthest-side at 50% 100%,
+          rgba(0, 0, 0, 0.2),
+          transparent
+        )
+        bottom;
+    background-repeat: no-repeat;
+    background-size:
+      100% 40px,
+      100% 40px,
+      100% 14px,
+      100% 14px;
+    background-attachment: local, local, scroll, scroll;
+  }
+
+  /* Container Utilities */
+  .container-fixed-sidebar {
+    margin-left: var(--sidebar-width);
+  }
+
+  .container-centered {
+    @apply mx-auto max-w-7xl;
+  }
+
+  .cl-cardBox {
+    box-shadow: none !important;
+    border-radius: 1em !important;
+  }
+
+  /* Prevent zoom on iOS when focusing inputs */
+  @media screen and (max-width: 512px) {
+    input[type='text'],
+    input[type='email'],
+    input[type='password'],
+    input[type='search'],
+    input[type='tel'],
+    input[type='url'],
+    textarea,
+    select {
+      font-size: 16px !important;
+      transform: none !important;
+      transition: none !important;
+    }
+  }
+
+  /* Prefer the viewport utilities above over raw Tailwind screen heights in app shells. */
+}
+
+@utility z-base {
+  z-index: var(--z-base);
+}
+@utility z-floating-button {
+  z-index: var(--z-floating-button);
+}
+@utility z-message-input {
+  z-index: var(--z-message-input);
+}
+@utility z-nav-header {
+  z-index: var(--z-nav-header);
+}
+@utility z-nav-drawer {
+  z-index: var(--z-nav-drawer);
+}
+@utility z-task-sticky-header {
+  z-index: var(--z-task-sticky-header);
+}
+@utility z-dialog {
+  z-index: var(--z-dialog);
+}
+@utility z-popover {
+  z-index: var(--z-popover);
+}
+@utility z-toast {
+  z-index: var(--z-toast);
+}
+@utility z-system {
+  z-index: var(--z-system);
+}
+@utility z-max {
+  z-index: var(--z-max);
+}
+
+/* ==========================================================================
+   Streamdown Markdown Styles
+   Customize markdown rendering in AI chat messages.
+   Uses data-streamdown attribute values for reliable targeting.
+   See: https://streamdown.ai/docs for full list of elements.
+   
+   NOTE: Streamdown has Tailwind classes baked into the library.
+   We use !important to override them when needed.
+   ========================================================================== */
+
+.chat-message p {
+  @apply my-2;
+}
+
+/* User messages have a different background color, requiring some overrides */
+.chat-message.is-user [data-streamdown='code-block'] {
+  @apply border-none;
+}
+.chat-message.is-user [data-streamdown='code-block-header'] {
+  @apply hidden;
+}
+.chat-message.is-user [data-streamdown='code-block-body'] {
+  @apply border-t-0 bg-background/30! dark:bg-foreground/10!;
+}
+.chat-message.is-user [data-streamdown='code-block-body'] code > span::before {
+  content: none !important;
+}
+
+[data-streamdown] {
+  font-size: inherit;
+}
+
+.chat-message [data-streamdown='heading-1'],
+.chat-message [data-streamdown='heading-2'],
+.chat-message [data-streamdown='heading-3'] {
+  @apply text-base!;
+}
+
+/* Headings — em units so they scale with the container's font-size.
+   Override the rem-based Tailwind classes baked into Streamdown. */
+[data-streamdown='heading-1'] {
+  font-size: 1.875em !important;
+}
+[data-streamdown='heading-2'] {
+  font-size: 1.5em !important;
+}
+[data-streamdown='heading-3'] {
+  font-size: 1.25em !important;
+}
+[data-streamdown='heading-4'] {
+  font-size: 1.125em !important;
+}
+[data-streamdown='heading-5'] {
+  font-size: 1em !important;
+}
+[data-streamdown='heading-6'] {
+  font-size: 0.875em !important;
+}
+/* Text elements */
+
+.chat-message.is-user [data-streamdown='paragraph'] {
+  @apply break-words;
+}
+[data-streamdown='strong'] {
+}
+[data-streamdown='link'] {
+  @apply text-secondary-foreground no-underline hover:underline;
+}
+[data-streamdown='paragraph'] code,
+[data-streamdown='paragraph'] [data-streamdown='inline-code'],
+[data-streamdown='list-item'] > code,
+[data-streamdown='list-item'] > [data-streamdown='inline-code'],
+[data-streamdown='table-cell'] > code,
+[data-streamdown='table-cell'] > [data-streamdown='inline-code'] {
+  @apply text-[0.75rem];
+}
+
+[data-streamdown='paragraph'] code,
+[data-streamdown='list-item'] code,
+[data-streamdown='table-cell'] code,
+[data-streamdown='inline-code'] {
+  @apply px-[3px] py-px bg-foreground/5 dark:bg-foreground/15 mx-0.5 first:ml-0 relative -top-px;
+}
+
+[data-streamdown='code-block'] {
+  @apply text-[0.75rem];
+}
+
+[data-streamdown='code-block-header'] svg {
+  @apply size-3;
+}
+
+/* Lists */
+[data-streamdown='ordered-list'] {
+  @apply ml-6 list-outside list-decimal;
+}
+[data-streamdown='unordered-list'] {
+  @apply ml-6 list-outside;
+}
+[data-streamdown='list-item'] {
+}
+/* Blocks */
+[data-streamdown='blockquote'] {
+}
+[data-streamdown='horizontal-rule'] {
+  @apply w-3/4! border border-dotted border-foreground/20 my-8;
+}
+/* Code */
+[data-streamdown='code-block'] {
+}
+
+[data-streamdown='mermaid-block'] {
+}
+/* Tables */
+[data-streamdown='table-wrapper'] {
+  @apply mb-8;
+}
+[data-streamdown='table'] {
+  @apply border-0;
+}
+[data-streamdown='table-header'] {
+  @apply bg-transparent;
+}
+[data-streamdown='table-body'] {
+}
+[data-streamdown='table-row'] {
+  @apply border-0;
+}
+[data-streamdown='table-header-cell'] {
+  @apply align-top px-2 bg-foreground/15;
+}
+
+[data-streamdown='table-header-cell']:first-child {
+  @apply rounded-l-xl  overflow-clip;
+}
+[data-streamdown='table-header-cell']:last-child {
+  @apply rounded-r-xl;
+}
+
+[data-streamdown='table-cell'] {
+  @apply align-top px-2 border-b border-foreground/15;
+}
+
+[data-streamdown='table-row']:last-child [data-streamdown='table-cell'] {
+  @apply border-b-0;
+}
+
+[data-streamdown='table-cell'] code {
+  @apply -mr-1;
+}
+
+[data-streamdown='table-header-cell']:first-child,
+[data-streamdown='table-cell']:first-child {
+  @apply pl-3;
+}
+
+[data-streamdown='table-header-cell']:last-child,
+[data-streamdown='table-cell']:last-child {
+  @apply pr-3;
+}
+
+/* Other */
+[data-streamdown='superscript'] {
+}
+[data-streamdown='subscript'] {
+}
+
+/* ==========================================================================
+   Permalink highlight
+   Applied via JS when scrolling to a hash-linked message.
+   ========================================================================== */
+
+@keyframes permalink-highlight {
+  0% {
+    transform: translateX(-15px);
+    width: 0px;
+  }
+  50% {
+    transform: translateX(8px);
+    width: 2px;
+  }
+  100% {
+    transform: translateX(-1px);
+    width: 3px;
+  }
+}
+
+.permalink-highlight {
+  @apply relative pl-3 mr-3 transition-all duration-200 delay-200 ease-in-out;
+}
+
+.permalink-highlight:before {
+  @apply block absolute rounded-full left-0 bg-accent-foreground;
+  content: '';
+  top: 2rem;
+  bottom: 2rem;
+  animation: permalink-highlight 0.35s ease-out 1 0.15s both;
+}

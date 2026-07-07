@@ -1,0 +1,523 @@
+import {
+  ALL_REPOSITORIES,
+  activeCloudTaskStatuses,
+  type CloudTask,
+  type CloudTaskPayload,
+  type ComputeProvider,
+  type LaunchCodingHarness,
+  type SourceControlProvider,
+  CloudTaskStatus,
+  CloudTaskType,
+  isExitedCloudTaskStatus,
+  resolveEvalHarnessSelection,
+} from '@roomote/types';
+import {
+  type RoutingDecision,
+  buildSlackRoutingContext,
+  enqueueCloudTask,
+  getTaskUrl,
+  routeTask,
+} from '@roomote/cloud-agents/server';
+import {
+  and,
+  cloudJobs,
+  db,
+  desc,
+  eq,
+  environmentRepositoryMappings,
+  inArray,
+  isNotNull,
+  markTaskStartParallelCountEndedAt,
+  repositories,
+  slackInstallations,
+} from '@roomote/db/server';
+import { SlackNotifier } from '@roomote/slack';
+
+import type { UserAuthSuccess } from '@/types';
+import { Env, getArtifactById, getRepositories } from '@/lib/server';
+import { humanizeFilename } from '@/lib/task-utils';
+
+export type CreateCloudJobResult =
+  | { success: true; id: number; taskId: string }
+  | { success: false; error: string };
+
+type CreateStandardTaskCloudJobInput = {
+  harness?: LaunchCodingHarness;
+  model?: string;
+  computeProvider?: ComputeProvider;
+  sourceTaskId?: string;
+  sourceArtifactId?: string;
+  sourceArtifactPath?: string;
+  sourceArtifactVersion?: number;
+  payload: CloudTaskPayload<CloudTaskType.StandardTask>;
+};
+
+function getManualTaskRepositoryFullNames(
+  payload: CloudTaskPayload<CloudTaskType.StandardTask>,
+) {
+  if (payload.selectedRepositories?.length) {
+    return [...new Set(payload.selectedRepositories.filter(Boolean))].sort(
+      (left, right) => left.localeCompare(right),
+    );
+  }
+
+  if (payload.repo && payload.repo !== ALL_REPOSITORIES) {
+    return [payload.repo];
+  }
+
+  return [];
+}
+
+function resolveSingleSourceControlProvider(
+  providers: SourceControlProvider[],
+): SourceControlProvider | undefined {
+  const uniqueProviders = [...new Set(providers)];
+
+  if (uniqueProviders.length > 1) {
+    throw new Error(
+      'Selected repositories must belong to a single source control provider.',
+    );
+  }
+
+  return uniqueProviders[0];
+}
+
+async function resolveEnvironmentSourceControlProvider(
+  environmentId: string | undefined,
+): Promise<SourceControlProvider | undefined> {
+  if (!environmentId) {
+    return undefined;
+  }
+
+  const rows = await db
+    .select({
+      sourceControlProvider: repositories.sourceControlProvider,
+    })
+    .from(environmentRepositoryMappings)
+    .innerJoin(
+      repositories,
+      eq(environmentRepositoryMappings.repositoryId, repositories.id),
+    )
+    .where(
+      and(
+        eq(environmentRepositoryMappings.environmentId, environmentId),
+        eq(repositories.isActive, true),
+      ),
+    );
+
+  return resolveSingleSourceControlProvider(
+    rows.map((row) => row.sourceControlProvider),
+  );
+}
+
+function getSlackChannelFromPayload(payload: unknown): string | undefined {
+  if (!payload || typeof payload !== 'object') {
+    return undefined;
+  }
+
+  const record = payload as Record<string, unknown>;
+  const channel =
+    typeof record.channel === 'string'
+      ? record.channel
+      : typeof record.slackChannel === 'string'
+        ? record.slackChannel
+        : undefined;
+
+  return channel;
+}
+
+async function getValidatedArtifactBuildSource({
+  auth,
+  sourceTaskId,
+  sourceArtifactId,
+  sourceArtifactPath,
+  sourceArtifactVersion,
+}: {
+  auth: UserAuthSuccess;
+  sourceTaskId?: string;
+  sourceArtifactId?: string;
+  sourceArtifactPath?: string;
+  sourceArtifactVersion?: number;
+}): Promise<{
+  sourceTaskId: string;
+  artifactPath: string;
+  artifactVersion: number;
+} | null> {
+  if (!sourceTaskId) {
+    return null;
+  }
+
+  if (!sourceArtifactId) {
+    console.warn(
+      `[artifactBuildSource] Missing source artifact ID for source task ${sourceTaskId}, skipping artifact-build Slack notification`,
+    );
+    return null;
+  }
+
+  const sourceArtifact = await getArtifactById({
+    taskId: sourceTaskId,
+    artifactId: sourceArtifactId,
+    auth: {
+      userId: auth.userId,
+      isAdmin: auth.isAdmin,
+    },
+  });
+
+  if (!sourceArtifact) {
+    console.warn(
+      `[artifactBuildSource] Could not validate source artifact ${sourceArtifactId} for source task ${sourceTaskId}, skipping artifact-build Slack notification`,
+    );
+    return null;
+  }
+
+  if (sourceArtifactPath && sourceArtifact.path !== sourceArtifactPath) {
+    console.warn(
+      `[artifactBuildSource] Source artifact path mismatch for task ${sourceTaskId}: expected ${sourceArtifact.path}, received ${sourceArtifactPath}, skipping artifact-build Slack notification`,
+    );
+    return null;
+  }
+
+  if (
+    sourceArtifactVersion !== undefined &&
+    sourceArtifact.version !== sourceArtifactVersion
+  ) {
+    console.warn(
+      `[artifactBuildSource] Source artifact version mismatch for task ${sourceTaskId}: expected ${sourceArtifact.version}, received ${sourceArtifactVersion}, skipping artifact-build Slack notification`,
+    );
+    return null;
+  }
+
+  return {
+    sourceTaskId: sourceArtifact.taskId,
+    artifactPath: sourceArtifact.path,
+    artifactVersion: sourceArtifact.version,
+  };
+}
+
+async function notifySlackThreadsAboutArtifactBuild({
+  sourceTaskId,
+  newTaskId,
+  artifactPath,
+  artifactVersion,
+}: {
+  sourceTaskId?: string;
+  newTaskId?: string;
+  artifactPath?: string;
+  artifactVersion?: number;
+}): Promise<void> {
+  if (!sourceTaskId || !newTaskId) {
+    return;
+  }
+
+  const sourceSlackJobs = await db.query.cloudJobs.findMany({
+    where: and(
+      eq(cloudJobs.taskId, sourceTaskId),
+      isNotNull(cloudJobs.slackThreadTs),
+    ),
+    columns: {
+      payload: true,
+      slackThreadTs: true,
+    },
+  });
+
+  if (sourceSlackJobs.length === 0) {
+    return;
+  }
+
+  const slackInstallation = await db.query.slackInstallations.findFirst({
+    where: eq(slackInstallations.isActive, true),
+    columns: { botAccessToken: true },
+  });
+
+  if (!slackInstallation) {
+    console.warn(
+      '[notifyArtifactBuildSlackThreads] No active Slack installation, skipping artifact-build Slack notification',
+    );
+    return;
+  }
+
+  const notifier = new SlackNotifier(slackInstallation.botAccessToken);
+  const notifiedThreads = new Set<string>();
+  const taskUrl = getTaskUrl({
+    taskId: newTaskId,
+    utm: { source: 'slack', campaign: 'artifact_build' },
+  });
+  const artifactLabel = artifactPath
+    ? `${humanizeFilename(artifactPath)}${
+        artifactVersion !== undefined ? ` (v${artifactVersion})` : ''
+      }`
+    : 'this artifact';
+  const text = `Started a new task to build ${artifactLabel}. <${taskUrl}|Open task>`;
+  const blocks = [
+    {
+      type: 'section' as const,
+      text: {
+        type: 'mrkdwn' as const,
+        text,
+      },
+    },
+  ];
+
+  for (const sourceSlackJob of sourceSlackJobs) {
+    const threadTs = sourceSlackJob.slackThreadTs;
+
+    if (!threadTs || notifiedThreads.has(threadTs)) {
+      continue;
+    }
+
+    const channel = getSlackChannelFromPayload(sourceSlackJob.payload);
+
+    if (!channel) {
+      console.warn(
+        `[notifyArtifactBuildSlackThreads] No Slack channel found for source task ${sourceTaskId} thread ${threadTs}, skipping artifact-build Slack notification`,
+      );
+      continue;
+    }
+
+    try {
+      await notifier.postMessage({
+        channel,
+        thread_ts: threadTs,
+        text,
+        blocks,
+        unfurl_links: false,
+        unfurl_media: false,
+      });
+
+      notifiedThreads.add(threadTs);
+    } catch (error) {
+      console.error(
+        `[notifyArtifactBuildSlackThreads] Failed to notify Slack thread ${threadTs} about artifact build task ${newTaskId}: ${
+          error instanceof Error ? error.message : String(error)
+        }`,
+      );
+    }
+  }
+}
+
+async function notifySourceTaskArtifactBuild({
+  auth,
+  sourceTaskId,
+  sourceArtifactId,
+  sourceArtifactPath,
+  sourceArtifactVersion,
+  newTaskId,
+}: {
+  auth: UserAuthSuccess;
+  sourceTaskId?: string;
+  sourceArtifactId?: string;
+  sourceArtifactPath?: string;
+  sourceArtifactVersion?: number;
+  newTaskId?: string;
+}): Promise<void> {
+  const source = await getValidatedArtifactBuildSource({
+    auth,
+    sourceTaskId,
+    sourceArtifactId,
+    sourceArtifactPath,
+    sourceArtifactVersion,
+  });
+
+  if (!source) {
+    return;
+  }
+
+  await notifySlackThreadsAboutArtifactBuild({
+    sourceTaskId: source.sourceTaskId,
+    newTaskId,
+    artifactPath: source.artifactPath,
+    artifactVersion: source.artifactVersion,
+  });
+}
+
+export async function routeHomeTaskCommand(
+  auth: UserAuthSuccess,
+  input: {
+    description: string;
+    images?: string[];
+  },
+): Promise<RoutingDecision> {
+  try {
+    const trimmedDescription = input.description.trim();
+
+    if (trimmedDescription.length === 0) {
+      return {
+        status: 'fallback',
+        reason: 'Task description is required for auto routing.',
+      };
+    }
+
+    const routingContext = await buildSlackRoutingContext({
+      userId: auth.userId,
+      taskDescription: trimmedDescription,
+      ...(input.images?.length ? { images: input.images } : {}),
+      apiBaseUrl: Env.TRPC_URL ?? Env.ROOMOTE_APP_URL,
+    });
+
+    return await routeTask(routingContext);
+  } catch (error) {
+    console.error(error);
+
+    return {
+      status: 'fallback',
+      reason:
+        error instanceof Error ? error.message : 'An unknown error occurred.',
+    };
+  }
+}
+
+export async function createStandardTaskCloudJobCommand(
+  auth: UserAuthSuccess,
+  input: CreateStandardTaskCloudJobInput,
+): Promise<CreateCloudJobResult> {
+  try {
+    if (!input.payload.environmentId && !input.payload.repo) {
+      return {
+        success: false,
+        error: 'Select an environment before starting a task.',
+      };
+    }
+
+    const evalSelection = resolveEvalHarnessSelection({
+      harness: input.harness,
+      model: input.model,
+    });
+
+    if (!evalSelection.ok) {
+      throw new Error(evalSelection.error);
+    }
+
+    const selectedRepositoryFullNames = getManualTaskRepositoryFullNames(
+      input.payload,
+    );
+    const availableRepositories =
+      selectedRepositoryFullNames.length === 0
+        ? []
+        : await getRepositories(auth);
+    const selectedRepositories = availableRepositories.filter((repository) =>
+      selectedRepositoryFullNames.includes(repository.fullName),
+    );
+    const sourceControlProvider =
+      input.payload.sourceControlProvider ??
+      resolveSingleSourceControlProvider(
+        selectedRepositories.map(
+          (repository) => repository.sourceControlProvider,
+        ),
+      ) ??
+      (await resolveEnvironmentSourceControlProvider(
+        input.payload.environmentId,
+      ));
+
+    const task: CloudTask = {
+      userId: auth.userId,
+      harness: evalSelection.harness ?? input.harness,
+      computeProvider: input.computeProvider,
+      type: CloudTaskType.StandardTask,
+      payload: {
+        ...input.payload,
+        ...(sourceControlProvider ? { sourceControlProvider } : {}),
+        ...(evalSelection.harnessModelOverrides
+          ? {
+              harnessModelOverrides: {
+                ...(input.payload.harnessModelOverrides ?? {}),
+                ...evalSelection.harnessModelOverrides,
+              },
+            }
+          : {}),
+      },
+    };
+
+    const launchResult = await enqueueCloudTask(task, {
+      launchClass: 'human',
+    });
+
+    try {
+      await notifySourceTaskArtifactBuild({
+        auth,
+        sourceTaskId: input.sourceTaskId,
+        sourceArtifactId: input.sourceArtifactId,
+        sourceArtifactPath: input.sourceArtifactPath,
+        sourceArtifactVersion: input.sourceArtifactVersion,
+        newTaskId: 'taskId' in launchResult ? launchResult.taskId : undefined,
+      });
+    } catch (error) {
+      console.error(
+        `[createStandardTaskCloudJob] Failed to notify Slack threads for source task ${input.sourceTaskId ?? 'unknown'}: ${
+          error instanceof Error ? error.message : String(error)
+        }`,
+      );
+    }
+
+    return {
+      success: true,
+      id: launchResult.id,
+      taskId: launchResult.taskId,
+    };
+  } catch (error) {
+    console.error(error);
+
+    return error instanceof Error
+      ? { success: false, error: error.message }
+      : { success: false, error: 'An unknown error occurred.' };
+  }
+}
+
+export async function cancelCloudJobCommand(
+  auth: UserAuthSuccess,
+  input: { taskId: string; cloudJobId?: number },
+): Promise<{ success: true } | { success: false; error: string }> {
+  try {
+    const taskFilter = eq(cloudJobs.taskId, input.taskId);
+
+    const job =
+      // Snapshot resumes reuse taskId, so a stale cloudJobId can still point at
+      // an older non-terminal row. Always prefer the newest active job for the
+      // task over the supplied ID.
+      (await db.query.cloudJobs.findFirst({
+        where: and(
+          taskFilter,
+          inArray(cloudJobs.status, [...activeCloudTaskStatuses]),
+        ),
+        orderBy: [desc(cloudJobs.createdAt), desc(cloudJobs.id)],
+      })) ??
+      (input.cloudJobId !== undefined
+        ? await db.query.cloudJobs.findFirst({
+            where: and(eq(cloudJobs.id, input.cloudJobId), taskFilter),
+            orderBy: [desc(cloudJobs.createdAt), desc(cloudJobs.id)],
+          })
+        : null) ??
+      (await db.query.cloudJobs.findFirst({
+        where: taskFilter,
+        orderBy: [desc(cloudJobs.createdAt), desc(cloudJobs.id)],
+      }));
+
+    if (!job) {
+      return { success: false, error: 'Cloud job not found' };
+    }
+
+    if (!isExitedCloudTaskStatus(job.status)) {
+      const endedAt = new Date();
+
+      await db.transaction(async (tx) => {
+        await tx
+          .update(cloudJobs)
+          .set({ status: CloudTaskStatus.Canceled, canceledAt: endedAt })
+          .where(eq(cloudJobs.id, job.id));
+
+        await markTaskStartParallelCountEndedAt(tx, {
+          cloudJobId: job.id,
+          endedAt,
+        });
+      });
+    }
+
+    return { success: true };
+  } catch (error) {
+    console.error(error);
+
+    return {
+      success: false,
+      error: error instanceof Error ? error.message : 'Unknown error occurred',
+    };
+  }
+}

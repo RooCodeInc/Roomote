@@ -1,0 +1,73 @@
+---
+title: Telegram
+icon: 'https://api.iconify.design/simple-icons:telegram.svg?color=currentColor'
+description: Configure a Telegram bot and webhook so Roomote can start and continue tasks from Telegram.
+---
+
+Telegram is a deployment-owned messaging provider. It is not a Roomote sign-in
+provider.
+
+Roomote can receive Telegram bot messages, start tasks from private chats or
+bot mentions, and reply back through the same chat or forum topic. Telegram
+delivers updates through the Bot API webhook endpoint, so Roomote must be
+reachable at a stable public HTTPS URL.
+
+Use `<public-url>` below for your stable public Roomote URL.
+
+## Create a Telegram bot
+
+Message `@BotFather` in Telegram and create or select a bot. Save the bot
+token and username in Roomote setup or env vars:
+
+```sh
+TELEGRAM_BOT_TOKEN=<botfather-token>
+TELEGRAM_BOT_USERNAME=<bot-username-without-at>
+```
+
+Generate a random webhook secret and save it too:
+
+```sh
+TELEGRAM_WEBHOOK_SECRET=<random-secret>
+```
+
+Restart Roomote after changing Telegram env vars. Inbound webhooks are accepted
+only when Telegram sends the matching `X-Telegram-Bot-Api-Secret-Token`
+header, and outbound replies use `TELEGRAM_BOT_TOKEN`.
+
+## Register the webhook
+
+With Roomote running and `<public-url>` pointing at the Roomote web/API server,
+register the Telegram webhook:
+
+```sh
+curl -sS "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/setWebhook" \
+  -H "content-type: application/json" \
+  -d '{
+    "url": "<public-url>/api/webhooks/telegram",
+    "secret_token": "<random-secret>",
+    "allowed_updates": ["message"]
+  }'
+```
+
+Use the same value for `secret_token` and `TELEGRAM_WEBHOOK_SECRET`.
+
+## Account linking
+
+Telegram tasks are attributed only to senders who have linked their Telegram
+account to a Roomote user.
+
+Generate a link code under **Settings > Personal > Linked Accounts** and send
+it to the bot. Until a sender links, Roomote will not start, resume, or follow
+up on tasks on their behalf.
+
+## Verify setup
+
+1. send a direct message to the bot, or mention the bot in a group
+2. confirm Roomote starts a task and posts a Telegram reply with the task link
+3. reply in the same Telegram chat or forum topic to send a follow-up
+
+## Local URL changes
+
+When the public URL changes, call `setWebhook` again with the new
+`<public-url>/api/webhooks/telegram` URL and restart Roomote with the matching
+URL.

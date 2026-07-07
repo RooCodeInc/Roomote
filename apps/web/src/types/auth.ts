@@ -1,0 +1,62 @@
+import { FeatureFlag } from '@roomote/feature-flags';
+
+/**
+ * Authentication
+ */
+
+export type UserResource = {
+  username: string | null;
+  fullName: string | null;
+  firstName: string | null;
+  lastName: string | null;
+  primaryEmailAddress: { id: string; emailAddress: string } | null;
+  emailAddresses: { id: string; emailAddress: string }[];
+  imageUrl: string;
+  createdAt: Date | number | null;
+};
+
+export type AuthorizedUser = {
+  userId: string;
+  name: string | null;
+  primaryEmail: string | null;
+  isAdmin: boolean;
+  featureFlags: Record<FeatureFlag, boolean>;
+  /**
+   * Whether anonymous analytics is active for this deployment (admin
+   * setting enabled AND the environment allows telemetry). Drives whether
+   * the client tracking module is loaded at all.
+   */
+  anonymousAnalyticsEnabled: boolean;
+  resource: UserResource;
+};
+
+export type AuthError = {
+  success: false;
+  error: string;
+  /** Machine-readable cause for failures the UI treats specially. */
+  reason?: 'seat_limit';
+};
+
+export type UserAuthSuccess = {
+  success: true;
+  userType: 'user';
+} & AuthorizedUser;
+
+export type JobAuthTokenSuccess = {
+  success: true;
+  userType: 'job';
+  cloudJobId: number;
+  userId: string;
+  name: string | null;
+  primaryEmail: string | null;
+  isAdmin: boolean;
+};
+
+export type UserAuthTokenSuccess = {
+  success: true;
+  userType: 'user';
+  userId: string;
+  name: string | null;
+  primaryEmail: string | null;
+  isAdmin: boolean;
+};

@@ -1,0 +1,119 @@
+---
+title: Skills
+icon: sparkles
+description: Add reusable environment-level playbooks that help Roomote handle specialized tools, workflows, and team practices.
+---
+
+Skills are reusable instructions Roomote can use when a task needs a
+specialized workflow.
+
+Use Skills when the same guidance keeps showing up across tasks in an
+environment: a framework-specific review checklist, a release process, a
+design-system rule, a data workflow, or a repeatable debugging path.
+
+Skills are for durable playbooks that help a Roomote agent decide how to work.
+They are not a replacement for connecting providers, adding environment
+variables, or writing the one-off prompt for the current task.
+
+## What Skills settings controls
+
+The Skills settings page is for admin-managed skills attached to environments.
+A skill only applies to tasks that run in an environment where it is enabled.
+
+You can add skills in two ways:
+
+| Skill type        | How it is added                                      | Best for                                                                |
+| ----------------- | ---------------------------------------------------- | ----------------------------------------------------------------------- |
+| Marketplace skill | Search and install from the skill marketplace        | Reusing a maintained public skill for a common tool or workflow         |
+| Custom skill      | Paste your own skill content and choose environments | Capturing team-specific behavior that does not belong in one repository |
+
+The installed list shows which environments can use each skill. Edit a skill's
+availability when it should apply to more or fewer environments.
+
+## When to use a custom skill
+
+Create a custom skill when the instruction is:
+
+- repeatable across many tasks
+- specific enough that Roomote can tell when to use it
+- more detailed than a short line of environment guidance
+- durable enough to maintain over time
+
+Good custom skills include:
+
+- a support-investigation workflow for your product
+- a design-system implementation checklist
+- a release-note drafting process
+- a database migration review guide
+- a customer-escalation triage playbook
+
+If the instruction is only one sentence, it probably belongs in
+[Agent Guidance](/agent-guidance),
+[environment guidance](/environments), or the task prompt instead.
+
+## Write the description carefully
+
+The description helps Roomote decide when the skill is relevant. Make it
+concrete.
+
+Prefer:
+
+```text
+Use when changing React components in the dashboard design system.
+```
+
+Avoid:
+
+```text
+Use for frontend stuff.
+```
+
+The skill content can be more detailed, but the description should quickly
+answer: "When should Roomote reach for this?"
+
+## How Skills interact with repository-defined skills
+
+Some repositories define their own skills in the repository, usually as
+checked-in `SKILL.md` files. Those repository-defined skills travel with the
+repository and are best for instructions that should stay versioned with that
+codebase.
+
+Skills configured in Roomote settings are different:
+
+- **Settings skills are environment-level.** They apply to selected Roomote
+  environments, even when the guidance is not checked into a repository.
+- **Repository-defined skills are codebase-level.** They apply when the task
+  is working in that repository and the active workflow finds them relevant.
+- **Both are supplemental.** They help Roomote perform specialized work after
+  a Roomote task is underway; they do not replace the built-in task flow,
+  environment setup, or the user's prompt.
+- **Built-in Roomote skills stay authoritative.** If a custom or
+  repository-defined skill uses the same name as a built-in Roomote workflow,
+  Roomote's built-in workflow wins. Use distinct names for team skills.
+
+Use repository-defined skills when the instruction should be reviewed and
+changed with the code. Use Settings skills when an admin wants to roll out a
+playbook across one or more environments without requiring a repository
+change.
+
+## Choosing the right home
+
+| Put it in                     | Use it for                                                             |
+| ----------------------------- | ---------------------------------------------------------------------- |
+| **Skills settings**           | Reusable playbooks for selected environments                           |
+| **Repository-defined skills** | Codebase-specific playbooks that should live with the repository       |
+| **Environment guidance**      | Setup commands, services, ports, secrets, and workspace-specific rules |
+| **Agent Guidance**            | Deployment-wide expectations that apply to most tasks                  |
+| **Task prompt**               | One-off context for the current ask                                    |
+
+## Common issues
+
+- **Roomote does not use the skill.** Make the description more specific and
+  confirm the task is running in an environment where the skill is enabled.
+- **The skill applies too broadly.** Narrow the description or limit it to
+  fewer environments.
+- **Two skills seem to overlap.** Keep the more specific one, or split the
+  workflow so each skill has a clear trigger.
+- **A repository already has a similar skill.** Prefer the repository-defined
+  skill for codebase-owned behavior, and use Settings skills for
+  cross-environment behavior.

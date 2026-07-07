@@ -1,0 +1,68 @@
+---
+title: Local development
+icon: terminal
+description: Set up the repository to develop on Roomote itself.
+---
+
+This page is for contributors who want to develop Roomote itself from a local
+checkout. If you want to operate Roomote for a team, start with
+[Self-hosting](/self-hosting) instead.
+
+The full contributor walkthrough lives in the repository
+[LOCAL_DEVELOPMENT.md](https://github.com/RooCodeInc/Roomote/blob/develop/LOCAL_DEVELOPMENT.md).
+
+## Prerequisites
+
+- **Docker Engine with Compose** — for the Postgres, Redis, and artifact
+  storage containers (Docker Desktop on macOS also works). x86_64 and arm64
+  are both supported; on Apple Silicon the task worker builds and runs
+  natively, with no amd64 emulation.
+- **mise** — manages the repository toolchain (Node.js, pnpm, and friends).
+- **OpenCode CLI** — provides the `opencode` binary used to run tasks
+  (`npm install -g opencode-ai`).
+- **ngrok** — optional, only when you point `ROOMOTE_PUBLIC_URL` at an ngrok
+  domain; any public HTTPS URL works.
+
+## Install and run
+
+```sh
+mise install && pnpm install
+pnpm dev
+```
+
+`pnpm dev` starts all services locally under PM2 supervision: it prepares
+service code, resolves your public callback URL, starts Postgres, Redis, and
+MinIO if needed, builds the local worker release archive, and starts the
+Roomote services.
+
+Use a public HTTPS URL, such as an ngrok domain, when testing provider
+callbacks from source control or communications providers. Local-only URLs are
+fine for dashboard work that does not need external callbacks.
+
+Useful process-management commands:
+
+```sh
+pm2 status                 # see all running services
+pm2 logs [service-name]    # tail logs for one service
+pnpm dev --reset           # start with a database reset
+```
+
+## Validation
+
+```sh
+pnpm lint          # Prettier format check + ESLint
+pnpm check-types   # TypeScript type checking
+pnpm lint:fast     # Matches the pre-push hook's lint step
+pnpm check-types:fast # Matches the pre-push hook's typecheck step
+pnpm knip          # Also part of the pre-push hook
+pnpm test          # Vitest across all workspaces
+pnpm check         # lint + check-types + test + knip
+```
+
+## When to use self-hosting instead
+
+Use [Self-hosting](/self-hosting) when you want a stable deployment for a team,
+want published images instead of a local checkout, or do not plan to edit
+Roomote code. Local development is intentionally more moving parts because it
+runs the development services, queues, workers, and callback plumbing from
+source.

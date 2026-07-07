@@ -1,0 +1,694 @@
+import { CloudJobQueueEnqueueError } from '@roomote/cloud-agents/server';
+
+import { launchActWorkItems } from '../launch.js';
+import { postLateBoundWorkItemFailureMessage } from '../slack.js';
+import { postLateBoundWorkItemFailureToTelegram } from '../telegram.js';
+import type { PersistedAutomationWorkItem } from '../types.js';
+
+const {
+  MockCloudJobQueueEnqueueError,
+  mockDbUpdate,
+  mockEnqueueCloudTask,
+  mockUpdateBackgroundAutomationSlackThreadMetadata,
+} = vi.hoisted(() => ({
+  MockCloudJobQueueEnqueueError: class extends Error {
+    cloudJobId: number;
+    taskId: string;
+    originalError: unknown;
+
+    constructor(input: {
+      cloudJobId: number;
+      taskId: string;
+      originalError: unknown;
+    }) {
+      super('Failed to enqueue cloud job.');
+      this.name = 'CloudJobQueueEnqueueError';
+      this.cloudJobId = input.cloudJobId;
+      this.taskId = input.taskId;
+      this.originalError = input.originalError;
+    }
+  },
+  mockDbUpdate: vi.fn(),
+  mockEnqueueCloudTask: vi.fn(),
+  mockUpdateBackgroundAutomationSlackThreadMetadata: vi.fn(),
+}));
+
+vi.mock('@roomote/cloud-agents/server', () => ({
+  CloudJobQueueEnqueueError: MockCloudJobQueueEnqueueError,
+  enqueueCloudTask: mockEnqueueCloudTask,
+}));
+
+vi.mock('@roomote/db/server', () => ({
+  and: vi.fn((...args) => ({ type: 'and', args })),
+  automationWorkItems: {
+    id: 'automationWorkItems.id',
+    status: 'automationWorkItems.status',
+    executionTaskId: 'automationWorkItems.executionTaskId',
+    launchClaimedAt: 'automationWorkItems.launchClaimedAt',
+    launchError: 'automationWorkItems.launchError',
+    updatedAt: 'automationWorkItems.updatedAt',
+  },
+  db: {
+    update: (...args: unknown[]) => mockDbUpdate(...args),
+  },
+  eq: vi.fn((...args) => ({ type: 'eq', args })),
+  inArray: vi.fn((...args) => ({ type: 'inArray', args })),
+  isNull: vi.fn((...args) => ({ type: 'isNull', args })),
+  lte: vi.fn((...args) => ({ type: 'lte', args })),
+  or: vi.fn((...args) => ({ type: 'or', args })),
+  updateBackgroundAutomationSlackThreadMetadata: (...args: unknown[]) =>
+    mockUpdateBackgroundAutomationSlackThreadMetadata(...args),
+}));
+
+vi.mock('../telegram.js', () => ({
+  resolveAutomationTelegramTarget: vi.fn(),
+  postLateBoundWorkItemFailureToTelegram: vi.fn(async () => undefined),
+}));
+
+vi.mock('../teams.js', () => ({
+  resolveAutomationTeamsTarget: vi.fn(async () => null),
+  postLateBoundWorkItemFailureToTeams: vi.fn(async () => undefined),
+}));
+
+vi.mock('../slack.js', () => ({
+  postLateBoundWorkItemFailureMessage: vi.fn(),
+}));
+
+const workItem: PersistedAutomationWorkItem = {
+  id: 'work-item-1',
+  title: 'Fix parser nil access',
+  brief: 'Nil access is driving a production Sentry issue.',
+  category: 'bug',
+  priority: 'P1',
+  actionKind: 'code_change_pr',
+  disposition: 'act',
+  status: 'open',
+  investigationContext: '$sentry-triage\nIssue: SENTRY-123',
+  executionPrompt:
+    'Reproduce the nil access, fix it, add regression coverage, and open a PR.',
+  fingerprint: 'fingerprint-1',
+  repositoryIds: ['repo-1'],
+  targetRepositoryFullName: 'acme/app',
+  targetEnvironmentId: null,
+  workspaceReadiness: 'bare_repo',
+  readinessMessage: 'Bare repo launch.',
+  sortOrder: 0,
+  executionTaskId: null,
+  launchError: null,
+};
+
+const slackTarget = {
+  provider: 'slack' as const,
+  slack: { postMessage: vi.fn() } as never,
+  channelId: 'C456',
+};
+
+function setupDbUpdateMock(options: { throwOnWhereCall?: number } = {}) {
+  const updateSets: Record<string, unknown>[] = [];
+  let whereCall = 0;
+
+  mockDbUpdate.mockImplementation(() => ({
+    set: (values: Record<string, unknown>) => {
+      updateSets.push(values);
+
+      return {
+        where: () => {
+          whereCall += 1;
+
+          if (options.throwOnWhereCall === whereCall) {
+            throw new Error('tracking update failed');
+          }
+
+          return {
+            returning: async () => [{ id: workItem.id }],
+          };
+        },
+      };
+    },
+  }));
+
+  return updateSets;
+}
+
+function mockSuccessfulTaskEnqueue(taskId = 'task-1') {
+  mockEnqueueCloudTask.mockImplementationOnce(async (_task, options) => {
+    await options.beforeEnqueue?.({
+      id: 123,
+      taskId,
+    });
+
+    return {
+      id: 123,
+      taskId,
+    };
+  });
+}
+
+describe('launchActWorkItems', () => {
+  beforeEach(() => {
+    mockEnqueueCloudTask.mockReset();
+    mockUpdateBackgroundAutomationSlackThreadMetadata.mockReset();
+    mockUpdateBackgroundAutomationSlackThreadMetadata.mockResolvedValue(true);
+    vi.mocked(postLateBoundWorkItemFailureMessage).mockReset();
+    vi.mocked(postLateBoundWorkItemFailureMessage).mockResolvedValue(undefined);
+    mockDbUpdate.mockReset();
+  });
+
+  it('launches the work item and marks it started with the execution task', async () => {
+    const updateSets = setupDbUpdateMock();
+    mockSuccessfulTaskEnqueue('task-1');
+
+    const result = await launchActWorkItems({
+      userId: 'user-1',
+      workItems: [workItem],
+      executionTaskBootstrap: '$implement-changes',
+      chatTarget: null,
+    });
+
+    expect(result).toEqual({ launchedCount: 1, failedCount: 0 });
+    const enqueuePayload = mockEnqueueCloudTask.mock.calls[0]?.[0]
+      .payload as Record<string, unknown>;
+    expect(enqueuePayload.description).toEqual(
+      expect.stringContaining('keep progress visible in the web task'),
+    );
+    expect(enqueuePayload.description).toEqual(
+      expect.stringContaining('without posting status updates back to Slack'),
+    );
+    expect(enqueuePayload.visibleInTranscript).toBe(false);
+    expect(enqueuePayload).not.toHaveProperty('channel');
+    expect(enqueuePayload).not.toHaveProperty('slackChannel');
+    expect(enqueuePayload).not.toHaveProperty('thread_ts');
+    expect(enqueuePayload).not.toHaveProperty('slackThreadTs');
+    expect(mockEnqueueCloudTask.mock.calls[0]?.[1]).toEqual(
+      expect.objectContaining({
+        beforeEnqueue: expect.any(Function),
+        launchClass: 'automation',
+      }),
+    );
+    expect(updateSets).toEqual([
+      expect.objectContaining({ status: 'acting' }),
+      expect.objectContaining({
+        status: 'started',
+        executionTaskId: 'task-1',
+        launchError: null,
+      }),
+    ]);
+  });
+
+  it('marks launches started before cloud job enqueue', async () => {
+    const updateSets = setupDbUpdateMock();
+    mockSuccessfulTaskEnqueue('task-direct-1');
+
+    const result = await launchActWorkItems({
+      userId: 'user-1',
+      workItems: [workItem],
+      executionTaskBootstrap: '$implement-changes',
+      chatTarget: null,
+    });
+
+    expect(result).toEqual({ launchedCount: 1, failedCount: 0 });
+    expect(updateSets).toEqual([
+      expect.objectContaining({ status: 'acting' }),
+      expect.objectContaining({
+        status: 'started',
+        executionTaskId: 'task-direct-1',
+        launchError: null,
+      }),
+    ]);
+  });
+
+  it('seeds late-bound Dependabot launches with single-closeout instructions and Slack channel only', async () => {
+    const updateSets = setupDbUpdateMock();
+    mockSuccessfulTaskEnqueue('task-direct-dependabot');
+
+    const result = await launchActWorkItems({
+      userId: 'user-1',
+      workItems: [
+        {
+          ...workItem,
+          investigationContext:
+            '$update-dependencies alert=https://github.com/acme/api/security/dependabot/123; package=braces\nManifest: apps/web/package.json',
+          executionPrompt:
+            '$update-dependencies\nUpdate the vulnerable package, validate affected flows, and open a PR.',
+          targetEnvironmentId: 'env-1',
+          workspaceReadiness: 'environment_backed',
+          readinessMessage: null,
+        },
+      ],
+      executionTaskBootstrap: '$update-dependencies',
+      chatTarget: slackTarget,
+    });
+
+    expect(result).toEqual({ launchedCount: 1, failedCount: 0 });
+    const enqueuePayload = mockEnqueueCloudTask.mock.calls[0]?.[0]
+      .payload as Record<string, unknown>;
+    expect(enqueuePayload.description).toEqual(
+      expect.stringContaining('$update-dependencies'),
+    );
+    expect(enqueuePayload.description).toEqual(
+      expect.stringContaining(
+        'Do not send Slack progress updates, elapsed-time updates, validation-started updates, or partial findings',
+      ),
+    );
+    expect(enqueuePayload.description).toEqual(
+      expect.stringContaining(
+        'Keep intermediate status in the web task and todo list only',
+      ),
+    );
+    expect(enqueuePayload.description).toEqual(
+      expect.stringContaining(
+        'do not send a Slack-visible opening acknowledgement',
+      ),
+    );
+    expect(enqueuePayload.description).toEqual(
+      expect.stringContaining(
+        'Post to Slack only when you have a final successful result (for example, a shipped change or an opened draft PR), a final no-op/deferred result after reverting untrusted changes, a durable blocker that stops the run, or a concrete user input request',
+      ),
+    );
+    expect(enqueuePayload.description).toEqual(
+      expect.stringContaining(
+        'Keep the first Slack-visible closeout as one self-contained message instead of a separate opener plus a result',
+      ),
+    );
+    expect(enqueuePayload.description).toEqual(
+      expect.stringContaining(
+        'make it fully standalone and do not assume readers have seen any earlier scan, audit, or research task',
+      ),
+    );
+    expect(enqueuePayload.description).toEqual(
+      expect.stringContaining(
+        'Write that closeout like a helpful coworker summarizing completed work',
+      ),
+    );
+    expect(enqueuePayload.description).toEqual(
+      expect.stringContaining(
+        'Lead with a direct plain-language sentence that names the object of the work, says what you reviewed, why it mattered, and what changed or how far it got',
+      ),
+    );
+    expect(enqueuePayload.description).toEqual(
+      expect.stringContaining(
+        'On first mention, spell out the object before shorthand or identifiers',
+      ),
+    );
+    expect(enqueuePayload.description).toEqual(
+      expect.stringContaining(
+        'Avoid thread-local references like "this", "that follow-up", "the issue", "the investigation", or "the risk"',
+      ),
+    );
+    expect(enqueuePayload.description).toEqual(
+      expect.stringContaining(
+        'Keep the whole message to at most two short paragraphs',
+      ),
+    );
+    expect(enqueuePayload.description).toEqual(
+      expect.stringContaining(
+        'use one human-readable reference from that context so the reader knows what prompted the work',
+      ),
+    );
+    expect(enqueuePayload.description).toEqual(
+      expect.stringContaining(
+        'make the label describe the object instead of showing an unexplained code',
+      ),
+    );
+    expect(enqueuePayload.description).toEqual(
+      expect.stringContaining(
+        'if there is a clean URL, render it as a named inline link such as `[Sentry issue ROOMOTE-WORKER-381](...)` or `[alert #123](...)`, not a bare URL or a bare-ID label',
+      ),
+    );
+    expect(enqueuePayload.description).toEqual(
+      expect.stringContaining(
+        'keep a stable plain-text identifier such as `GHSA-123`, `SENTRY-123`, or `owner/repo#123` if that is the clearest reference',
+      ),
+    );
+    expect(enqueuePayload.description).toEqual(
+      expect.stringContaining(
+        'make the delivery state explicit; if the work stopped at a draft PR, say you opened a draft PR instead of saying it shipped',
+      ),
+    );
+    expect(enqueuePayload.description).toEqual(
+      expect.stringContaining(
+        'Link the draft PR number if the URL is available; otherwise keep the PR identifier plain text',
+      ),
+    );
+    expect(enqueuePayload.description).toEqual(
+      expect.stringContaining(
+        'I reviewed [alert #275](...) and opened [draft PR #4783](...) to address a high and two medium `undici` vulnerabilities',
+      ),
+    );
+    expect(enqueuePayload.description).toEqual(
+      expect.stringContaining(
+        'do not recite file paths, code identifiers, or step-by-step verification in Slack',
+      ),
+    );
+    expect(enqueuePayload.description).toEqual(
+      expect.stringContaining(
+        'Do not append a verification or validation sentence',
+      ),
+    );
+    expect(enqueuePayload.description).toEqual(
+      expect.stringContaining(
+        'For blocker, no-op, deferred, or input-needed outcomes, keep the same single-message shape but report only the outcome-relevant details',
+      ),
+    );
+    expect(enqueuePayload.automationWorkItemId).toBe(workItem.id);
+    expect(enqueuePayload.visibleInTranscript).toBe(false);
+    expect(enqueuePayload.channel).toBe('C456');
+    expect(enqueuePayload.slackChannel).toBe('C456');
+    expect(enqueuePayload).not.toHaveProperty('thread_ts');
+    expect(enqueuePayload).not.toHaveProperty('slackThreadTs');
+    expect(updateSets).toEqual([
+      expect.objectContaining({ status: 'acting' }),
+      expect.objectContaining({
+        status: 'started',
+        executionTaskId: 'task-direct-dependabot',
+      }),
+    ]);
+  });
+
+  it('seeds late-bound implementation launches with generic single-closeout Slack instructions', async () => {
+    const updateSets = setupDbUpdateMock();
+    mockSuccessfulTaskEnqueue('task-direct-sentry');
+
+    const result = await launchActWorkItems({
+      userId: 'user-1',
+      workItems: [workItem],
+      executionTaskBootstrap: '$implement-changes',
+      chatTarget: slackTarget,
+    });
+
+    expect(result).toEqual({ launchedCount: 1, failedCount: 0 });
+    const enqueuePayload = mockEnqueueCloudTask.mock.calls[0]?.[0]
+      .payload as Record<string, unknown>;
+    expect(enqueuePayload.description).toEqual(
+      expect.stringContaining(
+        'do not send a Slack-visible opening acknowledgement',
+      ),
+    );
+    expect(enqueuePayload.description).toEqual(
+      expect.stringContaining(
+        'Keep the first Slack-visible closeout as one self-contained message instead of a separate opener plus a result',
+      ),
+    );
+    expect(enqueuePayload.description).toEqual(
+      expect.stringContaining(
+        'Write that closeout like a helpful coworker summarizing completed work',
+      ),
+    );
+    expect(enqueuePayload.description).toEqual(
+      expect.stringContaining(
+        'Pretend the Slack reader only sees that one closeout message and none of the hidden automation or environment context behind it',
+      ),
+    );
+    expect(enqueuePayload.description).toEqual(
+      expect.stringContaining(
+        'Do not frame the message as a follow-up on a hidden scan, audit, evaluator, research task, or spawned environment task',
+      ),
+    );
+    expect(enqueuePayload.description).toEqual(
+      expect.stringContaining(
+        'Prefer result-first wording like "I reviewed [alert #275](...) and opened [draft PR #4783](...) to address ..." or "I reviewed the Sentry issue SENTRY-123 and opened the resulting draft PR to address ..."',
+      ),
+    );
+    expect(enqueuePayload.description).toEqual(
+      expect.stringContaining(
+        'If you mention a prior PR, alert, issue, task, workflow run, or environment identifier, say in the same sentence what it is and what about it was under review',
+      ),
+    );
+    expect(enqueuePayload.description).toEqual(
+      expect.stringContaining(
+        'Keep the whole message to at most two short paragraphs',
+      ),
+    );
+    expect(enqueuePayload.description).toEqual(
+      expect.stringContaining(
+        'explain what the automation investigated and the concrete outcome, but do not recite file paths, code identifiers, or step-by-step verification in Slack',
+      ),
+    );
+    expect(enqueuePayload.description).toEqual(
+      expect.stringContaining(
+        'use one human-readable reference from that context so the reader knows what prompted the work',
+      ),
+    );
+    expect(enqueuePayload.description).toEqual(
+      expect.stringContaining(
+        'make the label describe the object instead of showing an unexplained code',
+      ),
+    );
+    expect(enqueuePayload.description).toEqual(
+      expect.stringContaining(
+        'keep a stable plain-text identifier such as `GHSA-123`, `SENTRY-123`, or `owner/repo#123` if that is the clearest reference',
+      ),
+    );
+    expect(enqueuePayload.description).toEqual(
+      expect.stringContaining(
+        'Prefer wording like "I reviewed [alert #275](...) and opened [draft PR #4783](...)" or "I reviewed the Sentry issue SENTRY-123 and opened the resulting draft PR ..." over "That shipped in draft PR #4783."',
+      ),
+    );
+    expect(enqueuePayload.automationWorkItemId).toBe(workItem.id);
+    expect(enqueuePayload.visibleInTranscript).toBe(false);
+    expect(enqueuePayload.channel).toBe('C456');
+    expect(enqueuePayload.slackChannel).toBe('C456');
+    expect(updateSets).toEqual([
+      expect.objectContaining({ status: 'acting' }),
+      expect.objectContaining({
+        status: 'started',
+        executionTaskId: 'task-direct-sentry',
+      }),
+    ]);
+  });
+
+  it('replies into an existing investigation thread when the slack target carries one', async () => {
+    const updateSets = setupDbUpdateMock();
+    mockSuccessfulTaskEnqueue('task-direct-threaded');
+
+    const result = await launchActWorkItems({
+      userId: 'user-1',
+      workItems: [workItem],
+      executionTaskBootstrap: '$implement-changes',
+      chatTarget: { ...slackTarget, threadTs: '1781300000.000100' },
+    });
+
+    expect(result).toEqual({ launchedCount: 1, failedCount: 0 });
+    const enqueuePayload = mockEnqueueCloudTask.mock.calls[0]?.[0]
+      .payload as Record<string, unknown>;
+    expect(enqueuePayload.thread_ts).toBe('1781300000.000100');
+    expect(enqueuePayload.slackThreadTs).toBe('1781300000.000100');
+    expect(enqueuePayload.channel).toBe('C456');
+    expect(enqueuePayload.visibleInTranscript).toBe(false);
+    expect(enqueuePayload.description).toEqual(
+      expect.stringContaining(
+        'Reply in the existing Slack investigation thread',
+      ),
+    );
+    expect(enqueuePayload.description).toEqual(
+      expect.stringContaining(
+        'still assume readers do not know about the hidden research task or spawned environment task behind this run',
+      ),
+    );
+    expect(enqueuePayload.description).not.toEqual(
+      expect.stringContaining('may create a new top-level thread'),
+    );
+    expect(
+      mockUpdateBackgroundAutomationSlackThreadMetadata,
+    ).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({
+        slackChannelId: 'C456',
+        threadTs: '1781300000.000100',
+        metadata: {
+          sourceTaskId: 'task-direct-threaded',
+        },
+      }),
+    );
+    expect(updateSets).toEqual([
+      expect.objectContaining({ status: 'acting' }),
+      expect.objectContaining({
+        status: 'started',
+        executionTaskId: 'task-direct-threaded',
+      }),
+    ]);
+  });
+
+  it('posts a channel-level failure message when a late-bound launch fails terminally', async () => {
+    setupDbUpdateMock();
+    mockEnqueueCloudTask.mockRejectedValueOnce(new Error('enqueue failed'));
+
+    const result = await launchActWorkItems({
+      userId: 'user-1',
+      workItems: [
+        {
+          ...workItem,
+          targetEnvironmentId: 'env-1',
+          workspaceReadiness: 'environment_backed',
+          readinessMessage: null,
+        },
+      ],
+      executionTaskBootstrap: '$update-dependencies',
+      chatTarget: slackTarget,
+    });
+
+    expect(result).toEqual({ launchedCount: 0, failedCount: 1 });
+    expect(postLateBoundWorkItemFailureMessage).toHaveBeenCalledWith({
+      slack: slackTarget.slack,
+      channelId: 'C456',
+      threadTs: null,
+      workItem: expect.objectContaining({ id: workItem.id }),
+      reason: 'enqueue failed',
+    });
+    expect(
+      mockUpdateBackgroundAutomationSlackThreadMetadata,
+    ).not.toHaveBeenCalled();
+  });
+
+  it('resolves an existing investigation thread when a threaded launch fails terminally', async () => {
+    setupDbUpdateMock();
+    mockEnqueueCloudTask.mockRejectedValueOnce(new Error('enqueue failed'));
+
+    const result = await launchActWorkItems({
+      userId: 'user-1',
+      workItems: [workItem],
+      executionTaskBootstrap: '$implement-changes',
+      chatTarget: { ...slackTarget, threadTs: '1781300000.000100' },
+    });
+
+    expect(result).toEqual({ launchedCount: 0, failedCount: 1 });
+    expect(postLateBoundWorkItemFailureMessage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        channelId: 'C456',
+        threadTs: '1781300000.000100',
+        reason: 'enqueue failed',
+      }),
+    );
+  });
+
+  it('posts Telegram failure messages when a Telegram-targeted launch fails terminally', async () => {
+    setupDbUpdateMock();
+    mockEnqueueCloudTask.mockRejectedValueOnce(new Error('enqueue failed'));
+
+    const result = await launchActWorkItems({
+      userId: 'user-1',
+      workItems: [workItem],
+      executionTaskBootstrap: '$implement-changes',
+      chatTarget: { provider: 'telegram', chatId: '8846357662' },
+    });
+
+    expect(result).toEqual({ launchedCount: 0, failedCount: 1 });
+    expect(postLateBoundWorkItemFailureToTelegram).toHaveBeenCalledWith(
+      expect.objectContaining({
+        chatId: '8846357662',
+        reason: 'enqueue failed',
+      }),
+    );
+    expect(postLateBoundWorkItemFailureMessage).not.toHaveBeenCalled();
+  });
+
+  it('seeds Telegram-targeted launches with communication payload and Telegram instructions', async () => {
+    setupDbUpdateMock();
+    mockSuccessfulTaskEnqueue('task-tg-1');
+
+    const result = await launchActWorkItems({
+      userId: 'user-1',
+      workItems: [workItem],
+      executionTaskBootstrap: '$implement-changes',
+      chatTarget: { provider: 'telegram', chatId: '8846357662' },
+    });
+
+    expect(result).toEqual({ launchedCount: 1, failedCount: 0 });
+    const enqueuePayload = mockEnqueueCloudTask.mock.calls[0]?.[0]
+      .payload as Record<string, unknown>;
+
+    expect(enqueuePayload.communicationProvider).toBe('telegram');
+    expect(enqueuePayload.communicationChannelId).toBe('8846357662');
+    expect(enqueuePayload.automationWorkItemId).toBe(workItem.id);
+    expect(enqueuePayload).not.toHaveProperty('slackChannel');
+    expect(enqueuePayload).not.toHaveProperty('channel');
+    expect(enqueuePayload.description).toEqual(
+      expect.stringContaining(
+        'Do not send Telegram progress updates, elapsed-time updates, validation-started updates, or partial findings',
+      ),
+    );
+    expect(enqueuePayload.description).toEqual(
+      expect.stringContaining(
+        'do not send a Telegram-visible opening acknowledgement',
+      ),
+    );
+  });
+
+  it('stays silent on terminal launch failures when no Slack target resolves', async () => {
+    const updateSets = setupDbUpdateMock();
+    mockEnqueueCloudTask.mockRejectedValueOnce(new Error('enqueue failed'));
+
+    const result = await launchActWorkItems({
+      userId: 'user-1',
+      workItems: [workItem],
+      executionTaskBootstrap: '$implement-changes',
+      chatTarget: null,
+    });
+
+    expect(result).toEqual({ launchedCount: 0, failedCount: 1 });
+    expect(updateSets.map((values) => values.status)).toEqual([
+      'acting',
+      'failed',
+    ]);
+    expect(postLateBoundWorkItemFailureMessage).not.toHaveBeenCalled();
+  });
+
+  it('marks the work item failed when tracking persistence fails before cloud job enqueue', async () => {
+    const updateSets = setupDbUpdateMock({ throwOnWhereCall: 2 });
+    mockSuccessfulTaskEnqueue();
+
+    const result = await launchActWorkItems({
+      userId: 'user-1',
+      workItems: [workItem],
+      executionTaskBootstrap: '$implement-changes',
+      chatTarget: null,
+    });
+
+    expect(result).toEqual({ launchedCount: 0, failedCount: 1 });
+    expect(updateSets.map((values) => values.status)).toEqual([
+      'acting',
+      'started',
+      'failed',
+    ]);
+  });
+
+  it('reopens direct launches when Redis enqueue fails after task tracking is linked', async () => {
+    const updateSets = setupDbUpdateMock();
+    mockEnqueueCloudTask.mockImplementationOnce(async (_task, options) => {
+      await options.beforeEnqueue?.({
+        id: 123,
+        taskId: 'task-direct-1',
+      });
+
+      throw new CloudJobQueueEnqueueError({
+        cloudJobId: 123,
+        taskId: 'task-direct-1',
+        originalError: new Error('redis unavailable'),
+      });
+    });
+
+    const result = await launchActWorkItems({
+      userId: 'user-1',
+      workItems: [workItem],
+      executionTaskBootstrap: '$implement-changes',
+      chatTarget: slackTarget,
+    });
+
+    expect(result).toEqual({ launchedCount: 0, failedCount: 1 });
+    expect(updateSets).toEqual([
+      expect.objectContaining({ status: 'acting' }),
+      expect.objectContaining({
+        status: 'started',
+        executionTaskId: 'task-direct-1',
+      }),
+      expect.objectContaining({
+        status: 'open',
+        executionTaskId: null,
+        launchedAt: null,
+        failedAt: null,
+      }),
+    ]);
+    // Retryable failures stay quiet; a later resubmission relaunches them.
+    expect(postLateBoundWorkItemFailureMessage).not.toHaveBeenCalled();
+  });
+});

@@ -1,0 +1,96 @@
+import {
+  cloudJobFactory,
+  db,
+  cloudJobs,
+  eq,
+  taskFactory,
+  userFactory,
+} from '@roomote/db/server';
+import { CloudTaskStatus, CloudTaskType } from '@roomote/types';
+import type { FeatureFlag } from '@roomote/feature-flags';
+
+import type { UserAuthSuccess } from '@/types';
+
+import { takeOverBrowserControlCommand } from './index';
+
+function buildMockAuth(
+  overrides: Partial<UserAuthSuccess> = {},
+): UserAuthSuccess {
+  const auth = {
+    success: true,
+    userType: 'user',
+    userId: 'user-browser-control-test',
+    isAdmin: false,
+    name: 'Test User',
+    primaryEmail: 'test@test.com',
+    featureFlags: {} as Record<FeatureFlag, boolean>,
+    resource: {
+      username: 'testuser',
+      fullName: 'Test User',
+      firstName: 'Test',
+      lastName: 'User',
+      primaryEmailAddress: { id: '1', emailAddress: 'test@test.com' },
+      emailAddresses: [{ id: '1', emailAddress: 'test@test.com' }],
+      imageUrl: 'https://example.com/avatar.jpg',
+      createdAt: new Date(),
+    },
+    ...overrides,
+  } as UserAuthSuccess;
+
+  return auth as UserAuthSuccess;
+}
+
+describe('takeOverBrowserControlCommand', () => {
+  it("updates actingUserId on the task's current cloud job", async () => {
+    const owner = await userFactory.create();
+    const viewer = await userFactory.create();
+    const task = await taskFactory.create({
+      userId: owner.id,
+    });
+    const staleCloudJob = await cloudJobFactory.create({
+      userId: owner.id,
+      taskId: task.id,
+      actingUserId: owner.id,
+      status: CloudTaskStatus.Completed,
+      snapshotId: 'snapshot-1',
+    });
+    const activeCloudJob = await cloudJobFactory.create({
+      userId: owner.id,
+      taskId: task.id,
+      sourceCloudJobId: staleCloudJob.id,
+      type: CloudTaskType.SnapshotResume,
+      actingUserId: owner.id,
+      status: CloudTaskStatus.Running,
+    });
+
+    const result = await takeOverBrowserControlCommand(
+      buildMockAuth({
+        userId: viewer.id,
+      }),
+      { taskId: task.id },
+    );
+
+    expect(result).toEqual({
+      success: true,
+      cloudJob: {
+        id: activeCloudJob.id,
+        actingUserId: viewer.id,
+      },
+    });
+
+    const updatedCloudJobs = await db
+      .select({
+        id: cloudJobs.id,
+        actingUserId: cloudJobs.actingUserId,
+      })
+      .from(cloudJobs)
+      .where(eq(cloudJobs.taskId, task.id));
+
+    expect(updatedCloudJobs).toEqual(
+      expect.arrayContaining([
+        { id: staleCloudJob.id, actingUserId: owner.id },
+        { id: activeCloudJob.id, actingUserId: viewer.id },
+      ]),
+    );
+  });
+});

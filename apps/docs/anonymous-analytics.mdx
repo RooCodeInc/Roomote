@@ -1,0 +1,59 @@
+---
+title: Anonymous Analytics
+icon: volleyball
+description: What anonymous usage data a Roomote deployment can share, how it is identified, and how admins turn it off.
+---
+
+Roomote can share **anonymous usage analytics** with the Roomote team to help
+improve the product. This is on by default, controlled entirely by
+deployment admins, and designed so that nothing sent can identify your
+company, users, code, or repositories.
+
+## What gets sent
+
+When anonymous analytics is enabled, your deployment sends:
+
+- **Usage events** — page views (as route patterns like `/task/[taskId]`,
+  never actual URLs or IDs) and product events such as tasks being created
+  or completed, with non-identifying facts like the harness, model, and
+  compute provider used.
+- **A daily instance report** — aggregate counts only: number of users,
+  environments, and connected repositories, task and token totals for the
+  past day, which provider types are configured, and which built-in
+  integrations are enabled.
+
+What is **never** sent: names, emails, repository names, task contents,
+prompts, code, tokens, or credentials.
+
+## How it is identified
+
+Activity is identified by two random IDs generated inside your deployment:
+
+- an **instance ID** for the deployment as a whole
+- a **user analytics ID** for each user
+
+Both are short random strings created locally. They are not derived from
+your domain, company, email addresses, or any other real-world identifier,
+and they cannot be edited or read through the app.
+
+## Turning it off
+
+Anonymous analytics is opt-out:
+
+- during setup, the final step includes an **Anonymous analytics** switch
+- afterwards, admins can change it any time in **Settings > Misc**
+
+The setting applies to everyone in the deployment. When disabled, no
+analytics code runs in the browser and no usage events or daily reports
+leave your servers.
+
+## Version checks
+
+Separately from analytics, your deployment checks once a day whether a newer
+Roomote release is available. This check is not optional and carries only
+the anonymous instance ID and your running version — no usage data.
+
+## Local development
+
+Deployments running in development mode (or builds without a release
+version) send nothing at all: no analytics, no version checks.
