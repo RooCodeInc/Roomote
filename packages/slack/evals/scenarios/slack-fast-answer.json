@@ -1,0 +1,57 @@
+{
+  "name": "slack-fast-answer",
+  "description": "A user @-mentions Roomote in a channel with a !fast question. Roomote should answer inline with a single, correct, threaded reply and no channel noise.",
+  "criteria": [
+    "The bot posts exactly one reply message, and it is a threaded reply whose thread_ts equals the ts of the mention that triggered it",
+    "The reply correctly answers the question: it explains that HTTP 429 means too many requests / rate limiting, and mentions backing off or honoring Retry-After as the standard client response",
+    "No channel-level (non-threaded) messages are posted by the bot",
+    "The reply is concise — a few sentences or short paragraphs — with no filler, apologies, or meta-commentary about being an AI"
+  ],
+  "state": {
+    "team": {
+      "id": "TROOMOTE",
+      "domain": "roomote-mock",
+      "timezone": "America/Los_Angeles"
+    },
+    "acceptedBotTokens": [],
+    "botUserId": "BROOMOTE",
+    "channels": [
+      {
+        "id": "C123ABC456",
+        "name": "product-debug",
+        "type": "public_channel",
+        "isMember": true,
+        "members": ["UDAN", "BROOMOTE"]
+      }
+    ],
+    "users": [
+      { "id": "BROOMOTE", "name": "roomote", "displayName": "Roomote" },
+      {
+        "id": "UDAN",
+        "name": "dan",
+        "displayName": "Dan Riccio",
+        "email": "local@roomote.dev"
+      }
+    ],
+    "messages": []
+  },
+  "events": [
+    {
+      "delayMs": 0,
+      "envelope": {
+        "kind": "event_callback",
+        "eventId": "$E1",
+        "event": {
+          "type": "app_mention",
+          "channel": "C123ABC456",
+          "user": "UDAN",
+          "text": "<@BROOMOTE> !fast What does HTTP status code 429 mean, and what is the standard way for a client to respond to it?",
+          "ts": "$TS1",
+          "channel_type": "channel"
+        }
+      }
+    }
+  ],
+  "settleMs": 20000,
+  "timeoutMs": 180000
+}

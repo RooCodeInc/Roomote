@@ -86,6 +86,18 @@ real hostnames (see
 set the three values manually to the services' `onrender.com` hostnames and
 redeploy.
 
+A service can also lose this race only on its very first boot: its
+container snapshots the environment before the referenced hostname has
+propagated, and the service crash-loops logging
+`❌ Invalid environment variables` with a composed URL reported as
+`Required` — even though the Environment tab already shows the resolved
+hostname. The stored value is fine; the running container just predates
+it. The entrypoint dispatcher heals the self-referencing case on its own
+(a service's own hostname falls back to the Render-injected
+`RENDER_EXTERNAL_HOSTNAME`), so only a cross-service reference can still
+hit this. Fix it with **Manual Deploy → Deploy latest reference** on the
+affected service to take a fresh environment snapshot.
+
 After the first deploy, also consider disabling **Auto-Sync** on the
 Blueprint (Blueprint settings in the Render dashboard). With Auto-Sync on,
 Render re-applies `render.yaml` whenever the tracked branch moves, which
