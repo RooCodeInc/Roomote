@@ -142,7 +142,7 @@ prune_roomote_images() {
   repo_prefix="$image_registry/$image_namespace/roomote-"
 
   tags_file="$(mktemp)" || return
-  trap 'rm -f "$tags_file" "$keep_file" "${keep_file}.dedup" "$images_file"; trap - RETURN' RETURN
+  trap 'rm -f "$tags_file" "$images_file"; [ -n "$keep_file" ] && rm -f "$keep_file" "${keep_file}.dedup"; trap - RETURN' RETURN
   keep_file="$(mktemp)" || return
   images_file="$(mktemp)" || return
 
