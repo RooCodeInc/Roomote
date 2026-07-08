@@ -720,6 +720,13 @@ QEMU emulation: rustc segfaults during the worker toolchain install
 (rust-lang/rust#147026). Tags only exist once the manifest job completes, so
 downstream jobs must depend on `publish`, not `build`.
 
+Layer caching uses Blacksmith's persistent builder
+(`useblacksmith/setup-docker-builder` + `useblacksmith/build-push-action`),
+which mounts an NVMe layer cache per repo/Dockerfile/arch on the runner. Do
+not add `type=gha` `cache-from`/`cache-to` directives back: these images
+overflow GitHub's 10GB per-repo Actions cache and its per-ref scoping, so
+every build missed cache and paid a multi-minute cache export on top.
+
 Published bundles are hardened against source disclosure: the tsup configs for
 api, controller, bullmq, preview-proxy, and worker minify when
 `NODE_ENV=production` (with `keepNames` so error/class names survive), and the
