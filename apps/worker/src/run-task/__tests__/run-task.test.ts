@@ -331,7 +331,7 @@ describe('runTask', () => {
       harnessSessionId: undefined,
       workerEnv: {
         authToken: 'cloud-token',
-        openRoomoteAppUrl: 'https://api.example.test',
+        roomoteAppUrl: 'https://api.example.test',
         trpcUrl: 'https://web.example.test',
         buildUserFacingEnv: vi.fn(() => ({
           HOME: '/tmp/home',
@@ -376,7 +376,7 @@ describe('runTask', () => {
       harnessSessionId: undefined,
       workerEnv: {
         authToken: 'cloud-token',
-        openRoomoteAppUrl: 'https://api.example.test',
+        roomoteAppUrl: 'https://api.example.test',
         trpcUrl: 'https://web.example.test',
         buildUserFacingEnv: vi.fn(() => ({
           HOME: '/tmp/home',
@@ -426,7 +426,7 @@ describe('runTask', () => {
       harnessSessionId: undefined,
       workerEnv: {
         authToken: 'cloud-token',
-        openRoomoteAppUrl: 'https://api.example.test',
+        roomoteAppUrl: 'https://api.example.test',
         trpcUrl: 'https://web.example.test',
         buildUserFacingEnv: vi.fn(() => ({
           HOME: '/tmp/home',
@@ -476,7 +476,7 @@ describe('runTask', () => {
       harnessSessionId: undefined,
       workerEnv: {
         authToken: 'cloud-token',
-        openRoomoteAppUrl: 'https://api.example.test',
+        roomoteAppUrl: 'https://api.example.test',
         trpcUrl: 'https://web.example.test',
         buildUserFacingEnv: vi.fn(() => ({
           HOME: '/tmp/home',
@@ -535,7 +535,7 @@ describe('runTask', () => {
       harnessSessionId: undefined,
       workerEnv: {
         authToken: 'cloud-token',
-        openRoomoteAppUrl: 'https://api.example.test',
+        roomoteAppUrl: 'https://api.example.test',
         trpcUrl: 'https://web.example.test',
         buildUserFacingEnv: vi.fn(() => ({
           HOME: '/tmp/home',
@@ -585,7 +585,7 @@ describe('runTask', () => {
       harnessSessionId: undefined,
       workerEnv: {
         authToken: 'cloud-token',
-        openRoomoteAppUrl: 'https://api.example.test',
+        roomoteAppUrl: 'https://api.example.test',
         trpcUrl: 'https://web.example.test',
         buildUserFacingEnv: vi.fn(() => ({
           HOME: '/tmp/home',
@@ -633,7 +633,7 @@ describe('runTask', () => {
       harnessSessionId: undefined,
       workerEnv: {
         authToken: 'cloud-token',
-        openRoomoteAppUrl: 'https://api.example.test',
+        roomoteAppUrl: 'https://api.example.test',
         trpcUrl: 'https://web.example.test',
         buildUserFacingEnv: vi.fn(() => ({
           HOME: '/tmp/home',
@@ -680,7 +680,7 @@ describe('runTask', () => {
       harnessSessionId: undefined,
       workerEnv: {
         authToken: 'cloud-token',
-        openRoomoteAppUrl: 'https://api.example.test',
+        roomoteAppUrl: 'https://api.example.test',
         trpcUrl: 'https://web.example.test',
         buildUserFacingEnv: vi.fn(() => ({
           HOME: '/tmp/home',
@@ -725,7 +725,7 @@ describe('runTask', () => {
       harnessSessionId: undefined,
       workerEnv: {
         authToken: 'cloud-token',
-        openRoomoteAppUrl: 'https://api.example.test',
+        roomoteAppUrl: 'https://api.example.test',
         trpcUrl: 'https://web.example.test',
         buildUserFacingEnv: vi.fn(() => ({
           HOME: '/tmp/home',
@@ -780,7 +780,7 @@ describe('runTask', () => {
       harnessSessionId: undefined,
       workerEnv: {
         authToken: 'cloud-token',
-        openRoomoteAppUrl: 'https://api.example.test',
+        roomoteAppUrl: 'https://api.example.test',
         trpcUrl: 'https://web.example.test',
         buildUserFacingEnv: vi.fn(() => ({
           HOME: '/tmp/home',
@@ -838,7 +838,7 @@ describe('runTask', () => {
       harnessSessionId: undefined,
       workerEnv: {
         authToken: 'cloud-token',
-        openRoomoteAppUrl: 'https://api.example.test',
+        roomoteAppUrl: 'https://api.example.test',
         trpcUrl: 'https://web.example.test',
         buildUserFacingEnv: vi.fn(() => ({
           HOME: '/tmp/home',
@@ -892,7 +892,7 @@ describe('runTask', () => {
       harnessSessionId: undefined,
       workerEnv: {
         authToken: 'cloud-token',
-        openRoomoteAppUrl: 'https://api.example.test',
+        roomoteAppUrl: 'https://api.example.test',
         trpcUrl: 'https://web.example.test',
         buildUserFacingEnv: vi.fn(() => ({
           HOME: '/tmp/home',
@@ -948,7 +948,7 @@ describe('runTask', () => {
       harnessSessionId: undefined,
       workerEnv: {
         authToken: 'cloud-token',
-        openRoomoteAppUrl: 'https://api.example.test',
+        roomoteAppUrl: 'https://api.example.test',
         trpcUrl: 'https://web.example.test',
         buildUserFacingEnv: vi.fn(() => ({
           HOME: '/tmp/home',
@@ -1005,7 +1005,7 @@ describe('runTask', () => {
         harnessSessionId: undefined,
         workerEnv: {
           authToken: 'cloud-token',
-          openRoomoteAppUrl: 'https://api.example.test',
+          roomoteAppUrl: 'https://api.example.test',
           trpcUrl: 'https://web.example.test',
           buildUserFacingEnv: vi.fn(() => ({
             HOME: '/tmp/home',
@@ -1085,7 +1085,7 @@ describe('runTask', () => {
         harnessSessionId: 'session-106',
         workerEnv: {
           authToken: 'cloud-token',
-          openRoomoteAppUrl: 'https://api.example.test',
+          roomoteAppUrl: 'https://api.example.test',
           trpcUrl: 'https://web.example.test',
           buildUserFacingEnv: vi.fn(() => ({
             HOME: '/tmp/home',
@@ -1149,7 +1149,7 @@ describe('runTask', () => {
         harnessSessionId: undefined,
         workerEnv: {
           authToken: 'cloud-token',
-          openRoomoteAppUrl: 'https://api.example.test',
+          roomoteAppUrl: 'https://api.example.test',
           trpcUrl: 'https://web.example.test',
           buildUserFacingEnv: vi.fn(() => ({
             HOME: '/tmp/home',
@@ -1215,7 +1215,7 @@ describe('runTask', () => {
         harnessSessionId: undefined,
         workerEnv: {
           authToken: 'cloud-token',
-          openRoomoteAppUrl: 'https://api.example.test',
+          roomoteAppUrl: 'https://api.example.test',
           trpcUrl: 'https://web.example.test',
           buildUserFacingEnv: vi.fn(() => ({
             HOME: '/tmp/home',
@@ -1278,7 +1278,7 @@ describe('runTask', () => {
         harnessSessionId: 'session-107',
         workerEnv: {
           authToken: 'cloud-token',
-          openRoomoteAppUrl: 'https://api.example.test',
+          roomoteAppUrl: 'https://api.example.test',
           trpcUrl: 'https://web.example.test',
           buildUserFacingEnv: vi.fn(() => ({
             HOME: '/tmp/home',
@@ -1336,7 +1336,7 @@ describe('runTask', () => {
       harnessSessionId: undefined,
       workerEnv: {
         authToken: 'cloud-token',
-        openRoomoteAppUrl: 'https://api.example.test',
+        roomoteAppUrl: 'https://api.example.test',
         trpcUrl: 'https://web.example.test',
         buildUserFacingEnv: vi.fn(() => ({
           HOME: '/tmp/home',
@@ -1378,7 +1378,7 @@ describe('runTask', () => {
       harnessSessionId: undefined,
       workerEnv: {
         authToken: 'cloud-token',
-        openRoomoteAppUrl: 'https://api.example.test',
+        roomoteAppUrl: 'https://api.example.test',
         trpcUrl: 'https://web.example.test',
         buildUserFacingEnv: vi.fn(() => ({
           HOME: '/tmp/home',
@@ -1423,7 +1423,7 @@ describe('runTask', () => {
       harnessSessionId: undefined,
       workerEnv: {
         authToken: 'cloud-token',
-        openRoomoteAppUrl: 'https://api.example.test',
+        roomoteAppUrl: 'https://api.example.test',
         trpcUrl: 'https://web.example.test',
         buildUserFacingEnv: vi.fn(() => ({
           HOME: '/tmp/home',
@@ -1481,7 +1481,7 @@ describe('runTask', () => {
       harnessSessionId: undefined,
       workerEnv: {
         authToken: 'cloud-token',
-        openRoomoteAppUrl: 'https://api.example.test',
+        roomoteAppUrl: 'https://api.example.test',
         trpcUrl: 'https://web.example.test',
         buildUserFacingEnv: vi.fn(() => ({
           HOME: '/tmp/home',
@@ -1542,7 +1542,7 @@ describe('runTask', () => {
       harnessSessionId: undefined,
       workerEnv: {
         authToken: 'cloud-token',
-        openRoomoteAppUrl: 'https://api.example.test',
+        roomoteAppUrl: 'https://api.example.test',
         trpcUrl: 'https://web.example.test',
         buildUserFacingEnv: vi.fn(() => ({
           HOME: '/tmp/home',
@@ -1594,7 +1594,7 @@ describe('runTask', () => {
       harnessSessionId: undefined,
       workerEnv: {
         authToken: 'cloud-token',
-        openRoomoteAppUrl: 'https://api.example.test',
+        roomoteAppUrl: 'https://api.example.test',
         trpcUrl: 'https://web.example.test',
         buildUserFacingEnv: vi.fn(() => ({
           HOME: '/tmp/home',
@@ -1642,7 +1642,7 @@ describe('runTask', () => {
       harnessSessionId: undefined,
       workerEnv: {
         authToken: 'cloud-token',
-        openRoomoteAppUrl: 'https://api.example.test',
+        roomoteAppUrl: 'https://api.example.test',
         trpcUrl: 'https://web.example.test',
         buildUserFacingEnv: vi.fn(() => ({
           HOME: '/tmp/home',
@@ -1690,7 +1690,7 @@ describe('runTask', () => {
       harnessSessionId: undefined,
       workerEnv: {
         authToken: 'cloud-token',
-        openRoomoteAppUrl: 'https://api.example.test',
+        roomoteAppUrl: 'https://api.example.test',
         trpcUrl: 'https://web.example.test',
         buildUserFacingEnv: vi.fn(() => ({
           HOME: '/tmp/home',
@@ -1766,7 +1766,7 @@ describe('runTask', () => {
         buildUserFacingEnv: vi.fn(() => ({
           HOME: '/tmp/home',
         })),
-        openRoomoteAppUrl: 'http://localhost:3000',
+        roomoteAppUrl: 'http://localhost:3000',
         trpcUrl: 'http://localhost:3001',
         authToken: 'auth-token',
         appEnv: 'test',
@@ -1864,7 +1864,7 @@ describe('runTask', () => {
         buildUserFacingEnv: vi.fn(() => ({
           HOME: '/tmp/home',
         })),
-        openRoomoteAppUrl: 'http://localhost:3000',
+        roomoteAppUrl: 'http://localhost:3000',
         trpcUrl: 'http://localhost:3001',
         authToken: 'auth-token',
         appEnv: 'test',
@@ -1934,7 +1934,7 @@ describe('runTask', () => {
         buildUserFacingEnv: vi.fn(() => ({
           HOME: '/tmp/home',
         })),
-        openRoomoteAppUrl: 'http://localhost:3000',
+        roomoteAppUrl: 'http://localhost:3000',
         trpcUrl: 'http://localhost:3001',
         authToken: 'auth-token',
         appEnv: 'test',
@@ -1982,7 +1982,7 @@ describe('runTask', () => {
       } as never,
       workerEnv: {
         buildUserFacingEnv: vi.fn(() => ({})),
-        openRoomoteAppUrl: 'http://localhost:3000',
+        roomoteAppUrl: 'http://localhost:3000',
         trpcUrl: 'http://localhost:3001',
         authToken: 'auth-token',
         appEnv: 'test',
@@ -2044,7 +2044,7 @@ describe('runTask', () => {
       } as never,
       workerEnv: {
         buildUserFacingEnv: vi.fn(() => ({})),
-        openRoomoteAppUrl: 'http://localhost:3000',
+        roomoteAppUrl: 'http://localhost:3000',
         trpcUrl: 'http://localhost:3001',
         authToken: 'auth-token',
         appEnv: 'test',
@@ -2150,7 +2150,7 @@ describe('runTask', () => {
       harnessSessionId: 'resume-session-406',
       workerEnv: {
         buildUserFacingEnv: vi.fn(() => ({})),
-        openRoomoteAppUrl: 'http://localhost:3000',
+        roomoteAppUrl: 'http://localhost:3000',
         trpcUrl: 'http://localhost:3001',
         authToken: 'auth-token',
         appEnv: 'test',
@@ -2231,7 +2231,7 @@ describe('runTask', () => {
       } as never,
       workerEnv: {
         buildUserFacingEnv: vi.fn(() => ({})),
-        openRoomoteAppUrl: 'http://localhost:3000',
+        roomoteAppUrl: 'http://localhost:3000',
         trpcUrl: 'http://localhost:3001',
         authToken: 'auth-token',
         appEnv: 'test',
@@ -2272,7 +2272,7 @@ describe('runTask', () => {
       } as never,
       workerEnv: {
         buildUserFacingEnv: vi.fn(() => ({})),
-        openRoomoteAppUrl: 'http://localhost:3000',
+        roomoteAppUrl: 'http://localhost:3000',
         trpcUrl: 'http://localhost:3001',
         authToken: 'auth-token',
         appEnv: 'test',
@@ -2318,7 +2318,7 @@ describe('runTask', () => {
       } as never,
       workerEnv: {
         buildUserFacingEnv: vi.fn(() => ({})),
-        openRoomoteAppUrl: 'http://localhost:3000',
+        roomoteAppUrl: 'http://localhost:3000',
         trpcUrl: 'http://localhost:3001',
         authToken: 'auth-token',
         appEnv: 'test',
@@ -2360,7 +2360,7 @@ describe('runTask', () => {
       harnessSessionId: undefined,
       workerEnv: {
         authToken: 'cloud-token',
-        openRoomoteAppUrl: 'https://api.example.test',
+        roomoteAppUrl: 'https://api.example.test',
         trpcUrl: 'https://web.example.test',
         buildUserFacingEnv: vi.fn(() => ({
           HOME: '/tmp/home',
@@ -2421,7 +2421,7 @@ describe('runTask', () => {
       harnessSessionId: undefined,
       workerEnv: {
         authToken: 'cloud-token',
-        openRoomoteAppUrl: 'https://api.example.test',
+        roomoteAppUrl: 'https://api.example.test',
         trpcUrl: 'https://web.example.test',
         buildUserFacingEnv: vi.fn(() => ({
           HOME: '/tmp/home',
@@ -2479,7 +2479,7 @@ describe('runTask', () => {
       harnessSessionId: undefined,
       workerEnv: {
         authToken: 'cloud-token',
-        openRoomoteAppUrl: 'https://api.example.test',
+        roomoteAppUrl: 'https://api.example.test',
         trpcUrl: 'https://web.example.test',
         buildUserFacingEnv: vi.fn(() => ({
           HOME: '/tmp/home',
@@ -2541,7 +2541,7 @@ describe('runTask', () => {
       harnessSessionId: undefined,
       workerEnv: {
         authToken: 'cloud-token',
-        openRoomoteAppUrl: 'https://api.example.test',
+        roomoteAppUrl: 'https://api.example.test',
         trpcUrl: 'https://web.example.test',
         buildUserFacingEnv: vi.fn(() => ({
           HOME: '/tmp/home',
@@ -2612,7 +2612,7 @@ describe('runTask', () => {
       harnessSessionId: undefined,
       workerEnv: {
         authToken: 'cloud-token',
-        openRoomoteAppUrl: 'https://api.example.test',
+        roomoteAppUrl: 'https://api.example.test',
         trpcUrl: 'https://web.example.test',
         buildUserFacingEnv: vi.fn(() => ({
           HOME: '/tmp/home',
@@ -2666,7 +2666,7 @@ describe('runTask', () => {
       harnessSessionId: undefined,
       workerEnv: {
         authToken: 'cloud-token',
-        openRoomoteAppUrl: 'https://api.example.test',
+        roomoteAppUrl: 'https://api.example.test',
         trpcUrl: 'https://web.example.test',
         buildUserFacingEnv: vi.fn(() => ({
           HOME: '/tmp/home',
@@ -2717,7 +2717,7 @@ describe('runTask', () => {
       harnessSessionId: undefined,
       workerEnv: {
         authToken: 'cloud-token',
-        openRoomoteAppUrl: 'https://api.example.test',
+        roomoteAppUrl: 'https://api.example.test',
         trpcUrl: 'https://web.example.test',
         buildUserFacingEnv: vi.fn(() => ({
           HOME: '/tmp/home',
@@ -2778,7 +2778,7 @@ describe('runTask', () => {
       harnessSessionId: undefined,
       workerEnv: {
         authToken: 'cloud-token',
-        openRoomoteAppUrl: 'https://api.example.test',
+        roomoteAppUrl: 'https://api.example.test',
         trpcUrl: 'https://web.example.test',
         buildUserFacingEnv: vi.fn(() => ({
           HOME: '/tmp/home',
@@ -2846,7 +2846,7 @@ describe('runTask', () => {
       harnessSessionId: undefined,
       workerEnv: {
         authToken: 'cloud-token',
-        openRoomoteAppUrl: 'https://api.example.test',
+        roomoteAppUrl: 'https://api.example.test',
         trpcUrl: 'https://web.example.test',
         buildUserFacingEnv: vi.fn(() => ({
           HOME: '/tmp/home',
@@ -2905,7 +2905,7 @@ describe('runTask', () => {
       harnessSessionId: undefined,
       workerEnv: {
         authToken: 'cloud-token',
-        openRoomoteAppUrl: 'https://api.example.test',
+        roomoteAppUrl: 'https://api.example.test',
         trpcUrl: 'https://web.example.test',
         buildUserFacingEnv: vi.fn(() => ({
           HOME: '/tmp/home',
@@ -2987,7 +2987,7 @@ describe('runTask', () => {
       harnessSessionId: undefined,
       workerEnv: {
         authToken: 'cloud-token',
-        openRoomoteAppUrl: 'https://api.example.test',
+        roomoteAppUrl: 'https://api.example.test',
         trpcUrl: 'https://web.example.test',
         buildUserFacingEnv: vi.fn(() => ({
           HOME: '/tmp/home',
@@ -3042,7 +3042,7 @@ describe('runTask', () => {
       harnessSessionId: undefined,
       workerEnv: {
         authToken: 'cloud-token',
-        openRoomoteAppUrl: 'https://api.example.test',
+        roomoteAppUrl: 'https://api.example.test',
         trpcUrl: 'https://web.example.test',
         buildUserFacingEnv: vi.fn(() => ({
           HOME: '/tmp/home',
@@ -3107,7 +3107,7 @@ describe('runTask', () => {
       harnessSessionId: undefined,
       workerEnv: {
         authToken: 'cloud-token',
-        openRoomoteAppUrl: 'https://api.example.test',
+        roomoteAppUrl: 'https://api.example.test',
         trpcUrl: 'https://web.example.test',
         buildUserFacingEnv: vi.fn(() => ({
           HOME: '/tmp/home',
@@ -3172,7 +3172,7 @@ describe('runTask', () => {
       harnessSessionId: undefined,
       workerEnv: {
         authToken: 'cloud-token',
-        openRoomoteAppUrl: 'https://api.example.test',
+        roomoteAppUrl: 'https://api.example.test',
         trpcUrl: 'https://web.example.test',
         buildUserFacingEnv: vi.fn(() => ({
           HOME: '/tmp/home',
@@ -3237,7 +3237,7 @@ describe('runTask', () => {
       harnessSessionId: undefined,
       workerEnv: {
         authToken: 'cloud-token',
-        openRoomoteAppUrl: 'https://api.example.test',
+        roomoteAppUrl: 'https://api.example.test',
         trpcUrl: 'https://web.example.test',
         buildUserFacingEnv: vi.fn(() => ({
           HOME: '/tmp/home',
@@ -3287,7 +3287,7 @@ describe('runTask', () => {
       harnessSessionId: undefined,
       workerEnv: {
         authToken: 'cloud-token',
-        openRoomoteAppUrl: 'https://api.example.test',
+        roomoteAppUrl: 'https://api.example.test',
         trpcUrl: 'https://web.example.test',
         buildUserFacingEnv: vi.fn(() => ({
           HOME: '/tmp/home',
@@ -3338,7 +3338,7 @@ describe('runTask', () => {
       harnessSessionId: undefined,
       workerEnv: {
         authToken: 'cloud-token',
-        openRoomoteAppUrl: 'https://api.example.test',
+        roomoteAppUrl: 'https://api.example.test',
         trpcUrl: 'https://web.example.test',
         buildUserFacingEnv: vi.fn(() => ({
           HOME: '/tmp/home',
@@ -3400,7 +3400,7 @@ describe('runTask', () => {
       harnessSessionId: undefined,
       workerEnv: {
         authToken: 'cloud-token',
-        openRoomoteAppUrl: 'https://api.example.test',
+        roomoteAppUrl: 'https://api.example.test',
         trpcUrl: 'https://web.example.test',
         buildUserFacingEnv: vi.fn(() => ({
           HOME: '/tmp/home',
@@ -3455,7 +3455,7 @@ describe('runTask', () => {
       harnessSessionId: undefined,
       workerEnv: {
         authToken: 'cloud-token',
-        openRoomoteAppUrl: 'https://api.example.test',
+        roomoteAppUrl: 'https://api.example.test',
         trpcUrl: 'https://web.example.test',
         buildUserFacingEnv: vi.fn(() => ({
           HOME: '/tmp/home',
@@ -3515,7 +3515,7 @@ describe('runTask', () => {
       harnessSessionId: undefined,
       workerEnv: {
         authToken: 'cloud-token',
-        openRoomoteAppUrl: 'https://api.example.test',
+        roomoteAppUrl: 'https://api.example.test',
         trpcUrl: 'https://web.example.test',
         buildUserFacingEnv: vi.fn(() => ({
           HOME: '/tmp/home',
@@ -3635,7 +3635,7 @@ describe('runTask', () => {
       harnessSessionId: undefined,
       workerEnv: {
         authToken: 'cloud-token',
-        openRoomoteAppUrl: 'https://api.example.test',
+        roomoteAppUrl: 'https://api.example.test',
         trpcUrl: 'https://web.example.test',
         buildUserFacingEnv: vi.fn(() => ({
           HOME: '/tmp/home',
@@ -3739,7 +3739,7 @@ describe('runTask', () => {
       harnessSessionId: undefined,
       workerEnv: {
         authToken: 'cloud-token',
-        openRoomoteAppUrl: 'https://api.example.test',
+        roomoteAppUrl: 'https://api.example.test',
         trpcUrl: 'https://web.example.test',
         buildUserFacingEnv: vi.fn(() => ({
           HOME: '/tmp/home',
@@ -3810,7 +3810,7 @@ describe('runTask', () => {
         harnessSessionId: undefined,
         workerEnv: {
           authToken: 'cloud-token',
-          openRoomoteAppUrl: 'https://api.example.test',
+          roomoteAppUrl: 'https://api.example.test',
           trpcUrl: 'https://web.example.test',
           buildUserFacingEnv: vi.fn(() => ({
             HOME: '/tmp/home',

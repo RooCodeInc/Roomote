@@ -248,7 +248,7 @@ export class DockerService {
         'ps',
         '-a',
         '--filter',
-        'name=^/(roomote|openroomote)-worker-',
+        'name=^/roomote-worker-',
         '--format',
         '{{.Names}}',
       ]);

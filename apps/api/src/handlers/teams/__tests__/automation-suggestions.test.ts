@@ -221,7 +221,7 @@ describe('postScheduledSuggestionsToTeams', () => {
   });
 
   it('renders "Automation in Environment" when a suggestion has a target environment', async () => {
-    selectWhereRowsMock.mockReturnValue([{ id: 'env-1', name: 'OpenRoomote' }]);
+    selectWhereRowsMock.mockReturnValue([{ id: 'env-1', name: 'Roomote' }]);
 
     await postScheduledSuggestionsToTeams({
       sourceTaskId: 'task-1',
@@ -240,6 +240,6 @@ describe('postScheduledSuggestionsToTeams', () => {
     });
 
     const posted = postMessageMock.mock.calls[0]![0] as { text: string };
-    expect(posted.text).toContain('_Suggest Ideas in OpenRoomote_');
+    expect(posted.text).toContain('_Suggest Ideas in Roomote_');
   });
 });

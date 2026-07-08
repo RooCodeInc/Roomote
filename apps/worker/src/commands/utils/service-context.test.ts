@@ -67,7 +67,7 @@ describe('buildServiceContextForPreviewProxy', () => {
     const workerEnv = {
       previewAuthPublicKey: 'preview-public-key',
       previewAuthCookieName: 'preview_auth',
-      openRoomoteAppUrl: 'https://app.roomote.dev',
+      roomoteAppUrl: 'https://app.roomote.dev',
       trpcUrl: 'https://api.roomote.dev',
     };
 

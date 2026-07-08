@@ -4,7 +4,7 @@ import { PREVIEW_WIDGET } from '../preview-widget';
 describe('preview-proxy branding', () => {
   it('uses the current logo asset in the injected widget', () => {
     expect(PREVIEW_WIDGET).toContain(
-      "var roomoteLogoUrl = openRoomoteAppUrl + '/logos/r.svg';",
+      "var roomoteLogoUrl = roomoteAppUrl + '/logos/r.svg';",
     );
   });
 

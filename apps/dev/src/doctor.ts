@@ -354,22 +354,22 @@ function getHealthEndpoints(
 ): { name: string; url: string }[] {
   const webPort = getConfiguredPort({
     env,
-    keys: ['ROOMOTE_WEB_PORT', 'OPENROOMOTE_WEB_PORT'],
+    keys: ['ROOMOTE_WEB_PORT'],
     fallback: DEFAULT_ROOMOTE_WEB_PORT,
   });
   const apiPort = getConfiguredPort({
     env,
-    keys: ['ROOMOTE_API_PORT', 'OPENROOMOTE_API_PORT'],
+    keys: ['ROOMOTE_API_PORT'],
     fallback: DEFAULT_ROOMOTE_API_PORT,
   });
   const bullmqPort = getConfiguredPort({
     env,
-    keys: ['ROOMOTE_BULLMQ_PORT', 'OPENROOMOTE_BULLMQ_PORT'],
+    keys: ['ROOMOTE_BULLMQ_PORT'],
     fallback: DEFAULT_ROOMOTE_BULLMQ_PORT,
   });
   const previewProxyPort = getConfiguredPort({
     env,
-    keys: ['ROOMOTE_PREVIEW_PROXY_PORT', 'OPENROOMOTE_PREVIEW_PROXY_PORT'],
+    keys: ['ROOMOTE_PREVIEW_PROXY_PORT'],
     fallback: DEFAULT_ROOMOTE_PREVIEW_PROXY_PORT,
   });
 

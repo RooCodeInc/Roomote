@@ -37,7 +37,7 @@ function createWorkerEnv() {
       trpcUrl: 'https://trpc.internal.example.com',
       previewProxyBaseUrl: 'https://preview.roomote.run',
       previewProxySubdomainSuffix: 'preview.roomote.run',
-      openRoomoteAppUrl: 'https://app.roomote.example',
+      roomoteAppUrl: 'https://app.roomote.example',
       appEnv: 'development',
     },
   });

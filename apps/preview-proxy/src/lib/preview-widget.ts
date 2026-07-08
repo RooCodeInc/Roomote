@@ -10,8 +10,8 @@ export const PREVIEW_WIDGET = `
   try { isInIframe = window.self !== window.top; } catch (e) { isInIframe = true; }
 
   // Extract taskId from hostname ({taskId}-{portName}.{domain}) and build task URL
-  var openRoomoteAppUrl = '__ROOMOTE_APP_URL__';
-  var roomoteLogoUrl = openRoomoteAppUrl + '/logos/r.svg';
+  var roomoteAppUrl = '__ROOMOTE_APP_URL__';
+  var roomoteLogoUrl = roomoteAppUrl + '/logos/r.svg';
   var hostParts = location.hostname.split('.');
   if (hostParts.length > 1) {
     var subdomain = hostParts[0];
@@ -19,7 +19,7 @@ export const PREVIEW_WIDGET = `
     if (hyphenIdx >= 0) {
       var potentialTaskId = subdomain.substring(0, hyphenIdx);
       if (/^[0-9a-z]{13}$/.test(potentialTaskId)) {
-        taskUrl = openRoomoteAppUrl + '/task/' + potentialTaskId;
+        taskUrl = roomoteAppUrl + '/task/' + potentialTaskId;
       }
     }
   }

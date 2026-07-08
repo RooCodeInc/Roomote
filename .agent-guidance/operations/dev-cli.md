@@ -165,10 +165,9 @@ nonzero.
 
 HTTP checks use the configured `ROOMOTE_WEB_PORT`, `ROOMOTE_API_PORT`,
 `ROOMOTE_BULLMQ_PORT`, and `ROOMOTE_PREVIEW_PROXY_PORT` values from the
-discovered PM2 web env, self-host web container env, or current shell. Legacy
-`OPENROOMOTE_*_PORT` names are still accepted as fallback values. If no valid
-configured port is present, doctor falls back to the standard local defaults:
-13000, 13001, 13002, and 18081.
+discovered PM2 web env, self-host web container env, or current shell. If no
+valid configured port is present, doctor falls back to the standard local
+defaults: 13000, 13001, 13002, and 18081.
 
 ## GitHub Bootstrap
 
