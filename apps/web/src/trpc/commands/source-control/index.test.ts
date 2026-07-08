@@ -11,6 +11,8 @@ const {
   mockSyncAdoRepositories,
   mockSyncGiteaRepositories,
   mockUpsertDeploymentEnvironmentVariables,
+  mockResolveAdoOrganization,
+  mockValidateAdoToken,
   mockValidateGiteaToken,
   mockEnv,
 } = vi.hoisted(() => ({
@@ -24,6 +26,8 @@ const {
   mockSyncAdoRepositories: vi.fn(),
   mockSyncGiteaRepositories: vi.fn(),
   mockUpsertDeploymentEnvironmentVariables: vi.fn(),
+  mockResolveAdoOrganization: vi.fn(),
+  mockValidateAdoToken: vi.fn(),
   mockValidateGiteaToken: vi.fn(),
   mockEnv: {
     ROOMOTE_APP_URL: 'https://roomote.example.com',
@@ -36,7 +40,9 @@ vi.mock('@roomote/ado', () => ({
     mockEnsureAdoServiceHooksForRepositories,
   removeAdoServiceHooksForRepositories:
     mockRemoveAdoServiceHooksForRepositories,
+  resolveAdoOrganization: mockResolveAdoOrganization,
   syncAdoRepositories: mockSyncAdoRepositories,
+  validateAdoToken: mockValidateAdoToken,
 }));
 
 vi.mock('@roomote/gitea', () => ({
@@ -151,6 +157,8 @@ describe('source-control commands', () => {
       { status: 'created', repositoryFullName: 'acme/Platform/backend' },
     ]);
     mockValidateGiteaToken.mockResolvedValue({ status: 'valid' });
+    mockResolveAdoOrganization.mockResolvedValue(null);
+    mockValidateAdoToken.mockResolvedValue({ status: 'valid' });
   });
 
   it('syncs Gitea repositories and configures pull request webhooks', async () => {
@@ -296,6 +304,53 @@ describe('source-control commands', () => {
         removed: 0,
       },
     });
+  });
+
+  it('rejects invalid Azure DevOps tokens during config validation', async () => {
+    mockValidateAdoToken.mockResolvedValue({
+      status: 'invalid',
+      error: 'Azure DevOps rejected the token.',
+    });
+
+    await expect(
+      assertValidSourceControlConfigInput({
+        provider: 'ado',
+        values: {
+          ADO_ORGANIZATION: 'acme',
+          ADO_TOKEN: 'ado-token',
+        },
+      }),
+    ).rejects.toThrow('Azure DevOps rejected the token.');
+
+    expect(mockValidateAdoToken).toHaveBeenCalledWith({
+      token: 'ado-token',
+      organization: 'acme',
+      baseUrl: undefined,
+    });
+  });
+
+  it('validates a new Azure DevOps token against the saved organization', async () => {
+    mockResolveAdoOrganization.mockResolvedValue('acme');
+
+    await assertValidSourceControlConfigInput({
+      provider: 'ado',
+      values: { ADO_TOKEN: 'ado-token' },
+    });
+
+    expect(mockValidateAdoToken).toHaveBeenCalledWith({
+      token: 'ado-token',
+      organization: 'acme',
+      baseUrl: undefined,
+    });
+  });
+
+  it('skips Azure DevOps token validation when no organization is available', async () => {
+    await assertValidSourceControlConfigInput({
+      provider: 'ado',
+      values: { ADO_TOKEN: 'ado-token' },
+    });
+
+    expect(mockValidateAdoToken).not.toHaveBeenCalled();
   });
 
   it('rejects invalid Gitea tokens during config validation', async () => {

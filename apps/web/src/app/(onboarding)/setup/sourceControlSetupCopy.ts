@@ -3,6 +3,8 @@ import type { SourceControlProvider } from '@roomote/types';
 type SourceControlSetupCopy = {
   creationHref: string;
   setupLabel: string;
+  /** Indefinite article for `setupLabel` ("a" unless the label needs "an"). */
+  setupLabelArticle?: 'a' | 'an';
   creationHint?: string;
 };
 
@@ -29,8 +31,9 @@ const SOURCE_CONTROL_SETUP_COPY: Record<
   ado: {
     creationHref: 'https://dev.azure.com/_usersSettings/tokens',
     setupLabel: 'Azure DevOps personal access token',
+    setupLabelArticle: 'an',
     creationHint:
-      'Create the PAT with Code access and permission to manage service hook subscriptions for the projects Roomote should access. Roomote syncs repositories and configures pull request service hooks automatically.',
+      'Create the PAT with Code read & write scopes and permission to manage service hook subscriptions for the projects Roomote should access. Prefer a bot or service account that is a member of those projects; Roomote syncs repositories and configures pull request service hooks automatically. The organization is the slug from your https://dev.azure.com/<organization> URL.',
   },
 };
 

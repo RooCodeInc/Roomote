@@ -72,7 +72,6 @@ type SourceControlProviderBlockProps = {
   repositoryTarget: string;
   adminHelp?: ReactNode;
   configForm?: ReactNode;
-  onSetupClick?: () => void;
 };
 
 const TOKEN_PROVIDER_UI = {
@@ -219,9 +218,6 @@ export function SourceControl() {
     },
   } satisfies Record<SourceControlTokenBackedProvider, TokenProviderState>;
 
-  const [configuringProvider, setConfiguringProvider] =
-    useState<SourceControlTokenBackedProvider | null>(null);
-
   const providerBlocks: SourceControlProviderBlockProps[] = [
     {
       provider: 'github',
@@ -313,17 +309,14 @@ export function SourceControl() {
         provider,
         isAdmin,
         state: tokenProviderState[provider],
-        onConfigure: () => setConfiguringProvider(provider),
-        configForm:
-          tokenProviderState[provider].isConfigured ||
-          configuringProvider === provider ? (
-            <SourceControlConfigForm
-              provider={provider}
-              configStatus={sourceControlConfigStatus.data}
-              saveSuccessMessage={`${sourceControlProviderDescriptors[provider].label} credentials saved.`}
-              onSaved={() => tokenProviderState[provider].sync.mutate()}
-            />
-          ) : null,
+        configForm: (
+          <SourceControlConfigForm
+            provider={provider}
+            configStatus={sourceControlConfigStatus.data}
+            saveSuccessMessage={`${sourceControlProviderDescriptors[provider].label} credentials saved.`}
+            onSaved={() => tokenProviderState[provider].sync.mutate()}
+          />
+        ),
       }),
     ),
   ];
@@ -405,13 +398,11 @@ function buildTokenProviderBlock({
   provider,
   isAdmin,
   state,
-  onConfigure,
   configForm,
 }: {
   provider: SourceControlTokenBackedProvider;
   isAdmin: boolean;
   state: TokenProviderState;
-  onConfigure: () => void;
   configForm?: ReactNode;
 }): SourceControlProviderBlockProps {
   const { label } = sourceControlProviderDescriptors[provider];
@@ -456,7 +447,6 @@ function buildTokenProviderBlock({
       </>
     ),
     configForm,
-    onSetupClick: onConfigure,
     adminHelp: isAdmin
       ? `Missing a repo here? Confirm the ${label} ${ui.credentialName} can access it, then refresh ${label}.`
       : undefined,
@@ -566,7 +556,6 @@ function SourceControlProviderBlock({
   repositoryTarget,
   adminHelp,
   configForm,
-  onSetupClick,
 }: SourceControlProviderBlockProps) {
   const [isRepositoryListOpen, setIsRepositoryListOpen] = useState(false);
   const [isExpanded, setIsExpanded] = useState(isConfigured);
@@ -602,10 +591,7 @@ function SourceControlProviderBlock({
           <button
             type="button"
             className="cursor-pointer underline underline-offset-4 hover:text-accent-foreground"
-            onClick={() => {
-              setIsExpanded(true);
-              onSetupClick?.();
-            }}
+            onClick={() => setIsExpanded(true)}
           >
             Set it up
           </button>
@@ -681,7 +667,7 @@ function ProviderSetupInstructions({
     <div className="max-w-2xl space-y-4">
       <div className="space-y-2">
         <p className="text-sm font-semibold">
-          Create a{' '}
+          Create {setupCopy.setupLabelArticle ?? 'a'}{' '}
           <a
             href={setupCopy.creationHref}
             target="_blank"
@@ -716,11 +702,11 @@ function isProviderConfigured(
     (candidate) => candidate.provider === provider,
   );
 
-  return (
-    providerStatus?.fields.some(
-      (field) => field.runtimeSatisfied || field.savedSatisfied,
-    ) ?? false
-  );
+  // configSatisfied covers required fields only: optional fields can be
+  // satisfied by unrelated deployment config (for example ADO_TENANT_ID
+  // falling back to ROOMOTE_AUTH_MICROSOFT_TENANT_ID), which must not hide
+  // the provider's setup instructions.
+  return providerStatus?.configSatisfied ?? false;
 }
 
 function RepositoryLinks({

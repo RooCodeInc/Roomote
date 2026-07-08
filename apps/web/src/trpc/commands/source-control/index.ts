@@ -604,6 +604,10 @@ export async function assertValidSourceControlConfigInput(params: {
     params.provider === 'gitea'
       ? params.values?.['GITEA_TOKEN']?.trim()
       : undefined;
+  const nextAdoToken =
+    params.provider === 'ado'
+      ? params.values?.['ADO_TOKEN']?.trim()
+      : undefined;
 
   if (nextGitLabToken) {
     const validation = await GitLab.validateGitLabToken({
@@ -627,6 +631,26 @@ export async function assertValidSourceControlConfigInput(params: {
     const validation = await Gitea.validateGiteaToken({
       token: nextGiteaToken,
       baseUrl: nextGiteaBaseUrl,
+    });
+
+    if (validation.status === 'invalid') {
+      throw new Error(validation.error);
+    }
+  }
+
+  if (nextAdoToken) {
+    const nextAdoOrganization =
+      params.values?.['ADO_ORGANIZATION']?.trim() ??
+      (await Ado.resolveAdoOrganization());
+
+    if (!nextAdoOrganization) {
+      return;
+    }
+
+    const validation = await Ado.validateAdoToken({
+      token: nextAdoToken,
+      organization: nextAdoOrganization,
+      baseUrl: params.values?.['ADO_BASE_URL']?.trim() || undefined,
     });
 
     if (validation.status === 'invalid') {
