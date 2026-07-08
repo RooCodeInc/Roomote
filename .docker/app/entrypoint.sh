@@ -15,6 +15,16 @@ fi
 # dockerCommand parser passes quote characters through literally, so a
 # `sh -c '...'` prelude cannot do it either. Derive the URL-shaped variables
 # from host-only references here instead; explicitly set values always win.
+#
+# A service's very first container can snapshot its environment before its
+# own hostname propagates into the blueprint's cross-service reference,
+# leaving the self-referencing host variable empty. Render injects the
+# service's own hostname directly as RENDER_EXTERNAL_HOSTNAME (never via a
+# reference), so fall back to it for the self-referencing case.
+case "$service" in
+  web) : "${ROOMOTE_WEB_HOST:=${RENDER_EXTERNAL_HOSTNAME:-}}" ;;
+  api) : "${ROOMOTE_API_HOST:=${RENDER_EXTERNAL_HOSTNAME:-}}" ;;
+esac
 if [ -z "${ROOMOTE_APP_URL:-}" ] && [ -n "${ROOMOTE_WEB_HOST:-}" ]; then
   export ROOMOTE_APP_URL="https://${ROOMOTE_WEB_HOST}"
 fi
