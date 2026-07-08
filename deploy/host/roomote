@@ -141,17 +141,8 @@ prune_roomote_images() {
   image_namespace="${image_namespace:-roocodeinc}"
   repo_prefix="$image_registry/$image_namespace/roomote-"
 
-  cleanup_prune_roomote_images() {
-    trap - RETURN
-    [ -z "$tags_file" ] || rm -f "$tags_file"
-    if [ -n "$keep_file" ]; then
-      rm -f "$keep_file" "${keep_file}.dedup"
-    fi
-    [ -z "$images_file" ] || rm -f "$images_file"
-  }
-
   tags_file="$(mktemp)" || return
-  trap cleanup_prune_roomote_images RETURN
+  trap 'rm -f "$tags_file" "$images_file"; [ -n "$keep_file" ] && rm -f "$keep_file" "${keep_file}.dedup"; trap - RETURN' RETURN
   keep_file="$(mktemp)" || return
   images_file="$(mktemp)" || return
 
@@ -207,7 +198,6 @@ prune_roomote_images() {
   kept_count="$(awk 'NF { count++ } END { print count + 0 }' "$keep_file")" || return
   kept_tags="$(tr '\n' ' ' <"$keep_file" | sed 's/[[:space:]]*$//')" || return
   log "Image retention complete: kept $kept_count release tag(s): ${kept_tags:-none}; removed $removed image reference(s); skipped $skipped in-use image reference(s)"
-  cleanup_prune_roomote_images
 }
 
 cmd_status() {
