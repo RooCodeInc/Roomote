@@ -39,26 +39,10 @@ const state = vi.hoisted(() => ({
   ],
   searchParams: '',
   configProviders: [
-    {
-      provider: 'gitlab',
-      fields: [{ runtimeSatisfied: false, savedSatisfied: true }],
-    },
-    {
-      provider: 'gitea',
-      fields: [{ runtimeSatisfied: false, savedSatisfied: true }],
-    },
-    {
-      provider: 'ado',
-      fields: [{ runtimeSatisfied: false, savedSatisfied: true }],
-    },
-  ] as {
-    provider: string;
-    fields: {
-      required?: boolean;
-      runtimeSatisfied: boolean;
-      savedSatisfied: boolean;
-    }[];
-  }[],
+    { provider: 'gitlab', configSatisfied: true },
+    { provider: 'gitea', configSatisfied: true },
+    { provider: 'ado', configSatisfied: true },
+  ],
 }));
 
 const mutations = vi.hoisted(() => ({
@@ -322,18 +306,9 @@ describe('SourceControl settings', () => {
       },
     ];
     state.configProviders = [
-      {
-        provider: 'gitlab',
-        fields: [{ runtimeSatisfied: false, savedSatisfied: true }],
-      },
-      {
-        provider: 'gitea',
-        fields: [{ runtimeSatisfied: false, savedSatisfied: true }],
-      },
-      {
-        provider: 'ado',
-        fields: [{ runtimeSatisfied: false, savedSatisfied: true }],
-      },
+      { provider: 'gitlab', configSatisfied: true },
+      { provider: 'gitea', configSatisfied: true },
+      { provider: 'ado', configSatisfied: true },
     ];
   });
 
@@ -463,18 +438,9 @@ describe('SourceControl settings', () => {
   it('shows setup links instead of sync for disconnected token providers', () => {
     state.gitLabRepositories = [];
     state.configProviders = [
-      {
-        provider: 'gitlab',
-        fields: [{ runtimeSatisfied: false, savedSatisfied: false }],
-      },
-      {
-        provider: 'gitea',
-        fields: [{ runtimeSatisfied: false, savedSatisfied: true }],
-      },
-      {
-        provider: 'ado',
-        fields: [{ runtimeSatisfied: false, savedSatisfied: true }],
-      },
+      { provider: 'gitlab', configSatisfied: false },
+      { provider: 'gitea', configSatisfied: true },
+      { provider: 'ado', configSatisfied: true },
     ];
 
     render(<SourceControl />);
@@ -502,28 +468,15 @@ describe('SourceControl settings', () => {
     ).not.toBeInTheDocument();
   });
 
-  it('shows ADO setup instructions when only optional fields are satisfied by fallbacks', () => {
+  it('shows ADO setup instructions when required config is not satisfied', () => {
     state.adoRepositories = [];
     state.configProviders = [
-      {
-        provider: 'gitlab',
-        fields: [{ runtimeSatisfied: false, savedSatisfied: true }],
-      },
-      {
-        provider: 'gitea',
-        fields: [{ runtimeSatisfied: false, savedSatisfied: true }],
-      },
-      {
-        provider: 'ado',
-        fields: [
-          // ADO_ORGANIZATION and ADO_TOKEN (required) are unset; only the
-          // optional ADO_TENANT_ID is satisfied via the
-          // ROOMOTE_AUTH_MICROSOFT_TENANT_ID fallback.
-          { runtimeSatisfied: false, savedSatisfied: false },
-          { runtimeSatisfied: false, savedSatisfied: false },
-          { required: false, runtimeSatisfied: true, savedSatisfied: false },
-        ],
-      },
+      { provider: 'gitlab', configSatisfied: true },
+      { provider: 'gitea', configSatisfied: true },
+      // configSatisfied covers required fields only, so ADO stays
+      // unconfigured even when the optional ADO_TENANT_ID is satisfied via
+      // the ROOMOTE_AUTH_MICROSOFT_TENANT_ID fallback.
+      { provider: 'ado', configSatisfied: false },
     ];
 
     render(<SourceControl />);
@@ -544,18 +497,9 @@ describe('SourceControl settings', () => {
     state.giteaRepositories = [];
     state.adoRepositories = [];
     state.configProviders = [
-      {
-        provider: 'gitlab',
-        fields: [{ runtimeSatisfied: false, savedSatisfied: true }],
-      },
-      {
-        provider: 'gitea',
-        fields: [{ runtimeSatisfied: false, savedSatisfied: false }],
-      },
-      {
-        provider: 'ado',
-        fields: [{ runtimeSatisfied: false, savedSatisfied: false }],
-      },
+      { provider: 'gitlab', configSatisfied: true },
+      { provider: 'gitea', configSatisfied: false },
+      { provider: 'ado', configSatisfied: false },
     ];
 
     render(<SourceControl />);

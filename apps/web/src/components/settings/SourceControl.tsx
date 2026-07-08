@@ -6,7 +6,6 @@ import Link from 'next/link';
 import { usePathname, useSearchParams } from 'next/navigation';
 import { toast } from 'sonner';
 import {
-  isRequiredField,
   prActions,
   sourceControlProviderDescriptors,
   sourceControlTokenBackedProviders,
@@ -703,17 +702,11 @@ function isProviderConfigured(
     (candidate) => candidate.provider === provider,
   );
 
-  if (!providerStatus) {
-    return false;
-  }
-
-  // Only required fields count: optional fields can be satisfied by
-  // unrelated deployment config (for example ADO_TENANT_ID falling back to
-  // ROOMOTE_AUTH_MICROSOFT_TENANT_ID), which must not hide the provider's
-  // setup instructions.
-  return providerStatus.fields
-    .filter(isRequiredField)
-    .every((field) => field.runtimeSatisfied || field.savedSatisfied);
+  // configSatisfied covers required fields only: optional fields can be
+  // satisfied by unrelated deployment config (for example ADO_TENANT_ID
+  // falling back to ROOMOTE_AUTH_MICROSOFT_TENANT_ID), which must not hide
+  // the provider's setup instructions.
+  return providerStatus?.configSatisfied ?? false;
 }
 
 function RepositoryLinks({
