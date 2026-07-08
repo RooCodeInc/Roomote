@@ -250,6 +250,10 @@ RUN mkdir -p /runtime-deps && cd /runtime-deps && npm init -y >/dev/null && \
 # ---------------------------------------------------------------------------
 FROM node:24.13.1-slim AS runtime
 
+# Connects the GHCR package to this repository and links pulled images back
+# to their source.
+LABEL org.opencontainers.image.source=https://github.com/RooCodeInc/Roomote
+
 ARG OPENCODE_CLI_VERSION=1.17.8
 
 COPY --from=docker-cli /usr/local/bin/docker /usr/local/bin/docker

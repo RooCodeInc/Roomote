@@ -4,6 +4,10 @@
 
 FROM ubuntu:24.04
 
+# Connects the GHCR package to this repository and links pulled images back
+# to their source.
+LABEL org.opencontainers.image.source=https://github.com/RooCodeInc/Roomote
+
 ARG AGENT_BROWSER_VERSION=0.27.0
 ARG OPENCODE_CLI_VERSION=1.17.8
 ARG FFMPEG_INSTALLER_VERSION=1.1.0
