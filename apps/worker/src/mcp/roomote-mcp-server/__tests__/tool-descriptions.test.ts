@@ -2,6 +2,8 @@ import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
+import { z } from 'zod';
+
 const thisFilePath = fileURLToPath(import.meta.url);
 const thisDirPath = path.dirname(thisFilePath);
 const originalEnv = { ...process.env };
@@ -650,6 +652,19 @@ describe('roomote MCP tool descriptions', () => {
     expect(source).toContain('CloudTaskType.SlackAppMention');
     expect(source).toContain(
       'const WEB_TASK_TYPES_WITH_SECURE_ENV_REQUESTS = new Set<string>([',
+    );
+  });
+
+  it('serializes manage_environments definition as a plain string schema, not a union', async () => {
+    const { registeredTools } = await importRoomoteMcpServer();
+    const envTool = getRegisteredTool(registeredTools, 'manage_environments');
+    const definitionSchema = envTool.config.inputSchema
+      .definition as unknown as z.ZodType;
+
+    expect(definitionSchema).toBeInstanceOf(z.ZodString);
+    expect(definitionSchema).not.toBeInstanceOf(z.ZodUnion);
+    expect((definitionSchema as z.ZodString).description).toContain(
+      'YAML or JSON string',
     );
   });
 
