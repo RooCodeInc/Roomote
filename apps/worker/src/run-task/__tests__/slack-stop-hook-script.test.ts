@@ -310,7 +310,7 @@ describe('SLACK_STOP_HOOK_SCRIPT', () => {
     expect(result.stderr).toBe('');
   });
 
-  it.each(['ack', 'progress', 'clarification'])(
+  it.each(['ack', 'progress'])(
     'blocks Stop when the recent send_chat_reply purpose is %s',
     (replyPurpose) => {
       const stateFilePath = path.join(
@@ -349,6 +349,79 @@ describe('SLACK_STOP_HOOK_SCRIPT', () => {
       expect(result.stderr).toContain(`replyPurpose="${replyPurpose}"`);
     },
   );
+
+  it('allows Stop when the current turn ends on a clarification question', () => {
+    const stateFilePath = path.join(
+      fs.mkdtempSync(path.join(os.tmpdir(), 'roomote-stop-state-')),
+      'state.json',
+    );
+    tempDirs.push(path.dirname(stateFilePath));
+    fs.writeFileSync(
+      stateFilePath,
+      JSON.stringify({
+        currentTurnMessageTs: 'user-111.222',
+        satisfiedTurnMessageTs: 'user-111.222',
+        messageTs: 'bot-333.444',
+        tool: 'send_chat_reply',
+        replyPurpose: 'clarification',
+        recordedAtMs: Date.now(),
+      }),
+      'utf8',
+    );
+
+    const result = runHook({
+      env: {
+        ROOMOTE_SLACK_HOOK_DEBUG: 'true',
+        ROOMOTE_SLACK_REPLY_SATISFACTION_STATE_FILE: stateFilePath,
+      },
+    });
+
+    expect(result.status).toBe(0);
+    expect(result.stdout).toBe('');
+    expect(result.stderr).toContain('decision="allow"');
+    expect(result.stderr).toContain('reason="terminal_reply_satisfied"');
+  });
+
+  it('blocks Stop when non-Slack work happened after a clarification question', () => {
+    const clarificationAtMs = Date.now() - 60_000;
+    const stateFilePath = path.join(
+      fs.mkdtempSync(path.join(os.tmpdir(), 'roomote-stop-state-')),
+      'state.json',
+    );
+    tempDirs.push(path.dirname(stateFilePath));
+    fs.writeFileSync(
+      stateFilePath,
+      JSON.stringify({
+        currentTurnMessageTs: 'user-111.222',
+        satisfiedTurnMessageTs: 'user-111.222',
+        messageTs: 'bot-333.444',
+        tool: 'send_chat_reply',
+        replyPurpose: 'clarification',
+        recordedAtMs: clarificationAtMs,
+        terminalSatisfiedTurnMessageTs: 'user-111.222',
+        terminalSatisfiedAtMs: clarificationAtMs,
+        terminalSatisfactionTool: 'send_chat_reply',
+        lastNonSlackWorkAfterTerminalAtMs: clarificationAtMs + 30_000,
+      }),
+      'utf8',
+    );
+
+    const result = runHook({
+      env: {
+        ROOMOTE_SLACK_REPLY_SATISFACTION_STATE_FILE: stateFilePath,
+      },
+    });
+
+    expect(result.status).toBe(0);
+    expect(JSON.parse(result.stdout)).toEqual({
+      decision: 'block',
+      reason: reminder,
+    });
+    expect(result.stderr).toContain('decision="block"');
+    expect(result.stderr).toContain(
+      'reason="current_turn_terminal_reply_stale"',
+    );
+  });
 
   it('blocks Stop when the current Slack turn only has a recent successful reaction', () => {
     const stateFilePath = path.join(

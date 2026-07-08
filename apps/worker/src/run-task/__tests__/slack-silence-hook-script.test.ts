@@ -731,6 +731,40 @@ describe('SLACK_SILENCE_HOOK_SCRIPT', () => {
     ).toBeUndefined();
   });
 
+  it.each(['todowrite', 'todoread'])(
+    'ignores %s todo bookkeeping after a terminal closeout on PostToolUse',
+    (toolName) => {
+      const stateFilePath = writeState({
+        recordedAtMs: Date.now() - 60_000,
+        messageTs: 'bot-111.222',
+        tool: 'send_chat_reply',
+        replyPurpose: 'closeout',
+        satisfiedTurnMessageTs: 'web:client-1',
+        currentTurnMessageTs: 'web:client-1',
+        terminalSatisfiedTurnMessageTs: 'web:client-1',
+        terminalSatisfiedAtMs: Date.now() - 60_000,
+        terminalSatisfactionTool: 'send_chat_reply',
+      });
+
+      const result = runHook({
+        input: {
+          hook_event_name: 'PostToolUse',
+          tool_name: toolName,
+        },
+        env: {
+          ROOMOTE_SLACK_REPLY_SATISFACTION_STATE_FILE: stateFilePath,
+        },
+      });
+
+      expect(result.status).toBe(0);
+      expect(result.stdout).toBe('');
+      expect(
+        JSON.parse(fs.readFileSync(stateFilePath, 'utf8'))
+          .lastNonSlackWorkAfterTerminalAtMs,
+      ).toBeUndefined();
+    },
+  );
+
   it.each(['request_user_input', 'request_user_input_handoff'])(
     'ignores %s bookkeeping after a terminal closeout on PostToolUse',
     (toolName) => {

@@ -190,10 +190,15 @@ function isCloseoutBookkeepingTool(input) {
   const toolName =
     input && typeof input.tool_name === 'string' ? input.tool_name : '';
 
+  // Todo bookkeeping (OpenCode's todowrite/todoread, legacy update_plan) does
+  // not add user-visible outcome, so it must not stale a terminal reply and
+  // force a redundant follow-up closeout.
   return (
     toolName.endsWith('update_plan') ||
     toolName.includes('/update_plan') ||
-    toolName.includes('.update_plan')
+    toolName.includes('.update_plan') ||
+    toolName.endsWith('todowrite') ||
+    toolName.endsWith('todoread')
   );
 }
 
@@ -298,8 +303,14 @@ function hasCurrentTurnTerminalCloseout(state) {
     return false;
   }
 
+  // Clarification is a terminal handoff like closeout: the turn ends waiting
+  // on the user's answer (kept in sync with the stop hook's policy).
   const replyPurpose = trimString(state.replyPurpose);
-  if (replyPurpose && replyPurpose !== 'closeout') {
+  if (
+    replyPurpose &&
+    replyPurpose !== 'closeout' &&
+    replyPurpose !== 'clarification'
+  ) {
     return false;
   }
 

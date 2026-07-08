@@ -373,6 +373,67 @@ describe('Slack reply satisfaction state', () => {
     });
   });
 
+  it('writes terminal state when a current-turn clarification reply is recorded', () => {
+    const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'roomote-slack-'));
+    tempDirs.push(tempDir);
+    const stateFilePath = path.join(tempDir, 'reply-state.json');
+    process.env[SLACK_REPLY_SATISFACTION_STATE_FILE_ENV] = stateFilePath;
+    fs.writeFileSync(
+      stateFilePath,
+      JSON.stringify({
+        currentTurnMessageTs: '111.222',
+        currentTurnStartedAtMs: 1000,
+      }),
+      'utf8',
+    );
+
+    recordSlackReplySatisfaction({
+      messageTs: 'bot-333.444',
+      tool: 'send_chat_reply',
+      replyPurpose: 'clarification',
+      nowMs: 1200,
+    });
+
+    expect(JSON.parse(fs.readFileSync(stateFilePath, 'utf8'))).toEqual({
+      currentTurnMessageTs: '111.222',
+      currentTurnStartedAtMs: 1000,
+      satisfiedTurnMessageTs: '111.222',
+      terminalSatisfiedTurnMessageTs: '111.222',
+      terminalSatisfiedAtMs: 1200,
+      terminalSatisfactionTool: 'send_chat_reply',
+      messageTs: 'bot-333.444',
+      tool: 'send_chat_reply',
+      replyPurpose: 'clarification',
+      recordedAtMs: 1200,
+    });
+  });
+
+  it('does not write terminal state for ack or progress replies', () => {
+    const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'roomote-slack-'));
+    tempDirs.push(tempDir);
+    const stateFilePath = path.join(tempDir, 'reply-state.json');
+    process.env[SLACK_REPLY_SATISFACTION_STATE_FILE_ENV] = stateFilePath;
+    fs.writeFileSync(
+      stateFilePath,
+      JSON.stringify({
+        currentTurnMessageTs: '111.222',
+        currentTurnStartedAtMs: 1000,
+      }),
+      'utf8',
+    );
+
+    recordSlackReplySatisfaction({
+      messageTs: 'bot-333.444',
+      tool: 'send_chat_reply',
+      replyPurpose: 'progress',
+      nowMs: 1200,
+    });
+
+    const state = JSON.parse(fs.readFileSync(stateFilePath, 'utf8'));
+    expect(state.terminalSatisfiedTurnMessageTs).toBeUndefined();
+    expect(state.terminalSatisfiedAtMs).toBeUndefined();
+  });
+
   it('does not clobber terminal closeout state when a later reaction overwrites the latest tool markers', () => {
     const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'roomote-slack-'));
     tempDirs.push(tempDir);
