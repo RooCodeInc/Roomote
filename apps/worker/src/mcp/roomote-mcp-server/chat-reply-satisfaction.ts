@@ -203,8 +203,11 @@ export function recordChatReplySatisfaction(input: {
           lastNonSlackWorkAfterSatisfactionAtMs: undefined,
         }
       : {}),
+    // A clarification reply is a terminal handoff like a closeout: the turn
+    // ends waiting on the user's answer, so ending after one is not silence.
     ...(input.tool === 'send_chat_reply' &&
-    input.replyPurpose === 'closeout' &&
+    (input.replyPurpose === 'closeout' ||
+      input.replyPurpose === 'clarification') &&
     satisfiesCurrentTurn
       ? {
           terminalSatisfiedTurnMessageTs: currentTurnMessageTs,
