@@ -741,9 +741,9 @@ roomoteMcpServer.registerTool(
         .enum(['create', 'update'])
         .describe('The environment action to perform'),
       definition: z
-        .union([z.string(), z.record(z.unknown())])
+        .string()
         .describe(
-          'Environment definition as a YAML/JSON string or object. Must satisfy EnvironmentConfig (e.g., include name and repositories).',
+          'Environment definition as a YAML or JSON string. Must satisfy EnvironmentConfig (e.g., include name and repositories).',
         ),
       environmentId: z
         .string()
