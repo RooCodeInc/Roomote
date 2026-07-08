@@ -117,6 +117,7 @@ export const SETUP_MODEL_PROVIDER_CATALOG = [
       'qwen3-6-plus': 'vercel/alibaba/qwen3.6-plus',
       'minimax-m3': 'vercel/minimax/minimax-m3',
       'mimo-v2-5': 'vercel/xiaomi/mimo-v2.5',
+      'grok-4-5': 'vercel/xai/grok-4.5',
     }),
   },
   {
@@ -228,6 +229,7 @@ export const SETUP_MODEL_PROVIDER_CATALOG = [
       'kimi-k2-7-code': 'opencode/kimi-k2.7-code',
       'qwen3-6-plus': 'opencode/qwen3.6-plus',
       'minimax-m3': 'opencode/minimax-m3',
+      'grok-4-5': 'opencode/grok-4.5',
     }),
   },
   {
@@ -306,6 +308,18 @@ export const SETUP_MODEL_PROVIDER_CATALOG = [
     suggestedTaskModels: mapRecommendedTaskModels({
       'gemini-3-1-pro': 'google/gemini-3.1-pro-preview',
       'gemini-3-5-flash': 'google/gemini-3.5-flash',
+    }),
+  },
+  {
+    // Provider id matches the models.dev/opencode `xai` provider so
+    // `xai/<model>` slugs resolve at runtime.
+    id: 'xai',
+    label: 'xAI',
+    envVarName: 'XAI_API_KEY',
+    defaultRoomoteModel: 'xai/grok-4.5',
+    authKind: 'api-key',
+    suggestedTaskModels: mapRecommendedTaskModels({
+      'grok-4-5': 'xai/grok-4.5',
     }),
   },
   {

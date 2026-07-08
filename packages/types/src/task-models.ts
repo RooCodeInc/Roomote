@@ -27,6 +27,7 @@ export const DIRECT_TASK_MODEL_PROVIDER_IDS = [
   'amazon-bedrock',
   'google-vertex',
   'google',
+  'xai',
 ] as const;
 
 const DIRECT_TASK_MODEL_PROVIDER_ID_SET = new Set<string>(
@@ -129,6 +130,7 @@ const TASK_MODEL_FAMILY_ALIASES = {
   Kimi: ['kimi'],
   DeepSeek: ['deepseek'],
   Qwen: ['qwen'],
+  Grok: ['grok'],
 } as const satisfies Record<string, readonly string[]>;
 
 export const taskModelSettingsSchema = z.object({
