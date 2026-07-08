@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
@@ -55,9 +55,9 @@ const TELEGRAM_WEBHOOK_STATUS_COPY: Record<
 
 import { buildSlackManifestPrefillUrl } from '@/lib/slack-app-manifest';
 import {
-  SLACK_APP_INSTALL_CALLBACK_PATH,
-  SLACK_SIGN_IN_CALLBACK_PATH,
-} from '@/lib/slack-callback-paths';
+  hasProviderSetupInstructions,
+  ProviderSetupInstructions,
+} from '@/app/(onboarding)/setup/ProviderSetupInstructions';
 import { getProviderSetupCopy } from '@/app/(onboarding)/setup/providerSetupCopy';
 import {
   ArrowLeft,
@@ -530,24 +530,9 @@ export function CommsProviderSection({
       ? buildSlackManifestPrefillUrl({ publicOrigin })
       : null;
 
-  const providerSetupNotes = useMemo(() => {
-    if (provider.id === 'slack') {
-      return [
-        `Register these as authorized redirect URLs (under OAuth & Permissions):`,
-        `${publicOrigin}${SLACK_SIGN_IN_CALLBACK_PATH}`,
-        `${publicOrigin}${SLACK_APP_INSTALL_CALLBACK_PATH}`,
-      ];
-    }
-    if (provider.id === 'microsoft') {
-      return [
-        'These values are for the Microsoft Entra app Roomote uses for Teams — both user sign-in and the bot. Under Authentication, add a Web redirect URI:',
-        `${publicOrigin}/api/auth/oauth2/callback/microsoft-entra-id`,
-        'Create a client secret, then enter the Application (client) ID, the secret value, and the Directory (tenant) ID below.',
-        `Create a bot for the same app in the Teams Developer Portal (Tools → Bot management) with the messaging endpoint ${publicOrigin}/api/webhooks/teams, then download the app package below and upload it in Teams. Dedicated TEAMS_BOT_* env vars override these values for the bot.`,
-      ];
-    }
-    return providerSetupCopy?.notes ?? [];
-  }, [providerSetupCopy?.notes, publicOrigin, provider.id]);
+  const showProviderSetupInstructions = hasProviderSetupInstructions(
+    provider.id,
+  );
 
   const hasPendingValueChanges = provider.fields.some((field) => {
     const nextValue = values[field.envVarName]?.trim() ?? '';
@@ -673,14 +658,11 @@ export function CommsProviderSection({
               </div>
             )}
 
-            {providerSetupNotes.length > 0 && (
-              <p className="font-semibold text-sm">
-                {providerSetupNotes.map((note) => (
-                  <span className="block" key={note}>
-                    {note}
-                  </span>
-                ))}
-              </p>
+            {showProviderSetupInstructions && (
+              <ProviderSetupInstructions
+                providerId={provider.id}
+                publicOrigin={publicOrigin}
+              />
             )}
 
             <div className="flex gap-2 items-start">

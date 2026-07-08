@@ -112,7 +112,9 @@ describe('chat message copy builders', () => {
       buildSnapshotResumeAcknowledgementText({
         surfaceName: 'Teams thread',
       }),
-    ).toBe('Reconnecting this Teams thread to the previous task snapshot...');
+    ).toBe(
+      "I found the previous task for this Teams thread and I'm reconnecting it here...",
+    );
 
     expect(
       buildSnapshotResumeAcknowledgementText({
@@ -120,7 +122,7 @@ describe('chat message copy builders', () => {
         taskUrl: 'https://openmote.dev/task/123',
       }),
     ).toBe(
-      'Reconnected this Teams thread to [the task](https://openmote.dev/task/123).',
+      'I found the previous task for this Teams thread and reconnected it here: [the task](https://openmote.dev/task/123).',
     );
   });
 

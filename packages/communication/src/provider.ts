@@ -36,7 +36,7 @@ export type CommunicationPostMessageInput = {
   threadId?: string;
   text?: string;
   blocks?: unknown[];
-  images?: Array<{ url: string; altText: string }>;
+  images?: Array<{ url: string; altText: string; contentType?: string }>;
   serviceUrl?: string;
   textFormat?: 'plain' | 'markdown' | 'xml';
   replyToMessageId?: string;

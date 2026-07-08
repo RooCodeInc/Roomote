@@ -1,14 +1,15 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { createTeamsCommunicationProviderFromRuntimeCredentials } from '@roomote/sdk/server';
 
 const {
-  buildThreadReplyImageBlocksMock,
+  buildThreadReplyImagesMock,
   envMock,
   getLatestInboundMessageIdMock,
   postMessageMock,
   resolveTelegramRuntimeCredentialsMock,
   withThreadReplyFooterLockMock,
 } = vi.hoisted(() => ({
-  buildThreadReplyImageBlocksMock: vi.fn(),
+  buildThreadReplyImagesMock: vi.fn(),
   envMock: { ROOMOTE_APP_URL: 'https://app.example.com' },
   getLatestInboundMessageIdMock: vi.fn(),
   postMessageMock: vi.fn(),
@@ -23,12 +24,20 @@ vi.mock('@roomote/db/server', () => ({
 }));
 
 vi.mock('@roomote/communication', () => ({
+  buildThreadReplyFooterText: vi.fn().mockReturnValue(null),
+  formatMarkdownLink: vi.fn(),
+  getThreadReplyFooterRecord: vi.fn(),
   TelegramCommunicationProvider: vi.fn().mockImplementation(function () {
     return { postMessage: postMessageMock };
   }),
   TeamsCommunicationProvider: vi.fn(),
   UnsupportedCommunicationOperationError: class UnsupportedCommunicationOperationError extends Error {},
   getLatestInboundMessageId: getLatestInboundMessageIdMock,
+  resolveThreadReplyFooterContext: vi.fn().mockResolvedValue({
+    linkedPr: null,
+    livePreviewUrl: null,
+  }),
+  setThreadReplyFooterRecord: vi.fn(),
 }));
 
 vi.mock('@roomote/communication/chat-messages', () => ({
@@ -51,7 +60,7 @@ vi.mock('@roomote/slack', () => ({
 }));
 
 vi.mock('../chat-reply-helpers.js', () => ({
-  buildThreadReplyImageBlocks: buildThreadReplyImageBlocksMock,
+  buildThreadReplyImages: buildThreadReplyImagesMock,
   errorResponseForThreadReplyImageError: vi.fn(),
   THREAD_REPLY_FOOTER_LOCK_TIMEOUT_MESSAGE: 'busy',
   withThreadReplyFooterLock: withThreadReplyFooterLockMock,
@@ -71,11 +80,75 @@ const telegramCloudJob = {
   },
 };
 
+const teamsCloudJob = {
+  id: 43,
+  taskId: 'task-2',
+  prRepo: null,
+  prNumber: null,
+  payload: {
+    communicationProvider: 'teams',
+    communicationChannelId: '19:conversation@thread.v2',
+    communicationServiceUrl: 'https://smba.trafficmanager.net/amer/',
+    communicationThreadId: 'activity-root',
+    communicationMessageId: 'activity-root',
+  },
+};
+
+describe('maybeSendCommunicationThreadReply (Teams)', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    buildThreadReplyImagesMock.mockResolvedValue([
+      {
+        url: 'https://app.example.com/api/artifacts/art-1/raw?sig=signed',
+        altText: 'screenshot.png',
+        contentType: 'image/png',
+      },
+    ]);
+    postMessageMock.mockResolvedValue({ messageId: 'activity-reply' });
+    vi.mocked(
+      createTeamsCommunicationProviderFromRuntimeCredentials,
+    ).mockResolvedValue({
+      postMessage: postMessageMock,
+      updateMessage: vi.fn(),
+    } as never);
+  });
+
+  it('sends image artifacts as Teams images instead of markdown links', async () => {
+    const response = await maybeSendCommunicationThreadReply({
+      cloudJob: teamsCloudJob,
+      parsedBody: { text: 'done', images: [{ artifactId: 'art-1' }] },
+    });
+
+    expect(response).not.toBeNull();
+    expect(buildThreadReplyImagesMock).toHaveBeenCalledWith({
+      artifactIds: ['art-1'],
+      cloudJob: { id: 43, taskId: 'task-2' },
+    });
+    expect(postMessageMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        channelId: '19:conversation@thread.v2',
+        serviceUrl: 'https://smba.trafficmanager.net/amer/',
+        text: 'done',
+        images: [
+          {
+            url: 'https://app.example.com/api/artifacts/art-1/raw?sig=signed',
+            altText: 'screenshot.png',
+            contentType: 'image/png',
+          },
+        ],
+      }),
+    );
+    expect(postMessageMock.mock.calls[0]?.[0]?.text).not.toContain(
+      'Attachments:',
+    );
+  });
+});
+
 describe('maybeSendCommunicationThreadReply (Telegram)', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     resolveTelegramRuntimeCredentialsMock.mockResolvedValue({ botToken: 't' });
-    buildThreadReplyImageBlocksMock.mockResolvedValue([]);
+    buildThreadReplyImagesMock.mockResolvedValue([]);
     getLatestInboundMessageIdMock.mockResolvedValue(null);
     postMessageMock.mockResolvedValue({ messageId: '999' });
     // Skip the footer path by returning null footer (resolveSlackThreadLinkedPr mocked)

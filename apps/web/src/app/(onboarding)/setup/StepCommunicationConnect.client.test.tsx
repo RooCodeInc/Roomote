@@ -173,6 +173,9 @@ describe('StepCommunicationConnect', () => {
       'href',
       'https://teams.microsoft.com/l/chat/0/0?users=28%3Abot-app-id',
     );
+    expect(
+      screen.getByRole('link', { name: /Download the app package/i }),
+    ).toHaveAttribute('href', '/api/teams/app-package');
 
     fireEvent.click(screen.getByRole('button', { name: 'Continue' }));
     expect(onContinue).toHaveBeenCalledTimes(1);

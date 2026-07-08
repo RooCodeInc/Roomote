@@ -16,10 +16,9 @@ import { createTeamsCommunicationProviderFromRuntimeCredentials } from '@roomote
 
 import { THREAD_REPLY_FOOTER_LOCK_TIMEOUT_MESSAGE } from './chat-reply-helpers';
 import {
-  buildCommunicationReplyText,
   buildCommunicationThreadReplyFooterTextBestEffort,
   deliverManagedThreadReplyFooter,
-  getCommunicationReplyImageBlocks,
+  getCommunicationReplyImages,
   type CommunicationReplyCloudJob,
   type ParsedThreadReplyBody,
 } from './communication-thread-reply-shared';
@@ -80,21 +79,16 @@ async function sendTeamsThreadReply(params: {
     );
   }
 
-  const { imageBlocks, errorResponse } = await getCommunicationReplyImageBlocks(
-    {
-      cloudJob: { id: params.cloudJob.id, taskId: params.cloudJob.taskId },
-      parsedBody: params.parsedBody,
-    },
-  );
+  const { images, errorResponse } = await getCommunicationReplyImages({
+    cloudJob: { id: params.cloudJob.id, taskId: params.cloudJob.taskId },
+    parsedBody: params.parsedBody,
+  });
   if (errorResponse) {
     return errorResponse;
   }
 
-  const text = buildCommunicationReplyText({
-    text: params.parsedBody.text,
-    images: imageBlocks,
-  });
-  if (!text) {
+  const text = params.parsedBody.text?.trim();
+  if (!text && images.length === 0) {
     return new Response(
       JSON.stringify({
         error: 'Teams thread replies require text or image attachments',
@@ -116,8 +110,15 @@ async function sendTeamsThreadReply(params: {
       serviceUrl,
       ...(threadId ? { threadId } : {}),
       replyToMessageId: threadId ?? messageId ?? undefined,
-      text: footerText ? `${text}\n\n${footerText}` : text,
+      ...(text || footerText
+        ? {
+            text: footerText
+              ? [text, footerText].filter(Boolean).join('\n\n')
+              : text!,
+          }
+        : {}),
       textFormat: 'markdown',
+      images,
     });
 
   let reply: Awaited<ReturnType<typeof postTeamsReply>>;
@@ -138,7 +139,7 @@ async function sendTeamsThreadReply(params: {
         logContext: LOG_CONTEXT,
         postReplyWithFooter: async () => ({
           ...(await postTeamsReply()),
-          textWithoutFooter: text,
+          textWithoutFooter: text ?? '',
         }),
         clearPreviousFooter: async (previousFooterRecord) => {
           await provider.updateMessage({
@@ -205,18 +206,16 @@ async function sendTelegramThreadReply(params: {
     );
   }
 
-  const { imageBlocks, errorResponse } = await getCommunicationReplyImageBlocks(
-    {
-      cloudJob: { id: params.cloudJob.id, taskId: params.cloudJob.taskId },
-      parsedBody: params.parsedBody,
-    },
-  );
+  const { images, errorResponse } = await getCommunicationReplyImages({
+    cloudJob: { id: params.cloudJob.id, taskId: params.cloudJob.taskId },
+    parsedBody: params.parsedBody,
+  });
   if (errorResponse) {
     return errorResponse;
   }
 
   const text = params.parsedBody.text?.trim();
-  if (!text && imageBlocks.length === 0) {
+  if (!text && images.length === 0) {
     return new Response(
       JSON.stringify({
         error: 'Telegram thread replies require text or image attachments',
@@ -251,10 +250,7 @@ async function sendTelegramThreadReply(params: {
     replyToMessageId: replyToMessageId ?? undefined,
     ...(text ? { text } : {}),
     textFormat: 'markdown',
-    images: imageBlocks.map((block) => ({
-      url: block.image_url,
-      altText: block.alt_text,
-    })),
+    images,
   });
 
   await postTelegramThreadReplyFooterBestEffort({

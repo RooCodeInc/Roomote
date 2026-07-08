@@ -9,8 +9,9 @@ import {
 import { Env } from '@roomote/env';
 
 import {
-  buildThreadReplyImageBlocks,
+  buildThreadReplyImages,
   errorResponseForThreadReplyImageError,
+  type ThreadReplyImage,
   withThreadReplyFooterLock,
 } from './chat-reply-helpers';
 
@@ -28,12 +29,6 @@ export type ParsedThreadReplyBody = {
 };
 
 type CommunicationThreadReplyProvider = 'telegram' | 'teams';
-
-type ThreadReplyImageBlock = {
-  type: 'image';
-  image_url: string;
-  alt_text: string;
-};
 
 type PostedFooterRecord<T extends { messageId: string }> = T & {
   textWithoutFooter: string;
@@ -55,26 +50,6 @@ function getThreadReplyWebPath(payload: unknown): string | null {
 
 function isSetupThreadReplyPayload(payload: unknown): boolean {
   return getThreadReplyWebPath(payload) === '/setup';
-}
-
-export function buildCommunicationReplyText(params: {
-  text?: string;
-  images: ThreadReplyImageBlock[];
-}): string {
-  const textParts = params.text?.trim() ? [params.text.trim()] : [];
-
-  if (params.images.length > 0) {
-    textParts.push(
-      [
-        'Attachments:',
-        ...params.images.map(
-          (image) => `- [${image.alt_text}](${image.image_url})`,
-        ),
-      ].join('\n'),
-    );
-  }
-
-  return textParts.join('\n\n');
 }
 
 function buildThreadReplyTaskUrl(
@@ -129,11 +104,11 @@ export async function buildCommunicationThreadReplyFooterTextBestEffort(params: 
   }
 }
 
-export async function getCommunicationReplyImageBlocks(params: {
+export async function getCommunicationReplyImages(params: {
   cloudJob: Pick<CommunicationReplyCloudJob, 'id' | 'taskId'>;
   parsedBody: ParsedThreadReplyBody;
 }): Promise<{
-  imageBlocks: ThreadReplyImageBlock[];
+  images: ThreadReplyImage[];
   errorResponse: Response | null;
 }> {
   const artifactIds = [
@@ -142,7 +117,7 @@ export async function getCommunicationReplyImageBlocks(params: {
 
   try {
     return {
-      imageBlocks: await buildThreadReplyImageBlocks({
+      images: await buildThreadReplyImages({
         artifactIds,
         cloudJob: params.cloudJob,
       }),
@@ -154,7 +129,7 @@ export async function getCommunicationReplyImageBlocks(params: {
 
     if (errorResponse) {
       return {
-        imageBlocks: [],
+        images: [],
         errorResponse,
       };
     }

@@ -91,37 +91,34 @@ export const SETUP_AUTH_PROVIDER_CATALOG = [
       {
         envVarName: 'ROOMOTE_AUTH_MICROSOFT_CLIENT_ID',
         acceptedEnvVarNames: ['ROOMOTE_AUTH_MICROSOFT_CLIENT_ID'],
-        label: 'Microsoft Client ID',
+        label: 'App Client ID',
       },
       {
         envVarName: 'ROOMOTE_AUTH_MICROSOFT_CLIENT_SECRET',
         acceptedEnvVarNames: ['ROOMOTE_AUTH_MICROSOFT_CLIENT_SECRET'],
-        label: 'Microsoft Client Secret',
+        label: 'Client Secret',
         secret: true,
       },
       {
         envVarName: 'ROOMOTE_AUTH_MICROSOFT_TENANT_ID',
         acceptedEnvVarNames: ['ROOMOTE_AUTH_MICROSOFT_TENANT_ID'],
-        label: 'Microsoft Tenant ID',
+        label: 'Tenant ID',
       },
       {
         envVarName: 'TEAMS_BOT_APP_ID',
         acceptedEnvVarNames: ['TEAMS_BOT_APP_ID'],
         label: 'Teams Bot App ID',
-        required: false,
       },
       {
         envVarName: 'TEAMS_BOT_APP_PASSWORD',
         acceptedEnvVarNames: ['TEAMS_BOT_APP_PASSWORD'],
         label: 'Teams Bot App Password',
-        required: false,
         secret: true,
       },
       {
         envVarName: 'TEAMS_BOT_TENANT_ID',
         acceptedEnvVarNames: ['TEAMS_BOT_TENANT_ID'],
         label: 'Teams Bot Tenant ID',
-        required: false,
       },
       {
         envVarName: 'TEAMS_BOT_TOKEN_ENDPOINT',

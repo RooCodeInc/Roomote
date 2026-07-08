@@ -141,6 +141,14 @@ export class TeamsCommunicationProvider implements CommunicationProviderAdapter 
       throw new Error('Teams postMessage requires a Bot Framework serviceUrl.');
     }
 
+    const imageAttachments =
+      input.images?.map((image) => ({
+        contentType: image.contentType ?? 'image/*',
+        contentUrl: image.url,
+        name: image.altText,
+      })) ?? [];
+    const attachments = [...(input.attachments ?? []), ...imageAttachments];
+
     const result = await this.client.sendActivity({
       serviceUrl,
       conversationId: input.channelId,
@@ -150,7 +158,7 @@ export class TeamsCommunicationProvider implements CommunicationProviderAdapter 
         ? { replyToActivityId: input.replyToMessageId ?? input.threadId }
         : {}),
       ...(input.channelData ? { channelData: input.channelData } : {}),
-      ...(input.attachments ? { attachments: input.attachments } : {}),
+      ...(attachments.length > 0 ? { attachments } : {}),
     });
 
     return {

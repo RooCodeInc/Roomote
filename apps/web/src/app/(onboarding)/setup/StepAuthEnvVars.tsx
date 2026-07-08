@@ -2,36 +2,32 @@
 
 import { useEffect, useMemo, useState } from 'react';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
-import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { toast } from 'sonner';
 import type { SetupAuthStatus } from '@roomote/types';
 
 import { authClient } from '@/lib/auth-client';
 import { getAuthProviderCallbackUrl } from '@/lib/auth-provider-callback';
-import { buildSlackManifestPrefillUrl } from '@/lib/slack-app-manifest';
-import {
-  SLACK_APP_INSTALL_CALLBACK_PATH,
-  SLACK_SIGN_IN_CALLBACK_PATH,
-} from '@/lib/slack-callback-paths';
 import { useTRPC } from '@/trpc/client';
 import {
   ArrowLeft,
   ArrowRight,
   BrandIcon,
   Button,
-  Check,
-  EnvVarsInfoNote,
-  ExternalLink,
-  Input,
-  Pencil,
-  Sparkles,
   Spinner,
 } from '@/components/system';
 
 import { StepTitle } from './StepTitle';
-import { getProviderSetupCopy } from './providerSetupCopy';
-const MASKED_VALUE = '••••••••••••••••••••••••••••';
+import {
+  getSetupEffectiveFieldValue,
+  getSetupSubmitValues,
+  getSetupVisibleFields,
+  ProviderSetupExperience,
+} from './ProviderSetupExperience';
+
+/** Microsoft app (client) IDs are GUIDs. */
+const MICROSOFT_APP_ID_PATTERN =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 function getOAuth2ProviderId(
   providerId: SetupAuthStatus['preselectedProvider'],
@@ -136,8 +132,14 @@ export function StepAuthEnvVars({
       ),
     [authSetup.providers, effectiveSelectedProviderId],
   );
+  const visibleFields = useMemo(
+    () => getSetupVisibleFields(selectedProvider ?? null),
+    [selectedProvider],
+  );
+  const isMicrosoftProvider = selectedProvider?.id === 'microsoft';
+
   const canContinueWithoutNewValues =
-    selectedProvider?.fields.every(
+    visibleFields.every(
       (field) =>
         field.required === false ||
         field.runtimeSatisfied ||
@@ -147,8 +149,12 @@ export function StepAuthEnvVars({
   const isActionDisabled =
     saveAuthConfig.isPending ||
     !selectedProvider ||
-    selectedProvider.fields.some((field) => {
-      const nextValue = values[field.envVarName]?.trim() ?? '';
+    visibleFields.some((field) => {
+      const nextValue = getSetupEffectiveFieldValue({
+        provider: selectedProvider,
+        field,
+        values,
+      }).trim();
 
       return (
         field.required !== false &&
@@ -165,40 +171,44 @@ export function StepAuthEnvVars({
 
     await saveAuthConfig.mutateAsync({
       provider: selectedProvider.id,
-      values,
+      values: getSetupSubmitValues({ provider: selectedProvider, values }),
       ...(bootstrapMode && setupToken ? { setupToken } : {}),
     });
   };
 
   const provider = selectedProvider?.label;
-  const providerSetupCopy = selectedProvider
-    ? getProviderSetupCopy(selectedProvider.id)
-    : null;
-  const providerSetupLabel = providerSetupCopy?.setupLabel ?? `${provider} app`;
   const publicOrigin =
     typeof window === 'undefined'
       ? 'https://your-deployment-url'
       : window.location.origin;
-  const slackManifestPrefillUrl =
-    selectedProvider?.id === 'slack'
-      ? buildSlackManifestPrefillUrl({ publicOrigin })
+  const teamsBotAppIdField = selectedProvider?.fields.find(
+    (field) => field.envVarName === 'TEAMS_BOT_APP_ID',
+  );
+  const enteredTeamsBotAppId =
+    isMicrosoftProvider && teamsBotAppIdField
+      ? getSetupEffectiveFieldValue({
+          provider: selectedProvider,
+          field: teamsBotAppIdField,
+          values,
+        }).trim()
+      : '';
+  const typedTeamsBotAppId = MICROSOFT_APP_ID_PATTERN.test(enteredTeamsBotAppId)
+    ? enteredTeamsBotAppId
+    : '';
+  const teamsBotAppIdStored = isMicrosoftProvider
+    ? selectedProvider.fields.some(
+        (field) =>
+          (field.envVarName === 'TEAMS_BOT_APP_ID' ||
+            field.envVarName === 'ROOMOTE_AUTH_MICROSOFT_CLIENT_ID') &&
+          (field.runtimeSatisfied || field.savedSatisfied),
+      )
+    : false;
+  const teamsAppPackageHref = typedTeamsBotAppId
+    ? `/api/setup/teams-app-package?botAppId=${encodeURIComponent(typedTeamsBotAppId)}`
+    : !bootstrapMode && teamsBotAppIdStored
+      ? '/api/teams/app-package'
       : null;
   const [showManualSlackValues, setShowManualSlackValues] = useState(false);
-  const providerSetupNotes = useMemo(() => {
-    if (!selectedProvider) {
-      return providerSetupCopy?.notes ?? [];
-    }
-
-    if (selectedProvider.id !== 'slack') {
-      return providerSetupCopy?.notes ?? [];
-    }
-
-    return [
-      `Register these as authorized redirect URLs (under OAuth & Permissions):`,
-      `${publicOrigin}${SLACK_SIGN_IN_CALLBACK_PATH}`,
-      `${publicOrigin}${SLACK_APP_INSTALL_CALLBACK_PATH}`,
-    ];
-  }, [providerSetupCopy?.notes, publicOrigin, selectedProvider]);
 
   useEffect(() => {
     setShowManualSlackValues(false);
@@ -209,7 +219,11 @@ export function StepAuthEnvVars({
     authSetup.runtimeConfiguredProvider === selectedProvider?.id &&
     selectedProvider.runtimeSatisfied;
   const selectedProviderHasEditableFields =
-    selectedProvider?.fields.some((field) => !field.runtimeSatisfied) ?? false;
+    visibleFields.some((field) => !field.runtimeSatisfied) ?? false;
+  const providerOwnsActions =
+    selectedProvider?.id === 'slack' &&
+    !showManualSlackValues &&
+    !selectedProvider.runtimeSatisfied;
 
   if (bootstrapMode && selectedProviderRuntimeConfigured) {
     return (
@@ -241,233 +255,69 @@ export function StepAuthEnvVars({
     );
   }
 
-  if (
-    selectedProvider?.id === 'slack' &&
-    !showManualSlackValues &&
-    !selectedProvider.runtimeSatisfied
-  ) {
-    return (
-      <div className="relative w-full max-w-2xl space-y-4 py-2 md:py-0">
-        <StepTitle text="Create Slack app" />
+  return (
+    <div className="relative w-full max-w-2xl space-y-5 py-2 md:py-0">
+      {selectedProvider ? (
+        <ProviderSetupExperience
+          provider={selectedProvider}
+          values={values}
+          publicOrigin={publicOrigin}
+          disabled={saveAuthConfig.isPending}
+          editingSavedValues={editingSavedValues}
+          clearedSavedValues={clearedSavedValues}
+          teamsAppPackageHref={teamsAppPackageHref}
+          showManualSlackValues={showManualSlackValues}
+          onShowManualSlackValues={() => setShowManualSlackValues(true)}
+          onBack={onBack}
+          onValueChange={(envVarName, value) =>
+            setValues((current) => ({ ...current, [envVarName]: value }))
+          }
+          onEditingSavedValueChange={(envVarName, editing) =>
+            setEditingSavedValues((current) => ({
+              ...current,
+              [envVarName]: editing,
+            }))
+          }
+          onClearedSavedValueChange={(envVarName, cleared) =>
+            setClearedSavedValues((current) => ({
+              ...current,
+              [envVarName]: cleared,
+            }))
+          }
+        />
+      ) : null}
 
-        <div className="space-y-3 max-w-xl">
-          <p>
-            Because Roomote is self-hosted, we can&apos;t offer you an
-            out-of-the-box Slack app – you need to create your own.
-          </p>
-          <p>
-            Roomote can create it for you automatically, and then you can enter
-            the config values manually.
-          </p>
-        </div>
-
+      {providerOwnsActions ? null : (
         <div className="flex flex-col gap-2 sm:flex-row sm:items-center mt-8">
           {onBack ? (
-            <Button type="button" variant="outline" onClick={onBack}>
+            <Button
+              type="button"
+              variant="outline"
+              onClick={onBack}
+              disabled={saveAuthConfig.isPending}
+            >
               <ArrowLeft />
               Back
             </Button>
           ) : null}
-          <Button asChild>
-            <a
-              href={slackManifestPrefillUrl ?? 'https://api.slack.com/apps'}
-              target="_blank"
-              rel="noopener noreferrer"
-              onClick={() => setShowManualSlackValues(true)}
-            >
-              <Sparkles />
-              Create Slack app
-            </a>
-          </Button>
           <Button
             type="button"
-            variant="outline"
-            onClick={() => setShowManualSlackValues(true)}
+            onClick={() => void handleContinue()}
+            disabled={isActionDisabled}
           >
-            <Pencil />
-            Enter values manually
+            {saveAuthConfig.isPending
+              ? 'Saving...'
+              : !selectedProviderHasEditableFields
+                ? 'Continue'
+                : bootstrapMode
+                  ? 'Save and sign in'
+                  : canContinueWithoutNewValues
+                    ? 'Continue'
+                    : 'Save and continue'}
+            {saveAuthConfig.isPending ? <Spinner /> : <ArrowRight />}
           </Button>
-        </div>
-      </div>
-    );
-  }
-
-  return (
-    <div className="relative w-full max-w-2xl space-y-5 py-2 md:py-0">
-      <StepTitle text={`Configure ${providerSetupLabel}`} />
-
-      <div className="flex gap-2 items-start mt-6">
-        <span className="rounded-full bg-foreground text-background font-bold size-8 inline-flex items-center justify-center shrink-0 mt-1">
-          1
-        </span>
-        <div>
-          <p className="font-semibold">
-            {providerSetupCopy ? (
-              <>
-                Create a new {providerSetupCopy.setupLabel}.
-                <Button variant="outline" size="sm" className="ml-2">
-                  <a
-                    href={providerSetupCopy.creationHref}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                  >
-                    Go <ExternalLink className="inline size-4 -mt-1 ml-1" />
-                  </a>
-                </Button>
-              </>
-            ) : (
-              <>create a new {providerSetupLabel}.</>
-            )}
-          </p>
-          <p className="text-sm text-muted-foreground">
-            If you need our logo,{' '}
-            <Link
-              className="underline underline-offset-4 hover:text-foreground"
-              href="/api/setup/roomote-logo"
-            >
-              download here
-            </Link>
-            .
-          </p>
-        </div>
-      </div>
-
-      {providerSetupNotes.length > 0 && (
-        <div className="flex gap-2 items-start">
-          <span className="rounded-full bg-foreground text-background font-bold size-8 inline-flex items-center justify-center shrink-0">
-            2
-          </span>
-          <p className="font-semibold">
-            {providerSetupNotes.map((note) => (
-              <span className="block" key={note}>
-                {note}
-              </span>
-            ))}
-          </p>
         </div>
       )}
-
-      <div className="flex gap-2 items-start">
-        <span className="rounded-full bg-foreground text-background font-bold size-8 inline-flex items-center justify-center shrink-0">
-          {providerSetupNotes.length > 0 ? 3 : 2}
-        </span>
-        <div>
-          <p className="font-semibold">Enter the values below:</p>
-          <div className="space-y-2">
-            {selectedProvider?.fields.map((field) => {
-              const value = values[field.envVarName] ?? '';
-              const shouldShowSavedValueMask =
-                !field.runtimeSatisfied &&
-                field.savedSatisfied &&
-                value.length === 0 &&
-                !clearedSavedValues[field.envVarName] &&
-                !editingSavedValues[field.envVarName];
-
-              return (
-                <div
-                  key={field.envVarName}
-                  className="grid gap-2 md:grid-cols-[180px_minmax(0,1fr)] md:items-center max-w-xl"
-                >
-                  <div className="space-y-1">
-                    <div className="text-sm font-medium">
-                      {field.label}
-                      {field.required === false ? ' (optional)' : ''}
-                    </div>
-                  </div>
-                  <div>
-                    <div className="flex items-center gap-2">
-                      <Input
-                        secret={field.secret && !field.runtimeSatisfied}
-                        className="font-mono"
-                        value={
-                          field.runtimeSatisfied
-                            ? MASKED_VALUE
-                            : shouldShowSavedValueMask
-                              ? MASKED_VALUE
-                              : value
-                        }
-                        onFocus={() => {
-                          if (shouldShowSavedValueMask) {
-                            setEditingSavedValues((current) => ({
-                              ...current,
-                              [field.envVarName]: true,
-                            }));
-                          }
-                        }}
-                        onBlur={() => {
-                          if (field.savedSatisfied && value.length === 0) {
-                            setEditingSavedValues((current) => ({
-                              ...current,
-                              [field.envVarName]: false,
-                            }));
-                          }
-                        }}
-                        onChange={(event) => {
-                          const nextValue = event.target.value;
-                          setValues((current) => ({
-                            ...current,
-                            [field.envVarName]: nextValue,
-                          }));
-                          if (field.savedSatisfied) {
-                            setClearedSavedValues((current) => ({
-                              ...current,
-                              [field.envVarName]: nextValue.length === 0,
-                            }));
-                          }
-                        }}
-                        placeholder={field.runtimeSatisfied ? '' : field.label}
-                        disabled={
-                          saveAuthConfig.isPending || field.runtimeSatisfied
-                        }
-                        data-1p-ignore
-                      />
-                      {(field.runtimeSatisfied || field.savedSatisfied) && (
-                        <Check />
-                      )}
-                    </div>
-                  </div>
-                </div>
-              );
-            })}
-
-            <div className="space-y-2 text-sm text-muted-foreground">
-              <EnvVarsInfoNote
-                runtimeConfigured={selectedProvider?.runtimeSatisfied}
-              />
-            </div>
-          </div>
-        </div>
-      </div>
-
-      <div className="flex flex-col gap-2 sm:flex-row sm:items-center mt-8">
-        {onBack ? (
-          <Button
-            type="button"
-            variant="outline"
-            onClick={onBack}
-            disabled={saveAuthConfig.isPending}
-          >
-            <ArrowLeft />
-            Back
-          </Button>
-        ) : null}
-        <Button
-          type="button"
-          onClick={() => void handleContinue()}
-          disabled={isActionDisabled}
-        >
-          {saveAuthConfig.isPending
-            ? 'Saving...'
-            : !selectedProviderHasEditableFields
-              ? 'Continue'
-              : bootstrapMode
-                ? 'Save and sign in'
-                : canContinueWithoutNewValues
-                  ? 'Continue'
-                  : 'Save and continue'}
-          {saveAuthConfig.isPending ? <Spinner /> : <ArrowRight />}
-        </Button>
-      </div>
     </div>
   );
 }

@@ -107,6 +107,58 @@ describe('TeamsCommunicationProvider', () => {
     ).rejects.toThrow('Teams postMessage requires a Bot Framework serviceUrl');
   });
 
+  it('sends images as Bot Framework attachments', async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(
+        jsonResponse({
+          access_token: 'bot-token',
+          expires_in: 3600,
+          token_type: 'Bearer',
+        }),
+      )
+      .mockResolvedValueOnce(jsonResponse({ id: 'activity-response' }));
+    const provider = new TeamsCommunicationProvider({
+      appId: 'bot-app-id',
+      appPassword: 'bot-secret',
+      tokenEndpoint: 'https://login.example.test/token',
+      fetch: fetchMock as typeof fetch,
+    });
+
+    await provider.postMessage({
+      channelId: '19:conversation@thread.v2',
+      text: 'Here is the screenshot',
+      images: [
+        {
+          url: 'https://app.example.com/api/artifacts/art-1/raw?sig=signed',
+          altText: 'screenshot.png',
+          contentType: 'image/png',
+        },
+      ],
+      serviceUrl: 'https://smba.trafficmanager.net/amer/',
+    });
+
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      2,
+      'https://smba.trafficmanager.net/amer/v3/conversations/19%3Aconversation%40thread.v2/activities',
+      expect.objectContaining({
+        method: 'POST',
+        body: JSON.stringify({
+          type: 'message',
+          text: 'Here is the screenshot',
+          attachments: [
+            {
+              contentType: 'image/png',
+              contentUrl:
+                'https://app.example.com/api/artifacts/art-1/raw?sig=signed',
+              name: 'screenshot.png',
+            },
+          ],
+        }),
+      }),
+    );
+  });
+
   it('sends direct Teams messages through a one-on-one Bot Framework conversation', async () => {
     const fetchMock = vi
       .fn()
