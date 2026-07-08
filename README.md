@@ -49,10 +49,11 @@ _We're interested in PRs for tested support for other PaaS providers._
 ### Railway
 
 Railway uses managed Postgres/Redis and hosted compute such as Modal, E2B, or
-Daytona. Docker compute is not available there; see
+Daytona. Docker compute is not available there. The template below tracks the
+stable `main` channel; a develop-channel template also exists — see
 [deploy/railway/README.md](deploy/railway/README.md).
 
-[![Deploy with the template](https://railway.com/button.svg)](https://railway.com/deploy/bP3Lsu)
+[![Deploy with the template](https://railway.com/button.svg)](https://railway.com/deploy/Rj2cFo)
 
 ### Coolify
 

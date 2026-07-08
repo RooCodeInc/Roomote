@@ -39,15 +39,19 @@ Active infrastructure:
 9. `pnpm run doctor` local runtime diagnostics
 10. Validation GitHub Actions CI
 11. Railway PaaS deployment path under `deploy/railway/` — a maintained
-    template spec (`template.yaml`) plus operator guide for running the
+    template spec (`template.yaml`, published as two marketplace templates
+    that differ only in image channel: stable `:main` and latest-build
+    `:develop`) plus operator guide for running the
     published images on Railway with managed Postgres/Redis, hosted compute
     (Modal/E2B/Daytona; the Docker provider cannot run without a Docker
     socket), separate web/API origins instead of Caddy path routing, and
     `ROOMOTE_AUTO_GENERATE_KEYS=true` instead of installer-generated
     keypairs. `ROOMOTE_APP_URL` on the api service is the single
     canonical-origin knob (`ROOMOTE_PUBLIC_URL` stays unset; the app falls
-    back), so attaching a custom domain is a one-variable edit — see
-    "Attaching a custom domain" in `deploy/railway/README.md`
+    back) and the template's one optional deploy-time prompt, so a custom
+    domain is either entered on the deploy screen before first boot or
+    attached later as a one-variable edit — see "Attaching a custom
+    domain" in `deploy/railway/README.md`
 12. Coolify deployment path under `deploy/coolify/` — a maintained,
     paste-ready Docker Compose resource (`docker-compose.yaml`) plus operator
     guide for running the published images on a Coolify-managed server.
