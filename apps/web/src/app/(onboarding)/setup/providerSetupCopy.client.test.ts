@@ -22,11 +22,6 @@ describe('getProviderSetupCopy', () => {
       {
         creationHref: 'https://t.me/BotFather',
         setupLabel: 'Telegram bot',
-        notes: [
-          'In the BotFather chat, send /newbot, pick a display name, then a username ending in "bot".',
-          'Copy the bot token BotFather replies with into the field below.',
-          'Roomote registers the webhook automatically when you save.',
-        ],
       },
     ],
   ] as const)('returns setup copy for %s', (providerId, expected) => {

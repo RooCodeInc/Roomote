@@ -184,6 +184,7 @@ vi.mock('sonner', () => ({ toast: { success: vi.fn(), error: vi.fn() } }));
 
 vi.mock('@/components/system', () => ({
   ArrowLeft: () => <svg aria-hidden="true" />,
+  BasicTooltip: ({ children }: { children: ReactNode }) => children,
   BrandIcon: ({ icon }: { icon: string }) => (
     <svg aria-label={icon} role="img" />
   ),
@@ -199,6 +200,13 @@ vi.mock('@/components/system', () => ({
   CardHeader: ({ children }: { children: ReactNode }) => <div>{children}</div>,
   CardTitle: ({ children }: { children: ReactNode }) => <h3>{children}</h3>,
   Check: () => <svg aria-hidden="true" />,
+  CopyIconButton: ({
+    'aria-label': ariaLabel,
+  }: {
+    'aria-label'?: string;
+    content: string;
+    tooltip?: ReactNode;
+  }) => <button type="button" aria-label={ariaLabel ?? 'Copy'} />,
   Dialog: ({ children, open }: { children: ReactNode; open: boolean }) =>
     open ? <div>{children}</div> : null,
   DialogContent: ({ children }: { children: ReactNode }) => (
@@ -318,6 +326,64 @@ function buildMicrosoftProvider(
         envVarName: 'ROOMOTE_AUTH_MICROSOFT_CLIENT_ID',
         acceptedEnvVarNames: ['ROOMOTE_AUTH_MICROSOFT_CLIENT_ID'],
         label: 'Microsoft Client ID',
+        runtimeSatisfied: false,
+        savedSatisfied: false,
+        satisfiedByEnvVarName: null,
+      },
+      {
+        envVarName: 'ROOMOTE_AUTH_MICROSOFT_CLIENT_SECRET',
+        acceptedEnvVarNames: ['ROOMOTE_AUTH_MICROSOFT_CLIENT_SECRET'],
+        label: 'Microsoft Client Secret',
+        secret: true,
+        runtimeSatisfied: false,
+        savedSatisfied: false,
+        satisfiedByEnvVarName: null,
+      },
+      {
+        envVarName: 'ROOMOTE_AUTH_MICROSOFT_TENANT_ID',
+        acceptedEnvVarNames: ['ROOMOTE_AUTH_MICROSOFT_TENANT_ID'],
+        label: 'Microsoft Tenant ID',
+        runtimeSatisfied: false,
+        savedSatisfied: false,
+        satisfiedByEnvVarName: null,
+      },
+      {
+        envVarName: 'TEAMS_BOT_APP_ID',
+        acceptedEnvVarNames: ['TEAMS_BOT_APP_ID'],
+        label: 'Teams Bot App ID',
+        runtimeSatisfied: false,
+        savedSatisfied: false,
+        satisfiedByEnvVarName: null,
+      },
+      {
+        envVarName: 'TEAMS_BOT_APP_PASSWORD',
+        acceptedEnvVarNames: ['TEAMS_BOT_APP_PASSWORD'],
+        label: 'Teams Bot App Password',
+        secret: true,
+        runtimeSatisfied: false,
+        savedSatisfied: false,
+        satisfiedByEnvVarName: null,
+      },
+      {
+        envVarName: 'TEAMS_BOT_TENANT_ID',
+        acceptedEnvVarNames: ['TEAMS_BOT_TENANT_ID'],
+        label: 'Teams Bot Tenant ID',
+        runtimeSatisfied: false,
+        savedSatisfied: false,
+        satisfiedByEnvVarName: null,
+      },
+      {
+        envVarName: 'TEAMS_BOT_TOKEN_ENDPOINT',
+        acceptedEnvVarNames: ['TEAMS_BOT_TOKEN_ENDPOINT'],
+        label: 'Teams Bot Token Endpoint',
+        runtimeSatisfied: false,
+        savedSatisfied: false,
+        satisfiedByEnvVarName: null,
+      },
+      {
+        envVarName: 'TEAMS_BOT_OAUTH_SCOPE',
+        acceptedEnvVarNames: ['TEAMS_BOT_OAUTH_SCOPE'],
+        label: 'Teams Bot OAuth Scope',
         runtimeSatisfied: false,
         savedSatisfied: false,
         satisfiedByEnvVarName: null,
@@ -522,6 +588,8 @@ describe('CommsProviderSection', () => {
       expect(
         screen.getByText(/Team members can link Microsoft Teams accounts/),
       ).toBeInTheDocument();
+      expect(screen.getByText('Teams Bot App ID')).toBeInTheDocument();
+      expect(screen.queryByText('Teams Bot App ID (optional)')).toBeNull();
       expect(
         screen.getByRole('button', { name: /Open in Teams/ }),
       ).toBeInTheDocument();

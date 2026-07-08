@@ -41,6 +41,13 @@ describe('deliverManagedThreadReplyFooter', () => {
     getThreadReplyFooterRecordMock.mockResolvedValue({
       messageId: 'old-message',
       textWithoutFooter: 'Previous reply',
+      images: [
+        {
+          url: 'https://app.example.com/api/artifacts/art-1/raw?sig=signed',
+          altText: 'screenshot.png',
+          contentType: 'image/png',
+        },
+      ],
     });
     const clearPreviousFooter = vi.fn().mockResolvedValue(undefined);
 
@@ -55,6 +62,13 @@ describe('deliverManagedThreadReplyFooter', () => {
       postReplyWithFooter: async () => ({
         messageId: 'new-message',
         textWithoutFooter: 'Latest reply',
+        images: [
+          {
+            url: 'https://app.example.com/api/artifacts/art-2/raw?sig=signed',
+            altText: 'next.png',
+            contentType: 'image/png',
+          },
+        ],
       }),
       clearPreviousFooter,
     });
@@ -71,6 +85,13 @@ describe('deliverManagedThreadReplyFooter', () => {
     expect(clearPreviousFooter).toHaveBeenCalledWith({
       messageId: 'old-message',
       textWithoutFooter: 'Previous reply',
+      images: [
+        {
+          url: 'https://app.example.com/api/artifacts/art-1/raw?sig=signed',
+          altText: 'screenshot.png',
+          contentType: 'image/png',
+        },
+      ],
     });
     expect(setThreadReplyFooterRecordMock).toHaveBeenCalledWith(
       'teams',
@@ -79,11 +100,25 @@ describe('deliverManagedThreadReplyFooter', () => {
       {
         messageId: 'new-message',
         textWithoutFooter: 'Latest reply',
+        images: [
+          {
+            url: 'https://app.example.com/api/artifacts/art-2/raw?sig=signed',
+            altText: 'next.png',
+            contentType: 'image/png',
+          },
+        ],
       },
     );
     expect(reply).toEqual({
       messageId: 'new-message',
       textWithoutFooter: 'Latest reply',
+      images: [
+        {
+          url: 'https://app.example.com/api/artifacts/art-2/raw?sig=signed',
+          altText: 'next.png',
+          contentType: 'image/png',
+        },
+      ],
     });
   });
 

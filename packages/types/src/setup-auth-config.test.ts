@@ -1,5 +1,14 @@
 import { buildSetupAuthStatus } from './setup-auth-config';
 
+const REQUIRED_MICROSOFT_TEAMS_ENV_VARS = [
+  'ROOMOTE_AUTH_MICROSOFT_CLIENT_ID',
+  'ROOMOTE_AUTH_MICROSOFT_CLIENT_SECRET',
+  'ROOMOTE_AUTH_MICROSOFT_TENANT_ID',
+  'TEAMS_BOT_APP_ID',
+  'TEAMS_BOT_APP_PASSWORD',
+  'TEAMS_BOT_TENANT_ID',
+];
+
 describe('buildSetupAuthStatus', () => {
   it('treats runtime env as the highest-precedence satisfied setup source', () => {
     const status = buildSetupAuthStatus({
@@ -31,13 +40,33 @@ describe('buildSetupAuthStatus', () => {
     });
   });
 
-  it('preselects the saved provider when only persisted setup state exists', () => {
+  it('does not satisfy Teams setup with only Microsoft sign-in values', () => {
     const status = buildSetupAuthStatus({
       persistedEnvVarNames: [
         'ROOMOTE_AUTH_MICROSOFT_CLIENT_ID',
         'ROOMOTE_AUTH_MICROSOFT_CLIENT_SECRET',
         'ROOMOTE_AUTH_MICROSOFT_TENANT_ID',
       ],
+    });
+
+    expect(status.setupSatisfiedByRuntimeEnv).toBe(false);
+    expect(status.preselectedProvider).toBe('slack');
+    expect(status.selectedProvider).toBeNull();
+    expect(status.runtimeConfiguredProvider).toBeNull();
+    expect(status.runtimeConfiguredProviders).toEqual([]);
+    expect(status.lockReason).toBeNull();
+    expect(
+      status.providers.find((provider) => provider.id === 'microsoft'),
+    ).toMatchObject({
+      runtimeSatisfied: false,
+      savedSatisfied: false,
+      setupSatisfied: false,
+    });
+  });
+
+  it('preselects the saved Teams provider when required sign-in and bot values exist', () => {
+    const status = buildSetupAuthStatus({
+      persistedEnvVarNames: REQUIRED_MICROSOFT_TEAMS_ENV_VARS,
     });
 
     expect(status.setupSatisfiedByRuntimeEnv).toBe(false);
@@ -135,6 +164,11 @@ describe('buildSetupAuthStatus', () => {
         ROOMOTE_AUTH_MICROSOFT_CLIENT_ID: 'microsoft-client-id',
         ROOMOTE_AUTH_MICROSOFT_CLIENT_SECRET: 'microsoft-client-secret',
         ROOMOTE_AUTH_MICROSOFT_TENANT_ID: 'microsoft-tenant-id',
+        TEAMS_BOT_APP_ID: 'teams-bot-app-id',
+        TEAMS_BOT_APP_PASSWORD: 'teams-bot-app-password',
+        TEAMS_BOT_TENANT_ID: 'teams-bot-tenant-id',
+        TEAMS_BOT_TOKEN_ENDPOINT: 'https://login.example.test/token',
+        TEAMS_BOT_OAUTH_SCOPE: 'https://api.botframework.com/.default',
       },
     });
 
