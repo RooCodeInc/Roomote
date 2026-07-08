@@ -32,6 +32,7 @@ type CommunicationThreadReplyProvider = 'telegram' | 'teams';
 
 type PostedFooterRecord<T extends { messageId: string }> = T & {
   textWithoutFooter: string;
+  images?: ThreadReplyFooterRecord['images'];
 };
 
 function getThreadReplyWebPath(payload: unknown): string | null {
@@ -196,6 +197,9 @@ export async function deliverManagedThreadReplyFooter<
           {
             messageId: posted.messageId,
             textWithoutFooter: posted.textWithoutFooter,
+            ...(posted.images && posted.images.length > 0
+              ? { images: posted.images }
+              : {}),
           },
         );
       } catch (error) {

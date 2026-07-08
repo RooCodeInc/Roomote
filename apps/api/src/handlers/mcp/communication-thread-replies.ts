@@ -140,6 +140,7 @@ async function sendTeamsThreadReply(params: {
         postReplyWithFooter: async () => ({
           ...(await postTeamsReply()),
           textWithoutFooter: text ?? '',
+          ...(images.length > 0 ? { images } : {}),
         }),
         clearPreviousFooter: async (previousFooterRecord) => {
           await provider.updateMessage({
@@ -148,6 +149,10 @@ async function sendTeamsThreadReply(params: {
             messageId: previousFooterRecord.messageId,
             text: previousFooterRecord.textWithoutFooter,
             textFormat: 'markdown',
+            ...(previousFooterRecord.images &&
+            previousFooterRecord.images.length > 0
+              ? { images: previousFooterRecord.images }
+              : {}),
           });
         },
       });

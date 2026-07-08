@@ -66,6 +66,11 @@ vi.mock('../chat-reply-helpers.js', () => ({
   withThreadReplyFooterLock: withThreadReplyFooterLockMock,
 }));
 
+import {
+  buildThreadReplyFooterText,
+  getThreadReplyFooterRecord,
+  setThreadReplyFooterRecord,
+} from '@roomote/communication';
 import { maybeSendCommunicationThreadReply } from '../communication-thread-replies';
 
 const telegramCloudJob = {
@@ -105,6 +110,12 @@ describe('maybeSendCommunicationThreadReply (Teams)', () => {
       },
     ]);
     postMessageMock.mockResolvedValue({ messageId: 'activity-reply' });
+    // Tests force no managed-footer path unless they override this.
+    vi.mocked(buildThreadReplyFooterText).mockReturnValue(null as never);
+    vi.mocked(getThreadReplyFooterRecord).mockResolvedValue(null);
+    withThreadReplyFooterLockMock.mockImplementation(
+      async ({ fn }: { fn: () => Promise<unknown> }) => fn(),
+    );
     vi.mocked(
       createTeamsCommunicationProviderFromRuntimeCredentials,
     ).mockResolvedValue({
@@ -140,6 +151,71 @@ describe('maybeSendCommunicationThreadReply (Teams)', () => {
     );
     expect(postMessageMock.mock.calls[0]?.[0]?.text).not.toContain(
       'Attachments:',
+    );
+  });
+
+  it('re-sends previous reply images when clearing a managed footer', async () => {
+    const updateMessageMock = vi.fn().mockResolvedValue(undefined);
+    const footerImages = [
+      {
+        url: 'https://app.example.com/api/artifacts/art-1/raw?sig=signed',
+        altText: 'screenshot.png',
+        contentType: 'image/png',
+      },
+    ];
+
+    withThreadReplyFooterLockMock.mockImplementation(
+      async ({ fn }: { fn: () => Promise<unknown> }) => fn(),
+    );
+    vi.mocked(buildThreadReplyFooterText).mockReturnValue(
+      '[View task](https://app.example.com/task/task-2)',
+    );
+    vi.mocked(getThreadReplyFooterRecord).mockResolvedValue({
+      messageId: 'previous-reply',
+      textWithoutFooter: 'earlier reply with image',
+      images: footerImages,
+    });
+    vi.mocked(setThreadReplyFooterRecord).mockResolvedValue(undefined);
+    postMessageMock.mockResolvedValue({ messageId: 'new-reply' });
+    vi.mocked(
+      createTeamsCommunicationProviderFromRuntimeCredentials,
+    ).mockResolvedValue({
+      postMessage: postMessageMock,
+      updateMessage: updateMessageMock,
+    } as never);
+
+    const response = await maybeSendCommunicationThreadReply({
+      cloudJob: teamsCloudJob,
+      parsedBody: {
+        text: 'later update',
+        images: [{ artifactId: 'art-1' }],
+      },
+    });
+
+    expect(response).not.toBeNull();
+    expect(postMessageMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        text: expect.stringContaining('later update'),
+        images: footerImages,
+      }),
+    );
+    expect(updateMessageMock).toHaveBeenCalledWith({
+      channelId: '19:conversation@thread.v2',
+      serviceUrl: 'https://smba.trafficmanager.net/amer/',
+      messageId: 'previous-reply',
+      text: 'earlier reply with image',
+      textFormat: 'markdown',
+      images: footerImages,
+    });
+    expect(setThreadReplyFooterRecord).toHaveBeenCalledWith(
+      'teams',
+      '19:conversation@thread.v2',
+      'activity-root',
+      {
+        messageId: 'new-reply',
+        textWithoutFooter: 'later update',
+        images: footerImages,
+      },
     );
   });
 });

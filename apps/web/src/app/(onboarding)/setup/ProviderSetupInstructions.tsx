@@ -45,7 +45,7 @@ function InstructionUrl({ heading, url }: { heading: string; url: string }) {
       </p>
       <div className="flex items-center gap-2 rounded-md border border-black px-2 py-1.5 overflow-hidden justify-end">
         <BasicTooltip content={url}>
-          <span className="font-mono text-xs text-foreground text- truncate">
+          <span className="font-mono text-xs text-foreground truncate">
             {url}
           </span>
         </BasicTooltip>

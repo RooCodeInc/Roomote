@@ -273,6 +273,61 @@ describe('TeamsCommunicationProvider', () => {
     );
   });
 
+  it('re-attaches images when updateMessage is used to clear a footer', async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(
+        jsonResponse({
+          access_token: 'bot-token',
+          expires_in: 3600,
+          token_type: 'Bearer',
+        }),
+      )
+      .mockResolvedValueOnce(jsonResponse({ id: 'activity-updated' }));
+    const provider = new TeamsCommunicationProvider({
+      appId: 'bot-app-id',
+      appPassword: 'bot-secret',
+      tokenEndpoint: 'https://login.example.test/token',
+      fetch: fetchMock as typeof fetch,
+    });
+
+    await provider.updateMessage({
+      channelId: '19:conversation@thread.v2',
+      messageId: 'activity-root',
+      serviceUrl: 'https://smba.trafficmanager.net/amer/',
+      text: 'done with screenshot',
+      textFormat: 'markdown',
+      images: [
+        {
+          url: 'https://app.example.com/api/artifacts/art-1/raw?sig=signed',
+          altText: 'screenshot.png',
+          contentType: 'image/png',
+        },
+      ],
+    });
+
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      2,
+      'https://smba.trafficmanager.net/amer/v3/conversations/19%3Aconversation%40thread.v2/activities/activity-root',
+      expect.objectContaining({
+        method: 'PUT',
+        body: JSON.stringify({
+          type: 'message',
+          text: 'done with screenshot',
+          textFormat: 'markdown',
+          attachments: [
+            {
+              contentType: 'image/png',
+              contentUrl:
+                'https://app.example.com/api/artifacts/art-1/raw?sig=signed',
+              name: 'screenshot.png',
+            },
+          ],
+        }),
+      }),
+    );
+  });
+
   it('downloads Teams image attachments with Bot Framework auth and converts them to prompt images', async () => {
     const imageBytes = Buffer.from(
       'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/p9sAAAAASUVORK5CYII=',

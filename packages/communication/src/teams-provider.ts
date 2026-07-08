@@ -198,6 +198,7 @@ export class TeamsCommunicationProvider implements CommunicationProviderAdapter 
     serviceUrl?: string;
     text: string;
     textFormat?: 'plain' | 'markdown' | 'xml';
+    images?: Array<{ url: string; altText: string; contentType?: string }>;
   }): Promise<void> {
     const serviceUrl = input.serviceUrl ?? this.options.serviceUrl;
 
@@ -207,12 +208,20 @@ export class TeamsCommunicationProvider implements CommunicationProviderAdapter 
       );
     }
 
+    const imageAttachments =
+      input.images?.map((image) => ({
+        contentType: image.contentType ?? 'image/*',
+        contentUrl: image.url,
+        name: image.altText,
+      })) ?? [];
+
     await this.client.updateActivity({
       serviceUrl,
       conversationId: input.channelId,
       activityId: input.messageId,
       text: input.text,
       ...(input.textFormat ? { textFormat: input.textFormat } : {}),
+      ...(imageAttachments.length > 0 ? { attachments: imageAttachments } : {}),
     });
   }
 
