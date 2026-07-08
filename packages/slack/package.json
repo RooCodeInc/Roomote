@@ -15,7 +15,8 @@
     "check-types:fast": "tsgo --noEmit",
     "mock:server": "dotenvx run -f ../../.env.local -- tsx scripts/run-mock-slack.ts",
     "test": "dotenvx run -f ../../.env.test -- vitest",
-    "clean": "rimraf .turbo"
+    "clean": "rimraf .turbo",
+    "eval:scenario": "dotenvx run -f ../../.env.local -- tsx evals/run-slack-scenario.ts"
   },
   "dependencies": {
     "@roomote/cloud-agents": "workspace:^",
