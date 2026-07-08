@@ -36,7 +36,7 @@ jobs:
           # `roomote` covers the linked login, `Roomote` the raw author
           # name on unlinked commits, `claude` the Claude agent name, and
           # `vercel` the Vercel deployment account.
-          allowlist: '*[bot],claude,roomote,Roomote,vercel'
+          allowlist: '*[bot],claude,openmote,roomote,Roomote,vercel'
           custom-notsigned-prcomment: >-
             Thank you for your contribution! Before we can merge this pull
             request, we need you to sign our [Contributor License
