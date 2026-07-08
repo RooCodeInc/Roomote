@@ -19,6 +19,7 @@ import {
 const ADO_PROVIDER = 'ado' satisfies SourceControlProvider;
 const DEFAULT_ADO_BASE_URL = 'https://dev.azure.com';
 const ADO_API_VERSION = '7.1';
+const ADO_TOKEN_VALIDATION_TIMEOUT_MS = 10_000;
 const DEFAULT_ADO_GIT_USERNAME = 'ado';
 const ADO_SERVICE_HOOK_ENSURE_CONCURRENCY = 5;
 const ADO_SERVICE_HOOK_PUBLISHER_ID = 'tfs';
@@ -373,6 +374,85 @@ export async function getAdoDeploymentUser(options?: {
 
 export function clearAdoDeploymentUserCache(): void {
   cachedAdoDeploymentUser = null;
+}
+
+export type AdoTokenValidationResult =
+  | { status: 'valid'; displayName: string }
+  | { status: 'invalid'; error: string }
+  | { status: 'unknown'; error: string };
+
+export async function validateAdoToken({
+  token,
+  organization,
+  baseUrl,
+  fetchImpl = fetch,
+  timeoutMs = ADO_TOKEN_VALIDATION_TIMEOUT_MS,
+}: {
+  token: string;
+  organization: string;
+  baseUrl?: string;
+  fetchImpl?: typeof fetch;
+  timeoutMs?: number;
+}): Promise<AdoTokenValidationResult> {
+  try {
+    const organizationApiBaseUrl = buildAdoOrganizationApiBaseUrl({
+      baseUrl:
+        baseUrl === undefined
+          ? await resolveAdoBaseUrl()
+          : normalizeBaseUrl(baseUrl),
+      organization,
+    });
+    const response = await fetchImpl(
+      buildAdoApiUrl(organizationApiBaseUrl, '/_apis/connectionData', {
+        'api-version': ADO_API_VERSION,
+      }),
+      {
+        method: 'GET',
+        headers: {
+          Accept: 'application/json',
+          Authorization: buildAdoBasicAuthHeader(token),
+        },
+        signal: AbortSignal.timeout(timeoutMs),
+      },
+    );
+
+    // Azure DevOps answers rejected PATs with a 203 sign-in page instead of
+    // a 401, so treat that status as a definitive rejection too.
+    if ([203, 401, 403].includes(response.status)) {
+      return {
+        status: 'invalid',
+        error:
+          'Azure DevOps rejected the token. Confirm the PAT is active, belongs to the organization, and has Code read access.',
+      };
+    }
+
+    if (response.status !== 200) {
+      return {
+        status: 'unknown',
+        error: `Could not verify the Azure DevOps token: ${response.status} ${response.statusText}`,
+      };
+    }
+
+    const { authenticatedUser } = adoConnectionDataSchema.parse(
+      await response.json(),
+    );
+
+    return {
+      status: 'valid',
+      displayName:
+        authenticatedUser.providerDisplayName ??
+        authenticatedUser.displayName ??
+        authenticatedUser.uniqueName ??
+        authenticatedUser.id,
+    };
+  } catch (error) {
+    return {
+      status: 'unknown',
+      error: `Could not verify the Azure DevOps token: ${
+        error instanceof Error ? error.message : String(error)
+      }`,
+    };
+  }
 }
 
 function normalizeAdoParentCommentId(

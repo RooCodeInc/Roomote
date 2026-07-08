@@ -51,7 +51,14 @@ const state = vi.hoisted(() => ({
       provider: 'ado',
       fields: [{ runtimeSatisfied: false, savedSatisfied: true }],
     },
-  ],
+  ] as {
+    provider: string;
+    fields: {
+      required?: boolean;
+      runtimeSatisfied: boolean;
+      savedSatisfied: boolean;
+    }[];
+  }[],
 }));
 
 const mutations = vi.hoisted(() => ({
@@ -493,6 +500,73 @@ describe('SourceControl settings', () => {
     expect(
       screen.queryByRole('button', { name: 'Hide config' }),
     ).not.toBeInTheDocument();
+  });
+
+  it('shows ADO setup instructions when only optional fields are satisfied by fallbacks', () => {
+    state.adoRepositories = [];
+    state.configProviders = [
+      {
+        provider: 'gitlab',
+        fields: [{ runtimeSatisfied: false, savedSatisfied: true }],
+      },
+      {
+        provider: 'gitea',
+        fields: [{ runtimeSatisfied: false, savedSatisfied: true }],
+      },
+      {
+        provider: 'ado',
+        fields: [
+          // ADO_ORGANIZATION and ADO_TOKEN (required) are unset; only the
+          // optional ADO_TENANT_ID is satisfied via the
+          // ROOMOTE_AUTH_MICROSOFT_TENANT_ID fallback.
+          { runtimeSatisfied: false, savedSatisfied: false },
+          { runtimeSatisfied: false, savedSatisfied: false },
+          { required: false, runtimeSatisfied: true, savedSatisfied: false },
+        ],
+      },
+    ];
+
+    render(<SourceControl />);
+
+    expect(
+      screen.queryByRole('button', { name: 'Refresh Azure DevOps' }),
+    ).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Set it up' }));
+
+    expect(
+      screen.getByRole('link', { name: /Azure DevOps personal access token/ }),
+    ).toHaveAttribute('href', 'https://dev.azure.com/_usersSettings/tokens');
+    expect(screen.getByTestId('source-control-config-ado')).toBeInTheDocument();
+  });
+
+  it('keeps every expanded provider form visible when setting up multiple providers', () => {
+    state.giteaRepositories = [];
+    state.adoRepositories = [];
+    state.configProviders = [
+      {
+        provider: 'gitlab',
+        fields: [{ runtimeSatisfied: false, savedSatisfied: true }],
+      },
+      {
+        provider: 'gitea',
+        fields: [{ runtimeSatisfied: false, savedSatisfied: false }],
+      },
+      {
+        provider: 'ado',
+        fields: [{ runtimeSatisfied: false, savedSatisfied: false }],
+      },
+    ];
+
+    render(<SourceControl />);
+
+    fireEvent.click(screen.getAllByRole('button', { name: 'Set it up' })[0]!);
+    fireEvent.click(screen.getByRole('button', { name: 'Set it up' }));
+
+    expect(
+      screen.getByTestId('source-control-config-gitea'),
+    ).toBeInTheDocument();
+    expect(screen.getByTestId('source-control-config-ado')).toBeInTheDocument();
   });
 
   it('shows a success toast when pull request delivery is saved', () => {
