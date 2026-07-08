@@ -1,13 +1,19 @@
 # Running Roomote on Railway
 
-[![Deploy on Railway](https://railway.com/button.svg)](https://railway.com/deploy/bP3Lsu)
+Two official templates are published, one per image channel:
+
+| Channel                     | Tracks     | Deploy                                                                                    |
+| --------------------------- | ---------- | ----------------------------------------------------------------------------------------- |
+| **main** (stable)           | `:main`    | [![Deploy on Railway](https://railway.com/button.svg)](https://railway.com/deploy/Rj2cFo) |
+| **develop** (latest builds) | `:develop` | [![Deploy on Railway](https://railway.com/button.svg)](https://railway.com/deploy/bP3Lsu) |
 
 This guide covers deploying Roomote on [Railway](https://railway.com) — either
-through the official Roomote template or by composing the services manually.
-The maintained service specification for the official template lives in
-[`template.yaml`](template.yaml); Railway does not read that file directly,
-but it is the source of truth that maintainers mirror into Railway's Template
-Composer.
+through an official Roomote template or by composing the services manually.
+Both templates are mirrored from the same maintained service specification,
+[`template.yaml`](template.yaml), and differ only in which image alias the
+four app services track; everything in this guide applies to both. Railway
+does not read that file directly, but it is the source of truth that
+maintainers mirror into Railway's Template Composer.
 
 For single-host Docker deployments, use the one-command installer or the
 Compose paths in [SELF_HOSTING.md](../../SELF_HOSTING.md) instead.
@@ -37,9 +43,12 @@ Compose paths in [SELF_HOSTING.md](../../SELF_HOSTING.md) instead.
   more than one service: each occurrence generates a different value, and
   `ENCRYPTION_KEY` must be identical everywhere.
 - **Provider credentials live in the app, not the template.** The template
-  ships with zero deploy-time inputs. Modal tokens and the model provider
-  API key are entered in the `/setup` wizard (or Settings) after first boot
-  and stored encrypted in Postgres.
+  ships with zero required deploy-time inputs. Modal tokens and the model
+  provider API key are entered in the `/setup` wizard (or Settings) after
+  first boot and stored encrypted in Postgres. The one optional prompt on
+  the deploy screen is `ROOMOTE_APP_URL`, for deployers who want a custom
+  domain from the start (see
+  [Attaching a custom domain](#attaching-a-custom-domain)).
 - **Live previews are off by default.** Preview subdomains need a wildcard
   domain, and Railway-generated service domains are single-label. Previews
   can be enabled later with a wildcard custom domain (see below); everything
@@ -64,9 +73,17 @@ needed.
 
 ## Image channel and versions
 
-The template tracks the mutable **`:develop`** alias, which the publish
-workflow moves to every new develop build (releases also move `:latest`).
-Nothing else in the template encodes a version:
+Each template tracks one mutable channel alias, which the publish workflow
+moves on every matching build:
+
+- The **main-channel** template tracks **`:main`**, moved on every build of
+  the `main` branch (each build also publishes an immutable `main-<sha>`
+  tag). This is the stable choice.
+- The **develop-channel** template tracks **`:develop`**, moved on every
+  build of the `develop` branch (immutable tag: `develop-<sha>`). Tagged
+  `v*` releases additionally move `:latest`.
+
+Nothing else in either template encodes a version:
 
 - The images bake `RELEASE_VERSION` at build time, and the app derives
   `DOCKER_WORKER_IMAGE` and `MODAL_BASE_IMAGE_REF` from it when those are
@@ -76,21 +93,24 @@ Nothing else in the template encodes a version:
   constant.
 
 To pin instead (recommended for production deployments): put the same
-immutable tag (`v*` or `develop-<sha>`) in the four app-service image fields.
-No other edits are needed — the derived values follow the image.
+immutable tag (`v*`, `main-<sha>`, or `develop-<sha>`) in the four
+app-service image fields. No other edits are needed — the derived values
+follow the image.
 
 ## Service topology
 
-| Railway service | Source                            | Start command                                      | Public domain                | Healthcheck        |
-| --------------- | --------------------------------- | -------------------------------------------------- | ---------------------------- | ------------------ |
-| `Postgres`      | Railway managed PostgreSQL        | —                                                  | no                           | managed            |
-| `Redis`         | Railway managed Redis             | —                                                  | no                           | managed            |
-| `minio`         | `minio/minio` + volume at `/data` | `minio server /data --console-address :9001`       | yes (HTTP proxy port 9000)   | —                  |
-| `web`           | `roomote-app:develop`             | `/roomote/.docker/app/entrypoint.sh web`           | yes (HTTP proxy port 8080)   | `/health`          |
-| `api`           | `roomote-app:develop`             | `/roomote/.docker/app/entrypoint.sh api`           | yes (HTTP proxy port 8080)   | `/health/liveness` |
-| `controller`    | `roomote-app:develop`             | `/roomote/.docker/app/entrypoint.sh controller`    | no                           | —                  |
-| `bullmq`        | `roomote-app:develop`             | `/roomote/.docker/app/entrypoint.sh bullmq`        | no                           | —                  |
-| `preview-proxy` | `roomote-app:develop` (optional)  | `/roomote/.docker/app/entrypoint.sh preview-proxy` | yes + wildcard custom domain | `/health`          |
+`<channel>` below is `main` or `develop`, per template.
+
+| Railway service | Source                             | Start command                                      | Public domain                | Healthcheck        |
+| --------------- | ---------------------------------- | -------------------------------------------------- | ---------------------------- | ------------------ |
+| `Postgres`      | Railway managed PostgreSQL         | —                                                  | no                           | managed            |
+| `Redis`         | Railway managed Redis              | —                                                  | no                           | managed            |
+| `minio`         | `minio/minio` + volume at `/data`  | `minio server /data --console-address :9001`       | yes (HTTP proxy port 9000)   | —                  |
+| `web`           | `roomote-app:<channel>`            | `/roomote/.docker/app/entrypoint.sh web`           | yes (HTTP proxy port 8080)   | `/health`          |
+| `api`           | `roomote-app:<channel>`            | `/roomote/.docker/app/entrypoint.sh api`           | yes (HTTP proxy port 8080)   | `/health/liveness` |
+| `controller`    | `roomote-app:<channel>`            | `/roomote/.docker/app/entrypoint.sh controller`    | no                           | —                  |
+| `bullmq`        | `roomote-app:<channel>`            | `/roomote/.docker/app/entrypoint.sh bullmq`        | no                           | —                  |
+| `preview-proxy` | `roomote-app:<channel>` (optional) | `/roomote/.docker/app/entrypoint.sh preview-proxy` | yes + wildcard custom domain | `/health`          |
 
 Railway's custom start command **bypasses the image entrypoint** and executes
 the command directly, so the full `/roomote/.docker/app/entrypoint.sh <service>`
@@ -175,8 +195,8 @@ uploads it into hosted-compute sandboxes at spawn time — no shared volume is
 needed. The version-less `worker-current.tar.gz` name works because the
 controller reads the release version from the `VERSION` file inside the
 archive. Do not leave `DOCKER_WORKER_RELEASE_PATH` unset: without it the
-controller falls back to fetching GitHub worker releases, which do not exist
-for `develop` builds.
+controller falls back to fetching GitHub worker releases, which only exist
+for tagged `v*` releases — not for `develop` or `main` branch builds.
 
 minio:
 
@@ -189,10 +209,12 @@ Notes:
 
 - `ROOMOTE_APP_URL` on api is the **single canonical-origin knob**: it is the
   URL users browse, and web/controller/bullmq reference
-  `${{api.ROOMOTE_APP_URL}}` rather than repeating the value. Do not set
-  `ROOMOTE_PUBLIC_URL` — it is optional and the app falls back to
-  `ROOMOTE_APP_URL` everywhere it would apply. See
-  [Attaching a custom domain](#attaching-a-custom-domain).
+  `${{api.ROOMOTE_APP_URL}}` rather than repeating the value. It is also the
+  template's one optional deploy-time prompt — the deploy screen shows it
+  pre-filled with the generated-domain reference so a custom domain can be
+  entered before first boot. Do not set `ROOMOTE_PUBLIC_URL` — it is
+  optional and the app falls back to `ROOMOTE_APP_URL` everywhere it would
+  apply. See [Attaching a custom domain](#attaching-a-custom-domain).
 - Leave `DOCKER_WORKER_IMAGE` and `MODAL_BASE_IMAGE_REF` **unset**. The app
   derives both from the `RELEASE_VERSION` baked into the running image, so
   they always match the deployed build. Setting them explicitly overrides
@@ -251,7 +273,11 @@ logs a warning when creation fails).
    `[auth-keypairs] Generated ...` in an app service's logs — whichever app
    service boots first wins the race and generates them).
 2. Open `https://<web-domain>/setup` (append `?token=<SETUP_TOKEN>` or paste
-   the token into the wizard's token step if you configured one).
+   the token into the wizard's token step if you configured one). If you
+   entered a custom domain in the `ROOMOTE_APP_URL` prompt at deploy time,
+   attach that domain to the web service and finish DNS first, then open
+   `/setup` on the custom domain — the generated domain will reject auth
+   with `403 Invalid origin`.
 3. Create the founding admin account (email/password works immediately;
    Slack or Microsoft sign-in can be added later).
 4. Connect GitHub with **Create GitHub App** — the manifest flow derives the
@@ -267,16 +293,34 @@ logs a warning when creation fails).
 
 ## Attaching a custom domain
 
-The template boots on Railway-generated domains, and `ROOMOTE_APP_URL` — the
-origin users browse — derives from the web service's generated domain. When
-you attach a custom domain to the web service, Railway does **not** update
-`RAILWAY_PUBLIC_DOMAIN`, so the app keeps treating the generated domain as
-canonical. The symptom is a working dashboard that rejects signup, login,
-and OAuth flows with `403 {"error":"Invalid origin"}`: the browser sends the
-custom domain as its `Origin`, and the auth layer only trusts
-`ROOMOTE_APP_URL`.
+By default the template boots on Railway-generated domains, and
+`ROOMOTE_APP_URL` — the origin users browse — derives from the web service's
+generated domain. A custom domain can be set either at deploy time (through
+the template's one optional prompt) or after deploy (a one-variable edit).
+Setting it at deploy time is preferable when you already own the domain:
+everything the setup wizard registers — in particular the GitHub App's OAuth
+callback and webhook URLs — derives from the canonical origin, so getting it
+right before `/setup` avoids reconnecting integrations later.
 
-The fix is a one-variable edit, because the app services all reference
+**At deploy time.** The deploy screen shows `ROOMOTE_APP_URL` on the api
+service pre-filled with the generated-domain reference
+(`https://${{web.RAILWAY_PUBLIC_DOMAIN}}`). Replace it with your domain, for
+example `https://app.example.com`. Then, after the project deploys:
+
+1. Add `app.example.com` as a custom domain on the **web** service and
+   complete the DNS setup.
+2. Open `/setup` on the custom domain — not the generated one. Once
+   `ROOMOTE_APP_URL` points at the custom domain, the generated web domain
+   rejects signup and login with `403 {"error":"Invalid origin"}`, which is
+   expected: only the canonical origin is trusted.
+
+**After deploy.** When you attach a custom domain to the web service on a
+running deployment, Railway does **not** update `RAILWAY_PUBLIC_DOMAIN`, so
+the app keeps treating the generated domain as canonical. The symptom is a
+working dashboard that rejects signup, login, and OAuth flows with
+`403 {"error":"Invalid origin"}`: the browser sends the custom domain as its
+`Origin`, and the auth layer only trusts `ROOMOTE_APP_URL`. The fix is a
+one-variable edit, because the app services all reference
 `${{api.ROOMOTE_APP_URL}}`:
 
 1. Add the custom domain (for example `app.example.com`) to the **web**
@@ -320,13 +364,14 @@ Live previews need a wildcard domain, which requires a domain you control:
   Railway's template-update notifications only exist for GitHub-repo-based
   templates, not Docker-image-based ones like this. Template changes affect
   new deploys only.
-- **Upgrade a deployment on `:develop`** by redeploying the four app
-  services — they pull the current alias, and everything version-coupled
-  derives from the new image. On an immutable pin, bump the tag in the four
-  image fields first. The api service's `db-migrate` pre-deploy applies any
-  schema changes, and the auto-generated keypairs persist in Postgres, so
-  sessions, job tokens, and preview tokens survive redeploys. To make this
-  happen automatically on every develop build, see
+- **Upgrade a deployment on a channel alias** (`:main` or `:develop`) by
+  redeploying the four app services — they pull the current alias, and
+  everything version-coupled derives from the new image. On an immutable
+  pin, bump the tag in the four image fields first. The api service's
+  `db-migrate` pre-deploy applies any schema changes, and the
+  auto-generated keypairs persist in Postgres, so sessions, job tokens, and
+  preview tokens survive redeploys. Develop-channel deployments can make
+  this happen automatically on every develop build — see
   [Auto-deploying every develop build](#auto-deploying-every-develop-build-optional).
 - **Back up** the Railway Postgres database (Railway backups or `pg_dump`)
   and the MinIO volume or external bucket. Everything else is reproducible
@@ -338,14 +383,16 @@ Live previews need a wildcard domain, which requires a domain you control:
 
 ## Auto-deploying every develop build (optional)
 
-Railway never redeploys on its own when a mutable tag like `:develop` moves,
-so a deployment tracking the alias only picks up new builds when someone
-redeploys the app services. The `Publish GHCR Images` workflow has an
-optional `deploy-railway` job that closes that gap: after each develop
-build's images publish, it calls Railway's public GraphQL API directly,
-finds every service in the environment running the `roomote-app` image,
-points it at the new immutable `develop-<short-sha>` tag, and redeploys it.
-Nothing extra runs inside the Railway project.
+Railway never redeploys on its own when a mutable tag like `:develop` or
+`:main` moves, so a deployment tracking a channel alias only picks up new
+builds when someone redeploys the app services. The `Publish GHCR Images`
+workflow has an optional `deploy-railway` job that closes that gap for the
+**develop channel**: after each develop build's images publish, it calls
+Railway's public GraphQL API directly, finds every service in the
+environment running the `roomote-app` image, points it at the new immutable
+`develop-<short-sha>` tag, and redeploys it. Nothing extra runs inside the
+Railway project. The job only fires on develop pushes today; main-channel
+deployments upgrade by redeploying the app services after a main build.
 
 Setup, once:
 
@@ -383,11 +430,25 @@ Railway project's token settings.
 
 ## Maintaining the marketplace template
 
-When the template needs to change, edit [`template.yaml`](template.yaml)
-first, then mirror the change into the published template through Railway's
-Template Composer. Re-run the first-boot verification on a scratch Railway
-project before publishing the update. When the change touches reference
-variables — in particular the `${{api.*}}` references to values that are
-themselves references, like `ROOMOTE_APP_URL` — also open each app
-service's Variables tab on the scratch project and confirm the resolved
-values are real URLs, not literal `${{...}}` strings.
+Two published templates mirror the one spec in
+[`template.yaml`](template.yaml): the main-channel template
+(`railway.com/deploy/Rj2cFo`) and the develop-channel template
+(`railway.com/deploy/bP3Lsu`). They differ only in the app image alias
+(`:main` vs `:develop`); everything else must stay identical. When the spec
+changes, edit `template.yaml` first, then mirror the change into **both**
+published templates through Railway's Template Composer (Railway has no
+template-duplicate feature, so each is edited by hand). Re-run the
+first-boot verification on a scratch Railway project before publishing an
+update (one scratch run on either channel covers a change that does not
+touch the image fields). When the change touches reference variables — in
+particular the `${{api.*}}` references to values that are themselves
+references, like `ROOMOTE_APP_URL` — also open each app service's Variables
+tab on the scratch project and confirm the resolved values are real URLs,
+not literal `${{...}}` strings.
+
+The `ROOMOTE_APP_URL` deploy-time prompt needs its own check on the scratch
+deploy: confirm the deploy screen shows the variable with the description
+from `template.yaml` and the reference default pre-filled, that leaving the
+default still resolves to the generated web domain after deploy, and that
+overriding it with a test value reaches the app services as that literal
+value.
