@@ -166,22 +166,10 @@ export async function evaluateSignInAccess({
     return { allowed: false };
   }
 
-  if (await hasExistingAppUser(userId)) {
-    return { allowed: true, via: 'existing_user' };
-  }
-
-  if (await isUserInProviderOrg(userId)) {
-    return { allowed: true, via: 'org_membership' };
-  }
-
   const inviteToken = await getRequestInviteToken();
-  const invite = await findUsableInviteByToken(inviteToken);
+  const setupBootstrapOpen = await isSetupBootstrapOpen();
 
-  if (invite) {
-    return { allowed: true, via: 'invite', inviteId: invite.id };
-  }
-
-  if (await isSetupBootstrapOpen()) {
+  if (setupBootstrapOpen && Env.SETUP_TOKEN && inviteToken) {
     // The system invite: while initial setup is still open, a valid
     // SETUP_TOKEN admits the deployment operator, even when an earlier
     // aborted setup attempt already left an account behind. Only local
@@ -191,6 +179,24 @@ export async function evaluateSignInAccess({
     if (isSetupTokenValid(inviteToken ?? undefined)) {
       return { allowed: true, via: 'bootstrap' };
     }
+  }
+
+  if (await hasExistingAppUser(userId)) {
+    return { allowed: true, via: 'existing_user' };
+  }
+
+  if (await isUserInProviderOrg(userId)) {
+    return { allowed: true, via: 'org_membership' };
+  }
+
+  const invite = await findUsableInviteByToken(inviteToken);
+
+  if (invite) {
+    return { allowed: true, via: 'invite', inviteId: invite.id };
+  }
+
+  if (setupBootstrapOpen && isSetupTokenValid(undefined)) {
+    return { allowed: true, via: 'bootstrap' };
   }
 
   return { allowed: false };

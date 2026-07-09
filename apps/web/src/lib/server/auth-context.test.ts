@@ -197,6 +197,30 @@ describe('authorize', () => {
     ]);
   });
 
+  it('promotes an existing member admitted by the setup token while setup is open', async () => {
+    mockAccessDecision.current = { allowed: true, via: 'bootstrap' };
+    mockUsersFindFirst.mockResolvedValue({
+      id: 'user-1',
+      role: 'member',
+      createdAt: new Date('2025-01-01T00:00:00.000Z'),
+      imageUrl: 'https://example.com/avatar.png',
+      onboardingCompletedAt: new Date('2025-01-01T00:00:00.000Z'),
+      deletedAt: null,
+    });
+
+    const result = await authorize();
+
+    expect(result.success).toBe(true);
+    if (!result.success) {
+      return;
+    }
+
+    expect(result.isAdmin).toBe(true);
+    expect(mockUpdateSet).toHaveBeenCalledWith(
+      expect.objectContaining({ role: 'admin' }),
+    );
+  });
+
   it('admits non-bootstrap newcomers as members when users already exist', async () => {
     mockAccessDecision.current = { allowed: true, via: 'org_membership' };
     mockUsersFindFirst.mockResolvedValue(null);

@@ -192,6 +192,17 @@ describe('evaluateSignInAccess', () => {
     ).resolves.toEqual({ allowed: true, via: 'org_membership' });
   });
 
+  it('treats a setup-token Microsoft sign-in as bootstrap before org membership', async () => {
+    mockEnvState.SETUP_TOKEN = 'setup-secret';
+    mockInviteState.requestToken = 'setup-secret';
+    mockSetupBootstrapState.open = true;
+
+    await expect(
+      evaluateSignInAccess({ userId: 'user-2', email: 'admin@example.com' }),
+    ).resolves.toEqual({ allowed: true, via: 'bootstrap' });
+    expect(mockDbSelect).not.toHaveBeenCalled();
+  });
+
   it('admits invite holders and reports the invite id', async () => {
     mockInviteState.requestToken = 'invite-token';
     mockInviteState.usableInvite = { id: 'invite-1' };
