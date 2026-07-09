@@ -122,6 +122,7 @@ export function normalizeChannelAutoStartInputRows(params: {
     params.legacyInstructions
       ? [
           {
+            channelId: null,
             slackChannel: params.legacyChannel ?? null,
             instructions: params.legacyInstructions ?? null,
             launchMode: DEFAULT_CHANNEL_AUTO_START_LAUNCH_MODE,
@@ -132,6 +133,7 @@ export function normalizeChannelAutoStartInputRows(params: {
 
   return inputRows
     .map((row) => ({
+      channelId: normalizeOptionalText(row.channelId),
       slackChannel: normalizeOptionalText(row.slackChannel),
       instructions: normalizeOptionalText(row.instructions),
       launchMode:
@@ -140,5 +142,5 @@ export function normalizeChannelAutoStartInputRows(params: {
           : DEFAULT_CHANNEL_AUTO_START_LAUNCH_MODE,
       launchCriteria: normalizeOptionalText(row.launchCriteria),
     }))
-    .filter((row) => row.slackChannel || row.instructions);
+    .filter((row) => row.channelId || row.slackChannel || row.instructions);
 }

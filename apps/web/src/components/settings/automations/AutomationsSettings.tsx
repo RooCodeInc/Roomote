@@ -674,6 +674,7 @@ function mapSettingsToFormState(
     conflictResolverInstructions: settings.conflictResolverInstructions ?? '',
     channelAutoStartSlackChannels: settings.channelAutoStartSlackChannels.map(
       ({ channelId, instructions, launchMode, launchCriteria }) => ({
+        channelId,
         slackChannel:
           settings.channelAutoStartSlackChannelNames?.[channelId] ??
           channelId ??
