@@ -37,6 +37,10 @@ vi.mock('../AcpUnknownMessage', () => ({
   AcpUnknownMessage: () => <div>unknown message</div>,
 }));
 
+vi.mock('../AcpTaskCancelledMessage', () => ({
+  AcpTaskCancelledMessage: () => <div>task cancelled marker</div>,
+}));
+
 function buildToolResult(
   kind: string,
   overrides?: Partial<AcpToolResultUiMessage['data']>,
@@ -105,4 +109,23 @@ describe('AcpMessageItem tool routing', () => {
       expect(commandOutputSpy).not.toHaveBeenCalled();
     },
   );
+
+  it('renders task_cancelled messages as the cancel marker', () => {
+    render(
+      <AcpMessageItem
+        msg={{
+          id: 'cancel-1',
+          ts: 1,
+          role: 'system',
+          kind: 'task_cancelled',
+          partial: false,
+          sessionId: 'session-1',
+          updateType: 'roomote_runtime.task_cancelled',
+          data: { sessionId: 'session-1', cancelledByName: 'Daniel' },
+        }}
+      />,
+    );
+
+    expect(screen.getByText('task cancelled marker')).toBeInTheDocument();
+  });
 });

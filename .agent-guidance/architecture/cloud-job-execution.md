@@ -453,7 +453,16 @@ Persistence model:
   active session as hidden follow-up prompts. The response envelope preserves
   `submitted` versus `cancelled` resolution, and the hidden answer replay
   carries the answering user's `userId` so queued-prompt preparation can
-  refresh actor-scoped MCP state at the next turn boundary. For Slack-backed
+  refresh actor-scoped MCP state at the next turn boundary. An explicit user
+  stop (web Stop button, Slack/Telegram cancel, `POST /api/tasks/:taskId/stop`)
+  threads `cancelledBy` attribution through the sandbox `cancelTask`
+  procedure; the harness then flushes the aborted turn's partial assistant
+  output as its persisted message, emits cancelled responses for any pending
+  questions, persists a `roomote_runtime.task_cancelled` marker envelope
+  (rendered by the web transcript as a centered "Stopped by …" divider), and
+  drops trailing post-abort assistant stream/finalize events until the next
+  prompt. Internal cancels (steer replay, env-var resumable stop, task
+  replacement) carry no attribution and emit no marker. For Slack-backed
   tasks, the harness evaluates the generated stop hook before completion; when
   a terminal Slack-visible closeout is missing, it sends the hook reminder back
   as a hidden queued prompt and withholds `TaskCompleted` until the closeout is

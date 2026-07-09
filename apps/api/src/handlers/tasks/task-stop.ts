@@ -24,6 +24,15 @@ interface StopTaskJob {
   actingUserId: string | null;
 }
 
+/**
+ * Attribution for the user stop, forwarded to the sandbox so the transcript
+ * gets a visible `task_cancelled` marker naming who stopped the task.
+ */
+interface StopTaskAttribution {
+  name?: string;
+  source?: string;
+}
+
 type StopTaskJobResult =
   | { success: true; mode: 'sandbox_stop' | 'direct_cancel' }
   | { success: false; error: string; statusCode: 403 | 404 | 409 | 502 };
@@ -158,8 +167,9 @@ async function readCurrentStopTaskResolution(
 async function stopTaskSandboxJob(params: {
   job: StopTaskJob & { sandboxServerUrl: string };
   authUserId?: string | null;
+  cancelledBy?: StopTaskAttribution;
 }): Promise<StopTaskJobResult> {
-  const { job, authUserId } = params;
+  const { job, authUserId, cancelledBy } = params;
   const tokenUserId = authUserId ?? job.actingUserId ?? job.userId;
 
   if (!tokenUserId) {
@@ -175,7 +185,10 @@ async function stopTaskSandboxJob(params: {
       cloudJobId: job.id,
       userId: tokenUserId,
       sandboxServerUrl: job.sandboxServerUrl,
-      call: (client) => client.commands.cancelTask.mutate(),
+      call: (client) =>
+        client.commands.cancelTask.mutate(
+          cancelledBy ? { cancelledBy } : undefined,
+        ),
     });
 
     return { success: true, mode: 'sandbox_stop' };
@@ -196,8 +209,10 @@ export async function stopTaskJob(params: {
   job: StopTaskJob;
   authUserId?: string | null;
   allowDirectCancelWithoutSandbox?: boolean;
+  cancelledBy?: StopTaskAttribution;
 }): Promise<StopTaskJobResult> {
-  const { job, authUserId, allowDirectCancelWithoutSandbox } = params;
+  const { job, authUserId, allowDirectCancelWithoutSandbox, cancelledBy } =
+    params;
 
   const initialResolution = resolveStopTaskJob(job);
 
@@ -209,6 +224,7 @@ export async function stopTaskJob(params: {
     return await stopTaskSandboxJob({
       job: initialResolution.job,
       authUserId,
+      cancelledBy,
     });
   }
 
@@ -222,6 +238,7 @@ export async function stopTaskJob(params: {
     return await stopTaskSandboxJob({
       job: refreshedResolution.job,
       authUserId,
+      cancelledBy,
     });
   }
 
@@ -239,6 +256,7 @@ export async function stopTaskJob(params: {
     return await stopTaskSandboxJob({
       job: racedResolution.job,
       authUserId,
+      cancelledBy,
     });
   }
 
