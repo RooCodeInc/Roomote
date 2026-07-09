@@ -40,6 +40,7 @@ import {
   getPendingTaskEnvVarRequest,
 } from './task-env-var-request-state';
 import { getAcpClientMessageId } from './services/acp-client-message-id';
+import { shouldMarkTrailingAssistantCompletion } from './trailing-assistant-completion';
 import {
   addOptimisticQueuedMessage,
   createQueuedMessageState,
@@ -229,7 +230,7 @@ function getOptimisticUserTextDedupeKey(message: AcpUiMessage): string | null {
  * clientMessageId, the tool call id, and the emitter timestamp of the
  * originating runtime event.
  */
-function getMergeCoverageKeys(message: AcpUiMessage): string[] {
+function getMergeCoverageBaseKeys(message: AcpUiMessage): string[] {
   const keys: string[] = [`id:${message.id}`];
 
   const logicalEventId = canonicalizeAcpLogicalEventId(
@@ -244,17 +245,43 @@ function getMergeCoverageKeys(message: AcpUiMessage): string[] {
     keys.push(`client:${message.clientMessageId}`);
   }
 
-  if (
-    (message.kind === 'tool_call' || message.kind === 'tool_result') &&
-    message.toolCallId
-  ) {
-    keys.push(`tool:${message.toolCallId}`);
-  }
-
   if (message.optimistic !== true) {
     keys.push(
       `event:${message.updateType ?? message.kind}|${message.sessionId ?? ''}|${message.ts}`,
     );
+  }
+
+  return keys;
+}
+
+/** Keys a rebuilt (persisted) message provides as coverage. A terminal tool
+ *  result also covers its own tool call. */
+function getMergeCoverageProvidedKeys(message: AcpUiMessage): string[] {
+  const keys = getMergeCoverageBaseKeys(message);
+
+  if (
+    (message.kind === 'tool_call' || message.kind === 'tool_result') &&
+    message.toolCallId
+  ) {
+    keys.push(`tool:${message.kind}:${message.toolCallId}`);
+
+    if (message.kind === 'tool_result') {
+      keys.push(`tool:tool_call:${message.toolCallId}`);
+    }
+  }
+
+  return keys;
+}
+
+/** Keys that mark a live message as covered when any of them is provided by
+ *  the rebuild. Live terminal tool results are matched separately by
+ *  terminality (see the carry-over filter), so only pending tool calls use
+ *  the tool key here. */
+function getMergeCoverageRequiredKeys(message: AcpUiMessage): string[] {
+  const keys = getMergeCoverageBaseKeys(message);
+
+  if (message.kind === 'tool_call' && message.toolCallId) {
+    keys.push(`tool:tool_call:${message.toolCallId}`);
   }
 
   return keys;
@@ -829,14 +856,39 @@ export function createSandboxStore(
           // socket events, mis-applied replacements, ordering skew) heals on
           // the next refetch rather than persisting until the sandbox
           // sleeps.
-          const rebuilt = acpService.loadAcpEnvelopes(sorted);
+          // Preserve the trailing turn-completion decision: derive it from
+          // the current live status when we have one, otherwise keep what
+          // the transcript already shows (the initial hydration decided
+          // from the page-load task state).
+          const lastAssistantMessage = state.messages.findLast(
+            (message) => message.role === 'assistant',
+          );
+          const rebuilt = acpService.loadAcpEnvelopes(sorted, {
+            markTrailingAssistantCompletion: state.taskStatus
+              ? shouldMarkTrailingAssistantCompletion({
+                  taskPhase: state.taskStatus.phase,
+                })
+              : lastAssistantMessage?.isTurnCompletion === true,
+          });
 
           const envelopeIds = new Set(sorted.map((envelope) => envelope.id));
           const coveredKeys = new Set<string>();
 
           for (const message of rebuilt.acpMessages) {
-            for (const key of getMergeCoverageKeys(message)) {
+            for (const key of getMergeCoverageProvidedKeys(message)) {
               coveredKeys.add(key);
+            }
+          }
+
+          const rebuiltToolKindByCallId = new Map<string, string>();
+
+          for (const message of rebuilt.acpMessages) {
+            if (
+              (message.kind === 'tool_call' ||
+                message.kind === 'tool_result') &&
+              message.toolCallId
+            ) {
+              rebuiltToolKindByCallId.set(message.toolCallId, message.kind);
             }
           }
 
@@ -847,21 +899,56 @@ export function createSandboxStore(
           // emitter timestamp of the same event — is dropped in favor of
           // the persisted version.
           const carriedOver = state.messages.filter((message) => {
+            // Live terminal tool results are matched by terminality, not
+            // id: live updates mutate the loaded tool_call in place, so
+            // the live result can sit under the pending call's envelope
+            // id. Only a persisted terminal result covers it.
+            if (message.kind === 'tool_result' && message.toolCallId) {
+              return (
+                rebuiltToolKindByCallId.get(message.toolCallId) !==
+                'tool_result'
+              );
+            }
+
             if (envelopeIds.has(message.id)) {
               return false;
             }
 
-            return !getMergeCoverageKeys(message).some((key) =>
+            return !getMergeCoverageRequiredKeys(message).some((key) =>
               coveredKeys.has(key),
             );
           });
+
+          // A carried-over live terminal tool result supersedes the rebuilt
+          // pending tool_call row for the same call, so the tool does not
+          // render twice (or appear still-running) until the terminal
+          // result envelope is persisted.
+          const carriedTerminalToolCallIds = new Set(
+            carriedOver
+              .filter(
+                (message) =>
+                  message.kind === 'tool_result' && message.toolCallId,
+              )
+              .map((message) => message.toolCallId as string),
+          );
+          const rebuiltMessages =
+            carriedTerminalToolCallIds.size > 0
+              ? rebuilt.acpMessages.filter(
+                  (message) =>
+                    !(
+                      message.kind === 'tool_call' &&
+                      message.toolCallId &&
+                      carriedTerminalToolCallIds.has(message.toolCallId)
+                    ),
+                )
+              : rebuilt.acpMessages;
 
           // Carried-over messages go first so an optimistic user prompt is
           // indexed before its persisted counterpart and gets replaced by
           // the text-dedupe pass; the final order is by timestamp anyway.
           const normalized = normalizeMergedAcpMessages([
             ...carriedOver,
-            ...rebuilt.acpMessages,
+            ...rebuiltMessages,
           ]);
           // When the fetched history carries plan state, its todo list is
           // authoritative — including an intentionally empty one. Only fall

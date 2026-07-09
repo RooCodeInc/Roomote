@@ -1124,6 +1124,160 @@ describe('createSandboxStore', () => {
     expect(store.getState().pendingUserInputRequests).toEqual([]);
   });
 
+  it('does not mark the trailing assistant message as completed when merging while running', () => {
+    const store = createAcpStore();
+
+    store.getState()._setTaskStatus({
+      phase: 'running',
+      taskStateEvent: 'taskStarted',
+      sessionId: 'session-1',
+      isConnected: true,
+      sleepRemainingMs: null,
+      lastErrorMessage: undefined,
+    });
+
+    store.getState()._mergeAcpHistory([
+      acpEnvelope({
+        id: 'persisted:running-user',
+        ts: 9400,
+        eventType: ACP_ENVELOPE_EVENT_TYPES.UserPrompt,
+        kind: 'text',
+        text: 'Keep going',
+        role: 'user',
+        contentBlocks: [textBlock('Keep going')],
+        metadata: { sessionId: 'session-1' },
+        payload: { sessionId: 'session-1', text: 'Keep going' },
+      }),
+      acpEnvelope({
+        id: 'persisted:running-assistant',
+        ts: 9500,
+        eventType: ACP_ENVELOPE_EVENT_TYPES.AssistantMessage,
+        kind: 'text',
+        text: 'Working on it.',
+        role: 'assistant',
+        contentBlocks: [textBlock('Working on it.')],
+        metadata: { sessionId: 'session-1' },
+        payload: { sessionId: 'session-1', text: 'Working on it.' },
+      }),
+    ]);
+
+    const trailing = store
+      .getState()
+      .messages.findLast((message) => message.role === 'assistant');
+    expect(trailing?.isTurnCompletion).not.toBe(true);
+  });
+
+  it('treats history todowrite tool updates as authoritative plan state', () => {
+    const store = createAcpStore();
+
+    emitAcp(
+      store,
+      acpPlan(
+        [
+          { id: 'stale-1', content: 'Old live todo', status: 'pending' },
+          { id: 'stale-2', content: 'Another old todo', status: 'pending' },
+        ],
+        {
+          id: 'live-plan-stale',
+          ts: 9600,
+          sessionId: 'session-todowrite-branch',
+        },
+      ),
+    );
+    expect(store.getState().todos).toHaveLength(2);
+
+    const historyTodos = [
+      {
+        id: 'fresh-1',
+        content: 'Persisted todo from history',
+        status: 'in_progress',
+      },
+    ];
+
+    // Plan state arriving through a ToolCallUpdate todowrite envelope (not a
+    // Plan or ToolResult envelope) must still count as plan history.
+    store.getState()._mergeAcpHistory([
+      acpEnvelope({
+        id: 'persisted-todowrite-update',
+        ts: 9700,
+        eventType: ACP_ENVELOPE_EVENT_TYPES.ToolCallUpdate,
+        kind: 'tool_result',
+        role: 'tool',
+        contentBlocks: [textBlock('todowrite')],
+        metadata: {
+          sessionId: 'session-todowrite-branch',
+          toolCallId: 'call_todowrite_branch',
+          status: 'completed',
+        },
+        payload: {
+          sessionId: 'session-todowrite-branch',
+          toolCallId: 'call_todowrite_branch',
+          kind: 'todowrite',
+          title: 'todowrite',
+          status: 'completed',
+          rawInput: { todos: historyTodos },
+        },
+      }),
+    ]);
+
+    expect(store.getState().todos).toMatchObject([
+      { id: 'fresh-1', content: 'Persisted todo from history' },
+    ]);
+  });
+
+  it('keeps a live terminal tool result when history only has the pending call', () => {
+    const store = createAcpStore();
+
+    const pendingCallEnvelope = acpEnvelope({
+      id: 'persisted:pending-tool-call',
+      ts: 9800,
+      eventType: ACP_ENVELOPE_EVENT_TYPES.ToolCall,
+      kind: 'tool_call',
+      role: 'tool',
+      contentBlocks: [textBlock('read')],
+      metadata: {
+        sessionId: 'session-1',
+        toolCallId: 'call_pending_result',
+        status: 'running',
+      },
+      payload: {
+        sessionId: 'session-1',
+        toolCallId: 'call_pending_result',
+        title: 'read',
+        kind: 'read',
+        status: 'running',
+      },
+    });
+
+    store.getState()._loadAcpHistory([pendingCallEnvelope]);
+
+    // The terminal result arrives over the live socket...
+    emitAcp(
+      store,
+      acpToolCallUpdate({
+        toolCallId: 'call_pending_result',
+        id: 'live:tool-terminal',
+        ts: 9900,
+        payload: {
+          status: 'completed',
+          output: 'file contents here',
+        },
+      }),
+    );
+
+    // ...and the next refetch still only has the pending call persisted.
+    store.getState()._mergeAcpHistory([pendingCallEnvelope]);
+
+    const toolMessages = store
+      .getState()
+      .messages.filter(
+        (message) => message.toolCallId === 'call_pending_result',
+      );
+    expect(toolMessages).toHaveLength(1);
+    expect(toolMessages[0]?.kind).toBe('tool_result');
+    expect(toolMessages[0]?.text).toContain('file contents here');
+  });
+
   it('masks secret request_user_input responses in the transcript', () => {
     const store = createAcpStore();
 

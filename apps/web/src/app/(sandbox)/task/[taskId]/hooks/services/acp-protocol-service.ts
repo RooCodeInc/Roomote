@@ -1723,6 +1723,7 @@ export class AcpProtocolService {
 
           if ('todos' in result && result.todos) {
             todos = result.todos;
+            hasPlanHistory = true;
           }
         }
 
