@@ -45,7 +45,7 @@ vi.mock('@roomote/db/encryption', () => ({
 }));
 
 vi.mock('@roomote/cloud-agents/server', () => ({
-  resolveUserIdForCloudJob: mockResolveUserIdForCloudJob,
+  resolveCredentialUserIdForCloudJob: mockResolveUserIdForCloudJob,
 }));
 
 import { db } from '@roomote/db/server';

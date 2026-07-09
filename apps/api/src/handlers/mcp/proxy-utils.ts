@@ -9,7 +9,7 @@ import {
   isUserToken,
   parseMcpJsonRpcPayload,
 } from '@roomote/types';
-import { resolveUserIdForCloudJob } from '@roomote/cloud-agents/server';
+import { resolveCredentialUserIdForCloudJob } from '@roomote/cloud-agents/server';
 import { cloudJobs, db, eq } from '@roomote/db/server';
 
 import type { Variables } from '../../types';
@@ -102,7 +102,7 @@ export async function resolveActingUserId(
     throw new McpProxyError(404, 'Cloud job not found for this MCP token');
   }
 
-  const resolvedUserId = await resolveUserIdForCloudJob({
+  const resolvedUserId = await resolveCredentialUserIdForCloudJob({
     id: auth.cloudJobId,
     userId: cloudJob.userId,
   });
@@ -133,7 +133,7 @@ async function verifyCloudJobHasRealUser(
     );
   }
 
-  const resolvedUserId = await resolveUserIdForCloudJob(cloudJob);
+  const resolvedUserId = await resolveCredentialUserIdForCloudJob(cloudJob);
 
   if (!hasRealCloudJobUser(resolvedUserId)) {
     return jsonRpcErrorResponse(

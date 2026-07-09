@@ -28,6 +28,8 @@ import {
   resolveSourceControlProviderFromPayload,
   TASK_TIMEOUT_MS,
   type SourceControlProvider,
+  isKnownAutomationTaskType,
+  resolveTaskAutomationDisplayName,
 } from '@roomote/types';
 import { Env } from '@roomote/env';
 import {
@@ -127,12 +129,17 @@ async function resolvePersistedTaskAttributionSnapshot(
   task: CloudTask,
 ): Promise<TaskAttributionSnapshot> {
   if (task.attributionOverride?.kind === 'automatic') {
+    const overrideDisplayName =
+      typeof task.attributionOverride.displayName === 'string'
+        ? task.attributionOverride.displayName.trim()
+        : '';
     return {
       attributionKind: 'automatic',
       attributedUserId: null,
       attributionSourceKind:
         task.attributionOverride.sourceKind ?? 'automation',
-      attributionSourceDisplayName: null,
+      attributionSourceDisplayName:
+        overrideDisplayName || resolveTaskAutomationDisplayName(task) || null,
       attributionSourceExternalId: null,
       attributedGithubLogin: null,
       attributedGithubUserId: null,
@@ -713,8 +720,17 @@ export async function enqueueCloudTask(
 
   await assertDeploymentIsActive();
 
-  if (!userId && !githubUserId) {
-    throw new Error('A cloud task must have a userId or a githubUserId.');
+  // Automation-initiated tasks carry no stamped user id. Their attribution is
+  // the automation name, and credential resolution happens lazily at job-token
+  // mint time via `resolveCredentialUserIdForCloudJob`.
+  const isAutomationInitiated =
+    task.attributionOverride?.kind === 'automatic' ||
+    isKnownAutomationTaskType(task.type);
+
+  if (!userId && !githubUserId && !isAutomationInitiated) {
+    throw new Error(
+      'A cloud task must have a userId or a githubUserId, or be initiated by a known automation.',
+    );
   }
 
   if (userId) {

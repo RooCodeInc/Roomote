@@ -4,7 +4,7 @@ import {
   enqueueCloudTask,
   getTaskUrl,
   routeGitHubTask,
-  resolveUserIdForCloudJob,
+  resolveCredentialUserIdForCloudJob,
 } from '@roomote/cloud-agents/server';
 import {
   findActiveGitHubPrReviewTask,
@@ -841,7 +841,7 @@ async function resolveReusableTaskSenderUserId({
 
   return (
     latestJob.actingUserId ??
-    (await resolveUserIdForCloudJob({
+    (await resolveCredentialUserIdForCloudJob({
       id: latestJob.id,
       userId: latestJob.userId,
     }))
@@ -1030,7 +1030,7 @@ async function resumeExistingTaskAndDeliverFollowUp({
   const senderUserId =
     userId ??
     sourceJob.actingUserId ??
-    (await resolveUserIdForCloudJob({
+    (await resolveCredentialUserIdForCloudJob({
       id: sourceJob.id,
       userId: sourceJob.userId,
     }));

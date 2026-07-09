@@ -1,7 +1,4 @@
-import {
-  enqueueCloudTask,
-  resolveUserIdForCloudJob,
-} from '@roomote/cloud-agents/server';
+import { enqueueCloudTask } from '@roomote/cloud-agents/server';
 import {
   completeBackgroundAutomationRun,
   completeBackgroundAutomationRunByJobId,
@@ -157,19 +154,6 @@ export function createScheduledTriageJob(
           continue;
         }
 
-        const adminUserId = await resolveUserIdForCloudJob({
-          id: 0,
-          userId: null,
-        });
-
-        if (!adminUserId) {
-          console.warn(
-            `${logPrefix} Skipping deployment: no active user available for scheduled ${config.automationKey.replaceAll('_', ' ')} task`,
-          );
-          skipped++;
-          continue;
-        }
-
         const scanTask = await config.buildScanTask({
           deployment,
           channelId,
@@ -195,7 +179,10 @@ export function createScheduledTriageJob(
 
         const launchResult = await enqueueCloudTask(
           {
-            userId: adminUserId,
+            // Automation-initiated: no stamped user id. Attribution comes
+            // from the suggestion source, and credentials resolve at
+            // token-mint time.
+            userId: null,
             type: CloudTaskType.SuggestedTasks,
             payload: scanTask.payload,
           },

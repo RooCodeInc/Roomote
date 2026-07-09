@@ -27,7 +27,7 @@ import {
 } from '@roomote/db/server';
 import {
   dequeueCloudTask,
-  resolveUserIdForCloudJob,
+  resolveCredentialUserIdForCloudJob,
 } from '@roomote/cloud-agents/server';
 import { finishCloudJob } from '@roomote/sdk/server';
 
@@ -411,7 +411,7 @@ export abstract class BaseController {
   protected async dequeueCloudJob(
     cloudJob: CloudJob,
   ): Promise<{ cloudJob: CloudJob; authToken: string } | null> {
-    const userId = await resolveUserIdForCloudJob(cloudJob);
+    const userId = await resolveCredentialUserIdForCloudJob(cloudJob);
 
     if (!userId) {
       throw new Error(

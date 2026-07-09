@@ -1,16 +1,22 @@
 import {
-  type EffectiveAuthorKind,
   TASK_ATTRIBUTION_SOURCE_KINDS,
-  type TaskAttributionKind,
   type TaskAttributionSourceKind,
 } from '@roomote/types';
 
 const UNLINKED_CREATOR_FILTER_PREFIX = 'unlinked:';
-export const ROOMOTE_CREATOR_FILTER_VALUE = 'author:roomote';
+const AUTOMATION_CREATOR_FILTER_PREFIX = 'automation:';
+
+/** Shared bucket for automation-initiated tasks without a specific name. */
+export const AUTOMATIONS_CREATOR_FILTER_VALUE = 'automations';
+export const AUTOMATIONS_CREATOR_FILTER_LABEL = 'Automations';
 
 type ParsedCreatorFilterValue =
   | {
-      kind: 'roomote';
+      kind: 'automations';
+    }
+  | {
+      kind: 'automation';
+      label: string;
     }
   | {
       kind: 'matched_user';
@@ -22,40 +28,56 @@ type ParsedCreatorFilterValue =
       sourceExternalId: string;
     };
 
-export function buildCreatorFilterValue(input: {
-  effectiveAuthorKind?: EffectiveAuthorKind | null | undefined;
-  userId?: string | null | undefined;
-  attributionKind: TaskAttributionKind | null | undefined;
+export function buildMatchedUserCreatorFilterValue(userId: string): string {
+  return userId;
+}
+
+export function buildUnlinkedCreatorFilterValue(input: {
   attributionSourceKind: TaskAttributionSourceKind | null | undefined;
   attributionSourceExternalId: string | null | undefined;
 }): string | null {
-  if (input.effectiveAuthorKind === 'roomote') {
-    return ROOMOTE_CREATOR_FILTER_VALUE;
+  if (!input.attributionSourceKind || !input.attributionSourceExternalId) {
+    return null;
   }
 
-  if (input.userId) {
-    return input.userId;
-  }
+  return `${UNLINKED_CREATOR_FILTER_PREFIX}${input.attributionSourceKind}:${encodeURIComponent(
+    input.attributionSourceExternalId,
+  )}`;
+}
 
-  if (
-    input.attributionKind === 'unlinked_user' &&
-    input.attributionSourceKind &&
-    input.attributionSourceExternalId
-  ) {
-    return `${UNLINKED_CREATOR_FILTER_PREFIX}${input.attributionSourceKind}:${encodeURIComponent(
-      input.attributionSourceExternalId,
-    )}`;
-  }
-
-  return null;
+export function buildAutomationCreatorFilterValue(label: string): string {
+  return `${AUTOMATION_CREATOR_FILTER_PREFIX}${encodeURIComponent(label)}`;
 }
 
 export function parseCreatorFilterValue(
   value: string,
 ): ParsedCreatorFilterValue {
-  if (value === ROOMOTE_CREATOR_FILTER_VALUE) {
+  if (value === AUTOMATIONS_CREATOR_FILTER_VALUE) {
     return {
-      kind: 'roomote',
+      kind: 'automations',
+    };
+  }
+
+  if (value.startsWith(AUTOMATION_CREATOR_FILTER_PREFIX)) {
+    let label: string;
+
+    try {
+      label = decodeURIComponent(
+        value.slice(AUTOMATION_CREATOR_FILTER_PREFIX.length),
+      );
+    } catch {
+      label = '';
+    }
+
+    if (label) {
+      return {
+        kind: 'automation',
+        label,
+      };
+    }
+
+    return {
+      kind: 'automations',
     };
   }
 

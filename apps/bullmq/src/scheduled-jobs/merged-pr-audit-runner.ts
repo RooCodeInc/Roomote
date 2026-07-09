@@ -2,7 +2,6 @@ import {
   buildRepositoryCoverage,
   enqueueCloudTask,
   formatRepositoryEnvironmentLines,
-  resolveUserIdForCloudJob,
   type RepositoryCoverage,
 } from '@roomote/cloud-agents/server';
 import {
@@ -438,30 +437,6 @@ async function processDeployment(
       return { kind: 'processed' };
     }
 
-    const adminUserId = await resolveUserIdForCloudJob({
-      id: 0,
-      userId: null,
-    });
-
-    if (!adminUserId) {
-      console.warn(
-        `${logPrefix} Skipping deployment: no user available for ${config.automationKey.replaceAll('_', ' ')} task`,
-      );
-      await completeBackgroundAutomationRun(db, {
-        runId,
-        automationKey: config.automationKey,
-        status: 'failed',
-        finishedAt: new Date(),
-        error: `No user available for ${config.automationKey.replaceAll('_', ' ')} cloud task.`,
-        lastRunAt: 'skip',
-        metadata: {
-          reason: 'no_user',
-          scanUpperBound: scanUpperBound.toISOString(),
-        },
-      });
-      return { kind: 'skipped' };
-    }
-
     const recentThreadFeedback = await loadAutomationThreadFeedbackReport({
       automationKey: config.automationKey,
       slackChannelId: channelId,
@@ -475,7 +450,9 @@ async function processDeployment(
 
     const launchResult = await enqueueCloudTask(
       {
-        userId: adminUserId,
+        // Automation-initiated: no stamped user id. Attribution comes from
+        // the suggestion source, and credentials resolve at token-mint time.
+        userId: null,
         type: CloudTaskType.SuggestedTasks,
         payload: {
           repo: ALL_REPOSITORIES,

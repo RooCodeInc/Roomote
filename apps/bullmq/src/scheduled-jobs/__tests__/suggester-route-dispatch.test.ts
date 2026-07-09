@@ -35,7 +35,6 @@ import { dispatchSuggestionRoutes } from '../suggester-route-dispatch';
 
 function buildParams() {
   return {
-    adminUserId: 'admin-1',
     deployment: {
       slackBotToken: 'xoxb-test',
       slackTeamId: 'T-1',
@@ -118,7 +117,7 @@ describe('dispatchSuggestionRoutes', () => {
     );
     expect(mockEnqueueCloudTask).toHaveBeenCalledWith(
       {
-        userId: 'admin-1',
+        userId: null,
         type: CloudTaskType.SuggestedTasks,
         payload: {
           repo: ALL_REPOSITORIES,

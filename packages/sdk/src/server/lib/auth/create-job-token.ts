@@ -3,7 +3,7 @@ import { z } from 'zod';
 import type { AuthTokenContext } from '@roomote/types';
 import * as Auth from '@roomote/auth';
 import { db, cloudJobs, eq } from '@roomote/db/server';
-import { resolveUserIdForCloudJob } from '@roomote/cloud-agents/server';
+import { resolveCredentialUserIdForCloudJob } from '@roomote/cloud-agents/server';
 
 export const createJobTokenInputSchema = Auth.createJobTokenOptionsSchema.omit({
   userId: true,
@@ -22,7 +22,7 @@ export const createJobToken = async (
     throw new Error(`Cloud job ${input.cloudJobId} not found`);
   }
 
-  const userId = await resolveUserIdForCloudJob(cloudJob);
+  const userId = await resolveCredentialUserIdForCloudJob(cloudJob);
 
   if (!userId) {
     console.error(

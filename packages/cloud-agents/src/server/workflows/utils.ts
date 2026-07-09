@@ -236,7 +236,14 @@ function buildPrBodyAttributionLine({
       : defaultFollowUpInstruction;
 
   if (attribution.authorKind === 'roomote') {
-    return `> Created by Roomote. ${instruction}`;
+    // `productDisplay` carries the initiating automation's name (for example
+    // "PR Reviewer") and falls back to the product name for unnamed
+    // automation work.
+    const safeAutomationName = escapeValue(
+      attribution.productDisplay?.trim() || PRODUCT_NAME,
+    );
+
+    return `> Created by ${safeAutomationName}. ${instruction}`;
   }
 
   const safeUserName = escapeValue(

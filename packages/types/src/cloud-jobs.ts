@@ -730,6 +730,8 @@ const sharedTaskSchema = z.object({
     .object({
       kind: z.literal('automatic'),
       sourceKind: z.enum(TASK_ATTRIBUTION_SOURCE_KINDS).optional(),
+      /** User-facing automation name for attribution/analytics. */
+      displayName: z.string().min(1).optional(),
     })
     .optional(),
   /**
