@@ -52,13 +52,15 @@
 # - ROOMOTE_APP_URL on api is the single canonical-origin knob; the other
 #   app services reference ${{api.ROOMOTE_APP_URL}}. Note api's own value
 #   is itself a reference (https://${{web.RAILWAY_PUBLIC_DOMAIN}}), so this
-#   is a reference to a reference — a pattern Railway's docs neither
-#   promise nor rule out. The mandatory scratch-project first-boot run (see
-#   "Maintaining the marketplace template" in README.md) must confirm the
-#   app services receive the resolved URL, not a literal ${{...}} string;
-#   if resolution ever fails, fall back to repeating the raw
-#   https://${{web.RAILWAY_PUBLIC_DOMAIN}} value per service and accept the
-#   multi-service edit when changing domains. A custom domain is either set
+#   is a reference to a reference. Verified working on a scratch deploy
+#   (2026-07-08): the app services receive the resolved URL, not a literal
+#   ${{...}} string. Re-check it on the scratch-project first-boot run
+#   after template changes (see "Maintaining the marketplace template" in
+#   README.md); if resolution ever regresses, fall back to repeating the
+#   raw https://${{web.RAILWAY_PUBLIC_DOMAIN}} value per service and accept
+#   the multi-service edit when changing domains. Do NOT flatten the
+#   ${{api.*}} references to raw values in the Composer — that silently
+#   breaks the one-variable custom-domain edit. A custom domain is either set
 #   at deploy time through the ROOMOTE_APP_URL prompt or attached later as
 #   a one-variable edit; see "Attaching a custom domain" in README.md.
 #   ROOMOTE_PUBLIC_URL is intentionally not set — the app falls
