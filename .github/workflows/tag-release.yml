@@ -17,17 +17,28 @@ jobs:
     name: Create v* tag
     runs-on: blacksmith-4vcpu-ubuntu-2404
     steps:
+      - name: Require RELEASE_BOT_TOKEN
+        env:
+          RELEASE_BOT_TOKEN: ${{ secrets.RELEASE_BOT_TOKEN }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ -z "${RELEASE_BOT_TOKEN:-}" ]; then
+            echo "::error::RELEASE_BOT_TOKEN is required to push product tags. GITHUB_TOKEN does not re-trigger publish-ghcr.yml or create-github-release, so a token-less tag would leave v* versions stuck without images. Add a GitHub App installation token or fine-grained PAT (contents + pull-requests write) as the RELEASE_BOT_TOKEN repository secret, then re-run this workflow / re-promote."
+            exit 1
+          fi
+
       - name: Checkout
         uses: actions/checkout@v4
         with:
-          # Bot token so creating the tag triggers publish-ghcr.yml (GITHUB_TOKEN
-          # pushes do not kick off other workflows).
-          token: ${{ secrets.RELEASE_BOT_TOKEN || secrets.GITHUB_TOKEN }}
+          # Must be RELEASE_BOT_TOKEN (not GITHUB_TOKEN): workflow-created tag
+          # pushes from GITHUB_TOKEN do not kick off publish-ghcr.yml.
+          token: ${{ secrets.RELEASE_BOT_TOKEN }}
           fetch-depth: 0
 
       - name: Push annotated product tag when version is new
         env:
-          GH_TOKEN: ${{ secrets.RELEASE_BOT_TOKEN || secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ secrets.RELEASE_BOT_TOKEN }}
         shell: bash
         run: |
           set -euo pipefail

@@ -737,11 +737,15 @@ Any `@roomote/*` package selection is equivalent under the fixed group. See
 
 ### Secrets and branch rules
 
-- Prefer repository secret `RELEASE_BOT_TOKEN` (GitHub App installation token or
-  fine-grained PAT with `contents: write` and `pull-requests: write`). Workflows
-  fall back to `GITHUB_TOKEN`, but that path does not re-trigger
-  `publish-ghcr.yml` after a tag push and often does not run CI on bot-opened
-  PRs.
+- Repository secret `RELEASE_BOT_TOKEN` (GitHub App installation token or
+  fine-grained PAT with `contents: write` and `pull-requests: write`) is
+  **required** for product tagging. `.github/workflows/tag-release.yml` fails
+  closed without it: pushing a `v*` tag with the default `GITHUB_TOKEN` does
+  not re-trigger `publish-ghcr.yml`, which would wedge that version until
+  manual tag/release cleanup. The Version / Promote PR automation in
+  `release.yml` still prefers `RELEASE_BOT_TOKEN` (falls back to
+  `GITHUB_TOKEN`) so repository setup before secrets land is possible, but CI
+  on bot-opened PRs may need a re-run without it.
 - Protect `main`: require a pull request, require green CI, and prefer
   merge-commit-only for promote PRs.
 - Product `v*` releases must stay the only **non-prerelease** GitHub Releases
