@@ -144,10 +144,16 @@ enable a Better Auth Azure DevOps linked-account flow backed by Microsoft
 Entra. The provider requests the Azure DevOps resource scope
 `499b84ac-1321-427f-aa17-267ca6975798/.default`, then calls global Azure
 DevOps APIs under `https://app.vssps.visualstudio.com`. It stores
-`auth_accounts.provider_id = 'ado'` with the stable
-`connectionData.authenticatedUser.id` so comment-webhook authors can be matched
-to linked Roomote users, and uses the profile API only for display/email
-enrichment. The Entra tenant must have the Azure DevOps enterprise
+`auth_accounts.provider_id = 'ado'` with `account_id` set to the linked
+identity's normalized `uniqueName` (UPN/email). Azure DevOps exposes a user
+under different id namespaces per surface — the OAuth `connectionData` returns
+a vssps user id, while pull request comment webhooks deliver an org identity
+id, and neither equals the Entra object id — so those ids never match across
+surfaces. The `uniqueName` is the one identifier present identically on both
+the link response and the comment webhook, so linked-account matching keys off
+it (normalized via `normalizeAdoLinkedAccountKey`); the profile API is used
+only for display/email enrichment. The Entra tenant must have the Azure DevOps
+enterprise
 application/service principal and admin consent for the app's Azure DevOps
 delegated permission. Comment-triggered work requires this row so the task can
 run as the linked Roomote user while repository clone, API, and comment writes
@@ -245,14 +251,17 @@ gate.
 
 Comment mention routing is explicit-request driven, so it bypasses the PR
 author policy while still requiring the synced repository and environment
-mapping gate. Roomote ignores comments authored by Roomote-prefixed Azure
-DevOps identities or by the current deployment token identity resolved from
-Azure DevOps connection data. Explicit ADO comment mentions require the
-commenter to have a linked Azure DevOps account in Settings > Linked Accounts;
-target resolution matches the webhook comment author's stable `id` to
-`auth_accounts.provider_id = 'ado'` and attributes the task to that linked
-Roomote user. When no linked account exists, Roomote replies on the PR thread
-with a link-account instruction instead of starting work.
+mapping gate. Roomote ignores comments authored by the Roomote bot identity
+(name/handle beginning with `roomote`) or by the current deployment token
+identity resolved from Azure DevOps connection data. The self-identity check is
+name-prefix based, not a bare `@roomote` substring, so real users in a
+`roomote.*` Entra tenant are not mistaken for the bot. Explicit ADO comment
+mentions require the commenter to have a linked Azure DevOps account in
+Settings > Linked Accounts; target resolution matches the webhook comment
+author's normalized `uniqueName` to `auth_accounts.account_id` (provider
+`ado`) and attributes the task to that linked Roomote user. When no linked
+account exists, Roomote replies on the PR thread with a link-account
+instruction instead of starting work.
 
 ## Smoke Test
 

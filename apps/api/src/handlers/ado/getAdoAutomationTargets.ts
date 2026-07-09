@@ -1,3 +1,4 @@
+import { normalizeAdoLinkedAccountKey } from '@roomote/ado';
 import {
   CloudAgentType,
   DEFAULT_PR_REVIEWER_SETTINGS,
@@ -38,15 +39,17 @@ export function getAdoIdentityName(
   return identity?.uniqueName ?? identity?.displayName;
 }
 
-function getAdoIdentityId(identity: AdoIdentity | undefined): string | null {
-  const id = identity?.id?.trim();
-
-  return id && id.length > 0 ? id : null;
-}
-
 export function isRoomoteAdoIdentity(identityName: string): boolean {
-  const normalized = identityName.toLowerCase();
-  return normalized.startsWith('roomote') || normalized.includes('@roomote');
+  const normalized = identityName.toLowerCase().trim();
+
+  // Match Roomote's own bot by its identity name/handle only. A bare
+  // `@roomote` substring check also matched every human whose Azure DevOps
+  // uniqueName is an email in a `roomote.*` tenant (e.g.
+  // `dan@roomote.onmicrosoft.com`), which silently dropped their `@roomote`
+  // PR comment mentions. The comment path additionally guards against
+  // Roomote's own posts with `isDeploymentTokenAuthor`, which resolves the
+  // exact deployment identity rather than guessing from the name.
+  return normalized.startsWith('roomote') || normalized.startsWith('@roomote');
 }
 
 export async function getAdoAutomationTargets({
@@ -73,7 +76,12 @@ export async function getAdoAutomationTargets({
   const repositoryId = payload.resource.repository.id;
   const fullName = payload.repositoryFullName;
   const authorName = getAdoIdentityName(payload.resource.createdBy);
-  const senderAdoUserId = getAdoIdentityId(payload.commentAuthor);
+  // Linked accounts are keyed on the commenter's normalized uniqueName
+  // (UPN/email); the comment author's raw `id` is a different Azure DevOps id
+  // namespace than the one stored at link time and never matches.
+  const senderLinkedAccountKey = normalizeAdoLinkedAccountKey(
+    payload.commentAuthor?.uniqueName,
+  );
   const senderName = getAdoIdentityName(payload.commentAuthor);
 
   const repo = await db.query.repositories.findFirst({
@@ -99,11 +107,11 @@ export async function getAdoAutomationTargets({
   let linkedSenderUserId: string | null = null;
 
   if (requireLinkedSenderAccount) {
-    const linkedAccount = senderAdoUserId
+    const linkedAccount = senderLinkedAccountKey
       ? await db.query.authAccounts.findFirst({
           where: and(
             eq(authAccounts.providerId, 'ado'),
-            eq(authAccounts.accountId, senderAdoUserId),
+            eq(authAccounts.accountId, senderLinkedAccountKey),
           ),
           orderBy: [desc(authAccounts.updatedAt)],
           columns: {
@@ -118,7 +126,7 @@ export async function getAdoAutomationTargets({
       return {
         status: 'error',
         code: 'account_link_required',
-        message: `Azure DevOps user ${senderName ?? senderAdoUserId ?? 'unknown'} is not linked to a Roomote user`,
+        message: `Azure DevOps user ${senderName ?? senderLinkedAccountKey ?? 'unknown'} is not linked to a Roomote user`,
       };
     }
   }

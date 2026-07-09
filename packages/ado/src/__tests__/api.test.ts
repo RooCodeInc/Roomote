@@ -71,6 +71,7 @@ import {
   removeAdoServiceHooksForRepositories,
   getAdoDeploymentUser,
   listAdoRepositories,
+  normalizeAdoLinkedAccountKey,
   validateAdoToken,
   type AdoRepository,
 } from '../api';
@@ -760,5 +761,23 @@ describe('Azure DevOps API helpers', () => {
           body.eventType === 'ms.vss-code.git-pullrequest-comment-event',
       ),
     ).toBe(true);
+  });
+});
+
+describe('normalizeAdoLinkedAccountKey', () => {
+  it('lowercases and trims so the link and webhook sides agree', () => {
+    expect(normalizeAdoLinkedAccountKey('  Dan@Roomote.OnMicrosoft.com ')).toBe(
+      'dan@roomote.onmicrosoft.com',
+    );
+    expect(normalizeAdoLinkedAccountKey('dan@roomote.onmicrosoft.com')).toBe(
+      'dan@roomote.onmicrosoft.com',
+    );
+  });
+
+  it('returns null for empty or missing values', () => {
+    expect(normalizeAdoLinkedAccountKey('')).toBeNull();
+    expect(normalizeAdoLinkedAccountKey('   ')).toBeNull();
+    expect(normalizeAdoLinkedAccountKey(null)).toBeNull();
+    expect(normalizeAdoLinkedAccountKey(undefined)).toBeNull();
   });
 });

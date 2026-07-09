@@ -377,6 +377,24 @@ export function clearAdoDeploymentUserCache(): void {
   cachedAdoDeploymentUser = null;
 }
 
+/**
+ * Normalizes an Azure DevOps identity to the key used for linked-account
+ * matching. Azure DevOps exposes a user's identity under different ids per
+ * surface: the Entra OAuth `connectionData` returns a vssps user id, while
+ * pull request comment webhooks deliver an org identity id — the two never
+ * match, and neither equals the Entra object id. The `uniqueName` (UPN /
+ * email) is the one value present identically on both surfaces, so linked
+ * accounts key off it. Lowercasing and trimming keeps the link side and the
+ * webhook side in agreement.
+ */
+export function normalizeAdoLinkedAccountKey(
+  value: string | null | undefined,
+): string | null {
+  const normalized = value?.trim().toLowerCase();
+
+  return normalized ? normalized : null;
+}
+
 const adoPullRequestDetailsSchema = z
   .object({ pullRequestId: z.number() })
   .passthrough();
