@@ -8,6 +8,7 @@ import type {
   CommunicationThreadLookupResult,
 } from './provider';
 import { UnsupportedCommunicationOperationError } from './provider';
+import { getTelegramApiBaseUrl } from './telegram-api-base-url';
 import {
   TELEGRAM_MAX_MESSAGE_LENGTH,
   chunkTelegramMarkdown,
@@ -76,7 +77,7 @@ export class TelegramCommunicationProvider implements CommunicationProviderAdapt
   private readonly fetchImpl: typeof fetch;
 
   constructor(private readonly options: TelegramCommunicationProviderOptions) {
-    this.apiBaseUrl = options.apiBaseUrl ?? 'https://api.telegram.org';
+    this.apiBaseUrl = options.apiBaseUrl ?? getTelegramApiBaseUrl();
     this.fetchImpl = options.fetch ?? fetch;
   }
 
@@ -293,6 +294,80 @@ export class TelegramCommunicationProvider implements CommunicationProviderAdapt
       callback_query_id: input.callbackQueryId,
       ...(input.text ? { text: input.text } : {}),
     });
+  }
+
+  /**
+   * Replace the text (and keyboard) of an existing bot message. Mirrors the
+   * postMessage markdown handling: try Telegram HTML, fall back to the raw
+   * markdown as plain text when entity parsing fails. The edited text must
+   * fit in one message — this is for cards and status lines, not replies.
+   */
+  async editMessageText(input: {
+    channelId: string;
+    messageId: string;
+    text: string;
+    textFormat?: 'plain' | 'markdown';
+    buttons?: CommunicationMessageButton[][];
+  }): Promise<void> {
+    const useMarkdown = input.textFormat === 'markdown';
+    const firstChunk = useMarkdown
+      ? chunkTelegramMarkdownAsHtml(input.text)[0]
+      : null;
+    const attempts: Array<{ text: string; parseMode?: 'HTML' }> =
+      firstChunk?.html
+        ? [
+            { text: firstChunk.html, parseMode: 'HTML' },
+            { text: firstChunk.markdown },
+          ]
+        : [{ text: firstChunk?.markdown ?? input.text }];
+
+    let lastError: Error | null = null;
+
+    for (const attempt of attempts) {
+      const response = await this.fetchImpl(
+        `${this.apiBaseUrl.replace(/\/$/, '')}/bot${this.options.botToken}/editMessageText`,
+        {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({
+            chat_id: input.channelId,
+            message_id: Number.parseInt(input.messageId, 10),
+            text: attempt.text,
+            ...(attempt.parseMode ? { parse_mode: attempt.parseMode } : {}),
+            link_preview_options: { is_disabled: true },
+            reply_markup: buildTelegramReplyMarkup(input.buttons) ?? {
+              inline_keyboard: [],
+            },
+          }),
+        },
+      );
+      const parsed = (await response.json().catch(() => null)) as {
+        ok?: boolean;
+        description?: string;
+      } | null;
+
+      if (response.ok && parsed?.ok) {
+        return;
+      }
+
+      const description = parsed?.description;
+      lastError = new Error(
+        `Telegram editMessageText failed${
+          response.status ? ` (${response.status})` : ''
+        }: ${description ?? response.statusText}`,
+      );
+
+      const isEntityParseError =
+        attempt.parseMode === 'HTML' &&
+        response.status === 400 &&
+        Boolean(description?.toLowerCase().includes("can't parse entities"));
+
+      if (!isEntityParseError) {
+        throw lastError;
+      }
+    }
+
+    throw lastError ?? new Error('Telegram editMessageText failed.');
   }
 
   /** Replace or remove the inline keyboard on an existing message. */

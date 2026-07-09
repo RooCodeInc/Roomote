@@ -12,40 +12,23 @@ import {
 
 import { apiLogger } from '../../logging.js';
 import { stopTaskJob } from '../tasks/task-stop.js';
+import {
+  parseCancelTaskCallbackData,
+  parseTelegramRouteCallbackData,
+} from './callback-data.js';
 import { resolveTelegramSenderUserId } from './linked-user.js';
 import {
   answerTelegramCallbackQueryBestEffort,
   clearTelegramMessageButtonsBestEffort,
   postTelegramMessageBestEffort,
 } from './replies.js';
+import { handleTelegramRoutingCallback } from './routing-confirmation.js';
 import {
   claimTelegramSuggestionLaunch,
   parseTelegramSuggestionCallbackData,
 } from './setup-suggestions.js';
 import { startNewTelegramTask } from './task-orchestration.js';
 import type { QueuedTelegramCommunicationMessage } from './types.js';
-
-const CANCEL_TASK_CALLBACK_PREFIX = 'cancel_task:';
-
-/** callback_data is limited to 64 bytes, so carry only the cloud job id. */
-export function buildTelegramCancelTaskCallbackData(
-  cloudJobId: number,
-): string {
-  return `${CANCEL_TASK_CALLBACK_PREFIX}${cloudJobId}`;
-}
-
-function parseCancelTaskCallbackData(data: string): number | null {
-  if (!data.startsWith(CANCEL_TASK_CALLBACK_PREFIX)) {
-    return null;
-  }
-
-  const cloudJobId = Number.parseInt(
-    data.slice(CANCEL_TASK_CALLBACK_PREFIX.length),
-    10,
-  );
-
-  return Number.isSafeInteger(cloudJobId) && cloudJobId > 0 ? cloudJobId : null;
-}
 
 async function findCancelableCloudJob(cloudJobId: number, chatId: string) {
   return db.query.taskRuns.findFirst({
@@ -216,6 +199,8 @@ async function handleSuggestionLaunchCallback(params: {
         communicationChannelId: chatId,
         communicationMessageId: messageId,
       },
+      // The button click already is the explicit start signal.
+      skipRoutingConfirmation: true,
     });
   } catch (error) {
     apiLogger.warn(
@@ -251,6 +236,13 @@ export async function handleTelegramCallbackQuery(
 
   if (suggestionId !== null) {
     await handleSuggestionLaunchCallback({ query, suggestionId });
+    return;
+  }
+
+  const routeAction = parseTelegramRouteCallbackData(data);
+
+  if (routeAction !== null) {
+    await handleTelegramRoutingCallback({ query, action: routeAction });
     return;
   }
 

@@ -42,8 +42,10 @@ vi.mock('../getAdoAutomationTargets', () => ({
     displayName?: string;
   }) => identity?.uniqueName ?? identity?.displayName,
   isRoomoteAdoIdentity: (identityName: string) => {
-    const normalized = identityName.toLowerCase();
-    return normalized.startsWith('roomote') || normalized.includes('@roomote');
+    const normalized = identityName.toLowerCase().trim();
+    return (
+      normalized.startsWith('roomote') || normalized.startsWith('@roomote')
+    );
   },
 }));
 
@@ -337,6 +339,25 @@ describe('handleAdoComment', () => {
     });
     expect(mockEnqueueCloudTask).not.toHaveBeenCalled();
     expect(mockGetAdoAutomationTargets).not.toHaveBeenCalled();
+  });
+
+  it('processes mentions from a human whose email domain contains roomote', async () => {
+    // Regression: users in a `roomote.*` Entra tenant have `@roomote…`
+    // uniqueNames and must not be mistaken for Roomote's own bot.
+    const result = await handleAdoComment(
+      makeCommentPayload({
+        comment: {
+          author: {
+            id: 'ado-user-2',
+            uniqueName: 'dan@roomote.onmicrosoft.com',
+            displayName: 'Dan Riccio',
+          },
+        },
+      }),
+    );
+
+    expect(result).toEqual({ status: 'ok', metadata: { ids: [1234] } });
+    expect(mockEnqueueCloudTask).toHaveBeenCalled();
   });
 
   it('posts a reviewer-gate comment when no automation target is found', async () => {

@@ -68,6 +68,13 @@ x-roomote-env: &roomote-env
   NEXT_PUBLIC_GITHUB_APP_SLUG: ${NEXT_PUBLIC_GITHUB_APP_SLUG:-}
   SETUP_TOKEN: ${SETUP_TOKEN:-}
   DEFAULT_COMPUTE_PROVIDER: ${DEFAULT_COMPUTE_PROVIDER:-docker}
+  # Declarative environment provisioning: point ROOMOTE_ENVIRONMENTS_DIR at a
+  # directory of environment YAML files mounted into the api container (for
+  # example `- ./environments:/roomote/environments:ro` on the api service),
+  # or put inline multi-document YAML in ROOMOTE_ENVIRONMENTS_YAML. Only the
+  # api service reads these; see SELF_HOSTING.md.
+  ROOMOTE_ENVIRONMENTS_DIR: ${ROOMOTE_ENVIRONMENTS_DIR:-}
+  ROOMOTE_ENVIRONMENTS_YAML: ${ROOMOTE_ENVIRONMENTS_YAML:-}
 
 x-roomote-service: &roomote-service
   restart: unless-stopped

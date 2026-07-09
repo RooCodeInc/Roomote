@@ -5,6 +5,8 @@ import {
   deploymentSettings,
   eq,
   isNull,
+  ne,
+  not,
   slackInstallations,
   users,
 } from '@roomote/db/server';
@@ -22,6 +24,7 @@ import { isSetupBootstrapOpen } from './setup-bootstrap';
 import { isSetupTokenValid } from './setup-token';
 
 const DEFAULT_DEPLOYMENT_ID = 'default';
+const SETUP_BOOTSTRAP_USER_ID = 'setup-bootstrap-user';
 const SLACK_TEAM_ID_CLAIM = 'https://slack.com/team_id';
 const MICROSOFT_ENTRA_PROVIDER_ID = 'microsoft-entra-id';
 
@@ -90,6 +93,18 @@ async function hasExistingAppUser(userId: string): Promise<boolean> {
     .select({ id: users.id })
     .from(users)
     .where(and(eq(users.id, userId), isNull(users.deletedAt)))
+    .limit(1);
+
+  return existingUser != null;
+}
+
+async function hasAnyOtherRealAppUser(userId: string): Promise<boolean> {
+  const [existingUser] = await db
+    .select({ id: users.id })
+    .from(users)
+    .where(
+      and(ne(users.id, SETUP_BOOTSTRAP_USER_ID), not(eq(users.id, userId))),
+    )
     .limit(1);
 
   return existingUser != null;
@@ -166,22 +181,10 @@ export async function evaluateSignInAccess({
     return { allowed: false };
   }
 
-  if (await hasExistingAppUser(userId)) {
-    return { allowed: true, via: 'existing_user' };
-  }
-
-  if (await isUserInProviderOrg(userId)) {
-    return { allowed: true, via: 'org_membership' };
-  }
-
   const inviteToken = await getRequestInviteToken();
-  const invite = await findUsableInviteByToken(inviteToken);
+  const setupBootstrapOpen = await isSetupBootstrapOpen();
 
-  if (invite) {
-    return { allowed: true, via: 'invite', inviteId: invite.id };
-  }
-
-  if (await isSetupBootstrapOpen()) {
+  if (setupBootstrapOpen && Env.SETUP_TOKEN && inviteToken) {
     // The system invite: while initial setup is still open, a valid
     // SETUP_TOKEN admits the deployment operator, even when an earlier
     // aborted setup attempt already left an account behind. Only local
@@ -191,6 +194,29 @@ export async function evaluateSignInAccess({
     if (isSetupTokenValid(inviteToken ?? undefined)) {
       return { allowed: true, via: 'bootstrap' };
     }
+  }
+
+  if (
+    setupBootstrapOpen &&
+    !Env.SETUP_TOKEN &&
+    isSetupTokenValid(undefined) &&
+    !(await hasAnyOtherRealAppUser(userId))
+  ) {
+    return { allowed: true, via: 'bootstrap' };
+  }
+
+  if (await hasExistingAppUser(userId)) {
+    return { allowed: true, via: 'existing_user' };
+  }
+
+  const invite = await findUsableInviteByToken(inviteToken);
+
+  if (invite) {
+    return { allowed: true, via: 'invite', inviteId: invite.id };
+  }
+
+  if (await isUserInProviderOrg(userId)) {
+    return { allowed: true, via: 'org_membership' };
   }
 
   return { allowed: false };

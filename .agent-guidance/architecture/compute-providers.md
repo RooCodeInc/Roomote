@@ -162,8 +162,9 @@ snapshots.
   baseImageRef: string;         // MODAL_BASE_IMAGE_REF
   registryUsername?: string;    // MODAL_REGISTRY_USERNAME
   registryPassword?: string;    // MODAL_REGISTRY_PASSWORD
-  ecrOidcRoleArn?: string;      // MODAL_ECR_OIDC_ROLE_ARN
+  ecrOidcRoleArn?: string;    // MODAL_ECR_OIDC_ROLE_ARN
   ecrRegion?: string;           // MODAL_ECR_REGION
+  regions?: string[];           // MODAL_REGIONS (optional placement list)
   timeoutMs?: number;
 }
 ```
@@ -212,6 +213,10 @@ environment-snapshot resumes use one shared source of truth for the cap.
 - Modal can pull the base image from ECR via OIDC when both `MODAL_ECR_OIDC_ROLE_ARN` and `MODAL_ECR_REGION` are configured.
 - The image reference still comes from `MODAL_BASE_IMAGE_REF`; OIDC only changes how Modal authenticates the pull.
 
+**Container region placement**:
+
+- Optional `regions` (`MODAL_REGIONS`, comma-separated Modal region tokens such as `us` or `us-west`) is passed through to `sandboxes.create` on fresh boots and snapshot resumes. Unset keeps Modal's default placement. This is independent of `MODAL_ECR_REGION`.
+
 ### Daytona
 
 **Location**: `packages/compute-providers/src/adapters/daytona.ts`
@@ -221,7 +226,7 @@ for its minimal customer onboarding: authentication is a single
 `DAYTONA_API_KEY`, and the worker base image is a Daytona snapshot registered
 once from the public Roomote worker image (any publicly accessible registry
 image works), so customers never build or upload images themselves. The
-setup wizard and the Settings → Compute page can register that snapshot
+setup wizard and the Settings → Sandboxes page can register that snapshot
 automatically from the configured worker image
 (`registerDaytonaWorkerSnapshot` in
 `packages/compute-providers/src/daytona/register-daytona-snapshot.ts`); see
@@ -597,7 +602,7 @@ Runtime credential resolution is process-env-first with a database fallback:
   image is available yet, and Docker stays credentials-free and needs no
   hosted worker image.
 - Runtime env values lock their field in the UI and are never overwritten by a
-  save. Otherwise the setup wizard and the Settings → Compute save commands
+  save. Otherwise the setup wizard and the Settings → Sandboxes save commands
   persist submitted credentials, submitted infrastructure values, and the
   shared worker image as encrypted deployment env vars.
 - For Modal, `MODAL_BASE_IMAGE_REF` is derived from the effective worker image
@@ -636,9 +641,9 @@ Runtime credential resolution is process-env-first with a database fallback:
 - Registry auth (Modal ECR OIDC or registry username/password pairs),
   endpoints, and timeouts stay env-only and are not surfaced by the UI.
 
-### Settings → Compute Page
+### Settings → Sandboxes Page
 
-Admins can also manage compute providers after setup at `/settings/compute`
+Admins can also manage compute providers after setup at `/settings/sandboxes`
 (admin-only, mirroring the Settings → Communications pattern). The page is
 `ComputeSettingsPage` → `ComputeProviders` / `ComputeProviderSection` in
 `apps/web/src/components/settings/`, backed by the `compute` tRPC router
@@ -649,22 +654,22 @@ Admins can also manage compute providers after setup at `/settings/compute`
   `deployment_settings.runtime_compute_config`, and the saved shared worker
   image, plus the deployment-wide `provisioning` map of per-provider worker
   base-image runs (stale in-flight runs presented as failed).
-- The page has a shared "Hosted compute worker image" section above the
-  provider sections (`ComputeWorkerImageSection`), backed by
-  `compute.saveWorkerImage` / `compute.clearWorkerImage`. Each provider section
+- The settings page does **not** expose a shared worker-image editor; the
+  worker image is deployment-managed via process env / release derivation
+  (`DOCKER_WORKER_IMAGE` and related resolution). Each provider section
   (`ComputeProviderSection`) shows credential fields normally plus an "Advanced
   infrastructure" expandable area for that provider's infrastructure values.
-- `compute.saveConfig` encrypts submitted account credentials, submitted
-  provider-specific infrastructure values, and a submitted shared worker image
-  into deployment env vars (with the same Modal base-image-ref derivation as
-  the wizard), but unlike the wizard it does **not** switch the deployment
-  default onto the provider and does not require missing infrastructure before
-  saving credentials. Runtime env values are locked and never overwritten. For
-  provisionable providers (E2B, Daytona) it behaves like the wizard: when no
-  manual artifact value is entered, a registry-qualified worker image exists,
-  and the required credentials are available, the save records the run as
-  pending and starts the detached provisioning; entering the artifact manually
-  persists it and skips provisioning. The logic is shared with the wizard via
+- `compute.saveConfig` encrypts submitted account credentials and submitted
+  provider-specific infrastructure values into deployment env vars (with the
+  same Modal base-image-ref derivation as the wizard), but unlike the wizard it
+  does **not** switch the deployment default onto the provider and does not
+  require missing infrastructure before saving credentials. Runtime env values
+  are locked and never overwritten. For provisionable providers (E2B, Daytona)
+  it behaves like the wizard: when no manual artifact value is entered, a
+  registry-qualified worker image exists, and the required credentials are
+  available, the save records the run as pending and starts the detached
+  provisioning; entering the artifact manually persists it and skips
+  provisioning. The logic is shared with the wizard via
   `apps/web/src/trpc/commands/compute/compute-provisioning.ts`.
 - `compute.setDefaultProvider` persists
   `deployment_settings.runtime_compute_config.defaultProvider`, allowing hosted
@@ -673,8 +678,7 @@ Admins can also manage compute providers after setup at `/settings/compute`
   provisioning (i.e. `configSatisfied`).
 - `compute.clearConfig` deletes this provider's saved credential **and**
   provider-specific infrastructure deployment env vars (for Modal that includes
-  `MODAL_BASE_IMAGE_REF`); it does not touch the shared `DOCKER_WORKER_IMAGE`,
-  which is cleared from its own shared section via `compute.clearWorkerImage`.
+  `MODAL_BASE_IMAGE_REF`); it does not touch the shared `DOCKER_WORKER_IMAGE`.
   Clearing does not change the persisted default; the page warns when the
   effective default provider is missing configuration.
 

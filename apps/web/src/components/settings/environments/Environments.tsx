@@ -33,6 +33,8 @@ import { useRepositories } from '@/hooks/source-control';
 import { useAuthorizedUser } from '@/hooks/useUser';
 
 import {
+  Badge,
+  BasicTooltip,
   Button,
   Collapsible,
   CollapsibleContent,
@@ -130,7 +132,16 @@ export function Environments() {
                   <Collapsible className="space-y-2">
                     <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
                       <div className="min-w-0 flex-1 space-y-1">
-                        <p className="font-medium leading-5">{env.name}</p>
+                        <div className="flex items-center gap-2">
+                          <p className="font-medium leading-5">{env.name}</p>
+                          {env.declarativeSource ? (
+                            <BasicTooltip
+                              content={`Provisioned from ${env.declarativeSource} at deployment startup. Edits are kept until the next restart re-applies the declarative definition.`}
+                            >
+                              <Badge variant="outline">Managed from file</Badge>
+                            </BasicTooltip>
+                          ) : null}
+                        </div>
                         {description ? (
                           <p className="text-sm text-muted-foreground">
                             {description}

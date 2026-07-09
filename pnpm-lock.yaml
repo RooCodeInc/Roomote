@@ -1182,6 +1182,9 @@ importers:
       postgres:
         specifier: ^3.4.8
         version: 3.4.8
+      yaml:
+        specifier: ^2.9.0
+        version: 2.9.0
     devDependencies:
       '@faker-js/faker':
         specifier: ^8.4.1

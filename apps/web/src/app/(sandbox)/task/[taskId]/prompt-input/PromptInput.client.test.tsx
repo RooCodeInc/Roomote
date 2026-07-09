@@ -585,6 +585,7 @@ describe('PromptInput', () => {
         source: 'web',
         clientMessageId: expect.any(String),
         userImageUrl: undefined,
+        autoSteerWhenQueued: true,
       });
     });
 
@@ -646,6 +647,7 @@ describe('PromptInput', () => {
         source: 'web',
         clientMessageId: expect.any(String),
         userImageUrl: undefined,
+        autoSteerWhenQueued: true,
       });
     });
 
@@ -659,7 +661,7 @@ describe('PromptInput', () => {
     expect(queryClientSetQueryDataMock).toHaveBeenCalledTimes(1);
   });
 
-  it('uses the queued-messages surface for optimistic prompts while the task is running', async () => {
+  it('steers prompts into the transcript while the task is running', async () => {
     useSandboxConnectedMock.mockReturnValue(true);
     useSandboxConnectionStatusMock.mockReturnValue({
       connected: true,
@@ -695,18 +697,19 @@ describe('PromptInput', () => {
         source: 'web',
         clientMessageId: expect.any(String),
         userImageUrl: undefined,
+        autoSteerWhenQueued: true,
       });
     });
 
-    expect(appendOptimisticQueuedMessageMock).toHaveBeenCalledWith(
+    expect(appendOptimisticAcpEventMock).toHaveBeenCalledWith(
       expect.objectContaining({
-        id: expect.stringMatching(/^local:/),
+        eventType: 'roomote_runtime.user_prompt',
+        role: 'user',
         text: 'queued follow-up',
-        optimistic: true,
       }),
     );
-    expect(appendOptimisticAcpEventMock).not.toHaveBeenCalled();
-    expect(queryClientSetQueryDataMock).not.toHaveBeenCalled();
+    expect(appendOptimisticQueuedMessageMock).not.toHaveBeenCalled();
+    expect(queryClientSetQueryDataMock).toHaveBeenCalledTimes(1);
   });
 
   it('steers the oldest queued message from empty Enter even after the parent turn leaves running state', async () => {
@@ -840,7 +843,7 @@ describe('PromptInput', () => {
     expect(toastErrorMock).toHaveBeenCalledWith('Failed to send message.');
   });
 
-  it('removes the optimistic queued message and shows a toast when a running send fails', async () => {
+  it('removes the optimistic transcript message and shows a toast when a running send fails', async () => {
     useSandboxConnectedMock.mockReturnValue(true);
     useSandboxConnectionStatusMock.mockReturnValue({
       connected: true,
@@ -872,12 +875,12 @@ describe('PromptInput', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Send' }));
 
     await waitFor(() => {
-      expect(removeOptimisticQueuedMessageMock).toHaveBeenCalledWith(
+      expect(removeOptimisticMessageMock).toHaveBeenCalledWith(
         expect.any(String),
       );
     });
 
-    expect(removeOptimisticMessageMock).not.toHaveBeenCalled();
+    expect(removeOptimisticQueuedMessageMock).not.toHaveBeenCalled();
     expect(toastErrorMock).toHaveBeenCalledWith('Failed to send message.');
   });
 });

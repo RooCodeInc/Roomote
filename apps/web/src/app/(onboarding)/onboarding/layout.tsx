@@ -6,7 +6,7 @@ import { useQuery } from '@tanstack/react-query';
 
 import { useRedirectToSignIn } from '@/hooks/useSignInRedirect';
 import { useUser } from '@/hooks/useUser';
-import { requiresSetup } from '@/lib/setup-status';
+import { DEFAULT_SETUP_REDIRECT_PATH, requiresSetup } from '@/lib/setup-status';
 import { useTRPC } from '@/trpc/client';
 import { FramedSurface, UserMenu } from '@/components/layout';
 
@@ -50,7 +50,7 @@ export default function Layout({ children }: { children: React.ReactNode }) {
 
   useEffect(() => {
     if (shouldRedirectToSetup) {
-      router.replace('/setup');
+      router.replace(DEFAULT_SETUP_REDIRECT_PATH);
     }
   }, [shouldRedirectToSetup, router]);
 

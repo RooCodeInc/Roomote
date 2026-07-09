@@ -193,6 +193,17 @@ delayed BullMQ job (`teams-suggested-tasks-onboarding-followup`) replies to
 the intro with an Automations link unless the suggester is already enabled.
 See `slack-onboarding.md` for the timeline contract.
 
+Teams onboarding requires a primary conversation captured from a verified
+inbound Teams activity. The setup kickoff only selects Teams when both that
+conversation and resolvable bot credentials exist; when credentials are
+missing or the kickoff post fails, setup logs a warning and falls back to the
+web-only onboarding task with all `chatHandoff*` fields null, so Teams never
+looks connected without a delivered kickoff. The web `teams.integrationStatus`
+command reports `primaryConversationReady` and `primaryConversationType`
+(from `findTeamsPrimaryConversation`), which power "send the bot one message"
+nudges on the Settings > Comms Teams card and the `/setup` connect step until
+the first conversation is captured.
+
 Teams tasks run the same turn-satisfaction machinery as Slack/Telegram
 (ack/closeout enforcement; enabled in `mcp-task-env.ts` and the worker
 turn-start recorders), including current-turn emoji reactions on follow-up

@@ -425,6 +425,7 @@ export class ModalClient implements ComputeProviderClient {
       console.log(
         `[ModalClient] Creating sandbox... ${JSON.stringify({
           encryptedPorts: input.ports,
+          regions: this.config.regions ?? '(default)',
           cpu: this.config.cpu ?? '(default)',
           cpuLimit: this.config.cpuLimit ?? '(default)',
           memoryMiB: this.config.memoryMiB ?? '(default)',
@@ -446,6 +447,9 @@ export class ModalClient implements ComputeProviderClient {
             : {}),
           ...(this.config.memoryLimitMiB
             ? { memoryLimitMiB: this.config.memoryLimitMiB }
+            : {}),
+          ...(this.config.regions?.length
+            ? { regions: this.config.regions }
             : {}),
         }),
         signal: input.signal,
@@ -883,6 +887,7 @@ export class ModalClient implements ComputeProviderClient {
       console.log(
         `[ModalClient] Creating sandbox from snapshot... ${JSON.stringify({
           encryptedPorts: input.ports,
+          regions: this.config.regions ?? '(default)',
         })}`,
       );
 
@@ -900,6 +905,9 @@ export class ModalClient implements ComputeProviderClient {
             : {}),
           ...(this.config.memoryLimitMiB
             ? { memoryLimitMiB: this.config.memoryLimitMiB }
+            : {}),
+          ...(this.config.regions?.length
+            ? { regions: this.config.regions }
             : {}),
         }),
         signal: input.signal,

@@ -81,7 +81,7 @@ The controller now initializes `@sentry/node` before `dist/index.js` runs so sta
 - `CONTROLLER_SENTRY_DSN` overrides the controller DSN when set.
 - `SENTRY_DSN` is the shared fallback override when a controller-specific DSN is not set.
 - If neither env var is present, controller Sentry stays disabled.
-- The controller reports `serverName=controller`, tags the scope with `roomote.service=controller`, forwards release metadata from `VERCEL_GIT_COMMIT_SHA`, `GITHUB_SHA`, or `RELEASE_VERSION`, and currently sets `sendDefaultPii: true`.
+- The controller reports `serverName=controller`, tags the scope with `roomote.service=controller`, forwards release metadata from `VERCEL_GIT_COMMIT_SHA`, `GITHUB_SHA`, or `RELEASE_VERSION`, and sets `sendDefaultPii: false`.
 
 ### Captured Paths
 

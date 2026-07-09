@@ -202,11 +202,12 @@ CREATE TABLE "environment_variables" (
 CREATE TABLE "environments" (
 	"id" uuid PRIMARY KEY DEFAULT gen_random_uuid() NOT NULL,
 	"user_id" text,
-	"created_by_user_id" text NOT NULL,
+	"created_by_user_id" text,
 	"name" text NOT NULL,
 	"description" text,
 	"config" jsonb NOT NULL,
 	"is_eval" boolean DEFAULT false NOT NULL,
+	"declarative_source" text,
 	"snapshot_id" text,
 	"snapshot_created_at" timestamp,
 	"snapshot_expires_at" timestamp,

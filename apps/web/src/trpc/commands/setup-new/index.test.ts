@@ -7,6 +7,7 @@ const {
   mockDbTransaction,
   mockUpsertDeploymentEnvironmentVariables,
   mockGetPersistedEnvironmentVariableNames,
+  mockGetPersistedEnvironmentVariableValues,
   mockGetSetupBootstrapState,
   mockSetupTokenState,
   mockRunComputeProvisioning,
@@ -18,6 +19,7 @@ const {
   mockDbTransaction: vi.fn(),
   mockUpsertDeploymentEnvironmentVariables: vi.fn(),
   mockGetPersistedEnvironmentVariableNames: vi.fn().mockResolvedValue([]),
+  mockGetPersistedEnvironmentVariableValues: vi.fn().mockResolvedValue({}),
   mockGetSetupBootstrapState: vi.fn(),
   mockSetupTokenState: {
     requiredToken: undefined as string | undefined,
@@ -93,6 +95,7 @@ vi.mock('@roomote/db/server', () => ({
   isNull: vi.fn(),
   markTaskStartParallelCountEndedAt: vi.fn(),
   resolveSavedWorkerImage: mockResolveSavedWorkerImage,
+  purgeSavedDeploymentWorkerImage: vi.fn(async () => undefined),
   resolveTelegramRuntimeCredentials: vi.fn(async () => ({
     botToken: null,
     webhookSecret: null,
@@ -146,6 +149,8 @@ vi.mock('../environment-variables', () => ({
     mockUpsertDeploymentEnvironmentVariables,
   getPersistedEnvironmentVariableNames:
     mockGetPersistedEnvironmentVariableNames,
+  getPersistedEnvironmentVariableValues:
+    mockGetPersistedEnvironmentVariableValues,
 }));
 
 vi.mock('../task-suggestions', () => ({
@@ -178,7 +183,11 @@ import { TaskPayloadKind } from '@roomote/types';
 import { enqueueCloudTask } from '@roomote/cloud-agents/server';
 import { TelegramCommunicationProvider } from '@roomote/communication/telegram-provider';
 import { resolveTelegramRuntimeCredentials } from '@roomote/db/server';
-import { findTelegramPrimaryChatId } from '@roomote/sdk/server';
+import {
+  createTeamsCommunicationProviderFromRuntimeCredentials,
+  findTelegramPrimaryChatId,
+  findTeamsPrimaryConversation,
+} from '@roomote/sdk/server';
 import { SlackNotifier } from '@roomote/slack';
 import { getRepositories } from '@/lib/server';
 import {
@@ -856,7 +865,7 @@ describe('setup-new compute config commands', () => {
     expect(mockRunComputeProvisioning).not.toHaveBeenCalled();
   });
 
-  it('persists a submitted shared worker image for hosted providers', async () => {
+  it('uses a submitted worker image without sticky DOCKER_WORKER_IMAGE persist', async () => {
     const result = await saveSetupNewComputeConfigCommand(buildMockAuth(), {
       provider: 'modal',
       values: {
@@ -867,20 +876,18 @@ describe('setup-new compute config commands', () => {
     });
 
     expect(result.runtimeComputeConfig.defaultProvider).toBe('modal');
-    expect(mockUpsertDeploymentEnvironmentVariables).toHaveBeenCalledWith(
-      expect.anything(),
-      expect.objectContaining({
-        values: expect.arrayContaining([
-          {
-            name: 'DOCKER_WORKER_IMAGE',
-            value: 'registry.example.com/worker:tag',
-          },
-          {
-            name: 'MODAL_BASE_IMAGE_REF',
-            value: 'registry.example.com/worker:tag',
-          },
-        ]),
-      }),
+    const values = mockUpsertDeploymentEnvironmentVariables.mock.calls[0]?.[1]
+      ?.values as Array<{ name: string; value: string }>;
+    expect(values).toEqual(
+      expect.arrayContaining([
+        {
+          name: 'MODAL_BASE_IMAGE_REF',
+          value: 'registry.example.com/worker:tag',
+        },
+      ]),
+    );
+    expect(values.map((entry) => entry.name)).not.toContain(
+      'DOCKER_WORKER_IMAGE',
     );
   });
 });
@@ -959,6 +966,10 @@ describe('setup-new onboarding task start command', () => {
       botUsername: null,
     } as Awaited<ReturnType<typeof resolveTelegramRuntimeCredentials>>);
     vi.mocked(findTelegramPrimaryChatId).mockResolvedValue(null);
+    vi.mocked(findTeamsPrimaryConversation).mockResolvedValue(null);
+    vi.mocked(
+      createTeamsCommunicationProviderFromRuntimeCredentials,
+    ).mockResolvedValue(null);
     vi.mocked(enqueueCloudTask).mockResolvedValue({
       taskId: 'task-onboarding-1',
       id: 'cloud-job-1',
@@ -1061,6 +1072,222 @@ describe('setup-new onboarding task start command', () => {
         }),
       }),
     );
+  });
+
+  it('falls back to a Teams kickoff when no Slack or Telegram destination exists but a primary conversation was captured', async () => {
+    mockOnboardingTransaction({ slackInstallation: null });
+
+    const teamsPostMessage = vi.fn(async () => ({
+      provider: 'teams' as const,
+      channelId: '19:channel@thread.tacv2',
+      messageId: '1751000000000',
+    }));
+
+    vi.mocked(findTeamsPrimaryConversation).mockResolvedValue({
+      conversationId: '19:channel@thread.tacv2',
+      serviceUrl: 'https://smba.trafficmanager.net/amer/',
+      conversationType: 'channel',
+    });
+    vi.mocked(
+      createTeamsCommunicationProviderFromRuntimeCredentials,
+    ).mockResolvedValue({
+      postMessage: teamsPostMessage,
+    } as unknown as Awaited<
+      ReturnType<typeof createTeamsCommunicationProviderFromRuntimeCredentials>
+    >);
+
+    const result = await startSetupNewOnboardingTaskCommand(buildMockAuth());
+
+    expect(result.taskId).toBe('task-onboarding-1');
+    expect(teamsPostMessage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        channelId: '19:channel@thread.tacv2',
+        serviceUrl: 'https://smba.trafficmanager.net/amer/',
+      }),
+    );
+    expect(SlackNotifier).not.toHaveBeenCalled();
+    expect(enqueueCloudTask).toHaveBeenCalledWith(
+      expect.objectContaining({
+        task: expect.objectContaining({
+          type: TaskPayloadKind.StandardTask,
+          payload: expect.objectContaining({
+            description: 'kickoff prompt',
+            visibleInTranscript: false,
+            communicationProvider: 'teams',
+            communicationChannelId: '19:channel@thread.tacv2',
+            communicationMessageId: '1751000000000',
+            communicationThreadId: '1751000000000',
+            communicationServiceUrl: 'https://smba.trafficmanager.net/amer/',
+          }),
+        }),
+        initiator: { kind: 'user', userId: 'setup-test-user' },
+        workflow: 'setup_onboarding',
+        surface: 'web',
+        trigger: 'manual',
+      }),
+    );
+    expect(insertValuesMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        setupNewState: expect.objectContaining({
+          onboardingTaskId: 'task-onboarding-1',
+          slackChannel: null,
+          chatHandoffProvider: 'teams',
+          chatHandoffChannelId: '19:channel@thread.tacv2',
+          chatHandoffThreadId: '1751000000000',
+          chatHandoffServiceUrl: 'https://smba.trafficmanager.net/amer/',
+        }),
+      }),
+    );
+  });
+
+  it('falls back to a web onboarding task when a Teams conversation exists but bot credentials are missing', async () => {
+    mockOnboardingTransaction({ slackInstallation: null });
+
+    const consoleWarnSpy = vi
+      .spyOn(console, 'warn')
+      .mockImplementation(() => {});
+
+    vi.mocked(findTeamsPrimaryConversation).mockResolvedValue({
+      conversationId: '19:channel@thread.tacv2',
+      serviceUrl: 'https://smba.trafficmanager.net/amer/',
+      conversationType: 'channel',
+    });
+
+    try {
+      const result = await startSetupNewOnboardingTaskCommand(buildMockAuth());
+
+      expect(result.taskId).toBe('task-onboarding-1');
+      expect(enqueueCloudTask).toHaveBeenCalledTimes(1);
+
+      const enqueueInput = vi.mocked(enqueueCloudTask).mock.calls[0]?.[0];
+      expect(enqueueInput?.task.payload).toBeDefined();
+      expect(enqueueInput?.task.payload).not.toHaveProperty(
+        'communicationProvider',
+      );
+      expect(consoleWarnSpy).toHaveBeenCalledWith(
+        expect.stringContaining('Teams bot credentials could not be resolved'),
+      );
+      expect(insertValuesMock).toHaveBeenCalledWith(
+        expect.objectContaining({
+          setupNewState: expect.objectContaining({
+            onboardingTaskId: 'task-onboarding-1',
+            chatHandoffProvider: null,
+            chatHandoffChannelId: null,
+            chatHandoffThreadId: null,
+            chatHandoffServiceUrl: null,
+          }),
+        }),
+      );
+    } finally {
+      consoleWarnSpy.mockRestore();
+    }
+  });
+
+  it('falls back to a web onboarding task when the Teams kickoff post fails', async () => {
+    mockOnboardingTransaction({ slackInstallation: null });
+
+    const consoleWarnSpy = vi
+      .spyOn(console, 'warn')
+      .mockImplementation(() => {});
+    const teamsPostMessage = vi.fn(async () => {
+      throw new Error('Teams post failed');
+    });
+
+    vi.mocked(findTeamsPrimaryConversation).mockResolvedValue({
+      conversationId: '19:channel@thread.tacv2',
+      serviceUrl: 'https://smba.trafficmanager.net/amer/',
+      conversationType: 'channel',
+    });
+    vi.mocked(
+      createTeamsCommunicationProviderFromRuntimeCredentials,
+    ).mockResolvedValue({
+      postMessage: teamsPostMessage,
+    } as unknown as Awaited<
+      ReturnType<typeof createTeamsCommunicationProviderFromRuntimeCredentials>
+    >);
+
+    try {
+      const result = await startSetupNewOnboardingTaskCommand(buildMockAuth());
+
+      expect(result.taskId).toBe('task-onboarding-1');
+      expect(teamsPostMessage).toHaveBeenCalled();
+      expect(enqueueCloudTask).toHaveBeenCalledTimes(1);
+
+      const enqueueInput = vi.mocked(enqueueCloudTask).mock.calls[0]?.[0];
+      expect(enqueueInput?.task.payload).toBeDefined();
+      expect(enqueueInput?.task.payload).not.toHaveProperty(
+        'communicationProvider',
+      );
+      expect(consoleWarnSpy).toHaveBeenCalledWith(
+        expect.stringContaining('Failed to post the Teams setup kickoff'),
+        expect.any(Error),
+      );
+      expect(insertValuesMock).toHaveBeenCalledWith(
+        expect.objectContaining({
+          setupNewState: expect.objectContaining({
+            onboardingTaskId: 'task-onboarding-1',
+            chatHandoffProvider: null,
+            chatHandoffChannelId: null,
+            chatHandoffThreadId: null,
+            chatHandoffServiceUrl: null,
+          }),
+        }),
+      );
+    } finally {
+      consoleWarnSpy.mockRestore();
+    }
+  });
+
+  it('falls back to a web onboarding task when the Teams kickoff post returns no message id', async () => {
+    mockOnboardingTransaction({ slackInstallation: null });
+
+    const consoleWarnSpy = vi
+      .spyOn(console, 'warn')
+      .mockImplementation(() => {});
+    const teamsPostMessage = vi.fn(async () => ({
+      provider: 'teams' as const,
+      channelId: '19:channel@thread.tacv2',
+      messageId: '',
+    }));
+
+    vi.mocked(findTeamsPrimaryConversation).mockResolvedValue({
+      conversationId: '19:channel@thread.tacv2',
+      serviceUrl: 'https://smba.trafficmanager.net/amer/',
+      conversationType: 'channel',
+    });
+    vi.mocked(
+      createTeamsCommunicationProviderFromRuntimeCredentials,
+    ).mockResolvedValue({
+      postMessage: teamsPostMessage,
+    } as unknown as Awaited<
+      ReturnType<typeof createTeamsCommunicationProviderFromRuntimeCredentials>
+    >);
+
+    try {
+      const result = await startSetupNewOnboardingTaskCommand(buildMockAuth());
+
+      expect(result.taskId).toBe('task-onboarding-1');
+      expect(teamsPostMessage).toHaveBeenCalled();
+      expect(consoleWarnSpy).toHaveBeenCalledWith(
+        expect.stringContaining('returned no message id'),
+      );
+
+      const enqueueInput = vi.mocked(enqueueCloudTask).mock.calls[0]?.[0];
+      expect(enqueueInput?.task.payload).toBeDefined();
+      expect(enqueueInput?.task.payload).not.toHaveProperty(
+        'communicationProvider',
+      );
+      expect(insertValuesMock).toHaveBeenCalledWith(
+        expect.objectContaining({
+          setupNewState: expect.objectContaining({
+            chatHandoffProvider: null,
+            chatHandoffChannelId: null,
+          }),
+        }),
+      );
+    } finally {
+      consoleWarnSpy.mockRestore();
+    }
   });
 
   it('applies the selected setup model to web onboarding tasks', async () => {

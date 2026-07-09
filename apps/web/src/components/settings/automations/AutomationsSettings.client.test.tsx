@@ -226,6 +226,7 @@ describe('Automations selection helpers', () => {
       ...baseFormState,
       channelAutoStartSlackChannels: [
         {
+          channelId: null,
           slackChannel: '#bugs',
           instructions: 'Treat each message as a bug report.',
           launchMode: DEFAULT_CHANNEL_AUTO_START_LAUNCH_MODE,
@@ -248,6 +249,7 @@ describe('Automations selection helpers', () => {
 
     expect(saveState.channelAutoStartSlackChannels).toEqual([
       {
+        channelId: null,
         slackChannel: '#bugs',
         instructions: 'Treat each message as a bug report.',
         launchMode: DEFAULT_CHANNEL_AUTO_START_LAUNCH_MODE,
@@ -255,6 +257,39 @@ describe('Automations selection helpers', () => {
       },
     ]);
     expect(saveState.managerSlackChannel).toBe('#managers');
+  });
+
+  it('sends the persisted channel id for an untouched channel auto-start row so the server resolves it by id instead of by name', () => {
+    const currentFormState: FormState = {
+      ...baseFormState,
+      channelAutoStartSlackChannels: [
+        // Hydrated from the server: a channel the user is not editing. Its name
+        // may no longer resolve (archived/renamed), but its id still does.
+        {
+          channelId: 'C0DEEP',
+          slackChannel: '#deepstrike-roo',
+          instructions: 'Handle deep strike reports.',
+          launchMode: DEFAULT_CHANNEL_AUTO_START_LAUNCH_MODE,
+          launchCriteria: '',
+        },
+      ],
+    };
+
+    const saveInput = buildAutomationSettingsSaveInput(
+      currentFormState,
+      baseFormState,
+      'channelAutoStart',
+    );
+
+    expect(saveInput.channelAutoStartSlackChannels).toEqual([
+      {
+        channelId: 'C0DEEP',
+        slackChannel: '#deepstrike-roo',
+        instructions: 'Handle deep strike reports.',
+        launchMode: DEFAULT_CHANNEL_AUTO_START_LAUNCH_MODE,
+        launchCriteria: null,
+      },
+    ]);
   });
 
   it('builds an API save input from the merged agent save state', () => {
@@ -317,6 +352,7 @@ describe('Automations selection helpers', () => {
         instructions: 'Treat each message as a bug report.',
       }),
     ).toEqual({
+      channelId: null,
       slackChannel: '#bugs',
       instructions: 'Treat each message as a bug report.',
       launchMode: DEFAULT_CHANNEL_AUTO_START_LAUNCH_MODE,
@@ -328,6 +364,7 @@ describe('Automations selection helpers', () => {
     expect(
       getAvailableAutoRespondChannelTemplates([
         {
+          channelId: null,
           slackChannel: '#bugs',
           instructions: 'Treat each message as a bug report.',
           launchMode: DEFAULT_CHANNEL_AUTO_START_LAUNCH_MODE,
@@ -341,24 +378,28 @@ describe('Automations selection helpers', () => {
     expect(
       getAvailableAutoRespondChannelTemplates([
         {
+          channelId: null,
           slackChannel: '#bugs',
           instructions: 'Treat each message as a bug report.',
           launchMode: DEFAULT_CHANNEL_AUTO_START_LAUNCH_MODE,
           launchCriteria: '',
         },
         {
+          channelId: null,
           slackChannel: '#support-inbound',
           instructions: 'Treat each message as a support request.',
           launchMode: DEFAULT_CHANNEL_AUTO_START_LAUNCH_MODE,
           launchCriteria: '',
         },
         {
+          channelId: null,
           slackChannel: '#ask-engineering',
           instructions: 'Treat each message as a technical question.',
           launchMode: DEFAULT_CHANNEL_AUTO_START_LAUNCH_MODE,
           launchCriteria: '',
         },
         {
+          channelId: null,
           slackChannel: '#ops-requests',
           instructions: 'Treat each message as an operational request.',
           launchMode: DEFAULT_CHANNEL_AUTO_START_LAUNCH_MODE,
@@ -373,6 +414,7 @@ describe('Automations selection helpers', () => {
       ...baseFormState,
       channelAutoStartSlackChannels: [
         {
+          channelId: 'C0BUGS',
           slackChannel: '#bugs',
           instructions: '',
           launchMode: DEFAULT_CHANNEL_AUTO_START_LAUNCH_MODE,
@@ -385,6 +427,7 @@ describe('Automations selection helpers', () => {
       ...baseFormState,
       channelAutoStartSlackChannels: [
         {
+          channelId: 'C0BUGS',
           slackChannel: '#bugs',
           instructions: 'Treat each message as a bug report.',
           launchMode: DEFAULT_CHANNEL_AUTO_START_LAUNCH_MODE,
@@ -401,6 +444,7 @@ describe('Automations selection helpers', () => {
 
     expect(saveState.channelAutoStartSlackChannels).toEqual([
       {
+        channelId: 'C0BUGS',
         slackChannel: '#bugs',
         instructions: '',
         launchMode: DEFAULT_CHANNEL_AUTO_START_LAUNCH_MODE,

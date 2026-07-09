@@ -353,7 +353,12 @@ export async function updateBackgroundAgentSettingsCommand(
       channelAutoStartRows.map((row) =>
         resolveChannelId({
           field: 'channelAutoStartSlackChannels',
-          input: row.slackChannel,
+          // Prefer the persisted channel ID for untouched rows: resolving by ID
+          // short-circuits without a Slack lookup, so an archived/renamed/private
+          // channel elsewhere in the list can't block saving an edit to another
+          // row. Fall back to the submitted name for new or channel-edited rows.
+          input:
+            normalizeSlackChannelIdInput(row.channelId) ?? row.slackChannel,
           notifier,
         }),
       ),
@@ -514,7 +519,7 @@ export async function updateBackgroundAgentSettingsCommand(
 
   if (
     shouldUpdateChannelAutoStart &&
-    channelAutoStartRows.some((row) => !row.slackChannel) &&
+    channelAutoStartRows.some((row) => !row.slackChannel && !row.channelId) &&
     !fieldErrors.channelAutoStartSlackChannels
   ) {
     fieldErrors.channelAutoStartSlackChannels =

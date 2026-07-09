@@ -5,6 +5,7 @@ import {
   resolveSingleSourceControlProvider,
 } from '@/lib/server/source-control-provider';
 import { buildSetupKickoffText } from '@roomote/communication/chat-messages';
+import type { TeamsCommunicationProvider } from '@roomote/communication/teams-provider';
 import { TelegramCommunicationProvider } from '@roomote/communication/telegram-provider';
 import { SlackNotifier } from '@roomote/slack';
 import {
@@ -25,7 +26,7 @@ import {
   sql,
   markTaskStartParallelCountEndedAt,
   resolveDeploymentEnvVar,
-  resolveSavedWorkerImage,
+  purgeSavedDeploymentWorkerImage,
   resolveTelegramRuntimeCredentials,
   syncSetupQualificationBlock,
   isChatGptSubscriptionConnected,
@@ -57,6 +58,7 @@ import {
   isConfiguredEnvValue,
   isExitedCloudTaskStatus,
   isRequiredComputeField,
+  NON_SECRET_COMPUTE_ENV_VAR_NAMES,
   normalizeDeploymentComputeConfig,
   normalizeDeploymentModelConfig,
   getSetupNewComputeProvisioningState,
@@ -105,6 +107,7 @@ import {
 } from '../setup/shared';
 import {
   getPersistedEnvironmentVariableNames,
+  getPersistedEnvironmentVariableValues,
   upsertDeploymentEnvironmentVariables,
 } from '../environment-variables';
 import {
@@ -466,13 +469,20 @@ async function resolveSetupSlackHandoffTarget(
 
 type SetupChatFallbackHandoffTarget =
   | { provider: 'telegram'; chatId: string; botToken: string }
-  | { provider: 'teams'; conversationId: string; serviceUrl: string };
+  | {
+      provider: 'teams';
+      conversationId: string;
+      serviceUrl: string;
+      teams: TeamsCommunicationProvider;
+    };
 
 /**
  * Resolves the non-Slack chat destination for the setup onboarding kickoff,
  * matching the proactive-messaging fallback ordering (Slack > Telegram >
  * Teams). Returns null when no chat surface is available, so setup falls
- * back to a web-only onboarding task.
+ * back to a web-only onboarding task. Teams is only selected when both a
+ * captured primary conversation and resolvable bot credentials exist, so a
+ * half-configured Teams deployment never blocks onboarding.
  */
 async function resolveSetupChatFallbackHandoffTarget(): Promise<SetupChatFallbackHandoffTarget | null> {
   const { botToken } = await resolveTelegramRuntimeCredentials();
@@ -488,11 +498,21 @@ async function resolveSetupChatFallbackHandoffTarget(): Promise<SetupChatFallbac
   const conversation = await findTeamsPrimaryConversation();
 
   if (conversation) {
-    return {
-      provider: 'teams',
-      conversationId: conversation.conversationId,
-      serviceUrl: conversation.serviceUrl,
-    };
+    const teams =
+      await createTeamsCommunicationProviderFromRuntimeCredentials();
+
+    if (teams) {
+      return {
+        provider: 'teams',
+        conversationId: conversation.conversationId,
+        serviceUrl: conversation.serviceUrl,
+        teams,
+      };
+    }
+
+    console.warn(
+      '[setup-new] Skipping the Teams setup kickoff because Teams bot credentials could not be resolved; onboarding continues as a web-only task.',
+    );
   }
 
   return null;
@@ -991,13 +1011,15 @@ export async function getSetupNewStatusCommand(auth: UserAuthSuccess) {
   assertAdmin(auth);
 
   const { userId } = auth;
+  await purgeSavedDeploymentWorkerImage();
+
   const [
     baseStatus,
     slackAccessStatus,
     persistedRuntimeModelConfig,
     persistedRuntimeComputeConfig,
     envVarNames,
-    savedWorkerImage,
+    nonSecretComputeEnvValues,
     chatgptConnected,
   ] = await Promise.all([
     getSetupBaseStatus(auth),
@@ -1005,7 +1027,9 @@ export async function getSetupNewStatusCommand(auth: UserAuthSuccess) {
     getPersistedRuntimeModelConfig(),
     getPersistedRuntimeComputeConfig(),
     getPersistedEnvironmentVariableNames(),
-    resolveSavedWorkerImage(),
+    getPersistedEnvironmentVariableValues([
+      ...NON_SECRET_COMPUTE_ENV_VAR_NAMES,
+    ]),
     isChatGptSubscriptionConnected(),
   ]);
   const activeSetupQualificationBlock =
@@ -1097,11 +1121,9 @@ export async function getSetupNewStatusCommand(auth: UserAuthSuccess) {
   const computeSetup = buildSetupComputeStatus({
     runtimeEnv: process.env,
     persistedEnvVarNames: envVarNames,
+    persistedEnvVarValues: nonSecretComputeEnvValues,
     persistedComputeConfig: persistedRuntimeComputeConfig,
     selectedProvider: setupNewState.computeProvider,
-    savedWorkerImage: process.env[SHARED_WORKER_IMAGE_ENV_VAR]?.trim()
-      ? null
-      : savedWorkerImage,
   });
   // Present stale in-flight provisioning runs as failed so the wizard
   // offers a retry instead of polling forever after a web-process restart.
@@ -1293,7 +1315,7 @@ export async function saveSetupNewComputeProviderChoiceCommand(
     );
 
     if (!providerStatus) {
-      throw new Error('Selected compute provider is unavailable.');
+      throw new Error('Selected sandbox provider is unavailable.');
     }
 
     const hasCredentialFields = providerStatus.fields.length > 0;
@@ -1350,31 +1372,26 @@ export async function saveSetupNewComputeConfigCommand(
         templateRef: string;
       } | null = null;
 
+      await purgeSavedDeploymentWorkerImage(tx);
+
       const [
         currentState,
         persistedRuntimeComputeConfig,
         persistedEnvVarNames,
-        savedWorkerImage,
       ] = await Promise.all([
         getPersistedSetupNewState(tx),
         getPersistedRuntimeComputeConfig(tx),
         getPersistedEnvironmentVariableNames(tx),
-        resolveSavedWorkerImage(tx),
       ]);
 
-      // The shared worker image (DOCKER_WORKER_IMAGE) may be submitted in the
-      // same request. Process env wins and locks it; otherwise a submitted or
-      // saved deployment value applies, then the RELEASE_VERSION derivation.
-      const workerImageLocked =
-        !!process.env[SHARED_WORKER_IMAGE_ENV_VAR]?.trim();
+      // In-request DOCKER_WORKER_IMAGE is only used for this save/provisioning
+      // pass. It is not persisted as sticky deployment state; process env and
+      // RELEASE_VERSION derivation own runtime configuration.
       const submittedWorkerImage =
         input.values?.[SHARED_WORKER_IMAGE_ENV_VAR]?.trim() || null;
-      const savedOrSubmittedWorkerImage = workerImageLocked
-        ? null
-        : (submittedWorkerImage ?? savedWorkerImage);
       const effectiveWorkerImage =
         process.env[SHARED_WORKER_IMAGE_ENV_VAR]?.trim() ||
-        savedOrSubmittedWorkerImage ||
+        submittedWorkerImage ||
         deriveWorkerImageFromReleaseVersion(process.env) ||
         undefined;
 
@@ -1383,14 +1400,13 @@ export async function saveSetupNewComputeConfigCommand(
         persistedEnvVarNames,
         persistedComputeConfig: persistedRuntimeComputeConfig,
         selectedProvider: input.provider,
-        savedWorkerImage: savedOrSubmittedWorkerImage,
       });
       const providerStatus = computeSetup.providers.find(
         (candidate) => candidate.provider === input.provider,
       );
 
       if (!providerStatus) {
-        throw new Error('Selected compute provider is unavailable.');
+        throw new Error('Selected sandbox provider is unavailable.');
       }
 
       // When the Modal base image is not entered, not env-provided, and not
@@ -1444,10 +1460,7 @@ export async function saveSetupNewComputeConfigCommand(
               currentState,
               provisionableProvider,
             ),
-            // The effective image includes the ref derived from the baked
-            // RELEASE_VERSION and any worker image saved through the UI, so
-            // provisioning also works on deployments that never set
-            // DOCKER_WORKER_IMAGE explicitly.
+            // Process env, in-request override, or RELEASE_VERSION derivation.
             dockerWorkerImage: effectiveWorkerImage,
             runtimeEnv: process.env,
             markPending: (nextState) => {
@@ -1475,17 +1488,11 @@ export async function saveSetupNewComputeConfigCommand(
         }
       }
 
-      // Credentials, submitted/derived infrastructure values, and the shared
-      // worker image are persisted as encrypted deployment env vars. Runtime
-      // env values are locked and never overwritten from the UI.
+      // Credentials and submitted/derived infrastructure values are persisted
+      // as encrypted deployment env vars. DOCKER_WORKER_IMAGE is never sticky-
+      // saved — runtime is process-env / release-derived only.
       const valuesToSave: Array<{ name: string; value: string }> = [];
-
-      if (submittedWorkerImage && !workerImageLocked) {
-        valuesToSave.push({
-          name: SHARED_WORKER_IMAGE_ENV_VAR,
-          value: submittedWorkerImage,
-        });
-      }
+      const envVarsToClear: string[] = [];
 
       for (const field of providerStatus.fields) {
         if (field.runtimeSatisfied) {
@@ -1500,6 +1507,13 @@ export async function saveSetupNewComputeConfigCommand(
             : '');
 
         if (!nextValue) {
+          if (
+            field.secret !== true &&
+            !isRequiredComputeField(field) &&
+            field.savedSatisfied
+          ) {
+            envVarsToClear.push(field.envVarName);
+          }
           continue;
         }
 
@@ -1537,6 +1551,17 @@ export async function saveSetupNewComputeConfigCommand(
           userId,
           values: valuesToSave,
         });
+      }
+
+      if (envVarsToClear.length > 0) {
+        await tx
+          .delete(environmentVariables)
+          .where(
+            and(
+              isNull(environmentVariables.userId),
+              inArray(environmentVariables.name, envVarsToClear),
+            ),
+          );
       }
 
       const setupNewState = normalizeSetupNewState({
@@ -2011,8 +2036,8 @@ export async function startSetupNewOnboardingTaskCommand(
 
       if (fallbackTarget) {
         const kickoffMessage = buildSetupKickoffText();
-        let kickoffMessageId: string;
-        let kickoffChannelId: string;
+        let kickoffMessageId: string | null = null;
+        let kickoffChannelId: string | null = null;
 
         if (fallbackTarget.provider === 'telegram') {
           const telegram = new TelegramCommunicationProvider({
@@ -2033,93 +2058,100 @@ export async function startSetupNewOnboardingTaskCommand(
           kickoffMessageId = posted.messageId;
           kickoffChannelId = fallbackTarget.chatId;
         } else {
-          const teams =
-            await createTeamsCommunicationProviderFromRuntimeCredentials();
+          // Teams is best-effort: when the kickoff post fails, onboarding
+          // continues as a web-only task instead of failing setup, and the
+          // persisted handoff fields stay null so Teams never looks
+          // connected without a delivered kickoff.
+          try {
+            const posted = await fallbackTarget.teams.postMessage({
+              channelId: fallbackTarget.conversationId,
+              serviceUrl: fallbackTarget.serviceUrl,
+              text: kickoffMessage,
+              textFormat: 'markdown',
+            });
 
-          if (!teams) {
-            throw new Error(
-              'Roomote could not resolve Teams bot credentials for setup.',
+            if (posted.messageId) {
+              kickoffMessageId = posted.messageId;
+              kickoffChannelId = fallbackTarget.conversationId;
+            } else {
+              console.warn(
+                '[setup-new] The Teams setup kickoff post returned no message id; onboarding continues as a web-only task.',
+              );
+            }
+          } catch (error) {
+            console.warn(
+              '[setup-new] Failed to post the Teams setup kickoff; onboarding continues as a web-only task.',
+              error,
             );
           }
-
-          const posted = await teams.postMessage({
-            channelId: fallbackTarget.conversationId,
-            serviceUrl: fallbackTarget.serviceUrl,
-            text: kickoffMessage,
-            textFormat: 'markdown',
-          });
-
-          if (!posted.messageId) {
-            throw new Error('Roomote could not post the Teams setup kickoff.');
-          }
-
-          kickoffMessageId = posted.messageId;
-          kickoffChannelId = fallbackTarget.conversationId;
         }
 
-        const startedAt = new Date().toISOString();
-        const launchResult = await enqueueCloudTask({
-          task: {
-            ...(modelSelection.harness
-              ? { harness: modelSelection.harness }
-              : {}),
-            type: TaskPayloadKind.StandardTask,
-            payload: {
-              ...workspacePayload,
-              ...(setupSourceControlProvider
-                ? { sourceControlProvider: setupSourceControlProvider }
+        if (kickoffMessageId && kickoffChannelId) {
+          const startedAt = new Date().toISOString();
+          const launchResult = await enqueueCloudTask({
+            task: {
+              ...(modelSelection.harness
+                ? { harness: modelSelection.harness }
                 : {}),
-              description: prompt,
-              visibleInTranscript: false,
-              communicationProvider: fallbackTarget.provider,
-              communicationChannelId: kickoffChannelId,
-              communicationMessageId: kickoffMessageId,
-              ...(fallbackTarget.provider === 'teams'
-                ? {
-                    communicationThreadId: kickoffMessageId,
-                    communicationServiceUrl: fallbackTarget.serviceUrl,
-                  }
-                : {}),
-              ...(modelSelection.harnessModelOverrides
-                ? {
-                    harnessModelOverrides: modelSelection.harnessModelOverrides,
-                  }
-                : {}),
+              type: TaskPayloadKind.StandardTask,
+              payload: {
+                ...workspacePayload,
+                ...(setupSourceControlProvider
+                  ? { sourceControlProvider: setupSourceControlProvider }
+                  : {}),
+                description: prompt,
+                visibleInTranscript: false,
+                communicationProvider: fallbackTarget.provider,
+                communicationChannelId: kickoffChannelId,
+                communicationMessageId: kickoffMessageId,
+                ...(fallbackTarget.provider === 'teams'
+                  ? {
+                      communicationThreadId: kickoffMessageId,
+                      communicationServiceUrl: fallbackTarget.serviceUrl,
+                    }
+                  : {}),
+                ...(modelSelection.harnessModelOverrides
+                  ? {
+                      harnessModelOverrides:
+                        modelSelection.harnessModelOverrides,
+                    }
+                  : {}),
+              },
             },
-          },
-          initiator: { kind: 'user', userId },
-          workflow: 'setup_onboarding',
-          surface: 'web',
-          trigger: 'manual',
-        });
+            initiator: { kind: 'user', userId },
+            workflow: 'setup_onboarding',
+            surface: 'web',
+            trigger: 'manual',
+          });
 
-        await savePersistedSetupNewState(
-          normalizeSetupNewState({
-            ...currentState,
-            selectedRepositoryIds: normalizedRepositoryIds,
-            setupGuidance: currentState.setupGuidance ?? null,
-            onboardingTaskId: launchResult.taskId,
-            onboardingTaskStartedAt: startedAt,
-            slackTeamId: null,
-            slackChannel: null,
-            slackThreadTs: null,
-            chatHandoffProvider: fallbackTarget.provider,
-            chatHandoffChannelId: kickoffChannelId,
-            chatHandoffThreadId: kickoffMessageId,
-            chatHandoffServiceUrl:
-              fallbackTarget.provider === 'teams'
-                ? fallbackTarget.serviceUrl
-                : null,
-            lastInteractedByUserId: userId,
-          }),
-          tx,
-        );
+          await savePersistedSetupNewState(
+            normalizeSetupNewState({
+              ...currentState,
+              selectedRepositoryIds: normalizedRepositoryIds,
+              setupGuidance: currentState.setupGuidance ?? null,
+              onboardingTaskId: launchResult.taskId,
+              onboardingTaskStartedAt: startedAt,
+              slackTeamId: null,
+              slackChannel: null,
+              slackThreadTs: null,
+              chatHandoffProvider: fallbackTarget.provider,
+              chatHandoffChannelId: kickoffChannelId,
+              chatHandoffThreadId: kickoffMessageId,
+              chatHandoffServiceUrl:
+                fallbackTarget.provider === 'teams'
+                  ? fallbackTarget.serviceUrl
+                  : null,
+              lastInteractedByUserId: userId,
+            }),
+            tx,
+          );
 
-        return {
-          taskId: launchResult.taskId,
-          startedAt,
-          launchedNewOnboardingTask: true as const,
-        };
+          return {
+            taskId: launchResult.taskId,
+            startedAt,
+            launchedNewOnboardingTask: true as const,
+          };
+        }
       }
 
       const startedAt = new Date().toISOString();

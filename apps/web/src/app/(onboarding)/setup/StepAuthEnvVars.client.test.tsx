@@ -10,13 +10,19 @@ import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import type { SetupAuthStatus } from '@roomote/types';
 
-const { replaceMock, refreshMock, signInOauth2Mock, signInSocialMock } =
-  vi.hoisted(() => ({
-    replaceMock: vi.fn(),
-    refreshMock: vi.fn(),
-    signInOauth2Mock: vi.fn(),
-    signInSocialMock: vi.fn(),
-  }));
+const {
+  locationAssignMock,
+  replaceMock,
+  refreshMock,
+  signInOauth2Mock,
+  signInSocialMock,
+} = vi.hoisted(() => ({
+  locationAssignMock: vi.fn(),
+  replaceMock: vi.fn(),
+  refreshMock: vi.fn(),
+  signInOauth2Mock: vi.fn(),
+  signInSocialMock: vi.fn(),
+}));
 
 vi.mock('next/navigation', () => ({
   useRouter: () => ({
@@ -86,13 +92,20 @@ vi.mock('@/components/system', () => ({
   Check: (props: SVGProps<SVGSVGElement>) => <svg {...props} />,
   CopyIconButton: ({
     'aria-label': ariaLabel,
+    disabled,
   }: {
     'aria-label'?: string;
     content: string;
+    disabled?: boolean;
     tooltip?: ReactNode;
-  }) => <button type="button" aria-label={ariaLabel ?? 'Copy'} />,
+  }) => (
+    <button
+      type="button"
+      aria-label={ariaLabel ?? 'Copy'}
+      disabled={disabled}
+    />
+  ),
   Download: (props: SVGProps<SVGSVGElement>) => <svg {...props} />,
-  ExternalLink: (props: SVGProps<SVGSVGElement>) => <svg {...props} />,
   EnvVarsInfoNote: ({
     children,
     runtimeConfigured,
@@ -100,13 +113,14 @@ vi.mock('@/components/system', () => ({
     children?: ReactNode;
     runtimeConfigured?: boolean;
   }) => (
-    <p>
+    <div>
       {children ??
         (runtimeConfigured
           ? "These values are being passed via ENV vars and can't be overridden here."
           : "You can pass these in as ENV vars. When configured here, they're encrypted in the database.")}
-    </p>
+    </div>
   ),
+  ExternalLink: (props: SVGProps<SVGSVGElement>) => <svg {...props} />,
   Info: (props: SVGProps<SVGSVGElement>) => <svg {...props} />,
   Pencil: (props: SVGProps<SVGSVGElement>) => <svg {...props} />,
   Sparkles: (props: SVGProps<SVGSVGElement>) => <svg {...props} />,
@@ -325,6 +339,7 @@ describe('StepAuthEnvVars', () => {
       writable: true,
       value: {
         ...window.location,
+        assign: locationAssignMock,
         origin: 'https://roomote.example.com',
       },
     });
@@ -470,9 +485,25 @@ describe('StepAuthEnvVars', () => {
     expect(
       screen.getByPlaceholderText('Microsoft Client ID'),
     ).toBeInTheDocument();
-    expectHeadingInNumberedStep('Enter the Microsoft app values.', 2);
+    expectHeadingInNumberedStep('Enter the Microsoft app generated values.', 2);
     expectHeadingInNumberedStep('Upload Roomote to Microsoft Teams.', 3);
     expectHeadingInNumberedStep('Add the Teams bot capability to that app.', 4);
+  });
+
+  it('does not show the settings env-var storage note in setup', () => {
+    render(
+      <StepAuthEnvVars
+        authSetup={buildAuthSetup('microsoft')}
+        selectedProviderId="microsoft"
+        onContinue={vi.fn()}
+      />,
+    );
+
+    expect(
+      screen.queryByText(
+        "You can pass these in as ENV vars. When configured here, they're encrypted in the database.",
+      ),
+    ).not.toBeInTheDocument();
   });
 
   it('enables the Teams app package download once a Microsoft app id is entered', () => {
@@ -488,11 +519,25 @@ describe('StepAuthEnvVars', () => {
       screen.queryByRole('link', { name: /download teams app package/i }),
     ).not.toBeInTheDocument();
     expect(
-      screen.getByText(/enter the microsoft client id above/i),
-    ).toBeInTheDocument();
+      screen.getByRole('button', { name: /download teams app package/i }),
+    ).toBeDisabled();
+    expect(
+      screen.getAllByRole('button', { name: /^go/i }).at(1),
+    ).toBeDisabled();
 
     fireEvent.change(screen.getByPlaceholderText('Microsoft Client ID'), {
       target: { value: '11111111-2222-3333-4444-555555555555' },
+    });
+
+    expect(
+      screen.queryByRole('link', { name: /download teams app package/i }),
+    ).not.toBeInTheDocument();
+
+    fireEvent.change(screen.getByPlaceholderText('Microsoft Client Secret'), {
+      target: { value: 'client-secret' },
+    });
+    fireEvent.change(screen.getByPlaceholderText('Microsoft Tenant ID'), {
+      target: { value: '22222222-3333-4444-5555-666666666666' },
     });
 
     expect(
@@ -505,6 +550,51 @@ describe('StepAuthEnvVars', () => {
       'href',
       'https://dev.teams.microsoft.com/home',
     );
+  });
+
+  it('keeps Microsoft Teams setup steps pending until all app values are filled', () => {
+    render(
+      <StepAuthEnvVars
+        authSetup={buildAuthSetup('microsoft')}
+        selectedProviderId="microsoft"
+        onContinue={vi.fn()}
+      />,
+    );
+
+    const uploadStep = screen
+      .getByText('Upload Roomote to Microsoft Teams.')
+      .closest('.flex');
+    const botStep = screen
+      .getByText('Add the Teams bot capability to that app.')
+      .closest('.flex');
+
+    expect(uploadStep).toHaveClass('opacity-50');
+    expect(botStep).toHaveClass('opacity-50');
+    expect(
+      screen.getByRole('button', { name: /download teams app package/i }),
+    ).toBeDisabled();
+    expect(
+      screen.getByRole('button', { name: /copy bot messaging endpoint/i }),
+    ).toBeDisabled();
+
+    fireEvent.change(screen.getByPlaceholderText('Microsoft Client ID'), {
+      target: { value: '11111111-2222-3333-4444-555555555555' },
+    });
+    fireEvent.change(screen.getByPlaceholderText('Microsoft Client Secret'), {
+      target: { value: 'client-secret' },
+    });
+    fireEvent.change(screen.getByPlaceholderText('Microsoft Tenant ID'), {
+      target: { value: '22222222-3333-4444-5555-666666666666' },
+    });
+
+    expect(uploadStep).not.toHaveClass('opacity-50');
+    expect(botStep).not.toHaveClass('opacity-50');
+    expect(
+      screen.getByRole('link', { name: /download teams app package/i }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole('button', { name: /copy bot messaging endpoint/i }),
+    ).toBeEnabled();
   });
 
   it('submits hidden Teams bot values for the single Microsoft app path', async () => {
@@ -617,15 +707,60 @@ describe('StepAuthEnvVars', () => {
     await waitFor(() => {
       expect(signInOauth2Mock).toHaveBeenCalledWith({
         providerId: 'slack',
-        callbackURL: expect.any(String),
+        callbackURL: '/api/slack/install-after-auth?redirect=%2Fsetup',
+        disableRedirect: true,
       });
     });
+    expect(locationAssignMock).toHaveBeenCalledWith('https://slack.test');
     expect(mutateAsync).toHaveBeenCalledWith({
       provider: 'slack',
       values: expect.objectContaining({
         SLACK_CLIENT_ID: 'client-id',
         SLACK_CLIENT_SECRET: 'client-secret',
         SLACK_SIGNING_SECRET: 'signing-secret',
+      }),
+    });
+  });
+
+  it('starts bootstrap Microsoft sign-in with setup flow continuation callback', async () => {
+    const mutateAsync = setupMutationMock();
+
+    render(
+      <StepAuthEnvVars
+        authSetup={buildAuthSetup('microsoft')}
+        selectedProviderId="microsoft"
+        onContinue={vi.fn()}
+        bootstrapMode
+      />,
+    );
+
+    fireEvent.change(screen.getByPlaceholderText('Microsoft Client ID'), {
+      target: { value: '11111111-2222-3333-4444-555555555555' },
+    });
+    fireEvent.change(screen.getByPlaceholderText('Microsoft Client Secret'), {
+      target: { value: 'client-secret' },
+    });
+    fireEvent.change(screen.getByPlaceholderText('Microsoft Tenant ID'), {
+      target: { value: '22222222-3333-4444-5555-666666666666' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: /save and sign in/i }));
+
+    await waitFor(() => {
+      expect(signInOauth2Mock).toHaveBeenCalledWith({
+        providerId: 'microsoft-entra-id',
+        callbackURL: '/setup',
+        disableRedirect: true,
+      });
+    });
+    expect(locationAssignMock).toHaveBeenCalledWith('https://slack.test');
+    expect(mutateAsync).toHaveBeenCalledWith({
+      provider: 'microsoft',
+      values: expect.objectContaining({
+        ROOMOTE_AUTH_MICROSOFT_CLIENT_ID:
+          '11111111-2222-3333-4444-555555555555',
+        ROOMOTE_AUTH_MICROSOFT_CLIENT_SECRET: 'client-secret',
+        ROOMOTE_AUTH_MICROSOFT_TENANT_ID:
+          '22222222-3333-4444-5555-666666666666',
       }),
     });
   });
@@ -681,9 +816,11 @@ describe('StepAuthEnvVars', () => {
     await waitFor(() => {
       expect(signInOauth2Mock).toHaveBeenCalledWith({
         providerId: 'slack',
-        callbackURL: expect.any(String),
+        callbackURL: '/api/slack/install-after-auth?redirect=%2Fsetup',
+        disableRedirect: true,
       });
     });
+    expect(locationAssignMock).toHaveBeenCalledWith('https://slack.test');
     expect(mutateAsync).toHaveBeenCalledWith({
       provider: 'slack',
       values: {},

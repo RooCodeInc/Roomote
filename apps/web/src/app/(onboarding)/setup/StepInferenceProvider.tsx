@@ -15,7 +15,6 @@ import {
   ArrowRight,
   Button,
   Check,
-  EnvVarsInfoNote,
   Input,
   Select,
   SelectContent,
@@ -156,6 +155,8 @@ export function StepInferenceProvider({
     hasSavedProviderKey &&
     apiKey.length === 0 &&
     !editingSavedValue;
+  const shouldShowConfiguredMask =
+    hasRuntimeProviderKey || shouldShowSavedValueMask;
   const canContinueWithoutApiKey = hasRuntimeProviderKey || hasSavedProviderKey;
   const hasMissingRequiredFields =
     !canContinueWithoutApiKey &&
@@ -209,13 +210,7 @@ export function StepInferenceProvider({
         {isChatGptProvider ? null : (
           <Input
             secret={!hasRuntimeProviderKey}
-            value={
-              hasRuntimeProviderKey
-                ? ''
-                : shouldShowSavedValueMask
-                  ? MASKED_VALUE
-                  : apiKey
-            }
+            value={shouldShowConfiguredMask ? MASKED_VALUE : apiKey}
             onFocus={() => {
               if (shouldShowSavedValueMask) {
                 setEditingSavedValue(true);
@@ -313,14 +308,6 @@ export function StepInferenceProvider({
           </Button>
         </div>
       )}
-
-      <div className="space-y-2 text-sm text-muted-foreground">
-        <EnvVarsInfoNote>
-          You can pass keys in as ENV vars when running Roomote (highly
-          recommended in production). When configured here, they&apos;re
-          encrypted in the database.
-        </EnvVarsInfoNote>
-      </div>
 
       <ChatGptConnectDialog
         open={isChatGptDialogOpen}

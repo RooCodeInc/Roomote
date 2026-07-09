@@ -12,16 +12,6 @@ import { cn } from '@/lib/utils';
 
 type ProviderSetupInstructionsProviderId = SetupAuthProviderId | 'telegram';
 
-export function hasProviderSetupInstructions(
-  providerId: ProviderSetupInstructionsProviderId | null | undefined,
-) {
-  return (
-    providerId === 'slack' ||
-    providerId === 'microsoft' ||
-    providerId === 'telegram'
-  );
-}
-
 function InstructionText({
   heading,
   children,

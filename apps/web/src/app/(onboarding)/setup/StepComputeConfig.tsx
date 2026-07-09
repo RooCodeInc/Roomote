@@ -19,7 +19,6 @@ import {
   Button,
   Check,
   ChevronDown,
-  EnvVarsInfoNote,
   Input,
   Spinner,
 } from '@/components/system';
@@ -31,6 +30,29 @@ import { getSetupStepDefinition } from './types';
 const COMPUTE_CONFIG_STEP = getSetupStepDefinition('compute-config');
 const MASKED_VALUE = '••••••••••••••••••••••••••••';
 const SHARED_WORKER_IMAGE_ENV_VAR = 'DOCKER_WORKER_IMAGE';
+
+function isSecretComputeField(field: { secret?: boolean }) {
+  return field.secret === true;
+}
+
+function getNonSecretFieldInitialValues(
+  fields: SetupComputeStatus['providers'][number]['fields'],
+): Record<string, string> {
+  const next: Record<string, string> = {};
+
+  for (const field of fields) {
+    if (isSecretComputeField(field) || field.runtimeSatisfied) {
+      continue;
+    }
+
+    const savedValue = field.savedValue?.trim();
+    if (savedValue) {
+      next[field.envVarName] = savedValue;
+    }
+  }
+
+  return next;
+}
 
 export function StepComputeConfig({
   computeSetup,
@@ -49,7 +71,29 @@ export function StepComputeConfig({
     selectedProviderId ??
     computeSetup.selectedProvider ??
     computeSetup.preselectedProvider;
-  const [values, setValues] = useState<Record<string, string>>({});
+  const selectedProviderFields = useMemo(() => {
+    return (
+      computeSetup.providers.find(
+        (candidate) => candidate.provider === effectiveSelectedProviderId,
+      )?.fields ?? []
+    );
+  }, [computeSetup.providers, effectiveSelectedProviderId]);
+  const nonSecretInitialValuesKey = selectedProviderFields
+    .filter((field) => !isSecretComputeField(field))
+    .map(
+      (field) =>
+        `${field.envVarName}:${field.savedValue ?? ''}:${field.savedSatisfied}:${field.runtimeSatisfied}`,
+    )
+    .join('|');
+  const nonSecretInitialValues = useMemo(
+    () => getNonSecretFieldInitialValues(selectedProviderFields),
+    // selectedProviderFields is intentionally omitted; content key drives updates.
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- content-keyed
+    [nonSecretInitialValuesKey],
+  );
+  const [values, setValues] = useState<Record<string, string>>(
+    nonSecretInitialValues,
+  );
   const [editingSavedValues, setEditingSavedValues] = useState<
     Record<string, boolean>
   >({});
@@ -101,11 +145,11 @@ export function StepComputeConfig({
   );
 
   useEffect(() => {
-    setValues({});
+    setValues(nonSecretInitialValues);
     setEditingSavedValues({});
     setAdvancedExpanded(false);
     setAwaitingTemplateBuild(false);
-  }, [effectiveSelectedProviderId]);
+  }, [effectiveSelectedProviderId, nonSecretInitialValues]);
 
   // Re-attach to an in-flight build (e.g. after a page reload mid-build).
   useEffect(() => {
@@ -271,9 +315,12 @@ export function StepComputeConfig({
     secret?: boolean;
     runtimeSatisfied?: boolean;
     savedSatisfied?: boolean;
+    savedValue?: string | null;
   }) => {
     const value = values[field.envVarName] ?? '';
+    const isSecretField = isSecretComputeField(field);
     const shouldShowSavedValueMask =
+      isSecretField &&
       !field.runtimeSatisfied &&
       !!field.savedSatisfied &&
       value.length === 0 &&
@@ -290,14 +337,17 @@ export function StepComputeConfig({
         </div>
         <div className="flex items-center gap-2">
           <Input
-            secret={field.secret && !field.runtimeSatisfied}
+            secret={isSecretField && !field.runtimeSatisfied}
+            type={isSecretField ? undefined : 'text'}
             className="font-mono disabled:bg-card/90 disabled:text-foreground/50"
             value={
-              field.runtimeSatisfied
-                ? ''
+              isSecretField && field.runtimeSatisfied
+                ? MASKED_VALUE
                 : shouldShowSavedValueMask
                   ? MASKED_VALUE
-                  : value
+                  : field.runtimeSatisfied && !isSecretField
+                    ? (field.savedValue ?? value)
+                    : value
             }
             onFocus={() => {
               if (shouldShowSavedValueMask) {
@@ -308,7 +358,7 @@ export function StepComputeConfig({
               }
             }}
             onBlur={() => {
-              if (field.savedSatisfied && value.length === 0) {
+              if (isSecretField && field.savedSatisfied && value.length === 0) {
                 setEditingSavedValues((current) => ({
                   ...current,
                   [field.envVarName]: false,
@@ -388,8 +438,6 @@ export function StepComputeConfig({
                   {credentialFields.map((field) => renderInputField(field))}
                 </div>
               ) : null}
-
-              {!advancedExpanded && <EnvVarsInfoNote />}
 
               {isHostedProvider && workerImage.hostedReady ? (
                 <div className="flex items-start gap-2 text-muted-foreground mt-4">
@@ -491,8 +539,6 @@ export function StepComputeConfig({
                   )}
                 </div>
               ) : null}
-
-              {advancedExpanded && <EnvVarsInfoNote />}
             </div>
           </div>
         ) : null}

@@ -20,7 +20,7 @@ const LOG_STREAM_READINESS_POLL_INTERVAL_MS = 2_000;
 const LOG_STREAM_READINESS_MAX_WAIT_MS = 15 * 60_000;
 
 const UNSUPPORTED_LOG_STREAMING_ERROR =
-  'Live log streaming is unavailable for this compute provider.';
+  'Live log streaming is unavailable for this sandbox provider.';
 
 export async function getCloudJobLogs(c: Context<{ Variables: Variables }>) {
   const authContext = c.get('authContext');

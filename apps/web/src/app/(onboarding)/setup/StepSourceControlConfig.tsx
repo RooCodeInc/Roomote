@@ -16,7 +16,6 @@ import {
   Button,
   Check,
   CopyIconButton,
-  EnvVarsInfoNote,
   ExternalLink,
   Input,
   Label,
@@ -393,8 +392,8 @@ export function StepSourceControlConfig({
                     secret={field.secret && !field.runtimeSatisfied}
                     className="font-mono"
                     value={
-                      field.runtimeSatisfied
-                        ? ''
+                      field.runtimeSatisfied && field.secret
+                        ? MASKED_VALUE
                         : shouldShowSavedValueMask
                           ? MASKED_VALUE
                           : value
@@ -436,10 +435,6 @@ export function StepSourceControlConfig({
             </div>
           );
         })}
-
-        <div className="space-y-2 text-sm text-muted-foreground">
-          <EnvVarsInfoNote />
-        </div>
       </div>
 
       <div className="flex flex-col gap-2 sm:flex-row sm:items-center mt-8">

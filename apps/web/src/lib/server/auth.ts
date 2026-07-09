@@ -5,6 +5,7 @@ import { APIError } from 'better-auth/api';
 import { nextCookies } from 'better-auth/next-js';
 import { genericOAuth, microsoftEntraId, slack } from 'better-auth/plugins';
 import { drizzleAdapter } from '@better-auth/drizzle-adapter';
+import { normalizeAdoLinkedAccountKey } from '@roomote/ado';
 
 import {
   authUsers,
@@ -665,8 +666,21 @@ async function createAuth(authProviderConfig: ResolvedAuthProviderConfig) {
                 readAdoConnectionDataUserString(user, 'uniqueName') ??
                 `Azure DevOps user ${accountId}`;
 
+              // Key the linked account on the uniqueName (UPN/email). The
+              // vssps connectionData `id` used here does not match the org
+              // identity id Azure DevOps sends as the comment author on PR
+              // webhooks, so id-based matching never resolves. The uniqueName
+              // is the one identifier both surfaces share. Fall back to the
+              // email and then the vssps id if a uniqueName is unavailable.
+              const linkedAccountKey =
+                normalizeAdoLinkedAccountKey(
+                  readAdoConnectionDataUserString(user, 'uniqueName'),
+                ) ??
+                normalizeAdoLinkedAccountKey(email) ??
+                accountId;
+
               return {
-                id: accountId,
+                id: linkedAccountKey,
                 email,
                 emailVerified: false,
                 name,

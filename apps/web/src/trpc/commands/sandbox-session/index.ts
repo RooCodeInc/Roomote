@@ -106,6 +106,7 @@ export const sendSandboxPromptInputSchema = z
     source: z.string().optional(),
     clientMessageId: z.string().optional(),
     userImageUrl: z.string().optional(),
+    autoSteerWhenQueued: z.boolean().optional(),
   })
   .superRefine((data, ctx) => {
     const hasPrompt =
@@ -227,6 +228,7 @@ export async function sendSandboxPromptCommand(
       clientMessageId: parsed.clientMessageId,
       userName: getAuthenticatedPromptUserName(auth),
       userImageUrl: parsed.userImageUrl,
+      autoSteerWhenQueued: parsed.autoSteerWhenQueued,
     });
   } catch (error) {
     await releaseOutOfBandContext(outOfBandContext);

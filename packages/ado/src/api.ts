@@ -3,6 +3,7 @@ import { z } from 'zod';
 import {
   ALL_REPOSITORIES,
   buildRepositoryCloneUrl,
+  stripCloneUrlUserInfo,
   type SourceControlProvider,
 } from '@roomote/types';
 import {
@@ -374,6 +375,83 @@ export async function getAdoDeploymentUser(options?: {
 
 export function clearAdoDeploymentUserCache(): void {
   cachedAdoDeploymentUser = null;
+}
+
+/**
+ * Normalizes an Azure DevOps identity to the key used for linked-account
+ * matching. Azure DevOps exposes a user's identity under different ids per
+ * surface: the Entra OAuth `connectionData` returns a vssps user id, while
+ * pull request comment webhooks deliver an org identity id — the two never
+ * match, and neither equals the Entra object id. The `uniqueName` (UPN /
+ * email) is the one value present identically on both surfaces, so linked
+ * accounts key off it. Lowercasing and trimming keeps the link side and the
+ * webhook side in agreement.
+ */
+export function normalizeAdoLinkedAccountKey(
+  value: string | null | undefined,
+): string | null {
+  const normalized = value?.trim().toLowerCase();
+
+  return normalized ? normalized : null;
+}
+
+const adoPullRequestDetailsSchema = z
+  .object({ pullRequestId: z.number() })
+  .passthrough();
+
+/**
+ * Fetches a pull request by repository UUID and pull request number.
+ * Returns the raw Azure DevOps pull request resource (repository, refs,
+ * identities, ...), used to rehydrate webhook payloads that only carry
+ * resource links.
+ */
+export async function getAdoPullRequest({
+  repositoryId,
+  pullRequestNumber,
+  token,
+  organization,
+  baseUrl,
+  organizationApiBaseUrl,
+  fetchImpl,
+}: {
+  repositoryId: string;
+  pullRequestNumber: number;
+  token?: string;
+  organization?: string;
+  baseUrl?: string;
+  organizationApiBaseUrl?: string;
+  fetchImpl?: typeof fetch;
+}): Promise<Record<string, unknown>> {
+  const adoToken = token ?? (await resolveAdoToken());
+
+  if (!adoToken?.trim()) {
+    throw new Error(
+      'ADO_TOKEN is required to read Azure DevOps pull requests.',
+    );
+  }
+
+  const resolvedOrganizationApiBaseUrl = await resolveAdoOrganizationApiBaseUrl(
+    { organization, baseUrl, organizationApiBaseUrl },
+  );
+
+  if (!resolvedOrganizationApiBaseUrl) {
+    throw new Error(
+      'ADO_ORGANIZATION is required to read Azure DevOps pull requests.',
+    );
+  }
+
+  const { data } = await requestAdoJson({
+    organizationApiBaseUrl: resolvedOrganizationApiBaseUrl,
+    fetchImpl,
+    path: `/_apis/git/repositories/${encodeURIComponent(
+      repositoryId,
+    )}/pullRequests/${pullRequestNumber}`,
+    params: { 'api-version': ADO_API_VERSION },
+    token: adoToken,
+    schema: adoPullRequestDetailsSchema,
+  });
+
+  return data;
 }
 
 export type AdoTokenValidationResult =
@@ -1115,13 +1193,17 @@ export function buildAdoRepositoryValues({
 }): AdoRepositoryValues {
   const fullName = buildAdoRepositoryFullName(organization, repository);
   const host = hostFromBaseUrl(baseUrl);
-  const cloneUrl =
+  // Azure DevOps remoteUrl embeds the organization as URL userinfo
+  // (https://org@dev.azure.com/...), which breaks the worker's git
+  // insteadOf proxy rewrite, so store the clone URL without it.
+  const cloneUrl = stripCloneUrlUserInfo(
     repository.remoteUrl ??
-    buildRepositoryCloneUrl({
-      provider: ADO_PROVIDER,
-      host,
-      repositoryFullName: fullName,
-    });
+      buildRepositoryCloneUrl({
+        provider: ADO_PROVIDER,
+        host,
+        repositoryFullName: fullName,
+      }),
+  );
 
   return {
     sourceControlProvider: ADO_PROVIDER,

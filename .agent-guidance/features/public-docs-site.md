@@ -77,7 +77,7 @@ Use these terms consistently in public docs:
   GitLab, Gitea, and Azure DevOps.
 - `inference provider` for the model provider used to run agents, such as
   OpenRouter, Anthropic, OpenAI, or other supported model backends.
-- `compute provider` for the execution backend that runs Roomote tasks and
+- `sandbox provider` (legacy: `compute provider`) for the execution backend that runs Roomote tasks and
   sandboxes, such as Docker, Modal, E2B, or Daytona.
 - `integration` for connected external tools that provide task context or
   actions, including Linear and MCP-backed services.

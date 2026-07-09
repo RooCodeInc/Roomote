@@ -989,6 +989,41 @@ function isOpenCodeMessageAbortedError(error: unknown): boolean {
   return name === 'MessageAbortedError' || message === 'Aborted';
 }
 
+const SESSION_ERROR_FALLBACK_MAX_CHARS = 600;
+
+const MAX_RESOLVED_USER_INPUT_REQUEST_IDS = 256;
+
+/**
+ * Session errors used to be dumped into the transcript as the raw
+ * `JSON.stringify(error)` blob (status codes, response headers, provider
+ * metadata). Surface the human-readable provider message instead; the full
+ * payload still goes to the harness log for debugging.
+ */
+function formatOpenCodeSessionErrorText(error: unknown): string {
+  const record = asRecord(error);
+  const name = asString(record?.name);
+  const message =
+    asString(asRecord(record?.data)?.message) ?? asString(record?.message);
+
+  if (message) {
+    return name && name !== 'APIError'
+      ? `The provider returned an error (${name}): ${message}`
+      : `The provider returned an error: ${message}`;
+  }
+
+  if (name) {
+    return `The session ended with an error: ${name}`;
+  }
+
+  const serialized = JSON.stringify(error ?? {});
+
+  return `The session ended with an error: ${
+    serialized.length > SESSION_ERROR_FALLBACK_MAX_CHARS
+      ? `${serialized.slice(0, SESSION_ERROR_FALLBACK_MAX_CHARS)}…`
+      : serialized
+  }`;
+}
+
 function formatOpenCodeUserInputResponsePrompt(options: {
   request: HarnessPendingUserInputRequest;
   answers: AcpRequestUserInputAnswers;
@@ -1421,6 +1456,12 @@ export class OpenCodeServerHarness
     string,
     HarnessPendingUserInputRequest
   >();
+  // Request ids that have already been answered or abandoned. A late answer
+  // (e.g. a web POST opened before a steer abandoned the question) for one
+  // of these must be rejected rather than fabricated into the replayed turn.
+  // Bounded, oldest-evicted, since ids are per-turn and only need to outlive
+  // in-flight answer round-trips.
+  private readonly resolvedUserInputRequestIds = new Set<string>();
   private readonly knownMcpServerNames: string[];
   private readonly visualAttachmentDirectories = new Set<string>();
 
@@ -2579,6 +2620,28 @@ export class OpenCodeServerHarness
   }
 
   private async interruptForQueuedReplay(): Promise<void> {
+    // The in-flight turn (and any question it was blocked on) is being
+    // superseded by a prioritized queued/steered prompt. Abandon pending
+    // questions so the replayed turn starts clean and downstream state
+    // (harness manager phase, UI) does not stay stuck on an obsolete
+    // request. Emit a cancelled response for each so consumers that only
+    // clear pending state on request_user_input_response (Slack, Linear,
+    // the web store) drop it too — otherwise a late answer to the dead
+    // question could still be accepted and injected into the replayed turn.
+    // The answer path deletes its own request and emits its response before
+    // reaching here, so this only sweeps questions the replay abandons.
+    if (this.pendingUserInputRequests.size > 0) {
+      for (const pending of this.pendingUserInputRequests.values()) {
+        this.runtimeEvents.requestUserInputResponse({
+          request: pending,
+          answers: {},
+          resolution: 'cancelled',
+        });
+        this.recordResolvedUserInputRequest(pending.requestId);
+      }
+      this.pendingUserInputRequests.clear();
+    }
+
     const sessionId = this.sessionId;
 
     if (!sessionId) {
@@ -2602,6 +2665,20 @@ export class OpenCodeServerHarness
   private async handleAnswerUserInputRequest(
     command: AnswerUserInputRequestCommand,
   ): Promise<void> {
+    // Reject answers for questions that were already answered or abandoned
+    // (e.g. a steer replayed the turn after a web answer POST was opened).
+    // The fallback below exists for the legit race where an answer arrives
+    // before the harness registered the request; a resolved id is not that.
+    if (
+      !this.pendingUserInputRequests.has(command.data.requestId) &&
+      this.resolvedUserInputRequestIds.has(command.data.requestId)
+    ) {
+      this.logger.warn(
+        `OpenCode harness ignoring AnswerUserInputRequest for already-resolved requestId=${command.data.requestId}`,
+      );
+      return;
+    }
+
     const pending =
       this.pendingUserInputRequests.get(command.data.requestId) ??
       this.createFallbackUserInputRequest(command.data.requestId);
@@ -2614,6 +2691,7 @@ export class OpenCodeServerHarness
     }
 
     this.pendingUserInputRequests.delete(command.data.requestId);
+    this.recordResolvedUserInputRequest(command.data.requestId);
     const resolution = getRequestUserInputResponseResolution(
       command.data.answers,
     );
@@ -2654,6 +2732,25 @@ export class OpenCodeServerHarness
       source: 'request_user_input_response',
       userId: command.data.userId,
     });
+  }
+
+  private recordResolvedUserInputRequest(requestId: string): void {
+    // Re-insert to move to the end (most-recently-resolved) for eviction.
+    this.resolvedUserInputRequestIds.delete(requestId);
+    this.resolvedUserInputRequestIds.add(requestId);
+
+    while (
+      this.resolvedUserInputRequestIds.size >
+      MAX_RESOLVED_USER_INPUT_REQUEST_IDS
+    ) {
+      const oldest = this.resolvedUserInputRequestIds.values().next().value;
+
+      if (oldest === undefined) {
+        break;
+      }
+
+      this.resolvedUserInputRequestIds.delete(oldest);
+    }
   }
 
   private createFallbackUserInputRequest(
@@ -3020,9 +3117,12 @@ export class OpenCodeServerHarness
     }
 
     if (sessionId) {
+      this.logger.error(
+        `OpenCode session error sessionId=${sessionId}: ${JSON.stringify(error ?? {})}`,
+      );
       this.runtimeEvents.assistantMessage({
         sessionId,
-        text: `OpenCode session error: ${JSON.stringify(error ?? {})}`,
+        text: formatOpenCodeSessionErrorText(error),
       });
       this.prompts.clear();
       this.clearQueuedPromptRetryTimer();

@@ -239,8 +239,6 @@ import {
 import {
   getComputeStatusCommand,
   saveComputeConfigCommand,
-  saveComputeWorkerImageCommand,
-  clearComputeWorkerImageCommand,
   clearComputeConfigCommand,
   setDefaultComputeProviderCommand,
 } from '../commands/compute';
@@ -404,6 +402,7 @@ const automationsRouter = createRouter({
         channelAutoStartSlackChannels: z
           .array(
             z.object({
+              channelId: z.string().trim().max(64).nullable().default(null),
               slackChannel: z.string().trim().max(160).nullable().default(null),
               instructions: z.string().max(8_000).nullable().default(null),
               launchMode: z.enum(['always_start']).default('always_start'),
@@ -1321,16 +1320,6 @@ export const appRouter = createRouter({
       .mutation(({ ctx: { auth }, input }) =>
         clearComputeConfigCommand(auth, input),
       ),
-
-    saveWorkerImage: protectedProcedure
-      .input(z.object({ value: z.string().trim() }))
-      .mutation(({ ctx: { auth }, input }) =>
-        saveComputeWorkerImageCommand(auth, input),
-      ),
-
-    clearWorkerImage: protectedProcedure.mutation(({ ctx: { auth } }) =>
-      clearComputeWorkerImageCommand(auth),
-    ),
 
     setDefaultProvider: protectedProcedure
       .input(z.object({ provider: z.enum(computeProviders) }))

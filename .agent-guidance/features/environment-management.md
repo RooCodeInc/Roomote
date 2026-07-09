@@ -3,7 +3,7 @@ title: Environment Management
 status: active
 last_reviewed: 2026-07-09
 owner: engineering
-summary: Technical documentation of Roomote environment and workspace management covering single-deployment configuration, config version history, snapshots, sandbox OIDC targets, compute target mapping, preview-auth bypass behavior, and preview defaults.
+summary: Technical documentation of Roomote environment and workspace management covering single-deployment configuration, declarative startup provisioning, config version history, snapshots, sandbox OIDC targets, compute target mapping, preview-auth bypass behavior, and preview defaults.
 ---
 
 # Environment Management
@@ -32,6 +32,8 @@ reviewable history in the append-only `environment_config_versions` table.
   `user`
 - MCP-driven environment updates used by the setup/onboarding agent snapshot
   the previous saved state with source `agent`
+- declarative startup provisioning writes the newly applied definition with
+  source `file`
 - the edit page can load a saved version into the YAML editor, but the current
   environment only changes when the user saves that loaded definition
 
@@ -64,21 +66,22 @@ Environments are stored in the `environments` table with related tables for repo
 
 ### `environments` Table
 
-| Column              | Type        | Description                                                       |
-| ------------------- | ----------- | ----------------------------------------------------------------- |
-| `id`                | `uuid`      | Primary key                                                       |
-| `userId`            | `text`      | Optional user association (FK to `users.id`)                      |
-| `createdByUserId`   | `text`      | User who created the environment (FK to `users.id`)               |
-| `name`              | `text`      | Unique name within the deployment                                 |
-| `description`       | `text`      | Optional human-readable description                               |
-| `config`            | `jsonb`     | Full `EnvironmentConfig` JSON blob                                |
-| `isEval`            | `boolean`   | Marks eval-only environments that are hidden from normal listings |
-| `snapshotId`        | `text`      | Legacy Vercel-era snapshot ID — no longer read or written         |
-| `snapshotCreatedAt` | `timestamp` | Legacy snapshot creation timestamp — no longer read or written    |
-| `snapshotExpiresAt` | `timestamp` | Legacy snapshot expiry timestamp — no longer read or written      |
-| `snapshotStatus`    | `text`      | Legacy snapshot status — no longer read or written                |
-| `createdAt`         | `timestamp` | Row creation timestamp                                            |
-| `updatedAt`         | `timestamp` | Row update timestamp                                              |
+| Column              | Type        | Description                                                                                    |
+| ------------------- | ----------- | ---------------------------------------------------------------------------------------------- |
+| `id`                | `uuid`      | Primary key                                                                                    |
+| `userId`            | `text`      | Optional user association (FK to `users.id`)                                                   |
+| `createdByUserId`   | `text`      | User who created the environment (FK to `users.id`); null for system-provisioned environments  |
+| `name`              | `text`      | Unique name within the deployment                                                              |
+| `description`       | `text`      | Optional human-readable description                                                            |
+| `config`            | `jsonb`     | Full `EnvironmentConfig` JSON blob                                                             |
+| `isEval`            | `boolean`   | Marks eval-only environments that are hidden from normal listings                              |
+| `declarativeSource` | `text`      | Declarative provisioning provenance (file basename or `env:<n>`); null when manually managed   |
+| `snapshotId`        | `text`      | Legacy Vercel-era snapshot ID — no longer read or written                                      |
+| `snapshotCreatedAt` | `timestamp` | Legacy snapshot creation timestamp — no longer read or written                                 |
+| `snapshotExpiresAt` | `timestamp` | Legacy snapshot expiry timestamp — no longer read or written                                   |
+| `snapshotStatus`    | `text`      | Legacy snapshot status — no longer read or written                                             |
+| `createdAt`         | `timestamp` | Row creation timestamp                                                                         |
+| `updatedAt`         | `timestamp` | Row update timestamp                                                                           |
 
 **Indexes:**
 
@@ -100,7 +103,7 @@ restore flows.
 | `config`          | `jsonb`     | Full `EnvironmentConfig` snapshot                              |
 | `name`            | `text`      | Environment name stored with the snapshot                      |
 | `description`     | `text`      | Environment description stored with the snapshot               |
-| `source`          | `text`      | Snapshot source: `setup`, `user`, `agent`, or `api`            |
+| `source`          | `text`      | Snapshot source: `setup`, `user`, `agent`, `api`, or `file`    |
 | `createdByUserId` | `text`      | Optional FK to `users.id` for the actor who triggered the save |
 | `createdAt`       | `timestamp` | Row creation timestamp                                         |
 
@@ -316,7 +319,11 @@ trust policies:
 
 ```typescript
 {
-  repository: string;           // GitHub repo in "owner/name" format
+  repository: string;           // Repository fullName as stored in the repositories
+                                // table: "owner/name" for GitHub/Gitea, and
+                                // multi-segment names for GitLab subgroups
+                                // ("group/subgroup/repo") and Azure DevOps
+                                // ("organization/project/repo", spaces allowed)
   branch?: string;              // Branch to checkout (default: repo default branch)
   tool_versions?: Record<string, string>;  // repo-local fallback tool versions
   commands?: Command[];         // Startup commands (install, build, etc.)
@@ -488,6 +495,55 @@ Before saving, the web UI can call `trpc.environments.validateConfig` to check:
 
 - Repository accessibility via GitHub API (hard error if inaccessible)
 - Branch existence (soft warning if not found)
+
+### 1b. Declarative Startup Provisioning
+
+**Loader:** `packages/db/src/lib/declarative-environments.ts`
+**Boot hook:** `apps/api/src/bootstrap.ts` (non-fatal; runs before `startApiServer()`)
+
+Operators can provision deployment-owned environments from declarative
+definitions applied at every API startup:
+
+- `ROOMOTE_ENVIRONMENTS_DIR` — directory of `*.yaml`/`*.yml`/`*.json` files,
+  one `EnvironmentConfig` per file (same schema as the UI YAML editor)
+- `ROOMOTE_ENVIRONMENTS_YAML` — inline multi-document YAML for PaaS-style
+  deployments without file mounts
+
+Apply semantics:
+
+- Upsert keyed by `config.name`, restricted to org-owned non-eval
+  environments; user-owned or eval name collisions are skipped with an error.
+- Create mirrors the REST create transaction (insert + config version +
+  mappings) with `createdByUserId: null`; update routes through
+  `updateEnvironmentDefinition`, so identical re-applies are no-ops and real
+  changes soft-delete environment snapshots as usual.
+- Config versions are written with source `file` and snapshot the **new**
+  definition.
+- `environments.declarative_source` records provenance (file basename or
+  `env:<n>`) and drives the "Managed from file" badge plus the edit-page
+  warning banner in the web UI. Environments stay editable; the file wins
+  again on the next boot.
+- Definitions that reference unlinked repositories still apply; mappings
+  backfill on a later boot because the resolved `repositoryIds` set changes.
+- Never prunes: definitions removed from the set only get their
+  `declarative_source` cleared ("orphaned" to manual management). Orphan
+  reconciliation runs only when the whole declared set was read and validated
+  successfully; while any source fails to read or parse, markers are left
+  untouched (`orphaningDeferred`) so a temporarily broken file does not orphan
+  its environment.
+- Invalid definitions are skipped with logged errors; a missing or unreadable
+  `ROOMOTE_ENVIRONMENTS_DIR` is itself skipped so inline YAML definitions
+  still apply. Postgres `42P01` is retried with the same bounded backoff as
+  the auth-keypair bootstrap so the API can boot in parallel with
+  `db-migrate`.
+
+Both env vars are in `CONTROL_PLANE_ENV_VAR_NAMES`, so they are reserved from
+the env-var editor and stripped from task sandboxes. Roomote's own definition
+is checked in at `.roomote/environments/roomote.yaml` as dogfood and a living
+example; keep it in sync when the repo's dev infrastructure (services, ports,
+tool versions, setup commands) changes. A schema test in
+`packages/db/src/lib/__tests__/declarative-environments.test.ts` validates
+that file in CI.
 
 ### 2. Launch Job on a Fresh Worker (Controller)
 

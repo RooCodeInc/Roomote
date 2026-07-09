@@ -88,6 +88,10 @@ export interface SlackChannelDisplayNames {
 }
 
 export interface ChannelAutoStartInputRow {
+  // Canonical Slack channel ID persisted for this row. When present and valid it
+  // is used as the resolution input so an unchanged row never has to be
+  // re-resolved by name on save. Null/absent for new or channel-edited rows.
+  channelId?: string | null;
   slackChannel: string | null;
   instructions: string | null;
   launchMode?: ChannelAutoStartLaunchMode | null;

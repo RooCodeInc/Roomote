@@ -24,6 +24,7 @@ messages until they link.
 | `TELEGRAM_WEBHOOK_SECRET`  | Shared secret verified via `x-telegram-bot-api-secret-token`.                                                                                                                |
 | `TELEGRAM_BOT_USERNAME`    | Bot username, used for group-mention task entry detection.                                                                                                                   |
 | `TELEGRAM_PRIMARY_CHAT_ID` | Destination for proactive messages (starter suggestions). Captured automatically from the first private chat that reaches the webhook (`primary-chat.ts`); first write wins. |
+| `TELEGRAM_API_BASE_URL`    | Bot API host, default `https://api.telegram.org`. Point it at the mock Telegram harness to capture outbound Bot API traffic in tests (see Testing).                          |
 
 Saving the Telegram provider from the settings UI registers the webhook
 automatically (`registerTelegramWebhookBestEffort` in
@@ -78,7 +79,30 @@ otherwise the LLM router and workers silently fall back or fail.
    group mention of `TELEGRAM_BOT_USERNAME`): resume from a completed job's
    snapshot when available, else route via the LLM router and either reply
    inline (`platform_answer`) or launch a standard task
-   (`task-orchestration.ts`). Bot commands count as invocations — for both
+   (`task-orchestration.ts`). Before launching, low-confidence routes get a
+   **routing-confirmation card** (`routing-confirmation.ts`, mirroring
+   Slack's gate): when the router's `debug.confidence` is below 0.95, the
+   workspace was remapped, or it picked all-repositories while environments
+   exist, the bot posts a compact card — "Planning to run this in
+   {suggested} — starting in ~5s." with ✅ Yes / ✖️ Nope buttons — instead
+   of launching. Yes (or ~5 seconds of silence) starts the suggestion; the
+   short window keeps the normal flow near-instant, with the started
+   message's cancel button covering late mis-route recovery (in-process
+   timer; a restart drops it and the pending choice expires via its
+   15-minute Redis TTL). Nope swaps the same message into a workspace
+   picker (environments, All repositories, ✖️ Nevermind) via the provider's
+   `editMessageText`; the picker never auto-starts. A router `fallback`
+   shows the picker directly (previously it silently launched in all
+   repos). The pending choice lives in Redis
+   (`telegram:pending_route:<id>`; buttons carry only the short id to stay
+   under the 64-byte callback_data limit) and is claimed one-shot with
+   `GETDEL`, so a click and the auto-confirm timer can never both launch;
+   the Nope transition re-keys the state under a fresh id so the suggestion
+   timer can never fire after the user said no. Only the requester's linked
+   account may click; a new task-entry message in the same chat/topic
+   invalidates the previous pending card. Suggestion
+   buttons and other explicit-intent launches skip the card
+   (`skipRoutingConfirmation`). Bot commands count as invocations — for both
    entry detection and invocation stripping — only when they lead the message
    (offset 0, or preceded only by this bot's mention); a `/command` mentioned
    mid-sentence is ordinary message content and survives into queued text.
@@ -95,7 +119,12 @@ otherwise the LLM router and workers silently fall back or fail.
    answers the callback, removes the button, and posts a confirmation.
    Starter-suggestion buttons (`idea:<suggestionId>`) atomically claim the
    suggestion and launch it through the normal Telegram routing pipeline.
-   Unknown callback data is answered and dropped so buttons never spin.
+   Routing-confirmation buttons (`route_ok:<id>` Yes, `route_alt:<id>` Nope
+   → picker, `route_pick:<id>:<n>` picker choice, `route_no:<id>`
+   Nevermind; build/parse helpers in `callback-data.ts`) claim the pending
+   route from Redis and launch, transition, or dismiss via the shared
+   `launchTelegramTask` (`task-launch.ts`). Unknown callback data is
+   answered and dropped so buttons never spin.
 
 ## Onboarding
 
@@ -193,6 +222,42 @@ current user.
   rejects entity parsing, and splits messages that exceed the 4096-character
   Bot API limit at line/code-fence boundaries.
 
+## Testing
+
+Prefer the mock Telegram harness for integration behavior — it impersonates
+both halves of the Bot API the way the mock Slack harness does for Slack:
+
+- [`packages/communication/src/mock-telegram-server.ts`](../../packages/communication/src/mock-telegram-server.ts) —
+  in-process Bot API fake (`sendMessage`, `sendPhoto`, `setMessageReaction`,
+  `deleteMessage`, `editMessageReplyMarkup`, `answerCallbackQuery`,
+  `setWebhook`/`getWebhookInfo`) with a `/mock/state` + `/mock/events` control
+  plane and an update `dispatch()` that posts signed updates (secret-token
+  header) to the real `/api/webhooks/telegram` handler. It enforces real
+  Telegram limits (4096-char messages, unknown-chat and missing-reply-target
+  rejections) and auto-computes `entities` for injected message text so
+  bot-command/mention detection behaves as in production. Failure-injection
+  knobs (`behavior.rejectHtmlParseMode`, `behavior.rejectPhotos`) exercise the
+  provider's fallback paths.
+- `TELEGRAM_API_BASE_URL` reroutes every runtime
+  `TelegramCommunicationProvider` construction to the harness (resolved in
+  [`packages/communication/src/telegram-api-base-url.ts`](../../packages/communication/src/telegram-api-base-url.ts)).
+- CLI runner: `pnpm --filter @roomote/communication mock:telegram --state <scenario.json>`
+  ([`packages/communication/scripts/run-mock-telegram.ts`](../../packages/communication/scripts/run-mock-telegram.ts),
+  example scenario next to it). Eval runner with LLM-judged criteria bundles:
+  `pnpm --filter @roomote/communication eval:telegram-scenario`
+  ([`packages/communication/evals/run-telegram-scenario.ts`](../../packages/communication/evals/run-telegram-scenario.ts)).
+- Unit coverage: [`packages/communication/src/__tests__/mock-telegram-server.test.ts`](../../packages/communication/src/__tests__/mock-telegram-server.test.ts)
+  drives the real provider against the harness;
+  [`apps/api/src/handlers/telegram/__tests__/`](../../apps/api/src/handlers/telegram/__tests__)
+  covers the webhook handler with module mocks.
+- End-to-end workflow (DB seeding, env wiring, scenario catalog):
+  [`.agents/skills/mock-telegram-testing/SKILL.md`](../../.agents/skills/mock-telegram-testing/SKILL.md).
+
+When a change touches task entry, active-job follow-up queueing, `/new` +
+`/done` handling, or callback buttons, cover both the update payload shape and
+the persisted cloud-job state — chat-id continuity is the Telegram substitute
+for Slack threads, so continuation bugs are the highest-value scenarios.
+
 ## Slack Parity Notes
 
 Supported: task entry, follow-up messages to the active job, snapshot resume,
@@ -203,11 +268,16 @@ reactions with turn-satisfaction enforcement, visual proof auto-post
 buttons (follow task, cancel task, start suggestion), `/start` welcome plus
 starter-suggestions onboarding, task-link reply footers, webhook verification
 and dedup, per-user account linking (`telegram_user_mappings` via link
-codes, analogous to `slack_user_mappings`).
+codes, analogous to `slack_user_mappings`), routing confirmation with a
+manual workspace picker (same Yes/Nope-then-picker two-step as Slack, via
+inline keyboard + `editMessageText`; same 0.95 confidence gate but a ~5s
+auto-confirm vs Slack's 30s constant; router fallback shows the picker
+instead of silently launching in all repos). Unlike Slack there is no free-text correction
+while a confirmation is pending — a new message in the chat starts a fresh
+routing flow and invalidates the old card.
 
 Not supported (Bot API or product limitations): thread/channel history reads,
-routing-confirmation buttons (Telegram routes and launches directly; the
-cancel button covers mis-routes), account-link education, MCP setup
+account-link education, MCP setup
 recommendations, automation thread-feedback collection and an explicit
 automations destination picker (summaries and execution output fall back to
 the primary chat when Slack is absent). The setup kickoff is supported: when

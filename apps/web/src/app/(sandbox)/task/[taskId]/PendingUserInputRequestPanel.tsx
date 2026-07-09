@@ -17,11 +17,7 @@ import { toast } from 'sonner';
 import { useTRPCClient } from '@/trpc/client';
 import type { PendingTaskUserInputRequest } from './hooks';
 
-import {
-  useSandboxClient,
-  useSandboxPendingUserInputRequests,
-  useSandboxTaskPhase,
-} from './hooks';
+import { useSandboxClient, useSandboxPendingUserInputRequests } from './hooks';
 import {
   buildAnswersForRequest,
   OTHER_VALUE,
@@ -96,7 +92,6 @@ export function PendingUserInputRequestStateProvider({
 }) {
   const client = useSandboxClient();
   const trpcClient = useTRPCClient();
-  const taskPhase = useSandboxTaskPhase();
   const requests = useSandboxPendingUserInputRequests();
 
   const [drafts, setDrafts] = useState<RequestDrafts>({});
@@ -154,14 +149,18 @@ export function PendingUserInputRequestStateProvider({
     );
   }, [requests]);
 
+  // Visibility tracks the live pending requests themselves, not the task
+  // phase: a queued/steered follow-up can flip the reported phase back to
+  // running while the harness turn is still blocked inside the question
+  // tool, and phase-gating here made the question unanswerable in that
+  // state. The runtime clears pending requests on answer, cancel, and
+  // turn teardown, so the list is self-correcting.
   const visibleRequests = useMemo(
     () =>
-      taskPhase === 'waiting_for_user_input'
-        ? requests.filter(
-            (request) => resolvedRequestIds[request.requestId] !== true,
-          )
-        : [],
-    [requests, resolvedRequestIds, taskPhase],
+      requests.filter(
+        (request) => resolvedRequestIds[request.requestId] !== true,
+      ),
+    [requests, resolvedRequestIds],
   );
 
   const requestEntries = useMemo<PendingRequestEntry[]>(

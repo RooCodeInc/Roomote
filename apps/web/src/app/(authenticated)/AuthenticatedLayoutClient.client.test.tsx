@@ -107,7 +107,7 @@ describe('AuthenticatedLayoutClient', () => {
 
     expect(screen.queryByText('Home content')).not.toBeInTheDocument();
     await waitFor(() => {
-      expect(replaceMock).toHaveBeenCalledWith('/setup');
+      expect(replaceMock).toHaveBeenCalledWith('/setup?step=welcome');
     });
   });
 

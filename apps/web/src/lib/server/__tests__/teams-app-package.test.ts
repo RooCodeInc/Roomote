@@ -121,8 +121,18 @@ describe('buildTeamsAppManifest', () => {
         appUrl: 'https://roomote.example.com',
       }),
     ) as {
+      $schema: string;
+      manifestVersion: string;
       id: string;
-      bots: Array<{ botId: string; scopes: string[] }>;
+      packageName?: string;
+      accentColor: string;
+      bots: Array<{
+        botId: string;
+        scopes: string[];
+        supportsFiles: boolean;
+      }>;
+      supportedChannelTypes?: string[];
+      supportsChannelFeatures: string;
       validDomains: string[];
       icons: { color: string; outline: string };
       developer: { websiteUrl: string };
@@ -135,11 +145,20 @@ describe('buildTeamsAppManifest', () => {
       };
     };
 
+    expect(manifest.$schema).toBe(
+      'https://developer.microsoft.com/en-us/json-schemas/teams/v1.25/MicrosoftTeams.schema.json',
+    );
+    expect(manifest.manifestVersion).toBe('1.25');
     expect(manifest.id).toBe('5037b551-0000-0000-0000-000000000000');
+    expect(manifest.packageName).toBeUndefined();
+    expect(manifest.accentColor).toBe('#d6ee26');
     expect(manifest.bots[0]).toMatchObject({
       botId: '5037b551-0000-0000-0000-000000000000',
       scopes: ['personal', 'team', 'groupChat'],
+      supportsFiles: true,
     });
+    expect(manifest.supportedChannelTypes).toBeUndefined();
+    expect(manifest.supportsChannelFeatures).toBe('tier1');
     expect(manifest.validDomains).toEqual(['roomote.example.com']);
     expect(manifest.icons).toEqual({
       color: 'color.png',
@@ -151,8 +170,14 @@ describe('buildTeamsAppManifest', () => {
       resource: 'https://roomote.example.com',
     });
     expect(manifest.authorization.permissions.resourceSpecific).toEqual([
+      { name: 'Channel.Create.Group', type: 'Application' },
+      { name: 'ChannelMember.Read.Group', type: 'Application' },
       { name: 'ChannelMessage.Read.Group', type: 'Application' },
+      { name: 'ChannelMessage.Send.Group', type: 'Application' },
+      { name: 'ChannelSettings.Read.Group', type: 'Application' },
       { name: 'ChatMessage.Read.Chat', type: 'Application' },
+      { name: 'ChatMessage.Send.Chat', type: 'Application' },
+      { name: 'Member.Read.Group', type: 'Application' },
     ]);
     expect(manifest.description.full).toContain(
       'receives channel and chat messages',

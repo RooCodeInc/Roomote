@@ -581,7 +581,7 @@ export function Home({
                 <SelectTrigger
                   size="sm"
                   className="w-36"
-                  aria-label="Compute provider"
+                  aria-label="Sandbox provider"
                 >
                   <SelectValue placeholder="Backend" />
                 </SelectTrigger>

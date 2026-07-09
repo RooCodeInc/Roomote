@@ -1,0 +1,55 @@
+{
+  "name": "telegram-duplicate-delivery",
+  "description": "Telegram redelivers the same update (identical update_id) 6 seconds apart; Redis update_id dedup must make handling exactly-once.",
+  "criteria": [
+    "The bot answered the question exactly once — there is exactly one bot answer message in chat 111000111.",
+    "The second delivery of the same update_id did not produce a second acknowledgement or a second task launch."
+  ],
+  "state": {
+    "bot": {
+      "id": 7000000001,
+      "username": "roomote_mock_bot",
+      "first_name": "Roomote"
+    },
+    "chats": [{ "id": 111000111, "type": "private", "first_name": "Dan" }],
+    "users": [{ "id": 111000111, "first_name": "Dan", "username": "dan_mock" }]
+  },
+  "events": [
+    {
+      "delayMs": 0,
+      "envelope": {
+        "kind": "message",
+        "updateId": "$U1",
+        "message": {
+          "message_id": "$M1",
+          "chat": { "id": 111000111, "type": "private", "first_name": "Dan" },
+          "from": {
+            "id": 111000111,
+            "first_name": "Dan",
+            "username": "dan_mock"
+          },
+          "text": "!fast what does the /new command do on Telegram?"
+        }
+      }
+    },
+    {
+      "delayMs": 6000,
+      "envelope": {
+        "kind": "message",
+        "updateId": "$U1",
+        "message": {
+          "message_id": "$M1",
+          "chat": { "id": 111000111, "type": "private", "first_name": "Dan" },
+          "from": {
+            "id": 111000111,
+            "first_name": "Dan",
+            "username": "dan_mock"
+          },
+          "text": "!fast what does the /new command do on Telegram?"
+        }
+      }
+    }
+  ],
+  "settleMs": 20000,
+  "timeoutMs": 180000
+}

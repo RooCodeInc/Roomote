@@ -40,7 +40,7 @@ export default function Layout({ children }: { children: React.ReactNode }) {
       <div ref={setUserMenuPortalContainer} className="light text-foreground" />
       <FramedSurface
         variant="bold"
-        frameClassName="h-[calc(var(--effective-viewport-height)-0.25rem)] w-[calc(100svw-0.25rem)] scroll-minimal overflow-hidden md:m-4 md:h-[calc(var(--effective-viewport-height)-2rem)] md:w-[calc(100vw-2rem)]"
+        frameClassName="h-[calc(var(--effective-viewport-height)-0.25rem)] w-[calc(100svw-0.25rem)] scroll-minimal overflow-hidden"
         surfaceClassName="flex flex-col !overflow-y-auto !overflow-x-hidden md:items-center"
       >
         {isSignedIn ? (

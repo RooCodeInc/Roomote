@@ -28,6 +28,7 @@ import {
 /** Microsoft app (client) IDs are GUIDs. */
 const MICROSOFT_APP_ID_PATTERN =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const BOOTSTRAP_SIGN_IN_CALLBACK_PATH = '/setup';
 
 function getOAuth2ProviderId(
   providerId: SetupAuthStatus['preselectedProvider'],
@@ -85,17 +86,19 @@ export function StepAuthEnvVars({
         if (bootstrapMode && selectedProvider) {
           const callbackURL = getAuthProviderCallbackUrl(
             selectedProvider.id,
-            '/setup',
+            BOOTSTRAP_SIGN_IN_CALLBACK_PATH,
           );
           const oauth2ProviderId = getOAuth2ProviderId(selectedProvider.id);
           const result = oauth2ProviderId
             ? await authClient.signIn.oauth2({
                 providerId: oauth2ProviderId,
                 callbackURL,
+                disableRedirect: true,
               })
             : await authClient.signIn.social({
                 provider: selectedProvider.id,
                 callbackURL,
+                disableRedirect: true,
               });
 
           if (result.error) {
@@ -103,11 +106,13 @@ export function StepAuthEnvVars({
             return;
           }
 
-          if (!result.data?.url) {
-            router.replace(callbackURL);
-            router.refresh();
+          if (result.data?.url) {
+            window.location.assign(result.data.url);
+            return;
           }
 
+          router.replace(callbackURL);
+          router.refresh();
           return;
         }
 

@@ -1,5 +1,5 @@
 {
-  "id": "03dafe6a-4ae9-4c33-a7f8-b433bc4af611",
+  "id": "476b7f74-fb8e-48b4-9051-c439e52d0c3a",
   "prevId": "00000000-0000-0000-0000-000000000000",
   "version": "7",
   "dialect": "postgresql",
@@ -1757,7 +1757,7 @@
           "name": "created_by_user_id",
           "type": "text",
           "primaryKey": false,
-          "notNull": true
+          "notNull": false
         },
         "name": {
           "name": "name",
@@ -1783,6 +1783,12 @@
           "primaryKey": false,
           "notNull": true,
           "default": false
+        },
+        "declarative_source": {
+          "name": "declarative_source",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
         },
         "snapshot_id": {
           "name": "snapshot_id",
