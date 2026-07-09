@@ -83,6 +83,7 @@ export interface SandboxSendPromptInput {
   clientMessageId?: string;
   userName?: string;
   userImageUrl?: string;
+  autoSteerWhenQueued?: boolean;
 }
 
 export interface SandboxSteerTaskInput {
