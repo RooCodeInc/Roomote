@@ -1,6 +1,7 @@
 import * as GitHub from '@roomote/github';
 import { enqueueCloudTask } from '@roomote/cloud-agents/server';
 import { buildSetupKickoffText } from '@roomote/communication/chat-messages';
+import type { TeamsCommunicationProvider } from '@roomote/communication/teams-provider';
 import { TelegramCommunicationProvider } from '@roomote/communication/telegram-provider';
 import { SlackNotifier } from '@roomote/slack';
 import {
@@ -458,13 +459,20 @@ async function resolveSetupSlackHandoffTarget(
 
 type SetupChatFallbackHandoffTarget =
   | { provider: 'telegram'; chatId: string; botToken: string }
-  | { provider: 'teams'; conversationId: string; serviceUrl: string };
+  | {
+      provider: 'teams';
+      conversationId: string;
+      serviceUrl: string;
+      teams: TeamsCommunicationProvider;
+    };
 
 /**
  * Resolves the non-Slack chat destination for the setup onboarding kickoff,
  * matching the proactive-messaging fallback ordering (Slack > Telegram >
  * Teams). Returns null when no chat surface is available, so setup falls
- * back to a web-only onboarding task.
+ * back to a web-only onboarding task. Teams is only selected when both a
+ * captured primary conversation and resolvable bot credentials exist, so a
+ * half-configured Teams deployment never blocks onboarding.
  */
 async function resolveSetupChatFallbackHandoffTarget(): Promise<SetupChatFallbackHandoffTarget | null> {
   const { botToken } = await resolveTelegramRuntimeCredentials();
@@ -480,11 +488,21 @@ async function resolveSetupChatFallbackHandoffTarget(): Promise<SetupChatFallbac
   const conversation = await findTeamsPrimaryConversation();
 
   if (conversation) {
-    return {
-      provider: 'teams',
-      conversationId: conversation.conversationId,
-      serviceUrl: conversation.serviceUrl,
-    };
+    const teams =
+      await createTeamsCommunicationProviderFromRuntimeCredentials();
+
+    if (teams) {
+      return {
+        provider: 'teams',
+        conversationId: conversation.conversationId,
+        serviceUrl: conversation.serviceUrl,
+        teams,
+      };
+    }
+
+    console.warn(
+      '[setup-new] Skipping the Teams setup kickoff because Teams bot credentials could not be resolved; onboarding continues as a web-only task.',
+    );
   }
 
   return null;
@@ -1948,8 +1966,8 @@ export async function startSetupNewOnboardingTaskCommand(
 
       if (fallbackTarget) {
         const kickoffMessage = buildSetupKickoffText();
-        let kickoffMessageId: string;
-        let kickoffChannelId: string;
+        let kickoffMessageId: string | null = null;
+        let kickoffChannelId: string | null = null;
 
         if (fallbackTarget.provider === 'telegram') {
           const telegram = new TelegramCommunicationProvider({
@@ -1970,94 +1988,101 @@ export async function startSetupNewOnboardingTaskCommand(
           kickoffMessageId = posted.messageId;
           kickoffChannelId = fallbackTarget.chatId;
         } else {
-          const teams =
-            await createTeamsCommunicationProviderFromRuntimeCredentials();
+          // Teams is best-effort: when the kickoff post fails, onboarding
+          // continues as a web-only task instead of failing setup, and the
+          // persisted handoff fields stay null so Teams never looks
+          // connected without a delivered kickoff.
+          try {
+            const posted = await fallbackTarget.teams.postMessage({
+              channelId: fallbackTarget.conversationId,
+              serviceUrl: fallbackTarget.serviceUrl,
+              text: kickoffMessage,
+              textFormat: 'markdown',
+            });
 
-          if (!teams) {
-            throw new Error(
-              'Roomote could not resolve Teams bot credentials for setup.',
+            if (posted.messageId) {
+              kickoffMessageId = posted.messageId;
+              kickoffChannelId = fallbackTarget.conversationId;
+            } else {
+              console.warn(
+                '[setup-new] The Teams setup kickoff post returned no message id; onboarding continues as a web-only task.',
+              );
+            }
+          } catch (error) {
+            console.warn(
+              '[setup-new] Failed to post the Teams setup kickoff; onboarding continues as a web-only task.',
+              error,
             );
           }
-
-          const posted = await teams.postMessage({
-            channelId: fallbackTarget.conversationId,
-            serviceUrl: fallbackTarget.serviceUrl,
-            text: kickoffMessage,
-            textFormat: 'markdown',
-          });
-
-          if (!posted.messageId) {
-            throw new Error('Roomote could not post the Teams setup kickoff.');
-          }
-
-          kickoffMessageId = posted.messageId;
-          kickoffChannelId = fallbackTarget.conversationId;
         }
 
-        const startedAt = new Date().toISOString();
-        const launchResult = await enqueueCloudTask(
-          {
-            userId,
-            ...(modelSelection.harness
-              ? { harness: modelSelection.harness }
-              : {}),
-            attributionOverride: {
-              kind: 'automatic',
-              sourceKind: 'automation',
-            },
-            type: CloudTaskType.StandardTask,
-            payload: {
-              ...workspacePayload,
-              description: prompt,
-              visibleInTranscript: false,
-              communicationProvider: fallbackTarget.provider,
-              communicationChannelId: kickoffChannelId,
-              communicationMessageId: kickoffMessageId,
-              ...(fallbackTarget.provider === 'teams'
-                ? {
-                    communicationThreadId: kickoffMessageId,
-                    communicationServiceUrl: fallbackTarget.serviceUrl,
-                  }
+        if (kickoffMessageId && kickoffChannelId) {
+          const startedAt = new Date().toISOString();
+          const launchResult = await enqueueCloudTask(
+            {
+              userId,
+              ...(modelSelection.harness
+                ? { harness: modelSelection.harness }
                 : {}),
-              ...(modelSelection.harnessModelOverrides
-                ? {
-                    harnessModelOverrides: modelSelection.harnessModelOverrides,
-                  }
-                : {}),
+              attributionOverride: {
+                kind: 'automatic',
+                sourceKind: 'automation',
+              },
+              type: CloudTaskType.StandardTask,
+              payload: {
+                ...workspacePayload,
+                description: prompt,
+                visibleInTranscript: false,
+                communicationProvider: fallbackTarget.provider,
+                communicationChannelId: kickoffChannelId,
+                communicationMessageId: kickoffMessageId,
+                ...(fallbackTarget.provider === 'teams'
+                  ? {
+                      communicationThreadId: kickoffMessageId,
+                      communicationServiceUrl: fallbackTarget.serviceUrl,
+                    }
+                  : {}),
+                ...(modelSelection.harnessModelOverrides
+                  ? {
+                      harnessModelOverrides:
+                        modelSelection.harnessModelOverrides,
+                    }
+                  : {}),
+              },
             },
-          },
-          {
-            launchClass: 'human',
-          },
-        );
+            {
+              launchClass: 'human',
+            },
+          );
 
-        await savePersistedSetupNewState(
-          normalizeSetupNewState({
-            ...currentState,
-            selectedRepositoryIds: normalizedRepositoryIds,
-            setupGuidance: currentState.setupGuidance ?? null,
-            onboardingTaskId: launchResult.taskId,
-            onboardingTaskStartedAt: startedAt,
-            slackTeamId: null,
-            slackChannel: null,
-            slackThreadTs: null,
-            chatHandoffProvider: fallbackTarget.provider,
-            chatHandoffChannelId: kickoffChannelId,
-            chatHandoffThreadId: kickoffMessageId,
-            chatHandoffServiceUrl:
-              fallbackTarget.provider === 'teams'
-                ? fallbackTarget.serviceUrl
-                : null,
-            lastInteractedByUserId: userId,
-          }),
-          tx,
-        );
+          await savePersistedSetupNewState(
+            normalizeSetupNewState({
+              ...currentState,
+              selectedRepositoryIds: normalizedRepositoryIds,
+              setupGuidance: currentState.setupGuidance ?? null,
+              onboardingTaskId: launchResult.taskId,
+              onboardingTaskStartedAt: startedAt,
+              slackTeamId: null,
+              slackChannel: null,
+              slackThreadTs: null,
+              chatHandoffProvider: fallbackTarget.provider,
+              chatHandoffChannelId: kickoffChannelId,
+              chatHandoffThreadId: kickoffMessageId,
+              chatHandoffServiceUrl:
+                fallbackTarget.provider === 'teams'
+                  ? fallbackTarget.serviceUrl
+                  : null,
+              lastInteractedByUserId: userId,
+            }),
+            tx,
+          );
 
-        return {
-          taskId: launchResult.taskId,
-          startedAt,
-          launchedNewOnboardingTask: true as const,
-        };
+          return {
+            taskId: launchResult.taskId,
+            startedAt,
+            launchedNewOnboardingTask: true as const,
+          };
+        }
       }
 
       const startedAt = new Date().toISOString();

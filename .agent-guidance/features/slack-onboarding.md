@@ -57,7 +57,13 @@ Telegram instead (see [Telegram Integration](./telegram-integration.md)):
 Deployments whose only chat surface is Microsoft Teams get the same steps in
 the primary Teams conversation (see
 [Teams Integration](./teams-integration.md)); Telegram outranks Teams when
-both are available, so at most one surface receives each step:
+both are available, so at most one surface receives each step. Teams stays
+fallback-only: it receives just the three steps below and requires a primary
+conversation captured from a verified inbound Teams activity. When no
+conversation is captured, or Teams bot credentials cannot be resolved, or the
+kickoff post fails, setup falls back to the web-only onboarding task instead
+of erroring, and the Teams settings/setup UI nudges the operator to message
+the bot (`teams.integrationStatus.primaryConversationReady`):
 
 | Step                      | Trigger                                                        | Destination                    | Shape                                                                                                                              |
 | ------------------------- | -------------------------------------------------------------- | ------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------- |
@@ -65,7 +71,7 @@ both are available, so at most one surface receives each step:
 | Starter suggestions intro | After onboarding suggestions submit, no Slack or Telegram set  | Primary Teams conversation     | One markdown message listing up to five ideas; no inline buttons yet, so the intro asks the user to reply with the idea they want.  |
 | Suggested Tasks follow-up | About 24 hours after the Teams suggestions intro               | Thread reply to the intro      | One message with an Automations markdown link; skipped when the suggester is already enabled. No interactive prompt state.          |
 
-Both Teams steps are single messages, matching the noise guardrails below —
+The Teams steps are single messages, matching the noise guardrails below —
 adding a nearby step risks clustering with the intro and the follow-up. The
 kickoff and the suggestions intro land in the same primary chat minutes to
 tens of minutes apart; keep any new step out of that window.

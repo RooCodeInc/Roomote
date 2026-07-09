@@ -1,4 +1,5 @@
 import { resolveTeamsBotRuntimeCredentials } from '@roomote/db/server';
+import { findTeamsPrimaryConversation } from '@roomote/sdk/server';
 
 import type { UserAuthSuccess } from '@/types';
 import { Env } from '@/lib/server';
@@ -11,6 +12,14 @@ type TeamsIntegrationStatus = {
   microsoftAuthConfigured: boolean;
   webhookUrl: string;
   openInTeamsUrl: string | null;
+  /**
+   * True when a verified inbound Teams activity has captured a conversation
+   * Roomote can post back into. Without it, proactive Teams output (setup
+   * onboarding kickoff, automation summaries) cannot reach Teams even when
+   * the bot credentials are configured.
+   */
+  primaryConversationReady: boolean;
+  primaryConversationType: string | null;
 };
 
 function getTeamsWebhookUrl() {
@@ -33,10 +42,12 @@ export async function getTeamsIntegrationStatusCommand(
 ): Promise<TeamsIntegrationStatus> {
   void auth;
 
-  const [credentials, authProviderConfig] = await Promise.all([
-    resolveTeamsBotRuntimeCredentials(),
-    resolveAuthProviderConfig(),
-  ]);
+  const [credentials, authProviderConfig, primaryConversation] =
+    await Promise.all([
+      resolveTeamsBotRuntimeCredentials(),
+      resolveAuthProviderConfig(),
+      findTeamsPrimaryConversation(),
+    ]);
 
   return {
     botConfigured: Boolean(credentials.botAppId && credentials.botAppPassword),
@@ -49,5 +60,7 @@ export async function getTeamsIntegrationStatusCommand(
     ),
     webhookUrl: getTeamsWebhookUrl(),
     openInTeamsUrl: getOpenInTeamsUrl(credentials.botAppId),
+    primaryConversationReady: primaryConversation !== null,
+    primaryConversationType: primaryConversation?.conversationType ?? null,
   };
 }
