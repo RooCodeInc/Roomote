@@ -1,4 +1,9 @@
-import type { ButtonHTMLAttributes, ReactNode } from 'react';
+import type {
+  AnchorHTMLAttributes,
+  ButtonHTMLAttributes,
+  ReactElement,
+  ReactNode,
+} from 'react';
 import { fireEvent, render, screen } from '@testing-library/react';
 
 import { CommsProviderSection } from './CommsProviderSection';
@@ -188,11 +193,28 @@ vi.mock('@/components/system', () => ({
   BrandIcon: ({ icon }: { icon: string }) => (
     <svg aria-label={icon} role="img" />
   ),
-  Button: ({ children, ...props }: ButtonHTMLAttributes<HTMLButtonElement>) => (
-    <button type="button" {...props}>
-      {children}
-    </button>
-  ),
+  Button: ({
+    asChild,
+    children,
+    ...props
+  }: ButtonHTMLAttributes<HTMLButtonElement> & {
+    asChild?: boolean;
+    children: ReactNode;
+  }) => {
+    if (asChild) {
+      const child = children as ReactElement<
+        AnchorHTMLAttributes<HTMLAnchorElement>
+      >;
+
+      return <a {...child.props}>{child.props.children}</a>;
+    }
+
+    return (
+      <button type="button" {...props}>
+        {children}
+      </button>
+    );
+  },
   Card: ({ children }: { children: ReactNode }) => <div>{children}</div>,
   CardAction: ({ children }: { children: ReactNode }) => <div>{children}</div>,
   CardContent: ({ children }: { children: ReactNode }) => <div>{children}</div>,
@@ -223,13 +245,27 @@ vi.mock('@/components/system', () => ({
   ),
   DialogTitle: ({ children }: { children: ReactNode }) => <h2>{children}</h2>,
   Download: () => <svg aria-hidden="true" />,
-  EnvVarsInfoNote: ({ children }: { children: ReactNode }) => (
-    <div>{children}</div>
+  EnvVarsInfoNote: ({
+    children,
+    runtimeConfigured,
+  }: {
+    children?: ReactNode;
+    runtimeConfigured?: boolean;
+  }) => (
+    <div>
+      {children ??
+        (runtimeConfigured
+          ? "These values are being passed via ENV vars and can't be overridden here."
+          : "You can pass these in as ENV vars. When configured here, they're encrypted in the database.")}
+    </div>
   ),
   ExternalLink: () => <svg aria-hidden="true" />,
   Info: () => <svg aria-hidden="true" />,
-  Input: (props: ButtonHTMLAttributes<HTMLInputElement>) => (
-    <input {...(props as object)} />
+  Input: ({
+    secret: _secret,
+    ...props
+  }: ButtonHTMLAttributes<HTMLInputElement> & { secret?: boolean }) => (
+    <input {...props} />
   ),
   Label: ({ children }: { children: ReactNode }) => <label>{children}</label>,
   Pencil: () => <svg aria-hidden="true" />,
@@ -265,7 +301,21 @@ vi.mock('@/lib/slack-callback-paths', () => ({
   SLACK_SIGN_IN_CALLBACK_PATH: '/api/slack/signin',
 }));
 vi.mock('@/app/(onboarding)/setup/providerSetupCopy', () => ({
-  getProviderSetupCopy: () => null,
+  getProviderSetupCopy: (providerId: 'slack' | 'microsoft' | 'telegram') =>
+    ({
+      slack: {
+        creationHref: 'https://api.slack.com/apps?new_app=1',
+        setupLabel: 'Slack app',
+      },
+      microsoft: {
+        creationHref: 'https://portal.azure.com/apps',
+        setupLabel: 'Microsoft Teams app',
+      },
+      telegram: {
+        creationHref: 'https://t.me/BotFather',
+        setupLabel: 'Telegram bot',
+      },
+    })[providerId],
 }));
 vi.mock('@/lib/settings', () => ({
   SETTINGS_PATHS: {
@@ -396,6 +446,49 @@ function buildMicrosoftProvider(
   };
 }
 
+function buildTelegramProvider(
+  overrides: Partial<CommsProviderStatus> = {},
+): CommsProviderStatus {
+  return {
+    id: 'telegram',
+    label: 'Telegram',
+    fields: [
+      {
+        envVarName: 'TELEGRAM_BOT_TOKEN',
+        acceptedEnvVarNames: ['TELEGRAM_BOT_TOKEN'],
+        label: 'Telegram Bot Token',
+        secret: true,
+        runtimeSatisfied: false,
+        savedSatisfied: false,
+        satisfiedByEnvVarName: null,
+      },
+      {
+        envVarName: 'TELEGRAM_WEBHOOK_SECRET',
+        acceptedEnvVarNames: ['TELEGRAM_WEBHOOK_SECRET'],
+        label: 'Telegram Webhook Secret',
+        secret: true,
+        runtimeSatisfied: false,
+        savedSatisfied: false,
+        satisfiedByEnvVarName: null,
+      },
+      {
+        envVarName: 'TELEGRAM_BOT_USERNAME',
+        acceptedEnvVarNames: ['TELEGRAM_BOT_USERNAME'],
+        label: 'Telegram Bot Username',
+        required: false,
+        runtimeSatisfied: false,
+        savedSatisfied: false,
+        satisfiedByEnvVarName: null,
+      },
+    ],
+    runtimeSatisfied: false,
+    savedSatisfied: false,
+    setupSatisfied: false,
+    telegramWebhook: null,
+    ...overrides,
+  };
+}
+
 describe('CommsProviderSection', () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -426,6 +519,106 @@ describe('CommsProviderSection', () => {
     state.slackChannelsIsError = false;
     state.slackChannelsIsFetching = false;
     state.updateRouterDebugIsPending = false;
+  });
+
+  describe('numbered setup instructions', () => {
+    it('shows the Slack create-app screen first, then numbered manual setup in settings', () => {
+      render(
+        <CommsProviderSection
+          provider={buildSlackProvider()}
+          onSave={vi.fn()}
+          onClear={vi.fn()}
+          savePending={false}
+          clearPending={false}
+        />,
+      );
+
+      fireEvent.click(screen.getByRole('button', { name: 'Set it up' }));
+
+      expect(
+        screen.queryByRole('heading', { name: 'Create Slack app' }),
+      ).not.toBeInTheDocument();
+      expect(
+        screen.getByRole('link', { name: 'Create Slack app' }),
+      ).toBeInTheDocument();
+
+      fireEvent.click(
+        screen.getByRole('button', { name: /Enter values manually/ }),
+      );
+
+      expect(
+        screen.queryByRole('heading', { name: 'Configure Slack app' }),
+      ).not.toBeInTheDocument();
+      expect(screen.getByText('1')).toBeInTheDocument();
+      expect(screen.getByText('2')).toBeInTheDocument();
+      expect(screen.getByText('3')).toBeInTheDocument();
+      expect(screen.getByText(/Create a new Slack app/)).toBeInTheDocument();
+      expect(screen.getByText('Authorized redirect URLs')).toBeInTheDocument();
+      expect(screen.getByText('Enter the values below:')).toBeInTheDocument();
+    });
+
+    it('shows numbered Microsoft setup with the settings env-var note', () => {
+      render(
+        <CommsProviderSection
+          provider={buildMicrosoftProvider()}
+          onSave={vi.fn()}
+          onClear={vi.fn()}
+          savePending={false}
+          clearPending={false}
+        />,
+      );
+
+      fireEvent.click(screen.getByRole('button', { name: 'Set it up' }));
+
+      expect(
+        screen.queryByRole('heading', {
+          name: 'Configure Microsoft Teams app',
+        }),
+      ).not.toBeInTheDocument();
+      expect(
+        screen.getByText('Create a Microsoft Entra app.'),
+      ).toBeInTheDocument();
+      expect(
+        screen.getByText('Enter the Microsoft app generated values.'),
+      ).toBeInTheDocument();
+      expect(
+        screen.getByText('Upload Roomote to Microsoft Teams.'),
+      ).toBeInTheDocument();
+      expect(
+        screen.getByText('Add the Teams bot capability to that app.'),
+      ).toBeInTheDocument();
+      expect(
+        screen.getByText(
+          "You can pass these in as ENV vars. When configured here, they're encrypted in the database.",
+        ),
+      ).toBeInTheDocument();
+    });
+
+    it('shows numbered Telegram setup with the settings-only webhook note', () => {
+      render(
+        <CommsProviderSection
+          provider={buildTelegramProvider()}
+          onSave={vi.fn()}
+          onClear={vi.fn()}
+          savePending={false}
+          clearPending={false}
+        />,
+      );
+
+      fireEvent.click(screen.getByRole('button', { name: 'Set it up' }));
+
+      expect(
+        screen.queryByRole('heading', { name: 'Configure Telegram bot' }),
+      ).not.toBeInTheDocument();
+      expect(screen.getByText(/Create a new Telegram bot/)).toBeInTheDocument();
+      expect(screen.getByText('Create bot')).toBeInTheDocument();
+      expect(screen.getByText('Bot token')).toBeInTheDocument();
+      expect(screen.getByText('Webhook')).toBeInTheDocument();
+      expect(screen.getByText('Enter the values below:')).toBeInTheDocument();
+      expect(
+        screen.getByText(/Roomote will generate the webhook secret/),
+      ).toBeInTheDocument();
+    });
   });
 
   describe('Slack workspace auth button', () => {
@@ -588,10 +781,10 @@ describe('CommsProviderSection', () => {
       expect(
         screen.getByText(/Team members can link Microsoft Teams accounts/),
       ).toBeInTheDocument();
-      expect(screen.getByText('Teams Bot App ID')).toBeInTheDocument();
+      expect(screen.queryByText('Teams Bot App ID')).toBeNull();
       expect(screen.queryByText('Teams Bot App ID (optional)')).toBeNull();
       expect(
-        screen.getByRole('button', { name: /Open in Teams/ }),
+        screen.getByRole('link', { name: /Open in Teams/ }),
       ).toBeInTheDocument();
     });
 
@@ -641,10 +834,10 @@ describe('CommsProviderSection', () => {
         screen.getByText(/Bot configured for incoming Teams messages/),
       ).toBeInTheDocument();
       expect(
-        screen.getByRole('button', { name: /Open in Teams/ }),
+        screen.getByRole('link', { name: /Open in Teams/ }),
       ).toBeInTheDocument();
       expect(
-        screen.getByRole('button', { name: /Download Teams app package/ }),
+        screen.getByRole('link', { name: /Download Teams app package/ }),
       ).toBeInTheDocument();
     });
   });

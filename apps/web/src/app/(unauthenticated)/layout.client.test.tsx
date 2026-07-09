@@ -45,7 +45,7 @@ describe('Unauthenticated layout', () => {
     roomoteWordmarkMock.mockClear();
   });
 
-  it('renders the logged-out shell at full effective viewport height', () => {
+  it('renders the logged-out shell in the setup-style centered frame', () => {
     render(
       <Layout>
         <div>child</div>
@@ -58,9 +58,11 @@ describe('Unauthenticated layout', () => {
     expect(framedSurfaceMock).toHaveBeenCalledWith(
       expect.objectContaining({
         variant: 'bold',
-        frameClassName: expect.stringContaining('items-center justify-center'),
+        frameClassName: expect.stringContaining(
+          'h-[calc(var(--effective-viewport-height)-0.25rem)]',
+        ),
         surfaceClassName: expect.stringContaining(
-          'light flex items-center justify-center text-foreground',
+          'light flex flex-col !overflow-y-auto !overflow-x-hidden text-foreground md:items-center',
         ),
         style: expect.objectContaining({
           height: 'var(--effective-viewport-height)',
@@ -69,15 +71,26 @@ describe('Unauthenticated layout', () => {
       }),
       undefined,
     );
-    expect(screen.getByText('RoomoteWordmark').parentElement).toHaveClass(
+    const contentColumn = screen.getByText('RoomoteWordmark').parentElement;
+    expect(contentColumn).toHaveClass(
       'flex',
-      'max-h-full',
-      'gap-8',
-      'overflow-y-auto',
+      'w-full',
+      'flex-col',
+      'md:my-auto',
+    );
+
+    const centeredShell = contentColumn?.parentElement;
+    expect(centeredShell).toHaveClass('relative', 'max-w-3xl', 'md:min-h-full');
+    expect(centeredShell?.firstElementChild).toHaveClass(
+      'absolute',
+      'inset-y-0',
+      'left-0',
+      'border-l-2',
+      'border-dotted',
     );
     expect(screen.getByText('RoomoteWordmark')).toHaveAttribute(
       'data-wordmark-class-name',
-      expect.stringContaining('shrink-0'),
+      expect.stringContaining('mb-8'),
     );
   });
 });

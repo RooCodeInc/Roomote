@@ -6,11 +6,13 @@ import { genericOAuthClient } from 'better-auth/client/plugins';
 type BaseAuthClient = ReturnType<typeof createAuthClient>;
 type OAuth2SignInInput = {
   callbackURL?: string;
+  disableRedirect?: boolean;
   providerId: string;
 };
-type OAuth2SignInResult = Awaited<
-  ReturnType<BaseAuthClient['signIn']['social']>
->;
+type OAuth2SignInResult = {
+  data?: { redirect?: boolean; url?: string } | null;
+  error?: { code?: string; message?: string; status?: number } | null;
+};
 type OAuth2LinkInput = {
   callbackURL: string;
   errorCallbackURL?: string;

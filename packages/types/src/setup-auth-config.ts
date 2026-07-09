@@ -91,18 +91,18 @@ export const SETUP_AUTH_PROVIDER_CATALOG = [
       {
         envVarName: 'ROOMOTE_AUTH_MICROSOFT_CLIENT_ID',
         acceptedEnvVarNames: ['ROOMOTE_AUTH_MICROSOFT_CLIENT_ID'],
-        label: 'App Client ID',
+        label: 'App (Client) ID',
       },
       {
         envVarName: 'ROOMOTE_AUTH_MICROSOFT_CLIENT_SECRET',
         acceptedEnvVarNames: ['ROOMOTE_AUTH_MICROSOFT_CLIENT_SECRET'],
-        label: 'Client Secret',
+        label: 'Client Secret Value',
         secret: true,
       },
       {
         envVarName: 'ROOMOTE_AUTH_MICROSOFT_TENANT_ID',
         acceptedEnvVarNames: ['ROOMOTE_AUTH_MICROSOFT_TENANT_ID'],
-        label: 'Tenant ID',
+        label: 'Directory (Tenant) ID',
       },
       {
         envVarName: 'TEAMS_BOT_APP_ID',

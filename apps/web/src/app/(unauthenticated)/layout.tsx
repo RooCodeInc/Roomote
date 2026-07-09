@@ -10,16 +10,19 @@ export default function AuthenticatedLayout({
   return (
     <FramedSurface
       variant="bold"
-      frameClassName="items-center justify-center"
-      surfaceClassName="light flex items-center justify-center text-foreground"
+      frameClassName="h-[calc(var(--effective-viewport-height)-0.25rem)] w-[calc(100svw-0.25rem)] scroll-minimal overflow-hidden"
+      surfaceClassName="light flex flex-col !overflow-y-auto !overflow-x-hidden text-foreground md:items-center"
       style={{
         height: 'var(--effective-viewport-height)',
         minHeight: 'var(--effective-viewport-height)',
       }}
     >
-      <div className="flex max-h-full min-h-0 w-full flex-col items-center gap-8 overflow-y-auto p-4 sm:p-6 lg:p-8">
-        <RoomoteWordmark className="h-20 shrink-0" />
-        {children}
+      <div className="relative flex w-full max-w-3xl flex-col md:min-h-full">
+        <div className="pointer-events-none absolute inset-y-0 left-0 hidden border-black border-l-2 border-dotted md:block" />
+        <div className="flex w-full flex-col px-4 py-6 space-y-4 md:my-auto md:px-0 md:py-10 md:pl-6">
+          <RoomoteWordmark className="mb-8 h-14 w-fit shrink-0" />
+          {children}
+        </div>
       </div>
     </FramedSurface>
   );

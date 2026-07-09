@@ -9,6 +9,7 @@ import {
 
 import { authClient } from '@/lib/auth-client';
 import { getAuthProviderCallbackUrl } from '@/lib/auth-provider-callback';
+import { cn } from '@/lib/utils';
 import { OriginMismatchAlert } from '@/components/layout';
 import { EmailPasswordAuth } from './email-password-auth';
 import {
@@ -18,7 +19,7 @@ import {
   ArrowRight,
   BrandIcon,
   Button,
-  Card,
+  Mail,
   Slack,
   Spinner,
 } from '@/components/system';
@@ -98,10 +99,13 @@ export function AuthForm({
   const visibleProviders = SOCIAL_PROVIDERS.filter((provider) =>
     enabledProviderSet.has(provider.id),
   );
+  const hasVisibleProviders = visibleProviders.length > 0;
 
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [isEmailAuthVisible, setIsEmailAuthVisible] = useState(false);
   const [submittingProvider, setSubmittingProvider] =
     useState<AuthProvider | null>(null);
+  const showEmailAuth = !hasVisibleProviders || isEmailAuthVisible;
 
   const handleSocialSignIn = async (provider: AuthProvider) => {
     setErrorMessage(null);
@@ -140,76 +144,89 @@ export function AuthForm({
   };
 
   return (
-    <main className="flex w-full items-center justify-center">
-      <Card className="w-full max-w-md text-center">
-        <h1 className="text-xl font-semibold tracking-tight">
-          Hi there, welcome to Roomote.
+    <main className="flex w-full">
+      <div className="relative w-full max-w-2xl space-y-6 py-2 text-left md:py-0">
+        <h1 className="relative text-3xl font-bold tracking-tighter">
+          <span className="relative flex items-center gap-3">
+            Welcome! Come on in.
+          </span>
         </h1>
-        <div className="space-y-2">
-          <OriginMismatchAlert />
-          {noticeMessage && (
-            <Alert variant="destructive">
-              <AlertCircle />
-              <AlertDescription>{noticeMessage}</AlertDescription>
-            </Alert>
-          )}
-          {errorMessage && (
-            <Alert variant="destructive">
-              <AlertCircle />
-              <AlertDescription>{errorMessage}</AlertDescription>
-            </Alert>
-          )}
-
+        <div className="max-w-xl space-y-4">
           <div className="space-y-2">
-            {visibleProviders.map((provider) => {
-              const isSubmitting = submittingProvider === provider.id;
+            <OriginMismatchAlert />
+            {noticeMessage && (
+              <Alert variant="destructive">
+                <AlertCircle />
+                <AlertDescription>{noticeMessage}</AlertDescription>
+              </Alert>
+            )}
+            {errorMessage && (
+              <Alert variant="destructive">
+                <AlertCircle />
+                <AlertDescription>{errorMessage}</AlertDescription>
+              </Alert>
+            )}
+          </div>
 
-              return (
-                <Button
-                  className="w-full"
-                  disabled={isSubmitting}
-                  key={provider.id}
-                  onClick={() => void handleSocialSignIn(provider.id)}
-                  type="button"
-                  size="lg"
-                >
-                  <span className="flex min-w-0 items-center gap-2">
-                    {isSubmitting ? (
-                      <Spinner />
-                    ) : (
-                      <AuthProviderIcon provider={provider.icon} />
-                    )}
-                    <span className="truncate">
-                      Continue with {provider.label}
+          {!showEmailAuth ? (
+            <div className="max-w-sm space-y-0.5">
+              {visibleProviders.map((provider) => {
+                const isSubmitting = submittingProvider === provider.id;
+
+                return (
+                  <Button
+                    className={cn('w-full')}
+                    disabled={isSubmitting}
+                    key={provider.id}
+                    onClick={() => void handleSocialSignIn(provider.id)}
+                    type="button"
+                  >
+                    <span className="flex min-w-0 grow items-center gap-2">
+                      {isSubmitting ? (
+                        <Spinner />
+                      ) : (
+                        <AuthProviderIcon provider={provider.icon} />
+                      )}
+                      <span className="grow truncate text-left font-medium">
+                        Login with {provider.label}
+                      </span>
                     </span>
-                  </span>
-                  <ArrowRight />
-                </Button>
-              );
-            })}
-          </div>
+                    <ArrowRight />
+                  </Button>
+                );
+              })}
 
-          {visibleProviders.length > 0 && (
-            <div className="flex items-center gap-3 py-1 text-xs text-muted-foreground">
-              <span className="h-px flex-1 bg-border" />
-              or
-              <span className="h-px flex-1 bg-border" />
+              <Button
+                className={cn('w-full')}
+                onClick={() => setIsEmailAuthVisible(true)}
+                type="button"
+              >
+                <Mail />
+                <span className="grow text-left font-medium">
+                  Log in with email
+                </span>
+                <ArrowRight />
+              </Button>
             </div>
-          )}
+          ) : null}
 
-          <div className="max-w-xs mx-auto">
-            <EmailPasswordAuth
-              redirectUrl={redirectUrl}
-              allowSignUp={canSignUp}
-              labelsAsPlaceholders={true}
-              hideModeSwitchMessage={hideModeSwitchMessage}
-              defaultMode={
-                canSignUp && searchParams.get('invited') ? 'sign-up' : 'sign-in'
-              }
-            />
-          </div>
+          {showEmailAuth ? (
+            <div className="max-w-sm">
+              <EmailPasswordAuth
+                redirectUrl={redirectUrl}
+                allowSignUp={canSignUp}
+                labelsAsPlaceholders={true}
+                hideModeSwitchMessage={hideModeSwitchMessage}
+                defaultMode={
+                  canSignUp && searchParams.get('invited')
+                    ? 'sign-up'
+                    : 'sign-in'
+                }
+              />
+            </div>
+          ) : null}
         </div>
-      </Card>
+      </div>
     </main>
   );
 }

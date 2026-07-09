@@ -5,7 +5,7 @@ import { useRouter } from 'next/navigation';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { PRODUCT_NAME } from '@roomote/types';
 import type { SourceControlProvider } from '@roomote/types';
-import { Button, Loader2, ArrowRight, Switch } from '@/components/system';
+import { Button, Loader2, ArrowRight, Checkbox } from '@/components/system';
 import { useTRPC } from '@/trpc/client';
 import { useEnvironments } from '@/hooks/environments/useEnvironments';
 import { buildInvokeMethods } from '../invokeMethods';
@@ -96,7 +96,7 @@ export function StepInvoke({
   );
 
   return (
-    <div className="relative w-full max-w-xl space-y-6 py-2 md:py-0">
+    <div className="relative w-full max-w-2xl space-y-6 py-2 md:py-0">
       <StepTitle text={INVOKE_STEP.title} />
       <p className="mb-4">How to work with {PRODUCT_NAME}:</p>
       <div className="space-y-5">
@@ -119,22 +119,25 @@ export function StepInvoke({
         ))}
       </div>
 
-      <div className="mt-6 flex items-start justify-between gap-4 rounded-lg border p-3">
-        <div className="space-y-0.5">
-          <p className="text-sm font-semibold">Anonymous analytics</p>
-          <p className="text-sm text-muted-foreground">
-            Share anonymous usage analytics with the {PRODUCT_NAME} team,
-            identified only by random IDs. You can change this later in
-            Settings.
-          </p>
-        </div>
-        <Switch
+      <div className="mt-4 flex items-start gap-2 border-t border-foreground/20 pt-4">
+        <Checkbox
           aria-label="Toggle anonymous analytics"
+          className="mt-0.5"
           checked={anonymousAnalyticsEnabled}
           onCheckedChange={(checked) =>
             setAnonymousAnalyticsEnabled(checked === true)
           }
         />
+        <div className="space-y-0.5">
+          <p className="text-sm font-semibold">Anonymous analytics</p>
+          <p className="text-sm text-muted-foreground">
+            Share usage stats with the {PRODUCT_NAME} team for product
+            improvements.
+            <br />
+            No PII, code or conversation content is ever shared. Accrues good
+            karma.
+          </p>
+        </div>
       </div>
 
       <div className="mt-3 flex">
