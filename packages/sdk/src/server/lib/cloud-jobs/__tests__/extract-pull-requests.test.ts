@@ -16,6 +16,8 @@ describe('parsePRFromOutput', () => {
       url: 'https://github.com/owner/repo/pull/42',
       repository: 'owner/repo',
       number: 42,
+      provider: 'github',
+      host: 'github.com',
     });
   });
 
@@ -28,6 +30,8 @@ describe('parsePRFromOutput', () => {
       url: 'https://github.com/acme/frontend/pull/100',
       repository: 'acme/frontend',
       number: 100,
+      provider: 'github',
+      host: 'github.com',
     });
   });
 
@@ -40,6 +44,8 @@ describe('parsePRFromOutput', () => {
       url: 'https://github.com/vercel/next.js/pull/12345',
       repository: 'vercel/next.js',
       number: 12345,
+      provider: 'github',
+      host: 'github.com',
     });
   });
 
@@ -54,6 +60,8 @@ describe('parsePRFromOutput', () => {
       url: 'https://github.com/owner/repo/pull/42',
       repository: 'owner/repo',
       number: 42,
+      provider: 'github',
+      host: 'github.com',
     });
   });
 
@@ -65,6 +73,8 @@ describe('parsePRFromOutput', () => {
       url: 'https://github.com/owner/repo/pull/42',
       repository: 'owner/repo',
       number: 42,
+      provider: 'github',
+      host: 'github.com',
     });
   });
 
@@ -72,10 +82,62 @@ describe('parsePRFromOutput', () => {
     expect(parsePRFromOutput('')).toBeNull();
   });
 
-  it('returns null for non-GitHub URLs', () => {
+  it('returns null for GitLab /pull/ URLs that are not merge-request paths', () => {
     expect(
       parsePRFromOutput('https://gitlab.com/owner/repo/pull/1'),
     ).toBeNull();
+  });
+
+  it('parses a GitLab merge request URL', () => {
+    expect(
+      parsePRFromOutput('https://gitlab.com/acme/api/-/merge_requests/42'),
+    ).toEqual({
+      url: 'https://gitlab.com/acme/api/-/merge_requests/42',
+      repository: 'acme/api',
+      number: 42,
+      provider: 'gitlab',
+      host: 'gitlab.com',
+    });
+  });
+
+  it('parses a self-managed GitLab merge request URL', () => {
+    expect(
+      parsePRFromOutput(
+        'https://gitlab.example.com/group/repo/-/merge_requests/7',
+      ),
+    ).toEqual({
+      url: 'https://gitlab.example.com/group/repo/-/merge_requests/7',
+      repository: 'group/repo',
+      number: 7,
+      provider: 'gitlab',
+      host: 'gitlab.example.com',
+    });
+  });
+
+  it('parses a Gitea pull request URL', () => {
+    expect(
+      parsePRFromOutput('https://git.example.com/team/repo/pulls/42'),
+    ).toEqual({
+      url: 'https://git.example.com/team/repo/pulls/42',
+      repository: 'team/repo',
+      number: 42,
+      provider: 'gitea',
+      host: 'git.example.com',
+    });
+  });
+
+  it('parses an Azure DevOps pull request URL', () => {
+    expect(
+      parsePRFromOutput(
+        'https://dev.azure.com/acme/Platform/_git/backend/pullrequest/42',
+      ),
+    ).toEqual({
+      url: 'https://dev.azure.com/acme/Platform/_git/backend/pullrequest/42',
+      repository: 'acme/Platform/backend',
+      number: 42,
+      provider: 'ado',
+      host: 'dev.azure.com',
+    });
   });
 
   it('returns null for http:// URLs (gh uses https)', () => {
@@ -92,6 +154,8 @@ describe('parsePRFromOutput', () => {
       url: 'https://github.com/owner/repo/pull/1',
       repository: 'owner/repo',
       number: 1,
+      provider: 'github',
+      host: 'github.com',
     });
   });
 
@@ -104,6 +168,8 @@ describe('parsePRFromOutput', () => {
       url: 'https://github.com/owner/repo/pull/99',
       repository: 'owner/repo',
       number: 99,
+      provider: 'github',
+      host: 'github.com',
     });
   });
 
@@ -116,6 +182,8 @@ describe('parsePRFromOutput', () => {
       url: 'https://github.com/owner/repo/pull/123',
       repository: 'owner/repo',
       number: 123,
+      provider: 'github',
+      host: 'github.com',
     });
   });
 });
@@ -131,6 +199,8 @@ describe('parsePRsFromText', () => {
         url: 'https://github.com/owner/repo/pull/77',
         repository: 'owner/repo',
         number: 77,
+        provider: 'github',
+        host: 'github.com',
       },
     ]);
   });
@@ -145,6 +215,8 @@ describe('parsePRsFromText', () => {
         url: 'https://github.com/owner/repo/pull/88',
         repository: 'owner/repo',
         number: 88,
+        provider: 'github',
+        host: 'github.com',
       },
     ]);
   });
@@ -162,6 +234,8 @@ describe('parsePRsFromText', () => {
         url: 'https://github.com/owner/repo/pull/99',
         repository: 'owner/repo',
         number: 99,
+        provider: 'github',
+        host: 'github.com',
       },
     ]);
   });
@@ -179,11 +253,49 @@ describe('parsePRsFromText', () => {
         url: 'https://github.com/owner/repo/pull/99',
         repository: 'owner/repo',
         number: 99,
+        provider: 'github',
+        host: 'github.com',
       },
       {
         url: 'https://github.com/owner/repo/pull/100',
         repository: 'owner/repo',
         number: 100,
+        provider: 'github',
+        host: 'github.com',
+      },
+    ]);
+  });
+
+  it('extracts GitLab, Gitea, and Azure DevOps MR links from completion text', () => {
+    const result = parsePRsFromText(
+      [
+        'Completed with https://gitlab.com/acme/api/-/merge_requests/42',
+        'Also https://git.example.com/team/repo/pulls/9 and',
+        'https://dev.azure.com/acme/Platform/_git/backend/pullrequest/7.',
+      ].join('\n'),
+    );
+
+    expect(result).toEqual([
+      {
+        url: 'https://gitlab.com/acme/api/-/merge_requests/42',
+        repository: 'acme/api',
+        number: 42,
+        provider: 'gitlab',
+        host: 'gitlab.com',
+      },
+      {
+        url: 'https://git.example.com/team/repo/pulls/9',
+        repository: 'team/repo',
+        number: 9,
+        provider: 'gitea',
+        host: 'git.example.com',
+      },
+      {
+        url: 'https://dev.azure.com/acme/Platform/_git/backend/pullrequest/7',
+        repository: 'acme/Platform/backend',
+        number: 7,
+        provider: 'ado',
+        host: 'dev.azure.com',
       },
     ]);
   });
@@ -202,6 +314,8 @@ describe('parsePRsFromGhPrCreateToolResult', () => {
         url: 'https://github.com/test/repo/pull/555',
         repository: 'test/repo',
         number: 555,
+        provider: 'github',
+        host: 'github.com',
       },
     ]);
   });
@@ -221,11 +335,15 @@ describe('parsePRsFromGhPrCreateToolResult', () => {
         url: 'https://github.com/test/one/pull/11',
         repository: 'test/one',
         number: 11,
+        provider: 'github',
+        host: 'github.com',
       },
       {
         url: 'https://github.com/test/two/pull/22',
         repository: 'test/two',
         number: 22,
+        provider: 'github',
+        host: 'github.com',
       },
     ]);
   });
@@ -241,6 +359,8 @@ describe('parsePRsFromGhPrCreateToolResult', () => {
         url: 'https://github.com/test/repo/pull/777',
         repository: 'test/repo',
         number: 777,
+        provider: 'github',
+        host: 'github.com',
       },
     ]);
   });
@@ -261,6 +381,8 @@ describe('parsePRsFromGhPrCreateToolResult', () => {
         url: 'https://github.com/Roomote/example-app/pull/2345',
         repository: 'Roomote/example-app',
         number: 2345,
+        provider: 'github',
+        host: 'github.com',
       },
     ]);
   });
@@ -281,6 +403,8 @@ describe('parsePRsFromGhPrCreateToolResult', () => {
         url: 'https://github.com/Roomote/example-app/pull/2587',
         repository: 'Roomote/example-app',
         number: 2587,
+        provider: 'github',
+        host: 'github.com',
       },
     ]);
   });
@@ -313,6 +437,8 @@ describe('parsePRsFromGhPrCheckoutToolResult', () => {
         url: 'https://github.com/Roomote/example-app/pull/2696',
         repository: 'Roomote/example-app',
         number: 2696,
+        provider: 'github',
+        host: 'github.com',
       },
     ]);
   });
@@ -348,6 +474,8 @@ describe('parsePRsFromGhPrCheckoutToolResult', () => {
         url: 'https://github.com/Roomote/example-app/pull/2696',
         repository: 'Roomote/example-app',
         number: 2696,
+        provider: 'github',
+        host: 'github.com',
       },
     ]);
   });
@@ -365,6 +493,8 @@ describe('parsePRsFromGhPrCheckoutToolResult', () => {
         url: 'https://github.com/other/repo/pull/2696',
         repository: 'other/repo',
         number: 2696,
+        provider: 'github',
+        host: 'github.com',
       },
     ]);
   });
@@ -383,6 +513,8 @@ describe('parsePRsFromGhPrListToolResult', () => {
         url: 'https://github.com/test/repo/pull/555',
         repository: 'test/repo',
         number: 555,
+        provider: 'github',
+        host: 'github.com',
       },
     ]);
   });
@@ -435,6 +567,8 @@ describe('parsePRsFromGhPrListToolResult', () => {
         url: 'https://github.com/test/repo/pull/555',
         repository: 'test/repo',
         number: 555,
+        provider: 'github',
+        host: 'github.com',
       },
     ]);
   });
@@ -470,6 +604,8 @@ describe('parsePRsFromAuthoritativeToolResultOutput', () => {
         url: 'https://github.com/test/repo/pull/556',
         repository: 'test/repo',
         number: 556,
+        provider: 'github',
+        host: 'github.com',
       },
     ]);
   });
@@ -490,6 +626,8 @@ describe('parsePRsFromAuthoritativeToolResultOutput', () => {
         url: 'https://github.com/test/repo/pull/556',
         repository: 'test/repo',
         number: 556,
+        provider: 'github',
+        host: 'github.com',
       },
     ]);
   });
@@ -512,6 +650,30 @@ describe('parsePRsFromAuthoritativeToolResultOutput', () => {
         url: 'https://github.com/test/repo/pull/556',
         repository: 'test/repo',
         number: 556,
+        provider: 'github',
+        host: 'github.com',
+      },
+    ]);
+  });
+
+  it('extracts a multi-provider MR from an authoritative delivery payload', () => {
+    const result = parsePRsFromAuthoritativeToolResultOutput(
+      JSON.stringify({
+        baseRefName: 'main',
+        headRefName: 'feature/gitlab-link',
+        isDraft: false,
+        title: '[Feat] Ship multi-provider link',
+        url: 'https://gitlab.com/acme/api/-/merge_requests/42',
+      }),
+    );
+
+    expect(result).toEqual([
+      {
+        url: 'https://gitlab.com/acme/api/-/merge_requests/42',
+        repository: 'acme/api',
+        number: 42,
+        provider: 'gitlab',
+        host: 'gitlab.com',
       },
     ]);
   });
@@ -532,6 +694,8 @@ describe('parsePRsFromAuthoritativeToolResultOutput', () => {
         url: 'https://github.com/test/repo/pull/556',
         repository: 'test/repo',
         number: 556,
+        provider: 'github',
+        host: 'github.com',
       },
     ]);
   });

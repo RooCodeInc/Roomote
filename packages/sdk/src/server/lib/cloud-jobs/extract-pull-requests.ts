@@ -9,8 +9,9 @@ import {
 } from '@roomote/db/server';
 import type { CloudJob } from '@roomote/db/server';
 import { createCloudJobGitHubToken, getOctokit } from '@roomote/github';
-import type { PullRequestStatus } from '@roomote/types';
+import type { PullRequestStatus, SourceControlProvider } from '@roomote/types';
 import type { ParsedPR } from '../../../pull-request-links';
+import { readSourceControlPullRequestForCloudJob } from '../pull-requests/source-control-pull-request-reads';
 
 export {
   detectPullRequestsFromToolResultEnvelope,
@@ -28,7 +29,7 @@ export {
  * degrade gracefully. The base ref and sha are persisted alongside the PR
  * association as cloud-job PR metadata.
  */
-async function fetchPrDetails(
+async function fetchGitHubPrDetails(
   cloudJob: CloudJob,
   owner: string,
   repo: string,
@@ -78,13 +79,108 @@ async function fetchPrDetails(
   }
 }
 
+function mapProviderReadStatus(details: {
+  state: 'open' | 'closed' | 'merged';
+  draft: boolean;
+}): PullRequestStatus {
+  if (details.state === 'merged') {
+    return 'merged';
+  }
+
+  if (details.state === 'closed') {
+    return 'closed';
+  }
+
+  if (details.draft) {
+    return 'draft';
+  }
+
+  return 'open';
+}
+
+/**
+ * Fetches title/status/base metadata for a detected PR URL. GitHub keeps the
+ * installation-token path (works even when the repo row is unlinked). Other
+ * providers reuse the multi-provider read surface, which owns token resolution
+ * and status mapping.
+ */
+async function fetchDetectedPrDetails(
+  cloudJob: CloudJob,
+  pr: ParsedPR,
+): Promise<{
+  title: string;
+  status: PullRequestStatus;
+  baseRef: string | null;
+  baseSha: string | null;
+} | null> {
+  if (pr.provider === 'github') {
+    const [owner, repoName] = pr.repository.split('/');
+
+    if (!owner || !repoName) {
+      return null;
+    }
+
+    return fetchGitHubPrDetails(cloudJob, owner, repoName, pr.number);
+  }
+
+  try {
+    const result = await readSourceControlPullRequestForCloudJob({
+      cloudJob,
+      input: {
+        action: 'get_pull_request',
+        repositoryFullName: pr.repository,
+        prNumber: pr.number,
+        sourceControlProvider: pr.provider,
+      },
+    });
+
+    if (!('title' in result)) {
+      return null;
+    }
+
+    return {
+      title: result.title,
+      status: mapProviderReadStatus(result),
+      baseRef: result.targetBranch || null,
+      baseSha: result.baseSha,
+    };
+  } catch (error) {
+    console.warn(
+      `[fetchPrDetails] Failed to fetch details for ${pr.provider} ${pr.repository}#${pr.number}: ${
+        error instanceof Error ? error.message : String(error)
+      }`,
+    );
+
+    return null;
+  }
+}
+
+async function resolveLinkedRepository({
+  provider,
+  repositoryFullName,
+}: {
+  provider: SourceControlProvider;
+  repositoryFullName: string;
+}): Promise<{ id: string; host: string | null } | null> {
+  const linkedRepository = await db.query.repositories.findFirst({
+    where: and(
+      eq(repositories.sourceControlProvider, provider),
+      eq(repositories.fullName, repositoryFullName),
+    ),
+    columns: { id: true, host: true },
+  });
+
+  return linkedRepository ?? null;
+}
+
 /**
  * Persists a detected pull request to the database:
  *
- * 1. Fetches the PR title from the GitHub API.
- * 2. Inserts into `task_pull_requests` (upsert via onConflictDoNothing
- *    so the same PR URL for a given task is never duplicated).
- * 3. Updates the `cloudJobs` row with `prRepo`, `prNumber`, and the
+ * 1. Fetches the PR title/status from the matching source-control API when
+ *    possible.
+ * 2. Inserts into `task_pull_requests` (upsert via onConflictDoUpdate so the
+ *    same PR URL for a given task is never duplicated).
+ * 3. Updates the `cloudJobs` row with provider, `prRepo`, `prNumber`, and the
  *    PR base ref so the association is visible in the dashboard.
  */
 export async function persistDetectedPullRequest({
@@ -96,20 +192,19 @@ export async function persistDetectedPullRequest({
   cloudJobId: number;
   pr: ParsedPR;
 }): Promise<void> {
-  // Load the full cloud job to get installation context for GitHub API.
+  // Load the full cloud job to get installation/token context for API lookups.
   const cloudJob = await db.query.cloudJobs.findFirst({
     where: eq(cloudJobs.id, cloudJobId),
   });
 
-  const [owner, repoName] = pr.repository.split('/');
   let prTitle: string | null = null;
   let status: PullRequestStatus | null = null;
   let baseRef: string | null = null;
   let baseSha: string | null = null;
   let fetchedPrDetails = false;
 
-  if (cloudJob && owner && repoName) {
-    const details = await fetchPrDetails(cloudJob, owner, repoName, pr.number);
+  if (cloudJob) {
+    const details = await fetchDetectedPrDetails(cloudJob, pr);
 
     if (details) {
       fetchedPrDetails = true;
@@ -120,24 +215,23 @@ export async function persistDetectedPullRequest({
     }
   }
 
-  // The transcript parser only emits canonical https://github.com/... PR URLs,
-  // so detected PRs are GitHub rows by construction. Resolve the linked
-  // repository row (nullable when the repo isn't linked) so the
-  // provider-scoped FK is set for new associations.
-  const linkedRepository = await db.query.repositories.findFirst({
-    where: and(
-      eq(repositories.sourceControlProvider, 'github'),
-      eq(repositories.fullName, pr.repository),
-    ),
-    columns: { id: true },
+  // Resolve the linked repository row by the provider decoded from the PR URL
+  // (nullable when the repo isn't linked) so the provider-scoped FK is set for
+  // new associations.
+  const linkedRepository = await resolveLinkedRepository({
+    provider: pr.provider,
+    repositoryFullName: pr.repository,
   });
+  // Prefer the host decoded from the PR URL so self-managed instances keep the
+  // instance that produced the link, even when a linked row has no host yet.
+  const host = pr.host || linkedRepository?.host || null;
 
   await db
     .insert(taskPullRequests)
     .values({
       taskId,
-      sourceControlProvider: 'github',
-      host: 'github.com',
+      sourceControlProvider: pr.provider,
+      host,
       repositoryId: linkedRepository?.id ?? null,
       prUrl: pr.url,
       prNumber: pr.number,
@@ -148,8 +242,8 @@ export async function persistDetectedPullRequest({
     .onConflictDoUpdate({
       target: [taskPullRequests.taskId, taskPullRequests.prUrl],
       set: {
-        sourceControlProvider: 'github',
-        host: 'github.com',
+        sourceControlProvider: pr.provider,
+        host,
         ...(linkedRepository && { repositoryId: linkedRepository.id }),
         ...(prTitle !== null && { prTitle }),
         ...(status !== null && { status }),
@@ -171,7 +265,7 @@ export async function persistDetectedPullRequest({
   await db
     .update(cloudJobs)
     .set({
-      prSourceControlProvider: 'github',
+      prSourceControlProvider: pr.provider,
       prRepo: pr.repository,
       prNumber: pr.number,
       prBaseRef: fetchedPrDetails

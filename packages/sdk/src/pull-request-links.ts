@@ -4,16 +4,22 @@ import {
   asBoolean,
   asRecord,
   asString,
+  buildPullRequestUrl,
+  parsePullRequestUrl,
+  sourceControlProviderDescriptors,
+  type SourceControlProvider,
 } from '@roomote/types';
 import { z } from 'zod';
 
 /**
- * Represents a pull request parsed from command output.
+ * Represents a pull request parsed from command output or free text.
  */
 export interface ParsedPR {
   url: string;
   repository: string;
   number: number;
+  provider: SourceControlProvider;
+  host: string;
 }
 
 /**
@@ -28,9 +34,7 @@ const AUTHORITATIVE_PR_RESULT_NAMES = new Set(['create-draft-pr', 'create-pr']);
  * responsible for constraining when this parser runs, usually via command
  * guards like `gh pr create` / `gh pr list` detection.
  */
-const PR_URL_REGEX = /https:\/\/github\.com\/([^/\s]+)\/([^/\s]+)\/pull\/(\d+)/;
-
-const GITHUB_URL_CANDIDATE_REGEX = /https:\/\/github\.com\/[^\s<>"']+/g;
+const HTTPS_URL_CANDIDATE_REGEX = /https:\/\/[^\s<>"']+/g;
 const GH_PR_CREATE_COMMAND_REGEX = /\bgh\s+pr\s+create\b/;
 const GH_PR_CHECKOUT_COMMAND_REGEX = /\bgh\s+pr\s+checkout\b/;
 const GH_PR_LIST_COMMAND_REGEX = /\bgh\s+pr\s+list\b/;
@@ -58,9 +62,6 @@ const AUTHORITATIVE_PR_TOOL_RESULT_ALLOWED_KEYS = new Set([
   'url',
 ]);
 
-const PR_URL_WITH_OPTIONAL_SUFFIX_REGEX =
-  /^https:\/\/github\.com\/([^/\s]+)\/([^/\s]+)\/pull\/(\d+)(?:[/?#].*)?$/;
-
 const ANSI_ESCAPE_PATTERN = String.raw`\u001B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~]|\][^\u0007\u001B]*(?:\u0007|\u001B\\))`;
 const ANSI_ESCAPE_REGEX = new RegExp(ANSI_ESCAPE_PATTERN, 'g');
 
@@ -83,33 +84,72 @@ function trimTrailingUrlPunctuation(url: string): string {
   return trimmed;
 }
 
-/**
- * Parses a GitHub PR URL from command output text.
- *
- * Returns a {@link ParsedPR} when the trimmed output contains a GitHub PR URL,
- * or `null` otherwise.
- */
-export function parsePRFromOutput(output: string): ParsedPR | null {
-  const trimmed = stripAnsiSequences(output).trim();
-  const match = trimmed.match(PR_URL_REGEX);
-
-  if (!match) {
+function toParsedPR(input: {
+  provider: SourceControlProvider;
+  host?: string;
+  repositoryFullName: string;
+  number: number;
+}): ParsedPR | null {
+  if (!Number.isInteger(input.number) || input.number <= 0) {
     return null;
   }
 
-  const owner = match[1]!;
-  const repo = match[2]!;
-  const number = parseInt(match[3]!, 10);
-
-  if (isNaN(number) || number <= 0) {
-    return null;
-  }
+  const host =
+    input.host ?? sourceControlProviderDescriptors[input.provider].defaultHost;
 
   return {
-    url: `https://github.com/${owner}/${repo}/pull/${number}`,
-    repository: `${owner}/${repo}`,
-    number,
+    url: buildPullRequestUrl({
+      provider: input.provider,
+      host,
+      repositoryFullName: input.repositoryFullName,
+      number: input.number,
+    }),
+    repository: input.repositoryFullName,
+    number: input.number,
+    provider: input.provider,
+    host,
   };
+}
+
+function parsePRFromUrlCandidate(url: string): ParsedPR | null {
+  const candidate = trimTrailingUrlPunctuation(url);
+  const ref = parsePullRequestUrl(candidate);
+
+  if (!ref) {
+    return null;
+  }
+
+  return toParsedPR(ref);
+}
+
+function githubParsedPR(repository: string, number: number): ParsedPR | null {
+  return toParsedPR({
+    provider: 'github',
+    host: 'github.com',
+    repositoryFullName: repository,
+    number,
+  });
+}
+
+/**
+ * Parses a pull request / merge request URL from command output text.
+ *
+ * Returns a {@link ParsedPR} when the trimmed output contains a recognized
+ * provider PR URL (GitHub, GitLab, Gitea, or Azure DevOps), or `null` otherwise.
+ */
+export function parsePRFromOutput(output: string): ParsedPR | null {
+  const cleaned = stripAnsiSequences(output);
+  const matches = cleaned.matchAll(HTTPS_URL_CANDIDATE_REGEX);
+
+  for (const match of matches) {
+    const parsed = parsePRFromUrlCandidate(match[0] ?? '');
+
+    if (parsed) {
+      return parsed;
+    }
+  }
+
+  return null;
 }
 
 /**
@@ -194,13 +234,9 @@ export function parsePRsFromGhPrCheckoutToolResult({
     return [];
   }
 
-  return [
-    {
-      url: `https://github.com/${repo}/pull/${prNumber}`,
-      repository: repo,
-      number: prNumber,
-    },
-  ];
+  const parsed = githubParsedPR(repo, prNumber);
+
+  return parsed ? [parsed] : [];
 }
 
 /**
@@ -241,30 +277,6 @@ export function parsePRsFromAuthoritativeToolResultOutput(
   const parsedPr = parsePRFromUrlCandidate(parsedResult.data.url);
 
   return parsedPr ? [parsedPr] : [];
-}
-
-function parsePRFromUrlCandidate(url: string): ParsedPR | null {
-  const parsed = trimTrailingUrlPunctuation(url).match(
-    PR_URL_WITH_OPTIONAL_SUFFIX_REGEX,
-  );
-
-  if (!parsed) {
-    return null;
-  }
-
-  const owner = parsed[1];
-  const repo = parsed[2];
-  const number = Number.parseInt(parsed[3] ?? '', 10);
-
-  if (!owner || !repo || Number.isNaN(number) || number <= 0) {
-    return null;
-  }
-
-  return {
-    url: `https://github.com/${owner}/${repo}/pull/${number}`,
-    repository: `${owner}/${repo}`,
-    number,
-  };
 }
 
 export function parseRepoFromCommand(command: string): string | null {
@@ -355,13 +367,9 @@ export function parsePRsFromGhPrListToolResult({
       return [];
     }
 
-    return [
-      {
-        url: `https://github.com/${repo}/pull/${number}`,
-        repository: repo,
-        number,
-      },
-    ];
+    const parsed = githubParsedPR(repo, number);
+
+    return parsed ? [parsed] : [];
   }
 
   const prs: ParsedPR[] = [];
@@ -373,19 +381,19 @@ export function parsePRsFromGhPrListToolResult({
 }
 
 /**
- * Parses one or more GitHub pull request URLs from arbitrary text.
+ * Parses one or more pull request / merge request URLs from arbitrary text.
  *
  * This supports assistant summaries that embed PR links in markdown (e.g.
  * backticks, inline prose, markdown links). Parsed URLs are normalized to the
- * canonical `https://github.com/owner/repo/pull/123` shape and deduplicated.
+ * canonical provider-specific shape and deduplicated.
  */
 export function parsePRsFromText(text: string): ParsedPR[] {
-  const matches = text.matchAll(GITHUB_URL_CANDIDATE_REGEX);
+  const matches = stripAnsiSequences(text).matchAll(HTTPS_URL_CANDIDATE_REGEX);
   const prs: ParsedPR[] = [];
   const seen = new Set<string>();
 
   for (const match of matches) {
-    const candidate = trimTrailingUrlPunctuation(match[0] ?? '');
+    const candidate = match[0] ?? '';
 
     if (!candidate) {
       continue;

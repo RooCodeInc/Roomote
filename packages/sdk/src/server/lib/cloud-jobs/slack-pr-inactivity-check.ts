@@ -112,7 +112,14 @@ async function resolvePullRequestTarget({
   cloudJob: CloudJob;
   completionText?: string;
 }): Promise<{ repository: string; prNumber: number } | null> {
-  if (cloudJob.prRepo && cloudJob.prNumber) {
+  // This storage path fetches baselines via the GitHub API, so only resolve
+  // GitHub targets here. Multi-provider associations still persist via
+  // transcript PR detection; inactivity checks outside GitHub are out of scope.
+  if (
+    cloudJob.prRepo &&
+    cloudJob.prNumber &&
+    (cloudJob.prSourceControlProvider ?? 'github') === 'github'
+  ) {
     return {
       repository: cloudJob.prRepo,
       prNumber: cloudJob.prNumber,
@@ -122,6 +129,7 @@ async function resolvePullRequestTarget({
   const latestTaskPullRequest = await db.query.taskPullRequests.findFirst({
     where: and(
       eq(taskPullRequests.taskId, cloudJob.taskId),
+      eq(taskPullRequests.sourceControlProvider, 'github'),
       isNotNull(taskPullRequests.repository),
       isNotNull(taskPullRequests.prNumber),
     ),
@@ -143,7 +151,9 @@ async function resolvePullRequestTarget({
     return null;
   }
 
-  const parsed = parsePRsFromText(completionText);
+  const parsed = parsePRsFromText(completionText).filter(
+    (candidate) => candidate.provider === 'github',
+  );
 
   if (parsed.length !== 1) {
     return null;
