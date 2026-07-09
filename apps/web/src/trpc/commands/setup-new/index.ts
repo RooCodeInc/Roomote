@@ -20,6 +20,7 @@ import {
   inArray,
   isNull,
   sql,
+  invalidateTeamsBotRuntimeCredentialsCache,
   markTaskStartParallelCountEndedAt,
   resolveDeploymentEnvVar,
   resolveSavedWorkerImage,
@@ -1583,7 +1584,7 @@ async function saveSetupAuthConfig(input: {
   }
   const provider = getSetupAuthProvider(input.provider);
 
-  return db.transaction(async (tx) => {
+  const result = await db.transaction(async (tx) => {
     const [currentState, persistedEnvVarNames] = await Promise.all([
       getPersistedSetupNewState(tx),
       getPersistedEnvironmentVariableNames(tx),
@@ -1655,6 +1656,12 @@ async function saveSetupAuthConfig(input: {
       setupNewState,
     };
   });
+
+  if (input.provider === 'microsoft') {
+    invalidateTeamsBotRuntimeCredentialsCache();
+  }
+
+  return result;
 }
 
 export async function saveSetupNewSourceControlProviderChoiceCommand(

@@ -4,9 +4,6 @@ const REQUIRED_MICROSOFT_TEAMS_ENV_VARS = [
   'ROOMOTE_AUTH_MICROSOFT_CLIENT_ID',
   'ROOMOTE_AUTH_MICROSOFT_CLIENT_SECRET',
   'ROOMOTE_AUTH_MICROSOFT_TENANT_ID',
-  'TEAMS_BOT_APP_ID',
-  'TEAMS_BOT_APP_PASSWORD',
-  'TEAMS_BOT_TENANT_ID',
 ];
 
 describe('buildSetupAuthStatus', () => {
@@ -40,31 +37,7 @@ describe('buildSetupAuthStatus', () => {
     });
   });
 
-  it('does not satisfy Teams setup with only Microsoft sign-in values', () => {
-    const status = buildSetupAuthStatus({
-      persistedEnvVarNames: [
-        'ROOMOTE_AUTH_MICROSOFT_CLIENT_ID',
-        'ROOMOTE_AUTH_MICROSOFT_CLIENT_SECRET',
-        'ROOMOTE_AUTH_MICROSOFT_TENANT_ID',
-      ],
-    });
-
-    expect(status.setupSatisfiedByRuntimeEnv).toBe(false);
-    expect(status.preselectedProvider).toBe('slack');
-    expect(status.selectedProvider).toBeNull();
-    expect(status.runtimeConfiguredProvider).toBeNull();
-    expect(status.runtimeConfiguredProviders).toEqual([]);
-    expect(status.lockReason).toBeNull();
-    expect(
-      status.providers.find((provider) => provider.id === 'microsoft'),
-    ).toMatchObject({
-      runtimeSatisfied: false,
-      savedSatisfied: false,
-      setupSatisfied: false,
-    });
-  });
-
-  it('preselects the saved Teams provider when required sign-in and bot values exist', () => {
+  it('satisfies Teams setup with only Microsoft sign-in values', () => {
     const status = buildSetupAuthStatus({
       persistedEnvVarNames: REQUIRED_MICROSOFT_TEAMS_ENV_VARS,
     });
@@ -82,6 +55,31 @@ describe('buildSetupAuthStatus', () => {
       savedSatisfied: true,
       setupSatisfied: true,
     });
+  });
+
+  it('still accepts optional dedicated TEAMS_BOT_* overrides when present', () => {
+    const status = buildSetupAuthStatus({
+      persistedEnvVarNames: [
+        ...REQUIRED_MICROSOFT_TEAMS_ENV_VARS,
+        'TEAMS_BOT_APP_ID',
+        'TEAMS_BOT_APP_PASSWORD',
+        'TEAMS_BOT_TENANT_ID',
+      ],
+    });
+
+    expect(
+      status.providers.find((provider) => provider.id === 'microsoft'),
+    ).toMatchObject({
+      runtimeSatisfied: false,
+      savedSatisfied: true,
+      setupSatisfied: true,
+    });
+    expect(
+      status.providers
+        .find((provider) => provider.id === 'microsoft')
+        ?.fields.filter((field) => field.envVarName.startsWith('TEAMS_BOT_'))
+        .every((field) => field.required === false),
+    ).toBe(true);
   });
 
   it('honors Slack shared-credential fallback compatibility', () => {
@@ -164,11 +162,6 @@ describe('buildSetupAuthStatus', () => {
         ROOMOTE_AUTH_MICROSOFT_CLIENT_ID: 'microsoft-client-id',
         ROOMOTE_AUTH_MICROSOFT_CLIENT_SECRET: 'microsoft-client-secret',
         ROOMOTE_AUTH_MICROSOFT_TENANT_ID: 'microsoft-tenant-id',
-        TEAMS_BOT_APP_ID: 'teams-bot-app-id',
-        TEAMS_BOT_APP_PASSWORD: 'teams-bot-app-password',
-        TEAMS_BOT_TENANT_ID: 'teams-bot-tenant-id',
-        TEAMS_BOT_TOKEN_ENDPOINT: 'https://login.example.test/token',
-        TEAMS_BOT_OAUTH_SCOPE: 'https://api.botframework.com/.default',
       },
     });
 

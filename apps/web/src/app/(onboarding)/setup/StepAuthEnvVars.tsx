@@ -181,21 +181,23 @@ export function StepAuthEnvVars({
     typeof window === 'undefined'
       ? 'https://your-deployment-url'
       : window.location.origin;
-  const teamsBotAppIdField = selectedProvider?.fields.find(
-    (field) => field.envVarName === 'TEAMS_BOT_APP_ID',
+  const microsoftClientIdField = selectedProvider?.fields.find(
+    (field) => field.envVarName === 'ROOMOTE_AUTH_MICROSOFT_CLIENT_ID',
   );
-  const enteredTeamsBotAppId =
-    isMicrosoftProvider && teamsBotAppIdField
+  const enteredMicrosoftClientId =
+    isMicrosoftProvider && microsoftClientIdField
       ? getSetupEffectiveFieldValue({
           provider: selectedProvider,
-          field: teamsBotAppIdField,
+          field: microsoftClientIdField,
           values,
         }).trim()
       : '';
-  const typedTeamsBotAppId = MICROSOFT_APP_ID_PATTERN.test(enteredTeamsBotAppId)
-    ? enteredTeamsBotAppId
+  const typedMicrosoftClientId = MICROSOFT_APP_ID_PATTERN.test(
+    enteredMicrosoftClientId,
+  )
+    ? enteredMicrosoftClientId
     : '';
-  const teamsBotAppIdStored = isMicrosoftProvider
+  const microsoftClientIdStored = isMicrosoftProvider
     ? selectedProvider.fields.some(
         (field) =>
           (field.envVarName === 'TEAMS_BOT_APP_ID' ||
@@ -203,9 +205,9 @@ export function StepAuthEnvVars({
           (field.runtimeSatisfied || field.savedSatisfied),
       )
     : false;
-  const teamsAppPackageHref = typedTeamsBotAppId
-    ? `/api/setup/teams-app-package?botAppId=${encodeURIComponent(typedTeamsBotAppId)}`
-    : !bootstrapMode && teamsBotAppIdStored
+  const teamsAppPackageHref = typedMicrosoftClientId
+    ? `/api/setup/teams-app-package?botAppId=${encodeURIComponent(typedMicrosoftClientId)}`
+    : !bootstrapMode && microsoftClientIdStored
       ? '/api/teams/app-package'
       : null;
   const [showManualSlackValues, setShowManualSlackValues] = useState(false);

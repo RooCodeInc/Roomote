@@ -245,6 +245,7 @@ function buildAuthSetup(
             envVarName: 'TEAMS_BOT_APP_ID',
             acceptedEnvVarNames: ['TEAMS_BOT_APP_ID'],
             label: 'Teams Bot App ID',
+            required: false,
             runtimeSatisfied: false,
             savedSatisfied: false,
             satisfiedByEnvVarName: null,
@@ -254,6 +255,7 @@ function buildAuthSetup(
             acceptedEnvVarNames: ['TEAMS_BOT_APP_PASSWORD'],
             label: 'Teams Bot App Password',
             secret: true,
+            required: false,
             runtimeSatisfied: false,
             savedSatisfied: false,
             satisfiedByEnvVarName: null,
@@ -262,6 +264,7 @@ function buildAuthSetup(
             envVarName: 'TEAMS_BOT_TENANT_ID',
             acceptedEnvVarNames: ['TEAMS_BOT_TENANT_ID'],
             label: 'Teams Bot Tenant ID',
+            required: false,
             runtimeSatisfied: false,
             savedSatisfied: false,
             satisfiedByEnvVarName: null,
@@ -507,7 +510,7 @@ describe('StepAuthEnvVars', () => {
     );
   });
 
-  it('submits hidden Teams bot values for the single Microsoft app path', async () => {
+  it('submits only Microsoft sign-in values for the single app path', async () => {
     const mutateAsync = setupMutationMock();
 
     render(
@@ -543,16 +546,13 @@ describe('StepAuthEnvVars', () => {
     await waitFor(() => {
       expect(mutateAsync).toHaveBeenCalledWith({
         provider: 'microsoft',
-        values: expect.objectContaining({
+        values: {
           ROOMOTE_AUTH_MICROSOFT_CLIENT_ID:
             '11111111-2222-3333-4444-555555555555',
           ROOMOTE_AUTH_MICROSOFT_CLIENT_SECRET: 'client-secret',
           ROOMOTE_AUTH_MICROSOFT_TENANT_ID:
             '22222222-3333-4444-5555-666666666666',
-          TEAMS_BOT_APP_ID: '11111111-2222-3333-4444-555555555555',
-          TEAMS_BOT_APP_PASSWORD: 'client-secret',
-          TEAMS_BOT_TENANT_ID: '22222222-3333-4444-5555-666666666666',
-        }),
+        },
       });
     });
   });

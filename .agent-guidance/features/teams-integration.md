@@ -44,16 +44,15 @@ callers build providers via
    `<ROOMOTE_APP_URL>/api/auth/oauth2/callback/microsoft-entra-id`, create a
    client secret, and save client/tenant IDs plus the secret in the comms
    settings card (or the `ROOMOTE_AUTH_MICROSOFT_*` env vars). The same app
-   serves user sign-in and the bot; in the setup wizard, Roomote requires this
-   single-app path and stores hidden `TEAMS_BOT_APP_ID`,
-   `TEAMS_BOT_APP_PASSWORD`, and `TEAMS_BOT_TENANT_ID` values copied from the
-   Microsoft Client ID/secret/tenant. Dedicated `TEAMS_BOT_*` env vars and the
-   optional `TEAMS_BOT_TOKEN_ENDPOINT` / `TEAMS_BOT_OAUTH_SCOPE` overrides are
-   still available from Settings or environment variables for deployments that
-   intentionally diverge after setup.
+   serves user sign-in and the bot; setup stores only the Microsoft sign-in
+   values. Runtime bot credentials fall back from those
+   (`resolveTeamsBotRuntimeCredentials`). Dedicated `TEAMS_BOT_*` env vars and
+   the optional `TEAMS_BOT_TOKEN_ENDPOINT` / `TEAMS_BOT_OAUTH_SCOPE` overrides
+   remain available from Settings or environment variables for deployments that
+   intentionally use a separate bot app registration.
 2. **Microsoft values**: paste the Client ID, client secret, and Tenant ID in
-   setup. Roomote stores these for Microsoft sign-in and copies them into the
-   hidden setup-only bot fields for the single-app path.
+   setup. Roomote stores these for Microsoft sign-in; the same ownership layer
+   satisfies Teams bot credentials at runtime without a second write.
 3. **Teams app package**: download the generated app package (manifest + icons zip,
    bot id and deployment URLs pre-filled, built by
    `apps/web/src/lib/server/teams-app-package.ts`) and upload it in Teams
