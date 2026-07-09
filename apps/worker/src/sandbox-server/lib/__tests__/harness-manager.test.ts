@@ -415,6 +415,156 @@ describe('HarnessManager reorderQueuedMessage', () => {
   });
 });
 
+describe('HarnessManager phase reporting', () => {
+  function startAndSettleTask(
+    harness: FakeHarness,
+    manager: HarnessManager,
+    taskId = 'task-phase-1',
+  ) {
+    manager.initializeWithoutPrompt();
+    manager.startNewTaskFromPrompt({ prompt: 'hello' });
+    harness.emitTaskEvent({
+      eventName: TaskEventName.TaskStarted,
+      payload: [taskId],
+    } as TaskEvent);
+    harness.emitTaskEvent({
+      eventName: TaskEventName.TaskCompleted,
+      payload: [taskId],
+    } as TaskEvent);
+    expect(manager.getStatus().phase).toBe('waiting_for_prompt');
+    return taskId;
+  }
+
+  it('promotes a settled task back to running when a user prompt starts a turn', () => {
+    const { harness, manager } = createManager();
+
+    try {
+      const taskId = startAndSettleTask(harness, manager);
+
+      // A drained queue follow-up / steered replay / question answer is
+      // delivered as a user_prompt runtime event without going through
+      // startNewTask or sendFollowUpPrompt.
+      harness.emitRuntimeOutput({
+        id: `${taskId}:prompt-1`,
+        ts: 10,
+        eventType: ACP_ENVELOPE_EVENT_TYPES.UserPrompt,
+        kind: 'text',
+        role: 'user',
+        contentBlocks: [{ type: 'text', text: 'drained follow-up' }],
+        metadata: { sessionId: taskId, sequence: 2 },
+        payload: { sessionId: taskId, text: 'drained follow-up' },
+      } as AcpMessage);
+
+      expect(manager.getStatus().phase).toBe('running');
+    } finally {
+      manager.dispose();
+      harness.dispose();
+    }
+  });
+
+  it('does not promote past a pending question on a user prompt event', () => {
+    const { harness, manager } = createManager();
+
+    try {
+      const taskId = 'task-phase-question';
+      manager.initializeWithoutPrompt();
+      manager.startNewTaskFromPrompt({ prompt: 'hello' });
+      harness.emitTaskEvent({
+        eventName: TaskEventName.TaskStarted,
+        payload: [taskId],
+      } as TaskEvent);
+      harness.emitRuntimeOutput({
+        id: `${taskId}:rui-1`,
+        ts: 5,
+        eventType: ACP_ENVELOPE_EVENT_TYPES.RequestUserInput,
+        kind: 'unknown',
+        role: 'assistant',
+        contentBlocks: [],
+        metadata: { sessionId: taskId, sequence: 1 },
+        payload: {
+          requestId: `rui:${taskId}:turn-1:call-1`,
+          sessionId: taskId,
+          turnId: 'turn-1',
+          callId: 'call-1',
+          status: 'pending',
+          questions: [],
+        },
+      } as AcpMessage);
+      expect(manager.getStatus().phase).toBe('waiting_for_user_input');
+
+      harness.emitRuntimeOutput({
+        id: `${taskId}:prompt-1`,
+        ts: 10,
+        eventType: ACP_ENVELOPE_EVENT_TYPES.UserPrompt,
+        kind: 'text',
+        role: 'user',
+        contentBlocks: [{ type: 'text', text: 'unrelated' }],
+        metadata: { sessionId: taskId, sequence: 2 },
+        payload: { sessionId: taskId, text: 'unrelated' },
+      } as AcpMessage);
+
+      expect(manager.getStatus().phase).toBe('waiting_for_user_input');
+    } finally {
+      manager.dispose();
+      harness.dispose();
+    }
+  });
+
+  it('reports waiting_for_user_input instead of running when a follow-up is sent behind a pending question', () => {
+    const { harness, manager } = createManager();
+
+    try {
+      const taskId = 'task-phase-blocked';
+      manager.initializeWithoutPrompt();
+      manager.startNewTaskFromPrompt({ prompt: 'hello' });
+      harness.emitTaskEvent({
+        eventName: TaskEventName.TaskStarted,
+        payload: [taskId],
+      } as TaskEvent);
+      expect(manager.getStatus().phase).toBe('running');
+
+      harness.pendingUserInputRequests = [
+        {
+          requestId: `rui:${taskId}:turn-1:call-1`,
+          sessionId: taskId,
+          turnId: 'turn-1',
+          callId: 'call-1',
+          status: 'pending',
+          questions: [],
+          ts: 1,
+        },
+      ];
+
+      const sent = manager.sendFollowUpPrompt({
+        prompt: 'steer while blocked',
+        autoSteerWhenQueued: true,
+      });
+
+      expect(sent).toBe(true);
+      expect(manager.getStatus().phase).toBe('waiting_for_user_input');
+    } finally {
+      manager.dispose();
+      harness.dispose();
+    }
+  });
+
+  it('still promotes a settled task to running for a follow-up with no pending question', () => {
+    const { harness, manager } = createManager();
+
+    try {
+      startAndSettleTask(harness, manager, 'task-phase-follow-up');
+
+      const sent = manager.sendFollowUpPrompt({ prompt: 'more work' });
+
+      expect(sent).toBe(true);
+      expect(manager.getStatus().phase).toBe('running');
+    } finally {
+      manager.dispose();
+      harness.dispose();
+    }
+  });
+});
+
 describe('HarnessManager cancelTask', () => {
   it('cancels while running even before sessionId is known', () => {
     const { harness, manager, logger } = createManager();

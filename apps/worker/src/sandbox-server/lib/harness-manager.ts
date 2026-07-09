@@ -269,7 +269,23 @@ export class HarnessManager extends EventEmitter<HarnessManagerEvents> {
       // provider error; clear stale error UI until a new error arrives.
       this.state.lastErrorMessage = undefined;
 
-      if (this.phase !== 'running') {
+      const hasPendingUserInput =
+        (this.harness.getPendingUserInputRequests?.() ?? []).length > 0;
+
+      if (hasPendingUserInput) {
+        // The harness cannot inject a prompt while a question blocks the
+        // turn — the message is at best queued (or about to trigger an
+        // abort-and-replay, whose lifecycle events will re-settle the
+        // phase). Report the blocked state instead of claiming active
+        // work, so the UI shows the question rather than "Working".
+        if (
+          this.phase !== 'waiting_for_user_input' &&
+          this.phase !== 'stopped' &&
+          this.phase !== 'shutting_down'
+        ) {
+          this.setPhase('waiting_for_user_input');
+        }
+      } else if (this.phase !== 'running') {
         this.clearTurnSettlementState();
         this.setPhase('running');
       }
@@ -1003,6 +1019,19 @@ export class HarnessManager extends EventEmitter<HarnessManagerEvents> {
         : (event.payload?.sessionId as string | undefined);
 
     if (sessionId !== this.state.sessionId) {
+      return;
+    }
+
+    if (event.eventType === ACP_ENVELOPE_EVENT_TYPES.UserPrompt) {
+      // A user prompt entering the session means a turn is starting — a
+      // drained queue follow-up, a steered replay, or a question answer.
+      // Those paths do not go through startNewTask/sendFollowUpPrompt, so
+      // without this the phase stays settled and the UI keeps showing the
+      // idle countdown while the agent is actively working.
+      if (this.phase === 'idle' || this.phase === 'waiting_for_prompt') {
+        this.clearTurnSettlementState();
+        this.setPhase('running');
+      }
       return;
     }
 
