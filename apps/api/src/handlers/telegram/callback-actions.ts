@@ -4,8 +4,10 @@ import {
   and,
   db,
   eq,
+  finalizeWorkItemLaunched,
   inArray,
   isNull,
+  releaseWorkItemClaim,
   sql,
   taskRuns,
 } from '@roomote/db/server';
@@ -189,8 +191,13 @@ async function handleSuggestionLaunchCallback(params: {
     channel: chatId,
   };
 
+  // The claim's `launchClaimedAt` is this launcher's fencing token; thread it
+  // through finalize/release so a slow launcher whose stale claim was
+  // reclaimed cannot stomp the new claimant's state.
+  const claimedAt = suggestion.launchClaimedAt;
+
   try {
-    await startNewTelegramTask({
+    const started = await startNewTelegramTask({
       message,
       launchOwnerUserId: senderUserId,
       queuedMessage,
@@ -202,12 +209,56 @@ async function handleSuggestionLaunchCallback(params: {
       // The button click already is the explicit start signal.
       skipRoutingConfirmation: true,
     });
+
+    if (started.status === 'started') {
+      // Close the launch state machine: `launching` -> `launched` with the
+      // task link, so a later click can never relaunch this suggestion and the
+      // task stays linked to its work item.
+      const finalized = await finalizeWorkItemLaunched(db, {
+        id: params.suggestionId,
+        taskId: started.launchResult.taskId,
+        claimedAt,
+      });
+
+      if (!finalized) {
+        // The task is already enqueued but the fencing guard rejected the
+        // finalize (our stale claim was reclaimed by another launcher). The
+        // task now runs unlinked from the work item. No cleanly callable
+        // enqueue-level cancel helper is exposed to this surface, so log
+        // loudly with both ids for triage.
+        apiLogger.warn(
+          `[telegram] finalize lost the fencing guard for work item ${params.suggestionId}; orphaned task ${started.launchResult.taskId} runs unlinked (claim reclaimed by another launcher)`,
+        );
+      }
+    } else {
+      // No task was launched: routing answered inline (`replied_inline`), or —
+      // defensively, since skipRoutingConfirmation is set — a confirmation was
+      // requested. Release the claim so the suggestion is retryable now
+      // instead of dead for the 10-minute stale window.
+      await releaseWorkItemClaim(db, { id: params.suggestionId, claimedAt });
+    }
   } catch (error) {
     apiLogger.warn(
       `[telegram] Failed to launch suggestion ${params.suggestionId} from callback: ${
         error instanceof Error ? error.message : String(error)
       }`,
     );
+
+    // Release the claim (fenced on our token) so the suggestion becomes
+    // retryable immediately rather than after the 10-minute stale window.
+    await releaseWorkItemClaim(db, {
+      id: params.suggestionId,
+      claimedAt,
+    }).catch((releaseError) => {
+      apiLogger.warn(
+        `[telegram] Failed to release claim for work item ${params.suggestionId} after launch failure: ${
+          releaseError instanceof Error
+            ? releaseError.message
+            : String(releaseError)
+        }`,
+      );
+    });
+
     await postTelegramMessageBestEffort({
       chatId,
       replyToMessageId: messageId,

@@ -92,6 +92,11 @@ describe('claimTelegramSuggestionLaunch (work_items launch CAS)', () => {
 
     expect(row?.status).toBe('launching');
     expect(row?.launchClaimedAt).toBeInstanceOf(Date);
+    // The returned claim carries the row's launchClaimedAt — the caller's
+    // fencing token for finalize/release.
+    expect(claimed?.launchClaimedAt.getTime()).toBe(
+      row?.launchClaimedAt?.getTime(),
+    );
   });
 
   it('returns null for a second claim (double-tap is a no-op)', async () => {

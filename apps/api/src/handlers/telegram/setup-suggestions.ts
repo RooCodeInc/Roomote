@@ -147,6 +147,10 @@ export async function postSetupTaskSuggestionsToTelegram(params: {
  *
  * The claim CAS (including its 10-minute stale-claim recovery) lives in the
  * shared `claimWorkItem` helper so every launch surface behaves identically.
+ * The returned `launchClaimedAt` is this launcher's fencing token — the caller
+ * must thread it through `finalizeWorkItemLaunched`/`releaseWorkItemClaim` so a
+ * slow launcher whose claim was reclaimed cannot stomp the new claimant's
+ * state.
  */
 export async function claimTelegramSuggestionLaunch(input: {
   suggestionId: string;
@@ -157,6 +161,7 @@ export async function claimTelegramSuggestionLaunch(input: {
   brief: string | null;
   investigationContext: string | null;
   targetRepositoryFullName: string | null;
+  launchClaimedAt: Date;
 } | null> {
   // Scope: a suggestion card for this work item must have been posted in this
   // chat. Suggestion buttons from any Telegram suggestion surface (setup
@@ -186,5 +191,6 @@ export async function claimTelegramSuggestionLaunch(input: {
     brief: claimed.brief,
     investigationContext: claimed.investigationContext,
     targetRepositoryFullName: claimed.targetRepositoryFullName,
+    launchClaimedAt: claimed.launchClaimedAt,
   };
 }
