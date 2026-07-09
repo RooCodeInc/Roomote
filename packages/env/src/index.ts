@@ -131,6 +131,7 @@ const serverSchema = {
   TELEGRAM_BOT_TOKEN: z.string().min(1).optional(),
   TELEGRAM_WEBHOOK_SECRET: z.string().min(1).optional(),
   TELEGRAM_BOT_USERNAME: z.string().min(1).optional(),
+  TELEGRAM_API_BASE_URL: z.string().url().default('https://api.telegram.org'),
   ROOMOTE_AUTH_SLACK_CLIENT_ID: z.string().min(1).optional(),
   ROOMOTE_AUTH_SLACK_CLIENT_SECRET: z.string().min(1).optional(),
   ROOMOTE_AUTH_MICROSOFT_CLIENT_ID: z.string().min(1).optional(),
