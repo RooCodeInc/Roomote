@@ -396,6 +396,52 @@ describe('ModalClient', () => {
         workdir: '/sandbox',
       }),
     );
+    expect(sandboxCreateMock.mock.calls[0]?.[2]).not.toHaveProperty('regions');
+  });
+
+  it('forwards Modal regions on create and snapshot resume', async () => {
+    sandboxCreateMock.mockResolvedValue({
+      sandboxId: 'modal-123',
+      tunnels: vi.fn().mockResolvedValue({}),
+      setTags: vi.fn().mockResolvedValue(undefined),
+    });
+
+    const client = new ModalClient({
+      tokenId: 'token-id',
+      tokenSecret: 'token-secret',
+      baseImageRef: MODAL_IMAGE_REF,
+      regions: ['us', 'us-west'],
+    });
+
+    await client.createInstance({ ports: [3000] });
+
+    expect(sandboxCreateMock).toHaveBeenCalledWith(
+      { appId: 'app-123' },
+      { imageId: 'img-123' },
+      expect.objectContaining({
+        regions: ['us', 'us-west'],
+      }),
+    );
+
+    sandboxCreateMock.mockClear();
+    sandboxCreateMock.mockResolvedValue({
+      sandboxId: 'modal-resume-123',
+      tunnels: vi.fn().mockResolvedValue({}),
+      setTags: vi.fn().mockResolvedValue(undefined),
+    });
+
+    await client.resumeFromSnapshot({
+      sourceSnapshotId: 'img-snap-123',
+      ports: [3000],
+    });
+
+    expect(sandboxCreateMock).toHaveBeenCalledWith(
+      { appId: 'app-123' },
+      { imageId: 'img-snap-123' },
+      expect.objectContaining({
+        regions: ['us', 'us-west'],
+      }),
+    );
   });
 
   it('uses the longer snapshot deadline and normalizes Modal snapshot RPC failures', async () => {

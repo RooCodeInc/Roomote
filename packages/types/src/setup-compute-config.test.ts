@@ -112,7 +112,10 @@ describe('buildSetupComputeStatus', () => {
       status.providers.find((provider) => provider.provider === 'docker')
         ?.label,
     ).toBe('Local Docker');
-    expect(infrastructureByProvider.modal).toEqual(['MODAL_BASE_IMAGE_REF']);
+    expect(infrastructureByProvider.modal).toEqual([
+      'MODAL_BASE_IMAGE_REF',
+      'MODAL_REGIONS',
+    ]);
     expect(infrastructureByProvider.daytona).toEqual([
       'DAYTONA_SNAPSHOT_NAME',
       'DAYTONA_API_URL',

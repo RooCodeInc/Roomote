@@ -215,6 +215,13 @@ export const SETUP_COMPUTE_PROVIDER_CATALOG = [
         category: 'infrastructure',
         advanced: true,
       },
+      {
+        envVarName: 'MODAL_REGIONS',
+        label: 'Modal Regions',
+        required: false,
+        category: 'infrastructure',
+        advanced: true,
+      },
     ],
   },
   {
