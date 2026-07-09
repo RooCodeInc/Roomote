@@ -29,9 +29,19 @@ vi.mock('@roomote/db/server', () => ({
           mockEnvironmentVariablesFindMany(...args),
       },
     },
+    select: () => ({
+      from: () => ({
+        where: async () => [],
+      }),
+    }),
     transaction: vi.fn(),
   },
   cloudJobs: { id: 'cloudJobs.id' },
+  repositories: {
+    fullName: 'repositories.fullName',
+    sourceControlProvider: 'repositories.sourceControlProvider',
+  },
+  inArray: vi.fn(),
   markTaskStartParallelCountEndedAt: vi.fn(),
   resolveTaskAttribution: vi.fn(),
   stringifyDecryptedEnvVarValue: (value: unknown) => String(value),

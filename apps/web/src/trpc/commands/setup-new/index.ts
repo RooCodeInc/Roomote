@@ -1,5 +1,9 @@
 import * as GitHub from '@roomote/github';
 import { enqueueCloudTask } from '@roomote/cloud-agents/server';
+import {
+  resolveEnvironmentSourceControlProvider,
+  resolveSingleSourceControlProvider,
+} from '@/lib/server/source-control-provider';
 import { buildSetupKickoffText } from '@roomote/communication/chat-messages';
 import { TelegramCommunicationProvider } from '@roomote/communication/telegram-provider';
 import { SlackNotifier } from '@roomote/slack';
@@ -129,6 +133,7 @@ type PersistedRuntimeModelConfig = DeploymentModelConfig;
 type SelectedRepositorySummary = {
   id: string;
   fullName: string;
+  sourceControlProvider: SourceControlProvider;
 };
 
 type PersistedQueuedSetupTask = QueuedOnboardingTask;
@@ -303,6 +308,7 @@ async function resolveSelectedRepositories(repositoryIds: string[]): Promise<{
     selectedRepositories.push({
       id: repository.id,
       fullName: repository.fullName,
+      sourceControlProvider: repository.sourceControlProvider,
     });
   }
 
@@ -837,6 +843,9 @@ async function launchQueuedSetupTasksIfReady({
         }
       : {};
 
+  const queuedSourceControlProvider =
+    await resolveEnvironmentSourceControlProvider(matchingEnvironmentId);
+
   await Promise.allSettled(
     claimedTasks.map(async (queuedTask) => {
       try {
@@ -846,6 +855,9 @@ async function launchQueuedSetupTasksIfReady({
             payload: {
               repo: '',
               environmentId: matchingEnvironmentId,
+              ...(queuedSourceControlProvider
+                ? { sourceControlProvider: queuedSourceControlProvider }
+                : {}),
               ...(slackTeamId ? { teamId: slackTeamId } : {}),
               ...(slackChannel ? { slackChannel } : {}),
               ...(slackThreadTs ? { slackThreadTs } : {}),
@@ -1963,6 +1975,13 @@ export async function startSetupNewOnboardingTaskCommand(
     const workspacePayload = buildSetupNewWorkspacePayload(
       selectedRepositoryFullNames,
     );
+    // Stamp the provider explicitly: dequeue defaults to GitHub when the
+    // payload omits it, which breaks non-GitHub deployments.
+    const setupSourceControlProvider = resolveSingleSourceControlProvider(
+      selectedRepositories.map(
+        (repository) => repository.sourceControlProvider,
+      ),
+    );
     const prompt = appendEnvironmentDefinitionGuidance(
       buildSetupNewKickoffPrompt(selectedRepositoryFullNames),
       currentState.setupGuidance,
@@ -2047,6 +2066,9 @@ export async function startSetupNewOnboardingTaskCommand(
             type: TaskPayloadKind.StandardTask,
             payload: {
               ...workspacePayload,
+              ...(setupSourceControlProvider
+                ? { sourceControlProvider: setupSourceControlProvider }
+                : {}),
               description: prompt,
               visibleInTranscript: false,
               communicationProvider: fallbackTarget.provider,
@@ -2109,6 +2131,9 @@ export async function startSetupNewOnboardingTaskCommand(
           type: TaskPayloadKind.StandardTask,
           payload: {
             ...workspacePayload,
+            ...(setupSourceControlProvider
+              ? { sourceControlProvider: setupSourceControlProvider }
+              : {}),
             description: prompt,
             visibleInTranscript: false,
             ...(modelSelection.harnessModelOverrides
@@ -2183,6 +2208,9 @@ export async function startSetupNewOnboardingTaskCommand(
           type: TaskPayloadKind.SlackAppMention,
           payload: {
             ...workspacePayload,
+            ...(setupSourceControlProvider
+              ? { sourceControlProvider: setupSourceControlProvider }
+              : {}),
             channel: slackChannel,
             user: handoffTarget.slackUserId,
             text: prompt,

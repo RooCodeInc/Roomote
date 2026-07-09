@@ -115,7 +115,8 @@ export const TRIGGERABLE_BACKGROUND_AUTOMATION_DESCRIPTORS = [
     label: 'Suggest Ideas',
     availability: 'stable',
     scheduleModes: DAILY_WEEKLY_SCHEDULE_MODES,
-    manualTriggerRequirements: ['slack', 'github', 'repository'],
+    // Provider-agnostic: suggestion scans work with any synced repository.
+    manualTriggerRequirements: ['slack', 'repository'],
     usesManagerChannel: true,
     scheduledSuggestionSource: 'suggest_ideas',
   },

@@ -3,6 +3,7 @@ import {
   CloudTaskStatus,
   buildSourceControlTokenMetadata,
   getSourceControlProviderLabel,
+  resolveCloudTaskWorkspace,
   resolveSourceControlProviderFromPayload,
   type SourceControlProvider,
   type SourceControlTokenMetadata,
@@ -16,6 +17,8 @@ import {
   resolveEffectiveModelRuntimeEnv,
   stringifyDecryptedEnvVarValue,
   eq,
+  inArray,
+  repositories,
   sql,
 } from '@roomote/db/server';
 import { decryptSecrets } from '@roomote/db/encryption';
@@ -217,6 +220,16 @@ export async function cancelAndReleaseCloudJob(
       })
       .where(eq(taskRuns.id, cloudJob.id));
 
+    // Mirror finishCloudJob's terminal task-state write: a canceled run maps
+    // the owning task to 'canceled'. finishCloudJob never runs for runs that
+    // are canceled before/at dequeue, so without this the task would stay
+    // 'active' forever. Matches finishCloudJob exactly (unconditional, no
+    // guard on sibling runs).
+    await tx
+      .update(tasks)
+      .set({ state: 'canceled', updatedAt: endedAt })
+      .where(eq(tasks.id, cloudJob.taskId));
+
     await markTaskStartParallelCountEndedAt(tx, {
       runId: cloudJob.id,
       endedAt,
@@ -243,10 +256,55 @@ export type SourceControlRuntimeToken = SourceControlTokenMetadata & {
   artifactsPatch?: Record<string, unknown>;
 };
 
+/**
+ * Resolve the provider for a job's source-control token. Prefers the explicit
+ * payload stamp; when absent, resolves from the synced repositories the
+ * workspace references, so non-GitHub deployments work even when a launch
+ * site forgot to stamp the payload. Falls back to the GitHub default only
+ * when the workspace repositories are unknown or span providers.
+ */
+async function resolveJobSourceControlProvider(
+  cloudJob: Pick<CloudJob, 'payload'>,
+): Promise<SourceControlProvider> {
+  const payload = cloudJob.payload as { sourceControlProvider?: unknown };
+
+  if (
+    payload.sourceControlProvider !== undefined &&
+    payload.sourceControlProvider !== null &&
+    payload.sourceControlProvider !== ''
+  ) {
+    return resolveSourceControlProviderFromPayload(payload);
+  }
+
+  const workspace = resolveCloudTaskWorkspace(cloudJob.payload);
+  const repositoryFullNames =
+    workspace.type === 'repository'
+      ? [workspace.repo]
+      : workspace.type === 'repository_set'
+        ? workspace.repositories
+        : [];
+
+  if (repositoryFullNames.length > 0) {
+    const rows = await db
+      .select({ sourceControlProvider: repositories.sourceControlProvider })
+      .from(repositories)
+      .where(inArray(repositories.fullName, repositoryFullNames));
+    const providers = [
+      ...new Set(rows.map((row) => row.sourceControlProvider)),
+    ];
+
+    if (providers.length === 1) {
+      return providers[0]!;
+    }
+  }
+
+  return resolveSourceControlProviderFromPayload(cloudJob.payload);
+}
+
 async function createProviderToken(
   cloudJob: CloudJob,
 ): Promise<SourceControlRuntimeToken> {
-  const provider = resolveSourceControlProviderFromPayload(cloudJob.payload);
+  const provider = await resolveJobSourceControlProvider(cloudJob);
 
   switch (provider) {
     case 'github': {
@@ -326,7 +384,7 @@ export async function createSourceControlTokenForJob(
     baseDelayMs = SOURCE_CONTROL_TOKEN_BASE_DELAY_MS,
   } = {},
 ): Promise<SourceControlRuntimeToken | null> {
-  const provider = resolveSourceControlProviderFromPayload(cloudJob.payload);
+  const provider = await resolveJobSourceControlProvider(cloudJob);
   const label = getSourceControlProviderLabel(provider);
 
   for (let attempt = 1; attempt <= maxRetries; attempt++) {
@@ -381,6 +439,21 @@ export async function cancelCloudJob(
       ...(artifacts ? { artifacts } : {}),
     })
     .where(eq(taskRuns.id, cloudJobId));
+
+  // Mirror finishCloudJob's terminal task-state write. This runs on the
+  // dequeue path (invalid job, bootstrap failure) where finishCloudJob never
+  // executes, so the owning task must be moved to 'canceled' here or it stays
+  // 'active' forever. The caller only has the run id, so resolve the task via
+  // the run row. Unconditional, matching finishCloudJob (no sibling-run guard).
+  await tx
+    .update(tasks)
+    .set({ state: 'canceled', updatedAt: endedAt })
+    .where(
+      eq(
+        tasks.id,
+        sql`(SELECT ${taskRuns.taskId} FROM ${taskRuns} WHERE ${taskRuns.id} = ${cloudJobId})`,
+      ),
+    );
 
   await markTaskStartParallelCountEndedAt(tx, {
     runId: cloudJobId,

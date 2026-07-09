@@ -156,7 +156,7 @@ type SuggestionCardMessageRow = {
   channelId: string;
   workItemId: string;
   suggestionKey: string;
-  createdByUserId: string;
+  createdByUserId: string | null;
 };
 
 /**
@@ -567,7 +567,7 @@ async function postTaskSuggestionsThreadToSlack(params: {
   sourceTaskId: string;
   slackBotAccessToken: string;
   slackChannelId: string;
-  createdByUserId: string;
+  createdByUserId: string | null;
   agentType: SuggestionAgentType;
   rootText: string;
   automationLabel?: string | null;
@@ -621,7 +621,7 @@ async function postTaskSuggestionsThreadToSlack(params: {
     params.historicalThreadFeedbackDebugSnippet?.trim();
 
   const canPostHistoricalThreadFeedbackDebugSnippet =
-    historicalThreadFeedbackDebugSnippet
+    historicalThreadFeedbackDebugSnippet && params.createdByUserId
       ? await shouldPostHistoricalThreadFeedbackDebugSnippet({
           userId: params.createdByUserId,
           logPrefix: '[submitTaskSuggestions]',
@@ -861,14 +861,13 @@ async function postSuggestedTasksSummaryToSlack(params: {
   historicalThreadFeedbackDebugSnippet?: string | null;
   suggestions: PersistedTaskSuggestion[];
 }): Promise<void> {
-  if (
-    params.suggestions.length === 0 ||
-    !params.createdByUserId ||
-    !params.sourceTaskId.trim()
-  ) {
+  if (params.suggestions.length === 0 || !params.sourceTaskId.trim()) {
     return;
   }
 
+  // Automation-initiated scans run as the deployment service principal and have
+  // no user anywhere, so `createdByUserId` is null. A null poster must not
+  // suppress the summary post; user-attribution decoration is skipped instead.
   const createdByUserId = params.createdByUserId;
 
   const [slackInstallation] = await db
@@ -1067,6 +1066,7 @@ export async function submitTaskSuggestions(
         where: eq(tasks.id, taskId),
         columns: {
           initiatorUserId: true,
+          initiatorAutomation: true,
         },
       }),
       db.query.deploymentSettings.findFirst({
@@ -1215,6 +1215,9 @@ export async function submitTaskSuggestions(
           suggestionsToPersist.map(
             (suggestion, index): typeof workItems.$inferInsert => ({
               kind: 'suggestion',
+              // Automation-initiated scans stamp their originating automation;
+              // onboarding/manual scans have no automation initiator (null FK).
+              automationKey: task?.initiatorAutomation ?? null,
               sourceTaskId: taskId,
               title: suggestion.title,
               brief: suggestion.brief,

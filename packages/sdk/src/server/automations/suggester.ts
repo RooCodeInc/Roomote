@@ -18,7 +18,7 @@ import { getRedis } from '@roomote/redis';
 import { type WorkItemStatus } from '@roomote/types';
 import {
   getActiveRepositoryFullNames,
-  hasActiveGitHubInstallation,
+  hasAnyActiveRepository,
 } from './github-deployment-scope';
 import { isRunDue, resolveSlackWorkspaceTimezone } from './scheduling-utils';
 import { dispatchSuggestionRoutes } from './suggester-route-dispatch';
@@ -46,7 +46,7 @@ const WINDOW_DAYS: Record<string, number> = {
 async function findEligibleDeployments(): Promise<
   SuggesterDeploymentContext[]
 > {
-  if (!(await hasActiveGitHubInstallation())) {
+  if (!(await hasAnyActiveRepository())) {
     return [];
   }
 

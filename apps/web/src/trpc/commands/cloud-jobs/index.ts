@@ -4,7 +4,6 @@ import {
   type CloudTaskPayload,
   type ComputeProvider,
   type LaunchCodingHarness,
-  type SourceControlProvider,
   type StandardTask,
   CloudTaskStatus,
   TaskPayloadKind,
@@ -23,10 +22,8 @@ import {
   db,
   desc,
   eq,
-  environmentRepositoryMappings,
   inArray,
   markTaskStartParallelCountEndedAt,
-  repositories,
   slackInstallations,
   taskRuns,
   tasks,
@@ -35,6 +32,10 @@ import { SlackNotifier } from '@roomote/slack';
 
 import type { UserAuthSuccess } from '@/types';
 import { Env, getArtifactById, getRepositories } from '@/lib/server';
+import {
+  resolveEnvironmentSourceControlProvider,
+  resolveSingleSourceControlProvider,
+} from '@/lib/server/source-control-provider';
 import { humanizeFilename } from '@/lib/task-utils';
 
 export type CreateCloudJobResult =
@@ -66,48 +67,6 @@ function getManualTaskRepositoryFullNames(
   }
 
   return [];
-}
-
-function resolveSingleSourceControlProvider(
-  providers: SourceControlProvider[],
-): SourceControlProvider | undefined {
-  const uniqueProviders = [...new Set(providers)];
-
-  if (uniqueProviders.length > 1) {
-    throw new Error(
-      'Selected repositories must belong to a single source control provider.',
-    );
-  }
-
-  return uniqueProviders[0];
-}
-
-async function resolveEnvironmentSourceControlProvider(
-  environmentId: string | undefined,
-): Promise<SourceControlProvider | undefined> {
-  if (!environmentId) {
-    return undefined;
-  }
-
-  const rows = await db
-    .select({
-      sourceControlProvider: repositories.sourceControlProvider,
-    })
-    .from(environmentRepositoryMappings)
-    .innerJoin(
-      repositories,
-      eq(environmentRepositoryMappings.repositoryId, repositories.id),
-    )
-    .where(
-      and(
-        eq(environmentRepositoryMappings.environmentId, environmentId),
-        eq(repositories.isActive, true),
-      ),
-    );
-
-  return resolveSingleSourceControlProvider(
-    rows.map((row) => row.sourceControlProvider),
-  );
 }
 
 function getSlackChannelFromPayload(payload: unknown): string | undefined {

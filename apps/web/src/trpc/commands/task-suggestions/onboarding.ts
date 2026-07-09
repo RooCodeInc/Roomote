@@ -10,6 +10,8 @@ import {
   deploymentSettings,
   eq,
   getBackgroundAgentSettingsForDeployment,
+  inArray,
+  repositories,
   resolveRepositorySelectionByIds,
   workItems,
 } from '@roomote/db/server';
@@ -23,6 +25,7 @@ import {
 } from '@roomote/types';
 
 import { getLatestCloudJobsByTaskId } from '@/lib/server';
+import { resolveSingleSourceControlProvider } from '@/lib/server/source-control-provider';
 import type { UserAuthSuccess } from '@/types';
 import { assertAdmin } from '../setup/shared';
 import { decorateSuggestionsWithEnvironmentIds } from './launch-resolution';
@@ -132,12 +135,24 @@ async function launchSuggestedTasksTask(input: {
   const workspacePayload = buildEnvironmentDefinitionWorkspacePayload(
     input.repositoryFullNames,
   );
+  // Stamp the provider explicitly: dequeue defaults to GitHub when the
+  // payload omits it, which breaks non-GitHub deployments.
+  const scanRepositoryRows = await db
+    .select({ sourceControlProvider: repositories.sourceControlProvider })
+    .from(repositories)
+    .where(inArray(repositories.fullName, input.repositoryFullNames));
+  const scanSourceControlProvider = resolveSingleSourceControlProvider(
+    scanRepositoryRows.map((row) => row.sourceControlProvider),
+  );
   const launchResult = await enqueueCloudTask(
     {
       task: {
         type: TaskPayloadKind.Scan,
         payload: {
           ...workspacePayload,
+          ...(scanSourceControlProvider
+            ? { sourceControlProvider: scanSourceControlProvider }
+            : {}),
           ...(input.repositoryIds?.length
             ? { selectedRepositoryIds: input.repositoryIds }
             : {}),

@@ -8,6 +8,7 @@ import Redis from 'ioredis-mock';
 import {
   type CloudTask,
   type SnapshotResumeTask,
+  CloudTaskStatus,
   TaskPayloadKind,
 } from '@roomote/types';
 import {
@@ -367,6 +368,55 @@ describe('enqueueCloudTask PR linkage', () => {
         { enqueue: false },
       ),
     ).rejects.toThrow('prLinkage');
+  });
+});
+
+describe('enqueue-failure cancel task state', () => {
+  // A run canceled before it is queued must leave the owning task in a
+  // terminal state. finishCloudJob never runs for these runs, so
+  // cancelCloudJobBeforeQueue is responsible for the tasks.state write.
+  // Regression guard for tasks stranded in 'active' with a canceled run.
+  it('marks the task canceled when the run is canceled before it is queued', async () => {
+    const userId = await createUser();
+
+    let capturedTaskId: string | undefined;
+
+    await expect(
+      enqueueCloudTask(
+        {
+          task: standardTaskInput(),
+          initiator: { kind: 'user', userId },
+          workflow: 'standard',
+          surface: 'web',
+          trigger: 'manual',
+        },
+        {
+          skipEarlyTitleGeneration: true,
+          // Throwing before the queue push exercises the enqueue-failure
+          // cancel path (cancelCloudJobBeforeQueue) after the task and its
+          // first run have been persisted.
+          beforeEnqueue: async (cloudJob) => {
+            capturedTaskId = cloudJob.taskId;
+            throw new Error('boom before enqueue');
+          },
+        },
+      ),
+    ).rejects.toThrow('boom before enqueue');
+
+    expect(capturedTaskId).toBeDefined();
+    createdTaskIds.push(capturedTaskId!);
+
+    const task = await db.query.tasks.findFirst({
+      where: eq(tasks.id, capturedTaskId!),
+    });
+    const runs = await db.query.taskRuns.findMany({
+      where: eq(taskRuns.taskId, capturedTaskId!),
+    });
+
+    expect(task!.state).toBe('canceled');
+    expect(runs).toHaveLength(1);
+    expect(runs[0]!.status).toBe(CloudTaskStatus.Canceled);
+    expect(runs[0]!.canceledAt).not.toBeNull();
   });
 });
 

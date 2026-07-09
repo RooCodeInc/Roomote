@@ -63,11 +63,9 @@ export const mcpConnectionsRouter = router({
         mcpId: z.string(),
       }),
     )
-    .query(async ({ ctx, input }) => {
-      if (!ctx.auth.userId) {
-        return false;
-      }
-
+    .query(async ({ input }) => {
+      // Deployment-scoped enablement: valid for any authenticated
+      // principal, including deployment-service-principal job tokens.
       const enablement = await db.query.deploymentMcpEnablements.findFirst({
         where: and(
           eq(deploymentMcpEnablements.mcpId, input.mcpId),

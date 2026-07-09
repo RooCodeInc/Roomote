@@ -39,6 +39,7 @@ import {
   createTaskWithRetry,
   markTaskStartParallelCountEndedAt,
   recordTaskStartParallelCount,
+  repositories,
   taskPullRequests,
   taskRuns,
   tasks,
@@ -99,14 +100,28 @@ async function cancelCloudJobBeforeQueue(
   failureContext: string,
 ): Promise<void> {
   try {
-    await db
-      .update(taskRuns)
-      .set({
-        status: CloudTaskStatus.Canceled,
-        canceledAt: new Date(),
-        error: message,
-      })
-      .where(eq(taskRuns.id, cloudJob.id));
+    const endedAt = new Date();
+
+    await db.transaction(async (tx) => {
+      await tx
+        .update(taskRuns)
+        .set({
+          status: CloudTaskStatus.Canceled,
+          canceledAt: endedAt,
+          error: message,
+        })
+        .where(eq(taskRuns.id, cloudJob.id));
+
+      // Mirror finishCloudJob's terminal task-state write. Enqueue-failure
+      // cancels bypass finishCloudJob entirely, so without this the task stays
+      // 'active' forever. cloud-agents cannot import @roomote/sdk, so the
+      // minimal write is replicated here. Unconditional, matching
+      // finishCloudJob (no sibling-run guard).
+      await tx
+        .update(tasks)
+        .set({ state: 'canceled', updatedAt: endedAt })
+        .where(eq(tasks.id, cloudJob.taskId));
+    });
   } catch (cancelError) {
     console.warn(
       `[enqueueCloudTask] Failed to cancel run ${cloudJob.id} after ${failureContext}: ${getErrorMessage(
@@ -281,6 +296,20 @@ export class CloudJobQueue {
                   error: 'Superseded by a newer cloud job.',
                 })
                 .where(eq(taskRuns.id, otherEntry.id));
+
+              // Mirror finishCloudJob's terminal task-state write so the
+              // superseded run's task does not stay 'active' forever. Only the
+              // run id is known here, so resolve the task via the run row.
+              // Unconditional, matching finishCloudJob (no sibling-run guard).
+              await tx
+                .update(tasks)
+                .set({ state: 'canceled', updatedAt: endedAt })
+                .where(
+                  eq(
+                    tasks.id,
+                    sql`(SELECT ${taskRuns.taskId} FROM ${taskRuns} WHERE ${taskRuns.id} = ${otherEntry.id})`,
+                  ),
+                );
 
               await markTaskStartParallelCountEndedAt(tx, {
                 runId: otherEntry.id,
@@ -1007,6 +1036,38 @@ async function enqueueFreshLaunch(
     TaskPayloadKind.GithubPrReviewFollowUp,
   ]);
   const workspace = resolveCloudTaskWorkspace(task.payload);
+
+  // Stamp the source-control provider once at launch when the caller omitted
+  // it. Downstream consumers (token minting, worker repository resolution)
+  // otherwise fall back to the GitHub default, which breaks GitLab/Gitea/ADO
+  // deployments for any launch surface that forgot the stamp.
+  if (
+    !('sourceControlProvider' in task.payload) ||
+    !task.payload.sourceControlProvider
+  ) {
+    const workspaceRepositoryFullNames =
+      workspace.type === 'repository'
+        ? [workspace.repo]
+        : workspace.type === 'repository_set'
+          ? workspace.repositories
+          : [];
+
+    if (workspaceRepositoryFullNames.length > 0) {
+      const providerRows = await db
+        .select({
+          sourceControlProvider: repositories.sourceControlProvider,
+        })
+        .from(repositories)
+        .where(inArray(repositories.fullName, workspaceRepositoryFullNames));
+      const providers = [
+        ...new Set(providerRows.map((row) => row.sourceControlProvider)),
+      ];
+
+      if (providers.length === 1) {
+        task.payload.sourceControlProvider = providers[0];
+      }
+    }
+  }
 
   if (
     PR_TASK_TYPES.has(task.type) &&

@@ -70,7 +70,10 @@ export async function postScheduledSuggestionsToTeams(params: {
 }): Promise<void> {
   const { sourceTaskId, createdByUserId, suggestions } = params;
 
-  if (!createdByUserId || suggestions.length === 0 || !sourceTaskId.trim()) {
+  // Automation-initiated scans have no user, so createdByUserId is null. That
+  // must not suppress the fallback post; the tracked_messages column is
+  // nullable and no user attribution is rendered here.
+  if (suggestions.length === 0 || !sourceTaskId.trim()) {
     return;
   }
 
