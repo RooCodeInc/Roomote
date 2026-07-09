@@ -22,7 +22,7 @@ import { StepTitle } from './StepTitle';
 import { ProviderSetupInstructions } from './ProviderSetupInstructions';
 import { getProviderSetupCopy } from './providerSetupCopy';
 
-export type ProviderSetupExperienceProvider =
+type ProviderSetupExperienceProvider =
   | SetupAuthStatus['providers'][number]
   | {
       id: SetupAuthStatus['providers'][number]['id'] | 'telegram';
