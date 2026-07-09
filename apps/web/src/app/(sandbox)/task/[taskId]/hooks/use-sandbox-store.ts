@@ -263,11 +263,10 @@ function getMergeCoverageProvidedKeys(message: AcpUiMessage): string[] {
     (message.kind === 'tool_call' || message.kind === 'tool_result') &&
     message.toolCallId
   ) {
-    keys.push(`tool:${message.kind}:${message.toolCallId}`);
-
-    if (message.kind === 'tool_result') {
-      keys.push(`tool:tool_call:${message.toolCallId}`);
-    }
+    // Any persisted row for a call (pending call or any result) covers the
+    // live pending tool_call; live results are matched by terminality in
+    // the carry-over filter instead.
+    keys.push(`tool:tool_call:${message.toolCallId}`);
   }
 
   return keys;
@@ -880,7 +879,8 @@ export function createSandboxStore(
             }
           }
 
-          const rebuiltToolKindByCallId = new Map<string, string>();
+          const rebuiltToolCallIds = new Set<string>();
+          const rebuiltTerminalToolCallIds = new Set<string>();
 
           for (const message of rebuilt.acpMessages) {
             if (
@@ -888,7 +888,11 @@ export function createSandboxStore(
                 message.kind === 'tool_result') &&
               message.toolCallId
             ) {
-              rebuiltToolKindByCallId.set(message.toolCallId, message.kind);
+              rebuiltToolCallIds.add(message.toolCallId);
+
+              if (message.kind === 'tool_result' && message.partial !== true) {
+                rebuiltTerminalToolCallIds.add(message.toolCallId);
+              }
             }
           }
 
@@ -899,15 +903,19 @@ export function createSandboxStore(
           // emitter timestamp of the same event — is dropped in favor of
           // the persisted version.
           const carriedOver = state.messages.filter((message) => {
-            // Live terminal tool results are matched by terminality, not
-            // id: live updates mutate the loaded tool_call in place, so
-            // the live result can sit under the pending call's envelope
-            // id. Only a persisted terminal result covers it.
+            // Live tool results are matched by terminality, not id: live
+            // updates mutate the loaded tool_call in place, so the live
+            // result can sit under the pending call's envelope id. A live
+            // terminal result is only covered by a persisted *terminal*
+            // result (an in-progress ToolCallUpdate also rebuilds as a
+            // partial tool_result); a live in-progress result is covered
+            // by any persisted row for the call.
             if (message.kind === 'tool_result' && message.toolCallId) {
-              return (
-                rebuiltToolKindByCallId.get(message.toolCallId) !==
-                'tool_result'
-              );
+              if (message.partial !== true) {
+                return !rebuiltTerminalToolCallIds.has(message.toolCallId);
+              }
+
+              return !rebuiltToolCallIds.has(message.toolCallId);
             }
 
             if (envelopeIds.has(message.id)) {
@@ -920,14 +928,16 @@ export function createSandboxStore(
           });
 
           // A carried-over live terminal tool result supersedes the rebuilt
-          // pending tool_call row for the same call, so the tool does not
-          // render twice (or appear still-running) until the terminal
-          // result envelope is persisted.
+          // pending tool_call / in-progress tool_result row for the same
+          // call, so the tool does not render twice (or appear
+          // still-running) until the terminal result envelope is persisted.
           const carriedTerminalToolCallIds = new Set(
             carriedOver
               .filter(
                 (message) =>
-                  message.kind === 'tool_result' && message.toolCallId,
+                  message.kind === 'tool_result' &&
+                  message.partial !== true &&
+                  message.toolCallId,
               )
               .map((message) => message.toolCallId as string),
           );
@@ -936,9 +946,11 @@ export function createSandboxStore(
               ? rebuilt.acpMessages.filter(
                   (message) =>
                     !(
-                      message.kind === 'tool_call' &&
                       message.toolCallId &&
-                      carriedTerminalToolCallIds.has(message.toolCallId)
+                      carriedTerminalToolCallIds.has(message.toolCallId) &&
+                      (message.kind === 'tool_call' ||
+                        (message.kind === 'tool_result' &&
+                          message.partial === true))
                     ),
                 )
               : rebuilt.acpMessages;

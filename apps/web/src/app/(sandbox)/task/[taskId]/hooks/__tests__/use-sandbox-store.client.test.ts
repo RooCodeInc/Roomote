@@ -1278,6 +1278,84 @@ describe('createSandboxStore', () => {
     expect(toolMessages[0]?.text).toContain('file contents here');
   });
 
+  it('keeps a live terminal tool result when history only has an in-progress update', () => {
+    const store = createAcpStore();
+
+    const pendingCallEnvelope = acpEnvelope({
+      id: 'persisted:inprogress-tool-call',
+      ts: 10000,
+      eventType: ACP_ENVELOPE_EVENT_TYPES.ToolCall,
+      kind: 'tool_call',
+      role: 'tool',
+      contentBlocks: [textBlock('shell')],
+      metadata: {
+        sessionId: 'session-1',
+        toolCallId: 'call_inprogress_result',
+        status: 'running',
+      },
+      payload: {
+        sessionId: 'session-1',
+        toolCallId: 'call_inprogress_result',
+        title: 'shell',
+        kind: 'execute',
+        status: 'running',
+      },
+    });
+    const inProgressUpdateEnvelope = acpEnvelope({
+      id: 'persisted:inprogress-tool-update',
+      ts: 10100,
+      eventType: ACP_ENVELOPE_EVENT_TYPES.ToolCallUpdate,
+      kind: 'tool_result',
+      role: 'tool',
+      contentBlocks: [textBlock('partial output')],
+      metadata: {
+        sessionId: 'session-1',
+        toolCallId: 'call_inprogress_result',
+        status: 'running',
+      },
+      payload: {
+        sessionId: 'session-1',
+        toolCallId: 'call_inprogress_result',
+        title: 'shell',
+        kind: 'execute',
+        status: 'running',
+        output: 'partial output',
+      },
+    });
+
+    store
+      .getState()
+      ._loadAcpHistory([pendingCallEnvelope, inProgressUpdateEnvelope]);
+
+    emitAcp(
+      store,
+      acpToolCallUpdate({
+        toolCallId: 'call_inprogress_result',
+        id: 'live:tool-final',
+        ts: 10200,
+        payload: {
+          status: 'completed',
+          output: 'full final output',
+        },
+      }),
+    );
+
+    // Refetch still only has the call + in-progress update persisted.
+    store
+      .getState()
+      ._mergeAcpHistory([pendingCallEnvelope, inProgressUpdateEnvelope]);
+
+    const toolMessages = store
+      .getState()
+      .messages.filter(
+        (message) => message.toolCallId === 'call_inprogress_result',
+      );
+    expect(toolMessages).toHaveLength(1);
+    expect(toolMessages[0]?.kind).toBe('tool_result');
+    expect(toolMessages[0]?.partial).not.toBe(true);
+    expect(toolMessages[0]?.text).toContain('full final output');
+  });
+
   it('masks secret request_user_input responses in the transcript', () => {
     const store = createAcpStore();
 
