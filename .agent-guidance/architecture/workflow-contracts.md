@@ -412,6 +412,7 @@ The `sync-github-pr-review` and `sync-github-pr-review-with-approval` appendices
 
 - recover a trustworthy last-reviewed SHA from explicit context, marker-based summary state, or a review-comment fallback
 - use legacy full-rereview only when a reusable legacy summary exists but no reliable anchor can be recovered
+- scope the since-last-review delta to the PR's authoritative Files Changed (`base...head`): the compare range `lastReviewSha...head` uses three-dot semantics, so after a rebase it also contains base-branch commits, and those files are excluded from `diff_in_range`, `changed_files_since_last_review`, and the `pull_request_changed_files` scope hint so a rebase cannot import findings for code the PR does not touch (a rebase-only head change with no PR-relevant delta collapses to the no-op path)
 - emit an explicit no-op path when there is no new delta
 - surface only net-new actionable issues
 - carry forward prior unresolved issues in the rolling summary instead of re-commenting them

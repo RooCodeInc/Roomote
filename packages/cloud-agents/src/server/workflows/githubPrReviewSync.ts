@@ -19,6 +19,7 @@ import {
   getPrSha,
   getPrReviewCommentId,
   formatChangedFiles,
+  filterUnifiedDiffToFiles,
 } from './utils';
 import {
   getGitHubLinkedWorkItemsFromClosingIssues,
@@ -366,16 +367,41 @@ export async function githubPrReviewSync({
   const range: [string, string] = [sha, currentHeadSha];
   const sameHeadAsLastReview = sha === currentHeadSha;
 
-  const { diff, changedFiles } = sameHeadAsLastReview
-    ? { diff: undefined, changedFiles: [] }
+  // The since-last-review range (compare `sha...currentHeadSha`) uses
+  // three-dot semantics, so after the branch is rebased onto its base it
+  // also contains every commit pulled in from the base branch — code the PR
+  // does not touch. Scope the range to the PR's authoritative Files Changed
+  // (base...head, what GitHub shows) so a rebase can no longer import
+  // findings for unrelated files.
+  const { changedFiles: pullRequestChangedFiles } = sameHeadAsLastReview
+    ? { changedFiles: [] }
+    : await GitHubCli.fetchDiff(prParams);
+  const pullRequestChangedFileSet = new Set(pullRequestChangedFiles);
+
+  const rangeResult = sameHeadAsLastReview
+    ? { diff: undefined, changedFiles: [] as string[] }
     : await GitHubCli.fetchDiffInRange({
         ...params,
         range,
       });
 
-  const commits = sameHeadAsLastReview
-    ? []
-    : await GitHubCli.fetchCommitsInRange({ ...prParams, sha });
+  const changedFiles = rangeResult.changedFiles.filter((file) =>
+    pullRequestChangedFileSet.has(file),
+  );
+  const diff =
+    rangeResult.diff === undefined
+      ? undefined
+      : filterUnifiedDiffToFiles(rangeResult.diff, pullRequestChangedFileSet);
+
+  // After scoping, a rebase-only head change can leave nothing the PR
+  // actually touched. Treat that like "no new changes" so the reviewer
+  // preserves the prior checklist instead of re-reviewing rebased-in base
+  // code.
+  const hasReviewableChanges = !sameHeadAsLastReview && changedFiles.length > 0;
+
+  const commits = hasReviewableChanges
+    ? await GitHubCli.fetchCommitsInRange({ ...prParams, sha })
+    : [];
   const reviewComments = await GitHubCli.fetchReviewComments(prParams);
   const issueComments = await GitHubCli.fetchIssueComments(prParams);
 
@@ -432,22 +458,25 @@ export async function githubPrReviewSync({
       pull_request_details: getPrDetails({ fullName, pr }),
       top_level_review_comment: prReviewerComment.body,
       prior_summary_checklist: priorSummaryChecklist,
-      changed_files_since_last_review: sameHeadAsLastReview
+      pull_request_changed_files: sameHeadAsLastReview
         ? undefined
-        : formatChangedFiles(changedFiles, 200),
-      commits_since_last_review: sameHeadAsLastReview
-        ? undefined
-        : getCommits(commits),
+        : formatChangedFiles(pullRequestChangedFiles, 200),
+      changed_files_since_last_review: hasReviewableChanges
+        ? formatChangedFiles(changedFiles, 200)
+        : undefined,
+      commits_since_last_review: hasReviewableChanges
+        ? getCommits(commits)
+        : undefined,
       linked_issue: getIssueDetails(fullName, issue),
-      diff_in_range: sameHeadAsLastReview
-        ? undefined
-        : getDiffInRange({
+      diff_in_range: hasReviewableChanges
+        ? getDiffInRange({
             repo: fullName,
             diff,
             range,
             lineLimit: 5_000,
             charLimit: 100_000,
-          }),
+          })
+        : undefined,
       existing_review_comments: getReviewComments(reviewComments),
       issue_comments: getIssueComments(issueComments),
     },

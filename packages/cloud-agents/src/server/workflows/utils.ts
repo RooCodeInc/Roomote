@@ -912,3 +912,44 @@ export function formatChangedFiles(
 
   return fileList;
 }
+
+const DIFF_FILE_SECTION_HEADER = /^diff --git a\/.+ b\/(.+)$/;
+
+/**
+ * Restrict a unified diff to only the per-file sections whose target path is
+ * in `allowedFiles`. Used to intersect a "since last review" range diff
+ * (which, after a rebase, contains commits pulled in from the base branch)
+ * with the pull request's authoritative Files Changed set, so the reviewer
+ * never sees — and cannot flag — code the PR does not actually touch.
+ */
+export function filterUnifiedDiffToFiles(
+  diff: string,
+  allowedFiles: Iterable<string>,
+): string {
+  const allowed = new Set(allowedFiles);
+  const lines = diff.split('\n');
+  const kept: string[] = [];
+  let includingSection = false;
+  let sawSectionHeader = false;
+
+  for (const line of lines) {
+    const headerMatch = DIFF_FILE_SECTION_HEADER.exec(line);
+
+    if (headerMatch) {
+      sawSectionHeader = true;
+      includingSection = allowed.has(headerMatch[1]!);
+    }
+
+    if (includingSection) {
+      kept.push(line);
+    }
+  }
+
+  // No `diff --git` headers at all — not a per-file unified diff we can
+  // safely filter (e.g. an empty or truncated diff). Leave it untouched.
+  if (!sawSectionHeader) {
+    return diff;
+  }
+
+  return kept.join('\n');
+}

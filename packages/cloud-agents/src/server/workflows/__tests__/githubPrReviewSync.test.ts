@@ -107,6 +107,61 @@ No actionable issues found.
     });
   });
 
+  describe('filterUnifiedDiffToFiles unit tests', () => {
+    const diff = [
+      'diff --git a/apps/web/src/kept.ts b/apps/web/src/kept.ts',
+      'index 111..222 100644',
+      '--- a/apps/web/src/kept.ts',
+      '+++ b/apps/web/src/kept.ts',
+      '@@ -1,2 +1,2 @@',
+      '-const a = 1;',
+      '+const a = 2;',
+      'diff --git a/apps/api/src/rebased.ts b/apps/api/src/rebased.ts',
+      'index 333..444 100644',
+      '--- a/apps/api/src/rebased.ts',
+      '+++ b/apps/api/src/rebased.ts',
+      '@@ -1,2 +1,2 @@',
+      '-const b = 1;',
+      '+const b = 2;',
+    ].join('\n');
+
+    it('keeps only sections for files in the allowed set', () => {
+      const result = utils.filterUnifiedDiffToFiles(diff, [
+        'apps/web/src/kept.ts',
+      ]);
+
+      expect(result).toContain('a/apps/web/src/kept.ts');
+      expect(result).toContain('const a = 2;');
+      expect(result).not.toContain('apps/api/src/rebased.ts');
+      expect(result).not.toContain('const b = 2;');
+    });
+
+    it('returns an empty diff when no section is allowed', () => {
+      const result = utils.filterUnifiedDiffToFiles(diff, [
+        'some/other/file.ts',
+      ]);
+
+      expect(result).toBe('');
+    });
+
+    it('keeps every section when all files are allowed', () => {
+      const result = utils.filterUnifiedDiffToFiles(diff, [
+        'apps/web/src/kept.ts',
+        'apps/api/src/rebased.ts',
+      ]);
+
+      expect(result).toBe(diff);
+    });
+
+    it('leaves a diff without git section headers untouched', () => {
+      const noHeaders = 'Diff is too large to display.';
+
+      expect(
+        utils.filterUnifiedDiffToFiles(noHeaders, ['apps/web/src/kept.ts']),
+      ).toBe(noHeaders);
+    });
+  });
+
   describe('getDiff unit tests', () => {
     it('should format diff without truncation when under limits', () => {
       const diff = 'line1\nline2\nline3';
