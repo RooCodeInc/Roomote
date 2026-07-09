@@ -203,7 +203,7 @@ export function AuthForm({
               >
                 <Mail />
                 <span className="grow text-left font-medium">
-                  Login in with email
+                  Log in with email
                 </span>
                 <ArrowRight />
               </Button>

@@ -33,6 +33,7 @@ export function EmailPasswordAuth({
   hideModeSwitchMessage = false,
   showNameField = true,
   submitRowClassName,
+  submitButtonClassName,
   submitLeadingAction,
 }: {
   redirectUrl: string;
@@ -165,7 +166,11 @@ export function EmailPasswordAuth({
 
       <div className={cn('flex items-center gap-2', submitRowClassName)}>
         {submitLeadingAction}
-        <Button className="w-full" type="submit" disabled={isSubmitting}>
+        <Button
+          className={cn('w-full', submitButtonClassName)}
+          type="submit"
+          disabled={isSubmitting}
+        >
           {isSubmitting ? <Spinner /> : null}
           {mode === 'sign-up' ? 'Create account' : 'Sign in'}
           <ArrowRight />
