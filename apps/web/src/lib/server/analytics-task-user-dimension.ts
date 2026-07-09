@@ -68,9 +68,10 @@ function getCanonicalUserDimensionValue(user: {
 
 /**
  * Canonical "By User" dimension for task analytics.
- * Matched product users keep their own series; every other attribution
- * (unlinked external identities, bots, automatic/system authors) collapses
- * into a single Automations series.
+ * Matched product users keep their own series. Named automations each get
+ * their series (e.g. "PR Reviewer", "Suggest Ideas"). Other automatic work
+ * falls back to a shared Automations series. Residual unlinked identities
+ * keep their own label so they are not mislabeled as an automation.
  */
 export function getCanonicalTaskAttributionDimensionValue(input: {
   attributionKind: TaskAttributionKind | null;
@@ -131,8 +132,30 @@ export function getCanonicalTaskAttributionDimensionValue(input: {
     });
   }
 
-  return createDimensionValue(
-    AUTOMATIONS_USER_DIMENSION_KEY,
-    AUTOMATIONS_USER_DIMENSION_LABEL,
-  );
+  if (attribution.kind === 'automatic') {
+    const label = attribution.analyticsDisplay?.trim() || PRODUCT_NAME;
+    if (
+      !label ||
+      label === PRODUCT_NAME ||
+      label === AUTOMATIONS_USER_DIMENSION_LABEL
+    ) {
+      return createDimensionValue(
+        AUTOMATIONS_USER_DIMENSION_KEY,
+        AUTOMATIONS_USER_DIMENSION_LABEL,
+      );
+    }
+
+    return createDimensionValue(`automation:${label}`, label);
+  }
+
+  // Unlinked external identities still show their own label.
+  const unlinkedLabel =
+    attribution.analyticsDisplay?.trim() || AUTOMATIONS_USER_DIMENSION_LABEL;
+  const unlinkedKey =
+    input.attributionSourceExternalId != null &&
+    input.attributionSourceExternalId.trim()
+      ? `unlinked:${input.attributionSourceKind}:${input.attributionSourceExternalId}`
+      : `unlinked:${unlinkedLabel}`;
+
+  return createDimensionValue(unlinkedKey, unlinkedLabel);
 }

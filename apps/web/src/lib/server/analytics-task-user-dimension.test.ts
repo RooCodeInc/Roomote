@@ -1,4 +1,9 @@
 import { describe, expect, it } from 'vitest';
+import {
+  CloudTaskType,
+  PRODUCT_NAME,
+  resolveTaskAutomationDisplayName,
+} from '@roomote/types';
 
 import {
   AUTOMATIONS_USER_DIMENSION_KEY,
@@ -30,15 +35,15 @@ describe('getCanonicalTaskAttributionDimensionValue', () => {
     });
   });
 
-  it('lumps unlinked external identities into Automations', () => {
+  it('uses named automation series for automatic attribution', () => {
     expect(
       getCanonicalTaskAttributionDimensionValue({
-        attributionKind: 'unlinked_user',
+        attributionKind: 'automatic',
         attributedUserId: null,
-        attributionSourceKind: 'github',
-        attributionSourceDisplayName: 'openmote[bot]',
-        attributionSourceExternalId: 'openmote[bot]',
-        attributedGithubLogin: 'openmote[bot]',
+        attributionSourceKind: 'automation',
+        attributionSourceDisplayName: 'PR Reviewer',
+        attributionSourceExternalId: null,
+        attributedGithubLogin: null,
         effectiveAuthorKind: null,
         effectiveAuthorUserId: null,
         effectiveAuthorDisplayName: null,
@@ -47,17 +52,17 @@ describe('getCanonicalTaskAttributionDimensionValue', () => {
         userEmail: null,
       }),
     ).toEqual({
-      key: AUTOMATIONS_USER_DIMENSION_KEY,
-      label: AUTOMATIONS_USER_DIMENSION_LABEL,
+      key: 'automation:PR Reviewer',
+      label: 'PR Reviewer',
     });
   });
 
-  it('lumps automatic/system authors into Automations', () => {
+  it('falls back to Automations when automatic has no specific name', () => {
     expect(
       getCanonicalTaskAttributionDimensionValue({
         attributionKind: 'automatic',
         attributedUserId: null,
-        attributionSourceKind: 'automation',
+        attributionSourceKind: 'system',
         attributionSourceDisplayName: null,
         attributionSourceExternalId: null,
         attributedGithubLogin: null,
@@ -74,60 +79,65 @@ describe('getCanonicalTaskAttributionDimensionValue', () => {
     });
   });
 
-  it('keys matched users on effective author when it differs from attributed', () => {
+  it('keeps unlinked external identities distinct', () => {
     expect(
       getCanonicalTaskAttributionDimensionValue({
-        attributionKind: 'matched_user',
-        attributedUserId: 'attributed-1',
+        attributionKind: 'unlinked_user',
+        attributedUserId: null,
         attributionSourceKind: 'github',
-        attributionSourceDisplayName: null,
-        attributionSourceExternalId: null,
-        attributedGithubLogin: 'someone',
-        effectiveAuthorKind: 'human',
-        effectiveAuthorUserId: 'effective-1',
-        effectiveAuthorDisplayName: 'Effective Person',
-        effectiveAuthorGithubLogin: 'effective',
-        userName: 'Attributed Person',
-        userEmail: 'attributed@example.com',
+        attributionSourceDisplayName: 'octocat',
+        attributionSourceExternalId: 'octocat',
+        attributedGithubLogin: 'octocat',
+        effectiveAuthorKind: null,
+        effectiveAuthorUserId: null,
+        effectiveAuthorDisplayName: null,
+        effectiveAuthorGithubLogin: null,
+        userName: null,
+        userEmail: null,
       }),
     ).toEqual({
-      key: 'user:effective-1',
-      label: 'Effective Person',
+      key: 'unlinked:github:octocat',
+      label: 'octocat',
     });
   });
+});
 
-  it('merges distinct non-matched sources into the same Automations key', () => {
-    const bot = getCanonicalTaskAttributionDimensionValue({
-      attributionKind: 'unlinked_user',
-      attributedUserId: null,
-      attributionSourceKind: 'github',
-      attributionSourceDisplayName: 'openmote[bot]',
-      attributionSourceExternalId: 'openmote[bot]',
-      attributedGithubLogin: 'openmote[bot]',
-      effectiveAuthorKind: null,
-      effectiveAuthorUserId: null,
-      effectiveAuthorDisplayName: null,
-      effectiveAuthorGithubLogin: null,
-      userName: null,
-      userEmail: null,
-    });
-    const roomote = getCanonicalTaskAttributionDimensionValue({
-      attributionKind: 'automatic',
-      attributedUserId: null,
-      attributionSourceKind: 'system',
-      attributionSourceDisplayName: null,
-      attributionSourceExternalId: null,
-      attributedGithubLogin: null,
-      effectiveAuthorKind: 'roomote',
-      effectiveAuthorUserId: null,
-      effectiveAuthorDisplayName: null,
-      effectiveAuthorGithubLogin: null,
-      userName: null,
-      userEmail: null,
-    });
+describe('resolveTaskAutomationDisplayName', () => {
+  it('names PR review and Conflict resolver automations', () => {
+    expect(
+      resolveTaskAutomationDisplayName({
+        type: CloudTaskType.GithubPrReview,
+      }),
+    ).toBe('PR Reviewer');
+    expect(
+      resolveTaskAutomationDisplayName({
+        type: CloudTaskType.GithubPrConflictResolve,
+      }),
+    ).toBe('Resolve PR Conflicts');
+  });
 
-    expect(bot.key).toBe(AUTOMATIONS_USER_DIMENSION_KEY);
-    expect(roomote.key).toBe(AUTOMATIONS_USER_DIMENSION_KEY);
-    expect(bot.key).toBe(roomote.key);
+  it('names scheduled suggestion automations from suggestionSource', () => {
+    expect(
+      resolveTaskAutomationDisplayName({
+        type: CloudTaskType.SuggestedTasks,
+        payload: { suggestionSource: 'suggest_ideas' },
+      }),
+    ).toBe('Suggest Ideas');
+    expect(
+      resolveTaskAutomationDisplayName({
+        type: CloudTaskType.SuggestedTasks,
+        payload: { suggestionSource: 'dependabot_triage' },
+      }),
+    ).toBe('Triage Dependabot Alerts');
+  });
+
+  it('returns null when no automation identity is available', () => {
+    expect(
+      resolveTaskAutomationDisplayName({
+        type: CloudTaskType.StandardTask,
+        payload: { repo: 'owner/repo' } as never,
+      }),
+    ).toBeNull();
+    expect(PRODUCT_NAME).toBeTruthy();
   });
 });

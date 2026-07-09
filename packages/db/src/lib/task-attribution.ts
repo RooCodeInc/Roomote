@@ -10,6 +10,8 @@ import {
   PRODUCT_NAME,
   getCommunicationProviderFromTaskPayload,
   getUserDisplayName,
+  isKnownAutomationTaskType,
+  resolveTaskAutomationDisplayName,
 } from '@roomote/types';
 import { and, desc, eq } from 'drizzle-orm';
 
@@ -152,13 +154,16 @@ export function resolveTaskAttributionDisplay(
   );
 
   if (effectiveAuthorKind === 'roomote') {
+    const automationDisplay =
+      normalizeNullableString(snapshot.attributionSourceDisplayName) ||
+      PRODUCT_NAME;
     return {
       authorKind: 'roomote',
       kind: 'automatic',
       sourceKind: snapshot.attributionSourceKind ?? 'system',
       githubDisplay: null,
-      productDisplay: PRODUCT_NAME,
-      analyticsDisplay: PRODUCT_NAME,
+      productDisplay: automationDisplay,
+      analyticsDisplay: automationDisplay,
       assigneeGithubLogin:
         effectivePrOwnerKind === 'specific_user'
           ? effectivePrOwnerGithubLogin
@@ -222,13 +227,17 @@ export function resolveTaskAttributionDisplay(
     };
   }
 
+  const automationDisplay =
+    normalizeNullableString(snapshot.attributionSourceDisplayName) ||
+    PRODUCT_NAME;
+
   return {
     authorKind: 'roomote',
     kind: 'automatic',
     sourceKind,
     githubDisplay: null,
-    productDisplay: PRODUCT_NAME,
-    analyticsDisplay: PRODUCT_NAME,
+    productDisplay: automationDisplay,
+    analyticsDisplay: automationDisplay,
     assigneeGithubLogin: null,
   };
 }
@@ -512,10 +521,31 @@ export async function buildTaskAttributionSnapshot(
   const sourceKind = inferSourceKind(task);
   const sourceDisplayName = inferSourceDisplayName(task);
   const sourceExternalId = inferSourceExternalId(task);
+  const automationDisplayName = resolveTaskAutomationDisplayName(task);
   const githubSourceIdentity =
     sourceKind === 'github'
       ? getTaskGithubIdentity(task)
       : { githubLogin: null, githubUserId: null };
+
+  // Webhook/background automation task types are product-owned, even when a
+  // GitHub/GitLab actor presence is available on the collate path.
+  if (
+    task.type === CloudTaskType.GithubPrReview ||
+    task.type === CloudTaskType.GithubPrReviewSync ||
+    task.type === CloudTaskType.GithubPrReviewFollowUp ||
+    task.type === CloudTaskType.GithubPrConflictResolve
+  ) {
+    return {
+      attributionKind: 'automatic',
+      attributedUserId: null,
+      attributionSourceKind: 'automation',
+      attributionSourceDisplayName:
+        automationDisplayName ?? sourceDisplayName ?? 'Automations',
+      attributionSourceExternalId: null,
+      attributedGithubLogin: null,
+      attributedGithubUserId: null,
+    };
+  }
 
   let attributedUserId: string | null = null;
 
@@ -607,8 +637,11 @@ export async function buildTaskAttributionSnapshot(
   return {
     attributionKind: 'automatic',
     attributedUserId: null,
-    attributionSourceKind: sourceKind,
-    attributionSourceDisplayName: sourceDisplayName,
+    attributionSourceKind:
+      isKnownAutomationTaskType(task.type) || automationDisplayName
+        ? 'automation'
+        : sourceKind,
+    attributionSourceDisplayName: automationDisplayName ?? sourceDisplayName,
     attributionSourceExternalId: sourceExternalId,
     attributedGithubLogin: null,
     attributedGithubUserId: null,

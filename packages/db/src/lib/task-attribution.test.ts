@@ -222,4 +222,66 @@ describe('buildTaskAttributionSnapshot', () => {
       attributedGithubUserId: 12345,
     });
   });
+
+  it('attributes GitHub PR review background tasks to the PR Reviewer automation', async () => {
+    const snapshot = await buildTaskAttributionSnapshot(db, {
+      userId: null,
+      type: CloudTaskType.GithubPrReview,
+      githubLogin: 'openmote[bot]',
+      githubUserId: 1,
+      payload: {
+        repo: 'owner/repo',
+        prNumber: 1,
+        prTitle: 'Test',
+        prUrl: 'https://example.com/pr/1',
+        headSha: 'abc',
+        branchName: 'feature',
+      },
+    } satisfies CloudTask);
+
+    expect(snapshot).toMatchObject({
+      attributionKind: 'automatic',
+      attributedUserId: null,
+      attributionSourceKind: 'automation',
+      attributionSourceDisplayName: 'PR Reviewer',
+    });
+  });
+
+  it('attributes scheduled suggestion tasks to the matching automation label', async () => {
+    const snapshot = await buildTaskAttributionSnapshot(db, {
+      userId: null,
+      type: CloudTaskType.SuggestedTasks,
+      payload: {
+        repo: 'owner/repo',
+        description: 'suggest',
+        suggestionSource: 'suggest_ideas',
+      },
+    } satisfies CloudTask);
+
+    expect(snapshot).toMatchObject({
+      attributionKind: 'automatic',
+      attributionSourceKind: 'automation',
+      attributionSourceDisplayName: 'Suggest Ideas',
+    });
+  });
+});
+
+describe('resolveTaskAttributionDisplay with automation names', () => {
+  it('surfaces automatic display names instead of the product brand', () => {
+    expect(
+      resolveTaskAttributionDisplay({
+        attributionKind: 'automatic',
+        attributedUserId: null,
+        attributionSourceKind: 'automation',
+        attributionSourceDisplayName: 'PR Reviewer',
+        attributionSourceExternalId: null,
+        attributedGithubLogin: null,
+        attributedGithubUserId: null,
+      }),
+    ).toMatchObject({
+      kind: 'automatic',
+      productDisplay: 'PR Reviewer',
+      analyticsDisplay: 'PR Reviewer',
+    });
+  });
 });

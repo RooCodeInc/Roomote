@@ -28,6 +28,7 @@ import {
   resolveSourceControlProviderFromPayload,
   TASK_TIMEOUT_MS,
   type SourceControlProvider,
+  resolveTaskAutomationDisplayName,
 } from '@roomote/types';
 import { Env } from '@roomote/env';
 import {
@@ -127,12 +128,17 @@ async function resolvePersistedTaskAttributionSnapshot(
   task: CloudTask,
 ): Promise<TaskAttributionSnapshot> {
   if (task.attributionOverride?.kind === 'automatic') {
+    const overrideDisplayName =
+      typeof task.attributionOverride.displayName === 'string'
+        ? task.attributionOverride.displayName.trim()
+        : '';
     return {
       attributionKind: 'automatic',
       attributedUserId: null,
       attributionSourceKind:
         task.attributionOverride.sourceKind ?? 'automation',
-      attributionSourceDisplayName: null,
+      attributionSourceDisplayName:
+        overrideDisplayName || resolveTaskAutomationDisplayName(task) || null,
       attributionSourceExternalId: null,
       attributedGithubLogin: null,
       attributedGithubUserId: null,
