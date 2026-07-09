@@ -436,8 +436,9 @@ Two published templates mirror the one spec in
 (`railway.com/deploy/bP3Lsu`). They differ only in the app image alias
 (`:main` vs `:develop`); everything else must stay identical. When the spec
 changes, edit `template.yaml` first, then mirror the change into **both**
-published templates through Railway's Template Composer (Railway has no
-template-duplicate feature, so each is edited by hand). Re-run the
+published templates through Railway's Template Composer (the Templates list
+has a Duplicate action for seeding a new template, but edits to existing
+templates are applied to each by hand). Re-run the
 first-boot verification on a scratch Railway project before publishing an
 update (one scratch run on either channel covers a change that does not
 touch the image fields). When the change touches reference variables — in
@@ -447,8 +448,9 @@ tab on the scratch project and confirm the resolved values are real URLs,
 not literal `${{...}}` strings.
 
 The `ROOMOTE_APP_URL` deploy-time prompt needs its own check on the scratch
-deploy: confirm the deploy screen shows the variable with the description
-from `template.yaml` and the reference default pre-filled, that leaving the
-default still resolves to the generated web domain after deploy, and that
-overriding it with a test value reaches the app services as that literal
-value.
+deploy: on the deploy screen, open the api service's **Configure** step and
+expand its pre-configured environment variables — `ROOMOTE_APP_URL` must
+appear as an editable field with the description from `template.yaml` and
+the reference default pre-filled. Confirm that leaving the default still
+resolves to the generated web domain after deploy, and that overriding it
+with a test value reaches the app services as that literal value.
