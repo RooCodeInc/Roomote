@@ -18,7 +18,6 @@ import {
 } from '@/components/system';
 
 import { StepTitle } from './StepTitle';
-import { getSetupStepPath } from './types';
 import {
   getSetupEffectiveFieldValue,
   getSetupSubmitValues,
@@ -29,6 +28,7 @@ import {
 /** Microsoft app (client) IDs are GUIDs. */
 const MICROSOFT_APP_ID_PATTERN =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const BOOTSTRAP_SIGN_IN_CALLBACK_PATH = '/setup';
 
 function getOAuth2ProviderId(
   providerId: SetupAuthStatus['preselectedProvider'],
@@ -86,7 +86,7 @@ export function StepAuthEnvVars({
         if (bootstrapMode && selectedProvider) {
           const callbackURL = getAuthProviderCallbackUrl(
             selectedProvider.id,
-            getSetupStepPath('auth-env-vars'),
+            BOOTSTRAP_SIGN_IN_CALLBACK_PATH,
           );
           const oauth2ProviderId = getOAuth2ProviderId(selectedProvider.id);
           const result = oauth2ProviderId

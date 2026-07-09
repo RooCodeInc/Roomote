@@ -677,8 +677,7 @@ describe('StepAuthEnvVars', () => {
     await waitFor(() => {
       expect(signInOauth2Mock).toHaveBeenCalledWith({
         providerId: 'slack',
-        callbackURL:
-          '/api/slack/install-after-auth?redirect=%2Fsetup%3Fstep%3Dauth-env-vars',
+        callbackURL: '/api/slack/install-after-auth?redirect=%2Fsetup',
         disableRedirect: true,
       });
     });
@@ -689,6 +688,49 @@ describe('StepAuthEnvVars', () => {
         SLACK_CLIENT_ID: 'client-id',
         SLACK_CLIENT_SECRET: 'client-secret',
         SLACK_SIGNING_SECRET: 'signing-secret',
+      }),
+    });
+  });
+
+  it('starts bootstrap Microsoft sign-in with setup flow continuation callback', async () => {
+    const mutateAsync = setupMutationMock();
+
+    render(
+      <StepAuthEnvVars
+        authSetup={buildAuthSetup('microsoft')}
+        selectedProviderId="microsoft"
+        onContinue={vi.fn()}
+        bootstrapMode
+      />,
+    );
+
+    fireEvent.change(screen.getByPlaceholderText('Microsoft Client ID'), {
+      target: { value: '11111111-2222-3333-4444-555555555555' },
+    });
+    fireEvent.change(screen.getByPlaceholderText('Microsoft Client Secret'), {
+      target: { value: 'client-secret' },
+    });
+    fireEvent.change(screen.getByPlaceholderText('Microsoft Tenant ID'), {
+      target: { value: '22222222-3333-4444-5555-666666666666' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: /save and sign in/i }));
+
+    await waitFor(() => {
+      expect(signInOauth2Mock).toHaveBeenCalledWith({
+        providerId: 'microsoft-entra-id',
+        callbackURL: '/setup',
+        disableRedirect: true,
+      });
+    });
+    expect(locationAssignMock).toHaveBeenCalledWith('https://slack.test');
+    expect(mutateAsync).toHaveBeenCalledWith({
+      provider: 'microsoft',
+      values: expect.objectContaining({
+        ROOMOTE_AUTH_MICROSOFT_CLIENT_ID:
+          '11111111-2222-3333-4444-555555555555',
+        ROOMOTE_AUTH_MICROSOFT_CLIENT_SECRET: 'client-secret',
+        ROOMOTE_AUTH_MICROSOFT_TENANT_ID:
+          '22222222-3333-4444-5555-666666666666',
       }),
     });
   });
@@ -744,8 +786,7 @@ describe('StepAuthEnvVars', () => {
     await waitFor(() => {
       expect(signInOauth2Mock).toHaveBeenCalledWith({
         providerId: 'slack',
-        callbackURL:
-          '/api/slack/install-after-auth?redirect=%2Fsetup%3Fstep%3Dauth-env-vars',
+        callbackURL: '/api/slack/install-after-auth?redirect=%2Fsetup',
         disableRedirect: true,
       });
     });
