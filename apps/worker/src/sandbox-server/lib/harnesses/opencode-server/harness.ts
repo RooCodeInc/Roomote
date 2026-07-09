@@ -989,6 +989,39 @@ function isOpenCodeMessageAbortedError(error: unknown): boolean {
   return name === 'MessageAbortedError' || message === 'Aborted';
 }
 
+const SESSION_ERROR_FALLBACK_MAX_CHARS = 600;
+
+/**
+ * Session errors used to be dumped into the transcript as the raw
+ * `JSON.stringify(error)` blob (status codes, response headers, provider
+ * metadata). Surface the human-readable provider message instead; the full
+ * payload still goes to the harness log for debugging.
+ */
+function formatOpenCodeSessionErrorText(error: unknown): string {
+  const record = asRecord(error);
+  const name = asString(record?.name);
+  const message =
+    asString(asRecord(record?.data)?.message) ?? asString(record?.message);
+
+  if (message) {
+    return name && name !== 'APIError'
+      ? `The provider returned an error (${name}): ${message}`
+      : `The provider returned an error: ${message}`;
+  }
+
+  if (name) {
+    return `The session ended with an error: ${name}`;
+  }
+
+  const serialized = JSON.stringify(error ?? {});
+
+  return `The session ended with an error: ${
+    serialized.length > SESSION_ERROR_FALLBACK_MAX_CHARS
+      ? `${serialized.slice(0, SESSION_ERROR_FALLBACK_MAX_CHARS)}…`
+      : serialized
+  }`;
+}
+
 function formatOpenCodeUserInputResponsePrompt(options: {
   request: HarnessPendingUserInputRequest;
   answers: AcpRequestUserInputAnswers;
@@ -3020,9 +3053,12 @@ export class OpenCodeServerHarness
     }
 
     if (sessionId) {
+      this.logger.error(
+        `OpenCode session error sessionId=${sessionId}: ${JSON.stringify(error ?? {})}`,
+      );
       this.runtimeEvents.assistantMessage({
         sessionId,
-        text: `OpenCode session error: ${JSON.stringify(error ?? {})}`,
+        text: formatOpenCodeSessionErrorText(error),
       });
       this.prompts.clear();
       this.clearQueuedPromptRetryTimer();
