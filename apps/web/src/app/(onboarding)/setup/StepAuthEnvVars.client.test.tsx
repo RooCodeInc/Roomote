@@ -86,11 +86,19 @@ vi.mock('@/components/system', () => ({
   Check: (props: SVGProps<SVGSVGElement>) => <svg {...props} />,
   CopyIconButton: ({
     'aria-label': ariaLabel,
+    disabled,
   }: {
     'aria-label'?: string;
     content: string;
+    disabled?: boolean;
     tooltip?: ReactNode;
-  }) => <button type="button" aria-label={ariaLabel ?? 'Copy'} />,
+  }) => (
+    <button
+      type="button"
+      aria-label={ariaLabel ?? 'Copy'}
+      disabled={disabled}
+    />
+  ),
   Download: (props: SVGProps<SVGSVGElement>) => <svg {...props} />,
   ExternalLink: (props: SVGProps<SVGSVGElement>) => <svg {...props} />,
   EnvVarsInfoNote: ({
@@ -488,11 +496,25 @@ describe('StepAuthEnvVars', () => {
       screen.queryByRole('link', { name: /download teams app package/i }),
     ).not.toBeInTheDocument();
     expect(
-      screen.getByText(/enter the microsoft client id above/i),
-    ).toBeInTheDocument();
+      screen.getByRole('button', { name: /download teams app package/i }),
+    ).toBeDisabled();
+    expect(
+      screen.getAllByRole('button', { name: /^go/i }).at(1),
+    ).toBeDisabled();
 
     fireEvent.change(screen.getByPlaceholderText('Microsoft Client ID'), {
       target: { value: '11111111-2222-3333-4444-555555555555' },
+    });
+
+    expect(
+      screen.queryByRole('link', { name: /download teams app package/i }),
+    ).not.toBeInTheDocument();
+
+    fireEvent.change(screen.getByPlaceholderText('Microsoft Client Secret'), {
+      target: { value: 'client-secret' },
+    });
+    fireEvent.change(screen.getByPlaceholderText('Microsoft Tenant ID'), {
+      target: { value: '22222222-3333-4444-5555-666666666666' },
     });
 
     expect(
@@ -505,6 +527,51 @@ describe('StepAuthEnvVars', () => {
       'href',
       'https://dev.teams.microsoft.com/home',
     );
+  });
+
+  it('keeps Microsoft Teams setup steps pending until all app values are filled', () => {
+    render(
+      <StepAuthEnvVars
+        authSetup={buildAuthSetup('microsoft')}
+        selectedProviderId="microsoft"
+        onContinue={vi.fn()}
+      />,
+    );
+
+    const uploadStep = screen
+      .getByText('Upload Roomote to Microsoft Teams.')
+      .closest('.flex');
+    const botStep = screen
+      .getByText('Add the Teams bot capability to that app.')
+      .closest('.flex');
+
+    expect(uploadStep).toHaveClass('opacity-50');
+    expect(botStep).toHaveClass('opacity-50');
+    expect(
+      screen.getByRole('button', { name: /download teams app package/i }),
+    ).toBeDisabled();
+    expect(
+      screen.getByRole('button', { name: /copy bot messaging endpoint/i }),
+    ).toBeDisabled();
+
+    fireEvent.change(screen.getByPlaceholderText('Microsoft Client ID'), {
+      target: { value: '11111111-2222-3333-4444-555555555555' },
+    });
+    fireEvent.change(screen.getByPlaceholderText('Microsoft Client Secret'), {
+      target: { value: 'client-secret' },
+    });
+    fireEvent.change(screen.getByPlaceholderText('Microsoft Tenant ID'), {
+      target: { value: '22222222-3333-4444-5555-666666666666' },
+    });
+
+    expect(uploadStep).not.toHaveClass('opacity-50');
+    expect(botStep).not.toHaveClass('opacity-50');
+    expect(
+      screen.getByRole('link', { name: /download teams app package/i }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole('button', { name: /copy bot messaging endpoint/i }),
+    ).toBeEnabled();
   });
 
   it('submits hidden Teams bot values for the single Microsoft app path', async () => {
