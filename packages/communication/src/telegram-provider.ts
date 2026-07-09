@@ -385,6 +385,25 @@ export class TelegramCommunicationProvider implements CommunicationProviderAdapt
     });
   }
 
+  /**
+   * Show a chat action (default `typing`). Telegram displays it for ~5s then
+   * clears it automatically, and any message the bot sends clears it early —
+   * so this is a fire-and-forget burst, re-sent on a heartbeat to span a
+   * longer reply delivery, never a state that must be turned off.
+   */
+  async sendChatAction(input: {
+    channelId: string;
+    action?: string;
+    threadId?: string;
+  }): Promise<void> {
+    const threadId = parsePositiveInteger(input.threadId);
+    await this.callBotApi('sendChatAction', {
+      chat_id: input.channelId,
+      action: input.action ?? 'typing',
+      ...(threadId ? { message_thread_id: threadId } : {}),
+    });
+  }
+
   /** Delete a message the bot sent (Bot API allows this within 48 hours). */
   async deleteMessage(input: {
     channelId: string;

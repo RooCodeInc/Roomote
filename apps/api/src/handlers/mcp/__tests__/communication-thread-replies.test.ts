@@ -6,6 +6,7 @@ const {
   envMock,
   getLatestInboundMessageIdMock,
   postMessageMock,
+  sendChatActionMock,
   resolveTelegramRuntimeCredentialsMock,
   withThreadReplyFooterLockMock,
 } = vi.hoisted(() => ({
@@ -13,6 +14,7 @@ const {
   envMock: { ROOMOTE_APP_URL: 'https://app.example.com' },
   getLatestInboundMessageIdMock: vi.fn(),
   postMessageMock: vi.fn(),
+  sendChatActionMock: vi.fn(),
   resolveTelegramRuntimeCredentialsMock: vi.fn(),
   withThreadReplyFooterLockMock: vi.fn(),
 }));
@@ -28,7 +30,7 @@ vi.mock('@roomote/communication', () => ({
   formatMarkdownLink: vi.fn(),
   getThreadReplyFooterRecord: vi.fn(),
   TelegramCommunicationProvider: vi.fn().mockImplementation(function () {
-    return { postMessage: postMessageMock };
+    return { postMessage: postMessageMock, sendChatAction: sendChatActionMock };
   }),
   TeamsCommunicationProvider: vi.fn(),
   UnsupportedCommunicationOperationError: class UnsupportedCommunicationOperationError extends Error {},
@@ -227,6 +229,7 @@ describe('maybeSendCommunicationThreadReply (Telegram)', () => {
     buildThreadReplyImagesMock.mockResolvedValue([]);
     getLatestInboundMessageIdMock.mockResolvedValue(null);
     postMessageMock.mockResolvedValue({ messageId: '999' });
+    sendChatActionMock.mockResolvedValue(undefined);
     // Skip the footer path by returning null footer (resolveSlackThreadLinkedPr mocked)
   });
 
@@ -276,6 +279,31 @@ describe('maybeSendCommunicationThreadReply (Telegram)', () => {
         channelId: '222',
         replyToMessageId: '100',
       }),
+    );
+  });
+
+  it('shows a typing action for the chat while delivering the reply', async () => {
+    await maybeSendCommunicationThreadReply({
+      cloudJob: telegramCloudJob,
+      parsedBody: { text: 'done', images: [] },
+    });
+
+    expect(sendChatActionMock).toHaveBeenCalledWith(
+      expect.objectContaining({ channelId: '222' }),
+    );
+  });
+
+  it('delivers the reply even if the typing action fails', async () => {
+    sendChatActionMock.mockRejectedValue(new Error('typing failed'));
+
+    const response = await maybeSendCommunicationThreadReply({
+      cloudJob: telegramCloudJob,
+      parsedBody: { text: 'done', images: [] },
+    });
+
+    expect(response).not.toBeNull();
+    expect(postMessageMock).toHaveBeenCalledWith(
+      expect.objectContaining({ channelId: '222', text: 'done' }),
     );
   });
 });
