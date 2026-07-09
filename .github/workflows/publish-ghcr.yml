@@ -337,10 +337,10 @@ jobs:
             --version "$VERSION"
 
   # Optional: keep a Railway deployment pinned to every develop build. The
-  # job talks to Railway's public GraphQL API with an environment-scoped
-  # project token: it finds every service in that environment running the
-  # roomote-app image, points it at the new immutable develop-<sha> tag,
-  # and redeploys it. See deploy/railway/README.md for the setup runbook.
+  # job runs .github/scripts/railway-deploy.sh with an environment-scoped
+  # project token: it finds every service in that one environment running
+  # the roomote-app image, points it at the new immutable develop-<sha>
+  # tag, and redeploys it. See deploy/railway/README.md for the runbook.
   deploy-railway:
     name: Deploy Railway preview
     runs-on: blacksmith-4vcpu-ubuntu-2404
@@ -353,81 +353,56 @@ jobs:
     permissions:
       contents: read
     steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
       - name: Point Railway services at the new image tag
         shell: bash
         env:
-          RAILWAY_PROJECT_TOKEN: ${{ secrets.ROOMOTE_RAILWAY_PROJECT_TOKEN }}
+          RAILWAY_TOKEN: ${{ secrets.ROOMOTE_RAILWAY_PROJECT_TOKEN }}
+          RAILWAY_TOKEN_TYPE: project
         run: |
           set -euo pipefail
-          : "${RAILWAY_PROJECT_TOKEN:?ROOMOTE_RAILWAY_PROJECT_TOKEN is required}"
-
-          api=https://backboard.railway.com/graphql/v2
-
-          # POST one GraphQL operation. Fails on transport errors and on
-          # GraphQL-level errors, and prints only the data payload.
-          gql() {
-            local query="$1" variables="${2:-null}" response
-            response="$(jq -n --arg query "$query" --argjson variables "$variables" \
-              '{query: $query, variables: $variables}' \
-              | curl -sS --fail-with-body --retry 3 --retry-all-errors \
-                  -X POST "$api" \
-                  -H 'Content-Type: application/json' \
-                  -H "Project-Access-Token: ${RAILWAY_PROJECT_TOKEN}" \
-                  --data-binary @-)"
-            if [ "$(jq 'has("errors")' <<< "$response")" = "true" ]; then
-              jq -r '.errors[].message' <<< "$response" >&2
-              return 1
-            fi
-            jq '.data' <<< "$response"
-          }
-
+          : "${RAILWAY_TOKEN:?ROOMOTE_RAILWAY_PROJECT_TOKEN is required}"
           owner="$(printf '%s' "$GITHUB_REPOSITORY_OWNER" | tr '[:upper:]' '[:lower:]')"
-          prefix="ghcr.io/${owner}/roomote-app"
-          image="${prefix}:develop-${GITHUB_SHA:0:8}"
+          export RAILWAY_IMAGE_PREFIX="ghcr.io/${owner}/roomote-app"
+          export RAILWAY_IMAGE="${RAILWAY_IMAGE_PREFIX}:develop-${GITHUB_SHA:0:8}"
+          .github/scripts/railway-deploy.sh
 
-          # A project token is scoped to a single environment; resolve it
-          # from the token instead of configuring it separately.
-          environment_id="$(gql 'query { projectToken { environmentId } }' \
-            | jq -r '.projectToken.environmentId')"
+  # Optional: keep a fleet of main-channel Railway deployments pinned to
+  # every main build. The job runs .github/scripts/railway-deploy.sh with a
+  # workspace (team) token: it discovers every environment in that Railway
+  # workspace with services running the roomote-app image, points them at
+  # the new immutable main-<sha> tag, and redeploys them — deploying a new
+  # customer into the workspace enrolls it with no CI change. When
+  # ROOMOTE_RAILWAY_FLEET_CANARY names a project, that project deploys
+  # first and a failure there aborts the rest of the fleet. See
+  # deploy/railway/README.md for the runbook.
+  deploy-railway-fleet:
+    name: Deploy Railway fleet
+    runs-on: blacksmith-4vcpu-ubuntu-2404
+    needs: publish
+    if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' && vars.ROOMOTE_RAILWAY_FLEET_AUTODEPLOY == 'true' }}
+    environment: railway-fleet
+    concurrency:
+      group: railway-fleet-deploy
+      cancel-in-progress: false
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
 
-          services="$(gql 'query ($environmentId: String!) {
-            environment(id: $environmentId) {
-              serviceInstances {
-                edges { node { serviceId serviceName source { image } } }
-              }
-            }
-          }' "$(jq -n --arg environmentId "$environment_id" '{environmentId: $environmentId}')" \
-            | jq -c --arg prefix "$prefix" \
-                '[.environment.serviceInstances.edges[].node
-                  | select(.source.image != null and (.source.image | startswith($prefix)))]')"
-
-          count="$(jq 'length' <<< "$services")"
-          if [ "$count" -eq 0 ]; then
-            echo "No Railway services run an image with prefix $prefix" >&2
-            exit 1
-          fi
-
-          # Both mutations are idempotent (set the image, then deploy), so
-          # a retried or partially failed run is safe to re-run.
-          for i in $(seq 0 $((count - 1))); do
-            service_id="$(jq -r ".[$i].serviceId" <<< "$services")"
-            service_name="$(jq -r ".[$i].serviceName" <<< "$services")"
-            echo "Updating $service_name to $image"
-            gql 'mutation ($environmentId: String!, $serviceId: String!, $input: ServiceInstanceUpdateInput!) {
-              serviceInstanceUpdate(environmentId: $environmentId, serviceId: $serviceId, input: $input)
-            }' "$(jq -n \
-                  --arg environmentId "$environment_id" \
-                  --arg serviceId "$service_id" \
-                  --arg image "$image" \
-                  '{environmentId: $environmentId, serviceId: $serviceId, input: {source: {image: $image}}}')" \
-              > /dev/null
-            gql 'mutation ($environmentId: String!, $serviceId: String!) {
-              serviceInstanceDeploy(environmentId: $environmentId, serviceId: $serviceId, latestCommit: false)
-            }' "$(jq -n \
-                  --arg environmentId "$environment_id" \
-                  --arg serviceId "$service_id" \
-                  '{environmentId: $environmentId, serviceId: $serviceId}')" \
-              > /dev/null
-          done
-
-          echo "Updated $count service(s) to $image"
+      - name: Deploy the fleet to the new image tag
+        shell: bash
+        env:
+          RAILWAY_TOKEN: ${{ secrets.ROOMOTE_RAILWAY_WORKSPACE_TOKEN }}
+          RAILWAY_TOKEN_TYPE: workspace
+          RAILWAY_CANARY_PROJECT: ${{ vars.ROOMOTE_RAILWAY_FLEET_CANARY }}
+        run: |
+          set -euo pipefail
+          : "${RAILWAY_TOKEN:?ROOMOTE_RAILWAY_WORKSPACE_TOKEN is required}"
+          owner="$(printf '%s' "$GITHUB_REPOSITORY_OWNER" | tr '[:upper:]' '[:lower:]')"
+          export RAILWAY_IMAGE_PREFIX="ghcr.io/${owner}/roomote-app"
+          export RAILWAY_IMAGE="${RAILWAY_IMAGE_PREFIX}:main-${GITHUB_SHA:0:8}"
+          .github/scripts/railway-deploy.sh

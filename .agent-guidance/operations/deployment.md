@@ -559,18 +559,27 @@ same immutable `develop-<short-sha>` tag. Keep the `preview` environment
 restricted to the `develop` branch and keep the deployment serialized through
 the workflow's `preview-deploy` concurrency group.
 
-The same workflow has an optional `deploy-railway` job that keeps a Railway
-deployment current with every develop build. It is gated on the repository
-variable `ROOMOTE_RAILWAY_AUTODEPLOY=true` (skipped otherwise) and runs in the
-GitHub `railway` environment with a single environment-scoped secret,
-`ROOMOTE_RAILWAY_PROJECT_TOKEN` — a Railway project token that can only touch
-one environment. The job calls Railway's public GraphQL API directly
-(`Project-Access-Token` header): it resolves the environment from the token,
-matches services whose image starts with `ghcr.io/<owner>/roomote-app`, then
-issues `serviceInstanceUpdate` with the immutable `develop-<short-sha>` tag
-and `serviceInstanceDeploy` for each. There is no intermediary service and no
-public endpoint. The operator runbook is the "Auto-deploying every develop
-build" section of `deploy/railway/README.md`.
+The same workflow has two optional Railway auto-deploy jobs, both thin
+wrappers around `.github/scripts/railway-deploy.sh`, which calls Railway's
+public GraphQL API directly — no intermediary service and no public
+endpoint. The script matches services whose image starts with
+`ghcr.io/<owner>/roomote-app`, then issues `serviceInstanceUpdate` with the
+immutable channel tag and `serviceInstanceDeploy` for each. `deploy-railway`
+keeps a single deployment current with every develop build: gated on the
+repository variable `ROOMOTE_RAILWAY_AUTODEPLOY=true`, it runs in the GitHub
+`railway` environment with `ROOMOTE_RAILWAY_PROJECT_TOKEN` — a Railway
+project token that can only touch one environment, which the script resolves
+from the token (`Project-Access-Token` header). `deploy-railway-fleet` keeps
+every deployment in a dedicated Railway workspace current with every main
+build: gated on `ROOMOTE_RAILWAY_FLEET_AUTODEPLOY=true`, it runs in the
+GitHub `railway-fleet` environment with `ROOMOTE_RAILWAY_WORKSPACE_TOKEN` —
+a workspace token (`Authorization: Bearer` header) whose blast radius is the
+dedicated fleet workspace. The fleet is discovered from the workspace rather
+than configured, an optional `ROOMOTE_RAILWAY_FLEET_CANARY` project deploys
+first and aborts the rest on failure, and per-environment failures elsewhere
+don't stop the run (results land in the Actions job summary). The operator
+runbook is the "Auto-deploying channel builds" section of
+`deploy/railway/README.md`.
 
 Upgrade and rollback are intentionally tag switches. `roomote-deploy upgrade`
 copies the new Compose/Caddy files, removes stale systemd loading of bootstrap

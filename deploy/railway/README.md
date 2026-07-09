@@ -380,9 +380,9 @@ Live previews need a wildcard domain, which requires a domain you control:
   pin, bump the tag in the four image fields first. The api service's
   `db-migrate` pre-deploy applies any schema changes, and the
   auto-generated keypairs persist in Postgres, so sessions, job tokens, and
-  preview tokens survive redeploys. Develop-channel deployments can make
-  this happen automatically on every develop build — see
-  [Auto-deploying every develop build](#auto-deploying-every-develop-build-optional).
+  preview tokens survive redeploys. Both channels can make this happen
+  automatically on every build — see
+  [Auto-deploying channel builds](#auto-deploying-channel-builds-optional).
 - **Back up** the Railway Postgres database (Railway backups or `pg_dump`)
   and the MinIO volume or external bucket. Everything else is reproducible
   from config.
@@ -391,52 +391,84 @@ Live previews need a wildcard domain, which requires a domain you control:
   through your compute provider (Modal/E2B/Daytona) and model usage bills
   through your model provider.
 
-## Auto-deploying every develop build (optional)
+## Auto-deploying channel builds (optional)
 
 Railway never redeploys on its own when a mutable tag like `:develop` or
 `:main` moves, so a deployment tracking a channel alias only picks up new
 builds when someone redeploys the app services. The `Publish GHCR Images`
-workflow has an optional `deploy-railway` job that closes that gap for the
-**develop channel**: after each develop build's images publish, it calls
-Railway's public GraphQL API directly, finds every service in the
-environment running the `roomote-app` image, points it at the new immutable
-`develop-<short-sha>` tag, and redeploys it. Nothing extra runs inside the
-Railway project. The job only fires on develop pushes today; main-channel
-deployments upgrade by redeploying the app services after a main build.
+workflow closes that gap with two optional jobs, both thin wrappers around
+[`railway-deploy.sh`](../../.github/scripts/railway-deploy.sh), which talks
+to Railway's public GraphQL API. Nothing extra runs inside the Railway
+projects.
 
-Setup, once:
-
-1. In the Railway project, create a **project token** for the target
-   environment (Project Settings → Tokens). Project tokens are scoped to
-   that one environment and can be revoked there at any time.
-2. On the GitHub repository, create a `railway` environment restricted to
-   the `develop` branch, with a single secret:
-   `ROOMOTE_RAILWAY_PROJECT_TOKEN`.
-3. Set the repository variable `ROOMOTE_RAILWAY_AUTODEPLOY=true`. The job is
-   skipped entirely while the variable is unset, so forks and deployments
-   that do not want auto-deploy need no other configuration.
-
-No project or environment IDs need to be configured: the job resolves the
-environment from the token itself (`query { projectToken { environmentId } }`).
-
-Each run matches services whose image starts with
+Shared mechanics: each run matches services whose image starts with
 `ghcr.io/<owner>/roomote-app` — api, web, controller, bullmq, and
 preview-proxy when present — then issues `serviceInstanceUpdate` with the
 pinned tag and `serviceInstanceDeploy` for each. The api service's
 `db-migrate` pre-deploy runs as usual. MinIO, Postgres, and Redis never
 match the prefix and are untouched. The first run permanently moves the
-matched services from the `:develop` alias to immutable
-`develop-<short-sha>` pins — intentional, since the pins make the deployed
-version visible in the Railway UI and make rollback a tag switch: edit the
-image field back to an older tag (or re-run the job from an older commit)
-to roll back.
+matched services from the channel alias to immutable `<channel>-<short-sha>`
+pins — intentional, since the pins make the deployed version visible in the
+Railway UI and make rollback a tag switch: edit the image field back to an
+older tag (or re-run the job from an older commit) to roll back. Both jobs
+are skipped entirely while their enable variable is unset, so forks and
+deployments that do not want auto-deploy need no other configuration.
 
-Security notes: the only credential is the project token, which can touch a
-single Railway environment and nothing else in the workspace. It lives in a
-GitHub environment secret, is never printed by the job, and GitHub does not
-expose environment secrets to fork pull requests, so open-sourcing the
-repository does not widen access. Rotate or revoke the token from the
-Railway project's token settings.
+### Single deployment on develop (`deploy-railway`)
+
+Fires on develop pushes and pins one deployment (the develop soak) to each
+`develop-<short-sha>` build, using an environment-scoped **project token**.
+
+Setup, once:
+
+1. In the Railway project, create a project token for the target
+   environment (Project Settings → Tokens). Project tokens are scoped to
+   that one environment and can be revoked there at any time.
+2. On the GitHub repository, create a `railway` environment restricted to
+   the `develop` branch, with a single secret:
+   `ROOMOTE_RAILWAY_PROJECT_TOKEN`.
+3. Set the repository variable `ROOMOTE_RAILWAY_AUTODEPLOY=true`.
+
+No project or environment IDs need to be configured: the job resolves the
+environment from the token itself (`query { projectToken { environmentId } }`).
+
+### Fleet of deployments on main (`deploy-railway-fleet`)
+
+Fires on main pushes and pins **every deployment in a dedicated Railway
+workspace** to each `main-<short-sha>` build, using a **workspace (team)
+token**. The fleet is discovered, not configured: the job lists the
+workspace's projects and environments and deploys every environment with
+services matching the image prefix. Onboarding a customer is just deploying
+the main-channel template into the fleet workspace — no CI change.
+
+Setup, once:
+
+1. Create a dedicated Railway workspace that holds only the fleet
+   deployments (plus the canary, below). The token can touch everything in
+   its workspace, so the workspace boundary is the blast-radius boundary —
+   do not mint it in a workspace that contains anything else.
+2. Create a **workspace token** (Workspace Settings → Tokens).
+3. On the GitHub repository, create a `railway-fleet` environment
+   restricted to the `main` branch, with a single secret:
+   `ROOMOTE_RAILWAY_WORKSPACE_TOKEN`.
+4. Set the repository variable `ROOMOTE_RAILWAY_FLEET_AUTODEPLOY=true`.
+5. Recommended: keep one deployment of your own in the workspace and set
+   the repository variable `ROOMOTE_RAILWAY_FLEET_CANARY=<project name>`.
+   The canary project deploys first, and a failure there aborts the rest of
+   the fleet, so a bad build reaches one deployment instead of all of them.
+
+Per-environment failures elsewhere in the fleet do not stop the run: the
+job continues to the remaining environments, reports every result in the
+Actions job summary (project, environment, services, status), and fails the
+run at the end if anything failed. Both mutations are idempotent, so
+re-running the job after a partial failure is safe.
+
+Security notes: the credentials live in GitHub environment secrets, are
+never printed by the jobs, and GitHub does not expose environment secrets
+to fork pull requests, so open-sourcing the repository does not widen
+access. The project token can touch a single Railway environment; the
+workspace token can touch its entire (dedicated) workspace — rotate or
+revoke either from Railway's token settings.
 
 ## Maintaining the marketplace template
 
