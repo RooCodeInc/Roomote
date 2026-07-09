@@ -3,13 +3,19 @@ import { ALL_REPOSITORIES, TaskPayloadKind } from '@roomote/types';
 
 import type { UserAuthSuccess } from '@/types';
 
-const { mockEnqueueCloudTask, mockGetRepositories, mockDbWhere, mockDbSelect } =
-  vi.hoisted(() => ({
-    mockEnqueueCloudTask: vi.fn(),
-    mockGetRepositories: vi.fn(),
-    mockDbWhere: vi.fn(),
-    mockDbSelect: vi.fn(),
-  }));
+const {
+  mockEnqueueCloudTask,
+  mockGetRepositories,
+  mockDbWhere,
+  mockDbSelect,
+  mockResolveWorkspaceProvider,
+} = vi.hoisted(() => ({
+  mockEnqueueCloudTask: vi.fn(),
+  mockGetRepositories: vi.fn(),
+  mockDbWhere: vi.fn(),
+  mockDbSelect: vi.fn(),
+  mockResolveWorkspaceProvider: vi.fn(),
+}));
 
 vi.mock('@roomote/cloud-agents/server', () => ({
   buildSlackRoutingContext: vi.fn(),
@@ -47,6 +53,8 @@ vi.mock('@roomote/db/server', () => ({
     right,
   })),
   markTaskStartParallelCountEndedAt: vi.fn(),
+  resolveWorkspaceSourceControlProvider: (...args: unknown[]) =>
+    mockResolveWorkspaceProvider(...args),
   repositories: {
     id: 'repositories.id',
     isActive: 'repositories.is_active',
@@ -132,6 +140,8 @@ describe('createStandardTaskCloudJobCommand', () => {
       })),
     });
     mockDbWhere.mockResolvedValue([]);
+    // Shared resolver defaults to unresolved; the environment test overrides it.
+    mockResolveWorkspaceProvider.mockResolvedValue(undefined);
     mockSuccessfulEnqueue();
   });
 
@@ -257,7 +267,8 @@ describe('createStandardTaskCloudJobCommand', () => {
   });
 
   it('stamps an environment source-control provider from its repository mappings', async () => {
-    mockDbWhere.mockResolvedValue([{ sourceControlProvider: 'ado' }]);
+    // The environment resolver delegates to the shared @roomote/db resolver.
+    mockResolveWorkspaceProvider.mockResolvedValue('ado');
 
     const result = await createStandardTaskCloudJobCommand(auth, {
       payload: {

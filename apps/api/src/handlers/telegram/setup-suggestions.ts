@@ -5,14 +5,11 @@ import {
 } from '@roomote/communication/chat-messages';
 import {
   and,
+  claimWorkItem,
   db,
   eq,
-  isNull,
-  lt,
-  or,
   resolveTelegramRuntimeCredentials,
   trackedMessages,
-  workItems,
 } from '@roomote/db/server';
 import { enqueueTelegramSuggestedTasksOnboardingFollowup } from '@roomote/sdk/server';
 
@@ -141,14 +138,15 @@ export async function postSetupTaskSuggestionsToTelegram(params: {
   });
 }
 
-const TELEGRAM_SUGGESTION_LAUNCH_STALE_CLAIM_MS = 10 * 60 * 1000;
-
 /**
  * Atomically claim a suggestion button click so a double tap cannot launch
  * two tasks. Returns the work item to launch, or null when it was already
  * claimed/launched or does not exist. The suggestion id from the `idea:<id>`
  * callback is the backing `work_items` row id; the chat id scopes the claim to
  * a suggestion card actually posted in this Telegram chat.
+ *
+ * The claim CAS (including its 10-minute stale-claim recovery) lives in the
+ * shared `claimWorkItem` helper so every launch surface behaves identically.
  */
 export async function claimTelegramSuggestionLaunch(input: {
   suggestionId: string;
@@ -176,31 +174,17 @@ export async function claimTelegramSuggestionLaunch(input: {
     return null;
   }
 
-  const now = new Date();
-  const staleClaimThreshold = new Date(
-    now.getTime() - TELEGRAM_SUGGESTION_LAUNCH_STALE_CLAIM_MS,
-  );
+  const claimed = await claimWorkItem(db, { id: input.suggestionId });
 
-  const [claimed] = await db
-    .update(workItems)
-    .set({ status: 'launching', launchClaimedAt: now, updatedAt: now })
-    .where(
-      and(
-        eq(workItems.id, input.suggestionId),
-        eq(workItems.status, 'open'),
-        or(
-          isNull(workItems.launchClaimedAt),
-          lt(workItems.launchClaimedAt, staleClaimThreshold),
-        ),
-      ),
-    )
-    .returning({
-      id: workItems.id,
-      title: workItems.title,
-      brief: workItems.brief,
-      investigationContext: workItems.investigationContext,
-      targetRepositoryFullName: workItems.targetRepositoryFullName,
-    });
+  if (!claimed) {
+    return null;
+  }
 
-  return claimed ?? null;
+  return {
+    id: claimed.id,
+    title: claimed.title,
+    brief: claimed.brief,
+    investigationContext: claimed.investigationContext,
+    targetRepositoryFullName: claimed.targetRepositoryFullName,
+  };
 }

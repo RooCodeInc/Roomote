@@ -1,4 +1,5 @@
 import * as GitHub from '@roomote/github';
+import { formatAutomationLabel } from '@roomote/types';
 
 import {
   db,
@@ -27,7 +28,11 @@ type TaskInitiatorRow = {
  */
 function getInitiatorLabel(row: TaskInitiatorRow): string {
   if (row.initiatorKind === 'automation') {
-    return row.initiatorAutomation ?? 'automation';
+    // Match the web dashboard/analytics label formatting so an automation is
+    // named consistently (e.g. `pr_review` -> "PR Review") across surfaces.
+    return row.initiatorAutomation
+      ? formatAutomationLabel(row.initiatorAutomation)
+      : 'automation';
   }
 
   return (

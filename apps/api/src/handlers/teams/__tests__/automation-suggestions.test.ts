@@ -99,7 +99,8 @@ function buildSuggestion(id: string, title: string) {
 describe('postScheduledSuggestionsToTeams', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    // First select: active Slack installation lookup (none). Second: dedup.
+    // The only `.limit()` lookup is now the dedup query (Slack/Telegram
+    // self-suppression was removed; precedence is owned by the caller).
     selectLimitMock.mockResolvedValue([]);
     telegramCredentialsMock.mockResolvedValue({
       botToken: null,
@@ -166,42 +167,9 @@ describe('postScheduledSuggestionsToTeams', () => {
     expect(rows[0]!.channelId).toBe('19:channel@thread.tacv2');
   });
 
-  it('skips when an active Slack installation exists', async () => {
-    selectLimitMock.mockResolvedValueOnce([{ id: 'install-1' }]);
-
-    await postScheduledSuggestionsToTeams({
-      sourceTaskId: 'task-1',
-      createdByUserId: 'user-1',
-      suggestionSource: 'sentry_triage',
-      suggestions: [buildSuggestion('aaa', 'Fix crash')],
-    });
-
-    expect(postMessageMock).not.toHaveBeenCalled();
-  });
-
-  it('skips when a Telegram automation destination exists', async () => {
-    telegramCredentialsMock.mockResolvedValueOnce({
-      botToken: 'bot-token',
-      webhookSecret: null,
-      botUsername: null,
-    });
-    findTelegramPrimaryChatIdMock.mockResolvedValueOnce('8846357662');
-
-    await postScheduledSuggestionsToTeams({
-      sourceTaskId: 'task-1',
-      createdByUserId: 'user-1',
-      suggestionSource: 'sentry_triage',
-      suggestions: [buildSuggestion('aaa', 'Fix crash')],
-    });
-
-    expect(postMessageMock).not.toHaveBeenCalled();
-  });
-
   it('skips when tracked messages already exist for the source task', async () => {
-    // Slack gate (empty), then the dedup lookup finds a tracked row.
-    selectLimitMock
-      .mockResolvedValueOnce([])
-      .mockResolvedValueOnce([{ id: 'existing' }]);
+    // The dedup lookup finds a tracked row (surface self-suppression removed).
+    selectLimitMock.mockResolvedValueOnce([{ id: 'existing' }]);
 
     await postScheduledSuggestionsToTeams({
       sourceTaskId: 'task-1',

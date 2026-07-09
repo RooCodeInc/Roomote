@@ -24,6 +24,7 @@ import {
   attachEnvironmentSnapshot,
   getEnvironmentSnapshotAttachmentSourceForCloudJob,
   resolveComputeProviderEnvValues,
+  syncTaskStateFromRuns,
   tasks,
   updatePendingEnvironmentSnapshot,
 } from '@roomote/db/server';
@@ -560,13 +561,9 @@ export const snapshotJob = async (job: SnapshotJob): Promise<void> => {
       .where(eq(taskRuns.id, cloudJobId));
 
     if (shouldCompleteTask && cloudJob.taskId) {
-      await tx
-        .update(tasks)
-        .set({
-          state: 'completed',
-          updatedAt: now,
-        })
-        .where(eq(tasks.id, cloudJob.taskId));
+      // Derive the task state from all its runs now that this run is completed;
+      // the shared helper keeps a non-terminal sibling from being overwritten.
+      await syncTaskStateFromRuns(tx, cloudJob.taskId);
     }
 
     await markTaskStartParallelCountEndedAt(tx, {

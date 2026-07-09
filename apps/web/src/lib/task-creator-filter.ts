@@ -82,20 +82,6 @@ export function parseCreatorFilterValue(
   return { kind: 'user', userId: value };
 }
 
-/**
- * Humanizes an automation key for display, e.g. `pr_review` -> "PR Review",
- * `mcp_recommendations` -> "MCP Recommendations".
- */
-const AUTOMATION_LABEL_ACRONYMS = new Set(['pr', 'ci', 'mcp']);
-
-export function formatAutomationLabel(key: string): string {
-  return key
-    .split(/[_-]+/)
-    .filter(Boolean)
-    .map((word) =>
-      AUTOMATION_LABEL_ACRONYMS.has(word)
-        ? word.toUpperCase()
-        : word.charAt(0).toUpperCase() + word.slice(1),
-    )
-    .join(' ');
-}
+// `formatAutomationLabel` now lives in `@roomote/types` so web + server-side
+// stats share one implementation. Re-exported here for existing web callers.
+export { formatAutomationLabel } from '@roomote/types';

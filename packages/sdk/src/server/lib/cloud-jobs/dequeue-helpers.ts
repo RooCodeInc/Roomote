@@ -15,10 +15,10 @@ import {
   tasks,
   markTaskStartParallelCountEndedAt,
   resolveEffectiveModelRuntimeEnv,
+  resolveWorkspaceSourceControlProvider,
   stringifyDecryptedEnvVarValue,
+  syncTaskStateFromRuns,
   eq,
-  inArray,
-  repositories,
   sql,
 } from '@roomote/db/server';
 import { decryptSecrets } from '@roomote/db/encryption';
@@ -220,15 +220,11 @@ export async function cancelAndReleaseCloudJob(
       })
       .where(eq(taskRuns.id, cloudJob.id));
 
-    // Mirror finishCloudJob's terminal task-state write: a canceled run maps
-    // the owning task to 'canceled'. finishCloudJob never runs for runs that
-    // are canceled before/at dequeue, so without this the task would stay
-    // 'active' forever. Matches finishCloudJob exactly (unconditional, no
-    // guard on sibling runs).
-    await tx
-      .update(tasks)
-      .set({ state: 'canceled', updatedAt: endedAt })
-      .where(eq(tasks.id, cloudJob.taskId));
+    // Derive the owning task's state from all its runs. finishCloudJob never
+    // runs for runs canceled before/at dequeue, so without this sync the task
+    // would stay 'active' forever. The shared helper deprioritizes this
+    // never-started cancel, so an earlier completed sibling still wins.
+    await syncTaskStateFromRuns(tx, cloudJob.taskId);
 
     await markTaskStartParallelCountEndedAt(tx, {
       runId: cloudJob.id,
@@ -276,26 +272,18 @@ async function resolveJobSourceControlProvider(
     return resolveSourceControlProviderFromPayload(payload);
   }
 
+  // No explicit stamp: resolve from the workspace's synced repositories via the
+  // shared resolver (covers every workspace shape). It returns undefined when
+  // the provider is ambiguous or unknown, in which case fall back to the
+  // GitHub default that resolveSourceControlProviderFromPayload applies.
   const workspace = resolveCloudTaskWorkspace(cloudJob.payload);
-  const repositoryFullNames =
-    workspace.type === 'repository'
-      ? [workspace.repo]
-      : workspace.type === 'repository_set'
-        ? workspace.repositories
-        : [];
+  const resolvedProvider = await resolveWorkspaceSourceControlProvider(
+    db,
+    workspace,
+  );
 
-  if (repositoryFullNames.length > 0) {
-    const rows = await db
-      .select({ sourceControlProvider: repositories.sourceControlProvider })
-      .from(repositories)
-      .where(inArray(repositories.fullName, repositoryFullNames));
-    const providers = [
-      ...new Set(rows.map((row) => row.sourceControlProvider)),
-    ];
-
-    if (providers.length === 1) {
-      return providers[0]!;
-    }
+  if (resolvedProvider) {
+    return resolvedProvider;
   }
 
   return resolveSourceControlProviderFromPayload(cloudJob.payload);
@@ -440,20 +428,18 @@ export async function cancelCloudJob(
     })
     .where(eq(taskRuns.id, cloudJobId));
 
-  // Mirror finishCloudJob's terminal task-state write. This runs on the
-  // dequeue path (invalid job, bootstrap failure) where finishCloudJob never
-  // executes, so the owning task must be moved to 'canceled' here or it stays
-  // 'active' forever. The caller only has the run id, so resolve the task via
-  // the run row. Unconditional, matching finishCloudJob (no sibling-run guard).
-  await tx
-    .update(tasks)
-    .set({ state: 'canceled', updatedAt: endedAt })
-    .where(
-      eq(
-        tasks.id,
-        sql`(SELECT ${taskRuns.taskId} FROM ${taskRuns} WHERE ${taskRuns.id} = ${cloudJobId})`,
-      ),
-    );
+  // Derive the owning task's state from all its runs. This runs on the dequeue
+  // path (invalid job, bootstrap failure) where finishCloudJob never executes,
+  // so the task must be resolved here or it stays 'active' forever. The caller
+  // only has the run id, so resolve the task via the run row, then sync.
+  const [runRow] = await tx
+    .select({ taskId: taskRuns.taskId })
+    .from(taskRuns)
+    .where(eq(taskRuns.id, cloudJobId));
+
+  if (runRow) {
+    await syncTaskStateFromRuns(tx, runRow.taskId);
+  }
 
   await markTaskStartParallelCountEndedAt(tx, {
     runId: cloudJobId,

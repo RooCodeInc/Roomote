@@ -23,6 +23,7 @@ const {
   mockDrainSlackMessagesToResumeJob,
   mockRecordComputeProviderUsage,
   mockMarkTaskStartParallelCountEndedAt,
+  mockSyncTaskStateFromRuns,
   transactionFn,
   andFn,
   eqFn,
@@ -57,6 +58,7 @@ const {
     mockDrainSlackMessagesToResumeJob: vi.fn() as AnyMock,
     mockRecordComputeProviderUsage: vi.fn() as AnyMock,
     mockMarkTaskStartParallelCountEndedAt: vi.fn() as AnyMock,
+    mockSyncTaskStateFromRuns: vi.fn() as AnyMock,
     transactionFn: vi.fn() as AnyMock,
     andFn,
     eqFn,
@@ -93,6 +95,7 @@ vi.mock('@roomote/db/server', () => ({
   createComputeProviderMutationEventRecorder:
     mockCreateComputeProviderMutationEventRecorder,
   markTaskStartParallelCountEndedAt: mockMarkTaskStartParallelCountEndedAt,
+  syncTaskStateFromRuns: mockSyncTaskStateFromRuns,
   recordCloudJobEvent: mockRecordCloudJobEvent,
   resolveComputeProviderEnvValues: vi.fn().mockResolvedValue({}),
   updatePendingEnvironmentSnapshot: mockUpdatePendingEnvironmentSnapshot,
@@ -179,6 +182,7 @@ describe('snapshotJob', () => {
     setFn.mockReturnValue({ where: updateWhereFn });
     updateWhereFn.mockResolvedValue([]);
     mockMarkTaskStartParallelCountEndedAt.mockResolvedValue(undefined);
+    mockSyncTaskStateFromRuns.mockResolvedValue(undefined);
     mockUpdatePendingEnvironmentSnapshot.mockResolvedValue(true);
     mockAttachEnvironmentSnapshot.mockResolvedValue(true);
     mockFindFirst.mockResolvedValue(baseCloudJob);
@@ -317,12 +321,11 @@ describe('snapshotJob', () => {
       data: { cloudJobId: 123, sandboxId: 'sb-mark-done' },
     } as never);
 
-    expect(updateFn).toHaveBeenCalledWith({ id: 'task-id' });
-    expect(setFn).toHaveBeenCalledWith(
-      expect.objectContaining({
-        state: 'completed',
-        updatedAt: expect.any(Date),
-      }),
+    // The task state is now derived by the shared helper (inside the same
+    // transaction) rather than stamped directly here.
+    expect(mockSyncTaskStateFromRuns).toHaveBeenCalledWith(
+      expect.anything(),
+      'task_snapshot_events',
     );
   });
 

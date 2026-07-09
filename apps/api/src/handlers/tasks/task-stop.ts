@@ -8,6 +8,7 @@ import {
   isNull,
   markTaskStartParallelCountEndedAt,
   not,
+  syncTaskStateFromRuns,
   taskRuns,
 } from '@roomote/db/server';
 import {
@@ -71,11 +72,15 @@ async function cancelTaskJobDirect(jobId: number): Promise<boolean> {
           ),
         ),
       )
-      .returning({ id: taskRuns.id });
+      .returning({ id: taskRuns.id, taskId: taskRuns.taskId });
 
     if (!job) {
       return [];
     }
+
+    // Derive the durable task state from all its runs after this direct cancel,
+    // so a still-running or already-completed sibling is respected.
+    await syncTaskStateFromRuns(tx, job.taskId);
 
     await markTaskStartParallelCountEndedAt(tx, {
       runId: jobId,

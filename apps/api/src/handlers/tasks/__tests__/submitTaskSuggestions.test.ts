@@ -5,6 +5,9 @@ import { type JobTokenContext, TaskPayloadKind } from '@roomote/types';
 import type { Variables } from '../../../types';
 import { mcpAuthMiddleware } from '../../mcp/middleware';
 import { submitTaskSuggestions } from '../submitTaskSuggestions';
+import { getAutomationRuntime } from '@roomote/db/server';
+import { postScheduledSuggestionsToTelegram } from '../../telegram/automation-suggestions';
+import { postScheduledSuggestionsToTeams } from '../../teams/automation-suggestions';
 
 const {
   mockTaskRunFindFirst,
@@ -22,6 +25,9 @@ const {
   insertedTrackedMessageValues: [] as Record<string, unknown>[],
 }));
 
+// Mutable so a test can simulate "Slack installed but no channel resolves".
+let slackInstallationChannelRows: unknown[] = [{ channelId: 'C-FALLBACK' }];
+
 function makeSelectResult(name: string): unknown[] {
   switch (name) {
     case 'repositories':
@@ -29,7 +35,7 @@ function makeSelectResult(name: string): unknown[] {
     case 'slackInstallations':
       return [{ id: 'inst-1', botAccessToken: 'xoxb-test', teamId: 'T1' }];
     case 'slackInstallationChannels':
-      return [{ channelId: 'C-FALLBACK' }];
+      return slackInstallationChannelRows;
     // Existing suggestion work_items + existing summary tracked_messages both
     // resolve empty so the persist + post paths run fresh.
     case 'workItems':
@@ -239,6 +245,12 @@ describe('submitTaskSuggestions', () => {
     mockPostMessage.mockReset();
     insertedWorkItemValues.length = 0;
     insertedTrackedMessageValues.length = 0;
+    slackInstallationChannelRows = [{ channelId: 'C-FALLBACK' }];
+    vi.mocked(getAutomationRuntime).mockResolvedValue({
+      slackChannelId: 'C-AUTO',
+    } as unknown as Awaited<ReturnType<typeof getAutomationRuntime>>);
+    vi.mocked(postScheduledSuggestionsToTelegram).mockReset();
+    vi.mocked(postScheduledSuggestionsToTeams).mockReset();
 
     let ts = 0;
     mockPostMessage.mockImplementation(async () => `ts-${++ts}`);
@@ -322,5 +334,40 @@ describe('submitTaskSuggestions', () => {
     expect(insertedTrackedMessageValues[0]).toMatchObject({
       createdByUserId: 'user-1',
     });
+  });
+
+  it('falls back to Telegram when Slack is installed but no channel resolves', async () => {
+    mockTaskFindFirst.mockResolvedValue({
+      initiatorUserId: null,
+      initiatorAutomation: 'suggest_ideas',
+    });
+
+    // Slack installation exists, but neither the automation runtime nor the
+    // installation channels resolve a destination -> Slack does not deliver.
+    vi.mocked(getAutomationRuntime).mockResolvedValue({
+      slackChannelId: undefined,
+    } as unknown as Awaited<ReturnType<typeof getAutomationRuntime>>);
+    slackInstallationChannelRows = [];
+    // Telegram delivers, so Teams must NOT fire.
+    vi.mocked(postScheduledSuggestionsToTelegram).mockResolvedValue(true);
+
+    const authContext: JobTokenContext = {
+      cloudJobId: 1,
+      userId: null,
+      principal: 'user',
+      tokenType: 'cj',
+      version: 1,
+    };
+    const app = createApp(authContext);
+
+    const response = await requestSuggestions(app);
+
+    expect(response.status).toBe(200);
+    // Slack never posted a root message (no channel).
+    expect(mockPostMessage).not.toHaveBeenCalled();
+    // Telegram fallback fired despite the active Slack installation.
+    expect(postScheduledSuggestionsToTelegram).toHaveBeenCalledTimes(1);
+    // Telegram delivered, so Teams is suppressed.
+    expect(postScheduledSuggestionsToTeams).not.toHaveBeenCalled();
   });
 });

@@ -4,13 +4,10 @@ import {
 } from '@roomote/cloud-agents/server';
 import { TaskPayloadKind, type BackgroundAutomationKey } from '@roomote/types';
 import {
-  and,
+  claimWorkItem,
   db,
   eq,
-  inArray,
-  isNull,
-  lte,
-  or,
+  finalizeWorkItemLaunched,
   updateBackgroundAutomationSlackThreadMetadata,
   workItems,
 } from '@roomote/db/server';
@@ -22,9 +19,6 @@ import { postLateBoundWorkItemFailureMessage } from './slack.js';
 import { postLateBoundWorkItemFailureToTelegram } from './telegram.js';
 import { postLateBoundWorkItemFailureToTeams } from './teams.js';
 import type { PersistedAutomationWorkItem } from './types.js';
-
-const LAUNCH_CLAIM_STALE_MS = 10 * 60 * 1000;
-const LAUNCHABLE_ACT_STATUSES = ['open', 'launching'] as const;
 
 type AutomationExecutionTaskBootstrap =
   | '$implement-changes'
@@ -169,27 +163,9 @@ export async function launchActWorkItems(params: {
   let failedCount = 0;
 
   for (const workItem of params.workItems) {
-    const claimStaleBefore = new Date(Date.now() - LAUNCH_CLAIM_STALE_MS);
-
-    const [claimedWorkItem] = await db
-      .update(workItems)
-      .set({
-        status: 'launching',
-        launchClaimedAt: new Date(),
-        updatedAt: new Date(),
-      })
-      .where(
-        and(
-          eq(workItems.id, workItem.id),
-          isNull(workItems.launchedTaskId),
-          inArray(workItems.status, [...LAUNCHABLE_ACT_STATUSES]),
-          or(
-            isNull(workItems.launchClaimedAt),
-            lte(workItems.launchClaimedAt, claimStaleBefore),
-          ),
-        ),
-      )
-      .returning({ id: workItems.id });
+    // Shared claim CAS: `open`/stale-`launching` with launched_task_id null.
+    // `failed` stays terminal by design (never in the claimable set).
+    const claimedWorkItem = await claimWorkItem(db, { id: workItem.id });
 
     if (!claimedWorkItem) {
       continue;
@@ -205,18 +181,11 @@ export async function launchActWorkItems(params: {
       }
 
       const markWorkItemStarted = async (taskId: string | null) => {
-        const [startedWorkItem] = await db
-          .update(workItems)
-          .set({
-            status: 'launched',
-            launchedTaskId: taskId,
-            launchedAt: new Date(),
-            launchClaimedAt: null,
-            launchError: null,
-            updatedAt: new Date(),
-          })
-          .where(and(eq(workItems.id, workItem.id)))
-          .returning({ id: workItems.id });
+        const startedWorkItem = await finalizeWorkItemLaunched(db, {
+          id: workItem.id,
+          taskId,
+          clearLaunchError: true,
+        });
 
         if (!startedWorkItem) {
           throw new Error(

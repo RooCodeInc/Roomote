@@ -27,6 +27,7 @@ import {
   lte,
   markTaskStartParallelCountEndedAt,
   resolveComputeProviderEnvValues,
+  syncTaskStateFromRuns,
 } from '@roomote/db/server';
 import { createComputeProviderClient } from '@roomote/compute-providers';
 import {
@@ -807,6 +808,10 @@ async function handleTimedSleepCandidate(params: {
         completedAt: endedAt,
       })
       .where(eq(taskRuns.id, job.id));
+
+    // Direct-completion path (not via finishCloudJob): derive the task state
+    // from all its runs now that this run is completed.
+    await syncTaskStateFromRuns(tx, job.taskId);
 
     await markTaskStartParallelCountEndedAt(tx, {
       runId: job.id,

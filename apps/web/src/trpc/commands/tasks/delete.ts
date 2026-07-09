@@ -74,6 +74,15 @@ export async function deleteTasksCommand(
       }
     }
 
+    // Remove the taskArtifacts rows now that their S3 objects are deleted. The
+    // task row is only soft-deleted (rows are retained for satellites), so the
+    // artifact rows would otherwise dangle and point at missing S3 objects.
+    if (artifactsToDelete.length > 0) {
+      await tx
+        .delete(taskArtifacts)
+        .where(inArray(taskArtifacts.taskId, taskIdsToDelete));
+    }
+
     await markTaskStartParallelCountsEndedAtForTaskIds(tx, {
       taskIds: taskIdsToDelete,
       endedAt,

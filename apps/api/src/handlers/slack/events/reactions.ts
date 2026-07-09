@@ -23,11 +23,11 @@ import {
 } from '@roomote/slack';
 import {
   and,
+  claimWorkItem,
   db,
   eq,
-  lt,
-  or,
-  isNull,
+  finalizeWorkItemLaunched,
+  releaseWorkItemClaim,
   trackedMessages,
   workItems,
 } from '@roomote/db/server';
@@ -79,8 +79,6 @@ const TASK_SUGGESTION_REACTION_MAX_ATTEMPTS = Math.ceil(
     TASK_SUGGESTION_REACTION_POLL_INTERVAL_MS,
 );
 
-const TASK_SUGGESTION_LAUNCH_STALE_CLAIM_MS = 10 * 60 * 1000;
-
 /**
  * Reaction-launchable suggestion types tracked on the suggestion_card's
  * `metadata.suggestionType`. Mirrors the old agentType filter — only
@@ -102,48 +100,10 @@ function getLaunchableSuggestionType(
 }
 
 /**
- * CAS the backing work item from `open` → `launching`, stamping the claim.
- * Only one reaction wins; a claim older than the stale window is recoverable.
- */
-async function claimWorkItemLaunch(workItemId: string): Promise<boolean> {
-  const now = new Date();
-  const staleClaimThreshold = new Date(
-    now.getTime() - TASK_SUGGESTION_LAUNCH_STALE_CLAIM_MS,
-  );
-
-  const [claimed] = await db
-    .update(workItems)
-    .set({ status: 'launching', launchClaimedAt: now, updatedAt: now })
-    .where(
-      and(
-        eq(workItems.id, workItemId),
-        eq(workItems.status, 'open'),
-        or(
-          isNull(workItems.launchClaimedAt),
-          lt(workItems.launchClaimedAt, staleClaimThreshold),
-        ),
-      ),
-    )
-    .returning({ id: workItems.id });
-
-  return Boolean(claimed);
-}
-
-/**
- * Release a claim after a launch failed before the cloud task started: back to
- * `open` with the claim cleared so a later reaction can retry.
- */
-async function releaseWorkItemLaunchClaim(workItemId: string): Promise<void> {
-  await db
-    .update(workItems)
-    .set({ status: 'open', launchClaimedAt: null, updatedAt: new Date() })
-    .where(eq(workItems.id, workItemId));
-}
-
-/**
- * Finalize a successful launch: `launching` → `launched` with the task link,
- * and record the seeded thread on the tracked suggestion card. Returns false
- * when another launcher already finalized the work item (idempotent race).
+ * Finalize a successful launch via the shared work_items helper (`launching` →
+ * `launched` with the task link, guarded so a race is idempotent) and, when it
+ * wins, record the seeded thread on the tracked suggestion card. Returns false
+ * when another launcher already finalized the work item.
  */
 async function markWorkItemLaunched(params: {
   workItemId: string;
@@ -151,32 +111,19 @@ async function markWorkItemLaunched(params: {
   taskId: string | null;
   launchedThreadTs?: string;
 }): Promise<boolean> {
-  const now = new Date();
-  const [updated] = await db
-    .update(workItems)
-    .set({
-      status: 'launched',
-      launchedTaskId: params.taskId,
-      launchedAt: now,
-      launchClaimedAt: null,
-      updatedAt: now,
-    })
-    .where(
-      and(
-        eq(workItems.id, params.workItemId),
-        eq(workItems.status, 'launching'),
-      ),
-    )
-    .returning({ id: workItems.id });
+  const finalized = await finalizeWorkItemLaunched(db, {
+    id: params.workItemId,
+    taskId: params.taskId,
+  });
 
-  if (!updated) {
+  if (!finalized) {
     return false;
   }
 
   if (params.launchedThreadTs) {
     await db
       .update(trackedMessages)
-      .set({ threadTs: params.launchedThreadTs, updatedAt: now })
+      .set({ threadTs: params.launchedThreadTs, updatedAt: new Date() })
       .where(eq(trackedMessages.id, params.trackedMessageId));
   }
 
@@ -301,9 +248,11 @@ async function launchTaskSuggestionTaskFromReaction({
     return false;
   }
 
-  // Only an open work item is launchable; launching/launched/dismissed are
-  // already handled (the CAS below reclaims a stale open claim).
-  if (workItem.status !== 'open') {
+  // `open` is launchable, and `launching` is allowed through so the shared
+  // claim CAS below can reclaim a *stale* launching item (a launcher that
+  // crashed before finalizing) while still rejecting a fresh one. launched /
+  // failed / dismissed are terminal for this surface.
+  if (workItem.status !== 'open' && workItem.status !== 'launching') {
     apiLogger.debug(
       `${logPrefix} suggestion already handled (status=${workItem.status}), skipping duplicate launch`,
     );
@@ -414,14 +363,16 @@ async function launchTaskSuggestionTaskFromReaction({
     return true;
   }
 
-  const didClaimSuggestionLaunch = await claimWorkItemLaunch(workItemId);
+  const didClaimSuggestionLaunch = Boolean(
+    await claimWorkItem(db, { id: workItemId }),
+  );
 
   if (!didClaimSuggestionLaunch) {
     return true;
   }
 
   if (!suggestionWorkspace) {
-    await releaseWorkItemLaunchClaim(workItemId);
+    await releaseWorkItemClaim(db, { id: workItemId });
 
     apiLogger.warn(
       `${logPrefix} suggestion launch failed before task start: ${launchFailureReason ?? 'missing launch workspace'}`,
@@ -489,7 +440,7 @@ async function launchTaskSuggestionTaskFromReaction({
     });
 
     if (!seededThreadTs) {
-      await releaseWorkItemLaunchClaim(workItemId);
+      await releaseWorkItemClaim(db, { id: workItemId });
       apiLogger.debug(
         `${logPrefix} failed to seed top-level Slack message; launch canceled`,
       );
@@ -565,7 +516,7 @@ async function launchTaskSuggestionTaskFromReaction({
           .catch(() => {});
       }
 
-      await releaseWorkItemLaunchClaim(workItemId);
+      await releaseWorkItemClaim(db, { id: workItemId });
       apiLogger.debug(
         `${logPrefix} reaction launch failed before cloud job start; claim released`,
       );
@@ -607,7 +558,7 @@ async function launchTaskSuggestionTaskFromReaction({
       return true;
     } catch (recoveryError) {
       try {
-        await releaseWorkItemLaunchClaim(workItemId);
+        await releaseWorkItemClaim(db, { id: workItemId });
       } catch (releaseError) {
         console.warn(
           `${logPrefix} failed to release claim after recovery failure: ${formatErrorForLog(releaseError)}`,

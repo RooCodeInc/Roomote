@@ -10,7 +10,6 @@ import {
   getEnvironmentDefinitionIdFromPayload,
   parseConflictResolutionSummary,
   stripCloudJobErrorMarkers,
-  type TaskState,
 } from '@roomote/types';
 import {
   formatMarkdownLink,
@@ -30,6 +29,7 @@ import {
   recordJobLifecycleEvent,
   slackInstallations,
   slackUserMappings,
+  syncTaskStateFromRuns,
   asc,
   eq,
   and,
@@ -87,22 +87,6 @@ const DEFAULT_DEPLOYMENT_ID = 'default';
  * from `task` and attempt-scoped state from the run row.
  */
 type FinishedRun = CloudJob & { task: Task };
-
-function resolveTerminalTaskState(
-  status:
-    | CloudTaskStatus.Completed
-    | CloudTaskStatus.Failed
-    | CloudTaskStatus.Canceled,
-): TaskState {
-  switch (status) {
-    case CloudTaskStatus.Completed:
-      return 'completed';
-    case CloudTaskStatus.Failed:
-      return 'failed';
-    case CloudTaskStatus.Canceled:
-      return 'canceled';
-  }
-}
 
 export const finishCloudJob = async ({
   id,
@@ -185,17 +169,13 @@ export const finishCloudJob = async ({
       })
       .where(eq(taskRuns.id, id));
 
-    // Terminal task state: this is the only writer of tasks.state. Idle keeps
-    // the task active (the sandbox is alive and waiting for interaction).
-    if (status !== CloudTaskStatus.Idle) {
-      await tx
-        .update(tasks)
-        .set({
-          state: resolveTerminalTaskState(status),
-          updatedAt: now,
-        })
-        .where(eq(tasks.id, job.taskId));
-    }
+    // Derive the durable task state from all of the task's runs via the shared
+    // @roomote/db helper. This is one of several writers (cancel/dequeue/sleep/
+    // snapshot paths also sync); routing them all through the same derivation
+    // keeps siblings honest — an idle sibling keeps the task active, and a
+    // failed-bootstrap resume can't clobber an already-completed task. The run
+    // status was just written above, so it is visible to the derivation.
+    await syncTaskStateFromRuns(tx, job.taskId);
 
     await markTaskStartParallelCountEndedAt(tx, {
       runId: id,

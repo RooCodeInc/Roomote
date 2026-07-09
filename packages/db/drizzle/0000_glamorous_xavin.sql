@@ -1170,4 +1170,4 @@ CREATE INDEX "work_items_kind_status_idx" ON "work_items" USING btree ("kind","s
 CREATE INDEX "work_items_automation_key_fingerprint_idx" ON "work_items" USING btree ("automation_key","fingerprint");--> statement-breakpoint
 CREATE INDEX "work_items_fingerprint_idx" ON "work_items" USING btree ("fingerprint");--> statement-breakpoint
 CREATE INDEX "work_items_launched_task_id_idx" ON "work_items" USING btree ("launched_task_id");--> statement-breakpoint
-CREATE UNIQUE INDEX "work_items_source_task_sort_order_unique" ON "work_items" USING btree ("source_task_id","sort_order");
+CREATE UNIQUE INDEX "work_items_source_task_kind_sort_order_unique" ON "work_items" USING btree ("source_task_id","kind","sort_order");

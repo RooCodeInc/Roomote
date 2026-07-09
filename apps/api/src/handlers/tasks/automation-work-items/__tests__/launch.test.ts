@@ -38,27 +38,96 @@ vi.mock('@roomote/cloud-agents/server', () => ({
   enqueueCloudTask: mockEnqueueCloudTask,
 }));
 
-vi.mock('@roomote/db/server', () => ({
-  and: vi.fn((...args) => ({ type: 'and', args })),
-  workItems: {
+vi.mock('@roomote/db/server', () => {
+  const workItems = {
     id: 'workItems.id',
     status: 'workItems.status',
     launchedTaskId: 'workItems.launchedTaskId',
     launchClaimedAt: 'workItems.launchClaimedAt',
     launchError: 'workItems.launchError',
     updatedAt: 'workItems.updatedAt',
-  },
-  db: {
+  };
+  const db = {
     update: (...args: unknown[]) => mockDbUpdate(...args),
-  },
-  eq: vi.fn((...args) => ({ type: 'eq', args })),
-  inArray: vi.fn((...args) => ({ type: 'inArray', args })),
-  isNull: vi.fn((...args) => ({ type: 'isNull', args })),
-  lte: vi.fn((...args) => ({ type: 'lte', args })),
-  or: vi.fn((...args) => ({ type: 'or', args })),
-  updateBackgroundAutomationSlackThreadMetadata: (...args: unknown[]) =>
-    mockUpdateBackgroundAutomationSlackThreadMetadata(...args),
-}));
+  };
+
+  // The shared claim/finalize helpers are mocked to delegate to the same
+  // db.update chain the surface used inline before, so the updateSets
+  // assertions (claim -> `launching`, finalize -> `launched`) still hold and
+  // the throwOnWhereCall counting is unchanged.
+  const claimWorkItem = vi.fn(
+    async (
+      database: {
+        update: (table: unknown) => {
+          set: (values: unknown) => {
+            where: (predicate: unknown) => {
+              returning: () => Promise<Array<{ id: string }>>;
+            };
+          };
+        };
+      },
+      { id: _id }: { id: string },
+    ) => {
+      const [row] = await database
+        .update(workItems)
+        .set({
+          status: 'launching',
+          launchClaimedAt: new Date(),
+          updatedAt: new Date(),
+        })
+        .where({})
+        .returning();
+      return row ?? null;
+    },
+  );
+  const finalizeWorkItemLaunched = vi.fn(
+    async (
+      database: {
+        update: (table: unknown) => {
+          set: (values: unknown) => {
+            where: (predicate: unknown) => {
+              returning: () => Promise<Array<{ id: string }>>;
+            };
+          };
+        };
+      },
+      {
+        taskId,
+        clearLaunchError,
+      }: { id: string; taskId: string | null; clearLaunchError?: boolean },
+    ) => {
+      const [row] = await database
+        .update(workItems)
+        .set({
+          status: 'launched',
+          launchedTaskId: taskId,
+          launchedAt: new Date(),
+          launchClaimedAt: null,
+          ...(clearLaunchError ? { launchError: null } : {}),
+          updatedAt: new Date(),
+        })
+        .where({})
+        .returning();
+      return Boolean(row);
+    },
+  );
+
+  return {
+    and: vi.fn((...args) => ({ type: 'and', args })),
+    workItems,
+    db,
+    eq: vi.fn((...args) => ({ type: 'eq', args })),
+    inArray: vi.fn((...args) => ({ type: 'inArray', args })),
+    isNull: vi.fn((...args) => ({ type: 'isNull', args })),
+    lte: vi.fn((...args) => ({ type: 'lte', args })),
+    or: vi.fn((...args) => ({ type: 'or', args })),
+    claimWorkItem,
+    finalizeWorkItemLaunched,
+    releaseWorkItemClaim: vi.fn(),
+    updateBackgroundAutomationSlackThreadMetadata: (...args: unknown[]) =>
+      mockUpdateBackgroundAutomationSlackThreadMetadata(...args),
+  };
+});
 
 vi.mock('../telegram.js', () => ({
   resolveAutomationTelegramTarget: vi.fn(),

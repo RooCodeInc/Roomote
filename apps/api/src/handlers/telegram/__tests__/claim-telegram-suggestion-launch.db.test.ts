@@ -122,11 +122,12 @@ describe('claimTelegramSuggestionLaunch (work_items launch CAS)', () => {
   });
 
   it('recovers a stale claim older than the 10-minute window', async () => {
-    // status stays open but launchClaimedAt is stale (a launcher that never
-    // finalized). The CAS reclaims it.
+    // A launcher that crashed after claiming leaves the item in `launching`
+    // with a stale launchClaimedAt. The shared CAS reclaims it (this is the
+    // stale-recovery case that used to be dead code).
     const staleClaimedAt = new Date(Date.now() - 11 * 60 * 1000);
     const workItemId = await seedSuggestionWorkItem({
-      status: 'open',
+      status: 'launching',
       launchClaimedAt: staleClaimedAt,
     });
 

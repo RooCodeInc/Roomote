@@ -4,8 +4,6 @@ import {
   environments,
   eq,
   inArray,
-  resolveTelegramRuntimeCredentials,
-  slackInstallations,
   sql,
   trackedMessages,
 } from '@roomote/db/server';
@@ -15,7 +13,6 @@ import { Env } from '@roomote/env';
 import { apiLogger } from '../../logging.js';
 import { resolveScheduledSuggestionSlackConfig } from '../tasks/background-automation-slack.js';
 import { buildScheduledSuggestionRootMessage } from '../tasks/scheduled-suggestion-root-summary.js';
-import { findTelegramPrimaryChatId } from '../telegram/primary-chat.js';
 import {
   findTeamsPrimaryConversation,
   postTeamsAutomationMessageBestEffort,
@@ -32,33 +29,15 @@ type TeamsAutomationSuggestion = {
   targetEnvironmentId: string | null;
 };
 
-async function hasActiveSlackInstallation(): Promise<boolean> {
-  const [installation] = await db
-    .select({ id: slackInstallations.id })
-    .from(slackInstallations)
-    .where(eq(slackInstallations.isActive, true))
-    .limit(1);
-
-  return Boolean(installation);
-}
-
-async function hasTelegramAutomationDestination(): Promise<boolean> {
-  const { botToken } = await resolveTelegramRuntimeCredentials();
-
-  if (!botToken) {
-    return false;
-  }
-
-  return Boolean(await findTelegramPrimaryChatId());
-}
-
 /**
- * Teams counterpart of the scheduled-automation Slack/Telegram summaries.
- * Runs only when neither an active Slack installation nor a Telegram
- * automation destination exists (Slack > Telegram > Teams, so output never
- * splits across surfaces), and posts one markdown message to the primary
- * Teams conversation. Teams has no inline start buttons yet, so suggestions
- * link back to the automations page instead.
+ * Teams counterpart of the scheduled-automation Slack/Telegram summaries, and
+ * the last fallback (Slack > Telegram > Teams). Posts one markdown message to
+ * the primary Teams conversation. Teams has no inline start buttons yet, so
+ * suggestions link back to the automations page instead.
+ *
+ * Surface precedence is owned by the caller in submitTaskSuggestions, which
+ * only invokes this when neither Slack nor Telegram delivered — this function
+ * no longer self-suppresses on Slack/Telegram destination existence.
  */
 export async function postScheduledSuggestionsToTeams(params: {
   sourceTaskId: string;
@@ -74,14 +53,6 @@ export async function postScheduledSuggestionsToTeams(params: {
   // must not suppress the fallback post; the tracked_messages column is
   // nullable and no user attribution is rendered here.
   if (suggestions.length === 0 || !sourceTaskId.trim()) {
-    return;
-  }
-
-  if (await hasActiveSlackInstallation()) {
-    return;
-  }
-
-  if (await hasTelegramAutomationDestination()) {
     return;
   }
 

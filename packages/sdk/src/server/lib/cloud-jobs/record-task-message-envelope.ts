@@ -481,15 +481,12 @@ async function maybeStopTaskAfterEnvVarRequest(
     return;
   }
 
-  const tokenUserId = input.userId ?? job.actingUserId;
-
-  if (!tokenUserId) {
-    return;
-  }
-
+  // Automation tasks have no acting user (actingUserId null); they must still
+  // trigger the env-var auto-stop as the deployment service principal, so pass
+  // null through instead of early-returning when no user resolves.
   await withSandboxServerRpcClient({
     cloudJobId: job.id,
-    userId: tokenUserId,
+    userId: input.userId ?? job.actingUserId ?? null,
     sandboxServerUrl: job.sandboxServerUrl,
     call: (client) => client.commands.cancelTask.mutate(),
   });

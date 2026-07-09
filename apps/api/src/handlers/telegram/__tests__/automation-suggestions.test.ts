@@ -94,7 +94,8 @@ describe('postScheduledSuggestionsToTelegram', () => {
       summaryText: 'I triaged the latest Sentry issues.',
       actionFooterText: 'footer',
     });
-    // First select: active Slack installation lookup (none). Second: dedup.
+    // The only `.limit()` lookup is now the dedup query (Slack self-suppression
+    // was removed; surface precedence is owned by the caller).
     selectLimitMock.mockResolvedValue([]);
   });
 
@@ -140,10 +141,11 @@ describe('postScheduledSuggestionsToTelegram', () => {
     expect(new Set(rows.map((row) => row.dedupeKey)).size).toBe(2);
   });
 
-  it('skips when an active Slack installation exists', async () => {
+  it('skips when tracked messages already exist for the source task', async () => {
+    // The dedup lookup finds a tracked row (Slack self-suppression removed).
     selectLimitMock.mockResolvedValueOnce([{ id: 'install-1' }]);
 
-    await postScheduledSuggestionsToTelegram({
+    const delivered = await postScheduledSuggestionsToTelegram({
       sourceTaskId: 'task-1',
       createdByUserId: 'user-1',
       suggestionSource: 'sentry_triage',
@@ -151,6 +153,9 @@ describe('postScheduledSuggestionsToTelegram', () => {
     });
 
     expect(postTelegramMessageBestEffortMock).not.toHaveBeenCalled();
+    // Already delivered on a prior run -> reported as delivered so Teams stays
+    // suppressed.
+    expect(delivered).toBe(true);
   });
 
   it('caps buttons at five and notes the overflow', async () => {

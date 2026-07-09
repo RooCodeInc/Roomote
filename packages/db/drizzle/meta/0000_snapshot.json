@@ -1,5 +1,5 @@
 {
-  "id": "a6c5f325-fdc5-4709-b0eb-e401153bfb5b",
+  "id": "03dafe6a-4ae9-4c33-a7f8-b433bc4af611",
   "prevId": "00000000-0000-0000-0000-000000000000",
   "version": "7",
   "dialect": "postgresql",
@@ -9169,11 +9169,17 @@
           "method": "btree",
           "with": {}
         },
-        "work_items_source_task_sort_order_unique": {
-          "name": "work_items_source_task_sort_order_unique",
+        "work_items_source_task_kind_sort_order_unique": {
+          "name": "work_items_source_task_kind_sort_order_unique",
           "columns": [
             {
               "expression": "source_task_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "kind",
               "isExpression": false,
               "asc": true,
               "nulls": "last"

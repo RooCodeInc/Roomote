@@ -2,7 +2,15 @@ import {
   buildSuggestionTaskPromptText,
   enqueueCloudTask,
 } from '@roomote/cloud-agents/server';
-import { and, db, eq, or, workItems } from '@roomote/db/server';
+import {
+  and,
+  claimWorkItem,
+  db,
+  eq,
+  finalizeWorkItemLaunched,
+  releaseWorkItemClaim,
+  workItems,
+} from '@roomote/db/server';
 import { TaskPayloadKind } from '@roomote/types';
 
 import type { UserAuthSuccess } from '@/types';
@@ -51,23 +59,14 @@ export async function implementTaskSuggestionCommand(
     throw new Error('This suggestion has already been implemented.');
   }
 
-  const claimedAt = new Date();
-  const [claimedSuggestion] = await db
-    .update(workItems)
-    .set({
-      status: 'launching',
-      launchClaimedAt: claimedAt,
-      dismissedAt: null,
-      updatedAt: claimedAt,
-    })
-    .where(
-      and(
-        eq(workItems.id, input.suggestionId),
-        eq(workItems.kind, 'suggestion'),
-        or(eq(workItems.status, 'open'), eq(workItems.status, 'dismissed')),
-      ),
-    )
-    .returning({ id: workItems.id });
+  // The web surface may relaunch a dismissed suggestion, so `dismissed` joins
+  // the claimable set here (other surfaces omit it). Shared CAS also covers
+  // stale-`launching` recovery.
+  const claimedSuggestion = await claimWorkItem(db, {
+    id: input.suggestionId,
+    additionalClaimableStatuses: ['dismissed'],
+    extraConditions: [eq(workItems.kind, 'suggestion')],
+  });
 
   if (!claimedSuggestion) {
     throw new Error('This suggestion has already been implemented.');
@@ -122,18 +121,11 @@ export async function implementTaskSuggestionCommand(
 
     // Record the launch link on the suggestion work_item. Previously the
     // web-launched suggestion dropped the task association entirely.
-    const launchedAt = new Date();
-    await db
-      .update(workItems)
-      .set({
-        status: 'launched',
-        launchedTaskId: launchResult.taskId,
-        launchedAt,
-        launchClaimedAt: null,
-        dismissedAt: null,
-        updatedAt: launchedAt,
-      })
-      .where(eq(workItems.id, input.suggestionId));
+    await finalizeWorkItemLaunched(db, {
+      id: input.suggestionId,
+      taskId: launchResult.taskId,
+      clearDismissedAt: true,
+    });
 
     return {
       success: true as const,
@@ -141,21 +133,13 @@ export async function implementTaskSuggestionCommand(
       cloudJobId: launchResult.id,
     };
   } catch (error) {
-    await db
-      .update(workItems)
-      .set({
-        status: 'open',
-        launchClaimedAt: null,
-        dismissedAt: null,
-        updatedAt: new Date(),
-      })
-      .where(
-        and(
-          eq(workItems.id, input.suggestionId),
-          eq(workItems.kind, 'suggestion'),
-          eq(workItems.status, 'launching'),
-        ),
-      );
+    // Release the claim back to `open` (never reverts a `launched` item; the
+    // shared guard requires status='launching').
+    await releaseWorkItemClaim(db, {
+      id: input.suggestionId,
+      clearDismissedAt: true,
+      extraConditions: [eq(workItems.kind, 'suggestion')],
+    });
 
     throw error;
   }

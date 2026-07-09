@@ -20,7 +20,12 @@ import {
   taskPullRequests,
   taskRunEvents,
   users,
+  environments,
+  environmentRepositoryMappings,
+  repositories,
   userFactory,
+  environmentFactory,
+  repositoryFactory,
 } from '@roomote/db/server';
 
 import {
@@ -417,6 +422,72 @@ describe('enqueue-failure cancel task state', () => {
     expect(runs).toHaveLength(1);
     expect(runs[0]!.status).toBe(CloudTaskStatus.Canceled);
     expect(runs[0]!.canceledAt).not.toBeNull();
+  });
+});
+
+describe('enqueueCloudTask source-control provider stamping', () => {
+  const createdEnvironmentIds: string[] = [];
+  const createdRepositoryIds: string[] = [];
+
+  afterAll(async () => {
+    // Mappings cascade-delete with their environment/repository.
+    if (createdEnvironmentIds.length > 0) {
+      await db
+        .delete(environments)
+        .where(inArray(environments.id, createdEnvironmentIds));
+    }
+    if (createdRepositoryIds.length > 0) {
+      await db
+        .delete(repositories)
+        .where(inArray(repositories.id, createdRepositoryIds));
+    }
+  });
+
+  it('stamps gitlab on an environment-workspace launch for a gitlab-only deployment', async () => {
+    const userId = await createUser();
+    const repository = await repositoryFactory.create({
+      sourceControlProvider: 'gitlab',
+      linkedByUserId: userId,
+      fullName: 'group/project',
+      isActive: true,
+    });
+    createdRepositoryIds.push(repository.id);
+
+    const environment = await environmentFactory.create({
+      createdByUserId: userId,
+    });
+    createdEnvironmentIds.push(environment.id);
+
+    await db.insert(environmentRepositoryMappings).values({
+      environmentId: environment.id,
+      repositoryId: repository.id,
+    });
+
+    const run = await launchFresh({
+      task: standardTaskInput({
+        payload: {
+          // environmentId makes this an environment workspace regardless of
+          // repo, so the provider must resolve via the environment-repository
+          // mapping (this repo is intentionally not in the repositories table).
+          repo: 'unmapped/repo',
+          environmentId: environment.id,
+          description: 'Work in the gitlab environment',
+        },
+      }),
+      initiator: { kind: 'user', userId },
+      workflow: 'standard',
+      surface: 'web',
+      trigger: 'manual',
+    });
+
+    const persistedRun = await db.query.taskRuns.findFirst({
+      where: eq(taskRuns.id, run.id),
+    });
+
+    expect(
+      (persistedRun!.payload as { sourceControlProvider?: string })
+        .sourceControlProvider,
+    ).toBe('gitlab');
   });
 });
 

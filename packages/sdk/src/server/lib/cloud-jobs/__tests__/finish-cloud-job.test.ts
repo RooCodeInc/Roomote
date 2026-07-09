@@ -60,6 +60,38 @@ function makeSelectChain() {
   return chain;
 }
 
+/**
+ * Rows the terminal transaction's `syncTaskStateFromRuns` reads back for the
+ * task's runs. Each state test sets this to drive the derived task state.
+ */
+let syncRunRows: Array<{
+  id: number;
+  status: CloudTaskStatus;
+  startedAt: Date | null;
+}> = [];
+
+function makeTxSelectChain() {
+  const chain: Record<string, unknown> = {};
+
+  for (const method of [
+    'from',
+    'where',
+    'leftJoin',
+    'innerJoin',
+    'orderBy',
+    'limit',
+  ]) {
+    chain[method] = vi.fn().mockReturnValue(chain);
+  }
+
+  chain.then = (
+    onFulfilled: (value: unknown[]) => unknown,
+    onRejected?: (reason: unknown) => unknown,
+  ) => Promise.resolve(syncRunRows).then(onFulfilled, onRejected);
+
+  return chain;
+}
+
 const mockDbSelect = vi.fn().mockImplementation(() => makeSelectChain());
 const mockDbUpdateWhere = vi.fn().mockResolvedValue(undefined);
 const mockDbUpdateSet = vi.fn().mockReturnValue({
@@ -304,6 +336,7 @@ describe('finishCloudJob', () => {
     mockRedisDel.mockResolvedValue(1);
     mockUpdateMessage.mockResolvedValue(true);
     mockDbExecute.mockResolvedValue([]);
+    syncRunRows = [];
     mockDbTransaction.mockImplementation(
       async (callback: (tx: unknown) => unknown) =>
         callback({
@@ -313,6 +346,7 @@ describe('finishCloudJob', () => {
               findFirst: (...args: unknown[]) => mockFindFirstRun(...args),
             },
           },
+          select: () => makeTxSelectChain(),
           update: (...args: unknown[]) => mockDbUpdate(...args),
         }),
     );
@@ -335,8 +369,12 @@ describe('finishCloudJob', () => {
     expect(mockCleanupSandboxOidcTargetsForCloudJob).toHaveBeenCalledWith(1);
   });
 
-  it('sets tasks.state to completed when the job completes', async () => {
+  it('derives tasks.state completed via the shared sync when the job completes', async () => {
     mockFindFirstRun.mockResolvedValue(makeRun());
+    // syncTaskStateFromRuns reads the run status just written above.
+    syncRunRows = [
+      { id: 1, status: CloudTaskStatus.Completed, startedAt: new Date() },
+    ];
 
     await finishCloudJob({
       id: 1,
@@ -350,8 +388,11 @@ describe('finishCloudJob', () => {
     });
   });
 
-  it('sets tasks.state to canceled when the job is canceled', async () => {
+  it('derives tasks.state canceled via the shared sync when the job is canceled', async () => {
     mockFindFirstRun.mockResolvedValue(makeRun());
+    syncRunRows = [
+      { id: 1, status: CloudTaskStatus.Canceled, startedAt: null },
+    ];
 
     await finishCloudJob({
       id: 1,
@@ -365,8 +406,11 @@ describe('finishCloudJob', () => {
     });
   });
 
-  it('sets tasks.state to failed when the job fails', async () => {
+  it('derives tasks.state failed via the shared sync when the job fails', async () => {
     mockFindFirstRun.mockResolvedValue(makeRun());
+    syncRunRows = [
+      { id: 1, status: CloudTaskStatus.Failed, startedAt: new Date() },
+    ];
 
     await finishCloudJob({
       id: 1,
@@ -381,15 +425,49 @@ describe('finishCloudJob', () => {
     });
   });
 
-  it('does not touch tasks.state when a job transitions to idle', async () => {
+  it('keeps the task active (not terminal) when the finishing run goes idle', async () => {
     mockFindFirstRun.mockResolvedValue(makeRun());
+    // The idle run is non-terminal, so the derivation resolves to 'active'.
+    syncRunRows = [
+      { id: 1, status: CloudTaskStatus.Idle, startedAt: new Date() },
+    ];
 
     await finishCloudJob({
       id: 1,
       status: CloudTaskStatus.Idle,
     });
 
-    expect(mockDbUpdate).not.toHaveBeenCalledWith(tasks);
+    // The shared sync still runs, but only ever derives 'active' here; it never
+    // stamps a terminal state onto an idle task.
+    for (const call of mockDbUpdateSet.mock.calls) {
+      const arg = call[0] as { state?: string } | undefined;
+      if (arg && 'state' in arg) {
+        expect(arg.state).toBe('active');
+      }
+    }
+  });
+
+  it('preserves completed when a bootstrap-failed resume is canceled after an earlier run completed', async () => {
+    mockFindFirstRun.mockResolvedValue(
+      makeRun({ id: 2, kind: 'resume', sourceRunId: 1 }),
+    );
+    // The prior run completed (started); this resume never started before it
+    // was canceled, so the derivation keeps the task 'completed'.
+    syncRunRows = [
+      { id: 1, status: CloudTaskStatus.Completed, startedAt: new Date() },
+      { id: 2, status: CloudTaskStatus.Canceled, startedAt: null },
+    ];
+
+    await finishCloudJob({
+      id: 2,
+      status: CloudTaskStatus.Canceled,
+    });
+
+    expect(mockDbUpdate).toHaveBeenNthCalledWith(2, tasks);
+    expect(mockDbUpdateSet).toHaveBeenNthCalledWith(2, {
+      state: 'completed',
+      updatedAt: expect.any(Date),
+    });
   });
 
   it('skips sandbox OIDC cleanup when a job transitions to idle', async () => {

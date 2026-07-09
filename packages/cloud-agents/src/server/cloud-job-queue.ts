@@ -39,7 +39,7 @@ import {
   createTaskWithRetry,
   markTaskStartParallelCountEndedAt,
   recordTaskStartParallelCount,
-  repositories,
+  syncTaskStateFromRuns,
   taskPullRequests,
   taskRuns,
   tasks,
@@ -53,6 +53,7 @@ import {
   lt,
   recordSnapshotResumeEvent,
   resolveDefaultComputeProvider,
+  resolveWorkspaceSourceControlProvider,
   sql,
 } from '@roomote/db/server';
 import type { MetadataRecord } from '@roomote/feature-flags/server';
@@ -112,15 +113,10 @@ async function cancelCloudJobBeforeQueue(
         })
         .where(eq(taskRuns.id, cloudJob.id));
 
-      // Mirror finishCloudJob's terminal task-state write. Enqueue-failure
-      // cancels bypass finishCloudJob entirely, so without this the task stays
-      // 'active' forever. cloud-agents cannot import @roomote/sdk, so the
-      // minimal write is replicated here. Unconditional, matching
-      // finishCloudJob (no sibling-run guard).
-      await tx
-        .update(tasks)
-        .set({ state: 'canceled', updatedAt: endedAt })
-        .where(eq(tasks.id, cloudJob.taskId));
+      // Derive the task state from all its runs. Enqueue-failure cancels
+      // bypass finishCloudJob entirely, so without this sync the task stays
+      // 'active' forever. The shared @roomote/db helper keeps siblings honest.
+      await syncTaskStateFromRuns(tx, cloudJob.taskId);
     });
   } catch (cancelError) {
     console.warn(
@@ -281,35 +277,54 @@ export class CloudJobQueue {
         const otherEntry = cloudJobQueueEntrySchema.parse(JSON.parse(rawValue));
 
         if (otherEntry.scope === entry.scope) {
-          await this.redis.lrem(CloudJobQueueKeys.Queue, 0, rawValue);
+          const removed = await this.redis.lrem(
+            CloudJobQueueKeys.Queue,
+            0,
+            rawValue,
+          );
+
+          // If lrem removed nothing the entry was already claimed off the
+          // queue by a worker; that worker owns the run's terminal state, so
+          // skip the DB cancel + sync entirely to avoid racing it.
+          if (removed === 0) {
+            continue;
+          }
 
           // Best-effort cancel in DB; do not block queue behavior during dedup.
           void db
             .transaction(async (tx) => {
               const endedAt = new Date();
 
-              await tx
+              // Only cancel a run still waiting in the queue (pending/dequeued).
+              // If it already advanced past dequeue it is claimed, so leave it
+              // and its task state to the owning worker.
+              const [canceledRun] = await tx
                 .update(taskRuns)
                 .set({
                   status: CloudTaskStatus.Canceled,
                   canceledAt: endedAt,
                   error: 'Superseded by a newer cloud job.',
                 })
-                .where(eq(taskRuns.id, otherEntry.id));
-
-              // Mirror finishCloudJob's terminal task-state write so the
-              // superseded run's task does not stay 'active' forever. Only the
-              // run id is known here, so resolve the task via the run row.
-              // Unconditional, matching finishCloudJob (no sibling-run guard).
-              await tx
-                .update(tasks)
-                .set({ state: 'canceled', updatedAt: endedAt })
                 .where(
-                  eq(
-                    tasks.id,
-                    sql`(SELECT ${taskRuns.taskId} FROM ${taskRuns} WHERE ${taskRuns.id} = ${otherEntry.id})`,
+                  and(
+                    eq(taskRuns.id, otherEntry.id),
+                    inArray(taskRuns.status, [
+                      CloudTaskStatus.Pending,
+                      CloudTaskStatus.Dequeued,
+                    ]),
                   ),
-                );
+                )
+                .returning({ taskId: taskRuns.taskId });
+
+              // The run was already claimed/terminal; nothing to sync.
+              if (!canceledRun) {
+                return;
+              }
+
+              // Derive the task state from all its runs so the superseded run's
+              // task does not stay 'active' forever, while an already-completed
+              // sibling still wins.
+              await syncTaskStateFromRuns(tx, canceledRun.taskId);
 
               await markTaskStartParallelCountEndedAt(tx, {
                 runId: otherEntry.id,
@@ -1040,32 +1055,21 @@ async function enqueueFreshLaunch(
   // Stamp the source-control provider once at launch when the caller omitted
   // it. Downstream consumers (token minting, worker repository resolution)
   // otherwise fall back to the GitHub default, which breaks GitLab/Gitea/ADO
-  // deployments for any launch surface that forgot the stamp.
+  // deployments for any launch surface that forgot the stamp. The shared
+  // resolver covers every workspace shape (repository, repository_set,
+  // environment, all_repositories) so environment- and all-repositories-based
+  // launches (e.g. Linear) get stamped too.
   if (
     !('sourceControlProvider' in task.payload) ||
     !task.payload.sourceControlProvider
   ) {
-    const workspaceRepositoryFullNames =
-      workspace.type === 'repository'
-        ? [workspace.repo]
-        : workspace.type === 'repository_set'
-          ? workspace.repositories
-          : [];
+    const resolvedProvider = await resolveWorkspaceSourceControlProvider(
+      db,
+      workspace,
+    );
 
-    if (workspaceRepositoryFullNames.length > 0) {
-      const providerRows = await db
-        .select({
-          sourceControlProvider: repositories.sourceControlProvider,
-        })
-        .from(repositories)
-        .where(inArray(repositories.fullName, workspaceRepositoryFullNames));
-      const providers = [
-        ...new Set(providerRows.map((row) => row.sourceControlProvider)),
-      ];
-
-      if (providers.length === 1) {
-        task.payload.sourceControlProvider = providers[0];
-      }
+    if (resolvedProvider) {
+      task.payload.sourceControlProvider = resolvedProvider;
     }
   }
 
@@ -1469,6 +1473,11 @@ async function enqueueSnapshotResume(
       if (options.afterCreateInTransaction) {
         await options.afterCreateInTransaction(tx, insertedRun);
       }
+
+      // The new resume run is non-terminal (pending/dequeued), so re-derive the
+      // task state: a task that had gone terminal on a prior attempt flips back
+      // to 'active' now that another attempt is queued.
+      await syncTaskStateFromRuns(tx, sourceRun.taskId);
 
       return insertedRun;
     });

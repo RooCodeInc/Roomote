@@ -421,8 +421,9 @@ export const workItems = pgTable(
     ),
     index('work_items_fingerprint_idx').on(table.fingerprint),
     index('work_items_launched_task_id_idx').on(table.launchedTaskId),
-    uniqueIndex('work_items_source_task_sort_order_unique').on(
+    uniqueIndex('work_items_source_task_kind_sort_order_unique').on(
       table.sourceTaskId,
+      table.kind,
       table.sortOrder,
     ),
   ],
