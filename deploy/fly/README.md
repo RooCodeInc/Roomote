@@ -173,7 +173,7 @@ Notes:
   encodes.
 - `MODAL_TOKEN_ID`, `MODAL_TOKEN_SECRET`, and model provider keys such as
   `OPENROUTER_API_KEY` are **not** deploy-time values. Enter them in the
-  `/setup` wizard (or Settings → Compute / Models) after first boot; they
+  `/setup` wizard (or Settings → Sandboxes / Models) after first boot; they
   are stored encrypted in Postgres. Setting them as secrets still works and
   takes precedence, but is unnecessary.
 - Leave `JOB_AUTH_*` and `PREVIEW_AUTH_*` unset —
@@ -215,7 +215,7 @@ workers. Pre-create the bucket, or set `S3_AUTO_CREATE_BUCKET=true` in
    manual URL entry is needed.
 5. Enter the compute provider credentials (Modal token pair for the default)
    and the model provider key when the wizard asks. When swapping to E2B or
-   Daytona instead, the wizard and **Settings → Compute** can build the E2B
+   Daytona instead, the wizard and **Settings → Sandboxes** can build the E2B
    template or Daytona snapshot in your provider account after credentials
    are saved.
 6. Pick repositories, create an environment, and run a small task end to end

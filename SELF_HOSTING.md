@@ -548,7 +548,7 @@ DAYTONA_SNAPSHOT_NAME=...
 
 `E2B_TEMPLATE_ID` and `DAYTONA_SNAPSHOT_NAME` can also be provisioned
 automatically during setup when a registry-qualified `DOCKER_WORKER_IMAGE`
-is configured — the setup wizard and the Settings → Compute page build the
+is configured — the setup wizard and the Settings → Sandboxes page build the
 worker base artifact in your provider account after credentials are saved.
 
 For quick-install and V1 deployer-managed hosts, leave `MODAL_BASE_IMAGE_REF`

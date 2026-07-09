@@ -82,14 +82,16 @@ const SETTINGS_NAVIGATION_ITEMS: SettingsNavigationItem[] = [
   },
   {
     id: 'compute',
-    label: 'Compute',
-    title: 'Compute',
+    label: 'Sandboxes',
+    title: 'Sandboxes',
     description:
-      'Configure the compute providers that run tasks and choose the default.',
+      'Configure the sandbox providers that run tasks and choose the default.',
     href: SETTINGS_PATHS.compute,
     icon: Cpu,
     adminOnly: true,
-    matches: (pathname) => pathname.startsWith(SETTINGS_PATHS.compute),
+    matches: (pathname) =>
+      pathname.startsWith(SETTINGS_PATHS.compute) ||
+      pathname.startsWith('/settings/compute'),
   },
   {
     id: 'source-control',

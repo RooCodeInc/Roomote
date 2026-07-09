@@ -1,5 +1,7 @@
-import { ComputeSettingsPage } from '@/components/settings/pages/ComputeSettingsPage';
+import { SETTINGS_PATHS } from '@/lib/settings';
 
-export default function Page() {
-  return <ComputeSettingsPage />;
+import { LegacySettingsRedirectPage } from '../cloud-projects/LegacySettingsRedirectPage';
+
+export default function LegacyComputeSettingsPage() {
+  return <LegacySettingsRedirectPage targetPath={SETTINGS_PATHS.compute} />;
 }

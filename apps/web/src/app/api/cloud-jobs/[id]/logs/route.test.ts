@@ -188,7 +188,7 @@ describe('GET /api/cloud-jobs/[id]/logs', () => {
     expect(streamCommandOutputMock).not.toHaveBeenCalled();
     expect(errorEvents).toHaveLength(1);
     expect(errorEvents[0]?.[0]).toEqual({
-      error: 'Live log streaming is unavailable for this compute provider.',
+      error: 'Live log streaming is unavailable for this sandbox provider.',
     });
     expect(disconnectEvents).toHaveLength(1);
   });

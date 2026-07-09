@@ -4,7 +4,7 @@ icon: '/logo/integrations/daytona.svg'
 description: Run Roomote tasks on Daytona-hosted sandboxes from a registered worker snapshot.
 ---
 
-Daytona is a hosted compute provider with straightforward API-key setup.
+Daytona is a hosted sandbox provider with straightforward API-key setup.
 Roomote starts task sandboxes from a registered worker snapshot and destroys
 them when they are no longer needed.
 
@@ -19,7 +19,7 @@ Use Daytona when:
 
 ## Configuration
 
-Add Daytona from **Settings > Compute**, or provide the values as deployment
+Add Daytona from **Settings > Sandboxes**, or provide the values as deployment
 env vars:
 
 ```sh
@@ -50,7 +50,7 @@ pinned so task startup is predictable.
 ## Verify setup
 
 1. save `DAYTONA_API_KEY` and `DAYTONA_SNAPSHOT_NAME`
-2. select Daytona as the default compute provider
+2. select Daytona as the default sandbox provider
 3. start a small task from an environment
 4. confirm the task starts, streams logs, and can run project commands
 5. verify preview links if the task starts a web app

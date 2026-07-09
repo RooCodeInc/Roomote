@@ -303,11 +303,11 @@ export const SETUP_COMPUTE_PROVIDER_CATALOG = [
 ] as const satisfies readonly SetupComputeProviderDescriptor[];
 
 /**
- * Compute-provider env vars managed by the setup flow and the Settings →
- * Compute page: account credentials, provider-specific infrastructure values
+ * Sandbox-provider env vars managed by the setup flow and the Settings →
+ * Sandboxes page: account credentials, provider-specific infrastructure values
  * (base images, template ids, snapshot names), and the shared worker image.
  * They are reserved from the generic environment-variables editor so operators
- * configure them through the compute UI (or the deployment env) instead.
+ * configure them through the sandboxes UI (or the deployment env) instead.
  */
 export const COMPUTE_PROVIDER_ENV_VAR_NAMES: ReadonlySet<string> = new Set([
   SHARED_WORKER_IMAGE_ENV_VAR,

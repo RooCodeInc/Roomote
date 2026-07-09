@@ -122,9 +122,9 @@ Notes:
   `RELEASE_VERSION` baked into the running image, so it always matches the
   deployed build. Setting it explicitly silently pins the worker to whatever
   version the value encodes.
-- Compute provider credentials (Modal token pair when using Modal) and
+- Sandbox provider credentials (Modal token pair when using Modal) and
   model provider keys such as `OPENROUTER_API_KEY` are **not** template
-  variables. Enter them in the `/setup` wizard (or Settings → Compute /
+  variables. Enter them in the `/setup` wizard (or Settings → Sandboxes /
   Models) after first boot; they are stored encrypted in Postgres.
 - Leave `JOB_AUTH_*` and `PREVIEW_AUTH_*` unset —
   `ROOMOTE_AUTO_GENERATE_KEYS=true` manages them. If you later provide

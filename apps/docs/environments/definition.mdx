@@ -16,7 +16,7 @@ generate a valid definition for you.
 
 ## What the definition is for
 
-When a Roomote agent starts a task, the [compute provider](/compute) gives it a
+When a Roomote agent starts a task, the [sandbox provider](/compute) gives it a
 clean sandbox. The environment definition is what turns that empty sandbox into
 a workspace grounded in your product. It is applied in a predictable order:
 
@@ -40,7 +40,7 @@ same setup. The concepts map closely:
 
 | Concept | Dev Container (`devcontainer.json`) | Roomote environment definition |
 | --- | --- | --- |
-| Base machine | [`image` / `build`](https://containers.dev/implementors/json_reference/#image-specific) | Provided by the [compute provider](/compute) worker image, not set here |
+| Base machine | [`image` / `build`](https://containers.dev/implementors/json_reference/#image-specific) | Provided by the [sandbox provider](/compute) worker image, not set here |
 | Extra tooling | [`features`](https://containers.dev/features) | `services` and `tool_versions` |
 | Setup steps | [`onCreateCommand` / `postCreateCommand`](https://containers.dev/implementors/json_reference/#lifecycle-scripts) | Repository `commands` |
 | Forwarded ports | [`forwardPorts` / `portsAttributes`](https://containers.dev/implementors/json_reference/#port-attributes) | `ports` |

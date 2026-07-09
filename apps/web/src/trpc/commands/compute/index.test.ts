@@ -652,7 +652,7 @@ describe('compute commands', () => {
           provider: 'modal',
         }),
       ).rejects.toThrow(
-        'Configure Modal before making it the default compute provider.',
+        'Configure Modal before making it the default sandbox provider.',
       );
     });
 

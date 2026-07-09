@@ -4,7 +4,7 @@ icon: 'https://api.iconify.design/simple-icons:docker.svg?color=currentColor'
 description: Run Roomote task sandboxes as Docker containers on the same host as the deployment.
 ---
 
-Docker is the simplest compute provider for local development and trusted
+Docker is the simplest sandbox provider for local development and trusted
 single-host self-hosting. Roomote starts one worker container per task, connects
 it to the configured Docker network, streams logs back to the task view, and
 stops the container when the task is finished.
@@ -25,7 +25,7 @@ resume support.
 ## Configuration
 
 Docker does not need provider API credentials. Select Docker during setup or
-from **Settings > Compute**.
+from **Settings > Sandboxes**.
 
 Common env vars:
 
@@ -48,14 +48,14 @@ tag when workers need a published image instead of a local tag.
 
 ## Security notes
 
-Docker compute requires the Roomote controller to create and manage worker
+Docker sandboxes require the Roomote controller to create and manage worker
 containers. Treat the Docker host and Docker socket as trusted infrastructure.
-Do not use Docker compute as a multi-tenant isolation boundary for untrusted
+Do not use Docker sandboxes as a multi-tenant isolation boundary for untrusted
 operators or repositories.
 
 ## Verify setup
 
-1. select Docker as the compute provider
+1. select Docker as the sandbox provider
 2. start a small task from an environment
 3. confirm the task can clone the repository and run a simple command
 4. open task logs and verify output streams back to Roomote

@@ -20,7 +20,7 @@ Roomote resolves configuration in layers:
    installer, a PaaS, or the shell.
 2. **Saved deployment environment variables** encrypted in Roomote during setup
    or from Settings pages.
-3. **Persisted runtime settings** such as the selected default model, compute
+3. **Persisted runtime settings** such as the selected default model, sandbox
    provider, or preview settings.
 4. **Derived defaults** for local development and release-managed values.
 
@@ -32,8 +32,8 @@ The exact order depends on the setting. A few important cases:
   in **Settings > Models**.
 - Preview env vars such as `PREVIEW_PROXY_BASE_URL` override values saved from
   **Settings > Live Previews**.
-- Compute provider credentials resolve as process env first, then saved
-  deployment env vars. The default compute provider is special: an explicit
+- Sandbox provider credentials resolve as process env first, then saved
+  deployment env vars. The default sandbox provider is special: an explicit
   admin selection saved in Roomote wins over `DEFAULT_COMPUTE_PROVIDER` because
   local and Compose stacks often set a default automatically.
 - Local development has safe defaults for Postgres, Redis, MinIO, signing keys,
@@ -76,7 +76,7 @@ For production and shared self-hosted deployments:
   `ROOMOTE_AUTO_GENERATE_KEYS=true` so Roomote generates and persists them.
 - Keep provider credentials in environment variables or a secret manager when
   they are controlled by the operator.
-- Prefer immutable worker image tags for hosted compute providers.
+- Prefer immutable worker image tags for hosted sandbox providers.
 - Avoid `SKIP_ENV_VALIDATION` outside build tooling or one-off diagnostics.
 
 ## Supported env vars
@@ -165,18 +165,18 @@ as per-task auth tokens or workspace paths.
 | `GOOGLE_VERTEX_LOCATION`                     | Provider key | Vertex AI location. Defaults to `us-central1` at the runtime when unset.                                     |
 | `MISTRAL_API_KEY`                            | Provider key | Mistral provider key forwarded when configured.                                                              |
 
-### Compute providers
+### Sandbox providers
 
 | Env var                      | Required          | Used for                                                                                                                       |
 | ---------------------------- | ----------------- | ------------------------------------------------------------------------------------------------------------------------------ |
-| `DEFAULT_COMPUTE_PROVIDER`   | Optional          | Runtime default compute provider when no admin default is saved. Supported values are `docker`, `modal`, `e2b`, and `daytona`. |
+| `DEFAULT_COMPUTE_PROVIDER`   | Optional          | Runtime default sandbox provider when no admin default is saved. Supported values are `docker`, `modal`, `e2b`, and `daytona`. |
 | `EXCLUDED_COMPUTE_PROVIDERS` | Optional          | Comma-separated provider IDs to hide or exclude from default selection.                                                        |
 | `DOCKER_WORKER_IMAGE`        | Optional          | Worker image for Docker and hosted compute derivation. In production, prefer an immutable registry-qualified tag.              |
 | `ROOMOTE_WORKER_IMAGE_REPO`  | Optional          | Registry repository used to derive the worker image from `RELEASE_VERSION` when `DOCKER_WORKER_IMAGE` is unset.                |
 | `DOCKER_WORKER_PLATFORM`     | Optional          | Docker worker platform. Defaults to the host architecture (`linux/arm64` on arm hosts, `linux/amd64` otherwise). |
 | `DOCKER_WORKER_NETWORK`      | Self-host Docker  | Docker network for worker containers in Compose/self-host mode.                                                                |
 | `DOCKER_WORKER_RELEASE_PATH` | Optional          | Path to a packaged worker release archive used by Docker worker bootstrap.                                                     |
-| `MODAL_TOKEN_ID`             | Modal             | Modal token ID. Can also be saved from **Settings > Compute**.                                                                 |
+| `MODAL_TOKEN_ID`             | Modal             | Modal token ID. Can also be saved from **Settings > Sandboxes**.                                                                 |
 | `MODAL_TOKEN_SECRET`         | Modal             | Modal token secret.                                                                                                            |
 | `MODAL_BASE_IMAGE_REF`       | Modal             | Modal base image reference. Usually derived from the worker image; set only to pin a custom image.                             |
 | `MODAL_ENDPOINT`             | Optional          | Modal endpoint override.                                                                                                       |
@@ -187,11 +187,11 @@ as per-task auth tokens or workspace paths.
 | `MODAL_ECR_OIDC_ROLE_ARN`    | ECR               | AWS IAM role ARN used by Modal for ECR OIDC pulls.                                                                             |
 | `MODAL_ECR_REGION`           | ECR               | AWS region for Modal ECR OIDC pulls.                                                                                           |
 | `MODAL_REGIONS`              | Optional          | Comma-separated Modal sandbox placement regions (for example `us` or `us-west`). Unset keeps Modal default placement.         |
-| `E2B_API_KEY`                | E2B               | E2B API key. Can also be saved from **Settings > Compute**.                                                                    |
+| `E2B_API_KEY`                | E2B               | E2B API key. Can also be saved from **Settings > Sandboxes**.                                                                    |
 | `E2B_TEMPLATE_ID`            | E2B               | Worker template ID. Usually provisioned from the worker image by Roomote.                                                      |
 | `E2B_DOMAIN`                 | Optional          | E2B domain for self-hosted or custom E2B clusters.                                                                             |
 | `E2B_MAX_SANDBOX_TIMEOUT_MS` | Optional          | Maximum E2B sandbox timeout Roomote will request. Defaults to one hour.                                                        |
-| `DAYTONA_API_KEY`            | Daytona           | Daytona API key. Can also be saved from **Settings > Compute**.                                                                |
+| `DAYTONA_API_KEY`            | Daytona           | Daytona API key. Can also be saved from **Settings > Sandboxes**.                                                                |
 | `DAYTONA_API_URL`            | Optional          | Daytona API URL override.                                                                                                      |
 | `DAYTONA_TARGET`             | Optional          | Daytona target or region.                                                                                                      |
 | `DAYTONA_SNAPSHOT_NAME`      | Daytona           | Worker snapshot name. Usually registered from the worker image by Roomote.                                                     |

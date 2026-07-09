@@ -54,11 +54,11 @@ export function ComputeWorkerImageSection({
   return (
     <Section
       icon={<Container className="size-4 shrink-0" />}
-      title="Hosted compute worker image"
+      title="Hosted sandbox worker image"
     >
       <div className="max-w-xl space-y-3">
         <p className="text-sm text-muted-foreground">
-          Cloud compute providers start tasks from this Roomote worker image.
+          Hosted sandbox providers start tasks from this Roomote worker image.
           Use an image tag they can pull, such as a public GHCR image or one
           they have credentials for.
         </p>
