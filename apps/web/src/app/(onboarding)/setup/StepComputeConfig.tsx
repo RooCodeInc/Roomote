@@ -343,7 +343,7 @@ export function StepComputeConfig({
             className="font-mono disabled:bg-card/90 disabled:text-foreground/50"
             value={
               isSecretField && field.runtimeSatisfied
-                ? ''
+                ? MASKED_VALUE
                 : shouldShowSavedValueMask
                   ? MASKED_VALUE
                   : field.runtimeSatisfied && !isSecretField
