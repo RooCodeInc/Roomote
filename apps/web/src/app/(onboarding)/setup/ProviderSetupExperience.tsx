@@ -10,6 +10,7 @@ import {
   Check,
   CopyIconButton,
   Download,
+  EnvVarsInfoNote,
   ExternalLink,
   Input,
   Button,
@@ -21,7 +22,18 @@ import { StepTitle } from './StepTitle';
 import { ProviderSetupInstructions } from './ProviderSetupInstructions';
 import { getProviderSetupCopy } from './providerSetupCopy';
 
-type ProviderStatus = SetupAuthStatus['providers'][number];
+export type ProviderSetupExperienceProvider =
+  | SetupAuthStatus['providers'][number]
+  | {
+      id: SetupAuthStatus['providers'][number]['id'] | 'telegram';
+      label: string;
+      fields: SetupAuthStatus['providers'][number]['fields'];
+      runtimeSatisfied: boolean;
+      savedSatisfied: boolean;
+      setupSatisfied: boolean;
+    };
+
+type ProviderStatus = ProviderSetupExperienceProvider;
 type ProviderFieldStatus = ProviderStatus['fields'][number];
 
 const MASKED_VALUE = '••••••••••••••••••••••••••••';
@@ -283,6 +295,8 @@ type ProviderSetupExperienceProps = {
   clearedSavedValues: Record<string, boolean>;
   teamsAppPackageHref: string | null;
   showManualSlackValues: boolean;
+  surface?: 'setup' | 'settings';
+  envVarsInfoNote?: React.ReactNode;
   onShowManualSlackValues: () => void;
   onValueChange: (envVarName: string, value: string) => void;
   onEditingSavedValueChange: (envVarName: string, editing: boolean) => void;
@@ -290,15 +304,43 @@ type ProviderSetupExperienceProps = {
   onBack?: () => void;
 };
 
+function SettingsEnvVarsInfoNote({
+  runtimeConfigured,
+  children,
+}: {
+  runtimeConfigured: boolean;
+  children?: React.ReactNode;
+}) {
+  return (
+    <EnvVarsInfoNote runtimeConfigured={runtimeConfigured}>
+      {children}
+    </EnvVarsInfoNote>
+  );
+}
+
+function ProviderSetupTitle({
+  surface,
+  text,
+}: {
+  surface?: 'setup' | 'settings';
+  text: string;
+}) {
+  return surface === 'settings' ? null : <StepTitle text={text} />;
+}
+
 function SlackSetupExperience(props: ProviderSetupExperienceProps) {
   const slackManifestPrefillUrl = buildSlackManifestPrefillUrl({
     publicOrigin: props.publicOrigin,
   });
 
-  if (!props.showManualSlackValues && !props.provider.runtimeSatisfied) {
+  if (
+    !props.showManualSlackValues &&
+    !props.provider.runtimeSatisfied &&
+    !props.provider.savedSatisfied
+  ) {
     return (
       <div className="relative w-full max-w-2xl space-y-4 py-2 md:py-0">
-        <StepTitle text="Create Slack app" />
+        <ProviderSetupTitle surface={props.surface} text="Create Slack app" />
 
         <div className="space-y-3 max-w-xl">
           <p>
@@ -367,13 +409,19 @@ function MicrosoftSetupExperience(props: ProviderSetupExperienceProps) {
       }).trim().length > 0
     );
   });
-  const pendingStepClassName = teamsAppValuesComplete
+  const teamsAppPackageAvailable =
+    Boolean(props.teamsAppPackageHref) &&
+    (teamsAppValuesComplete || props.surface === 'settings');
+  const pendingStepClassName = teamsAppPackageAvailable
     ? undefined
     : 'opacity-50';
 
   return (
     <div className="relative w-full max-w-2xl space-y-5 py-2 md:py-0">
-      <StepTitle text="Configure Microsoft Teams app" />
+      <ProviderSetupTitle
+        surface={props.surface}
+        text="Configure Microsoft Teams app"
+      />
 
       <NumberedStep number={1} className="mt-6">
         <p className="font-semibold">Create a Microsoft Entra app.</p>
@@ -404,6 +452,11 @@ function MicrosoftSetupExperience(props: ProviderSetupExperienceProps) {
           Enter the Microsoft app generated values.
         </p>
         <ProviderFields fields={fields} {...props} />
+        {props.surface === 'settings' ? (
+          <SettingsEnvVarsInfoNote
+            runtimeConfigured={props.provider.runtimeSatisfied}
+          />
+        ) : null}
       </NumberedStep>
 
       <NumberedStep number={3} className={pendingStepClassName}>
@@ -413,7 +466,7 @@ function MicrosoftSetupExperience(props: ProviderSetupExperienceProps) {
             Download your pre-filled Teams app package (manifest + icons), go to
             the Teams Developer Portal → Import App.
           </p>
-          {teamsAppValuesComplete && props.teamsAppPackageHref ? (
+          {teamsAppPackageAvailable && props.teamsAppPackageHref ? (
             <div className="flex items-center gap-2">
               <Button asChild variant="outline" size="sm">
                 <a href={props.teamsAppPackageHref} download>
@@ -458,7 +511,7 @@ function MicrosoftSetupExperience(props: ProviderSetupExperienceProps) {
           <InstructionUrlContent
             heading="Bot messaging endpoint"
             url={teamsWebhookUrl}
-            disabled={!teamsAppValuesComplete}
+            disabled={!teamsAppPackageAvailable}
           />
         </div>
       </NumberedStep>
@@ -474,7 +527,10 @@ function GenericSetupExperience(props: ProviderSetupExperienceProps) {
 
   return (
     <div className="relative w-full max-w-2xl space-y-5 py-2 md:py-0">
-      <StepTitle text={`Configure ${providerSetupLabel}`} />
+      <ProviderSetupTitle
+        surface={props.surface}
+        text={`Configure ${providerSetupLabel}`}
+      />
 
       <NumberedStep number={1} className="mt-6">
         <p className="font-semibold">
@@ -516,20 +572,24 @@ function GenericSetupExperience(props: ProviderSetupExperienceProps) {
       <NumberedStep number={3}>
         <p className="font-semibold">Enter the values below:</p>
         <ProviderFields fields={fields} {...props} />
+        {props.surface === 'settings' ? (
+          <SettingsEnvVarsInfoNote
+            runtimeConfigured={props.provider.runtimeSatisfied}
+          >
+            {props.envVarsInfoNote}
+          </SettingsEnvVarsInfoNote>
+        ) : null}
       </NumberedStep>
     </div>
   );
 }
 
-const PROVIDER_SETUP_EXPERIENCES = {
+const PROVIDER_SETUP_EXPERIENCES: Partial<
+  Record<ProviderSetupExperienceProvider['id'], typeof GenericSetupExperience>
+> = {
   slack: SlackSetupExperience,
   microsoft: MicrosoftSetupExperience,
-} satisfies Partial<
-  Record<
-    SetupAuthStatus['providers'][number]['id'],
-    typeof GenericSetupExperience
-  >
->;
+};
 
 export function ProviderSetupExperience(props: ProviderSetupExperienceProps) {
   const Component =

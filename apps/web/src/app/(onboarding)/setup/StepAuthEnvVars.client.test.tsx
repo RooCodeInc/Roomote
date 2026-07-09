@@ -106,6 +106,20 @@ vi.mock('@/components/system', () => ({
     />
   ),
   Download: (props: SVGProps<SVGSVGElement>) => <svg {...props} />,
+  EnvVarsInfoNote: ({
+    children,
+    runtimeConfigured,
+  }: {
+    children?: ReactNode;
+    runtimeConfigured?: boolean;
+  }) => (
+    <div>
+      {children ??
+        (runtimeConfigured
+          ? "These values are being passed via ENV vars and can't be overridden here."
+          : "You can pass these in as ENV vars. When configured here, they're encrypted in the database.")}
+    </div>
+  ),
   ExternalLink: (props: SVGProps<SVGSVGElement>) => <svg {...props} />,
   Info: (props: SVGProps<SVGSVGElement>) => <svg {...props} />,
   Pencil: (props: SVGProps<SVGSVGElement>) => <svg {...props} />,
@@ -474,6 +488,22 @@ describe('StepAuthEnvVars', () => {
     expectHeadingInNumberedStep('Enter the Microsoft app generated values.', 2);
     expectHeadingInNumberedStep('Upload Roomote to Microsoft Teams.', 3);
     expectHeadingInNumberedStep('Add the Teams bot capability to that app.', 4);
+  });
+
+  it('does not show the settings env-var storage note in setup', () => {
+    render(
+      <StepAuthEnvVars
+        authSetup={buildAuthSetup('microsoft')}
+        selectedProviderId="microsoft"
+        onContinue={vi.fn()}
+      />,
+    );
+
+    expect(
+      screen.queryByText(
+        "You can pass these in as ENV vars. When configured here, they're encrypted in the database.",
+      ),
+    ).not.toBeInTheDocument();
   });
 
   it('enables the Teams app package download once a Microsoft app id is entered', () => {
