@@ -20,7 +20,7 @@ instead. For a managed PaaS with no server of your own, see
   GitHub webhooks and compute workers call that API origin, and Slack
   webhooks arrive at the web origin and are proxied to the API internally.
 - **The Docker socket is available.** Unlike Railway, the Coolify host runs
-  Docker, so the `docker` compute provider works and is the template
+  Docker, so the `docker` sandbox provider works and is the template
   default: the controller mounts `/var/run/docker.sock` and runs task
   workers on the same server. Hosted compute (Modal, E2B, or Daytona) is a
   config-only swap; see [Task execution](#task-execution).
@@ -46,15 +46,15 @@ instead. For a managed PaaS with no server of your own, see
 ## What you need
 
 - A server running Coolify with enough headroom for the stack. With the
-  default `docker` compute provider, task workers run on the same host —
-  plan for 8 GB+ RAM. With hosted compute, 4 GB+ is enough for the control
+  default `docker` sandbox provider, task workers run on the same host —
+  plan for 8 GB+ RAM. With hosted sandboxes, 4 GB+ is enough for the control
   plane.
 - DNS you control for the web, api, and minio domains, or Coolify's
   generated domains for a quick trial. Set all three to `https://` — GitHub
   App creation and webhooks require HTTPS origins, and Coolify's proxy
   issues Let's Encrypt certificates for `https://` domains automatically.
 - A model provider API key, for example OpenRouter (entered in the setup
-  wizard, not at deploy time). When using hosted compute instead of the
+  wizard, not at deploy time). When using hosted sandboxes instead of the
   Docker socket, also a [Modal](https://modal.com), [E2B](https://e2b.dev),
   or [Daytona](https://daytona.io) account.
 
@@ -159,7 +159,7 @@ the same server. Two things matter in this mode:
   control of the host Docker daemon. This matches the single-host
   production shape and is intended for a trusted, single-tenant server.
 
-To use hosted compute instead (no socket access, task execution bills
+To use hosted sandboxes instead (no socket access, task execution bills
 through the provider):
 
 1. Set `DEFAULT_COMPUTE_PROVIDER=modal` (or `e2b` / `daytona`) and add

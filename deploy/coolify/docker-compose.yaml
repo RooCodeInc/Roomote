@@ -18,7 +18,7 @@
 #   across every service in this resource, so shared secrets such as
 #   `SERVICE_PASSWORD_MINIO` are safe to reference in more than one place
 #   (unlike Railway's per-occurrence `secret()` template function).
-# - The Coolify host has a Docker socket, so the `docker` compute provider
+# - The Coolify host has a Docker socket, so the `docker` sandbox provider
 #   works and is the template default: the controller mounts the socket and
 #   runs task workers on the same server. Hosted compute (modal/e2b/daytona)
 #   is a config-only swap; see "Task execution" in README.md.
@@ -193,8 +193,8 @@ services:
       api:
         condition: service_started
     volumes:
-      # Required by the default `docker` compute provider. Remove when
-      # switching to hosted compute (modal/e2b/daytona); see README.md.
+      # Required by the default `docker` sandbox provider. Remove when
+      # switching to hosted sandboxes (modal/e2b/daytona); see README.md.
       - /var/run/docker.sock:/var/run/docker.sock
     environment:
       <<: *roomote-shared-env

@@ -89,9 +89,7 @@ const SETTINGS_NAVIGATION_ITEMS: SettingsNavigationItem[] = [
     href: SETTINGS_PATHS.compute,
     icon: Cpu,
     adminOnly: true,
-    matches: (pathname) =>
-      pathname.startsWith(SETTINGS_PATHS.compute) ||
-      pathname.startsWith('/settings/compute'),
+    matches: (pathname) => pathname.startsWith(SETTINGS_PATHS.compute),
   },
   {
     id: 'source-control',

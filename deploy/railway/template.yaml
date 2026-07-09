@@ -34,7 +34,7 @@
 #   automatically can enable the publish workflow's deploy-railway job
 #   (README.md "Auto-deploying every develop build" — develop-only today).
 # - Railway has no Docker socket, so task execution must use a hosted
-#   compute provider (modal by default; e2b and daytona also work).
+#   sandbox provider (modal by default; e2b and daytona also work).
 #   EXCLUDED_COMPUTE_PROVIDERS=docker hides the unusable provider.
 # - Zero required deploy-time inputs. Modal tokens and model provider keys
 #   are entered in the /setup wizard after first boot and stored encrypted
@@ -44,7 +44,7 @@
 #   override the pre-filled default with https://<their-domain> before the
 #   first deploy instead of editing the variable after hitting 403
 #   "Invalid origin" errors.
-# - The api service must be publicly reachable: hosted compute workers and
+# - The api service must be publicly reachable: hosted sandboxes workers and
 #   GitHub webhooks call `TRPC_URL` directly.
 # - Both published images are public on GHCR: Railway pulls roomote-app and
 #   hosted-compute builders pull roomote-worker anonymously, so no registry

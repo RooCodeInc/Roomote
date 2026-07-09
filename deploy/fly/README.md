@@ -25,18 +25,18 @@ other PaaS-shaped paths, see [deploy/railway](../railway/README.md) and
   port 443 and the API is exposed on port **8443** of the same hostname:
   `TRPC_URL` is `https://<app>.fly.dev:8443`. Fly's `*.fly.dev` certificate
   covers TLS-handled ports other than 443, and GitHub webhooks and
-  hosted-compute workers call that origin directly (both support explicit
+  hosted-sandbox workers call that origin directly (both support explicit
   ports in URLs). Slack webhooks arrive at the web origin and are proxied to
   the API internally.
 - **One app, one Machine per service.** web, api, controller, and bullmq are
   Fly process groups of a single app, each running in its own Machine from
   the same `roomote-app` image. They share one `[env]` block and one set of
   secrets, and scale independently with `fly scale ... --process-group`.
-- **No Docker socket.** The `docker` compute provider cannot run on Fly
-  Machines. Task execution must use a hosted compute provider: Modal
+- **No Docker socket.** The `docker` sandbox provider cannot run on Fly
+  Machines. Task execution must use a hosted sandbox provider: Modal
   (default), E2B, or Daytona. Those only need outbound HTTPS plus API
   credentials. The config sets `EXCLUDED_COMPUTE_PROVIDERS=docker` so the
-  unusable provider never appears in setup or compute selection.
+  unusable provider never appears in setup or sandbox selection.
 - **Managed data services replace the bundled datastores.** Fly Managed
   Postgres provides `DATABASE_URL`, Upstash Redis (via `fly redis create`)
   provides `REDIS_URL`, and [Tigris](https://www.tigrisdata.com) object
@@ -61,7 +61,7 @@ other PaaS-shaped paths, see [deploy/railway](../railway/README.md) and
 
 - A Fly.io account and [`flyctl`](https://fly.io/docs/flyctl/install/)
   logged in (`fly auth login`).
-- A hosted compute account: [Modal](https://modal.com) (default),
+- A hosted sandbox account: [Modal](https://modal.com) (default),
   [E2B](https://e2b.dev), or [Daytona](https://daytona.io).
 - A model provider API key, for example OpenRouter (entered in the setup
   wizard, not at deploy time).
@@ -70,7 +70,7 @@ other PaaS-shaped paths, see [deploy/railway](../railway/README.md) and
 
 Both published images (`ghcr.io/roocodeinc/roomote-app` and
 `ghcr.io/roocodeinc/roomote-worker`) are public. Fly pulls the app image
-anonymously, and hosted compute providers (Modal's remote builder,
+anonymously, and hosted sandbox providers (Modal's remote builder,
 E2B/Daytona worker builds) pull the worker image anonymously; no registry
 credentials are needed.
 
@@ -191,7 +191,7 @@ Notes:
 `S3_AUTO_CREATE_BUCKET` stays unset. Tigris is S3-compatible with
 `S3_REGION=auto`, and presigned artifact URLs point at
 `https://fly.storage.tigris.dev` directly, which is reachable from
-hosted-compute workers and browsers without any service in this app.
+hosted-sandbox workers and browsers without any service in this app.
 
 Alternatively, point the S3 values at another external S3-compatible store
 (AWS S3, or Cloudflare R2 with `S3_REGION=auto`). Roomote uses path-style
@@ -213,7 +213,7 @@ workers. Pre-create the bucket, or set `S3_AUTO_CREATE_BUCKET=true` in
 4. Connect GitHub with **Create GitHub App** — the manifest flow derives the
    callback and webhook URLs from `ROOMOTE_APP_URL` and `TRPC_URL`, so no
    manual URL entry is needed.
-5. Enter the compute provider credentials (Modal token pair for the default)
+5. Enter the sandbox provider credentials (Modal token pair for the default)
    and the model provider key when the wizard asks. When swapping to E2B or
    Daytona instead, the wizard and **Settings → Sandboxes** can build the E2B
    template or Daytona snapshot in your provider account after credentials
@@ -241,7 +241,7 @@ GitHub App created by the wizard) keep the callback URLs they were created
 with, so reconnect or update those in their provider settings if you change
 the domain after onboarding.
 
-`TRPC_URL` can stay on `https://<app>.fly.dev:8443` — hosted-compute workers
+`TRPC_URL` can stay on `https://<app>.fly.dev:8443` — hosted-sandbox workers
 and webhooks call it directly, and it never needs to match the domain users
 browse. If you move it onto the custom domain, keep the `:8443` port; the
 certificate from `fly certs add` covers TLS-handled ports other than 443.
@@ -322,7 +322,7 @@ preview proxy cannot share it. Run the proxy as a second Fly app instead:
   reproducible from `fly.toml` plus the secrets.
 - **Costs** split four ways: Fly bills the Machines and Managed Postgres,
   Upstash and Tigris bill usage through Fly, task execution bills through
-  your compute provider (Modal/E2B/Daytona), and model usage bills through
+  your sandbox provider (Modal/E2B/Daytona), and model usage bills through
   your model provider.
 
 ## Maintaining the template

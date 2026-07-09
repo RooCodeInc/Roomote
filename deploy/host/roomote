@@ -299,7 +299,7 @@ cmd_upgrade() {
   set_env_value DOCKER_WORKER_RELEASE_PATH '/roomote/releases/worker-current.tar.gz'
 
   # Keep the installer/deployer-managed Modal base image ref in sync with the
-  # new worker image. The wizard stores the selected compute provider in the
+  # new worker image. The wizard stores the selected sandbox provider in the
   # database, not in the env file, so this must not gate on
   # DEFAULT_COMPUTE_PROVIDER. A different non-empty value is an operator
   # override and is left untouched.

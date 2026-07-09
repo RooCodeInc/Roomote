@@ -25,7 +25,7 @@
 #   in its own Machine, and all app services honor `PORT` (the same pattern
 #   as the Railway template).
 # - Fly Machines have no Docker socket, so task execution must use a hosted
-#   compute provider (modal by default; e2b and daytona also work).
+#   sandbox provider (modal by default; e2b and daytona also work).
 #   EXCLUDED_COMPUTE_PROVIDERS=docker hides the unusable provider.
 # - Managed resources replace the bundled datastores: Fly Managed Postgres
 #   (`fly mpg create` + `fly mpg attach` sets DATABASE_URL), Upstash Redis

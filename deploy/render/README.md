@@ -18,14 +18,14 @@ other PaaS paths, see [deploy/railway](../railway/README.md) and
 - **No Caddy edge.** Render terminates HTTPS and gives every web service its
   own public `onrender.com` domain. The web app and the API run on separate
   origins, so `TRPC_URL` points at the api service's public domain with no
-  `/_roomote-api` path prefix. GitHub webhooks and hosted-compute workers
+  `/_roomote-api` path prefix. GitHub webhooks and hosted-sandbox workers
   call that API origin directly, and Slack webhooks arrive at the web origin
   and are proxied to the API internally.
-- **No Docker socket.** The `docker` compute provider cannot run on Render.
-  Task execution must use a hosted compute provider: Modal (Blueprint
+- **No Docker socket.** The `docker` sandbox provider cannot run on Render.
+  Task execution must use a hosted sandbox provider: Modal (Blueprint
   default), E2B, or Daytona. Those only need outbound HTTPS plus API
   credentials. The Blueprint sets `EXCLUDED_COMPUTE_PROVIDERS=docker` so the
-  unusable provider never appears in setup or compute selection.
+  unusable provider never appears in setup or sandbox selection.
 - **No openssl provisioning step.** The Blueprint sets
   `ROOMOTE_AUTO_GENERATE_KEYS=true`, so Roomote generates the `JOB_AUTH_*` /
   `PREVIEW_AUTH_*` P-256 keypairs at first boot and persists them encrypted
@@ -63,7 +63,7 @@ other PaaS paths, see [deploy/railway](../railway/README.md) and
 - A Render account. The Blueprint uses paid instance types (Render's free
   tier has no background workers, persistent disks, or pre-deploy
   commands).
-- A hosted compute account: [Modal](https://modal.com) (default),
+- A hosted sandbox account: [Modal](https://modal.com) (default),
   [E2B](https://e2b.dev), or [Daytona](https://daytona.io).
 - A model provider API key, for example OpenRouter (entered in the setup
   wizard, not at deploy time).
@@ -108,7 +108,7 @@ apply changes you have not reviewed.
 
 Both published images (`ghcr.io/roocodeinc/roomote-app` and
 `ghcr.io/roocodeinc/roomote-worker`) are public. Render pulls the app image
-anonymously, and hosted compute providers (Modal's remote builder,
+anonymously, and hosted sandbox providers (Modal's remote builder,
 E2B/Daytona worker builds) pull the worker image anonymously; no registry
 credentials are needed. MinIO comes from Docker Hub.
 
@@ -256,11 +256,11 @@ when it is missing. Nothing to do after the first deploy — watch for
 `[artifacts-bucket] Created S3 bucket ...` in the api service's logs.
 
 Presigned artifact URLs use the minio service's public domain
-(`S3_PRESIGN_ENDPOINT`), so hosted-compute workers and browsers can download
+(`S3_PRESIGN_ENDPOINT`), so hosted-sandbox workers and browsers can download
 artifacts directly. Alternatively, skip bundled MinIO entirely and point the
 S3 values at an external S3-compatible store (AWS S3 or Cloudflare R2, with
 `S3_REGION=auto` for R2). Roomote uses path-style addressing, and
-`S3_PRESIGN_ENDPOINT` must be reachable from hosted-compute workers. On an
+`S3_PRESIGN_ENDPOINT` must be reachable from hosted-sandbox workers. On an
 external store, either pre-create the bucket and remove
 `S3_AUTO_CREATE_BUCKET`, or keep the flag if the configured credentials are
 allowed to create buckets (the api only logs a warning when creation fails).
@@ -279,7 +279,7 @@ allowed to create buckets (the api only logs a warning when creation fails).
 4. Connect GitHub with **Create GitHub App** — the manifest flow derives the
    callback and webhook URLs from `ROOMOTE_APP_URL` and `TRPC_URL`, so no
    manual URL entry is needed.
-5. Enter the compute provider credentials (Modal token pair for the default)
+5. Enter the sandbox provider credentials (Modal token pair for the default)
    and the model provider key when the wizard asks. When swapping to E2B or
    Daytona instead, the wizard and **Settings → Sandboxes** can build the E2B
    template or Daytona snapshot in your provider account after credentials
@@ -354,7 +354,7 @@ Live previews need a wildcard domain, which requires a domain you control:
   values.
 - **Costs** split three ways: Render hosts the control plane (web, api,
   controller, bullmq, Postgres, Key Value, MinIO — all on paid instance
-  types), while task execution bills through your compute provider
+  types), while task execution bills through your sandbox provider
   (Modal/E2B/Daytona) and model usage bills through your model provider.
   Upgrade individual instance types from the dashboard as usage grows.
 

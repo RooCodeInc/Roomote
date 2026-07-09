@@ -12,10 +12,10 @@ below.
 | One-command install        | `curl get.roomote.dev \| bash`     | Fresh server, guided browser setup, published images (start here)                                          |
 | Local development          | `pnpm dev`                         | Fast source edits with PM2-managed local services                                                          |
 | Single-host production     | `docker compose ... up -d --build` | Put web, API, controller, queues, preview proxy, and Caddy on one host                                     |
-| Railway (PaaS)             | Railway template                   | Managed platform deploy with hosted compute; see [deploy/railway](deploy/railway/README.md)                |
-| Render (PaaS)              | Render Blueprint                   | Managed platform deploy with hosted compute; see [deploy/render](deploy/render/README.md)                  |
+| Railway (PaaS)             | Railway template                   | Managed platform deploy with hosted sandboxes; see [deploy/railway](deploy/railway/README.md)                |
+| Render (PaaS)              | Render Blueprint                   | Managed platform deploy with hosted sandboxes; see [deploy/render](deploy/render/README.md)                  |
 | Coolify (self-hosted PaaS) | Docker Compose resource            | Run the published images on a Coolify-managed server; see [deploy/coolify](deploy/coolify/README.md)       |
-| Fly.io (PaaS)              | `flyctl` + maintained `fly.toml`   | One Fly app with managed Postgres/Redis/storage and hosted compute; see [deploy/fly](deploy/fly/README.md) |
+| Fly.io (PaaS)              | `flyctl` + maintained `fly.toml`   | One Fly app with managed Postgres/Redis/storage and hosted sandboxes; see [deploy/fly](deploy/fly/README.md) |
 
 The application stack is web, API, controller, BullMQ, preview proxy,
 Postgres, Redis, and MinIO artifact storage. The production overlay adds Caddy
@@ -108,8 +108,8 @@ your sign-in provider's redirect URLs.
 - A model provider account and API key.
 - A GitHub App installed on the repositories Roomote should use.
 - At least one sign-in provider: Slack or Microsoft Teams.
-- Docker socket access for the default single-host Docker compute provider, or
-  a hosted compute provider such as Vercel Sandbox or Modal.
+- Docker socket access for the default single-host Docker sandbox provider, or
+  a hosted sandbox provider such as Vercel Sandbox or Modal.
 - Optional Slack and Linear apps if you want those integrations.
 
 For production-style use, also prepare:
@@ -505,7 +505,7 @@ docker compose --env-file .env.production \
 
 `DEFAULT_COMPUTE_PROVIDER=docker` runs task workers as sibling Docker
 containers on the same host. Include `docker-compose.compute-docker.yml` when
-using Docker compute. That overlay:
+using Docker sandboxes. That overlay:
 
 - builds the `DOCKER_WORKER_IMAGE` from `apps/worker/Dockerfile`;
 - mounts `/var/run/docker.sock` into the controller;
@@ -515,7 +515,7 @@ using Docker compute. That overlay:
 - points `DOCKER_WORKER_RELEASE_PATH` at the controller image's packaged worker
   release archive.
 
-Docker compute is the simplest single-host deployment path:
+Docker sandboxes are the simplest single-host deployment path:
 
 ```sh
 DEFAULT_COMPUTE_PROVIDER=docker
@@ -724,7 +724,7 @@ license key functionality may not be disabled or circumvented.
 ## Current Limits
 
 - The first supported production shape is one self-managed host.
-- Docker compute is supported for that single-host shape. It is not a
+- Docker sandboxes are supported for that single-host shape. It is not a
   multi-host scheduler and it relies on trusted controller access to the host
   Docker socket.
 - Production monitoring, backup automation, and secret rotation are operator

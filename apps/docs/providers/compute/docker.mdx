@@ -16,7 +16,7 @@ Use Docker when:
 - you are developing Roomote locally
 - you are trying Roomote on one trusted host
 - task volume is modest enough for the host machine
-- you want the fewest external compute accounts and credentials
+- you want the fewest external sandbox accounts and credentials
 
 Move to a hosted provider when multiple users run heavier tasks, when task
 work should not compete with the Roomote server, or when you need snapshot
@@ -68,5 +68,5 @@ operators or repositories.
 - **The task cannot reach Roomote services.** Check `DOCKER_WORKER_NETWORK` and
   the Compose network used by the API and controller.
 - **Tasks slow down the app.** Docker tasks share the deployment host's CPU,
-  memory, disk, and network. Use hosted compute or a larger host for heavier
+  memory, disk, and network. Use hosted sandboxes or a larger host for heavier
   workloads.
