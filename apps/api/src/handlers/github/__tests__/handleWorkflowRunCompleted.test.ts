@@ -1,8 +1,8 @@
 const {
   mockDbSelect,
+  mockDeploymentHasActiveCredentialUser,
   mockEnqueueCloudTask,
   mockBuildRepositoryCoverage,
-  mockResolveUserIdForCloudJob,
   mockGetBackgroundAgentSettingsForOrg,
   mockEvaluateFeatureFlag,
   mockStartBackgroundAutomationRun,
@@ -14,9 +14,9 @@ const {
   mockRedisSet,
 } = vi.hoisted(() => ({
   mockDbSelect: vi.fn(),
+  mockDeploymentHasActiveCredentialUser: vi.fn(),
   mockEnqueueCloudTask: vi.fn(),
   mockBuildRepositoryCoverage: vi.fn(),
-  mockResolveUserIdForCloudJob: vi.fn(),
   mockGetBackgroundAgentSettingsForOrg: vi.fn(),
   mockEvaluateFeatureFlag: vi.fn(),
   mockStartBackgroundAutomationRun: vi.fn(),
@@ -54,11 +54,11 @@ vi.mock('@roomote/cloud-agents/server', () => ({
     `$ci-failure-triage trigger=${params.trigger} run=${params.triggeringRun?.runUrl ?? 'none'} announced=${params.hasAnnouncementThread === true}`,
   buildRepositoryCoverage: (...args: unknown[]) =>
     mockBuildRepositoryCoverage(...args),
+  deploymentHasActiveCredentialUser: (...args: unknown[]) =>
+    mockDeploymentHasActiveCredentialUser(...args),
   enqueueCloudTask: (...args: unknown[]) => mockEnqueueCloudTask(...args),
   getTaskUrl: ({ taskId }: { taskId: string }) =>
     `https://app.example.com/task/${taskId}?utm_source=slack&utm_medium=link&utm_campaign=slack.thread_reply`,
-  resolveUserIdForCloudJob: (...args: unknown[]) =>
-    mockResolveUserIdForCloudJob(...args),
 }));
 
 vi.mock('@roomote/feature-flags/server', () => ({
@@ -159,6 +159,7 @@ describe('handleWorkflowRunCompleted', () => {
       }),
     }));
     mockEvaluateFeatureFlag.mockResolvedValue(true);
+    mockDeploymentHasActiveCredentialUser.mockResolvedValue(true);
     mockGetBackgroundAgentSettingsForOrg.mockResolvedValue({
       ciFailureTriageFrequency: 'daily',
       managerSlackChannelId: 'C123MANAGER',
@@ -197,7 +198,6 @@ describe('handleWorkflowRunCompleted', () => {
       undefined as never,
     );
     mockUpsertBackgroundAutomationSlackThread.mockResolvedValue(undefined);
-    mockResolveUserIdForCloudJob.mockResolvedValue('admin-1');
     mockStartBackgroundAutomationRun.mockResolvedValue({ id: 'run-1' });
     mockCompleteBackgroundAutomationRun.mockResolvedValue(undefined);
     mockEnqueueCloudTask.mockResolvedValue({
@@ -220,7 +220,7 @@ describe('handleWorkflowRunCompleted', () => {
     );
     expect(mockEnqueueCloudTask).toHaveBeenCalledWith(
       expect.objectContaining({
-        userId: 'admin-1',
+        userId: null,
         type: CloudTaskType.SuggestedTasks,
         payload: expect.objectContaining({
           repo: 'acme/api',
@@ -382,6 +382,17 @@ describe('handleWorkflowRunCompleted', () => {
     const result = await handleWorkflowRunCompleted(buildPayload());
 
     expect(result.message).toContain('debounced');
+    expect(mockStartBackgroundAutomationRun).not.toHaveBeenCalled();
+    expect(mockEnqueueCloudTask).not.toHaveBeenCalled();
+  });
+
+  it('skips the launch when no active user can resolve credentials', async () => {
+    mockDeploymentHasActiveCredentialUser.mockResolvedValue(false);
+
+    const result = await handleWorkflowRunCompleted(buildPayload());
+
+    expect(result.status).toBe('ok');
+    expect(result.message).toContain('No active user');
     expect(mockStartBackgroundAutomationRun).not.toHaveBeenCalled();
     expect(mockEnqueueCloudTask).not.toHaveBeenCalled();
   });

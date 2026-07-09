@@ -12,10 +12,12 @@ function hasRoomoteTaskAttribution(prBody: string | null | undefined): boolean {
   }
 
   const hasTaskLink = /\[[^\]]+\]\([^)]*\/task\/[^)]*\)/.test(prBody);
+  // The attribution line names either a human ("Opened on behalf of ...") or
+  // the initiating automation ("Created by PR Reviewer.", "Created by
+  // Roomote."). Combined with the task-link requirement above this stays
+  // specific to Roomote-authored PR bodies.
   const hasRoomoteAttributionLine =
-    /Opened on behalf of|Created by Roomote(?: from an unlinked [^.]+)?\./.test(
-      prBody,
-    );
+    /Opened on behalf of|Created by [^.\n]{1,100}\./.test(prBody);
 
   return hasTaskLink && hasRoomoteAttributionLine;
 }

@@ -89,7 +89,7 @@ vi.mock('@roomote/redis', () => ({
 
 vi.mock('@roomote/cloud-agents/server', () => ({
   dequeueCloudTask: (...args: unknown[]) => mockDequeueCloudTask(...args),
-  resolveUserIdForCloudJob: (...args: unknown[]) =>
+  resolveCredentialUserIdForCloudJob: (...args: unknown[]) =>
     mockResolveUserIdForCloudJob(...args),
 }));
 

@@ -15,8 +15,6 @@ import {
   desc,
   inArray,
   lt,
-  isNull,
-  or,
   resolveTaskAttributionDisplay,
   sql,
   isVisibleTask,
@@ -30,11 +28,11 @@ import {
   HAS_PULL_REQUEST_FILTER_VALUE,
 } from '@/types';
 import { getTaskCategoryById } from '@/lib';
-import { parseCreatorFilterValue } from '@/lib/task-creator-filter';
 
 import { type SimpleUser, getUsersById } from './users';
 import { type SimpleCloudJob, getLatestCloudJobsByTaskId } from './cloud-jobs';
 import { getTaskModelDisplayNameMap } from './task-models';
+import { buildTaskCreatorFilterCondition } from './task-creator-filter-condition';
 
 /**
  * Task Filter Conditions
@@ -94,50 +92,7 @@ const getTaskFilterConditions = async ({ filters }: { filters: Filter[] }) => {
   for (const filter of filters) {
     switch (filter.type) {
       case 'userId': {
-        const creatorFilter = parseCreatorFilterValue(filter.value);
-
-        if (creatorFilter.kind === 'roomote') {
-          conditions.push(
-            or(
-              eq(tasks.effectiveAuthorKind, 'roomote'),
-              and(
-                isNull(tasks.effectiveAuthorKind),
-                eq(tasks.attributionKind, 'automatic'),
-              ),
-            )!,
-          );
-        } else if (creatorFilter.kind === 'unlinked_user') {
-          conditions.push(
-            and(
-              eq(tasks.attributionKind, 'unlinked_user'),
-              or(
-                isNull(tasks.effectiveAuthorKind),
-                and(
-                  eq(tasks.effectiveAuthorKind, 'human'),
-                  isNull(tasks.effectiveAuthorUserId),
-                ),
-              ),
-              eq(tasks.attributionSourceKind, creatorFilter.sourceKind),
-              eq(
-                tasks.attributionSourceExternalId,
-                creatorFilter.sourceExternalId,
-              ),
-            )!,
-          );
-        } else {
-          conditions.push(
-            or(
-              and(
-                eq(tasks.effectiveAuthorKind, 'human'),
-                eq(tasks.effectiveAuthorUserId, creatorFilter.userId),
-              ),
-              and(
-                isNull(tasks.effectiveAuthorKind),
-                eq(tasks.attributedUserId, creatorFilter.userId),
-              ),
-            )!,
-          );
-        }
+        conditions.push(buildTaskCreatorFilterCondition(filter.value));
 
         break;
       }

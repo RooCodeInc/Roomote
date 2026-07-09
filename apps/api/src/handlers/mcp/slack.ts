@@ -2,7 +2,7 @@ import type { ContentfulStatusCode } from 'hono/utils/http-status';
 import { Hono } from 'hono';
 
 import { Env } from '@roomote/env';
-import { resolveUserIdForCloudJob } from '@roomote/cloud-agents/server';
+import { resolveCredentialUserIdForCloudJob } from '@roomote/cloud-agents/server';
 import {
   and,
   backgroundAutomationSlackThreads,
@@ -885,7 +885,7 @@ slackMcp.post('/thread_reply', async (c) => {
     return c.json({ error: 'Cloud job not found for this MCP token' }, 404);
   }
 
-  const resolvedUserId = await resolveUserIdForCloudJob(cloudJob);
+  const resolvedUserId = await resolveCredentialUserIdForCloudJob(cloudJob);
 
   if (!hasRealCloudJobUser(resolvedUserId)) {
     return c.json(
@@ -1505,14 +1505,20 @@ slackMcp.post('/thread_lookup', async (c) => {
     return c.json({ error: 'Cloud job not found for this MCP token' }, 404);
   }
 
-  if (!hasRealCloudJobUser(cloudJob.userId)) {
+  // Automation-initiated jobs carry a null userId; their tokens are minted
+  // from the lazily resolved credential user, so validate against that same
+  // resolution instead of the raw job owner column.
+  const tokenCredentialUserId =
+    await resolveCredentialUserIdForCloudJob(cloudJob);
+
+  if (!hasRealCloudJobUser(tokenCredentialUserId)) {
     return c.json(
       { error: 'MCP proxy requires a cloud job associated with a real user' },
       403,
     );
   }
 
-  if (cloudJob.userId !== authContext.userId) {
+  if (tokenCredentialUserId !== authContext.userId) {
     return c.json(
       { error: 'MCP token user does not match cloud job user' },
       403,
@@ -1577,14 +1583,20 @@ slackMcp.post('/reaction_add', async (c) => {
     return c.json({ error: 'Cloud job not found for this MCP token' }, 404);
   }
 
-  if (!hasRealCloudJobUser(cloudJob.userId)) {
+  // Automation-initiated jobs carry a null userId; their tokens are minted
+  // from the lazily resolved credential user, so validate against that same
+  // resolution instead of the raw job owner column.
+  const tokenCredentialUserId =
+    await resolveCredentialUserIdForCloudJob(cloudJob);
+
+  if (!hasRealCloudJobUser(tokenCredentialUserId)) {
     return c.json(
       { error: 'MCP proxy requires a cloud job associated with a real user' },
       403,
     );
   }
 
-  if (cloudJob.userId !== authContext.userId) {
+  if (tokenCredentialUserId !== authContext.userId) {
     return c.json(
       { error: 'MCP token user does not match cloud job user' },
       403,
@@ -1697,14 +1709,20 @@ slackMcp.post('/channel_messages', async (c) => {
     return c.json({ error: 'Cloud job not found for this MCP token' }, 404);
   }
 
-  if (!hasRealCloudJobUser(cloudJob.userId)) {
+  // Automation-initiated jobs carry a null userId; their tokens are minted
+  // from the lazily resolved credential user, so validate against that same
+  // resolution instead of the raw job owner column.
+  const tokenCredentialUserId =
+    await resolveCredentialUserIdForCloudJob(cloudJob);
+
+  if (!hasRealCloudJobUser(tokenCredentialUserId)) {
     return c.json(
       { error: 'MCP proxy requires a cloud job associated with a real user' },
       403,
     );
   }
 
-  if (cloudJob.userId !== authContext.userId) {
+  if (tokenCredentialUserId !== authContext.userId) {
     return c.json(
       { error: 'MCP token user does not match cloud job user' },
       403,
@@ -1777,14 +1795,20 @@ slackMcp.post('/channel_post', async (c) => {
     return c.json({ error: 'Cloud job not found for this MCP token' }, 404);
   }
 
-  if (!hasRealCloudJobUser(cloudJob.userId)) {
+  // Automation-initiated jobs carry a null userId; their tokens are minted
+  // from the lazily resolved credential user, so validate against that same
+  // resolution instead of the raw job owner column.
+  const tokenCredentialUserId =
+    await resolveCredentialUserIdForCloudJob(cloudJob);
+
+  if (!hasRealCloudJobUser(tokenCredentialUserId)) {
     return c.json(
       { error: 'MCP proxy requires a cloud job associated with a real user' },
       403,
     );
   }
 
-  if (cloudJob.userId !== authContext.userId) {
+  if (tokenCredentialUserId !== authContext.userId) {
     return c.json(
       { error: 'MCP token user does not match cloud job user' },
       403,

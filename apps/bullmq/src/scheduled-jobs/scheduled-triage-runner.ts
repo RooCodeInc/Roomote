@@ -1,6 +1,6 @@
 import {
+  deploymentHasActiveCredentialUser,
   enqueueCloudTask,
-  resolveUserIdForCloudJob,
 } from '@roomote/cloud-agents/server';
 import {
   completeBackgroundAutomationRun,
@@ -157,15 +157,26 @@ export function createScheduledTriageJob(
           continue;
         }
 
-        const adminUserId = await resolveUserIdForCloudJob({
-          id: 0,
-          userId: null,
-        });
-
-        if (!adminUserId) {
+        // Automation tasks enqueue with a null userId, but token minting
+        // still needs at least one active user's credentials. Skip up front
+        // so the run is not recorded as succeeded when the job could never
+        // start.
+        if (!(await deploymentHasActiveCredentialUser())) {
           console.warn(
-            `${logPrefix} Skipping deployment: no active user available for scheduled ${config.automationKey.replaceAll('_', ' ')} task`,
+            `${logPrefix} Skipping deployment: no active user available to resolve credentials for scheduled ${config.automationKey.replaceAll('_', ' ')} task`,
           );
+          // Manual "Run now" triggers create a queued run before this job
+          // executes; complete it so it does not stay stuck in `queued`.
+          if (opts.bullmqJobId) {
+            await completeBackgroundAutomationRunByJobId(db, {
+              automationKey: config.automationKey,
+              bullmqJobId: opts.bullmqJobId,
+              status: 'skipped',
+              finishedAt: new Date(),
+              lastRunAt: 'skip',
+              metadata: { reason: 'no_user' },
+            });
+          }
           skipped++;
           continue;
         }
@@ -195,7 +206,10 @@ export function createScheduledTriageJob(
 
         const launchResult = await enqueueCloudTask(
           {
-            userId: adminUserId,
+            // Automation-initiated: no stamped user id. Attribution comes
+            // from the suggestion source, and credentials resolve at
+            // token-mint time.
+            userId: null,
             type: CloudTaskType.SuggestedTasks,
             payload: scanTask.payload,
           },

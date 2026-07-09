@@ -1,7 +1,7 @@
 import { Hono } from 'hono';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { WebStandardStreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/webStandardStreamableHttp.js';
-import { resolveUserIdForCloudJob } from '@roomote/cloud-agents/server';
+import { resolveCredentialUserIdForCloudJob } from '@roomote/cloud-agents/server';
 import {
   and,
   cloudJobs,
@@ -52,7 +52,7 @@ async function resolveSnowflakeMcpAuth(
       throw new McpProxyError(404, 'Cloud job not found for this MCP token');
     }
 
-    const resolvedUserId = await resolveUserIdForCloudJob(cloudJob);
+    const resolvedUserId = await resolveCredentialUserIdForCloudJob(cloudJob);
     if (!resolvedUserId) {
       throw new McpProxyError(
         403,

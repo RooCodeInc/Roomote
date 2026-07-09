@@ -38,7 +38,6 @@ function getSuggestionRouteKind(route: SuggestionDispatchRoute) {
 }
 
 async function enqueueSuggestionRoute(params: {
-  adminUserId: string;
   deployment: SuggesterDeploymentContext;
   previousSuggestions: Array<{
     title: string;
@@ -70,7 +69,9 @@ async function enqueueSuggestionRoute(params: {
 
     const launchResult = await enqueueCloudTask(
       {
-        userId: params.adminUserId,
+        // Automation-initiated: no stamped user id. Attribution comes from
+        // the suggestion source, and credentials resolve at token-mint time.
+        userId: null,
         type: CloudTaskType.SuggestedTasks,
         payload: {
           repo: ALL_REPOSITORIES,
@@ -153,7 +154,6 @@ async function enqueueSuggestionRoute(params: {
 }
 
 export async function dispatchSuggestionRoutes(params: {
-  adminUserId: string;
   deployment: SuggesterDeploymentContext;
   previousSuggestions: Array<{
     title: string;
@@ -170,7 +170,6 @@ export async function dispatchSuggestionRoutes(params: {
 
   for (const route of params.routePlan.routes) {
     const result = await enqueueSuggestionRoute({
-      adminUserId: params.adminUserId,
       deployment: params.deployment,
       previousSuggestions: params.previousSuggestions,
       repositoryCoverage: params.repositoryCoverage,

@@ -27,10 +27,16 @@ import {
 import type { TimePeriodFilter, UserAuthSuccess } from '@/types';
 import { getTaskCategoryById, getUserDisplayName } from '@/lib';
 import {
-  ROOMOTE_CREATOR_FILTER_VALUE,
-  buildCreatorFilterValue,
-  parseCreatorFilterValue,
+  AUTOMATIONS_CREATOR_FILTER_LABEL,
+  AUTOMATIONS_CREATOR_FILTER_VALUE,
+  buildAutomationCreatorFilterValue,
+  buildMatchedUserCreatorFilterValue,
+  buildUnlinkedCreatorFilterValue,
 } from '@/lib/task-creator-filter';
+import {
+  automationInitiatedTaskCondition,
+  buildTaskCreatorFilterCondition,
+} from '@/lib/server/task-creator-filter-condition';
 
 type FilterOption = { value: string; label: string; subLabel?: string };
 
@@ -183,40 +189,27 @@ export async function getUsersOnlyForFilterCommand(
       tasks.attributionSourceExternalId,
     );
 
-  const roomoteExistsQuery = db.select({ id: tasks.id }).from(tasks);
+  const automationsQuery = db
+    .select({
+      sourceDisplayName: tasks.attributionSourceDisplayName,
+    })
+    .from(tasks);
 
-  const roomoteResult = await (
+  const automationResults = await (
     taskCategory
-      ? roomoteExistsQuery.leftJoin(cloudJobs, eq(cloudJobs.taskId, tasks.id))
-      : roomoteExistsQuery
+      ? automationsQuery.leftJoin(cloudJobs, eq(cloudJobs.taskId, tasks.id))
+      : automationsQuery
   )
-    .where(
-      and(
-        ...whereConditions,
-        or(
-          eq(tasks.effectiveAuthorKind, 'roomote'),
-          and(
-            isNull(tasks.effectiveAuthorKind),
-            eq(tasks.attributionKind, 'automatic'),
-          ),
-        ),
-      ),
-    )
-    .limit(1);
+    .where(and(...whereConditions, automationInitiatedTaskCondition()))
+    .groupBy(tasks.attributionSourceDisplayName)
+    .orderBy(tasks.attributionSourceDisplayName);
 
   const matchedUserOptions: FilterOption[] = [
     ...matchedUserResults,
     ...legacyMatchedUserResults,
   ]
     .map((result) => ({
-      value:
-        buildCreatorFilterValue({
-          effectiveAuthorKind: 'human',
-          userId: result.userId,
-          attributionKind: 'matched_user',
-          attributionSourceKind: null,
-          attributionSourceExternalId: null,
-        }) ?? result.userId!,
+      value: buildMatchedUserCreatorFilterValue(result.userId!),
       label:
         getUserDisplayName({
           name: result.username,
@@ -231,10 +224,7 @@ export async function getUsersOnlyForFilterCommand(
 
   const unlinkedUserOptions: FilterOption[] = unlinkedUserResults.flatMap(
     (result) => {
-      const value = buildCreatorFilterValue({
-        effectiveAuthorKind: 'human',
-        userId: null,
-        attributionKind: result.attributionKind,
+      const value = buildUnlinkedCreatorFilterValue({
         attributionSourceKind: result.sourceKind,
         attributionSourceExternalId: result.sourceExternalId,
       });
@@ -253,20 +243,43 @@ export async function getUsersOnlyForFilterCommand(
     },
   );
 
-  const roomoteOptions: FilterOption[] =
-    roomoteResult.length > 0
+  const namedAutomationLabels = new Set<string>();
+  let hasUnnamedAutomations = false;
+
+  for (const result of automationResults) {
+    const label = result.sourceDisplayName?.trim();
+
+    if (
+      !label ||
+      label === PRODUCT_NAME ||
+      label === AUTOMATIONS_CREATOR_FILTER_LABEL
+    ) {
+      hasUnnamedAutomations = true;
+    } else {
+      namedAutomationLabels.add(label);
+    }
+  }
+
+  const automationOptions: FilterOption[] = [
+    ...[...namedAutomationLabels].map((label) => ({
+      value: buildAutomationCreatorFilterValue(label),
+      label,
+      subLabel: getAttributionSourceLabel('automation'),
+    })),
+    ...(hasUnnamedAutomations
       ? [
           {
-            value: ROOMOTE_CREATOR_FILTER_VALUE,
-            label: PRODUCT_NAME,
+            value: AUTOMATIONS_CREATOR_FILTER_VALUE,
+            label: AUTOMATIONS_CREATOR_FILTER_LABEL,
           },
         ]
-      : [];
+      : []),
+  ];
 
   return [
     ...matchedUserOptions,
     ...unlinkedUserOptions,
-    ...roomoteOptions,
+    ...automationOptions,
   ].sort((left, right) => left.label.localeCompare(right.label));
 }
 
@@ -297,49 +310,7 @@ export async function getRepositoriesForFilterCommand(
   const taskCategory = getTaskCategoryById(input.category);
 
   if (input.userId) {
-    const creatorFilter = parseCreatorFilterValue(input.userId);
-
-    if (creatorFilter.kind === 'roomote') {
-      conditions.push(
-        or(
-          eq(tasks.effectiveAuthorKind, 'roomote'),
-          and(
-            isNull(tasks.effectiveAuthorKind),
-            eq(tasks.attributionKind, 'automatic'),
-          ),
-        )!,
-      );
-    } else if (creatorFilter.kind === 'unlinked_user') {
-      conditions.push(eq(tasks.attributionKind, 'unlinked_user'));
-      conditions.push(
-        or(
-          isNull(tasks.effectiveAuthorKind),
-          and(
-            eq(tasks.effectiveAuthorKind, 'human'),
-            isNull(tasks.effectiveAuthorUserId),
-          ),
-        )!,
-      );
-      conditions.push(
-        eq(tasks.attributionSourceKind, creatorFilter.sourceKind),
-      );
-      conditions.push(
-        eq(tasks.attributionSourceExternalId, creatorFilter.sourceExternalId),
-      );
-    } else {
-      conditions.push(
-        or(
-          and(
-            eq(tasks.effectiveAuthorKind, 'human'),
-            eq(tasks.effectiveAuthorUserId, creatorFilter.userId),
-          ),
-          and(
-            isNull(tasks.effectiveAuthorKind),
-            eq(tasks.attributedUserId, creatorFilter.userId),
-          ),
-        )!,
-      );
-    }
+    conditions.push(buildTaskCreatorFilterCondition(input.userId));
   }
 
   if (taskCategory) {
@@ -408,49 +379,7 @@ export async function getPullRequestsForFilterCommand(
   }
 
   if (input.userId) {
-    const creatorFilter = parseCreatorFilterValue(input.userId);
-
-    if (creatorFilter.kind === 'roomote') {
-      whereConditions.push(
-        or(
-          eq(tasks.effectiveAuthorKind, 'roomote'),
-          and(
-            isNull(tasks.effectiveAuthorKind),
-            eq(tasks.attributionKind, 'automatic'),
-          ),
-        )!,
-      );
-    } else if (creatorFilter.kind === 'unlinked_user') {
-      whereConditions.push(eq(tasks.attributionKind, 'unlinked_user'));
-      whereConditions.push(
-        or(
-          isNull(tasks.effectiveAuthorKind),
-          and(
-            eq(tasks.effectiveAuthorKind, 'human'),
-            isNull(tasks.effectiveAuthorUserId),
-          ),
-        )!,
-      );
-      whereConditions.push(
-        eq(tasks.attributionSourceKind, creatorFilter.sourceKind),
-      );
-      whereConditions.push(
-        eq(tasks.attributionSourceExternalId, creatorFilter.sourceExternalId),
-      );
-    } else {
-      whereConditions.push(
-        or(
-          and(
-            eq(tasks.effectiveAuthorKind, 'human'),
-            eq(tasks.effectiveAuthorUserId, creatorFilter.userId),
-          ),
-          and(
-            isNull(tasks.effectiveAuthorKind),
-            eq(tasks.attributedUserId, creatorFilter.userId),
-          ),
-        )!,
-      );
-    }
+    whereConditions.push(buildTaskCreatorFilterCondition(input.userId));
   }
 
   if (input.timePeriod && input.timePeriod !== 'all') {
@@ -545,49 +474,7 @@ export async function getModelsForFilterCommand(
   }
 
   if (input.userId) {
-    const creatorFilter = parseCreatorFilterValue(input.userId);
-
-    if (creatorFilter.kind === 'roomote') {
-      conditions.push(
-        or(
-          eq(tasks.effectiveAuthorKind, 'roomote'),
-          and(
-            isNull(tasks.effectiveAuthorKind),
-            eq(tasks.attributionKind, 'automatic'),
-          ),
-        )!,
-      );
-    } else if (creatorFilter.kind === 'unlinked_user') {
-      conditions.push(eq(tasks.attributionKind, 'unlinked_user'));
-      conditions.push(
-        or(
-          isNull(tasks.effectiveAuthorKind),
-          and(
-            eq(tasks.effectiveAuthorKind, 'human'),
-            isNull(tasks.effectiveAuthorUserId),
-          ),
-        )!,
-      );
-      conditions.push(
-        eq(tasks.attributionSourceKind, creatorFilter.sourceKind),
-      );
-      conditions.push(
-        eq(tasks.attributionSourceExternalId, creatorFilter.sourceExternalId),
-      );
-    } else {
-      conditions.push(
-        or(
-          and(
-            eq(tasks.effectiveAuthorKind, 'human'),
-            eq(tasks.effectiveAuthorUserId, creatorFilter.userId),
-          ),
-          and(
-            isNull(tasks.effectiveAuthorKind),
-            eq(tasks.attributedUserId, creatorFilter.userId),
-          ),
-        )!,
-      );
-    }
+    conditions.push(buildTaskCreatorFilterCondition(input.userId));
   }
 
   if (taskCategory) {

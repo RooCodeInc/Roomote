@@ -10,7 +10,7 @@ vi.mock('@roomote/cloud-agents/server', () => ({
   enqueueCloudTask: vi.fn(),
   getTaskUrl: vi.fn(),
   routeGitHubTask: vi.fn(),
-  resolveUserIdForCloudJob: vi.fn(),
+  resolveCredentialUserIdForCloudJob: vi.fn(),
 }));
 
 vi.mock('@roomote/db/server', () => ({

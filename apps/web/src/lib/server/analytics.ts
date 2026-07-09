@@ -17,10 +17,8 @@ import { syncGitHubPullRequestFactsForOrg } from '@roomote/sdk/server';
 import {
   ALL_REPOSITORIES,
   CloudTaskType,
-  type EffectiveAuthorKind,
   type PullRequestStatus,
   PRODUCT_NAME,
-  type TaskAttributionKind,
   type TaskAttributionSourceKind,
 } from '@roomote/types';
 import {
@@ -33,7 +31,6 @@ import {
   desc,
   eq,
   inArray,
-  resolveTaskAttributionDisplay,
 } from '@roomote/db/server';
 
 import {
@@ -61,8 +58,8 @@ import {
 } from '@/types';
 
 import type { UserAuthSuccess } from '@/types';
-import { getUserDisplayName } from '@/lib/user-display-name';
 
+import { getCanonicalTaskAttributionDimensionValue } from './analytics-task-user-dimension';
 import { getLatestCloudJobsByTaskId } from './cloud-jobs';
 import { getRepositories } from './source-control';
 import {
@@ -71,6 +68,7 @@ import {
 } from './pull-request-facts';
 
 const SYSTEM_SOURCE = 'System';
+const AUTOMATION_SOURCE = 'Automation';
 const UNKNOWN_REPO_LABEL = 'Unknown Repo';
 const NO_PROJECT_LABEL = 'No Environment';
 const NO_VALUE_LABEL = '—';
@@ -87,7 +85,7 @@ const SOURCE_ORDER = [
   'GitHub',
   'Linear',
   'Web',
-  'Automation',
+  AUTOMATION_SOURCE,
   SYSTEM_SOURCE,
 ];
 const PR_STATUS_ORDER = ['Closed', 'Draft', 'Open', 'Merged'] as const;
@@ -291,24 +289,6 @@ function getSummaryPeriodCount(
   }
 }
 
-function formatUserLabel(
-  user: { name: string | null; email: string | null } | null,
-) {
-  return getUserDisplayName(user) || PRODUCT_NAME;
-}
-
-function formatDisambiguatedUserLabel(
-  user: { name: string | null; email: string | null } | null,
-) {
-  const displayName = getUserDisplayName(user);
-
-  if (displayName && user?.email) {
-    return `${displayName} (${user.email})`;
-  }
-
-  return formatUserLabel(user);
-}
-
 function createDimensionValue(
   key: string,
   label: string,
@@ -327,97 +307,6 @@ function createDimensionValue(
 
 function createLabelBackedDimensionValue(label: string) {
   return createDimensionValue(label, label);
-}
-
-function getCanonicalUserDimensionValue(user: {
-  id: string | null;
-  name: string | null;
-  email: string | null;
-}) {
-  const label = formatUserLabel(user);
-  const normalizedEmail = user.email?.trim().toLowerCase() ?? null;
-  const key = user.id
-    ? `user:${user.id}`
-    : normalizedEmail
-      ? `email:${normalizedEmail}`
-      : PRODUCT_NAME;
-
-  return createDimensionValue(key, label, formatDisambiguatedUserLabel(user));
-}
-
-function getCanonicalTaskAttributionDimensionValue(input: {
-  attributionKind: TaskAttributionKind | null;
-  attributedUserId: string | null;
-  attributionSourceKind: TaskAttributionSourceKind | null;
-  attributionSourceDisplayName: string | null;
-  attributionSourceExternalId: string | null;
-  attributedGithubLogin: string | null;
-  effectiveAuthorKind: EffectiveAuthorKind | null;
-  effectiveAuthorUserId: string | null;
-  effectiveAuthorDisplayName: string | null;
-  effectiveAuthorGithubLogin: string | null;
-  userName: string | null;
-  userEmail: string | null;
-}) {
-  const attribution = resolveTaskAttributionDisplay(
-    {
-      attributionKind: input.attributionKind,
-      attributedUserId: input.attributedUserId,
-      attributionSourceKind: input.attributionSourceKind,
-      attributionSourceDisplayName: input.attributionSourceDisplayName,
-      attributionSourceExternalId: input.attributionSourceExternalId,
-      attributedGithubLogin: input.attributedGithubLogin,
-      effectiveAuthorKind: input.effectiveAuthorKind,
-      effectiveAuthorUserId: input.effectiveAuthorUserId,
-      effectiveAuthorDisplayName: input.effectiveAuthorDisplayName,
-      effectiveAuthorGithubLogin: input.effectiveAuthorGithubLogin,
-    },
-    {
-      attributedUser: {
-        id: input.attributedUserId,
-        name: input.userName,
-        email: input.userEmail,
-      },
-    },
-  );
-
-  if (attribution.kind === 'matched_user') {
-    const matchedUserId =
-      input.effectiveAuthorKind === 'human' && input.effectiveAuthorUserId
-        ? input.effectiveAuthorUserId
-        : input.attributedUserId;
-    const matchedUserName =
-      input.effectiveAuthorKind === 'human' &&
-      input.effectiveAuthorDisplayName &&
-      input.effectiveAuthorUserId !== input.attributedUserId
-        ? input.effectiveAuthorDisplayName
-        : input.userName;
-    const matchedUserEmail =
-      matchedUserId && matchedUserId === input.attributedUserId
-        ? input.userEmail
-        : null;
-
-    return getCanonicalUserDimensionValue({
-      id: matchedUserId,
-      name: matchedUserName,
-      email: matchedUserEmail,
-    });
-  }
-
-  if (attribution.kind === 'unlinked_user') {
-    const key =
-      input.effectiveAuthorKind === 'human' &&
-      !input.effectiveAuthorUserId &&
-      attribution.analyticsDisplay
-        ? `unlinked:${attribution.sourceKind}:${attribution.analyticsDisplay}`
-        : input.attributionSourceExternalId
-          ? `unlinked:${input.attributionSourceKind}:${input.attributionSourceExternalId}`
-          : `unlinked:${attribution.analyticsDisplay}`;
-
-    return createDimensionValue(key, attribution.analyticsDisplay);
-  }
-
-  return createLabelBackedDimensionValue(attribution.analyticsDisplay);
 }
 
 function formatRepositoryLabel(repositoryName: string) {
@@ -441,14 +330,12 @@ function mapTaskSource(taskType: CloudTaskType | string | null | undefined) {
     return 'Linear';
   }
 
-  if (
-    taskType === CloudTaskType.StandardTask ||
-    taskType === CloudTaskType.SuggestedTasks ||
-    taskType === CloudTaskType.LegacyOnboardingSuggestions
-  ) {
+  if (taskType === CloudTaskType.StandardTask) {
     return 'Web';
   }
 
+  // Suggestion-generated and onboarding tasks are automation-initiated and
+  // are labeled via the attribution source kind before this fallback runs.
   return SYSTEM_SOURCE;
 }
 
@@ -1073,7 +960,10 @@ async function getTaskAnalyticsRows(
   const taskRows = await getTaskAnalyticsBaseRows(auth, timePeriod, now);
 
   return taskRows.map((task) => {
-    const sourceLabel = mapTaskSource(task.latestJobType);
+    const sourceLabel =
+      task.attributionSourceKind === 'automation'
+        ? AUTOMATION_SOURCE
+        : mapTaskSource(task.latestJobType);
 
     return {
       id: task.id,
@@ -1107,6 +997,7 @@ type TaskAnalyticsBaseRow = {
   title: string;
   timestamp: Date;
   latestJobType: CloudTaskType | null;
+  attributionSourceKind: TaskAttributionSourceKind | null;
   projectLabel: string;
   userDimension: AnalyticsDimensionValue;
 };
@@ -1237,6 +1128,7 @@ async function getTaskAnalyticsBaseRows(
       title: task.title,
       timestamp: task.timestamp,
       latestJobType: latestJob?.type ?? null,
+      attributionSourceKind: task.attributionSourceKind,
       projectLabel: getProjectLabel(task.repositoryName, environmentId),
       userDimension,
     } satisfies TaskAnalyticsBaseRow;

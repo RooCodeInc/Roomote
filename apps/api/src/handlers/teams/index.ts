@@ -58,7 +58,7 @@ import {
   buildTeamsRoutingContext,
   enqueueCloudTask,
   getTaskUrl,
-  resolveUserIdForCloudJob,
+  resolveCredentialUserIdForCloudJob,
   routeTask,
   type RoutingWorkspace,
 } from '@roomote/cloud-agents/server';
@@ -985,7 +985,7 @@ async function resumeTeamsTaskFromSnapshot(input: {
       const resumeUserId =
         queuedMessage.userId ??
         completedJob.userId ??
-        (await resolveUserIdForCloudJob(completedJob));
+        (await resolveCredentialUserIdForCloudJob(completedJob));
       if (!resumeUserId) {
         throw new Error(
           'No active user is available for Teams snapshot resume.',

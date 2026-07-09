@@ -66,7 +66,7 @@ vi.mock('@roomote/db/encryption', () => ({
 }));
 
 vi.mock('@roomote/cloud-agents/server', () => ({
-  resolveUserIdForCloudJob: mockResolveUserIdForCloudJob,
+  resolveCredentialUserIdForCloudJob: mockResolveUserIdForCloudJob,
 }));
 
 vi.mock('snowflake-sdk', () => ({

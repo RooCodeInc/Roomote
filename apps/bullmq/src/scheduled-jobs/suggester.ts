@@ -1,8 +1,9 @@
 import {
+  deploymentHasActiveCredentialUser,
   findEnvironmentForRepo,
-  resolveUserIdForCloudJob,
 } from '@roomote/cloud-agents/server';
 import {
+  completeBackgroundAutomationRunByJobId,
   db,
   slackInstallations,
   taskSuggestions,
@@ -168,15 +169,25 @@ export async function suggesterJob(
         continue;
       }
 
-      const adminUserId = await resolveUserIdForCloudJob({
-        id: 0,
-        userId: null,
-      });
-
-      if (!adminUserId) {
+      // Automation tasks enqueue with a null userId, but token minting still
+      // needs at least one active user's credentials. Skip up front so the
+      // run is not recorded as launched when the job could never start.
+      if (!(await deploymentHasActiveCredentialUser())) {
         console.warn(
-          `${LOG_PREFIX} Skipping deployment: no user available for scheduled suggester task`,
+          `${LOG_PREFIX} Skipping deployment: no active user available to resolve credentials for scheduled suggester task`,
         );
+        // Manual "Run now" triggers create a queued run before this job
+        // executes; complete it so it does not stay stuck in `queued`.
+        if (opts.bullmqJobId) {
+          await completeBackgroundAutomationRunByJobId(db, {
+            automationKey: 'suggester',
+            bullmqJobId: opts.bullmqJobId,
+            status: 'skipped',
+            finishedAt: new Date(),
+            lastRunAt: 'skip',
+            metadata: { reason: 'no_user' },
+          });
+        }
         skipped++;
         continue;
       }
@@ -255,7 +266,6 @@ export async function suggesterJob(
         },
       });
       const dispatchResult = await dispatchSuggestionRoutes({
-        adminUserId,
         deployment,
         previousSuggestions,
         repositoryCoverage: environmentBackedRepositoryCoverage,

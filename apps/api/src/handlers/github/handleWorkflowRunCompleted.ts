@@ -4,9 +4,9 @@ import { getRedis } from '@roomote/redis';
 import {
   buildCiFailureTriagePrompt,
   buildRepositoryCoverage,
+  deploymentHasActiveCredentialUser,
   enqueueCloudTask,
   getTaskUrl,
-  resolveUserIdForCloudJob,
 } from '@roomote/cloud-agents/server';
 import {
   and,
@@ -249,14 +249,14 @@ export async function handleWorkflowRunCompleted(
     };
   }
 
-  const adminUserId = await resolveUserIdForCloudJob({
-    id: 0,
-    userId: null,
-  });
-
-  if (!adminUserId) {
-    console.warn(`${LOG_PREFIX} No user available for CI failure triage`);
-    return { status: 'ok', message: 'No user available' };
+  // Automation tasks enqueue with a null userId, but token minting still
+  // needs at least one active user's credentials. Bail up front so no run or
+  // announcement is recorded for a job that could never start.
+  if (!(await deploymentHasActiveCredentialUser())) {
+    console.warn(
+      `${LOG_PREFIX} No active user available to resolve credentials for CI failure triage`,
+    );
+    return { status: 'ok', message: 'No active user available' };
   }
 
   const workflowName = run.name ?? payload.workflow?.name ?? 'unknown';
@@ -328,7 +328,9 @@ export async function handleWorkflowRunCompleted(
 
     const launchResult = await enqueueCloudTask(
       {
-        userId: adminUserId,
+        // Automation-initiated: no stamped user id. Attribution comes from
+        // the suggestion source, and credentials resolve at token-mint time.
+        userId: null,
         type: CloudTaskType.SuggestedTasks,
         payload: {
           repo: match.repositoryFullName,
