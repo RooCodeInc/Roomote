@@ -5,13 +5,7 @@ import { useRouter } from 'next/navigation';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { PRODUCT_NAME } from '@roomote/types';
 import type { SourceControlProvider } from '@roomote/types';
-import {
-  Button,
-  Loader2,
-  ArrowRight,
-  Switch,
-  Checkbox,
-} from '@/components/system';
+import { Button, Loader2, ArrowRight, Checkbox } from '@/components/system';
 import { useTRPC } from '@/trpc/client';
 import { useEnvironments } from '@/hooks/environments/useEnvironments';
 import { buildInvokeMethods } from '../invokeMethods';
