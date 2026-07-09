@@ -53,7 +53,7 @@ vi.mock('@roomote/db/server', () => ({
   db: {
     transaction: (...args: unknown[]) => mockDbTransaction(...args),
   },
-  backgroundAgentSettings: { orgId: 'backgroundAgentSettings.orgId' },
+  deploymentSettings: { orgId: 'deploymentSettings.orgId' },
   taskRuns: {},
   tasks: {},
   eq: (...args: unknown[]) => mockEq(...args),
@@ -197,7 +197,7 @@ describe('dequeueResumeCloudJob', () => {
       return callback({
         execute: (...args: unknown[]) => mockTxExecute(...args),
         query: {
-          backgroundAgentSettings: {
+          deploymentSettings: {
             findFirst: (...args: unknown[]) =>
               mockTxFindFirstBackgroundAgentSettings(...args),
           },

@@ -61,22 +61,6 @@ CREATE TABLE "automations" (
 	"updated_at" timestamp DEFAULT now() NOT NULL
 );
 --> statement-breakpoint
-CREATE TABLE "background_agent_settings" (
-	"id" text PRIMARY KEY DEFAULT 'default' NOT NULL,
-	"manager_slack_channel_id" text,
-	"global_agent_instructions" text,
-	"authorship_instructions" text,
-	"compiled_authorship_rules" jsonb DEFAULT '[]'::jsonb NOT NULL,
-	"compiled_authorship_issues" jsonb DEFAULT '[]'::jsonb NOT NULL,
-	"compiled_authorship_at" timestamp,
-	"style_guidance" text,
-	"slack_summon_emoji" text,
-	"slack_ack_emoji" text DEFAULT 'eyes' NOT NULL,
-	"slack_completion_emoji" text DEFAULT 'white_check_mark' NOT NULL,
-	"created_at" timestamp DEFAULT now() NOT NULL,
-	"updated_at" timestamp DEFAULT now() NOT NULL
-);
---> statement-breakpoint
 CREATE TABLE "compute_provider_usage" (
 	"id" uuid PRIMARY KEY DEFAULT gen_random_uuid() NOT NULL,
 	"provider" text NOT NULL,
@@ -151,6 +135,16 @@ CREATE TABLE "deployment_settings" (
 	"setup_completed_at" timestamp,
 	"setup_new_state" jsonb,
 	"slack_onboarding_stage" text,
+	"manager_slack_channel_id" text,
+	"global_agent_instructions" text,
+	"authorship_instructions" text,
+	"compiled_authorship_rules" jsonb DEFAULT '[]'::jsonb NOT NULL,
+	"compiled_authorship_issues" jsonb DEFAULT '[]'::jsonb NOT NULL,
+	"compiled_authorship_at" timestamp,
+	"style_guidance" text,
+	"slack_summon_emoji" text,
+	"slack_ack_emoji" text DEFAULT 'eyes' NOT NULL,
+	"slack_completion_emoji" text DEFAULT 'white_check_mark' NOT NULL,
 	"created_at" timestamp DEFAULT now() NOT NULL,
 	"updated_at" timestamp DEFAULT now() NOT NULL
 );

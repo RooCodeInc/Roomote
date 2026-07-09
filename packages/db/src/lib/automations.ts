@@ -34,7 +34,7 @@ import {
 } from '@roomote/types';
 
 import { type DatabaseOrTransaction, db } from '../db';
-import { automations, backgroundAgentSettings } from '../schema';
+import { automations, deploymentSettings } from '../schema';
 import type {
   Automation,
   BackgroundAgentSettings,
@@ -534,7 +534,7 @@ export async function getAutomationRuntime(
 
   const [automation, settingsRow] = await Promise.all([
     db.query.automations.findFirst({ where: eq(automations.key, key) }),
-    db.query.backgroundAgentSettings.findFirst({
+    db.query.deploymentSettings.findFirst({
       columns: { managerSlackChannelId: true },
     }),
   ]);
@@ -558,9 +558,9 @@ export async function getAutomationRuntime(
   };
 }
 
-export async function ensureBackgroundAgentSettingsRow(): Promise<void> {
-  await db.insert(backgroundAgentSettings).values({}).onConflictDoNothing({
-    target: backgroundAgentSettings.id,
+export async function ensureDeploymentSettingsRow(): Promise<void> {
+  await db.insert(deploymentSettings).values({}).onConflictDoNothing({
+    target: deploymentSettings.id,
   });
 }
 
@@ -606,7 +606,7 @@ function isFrequencyOf<T extends string>(modes: readonly T[]) {
  * automations table is the single source of truth for per-automation state.
  */
 export function normalizeBackgroundAgentSettings(
-  row: typeof backgroundAgentSettings.$inferSelect | null | undefined,
+  row: typeof deploymentSettings.$inferSelect | null | undefined,
   automationRows: Automation[] = [],
 ): BackgroundAgentSettings {
   const now = new Date();
@@ -768,7 +768,7 @@ export function normalizeBackgroundAgentSettings(
 
 export async function getBackgroundAgentSettings(): Promise<BackgroundAgentSettings> {
   const [row, automationRows] = await Promise.all([
-    db.query.backgroundAgentSettings.findFirst(),
+    db.query.deploymentSettings.findFirst(),
     listAutomations(),
   ]);
 
@@ -776,7 +776,7 @@ export async function getBackgroundAgentSettings(): Promise<BackgroundAgentSetti
 }
 
 export async function getBackgroundAgentSettingsForDeployment(): Promise<BackgroundAgentSettings> {
-  await ensureBackgroundAgentSettingsRow();
+  await ensureDeploymentSettingsRow();
   return getBackgroundAgentSettings();
 }
 
@@ -789,8 +789,8 @@ export async function getReviewCodeAutomationSettings(): Promise<PrReviewerSetti
 }
 
 export async function getSlackEmojiPreferencesForDeployment(): Promise<SlackEmojiPreferences> {
-  await ensureBackgroundAgentSettingsRow();
-  const row = await db.query.backgroundAgentSettings.findFirst();
+  await ensureDeploymentSettingsRow();
+  const row = await db.query.deploymentSettings.findFirst();
 
   return {
     slackSummonEmoji: normalizeOptionalSlackEmojiName(row?.slackSummonEmoji),

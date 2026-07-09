@@ -19,7 +19,7 @@ Slack is both a sign-in provider and a task entry surface. The local product has
 | Linked users       | Human Slack users map to Roomote users through `slack_user_mappings` and linked-account flows.            |
 | Tasks              | Slack app mentions and selected interactive actions create or resume Roomote tasks.                       |
 | Automations        | Slack-posting automations store destinations in `background_automation_targets`.                          |
-| Shared preferences | Emoji, tone, authorship, and suggestion preferences live in `background_agent_settings`.                  |
+| Shared preferences | Emoji, tone, authorship, and suggestion preferences live on `deployment_settings`.                       |
 | Setup state        | Slack setup/onboarding stage and router debug destination live in `deployment_settings`.                  |
 
 ## Key Code
@@ -32,7 +32,7 @@ Slack is both a sign-in provider and a task entry surface. The local product has
 - [`packages/slack/src/start-auto-routed-slack-task.ts`](../../packages/slack/src/start-auto-routed-slack-task.ts): auto-routed Slack launch path.
 - [`packages/slack/src/manager-mcp-setup.ts`](../../packages/slack/src/manager-mcp-setup.ts): manager-channel setup nudges for deployment-scoped MCP integrations.
 - [`packages/communication/src/chat-messages.ts`](../../packages/communication/src/chat-messages.ts): shared copy builders that Slack Block Kit formats for account linking, routing confirmation, task start, retryable errors, and PR-merged notices.
-- [`packages/db/src/schema.ts`](../../packages/db/src/schema.ts): `slack_installations`, `slack_user_mappings`, `background_agent_settings`, `background_automations`, and `background_automation_targets`.
+- [`packages/db/src/schema.ts`](../../packages/db/src/schema.ts): `slack_installations`, `slack_user_mappings`, `deployment_settings` (shared agent settings), `background_automations`, and `background_automation_targets`.
 
 ## App Setup
 
@@ -141,7 +141,7 @@ Deployment-level Slack automation state is split between:
 
 - `background_automations`: enablement, schedule, and automation-specific settings.
 - `background_automation_targets`: per-automation Slack destinations such as manager channels or auto-respond channels.
-- `background_agent_settings`: shared tone, reaction emoji, authorship, and suggestion settings.
+- `deployment_settings`: shared tone, reaction emoji, authorship, and suggestion settings (folded in from the former `background_agent_settings` table).
 
 Router debug posts are not background automations. Their Slack destination is
 stored as `deployment_settings.router_debug_slack_channel_id` and can be managed

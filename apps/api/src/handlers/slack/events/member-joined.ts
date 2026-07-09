@@ -1,8 +1,8 @@
 import { formatErrorForLog } from '@roomote/types';
 import {
-  backgroundAgentSettings,
   db,
   count,
+  deploymentSettings,
   eq,
   upsertAutomation,
   getBackgroundAgentSettingsForDeployment,
@@ -133,13 +133,13 @@ export async function maybePostSlackChannelWelcome(params: {
     const now = new Date();
 
     await db
-      .insert(backgroundAgentSettings)
+      .insert(deploymentSettings)
       .values({
         managerSlackChannelId: event.channel,
         updatedAt: now,
       })
       .onConflictDoUpdate({
-        target: backgroundAgentSettings.id,
+        target: deploymentSettings.id,
         set: {
           managerSlackChannelId: event.channel,
           updatedAt: now,
@@ -191,12 +191,12 @@ export async function maybePostSlackChannelWelcome(params: {
   } catch (error) {
     if (shouldEnableStarterAutomations) {
       await db
-        .update(backgroundAgentSettings)
+        .update(deploymentSettings)
         .set({
           managerSlackChannelId: settings.managerSlackChannelId,
           updatedAt: new Date(),
         })
-        .where(eq(backgroundAgentSettings.id, 'default'))
+        .where(eq(deploymentSettings.id, 'default'))
         .catch((cleanupError) => {
           console.warn(
             `[SlackWebhook] Failed to rollback manager-channel automation settings for ${event.channel}: ${formatErrorForLog(cleanupError)}`,

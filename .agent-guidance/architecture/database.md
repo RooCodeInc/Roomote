@@ -69,6 +69,7 @@ This pattern keeps related definitions together and makes the schema easier to n
 - Singleton deployment row keyed by `id`
 - Stores deployment-wide setup state, setup task linkage, initial admin user, and onboarding timestamps
 - `licenseKey` holds the deployment's signed Roomote license key (nullable; verified at read time — see [Licensing & Seat Limits](../features/licensing.md))
+- Also owns the deployment-wide Roomote agent settings folded in from the former `background_agent_settings` table: `managerSlackChannelId`, `globalAgentInstructions`, `authorshipInstructions` / compiled-authorship columns (`compiledAuthorshipRules`, `compiledAuthorshipIssues`, `compiledAuthorshipAt`), `styleGuidance`, and the Slack summon/ack/completion emoji columns. `getBackgroundAgentSettingsForDeployment()` reads these and layers a per-automation projection (built from `automations`) on top; there is no separate settings table or row-bootstrap path
 - Owns deployment state directly; Roomote is a single-deployment app and every active user belongs to that deployment
 
 **tasks**
@@ -101,10 +102,10 @@ The durable unit of work. One task = one conversation/piece of work; execution a
 - **One launch state machine** for every launchable surface: `status` (`open` | `launching` | `launched` | `failed` | `dismissed`), `launchClaimedAt` (stale-claim recovery), `launchedTaskId` (FK → `tasks`, recorded by every surface that launches), `launchedAt`, `failedAt`, `launchError`, `dismissedAt`. MCP recommendations get real `work_items` rows too
 - Unique index on `(sourceTaskId, sortOrder)` preserves ordering within a source task's generated batch
 
-**backgroundAgentSettings** (`background_agent_settings`)
+**Deployment-wide agent settings** (columns on `deployment_settings`)
 
-- Singleton (`id = 'default'`) holding only the genuinely global survivors after the rebuild: `managerSlackChannelId`, `globalAgentInstructions`, `authorshipInstructions` / compiled-authorship columns, `styleGuidance`, and the Slack summon/ack/completion emoji columns
-- Deleted from this table: the ~20 persona columns, the ~1250-line normalize/merge layer, the manager-channel triple fallback, per-feature Slack channel columns, `platformIssueSlackChannelId`, `suggesterInstructions`, and all per-automation cadence/last-run state (those now live on `automations`)
+- The former standalone `background_agent_settings` table was folded into `deployment_settings`; the genuinely global survivors after the rebuild now live as columns on the deployment singleton: `managerSlackChannelId`, `globalAgentInstructions`, `authorshipInstructions` / compiled-authorship columns, `styleGuidance`, and the Slack summon/ack/completion emoji columns
+- Deleted in the rebuild: the ~20 persona columns, the ~1250-line normalize/merge layer, the manager-channel triple fallback, per-feature Slack channel columns, `platformIssueSlackChannelId`, `suggesterInstructions`, and all per-automation cadence/last-run state (those now live on `automations`)
 - Channel resolution is now two levels only: the automation target, then the manager channel
 
 **automations** (`automations`)

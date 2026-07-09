@@ -1161,7 +1161,7 @@ async function enqueueFreshLaunch(
   const cloudJob = await db.transaction(async (tx) => {
     // Commit-author evaluation is unconditional at fresh enqueue.
     const [authorshipSettingsRow, matchedHumanActor] = await Promise.all([
-      tx.query.backgroundAgentSettings.findFirst({
+      tx.query.deploymentSettings.findFirst({
         columns: {
           compiledAuthorshipRules: true,
         },

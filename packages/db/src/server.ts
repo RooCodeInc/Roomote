@@ -144,8 +144,6 @@ export {
   slackQuickAnswersRelations,
   linearPendingSelections,
   linearPendingSelectionsRelations,
-  backgroundAgentSettings,
-  backgroundAgentSettingsRelations,
   automations,
   automationsRelations,
   trackedMessages,

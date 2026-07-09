@@ -47,7 +47,6 @@ import type {
   environments,
   environmentConfigVersions,
   environmentRepositoryMappings,
-  backgroundAgentSettings,
   automations,
   trackedMessages,
 } from './schema';
@@ -406,74 +405,86 @@ export type CreateLinearPendingSelection = Omit<
 /**
  * backgroundAgentSettings
  *
- * The stored row holds only deployment-wide agent settings (manager channel,
- * global instructions, style guidance, authorship rules, Slack emoji
- * preferences). The flat settings view consumed across the product adds a
- * per-automation projection built from the automations table.
+ * The stored columns live on deployment_settings and hold deployment-wide
+ * agent settings (manager channel, global instructions, style guidance,
+ * authorship rules, Slack emoji preferences). The flat settings view consumed
+ * across the product adds a per-automation projection built from the
+ * automations table.
  */
 
-export type BackgroundAgentSettings =
-  typeof backgroundAgentSettings.$inferSelect & {
-    channelAutoStartSlackChannels: Array<{
-      channelId: string;
-      instructions: string | null;
-      launchMode: ChannelAutoStartLaunchMode;
-      launchCriteria: string | null;
-    }>;
-    channelAutoStartEnabled: boolean;
-    channelAutoStartSlackChannelIds: string[];
-    channelAutoStartInstructions: string | null;
-    reviewCodeSettings: PrReviewerSettings;
-    conflictResolverFrequency: ConflictResolverFrequency;
-    conflictResolverLabel: string;
-    conflictResolverInstructions: string | null;
-    conflictResolverMaxPrAgeDays: ConflictResolverMaxPrAgeDays;
-    conflictResolverLastRunAt: Date | null;
-    suggesterFrequency: SuggesterFrequency;
-    suggesterSlackChannelId: string | null;
-    suggesterInstructions: string | null;
-    suggesterRoutingMode: SuggesterRoutingMode;
-    suggesterRoutingInstructions: string | null;
-    suggesterLastRunAt: Date | null;
-    announcerFrequency: AnnouncerFrequency;
-    announcerSlackChannelId: string | null;
-    announcerInstructions: string | null;
-    announcerLastRunAt: Date | null;
-    platformIssueSlackChannelId: string | null;
-    managerStatsFrequency: ManagerStatsFrequency;
-    managerStatsSlackChannelId: string | null;
-    managerStatsLastRunAt: Date | null;
-    sentryTriageFrequency: SentryTriageFrequency;
-    sentryTriageSlackChannelId: string | null;
-    sentryTriageProjectSlugs: string | null;
-    sentryTriageLastRunAt: Date | null;
-    dependabotTriageFrequency: DependabotTriageFrequency;
-    dependabotTriageSlackChannelId: string | null;
-    dependabotTriageLastRunAt: Date | null;
-    securityAuditorFrequency: SecurityAuditorFrequency;
-    securityAuditorSlackChannelId: string | null;
-    securityAuditorLastRunAt: Date | null;
-    securityAuditorScanCursor?: SecurityAuditorScanCursor | null;
-    codeQualityAuditorFrequency: CodeQualityAuditorFrequency;
-    codeQualityAuditorSlackChannelId: string | null;
-    codeQualityAuditorLastRunAt: Date | null;
-    codeQualityAuditorScanCursor?: CodeQualityAuditorScanCursor | null;
-    ciFailureTriageFrequency: CiFailureTriageFrequency;
-    ciFailureTriageSlackChannelId: string | null;
-    ciFailureTriageLastRunAt: Date | null;
-    ciFailureTriageScanCursor?: CiFailureTriageScanCursor | null;
-  };
+type StoredBackgroundAgentSettings = Pick<
+  typeof deploymentSettings.$inferSelect,
+  | 'id'
+  | 'managerSlackChannelId'
+  | 'globalAgentInstructions'
+  | 'authorshipInstructions'
+  | 'compiledAuthorshipRules'
+  | 'compiledAuthorshipIssues'
+  | 'compiledAuthorshipAt'
+  | 'styleGuidance'
+  | 'slackSummonEmoji'
+  | 'slackAckEmoji'
+  | 'slackCompletionEmoji'
+  | 'createdAt'
+  | 'updatedAt'
+>;
+
+export type BackgroundAgentSettings = StoredBackgroundAgentSettings & {
+  channelAutoStartSlackChannels: Array<{
+    channelId: string;
+    instructions: string | null;
+    launchMode: ChannelAutoStartLaunchMode;
+    launchCriteria: string | null;
+  }>;
+  channelAutoStartEnabled: boolean;
+  channelAutoStartSlackChannelIds: string[];
+  channelAutoStartInstructions: string | null;
+  reviewCodeSettings: PrReviewerSettings;
+  conflictResolverFrequency: ConflictResolverFrequency;
+  conflictResolverLabel: string;
+  conflictResolverInstructions: string | null;
+  conflictResolverMaxPrAgeDays: ConflictResolverMaxPrAgeDays;
+  conflictResolverLastRunAt: Date | null;
+  suggesterFrequency: SuggesterFrequency;
+  suggesterSlackChannelId: string | null;
+  suggesterInstructions: string | null;
+  suggesterRoutingMode: SuggesterRoutingMode;
+  suggesterRoutingInstructions: string | null;
+  suggesterLastRunAt: Date | null;
+  announcerFrequency: AnnouncerFrequency;
+  announcerSlackChannelId: string | null;
+  announcerInstructions: string | null;
+  announcerLastRunAt: Date | null;
+  platformIssueSlackChannelId: string | null;
+  managerStatsFrequency: ManagerStatsFrequency;
+  managerStatsSlackChannelId: string | null;
+  managerStatsLastRunAt: Date | null;
+  sentryTriageFrequency: SentryTriageFrequency;
+  sentryTriageSlackChannelId: string | null;
+  sentryTriageProjectSlugs: string | null;
+  sentryTriageLastRunAt: Date | null;
+  dependabotTriageFrequency: DependabotTriageFrequency;
+  dependabotTriageSlackChannelId: string | null;
+  dependabotTriageLastRunAt: Date | null;
+  securityAuditorFrequency: SecurityAuditorFrequency;
+  securityAuditorSlackChannelId: string | null;
+  securityAuditorLastRunAt: Date | null;
+  securityAuditorScanCursor?: SecurityAuditorScanCursor | null;
+  codeQualityAuditorFrequency: CodeQualityAuditorFrequency;
+  codeQualityAuditorSlackChannelId: string | null;
+  codeQualityAuditorLastRunAt: Date | null;
+  codeQualityAuditorScanCursor?: CodeQualityAuditorScanCursor | null;
+  ciFailureTriageFrequency: CiFailureTriageFrequency;
+  ciFailureTriageSlackChannelId: string | null;
+  ciFailureTriageLastRunAt: Date | null;
+  ciFailureTriageScanCursor?: CiFailureTriageScanCursor | null;
+};
 
 export type SecurityAuditorScanCursor = AutomationScanCursor;
 
 export type CodeQualityAuditorScanCursor = SecurityAuditorScanCursor;
 
 export type CiFailureTriageScanCursor = SecurityAuditorScanCursor;
-
-export type CreateBackgroundAgentSettings = Omit<
-  typeof backgroundAgentSettings.$inferInsert,
-  Generated
->;
 
 /**
  * automations

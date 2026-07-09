@@ -1,6 +1,6 @@
 import {
-  backgroundAgentSettings,
   db,
+  deploymentSettings,
   eq,
   getBackgroundAgentSettingsForDeployment,
   isNull,
@@ -241,7 +241,7 @@ export async function updateAgentBehaviorSettingsCommand(
   }
 
   await db
-    .insert(backgroundAgentSettings)
+    .insert(deploymentSettings)
     .values({
       id: 'default',
       globalAgentInstructions,
@@ -256,7 +256,7 @@ export async function updateAgentBehaviorSettingsCommand(
       updatedAt: now,
     })
     .onConflictDoUpdate({
-      target: backgroundAgentSettings.id,
+      target: deploymentSettings.id,
       set: {
         globalAgentInstructions,
         ...(authorshipInstructionsProvided

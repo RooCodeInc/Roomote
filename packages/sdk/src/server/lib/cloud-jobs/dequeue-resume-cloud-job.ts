@@ -286,7 +286,7 @@ export const dequeueResumeCloudJob = async (
           cloudJob.payload,
         ),
       });
-      const settings = await tx.query.backgroundAgentSettings.findFirst({
+      const settings = await tx.query.deploymentSettings.findFirst({
         columns: {
           globalAgentInstructions: true,
           styleGuidance: true,

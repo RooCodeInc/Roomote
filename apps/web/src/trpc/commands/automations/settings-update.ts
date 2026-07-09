@@ -11,9 +11,9 @@ import {
   type TriggerableBackgroundAutomationKey,
 } from '@roomote/types';
 import {
-  backgroundAgentSettings,
   db,
   DEFAULT_CONFLICT_RESOLVER_LABEL,
+  deploymentSettings,
   getBackgroundAgentSettingsForDeployment,
   MANAGER_CHANNEL_STARTER_AUTOMATION_SETTINGS,
   upsertAutomation,
@@ -730,14 +730,14 @@ export async function updateBackgroundAgentSettingsCommand(
 
   await db.transaction(async (tx) => {
     await tx
-      .insert(backgroundAgentSettings)
+      .insert(deploymentSettings)
       .values({
         id: 'default',
         managerSlackChannelId: managerChannelResult.channelId,
         updatedAt: now,
       })
       .onConflictDoUpdate({
-        target: backgroundAgentSettings.id,
+        target: deploymentSettings.id,
         set: {
           managerSlackChannelId: managerChannelResult.channelId,
           updatedAt: now,

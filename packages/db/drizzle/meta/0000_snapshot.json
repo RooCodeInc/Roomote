@@ -1,5 +1,5 @@
 {
-  "id": "476b7f74-fb8e-48b4-9051-c439e52d0c3a",
+  "id": "8b7a7aed-9afb-439d-b613-ea5a8d900fec",
   "prevId": "00000000-0000-0000-0000-000000000000",
   "version": "7",
   "dialect": "postgresql",
@@ -483,104 +483,6 @@
           "type": "jsonb",
           "primaryKey": false,
           "notNull": false
-        },
-        "created_at": {
-          "name": "created_at",
-          "type": "timestamp",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "now()"
-        },
-        "updated_at": {
-          "name": "updated_at",
-          "type": "timestamp",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "now()"
-        }
-      },
-      "indexes": {},
-      "foreignKeys": {},
-      "compositePrimaryKeys": {},
-      "uniqueConstraints": {},
-      "policies": {},
-      "checkConstraints": {},
-      "isRLSEnabled": false
-    },
-    "public.background_agent_settings": {
-      "name": "background_agent_settings",
-      "schema": "",
-      "columns": {
-        "id": {
-          "name": "id",
-          "type": "text",
-          "primaryKey": true,
-          "notNull": true,
-          "default": "'default'"
-        },
-        "manager_slack_channel_id": {
-          "name": "manager_slack_channel_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "global_agent_instructions": {
-          "name": "global_agent_instructions",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "authorship_instructions": {
-          "name": "authorship_instructions",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "compiled_authorship_rules": {
-          "name": "compiled_authorship_rules",
-          "type": "jsonb",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "'[]'::jsonb"
-        },
-        "compiled_authorship_issues": {
-          "name": "compiled_authorship_issues",
-          "type": "jsonb",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "'[]'::jsonb"
-        },
-        "compiled_authorship_at": {
-          "name": "compiled_authorship_at",
-          "type": "timestamp",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "style_guidance": {
-          "name": "style_guidance",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "slack_summon_emoji": {
-          "name": "slack_summon_emoji",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "slack_ack_emoji": {
-          "name": "slack_ack_emoji",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "'eyes'"
-        },
-        "slack_completion_emoji": {
-          "name": "slack_completion_emoji",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "'white_check_mark'"
         },
         "created_at": {
           "name": "created_at",
@@ -1245,6 +1147,70 @@
           "type": "text",
           "primaryKey": false,
           "notNull": false
+        },
+        "manager_slack_channel_id": {
+          "name": "manager_slack_channel_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "global_agent_instructions": {
+          "name": "global_agent_instructions",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "authorship_instructions": {
+          "name": "authorship_instructions",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "compiled_authorship_rules": {
+          "name": "compiled_authorship_rules",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'[]'::jsonb"
+        },
+        "compiled_authorship_issues": {
+          "name": "compiled_authorship_issues",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'[]'::jsonb"
+        },
+        "compiled_authorship_at": {
+          "name": "compiled_authorship_at",
+          "type": "timestamp",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "style_guidance": {
+          "name": "style_guidance",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "slack_summon_emoji": {
+          "name": "slack_summon_emoji",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "slack_ack_emoji": {
+          "name": "slack_ack_emoji",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'eyes'"
+        },
+        "slack_completion_emoji": {
+          "name": "slack_completion_emoji",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'white_check_mark'"
         },
         "created_at": {
           "name": "created_at",
