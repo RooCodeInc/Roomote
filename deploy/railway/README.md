@@ -368,6 +368,17 @@ Live previews need a wildcard domain, which requires a domain you control:
 4. Opt in from **Settings → Live Previews**, which validates the wildcard
    hostname and enables previews per deployment and environment.
 
+Expect three DNS records for the wildcard domain (its CNAME, an
+`_acme-challenge` CNAME to `authorize.railwaydns.net` that lets Railway
+issue the wildcard certificate, and a TXT ownership check) plus a CNAME and
+TXT for the base previews domain — Railway shows the exact values. On
+proxied DNS providers such as Cloudflare, leave all of these records
+unproxied. Operators running several deployments under one zone can
+automate steps 2–3 with
+[`scripts/onboard-deployment.sh`](scripts/onboard-deployment.sh) (Railway
+public API + Vercel DNS; other providers use its `--dry-run` output to
+create records by hand).
+
 ## Upgrades, backups, and costs
 
 - **Template edits do not propagate.** A deployed project is a snapshot;
