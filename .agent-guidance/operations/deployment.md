@@ -716,17 +716,24 @@ Any `@roomote/*` package selection is equivalent under the fixed group. See
    to `develop`, `changesets/action` opens or refreshes a single PR titled
    `Release Roomote` when pending `.changeset/*.md` files exist. Merging it
    runs `pnpm run version` (aggregates the root `CHANGELOG.md`, runs
-   `changeset version`, syncs the root version, updates the lockfile).
+   `changeset version`, syncs the root version, updates the lockfile). The
+   `.changeset/config.json` `fixed` group lists every `@roomote/*` package
+   by name (not a glob — Changesets does not expand globs here), so package
+   versions stay lockstep.
 2. **Promote PR to `main`**: after the Version PR merges (no remaining pending
    changesets and the product version is untagged), the same workflow opens or
    refreshes a PR `develop` → `main` titled `Promote vX.Y.Z to production`.
    Merge it with a **merge commit** (do not squash or rebase) so history stays
    shared.
-3. **Tag + GitHub Release on `main`** (`.github/workflows/tag-release.yml`):
-   when `main` receives an untagged version, the workflow creates annotated tag
-   `vX.Y.Z` and a GitHub Release marked latest (body from the matching
-   `CHANGELOG.md` section). The existing publish workflow then builds production
-   images.
+3. **Tag on `main`, then images, then GitHub Release**:
+   - `.github/workflows/tag-release.yml` pushes annotated tag `vX.Y.Z` only
+     (no GitHub Release yet) so the tag event can trigger image publish.
+   - `.github/workflows/publish-ghcr.yml` builds multi-arch
+     `roomote-app`/`roomote-worker` for that tag and moves `latest`.
+   - After both image manifests publish, the same workflow creates the
+     GitHub Release marked latest (body from the matching `CHANGELOG.md`
+     section), so installer / `releases/latest` never points at a tag whose
+     images are missing.
 
 ### Secrets and branch rules
 

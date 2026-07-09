@@ -10,7 +10,11 @@ For user-visible or operator-visible changes that should show up in the changelo
 pnpm changeset
 ```
 
-When prompted for packages, any `@roomote/*` selection is fine — the fixed group bumps every package together. Choose:
+When prompted for packages, any `@roomote/*` selection is fine — the
+`.changeset/config.json` **fixed** group lists every workspace package by name
+(Changesets does **not** expand globs such as `@roomote/*`), so every package
+bumps together. When you add a new `apps/*` or `packages/*` workspace, append
+its `package.json` name to that fixed list in the same change. Choose:
 
 - **patch** for bug fixes and small non-breaking changes
 - **minor** for new capabilities that stay backward compatible
@@ -24,6 +28,6 @@ Chores, docs-only, and pure-internal refactors can skip a changeset; they ride a
 
 1. Merge code to `develop`. When pending changesets exist, CI keeps a **Release PR** open against `develop` that bumps versions and updates the root `CHANGELOG.md`.
 2. Merging that Release PR (or any push to `develop` whose version is untagged) opens or refreshes a **Promote PR** (`develop` → `main`).
-3. Merging the Promote PR (merge commit, not squash) triggers tagging and a GitHub Release on `main`, which reuses the existing GHCR `v*` publish path for production images and the `latest` channel.
+3. Merging the Promote PR (merge commit, not squash) tags `vX.Y.Z` on `main`, then GHCR builds the matching images; the GitHub Release is created only after those images exist so `releases/latest` never points at a missing image set.
 
 Details live in [`.agent-guidance/operations/deployment.md`](../.agent-guidance/operations/deployment.md).

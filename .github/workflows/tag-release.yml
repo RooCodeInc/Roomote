@@ -14,7 +14,7 @@ permissions:
 
 jobs:
   tag:
-    name: Create v* tag and GitHub Release
+    name: Create v* tag
     runs-on: blacksmith-4vcpu-ubuntu-2404
     steps:
       - name: Checkout
@@ -25,7 +25,7 @@ jobs:
           token: ${{ secrets.RELEASE_BOT_TOKEN || secrets.GITHUB_TOKEN }}
           fetch-depth: 0
 
-      - name: Tag and publish GitHub Release when version is new
+      - name: Push annotated product tag when version is new
         env:
           GH_TOKEN: ${{ secrets.RELEASE_BOT_TOKEN || secrets.GITHUB_TOKEN }}
         shell: bash
@@ -42,44 +42,12 @@ jobs:
           fi
           tag="v${version}"
 
-          tag_exists=false
           if git rev-parse "$tag" >/dev/null 2>&1 || git ls-remote --tags origin "refs/tags/$tag" | grep -q .; then
-            tag_exists=true
-          fi
-
-          release_exists=false
-          if gh release view "$tag" >/dev/null 2>&1; then
-            release_exists=true
-          fi
-
-          if [ "$tag_exists" = true ] && [ "$release_exists" = true ]; then
-            echo "Tag and GitHub Release $tag already exist; skip."
+            echo "Tag $tag already exists; skip."
             exit 0
           fi
 
-          notes_file="$(mktemp)"
-          node scripts/release/extract-changelog-section.mjs "$version" > "$notes_file" || true
-          if [ ! -s "$notes_file" ]; then
-            printf 'Roomote %s\n' "$tag" > "$notes_file"
-          fi
-
-          if [ "$tag_exists" = false ]; then
-            git tag -a "$tag" -m "Roomote $tag"
-            git push origin "refs/tags/$tag"
-            echo "Pushed tag $tag"
-          else
-            echo "Tag $tag already exists; ensuring GitHub Release."
-          fi
-
-          if [ "$release_exists" = false ]; then
-            # Product releases own releases/latest for the self-host installer.
-            # Worker archive tags must be prereleases so they never steal latest.
-            gh release create "$tag" \
-              --title "Roomote $tag" \
-              --notes-file "$notes_file" \
-              --target "$(git rev-parse HEAD)" \
-              --latest
-            echo "Published GitHub Release $tag"
-          fi
-
-          rm -f "$notes_file"
+          git tag -a "$tag" -m "Roomote $tag"
+          git push origin "refs/tags/$tag"
+          echo "Pushed tag $tag"
+          echo "GitHub Release is created by publish-ghcr.yml after roomote-app and roomote-worker images for this tag are published."
