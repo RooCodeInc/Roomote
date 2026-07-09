@@ -28,6 +28,7 @@ import type {
 
 import type {
   AnswerUserInputRequestCommand,
+  CancelTaskCommand,
   Harness,
   HarnessCommandError,
   HarnessEvents,
@@ -1485,6 +1486,11 @@ export class OpenCodeServerHarness
   private replayAbortErrorSuppressionTimeout:
     | ReturnType<typeof setTimeout>
     | undefined;
+  // After a cancel, OpenCode still finalizes the aborted assistant message
+  // and stray part events can trail in; the partial output is flushed at
+  // cancel time instead, and everything after is dropped so nothing lands
+  // below the cancel point. Cleared when the next prompt goes out.
+  private suppressAssistantOutputUntilNextPrompt = false;
 
   constructor(options: OpenCodeServerHarnessOptions) {
     super();
@@ -1846,7 +1852,7 @@ export class OpenCodeServerHarness
         await this.handleSendMessage(command);
         return;
       case TaskCommandName.CancelTask:
-        await this.handleCancelTask();
+        await this.handleCancelTask(command);
         return;
       case TaskCommandName.CloseTask:
         this.currentWorkflowPhase = null;
@@ -1986,7 +1992,7 @@ export class OpenCodeServerHarness
     await this.submitPrompt({ ...command.data, text });
   }
 
-  private async handleCancelTask(): Promise<void> {
+  private async handleCancelTask(command?: CancelTaskCommand): Promise<void> {
     const sessionId = this.sessionId;
 
     if (!sessionId) {
@@ -1998,6 +2004,10 @@ export class OpenCodeServerHarness
       return;
     }
 
+    const cancelledBy = command?.data?.cancelledBy;
+    const hadActiveTurn =
+      this.inFlight || this.pendingUserInputRequests.size > 0;
+
     // Aborting an in-flight turn makes OpenCode emit a MessageAbortedError on the
     // session.error event. For an explicit cancel that's expected, not a failure
     // (the cancel is already surfaced via runtimeEvents.taskAborted), so suppress it the
@@ -2008,13 +2018,84 @@ export class OpenCodeServerHarness
       sessionId,
       signal: this.eventAbortController.signal,
     });
+    // Flush whatever the aborted turn had produced so it persists at the
+    // cancel point, then drop the trailing finalize/part events OpenCode
+    // emits for the aborted message — without this, that content re-emerges
+    // in the transcript after the cancel.
+    if (hadActiveTurn) {
+      await this.flushAssistantMessageForCancel(sessionId);
+    }
+    this.suppressAssistantOutputUntilNextPrompt = true;
     this.inFlight = false;
     this.finalizedAssistantTurn = null;
     this.prompts.clear();
     this.clearQueuedPromptRetryTimer();
-    this.pendingUserInputRequests.clear();
+    // Abandoned questions get an explicit cancelled response so surfaces
+    // that clear pending state on request_user_input_response (Slack,
+    // Linear, the web store) drop them, and late answers are rejected via
+    // the resolved-id set instead of being injected into a dead turn.
+    if (this.pendingUserInputRequests.size > 0) {
+      for (const pending of this.pendingUserInputRequests.values()) {
+        this.runtimeEvents.requestUserInputResponse({
+          request: pending,
+          answers: {},
+          resolution: 'cancelled',
+        });
+        this.recordResolvedUserInputRequest(pending.requestId);
+      }
+      this.pendingUserInputRequests.clear();
+    }
     this.clearAllExecuteToolProgress();
+
+    // Only an explicit user stop that actually interrupted something leaves
+    // a visible marker; internal cancels (steer replay, env-var resumable
+    // stop, task replacement) and idle stops stay silent.
+    if (cancelledBy && hadActiveTurn) {
+      this.runtimeEvents.taskCancelled({
+        sessionId,
+        cancelledByName: cancelledBy.name,
+        source: cancelledBy.source,
+      });
+    }
+
     this.runtimeEvents.taskAborted(sessionId);
+  }
+
+  /**
+   * Persist the in-flight assistant message as it stood at cancel time so the
+   * transcript keeps the partial output the user saw, ordered before the
+   * cancel marker. Marking it persisted also makes the post-abort
+   * `message.updated` finalize a no-op.
+   */
+  private async flushAssistantMessageForCancel(
+    sessionId: string,
+  ): Promise<void> {
+    try {
+      const messages = await this.client.messages({
+        sessionId,
+        limit: 20,
+        signal: this.eventAbortController.signal,
+      });
+      const latestAssistantMessage = [...messages]
+        .reverse()
+        .find(
+          (message) =>
+            message.info.role === 'assistant' &&
+            !this.persistedMessageIds.has(message.info.id),
+        );
+
+      if (!latestAssistantMessage) {
+        return;
+      }
+
+      this.persistAssistantMessage(latestAssistantMessage);
+    } catch (error) {
+      this.logger.warn(
+        `OpenCode cancel could not flush the aborted assistant message sessionId=${sessionId}: ${
+          error instanceof Error ? error.message : String(error)
+        }`,
+      );
+    }
   }
 
   private armReplayAbortErrorSuppression(): void {
@@ -2914,6 +2995,7 @@ export class OpenCodeServerHarness
   }
 
   private async submitPrompt(prompt: PromptInput): Promise<void> {
+    this.suppressAssistantOutputUntilNextPrompt = false;
     const sessionId = await this.ensureSession(prompt.text);
     const messageID = createOpenCodeMessageId();
     const nonEmptyImages = (prompt.images ?? []).filter(
@@ -3168,6 +3250,15 @@ export class OpenCodeServerHarness
       messageRole === 'user' ||
       (messageId && this.submittedUserMessageIds.has(messageId))
     ) {
+      return;
+    }
+
+    if (
+      this.suppressAssistantOutputUntilNextPrompt &&
+      (part.type === 'text' || part.type === 'reasoning')
+    ) {
+      // Trailing stream parts for a cancelled turn; the flushed message
+      // already persisted everything the transcript should keep.
       return;
     }
 
@@ -3464,6 +3555,13 @@ export class OpenCodeServerHarness
     }
 
     if (!info.time?.completed) {
+      return;
+    }
+
+    if (this.suppressAssistantOutputUntilNextPrompt) {
+      // Post-cancel finalize of the aborted message; the cancel flush already
+      // persisted its content (and persistedMessageIds makes this a no-op for
+      // that id anyway — this also covers messages created after the abort).
       return;
     }
 

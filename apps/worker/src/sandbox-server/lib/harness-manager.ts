@@ -23,7 +23,7 @@ import { captureWorkerMessage } from '../../monitoring/sentry';
 export { isActiveTaskPhase };
 export type { TaskPhase };
 
-import type { Harness } from './harness';
+import type { CancelTaskAttribution, Harness } from './harness';
 
 /**
  * Event names used by the HarnessManager.
@@ -539,8 +539,10 @@ export class HarnessManager extends EventEmitter<HarnessManagerEvents> {
 
   /**
    * Cancel the current task and keep the sandbox in a resumable stopped state.
+   * Pass `cancelledBy` only for explicit user stops — it makes the harness
+   * leave a visible `task_cancelled` marker in the transcript.
    */
-  cancelTask(): void {
+  cancelTask(options?: { cancelledBy?: CancelTaskAttribution }): void {
     const canCancelRunningTask = this.phase === 'running';
     const canCancelUserInputTask = this.phase === 'waiting_for_user_input';
 
@@ -573,7 +575,12 @@ export class HarnessManager extends EventEmitter<HarnessManagerEvents> {
     this.state.cancelTriggeredAt = Date.now();
     this.setPhase('stopped');
 
-    this.sendHarnessCommand({ commandName: HarnessCommand.CancelTask });
+    this.sendHarnessCommand({
+      commandName: HarnessCommand.CancelTask,
+      ...(options?.cancelledBy
+        ? { data: { cancelledBy: options.cancelledBy } }
+        : {}),
+    });
   }
 
   /**

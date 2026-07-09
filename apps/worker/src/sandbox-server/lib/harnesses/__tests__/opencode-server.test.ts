@@ -3342,3 +3342,375 @@ describe('OpenCodeServerHarness', () => {
     }
   });
 });
+
+describe('OpenCodeServerHarness cancel marker', () => {
+  function createPartialAssistantMessage(text: string): OpenCodeSessionMessage {
+    return {
+      info: {
+        id: 'msg_1',
+        sessionID: 'ses_1',
+        role: 'assistant',
+        providerID: 'openrouter',
+        modelID: 'openai/gpt-5.4',
+        mode: 'build',
+        time: {
+          created: 0,
+        },
+        cost: 0,
+        tokens: {
+          input: 5,
+          output: 2,
+          reasoning: 0,
+          cache: {
+            read: 0,
+            write: 0,
+          },
+        },
+      },
+      parts: [
+        {
+          id: 'part_1',
+          sessionID: 'ses_1',
+          messageID: 'msg_1',
+          type: 'text',
+          text,
+        },
+      ],
+    };
+  }
+
+  async function startTurnWithPartialText(
+    harness: OpenCodeServerHarness,
+    client: FakeOpenCodeServerClient,
+  ): Promise<void> {
+    await connectHarness(harness, client);
+
+    harness.sendCommand({
+      commandName: TaskCommandName.StartNewTask,
+      data: { text: 'Start work.', visibleInTranscript: true },
+    });
+    await vi.waitFor(() => {
+      expect(client.promptAsync).toHaveBeenCalledTimes(1);
+    });
+
+    await client.emit({
+      type: 'message.part.updated',
+      properties: {
+        part: {
+          id: 'part_1',
+          sessionID: 'ses_1',
+          messageID: 'msg_1',
+          type: 'text',
+          text: 'Partial answer',
+        },
+        delta: 'Partial answer',
+      },
+    });
+  }
+
+  it('emits a task_cancelled marker after the flushed partial output on an attributed cancel', async () => {
+    const { client, harness } = createHarness();
+    const runtimeOutputEvents: AcpMessage[] = [];
+    const persistedEnvelopes: AcpPersistedEnvelope[] = [];
+    const taskEvents: TaskEvent[] = [];
+
+    harness.subscribeRuntimeOutput((event) => runtimeOutputEvents.push(event));
+    harness.subscribeRuntimePersistedEnvelope((envelope) =>
+      persistedEnvelopes.push(envelope),
+    );
+    harness.subscribe((event) => taskEvents.push(event));
+
+    try {
+      await startTurnWithPartialText(harness, client);
+
+      client.messages.mockResolvedValueOnce([
+        createPartialAssistantMessage('Partial answer'),
+      ]);
+
+      harness.sendCommand({
+        commandName: TaskCommandName.CancelTask,
+        data: { cancelledBy: { name: 'Daniel', source: 'web' } },
+      });
+
+      await vi.waitFor(() => {
+        expect(
+          taskEvents.some(
+            (event) => event.eventName === TaskEventName.TaskAborted,
+          ),
+        ).toBe(true);
+      });
+
+      const assistantIndex = persistedEnvelopes.findIndex(
+        (envelope) =>
+          envelope.eventType === ACP_ENVELOPE_EVENT_TYPES.AssistantMessage &&
+          envelope.payload.text === 'Partial answer',
+      );
+      const markerIndex = persistedEnvelopes.findIndex(
+        (envelope) =>
+          envelope.eventType === ACP_ENVELOPE_EVENT_TYPES.TaskCancelled,
+      );
+
+      // The partial output the user saw is flushed first, then the marker —
+      // the marker is the last transcript entry of the cancelled turn.
+      expect(assistantIndex).toBeGreaterThanOrEqual(0);
+      expect(markerIndex).toBeGreaterThan(assistantIndex);
+      expect(persistedEnvelopes[markerIndex]).toMatchObject({
+        role: 'system',
+        payload: {
+          sessionId: 'ses_1',
+          cancelledByName: 'Daniel',
+          source: 'web',
+        },
+      });
+      expect(
+        runtimeOutputEvents.some(
+          (event) =>
+            event.eventType === ACP_ENVELOPE_EVENT_TYPES.TaskCancelled,
+        ),
+      ).toBe(true);
+    } finally {
+      harness.dispose();
+    }
+  });
+
+  it('drops trailing assistant output after a cancel until the next prompt', async () => {
+    const { client, harness } = createHarness();
+    const runtimeOutputEvents: AcpMessage[] = [];
+    const persistedEnvelopes: AcpPersistedEnvelope[] = [];
+    const taskEvents: TaskEvent[] = [];
+
+    harness.subscribeRuntimeOutput((event) => runtimeOutputEvents.push(event));
+    harness.subscribeRuntimePersistedEnvelope((envelope) =>
+      persistedEnvelopes.push(envelope),
+    );
+    harness.subscribe((event) => taskEvents.push(event));
+
+    try {
+      await startTurnWithPartialText(harness, client);
+
+      client.messages.mockResolvedValueOnce([
+        createPartialAssistantMessage('Partial answer'),
+      ]);
+
+      harness.sendCommand({
+        commandName: TaskCommandName.CancelTask,
+        data: { cancelledBy: { name: 'Daniel', source: 'web' } },
+      });
+
+      await vi.waitFor(() => {
+        expect(
+          taskEvents.some(
+            (event) => event.eventName === TaskEventName.TaskAborted,
+          ),
+        ).toBe(true);
+      });
+
+      const chunkCountAtCancel = runtimeOutputEvents.filter(
+        (event) =>
+          event.eventType === ACP_ENVELOPE_EVENT_TYPES.AssistantMessageChunk,
+      ).length;
+      const messageFetchCountAtCancel = client.message.mock.calls.length;
+
+      // Trailing stream content and the post-abort finalize must not land
+      // after the marker.
+      await client.emit({
+        type: 'message.part.updated',
+        properties: {
+          part: {
+            id: 'part_1',
+            sessionID: 'ses_1',
+            messageID: 'msg_1',
+            type: 'text',
+            text: 'Partial answer plus a trailing paragraph',
+          },
+          delta: ' plus a trailing paragraph',
+        },
+      });
+      await client.emit({
+        type: 'message.updated',
+        properties: {
+          info: {
+            id: 'msg_1',
+            sessionID: 'ses_1',
+            role: 'assistant',
+            time: { completed: 1 },
+          },
+        },
+      });
+
+      expect(
+        runtimeOutputEvents.filter(
+          (event) =>
+            event.eventType === ACP_ENVELOPE_EVENT_TYPES.AssistantMessageChunk,
+        ),
+      ).toHaveLength(chunkCountAtCancel);
+      expect(client.message.mock.calls).toHaveLength(
+        messageFetchCountAtCancel,
+      );
+      expect(
+        persistedEnvelopes.filter(
+          (envelope) =>
+            envelope.eventType === ACP_ENVELOPE_EVENT_TYPES.AssistantMessage,
+        ),
+      ).toHaveLength(1);
+
+      // The next prompt lifts the suppression: a fresh turn streams normally.
+      harness.sendCommand({
+        commandName: TaskCommandName.SendMessage,
+        data: { text: 'Continue.', visibleInTranscript: true },
+      });
+      await vi.waitFor(() => {
+        expect(client.promptAsync).toHaveBeenCalledTimes(2);
+      });
+
+      await client.emit({
+        type: 'message.part.updated',
+        properties: {
+          part: {
+            id: 'part_2',
+            sessionID: 'ses_1',
+            messageID: 'msg_2',
+            type: 'text',
+            text: 'Fresh turn',
+          },
+          delta: 'Fresh turn',
+        },
+      });
+
+      expect(
+        runtimeOutputEvents.filter(
+          (event) =>
+            event.eventType === ACP_ENVELOPE_EVENT_TYPES.AssistantMessageChunk,
+        ).length,
+      ).toBeGreaterThan(chunkCountAtCancel);
+    } finally {
+      harness.dispose();
+    }
+  });
+
+  it('does not emit a marker for a cancel without attribution', async () => {
+    const { client, harness } = createHarness();
+    const persistedEnvelopes: AcpPersistedEnvelope[] = [];
+    const taskEvents: TaskEvent[] = [];
+
+    harness.subscribeRuntimePersistedEnvelope((envelope) =>
+      persistedEnvelopes.push(envelope),
+    );
+    harness.subscribe((event) => taskEvents.push(event));
+
+    try {
+      await startTurnWithPartialText(harness, client);
+
+      client.messages.mockResolvedValueOnce([
+        createPartialAssistantMessage('Partial answer'),
+      ]);
+
+      harness.sendCommand({ commandName: TaskCommandName.CancelTask });
+
+      await vi.waitFor(() => {
+        expect(
+          taskEvents.some(
+            (event) => event.eventName === TaskEventName.TaskAborted,
+          ),
+        ).toBe(true);
+      });
+
+      expect(
+        persistedEnvelopes.some(
+          (envelope) =>
+            envelope.eventType === ACP_ENVELOPE_EVENT_TYPES.TaskCancelled,
+        ),
+      ).toBe(false);
+    } finally {
+      harness.dispose();
+    }
+  });
+
+  it('cancels pending questions with explicit responses on an attributed cancel', async () => {
+    const { client, harness } = createHarness();
+    const persistedEnvelopes: AcpPersistedEnvelope[] = [];
+    const taskEvents: TaskEvent[] = [];
+
+    harness.subscribeRuntimePersistedEnvelope((envelope) =>
+      persistedEnvelopes.push(envelope),
+    );
+    harness.subscribe((event) => taskEvents.push(event));
+
+    try {
+      await connectHarness(harness, client);
+
+      harness.sendCommand({
+        commandName: TaskCommandName.StartNewTask,
+        data: { text: 'Start work.', visibleInTranscript: true },
+      });
+      await vi.waitFor(() => {
+        expect(client.promptAsync).toHaveBeenCalledTimes(1);
+      });
+
+      await client.emit({
+        type: 'message.part.updated',
+        properties: {
+          part: {
+            id: 'part_q',
+            sessionID: 'ses_1',
+            messageID: 'msg_1',
+            type: 'tool',
+            callID: 'call_q',
+            tool: 'question',
+            state: {
+              status: 'running',
+              input: {
+                questions: [
+                  {
+                    id: 'q1',
+                    header: 'Approach',
+                    question: 'Which approach?',
+                    options: [{ label: 'A', description: 'Approach A.' }],
+                  },
+                ],
+              },
+              title: 'Ask user',
+            },
+          },
+        },
+      });
+
+      await vi.waitFor(() => {
+        expect(harness.getPendingUserInputRequests()).toHaveLength(1);
+      });
+
+      client.messages.mockResolvedValueOnce([]);
+
+      harness.sendCommand({
+        commandName: TaskCommandName.CancelTask,
+        data: { cancelledBy: { name: 'Daniel', source: 'web' } },
+      });
+
+      await vi.waitFor(() => {
+        expect(
+          taskEvents.some(
+            (event) => event.eventName === TaskEventName.TaskAborted,
+          ),
+        ).toBe(true);
+      });
+
+      const cancelledResponse = persistedEnvelopes.find(
+        (envelope) =>
+          envelope.eventType ===
+          ACP_ENVELOPE_EVENT_TYPES.RequestUserInputResponse,
+      );
+      const marker = persistedEnvelopes.find(
+        (envelope) =>
+          envelope.eventType === ACP_ENVELOPE_EVENT_TYPES.TaskCancelled,
+      );
+
+      expect(cancelledResponse?.payload).toMatchObject({
+        resolution: 'cancelled',
+      });
+      expect(marker).toBeDefined();
+      expect(harness.getPendingUserInputRequests()).toHaveLength(0);
+    } finally {
+      harness.dispose();
+    }
+  });
+});

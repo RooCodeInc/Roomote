@@ -1,6 +1,9 @@
 import {
+  ACP_ENVELOPE_EVENT_TYPES,
   canonicalizeAcpLogicalEventId,
   extractAcpMcpInvocation,
+  inferAcpMessageKind,
+  parseAcpTaskCancelledPayload,
   type AcpRequestUserInputQuestion,
   isLinkedReviewResultsMessage,
   normalizeTranscriptUserText,
@@ -991,5 +994,37 @@ describe('sanitizeEnvelopeFields', () => {
 
     expect(result.payload).toBeNull();
     expect(result.metadata).toBeNull();
+  });
+});
+
+describe('task_cancelled marker', () => {
+  it('maps the task_cancelled event type to its own message kind', () => {
+    expect(
+      inferAcpMessageKind(ACP_ENVELOPE_EVENT_TYPES.TaskCancelled),
+    ).toBe('task_cancelled');
+  });
+
+  it('parses a task_cancelled payload with attribution', () => {
+    expect(
+      parseAcpTaskCancelledPayload({
+        sessionId: 'ses_1',
+        cancelledByName: 'Daniel',
+        source: 'web',
+      }),
+    ).toEqual({
+      sessionId: 'ses_1',
+      cancelledByName: 'Daniel',
+      source: 'web',
+    });
+  });
+
+  it('parses an attribution-less payload and rejects one without a session', () => {
+    expect(parseAcpTaskCancelledPayload({ sessionId: 'ses_1' })).toEqual({
+      sessionId: 'ses_1',
+    });
+    expect(parseAcpTaskCancelledPayload({ cancelledByName: 'Daniel' })).toBe(
+      null,
+    );
+    expect(parseAcpTaskCancelledPayload(null)).toBe(null);
   });
 });

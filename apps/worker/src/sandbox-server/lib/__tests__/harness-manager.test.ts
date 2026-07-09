@@ -667,6 +667,45 @@ describe('HarnessManager cancelTask', () => {
     }
   });
 
+  it('forwards user-stop attribution to the harness cancel command', () => {
+    const { harness, manager } = createManager();
+
+    try {
+      manager.initializeWithoutPrompt();
+      manager.startNewTaskFromPrompt({ prompt: 'hello' });
+
+      manager.cancelTask({
+        cancelledBy: { name: 'Daniel', source: 'web' },
+      });
+
+      expect(harness.sentCommands.at(-1)).toMatchObject({
+        commandName: TaskCommandName.CancelTask,
+        data: { cancelledBy: { name: 'Daniel', source: 'web' } },
+      });
+    } finally {
+      manager.dispose();
+      harness.dispose();
+    }
+  });
+
+  it('sends the cancel command without data when no attribution is given', () => {
+    const { harness, manager } = createManager();
+
+    try {
+      manager.initializeWithoutPrompt();
+      manager.startNewTaskFromPrompt({ prompt: 'hello' });
+
+      manager.cancelTask();
+
+      const command = harness.sentCommands.at(-1);
+      expect(command?.commandName).toBe(TaskCommandName.CancelTask);
+      expect(command).not.toHaveProperty('data');
+    } finally {
+      manager.dispose();
+      harness.dispose();
+    }
+  });
+
   it('allows cancel while waiting for user input', () => {
     const { harness, manager, logger } = createManager();
 

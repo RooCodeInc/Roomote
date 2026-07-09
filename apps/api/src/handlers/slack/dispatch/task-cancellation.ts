@@ -133,6 +133,10 @@ export async function handleTaskCancellation(
     const stopResult = await stopTaskJob({
       job: cancelableCloudJob,
       allowDirectCancelWithoutSandbox: true,
+      cancelledBy: {
+        ...(payload.user.name ? { name: payload.user.name } : {}),
+        source: 'slack',
+      },
     });
 
     if (isTerminalStopResult(stopResult)) {

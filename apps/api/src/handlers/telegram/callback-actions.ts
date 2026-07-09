@@ -85,9 +85,19 @@ async function handleCancelTaskCallback(params: {
     return;
   }
 
+  const cancelledByName =
+    [params.query.from.first_name, params.query.from.last_name]
+      .filter(Boolean)
+      .join(' ')
+      .trim() || params.query.from.username;
+
   const stopResult = await stopTaskJob({
     job: cancelableJob,
     allowDirectCancelWithoutSandbox: true,
+    cancelledBy: {
+      ...(cancelledByName ? { name: cancelledByName } : {}),
+      source: 'telegram',
+    },
   });
 
   const canceled =
