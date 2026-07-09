@@ -161,7 +161,10 @@ export default function Page() {
         setIsLoading(false);
         setError('Missing manifest code. Please try again.');
       } else {
-        finishAppManifest.mutate(code);
+        finishAppManifest.mutate({
+          code,
+          redirect: decodedState?.redirect,
+        });
       }
     } else if (setupAction === 'request') {
       if (!code) {

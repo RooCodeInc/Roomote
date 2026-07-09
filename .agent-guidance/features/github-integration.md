@@ -1,7 +1,7 @@
 ---
 title: GitHub Integration
 status: active
-last_reviewed: 2026-07-06
+last_reviewed: 2026-07-09
 owner: engineering
 summary: Current GitHub, GitLab, Gitea, and Azure DevOps source-control integration guidance for Roomote's single-deployment model.
 ---
@@ -39,9 +39,9 @@ Source-control provider setup is folded into the same in-app, env-overridable mo
 
 GitHub fields: `NEXT_PUBLIC_GITHUB_APP_SLUG`, `GITHUB_APP_ID`, `GITHUB_APP_PRIVATE_KEY`, `GITHUB_CLIENT_ID`, `GITHUB_CLIENT_SECRET`, `GITHUB_WEBHOOK_SECRET`. GitHub setup defaults to `github.startCreateAppManifest`, which builds a server-side GitHub App manifest, posts it to GitHub, exchanges the callback `code` through `github.finishCreateAppManifest`, and saves the generated fields into encrypted deployment `environment_variables`; "Enter values manually" remains the fallback for existing GitHub Apps and production env management. Because the created app is private (`public: false`), it can only be installed on the account that owns it, so the manifest step exposes an optional GitHub organization input: when provided, the manifest POST targets `https://github.com/organizations/{org}/settings/apps/new` so the app is owned by (and installable on) that organization instead of the admin's personal account. The manifest webhook URL must be publicly reachable, so localhost `TRPC_URL` values fall back to `ROOMOTE_APP_URL` for manifest creation, and the manifest omits `installation` from `default_events` because GitHub rejects that event in app manifests. GitLab fields: required `GITLAB_TOKEN`, optional `GITLAB_CLIENT_ID` / `GITLAB_CLIENT_SECRET` / `GITLAB_WEBHOOK_SIGNING_TOKEN` / `GITLAB_WEBHOOK_SECRET`. Gitea fields: required `GITEA_BASE_URL` / `GITEA_TOKEN`, optional `GITEA_USERNAME` / `GITEA_CLIENT_ID` / `GITEA_CLIENT_SECRET` / `GITEA_WEBHOOK_SECRET`; the client id and secret are Gitea OAuth2 application credentials for personal linked accounts. Azure DevOps fields: required `ADO_ORGANIZATION` / `ADO_TOKEN`, optional `ADO_BASE_URL` / `ADO_USERNAME` / `ADO_CLIENT_ID` / `ADO_CLIENT_SECRET` / `ADO_TENANT_ID` / `ADO_WEBHOOK_SECRET`; the client id and secret are Microsoft Entra app credentials for personal linked accounts, not legacy Azure DevOps OAuth credentials. Saved secrets are never decrypted back to the browser; the UI shows a configured mask and lets admins replace values. tRPC mutations: `setupNew.saveSourceControlProviderChoice`, `setupNew.saveSourceControlConfig`, and the reusable `sourceControl.saveConfig` (Settings) all write into encrypted deployment `environment_variables` via `upsertDeploymentEnvironmentVariables`. The `sourceControl.configStatus` query returns the per-field saved/runtime status for the Settings form.
 
-1. The user creates a GitHub App from `/setup` through GitHub's manifest flow, or manually provides existing GitHub App env vars.
+1. The user creates a GitHub App from `/setup` or Settings → Source Control through GitHub's manifest flow, or manually provides existing GitHub App env vars (Settings includes Create GitHub App and Enter values manually when credentials are not yet config-satisfied).
 2. Roomote exchanges the manifest callback code and saves the returned app id, slug, client id/secret, webhook secret, and private key into encrypted deployment env vars.
-3. The user starts GitHub App installation from the returned install URL, the `/setup` source-control-connect step, or Settings.
+3. The user starts GitHub App installation only after credentials are satisfied (slug, app id, private key, client id/secret, webhook secret). Settings Connect GitHub is hidden until then, and the install command rejects the hosted product slug fallback (`roomote`) when this deployment has not configured its own app.
 4. The web app creates a pending installation record so the callback/webhook can match the installation.
 5. GitHub delivers installation webhooks to `/api/webhooks/github`.
 6. The API syncs the installation into `github_installations`.
