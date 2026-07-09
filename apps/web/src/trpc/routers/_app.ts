@@ -414,6 +414,7 @@ const automationsRouter = createRouter({
         channelAutoStartSlackChannels: z
           .array(
             z.object({
+              channelId: z.string().trim().max(64).nullable().default(null),
               slackChannel: z.string().trim().max(160).nullable().default(null),
               instructions: z.string().max(8_000).nullable().default(null),
               launchMode: z.enum(['always_start']).default('always_start'),

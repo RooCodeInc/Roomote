@@ -23,6 +23,11 @@ export type ReviewerEnvironmentScope = 'all' | 'specific';
 export type ReviewerAuthorReviewMode = 'all' | 'specific' | 'none';
 
 export type ChannelAutoStartFormRow = {
+  // Canonical Slack channel ID persisted for this row, or null for rows the
+  // user just added or whose channel field they edited. When present it is the
+  // authoritative identity so saving never has to re-resolve the channel by
+  // name (which fails for archived/renamed/private channels).
+  channelId: string | null;
   slackChannel: string;
   instructions: string;
   launchMode: ChannelAutoStartLaunchMode;
@@ -275,6 +280,7 @@ export function buildAutomationSettingsSaveInput(
       stateToSave.conflictResolverInstructions.trim() || null,
     channelAutoStartSlackChannels:
       stateToSave.channelAutoStartSlackChannels.map((row) => ({
+        channelId: row.channelId,
         slackChannel: row.slackChannel.trim() || null,
         instructions: row.instructions.trim() || null,
         launchMode: row.launchMode,

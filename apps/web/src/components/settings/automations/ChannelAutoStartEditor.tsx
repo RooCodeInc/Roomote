@@ -66,6 +66,7 @@ const AUTO_RESPOND_CHANNEL_TEMPLATES: readonly AutoRespondChannelTemplate[] = [
 
 function createEmptyChannelAutoStartRow(): ChannelAutoStartFormRow {
   return {
+    channelId: null,
     slackChannel: '',
     instructions: '',
     launchMode: DEFAULT_CHANNEL_AUTO_START_LAUNCH_MODE,
@@ -77,6 +78,7 @@ export function createChannelAutoStartRowFromTemplate(
   template: Pick<AutoRespondChannelTemplate, 'channel' | 'instructions'>,
 ): ChannelAutoStartFormRow {
   return {
+    channelId: null,
     slackChannel: template.channel,
     instructions: template.instructions,
     launchMode: DEFAULT_CHANNEL_AUTO_START_LAUNCH_MODE,
@@ -153,6 +155,12 @@ export function ChannelAutoStartEditor({
     );
   };
 
+  // Editing the channel invalidates any persisted channel ID, so drop it and
+  // force the server to resolve the new value on save.
+  const changeRowChannel = (rowIndex: number, slackChannel: string) => {
+    updateRow(rowIndex, { slackChannel, channelId: null });
+  };
+
   const addRow = (row: ChannelAutoStartFormRow) => {
     onRowsChange([...rows, row]);
   };
@@ -201,7 +209,7 @@ export function ChannelAutoStartEditor({
                         id={`channel-auto-start-slack-channel-${index}`}
                         value={row.slackChannel || null}
                         onChange={(value) =>
-                          updateRow(index, { slackChannel: value ?? '' })
+                          changeRowChannel(index, value ?? '')
                         }
                         options={slackChannelOptions ?? []}
                         disabled={!slackConnected}
@@ -217,7 +225,7 @@ export function ChannelAutoStartEditor({
                         id={`channel-auto-start-slack-channel-${index}`}
                         value={row.slackChannel}
                         onChange={(event) =>
-                          updateRow(index, { slackChannel: event.target.value })
+                          changeRowChannel(index, event.target.value)
                         }
                         placeholder="#bugs or C123ABC456"
                         className="w-m"
