@@ -165,7 +165,7 @@ export async function resolveComputeProviderEnvValues(
   // Derived last so both the runtime env and operator-saved deployment env
   // vars win over the default. The effective worker image follows the runtime
   // precedence: an explicit process-env DOCKER_WORKER_IMAGE wins, then the
-  // deployment env var saved through the Settings → Compute shared section,
+  // deployment env var saved through the Settings → Sandboxes shared section,
   // then the ref derived from the baked RELEASE_VERSION. Development falls
   // back to the public latest image when no hosted image is derivable.
   // Honoring the saved worker image here keeps Modal spawnable regardless of

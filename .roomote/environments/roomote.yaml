@@ -1,0 +1,114 @@
+# Roomote's own environment definition, kept in-repo both as dogfood and as a
+# living example of declarative environment provisioning.
+#
+# Apply it at startup by pointing a deployment (or local dev API) at this
+# directory:
+#
+#   ROOMOTE_ENVIRONMENTS_DIR=$PWD/.roomote/environments pnpm dev
+#
+# Semantics: the definition is re-applied on every API boot (file wins over UI
+# edits for the environment with this name), environments are never deleted,
+# and removing the file simply returns the environment to manual management.
+#
+# Keep this file in sync with the repo's dev infrastructure: if services,
+# ports, tool versions, or setup commands change, update this definition in
+# the same change. A schema test validates this file in CI.
+name: Roomote
+description:
+  The main Roomote product — Next.js web app, API server, background workers,
+  sandbox controller, and shared packages. Runs the full task-execution stack
+  (Redis, API, BullMQ, controller) plus a local Mintlify preview of the public
+  docs site (apps/docs) on the `docs` port.
+initialUrl: http://127.0.0.1:3000/auth/dev-login
+ports:
+  - name: web
+    port: 3000
+    initial_path: /auth/dev-login
+    primary: true
+  - name: docs
+    port: 3333
+services:
+  - postgres16
+repositories:
+  - repository: RooCodeInc/Roomote
+    branch: develop
+    tool_versions:
+      pnpm: 10.29.3
+      nodejs: 24.13.1
+    commands:
+      - name: Install toolchain and dependencies
+        run: mise install && pnpm install
+        timeout: 600
+        continue_on_error: false
+      - name: Install Mintlify CLI for docs
+        run: mise install node@22.20.0 && mise exec node@22.20.0 -- npm install -g mint
+        timeout: 600
+        continue_on_error: true
+      - name: Write local env overrides
+        run: printf 'DATABASE_URL=postgresql://postgres@localhost:5432/roomote_development\nREDIS_URL=redis://localhost:16379\nAPP_ENV=development\n' > .env.local
+        timeout: 600
+        continue_on_error: false
+      - name: Create development database
+        run: psql -h localhost -U postgres -c "CREATE DATABASE roomote_development" || true
+        timeout: 600
+        continue_on_error: false
+      - name: Create test database
+        run: psql -h localhost -U postgres -c "CREATE DATABASE roomote_test" || true
+        timeout: 600
+        continue_on_error: false
+      - name: Apply development database migrations
+        run: pnpm --filter @roomote/db db:migrate
+        timeout: 600
+        continue_on_error: false
+      - name: Seed demo data
+        run: pnpm --filter @roomote/db db:seed:demo
+        timeout: 600
+        continue_on_error: false
+      - name: Write test environment file
+        run: printf 'DATABASE_URL=postgresql://postgres@localhost:5432/roomote_test\nNODE_ENV=test\nAPP_ENV=development\nROOMOTE_APP_URL=http://localhost:3000\n' > .env.test
+        timeout: 600
+        continue_on_error: false
+      - name: Apply test database schema
+        run: pnpm --filter @roomote/db db:push:test
+        timeout: 600
+        continue_on_error: false
+      - name: Start Redis
+        run: mkdir -p /tmp/redis-data && redis-server --port 16379 --dir /tmp/redis-data --appendonly no
+        timeout: 600
+        continue_on_error: true
+        detached: true
+        logfile: /tmp/roomote-redis.log
+      - name: Build local worker release
+        run: pnpm --filter @roomote/dev build-worker-release
+        timeout: 600
+        continue_on_error: true
+      - name: Start API server
+        run: PORT=13001 APP_ENV=development pnpm --filter @roomote/api dev
+        timeout: 600
+        continue_on_error: true
+        detached: true
+        logfile: /tmp/roomote-api.log
+      - name: Start Next.js web dev server
+        run: PORT=3000 APP_ENV=development pnpm --filter @roomote/web dev
+        timeout: 600
+        continue_on_error: false
+        detached: true
+        logfile: /tmp/roomote-web.log
+      - name: Start BullMQ worker
+        run: PORT=13002 APP_ENV=development pnpm --filter @roomote/bullmq dev
+        timeout: 600
+        continue_on_error: true
+        detached: true
+        logfile: /tmp/roomote-bullmq.log
+      - name: Start controller
+        run: APP_ENV=development TRPC_URL="${ROOMOTE_API_HOST:-http://localhost:13001}" ROOMOTE_APP_URL="${ROOMOTE_WEB_HOST:-http://localhost:3000}" ROOMOTE_PUBLIC_URL="${ROOMOTE_WEB_HOST:-http://localhost:3000}" pnpm --filter @roomote/controller dev
+        timeout: 600
+        continue_on_error: true
+        detached: true
+        logfile: /tmp/roomote-controller.log
+      - name: Start Mintlify docs preview
+        run: cd apps/docs && mise exec node@22.20.0 -- mint dev --port 3333 --no-open
+        timeout: 600
+        continue_on_error: true
+        detached: true
+        logfile: /tmp/roomote-docs.log

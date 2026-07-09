@@ -102,6 +102,7 @@ x-roomote-production-env: &roomote-production-env
   MODAL_REGISTRY_PASSWORD: ${MODAL_REGISTRY_PASSWORD:-}
   MODAL_ECR_OIDC_ROLE_ARN: ${MODAL_ECR_OIDC_ROLE_ARN:-}
   MODAL_ECR_REGION: ${MODAL_ECR_REGION:-}
+  MODAL_REGIONS: ${MODAL_REGIONS:-}
 
 x-roomote-service: &roomote-service
   <<: *roomote-env-file

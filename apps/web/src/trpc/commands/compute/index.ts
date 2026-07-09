@@ -17,6 +17,7 @@ import {
   isComputeInfrastructureField,
   isRequiredComputeField,
   isSetupProvisionableComputeProvider,
+  NON_SECRET_COMPUTE_ENV_VAR_NAMES,
   normalizeDeploymentComputeConfig,
   presentSetupNewComputeProvisioning,
   resolveDerivedModalBaseImageRef,
@@ -33,6 +34,7 @@ import type { UserAuthSuccess } from '@/types';
 import {
   assertAdmin,
   getPersistedEnvironmentVariableNames,
+  getPersistedEnvironmentVariableValues,
   upsertDeploymentEnvironmentVariables,
 } from '../environment-variables';
 import {
@@ -106,12 +108,16 @@ export async function getComputeStatusCommand(auth: UserAuthSuccess): Promise<
 
   const [
     persistedEnvVarNames,
+    persistedEnvVarValues,
     persistedComputeConfig,
     savedWorkerImage,
     e2bProvisioning,
     daytonaProvisioning,
   ] = await Promise.all([
     getPersistedEnvironmentVariableNames(),
+    getPersistedEnvironmentVariableValues([
+      ...NON_SECRET_COMPUTE_ENV_VAR_NAMES,
+    ]),
     getPersistedRuntimeComputeConfig(),
     resolveSavedWorkerImage(),
     getPersistedComputeProvisioning('e2b'),
@@ -122,6 +128,7 @@ export async function getComputeStatusCommand(auth: UserAuthSuccess): Promise<
     ...buildSetupComputeStatus({
       runtimeEnv: process.env,
       persistedEnvVarNames,
+      persistedEnvVarValues,
       persistedComputeConfig,
       savedWorkerImage,
     }),
@@ -177,7 +184,7 @@ export async function saveComputeConfigCommand(
     );
 
     if (!providerStatus) {
-      throw new Error('Selected compute provider is unavailable.');
+      throw new Error('Selected sandbox provider is unavailable.');
     }
 
     // When the Modal base image is not entered, not env-provided, and not
@@ -212,6 +219,7 @@ export async function saveComputeConfigCommand(
     // worker image are all persisted as encrypted deployment env vars.
     // Runtime env values are locked and never overwritten from the UI.
     const valuesToSave: Array<{ name: string; value: string }> = [];
+    const envVarsToClear: string[] = [];
 
     if (submittedWorkerImage && !workerImageLocked) {
       valuesToSave.push({
@@ -233,6 +241,15 @@ export async function saveComputeConfigCommand(
           : '');
 
       if (!nextValue) {
+        // Empty secret inputs mean "leave unchanged". Empty optional
+        // non-secret inputs clear a previously saved deployment value.
+        if (
+          field.secret !== true &&
+          !isRequiredComputeField(field) &&
+          field.savedSatisfied
+        ) {
+          envVarsToClear.push(field.envVarName);
+        }
         continue;
       }
 
@@ -267,6 +284,17 @@ export async function saveComputeConfigCommand(
         userId,
         values: valuesToSave,
       });
+    }
+
+    if (envVarsToClear.length > 0) {
+      await tx
+        .delete(environmentVariables)
+        .where(
+          and(
+            isNull(environmentVariables.userId),
+            inArray(environmentVariables.name, envVarsToClear),
+          ),
+        );
     }
 
     // Provisionable providers' base images (E2B worker template, Daytona
@@ -439,12 +467,12 @@ export async function setDefaultComputeProviderCommand(
     );
 
     if (!providerStatus) {
-      throw new Error('Selected compute provider is unavailable.');
+      throw new Error('Selected sandbox provider is unavailable.');
     }
 
     if (!providerStatus.configSatisfied) {
       throw new Error(
-        `Configure ${providerStatus.label} before making it the default compute provider.`,
+        `Configure ${providerStatus.label} before making it the default sandbox provider.`,
       );
     }
 

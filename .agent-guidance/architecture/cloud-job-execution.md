@@ -418,9 +418,15 @@ Harnesses:
   are not fetched or copied for this handoff. The materialized files are retained
   for the active harness lifetime so transcript `@/tmp/...` references remain
   usable across follow-up turns and snapshot resumes, then cleaned up on harness
-  disposal or terminal error paths. OpenCode steering uses Roomote's queued-prompt
-  cancel/replay fallback, with
-  replay interrupts treated as non-terminal task events. OpenCode's normal
+  disposal or terminal error paths. OpenCode steering is native when possible:
+  a follow-up sent with `autoSteerWhenQueued` while a turn is in flight is
+  injected directly into the active OpenCode session (no abort), falling back
+  to Roomote's queued-prompt cancel/replay when native injection fails or a
+  `request_user_input` question is pending, with replay interrupts treated as
+  non-terminal task events. Provider follow-ups (Slack, Teams, Telegram) and
+  web task-page sends both set `autoSteerWhenQueued`; prompts stay in the local
+  runtime queue only as fallback/replay staging or for explicitly queue-only
+  messages. OpenCode's normal
   config precedence owns provider and model selection; task payload `model`
   overrides are passed as explicit prompt-level overrides only when launch code
   supplies one.

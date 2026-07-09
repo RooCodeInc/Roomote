@@ -205,7 +205,7 @@ export async function createEnvVarCommand(
 
   if (COMPUTE_PROVIDER_ENV_VAR_NAMES.has(name)) {
     throw new Error(
-      `"${name}" is a reserved compute provider variable. Configure it under Settings → Compute.`,
+      `"${name}" is a reserved sandbox provider variable. Configure it under Settings → Sandboxes.`,
     );
   }
 

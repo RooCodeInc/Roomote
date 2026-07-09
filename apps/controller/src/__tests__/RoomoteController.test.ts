@@ -19,6 +19,7 @@ const {
     MODAL_REGISTRY_PASSWORD: undefined,
     MODAL_ECR_OIDC_ROLE_ARN: undefined,
     MODAL_ECR_REGION: undefined,
+    MODAL_REGIONS: undefined,
     TRPC_URL: 'http://localhost:13001',
     DOCKER_WORKER_IMAGE: 'roomote-worker:local',
     DOCKER_WORKER_PLATFORM: 'linux/amd64',
@@ -96,6 +97,7 @@ describe('RoomoteController', () => {
     mockEnv.MODAL_REGISTRY_PASSWORD = undefined;
     mockEnv.MODAL_ECR_OIDC_ROLE_ARN = undefined;
     mockEnv.MODAL_ECR_REGION = undefined;
+    mockEnv.MODAL_REGIONS = undefined;
     mockEnv.TRPC_URL = 'http://localhost:13001';
     mockEnv.DOCKER_WORKER_IMAGE = 'roomote-worker:local';
     mockEnv.DOCKER_WORKER_PLATFORM = 'linux/amd64';
@@ -368,6 +370,7 @@ describe('RoomoteController', () => {
   it('adds deployment tags when spawning a modal worker', async () => {
     mockEnv.MODAL_REGISTRY_USERNAME = 'ghcr-user';
     mockEnv.MODAL_REGISTRY_PASSWORD = 'ghcr-token';
+    mockEnv.MODAL_REGIONS = 'us,us-west';
     const controller = new RoomoteController('preview');
 
     await (
@@ -404,6 +407,7 @@ describe('RoomoteController', () => {
         modalBaseImageRef: 'ghcr.io/roomote/modal-worker:test',
         modalRegistryUsername: 'ghcr-user',
         modalRegistryPassword: 'ghcr-token',
+        modalRegions: 'us,us-west',
       }),
     );
   });

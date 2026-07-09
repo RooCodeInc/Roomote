@@ -56,6 +56,7 @@ export const RECOMMENDED_TASK_MODELS = [
   { id: 'qwen3-6-plus', displayName: 'Qwen3.6 Plus', family: 'Qwen' },
   { id: 'minimax-m3', displayName: 'MiniMax M3', family: 'Minimax' },
   { id: 'mimo-v2-5', displayName: 'Mimo V2.5', family: 'MiMo' },
+  { id: 'grok-4-5', displayName: 'Grok 4.5', family: 'Grok' },
 ] as const satisfies readonly RecommendedTaskModel[];
 
 export type RecommendedTaskModelId =
@@ -109,4 +110,5 @@ export const OPENROUTER_RECOMMENDED_TASK_MODEL_SLUGS = {
   'qwen3-6-plus': 'openrouter/qwen/qwen3.6-plus',
   'minimax-m3': 'openrouter/minimax/minimax-m3',
   'mimo-v2-5': 'openrouter/xiaomi/mimo-v2.5',
+  'grok-4-5': 'openrouter/x-ai/grok-4.5',
 } as const satisfies RecommendedTaskModelSlugMap;

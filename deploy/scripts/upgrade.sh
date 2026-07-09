@@ -125,7 +125,7 @@ worker_image="$image_registry/$image_namespace/roomote-worker:$ROOMOTE_VERSION"
 # worker-current.tar.gz always matches the running image (see install.sh).
 worker_release_path="/roomote/releases/worker-current.tar.gz"
 # Keep the installer/deployer-managed Modal base image ref in sync with the
-# new worker image. The wizard stores the selected compute provider in the
+# new worker image. The wizard stores the selected sandbox provider in the
 # database, not in the env file, so this must not gate on
 # DEFAULT_COMPUTE_PROVIDER. A different non-empty value is an operator
 # override and is left untouched.

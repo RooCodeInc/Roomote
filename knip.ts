@@ -85,6 +85,9 @@ const config: KnipConfig = {
         'evals/router/promptfooconfig.followup.ts',
       ],
     },
+    'packages/communication': {
+      project: ['src/**/*.ts'],
+    },
     'packages/compute-providers': {
       project: ['src/**/*.ts'],
     },

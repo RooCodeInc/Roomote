@@ -74,6 +74,7 @@ vi.mock('@tanstack/react-query', async () => {
 vi.mock('@/components/system', () => ({
   ArrowLeft: (props: SVGProps<SVGSVGElement>) => <svg {...props} />,
   ArrowRight: (props: SVGProps<SVGSVGElement>) => <svg {...props} />,
+  BasicTooltip: ({ children }: { children: ReactNode }) => children,
   BrandIcon: ({
     name,
     icon,
@@ -83,6 +84,14 @@ vi.mock('@/components/system', () => ({
     icon: string;
   } & SVGProps<SVGSVGElement>) => <svg aria-label={name || icon} {...props} />,
   Check: (props: SVGProps<SVGSVGElement>) => <svg {...props} />,
+  CopyIconButton: ({
+    'aria-label': ariaLabel,
+  }: {
+    'aria-label'?: string;
+    content: string;
+    tooltip?: ReactNode;
+  }) => <button type="button" aria-label={ariaLabel ?? 'Copy'} />,
+  Download: (props: SVGProps<SVGSVGElement>) => <svg {...props} />,
   ExternalLink: (props: SVGProps<SVGSVGElement>) => <svg {...props} />,
   EnvVarsInfoNote: ({
     children,
@@ -140,6 +149,13 @@ const mockUseMutation = vi.mocked(useMutation);
 const mockUseQueryClient = vi.mocked(useQueryClient);
 
 import { StepAuthEnvVars } from './StepAuthEnvVars';
+
+function expectHeadingInNumberedStep(heading: string, number: number) {
+  const step = screen.getByText(heading).closest('.flex');
+
+  expect(step).not.toBeNull();
+  expect(step).toHaveTextContent(new RegExp(`^\\s*${number}`));
+}
 
 function buildAuthSetup(
   selectedProvider: SetupAuthStatus['preselectedProvider'] = 'slack',
@@ -204,6 +220,66 @@ function buildAuthSetup(
             envVarName: 'ROOMOTE_AUTH_MICROSOFT_CLIENT_ID',
             acceptedEnvVarNames: ['ROOMOTE_AUTH_MICROSOFT_CLIENT_ID'],
             label: 'Microsoft Client ID',
+            runtimeSatisfied: false,
+            savedSatisfied: false,
+            satisfiedByEnvVarName: null,
+          },
+          {
+            envVarName: 'ROOMOTE_AUTH_MICROSOFT_CLIENT_SECRET',
+            acceptedEnvVarNames: ['ROOMOTE_AUTH_MICROSOFT_CLIENT_SECRET'],
+            label: 'Microsoft Client Secret',
+            secret: true,
+            runtimeSatisfied: false,
+            savedSatisfied: false,
+            satisfiedByEnvVarName: null,
+          },
+          {
+            envVarName: 'ROOMOTE_AUTH_MICROSOFT_TENANT_ID',
+            acceptedEnvVarNames: ['ROOMOTE_AUTH_MICROSOFT_TENANT_ID'],
+            label: 'Microsoft Tenant ID',
+            runtimeSatisfied: false,
+            savedSatisfied: false,
+            satisfiedByEnvVarName: null,
+          },
+          {
+            envVarName: 'TEAMS_BOT_APP_ID',
+            acceptedEnvVarNames: ['TEAMS_BOT_APP_ID'],
+            label: 'Teams Bot App ID',
+            runtimeSatisfied: false,
+            savedSatisfied: false,
+            satisfiedByEnvVarName: null,
+          },
+          {
+            envVarName: 'TEAMS_BOT_APP_PASSWORD',
+            acceptedEnvVarNames: ['TEAMS_BOT_APP_PASSWORD'],
+            label: 'Teams Bot App Password',
+            secret: true,
+            runtimeSatisfied: false,
+            savedSatisfied: false,
+            satisfiedByEnvVarName: null,
+          },
+          {
+            envVarName: 'TEAMS_BOT_TENANT_ID',
+            acceptedEnvVarNames: ['TEAMS_BOT_TENANT_ID'],
+            label: 'Teams Bot Tenant ID',
+            runtimeSatisfied: false,
+            savedSatisfied: false,
+            satisfiedByEnvVarName: null,
+          },
+          {
+            envVarName: 'TEAMS_BOT_TOKEN_ENDPOINT',
+            acceptedEnvVarNames: ['TEAMS_BOT_TOKEN_ENDPOINT'],
+            label: 'Teams Bot Token Endpoint',
+            required: false,
+            runtimeSatisfied: false,
+            savedSatisfied: false,
+            satisfiedByEnvVarName: null,
+          },
+          {
+            envVarName: 'TEAMS_BOT_OAUTH_SCOPE',
+            acceptedEnvVarNames: ['TEAMS_BOT_OAUTH_SCOPE'],
+            label: 'Teams Bot OAuth Scope',
+            required: false,
             runtimeSatisfied: false,
             savedSatisfied: false,
             satisfiedByEnvVarName: null,
@@ -329,7 +405,7 @@ describe('StepAuthEnvVars', () => {
     ).toHaveAttribute('href', '/api/setup/roomote-logo');
   });
 
-  it('keeps non-Slack providers on the current manual form', () => {
+  it('keeps Microsoft setup focused on the single app values', () => {
     render(
       <StepAuthEnvVars
         authSetup={buildAuthSetup('microsoft')}
@@ -342,8 +418,174 @@ describe('StepAuthEnvVars', () => {
       screen.getByPlaceholderText('Microsoft Client ID'),
     ).toBeInTheDocument();
     expect(
+      screen.queryByPlaceholderText('Teams Bot App ID'),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByPlaceholderText('Teams Bot App Password'),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByPlaceholderText('Teams Bot Tenant ID'),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByPlaceholderText('Teams Bot Token Endpoint'),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByPlaceholderText('Teams Bot OAuth Scope'),
+    ).not.toBeInTheDocument();
+    expect(screen.queryByText('Teams Bot App ID (optional)')).toBeNull();
+    expect(
       screen.queryByRole('link', { name: /create slack app/i }),
     ).not.toBeInTheDocument();
+  });
+
+  it('shows Microsoft redirect and Teams messaging endpoint notes', () => {
+    render(
+      <StepAuthEnvVars
+        authSetup={buildAuthSetup('microsoft')}
+        selectedProviderId="microsoft"
+        onContinue={vi.fn()}
+      />,
+    );
+
+    expect(
+      screen.getByText('Create a Microsoft Entra app.'),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText('Add the Teams bot capability to that app.'),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText(
+        'https://roomote.example.com/api/auth/oauth2/callback/microsoft-entra-id',
+      ),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText(/https:\/\/roomote\.example\.com\/api\/webhooks\/teams/),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole('button', { name: 'Copy Web redirect URI' }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole('button', { name: 'Copy Bot messaging endpoint' }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByPlaceholderText('Microsoft Client ID'),
+    ).toBeInTheDocument();
+    expectHeadingInNumberedStep('Enter the Microsoft app values.', 2);
+    expectHeadingInNumberedStep('Upload Roomote to Microsoft Teams.', 3);
+    expectHeadingInNumberedStep('Add the Teams bot capability to that app.', 4);
+  });
+
+  it('enables the Teams app package download once a Microsoft app id is entered', () => {
+    render(
+      <StepAuthEnvVars
+        authSetup={buildAuthSetup('microsoft')}
+        selectedProviderId="microsoft"
+        onContinue={vi.fn()}
+      />,
+    );
+
+    expect(
+      screen.queryByRole('link', { name: /download teams app package/i }),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.getByText(/enter the microsoft client id above/i),
+    ).toBeInTheDocument();
+
+    fireEvent.change(screen.getByPlaceholderText('Microsoft Client ID'), {
+      target: { value: '11111111-2222-3333-4444-555555555555' },
+    });
+
+    expect(
+      screen.getByRole('link', { name: /download teams app package/i }),
+    ).toHaveAttribute(
+      'href',
+      '/api/setup/teams-app-package?botAppId=11111111-2222-3333-4444-555555555555',
+    );
+    expect(screen.getAllByRole('link', { name: /^go/i }).at(1)).toHaveAttribute(
+      'href',
+      'https://dev.teams.microsoft.com/home',
+    );
+  });
+
+  it('submits hidden Teams bot values for the single Microsoft app path', async () => {
+    const mutateAsync = setupMutationMock();
+
+    render(
+      <StepAuthEnvVars
+        authSetup={buildAuthSetup('microsoft')}
+        selectedProviderId="microsoft"
+        onContinue={vi.fn()}
+      />,
+    );
+
+    fireEvent.change(screen.getByPlaceholderText('Microsoft Client ID'), {
+      target: { value: '11111111-2222-3333-4444-555555555555' },
+    });
+    fireEvent.change(screen.getByPlaceholderText('Microsoft Client Secret'), {
+      target: { value: 'client-secret' },
+    });
+    fireEvent.change(screen.getByPlaceholderText('Microsoft Tenant ID'), {
+      target: { value: '22222222-3333-4444-5555-666666666666' },
+    });
+
+    expect(
+      screen.queryByPlaceholderText('Teams Bot App ID'),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByPlaceholderText('Teams Bot App Password'),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByPlaceholderText('Teams Bot Tenant ID'),
+    ).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: /save and continue/i }));
+
+    await waitFor(() => {
+      expect(mutateAsync).toHaveBeenCalledWith({
+        provider: 'microsoft',
+        values: expect.objectContaining({
+          ROOMOTE_AUTH_MICROSOFT_CLIENT_ID:
+            '11111111-2222-3333-4444-555555555555',
+          ROOMOTE_AUTH_MICROSOFT_CLIENT_SECRET: 'client-secret',
+          ROOMOTE_AUTH_MICROSOFT_TENANT_ID:
+            '22222222-3333-4444-5555-666666666666',
+          TEAMS_BOT_APP_ID: '11111111-2222-3333-4444-555555555555',
+          TEAMS_BOT_APP_PASSWORD: 'client-secret',
+          TEAMS_BOT_TENANT_ID: '22222222-3333-4444-5555-666666666666',
+        }),
+      });
+    });
+  });
+
+  it('links saved Microsoft credentials to the stored app package download', () => {
+    const authSetup = buildAuthSetup('microsoft');
+    const savedAuthSetup: SetupAuthStatus = {
+      ...authSetup,
+      providers: authSetup.providers.map((provider) =>
+        provider.id === 'microsoft'
+          ? {
+              ...provider,
+              savedSatisfied: true,
+              fields: provider.fields.map((field) => ({
+                ...field,
+                savedSatisfied: true,
+              })),
+            }
+          : provider,
+      ),
+    };
+
+    render(
+      <StepAuthEnvVars
+        authSetup={savedAuthSetup}
+        selectedProviderId="microsoft"
+        onContinue={vi.fn()}
+      />,
+    );
+
+    expect(
+      screen.getByRole('link', { name: /download teams app package/i }),
+    ).toHaveAttribute('href', '/api/teams/app-package');
   });
 
   it('starts bootstrap Slack sign-in after manual credentials are saved', async () => {

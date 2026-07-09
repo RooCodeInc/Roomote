@@ -24,19 +24,19 @@ Four PaaS-shaped paths run the same published images with
 `ROOMOTE_AUTO_GENERATE_KEYS=true` instead of installer-generated keypairs:
 
 - [`railway/`](railway/README.md) — managed Railway deployment with managed
-  Postgres/Redis and hosted compute (Modal/E2B/Daytona) instead of the
+  Postgres/Redis and hosted sandboxes (Modal/E2B/Daytona) instead of the
   Docker socket.
 - [`render/`](render/README.md) — managed Render deployment from the
   Blueprint at the repository root ([`render.yaml`](../render.yaml)), with
-  managed Postgres/Key Value and hosted compute instead of the Docker
+  managed Postgres/Key Value and hosted sandboxes instead of the Docker
   socket.
 - [`coolify/`](coolify/README.md) — a Docker Compose resource for a
   Coolify-managed server; the Docker socket is available there, so the
-  `docker` compute provider is the default.
+  `docker` sandbox provider is the default.
 - [`fly/`](fly/README.md) — a maintained `fly.toml` that runs the stack as
   one Fly.io app (a process group per service) with Fly Managed Postgres,
   Upstash Redis, and Tigris object storage; like Railway, there is no
-  Docker socket, so hosted compute is required.
+  Docker socket, so hosted sandboxes is required.
 
 V1 is intentionally single-tenant. Do not use this flow to put multiple
 customers on the same VM or database.

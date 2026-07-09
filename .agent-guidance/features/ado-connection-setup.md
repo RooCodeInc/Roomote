@@ -1,7 +1,7 @@
 ---
 title: Azure DevOps Connection Setup
 status: active
-last_reviewed: 2026-07-05
+last_reviewed: 2026-07-08
 owner: engineering
 summary: Operator-facing setup guide for connecting Azure DevOps to Roomote through deployment-token-backed source control, service hooks, and optional Entra-backed commenter account linking.
 ---
@@ -26,6 +26,11 @@ source-control connection. For the shared source-control boundary, see
 
 The current path supports:
 
+- validating newly saved `ADO_TOKEN` values against the organization
+  `connectionData` API from `/setup` and Settings (definitive rejections,
+  including Azure DevOps' 203 sign-in responses, block the save; connectivity
+  failures do not). Validation is skipped when no organization is available
+  from the submitted values or saved configuration.
 - syncing repositories visible to the Azure DevOps PAT into provider-tagged
   `repositories` rows from Settings > Environments > Source Control
 - cloning Azure DevOps repositories from the synced repository row's `cloneUrl`
@@ -112,6 +117,13 @@ environment variables:
    `ROOMOTE_AUTH_MICROSOFT_TENANT_ID` when present, and then to `common`.
 7. Optional `ADO_WEBHOOK_SECRET`. If omitted, the admin sync command generates
    and persists a random secret before creating service hooks.
+
+The Settings Source Control section treats Azure DevOps as configured only
+when the required `ADO_ORGANIZATION` and `ADO_TOKEN` values are present.
+Satisfied optional fields alone do not count: `ADO_TENANT_ID` falls back to
+`ROOMOTE_AUTH_MICROSOFT_TENANT_ID`, so deployments using Microsoft sign-in
+would otherwise show a bare credentials form instead of the provider setup
+instructions.
 
 The sync and worker credential paths resolve values in
 [`packages/ado/src/api.ts`](../../packages/ado/src/api.ts), preferring process
@@ -271,6 +283,7 @@ Use this sequence to verify a connection end to end:
 
 | Symptom                                                           | Likely cause                                                                                                                  | Check                                                                                                                                                             |
 | ----------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Saving the config fails with `Azure DevOps rejected the token.`   | The PAT is expired, revoked, or not valid for the configured organization                                                     | Recreate the PAT for the bot/service account in the target organization and save it again                                                                         |
 | `ADO_ORGANIZATION is required to sync Azure DevOps repositories.` | Organization is missing from both process env and encrypted env vars                                                          | Verify `ADO_ORGANIZATION` is available to the web/runtime process                                                                                                 |
 | `ADO_TOKEN is required to sync Azure DevOps repositories.`        | Token is missing from both process env and encrypted env vars                                                                 | Verify `ADO_TOKEN` is available to the web/runtime process                                                                                                        |
 | Sync succeeds but repo is missing                                 | Token identity cannot see the repository                                                                                      | Confirm the bot/service account has organization, project, or repository access                                                                                   |
@@ -285,7 +298,7 @@ Use this sequence to verify a connection end to end:
 
 ## Related Implementation
 
-- [`packages/ado/src/api.ts`](../../packages/ado/src/api.ts) — token/base URL resolution, repository listing, repository row mapping, sync, service-hook setup, runtime credentials
+- [`packages/ado/src/api.ts`](../../packages/ado/src/api.ts) — token/base URL resolution, token validation, repository listing, repository row mapping, sync, service-hook setup, runtime credentials
 - [`apps/web/src/trpc/commands/source-control/index.ts`](../../apps/web/src/trpc/commands/source-control/index.ts) — admin-only sync command
 - [`apps/api/src/handlers/ado`](../../apps/api/src/handlers/ado) — Azure DevOps webhook ingestion, pull request automation routing, and PR comment mention handling
 - [`apps/web/src/trpc/commands/cloud-jobs/index.ts`](../../apps/web/src/trpc/commands/cloud-jobs/index.ts) — web launch provider inference from selected repositories and environment mappings

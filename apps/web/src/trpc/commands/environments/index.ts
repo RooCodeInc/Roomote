@@ -58,6 +58,13 @@ export interface EnvironmentWithMeta {
   config: EnvironmentConfig;
   repositoryMappings: Array<{ repositoryId: string }>;
   repositoryCount: number;
+  /**
+   * Set when the environment is provisioned declaratively at deployment
+   * startup (file basename or inline-env-var document reference). Such
+   * environments stay editable, but the declarative definition wins again on
+   * the next restart.
+   */
+  declarativeSource: string | null;
   createdAt: Date;
   updatedAt: Date;
   snapshots: Partial<Record<ComputeProvider, EnvironmentSnapshotWithMeta>>;
@@ -199,6 +206,7 @@ function toEnvironmentWithMeta(
     repositoryMappings,
     repositoryCount:
       (env.config as EnvironmentConfig).repositories?.length ?? 0,
+    declarativeSource: env.declarativeSource,
     createdAt: env.createdAt,
     updatedAt: env.updatedAt,
     snapshots,

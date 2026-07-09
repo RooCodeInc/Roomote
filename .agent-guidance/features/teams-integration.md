@@ -44,23 +44,37 @@ callers build providers via
    `<ROOMOTE_APP_URL>/api/auth/oauth2/callback/microsoft-entra-id`, create a
    client secret, and save client/tenant IDs plus the secret in the comms
    settings card (or the `ROOMOTE_AUTH_MICROSOFT_*` env vars). The same app
-   serves user sign-in and the bot; dedicated `TEAMS_BOT_*` env vars
-   override the bot half when a separate bot app is preferred.
-2. **Bot**: create a bot for that app (Teams Developer Portal → Tools → Bot
-   management needs no Azure subscription; an Azure Bot resource also works)
-   with its messaging endpoint set to `<ROOMOTE_APP_URL>/api/webhooks/teams`.
-3. **Teams app**: download the generated app package from the comms settings
-   card (`GET /api/teams/app-package` — manifest + icons zip, bot id and
-   deployment URLs pre-filled, built by
+   serves user sign-in and the bot; in the setup wizard, Roomote requires this
+   single-app path and stores hidden `TEAMS_BOT_APP_ID`,
+   `TEAMS_BOT_APP_PASSWORD`, and `TEAMS_BOT_TENANT_ID` values copied from the
+   Microsoft Client ID/secret/tenant. Dedicated `TEAMS_BOT_*` env vars and the
+   optional `TEAMS_BOT_TOKEN_ENDPOINT` / `TEAMS_BOT_OAUTH_SCOPE` overrides are
+   still available from Settings or environment variables for deployments that
+   intentionally diverge after setup.
+2. **Microsoft values**: paste the Client ID, client secret, and Tenant ID in
+   setup. Roomote stores these for Microsoft sign-in and copies them into the
+   hidden setup-only bot fields for the single-app path.
+3. **Teams app package**: download the generated app package (manifest + icons zip,
+   bot id and deployment URLs pre-filled, built by
    `apps/web/src/lib/server/teams-app-package.ts`) and upload it in Teams
    (Apps → Manage your apps → Upload an app) or import it in the Developer
-   Portal. The manifest declares Teams RSC application permissions
+   Portal. Two routes serve it: `GET /api/teams/app-package` (authed; resolves
+   the stored bot credentials, linked from the comms settings card and the
+   setup communication-connect step) and
+   `GET /api/setup/teams-app-package?botAppId=<guid>` (unauthenticated;
+   builds from the caller-supplied GUID so the setup env-vars step can offer
+   the download before credentials are saved, including bootstrap mode). The
+   manifest declares Teams RSC application permissions
    `ChannelMessage.Read.Group` and `ChatMessage.Read.Chat` under
    `authorization.permissions.resourceSpecific`, plus `webApplicationInfo`, so
    a consented team/chat installation can deliver unmentioned channel and chat
    messages to the bot. Existing Teams installations need an app package
    upgrade or reinstall before Teams grants those new permissions.
-4. For Graph-backed history reads, the sign-in app needs delegated
+4. **Bot capability**: in the Teams Developer Portal, open the imported
+   Roomote app and add a bot capability that uses the same Microsoft Client ID
+   as the bot app ID. Set the bot messaging endpoint to
+   `<ROOMOTE_APP_URL>/api/webhooks/teams`.
+5. For Graph-backed history reads, the sign-in app needs delegated
    `ChannelMessage.Read.All` and `Chat.Read` permissions (admin consent).
 
 ## Inbound Flow
@@ -130,9 +144,10 @@ callers build providers via
 - `TeamsCommunicationProvider` (`packages/communication/src/teams-provider.ts`)
   posts via the Bot Framework REST API (client-credentials token exchange in
   `teams-bot-framework-client.ts`): markdown messages, thread replies,
-  direct messages (creates DM conversations), message edits, and emoji-only
-  reaction fallback messages. Bot Framework has no native outbound reaction
-  API, so reactions appear as bot messages whose body is only the mapped emoji.
+  image attachments from signed Roomote artifact URLs, direct messages
+  (creates DM conversations), message edits, and emoji-only reaction fallback
+  messages. Bot Framework has no native outbound reaction API, so reactions
+  appear as bot messages whose body is only the mapped emoji.
 - Worker `send_chat_reply` dispatches by the job's communication provider
   through `POST /api/mcp/slack/thread_reply`, same as Telegram.
 - Channel/thread history reads use Microsoft Graph with a **delegated**
@@ -146,9 +161,9 @@ Supported: task entry (DM + mention, plus unmentioned team/chat messages after
 RSC consent), unmentioned thread replies to the bot in Roomote-owned channel
 threads (Slack-parity no-mention window computed from Graph history),
 follow-ups to active jobs, snapshot resume, account linking with
-activity resume, image attachment/screenshot ingestion, message edits,
-emoji-only reaction fallback messages, Graph history reads, per-user
-attribution.
+activity resume, image attachment/screenshot ingestion, outbound image
+attachments from `send_chat_reply`, message edits, emoji-only reaction fallback
+messages, Graph history reads, per-user attribution.
 
 ## Automations
 

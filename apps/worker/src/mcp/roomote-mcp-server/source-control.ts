@@ -157,13 +157,19 @@ export async function handleManageSourceControl(
       );
     }
 
+    // Models often emit empty strings for unused optional fields. blank values
+    // must not be forwarded as present ids (GitHub routes issue vs review
+    // comment updates using the presence of threadId).
+    const threadId = params.threadId?.trim() || undefined;
+    const commentId = params.commentId?.trim() || undefined;
+
     return jsonResult(
       await writeSourceControl(config, taskId, {
         action: params.action,
         repositoryFullName: params.repositoryFullName,
         prNumber: params.prNumber,
-        threadId: params.threadId,
-        commentId: params.commentId,
+        threadId,
+        commentId,
         body: params.body,
         resolved: params.resolved,
         reviewEvent: params.reviewEvent,

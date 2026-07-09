@@ -33,7 +33,7 @@ shared libraries under `packages/`.
 | `packages/db`                                     | Drizzle ORM schema and migrations.                                  |
 | `packages/sdk`                                    | Shared contract between API, controller, and worker.                |
 | `packages/auth`                                   | Authentication and session handling.                                |
-| `packages/compute-providers`                      | Sandbox compute provider integrations.                              |
+| `packages/compute-providers`                      | Sandbox provider integrations.                                      |
 | `packages/github`, `gitlab`, `gitea`, `ado`       | Source-control provider integrations.                               |
 | `packages/slack`, `linear`, `communication`       | Conversation-surface and issue-tracker integrations.                |
 | `packages/redis`, `env`, `types`, `feature-flags` | Shared infrastructure utilities.                                    |
@@ -42,7 +42,7 @@ shared libraries under `packages/`.
 
 1. A task is created from the web dashboard, Slack, or another entry surface.
 2. The API records it and enqueues work; the controller dequeues and provisions
-   a sandbox with the selected compute provider.
+   a sandbox with the selected sandbox provider.
 3. The worker runs inside the sandbox, executes the agent against your
    repositories, and streams progress back.
 4. Live previews from the sandbox are exposed through the preview proxy, and

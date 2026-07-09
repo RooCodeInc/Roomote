@@ -281,12 +281,14 @@ describe('createSandboxStore', () => {
       }),
     ]);
 
+    // The refreshed history is authoritative: the surviving message is the
+    // persisted envelope (its id is the durable anchor used by reloads and
+    // the historical view), not the ephemeral live twin.
     expect(store.getState().messages).toMatchObject([
       {
-        id: 'live:slack-follow-up',
+        id: 'persisted:slack-follow-up',
         text: 'So what is it',
         clientMessageId: 'slack:1710000000.123',
-        optimistic: false,
       },
     ]);
     expect(store.getState().messages).toHaveLength(1);

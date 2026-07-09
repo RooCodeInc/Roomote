@@ -1156,6 +1156,50 @@ describe('useSetupFlow', () => {
     );
   });
 
+  it('preserves a valid current step deep link without replacing it', async () => {
+    mockStatus({
+      authSetup: {
+        setupSatisfiedByRuntimeEnv: false,
+        selectedProvider: 'slack',
+        preselectedProvider: 'slack',
+        runtimeConfiguredProvider: null,
+        runtimeConfiguredProviders: [],
+        lockReason: null,
+        providers: [
+          {
+            id: 'slack',
+            label: 'Slack',
+            fields: [],
+            runtimeSatisfied: false,
+            savedSatisfied: false,
+            setupSatisfied: false,
+          },
+        ],
+      },
+      setupNewState: {
+        authProvider: 'slack',
+        modelProvider: null,
+        computeProvider: null,
+        sourceControlProvider: null,
+        selectedRepositoryIds: [],
+        onboardingTaskId: null,
+        onboardingTaskStartedAt: null,
+        slackChannel: null,
+        slackThreadTs: null,
+      },
+    });
+    setLocationSearch('?step=auth-env-vars');
+
+    const { result } = renderHook(() => useSetupFlow());
+
+    await waitFor(() => {
+      expect(result.current.step).toBe('auth-env-vars');
+    });
+
+    expect(routerMock.replace).not.toHaveBeenCalled();
+    expect(window.location.search).toBe('?step=auth-env-vars');
+  });
+
   it('updates the active step when the URL changes via browser back/forward', async () => {
     mockStatus();
     setLocationSearch('?step=compute-provider');

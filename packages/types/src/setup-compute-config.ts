@@ -61,6 +61,8 @@ export type SetupComputeProviderDescriptor = {
 export type SetupComputeFieldStatus = SetupComputeFieldDescriptor & {
   runtimeSatisfied: boolean;
   savedSatisfied: boolean;
+  /** Plain-text value for non-secret fields; secrets never round-trip here. */
+  savedValue?: string | null;
   /**
    * True when the deployment can derive a working default for this env-only
    * field without operator input (for example the Modal base image ref from
@@ -215,6 +217,14 @@ export const SETUP_COMPUTE_PROVIDER_CATALOG = [
         category: 'infrastructure',
         advanced: true,
       },
+      {
+        envVarName: 'MODAL_REGIONS',
+        label: 'Modal Regions',
+        required: false,
+        secret: false,
+        category: 'infrastructure',
+        advanced: true,
+      },
     ],
   },
   {
@@ -293,11 +303,11 @@ export const SETUP_COMPUTE_PROVIDER_CATALOG = [
 ] as const satisfies readonly SetupComputeProviderDescriptor[];
 
 /**
- * Compute-provider env vars managed by the setup flow and the Settings →
- * Compute page: account credentials, provider-specific infrastructure values
+ * Sandbox-provider env vars managed by the setup flow and the Settings →
+ * Sandboxes page: account credentials, provider-specific infrastructure values
  * (base images, template ids, snapshot names), and the shared worker image.
  * They are reserved from the generic environment-variables editor so operators
- * configure them through the compute UI (or the deployment env) instead.
+ * configure them through the sandboxes UI (or the deployment env) instead.
  */
 export const COMPUTE_PROVIDER_ENV_VAR_NAMES: ReadonlySet<string> = new Set([
   SHARED_WORKER_IMAGE_ENV_VAR,
@@ -305,6 +315,20 @@ export const COMPUTE_PROVIDER_ENV_VAR_NAMES: ReadonlySet<string> = new Set([
     SETUP_COMPUTE_PROVIDER_CATALOG as readonly SetupComputeProviderDescriptor[]
   ).flatMap((descriptor) => descriptor.fields.map((field) => field.envVarName)),
 ]);
+
+export const NON_SECRET_COMPUTE_ENV_VAR_NAMES: readonly string[] = (
+  SETUP_COMPUTE_PROVIDER_CATALOG as readonly SetupComputeProviderDescriptor[]
+).flatMap((descriptor) =>
+  descriptor.fields
+    .filter((field) => field.secret !== true)
+    .map((field) => field.envVarName),
+);
+
+function isSecretSetupComputeField(
+  field: Pick<SetupComputeFieldDescriptor, 'secret'>,
+): boolean {
+  return field.secret === true;
+}
 
 /**
  * Env-only infrastructure values that the deployment can provision itself
@@ -489,6 +513,7 @@ export function deriveModalBaseImageRefDefault(
 export function buildSetupComputeStatus(input: {
   runtimeEnv?: Partial<Record<string, string | undefined>> | null;
   persistedEnvVarNames?: Iterable<string>;
+  persistedEnvVarValues?: Partial<Record<string, string>>;
   persistedComputeConfig?: Partial<DeploymentComputeConfig> | null;
   selectedProvider?: ComputeProvider | null;
   /**
@@ -502,6 +527,7 @@ export function buildSetupComputeStatus(input: {
   const persistedEnvVarNameSet = new Set(
     Array.from(input.persistedEnvVarNames ?? []).map((name) => name.trim()),
   );
+  const persistedEnvVarValues = input.persistedEnvVarValues ?? {};
   const persistedComputeConfig = normalizeDeploymentComputeConfig(
     input.persistedComputeConfig,
   );
@@ -544,11 +570,21 @@ export function buildSetupComputeStatus(input: {
   };
 
   const providers = SETUP_COMPUTE_PROVIDER_CATALOG.map((descriptor) => {
-    const fields: SetupComputeFieldStatus[] = descriptor.fields.map(
-      (field) => ({
+    const fields: SetupComputeFieldStatus[] = (
+      descriptor.fields as readonly SetupComputeFieldDescriptor[]
+    ).map((field) => {
+      const runtimeValue = runtimeEnv[field.envVarName]?.trim() || null;
+      const persistedValue =
+        persistedEnvVarValues[field.envVarName]?.trim() || null;
+      const savedValue = isSecretSetupComputeField(field)
+        ? null
+        : (runtimeValue ?? persistedValue);
+
+      return {
         ...field,
         runtimeSatisfied: isConfiguredEnvValue(runtimeEnv[field.envVarName]),
         savedSatisfied: persistedEnvVarNameSet.has(field.envVarName),
+        savedValue,
         defaultSatisfied:
           field.envVarName === 'MODAL_BASE_IMAGE_REF' &&
           derivedModalBaseImageRef !== null,
@@ -559,8 +595,8 @@ export function buildSetupComputeStatus(input: {
         setupProvisionable:
           SETUP_PROVISIONABLE_COMPUTE_ENV_VARS.has(field.envVarName) &&
           derivedModalBaseImageRef !== null,
-      }),
-    );
+      };
+    });
 
     const requiredFields = fields.filter(isRequiredComputeField);
     const runtimeConfigSatisfied = requiredFields.every(

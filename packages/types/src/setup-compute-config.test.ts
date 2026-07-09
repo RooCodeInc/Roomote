@@ -112,7 +112,10 @@ describe('buildSetupComputeStatus', () => {
       status.providers.find((provider) => provider.provider === 'docker')
         ?.label,
     ).toBe('Local Docker');
-    expect(infrastructureByProvider.modal).toEqual(['MODAL_BASE_IMAGE_REF']);
+    expect(infrastructureByProvider.modal).toEqual([
+      'MODAL_BASE_IMAGE_REF',
+      'MODAL_REGIONS',
+    ]);
     expect(infrastructureByProvider.daytona).toEqual([
       'DAYTONA_SNAPSHOT_NAME',
       'DAYTONA_API_URL',
@@ -130,11 +133,42 @@ describe('buildSetupComputeStatus', () => {
     expect(modalBaseImage?.advanced).toBe(true);
     expect(modalBaseImage?.category).toBe('infrastructure');
 
+    const modalRegions = status.providers
+      .find((provider) => provider.provider === 'modal')
+      ?.fields.find((field) => field.envVarName === 'MODAL_REGIONS');
+    expect(modalRegions?.secret).toBe(false);
+    expect(modalRegions?.required).toBe(false);
+
     const modalToken = status.providers
       .find((provider) => provider.provider === 'modal')
       ?.fields.find((field) => field.envVarName === 'MODAL_TOKEN_ID');
     expect(modalToken?.category).toBe('credential');
     expect(isComputeCredentialField(modalToken!)).toBe(true);
+  });
+
+  it('returns plain-text savedValue for non-secret fields only', () => {
+    const status = buildSetupComputeStatus({
+      runtimeEnv: {
+        MODAL_REGIONS: 'us',
+      },
+      persistedEnvVarNames: ['MODAL_TOKEN_SECRET', 'MODAL_REGIONS'],
+      persistedEnvVarValues: {
+        MODAL_TOKEN_SECRET: 'should-never-surface',
+        MODAL_REGIONS: 'us-west',
+      },
+    });
+    const modal = status.providers.find(
+      (provider) => provider.provider === 'modal',
+    );
+
+    expect(
+      modal?.fields.find((field) => field.envVarName === 'MODAL_REGIONS')
+        ?.savedValue,
+    ).toBe('us');
+    expect(
+      modal?.fields.find((field) => field.envVarName === 'MODAL_TOKEN_SECRET')
+        ?.savedValue,
+    ).toBeNull();
   });
 
   it('keeps all providers present even when infrastructure is missing', () => {

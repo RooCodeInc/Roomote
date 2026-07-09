@@ -16,7 +16,10 @@ import {
   INVITE_COOKIE_NAME,
   readInviteTokenFromDocumentCookie,
 } from '@/lib/invite-cookie';
-import { getSetupRedirectPath } from '@/lib/setup-status';
+import {
+  DEFAULT_SETUP_REDIRECT_PATH,
+  getSetupRedirectPath,
+} from '@/lib/setup-status';
 import { useTRPC } from '@/trpc/client';
 import { Button, Spinner } from '@/components/system';
 
@@ -199,7 +202,10 @@ export default function SetupPage() {
     }
 
     if (!isSetupStatusLoading && !isSetupStatusError && setupStatus != null) {
-      if (setupRedirectPath && setupRedirectPath !== '/setup') {
+      if (
+        setupRedirectPath &&
+        setupRedirectPath !== DEFAULT_SETUP_REDIRECT_PATH
+      ) {
         router.replace(setupRedirectPath);
         return;
       }

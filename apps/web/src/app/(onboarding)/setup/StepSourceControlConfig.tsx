@@ -393,8 +393,8 @@ export function StepSourceControlConfig({
                     secret={field.secret && !field.runtimeSatisfied}
                     className="font-mono"
                     value={
-                      field.runtimeSatisfied
-                        ? ''
+                      field.runtimeSatisfied && field.secret
+                        ? MASKED_VALUE
                         : shouldShowSavedValueMask
                           ? MASKED_VALUE
                           : value

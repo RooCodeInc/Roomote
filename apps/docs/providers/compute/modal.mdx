@@ -4,7 +4,7 @@ icon: 'https://api.iconify.design/simple-icons:modal.svg?color=currentColor'
 description: Run Roomote tasks on Modal-hosted sandboxes with snapshot support.
 ---
 
-Modal is a hosted compute provider for running task sandboxes away from the
+Modal is a hosted sandbox provider for running task sandboxes away from the
 Roomote server. It is a good fit when you want provider-managed sandbox
 infrastructure, better isolation from the app host, and snapshot-capable
 resume flows.
@@ -20,7 +20,7 @@ Use Modal when:
 
 ## Configuration
 
-Add Modal from **Settings > Compute**, or provide the values as deployment env
+Add Modal from **Settings > Sandboxes**, or provide the values as deployment env
 vars:
 
 ```sh
@@ -29,7 +29,7 @@ MODAL_TOKEN_SECRET=...
 ```
 
 Modal also needs a base image. Roomote usually derives `MODAL_BASE_IMAGE_REF`
-from the shared worker image configured in **Settings > Compute** or
+from the shared worker image configured in **Settings > Sandboxes** or
 `DOCKER_WORKER_IMAGE`:
 
 ```sh
@@ -52,10 +52,21 @@ MODAL_REGISTRY_USERNAME=...
 MODAL_REGISTRY_PASSWORD=...
 MODAL_ECR_OIDC_ROLE_ARN=...
 MODAL_ECR_REGION=...
+# Optional sandbox placement; also available as Advanced infrastructure in
+# Settings > Sandboxes. Comma-separated Modal regions, for example us or us-west.
+MODAL_REGIONS=us
 ```
 
 Use the registry variables when Modal must pull from a private registry. For
 production, prefer immutable image tags such as a release or commit tag.
+
+`MODAL_REGIONS` is an optional comma-separated list of Modal container placement
+regions (for example `us`, `us-west`, or `us,eu`). When unset, Modal chooses
+placement. Prefer broader tokens such as `us` for capacity and cold-start
+behavior. Pinning a region can add a Modal pricing multiplier and only applies
+to newly created or resumed sandboxes, not sandboxes that are already running.
+Do not confuse `MODAL_REGIONS` with `MODAL_ECR_REGION`, which only controls AWS
+ECR image pulls.
 
 ## Worker image expectations
 
@@ -67,7 +78,7 @@ worker runtime starts.
 ## Verify setup
 
 1. save Modal credentials and a registry-qualified worker image
-2. select Modal as the default compute provider
+2. select Modal as the default sandbox provider
 3. start a small task from an environment
 4. confirm the task starts, streams logs, and can run project commands
 5. try resuming or following up on a task that can use a saved snapshot

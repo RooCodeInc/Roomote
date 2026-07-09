@@ -18,6 +18,7 @@ import {
   cleanupModalInstance,
   createComputeProviderClient,
   createModalMachine,
+  parseModalRegions,
   resolveAuthBypassHeaderName,
   resolveAuthBypassValue,
 } from '@roomote/compute-providers';
@@ -126,6 +127,8 @@ export async function spawnModalWorker(
     modalRegistryPassword?: string;
     modalEcrOidcRoleArn?: string;
     modalEcrRegion?: string;
+    /** Comma-separated Modal placement region tokens (`MODAL_REGIONS`). */
+    modalRegions?: string;
     modalTimeoutMs: number;
     localTarballPath?: string;
     deploymentSlug?: string;
@@ -146,11 +149,13 @@ export async function spawnModalWorker(
     modalRegistryPassword,
     modalEcrOidcRoleArn,
     modalEcrRegion,
+    modalRegions,
     modalTimeoutMs,
     localTarballPath,
     deploymentSlug,
     modalTags,
   } = config;
+  const parsedModalRegions = parseModalRegions(modalRegions);
   const environmentId = cloudJob.payload.environmentId;
 
   const { namedPorts, environmentSnapshotId, environmentConfig } =
@@ -261,6 +266,7 @@ export async function spawnModalWorker(
       : {}),
     ...(modalEcrOidcRoleArn ? { ecrOidcRoleArn: modalEcrOidcRoleArn } : {}),
     ...(modalEcrRegion ? { ecrRegion: modalEcrRegion } : {}),
+    ...(parsedModalRegions ? { regions: parsedModalRegions } : {}),
     ...(configuredResources.configuredCpuCores !== null
       ? { cpu: configuredResources.configuredCpuCores }
       : {}),

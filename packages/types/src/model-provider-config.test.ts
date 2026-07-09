@@ -207,6 +207,7 @@ describe('SETUP_MODEL_PROVIDER_CATALOG', () => {
         'amazon-bedrock',
         'google-vertex',
         'google',
+        'xai',
         'chatgpt',
       ],
     );

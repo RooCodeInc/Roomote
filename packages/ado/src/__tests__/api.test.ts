@@ -71,6 +71,7 @@ import {
   removeAdoServiceHooksForRepositories,
   getAdoDeploymentUser,
   listAdoRepositories,
+  validateAdoToken,
   type AdoRepository,
 } from '../api';
 
@@ -292,6 +293,78 @@ describe('Azure DevOps API helpers', () => {
       },
       isActive: true,
       linkedByUserId: 'user-1',
+    });
+  });
+
+  it('validates Azure DevOps tokens against the connection data API', async () => {
+    const fetchMock = vi.fn<typeof fetch>().mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          authenticatedUser: {
+            id: 'user-guid',
+            uniqueName: 'roomote-bot@acme.example',
+            providerDisplayName: 'Roomote Bot',
+          },
+        }),
+        { status: 200 },
+      ),
+    );
+
+    await expect(
+      validateAdoToken({
+        token: 'ado_test',
+        organization: 'acme',
+        baseUrl: 'https://dev.azure.com',
+        fetchImpl: fetchMock,
+      }),
+    ).resolves.toEqual({ status: 'valid', displayName: 'Roomote Bot' });
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      'https://dev.azure.com/acme/_apis/connectionData?api-version=7.1',
+      expect.objectContaining({
+        method: 'GET',
+        headers: expect.objectContaining({
+          Authorization: `Basic ${Buffer.from(':ado_test').toString('base64')}`,
+        }),
+      }),
+    );
+  });
+
+  it('rejects definitively invalid Azure DevOps tokens during validation', async () => {
+    // Azure DevOps answers rejected PATs with a 203 sign-in page.
+    const fetchMock = vi
+      .fn<typeof fetch>()
+      .mockResolvedValue(new Response('<html>Sign in</html>', { status: 203 }));
+
+    await expect(
+      validateAdoToken({
+        token: 'bad_token',
+        organization: 'acme',
+        baseUrl: 'https://dev.azure.com',
+        fetchImpl: fetchMock,
+      }),
+    ).resolves.toEqual({
+      status: 'invalid',
+      error:
+        'Azure DevOps rejected the token. Confirm the PAT is active, belongs to the organization, and has Code read access.',
+    });
+  });
+
+  it('returns unknown when Azure DevOps token validation cannot complete', async () => {
+    const fetchMock = vi
+      .fn<typeof fetch>()
+      .mockRejectedValue(new Error('network unreachable'));
+
+    await expect(
+      validateAdoToken({
+        token: 'ado_test',
+        organization: 'acme',
+        baseUrl: 'https://dev.azure.com',
+        fetchImpl: fetchMock,
+      }),
+    ).resolves.toEqual({
+      status: 'unknown',
+      error: 'Could not verify the Azure DevOps token: network unreachable',
     });
   });
 

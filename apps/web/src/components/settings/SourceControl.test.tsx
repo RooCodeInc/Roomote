@@ -39,18 +39,9 @@ const state = vi.hoisted(() => ({
   ],
   searchParams: '',
   configProviders: [
-    {
-      provider: 'gitlab',
-      fields: [{ runtimeSatisfied: false, savedSatisfied: true }],
-    },
-    {
-      provider: 'gitea',
-      fields: [{ runtimeSatisfied: false, savedSatisfied: true }],
-    },
-    {
-      provider: 'ado',
-      fields: [{ runtimeSatisfied: false, savedSatisfied: true }],
-    },
+    { provider: 'gitlab', configSatisfied: true },
+    { provider: 'gitea', configSatisfied: true },
+    { provider: 'ado', configSatisfied: true },
   ],
 }));
 
@@ -315,18 +306,9 @@ describe('SourceControl settings', () => {
       },
     ];
     state.configProviders = [
-      {
-        provider: 'gitlab',
-        fields: [{ runtimeSatisfied: false, savedSatisfied: true }],
-      },
-      {
-        provider: 'gitea',
-        fields: [{ runtimeSatisfied: false, savedSatisfied: true }],
-      },
-      {
-        provider: 'ado',
-        fields: [{ runtimeSatisfied: false, savedSatisfied: true }],
-      },
+      { provider: 'gitlab', configSatisfied: true },
+      { provider: 'gitea', configSatisfied: true },
+      { provider: 'ado', configSatisfied: true },
     ];
   });
 
@@ -456,18 +438,9 @@ describe('SourceControl settings', () => {
   it('shows setup links instead of sync for disconnected token providers', () => {
     state.gitLabRepositories = [];
     state.configProviders = [
-      {
-        provider: 'gitlab',
-        fields: [{ runtimeSatisfied: false, savedSatisfied: false }],
-      },
-      {
-        provider: 'gitea',
-        fields: [{ runtimeSatisfied: false, savedSatisfied: true }],
-      },
-      {
-        provider: 'ado',
-        fields: [{ runtimeSatisfied: false, savedSatisfied: true }],
-      },
+      { provider: 'gitlab', configSatisfied: false },
+      { provider: 'gitea', configSatisfied: true },
+      { provider: 'ado', configSatisfied: true },
     ];
 
     render(<SourceControl />);
@@ -493,6 +466,51 @@ describe('SourceControl settings', () => {
     expect(
       screen.queryByRole('button', { name: 'Hide config' }),
     ).not.toBeInTheDocument();
+  });
+
+  it('shows ADO setup instructions when required config is not satisfied', () => {
+    state.adoRepositories = [];
+    state.configProviders = [
+      { provider: 'gitlab', configSatisfied: true },
+      { provider: 'gitea', configSatisfied: true },
+      // configSatisfied covers required fields only, so ADO stays
+      // unconfigured even when the optional ADO_TENANT_ID is satisfied via
+      // the ROOMOTE_AUTH_MICROSOFT_TENANT_ID fallback.
+      { provider: 'ado', configSatisfied: false },
+    ];
+
+    render(<SourceControl />);
+
+    expect(
+      screen.queryByRole('button', { name: 'Refresh Azure DevOps' }),
+    ).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Set it up' }));
+
+    expect(
+      screen.getByRole('link', { name: /Azure DevOps personal access token/ }),
+    ).toHaveAttribute('href', 'https://dev.azure.com/_usersSettings/tokens');
+    expect(screen.getByTestId('source-control-config-ado')).toBeInTheDocument();
+  });
+
+  it('keeps every expanded provider form visible when setting up multiple providers', () => {
+    state.giteaRepositories = [];
+    state.adoRepositories = [];
+    state.configProviders = [
+      { provider: 'gitlab', configSatisfied: true },
+      { provider: 'gitea', configSatisfied: false },
+      { provider: 'ado', configSatisfied: false },
+    ];
+
+    render(<SourceControl />);
+
+    fireEvent.click(screen.getAllByRole('button', { name: 'Set it up' })[0]!);
+    fireEvent.click(screen.getByRole('button', { name: 'Set it up' }));
+
+    expect(
+      screen.getByTestId('source-control-config-gitea'),
+    ).toBeInTheDocument();
+    expect(screen.getByTestId('source-control-config-ado')).toBeInTheDocument();
   });
 
   it('shows a success toast when pull request delivery is saved', () => {

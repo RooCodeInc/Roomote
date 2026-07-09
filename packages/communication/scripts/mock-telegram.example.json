@@ -1,0 +1,50 @@
+{
+  "port": 3013,
+  "roomoteTarget": {
+    "webhookUrl": "http://localhost:4000/api/webhooks/telegram"
+  },
+  "state": {
+    "bot": {
+      "id": 7000000001,
+      "username": "roomote_mock_bot",
+      "first_name": "Roomote"
+    },
+    "chats": [
+      {
+        "id": 111000111,
+        "type": "private",
+        "first_name": "Dan"
+      },
+      {
+        "id": -100222000222,
+        "type": "supergroup",
+        "title": "roomote-dev"
+      }
+    ],
+    "users": [
+      {
+        "id": 111000111,
+        "first_name": "Dan",
+        "username": "dan_mock"
+      }
+    ]
+  },
+  "replay": [
+    {
+      "kind": "message",
+      "message": {
+        "chat": {
+          "id": 111000111,
+          "type": "private",
+          "first_name": "Dan"
+        },
+        "from": {
+          "id": 111000111,
+          "first_name": "Dan",
+          "username": "dan_mock"
+        },
+        "text": "!fast what file handles Telegram webhooks?"
+      }
+    }
+  ]
+}

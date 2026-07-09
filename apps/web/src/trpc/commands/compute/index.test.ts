@@ -9,6 +9,7 @@ const {
   mockDbDelete,
   mockUpsertDeploymentEnvironmentVariables,
   mockGetPersistedEnvironmentVariableNames,
+  mockGetPersistedEnvironmentVariableValues,
   mockResolveSavedWorkerImage,
   mockRunComputeProvisioning,
 } = vi.hoisted(() => ({
@@ -20,6 +21,7 @@ const {
   })),
   mockUpsertDeploymentEnvironmentVariables: vi.fn(),
   mockGetPersistedEnvironmentVariableNames: vi.fn().mockResolvedValue([]),
+  mockGetPersistedEnvironmentVariableValues: vi.fn().mockResolvedValue({}),
   mockResolveSavedWorkerImage: vi.fn().mockResolvedValue(null),
   mockRunComputeProvisioning: vi.fn().mockResolvedValue(undefined),
 }));
@@ -62,6 +64,8 @@ vi.mock('../environment-variables', () => ({
   },
   getPersistedEnvironmentVariableNames:
     mockGetPersistedEnvironmentVariableNames,
+  getPersistedEnvironmentVariableValues:
+    mockGetPersistedEnvironmentVariableValues,
   upsertDeploymentEnvironmentVariables:
     mockUpsertDeploymentEnvironmentVariables,
 }));
@@ -125,6 +129,7 @@ describe('compute commands', () => {
     'MODAL_TOKEN_ID',
     'MODAL_TOKEN_SECRET',
     'MODAL_BASE_IMAGE_REF',
+    'MODAL_REGIONS',
     'E2B_API_KEY',
     'E2B_TEMPLATE_ID',
     'E2B_DOMAIN',
@@ -288,6 +293,63 @@ describe('compute commands', () => {
       } finally {
         delete process.env.MODAL_TOKEN_ID;
       }
+    });
+
+    it('clears a saved optional non-secret field when the operator empties it', async () => {
+      // Saved-only path: runtime MODAL_REGIONS would lock the field and
+      // skip delete. MANAGED_COMPUTE_ENV_VARS already clears it per-test.
+      delete process.env.MODAL_REGIONS;
+      mockGetPersistedEnvironmentVariableNames.mockResolvedValue([
+        'MODAL_TOKEN_ID',
+        'MODAL_TOKEN_SECRET',
+        'MODAL_REGIONS',
+      ]);
+      const txWhere = vi.fn(async () => undefined);
+      const txDelete = vi.fn(() => ({ where: txWhere }));
+      const {
+        and: txAnd,
+        inArray: txInArray,
+        isNull: txIsNull,
+      } = await import('@roomote/db/server');
+
+      mockDbTransaction.mockImplementation(async (callback) => {
+        return callback({
+          select: createSelectChain(),
+          insert: createInsertChain(),
+          delete: txDelete,
+        } as never);
+      });
+
+      await saveComputeConfigCommand(buildMockAuth(), {
+        provider: 'modal',
+        values: {
+          MODAL_REGIONS: '',
+        },
+      });
+
+      expect(mockUpsertDeploymentEnvironmentVariables).not.toHaveBeenCalled();
+      expect(txDelete).toHaveBeenCalled();
+      expect(txIsNull).toHaveBeenCalledWith('env.user_id');
+      expect(txInArray).toHaveBeenCalledWith('env.name', ['MODAL_REGIONS']);
+      expect(txAnd).toHaveBeenCalledWith(
+        { op: 'isNull', field: 'env.user_id' },
+        {
+          op: 'inArray',
+          field: 'env.name',
+          values: ['MODAL_REGIONS'],
+        },
+      );
+      expect(txWhere).toHaveBeenCalledWith({
+        op: 'and',
+        conditions: [
+          { op: 'isNull', field: 'env.user_id' },
+          {
+            op: 'inArray',
+            field: 'env.name',
+            values: ['MODAL_REGIONS'],
+          },
+        ],
+      });
     });
 
     it('does not block credential saves on missing env-only infrastructure', async () => {
@@ -465,6 +527,7 @@ describe('compute commands', () => {
         'MODAL_TOKEN_ID',
         'MODAL_TOKEN_SECRET',
         'MODAL_BASE_IMAGE_REF',
+        'MODAL_REGIONS',
       ]);
       expect(txIsNull).toHaveBeenCalledWith('env.user_id');
       expect(txAnd).toHaveBeenCalledWith(
@@ -476,6 +539,7 @@ describe('compute commands', () => {
             'MODAL_TOKEN_ID',
             'MODAL_TOKEN_SECRET',
             'MODAL_BASE_IMAGE_REF',
+            'MODAL_REGIONS',
           ],
         },
       );
@@ -490,6 +554,7 @@ describe('compute commands', () => {
               'MODAL_TOKEN_ID',
               'MODAL_TOKEN_SECRET',
               'MODAL_BASE_IMAGE_REF',
+              'MODAL_REGIONS',
             ],
           },
         ],
@@ -587,7 +652,7 @@ describe('compute commands', () => {
           provider: 'modal',
         }),
       ).rejects.toThrow(
-        'Configure Modal before making it the default compute provider.',
+        'Configure Modal before making it the default sandbox provider.',
       );
     });
 

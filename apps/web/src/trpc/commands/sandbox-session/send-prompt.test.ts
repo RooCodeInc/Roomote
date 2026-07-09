@@ -136,6 +136,40 @@ describe('sendSandboxPromptCommand', () => {
     );
   });
 
+  it('forwards autoSteerWhenQueued to the sandbox sendPrompt command', async () => {
+    const user = await userFactory.create({ name: 'DB User' });
+    const task = await taskFactory.create({
+      userId: user.id,
+    });
+
+    await cloudJobFactory.create({
+      userId: user.id,
+      taskId: task.id,
+      status: CloudTaskStatus.Running,
+      sandboxServerUrl: 'http://sandbox.example.test',
+      result: {},
+    });
+
+    await sendSandboxPromptCommand(
+      buildMockAuth({
+        userId: user.id,
+      }),
+      {
+        taskId: task.id,
+        prompt: 'change direction',
+        source: 'web',
+        autoSteerWhenQueued: true,
+      },
+    );
+
+    expect(mockSendPromptMutate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        prompt: 'change direction',
+        autoSteerWhenQueued: true,
+      }),
+    );
+  });
+
   it('falls back to the authenticated email when the user name is blank', async () => {
     const user = await userFactory.create({
       name: 'Casey Example',

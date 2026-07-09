@@ -26,7 +26,7 @@ import { upsertDeploymentEnvironmentVariables } from '../environment-variables';
 
 /**
  * Shared worker base-image provisioning used by both the setup wizard and
- * the Settings → Compute page. Provisionable providers' base images are
+ * the Settings → Sandboxes page. Provisionable providers' base images are
  * artifacts inside the operator's provider account (the E2B worker template,
  * the Daytona worker snapshot), so saving credentials from either surface
  * can kick off a detached provisioning run; progress lives on the
