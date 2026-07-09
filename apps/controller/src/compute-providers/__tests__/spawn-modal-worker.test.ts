@@ -47,19 +47,25 @@ vi.mock('@roomote/db/server', async (importOriginal) => {
   };
 });
 
-vi.mock('@roomote/compute-providers', () => ({
-  createModalMachine: (...args: unknown[]) => mockCreateModalMachine(...args),
-  createComputeProviderClient: (arg: unknown) =>
-    mockCreateComputeProviderClient(arg),
-  buildComputeProviderMutationDetails: vi.fn(
-    (_context: unknown, details: Record<string, unknown> = {}) => details,
-  ),
-  buildModalWorkerEnv: vi.fn(() => ({ AUTH_TOKEN: 'auth_token' })),
-  cleanupModalInstance: (...args: unknown[]) =>
-    mockCleanupModalInstance(...args),
-  resolveAuthBypassHeaderName: vi.fn(() => undefined),
-  resolveAuthBypassValue: vi.fn(() => undefined),
-}));
+vi.mock('@roomote/compute-providers', async (importOriginal) => {
+  const actual =
+    await importOriginal<typeof import('@roomote/compute-providers')>();
+
+  return {
+    ...actual,
+    createModalMachine: (...args: unknown[]) => mockCreateModalMachine(...args),
+    createComputeProviderClient: (arg: unknown) =>
+      mockCreateComputeProviderClient(arg),
+    buildComputeProviderMutationDetails: vi.fn(
+      (_context: unknown, details: Record<string, unknown> = {}) => details,
+    ),
+    buildModalWorkerEnv: vi.fn(() => ({ AUTH_TOKEN: 'auth_token' })),
+    cleanupModalInstance: (...args: unknown[]) =>
+      mockCleanupModalInstance(...args),
+    resolveAuthBypassHeaderName: vi.fn(() => undefined),
+    resolveAuthBypassValue: vi.fn(() => undefined),
+  };
+});
 
 vi.mock('../../utils', () => ({
   getNamedPortsForCloudJob: (...args: unknown[]) =>
@@ -98,6 +104,33 @@ describe('spawnModalWorker', () => {
       environmentConfig: undefined,
     });
     mockPrimeEnvironmentOidcForMachine.mockResolvedValue(undefined);
+  });
+
+  it('forwards Modal regions into the compute client config', async () => {
+    await spawnModalWorker(
+      mockCloudJob({
+        type: CloudTaskType.StandardTask,
+        payload: { repo: 'test/repo', environmentId: 'env_123' },
+      }),
+      'auth_token',
+      {
+        deploymentSlug: 'roomote',
+        modalTokenId: 'token-id',
+        modalTokenSecret: 'token-secret',
+        modalBaseImageRef: 'image-ref',
+        modalRegions: ' us , us-west ',
+        modalTimeoutMs: 60_000,
+      },
+    );
+
+    expect(mockCreateComputeProviderClient).toHaveBeenCalledWith(
+      expect.objectContaining({
+        provider: 'modal',
+        config: expect.objectContaining({
+          regions: ['us', 'us-west'],
+        }),
+      }),
+    );
   });
 
   it('primes environment OIDC before launching a fresh Modal worker when the environment defines OIDC targets', async () => {

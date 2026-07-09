@@ -99,6 +99,7 @@ export class RoomoteController extends BaseController {
           modalRegistryPassword: Env.MODAL_REGISTRY_PASSWORD,
           modalEcrOidcRoleArn: Env.MODAL_ECR_OIDC_ROLE_ARN,
           modalEcrRegion: Env.MODAL_ECR_REGION,
+          modalRegions: resolvedEnv.MODAL_REGIONS,
           modalTimeoutMs: timeoutMs,
           localTarballPath: this.localWorkerReleasePath,
         });

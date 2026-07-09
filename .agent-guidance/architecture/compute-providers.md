@@ -162,8 +162,9 @@ snapshots.
   baseImageRef: string;         // MODAL_BASE_IMAGE_REF
   registryUsername?: string;    // MODAL_REGISTRY_USERNAME
   registryPassword?: string;    // MODAL_REGISTRY_PASSWORD
-  ecrOidcRoleArn?: string;      // MODAL_ECR_OIDC_ROLE_ARN
+  ecrOidcRoleArn?: string;    // MODAL_ECR_OIDC_ROLE_ARN
   ecrRegion?: string;           // MODAL_ECR_REGION
+  regions?: string[];           // MODAL_REGIONS (optional placement list)
   timeoutMs?: number;
 }
 ```
@@ -211,6 +212,10 @@ environment-snapshot resumes use one shared source of truth for the cap.
 
 - Modal can pull the base image from ECR via OIDC when both `MODAL_ECR_OIDC_ROLE_ARN` and `MODAL_ECR_REGION` are configured.
 - The image reference still comes from `MODAL_BASE_IMAGE_REF`; OIDC only changes how Modal authenticates the pull.
+
+**Container region placement**:
+
+- Optional `regions` (`MODAL_REGIONS`, comma-separated Modal region tokens such as `us` or `us-west`) is passed through to `sandboxes.create` on fresh boots and snapshot resumes. Unset keeps Modal's default placement. This is independent of `MODAL_ECR_REGION`.
 
 ### Daytona
 

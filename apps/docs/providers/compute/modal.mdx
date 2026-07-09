@@ -52,10 +52,21 @@ MODAL_REGISTRY_USERNAME=...
 MODAL_REGISTRY_PASSWORD=...
 MODAL_ECR_OIDC_ROLE_ARN=...
 MODAL_ECR_REGION=...
+# Optional sandbox placement; also available as Advanced infrastructure in
+# Settings > Compute. Comma-separated Modal regions, for example us or us-west.
+MODAL_REGIONS=us
 ```
 
 Use the registry variables when Modal must pull from a private registry. For
 production, prefer immutable image tags such as a release or commit tag.
+
+`MODAL_REGIONS` is an optional comma-separated list of Modal container placement
+regions (for example `us`, `us-west`, or `us,eu`). When unset, Modal chooses
+placement. Prefer broader tokens such as `us` for capacity and cold-start
+behavior. Pinning a region can add a Modal pricing multiplier and only applies
+to newly created or resumed sandboxes, not sandboxes that are already running.
+Do not confuse `MODAL_REGIONS` with `MODAL_ECR_REGION`, which only controls AWS
+ECR image pulls.
 
 ## Worker image expectations
 

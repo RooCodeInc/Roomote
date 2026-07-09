@@ -186,6 +186,7 @@ as per-task auth tokens or workspace paths.
 | `MODAL_REGISTRY_PASSWORD`    | Private registry  | Registry password for private non-ECR image pulls.                                                                             |
 | `MODAL_ECR_OIDC_ROLE_ARN`    | ECR               | AWS IAM role ARN used by Modal for ECR OIDC pulls.                                                                             |
 | `MODAL_ECR_REGION`           | ECR               | AWS region for Modal ECR OIDC pulls.                                                                                           |
+| `MODAL_REGIONS`              | Optional          | Comma-separated Modal sandbox placement regions (for example `us` or `us-west`). Unset keeps Modal default placement.         |
 | `E2B_API_KEY`                | E2B               | E2B API key. Can also be saved from **Settings > Compute**.                                                                    |
 | `E2B_TEMPLATE_ID`            | E2B               | Worker template ID. Usually provisioned from the worker image by Roomote.                                                      |
 | `E2B_DOMAIN`                 | Optional          | E2B domain for self-hosted or custom E2B clusters.                                                                             |
