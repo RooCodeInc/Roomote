@@ -68,6 +68,11 @@ import {
   findActiveTeamsJob,
   findCompletedTeamsJobWithSnapshot,
 } from './find-active-teams-job.js';
+import {
+  launchClaimedTeamsSuggestion,
+  parseTeamsSuggestionStartText,
+  resolveAndClaimTeamsSuggestionStart,
+} from './suggestion-start.js';
 import { shouldRouteUnmentionedTeamsThreadReplyToAgent } from './unmentioned-thread-reply.js';
 
 const TEAMS_ACTIVITY_DEDUP_PREFIX = 'teams:activity:';
@@ -1640,6 +1645,90 @@ teams.post('/', async (c) => {
         queued: false,
         reason: 'account_link_required',
       });
+    }
+
+    // Structured "start idea N" hook for the posted suggestion lists. Matches
+    // are driven through the shared work-item claim state machine (claim ->
+    // launch -> fenced finalize/release) like the Slack reaction and Telegram
+    // button surfaces; anything that does not parse, or a conversation with no
+    // tracked suggestion cards, falls through to normal task entry unchanged.
+    // This runs before the snapshot resume so a suggestion start is never
+    // swallowed as a follow-up to the conversation's previous task.
+    const suggestionIdeaNumber = parseTeamsSuggestionStartText(
+      queuedMessage.text,
+    );
+
+    if (suggestionIdeaNumber !== null) {
+      const resolution = await resolveAndClaimTeamsSuggestionStart({
+        conversationId: metadata.communicationChannelId,
+        ideaNumber: suggestionIdeaNumber,
+      });
+
+      if (resolution.outcome === 'not_found') {
+        await postTeamsMessageBestEffort({
+          conversationId: metadata.communicationChannelId,
+          threadId: metadata.communicationThreadId,
+          serviceUrl: metadata.communicationServiceUrl,
+          text: `I couldn't find idea ${suggestionIdeaNumber} — the latest suggestions list has ${resolution.ideaCount} idea${resolution.ideaCount === 1 ? '' : 's'}.`,
+        });
+
+        return c.json({
+          ok: true,
+          queued: false,
+          reason: 'suggestion_not_found',
+        });
+      }
+
+      if (resolution.outcome === 'already_started') {
+        await postTeamsMessageBestEffort({
+          conversationId: metadata.communicationChannelId,
+          threadId: metadata.communicationThreadId,
+          serviceUrl: metadata.communicationServiceUrl,
+          text: `"${resolution.title}" was already started or is no longer available.`,
+        });
+
+        return c.json({
+          ok: true,
+          queued: false,
+          reason: 'suggestion_already_started',
+        });
+      }
+
+      if (resolution.outcome === 'claimed') {
+        const suggestionLaunch = await launchClaimedTeamsSuggestion({
+          suggestion: resolution.suggestion,
+          launchTask: (promptText) =>
+            startNewTeamsTask({
+              activity,
+              mappedUserId,
+              queuedMessage: { ...queuedMessage!, text: promptText },
+              metadata,
+            }),
+          postMessage: (text) =>
+            postTeamsMessageBestEffort({
+              conversationId: metadata.communicationChannelId,
+              threadId: metadata.communicationThreadId,
+              serviceUrl: metadata.communicationServiceUrl,
+              text,
+            }),
+        });
+
+        return c.json(
+          suggestionLaunch.result === 'started'
+            ? {
+                ok: true,
+                started: true,
+                cloudJobId: suggestionLaunch.cloudJobId,
+              }
+            : {
+                ok: true,
+                queued: false,
+                reason: `suggestion_${suggestionLaunch.result}`,
+              },
+        );
+      }
+
+      // outcome === 'no_cards': fall through to normal task entry.
     }
 
     queuedMessage = await attachTeamsActivityImagesToQueuedMessage(
