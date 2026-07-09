@@ -45,7 +45,6 @@ vi.mock('@/components/system', () => ({
   ),
   Check: (props: SVGProps<SVGSVGElement>) => <svg {...props} />,
   ChevronDown: (props: SVGProps<SVGSVGElement>) => <svg {...props} />,
-  EnvVarsInfoNote: () => <p>Env vars note</p>,
   Input: ({
     secret: _secret,
     ...props

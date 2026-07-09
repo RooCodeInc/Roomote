@@ -15,7 +15,6 @@ import {
   ArrowRight,
   Button,
   Check,
-  EnvVarsInfoNote,
   Input,
   Select,
   SelectContent,
@@ -309,14 +308,6 @@ export function StepInferenceProvider({
           </Button>
         </div>
       )}
-
-      <div className="space-y-2 text-sm text-muted-foreground">
-        <EnvVarsInfoNote>
-          You can pass keys in as ENV vars when running Roomote (highly
-          recommended in production). When configured here, they&apos;re
-          encrypted in the database.
-        </EnvVarsInfoNote>
-      </div>
 
       <ChatGptConnectDialog
         open={isChatGptDialogOpen}

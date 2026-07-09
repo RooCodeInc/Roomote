@@ -10,7 +10,6 @@ import {
   Check,
   CopyIconButton,
   Download,
-  EnvVarsInfoNote,
   ExternalLink,
   Input,
   Button,
@@ -271,10 +270,6 @@ function ProviderFields({
           </div>
         );
       })}
-
-      <div className="space-y-2 text-sm text-muted-foreground">
-        <EnvVarsInfoNote runtimeConfigured={provider.runtimeSatisfied} />
-      </div>
     </div>
   );
 }

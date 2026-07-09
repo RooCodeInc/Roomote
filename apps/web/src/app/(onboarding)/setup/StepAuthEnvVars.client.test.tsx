@@ -107,20 +107,6 @@ vi.mock('@/components/system', () => ({
   ),
   Download: (props: SVGProps<SVGSVGElement>) => <svg {...props} />,
   ExternalLink: (props: SVGProps<SVGSVGElement>) => <svg {...props} />,
-  EnvVarsInfoNote: ({
-    children,
-    runtimeConfigured,
-  }: {
-    children?: ReactNode;
-    runtimeConfigured?: boolean;
-  }) => (
-    <p>
-      {children ??
-        (runtimeConfigured
-          ? "These values are being passed via ENV vars and can't be overridden here."
-          : "You can pass these in as ENV vars. When configured here, they're encrypted in the database.")}
-    </p>
-  ),
   Info: (props: SVGProps<SVGSVGElement>) => <svg {...props} />,
   Pencil: (props: SVGProps<SVGSVGElement>) => <svg {...props} />,
   Sparkles: (props: SVGProps<SVGSVGElement>) => <svg {...props} />,

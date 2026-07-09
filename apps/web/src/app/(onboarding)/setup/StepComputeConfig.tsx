@@ -19,7 +19,6 @@ import {
   Button,
   Check,
   ChevronDown,
-  EnvVarsInfoNote,
   Input,
   Spinner,
 } from '@/components/system';
@@ -440,8 +439,6 @@ export function StepComputeConfig({
                 </div>
               ) : null}
 
-              {!advancedExpanded && <EnvVarsInfoNote />}
-
               {isHostedProvider && workerImage.hostedReady ? (
                 <div className="flex items-start gap-2 text-muted-foreground mt-4">
                   <Check className="inline size-4 mt-0.5 shrink-0 text-foreground" />
@@ -542,8 +539,6 @@ export function StepComputeConfig({
                   )}
                 </div>
               ) : null}
-
-              {advancedExpanded && <EnvVarsInfoNote />}
             </div>
           </div>
         ) : null}
