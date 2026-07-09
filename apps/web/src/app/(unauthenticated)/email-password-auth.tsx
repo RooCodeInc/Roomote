@@ -33,7 +33,6 @@ export function EmailPasswordAuth({
   hideModeSwitchMessage = false,
   showNameField = true,
   submitRowClassName,
-  submitButtonClassName = 'w-full',
   submitLeadingAction,
 }: {
   redirectUrl: string;
@@ -166,11 +165,7 @@ export function EmailPasswordAuth({
 
       <div className={cn('flex items-center gap-2', submitRowClassName)}>
         {submitLeadingAction}
-        <Button
-          className={submitButtonClassName}
-          type="submit"
-          disabled={isSubmitting}
-        >
+        <Button className="w-full" type="submit" disabled={isSubmitting}>
           {isSubmitting ? <Spinner /> : null}
           {mode === 'sign-up' ? 'Create account' : 'Sign in'}
           <ArrowRight />
@@ -178,9 +173,9 @@ export function EmailPasswordAuth({
       </div>
 
       {allowSignUp && showModeToggle && (
-        <button
+        <Button
           type="button"
-          className="w-full text-center text-xs text-muted-foreground underline-offset-4 hover:underline"
+          className="w-full"
           onClick={() => {
             setErrorMessage(null);
             setModeState(mode === 'sign-up' ? 'sign-in' : 'sign-up');
@@ -190,10 +185,10 @@ export function EmailPasswordAuth({
           {mode === 'sign-up'
             ? 'Already have an account? Sign in'
             : 'Need an account? Create one'}
-        </button>
+        </Button>
       )}
       {hideModeSwitchMessage ? null : (
-        <p className="w-full text-center text-xs text-muted-foreground mt-8">
+        <p className="w-full text-sm text-muted-foreground mt-8">
           Need an account? Forgot your password?
           <br />
           Ask your admin.

@@ -143,7 +143,7 @@ describe('AuthForm', () => {
     expect(replaceMock).not.toHaveBeenCalled();
   });
 
-  it('shows provider configuration guidance', () => {
+  it('shows provider configuration guidance and hides email behind an option', () => {
     render(<AuthForm />);
 
     expect(
@@ -151,8 +151,32 @@ describe('AuthForm', () => {
         name: 'Hi there, welcome to Roomote.',
       }),
     ).toBeVisible();
+    expect(
+      screen.getByRole('button', { name: 'Continue with email' }),
+    ).toBeVisible();
+    expect(screen.queryByLabelText('Email')).not.toBeInTheDocument();
+    expect(screen.queryByLabelText('Password')).not.toBeInTheDocument();
+  });
+
+  it('reveals email sign-in from the provider selection list', () => {
+    render(<AuthForm />);
+
+    fireEvent.click(
+      screen.getByRole('button', { name: 'Continue with email' }),
+    );
+
     expect(screen.getByLabelText('Email')).toBeVisible();
     expect(screen.getByLabelText('Password')).toBeVisible();
+    expect(screen.getByRole('button', { name: 'Sign in' })).toBeVisible();
+    expect(
+      screen.queryByRole('button', { name: 'Continue with email' }),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole('button', { name: 'Continue with Slack' }),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole('button', { name: 'Continue with Microsoft Teams' }),
+    ).not.toBeInTheDocument();
   });
 
   it('omits provider buttons when no provider is configured', () => {
@@ -198,6 +222,10 @@ describe('AuthForm', () => {
   it('offers account creation to invited visitors', () => {
     render(<AuthForm canSignUp />);
 
+    fireEvent.click(
+      screen.getByRole('button', { name: 'Continue with email' }),
+    );
+
     expect(
       screen.getByRole('button', { name: 'Need an account? Create one' }),
     ).toBeVisible();
@@ -208,6 +236,10 @@ describe('AuthForm', () => {
 
   it('hides account creation and points at an admin without an invite', () => {
     render(<AuthForm />);
+
+    fireEvent.click(
+      screen.getByRole('button', { name: 'Continue with email' }),
+    );
 
     expect(
       screen.queryByRole('button', { name: /create/i }),
@@ -235,6 +267,10 @@ describe('AuthForm', () => {
 
     render(<AuthForm canSignUp />);
 
+    fireEvent.click(
+      screen.getByRole('button', { name: 'Continue with email' }),
+    );
+
     expect(screen.getByLabelText('Name')).toBeVisible();
     expect(
       screen.getByRole('button', { name: 'Create account' }),
@@ -245,6 +281,10 @@ describe('AuthForm', () => {
     searchParams = new URLSearchParams('invited=1');
 
     render(<AuthForm />);
+
+    fireEvent.click(
+      screen.getByRole('button', { name: 'Continue with email' }),
+    );
 
     expect(screen.queryByLabelText('Name')).not.toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Sign in' })).toBeVisible();
@@ -257,6 +297,9 @@ describe('AuthForm', () => {
 
     expect(screen.getByText(/reached its licensed user limit/)).toBeVisible();
     // Sign-in stays available: existing users are never blocked by the gate.
+    fireEvent.click(
+      screen.getByRole('button', { name: 'Continue with email' }),
+    );
     expect(screen.getByRole('button', { name: 'Sign in' })).toBeVisible();
   });
 

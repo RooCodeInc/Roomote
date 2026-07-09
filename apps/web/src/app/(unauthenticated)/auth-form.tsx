@@ -19,6 +19,7 @@ import {
   ArrowRight,
   BrandIcon,
   Button,
+  Mail,
   Slack,
   Spinner,
 } from '@/components/system';
@@ -98,10 +99,13 @@ export function AuthForm({
   const visibleProviders = SOCIAL_PROVIDERS.filter((provider) =>
     enabledProviderSet.has(provider.id),
   );
+  const hasVisibleProviders = visibleProviders.length > 0;
 
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [isEmailAuthVisible, setIsEmailAuthVisible] = useState(false);
   const [submittingProvider, setSubmittingProvider] =
     useState<AuthProvider | null>(null);
+  const showEmailAuth = !hasVisibleProviders || isEmailAuthVisible;
 
   const handleSocialSignIn = async (provider: AuthProvider) => {
     setErrorMessage(null);
@@ -140,20 +144,14 @@ export function AuthForm({
   };
 
   return (
-    <main className="flex w-full justify-center md:justify-start">
+    <main className="flex w-full">
       <div className="relative w-full max-w-2xl space-y-6 py-2 text-left md:py-0">
         <h1 className="relative text-3xl font-bold tracking-tighter">
           <span className="relative flex items-center gap-3">
-            <span className="absolute -left-6 hidden w-3 rounded-lg border border-foreground bg-accent-bright-foreground md:inline-block" />
-            Hi there, welcome to Roomote.
+            Welcome! Come on in.
           </span>
         </h1>
         <div className="max-w-xl space-y-4">
-          <p>
-            Sign in with your team&apos;s messaging tool. Email is available
-            below.
-          </p>
-
           <div className="space-y-2">
             <OriginMismatchAlert />
             {noticeMessage && (
@@ -170,60 +168,63 @@ export function AuthForm({
             )}
           </div>
 
-          <div className="max-w-sm space-y-0.5">
-            {visibleProviders.map((provider) => {
-              const isSubmitting = submittingProvider === provider.id;
+          {!showEmailAuth ? (
+            <div className="max-w-sm space-y-0.5">
+              {visibleProviders.map((provider) => {
+                const isSubmitting = submittingProvider === provider.id;
 
-              return (
-                <Button
-                  className={cn(
-                    'group flex h-auto w-full py-5',
-                    'hover:bg-foreground hover:text-accent-foreground',
-                  )}
-                  disabled={isSubmitting}
-                  key={provider.id}
-                  onClick={() => void handleSocialSignIn(provider.id)}
-                  type="button"
-                >
-                  <span className="flex min-w-0 grow items-center gap-2">
-                    {isSubmitting ? (
-                      <Spinner />
-                    ) : (
-                      <AuthProviderIcon provider={provider.icon} />
-                    )}
-                    <span className="grow truncate text-left font-medium">
-                      Continue with {provider.label}
+                return (
+                  <Button
+                    className={cn('w-full')}
+                    disabled={isSubmitting}
+                    key={provider.id}
+                    onClick={() => void handleSocialSignIn(provider.id)}
+                    type="button"
+                  >
+                    <span className="flex min-w-0 grow items-center gap-2">
+                      {isSubmitting ? (
+                        <Spinner />
+                      ) : (
+                        <AuthProviderIcon provider={provider.icon} />
+                      )}
+                      <span className="grow truncate text-left font-medium">
+                        Login with {provider.label}
+                      </span>
                     </span>
-                  </span>
-                  <ArrowRight />
-                </Button>
-              );
-            })}
-          </div>
+                    <ArrowRight />
+                  </Button>
+                );
+              })}
 
-          {visibleProviders.length > 0 && (
-            <div className="flex max-w-sm items-center gap-3 py-1 text-xs text-muted-foreground">
-              <span className="h-px flex-1 bg-border" />
-              or
-              <span className="h-px flex-1 bg-border" />
+              <Button
+                className={cn('w-full')}
+                onClick={() => setIsEmailAuthVisible(true)}
+                type="button"
+              >
+                <Mail />
+                <span className="grow text-left font-medium">
+                  Login in with email
+                </span>
+                <ArrowRight />
+              </Button>
             </div>
-          )}
+          ) : null}
 
-          <div className="max-w-sm">
-            <EmailPasswordAuth
-              redirectUrl={redirectUrl}
-              allowSignUp={canSignUp}
-              labelsAsPlaceholders={true}
-              hideModeSwitchMessage={hideModeSwitchMessage}
-              defaultMode={
-                canSignUp && searchParams.get('invited') ? 'sign-up' : 'sign-in'
-              }
-              submitButtonClassName={cn(
-                'h-auto w-full justify-between py-5',
-                'hover:bg-foreground hover:text-accent-foreground',
-              )}
-            />
-          </div>
+          {showEmailAuth ? (
+            <div className="max-w-sm">
+              <EmailPasswordAuth
+                redirectUrl={redirectUrl}
+                allowSignUp={canSignUp}
+                labelsAsPlaceholders={true}
+                hideModeSwitchMessage={hideModeSwitchMessage}
+                defaultMode={
+                  canSignUp && searchParams.get('invited')
+                    ? 'sign-up'
+                    : 'sign-in'
+                }
+              />
+            </div>
+          ) : null}
         </div>
       </div>
     </main>
