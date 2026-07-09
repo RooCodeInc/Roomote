@@ -1,7 +1,7 @@
 ---
 title: Cloud Job Execution Architecture
 status: active
-last_reviewed: 2026-07-03
+last_reviewed: 2026-07-09
 owner: engineering
 summary: Cloud job execution system covering direct cloud-job submission, controller dispatch, worker runtime, sandbox OIDC refresh, snapshots, and completion.
 ---
@@ -461,8 +461,12 @@ Persistence model:
   questions, persists a `roomote_runtime.task_cancelled` marker envelope
   (rendered by the web transcript as a centered "Stopped by …" divider), and
   drops trailing post-abort assistant stream/finalize events until the next
-  prompt. Internal cancels (steer replay, env-var resumable stop, task
-  replacement) carry no attribution and emit no marker. For Slack-backed
+  prompt. API-side stop paths (`stopTaskJob` and the MCP direct cancel)
+  additionally persist `cloud_jobs.cancelRequestedAt` before invoking the
+  sandbox cancel, so a sandbox that dies mid-cancel still leaves durable
+  evidence that the stop was deliberate. Internal cancels (steer replay,
+  env-var resumable stop, task replacement) carry no attribution, emit no
+  marker, and do not set `cancelRequestedAt`. For Slack-backed
   tasks, the harness evaluates the generated stop hook before completion; when
   a terminal Slack-visible closeout is missing, it sends the hook reminder back
   as a hidden queued prompt and withholds `TaskCompleted` until the closeout is
@@ -511,6 +515,7 @@ Enqueue + processing:
 - `sleepCheckJob()` writes durable per-job decision events into `cloud_job_events` for candidate dedupe, instance-status checks, deadline extensions, snapshot handoff claims, and failure paths so operators can reconstruct why a given job was or was not snapshotted. Snapshot handoffs include a `snapshotIntentId`, trigger path, and BullMQ queue job id so later `snapshot_request` and `snapshot_queue` events can be correlated back to the sleep-check owner.
 - Once a worker has already transitioned a resumable task to `idle` and BullMQ has claimed the external sleep action, late worker-side finalization errors are treated as non-fatal noise rather than downgrading the task into a failed terminal state. In that phase, BullMQ snapshot processing is the source of truth for the eventual completion outcome.
 - Stale-worker recovery now scans both `running` and `idle` jobs on snapshot-capable providers so resumable sessions that lose their worker heartbeat while waiting for follow-up can still be snapshotted or finalized with an explicit audit trail instead of going silent until manual cancellation.
+- Before finalizing a swept job as failed (instance gone, or destroy-and-fail for non-resumable types), `sleepCheckJob()` re-reads `cloud_jobs.cancelRequestedAt`. When a user stop was requested, the job is finalized as `canceled` instead of `failed`, and `finishCloudJob` independently suppresses Slack/Teams/Linear failure notifications for any `failed` finalization of a cancel-requested job — so a deliberately stopped task never posts a "ran into a hiccup" failure reply.
 - While the worker is still alive, it also sends periodic `recordComputeProviderUsage(... lifecycleAction='running')` updates on the worker-heartbeat cadence. Those writes provide a rolling estimate of the active task-owned compute segment before any BullMQ teardown action happens.
 - Fresh launch paths snapshot the effective provider compute resources onto
   `cloud_jobs` so later teardown accounting does not have to guess which
@@ -615,7 +620,7 @@ Terminal statuses accepted by SDK `done`:
 
 - Identity: `id`, `type`, `userId`, `taskId`, `harness`
 - Initial intent: `requestedWorkKind`, `requestedWorkKindSource`, `requestedWorkKindConfidence`
-- Lifecycle: `status`, `taskPhase`, `createdAt`, `dequeuedAt`, `provisionStartedAt`, `provisionReadyAt`, `startedAt`, `setupCompletedAt`, `harnessStartedAt`, `runtimeTaskStartedAt`, `firstAssistantOutputAt`, `completedAt`, `canceledAt`
+- Lifecycle: `status`, `taskPhase`, `createdAt`, `dequeuedAt`, `provisionStartedAt`, `provisionReadyAt`, `startedAt`, `setupCompletedAt`, `harnessStartedAt`, `runtimeTaskStartedAt`, `firstAssistantOutputAt`, `completedAt`, `cancelRequestedAt` (user stop intent, set by stop paths before the sandbox cancel), `canceledAt`
 - Launch mode (captured once per job): `launchMode` (`fresh` \| `environment_snapshot` \| `task_snapshot`); provisioning latency is only comparable within the same launch mode
 - Runtime routing: `vendor`, `machineId`, `sandboxCmdId`, `machineDomains`, `proxyPorts`, `sandboxServerUrl`
 - Worker runtime identity: `workerReleaseTag`, `workerVersion`, `workerCommit` capture the actual worker artifact metadata reported by the running worker during bootstrap

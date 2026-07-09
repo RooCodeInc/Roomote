@@ -60,6 +60,19 @@ async function findCurrentStopTaskJob(
   );
 }
 
+/**
+ * Persist the stop request on the cloud job row before the cancel is carried
+ * out. If the sandbox dies before the row reaches a terminal state, recovery
+ * sweeps use this to finalize the job as canceled instead of misreporting the
+ * deliberate stop as a runtime failure. Keeps the earliest request time.
+ */
+async function markCancelRequested(jobId: number): Promise<void> {
+  await db
+    .update(cloudJobs)
+    .set({ cancelRequestedAt: new Date() })
+    .where(and(eq(cloudJobs.id, jobId), isNull(cloudJobs.cancelRequestedAt)));
+}
+
 async function cancelTaskJobDirect(jobId: number): Promise<boolean> {
   const endedAt = new Date();
 
@@ -68,6 +81,7 @@ async function cancelTaskJobDirect(jobId: number): Promise<boolean> {
       .update(cloudJobs)
       .set({
         status: CloudTaskStatus.Canceled,
+        cancelRequestedAt: endedAt,
         canceledAt: endedAt,
       })
       .where(
@@ -179,6 +193,8 @@ async function stopTaskSandboxJob(params: {
       error: 'User context required to stop the active sandbox task',
     };
   }
+
+  await markCancelRequested(job.id);
 
   try {
     await withSandboxServerRpcClient({

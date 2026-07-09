@@ -374,9 +374,26 @@ export const finishCloudJob = async ({
     }
   }
 
+  // A stop request persisted on the row (cancelRequestedAt) means a Failed
+  // finalization is the fallout of a deliberate user stop — e.g. the sandbox
+  // died before the cancel completed — so failure notifications would tell
+  // the user a task they stopped "ran into a hiccup". Suppress them.
+  const failedAfterStopRequest =
+    status === CloudTaskStatus.Failed && job.cancelRequestedAt != null;
+
+  if (failedAfterStopRequest) {
+    console.log(
+      `[finishCloudJob] Suppressing failure notifications for job ${id}: a stop was requested at ${job.cancelRequestedAt!.toISOString()}`,
+    );
+  }
+
   // Slack failure notification: post a thread reply when the job failed and
   // was triggered from Slack (has slackThreadTs).
-  if (status === CloudTaskStatus.Failed && job.slackThreadTs) {
+  if (
+    status === CloudTaskStatus.Failed &&
+    !failedAfterStopRequest &&
+    job.slackThreadTs
+  ) {
     try {
       await sendSlackFailureNotification(job, sanitizedError);
     } catch (err) {
@@ -392,6 +409,7 @@ export const finishCloudJob = async ({
   // was triggered from Teams (payload carries Teams communication metadata).
   if (
     status === CloudTaskStatus.Failed &&
+    !failedAfterStopRequest &&
     !job.slackThreadTs &&
     getCommunicationProviderFromTaskPayload(job.payload) === 'teams'
   ) {
@@ -442,7 +460,11 @@ export const finishCloudJob = async ({
 
   // Linear failure notification: emit an error activity when the job failed
   // and was triggered from Linear (has linearSessionId).
-  if (status === CloudTaskStatus.Failed && job.linearSessionId) {
+  if (
+    status === CloudTaskStatus.Failed &&
+    !failedAfterStopRequest &&
+    job.linearSessionId
+  ) {
     try {
       await sendLinearFailureNotification(job, sanitizedError);
     } catch (err) {
