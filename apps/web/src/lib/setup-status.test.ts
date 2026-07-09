@@ -1,4 +1,8 @@
-import { getSetupRedirectPath, requiresSetup } from './setup-status';
+import {
+  DEFAULT_SETUP_REDIRECT_PATH,
+  getSetupRedirectPath,
+  requiresSetup,
+} from './setup-status';
 
 describe('setup-status', () => {
   it('routes orgs without GitHub to the setup flow', () => {
@@ -8,7 +12,7 @@ describe('setup-status', () => {
         hasEnvironments: false,
         setupCompletedAt: '2026-01-01T00:00:00.000Z',
       }),
-    ).toBe('/setup');
+    ).toBe(DEFAULT_SETUP_REDIRECT_PATH);
     expect(
       requiresSetup({
         hasGitHub: false,
@@ -25,7 +29,7 @@ describe('setup-status', () => {
         hasEnvironments: false,
         setupCompletedAt: null,
       }),
-    ).toBe('/setup');
+    ).toBe(DEFAULT_SETUP_REDIRECT_PATH);
   });
 
   it('allows previously completed orgs with no environments to continue through the app', () => {
@@ -69,7 +73,7 @@ describe('setup-status', () => {
         hasEnvironments: true,
         setupCompletedAt: null,
       }),
-    ).toBe('/setup');
+    ).toBe(DEFAULT_SETUP_REDIRECT_PATH);
     expect(
       requiresSetup({
         hasGitHub: true,
@@ -86,7 +90,7 @@ describe('setup-status', () => {
         hasEnvironments: true,
         setupCompletedAt: '2026-01-01T00:00:00.000Z',
       }),
-    ).toBe('/setup');
+    ).toBe(DEFAULT_SETUP_REDIRECT_PATH);
     expect(
       requiresSetup({
         hasGitHub: false,
