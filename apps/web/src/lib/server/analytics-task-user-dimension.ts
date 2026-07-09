@@ -10,7 +10,7 @@ import { getUserDisplayName } from '@/lib/user-display-name';
 export const AUTOMATIONS_USER_DIMENSION_KEY = 'automations';
 export const AUTOMATIONS_USER_DIMENSION_LABEL = 'Automations';
 
-export type AnalyticsUserDimensionValue = {
+type AnalyticsUserDimensionValue = {
   key: string;
   label: string;
   disambiguationLabel?: string;
