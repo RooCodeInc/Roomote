@@ -371,8 +371,10 @@ export const PromptInput = forwardRef<PromptInputHandle, PromptInputProps>(
       async (message: PromptInputMessage) => {
         const text = message.text.trim();
         const hasAttachments = (message.files?.length ?? 0) > 0;
+        // Keyed off the live pending request rather than the task phase:
+        // the phase can report running while the turn is still blocked on
+        // the question, and a message here must answer it, not steer.
         const shouldAnswerPendingFreeText =
-          taskPhase === 'waiting_for_user_input' &&
           Boolean(pendingUserInputState?.activeFreeTextRequest) &&
           !hasAttachments;
 
@@ -453,7 +455,6 @@ export const PromptInput = forwardRef<PromptInputHandle, PromptInputProps>(
         pendingUserInputState,
         sending,
         handlePromptChange,
-        taskPhase,
         scrollToBottom,
         handleMessageSent,
         cloudJob,
