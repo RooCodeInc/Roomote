@@ -10,10 +10,10 @@ import {
 import {
   type CloudJob,
   db,
-  cloudJobs,
+  taskRuns,
+  tasks,
   markTaskStartParallelCountEndedAt,
   resolveEffectiveModelRuntimeEnv,
-  resolveTaskAttribution,
   stringifyDecryptedEnvVarValue,
   eq,
   sql,
@@ -23,7 +23,10 @@ import { createCloudJobWorkerGitHubToken } from '@roomote/github';
 import { createCloudJobScopedGitLabTokens } from '@roomote/gitlab';
 import { createCloudJobGiteaCredentials } from '@roomote/gitea';
 import { createCloudJobAdoCredentials } from '@roomote/ado';
-import { releaseCloudTask } from '@roomote/cloud-agents/server';
+import {
+  releaseCloudTask,
+  resolveTaskCommitAuthor,
+} from '@roomote/cloud-agents/server';
 
 import { withBootstrapFailureSignal } from '../../../bootstrap-failure-signal';
 
@@ -98,12 +101,12 @@ export function redactSourceControlProviderEnvVars(
 }
 
 /**
- * Returns a SQL query to claim a specific cloud job by ID.
+ * Returns a SQL query to claim a specific task run by ID.
  */
 export function claimJobById(cloudJobId: number) {
   return sql`
-    UPDATE cloud_jobs SET status = ${CloudTaskStatus.Processing} WHERE id = (
-      SELECT id FROM cloud_jobs
+    UPDATE task_runs SET status = ${CloudTaskStatus.Processing} WHERE id = (
+      SELECT id FROM task_runs
       WHERE id = ${cloudJobId} AND status = ${CloudTaskStatus.Dequeued}
       FOR UPDATE SKIP LOCKED
     )
@@ -206,16 +209,16 @@ export async function cancelAndReleaseCloudJob(
 
   await db.transaction(async (tx) => {
     await tx
-      .update(cloudJobs)
+      .update(taskRuns)
       .set({
         status: CloudTaskStatus.Canceled,
         canceledAt: endedAt,
         error: errorMessage,
       })
-      .where(eq(cloudJobs.id, cloudJob.id));
+      .where(eq(taskRuns.id, cloudJob.id));
 
     await markTaskStartParallelCountEndedAt(tx, {
-      cloudJobId: cloudJob.id,
+      runId: cloudJob.id,
       endedAt,
     });
   });
@@ -370,17 +373,17 @@ export async function cancelCloudJob(
   const endedAt = new Date();
 
   await tx
-    .update(cloudJobs)
+    .update(taskRuns)
     .set({
       status: CloudTaskStatus.Canceled,
       canceledAt: endedAt,
       error,
       ...(artifacts ? { artifacts } : {}),
     })
-    .where(eq(cloudJobs.id, cloudJobId));
+    .where(eq(taskRuns.id, cloudJobId));
 
   await markTaskStartParallelCountEndedAt(tx, {
-    cloudJobId,
+    runId: cloudJobId,
     endedAt,
   });
 }
@@ -415,30 +418,27 @@ export function reportBootstrapFailure({
 
 export async function resolveGitAuthor(
   tx: DbTx,
-  cloudJob: CloudJob,
+  cloudJob: Pick<CloudJob, 'id' | 'taskId'>,
 ): Promise<GitAuthor> {
-  const attribution = await resolveTaskAttribution(tx, {
-    attributionKind: cloudJob.attributionKind,
-    attributedUserId: cloudJob.attributedUserId,
-    attributionSourceKind: cloudJob.attributionSourceKind,
-    attributionSourceDisplayName: cloudJob.attributionSourceDisplayName,
-    attributionSourceExternalId: cloudJob.attributionSourceExternalId,
-    attributedGithubLogin: cloudJob.attributedGithubLogin,
-    attributedGithubUserId: cloudJob.attributedGithubUserId,
-    effectiveAuthorKind: cloudJob.effectiveAuthorKind,
-    effectiveAuthorUserId: cloudJob.effectiveAuthorUserId,
-    effectiveAuthorDisplayName: cloudJob.effectiveAuthorDisplayName,
-    effectiveAuthorGithubLogin: cloudJob.effectiveAuthorGithubLogin,
-    effectiveAuthorGithubUserId: cloudJob.effectiveAuthorGithubUserId,
-    effectiveAuthorReason: cloudJob.effectiveAuthorReason,
-    effectiveAuthorRuleId: cloudJob.effectiveAuthorRuleId,
-    effectivePrOwnerKind: cloudJob.effectivePrOwnerKind,
-    effectivePrOwnerUserId: cloudJob.effectivePrOwnerUserId,
-    effectivePrOwnerDisplayName: cloudJob.effectivePrOwnerDisplayName,
-    effectivePrOwnerGithubLogin: cloudJob.effectivePrOwnerGithubLogin,
-    effectivePrOwnerReason: cloudJob.effectivePrOwnerReason,
-    effectivePrOwnerRuleId: cloudJob.effectivePrOwnerRuleId,
+  const task = await tx.query.tasks.findFirst({
+    where: eq(tasks.id, cloudJob.taskId),
+    columns: {
+      commitAuthorKind: true,
+      commitAuthorUserId: true,
+      commitAuthorLogin: true,
+      commitAuthorExternalId: true,
+      prAssigneeLogin: true,
+      actorDisplayName: true,
+    },
   });
 
-  return attribution.gitAuthor;
+  if (!task) {
+    throw new Error(
+      `Task ${cloudJob.taskId} not found while resolving the git author for run ${cloudJob.id}.`,
+    );
+  }
+
+  const commitAuthor = await resolveTaskCommitAuthor(tx, task);
+
+  return commitAuthor.gitAuthor;
 }

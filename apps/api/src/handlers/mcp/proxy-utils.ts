@@ -9,7 +9,7 @@ import {
   isUserToken,
   parseMcpJsonRpcPayload,
 } from '@roomote/types';
-import { cloudJobs, db, eq } from '@roomote/db/server';
+import { db, eq, taskRuns } from '@roomote/db/server';
 
 import type { Variables } from '../../types';
 import { fetchWithLongLivedStreamDispatcher } from '../long-lived-fetch';
@@ -72,11 +72,11 @@ export function toMcpToolResult<T extends Record<string, unknown>>(payload: T) {
 /**
  * Resolve the effective user for downstream MCP credential lookup.
  *
- * Job tokens remain tied to the cloud job owner for authorization checks, but
- * integration MCPs may need to execute as the most recent human who replied to
- * the task. That live actor is stored on `cloud_jobs.actingUserId` rather than
- * inferred from `task_messages`, because transcript persistence is async and
- * may lag behind the turn that is about to make MCP calls.
+ * Job tokens remain tied to the run's acting user for authorization checks;
+ * integration MCPs execute as the most recent human who launched or replied
+ * to the task. That live actor is stored on `task_runs.actingUserId` rather
+ * than inferred from `task_messages`, because transcript persistence is async
+ * and may lag behind the turn that is about to make MCP calls.
  */
 export async function resolveActingUserId(
   auth: McpAuthContext,
@@ -98,16 +98,16 @@ export async function resolveActingUserId(
     );
   }
 
-  const cloudJob = await db.query.cloudJobs.findFirst({
-    columns: { userId: true, actingUserId: true },
-    where: eq(cloudJobs.id, auth.cloudJobId),
+  const cloudJob = await db.query.taskRuns.findFirst({
+    columns: { actingUserId: true },
+    where: eq(taskRuns.id, auth.cloudJobId),
   });
 
   if (!cloudJob) {
     throw new McpProxyError(404, 'Cloud job not found for this MCP token');
   }
 
-  const actingUserId = cloudJob.actingUserId ?? cloudJob.userId;
+  const actingUserId = cloudJob.actingUserId;
 
   if (!hasRealCloudJobUser(actingUserId)) {
     // Deployment-service-principal jobs have no human actor. Callers that
@@ -141,24 +141,24 @@ export async function resolveActingUserIdOrNull(
     );
   }
 
-  const cloudJob = await db.query.cloudJobs.findFirst({
-    columns: { userId: true, actingUserId: true },
-    where: eq(cloudJobs.id, auth.cloudJobId),
+  const cloudJob = await db.query.taskRuns.findFirst({
+    columns: { actingUserId: true },
+    where: eq(taskRuns.id, auth.cloudJobId),
   });
 
   if (!cloudJob) {
     throw new McpProxyError(404, 'Cloud job not found for this MCP token');
   }
 
-  return cloudJob.actingUserId ?? cloudJob.userId ?? null;
+  return cloudJob.actingUserId ?? null;
 }
 
 async function verifyCloudJobTokenMatchesJob(
   auth: JobTokenContext,
 ): Promise<Response | null> {
-  const cloudJob = await db.query.cloudJobs.findFirst({
-    columns: { id: true, userId: true },
-    where: eq(cloudJobs.id, auth.cloudJobId),
+  const cloudJob = await db.query.taskRuns.findFirst({
+    columns: { id: true, actingUserId: true },
+    where: eq(taskRuns.id, auth.cloudJobId),
   });
 
   if (!cloudJob) {
@@ -169,10 +169,11 @@ async function verifyCloudJobTokenMatchesJob(
     );
   }
 
-  // The token principal must match the job: a user token must carry the
-  // job's user, and a deployment-service-principal token is only valid for a
-  // job with no user. Both being null is the automation case and is valid.
-  if ((cloudJob.userId ?? null) !== auth.userId) {
+  // The token principal must match the run's acting user: a user token must
+  // carry the run's acting user, and a deployment-service-principal token is
+  // only valid for a run with no acting user. Both being null is the
+  // automation case and is valid.
+  if ((cloudJob.actingUserId ?? null) !== auth.userId) {
     return jsonRpcErrorResponse(
       403,
       -32000,

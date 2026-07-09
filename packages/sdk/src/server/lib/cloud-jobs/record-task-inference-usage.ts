@@ -1,9 +1,4 @@
-import {
-  cloudJobs,
-  db,
-  eq,
-  taskInferenceUsageEvents,
-} from '@roomote/db/server';
+import { db, eq, taskInferenceUsageEvents, taskRuns } from '@roomote/db/server';
 
 type TaskInferenceUsageCostSource = 'opencode_message' | 'missing';
 
@@ -31,7 +26,6 @@ interface RecordTaskInferenceUsageInput {
 interface TaskInferenceUsageCloudJob {
   id: number;
   taskId: string | null;
-  userId: string | null;
 }
 
 function clampOptionalInteger(value: number | null | undefined): number {
@@ -70,12 +64,11 @@ async function loadTaskInferenceUsageCloudJob(
   cloudJobId: number,
 ): Promise<TaskInferenceUsageCloudJob | null> {
   return (
-    (await db.query.cloudJobs.findFirst({
-      where: eq(cloudJobs.id, cloudJobId),
+    (await db.query.taskRuns.findFirst({
+      where: eq(taskRuns.id, cloudJobId),
       columns: {
         id: true,
         taskId: true,
-        userId: true,
       },
     })) ?? null
   );
@@ -120,8 +113,7 @@ export async function recordTaskInferenceUsage(
     .values({
       source: 'opencode',
       taskId: cloudJob.taskId,
-      cloudJobId: cloudJob.id,
-      userId: cloudJob.userId,
+      runId: cloudJob.id,
       harnessSessionId: input.harnessSessionId,
       messageId: input.messageId,
       providerId: input.providerId ?? null,
@@ -147,8 +139,7 @@ export async function recordTaskInferenceUsage(
         taskInferenceUsageEvents.messageId,
       ],
       set: {
-        cloudJobId: cloudJob.id,
-        userId: cloudJob.userId,
+        runId: cloudJob.id,
         providerId: input.providerId ?? null,
         modelId: input.modelId ?? null,
         agent,

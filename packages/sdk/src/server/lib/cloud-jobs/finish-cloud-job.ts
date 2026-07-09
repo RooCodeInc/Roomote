@@ -1,6 +1,6 @@
 import {
   ALL_REPOSITORIES,
-  CloudTaskType,
+  TaskPayloadKind,
   CloudTaskStatus,
   getCommunicationChannelFromTaskPayload,
   getCommunicationMessageIdFromTaskPayload,
@@ -8,9 +8,9 @@ import {
   getCommunicationServiceUrlFromTaskPayload,
   getCommunicationThreadIdFromTaskPayload,
   getEnvironmentDefinitionIdFromPayload,
-  isPrReviewJob,
   parseConflictResolutionSummary,
   stripCloudJobErrorMarkers,
+  type TaskState,
 } from '@roomote/types';
 import {
   formatMarkdownLink,
@@ -20,15 +20,20 @@ import {
 import { createTeamsCommunicationProviderFromRuntimeCredentials } from '../teams-communication';
 import {
   type CloudJob,
+  type Task,
+  type TaskPullRequest,
   db,
-  cloudJobs,
+  taskRuns,
+  taskPullRequests,
   deploymentSettings,
   markTaskStartParallelCountEndedAt,
   recordJobLifecycleEvent,
   slackInstallations,
   slackUserMappings,
+  asc,
   eq,
   and,
+  isNotNull,
   tasks,
 } from '@roomote/db/server';
 import {
@@ -76,6 +81,29 @@ import { buildManagerSlackSettingsUrl } from '../manager-slack';
 const DEFAULT_LOCAL_ROOMOTE_APP_URL = 'http://localhost:13000';
 const DEFAULT_DEPLOYMENT_ID = 'default';
 
+/**
+ * Run + its owning task, as loaded by the terminal path. Side-effect helpers
+ * read conversation cargo (channel bindings, requestedWorkKind, initiator)
+ * from `task` and attempt-scoped state from the run row.
+ */
+type FinishedRun = CloudJob & { task: Task };
+
+function resolveTerminalTaskState(
+  status:
+    | CloudTaskStatus.Completed
+    | CloudTaskStatus.Failed
+    | CloudTaskStatus.Canceled,
+): TaskState {
+  switch (status) {
+    case CloudTaskStatus.Completed:
+      return 'completed';
+    case CloudTaskStatus.Failed:
+      return 'failed';
+    case CloudTaskStatus.Canceled:
+      return 'canceled';
+  }
+}
+
 export const finishCloudJob = async ({
   id,
   status,
@@ -89,13 +117,16 @@ export const finishCloudJob = async ({
     | CloudTaskStatus.Idle;
   error?: string;
 }) => {
-  const job = await db.query.cloudJobs.findFirst({
-    where: eq(cloudJobs.id, id),
+  const job = await db.query.taskRuns.findFirst({
+    where: eq(taskRuns.id, id),
+    with: { task: true },
   });
 
   if (!job) {
     return;
   }
+
+  const task = job.task;
 
   try {
     await releaseCloudTask(job);
@@ -107,7 +138,7 @@ export const finishCloudJob = async ({
     );
   }
 
-  const { type: jobType, payload } = job;
+  const { payloadKind } = job;
   const sanitizedError = stripCloudJobErrorMarkers(error);
 
   const now = new Date();
@@ -143,7 +174,7 @@ export const finishCloudJob = async ({
 
   await db.transaction(async (tx) => {
     await tx
-      .update(cloudJobs)
+      .update(taskRuns)
       .set({
         status,
         taskPhase: status === CloudTaskStatus.Idle ? job.taskPhase : null,
@@ -152,25 +183,27 @@ export const finishCloudJob = async ({
         canceledAt: status === CloudTaskStatus.Canceled ? now : job.canceledAt,
         completedAt: status === CloudTaskStatus.Canceled ? null : now,
       })
-      .where(eq(cloudJobs.id, id));
+      .where(eq(taskRuns.id, id));
 
-    if (job.taskId && status !== CloudTaskStatus.Idle) {
+    // Terminal task state: this is the only writer of tasks.state. Idle keeps
+    // the task active (the sandbox is alive and waiting for interaction).
+    if (status !== CloudTaskStatus.Idle) {
       await tx
         .update(tasks)
         .set({
-          completed: status === CloudTaskStatus.Completed,
+          state: resolveTerminalTaskState(status),
           updatedAt: now,
         })
         .where(eq(tasks.id, job.taskId));
     }
 
     await markTaskStartParallelCountEndedAt(tx, {
-      cloudJobId: id,
+      runId: id,
       endedAt: now,
     });
 
     await recordJobLifecycleEvent(tx, {
-      cloudJobId: job.id,
+      runId: job.id,
       taskId: job.taskId,
       eventType: lifecycleEvent.eventType,
       message: lifecycleEvent.message,
@@ -204,9 +237,9 @@ export const finishCloudJob = async ({
   // non-identifying routing facts only.
   if (status === CloudTaskStatus.Completed) {
     void captureEvent('task_completed', {
-      ...(job.userId ? { userId: job.userId } : {}),
+      ...(job.actingUserId ? { userId: job.actingUserId } : {}),
       properties: {
-        taskType: job.type,
+        taskType: job.payloadKind,
         harness: job.harness ?? null,
         computeProvider: job.vendor ?? null,
       },
@@ -214,8 +247,8 @@ export const finishCloudJob = async ({
   }
 
   if (
-    job.taskId &&
-    (status === CloudTaskStatus.Completed || status === CloudTaskStatus.Failed)
+    status === CloudTaskStatus.Completed ||
+    status === CloudTaskStatus.Failed
   ) {
     try {
       await refreshTaskTitleOnCompletion({
@@ -255,7 +288,7 @@ export const finishCloudJob = async ({
     }
   }
 
-  if (jobType === CloudTaskType.SnapshotResume) {
+  if (payloadKind === TaskPayloadKind.SnapshotResume) {
     try {
       await ensureSnapshotResumeGitHubFollowUpFallback({ resumeJobId: job.id });
     } catch (err) {
@@ -267,116 +300,15 @@ export const finishCloudJob = async ({
     }
   }
 
-  // GitHub PR review reaction cleanup.
-  if (isPrReviewJob(jobType, payload)) {
-    if (job.githubPrReactionId) {
-      try {
-        const token = await createCloudJobGitHubToken(job);
-        const [owner, repo] = payload.repo.split('/');
-
-        await deleteReaction(token, {
-          reaction_id: job.githubPrReactionId,
-          owner: owner!,
-          repo: repo!,
-          issue_number: payload.prNumber ?? payload.githubPrNumber,
-        });
-
-        await db
-          .update(cloudJobs)
-          .set({ githubPrReactionId: null })
-          .where(eq(cloudJobs.id, id));
-      } catch (error) {
-        console.error(
-          `[finishCloudJob] Failed to delete reaction for job ${id}: ${
-            error instanceof Error ? error.message : String(error)
-          }`,
-        );
-      }
-    }
-
-    if (job.githubPrCheckRunId) {
-      try {
-        const token = await createCloudJobGitHubToken(job);
-        const [owner, repo] = payload.repo.split('/');
-
-        await updateCheckRun(token, {
-          owner: owner!,
-          repo: repo!,
-          check_run_id: job.githubPrCheckRunId,
-          status: 'completed',
-          conclusion: 'success',
-        });
-      } catch (error) {
-        console.error(
-          `[finishCloudJob] Failed to complete check run for job ${id}: ${
-            error instanceof Error ? error.message : String(error)
-          }`,
-        );
-      }
-    }
-
-    // GitHub PR review summary comment finalization (safety net).
-    // The review-code skill is responsible for patching the summary comment's
-    // in-progress status to a terminal result, but when it doesn't (the job
-    // failed before the agent ran, the agent skipped the update, or posted the
-    // result as a separate comment) the starting line stays forever. This
-    // ensures the comment reflects the terminal job outcome without clobbering
-    // a real agent completion (it only patches comments still showing an
-    // in-progress status line).
-    if (
-      status !== CloudTaskStatus.Idle &&
-      job.taskId &&
-      job.prRepo &&
-      job.prNumber
-    ) {
-      try {
-        const token = await createCloudJobGitHubToken(job);
-        const [owner, repo] = job.prRepo.split('/');
-        const outcome =
-          status === CloudTaskStatus.Completed
-            ? 'completed'
-            : status === CloudTaskStatus.Failed
-              ? 'failed'
-              : 'canceled';
-        const terminalStatus = buildTerminalReviewStatus({
-          outcome,
-          taskUrl: getTaskUrl({
-            taskId: job.taskId,
-            utm: {
-              source: 'github-comment',
-              medium: 'link',
-              campaign: 'github.pr.review',
-            },
-          }),
-        });
-
-        const finalized = await finalizeGithubPrReviewComment({
-          gitHubToken: token,
-          owner: owner!,
-          repo: repo!,
-          prNumber: job.prNumber,
-          commentId: job.githubPrReviewCommentId,
-          terminalStatus,
-        });
-
-        if (finalized) {
-          console.log(
-            `[finishCloudJob] Finalized stale PR review summary comment for job ${id} on ${job.prRepo}#${job.prNumber}`,
-          );
-        }
-      } catch (error) {
-        console.error(
-          `[finishCloudJob] Failed to finalize PR review summary comment for job ${id}: ${
-            error instanceof Error ? error.message : String(error)
-          }`,
-        );
-      }
-    }
+  // GitHub PR review cleanup: reaction, check run, and stale summary comment.
+  // PR linkage and the GitHub-native identifiers live on task_pull_requests.
+  if (task.workflow === 'pr_review') {
+    await cleanupGithubPrReviewArtifacts(job, status);
   }
 
   // Slack failure notification: post a thread reply when the job failed and
-  // was triggered from Slack (has slackThreadTs).
-  if (status === CloudTaskStatus.Failed && job.slackThreadTs) {
+  // was triggered from Slack (the task carries a Slack thread binding).
+  if (status === CloudTaskStatus.Failed && task.slackThreadTs) {
     try {
       await sendSlackFailureNotification(job, sanitizedError);
     } catch (err) {
@@ -392,7 +324,7 @@ export const finishCloudJob = async ({
   // was triggered from Teams (payload carries Teams communication metadata).
   if (
     status === CloudTaskStatus.Failed &&
-    !job.slackThreadTs &&
+    !task.slackThreadTs &&
     getCommunicationProviderFromTaskPayload(job.payload) === 'teams'
   ) {
     try {
@@ -414,8 +346,8 @@ export const finishCloudJob = async ({
   if (
     (status === CloudTaskStatus.Completed ||
       linkedEnvironmentDefinitionId !== null) &&
-    (job.type === CloudTaskType.SlackAppMention ||
-      job.type === CloudTaskType.SnapshotResume)
+    (payloadKind === TaskPayloadKind.SlackAppMention ||
+      payloadKind === TaskPayloadKind.SnapshotResume)
   ) {
     try {
       await sendSlackSetupCompletionNotification(job);
@@ -441,8 +373,8 @@ export const finishCloudJob = async ({
   }
 
   // Linear failure notification: emit an error activity when the job failed
-  // and was triggered from Linear (has linearSessionId).
-  if (status === CloudTaskStatus.Failed && job.linearSessionId) {
+  // and was triggered from Linear (the task carries a Linear session binding).
+  if (status === CloudTaskStatus.Failed && task.linearSessionId) {
     try {
       await sendLinearFailureNotification(job, sanitizedError);
     } catch (err) {
@@ -456,9 +388,7 @@ export const finishCloudJob = async ({
 
   // GitHub PR conflict resolution comment
   if (
-    jobType === CloudTaskType.GithubPrConflictResolve &&
-    job.prRepo &&
-    job.prNumber &&
+    task.workflow === 'pr_conflict_resolve' &&
     (status === CloudTaskStatus.Completed || status === CloudTaskStatus.Failed)
   ) {
     try {
@@ -472,6 +402,156 @@ export const finishCloudJob = async ({
     }
   }
 };
+
+/**
+ * Returns the task's PR rows ordered by detection time. For PR-triggered
+ * workflows the first row is the one inserted at enqueue.
+ */
+async function findTaskPullRequests(
+  taskId: string,
+): Promise<TaskPullRequest[]> {
+  return db.query.taskPullRequests.findMany({
+    where: eq(taskPullRequests.taskId, taskId),
+    orderBy: [
+      asc(taskPullRequests.detectedAt),
+      asc(taskPullRequests.createdAt),
+    ],
+  });
+}
+
+async function cleanupGithubPrReviewArtifacts(
+  job: FinishedRun,
+  status:
+    | CloudTaskStatus.Completed
+    | CloudTaskStatus.Failed
+    | CloudTaskStatus.Canceled
+    | CloudTaskStatus.Idle,
+): Promise<void> {
+  let prRows: TaskPullRequest[];
+
+  try {
+    prRows = await findTaskPullRequests(job.taskId);
+  } catch (error) {
+    console.error(
+      `[finishCloudJob] Failed to load task_pull_requests for task ${job.taskId}: ${
+        error instanceof Error ? error.message : String(error)
+      }`,
+    );
+    return;
+  }
+
+  for (const prRow of prRows) {
+    if (
+      prRow.sourceControlProvider !== 'github' ||
+      !prRow.repository ||
+      !prRow.prNumber
+    ) {
+      continue;
+    }
+
+    const [owner, repo] = prRow.repository.split('/');
+
+    if (!owner || !repo) {
+      continue;
+    }
+
+    if (prRow.githubReactionId) {
+      try {
+        const token = await createCloudJobGitHubToken(job);
+
+        await deleteReaction(token, {
+          reaction_id: prRow.githubReactionId,
+          owner,
+          repo,
+          issue_number: prRow.prNumber,
+        });
+
+        await db
+          .update(taskPullRequests)
+          .set({ githubReactionId: null, updatedAt: new Date() })
+          .where(eq(taskPullRequests.id, prRow.id));
+      } catch (error) {
+        console.error(
+          `[finishCloudJob] Failed to delete reaction for job ${job.id}: ${
+            error instanceof Error ? error.message : String(error)
+          }`,
+        );
+      }
+    }
+
+    if (prRow.githubCheckRunId) {
+      try {
+        const token = await createCloudJobGitHubToken(job);
+
+        await updateCheckRun(token, {
+          owner,
+          repo,
+          check_run_id: prRow.githubCheckRunId,
+          status: 'completed',
+          conclusion: 'success',
+        });
+      } catch (error) {
+        console.error(
+          `[finishCloudJob] Failed to complete check run for job ${job.id}: ${
+            error instanceof Error ? error.message : String(error)
+          }`,
+        );
+      }
+    }
+
+    // GitHub PR review summary comment finalization (safety net).
+    // The review-code skill is responsible for patching the summary comment's
+    // in-progress status to a terminal result, but when it doesn't (the job
+    // failed before the agent ran, the agent skipped the update, or posted the
+    // result as a separate comment) the starting line stays forever. This
+    // ensures the comment reflects the terminal job outcome without clobbering
+    // a real agent completion (it only patches comments still showing an
+    // in-progress status line).
+    if (status !== CloudTaskStatus.Idle) {
+      try {
+        const token = await createCloudJobGitHubToken(job);
+        const outcome =
+          status === CloudTaskStatus.Completed
+            ? 'completed'
+            : status === CloudTaskStatus.Failed
+              ? 'failed'
+              : 'canceled';
+        const terminalStatus = buildTerminalReviewStatus({
+          outcome,
+          taskUrl: getTaskUrl({
+            taskId: job.taskId,
+            utm: {
+              source: 'github-comment',
+              medium: 'link',
+              campaign: 'github.pr.review',
+            },
+          }),
+        });
+
+        const finalized = await finalizeGithubPrReviewComment({
+          gitHubToken: token,
+          owner,
+          repo,
+          prNumber: prRow.prNumber,
+          commentId: prRow.githubReviewCommentId,
+          terminalStatus,
+        });
+
+        if (finalized) {
+          console.log(
+            `[finishCloudJob] Finalized stale PR review summary comment for job ${job.id} on ${prRow.repository}#${prRow.prNumber}`,
+          );
+        }
+      } catch (error) {
+        console.error(
+          `[finishCloudJob] Failed to finalize PR review summary comment for job ${job.id}: ${
+            error instanceof Error ? error.message : String(error)
+          }`,
+        );
+      }
+    }
+  }
+}
 
 function getRuntimeTaskId(job: CloudJob): string | null {
   if (
@@ -500,7 +580,7 @@ function hasReachedTaskRuntime(job: CloudJob): boolean {
  * Teams-launched job fails. Mirrors the Slack failure notification path using
  * the provider-neutral communication metadata on the task payload.
  */
-async function sendTeamsFailureNotification(job: CloudJob): Promise<void> {
+async function sendTeamsFailureNotification(job: FinishedRun): Promise<void> {
   const provider =
     await createTeamsCommunicationProviderFromRuntimeCredentials();
 
@@ -527,12 +607,10 @@ async function sendTeamsFailureNotification(job: CloudJob): Promise<void> {
   const failureText = hasReachedTaskRuntime(job)
     ? TASK_RUNTIME_FAILURE_TEXT
     : TASK_STARTUP_FAILURE_TEXT;
-  const taskUrl = job.taskId
-    ? getTaskUrl({
-        taskId: job.taskId,
-        utm: { campaign: job.type, source: 'teams' },
-      })
-    : null;
+  const taskUrl = getTaskUrl({
+    taskId: job.taskId,
+    utm: { campaign: job.payloadKind, source: 'teams' },
+  });
   const text = taskUrl
     ? `${failureText}\n\n${formatMarkdownLink('Open the task', taskUrl)}`
     : failureText;
@@ -554,14 +632,15 @@ async function sendTeamsFailureNotification(job: CloudJob): Promise<void> {
 /**
  * Handle Slack cleanup and any required failure handoff when a job fails.
  * Resolves the active Slack installation for the org, extracts the channel
- * from the payload (for SlackAppMention jobs), removes stale controls from the
- * started message, then posts either setup onboarding guidance or a retryable
- * generic failure message back into the Slack thread.
+ * from the task's channel bindings, removes stale controls from the started
+ * message, then posts either setup onboarding guidance or a retryable generic
+ * failure message back into the Slack thread.
  */
 async function sendSlackFailureNotification(
-  job: CloudJob,
+  job: FinishedRun,
   _error?: string,
 ): Promise<void> {
+  const task = job.task;
   const runtimeAlreadyStarted = hasReachedTaskRuntime(job);
   const slackInstallation = await db.query.slackInstallations.findFirst({
     where: and(eq(slackInstallations.isActive, true)),
@@ -578,7 +657,7 @@ async function sendSlackFailureNotification(
 
   if (!channel) {
     console.warn(
-      `[finishCloudJob] No channel found in payload for job ${job.id}, skipping Slack notification`,
+      `[finishCloudJob] No channel found for job ${job.id}, skipping Slack notification`,
     );
     return;
   }
@@ -590,21 +669,21 @@ async function sendSlackFailureNotification(
     ? buildSlackWebPathUrl(route.webPath, 'setup.onboarding.failed')
     : getTaskUrl({
         taskId: job.taskId,
-        utm: { campaign: job.type, source: 'slack' },
+        utm: { campaign: job.payloadKind, source: 'slack' },
       });
 
   // Remove the cancel button from the started message.
   const slackStartedMessageTs = await getSlackStartedMessageTs(job.id);
-  if (slackStartedMessageTs && job.slackThreadTs) {
+  if (slackStartedMessageTs && task.slackThreadTs) {
     await slack.removeCancelButton({
       channel,
       messageTs: slackStartedMessageTs,
-      threadTs: job.slackThreadTs,
+      threadTs: task.slackThreadTs,
     });
   }
 
   if (!isSetupOnboarding) {
-    const threadReplyTs = threadTs ?? job.slackThreadTs!;
+    const threadReplyTs = threadTs ?? task.slackThreadTs!;
     const retryableFailureText = runtimeAlreadyStarted
       ? SLACK_RUNTIME_FAILURE_TEXT
       : SLACK_STARTUP_FAILURE_TEXT;
@@ -612,7 +691,7 @@ async function sendSlackFailureNotification(
       "I ran into a hiccup and couldn't get started. Please send a fresh Slack message and I'll give it another shot.";
 
     const failureMessage =
-      job.type === CloudTaskType.SlackAppMention
+      job.payloadKind === TaskPayloadKind.SlackAppMention
         ? buildTaskFailedMessage({
             cloudJobId: job.id,
             messageText: retryableFailureText,
@@ -648,15 +727,15 @@ async function sendSlackFailureNotification(
 
   const messageTs = await slack.postMessage({
     channel,
-    thread_ts: threadTs ?? job.slackThreadTs!,
+    thread_ts: threadTs ?? task.slackThreadTs!,
     text: `I ran into an issue when setting things up. <${taskUrl}|Continue on the web app> to fix it.`,
     unfurl_links: false,
     unfurl_media: false,
   });
 
-  const failureSubject = job.userId
+  const failureSubject = job.actingUserId
     ? await findSlackConversationSubjectByUserId({
-        userId: job.userId,
+        userId: job.actingUserId,
         slackTeamId: slackInstallation.teamId,
       })
     : null;
@@ -667,7 +746,7 @@ async function sendSlackFailureNotification(
       ...failureSubject,
       slackChannelId: channel,
       conversationKind: 'thread',
-      threadTs: threadTs ?? job.slackThreadTs!,
+      threadTs: threadTs ?? task.slackThreadTs!,
       messageTs,
       direction: 'outbound',
       authorKind: 'roomote',
@@ -732,9 +811,9 @@ function buildSlackQuestionChannelInviteClaimKey(params: {
 
 function buildSlackSetupCompletionClaimKey(params: {
   slackInstallationId: string;
-  rootCloudJobId: number;
+  taskId: string;
 }): string {
-  return `slack:setup-completion:${params.slackInstallationId}:${params.rootCloudJobId}`;
+  return `slack:setup-completion:${params.slackInstallationId}:${params.taskId}`;
 }
 
 const SLACK_ONBOARDING_STAGE = {
@@ -743,12 +822,15 @@ const SLACK_ONBOARDING_STAGE = {
 } as const;
 
 async function maybeSendSlackQuestionChannelInvite(
-  job: CloudJob,
+  job: FinishedRun,
 ): Promise<void> {
+  const task = job.task;
+  const invitedUserId = job.actingUserId;
+
   if (
-    !job.userId ||
-    !job.requestedWorkKind ||
-    job.requestedWorkKind === 'unknown'
+    !invitedUserId ||
+    !task.requestedWorkKind ||
+    task.requestedWorkKind === 'unknown'
   ) {
     return;
   }
@@ -770,7 +852,7 @@ async function maybeSendSlackQuestionChannelInvite(
   const slackInstallation = await db.query.slackInstallations.findFirst({
     where: and(
       eq(slackInstallations.isActive, true),
-      eq(slackInstallations.installedByUserId, job.userId),
+      eq(slackInstallations.installedByUserId, invitedUserId),
     ),
     columns: {
       id: true,
@@ -793,7 +875,7 @@ async function maybeSendSlackQuestionChannelInvite(
 
   const slackUserMapping = await db.query.slackUserMappings.findFirst({
     where: and(
-      eq(slackUserMappings.userId, job.userId),
+      eq(slackUserMappings.userId, invitedUserId),
       eq(slackUserMappings.slackTeamId, slackInstallation.teamId),
     ),
     columns: {
@@ -811,28 +893,36 @@ async function maybeSendSlackQuestionChannelInvite(
       ? slackUserMapping.updatedAt
       : slackInstallation.updatedAt;
 
-  const completedKnownWorkKindJobs = await db.query.cloudJobs.findMany({
-    where: and(
-      eq(cloudJobs.userId, job.userId),
-      eq(cloudJobs.status, CloudTaskStatus.Completed),
-    ),
-    columns: {
-      taskId: true,
-      completedAt: true,
-      requestedWorkKind: true,
-    },
-  });
+  // Completed tasks initiated by this user with a known work kind. State and
+  // requestedWorkKind live on tasks; completion time is the terminal run's
+  // completedAt.
+  const completedTaskRows = await db
+    .select({
+      taskId: tasks.id,
+      requestedWorkKind: tasks.requestedWorkKind,
+      completedAt: taskRuns.completedAt,
+    })
+    .from(tasks)
+    .innerJoin(taskRuns, eq(taskRuns.taskId, tasks.id))
+    .where(
+      and(
+        eq(tasks.initiatorUserId, invitedUserId),
+        eq(tasks.state, 'completed'),
+        eq(taskRuns.status, CloudTaskStatus.Completed),
+        isNotNull(taskRuns.completedAt),
+      ),
+    );
 
   const completedEligibleTaskCount = new Set(
-    completedKnownWorkKindJobs
+    completedTaskRows
       .filter(
-        (completedJob) =>
-          completedJob.requestedWorkKind &&
-          completedJob.requestedWorkKind !== 'unknown' &&
-          completedJob.completedAt &&
-          completedJob.completedAt >= inviteEligibilityStartAt,
+        (row) =>
+          row.requestedWorkKind &&
+          row.requestedWorkKind !== 'unknown' &&
+          row.completedAt &&
+          row.completedAt >= inviteEligibilityStartAt,
       )
-      .map((completedJob) => completedJob.taskId),
+      .map((row) => row.taskId),
   ).size;
 
   if (completedEligibleTaskCount !== 2) {
@@ -850,7 +940,7 @@ async function maybeSendSlackQuestionChannelInvite(
 
   const publicChannels = await slack.listPublicChannels();
   const suggestedChannels = await suggestSlackQuestionChannels({
-    userId: job.userId,
+    userId: invitedUserId,
     taskId: job.taskId,
     channels: publicChannels,
   });
@@ -880,7 +970,7 @@ async function maybeSendSlackQuestionChannelInvite(
 
   await recordSlackConversationMessageBestEffort({
     logContext: 'finishCloudJob.questionChannelInvite',
-    subjectUserId: job.userId,
+    subjectUserId: invitedUserId,
     slackTeamId: slackInstallation.teamId,
     subjectSlackUserId: slackUserMapping.slackUserId,
     slackChannelId: dmChannelId,
@@ -911,7 +1001,7 @@ async function maybeSendSlackQuestionChannelInvite(
     );
 }
 
-async function sendSlackSetupCompletionNotification(job: CloudJob) {
+async function sendSlackSetupCompletionNotification(job: FinishedRun) {
   const { channel, threadTs, route } = await resolveSlackJobRouting(job);
 
   if (route.kind !== 'setup-onboarding' || !threadTs) {
@@ -920,7 +1010,7 @@ async function sendSlackSetupCompletionNotification(job: CloudJob) {
 
   if (!channel) {
     console.warn(
-      `[finishCloudJob] No channel found in payload for setup completion job ${job.id}, skipping Slack notification`,
+      `[finishCloudJob] No channel found for setup completion job ${job.id}, skipping Slack notification`,
     );
     return;
   }
@@ -953,9 +1043,11 @@ async function sendSlackSetupCompletionNotification(job: CloudJob) {
   }
 
   const redis = getRedis();
+  // All resume runs share the task, so the task id is the natural claim
+  // scope (previously the root run of the sourceCloudJobId chain).
   const claimKey = buildSlackSetupCompletionClaimKey({
     slackInstallationId: slackInstallation.id,
-    rootCloudJobId: await resolveRootSourceCloudJobId(job),
+    taskId: job.taskId,
   });
   const claim = await redis.set(claimKey, '1', 'EX', 30 * 24 * 60 * 60, 'NX');
 
@@ -990,9 +1082,9 @@ async function sendSlackSetupCompletionNotification(job: CloudJob) {
     return;
   }
 
-  const completionSubject = job.userId
+  const completionSubject = job.actingUserId
     ? await findSlackConversationSubjectByUserId({
-        userId: job.userId,
+        userId: job.actingUserId,
         slackTeamId: slackInstallation.teamId,
       })
     : null;
@@ -1017,75 +1109,44 @@ async function sendSlackSetupCompletionNotification(job: CloudJob) {
   }
 }
 
-async function resolveRootSourceCloudJobId(
-  job: Pick<CloudJob, 'id' | 'sourceCloudJobId'>,
-): Promise<number> {
-  let rootCloudJobId = job.id;
-  const visitedJobIds = new Set<number>([job.id]);
-  let sourceCloudJobId = job.sourceCloudJobId;
-
-  while (sourceCloudJobId) {
-    if (visitedJobIds.has(sourceCloudJobId)) {
-      break;
-    }
-
-    visitedJobIds.add(sourceCloudJobId);
-    rootCloudJobId = sourceCloudJobId;
-
-    const sourceJob = await db.query.cloudJobs.findFirst({
-      columns: {
-        id: true,
-        sourceCloudJobId: true,
-      },
-      where: eq(cloudJobs.id, sourceCloudJobId),
-    });
-
-    if (!sourceJob) {
-      break;
-    }
-
-    sourceCloudJobId = sourceJob.sourceCloudJobId;
-  }
-
-  return rootCloudJobId;
-}
-
+/**
+ * Setup-onboarding resumes carry the environment definition id somewhere in
+ * the payloads of the task's run chain. Instead of walking sourceRunId links,
+ * scan the sibling runs of the task from newest to oldest.
+ */
 async function resolveSetupCompletionEnvironmentDefinitionId(
-  job: Pick<CloudJob, 'id' | 'payload' | 'sourceCloudJobId'>,
+  job: Pick<FinishedRun, 'id' | 'payload' | 'taskId'>,
 ): Promise<string | null> {
-  let environmentDefinitionId = getEnvironmentDefinitionIdFromPayload(
+  const environmentDefinitionId = getEnvironmentDefinitionIdFromPayload(
     job.payload,
   );
 
-  const visitedJobIds = new Set<number>([job.id]);
-  let sourceCloudJobId = job.sourceCloudJobId;
-  while (sourceCloudJobId && !environmentDefinitionId) {
-    if (visitedJobIds.has(sourceCloudJobId)) {
-      break;
-    }
-
-    visitedJobIds.add(sourceCloudJobId);
-
-    const sourceJob = await db.query.cloudJobs.findFirst({
-      columns: {
-        id: true,
-        payload: true,
-        sourceCloudJobId: true,
-      },
-      where: eq(cloudJobs.id, sourceCloudJobId),
-    });
-
-    if (!sourceJob) {
-      break;
-    }
-
-    environmentDefinitionId = getEnvironmentDefinitionIdFromPayload(
-      sourceJob.payload,
-    );
-    sourceCloudJobId = sourceJob.sourceCloudJobId;
+  if (environmentDefinitionId) {
+    return environmentDefinitionId;
   }
 
-  return environmentDefinitionId;
+  const siblingRuns = await db.query.taskRuns.findMany({
+    columns: {
+      id: true,
+      payload: true,
+    },
+    where: eq(taskRuns.taskId, job.taskId),
+    orderBy: [asc(taskRuns.id)],
+  });
+
+  for (const run of siblingRuns) {
+    if (run.id === job.id) {
+      continue;
+    }
+
+    const fromSibling = getEnvironmentDefinitionIdFromPayload(run.payload);
+
+    if (fromSibling) {
+      return fromSibling;
+    }
+  }
+
+  return null;
 }
 
 function getSlackProjectNameFromPayload(payload: unknown): string | null {
@@ -1130,7 +1191,7 @@ function buildSlackWebPathUrl(webPath: string, campaign: string): string {
  * access token, and emits an error event to the session.
  */
 async function sendLinearFailureNotification(
-  job: CloudJob,
+  job: FinishedRun,
   error?: string,
 ): Promise<void> {
   const connection = await findLinearDeploymentMcpConnection();
@@ -1156,7 +1217,7 @@ async function sendLinearFailureNotification(
   const client = new LinearClient(accessToken);
   const errorMessage = error ?? 'Task failed with an unknown error.';
 
-  await client.emitError(job.linearSessionId!, errorMessage);
+  await client.emitError(job.task.linearSessionId!, errorMessage);
 
   console.log(
     `[finishCloudJob] Sent Linear failure notification for job ${job.id}`,
@@ -1164,20 +1225,33 @@ async function sendLinearFailureNotification(
 }
 
 async function postConflictResolutionComment(
-  job: CloudJob,
+  job: FinishedRun,
   status: CloudTaskStatus.Completed | CloudTaskStatus.Failed,
   error?: string,
 ): Promise<void> {
+  const prRows = await findTaskPullRequests(job.taskId);
+  const prRow = prRows.find(
+    (row) =>
+      row.sourceControlProvider === 'github' && row.repository && row.prNumber,
+  );
+
+  if (!prRow?.repository || !prRow.prNumber) {
+    console.warn(
+      `[finishCloudJob] Skipping conflict resolution comment for job ${job.id}: no linked GitHub pull request row`,
+    );
+    return;
+  }
+
   console.log(
-    `[finishCloudJob] postConflictResolutionComment called for job ${job.id} (status=${status}, repo=${job.prRepo}, pr=${job.prNumber})`,
+    `[finishCloudJob] postConflictResolutionComment called for job ${job.id} (status=${status}, repo=${prRow.repository}, pr=${prRow.prNumber})`,
   );
 
   const token = await createCloudJobGitHubToken(job);
-  const [owner, repo] = job.prRepo!.split('/');
+  const [owner, repo] = prRow.repository.split('/');
 
-  if (!owner || !repo || !job.prNumber) {
+  if (!owner || !repo) {
     console.warn(
-      `[finishCloudJob] Skipping conflict resolution comment: missing owner/repo/prNumber (owner=${owner}, repo=${repo}, prNumber=${job.prNumber})`,
+      `[finishCloudJob] Skipping conflict resolution comment: malformed repository (${prRow.repository})`,
     );
 
     return;
@@ -1199,7 +1273,7 @@ async function postConflictResolutionComment(
     await createIssueComment(token, {
       owner,
       repo,
-      issue_number: job.prNumber,
+      issue_number: prRow.prNumber,
       body: parsedSummary
         ? formatConflictResolutionSuccessComment(parsedSummary)
         : 'Resolved merge conflicts on this PR.',
@@ -1208,7 +1282,7 @@ async function postConflictResolutionComment(
     await createIssueComment(token, {
       owner,
       repo,
-      issue_number: job.prNumber,
+      issue_number: prRow.prNumber,
       body: formatConflictResolutionFailureComment(
         error || 'The automated resolution encountered an error.',
       ),
@@ -1216,6 +1290,6 @@ async function postConflictResolutionComment(
   }
 
   console.log(
-    `[finishCloudJob] Posted conflict resolution ${status} comment for job ${job.id} on ${job.prRepo}#${job.prNumber}`,
+    `[finishCloudJob] Posted conflict resolution ${status} comment for job ${job.id} on ${prRow.repository}#${prRow.prNumber}`,
   );
 }

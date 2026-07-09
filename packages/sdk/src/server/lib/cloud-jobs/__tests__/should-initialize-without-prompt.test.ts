@@ -1,4 +1,4 @@
-import { CloudTaskType, standardTaskSchema } from '@roomote/types';
+import { TaskPayloadKind, standardTaskSchema } from '@roomote/types';
 import { shouldInitializeWithoutPrompt } from '../dequeue-cloud-job';
 
 // Minimal shared fields required by all CloudTask variants.
@@ -10,7 +10,7 @@ describe('shouldInitializeWithoutPrompt', () => {
   it('returns false when description is a non-empty string', () => {
     const task = standardTaskSchema.parse({
       ...sharedFields,
-      type: CloudTaskType.StandardTask,
+      type: TaskPayloadKind.StandardTask,
       payload: { repo: 'owner/repo', description: 'Fix the bug' },
     });
 
@@ -20,7 +20,7 @@ describe('shouldInitializeWithoutPrompt', () => {
   it('returns true when description is an empty string', () => {
     const task = standardTaskSchema.parse({
       ...sharedFields,
-      type: CloudTaskType.StandardTask,
+      type: TaskPayloadKind.StandardTask,
       payload: { repo: 'owner/repo', description: '' },
     });
 
@@ -30,7 +30,7 @@ describe('shouldInitializeWithoutPrompt', () => {
   it('returns true when description is undefined and blank is true (Zod strips key)', () => {
     const task = standardTaskSchema.parse({
       ...sharedFields,
-      type: CloudTaskType.StandardTask,
+      type: TaskPayloadKind.StandardTask,
       payload: { repo: 'owner/repo', description: undefined, blank: true },
     });
 
@@ -42,7 +42,7 @@ describe('shouldInitializeWithoutPrompt', () => {
   it('returns true when description is omitted and blank is true', () => {
     const task = standardTaskSchema.parse({
       ...sharedFields,
-      type: CloudTaskType.StandardTask,
+      type: TaskPayloadKind.StandardTask,
       payload: { repo: 'owner/repo', blank: true },
     });
 
@@ -52,7 +52,7 @@ describe('shouldInitializeWithoutPrompt', () => {
   it('returns false when description is omitted and blank is not set', () => {
     const task = standardTaskSchema.parse({
       ...sharedFields,
-      type: CloudTaskType.StandardTask,
+      type: TaskPayloadKind.StandardTask,
       payload: { repo: 'owner/repo' },
     });
 
@@ -62,7 +62,7 @@ describe('shouldInitializeWithoutPrompt', () => {
   it('returns true when description is whitespace-only', () => {
     const task = standardTaskSchema.parse({
       ...sharedFields,
-      type: CloudTaskType.StandardTask,
+      type: TaskPayloadKind.StandardTask,
       payload: { repo: 'owner/repo', description: '   ' },
     });
 

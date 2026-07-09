@@ -12,7 +12,7 @@ import {
   sql,
 } from '@roomote/db/server';
 import {
-  CloudTaskType,
+  TaskPayloadKind,
   type EnvironmentConfig,
   normalizeSetupNewState,
 } from '@roomote/types';
@@ -351,10 +351,9 @@ async function sendSetupCompletionMcpRecommendations(
       return;
     }
 
-    await enqueueCloudTask(
-      {
-        userId,
-        type: CloudTaskType.McpRecommendations,
+    await enqueueCloudTask({
+      task: {
+        type: TaskPayloadKind.McpRecommendations,
         payload: {
           repo: primaryRepository,
           environmentId: mcpRecommendationContext.environmentId,
@@ -372,10 +371,12 @@ async function sendSetupCompletionMcpRecommendations(
           visibleInTranscript: false,
         },
       },
-      {
-        launchClass: 'automation',
-      },
-    );
+      initiator: { kind: 'automation', key: 'mcp_recommendations' },
+      workflow: 'mcp_recommendations',
+      surface: 'web',
+      trigger: 'manual',
+      visibility: 'hidden',
+    });
   } catch (error) {
     console.error(
       `[completeSetupCommand] Failed to enqueue MCP recommendations task: ${

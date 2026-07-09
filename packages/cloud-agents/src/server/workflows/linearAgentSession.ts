@@ -1,5 +1,5 @@
 import { type LinearAgentSessionTask, type PrAction } from '@roomote/types';
-import type { ResolvedTaskAttributionDisplay } from '@roomote/db/server';
+import type { ResolvedTaskCommitAuthor } from '../commit-author';
 
 import { standardTask } from './standardTask';
 
@@ -68,7 +68,7 @@ export async function linearAgentSession({
   repoFullNames?: string[];
   conflictResolverLabel?: string;
   cloudJobUrl: string;
-  attribution?: ResolvedTaskAttributionDisplay;
+  attribution?: ResolvedTaskCommitAuthor;
   visualProofAutoScreencastEnabled?: boolean;
   backgroundProofCaptureEnabled?: boolean;
   prAction?: PrAction;

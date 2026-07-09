@@ -1,5 +1,9 @@
 import { enqueueCloudTask } from '@roomote/cloud-agents/server';
-import { ALL_REPOSITORIES, CloudTaskType } from '@roomote/types';
+import {
+  ALL_REPOSITORIES,
+  TaskPayloadKind,
+  type TaskInitiator,
+} from '@roomote/types';
 
 import type {
   AgentSession,
@@ -45,49 +49,76 @@ export async function createLinearAgentJob({
   const guidance = agentSession.guidance;
   const user = agentSession.user;
 
+  // Linked senders initiate as themselves; unlinked senders keep their raw
+  // Linear identity on the initiator stamp (kind 'user' + externalId).
+  const initiator: TaskInitiator = userId
+    ? user?.id
+      ? {
+          kind: 'user',
+          externalId: user.id,
+          displayName: user.name,
+          matchedUserId: userId,
+        }
+      : { kind: 'user', userId }
+    : {
+        kind: 'user',
+        externalId: user?.id ?? `linear-session:${sessionId}`,
+        displayName: user?.name,
+      };
+
   try {
     const launchResult = await enqueueCloudTask({
-      type: CloudTaskType.LinearAgentSession,
-      userId: userId ?? null,
-      linearSessionId: sessionId,
-      linearIssueId: issue.id,
-      linearOrganizationId: organizationId,
-      payload: {
-        repo: repo ?? ALL_REPOSITORIES,
-        environmentId,
-        sessionId,
-        organizationId,
-        action,
-        issueId: issue.id,
-        issueIdentifier: issue.identifier,
-        issueTitle: issue.title,
-        issueDescription: issue.description,
-        issueUrl: issue.url,
-        linkedWorkItems: [
-          {
-            provider: 'linear',
-            identifier: issue.identifier,
-            url: issue.url,
-            title: issue.title,
-          },
-        ],
-        commentBody: comment?.body,
-        commentId: comment?.id,
-        userId: user?.id,
-        username: user?.name,
-        previousComments: previousComments?.map((c: LinearComment) => ({
-          id: c.id,
-          body: c.body,
-          userId: c.user?.id,
-          username: c.user?.name,
-          createdAt: c.createdAt,
-        })),
-        guidance: guidance
-          ? {
-              system: guidance.system,
-              instructions: guidance.instructions,
-            }
-          : undefined,
+      task: {
+        type: TaskPayloadKind.LinearAgentSession,
+        linearSessionId: sessionId,
+        linearIssueId: issue.id,
+        linearOrganizationId: organizationId,
+        payload: {
+          repo: repo ?? ALL_REPOSITORIES,
+          environmentId,
+          sessionId,
+          organizationId,
+          action,
+          issueId: issue.id,
+          issueIdentifier: issue.identifier,
+          issueTitle: issue.title,
+          issueDescription: issue.description,
+          issueUrl: issue.url,
+          linkedWorkItems: [
+            {
+              provider: 'linear',
+              identifier: issue.identifier,
+              url: issue.url,
+              title: issue.title,
+            },
+          ],
+          commentBody: comment?.body,
+          commentId: comment?.id,
+          userId: user?.id,
+          username: user?.name,
+          previousComments: previousComments?.map((c: LinearComment) => ({
+            id: c.id,
+            body: c.body,
+            userId: c.user?.id,
+            username: c.user?.name,
+            createdAt: c.createdAt,
+          })),
+          guidance: guidance
+            ? {
+                system: guidance.system,
+                instructions: guidance.instructions,
+              }
+            : undefined,
+        },
+      },
+      initiator,
+      workflow: 'standard',
+      surface: 'linear',
+      trigger: 'message',
+      channels: {
+        linearSessionId: sessionId,
+        linearIssueId: issue.id,
+        linearOrganizationId: organizationId,
       },
     });
 

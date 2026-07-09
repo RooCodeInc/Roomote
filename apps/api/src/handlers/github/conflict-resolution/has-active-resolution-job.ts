@@ -1,11 +1,23 @@
-import { db, cloudJobs, eq, and, inArray } from '@roomote/db/server';
-import { CloudTaskType, CloudTaskStatus } from '@roomote/types';
+import {
+  db,
+  taskPullRequests,
+  taskRuns,
+  tasks,
+  eq,
+  and,
+  inArray,
+} from '@roomote/db/server';
+import { CloudTaskStatus } from '@roomote/types';
 
 import { LOG_PREFIX } from './constants';
 
 /**
  * Check if there's already an active (pending/running) conflict resolution
- * job for the given PR. Prevents duplicate resolution attempts.
+ * run for the given PR. Prevents duplicate resolution attempts.
+ *
+ * PR association lives on task_pull_requests (inserted at enqueue for
+ * pr_conflict_resolve launches), so the guard is a tasks JOIN
+ * task_pull_requests JOIN task_runs lookup.
  */
 export async function hasActiveResolutionJob(
   repoFullName: string,
@@ -14,14 +26,17 @@ export async function hasActiveResolutionJob(
   const activeStatuses = [CloudTaskStatus.Pending, CloudTaskStatus.Running];
 
   const existing = await db
-    .select({ id: cloudJobs.id })
-    .from(cloudJobs)
+    .select({ id: taskRuns.id })
+    .from(tasks)
+    .innerJoin(taskPullRequests, eq(taskPullRequests.taskId, tasks.id))
+    .innerJoin(taskRuns, eq(taskRuns.taskId, tasks.id))
     .where(
       and(
-        eq(cloudJobs.type, CloudTaskType.GithubPrConflictResolve),
-        eq(cloudJobs.prRepo, repoFullName),
-        eq(cloudJobs.prNumber, prNumber),
-        inArray(cloudJobs.status, activeStatuses),
+        eq(tasks.workflow, 'pr_conflict_resolve'),
+        eq(taskPullRequests.sourceControlProvider, 'github'),
+        eq(taskPullRequests.repository, repoFullName),
+        eq(taskPullRequests.prNumber, prNumber),
+        inArray(taskRuns.status, activeStatuses),
       ),
     )
     .limit(1);

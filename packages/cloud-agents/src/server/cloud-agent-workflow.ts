@@ -1,6 +1,6 @@
 import {
   type CloudTask,
-  CloudTaskType,
+  TaskPayloadKind,
   getCommunicationChannelFromTaskPayload,
   getCommunicationMessageIdFromTaskPayload,
   getCommunicationProviderFromTaskPayload,
@@ -19,7 +19,8 @@ import {
 import {
   type CloudJob,
   db,
-  resolveTaskAttribution,
+  eq,
+  tasks,
   getBackgroundAgentSettings,
   DEFAULT_CONFLICT_RESOLVER_LABEL,
   getDeploymentPrAction,
@@ -40,6 +41,10 @@ import {
 import { linearAgentSession } from './workflows/linearAgentSession';
 import { githubPrConflictResolve } from './workflows/githubPrConflictResolve';
 import { getWorkspaceRepositoryFullNames } from './workflows/utils';
+import {
+  DEFAULT_ROOMOTE_COMMIT_AUTHOR,
+  resolveTaskCommitAuthor,
+} from './commit-author';
 
 import { getTaskUrl } from './cloud-job-id-coder';
 
@@ -58,31 +63,24 @@ export async function generatePrompt({
 }> {
   const cloudJobUrl = getTaskUrl({
     taskId: cloudJob.taskId,
-    utm: { campaign: cloudJob.type, source: 'github-comment' },
+    utm: { campaign: cloudJob.payloadKind, source: 'github-comment' },
   });
 
-  const attribution = await resolveTaskAttribution(db, {
-    attributionKind: cloudJob.attributionKind,
-    attributedUserId: cloudJob.attributedUserId,
-    attributionSourceKind: cloudJob.attributionSourceKind,
-    attributionSourceDisplayName: cloudJob.attributionSourceDisplayName,
-    attributionSourceExternalId: cloudJob.attributionSourceExternalId,
-    attributedGithubLogin: cloudJob.attributedGithubLogin,
-    attributedGithubUserId: cloudJob.attributedGithubUserId,
-    effectiveAuthorKind: cloudJob.effectiveAuthorKind,
-    effectiveAuthorUserId: cloudJob.effectiveAuthorUserId,
-    effectiveAuthorDisplayName: cloudJob.effectiveAuthorDisplayName,
-    effectiveAuthorGithubLogin: cloudJob.effectiveAuthorGithubLogin,
-    effectiveAuthorGithubUserId: cloudJob.effectiveAuthorGithubUserId,
-    effectiveAuthorReason: cloudJob.effectiveAuthorReason,
-    effectiveAuthorRuleId: cloudJob.effectiveAuthorRuleId,
-    effectivePrOwnerKind: cloudJob.effectivePrOwnerKind,
-    effectivePrOwnerUserId: cloudJob.effectivePrOwnerUserId,
-    effectivePrOwnerDisplayName: cloudJob.effectivePrOwnerDisplayName,
-    effectivePrOwnerGithubLogin: cloudJob.effectivePrOwnerGithubLogin,
-    effectivePrOwnerReason: cloudJob.effectivePrOwnerReason,
-    effectivePrOwnerRuleId: cloudJob.effectivePrOwnerRuleId,
+  const taskRow = await db.query.tasks.findFirst({
+    where: eq(tasks.id, cloudJob.taskId),
+    columns: {
+      commitAuthorKind: true,
+      commitAuthorUserId: true,
+      commitAuthorLogin: true,
+      commitAuthorExternalId: true,
+      prAssigneeLogin: true,
+      actorDisplayName: true,
+      slackThreadTs: true,
+    },
   });
+  const commitAuthor = taskRow
+    ? await resolveTaskCommitAuthor(db, taskRow)
+    : DEFAULT_ROOMOTE_COMMIT_AUTHOR;
   const { conflictResolverFrequency, conflictResolverLabel } =
     await getBackgroundAgentSettings().catch(() => ({
       conflictResolverFrequency: 'every_6_hours' as const,
@@ -95,7 +93,7 @@ export async function generatePrompt({
     await featureFlagEvaluator
       .evaluate(flag, {
         isDeploymentContext: false,
-        userId: cloudJob.userId ?? cloudTask.userId ?? 'deployment',
+        userId: cloudJob.actingUserId ?? 'deployment',
       })
       .catch(() => false);
   const visualProofAutoScreencastEnabled = await evaluateOrgFeatureFlag(
@@ -108,55 +106,55 @@ export async function generatePrompt({
 
   switch (cloudTask.type) {
     // <Agent: PR Reviewer, Trigger: GitHub>
-    case CloudTaskType.GithubPrReview:
+    case TaskPayloadKind.GithubPrReview:
       return githubPrReview({
         cloudTask,
         gitHubToken,
         cloudJobUrl,
-        attribution,
+        attribution: commitAuthor,
         visualProofAutoScreencastEnabled,
         backgroundProofCaptureEnabled,
       });
-    case CloudTaskType.GithubPrReviewSync:
+    case TaskPayloadKind.GithubPrReviewSync:
       return githubPrReviewSync({
         cloudJobId: cloudJob.id,
         cloudTask,
         gitHubToken,
         cloudJobUrl,
-        attribution,
+        attribution: commitAuthor,
         visualProofAutoScreencastEnabled,
         backgroundProofCaptureEnabled,
       });
 
     // <Agent: PR Reviewer follow-up, Trigger: GitHub>
-    case CloudTaskType.GithubPrReviewFollowUp:
+    case TaskPayloadKind.GithubPrReviewFollowUp:
       return githubPrReviewFollowUp({
         cloudTask,
         gitHubToken,
         cloudJobUrl,
-        attribution,
+        attribution: commitAuthor,
         visualProofAutoScreencastEnabled,
         backgroundProofCaptureEnabled,
       });
 
     // <Agent: Fixer, Trigger: GitHub (conflict resolution)>
-    case CloudTaskType.GithubPrConflictResolve:
+    case TaskPayloadKind.GithubPrConflictResolve:
       return githubPrConflictResolve({
         cloudTask,
         cloudJobUrl,
-        attribution,
+        attribution: commitAuthor,
         visualProofAutoScreencastEnabled,
         backgroundProofCaptureEnabled,
       });
 
     // <Agent: Generalist, Trigger: Slack>
-    case CloudTaskType.SlackAppMention: {
+    case TaskPayloadKind.SlackAppMention: {
       return slackAppMention({
         cloudTask,
         repoFullNames: await getWorkspaceRepositoryFullNames(cloudTask),
         conflictResolverLabel: enabledConflictResolverLabel,
         cloudJobUrl,
-        attribution,
+        attribution: commitAuthor,
         visualProofAutoScreencastEnabled,
         backgroundProofCaptureEnabled,
         prAction,
@@ -164,23 +162,22 @@ export async function generatePrompt({
     }
 
     // <Agent: Generalist, Trigger: Linear>
-    case CloudTaskType.LinearAgentSession:
+    case TaskPayloadKind.LinearAgentSession:
       return linearAgentSession({
         cloudTask,
         repoFullNames: await getWorkspaceRepositoryFullNames(cloudTask),
         conflictResolverLabel: enabledConflictResolverLabel,
         cloudJobUrl,
-        attribution,
+        attribution: commitAuthor,
         visualProofAutoScreencastEnabled,
         backgroundProofCaptureEnabled,
         prAction,
       });
 
     // <Agent: Generalist, Trigger: Manual>
-    case CloudTaskType.StandardTask:
-    case CloudTaskType.SuggestedTasks:
-    case CloudTaskType.McpRecommendations:
-    case CloudTaskType.LegacyOnboardingSuggestions: {
+    case TaskPayloadKind.StandardTask:
+    case TaskPayloadKind.Scan:
+    case TaskPayloadKind.McpRecommendations: {
       const baseDescription = cloudTask.payload.description;
       if (!baseDescription) {
         throw new Error(`Description is required for ${cloudTask.type}`);
@@ -227,7 +224,7 @@ export async function generatePrompt({
           : null;
       const slackThreadTs =
         getSlackThreadTsFromTaskPayload(cloudTask.payload) ??
-        cloudJob.slackThreadTs ??
+        taskRow?.slackThreadTs ??
         null;
       // Telegram and Teams persist generic conversation ids on the payload;
       // resolve them into the surface-specific fields the PR provenance line
@@ -256,7 +253,7 @@ export async function generatePrompt({
             : 'web',
         conflictResolverLabel: enabledConflictResolverLabel,
         cloudJobUrl,
-        attribution,
+        attribution: commitAuthor,
         slackTeamDomain:
           getSlackTeamDomainFromTaskPayload(cloudTask.payload) ?? undefined,
         slackChannel: slackChannel ?? undefined,

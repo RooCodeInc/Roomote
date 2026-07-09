@@ -159,14 +159,14 @@ describe('launchActWorkItems', () => {
     mockSuccessfulTaskEnqueue('task-1');
 
     const result = await launchActWorkItems({
-      userId: 'user-1',
+      automationKey: 'sentry_triage',
       workItems: [workItem],
       executionTaskBootstrap: '$implement-changes',
       chatTarget: null,
     });
 
     expect(result).toEqual({ launchedCount: 1, failedCount: 0 });
-    const enqueuePayload = mockEnqueueCloudTask.mock.calls[0]?.[0]
+    const enqueuePayload = mockEnqueueCloudTask.mock.calls[0]?.[0].task
       .payload as Record<string, unknown>;
     expect(enqueuePayload.description).toEqual(
       expect.stringContaining('keep progress visible in the web task'),
@@ -200,7 +200,7 @@ describe('launchActWorkItems', () => {
     mockSuccessfulTaskEnqueue('task-direct-1');
 
     const result = await launchActWorkItems({
-      userId: 'user-1',
+      automationKey: 'sentry_triage',
       workItems: [workItem],
       executionTaskBootstrap: '$implement-changes',
       chatTarget: null,
@@ -222,7 +222,7 @@ describe('launchActWorkItems', () => {
     mockSuccessfulTaskEnqueue('task-direct-dependabot');
 
     const result = await launchActWorkItems({
-      userId: 'user-1',
+      automationKey: 'sentry_triage',
       workItems: [
         {
           ...workItem,
@@ -240,7 +240,7 @@ describe('launchActWorkItems', () => {
     });
 
     expect(result).toEqual({ launchedCount: 1, failedCount: 0 });
-    const enqueuePayload = mockEnqueueCloudTask.mock.calls[0]?.[0]
+    const enqueuePayload = mockEnqueueCloudTask.mock.calls[0]?.[0].task
       .payload as Record<string, unknown>;
     expect(enqueuePayload.description).toEqual(
       expect.stringContaining('$update-dependencies'),
@@ -370,14 +370,14 @@ describe('launchActWorkItems', () => {
     mockSuccessfulTaskEnqueue('task-direct-sentry');
 
     const result = await launchActWorkItems({
-      userId: 'user-1',
+      automationKey: 'sentry_triage',
       workItems: [workItem],
       executionTaskBootstrap: '$implement-changes',
       chatTarget: slackTarget,
     });
 
     expect(result).toEqual({ launchedCount: 1, failedCount: 0 });
-    const enqueuePayload = mockEnqueueCloudTask.mock.calls[0]?.[0]
+    const enqueuePayload = mockEnqueueCloudTask.mock.calls[0]?.[0].task
       .payload as Record<string, unknown>;
     expect(enqueuePayload.description).toEqual(
       expect.stringContaining(
@@ -462,14 +462,14 @@ describe('launchActWorkItems', () => {
     mockSuccessfulTaskEnqueue('task-direct-threaded');
 
     const result = await launchActWorkItems({
-      userId: 'user-1',
+      automationKey: 'sentry_triage',
       workItems: [workItem],
       executionTaskBootstrap: '$implement-changes',
       chatTarget: { ...slackTarget, threadTs: '1781300000.000100' },
     });
 
     expect(result).toEqual({ launchedCount: 1, failedCount: 0 });
-    const enqueuePayload = mockEnqueueCloudTask.mock.calls[0]?.[0]
+    const enqueuePayload = mockEnqueueCloudTask.mock.calls[0]?.[0].task
       .payload as Record<string, unknown>;
     expect(enqueuePayload.thread_ts).toBe('1781300000.000100');
     expect(enqueuePayload.slackThreadTs).toBe('1781300000.000100');
@@ -514,7 +514,7 @@ describe('launchActWorkItems', () => {
     mockEnqueueCloudTask.mockRejectedValueOnce(new Error('enqueue failed'));
 
     const result = await launchActWorkItems({
-      userId: 'user-1',
+      automationKey: 'sentry_triage',
       workItems: [
         {
           ...workItem,
@@ -545,7 +545,7 @@ describe('launchActWorkItems', () => {
     mockEnqueueCloudTask.mockRejectedValueOnce(new Error('enqueue failed'));
 
     const result = await launchActWorkItems({
-      userId: 'user-1',
+      automationKey: 'sentry_triage',
       workItems: [workItem],
       executionTaskBootstrap: '$implement-changes',
       chatTarget: { ...slackTarget, threadTs: '1781300000.000100' },
@@ -566,7 +566,7 @@ describe('launchActWorkItems', () => {
     mockEnqueueCloudTask.mockRejectedValueOnce(new Error('enqueue failed'));
 
     const result = await launchActWorkItems({
-      userId: 'user-1',
+      automationKey: 'sentry_triage',
       workItems: [workItem],
       executionTaskBootstrap: '$implement-changes',
       chatTarget: { provider: 'telegram', chatId: '8846357662' },
@@ -587,14 +587,14 @@ describe('launchActWorkItems', () => {
     mockSuccessfulTaskEnqueue('task-tg-1');
 
     const result = await launchActWorkItems({
-      userId: 'user-1',
+      automationKey: 'sentry_triage',
       workItems: [workItem],
       executionTaskBootstrap: '$implement-changes',
       chatTarget: { provider: 'telegram', chatId: '8846357662' },
     });
 
     expect(result).toEqual({ launchedCount: 1, failedCount: 0 });
-    const enqueuePayload = mockEnqueueCloudTask.mock.calls[0]?.[0]
+    const enqueuePayload = mockEnqueueCloudTask.mock.calls[0]?.[0].task
       .payload as Record<string, unknown>;
 
     expect(enqueuePayload.communicationProvider).toBe('telegram');
@@ -619,7 +619,7 @@ describe('launchActWorkItems', () => {
     mockEnqueueCloudTask.mockRejectedValueOnce(new Error('enqueue failed'));
 
     const result = await launchActWorkItems({
-      userId: 'user-1',
+      automationKey: 'sentry_triage',
       workItems: [workItem],
       executionTaskBootstrap: '$implement-changes',
       chatTarget: null,
@@ -638,7 +638,7 @@ describe('launchActWorkItems', () => {
     mockSuccessfulTaskEnqueue();
 
     const result = await launchActWorkItems({
-      userId: 'user-1',
+      automationKey: 'sentry_triage',
       workItems: [workItem],
       executionTaskBootstrap: '$implement-changes',
       chatTarget: null,
@@ -668,7 +668,7 @@ describe('launchActWorkItems', () => {
     });
 
     const result = await launchActWorkItems({
-      userId: 'user-1',
+      automationKey: 'sentry_triage',
       workItems: [workItem],
       executionTaskBootstrap: '$implement-changes',
       chatTarget: slackTarget,

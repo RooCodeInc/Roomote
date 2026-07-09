@@ -1,12 +1,14 @@
-import { AGENT_DISPLAY_NAME, CloudTaskType } from '@roomote/types';
+import { AGENT_DISPLAY_NAME, TaskPayloadKind } from '@roomote/types';
 
 const {
   cloudJobFindFirstMock,
+  taskFindFirstMock,
   slackInstallationFindFirstMock,
   slackUserMappingFindFirstMock,
   environmentFindFirstMock,
 } = vi.hoisted(() => ({
   cloudJobFindFirstMock: vi.fn(),
+  taskFindFirstMock: vi.fn(),
   slackInstallationFindFirstMock: vi.fn(),
   slackUserMappingFindFirstMock: vi.fn(),
   environmentFindFirstMock: vi.fn(),
@@ -43,11 +45,15 @@ vi.mock('@roomote/cloud-agents/server', () => ({
 
 vi.mock('@roomote/db/server', () => ({
   and: vi.fn((...args: unknown[]) => ({ and: args })),
-  cloudJobs: { id: 'id' },
+  taskRuns: { id: 'id' },
+  tasks: { id: 'id' },
   db: {
     query: {
-      cloudJobs: {
+      taskRuns: {
         findFirst: cloudJobFindFirstMock,
+      },
+      tasks: {
+        findFirst: taskFindFirstMock,
       },
       slackInstallations: {
         findFirst: slackInstallationFindFirstMock,
@@ -185,6 +191,9 @@ describe('handleRetryFailedTask', () => {
         repositories: [{ repository: 'owner/repo' }],
       },
     });
+    taskFindFirstMock.mockResolvedValue({
+      initiatorUserId: 'user-1',
+    });
     setSlackStartedMessageTsMock.mockResolvedValue(undefined);
     redisSetMock.mockResolvedValue('OK');
   });
@@ -196,8 +205,9 @@ describe('handleRetryFailedTask', () => {
   it('restarts the failed Slack task for the original requester', async () => {
     cloudJobFindFirstMock.mockResolvedValue({
       id: 42,
-      type: CloudTaskType.SlackAppMention,
-      userId: 'user-1',
+      taskId: 'task-42',
+      payloadKind: TaskPayloadKind.SlackAppMention,
+      actingUserId: 'user-1',
       payload: {
         channel: 'C123',
         user: 'U123',
@@ -219,7 +229,12 @@ describe('handleRetryFailedTask', () => {
     );
 
     expect(startSlackAppMentionTaskMock).toHaveBeenCalledWith({
-      userId: 'user-1',
+      initiator: {
+        kind: 'user',
+        externalId: 'U123',
+        matchedUserId: 'user-1',
+      },
+      trigger: 'manual',
       channel: 'C123',
       teamId: 'T123',
       teamDomain: undefined,
@@ -318,8 +333,9 @@ describe('handleRetryFailedTask', () => {
   it('retries the failed Slack task when a different Slack user clicks Try again', async () => {
     cloudJobFindFirstMock.mockResolvedValue({
       id: 42,
-      type: CloudTaskType.SlackAppMention,
-      userId: 'user-1',
+      taskId: 'task-42',
+      payloadKind: TaskPayloadKind.SlackAppMention,
+      actingUserId: 'user-1',
       payload: {
         channel: 'C123',
         user: 'U123',
@@ -336,7 +352,12 @@ describe('handleRetryFailedTask', () => {
 
     expect(startSlackAppMentionTaskMock).toHaveBeenCalledWith(
       expect.objectContaining({
-        userId: 'user-1',
+        initiator: {
+          kind: 'user',
+          externalId: 'U123',
+          matchedUserId: 'user-1',
+        },
+        trigger: 'manual',
         channel: 'C123',
         teamId: 'T123',
         slackUserId: 'U123',
@@ -398,8 +419,9 @@ describe('handleRetryFailedTask', () => {
   it('posts a fallback error when the retry attempt fails', async () => {
     cloudJobFindFirstMock.mockResolvedValue({
       id: 42,
-      type: CloudTaskType.SlackAppMention,
-      userId: 'user-1',
+      taskId: 'task-42',
+      payloadKind: TaskPayloadKind.SlackAppMention,
+      actingUserId: 'user-1',
       payload: {
         channel: 'C123',
         user: 'U123',
@@ -430,8 +452,9 @@ describe('handleRetryFailedTask', () => {
     environmentFindFirstMock.mockResolvedValue(null);
     cloudJobFindFirstMock.mockResolvedValue({
       id: 42,
-      type: CloudTaskType.SlackAppMention,
-      userId: 'user-1',
+      taskId: 'task-42',
+      payloadKind: TaskPayloadKind.SlackAppMention,
+      actingUserId: 'user-1',
       payload: {
         channel: 'C123',
         user: 'U123',

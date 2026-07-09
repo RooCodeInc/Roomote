@@ -2,13 +2,13 @@ import { TRPCClientError } from '@trpc/client';
 import { withSandboxServerRpcClient } from '@roomote/sdk/server';
 import {
   and,
-  cloudJobs,
   db,
   eq,
   inArray,
   isNull,
   markTaskStartParallelCountEndedAt,
   not,
+  taskRuns,
 } from '@roomote/db/server';
 import {
   CloudTaskStatus,
@@ -20,7 +20,6 @@ interface StopTaskJob {
   id: number;
   status: CloudTaskStatus;
   sandboxServerUrl: string | null;
-  userId: string | null;
   actingUserId: string | null;
 }
 
@@ -38,13 +37,12 @@ async function findCurrentStopTaskJob(
   jobId: number,
 ): Promise<StopTaskJob | null> {
   return (
-    (await db.query.cloudJobs.findFirst({
-      where: eq(cloudJobs.id, jobId),
+    (await db.query.taskRuns.findFirst({
+      where: eq(taskRuns.id, jobId),
       columns: {
         id: true,
         status: true,
         sandboxServerUrl: true,
-        userId: true,
         actingUserId: true,
       },
     })) ?? null
@@ -56,31 +54,31 @@ async function cancelTaskJobDirect(jobId: number): Promise<boolean> {
 
   const [updatedJob] = await db.transaction(async (tx) => {
     const [job] = await tx
-      .update(cloudJobs)
+      .update(taskRuns)
       .set({
         status: CloudTaskStatus.Canceled,
         canceledAt: endedAt,
       })
       .where(
         and(
-          eq(cloudJobs.id, jobId),
-          isNull(cloudJobs.sandboxServerUrl),
+          eq(taskRuns.id, jobId),
+          isNull(taskRuns.sandboxServerUrl),
           not(
             inArray(
-              cloudJobs.status,
+              taskRuns.status,
               exitedCloudTaskStatuses as unknown as CloudTaskStatus[],
             ),
           ),
         ),
       )
-      .returning({ id: cloudJobs.id });
+      .returning({ id: taskRuns.id });
 
     if (!job) {
       return [];
     }
 
     await markTaskStartParallelCountEndedAt(tx, {
-      cloudJobId: jobId,
+      runId: jobId,
       endedAt,
     });
 
@@ -160,7 +158,7 @@ async function stopTaskSandboxJob(params: {
   authUserId?: string | null;
 }): Promise<StopTaskJobResult> {
   const { job, authUserId } = params;
-  const tokenUserId = authUserId ?? job.actingUserId ?? job.userId;
+  const tokenUserId = authUserId ?? job.actingUserId;
 
   if (!tokenUserId) {
     return {

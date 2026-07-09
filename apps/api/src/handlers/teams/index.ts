@@ -48,7 +48,7 @@ import {
   ALL_REPOSITORIES,
   type CloudTask,
   type CloudTaskPayload,
-  CloudTaskType,
+  TaskPayloadKind,
   PRODUCT_NAME,
   type QueuedCommunicationMessage,
   populateSnapshotResumeCommunicationMetadata,
@@ -961,7 +961,9 @@ async function resumeTeamsTaskFromSnapshot(input: {
         typeof completedPayload.environmentId === 'string'
           ? completedPayload.environmentId
           : undefined;
-      const resumePayload: CloudTaskPayload<CloudTaskType.SnapshotResume> = {
+      const resumePayload: CloudTaskPayload<
+        typeof TaskPayloadKind.SnapshotResume
+      > = {
         repo,
         ...(environmentId ? { environmentId } : {}),
         ...(completedJob.port ? { port: completedJob.port } : {}),
@@ -981,18 +983,22 @@ async function resumeTeamsTaskFromSnapshot(input: {
       });
       restoreSnapshotResumeVisiblePromptFields(resumePayload, completedPayload);
 
-      // Prefer the queued message sender, then the completed job's owner. No
-      // forged fallback: when neither is a real user the resume runs as the
-      // deployment service principal via an automation launch.
+      // Prefer the queued message sender, then the source run's acting user.
+      // No forged fallback: when neither is a real user the resume runs as
+      // the deployment service principal.
       const resumeUserId = queuedMessage.userId ?? completedJob.userId ?? null;
 
+      // Resumes never create tasks and never re-attribute; the resuming
+      // human becomes the new run's acting user.
       const resumeLaunch = await enqueueCloudTask(
         {
-          type: CloudTaskType.SnapshotResume,
-          userId: resumeUserId,
-          sourceSnapshotId,
-          sourceCloudJobId: completedJob.id,
-          payload: resumePayload,
+          task: {
+            type: TaskPayloadKind.SnapshotResume,
+            sourceSnapshotId,
+            sourceCloudJobId: completedJob.id,
+            payload: resumePayload,
+          },
+          actingUserId: resumeUserId,
         },
         {
           launchClass: resumeUserId ? 'human' : 'automation',
@@ -1270,9 +1276,11 @@ async function startNewTeamsTask(input: {
     throw new Error('Teams task routing selected an unavailable workspace.');
   }
 
-  const task: Extract<CloudTask, { type: CloudTaskType.StandardTask }> = {
-    type: CloudTaskType.StandardTask,
-    userId: launchUserId,
+  const task: Extract<
+    CloudTask,
+    { type: typeof TaskPayloadKind.StandardTask }
+  > = {
+    type: TaskPayloadKind.StandardTask,
     payload: {
       repo: workspace.repoForPayload,
       ...(workspace.environmentId
@@ -1285,9 +1293,18 @@ async function startNewTeamsTask(input: {
       ...input.metadata,
     },
   };
-  const launchResult = await enqueueCloudTask(task, {
-    launchClass: 'human',
-  });
+  const launchResult = await enqueueCloudTask(
+    {
+      task,
+      initiator: { kind: 'user', userId: launchUserId },
+      workflow: 'standard',
+      surface: 'teams',
+      trigger: 'message',
+    },
+    {
+      launchClass: 'human',
+    },
+  );
 
   const taskUrl = getTaskUrl({
     taskId: launchResult.taskId,

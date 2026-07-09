@@ -1,4 +1,4 @@
-import { CloudTaskStatus, CloudTaskType } from '@roomote/types';
+import { CloudTaskStatus, TaskPayloadKind } from '@roomote/types';
 
 import type { CloudJobDetail } from '@/lib/server';
 import { getCloudJobVisiblePrompt } from '@/lib';
@@ -17,8 +17,10 @@ function createCloudJobDetail(
   return {
     id: 1,
     taskId: 'task-1',
-    userId: 'user-1',
-    type: 'standard.task',
+    kind: 'fresh',
+    sourceRunId: null,
+    actingUserId: null,
+    payloadKind: TaskPayloadKind.StandardTask,
     payload: { repo: 'owner/repo', description: 'Test task' },
     status: CloudTaskStatus.Pending,
     taskPhase: null,
@@ -28,18 +30,16 @@ function createCloudJobDetail(
     machineId: null,
     machineDomain: null,
     machineDomains: null,
-    machinePrimaryPortName: null,
-    machinePorts: null,
-    provider: null,
+    primaryPortName: null,
+    initialPaths: null,
+    proxyPorts: null,
+    vendor: null,
     sandboxCmdId: null,
     sandboxServerUrl: null,
     createdAt: new Date(),
-    updatedAt: new Date(),
     startedAt: null,
     completedAt: null,
     canceledAt: null,
-    draftPrompt: null,
-    sourceCloudJobId: null,
     sourceSnapshotId: null,
     snapshotId: null,
     snapshotRequestedAt: null,
@@ -48,24 +48,11 @@ function createCloudJobDetail(
     sleepAt: null,
     sleepRequestedAt: null,
     refetchInterval: undefined,
-    githubInstallationId: null,
-    githubLogin: null,
-    githubUserId: null,
-    prRepo: null,
-    prNumber: null,
-    githubPrCommentId: null,
-    githubPrReviewCommentId: null,
-    githubPrReviewId: null,
-    githubPrReactionId: null,
-    githubPrReviewReactionId: null,
-    githubPrCommentReactionId: null,
-    githubPrCheckRunId: null,
-    prSha: null,
-    title: null,
     authBypassValue: null,
     authBypassHeaderName: null,
     harness: 'opencode-server',
     user: null,
+    actingUser: null,
     ...overrides,
   } as CloudJobDetail;
 }
@@ -141,7 +128,7 @@ describe('getSessionState', () => {
   it('keeps snapshot resumes in resuming mode until a first harness message', () => {
     const cloudJob = createCloudJobDetail({
       status: CloudTaskStatus.Running,
-      type: CloudTaskType.SnapshotResume,
+      payloadKind: TaskPayloadKind.SnapshotResume,
     });
 
     expect(
@@ -189,7 +176,7 @@ describe('getSessionState', () => {
     const startedAt = new Date('2025-01-01T00:00:00Z');
     const cloudJob = createCloudJobDetail({
       status: CloudTaskStatus.Running,
-      type: CloudTaskType.SnapshotResume,
+      payloadKind: TaskPayloadKind.SnapshotResume,
       startedAt,
     });
 

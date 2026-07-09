@@ -20,7 +20,7 @@ import {
   upsertBackgroundAutomationSlackThread,
 } from '@roomote/db/server';
 import {
-  CloudTaskType,
+  TaskPayloadKind,
   getTriggerableBackgroundAutomationDescriptorByKey,
   type SlackBlock,
 } from '@roomote/types';
@@ -318,39 +318,53 @@ export async function handleWorkflowRunCompleted(
     // CI failure triage runs as the deployment service principal.
     const launchResult = await enqueueCloudTask(
       {
-        userId: null,
-        type: CloudTaskType.SuggestedTasks,
-        payload: {
-          repo: match.repositoryFullName,
-          selectedRepositories: [match.repositoryFullName],
-          description: buildCiFailureTriagePrompt({
-            channelId,
-            repositoryFullNames: [match.repositoryFullName],
-            repositoryCoverage,
-            scanWindowStart: new Date(Date.now() - WEBHOOK_SCAN_WINDOW_MS),
-            trigger: 'webhook',
-            triggeringRun: {
-              repositoryFullName: match.repositoryFullName,
-              workflowName,
-              runUrl: run.html_url,
-              headBranch: run.head_branch,
-              headSha: run.head_sha,
-            },
-            hasAnnouncementThread: announcementTs !== null,
-          }),
-          trigger: 'scheduled',
-          notifySlack: true,
-          suggestionSource: 'ci_failure_triage',
-          ...(announcementTs
-            ? {
-                channel: channelId,
-                slackChannel: channelId,
-                thread_ts: announcementTs,
-                slackThreadTs: announcementTs,
-              }
-            : {}),
-          visibleInTranscript: false,
+        task: {
+          type: TaskPayloadKind.Scan,
+          payload: {
+            repo: match.repositoryFullName,
+            selectedRepositories: [match.repositoryFullName],
+            description: buildCiFailureTriagePrompt({
+              channelId,
+              repositoryFullNames: [match.repositoryFullName],
+              repositoryCoverage,
+              scanWindowStart: new Date(Date.now() - WEBHOOK_SCAN_WINDOW_MS),
+              trigger: 'webhook',
+              triggeringRun: {
+                repositoryFullName: match.repositoryFullName,
+                workflowName,
+                runUrl: run.html_url,
+                headBranch: run.head_branch,
+                headSha: run.head_sha,
+              },
+              hasAnnouncementThread: announcementTs !== null,
+            }),
+            trigger: 'scheduled',
+            notifySlack: true,
+            suggestionSource: 'ci_failure_triage',
+            ...(announcementTs
+              ? {
+                  channel: channelId,
+                  slackChannel: channelId,
+                  thread_ts: announcementTs,
+                  slackThreadTs: announcementTs,
+                }
+              : {}),
+            visibleInTranscript: false,
+          },
         },
+        initiator: { kind: 'automation', key: 'ci_failure_triage' },
+        workflow: 'scan',
+        surface: 'github',
+        trigger: 'webhook',
+        visibility: 'hidden',
+        ...(announcementTs
+          ? {
+              channels: {
+                slackChannelId: channelId,
+                slackThreadTs: announcementTs,
+              },
+            }
+          : {}),
       },
       {
         launchClass: 'automation',

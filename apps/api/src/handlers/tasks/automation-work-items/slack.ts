@@ -3,7 +3,6 @@ import {
   and,
   asc,
   automationWorkItems,
-  cloudJobs,
   db,
   eq,
   getBackgroundAgentSettingsForDeployment,
@@ -12,6 +11,8 @@ import {
   slackInstallationChannels,
   slackInstallations,
   sql,
+  taskRuns,
+  tasks,
   updateBackgroundAutomationRunArtifactsByTaskId,
   upsertBackgroundAutomationSlackThread,
 } from '@roomote/db/server';
@@ -84,24 +85,30 @@ export async function bindLateSlackThreadToTask(params: {
   });
 
   await db.transaction(async (tx) => {
-    const boundJobs = await tx
-      .update(cloudJobs)
+    // Channel bindings live on the tasks row now; only bind when no thread
+    // has been bound yet (first writer wins).
+    const boundTasks = await tx
+      .update(tasks)
       .set({
+        slackChannelId: params.channelId,
         slackThreadTs: params.threadTs,
-        payload: sql`coalesce(${cloudJobs.payload}, '{}'::jsonb) || ${slackThreadPayloadPatch}::jsonb`,
       })
-      .where(
-        and(
-          eq(cloudJobs.taskId, params.taskId),
-          isNull(cloudJobs.slackThreadTs),
-        ),
-      )
-      .returning({ id: cloudJobs.id });
+      .where(and(eq(tasks.id, params.taskId), isNull(tasks.slackThreadTs)))
+      .returning({ id: tasks.id });
 
     // Another reply already bound a thread for this task; keep its metadata.
-    if (boundJobs.length === 0) {
+    if (boundTasks.length === 0) {
       return;
     }
+
+    // Keep run payloads in sync for consumers that read Slack routing
+    // metadata from the payload (prompt assembly, callbacks).
+    await tx
+      .update(taskRuns)
+      .set({
+        payload: sql`coalesce(${taskRuns.payload}, '{}'::jsonb) || ${slackThreadPayloadPatch}::jsonb`,
+      })
+      .where(eq(taskRuns.taskId, params.taskId));
 
     if (!params.automationWorkItemId) {
       return;

@@ -101,7 +101,7 @@ vi.mock('@roomote/db/server', () => ({
   eq: vi.fn((left: unknown, right: unknown) => [left, right]),
 }));
 
-import { CloudTaskType } from '@roomote/types';
+import { TaskPayloadKind } from '@roomote/types';
 import { db } from '@roomote/db/server';
 
 import { handleWorkflowRunCompleted } from '../handleWorkflowRunCompleted';
@@ -215,20 +215,30 @@ describe('handleWorkflowRunCompleted', () => {
     );
     expect(mockEnqueueCloudTask).toHaveBeenCalledWith(
       expect.objectContaining({
-        userId: null,
-        type: CloudTaskType.SuggestedTasks,
-        payload: expect.objectContaining({
-          repo: 'acme/api',
-          selectedRepositories: ['acme/api'],
-          suggestionSource: 'ci_failure_triage',
-          channel: 'C123MANAGER',
-          slackChannel: 'C123MANAGER',
-          thread_ts: '1781300000.000100',
-          slackThreadTs: '1781300000.000100',
-          description: expect.stringContaining(
-            'run=https://github.com/acme/api/actions/runs/42',
-          ),
+        task: expect.objectContaining({
+          type: TaskPayloadKind.Scan,
+          payload: expect.objectContaining({
+            repo: 'acme/api',
+            selectedRepositories: ['acme/api'],
+            suggestionSource: 'ci_failure_triage',
+            channel: 'C123MANAGER',
+            slackChannel: 'C123MANAGER',
+            thread_ts: '1781300000.000100',
+            slackThreadTs: '1781300000.000100',
+            description: expect.stringContaining(
+              'run=https://github.com/acme/api/actions/runs/42',
+            ),
+          }),
         }),
+        initiator: { kind: 'automation', key: 'ci_failure_triage' },
+        workflow: 'scan',
+        surface: 'github',
+        trigger: 'webhook',
+        visibility: 'hidden',
+        channels: {
+          slackChannelId: 'C123MANAGER',
+          slackThreadTs: '1781300000.000100',
+        },
       }),
       expect.objectContaining({
         launchClass: 'automation',
@@ -322,7 +332,7 @@ describe('handleWorkflowRunCompleted', () => {
     const result = await handleWorkflowRunCompleted(buildPayload());
 
     expect(result.status).toBe('ok');
-    const payload = mockEnqueueCloudTask.mock.calls[0]?.[0].payload;
+    const payload = mockEnqueueCloudTask.mock.calls[0]?.[0].task.payload;
     expect(payload.thread_ts).toBeUndefined();
     expect(payload.slackChannel).toBeUndefined();
     expect(payload.description).toContain('announced=false');

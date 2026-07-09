@@ -1,6 +1,6 @@
 import {
   ALL_REPOSITORIES,
-  CloudTaskType,
+  TaskPayloadKind,
   populateSnapshotResumeSlackMetadata,
   restoreSnapshotResumeVisiblePromptFields,
 } from '@roomote/types';
@@ -18,7 +18,7 @@ import {
   type SlackEvent,
   type SlackNotifier,
 } from '@roomote/slack';
-import { and, cloudJobs, db, desc, eq, gt } from '@roomote/db/server';
+import { and, db, desc, eq, gt, taskRuns, tasks } from '@roomote/db/server';
 import {
   appendAttachmentTextsToPromptText,
   stripLeadingRawSlackMention,
@@ -34,7 +34,7 @@ import { getIsSlackDiverged } from '../helpers/thread-sync.js';
 
 type CompletedSlackJob = {
   id: number;
-  userId: string | null;
+  actingUserId: string | null;
   snapshotId: string | null;
   payload: unknown;
   port: number | null;
@@ -45,7 +45,7 @@ export async function processSnapshotResume(
   slack: SlackNotifier,
   completedJob: CompletedSlackJob,
   threadId: string,
-  userId: string,
+  userId: string | null,
   ackEmoji: string,
   completionEmoji: string,
   botUserId?: string,
@@ -89,7 +89,7 @@ export async function processSnapshotResume(
   const attachments = await processSlackAttachments({
     slack,
     files: currentMessageFiles,
-    userId: completedJob.userId ?? undefined,
+    userId: completedJob.actingUserId ?? undefined,
     userTextContext: stripLeadingSlackProductMention(
       stripLeadingRawSlackMention(event.text),
     ),
@@ -123,7 +123,7 @@ export async function processSnapshotResume(
         claimedMessages,
         excludeFileIds,
         logContext,
-        userId: completedJob.userId ?? undefined,
+        userId: completedJob.actingUserId ?? undefined,
         messageText,
         currentAttachmentTexts: attachments.attachmentTexts,
         currentVideoDescriptions: attachments.videoDescriptions,
@@ -147,7 +147,7 @@ export async function processSnapshotResume(
     const queuedSlackMessage = {
       text: messageTextWithVideoDescriptions,
       user: event.user,
-      userId,
+      userId: userId ?? undefined,
       ts: event.ts,
       images: allImages.length > 0 ? allImages : undefined,
       formattedPrompt,
@@ -178,14 +178,17 @@ export async function processSnapshotResume(
         ttlSeconds: 30,
         poll: { intervalMs: 500, maxAttempts: 10 },
         onAcquired: async () => {
+          // Resumes never create tasks and never re-attribute; the Slack
+          // follow-up sender becomes the new run's acting user.
           const resumeLaunch = await enqueueCloudTask(
             {
-              type: CloudTaskType.SnapshotResume,
-              userId,
-              slackThreadTs: threadId,
-              sourceSnapshotId: completedJob.snapshotId!,
-              sourceCloudJobId: completedJob.id,
-              payload: directPayload,
+              task: {
+                type: TaskPayloadKind.SnapshotResume,
+                sourceSnapshotId: completedJob.snapshotId!,
+                sourceCloudJobId: completedJob.id,
+                payload: directPayload,
+              },
+              actingUserId: userId,
             },
             {},
           );
@@ -197,15 +200,21 @@ export async function processSnapshotResume(
           return resumeLaunch.id;
         },
         onContended: async () => {
-          const recent = await db.query.cloudJobs.findFirst({
-            where: and(
-              eq(cloudJobs.slackThreadTs, threadId),
-              eq(cloudJobs.type, CloudTaskType.SnapshotResume),
-              gt(cloudJobs.createdAt, new Date(Date.now() - 60_000)),
-            ),
-            orderBy: desc(cloudJobs.createdAt),
-            columns: { id: true },
-          });
+          // Slack channel bindings live on tasks; resume runs are the
+          // kind='resume' rows of the bound task.
+          const [recent] = await db
+            .select({ id: taskRuns.id })
+            .from(taskRuns)
+            .innerJoin(tasks, eq(tasks.id, taskRuns.taskId))
+            .where(
+              and(
+                eq(tasks.slackThreadTs, threadId),
+                eq(taskRuns.kind, 'resume'),
+                gt(taskRuns.createdAt, new Date(Date.now() - 60_000)),
+              ),
+            )
+            .orderBy(desc(taskRuns.createdAt))
+            .limit(1);
 
           return recent?.id;
         },

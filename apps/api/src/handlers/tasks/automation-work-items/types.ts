@@ -1,5 +1,5 @@
 import {
-  CloudTaskType,
+  TaskPayloadKind,
   type AutomationWorkItemDisposition,
   type CloudTaskPayload,
   type SuggestionCategory,
@@ -7,8 +7,9 @@ import {
   type WorkspaceReadiness,
 } from '@roomote/types';
 
-export type SuggestedTasksPayload =
-  CloudTaskPayload<CloudTaskType.SuggestedTasks>;
+export type SuggestedTasksPayload = CloudTaskPayload<
+  typeof TaskPayloadKind.Scan
+>;
 
 export type ResolvedRepository = {
   id: string;

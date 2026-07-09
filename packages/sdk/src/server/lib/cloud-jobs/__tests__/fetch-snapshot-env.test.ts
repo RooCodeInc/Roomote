@@ -17,15 +17,14 @@ const {
 vi.mock('@roomote/db/server', () => ({
   db: {
     query: {
-      cloudJobs: {
+      taskRuns: {
         findFirst: mockFindFirst,
       },
     },
     transaction: mockTransaction,
   },
-  cloudJobs: {
-    id: 'cloudJobs.id',
-    userId: 'cloudJobs.userId',
+  taskRuns: {
+    id: 'taskRuns.id',
   },
   and: (...args: unknown[]) => ({ _and: args }),
   eq: (col: unknown, val: unknown) => ({ _eq: [col, val] }),

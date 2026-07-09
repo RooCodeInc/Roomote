@@ -3,10 +3,10 @@ import { streamSSE, type SSEStreamingApi } from 'hono/streaming';
 
 import { createComputeProviderClient } from '@roomote/compute-providers';
 import {
-  cloudJobs,
   db,
   eq,
   resolveComputeProviderEnvValues,
+  taskRuns,
 } from '@roomote/db/server';
 import {
   isExitedCloudTaskStatus,
@@ -61,8 +61,8 @@ async function streamCloudJobLogs({
     );
   }
 
-  const cloudJob = await db.query.cloudJobs.findFirst({
-    where: eq(cloudJobs.id, cloudJobId),
+  const cloudJob = await db.query.taskRuns.findFirst({
+    where: eq(taskRuns.id, cloudJobId),
   });
 
   if (!cloudJob) {
@@ -104,8 +104,8 @@ async function streamCloudJobLogs({
 
       await sleep(LOG_STREAM_READINESS_POLL_INTERVAL_MS);
 
-      const latestCloudJob = await db.query.cloudJobs.findFirst({
-        where: eq(cloudJobs.id, cloudJobId),
+      const latestCloudJob = await db.query.taskRuns.findFirst({
+        where: eq(taskRuns.id, cloudJobId),
         columns: { machineId: true, sandboxCmdId: true, status: true },
       });
 

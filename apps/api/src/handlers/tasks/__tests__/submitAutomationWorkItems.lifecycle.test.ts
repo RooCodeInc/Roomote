@@ -2,7 +2,7 @@ import { Hono } from 'hono';
 
 import {
   type AuthTokenContext,
-  CloudTaskType,
+  TaskPayloadKind,
   type JobTokenContext,
 } from '@roomote/types';
 
@@ -48,16 +48,22 @@ vi.mock('@roomote/db/server', () => ({
   backgroundAutomationRuns: {
     taskId: 'backgroundAutomationRuns.taskId',
   },
-  cloudJobs: {
-    taskId: 'cloudJobs.taskId',
+  taskRuns: {
+    taskId: 'taskRuns.taskId',
+  },
+  tasks: {
+    id: 'tasks.id',
   },
   db: {
     query: {
       backgroundAutomationRuns: {
         findFirst: (...args: unknown[]) => mockAutomationRunFindFirst(...args),
       },
-      cloudJobs: {
+      taskRuns: {
         findFirst: (...args: unknown[]) => mockCloudJobFindFirst(...args),
+      },
+      tasks: {
+        findFirst: vi.fn(async () => undefined),
       },
     },
   },
@@ -151,8 +157,8 @@ describe('submitAutomationWorkItems lifecycle', () => {
     mockResolveRepositoryIdsForSuggestedTask.mockReset();
 
     mockCloudJobFindFirst.mockResolvedValue({
-      type: CloudTaskType.SuggestedTasks,
-      userId: 'user-1',
+      payloadKind: TaskPayloadKind.Scan,
+      actingUserId: 'user-1',
       payload: {
         repo: 'acme/app',
         selectedRepositories: ['acme/app'],
@@ -225,7 +231,9 @@ describe('submitAutomationWorkItems lifecycle', () => {
       duplicateCount: 0,
     });
     expect(mockLaunchActWorkItems).toHaveBeenCalledWith({
-      userId: 'user-1',
+      // The launch is stamped with the originating automation's key instead
+      // of a config-owner userId.
+      automationKey: 'sentry_triage',
       workItems: [actWorkItem],
       executionTaskBootstrap: '$implement-changes',
       chatTarget: expect.objectContaining({
@@ -372,8 +380,8 @@ describe('submitAutomationWorkItems lifecycle', () => {
       category: 'security',
     });
     mockCloudJobFindFirst.mockResolvedValueOnce({
-      type: CloudTaskType.SuggestedTasks,
-      userId: 'user-1',
+      payloadKind: TaskPayloadKind.Scan,
+      actingUserId: 'user-1',
       payload: {
         repo: 'acme/app',
         selectedRepositories: ['acme/app'],
@@ -474,8 +482,8 @@ describe('submitAutomationWorkItems lifecycle', () => {
         readinessMessage: null,
       });
       mockCloudJobFindFirst.mockResolvedValueOnce({
-        type: CloudTaskType.SuggestedTasks,
-        userId: 'user-1',
+        payloadKind: TaskPayloadKind.Scan,
+        actingUserId: 'user-1',
         payload: {
           repo: 'acme/app',
           selectedRepositories: ['acme/app'],
@@ -529,8 +537,8 @@ describe('submitAutomationWorkItems lifecycle', () => {
     const environmentId = '11111111-1111-1111-1111-111111111111';
     const actWorkItem = buildActWorkItem();
     mockCloudJobFindFirst.mockResolvedValueOnce({
-      type: CloudTaskType.SuggestedTasks,
-      userId: 'user-1',
+      payloadKind: TaskPayloadKind.Scan,
+      actingUserId: 'user-1',
       payload: {
         repo: 'acme/app',
         selectedRepositories: ['acme/app'],

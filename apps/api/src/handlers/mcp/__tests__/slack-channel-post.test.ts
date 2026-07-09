@@ -20,15 +20,19 @@ const {
 vi.mock('@roomote/db/server', () => ({
   db: {
     query: {
-      cloudJobs: { findFirst: vi.fn() },
+      taskRuns: { findFirst: vi.fn() },
+      tasks: { findFirst: vi.fn() },
       slackInstallations: { findFirst: vi.fn() },
       taskArtifacts: { findMany: vi.fn() },
     },
   },
-  cloudJobs: { id: 'id' },
+  taskRuns: { id: 'id' },
+  tasks: { id: 'id' },
   slackInstallations: { orgId: 'orgId', isActive: 'isActive' },
   taskArtifacts: { id: 'id' },
   eq: vi.fn(),
+  desc: vi.fn(),
+  isVisibleTask: vi.fn(() => ({})),
   and: vi.fn(),
   inArray: vi.fn(),
 }));
@@ -114,13 +118,13 @@ function mockCloudJob(
   overrides: Partial<{
     id: number;
     orgId: string;
-    userId: string | null;
+    actingUserId: string | null;
     taskId: string;
   }> = {},
 ) {
   return {
     id: 42,
-    userId: 'user-1',
+    actingUserId: 'user-1',
     taskId: 'task-1',
     ...overrides,
   };
@@ -167,7 +171,7 @@ describe('slack channel post MCP endpoint', () => {
   });
 
   it('rejects invalid channel formats', async () => {
-    vi.mocked(db.query.cloudJobs.findFirst).mockResolvedValue(
+    vi.mocked(db.query.taskRuns.findFirst).mockResolvedValue(
       mockCloudJob() as never,
     );
 
@@ -184,7 +188,7 @@ describe('slack channel post MCP endpoint', () => {
   });
 
   it('rejects direct-message IDs', async () => {
-    vi.mocked(db.query.cloudJobs.findFirst).mockResolvedValue(
+    vi.mocked(db.query.taskRuns.findFirst).mockResolvedValue(
       mockCloudJob() as never,
     );
 
@@ -201,7 +205,7 @@ describe('slack channel post MCP endpoint', () => {
   });
 
   it('rejects lowercase direct-message IDs', async () => {
-    vi.mocked(db.query.cloudJobs.findFirst).mockResolvedValue(
+    vi.mocked(db.query.taskRuns.findFirst).mockResolvedValue(
       mockCloudJob() as never,
     );
 
@@ -218,7 +222,7 @@ describe('slack channel post MCP endpoint', () => {
   });
 
   it('accepts raw channel IDs', async () => {
-    vi.mocked(db.query.cloudJobs.findFirst).mockResolvedValue(
+    vi.mocked(db.query.taskRuns.findFirst).mockResolvedValue(
       mockCloudJob() as never,
     );
     vi.mocked(db.query.slackInstallations.findFirst).mockResolvedValue({
@@ -245,7 +249,7 @@ describe('slack channel post MCP endpoint', () => {
   });
 
   it('passes markdown tables through channel posts unchanged', async () => {
-    vi.mocked(db.query.cloudJobs.findFirst).mockResolvedValue(
+    vi.mocked(db.query.taskRuns.findFirst).mockResolvedValue(
       mockCloudJob() as never,
     );
     vi.mocked(db.query.slackInstallations.findFirst).mockResolvedValue({
@@ -277,7 +281,7 @@ describe('slack channel post MCP endpoint', () => {
   });
 
   it('accepts lowercase raw channel IDs', async () => {
-    vi.mocked(db.query.cloudJobs.findFirst).mockResolvedValue(
+    vi.mocked(db.query.taskRuns.findFirst).mockResolvedValue(
       mockCloudJob() as never,
     );
     vi.mocked(db.query.slackInstallations.findFirst).mockResolvedValue({
@@ -304,7 +308,7 @@ describe('slack channel post MCP endpoint', () => {
   });
 
   it('accepts Slack channel mentions', async () => {
-    vi.mocked(db.query.cloudJobs.findFirst).mockResolvedValue(
+    vi.mocked(db.query.taskRuns.findFirst).mockResolvedValue(
       mockCloudJob() as never,
     );
     vi.mocked(db.query.slackInstallations.findFirst).mockResolvedValue({
@@ -324,7 +328,7 @@ describe('slack channel post MCP endpoint', () => {
   });
 
   it('accepts lowercase Slack channel mentions', async () => {
-    vi.mocked(db.query.cloudJobs.findFirst).mockResolvedValue(
+    vi.mocked(db.query.taskRuns.findFirst).mockResolvedValue(
       mockCloudJob() as never,
     );
     vi.mocked(db.query.slackInstallations.findFirst).mockResolvedValue({
@@ -344,7 +348,7 @@ describe('slack channel post MCP endpoint', () => {
   });
 
   it('normalizes bare channel names before resolving them', async () => {
-    vi.mocked(db.query.cloudJobs.findFirst).mockResolvedValue(
+    vi.mocked(db.query.taskRuns.findFirst).mockResolvedValue(
       mockCloudJob() as never,
     );
     vi.mocked(db.query.slackInstallations.findFirst).mockResolvedValue({
@@ -363,7 +367,7 @@ describe('slack channel post MCP endpoint', () => {
   });
 
   it('treats c/g-prefixed bare names as channel names, not IDs', async () => {
-    vi.mocked(db.query.cloudJobs.findFirst).mockResolvedValue(
+    vi.mocked(db.query.taskRuns.findFirst).mockResolvedValue(
       mockCloudJob() as never,
     );
     vi.mocked(db.query.slackInstallations.findFirst).mockResolvedValue({
@@ -382,7 +386,7 @@ describe('slack channel post MCP endpoint', () => {
   });
 
   it('rejects when the Slack app cannot resolve the channel', async () => {
-    vi.mocked(db.query.cloudJobs.findFirst).mockResolvedValue(
+    vi.mocked(db.query.taskRuns.findFirst).mockResolvedValue(
       mockCloudJob() as never,
     );
     vi.mocked(db.query.slackInstallations.findFirst).mockResolvedValue({
@@ -401,7 +405,7 @@ describe('slack channel post MCP endpoint', () => {
   });
 
   it('rejects channels the Slack app is not a member of', async () => {
-    vi.mocked(db.query.cloudJobs.findFirst).mockResolvedValue(
+    vi.mocked(db.query.taskRuns.findFirst).mockResolvedValue(
       mockCloudJob() as never,
     );
     vi.mocked(db.query.slackInstallations.findFirst).mockResolvedValue({
@@ -420,7 +424,7 @@ describe('slack channel post MCP endpoint', () => {
   });
 
   it('posts top-level messages to resolved channels', async () => {
-    vi.mocked(db.query.cloudJobs.findFirst).mockResolvedValue(
+    vi.mocked(db.query.taskRuns.findFirst).mockResolvedValue(
       mockCloudJob() as never,
     );
     vi.mocked(db.query.slackInstallations.findFirst).mockResolvedValue({
@@ -446,7 +450,7 @@ describe('slack channel post MCP endpoint', () => {
   });
 
   it('normalizes hashed channel names before resolving them', async () => {
-    vi.mocked(db.query.cloudJobs.findFirst).mockResolvedValue(
+    vi.mocked(db.query.taskRuns.findFirst).mockResolvedValue(
       mockCloudJob() as never,
     );
     vi.mocked(db.query.slackInstallations.findFirst).mockResolvedValue({
@@ -465,7 +469,7 @@ describe('slack channel post MCP endpoint', () => {
   });
 
   it('posts inside existing threads and includes image blocks', async () => {
-    vi.mocked(db.query.cloudJobs.findFirst).mockResolvedValue(
+    vi.mocked(db.query.taskRuns.findFirst).mockResolvedValue(
       mockCloudJob() as never,
     );
     vi.mocked(db.query.slackInstallations.findFirst).mockResolvedValue({
@@ -475,7 +479,7 @@ describe('slack channel post MCP endpoint', () => {
       {
         id: 'art-1',
         taskId: 'task-1',
-        cloudJobId: 42,
+        runId: 42,
         contentType: 'image/png',
         uploaded: true,
         path: 'screenshots/capture.png',
@@ -508,7 +512,7 @@ describe('slack channel post MCP endpoint', () => {
   });
 
   it('rejects threaded channel posts when the Slack thread source message is gone', async () => {
-    vi.mocked(db.query.cloudJobs.findFirst).mockResolvedValue(
+    vi.mocked(db.query.taskRuns.findFirst).mockResolvedValue(
       mockCloudJob() as never,
     );
     vi.mocked(db.query.slackInstallations.findFirst).mockResolvedValue({
@@ -535,7 +539,7 @@ describe('slack channel post MCP endpoint', () => {
   });
 
   it('returns 502 when Slack does not return a message timestamp', async () => {
-    vi.mocked(db.query.cloudJobs.findFirst).mockResolvedValue(
+    vi.mocked(db.query.taskRuns.findFirst).mockResolvedValue(
       mockCloudJob() as never,
     );
     vi.mocked(db.query.slackInstallations.findFirst).mockResolvedValue({

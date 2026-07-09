@@ -2,35 +2,33 @@ import {
   db,
   tasks,
   users,
-  cloudJobs,
   environments,
+  taskRuns,
   taskPullRequests,
   eq,
   sql,
   and,
   isNotNull,
   isNull,
-  or,
   desc,
   max,
   not,
   inArray,
-  isVisibleTask,
 } from '@roomote/db/server';
 
 import {
   ALL_REPOSITORIES,
-  PRODUCT_NAME,
+  type TaskSurface,
   getTaskModelDisplayName,
 } from '@roomote/types';
 
 import type { TimePeriodFilter, UserAuthSuccess } from '@/types';
 import { getTaskCategoryById, getUserDisplayName } from '@/lib';
 import {
-  ROOMOTE_CREATOR_FILTER_VALUE,
   buildCreatorFilterValue,
-  parseCreatorFilterValue,
+  formatAutomationLabel,
 } from '@/lib/task-creator-filter';
+import { getCreatorFilterCondition } from '@/lib/server/tasks';
 
 type FilterOption = { value: string; label: string; subLabel?: string };
 
@@ -41,29 +39,41 @@ function formatPrRepoName(repo: string): string {
 const getTimePeriodCutoff = (timePeriod: number): number =>
   Math.floor(Date.now() / 1000) - timePeriod * 24 * 60 * 60;
 
-function getVisibleTaskHistoryCondition() {
-  // `isVisibleTask` constructs a DB-backed subquery, so keep it out of module
-  // scope until apps/web has explicitly initialized the database singleton.
-  return isVisibleTask(tasks.id);
+function getVisibleTaskHistoryConditions() {
+  return [eq(tasks.visibility, 'visible'), isNull(tasks.deletedAt)];
 }
 
-function getAttributionSourceLabel(
-  sourceKind: string | null,
-): string | undefined {
-  switch (sourceKind) {
+function getSurfaceSubLabel(surface: TaskSurface | null): string | undefined {
+  switch (surface) {
     case 'slack':
       return 'Slack';
+    case 'teams':
+      return 'Teams';
+    case 'telegram':
+      return 'Telegram';
     case 'github':
       return 'GitHub';
+    case 'gitlab':
+      return 'GitLab';
+    case 'gitea':
+      return 'Gitea';
+    case 'ado':
+      return 'Azure DevOps';
     case 'linear':
       return 'Linear';
     case 'web':
       return 'Web';
-    case 'automation':
-      return 'Automation';
+    case 'api':
+      return 'API';
     default:
       return undefined;
   }
+}
+
+function getCategoryCondition(category: string | null | undefined) {
+  const taskCategory = getTaskCategoryById(category);
+
+  return taskCategory ? [inArray(tasks.workflow, taskCategory.workflows)] : [];
 }
 
 export async function getUsersOnlyForFilterCommand(
@@ -74,200 +84,74 @@ export async function getUsersOnlyForFilterCommand(
     timePeriod?: TimePeriodFilter;
   },
 ): Promise<FilterOption[]> {
-  const whereConditions = [];
-  const taskCategory = getTaskCategoryById(input.category);
+  void auth;
+  const whereConditions = [...getVisibleTaskHistoryConditions()];
 
   if (input.repositoryName) {
     whereConditions.push(eq(tasks.repositoryName, input.repositoryName));
   }
 
-  if (taskCategory) {
-    whereConditions.push(inArray(cloudJobs.type, [...taskCategory.taskTypes]));
-  }
+  whereConditions.push(...getCategoryCondition(input.category));
 
   if (input.timePeriod && input.timePeriod !== 'all') {
     const cutoffTimestamp = getTimePeriodCutoff(input.timePeriod);
     whereConditions.push(sql`${tasks.timestamp} >= ${cutoffTimestamp}`);
   }
 
-  whereConditions.push(getVisibleTaskHistoryCondition());
-
-  const matchedUsersQuery = db
-    .select({
-      userId: tasks.effectiveAuthorUserId,
-      username: users.name,
+  // Distinct initiator identities straight off the tasks columns.
+  const initiatorRows = await db
+    .selectDistinct({
+      initiatorKind: tasks.initiatorKind,
+      initiatorUserId: tasks.initiatorUserId,
+      initiatorAutomation: tasks.initiatorAutomation,
+      actorExternalId: tasks.actorExternalId,
+      actorDisplayName: tasks.actorDisplayName,
+      surface: tasks.surface,
+      userName: users.name,
       userEmail: users.email,
     })
     .from(tasks)
-    .innerJoin(users, eq(users.id, tasks.effectiveAuthorUserId));
+    .leftJoin(users, eq(users.id, tasks.initiatorUserId))
+    .where(and(...whereConditions));
 
-  const matchedUserResults = await (
-    taskCategory
-      ? matchedUsersQuery.leftJoin(cloudJobs, eq(cloudJobs.taskId, tasks.id))
-      : matchedUsersQuery
-  )
-    .where(
-      and(
-        ...whereConditions,
-        eq(tasks.effectiveAuthorKind, 'human'),
-        isNotNull(tasks.effectiveAuthorUserId),
-      ),
-    )
-    .groupBy(tasks.effectiveAuthorUserId, users.name, users.email)
-    .orderBy(users.name, users.email);
+  const optionsByValue = new Map<string, FilterOption>();
 
-  const legacyMatchedUsersQuery = db
-    .select({
-      userId: tasks.attributedUserId,
-      username: users.name,
-      userEmail: users.email,
-    })
-    .from(tasks)
-    .innerJoin(users, eq(users.id, tasks.attributedUserId));
+  for (const row of initiatorRows) {
+    const value = buildCreatorFilterValue(row);
 
-  const legacyMatchedUserResults = await (
-    taskCategory
-      ? legacyMatchedUsersQuery.leftJoin(
-          cloudJobs,
-          eq(cloudJobs.taskId, tasks.id),
-        )
-      : legacyMatchedUsersQuery
-  )
-    .where(
-      and(
-        ...whereConditions,
-        isNull(tasks.effectiveAuthorKind),
-        isNotNull(tasks.attributedUserId),
-      ),
-    )
-    .groupBy(tasks.attributedUserId, users.name, users.email)
-    .orderBy(users.name, users.email);
+    if (!value || optionsByValue.has(value)) {
+      continue;
+    }
 
-  const unlinkedUsersQuery = db
-    .select({
-      attributionKind: tasks.attributionKind,
-      sourceKind: tasks.attributionSourceKind,
-      sourceDisplayName: tasks.attributionSourceDisplayName,
-      sourceExternalId: tasks.attributionSourceExternalId,
-    })
-    .from(tasks);
-
-  const unlinkedUserResults = await (
-    taskCategory
-      ? unlinkedUsersQuery.leftJoin(cloudJobs, eq(cloudJobs.taskId, tasks.id))
-      : unlinkedUsersQuery
-  )
-    .where(
-      and(
-        ...whereConditions,
-        eq(tasks.attributionKind, 'unlinked_user'),
-        or(
-          isNull(tasks.effectiveAuthorKind),
-          and(
-            eq(tasks.effectiveAuthorKind, 'human'),
-            isNull(tasks.effectiveAuthorUserId),
-          ),
-        ),
-        isNotNull(tasks.attributionSourceKind),
-        isNotNull(tasks.attributionSourceExternalId),
-      ),
-    )
-    .groupBy(
-      tasks.attributionKind,
-      tasks.attributionSourceKind,
-      tasks.attributionSourceDisplayName,
-      tasks.attributionSourceExternalId,
-    )
-    .orderBy(
-      tasks.attributionSourceDisplayName,
-      tasks.attributionSourceExternalId,
-    );
-
-  const roomoteExistsQuery = db.select({ id: tasks.id }).from(tasks);
-
-  const roomoteResult = await (
-    taskCategory
-      ? roomoteExistsQuery.leftJoin(cloudJobs, eq(cloudJobs.taskId, tasks.id))
-      : roomoteExistsQuery
-  )
-    .where(
-      and(
-        ...whereConditions,
-        or(
-          eq(tasks.effectiveAuthorKind, 'roomote'),
-          and(
-            isNull(tasks.effectiveAuthorKind),
-            eq(tasks.attributionKind, 'automatic'),
-          ),
-        ),
-      ),
-    )
-    .limit(1);
-
-  const matchedUserOptions: FilterOption[] = [
-    ...matchedUserResults,
-    ...legacyMatchedUserResults,
-  ]
-    .map((result) => ({
-      value:
-        buildCreatorFilterValue({
-          effectiveAuthorKind: 'human',
-          userId: result.userId,
-          attributionKind: 'matched_user',
-          attributionSourceKind: null,
-          attributionSourceExternalId: null,
-        }) ?? result.userId!,
-      label:
-        getUserDisplayName({
-          name: result.username,
-          email: result.userEmail,
-        }) ?? '',
-    }))
-    .filter(
-      (option, index, options) =>
-        options.findIndex((candidate) => candidate.value === option.value) ===
-        index,
-    );
-
-  const unlinkedUserOptions: FilterOption[] = unlinkedUserResults.flatMap(
-    (result) => {
-      const value = buildCreatorFilterValue({
-        effectiveAuthorKind: 'human',
-        userId: null,
-        attributionKind: result.attributionKind,
-        attributionSourceKind: result.sourceKind,
-        attributionSourceExternalId: result.sourceExternalId,
+    if (row.initiatorKind === 'automation') {
+      optionsByValue.set(value, {
+        value,
+        label: row.initiatorAutomation
+          ? formatAutomationLabel(row.initiatorAutomation)
+          : '',
+        subLabel: 'Automation',
       });
+    } else if (row.initiatorUserId) {
+      optionsByValue.set(value, {
+        value,
+        label:
+          getUserDisplayName({
+            name: row.userName,
+            email: row.userEmail,
+          }) ?? '',
+      });
+    } else {
+      optionsByValue.set(value, {
+        value,
+        label: row.actorDisplayName ?? row.actorExternalId ?? '',
+        subLabel: getSurfaceSubLabel(row.surface),
+      });
+    }
+  }
 
-      if (!value) {
-        return [];
-      }
-
-      return [
-        {
-          value,
-          label: result.sourceDisplayName ?? result.sourceExternalId ?? '',
-          subLabel: getAttributionSourceLabel(result.sourceKind),
-        },
-      ];
-    },
-  );
-
-  const roomoteOptions: FilterOption[] =
-    roomoteResult.length > 0
-      ? [
-          {
-            value: ROOMOTE_CREATOR_FILTER_VALUE,
-            label: PRODUCT_NAME,
-          },
-        ]
-      : [];
-
-  return [
-    ...matchedUserOptions,
-    ...unlinkedUserOptions,
-    ...roomoteOptions,
-  ].sort((left, right) => left.label.localeCompare(right.label));
+  return [...optionsByValue.values()]
+    .filter((option) => option.label)
+    .sort((left, right) => left.label.localeCompare(right.label));
 }
 
 export async function getEnvironmentsForFilterCommand(
@@ -293,58 +177,13 @@ export async function getRepositoriesForFilterCommand(
   },
 ): Promise<FilterOption[]> {
   void auth;
-  const conditions = [];
-  const taskCategory = getTaskCategoryById(input.category);
+  const conditions = [...getVisibleTaskHistoryConditions()];
 
   if (input.userId) {
-    const creatorFilter = parseCreatorFilterValue(input.userId);
-
-    if (creatorFilter.kind === 'roomote') {
-      conditions.push(
-        or(
-          eq(tasks.effectiveAuthorKind, 'roomote'),
-          and(
-            isNull(tasks.effectiveAuthorKind),
-            eq(tasks.attributionKind, 'automatic'),
-          ),
-        )!,
-      );
-    } else if (creatorFilter.kind === 'unlinked_user') {
-      conditions.push(eq(tasks.attributionKind, 'unlinked_user'));
-      conditions.push(
-        or(
-          isNull(tasks.effectiveAuthorKind),
-          and(
-            eq(tasks.effectiveAuthorKind, 'human'),
-            isNull(tasks.effectiveAuthorUserId),
-          ),
-        )!,
-      );
-      conditions.push(
-        eq(tasks.attributionSourceKind, creatorFilter.sourceKind),
-      );
-      conditions.push(
-        eq(tasks.attributionSourceExternalId, creatorFilter.sourceExternalId),
-      );
-    } else {
-      conditions.push(
-        or(
-          and(
-            eq(tasks.effectiveAuthorKind, 'human'),
-            eq(tasks.effectiveAuthorUserId, creatorFilter.userId),
-          ),
-          and(
-            isNull(tasks.effectiveAuthorKind),
-            eq(tasks.attributedUserId, creatorFilter.userId),
-          ),
-        )!,
-      );
-    }
+    conditions.push(getCreatorFilterCondition(input.userId));
   }
 
-  if (taskCategory) {
-    conditions.push(inArray(cloudJobs.type, [...taskCategory.taskTypes]));
-  }
+  conditions.push(...getCategoryCondition(input.category));
 
   if (input.timePeriod && input.timePeriod !== 'all') {
     const cutoffTimestamp = getTimePeriodCutoff(input.timePeriod);
@@ -353,7 +192,6 @@ export async function getRepositoriesForFilterCommand(
 
   conditions.push(isNotNull(tasks.repositoryName));
   conditions.push(sql`${tasks.repositoryName} != ''`);
-  conditions.push(getVisibleTaskHistoryCondition());
 
   const environmentIds = await db.query.environments.findMany({
     columns: { id: true },
@@ -371,15 +209,9 @@ export async function getRepositoriesForFilterCommand(
     );
   }
 
-  const repositoriesQuery = db
+  const results = await db
     .select({ repositoryName: tasks.repositoryName })
-    .from(tasks);
-
-  const results = await (
-    taskCategory
-      ? repositoriesQuery.leftJoin(cloudJobs, eq(cloudJobs.taskId, tasks.id))
-      : repositoriesQuery
-  )
+    .from(tasks)
     .where(and(...conditions))
     .groupBy(tasks.repositoryName)
     .orderBy(tasks.repositoryName);
@@ -400,57 +232,14 @@ export async function getPullRequestsForFilterCommand(
   },
 ): Promise<FilterOption[]> {
   void auth;
-  const whereConditions = [];
-  const taskCategory = getTaskCategoryById(input.category);
+  const whereConditions = [...getVisibleTaskHistoryConditions()];
 
   if (input.repositoryName) {
     whereConditions.push(eq(tasks.repositoryName, input.repositoryName));
   }
 
   if (input.userId) {
-    const creatorFilter = parseCreatorFilterValue(input.userId);
-
-    if (creatorFilter.kind === 'roomote') {
-      whereConditions.push(
-        or(
-          eq(tasks.effectiveAuthorKind, 'roomote'),
-          and(
-            isNull(tasks.effectiveAuthorKind),
-            eq(tasks.attributionKind, 'automatic'),
-          ),
-        )!,
-      );
-    } else if (creatorFilter.kind === 'unlinked_user') {
-      whereConditions.push(eq(tasks.attributionKind, 'unlinked_user'));
-      whereConditions.push(
-        or(
-          isNull(tasks.effectiveAuthorKind),
-          and(
-            eq(tasks.effectiveAuthorKind, 'human'),
-            isNull(tasks.effectiveAuthorUserId),
-          ),
-        )!,
-      );
-      whereConditions.push(
-        eq(tasks.attributionSourceKind, creatorFilter.sourceKind),
-      );
-      whereConditions.push(
-        eq(tasks.attributionSourceExternalId, creatorFilter.sourceExternalId),
-      );
-    } else {
-      whereConditions.push(
-        or(
-          and(
-            eq(tasks.effectiveAuthorKind, 'human'),
-            eq(tasks.effectiveAuthorUserId, creatorFilter.userId),
-          ),
-          and(
-            isNull(tasks.effectiveAuthorKind),
-            eq(tasks.attributedUserId, creatorFilter.userId),
-          ),
-        )!,
-      );
-    }
+    whereConditions.push(getCreatorFilterCondition(input.userId));
   }
 
   if (input.timePeriod && input.timePeriod !== 'all') {
@@ -458,13 +247,10 @@ export async function getPullRequestsForFilterCommand(
     whereConditions.push(sql`${tasks.timestamp} >= ${cutoffTimestamp}`);
   }
 
-  if (taskCategory) {
-    whereConditions.push(inArray(cloudJobs.type, [...taskCategory.taskTypes]));
-  }
+  whereConditions.push(...getCategoryCondition(input.category));
 
   whereConditions.push(isNotNull(taskPullRequests.repository));
   whereConditions.push(isNotNull(taskPullRequests.prNumber));
-  whereConditions.push(getVisibleTaskHistoryCondition());
 
   const trimmedSearch = input.search?.trim();
 
@@ -482,7 +268,7 @@ export async function getPullRequestsForFilterCommand(
     'latest_detected_at',
   );
 
-  const query = db
+  const results = await db
     .select({
       repository: taskPullRequests.repository,
       prNumber: taskPullRequests.prNumber,
@@ -490,19 +276,11 @@ export async function getPullRequestsForFilterCommand(
       latestDetectedAt,
     })
     .from(tasks)
-    .innerJoin(taskPullRequests, eq(taskPullRequests.taskId, tasks.id));
-
-  const baseQuery = (
-    taskCategory
-      ? query.leftJoin(cloudJobs, eq(cloudJobs.taskId, tasks.id))
-      : query
-  )
+    .innerJoin(taskPullRequests, eq(taskPullRequests.taskId, tasks.id))
     .where(and(...whereConditions))
     .groupBy(taskPullRequests.repository, taskPullRequests.prNumber)
     .orderBy(desc(latestDetectedAt))
     .limit(20);
-
-  const results = await baseQuery;
 
   return results
     .filter(
@@ -531,13 +309,19 @@ export async function getModelsForFilterCommand(
   },
 ): Promise<FilterOption[]> {
   void auth;
-  const conditions = [];
-  const taskCategory = getTaskCategoryById(input.category);
+  const conditions = [...getVisibleTaskHistoryConditions()];
 
   if (input.repositoryName) {
     if (input.repositoryName.startsWith('env:')) {
+      const environmentId = input.repositoryName.slice(4);
+
       conditions.push(
-        sql`${cloudJobs.payload}->>'environmentId' = ${input.repositoryName.slice(4)}`,
+        sql`EXISTS (
+          SELECT 1
+          FROM ${taskRuns}
+          WHERE ${taskRuns.taskId} = ${tasks.id}
+            AND ${taskRuns.payload}->>'environmentId' = ${environmentId}
+        )`,
       );
     } else {
       conditions.push(eq(tasks.repositoryName, input.repositoryName));
@@ -545,68 +329,19 @@ export async function getModelsForFilterCommand(
   }
 
   if (input.userId) {
-    const creatorFilter = parseCreatorFilterValue(input.userId);
-
-    if (creatorFilter.kind === 'roomote') {
-      conditions.push(
-        or(
-          eq(tasks.effectiveAuthorKind, 'roomote'),
-          and(
-            isNull(tasks.effectiveAuthorKind),
-            eq(tasks.attributionKind, 'automatic'),
-          ),
-        )!,
-      );
-    } else if (creatorFilter.kind === 'unlinked_user') {
-      conditions.push(eq(tasks.attributionKind, 'unlinked_user'));
-      conditions.push(
-        or(
-          isNull(tasks.effectiveAuthorKind),
-          and(
-            eq(tasks.effectiveAuthorKind, 'human'),
-            isNull(tasks.effectiveAuthorUserId),
-          ),
-        )!,
-      );
-      conditions.push(
-        eq(tasks.attributionSourceKind, creatorFilter.sourceKind),
-      );
-      conditions.push(
-        eq(tasks.attributionSourceExternalId, creatorFilter.sourceExternalId),
-      );
-    } else {
-      conditions.push(
-        or(
-          and(
-            eq(tasks.effectiveAuthorKind, 'human'),
-            eq(tasks.effectiveAuthorUserId, creatorFilter.userId),
-          ),
-          and(
-            isNull(tasks.effectiveAuthorKind),
-            eq(tasks.attributedUserId, creatorFilter.userId),
-          ),
-        )!,
-      );
-    }
+    conditions.push(getCreatorFilterCondition(input.userId));
   }
 
-  if (taskCategory) {
-    conditions.push(inArray(cloudJobs.type, [...taskCategory.taskTypes]));
-  }
+  conditions.push(...getCategoryCondition(input.category));
 
   if (input.timePeriod && input.timePeriod !== 'all') {
     const cutoffTimestamp = getTimePeriodCutoff(input.timePeriod);
     conditions.push(sql`${tasks.timestamp} >= ${cutoffTimestamp}`);
   }
 
-  conditions.push(getVisibleTaskHistoryCondition());
-
-  const query = db.select({ model: tasks.model }).from(tasks);
-  const results = await (
-    taskCategory || input.repositoryName?.startsWith('env:')
-      ? query.leftJoin(cloudJobs, eq(cloudJobs.taskId, tasks.id))
-      : query
-  )
+  const results = await db
+    .select({ model: tasks.model })
+    .from(tasks)
     .where(and(...conditions))
     .groupBy(tasks.model)
     .orderBy(tasks.model);

@@ -10,7 +10,7 @@ import {
 import {
   type CloudTaskPayload,
   CloudAgentType,
-  CloudTaskType,
+  TaskPayloadKind,
   PRODUCT_NAME,
   isActivelyRunningCloudTask,
 } from '@roomote/types';
@@ -252,7 +252,8 @@ export async function handleGitLabNote(
   const target =
     targetsResult.status === 'ok' ? targetsResult.targets[0] : undefined;
 
-  if (!target) {
+  // requireLinkedSenderAccount guarantees a linked commenter here.
+  if (!target || !target.userId) {
     await postMentionResponseNote({
       ...mentionResponseTarget,
       body:
@@ -373,23 +374,30 @@ export async function handleGitLabNote(
       : {}),
     ...(headSha ? { sha: headSha } : {}),
     targetBranch: mergeRequest.target_branch,
-  } satisfies CloudTaskPayload<CloudTaskType.GithubPrReview>;
+  } satisfies CloudTaskPayload<typeof TaskPayloadKind.GithubPrReview>;
 
   try {
-    const launch = await enqueueCloudTask(
-      {
-        userId: target.userId,
-        attributionOverride: {
-          kind: 'automatic',
-          sourceKind: 'gitlab',
-        },
-        type: CloudTaskType.GithubPrReview,
+    // A human @roomote mention started this review: the commenter is the
+    // initiator (the old automatic/gitlab attribution override is gone).
+    const launch = await enqueueCloudTask({
+      task: {
+        type: TaskPayloadKind.GithubPrReview,
         payload: reviewPayload,
       },
-      {
-        launchClass: 'automation',
+      initiator: { kind: 'user', userId: target.userId },
+      workflow: 'pr_review',
+      surface: 'gitlab',
+      trigger: 'message',
+      prLinkage: {
+        provider: 'gitlab',
+        repository: repoFullName,
+        prNumber: mergeRequest.iid,
+        prUrl,
+        prTitle: mergeRequest.title,
+        prSha: headSha || null,
+        prBaseRef: mergeRequest.target_branch ?? null,
       },
-    );
+    });
 
     await postMentionResponseNote({
       ...mentionResponseTarget,

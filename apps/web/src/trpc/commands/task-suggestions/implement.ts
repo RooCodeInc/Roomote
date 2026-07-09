@@ -3,7 +3,7 @@ import {
   enqueueCloudTask,
 } from '@roomote/cloud-agents/server';
 import { and, db, eq, or, taskSuggestions } from '@roomote/db/server';
-import { CloudTaskType } from '@roomote/types';
+import { TaskPayloadKind } from '@roomote/types';
 
 import type { UserAuthSuccess } from '@/types';
 import { resolveSuggestionLaunchWorkspace } from './launch-resolution';
@@ -88,10 +88,9 @@ export async function implementTaskSuggestionCommand(
       throw new Error(resolution.failureReason);
     }
 
-    const launchResult = await enqueueCloudTask(
-      {
-        userId: auth.userId,
-        type: CloudTaskType.StandardTask,
+    const launchResult = await enqueueCloudTask({
+      task: {
+        type: TaskPayloadKind.StandardTask,
         payload: {
           repo: resolution.workspace.repoForPayload,
           ...(resolution.workspace.environmentId
@@ -111,8 +110,11 @@ export async function implementTaskSuggestionCommand(
           }),
         },
       },
-      {},
-    );
+      initiator: { kind: 'user', userId: auth.userId },
+      workflow: 'standard',
+      surface: 'web',
+      trigger: 'manual',
+    });
 
     return {
       success: true as const,

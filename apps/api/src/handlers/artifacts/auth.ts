@@ -1,10 +1,10 @@
 import type { JobTokenContext } from '@roomote/types';
 import {
   and,
-  cloudJobs,
   db,
   eq,
   isVisibleTask,
+  taskRuns,
   tasks,
 } from '@roomote/db/server';
 import { findCloudJobByJobTokenClaims } from '@roomote/sdk/server';
@@ -73,11 +73,11 @@ async function getArtifactRouteCloudJobBinding(auth: ArtifactRouteAuthContext) {
     return null;
   }
 
-  return db.query.cloudJobs.findFirst({
+  return db.query.taskRuns.findFirst({
     columns: {
       taskId: true,
     },
-    where: eq(cloudJobs.id, scopedJob.id),
+    where: eq(taskRuns.id, scopedJob.id),
   });
 }
 
@@ -131,7 +131,7 @@ export async function verifyArtifactRouteTaskReadAccess(
     columns: {
       id: true,
     },
-    where: and(eq(tasks.id, taskId), isVisibleTask(tasks.id)),
+    where: and(eq(tasks.id, taskId), isVisibleTask()),
   });
 
   if (requestedTask) {

@@ -16,8 +16,9 @@ import type {
   tasks,
   taskPins,
   taskShares,
-  cloudJobs,
-  cloudJobEvents,
+  taskPullRequests,
+  taskRuns,
+  taskRunEvents,
   taskStartParallelCounts,
   taskSuggestions,
   automationWorkItems,
@@ -40,7 +41,6 @@ import type {
   fastAgentSessions,
   linearPendingSelections,
   environmentVariables,
-  evalRuns,
   environments,
   environmentConfigVersions,
   environmentRepositoryMappings,
@@ -100,25 +100,41 @@ export type TaskShare = typeof taskShares.$inferSelect;
 export type CreateTaskShare = Omit<typeof taskShares.$inferInsert, Generated>;
 
 /**
- * cloudJobs
+ * taskPullRequests
  */
 
-export type CloudJob = typeof cloudJobs.$inferSelect;
-
-export type CreateCloudJob = Omit<typeof cloudJobs.$inferInsert, Generated>;
+export type TaskPullRequest = typeof taskPullRequests.$inferSelect;
 
 /**
- * cloudJobEvents
+ * taskRuns
  */
 
-export type UpdateCloudJob = Partial<Omit<CloudJob, 'id' | 'createdAt'>>;
+export type Run = typeof taskRuns.$inferSelect;
 
-export type CloudJobEvent = typeof cloudJobEvents.$inferSelect;
+export type CreateRun = Omit<typeof taskRuns.$inferInsert, Generated>;
 
-export type CreateCloudJobEvent = Omit<
-  typeof cloudJobEvents.$inferInsert,
-  Generated
->;
+export type UpdateRun = Partial<Omit<Run, 'id' | 'createdAt'>>;
+
+// TODO(stage5-rename): temporary type-only aliases to bound downstream churn
+// until the Stage 5 CloudJob -> Run vocabulary pass. Do not alias tables.
+export type CloudJob = Run;
+
+export type CreateCloudJob = CreateRun;
+
+export type UpdateCloudJob = UpdateRun;
+
+/**
+ * taskRunEvents
+ */
+
+export type RunEvent = typeof taskRunEvents.$inferSelect;
+
+export type CreateRunEvent = Omit<typeof taskRunEvents.$inferInsert, Generated>;
+
+// TODO(stage5-rename): temporary type-only aliases, see above.
+export type CloudJobEvent = RunEvent;
+
+export type CreateCloudJobEvent = CreateRunEvent;
 
 /**
  * task_start_parallel_counts
@@ -367,14 +383,6 @@ export type CreateEnvironmentVariable = Omit<
   typeof environmentVariables.$inferInsert,
   Generated
 >;
-
-/**
- * evalRuns
- */
-
-export type EvalRun = typeof evalRuns.$inferSelect;
-
-export type CreateEvalRun = Omit<typeof evalRuns.$inferInsert, Generated>;
 
 /**
  * environments

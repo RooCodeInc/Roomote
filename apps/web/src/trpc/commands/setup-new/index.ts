@@ -9,7 +9,7 @@ import {
   environments,
   environmentVariables,
   users,
-  cloudJobs,
+  taskRuns,
   taskSuggestions,
   setupNewQueuedTasks,
   slackInstallations,
@@ -42,7 +42,7 @@ import {
   collectSetupModelProviderCredentialValues,
   createEmptySetupNewState,
   CloudTaskStatus,
-  CloudTaskType,
+  TaskPayloadKind,
   resolveEvalHarnessSelection,
   type ComputeProvider,
   type DeploymentModelConfig,
@@ -804,10 +804,9 @@ async function launchQueuedSetupTasksIfReady({
   await Promise.allSettled(
     claimedTasks.map(async (queuedTask) => {
       try {
-        const launchResult = await enqueueCloudTask(
-          {
-            userId: queuedTask.selectedByUserId,
-            type: CloudTaskType.StandardTask,
+        const launchResult = await enqueueCloudTask({
+          task: {
+            type: TaskPayloadKind.StandardTask,
             payload: {
               repo: '',
               environmentId: matchingEnvironmentId,
@@ -818,10 +817,19 @@ async function launchQueuedSetupTasksIfReady({
               description: queuedTask.prompt,
             },
           },
-          {
-            launchClass: 'human',
-          },
-        );
+          initiator: { kind: 'user', userId: queuedTask.selectedByUserId },
+          workflow: 'setup_onboarding',
+          surface: 'web',
+          trigger: 'manual',
+          ...(slackChannel || slackThreadTs
+            ? {
+                channels: {
+                  slackChannelId: slackChannel ?? null,
+                  slackThreadTs: slackThreadTs ?? null,
+                },
+              }
+            : {}),
+        });
 
         const launchedAt = new Date();
 
@@ -1988,17 +1996,12 @@ export async function startSetupNewOnboardingTaskCommand(
         }
 
         const startedAt = new Date().toISOString();
-        const launchResult = await enqueueCloudTask(
-          {
-            userId,
+        const launchResult = await enqueueCloudTask({
+          task: {
             ...(modelSelection.harness
               ? { harness: modelSelection.harness }
               : {}),
-            attributionOverride: {
-              kind: 'automatic',
-              sourceKind: 'automation',
-            },
-            type: CloudTaskType.StandardTask,
+            type: TaskPayloadKind.StandardTask,
             payload: {
               ...workspacePayload,
               description: prompt,
@@ -2019,10 +2022,11 @@ export async function startSetupNewOnboardingTaskCommand(
                 : {}),
             },
           },
-          {
-            launchClass: 'human',
-          },
-        );
+          initiator: { kind: 'user', userId },
+          workflow: 'setup_onboarding',
+          surface: 'web',
+          trigger: 'manual',
+        });
 
         await savePersistedSetupNewState(
           normalizeSetupNewState({
@@ -2054,13 +2058,12 @@ export async function startSetupNewOnboardingTaskCommand(
       }
 
       const startedAt = new Date().toISOString();
-      const launchResult = await enqueueCloudTask(
-        {
-          userId,
+      const launchResult = await enqueueCloudTask({
+        task: {
           ...(modelSelection.harness
             ? { harness: modelSelection.harness }
             : {}),
-          type: CloudTaskType.StandardTask,
+          type: TaskPayloadKind.StandardTask,
           payload: {
             ...workspacePayload,
             description: prompt,
@@ -2072,10 +2075,11 @@ export async function startSetupNewOnboardingTaskCommand(
               : {}),
           },
         },
-        {
-          launchClass: 'human',
-        },
-      );
+        initiator: { kind: 'user', userId },
+        workflow: 'setup_onboarding',
+        surface: 'web',
+        trigger: 'manual',
+      });
 
       await savePersistedSetupNewState(
         normalizeSetupNewState({
@@ -2128,17 +2132,12 @@ export async function startSetupNewOnboardingTaskCommand(
     let launchResult: Awaited<ReturnType<typeof enqueueCloudTask>>;
 
     try {
-      launchResult = await enqueueCloudTask(
-        {
-          userId,
+      launchResult = await enqueueCloudTask({
+        task: {
           ...(modelSelection.harness
             ? { harness: modelSelection.harness }
             : {}),
-          attributionOverride: {
-            kind: 'automatic',
-            sourceKind: 'automation',
-          },
-          type: CloudTaskType.SlackAppMention,
+          type: TaskPayloadKind.SlackAppMention,
           payload: {
             ...workspacePayload,
             channel: slackChannel,
@@ -2155,10 +2154,15 @@ export async function startSetupNewOnboardingTaskCommand(
               : {}),
           },
         },
-        {
-          launchClass: 'human',
+        initiator: { kind: 'user', userId },
+        workflow: 'setup_onboarding',
+        surface: 'slack',
+        trigger: 'manual',
+        channels: {
+          slackChannelId: slackChannel,
+          slackThreadTs,
         },
-      );
+      });
     } catch (error) {
       await slack.deleteMessage({ channel: slackChannel, ts: slackThreadTs });
       throw error;
@@ -2235,11 +2239,11 @@ export async function cancelSetupNewOnboardingTaskCommand(
 
   const jobs = await db
     .select({
-      id: cloudJobs.id,
-      status: cloudJobs.status,
+      id: taskRuns.id,
+      status: taskRuns.status,
     })
-    .from(cloudJobs)
-    .where(eq(cloudJobs.taskId, currentState.onboardingTaskId));
+    .from(taskRuns)
+    .where(eq(taskRuns.taskId, currentState.onboardingTaskId));
 
   const activeJobIds = jobs
     .filter((job) => !isExitedCloudTaskStatus(job.status))
@@ -2250,17 +2254,17 @@ export async function cancelSetupNewOnboardingTaskCommand(
 
     await db.transaction(async (tx) => {
       await tx
-        .update(cloudJobs)
+        .update(taskRuns)
         .set({
           status: CloudTaskStatus.Canceled,
           canceledAt: endedAt,
         })
-        .where(inArray(cloudJobs.id, activeJobIds));
+        .where(inArray(taskRuns.id, activeJobIds));
 
       await Promise.all(
-        activeJobIds.map((cloudJobId) =>
+        activeJobIds.map((runId) =>
           markTaskStartParallelCountEndedAt(tx, {
-            cloudJobId,
+            runId,
             endedAt,
           }),
         ),

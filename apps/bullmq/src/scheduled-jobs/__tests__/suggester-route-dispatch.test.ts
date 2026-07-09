@@ -29,7 +29,7 @@ vi.mock('@roomote/db/server', () => ({
 }));
 
 import { buildSuggestedTasksPrompt } from '@roomote/cloud-agents/server';
-import { ALL_REPOSITORIES, CloudTaskType } from '@roomote/types';
+import { ALL_REPOSITORIES, TaskPayloadKind } from '@roomote/types';
 
 import { dispatchSuggestionRoutes } from '../suggester-route-dispatch';
 
@@ -115,10 +115,9 @@ describe('dispatchSuggestionRoutes', () => {
         },
       }),
     );
-    expect(mockEnqueueCloudTask).toHaveBeenCalledWith(
-      {
-        userId: null,
-        type: CloudTaskType.SuggestedTasks,
+    expect(mockEnqueueCloudTask).toHaveBeenCalledWith({
+      task: {
+        type: TaskPayloadKind.Scan,
         payload: {
           repo: ALL_REPOSITORIES,
           selectedRepositories: ['acme/api'],
@@ -150,10 +149,13 @@ describe('dispatchSuggestionRoutes', () => {
           visibleInTranscript: false,
         },
       },
-      {
-        launchClass: 'automation',
-      },
-    );
+      initiator: { kind: 'automation', key: 'suggester' },
+      workflow: 'scan',
+      surface: 'system',
+      trigger: 'schedule',
+      visibility: 'hidden',
+      channels: { slackChannelId: 'C123SUGGEST' },
+    });
     expect(mockCompleteBackgroundAutomationRun).toHaveBeenCalledWith(
       expect.anything(),
       expect.objectContaining({

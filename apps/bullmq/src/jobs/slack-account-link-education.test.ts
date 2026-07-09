@@ -31,7 +31,7 @@ vi.mock('@roomote/db/server', () => ({
         findFirst: (...args: unknown[]) =>
           mockFindFirstSlackUserMapping(...args),
       },
-      cloudJobs: {
+      tasks: {
         findFirst: (...args: unknown[]) => mockFindFirstCloudJob(...args),
       },
     },
@@ -46,8 +46,8 @@ vi.mock('@roomote/db/server', () => ({
     slackUserId: 'slackUserId',
     slackTeamId: 'slackTeamId',
   },
-  cloudJobs: {
-    userId: 'userId',
+  tasks: {
+    initiatorUserId: 'initiatorUserId',
     requestedWorkKind: 'requestedWorkKind',
   },
 }));

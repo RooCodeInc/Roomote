@@ -1,7 +1,7 @@
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import { CloudTaskStatus, CloudTaskType } from '@roomote/types';
+import { CloudTaskStatus, TaskPayloadKind } from '@roomote/types';
 import type { CloudJob } from '@roomote/db/server';
 
 // ── Mocks ────────────────────────────────────────────────────────────────────
@@ -59,7 +59,7 @@ vi.mock('@roomote/db/server', async () => {
     ...actual,
     db: {
       query: {
-        cloudJobs: {
+        taskRuns: {
           findFirst: (...args: unknown[]) => mockCloudJobsFindFirst(...args),
         },
         orgs: { findFirst: (...args: unknown[]) => mockOrgsFindFirst(...args) },
@@ -151,7 +151,7 @@ class SaturatedTestController extends TestController {
 function makeCloudJob(overrides: Partial<CloudJob> = {}): CloudJob {
   return {
     id: 42,
-    type: CloudTaskType.StandardTask,
+    payloadKind: TaskPayloadKind.StandardTask,
     userId: 'user-1',
     harness: 'opencode-server',
     status: CloudTaskStatus.Running,
@@ -238,7 +238,7 @@ describe('BaseController.handleSpawnJobError', () => {
     };
     const job = makeCloudJob({
       id: 99,
-      type: CloudTaskType.SnapshotEnvironment,
+      payloadKind: TaskPayloadKind.SnapshotEnvironment,
       vendor: 'modal',
       payload: {
         repo: 'owner/repo',
@@ -331,7 +331,7 @@ describe('BaseController.handleSpawnJobError', () => {
         expect.objectContaining({
           jobId: 108,
           jobStatus: CloudTaskStatus.Pending,
-          jobType: CloudTaskType.StandardTask,
+          jobType: TaskPayloadKind.StandardTask,
           phase: 'database_fallback',
           provider: 'modal',
           repo: 'owner/repo',
@@ -412,7 +412,7 @@ describe('BaseController.dequeueCloudJob', () => {
     expect(mockRecordJobLifecycleEvent).toHaveBeenCalledWith(
       expect.anything(),
       expect.objectContaining({
-        cloudJobId: 77,
+        runId: 77,
         taskId: 'task-1',
         eventType: 'decision',
         message: expect.stringContaining('Controller dequeued'),
@@ -459,7 +459,7 @@ describe('BaseController.dequeueCloudJob', () => {
     expect(mockRecordJobLifecycleEvent).toHaveBeenCalledWith(
       expect.anything(),
       expect.objectContaining({
-        cloudJobId: 80,
+        runId: 80,
         details: expect.objectContaining({
           stage: 'controller_dequeue',
           status: CloudTaskStatus.Dequeued,

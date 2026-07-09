@@ -3,13 +3,13 @@ import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { WebStandardStreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/webStandardStreamableHttp.js';
 import {
   and,
-  cloudJobs,
   db,
   eq,
   environments,
   isNull,
   mcpConnections,
   deploymentMcpEnablements,
+  taskRuns,
 } from '@roomote/db/server';
 import {
   findLinearDeploymentMcpConnection,
@@ -38,6 +38,7 @@ import {
   lookupSlackChannelMessages,
   lookupSlackThread,
 } from './slack-thread-lookup';
+import { getTaskChannelBindings } from '../tasks/helpers';
 
 const ROOMOTE_MCP_SERVER_INFO = {
   name: 'roomote-router-mcp',
@@ -243,20 +244,52 @@ async function buildAboutMePayload(options: {
   };
 }
 
+type SlackLookupRunContext = {
+  actingUserId: string | null;
+  slackChannelId: string | null;
+  slackThreadTs: string | null;
+  payload: unknown;
+};
+
+/**
+ * Load the Slack routing context for a job-token request: the run's acting
+ * user and payload plus the owning task's Slack channel bindings (channel
+ * bindings moved from runs to tasks in the Stage 2 data-model
+ * simplification).
+ */
+async function loadSlackLookupRunContext(
+  cloudJobId: number,
+): Promise<SlackLookupRunContext> {
+  const run = await db.query.taskRuns.findFirst({
+    columns: {
+      actingUserId: true,
+      taskId: true,
+      payload: true,
+    },
+    where: eq(taskRuns.id, cloudJobId),
+  });
+
+  if (!run) {
+    throw new McpProxyError(404, 'Cloud job not found for this MCP token');
+  }
+
+  const bindings = await getTaskChannelBindings(run.taskId);
+
+  return {
+    actingUserId: run.actingUserId,
+    slackChannelId: bindings?.slackChannelId ?? null,
+    slackThreadTs: bindings?.slackThreadTs ?? null,
+    payload: run.payload,
+  };
+}
+
 async function buildSlackThreadPayload(options: {
   auth: McpAuthContext;
   actingUserId: string | null;
   channel?: string;
   messageTs: string;
 }) {
-  let cloudJob:
-    | {
-        actingUserId: string | null;
-        type: string;
-        slackThreadTs: string | null;
-        payload: unknown;
-      }
-    | undefined;
+  let cloudJob: SlackLookupRunContext | undefined;
 
   if (options.auth.tokenType === 'cj') {
     if (!options.auth.cloudJobId) {
@@ -266,19 +299,7 @@ async function buildSlackThreadPayload(options: {
       );
     }
 
-    cloudJob = await db.query.cloudJobs.findFirst({
-      columns: {
-        actingUserId: true,
-        type: true,
-        slackThreadTs: true,
-        payload: true,
-      },
-      where: eq(cloudJobs.id, options.auth.cloudJobId),
-    });
-
-    if (!cloudJob) {
-      throw new McpProxyError(404, 'Cloud job not found for this MCP token');
-    }
+    cloudJob = await loadSlackLookupRunContext(options.auth.cloudJobId);
   }
 
   return lookupSlackThread({
@@ -300,14 +321,7 @@ async function buildSlackChannelMessagesPayload(options: {
   oldest?: string;
   latest?: string;
 }) {
-  let cloudJob:
-    | {
-        actingUserId: string | null;
-        type: string;
-        slackThreadTs: string | null;
-        payload: unknown;
-      }
-    | undefined;
+  let cloudJob: SlackLookupRunContext | undefined;
 
   if (options.auth.tokenType === 'cj') {
     if (!options.auth.cloudJobId) {
@@ -317,19 +331,7 @@ async function buildSlackChannelMessagesPayload(options: {
       );
     }
 
-    cloudJob = await db.query.cloudJobs.findFirst({
-      columns: {
-        actingUserId: true,
-        type: true,
-        slackThreadTs: true,
-        payload: true,
-      },
-      where: eq(cloudJobs.id, options.auth.cloudJobId),
-    });
-
-    if (!cloudJob) {
-      throw new McpProxyError(404, 'Cloud job not found for this MCP token');
-    }
+    cloudJob = await loadSlackLookupRunContext(options.auth.cloudJobId);
   }
 
   return lookupSlackChannelMessages({

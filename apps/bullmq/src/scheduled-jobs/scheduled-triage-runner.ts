@@ -9,7 +9,7 @@ import {
   slackInstallations,
   startBackgroundAutomationRun,
 } from '@roomote/db/server';
-import { CloudTaskType, type SuggestedTasksTask } from '@roomote/types';
+import { TaskPayloadKind, type SuggestedTasksTask } from '@roomote/types';
 
 import {
   isRunDue,
@@ -179,17 +179,19 @@ export function createScheduledTriageJob(
 
         // Automation scans run as the deployment service principal; a manual
         // trigger is still an automation launch, just with a manual trigger
-        // kind on the run record.
-        const launchResult = await enqueueCloudTask(
-          {
-            userId: null,
-            type: CloudTaskType.SuggestedTasks,
+        // kind on the task record.
+        const launchResult = await enqueueCloudTask({
+          task: {
+            type: TaskPayloadKind.Scan,
             payload: scanTask.payload,
           },
-          {
-            launchClass: 'automation',
-          },
-        );
+          initiator: { kind: 'automation', key: config.automationKey },
+          workflow: 'scan',
+          surface: 'system',
+          trigger: opts.manualTrigger ? 'manual' : 'schedule',
+          visibility: 'hidden',
+          channels: { slackChannelId: channelId },
+        });
 
         await completeBackgroundAutomationRun(db, {
           runId,

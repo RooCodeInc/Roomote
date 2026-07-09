@@ -1,7 +1,7 @@
 import {
   ALL_REPOSITORIES,
   type CloudTaskPayload,
-  CloudTaskType,
+  TaskPayloadKind,
   populateSnapshotResumeSlackMetadata,
   restoreSnapshotResumeVisiblePromptFields,
 } from '@roomote/types';
@@ -19,7 +19,7 @@ import { prependLinearMessages } from './queue-linear-message';
  */
 export interface DrainSourceJob {
   id: number;
-  userId: string | null;
+  /** Channel bindings sourced from the run's task row (tasks table). */
   linearSessionId: string | null;
   linearIssueId: string | null;
   linearOrganizationId: string | null;
@@ -117,7 +117,9 @@ export async function drainLinearMessagesToResumeJob(
     selectedRepositories && selectedRepositories.length > 0
       ? selectedRepositories
       : undefined;
-  const payloadForResume: CloudTaskPayload<CloudTaskType.SnapshotResume> = {
+  const payloadForResume: CloudTaskPayload<
+    typeof TaskPayloadKind.SnapshotResume
+  > = {
     repo,
     environmentId,
     selectedRepositories: scopedSelectedRepositories,
@@ -145,18 +147,21 @@ export async function drainLinearMessagesToResumeJob(
     }
 
     payloadForResume.queuedLinearMessages = messages;
+
+    // The resumer becomes the new run's acting user: the most recent drained
+    // follow-up sender we could resolve to a Roomote user. Resumes never
+    // create tasks and never re-attribute the task initiator.
+    const resumeActingUserId =
+      [...messages].reverse().find((message) => message.userId)?.userId ?? null;
+
     resumeLaunch = await enqueueCloudTask({
-      type: CloudTaskType.SnapshotResume,
-      userId: sourceJob.userId,
-      linearSessionId: sourceJob.linearSessionId,
-      linearIssueId: sourceJob.linearIssueId ?? undefined,
-      linearOrganizationId: sourceJob.linearOrganizationId ?? undefined,
-      ...(sourceJob.slackThreadTs
-        ? { slackThreadTs: sourceJob.slackThreadTs }
-        : {}),
-      sourceSnapshotId: snapshotId,
-      sourceCloudJobId: sourceJob.id,
-      payload: payloadForResume,
+      task: {
+        type: TaskPayloadKind.SnapshotResume,
+        sourceSnapshotId: snapshotId,
+        sourceCloudJobId: sourceJob.id,
+        payload: payloadForResume,
+      },
+      actingUserId: resumeActingUserId,
     });
   } catch (error) {
     try {

@@ -10,7 +10,7 @@ vi.mock('@roomote/sdk/client', () => ({
   },
 }));
 
-import { CloudTaskType } from '@roomote/types';
+import { TaskPayloadKind } from '@roomote/types';
 
 import { CloudTaskStatus } from '@roomote/types';
 import { waitForExternalSleepAction } from '../wait-for-external-sleep-action';
@@ -51,7 +51,7 @@ describe('waitForExternalSleepAction', () => {
     const result = await waitForExternalSleepAction({
       cloudJob: {
         id: 123,
-        type: CloudTaskType.GithubIssueCommentRespond,
+        payloadKind: TaskPayloadKind.StandardTask,
         vendor: 'modal',
         machineId: 'sb_test_123',
       } as never,
@@ -93,7 +93,7 @@ describe('waitForExternalSleepAction', () => {
     const result = await waitForExternalSleepAction({
       cloudJob: {
         id: 456,
-        type: CloudTaskType.GithubPrReview,
+        payloadKind: TaskPayloadKind.GithubPrReview,
         vendor: 'modal',
         machineId: 'sb_test_456',
       } as never,
@@ -135,7 +135,7 @@ describe('waitForExternalSleepAction', () => {
     const result = await waitForExternalSleepAction({
       cloudJob: {
         id: 789,
-        type: CloudTaskType.SlackAppMention,
+        payloadKind: TaskPayloadKind.SlackAppMention,
         vendor: 'modal',
         machineId: 'mo_test_789',
       } as never,
@@ -159,7 +159,7 @@ describe('waitForExternalSleepAction', () => {
     const result = await waitForExternalSleepAction({
       cloudJob: {
         id: 123,
-        type: CloudTaskType.GithubPrReviewFollowUp,
+        payloadKind: TaskPayloadKind.GithubPrReviewFollowUp,
         vendor: 'docker',
         machineId: 'worker-123',
       } as never,

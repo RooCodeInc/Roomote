@@ -10,7 +10,7 @@ import {
 import {
   type CloudTaskPayload,
   CloudAgentType,
-  CloudTaskType,
+  TaskPayloadKind,
   PRODUCT_NAME,
   isActivelyRunningCloudTask,
 } from '@roomote/types';
@@ -258,7 +258,8 @@ export async function handleGiteaComment(
   const target =
     targetsResult.status === 'ok' ? targetsResult.targets[0] : undefined;
 
-  if (!target) {
+  // requireLinkedSenderAccount guarantees a linked commenter here.
+  if (!target || !target.userId) {
     await postMentionResponseComment({
       ...mentionResponseTarget,
       body:
@@ -371,23 +372,31 @@ export async function handleGiteaComment(
     ...(pullRequest.head?.ref ? { branch: pullRequest.head.ref } : {}),
     ...(headSha ? { sha: headSha } : {}),
     targetBranch: pullRequest.base?.ref,
-  } satisfies CloudTaskPayload<CloudTaskType.GithubPrReview>;
+  } satisfies CloudTaskPayload<typeof TaskPayloadKind.GithubPrReview>;
 
   try {
-    const launch = await enqueueCloudTask(
-      {
-        userId: target.userId,
-        attributionOverride: {
-          kind: 'automatic',
-          sourceKind: 'gitea',
-        },
-        type: CloudTaskType.GithubPrReview,
+    // A human @roomote mention started this review: the commenter is the
+    // initiator (the old automatic/gitea attribution override is gone).
+    const launch = await enqueueCloudTask({
+      task: {
+        type: TaskPayloadKind.GithubPrReview,
         payload: reviewPayload,
       },
-      {
-        launchClass: 'automation',
+      initiator: { kind: 'user', userId: target.userId },
+      workflow: 'pr_review',
+      surface: 'gitea',
+      trigger: 'message',
+      prLinkage: {
+        provider: 'gitea',
+        repository: repoFullName,
+        prNumber: pullRequest.number,
+        prUrl,
+        prTitle: pullRequest.title,
+        prSha: headSha || null,
+        prBaseRef: pullRequest.base?.ref ?? null,
+        prBaseSha: pullRequest.base?.sha ?? null,
       },
-    );
+    });
 
     await postMentionResponseComment({
       ...mentionResponseTarget,

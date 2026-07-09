@@ -307,16 +307,16 @@ export async function generateTaskSummaryCommand(
       };
     }
 
-    // Look up the task creator's name from the DB so the summary references
+    // Look up the task initiator's name from the DB so the summary references
     // the person who created the task, not whoever is currently viewing it.
     const [taskRow] = await db
       .select({
-        taskUserId: tasks.userId,
+        taskUserId: tasks.initiatorUserId,
         userName: users.name,
         userEmail: users.email,
       })
       .from(tasks)
-      .leftJoin(users, eq(tasks.userId, users.id))
+      .leftJoin(users, eq(tasks.initiatorUserId, users.id))
       .where(eq(tasks.id, input.taskId))
       .limit(1);
 

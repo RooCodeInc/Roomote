@@ -29,7 +29,12 @@ type AdoAutomationTarget = {
   settings: PrReviewerSettings | null;
   repo: Repository;
   repositoryIds: string[];
-  userId: string;
+  /**
+   * The Roomote user linked to the triggering sender, when one exists. The
+   * old repo-linker fallback owner is gone: automation-triggered launches
+   * carry an automation initiator instead of a forged owner.
+   */
+  userId: string | null;
 };
 
 export function getAdoIdentityName(
@@ -179,7 +184,7 @@ export async function getAdoAutomationTargets({
         settings: reviewerSettings,
         repo,
         repositoryIds: [repo.id],
-        userId: linkedSenderUserId ?? repo.linkedByUserId,
+        userId: linkedSenderUserId,
       },
     ],
   };

@@ -18,7 +18,7 @@ vi.mock('../utils', () => ({
   executeJob: executeJobMock,
 }));
 
-import { CloudTaskType } from '@roomote/types';
+import { TaskPayloadKind } from '@roomote/types';
 
 import { run } from '../run';
 
@@ -63,7 +63,7 @@ describe('run', () => {
         jobContext: {
           cloudJob: {
             id: 99,
-            type: CloudTaskType.StandardTask,
+            payloadKind: TaskPayloadKind.StandardTask,
           },
           envVars: {},
           prompt: 'keep this local task open',
@@ -107,7 +107,7 @@ describe('run', () => {
         jobContext: {
           cloudJob: {
             id: 99,
-            type: CloudTaskType.StandardTask,
+            payloadKind: TaskPayloadKind.StandardTask,
           },
           envVars: {},
           prompt: 'proof me',
@@ -146,7 +146,7 @@ describe('run', () => {
         jobContext: {
           cloudJob: {
             id: 100,
-            type: CloudTaskType.StandardTask,
+            payloadKind: TaskPayloadKind.StandardTask,
             taskId: 'task-100',
           },
           envVars: {},

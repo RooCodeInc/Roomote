@@ -92,7 +92,7 @@ export async function recordSlackConversationMessage(
       text: input.text?.trim() ?? '',
       metadata: input.metadata ?? {},
       taskId: input.taskId ?? null,
-      cloudJobId: input.cloudJobId ?? null,
+      runId: input.cloudJobId ?? null,
       fastAgentSessionId: input.fastAgentSessionId ?? null,
     })
     .onConflictDoNothing();

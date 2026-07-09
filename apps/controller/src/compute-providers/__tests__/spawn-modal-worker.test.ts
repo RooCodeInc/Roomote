@@ -1,5 +1,5 @@
 import type { CloudJob } from '@roomote/db/server';
-import { CloudTaskType } from '@roomote/types';
+import { TaskPayloadKind } from '@roomote/types';
 
 const mockCreateModalMachine = vi.fn();
 const mockRunCommand = vi.fn();
@@ -22,7 +22,7 @@ const mockShouldEnableAuthBypassForCloudJob = vi.fn(
 const mockPrimeEnvironmentOidcForMachine = vi.fn();
 
 function mockCloudJob(
-  overrides: Partial<CloudJob> & Pick<CloudJob, 'type'>,
+  overrides: Partial<CloudJob> & Pick<CloudJob, 'payloadKind'>,
 ): CloudJob {
   return {
     id: 123,
@@ -116,7 +116,7 @@ describe('spawnModalWorker', () => {
 
     await spawnModalWorker(
       mockCloudJob({
-        type: CloudTaskType.StandardTask,
+        payloadKind: TaskPayloadKind.StandardTask,
         payload: { repo: 'test/repo', environmentId: 'env_123' },
       }),
       'auth_token',
@@ -157,7 +157,7 @@ describe('spawnModalWorker', () => {
     await expect(
       spawnModalWorker(
         mockCloudJob({
-          type: CloudTaskType.StandardTask,
+          payloadKind: TaskPayloadKind.StandardTask,
           payload: { repo: 'test/repo', environmentId: 'env_1' },
         }),
         'auth_token',
@@ -217,7 +217,7 @@ describe('spawnModalWorker', () => {
 
     await spawnModalWorker(
       mockCloudJob({
-        type: CloudTaskType.StandardTask,
+        payloadKind: TaskPayloadKind.StandardTask,
         taskId: 'innertask12345',
         payload: { repo: 'test/repo', environmentId: 'env_1' },
       }),
@@ -249,7 +249,7 @@ describe('spawnModalWorker', () => {
   it('uses task_snapshot launch mode for snapshot resume jobs', async () => {
     await spawnModalWorker(
       mockCloudJob({
-        type: CloudTaskType.SnapshotResume,
+        payloadKind: TaskPayloadKind.SnapshotResume,
         sourceSnapshotId: 'snap-task-123',
         payload: { repo: 'test/repo', environmentId: 'env_1' },
       }),
@@ -280,7 +280,7 @@ describe('spawnModalWorker', () => {
 
     await spawnModalWorker(
       mockCloudJob({
-        type: CloudTaskType.SnapshotEnvironment,
+        payloadKind: TaskPayloadKind.SnapshotEnvironment,
         sourceSnapshotId: 'snap_job_ignored_123',
         payload: { repo: 'test/repo', environmentId: 'env_1' },
       }),
@@ -313,7 +313,7 @@ describe('spawnModalWorker', () => {
     await expect(
       spawnModalWorker(
         mockCloudJob({
-          type: CloudTaskType.SnapshotResume,
+          payloadKind: TaskPayloadKind.SnapshotResume,
           sourceSnapshotId: null,
           payload: { repo: 'test/repo', environmentId: 'env_1' },
         }),

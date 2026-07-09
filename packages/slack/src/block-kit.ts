@@ -4,7 +4,7 @@ import {
   type SlackBlock,
   AGENT_DISPLAY_NAME,
   type CloudTaskPayload,
-  CloudTaskType,
+  TaskPayloadKind,
   ALL_REPOSITORIES,
   PRODUCT_NAME,
   buildSlackThreadPermalink,
@@ -24,7 +24,8 @@ import {
   type SlackInstallation,
   type SlackUserMapping,
   db,
-  cloudJobs,
+  tasks,
+  taskRuns,
   slackInstallations,
   slackUserMappings,
   slackAuthTokens,
@@ -1907,7 +1908,12 @@ export async function handleTaskConfiguration(
 
     // Cloud tasks originating from Slack run against the deployment-wide setup.
     const cloudJob = await startSlackAppMentionTask({
-      userId: userMapping.userId,
+      initiator: {
+        kind: 'user',
+        externalId: originalEvent.user,
+        matchedUserId: userMapping.userId,
+      },
+      trigger: 'manual',
       channel: originalEvent.channel,
       teamId,
       teamDomain: slackInstallation.teamDomain ?? undefined,
@@ -2162,7 +2168,12 @@ async function startImmediateSlackTask({
   });
 
   const cloudJob = await startSlackAppMentionTask({
-    userId: userMapping.userId,
+    initiator: {
+      kind: 'user',
+      externalId: event.user,
+      matchedUserId: userMapping.userId,
+    },
+    trigger: 'manual',
     channel: event.channel,
     teamId: slackInstallation.teamId,
     teamDomain: slackInstallation.teamDomain ?? undefined,
@@ -2321,7 +2332,12 @@ async function createJobFromPrefill({
   });
 
   const cloudJob = await startSlackAppMentionTask({
-    userId,
+    initiator: {
+      kind: 'user',
+      externalId: originalEvent.user,
+      matchedUserId: userId,
+    },
+    trigger: 'manual',
     channel: originalEvent.channel,
     teamId: prefill.teamId,
     teamDomain: prefill.teamDomain,
@@ -3240,14 +3256,15 @@ export async function handleRetryFailedTask(
     return;
   }
 
-  const retryJob = await db.query.cloudJobs.findFirst({
+  const retryJob = await db.query.taskRuns.findFirst({
     columns: {
       id: true,
-      type: true,
-      userId: true,
+      taskId: true,
+      payloadKind: true,
+      actingUserId: true,
       payload: true,
     },
-    where: eq(cloudJobs.id, actionValue.cloudJobId),
+    where: eq(taskRuns.id, actionValue.cloudJobId),
   });
 
   if (!retryJob) {
@@ -3258,7 +3275,7 @@ export async function handleRetryFailedTask(
     return;
   }
 
-  if (retryJob.type !== CloudTaskType.SlackAppMention) {
+  if (retryJob.payloadKind !== TaskPayloadKind.SlackAppMention) {
     await postSlackInteractiveResponse(payload.response_url, {
       replace_original: false,
       text: 'I could not recover the original Slack task details for that retry.',
@@ -3266,8 +3283,9 @@ export async function handleRetryFailedTask(
     return;
   }
 
-  const originalPayload =
-    retryJob.payload as CloudTaskPayload<CloudTaskType.SlackAppMention>;
+  const originalPayload = retryJob.payload as CloudTaskPayload<
+    typeof TaskPayloadKind.SlackAppMention
+  >;
 
   if (
     typeof originalPayload.channel !== 'string' ||
@@ -3284,7 +3302,13 @@ export async function handleRetryFailedTask(
     return;
   }
 
-  const retryUserId = retryJob.userId;
+  // Prefer the task's immutable initiator stamp; fall back to the run's
+  // acting user for launches that resolved the sender only after start.
+  const retryTask = await db.query.tasks.findFirst({
+    columns: { initiatorUserId: true },
+    where: eq(tasks.id, retryJob.taskId),
+  });
+  const retryUserId = retryTask?.initiatorUserId ?? retryJob.actingUserId;
 
   if (typeof retryUserId !== 'string' || retryUserId.length === 0) {
     await postSlackInteractiveResponse(payload.response_url, {
@@ -3350,7 +3374,12 @@ export async function handleRetryFailedTask(
       : undefined;
 
     const cloudJob = await startSlackAppMentionTask({
-      userId: retryUserId,
+      initiator: {
+        kind: 'user',
+        externalId: originalPayload.user,
+        matchedUserId: retryUserId,
+      },
+      trigger: 'manual',
       channel: originalPayload.channel,
       teamId: retryTeamId,
       teamDomain:

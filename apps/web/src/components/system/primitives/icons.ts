@@ -15,7 +15,6 @@ export {
   ArrowUpFromLine,
   ArrowUpRightIcon,
   AtSignIcon,
-  Ban,
   BookCopy,
   BookMarked,
   Brain,

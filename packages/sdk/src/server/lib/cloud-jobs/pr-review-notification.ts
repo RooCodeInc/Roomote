@@ -4,11 +4,12 @@ import { z } from 'zod';
 import type { CloudJob } from '@roomote/db/server';
 import {
   and,
-  cloudJobs,
   db,
   eq,
   inArray,
   taskPullRequests,
+  taskRuns,
+  tasks,
 } from '@roomote/db/server';
 import { FeatureFlag } from '@roomote/feature-flags/server';
 import { getRedis } from '@roomote/redis';
@@ -104,7 +105,7 @@ type EnqueuePrReviewNotificationResult = {
 
 type PrReviewNotificationRoutingJob = Pick<
   CloudJob,
-  'id' | 'payload' | 'slackThreadTs' | 'sourceCloudJobId'
+  'id' | 'taskId' | 'payload'
 >;
 
 export type PrReviewNotificationRoute =
@@ -169,12 +170,14 @@ function buildScheduledMarkerKey(target: {
 }
 
 /**
- * Returns whether the given cloud job carries originating-conversation
- * context for any supported communication provider.
+ * Returns whether the given run carries originating-conversation context for
+ * any supported communication provider. The Slack thread binding lives on the
+ * tasks row; callers pass it alongside the run payload.
  */
-export function hasPrReviewNotificationThreadContext(
-  job: Pick<CloudJob, 'payload' | 'slackThreadTs'>,
-): boolean {
+export function hasPrReviewNotificationThreadContext(job: {
+  payload: unknown;
+  slackThreadTs: string | null;
+}): boolean {
   if (job.slackThreadTs) {
     return true;
   }
@@ -416,10 +419,15 @@ export async function enqueuePrReviewNotification(
     return { notifiedTaskCount: 0, reason: 'no_linked_tasks' };
   }
 
-  const linkedJobs = await db.query.cloudJobs.findMany({
-    where: inArray(cloudJobs.taskId, taskIds),
-    columns: { taskId: true, payload: true, slackThreadTs: true },
-  });
+  const linkedJobs = await db
+    .select({
+      taskId: taskRuns.taskId,
+      payload: taskRuns.payload,
+      slackThreadTs: tasks.slackThreadTs,
+    })
+    .from(taskRuns)
+    .innerJoin(tasks, eq(tasks.id, taskRuns.taskId))
+    .where(inArray(taskRuns.taskId, taskIds));
 
   const conversationTaskIds = Array.from(
     new Set(

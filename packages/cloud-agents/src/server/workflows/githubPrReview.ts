@@ -9,7 +9,7 @@ import {
   Schemas as GitHubSchemas,
   updateIssueComment,
 } from '@roomote/github';
-import type { ResolvedTaskAttributionDisplay } from '@roomote/db/server';
+import type { ResolvedTaskCommitAuthor } from '../commit-author';
 
 import {
   buildGithubCommentActionLink,
@@ -88,7 +88,7 @@ function gitLabMergeRequestReview({
 }: {
   cloudTask: GithubPullRequestReviewOpenTask;
   cloudJobUrl: string;
-  attribution?: ResolvedTaskAttributionDisplay;
+  attribution?: ResolvedTaskCommitAuthor;
   visualProofAutoScreencastEnabled?: boolean;
   backgroundProofCaptureEnabled?: boolean;
 }) {
@@ -165,7 +165,7 @@ function giteaPullRequestReview({
 }: {
   cloudTask: GithubPullRequestReviewOpenTask;
   cloudJobUrl: string;
-  attribution?: ResolvedTaskAttributionDisplay;
+  attribution?: ResolvedTaskCommitAuthor;
   visualProofAutoScreencastEnabled?: boolean;
   backgroundProofCaptureEnabled?: boolean;
 }) {
@@ -242,7 +242,7 @@ function adoPullRequestReview({
 }: {
   cloudTask: GithubPullRequestReviewOpenTask;
   cloudJobUrl: string;
-  attribution?: ResolvedTaskAttributionDisplay;
+  attribution?: ResolvedTaskCommitAuthor;
   visualProofAutoScreencastEnabled?: boolean;
   backgroundProofCaptureEnabled?: boolean;
 }) {
@@ -275,7 +275,7 @@ export async function githubPrReview({
   cloudTask: GithubPullRequestReviewOpenTask;
   gitHubToken: string;
   cloudJobUrl: string;
-  attribution?: ResolvedTaskAttributionDisplay;
+  attribution?: ResolvedTaskCommitAuthor;
   visualProofAutoScreencastEnabled?: boolean;
   backgroundProofCaptureEnabled?: boolean;
 }): Promise<{

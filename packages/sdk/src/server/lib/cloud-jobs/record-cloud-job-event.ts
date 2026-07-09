@@ -15,5 +15,6 @@ export async function recordCloudJobEvent(input: {
   message?: string;
   details?: CloudJobEventDetails;
 }): Promise<void> {
-  await persistCloudJobEvent(db, input);
+  const { cloudJobId, ...rest } = input;
+  await persistCloudJobEvent(db, { runId: cloudJobId, ...rest });
 }

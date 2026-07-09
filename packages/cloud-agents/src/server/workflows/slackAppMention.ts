@@ -6,7 +6,7 @@ import {
   getSlackTeamIdFromTaskPayload,
   type PrAction,
 } from '@roomote/types';
-import type { ResolvedTaskAttributionDisplay } from '@roomote/db/server';
+import type { ResolvedTaskCommitAuthor } from '../commit-author';
 import { Env } from '@roomote/env';
 import {
   stripLeadingSlackProductMention,
@@ -251,7 +251,7 @@ export async function slackAppMention({
   repoFullNames?: string[];
   conflictResolverLabel?: string;
   cloudJobUrl: string;
-  attribution?: ResolvedTaskAttributionDisplay;
+  attribution?: ResolvedTaskCommitAuthor;
   username?: string;
   visualProofAutoScreencastEnabled?: boolean;
   backgroundProofCaptureEnabled?: boolean;

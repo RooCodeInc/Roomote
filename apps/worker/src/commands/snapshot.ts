@@ -3,7 +3,7 @@ import pWaitFor from 'p-wait-for';
 import {
   DEFAULT_SOURCE_CONTROL_PROVIDER,
   CloudTaskStatus,
-  CloudTaskType,
+  TaskPayloadKind,
 } from '@roomote/types';
 import { sdk } from '@roomote/sdk/client';
 
@@ -44,7 +44,7 @@ export async function snapshot({
 }: SnapshotOptions): Promise<boolean> {
   setWorkerRuntimeContext({
     cloudJobId,
-    cloudJobType: CloudTaskType.SnapshotEnvironment,
+    cloudJobType: TaskPayloadKind.SnapshotEnvironment,
     environmentId,
   });
 
@@ -68,7 +68,7 @@ export async function snapshot({
 
     setWorkerRuntimeContext({
       cloudJobId,
-      cloudJobType: CloudTaskType.SnapshotEnvironment,
+      cloudJobType: TaskPayloadKind.SnapshotEnvironment,
       environmentId,
       taskId,
     });
@@ -95,7 +95,7 @@ export async function snapshot({
           environmentConfig,
         },
         envVars,
-        cloudJobType: CloudTaskType.SnapshotEnvironment,
+        cloudJobType: TaskPayloadKind.SnapshotEnvironment,
         sourceControlProvider:
           sourceControlToken?.provider ?? DEFAULT_SOURCE_CONTROL_PROVIDER,
       },

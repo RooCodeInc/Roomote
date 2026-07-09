@@ -5,7 +5,7 @@ import type {
 import { Env } from '@roomote/env';
 import {
   ALL_REPOSITORIES,
-  CloudTaskType,
+  TaskPayloadKind,
   type CloudTask,
   type CloudTaskPayload,
   populateSnapshotResumeCommunicationMetadata,
@@ -93,14 +93,15 @@ export async function resumeTelegramTaskFromSnapshot(input: {
     typeof completedPayload.environmentId === 'string'
       ? completedPayload.environmentId
       : undefined;
-  const resumePayload: CloudTaskPayload<CloudTaskType.SnapshotResume> = {
-    repo,
-    ...(environmentId ? { environmentId } : {}),
-    ...(input.completedJob.port ? { port: input.completedJob.port } : {}),
-    sourceSnapshotId,
-    sourceCloudJobId: input.completedJob.id,
-    queuedCommunicationMessages: [input.queuedMessage],
-  };
+  const resumePayload: CloudTaskPayload<typeof TaskPayloadKind.SnapshotResume> =
+    {
+      repo,
+      ...(environmentId ? { environmentId } : {}),
+      ...(input.completedJob.port ? { port: input.completedJob.port } : {}),
+      sourceSnapshotId,
+      sourceCloudJobId: input.completedJob.id,
+      queuedCommunicationMessages: [input.queuedMessage],
+    };
 
   populateSnapshotResumeCommunicationMetadata(resumePayload, {
     provider: 'telegram',
@@ -111,13 +112,17 @@ export async function resumeTelegramTaskFromSnapshot(input: {
   });
   restoreSnapshotResumeVisiblePromptFields(resumePayload, completedPayload);
 
+  // Resumes never create tasks and never re-attribute; the resuming human
+  // becomes the new run's acting user.
   return enqueueCloudTask(
     {
-      type: CloudTaskType.SnapshotResume,
-      userId: input.queuedMessage.userId,
-      sourceSnapshotId,
-      sourceCloudJobId: input.completedJob.id,
-      payload: resumePayload,
+      task: {
+        type: TaskPayloadKind.SnapshotResume,
+        sourceSnapshotId,
+        sourceCloudJobId: input.completedJob.id,
+        payload: resumePayload,
+      },
+      actingUserId: input.queuedMessage.userId ?? null,
     },
     {
       launchClass: 'human',
@@ -193,9 +198,11 @@ export async function startNewTelegramTask(input: {
     throw new Error('Telegram task routing selected an unavailable workspace.');
   }
 
-  const task: Extract<CloudTask, { type: CloudTaskType.StandardTask }> = {
-    type: CloudTaskType.StandardTask,
-    userId: input.launchOwnerUserId,
+  const task: Extract<
+    CloudTask,
+    { type: typeof TaskPayloadKind.StandardTask }
+  > = {
+    type: TaskPayloadKind.StandardTask,
     payload: {
       repo: workspace.repoForPayload,
       ...(workspace.environmentId
@@ -205,9 +212,18 @@ export async function startNewTelegramTask(input: {
       ...input.metadata,
     },
   };
-  const launchResult = await enqueueCloudTask(task, {
-    launchClass: 'human',
-  });
+  const launchResult = await enqueueCloudTask(
+    {
+      task,
+      initiator: { kind: 'user', userId: input.launchOwnerUserId },
+      workflow: 'standard',
+      surface: 'telegram',
+      trigger: 'message',
+    },
+    {
+      launchClass: 'human',
+    },
+  );
 
   const taskUrl = getTaskUrl({
     taskId: launchResult.taskId,

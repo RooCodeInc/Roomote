@@ -373,13 +373,19 @@ describe('Slack deleted-mention suppression', () => {
     });
     expect(enqueueCloudTaskMock).toHaveBeenCalledWith(
       expect.objectContaining({
-        slackThreadTs: '111.222',
+        channels: expect.objectContaining({
+          slackThreadTs: '111.222',
+        }),
       }),
+      expect.anything(),
     );
     expect(enqueueCloudTaskMock).toHaveBeenCalledWith(
-      expect.not.objectContaining({
-        requestedWorkKindDecision: expect.anything(),
+      expect.objectContaining({
+        task: expect.not.objectContaining({
+          requestedWorkKindDecision: expect.anything(),
+        }),
       }),
+      expect.anything(),
     );
   });
 
@@ -445,10 +451,13 @@ describe('Slack deleted-mention suppression', () => {
     );
     expect(enqueueCloudTaskMock).toHaveBeenCalledWith(
       expect.objectContaining({
-        payload: expect.objectContaining({
-          text: '<@BOT> investigate this\n\nVideo attachment descriptions:\n- Video 1: The user opens the modal and a permission error is shown.',
+        task: expect.objectContaining({
+          payload: expect.objectContaining({
+            text: '<@BOT> investigate this\n\nVideo attachment descriptions:\n- Video 1: The user opens the modal and a permission error is shown.',
+          }),
         }),
       }),
+      expect.anything(),
     );
   });
 
@@ -660,11 +669,14 @@ describe('Slack deleted-mention suppression', () => {
     expect(hsetMock).not.toHaveBeenCalled();
     expect(enqueueCloudTaskMock).toHaveBeenCalledWith(
       expect.objectContaining({
-        payload: expect.objectContaining({
-          repo: '__all_repositories__',
-          text: '<@BOT> what time is it',
+        task: expect.objectContaining({
+          payload: expect.objectContaining({
+            repo: '__all_repositories__',
+            text: '<@BOT> what time is it',
+          }),
         }),
       }),
+      expect.anything(),
     );
     expect(postMessageMock).toHaveBeenCalledWith(
       expect.objectContaining({

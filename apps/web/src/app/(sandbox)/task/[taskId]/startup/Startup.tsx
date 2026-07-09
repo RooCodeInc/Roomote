@@ -3,7 +3,7 @@
 import { useCallback } from 'react';
 import { SSEProvider } from 'react-hooks-sse';
 
-import { CloudTaskType, type CloudTaskStatus } from '@roomote/types';
+import { TaskPayloadKind, type CloudTaskStatus } from '@roomote/types';
 import type { CloudJob } from '@roomote/db';
 
 import { useRestoreCloudJobSnapshot } from '@/hooks/snapshots';
@@ -62,10 +62,10 @@ const StartupInner = ({
     useStartupProgress({ cloudJobId, initialCloudJob, onStatusChange });
 
   const canRetryResume =
-    initialCloudJob?.type === CloudTaskType.SnapshotResume &&
+    initialCloudJob?.payloadKind === TaskPayloadKind.SnapshotResume &&
     typeof initialCloudJob.sourceSnapshotId === 'string' &&
     initialCloudJob.sourceSnapshotId.length > 0 &&
-    typeof initialCloudJob.sourceCloudJobId === 'number';
+    typeof initialCloudJob.sourceRunId === 'number';
 
   return (
     <StartupSequence
@@ -80,7 +80,7 @@ const StartupInner = ({
               onClick: () =>
                 restoreSnapshot.mutate({
                   sourceSnapshotId: initialCloudJob.sourceSnapshotId!,
-                  sourceCloudJobId: initialCloudJob.sourceCloudJobId!,
+                  sourceCloudJobId: initialCloudJob.sourceRunId!,
                 }),
               pending: restoreSnapshot.isPending,
             }
@@ -95,10 +95,10 @@ interface SnapshotResumeFailureFooterProps {
     CloudJob,
     | 'error'
     | 'result'
-    | 'sourceCloudJobId'
+    | 'sourceRunId'
     | 'sourceSnapshotId'
     | 'status'
-    | 'type'
+    | 'payloadKind'
   >;
 }
 
@@ -108,10 +108,10 @@ export const SnapshotResumeFailureFooter = ({
   const restoreSnapshot = useRestoreCloudJobSnapshot();
 
   const canRetryResume =
-    cloudJob.type === CloudTaskType.SnapshotResume &&
+    cloudJob.payloadKind === TaskPayloadKind.SnapshotResume &&
     typeof cloudJob.sourceSnapshotId === 'string' &&
     cloudJob.sourceSnapshotId.length > 0 &&
-    typeof cloudJob.sourceCloudJobId === 'number';
+    typeof cloudJob.sourceRunId === 'number';
 
   return (
     <StartupFailureMessage
@@ -123,7 +123,7 @@ export const SnapshotResumeFailureFooter = ({
               onClick: () =>
                 restoreSnapshot.mutate({
                   sourceSnapshotId: cloudJob.sourceSnapshotId!,
-                  sourceCloudJobId: cloudJob.sourceCloudJobId!,
+                  sourceCloudJobId: cloudJob.sourceRunId!,
                 }),
               pending: restoreSnapshot.isPending,
             }

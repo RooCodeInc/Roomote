@@ -9,10 +9,10 @@ import type {
 } from '@roomote/types';
 
 import type { DatabaseOrTransaction } from '../db';
-import { cloudJobEvents, cloudJobs } from '../schema';
+import { taskRunEvents, taskRuns } from '../schema';
 
 interface RecordCloudJobEventInput {
-  cloudJobId: number;
+  runId: number;
   taskId?: string;
   source: CloudJobEventSource;
   eventType: CloudJobEventType;
@@ -22,33 +22,33 @@ interface RecordCloudJobEventInput {
 }
 
 interface ListCloudJobEventsOptions {
-  cloudJobId: number;
+  runId: number;
   limit?: number;
   order?: 'asc' | 'desc';
 }
 
 interface RecordComputeProviderMutationEventInput extends ComputeProviderMutationEvent {
-  cloudJobId: number;
+  runId: number;
   taskId?: string;
   details?: CloudJobEventDetails;
   createdAt?: Date;
 }
 
-async function resolveCloudJobContext(
+async function resolveRunContext(
   database: DatabaseOrTransaction,
-  cloudJobId: number,
+  runId: number,
 ): Promise<{ taskId: string }> {
-  const [cloudJob] = await database
-    .select({ taskId: cloudJobs.taskId })
-    .from(cloudJobs)
-    .where(eq(cloudJobs.id, cloudJobId))
+  const [run] = await database
+    .select({ taskId: taskRuns.taskId })
+    .from(taskRuns)
+    .where(eq(taskRuns.id, runId))
     .limit(1);
 
-  if (!cloudJob) {
-    throw new Error(`Cannot record event for missing cloud job #${cloudJobId}`);
+  if (!run) {
+    throw new Error(`Cannot record event for missing run #${runId}`);
   }
 
-  return cloudJob;
+  return run;
 }
 
 export async function recordCloudJobEvent(
@@ -57,12 +57,12 @@ export async function recordCloudJobEvent(
 ) {
   const context = input.taskId
     ? { taskId: input.taskId }
-    : await resolveCloudJobContext(database, input.cloudJobId);
+    : await resolveRunContext(database, input.runId);
 
   const [event] = await database
-    .insert(cloudJobEvents)
+    .insert(taskRunEvents)
     .values({
-      cloudJobId: input.cloudJobId,
+      runId: input.runId,
       taskId: context.taskId,
       source: input.source,
       eventType: input.eventType,
@@ -78,7 +78,7 @@ export async function recordCloudJobEvent(
 export async function recordSnapshotResumeEvent(
   database: DatabaseOrTransaction,
   input: {
-    cloudJobId: number;
+    runId: number;
     taskId?: string;
     eventType: CloudJobEventType;
     message: string;
@@ -86,7 +86,7 @@ export async function recordSnapshotResumeEvent(
   },
 ) {
   return recordCloudJobEvent(database, {
-    cloudJobId: input.cloudJobId,
+    runId: input.runId,
     taskId: input.taskId,
     source: 'snapshot_resume',
     eventType: input.eventType,
@@ -98,7 +98,7 @@ export async function recordSnapshotResumeEvent(
 export async function recordJobLifecycleEvent(
   database: DatabaseOrTransaction,
   input: {
-    cloudJobId: number;
+    runId: number;
     taskId?: string;
     eventType: CloudJobEventType;
     message: string;
@@ -107,7 +107,7 @@ export async function recordJobLifecycleEvent(
   },
 ) {
   return recordCloudJobEvent(database, {
-    cloudJobId: input.cloudJobId,
+    runId: input.runId,
     taskId: input.taskId,
     source: 'job_lifecycle',
     eventType: input.eventType,
@@ -122,7 +122,7 @@ export async function recordComputeProviderMutationEvent(
   input: RecordComputeProviderMutationEventInput,
 ) {
   return recordCloudJobEvent(database, {
-    cloudJobId: input.cloudJobId,
+    runId: input.runId,
     taskId: input.taskId,
     source: 'compute_provider',
     eventType: input.eventType,
@@ -149,7 +149,7 @@ export async function recordComputeProviderMutationEventSafe(
     const prefix = options?.logPrefix ?? 'recordComputeProviderMutationEvent';
     logger.warn(
       `[${prefix}] Failed to persist compute-provider event for cloud job #${
-        input.cloudJobId
+        input.runId
       }: ${error instanceof Error ? error.message : String(error)}`,
     );
   }
@@ -158,7 +158,7 @@ export async function recordComputeProviderMutationEventSafe(
 export function createComputeProviderMutationEventRecorder(
   database: DatabaseOrTransaction,
   context: {
-    cloudJobId: number;
+    runId: number;
     taskId?: string;
   },
   options?: { logPrefix?: string; logger?: Pick<Console, 'warn'> },
@@ -181,13 +181,13 @@ export async function listCloudJobEvents(
 ) {
   const orderBy =
     options.order === 'asc'
-      ? asc(cloudJobEvents.createdAt)
-      : desc(cloudJobEvents.createdAt);
+      ? asc(taskRunEvents.createdAt)
+      : desc(taskRunEvents.createdAt);
 
   return database
     .select()
-    .from(cloudJobEvents)
-    .where(eq(cloudJobEvents.cloudJobId, options.cloudJobId))
+    .from(taskRunEvents)
+    .where(eq(taskRunEvents.runId, options.runId))
     .orderBy(orderBy)
     .limit(options.limit ?? 100);
 }

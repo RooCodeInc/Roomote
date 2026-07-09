@@ -8,7 +8,7 @@ import {
   db,
   startBackgroundAutomationRun,
 } from '@roomote/db/server';
-import { ALL_REPOSITORIES, CloudTaskType } from '@roomote/types';
+import { ALL_REPOSITORIES, TaskPayloadKind } from '@roomote/types';
 import type { TaskSuggestionStatus } from '@roomote/types';
 
 import {
@@ -68,10 +68,9 @@ async function enqueueSuggestionRoute(params: {
     ).id;
 
     // Suggestion scans run as the deployment service principal.
-    const launchResult = await enqueueCloudTask(
-      {
-        userId: null,
-        type: CloudTaskType.SuggestedTasks,
+    const launchResult = await enqueueCloudTask({
+      task: {
+        type: TaskPayloadKind.Scan,
         payload: {
           repo: ALL_REPOSITORIES,
           selectedRepositories: params.repositoryFullNames,
@@ -102,10 +101,13 @@ async function enqueueSuggestionRoute(params: {
           visibleInTranscript: false,
         },
       },
-      {
-        launchClass: 'automation',
-      },
-    );
+      initiator: { kind: 'automation', key: 'suggester' },
+      workflow: 'scan',
+      surface: 'system',
+      trigger: params.triggerKind === 'manual' ? 'manual' : 'schedule',
+      visibility: 'hidden',
+      channels: { slackChannelId: params.route.channelId },
+    });
 
     await completeBackgroundAutomationRun(db, {
       runId,

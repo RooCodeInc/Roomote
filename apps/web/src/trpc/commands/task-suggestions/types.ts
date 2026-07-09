@@ -1,8 +1,8 @@
 import type {
   CloudTaskPayload,
-  CloudTaskType,
   SuggestionCategory,
   SuggestionPriority,
+  TaskPayloadKind,
   TaskSuggestionSource,
   TaskSuggestionStatus,
 } from '@roomote/types';
@@ -54,9 +54,6 @@ export type SuggestionHistoryItem = {
 };
 
 export type SuggestionSourceCloudJob = {
-  id: number;
-  taskId: string;
-  type: CloudTaskType;
+  payloadKind: TaskPayloadKind;
   payload: CloudTaskPayload;
-  sourceCloudJobId: number | null;
 };

@@ -1,5 +1,5 @@
 import {
-  CloudTaskType,
+  TaskPayloadKind,
   NonRetryableSpawnError,
   getPrimaryPortFromConfig,
 } from '@roomote/types';
@@ -7,7 +7,7 @@ import {
   type CloudJob,
   createComputeProviderMutationEventRecorder,
   db,
-  cloudJobs,
+  taskRuns,
   eq,
 } from '@roomote/db/server';
 import { stampCloudJobMilestone } from '@roomote/sdk/server';
@@ -104,11 +104,11 @@ export async function spawnDaytonaWorker(
   // Daytona does not support environment or task snapshots yet, so snapshot
   // job types cannot run on this provider.
   if (
-    cloudJob.type === CloudTaskType.SnapshotEnvironment ||
-    cloudJob.type === CloudTaskType.SnapshotResume
+    cloudJob.payloadKind === TaskPayloadKind.SnapshotEnvironment ||
+    cloudJob.payloadKind === TaskPayloadKind.SnapshotResume
   ) {
     throw new NonRetryableSpawnError(
-      `Daytona provider does not support ${cloudJob.type} jobs`,
+      `Daytona provider does not support ${cloudJob.payloadKind} jobs`,
     );
   }
 
@@ -150,7 +150,7 @@ export async function spawnDaytonaWorker(
   const recordMutation = createComputeProviderMutationEventRecorder(
     db,
     {
-      cloudJobId: cloudJob.id,
+      runId: cloudJob.id,
       taskId: cloudJob.taskId,
     },
     { logPrefix: 'spawnDaytonaWorker', logger: console },
@@ -294,9 +294,9 @@ export async function spawnDaytonaWorker(
 
     if (result.commandId) {
       await db
-        .update(cloudJobs)
+        .update(taskRuns)
         .set({ sandboxCmdId: result.commandId })
-        .where(eq(cloudJobs.id, cloudJob.id));
+        .where(eq(taskRuns.id, cloudJob.id));
     }
 
     return {

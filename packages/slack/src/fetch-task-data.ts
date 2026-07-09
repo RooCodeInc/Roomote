@@ -3,7 +3,7 @@ import {
   db,
   tasks,
   users,
-  cloudJobs,
+  taskRuns,
   slackUserMappings,
   slackInstallations,
   eq,
@@ -30,11 +30,9 @@ function deriveStatus(task: Task, job: CloudJob | null): string {
     return job.status;
   }
 
-  if (typeof task.completed === 'boolean') {
-    return task.completed ? 'completed' : 'pending';
-  }
-
-  return 'Unknown';
+  // Terminal task state ('completed' | 'failed' | 'canceled') is authoritative
+  // once set; 'active' means no terminal transition has been recorded yet.
+  return task.state === 'active' ? 'pending' : task.state;
 }
 
 /**
@@ -71,21 +69,24 @@ export async function fetchTaskDataForUnfurl(
 
     let taskUser: User | null = null;
 
-    if (taskWithRelations.userId) {
+    if (taskWithRelations.initiatorUserId) {
       taskUser =
         (await db.query.users.findFirst({
-          where: eq(users.id, taskWithRelations.userId),
+          where: eq(users.id, taskWithRelations.initiatorUserId),
         })) ?? null;
     }
 
     const job =
-      (await db.query.cloudJobs.findFirst({
-        where: eq(cloudJobs.taskId, taskWithRelations.id),
-        orderBy: [desc(cloudJobs.id)],
+      (await db.query.taskRuns.findFirst({
+        where: eq(taskRuns.taskId, taskWithRelations.id),
+        orderBy: [desc(taskRuns.id)],
       })) ?? null;
 
     const creatorUser = taskUser;
-    const createdBy = getUserDisplayName(taskUser) || 'Unknown User';
+    const createdBy =
+      getUserDisplayName(taskUser) ||
+      taskWithRelations.actorDisplayName ||
+      'Unknown User';
 
     // Look up the Slack user ID for the creator if we have a user ID.
     // Join with slackInstallations to ensure we get the mapping for the
@@ -119,7 +120,7 @@ export async function fetchTaskDataForUnfurl(
 
     const url = getTaskUrl({
       taskId,
-      utm: { campaign: job?.type ?? '', source: 'slack-unfurl' },
+      utm: { campaign: job?.payloadKind ?? '', source: 'slack-unfurl' },
     });
 
     const result: TaskUnfurlData = {

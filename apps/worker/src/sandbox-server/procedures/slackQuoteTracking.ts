@@ -1,4 +1,7 @@
-import { normalizeTranscriptUserText } from '@roomote/types';
+import {
+  getSlackThreadTsFromTaskPayload,
+  normalizeTranscriptUserText,
+} from '@roomote/types';
 import { sdk } from '@roomote/sdk/client';
 import { hasSlackThreadReplyContext } from '@roomote/slack/client';
 import { getRoomoteConfig } from '../../mcp/roomote-mcp-server/config';
@@ -41,7 +44,15 @@ async function getSlackQuoteTrackingConfig(params: {
 
   const job = await sdk.cloudJobs.findFirstById(cloudJobId);
 
-  if (!job || !hasSlackThreadReplyContext(job)) {
+  if (
+    !job ||
+    !hasSlackThreadReplyContext({
+      payload: job.payload,
+      // Thread bindings live on the task row now; the payload carries the
+      // same thread context for Slack-launched and resumed jobs.
+      slackThreadTs: getSlackThreadTsFromTaskPayload(job.payload) ?? null,
+    })
+  ) {
     return null;
   }
 

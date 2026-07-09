@@ -8,7 +8,7 @@ import {
 } from '@roomote/types';
 import {
   type CloudJob,
-  cloudJobs,
+  taskRuns,
   desc,
   environments,
   eq,
@@ -143,9 +143,9 @@ export async function resolveRequest(
   }
 
   try {
-    const cloudJob = await db.query.cloudJobs.findFirst({
-      where: eq(cloudJobs.taskId, identifier.taskId),
-      orderBy: desc(cloudJobs.createdAt),
+    const cloudJob = await db.query.taskRuns.findFirst({
+      where: eq(taskRuns.taskId, identifier.taskId),
+      orderBy: desc(taskRuns.createdAt),
     });
 
     const identifierLog = { taskId: escapeForLog(identifier.taskId) };

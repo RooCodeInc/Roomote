@@ -37,10 +37,10 @@ JSON shape:
     {
       "label": string,
       "conditions": {
-        "sourceKinds": string[],
-        "taskTypes": string[],
+        "surfaces": string[],
+        "workflows": string[],
         "repositoryFullNames": string[],
-        "humanCreated": boolean | null
+        "initiatorKinds": string[]
       },
       "author": {
         "mode": "unchanged" | "roomote" | "matched_human" | "specific_user",

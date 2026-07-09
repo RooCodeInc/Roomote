@@ -27,7 +27,7 @@ import {
 } from '@roomote/db/server';
 import {
   ALL_REPOSITORIES,
-  CloudTaskType,
+  TaskPayloadKind,
   type BackgroundAutomationKey,
   type TaskSuggestionSource,
 } from '@roomote/types';
@@ -449,11 +449,10 @@ async function processDeployment(
       await buildRepositoryCoverage(selectedRepositories);
 
     // Automation scans run as the deployment service principal; a manual
-    // trigger is still an automation launch.
-    const launchResult = await enqueueCloudTask(
-      {
-        userId: null,
-        type: CloudTaskType.SuggestedTasks,
+    // trigger is still an automation launch, just with a manual trigger.
+    const launchResult = await enqueueCloudTask({
+      task: {
+        type: TaskPayloadKind.Scan,
         payload: {
           repo: ALL_REPOSITORIES,
           selectedRepositories,
@@ -475,10 +474,13 @@ async function processDeployment(
           visibleInTranscript: false,
         },
       },
-      {
-        launchClass: 'automation',
-      },
-    );
+      initiator: { kind: 'automation', key: config.automationKey },
+      workflow: 'scan',
+      surface: 'system',
+      trigger: opts.manualTrigger ? 'manual' : 'schedule',
+      visibility: 'hidden',
+      channels: { slackChannelId: channelId },
+    });
 
     if (pullRequestBatch.hasMore && pullRequestBatch.nextCursor) {
       await config.settings.updateScanCursor(db, {

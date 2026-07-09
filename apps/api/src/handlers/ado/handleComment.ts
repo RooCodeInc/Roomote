@@ -11,7 +11,7 @@ import {
 import {
   type CloudTaskPayload,
   CloudAgentType,
-  CloudTaskType,
+  TaskPayloadKind,
   PRODUCT_NAME,
   isActivelyRunningCloudTask,
 } from '@roomote/types';
@@ -294,7 +294,8 @@ export async function handleAdoComment(
   const target =
     targetsResult.status === 'ok' ? targetsResult.targets[0] : undefined;
 
-  if (!target) {
+  // requireLinkedSenderAccount guarantees a linked commenter here.
+  if (!target || !target.userId) {
     const body =
       targetsResult.status === 'error' &&
       targetsResult.code === 'account_link_required'
@@ -408,23 +409,30 @@ export async function handleAdoComment(
     ...(branchName ? { branch: branchName } : {}),
     ...(headSha ? { sha: headSha } : {}),
     targetBranch: stripAdoGitRefPrefix(pullRequest.targetRefName),
-  } satisfies CloudTaskPayload<CloudTaskType.GithubPrReview>;
+  } satisfies CloudTaskPayload<typeof TaskPayloadKind.GithubPrReview>;
 
   try {
-    const launch = await enqueueCloudTask(
-      {
-        userId: target.userId,
-        attributionOverride: {
-          kind: 'automatic',
-          sourceKind: 'ado',
-        },
-        type: CloudTaskType.GithubPrReview,
+    // A human @roomote mention started this review: the commenter is the
+    // initiator (the old automatic/ado attribution override is gone).
+    const launch = await enqueueCloudTask({
+      task: {
+        type: TaskPayloadKind.GithubPrReview,
         payload: reviewPayload,
       },
-      {
-        launchClass: 'automation',
+      initiator: { kind: 'user', userId: target.userId },
+      workflow: 'pr_review',
+      surface: 'ado',
+      trigger: 'message',
+      prLinkage: {
+        provider: 'ado',
+        repository: repoFullName,
+        prNumber: pullRequest.pullRequestId,
+        prUrl: reviewPayload.prUrl,
+        prTitle: pullRequest.title,
+        prSha: headSha || null,
+        prBaseRef: stripAdoGitRefPrefix(pullRequest.targetRefName) ?? null,
       },
-    );
+    });
 
     await postMentionResponseComment({
       ...mentionResponseTarget,

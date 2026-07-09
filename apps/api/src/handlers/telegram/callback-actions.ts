@@ -2,12 +2,12 @@ import type { TelegramCallbackQuery } from '@roomote/communication/telegram-upda
 import { activeCloudTaskStatuses } from '@roomote/types';
 import {
   and,
-  cloudJobs,
   db,
   eq,
   inArray,
   isNull,
   sql,
+  taskRuns,
 } from '@roomote/db/server';
 
 import { apiLogger } from '../../logging.js';
@@ -48,22 +48,21 @@ function parseCancelTaskCallbackData(data: string): number | null {
 }
 
 async function findCancelableCloudJob(cloudJobId: number, chatId: string) {
-  return db.query.cloudJobs.findFirst({
+  return db.query.taskRuns.findFirst({
     where: and(
-      eq(cloudJobs.id, cloudJobId),
+      eq(taskRuns.id, cloudJobId),
       // Only cancel jobs launched from the chat the button lives in — the
       // inbound message path is chat-scoped the same way.
-      sql`${cloudJobs.payload}->>'communicationProvider' = 'telegram'`,
-      sql`${cloudJobs.payload}->>'communicationChannelId' = ${chatId}`,
-      inArray(cloudJobs.status, [...activeCloudTaskStatuses]),
-      isNull(cloudJobs.canceledAt),
+      sql`${taskRuns.payload}->>'communicationProvider' = 'telegram'`,
+      sql`${taskRuns.payload}->>'communicationChannelId' = ${chatId}`,
+      inArray(taskRuns.status, [...activeCloudTaskStatuses]),
+      isNull(taskRuns.canceledAt),
     ),
     columns: {
       id: true,
       taskId: true,
       status: true,
       sandboxServerUrl: true,
-      userId: true,
       actingUserId: true,
     },
   });

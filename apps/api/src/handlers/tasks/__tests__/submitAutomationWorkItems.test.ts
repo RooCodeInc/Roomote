@@ -2,7 +2,7 @@ import { Hono } from 'hono';
 
 import {
   type AuthTokenContext,
-  CloudTaskType,
+  TaskPayloadKind,
   type JobTokenContext,
 } from '@roomote/types';
 
@@ -46,8 +46,11 @@ vi.mock('@roomote/db/server', () => ({
   backgroundAutomationRuns: {
     taskId: 'backgroundAutomationRuns.taskId',
   },
-  cloudJobs: {
-    taskId: 'cloudJobs.taskId',
+  taskRuns: {
+    taskId: 'taskRuns.taskId',
+  },
+  tasks: {
+    id: 'tasks.id',
   },
   environments: {},
   repositories: {},
@@ -59,8 +62,11 @@ vi.mock('@roomote/db/server', () => ({
   upsertBackgroundAutomationSlackThread: vi.fn(),
   db: {
     query: {
-      cloudJobs: {
+      taskRuns: {
         findFirst: (...args: unknown[]) => mockCloudJobFindFirst(...args),
+      },
+      tasks: {
+        findFirst: vi.fn(async () => undefined),
       },
       backgroundAutomationRuns: {
         findFirst: (...args: unknown[]) => mockAutomationRunFindFirst(...args),
@@ -97,8 +103,8 @@ describe('submitAutomationWorkItems', () => {
     mockCloudJobFindFirst.mockReset();
     mockAutomationRunFindFirst.mockReset();
     mockCloudJobFindFirst.mockResolvedValue({
-      type: CloudTaskType.SuggestedTasks,
-      userId: 'user-1',
+      payloadKind: TaskPayloadKind.Scan,
+      actingUserId: 'user-1',
       payload: {
         repo: 'acme/app',
         selectedRepositories: ['acme/app'],
@@ -197,8 +203,8 @@ describe('submitAutomationWorkItems', () => {
 
   it('rejects Dependabot suggestion work items', async () => {
     mockCloudJobFindFirst.mockResolvedValueOnce({
-      type: CloudTaskType.SuggestedTasks,
-      userId: 'user-1',
+      payloadKind: TaskPayloadKind.Scan,
+      actingUserId: 'user-1',
       payload: {
         repo: 'acme/app',
         selectedRepositories: ['acme/app'],
@@ -239,8 +245,8 @@ describe('submitAutomationWorkItems', () => {
   it('rejects multiple Dependabot action work items for the same target environment', async () => {
     const environmentId = '11111111-1111-1111-1111-111111111111';
     mockCloudJobFindFirst.mockResolvedValueOnce({
-      type: CloudTaskType.SuggestedTasks,
-      userId: 'user-1',
+      payloadKind: TaskPayloadKind.Scan,
+      actingUserId: 'user-1',
       payload: {
         repo: 'acme/app',
         selectedRepositories: ['acme/app'],
@@ -291,8 +297,8 @@ describe('submitAutomationWorkItems', () => {
 
   it('rejects more than three Dependabot action work items', async () => {
     mockCloudJobFindFirst.mockResolvedValueOnce({
-      type: CloudTaskType.SuggestedTasks,
-      userId: 'user-1',
+      payloadKind: TaskPayloadKind.Scan,
+      actingUserId: 'user-1',
       payload: {
         repo: 'acme/app',
         selectedRepositories: ['acme/app'],
@@ -428,8 +434,8 @@ describe('submitAutomationWorkItems', () => {
 
   it('rejects Security Auditor suggestion work items', async () => {
     mockCloudJobFindFirst.mockResolvedValueOnce({
-      type: CloudTaskType.SuggestedTasks,
-      userId: 'user-1',
+      payloadKind: TaskPayloadKind.Scan,
+      actingUserId: 'user-1',
       payload: {
         repo: 'acme/app',
         selectedRepositories: ['acme/app'],
@@ -470,8 +476,8 @@ describe('submitAutomationWorkItems', () => {
   it('rejects automation work items for unsupported task sources', async () => {
     const environmentId = '11111111-1111-1111-1111-111111111111';
     mockCloudJobFindFirst.mockResolvedValueOnce({
-      type: CloudTaskType.SuggestedTasks,
-      userId: 'user-1',
+      payloadKind: TaskPayloadKind.Scan,
+      actingUserId: 'user-1',
       payload: {
         repo: 'acme/app',
         selectedRepositories: ['acme/app'],

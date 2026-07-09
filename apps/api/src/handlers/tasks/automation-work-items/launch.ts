@@ -2,7 +2,7 @@ import {
   CloudJobQueueEnqueueError,
   enqueueCloudTask,
 } from '@roomote/cloud-agents/server';
-import { CloudTaskType } from '@roomote/types';
+import { TaskPayloadKind } from '@roomote/types';
 import {
   and,
   automationWorkItems,
@@ -159,7 +159,8 @@ export type AutomationChatTarget =
     };
 
 export async function launchActWorkItems(params: {
-  userId: string | null;
+  /** The originating automation's key; stamped as the task initiator. */
+  automationKey: string;
   workItems: PersistedAutomationWorkItem[];
   executionTaskBootstrap: AutomationExecutionTaskBootstrap;
   chatTarget: AutomationChatTarget | null;
@@ -228,57 +229,70 @@ export async function launchActWorkItems(params: {
 
       await enqueueCloudTask(
         {
-          userId: params.userId,
-          type: CloudTaskType.StandardTask,
-          payload: {
-            repo: workItem.targetRepositoryFullName,
-            ...(workItem.targetEnvironmentId
-              ? { environmentId: workItem.targetEnvironmentId }
-              : {}),
-            selectedRepositories: [workItem.targetRepositoryFullName],
-            description: buildExecutionTaskPrompt(workItem, {
-              executionTaskBootstrap: params.executionTaskBootstrap,
-              lateBoundChatReplies: params.chatTarget !== null,
-              hasChatThread:
-                params.chatTarget?.provider === 'slack' &&
-                Boolean(params.chatTarget.threadTs),
-              chatSurface:
-                params.chatTarget?.provider === 'telegram'
-                  ? 'Telegram'
-                  : params.chatTarget?.provider === 'teams'
-                    ? 'Teams'
-                    : 'Slack',
-            }),
-            ...(params.chatTarget?.provider === 'slack'
-              ? {
-                  automationWorkItemId: workItem.id,
-                  channel: params.chatTarget.channelId,
-                  slackChannel: params.chatTarget.channelId,
-                  ...(params.chatTarget.threadTs
-                    ? {
-                        thread_ts: params.chatTarget.threadTs,
-                        slackThreadTs: params.chatTarget.threadTs,
-                      }
-                    : {}),
-                }
-              : {}),
-            ...(params.chatTarget?.provider === 'telegram'
-              ? {
-                  automationWorkItemId: workItem.id,
-                  communicationProvider: 'telegram',
-                  communicationChannelId: params.chatTarget.chatId,
-                }
-              : {}),
-            ...(params.chatTarget?.provider === 'teams'
-              ? {
-                  automationWorkItemId: workItem.id,
-                  communicationProvider: 'teams',
-                  communicationChannelId: params.chatTarget.conversationId,
-                  communicationServiceUrl: params.chatTarget.serviceUrl,
-                }
-              : {}),
-            visibleInTranscript: false,
+          task: {
+            type: TaskPayloadKind.StandardTask,
+            payload: {
+              repo: workItem.targetRepositoryFullName,
+              ...(workItem.targetEnvironmentId
+                ? { environmentId: workItem.targetEnvironmentId }
+                : {}),
+              selectedRepositories: [workItem.targetRepositoryFullName],
+              description: buildExecutionTaskPrompt(workItem, {
+                executionTaskBootstrap: params.executionTaskBootstrap,
+                lateBoundChatReplies: params.chatTarget !== null,
+                hasChatThread:
+                  params.chatTarget?.provider === 'slack' &&
+                  Boolean(params.chatTarget.threadTs),
+                chatSurface:
+                  params.chatTarget?.provider === 'telegram'
+                    ? 'Telegram'
+                    : params.chatTarget?.provider === 'teams'
+                      ? 'Teams'
+                      : 'Slack',
+              }),
+              ...(params.chatTarget?.provider === 'slack'
+                ? {
+                    automationWorkItemId: workItem.id,
+                    channel: params.chatTarget.channelId,
+                    slackChannel: params.chatTarget.channelId,
+                    ...(params.chatTarget.threadTs
+                      ? {
+                          thread_ts: params.chatTarget.threadTs,
+                          slackThreadTs: params.chatTarget.threadTs,
+                        }
+                      : {}),
+                  }
+                : {}),
+              ...(params.chatTarget?.provider === 'telegram'
+                ? {
+                    automationWorkItemId: workItem.id,
+                    communicationProvider: 'telegram',
+                    communicationChannelId: params.chatTarget.chatId,
+                  }
+                : {}),
+              ...(params.chatTarget?.provider === 'teams'
+                ? {
+                    automationWorkItemId: workItem.id,
+                    communicationProvider: 'teams',
+                    communicationChannelId: params.chatTarget.conversationId,
+                    communicationServiceUrl: params.chatTarget.serviceUrl,
+                  }
+                : {}),
+              visibleInTranscript: false,
+            },
           },
+          initiator: { kind: 'automation', key: params.automationKey },
+          workflow: 'standard',
+          surface: 'system',
+          trigger: 'schedule',
+          ...(params.chatTarget?.provider === 'slack'
+            ? {
+                channels: {
+                  slackChannelId: params.chatTarget.channelId,
+                  slackThreadTs: params.chatTarget.threadTs ?? null,
+                },
+              }
+            : {}),
         },
         {
           launchClass: 'automation',

@@ -189,7 +189,7 @@ export async function submitAutoActWorkItems(params: {
         (await resolveAutomationTeamsTarget()))
       : null;
   const launchResult = await launchActWorkItems({
-    userId: params.userId,
+    automationKey: params.automationKey,
     workItems: launchableActItems,
     executionTaskBootstrap: config.executionTaskBootstrap,
     chatTarget,

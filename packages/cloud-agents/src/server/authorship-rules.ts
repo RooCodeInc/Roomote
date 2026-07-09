@@ -1,15 +1,15 @@
 import {
   type AuthorshipRuleActor,
   type AuthorshipRuleIssue,
-  type CloudTask,
+  type CommitAuthorKind,
   type CompiledAuthorshipRule,
-  type EffectiveAuthorKind,
-  type EffectiveAuthorReason,
-  type EffectivePrOwnerKind,
-  type EffectivePrOwnerReason,
-  type TaskAttributionSourceKind,
-  TASK_ATTRIBUTION_SOURCE_KINDS,
-  CloudTaskType,
+  type TaskInitiator,
+  type TaskInitiatorKind,
+  type TaskSurface,
+  type TaskWorkflow,
+  TASK_INITIATOR_KINDS,
+  TASK_SURFACES,
+  TASK_WORKFLOWS,
 } from '@roomote/types';
 import { z } from 'zod';
 
@@ -25,22 +25,28 @@ export const authorshipRuleSchema = z
     label: z.string().trim().min(1).max(120),
     conditions: z
       .object({
-        sourceKinds: z
-          .array(z.enum(TASK_ATTRIBUTION_SOURCE_KINDS))
-          .max(TASK_ATTRIBUTION_SOURCE_KINDS.length)
+        surfaces: z
+          .array(z.enum(TASK_SURFACES))
+          .max(TASK_SURFACES.length)
           .default([]),
-        taskTypes: z.array(z.nativeEnum(CloudTaskType)).max(8).default([]),
+        workflows: z
+          .array(z.enum(TASK_WORKFLOWS))
+          .max(TASK_WORKFLOWS.length)
+          .default([]),
         repositoryFullNames: z
           .array(z.string().trim().min(1))
           .max(16)
           .default([]),
-        humanCreated: z.boolean().nullable().optional(),
+        initiatorKinds: z
+          .array(z.enum(TASK_INITIATOR_KINDS))
+          .max(TASK_INITIATOR_KINDS.length)
+          .default([]),
       })
       .default({
-        sourceKinds: [],
-        taskTypes: [],
+        surfaces: [],
+        workflows: [],
         repositoryFullNames: [],
-        humanCreated: null,
+        initiatorKinds: [],
       }),
     author: z
       .object({
@@ -111,17 +117,17 @@ export const AUTHORSHIP_RULES_SYSTEM_PROMPT = `
 You compile organization-level authorship and PR ownership instructions for Roomote into structured rules.
 
 Important defaults:
-- Roomote is the default author everywhere.
-- If a task is human-created and no rule overrides that, the human should be the effective author.
-- PR assignee inherits the effective author by default.
+- Roomote is the default commit author for automation-initiated tasks.
+- If a task is user-initiated and no rule overrides that, the initiating human should be the commit author.
+- PR assignee inherits the commit author's GitHub login by default.
 
 Use rules only for explicit overrides or routing.
 
 Allowed conditions:
-- source kind: slack, github, linear, web, automation, system
-- task type
+- surface: ${TASK_SURFACES.join(', ')}
+- workflow: ${TASK_WORKFLOWS.join(', ')}
 - repository full name
-- whether the task is human-created
+- initiator kind: ${TASK_INITIATOR_KINDS.join(', ')} ('user' means a human initiated the task, 'automation' means an automation initiated it)
 
 Allowed author decisions:
 - unchanged
@@ -147,7 +153,7 @@ For PR owner decisions, a GitHub login is sufficient even when the numeric GitHu
 A missing numeric GitHub user ID blocks only author.mode = specific_user. It does not block prOwner.mode = specific_user.
 If a user is referenced only as a PR owner, never emit an authorship error about that missing numeric GitHub user ID.
 When referencing a repository, return the full repository name exactly as listed.
-Do not invent users, repository names, source kinds, task types.
+Do not invent users, repository names, surfaces, workflows, or initiator kinds.
 Return structured output only.
 `.trim();
 
@@ -167,44 +173,15 @@ type CompiledAuthorshipRulesResult = {
   rules: CompiledAuthorshipRule[];
 };
 
-type EffectiveAuthorSnapshot = {
-  attributionKind: 'matched_user' | 'unlinked_user' | 'automatic' | null;
-  attributionSourceKind: TaskAttributionSourceKind | null;
-  attributionSourceDisplayName: string | null;
-  attributionSourceExternalId: string | null;
-  attributedGithubLogin?: string | null;
-  attributedGithubUserId?: number | null;
-};
-
-type EffectiveAuthorIdentity = AuthorshipRuleActor & {
-  kind: EffectiveAuthorKind;
-  reason: EffectiveAuthorReason;
-  ruleId: string | null;
-};
-
-type EffectivePrOwnerIdentity = {
-  kind: EffectivePrOwnerKind;
-  userId: string | null;
-  displayName: string | null;
-  githubLogin: string | null;
-  reason: EffectivePrOwnerReason;
-  ruleId: string | null;
-};
-
-export type EffectiveAuthorshipEvaluation = {
-  effectiveAuthorDisplayName: string | null;
-  effectiveAuthorGithubLogin: string | null;
-  effectiveAuthorGithubUserId: number | null;
-  effectiveAuthorKind: EffectiveAuthorKind;
-  effectiveAuthorReason: EffectiveAuthorReason;
-  effectiveAuthorRuleId: string | null;
-  effectiveAuthorUserId: string | null;
-  effectivePrOwnerDisplayName: string | null;
-  effectivePrOwnerGithubLogin: string | null;
-  effectivePrOwnerKind: EffectivePrOwnerKind;
-  effectivePrOwnerReason: EffectivePrOwnerReason;
-  effectivePrOwnerRuleId: string | null;
-  effectivePrOwnerUserId: string | null;
+/**
+ * The persisted 5-column commit-author block stamped onto tasks at enqueue.
+ */
+export type CommitAuthorSelection = {
+  commitAuthorKind: CommitAuthorKind;
+  commitAuthorUserId: string | null;
+  commitAuthorLogin: string | null;
+  commitAuthorExternalId: string | null;
+  prAssigneeLogin: string | null;
 };
 
 function normalizeOptionalText(
@@ -361,13 +338,10 @@ function normalizeCompiledRule(
     priority: index,
     label: input.label,
     conditions: {
-      sourceKinds: [...new Set(input.conditions.sourceKinds)],
-      taskTypes: [...new Set(input.conditions.taskTypes)],
+      surfaces: [...new Set(input.conditions.surfaces)],
+      workflows: [...new Set(input.conditions.workflows)],
       repositoryFullNames,
-      humanCreated:
-        typeof input.conditions.humanCreated === 'boolean'
-          ? input.conditions.humanCreated
-          : null,
+      initiatorKinds: [...new Set(input.conditions.initiatorKinds)],
     },
     author:
       authorMode === 'specific_user' && authorActor
@@ -431,118 +405,120 @@ export async function compileAuthorshipRules(
   };
 }
 
-function isHumanCreated(snapshot: EffectiveAuthorSnapshot): boolean {
-  return (
-    snapshot.attributionKind === 'matched_user' ||
-    snapshot.attributionKind === 'unlinked_user'
-  );
-}
+type AuthorIdentity = {
+  kind: CommitAuthorKind;
+  userId: string | null;
+  githubLogin: string | null;
+  githubExternalId: string | null;
+  /** Rule that decided this author, null for the default resolution. */
+  ruleId: string | null;
+};
 
-function buildUnlinkedHumanDisplay(
-  snapshot: EffectiveAuthorSnapshot,
-): string | null {
-  return (
-    normalizeOptionalText(snapshot.attributionSourceDisplayName) ??
-    normalizeOptionalText(snapshot.attributionSourceExternalId)
-  );
-}
+type PrOwnerIdentity = {
+  mode: 'inherit_author' | 'none' | 'specific';
+  githubLogin: string | null;
+  ruleId: string | null;
+};
 
-function getDefaultEffectiveAuthor(input: {
+export type EvaluateCommitAuthorInput = {
+  compiledRules: CompiledAuthorshipRule[];
+  initiator: TaskInitiator;
+  /**
+   * The linked user the initiator resolves to (initiator.userId or
+   * initiator.matchedUserId), enriched with their latest GitHub identity.
+   */
   matchedHumanActor: AuthorshipRuleActor | null;
-  snapshot: EffectiveAuthorSnapshot;
-  task: CloudTask;
-}): EffectiveAuthorIdentity {
-  if (!isHumanCreated(input.snapshot)) {
+  /**
+   * Raw GitHub identity supplied by the launch for unlinked humans (e.g. the
+   * PR author on conflict-resolution or webhook-review launches).
+   */
+  externalGithubIdentity?: {
+    githubLogin?: string | null;
+    githubUserId?: number | null;
+  };
+  workflow: TaskWorkflow;
+  surface: TaskSurface;
+  repositoryFullName: string | null;
+};
+
+function getInitiatorKind(initiator: TaskInitiator): TaskInitiatorKind {
+  return initiator.kind;
+}
+
+function getDefaultAuthor(input: EvaluateCommitAuthorInput): AuthorIdentity {
+  if (input.initiator.kind === 'automation') {
     return {
       kind: 'roomote',
       userId: null,
-      displayName: null,
       githubLogin: null,
-      githubUserId: null,
-      reason: 'default_roomote',
+      githubExternalId: null,
       ruleId: null,
     };
   }
 
-  if (input.matchedHumanActor) {
+  if (input.matchedHumanActor?.userId) {
     return {
-      kind: 'human',
+      kind: 'user',
       userId: input.matchedHumanActor.userId,
-      displayName:
-        normalizeOptionalText(input.matchedHumanActor.displayName) ??
-        buildUnlinkedHumanDisplay(input.snapshot),
       githubLogin: normalizeOptionalText(input.matchedHumanActor.githubLogin),
-      githubUserId: normalizeOptionalNumber(
-        input.matchedHumanActor.githubUserId,
-      ),
-      reason: 'human_created',
+      githubExternalId:
+        normalizeOptionalNumber(input.matchedHumanActor.githubUserId) !== null
+          ? String(input.matchedHumanActor.githubUserId)
+          : null,
       ruleId: null,
     };
   }
 
-  if (input.snapshot.attributionSourceKind === 'github') {
-    return {
-      kind: 'human',
-      userId: null,
-      displayName:
-        buildUnlinkedHumanDisplay(input.snapshot) ??
-        normalizeOptionalText(input.snapshot.attributedGithubLogin),
-      githubLogin: normalizeOptionalText(input.snapshot.attributedGithubLogin),
-      githubUserId: normalizeOptionalNumber(
-        input.snapshot.attributedGithubUserId,
-      ),
-      reason: 'human_created',
-      ruleId: null,
-    };
-  }
+  // Unlinked human. Preserve any GitHub identity so their noreply commits
+  // survive; without one the git author falls back to Roomote at read time
+  // while the task still displays the external actor.
+  const githubLogin = normalizeOptionalText(
+    input.externalGithubIdentity?.githubLogin,
+  );
+  const githubUserId = normalizeOptionalNumber(
+    input.externalGithubIdentity?.githubUserId,
+  );
 
   return {
-    kind: 'human',
+    kind: 'external',
     userId: null,
-    displayName: buildUnlinkedHumanDisplay(input.snapshot),
-    githubLogin: null,
-    githubUserId: null,
-    reason: 'human_created',
+    githubLogin,
+    githubExternalId: githubUserId !== null ? String(githubUserId) : null,
     ruleId: null,
   };
 }
 
-function ruleMatches(params: {
-  humanCreated: boolean;
-  repositoryFullName: string | null;
-  rule: CompiledAuthorshipRule;
-  snapshot: EffectiveAuthorSnapshot;
-  task: CloudTask;
-}): boolean {
-  const { conditions } = params.rule;
+function ruleMatches(
+  rule: CompiledAuthorshipRule,
+  input: EvaluateCommitAuthorInput,
+): boolean {
+  const { conditions } = rule;
 
   if (
-    typeof conditions.humanCreated === 'boolean' &&
-    conditions.humanCreated !== params.humanCreated
+    conditions.initiatorKinds.length > 0 &&
+    !conditions.initiatorKinds.includes(getInitiatorKind(input.initiator))
   ) {
     return false;
   }
 
   if (
-    conditions.sourceKinds.length > 0 &&
-    !conditions.sourceKinds.includes(
-      params.snapshot.attributionSourceKind ?? 'system',
-    )
+    conditions.surfaces.length > 0 &&
+    !conditions.surfaces.includes(input.surface)
   ) {
     return false;
   }
 
   if (
-    conditions.taskTypes.length > 0 &&
-    !conditions.taskTypes.includes(params.task.type)
+    conditions.workflows.length > 0 &&
+    !conditions.workflows.includes(input.workflow)
   ) {
     return false;
   }
 
   if (
     conditions.repositoryFullNames.length > 0 &&
-    (!params.repositoryFullName ||
-      !conditions.repositoryFullNames.includes(params.repositoryFullName))
+    (!input.repositoryFullName ||
+      !conditions.repositoryFullNames.includes(input.repositoryFullName))
   ) {
     return false;
   }
@@ -550,62 +526,47 @@ function ruleMatches(params: {
   return true;
 }
 
+function actorToAuthor(
+  actor: AuthorshipRuleActor,
+  ruleId: string,
+): AuthorIdentity {
+  const githubUserId = normalizeOptionalNumber(actor.githubUserId);
+
+  return {
+    kind: actor.userId ? 'user' : 'external',
+    userId: actor.userId,
+    githubLogin: normalizeOptionalText(actor.githubLogin),
+    githubExternalId: githubUserId !== null ? String(githubUserId) : null,
+    ruleId,
+  };
+}
+
 function resolveAuthorDecision(params: {
-  currentAuthor: EffectiveAuthorIdentity;
+  currentAuthor: AuthorIdentity;
   matchedHumanActor: AuthorshipRuleActor | null;
   rule: CompiledAuthorshipRule;
-}): EffectiveAuthorIdentity {
+}): AuthorIdentity {
   switch (params.rule.author.mode) {
     case 'roomote':
       return {
         kind: 'roomote',
         userId: null,
-        displayName: null,
         githubLogin: null,
-        githubUserId: null,
-        reason: 'rule_roomote',
+        githubExternalId: null,
         ruleId: params.rule.id,
       };
     case 'matched_human':
-      if (!params.matchedHumanActor) {
+      if (!params.matchedHumanActor?.userId) {
         return params.currentAuthor;
       }
 
-      return {
-        kind: 'human',
-        userId: params.matchedHumanActor.userId,
-        displayName: normalizeOptionalText(
-          params.matchedHumanActor.displayName,
-        ),
-        githubLogin: normalizeOptionalText(
-          params.matchedHumanActor.githubLogin,
-        ),
-        githubUserId: normalizeOptionalNumber(
-          params.matchedHumanActor.githubUserId,
-        ),
-        reason: 'rule_matched_human',
-        ruleId: params.rule.id,
-      };
+      return actorToAuthor(params.matchedHumanActor, params.rule.id);
     case 'specific_user':
       if (!params.rule.author.actor) {
         return params.currentAuthor;
       }
 
-      return {
-        kind: 'human',
-        userId: params.rule.author.actor.userId,
-        displayName: normalizeOptionalText(
-          params.rule.author.actor.displayName,
-        ),
-        githubLogin: normalizeOptionalText(
-          params.rule.author.actor.githubLogin,
-        ),
-        githubUserId: normalizeOptionalNumber(
-          params.rule.author.actor.githubUserId,
-        ),
-        reason: 'rule_specific_user',
-        ruleId: params.rule.id,
-      };
+      return actorToAuthor(params.rule.author.actor, params.rule.id);
     case 'unchanged':
     default:
       return params.currentAuthor;
@@ -613,28 +574,21 @@ function resolveAuthorDecision(params: {
 }
 
 function resolvePrOwnerDecision(params: {
-  author: EffectiveAuthorIdentity;
-  currentOwner: EffectivePrOwnerIdentity;
+  currentOwner: PrOwnerIdentity;
   matchedHumanActor: AuthorshipRuleActor | null;
   rule: CompiledAuthorshipRule;
-}): EffectivePrOwnerIdentity {
+}): PrOwnerIdentity {
   switch (params.rule.prOwner.mode) {
     case 'inherit_author':
       return {
-        kind: 'inherit_author',
-        userId: params.author.userId,
-        displayName: params.author.displayName,
-        githubLogin: params.author.githubLogin,
-        reason: 'inherit_author',
+        mode: 'inherit_author',
+        githubLogin: null,
         ruleId: params.rule.id,
       };
     case 'none':
       return {
-        kind: 'none',
-        userId: null,
-        displayName: null,
+        mode: 'none',
         githubLogin: null,
-        reason: 'rule_none',
         ruleId: params.rule.id,
       };
     case 'matched_human':
@@ -643,15 +597,10 @@ function resolvePrOwnerDecision(params: {
       }
 
       return {
-        kind: 'specific_user',
-        userId: params.matchedHumanActor.userId,
-        displayName: normalizeOptionalText(
-          params.matchedHumanActor.displayName,
-        ),
+        mode: 'specific',
         githubLogin: normalizeOptionalText(
           params.matchedHumanActor.githubLogin,
         ),
-        reason: 'rule_matched_human',
         ruleId: params.rule.id,
       };
     case 'specific_user':
@@ -660,15 +609,10 @@ function resolvePrOwnerDecision(params: {
       }
 
       return {
-        kind: 'specific_user',
-        userId: params.rule.prOwner.actor.userId,
-        displayName: normalizeOptionalText(
-          params.rule.prOwner.actor.displayName,
-        ),
+        mode: 'specific',
         githubLogin: normalizeOptionalText(
           params.rule.prOwner.actor.githubLogin,
         ),
-        reason: 'rule_specific_user',
         ruleId: params.rule.id,
       };
     case 'unchanged':
@@ -677,41 +621,35 @@ function resolvePrOwnerDecision(params: {
   }
 }
 
-export function evaluateEffectiveAuthorship(input: {
-  compiledRules: CompiledAuthorshipRule[];
-  matchedHumanActor: AuthorshipRuleActor | null;
-  snapshot: EffectiveAuthorSnapshot;
-  task: CloudTask;
-}): EffectiveAuthorshipEvaluation {
-  const humanCreated = isHumanCreated(input.snapshot);
-  const repositoryFullName = normalizeOptionalText(input.task.payload.repo);
-
-  let author = getDefaultEffectiveAuthor({
-    matchedHumanActor: input.matchedHumanActor,
-    snapshot: input.snapshot,
-    task: input.task,
-  });
-  let prOwner: EffectivePrOwnerIdentity = {
-    kind: 'inherit_author',
-    userId: author.userId,
-    displayName: author.displayName,
-    githubLogin: author.githubLogin,
-    reason: 'inherit_author',
+/**
+ * Evaluates the persisted commit-author block for a fresh task launch.
+ *
+ * Defaults:
+ * - automation-initiated -> 'roomote'
+ * - user-initiated with a linked user -> 'user' (+ their latest GitHub
+ *   identity when available)
+ * - user-initiated unlinked -> 'external' (with GitHub login + numeric id
+ *   when the launch supplied one)
+ *
+ * Compiled rules (conditions: surfaces/workflows/repositoryFullNames/
+ * initiatorKinds) can override the author to roomote or a specific user, and
+ * can set or clear the PR assignee. The PR assignee defaults to the effective
+ * author's GitHub login.
+ */
+export function evaluateCommitAuthor(
+  input: EvaluateCommitAuthorInput,
+): CommitAuthorSelection {
+  let author = getDefaultAuthor(input);
+  let prOwner: PrOwnerIdentity = {
+    mode: 'inherit_author',
+    githubLogin: null,
     ruleId: null,
   };
   let authorDecisionApplied = false;
   let prOwnerDecisionApplied = false;
 
   for (const rule of input.compiledRules) {
-    if (
-      !ruleMatches({
-        humanCreated,
-        repositoryFullName,
-        rule,
-        snapshot: input.snapshot,
-        task: input.task,
-      })
-    ) {
+    if (!ruleMatches(rule, input)) {
       continue;
     }
 
@@ -726,7 +664,6 @@ export function evaluateEffectiveAuthorship(input: {
 
     if (!prOwnerDecisionApplied && rule.prOwner.mode !== 'unchanged') {
       prOwner = resolvePrOwnerDecision({
-        author,
         currentOwner: prOwner,
         matchedHumanActor: input.matchedHumanActor,
         rule,
@@ -739,30 +676,18 @@ export function evaluateEffectiveAuthorship(input: {
     }
   }
 
-  if (prOwner.kind === 'inherit_author') {
-    prOwner = {
-      kind: 'inherit_author',
-      userId: author.userId,
-      displayName: author.displayName,
-      githubLogin: author.githubLogin,
-      reason: prOwner.reason,
-      ruleId: prOwner.ruleId,
-    };
-  }
+  const prAssigneeLogin =
+    prOwner.mode === 'none'
+      ? null
+      : prOwner.mode === 'specific'
+        ? prOwner.githubLogin
+        : author.githubLogin;
 
   return {
-    effectiveAuthorKind: author.kind,
-    effectiveAuthorUserId: author.userId,
-    effectiveAuthorDisplayName: author.displayName,
-    effectiveAuthorGithubLogin: author.githubLogin,
-    effectiveAuthorGithubUserId: author.githubUserId,
-    effectiveAuthorReason: author.reason,
-    effectiveAuthorRuleId: author.ruleId,
-    effectivePrOwnerKind: prOwner.kind,
-    effectivePrOwnerUserId: prOwner.userId,
-    effectivePrOwnerDisplayName: prOwner.displayName,
-    effectivePrOwnerGithubLogin: prOwner.githubLogin,
-    effectivePrOwnerReason: prOwner.reason,
-    effectivePrOwnerRuleId: prOwner.ruleId,
+    commitAuthorKind: author.kind,
+    commitAuthorUserId: author.userId,
+    commitAuthorLogin: author.githubLogin,
+    commitAuthorExternalId: author.githubExternalId,
+    prAssigneeLogin,
   };
 }

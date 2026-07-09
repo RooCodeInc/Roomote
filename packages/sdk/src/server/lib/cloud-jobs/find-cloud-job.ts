@@ -1,9 +1,9 @@
 import type { JobTokenContext } from '@roomote/types';
-import { db, cloudJobs, eq } from '@roomote/db/server';
+import { db, taskRuns, eq } from '@roomote/db/server';
 
 export const findCloudJob = async (id: number) =>
-  db.query.cloudJobs.findFirst({
-    where: eq(cloudJobs.id, id),
+  db.query.taskRuns.findFirst({
+    where: eq(taskRuns.id, id),
   });
 
 /**
@@ -13,8 +13,8 @@ export const findCloudJob = async (id: number) =>
  * other large columns turn each poll into an expensive read under load.
  */
 export const findCloudJobRuntimeState = async (id: number) =>
-  db.query.cloudJobs.findFirst({
-    where: eq(cloudJobs.id, id),
+  db.query.taskRuns.findFirst({
+    where: eq(taskRuns.id, id),
     columns: {
       id: true,
       status: true,
@@ -29,8 +29,8 @@ export const findCloudJobRuntimeState = async (id: number) =>
   });
 
 export const findCloudJobForAccess = async (id: number) =>
-  db.query.cloudJobs.findFirst({
-    where: eq(cloudJobs.id, id),
+  db.query.taskRuns.findFirst({
+    where: eq(taskRuns.id, id),
     columns: { id: true },
   });
 
@@ -38,18 +38,20 @@ export const findCloudJobByJobTokenClaims = async ({
   cloudJobId,
   userId,
 }: Pick<JobTokenContext, 'cloudJobId' | 'userId'>) => {
-  const cloudJob = await db.query.cloudJobs.findFirst({
-    where: eq(cloudJobs.id, cloudJobId),
-    columns: { id: true, userId: true },
+  const run = await db.query.taskRuns.findFirst({
+    where: eq(taskRuns.id, cloudJobId),
+    columns: { id: true, actingUserId: true },
   });
 
-  if (!cloudJob) {
+  if (!run) {
     return null;
   }
 
-  if (cloudJob.userId && cloudJob.userId !== userId) {
+  // Token/run match rule: (run.actingUserId ?? null) === token.userId.
+  // null === null is a valid deployment-principal match.
+  if ((run.actingUserId ?? null) !== (userId ?? null)) {
     return null;
   }
 
-  return { id: cloudJob.id };
+  return { id: run.id };
 };

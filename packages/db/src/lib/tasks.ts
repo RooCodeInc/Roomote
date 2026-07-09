@@ -1,25 +1,13 @@
-import { and, eq, inArray, notExists, type SQL } from 'drizzle-orm';
+import { eq, type SQL } from 'drizzle-orm';
 
-import { HIDDEN_CLOUD_TASK_TYPES } from '@roomote/types';
-
-import { db, type DatabaseOrTransaction } from '../db';
-import { cloudJobs, tasks } from '../schema';
+import { type DatabaseOrTransaction, db } from '../db';
+import { tasks } from '../schema';
 import type { CreateTask, Task } from '../types';
 
 import { generateTaskId } from './task-id';
 
-export function isVisibleTask(taskIdColumn: typeof tasks.id): SQL {
-  return notExists(
-    db
-      .select({ hiddenCloudJobId: cloudJobs.id })
-      .from(cloudJobs)
-      .where(
-        and(
-          eq(cloudJobs.taskId, taskIdColumn),
-          inArray(cloudJobs.type, [...HIDDEN_CLOUD_TASK_TYPES]),
-        ),
-      ),
-  );
+export function isVisibleTask(): SQL {
+  return eq(tasks.visibility, 'visible');
 }
 
 const UNIQUE_VIOLATION_CODE = '23505';

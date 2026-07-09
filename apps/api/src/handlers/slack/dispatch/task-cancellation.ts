@@ -9,12 +9,12 @@ import {
 import { activeCloudTaskStatuses } from '@roomote/types';
 import {
   and,
-  cloudJobs,
   db,
   desc,
   eq,
   inArray,
   isNull,
+  taskRuns,
 } from '@roomote/db/server';
 
 import { stopTaskJob } from '../../tasks/task-stop.js';
@@ -26,19 +26,18 @@ type CancelableCloudJobTarget = Parameters<typeof stopTaskJob>[0]['job'] & {
 async function findLatestActiveCloudJobForTask(
   taskId: string,
 ): Promise<CancelableCloudJobTarget | null> {
-  const activeJob = await db.query.cloudJobs.findFirst({
+  const activeJob = await db.query.taskRuns.findFirst({
     where: and(
-      eq(cloudJobs.taskId, taskId),
-      inArray(cloudJobs.status, [...activeCloudTaskStatuses]),
-      isNull(cloudJobs.canceledAt),
+      eq(taskRuns.taskId, taskId),
+      inArray(taskRuns.status, [...activeCloudTaskStatuses]),
+      isNull(taskRuns.canceledAt),
     ),
-    orderBy: desc(cloudJobs.createdAt),
+    orderBy: desc(taskRuns.createdAt),
     columns: {
       id: true,
       taskId: true,
       status: true,
       sandboxServerUrl: true,
-      userId: true,
       actingUserId: true,
     },
   });
@@ -49,14 +48,13 @@ async function findLatestActiveCloudJobForTask(
 async function resolveCancelableCloudJob(
   cloudJobId: number,
 ): Promise<CancelableCloudJobTarget | null> {
-  const sourceJob = await db.query.cloudJobs.findFirst({
-    where: eq(cloudJobs.id, cloudJobId),
+  const sourceJob = await db.query.taskRuns.findFirst({
+    where: eq(taskRuns.id, cloudJobId),
     columns: {
       id: true,
       taskId: true,
       status: true,
       sandboxServerUrl: true,
-      userId: true,
       actingUserId: true,
       canceledAt: true,
     },
@@ -75,7 +73,6 @@ async function resolveCancelableCloudJob(
           taskId: sourceJob.taskId,
           status: sourceJob.status,
           sandboxServerUrl: sourceJob.sandboxServerUrl,
-          userId: sourceJob.userId,
           actingUserId: sourceJob.actingUserId,
         }
       : null;

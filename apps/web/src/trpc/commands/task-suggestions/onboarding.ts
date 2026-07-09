@@ -14,7 +14,7 @@ import {
 } from '@roomote/db/server';
 import {
   CloudTaskStatus,
-  CloudTaskType,
+  TaskPayloadKind,
   buildEnvironmentDefinitionWorkspacePayload,
   createEmptySetupNewState,
   isExitedCloudTaskStatus,
@@ -126,34 +126,42 @@ async function launchSuggestedTasksTask(input: {
   );
   const launchResult = await enqueueCloudTask(
     {
-      userId: input.userId,
-      type: CloudTaskType.SuggestedTasks,
-      payload: {
-        ...workspacePayload,
-        ...(input.repositoryIds?.length
-          ? { selectedRepositoryIds: input.repositoryIds }
-          : {}),
-        ...(input.currentState.slackTeamId
-          ? { teamId: input.currentState.slackTeamId }
-          : {}),
-        ...(input.currentState.slackChannel
-          ? { slackChannel: input.currentState.slackChannel }
-          : {}),
-        ...(input.currentState.slackThreadTs
-          ? { slackThreadTs: input.currentState.slackThreadTs }
-          : {}),
-        description: buildSuggestedTasksPrompt({
-          repositoryFullNames: input.repositoryFullNames,
-          repositoryCoverage,
-          setupGuidance: input.setupGuidance,
-          suggesterInstructions: settings?.suggesterInstructions ?? null,
-        }),
-        trigger: input.trigger,
-        notifySlack: input.notifySlack,
-        visibleInTranscript: false,
+      task: {
+        type: TaskPayloadKind.Scan,
+        payload: {
+          ...workspacePayload,
+          ...(input.repositoryIds?.length
+            ? { selectedRepositoryIds: input.repositoryIds }
+            : {}),
+          ...(input.currentState.slackTeamId
+            ? { teamId: input.currentState.slackTeamId }
+            : {}),
+          ...(input.currentState.slackChannel
+            ? { slackChannel: input.currentState.slackChannel }
+            : {}),
+          ...(input.currentState.slackThreadTs
+            ? { slackThreadTs: input.currentState.slackThreadTs }
+            : {}),
+          description: buildSuggestedTasksPrompt({
+            repositoryFullNames: input.repositoryFullNames,
+            repositoryCoverage,
+            setupGuidance: input.setupGuidance,
+            suggesterInstructions: settings?.suggesterInstructions ?? null,
+          }),
+          trigger: input.trigger,
+          notifySlack: input.notifySlack,
+          visibleInTranscript: false,
+        },
       },
+      initiator: { kind: 'user', userId: input.userId },
+      workflow: 'scan',
+      surface: 'web',
+      trigger: 'manual',
+      visibility: 'hidden',
     },
     {
+      // Keepalive parity: scans keep the automation runtime policy they had
+      // before the initiator model existed.
       launchClass: 'automation',
     },
   );

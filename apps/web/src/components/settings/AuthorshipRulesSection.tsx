@@ -79,18 +79,18 @@ function describePrOwnerDecision(rule: CompiledAuthorshipRule) {
 function getRuleConditions(rule: CompiledAuthorshipRule) {
   const conditions: string[] = [];
 
-  if (typeof rule.conditions.humanCreated === 'boolean') {
+  for (const initiatorKind of rule.conditions.initiatorKinds) {
     conditions.push(
-      rule.conditions.humanCreated ? 'Human-created' : 'Non-human',
+      initiatorKind === 'user' ? 'User-initiated' : 'Automation-initiated',
     );
   }
 
-  for (const sourceKind of rule.conditions.sourceKinds) {
-    conditions.push(`Source: ${formatRuleValue(sourceKind)}`);
+  for (const surface of rule.conditions.surfaces) {
+    conditions.push(`Surface: ${formatRuleValue(surface)}`);
   }
 
-  for (const taskType of rule.conditions.taskTypes) {
-    conditions.push(`Task: ${formatRuleValue(taskType)}`);
+  for (const workflow of rule.conditions.workflows) {
+    conditions.push(`Workflow: ${formatRuleValue(workflow)}`);
   }
 
   for (const repositoryFullName of rule.conditions.repositoryFullNames) {

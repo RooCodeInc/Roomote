@@ -12,11 +12,20 @@ import {
   unique,
   check,
   uniqueIndex,
+  type AnyPgColumn,
 } from 'drizzle-orm/pg-core';
 import { relations, sql } from 'drizzle-orm';
 
 import type {
-  CloudTaskType,
+  TaskPayloadKind,
+  TaskWorkflow,
+  TaskSurface,
+  TaskTrigger,
+  TaskVisibility,
+  TaskState,
+  TaskInitiatorKind,
+  CommitAuthorKind,
+  RunKind,
   CloudTaskStatus,
   CloudTaskPayload,
   RequestedWorkKind,
@@ -59,13 +68,7 @@ import type {
   AutomationWorkItemDisposition,
   AutomationWorkItemStatus,
   TaskSuggestionStatus,
-  TaskAttributionKind,
-  TaskAttributionSourceKind,
-  EffectiveAuthorKind,
   McpConnectionRole,
-  EffectiveAuthorReason,
-  EffectivePrOwnerKind,
-  EffectivePrOwnerReason,
   CompiledAuthorshipRule,
   AuthorshipRuleIssue,
   SourceControlProvider,
@@ -122,7 +125,7 @@ export const users = pgTable(
 );
 
 export const userRelations = relations(users, ({ many }) => ({
-  tasks: many(tasks),
+  tasks: many(tasks, { relationName: 'taskInitiatorUser' }),
   taskPins: many(taskPins),
   agentSuggestionMessages: many(agentSuggestionMessages),
   fastAgentSessions: many(fastAgentSessions),
@@ -588,49 +591,50 @@ export const tasks = pgTable(
       .primaryKey()
       .$defaultFn(() => generateTaskId()),
 
-    userId: text('user_id').references(() => users.id),
-    attributionKind: text('attribution_kind')
+    // Query-load-bearing classification, stamped at creation.
+    workflow: text('workflow').notNull().$type<TaskWorkflow>(),
+    surface: text('surface').notNull().$type<TaskSurface>(),
+    trigger: text('trigger').notNull().$type<TaskTrigger>(),
+    visibility: text('visibility')
       .notNull()
-      .default('automatic')
-      .$type<TaskAttributionKind>(),
-    attributedUserId: text('attributed_user_id').references(() => users.id),
-    attributionSourceKind: text('attribution_source_kind')
-      .notNull()
-      .default('system')
-      .$type<TaskAttributionSourceKind>(),
-    attributionSourceDisplayName: text('attribution_source_display_name'),
-    attributionSourceExternalId: text('attribution_source_external_id'),
-    attributedGithubLogin: text('attributed_github_login'),
-    attributedGithubUserId: bigint('attributed_github_user_id', {
-      mode: 'number',
-    }),
-    effectiveAuthorKind: text(
-      'effective_author_kind',
-    ).$type<EffectiveAuthorKind>(),
-    effectiveAuthorUserId: text('effective_author_user_id').references(
+      .default('visible')
+      .$type<TaskVisibility>(),
+    // Terminal task state. Only written by the finishCloudJob terminal path;
+    // live runtime phase stays on runs.
+    state: text('state').notNull().default('active').$type<TaskState>(),
+
+    // Initiator stamp (immutable, written once at creation).
+    initiatorKind: text('initiator_kind').notNull().$type<TaskInitiatorKind>(),
+    initiatorUserId: text('initiator_user_id').references(() => users.id),
+    // Automation key. Plain text in Stage 2; FK to automations.key from
+    // Stage 3 on.
+    initiatorAutomation: text('initiator_automation'),
+    // Raw external actor id (Slack user id, GitHub user id/login as
+    // provided). Populated whenever an integration surface knows the raw
+    // actor, for either initiator kind.
+    actorExternalId: text('actor_external_id'),
+    actorDisplayName: text('actor_display_name'),
+
+    // Commit-author block, evaluated unconditionally at enqueue.
+    // 'external' is used for unlinked humans with a GitHub identity so their
+    // noreply commits survive.
+    commitAuthorKind: text('commit_author_kind').$type<CommitAuthorKind>(),
+    commitAuthorUserId: text('commit_author_user_id').references(
       () => users.id,
     ),
-    effectiveAuthorDisplayName: text('effective_author_display_name'),
-    effectiveAuthorGithubLogin: text('effective_author_github_login'),
-    effectiveAuthorGithubUserId: bigint('effective_author_github_user_id', {
-      mode: 'number',
-    }),
-    effectiveAuthorReason: text(
-      'effective_author_reason',
-    ).$type<EffectiveAuthorReason>(),
-    effectiveAuthorRuleId: text('effective_author_rule_id'),
-    effectivePrOwnerKind: text(
-      'effective_pr_owner_kind',
-    ).$type<EffectivePrOwnerKind>(),
-    effectivePrOwnerUserId: text('effective_pr_owner_user_id').references(
-      () => users.id,
-    ),
-    effectivePrOwnerDisplayName: text('effective_pr_owner_display_name'),
-    effectivePrOwnerGithubLogin: text('effective_pr_owner_github_login'),
-    effectivePrOwnerReason: text(
-      'effective_pr_owner_reason',
-    ).$type<EffectivePrOwnerReason>(),
-    effectivePrOwnerRuleId: text('effective_pr_owner_rule_id'),
+    commitAuthorLogin: text('commit_author_login'),
+    // GitHub numeric id as text, for the noreply email
+    // `{id}+{login}@users.noreply.github.com`.
+    commitAuthorExternalId: text('commit_author_external_id'),
+    prAssigneeLogin: text('pr_assignee_login'),
+
+    // Channel bindings (nullable; NOT unique -- thread-to-task is 1:N).
+    slackChannelId: text('slack_channel_id'),
+    slackThreadTs: text('slack_thread_ts'),
+    linearSessionId: text('linear_session_id'),
+    linearIssueId: text('linear_issue_id'),
+    linearOrganizationId: text('linear_organization_id'),
+
     harness: text('harness')
       .notNull()
       .default('opencode-server')
@@ -644,7 +648,24 @@ export const tasks = pgTable(
     llmTitleCheckpoint: integer('llm_title_checkpoint').notNull().default(0),
     mode: text('mode'),
     model: text('model').notNull(),
-    completed: boolean('completed').notNull().default(false),
+    // Initial task prompt. Per-attempt/resume prompts stay on runs.
+    prompt: text('prompt'),
+    /**
+     * Draft prompt text the user was composing when the sandbox went to
+     * sleep. Saved periodically while typing so it can be restored after
+     * wake-up.
+     */
+    draftPrompt: text('draft_prompt'),
+    requestedWorkKind: text('requested_work_kind')
+      .notNull()
+      .default('unknown')
+      .$type<RequestedWorkKind>(),
+    requestedWorkKindSource: text('requested_work_kind_source')
+      .notNull()
+      .default('system_default')
+      .$type<RequestedWorkKindSource>(),
+    requestedWorkKindConfidence: real('requested_work_kind_confidence'),
+    harnessInstructions: text('harness_instructions'),
     computeDurationMs: bigint('compute_duration_ms', {
       mode: 'number',
     })
@@ -655,11 +676,20 @@ export const tasks = pgTable(
     repositoryUrl: text('repository_url'),
     repositoryName: text('repository_name'),
     defaultBranch: text('default_branch'),
+    // Soft delete; queries filter isNull(deletedAt).
+    deletedAt: timestamp('deleted_at'),
     createdAt: timestamp('created_at').notNull().defaultNow(),
     updatedAt: timestamp('updated_at').notNull().defaultNow(),
   },
   (table) => [
-    index('tasks_user_id_idx').on(table.userId),
+    index('tasks_initiator_user_id_idx').on(table.initiatorUserId),
+    index('tasks_initiator_automation_idx').on(table.initiatorAutomation),
+    index('tasks_workflow_idx').on(table.workflow),
+    index('tasks_visibility_activity_at_idx').using(
+      'btree',
+      table.visibility,
+      table.activityAt.desc(),
+    ),
     index('tasks_harness_session_id_idx').on(table.harnessSessionId),
     index('tasks_timestamp_idx').on(table.timestamp),
     index('tasks_deployment_activity_at_idx').using(
@@ -667,14 +697,27 @@ export const tasks = pgTable(
       table.activityAt.desc(),
       table.id.desc(),
     ),
-    index('tasks_completed_idx').on(table.completed),
     index('tasks_created_at_idx').on(table.createdAt),
+    check(
+      'tasks_initiator_shape_check',
+      sql`(${table.initiatorKind} = 'user' AND ${table.initiatorAutomation} IS NULL AND (${table.initiatorUserId} IS NOT NULL OR ${table.actorExternalId} IS NOT NULL)) OR (${table.initiatorKind} = 'automation' AND ${table.initiatorAutomation} IS NOT NULL AND ${table.initiatorUserId} IS NULL)`,
+    ),
   ],
 );
 
-export const tasksRelations = relations(tasks, ({ many }) => ({
+export const tasksRelations = relations(tasks, ({ one, many }) => ({
+  initiatorUser: one(users, {
+    fields: [tasks.initiatorUserId],
+    references: [users.id],
+    relationName: 'taskInitiatorUser',
+  }),
+  commitAuthorUser: one(users, {
+    fields: [tasks.commitAuthorUserId],
+    references: [users.id],
+    relationName: 'taskCommitAuthorUser',
+  }),
   taskPins: many(taskPins),
-  cloudJobs: many(cloudJobs),
+  runs: many(taskRuns),
   inferenceUsageEvents: many(taskInferenceUsageEvents),
   automationWorkItemsAsSource: many(automationWorkItems, {
     relationName: 'automationWorkItemSourceTask',
@@ -741,7 +784,7 @@ export const taskArtifacts = pgTable(
     taskId: text('task_id')
       .notNull()
       .references(() => tasks.id, { onDelete: 'cascade' }),
-    cloudJobId: integer('cloud_job_id').references(() => cloudJobs.id, {
+    runId: integer('run_id').references(() => taskRuns.id, {
       onDelete: 'set null',
     }),
     artifactType: text('artifact_type')
@@ -757,7 +800,7 @@ export const taskArtifacts = pgTable(
   },
   (table) => [
     index('task_artifacts_task_id_idx').on(table.taskId),
-    index('task_artifacts_cloud_job_id_idx').on(table.cloudJobId),
+    index('task_artifacts_run_id_idx').on(table.runId),
     index('task_artifacts_uploaded_idx').on(table.uploaded),
     index('task_artifacts_created_at_idx').on(table.createdAt),
     index('task_artifacts_path_idx').on(table.taskId, table.path),
@@ -779,22 +822,11 @@ export const taskArtifactsRelations = relations(taskArtifacts, ({ one }) => ({
     fields: [taskArtifacts.taskId],
     references: [tasks.id],
   }),
-  cloudJob: one(cloudJobs, {
-    fields: [taskArtifacts.cloudJobId],
-    references: [cloudJobs.id],
+  run: one(taskRuns, {
+    fields: [taskArtifacts.runId],
+    references: [taskRuns.id],
   }),
 }));
-
-/**
- * deleted_tasks
- */
-
-export const deletedTasks = pgTable('deleted_tasks', {
-  id: uuid('id').primaryKey().defaultRandom(),
-  taskId: text('task_id').notNull(), // Not a foreign key - task may be deleted
-  userId: text('user_id'), // Not a foreign key - user may be deleted
-  createdAt: timestamp('created_at').notNull().defaultNow(),
-});
 
 /**
  * task_shares
@@ -868,6 +900,19 @@ export const taskPullRequests = pgTable(
     prNumber: integer('pr_number'),
     prTitle: text('pr_title'),
     repository: text('repository'), // e.g., "owner/repo"
+    // Head SHA of the PR as last observed (review/dedup paths key off this).
+    prSha: text('pr_sha'),
+    // Base branch + base commit of the PR. Captured server-side from the
+    // authed PR fetch so the base is visible without re-fetching in the
+    // sandbox.
+    prBaseRef: text('pr_base_ref'),
+    prBaseSha: text('pr_base_sha'),
+    // GitHub-native identifiers that have no provider-neutral equivalent.
+    githubReactionId: bigint('github_reaction_id', { mode: 'number' }),
+    githubCheckRunId: bigint('github_check_run_id', { mode: 'number' }),
+    githubReviewCommentId: bigint('github_review_comment_id', {
+      mode: 'number',
+    }),
 
     // Status
     status: text('status').$type<import('@roomote/types').PullRequestStatus>(),
@@ -914,74 +959,42 @@ export const taskPullRequestsRelations = relations(
 );
 
 /**
- * cloud_jobs
+ * task_runs
+ *
+ * One row per execution attempt of a task. A task has 1:N runs (fresh launch
+ * plus snapshot resumes). Everything attempt-scoped lives here; conversation
+ * cargo and classification live on tasks.
  */
 
-export const cloudJobs = pgTable(
-  'cloud_jobs',
+export const taskRuns = pgTable(
+  'task_runs',
   {
     id: integer('id').primaryKey().generatedAlwaysAsIdentity(),
-    type: text('type').notNull().$type<CloudTaskType>(),
-
-    userId: text('user_id').references(() => users.id),
-    attributionKind: text('attribution_kind')
+    taskId: text('task_id')
       .notNull()
-      .default('automatic')
-      .$type<TaskAttributionKind>(),
-    attributedUserId: text('attributed_user_id').references(() => users.id),
-    attributionSourceKind: text('attribution_source_kind')
-      .notNull()
-      .default('system')
-      .$type<TaskAttributionSourceKind>(),
-    attributionSourceDisplayName: text('attribution_source_display_name'),
-    attributionSourceExternalId: text('attribution_source_external_id'),
-    attributedGithubLogin: text('attributed_github_login'),
-    attributedGithubUserId: bigint('attributed_github_user_id', {
-      mode: 'number',
-    }),
-    effectiveAuthorKind: text(
-      'effective_author_kind',
-    ).$type<EffectiveAuthorKind>(),
-    effectiveAuthorUserId: text('effective_author_user_id').references(
-      () => users.id,
+      .references(() => tasks.id, { onDelete: 'cascade' }),
+    // 'fresh' for new launches, 'resume' for snapshot resumes (replaces the
+    // SnapshotResume task type as a classification signal).
+    kind: text('kind').notNull().default('fresh').$type<RunKind>(),
+    // Parent run when resuming from snapshot.
+    sourceRunId: integer('source_run_id').references(
+      (): AnyPgColumn => taskRuns.id,
     ),
-    effectiveAuthorDisplayName: text('effective_author_display_name'),
-    effectiveAuthorGithubLogin: text('effective_author_github_login'),
-    effectiveAuthorGithubUserId: bigint('effective_author_github_user_id', {
-      mode: 'number',
-    }),
-    effectiveAuthorReason: text(
-      'effective_author_reason',
-    ).$type<EffectiveAuthorReason>(),
-    effectiveAuthorRuleId: text('effective_author_rule_id'),
-    effectivePrOwnerKind: text(
-      'effective_pr_owner_kind',
-    ).$type<EffectivePrOwnerKind>(),
-    effectivePrOwnerUserId: text('effective_pr_owner_user_id').references(
-      () => users.id,
-    ),
-    effectivePrOwnerDisplayName: text('effective_pr_owner_display_name'),
-    effectivePrOwnerGithubLogin: text('effective_pr_owner_github_login'),
-    effectivePrOwnerReason: text(
-      'effective_pr_owner_reason',
-    ).$type<EffectivePrOwnerReason>(),
-    effectivePrOwnerRuleId: text('effective_pr_owner_rule_id'),
     /**
-     * Effective user for downstream integration auth while this cloud job runs.
-     *
-     * `userId` stays tied to the job owner for job-token scoping and ownership.
-     * `actingUserId` can change as different users send follow-ups to the same
-     * running task, allowing MCP proxies to resolve OAuth credentials for the
-     * most recent human actor instead of always using the original job owner.
+     * The launching or most recently acting human for this run; null for
+     * automation runs. THE ONLY user column on runs. Set at enqueue, updated
+     * by follow-up senders/resumers. Job tokens and MCP OAuth key off it,
+     * falling back to the deployment service principal when null.
      */
     actingUserId: text('acting_user_id').references(() => users.id),
+    // Runtime payload dispatch key (renamed from `type`). No query outside
+    // runtime dispatch may branch on this; queries use tasks.workflow/
+    // surface/visibility.
+    payloadKind: text('payload_kind').notNull().$type<TaskPayloadKind>(),
     harness: text('harness')
       .notNull()
       .default('opencode-server')
       .$type<CodingHarness>(),
-
-    githubLogin: text('github_login'),
-    githubUserId: bigint('github_user_id', { mode: 'number' }),
 
     status: text('status')
       .notNull()
@@ -989,18 +1002,8 @@ export const cloudJobs = pgTable(
       .$type<CloudTaskStatus>(),
     taskPhase: text('task_phase'),
     payload: jsonb('payload').notNull().$type<CloudTaskPayload>(),
+    // Per-attempt prompt, including the deferred resume prompt.
     prompt: text('prompt'),
-    requestedWorkKind: text('requested_work_kind')
-      .notNull()
-      .default('unknown')
-      .$type<RequestedWorkKind>(),
-    requestedWorkKindSource: text('requested_work_kind_source')
-      .notNull()
-      .default('system_default')
-      .$type<RequestedWorkKindSource>(),
-    requestedWorkKindConfidence: real('requested_work_kind_confidence'),
-    harnessInstructions: text('harness_instructions'),
-    title: text('title'), // LLM-generated short title for display.
     log: text('log'),
     artifacts: jsonb('artifacts'),
     result: jsonb('result'),
@@ -1042,41 +1045,6 @@ export const cloudJobs = pgTable(
     workerReleaseTag: text('worker_release_tag'),
     workerVersion: text('worker_version'),
     workerCommit: text('worker_commit'),
-    ghToken: text('gh_token'),
-    userToken: text('user_token'),
-    taskId: text('task_id').notNull(),
-
-    // Slack Metadata
-    slackThreadTs: text('slack_thread_ts'),
-
-    // Linear Metadata
-    linearSessionId: text('linear_session_id'),
-    linearIssueId: text('linear_issue_id'),
-    linearOrganizationId: text('linear_organization_id'),
-
-    // Source-control PR metadata. These columns are provider-neutral: GitHub,
-    // GitLab, Gitea, and ADO webhook/mutation paths all populate them for the
-    // linked PR. `prSourceControlProvider` records which provider the PR
-    // belongs to so readers can disambiguate; it defaults to `github` for
-    // historical rows and is backfilled from the matching `task_pull_requests`
-    // row.
-    prSourceControlProvider: text('pr_source_control_provider')
-      .default('github')
-      .$type<SourceControlProvider>(),
-    prRepo: text('pr_repo'),
-    prNumber: integer('pr_number'),
-    prSha: text('pr_sha'),
-    // Base branch + base commit of the linked PR. Captured server-side from
-    // the authed PR fetch alongside the PR association so the base of the
-    // linked PR is visible without re-fetching via `gh` in the sandbox.
-    prBaseRef: text('pr_base_ref'),
-    prBaseSha: text('pr_base_sha'),
-    // GitHub-native identifiers that have no provider-neutral equivalent.
-    githubPrReactionId: bigint('github_pr_reaction_id', { mode: 'number' }),
-    githubPrCheckRunId: bigint('github_pr_check_run_id', { mode: 'number' }),
-    githubPrReviewCommentId: bigint('github_pr_review_comment_id', {
-      mode: 'number',
-    }),
 
     // Vendor routing: determines which infrastructure runs the job.
     vendor: text('vendor').$type<ComputeProvider>(),
@@ -1095,7 +1063,6 @@ export const cloudJobs = pgTable(
     sleepRequestedAt: timestamp('sleep_requested_at'), // Set once BullMQ claims responsibility for the due sleep action.
     workerHeartbeatAt: timestamp('worker_heartbeat_at'), // Last worker process heartbeat observed for this sandbox-backed job.
     sourceSnapshotId: text('source_snapshot_id'), // Snapshot this job was resumed from.
-    sourceCloudJobId: integer('source_cloud_job_id'), // Parent job when resuming from snapshot.
 
     /**
      * Git HEAD SHAs captured at task start for each repo in the workspace.
@@ -1120,12 +1087,6 @@ export const cloudJobs = pgTable(
      */
     authBypassHeaderName: text('auth_bypass_header_name'),
 
-    /**
-     * Draft prompt text the user was composing when the sandbox went to sleep.
-     * Saved periodically while typing so it can be restored after wake-up.
-     */
-    draftPrompt: text('draft_prompt'),
-
     // Lifecycle:
     // created -> dequeued -> provisionStarted -> provisionReady -> started
     //   -> setupCompleted -> harnessStarted -> runtimeTaskStarted
@@ -1146,44 +1107,44 @@ export const cloudJobs = pgTable(
     launchMode: text('launch_mode').$type<ComputeProviderLaunchMode>(),
   },
   (table) => [
-    index('cloud_jobs_user_id_idx').on(table.userId),
-    index('cloud_jobs_task_id_idx').on(table.taskId),
-    index('cloud_jobs_github_login_idx').on(table.githubLogin),
-    index('cloud_jobs_github_user_id_idx').on(table.githubUserId),
-    index('cloud_jobs_snapshot_id_idx').on(table.snapshotId),
-    index('cloud_jobs_sleep_at_idx').on(table.sleepAt),
-    index('cloud_jobs_worker_heartbeat_at_idx').on(table.workerHeartbeatAt),
-    index('cloud_jobs_sleep_check_due_idx')
+    index('task_runs_task_id_idx').on(table.taskId),
+    index('task_runs_acting_user_id_idx').on(table.actingUserId),
+    index('task_runs_snapshot_id_idx').on(table.snapshotId),
+    index('task_runs_sleep_at_idx').on(table.sleepAt),
+    index('task_runs_worker_heartbeat_at_idx').on(table.workerHeartbeatAt),
+    index('task_runs_sleep_check_due_idx')
       .using('btree', table.sleepAt, table.createdAt, table.vendor)
       .where(
         sql`${table.status} IN ('running', 'idle') AND ${table.machineId} IS NOT NULL AND ${table.sleepAt} IS NOT NULL AND ${table.sleepRequestedAt} IS NULL AND ${table.snapshotId} IS NULL AND ${table.snapshotRequestedAt} IS NULL AND ${table.vendor} IN ('modal', 'daytona', 'e2b')`,
       ),
-    index('cloud_jobs_sleep_check_stale_worker_idx')
+    index('task_runs_sleep_check_stale_worker_idx')
       .using('btree', table.workerHeartbeatAt, table.createdAt, table.vendor)
       .where(
         sql`${table.status} IN ('running', 'idle') AND ${table.machineId} IS NOT NULL AND ${table.workerHeartbeatAt} IS NOT NULL AND ${table.sleepRequestedAt} IS NULL AND ${table.snapshotId} IS NULL AND ${table.snapshotRequestedAt} IS NULL AND ${table.vendor} IN ('modal', 'daytona', 'e2b')`,
       ),
-    index('cloud_jobs_sleep_check_active_idx')
+    index('task_runs_sleep_check_active_idx')
       .using('btree', table.vendor, table.createdAt.desc())
       .where(
         sql`${table.status} IN ('running', 'idle') AND ${table.machineId} IS NOT NULL AND ${table.sleepRequestedAt} IS NULL AND ${table.snapshotId} IS NULL AND ${table.snapshotRequestedAt} IS NULL AND ${table.vendor} IN ('modal', 'daytona', 'e2b')`,
       ),
-    index('cloud_jobs_source_snapshot_id_idx').on(table.sourceSnapshotId),
-    index('cloud_jobs_source_cloud_job_id_idx').on(table.sourceCloudJobId),
-    index('cloud_jobs_first_assistant_output_at_idx').on(
+    index('task_runs_source_snapshot_id_idx').on(table.sourceSnapshotId),
+    index('task_runs_source_run_id_idx').on(table.sourceRunId),
+    index('task_runs_first_assistant_output_at_idx').on(
       table.firstAssistantOutputAt,
     ),
   ],
 );
 
-export const cloudJobEvents = pgTable(
-  'cloud_job_events',
+export const taskRunEvents = pgTable(
+  'task_run_events',
   {
     id: uuid('id').primaryKey().defaultRandom(),
-    cloudJobId: integer('cloud_job_id')
+    runId: integer('run_id')
       .notNull()
-      .references(() => cloudJobs.id, { onDelete: 'cascade' }),
-    taskId: text('task_id').notNull(), // Not a foreign key - task may be deleted
+      .references(() => taskRuns.id, { onDelete: 'cascade' }),
+    taskId: text('task_id')
+      .notNull()
+      .references(() => tasks.id, { onDelete: 'cascade' }),
     source: text('source').notNull().$type<CloudJobEventSource>(),
     eventType: text('event_type').notNull().$type<CloudJobEventType>(),
     message: text('message'),
@@ -1194,16 +1155,16 @@ export const cloudJobEvents = pgTable(
     createdAt: timestamp('created_at').notNull().defaultNow(),
   },
   (table) => [
-    index('cloud_job_events_cloud_job_id_created_at_idx').on(
-      table.cloudJobId,
+    index('task_run_events_run_id_created_at_idx').on(
+      table.runId,
       table.createdAt,
     ),
-    index('cloud_job_events_task_id_created_at_idx').on(
+    index('task_run_events_task_id_created_at_idx').on(
       table.taskId,
       table.createdAt,
     ),
-    index('cloud_job_events_created_at_idx').on(table.createdAt),
-    index('cloud_job_events_source_created_at_idx').on(
+    index('task_run_events_created_at_idx').on(table.createdAt),
+    index('task_run_events_source_created_at_idx').on(
       table.source,
       table.createdAt,
     ),
@@ -1222,11 +1183,13 @@ export const taskStartParallelCounts = pgTable(
   'task_start_parallel_counts',
   {
     id: uuid('id').primaryKey().defaultRandom(),
-    // Keep parent identifiers for analytics/debugging lookups, but do not use
-    // cascading task/cloud-job FKs so the per-run history survives cleanup.
-    taskId: text('task_id').notNull(),
-    cloudJobId: integer('cloud_job_id').notNull(),
-    cloudJobType: text('cloud_job_type').$type<CloudTaskType>(),
+    taskId: text('task_id')
+      .notNull()
+      .references(() => tasks.id, { onDelete: 'cascade' }),
+    runId: integer('run_id')
+      .notNull()
+      .references(() => taskRuns.id, { onDelete: 'cascade' }),
+    payloadKind: text('payload_kind').$type<TaskPayloadKind>(),
     parallelCount: integer('parallel_count').notNull(),
     activityWindowSeconds: integer('activity_window_seconds').notNull(),
     startedAt: timestamp('started_at').notNull(),
@@ -1234,9 +1197,7 @@ export const taskStartParallelCounts = pgTable(
     createdAt: timestamp('created_at').notNull().defaultNow(),
   },
   (table) => [
-    uniqueIndex('task_start_parallel_counts_cloud_job_id_unique').on(
-      table.cloudJobId,
-    ),
+    uniqueIndex('task_start_parallel_counts_run_id_unique').on(table.runId),
     index('task_start_parallel_counts_task_id_started_at_idx').on(
       table.taskId,
       table.startedAt,
@@ -1252,9 +1213,9 @@ export const taskStartParallelCountsRelations = relations(
       fields: [taskStartParallelCounts.taskId],
       references: [tasks.id],
     }),
-    cloudJob: one(cloudJobs, {
-      fields: [taskStartParallelCounts.cloudJobId],
-      references: [cloudJobs.id],
+    run: one(taskRuns, {
+      fields: [taskStartParallelCounts.runId],
+      references: [taskRuns.id],
     }),
   }),
 );
@@ -1269,9 +1230,9 @@ export const taskMessages = pgTable(
   'task_messages',
   {
     id: uuid('id').primaryKey().defaultRandom(),
-    cloudJobId: integer('cloud_job_id')
+    runId: integer('run_id')
       .notNull()
-      .references(() => cloudJobs.id, { onDelete: 'cascade' }),
+      .references(() => taskRuns.id, { onDelete: 'cascade' }),
     taskId: text('task_id')
       .notNull()
       .references(() => tasks.id, { onDelete: 'cascade' }),
@@ -1331,7 +1292,7 @@ export const taskMessages = pgTable(
   },
   (table) => [
     index('task_messages_task_id_ts_idx').on(table.taskId, table.ts),
-    index('task_messages_cloud_job_id_idx').on(table.cloudJobId),
+    index('task_messages_run_id_idx').on(table.runId),
     index('task_messages_created_at_idx').on(table.createdAt),
     unique('task_messages_task_protocol_ts_event_type_unique').on(
       table.taskId,
@@ -1343,9 +1304,9 @@ export const taskMessages = pgTable(
 );
 
 export const taskMessagesRelations = relations(taskMessages, ({ one }) => ({
-  cloudJob: one(cloudJobs, {
-    fields: [taskMessages.cloudJobId],
-    references: [cloudJobs.id],
+  run: one(taskRuns, {
+    fields: [taskMessages.runId],
+    references: [taskRuns.id],
   }),
   task: one(tasks, {
     fields: [taskMessages.taskId],
@@ -1365,10 +1326,7 @@ export const taskInferenceUsageEvents = pgTable(
     taskId: text('task_id')
       .notNull()
       .references(() => tasks.id, { onDelete: 'cascade' }),
-    cloudJobId: integer('cloud_job_id').references(() => cloudJobs.id, {
-      onDelete: 'set null',
-    }),
-    userId: text('user_id').references(() => users.id, {
+    runId: integer('run_id').references(() => taskRuns.id, {
       onDelete: 'set null',
     }),
     harnessSessionId: text('harness_session_id').notNull(),
@@ -1422,8 +1380,7 @@ export const taskInferenceUsageEvents = pgTable(
       table.messageId,
     ),
     index('task_inference_usage_events_task_id_idx').on(table.taskId),
-    index('task_inference_usage_events_cloud_job_id_idx').on(table.cloudJobId),
-    index('task_inference_usage_events_user_id_idx').on(table.userId),
+    index('task_inference_usage_events_run_id_idx').on(table.runId),
     index('task_inference_usage_events_created_at_idx').on(table.createdAt),
   ],
 );
@@ -1435,13 +1392,9 @@ export const taskInferenceUsageEventsRelations = relations(
       fields: [taskInferenceUsageEvents.taskId],
       references: [tasks.id],
     }),
-    cloudJob: one(cloudJobs, {
-      fields: [taskInferenceUsageEvents.cloudJobId],
-      references: [cloudJobs.id],
-    }),
-    user: one(users, {
-      fields: [taskInferenceUsageEvents.userId],
-      references: [users.id],
+    run: one(taskRuns, {
+      fields: [taskInferenceUsageEvents.runId],
+      references: [taskRuns.id],
     }),
   }),
 );
@@ -1483,9 +1436,9 @@ export const taskPlatformIssueReports = pgTable(
     taskId: text('task_id')
       .notNull()
       .references(() => tasks.id, { onDelete: 'cascade' }),
-    cloudJobId: integer('cloud_job_id')
+    runId: integer('run_id')
       .notNull()
-      .references(() => cloudJobs.id, { onDelete: 'cascade' }),
+      .references(() => taskRuns.id, { onDelete: 'cascade' }),
     taskMessageId: uuid('task_message_id').references(() => taskMessages.id, {
       onDelete: 'set null',
     }),
@@ -1499,8 +1452,8 @@ export const taskPlatformIssueReports = pgTable(
       table.taskId,
       table.createdAt,
     ),
-    index('task_platform_issue_reports_cloud_job_id_created_at_idx').on(
-      table.cloudJobId,
+    index('task_platform_issue_reports_run_id_created_at_idx').on(
+      table.runId,
       table.createdAt,
     ),
     uniqueIndex('task_platform_issue_reports_task_message_id_unique').on(
@@ -1516,9 +1469,9 @@ export const taskPlatformIssueReportsRelations = relations(
       fields: [taskPlatformIssueReports.taskId],
       references: [tasks.id],
     }),
-    cloudJob: one(cloudJobs, {
-      fields: [taskPlatformIssueReports.cloudJobId],
-      references: [cloudJobs.id],
+    run: one(taskRuns, {
+      fields: [taskPlatformIssueReports.runId],
+      references: [taskRuns.id],
     }),
     taskMessage: one(taskMessages, {
       fields: [taskPlatformIssueReports.taskMessageId],
@@ -1527,23 +1480,32 @@ export const taskPlatformIssueReportsRelations = relations(
   }),
 );
 
-export const cloudJobEventsRelations = relations(cloudJobEvents, ({ one }) => ({
-  cloudJob: one(cloudJobs, {
-    fields: [cloudJobEvents.cloudJobId],
-    references: [cloudJobs.id],
+export const taskRunEventsRelations = relations(taskRunEvents, ({ one }) => ({
+  run: one(taskRuns, {
+    fields: [taskRunEvents.runId],
+    references: [taskRuns.id],
+  }),
+  task: one(tasks, {
+    fields: [taskRunEvents.taskId],
+    references: [tasks.id],
   }),
 }));
 
-export const cloudJobsRelations = relations(cloudJobs, ({ one, many }) => ({
-  user: one(users, {
-    fields: [cloudJobs.userId],
+export const taskRunsRelations = relations(taskRuns, ({ one, many }) => ({
+  actingUser: one(users, {
+    fields: [taskRuns.actingUserId],
     references: [users.id],
   }),
   task: one(tasks, {
-    fields: [cloudJobs.taskId],
+    fields: [taskRuns.taskId],
     references: [tasks.id],
   }),
-  events: many(cloudJobEvents),
+  sourceRun: one(taskRuns, {
+    fields: [taskRuns.sourceRunId],
+    references: [taskRuns.id],
+    relationName: 'taskRunSourceRun',
+  }),
+  events: many(taskRunEvents),
   messages: many(taskMessages),
   inferenceUsageEvents: many(taskInferenceUsageEvents),
   platformIssueReports: many(taskPlatformIssueReports),
@@ -1560,10 +1522,7 @@ export const computeProviderUsage = pgTable(
     provider: text('provider').notNull().$type<ComputeProvider>(),
     providerUsageId: text('provider_usage_id').notNull(),
     authKind: text('auth_kind').notNull(),
-    userId: text('user_id').references(() => users.id, {
-      onDelete: 'set null',
-    }),
-    cloudJobId: integer('cloud_job_id').references(() => cloudJobs.id, {
+    runId: integer('run_id').references(() => taskRuns.id, {
       onDelete: 'set null',
     }),
     taskId: text('task_id').references(() => tasks.id, {
@@ -1608,8 +1567,7 @@ export const computeProviderUsage = pgTable(
       table.provider,
       table.providerUsageId,
     ),
-    index('compute_provider_usage_user_id_idx').on(table.userId),
-    index('compute_provider_usage_cloud_job_id_idx').on(table.cloudJobId),
+    index('compute_provider_usage_run_id_idx').on(table.runId),
     index('compute_provider_usage_task_id_idx').on(table.taskId),
     index('compute_provider_usage_created_at_idx').on(table.createdAt),
   ],
@@ -1621,12 +1579,9 @@ export const computeProviderUsageSamples = pgTable(
     id: uuid('id').primaryKey().defaultRandom(),
     provider: text('provider').notNull().$type<ComputeProvider>(),
     providerUsageId: text('provider_usage_id').notNull(),
-    userId: text('user_id').references(() => users.id, {
-      onDelete: 'set null',
-    }),
-    cloudJobId: integer('cloud_job_id')
+    runId: integer('run_id')
       .notNull()
-      .references(() => cloudJobs.id, { onDelete: 'cascade' }),
+      .references(() => taskRuns.id, { onDelete: 'cascade' }),
     taskId: text('task_id').references(() => tasks.id, {
       onDelete: 'set null',
     }),
@@ -1651,10 +1606,7 @@ export const computeProviderUsageSamples = pgTable(
     uniqueIndex(
       'compute_provider_usage_samples_provider_usage_sampled_at_unique',
     ).on(table.provider, table.providerUsageId, table.sampledAt),
-    index('compute_provider_usage_samples_user_id_idx').on(table.userId),
-    index('compute_provider_usage_samples_cloud_job_id_idx').on(
-      table.cloudJobId,
-    ),
+    index('compute_provider_usage_samples_run_id_idx').on(table.runId),
     index('compute_provider_usage_samples_task_id_idx').on(table.taskId),
     index('compute_provider_usage_samples_created_at_idx').on(table.createdAt),
   ],
@@ -1663,13 +1615,9 @@ export const computeProviderUsageSamples = pgTable(
 export const computeProviderUsageRelations = relations(
   computeProviderUsage,
   ({ one }) => ({
-    user: one(users, {
-      fields: [computeProviderUsage.userId],
-      references: [users.id],
-    }),
-    cloudJob: one(cloudJobs, {
-      fields: [computeProviderUsage.cloudJobId],
-      references: [cloudJobs.id],
+    run: one(taskRuns, {
+      fields: [computeProviderUsage.runId],
+      references: [taskRuns.id],
     }),
     task: one(tasks, {
       fields: [computeProviderUsage.taskId],
@@ -2364,7 +2312,7 @@ export const slackConversationMessages = pgTable(
     taskId: text('task_id').references(() => tasks.id, {
       onDelete: 'set null',
     }),
-    cloudJobId: integer('cloud_job_id').references(() => cloudJobs.id, {
+    runId: integer('run_id').references(() => taskRuns.id, {
       onDelete: 'set null',
     }),
     fastAgentSessionId: uuid('fast_agent_session_id').references(
@@ -2387,7 +2335,7 @@ export const slackConversationMessages = pgTable(
       table.messageAt,
     ),
     index('slack_conversation_messages_task_id_idx').on(table.taskId),
-    index('slack_conversation_messages_cloud_job_id_idx').on(table.cloudJobId),
+    index('slack_conversation_messages_run_id_idx').on(table.runId),
     uniqueIndex('slack_conversation_messages_team_channel_message_unique').on(
       table.slackTeamId,
       table.slackChannelId,
@@ -2411,9 +2359,9 @@ export const slackConversationMessagesRelations = relations(
       fields: [slackConversationMessages.taskId],
       references: [tasks.id],
     }),
-    cloudJob: one(cloudJobs, {
-      fields: [slackConversationMessages.cloudJobId],
-      references: [cloudJobs.id],
+    run: one(taskRuns, {
+      fields: [slackConversationMessages.runId],
+      references: [taskRuns.id],
     }),
     fastAgentSession: one(fastAgentSessions, {
       fields: [slackConversationMessages.fastAgentSessionId],
@@ -2922,47 +2870,6 @@ export const deploymentSecrets = pgTable(
 );
 
 /**
- * eval_runs
- */
-
-export const EVAL_RUN_STATUSES = [
-  'running',
-  'passed',
-  'failed',
-  'canceled',
-] as const;
-
-export const evalRuns = pgTable(
-  'eval_runs',
-  {
-    id: uuid('id').primaryKey().defaultRandom(),
-    evalName: text('eval_name').notNull(),
-    status: text('status').notNull(),
-    report: jsonb('report'),
-    phases: jsonb('phases'),
-    durationMs: integer('duration_ms'),
-    error: text('error'),
-    triggeredBy: text('triggered_by'),
-    createdAt: timestamp('created_at', { withTimezone: true })
-      .notNull()
-      .defaultNow(),
-    finishedAt: timestamp('finished_at', { withTimezone: true }),
-  },
-  (table) => [
-    index('eval_runs_eval_name_idx').on(table.evalName),
-    index('eval_runs_status_idx').on(table.status),
-    index('eval_runs_created_at_desc_idx').using(
-      'btree',
-      table.createdAt.desc(),
-    ),
-    check(
-      'eval_runs_status_check',
-      sql`${table.status} in ('running', 'passed', 'failed', 'canceled')`,
-    ),
-  ],
-);
-
-/**
  * webhooks
  *
  * Records incoming webhooks from external providers (GitHub, Slack, etc.)
@@ -3197,7 +3104,7 @@ export const sandboxOidcTargets = pgTable(
     environmentId: uuid('environment_id')
       .notNull()
       .references(() => environments.id, { onDelete: 'cascade' }),
-    cloudJobId: integer('cloud_job_id').references(() => cloudJobs.id, {
+    runId: integer('run_id').references(() => taskRuns.id, {
       onDelete: 'cascade',
     }),
     computeProvider: text('compute_provider')
@@ -3216,14 +3123,14 @@ export const sandboxOidcTargets = pgTable(
   },
   (table) => [
     index('sandbox_oidc_targets_environment_id_idx').on(table.environmentId),
-    index('sandbox_oidc_targets_cloud_job_id_idx').on(table.cloudJobId),
+    index('sandbox_oidc_targets_run_id_idx').on(table.runId),
     index('sandbox_oidc_targets_refresh_at_idx').on(table.refreshAt),
     uniqueIndex('sandbox_oidc_targets_provider_target_file_unique').on(
       table.computeProvider,
       table.computeProviderId,
       table.tokenFile,
     ),
-    check('sandbox_oidc_targets_owner_required', sql`cloud_job_id IS NOT NULL`),
+    check('sandbox_oidc_targets_owner_required', sql`run_id IS NOT NULL`),
   ],
 );
 
@@ -3234,9 +3141,9 @@ export const sandboxOidcTargetsRelations = relations(
       fields: [sandboxOidcTargets.environmentId],
       references: [environments.id],
     }),
-    cloudJob: one(cloudJobs, {
-      fields: [sandboxOidcTargets.cloudJobId],
-      references: [cloudJobs.id],
+    run: one(taskRuns, {
+      fields: [sandboxOidcTargets.runId],
+      references: [taskRuns.id],
     }),
   }),
 );

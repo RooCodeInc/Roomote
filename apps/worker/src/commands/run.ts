@@ -30,7 +30,7 @@ export async function run({
               cloudJobId: cloudJob.id,
               stage: 'run.dequeueCloudJob.bootstrapFailure',
               taskId: cloudJob.taskId,
-              taskType: cloudJob.type,
+              taskType: cloudJob.payloadKind,
             });
           },
         },

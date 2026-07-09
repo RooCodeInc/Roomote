@@ -10,7 +10,7 @@ import {
   resolveComputeProviderTarget,
 } from '@roomote/types';
 
-import { cloudJobs, db, eq } from '@roomote/db/server';
+import { db, eq, taskRuns } from '@roomote/db/server';
 
 import { authorizeUserToken } from '@/lib/server';
 
@@ -37,8 +37,8 @@ export async function GET(
   const { id } = await props.params;
   const cloudJobId = z.coerce.number().parse(id);
 
-  const cloudJob = await db.query.cloudJobs.findFirst({
-    where: eq(cloudJobs.id, cloudJobId),
+  const cloudJob = await db.query.taskRuns.findFirst({
+    where: eq(taskRuns.id, cloudJobId),
   });
 
   if (!cloudJob) {
@@ -81,8 +81,8 @@ export async function GET(
 
       await sleep(LOG_STREAM_READINESS_POLL_INTERVAL_MS);
 
-      const latestCloudJob = await db.query.cloudJobs.findFirst({
-        where: eq(cloudJobs.id, cloudJobId),
+      const latestCloudJob = await db.query.taskRuns.findFirst({
+        where: eq(taskRuns.id, cloudJobId),
         columns: {
           machineId: true,
           sandboxCmdId: true,

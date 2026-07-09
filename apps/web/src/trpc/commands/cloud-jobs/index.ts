@@ -1,13 +1,13 @@
 import {
   ALL_REPOSITORIES,
   activeCloudTaskStatuses,
-  type CloudTask,
   type CloudTaskPayload,
   type ComputeProvider,
   type LaunchCodingHarness,
   type SourceControlProvider,
+  type StandardTask,
   CloudTaskStatus,
-  CloudTaskType,
+  TaskPayloadKind,
   isExitedCloudTaskStatus,
   resolveEvalHarnessSelection,
 } from '@roomote/types';
@@ -20,16 +20,16 @@ import {
 } from '@roomote/cloud-agents/server';
 import {
   and,
-  cloudJobs,
   db,
   desc,
   eq,
   environmentRepositoryMappings,
   inArray,
-  isNotNull,
   markTaskStartParallelCountEndedAt,
   repositories,
   slackInstallations,
+  taskRuns,
+  tasks,
 } from '@roomote/db/server';
 import { SlackNotifier } from '@roomote/slack';
 
@@ -49,11 +49,11 @@ type CreateStandardTaskCloudJobInput = {
   sourceArtifactId?: string;
   sourceArtifactPath?: string;
   sourceArtifactVersion?: number;
-  payload: CloudTaskPayload<CloudTaskType.StandardTask>;
+  payload: CloudTaskPayload<typeof TaskPayloadKind.StandardTask>;
 };
 
 function getManualTaskRepositoryFullNames(
-  payload: CloudTaskPayload<CloudTaskType.StandardTask>,
+  payload: CloudTaskPayload<typeof TaskPayloadKind.StandardTask>,
 ) {
   if (payload.selectedRepositories?.length) {
     return [...new Set(payload.selectedRepositories.filter(Boolean))].sort(
@@ -209,18 +209,18 @@ async function notifySlackThreadsAboutArtifactBuild({
     return;
   }
 
-  const sourceSlackJobs = await db.query.cloudJobs.findMany({
-    where: and(
-      eq(cloudJobs.taskId, sourceTaskId),
-      isNotNull(cloudJobs.slackThreadTs),
-    ),
+  // Slack channel bindings live on the tasks row.
+  const sourceTask = await db.query.tasks.findFirst({
+    where: eq(tasks.id, sourceTaskId),
     columns: {
-      payload: true,
+      slackChannelId: true,
       slackThreadTs: true,
     },
   });
 
-  if (sourceSlackJobs.length === 0) {
+  const threadTs = sourceTask?.slackThreadTs;
+
+  if (!threadTs) {
     return;
   }
 
@@ -236,8 +236,29 @@ async function notifySlackThreadsAboutArtifactBuild({
     return;
   }
 
+  let channel = sourceTask.slackChannelId ?? undefined;
+
+  if (!channel) {
+    // Fall back to channel metadata stored on run payloads for tasks created
+    // before channel bindings were stamped onto the tasks row.
+    const sourceRuns = await db.query.taskRuns.findMany({
+      where: eq(taskRuns.taskId, sourceTaskId),
+      columns: { payload: true },
+    });
+
+    channel = sourceRuns
+      .map((run) => getSlackChannelFromPayload(run.payload))
+      .find(Boolean);
+  }
+
+  if (!channel) {
+    console.warn(
+      `[notifyArtifactBuildSlackThreads] No Slack channel found for source task ${sourceTaskId} thread ${threadTs}, skipping artifact-build Slack notification`,
+    );
+    return;
+  }
+
   const notifier = new SlackNotifier(slackInstallation.botAccessToken);
-  const notifiedThreads = new Set<string>();
   const taskUrl = getTaskUrl({
     taskId: newTaskId,
     utm: { source: 'slack', campaign: 'artifact_build' },
@@ -258,40 +279,21 @@ async function notifySlackThreadsAboutArtifactBuild({
     },
   ];
 
-  for (const sourceSlackJob of sourceSlackJobs) {
-    const threadTs = sourceSlackJob.slackThreadTs;
-
-    if (!threadTs || notifiedThreads.has(threadTs)) {
-      continue;
-    }
-
-    const channel = getSlackChannelFromPayload(sourceSlackJob.payload);
-
-    if (!channel) {
-      console.warn(
-        `[notifyArtifactBuildSlackThreads] No Slack channel found for source task ${sourceTaskId} thread ${threadTs}, skipping artifact-build Slack notification`,
-      );
-      continue;
-    }
-
-    try {
-      await notifier.postMessage({
-        channel,
-        thread_ts: threadTs,
-        text,
-        blocks,
-        unfurl_links: false,
-        unfurl_media: false,
-      });
-
-      notifiedThreads.add(threadTs);
-    } catch (error) {
-      console.error(
-        `[notifyArtifactBuildSlackThreads] Failed to notify Slack thread ${threadTs} about artifact build task ${newTaskId}: ${
-          error instanceof Error ? error.message : String(error)
-        }`,
-      );
-    }
+  try {
+    await notifier.postMessage({
+      channel,
+      thread_ts: threadTs,
+      text,
+      blocks,
+      unfurl_links: false,
+      unfurl_media: false,
+    });
+  } catch (error) {
+    console.error(
+      `[notifyArtifactBuildSlackThreads] Failed to notify Slack thread ${threadTs} about artifact build task ${newTaskId}: ${
+        error instanceof Error ? error.message : String(error)
+      }`,
+    );
   }
 }
 
@@ -408,11 +410,10 @@ export async function createStandardTaskCloudJobCommand(
         input.payload.environmentId,
       ));
 
-    const task: CloudTask = {
-      userId: auth.userId,
+    const task: StandardTask = {
       harness: evalSelection.harness ?? input.harness,
       computeProvider: input.computeProvider,
-      type: CloudTaskType.StandardTask,
+      type: TaskPayloadKind.StandardTask,
       payload: {
         ...input.payload,
         ...(sourceControlProvider ? { sourceControlProvider } : {}),
@@ -427,8 +428,12 @@ export async function createStandardTaskCloudJobCommand(
       },
     };
 
-    const launchResult = await enqueueCloudTask(task, {
-      launchClass: 'human',
+    const launchResult = await enqueueCloudTask({
+      task,
+      initiator: { kind: 'user', userId: auth.userId },
+      workflow: 'standard',
+      surface: 'web',
+      trigger: 'manual',
     });
 
     try {
@@ -467,28 +472,28 @@ export async function cancelCloudJobCommand(
   input: { taskId: string; cloudJobId?: number },
 ): Promise<{ success: true } | { success: false; error: string }> {
   try {
-    const taskFilter = eq(cloudJobs.taskId, input.taskId);
+    const taskFilter = eq(taskRuns.taskId, input.taskId);
 
     const job =
       // Snapshot resumes reuse taskId, so a stale cloudJobId can still point at
-      // an older non-terminal row. Always prefer the newest active job for the
+      // an older non-terminal row. Always prefer the newest active run for the
       // task over the supplied ID.
-      (await db.query.cloudJobs.findFirst({
+      (await db.query.taskRuns.findFirst({
         where: and(
           taskFilter,
-          inArray(cloudJobs.status, [...activeCloudTaskStatuses]),
+          inArray(taskRuns.status, [...activeCloudTaskStatuses]),
         ),
-        orderBy: [desc(cloudJobs.createdAt), desc(cloudJobs.id)],
+        orderBy: [desc(taskRuns.createdAt), desc(taskRuns.id)],
       })) ??
       (input.cloudJobId !== undefined
-        ? await db.query.cloudJobs.findFirst({
-            where: and(eq(cloudJobs.id, input.cloudJobId), taskFilter),
-            orderBy: [desc(cloudJobs.createdAt), desc(cloudJobs.id)],
+        ? await db.query.taskRuns.findFirst({
+            where: and(eq(taskRuns.id, input.cloudJobId), taskFilter),
+            orderBy: [desc(taskRuns.createdAt), desc(taskRuns.id)],
           })
         : null) ??
-      (await db.query.cloudJobs.findFirst({
+      (await db.query.taskRuns.findFirst({
         where: taskFilter,
-        orderBy: [desc(cloudJobs.createdAt), desc(cloudJobs.id)],
+        orderBy: [desc(taskRuns.createdAt), desc(taskRuns.id)],
       }));
 
     if (!job) {
@@ -500,12 +505,12 @@ export async function cancelCloudJobCommand(
 
       await db.transaction(async (tx) => {
         await tx
-          .update(cloudJobs)
+          .update(taskRuns)
           .set({ status: CloudTaskStatus.Canceled, canceledAt: endedAt })
-          .where(eq(cloudJobs.id, job.id));
+          .where(eq(taskRuns.id, job.id));
 
         await markTaskStartParallelCountEndedAt(tx, {
-          cloudJobId: job.id,
+          runId: job.id,
           endedAt,
         });
       });

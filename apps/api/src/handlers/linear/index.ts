@@ -5,7 +5,7 @@ import { Hono } from 'hono';
 import {
   AGENT_DISPLAY_NAME,
   type CloudTaskPayload,
-  CloudTaskType,
+  TaskPayloadKind,
   formatErrorForLog,
   parseAcpRequestUserInputAnswerReply,
   ALL_REPOSITORIES,
@@ -800,7 +800,9 @@ async function handleAgentSessionEvent(
           typeof completedPayload?.environmentId === 'string'
             ? completedPayload.environmentId
             : undefined;
-        const resumePayload: CloudTaskPayload<CloudTaskType.SnapshotResume> = {
+        const resumePayload: CloudTaskPayload<
+          typeof TaskPayloadKind.SnapshotResume
+        > = {
           repo,
           environmentId,
           port: completedJob.port ?? undefined,
@@ -816,19 +818,17 @@ async function handleAgentSessionEvent(
           completedPayload,
         );
 
+        // Resumes never create tasks and never re-attribute; the resuming
+        // human becomes the new run's acting user.
         const resumeLaunch = await enqueueCloudTask(
           {
-            type: CloudTaskType.SnapshotResume,
-            userId: completedJob.userId,
-            linearSessionId: sessionId,
-            linearIssueId: agentSession.issue.id,
-            linearOrganizationId: organizationId,
-            sourceSnapshotId: completedJob.snapshotId,
-            sourceCloudJobId: completedJob.id,
-            ...(completedJob.slackThreadTs
-              ? { slackThreadTs: completedJob.slackThreadTs }
-              : {}),
-            payload: resumePayload,
+            task: {
+              type: TaskPayloadKind.SnapshotResume,
+              sourceSnapshotId: completedJob.snapshotId,
+              sourceCloudJobId: completedJob.id,
+              payload: resumePayload,
+            },
+            actingUserId: userId ?? completedJob.actingUserId ?? null,
           },
           {},
         );

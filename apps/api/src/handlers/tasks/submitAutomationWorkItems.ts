@@ -1,11 +1,12 @@
 import type { Context } from 'hono';
 
-import { CloudTaskType } from '@roomote/types';
+import { TaskPayloadKind } from '@roomote/types';
 import {
   backgroundAutomationRuns,
-  cloudJobs,
   db,
   eq,
+  taskRuns,
+  tasks,
 } from '@roomote/db/server';
 
 import type { Variables } from '../../types';
@@ -48,13 +49,19 @@ export async function submitAutomationWorkItems(
   }
 
   try {
-    const [cloudJob, automationRun] = await Promise.all([
-      db.query.cloudJobs.findFirst({
-        where: eq(cloudJobs.taskId, taskId),
+    const [run, task, automationRun] = await Promise.all([
+      db.query.taskRuns.findFirst({
+        where: eq(taskRuns.taskId, taskId),
         columns: {
-          type: true,
-          userId: true,
+          payloadKind: true,
+          actingUserId: true,
           payload: true,
+        },
+      }),
+      db.query.tasks.findFirst({
+        where: eq(tasks.id, taskId),
+        columns: {
+          initiatorUserId: true,
         },
       }),
       db.query.backgroundAutomationRuns.findFirst({
@@ -66,15 +73,15 @@ export async function submitAutomationWorkItems(
       }),
     ]);
 
-    if (!cloudJob) {
+    if (!run) {
       return c.json({ error: 'Task not found' }, 404);
     }
 
-    if (cloudJob.type !== CloudTaskType.SuggestedTasks) {
+    if (run.payloadKind !== TaskPayloadKind.Scan) {
       return c.json({ error: 'Task is not an automation scan task' }, 400);
     }
 
-    const payload = cloudJob.payload as SuggestedTasksPayload;
+    const payload = run.payload as SuggestedTasksPayload;
     const automationSource = payload.suggestionSource;
 
     if (
@@ -92,7 +99,8 @@ export async function submitAutomationWorkItems(
     try {
       return c.json(
         await submitAutoActWorkItems({
-          userId: auth.userId ?? cloudJob.userId ?? null,
+          userId:
+            auth.userId ?? run.actingUserId ?? task?.initiatorUserId ?? null,
           taskId,
           automationRunId: automationRun.id,
           automationKey: automationSource,

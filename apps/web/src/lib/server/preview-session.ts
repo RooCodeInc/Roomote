@@ -1,9 +1,9 @@
 import { createPreviewToken } from '@roomote/auth';
 import {
-  cloudJobs,
   db,
   eq,
   resolveEffectivePreviewRuntimeConfig,
+  taskRuns,
 } from '@roomote/db/server';
 
 import { getSignedInAuthContext } from '@/lib/server';
@@ -96,8 +96,8 @@ export async function createPreviewSession(params: {
     throw new PreviewSessionError(401, 'Unauthorized');
   }
 
-  const cloudJob = await db.query.cloudJobs.findFirst({
-    where: eq(cloudJobs.id, cloudJobId),
+  const cloudJob = await db.query.taskRuns.findFirst({
+    where: eq(taskRuns.id, cloudJobId),
   });
 
   if (!cloudJob) {

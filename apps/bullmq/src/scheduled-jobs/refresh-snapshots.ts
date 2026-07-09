@@ -2,14 +2,15 @@ import {
   type ComputeProvider,
   type SnapshotEnvironmentAttachment,
   activeCloudTaskStatuses,
-  CloudTaskType,
+  TaskPayloadKind,
   resolveComputeProviderTarget,
 } from '@roomote/types';
 import {
   db,
   type DatabaseOrTransaction,
   environmentSnapshots,
-  cloudJobs,
+  taskRuns,
+  tasks,
   claimPendingEnvironmentSnapshotForAttachment,
   resolveDefaultComputeProvider,
   updatePendingEnvironmentSnapshot,
@@ -30,7 +31,6 @@ const LOG_PREFIX = '[refreshSnapshots]';
 interface SnapshotRefreshCandidateBase {
   environmentId: string;
   environmentName: string;
-  createdByUserId: string;
   provider: ComputeProvider;
   snapshotId: string | null;
   snapshotCreatedAt: Date | null;
@@ -190,7 +190,6 @@ async function findSnapshotRefreshCandidates(
     columns: {
       id: true,
       name: true,
-      createdByUserId: true,
       updatedAt: true,
     },
   });
@@ -224,7 +223,6 @@ async function findSnapshotRefreshCandidates(
         candidates.push({
           environmentId: environment.id,
           environmentName: environment.name,
-          createdByUserId: environment.createdByUserId,
           provider: snapshotRow.provider,
           environmentSnapshotId: snapshotRow.id,
           snapshotId: snapshotRow.snapshotId,
@@ -238,7 +236,6 @@ async function findSnapshotRefreshCandidates(
         candidates.push({
           environmentId: environment.id,
           environmentName: environment.name,
-          createdByUserId: environment.createdByUserId,
           provider: targetProvider,
           snapshotId: snapshotRow.snapshotId,
           snapshotCreatedAt: snapshotRow.snapshotCreatedAt,
@@ -255,7 +252,6 @@ async function findSnapshotRefreshCandidates(
     candidates.push({
       environmentId: environment.id,
       environmentName: environment.name,
-      createdByUserId: environment.createdByUserId,
       provider: targetProvider,
       snapshotId: null,
       snapshotCreatedAt: null,
@@ -280,22 +276,26 @@ async function findActiveSnapshotRefreshJob(
   candidate: SnapshotRefreshCandidate,
   dbOrTx: DatabaseOrTransaction = db,
 ): Promise<ActiveSnapshotRefreshJob | null> {
-  return (
-    (await dbOrTx.query.cloudJobs.findFirst({
-      where: and(
-        eq(cloudJobs.type, CloudTaskType.SnapshotEnvironment),
-        eq(cloudJobs.vendor, candidate.provider),
-        inArray(cloudJobs.status, [...activeCloudTaskStatuses]),
-        sql`${cloudJobs.payload}->>'environmentId' = ${candidate.environmentId}`,
+  const [activeRun] = await dbOrTx
+    .select({
+      id: taskRuns.id,
+      status: taskRuns.status,
+      createdAt: taskRuns.createdAt,
+    })
+    .from(taskRuns)
+    .innerJoin(tasks, eq(tasks.id, taskRuns.taskId))
+    .where(
+      and(
+        eq(tasks.workflow, 'env_snapshot'),
+        eq(taskRuns.vendor, candidate.provider),
+        inArray(taskRuns.status, [...activeCloudTaskStatuses]),
+        sql`${taskRuns.payload}->>'environmentId' = ${candidate.environmentId}`,
       ),
-      columns: {
-        id: true,
-        status: true,
-        createdAt: true,
-      },
-      orderBy: [desc(cloudJobs.createdAt), desc(cloudJobs.id)],
-    })) ?? null
-  );
+    )
+    .orderBy(desc(taskRuns.createdAt), desc(taskRuns.id))
+    .limit(1);
+
+  return activeRun ?? null;
 }
 
 async function hasRecentPendingSnapshotClaim(
@@ -433,15 +433,21 @@ export const refreshSnapshotsJob = async () => {
           });
 
           const { id } = await enqueueCloudTask({
-            userId: candidate.createdByUserId,
-            computeProvider: candidate.provider,
-            type: CloudTaskType.SnapshotEnvironment,
-            payload: {
-              repo: '',
-              environmentId: candidate.environmentId,
-              environmentSnapshotAttachment:
-                pendingSnapshotClaim.attachmentSource,
+            task: {
+              type: TaskPayloadKind.SnapshotEnvironment,
+              computeProvider: candidate.provider,
+              payload: {
+                repo: '',
+                environmentId: candidate.environmentId,
+                environmentSnapshotAttachment:
+                  pendingSnapshotClaim.attachmentSource,
+              },
             },
+            initiator: { kind: 'automation', key: 'snapshot_refresh' },
+            workflow: 'env_snapshot',
+            surface: 'system',
+            trigger: 'schedule',
+            visibility: 'hidden',
           });
 
           logRefreshSnapshots('Created snapshot refresh job', {
@@ -498,15 +504,21 @@ export const refreshSnapshotsJob = async () => {
             });
 
             const { id } = await enqueueCloudTask({
-              userId: candidate.createdByUserId,
-              computeProvider: candidate.provider,
-              type: CloudTaskType.SnapshotEnvironment,
-              payload: {
-                repo: '',
-                environmentId: candidate.environmentId,
-                environmentSnapshotAttachment:
-                  buildSnapshotRefreshAttachment(candidate),
+              task: {
+                type: TaskPayloadKind.SnapshotEnvironment,
+                computeProvider: candidate.provider,
+                payload: {
+                  repo: '',
+                  environmentId: candidate.environmentId,
+                  environmentSnapshotAttachment:
+                    buildSnapshotRefreshAttachment(candidate),
+                },
               },
+              initiator: { kind: 'automation', key: 'snapshot_refresh' },
+              workflow: 'env_snapshot',
+              surface: 'system',
+              trigger: 'schedule',
+              visibility: 'hidden',
             });
 
             return {

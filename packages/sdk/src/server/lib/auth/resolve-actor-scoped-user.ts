@@ -1,4 +1,4 @@
-import { cloudJobs, db, eq } from '@roomote/db/server';
+import { db, eq, taskRuns } from '@roomote/db/server';
 
 interface ActorScopedAuthContext {
   /**
@@ -36,12 +36,11 @@ export async function resolveActorScopedUserContext(
     return fallback;
   }
 
-  const cloudJob = await db.query.cloudJobs.findFirst({
+  const cloudJob = await db.query.taskRuns.findFirst({
     columns: {
-      userId: true,
       actingUserId: true,
     },
-    where: eq(cloudJobs.id, auth.cloudJobId),
+    where: eq(taskRuns.id, auth.cloudJobId),
   });
 
   if (!cloudJob) {
@@ -49,7 +48,6 @@ export async function resolveActorScopedUserContext(
   }
 
   return {
-    userId:
-      cloudJob.actingUserId ?? cloudJob.userId ?? auth.userId ?? undefined,
+    userId: cloudJob.actingUserId ?? auth.userId ?? undefined,
   };
 }

@@ -2,17 +2,18 @@ import {
   type AuthTokenContext,
   type JobTokenContext,
   type CloudTaskPayload,
+  type RequestedWorkKind,
   CloudTaskStatus,
-  CloudTaskType,
+  TaskPayloadKind,
   resolveSourceControlProviderFromPayload,
 } from '@roomote/types';
 import {
   type CloudJob,
+  type Task,
   db,
-  cloudJobs,
+  taskRuns,
   recordJobLifecycleEvent,
   recordSnapshotResumeEvent,
-  tasks,
   eq,
 } from '@roomote/db/server';
 import { releaseCloudTask } from '@roomote/cloud-agents/server';
@@ -30,12 +31,18 @@ import {
   reportBootstrapFailure,
   resolveGitAuthor,
 } from './dequeue-helpers';
+import {
+  type DequeuedTaskContext,
+  buildDequeuedTaskContext,
+} from './dequeue-cloud-job';
 import { resolveSlackJobRouting } from './slack-job-routing';
 
 type DequeueResumeCloudJobResult =
   | undefined
   | {
       cloudJob: CloudJob;
+      task: DequeuedTaskContext;
+      requestedWorkKind: RequestedWorkKind;
       gitHubToken: string;
       sourceControlToken: SourceControlRuntimeToken;
       envVars: Record<string, string>;
@@ -45,8 +52,9 @@ type DequeueResumeCloudJobResult =
       setupOnboardingTask: boolean;
       gitAuthor: GitAuthor;
       /**
-       * The Roomote harness session ID from the source job that should be resumed.
-       * Resolved from tasks.harnessSessionId.
+       * The Roomote harness session ID that should be resumed.
+       * Resolved from tasks.harnessSessionId of the run's own task — resume
+       * runs share the task with the run they resume.
        */
       harnessSessionId: string;
       /**
@@ -67,18 +75,19 @@ type DequeueResumeCloudJobResult =
     };
 
 /**
- * Prepares a SnapshotResume cloud job for execution.
+ * Prepares a snapshot-resume run for execution.
  *
- * This function claims the job, validates it, and looks up the source
- * harnessSessionId from the original cloud job's task. The worker uses that
- * harness session ID to resume the existing task instead of starting a new one.
+ * This function claims the run, validates it, and reads the persisted
+ * harnessSessionId from the run's task (resume runs are rows on the same
+ * task). The worker uses that harness session ID to resume the existing task
+ * instead of starting a new one.
  *
  * Unlike regular dequeue, this doesn't generate a prompt since we're resuming
  * an existing task with its own conversation history.
  *
  * @param _auth - Authentication context
- * @param input - Must include cloudJobId for the SnapshotResume job
- * @returns The job data with harnessSessionId, or undefined if preparation failed
+ * @param input - Must include cloudJobId for the snapshot-resume run
+ * @returns The run data with harnessSessionId, or undefined if preparation failed
  */
 export const dequeueResumeCloudJob = async (
   _auth: AuthTokenContext | JobTokenContext,
@@ -116,6 +125,7 @@ export const dequeueResumeCloudJob = async (
       | {
           error: false;
           cloudJob: CloudJob;
+          task: Task;
           envVars: Record<string, string>;
           orgAgentInstructions?: string;
           styleGuidance?: string;
@@ -130,8 +140,9 @@ export const dequeueResumeCloudJob = async (
       const [dequeued] = await tx.execute<Pick<CloudJob, 'id'>>(query);
 
       const cloudJob = dequeued
-        ? await tx.query.cloudJobs.findFirst({
-            where: eq(cloudJobs.id, dequeued.id),
+        ? await tx.query.taskRuns.findFirst({
+            where: eq(taskRuns.id, dequeued.id),
+            with: { task: true },
           })
         : undefined;
 
@@ -143,11 +154,11 @@ export const dequeueResumeCloudJob = async (
         return { error: true, cloudJob };
       }
 
-      if (cloudJob.type !== CloudTaskType.SnapshotResume) {
-        const errorMessage = `Expected SnapshotResume job, got ${cloudJob.type}`;
+      if (cloudJob.payloadKind !== TaskPayloadKind.SnapshotResume) {
+        const errorMessage = `Expected SnapshotResume run, got ${cloudJob.payloadKind}`;
 
         console.error(
-          `${tag} Expected SnapshotResume job, got ${cloudJob.type}`,
+          `${tag} Expected SnapshotResume run, got ${cloudJob.payloadKind}`,
         );
 
         reportBootstrapFailure({
@@ -161,11 +172,11 @@ export const dequeueResumeCloudJob = async (
           cloudJobId: cloudJob.id,
           taskId: cloudJob.taskId,
           message:
-            'Snapshot resume bootstrap failed because the claimed job was not a SnapshotResume job.',
+            'Snapshot resume bootstrap failed because the claimed run was not a snapshot-resume run.',
           details: {
             stage: 'bootstrap',
             reason: 'invalid_job_type',
-            actualJobType: cloudJob.type,
+            actualJobType: cloudJob.payloadKind,
           },
         };
 
@@ -177,15 +188,16 @@ export const dequeueResumeCloudJob = async (
         return { error: true, cloudJob, bootstrapFailureEvent };
       }
 
-      const resumePayload =
-        cloudJob.payload as CloudTaskPayload<CloudTaskType.SnapshotResume>;
+      const resumePayload = cloudJob.payload as CloudTaskPayload<
+        typeof TaskPayloadKind.SnapshotResume
+      >;
+      const sourceRunId =
+        cloudJob.sourceRunId ?? resumePayload.sourceCloudJobId;
 
-      if (!resumePayload.sourceCloudJobId) {
-        const errorMessage = `SnapshotResume job ${cloudJob.id} has no sourceCloudJobId`;
+      if (!sourceRunId) {
+        const errorMessage = `Snapshot-resume run ${cloudJob.id} has no source run id`;
 
-        console.error(
-          `${tag} SnapshotResume job ${cloudJob.id} has no sourceCloudJobId`,
-        );
+        console.error(`${tag} ${errorMessage}`);
 
         reportBootstrapFailure({
           callback: onBootstrapFailure,
@@ -198,7 +210,7 @@ export const dequeueResumeCloudJob = async (
           cloudJobId: cloudJob.id,
           taskId: cloudJob.taskId,
           message:
-            'Snapshot resume bootstrap failed because the job was missing sourceCloudJobId.',
+            'Snapshot resume bootstrap failed because the run was missing its source run id.',
           details: {
             stage: 'bootstrap',
             reason: 'missing_source_cloud_job_id',
@@ -214,31 +226,19 @@ export const dequeueResumeCloudJob = async (
         return { error: true, cloudJob, bootstrapFailureEvent };
       }
 
-      // Look up the source cloud job to find its canonical task row, then
-      // read the persisted harnessSessionId from that task.
-      const sourceCloudJob = await tx.query.cloudJobs.findFirst({
-        where: eq(cloudJobs.id, resumePayload.sourceCloudJobId),
-        columns: { taskId: true, sourceCloudJobId: true },
-      });
-
-      const sourceTask = sourceCloudJob?.taskId
-        ? await tx.query.tasks.findFirst({
-            where: eq(tasks.id, sourceCloudJob.taskId),
-            columns: { harnessSessionId: true },
-          })
-        : undefined;
-
-      const harnessSessionId = sourceTask?.harnessSessionId ?? null;
+      // Resume runs share their task with the run they resume, so the
+      // harness session lives on the run's own task row.
+      const harnessSessionId = cloudJob.task.harnessSessionId ?? null;
 
       if (!harnessSessionId) {
         console.error(
-          `${tag} Source task ${sourceCloudJob?.taskId ?? 'n/a'} from cloud job ${resumePayload.sourceCloudJobId} has no harnessSessionId`,
+          `${tag} Task ${cloudJob.taskId} for resume run ${cloudJob.id} has no harnessSessionId`,
         );
 
         reportBootstrapFailure({
           callback: onBootstrapFailure,
           error: new Error(
-            `Source task ${sourceCloudJob?.taskId ?? 'n/a'} from cloud job ${resumePayload.sourceCloudJobId} has no harnessSessionId to resume`,
+            `Task ${cloudJob.taskId} for resume run ${cloudJob.id} has no harnessSessionId to resume`,
           ),
           cloudJob,
           logPrefix: tag,
@@ -248,20 +248,20 @@ export const dequeueResumeCloudJob = async (
           cloudJobId: cloudJob.id,
           taskId: cloudJob.taskId,
           message:
-            'Snapshot resume bootstrap failed because the source task had no harness session to resume.',
+            'Snapshot resume bootstrap failed because the task had no harness session to resume.',
           details: {
             stage: 'bootstrap',
             reason: 'missing_harness_session_id',
-            sourceCloudJobId: resumePayload.sourceCloudJobId,
+            sourceRunId,
             sourceSnapshotId: resumePayload.sourceSnapshotId,
-            sourceTaskId: sourceCloudJob?.taskId ?? null,
+            sourceTaskId: cloudJob.taskId,
           },
         };
 
         await cancelCloudJob(
           tx,
           cloudJob.id,
-          `Source task ${sourceCloudJob?.taskId ?? 'n/a'} from cloud job ${resumePayload.sourceCloudJobId} has no harnessSessionId to resume`,
+          `Task ${cloudJob.taskId} for resume run ${cloudJob.id} has no harnessSessionId to resume`,
           {
             bootstrapFailureReason: 'missing_harness_session_id',
             existingArtifacts: cloudJob.artifacts,
@@ -271,13 +271,13 @@ export const dequeueResumeCloudJob = async (
         return { error: true, cloudJob, bootstrapFailureEvent };
       }
 
-      // Get repo and environmentId from the current job's payload.
-      // These were copied from the source job when the SnapshotResume job was created.
+      // Get repo and environmentId from the current run's payload.
+      // These were copied from the source run when the resume was created.
       const sourceRepo = resumePayload.repo;
       const sourceEnvironmentId = resumePayload.environmentId;
       const sourceSelectedRepositories = resumePayload.selectedRepositories;
       console.log(
-        `${tag} Found source harness session ID ${harnessSessionId} from cloud job ${resumePayload.sourceCloudJobId} (taskId=${sourceCloudJob?.taskId ?? 'n/a'}, repo=${sourceRepo}, environmentId=${sourceEnvironmentId})`,
+        `${tag} Found harness session ID ${harnessSessionId} for resume run ${cloudJob.id} (taskId=${cloudJob.taskId}, sourceRunId=${sourceRunId}, repo=${sourceRepo}, environmentId=${sourceEnvironmentId})`,
       );
 
       // Fetch environment variables
@@ -295,17 +295,17 @@ export const dequeueResumeCloudJob = async (
 
       // Update startedAt timestamp
       await tx
-        .update(cloudJobs)
+        .update(taskRuns)
         .set({
           startedAt: new Date(),
           ...(workerReleaseTag !== undefined ? { workerReleaseTag } : {}),
           ...(workerVersion !== undefined ? { workerVersion } : {}),
           ...(workerCommit !== undefined ? { workerCommit } : {}),
         })
-        .where(eq(cloudJobs.id, cloudJob.id));
+        .where(eq(taskRuns.id, cloudJob.id));
 
       await recordJobLifecycleEvent(tx, {
-        cloudJobId: cloudJob.id,
+        runId: cloudJob.id,
         taskId: cloudJob.taskId,
         eventType: 'started',
         message:
@@ -316,12 +316,12 @@ export const dequeueResumeCloudJob = async (
           vendor: cloudJob.vendor ?? null,
           machineId: cloudJob.machineId ?? null,
           sourceSnapshotId: cloudJob.sourceSnapshotId ?? null,
-          sourceCloudJobId: resumePayload.sourceCloudJobId,
+          sourceRunId,
           harnessSessionId,
           sourceRepo,
           sourceEnvironmentId,
           selectedRepositories: sourceSelectedRepositories ?? null,
-          cloudTaskType: cloudJob.type,
+          cloudTaskType: cloudJob.payloadKind,
           workerReleaseTag: workerReleaseTag ?? null,
           workerVersion: workerVersion ?? null,
           workerCommit: workerCommit ?? null,
@@ -333,6 +333,7 @@ export const dequeueResumeCloudJob = async (
       return {
         error: false,
         cloudJob,
+        task: cloudJob.task,
         envVars,
         orgAgentInstructions: settings?.globalAgentInstructions ?? undefined,
         styleGuidance: settings?.styleGuidance ?? undefined,
@@ -393,7 +394,7 @@ export const dequeueResumeCloudJob = async (
           stage: 'bootstrap',
           reason: 'missing_source_control_token',
           provider: sourceControlProvider,
-          sourceCloudJobId: result.cloudJob.sourceCloudJobId ?? null,
+          sourceRunId: result.cloudJob.sourceRunId ?? null,
           sourceSnapshotId: result.cloudJob.sourceSnapshotId ?? null,
         },
       });
@@ -431,7 +432,7 @@ export const dequeueResumeCloudJob = async (
         details: {
           stage: 'bootstrap',
           reason: 'runtime_env_resolution_failed',
-          sourceCloudJobId: result.cloudJob.sourceCloudJobId ?? null,
+          sourceRunId: result.cloudJob.sourceRunId ?? null,
           sourceSnapshotId: result.cloudJob.sourceSnapshotId ?? null,
           error: message,
         },
@@ -450,7 +451,7 @@ export const dequeueResumeCloudJob = async (
       message: `Snapshot resume bootstrap started with source session ${result.harnessSessionId}.`,
       details: {
         stage: 'bootstrap',
-        sourceCloudJobId: result.cloudJob.sourceCloudJobId ?? null,
+        sourceRunId: result.cloudJob.sourceRunId ?? null,
         sourceSnapshotId: result.cloudJob.sourceSnapshotId ?? null,
         harnessSessionId: result.harnessSessionId,
         sourceRepo: result.sourceRepo ?? null,
@@ -477,15 +478,17 @@ export const dequeueResumeCloudJob = async (
 
     const slackJobRouting = await resolveSlackJobRouting(result.cloudJob);
 
-    const { error: _, ...rest } = result;
+    const { error: _, task, ...rest } = result;
     return {
       ...rest,
+      task: buildDequeuedTaskContext(task),
+      requestedWorkKind: task.requestedWorkKind,
       gitHubToken,
       sourceControlToken,
       orgAgentInstructions: result.orgAgentInstructions,
       styleGuidance: result.styleGuidance,
       setupOnboardingTask: slackJobRouting.route.kind === 'setup-onboarding',
-      harnessInstructions: result.cloudJob.harnessInstructions ?? undefined,
+      harnessInstructions: task.harnessInstructions ?? undefined,
     };
   } catch (error) {
     console.error(
@@ -504,7 +507,7 @@ async function recordSnapshotResumeBootstrapEvent(input: {
 }): Promise<void> {
   try {
     await recordSnapshotResumeEvent(db, {
-      cloudJobId: input.cloudJobId,
+      runId: input.cloudJobId,
       taskId: input.taskId,
       eventType: input.eventType,
       message: input.message,

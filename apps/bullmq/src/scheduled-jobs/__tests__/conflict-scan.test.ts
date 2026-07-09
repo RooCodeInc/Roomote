@@ -70,9 +70,6 @@ vi.mock('@roomote/types', async (importOriginal) => {
     CONFLICT_RESOLUTION_COMMENT_MARKER: '<!-- conflict-resolution -->',
     DEFAULT_CONFLICT_SCAN_LOOKBACK_DAYS: 7,
     DEFAULT_CONFLICT_RESOLUTION_MAX_PR_AGE_DAYS: 30,
-    CloudTaskType: {
-      GithubPrConflictResolve: 'github.pr.conflict.resolve',
-    },
     CloudTaskStatus: {
       Pending: 'pending',
       Running: 'running',
@@ -92,7 +89,9 @@ vi.mock('@roomote/db/server', () => {
     ) =>
       Promise.resolve(mockSelectWhere(...args)).then(onFulfilled, onRejected),
   }));
-  const from = vi.fn(() => ({ where }));
+  const chain: { where: typeof where; innerJoin?: unknown } = { where };
+  chain.innerJoin = vi.fn(() => chain);
+  const from = vi.fn(() => chain);
   const select = vi.fn(() => ({ from }));
   const updateSet = vi.fn(() => ({
     where: vi.fn().mockResolvedValue(undefined),
@@ -121,11 +120,19 @@ vi.mock('@roomote/db/server', () => {
       fullName: 'fullName',
       installationId: 'installationId',
     },
-    cloudJobs: {
+    tasks: {
       id: 'id',
-      type: 'type',
-      prRepo: 'prRepo',
+      workflow: 'workflow',
+    },
+    taskPullRequests: {
+      taskId: 'taskId',
+      sourceControlProvider: 'sourceControlProvider',
+      repository: 'repository',
       prNumber: 'prNumber',
+    },
+    taskRuns: {
+      id: 'id',
+      taskId: 'taskId',
       status: 'status',
     },
     DEFAULT_CONFLICT_RESOLUTION_IDLE_WINDOW_MS: 30 * 60 * 1000,
@@ -350,7 +357,7 @@ describe('conflictScanJob', () => {
     });
   });
 
-  it('enqueues autonomous conflict-resolution tasks without a linked Roomote userId', async () => {
+  it('enqueues conflict-resolution tasks as the conflict_resolver automation with the PR author as actor', async () => {
     mockIsRepoSkipped.mockReturnValue(false);
     mockSelectLimit
       .mockResolvedValueOnce([])
@@ -387,9 +394,27 @@ describe('conflictScanJob', () => {
 
     expect(mockEnqueueCloudTask).toHaveBeenCalledWith(
       expect.objectContaining({
-        type: 'github.pr.conflict.resolve',
-        githubLogin: 'author',
-        githubUserId: 123,
+        task: expect.objectContaining({
+          type: 'github_pr_conflict_resolve',
+          githubLogin: 'author',
+          githubUserId: 123,
+        }),
+        initiator: {
+          kind: 'automation',
+          key: 'conflict_resolver',
+          actor: { externalId: '123', displayName: 'author' },
+        },
+        workflow: 'pr_conflict_resolve',
+        surface: 'github',
+        trigger: 'schedule',
+        prLinkage: expect.objectContaining({
+          provider: 'github',
+          repository: 'Roomote/example-app',
+          prNumber: 42,
+          prUrl: 'https://github.com/Roomote/example-app/pull/42',
+          prSha: 'abc1234',
+          prBaseRef: 'main',
+        }),
       }),
     );
     expect(mockEnqueueCloudTask.mock.calls[0]?.[0]).not.toHaveProperty(

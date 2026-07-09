@@ -3,7 +3,7 @@ const {
   mockGetAdoAutomationTargets,
   mockUpdateTaskPrStatus,
   mockRepositoriesFindFirst,
-  mockCloudJobsFindFirst,
+  mockDedupSelect,
   mockNotifySlackPrMerge,
   mockNotifyTeamsPrMerge,
   mockNotifyTelegramAndLinearPrMerge,
@@ -12,7 +12,9 @@ const {
   mockGetAdoAutomationTargets: vi.fn(),
   mockUpdateTaskPrStatus: vi.fn(),
   mockRepositoriesFindFirst: vi.fn(),
-  mockCloudJobsFindFirst: vi.fn(),
+  // Resolves the rows for each `db.select().from(tasks).innerJoin(...)`
+  // dedup lookup, in call order.
+  mockDedupSelect: vi.fn(),
   mockNotifySlackPrMerge: vi.fn(),
   mockNotifyTeamsPrMerge: vi.fn(),
   mockNotifyTelegramAndLinearPrMerge: vi.fn(),
@@ -32,9 +34,17 @@ vi.mock('@roomote/db/server', () => ({
       repositories: {
         findFirst: (...args: unknown[]) => mockRepositoriesFindFirst(...args),
       },
-      cloudJobs: {
-        findFirst: (...args: unknown[]) => mockCloudJobsFindFirst(...args),
-      },
+    },
+    select: () => {
+      const rowsPromise = Promise.resolve(mockDedupSelect());
+      const chain = {
+        from: () => chain,
+        innerJoin: () => chain,
+        where: () => chain,
+        orderBy: () => chain,
+        limit: () => rowsPromise,
+      };
+      return chain;
     },
   },
   repositories: {
@@ -42,15 +52,23 @@ vi.mock('@roomote/db/server', () => ({
     fullName: 'repositories.fullName',
     isActive: 'repositories.isActive',
   },
-  cloudJobs: {
-    id: 'cloudJobs.id',
-    type: 'cloudJobs.type',
-    prRepo: 'cloudJobs.prRepo',
-    prNumber: 'cloudJobs.prNumber',
-    prSha: 'cloudJobs.prSha',
-    status: 'cloudJobs.status',
-    canceledAt: 'cloudJobs.canceledAt',
-    createdAt: 'cloudJobs.createdAt',
+  tasks: {
+    id: 'tasks.id',
+    workflow: 'tasks.workflow',
+  },
+  taskPullRequests: {
+    taskId: 'taskPullRequests.taskId',
+    sourceControlProvider: 'taskPullRequests.sourceControlProvider',
+    repository: 'taskPullRequests.repository',
+    prNumber: 'taskPullRequests.prNumber',
+    prSha: 'taskPullRequests.prSha',
+  },
+  taskRuns: {
+    id: 'taskRuns.id',
+    taskId: 'taskRuns.taskId',
+    status: 'taskRuns.status',
+    canceledAt: 'taskRuns.canceledAt',
+    createdAt: 'taskRuns.createdAt',
   },
   and: vi.fn((...conditions: unknown[]) => ({ type: 'and', conditions })),
   desc: vi.fn((column: unknown) => ({ type: 'desc', column })),
@@ -92,7 +110,7 @@ vi.mock('../getAdoAutomationTargets', async () => {
   };
 });
 
-import { CloudTaskType } from '@roomote/types';
+import { TaskPayloadKind } from '@roomote/types';
 
 import { handleAdoPullRequest } from '../handlePullRequest';
 import type { AdoPullRequestWebhook } from '../types';
@@ -149,13 +167,13 @@ describe('handleAdoPullRequest', () => {
     mockGetAdoAutomationTargets.mockReset();
     mockUpdateTaskPrStatus.mockReset();
     mockRepositoriesFindFirst.mockReset();
-    mockCloudJobsFindFirst.mockReset();
+    mockDedupSelect.mockReset();
     mockNotifySlackPrMerge.mockReset();
     mockNotifyTeamsPrMerge.mockReset();
     mockNotifyTelegramAndLinearPrMerge.mockReset();
 
     mockRepositoriesFindFirst.mockResolvedValue({ id: 'repo-row-1' });
-    mockCloudJobsFindFirst.mockResolvedValue(null);
+    mockDedupSelect.mockReturnValue([]);
     mockNotifySlackPrMerge.mockResolvedValue(undefined);
     mockNotifyTeamsPrMerge.mockResolvedValue(undefined);
     mockNotifyTelegramAndLinearPrMerge.mockResolvedValue(undefined);
@@ -190,23 +208,37 @@ describe('handleAdoPullRequest', () => {
     });
     expect(mockEnqueueCloudTask).toHaveBeenCalledWith(
       expect.objectContaining({
-        userId: 'user-1',
-        attributionOverride: {
-          kind: 'automatic',
-          sourceKind: 'ado',
-        },
-        type: CloudTaskType.GithubPrReview,
-        payload: expect.objectContaining({
-          repo: 'acme/Platform/backend',
-          sourceControlProvider: 'ado',
+        task: expect.objectContaining({
+          type: TaskPayloadKind.GithubPrReview,
+          payload: expect.objectContaining({
+            repo: 'acme/Platform/backend',
+            sourceControlProvider: 'ado',
+            prNumber: 42,
+            prUrl:
+              'https://dev.azure.com/acme/Platform/_git/backend/pullrequest/42',
+            headSha: 'abc123',
+            branchName: 'feature/test',
+            branch: 'feature/test',
+            sha: 'abc123',
+            targetBranch: 'main',
+          }),
+        }),
+        initiator: expect.objectContaining({
+          kind: 'automation',
+          key: 'review_code',
+          actor: expect.objectContaining({
+            displayName: 'roomote-bot@acme.example',
+          }),
+        }),
+        workflow: 'pr_review',
+        surface: 'ado',
+        trigger: 'webhook',
+        prLinkage: expect.objectContaining({
+          provider: 'ado',
+          repository: 'acme/Platform/backend',
           prNumber: 42,
-          prUrl:
-            'https://dev.azure.com/acme/Platform/_git/backend/pullrequest/42',
-          headSha: 'abc123',
-          branchName: 'feature/test',
-          branch: 'feature/test',
-          sha: 'abc123',
-          targetBranch: 'main',
+          prSha: 'abc123',
+          prBaseRef: 'main',
         }),
       }),
       expect.objectContaining({
@@ -241,8 +273,10 @@ describe('handleAdoPullRequest', () => {
     );
     expect(mockEnqueueCloudTask).toHaveBeenCalledWith(
       expect.objectContaining({
-        payload: expect.objectContaining({
-          repo: 'acme/Platform/backend',
+        task: expect.objectContaining({
+          payload: expect.objectContaining({
+            repo: 'acme/Platform/backend',
+          }),
         }),
       }),
       expect.any(Object),
@@ -256,10 +290,12 @@ describe('handleAdoPullRequest', () => {
 
     expect(mockEnqueueCloudTask).toHaveBeenCalledWith(
       expect.objectContaining({
-        type: CloudTaskType.GithubPrReviewSync,
-        payload: expect.objectContaining({
-          branch: 'feature/test',
-          sha: 'abc123',
+        task: expect.objectContaining({
+          type: TaskPayloadKind.GithubPrReviewSync,
+          payload: expect.objectContaining({
+            branch: 'feature/test',
+            sha: 'abc123',
+          }),
         }),
       }),
       expect.any(Object),
@@ -277,15 +313,12 @@ describe('handleAdoPullRequest', () => {
     });
 
     expect(mockGetAdoAutomationTargets).not.toHaveBeenCalled();
-    expect(mockCloudJobsFindFirst).not.toHaveBeenCalled();
+    expect(mockDedupSelect).not.toHaveBeenCalled();
     expect(mockEnqueueCloudTask).not.toHaveBeenCalled();
   });
 
   it('skips updated pull requests when the head SHA already has a review job', async () => {
-    mockCloudJobsFindFirst.mockResolvedValueOnce({
-      id: 99,
-      prSha: 'abc123',
-    });
+    mockDedupSelect.mockReturnValueOnce([{ id: 99 }]);
 
     await expect(
       handleAdoPullRequest(makePayload('git.pullrequest.updated'), {
@@ -307,23 +340,23 @@ describe('handleAdoPullRequest', () => {
       message: 'No prior Azure DevOps PR review found for sync event.',
     });
 
-    expect(mockCloudJobsFindFirst).toHaveBeenCalledTimes(2);
+    expect(mockDedupSelect).toHaveBeenCalledTimes(2);
     expect(mockEnqueueCloudTask).not.toHaveBeenCalled();
   });
 
   it('enqueues legacy updated pull request events when the head SHA changed', async () => {
-    mockCloudJobsFindFirst
-      .mockResolvedValueOnce(null)
-      .mockResolvedValueOnce({ id: 98, prSha: 'old-sha' });
+    mockDedupSelect.mockReturnValueOnce([]).mockReturnValueOnce([{ id: 98 }]);
 
     await handleAdoPullRequest(makePayload('git.pullrequest.updated'));
 
     expect(mockEnqueueCloudTask).toHaveBeenCalledWith(
       expect.objectContaining({
-        type: CloudTaskType.GithubPrReviewSync,
-        payload: expect.objectContaining({
-          branch: 'feature/test',
-          sha: 'abc123',
+        task: expect.objectContaining({
+          type: TaskPayloadKind.GithubPrReviewSync,
+          payload: expect.objectContaining({
+            branch: 'feature/test',
+            sha: 'abc123',
+          }),
         }),
       }),
       expect.any(Object),

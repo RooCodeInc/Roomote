@@ -1,4 +1,4 @@
-import { CloudTaskStatus, CloudTaskType } from '@roomote/types';
+import { CloudTaskStatus, TaskPayloadKind } from '@roomote/types';
 import type { CloudJob } from '@roomote/db/server';
 
 const {
@@ -7,7 +7,6 @@ const {
   mockTxFindFirstBackgroundAgentSettings,
   mockTxExecute,
   mockTxFindFirstCloudJobs,
-  mockTxFindFirstTasks,
   mockTxUpdate,
   mockTxUpdateSet,
   mockTxUpdateWhere,
@@ -31,7 +30,6 @@ const {
   mockTxFindFirstBackgroundAgentSettings: vi.fn(),
   mockTxExecute: vi.fn(),
   mockTxFindFirstCloudJobs: vi.fn(),
-  mockTxFindFirstTasks: vi.fn(),
   mockTxUpdateWhere: vi.fn(),
   mockTxUpdateSet: vi.fn(),
   mockTxUpdate: vi.fn(),
@@ -56,7 +54,7 @@ vi.mock('@roomote/db/server', () => ({
     transaction: (...args: unknown[]) => mockDbTransaction(...args),
   },
   backgroundAgentSettings: { orgId: 'backgroundAgentSettings.orgId' },
-  cloudJobs: {},
+  taskRuns: {},
   tasks: {},
   eq: (...args: unknown[]) => mockEq(...args),
   recordJobLifecycleEvent: (...args: unknown[]) =>
@@ -95,15 +93,37 @@ vi.mock('../slack-job-routing', () => ({
 
 import { dequeueResumeCloudJob } from '../dequeue-resume-cloud-job';
 
-function makeSnapshotResumeJob(overrides: Partial<CloudJob> = {}): CloudJob {
+type RunWithTask = CloudJob & { task: Record<string, unknown> };
+
+function makeTaskRow(overrides: Record<string, unknown> = {}) {
+  return {
+    id: 'task-101',
+    title: 'Task 101',
+    prompt: null,
+    harnessSessionId: 'session-canonical',
+    harnessInstructions: 'preserved instructions',
+    requestedWorkKind: 'unknown',
+    slackChannelId: null,
+    slackThreadTs: null,
+    linearSessionId: null,
+    linearIssueId: null,
+    linearOrganizationId: null,
+    ...overrides,
+  };
+}
+
+function makeSnapshotResumeJob(
+  overrides: Partial<RunWithTask> = {},
+  taskOverrides: Record<string, unknown> = {},
+): RunWithTask {
   return {
     id: 101,
     harness: 'opencode-server',
     status: CloudTaskStatus.Dequeued,
-    type: CloudTaskType.SnapshotResume,
+    kind: 'resume',
+    payloadKind: TaskPayloadKind.SnapshotResume,
     taskId: 'task-101',
-    harnessInstructions: 'preserved instructions',
-    sourceCloudJobId: 99,
+    sourceRunId: 99,
     sourceSnapshotId: 'snap-1',
     payload: {
       sourceCloudJobId: 99,
@@ -113,8 +133,9 @@ function makeSnapshotResumeJob(overrides: Partial<CloudJob> = {}): CloudJob {
       selectedRepositories: ['acme/api', 'acme/web'],
     },
     result: null,
+    task: makeTaskRow(taskOverrides),
     ...overrides,
-  } as CloudJob;
+  } as RunWithTask;
 }
 
 describe('dequeueResumeCloudJob', () => {
@@ -180,12 +201,9 @@ describe('dequeueResumeCloudJob', () => {
             findFirst: (...args: unknown[]) =>
               mockTxFindFirstBackgroundAgentSettings(...args),
           },
-          cloudJobs: {
+          taskRuns: {
             findFirst: (...args: unknown[]) =>
               mockTxFindFirstCloudJobs(...args),
-          },
-          tasks: {
-            findFirst: (...args: unknown[]) => mockTxFindFirstTasks(...args),
           },
         },
         update: (...args: unknown[]) => mockTxUpdate(...args),
@@ -193,18 +211,11 @@ describe('dequeueResumeCloudJob', () => {
     });
   });
 
-  it('returns source task harnessSessionId for snapshot resume', async () => {
+  it("returns the task's harnessSessionId for snapshot resume", async () => {
     const resumeJob = makeSnapshotResumeJob();
 
     mockTxExecute.mockResolvedValue([{ id: resumeJob.id }]);
-    mockTxFindFirstCloudJobs
-      .mockResolvedValueOnce(resumeJob)
-      .mockResolvedValueOnce({
-        taskId: 'task-source',
-      });
-    mockTxFindFirstTasks.mockResolvedValue({
-      harnessSessionId: 'session-canonical',
-    });
+    mockTxFindFirstCloudJobs.mockResolvedValueOnce(resumeJob);
 
     const result = await dequeueResumeCloudJob({ orgId: 'org-1' } as never, {
       cloudJobId: resumeJob.id,
@@ -216,15 +227,19 @@ describe('dequeueResumeCloudJob', () => {
       'acme/api',
       'acme/web',
     ]);
+    expect(result?.task).toMatchObject({
+      id: 'task-101',
+      harnessInstructions: 'preserved instructions',
+    });
     expect(mockRecordSnapshotResumeEvent).toHaveBeenCalledWith(
       expect.anything(),
       expect.objectContaining({
-        cloudJobId: resumeJob.id,
+        runId: resumeJob.id,
         eventType: 'started',
         message: expect.stringContaining('session-canonical'),
         details: expect.objectContaining({
           stage: 'bootstrap',
-          sourceCloudJobId: 99,
+          sourceRunId: 99,
           sourceSnapshotId: 'snap-1',
           harnessSessionId: 'session-canonical',
           sourceRepo: 'owner/repo',
@@ -236,7 +251,7 @@ describe('dequeueResumeCloudJob', () => {
     expect(mockRecordJobLifecycleEvent).toHaveBeenCalledWith(
       expect.anything(),
       expect.objectContaining({
-        cloudJobId: resumeJob.id,
+        runId: resumeJob.id,
         taskId: resumeJob.taskId,
         eventType: 'started',
         message: expect.stringContaining('started resume bootstrap'),
@@ -244,12 +259,12 @@ describe('dequeueResumeCloudJob', () => {
           stage: 'worker_bootstrap',
           status: CloudTaskStatus.Processing,
           sourceSnapshotId: 'snap-1',
-          sourceCloudJobId: 99,
+          sourceRunId: 99,
           harnessSessionId: 'session-canonical',
           sourceRepo: 'owner/repo',
           sourceEnvironmentId: 'env-1',
           selectedRepositories: ['acme/api', 'acme/web'],
-          cloudTaskType: CloudTaskType.SnapshotResume,
+          cloudTaskType: TaskPayloadKind.SnapshotResume,
         }),
       }),
     );
@@ -259,14 +274,7 @@ describe('dequeueResumeCloudJob', () => {
     const resumeJob = makeSnapshotResumeJob();
 
     mockTxExecute.mockResolvedValue([{ id: resumeJob.id }]);
-    mockTxFindFirstCloudJobs
-      .mockResolvedValueOnce(resumeJob)
-      .mockResolvedValueOnce({
-        taskId: 'task-source',
-      });
-    mockTxFindFirstTasks.mockResolvedValue({
-      harnessSessionId: 'session-canonical',
-    });
+    mockTxFindFirstCloudJobs.mockResolvedValueOnce(resumeJob);
     mockTxFindFirstBackgroundAgentSettings.mockResolvedValue({
       globalAgentInstructions: 'Org guidance',
       styleGuidance: 'Be direct and calm.',
@@ -279,18 +287,11 @@ describe('dequeueResumeCloudJob', () => {
     expect(result?.styleGuidance).toBe('Be direct and calm.');
   });
 
-  it('marks resumed setup onboarding jobs when routing resolves /setup from the source chain', async () => {
+  it('marks resumed setup onboarding jobs when routing resolves /setup', async () => {
     const resumeJob = makeSnapshotResumeJob();
 
     mockTxExecute.mockResolvedValue([{ id: resumeJob.id }]);
-    mockTxFindFirstCloudJobs
-      .mockResolvedValueOnce(resumeJob)
-      .mockResolvedValueOnce({
-        taskId: 'task-source',
-      });
-    mockTxFindFirstTasks.mockResolvedValue({
-      harnessSessionId: 'session-canonical',
-    });
+    mockTxFindFirstCloudJobs.mockResolvedValueOnce(resumeJob);
     mockResolveSlackJobRouting.mockResolvedValue({
       channel: 'C123',
       threadTs: '1710000000.000100',
@@ -309,14 +310,7 @@ describe('dequeueResumeCloudJob', () => {
     const resumeJob = makeSnapshotResumeJob();
 
     mockTxExecute.mockResolvedValue([{ id: resumeJob.id }]);
-    mockTxFindFirstCloudJobs
-      .mockResolvedValueOnce(resumeJob)
-      .mockResolvedValueOnce({
-        taskId: 'task-source',
-      });
-    mockTxFindFirstTasks.mockResolvedValue({
-      harnessSessionId: 'session-canonical',
-    });
+    mockTxFindFirstCloudJobs.mockResolvedValueOnce(resumeJob);
 
     await dequeueResumeCloudJob({ orgId: 'org-1' } as never, {
       cloudJobId: resumeJob.id,
@@ -349,14 +343,7 @@ describe('dequeueResumeCloudJob', () => {
     const resumeJob = makeSnapshotResumeJob();
 
     mockTxExecute.mockResolvedValue([{ id: resumeJob.id }]);
-    mockTxFindFirstCloudJobs
-      .mockResolvedValueOnce(resumeJob)
-      .mockResolvedValueOnce({
-        taskId: 'task-source',
-      });
-    mockTxFindFirstTasks.mockResolvedValue({
-      harnessSessionId: 'session-canonical',
-    });
+    mockTxFindFirstCloudJobs.mockResolvedValueOnce(resumeJob);
     mockTxFindFirstBackgroundAgentSettings.mockResolvedValue({
       globalAgentInstructions: 'Mention the affected environment in updates.',
     });
@@ -370,16 +357,11 @@ describe('dequeueResumeCloudJob', () => {
     );
   });
 
-  it('fails fast when source task has no harnessSessionId', async () => {
-    const resumeJob = makeSnapshotResumeJob();
+  it('fails fast when the task has no harnessSessionId', async () => {
+    const resumeJob = makeSnapshotResumeJob({}, { harnessSessionId: null });
 
     mockTxExecute.mockResolvedValue([{ id: resumeJob.id }]);
-    mockTxFindFirstCloudJobs
-      .mockResolvedValueOnce(resumeJob)
-      .mockResolvedValueOnce({
-        taskId: 'task-source',
-      });
-    mockTxFindFirstTasks.mockResolvedValue({ harnessSessionId: null });
+    mockTxFindFirstCloudJobs.mockResolvedValueOnce(resumeJob);
 
     const result = await dequeueResumeCloudJob({ orgId: 'org-1' } as never, {
       cloudJobId: resumeJob.id,
@@ -398,14 +380,14 @@ describe('dequeueResumeCloudJob', () => {
     expect(mockRecordSnapshotResumeEvent).toHaveBeenCalledWith(
       expect.anything(),
       expect.objectContaining({
-        cloudJobId: resumeJob.id,
+        runId: resumeJob.id,
         eventType: 'failed',
         details: expect.objectContaining({
           stage: 'bootstrap',
           reason: 'missing_harness_session_id',
-          sourceCloudJobId: 99,
+          sourceRunId: 99,
           sourceSnapshotId: 'snap-1',
-          sourceTaskId: 'task-source',
+          sourceTaskId: 'task-101',
         }),
       }),
     );
@@ -413,17 +395,10 @@ describe('dequeueResumeCloudJob', () => {
   });
 
   it('invokes the bootstrap failure callback when resume bootstrap fails before startup', async () => {
-    const resumeJob = makeSnapshotResumeJob();
+    const resumeJob = makeSnapshotResumeJob({}, { harnessSessionId: null });
 
     mockTxExecute.mockResolvedValue([{ id: resumeJob.id }]);
-    mockTxFindFirstCloudJobs
-      .mockResolvedValueOnce(resumeJob)
-      .mockResolvedValueOnce({
-        taskId: 'task-source',
-      });
-    mockTxFindFirstTasks.mockResolvedValue({
-      harnessSessionId: null,
-    });
+    mockTxFindFirstCloudJobs.mockResolvedValueOnce(resumeJob);
 
     const result = await dequeueResumeCloudJob(
       { orgId: 'org-1' } as never,
@@ -446,7 +421,7 @@ describe('dequeueResumeCloudJob', () => {
 
   it('uses the same error message for invalid resume job type in the callback and canceled job row', async () => {
     const invalidJob = makeSnapshotResumeJob({
-      type: CloudTaskType.StandardTask,
+      payloadKind: TaskPayloadKind.StandardTask,
     });
 
     mockTxExecute.mockResolvedValue([{ id: invalidJob.id }]);
@@ -469,7 +444,7 @@ describe('dequeueResumeCloudJob', () => {
 
     expect(callbackError?.message).toBe(cancelReason);
     expect(cancelReason).toBe(
-      `Expected SnapshotResume job, got ${invalidJob.type}`,
+      `Expected SnapshotResume run, got ${invalidJob.payloadKind}`,
     );
     expect(mockCancelCloudJob.mock.calls[0]?.[3]).toEqual(
       expect.objectContaining({
@@ -479,8 +454,9 @@ describe('dequeueResumeCloudJob', () => {
     );
   });
 
-  it('uses the same error message for missing sourceCloudJobId in the callback and canceled job row', async () => {
+  it('uses the same error message for a missing source run id in the callback and canceled job row', async () => {
     const invalidJob = makeSnapshotResumeJob({
+      sourceRunId: null,
       payload: {
         sourceCloudJobId: undefined,
         sourceSnapshotId: 'snap-1',
@@ -510,7 +486,7 @@ describe('dequeueResumeCloudJob', () => {
 
     expect(callbackError?.message).toBe(cancelReason);
     expect(cancelReason).toBe(
-      `SnapshotResume job ${invalidJob.id} has no sourceCloudJobId`,
+      `Snapshot-resume run ${invalidJob.id} has no source run id`,
     );
     expect(mockCancelCloudJob.mock.calls[0]?.[3]).toEqual(
       expect.objectContaining({
@@ -524,14 +500,7 @@ describe('dequeueResumeCloudJob', () => {
     const resumeJob = makeSnapshotResumeJob();
 
     mockTxExecute.mockResolvedValue([{ id: resumeJob.id }]);
-    mockTxFindFirstCloudJobs
-      .mockResolvedValueOnce(resumeJob)
-      .mockResolvedValueOnce({
-        taskId: 'task-source',
-      });
-    mockTxFindFirstTasks.mockResolvedValue({
-      harnessSessionId: 'session-canonical',
-    });
+    mockTxFindFirstCloudJobs.mockResolvedValueOnce(resumeJob);
 
     await dequeueResumeCloudJob({ orgId: 'org-1' } as never, {
       cloudJobId: resumeJob.id,

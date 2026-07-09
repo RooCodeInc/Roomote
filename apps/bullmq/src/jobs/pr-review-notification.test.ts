@@ -33,7 +33,7 @@ const {
 vi.mock('@roomote/db/server', () => ({
   db: {
     query: {
-      cloudJobs: {
+      taskRuns: {
         findFirst: (...args: unknown[]) => mockFindFirstCloudJob(...args),
       },
       taskPullRequests: {
@@ -49,7 +49,7 @@ vi.mock('@roomote/db/server', () => ({
   and: vi.fn(() => 'and-condition'),
   eq: vi.fn(() => 'eq-condition'),
   desc: vi.fn(() => 'desc-order'),
-  cloudJobs: { taskId: 'taskId', createdAt: 'createdAt' },
+  taskRuns: { taskId: 'taskId', createdAt: 'createdAt' },
   taskPullRequests: {
     taskId: 'taskId',
     repository: 'repository',

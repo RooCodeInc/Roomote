@@ -1,4 +1,4 @@
-import { CloudTaskType, CloudAgentType, PRODUCT_NAME } from '@roomote/types';
+import { TaskPayloadKind, CloudAgentType, PRODUCT_NAME } from '@roomote/types';
 import { enqueueCloudTask, getTaskUrl } from '@roomote/cloud-agents/server';
 import {
   DEFAULT_CONFLICT_RESOLUTION_IDLE_WINDOW_MS,
@@ -206,19 +206,38 @@ async function tryEnqueueResolution(
 
     for (const target of targetResult.targets) {
       const launchResult = await enqueueCloudTask({
-        type: CloudTaskType.GithubPrConflictResolve,
-        payload: {
-          repo: repoFullName,
-          prNumber: candidate.prNumber,
-          prTitle: candidate.title,
-          prUrl: candidate.htmlUrl,
-          headRef: candidate.headRef,
-          baseRef: candidate.baseRef,
+        task: {
+          type: TaskPayloadKind.GithubPrConflictResolve,
+          ...getBackgroundGithubTaskProperties(target.properties),
+          payload: {
+            repo: repoFullName,
+            prNumber: candidate.prNumber,
+            prTitle: candidate.title,
+            prUrl: candidate.htmlUrl,
+            headRef: candidate.headRef,
+            baseRef: candidate.baseRef,
+          },
         },
-        prRepo: repoFullName,
-        prNumber: candidate.prNumber,
-        prSourceControlProvider: 'github',
-        ...getBackgroundGithubTaskProperties(target.properties),
+        initiator: {
+          kind: 'automation',
+          key: 'conflict_resolver',
+          actor: {
+            externalId: String(candidate.authorId),
+            displayName: candidate.authorLogin,
+          },
+        },
+        workflow: 'pr_conflict_resolve',
+        surface: 'github',
+        trigger: 'webhook',
+        prLinkage: {
+          provider: 'github',
+          repository: repoFullName,
+          prNumber: candidate.prNumber,
+          prUrl: candidate.htmlUrl,
+          prTitle: candidate.title,
+          prSha: candidate.headSha,
+          prBaseRef: candidate.baseRef,
+        },
       });
 
       const taskUrl = getTaskUrl({

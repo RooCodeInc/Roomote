@@ -4,7 +4,7 @@ import { z } from 'zod';
 import {
   ALL_REPOSITORIES,
   type CloudTaskPayload,
-  CloudTaskType,
+  TaskPayloadKind,
   getScheduledSuggestionBackgroundAutomationDescriptor,
   isBetaBackgroundAutomationKey,
   normalizeSetupNewState,
@@ -30,7 +30,6 @@ import {
   and,
   asc,
   buildTaskSuggestionContentHash,
-  cloudJobs,
   db,
   environments,
   eq,
@@ -42,6 +41,8 @@ import {
   slackInstallations,
   slackUserMappings,
   sql,
+  taskRuns,
+  tasks,
   taskSuggestions,
   updateBackgroundAutomationRunArtifactsByTaskId,
   upsertBackgroundAutomationSlackThread,
@@ -91,9 +92,7 @@ const submitTaskSuggestionsBodySchema = z.object({
 const SETUP_ONBOARDING_SUGGESTION_METADATA_EVENT_TYPE =
   'roomote.setup_onboarding_suggestion';
 
-type SuggestedTasksPayload =
-  | CloudTaskPayload<CloudTaskType.SuggestedTasks>
-  | CloudTaskPayload<CloudTaskType.LegacyOnboardingSuggestions>;
+type SuggestedTasksPayload = CloudTaskPayload<typeof TaskPayloadKind.Scan>;
 
 type PersistedTaskSuggestion = {
   id: string;
@@ -957,13 +956,23 @@ async function postSuggestedTasksSummaryToSlack(params: {
         thread_ts: postResult.rootMessageTs,
       });
 
+      // Channel bindings live on the tasks row now.
       await tx
-        .update(cloudJobs)
+        .update(tasks)
         .set({
+          slackChannelId: channel.channelId,
           slackThreadTs: postResult.rootMessageTs,
-          payload: sql`coalesce(${cloudJobs.payload}, '{}'::jsonb) || ${slackThreadPayloadPatch}::jsonb`,
         })
-        .where(eq(cloudJobs.taskId, params.sourceTaskId));
+        .where(eq(tasks.id, params.sourceTaskId));
+
+      // Keep run payloads in sync for consumers that read Slack routing
+      // metadata from the payload (prompt assembly, callbacks).
+      await tx
+        .update(taskRuns)
+        .set({
+          payload: sql`coalesce(${taskRuns.payload}, '{}'::jsonb) || ${slackThreadPayloadPatch}::jsonb`,
+        })
+        .where(eq(taskRuns.taskId, params.sourceTaskId));
     }
 
     if (postResult && shouldTrackAutomationThread) {
@@ -1019,15 +1028,21 @@ export async function submitTaskSuggestions(
   }
 
   try {
-    const [cloudJob, deploymentSettings] = await Promise.all([
-      db.query.cloudJobs.findFirst({
-        where: eq(cloudJobs.taskId, taskId),
+    const [run, task, deploymentSettings] = await Promise.all([
+      db.query.taskRuns.findFirst({
+        where: eq(taskRuns.taskId, taskId),
         orderBy: (table, { desc }) => desc(table.id),
         columns: {
           id: true,
-          type: true,
-          userId: true,
+          payloadKind: true,
+          actingUserId: true,
           payload: true,
+        },
+      }),
+      db.query.tasks.findFirst({
+        where: eq(tasks.id, taskId),
+        columns: {
+          initiatorUserId: true,
         },
       }),
       db.query.deploymentSettings.findFirst({
@@ -1037,24 +1052,21 @@ export async function submitTaskSuggestions(
       }),
     ]);
 
-    if (!cloudJob) {
+    if (!run) {
       return c.json({ error: 'Task not found' }, 404);
     }
 
-    if (
-      cloudJob.type !== CloudTaskType.SuggestedTasks &&
-      cloudJob.type !== CloudTaskType.LegacyOnboardingSuggestions
-    ) {
+    if (run.payloadKind !== TaskPayloadKind.Scan) {
       return c.json({ error: 'Task is not a Suggested Tasks task' }, 400);
     }
 
-    const payload = cloudJob.payload as SuggestedTasksPayload;
+    const payload = run.payload as SuggestedTasksPayload;
     const setupNewState = normalizeSetupNewState(
       deploymentSettings?.setupNewState,
     );
-    const isOnboardingTrigger =
-      cloudJob.type === CloudTaskType.LegacyOnboardingSuggestions ||
-      payload.trigger === 'onboarding';
+    const createdByUserId =
+      auth.userId ?? run.actingUserId ?? task?.initiatorUserId ?? null;
+    const isOnboardingTrigger = payload.trigger === 'onboarding';
 
     let candidateRepositories: ResolvedRepository[] = [];
 
@@ -1211,7 +1223,7 @@ export async function submitTaskSuggestions(
       await postSetupTaskSuggestionsToSlack({
         sourceTaskId: taskId,
         slackChannel: setupNewState.slackChannel,
-        createdByUserId: auth.userId ?? cloudJob.userId ?? null,
+        createdByUserId,
         suggestions: persistedSuggestions,
       });
 
@@ -1220,7 +1232,7 @@ export async function submitTaskSuggestions(
       if (!setupNewState.slackChannel) {
         await postSetupTaskSuggestionsToTelegram({
           sourceTaskId: taskId,
-          createdByUserId: auth.userId ?? cloudJob.userId ?? null,
+          createdByUserId,
           suggestions: persistedSuggestions,
         });
 
@@ -1228,7 +1240,7 @@ export async function submitTaskSuggestions(
         // checked inside).
         await postSetupTaskSuggestionsToTeams({
           sourceTaskId: taskId,
-          createdByUserId: auth.userId ?? cloudJob.userId ?? null,
+          createdByUserId,
           suggestions: persistedSuggestions,
         });
       }
@@ -1237,7 +1249,7 @@ export async function submitTaskSuggestions(
     if (payload.notifySlack) {
       await postSuggestedTasksSummaryToSlack({
         sourceTaskId: taskId,
-        createdByUserId: auth.userId ?? cloudJob.userId ?? null,
+        createdByUserId,
         suggestionSource: payload.suggestionSource,
         historicalThreadFeedbackDebugSnippet:
           payload.historicalThreadFeedbackDebugSnippet ?? null,
@@ -1249,7 +1261,7 @@ export async function submitTaskSuggestions(
       // buttons per suggestion).
       await postScheduledSuggestionsToTelegram({
         sourceTaskId: taskId,
-        createdByUserId: auth.userId ?? cloudJob.userId ?? null,
+        createdByUserId,
         suggestionSource: payload.suggestionSource,
         suggestions: persistedSuggestions,
       });
@@ -1258,7 +1270,7 @@ export async function submitTaskSuggestions(
       // checked inside).
       await postScheduledSuggestionsToTeams({
         sourceTaskId: taskId,
-        createdByUserId: auth.userId ?? cloudJob.userId ?? null,
+        createdByUserId,
         suggestionSource: payload.suggestionSource,
         suggestions: persistedSuggestions,
       });

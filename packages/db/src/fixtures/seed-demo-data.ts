@@ -4,7 +4,7 @@ import { CloudTaskStatus } from '@roomote/types';
 
 import type { CreateUser } from '../types';
 import {
-  cloudJobs,
+  taskRuns,
   deploymentSettings,
   environments,
   githubInstallations,
@@ -15,7 +15,7 @@ import {
 import { db } from '../db';
 
 import {
-  cloudJobFactory,
+  runFactory,
   environmentFactory,
   githubInstallationFactory,
   repositoryFactory,
@@ -46,7 +46,7 @@ export const demoSeedTasks = [
     id: 'demo-seed-task-fix-login',
     title: 'Fix login redirect loop on expired sessions',
     mode: 'code',
-    completed: true,
+    state: 'completed',
     cloudJobStatus: CloudTaskStatus.Completed,
     repositoryFullName: 'roomote-demo/demo-web',
   },
@@ -54,7 +54,7 @@ export const demoSeedTasks = [
     id: 'demo-seed-task-add-webhooks',
     title: 'Add webhook retries with exponential backoff',
     mode: 'code',
-    completed: true,
+    state: 'completed',
     cloudJobStatus: CloudTaskStatus.Completed,
     repositoryFullName: 'roomote-demo/demo-api',
   },
@@ -62,7 +62,7 @@ export const demoSeedTasks = [
     id: 'demo-seed-task-explain-auth',
     title: 'Explain how session tokens are validated',
     mode: 'ask',
-    completed: false,
+    state: 'active',
     cloudJobStatus: CloudTaskStatus.Running,
     repositoryFullName: 'roomote-demo/demo-api',
   },
@@ -209,11 +209,10 @@ export async function seedDemoData(): Promise<DemoSeedSummary> {
     if (!existingTask) {
       await taskFactory.create({
         id: task.id,
-        userId: demoSeedUserId,
-        attributedUserId: demoSeedUserId,
+        initiatorUserId: demoSeedUserId,
         title: task.title,
         mode: task.mode,
-        completed: task.completed,
+        state: task.state,
         repositoryName: task.repositoryFullName,
         repositoryUrl: `https://github.com/${task.repositoryFullName}`,
         defaultBranch: 'main',
@@ -222,14 +221,14 @@ export async function seedDemoData(): Promise<DemoSeedSummary> {
 
     record(`task ${task.id}`, !existingTask);
 
-    const existingCloudJob = await db.query.cloudJobs.findFirst({
-      where: eq(cloudJobs.taskId, task.id),
+    const existingCloudJob = await db.query.taskRuns.findFirst({
+      where: eq(taskRuns.taskId, task.id),
     });
 
     if (!existingCloudJob) {
-      await cloudJobFactory.create({
+      await runFactory.create({
         taskId: task.id,
-        userId: demoSeedUserId,
+        actingUserId: demoSeedUserId,
         status: task.cloudJobStatus,
         payload: {
           repo: task.repositoryFullName,

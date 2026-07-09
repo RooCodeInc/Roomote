@@ -1,4 +1,4 @@
-import { CloudTaskType, type CloudTaskPayload } from '@roomote/types';
+import { TaskPayloadKind, type CloudTaskPayload } from '@roomote/types';
 
 import { getCloudJobVisiblePrompt, getCloudJobPromptText } from '@/lib';
 
@@ -13,7 +13,7 @@ describe('getCloudJobPromptText', () => {
         buildCloudJob({
           repo: 'Roomote/example-app',
           description: 'Investigate the failing route',
-        } satisfies CloudTaskPayload<CloudTaskType.StandardTask>),
+        } satisfies CloudTaskPayload<typeof TaskPayloadKind.StandardTask>),
       ),
     ).toBe('Investigate the failing route');
   });
@@ -28,7 +28,7 @@ describe('getCloudJobPromptText', () => {
           ts: '123.000',
           thread_ts: '123.456',
           repo: 'Roomote/example-app',
-        } satisfies CloudTaskPayload<CloudTaskType.SlackAppMention>),
+        } satisfies CloudTaskPayload<typeof TaskPayloadKind.SlackAppMention>),
       ),
     ).toBe('<slack_message>\nplease help\n</slack_message>');
   });
@@ -42,7 +42,9 @@ describe('getCloudJobPromptText', () => {
           prTitle: 'Fix the task transcript UI',
           commentBody:
             'Fix this specific issue:\n\nThe task page shows raw XML.',
-        } satisfies CloudTaskPayload<CloudTaskType.GithubPrReviewFollowUp>),
+        } satisfies CloudTaskPayload<
+          typeof TaskPayloadKind.GithubPrReviewFollowUp
+        >),
       ),
     ).toBe('Fix this specific issue:\n\nThe task page shows raw XML.');
   });
@@ -56,7 +58,7 @@ describe('getCloudJobPromptText', () => {
           sourceCloudJobId: 42,
           text: 'Original launch prompt',
           resumePrompt: 'Wake up and continue',
-        } satisfies CloudTaskPayload<CloudTaskType.SnapshotResume>),
+        } satisfies CloudTaskPayload<typeof TaskPayloadKind.SnapshotResume>),
       ),
     ).toBe('Wake up and continue');
   });
@@ -73,7 +75,7 @@ describe('getCloudJobVisiblePrompt', () => {
           ts: '123.000',
           thread_ts: '123.456',
           repo: 'Roomote/example-app',
-        } satisfies CloudTaskPayload<CloudTaskType.SlackAppMention>),
+        } satisfies CloudTaskPayload<typeof TaskPayloadKind.SlackAppMention>),
       ),
     ).toEqual({
       text: 'latest question',
@@ -91,7 +93,7 @@ describe('getCloudJobVisiblePrompt', () => {
           ts: '123.000',
           thread_ts: '123.456',
           repo: 'Roomote/example-app',
-        } satisfies CloudTaskPayload<CloudTaskType.SlackAppMention>),
+        } satisfies CloudTaskPayload<typeof TaskPayloadKind.SlackAppMention>),
       ),
     ).toEqual({
       text: 'latest question',
@@ -109,7 +111,7 @@ describe('getCloudJobVisiblePrompt', () => {
           ts: '123.000',
           thread_ts: '123.456',
           repo: 'Roomote/example-app',
-        } satisfies CloudTaskPayload<CloudTaskType.SlackAppMention>),
+        } satisfies CloudTaskPayload<typeof TaskPayloadKind.SlackAppMention>),
       ),
     ).toEqual({
       text: 'latest question',
@@ -123,7 +125,7 @@ describe('getCloudJobVisiblePrompt', () => {
         buildCloudJob({
           repo: 'Roomote/example-app',
           images: ['data:image/png;base64,abc123'],
-        } satisfies CloudTaskPayload<CloudTaskType.StandardTask>),
+        } satisfies CloudTaskPayload<typeof TaskPayloadKind.StandardTask>),
       ),
     ).toEqual({
       images: ['data:image/png;base64,abc123'],
@@ -143,7 +145,7 @@ describe('getCloudJobVisiblePrompt', () => {
           visibleInTranscript: false,
           resumePrompt: 'Wake up and continue',
           resumePromptImages: ['data:image/png;base64,new'],
-        } satisfies CloudTaskPayload<CloudTaskType.SnapshotResume>),
+        } satisfies CloudTaskPayload<typeof TaskPayloadKind.SnapshotResume>),
       ),
     ).toEqual({
       text: 'Wake up and continue',
@@ -163,7 +165,7 @@ describe('getCloudJobVisiblePrompt', () => {
           images: ['data:image/png;base64,old'],
           visibleInTranscript: false,
           resumePrompt: 'Wake up and continue',
-        } satisfies CloudTaskPayload<CloudTaskType.SnapshotResume>),
+        } satisfies CloudTaskPayload<typeof TaskPayloadKind.SnapshotResume>),
       ),
     ).toEqual({
       text: 'Wake up and continue',
@@ -176,7 +178,7 @@ describe('getCloudJobVisiblePrompt', () => {
       getCloudJobVisiblePrompt(
         buildCloudJob({
           repo: 'Roomote/example-app',
-        } satisfies CloudTaskPayload<CloudTaskType.StandardTask>),
+        } satisfies CloudTaskPayload<typeof TaskPayloadKind.StandardTask>),
       ),
     ).toBeNull();
   });

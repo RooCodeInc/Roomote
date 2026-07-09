@@ -8,8 +8,36 @@ import {
   users,
   eq,
   gte,
-  resolveTaskAttributionDisplay,
 } from '@roomote/db/server';
+
+type TaskInitiatorRow = {
+  initiatorKind: 'user' | 'automation';
+  initiatorUserId: string | null;
+  initiatorAutomation: string | null;
+  actorExternalId: string | null;
+  actorDisplayName: string | null;
+  userName: string | null;
+  userEmail: string | null;
+};
+
+/**
+ * Human-readable label for a task's initiator. Automation tasks are labeled
+ * by their automation key; user tasks by the linked user's name/email or the
+ * frozen external actor display.
+ */
+function getInitiatorLabel(row: TaskInitiatorRow): string {
+  if (row.initiatorKind === 'automation') {
+    return row.initiatorAutomation ?? 'automation';
+  }
+
+  return (
+    row.userName ??
+    row.userEmail ??
+    row.actorDisplayName ??
+    row.actorExternalId ??
+    'Unknown user'
+  );
+}
 
 type PullRequestMetadata = {
   canonicalTaskId: string;
@@ -59,22 +87,17 @@ async function getRoomotePullRequestMetadataByKey() {
       taskId: taskPullRequests.taskId,
       repository: taskPullRequests.repository,
       prNumber: taskPullRequests.prNumber,
-      taskAttributionKind: tasks.attributionKind,
-      taskAttributedUserId: tasks.attributedUserId,
-      taskAttributionSourceKind: tasks.attributionSourceKind,
-      taskAttributionSourceDisplayName: tasks.attributionSourceDisplayName,
-      taskAttributionSourceExternalId: tasks.attributionSourceExternalId,
-      taskAttributedGithubLogin: tasks.attributedGithubLogin,
-      taskEffectiveAuthorKind: tasks.effectiveAuthorKind,
-      taskEffectiveAuthorUserId: tasks.effectiveAuthorUserId,
-      taskEffectiveAuthorDisplayName: tasks.effectiveAuthorDisplayName,
-      taskEffectiveAuthorGithubLogin: tasks.effectiveAuthorGithubLogin,
-      taskUserName: users.name,
-      taskUserEmail: users.email,
+      initiatorKind: tasks.initiatorKind,
+      initiatorUserId: tasks.initiatorUserId,
+      initiatorAutomation: tasks.initiatorAutomation,
+      actorExternalId: tasks.actorExternalId,
+      actorDisplayName: tasks.actorDisplayName,
+      userName: users.name,
+      userEmail: users.email,
     })
     .from(taskPullRequests)
     .innerJoin(tasks, eq(tasks.id, taskPullRequests.taskId))
-    .leftJoin(users, eq(users.id, tasks.attributedUserId));
+    .leftJoin(users, eq(users.id, tasks.initiatorUserId));
 
   const metadataByKey = new Map<string, PullRequestMetadata>();
 
@@ -82,31 +105,10 @@ async function getRoomotePullRequestMetadataByKey() {
     if (!row.repository || row.prNumber === null) {
       continue;
     }
-    const attribution = resolveTaskAttributionDisplay(
-      {
-        attributionKind: row.taskAttributionKind,
-        attributedUserId: row.taskAttributedUserId,
-        attributionSourceKind: row.taskAttributionSourceKind,
-        attributionSourceDisplayName: row.taskAttributionSourceDisplayName,
-        attributionSourceExternalId: row.taskAttributionSourceExternalId,
-        attributedGithubLogin: row.taskAttributedGithubLogin,
-        effectiveAuthorKind: row.taskEffectiveAuthorKind,
-        effectiveAuthorUserId: row.taskEffectiveAuthorUserId,
-        effectiveAuthorDisplayName: row.taskEffectiveAuthorDisplayName,
-        effectiveAuthorGithubLogin: row.taskEffectiveAuthorGithubLogin,
-      },
-      {
-        attributedUser: {
-          id: row.taskAttributedUserId,
-          name: row.taskUserName,
-          email: row.taskUserEmail,
-        },
-      },
-    );
 
     metadataByKey.set(getPullRequestKey(row.repository, row.prNumber), {
       canonicalTaskId: row.taskId,
-      userLabel: attribution.analyticsDisplay,
+      userLabel: getInitiatorLabel(row),
     });
   }
 
@@ -127,68 +129,23 @@ async function getAnalyticsRepositoryIds() {
 async function getActiveUserCount(since: Date) {
   const rows = await db
     .select({
-      attributionKind: tasks.attributionKind,
-      attributedUserId: tasks.attributedUserId,
-      attributionSourceKind: tasks.attributionSourceKind,
-      attributionSourceDisplayName: tasks.attributionSourceDisplayName,
-      attributionSourceExternalId: tasks.attributionSourceExternalId,
-      attributedGithubLogin: tasks.attributedGithubLogin,
-      effectiveAuthorKind: tasks.effectiveAuthorKind,
-      effectiveAuthorUserId: tasks.effectiveAuthorUserId,
-      effectiveAuthorDisplayName: tasks.effectiveAuthorDisplayName,
-      effectiveAuthorGithubLogin: tasks.effectiveAuthorGithubLogin,
-      userName: users.name,
-      userEmail: users.email,
+      initiatorKind: tasks.initiatorKind,
+      initiatorUserId: tasks.initiatorUserId,
+      actorExternalId: tasks.actorExternalId,
     })
     .from(tasks)
-    .leftJoin(users, eq(users.id, tasks.attributedUserId))
     .where(gte(tasks.createdAt, since));
 
   const humanCreatorKeys = rows.flatMap((row) => {
-    const attribution = resolveTaskAttributionDisplay(
-      {
-        attributionKind: row.attributionKind,
-        attributedUserId: row.attributedUserId,
-        attributionSourceKind: row.attributionSourceKind,
-        attributionSourceDisplayName: row.attributionSourceDisplayName,
-        attributionSourceExternalId: row.attributionSourceExternalId,
-        attributedGithubLogin: row.attributedGithubLogin,
-        effectiveAuthorKind: row.effectiveAuthorKind,
-        effectiveAuthorUserId: row.effectiveAuthorUserId,
-        effectiveAuthorDisplayName: row.effectiveAuthorDisplayName,
-        effectiveAuthorGithubLogin: row.effectiveAuthorGithubLogin,
-      },
-      {
-        attributedUser: {
-          id: row.attributedUserId,
-          name: row.userName,
-          email: row.userEmail,
-        },
-      },
-    );
-
-    if (attribution.kind === 'automatic') {
+    if (row.initiatorKind !== 'user') {
       return [];
     }
 
-    if (attribution.kind === 'matched_user') {
-      const matchedUserId =
-        row.effectiveAuthorKind === 'human' && row.effectiveAuthorUserId
-          ? row.effectiveAuthorUserId
-          : row.attributedUserId;
-
-      return matchedUserId ? [`matched:${matchedUserId}`] : [];
+    if (row.initiatorUserId) {
+      return [`user:${row.initiatorUserId}`];
     }
 
-    if (row.attributionSourceKind && row.attributionSourceExternalId) {
-      return [
-        `unlinked:${row.attributionSourceKind}:${row.attributionSourceExternalId}`,
-      ];
-    }
-
-    return [
-      `unlinked:${attribution.sourceKind}:${attribution.analyticsDisplay}`,
-    ];
+    return row.actorExternalId ? [`external:${row.actorExternalId}`] : [];
   });
 
   return new Set(humanCreatorKeys).size;

@@ -68,7 +68,7 @@ vi.mock('../getGiteaAutomationTargets', async () => {
   };
 });
 
-import { CloudTaskType } from '@roomote/types';
+import { TaskPayloadKind } from '@roomote/types';
 
 import { handleGiteaPullRequest } from '../handlePullRequest';
 import type { GiteaPullRequestWebhook } from '../types';
@@ -143,22 +143,32 @@ describe('handleGiteaPullRequest', () => {
     });
     expect(mockEnqueueCloudTask).toHaveBeenCalledWith(
       expect.objectContaining({
-        userId: 'user-1',
-        attributionOverride: {
-          kind: 'automatic',
-          sourceKind: 'gitea',
-        },
-        type: CloudTaskType.GithubPrReview,
-        payload: expect.objectContaining({
-          repo: 'acme/backend',
-          sourceControlProvider: 'gitea',
+        task: expect.objectContaining({
+          type: TaskPayloadKind.GithubPrReview,
+          payload: expect.objectContaining({
+            repo: 'acme/backend',
+            sourceControlProvider: 'gitea',
+            prNumber: 42,
+            prUrl: 'https://git.example.com/acme/backend/pulls/42',
+            headSha: 'abc123',
+            branchName: 'feature/test',
+            branch: 'feature/test',
+            sha: 'abc123',
+            targetBranch: 'main',
+          }),
+        }),
+        initiator: expect.objectContaining({
+          kind: 'automation',
+          key: 'review_code',
+        }),
+        workflow: 'pr_review',
+        surface: 'gitea',
+        trigger: 'webhook',
+        prLinkage: expect.objectContaining({
+          provider: 'gitea',
+          repository: 'acme/backend',
           prNumber: 42,
-          prUrl: 'https://git.example.com/acme/backend/pulls/42',
-          headSha: 'abc123',
-          branchName: 'feature/test',
-          branch: 'feature/test',
-          sha: 'abc123',
-          targetBranch: 'main',
+          prSha: 'abc123',
         }),
       }),
       expect.objectContaining({
@@ -172,10 +182,12 @@ describe('handleGiteaPullRequest', () => {
 
     expect(mockEnqueueCloudTask).toHaveBeenCalledWith(
       expect.objectContaining({
-        type: CloudTaskType.GithubPrReviewSync,
-        payload: expect.objectContaining({
-          branch: 'feature/test',
-          sha: 'abc123',
+        task: expect.objectContaining({
+          type: TaskPayloadKind.GithubPrReviewSync,
+          payload: expect.objectContaining({
+            branch: 'feature/test',
+            sha: 'abc123',
+          }),
         }),
       }),
       expect.any(Object),
@@ -186,7 +198,7 @@ describe('handleGiteaPullRequest', () => {
     mockFindActiveGitHubPrReviewTask.mockResolvedValue({
       jobId: 99,
       taskId: 'running-task',
-      type: CloudTaskType.GithubPrReviewSync,
+      type: TaskPayloadKind.GithubPrReviewSync,
       status: 'running' as never,
       taskPhase: 'running',
       match: 'github_pr',

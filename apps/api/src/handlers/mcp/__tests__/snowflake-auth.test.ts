@@ -41,11 +41,11 @@ const {
 vi.mock('@roomote/db/server', () => ({
   db: {
     query: {
-      cloudJobs: { findFirst: mockFindCloudJob },
+      taskRuns: { findFirst: mockFindCloudJob },
       mcpConnections: { findFirst: mockFindConnection },
     },
   },
-  cloudJobs: { id: 'id' },
+  taskRuns: { id: 'id' },
   mcpConnections: {
     mcpId: 'mcpId',
     enabled: 'enabled',
@@ -153,7 +153,7 @@ describe('snowflake MCP auth and tool handling', () => {
     vi.clearAllMocks();
     mockFindCloudJob.mockResolvedValue({
       id: 42,
-      userId: 'user-1',
+      actingUserId: 'user-1',
     });
     mockFindConnection.mockResolvedValue(mockConnectionRow());
     mockSnowflakeConnect.mockImplementation((callback) => {
@@ -495,7 +495,7 @@ describe('snowflake MCP auth and tool handling', () => {
   it('rejects tokens whose principal does not match the cloud job user', async () => {
     mockFindCloudJob.mockResolvedValue({
       id: 42,
-      userId: 'user-2',
+      actingUserId: 'user-2',
     });
 
     const response = await postMcp(
@@ -513,7 +513,7 @@ describe('snowflake MCP auth and tool handling', () => {
   it('rejects user tokens for deployment-principal cloud jobs', async () => {
     mockFindCloudJob.mockResolvedValue({
       id: 42,
-      userId: null,
+      actingUserId: null,
     });
 
     const response = await postMcp(
@@ -531,7 +531,7 @@ describe('snowflake MCP auth and tool handling', () => {
   it('allows deployment-principal tokens for deployment-principal cloud jobs backed by a deployment-scoped connection', async () => {
     mockFindCloudJob.mockResolvedValue({
       id: 42,
-      userId: null,
+      actingUserId: null,
     });
 
     const response = await postMcp(

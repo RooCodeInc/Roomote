@@ -18,8 +18,9 @@ import {
   ALL_REPOSITORIES,
   buildTaskTypePromptAndWorkspacePayload,
   getEnvironmentRepositoryInstallationError,
-  type CloudTask,
-  CloudTaskType,
+  type StandardTask,
+  type SuggestedTasksTask,
+  TaskPayloadKind,
   resolveEvalHarnessSelection,
   type SourceControlProvider,
   TaskTypePromptAndWorkspacePayloadError,
@@ -204,8 +205,8 @@ export async function launchTask(
     );
   const taskType =
     requestedType === 'suggested-tasks'
-      ? CloudTaskType.SuggestedTasks
-      : CloudTaskType.StandardTask;
+      ? TaskPayloadKind.Scan
+      : TaskPayloadKind.StandardTask;
   const requiresAdmin = ADMIN_REQUIRED_LAUNCH_TYPES.has(requestedType);
 
   try {
@@ -312,7 +313,6 @@ export async function launchTask(
     });
 
     const taskBase = {
-      userId: auth.userId,
       harness: harnessSelection.harness ?? body.harness,
       computeProvider: body.computeProvider,
       requestedWorkKindDecision,
@@ -322,11 +322,11 @@ export async function launchTask(
         : {}),
     };
 
-    const task: CloudTask =
-      taskType === CloudTaskType.SuggestedTasks
+    const task: StandardTask | SuggestedTasksTask =
+      taskType === TaskPayloadKind.Scan
         ? {
             ...taskBase,
-            type: CloudTaskType.SuggestedTasks,
+            type: TaskPayloadKind.Scan,
             payload: {
               ...basePayload,
               trigger: body.trigger ?? 'scheduled',
@@ -335,7 +335,7 @@ export async function launchTask(
           }
         : {
             ...taskBase,
-            type: CloudTaskType.StandardTask,
+            type: TaskPayloadKind.StandardTask,
             payload: {
               ...basePayload,
               bootstrap:
@@ -343,10 +343,25 @@ export async function launchTask(
             },
           };
 
-    const launchResult = await enqueueCloudTask(task, {
-      launchClass:
-        task.type === CloudTaskType.SuggestedTasks ? 'automation' : 'human',
-    });
+    // A human explicitly asked for this launch via the API, so the human is
+    // the initiator even for the hidden scan branch (the old automation stamp
+    // made the requesting human invisible).
+    const launchResult = await enqueueCloudTask(
+      {
+        task,
+        initiator: { kind: 'user', userId: auth.userId },
+        workflow: task.type === TaskPayloadKind.Scan ? 'scan' : 'standard',
+        surface: 'api',
+        trigger: 'manual',
+        ...(task.type === TaskPayloadKind.Scan
+          ? { visibility: 'hidden' as const }
+          : {}),
+      },
+      {
+        launchClass:
+          task.type === TaskPayloadKind.Scan ? 'automation' : 'human',
+      },
+    );
 
     return c.json({
       success: true,

@@ -1,7 +1,7 @@
 import {
   type CloudTaskPayload,
   activeCloudTaskStatuses,
-  CloudTaskType,
+  TaskPayloadKind,
   ORPHANED_PENDING_THRESHOLD_MS,
   populateSnapshotResumeSlackMetadata,
   EXPIRED_SNAPSHOT_RESUME_ERROR,
@@ -15,7 +15,8 @@ import { createClient } from '@roomote/sdk/client';
 import {
   db,
   environments,
-  cloudJobs,
+  taskRuns,
+  tasks,
   claimPendingEnvironmentSnapshotForAttachment,
   clearEnvironmentSnapshot,
   getEnvironmentSnapshot,
@@ -60,30 +61,30 @@ type SimpleResult = { success: true } | { success: false; error: string };
 async function inheritSnapshotResumeVisiblePromptFields(
   payload: Record<string, unknown>,
   sourcePayload: unknown,
-  ancestorSourceCloudJobId: number | null,
+  ancestorSourceRunId: number | null,
 ): Promise<void> {
   restoreSnapshotResumeVisiblePromptFields(payload, sourcePayload);
 
   const visited = new Set<number>();
-  let currentSourceCloudJobId = ancestorSourceCloudJobId;
+  let currentSourceRunId = ancestorSourceRunId;
 
-  while (currentSourceCloudJobId && !visited.has(currentSourceCloudJobId)) {
-    visited.add(currentSourceCloudJobId);
+  while (currentSourceRunId && !visited.has(currentSourceRunId)) {
+    visited.add(currentSourceRunId);
 
-    const sourceJob = await db.query.cloudJobs.findFirst({
-      where: eq(cloudJobs.id, currentSourceCloudJobId),
+    const sourceRun = await db.query.taskRuns.findFirst({
+      where: eq(taskRuns.id, currentSourceRunId),
       columns: {
         payload: true,
-        sourceCloudJobId: true,
+        sourceRunId: true,
       },
     });
 
-    if (!sourceJob) {
+    if (!sourceRun) {
       return;
     }
 
-    restoreSnapshotResumeVisiblePromptFields(payload, sourceJob.payload);
-    currentSourceCloudJobId = sourceJob.sourceCloudJobId;
+    restoreSnapshotResumeVisiblePromptFields(payload, sourceRun.payload);
+    currentSourceRunId = sourceRun.sourceRunId;
   }
 }
 
@@ -91,19 +92,25 @@ async function findActiveEnvironmentSnapshotJob(params: {
   environmentId: string;
   provider: ComputeProvider;
 }) {
-  return db.query.cloudJobs.findFirst({
-    where: and(
-      eq(cloudJobs.type, CloudTaskType.SnapshotEnvironment),
-      eq(cloudJobs.vendor, params.provider),
-      inArray(cloudJobs.status, [...activeCloudTaskStatuses]),
-      sql`${cloudJobs.payload}->>'environmentId' = ${params.environmentId}`,
-    ),
-    columns: {
-      id: true,
-      taskId: true,
-    },
-    orderBy: [desc(cloudJobs.createdAt), desc(cloudJobs.id)],
-  });
+  const [job] = await db
+    .select({
+      id: taskRuns.id,
+      taskId: taskRuns.taskId,
+    })
+    .from(taskRuns)
+    .innerJoin(tasks, eq(tasks.id, taskRuns.taskId))
+    .where(
+      and(
+        eq(tasks.workflow, 'env_snapshot'),
+        eq(taskRuns.vendor, params.provider),
+        inArray(taskRuns.status, [...activeCloudTaskStatuses]),
+        sql`${taskRuns.payload}->>'environmentId' = ${params.environmentId}`,
+      ),
+    )
+    .orderBy(desc(taskRuns.createdAt), desc(taskRuns.id))
+    .limit(1);
+
+  return job ?? null;
 }
 
 export async function createEnvironmentSnapshotCommand(
@@ -196,11 +203,10 @@ export async function createEnvironmentSnapshotCommand(
     }
 
     try {
-      const snapshotLaunch = await enqueueCloudTask(
-        {
-          userId,
+      const snapshotLaunch = await enqueueCloudTask({
+        task: {
           computeProvider: provider,
-          type: CloudTaskType.SnapshotEnvironment,
+          type: TaskPayloadKind.SnapshotEnvironment,
           payload: {
             repo: '',
             environmentId: input.environmentId,
@@ -208,10 +214,12 @@ export async function createEnvironmentSnapshotCommand(
               pendingSnapshotClaim.attachmentSource,
           },
         },
-        {
-          launchClass: 'maintenance',
-        },
-      );
+        initiator: { kind: 'user', userId },
+        workflow: 'env_snapshot',
+        surface: 'web',
+        trigger: 'manual',
+        visibility: 'hidden',
+      });
 
       return {
         success: true,
@@ -305,8 +313,8 @@ export async function createCloudJobSnapshotCommand(
   try {
     const { userId } = auth;
 
-    const cloudJob = await db.query.cloudJobs.findFirst({
-      where: eq(cloudJobs.id, input.cloudJobId),
+    const cloudJob = await db.query.taskRuns.findFirst({
+      where: eq(taskRuns.id, input.cloudJobId),
     });
 
     if (!cloudJob) {
@@ -370,9 +378,9 @@ export async function createCloudJobSnapshotCommand(
     }
 
     await db
-      .update(cloudJobs)
+      .update(taskRuns)
       .set({ snapshotRequestedAt: new Date() })
-      .where(eq(cloudJobs.id, input.cloudJobId));
+      .where(eq(taskRuns.id, input.cloudJobId));
 
     return { success: true };
   } catch (error) {
@@ -380,13 +388,13 @@ export async function createCloudJobSnapshotCommand(
 
     try {
       await db
-        .update(cloudJobs)
+        .update(taskRuns)
         .set({
           snapshotRequestedAt: null,
           snapshotFailedAt: new Date(),
           error: `Snapshot creation failed: ${error instanceof Error ? error.message : String(error)}`,
         })
-        .where(eq(cloudJobs.id, input.cloudJobId));
+        .where(eq(taskRuns.id, input.cloudJobId));
     } catch (_error) {
       // NO-OP
     }
@@ -413,21 +421,15 @@ export async function restoreCloudJobSnapshotCommand(
   try {
     const { userId } = auth;
 
-    const sourceJob = await db.query.cloudJobs.findFirst({
-      where: eq(cloudJobs.id, input.sourceCloudJobId),
+    const sourceJob = await db.query.taskRuns.findFirst({
+      where: eq(taskRuns.id, input.sourceCloudJobId),
       columns: {
         port: true,
         payload: true,
         taskId: true,
-        userId: true,
         snapshotCreatedAt: true,
-        sourceCloudJobId: true,
-        draftPrompt: true,
+        sourceRunId: true,
         vendor: true,
-        slackThreadTs: true,
-        linearSessionId: true,
-        linearIssueId: true,
-        linearOrganizationId: true,
       },
     });
 
@@ -435,6 +437,27 @@ export async function restoreCloudJobSnapshotCommand(
       return {
         success: false,
         error: 'Source cloud job not found or you do not have access',
+      };
+    }
+
+    // Conversation cargo (draft prompt, Slack/Linear channel bindings) lives
+    // on the tasks row.
+    const sourceTask = await db.query.tasks.findFirst({
+      where: eq(tasks.id, sourceJob.taskId),
+      columns: {
+        draftPrompt: true,
+        slackChannelId: true,
+        slackThreadTs: true,
+        linearSessionId: true,
+        linearIssueId: true,
+        linearOrganizationId: true,
+      },
+    });
+
+    if (!sourceTask) {
+      return {
+        success: false,
+        error: 'Source task not found or you do not have access',
       };
     }
 
@@ -474,7 +497,7 @@ export async function restoreCloudJobSnapshotCommand(
       outOfBandContext = await claimOutOfBandContextForPrompt(sourceJob.taskId);
     }
 
-    const payload: CloudTaskPayload<CloudTaskType.SnapshotResume> = {
+    const payload: CloudTaskPayload<typeof TaskPayloadKind.SnapshotResume> = {
       repo: sourceJob.payload.repo,
       environmentId: sourceJob.payload.environmentId,
       port: sourceJob.port ?? undefined,
@@ -495,49 +518,46 @@ export async function restoreCloudJobSnapshotCommand(
     };
     populateSnapshotResumeSlackMetadata(payload, {
       sourcePayload,
-      threadTs: sourceJob.slackThreadTs,
+      threadTs: sourceTask.slackThreadTs,
     });
 
     await inheritSnapshotResumeVisiblePromptFields(
       payload,
       sourceJob.payload,
-      sourceJob.sourceCloudJobId,
+      sourceJob.sourceRunId,
     );
 
-    const resumeLaunch = await enqueueCloudTask(
-      {
-        userId: sourceJob.userId ?? userId,
+    const resumeLaunch = await enqueueCloudTask({
+      task: {
         computeProvider:
           sourceJob.vendor ?? resolveComputeProviderTarget(undefined),
         sourceSnapshotId: input.sourceSnapshotId,
         sourceCloudJobId: input.sourceCloudJobId,
-        type: CloudTaskType.SnapshotResume,
-        ...(sourceJob.slackThreadTs
-          ? { slackThreadTs: sourceJob.slackThreadTs }
+        type: TaskPayloadKind.SnapshotResume,
+        ...(sourceTask.slackThreadTs
+          ? { slackThreadTs: sourceTask.slackThreadTs }
           : {}),
-        ...(sourceJob.linearSessionId
+        ...(sourceTask.linearSessionId
           ? {
-              linearSessionId: sourceJob.linearSessionId,
-              ...(sourceJob.linearIssueId
-                ? { linearIssueId: sourceJob.linearIssueId }
+              linearSessionId: sourceTask.linearSessionId,
+              ...(sourceTask.linearIssueId
+                ? { linearIssueId: sourceTask.linearIssueId }
                 : {}),
-              ...(sourceJob.linearOrganizationId
-                ? { linearOrganizationId: sourceJob.linearOrganizationId }
+              ...(sourceTask.linearOrganizationId
+                ? { linearOrganizationId: sourceTask.linearOrganizationId }
                 : {}),
             }
           : {}),
         payload,
       },
-      {
-        launchClass: 'human',
-      },
-    );
+      actingUserId: userId,
+    });
 
     if (hasExplicitResumePrompt && resumePrompt.length === 0) {
       await db
-        .update(cloudJobs)
+        .update(tasks)
         .set({ draftPrompt: null })
-        .where(eq(cloudJobs.id, input.sourceCloudJobId));
+        .where(eq(tasks.id, sourceJob.taskId));
     }
 
     return {

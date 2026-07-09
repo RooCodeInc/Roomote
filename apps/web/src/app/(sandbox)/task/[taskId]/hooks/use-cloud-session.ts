@@ -39,17 +39,36 @@ export interface SandboxConnectionTarget {
   token: string;
 }
 
+/**
+ * Run row shape used by the task workspace UI: the run detail (live runtime
+ * status/phase/preview fields) decorated with the task's latest pull-request
+ * association and the resolved preview proxy base URL from the session query.
+ */
+export type SessionCloudJob = CloudJobDetail & {
+  prRepo: string | null;
+  prNumber: number | null;
+  previewProxyBaseUrl?: string;
+};
+
+/**
+ * Task shape returned by the session query. The by-id command spreads the
+ * full tasks row; the shared TaskWithAssociations type declares the
+ * conversation-cargo columns (draft prompt, channel bindings, surface) as
+ * optional because trimmed list rows omit them.
+ */
+export type SessionTask = TaskWithAssociations;
+
 export interface CloudSession {
   /** Resolved task ID from the task route segment. */
   taskId: string;
 
   /** The raw Task with associations, null if not yet loaded or not found. */
-  task: TaskWithAssociations | null | undefined;
+  task: SessionTask | null | undefined;
 
   harness: CodingHarness;
 
-  /** The raw CloudJob detail, null if not yet loaded or not found. */
-  cloudJob: CloudJobDetail | null | undefined;
+  /** The raw run detail, null if not yet loaded or not found. */
+  cloudJob: SessionCloudJob | null | undefined;
 
   /** Sandbox auth token for the live connection. */
   token: string | undefined;
@@ -152,8 +171,14 @@ export function useCloudSession(
     ),
   );
 
-  const task = sessionQuery.data?.task;
-  const cloudJob = sessionQuery.data?.cloudJob;
+  const task: SessionTask | null | undefined = sessionQuery.data?.task;
+  // The session command returns the run row joined with its user and the
+  // task-level pull-request fallback; cast once here so the rest of the task
+  // workspace consumes a stable client-side shape.
+  const cloudJob = sessionQuery.data?.cloudJob as
+    | SessionCloudJob
+    | null
+    | undefined;
   const artifacts = sessionQuery.data?.artifacts ?? EMPTY_ARTIFACTS;
 
   const payloadBlank =
@@ -268,7 +293,7 @@ export function useCloudSession(
       artifacts,
       prompt,
       blank: !!payloadBlank,
-      draftPrompt: cloudJob?.draftPrompt ?? null,
+      draftPrompt: task?.draftPrompt ?? null,
       sessionState,
       isSessionLoading,
       isTokenLoading,

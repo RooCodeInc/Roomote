@@ -56,6 +56,11 @@ const baseValues = {
   provider: 'anthropic',
   model: 'claude-sonnet-4-20250514',
   timestamp: 1_700_000_000,
+  workflow: 'standard',
+  surface: 'web',
+  trigger: 'manual',
+  initiatorKind: 'user',
+  actorExternalId: 'ext-user-1',
 } satisfies Parameters<typeof createTaskWithRetry>[0];
 
 describe('createTaskWithRetry', () => {

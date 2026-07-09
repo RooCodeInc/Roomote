@@ -1,4 +1,4 @@
-import { CloudTaskType } from '@roomote/types';
+import { TaskPayloadKind } from '@roomote/types';
 
 import type { HarnessLogger } from '../logging';
 import { startPolling } from './polling';
@@ -61,9 +61,8 @@ function createListenerOptions(
   return {
     cloudJob: {
       id: 42,
-      type: CloudTaskType.StandardTask,
-      slackThreadTs: null,
-      linearSessionId: null,
+      payloadKind: TaskPayloadKind.StandardTask,
+      payload: {},
       ...cloudJob,
     } as ListenerOptions['cloudJob'],
     state: createState(),
@@ -106,8 +105,12 @@ describe('startPolling', () => {
 
   it('starts Slack message polling for any Slack-linked cloud job', () => {
     const options = createListenerOptions({
-      type: CloudTaskType.SuggestedTasks,
-      slackThreadTs: '111.222',
+      payloadKind: TaskPayloadKind.Scan,
+      payload: {
+        repo: 'owner/repo',
+        description: 'Suggest follow-up tasks',
+        thread_ts: '111.222',
+      },
     });
 
     startPolling(options);
@@ -118,8 +121,7 @@ describe('startPolling', () => {
 
   it('starts Slack message polling for jobs with Slack channel metadata before a thread exists', () => {
     const options = createListenerOptions({
-      type: CloudTaskType.SuggestedTasks,
-      slackThreadTs: null,
+      payloadKind: TaskPayloadKind.Scan,
       payload: {
         repo: 'owner/repo',
         description: 'Suggest follow-up tasks',
@@ -135,8 +137,7 @@ describe('startPolling', () => {
 
   it('does not start Slack message polling without Slack thread or channel linkage', () => {
     const options = createListenerOptions({
-      type: CloudTaskType.SuggestedTasks,
-      slackThreadTs: null,
+      payloadKind: TaskPayloadKind.Scan,
       payload: {
         repo: 'owner/repo',
         description: 'Suggest follow-up tasks',
@@ -151,7 +152,7 @@ describe('startPolling', () => {
 
   it('starts generic communication polling for Teams-linked cloud jobs', () => {
     const options = createListenerOptions({
-      type: CloudTaskType.StandardTask,
+      payloadKind: TaskPayloadKind.StandardTask,
       payload: {
         repo: 'owner/repo',
         description: 'Teams-originated task',
@@ -173,7 +174,7 @@ describe('startPolling', () => {
 
   it('starts generic communication polling for Telegram-linked cloud jobs', () => {
     const options = createListenerOptions({
-      type: CloudTaskType.StandardTask,
+      payloadKind: TaskPayloadKind.StandardTask,
       payload: {
         repo: 'owner/repo',
         description: 'Telegram-originated task',

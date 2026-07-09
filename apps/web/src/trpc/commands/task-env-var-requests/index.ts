@@ -1,12 +1,12 @@
 import { z } from 'zod';
 
 import {
-  cloudJobs,
   db,
   desc,
   environmentVariables,
   eq,
   inArray,
+  taskRuns,
 } from '@roomote/db/server';
 import {
   ACP_ENVELOPE_EVENT_TYPES,
@@ -115,9 +115,9 @@ export async function fulfillTaskEnvVarRequestCommand(
       values: valuesToPersist,
     });
 
-    const activeCloudJob = await tx.query.cloudJobs.findFirst({
-      where: eq(cloudJobs.taskId, taskId),
-      orderBy: desc(cloudJobs.createdAt),
+    const activeCloudJob = await tx.query.taskRuns.findFirst({
+      where: eq(taskRuns.taskId, taskId),
+      orderBy: desc(taskRuns.createdAt),
       columns: {
         id: true,
         status: true,

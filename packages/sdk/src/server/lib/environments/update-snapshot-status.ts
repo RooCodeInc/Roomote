@@ -1,11 +1,11 @@
 import {
   type JobTokenContext,
-  CloudTaskType,
+  TaskPayloadKind,
   resolveComputeProviderTarget,
 } from '@roomote/types';
 import {
   db,
-  cloudJobs,
+  taskRuns,
   environments,
   buildPendingEnvironmentSnapshotMatchForCloudJob,
   getEnvironmentSnapshot,
@@ -22,13 +22,13 @@ export async function updateSnapshotStatus(
   auth: JobTokenContext,
   input: UpdateSnapshotStatusInput,
 ): Promise<void> {
-  const cloudJob = await db.query.cloudJobs.findFirst({
-    where: eq(cloudJobs.id, auth.cloudJobId),
+  const cloudJob = await db.query.taskRuns.findFirst({
+    where: eq(taskRuns.id, auth.cloudJobId),
   });
 
   const jobEnvironmentId = cloudJob?.payload.environmentId;
   const isValidSnapshotJob =
-    cloudJob?.type === CloudTaskType.SnapshotEnvironment &&
+    cloudJob?.payloadKind === TaskPayloadKind.SnapshotEnvironment &&
     typeof jobEnvironmentId === 'string' &&
     jobEnvironmentId === input.environmentId;
 

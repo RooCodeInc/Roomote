@@ -2,13 +2,15 @@ import {
   backgroundAgentSettings,
   db,
   eq,
-  findLatestGithubIdentityForUser,
   getBackgroundAgentSettingsForDeployment,
   isNull,
   repositories,
   users,
 } from '@roomote/db/server';
-import { compileAuthorshipRules } from '@roomote/cloud-agents/server';
+import {
+  compileAuthorshipRules,
+  findLatestGithubIdentityForUser,
+} from '@roomote/cloud-agents/server';
 import type {
   AuthorshipRuleActor,
   AuthorshipRuleIssue,

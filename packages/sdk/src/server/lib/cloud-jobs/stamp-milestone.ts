@@ -1,5 +1,5 @@
 import type { ComputeProviderLaunchMode } from '@roomote/types';
-import { and, db, cloudJobs, eq, isNull, sql } from '@roomote/db/server';
+import { and, db, taskRuns, eq, isNull, sql } from '@roomote/db/server';
 
 export const cloudJobMilestoneFields = [
   'provisionStartedAt',
@@ -13,12 +13,12 @@ export const cloudJobMilestoneFields = [
 export type CloudJobMilestoneField = (typeof cloudJobMilestoneFields)[number];
 
 const milestoneColumns = {
-  provisionStartedAt: cloudJobs.provisionStartedAt,
-  provisionReadyAt: cloudJobs.provisionReadyAt,
-  setupCompletedAt: cloudJobs.setupCompletedAt,
-  harnessStartedAt: cloudJobs.harnessStartedAt,
-  runtimeTaskStartedAt: cloudJobs.runtimeTaskStartedAt,
-  firstAssistantOutputAt: cloudJobs.firstAssistantOutputAt,
+  provisionStartedAt: taskRuns.provisionStartedAt,
+  provisionReadyAt: taskRuns.provisionReadyAt,
+  setupCompletedAt: taskRuns.setupCompletedAt,
+  harnessStartedAt: taskRuns.harnessStartedAt,
+  runtimeTaskStartedAt: taskRuns.runtimeTaskStartedAt,
+  firstAssistantOutputAt: taskRuns.firstAssistantOutputAt,
 } as const;
 
 /**
@@ -43,11 +43,11 @@ export async function stampCloudJobMilestone(input: {
   const updates: Record<string, unknown> = { [field]: at };
 
   if (launchMode !== undefined) {
-    updates.launchMode = sql`COALESCE(${cloudJobs.launchMode}, ${launchMode})`;
+    updates.launchMode = sql`COALESCE(${taskRuns.launchMode}, ${launchMode})`;
   }
 
   await db
-    .update(cloudJobs)
+    .update(taskRuns)
     .set(updates)
-    .where(and(eq(cloudJobs.id, cloudJobId), isNull(column)));
+    .where(and(eq(taskRuns.id, cloudJobId), isNull(column)));
 }

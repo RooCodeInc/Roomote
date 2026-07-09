@@ -431,9 +431,6 @@ async function launchTaskSuggestionTaskFromReaction({
     return true;
   }
 
-  const actorUserId =
-    reactingUserMapping.activeMapping?.userId ??
-    suggestionMessage.createdByUserId;
   const suggestionSlackTargetRepositoryFullName =
     suggestion.targetRepositoryFullName;
 
@@ -486,8 +483,17 @@ async function launchTaskSuggestionTaskFromReaction({
       return false;
     }
 
+    // The reacting human is the initiator; the old fallback to the
+    // suggestion creator's identity is gone.
     cloudJob = await startSlackAppMentionTask({
-      userId: actorUserId,
+      initiator: {
+        kind: 'user',
+        externalId: reactionEvent.user,
+        ...(reactingUserMapping.activeMapping?.userId
+          ? { matchedUserId: reactingUserMapping.activeMapping.userId }
+          : {}),
+      },
+      trigger: 'manual',
       channel: channelId,
       teamId,
       slackUserId: reactionEvent.user,
@@ -780,8 +786,6 @@ async function launchCoachSuggestionTaskFromReaction({
     return true;
   }
 
-  const actorUserId =
-    reactingUserMapping.activeMapping?.userId ?? suggestion.createdByUserId;
   const instructionText = `@${PRODUCT_NAME}, implement this`;
   const quotedSourceText = sourceText
     .split('\n')
@@ -809,8 +813,17 @@ async function launchCoachSuggestionTaskFromReaction({
     deliveryTracker = new SlackThreadDeliveryTracker(channelId, seededThreadTs);
     deliveryTracker.track(seededThreadTs);
 
+    // The reacting human is the initiator; the old fallback to the
+    // suggestion creator's identity is gone.
     const cloudJob = await startSlackAppMentionTask({
-      userId: actorUserId,
+      initiator: {
+        kind: 'user',
+        externalId: reactionEvent.user,
+        ...(reactingUserMapping.activeMapping?.userId
+          ? { matchedUserId: reactingUserMapping.activeMapping.userId }
+          : {}),
+      },
+      trigger: 'manual',
       channel: channelId,
       teamId,
       slackUserId: reactionEvent.user,

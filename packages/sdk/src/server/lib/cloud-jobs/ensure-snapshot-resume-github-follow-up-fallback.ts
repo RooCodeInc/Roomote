@@ -1,9 +1,10 @@
 import { enqueueCloudTask } from '@roomote/cloud-agents/server';
-import { cloudJobs, db, eq, sql } from '@roomote/db/server';
+import { db, eq, sql, taskRuns } from '@roomote/db/server';
 import {
-  CloudTaskType,
+  TaskPayloadKind,
   type CloudTaskPayload,
   type SnapshotResumePromptFallbackTask,
+  type TaskInitiator,
 } from '@roomote/types';
 
 function getDeferredResumePromptAccepted(result: unknown): boolean | null {
@@ -49,6 +50,34 @@ function getResumePromptFallbackTask(
   return fallbackTask as SnapshotResumePromptFallbackTask;
 }
 
+/**
+ * The fallback launch is a human PR-mention follow-up. Prefer the linked user
+ * when the fallback task captured one; otherwise carry the raw GitHub actor
+ * identity as an external user initiator.
+ */
+function resolveFallbackInitiator(
+  fallbackTask: SnapshotResumePromptFallbackTask,
+): TaskInitiator | null {
+  if (fallbackTask.userId) {
+    return { kind: 'user', userId: fallbackTask.userId };
+  }
+
+  const externalId =
+    fallbackTask.githubUserId != null
+      ? String(fallbackTask.githubUserId)
+      : (fallbackTask.githubLogin ?? null);
+
+  if (!externalId) {
+    return null;
+  }
+
+  return {
+    kind: 'user',
+    externalId,
+    displayName: fallbackTask.githubLogin ?? undefined,
+  };
+}
+
 export async function ensureSnapshotResumeGitHubFollowUpFallback({
   resumeJobId,
 }: {
@@ -57,17 +86,20 @@ export async function ensureSnapshotResumeGitHubFollowUpFallback({
   return db.transaction(async (tx) => {
     await tx.execute(sql`SELECT pg_advisory_xact_lock(${resumeJobId})`);
 
-    const resumeJob = await tx.query.cloudJobs.findFirst({
-      where: eq(cloudJobs.id, resumeJobId),
+    const resumeJob = await tx.query.taskRuns.findFirst({
+      where: eq(taskRuns.id, resumeJobId),
       columns: {
         id: true,
-        type: true,
+        payloadKind: true,
         payload: true,
         result: true,
       },
     });
 
-    if (!resumeJob || resumeJob.type !== CloudTaskType.SnapshotResume) {
+    if (
+      !resumeJob ||
+      resumeJob.payloadKind !== TaskPayloadKind.SnapshotResume
+    ) {
       return null;
     }
 
@@ -80,8 +112,8 @@ export async function ensureSnapshotResumeGitHubFollowUpFallback({
     );
 
     if (existingFallbackJobId) {
-      const existingFallbackJob = await tx.query.cloudJobs.findFirst({
-        where: eq(cloudJobs.id, existingFallbackJobId),
+      const existingFallbackJob = await tx.query.taskRuns.findFirst({
+        where: eq(taskRuns.id, existingFallbackJobId),
         columns: { id: true, taskId: true },
       });
 
@@ -99,13 +131,38 @@ export async function ensureSnapshotResumeGitHubFollowUpFallback({
       return null;
     }
 
+    const initiator = resolveFallbackInitiator(fallbackTask);
+
+    if (!initiator) {
+      console.warn(
+        `[ensureSnapshotResumeGitHubFollowUpFallback] Skipping fallback launch for resume run ${resumeJobId}: fallback task carries no user or GitHub identity.`,
+      );
+      return null;
+    }
+
+    const fallbackPayload = fallbackTask.payload as CloudTaskPayload<
+      typeof TaskPayloadKind.GithubPrReviewFollowUp
+    >;
+
     const fallbackLaunch = await enqueueCloudTask({
-      type: CloudTaskType.GithubPrReviewFollowUp,
-      payload:
-        fallbackTask.payload as CloudTaskPayload<CloudTaskType.GithubPrReviewFollowUp>,
-      userId: fallbackTask.userId,
-      githubLogin: fallbackTask.githubLogin,
-      githubUserId: fallbackTask.githubUserId,
+      task: {
+        type: TaskPayloadKind.GithubPrReviewFollowUp,
+        payload: fallbackPayload,
+        githubLogin: fallbackTask.githubLogin,
+        githubUserId: fallbackTask.githubUserId,
+      },
+      initiator,
+      workflow: 'pr_review',
+      surface: 'github',
+      trigger: 'message',
+      prLinkage: {
+        provider: 'github',
+        host: 'github.com',
+        repository: fallbackPayload.repo,
+        prNumber: fallbackPayload.prNumber,
+        prUrl: `https://github.com/${fallbackPayload.repo}/pull/${fallbackPayload.prNumber}`,
+        prTitle: fallbackPayload.prTitle,
+      },
     });
 
     const latestResult =
@@ -116,7 +173,7 @@ export async function ensureSnapshotResumeGitHubFollowUpFallback({
         : {};
 
     await tx
-      .update(cloudJobs)
+      .update(taskRuns)
       .set({
         result: {
           ...latestResult,
@@ -124,7 +181,7 @@ export async function ensureSnapshotResumeGitHubFollowUpFallback({
           deferredResumePromptFallbackEnqueuedAt: new Date().toISOString(),
         },
       })
-      .where(eq(cloudJobs.id, resumeJobId));
+      .where(eq(taskRuns.id, resumeJobId));
 
     return { id: fallbackLaunch.id, taskId: fallbackLaunch.taskId };
   });

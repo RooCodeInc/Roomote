@@ -15,11 +15,11 @@ const { mockFindCloudJob, mockFindConnection, mockEq, mockAnd, mockIsNull } =
 vi.mock('@roomote/db/server', () => ({
   db: {
     query: {
-      cloudJobs: { findFirst: mockFindCloudJob },
+      taskRuns: { findFirst: mockFindCloudJob },
       mcpConnections: { findFirst: mockFindConnection },
     },
   },
-  cloudJobs: { id: 'id' },
+  taskRuns: { id: 'id' },
   mcpConnections: {
     mcpId: 'mcpId',
     enabled: 'enabled',
@@ -115,7 +115,7 @@ describe('vercel MCP auth and tool handling', () => {
     vi.clearAllMocks();
     mockFindCloudJob.mockResolvedValue({
       id: 42,
-      userId: 'user-1',
+      actingUserId: 'user-1',
     });
     mockFindConnection.mockResolvedValue(mockConnectionRow());
   });
@@ -166,7 +166,7 @@ describe('vercel MCP auth and tool handling', () => {
   it('rejects tokens whose principal does not match the cloud job user', async () => {
     mockFindCloudJob.mockResolvedValue({
       id: 42,
-      userId: 'user-2',
+      actingUserId: 'user-2',
     });
 
     const response = await postMcp(
@@ -197,7 +197,7 @@ describe('vercel MCP auth and tool handling', () => {
   it('allows deployment-principal tokens for deployment-principal cloud jobs', async () => {
     mockFindCloudJob.mockResolvedValue({
       id: 42,
-      userId: null,
+      actingUserId: null,
     });
 
     const response = await postMcp(

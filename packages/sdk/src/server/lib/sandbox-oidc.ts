@@ -21,7 +21,7 @@ import {
 } from '@roomote/types';
 import {
   and,
-  cloudJobs,
+  taskRuns,
   recordCloudJobEvent,
   createRowMapper,
   db,
@@ -167,7 +167,7 @@ function buildTargetRows(params: {
 
   return params.targets.map((target) => ({
     environmentId: params.environmentId,
-    cloudJobId: params.cloudJobId ?? null,
+    runId: params.cloudJobId ?? null,
     computeProvider: params.computeProvider,
     computeProviderId: params.computeProviderId,
     targetKind: target.kind,
@@ -190,7 +190,7 @@ function groupRowsByInstance(
     const key = [
       row.computeProvider,
       row.computeProviderId,
-      row.cloudJobId ?? 'none',
+      row.runId ?? 'none',
       row.environmentId,
     ].join(':');
     const entries = groups.get(key) ?? [];
@@ -450,9 +450,9 @@ async function loadOwnerStateForRefresh(
     return null;
   }
 
-  if (row.cloudJobId) {
-    const cloudJob = await db.query.cloudJobs.findFirst({
-      where: eq(cloudJobs.id, row.cloudJobId),
+  if (row.runId) {
+    const cloudJob = await db.query.taskRuns.findFirst({
+      where: eq(taskRuns.id, row.runId),
       columns: {
         id: true,
         taskId: true,
@@ -486,7 +486,7 @@ async function loadOwnerStateForRefresh(
       taskId: cloudJob.taskId,
       environmentId: row.environmentId,
       environmentConfig: environment.config,
-      cloudJobId: row.cloudJobId,
+      cloudJobId: row.runId,
     };
   }
 
@@ -564,7 +564,7 @@ async function recordSandboxOidcEventSafe(params: {
 
   try {
     await recordCloudJobEvent(db, {
-      cloudJobId: params.cloudJobId,
+      runId: params.cloudJobId,
       taskId: params.taskId,
       source: 'machine_oidc',
       eventType: params.eventType,
@@ -861,7 +861,7 @@ export async function primeSandboxOidcTargets(
         ],
         set: {
           environmentId: input.environmentId,
-          cloudJobId: input.cloudJobId ?? null,
+          runId: input.cloudJobId ?? null,
           targetKind: sql`excluded.target_kind`,
           audience: sql`excluded.audience`,
           awsRoleArn: sql`excluded.aws_role_arn`,
@@ -892,7 +892,7 @@ export async function cleanupSandboxOidcTargetsForCloudJob(
   cloudJobId: number,
 ): Promise<void> {
   const rows = await db.query.sandboxOidcTargets.findMany({
-    where: eq(sandboxOidcTargets.cloudJobId, cloudJobId),
+    where: eq(sandboxOidcTargets.runId, cloudJobId),
   });
 
   const groups = groupRowsByInstance(rows);

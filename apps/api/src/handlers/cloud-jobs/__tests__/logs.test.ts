@@ -12,12 +12,12 @@ const mockStreamCommandOutput = vi.hoisted(() => vi.fn());
 vi.mock('@roomote/db/server', () => ({
   and: vi.fn((...args) => ({ type: 'and', args })),
   eq: vi.fn((...args) => ({ type: 'eq', args })),
-  cloudJobs: {
-    id: 'cloudJobs.id',
+  taskRuns: {
+    id: 'taskRuns.id',
   },
   db: {
     query: {
-      cloudJobs: {
+      taskRuns: {
         findFirst: mockFindFirst,
       },
     },

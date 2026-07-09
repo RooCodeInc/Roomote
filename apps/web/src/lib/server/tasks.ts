@@ -1,13 +1,9 @@
-import {
-  type CloudTaskType,
-  isCloudTaskType,
-  isHiddenCloudTaskType,
-} from '@roomote/types';
+import { type TaskWorkflow, getUserDisplayName } from '@roomote/types';
 import {
   type SQL,
   db,
   tasks,
-  cloudJobs,
+  taskRuns,
   taskPullRequests,
   taskInferenceUsageEvents,
   eq,
@@ -16,21 +12,22 @@ import {
   inArray,
   lt,
   isNull,
-  or,
-  resolveTaskAttributionDisplay,
   sql,
-  isVisibleTask,
 } from '@roomote/db/server';
 
 import {
   type Task as SimpleTask,
+  type TaskCreatorKind,
   type TaskInferenceUsageSummary,
   type Filter,
   type TimePeriodFilter,
   HAS_PULL_REQUEST_FILTER_VALUE,
 } from '@/types';
-import { getTaskCategoryById } from '@/lib';
-import { parseCreatorFilterValue } from '@/lib/task-creator-filter';
+import { getTaskCategoryById, isTaskWorkflow } from '@/lib';
+import {
+  formatAutomationLabel,
+  parseCreatorFilterValue,
+} from '@/lib/task-creator-filter';
 
 import { type SimpleUser, getUsersById } from './users';
 import { type SimpleCloudJob, getLatestCloudJobsByTaskId } from './cloud-jobs';
@@ -41,18 +38,6 @@ import { getTaskModelDisplayNameMap } from './task-models';
  */
 
 type TaskFilterCondition = SQL<unknown>;
-
-function getVisibleTaskHistoryCondition(): SQL<unknown> {
-  // `isVisibleTask` constructs a DB-backed subquery, so keep it out of module
-  // scope until apps/web has explicitly initialized the database singleton.
-  return isVisibleTask(tasks.id);
-}
-
-function requiresCloudJobJoin(filters: Filter[]): boolean {
-  return filters.some((filter) =>
-    ['category', 'environmentId', 'taskType'].includes(filter.type),
-  );
-}
 
 function getEffectiveFilters(
   filters: Filter[],
@@ -65,94 +50,79 @@ function getEffectiveFilters(
   return filters.filter((filter) => filter.type !== 'taskType');
 }
 
-function getSelectedTaskTypes(filters: Filter[]): CloudTaskType[] {
+function getSelectedWorkflows(filters: Filter[]): TaskWorkflow[] {
   return [
     ...new Set(
       filters
         .filter((filter) => filter.type === 'taskType')
         .map((filter) => filter.value)
-        .filter(isCloudTaskType),
+        .filter(isTaskWorkflow),
     ),
   ];
 }
 
-const getTaskFilterConditions = async ({ filters }: { filters: Filter[] }) => {
+/**
+ * Creator filters are a pure function of the tasks initiator columns.
+ */
+export function getCreatorFilterCondition(value: string): TaskFilterCondition {
+  const creatorFilter = parseCreatorFilterValue(value);
+
+  if (creatorFilter.kind === 'automation') {
+    return and(
+      eq(tasks.initiatorKind, 'automation'),
+      eq(tasks.initiatorAutomation, creatorFilter.key),
+    )!;
+  }
+
+  if (creatorFilter.kind === 'external') {
+    return and(
+      eq(tasks.initiatorKind, 'user'),
+      isNull(tasks.initiatorUserId),
+      eq(tasks.actorExternalId, creatorFilter.externalId),
+    )!;
+  }
+
+  return eq(tasks.initiatorUserId, creatorFilter.userId);
+}
+
+const getTaskFilterConditions = ({ filters }: { filters: Filter[] }) => {
   const conditions: TaskFilterCondition[] = [];
   const hasTaskTypeFilter = filters.some(
     (filter) => filter.type === 'taskType',
   );
-  const selectedTaskTypes = getSelectedTaskTypes(filters);
+  const selectedWorkflows = getSelectedWorkflows(filters);
 
   if (hasTaskTypeFilter) {
-    if (selectedTaskTypes.length === 0) {
+    if (selectedWorkflows.length === 0) {
       conditions.push(sql`1 = 0`);
     } else {
-      conditions.push(inArray(cloudJobs.type, selectedTaskTypes));
+      conditions.push(inArray(tasks.workflow, selectedWorkflows));
     }
   }
 
   for (const filter of filters) {
     switch (filter.type) {
       case 'userId': {
-        const creatorFilter = parseCreatorFilterValue(filter.value);
-
-        if (creatorFilter.kind === 'roomote') {
-          conditions.push(
-            or(
-              eq(tasks.effectiveAuthorKind, 'roomote'),
-              and(
-                isNull(tasks.effectiveAuthorKind),
-                eq(tasks.attributionKind, 'automatic'),
-              ),
-            )!,
-          );
-        } else if (creatorFilter.kind === 'unlinked_user') {
-          conditions.push(
-            and(
-              eq(tasks.attributionKind, 'unlinked_user'),
-              or(
-                isNull(tasks.effectiveAuthorKind),
-                and(
-                  eq(tasks.effectiveAuthorKind, 'human'),
-                  isNull(tasks.effectiveAuthorUserId),
-                ),
-              ),
-              eq(tasks.attributionSourceKind, creatorFilter.sourceKind),
-              eq(
-                tasks.attributionSourceExternalId,
-                creatorFilter.sourceExternalId,
-              ),
-            )!,
-          );
-        } else {
-          conditions.push(
-            or(
-              and(
-                eq(tasks.effectiveAuthorKind, 'human'),
-                eq(tasks.effectiveAuthorUserId, creatorFilter.userId),
-              ),
-              and(
-                isNull(tasks.effectiveAuthorKind),
-                eq(tasks.attributedUserId, creatorFilter.userId),
-              ),
-            )!,
-          );
-        }
-
+        conditions.push(getCreatorFilterCondition(filter.value));
         break;
       }
       case 'category': {
         const taskCategory = getTaskCategoryById(filter.value);
 
         if (taskCategory) {
-          conditions.push(inArray(cloudJobs.type, [...taskCategory.taskTypes]));
+          conditions.push(inArray(tasks.workflow, taskCategory.workflows));
         }
 
         break;
       }
       case 'environmentId':
         conditions.push(
-          sql`${cloudJobs.payload}->>'environmentId' = ${filter.value}`,
+          sql`EXISTS (
+            SELECT 1
+            FROM ${taskRuns}
+            WHERE ${taskRuns.taskId} = ${tasks.id}
+              AND ${taskRuns.payload}->>'environmentId' = ${filter.value}
+          )`,
         );
 
         break;
@@ -230,12 +200,46 @@ function parseTaskActivityCursor(
 }
 
 /**
+ * Task creator display: a pure function of the tasks initiator columns.
+ * - automation -> the automation key (humanized label)
+ * - user + linked user -> the user's name/avatar
+ * - user + no linked user -> the frozen external actor display
+ */
+export function resolveTaskCreatorDisplay(
+  task: {
+    initiatorKind: 'user' | 'automation';
+    initiatorAutomation: string | null;
+    actorExternalId: string | null;
+    actorDisplayName: string | null;
+  },
+  user: { name: string | null; email: string | null } | null,
+): { kind: TaskCreatorKind; label: string } {
+  if (task.initiatorKind === 'automation') {
+    return {
+      kind: 'automation',
+      label: task.initiatorAutomation
+        ? formatAutomationLabel(task.initiatorAutomation)
+        : '',
+    };
+  }
+
+  if (user) {
+    return { kind: 'user', label: getUserDisplayName(user) ?? '' };
+  }
+
+  return {
+    kind: 'external',
+    label: task.actorDisplayName ?? task.actorExternalId ?? '',
+  };
+}
+
+/**
  * Get Tasks
  */
 
 export type Task = SimpleTask & {
   attributionLabel: string;
-  attributionKind: string | null;
+  attributionKind: TaskCreatorKind;
   modelDisplayName?: string | null;
   user: SimpleUser | null;
   cloudJob: SimpleCloudJob;
@@ -302,15 +306,14 @@ export const getTasks = async ({
   const hasTaskTypeFilter = effectiveFilters.some(
     (filter) => filter.type === 'taskType',
   );
-  const conditions = [];
+  const conditions: TaskFilterCondition[] = [isNull(tasks.deletedAt)];
 
+  // An explicit workflow filter is the only way to reveal hidden tasks.
   if (!hasTaskTypeFilter) {
-    conditions.push(getVisibleTaskHistoryCondition());
+    conditions.push(eq(tasks.visibility, 'visible'));
   }
 
-  conditions.push(
-    ...(await getTaskFilterConditions({ filters: effectiveFilters })),
-  );
+  conditions.push(...getTaskFilterConditions({ filters: effectiveFilters }));
 
   if (timePeriod !== 'all') {
     const cutoffTimestamp =
@@ -331,63 +334,42 @@ export const getTasks = async ({
     }
   }
 
-  const baseQuery = db
-    .selectDistinct({
+  // Single-table read: display identity, classification, and state are all
+  // columns on tasks. The latest-run join happens separately and only feeds
+  // live runtime status/phase/preview fields.
+  const taskResults = await db
+    .select({
       id: tasks.id,
       harnessSessionId: tasks.harnessSessionId,
-      userId: tasks.userId,
-      attributedUserId: tasks.attributedUserId,
-      attributionKind: tasks.attributionKind,
-      attributionSourceKind: tasks.attributionSourceKind,
-      attributionSourceDisplayName: tasks.attributionSourceDisplayName,
-      attributionSourceExternalId: tasks.attributionSourceExternalId,
-      attributedGithubLogin: tasks.attributedGithubLogin,
-      effectiveAuthorKind: tasks.effectiveAuthorKind,
-      effectiveAuthorUserId: tasks.effectiveAuthorUserId,
-      effectiveAuthorDisplayName: tasks.effectiveAuthorDisplayName,
-      effectiveAuthorGithubLogin: tasks.effectiveAuthorGithubLogin,
-      effectiveAuthorGithubUserId: tasks.effectiveAuthorGithubUserId,
-      effectiveAuthorReason: tasks.effectiveAuthorReason,
-      effectiveAuthorRuleId: tasks.effectiveAuthorRuleId,
-      effectivePrOwnerKind: tasks.effectivePrOwnerKind,
-      effectivePrOwnerUserId: tasks.effectivePrOwnerUserId,
-      effectivePrOwnerDisplayName: tasks.effectivePrOwnerDisplayName,
-      effectivePrOwnerGithubLogin: tasks.effectivePrOwnerGithubLogin,
-      effectivePrOwnerReason: tasks.effectivePrOwnerReason,
-      effectivePrOwnerRuleId: tasks.effectivePrOwnerRuleId,
+      initiatorKind: tasks.initiatorKind,
+      initiatorUserId: tasks.initiatorUserId,
+      initiatorAutomation: tasks.initiatorAutomation,
+      actorExternalId: tasks.actorExternalId,
+      actorDisplayName: tasks.actorDisplayName,
       title: tasks.title,
       model: tasks.model,
       mode: tasks.mode,
-      completed: tasks.completed,
+      state: tasks.state,
+      workflow: tasks.workflow,
       timestamp: tasks.timestamp,
       activityAt: tasks.activityAt,
       repositoryUrl: tasks.repositoryUrl,
       repositoryName: tasks.repositoryName,
       defaultBranch: tasks.defaultBranch,
     })
-    .from(tasks);
-
-  const taskResults = await (
-    requiresCloudJobJoin(effectiveFilters)
-      ? baseQuery.leftJoin(cloudJobs, eq(cloudJobs.taskId, tasks.id))
-      : baseQuery
-  )
+    .from(tasks)
     .where(and(...conditions))
     .orderBy(desc(tasks.activityAt), desc(tasks.id))
     .limit(limit + 1); // Request one extra to determine hasMore.
 
-  // Fetch associations (users, cloud jobs, cloud agents) in parallel.
+  // Fetch associations (users, latest runs, usage) in parallel.
   const userIds = [
-    ...new Set([
-      ...taskResults
-        .map((t) =>
-          t.effectiveAuthorKind === 'roomote'
-            ? null
-            : (t.effectiveAuthorUserId ?? t.attributedUserId),
-        )
+    ...new Set(
+      taskResults
+        .map((t) => t.initiatorUserId)
         .filter((id): id is string => id !== null),
-    ]),
-  ].filter((id): id is string => id !== null);
+    ),
+  ];
 
   const taskIds = taskResults.map((t) => t.id);
 
@@ -405,52 +387,22 @@ export const getTasks = async ({
 
   const enrichedTasks = taskResults
     .map((task) => {
-      const displayUserId =
-        task.effectiveAuthorKind === 'roomote'
-          ? null
-          : (task.effectiveAuthorUserId ?? task.attributedUserId);
-      const user = displayUserId ? (usersById[displayUserId] ?? null) : null;
+      const user = task.initiatorUserId
+        ? (usersById[task.initiatorUserId] ?? null)
+        : null;
       const cloudJob = cloudJobsByTaskId[task.id];
+
       if (!cloudJob) {
         return null;
       }
 
-      if (!hasTaskTypeFilter && isHiddenCloudTaskType(cloudJob.type)) {
-        return null;
-      }
-
-      const attribution = resolveTaskAttributionDisplay(
-        {
-          attributionKind: task.attributionKind,
-          attributedUserId: task.attributedUserId,
-          attributionSourceKind: task.attributionSourceKind,
-          attributionSourceDisplayName: task.attributionSourceDisplayName,
-          attributionSourceExternalId: task.attributionSourceExternalId,
-          attributedGithubLogin: task.attributedGithubLogin,
-          effectiveAuthorKind: task.effectiveAuthorKind,
-          effectiveAuthorUserId: task.effectiveAuthorUserId,
-          effectiveAuthorDisplayName: task.effectiveAuthorDisplayName,
-          effectiveAuthorGithubLogin: task.effectiveAuthorGithubLogin,
-          effectiveAuthorGithubUserId: task.effectiveAuthorGithubUserId,
-          effectiveAuthorReason: task.effectiveAuthorReason,
-          effectiveAuthorRuleId: task.effectiveAuthorRuleId,
-          effectivePrOwnerKind: task.effectivePrOwnerKind,
-          effectivePrOwnerUserId: task.effectivePrOwnerUserId,
-          effectivePrOwnerDisplayName: task.effectivePrOwnerDisplayName,
-          effectivePrOwnerGithubLogin: task.effectivePrOwnerGithubLogin,
-          effectivePrOwnerReason: task.effectivePrOwnerReason,
-          effectivePrOwnerRuleId: task.effectivePrOwnerRuleId,
-        },
-        {
-          attributedUser: user,
-        },
-      );
+      const creator = resolveTaskCreatorDisplay(task, user);
 
       return {
         ...task,
         user,
-        attributionLabel: attribution.productDisplay,
-        attributionKind: attribution.kind,
+        attributionLabel: creator.label,
+        attributionKind: creator.kind,
         modelDisplayName: task.model ? modelDisplayNames.get(task.model) : null,
         cloudJob,
         inferenceUsage: inferenceUsageByTaskId[task.id],
@@ -477,7 +429,9 @@ export const getTasks = async ({
 /**
  * Search Tasks
  *
- * Simple search by title with ILIKE, scoped to the user's tasks within their org.
+ * Simple search by title with ILIKE, scoped to the whole deployment. "My
+ * tasks" filtering happens through the creator filter (initiatorUserId), not
+ * through an implicit owner scope.
  */
 
 type SearchTaskResult = {
@@ -489,7 +443,6 @@ type SearchTaskResult = {
 };
 
 export const searchTasks = async ({
-  userId,
   query,
   limit = 10,
   includeIds,
@@ -501,8 +454,8 @@ export const searchTasks = async ({
   includeIds?: string[];
 }): Promise<SearchTaskResult[]> => {
   const baseConditions = [
-    eq(tasks.userId, userId),
-    getVisibleTaskHistoryCondition(),
+    isNull(tasks.deletedAt),
+    eq(tasks.visibility, 'visible'),
   ];
 
   const searchConditions = [...baseConditions];
@@ -514,7 +467,7 @@ export const searchTasks = async ({
 
   // Main search query.
   const searchResults = await db
-    .selectDistinct({
+    .select({
       id: tasks.id,
       title: tasks.title,
       timestamp: tasks.timestamp,
@@ -536,7 +489,7 @@ export const searchTasks = async ({
 
   if (missingIds.length > 0) {
     pinnedResults = await db
-      .selectDistinct({
+      .select({
         id: tasks.id,
         title: tasks.title,
         timestamp: tasks.timestamp,
@@ -556,7 +509,7 @@ export const searchTasks = async ({
     .map((task) => {
       const cloudJob = cloudJobsByTaskId[task.id];
 
-      if (!cloudJob || isHiddenCloudTaskType(cloudJob.type)) {
+      if (!cloudJob) {
         return null;
       }
 

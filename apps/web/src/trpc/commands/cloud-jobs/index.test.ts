@@ -1,5 +1,5 @@
 import { FeatureFlag } from '@roomote/feature-flags';
-import { ALL_REPOSITORIES, CloudTaskType } from '@roomote/types';
+import { ALL_REPOSITORIES, TaskPayloadKind } from '@roomote/types';
 
 import type { UserAuthSuccess } from '@/types';
 
@@ -20,15 +20,13 @@ vi.mock('@roomote/cloud-agents/server', () => ({
 
 vi.mock('@roomote/db/server', () => ({
   and: vi.fn((...conditions: unknown[]) => ({ type: 'and', conditions })),
-  cloudJobs: {
-    id: 'cloud_jobs.id',
-    taskId: 'cloud_jobs.task_id',
-    slackThreadTs: 'cloud_jobs.slack_thread_ts',
-    status: 'cloud_jobs.status',
-  },
   db: {
     query: {
-      cloudJobs: {
+      tasks: {
+        findFirst: vi.fn(async () => null),
+      },
+      taskRuns: {
+        findFirst: vi.fn(async () => null),
         findMany: vi.fn(async () => []),
       },
       slackInstallations: {
@@ -48,7 +46,6 @@ vi.mock('@roomote/db/server', () => ({
     left,
     right,
   })),
-  isNotNull: vi.fn((value: unknown) => ({ type: 'isNotNull', value })),
   markTaskStartParallelCountEndedAt: vi.fn(),
   repositories: {
     id: 'repositories.id',
@@ -57,6 +54,18 @@ vi.mock('@roomote/db/server', () => ({
   },
   slackInstallations: {
     isActive: 'slack_installations.is_active',
+  },
+  taskRuns: {
+    id: 'task_runs.id',
+    taskId: 'task_runs.task_id',
+    status: 'task_runs.status',
+    createdAt: 'task_runs.created_at',
+    payload: 'task_runs.payload',
+  },
+  tasks: {
+    id: 'tasks.id',
+    slackChannelId: 'tasks.slack_channel_id',
+    slackThreadTs: 'tasks.slack_thread_ts',
   },
   sql: vi.fn(),
 }));
@@ -150,15 +159,18 @@ describe('createStandardTaskCloudJobCommand', () => {
     });
     expect(mockEnqueueCloudTask).toHaveBeenCalledWith(
       expect.objectContaining({
-        type: CloudTaskType.StandardTask,
-        payload: expect.objectContaining({
-          repo: 'acme/Platform/backend',
-          environmentId: '7bb91386-6282-4c98-9b31-0eb181116822',
-          sourceControlProvider: 'ado',
+        task: expect.objectContaining({
+          type: TaskPayloadKind.StandardTask,
+          payload: expect.objectContaining({
+            repo: 'acme/Platform/backend',
+            environmentId: '7bb91386-6282-4c98-9b31-0eb181116822',
+            sourceControlProvider: 'ado',
+          }),
         }),
-      }),
-      expect.objectContaining({
-        launchClass: 'human',
+        initiator: { kind: 'user', userId: 'user-123' },
+        workflow: 'standard',
+        surface: 'web',
+        trigger: 'manual',
       }),
     );
   });
@@ -186,13 +198,16 @@ describe('createStandardTaskCloudJobCommand', () => {
     });
     expect(mockEnqueueCloudTask).toHaveBeenCalledWith(
       expect.objectContaining({
-        type: CloudTaskType.StandardTask,
-        payload: expect.not.objectContaining({
-          environmentId: expect.anything(),
+        task: expect.objectContaining({
+          type: TaskPayloadKind.StandardTask,
+          payload: expect.not.objectContaining({
+            environmentId: expect.anything(),
+          }),
         }),
-      }),
-      expect.objectContaining({
-        launchClass: 'human',
+        initiator: { kind: 'user', userId: 'user-123' },
+        workflow: 'standard',
+        surface: 'web',
+        trigger: 'manual',
       }),
     );
   });
@@ -212,13 +227,16 @@ describe('createStandardTaskCloudJobCommand', () => {
     });
     expect(mockEnqueueCloudTask).toHaveBeenCalledWith(
       expect.objectContaining({
-        type: CloudTaskType.StandardTask,
-        payload: expect.objectContaining({
-          repo: ALL_REPOSITORIES,
+        task: expect.objectContaining({
+          type: TaskPayloadKind.StandardTask,
+          payload: expect.objectContaining({
+            repo: ALL_REPOSITORIES,
+          }),
         }),
-      }),
-      expect.objectContaining({
-        launchClass: 'human',
+        initiator: { kind: 'user', userId: 'user-123' },
+        workflow: 'standard',
+        surface: 'web',
+        trigger: 'manual',
       }),
     );
   });
@@ -256,14 +274,17 @@ describe('createStandardTaskCloudJobCommand', () => {
     });
     expect(mockEnqueueCloudTask).toHaveBeenCalledWith(
       expect.objectContaining({
-        type: CloudTaskType.StandardTask,
-        payload: expect.objectContaining({
-          environmentId: '7bb91386-6282-4c98-9b31-0eb181116822',
-          sourceControlProvider: 'ado',
+        task: expect.objectContaining({
+          type: TaskPayloadKind.StandardTask,
+          payload: expect.objectContaining({
+            environmentId: '7bb91386-6282-4c98-9b31-0eb181116822',
+            sourceControlProvider: 'ado',
+          }),
         }),
-      }),
-      expect.objectContaining({
-        launchClass: 'human',
+        initiator: { kind: 'user', userId: 'user-123' },
+        workflow: 'standard',
+        surface: 'web',
+        trigger: 'manual',
       }),
     );
   });

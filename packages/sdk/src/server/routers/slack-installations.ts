@@ -1,12 +1,6 @@
 import { z } from 'zod';
 
-import {
-  cloudJobs,
-  db,
-  desc,
-  eq,
-  slackInstallations,
-} from '@roomote/db/server';
+import { db, desc, eq, slackInstallations, taskRuns } from '@roomote/db/server';
 import { drainSlackMessagesToResumeJob } from '@roomote/slack';
 
 import { authenticatedProcedure, jobScoped, router } from '../trpc';
@@ -30,21 +24,29 @@ export const slackInstallationsRouter = router({
     z.object({ cloudJobId: z.number() }),
     'cloudJobId',
   ).mutation(async ({ input }) => {
-    const cloudJob = await db.query.cloudJobs.findFirst({
-      where: eq(cloudJobs.id, input.cloudJobId),
+    const cloudJob = await db.query.taskRuns.findFirst({
+      where: eq(taskRuns.id, input.cloudJobId),
+      with: { task: true },
     });
 
     if (!cloudJob) {
       return { resumed: false, reason: 'job_not_found' } as const;
     }
 
-    if (!cloudJob.slackThreadTs) {
+    // The Slack thread binding lives on the run's task row.
+    const slackThreadTs = cloudJob.task.slackThreadTs;
+
+    if (!slackThreadTs) {
       return { resumed: false, reason: 'no_slack_thread' } as const;
     }
 
-    const result = await drainSlackMessagesToResumeJob(
-      cloudJob as Parameters<typeof drainSlackMessagesToResumeJob>[0],
-    );
+    const result = await drainSlackMessagesToResumeJob({
+      id: cloudJob.id,
+      slackThreadTs,
+      snapshotId: cloudJob.snapshotId,
+      payload: cloudJob.payload as Record<string, unknown>,
+      port: cloudJob.port,
+    });
 
     if (result.resumed) {
       console.log(

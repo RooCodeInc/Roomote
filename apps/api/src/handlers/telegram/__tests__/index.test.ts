@@ -77,17 +77,59 @@ vi.mock('@roomote/db/server', () => ({
   authUsers: {
     id: 'authUserId',
   },
-  cloudJobs: {
+  taskRuns: {
     canceledAt: 'canceledAt',
     createdAt: 'createdAt',
     payload: 'payload',
     snapshotCreatedAt: 'snapshotCreatedAt',
     snapshotId: 'snapshotId',
     status: 'status',
+    id: 'id',
+    taskId: 'taskId',
+    actingUserId: 'actingUserId',
+    port: 'port',
+    result: 'result',
+  },
+  tasks: {
+    id: 'tasks.id',
+    initiatorUserId: 'tasks.initiatorUserId',
   },
   db: {
     insert: insertMock,
     update: updateMock,
+    // The Telegram job lookups moved from db.query.cloudJobs.findFirst to
+    // db.select(...).from(taskRuns).innerJoin(tasks). Adapt the select chain
+    // onto the same sequential mock queue so per-test row sequences keep
+    // working; legacy `userId` keys map to run actingUserId.
+    select: () => {
+      const chain = {
+        from: () => chain,
+        innerJoin: () => chain,
+        where: () => chain,
+        orderBy: () => chain,
+        limit: async () => {
+          const row = (await cloudJobsFindFirstMock()) as Record<
+            string,
+            unknown
+          > | null;
+
+          if (!row) {
+            return [];
+          }
+
+          const { userId, ...rest } = row;
+
+          return [
+            {
+              actingUserId: userId ?? null,
+              initiatorUserId: userId ?? null,
+              ...rest,
+            },
+          ];
+        },
+      };
+      return chain;
+    },
     query: {
       authAccounts: {
         findFirst: vi.fn(),
@@ -95,11 +137,11 @@ vi.mock('@roomote/db/server', () => ({
       authUsers: {
         findFirst: authUsersFindFirstMock,
       },
-      cloudJobs: {
-        findFirst: cloudJobsFindFirstMock,
-      },
       environments: {
         findFirst: vi.fn(),
+      },
+      taskRuns: {
+        findFirst: cloudJobsFindFirstMock,
       },
       users: {
         findFirst: usersFindFirstMock,
@@ -568,15 +610,20 @@ describe('Telegram webhook handler', () => {
     );
     expect(enqueueCloudTaskMock).toHaveBeenCalledWith(
       expect.objectContaining({
-        type: 'standard.task',
-        userId: 'launch-owner-2',
-        payload: expect.objectContaining({
-          repo: '__all_repositories__',
-          description: 'please check this',
-          communicationProvider: 'telegram',
-          communicationChannelId: '222',
-          communicationMessageId: '456',
+        task: expect.objectContaining({
+          type: 'standard',
+          payload: expect.objectContaining({
+            repo: '__all_repositories__',
+            description: 'please check this',
+            communicationProvider: 'telegram',
+            communicationChannelId: '222',
+            communicationMessageId: '456',
+          }),
         }),
+        initiator: { kind: 'user', userId: 'launch-owner-2' },
+        workflow: 'standard',
+        surface: 'telegram',
+        trigger: 'message',
       }),
       expect.objectContaining({
         launchClass: 'human',
@@ -686,26 +733,28 @@ describe('Telegram webhook handler', () => {
     expect(response.status).toBe(200);
     expect(enqueueCloudTaskMock).toHaveBeenCalledWith(
       expect.objectContaining({
-        type: 'snapshot.resume',
-        userId: 'launch-owner-4',
-        sourceSnapshotId: 'snapshot-1',
-        sourceCloudJobId: 55,
-        payload: expect.objectContaining({
-          repo: 'RooCodeInc/Roomote',
-          environmentId: 'env-1',
-          port: 3000,
+        actingUserId: 'launch-owner-4',
+        task: expect.objectContaining({
+          type: 'snapshot_resume',
           sourceSnapshotId: 'snapshot-1',
           sourceCloudJobId: 55,
-          queuedCommunicationMessages: [
-            expect.objectContaining({
-              provider: 'telegram',
-              text: 'continue this',
-              userId: 'launch-owner-4',
-            }),
-          ],
-          communicationProvider: 'telegram',
-          communicationChannelId: '222',
-          communicationMessageId: '456',
+          payload: expect.objectContaining({
+            repo: 'RooCodeInc/Roomote',
+            environmentId: 'env-1',
+            port: 3000,
+            sourceSnapshotId: 'snapshot-1',
+            sourceCloudJobId: 55,
+            queuedCommunicationMessages: [
+              expect.objectContaining({
+                provider: 'telegram',
+                text: 'continue this',
+                userId: 'launch-owner-4',
+              }),
+            ],
+            communicationProvider: 'telegram',
+            communicationChannelId: '222',
+            communicationMessageId: '456',
+          }),
         }),
       }),
       expect.objectContaining({
@@ -756,14 +805,19 @@ describe('Telegram webhook handler', () => {
     // A fresh StandardTask is enqueued, not a snapshot.resume.
     expect(enqueueCloudTaskMock).toHaveBeenCalledWith(
       expect.objectContaining({
-        type: 'standard.task',
-        userId: 'launch-owner-5',
-        payload: expect.objectContaining({
-          description: 'fix the flaky auth test',
-          communicationProvider: 'telegram',
-          communicationChannelId: '222',
-          communicationMessageId: '456',
+        task: expect.objectContaining({
+          type: 'standard',
+          payload: expect.objectContaining({
+            description: 'fix the flaky auth test',
+            communicationProvider: 'telegram',
+            communicationChannelId: '222',
+            communicationMessageId: '456',
+          }),
         }),
+        initiator: { kind: 'user', userId: 'launch-owner-5' },
+        workflow: 'standard',
+        surface: 'telegram',
+        trigger: 'message',
       }),
       expect.objectContaining({ launchClass: 'human' }),
     );
@@ -790,9 +844,11 @@ describe('Telegram webhook handler', () => {
     });
     expect(enqueueCloudTaskMock).toHaveBeenCalledWith(
       expect.objectContaining({
-        type: 'standard.task',
-        payload: expect.objectContaining({
-          description: 'run the test suite',
+        task: expect.objectContaining({
+          type: 'standard',
+          payload: expect.objectContaining({
+            description: 'run the test suite',
+          }),
         }),
       }),
       expect.objectContaining({ launchClass: 'human' }),
@@ -955,9 +1011,11 @@ describe('Telegram webhook handler', () => {
     });
     expect(enqueueCloudTaskMock).toHaveBeenCalledWith(
       expect.objectContaining({
-        type: 'standard.task',
-        payload: expect.objectContaining({
-          description: 'fix the tests',
+        task: expect.objectContaining({
+          type: 'standard',
+          payload: expect.objectContaining({
+            description: 'fix the tests',
+          }),
         }),
       }),
       expect.objectContaining({ launchClass: 'human' }),

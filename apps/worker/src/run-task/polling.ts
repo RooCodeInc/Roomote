@@ -1,8 +1,11 @@
 import {
-  CloudTaskType,
+  TaskPayloadKind,
   getCommunicationProviderFromTaskPayload,
   getSlackChannelFromTaskPayload,
+  getSlackThreadTsFromTaskPayload,
 } from '@roomote/types';
+
+import { getLinearSessionIdFromResumePayload } from './linear-resume-payload';
 
 import type { ListenerOptions, RunTaskState } from './types';
 import {
@@ -18,7 +21,7 @@ export const startPolling = (options: ListenerOptions) => {
   state.cancelInterval = createCancelInterval(options);
 
   if (
-    cloudJob.slackThreadTs ||
+    getSlackThreadTsFromTaskPayload(cloudJob.payload) ||
     getSlackChannelFromTaskPayload(cloudJob.payload)
   ) {
     state.slackMessageInterval = createSlackMessageInterval(options);
@@ -37,9 +40,9 @@ export const startPolling = (options: ListenerOptions) => {
   }
 
   if (
-    cloudJob.type === CloudTaskType.LinearAgentSession ||
-    (cloudJob.type === CloudTaskType.SnapshotResume &&
-      !!cloudJob.linearSessionId)
+    cloudJob.payloadKind === TaskPayloadKind.LinearAgentSession ||
+    (cloudJob.payloadKind === TaskPayloadKind.SnapshotResume &&
+      !!getLinearSessionIdFromResumePayload(cloudJob.payload))
   ) {
     state.linearMessageInterval = createLinearMessageInterval(options);
   }

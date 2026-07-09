@@ -1,6 +1,6 @@
 import {
-  cloudJobEvents,
-  cloudJobs,
+  taskRunEvents,
+  taskRuns,
   db,
   eq,
   listCloudJobEvents,
@@ -9,7 +9,7 @@ import {
   recordCloudJobEvent,
   taskFactory,
   userFactory,
-  cloudJobFactory,
+  runFactory,
   tasks,
 } from '../../server';
 
@@ -19,12 +19,12 @@ let testCloudJobId: number;
 
 async function cleanup() {
   await db
-    .delete(cloudJobEvents)
-    .where(eq(cloudJobEvents.cloudJobId, testCloudJobId ?? -1))
+    .delete(taskRunEvents)
+    .where(eq(taskRunEvents.runId, testCloudJobId ?? -1))
     .catch(() => {});
   await db
-    .delete(cloudJobs)
-    .where(eq(cloudJobs.id, testCloudJobId ?? -1))
+    .delete(taskRuns)
+    .where(eq(taskRuns.id, testCloudJobId ?? -1))
     .catch(() => {});
   await db
     .delete(tasks)
@@ -39,10 +39,10 @@ describe('cloud job event helpers', () => {
     await userFactory.create({ id: TEST_USER_ID }).catch(() => {});
     await taskFactory.create({
       id: TEST_TASK_ID,
-      userId: TEST_USER_ID,
+      initiatorUserId: TEST_USER_ID,
     });
-    const cloudJob = await cloudJobFactory.create({
-      userId: TEST_USER_ID,
+    const cloudJob = await runFactory.create({
+      actingUserId: TEST_USER_ID,
       taskId: TEST_TASK_ID,
     });
     testCloudJobId = cloudJob.id;
@@ -54,7 +54,7 @@ describe('cloud job event helpers', () => {
 
   it('records an event using the cloud job context when taskId and orgId are omitted', async () => {
     const event = await recordCloudJobEvent(db, {
-      cloudJobId: testCloudJobId,
+      runId: testCloudJobId,
       source: 'sleep_check',
       eventType: 'decision',
       message: 'Completed the idle job without a snapshot.',
@@ -66,7 +66,7 @@ describe('cloud job event helpers', () => {
 
     expect(event).toEqual(
       expect.objectContaining({
-        cloudJobId: testCloudJobId,
+        runId: testCloudJobId,
         taskId: TEST_TASK_ID,
         source: 'sleep_check',
         eventType: 'decision',
@@ -76,7 +76,7 @@ describe('cloud job event helpers', () => {
 
   it('lists events newest first by default', async () => {
     await recordCloudJobEvent(db, {
-      cloudJobId: testCloudJobId,
+      runId: testCloudJobId,
       source: 'snapshot_request',
       eventType: 'enqueued',
       message: 'First event',
@@ -84,7 +84,7 @@ describe('cloud job event helpers', () => {
       details: { queueJobId: 'snapshot-910001' },
     });
     await recordCloudJobEvent(db, {
-      cloudJobId: testCloudJobId,
+      runId: testCloudJobId,
       source: 'snapshot_queue',
       eventType: 'completed',
       message: 'Second event',
@@ -93,7 +93,7 @@ describe('cloud job event helpers', () => {
     });
 
     const events = await listCloudJobEvents(db, {
-      cloudJobId: testCloudJobId,
+      runId: testCloudJobId,
     });
 
     expect(events.map((event) => event.message)).toEqual([
@@ -102,11 +102,14 @@ describe('cloud job event helpers', () => {
     ]);
   });
 
-  it('records events after the source task has been deleted', async () => {
-    await db.delete(tasks).where(eq(tasks.id, TEST_TASK_ID));
+  it('records events after the source task has been soft-deleted', async () => {
+    await db
+      .update(tasks)
+      .set({ deletedAt: new Date() })
+      .where(eq(tasks.id, TEST_TASK_ID));
 
     const event = await recordCloudJobEvent(db, {
-      cloudJobId: testCloudJobId,
+      runId: testCloudJobId,
       source: 'snapshot_queue',
       eventType: 'failed',
       message: 'Snapshot request stopped because the sandbox was already gone.',
@@ -117,7 +120,7 @@ describe('cloud job event helpers', () => {
 
     expect(event).toEqual(
       expect.objectContaining({
-        cloudJobId: testCloudJobId,
+        runId: testCloudJobId,
         taskId: TEST_TASK_ID,
       }),
     );
@@ -125,7 +128,7 @@ describe('cloud job event helpers', () => {
 
   it('records compute-provider mutation metadata under the compute_provider source', async () => {
     const event = await recordComputeProviderMutationEvent(db, {
-      cloudJobId: testCloudJobId,
+      runId: testCloudJobId,
       provider: 'modal',
       operation: 'destroy_instance',
       eventType: 'started',
@@ -138,7 +141,7 @@ describe('cloud job event helpers', () => {
 
     expect(event).toEqual(
       expect.objectContaining({
-        cloudJobId: testCloudJobId,
+        runId: testCloudJobId,
         taskId: TEST_TASK_ID,
         source: 'compute_provider',
         eventType: 'started',
@@ -157,7 +160,7 @@ describe('cloud job event helpers', () => {
 
   it('builds a reusable recorder that persists shared mutation metadata', async () => {
     const recordMutation = createComputeProviderMutationEventRecorder(db, {
-      cloudJobId: testCloudJobId,
+      runId: testCloudJobId,
     });
 
     await recordMutation({
@@ -175,7 +178,7 @@ describe('cloud job event helpers', () => {
     });
 
     const [event] = await listCloudJobEvents(db, {
-      cloudJobId: testCloudJobId,
+      runId: testCloudJobId,
       limit: 1,
     });
 
@@ -186,7 +189,7 @@ describe('cloud job event helpers', () => {
 
     expect(event).toEqual(
       expect.objectContaining({
-        cloudJobId: testCloudJobId,
+        runId: testCloudJobId,
         taskId: TEST_TASK_ID,
         source: 'compute_provider',
         eventType: 'failed',

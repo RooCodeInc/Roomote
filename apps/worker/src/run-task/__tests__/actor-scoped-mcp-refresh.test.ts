@@ -42,7 +42,6 @@ describe('createActorScopedMcpRefresher', () => {
     const refreshActorScopedMcp = createActorScopedMcpRefresher({
       cloudJob: {
         id: 42,
-        userId: 'owner-user',
         actingUserId: 'owner-user',
       },
       integrations,
@@ -100,7 +99,6 @@ describe('createActorScopedMcpRefresher', () => {
     const refreshActorScopedMcp = createActorScopedMcpRefresher({
       cloudJob: {
         id: 42,
-        userId: 'owner-user',
         actingUserId: 'owner-user',
       },
       integrations,
@@ -141,7 +139,6 @@ describe('createActorScopedMcpRefresher', () => {
     const refreshActorScopedMcp = createActorScopedMcpRefresher({
       cloudJob: {
         id: 42,
-        userId: 'owner-user',
         actingUserId: 'owner-user',
       },
       integrations,
@@ -196,7 +193,6 @@ describe('createActorScopedMcpRefresher', () => {
     const refreshActorScopedMcp = createActorScopedMcpRefresher({
       cloudJob: {
         id: 42,
-        userId: 'owner-user',
         actingUserId: 'owner-user',
       },
       integrations,
@@ -239,7 +235,6 @@ describe('createActorScopedMcpRefresher', () => {
     const refreshActorScopedMcp = createActorScopedMcpRefresher({
       cloudJob: {
         id: 42,
-        userId: 'owner-user',
         actingUserId: 'owner-user',
       },
       integrations,
@@ -290,7 +285,6 @@ describe('createActorScopedMcpRefresher', () => {
     const refreshActorScopedMcp = createActorScopedMcpRefresher({
       cloudJob: {
         id: 42,
-        userId: 'owner-user',
         actingUserId: 'owner-user',
       },
       integrations,
@@ -336,7 +330,6 @@ describe('createActorScopedMcpRefresher', () => {
     const refreshActorScopedMcp = createActorScopedMcpRefresher({
       cloudJob: {
         id: 42,
-        userId: 'owner-user',
         actingUserId: 'owner-user',
       },
       integrations,

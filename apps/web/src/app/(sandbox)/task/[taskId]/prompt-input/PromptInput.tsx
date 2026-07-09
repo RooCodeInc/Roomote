@@ -685,7 +685,7 @@ export const PromptInput = forwardRef<PromptInputHandle, PromptInputProps>(
               )}
               {showTaskToolsMenu &&
                 cloudJob &&
-                shouldShowTaskToolsActions(cloudJob.type) && (
+                shouldShowTaskToolsActions(cloudJob.payloadKind) && (
                   <TaskToolsButton cloudJob={cloudJob} />
                 )}
             </PromptInputTools>

@@ -10,10 +10,7 @@ export async function getMessageSources(cloudJobId: number): Promise<string[]> {
     .selectDistinct({ source: taskMessages.source })
     .from(taskMessages)
     .where(
-      and(
-        eq(taskMessages.cloudJobId, cloudJobId),
-        isNotNull(taskMessages.source),
-      ),
+      and(eq(taskMessages.runId, cloudJobId), isNotNull(taskMessages.source)),
     );
 
   return rows.map((r) => r.source).filter((s): s is string => s !== null);

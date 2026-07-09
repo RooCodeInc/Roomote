@@ -43,7 +43,6 @@ export * from './lib/task-id';
 export * from './lib/task-activity-timestamp';
 export * from './lib/task-suggestion-content-hash';
 export * from './lib/task-start-parallel-counts';
-export * from './lib/task-attribution';
 export * from './lib/tasks';
 export * from './lib/background-agent-settings';
 export * from './lib/background-automation-runs';
@@ -65,7 +64,6 @@ export * from './lib/router-debug-settings';
 export * from './lib/pr-action-settings';
 export * from './lib/setup-qualification';
 export * from './lib/setup-qualification-blocks';
-export * from './lib/eval-runs';
 export * from './lib/repositories';
 export * from './lib/telemetry-ids';
 export * from './lib/instance-report';
@@ -99,10 +97,10 @@ export {
   taskSharesRelations,
   taskPullRequests,
   taskPullRequestsRelations,
-  deletedTasks,
-  cloudJobs,
-  cloudJobEvents,
-  cloudJobEventsRelations,
+  taskRuns,
+  taskRunsRelations,
+  taskRunEvents,
+  taskRunEventsRelations,
   taskStartParallelCounts,
   taskStartParallelCountsRelations,
   taskMessages,
@@ -164,8 +162,6 @@ export {
   environmentVariables,
   environmentVariablesRelations,
   deploymentSecrets,
-  EVAL_RUN_STATUSES,
-  evalRuns,
   webhooks,
   environments,
   environmentsRelations,

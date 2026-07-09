@@ -14,7 +14,7 @@ const {
 vi.mock('../lib/db', () => ({
   db: {
     query: {
-      cloudJobs: {
+      taskRuns: {
         findFirst: cloudJobFindFirstMock,
       },
       environments: {

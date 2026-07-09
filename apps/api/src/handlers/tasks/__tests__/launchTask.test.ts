@@ -130,9 +130,9 @@ describe('launchTask', () => {
 
     expect(response.status).toBe(200);
     const enqueuedTask = mockEnqueueCloudTask.mock.calls[0]?.[0] as {
-      payload: { sourceControlProvider?: string };
+      task: { payload: { sourceControlProvider?: string } };
     };
-    expect(enqueuedTask.payload.sourceControlProvider).toBe('gitlab');
+    expect(enqueuedTask.task.payload.sourceControlProvider).toBe('gitlab');
   });
 
   it('leaves the provider unset for prompt-only launches with no repository context', async () => {
@@ -149,9 +149,9 @@ describe('launchTask', () => {
 
     expect(response.status).toBe(200);
     const enqueuedTask = mockEnqueueCloudTask.mock.calls[0]?.[0] as {
-      payload: { sourceControlProvider?: string };
+      task: { payload: { sourceControlProvider?: string } };
     };
-    expect(enqueuedTask.payload.sourceControlProvider).toBeUndefined();
+    expect(enqueuedTask.task.payload.sourceControlProvider).toBeUndefined();
   });
 
   it('rejects launches whose selected repositories span multiple providers', async () => {

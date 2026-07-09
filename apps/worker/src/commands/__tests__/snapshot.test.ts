@@ -128,12 +128,12 @@ describe('snapshot', () => {
     expect(findEnvironmentCallOrder).toBeDefined();
     expect(mockSetWorkerRuntimeContext).toHaveBeenNthCalledWith(1, {
       cloudJobId: 42,
-      cloudJobType: 'snapshot.environment',
+      cloudJobType: 'snapshot_environment',
       environmentId: 'env-1',
     });
     expect(mockSetWorkerRuntimeContext).toHaveBeenNthCalledWith(2, {
       cloudJobId: 42,
-      cloudJobType: 'snapshot.environment',
+      cloudJobType: 'snapshot_environment',
       environmentId: 'env-1',
       taskId: 'task-42',
     });

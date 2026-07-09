@@ -1,12 +1,11 @@
 import {
   db,
   tasks,
-  deletedTasks,
   markTaskStartParallelCountsEndedAtForTaskIds,
   taskArtifacts,
-  eq,
   and,
   inArray,
+  isNull,
 } from '@roomote/db/server';
 
 import { deleteArtifactsBatch } from '@/lib/server';
@@ -17,21 +16,19 @@ export async function deleteTasksCommand(
   auth: UserAuthSuccess,
   input: { taskIds: string[] },
 ) {
-  const { userId: authUserId, isAdmin } = auth;
+  // Any deployment member can delete tasks; deletion is a soft delete
+  // (tasks.deletedAt) so satellites and artifact cleanup can still read the
+  // rows.
+  void auth;
 
-  // Build where conditions based on user permissions.
-  const whereConditions = [inArray(tasks.id, input.taskIds)];
+  const whereConditions = [
+    inArray(tasks.id, input.taskIds),
+    isNull(tasks.deletedAt),
+  ];
 
-  // Non-admins can ONLY delete their own tasks.
-  if (!isAdmin) {
-    whereConditions.push(eq(tasks.userId, authUserId));
-  }
-
-  // Use a transaction to track deletions and delete tasks.
   const result = await db.transaction(async (tx) => {
-    // First, get the tasks that will be deleted to track them.
     const tasksToDelete = await tx
-      .select({ id: tasks.id, userId: tasks.userId })
+      .select({ id: tasks.id })
       .from(tasks)
       .where(and(...whereConditions));
 
@@ -42,7 +39,7 @@ export async function deleteTasksCommand(
     const taskIdsToDelete = tasksToDelete.map((t) => t.id);
     const endedAt = new Date();
 
-    // Query artifacts for these tasks BEFORE deleting them.
+    // Query artifacts for these tasks so their S3 objects can be removed.
     const artifactsToDelete = await tx
       .select({
         id: taskArtifacts.id,
@@ -82,17 +79,10 @@ export async function deleteTasksCommand(
       endedAt,
     });
 
-    // Insert records into deleted_tasks table for audit trail.
-    await tx.insert(deletedTasks).values(
-      tasksToDelete.map((task) => ({
-        taskId: task.id,
-        userId: task.userId,
-      })),
-    );
-
-    // Delete the tasks (cascade will delete artifact DB records).
+    // Soft delete: queries filter isNull(tasks.deletedAt).
     const deletedTasksResult = await tx
-      .delete(tasks)
+      .update(tasks)
+      .set({ deletedAt: endedAt, updatedAt: endedAt })
       .where(and(...whereConditions))
       .returning({ id: tasks.id });
 

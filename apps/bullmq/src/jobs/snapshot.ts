@@ -2,7 +2,7 @@ import { Job, UnrecoverableError } from 'bullmq';
 
 import {
   CloudTaskStatus,
-  CloudTaskType,
+  TaskPayloadKind,
   extractErrorDetails,
   isObservedTimeoutError,
   resolveComputeProviderTarget,
@@ -16,7 +16,7 @@ import {
   buildPendingEnvironmentSnapshotMatchForCloudJob,
   createComputeProviderMutationEventRecorder,
   db,
-  cloudJobs,
+  taskRuns,
   eq,
   isNull,
   markTaskStartParallelCountEndedAt,
@@ -144,8 +144,8 @@ export const snapshotJob = async (job: SnapshotJob): Promise<void> => {
   const attemptsRemaining = Math.max(queueMaxAttempts - queueAttempt, 0);
   const isFinalAttempt = queueAttempt >= queueMaxAttempts;
 
-  const cloudJob = await db.query.cloudJobs.findFirst({
-    where: eq(cloudJobs.id, cloudJobId),
+  const cloudJob = await db.query.taskRuns.findFirst({
+    where: eq(taskRuns.id, cloudJobId),
   });
 
   if (!cloudJob) {
@@ -185,7 +185,7 @@ export const snapshotJob = async (job: SnapshotJob): Promise<void> => {
   const recordMutation = createComputeProviderMutationEventRecorder(
     db,
     {
-      cloudJobId,
+      runId: cloudJobId,
       taskId: cloudJob.taskId,
     },
     { logPrefix: 'snapshotJob', logger: console },
@@ -271,7 +271,7 @@ export const snapshotJob = async (job: SnapshotJob): Promise<void> => {
       });
       // Clear the request flag and record the error.
       await db
-        .update(cloudJobs)
+        .update(taskRuns)
         .set({
           payload: clearedCompletionPayload,
           snapshotRequestedAt: null,
@@ -279,9 +279,9 @@ export const snapshotJob = async (job: SnapshotJob): Promise<void> => {
           snapshotFailedAt: new Date(),
           error: `Cannot create snapshot: instance is ${status}`,
         })
-        .where(and(eq(cloudJobs.id, cloudJobId), isNull(cloudJobs.snapshotId)));
+        .where(and(eq(taskRuns.id, cloudJobId), isNull(taskRuns.snapshotId)));
 
-      if (cloudJob.type === CloudTaskType.SnapshotEnvironment) {
+      if (cloudJob.payloadKind === TaskPayloadKind.SnapshotEnvironment) {
         const environmentId = cloudJob.payload.environmentId;
 
         if (environmentId) {
@@ -436,7 +436,7 @@ export const snapshotJob = async (job: SnapshotJob): Promise<void> => {
         }
 
         await db
-          .update(cloudJobs)
+          .update(taskRuns)
           .set({
             payload: clearedCompletionPayload,
             snapshotRequestedAt: null,
@@ -444,9 +444,7 @@ export const snapshotJob = async (job: SnapshotJob): Promise<void> => {
             snapshotFailedAt: new Date(),
             error: `Snapshot failed: ${errorMessage}`,
           })
-          .where(
-            and(eq(cloudJobs.id, cloudJobId), isNull(cloudJobs.snapshotId)),
-          );
+          .where(and(eq(taskRuns.id, cloudJobId), isNull(taskRuns.snapshotId)));
 
         await recordSnapshotQueueEvent(cloudJob, {
           eventType: 'decision',
@@ -468,7 +466,7 @@ export const snapshotJob = async (job: SnapshotJob): Promise<void> => {
         });
 
         // Mark the environment snapshot as failed so the UI stops showing "Snapshotting..."
-        if (cloudJob.type === CloudTaskType.SnapshotEnvironment) {
+        if (cloudJob.payloadKind === TaskPayloadKind.SnapshotEnvironment) {
           const environmentId = cloudJob.payload.environmentId;
 
           if (environmentId) {
@@ -548,7 +546,7 @@ export const snapshotJob = async (job: SnapshotJob): Promise<void> => {
 
   await db.transaction(async (tx) => {
     await tx
-      .update(cloudJobs)
+      .update(taskRuns)
       .set({
         payload: clearedCompletionPayload,
         snapshotId,
@@ -559,26 +557,26 @@ export const snapshotJob = async (job: SnapshotJob): Promise<void> => {
         status: CloudTaskStatus.Completed,
         completedAt: now,
       })
-      .where(eq(cloudJobs.id, cloudJobId));
+      .where(eq(taskRuns.id, cloudJobId));
 
     if (shouldCompleteTask && cloudJob.taskId) {
       await tx
         .update(tasks)
         .set({
-          completed: true,
+          state: 'completed',
           updatedAt: now,
         })
         .where(eq(tasks.id, cloudJob.taskId));
     }
 
     await markTaskStartParallelCountEndedAt(tx, {
-      cloudJobId,
+      runId: cloudJobId,
       endedAt: now,
     });
   });
 
   await tryRecordComputeProviderUsage({
-    cloudJobId,
+    runId: cloudJobId,
     lifecycleAction: 'snapshot',
     completedAt: now,
     usageObservation,
@@ -592,7 +590,10 @@ export const snapshotJob = async (job: SnapshotJob): Promise<void> => {
 
   const environmentId = cloudJob.payload.environmentId;
 
-  if (cloudJob.type === CloudTaskType.SnapshotEnvironment && environmentId) {
+  if (
+    cloudJob.payloadKind === TaskPayloadKind.SnapshotEnvironment &&
+    environmentId
+  ) {
     const attachmentSource =
       getEnvironmentSnapshotAttachmentSourceForCloudJob(cloudJob);
     const attached = await attachEnvironmentSnapshot(db, {
@@ -660,48 +661,75 @@ export const snapshotJob = async (job: SnapshotJob): Promise<void> => {
     `[SnapshotQueue] ✅ Created snapshot ${snapshotId} for job #${cloudJobId}`,
   );
 
+  // Channel bindings live on the task row now; the drain helpers need them
+  // to decide whether a resume run must be created for pending messages.
+  const taskChannelBindings = await db.query.tasks.findFirst({
+    where: eq(tasks.id, cloudJob.taskId),
+    columns: {
+      slackThreadTs: true,
+      linearSessionId: true,
+      linearIssueId: true,
+      linearOrganizationId: true,
+    },
+  });
+
   // Drain pending Linear messages to prevent loss during manual snapshots.
   // When a snapshot is triggered via the UI, the worker never calls
   // drainLinearMessages before the container is killed. Any messages queued
-  // to the old job's Redis list during the ~30s snapshot window would be
-  // orphaned. We check here and create a SnapshotResume job to pick them up.
-  if (cloudJob.linearSessionId) {
+  // to the old run's Redis list during the ~30s snapshot window would be
+  // orphaned. We check here and create a SnapshotResume run to pick them up.
+  if (taskChannelBindings?.linearSessionId) {
     try {
       const drainResult = await drainLinearMessagesToResumeJob(
-        cloudJob as Parameters<typeof drainLinearMessagesToResumeJob>[0],
+        {
+          id: cloudJob.id,
+          linearSessionId: taskChannelBindings.linearSessionId,
+          linearIssueId: taskChannelBindings.linearIssueId,
+          linearOrganizationId: taskChannelBindings.linearOrganizationId,
+          slackThreadTs: taskChannelBindings.slackThreadTs,
+          snapshotId,
+          payload: cloudJob.payload as Record<string, unknown>,
+          port: cloudJob.port,
+        },
         snapshotId,
       );
 
       if (drainResult.resumed) {
         console.log(
-          `[SnapshotQueue] Routed ${drainResult.messageCount} Linear message(s) to SnapshotResume cloud job ${drainResult.cloudJobId}`,
+          `[SnapshotQueue] Routed ${drainResult.messageCount} Linear message(s) to SnapshotResume run ${drainResult.cloudJobId}`,
         );
       }
     } catch (drainError) {
       // Log but don't fail the snapshot -- the snapshot itself succeeded.
       console.error(
-        `[SnapshotQueue] Failed to drain Linear messages for job #${cloudJobId}: ${drainError instanceof Error ? drainError.message : String(drainError)}`,
+        `[SnapshotQueue] Failed to drain Linear messages for run #${cloudJobId}: ${drainError instanceof Error ? drainError.message : String(drainError)}`,
       );
     }
   }
 
   // Drain pending Slack messages using the same pattern as Linear.
-  if (cloudJob.slackThreadTs) {
+  if (taskChannelBindings?.slackThreadTs) {
     try {
       const drainResult = await drainSlackMessagesToResumeJob(
-        cloudJob as Parameters<typeof drainSlackMessagesToResumeJob>[0],
+        {
+          id: cloudJob.id,
+          slackThreadTs: taskChannelBindings.slackThreadTs,
+          snapshotId,
+          payload: cloudJob.payload as Record<string, unknown>,
+          port: cloudJob.port,
+        },
         snapshotId,
       );
 
       if (drainResult.resumed) {
         console.log(
-          `[SnapshotQueue] Routed ${drainResult.messageCount} Slack message(s) to SnapshotResume cloud job ${drainResult.cloudJobId}`,
+          `[SnapshotQueue] Routed ${drainResult.messageCount} Slack message(s) to SnapshotResume run ${drainResult.cloudJobId}`,
         );
       }
     } catch (drainError) {
       // Log but don't fail the snapshot -- the snapshot itself succeeded.
       console.error(
-        `[SnapshotQueue] Failed to drain Slack messages for job #${cloudJobId}: ${drainError instanceof Error ? drainError.message : String(drainError)}`,
+        `[SnapshotQueue] Failed to drain Slack messages for run #${cloudJobId}: ${drainError instanceof Error ? drainError.message : String(drainError)}`,
       );
     }
   }
@@ -717,7 +745,7 @@ async function recordSnapshotQueueEvent(
 ): Promise<void> {
   try {
     await recordCloudJobEvent(db, {
-      cloudJobId: cloudJob.id,
+      runId: cloudJob.id,
       taskId: cloudJob.taskId,
       source: 'snapshot_queue',
       eventType: input.eventType,

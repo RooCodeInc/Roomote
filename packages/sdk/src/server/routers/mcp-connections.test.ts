@@ -61,7 +61,7 @@ vi.mock('@roomote/db/server', () => ({
   db: {
     select: mockSelect,
     query: {
-      cloudJobs: { findFirst: mockFindCloudJob },
+      taskRuns: { findFirst: mockFindCloudJob },
       deploymentMcpEnablements: {
         findFirst: vi.fn(),
         findMany: mockFindEnablements,
@@ -79,8 +79,8 @@ vi.mock('@roomote/db/server', () => ({
     enabled: 'connection.enabled',
     createdAt: 'connection.createdAt',
   },
-  cloudJobs: {
-    id: 'cloudJob.id',
+  taskRuns: {
+    id: 'taskRun.id',
   },
   deploymentMcpEnablements: {
     mcpId: 'enablement.mcpId',
@@ -179,7 +179,6 @@ describe('mcpConnectionsRouter.getMcpServerConfigs', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockFindCloudJob.mockResolvedValue({
-      userId: 'user-1',
       actingUserId: null,
     });
     mockFindEnablements.mockResolvedValue([]);
@@ -587,9 +586,8 @@ describe('mcpConnectionsRouter.getMcpServerConfigs', () => {
     );
   });
 
-  it('uses cloudJobs.actingUserId for job-token actor-scoped lookups', async () => {
+  it('uses taskRuns.actingUserId for job-token actor-scoped lookups', async () => {
     mockFindCloudJob.mockResolvedValueOnce({
-      userId: 'owner-user',
       actingUserId: 'actor-user',
     });
     mockGetValidAccessToken.mockResolvedValue('notion-raw-access-token');

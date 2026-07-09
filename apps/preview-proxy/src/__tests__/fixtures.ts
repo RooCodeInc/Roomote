@@ -41,17 +41,16 @@ export function createMockCloudJob(
   overrides: {
     id?: number;
     taskId?: string | null;
-    orgId?: string | null;
-    userId?: string | null;
+    actingUserId?: string | null;
     payload?: Record<string, unknown> | null;
   } = {},
 ): CloudJob {
   return {
     id: overrides.id ?? 1,
     taskId: 'taskId' in overrides ? overrides.taskId : TEST_TASK_ID,
-    userId: overrides.userId ?? null,
+    actingUserId: overrides.actingUserId ?? null,
     payload: overrides.payload ?? null,
-  } as CloudJob;
+  } as unknown as CloudJob;
 }
 
 /**

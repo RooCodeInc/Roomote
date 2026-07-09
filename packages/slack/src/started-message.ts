@@ -118,7 +118,12 @@ export async function finishRoutedStart({
   cloudJobId: number | null;
   taskId: string | null;
   taskDescription: string;
-  userId: string;
+  /**
+   * Linked launching user, when one exists. Automation-initiated launches
+   * (for example bot-authored channel auto-start) have none and skip the
+   * per-user last-workspace memory.
+   */
+  userId?: string | null;
   initiatingSlackUserId?: string;
   agentName: string;
   workspaceDisplayName: string;
@@ -196,11 +201,13 @@ export async function finishRoutedStart({
     });
   }
 
-  const lastWorkspaceKey = `last_workspace:${userId}`;
-  await getRedis().set(
-    lastWorkspaceKey,
-    workspaceValue,
-    'EX',
-    30 * 24 * 60 * 60,
-  );
+  if (userId) {
+    const lastWorkspaceKey = `last_workspace:${userId}`;
+    await getRedis().set(
+      lastWorkspaceKey,
+      workspaceValue,
+      'EX',
+      30 * 24 * 60 * 60,
+    );
+  }
 }

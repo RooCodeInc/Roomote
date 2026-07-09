@@ -8,9 +8,7 @@ describe('getSlackReplyContext', () => {
   it('returns null when a snapshot resume job has no Slack metadata', () => {
     expect(
       getSlackReplyContext({
-        type: 'snapshot.resume',
         payload: {},
-        slackThreadTs: null,
       }),
     ).toBeNull();
   });
@@ -18,11 +16,10 @@ describe('getSlackReplyContext', () => {
   it('returns Slack context for any Slack-linked job with channel metadata', () => {
     expect(
       getSlackReplyContext({
-        type: 'suggested.tasks',
         payload: {
           channel: 'C123',
+          thread_ts: '111.222',
         },
-        slackThreadTs: '111.222',
       }),
     ).toEqual({
       channel: 'C123',
@@ -33,11 +30,9 @@ describe('getSlackReplyContext', () => {
   it('returns Slack channel context before a delayed thread exists', () => {
     expect(
       getSlackReplyContext({
-        type: 'suggested.tasks',
         payload: {
           slackChannel: 'C123',
         },
-        slackThreadTs: null,
       }),
     ).toEqual({
       channel: 'C123',

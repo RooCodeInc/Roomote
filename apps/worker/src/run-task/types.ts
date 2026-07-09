@@ -5,6 +5,7 @@ import type {
   CloudTaskStatus,
   CommunicationProvider,
   EnvironmentConfig,
+  RequestedWorkKind,
 } from '@roomote/types';
 import type { CloudJob, DequeuedCloudJob } from '@roomote/sdk/client';
 
@@ -123,6 +124,13 @@ export type RunTaskOptions = {
    * task-scoped environment guidance.
    */
   harnessInstructions?: string;
+  /**
+   * Requested work kind stamped on the task at enqueue. Stage 2 moved this
+   * off the run row onto tasks; it should be supplied by the SDK
+   * dequeue/resume response once the response exposes task fields. Used only
+   * to pick the initial workflow phase.
+   */
+  requestedWorkKind?: RequestedWorkKind | null;
   /**
    * Deployment-wide agent behavior instructions configured in admin
    * settings. When provided, these are merged into the startup

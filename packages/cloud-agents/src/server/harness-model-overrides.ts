@@ -3,7 +3,7 @@ import {
   type CodingHarness,
   type HarnessModelOverrides,
   type TaskModelSettings,
-  CloudTaskType,
+  TaskPayloadKind,
   getDefaultTaskModelId,
   getHarnessModelOverride,
   isTaskModelIdAllowed,
@@ -20,8 +20,8 @@ function isConfiguredModelId(
 
 function isCodeReviewTaskType(task: CloudTask): boolean {
   return (
-    task.type === CloudTaskType.GithubPrReview ||
-    task.type === CloudTaskType.GithubPrReviewSync
+    task.type === TaskPayloadKind.GithubPrReview ||
+    task.type === TaskPayloadKind.GithubPrReviewSync
   );
 }
 

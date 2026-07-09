@@ -1,4 +1,4 @@
-import { CloudTaskType } from '@roomote/types';
+import { type TaskWorkflow, TASK_WORKFLOWS } from '@roomote/types';
 
 import {
   type LucideIcon,
@@ -10,7 +10,7 @@ import {
 type TaskCategory = {
   id: string;
   label: string;
-  taskTypes: CloudTaskType[];
+  workflows: TaskWorkflow[];
   icon: LucideIcon;
   isAutonomous: boolean;
 };
@@ -19,29 +19,21 @@ const TASK_CATEGORIES: readonly TaskCategory[] = [
   {
     id: 'delegated',
     label: 'Delegated Tasks',
-    taskTypes: [
-      CloudTaskType.StandardTask,
-      CloudTaskType.SlackAppMention,
-      CloudTaskType.LinearAgentSession,
-    ],
+    workflows: ['standard'],
     icon: FileText,
     isAutonomous: false,
   },
   {
     id: 'pr-reviews',
     label: 'PR Reviews',
-    taskTypes: [
-      CloudTaskType.GithubPrReview,
-      CloudTaskType.GithubPrReviewSync,
-      CloudTaskType.GithubPrReviewFollowUp,
-    ],
+    workflows: ['pr_review'],
     icon: GitPullRequest,
     isAutonomous: true,
   },
   {
     id: 'auto-fixes',
     label: 'Auto-fixes',
-    taskTypes: [CloudTaskType.GithubPrConflictResolve],
+    workflows: ['pr_conflict_resolve'],
     icon: Bug,
     isAutonomous: true,
   },
@@ -53,4 +45,22 @@ export function getTaskCategoryById(id: string | null | undefined) {
   }
 
   return TASK_CATEGORIES.find((category) => category.id === id) ?? null;
+}
+
+/**
+ * Workflows whose tasks are hidden from default task lists. Kept in sync with
+ * the launch paths that stamp `tasks.visibility = 'hidden'`; the explicit
+ * workflow filter is the only UI surface that can reveal them.
+ */
+export const HIDDEN_TASK_WORKFLOWS: ReadonlySet<TaskWorkflow> = new Set([
+  'scan',
+  'mcp_recommendations',
+  'env_snapshot',
+]);
+
+export const DEFAULT_VISIBLE_TASK_WORKFLOWS: readonly TaskWorkflow[] =
+  TASK_WORKFLOWS.filter((workflow) => !HIDDEN_TASK_WORKFLOWS.has(workflow));
+
+export function isTaskWorkflow(value: string): value is TaskWorkflow {
+  return (TASK_WORKFLOWS as readonly string[]).includes(value);
 }

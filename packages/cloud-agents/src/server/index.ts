@@ -11,6 +11,7 @@ export { ROOMOTE_COMPACT_PROMPT } from '../compact-prompt';
 export * from './cloud-agent-workflow';
 export * from './cloud-job-id-coder';
 export * from './cloud-job-queue';
+export * from './commit-author';
 export * from './repository-environment-coverage';
 export * from './ci-failure-triage-prompt';
 export * from './automation-root-summary';

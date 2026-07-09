@@ -1,9 +1,11 @@
 import {
   type CloudTaskPayload,
   type SlackBlock,
-  CloudTaskType,
+  TaskPayloadKind,
   DEFAULT_SLACK_ACK_EMOJI,
   PRODUCT_NAME,
+  getSlackChannelFromTaskPayload,
+  getSlackThreadTsFromTaskPayload,
 } from '@roomote/types';
 import {
   SlackNotifier,
@@ -85,7 +87,7 @@ function getInitiatingSlackUserIdForStartedMessage(
   const payload = cloudJob.payload;
 
   if (
-    cloudJob.type === CloudTaskType.SlackAppMention &&
+    cloudJob.payloadKind === TaskPayloadKind.SlackAppMention &&
     payload &&
     typeof payload === 'object' &&
     'user' in payload &&
@@ -583,9 +585,10 @@ async function removeSlackAckReaction(
 
 function getSlackConversation(cloudJob: CloudJob) {
   // For SlackAppMention jobs, channel and thread_ts are in the payload.
-  if (cloudJob.type === CloudTaskType.SlackAppMention) {
-    const { channel, thread_ts } =
-      cloudJob.payload as CloudTaskPayload<CloudTaskType.SlackAppMention>;
+  if (cloudJob.payloadKind === TaskPayloadKind.SlackAppMention) {
+    const { channel, thread_ts } = cloudJob.payload as CloudTaskPayload<
+      typeof TaskPayloadKind.SlackAppMention
+    >;
 
     if (!thread_ts) {
       throw new Error('Thread TS not found.');
@@ -594,15 +597,20 @@ function getSlackConversation(cloudJob: CloudJob) {
     return { channel, thread_ts };
   }
 
-  // For SnapshotResume jobs with Slack metadata, read channel from payload
-  // and thread_ts from the top-level slackThreadTs field.
+  // For SnapshotResume jobs with Slack metadata, channel and thread_ts are
+  // copied onto the resume payload when the resume is enqueued.
+  const resumeThreadTs =
+    cloudJob.payloadKind === TaskPayloadKind.SnapshotResume
+      ? getSlackThreadTsFromTaskPayload(cloudJob.payload)
+      : null;
+
   if (
-    cloudJob.type === CloudTaskType.SnapshotResume &&
-    cloudJob.slackThreadTs
+    cloudJob.payloadKind === TaskPayloadKind.SnapshotResume &&
+    resumeThreadTs
   ) {
-    const payload = cloudJob.payload as Record<string, unknown>;
-    const channel = payload.slackChannel as string | undefined;
-    const thread_ts = cloudJob.slackThreadTs;
+    const channel =
+      getSlackChannelFromTaskPayload(cloudJob.payload) ?? undefined;
+    const thread_ts = resumeThreadTs;
 
     if (!channel) {
       throw new Error(
@@ -615,19 +623,20 @@ function getSlackConversation(cloudJob: CloudJob) {
   }
 
   throw new Error(
-    `Cloud job ${cloudJob.id} (type=${cloudJob.type}) is not a Slack-originated job`,
+    `Cloud job ${cloudJob.id} (payloadKind=${cloudJob.payloadKind}) is not a Slack-originated job`,
   );
 }
 
 function getSlackOriginMessageTs(cloudJob: CloudJob): string | null {
-  if (cloudJob.type === CloudTaskType.SlackAppMention) {
-    const { ts } =
-      cloudJob.payload as CloudTaskPayload<CloudTaskType.SlackAppMention>;
+  if (cloudJob.payloadKind === TaskPayloadKind.SlackAppMention) {
+    const { ts } = cloudJob.payload as CloudTaskPayload<
+      typeof TaskPayloadKind.SlackAppMention
+    >;
 
     return ts;
   }
 
-  if (cloudJob.type === CloudTaskType.SnapshotResume) {
+  if (cloudJob.payloadKind === TaskPayloadKind.SnapshotResume) {
     const payload = cloudJob.payload as { slackOriginMessageTs?: unknown };
 
     return typeof payload.slackOriginMessageTs === 'string'

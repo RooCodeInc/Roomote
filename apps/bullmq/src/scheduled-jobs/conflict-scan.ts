@@ -4,7 +4,9 @@ import {
   db,
   githubInstallations,
   repositories,
-  cloudJobs,
+  taskPullRequests,
+  taskRuns,
+  tasks,
   DEFAULT_CONFLICT_RESOLUTION_IDLE_WINDOW_MS,
   findActiveGitHubBranchWork,
   hasRecentGitHubBranchCommit,
@@ -21,7 +23,7 @@ import {
   isRepoSkipped,
 } from '@roomote/github';
 import { enqueueCloudTask } from '@roomote/cloud-agents/server';
-import { CloudTaskType, CloudTaskStatus } from '@roomote/types';
+import { TaskPayloadKind, CloudTaskStatus } from '@roomote/types';
 import { Env } from '@roomote/env';
 
 import {
@@ -73,7 +75,7 @@ async function getActiveRepos(
 
 /**
  * Check if there's already an active (pending/running) conflict resolution
- * job for the given PR. We duplicate this logic here rather than importing
+ * run for the given PR. We duplicate this logic here rather than importing
  * from the api app to keep the BullMQ app self-contained.
  */
 async function hasActiveResolutionJob(
@@ -83,14 +85,17 @@ async function hasActiveResolutionJob(
   const activeStatuses = [CloudTaskStatus.Pending, CloudTaskStatus.Running];
 
   const existing = await db
-    .select({ id: cloudJobs.id })
-    .from(cloudJobs)
+    .select({ id: taskRuns.id })
+    .from(tasks)
+    .innerJoin(taskPullRequests, eq(taskPullRequests.taskId, tasks.id))
+    .innerJoin(taskRuns, eq(taskRuns.taskId, tasks.id))
     .where(
       and(
-        eq(cloudJobs.type, CloudTaskType.GithubPrConflictResolve),
-        eq(cloudJobs.prRepo, repoFullName),
-        eq(cloudJobs.prNumber, prNumber),
-        inArray(cloudJobs.status, activeStatuses),
+        eq(tasks.workflow, 'pr_conflict_resolve'),
+        eq(taskPullRequests.sourceControlProvider, 'github'),
+        eq(taskPullRequests.repository, repoFullName),
+        eq(taskPullRequests.prNumber, prNumber),
+        inArray(taskRuns.status, activeStatuses),
       ),
     )
     .limit(1);
@@ -292,20 +297,44 @@ export async function conflictScanJob(
               const prAuthorLogin = pr.user?.login;
 
               const launchResult = await enqueueCloudTask({
-                type: CloudTaskType.GithubPrConflictResolve,
-                payload: {
-                  repo: repo.fullName,
-                  prNumber: pr.number,
-                  prTitle: pr.title,
-                  prUrl: pr.html_url,
-                  headRef: pr.head.ref,
-                  baseRef: pr.base.ref,
+                task: {
+                  type: TaskPayloadKind.GithubPrConflictResolve,
+                  payload: {
+                    repo: repo.fullName,
+                    prNumber: pr.number,
+                    prTitle: pr.title,
+                    prUrl: pr.html_url,
+                    headRef: pr.head.ref,
+                    baseRef: pr.base.ref,
+                  },
+                  githubLogin: prAuthorLogin,
+                  githubUserId: prAuthorId,
                 },
-                githubLogin: prAuthorLogin,
-                githubUserId: prAuthorId,
-                prRepo: repo.fullName,
-                prNumber: pr.number,
-                prSourceControlProvider: 'github',
+                initiator: {
+                  kind: 'automation',
+                  key: 'conflict_resolver',
+                  ...(prAuthorId != null
+                    ? {
+                        actor: {
+                          externalId: String(prAuthorId),
+                          displayName: prAuthorLogin,
+                        },
+                      }
+                    : {}),
+                },
+                workflow: 'pr_conflict_resolve',
+                surface: 'github',
+                trigger: 'schedule',
+                prLinkage: {
+                  provider: 'github',
+                  repository: repo.fullName,
+                  prNumber: pr.number,
+                  prUrl: pr.html_url,
+                  prTitle: pr.title,
+                  prSha: pr.head.sha,
+                  prBaseRef: pr.base.ref,
+                  prBaseSha: pr.base.sha,
+                },
               });
 
               launchedTaskCount++;
