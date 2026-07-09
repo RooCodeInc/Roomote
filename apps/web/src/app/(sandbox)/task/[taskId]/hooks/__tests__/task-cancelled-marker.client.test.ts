@@ -138,9 +138,7 @@ describe('task_cancelled marker history reconstruction', () => {
 
     const aborted = store
       .getState()
-      .messages.find(
-        (msg) => msg.text === 'Starting the refactor by mapping',
-      );
+      .messages.find((msg) => msg.text === 'Starting the refactor by mapping');
 
     expect(aborted).toBeDefined();
     expect(aborted?.isTurnCompletion).not.toBe(true);

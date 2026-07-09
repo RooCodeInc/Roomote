@@ -3464,8 +3464,7 @@ describe('OpenCodeServerHarness cancel marker', () => {
       });
       expect(
         runtimeOutputEvents.some(
-          (event) =>
-            event.eventType === ACP_ENVELOPE_EVENT_TYPES.TaskCancelled,
+          (event) => event.eventType === ACP_ENVELOPE_EVENT_TYPES.TaskCancelled,
         ),
       ).toBe(true);
     } finally {
@@ -3544,9 +3543,7 @@ describe('OpenCodeServerHarness cancel marker', () => {
             event.eventType === ACP_ENVELOPE_EVENT_TYPES.AssistantMessageChunk,
         ),
       ).toHaveLength(chunkCountAtCancel);
-      expect(client.message.mock.calls).toHaveLength(
-        messageFetchCountAtCancel,
-      );
+      expect(client.message.mock.calls).toHaveLength(messageFetchCountAtCancel);
       expect(
         persistedEnvelopes.filter(
           (envelope) =>

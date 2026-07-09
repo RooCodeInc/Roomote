@@ -4,9 +4,7 @@ import { ACP_ENVELOPE_EVENT_TYPES } from '@roomote/types';
 import { AcpTaskCancelledMessage } from '../AcpTaskCancelledMessage';
 import type { AcpUiMessage } from '../types';
 
-function buildMarker(
-  payload: Record<string, unknown> = {},
-): AcpUiMessage {
+function buildMarker(payload: Record<string, unknown> = {}): AcpUiMessage {
   return {
     id: 'cancel-1',
     ts: 1200,
@@ -21,7 +19,11 @@ function buildMarker(
 
 describe('AcpTaskCancelledMessage', () => {
   it('names the user who stopped the task', () => {
-    render(<AcpTaskCancelledMessage msg={buildMarker({ cancelledByName: 'Daniel' })} />);
+    render(
+      <AcpTaskCancelledMessage
+        msg={buildMarker({ cancelledByName: 'Daniel' })}
+      />,
+    );
 
     expect(screen.getByTestId('task-cancelled-marker')).toHaveTextContent(
       'Stopped by Daniel',

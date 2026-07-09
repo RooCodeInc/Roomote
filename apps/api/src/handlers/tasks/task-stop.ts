@@ -28,7 +28,7 @@ interface StopTaskJob {
  * Attribution for the user stop, forwarded to the sandbox so the transcript
  * gets a visible `task_cancelled` marker naming who stopped the task.
  */
-export interface StopTaskAttribution {
+interface StopTaskAttribution {
   name?: string;
   source?: string;
 }

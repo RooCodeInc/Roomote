@@ -999,9 +999,9 @@ describe('sanitizeEnvelopeFields', () => {
 
 describe('task_cancelled marker', () => {
   it('maps the task_cancelled event type to its own message kind', () => {
-    expect(
-      inferAcpMessageKind(ACP_ENVELOPE_EVENT_TYPES.TaskCancelled),
-    ).toBe('task_cancelled');
+    expect(inferAcpMessageKind(ACP_ENVELOPE_EVENT_TYPES.TaskCancelled)).toBe(
+      'task_cancelled',
+    );
   });
 
   it('parses a task_cancelled payload with attribution', () => {
