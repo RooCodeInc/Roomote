@@ -485,6 +485,17 @@ export function EditEnvironmentPage({
                 </AlertDescription>
               </Alert>
             ) : null}
+            {environment?.declarativeSource ? (
+              <Alert>
+                <AlertDescription>
+                  This environment is provisioned from{' '}
+                  <strong>{environment.declarativeSource}</strong> at deployment
+                  startup. You can edit it here, but the declarative definition
+                  is re-applied on the next restart and will overwrite changes
+                  saved from this page.
+                </AlertDescription>
+              </Alert>
+            ) : null}
             {environmentQuery.isPending ? (
               <div className="flex items-center justify-center py-12 text-muted-foreground">
                 <Loader2 className="size-4 animate-spin" />

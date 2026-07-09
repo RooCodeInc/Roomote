@@ -21,7 +21,10 @@ import {
   isNull,
   sql,
 } from '@roomote/db/server';
-import { enqueueCloudTask } from '@roomote/cloud-agents/server';
+import {
+  enqueueCloudTask,
+  resolveUserIdForCloudJob,
+} from '@roomote/cloud-agents/server';
 
 const SNAPSHOT_REFRESH_INTERVAL_MS = 24 * 60 * 60 * 1000;
 const PENDING_SNAPSHOT_RECOVERY_GRACE_MS = 5 * 60 * 1000;
@@ -30,7 +33,11 @@ const LOG_PREFIX = '[refreshSnapshots]';
 interface SnapshotRefreshCandidateBase {
   environmentId: string;
   environmentName: string;
-  createdByUserId: string;
+  /**
+   * Null for system-provisioned environments (declarative startup
+   * provisioning); refresh jobs then fall back to the first active user.
+   */
+  createdByUserId: string | null;
   provider: ComputeProvider;
   snapshotId: string | null;
   snapshotCreatedAt: Date | null;
@@ -370,6 +377,23 @@ export const refreshSnapshotsJob = async () => {
       > = null;
 
       try {
+        const jobUserId =
+          candidate.createdByUserId ??
+          (await resolveUserIdForCloudJob({ id: 0, userId: null }));
+
+        if (!jobUserId) {
+          logRefreshSnapshots(
+            'Skipping snapshot refresh: no active user available to attribute the job',
+            {
+              environmentId: candidate.environmentId,
+              environmentName: candidate.environmentName,
+              provider: candidate.provider,
+              source: candidate.source,
+            },
+          );
+          continue;
+        }
+
         if (candidate.source === 'missing_default_provider_snapshot') {
           const activeRefreshJob =
             await findActiveSnapshotRefreshJob(candidate);
@@ -433,7 +457,7 @@ export const refreshSnapshotsJob = async () => {
           });
 
           const { id } = await enqueueCloudTask({
-            userId: candidate.createdByUserId,
+            userId: jobUserId,
             computeProvider: candidate.provider,
             type: CloudTaskType.SnapshotEnvironment,
             payload: {
@@ -498,7 +522,7 @@ export const refreshSnapshotsJob = async () => {
             });
 
             const { id } = await enqueueCloudTask({
-              userId: candidate.createdByUserId,
+              userId: jobUserId,
               computeProvider: candidate.provider,
               type: CloudTaskType.SnapshotEnvironment,
               payload: {
