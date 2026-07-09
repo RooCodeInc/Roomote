@@ -2237,8 +2237,11 @@ describe('OpenCodeServerHarness', () => {
         }),
       ).toBe(true);
 
+      // Wait for the steer to fully abort and replay (its drained prompt is
+      // the second promptAsync call) so the baseline below excludes it.
       await vi.waitFor(() => {
         expect(harness.getPendingUserInputRequests()).toEqual([]);
+        expect(client.promptAsync).toHaveBeenCalledTimes(2);
       });
 
       // A cancelled response is emitted for the abandoned question so
@@ -2254,6 +2257,38 @@ describe('OpenCodeServerHarness', () => {
       expect(cancelledResponse?.payload).toMatchObject({
         resolution: 'cancelled',
       });
+
+      // A late answer to the abandoned question (e.g. a web POST opened
+      // before the steer) must be rejected, not fabricated into the
+      // replayed turn: no submitted response, no extra prompt submission.
+      const promptCallsBeforeStaleAnswer = client.promptAsync.mock.calls.length;
+
+      expect(
+        harness.sendCommand({
+          commandName: TaskCommandName.AnswerUserInputRequest,
+          data: {
+            requestId: 'rui:ses_1:msg_question:question_call_1',
+            answers: { color: { answers: ['Blue'] } },
+            userId: 'stale-user',
+          },
+        }),
+      ).toBe(true);
+
+      await new Promise((resolve) => setTimeout(resolve, 20));
+
+      expect(client.promptAsync.mock.calls.length).toBe(
+        promptCallsBeforeStaleAnswer,
+      );
+      expect(
+        persistedEnvelopes.some(
+          (envelope) =>
+            envelope.eventType ===
+              ACP_ENVELOPE_EVENT_TYPES.RequestUserInputResponse &&
+            envelope.payload.requestId ===
+              'rui:ses_1:msg_question:question_call_1' &&
+            envelope.payload.resolution === 'submitted',
+        ),
+      ).toBe(false);
     } finally {
       harness.dispose();
     }
