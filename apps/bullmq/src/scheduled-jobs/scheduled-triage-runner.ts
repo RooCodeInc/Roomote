@@ -1,7 +1,4 @@
-import {
-  enqueueCloudTask,
-  resolveUserIdForCloudJob,
-} from '@roomote/cloud-agents/server';
+import { enqueueCloudTask } from '@roomote/cloud-agents/server';
 import {
   completeBackgroundAutomationRun,
   completeBackgroundAutomationRunByJobId,
@@ -157,19 +154,6 @@ export function createScheduledTriageJob(
           continue;
         }
 
-        const adminUserId = await resolveUserIdForCloudJob({
-          id: 0,
-          userId: null,
-        });
-
-        if (!adminUserId) {
-          console.warn(
-            `${logPrefix} Skipping deployment: no active user available for scheduled ${config.automationKey.replaceAll('_', ' ')} task`,
-          );
-          skipped++;
-          continue;
-        }
-
         const scanTask = await config.buildScanTask({
           deployment,
           channelId,
@@ -193,14 +177,17 @@ export function createScheduledTriageJob(
           })
         ).id;
 
+        // Automation scans run as the deployment service principal; a manual
+        // trigger is still an automation launch, just with a manual trigger
+        // kind on the run record.
         const launchResult = await enqueueCloudTask(
           {
-            userId: adminUserId,
+            userId: null,
             type: CloudTaskType.SuggestedTasks,
             payload: scanTask.payload,
           },
           {
-            launchClass: opts.manualTrigger ? 'human' : 'automation',
+            launchClass: 'automation',
           },
         );
 

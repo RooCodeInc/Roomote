@@ -119,6 +119,7 @@ describe('fetchSnapshotEnv', () => {
     const auth: JobTokenContext = {
       cloudJobId: 42,
       userId: 'user_789',
+      principal: 'user',
       tokenType: 'cj',
       version: 1,
     };

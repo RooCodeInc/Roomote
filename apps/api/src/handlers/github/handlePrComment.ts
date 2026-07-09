@@ -4,7 +4,6 @@ import {
   enqueueCloudTask,
   getTaskUrl,
   routeGitHubTask,
-  resolveUserIdForCloudJob,
 } from '@roomote/cloud-agents/server';
 import {
   findActiveGitHubPrReviewTask,
@@ -839,13 +838,9 @@ async function resolveReusableTaskSenderUserId({
     return null;
   }
 
-  return (
-    latestJob.actingUserId ??
-    (await resolveUserIdForCloudJob({
-      id: latestJob.id,
-      userId: latestJob.userId,
-    }))
-  );
+  // No forged fallback: when neither the acting user nor the job owner is a
+  // real user, the follow-up has no deliverable human and callers handle null.
+  return latestJob.actingUserId ?? latestJob.userId ?? null;
 }
 
 /**
@@ -1027,13 +1022,10 @@ async function resumeExistingTaskAndDeliverFollowUp({
     };
   }
 
-  const senderUserId =
-    userId ??
-    sourceJob.actingUserId ??
-    (await resolveUserIdForCloudJob({
-      id: sourceJob.id,
-      userId: sourceJob.userId,
-    }));
+  // Prefer the linked commenter, then the job's acting user, then the job
+  // owner. No forged fallback: an ownerless job with an unlinked commenter has
+  // no delivery user and is rejected below.
+  const senderUserId = userId ?? sourceJob.actingUserId ?? sourceJob.userId;
 
   if (!senderUserId) {
     return {

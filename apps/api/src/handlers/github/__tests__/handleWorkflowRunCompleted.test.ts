@@ -2,7 +2,6 @@ const {
   mockDbSelect,
   mockEnqueueCloudTask,
   mockBuildRepositoryCoverage,
-  mockResolveUserIdForCloudJob,
   mockGetBackgroundAgentSettingsForOrg,
   mockEvaluateFeatureFlag,
   mockStartBackgroundAutomationRun,
@@ -16,7 +15,6 @@ const {
   mockDbSelect: vi.fn(),
   mockEnqueueCloudTask: vi.fn(),
   mockBuildRepositoryCoverage: vi.fn(),
-  mockResolveUserIdForCloudJob: vi.fn(),
   mockGetBackgroundAgentSettingsForOrg: vi.fn(),
   mockEvaluateFeatureFlag: vi.fn(),
   mockStartBackgroundAutomationRun: vi.fn(),
@@ -57,8 +55,6 @@ vi.mock('@roomote/cloud-agents/server', () => ({
   enqueueCloudTask: (...args: unknown[]) => mockEnqueueCloudTask(...args),
   getTaskUrl: ({ taskId }: { taskId: string }) =>
     `https://app.example.com/task/${taskId}?utm_source=slack&utm_medium=link&utm_campaign=slack.thread_reply`,
-  resolveUserIdForCloudJob: (...args: unknown[]) =>
-    mockResolveUserIdForCloudJob(...args),
 }));
 
 vi.mock('@roomote/feature-flags/server', () => ({
@@ -197,7 +193,6 @@ describe('handleWorkflowRunCompleted', () => {
       undefined as never,
     );
     mockUpsertBackgroundAutomationSlackThread.mockResolvedValue(undefined);
-    mockResolveUserIdForCloudJob.mockResolvedValue('admin-1');
     mockStartBackgroundAutomationRun.mockResolvedValue({ id: 'run-1' });
     mockCompleteBackgroundAutomationRun.mockResolvedValue(undefined);
     mockEnqueueCloudTask.mockResolvedValue({
@@ -220,7 +215,7 @@ describe('handleWorkflowRunCompleted', () => {
     );
     expect(mockEnqueueCloudTask).toHaveBeenCalledWith(
       expect.objectContaining({
-        userId: 'admin-1',
+        userId: null,
         type: CloudTaskType.SuggestedTasks,
         payload: expect.objectContaining({
           repo: 'acme/api',

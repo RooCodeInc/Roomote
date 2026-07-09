@@ -38,7 +38,6 @@ function getSuggestionRouteKind(route: SuggestionDispatchRoute) {
 }
 
 async function enqueueSuggestionRoute(params: {
-  adminUserId: string;
   deployment: SuggesterDeploymentContext;
   previousSuggestions: Array<{
     title: string;
@@ -68,9 +67,10 @@ async function enqueueSuggestionRoute(params: {
       })
     ).id;
 
+    // Suggestion scans run as the deployment service principal.
     const launchResult = await enqueueCloudTask(
       {
-        userId: params.adminUserId,
+        userId: null,
         type: CloudTaskType.SuggestedTasks,
         payload: {
           repo: ALL_REPOSITORIES,
@@ -153,7 +153,6 @@ async function enqueueSuggestionRoute(params: {
 }
 
 export async function dispatchSuggestionRoutes(params: {
-  adminUserId: string;
   deployment: SuggesterDeploymentContext;
   previousSuggestions: Array<{
     title: string;
@@ -170,7 +169,6 @@ export async function dispatchSuggestionRoutes(params: {
 
   for (const route of params.routePlan.routes) {
     const result = await enqueueSuggestionRoute({
-      adminUserId: params.adminUserId,
       deployment: params.deployment,
       previousSuggestions: params.previousSuggestions,
       repositoryCoverage: params.repositoryCoverage,

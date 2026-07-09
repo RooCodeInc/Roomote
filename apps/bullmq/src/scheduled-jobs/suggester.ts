@@ -1,7 +1,4 @@
-import {
-  findEnvironmentForRepo,
-  resolveUserIdForCloudJob,
-} from '@roomote/cloud-agents/server';
+import { findEnvironmentForRepo } from '@roomote/cloud-agents/server';
 import {
   db,
   slackInstallations,
@@ -168,19 +165,6 @@ export async function suggesterJob(
         continue;
       }
 
-      const adminUserId = await resolveUserIdForCloudJob({
-        id: 0,
-        userId: null,
-      });
-
-      if (!adminUserId) {
-        console.warn(
-          `${LOG_PREFIX} Skipping deployment: no user available for scheduled suggester task`,
-        );
-        skipped++;
-        continue;
-      }
-
       const openSuggestionCount = await countOpenSuggestions();
 
       if (
@@ -255,7 +239,6 @@ export async function suggesterJob(
         },
       });
       const dispatchResult = await dispatchSuggestionRoutes({
-        adminUserId,
         deployment,
         previousSuggestions,
         repositoryCoverage: environmentBackedRepositoryCoverage,

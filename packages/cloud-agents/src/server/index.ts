@@ -25,7 +25,6 @@ export * from './llm-task-title';
 export * from './mcp-self-setup';
 export * from './mcp-tool-client';
 export * from './non-task-provider-usage';
-export * from './resolve-user-id-for-cloud-job';
 export * from './router';
 export * from './slack-question-channel-suggestions';
 export * from './suggestion-routing';

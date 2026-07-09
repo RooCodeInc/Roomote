@@ -91,9 +91,13 @@ export async function authorizeJobToken(
   try {
     const tokenContext = await validateJobToken(token);
 
-    const user = await db.query.users.findFirst({
-      where: eq(users.id, tokenContext.userId),
-    });
+    // Deployment-principal job tokens carry no user; skip the lookup rather
+    // than resolving an arbitrary user for them.
+    const user = tokenContext.userId
+      ? await db.query.users.findFirst({
+          where: eq(users.id, tokenContext.userId),
+        })
+      : undefined;
 
     const response: Pick<
       JobAuthTokenSuccess,

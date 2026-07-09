@@ -65,7 +65,11 @@ export const sendPrompt = publicProcedure
   .input(sendPromptInputSchema)
   .mutation(async ({ input, ctx }) => {
     const userId =
-      ctx.auth && 'userId' in ctx.auth ? ctx.auth.userId : undefined;
+      // Deployment-principal job tokens have a null userId; treat them as no
+      // acting user rather than fabricating one.
+      ctx.auth && 'userId' in ctx.auth
+        ? (ctx.auth.userId ?? undefined)
+        : undefined;
     const resolvedPrompt = input.taskTool
       ? getTaskToolInvocation(input.taskTool.actionId, ctx.codingHarness)
       : (input.prompt ?? '');

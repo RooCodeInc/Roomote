@@ -1,7 +1,11 @@
 import { cloudJobs, db, eq } from '@roomote/db/server';
 
 interface ActorScopedAuthContext {
-  userId?: string;
+  /**
+   * Null when the token runs as the deployment service principal (no human);
+   * such contexts resolve to "no acting user".
+   */
+  userId?: string | null;
   cloudJobId?: number;
 }
 
@@ -25,7 +29,7 @@ export async function resolveActorScopedUserContext(
   }
 
   const fallback = {
-    userId: auth.userId,
+    userId: auth.userId ?? undefined,
   };
 
   if (!auth.cloudJobId) {
@@ -45,6 +49,7 @@ export async function resolveActorScopedUserContext(
   }
 
   return {
-    userId: cloudJob.actingUserId ?? cloudJob.userId ?? auth.userId,
+    userId:
+      cloudJob.actingUserId ?? cloudJob.userId ?? auth.userId ?? undefined,
   };
 }

@@ -87,6 +87,7 @@ function createApp(authContext?: AuthTokenContext | JobTokenContext) {
 describe('submitAutomationWorkItems', () => {
   const authContext: JobTokenContext = {
     userId: 'user-1',
+    principal: 'user',
     cloudJobId: 1,
     tokenType: 'cj',
     version: 1,

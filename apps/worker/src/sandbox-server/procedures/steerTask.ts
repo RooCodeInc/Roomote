@@ -42,7 +42,11 @@ export const steerTask = publicProcedure
     }
 
     const userId =
-      ctx.auth && 'userId' in ctx.auth ? ctx.auth.userId : undefined;
+      // Deployment-principal job tokens have a null userId; treat them as no
+      // acting user rather than fabricating one.
+      ctx.auth && 'userId' in ctx.auth
+        ? (ctx.auth.userId ?? undefined)
+        : undefined;
 
     const status = ctx.harnessManager.getStatus();
     const hasActiveTurn = isActiveTaskPhase(status.phase);

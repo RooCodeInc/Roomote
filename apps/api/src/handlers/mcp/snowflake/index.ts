@@ -1,7 +1,6 @@
 import { Hono } from 'hono';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { WebStandardStreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/webStandardStreamableHttp.js';
-import { resolveUserIdForCloudJob } from '@roomote/cloud-agents/server';
 import {
   and,
   cloudJobs,
@@ -52,18 +51,15 @@ async function resolveSnowflakeMcpAuth(
       throw new McpProxyError(404, 'Cloud job not found for this MCP token');
     }
 
-    const resolvedUserId = await resolveUserIdForCloudJob(cloudJob);
-    if (!resolvedUserId) {
+    // The token principal must match the job: a user token must carry the
+    // job's user, and a deployment-service-principal token is only valid for
+    // a job with no user (null === null). Snowflake credentials come from a
+    // deployment-scoped connection, so deployment-principal jobs are fully
+    // supported.
+    if ((cloudJob.userId ?? null) !== authContext.userId) {
       throw new McpProxyError(
         403,
-        'MCP proxy requires a cloud job associated with a real user',
-      );
-    }
-
-    if (resolvedUserId !== authContext.userId) {
-      throw new McpProxyError(
-        403,
-        'MCP token user does not match cloud job user',
+        'MCP token principal does not match cloud job',
       );
     }
 

@@ -28,8 +28,10 @@ export const mcpAuthMiddleware = createMiddleware<{
     return c.json({ error: 'Authentication required' }, 401);
   }
 
+  // Job tokens minted for the deployment service principal carry a null
+  // userId; surface that as undefined rather than pretending a user exists.
   const userId =
-    'userId' in authContext ? (authContext.userId as string) : undefined;
+    'userId' in authContext ? (authContext.userId ?? undefined) : undefined;
 
   c.set('mcpAuth', { userId, authContext });
 

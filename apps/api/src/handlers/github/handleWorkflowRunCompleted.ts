@@ -6,7 +6,6 @@ import {
   buildRepositoryCoverage,
   enqueueCloudTask,
   getTaskUrl,
-  resolveUserIdForCloudJob,
 } from '@roomote/cloud-agents/server';
 import {
   and,
@@ -249,16 +248,6 @@ export async function handleWorkflowRunCompleted(
     };
   }
 
-  const adminUserId = await resolveUserIdForCloudJob({
-    id: 0,
-    userId: null,
-  });
-
-  if (!adminUserId) {
-    console.warn(`${LOG_PREFIX} No user available for CI failure triage`);
-    return { status: 'ok', message: 'No user available' };
-  }
-
   const workflowName = run.name ?? payload.workflow?.name ?? 'unknown';
   const announcementText = buildAnnouncementText({
     repositoryFullName: match.repositoryFullName,
@@ -326,9 +315,10 @@ export async function handleWorkflowRunCompleted(
       })
     ).id;
 
+    // CI failure triage runs as the deployment service principal.
     const launchResult = await enqueueCloudTask(
       {
-        userId: adminUserId,
+        userId: null,
         type: CloudTaskType.SuggestedTasks,
         payload: {
           repo: match.repositoryFullName,

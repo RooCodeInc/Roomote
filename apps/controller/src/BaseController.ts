@@ -25,10 +25,7 @@ import {
   and,
   isNull,
 } from '@roomote/db/server';
-import {
-  dequeueCloudTask,
-  resolveUserIdForCloudJob,
-} from '@roomote/cloud-agents/server';
+import { dequeueCloudTask } from '@roomote/cloud-agents/server';
 import { finishCloudJob } from '@roomote/sdk/server';
 
 import { getOrphanedJob } from './orphaned-cloud-jobs';
@@ -411,26 +408,19 @@ export abstract class BaseController {
   protected async dequeueCloudJob(
     cloudJob: CloudJob,
   ): Promise<{ cloudJob: CloudJob; authToken: string } | null> {
-    const userId = await resolveUserIdForCloudJob(cloudJob);
-
-    if (!userId) {
-      throw new Error(
-        `Job ${cloudJob.id}: cannot resolve a user for job token creation`,
-      );
-    }
-
     const sandboxTimeoutMs = SANDBOX_TIMEOUT_MS;
 
+    // Jobs without a human driver run as the deployment service principal;
+    // the token carries no user claim rather than borrowing an arbitrary
+    // user's identity.
     const authToken = await createJobToken({
       cloudJobId: cloudJob.id,
-      userId,
+      userId: cloudJob.userId ?? null,
       timeoutMs: sandboxTimeoutMs,
     });
 
     if (!authToken) {
-      throw new Error(
-        `Failed to create job token for job ${cloudJob.id} from user ${userId}`,
-      );
+      throw new Error(`Failed to create job token for job ${cloudJob.id}`);
     }
 
     let dequeueSkipped = false;

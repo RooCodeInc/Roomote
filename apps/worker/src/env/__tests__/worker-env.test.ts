@@ -365,6 +365,7 @@ describe('WorkerEnv', () => {
       await expect(validateJobToken(token)).resolves.toEqual({
         cloudJobId: 123,
         userId: 'user-123',
+        principal: 'user',
         tokenType: 'cj',
         version: 1,
       });

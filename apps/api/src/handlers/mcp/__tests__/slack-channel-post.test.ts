@@ -130,6 +130,7 @@ describe('slack channel post MCP endpoint', () => {
   const jobToken: JobTokenContext = {
     cloudJobId: 42,
     userId: 'user-1',
+    principal: 'user',
     tokenType: 'cj',
     version: 1,
   };

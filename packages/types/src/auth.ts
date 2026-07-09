@@ -12,7 +12,9 @@ export const jobTokenPayloadSchema = z.object({
   nbf: z.number().int().positive('Not before (nbf) must be a positive integer'),
   v: z.literal(1, { errorMap: () => ({ message: 'Version must be 1' }) }),
   r: z.object({
-    u: z.string().min(1, 'User ID is required'),
+    // Absent user claim means the job runs as the deployment service
+    // principal (automation-initiated work with no human driver).
+    u: z.string().min(1, 'User ID must be non-empty when present').optional(),
     t: z.literal('cj', {
       errorMap: () => ({ message: 'Token type must be "cj"' }),
     }),
@@ -23,11 +25,18 @@ export type JobTokenPayload = z.infer<typeof jobTokenPayloadSchema>;
 
 /**
  * JobTokenContext
+ *
+ * `principal` distinguishes a human-scoped job token from one minted for the
+ * deployment service principal. `userId` is null exactly when
+ * `principal === 'deployment'`.
  */
+
+export type JobTokenPrincipal = 'user' | 'deployment';
 
 export interface JobTokenContext {
   cloudJobId: number;
-  userId: string;
+  userId: string | null;
+  principal: JobTokenPrincipal;
   tokenType: 'cj';
   version: number;
 }

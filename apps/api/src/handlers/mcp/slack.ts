@@ -2,7 +2,6 @@ import type { ContentfulStatusCode } from 'hono/utils/http-status';
 import { Hono } from 'hono';
 
 import { Env } from '@roomote/env';
-import { resolveUserIdForCloudJob } from '@roomote/cloud-agents/server';
 import {
   and,
   backgroundAutomationSlackThreads,
@@ -885,18 +884,13 @@ slackMcp.post('/thread_reply', async (c) => {
     return c.json({ error: 'Cloud job not found for this MCP token' }, 404);
   }
 
-  const resolvedUserId = await resolveUserIdForCloudJob(cloudJob);
-
-  if (!hasRealCloudJobUser(resolvedUserId)) {
+  // The token principal must match the job: a user token must carry the
+  // job's user, and a deployment-service-principal token is only valid for a
+  // job with no user (null === null). Replies are posted with the deployment
+  // Slack bot token, so no human actor is required here.
+  if ((cloudJob.userId ?? null) !== authContext.userId) {
     return c.json(
-      { error: 'MCP proxy requires a cloud job associated with a real user' },
-      403,
-    );
-  }
-
-  if (resolvedUserId !== authContext.userId) {
-    return c.json(
-      { error: 'MCP token user does not match cloud job user' },
+      { error: 'MCP token principal does not match cloud job' },
       403,
     );
   }
@@ -1446,10 +1440,14 @@ slackMcp.post('/thread_reply', async (c) => {
     throw error;
   }
 
-  const subject = await findSlackConversationSubjectByUserId({
-    userId: resolvedUserId,
-    slackTeamId: slackInstallation.teamId,
-  });
+  // Conversation-subject bookkeeping is keyed to a human user; skip it for
+  // deployment-service-principal jobs, which have no user.
+  const subject = hasRealCloudJobUser(cloudJob.userId)
+    ? await findSlackConversationSubjectByUserId({
+        userId: cloudJob.userId,
+        slackTeamId: slackInstallation.teamId,
+      })
+    : null;
 
   if (subject) {
     await recordSlackConversationMessageBestEffort({
@@ -1505,16 +1503,13 @@ slackMcp.post('/thread_lookup', async (c) => {
     return c.json({ error: 'Cloud job not found for this MCP token' }, 404);
   }
 
-  if (!hasRealCloudJobUser(cloudJob.userId)) {
+  // The token principal must match the job; a deployment-service-principal
+  // token is valid for a job with no user (null === null). This endpoint
+  // operates via the deployment Slack bot token, so no human actor is
+  // required.
+  if ((cloudJob.userId ?? null) !== authContext.userId) {
     return c.json(
-      { error: 'MCP proxy requires a cloud job associated with a real user' },
-      403,
-    );
-  }
-
-  if (cloudJob.userId !== authContext.userId) {
-    return c.json(
-      { error: 'MCP token user does not match cloud job user' },
+      { error: 'MCP token principal does not match cloud job' },
       403,
     );
   }
@@ -1577,16 +1572,13 @@ slackMcp.post('/reaction_add', async (c) => {
     return c.json({ error: 'Cloud job not found for this MCP token' }, 404);
   }
 
-  if (!hasRealCloudJobUser(cloudJob.userId)) {
+  // The token principal must match the job; a deployment-service-principal
+  // token is valid for a job with no user (null === null). This endpoint
+  // operates via the deployment Slack bot token, so no human actor is
+  // required.
+  if ((cloudJob.userId ?? null) !== authContext.userId) {
     return c.json(
-      { error: 'MCP proxy requires a cloud job associated with a real user' },
-      403,
-    );
-  }
-
-  if (cloudJob.userId !== authContext.userId) {
-    return c.json(
-      { error: 'MCP token user does not match cloud job user' },
+      { error: 'MCP token principal does not match cloud job' },
       403,
     );
   }
@@ -1697,16 +1689,13 @@ slackMcp.post('/channel_messages', async (c) => {
     return c.json({ error: 'Cloud job not found for this MCP token' }, 404);
   }
 
-  if (!hasRealCloudJobUser(cloudJob.userId)) {
+  // The token principal must match the job; a deployment-service-principal
+  // token is valid for a job with no user (null === null). This endpoint
+  // operates via the deployment Slack bot token, so no human actor is
+  // required.
+  if ((cloudJob.userId ?? null) !== authContext.userId) {
     return c.json(
-      { error: 'MCP proxy requires a cloud job associated with a real user' },
-      403,
-    );
-  }
-
-  if (cloudJob.userId !== authContext.userId) {
-    return c.json(
-      { error: 'MCP token user does not match cloud job user' },
+      { error: 'MCP token principal does not match cloud job' },
       403,
     );
   }
@@ -1777,16 +1766,13 @@ slackMcp.post('/channel_post', async (c) => {
     return c.json({ error: 'Cloud job not found for this MCP token' }, 404);
   }
 
-  if (!hasRealCloudJobUser(cloudJob.userId)) {
+  // The token principal must match the job; a deployment-service-principal
+  // token is valid for a job with no user (null === null). This endpoint
+  // operates via the deployment Slack bot token, so no human actor is
+  // required.
+  if ((cloudJob.userId ?? null) !== authContext.userId) {
     return c.json(
-      { error: 'MCP proxy requires a cloud job associated with a real user' },
-      403,
-    );
-  }
-
-  if (cloudJob.userId !== authContext.userId) {
-    return c.json(
-      { error: 'MCP token user does not match cloud job user' },
+      { error: 'MCP token principal does not match cloud job' },
       403,
     );
   }

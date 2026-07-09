@@ -266,7 +266,10 @@ export const cloudJobsRouter = router({
     }),
     'cloudJobId',
   ).mutation(({ ctx, input }) => {
-    const userId = 'userId' in ctx.auth ? ctx.auth.userId : undefined;
+    // Deployment-principal job tokens carry no human user; leave the
+    // attribution unset so the envelope persists without a user id.
+    const userId =
+      'userId' in ctx.auth ? (ctx.auth.userId ?? undefined) : undefined;
 
     return recordTaskMessageEnvelope({
       cloudJobId: input.cloudJobId,

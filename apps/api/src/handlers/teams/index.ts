@@ -58,7 +58,6 @@ import {
   buildTeamsRoutingContext,
   enqueueCloudTask,
   getTaskUrl,
-  resolveUserIdForCloudJob,
   routeTask,
   type RoutingWorkspace,
 } from '@roomote/cloud-agents/server';
@@ -982,15 +981,10 @@ async function resumeTeamsTaskFromSnapshot(input: {
       });
       restoreSnapshotResumeVisiblePromptFields(resumePayload, completedPayload);
 
-      const resumeUserId =
-        queuedMessage.userId ??
-        completedJob.userId ??
-        (await resolveUserIdForCloudJob(completedJob));
-      if (!resumeUserId) {
-        throw new Error(
-          'No active user is available for Teams snapshot resume.',
-        );
-      }
+      // Prefer the queued message sender, then the completed job's owner. No
+      // forged fallback: when neither is a real user the resume runs as the
+      // deployment service principal via an automation launch.
+      const resumeUserId = queuedMessage.userId ?? completedJob.userId ?? null;
 
       const resumeLaunch = await enqueueCloudTask(
         {
@@ -1001,7 +995,7 @@ async function resumeTeamsTaskFromSnapshot(input: {
           payload: resumePayload,
         },
         {
-          launchClass: 'human',
+          launchClass: resumeUserId ? 'human' : 'automation',
         },
       );
 

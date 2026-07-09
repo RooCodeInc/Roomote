@@ -713,8 +713,17 @@ export async function enqueueCloudTask(
 
   await assertDeploymentIsActive();
 
-  if (!userId && !githubUserId) {
-    throw new Error('A cloud task must have a userId or a githubUserId.');
+  // Automation and maintenance launches may legitimately have no human
+  // identity: they run as the deployment service principal. Human-facing
+  // launches must still carry a user or an external GitHub identity.
+  const isNonHumanLaunch =
+    options.launchClass === 'automation' ||
+    options.launchClass === 'maintenance';
+
+  if (!userId && !githubUserId && !isNonHumanLaunch) {
+    throw new Error(
+      'A cloud task must have a userId or a githubUserId unless it is an explicit automation or maintenance launch.',
+    );
   }
 
   if (userId) {

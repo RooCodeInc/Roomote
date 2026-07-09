@@ -12,7 +12,14 @@ import { findCloudJobByJobTokenClaims } from '@roomote/sdk/server';
 import type { Variables } from '../../types';
 
 type ArtifactRouteAuthContext = {
-  userId: string;
+  /**
+   * Null for deployment-principal job tokens. Authorization stays scoped to
+   * the cloud job itself: `findCloudJobByJobTokenClaims` matches by
+   * `cloudJobId` and only requires `userId` to agree when the job has an
+   * owner, so an ownerless job's deployment token is authorized exactly like
+   * the job's own user would have been.
+   */
+  userId: string | null;
   cloudJobId: number;
   tokenType: 'cj';
 };

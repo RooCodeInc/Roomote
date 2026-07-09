@@ -148,6 +148,7 @@ function createJobCaller() {
   const auth: JobTokenContext = {
     cloudJobId: 42,
     userId: 'user-1',
+    principal: 'user',
     tokenType: 'cj',
     version: 1,
   };
@@ -247,6 +248,7 @@ describe('cloudJobsRouter queue message guards', () => {
     expect(mockFindCloudJobByJobTokenClaims).toHaveBeenCalledWith({
       cloudJobId: 42,
       userId: 'user-1',
+      principal: 'user',
       tokenType: 'cj',
       version: 1,
     });
@@ -279,6 +281,7 @@ describe('cloudJobsRouter queue message guards', () => {
     expect(mockFindCloudJobByJobTokenClaims).toHaveBeenCalledWith({
       cloudJobId: 42,
       userId: 'user-1',
+      principal: 'user',
       tokenType: 'cj',
       version: 1,
     });
@@ -302,6 +305,7 @@ describe('cloudJobsRouter queue message guards', () => {
     expect(mockFindCloudJobByJobTokenClaims).toHaveBeenCalledWith({
       cloudJobId: 42,
       userId: 'user-1',
+      principal: 'user',
       tokenType: 'cj',
       version: 1,
     });

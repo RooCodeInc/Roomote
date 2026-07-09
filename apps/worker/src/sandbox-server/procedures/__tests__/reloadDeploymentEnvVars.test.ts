@@ -87,6 +87,7 @@ function createCaller(workerEnv?: WorkerEnv, cloudJobId = 1) {
     auth: {
       cloudJobId,
       userId: 'user-1',
+      principal: 'user',
       tokenType: 'cj',
       version: 1,
     } satisfies JobTokenContext,

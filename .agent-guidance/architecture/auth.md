@@ -15,7 +15,7 @@ Roomote is local-first and self-hosted. The web app uses Better Auth for the bro
 Authentication has three active mechanisms:
 
 1. **Browser auth context** — `apps/web/src/lib/server/auth-context.ts` resolves the current Better Auth session and maps it into the single-deployment product identity.
-2. **Job tokens** (`t: 'cj'`) — per cloud job, scoped to task execution and validated by `@roomote/auth`.
+2. **Job tokens** (`t: 'cj'`) — per cloud job, scoped to task execution and validated by `@roomote/auth`. The user claim (`r.u`) is optional: a token without it authenticates as the **deployment service principal**, the non-human identity for automation-initiated jobs with no human driver. `JobTokenContext` carries `principal: 'user' | 'deployment'` and a nullable `userId`. Token/job matching is `(cloudJob.userId ?? null) === token.userId`, so a deployment token is valid exactly for ownerless jobs. There is no first-user or placeholder-owner fallback anywhere (`resolveUserIdForCloudJob` was deleted); operations that genuinely require a human actor return a 403 naming the service principal, and MCP credential lookups for deployment-principal jobs use deployment-scoped `mcp_connections` rows (`user_id IS NULL`).
 3. **Auth tokens** (`t: 'auth'`) — user bearer tokens for API access and worker-to-app calls.
 
 The deployment identity is intentionally flat:

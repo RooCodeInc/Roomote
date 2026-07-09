@@ -52,6 +52,7 @@ function createJobCaller() {
   const auth: JobTokenContext = {
     cloudJobId: 42,
     userId: 'owner-user',
+    principal: 'user',
     tokenType: 'cj',
     version: 1,
   };

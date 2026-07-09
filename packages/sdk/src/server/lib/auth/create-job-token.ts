@@ -3,7 +3,6 @@ import { z } from 'zod';
 import type { AuthTokenContext } from '@roomote/types';
 import * as Auth from '@roomote/auth';
 import { db, cloudJobs, eq } from '@roomote/db/server';
-import { resolveUserIdForCloudJob } from '@roomote/cloud-agents/server';
 
 export const createJobTokenInputSchema = Auth.createJobTokenOptionsSchema.omit({
   userId: true,
@@ -22,15 +21,7 @@ export const createJobToken = async (
     throw new Error(`Cloud job ${input.cloudJobId} not found`);
   }
 
-  const userId = await resolveUserIdForCloudJob(cloudJob);
-
-  if (!userId) {
-    console.error(
-      `[createJobToken] Unable to determine user to authorize for cloud job ${JSON.stringify(cloudJob)}`,
-    );
-
-    throw new Error('Unable to determine user to authorize for cloud job');
-  }
-
-  return Auth.createJobToken({ ...input, userId });
+  // Jobs without a human driver are tokenized as the deployment service
+  // principal rather than borrowing an arbitrary user's identity.
+  return Auth.createJobToken({ ...input, userId: cloudJob.userId ?? null });
 };

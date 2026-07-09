@@ -78,6 +78,7 @@ describe('getCloudJobLogs', () => {
     const jobTokenContext: JobTokenContext = {
       cloudJobId: 999,
       userId: 'user-1',
+      principal: 'user',
       tokenType: 'cj',
       version: 1,
     };
@@ -97,6 +98,7 @@ describe('getCloudJobLogs', () => {
     const jobTokenContext: JobTokenContext = {
       cloudJobId: 101,
       userId: 'user-1',
+      principal: 'user',
       tokenType: 'cj',
       version: 1,
     };
