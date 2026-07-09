@@ -162,18 +162,15 @@ export async function resolveComputeProviderEnvValues(
     }
   }
 
-  // Derived last so both the runtime env and operator-saved deployment env
-  // vars win over the default. The effective worker image follows the runtime
-  // precedence: an explicit process-env DOCKER_WORKER_IMAGE wins, then the
-  // deployment env var saved through the Settings → Sandboxes shared section,
-  // then the ref derived from the baked RELEASE_VERSION. Development falls
-  // back to the public latest image when no hosted image is derivable.
-  // Honoring the saved worker image here keeps Modal spawnable regardless of
-  // the order in which credentials and the shared worker image were saved.
+  // Effective worker image is deploy/runtime-managed only: process env
+  // DOCKER_WORKER_IMAGE, then the ref derived from the baked RELEASE_VERSION.
+  // Legacy deployment-env rows from the removed Settings worker-image UI are
+  // intentionally ignored so a sticky saved value cannot pin release-derived
+  // workers back to a stale image. Development falls back to the public
+  // latest image when no hosted image is derivable.
   if (provider === 'modal' && !resolvedValues.MODAL_BASE_IMAGE_REF) {
     const effectiveWorkerImage =
       runtimeEnv.DOCKER_WORKER_IMAGE?.trim() ||
-      (await resolveSavedWorkerImage(executor)) ||
       deriveWorkerImageFromReleaseVersion(runtimeEnv) ||
       undefined;
     const derivedBaseImageRef = resolveDerivedModalBaseImageRef({
@@ -190,36 +187,30 @@ export async function resolveComputeProviderEnvValues(
 }
 
 /**
- * Reads the saved deployment `DOCKER_WORKER_IMAGE` value (the shared hosted
- * compute worker image) from the encrypted deployment env vars. Returns null
- * when no deployment-scoped value is saved. Used so a worker image configured
- * through the UI counts toward hosted readiness before the process restarts.
+ * @deprecated Shared worker images are no longer stored via Settings. Returns
+ * null so callers drop the old DB-backed middle layer in favor of process env
+ * + release-image derivation.
  */
 export async function resolveSavedWorkerImage(
-  executor: DatabaseOrTransaction = db,
+  _executor: DatabaseOrTransaction = db,
 ): Promise<string | null> {
-  const [row] = await executor
-    .select({ value: environmentVariables.value })
-    .from(environmentVariables)
+  return null;
+}
+
+/**
+ * Deletes any deployment-scoped `DOCKER_WORKER_IMAGE` rows left from the
+ * removed Settings worker-image editor so they cannot linger as reserved,
+ * hidden, sticky configuration.
+ */
+export async function purgeSavedDeploymentWorkerImage(
+  executor: DatabaseOrTransaction = db,
+): Promise<void> {
+  await executor
+    .delete(environmentVariables)
     .where(
       and(
         isNull(environmentVariables.userId),
         eq(environmentVariables.name, SHARED_WORKER_IMAGE_ENV_VAR),
       ),
-    )
-    .limit(1);
-
-  if (!row) {
-    return null;
-  }
-
-  const decryptedValue = await decryptSecrets<string>(row.value);
-
-  if (decryptedValue === null) {
-    return null;
-  }
-
-  const value = stringifyDecryptedEnvVarValue(decryptedValue).trim();
-
-  return value || null;
+    );
 }

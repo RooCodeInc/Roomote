@@ -54,6 +54,7 @@ vi.mock('@roomote/db/server', () => ({
   })),
   isNull: vi.fn((field: unknown) => ({ op: 'isNull', field })),
   resolveSavedWorkerImage: mockResolveSavedWorkerImage,
+  purgeSavedDeploymentWorkerImage: vi.fn(async () => undefined),
 }));
 
 vi.mock('../environment-variables', () => ({
@@ -72,10 +73,8 @@ vi.mock('../environment-variables', () => ({
 
 import {
   clearComputeConfigCommand,
-  clearComputeWorkerImageCommand,
   getComputeStatusCommand,
   saveComputeConfigCommand,
-  saveComputeWorkerImageCommand,
   setDefaultComputeProviderCommand,
 } from './index';
 
@@ -240,7 +239,7 @@ describe('compute commands', () => {
       expect(mockRunComputeProvisioning).not.toHaveBeenCalled();
     });
 
-    it('persists a submitted shared worker image', async () => {
+    it('uses a submitted worker image to derive Modal base image without sticky persist', async () => {
       await saveComputeConfigCommand(buildMockAuth(), {
         provider: 'modal',
         values: {
@@ -250,20 +249,18 @@ describe('compute commands', () => {
         },
       });
 
-      expect(mockUpsertDeploymentEnvironmentVariables).toHaveBeenCalledWith(
-        expect.anything(),
-        expect.objectContaining({
-          values: expect.arrayContaining([
-            {
-              name: 'DOCKER_WORKER_IMAGE',
-              value: 'registry.example.com/worker:tag',
-            },
-            {
-              name: 'MODAL_BASE_IMAGE_REF',
-              value: 'registry.example.com/worker:tag',
-            },
-          ]),
-        }),
+      const values = mockUpsertDeploymentEnvironmentVariables.mock.calls[0]?.[1]
+        ?.values as Array<{ name: string; value: string }>;
+      expect(values).toEqual(
+        expect.arrayContaining([
+          {
+            name: 'MODAL_BASE_IMAGE_REF',
+            value: 'registry.example.com/worker:tag',
+          },
+        ]),
+      );
+      expect(values.map((entry) => entry.name)).not.toContain(
+        'DOCKER_WORKER_IMAGE',
       );
     });
 
@@ -414,14 +411,13 @@ describe('compute commands', () => {
       });
     });
 
-    it('starts the E2B template build from a saved worker image', async () => {
-      mockResolveSavedWorkerImage.mockResolvedValue(
-        'registry.example.com/worker:tag',
-      );
-
+    it('starts the E2B template build from a submitted worker image', async () => {
       await saveComputeConfigCommand(buildMockAuth(), {
         provider: 'e2b',
-        values: { E2B_API_KEY: 'e2b-key' },
+        values: {
+          E2B_API_KEY: 'e2b-key',
+          DOCKER_WORKER_IMAGE: 'registry.example.com/worker:tag',
+        },
       });
 
       expect(mockRunComputeProvisioning).toHaveBeenCalledWith({
@@ -565,76 +561,6 @@ describe('compute commands', () => {
       await clearComputeConfigCommand(buildMockAuth(), { provider: 'docker' });
 
       expect(mockDbTransaction).not.toHaveBeenCalled();
-    });
-  });
-
-  describe('saveComputeWorkerImageCommand', () => {
-    beforeEach(() => {
-      mockDbTransaction.mockImplementation(async (callback) => {
-        return callback({
-          insert: createInsertChain(),
-        } as never);
-      });
-      delete process.env.DOCKER_WORKER_IMAGE;
-    });
-
-    afterEach(() => {
-      delete process.env.DOCKER_WORKER_IMAGE;
-    });
-
-    it('saves the shared worker image as a deployment env var', async () => {
-      await saveComputeWorkerImageCommand(buildMockAuth(), {
-        value: '  registry.example.com/worker:tag  ',
-      });
-
-      expect(mockUpsertDeploymentEnvironmentVariables).toHaveBeenCalledWith(
-        expect.anything(),
-        expect.objectContaining({
-          userId: 'compute-test-user',
-          values: [
-            {
-              name: 'DOCKER_WORKER_IMAGE',
-              value: 'registry.example.com/worker:tag',
-            },
-          ],
-        }),
-      );
-    });
-
-    it('rejects a blank worker image', async () => {
-      await expect(
-        saveComputeWorkerImageCommand(buildMockAuth(), { value: '   ' }),
-      ).rejects.toThrow('Enter a worker image reference to save.');
-    });
-
-    it('refuses to override an env-provided worker image', async () => {
-      process.env.DOCKER_WORKER_IMAGE = 'registry.example.com/env:tag';
-
-      await expect(
-        saveComputeWorkerImageCommand(buildMockAuth(), {
-          value: 'registry.example.com/worker:tag',
-        }),
-      ).rejects.toThrow(
-        'The worker image is set via an environment variable and cannot be overridden here.',
-      );
-    });
-  });
-
-  describe('clearComputeWorkerImageCommand', () => {
-    it('deletes the shared worker image deployment env var', async () => {
-      const txWhere = vi.fn(async () => undefined);
-      const txDelete = vi.fn(() => ({ where: txWhere }));
-      const { inArray: txInArray } = await import('@roomote/db/server');
-
-      mockDbTransaction.mockImplementation(async (callback) => {
-        return callback({ delete: txDelete } as never);
-      });
-
-      await clearComputeWorkerImageCommand(buildMockAuth());
-
-      expect(txInArray).toHaveBeenCalledWith('env.name', [
-        'DOCKER_WORKER_IMAGE',
-      ]);
     });
   });
 

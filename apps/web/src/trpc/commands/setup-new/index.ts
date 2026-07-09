@@ -22,7 +22,7 @@ import {
   sql,
   markTaskStartParallelCountEndedAt,
   resolveDeploymentEnvVar,
-  resolveSavedWorkerImage,
+  purgeSavedDeploymentWorkerImage,
   resolveTelegramRuntimeCredentials,
   syncSetupQualificationBlock,
   isChatGptSubscriptionConnected,
@@ -930,6 +930,8 @@ export async function getSetupNewStatusCommand(auth: UserAuthSuccess) {
   assertAdmin(auth);
 
   const { userId } = auth;
+  await purgeSavedDeploymentWorkerImage();
+
   const [
     baseStatus,
     slackAccessStatus,
@@ -937,7 +939,6 @@ export async function getSetupNewStatusCommand(auth: UserAuthSuccess) {
     persistedRuntimeComputeConfig,
     envVarNames,
     nonSecretComputeEnvValues,
-    savedWorkerImage,
     chatgptConnected,
   ] = await Promise.all([
     getSetupBaseStatus(auth),
@@ -948,7 +949,6 @@ export async function getSetupNewStatusCommand(auth: UserAuthSuccess) {
     getPersistedEnvironmentVariableValues([
       ...NON_SECRET_COMPUTE_ENV_VAR_NAMES,
     ]),
-    resolveSavedWorkerImage(),
     isChatGptSubscriptionConnected(),
   ]);
   const activeSetupQualificationBlock =
@@ -1043,9 +1043,6 @@ export async function getSetupNewStatusCommand(auth: UserAuthSuccess) {
     persistedEnvVarValues: nonSecretComputeEnvValues,
     persistedComputeConfig: persistedRuntimeComputeConfig,
     selectedProvider: setupNewState.computeProvider,
-    savedWorkerImage: process.env[SHARED_WORKER_IMAGE_ENV_VAR]?.trim()
-      ? null
-      : savedWorkerImage,
   });
   // Present stale in-flight provisioning runs as failed so the wizard
   // offers a retry instead of polling forever after a web-process restart.
@@ -1294,31 +1291,26 @@ export async function saveSetupNewComputeConfigCommand(
         templateRef: string;
       } | null = null;
 
+      await purgeSavedDeploymentWorkerImage(tx);
+
       const [
         currentState,
         persistedRuntimeComputeConfig,
         persistedEnvVarNames,
-        savedWorkerImage,
       ] = await Promise.all([
         getPersistedSetupNewState(tx),
         getPersistedRuntimeComputeConfig(tx),
         getPersistedEnvironmentVariableNames(tx),
-        resolveSavedWorkerImage(tx),
       ]);
 
-      // The shared worker image (DOCKER_WORKER_IMAGE) may be submitted in the
-      // same request. Process env wins and locks it; otherwise a submitted or
-      // saved deployment value applies, then the RELEASE_VERSION derivation.
-      const workerImageLocked =
-        !!process.env[SHARED_WORKER_IMAGE_ENV_VAR]?.trim();
+      // In-request DOCKER_WORKER_IMAGE is only used for this save/provisioning
+      // pass. It is not persisted as sticky deployment state; process env and
+      // RELEASE_VERSION derivation own runtime configuration.
       const submittedWorkerImage =
         input.values?.[SHARED_WORKER_IMAGE_ENV_VAR]?.trim() || null;
-      const savedOrSubmittedWorkerImage = workerImageLocked
-        ? null
-        : (submittedWorkerImage ?? savedWorkerImage);
       const effectiveWorkerImage =
         process.env[SHARED_WORKER_IMAGE_ENV_VAR]?.trim() ||
-        savedOrSubmittedWorkerImage ||
+        submittedWorkerImage ||
         deriveWorkerImageFromReleaseVersion(process.env) ||
         undefined;
 
@@ -1327,7 +1319,6 @@ export async function saveSetupNewComputeConfigCommand(
         persistedEnvVarNames,
         persistedComputeConfig: persistedRuntimeComputeConfig,
         selectedProvider: input.provider,
-        savedWorkerImage: savedOrSubmittedWorkerImage,
       });
       const providerStatus = computeSetup.providers.find(
         (candidate) => candidate.provider === input.provider,
@@ -1388,10 +1379,7 @@ export async function saveSetupNewComputeConfigCommand(
               currentState,
               provisionableProvider,
             ),
-            // The effective image includes the ref derived from the baked
-            // RELEASE_VERSION and any worker image saved through the UI, so
-            // provisioning also works on deployments that never set
-            // DOCKER_WORKER_IMAGE explicitly.
+            // Process env, in-request override, or RELEASE_VERSION derivation.
             dockerWorkerImage: effectiveWorkerImage,
             runtimeEnv: process.env,
             markPending: (nextState) => {
@@ -1419,18 +1407,11 @@ export async function saveSetupNewComputeConfigCommand(
         }
       }
 
-      // Credentials, submitted/derived infrastructure values, and the shared
-      // worker image are persisted as encrypted deployment env vars. Runtime
-      // env values are locked and never overwritten from the UI.
+      // Credentials and submitted/derived infrastructure values are persisted
+      // as encrypted deployment env vars. DOCKER_WORKER_IMAGE is never sticky-
+      // saved — runtime is process-env / release-derived only.
       const valuesToSave: Array<{ name: string; value: string }> = [];
       const envVarsToClear: string[] = [];
-
-      if (submittedWorkerImage && !workerImageLocked) {
-        valuesToSave.push({
-          name: SHARED_WORKER_IMAGE_ENV_VAR,
-          value: submittedWorkerImage,
-        });
-      }
 
       for (const field of providerStatus.fields) {
         if (field.runtimeSatisfied) {

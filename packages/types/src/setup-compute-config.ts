@@ -543,16 +543,15 @@ export function buildSetupComputeStatus(input: {
       ? runtimeDefaultValue
       : null;
 
-  // Worker image resolution follows the runtime precedence: an explicit
-  // process env value wins, then a saved deployment env var, then the ref
-  // derived from the baked RELEASE_VERSION. Only a registry-qualified ref is
-  // hosted-ready; a bare local tag is not pullable by hosted providers.
+  // Worker image resolution is deploy/runtime-managed only: process env wins,
+  // then the ref derived from the baked RELEASE_VERSION. Legacy saved
+  // deployment DOCKER_WORKER_IMAGE rows (from the removed Settings section)
+  // are ignored so they cannot stick above release-derived images. Only a
+  // registry-qualified ref is hosted-ready; a bare local tag is not pullable
+  // by hosted providers.
   const explicitWorkerImage = runtimeEnv.DOCKER_WORKER_IMAGE?.trim() || null;
-  const savedWorkerImage = input.savedWorkerImage?.trim() || null;
   const effectiveWorkerImage =
-    explicitWorkerImage ??
-    savedWorkerImage ??
-    deriveWorkerImageFromReleaseVersion(runtimeEnv);
+    explicitWorkerImage ?? deriveWorkerImageFromReleaseVersion(runtimeEnv);
   const hostedWorkerImageRef =
     deriveModalBaseImageRefDefault(effectiveWorkerImage) ??
     (isDevelopmentRuntime(runtimeEnv)
@@ -564,7 +563,8 @@ export function buildSetupComputeStatus(input: {
     envVarName: SHARED_WORKER_IMAGE_ENV_VAR,
     label: 'Worker image',
     runtimeSatisfied: isConfiguredEnvValue(runtimeEnv.DOCKER_WORKER_IMAGE),
-    savedSatisfied: persistedEnvVarNameSet.has(SHARED_WORKER_IMAGE_ENV_VAR),
+    // Legacy DB-backed worker images are no longer part of readiness/status.
+    savedSatisfied: false,
     hostedImageRef: hostedWorkerImageRef,
     hostedReady: hostedWorkerImageRef !== null,
   };
