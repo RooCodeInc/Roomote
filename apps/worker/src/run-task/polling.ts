@@ -17,10 +17,14 @@ import {
 } from './polling/index';
 
 export const startPolling = (options: ListenerOptions) => {
-  const { cloudJob, state, logger } = options;
+  const { cloudJob, task, state, logger } = options;
   state.cancelInterval = createCancelInterval(options);
 
+  // Prefer the task channel bindings from the dequeue/resume response; fall
+  // back to payload-derived extraction for payloads that predate them.
   if (
+    task?.slackThreadTs ||
+    task?.slackChannelId ||
     getSlackThreadTsFromTaskPayload(cloudJob.payload) ||
     getSlackChannelFromTaskPayload(cloudJob.payload)
   ) {
@@ -42,7 +46,10 @@ export const startPolling = (options: ListenerOptions) => {
   if (
     cloudJob.payloadKind === TaskPayloadKind.LinearAgentSession ||
     (cloudJob.payloadKind === TaskPayloadKind.SnapshotResume &&
-      !!getLinearSessionIdFromResumePayload(cloudJob.payload))
+      !!(
+        task?.linearSessionId ??
+        getLinearSessionIdFromResumePayload(cloudJob.payload)
+      ))
   ) {
     state.linearMessageInterval = createLinearMessageInterval(options);
   }

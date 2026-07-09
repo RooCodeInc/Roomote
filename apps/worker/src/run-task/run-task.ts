@@ -498,6 +498,7 @@ export const runTask = async ({
   prompt,
   harnessInstructions,
   requestedWorkKind,
+  task,
   orgAgentInstructions,
   agentInstructions,
   environmentConfig,
@@ -1583,6 +1584,7 @@ export const runTask = async ({
     // (syncPollingState was already called above, before task start/resume.)
     startPolling({
       cloudJob,
+      task,
       state: pollingState,
       logger,
       workingDirectory: workspacePath,
@@ -1641,7 +1643,10 @@ export const runTask = async ({
       sleepActionTriggered &&
       (cloudJob.payloadKind === TaskPayloadKind.LinearAgentSession ||
         (cloudJob.payloadKind === TaskPayloadKind.SnapshotResume &&
-          !!getLinearSessionIdFromResumePayload(cloudJob.payload)))
+          !!(
+            task?.linearSessionId ??
+            getLinearSessionIdFromResumePayload(cloudJob.payload)
+          )))
     ) {
       try {
         const result = await sdk.linearSessions.drainLinearMessages({
@@ -1671,7 +1676,9 @@ export const runTask = async ({
     // channel metadata here and let the SDK re-read the authoritative DB row.
     if (
       sleepActionTriggered &&
-      (getSlackThreadTsFromTaskPayload(cloudJob.payload) ||
+      (task?.slackThreadTs ||
+        task?.slackChannelId ||
+        getSlackThreadTsFromTaskPayload(cloudJob.payload) ||
         getSlackChannelFromTaskPayload(cloudJob.payload))
     ) {
       try {

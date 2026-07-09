@@ -52,16 +52,22 @@ export async function resume(cloudJobId: number): Promise<boolean> {
       logger,
       workerEnv,
     }) => {
-      // Override callbacks for SnapshotResume jobs with integration metadata
+      // Override callbacks for SnapshotResume jobs with integration metadata.
+      // Prefer the task channel bindings from the resume response; fall back
+      // to payload-derived extraction for payloads that predate them.
       const isLinearResume =
         jobContext.cloudJob.payloadKind === TaskPayloadKind.SnapshotResume &&
         Boolean(
+          jobContext.task?.linearSessionId ??
           getLinearSessionIdFromResumePayload(jobContext.cloudJob.payload),
         );
 
       const isSlackResume =
         jobContext.cloudJob.payloadKind === TaskPayloadKind.SnapshotResume &&
-        Boolean(getSlackThreadTsFromTaskPayload(jobContext.cloudJob.payload));
+        Boolean(
+          jobContext.task?.slackThreadTs ??
+          getSlackThreadTsFromTaskPayload(jobContext.cloudJob.payload),
+        );
 
       const callbacks = isLinearResume
         ? linearAgentCallbacks
@@ -84,6 +90,8 @@ export async function resume(cloudJobId: number): Promise<boolean> {
         workspacePath,
         prompt: '',
         harnessInstructions: jobContext.harnessInstructions,
+        requestedWorkKind: jobContext.requestedWorkKind,
+        task: jobContext.task,
         usesSharedWorkspaceRoot,
         repoPaths,
         repoLocalSkills,

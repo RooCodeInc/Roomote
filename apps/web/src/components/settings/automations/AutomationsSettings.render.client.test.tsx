@@ -73,9 +73,6 @@ const state = vi.hoisted(() => ({
         codeQualityAuditorSlackChannelId: null,
         ciFailureTriageFrequency: 'off' as const,
         ciFailureTriageSlackChannelId: null,
-        coachFrequency: 'off' as const,
-        coachSlackChannelId: null,
-        coachInstructions: null,
         suggesterFrequency: 'off' as const,
         suggesterSlackChannelId: null,
         suggesterInstructions: null,
@@ -91,7 +88,6 @@ const state = vi.hoisted(() => ({
           C123BUGS: '#bugs',
         },
         managerStatsSlackChannel: null,
-        coachSlackChannel: null,
         suggesterSlackChannel: null,
         announcerSlackChannel: null,
         platformIssueSlackChannel: null,
@@ -105,7 +101,6 @@ const state = vi.hoisted(() => ({
         channelAutoStartSlackChannels: [],
         managerSlackChannel: null,
         managerStatsSlackChannel: null,
-        coachSlackChannel: null,
         suggesterSlackChannel: null,
         announcerSlackChannel: null,
         platformIssueSlackChannel: null,
@@ -126,6 +121,7 @@ const state = vi.hoisted(() => ({
         relayUsers: [],
       },
       recentRuns: {},
+      automationStatus: {},
     },
   },
   slackChannelsQuery: {
@@ -259,7 +255,7 @@ vi.mock('@/trpc/client', () => ({
           return options ?? {};
         },
       },
-      triggerAgent: {
+      triggerAutomation: {
         mutationOptions: (options?: Record<string, unknown>) => {
           mutations.latestTriggerOptions =
             (options as typeof mutations.latestTriggerOptions) ?? null;

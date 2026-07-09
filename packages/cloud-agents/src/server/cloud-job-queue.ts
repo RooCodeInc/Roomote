@@ -4,6 +4,7 @@ import { z } from 'zod';
 
 import {
   type AuthorshipRuleActor,
+  type BackgroundAutomationKey,
   type CloudTask,
   type CodingHarness,
   type SnapshotResumeTask,
@@ -34,6 +35,7 @@ import {
   type DatabaseTransaction,
   db,
   deploymentSettings,
+  ensureAutomationRowsOnce,
   createTaskWithRetry,
   markTaskStartParallelCountEndedAt,
   recordTaskStartParallelCount,
@@ -777,7 +779,7 @@ function getInitiatorLinkedUserId(initiator: TaskInitiator): string | null {
 type TaskInitiatorColumns = {
   initiatorKind: 'user' | 'automation';
   initiatorUserId: string | null;
-  initiatorAutomation: string | null;
+  initiatorAutomation: BackgroundAutomationKey | null;
   actorExternalId: string | null;
   actorDisplayName: string | null;
 };
@@ -1077,6 +1079,13 @@ async function enqueueFreshLaunch(
     }));
 
   const initiatorColumns = resolveInitiatorColumns(initiator);
+
+  // tasks.initiator_automation references automations.key; make sure the
+  // seeded rows exist before stamping an automation initiator.
+  if (initiator.kind === 'automation') {
+    await ensureAutomationRowsOnce();
+  }
+
   const initialPrompt = getInitialTaskPrompt(task) ?? null;
   const externalGithubIdentity = {
     githubLogin: 'githubLogin' in task ? task.githubLogin : null,

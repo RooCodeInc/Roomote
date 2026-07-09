@@ -15,6 +15,13 @@
       "when": 1783570571104,
       "tag": "0001_ancient_marvel_apes",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1783606092708,
+      "tag": "0002_misty_zemo",
+      "breakpoints": true
     }
   ]
 }

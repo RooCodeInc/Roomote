@@ -1,7 +1,6 @@
 import type { Mock } from 'vitest';
 
 const {
-  mockGetRedis,
   mockGetCommitCommittedAt,
   mockGetInstallationOctokit,
   mockIsRepoSkipped,
@@ -11,15 +10,12 @@ const {
   mockSelectLimit,
   mockSelectWhere,
   mockFindInstallation,
-  mockGetBackgroundAgentSettingsForOrg,
-  mockStartBackgroundAutomationRun,
-  mockCompleteBackgroundAutomationRun,
-  mockCompleteBackgroundAutomationRunByJobId,
+  mockGetAutomationRuntime,
+  mockRecordAutomationRunOutcome,
 } = vi.hoisted(() => {
   type AnyMock = Mock<(...args: never[]) => unknown>;
 
   return {
-    mockGetRedis: vi.fn(() => ({})) as AnyMock,
     mockGetCommitCommittedAt: vi.fn() as AnyMock,
     mockGetInstallationOctokit: vi.fn() as AnyMock,
     mockIsRepoSkipped: vi.fn() as AnyMock,
@@ -29,16 +25,10 @@ const {
     mockSelectLimit: vi.fn() as AnyMock,
     mockSelectWhere: vi.fn() as AnyMock,
     mockFindInstallation: vi.fn() as AnyMock,
-    mockGetBackgroundAgentSettingsForOrg: vi.fn() as AnyMock,
-    mockStartBackgroundAutomationRun: vi.fn() as AnyMock,
-    mockCompleteBackgroundAutomationRun: vi.fn() as AnyMock,
-    mockCompleteBackgroundAutomationRunByJobId: vi.fn() as AnyMock,
+    mockGetAutomationRuntime: vi.fn() as AnyMock,
+    mockRecordAutomationRunOutcome: vi.fn() as AnyMock,
   };
 });
-
-vi.mock('../../redis', () => ({
-  getRedis: mockGetRedis,
-}));
 
 vi.mock('@roomote/cloud-agents/server', () => ({
   enqueueCloudTask: mockEnqueueCloudTask,
@@ -108,7 +98,6 @@ vi.mock('@roomote/db/server', () => {
         },
       },
     },
-    backgroundAgentSettings: {},
     githubInstallations: {
       installationId: 'installationId',
       suspendedAt: 'suspendedAt',
@@ -136,18 +125,15 @@ vi.mock('@roomote/db/server', () => {
       status: 'status',
     },
     DEFAULT_CONFLICT_RESOLUTION_IDLE_WINDOW_MS: 30 * 60 * 1000,
+    DEFAULT_CONFLICT_RESOLVER_LABEL: 'auto-resolve-conflicts',
     findActiveGitHubBranchWork: mockFindActiveGitHubBranchWork,
     hasRecentGitHubBranchCommit: mockHasRecentGitHubBranchCommit,
-    startBackgroundAutomationRun: mockStartBackgroundAutomationRun,
-    completeBackgroundAutomationRun: mockCompleteBackgroundAutomationRun,
-    completeBackgroundAutomationRunByJobId:
-      mockCompleteBackgroundAutomationRunByJobId,
+    getAutomationRuntime: mockGetAutomationRuntime,
+    recordAutomationRunOutcome: mockRecordAutomationRunOutcome,
     isNull: vi.fn(),
     eq: vi.fn(),
     and: vi.fn(),
     inArray: vi.fn(),
-    getBackgroundAgentSettingsForDeployment:
-      mockGetBackgroundAgentSettingsForOrg,
   };
 });
 
@@ -157,11 +143,20 @@ describe('conflictScanJob', () => {
   beforeEach(() => {
     vi.clearAllMocks();
 
-    mockGetBackgroundAgentSettingsForOrg.mockResolvedValue({
-      conflictResolverFrequency: 'daily',
-      conflictResolverMaxPrAgeDays: 7 as const,
-      conflictResolverLabel: 'auto-resolve-conflicts',
-      conflictResolverLastRunAt: null,
+    mockGetAutomationRuntime.mockResolvedValue({
+      key: 'conflict_resolver',
+      enabled: true,
+      scheduleMode: 'daily',
+      lastRunAt: null,
+      instructions: null,
+      settings: {
+        label: 'auto-resolve-conflicts',
+        maxPrAgeDays: 7,
+      },
+      targets: [],
+      scanCursor: null,
+      slackChannelId: null,
+      managerSlackChannelId: null,
     });
     mockFindInstallation.mockResolvedValue({ id: 'install-row-1' });
     mockSelectWhere
@@ -176,9 +171,7 @@ describe('conflictScanJob', () => {
       new Date('2026-03-17T20:00:00.000Z'),
     );
     mockHasRecentGitHubBranchCommit.mockReturnValue(false);
-    mockStartBackgroundAutomationRun.mockResolvedValue({ id: 'run-1' });
-    mockCompleteBackgroundAutomationRun.mockResolvedValue(undefined);
-    mockCompleteBackgroundAutomationRunByJobId.mockResolvedValue(null);
+    mockRecordAutomationRunOutcome.mockResolvedValue(undefined);
 
     mockGetInstallationOctokit.mockResolvedValue({
       paginate: vi.fn().mockResolvedValue([]),
@@ -214,6 +207,47 @@ describe('conflictScanJob', () => {
 
     const octokit = await mockGetInstallationOctokit.mock.results[0]!.value;
     expect(octokit.paginate).toHaveBeenCalledOnce();
+  });
+
+  it('records the pass outcome on the automations row', async () => {
+    mockIsRepoSkipped.mockReturnValue(false);
+
+    await conflictScanJob();
+
+    expect(mockRecordAutomationRunOutcome).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({
+        key: 'conflict_resolver',
+        status: 'skipped',
+      }),
+    );
+  });
+
+  it('skips the pass when the automation is disabled', async () => {
+    // This pass exits before the repo lookup, so rebuild the select queue
+    // without the queued repos row to keep later tests' queues aligned.
+    mockSelectWhere.mockReset();
+    mockSelectWhere.mockResolvedValue([
+      { orgId: 'org-1', installationId: 123 },
+    ]);
+    mockGetAutomationRuntime.mockResolvedValue({
+      key: 'conflict_resolver',
+      enabled: false,
+      scheduleMode: null,
+      lastRunAt: null,
+      instructions: null,
+      settings: {},
+      targets: [],
+      scanCursor: null,
+      slackChannelId: null,
+      managerSlackChannelId: null,
+    });
+
+    const result = await conflictScanJob();
+
+    expect(result.skippedReason).toBe('Automation is disabled.');
+    expect(mockGetInstallationOctokit).not.toHaveBeenCalled();
+    expect(mockRecordAutomationRunOutcome).not.toHaveBeenCalled();
   });
 
   it('skips conflicting PRs when another Roomote task is active on the branch', async () => {
@@ -390,7 +424,7 @@ describe('conflictScanJob', () => {
     };
     mockGetInstallationOctokit.mockResolvedValueOnce(octokit);
 
-    await conflictScanJob();
+    const result = await conflictScanJob();
 
     expect(mockEnqueueCloudTask).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -420,6 +454,7 @@ describe('conflictScanJob', () => {
     expect(mockEnqueueCloudTask.mock.calls[0]?.[0]).not.toHaveProperty(
       'userId',
     );
+    expect(result.launchedTaskId).toBe('task-1');
     expect(octokit.rest.issues.createComment).toHaveBeenCalledWith(
       expect.objectContaining({
         owner: 'Roomote',

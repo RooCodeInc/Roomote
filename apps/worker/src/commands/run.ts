@@ -67,6 +67,11 @@ export async function run({
         workspacePath,
         prompt: jobContext.prompt,
         harnessInstructions: jobContext.harnessInstructions,
+        // Task-level launch context from the dequeue response. Fresh
+        // dispatches with kind 'unknown' map to plan-repo-implementation via
+        // getInitialWorkflowPhase.
+        requestedWorkKind: jobContext.requestedWorkKind,
+        task: jobContext.task,
         usesSharedWorkspaceRoot,
         repoPaths,
         repoLocalSkills,

@@ -1,12 +1,11 @@
 /**
- * Stage 2 interim: runs no longer carry a `linearSessionId` column (channel
- * bindings live on the task row, which the SDK dequeue/resume responses do
- * not expose yet). Linear-triggered snapshot resumes always carry the drained
- * follow-up messages in the payload, and every queued Linear message includes
- * its session id, so the worker derives the session from there.
- *
- * Once the dequeue/resume responses include the task's channel bindings,
- * callers should switch to `task.linearSessionId`.
+ * Payload-derived fallback for the Linear session id. Channel bindings live
+ * on the task row and are exposed by the SDK dequeue/resume responses as
+ * `task.linearSessionId`, which callers should prefer. Linear-triggered
+ * snapshot resumes also carry the drained follow-up messages in the payload,
+ * and every queued Linear message includes its session id, so this fallback
+ * covers payloads that predate the task columns (and callback paths that
+ * only receive the cloud job).
  */
 export function getLinearSessionIdFromResumePayload(
   payload: unknown,

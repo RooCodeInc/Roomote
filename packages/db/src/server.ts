@@ -44,8 +44,7 @@ export * from './lib/task-activity-timestamp';
 export * from './lib/task-suggestion-content-hash';
 export * from './lib/task-start-parallel-counts';
 export * from './lib/tasks';
-export * from './lib/background-agent-settings';
-export * from './lib/background-automation-runs';
+export * from './lib/automations';
 export * from './lib/background-automation-slack-threads';
 export * from './lib/cloud-job-events';
 export * from './lib/environment-config-versions';
@@ -147,12 +146,8 @@ export {
   linearPendingSelectionsRelations,
   backgroundAgentSettings,
   backgroundAgentSettingsRelations,
-  backgroundAutomations,
-  backgroundAutomationsRelations,
-  backgroundAutomationTargets,
-  backgroundAutomationTargetsRelations,
-  backgroundAutomationRuns,
-  backgroundAutomationRunsRelations,
+  automations,
+  automationsRelations,
   backgroundAutomationSlackThreads,
   backgroundAutomationSlackThreadsRelations,
   mcpSetupManagerNotifications,

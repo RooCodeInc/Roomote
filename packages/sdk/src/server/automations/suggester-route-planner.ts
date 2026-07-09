@@ -17,7 +17,6 @@ export type RepositoryCoverage = Array<{
 }>;
 
 export type SuggestionDispatchRoute = {
-  bullmqJobId: string;
   channelId: string;
   channelName: string;
   excludedGroupLabels: string[];
@@ -50,12 +49,10 @@ export function formatSlackChannelName(
 }
 
 function buildLegacySuggestionDispatchRoute(params: {
-  baseJobId: string;
   managerChannelId: string;
   settings: SuggestionRoutingSettings;
 }): SuggestionDispatchRoute {
   return {
-    bullmqJobId: params.baseJobId,
     channelId: params.managerChannelId,
     channelName: formatSlackChannelName(null, params.managerChannelId),
     excludedGroupLabels: [],
@@ -69,7 +66,6 @@ function buildLegacySuggestionDispatchRoute(params: {
 }
 
 async function buildGroupedSuggestionDispatchRoutes(params: {
-  baseJobId: string;
   deployment: SuggesterDeploymentContext;
   managerChannelId: string;
   repositoryCoverage: RepositoryCoverage;
@@ -96,22 +92,19 @@ async function buildGroupedSuggestionDispatchRoutes(params: {
     }
 
     const groupedLabels = plan.routes.map((route) => route.groupLabel);
-    const routes: SuggestionDispatchRoute[] = plan.routes.map(
-      (route, index) => ({
-        bullmqJobId: `${params.baseJobId}:route:${index + 1}`,
-        channelId: route.channelId,
-        channelName: formatSlackChannelName(route.channelName, route.channelId),
-        excludedGroupLabels: groupedLabels.filter(
-          (groupLabel) => groupLabel !== route.groupLabel,
-        ),
-        groupLabel: route.groupLabel,
-        isFallbackRoute: false,
-        isLegacyRoute: false,
-        recentThreadFeedback: null,
-        routeInstructions: route.routeInstructions,
-        suggesterInstructions: null,
-      }),
-    );
+    const routes: SuggestionDispatchRoute[] = plan.routes.map((route) => ({
+      channelId: route.channelId,
+      channelName: formatSlackChannelName(route.channelName, route.channelId),
+      excludedGroupLabels: groupedLabels.filter(
+        (groupLabel) => groupLabel !== route.groupLabel,
+      ),
+      groupLabel: route.groupLabel,
+      isFallbackRoute: false,
+      isLegacyRoute: false,
+      recentThreadFeedback: null,
+      routeInstructions: route.routeInstructions,
+      suggesterInstructions: null,
+    }));
 
     const fallbackInstructions =
       plan.fallbackInstructions?.trim() ||
@@ -119,7 +112,6 @@ async function buildGroupedSuggestionDispatchRoutes(params: {
 
     if (fallbackInstructions) {
       routes.push({
-        bullmqJobId: `${params.baseJobId}:route:${routes.length + 1}`,
         channelId: params.managerChannelId,
         channelName: formatSlackChannelName(
           plan.fallbackChannelName,
@@ -147,7 +139,6 @@ async function buildGroupedSuggestionDispatchRoutes(params: {
 }
 
 export async function prepareSuggestionDispatchPlan(params: {
-  baseJobId: string;
   deployment: SuggesterDeploymentContext;
   groupedRoutingEnabled: boolean;
   managerChannelId: string;
@@ -181,7 +172,6 @@ export async function prepareSuggestionDispatchPlan(params: {
     params.settings.suggesterRoutingMode === 'group_by_instructions' &&
     params.settings.suggesterRoutingInstructions
       ? await buildGroupedSuggestionDispatchRoutes({
-          baseJobId: params.baseJobId,
           deployment: params.deployment,
           managerChannelId: params.managerChannelId,
           repositoryCoverage: params.repositoryCoverage,
@@ -195,7 +185,6 @@ export async function prepareSuggestionDispatchPlan(params: {
         ? groupedRoutes
         : [
             buildLegacySuggestionDispatchRoute({
-              baseJobId: params.baseJobId,
               managerChannelId: params.managerChannelId,
               settings: params.settings,
             }),

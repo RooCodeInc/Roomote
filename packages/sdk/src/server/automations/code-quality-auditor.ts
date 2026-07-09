@@ -1,5 +1,3 @@
-import { updateCodeQualityAuditorScanCursor } from '@roomote/db/server';
-
 import type { RepositoryCoverage } from '@roomote/cloud-agents/server';
 import {
   buildMergedPullRequestTaskContext,
@@ -42,10 +40,4 @@ ${params.recentThreadFeedback?.trim() ? `Recent feedback from earlier Code Quali
 export const codeQualityAuditorJob = createMergedPullRequestAuditJob({
   automationKey: 'code_quality_auditor',
   buildPrompt: buildCodeQualityAuditorPrompt,
-  settings: {
-    frequencyKey: 'codeQualityAuditorFrequency',
-    lastRunAtKey: 'codeQualityAuditorLastRunAt',
-    scanCursorKey: 'codeQualityAuditorScanCursor',
-    updateScanCursor: updateCodeQualityAuditorScanCursor,
-  },
 });

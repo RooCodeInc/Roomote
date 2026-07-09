@@ -5,30 +5,30 @@ import {
 } from '@roomote/cloud-agents/server/non-task-provider-usage';
 
 import {
-  completeBackgroundAutomationRun,
-  completeBackgroundAutomationRunByJobId,
   db,
-  startBackgroundAutomationRun,
+  getAutomationRuntime,
+  recordAutomationRunOutcome,
   upsertBackgroundAutomationSlackThread,
   slackInstallations,
   taskPullRequests,
   tasks,
-  getBackgroundAgentSettingsForDeployment,
   and,
   eq,
   gte,
   isNotNull,
-  resolveManagerSlackChannelId,
 } from '@roomote/db/server';
-import {
-  buildAutomationRootSummaryMessage,
-  SUMMARIZE_MERGED_PRS_SETTINGS_HASH,
-} from '@roomote/sdk/server';
+import { SUMMARIZE_MERGED_PRS_SETTINGS_HASH } from '@roomote/types';
 import { SlackNotifier } from '@roomote/slack';
 
 import { loadAutomationThreadFeedbackContext } from './automation-thread-feedback';
 import { hasActiveGitHubInstallation } from './github-deployment-scope';
+import { buildAutomationRootSummaryMessage } from '../lib/manager-slack';
 import { isRunDue, resolveSlackWorkspaceTimezone } from './scheduling-utils';
+import {
+  emptyJobResult,
+  type AutomationJobResult,
+  type AutomationRunOpts,
+} from './types';
 
 const LOG_PREFIX = '[announcer]';
 const SCHEDULE_HOUR_LOCAL = 2;
@@ -215,39 +215,43 @@ function buildAnnouncerDetailThreadMessages(
 }
 
 export async function announcerJob(
-  opts: { manualTrigger?: boolean; bullmqJobId?: string } = {},
-): Promise<void> {
+  opts: AutomationRunOpts = {},
+): Promise<AutomationJobResult> {
   console.log(`${LOG_PREFIX} Starting announcer evaluator`);
 
   const now = new Date();
+  const result = emptyJobResult();
   const eligibleDeployments = await findEligibleDeployments();
+
+  if (eligibleDeployments.length === 0) {
+    result.skippedReason = 'GitHub and Slack must both be connected.';
+  }
 
   let processed = 0;
   let skipped = 0;
-  const errors: string[] = [];
 
   for (const deployment of eligibleDeployments) {
-    let runId: string | null = null;
-
     try {
-      const settings = await getBackgroundAgentSettingsForDeployment();
+      const runtime = await getAutomationRuntime('announcer');
+      const frequency = runtime.enabled ? runtime.scheduleMode : 'off';
 
-      if (settings.announcerFrequency === 'off') {
+      if (!frequency || frequency === 'off' || !(frequency in WINDOW_DAYS)) {
+        result.skippedReason = 'Automation is disabled.';
         skipped++;
         continue;
       }
 
-      const channelId = resolveManagerSlackChannelId(settings, 'announcer');
+      const channelId = runtime.slackChannelId;
 
       if (!channelId) {
         console.log(
           `${LOG_PREFIX} Skipping deployment: announcer channel not configured`,
         );
+        result.skippedReason = 'Announcer channel is not configured.';
         skipped++;
         continue;
       }
 
-      const frequency = settings.announcerFrequency as AnnouncerFrequency;
       const timezone = await resolveSlackWorkspaceTimezone(
         deployment,
         LOG_PREFIX,
@@ -258,43 +262,33 @@ export async function announcerJob(
         !isRunDue({
           now,
           timeZone: timezone,
-          frequency,
-          lastRunAt: settings.announcerLastRunAt,
+          frequency: frequency as AnnouncerFrequency,
+          lastRunAt: runtime.lastRunAt,
           scheduleHourLocal: SCHEDULE_HOUR_LOCAL,
           windowDays: WINDOW_DAYS,
         })
       ) {
+        result.skippedReason = 'Not due yet.';
         skipped++;
         continue;
       }
 
-      const windowDays = WINDOW_DAYS[frequency];
+      const windowDays = WINDOW_DAYS[frequency as AnnouncerFrequency];
       const since = new Date(now.getTime() - windowDays * 24 * 60 * 60 * 1000);
       const mergedPullRequests = await getMergedPullRequests(since);
-      runId = (
-        await startBackgroundAutomationRun(db, {
-          automationKey: 'announcer',
-          bullmqJobId: opts.bullmqJobId ?? `announcer:${crypto.randomUUID()}`,
-          triggerKind: opts.manualTrigger ? 'manual' : 'scheduled',
-          startedAt: new Date(),
-        })
-      ).id;
 
       if (mergedPullRequests.length === 0) {
         console.log(
           `${LOG_PREFIX} Deployment has no merged PRs in current window`,
         );
 
-        await completeBackgroundAutomationRun(db, {
-          runId,
-          automationKey: 'announcer',
+        await recordAutomationRunOutcome(db, {
+          key: 'announcer',
           status: 'skipped',
-          finishedAt: new Date(),
-          metadata: {
-            reason: 'no_merged_pull_requests',
-          },
+          at: new Date(),
         });
 
+        result.skippedReason = 'No merged pull requests in the window.';
         processed++;
         continue;
       }
@@ -306,21 +300,18 @@ export async function announcerJob(
       });
       const summary = await runAnnouncerAnalysis(
         mergedPullRequests,
-        settings.announcerInstructions,
+        runtime.instructions,
         recentThreadFeedback,
       );
 
       if (!summary) {
         console.warn(`${LOG_PREFIX} No summary output; skipping Slack post`);
-        await completeBackgroundAutomationRun(db, {
-          runId,
-          automationKey: 'announcer',
+        await recordAutomationRunOutcome(db, {
+          key: 'announcer',
           status: 'skipped',
-          finishedAt: new Date(),
-          metadata: {
-            reason: 'empty_summary',
-          },
+          at: new Date(),
         });
+        result.skippedReason = 'Summary generation returned no output.';
         skipped++;
         continue;
       }
@@ -368,49 +359,34 @@ export async function announcerJob(
         }
       }
 
-      await completeBackgroundAutomationRun(db, {
-        runId,
-        automationKey: 'announcer',
+      await recordAutomationRunOutcome(db, {
+        key: 'announcer',
         status: 'succeeded',
-        finishedAt: new Date(),
-        slackChannelId: channelId,
-        threadTs: ts,
-        metadata: {
-          mergedCount: mergedPullRequests.length,
-          windowDays,
-        },
+        at: new Date(),
       });
 
+      result.completed = true;
       processed++;
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
-      errors.push(message);
-      if (runId) {
-        await completeBackgroundAutomationRun(db, {
-          runId,
-          automationKey: 'announcer',
-          status: 'failed',
-          finishedAt: new Date(),
-          error: message,
-        });
-      } else if (opts.bullmqJobId) {
-        await completeBackgroundAutomationRunByJobId(db, {
-          automationKey: 'announcer',
-          bullmqJobId: opts.bullmqJobId,
-          status: 'failed',
-          finishedAt: new Date(),
-          error: message,
-        });
-      }
+      result.errors.push(message);
+      await recordAutomationRunOutcome(db, {
+        key: 'announcer',
+        status: 'failed',
+        at: new Date(),
+        error: message,
+      });
       console.error(`${LOG_PREFIX} Failed deployment: ${message}`);
     }
   }
 
   console.log(
-    `${LOG_PREFIX} Completed: ${processed} processed, ${skipped} skipped, ${errors.length} errors`,
+    `${LOG_PREFIX} Completed: ${processed} processed, ${skipped} skipped, ${result.errors.length} errors`,
   );
 
-  if (errors.length > 0) {
-    console.error(`${LOG_PREFIX} Errors:`, errors);
+  if (result.errors.length > 0) {
+    console.error(`${LOG_PREFIX} Errors:`, result.errors);
   }
+
+  return result;
 }

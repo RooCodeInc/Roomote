@@ -13,7 +13,6 @@ export type ConflictResolverFrequency =
   | 'every_hour'
   | 'every_6_hours'
   | 'daily';
-export type CoachFrequency = 'off' | 'daily' | 'weekly' | 'biweekly';
 export type SuggesterFrequency = 'off' | 'daily' | 'weekly';
 export type AnnouncerFrequency = 'off' | 'daily' | 'weekly';
 export type ManagerStatsFrequency = 'off' | 'weekly';
@@ -64,9 +63,6 @@ export type FormState = {
   sentryTriageProjectSlugs: string;
   dependabotTriageFrequency: DependabotTriageFrequency;
   dependabotTriageSlackChannel: string;
-  coachFrequency: CoachFrequency;
-  coachSlackChannel: string;
-  coachInstructions: string;
   suggesterFrequency: SuggesterFrequency;
   suggesterSlackChannel: string;
   suggesterInstructions: string;
@@ -90,7 +86,6 @@ export type AgentType =
   | ScheduleOnlyBackgroundAutomationId
   | 'reviewer'
   | 'conflictResolver'
-  | 'coach'
   | 'suggester'
   | 'announcer'
   | 'platformIssueAlerts';
@@ -138,12 +133,6 @@ const DEPENDABOT_TRIAGE_FIELDS: Array<keyof FormState> = [
   'dependabotTriageSlackChannel',
 ];
 
-const COACH_FIELDS: Array<keyof FormState> = [
-  'coachFrequency',
-  'coachSlackChannel',
-  'coachInstructions',
-];
-
 const SUGGESTER_FIELDS: Array<keyof FormState> = [
   'suggesterFrequency',
   'suggesterSlackChannel',
@@ -185,7 +174,6 @@ const AGENT_FIELDS: Record<AgentType, Array<keyof FormState>> = {
   ...SCHEDULE_ONLY_AGENT_FIELDS,
   reviewer: REVIEWER_FIELDS,
   conflictResolver: CONFLICT_RESOLVER_FIELDS,
-  coach: COACH_FIELDS,
   suggester: SUGGESTER_FIELDS,
   announcer: ANNOUNCER_FIELDS,
   platformIssueAlerts: PLATFORM_ISSUE_ALERT_FIELDS,
@@ -293,9 +281,6 @@ export function buildAutomationSettingsSaveInput(
     dependabotTriageSlackChannel:
       stateToSave.dependabotTriageSlackChannel.trim() || null,
     ...buildScheduleOnlyAutomationSaveInput(stateToSave),
-    coachFrequency: stateToSave.coachFrequency,
-    coachSlackChannel: stateToSave.coachSlackChannel.trim() || null,
-    coachInstructions: stateToSave.coachInstructions.trim() || null,
     suggesterFrequency: stateToSave.suggesterFrequency,
     suggesterSlackChannel: stateToSave.suggesterSlackChannel.trim() || null,
     suggesterInstructions: stateToSave.suggesterInstructions.trim() || null,

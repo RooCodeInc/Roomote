@@ -11,21 +11,21 @@ import { mcpAuthMiddleware } from '../../mcp/middleware';
 import { submitAutomationWorkItems } from '../submitAutomationWorkItems';
 
 const {
-  mockAutomationRunFindFirst,
   mockCloudJobFindFirst,
   mockLaunchActWorkItems,
   mockPersistAutomationWorkItems,
   mockResolveAutomationSlackTarget,
   mockResolvePreparedAutomationWorkItems,
   mockResolveRepositoryIdsForSuggestedTask,
+  mockTaskFindFirst,
 } = vi.hoisted(() => ({
-  mockAutomationRunFindFirst: vi.fn(),
   mockCloudJobFindFirst: vi.fn(),
   mockLaunchActWorkItems: vi.fn(),
   mockPersistAutomationWorkItems: vi.fn(),
   mockResolveAutomationSlackTarget: vi.fn(),
   mockResolvePreparedAutomationWorkItems: vi.fn(),
   mockResolveRepositoryIdsForSuggestedTask: vi.fn(),
+  mockTaskFindFirst: vi.fn(),
 }));
 
 vi.mock('../automation-work-items/telegram.js', () => ({
@@ -45,9 +45,6 @@ vi.mock('@roomote/db/server', () => ({
     botUsername: null,
   })),
   and: vi.fn((...args) => ({ type: 'and', args })),
-  backgroundAutomationRuns: {
-    taskId: 'backgroundAutomationRuns.taskId',
-  },
   taskRuns: {
     taskId: 'taskRuns.taskId',
   },
@@ -56,14 +53,11 @@ vi.mock('@roomote/db/server', () => ({
   },
   db: {
     query: {
-      backgroundAutomationRuns: {
-        findFirst: (...args: unknown[]) => mockAutomationRunFindFirst(...args),
-      },
       taskRuns: {
         findFirst: (...args: unknown[]) => mockCloudJobFindFirst(...args),
       },
       tasks: {
-        findFirst: vi.fn(async () => undefined),
+        findFirst: (...args: unknown[]) => mockTaskFindFirst(...args),
       },
     },
   },
@@ -148,7 +142,7 @@ describe('submitAutomationWorkItems lifecycle', () => {
   };
 
   beforeEach(() => {
-    mockAutomationRunFindFirst.mockReset();
+    mockTaskFindFirst.mockReset();
     mockCloudJobFindFirst.mockReset();
     mockLaunchActWorkItems.mockReset();
     mockPersistAutomationWorkItems.mockReset();
@@ -165,9 +159,9 @@ describe('submitAutomationWorkItems lifecycle', () => {
         suggestionSource: 'sentry_triage',
       },
     });
-    mockAutomationRunFindFirst.mockResolvedValue({
-      id: 'run-1',
-      automationKey: 'sentry_triage',
+    mockTaskFindFirst.mockResolvedValue({
+      initiatorUserId: null,
+      initiatorAutomation: 'sentry_triage',
     });
     mockResolveRepositoryIdsForSuggestedTask.mockResolvedValue([
       { id: 'repo-1', fullName: 'acme/app' },
@@ -388,9 +382,9 @@ describe('submitAutomationWorkItems lifecycle', () => {
         suggestionSource: 'dependabot_triage',
       },
     });
-    mockAutomationRunFindFirst.mockResolvedValueOnce({
-      id: 'run-1',
-      automationKey: 'dependabot_triage',
+    mockTaskFindFirst.mockResolvedValueOnce({
+      initiatorUserId: null,
+      initiatorAutomation: 'dependabot_triage',
     });
     mockResolvePreparedAutomationWorkItems.mockResolvedValueOnce([
       { title: 'Update braces to resolve Dependabot alert' },
@@ -490,9 +484,9 @@ describe('submitAutomationWorkItems lifecycle', () => {
           suggestionSource: source,
         },
       });
-      mockAutomationRunFindFirst.mockResolvedValueOnce({
-        id: 'run-1',
-        automationKey: source,
+      mockTaskFindFirst.mockResolvedValueOnce({
+        initiatorUserId: null,
+        initiatorAutomation: source,
       });
       mockPersistAutomationWorkItems.mockResolvedValueOnce({
         created: true,
@@ -547,9 +541,9 @@ describe('submitAutomationWorkItems lifecycle', () => {
         slackThreadTs: '1781300000.000100',
       },
     });
-    mockAutomationRunFindFirst.mockResolvedValueOnce({
-      id: 'run-1',
-      automationKey: 'ci_failure_triage',
+    mockTaskFindFirst.mockResolvedValueOnce({
+      initiatorUserId: null,
+      initiatorAutomation: 'ci_failure_triage',
     });
     mockPersistAutomationWorkItems.mockResolvedValueOnce({
       created: true,

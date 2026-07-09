@@ -49,16 +49,9 @@ import type {
   McpConnectionAuthConfig,
   SetupNewState,
   LinearPendingSelectionStep,
-  ConflictResolverFrequency,
-  CoachFrequency,
-  SuggesterFrequency,
-  AnnouncerFrequency,
-  ManagerStatsFrequency,
+  AutomationScanCursor,
+  AutomationTarget,
   BackgroundAutomationKey,
-  BackgroundAutomationRunStatus,
-  BackgroundAutomationRunTriggerKind,
-  BackgroundAutomationProvider,
-  BackgroundAutomationTargetKind,
   PlatformIssueReport,
   WorkspaceReadiness,
   ComputeProviderUsageLifecycleAction,
@@ -75,10 +68,7 @@ import type {
   TaskModelSettings,
   UserRole,
 } from '@roomote/types';
-import {
-  AUTO_RESOLVE_CONFLICTS_LABEL,
-  DEFAULT_TASK_ARTIFACT_TYPE,
-} from '@roomote/types';
+import { DEFAULT_TASK_ARTIFACT_TYPE } from '@roomote/types';
 
 import { encryptedJson, encryptedText } from './lib/custom-types';
 import type {
@@ -425,12 +415,6 @@ export const automationWorkItems = pgTable(
     sourceTaskId: text('source_task_id').references(() => tasks.id, {
       onDelete: 'cascade',
     }),
-    backgroundAutomationRunId: uuid('background_automation_run_id').references(
-      () => backgroundAutomationRuns.id,
-      {
-        onDelete: 'set null',
-      },
-    ),
     title: text('title').notNull(),
     brief: text('brief').notNull(),
     category: text('category').$type<SuggestionCategory | null>(),
@@ -498,10 +482,6 @@ export const automationWorkItemsRelations = relations(
       fields: [automationWorkItems.sourceTaskId],
       references: [tasks.id],
       relationName: 'automationWorkItemSourceTask',
-    }),
-    backgroundAutomationRun: one(backgroundAutomationRuns, {
-      fields: [automationWorkItems.backgroundAutomationRunId],
-      references: [backgroundAutomationRuns.id],
     }),
     targetEnvironment: one(environments, {
       fields: [automationWorkItems.targetEnvironmentId],
@@ -606,9 +586,11 @@ export const tasks = pgTable(
     // Initiator stamp (immutable, written once at creation).
     initiatorKind: text('initiator_kind').notNull().$type<TaskInitiatorKind>(),
     initiatorUserId: text('initiator_user_id').references(() => users.id),
-    // Automation key. Plain text in Stage 2; FK to automations.key from
-    // Stage 3 on.
-    initiatorAutomation: text('initiator_automation'),
+    // Automation key referencing automations.key. Rows for every key are
+    // seeded by ensureAutomationRows so the FK always holds.
+    initiatorAutomation: text('initiator_automation')
+      .$type<BackgroundAutomationKey>()
+      .references(() => automations.key),
     // Raw external actor id (Slack user id, GitHub user id/login as
     // provided). Populated whenever an integration surface knows the raw
     // actor, for either initiator kind.
@@ -729,7 +711,10 @@ export const tasksRelations = relations(tasks, ({ one, many }) => ({
   messages: many(taskMessages),
   slackReplyDetails: many(taskSlackReplyDetails),
   platformIssueReports: many(taskPlatformIssueReports),
-  backgroundAutomationRuns: many(backgroundAutomationRuns),
+  initiatorAutomationRow: one(automations, {
+    fields: [tasks.initiatorAutomation],
+    references: [automations.key],
+  }),
 }));
 
 /**
@@ -2458,6 +2443,7 @@ export const linearPendingSelectionsRelations = relations(
 
 export const backgroundAgentSettings = pgTable('background_agent_settings', {
   id: text('id').notNull().primaryKey().default('default'),
+  managerSlackChannelId: text('manager_slack_channel_id'),
   globalAgentInstructions: text('global_agent_instructions'),
   authorshipInstructions: text('authorship_instructions'),
   compiledAuthorshipRules: jsonb('compiled_authorship_rules')
@@ -2470,46 +2456,6 @@ export const backgroundAgentSettings = pgTable('background_agent_settings', {
     .default(sql`'[]'::jsonb`),
   compiledAuthorshipAt: timestamp('compiled_authorship_at'),
   styleGuidance: text('style_guidance'),
-  suggesterInstructions: text('suggester_instructions'),
-  suggesterFrequency: text('suggester_frequency')
-    .notNull()
-    .default('off')
-    .$type<SuggesterFrequency>(),
-  suggesterSlackChannelId: text('suggester_slack_channel_id'),
-  suggesterLastRunAt: timestamp('suggester_last_run_at'),
-
-  conflictResolverFrequency: text('conflict_resolver_frequency')
-    .notNull()
-    .default('off')
-    .$type<ConflictResolverFrequency>(),
-  conflictResolverLabel: text('conflict_resolver_label')
-    .notNull()
-    .default(AUTO_RESOLVE_CONFLICTS_LABEL),
-  conflictResolverInstructions: text('conflict_resolver_instructions'),
-  conflictResolverLastRunAt: timestamp('conflict_resolver_last_run_at'),
-
-  coachFrequency: text('coach_frequency')
-    .notNull()
-    .default('off')
-    .$type<CoachFrequency>(),
-  coachSlackChannelId: text('coach_slack_channel_id'),
-  coachInstructions: text('coach_instructions'),
-  coachLastRunAt: timestamp('coach_last_run_at'),
-
-  announcerFrequency: text('announcer_frequency')
-    .notNull()
-    .default('off')
-    .$type<AnnouncerFrequency>(),
-  announcerSlackChannelId: text('announcer_slack_channel_id'),
-  platformIssueSlackChannelId: text('platform_issue_slack_channel_id'),
-  managerSlackChannelId: text('manager_slack_channel_id'),
-  managerStatsFrequency: text('manager_stats_frequency')
-    .notNull()
-    .default('off')
-    .$type<ManagerStatsFrequency>(),
-  managerStatsLastRunAt: timestamp('manager_stats_last_run_at'),
-  announcerInstructions: text('announcer_instructions'),
-  announcerLastRunAt: timestamp('announcer_last_run_at'),
   slackSummonEmoji: text('slack_summon_emoji'),
   slackAckEmoji: text('slack_ack_emoji').notNull().default('eyes'),
   slackCompletionEmoji: text('slack_completion_emoji')
@@ -2525,91 +2471,44 @@ export const backgroundAgentSettingsRelations = relations(
   () => ({}),
 );
 
-export const backgroundAutomations = pgTable(
-  'background_automations',
-  {
-    id: uuid('id').primaryKey().defaultRandom(),
-    automationKey: text('automation_key')
-      .notNull()
-      .$type<BackgroundAutomationKey>(),
-    enabled: boolean('enabled').notNull().default(false),
-    schedule: jsonb('schedule')
-      .notNull()
-      .default({})
-      .$type<Record<string, unknown>>(),
-    settings: jsonb('settings')
-      .notNull()
-      .default({})
-      .$type<Record<string, unknown>>(),
-    lastRunAt: timestamp('last_run_at'),
-    lastSucceededAt: timestamp('last_succeeded_at'),
-    lastFailedAt: timestamp('last_failed_at'),
-    lastError: text('last_error'),
-    createdAt: timestamp('created_at').notNull().defaultNow(),
-    updatedAt: timestamp('updated_at').notNull().defaultNow(),
-  },
-  (table) => [
-    uniqueIndex('background_automations_key_unique').on(table.automationKey),
-    index('background_automations_key_enabled_idx').on(
-      table.automationKey,
-      table.enabled,
-    ),
-  ],
-);
+/**
+ * automations
+ *
+ * One row per automation, keyed by the canonical snake_case automation key.
+ * Rows for every known key are seeded by ensureAutomationRows so
+ * tasks.initiator_automation can hold a real FK. Internal automations
+ * (internal = true) launch tasks but are hidden from the settings UI.
+ */
 
-export const backgroundAutomationsRelations = relations(
-  backgroundAutomations,
-  ({ many }) => ({
-    targets: many(backgroundAutomationTargets),
-  }),
-);
+export const automations = pgTable('automations', {
+  key: text('key').primaryKey().$type<BackgroundAutomationKey>(),
+  enabled: boolean('enabled').notNull().default(false),
+  internal: boolean('internal').notNull().default(false),
+  schedule: jsonb('schedule')
+    .notNull()
+    .default({})
+    .$type<Record<string, unknown>>(),
+  instructions: text('instructions'),
+  settings: jsonb('settings')
+    .notNull()
+    .default({})
+    .$type<Record<string, unknown>>(),
+  targets: jsonb('targets')
+    .notNull()
+    .default(sql`'[]'::jsonb`)
+    .$type<AutomationTarget[]>(),
+  lastRunAt: timestamp('last_run_at'),
+  lastSucceededAt: timestamp('last_succeeded_at'),
+  lastFailedAt: timestamp('last_failed_at'),
+  lastError: text('last_error'),
+  scanCursor: jsonb('scan_cursor').$type<AutomationScanCursor | null>(),
+  createdAt: timestamp('created_at').notNull().defaultNow(),
+  updatedAt: timestamp('updated_at').notNull().defaultNow(),
+});
 
-export const backgroundAutomationTargets = pgTable(
-  'background_automation_targets',
-  {
-    id: uuid('id').primaryKey().defaultRandom(),
-    automationId: uuid('automation_id')
-      .notNull()
-      .references(() => backgroundAutomations.id, { onDelete: 'cascade' }),
-    provider: text('provider').notNull().$type<BackgroundAutomationProvider>(),
-    targetKind: text('target_kind')
-      .notNull()
-      .$type<BackgroundAutomationTargetKind>(),
-    externalRef: text('external_ref').notNull(),
-    metadata: jsonb('metadata')
-      .notNull()
-      .default({})
-      .$type<Record<string, unknown>>(),
-    createdAt: timestamp('created_at').notNull().defaultNow(),
-    updatedAt: timestamp('updated_at').notNull().defaultNow(),
-  },
-  (table) => [
-    uniqueIndex('background_automation_targets_unique').on(
-      table.automationId,
-      table.provider,
-      table.targetKind,
-      table.externalRef,
-    ),
-    index('background_automation_targets_automation_idx').on(
-      table.automationId,
-    ),
-    index('background_automation_targets_provider_kind_ref_idx').on(
-      table.provider,
-      table.targetKind,
-      table.externalRef,
-    ),
-  ],
-);
-
-export const backgroundAutomationTargetsRelations = relations(
-  backgroundAutomationTargets,
-  ({ one }) => ({
-    automation: one(backgroundAutomations, {
-      fields: [backgroundAutomationTargets.automationId],
-      references: [backgroundAutomations.id],
-    }),
-  }),
-);
+export const automationsRelations = relations(automations, ({ many }) => ({
+  tasks: many(tasks),
+}));
 
 /**
  * background_automation_slack_threads
@@ -2648,61 +2547,6 @@ export const backgroundAutomationSlackThreads = pgTable(
 export const backgroundAutomationSlackThreadsRelations = relations(
   backgroundAutomationSlackThreads,
   () => ({}),
-);
-
-/**
- * background_automation_runs
- */
-
-export const backgroundAutomationRuns = pgTable(
-  'background_automation_runs',
-  {
-    id: uuid('id').primaryKey().defaultRandom(),
-    automationKey: text('automation_key')
-      .notNull()
-      .$type<BackgroundAutomationKey>(),
-    bullmqJobId: text('bullmq_job_id').notNull(),
-    triggerKind: text('trigger_kind')
-      .notNull()
-      .$type<BackgroundAutomationRunTriggerKind>(),
-    status: text('status').notNull().$type<BackgroundAutomationRunStatus>(),
-    taskId: text('task_id').references(() => tasks.id, {
-      onDelete: 'set null',
-    }),
-    slackChannelId: text('slack_channel_id'),
-    threadTs: text('thread_ts'),
-    startedAt: timestamp('started_at'),
-    finishedAt: timestamp('finished_at'),
-    error: text('error'),
-    metadata: jsonb('metadata')
-      .notNull()
-      .default(sql`'{}'::jsonb`)
-      .$type<Record<string, unknown>>(),
-    createdAt: timestamp('created_at').notNull().defaultNow(),
-    updatedAt: timestamp('updated_at').notNull().defaultNow(),
-  },
-  (table) => [
-    uniqueIndex('background_automation_runs_deployment_key_job_unique').on(
-      table.automationKey,
-      table.bullmqJobId,
-    ),
-    index('background_automation_runs_recent_lookup_idx').on(
-      table.automationKey,
-      table.createdAt,
-    ),
-    index('background_automation_runs_task_id_idx').on(table.taskId),
-  ],
-);
-
-export const backgroundAutomationRunsRelations = relations(
-  backgroundAutomationRuns,
-  ({ one, many }) => ({
-    task: one(tasks, {
-      fields: [backgroundAutomationRuns.taskId],
-      references: [tasks.id],
-    }),
-    automationWorkItems: many(automationWorkItems),
-  }),
 );
 
 export type ManagerMcpSetupNotificationReason =
@@ -2754,7 +2598,6 @@ export const mcpSetupManagerNotificationsRelations = relations(
 );
 
 export type BackgroundAgentSuggestionType =
-  | 'coach'
   | 'setup_onboarding'
   | 'suggested_tasks'
   | 'sentry_triage'

@@ -44,10 +44,8 @@ import {
   taskRuns,
   tasks,
   taskSuggestions,
-  updateBackgroundAutomationRunArtifactsByTaskId,
   upsertBackgroundAutomationSlackThread,
-  getBackgroundAgentSettingsForDeployment,
-  resolveManagerSlackChannelId,
+  getAutomationRuntime,
 } from '@roomote/db/server';
 
 import type { Variables } from '../../types';
@@ -848,7 +846,6 @@ async function postSuggestedTasksSummaryToSlack(params: {
     return;
   }
 
-  const settings = await getBackgroundAgentSettingsForDeployment();
   const slackConfig = resolveScheduledSuggestionSlackConfig(
     params.suggestionSource,
   );
@@ -858,10 +855,12 @@ async function postSuggestedTasksSummaryToSlack(params: {
     )?.label ?? null;
   const shouldTrackAutomationThread = Boolean(params.suggestionSource);
 
-  const configuredChannelId = resolveManagerSlackChannelId(
-    settings ?? null,
-    slackConfig.managerChannelKind,
+  // Two-level fallback: the automation's own slack_channel target, then the
+  // shared manager channel (getAutomationRuntime resolves both levels).
+  const automationRuntime = await getAutomationRuntime(
+    slackConfig.automationKey,
   );
+  const configuredChannelId = automationRuntime.slackChannelId;
 
   const [channel] = configuredChannelId
     ? [{ channelId: configuredChannelId }]
@@ -973,14 +972,6 @@ async function postSuggestedTasksSummaryToSlack(params: {
           payload: sql`coalesce(${taskRuns.payload}, '{}'::jsonb) || ${slackThreadPayloadPatch}::jsonb`,
         })
         .where(eq(taskRuns.taskId, params.sourceTaskId));
-    }
-
-    if (postResult && shouldTrackAutomationThread) {
-      await updateBackgroundAutomationRunArtifactsByTaskId(tx, {
-        taskId: params.sourceTaskId,
-        slackChannelId: channel.channelId,
-        threadTs: postResult.rootMessageTs,
-      });
     }
 
     if (postResult && shouldTrackAutomationThread) {

@@ -1,27 +1,27 @@
 import { Env } from '@roomote/env';
 import {
-  completeBackgroundAutomationRun,
-  completeBackgroundAutomationRunByJobId,
   db,
+  getAutomationRuntime,
+  recordAutomationRunOutcome,
   slackInstallations,
-  getBackgroundAgentSettingsForDeployment,
-  startBackgroundAutomationRun,
   eq,
-  resolveManagerSlackChannelId,
 } from '@roomote/db/server';
-import {
-  buildAutomationSettingsMessage,
-  buildManagerStatsDigest,
-  MANAGER_STATS_SETTINGS_HASH,
-} from '@roomote/sdk/server';
+import { MANAGER_STATS_SETTINGS_HASH } from '@roomote/types';
 import { SlackNotifier } from '@roomote/slack';
 import type { SlackMessage } from '@roomote/slack';
 
+import { buildAutomationSettingsMessage } from '../lib/manager-slack';
+import { buildManagerStatsDigest } from '../lib/manager-stats';
 import { hasActiveGitHubInstallation } from './github-deployment-scope';
 import {
   isWeeklyRunDueOnLocalDay,
   resolveSlackWorkspaceTimezone,
 } from './scheduling-utils';
+import {
+  emptyJobResult,
+  type AutomationJobResult,
+  type AutomationRunOpts,
+} from './types';
 
 const LOG_PREFIX = '[managerStats]';
 const SCHEDULE_DAY_LOCAL = 5; // Friday.
@@ -97,30 +97,35 @@ async function findEligibleDeployments(): Promise<DeploymentContext[]> {
 }
 
 export async function managerStatsJob(
-  opts: { manualTrigger?: boolean; bullmqJobId?: string } = {},
-) {
+  opts: AutomationRunOpts = {},
+): Promise<AutomationJobResult> {
   console.log(`${LOG_PREFIX} Starting manager stats job`);
 
   const now = new Date();
+  const result = emptyJobResult();
   const eligibleDeployments = await findEligibleDeployments();
+
+  if (eligibleDeployments.length === 0) {
+    result.skippedReason = 'GitHub and Slack must both be connected.';
+  }
 
   let processed = 0;
   let skipped = 0;
-  const errors: string[] = [];
 
   for (const deployment of eligibleDeployments) {
-    let runId: string | null = null;
-
     try {
-      const settings = await getBackgroundAgentSettingsForDeployment();
-      const channelId = resolveManagerSlackChannelId(settings, 'managerStats');
+      const runtime = await getAutomationRuntime('manager_stats');
+      const frequency = runtime.enabled ? runtime.scheduleMode : 'off';
+      const channelId = runtime.slackChannelId;
 
-      if (settings.managerStatsFrequency === 'off') {
+      if (!frequency || frequency === 'off') {
+        result.skippedReason = 'Automation is disabled.';
         skipped++;
         continue;
       }
 
       if (!channelId) {
+        result.skippedReason = 'Manager channel is not configured.';
         skipped++;
         continue;
       }
@@ -135,41 +140,29 @@ export async function managerStatsJob(
         !isWeeklyRunDueOnLocalDay({
           now,
           timeZone: timezone,
-          lastRunAt: settings.managerStatsLastRunAt,
+          lastRunAt: runtime.lastRunAt,
           scheduleDayLocal: SCHEDULE_DAY_LOCAL,
           scheduleHourLocal: SCHEDULE_HOUR_LOCAL,
         })
       ) {
+        result.skippedReason = 'Not due yet.';
         skipped++;
         continue;
       }
 
       const since = new Date(now.getTime() - WINDOW_DAYS * 24 * 60 * 60 * 1000);
-      runId = (
-        await startBackgroundAutomationRun(db, {
-          automationKey: 'manager_stats',
-          bullmqJobId:
-            opts.bullmqJobId ?? `manager-stats:${crypto.randomUUID()}`,
-          triggerKind: opts.manualTrigger ? 'manual' : 'scheduled',
-          startedAt: new Date(),
-        })
-      ).id;
-
       const stats = await buildManagerStatsDigest({
         actorUserId: deployment.actorUserId,
         since,
       });
 
       if (stats.activeUsers === 0 && stats.totalPullRequests === 0) {
-        await completeBackgroundAutomationRun(db, {
-          runId,
-          automationKey: 'manager_stats',
+        await recordAutomationRunOutcome(db, {
+          key: 'manager_stats',
           status: 'skipped',
-          finishedAt: new Date(),
-          metadata: {
-            reason: 'no_activity',
-          },
+          at: new Date(),
         });
+        result.skippedReason = 'No activity in the stats window.';
         processed++;
         continue;
       }
@@ -184,44 +177,33 @@ export async function managerStatsJob(
         throw new Error('Failed to post weekly manager stats');
       }
 
-      await completeBackgroundAutomationRun(db, {
-        runId,
-        automationKey: 'manager_stats',
+      await recordAutomationRunOutcome(db, {
+        key: 'manager_stats',
         status: 'succeeded',
-        finishedAt: new Date(),
-        slackChannelId: channelId,
-        threadTs: messageTs,
+        at: new Date(),
       });
+      result.completed = true;
       processed++;
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
-      errors.push(message);
-      if (runId) {
-        await completeBackgroundAutomationRun(db, {
-          runId,
-          automationKey: 'manager_stats',
-          status: 'failed',
-          finishedAt: new Date(),
-          error: message,
-        });
-      } else if (opts.bullmqJobId) {
-        await completeBackgroundAutomationRunByJobId(db, {
-          automationKey: 'manager_stats',
-          bullmqJobId: opts.bullmqJobId,
-          status: 'failed',
-          finishedAt: new Date(),
-          error: message,
-        });
-      }
+      result.errors.push(message);
+      await recordAutomationRunOutcome(db, {
+        key: 'manager_stats',
+        status: 'failed',
+        at: new Date(),
+        error: message,
+      });
       console.error(`${LOG_PREFIX} Failed deployment: ${message}`);
     }
   }
 
   console.log(
-    `${LOG_PREFIX} Completed: ${processed} processed, ${skipped} skipped, ${errors.length} errors`,
+    `${LOG_PREFIX} Completed: ${processed} processed, ${skipped} skipped, ${result.errors.length} errors`,
   );
 
-  if (errors.length > 0) {
-    console.error(`${LOG_PREFIX} Errors:`, errors);
+  if (result.errors.length > 0) {
+    console.error(`${LOG_PREFIX} Errors:`, result.errors);
   }
+
+  return result;
 }

@@ -1,7 +1,7 @@
 ---
 title: Environment Management
 status: active
-last_reviewed: 2026-07-03
+last_reviewed: 2026-07-09
 owner: engineering
 summary: Technical documentation of Roomote environment and workspace management covering single-deployment configuration, config version history, snapshots, sandbox OIDC targets, compute target mapping, preview-auth bypass behavior, and preview defaults.
 ---
@@ -379,7 +379,7 @@ installing PM2 at runtime.
 
 Task snapshot resume jobs treat environment repository commands as
 best-effort. The source snapshot already captured a previously working
-environment, so `CloudTaskType.SnapshotResume` forces repository commands to
+environment, so `TaskPayloadKind.SnapshotResume` forces repository commands to
 continue on failure, emits a user-visible startup warning, and keeps detailed
 debug logs for the failed command. Fresh environment setup and environment
 snapshot creation still respect each command's configured `continue_on_error`
@@ -535,7 +535,7 @@ worker/runtime before the task starts.
 
 1. User clicks "Create Snapshot" in the web UI
 2. Web app calls `trpc.snapshots.createEnvironment({ environmentId, provider })`
-3. Handler enqueues a `CloudTaskType.SnapshotEnvironment` job
+3. Handler enqueues a `TaskPayloadKind.SnapshotEnvironment` job
 4. Worker provisions the environment from the provider's fresh base-image path rather than inheriting the previous environment snapshot
 5. Worker calls the active provider's snapshot API to capture filesystem state
 6. BullMQ worker writes `snapshotId`, `snapshotCreatedAt`, `snapshotExpiresAt` to `environment_snapshots`
@@ -573,7 +573,7 @@ snapshot.
 
 1. User clicks "Resume Snapshot" on a completed/paused task
 2. Web app calls `trpc.snapshots.restoreCloudJob({ sourceSnapshotId, sourceCloudJobId })`
-3. Handler enqueues a new `CloudTaskType.SnapshotResume` job
+3. Handler enqueues a new `TaskPayloadKind.SnapshotResume` job
 4. Worker creates a new instance from the snapshot on the same provider that created it
 5. Task execution resumes with the previous filesystem state intact
 

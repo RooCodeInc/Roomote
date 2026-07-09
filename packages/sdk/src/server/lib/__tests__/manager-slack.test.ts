@@ -21,7 +21,6 @@ import {
   buildAutomationSettingsMessage,
   SENTRY_TRIAGE_SETTINGS_HASH,
   SUGGEST_IDEAS_SETTINGS_HASH,
-  SUGGEST_SELF_IMPROVEMENTS_SETTINGS_HASH,
   shouldPostHistoricalThreadFeedbackDebugSnippet,
 } from '../manager-slack';
 
@@ -66,13 +65,6 @@ describe('manager slack helpers', () => {
       buildAutomationSettingsContextText(SENTRY_TRIAGE_SETTINGS_HASH),
     ).toBe(
       'Configure the Triage Sentry Issues automation in <https://app.example.com/automations#sentry-triage|automation settings>.',
-    );
-    expect(
-      buildAutomationSettingsContextText(
-        SUGGEST_SELF_IMPROVEMENTS_SETTINGS_HASH,
-      ),
-    ).toBe(
-      'Configure the Suggest Self-improvements automation in <https://app.example.com/automations#suggest-self-improvements|automation settings>.',
     );
   });
 

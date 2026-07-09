@@ -1,8 +1,6 @@
-import { acquireRedisLock, withContention } from '@roomote/redis';
+import { acquireRedisLock } from '@roomote/redis';
 import {
   AGENT_DISPLAY_NAME,
-  ALL_REPOSITORIES,
-  PRODUCT_NAME,
   formatErrorForLog,
   normalizeSetupNewState,
 } from '@roomote/types';
@@ -23,7 +21,6 @@ import {
   startSlackAppMentionTask,
   type SlackNotifier,
   type SlackReactionAddedEvent,
-  SlackThreadDeliveryTracker,
 } from '@roomote/slack';
 import {
   automationWorkItems,
@@ -712,165 +709,6 @@ async function launchTaskSuggestionTaskWithContention(params: {
   return lifecycleResult === 'handled';
 }
 
-async function launchCoachSuggestionTaskFromReaction({
-  teamId,
-  slack,
-  reactionEvent,
-  ackEmoji,
-  completionEmoji,
-  sourceText: providedSourceText,
-}: {
-  teamId: string;
-  slack: SlackNotifier;
-  reactionEvent: SlackReactionAddedEvent;
-  ackEmoji: string;
-  completionEmoji: string;
-  sourceText?: string | null;
-}): Promise<boolean> {
-  if (reactionEvent.item.type !== 'message') {
-    return false;
-  }
-
-  const channelId = reactionEvent.item.channel;
-  const messageTs = reactionEvent.item.ts;
-
-  const [suggestion] = await db
-    .select({
-      id: agentSuggestionMessages.id,
-      taskId: agentSuggestionMessages.taskId,
-      createdByUserId: agentSuggestionMessages.createdByUserId,
-    })
-    .from(agentSuggestionMessages)
-    .where(
-      and(
-        eq(agentSuggestionMessages.agentType, 'coach'),
-        eq(agentSuggestionMessages.channelId, channelId),
-        eq(agentSuggestionMessages.messageTs, messageTs),
-      ),
-    )
-    .limit(1);
-
-  if (!suggestion || suggestion.taskId) {
-    return false;
-  }
-
-  const sourceText =
-    providedSourceText?.trim() ??
-    (
-      await slack.getMessage({
-        channel: channelId,
-        messageTs,
-      })
-    )?.text.trim();
-
-  if (!sourceText) {
-    return false;
-  }
-
-  const reactingUserMapping = await lookupSlackUserMapping({
-    slackUserId: reactionEvent.user,
-    teamId,
-  });
-
-  if (reactingUserMapping.hasInactiveMapping) {
-    await slack.postMessage({
-      channel: channelId,
-      text: REMOVED_SLACK_ACCOUNT_LAUNCH_FAILURE,
-      blocks: [
-        {
-          type: 'markdown',
-          text: REMOVED_SLACK_ACCOUNT_LAUNCH_FAILURE,
-        },
-      ],
-    });
-    return true;
-  }
-
-  const instructionText = `@${PRODUCT_NAME}, implement this`;
-  const quotedSourceText = sourceText
-    .split('\n')
-    .map((line) => `> ${line}`)
-    .join('\n');
-  const launchText = `<@${reactionEvent.user}>, I'll start on this, per your request:\n${quotedSourceText}`;
-  let deliveryTracker: SlackThreadDeliveryTracker | null = null;
-
-  try {
-    const seededThreadTs = await slack.postMessage({
-      channel: channelId,
-      text: launchText,
-      blocks: [
-        {
-          type: 'markdown',
-          text: launchText,
-        },
-      ],
-    });
-
-    if (!seededThreadTs) {
-      return false;
-    }
-
-    deliveryTracker = new SlackThreadDeliveryTracker(channelId, seededThreadTs);
-    deliveryTracker.track(seededThreadTs);
-
-    // The reacting human is the initiator; the old fallback to the
-    // suggestion creator's identity is gone.
-    const cloudJob = await startSlackAppMentionTask({
-      initiator: {
-        kind: 'user',
-        externalId: reactionEvent.user,
-        ...(reactingUserMapping.activeMapping?.userId
-          ? { matchedUserId: reactingUserMapping.activeMapping.userId }
-          : {}),
-      },
-      trigger: 'manual',
-      channel: channelId,
-      teamId,
-      slackUserId: reactionEvent.user,
-      text: instructionText,
-      agentPromptText: `${instructionText}\n\n${sourceText}`,
-      ts: seededThreadTs,
-      threadTs: seededThreadTs,
-      repo: ALL_REPOSITORIES,
-      ackEmoji,
-      completionEmoji,
-      queuedStartedMessage: {
-        ts: seededThreadTs,
-        agentName: AGENT_DISPLAY_NAME,
-        initiatingSlackUserId: reactionEvent.user,
-        workspaceDisplayName: 'all repos',
-        workspaceOnly: false,
-      },
-    });
-
-    const updated = await db
-      .update(agentSuggestionMessages)
-      .set({
-        taskId: cloudJob.taskId,
-        launchedThreadTs: seededThreadTs,
-        launchedAt: new Date(),
-      })
-      .where(
-        and(
-          eq(agentSuggestionMessages.id, suggestion.id),
-          isNull(agentSuggestionMessages.taskId),
-        ),
-      )
-      .returning({ id: agentSuggestionMessages.id });
-
-    if (updated.length === 0) {
-      apiLogger.debug(
-        `[SlackWebhook] coach reaction became idempotent for ${channelId}:${messageTs}`,
-      );
-      return false;
-    }
-
-    return true;
-  } finally {
-    await deliveryTracker?.commit();
-  }
-}
-
 export async function handleReactionAddedEvent(params: {
   context: SlackWebhookContext;
   event: SlackReactionAddedEvent;
@@ -896,60 +734,7 @@ export async function handleReactionAddedEvent(params: {
     return;
   }
 
-  const launchCoachSuggestionWithContention = async (
-    sourceText?: string | null,
-  ) => {
-    apiLogger.debug(
-      `[SlackWebhook] Processing tracked coach reaction team=${context.teamId} channel=${event.item.channel} messageTs=${event.item.ts} reaction=${event.reaction} user=${event.user}`,
-    );
-
-    const coachLockKey = `slack:coach-reaction:${event.item.channel}:${event.item.ts}`;
-
-    const { value: coachReactionHandled } = await withContention<boolean>(
-      coachLockKey,
-      {
-        ttlSeconds: 30,
-        poll: { intervalMs: 400, maxAttempts: 10 },
-        onAcquired: async () =>
-          launchCoachSuggestionTaskFromReaction({
-            teamId: context.teamId,
-            slack: context.slack,
-            reactionEvent: event,
-            ackEmoji: reactionNames.ackEmoji,
-            completionEmoji: reactionNames.completionEmoji,
-            sourceText,
-          }),
-        onContended: async () => {
-          const [existing] = await db
-            .select({ taskId: agentSuggestionMessages.taskId })
-            .from(agentSuggestionMessages)
-            .where(
-              and(
-                eq(agentSuggestionMessages.agentType, 'coach'),
-                eq(agentSuggestionMessages.channelId, event.item.channel),
-                eq(agentSuggestionMessages.messageTs, event.item.ts),
-              ),
-            )
-            .limit(1);
-
-          return Boolean(existing?.taskId);
-        },
-      },
-    );
-
-    return coachReactionHandled;
-  };
-
   if (isThumbsUp) {
-    const coachReactionHandled = await launchCoachSuggestionWithContention();
-
-    if (coachReactionHandled) {
-      apiLogger.debug(
-        `[SlackWebhook] Coach reaction launched task for ${event.item.channel}:${event.item.ts}`,
-      );
-      return;
-    }
-
     apiLogger.debug(
       `[SetupSuggestionLifecycle] Processing thumbs-up reaction team=${context.teamId} channel=${event.item.channel} messageTs=${event.item.ts} reaction=${event.reaction} user=${event.user}`,
     );
@@ -1003,17 +788,6 @@ export async function handleReactionAddedEvent(params: {
     sourceMessage.app_id === context.slackInstallation.appId;
 
   if (isRoomoteAuthoredBotMessage) {
-    const coachReactionHandled = await launchCoachSuggestionWithContention(
-      sourceMessage.text,
-    );
-
-    if (coachReactionHandled) {
-      apiLogger.debug(
-        `[SlackWebhook] Coach reaction launched task for ${event.item.channel}:${event.item.ts}`,
-      );
-      return;
-    }
-
     apiLogger.debug(
       `[SlackWebhook] Ignoring summon reaction on Roomote-authored bot message ${event.item.channel}:${event.item.ts}`,
     );

@@ -4,7 +4,7 @@ import {
   db,
   count,
   eq,
-  upsertBackgroundAutomation,
+  upsertAutomation,
   getBackgroundAgentSettingsForDeployment,
   MANAGER_CHANNEL_STARTER_AUTOMATION_SETTINGS,
   slackInstallationChannels,
@@ -48,28 +48,24 @@ async function syncManagerStarterAutomations(params: {
   const { settings, updatedAt } = params;
 
   await Promise.all([
-    upsertBackgroundAutomation(db, {
-      automationKey: 'suggester',
+    upsertAutomation(db, {
+      key: 'suggester',
       enabled: settings.suggesterFrequency !== 'off',
       schedule: { mode: settings.suggesterFrequency },
-      settings: settings.suggesterInstructions
-        ? { instructions: settings.suggesterInstructions }
-        : {},
+      instructions: settings.suggesterInstructions ?? null,
       targets: buildStarterAutomationTargets(settings.suggesterSlackChannelId),
       updatedAt,
     }),
-    upsertBackgroundAutomation(db, {
-      automationKey: 'announcer',
+    upsertAutomation(db, {
+      key: 'announcer',
       enabled: settings.announcerFrequency !== 'off',
       schedule: { mode: settings.announcerFrequency },
-      settings: settings.announcerInstructions
-        ? { instructions: settings.announcerInstructions }
-        : {},
+      instructions: settings.announcerInstructions ?? null,
       targets: buildStarterAutomationTargets(settings.announcerSlackChannelId),
       updatedAt,
     }),
-    upsertBackgroundAutomation(db, {
-      automationKey: 'manager_stats',
+    upsertAutomation(db, {
+      key: 'manager_stats',
       enabled: settings.managerStatsFrequency !== 'off',
       schedule: { mode: settings.managerStatsFrequency },
       updatedAt,

@@ -5,12 +5,12 @@ import { Env } from '@roomote/env';
 import {
   and,
   backgroundAutomationSlackThreads,
-  backgroundAutomationRuns,
   automationWorkItems,
   db,
   eq,
   slackInstallations,
   taskRuns,
+  tasks,
 } from '@roomote/db/server';
 import {
   getTriggerableBackgroundAutomationDescriptorByKey,
@@ -445,18 +445,10 @@ async function refreshTrackedAutomationThreadRootFooter(params: {
   taskId: string;
   taskUrl: string;
 }): Promise<void> {
-  const [trackedRun, trackedThread] = await Promise.all([
-    db.query.backgroundAutomationRuns.findFirst({
-      columns: {
-        automationKey: true,
-        taskId: true,
-      },
-      where: and(
-        eq(backgroundAutomationRuns.slackChannelId, params.channel),
-        eq(backgroundAutomationRuns.threadTs, params.threadTs),
-      ),
-      orderBy: (table, { desc }) => [desc(table.createdAt)],
-    }),
+  // Run rows are gone; the automation-thread linkage lives on the tracked
+  // Slack thread registry plus the task's own channel bindings + initiator
+  // stamp (tasks.initiator_automation).
+  const [trackedThread, boundTask] = await Promise.all([
     db.query.backgroundAutomationSlackThreads.findFirst({
       columns: {
         automationKey: true,
@@ -467,6 +459,16 @@ async function refreshTrackedAutomationThreadRootFooter(params: {
         eq(backgroundAutomationSlackThreads.threadTs, params.threadTs),
       ),
     }),
+    db.query.tasks.findFirst({
+      columns: {
+        initiatorAutomation: true,
+      },
+      where: and(
+        eq(tasks.id, params.taskId),
+        eq(tasks.slackChannelId, params.channel),
+        eq(tasks.slackThreadTs, params.threadTs),
+      ),
+    }),
   ]);
 
   const trackedThreadTaskId =
@@ -474,16 +476,14 @@ async function refreshTrackedAutomationThreadRootFooter(params: {
     trackedThread.metadata.sourceTaskId.trim().length > 0
       ? trackedThread.metadata.sourceTaskId
       : null;
+  const boundTaskAutomationKey = boundTask?.initiatorAutomation ?? null;
 
-  if (
-    trackedRun?.taskId !== params.taskId &&
-    trackedThreadTaskId !== params.taskId
-  ) {
+  if (trackedThreadTaskId !== params.taskId && !boundTaskAutomationKey) {
     return;
   }
 
   const trackedAutomationKey =
-    trackedRun?.automationKey ?? trackedThread?.automationKey ?? null;
+    trackedThread?.automationKey ?? boundTaskAutomationKey ?? null;
   const automationKey = trackedAutomationKey ?? 'automation';
   const automationLabel = trackedAutomationKey
     ? getTriggerableBackgroundAutomationDescriptorByKey(trackedAutomationKey)

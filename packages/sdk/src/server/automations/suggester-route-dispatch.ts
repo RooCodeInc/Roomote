@@ -2,12 +2,7 @@ import {
   buildSuggestedTasksPrompt,
   enqueueCloudTask,
 } from '@roomote/cloud-agents/server';
-import {
-  completeBackgroundAutomationRun,
-  completeBackgroundAutomationRunByJobId,
-  db,
-  startBackgroundAutomationRun,
-} from '@roomote/db/server';
+import { db, recordAutomationRunOutcome } from '@roomote/db/server';
 import { ALL_REPOSITORIES, TaskPayloadKind } from '@roomote/types';
 import type { TaskSuggestionStatus } from '@roomote/types';
 
@@ -25,18 +20,6 @@ type EnvironmentBackedRepositoryCoverage = Array<{
   targetEnvironmentId: string;
 }>;
 
-function getSuggestionRouteKind(route: SuggestionDispatchRoute) {
-  if (route.isLegacyRoute) {
-    return 'legacy';
-  }
-
-  if (route.isFallbackRoute) {
-    return 'fallback';
-  }
-
-  return 'grouped';
-}
-
 async function enqueueSuggestionRoute(params: {
   deployment: SuggesterDeploymentContext;
   previousSuggestions: Array<{
@@ -48,25 +31,8 @@ async function enqueueSuggestionRoute(params: {
   repositoryFullNames: string[];
   route: SuggestionDispatchRoute;
   triggerKind: 'manual' | 'scheduled';
-}): Promise<{ error?: string; success: boolean }> {
-  let runId: string | null = null;
-
+}): Promise<{ error?: string; success: boolean; taskId?: string }> {
   try {
-    runId = (
-      await startBackgroundAutomationRun(db, {
-        automationKey: 'suggester',
-        bullmqJobId: params.route.bullmqJobId,
-        triggerKind: params.triggerKind,
-        startedAt: new Date(),
-        metadata: {
-          routeChannelId: params.route.channelId,
-          routeChannelName: params.route.channelName,
-          routeGroupLabel: params.route.groupLabel,
-          routeKind: getSuggestionRouteKind(params.route),
-        },
-      })
-    ).id;
-
     // Suggestion scans run as the deployment service principal.
     const launchResult = await enqueueCloudTask({
       task: {
@@ -109,43 +75,9 @@ async function enqueueSuggestionRoute(params: {
       channels: { slackChannelId: params.route.channelId },
     });
 
-    await completeBackgroundAutomationRun(db, {
-      runId,
-      automationKey: 'suggester',
-      status: 'succeeded',
-      finishedAt: new Date(),
-      taskId: launchResult.taskId,
-      slackChannelId: params.route.channelId,
-      metadata: {
-        cloudJobId: launchResult.id,
-        routeChannelName: params.route.channelName,
-        routeGroupLabel: params.route.groupLabel,
-        routeKind: getSuggestionRouteKind(params.route),
-      },
-    });
-
-    return { success: true };
+    return { success: true, taskId: launchResult.taskId };
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
-
-    if (runId) {
-      await completeBackgroundAutomationRun(db, {
-        runId,
-        automationKey: 'suggester',
-        status: 'failed',
-        finishedAt: new Date(),
-        error: message,
-        slackChannelId: params.route.channelId,
-      });
-    } else {
-      await completeBackgroundAutomationRunByJobId(db, {
-        automationKey: 'suggester',
-        bullmqJobId: params.route.bullmqJobId,
-        status: 'failed',
-        finishedAt: new Date(),
-        error: message,
-      });
-    }
 
     return {
       success: false,
@@ -165,8 +97,13 @@ export async function dispatchSuggestionRoutes(params: {
   repositoryFullNames: string[];
   routePlan: SuggestionDispatchPlan;
   triggerKind: 'manual' | 'scheduled';
-}): Promise<{ errors: string[]; successfulRoutes: number }> {
+}): Promise<{
+  errors: string[];
+  firstLaunchedTaskId: string | null;
+  successfulRoutes: number;
+}> {
   let successfulRoutes = 0;
+  let firstLaunchedTaskId: string | null = null;
   const errors: string[] = [];
 
   for (const route of params.routePlan.routes) {
@@ -188,6 +125,7 @@ export async function dispatchSuggestionRoutes(params: {
 
     if (result.success) {
       successfulRoutes++;
+      firstLaunchedTaskId ??= result.taskId ?? null;
       continue;
     }
 
@@ -200,5 +138,22 @@ export async function dispatchSuggestionRoutes(params: {
     console.error(`${LOG_PREFIX} Failed route ${routeLabel}: ${result.error}`);
   }
 
-  return { errors, successfulRoutes };
+  // A pass with at least one successful route counts as a run; a pass where
+  // every route failed lands the error on the automation row.
+  if (successfulRoutes > 0) {
+    await recordAutomationRunOutcome(db, {
+      key: 'suggester',
+      status: 'succeeded',
+      at: new Date(),
+    });
+  } else if (errors.length > 0) {
+    await recordAutomationRunOutcome(db, {
+      key: 'suggester',
+      status: 'failed',
+      at: new Date(),
+      error: errors.join('; '),
+    });
+  }
+
+  return { errors, firstLaunchedTaskId, successfulRoutes };
 }

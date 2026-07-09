@@ -50,7 +50,6 @@ export {
   CreditCardIcon,
   Database,
   DollarSign,
-  Dumbbell,
   Drum,
   Download,
   ExternalLink,

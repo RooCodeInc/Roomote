@@ -1,16 +1,18 @@
 ---
 title: Cloud Job Execution Architecture
 status: active
-last_reviewed: 2026-07-03
+last_reviewed: 2026-07-09
 owner: engineering
-summary: Cloud job execution system covering direct cloud-job submission, controller dispatch, worker runtime, sandbox OIDC refresh, snapshots, and completion.
+summary: Work execution system covering the tasks/task_runs split, the initiator-stamped enqueue contract, controller dispatch, worker runtime, sandbox OIDC refresh, snapshots, and completion.
 ---
 
 # Cloud Job Execution Architecture
 
-This document describes the current work execution system across cloud-job submission, controller dispatch, worker runtime, snapshots, and completion.
+This document describes the current work execution system across task/run submission, controller dispatch, worker runtime, snapshots, and completion.
 
 It is intended for engineers and coding agents who need to debug or extend job execution behavior.
+
+Vocabulary note: the execution-attempt table is `task_runs` (one row per sandbox run of a task), but much of the TypeScript surface still uses the older "cloud job" vocabulary (`CloudJob`, `cloudJobId`, `enqueueCloudTask`, `finishCloudJob`). "Cloud job" and "run" refer to the same row; a rename pass is deferred to bound diffs.
 
 ## Child Surface Inventory
 
@@ -24,47 +26,64 @@ It is intended for engineers and coding agents who need to debug or extend job e
 
 ## System Overview
 
-Roomote launches work by creating `cloud_jobs` and linked `tasks` records
-immediately, then pushing the cloud job ID onto the Redis-backed controller
-queue. Callers receive stable task links as soon as launch validation and
-persistence succeed. Execution has four major stages:
+Roomote launches work by creating a `tasks` row plus its first `task_runs` row
+immediately, then pushing the run ID onto the Redis-backed controller queue.
+Callers receive stable task links as soon as launch validation and persistence
+succeed. Execution has four major stages:
 
-1. Cloud-job/task creation
+1. Task/run creation
 2. Controller Redis dequeue + machine dispatch
 3. Worker setup + harness execution
 4. Completion, notifications, and optional snapshot/resume
 
+The responsibility split is strict:
+
+- **`tasks`** is the durable unit of work: initiator stamp, workflow/surface/
+  trigger/visibility classification, terminal `state`, commit-author block,
+  channel bindings, initial prompt, `harnessInstructions`, and other
+  conversation cargo. See [Database Architecture](./database.md).
+- **`task_runs`** is one sandbox execution attempt: status/taskPhase, payload
+  (`payloadKind` dispatch key), per-attempt prompt, machine/provider routing,
+  snapshot/sleep state, milestone timestamps, and `actingUserId` (the only
+  user column on runs).
+- A resume is simply a new `task_runs` row with `kind: 'resume'` and a
+  `sourceRunId` pointing at the parent run. Nothing is copied between runs and
+  there are no chain walkers; task-level context is read from the `tasks` row.
+
 Core components:
 
-| Component         | Primary paths                                                                               | Responsibility                                                                     |
-| ----------------- | ------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------- |
-| Web/API producers | `apps/web/src/trpc/commands/cloud-jobs/index.ts`, `apps/api/src/handlers/*`                 | Validate launch requests and call the shared cloud-job enqueue helper              |
-| Queue helper      | `packages/cloud-agents/src/server/cloud-job-queue.ts`                                       | Create `cloud_jobs`/`tasks`, run pre-enqueue hooks, and push Redis queue entries   |
-| Controller        | `apps/controller/src/*`                                                                     | Dequeue cloud jobs from Redis, recover orphaned jobs, and launch provider machines |
-| Worker runtime    | `apps/worker/scripts/worker.ts`, `apps/worker/src/commands/*`, `apps/worker/src/run-task/*` | Setup repos/services, run harness, persist progress                                |
-| SDK server        | `packages/sdk/src/server/routers/cloud-jobs.ts`, `packages/sdk/src/server/lib/cloud-jobs/*` | Worker-facing RPC for dequeue/update/done/messages/snapshot                        |
-| Snapshot worker   | `apps/bullmq/src/jobs/snapshot.ts`                                                          | Create snapshots and finalize snapshot metadata                                    |
-| Data model        | `packages/db/src/schema.ts`                                                                 | Source of truth for cloud job state                                                |
+| Component         | Primary paths                                                                               | Responsibility                                                                         |
+| ----------------- | ------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------- |
+| Web/API producers | `apps/web/src/trpc/commands/cloud-jobs/index.ts`, `apps/api/src/handlers/*`                 | Validate launch requests and call the shared enqueue helper with an explicit initiator |
+| Queue helper      | `packages/cloud-agents/src/server/cloud-job-queue.ts`                                       | Create `tasks`/`task_runs` (+ enqueue-time PR linkage), run hooks, push Redis entries  |
+| Controller        | `apps/controller/src/*`                                                                     | Dequeue runs from Redis, recover orphaned runs, and launch provider machines           |
+| Worker runtime    | `apps/worker/scripts/worker.ts`, `apps/worker/src/commands/*`, `apps/worker/src/run-task/*` | Setup repos/services, run harness, persist progress                                    |
+| SDK server        | `packages/sdk/src/server/routers/cloud-jobs.ts`, `packages/sdk/src/server/lib/cloud-jobs/*` | Worker-facing RPC for dequeue/update/done/messages/snapshot                            |
+| Snapshot worker   | `apps/bullmq/src/jobs/snapshot.ts`                                                          | Create snapshots and finalize snapshot metadata                                        |
+| Data model        | `packages/db/src/schema.ts`                                                                 | Source of truth for task and run state                                                 |
 
 ## End-to-End Flow
 
 ```text
 Producer (web/api/webhook)
-  -> enqueueCloudTask()
-  -> create cloud_jobs/tasks rows
+  -> enqueueCloudTask({ task, initiator, workflow, surface, trigger, ... })
+  -> fresh: create tasks row (+ task_pull_requests for PR workflows)
+     plus first task_runs row; resume: new task_runs row on the same task
   -> push { id, scope } to Redis queue
 
 Controller loop
   -> dequeueCloudTask()
-  -> load cloud_jobs row
-  -> mark cloud_jobs.status=dequeued
-  -> create job token
+  -> load task_runs row
+  -> mark run status=dequeued
+  -> create job token from run.actingUserId (deployment principal when null)
   -> spawn or resume provider machine
 
 Worker process
   -> sdk.cloudJobs.dequeue()/resume() => status=processing + startedAt
-  -> fresh dequeue generates prompt + harnessInstructions
-  -> resume reuses persisted harnessInstructions and prior session
+     (response carries the run plus a DequeuedTaskContext from the tasks row)
+  -> fresh dequeue generates the prompt (persisted on the run) and
+     harnessInstructions (persisted on the task)
+  -> resume reuses tasks.harnessInstructions and the prior session
   -> setup workspace/services
   -> status: preparing -> spawning -> connecting -> running
   -> persist messages/logs/taskPhase
@@ -72,57 +91,92 @@ Worker process
 
 finishCloudJob()
   -> release lock
-  -> final status + timestamps
+  -> final run status + timestamps
+  -> terminal tasks.state write (the only writer; idle keeps 'active')
   -> notifications / cleanup
   -> optional snapshot / resume chain
 ```
 
-## Cloud Job Creation and Enqueueing
+## Task/Run Creation and Enqueueing
 
 Runtime producers call `enqueueCloudTask()` in
-`packages/cloud-agents/src/server/cloud-job-queue.ts`. The helper validates the
-launch request, creates or reuses the linked `tasks` row, persists the
-`cloud_jobs` execution attempt, optionally runs a producer-supplied
-`beforeEnqueue` hook, and pushes the job onto the Redis controller queue.
+`packages/cloud-agents/src/server/cloud-job-queue.ts`. Fresh launches create
+the `tasks` row (initiator stamp, classification, commit-author block, channel
+bindings, optional PR linkage) plus the first `task_runs` row in one
+transaction; resumes attach a new run to the source run's existing task. The
+helper optionally runs a producer-supplied `beforeEnqueue` hook, then pushes
+the run onto the Redis controller queue.
 
 Web task launches, `POST /api/mcp/tasks`, SDK `cloudJobs.enqueue`, integration
-webhooks, automation work items, and snapshot-resume handoffs all receive direct
-task links from the persisted `cloud_jobs` row. Web and API surfaces return
+webhooks, automation work items, and snapshot-resume handoffs all receive
+direct task links from the persisted rows. Web and API surfaces return
 `{ success: true, cloudJobId, taskId }`, while SDK `cloudJobs.enqueue` maps the
-result to `{ id, taskId }`. The web tRPC `queue` router, `/queue` dashboard
-routes, `queue_items` table, Chore Queue feature flag, and controller
-claim-time queue pipeline have been removed.
+result to `{ id, taskId }`.
 
-`cloud_jobs` is the execution history and worker bootstrap state for all new
-work. Producers that need to link external state after the task ID exists, such
-as automation work-item execution launches, should use `beforeEnqueue` so a
-failed linkage cancels the newly created cloud job before it reaches the
-controller queue.
+Producers that need to link external state after the task ID exists, such as
+automation work-item execution launches, should use `beforeEnqueue` so a failed
+linkage cancels the newly created run before it reaches the controller queue.
 
-## Cloud Job Creation
+### Enqueue Contract
 
-Primary create path: `enqueueCloudTask()` in `packages/cloud-agents/src/server/cloud-job-queue.ts`.
+`EnqueueCloudTaskInput` is a union of two launch shapes:
 
-Key behavior:
+**Fresh launch** (`FreshCloudTaskLaunch`) — creates a task plus its first run:
 
-- Validates user, task, repository, and environment constraints before insert.
-- Auto-resolves `environmentId` for PR task types when missing.
-- Defaults new launches to `opencode-server` through the shared launch-default constant. New cloud job rows should not contain any other coding harness.
+- `task`: the `CloudTask` payload (any type except `SnapshotResume`)
+- `initiator` (required): the `TaskInitiator` union, stamped immutably onto
+  the task —
+  - `{ kind: 'user', userId }` for linked humans
+  - `{ kind: 'user', externalId, displayName?, matchedUserId? }` for senders
+    known only by an external identity (unlinked Slack/GitHub actors);
+    `matchedUserId` is set when the call site's own mapping lookup resolves a
+    Roomote user
+  - `{ kind: 'automation', key, actor? }` for automation launches; `actor`
+    carries webhook-sender/PR-author context for display and commit authorship
+- `workflow`, `surface`, `trigger` (required) and `visibility` (optional,
+  default `visible`): the query-load-bearing classification
+- `channels` (optional): Slack/Linear channel bindings, derived by the caller
+  from the surface context it already holds — enqueue never sniffs them out of
+  the payload
+- `prLinkage` (required for `pr_review` / `pr_conflict_resolve` workflows):
+  provider/repo/PR identifiers plus head/base SHAs and GitHub-native ids,
+  inserted as a `task_pull_requests` row inside the create transaction
+
+There is no attribution inference anymore: no payload sniffing, no
+`attributionOverride`, no `resumePromptUserId`, no display cascade. Every one
+of the ~47 call sites passes its real initiator. The commit-author block is
+evaluated unconditionally at fresh enqueue by `evaluateCommitAuthor()`
+(authorship rules keyed on workflow/surface/initiator, not task types).
+
+**Resume** (`ResumeCloudTaskLaunch`) — a `SnapshotResume` task plus an optional
+`actingUserId` (the resuming human; null for automation-driven resumes). A
+resume never creates a task, never re-attributes, and must not carry
+initiator/classification/channel/PR fields; it inserts a new `task_runs` row
+with `kind: 'resume'`, `sourceRunId`, and the resolved `sourceSnapshotId`.
+
+Other key behavior:
+
+- Validates deployment/user/environment constraints before insert (deleted
+  users cannot launch; disabled deployments reject enqueue).
+- Auto-resolves `environmentId` for PR payload kinds when missing.
+- Defaults new launches to `opencode-server` through the shared launch-default constant. New run rows should not contain any other coding harness.
 - Caller-provided model overrides reach the harness through the shared [`resolveEvalHarnessSelection`](../../packages/types/src/eval-harness-selection.ts) helper on two surfaces: the Slack `!eval` launcher and the programmatic launch API (`POST /api/mcp/tasks` -> [`launchTask`](../../apps/api/src/handlers/tasks/launchTask.ts)). Both translate a valid OpenCode catalog `model` into `payload.harnessModelOverrides['opencode-server']`; non-catalog model names, unknown harness values, and reasoning-effort overrides are rejected instead of being silently routed to another runtime.
 - The internal Slack `!eval` launcher (gated by `SlackEvalLauncher`) is the one launch surface that maps caller-provided harness/model overrides into the launch. The shared [`resolveEvalHarnessSelection`](../../packages/types/src/eval-harness-selection.ts) helper resolves `--harness` / `--model` into an optional `task.harness` pin and `payload.harnessModelOverrides`; both the Slack command parser (to return usage errors) and [`startSlackAppMentionTask`](../../packages/slack/src/start-slack-app-mention.ts) (to build the payload) call it. `--harness` may only select `opencode-server`. When omitted, a recognized OpenCode catalog model (`getOpenCodeRequestedModelCatalogEntry`) infers and pins `task.harness = 'opencode-server'` and sets `harnessModelOverrides['opencode-server']`. `resolveEffectiveHarnessModelState` resolves the persisted `tasks.model` from the OpenCode override so eval launches record their actual model rather than the default.
-- `SnapshotResume` jobs inherit the source job's persisted `payload.harnessModelOverrides` instead of re-evaluating deployment feature-flag state, so resumed harness runs keep the same runtime model as the original launch.
-- Persists an initial `requestedWorkKind` decision on every new `cloud_jobs` row. StandardTask launches honor explicit bootstrap overrides first, Slack/Linear/Web/API launches fall back to a dedicated prompt classifier when needed, and `SnapshotResume` jobs inherit the source job's persisted value.
-- Persists a task-attribution snapshot onto each new `cloud_jobs` row and any newly created `tasks` row. Enqueue stays conservative by default: automation and setup flows can stamp an explicit automatic override, user-facing StandardTask launches backfill as web-created work, and `SnapshotResume` only upgrades to human attribution when the initiating surface carries a concrete Roomote user identity. For resumed follow-ups, attribution prefers `payload.resumePromptUserId` when present so the persisted creator follows the current resumer even if the job owner stays tied to the source task for runtime continuity; Slack and Linear resumes still preserve those source kinds when their routing metadata is present.
-- Creates or reuses `tasks` records (`taskId`) and links the execution attempt to org, user, and task. Newly created task rows persist the effective OpenCode runtime model from any validated override so task history and admin surfaces match the harness configuration that actually runs.
-- Supports an internal `beforeEnqueue` hook for producers that must persist external launch linkage after the cloud job row exists but before the job reaches the controller queue. If that hook throws, or if the Redis queue push fails afterward, enqueue cancels the new cloud job and reports the failure without leaving a recoverable pending job behind.
-- Resolves a launch class (`human`, `automation`, or `maintenance`) only to choose the persisted `keepaliveMs` runtime policy for new cloud jobs. Launch classes are not a chore queue concept, are not persisted as their own cloud-job field, and are not exposed to authorship rules; authorship should match durable task attribution fields such as `sourceKinds`, `taskTypes`, repository, and `humanCreated`.
-- Resolves the job's compute provider from `CloudTask.computeProvider`, falling back to `DEFAULT_COMPUTE_PROVIDER` when the caller omits it. The local-first default is `docker`, which makes local and single-host self-host controllers run immediate tasks in job-scoped Docker worker containers instead of requiring hosted provider credentials. The web Home surface exposes an explicit compute-provider picker for all users; omitted-provider launches from Slack, Linear, GitHub, CLI resume paths, and other enqueue-only producers inherit the env default. `SnapshotResume` jobs inherit the source job's provider when one exists.
+- Resume runs inherit the source run's persisted `payload.harnessModelOverrides` instead of re-evaluating deployment feature-flag state, so resumed harness runs keep the same runtime model as the original launch.
+- Persists an initial `requestedWorkKind` decision on every new `tasks` row (StandardTask launches honor explicit bootstrap overrides first; other launches fall back to a dedicated prompt classifier). Resumes read the value from the existing task.
+- Supports an internal `beforeEnqueue` hook for producers that must persist external launch linkage after the run row exists but before it reaches the controller queue. If that hook throws, or if the Redis queue push fails afterward, enqueue cancels the new run and reports the failure without leaving a recoverable pending run behind.
+- Resolves a launch class (`human`, `automation`, or `maintenance`) only to choose the persisted `keepaliveMs` runtime policy. Automation-initiated launches derive the `automation` class from the initiator automatically; an explicit `launchClass` option can still override it. Launch classes are not persisted as their own field and are not exposed to authorship rules.
+- Resolves the run's compute provider from `CloudTask.computeProvider`, falling back to `DEFAULT_COMPUTE_PROVIDER` when the caller omits it. The local-first default is `docker`, which makes local and single-host self-host controllers run immediate tasks in job-scoped Docker worker containers instead of requiring hosted provider credentials. The web Home surface exposes an explicit compute-provider picker for all users; omitted-provider launches from Slack, Linear, GitHub, CLI resume paths, and other enqueue-only producers inherit the env default. Resume runs always inherit the source run's provider when one exists.
 - Enqueues Redis queue entry `{ id, scope }` when called with default `enqueue: true`. Explicit direct-run jobs that are claimed by an already-running worker may pass `enqueue: false`.
+- `skipInitialActingUser` leaves `actingUserId` unset until a real follow-up sender can be resolved (Slack channel auto-start path).
 
 Queue scope and dedup:
 
-- PR review jobs use deterministic scope: `<repo>:<prNumber>`.
-- All other jobs use random UUID scope (effectively no dedup).
+- The queue scope is explicit at enqueue via `resolveQueueScope()`: `pr_review`
+  workflow launches with a PR-scoped payload kind use the deterministic scope
+  `<repository>:<prNumber>` from `prLinkage`; everything else gets a random
+  UUID scope (effectively no dedup). There is no payload-kind-based scope
+  inference helper anymore.
 - Enqueue evicts older queued entries with the same scope and marks them canceled.
 
 ## Redis Queue and Lock Semantics for Direct Paths
@@ -144,7 +198,7 @@ Entry point: `apps/controller/src/index.ts`.
 Controller selection:
 
 - `RoomoteController` is the runtime entry point.
-- One controller process handles mixed backends by branching on `cloud_jobs.vendor`.
+- One controller process handles mixed backends by branching on `task_runs.vendor`.
 - The default provider now comes from `DEFAULT_COMPUTE_PROVIDER`. Explicit user-facing provider overrides are always allowed on the web; omitted-provider jobs inherit the configured default.
 
 Main loop: `BaseController.start()` in `apps/controller/src/BaseController.ts`.
@@ -153,15 +207,15 @@ Per-iteration behavior:
 
 1. Write heartbeat to Redis (`controller:heartbeat`, TTL 600s).
 2. Dequeue the next Redis cloud-job entry.
-3. Load the `cloud_jobs` row and start spawn in background (bounded by concurrency).
+3. Load the `task_runs` row and start spawn in background (bounded by concurrency).
 4. If no Redis job is available, periodically scan for orphaned jobs.
 
 Spawn behavior:
 
-- `dequeueCloudJob()` sets status to `dequeued`, stamps `dequeuedAt`, and creates a job token.
+- `dequeueCloudJob()` sets status to `dequeued`, stamps `dequeuedAt`, and creates a job token. The token's user claim comes from `task_runs.actingUserId`; when that is null the token is minted for the deployment service principal (see [Authentication & Authorization](./auth.md)).
 - When the worker later claims the job through `sdk.cloudJobs.dequeue()` or `sdk.cloudJobs.resume()`, it stamps `startedAt` before prompt generation and other pre-run network work so health/recovery checks stop treating that launch as "not started" once the worker has actually taken ownership.
-- That same bootstrap claim now persists the actual worker artifact metadata reported by the running worker (`workerReleaseTag`, `workerVersion`, `workerCommit`) onto the `cloud_jobs` row. This is the source of truth for which shipped worker runtime actually executed the job.
-- `spawnWorker()` now always hands off to the provider-specific fresh or snapshot-backed launch path after dequeue. `resolveComputeProviderTarget()` maps a missing or unsupported `cloud_jobs.vendor` to the deployment default (ultimately `docker`).
+- That same bootstrap claim now persists the actual worker artifact metadata reported by the running worker (`workerReleaseTag`, `workerVersion`, `workerCommit`) onto the `task_runs` row. This is the source of truth for which shipped worker runtime actually executed the job.
+- `spawnWorker()` now always hands off to the provider-specific fresh or snapshot-backed launch path after dequeue. `resolveComputeProviderTarget()` maps a missing or unsupported `task_runs.vendor` to the deployment default (ultimately `docker`).
 - Fresh launches use bounded phase timeouts inside the provider spawn helpers instead of waiting indefinitely in one spawn attempt: worker bootstrap (archive upload plus `install-worker.sh`) is currently capped at 120 seconds, and the detached `worker resume` launch at 60 seconds, with best-effort status and command-plane diagnostics logged before teardown if the launch request times out.
 - While a spawn promise is still pending, the controller emits a periodic warning every 30 seconds with the elapsed spawn time so a stuck launch does not go silent in logs.
 - Machine launches that need environment OIDC material now emit dedicated `machine_oidc` cloud-job events around the token-file upload and install-command steps, including bounded pre-step instance-status snapshots, so resume-path flake can be distinguished between provider readiness, file-write, and command-exec failures without waiting for worker startup.
@@ -219,12 +273,17 @@ Execution wrapper: `executeJob()` in `apps/worker/src/commands/utils/execute-job
 
 Runtime flow:
 
-1. Fetch job context via SDK (`dequeue` or `resume`).
-   - Fresh dequeue claims the job, calls `generatePrompt()`, and persists the
-     returned `prompt` plus `harnessInstructions` onto `cloud_jobs`.
-   - Resume bootstrap does not call `generatePrompt()` again. It reuses the
-     source job's persisted `harnessInstructions`, resumes the saved harness
-     session, and starts with an empty startup prompt.
+1. Fetch job context via SDK (`dequeue` or `resume`). Both responses carry the
+   run row plus a `DequeuedTaskContext` — the task-level launch context
+   (task id, title, initial prompt, `harnessInstructions`,
+   `requestedWorkKind`, and Slack/Linear channel bindings) joined explicitly
+   from the `tasks` row instead of being duplicated onto each run.
+   - Fresh dequeue claims the run, calls `generatePrompt()`, persists the
+     returned per-attempt `prompt` onto the run and the generated
+     `harnessInstructions` onto the task.
+   - Resume bootstrap does not call `generatePrompt()` again. It reuses
+     `tasks.harnessInstructions`, resumes the saved harness session, and
+     starts with an empty startup prompt. Nothing is copied between run rows.
 2. Inject env vars and preview URLs.
 
 - Source-control auth is injected in two layers: the worker writes the current provider token state under `~/.roomote/`, and the shared `BASH_ENV` file re-sources provider token env scripts for each bash command. Long-lived harness processes no longer keep fixed source-control token env vars such as `GH_TOKEN`, `GITLAB_TOKEN`, `GITEA_TOKEN`, or `ADO_TOKEN` in their inherited env. GitHub still uses a file-backed `GH_TOKEN` plus the `gh` wrapper, and GitLab still uses short-lived repo-scoped credentials in the file-backed credential helper. Gitea and Azure DevOps now keep the deployment PAT only in worker memory and route git HTTPS traffic through a worker-local proxy with exact `insteadOf` rewrites for the allowed provider base URL, so the selected repositories still clone and push without writing a task-readable copy of `GITEA_TOKEN` or `ADO_TOKEN`. The worker registers the file-backed git credential helper for GitHub and GitLab, with `gh auth setup-git` skipped when no GitHub token is available. GitHub tasks resolve GitHub App credentials through the deployment env resolver, so process env values take precedence and encrypted `environment_variables` rows created by setup are the runtime fallback. They then resolve GitHub App installation tokens from the selected repository set, falling back to the newest deployment installation only when the task is not repository-scoped; they fail token creation when the selected repositories span multiple GitHub App installations. GitLab tasks use a deployment-provided `GITLAB_TOKEN` from encrypted environment variables or process env to mint selected repository credentials for `gitlab.com`; GitLab `all_repositories` workspaces still require explicit repository scope because project-scoped tokens are minted per repository. Gitea tasks use `GITEA_BASE_URL` plus `GITEA_TOKEN` from encrypted environment variables or process env, clone from synced repository `cloneUrl` values, and resolve `all_repositories` workspaces from synced Gitea repository rows filtered by `sourceControlProvider = 'gitea'`. Azure DevOps tasks use `ADO_ORGANIZATION` plus `ADO_TOKEN` from encrypted environment variables or process env, clone from synced repository `cloneUrl` values, and resolve `all_repositories` workspaces from synced Azure DevOps rows filtered by `sourceControlProvider = 'ado'`.
@@ -281,7 +340,7 @@ errors and Roomote runtime envelope persistence failures are reported with per-j
 per-envelope context. The cancel-recovery path also emits a warning-level
 Sentry signal when a stuck turn has to be restarted.
 
-While the sandbox is alive, the worker also persists `cloud_jobs.sleepAt`, the
+While the sandbox is alive, the worker also persists `task_runs.sleepAt`, the
 authoritative auto-sleep deadline used by both the task UI countdown and
 BullMQ's sleep scheduler. While a turn is actively running or waiting on
 `request_user_input`, the worker refreshes that deadline every 45 seconds and
@@ -452,7 +511,7 @@ Persistence model:
   a terminal Slack-visible closeout is missing, it sends the hook reminder back
   as a hidden queued prompt and withholds `TaskCompleted` until the closeout is
   satisfied or the guard reaches its retry cap.
-- Worker startup log UIs rely on provider-side command output streaming when the compute provider supports it. The worker no longer mirrors harness logs into `cloud_jobs.log`.
+- Worker startup log UIs rely on provider-side command output streaming when the compute provider supports it. The worker no longer mirrors harness logs into `task_runs.log`.
 
 ### Harness Transport Boundary
 
@@ -480,7 +539,7 @@ This matches the `task_messages` schema split: `contentBlocks` is the canonical 
 
 There are two snapshot modes in current code:
 
-1. Environment snapshot jobs (`CloudTaskType.SnapshotEnvironment`) created from environment settings UI, keyed by provider.
+1. Environment snapshot jobs (`TaskPayloadKind.SnapshotEnvironment`, workflow `env_snapshot`) created from environment settings UI, keyed by provider.
 2. Runtime/manual snapshots created from running cloud jobs (including automatic sleep handling at `sleepAt`, which snapshots resumable jobs and shuts down non-resumable ones).
 
 Enqueue + processing:
@@ -490,19 +549,19 @@ Enqueue + processing:
 - Runtime snapshot requests use their `snapshotIntentId` as the BullMQ custom job id. Active/pending jobs for the same intent are treated as duplicates, while retained terminal jobs are removed before re-adding so a later DB-driven recovery attempt is not blocked by BullMQ's duplicate custom-id semantics.
 - Runtime task workers no longer initiate automatic sleep actions themselves. Instead, they persist the due `sleepAt` deadline and wait for BullMQ to claim the job's sleep transition once that deadline elapses.
 - That worker-side wait now applies to every provider in `sleepCheckManagedComputeProviders` (`modal`, `e2b`, and `daytona` today). Managed runtimes are expected to stay alive long enough for BullMQ to claim `sleepRequestedAt`/`snapshotRequestedAt`, after which the provider snapshot or destroy path tears the runtime down.
-- BullMQ's scheduled `sleepCheckJob()` processes due runtime jobs for sleep-check-managed providers once `cloud_jobs.sleepAt` is reached. Resumable task types on snapshot-capable providers (`modal`, `e2b`) are snapshotted; non-resumable task types — and every job on non-snapshot providers such as `daytona` — are shut down directly. The candidate queries are backed by partial indexes whose vendor predicates match that managed list (migration `0021_bumpy_the_santerians.sql` dropped the retired `sandbox` vendor from them).
+- BullMQ's scheduled `sleepCheckJob()` processes due runtime jobs for sleep-check-managed providers once `task_runs.sleepAt` is reached. Resumable payload kinds on snapshot-capable providers (`modal`, `e2b`) are snapshotted; non-resumable payload kinds — and every job on non-snapshot providers such as `daytona` — are shut down directly. The candidate queries are backed by partial indexes on `task_runs` whose vendor predicates match that managed list.
 - `sleepCheckJob()` also runs a provider-timeout backstop over active provider-backed jobs whose persisted `sleepAt` is still in the future (or missing): if the provider reports `timeoutRemainingMs <= SNAPSHOT_CHECK_THRESHOLD_MS`, BullMQ treats that job as immediately eligible for snapshot/shutdown so a stale `sleepAt` value cannot silently carry the task past the provider hard limit.
 - Candidate precedence is now resolved per machine from the live provider status: `due_sleep` wins first, then the actual `hard_limit` backstop, and only then `stale_worker` recovery. A stale worker candidate no longer preempts a resumable live instance that is already inside the provider reap window.
-- `sleepCheckJob()` writes durable per-job decision events into `cloud_job_events` for candidate dedupe, instance-status checks, deadline extensions, snapshot handoff claims, and failure paths so operators can reconstruct why a given job was or was not snapshotted. Snapshot handoffs include a `snapshotIntentId`, trigger path, and BullMQ queue job id so later `snapshot_request` and `snapshot_queue` events can be correlated back to the sleep-check owner.
+- `sleepCheckJob()` writes durable per-job decision events into `task_run_events` for candidate dedupe, instance-status checks, deadline extensions, snapshot handoff claims, and failure paths so operators can reconstruct why a given job was or was not snapshotted. Snapshot handoffs include a `snapshotIntentId`, trigger path, and BullMQ queue job id so later `snapshot_request` and `snapshot_queue` events can be correlated back to the sleep-check owner.
 - Once a worker has already transitioned a resumable task to `idle` and BullMQ has claimed the external sleep action, late worker-side finalization errors are treated as non-fatal noise rather than downgrading the task into a failed terminal state. In that phase, BullMQ snapshot processing is the source of truth for the eventual completion outcome.
 - Stale-worker recovery now scans both `running` and `idle` jobs on snapshot-capable providers so resumable sessions that lose their worker heartbeat while waiting for follow-up can still be snapshotted or finalized with an explicit audit trail instead of going silent until manual cancellation.
 - While the worker is still alive, it also sends periodic `recordComputeProviderUsage(... lifecycleAction='running')` updates on the worker-heartbeat cadence. Those writes provide a rolling estimate of the active task-owned compute segment before any BullMQ teardown action happens.
 - Fresh launch paths snapshot the effective provider compute resources onto
-  `cloud_jobs` so later teardown accounting does not have to guess which
+  `task_runs` so later teardown accounting does not have to guess which
   provider resource configuration was actually used.
 - `complete_without_snapshot` is reserved for cases where snapshotting is already impossible for the selected idle job, such as the provider reporting that the instance is no longer `running`.
 - BullMQ worker (`apps/bullmq/src/jobs/snapshot.ts`) records the queue attempt, pre-snapshot provider status, post-failure provider status when available, and any request-state clearing before writing the terminal snapshot outcome. It is the final authority that writes:
-  - `cloud_jobs.snapshotId/snapshotCreatedAt`
+  - `task_runs.snapshotId/snapshotCreatedAt`
   - terminal `status='completed'` for snapshot job
   - `environment_snapshots` rows for `SnapshotEnvironment` through the
     DB-layer `attachEnvironmentSnapshot()` state transition
@@ -522,13 +581,13 @@ Enqueue + processing:
   earlier worker-side `running` estimate for the same cloud-job/machine segment
   instead of creating a second row, and they are the only writes that refresh
   `tasks.computeDurationMs`.
-- Snapshot enqueue and processing paths also emit durable `cloud_job_events` rows so there is an audit trail even when the BullMQ queue never reaches a terminal failed job.
-- Cloud-job-linked mutating compute-provider calls now emit their own `cloud_job_events` rows before and after the provider call, so create/resume, file-write, command, snapshot, and destroy operations can be reconstructed even when the higher-level workflow fails mid-flight.
-- Snapshot failures now persist structured provider error details in those `cloud_job_events` rows, including HTTP status/body details from the provider SDK plus the immediate post-failure instance-status lookup when Roomote can still read it.
+- Snapshot enqueue and processing paths also emit durable `task_run_events` rows so there is an audit trail even when the BullMQ queue never reaches a terminal failed job.
+- Cloud-job-linked mutating compute-provider calls now emit their own `task_run_events` rows before and after the provider call, so create/resume, file-write, command, snapshot, and destroy operations can be reconstructed even when the higher-level workflow fails mid-flight.
+- Snapshot failures now persist structured provider error details in those `task_run_events` rows, including HTTP status/body details from the provider SDK plus the immediate post-failure instance-status lookup when Roomote can still read it.
 - The snapshot queue's reconciliation recovery path is gated on the optional `findSnapshotBySourceInstance` client capability. For providers that implement it (none currently do), an in-progress-snapshot signal or a retried queue attempt triggers a bounded lookup for a completed snapshot from the same source instance, recording `snapshot_reconcile_started`, `snapshot_reconcile_found`, or `snapshot_reconcile_not_found` decision events before either completing the cloud job with the recovered snapshot id or falling back to the normal explicit failure path. Providers without the capability skip reconciliation entirely.
 - Those `compute_provider` events now flow through one shared mutation contract: every event carries a consistent lifecycle shape (`provider`, `operation`, optional `instanceId`, operator-facing `message`) plus normalized lifecycle details such as `launchMode`, `sourceSnapshotId`, `ports`, and `attempt` when they apply.
 - Provider-agnostic lifecycle milestones now emit durable `job_lifecycle` events at controller dequeue, worker bootstrap, and terminal status transitions so an executed job cannot finish with an empty audit trail even when it never enters snapshot-specific branches.
-- Snapshot resume orchestration now emits durable `cloud_job_events` rows for resume requests, child-job creation, and resume-bootstrap failures so operators can reconstruct why a task did or did not wake successfully.
+- Snapshot resume orchestration now emits durable `task_run_events` rows for resume requests, child-job creation, and resume-bootstrap failures so operators can reconstruct why a task did or did not wake successfully.
 
 ### Sandbox OIDC Refresh Loop
 
@@ -550,13 +609,16 @@ Sandbox OIDC rotation is owned outside the worker runtime.
 
 Resume:
 
-- `SnapshotResume` jobs are created with `sourceSnapshotId` and `sourceCloudJobId`.
-- `SnapshotResume` always inherits the source job's compute provider; snapshots are provider-bound and are never resumed across providers.
-- Workflow-specific `harnessInstructions` are persisted on the source `cloud_jobs` row at initial dequeue and copied forward onto `SnapshotResume` jobs so resumed workers can recreate harness system prompts without rerunning prompt builders or repeating builder side effects.
+- A resume is a new `task_runs` row on the same task: `kind: 'resume'`,
+  `payloadKind: 'snapshot_resume'`, `sourceRunId` pointing at the parent run,
+  and `sourceSnapshotId`. The resumer (when human) becomes the new run's
+  `actingUserId`; resumes never re-attribute the task's initiator.
+- A resume always inherits the source run's compute provider; snapshots are provider-bound and are never resumed across providers.
+- Workflow-specific `harnessInstructions` are persisted on the `tasks` row at initial dequeue, so resumed workers read them from the task and can recreate harness system prompts without rerunning prompt builders, repeating builder side effects, or copying fields between run rows.
 - Resume bootstrap sets the startup `prompt` to an empty string. Any deferred
   follow-up for the resumed task is queued after reconnect instead of being
   treated as a fresh-task startup prompt.
-- `dequeueResumeCloudJob()` resolves runtime task session from source job (`result.runtimeTaskId` or `tasks.harnessSessionId`).
+- `dequeueResumeCloudJob()` resolves the runtime task session from the source run (`result.runtimeTaskId` or `tasks.harnessSessionId`) and returns the same `DequeuedTaskContext` shape as fresh dequeue.
 - Worker `resume` command restores workspace context and resumes harness session
   into `waiting_for_prompt`, so the restored cloud job immediately uses the
   normal keepalive window instead of inheriting the provider hard timeout until
@@ -574,8 +636,9 @@ Finalization path: `finishCloudJob()` in `packages/sdk/src/server/lib/cloud-jobs
 Responsibilities:
 
 - Releases queue lock via `releaseCloudTask()`.
-- Writes final status and timestamps.
-- Clears `taskPhase` once a job reaches a terminal completed/failed/canceled state.
+- Writes final run status and timestamps.
+- Clears `taskPhase` once a run reaches a terminal completed/failed/canceled state.
+- Is the **only writer of `tasks.state`**: terminal `completed`/`failed`/`canceled` run statuses set the matching task state; `idle` leaves the task `active` because the conversation is still live.
 - Does **not** own compute-provider usage recording. Compute usage is recorded
   earlier in BullMQ teardown paths when the instance actually stops, which can
   happen before or after `finishCloudJob()` depending on snapshot and sleep
@@ -596,21 +659,29 @@ Terminal statuses accepted by SDK `done`:
 
 ## Data Model (Important Tables)
 
-`cloud_jobs` (`packages/db/src/schema.ts`):
+See [Database Architecture](./database.md) for the full column inventory; the runtime-relevant highlights:
 
-- Identity: `id`, `type`, `userId`, `taskId`, `harness`
-- Initial intent: `requestedWorkKind`, `requestedWorkKindSource`, `requestedWorkKindConfidence`
+`tasks` (`packages/db/src/schema.ts`):
+
+- The durable unit of work: initiator stamp (`initiatorKind`/`initiatorUserId`/`initiatorAutomation`/`actorExternalId`/`actorDisplayName`), classification (`workflow`, `surface`, `trigger`, `visibility`), terminal `state`, commit-author block, channel bindings, `title`, `prompt`, `draftPrompt`, `requestedWorkKind*`, `harnessInstructions`, and soft-delete `deletedAt`
+
+`task_runs` (`packages/db/src/schema.ts`):
+
+- Identity: `id`, `taskId` (real FK → `tasks`), `kind` (`fresh` \| `resume`), `sourceRunId`, `payloadKind`, `actingUserId`, `harness`
 - Lifecycle: `status`, `taskPhase`, `createdAt`, `dequeuedAt`, `provisionStartedAt`, `provisionReadyAt`, `startedAt`, `setupCompletedAt`, `harnessStartedAt`, `runtimeTaskStartedAt`, `firstAssistantOutputAt`, `completedAt`, `canceledAt`
-- Launch mode (captured once per job): `launchMode` (`fresh` \| `environment_snapshot` \| `task_snapshot`); provisioning latency is only comparable within the same launch mode
+- Launch mode (captured once per run): `launchMode` (`fresh` \| `environment_snapshot` \| `task_snapshot`); provisioning latency is only comparable within the same launch mode
 - Runtime routing: `vendor`, `machineId`, `sandboxCmdId`, `machineDomains`, `proxyPorts`, `sandboxServerUrl`
 - Worker runtime identity: `workerReleaseTag`, `workerVersion`, `workerCommit` capture the actual worker artifact metadata reported by the running worker during bootstrap
-- Snapshot/sleep fields: `snapshotId`, `snapshotRequestedAt`, `snapshotCreatedAt`, `snapshotFailedAt`, `sleepAt`, `sleepRequestedAt`, `sourceSnapshotId`, `sourceCloudJobId`
+- Snapshot/sleep fields: `snapshotId`, `snapshotRequestedAt`, `snapshotCreatedAt`, `snapshotFailedAt`, `sleepAt`, `sleepRequestedAt`, `sourceSnapshotId`
 - Worker liveness: `workerHeartbeatAt` records the last successful worker-process heartbeat for stale-worker recovery when the sandbox is still alive but the worker has stopped making progress
-- Integrations: Slack/Linear/GitHub metadata fields
 
-`cloud_job_events`:
+`task_pull_requests`:
 
-- Append-only audit history for cloud job lifecycle decisions and provider operations
+- The only PR home. PR-triggered launches insert their row at enqueue; execution-time extraction appends PRs the agent created. Review-flow state (`prSha`, `prBaseRef`, `prBaseSha`, GitHub reaction/check-run/review-comment ids) lives here
+
+`task_run_events` (renamed from `cloud_job_events`; `runId` and `taskId` are real FKs):
+
+- Append-only audit history for run lifecycle decisions and provider operations
 - Stores `source`, `eventType`, operator-facing `message`, and structured `details`
 - Current sources include:
   - `job_lifecycle`
@@ -654,9 +725,9 @@ Recommended next additions:
 
 ## Timing Diagnostics
 
-Deployment latency analytics rely on a fixed set of ordered milestone timestamps on `cloud_jobs`, segmented by `launchMode`.
+Deployment latency analytics rely on a fixed set of ordered milestone timestamps on `task_runs`, segmented by `launchMode`. The milestone set and semantics are unchanged by the tasks/runs split.
 
-Milestone timeline (each stamped at most once per job via `stampCloudJobMilestone` in `packages/sdk/src/server/lib/cloud-jobs/stamp-milestone.ts`, which uses `WHERE <field> IS NULL` to preserve the first transition):
+Milestone timeline (each stamped at most once per run via `stampCloudJobMilestone` in `packages/sdk/src/server/lib/cloud-jobs/stamp-milestone.ts`, which uses `WHERE <field> IS NULL` to preserve the first transition):
 
 | Milestone                | Written by                                                                         | Meaning                                                           |
 | ------------------------ | ---------------------------------------------------------------------------------- | ----------------------------------------------------------------- |
@@ -671,7 +742,7 @@ Milestone timeline (each stamped at most once per job via `stampCloudJobMileston
 | `firstAssistantOutputAt` | `apps/worker/src/run-task/subscribe-harness-callbacks.ts`                          | First live Roomote runtime event with `role='assistant'` observed |
 | `completedAt`            | finalize path                                                                      | Terminal status written                                           |
 
-Fine-grained setup-step durations flow through the existing `cloud_job_events` table in two layers:
+Fine-grained setup-step durations flow through the existing `task_run_events` table in two layers:
 
 - `source='job_lifecycle'` now captures pre-worker-setup bootstrap phases such as `createSourceControlToken`, `generatePrompt`, `resolveRuntimeEnvVars`, and `resolveLaunchFlagsAndRouting`.
 - `source='worker_runtime'` captures outer worker phases such as `resolveWorkspaceConfig` and `setupWorkspace`, plus the nested `timedStep()` setup labels.
@@ -680,13 +751,13 @@ All of these phase events use `eventType='phase'`, `message=<label>`, and `detai
 
 `firstAssistantOutputAt` is intentionally not a token-usage metric. It answers "has the harness started producing assistant output yet?" using the live Roomote runtime stream rather than waiting for persisted envelopes.
 
-Queries that need proof of end-to-end harness activity should filter `WHERE firstAssistantOutputAt IS NOT NULL` and segment by `launchMode` because fresh launches and snapshot resumes have very different provisioning profiles. If the question is specifically "did the harness accept the task yet?", `runtimeTaskStartedAt` is the better cut. The `cloud_jobs_first_assistant_output_at_idx` index backs common time-bounded aggregations.
+Queries that need proof of end-to-end harness activity should filter `WHERE firstAssistantOutputAt IS NOT NULL` and segment by `launchMode` because fresh launches and snapshot resumes have very different provisioning profiles. If the question is specifically "did the harness accept the task yet?", `runtimeTaskStartedAt` is the better cut. The `task_runs_first_assistant_output_at_idx` index backs common time-bounded aggregations.
 
 ## Auth and Authorization
 
 Token types (`packages/auth/src/*.ts`):
 
-- Job token (`r.t='cj'`): scoped to one cloud job (`sub=cloudJobId`) + user claim.
+- Job token (`r.t='cj'`): scoped to one run (`sub=cloudJobId`). The user claim (`r.u`) is optional and sourced from `task_runs.actingUserId`; a token without it authenticates as the deployment service principal. See [Authentication & Authorization](./auth.md).
 - Auth token (`r.t='auth'`): user session token for non-job actions.
 
 Middleware (`apps/api/src/middleware/tokenAuthMiddleware.ts`):
@@ -697,26 +768,26 @@ Middleware (`apps/api/src/middleware/tokenAuthMiddleware.ts`):
 
 ## Key Files Reference
 
-| File                                                                 | Why it matters                                                                      |
-| -------------------------------------------------------------------- | ----------------------------------------------------------------------------------- |
-| `packages/cloud-agents/src/server/cloud-job-queue.ts`                | Job creation, queue/lock behavior, and compute-provider selection                   |
-| `apps/controller/src/BaseController.ts`                              | Main dequeue loop, heartbeat, spawn, error handling                                 |
-| `apps/controller/src/orphaned-cloud-jobs.ts`                         | Orphan detection and lock release behavior                                          |
-| `apps/controller/src/compute-providers/spawn-modal-worker.ts`        | Fresh Modal worker spawn path (Daytona/E2B/Docker siblings live alongside)          |
-| `apps/worker/scripts/worker.ts`                                      | Worker runtime commands and process entrypoint                                      |
-| `apps/worker/src/commands/utils/execute-job.ts`                      | Shared execution wrapper for run/resume                                             |
-| `apps/worker/src/run-task/run-task.ts`                               | Harness runtime, status updates, polling, and external sleep-action handoff         |
-| `apps/worker/src/run-task/create-harness.ts`                         | Harness selection and Roomote runtime event setup                                   |
-| `packages/sdk/src/server/routers/cloud-jobs.ts`                      | Worker/API RPC contract for cloud job operations                                    |
-| `packages/sdk/src/server/lib/cloud-jobs/dequeue-cloud-job.ts`        | Worker dequeue transaction + prompt/token prep                                      |
-| `packages/sdk/src/server/lib/cloud-jobs/dequeue-resume-cloud-job.ts` | Resume dequeue and source session resolution                                        |
-| `packages/sdk/src/server/lib/cloud-jobs/finish-cloud-job.ts`         | Finalization and side effects                                                       |
-| `packages/sdk/src/server/lib/cloud-jobs/enqueue-snapshot.ts`         | Snapshot BullMQ enqueue logic                                                       |
-| `apps/bullmq/src/jobs/snapshot.ts`                                   | Snapshot execution and final DB writes                                              |
-| `apps/web/src/trpc/commands/snapshots/index.ts`                      | UI-triggered snapshot and resume commands                                           |
-| `apps/web/src/trpc/commands/sandbox-session/index.ts`                | Session resolution across snapshot-resume chains                                    |
-| `packages/db/src/schema.ts`                                          | Authoritative schema for cloud_jobs/environments/sandbox_oidc_targets/task_messages |
-| `packages/types/src/cloud-jobs.ts`                                   | Task types, launch classes, status sets, and launch-mode helpers                    |
+| File                                                                 | Why it matters                                                                                                  |
+| -------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------- |
+| `packages/cloud-agents/src/server/cloud-job-queue.ts`                | Job creation, queue/lock behavior, and compute-provider selection                                               |
+| `apps/controller/src/BaseController.ts`                              | Main dequeue loop, heartbeat, spawn, error handling                                                             |
+| `apps/controller/src/orphaned-cloud-jobs.ts`                         | Orphan detection and lock release behavior                                                                      |
+| `apps/controller/src/compute-providers/spawn-modal-worker.ts`        | Fresh Modal worker spawn path (Daytona/E2B/Docker siblings live alongside)                                      |
+| `apps/worker/scripts/worker.ts`                                      | Worker runtime commands and process entrypoint                                                                  |
+| `apps/worker/src/commands/utils/execute-job.ts`                      | Shared execution wrapper for run/resume                                                                         |
+| `apps/worker/src/run-task/run-task.ts`                               | Harness runtime, status updates, polling, and external sleep-action handoff                                     |
+| `apps/worker/src/run-task/create-harness.ts`                         | Harness selection and Roomote runtime event setup                                                               |
+| `packages/sdk/src/server/routers/cloud-jobs.ts`                      | Worker/API RPC contract for cloud job operations                                                                |
+| `packages/sdk/src/server/lib/cloud-jobs/dequeue-cloud-job.ts`        | Worker dequeue transaction + prompt/token prep                                                                  |
+| `packages/sdk/src/server/lib/cloud-jobs/dequeue-resume-cloud-job.ts` | Resume dequeue and source session resolution                                                                    |
+| `packages/sdk/src/server/lib/cloud-jobs/finish-cloud-job.ts`         | Finalization and side effects                                                                                   |
+| `packages/sdk/src/server/lib/cloud-jobs/enqueue-snapshot.ts`         | Snapshot BullMQ enqueue logic                                                                                   |
+| `apps/bullmq/src/jobs/snapshot.ts`                                   | Snapshot execution and final DB writes                                                                          |
+| `apps/web/src/trpc/commands/snapshots/index.ts`                      | UI-triggered snapshot and resume commands                                                                       |
+| `apps/web/src/trpc/commands/sandbox-session/index.ts`                | Session resolution across snapshot-resume chains                                                                |
+| `packages/db/src/schema.ts`                                          | Authoritative schema for tasks/task_runs/environments/sandbox_oidc_targets/task_messages                        |
+| `packages/types/src/cloud-jobs.ts`                                   | TaskInitiator/TaskPayloadKind, workflow/surface/trigger vocab, launch classes, status sets, launch-mode helpers |
 
 ## Extension Guardrails
 
@@ -776,14 +847,17 @@ CI, or reporting paths. Treat them as required checks before opening a PR.
 
 ### Database Query Conventions
 
-- When writing a new `tasks` or `cloud_jobs` query with a time window, make the
+- When writing a new `tasks` or `task_runs` query with a time window, make the
   `WHERE` time-bound column and `ORDER BY` column match unless the divergence is
   intentional and documented in the query.
-- For user-facing task listings or analytics, apply `isVisibleTask(tasks.id)`
-  unless the query is explicitly an admin or internal-only view.
-- If you only have the latest cloud job type available, filter hidden/internal
-  task types with `isHiddenCloudTaskType(...)` before surfacing results to
-  users.
+- For user-facing task listings or analytics, apply `isVisibleTask()`
+  (`eq(tasks.visibility, 'visible')`) and `isNull(tasks.deletedAt)` unless the
+  query is explicitly an admin or internal-only view.
+- Never classify tasks by `task_runs.payloadKind` outside runtime dispatch —
+  filter on `tasks.workflow` / `surface` / `trigger` / `visibility` instead.
+  The latest-run join exists only for live runtime phase.
+- Filter creators/initiators on `tasks.initiatorUserId` /
+  `tasks.initiatorAutomation`, not on run rows.
 - Grep for `isVisibleTask` in existing task queries and mirror the nearby
   pattern before adding a new one-off filter.
 
@@ -810,6 +884,6 @@ Common debugging anchors:
 
 - Queue lock issues: `releaseCloudTask`, orphan checks, scope generation
 - "stuck in dequeued": controller logs + `/health/controller` + `dequeuedAt`/`startedAt`
-- Snapshot confusion: compare `snapshotRequestedAt`, `snapshotCreatedAt`, `snapshotFailedAt`, `workerHeartbeatAt`, `sleepAt`, and the ordered `cloud_job_events` trail before falling back to BullMQ logs
+- Snapshot confusion: compare `snapshotRequestedAt`, `snapshotCreatedAt`, `snapshotFailedAt`, `workerHeartbeatAt`, `sleepAt`, and the ordered `task_run_events` trail before falling back to BullMQ logs
 - If a task already reached `idle` and BullMQ claimed the sleep action, treat late worker-side finalize errors as transport noise first. Check whether the snapshot queue later wrote the real terminal state before interpreting a raw `job_lifecycle failed` event as user-visible task failure.
 - Suspected crashed worker with live sandbox: compare `workerHeartbeatAt` against current time, then check whether the sandbox is still `running` and whether BullMQ `sleep-check` recovered it via snapshot or failure

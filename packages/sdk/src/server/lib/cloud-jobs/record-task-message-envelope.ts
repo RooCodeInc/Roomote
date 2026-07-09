@@ -19,7 +19,6 @@ import {
   lt,
   asc,
   sql,
-  resolveManagerSlackChannelId,
 } from '@roomote/db/server';
 import { getRedis } from '@roomote/redis';
 import {
@@ -187,13 +186,10 @@ async function maybeNotifyPlatformIssueToSlack(params: {
     }),
   ]);
 
-  const channelId = resolveManagerSlackChannelId(
-    {
-      managerSlackChannelId: settings.managerSlackChannelId ?? null,
-      platformIssueSlackChannelId: settings.platformIssueSlackChannelId ?? null,
-    },
-    'platformIssue',
-  );
+  // Two-level fallback: the platform_issue_alerts automation target wins,
+  // otherwise the deployment-wide manager channel.
+  const channelId =
+    settings.platformIssueSlackChannelId ?? settings.managerSlackChannelId;
 
   if (!channelId) {
     return;

@@ -1,13 +1,11 @@
 import { enqueueCloudTask } from '@roomote/cloud-agents/server';
 import {
-  completeBackgroundAutomationRun,
-  completeBackgroundAutomationRunByJobId,
   db,
   eq,
-  getBackgroundAgentSettingsForDeployment,
-  resolveManagerSlackChannelId,
+  getAutomationRuntime,
+  recordAutomationRunOutcome,
   slackInstallations,
-  startBackgroundAutomationRun,
+  type AutomationRuntime,
 } from '@roomote/db/server';
 import { TaskPayloadKind, type SuggestedTasksTask } from '@roomote/types';
 
@@ -17,6 +15,11 @@ import {
   type SlackDeploymentContext,
 } from './scheduling-utils';
 import { postScheduledTriageRoutingDebug } from './triage-routing-debug';
+import {
+  emptyJobResult,
+  type AutomationJobResult,
+  type AutomationRunOpts,
+} from './types';
 
 const SCHEDULE_HOUR_LOCAL = 3;
 
@@ -27,27 +30,12 @@ const WINDOW_DAYS: Record<string, number> = {
 
 type TriageDeploymentContext = SlackDeploymentContext;
 
-type TriageAutomationSettings = Awaited<
-  ReturnType<typeof getBackgroundAgentSettingsForDeployment>
->;
-
 export type TriageScanBuild =
   | { kind: 'scan'; payload: SuggestedTasksTask['payload'] }
   | { kind: 'skip'; reason: string };
 
 type ScheduledTriageAutomationConfig = {
   automationKey: 'sentry_triage' | 'dependabot_triage' | 'ci_failure_triage';
-  /** Queue/job source tag passed to the cloud task enqueue options. */
-  enqueueSource: string;
-  managerChannelKind: 'sentryTriage' | 'dependabotTriage' | 'ciFailureTriage';
-  frequencyKey:
-    | 'sentryTriageFrequency'
-    | 'dependabotTriageFrequency'
-    | 'ciFailureTriageFrequency';
-  lastRunAtKey:
-    | 'sentryTriageLastRunAt'
-    | 'dependabotTriageLastRunAt'
-    | 'ciFailureTriageLastRunAt';
   /**
    * Builds the scan task payload for the deployment, or skips with a logged
    * reason (missing credentials, no eligible repositories, ...).
@@ -55,7 +43,7 @@ type ScheduledTriageAutomationConfig = {
   buildScanTask: (params: {
     deployment: TriageDeploymentContext;
     channelId: string;
-    settings: TriageAutomationSettings;
+    runtime: AutomationRuntime;
     manualTrigger: boolean;
   }) => Promise<TriageScanBuild>;
 };
@@ -79,43 +67,39 @@ async function findEligibleDeploymentContexts(): Promise<
 
 export function createScheduledTriageJob(
   config: ScheduledTriageAutomationConfig,
-): (opts?: { manualTrigger?: boolean; bullmqJobId?: string }) => Promise<void> {
-  const jobSlug = config.automationKey.replaceAll('_', '-');
-  const logPrefix = `[${jobSlug}]`;
+): (opts?: AutomationRunOpts) => Promise<AutomationJobResult> {
+  const logPrefix = `[${config.automationKey.replaceAll('_', '-')}]`;
 
   return async function scheduledTriageJob(
-    opts: {
-      manualTrigger?: boolean;
-      bullmqJobId?: string;
-    } = {},
-  ): Promise<void> {
+    opts: AutomationRunOpts = {},
+  ): Promise<AutomationJobResult> {
     console.log(
       `${logPrefix} Starting ${config.automationKey.replaceAll('_', ' ')} evaluator`,
     );
 
     const now = new Date();
+    const result = emptyJobResult();
     const eligibleDeployments = await findEligibleDeploymentContexts();
+
+    if (eligibleDeployments.length === 0) {
+      result.skippedReason = 'No active Slack installation.';
+    }
 
     let processed = 0;
     let skipped = 0;
-    const errors: string[] = [];
 
     for (const deployment of eligibleDeployments) {
-      let runId: string | null = null;
-
       try {
-        const settings = await getBackgroundAgentSettingsForDeployment();
-        const frequency = settings[config.frequencyKey];
+        const runtime = await getAutomationRuntime(config.automationKey);
+        const frequency = runtime.enabled ? runtime.scheduleMode : 'off';
 
-        if (frequency === 'off') {
+        if (!frequency || frequency === 'off') {
+          result.skippedReason = 'Automation is disabled.';
           skipped++;
           continue;
         }
 
-        const channelId = resolveManagerSlackChannelId(
-          settings,
-          config.managerChannelKind,
-        );
+        const channelId = runtime.slackChannelId;
 
         if (!channelId) {
           await postScheduledTriageRoutingDebug({
@@ -130,6 +114,7 @@ export function createScheduledTriageJob(
           console.log(
             `${logPrefix} Skipping deployment: manager channel not configured`,
           );
+          result.skippedReason = 'Manager channel is not configured.';
           skipped++;
           continue;
         }
@@ -145,11 +130,12 @@ export function createScheduledTriageJob(
             now,
             timeZone: timezone,
             frequency,
-            lastRunAt: settings[config.lastRunAtKey],
+            lastRunAt: runtime.lastRunAt,
             scheduleHourLocal: SCHEDULE_HOUR_LOCAL,
             windowDays: WINDOW_DAYS,
           })
         ) {
+          result.skippedReason = 'Not due yet.';
           skipped++;
           continue;
         }
@@ -157,25 +143,16 @@ export function createScheduledTriageJob(
         const scanTask = await config.buildScanTask({
           deployment,
           channelId,
-          settings,
+          runtime,
           manualTrigger: opts.manualTrigger === true,
         });
 
         if (scanTask.kind === 'skip') {
           console.log(`${logPrefix} Skipping deployment: ${scanTask.reason}`);
+          result.skippedReason = scanTask.reason;
           skipped++;
           continue;
         }
-
-        runId = (
-          await startBackgroundAutomationRun(db, {
-            automationKey: config.automationKey,
-            bullmqJobId:
-              opts.bullmqJobId ?? `${jobSlug}:${crypto.randomUUID()}`,
-            triggerKind: opts.manualTrigger ? 'manual' : 'scheduled',
-            startedAt: new Date(),
-          })
-        ).id;
 
         // Automation scans run as the deployment service principal; a manual
         // trigger is still an automation launch, just with a manual trigger
@@ -193,13 +170,10 @@ export function createScheduledTriageJob(
           channels: { slackChannelId: channelId },
         });
 
-        await completeBackgroundAutomationRun(db, {
-          runId,
-          automationKey: config.automationKey,
+        await recordAutomationRunOutcome(db, {
+          key: config.automationKey,
           status: 'succeeded',
-          finishedAt: new Date(),
-          taskId: launchResult.taskId,
-          metadata: { cloudJobId: launchResult.id },
+          at: new Date(),
         });
 
         await postScheduledTriageRoutingDebug({
@@ -210,37 +184,29 @@ export function createScheduledTriageJob(
           taskSlackChannelId: channelId,
         });
 
+        result.launchedTaskId ??= launchResult.taskId;
         processed++;
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
-        errors.push(message);
-        if (runId) {
-          await completeBackgroundAutomationRun(db, {
-            runId,
-            automationKey: config.automationKey,
-            status: 'failed',
-            finishedAt: new Date(),
-            error: message,
-          });
-        } else if (opts.bullmqJobId) {
-          await completeBackgroundAutomationRunByJobId(db, {
-            automationKey: config.automationKey,
-            bullmqJobId: opts.bullmqJobId,
-            status: 'failed',
-            finishedAt: new Date(),
-            error: message,
-          });
-        }
+        result.errors.push(message);
+        await recordAutomationRunOutcome(db, {
+          key: config.automationKey,
+          status: 'failed',
+          at: new Date(),
+          error: message,
+        });
         console.error(`${logPrefix} Failed deployment: ${message}`);
       }
     }
 
     console.log(
-      `${logPrefix} Completed: ${processed} processed, ${skipped} skipped, ${errors.length} errors`,
+      `${logPrefix} Completed: ${processed} processed, ${skipped} skipped, ${result.errors.length} errors`,
     );
 
-    if (errors.length > 0) {
-      console.error(`${logPrefix} Errors:`, errors);
+    if (result.errors.length > 0) {
+      console.error(`${logPrefix} Errors:`, result.errors);
     }
+
+    return result;
   };
 }

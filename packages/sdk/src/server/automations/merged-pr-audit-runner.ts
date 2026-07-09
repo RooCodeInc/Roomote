@@ -7,33 +7,35 @@ import {
 import {
   and,
   asc,
-  completeBackgroundAutomationRun,
-  completeBackgroundAutomationRunByJobId,
   db,
   eq,
-  getBackgroundAgentSettingsForDeployment,
+  getAutomationRuntime,
   gt,
-  pullRequestFacts,
   gte,
   isNotNull,
   lte,
   or,
+  pullRequestFacts,
+  recordAutomationRunOutcome,
   repositories,
-  resolveManagerSlackChannelId,
   slackInstallations,
-  startBackgroundAutomationRun,
-  type CodeQualityAuditorScanCursor,
-  type SecurityAuditorScanCursor,
+  updateAutomationScanCursor,
 } from '@roomote/db/server';
 import {
   ALL_REPOSITORIES,
   TaskPayloadKind,
+  type AutomationScanCursor,
   type BackgroundAutomationKey,
   type TaskSuggestionSource,
 } from '@roomote/types';
 
 import { loadAutomationThreadFeedbackReport } from './automation-thread-feedback';
 import { hasActiveGitHubInstallation } from './github-deployment-scope';
+import {
+  emptyJobResult,
+  type AutomationJobResult,
+  type AutomationRunOpts,
+} from './types';
 
 const FREQUENCY_INTERVAL_MS = {
   every_hour: 60 * 60 * 1000,
@@ -44,22 +46,7 @@ const FREQUENCY_INTERVAL_MS = {
 
 const MAX_MERGED_PULL_REQUESTS_PER_RUN = 250;
 
-export type MergedPullRequestAuditScanCursor =
-  | SecurityAuditorScanCursor
-  | CodeQualityAuditorScanCursor;
-
-type MergedPullRequestAuditSettings = {
-  frequencyKey: 'securityAuditorFrequency' | 'codeQualityAuditorFrequency';
-  lastRunAtKey: 'securityAuditorLastRunAt' | 'codeQualityAuditorLastRunAt';
-  scanCursorKey: 'securityAuditorScanCursor' | 'codeQualityAuditorScanCursor';
-  updateScanCursor: (
-    dbClient: typeof db,
-    params: {
-      cursor: MergedPullRequestAuditScanCursor | null;
-      updatedAt: Date;
-    },
-  ) => Promise<unknown>;
-};
+export type MergedPullRequestAuditScanCursor = AutomationScanCursor;
 
 export interface MergedPullRequest {
   externalPullRequestId: number;
@@ -84,19 +71,14 @@ export type MergedPullRequestAuditScanMode =
     }
   | { kind: 'interval'; since: Date };
 
-type ProcessOrgOptions = {
-  manualTrigger?: boolean;
-  bullmqJobId?: string;
-};
-
 type MergedPullRequestAuditAutomationKey = Extract<
   BackgroundAutomationKey,
   'security_auditor' | 'code_quality_auditor'
 >;
 
 type OrgOutcome =
-  | { kind: 'processed' }
-  | { kind: 'skipped' }
+  | { kind: 'processed'; launchedTaskId: string | null }
+  | { kind: 'skipped'; reason: string }
   | { kind: 'errored'; message: string };
 
 type PromptBuilderParams = {
@@ -112,7 +94,6 @@ type PromptBuilderParams = {
 type MergedPullRequestAuditConfig = {
   automationKey: MergedPullRequestAuditAutomationKey;
   buildPrompt: (params: PromptBuilderParams) => string;
-  settings: MergedPullRequestAuditSettings;
   suggestionSource?: Extract<
     TaskSuggestionSource,
     'security_auditor' | 'code_quality_auditor'
@@ -150,26 +131,8 @@ function resolveScanMode(params: {
   };
 }
 
-function getManagerChannelKind(
-  automationKey: string,
-): Parameters<typeof resolveManagerSlackChannelId>[1] {
-  return automationKey.replace(/_([a-z])/g, (_, char: string) =>
-    char.toUpperCase(),
-  ) as Parameters<typeof resolveManagerSlackChannelId>[1];
-}
-
 function getLogPrefix(automationKey: string): string {
   return `[${automationKey.replaceAll('_', '-')}]`;
-}
-
-function resolveBullmqJobId(
-  automationKey: string,
-  opts: ProcessOrgOptions,
-): string {
-  return (
-    opts.bullmqJobId ??
-    `${automationKey.replaceAll('_', '-')}:${crypto.randomUUID()}`
-  );
 }
 
 function escapeTaskContextText(value: string): string {
@@ -343,35 +306,36 @@ function getSelectedRepositories(
 
 async function processDeployment(
   config: MergedPullRequestAuditConfig,
-  opts: ProcessOrgOptions,
+  opts: AutomationRunOpts,
 ): Promise<OrgOutcome> {
   const logPrefix = getLogPrefix(config.automationKey);
-  let runId: string | null = null;
   let scanUpperBound: Date | null = null;
 
   try {
     const now = new Date();
-    const settings = await getBackgroundAgentSettingsForDeployment();
-    const frequency = settings[config.settings.frequencyKey];
-    const lastRunAt = settings[config.settings.lastRunAtKey];
-    const scanCursor = settings[config.settings.scanCursorKey] ?? null;
-    const channelId = resolveManagerSlackChannelId(
-      settings,
-      getManagerChannelKind(config.automationKey),
-    );
+    const runtime = await getAutomationRuntime(config.automationKey);
+    const frequency = runtime.enabled ? runtime.scheduleMode : 'off';
+    const lastRunAt = runtime.lastRunAt;
+    const scanCursor = runtime.scanCursor;
+    const channelId = runtime.slackChannelId;
 
-    if (frequency === 'off') {
-      return { kind: 'skipped' };
+    if (
+      !frequency ||
+      frequency === 'off' ||
+      !(frequency in FREQUENCY_INTERVAL_MS)
+    ) {
+      return { kind: 'skipped', reason: 'Automation is disabled.' };
     }
 
     if (!channelId) {
       console.log(
         `${logPrefix} Skipping deployment: manager channel not configured`,
       );
-      return { kind: 'skipped' };
+      return { kind: 'skipped', reason: 'Manager channel is not configured.' };
     }
 
-    const intervalMs = FREQUENCY_INTERVAL_MS[frequency];
+    const intervalMs =
+      FREQUENCY_INTERVAL_MS[frequency as keyof typeof FREQUENCY_INTERVAL_MS];
 
     if (
       !opts.manualTrigger &&
@@ -379,7 +343,7 @@ async function processDeployment(
       lastRunAt &&
       now.getTime() - lastRunAt.getTime() < intervalMs
     ) {
-      return { kind: 'skipped' };
+      return { kind: 'skipped', reason: 'Not due yet.' };
     }
 
     const scanMode = resolveScanMode({
@@ -394,17 +358,6 @@ async function processDeployment(
       scanUpperBound,
     );
     const mergedPullRequests = pullRequestBatch.pullRequests;
-    const bullmqJobId = resolveBullmqJobId(config.automationKey, opts);
-    const triggerKind = opts.manualTrigger ? 'manual' : 'scheduled';
-
-    runId = (
-      await startBackgroundAutomationRun(db, {
-        automationKey: config.automationKey,
-        bullmqJobId,
-        triggerKind,
-        startedAt: now,
-      })
-    ).id;
 
     if (mergedPullRequests.length === 0) {
       console.log(
@@ -412,29 +365,24 @@ async function processDeployment(
       );
 
       if (scanCursor) {
-        await config.settings.updateScanCursor(db, {
+        await updateAutomationScanCursor(db, {
+          key: config.automationKey,
           cursor: null,
           updatedAt: new Date(),
         });
       }
 
-      await completeBackgroundAutomationRun(db, {
-        runId,
-        automationKey: config.automationKey,
+      await recordAutomationRunOutcome(db, {
+        key: config.automationKey,
         status: 'skipped',
-        finishedAt: new Date(),
+        at: new Date(),
         lastRunAt: scanUpperBound,
-        metadata: {
-          reason: 'no_merged_pull_requests',
-          scanMode: scanMode.kind,
-          scanUpperBound: scanUpperBound.toISOString(),
-          ...(scanMode.kind === 'interval'
-            ? { since: scanMode.since.toISOString() }
-            : { resumedFromCursor: scanMode.cursor }),
-        },
       });
 
-      return { kind: 'processed' };
+      return {
+        kind: 'skipped',
+        reason: 'No merged pull requests in the scan window.',
+      };
     }
 
     const recentThreadFeedback = await loadAutomationThreadFeedbackReport({
@@ -483,67 +431,40 @@ async function processDeployment(
     });
 
     if (pullRequestBatch.hasMore && pullRequestBatch.nextCursor) {
-      await config.settings.updateScanCursor(db, {
+      await updateAutomationScanCursor(db, {
+        key: config.automationKey,
         cursor: pullRequestBatch.nextCursor,
         updatedAt: new Date(),
       });
     } else if (scanCursor) {
-      await config.settings.updateScanCursor(db, {
+      await updateAutomationScanCursor(db, {
+        key: config.automationKey,
         cursor: null,
         updatedAt: new Date(),
       });
     }
 
-    await completeBackgroundAutomationRun(db, {
-      runId,
-      automationKey: config.automationKey,
+    await recordAutomationRunOutcome(db, {
+      key: config.automationKey,
       status: 'succeeded',
-      finishedAt: new Date(),
-      taskId: launchResult.taskId,
+      at: new Date(),
       lastRunAt:
         pullRequestBatch.hasMore && pullRequestBatch.nextCursor
           ? new Date(pullRequestBatch.nextCursor.mergedAt)
           : scanUpperBound,
-      metadata: {
-        cloudJobId: launchResult.id,
-        pullRequestCount: mergedPullRequests.length,
-        hasMorePullRequests: pullRequestBatch.hasMore,
-        scanUpperBound: scanUpperBound.toISOString(),
-        ...(pullRequestBatch.nextCursor
-          ? { nextCursor: pullRequestBatch.nextCursor }
-          : {}),
-      },
     });
 
-    return { kind: 'processed' };
+    return { kind: 'processed', launchedTaskId: launchResult.taskId };
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
 
-    if (runId) {
-      await completeBackgroundAutomationRun(db, {
-        runId,
-        automationKey: config.automationKey,
-        status: 'failed',
-        finishedAt: new Date(),
-        error: message,
-        lastRunAt: 'skip',
-        ...(scanUpperBound
-          ? { metadata: { scanUpperBound: scanUpperBound.toISOString() } }
-          : {}),
-      });
-    } else if (opts.bullmqJobId) {
-      await completeBackgroundAutomationRunByJobId(db, {
-        automationKey: config.automationKey,
-        bullmqJobId: opts.bullmqJobId,
-        status: 'failed',
-        finishedAt: new Date(),
-        error: message,
-        lastRunAt: 'skip',
-        ...(scanUpperBound
-          ? { metadata: { scanUpperBound: scanUpperBound.toISOString() } }
-          : {}),
-      });
-    }
+    await recordAutomationRunOutcome(db, {
+      key: config.automationKey,
+      status: 'failed',
+      at: new Date(),
+      error: message,
+      lastRunAt: 'skip',
+    });
 
     console.error(`${logPrefix} Failed deployment: ${message}`);
     return { kind: 'errored', message };
@@ -552,21 +473,18 @@ async function processDeployment(
 
 export function createMergedPullRequestAuditJob(
   config: MergedPullRequestAuditConfig,
-): (opts?: { manualTrigger?: boolean; bullmqJobId?: string }) => Promise<void> {
+): (opts?: AutomationRunOpts) => Promise<AutomationJobResult> {
   return async function mergedPullRequestAuditJob(
-    opts: {
-      manualTrigger?: boolean;
-      bullmqJobId?: string;
-    } = {},
-  ): Promise<void> {
+    opts: AutomationRunOpts = {},
+  ): Promise<AutomationJobResult> {
     const logPrefix = getLogPrefix(config.automationKey);
     console.log(
       `${logPrefix} Starting ${config.automationKey.replaceAll('_', ' ')} evaluator`,
     );
 
+    const result = emptyJobResult();
     let processed = 0;
     let skipped = 0;
-    const errors: string[] = [];
 
     if (await hasEligibleDeployment()) {
       const outcome = await processDeployment(config, opts);
@@ -574,24 +492,30 @@ export function createMergedPullRequestAuditJob(
       switch (outcome.kind) {
         case 'processed':
           processed++;
+          result.completed = true;
+          result.launchedTaskId = outcome.launchedTaskId;
           break;
         case 'skipped':
           skipped++;
+          result.skippedReason = outcome.reason;
           break;
         case 'errored':
-          errors.push(outcome.message);
+          result.errors.push(outcome.message);
           break;
       }
     } else {
       skipped++;
+      result.skippedReason = 'GitHub and Slack must both be connected.';
     }
 
     console.log(
-      `${logPrefix} Completed: ${processed} processed, ${skipped} skipped, ${errors.length} errors`,
+      `${logPrefix} Completed: ${processed} processed, ${skipped} skipped, ${result.errors.length} errors`,
     );
 
-    if (errors.length > 0) {
-      console.error(`${logPrefix} Errors:`, errors);
+    if (result.errors.length > 0) {
+      console.error(`${logPrefix} Errors:`, result.errors);
     }
+
+    return result;
   };
 }

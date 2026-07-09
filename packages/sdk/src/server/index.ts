@@ -22,6 +22,7 @@ export {
 } from './lib/cloud-jobs/record-task-message-envelope';
 export { ensureSnapshotResumeGitHubFollowUpFallback } from './lib/cloud-jobs/ensure-snapshot-resume-github-follow-up-fallback';
 export * from './lib/manager-slack';
+export * from './automations';
 export * from './lib/manager-stats';
 export {
   cleanupSandboxOidcTargetsForCloudJob,

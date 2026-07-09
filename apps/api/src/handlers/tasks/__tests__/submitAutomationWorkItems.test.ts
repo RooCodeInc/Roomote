@@ -10,12 +10,10 @@ import type { Variables } from '../../../types';
 import { mcpAuthMiddleware } from '../../mcp/middleware';
 import { submitAutomationWorkItems } from '../submitAutomationWorkItems';
 
-const { mockCloudJobFindFirst, mockAutomationRunFindFirst } = vi.hoisted(
-  () => ({
-    mockCloudJobFindFirst: vi.fn(),
-    mockAutomationRunFindFirst: vi.fn(),
-  }),
-);
+const { mockCloudJobFindFirst, mockTaskFindFirst } = vi.hoisted(() => ({
+  mockCloudJobFindFirst: vi.fn(),
+  mockTaskFindFirst: vi.fn(),
+}));
 
 vi.mock('@roomote/cloud-agents/server', () => ({
   CloudJobQueueEnqueueError: class CloudJobQueueEnqueueError extends Error {},
@@ -43,9 +41,6 @@ vi.mock('@roomote/db/server', () => ({
   or: vi.fn((...args) => ({ type: 'or', args })),
   sql: vi.fn(),
   automationWorkItems: {},
-  backgroundAutomationRuns: {
-    taskId: 'backgroundAutomationRuns.taskId',
-  },
   taskRuns: {
     taskId: 'taskRuns.taskId',
   },
@@ -56,9 +51,9 @@ vi.mock('@roomote/db/server', () => ({
   repositories: {},
   slackInstallationChannels: {},
   slackInstallations: {},
-  resolveManagerSlackChannelId: vi.fn(),
-  getBackgroundAgentSettingsForDeployment: vi.fn(),
-  updateBackgroundAutomationRunArtifactsByTaskId: vi.fn(),
+  getAutomationRuntime: vi.fn(async () => ({
+    slackChannelId: null,
+  })),
   upsertBackgroundAutomationSlackThread: vi.fn(),
   db: {
     query: {
@@ -66,10 +61,7 @@ vi.mock('@roomote/db/server', () => ({
         findFirst: (...args: unknown[]) => mockCloudJobFindFirst(...args),
       },
       tasks: {
-        findFirst: vi.fn(async () => undefined),
-      },
-      backgroundAutomationRuns: {
-        findFirst: (...args: unknown[]) => mockAutomationRunFindFirst(...args),
+        findFirst: (...args: unknown[]) => mockTaskFindFirst(...args),
       },
     },
   },
@@ -101,7 +93,7 @@ describe('submitAutomationWorkItems', () => {
 
   beforeEach(() => {
     mockCloudJobFindFirst.mockReset();
-    mockAutomationRunFindFirst.mockReset();
+    mockTaskFindFirst.mockReset();
     mockCloudJobFindFirst.mockResolvedValue({
       payloadKind: TaskPayloadKind.Scan,
       actingUserId: 'user-1',
@@ -111,9 +103,9 @@ describe('submitAutomationWorkItems', () => {
         suggestionSource: 'sentry_triage',
       },
     });
-    mockAutomationRunFindFirst.mockResolvedValue({
-      id: 'run-1',
-      automationKey: 'sentry_triage',
+    mockTaskFindFirst.mockResolvedValue({
+      initiatorUserId: null,
+      initiatorAutomation: 'sentry_triage',
     });
   });
 
@@ -211,9 +203,9 @@ describe('submitAutomationWorkItems', () => {
         suggestionSource: 'dependabot_triage',
       },
     });
-    mockAutomationRunFindFirst.mockResolvedValueOnce({
-      id: 'run-1',
-      automationKey: 'dependabot_triage',
+    mockTaskFindFirst.mockResolvedValueOnce({
+      initiatorUserId: null,
+      initiatorAutomation: 'dependabot_triage',
     });
 
     const app = createApp(authContext);
@@ -253,9 +245,9 @@ describe('submitAutomationWorkItems', () => {
         suggestionSource: 'dependabot_triage',
       },
     });
-    mockAutomationRunFindFirst.mockResolvedValueOnce({
-      id: 'run-1',
-      automationKey: 'dependabot_triage',
+    mockTaskFindFirst.mockResolvedValueOnce({
+      initiatorUserId: null,
+      initiatorAutomation: 'dependabot_triage',
     });
 
     const app = createApp(authContext);
@@ -305,9 +297,9 @@ describe('submitAutomationWorkItems', () => {
         suggestionSource: 'dependabot_triage',
       },
     });
-    mockAutomationRunFindFirst.mockResolvedValueOnce({
-      id: 'run-1',
-      automationKey: 'dependabot_triage',
+    mockTaskFindFirst.mockResolvedValueOnce({
+      initiatorUserId: null,
+      initiatorAutomation: 'dependabot_triage',
     });
 
     const app = createApp(authContext);
@@ -442,9 +434,9 @@ describe('submitAutomationWorkItems', () => {
         suggestionSource: 'security_auditor',
       },
     });
-    mockAutomationRunFindFirst.mockResolvedValueOnce({
-      id: 'run-1',
-      automationKey: 'security_auditor',
+    mockTaskFindFirst.mockResolvedValueOnce({
+      initiatorUserId: null,
+      initiatorAutomation: 'security_auditor',
     });
 
     const app = createApp(authContext);
@@ -484,7 +476,10 @@ describe('submitAutomationWorkItems', () => {
         suggestionSource: 'suggest_ideas',
       },
     });
-    mockAutomationRunFindFirst.mockResolvedValueOnce(undefined);
+    mockTaskFindFirst.mockResolvedValueOnce({
+      initiatorUserId: 'user-1',
+      initiatorAutomation: null,
+    });
 
     const app = createApp(authContext);
     const response = await app.request(

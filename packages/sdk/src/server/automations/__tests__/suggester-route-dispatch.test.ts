@@ -1,14 +1,9 @@
-const {
-  mockEnqueueCloudTask,
-  mockStartBackgroundAutomationRun,
-  mockCompleteBackgroundAutomationRun,
-  mockCompleteBackgroundAutomationRunByJobId,
-} = vi.hoisted(() => ({
-  mockEnqueueCloudTask: vi.fn(),
-  mockStartBackgroundAutomationRun: vi.fn(),
-  mockCompleteBackgroundAutomationRun: vi.fn(),
-  mockCompleteBackgroundAutomationRunByJobId: vi.fn(),
-}));
+const { mockEnqueueCloudTask, mockRecordAutomationRunOutcome } = vi.hoisted(
+  () => ({
+    mockEnqueueCloudTask: vi.fn(),
+    mockRecordAutomationRunOutcome: vi.fn(),
+  }),
+);
 
 vi.mock('@roomote/cloud-agents/server', async (importOriginal) => {
   const actual =
@@ -22,10 +17,7 @@ vi.mock('@roomote/cloud-agents/server', async (importOriginal) => {
 
 vi.mock('@roomote/db/server', () => ({
   db: {},
-  startBackgroundAutomationRun: mockStartBackgroundAutomationRun,
-  completeBackgroundAutomationRun: mockCompleteBackgroundAutomationRun,
-  completeBackgroundAutomationRunByJobId:
-    mockCompleteBackgroundAutomationRunByJobId,
+  recordAutomationRunOutcome: mockRecordAutomationRunOutcome,
 }));
 
 import { buildSuggestedTasksPrompt } from '@roomote/cloud-agents/server';
@@ -56,7 +48,6 @@ function buildParams() {
     routePlan: {
       routes: [
         {
-          bullmqJobId: 'suggester:org-1:test',
           channelId: 'C123SUGGEST',
           channelName: 'C123SUGGEST',
           excludedGroupLabels: [],
@@ -82,39 +73,27 @@ describe('dispatchSuggestionRoutes', () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date('2026-04-09T03:00:00.000Z'));
 
-    mockStartBackgroundAutomationRun.mockResolvedValue({ id: 'run-1' });
     mockEnqueueCloudTask.mockResolvedValue({ id: 1, taskId: 'task-1' });
-    mockCompleteBackgroundAutomationRun.mockResolvedValue(null);
-    mockCompleteBackgroundAutomationRunByJobId.mockResolvedValue(null);
+    mockRecordAutomationRunOutcome.mockResolvedValue(undefined);
   });
 
   afterEach(() => {
     vi.useRealTimers();
   });
 
-  it('enqueues a legacy route and completes the run lifecycle on success', async () => {
+  it('enqueues a legacy route and records a successful pass on the automations row', async () => {
     const params = buildParams();
 
     const result = await dispatchSuggestionRoutes(params);
 
-    expect(result).toEqual({ successfulRoutes: 1, errors: [] });
+    expect(result).toEqual({
+      successfulRoutes: 1,
+      firstLaunchedTaskId: 'task-1',
+      errors: [],
+    });
     expect(
       params.routePlan.loadRecentThreadFeedbackForChannel,
     ).toHaveBeenCalledWith('C123SUGGEST');
-    expect(mockStartBackgroundAutomationRun).toHaveBeenCalledWith(
-      expect.anything(),
-      expect.objectContaining({
-        automationKey: 'suggester',
-        bullmqJobId: 'suggester:org-1:test',
-        triggerKind: 'scheduled',
-        metadata: {
-          routeChannelId: 'C123SUGGEST',
-          routeChannelName: 'C123SUGGEST',
-          routeGroupLabel: null,
-          routeKind: 'legacy',
-        },
-      }),
-    );
     expect(mockEnqueueCloudTask).toHaveBeenCalledWith({
       task: {
         type: TaskPayloadKind.Scan,
@@ -156,21 +135,12 @@ describe('dispatchSuggestionRoutes', () => {
       visibility: 'hidden',
       channels: { slackChannelId: 'C123SUGGEST' },
     });
-    expect(mockCompleteBackgroundAutomationRun).toHaveBeenCalledWith(
+    expect(mockRecordAutomationRunOutcome).toHaveBeenCalledWith(
       expect.anything(),
       expect.objectContaining({
-        runId: 'run-1',
-        automationKey: 'suggester',
+        key: 'suggester',
         status: 'succeeded',
-        finishedAt: new Date('2026-04-09T03:00:00.000Z'),
-        taskId: 'task-1',
-        slackChannelId: 'C123SUGGEST',
-        metadata: {
-          cloudJobId: 1,
-          routeChannelName: 'C123SUGGEST',
-          routeGroupLabel: null,
-          routeKind: 'legacy',
-        },
+        at: new Date('2026-04-09T03:00:00.000Z'),
       }),
     );
   });
@@ -189,7 +159,6 @@ describe('dispatchSuggestionRoutes', () => {
       routePlan: {
         routes: [
           {
-            bullmqJobId: 'suggester:org-1:test:route:1',
             channelId: 'G123PRIVATE',
             channelName: '#eng-private',
             excludedGroupLabels: ['Product polish'],
@@ -202,7 +171,6 @@ describe('dispatchSuggestionRoutes', () => {
             suggesterInstructions: null,
           },
           {
-            bullmqJobId: 'suggester:org-1:test:route:2',
             channelId: 'C123PRODUCT',
             channelName: '#product-eng',
             excludedGroupLabels: ['Incidents'],
@@ -217,9 +185,6 @@ describe('dispatchSuggestionRoutes', () => {
         loadRecentThreadFeedbackForChannel,
       },
     };
-    mockStartBackgroundAutomationRun
-      .mockResolvedValueOnce({ id: 'run-1' })
-      .mockResolvedValueOnce({ id: 'run-2' });
     mockEnqueueCloudTask
       .mockRejectedValueOnce(new Error('queue failed'))
       .mockResolvedValueOnce({ taskId: 'task-2' });
@@ -228,6 +193,7 @@ describe('dispatchSuggestionRoutes', () => {
 
     expect(result).toEqual({
       successfulRoutes: 1,
+      firstLaunchedTaskId: 'task-2',
       errors: ['Incidents: queue failed'],
     });
     expect(loadRecentThreadFeedbackForChannel).toHaveBeenNthCalledWith(
@@ -238,24 +204,12 @@ describe('dispatchSuggestionRoutes', () => {
       2,
       'C123PRODUCT',
     );
-    expect(mockCompleteBackgroundAutomationRun).toHaveBeenCalledWith(
+    // One successful route still counts the pass as a run.
+    expect(mockRecordAutomationRunOutcome).toHaveBeenCalledWith(
       expect.anything(),
       expect.objectContaining({
-        runId: 'run-1',
-        automationKey: 'suggester',
-        status: 'failed',
-        error: 'queue failed',
-        slackChannelId: 'G123PRIVATE',
-      }),
-    );
-    expect(mockCompleteBackgroundAutomationRun).toHaveBeenCalledWith(
-      expect.anything(),
-      expect.objectContaining({
-        runId: 'run-2',
-        automationKey: 'suggester',
+        key: 'suggester',
         status: 'succeeded',
-        taskId: 'task-2',
-        slackChannelId: 'C123PRODUCT',
       }),
     );
     expect(consoleSpy).toHaveBeenCalledWith(
@@ -265,28 +219,27 @@ describe('dispatchSuggestionRoutes', () => {
     consoleSpy.mockRestore();
   });
 
-  it('marks the route failed by BullMQ job id when run creation fails', async () => {
+  it('records a failed pass when every route fails', async () => {
+    const consoleSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
     const params = buildParams();
-    mockStartBackgroundAutomationRun.mockRejectedValue(
-      new Error('run start failed'),
-    );
+    mockEnqueueCloudTask.mockRejectedValue(new Error('queue failed'));
 
     const result = await dispatchSuggestionRoutes(params);
 
     expect(result).toEqual({
       successfulRoutes: 0,
-      errors: ['C123SUGGEST: run start failed'],
+      firstLaunchedTaskId: null,
+      errors: ['C123SUGGEST: queue failed'],
     });
-    expect(mockCompleteBackgroundAutomationRun).not.toHaveBeenCalled();
-    expect(mockCompleteBackgroundAutomationRunByJobId).toHaveBeenCalledWith(
+    expect(mockRecordAutomationRunOutcome).toHaveBeenCalledWith(
       expect.anything(),
-      {
-        automationKey: 'suggester',
-        bullmqJobId: 'suggester:org-1:test',
+      expect.objectContaining({
+        key: 'suggester',
         status: 'failed',
-        finishedAt: new Date('2026-04-09T03:00:00.000Z'),
-        error: 'run start failed',
-      },
+        error: 'C123SUGGEST: queue failed',
+      }),
     );
+
+    consoleSpy.mockRestore();
   });
 });

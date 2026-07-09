@@ -57,6 +57,7 @@ function createState(): RunTaskState {
 
 function createListenerOptions(
   cloudJob: Partial<ListenerOptions['cloudJob']>,
+  task?: ListenerOptions['task'],
 ): ListenerOptions {
   return {
     cloudJob: {
@@ -65,6 +66,7 @@ function createListenerOptions(
       payload: {},
       ...cloudJob,
     } as ListenerOptions['cloudJob'],
+    task,
     state: createState(),
     logger: createLogger(),
     workingDirectory: '/tmp/workspace',
@@ -148,6 +150,72 @@ describe('startPolling', () => {
 
     expect(mockCreateSlackMessageInterval).not.toHaveBeenCalled();
     expect(options.state.slackMessageInterval).toBeUndefined();
+  });
+
+  it('starts Slack message polling from task channel bindings without payload metadata', () => {
+    const options = createListenerOptions(
+      {
+        payloadKind: TaskPayloadKind.StandardTask,
+        payload: {
+          repo: 'owner/repo',
+          description: 'Task-bound Slack job',
+        },
+      },
+      {
+        slackChannelId: 'C123',
+        slackThreadTs: '111.222',
+        linearSessionId: null,
+      },
+    );
+
+    startPolling(options);
+
+    expect(mockCreateSlackMessageInterval).toHaveBeenCalledWith(options);
+    expect(options.state.slackMessageInterval).toBeDefined();
+  });
+
+  it('starts Linear message polling for snapshot resumes from task channel bindings', () => {
+    const options = createListenerOptions(
+      {
+        payloadKind: TaskPayloadKind.SnapshotResume,
+        payload: {
+          repo: 'owner/repo',
+        },
+      },
+      {
+        slackChannelId: null,
+        slackThreadTs: null,
+        linearSessionId: 'linear-session-1',
+      },
+    );
+
+    startPolling(options);
+
+    expect(mockCreateLinearMessageInterval).toHaveBeenCalledWith(options);
+    expect(options.state.linearMessageInterval).toBeDefined();
+  });
+
+  it('falls back to payload extraction for snapshot resumes without task bindings', () => {
+    const options = createListenerOptions({
+      payloadKind: TaskPayloadKind.SnapshotResume,
+      payload: {
+        repo: 'owner/repo',
+        queuedLinearMessages: [
+          {
+            sessionId: 'linear-session-2',
+            organizationId: 'org-1',
+            action: 'prompted' as const,
+            timestamp: 1,
+            payload: {},
+          },
+        ],
+      },
+    });
+
+    startPolling(options);
+
+    expect(mockCreateLinearMessageInterval).toHaveBeenCalledWith(options);
+    expect(options.state.linearMessageInterval).toBeDefined();
   });
 
   it('starts generic communication polling for Teams-linked cloud jobs', () => {

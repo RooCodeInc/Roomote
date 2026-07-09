@@ -1,5 +1,3 @@
-import { updateSecurityAuditorScanCursor } from '@roomote/db/server';
-
 import type { RepositoryCoverage } from '@roomote/cloud-agents/server';
 import {
   buildMergedPullRequestTaskContext,
@@ -38,10 +36,4 @@ ${params.recentThreadFeedback?.trim() ? `Recent feedback from earlier Security A
 export const securityAuditorJob = createMergedPullRequestAuditJob({
   automationKey: 'security_auditor',
   buildPrompt: buildSecurityAuditorPrompt,
-  settings: {
-    frequencyKey: 'securityAuditorFrequency',
-    lastRunAtKey: 'securityAuditorLastRunAt',
-    scanCursorKey: 'securityAuditorScanCursor',
-    updateScanCursor: updateSecurityAuditorScanCursor,
-  },
 });

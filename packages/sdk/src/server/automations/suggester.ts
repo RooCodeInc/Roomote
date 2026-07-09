@@ -3,22 +3,18 @@ import {
   db,
   slackInstallations,
   taskSuggestions,
-  getBackgroundAgentSettingsForDeployment,
+  getAutomationRuntime,
   count,
   desc,
   eq,
   gte,
-  resolveManagerSlackChannelId,
 } from '@roomote/db/server';
 import {
   FeatureFlag,
   getFeatureFlagEvaluator,
 } from '@roomote/feature-flags/server';
-import {
-  type SuggesterFrequency,
-  type TaskSuggestionStatus,
-} from '@roomote/types';
-import { getRedis } from '../redis';
+import { getRedis } from '@roomote/redis';
+import { type TaskSuggestionStatus } from '@roomote/types';
 import {
   getActiveRepositoryFullNames,
   hasActiveGitHubInstallation,
@@ -30,13 +26,18 @@ import {
   type RepositoryCoverage,
   type SuggesterDeploymentContext,
 } from './suggester-route-planner';
+import {
+  emptyJobResult,
+  type AutomationJobResult,
+  type AutomationRunOpts,
+} from './types';
 
 const LOG_PREFIX = '[suggester]';
 const SCHEDULE_HOUR_LOCAL = 2;
 const OPEN_SUGGESTION_LIMIT = 0;
 const PREVIOUS_SUGGESTIONS_LOOKBACK_DAYS = 30;
 
-const WINDOW_DAYS: Record<Exclude<SuggesterFrequency, 'off'>, number> = {
+const WINDOW_DAYS: Record<string, number> = {
   daily: 1,
   weekly: 7,
 };
@@ -110,16 +111,20 @@ async function countOpenSuggestions(): Promise<number> {
 }
 
 export async function suggesterJob(
-  opts: { manualTrigger?: boolean; bullmqJobId?: string } = {},
-): Promise<void> {
+  opts: AutomationRunOpts = {},
+): Promise<AutomationJobResult> {
   console.log(`${LOG_PREFIX} Starting suggester evaluator`);
 
   const now = new Date();
+  const result = emptyJobResult();
   const eligibleDeployments = await findEligibleDeployments();
+
+  if (eligibleDeployments.length === 0) {
+    result.skippedReason = 'GitHub and Slack must both be connected.';
+  }
 
   let processed = 0;
   let skipped = 0;
-  const errors: string[] = [];
 
   for (const deployment of eligibleDeployments) {
     try {
@@ -128,10 +133,12 @@ export async function suggesterJob(
       ).evaluate(FeatureFlag.SuggestionRouting, {
         isDeploymentContext: true,
       });
-      const settings = await getBackgroundAgentSettingsForDeployment();
-      const channelId = resolveManagerSlackChannelId(settings, 'suggester');
+      const runtime = await getAutomationRuntime('suggester');
+      const frequency = runtime.enabled ? runtime.scheduleMode : 'off';
+      const channelId = runtime.slackChannelId;
 
-      if (settings.suggesterFrequency === 'off') {
+      if (!frequency || frequency === 'off' || !(frequency in WINDOW_DAYS)) {
+        result.skippedReason = 'Automation is disabled.';
         skipped++;
         continue;
       }
@@ -140,11 +147,11 @@ export async function suggesterJob(
         console.log(
           `${LOG_PREFIX} Skipping deployment: suggester channel not configured`,
         );
+        result.skippedReason = 'Suggester channel is not configured.';
         skipped++;
         continue;
       }
 
-      const frequency = settings.suggesterFrequency;
       const timezone = await resolveSlackWorkspaceTimezone(
         deployment,
         LOG_PREFIX,
@@ -156,11 +163,12 @@ export async function suggesterJob(
           now,
           timeZone: timezone,
           frequency,
-          lastRunAt: settings.suggesterLastRunAt,
+          lastRunAt: runtime.lastRunAt,
           scheduleHourLocal: SCHEDULE_HOUR_LOCAL,
           windowDays: WINDOW_DAYS,
         })
       ) {
+        result.skippedReason = 'Not due yet.';
         skipped++;
         continue;
       }
@@ -174,6 +182,7 @@ export async function suggesterJob(
         console.log(
           `${LOG_PREFIX} Skipping deployment: 25 or more open suggestions already exist`,
         );
+        result.skippedReason = 'Too many open suggestions already exist.';
         skipped++;
         continue;
       }
@@ -184,6 +193,8 @@ export async function suggesterJob(
         console.log(
           `${LOG_PREFIX} Skipping deployment: no repositories available for suggestion scan`,
         );
+        result.skippedReason =
+          'No repositories are available for a suggestion scan.';
         skipped++;
         continue;
       }
@@ -214,6 +225,8 @@ export async function suggesterJob(
         console.log(
           `${LOG_PREFIX} Skipping deployment: no repositories present in configured environments for suggestion scan`,
         );
+        result.skippedReason =
+          'No repositories are covered by a configured environment.';
         skipped++;
         continue;
       }
@@ -224,18 +237,22 @@ export async function suggesterJob(
         );
       }
 
-      const baseJobId = opts.bullmqJobId ?? `suggester:${crypto.randomUUID()}`;
       const routePlan = await prepareSuggestionDispatchPlan({
-        baseJobId,
         deployment,
         groupedRoutingEnabled: suggestionRoutingEnabled,
         managerChannelId: channelId,
         now,
         repositoryCoverage,
         settings: {
-          suggesterInstructions: settings.suggesterInstructions,
-          suggesterRoutingInstructions: settings.suggesterRoutingInstructions,
-          suggesterRoutingMode: settings.suggesterRoutingMode,
+          suggesterInstructions: runtime.instructions,
+          suggesterRoutingInstructions:
+            typeof runtime.settings.routingInstructions === 'string'
+              ? runtime.settings.routingInstructions
+              : null,
+          suggesterRoutingMode:
+            typeof runtime.settings.routingMode === 'string'
+              ? runtime.settings.routingMode
+              : null,
         },
       });
       const dispatchResult = await dispatchSuggestionRoutes({
@@ -249,21 +266,24 @@ export async function suggesterJob(
 
       if (dispatchResult.successfulRoutes > 0) {
         processed++;
+        result.launchedTaskId ??= dispatchResult.firstLaunchedTaskId;
       }
 
-      errors.push(...dispatchResult.errors);
+      result.errors.push(...dispatchResult.errors);
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
-      errors.push(message);
+      result.errors.push(message);
       console.error(`${LOG_PREFIX} Failed deployment: ${message}`);
     }
   }
 
   console.log(
-    `${LOG_PREFIX} Completed: ${processed} processed, ${skipped} skipped, ${errors.length} errors`,
+    `${LOG_PREFIX} Completed: ${processed} processed, ${skipped} skipped, ${result.errors.length} errors`,
   );
 
-  if (errors.length > 0) {
-    console.error(`${LOG_PREFIX} Errors:`, errors);
+  if (result.errors.length > 0) {
+    console.error(`${LOG_PREFIX} Errors:`, result.errors);
   }
+
+  return result;
 }

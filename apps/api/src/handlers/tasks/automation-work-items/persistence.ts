@@ -23,7 +23,6 @@ import type {
 export async function persistAutomationWorkItems(params: {
   sourceTaskId: string;
   automationKey: AutomationKey;
-  backgroundAutomationRunId: string | null;
   preparedWorkItems: PreparedAutomationWorkItem[];
   repositoryIds: string[];
 }): Promise<PersistedAutomationWorkItemsResult> {
@@ -116,7 +115,6 @@ export async function persistAutomationWorkItems(params: {
           (workItem, index): typeof automationWorkItems.$inferInsert => ({
             automationKey: params.automationKey,
             sourceTaskId: params.sourceTaskId,
-            backgroundAutomationRunId: params.backgroundAutomationRunId,
             title: workItem.title,
             brief: workItem.brief,
             category: workItem.category,

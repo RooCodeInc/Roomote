@@ -10,7 +10,7 @@ describe('background agent helpers', () => {
     expect(
       getBackgroundAgentFrequencyValues({
         conflictResolverFrequency: 'off',
-        coachFrequency: 'daily',
+        suggesterFrequency: 'daily',
         announcerFrequency: 'weekly',
         conflictResolverLabel: 'Roomote',
       }),
@@ -21,7 +21,7 @@ describe('background agent helpers', () => {
     expect(
       hasEnabledBackgroundAgents({
         conflictResolverFrequency: 'off',
-        coachFrequency: 'off',
+        suggesterFrequency: 'off',
         announcerFrequency: 'off',
       }),
     ).toBe(false);
@@ -31,7 +31,7 @@ describe('background agent helpers', () => {
     expect(
       hasEnabledBackgroundAgents({
         conflictResolverFrequency: 'every_6_hours',
-        coachFrequency: 'off',
+        suggesterFrequency: 'off',
         announcerFrequency: 'off',
       }),
     ).toBe(true);
@@ -41,7 +41,7 @@ describe('background agent helpers', () => {
     expect(
       hasEnabledBackgroundAgents({
         conflictResolverFrequency: 'off',
-        coachFrequency: 'off',
+        suggesterFrequency: 'off',
         announcerFrequency: 'off',
         triageFrequency: 'daily',
       }),
@@ -52,7 +52,7 @@ describe('background agent helpers', () => {
     expect(
       hasEnabledBackgroundAgents({
         conflictResolverFrequency: 'off',
-        coachFrequency: 'off',
+        suggesterFrequency: 'off',
         announcerFrequency: 'off',
         channelAutoStartEnabled: true,
       }),

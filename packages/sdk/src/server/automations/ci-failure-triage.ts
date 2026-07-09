@@ -14,16 +14,12 @@ import { createScheduledTriageJob } from './scheduled-triage-runner';
 
 // CI failure triage is webhook-driven (the workflow_run handler in apps/api
 // launches a scan as soon as a default-branch run fails). This job is never
-// registered with a scheduler; it only serves the manual Run-now trigger,
-// which sweeps all environment-backed repositories on demand.
+// registered with a scheduler; it only serves the synchronous manual Run-now
+// trigger, which sweeps all environment-backed repositories on demand.
 const MANUAL_SCAN_WINDOW_MS = 7 * 24 * 60 * 60 * 1000;
 
 export const ciFailureTriageJob = createScheduledTriageJob({
   automationKey: 'ci_failure_triage',
-  enqueueSource: 'ci_failure_triage',
-  managerChannelKind: 'ciFailureTriage',
-  frequencyKey: 'ciFailureTriageFrequency',
-  lastRunAtKey: 'ciFailureTriageLastRunAt',
   async buildScanTask({ channelId, manualTrigger }) {
     if (!(await hasActiveGitHubInstallation())) {
       return { kind: 'skip', reason: 'GitHub is not configured' };

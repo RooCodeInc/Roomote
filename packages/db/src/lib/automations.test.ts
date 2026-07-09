@@ -1,6 +1,6 @@
 import { DEFAULT_PR_REVIEWER_SETTINGS } from '@roomote/types';
 
-import { normalizeReviewCodeAutomationSettings } from './background-agent-settings';
+import { normalizeReviewCodeAutomationSettings } from './automations';
 
 describe('normalizeReviewCodeAutomationSettings', () => {
   it('defaults all-author automatic review off', () => {

@@ -1,9 +1,9 @@
 ---
 title: Agent Entry Surfaces
 status: active
-last_reviewed: 2026-06-30
+last_reviewed: 2026-07-09
 owner: engineering
-summary: Cross-surface overview of how work enters Roomote from the web dashboard, Slack, Teams, Telegram, Linear, GitHub, and programmatic launch paths, plus where those paths converge.
+summary: Cross-surface overview of how work enters Roomote from the web dashboard, Slack, Teams, Telegram, Linear, GitHub, and programmatic launch paths, the explicit initiator each surface stamps, and where those paths converge.
 ---
 
 # Agent Entry Surfaces
@@ -12,7 +12,16 @@ Roomote agents are configured in the web dashboard, but work enters the product 
 
 Use this page for the entry-path overview. Use the surface-specific docs for end-to-end behavior.
 
-Current direction: the user-facing `Generalist` agent (backed by `CloudTaskType.StandardTask`) is the delegated task-entry path for natural-language work.
+Current direction: the user-facing `Generalist` agent (backed by the `TaskPayloadKind.StandardTask` payload, `workflow: 'standard'`) is the delegated task-entry path for natural-language work.
+
+## Initiator Contract
+
+Every entry surface passes an explicit `initiator` to `enqueueCloudTask()`; it is stamped immutably onto the `tasks` row and there is no attribution inference anywhere downstream:
+
+- **Human-driven launches** (web tRPC, `POST /api/mcp/tasks` StandardTask, Teams, Telegram, linked Slack mentions, linked Linear sessions, manual `@roomote` PR mentions/follow-ups, reaction launches, onboarding queue launches) pass `{ kind: 'user', userId }`.
+- **Unlinked human actors** (a Slack or GitHub sender with no Roomote user mapping) are still `kind: 'user'`, carrying `externalId`/`displayName` — and `matchedUserId` when the surface's own mapping lookup resolves one. The initiator CHECK admits external-identity-only humans.
+- **Automation launches** (webhook PR open/sync reviews, nightly conflict scans, scheduled scans such as the suggester and triage runners, MCP recommendations, snapshot refresh, Slack channel auto-start) pass `{ kind: 'automation', key }` with the automation's key, plus `actor: { externalId, displayName }` context when the triggering webhook knows the human (e.g. the PR author on a webhook review) so display and commit authorship survive.
+- **Resumes never re-attribute**: a follow-up or resume attaches a new run to the existing task and only updates the run's `actingUserId`.
 
 ## At a Glance
 
@@ -37,7 +46,7 @@ Current entry paths:
 
 - **Explicit launch from Home**: the user chooses the workspace in [`apps/web/src/app/(authenticated)/home/Home.tsx`](../../apps/web/src/app/%28authenticated%29/home/Home.tsx), then the UI calls the web-router `cloudJobs.createStandardTask` path backed by [`apps/web/src/trpc/commands/cloud-jobs/index.ts`](../../apps/web/src/trpc/commands/cloud-jobs/index.ts).
 - **Auto launch from Home**: when the user keeps the workspace on `Auto`, `Home.tsx` first calls the web-router `cloudJobs.routeHomeTask` mutation to run the shared LLM router before launching the task. On this surface, only the workspace is routed because the delegated agent is already fixed to `Generalist`. If the router returns a `platform_answer`, Home shows that answer inline instead of creating a task.
-- **Web launch behavior**: Roomote does not expose the old Work Queue dashboard. Web-created launches pass `queueEnabled: false` into the launch helper so Home keeps the immediate `{ id, taskId }` web response and navigates directly to `/task/:taskId`.
+- **Web launch behavior**: Roomote does not expose the old Work Queue dashboard. Web-created launches call `enqueueCloudTask()` with `initiator: { kind: 'user', userId }`, `workflow: 'standard'`, `surface: 'web'`, `trigger: 'manual'`, keep the immediate `{ id, taskId }` web response, and navigate directly to `/task/:taskId`.
 - **Converged delegated entry model**: natural-language task creation uses `Generalist` / `StandardTask` as the single delegated entry path.
   The web dashboard is also the first place users manage the prerequisites for the other surfaces: repositories, environments, app connections, and integration setup.
 
@@ -131,6 +140,8 @@ GitHub can also create work without a user prompt:
 - Push events can trigger proactive conflict-resolution scans.
 - Merge events notify linked Slack threads that the PR was merged.
 
+These autonomous launches are automation-initiated: webhook reviews enqueue with `initiator: { kind: 'automation', key: 'review_code' }` and the nightly conflict scan with key `conflict_resolver`, carrying the webhook sender / PR author as `actor` context for display and commit authorship. Mention-driven review and follow-up launches are user-initiated by the mentioning human (external GitHub identity when unlinked).
+
 GitHub does not currently use the cross-surface LLM router in production entry flows. Repository context comes from the event itself, so there is no environment/workspace chooser comparable to Slack, Teams, Telegram, Linear, or Home Auto.
 
 Primary references:
@@ -146,21 +157,21 @@ Not every Roomote entry path is a user-facing surface.
 Important non-UI producers:
 
 - [`POST /api/mcp/tasks`](../../apps/api/src/handlers/tasks/launchTask.ts) returns `{ success: true, cloudJobId, taskId }`.
-- `enqueueCloudTask()` is the normal server-side launch path for trusted callers that already have a complete `CloudTask`. It validates user/environment launch eligibility, creates the linked `cloud_jobs`/`tasks` rows, runs any `beforeEnqueue` hook, and pushes the job onto the controller Redis queue.
-- Snapshot maintenance and resume helpers use the same direct cloud-job contract.
+- `enqueueCloudTask()` is the normal server-side launch path for trusted callers that already have a complete `CloudTask` plus an explicit initiator and workflow/surface/trigger classification. It validates launch eligibility, creates the `tasks` row plus its first `task_runs` row (and the `task_pull_requests` row for PR workflows), runs any `beforeEnqueue` hook, and pushes the run onto the controller Redis queue.
+- Snapshot maintenance and resume helpers use the same enqueue contract's resume shape (a new run on the existing task).
 
 These are real entry paths into the Roomote runtime, but they are not primary end-user product surfaces in the way the web dashboard, Slack, Teams, Telegram, Linear, and GitHub are.
 
 ## Where Paths Converge
 
-Fresh-task entry paths should converge on [`enqueueCloudTask()`](../../packages/cloud-agents/src/server/cloud-job-queue.ts). That helper creates the persisted `cloud_jobs`/`tasks` execution attempt immediately and then the controller launches the worker after dequeuing the Redis job entry.
+Fresh-task entry paths should converge on [`enqueueCloudTask()`](../../packages/cloud-agents/src/server/cloud-job-queue.ts). That helper creates the persisted `tasks` row plus its first `task_runs` execution attempt immediately and then the controller launches the worker after dequeuing the Redis entry.
 
 ```text
 Web UI / Slack / Teams / Telegram / Linear / GitHub / API
   -> surface-specific auth + validation
   -> agent/workspace selection
      (explicit, LLM-routed, heuristic, or event-specific)
-  -> enqueueCloudTask()
+  -> enqueueCloudTask({ task, initiator, workflow, surface, trigger, ... })
   -> controller Redis dequeue
   -> worker runtime
   -> output returned to the originating surface

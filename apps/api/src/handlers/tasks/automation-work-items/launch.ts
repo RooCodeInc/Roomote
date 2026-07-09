@@ -2,7 +2,7 @@ import {
   CloudJobQueueEnqueueError,
   enqueueCloudTask,
 } from '@roomote/cloud-agents/server';
-import { TaskPayloadKind } from '@roomote/types';
+import { TaskPayloadKind, type BackgroundAutomationKey } from '@roomote/types';
 import {
   and,
   automationWorkItems,
@@ -160,7 +160,7 @@ export type AutomationChatTarget =
 
 export async function launchActWorkItems(params: {
   /** The originating automation's key; stamped as the task initiator. */
-  automationKey: string;
+  automationKey: BackgroundAutomationKey;
   workItems: PersistedAutomationWorkItem[];
   executionTaskBootstrap: AutomationExecutionTaskBootstrap;
   chatTarget: AutomationChatTarget | null;

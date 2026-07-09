@@ -5,15 +5,13 @@ import {
   automationWorkItems,
   db,
   eq,
-  getBackgroundAgentSettingsForDeployment,
+  getAutomationRuntime,
   isNull,
-  resolveManagerSlackChannelId,
   slackInstallationChannels,
   slackInstallations,
   sql,
   taskRuns,
   tasks,
-  updateBackgroundAutomationRunArtifactsByTaskId,
   upsertBackgroundAutomationSlackThread,
 } from '@roomote/db/server';
 
@@ -40,11 +38,10 @@ export async function resolveAutomationSlackTarget(params: {
     return null;
   }
 
-  const settings = await getBackgroundAgentSettingsForDeployment();
-  const configuredChannelId = resolveManagerSlackChannelId(
-    settings,
-    params.slackConfig.managerChannelKind,
-  );
+  // Two-level fallback: the automation's own slack_channel target, then the
+  // shared manager channel (getAutomationRuntime resolves both levels).
+  const runtime = await getAutomationRuntime(params.slackConfig.automationKey);
+  const configuredChannelId = runtime.slackChannelId;
 
   const [channel] = configuredChannelId
     ? [{ channelId: configuredChannelId }]
@@ -126,12 +123,6 @@ export async function bindLateSlackThreadToTask(params: {
     if (!automationWorkItem?.sourceTaskId) {
       return;
     }
-
-    await updateBackgroundAutomationRunArtifactsByTaskId(tx, {
-      taskId: automationWorkItem.sourceTaskId,
-      slackChannelId: params.channelId,
-      threadTs: params.threadTs,
-    });
 
     await upsertBackgroundAutomationSlackThread(tx, {
       automationKey: automationWorkItem.automationKey,

@@ -132,7 +132,6 @@ function isLaunchableActWorkItem(
 export async function submitAutoActWorkItems(params: {
   userId: string | null;
   taskId: string;
-  automationRunId: string | null;
   automationKey: AutomationKey;
   payload: SuggestedTasksPayload;
   workItems: AutomationWorkItemInput[];
@@ -158,7 +157,6 @@ export async function submitAutoActWorkItems(params: {
   const persisted = await persistAutomationWorkItems({
     sourceTaskId: params.taskId,
     automationKey: params.automationKey,
-    backgroundAutomationRunId: params.automationRunId,
     preparedWorkItems,
     repositoryIds: candidateRepositories.map((repository) => repository.id),
   });

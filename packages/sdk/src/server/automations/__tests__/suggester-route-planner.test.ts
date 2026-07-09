@@ -31,7 +31,6 @@ import { prepareSuggestionDispatchPlan } from '../suggester-route-planner';
 
 function buildParams() {
   return {
-    baseJobId: 'suggester:org-1:test',
     groupedRoutingEnabled: true,
     managerChannelId: 'C123MANAGER',
     now: new Date('2026-04-09T03:00:00.000Z'),
@@ -137,7 +136,6 @@ describe('prepareSuggestionDispatchPlan', () => {
     });
     expect(plan.routes).toEqual([
       {
-        bullmqJobId: 'suggester:org-1:test:route:1',
         channelId: 'G123PRIVATE',
         channelName: '#eng-private',
         excludedGroupLabels: ['Product polish'],
@@ -150,7 +148,6 @@ describe('prepareSuggestionDispatchPlan', () => {
         suggesterInstructions: null,
       },
       {
-        bullmqJobId: 'suggester:org-1:test:route:2',
         channelId: 'C123PRODUCT',
         channelName: '#product-eng',
         excludedGroupLabels: ['Incidents'],
@@ -199,12 +196,10 @@ describe('prepareSuggestionDispatchPlan', () => {
 
     expect(plan.routes).toEqual([
       expect.objectContaining({
-        bullmqJobId: 'suggester:org-1:test:route:1',
         channelId: 'G123PRIVATE',
         groupLabel: 'Incidents',
       }),
       {
-        bullmqJobId: 'suggester:org-1:test:route:2',
         channelId: 'C123MANAGER',
         channelName: '#roomote-managers',
         excludedGroupLabels: ['Incidents'],
@@ -233,7 +228,6 @@ describe('prepareSuggestionDispatchPlan', () => {
 
     expect(plan.routes).toEqual([
       {
-        bullmqJobId: 'suggester:org-1:test',
         channelId: 'C123MANAGER',
         channelName: 'C123MANAGER',
         excludedGroupLabels: [],
@@ -259,7 +253,6 @@ describe('prepareSuggestionDispatchPlan', () => {
     expect(mockPlanSuggestionRoutes).not.toHaveBeenCalled();
     expect(plan.routes).toEqual([
       {
-        bullmqJobId: 'suggester:org-1:test',
         channelId: 'C123MANAGER',
         channelName: 'C123MANAGER',
         excludedGroupLabels: [],

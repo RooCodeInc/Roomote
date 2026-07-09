@@ -4,6 +4,7 @@ import {
   type ComputeProvider,
   computeProviders,
 } from './compute-providers/compute-provider';
+import type { BackgroundAutomationKey } from './background-agents';
 import {
   communicationProviderSchema,
   isCommunicationProvider,
@@ -109,7 +110,7 @@ export type TaskInitiator =
     }
   | {
       kind: 'automation';
-      key: string;
+      key: BackgroundAutomationKey;
       actor?: { externalId: string; displayName?: string };
     };
 

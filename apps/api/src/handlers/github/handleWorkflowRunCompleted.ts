@@ -1,5 +1,3 @@
-import crypto from 'node:crypto';
-
 import { getRedis } from '@roomote/redis';
 import {
   buildCiFailureTriagePrompt,
@@ -9,14 +7,12 @@ import {
 } from '@roomote/cloud-agents/server';
 import {
   and,
-  completeBackgroundAutomationRun,
   db,
   eq,
   getBackgroundAgentSettingsForDeployment,
   githubInstallations,
+  recordAutomationRunOutcome,
   repositories,
-  resolveManagerSlackChannelId,
-  startBackgroundAutomationRun,
   upsertBackgroundAutomationSlackThread,
 } from '@roomote/db/server';
 import {
@@ -215,7 +211,9 @@ export async function handleWorkflowRunCompleted(
     return { status: 'ok', message: 'CI failure triage is disabled' };
   }
 
-  const channelId = resolveManagerSlackChannelId(settings, 'ciFailureTriage');
+  // Two-level fallback resolved by the settings projection: automation
+  // target -> shared manager channel.
+  const channelId = settings.ciFailureTriageSlackChannelId;
 
   if (!channelId) {
     return { status: 'ok', message: 'Manager channel is not configured' };
@@ -303,18 +301,7 @@ export async function handleWorkflowRunCompleted(
     }
   }
 
-  let runId: string | null = null;
-
   try {
-    runId = (
-      await startBackgroundAutomationRun(db, {
-        automationKey: 'ci_failure_triage',
-        bullmqJobId: `ci-failure-triage:webhook:${crypto.randomUUID()}`,
-        triggerKind: 'webhook',
-        startedAt: new Date(),
-      })
-    ).id;
-
     // CI failure triage runs as the deployment service principal.
     const launchResult = await enqueueCloudTask(
       {
@@ -371,21 +358,10 @@ export async function handleWorkflowRunCompleted(
       },
     );
 
-    await completeBackgroundAutomationRun(db, {
-      runId,
-      automationKey: 'ci_failure_triage',
+    await recordAutomationRunOutcome(db, {
+      key: 'ci_failure_triage',
       status: 'succeeded',
-      finishedAt: new Date(),
-      taskId: launchResult.taskId,
-      ...(announcementTs
-        ? { slackChannelId: channelId, threadTs: announcementTs }
-        : {}),
-      metadata: {
-        cloudJobId: launchResult.id,
-        triggeringRunUrl: run.html_url,
-        workflowName,
-        headSha: run.head_sha,
-      },
+      at: new Date(),
     });
 
     if (announcementTs && slackTarget) {
@@ -415,23 +391,21 @@ export async function handleWorkflowRunCompleted(
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
 
-    if (runId) {
-      await completeBackgroundAutomationRun(db, {
-        runId,
-        automationKey: 'ci_failure_triage',
-        status: 'failed',
-        finishedAt: new Date(),
-        error: message,
-      }).catch((completionError) => {
-        console.warn(
-          `${LOG_PREFIX} Failed to record failed CI failure triage run ${runId}: ${
-            completionError instanceof Error
-              ? completionError.message
-              : String(completionError)
-          }`,
-        );
-      });
-    }
+    // Dispatch failures land on the automations row (lastFailedAt/lastError).
+    await recordAutomationRunOutcome(db, {
+      key: 'ci_failure_triage',
+      status: 'failed',
+      at: new Date(),
+      error: message,
+    }).catch((completionError: unknown) => {
+      console.warn(
+        `${LOG_PREFIX} Failed to record CI failure triage outcome: ${
+          completionError instanceof Error
+            ? completionError.message
+            : String(completionError)
+        }`,
+      );
+    });
 
     if (slackTarget && announcementTs) {
       await postAnnouncementLaunchFailureReply({

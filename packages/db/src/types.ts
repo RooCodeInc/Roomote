@@ -1,12 +1,17 @@
 import type {
-  DependabotTriageFrequency,
+  AnnouncerFrequency,
+  AutomationScanCursor,
   ChannelAutoStartLaunchMode,
   CiFailureTriageFrequency,
   CodeQualityAuditorFrequency,
+  ConflictResolverFrequency,
   ConflictResolverMaxPrAgeDays,
+  DependabotTriageFrequency,
+  ManagerStatsFrequency,
   PrReviewerSettings,
   SecurityAuditorFrequency,
   SentryTriageFrequency,
+  SuggesterFrequency,
   SuggesterRoutingMode,
 } from '@roomote/types';
 
@@ -45,9 +50,7 @@ import type {
   environmentConfigVersions,
   environmentRepositoryMappings,
   backgroundAgentSettings,
-  backgroundAutomations,
-  backgroundAutomationTargets,
-  backgroundAutomationRuns,
+  automations,
   backgroundAutomationSlackThreads,
   mcpSetupManagerNotifications,
 } from './schema';
@@ -429,6 +432,11 @@ export type CreateLinearPendingSelection = Omit<
 
 /**
  * backgroundAgentSettings
+ *
+ * The stored row holds only deployment-wide agent settings (manager channel,
+ * global instructions, style guidance, authorship rules, Slack emoji
+ * preferences). The flat settings view consumed across the product adds a
+ * per-automation projection built from the automations table.
  */
 
 export type BackgroundAgentSettings =
@@ -443,8 +451,25 @@ export type BackgroundAgentSettings =
     channelAutoStartSlackChannelIds: string[];
     channelAutoStartInstructions: string | null;
     reviewCodeSettings: PrReviewerSettings;
-    managerStatsSlackChannelId: string | null;
+    conflictResolverFrequency: ConflictResolverFrequency;
+    conflictResolverLabel: string;
+    conflictResolverInstructions: string | null;
     conflictResolverMaxPrAgeDays: ConflictResolverMaxPrAgeDays;
+    conflictResolverLastRunAt: Date | null;
+    suggesterFrequency: SuggesterFrequency;
+    suggesterSlackChannelId: string | null;
+    suggesterInstructions: string | null;
+    suggesterRoutingMode: SuggesterRoutingMode;
+    suggesterRoutingInstructions: string | null;
+    suggesterLastRunAt: Date | null;
+    announcerFrequency: AnnouncerFrequency;
+    announcerSlackChannelId: string | null;
+    announcerInstructions: string | null;
+    announcerLastRunAt: Date | null;
+    platformIssueSlackChannelId: string | null;
+    managerStatsFrequency: ManagerStatsFrequency;
+    managerStatsSlackChannelId: string | null;
+    managerStatsLastRunAt: Date | null;
     sentryTriageFrequency: SentryTriageFrequency;
     sentryTriageSlackChannelId: string | null;
     sentryTriageProjectSlugs: string | null;
@@ -452,8 +477,6 @@ export type BackgroundAgentSettings =
     dependabotTriageFrequency: DependabotTriageFrequency;
     dependabotTriageSlackChannelId: string | null;
     dependabotTriageLastRunAt: Date | null;
-    suggesterRoutingMode: SuggesterRoutingMode;
-    suggesterRoutingInstructions: string | null;
     securityAuditorFrequency: SecurityAuditorFrequency;
     securityAuditorSlackChannelId: string | null;
     securityAuditorLastRunAt: Date | null;
@@ -468,10 +491,7 @@ export type BackgroundAgentSettings =
     ciFailureTriageScanCursor?: CiFailureTriageScanCursor | null;
   };
 
-export type SecurityAuditorScanCursor = {
-  mergedAt: string;
-  externalPullRequestId: number;
-};
+export type SecurityAuditorScanCursor = AutomationScanCursor;
 
 export type CodeQualityAuditorScanCursor = SecurityAuditorScanCursor;
 
@@ -483,27 +503,12 @@ export type CreateBackgroundAgentSettings = Omit<
 >;
 
 /**
- * backgroundAutomations
+ * automations
  */
 
-export type BackgroundAutomation = typeof backgroundAutomations.$inferSelect;
+export type Automation = typeof automations.$inferSelect;
 
-export type CreateBackgroundAutomation = Omit<
-  typeof backgroundAutomations.$inferInsert,
-  Generated
->;
-
-/**
- * backgroundAutomationTargets
- */
-
-export type BackgroundAutomationTarget =
-  typeof backgroundAutomationTargets.$inferSelect;
-
-export type CreateBackgroundAutomationTarget = Omit<
-  typeof backgroundAutomationTargets.$inferInsert,
-  Generated
->;
+export type CreateAutomation = Omit<typeof automations.$inferInsert, Timestamp>;
 
 /**
  * backgroundAutomationSlackThreads
@@ -514,17 +519,5 @@ export type BackgroundAutomationSlackThread =
 
 export type CreateBackgroundAutomationSlackThread = Omit<
   typeof backgroundAutomationSlackThreads.$inferInsert,
-  Generated
->;
-
-/**
- * backgroundAutomationRuns
- */
-
-export type BackgroundAutomationRun =
-  typeof backgroundAutomationRuns.$inferSelect;
-
-export type CreateBackgroundAutomationRun = Omit<
-  typeof backgroundAutomationRuns.$inferInsert,
   Generated
 >;

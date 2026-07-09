@@ -4,7 +4,14 @@ import {
   getEnvironmentBackedCoverage,
   type RepositoryCoverage,
 } from '@roomote/cloud-agents/server';
-import { and, db, eq, isNull, mcpConnections } from '@roomote/db/server';
+import {
+  and,
+  db,
+  eq,
+  getAutomationTargetRefs,
+  isNull,
+  mcpConnections,
+} from '@roomote/db/server';
 import { ALL_REPOSITORIES, type SentryTriageFrequency } from '@roomote/types';
 
 import { loadAutomationThreadFeedbackReport } from './automation-thread-feedback';
@@ -34,17 +41,6 @@ async function hasSentryMcpConnection(): Promise<boolean> {
     .limit(1);
 
   return Boolean(connection);
-}
-
-function parseProjectSlugs(value: string | null | undefined): string[] {
-  return [
-    ...new Set(
-      (value ?? '')
-        .split(/[\s,]+/u)
-        .map((slug) => slug.trim())
-        .filter(Boolean),
-    ),
-  ].sort((left, right) => left.localeCompare(right));
 }
 
 function buildSentryFollowUpInstructions(): string {
@@ -118,11 +114,7 @@ ${recentThreadFeedback?.trim() ? `Recent feedback from earlier Sentry triage thr
 
 export const sentryTriageJob = createScheduledTriageJob({
   automationKey: 'sentry_triage',
-  enqueueSource: 'sentry_triage',
-  managerChannelKind: 'sentryTriage',
-  frequencyKey: 'sentryTriageFrequency',
-  lastRunAtKey: 'sentryTriageLastRunAt',
-  async buildScanTask({ deployment, channelId, settings, manualTrigger }) {
+  async buildScanTask({ deployment, channelId, runtime, manualTrigger }) {
     if (!(await hasSentryMcpConnection())) {
       return {
         kind: 'skip',
@@ -130,9 +122,9 @@ export const sentryTriageJob = createScheduledTriageJob({
       } satisfies TriageScanBuild;
     }
 
-    const frequency = settings.sentryTriageFrequency;
+    const frequency = runtime.scheduleMode as SentryTriageFrequency;
 
-    if (frequency === 'off') {
+    if (frequency !== 'daily' && frequency !== 'weekly') {
       return { kind: 'skip', reason: 'frequency is off' };
     }
 
@@ -158,7 +150,11 @@ export const sentryTriageJob = createScheduledTriageJob({
         description: buildSentryTriagePrompt({
           channelId,
           frequency,
-          projectSlugs: parseProjectSlugs(settings.sentryTriageProjectSlugs),
+          projectSlugs: getAutomationTargetRefs(
+            runtime,
+            'sentry',
+            'sentry_project',
+          ),
           repositoryFullNames: environmentBackedRepositories,
           repositoryCoverage,
           manualTrigger,

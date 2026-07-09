@@ -119,7 +119,6 @@ describe('persistAutomationWorkItems', () => {
     const result = await persistAutomationWorkItems({
       sourceTaskId: 'task-source-2',
       automationKey: 'sentry_triage',
-      backgroundAutomationRunId: 'run-1',
       preparedWorkItems: [
         {
           title: 'Fix parser nil access',
@@ -172,7 +171,6 @@ describe('persistAutomationWorkItems', () => {
     const result = await persistAutomationWorkItems({
       sourceTaskId: 'task-source-2',
       automationKey: 'sentry_triage',
-      backgroundAutomationRunId: 'run-1',
       preparedWorkItems: [
         {
           title: 'Retry task link for fingerprint 2',

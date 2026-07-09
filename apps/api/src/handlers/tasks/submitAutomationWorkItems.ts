@@ -1,13 +1,7 @@
 import type { Context } from 'hono';
 
 import { TaskPayloadKind } from '@roomote/types';
-import {
-  backgroundAutomationRuns,
-  db,
-  eq,
-  taskRuns,
-  tasks,
-} from '@roomote/db/server';
+import { db, eq, taskRuns, tasks } from '@roomote/db/server';
 
 import type { Variables } from '../../types';
 import type { McpAuth } from '../mcp/middleware';
@@ -49,7 +43,7 @@ export async function submitAutomationWorkItems(
   }
 
   try {
-    const [run, task, automationRun] = await Promise.all([
+    const [run, task] = await Promise.all([
       db.query.taskRuns.findFirst({
         where: eq(taskRuns.taskId, taskId),
         columns: {
@@ -62,13 +56,7 @@ export async function submitAutomationWorkItems(
         where: eq(tasks.id, taskId),
         columns: {
           initiatorUserId: true,
-        },
-      }),
-      db.query.backgroundAutomationRuns.findFirst({
-        where: eq(backgroundAutomationRuns.taskId, taskId),
-        columns: {
-          id: true,
-          automationKey: true,
+          initiatorAutomation: true,
         },
       }),
     ]);
@@ -84,9 +72,11 @@ export async function submitAutomationWorkItems(
     const payload = run.payload as SuggestedTasksPayload;
     const automationSource = payload.suggestionSource;
 
+    // The task's immutable initiator stamp is the source of truth for which
+    // automation launched this scan; the payload source must match it.
     if (
       !isAutomationWorkItemSource(automationSource) ||
-      automationSource !== automationRun?.automationKey
+      automationSource !== task?.initiatorAutomation
     ) {
       return c.json(
         {
@@ -102,7 +92,6 @@ export async function submitAutomationWorkItems(
           userId:
             auth.userId ?? run.actingUserId ?? task?.initiatorUserId ?? null,
           taskId,
-          automationRunId: automationRun.id,
           automationKey: automationSource,
           payload,
           workItems: parsedBody.data.workItems,

@@ -1,6 +1,4 @@
 import {
-  completeBackgroundAutomationRun,
-  completeBackgroundAutomationRunByJobId,
   db,
   githubInstallations,
   repositories,
@@ -8,14 +6,15 @@ import {
   taskRuns,
   tasks,
   DEFAULT_CONFLICT_RESOLUTION_IDLE_WINDOW_MS,
+  DEFAULT_CONFLICT_RESOLVER_LABEL,
   findActiveGitHubBranchWork,
+  getAutomationRuntime,
   hasRecentGitHubBranchCommit,
   isNull,
   eq,
   and,
   inArray,
-  getBackgroundAgentSettingsForDeployment,
-  startBackgroundAutomationRun,
+  recordAutomationRunOutcome,
 } from '@roomote/db/server';
 import {
   getCommitCommittedAt,
@@ -23,13 +22,24 @@ import {
   isRepoSkipped,
 } from '@roomote/github';
 import { enqueueCloudTask } from '@roomote/cloud-agents/server';
-import { TaskPayloadKind, CloudTaskStatus } from '@roomote/types';
+import {
+  TaskPayloadKind,
+  CloudTaskStatus,
+  DEFAULT_CONFLICT_RESOLUTION_MAX_PR_AGE_DAYS,
+  isConflictResolverMaxPrAgeDays,
+} from '@roomote/types';
 import { Env } from '@roomote/env';
 
 import {
   CONFLICT_RESOLUTION_COMMENT_MARKER,
   DEFAULT_CONFLICT_SCAN_LOOKBACK_DAYS,
 } from '@roomote/types';
+
+import {
+  emptyJobResult,
+  type AutomationJobResult,
+  type AutomationRunOpts,
+} from './types';
 
 const LOG_PREFIX = '[conflictScan]';
 
@@ -75,8 +85,7 @@ async function getActiveRepos(
 
 /**
  * Check if there's already an active (pending/running) conflict resolution
- * run for the given PR. We duplicate this logic here rather than importing
- * from the api app to keep the BullMQ app self-contained.
+ * run for the given PR.
  */
 async function hasActiveResolutionJob(
   repoFullName: string,
@@ -111,64 +120,72 @@ const CONFLICT_RESOLVER_INTERVAL_MS: Record<string, number> = {
 };
 
 /**
- * Scheduled job: scan all eligible repos for PRs with merge conflicts.
+ * Scan all eligible repos for PRs with merge conflicts.
  *
  * This serves as a backstop to the event-driven push handler, recovering
  * from missed webhooks or transient API failures.
  */
 export async function conflictScanJob(
-  opts: { bullmqJobId?: string; manualTrigger?: boolean } = {},
-): Promise<void> {
+  opts: AutomationRunOpts = {},
+): Promise<AutomationJobResult> {
   console.log(`${LOG_PREFIX} Starting scheduled conflict scan`);
 
+  const result = emptyJobResult();
   const installations = await findEligibleInstallations();
+
+  if (installations.length === 0) {
+    result.skippedReason = 'No active GitHub installation.';
+  }
 
   let totalCandidates = 0;
   let totalConflicting = 0;
 
   for (const { installationId } of installations) {
-    const settings = await getBackgroundAgentSettingsForDeployment();
+    const runtime = await getAutomationRuntime('conflict_resolver');
+    const frequency = runtime.enabled ? runtime.scheduleMode : 'off';
 
-    if (settings.conflictResolverFrequency === 'off') {
+    if (!frequency || frequency === 'off') {
+      result.skippedReason = 'Automation is disabled.';
       continue;
     }
 
-    // Frequency gating: skip if last run was too recent for the configured frequency
-    const intervalMs =
-      CONFLICT_RESOLVER_INTERVAL_MS[settings.conflictResolverFrequency];
+    // Frequency gating: skip if last run was too recent for the configured
+    // frequency.
+    const intervalMs = CONFLICT_RESOLVER_INTERVAL_MS[frequency];
 
-    if (intervalMs && settings.conflictResolverLastRunAt) {
-      const elapsed = Date.now() - settings.conflictResolverLastRunAt.getTime();
-
-      if (elapsed < intervalMs) {
-        console.log(
-          `${LOG_PREFIX} Skipping deployment: last run ${Math.round(elapsed / 60_000)}m ago, interval ${Math.round(intervalMs / 60_000)}m`,
-        );
-        continue;
-      }
+    if (
+      !opts.manualTrigger &&
+      intervalMs &&
+      runtime.lastRunAt &&
+      Date.now() - runtime.lastRunAt.getTime() < intervalMs
+    ) {
+      console.log(
+        `${LOG_PREFIX} Skipping deployment: last run ${Math.round((Date.now() - runtime.lastRunAt.getTime()) / 60_000)}m ago, interval ${Math.round(intervalMs / 60_000)}m`,
+      );
+      result.skippedReason = 'Not due yet.';
+      continue;
     }
+
+    const rawMaxPrAgeDays = runtime.settings.maxPrAgeDays;
+    const conflictResolverMaxPrAgeDays =
+      typeof rawMaxPrAgeDays === 'number' &&
+      isConflictResolverMaxPrAgeDays(rawMaxPrAgeDays)
+        ? rawMaxPrAgeDays
+        : DEFAULT_CONFLICT_RESOLUTION_MAX_PR_AGE_DAYS;
+    const conflictResolverLabel =
+      typeof runtime.settings.label === 'string' &&
+      runtime.settings.label.trim()
+        ? runtime.settings.label
+        : DEFAULT_CONFLICT_RESOLVER_LABEL;
 
     console.log(`${LOG_PREFIX} Scanning installation ${installationId}`);
 
-    let runId: string | null = null;
     let candidateCount = 0;
     let conflictingCount = 0;
     let launchedTaskCount = 0;
-    let launchedTaskId: string | null = null;
-    const launchedCloudJobIds: number[] = [];
     let notificationCount = 0;
 
     try {
-      runId = (
-        await startBackgroundAutomationRun(db, {
-          automationKey: 'conflict_resolver',
-          bullmqJobId:
-            opts.bullmqJobId ?? `conflict-scan:${crypto.randomUUID()}`,
-          triggerKind: opts.manualTrigger ? 'manual' : 'scheduled',
-          startedAt: new Date(),
-        })
-      ).id;
-
       const octokit = await getInstallationOctokit({ installationId });
       const repos = await getActiveRepos(installationId);
 
@@ -186,9 +203,6 @@ export async function conflictScanJob(
           continue;
         }
 
-        // Use the GitHub API to list PRs directly. We duplicate some logic
-        // here rather than importing from the api app to keep the BullMQ
-        // app self-contained and avoid cross-app dependencies.
         const oldestAllowedUpdatedAt = new Date();
         oldestAllowedUpdatedAt.setDate(
           oldestAllowedUpdatedAt.getDate() -
@@ -196,8 +210,7 @@ export async function conflictScanJob(
         );
         const oldestAllowedCreatedAt = new Date();
         oldestAllowedCreatedAt.setDate(
-          oldestAllowedCreatedAt.getDate() -
-            settings.conflictResolverMaxPrAgeDays,
+          oldestAllowedCreatedAt.getDate() - conflictResolverMaxPrAgeDays,
         );
 
         const prs = await octokit.paginate(octokit.rest.pulls.list, {
@@ -212,7 +225,7 @@ export async function conflictScanJob(
         for (const pr of prs) {
           // Must have the opt-in label
           const hasLabel = pr.labels.some(
-            (l) => l.name === settings.conflictResolverLabel,
+            (l) => l.name === conflictResolverLabel,
           );
 
           if (!hasLabel) {
@@ -324,7 +337,7 @@ export async function conflictScanJob(
                 },
                 workflow: 'pr_conflict_resolve',
                 surface: 'github',
-                trigger: 'schedule',
+                trigger: opts.manualTrigger ? 'manual' : 'schedule',
                 prLinkage: {
                   provider: 'github',
                   repository: repo.fullName,
@@ -338,8 +351,7 @@ export async function conflictScanJob(
               });
 
               launchedTaskCount++;
-              launchedTaskId ??= launchResult.taskId;
-              launchedCloudJobIds.push(launchResult.id);
+              result.launchedTaskId ??= launchResult.taskId;
               console.log(
                 `${LOG_PREFIX} Launched conflict resolution cloud job ${launchResult.id} for ${repo.fullName}#${pr.number}`,
               );
@@ -379,55 +391,33 @@ export async function conflictScanJob(
           }
         }
       }
-      await completeBackgroundAutomationRun(db, {
-        runId,
-        automationKey: 'conflict_resolver',
+
+      result.completed = true;
+
+      if (candidateCount === 0) {
+        result.skippedReason ??= 'No labeled conflict candidates found.';
+      }
+
+      await recordAutomationRunOutcome(db, {
+        key: 'conflict_resolver',
         status: candidateCount > 0 ? 'succeeded' : 'skipped',
-        finishedAt: new Date(),
-        taskId: launchedTaskId,
-        metadata: {
-          candidateCount,
-          conflictingCount,
-          launchedTaskCount,
-          ...(launchedCloudJobIds.length > 0 ? { launchedCloudJobIds } : {}),
-          notificationCount,
-          ...(candidateCount === 0 ? { reason: 'no_conflict_candidates' } : {}),
-        },
+        at: new Date(),
       });
+
+      console.log(
+        `${LOG_PREFIX} Installation ${installationId}: ${candidateCount} candidates, ${conflictingCount} conflicting, ${launchedTaskCount} launched, ${notificationCount} notified`,
+      );
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
-      if (runId) {
-        await completeBackgroundAutomationRun(db, {
-          runId,
-          automationKey: 'conflict_resolver',
-          status: 'failed',
-          finishedAt: new Date(),
-          taskId: null,
-          error: message,
-          metadata: {
-            candidateCount,
-            conflictingCount,
-            launchedTaskCount,
-            ...(launchedCloudJobIds.length > 0 ? { launchedCloudJobIds } : {}),
-            notificationCount,
-          },
-        });
-      } else if (opts.bullmqJobId) {
-        await completeBackgroundAutomationRunByJobId(db, {
-          automationKey: 'conflict_resolver',
-          bullmqJobId: opts.bullmqJobId,
-          status: 'failed',
-          finishedAt: new Date(),
-          taskId: null,
-          error: message,
-          metadata: {
-            candidateCount,
-            conflictingCount,
-            launchedTaskCount,
-            notificationCount,
-          },
-        });
-      }
+      result.errors.push(message);
+
+      await recordAutomationRunOutcome(db, {
+        key: 'conflict_resolver',
+        status: 'failed',
+        at: new Date(),
+        error: message,
+      });
+
       console.error(
         `${LOG_PREFIX} Error scanning installation ${installationId}:`,
         message,
@@ -438,6 +428,8 @@ export async function conflictScanJob(
   console.log(
     `${LOG_PREFIX} Scan complete: ${totalCandidates} candidates, ${totalConflicting} conflicting`,
   );
+
+  return result;
 }
 
 /**

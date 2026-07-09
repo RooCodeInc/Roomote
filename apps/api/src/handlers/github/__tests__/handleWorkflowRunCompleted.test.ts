@@ -4,8 +4,7 @@ const {
   mockBuildRepositoryCoverage,
   mockGetBackgroundAgentSettingsForOrg,
   mockEvaluateFeatureFlag,
-  mockStartBackgroundAutomationRun,
-  mockCompleteBackgroundAutomationRun,
+  mockRecordAutomationRunOutcome,
   mockUpsertBackgroundAutomationSlackThread,
   mockResolveAutomationSlackTarget,
   mockPostMessage,
@@ -17,8 +16,7 @@ const {
   mockBuildRepositoryCoverage: vi.fn(),
   mockGetBackgroundAgentSettingsForOrg: vi.fn(),
   mockEvaluateFeatureFlag: vi.fn(),
-  mockStartBackgroundAutomationRun: vi.fn(),
-  mockCompleteBackgroundAutomationRun: vi.fn(),
+  mockRecordAutomationRunOutcome: vi.fn(),
   mockUpsertBackgroundAutomationSlackThread: vi.fn(),
   mockResolveAutomationSlackTarget: vi.fn(),
   mockPostMessage: vi.fn(),
@@ -33,7 +31,7 @@ vi.mock('../../tasks/automation-work-items/slack.js', () => ({
 
 vi.mock('../../tasks/background-automation-slack.js', () => ({
   resolveScheduledSuggestionSlackConfig: vi.fn(() => ({
-    managerChannelKind: 'ciFailureTriage',
+    automationKey: 'ci_failure_triage',
   })),
 }));
 
@@ -87,16 +85,10 @@ vi.mock('@roomote/db/server', () => ({
   taskPullRequests: { taskId: 'taskPullRequests.taskId' },
   getBackgroundAgentSettingsForDeployment: (...args: unknown[]) =>
     mockGetBackgroundAgentSettingsForOrg(...args),
-  startBackgroundAutomationRun: (...args: unknown[]) =>
-    mockStartBackgroundAutomationRun(...args),
-  completeBackgroundAutomationRun: (...args: unknown[]) =>
-    mockCompleteBackgroundAutomationRun(...args),
+  recordAutomationRunOutcome: (...args: unknown[]) =>
+    mockRecordAutomationRunOutcome(...args),
   upsertBackgroundAutomationSlackThread: (...args: unknown[]) =>
     mockUpsertBackgroundAutomationSlackThread(...args),
-  resolveManagerSlackChannelId: vi.fn(
-    (settings: { managerSlackChannelId?: string | null }) =>
-      settings.managerSlackChannelId ?? null,
-  ),
   and: vi.fn((...args: unknown[]) => args),
   eq: vi.fn((left: unknown, right: unknown) => [left, right]),
 }));
@@ -157,7 +149,7 @@ describe('handleWorkflowRunCompleted', () => {
     mockEvaluateFeatureFlag.mockResolvedValue(true);
     mockGetBackgroundAgentSettingsForOrg.mockResolvedValue({
       ciFailureTriageFrequency: 'daily',
-      managerSlackChannelId: 'C123MANAGER',
+      ciFailureTriageSlackChannelId: 'C123MANAGER',
     });
     mockBuildRepositoryCoverage.mockResolvedValue([
       { repositoryFullName: 'acme/api', targetEnvironmentId: 'env-api' },
@@ -193,8 +185,7 @@ describe('handleWorkflowRunCompleted', () => {
       undefined as never,
     );
     mockUpsertBackgroundAutomationSlackThread.mockResolvedValue(undefined);
-    mockStartBackgroundAutomationRun.mockResolvedValue({ id: 'run-1' });
-    mockCompleteBackgroundAutomationRun.mockResolvedValue(undefined);
+    mockRecordAutomationRunOutcome.mockResolvedValue(undefined);
     mockEnqueueCloudTask.mockResolvedValue({
       success: true,
       cloudJobId: 7,
@@ -206,13 +197,6 @@ describe('handleWorkflowRunCompleted', () => {
     const result = await handleWorkflowRunCompleted(buildPayload());
 
     expect(result.status).toBe('ok');
-    expect(mockStartBackgroundAutomationRun).toHaveBeenCalledWith(
-      expect.anything(),
-      expect.objectContaining({
-        automationKey: 'ci_failure_triage',
-        triggerKind: 'webhook',
-      }),
-    );
     expect(mockEnqueueCloudTask).toHaveBeenCalledWith(
       expect.objectContaining({
         task: expect.objectContaining({
@@ -244,16 +228,11 @@ describe('handleWorkflowRunCompleted', () => {
         launchClass: 'automation',
       }),
     );
-    expect(mockCompleteBackgroundAutomationRun).toHaveBeenCalledWith(
+    expect(mockRecordAutomationRunOutcome).toHaveBeenCalledWith(
       expect.anything(),
       expect.objectContaining({
+        key: 'ci_failure_triage',
         status: 'succeeded',
-        taskId: 'task-scan-1',
-        slackChannelId: 'C123MANAGER',
-        threadTs: '1781300000.000100',
-        metadata: expect.objectContaining({
-          triggeringRunUrl: 'https://github.com/acme/api/actions/runs/42',
-        }),
       }),
     );
     expect(mockPostMessage).toHaveBeenCalledWith(
@@ -361,7 +340,7 @@ describe('handleWorkflowRunCompleted', () => {
   it('skips orgs with the automation disabled', async () => {
     mockGetBackgroundAgentSettingsForOrg.mockResolvedValue({
       ciFailureTriageFrequency: 'off',
-      managerSlackChannelId: 'C123MANAGER',
+      ciFailureTriageSlackChannelId: 'C123MANAGER',
     });
 
     const result = await handleWorkflowRunCompleted(buildPayload());
@@ -387,38 +366,20 @@ describe('handleWorkflowRunCompleted', () => {
     const result = await handleWorkflowRunCompleted(buildPayload());
 
     expect(result.message).toContain('debounced');
-    expect(mockStartBackgroundAutomationRun).not.toHaveBeenCalled();
+    expect(mockRecordAutomationRunOutcome).not.toHaveBeenCalled();
     expect(mockEnqueueCloudTask).not.toHaveBeenCalled();
   });
 
-  it('resolves the announcement thread when starting the run record throws', async () => {
-    mockStartBackgroundAutomationRun.mockRejectedValue(new Error('db down'));
-
-    const result = await handleWorkflowRunCompleted(buildPayload());
-
-    expect(result.status).toBe('error');
-    expect(mockEnqueueCloudTask).not.toHaveBeenCalled();
-    expect(mockCompleteBackgroundAutomationRun).not.toHaveBeenCalled();
-    expect(mockPostMessage).toHaveBeenCalledWith(
-      expect.objectContaining({
-        channel: 'C123MANAGER',
-        thread_ts: '1781300000.000100',
-        text: expect.stringContaining(
-          "I couldn't start the investigation for this failure.",
-        ),
-      }),
-    );
-  });
-
-  it('records a failed run and resolves the announcement thread when the launch throws', async () => {
+  it('records the failure on the automations row and resolves the announcement thread when the launch throws', async () => {
     mockEnqueueCloudTask.mockRejectedValue(new Error('enqueue failed'));
 
     const result = await handleWorkflowRunCompleted(buildPayload());
 
     expect(result.status).toBe('error');
-    expect(mockCompleteBackgroundAutomationRun).toHaveBeenCalledWith(
+    expect(mockRecordAutomationRunOutcome).toHaveBeenCalledWith(
       expect.anything(),
       expect.objectContaining({
+        key: 'ci_failure_triage',
         status: 'failed',
         error: 'enqueue failed',
       }),

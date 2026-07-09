@@ -71,10 +71,6 @@ ${recentThreadFeedback?.trim() ? `Recent feedback from earlier Dependabot triage
 
 export const dependabotTriageJob = createScheduledTriageJob({
   automationKey: 'dependabot_triage',
-  enqueueSource: 'dependabot',
-  managerChannelKind: 'dependabotTriage',
-  frequencyKey: 'dependabotTriageFrequency',
-  lastRunAtKey: 'dependabotTriageLastRunAt',
   async buildScanTask({ channelId, manualTrigger }) {
     if (!(await hasActiveGitHubInstallation())) {
       return { kind: 'skip', reason: 'GitHub is not configured' };

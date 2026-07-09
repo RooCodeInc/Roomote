@@ -6,17 +6,15 @@ vi.mock('@roomote/env', () => ({
 
 vi.mock('@roomote/db/server', () => ({
   db: {},
-  backgroundAgentSettings: {},
   githubInstallations: {},
   slackInstallations: {},
-  getBackgroundAgentSettingsForDeployment: vi.fn(),
+  getAutomationRuntime: vi.fn(),
+  recordAutomationRunOutcome: vi.fn(),
   eq: vi.fn(),
   isNull: vi.fn(),
-  resolveManagerSlackChannelId: vi.fn(),
 }));
 
-vi.mock('@roomote/sdk/server', () => ({
-  buildManagerStatsDigest: vi.fn(),
+vi.mock('../../lib/manager-slack', () => ({
   buildAutomationSettingsMessage: (text: string, hash: string) => ({
     text: text.trim(),
     blocks: [
@@ -38,7 +36,10 @@ vi.mock('@roomote/sdk/server', () => ({
       },
     ],
   }),
-  MANAGER_STATS_SETTINGS_HASH: 'weekly-manager-stats',
+}));
+
+vi.mock('../../lib/manager-stats', () => ({
+  buildManagerStatsDigest: vi.fn(),
 }));
 
 vi.mock('@roomote/slack', () => ({
@@ -47,7 +48,7 @@ vi.mock('@roomote/slack', () => ({
 
 vi.mock('../scheduling-utils', () => ({
   isWeeklyRunDueOnLocalDay: vi.fn(),
-  resolveOrgTimezone: vi.fn(),
+  resolveSlackWorkspaceTimezone: vi.fn(),
 }));
 
 import { formatManagerStatsMessage } from '../manager-stats';

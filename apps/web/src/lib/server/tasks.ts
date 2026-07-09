@@ -1,4 +1,8 @@
-import { type TaskWorkflow, getUserDisplayName } from '@roomote/types';
+import {
+  type BackgroundAutomationKey,
+  type TaskWorkflow,
+  getUserDisplayName,
+} from '@roomote/types';
 import {
   type SQL,
   db,
@@ -70,7 +74,11 @@ export function getCreatorFilterCondition(value: string): TaskFilterCondition {
   if (creatorFilter.kind === 'automation') {
     return and(
       eq(tasks.initiatorKind, 'automation'),
-      eq(tasks.initiatorAutomation, creatorFilter.key),
+      // The filter value is user input; unknown keys simply match no rows.
+      eq(
+        tasks.initiatorAutomation,
+        creatorFilter.key as BackgroundAutomationKey,
+      ),
     )!;
   }
 
