@@ -712,7 +712,12 @@ export const appRouter = createRouter({
       ),
 
     finishCreateAppManifest: protectedProcedure
-      .input(z.object({ code: z.string().min(1) }))
+      .input(
+        z.object({
+          code: z.string().min(1),
+          redirect: z.string().optional(),
+        }),
+      )
       .mutation(({ ctx: { auth }, input }) =>
         finishCreateGitHubAppManifestCommand(auth, input),
       ),
