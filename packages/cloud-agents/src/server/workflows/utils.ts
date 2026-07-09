@@ -953,3 +953,73 @@ export function filterUnifiedDiffToFiles(
 
   return kept.join('\n');
 }
+
+export interface ScopedSyncReviewDelta {
+  /** Whether the PR's authoritative Files Changed were successfully read. */
+  pullRequestFilesAvailable: boolean;
+  /** Range changed files scoped to the PR's Files Changed (unscoped on failure). */
+  changedFiles: string[];
+  /** Range diff scoped to the PR's Files Changed (unscoped/undefined on failure). */
+  diff: string | undefined;
+  /**
+   * Whether the reviewer has a delta to act on. False only when a trustworthy,
+   * successful read genuinely surfaced no PR-relevant change — a fetch
+   * failure or too-large diff keeps this true so the reviewer inspects
+   * manually rather than silently collapsing to a no-op.
+   */
+  hasReviewableChanges: boolean;
+}
+
+/**
+ * Scope a since-last-review compare range to the PR's authoritative Files
+ * Changed. The compare range uses three-dot semantics, so after a rebase it
+ * carries base-branch commits; intersecting with the PR's `base...head` files
+ * drops them. Both diff fetches return `{ diff: undefined, changedFiles: [] }`
+ * on failure/too-large, so failure is treated as "inspect manually", never as
+ * "no changes".
+ */
+export function resolveScopedSyncReviewDelta({
+  sameHeadAsLastReview,
+  pullRequestDiff,
+  rangeDiff,
+}: {
+  sameHeadAsLastReview: boolean;
+  pullRequestDiff: { diff: string | undefined; changedFiles: string[] };
+  rangeDiff: { diff: string | undefined; changedFiles: string[] };
+}): ScopedSyncReviewDelta {
+  if (sameHeadAsLastReview) {
+    return {
+      pullRequestFilesAvailable: true,
+      changedFiles: [],
+      diff: undefined,
+      hasReviewableChanges: false,
+    };
+  }
+
+  const pullRequestFilesAvailable = pullRequestDiff.diff !== undefined;
+  const rangeFetchFailed = rangeDiff.diff === undefined;
+  const pullRequestChangedFileSet = new Set(pullRequestDiff.changedFiles);
+
+  const changedFiles = pullRequestFilesAvailable
+    ? rangeDiff.changedFiles.filter((file) =>
+        pullRequestChangedFileSet.has(file),
+      )
+    : rangeDiff.changedFiles;
+
+  const diff =
+    rangeDiff.diff === undefined
+      ? undefined
+      : pullRequestFilesAvailable
+        ? filterUnifiedDiffToFiles(rangeDiff.diff, pullRequestChangedFileSet)
+        : rangeDiff.diff;
+
+  const hasReviewableChanges =
+    rangeFetchFailed || !pullRequestFilesAvailable || changedFiles.length > 0;
+
+  return {
+    pullRequestFilesAvailable,
+    changedFiles,
+    diff,
+    hasReviewableChanges,
+  };
+}

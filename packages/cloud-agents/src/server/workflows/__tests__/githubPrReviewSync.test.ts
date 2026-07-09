@@ -162,6 +162,103 @@ No actionable issues found.
     });
   });
 
+  describe('resolveScopedSyncReviewDelta unit tests', () => {
+    const prSectionDiff = [
+      'diff --git a/apps/web/src/pr.ts b/apps/web/src/pr.ts',
+      '@@ -1 +1 @@',
+      '-const a = 1;',
+      '+const a = 2;',
+    ].join('\n');
+    const rebaseRangeDiff = [
+      prSectionDiff,
+      'diff --git a/apps/api/src/base.ts b/apps/api/src/base.ts',
+      '@@ -1 +1 @@',
+      '-const b = 1;',
+      '+const b = 2;',
+    ].join('\n');
+
+    it('drops rebased-in base-branch files but keeps the PR files', () => {
+      const result = utils.resolveScopedSyncReviewDelta({
+        sameHeadAsLastReview: false,
+        pullRequestDiff: {
+          diff: prSectionDiff,
+          changedFiles: ['apps/web/src/pr.ts'],
+        },
+        rangeDiff: {
+          diff: rebaseRangeDiff,
+          changedFiles: ['apps/web/src/pr.ts', 'apps/api/src/base.ts'],
+        },
+      });
+
+      expect(result.changedFiles).toEqual(['apps/web/src/pr.ts']);
+      expect(result.diff).toContain('apps/web/src/pr.ts');
+      expect(result.diff).not.toContain('apps/api/src/base.ts');
+      expect(result.hasReviewableChanges).toBe(true);
+    });
+
+    it('collapses to no-op when the range only touched base-branch files', () => {
+      const result = utils.resolveScopedSyncReviewDelta({
+        sameHeadAsLastReview: false,
+        pullRequestDiff: {
+          diff: prSectionDiff,
+          changedFiles: ['apps/web/src/pr.ts'],
+        },
+        rangeDiff: {
+          diff: 'diff --git a/apps/api/src/base.ts b/apps/api/src/base.ts\n@@ -1 +1 @@\n-x\n+y',
+          changedFiles: ['apps/api/src/base.ts'],
+        },
+      });
+
+      expect(result.changedFiles).toEqual([]);
+      expect(result.hasReviewableChanges).toBe(false);
+    });
+
+    it('keeps reviewable changes (inspect manually) when the range fetch failed', () => {
+      const result = utils.resolveScopedSyncReviewDelta({
+        sameHeadAsLastReview: false,
+        pullRequestDiff: {
+          diff: prSectionDiff,
+          changedFiles: ['apps/web/src/pr.ts'],
+        },
+        // fetch failure / too-large: helper returns undefined diff, empty files
+        rangeDiff: { diff: undefined, changedFiles: [] },
+      });
+
+      expect(result.diff).toBeUndefined();
+      expect(result.hasReviewableChanges).toBe(true);
+    });
+
+    it('falls back to the unscoped range when the PR Files Changed fetch failed', () => {
+      const result = utils.resolveScopedSyncReviewDelta({
+        sameHeadAsLastReview: false,
+        pullRequestDiff: { diff: undefined, changedFiles: [] },
+        rangeDiff: {
+          diff: rebaseRangeDiff,
+          changedFiles: ['apps/web/src/pr.ts', 'apps/api/src/base.ts'],
+        },
+      });
+
+      expect(result.pullRequestFilesAvailable).toBe(false);
+      expect(result.changedFiles).toEqual([
+        'apps/web/src/pr.ts',
+        'apps/api/src/base.ts',
+      ]);
+      expect(result.diff).toBe(rebaseRangeDiff);
+      expect(result.hasReviewableChanges).toBe(true);
+    });
+
+    it('is a no-op when the head matches the last review', () => {
+      const result = utils.resolveScopedSyncReviewDelta({
+        sameHeadAsLastReview: true,
+        pullRequestDiff: { diff: undefined, changedFiles: [] },
+        rangeDiff: { diff: undefined, changedFiles: [] },
+      });
+
+      expect(result.hasReviewableChanges).toBe(false);
+      expect(result.changedFiles).toEqual([]);
+    });
+  });
+
   describe('getDiff unit tests', () => {
     it('should format diff without truncation when under limits', () => {
       const diff = 'line1\nline2\nline3';
