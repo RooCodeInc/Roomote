@@ -1,9 +1,9 @@
 ---
 title: Deployment & Release
 status: active
-last_reviewed: 2026-07-08
+last_reviewed: 2026-07-09
 owner: engineering
-summary: Local-first deployment and release guidance for the Roomote split, covering Docker Compose infrastructure, PM2 development services, the public self-host operator guide, the single-host Caddy production overlay, the one-command host installer and roomote host CLI, the V1 GHCR and DigitalOcean deployment flow, preview image publishing, CI, and current managed-host exclusions.
+summary: Local-first deployment and release guidance for the Roomote split, covering Docker Compose infrastructure, PM2 development services, the public self-host operator guide, the single-host Caddy production overlay, the one-command host installer and roomote host CLI, the V1 GHCR and DigitalOcean deployment flow, Changesets product versioning and develop→main promotion, preview image publishing, CI, and current managed-host exclusions.
 ---
 
 # Deployment & Release
@@ -33,12 +33,14 @@ Active infrastructure:
    (`deploy/host/roomote`) for self-serve single-host installs on an existing
    server, served at `https://get.roomote.dev` by the Vercel proxy under
    `deploy/get-roomote/`
-7. GHCR image publishing for `develop` preview tags and immutable `v*`
-   production tags
-8. Local worker release archive builds for sandbox execution
-9. `pnpm run doctor` local runtime diagnostics
-10. Validation GitHub Actions CI
-11. Railway PaaS deployment path under `deploy/railway/` — a maintained
+7. GHCR image publishing for `develop` preview tags, `main` channel tags, and
+   immutable `v*` production tags
+8. Changesets single-product versioning with automated Version / Promote PRs
+   and `v*` GitHub Releases on `main`
+9. Local worker release archive builds for sandbox execution
+10. `pnpm run doctor` local runtime diagnostics
+11. Validation GitHub Actions CI
+12. Railway PaaS deployment path under `deploy/railway/` — a maintained
     template spec (`template.yaml`, published as two marketplace templates
     that differ only in image channel: stable `:main` and latest-build
     `:develop`) plus operator guide for running the
@@ -52,7 +54,7 @@ Active infrastructure:
     domain is either entered on the deploy screen before first boot or
     attached later as a one-variable edit — see "Attaching a custom
     domain" in `deploy/railway/README.md`
-12. Coolify deployment path under `deploy/coolify/` — a maintained,
+13. Coolify deployment path under `deploy/coolify/` — a maintained,
     paste-ready Docker Compose resource (`docker-compose.yaml`) plus operator
     guide for running the published images on a Coolify-managed server.
     Coolify's proxy is the HTTPS edge (separate web/API/MinIO domains instead
@@ -61,7 +63,7 @@ Active infrastructure:
     installer-generated keypairs. Unlike Railway, the host Docker socket is
     available, so the `docker` compute provider is the template default and
     hosted compute is the documented alternative
-13. Render PaaS deployment path — a maintained Blueprint (`render.yaml` at
+14. Render PaaS deployment path — a maintained Blueprint (`render.yaml` at
     the repository root, because Render's deploy button and Blueprint sync
     only read it from there) plus an operator guide under `deploy/render/`
     for running the published images on Render with managed Postgres and Key
@@ -78,7 +80,7 @@ Active infrastructure:
     quote characters through literally, so `/bin/sh -c '...'` wrappers exit
     127 — see "Attaching a custom domain" in
     `deploy/render/README.md` for the origin-change consequence
-14. Fly.io deployment path under `deploy/fly/` — a maintained `fly.toml`
+15. Fly.io deployment path under `deploy/fly/` — a maintained `fly.toml`
     plus operator guide for running the published images as one Fly app
     whose process groups (web, api, controller, bullmq) each run in their
     own Machine. Fly Proxy is the HTTPS edge (web on 443, api on port 8443
@@ -691,6 +693,60 @@ across that removal should know:
 - `VERCEL_SANDBOX_ACCESS_TOKEN` and `VERCEL_SANDBOX_BASE_IMAGE_SNAPSHOT_ID`
   are no longer read and can be dropped from env files.
 
+## Versioning And Release Promotion
+
+Roomote uses a **single product version** for the monorepo (not per-package npm
+releases). Package.json `version` fields move in lockstep via
+[Changesets](https://github.com/changesets/changesets) with a fixed `@roomote/*`
+group. The canonical version is the root `package.json` field and appears in
+GitHub Releases as `vX.Y.Z`.
+
+Contributor entrypoint (optional; not enforced by CI):
+
+```bash
+pnpm changeset
+```
+
+Any `@roomote/*` package selection is equivalent under the fixed group. See
+[`.changeset/README.md`](../../.changeset/README.md).
+
+### Release automation
+
+1. **Version PR on `develop`** (`.github/workflows/release.yml`): on each push
+   to `develop`, `changesets/action` opens or refreshes a single PR titled
+   `Release Roomote` when pending `.changeset/*.md` files exist. Merging it
+   runs `pnpm run version` (aggregates the root `CHANGELOG.md`, runs
+   `changeset version`, syncs the root version, updates the lockfile).
+2. **Promote PR to `main`**: after the Version PR merges (no remaining pending
+   changesets and the product version is untagged), the same workflow opens or
+   refreshes a PR `develop` → `main` titled `Promote vX.Y.Z to production`.
+   Merge it with a **merge commit** (do not squash or rebase) so history stays
+   shared.
+3. **Tag + GitHub Release on `main`** (`.github/workflows/tag-release.yml`):
+   when `main` receives an untagged version, the workflow creates annotated tag
+   `vX.Y.Z` and a GitHub Release marked latest (body from the matching
+   `CHANGELOG.md` section). The existing publish workflow then builds production
+   images.
+
+### Secrets and branch rules
+
+- Prefer repository secret `RELEASE_BOT_TOKEN` (GitHub App installation token or
+  fine-grained PAT with `contents: write` and `pull-requests: write`). Workflows
+  fall back to `GITHUB_TOKEN`, but that path does not re-trigger
+  `publish-ghcr.yml` after a tag push and often does not run CI on bot-opened
+  PRs.
+- Protect `main`: require a pull request, require green CI, and prefer
+  merge-commit-only for promote PRs.
+- Product `v*` releases must stay the only **non-prerelease** GitHub Releases
+  so `releases/latest` (used by `deploy/install.sh` / get.roomote.dev) stays on
+  the product version. Manual `scripts/build-worker-release.sh --publish`
+  releases are **always** prerelease for that reason.
+
+Hotfixes follow the same path: land on `develop` (with a changeset when the
+changelog should capture the fix), merge the Version PR if needed, then merge
+the Promote PR. Image rollback remains a `roomote-deploy upgrade` tag switch to
+a prior `v*` or `main-<sha>` image.
+
 ## CI And Image Publishing
 
 `.github/workflows/CI.yml` validates code changes:
@@ -705,12 +761,14 @@ CI does not migrate hosted databases, deploy Fly apps, publish worker releases,
 or post Slack notifications.
 
 `.github/workflows/publish-ghcr.yml` publishes images to GHCR on pushes to
-`develop`, pushes of `v*` tags, and manual dispatch with an explicit version
-input. A `develop` push publishes `develop-<short-sha>` tags and passes
-`APP_ENV=preview` as the Docker build argument. `v*` tag pushes publish that tag
-with `APP_ENV=production`; manual dispatch uses the explicit version input and
-sets `APP_ENV=preview` only when dispatched against the `develop` branch. It
-builds and pushes multi-arch (linux/amd64 + linux/arm64) images:
+`develop`, `main`, pushed `v*` tags, and manual dispatch with an explicit version
+input. A `develop` push publishes `develop-<short-sha>` tags and the mutable
+`develop` channel alias with `APP_ENV=preview`. A `main` push publishes
+`main-<short-sha>` and the `main` channel. `v*` tag pushes publish that tag with
+`APP_ENV=production` and move the mutable `latest` channel alias. Manual
+dispatch publishes no alias so re-publishing an old version never moves a
+channel backwards. It builds and pushes multi-arch (linux/amd64 + linux/arm64)
+images:
 
 - `roomote-app` (shared image for web, api, controller, bullmq, preview-proxy,
   and the db-migrate one-shot)

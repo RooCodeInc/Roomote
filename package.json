@@ -1,5 +1,6 @@
 {
   "name": "roomote",
+  "version": "0.1.0",
   "license": "FCL-1.0-ALv2",
   "packageManager": "pnpm@10.29.3",
   "engines": {
@@ -40,9 +41,13 @@
     "eval:router": "pnpm --filter @roomote/cloud-agents eval:router",
     "eval:router:followup": "pnpm --filter @roomote/cloud-agents eval:router:followup",
     "eval:router:view": "pnpm --filter @roomote/cloud-agents eval:router:view",
-    "eval:router:share": "pnpm --filter @roomote/cloud-agents eval:router:share"
+    "eval:router:share": "pnpm --filter @roomote/cloud-agents eval:router:share",
+    "changeset": "changeset",
+    "version": "node scripts/release/aggregate-changelog.mjs && changeset version && node scripts/release/sync-root-version.mjs && pnpm install --lockfile-only",
+    "test:release-scripts": "node --test scripts/release/__tests__/*.test.mjs"
   },
   "devDependencies": {
+    "@changesets/cli": "^2.31.0",
     "@dotenvx/dotenvx": "^1.52.0",
     "@roomote/config-typescript": "workspace:^",
     "@types/node": "^24.10.13",
@@ -103,6 +108,7 @@
       "@better-auth/core>zod": "^4.3.6",
       "js-cookie": "3.0.7",
       "js-yaml": "4.2.0",
+      "read-yaml-file@1>js-yaml": "3.14.1",
       "nise>path-to-regexp": "8.4.0",
       "protobufjs": "7.6.3",
       "qs": "6.15.2",

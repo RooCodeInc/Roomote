@@ -1,5 +1,6 @@
 {
   "name": "@roomote/web",
+  "version": "0.1.0",
   "private": true,
   "scripts": {
     "format": "prettier --write .",
