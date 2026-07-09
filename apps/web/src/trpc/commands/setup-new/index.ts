@@ -1237,7 +1237,7 @@ export async function saveSetupNewComputeProviderChoiceCommand(
     );
 
     if (!providerStatus) {
-      throw new Error('Selected compute provider is unavailable.');
+      throw new Error('Selected sandbox provider is unavailable.');
     }
 
     const hasCredentialFields = providerStatus.fields.length > 0;
@@ -1334,7 +1334,7 @@ export async function saveSetupNewComputeConfigCommand(
       );
 
       if (!providerStatus) {
-        throw new Error('Selected compute provider is unavailable.');
+        throw new Error('Selected sandbox provider is unavailable.');
       }
 
       // When the Modal base image is not entered, not env-provided, and not

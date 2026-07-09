@@ -4,7 +4,7 @@ icon: '/logo/integrations/e2b.svg'
 description: Run Roomote tasks on E2B-hosted sandboxes using a Roomote worker template.
 ---
 
-E2B is a hosted compute provider for running task sandboxes away from the
+E2B is a hosted sandbox provider for running task sandboxes away from the
 Roomote server. Roomote uses an E2B template built from the Roomote worker
 runtime, then starts task sandboxes from that template.
 
@@ -19,7 +19,7 @@ Use E2B when:
 
 ## Configuration
 
-Add E2B from **Settings > Compute**, or provide the values as deployment env
+Add E2B from **Settings > Sandboxes**, or provide the values as deployment env
 vars:
 
 ```sh
@@ -50,7 +50,7 @@ so task startup is predictable.
 ## Verify setup
 
 1. save `E2B_API_KEY` and `E2B_TEMPLATE_ID`
-2. select E2B as the default compute provider
+2. select E2B as the default sandbox provider
 3. start a small task from an environment
 4. confirm the task starts, streams logs, and can run project commands
 5. verify preview links if the task starts a web app

@@ -226,7 +226,7 @@ for its minimal customer onboarding: authentication is a single
 `DAYTONA_API_KEY`, and the worker base image is a Daytona snapshot registered
 once from the public Roomote worker image (any publicly accessible registry
 image works), so customers never build or upload images themselves. The
-setup wizard and the Settings → Compute page can register that snapshot
+setup wizard and the Settings → Sandboxes page can register that snapshot
 automatically from the configured worker image
 (`registerDaytonaWorkerSnapshot` in
 `packages/compute-providers/src/daytona/register-daytona-snapshot.ts`); see
@@ -602,7 +602,7 @@ Runtime credential resolution is process-env-first with a database fallback:
   image is available yet, and Docker stays credentials-free and needs no
   hosted worker image.
 - Runtime env values lock their field in the UI and are never overwritten by a
-  save. Otherwise the setup wizard and the Settings → Compute save commands
+  save. Otherwise the setup wizard and the Settings → Sandboxes save commands
   persist submitted credentials, submitted infrastructure values, and the
   shared worker image as encrypted deployment env vars.
 - For Modal, `MODAL_BASE_IMAGE_REF` is derived from the effective worker image
@@ -641,9 +641,9 @@ Runtime credential resolution is process-env-first with a database fallback:
 - Registry auth (Modal ECR OIDC or registry username/password pairs),
   endpoints, and timeouts stay env-only and are not surfaced by the UI.
 
-### Settings → Compute Page
+### Settings → Sandboxes Page
 
-Admins can also manage compute providers after setup at `/settings/compute`
+Admins can also manage compute providers after setup at `/settings/sandboxes`
 (admin-only, mirroring the Settings → Communications pattern). The page is
 `ComputeSettingsPage` → `ComputeProviders` / `ComputeProviderSection` in
 `apps/web/src/components/settings/`, backed by the `compute` tRPC router
@@ -654,7 +654,7 @@ Admins can also manage compute providers after setup at `/settings/compute`
   `deployment_settings.runtime_compute_config`, and the saved shared worker
   image, plus the deployment-wide `provisioning` map of per-provider worker
   base-image runs (stale in-flight runs presented as failed).
-- The page has a shared "Hosted compute worker image" section above the
+- The page has a shared "Hosted sandbox worker image" section above the
   provider sections (`ComputeWorkerImageSection`), backed by
   `compute.saveWorkerImage` / `compute.clearWorkerImage`. Each provider section
   (`ComputeProviderSection`) shows credential fields normally plus an "Advanced

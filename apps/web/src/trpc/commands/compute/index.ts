@@ -184,7 +184,7 @@ export async function saveComputeConfigCommand(
     );
 
     if (!providerStatus) {
-      throw new Error('Selected compute provider is unavailable.');
+      throw new Error('Selected sandbox provider is unavailable.');
     }
 
     // When the Modal base image is not entered, not env-provided, and not
@@ -467,12 +467,12 @@ export async function setDefaultComputeProviderCommand(
     );
 
     if (!providerStatus) {
-      throw new Error('Selected compute provider is unavailable.');
+      throw new Error('Selected sandbox provider is unavailable.');
     }
 
     if (!providerStatus.configSatisfied) {
       throw new Error(
-        `Configure ${providerStatus.label} before making it the default compute provider.`,
+        `Configure ${providerStatus.label} before making it the default sandbox provider.`,
       );
     }
 

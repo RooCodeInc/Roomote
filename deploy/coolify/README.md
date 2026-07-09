@@ -17,12 +17,12 @@ instead. For a managed PaaS with no server of your own, see
   `/_roomote-api` path routing. The web app, the API, and MinIO each get
   their own public domain through `SERVICE_FQDN_*` declarations in the
   compose file, so `TRPC_URL` points at the api service's domain directly.
-  GitHub webhooks and compute workers call that API origin, and Slack
+  GitHub webhooks and sandbox workers call that API origin, and Slack
   webhooks arrive at the web origin and are proxied to the API internally.
 - **The Docker socket is available.** Unlike Railway, the Coolify host runs
-  Docker, so the `docker` compute provider works and is the template
+  Docker, so the `docker` sandbox provider works and is the template
   default: the controller mounts `/var/run/docker.sock` and runs task
-  workers on the same server. Hosted compute (Modal, E2B, or Daytona) is a
+  workers on the same server. Hosted sandboxes (Modal, E2B, or Daytona) are a
   config-only swap; see [Task execution](#task-execution).
 - **No openssl provisioning step.** The template sets
   `ROOMOTE_AUTO_GENERATE_KEYS=true`, so Roomote generates the `JOB_AUTH_*` /
@@ -46,15 +46,15 @@ instead. For a managed PaaS with no server of your own, see
 ## What you need
 
 - A server running Coolify with enough headroom for the stack. With the
-  default `docker` compute provider, task workers run on the same host —
-  plan for 8 GB+ RAM. With hosted compute, 4 GB+ is enough for the control
+  default `docker` sandbox provider, task workers run on the same host —
+  plan for 8 GB+ RAM. With hosted sandboxes, 4 GB+ is enough for the control
   plane.
 - DNS you control for the web, api, and minio domains, or Coolify's
   generated domains for a quick trial. Set all three to `https://` — GitHub
   App creation and webhooks require HTTPS origins, and Coolify's proxy
   issues Let's Encrypt certificates for `https://` domains automatically.
 - A model provider API key, for example OpenRouter (entered in the setup
-  wizard, not at deploy time). When using hosted compute instead of the
+  wizard, not at deploy time). When using hosted sandboxes instead of the
   Docker socket, also a [Modal](https://modal.com), [E2B](https://e2b.dev),
   or [Daytona](https://daytona.io) account.
 
@@ -122,9 +122,9 @@ Notes:
   `RELEASE_VERSION` baked into the running image, so it always matches the
   deployed build. Setting it explicitly silently pins the worker to whatever
   version the value encodes.
-- Compute provider credentials (Modal token pair when using Modal) and
+- Sandbox provider credentials (Modal token pair when using Modal) and
   model provider keys such as `OPENROUTER_API_KEY` are **not** template
-  variables. Enter them in the `/setup` wizard (or Settings → Compute /
+  variables. Enter them in the `/setup` wizard (or Settings → Sandboxes /
   Models) after first boot; they are stored encrypted in Postgres.
 - Leave `JOB_AUTH_*` and `PREVIEW_AUTH_*` unset —
   `ROOMOTE_AUTO_GENERATE_KEYS=true` manages them. If you later provide
@@ -159,7 +159,7 @@ the same server. Two things matter in this mode:
   control of the host Docker daemon. This matches the single-host
   production shape and is intended for a trusted, single-tenant server.
 
-To use hosted compute instead (no socket access, task execution bills
+To use hosted sandboxes instead (no socket access, task execution bills
 through the provider):
 
 1. Set `DEFAULT_COMPUTE_PROVIDER=modal` (or `e2b` / `daytona`) and add
@@ -196,9 +196,9 @@ addressing, and `S3_PRESIGN_ENDPOINT` must be reachable from workers.
    callback and webhook URLs from `ROOMOTE_APP_URL` and `TRPC_URL`, so no
    manual URL entry is needed.
 5. Enter the model provider key when the wizard asks. With the default
-   Docker provider there are no compute credentials to enter; with hosted
-   compute, enter the provider tokens and let the wizard build the E2B
-   template or Daytona snapshot when applicable.
+    Docker provider there are no sandbox credentials to enter; with hosted
+    sandboxes, enter the provider tokens and let the wizard build the E2B
+    template or Daytona snapshot when applicable.
 6. Pick repositories, create an environment, and run a small task end to end
    (the SELF_HOSTING.md verification checklist applies from step 2 onward).
 
@@ -233,7 +233,7 @@ wildcard-capable TLS setup on the Coolify proxy:
   config plus the generated environment values on the resource.
 - **Costs** are your server. With the default Docker provider everything —
   control plane and task execution — runs on the Coolify host. With hosted
-  compute, task execution bills through the provider and model usage bills
+  sandboxes, task execution bills through the provider and model usage bills
   through your model provider.
 
 ## Maintaining the template

@@ -802,7 +802,7 @@ describe('Home', () => {
   it('always shows the compute provider selector', () => {
     render(<Home initialPlaceholderIndex={0} />);
 
-    expect(screen.getByLabelText('Compute provider')).toBeInTheDocument();
+    expect(screen.getByLabelText('Sandbox provider')).toBeInTheDocument();
   });
 
   it('announces routing progress while auto-routing is pending', async () => {
