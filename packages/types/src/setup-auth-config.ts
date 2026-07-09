@@ -108,17 +108,20 @@ export const SETUP_AUTH_PROVIDER_CATALOG = [
         envVarName: 'TEAMS_BOT_APP_ID',
         acceptedEnvVarNames: ['TEAMS_BOT_APP_ID'],
         label: 'Teams Bot App ID',
+        required: false,
       },
       {
         envVarName: 'TEAMS_BOT_APP_PASSWORD',
         acceptedEnvVarNames: ['TEAMS_BOT_APP_PASSWORD'],
         label: 'Teams Bot App Password',
         secret: true,
+        required: false,
       },
       {
         envVarName: 'TEAMS_BOT_TENANT_ID',
         acceptedEnvVarNames: ['TEAMS_BOT_TENANT_ID'],
         label: 'Teams Bot Tenant ID',
+        required: false,
       },
       {
         envVarName: 'TEAMS_BOT_TOKEN_ENDPOINT',

@@ -27,14 +27,10 @@ type ProviderFieldStatus = ProviderStatus['fields'][number];
 
 const MASKED_VALUE = '••••••••••••••••••••••••••••';
 
-const MICROSOFT_SINGLE_APP_BOT_FIELD_SOURCES: Record<string, string> = {
-  TEAMS_BOT_APP_ID: 'ROOMOTE_AUTH_MICROSOFT_CLIENT_ID',
-  TEAMS_BOT_APP_PASSWORD: 'ROOMOTE_AUTH_MICROSOFT_CLIENT_SECRET',
-  TEAMS_BOT_TENANT_ID: 'ROOMOTE_AUTH_MICROSOFT_TENANT_ID',
-};
-
 const MICROSOFT_SETUP_HIDDEN_ENV_VAR_NAMES = new Set([
-  ...Object.keys(MICROSOFT_SINGLE_APP_BOT_FIELD_SOURCES),
+  'TEAMS_BOT_APP_ID',
+  'TEAMS_BOT_APP_PASSWORD',
+  'TEAMS_BOT_TENANT_ID',
   'TEAMS_BOT_TOKEN_ENDPOINT',
   'TEAMS_BOT_OAUTH_SCOPE',
 ]);
@@ -54,80 +50,23 @@ export function getSetupVisibleFields(provider: ProviderStatus | null) {
 }
 
 export function getSetupEffectiveFieldValue({
-  provider,
   field,
   values,
 }: {
-  provider: ProviderStatus | null;
+  provider?: ProviderStatus | null;
   field: ProviderFieldStatus;
   values: Record<string, string>;
 }) {
-  const ownValue = values[field.envVarName] ?? '';
-
-  if (ownValue.length > 0) {
-    return ownValue;
-  }
-
-  if (
-    provider?.id !== 'microsoft' ||
-    field.runtimeSatisfied ||
-    field.savedSatisfied
-  ) {
-    return '';
-  }
-
-  const sourceEnvVarName =
-    MICROSOFT_SINGLE_APP_BOT_FIELD_SOURCES[field.envVarName];
-
-  return sourceEnvVarName ? (values[sourceEnvVarName] ?? '') : '';
+  return values[field.envVarName] ?? '';
 }
 
 export function getSetupSubmitValues({
-  provider,
   values,
 }: {
-  provider: ProviderStatus | null;
+  provider?: ProviderStatus | null;
   values: Record<string, string>;
 }) {
-  if (!provider) {
-    return values;
-  }
-
-  const nextValues = { ...values };
-
-  for (const field of getSetupVisibleFields(provider)) {
-    if (nextValues[field.envVarName]?.trim()) {
-      continue;
-    }
-
-    const copiedValue = getSetupEffectiveFieldValue({
-      provider,
-      field,
-      values,
-    });
-
-    if (copiedValue.trim()) {
-      nextValues[field.envVarName] = copiedValue;
-    }
-  }
-
-  if (provider.id === 'microsoft') {
-    for (const [envVarName, sourceEnvVarName] of Object.entries(
-      MICROSOFT_SINGLE_APP_BOT_FIELD_SOURCES,
-    )) {
-      if (nextValues[envVarName]?.trim()) {
-        continue;
-      }
-
-      const copiedValue = values[sourceEnvVarName];
-
-      if (copiedValue?.trim()) {
-        nextValues[envVarName] = copiedValue;
-      }
-    }
-  }
-
-  return nextValues;
+  return values;
 }
 
 function NumberedStep({
@@ -374,8 +313,8 @@ function MicrosoftSetupExperience(props: ProviderSetupExperienceProps) {
       <NumberedStep number={2}>
         <p className="font-semibold">Enter the Microsoft app values.</p>
         <p className="text-sm text-muted-foreground max-w-xl">
-          Roomote stores these values for Microsoft sign-in and also saves
-          hidden Teams bot credentials copied from them.
+          Roomote stores these values for Microsoft sign-in. The same app also
+          powers the Teams bot at runtime.
         </p>
         <ProviderFields fields={fields} {...props} />
       </NumberedStep>
