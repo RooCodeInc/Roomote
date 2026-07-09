@@ -9,6 +9,7 @@ const {
   mockDbDelete,
   mockUpsertDeploymentEnvironmentVariables,
   mockGetPersistedEnvironmentVariableNames,
+  mockGetPersistedEnvironmentVariableValues,
   mockResolveSavedWorkerImage,
   mockRunComputeProvisioning,
 } = vi.hoisted(() => ({
@@ -20,6 +21,7 @@ const {
   })),
   mockUpsertDeploymentEnvironmentVariables: vi.fn(),
   mockGetPersistedEnvironmentVariableNames: vi.fn().mockResolvedValue([]),
+  mockGetPersistedEnvironmentVariableValues: vi.fn().mockResolvedValue({}),
   mockResolveSavedWorkerImage: vi.fn().mockResolvedValue(null),
   mockRunComputeProvisioning: vi.fn().mockResolvedValue(undefined),
 }));
@@ -62,6 +64,8 @@ vi.mock('../environment-variables', () => ({
   },
   getPersistedEnvironmentVariableNames:
     mockGetPersistedEnvironmentVariableNames,
+  getPersistedEnvironmentVariableValues:
+    mockGetPersistedEnvironmentVariableValues,
   upsertDeploymentEnvironmentVariables:
     mockUpsertDeploymentEnvironmentVariables,
 }));
@@ -465,6 +469,7 @@ describe('compute commands', () => {
         'MODAL_TOKEN_ID',
         'MODAL_TOKEN_SECRET',
         'MODAL_BASE_IMAGE_REF',
+        'MODAL_REGIONS',
       ]);
       expect(txIsNull).toHaveBeenCalledWith('env.user_id');
       expect(txAnd).toHaveBeenCalledWith(
@@ -476,6 +481,7 @@ describe('compute commands', () => {
             'MODAL_TOKEN_ID',
             'MODAL_TOKEN_SECRET',
             'MODAL_BASE_IMAGE_REF',
+            'MODAL_REGIONS',
           ],
         },
       );
@@ -490,6 +496,7 @@ describe('compute commands', () => {
               'MODAL_TOKEN_ID',
               'MODAL_TOKEN_SECRET',
               'MODAL_BASE_IMAGE_REF',
+              'MODAL_REGIONS',
             ],
           },
         ],

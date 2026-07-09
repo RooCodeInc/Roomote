@@ -54,6 +54,7 @@ import {
   isConfiguredEnvValue,
   isExitedCloudTaskStatus,
   isRequiredComputeField,
+  NON_SECRET_COMPUTE_ENV_VAR_NAMES,
   normalizeDeploymentComputeConfig,
   normalizeDeploymentModelConfig,
   getSetupNewComputeProvisioningState,
@@ -102,6 +103,7 @@ import {
 } from '../setup/shared';
 import {
   getPersistedEnvironmentVariableNames,
+  getPersistedEnvironmentVariableValues,
   upsertDeploymentEnvironmentVariables,
 } from '../environment-variables';
 import {
@@ -934,6 +936,7 @@ export async function getSetupNewStatusCommand(auth: UserAuthSuccess) {
     persistedRuntimeModelConfig,
     persistedRuntimeComputeConfig,
     envVarNames,
+    nonSecretComputeEnvValues,
     savedWorkerImage,
     chatgptConnected,
   ] = await Promise.all([
@@ -942,6 +945,9 @@ export async function getSetupNewStatusCommand(auth: UserAuthSuccess) {
     getPersistedRuntimeModelConfig(),
     getPersistedRuntimeComputeConfig(),
     getPersistedEnvironmentVariableNames(),
+    getPersistedEnvironmentVariableValues([
+      ...NON_SECRET_COMPUTE_ENV_VAR_NAMES,
+    ]),
     resolveSavedWorkerImage(),
     isChatGptSubscriptionConnected(),
   ]);
@@ -1034,6 +1040,7 @@ export async function getSetupNewStatusCommand(auth: UserAuthSuccess) {
   const computeSetup = buildSetupComputeStatus({
     runtimeEnv: process.env,
     persistedEnvVarNames: envVarNames,
+    persistedEnvVarValues: nonSecretComputeEnvValues,
     persistedComputeConfig: persistedRuntimeComputeConfig,
     selectedProvider: setupNewState.computeProvider,
     savedWorkerImage: process.env[SHARED_WORKER_IMAGE_ENV_VAR]?.trim()

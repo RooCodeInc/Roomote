@@ -17,6 +17,7 @@ import {
   isComputeInfrastructureField,
   isRequiredComputeField,
   isSetupProvisionableComputeProvider,
+  NON_SECRET_COMPUTE_ENV_VAR_NAMES,
   normalizeDeploymentComputeConfig,
   presentSetupNewComputeProvisioning,
   resolveDerivedModalBaseImageRef,
@@ -33,6 +34,7 @@ import type { UserAuthSuccess } from '@/types';
 import {
   assertAdmin,
   getPersistedEnvironmentVariableNames,
+  getPersistedEnvironmentVariableValues,
   upsertDeploymentEnvironmentVariables,
 } from '../environment-variables';
 import {
@@ -106,12 +108,16 @@ export async function getComputeStatusCommand(auth: UserAuthSuccess): Promise<
 
   const [
     persistedEnvVarNames,
+    persistedEnvVarValues,
     persistedComputeConfig,
     savedWorkerImage,
     e2bProvisioning,
     daytonaProvisioning,
   ] = await Promise.all([
     getPersistedEnvironmentVariableNames(),
+    getPersistedEnvironmentVariableValues([
+      ...NON_SECRET_COMPUTE_ENV_VAR_NAMES,
+    ]),
     getPersistedRuntimeComputeConfig(),
     resolveSavedWorkerImage(),
     getPersistedComputeProvisioning('e2b'),
@@ -122,6 +128,7 @@ export async function getComputeStatusCommand(auth: UserAuthSuccess): Promise<
     ...buildSetupComputeStatus({
       runtimeEnv: process.env,
       persistedEnvVarNames,
+      persistedEnvVarValues,
       persistedComputeConfig,
       savedWorkerImage,
     }),
