@@ -988,6 +988,142 @@ describe('createSandboxStore', () => {
     ]);
   });
 
+  it('keeps masking secret answers after a history refetch over a pending request', () => {
+    const store = createAcpStore();
+    const secretQuestions = [
+      {
+        id: 'api_key',
+        header: 'API key',
+        question: 'Enter the API key',
+        isOther: true,
+        isSecret: true,
+        options: [
+          {
+            label: 'Provided',
+            description: 'Use a provided key.',
+          },
+        ],
+      },
+    ];
+
+    // The pending request arrives in the persisted history...
+    store.getState()._mergeAcpHistory([
+      acpEnvelope({
+        id: 'persisted:secret-request',
+        ts: 9100,
+        eventType: ACP_ENVELOPE_EVENT_TYPES.RequestUserInput,
+        kind: 'unknown',
+        role: 'assistant',
+        metadata: {
+          sessionId: 'session-1',
+        },
+        payload: {
+          requestId: 'rui:session-1:turn-1:call-secret-refetch',
+          sessionId: 'session-1',
+          turnId: 'turn-1',
+          callId: 'call-secret-refetch',
+          status: 'pending',
+          questions: secretQuestions,
+        },
+      }),
+    ]);
+
+    // ...and the live response lands after the refetch. The refetch must
+    // not have discarded the pending-request lookup, or the secret answer
+    // renders raw.
+    emitAcp(
+      store,
+      acpRequestUserInputResponse({
+        requestId: 'rui:session-1:turn-1:call-secret-refetch',
+        answers: {
+          api_key: {
+            answers: ['sk-secret-value'],
+          },
+        },
+      }),
+    );
+
+    const responseMessage = store
+      .getState()
+      .messages.find((msg) => msg.role === 'user' && msg.kind === 'text');
+    expect(responseMessage?.text).toBe('[hidden]');
+    expect(responseMessage?.text).not.toContain('sk-secret-value');
+  });
+
+  it('converges todos to an intentionally empty plan on refetch', () => {
+    const store = createAcpStore();
+
+    emitAcp(
+      store,
+      acpPlan(
+        [
+          { id: '1', content: 'Investigate', status: 'in_progress' },
+          { id: '2', content: 'Fix', status: 'pending' },
+        ],
+        {
+          id: 'live-plan-clear-1',
+          ts: 9200,
+          sessionId: 'session-todo-clear',
+        },
+      ),
+    );
+    expect(store.getState().todos).toHaveLength(2);
+
+    // Server history's latest plan state is an intentionally empty list.
+    store.getState()._mergeAcpHistory([
+      acpEnvelope({
+        id: 'persisted-plan-clear',
+        ts: 9300,
+        eventType: ACP_ENVELOPE_EVENT_TYPES.Plan,
+        kind: 'plan',
+        role: 'assistant',
+        metadata: {
+          sessionId: 'session-todo-clear',
+        },
+        payload: {
+          entries: [],
+        },
+      }),
+    ]);
+
+    expect(store.getState().todos).toEqual([]);
+  });
+
+  it('drops pending user input requests when the task aborts', () => {
+    const store = createAcpStore();
+
+    emitAcp(
+      store,
+      acpRequestUserInput({
+        requestId: 'rui:session-1:turn-1:call-aborted',
+        questions: [
+          {
+            id: 'choice',
+            header: 'Choice',
+            question: 'Pick one',
+            isOther: false,
+            isSecret: false,
+            options: [{ label: 'A', description: 'Option A.' }],
+          },
+        ],
+      }),
+    );
+    expect(store.getState().pendingUserInputRequests).toHaveLength(1);
+
+    // Cancel/session-error clears the worker-side map and emits a
+    // taskAborted status; the client must drop the stale question too.
+    store.getState()._setTaskStatus({
+      phase: 'waiting_for_prompt',
+      taskStateEvent: 'taskAborted',
+      sessionId: 'session-1',
+      isConnected: true,
+      sleepRemainingMs: null,
+      lastErrorMessage: undefined,
+    });
+
+    expect(store.getState().pendingUserInputRequests).toEqual([]);
+  });
+
   it('masks secret request_user_input responses in the transcript', () => {
     const store = createAcpStore();
 

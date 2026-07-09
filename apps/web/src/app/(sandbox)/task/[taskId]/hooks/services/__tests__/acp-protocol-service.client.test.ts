@@ -61,7 +61,8 @@ describe('AcpProtocolService', () => {
       text: 'Hello ',
     });
 
-    service.setMessages(messages);
+    service.reset();
+    service.rebindMessages(messages);
     messages = service.applyOutputEvent(
       messages,
       assistantChunk('world', 2),
@@ -96,7 +97,8 @@ describe('AcpProtocolService', () => {
       partial: true,
     });
 
-    service.setMessages(messages);
+    service.reset();
+    service.rebindMessages(messages);
     messages = service.applyOutputEvent(
       messages,
       assistantChunk('world', 3),

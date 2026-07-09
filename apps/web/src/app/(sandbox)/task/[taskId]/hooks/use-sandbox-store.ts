@@ -589,6 +589,20 @@ export function createSandboxStore(
 
         set({ taskStatus: status });
 
+        // A cancel or terminal session error aborts the in-flight turn and
+        // clears the worker-side pending question map, but no
+        // request_user_input lifecycle event reaches the client. Drop the
+        // stale requests here so the question panel does not stay
+        // answerable (and swallow free-text sends) after an abort.
+        if (wireStatus?.taskStateEvent === 'taskAborted') {
+          acpService.replacePendingRequestUserInputRequests([]);
+          set((state) =>
+            state.pendingUserInputRequests.length === 0
+              ? state
+              : { ...state, pendingUserInputRequests: [] },
+          );
+        }
+
         if (status?.phase && status.phase !== 'running') {
           clearQueuedMessagesTimer();
 
@@ -849,7 +863,10 @@ export function createSandboxStore(
             ...carriedOver,
             ...rebuilt.acpMessages,
           ]);
-          const todos = rebuilt.todos.length > 0 ? rebuilt.todos : state.todos;
+          // When the fetched history carries plan state, its todo list is
+          // authoritative — including an intentionally empty one. Only fall
+          // back to the live todos when history has no plan state at all.
+          const todos = rebuilt.hasPlanHistory ? rebuilt.todos : state.todos;
 
           if (
             isSameRenderedMessageList(state.messages, normalized.messages) &&
@@ -858,11 +875,11 @@ export function createSandboxStore(
             // Nothing user-visible changed — keep the existing references
             // (no re-render), but leave the service indexes pointing at the
             // kept array's ids/positions, which are identical by check.
-            acpService.setMessages(state.messages);
+            acpService.rebindMessages(state.messages);
             return state;
           }
 
-          acpService.setMessages(normalized.messages);
+          acpService.rebindMessages(normalized.messages);
 
           return {
             ...state,
