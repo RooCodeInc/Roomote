@@ -176,6 +176,11 @@ API and upserts each repository into `repositories` with:
 - `githubRepoId = null`
 - `externalRepoId = <Azure DevOps repository UUID>`
 - `fullName = <organization>/<project>/<repository>`
+- `cloneUrl = <remoteUrl with the organization userinfo stripped>` — Azure
+  DevOps `remoteUrl` values embed the organization as the URL username
+  (`https://org@dev.azure.com/...`), which would bypass the worker's
+  `insteadOf` credential-proxy rewrite; sync stores the URL without userinfo
+  and the worker also strips userinfo defensively before cloning
 - `linkedByUserId = <admin who ran sync>`
 
 Previously active Azure DevOps repositories missing from the latest sync are
@@ -289,6 +294,7 @@ Use this sequence to verify a connection end to end:
 | `@roomote` PR comment receives a link-account reply               | Comment author has not linked Azure DevOps in Roomote                                                                         | Configure `ADO_CLIENT_ID` / `ADO_CLIENT_SECRET` for an Entra app if the row is missing, then have the commenter link Azure DevOps in Settings > Linked Accounts   |
 | `@roomote` PR comment is recorded but no task starts              | Missing mention, Roomote/deployment-token author, no active repository row, no environment mapping, or missing linked account | Confirm the comment contains `@roomote`, the author is not the Roomote bot, the commenter has linked Azure DevOps, and the synced repo has an environment mapping |
 | Worker cannot clone Azure DevOps repo                             | Repository was not synced, PAT cannot clone, or username is wrong                                                             | Confirm active Azure DevOps repository rows, token Code access, and optional username                                                                             |
+| Worker clone fails with `could not read Password for 'https://<org>@dev.azure.com/...'` | Repository row stores a clone URL with embedded userinfo (synced before URL normalization), so the git `insteadOf` proxy rewrite does not match | Re-run the Azure DevOps sync to normalize the stored clone URL, and confirm the worker release includes the userinfo-stripping clone path |
 
 ## Related Implementation
 

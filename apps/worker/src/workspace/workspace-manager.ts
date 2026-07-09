@@ -10,6 +10,7 @@ import {
   PRODUCT_NAME,
   buildRepositoryCloneUrl,
   renderManualSkillMarkdown,
+  stripCloneUrlUserInfo,
   type SourceControlProvider,
 } from '@roomote/types';
 import { sdk } from '@roomote/sdk/client';
@@ -526,12 +527,16 @@ export class WorkspaceManager {
       fullName: repoFullName,
       defaultBranch: branch || 'main',
     };
-    const cloneUrl =
+    // Stored clone URLs may embed userinfo (e.g. Azure DevOps rows synced
+    // before URLs were normalized), which would bypass the credential
+    // proxy's insteadOf prefix rewrite — always clone without it.
+    const cloneUrl = stripCloneUrlUserInfo(
       repo?.cloneUrl ??
-      buildRepositoryCloneUrl({
-        provider: sourceControlProvider,
-        repositoryFullName: fullName,
-      });
+        buildRepositoryCloneUrl({
+          provider: sourceControlProvider,
+          repositoryFullName: fullName,
+        }),
+    );
     const targetBranch = branch || defaultBranch;
 
     console.log(`Preparing ${fullName}#${targetBranch}`);

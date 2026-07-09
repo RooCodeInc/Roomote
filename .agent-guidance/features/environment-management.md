@@ -319,7 +319,11 @@ trust policies:
 
 ```typescript
 {
-  repository: string;           // GitHub repo in "owner/name" format
+  repository: string;           // Repository fullName as stored in the repositories
+                                // table: "owner/name" for GitHub/Gitea, and
+                                // multi-segment names for GitLab subgroups
+                                // ("group/subgroup/repo") and Azure DevOps
+                                // ("organization/project/repo", spaces allowed)
   branch?: string;              // Branch to checkout (default: repo default branch)
   tool_versions?: Record<string, string>;  // repo-local fallback tool versions
   commands?: Command[];         // Startup commands (install, build, etc.)
