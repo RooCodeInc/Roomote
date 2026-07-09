@@ -24,11 +24,10 @@ export function buildTeamsAppManifest(params: TeamsAppManifestParams): string {
   return JSON.stringify(
     {
       $schema:
-        'https://developer.microsoft.com/en-us/json-schemas/teams/v1.16/MicrosoftTeams.schema.json',
-      manifestVersion: '1.16',
+        'https://developer.microsoft.com/en-us/json-schemas/teams/v1.25/MicrosoftTeams.schema.json',
+      manifestVersion: '1.25',
       version: '1.0.0',
       id: params.botAppId,
-      packageName: 'com.roomote.teams',
       developer: {
         name: 'Roomote',
         websiteUrl: origin,
@@ -47,7 +46,7 @@ export function buildTeamsAppManifest(params: TeamsAppManifestParams): string {
         color: COLOR_ICON_FILENAME,
         outline: OUTLINE_ICON_FILENAME,
       },
-      accentColor: '#1A1A1A',
+      accentColor: '#d6ee26',
       webApplicationInfo: {
         id: params.botAppId,
         resource: origin,
@@ -56,11 +55,35 @@ export function buildTeamsAppManifest(params: TeamsAppManifestParams): string {
         permissions: {
           resourceSpecific: [
             {
+              name: 'Channel.Create.Group',
+              type: 'Application',
+            },
+            {
+              name: 'ChannelMember.Read.Group',
+              type: 'Application',
+            },
+            {
               name: 'ChannelMessage.Read.Group',
               type: 'Application',
             },
             {
+              name: 'ChannelMessage.Send.Group',
+              type: 'Application',
+            },
+            {
+              name: 'ChannelSettings.Read.Group',
+              type: 'Application',
+            },
+            {
               name: 'ChatMessage.Read.Chat',
+              type: 'Application',
+            },
+            {
+              name: 'ChatMessage.Send.Chat',
+              type: 'Application',
+            },
+            {
+              name: 'Member.Read.Group',
               type: 'Application',
             },
           ],
@@ -70,11 +93,12 @@ export function buildTeamsAppManifest(params: TeamsAppManifestParams): string {
         {
           botId: params.botAppId,
           scopes: ['personal', 'team', 'groupChat'],
-          supportsFiles: false,
+          supportsFiles: true,
           isNotificationOnly: false,
         },
       ],
       permissions: ['identity', 'messageTeamMembers'],
+      supportsChannelFeatures: 'tier1',
       validDomains: [appUrl.host],
     },
     null,
