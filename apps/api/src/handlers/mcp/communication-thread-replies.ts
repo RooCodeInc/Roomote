@@ -28,6 +28,42 @@ const TEAMS_THREAD_REPLY_FOOTER_LOCK_PREFIX = 'teams:thread_reply_footer_lock:';
 const TELEGRAM_THREAD_REPLY_FOOTER_LOCK_PREFIX =
   'telegram:thread_reply_footer_lock:';
 
+// Telegram clears a chat action after ~5s; re-send inside that window so the
+// "typing…" indicator spans the whole reply delivery (chunks, photo fetch,
+// footer) instead of lapsing partway through.
+const TELEGRAM_TYPING_HEARTBEAT_MS = 4_000;
+
+/**
+ * Show "typing…" while a Telegram reply is being delivered. Fires immediately,
+ * then on a heartbeat until the returned stop function runs. Entirely
+ * best-effort: a chat-action failure must never disrupt the actual reply.
+ */
+function startTelegramTypingHeartbeat(
+  provider: TelegramCommunicationProvider,
+  input: { channelId: string; threadId?: string },
+): () => void {
+  const fire = () => {
+    void provider
+      .sendChatAction({
+        channelId: input.channelId,
+        ...(input.threadId ? { threadId: input.threadId } : {}),
+      })
+      .catch((error) => {
+        console.error(
+          `[${LOG_CONTEXT}] Telegram typing action failed: ${
+            error instanceof Error ? error.message : String(error)
+          }`,
+        );
+      });
+  };
+
+  fire();
+  const timer = setInterval(fire, TELEGRAM_TYPING_HEARTBEAT_MS);
+  timer.unref?.();
+
+  return () => clearInterval(timer);
+}
+
 async function createTeamsCommunicationProvider(): Promise<TeamsCommunicationProvider | null> {
   return createTeamsCommunicationProviderFromRuntimeCredentials();
 }
@@ -249,21 +285,34 @@ async function sendTelegramThreadReply(params: {
     );
   }
 
-  const reply = await provider.postMessage({
+  // The reply text is already composed by the worker; the only window the API
+  // owns is this delivery. Show "typing…" across it so the message(s) don't
+  // land abruptly after the silence, and stop the instant delivery finishes.
+  const stopTyping = startTelegramTypingHeartbeat(provider, {
     channelId,
     ...(threadId ? { threadId } : {}),
-    replyToMessageId: replyToMessageId ?? undefined,
-    ...(text ? { text } : {}),
-    textFormat: 'markdown',
-    images,
   });
 
-  await postTelegramThreadReplyFooterBestEffort({
-    provider,
-    cloudJob: params.cloudJob,
-    channelId,
-    threadId,
-  });
+  let reply;
+  try {
+    reply = await provider.postMessage({
+      channelId,
+      ...(threadId ? { threadId } : {}),
+      replyToMessageId: replyToMessageId ?? undefined,
+      ...(text ? { text } : {}),
+      textFormat: 'markdown',
+      images,
+    });
+
+    await postTelegramThreadReplyFooterBestEffort({
+      provider,
+      cloudJob: params.cloudJob,
+      channelId,
+      threadId,
+    });
+  } finally {
+    stopTyping();
+  }
 
   return new Response(JSON.stringify({ messageTs: reply.messageId }), {
     headers: { 'content-type': 'application/json' },
