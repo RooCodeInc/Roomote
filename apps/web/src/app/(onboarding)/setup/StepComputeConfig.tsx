@@ -79,9 +79,18 @@ export function StepComputeConfig({
       )?.fields ?? []
     );
   }, [computeSetup.providers, effectiveSelectedProviderId]);
+  const nonSecretInitialValuesKey = selectedProviderFields
+    .filter((field) => !isSecretComputeField(field))
+    .map(
+      (field) =>
+        `${field.envVarName}:${field.savedValue ?? ''}:${field.savedSatisfied}:${field.runtimeSatisfied}`,
+    )
+    .join('|');
   const nonSecretInitialValues = useMemo(
     () => getNonSecretFieldInitialValues(selectedProviderFields),
-    [selectedProviderFields],
+    // selectedProviderFields is intentionally omitted; content key drives updates.
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- content-keyed
+    [nonSecretInitialValuesKey],
   );
   const [values, setValues] = useState<Record<string, string>>(
     nonSecretInitialValues,

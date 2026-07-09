@@ -129,6 +129,7 @@ describe('compute commands', () => {
     'MODAL_TOKEN_ID',
     'MODAL_TOKEN_SECRET',
     'MODAL_BASE_IMAGE_REF',
+    'MODAL_REGIONS',
     'E2B_API_KEY',
     'E2B_TEMPLATE_ID',
     'E2B_DOMAIN',
@@ -295,6 +296,9 @@ describe('compute commands', () => {
     });
 
     it('clears a saved optional non-secret field when the operator empties it', async () => {
+      // Saved-only path: runtime MODAL_REGIONS would lock the field and
+      // skip delete. MANAGED_COMPUTE_ENV_VARS already clears it per-test.
+      delete process.env.MODAL_REGIONS;
       mockGetPersistedEnvironmentVariableNames.mockResolvedValue([
         'MODAL_TOKEN_ID',
         'MODAL_TOKEN_SECRET',

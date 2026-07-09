@@ -135,9 +135,21 @@ export function ComputeProviderSection({
   const [expanded, setExpanded] = useState(
     () => hasNoInputFields || hasConfiguredValues,
   );
+  // Key off field content, not array identity — query/refetch creates a new
+  // fields array each time and must not wipe in-progress edits (including
+  // clearing a saved optional non-secret value, which enables Save).
+  const nonSecretInitialValuesKey = provider.fields
+    .filter((field) => !isSecretComputeField(field))
+    .map(
+      (field) =>
+        `${field.envVarName}:${field.savedValue ?? ''}:${field.savedSatisfied}:${field.runtimeSatisfied}`,
+    )
+    .join('|');
   const nonSecretInitialValues = useMemo(
     () => getNonSecretFieldInitialValues(provider.fields),
-    [provider.fields],
+    // provider.fields is intentionally omitted; content key drives updates.
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- content-keyed
+    [nonSecretInitialValuesKey],
   );
   const [values, setValues] = useState<Record<string, string>>(
     () => nonSecretInitialValues,
