@@ -18,11 +18,28 @@ import { workItems } from '../schema';
  * stale `launching` here fixes that for all surfaces at once. The
  * `launched_task_id IS NULL` guard additionally blocks relaunch of an item that
  * already produced a task, even if its status is momentarily inconsistent.
+ *
+ * Fencing token: `claimWorkItem` stamps `launch_claimed_at = now` and returns
+ * the claimed row, so the returned `launchClaimedAt` IS the caller's per-claim
+ * ownership token. `finalizeWorkItemLaunched` and `releaseWorkItemClaim` require
+ * that token and match it in their WHERE guard, so a slow launcher whose stale
+ * `launching` claim was reclaimed by a second launcher (reclaims are ≥10 minutes
+ * apart, so the timestamps cannot collide) deterministically fails to finalize
+ * or release and cannot stomp the new claimant's state. Callers thread the
+ * claimed row's `launchClaimedAt` straight through to their finalize/release.
  */
 export const WORK_ITEM_LAUNCH_STALE_CLAIM_MS = 10 * 60 * 1000;
 
-/** All columns of a work_items row (what the claim CAS returns). */
-export type ClaimedWorkItem = typeof workItems.$inferSelect;
+/**
+ * All columns of a work_items row (what the claim CAS returns). `claimWorkItem`
+ * always stamps `launch_claimed_at = now`, so on a successful claim that column
+ * is guaranteed non-null — the caller's fencing token to thread through
+ * finalize/release.
+ */
+export type ClaimedWorkItem = Omit<
+  typeof workItems.$inferSelect,
+  'launchClaimedAt'
+> & { launchClaimedAt: Date };
 
 /**
  * CAS a work item from a claimable state into `launching`, stamping the claim.
@@ -81,20 +98,28 @@ export async function claimWorkItem(
     )
     .returning();
 
-  return claimed ?? null;
+  // The CAS always sets launch_claimed_at = now, so the returned row's
+  // launchClaimedAt is non-null; narrow it into the fencing-token type.
+  return (claimed as ClaimedWorkItem | undefined) ?? null;
 }
 
 /**
  * Release an in-flight claim back to `open` after a launch failed before the
  * cloud task started, clearing the claim so a later trigger can retry.
  *
- * Guarded on `status = 'launching'`: it never reverts a `launched` item (whose
- * `launched_task_id` is set), which would otherwise risk a double launch.
+ * Guarded on `status = 'launching'` AND `launch_claimed_at = claimedAt` (the
+ * fencing token returned by `claimWorkItem`): it never reverts a `launched` item
+ * (whose `launched_task_id` is set), which would otherwise risk a double launch,
+ * and a slow launcher whose claim was already reclaimed cannot revert the new
+ * claimant's `launching` state back to `open`. Returns false when the guard did
+ * not match (already launched, or the claim was stolen).
  */
 export async function releaseWorkItemClaim(
   tx: DatabaseOrTransaction,
   params: {
     id: string;
+    /** The `launchClaimedAt` from the claimed row — the caller's claim token. */
+    claimedAt: Date;
     /** Also clear `dismissed_at` (web surface releases to a clean `open`). */
     clearDismissedAt?: boolean;
     /** Extra predicates ANDed into the guard. */
@@ -114,6 +139,7 @@ export async function releaseWorkItemClaim(
       and(
         eq(workItems.id, params.id),
         eq(workItems.status, 'launching'),
+        eq(workItems.launchClaimedAt, params.claimedAt),
         ...(params.extraConditions ?? []),
       ),
     )
@@ -125,15 +151,22 @@ export async function releaseWorkItemClaim(
 /**
  * Finalize a successful launch: `launching` -> `launched` with the task link.
  *
- * Guarded on `status = 'launching'` so it is idempotent under a race (returns
- * false when another launcher already finalized). Surface-specific side effects
- * (e.g. stamping a Slack thread) stay with the caller.
+ * Guarded on `status = 'launching'` AND `launch_claimed_at = claimedAt` (the
+ * fencing token returned by `claimWorkItem`) so it is idempotent under a race
+ * (returns false when another launcher already finalized) AND so a slow launcher
+ * whose claim was reclaimed cannot finalize onto the new claimant's claim. When
+ * this returns false after the caller already enqueued a task, that task is
+ * orphaned (unlinked from the work item) and the caller must handle it (log
+ * loudly and best-effort cancel). Surface-specific side effects (e.g. stamping a
+ * Slack thread) stay with the caller.
  */
 export async function finalizeWorkItemLaunched(
   tx: DatabaseOrTransaction,
   params: {
     id: string;
     taskId: string | null;
+    /** The `launchClaimedAt` from the claimed row — the caller's claim token. */
+    claimedAt: Date;
     /** Clear a prior `launch_error` (automation act items). */
     clearLaunchError?: boolean;
     /** Clear `dismissed_at` (web relaunch of a dismissed suggestion). */
@@ -152,7 +185,13 @@ export async function finalizeWorkItemLaunched(
       ...(params.clearDismissedAt ? { dismissedAt: null } : {}),
       updatedAt: now,
     })
-    .where(and(eq(workItems.id, params.id), eq(workItems.status, 'launching')))
+    .where(
+      and(
+        eq(workItems.id, params.id),
+        eq(workItems.status, 'launching'),
+        eq(workItems.launchClaimedAt, params.claimedAt),
+      ),
+    )
     .returning({ id: workItems.id });
 
   return Boolean(updated);

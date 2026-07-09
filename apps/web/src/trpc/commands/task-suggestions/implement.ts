@@ -121,11 +121,22 @@ export async function implementTaskSuggestionCommand(
 
     // Record the launch link on the suggestion work_item. Previously the
     // web-launched suggestion dropped the task association entirely.
-    await finalizeWorkItemLaunched(db, {
+    const finalized = await finalizeWorkItemLaunched(db, {
       id: input.suggestionId,
       taskId: launchResult.taskId,
+      claimedAt: claimedSuggestion.launchClaimedAt,
       clearDismissedAt: true,
     });
+
+    if (!finalized) {
+      // The task is already enqueued but the fencing guard rejected the
+      // finalize (our stale claim was reclaimed by another launcher). The task
+      // now runs unlinked from the work item. No cleanly callable enqueue-level
+      // cancel helper is exposed to this surface, so log loudly for triage.
+      console.warn(
+        `[implementTaskSuggestion] finalize lost the fencing guard for work item ${input.suggestionId}; orphaned task ${launchResult.taskId} runs unlinked (claim reclaimed by another launcher).`,
+      );
+    }
 
     return {
       success: true as const,
@@ -137,6 +148,7 @@ export async function implementTaskSuggestionCommand(
     // shared guard requires status='launching').
     await releaseWorkItemClaim(db, {
       id: input.suggestionId,
+      claimedAt: claimedSuggestion.launchClaimedAt,
       clearDismissedAt: true,
       extraConditions: [eq(workItems.kind, 'suggestion')],
     });

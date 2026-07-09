@@ -184,6 +184,7 @@ export async function launchActWorkItems(params: {
         const startedWorkItem = await finalizeWorkItemLaunched(db, {
           id: workItem.id,
           taskId,
+          claimedAt: claimedWorkItem.launchClaimedAt,
           clearLaunchError: true,
         });
 

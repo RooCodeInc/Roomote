@@ -89,13 +89,32 @@ export function deriveTaskStateFromRuns(
  * which sibling finishes, and a cancel-before-start of an only-run still
  * resolves the task to 'canceled'.
  *
- * Writes `state` (+`updatedAt`) only when it actually changes. Call inside the
- * same transaction as the run-status write so the two stay consistent.
+ * Writes `state` (+`updatedAt`) only when it actually changes.
+ *
+ * MUST be called inside the same transaction that wrote the run-status change
+ * this sync reflects (`tx` is a transaction, never a bare connection). The
+ * derivation reads every sibling run, so two sibling runs finishing
+ * concurrently could otherwise each miss the other's still-uncommitted terminal
+ * write under READ COMMITTED, both derive 'active', and leave the task stuck
+ * 'active' after both commit. To serialize, this acquires a `SELECT ... FOR
+ * UPDATE` row lock on the owning `tasks` row before reading the runs: the second
+ * transaction blocks on the lock until the first commits, and because each
+ * statement takes a fresh snapshot under READ COMMITTED its subsequent runs read
+ * then sees the committed sibling status.
  */
 export async function syncTaskStateFromRuns(
   tx: DatabaseOrTransaction,
   taskId: string,
 ): Promise<void> {
+  // Serialize concurrent sibling-run syncs on the owning task row. This lock is
+  // only meaningful inside a transaction (the invariant above); it is released
+  // when that transaction commits/rolls back.
+  await tx
+    .select({ id: tasks.id })
+    .from(tasks)
+    .where(eq(tasks.id, taskId))
+    .for('update');
+
   const runs = await tx
     .select({
       id: taskRuns.id,

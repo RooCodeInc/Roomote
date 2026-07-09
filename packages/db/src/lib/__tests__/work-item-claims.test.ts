@@ -166,9 +166,10 @@ describe('work_items launch claim helpers', () => {
   });
 
   it('release reverts a launching item to open but never a launched one', async () => {
+    const launchingClaimedAt = new Date();
     const launchingId = await seedWorkItem({
       status: 'launching',
-      launchClaimedAt: new Date(),
+      launchClaimedAt: launchingClaimedAt,
     });
     const launchedTaskId = await seedLaunchedTaskId();
     const launchedId = await seedWorkItem({
@@ -178,9 +179,11 @@ describe('work_items launch claim helpers', () => {
 
     const releasedLaunching = await releaseWorkItemClaim(db, {
       id: launchingId,
+      claimedAt: launchingClaimedAt,
     });
     const releasedLaunched = await releaseWorkItemClaim(db, {
       id: launchedId,
+      claimedAt: new Date(),
     });
 
     expect(releasedLaunching).toBe(true);
@@ -196,18 +199,21 @@ describe('work_items launch claim helpers', () => {
 
   it('finalize is idempotent under a race', async () => {
     const launchedTaskId = await seedLaunchedTaskId();
+    const claimedAt = new Date();
     const id = await seedWorkItem({
       status: 'launching',
-      launchClaimedAt: new Date(),
+      launchClaimedAt: claimedAt,
     });
 
     const first = await finalizeWorkItemLaunched(db, {
       id,
       taskId: launchedTaskId,
+      claimedAt,
     });
     const second = await finalizeWorkItemLaunched(db, {
       id,
       taskId: launchedTaskId,
+      claimedAt,
     });
 
     expect(first).toBe(true);
@@ -215,6 +221,95 @@ describe('work_items launch claim helpers', () => {
     const row = await readStatus(id);
     expect(row?.status).toBe('launched');
     expect(row?.launchedTaskId).toBe(launchedTaskId);
+  });
+
+  it('fresh claim -> finalize with the matching token succeeds', async () => {
+    const launchedTaskId = await seedLaunchedTaskId();
+    const id = await seedWorkItem();
+
+    const claimed = await claimWorkItem(db, { id });
+    expect(claimed).not.toBeNull();
+
+    const finalized = await finalizeWorkItemLaunched(db, {
+      id,
+      taskId: launchedTaskId,
+      claimedAt: claimed!.launchClaimedAt,
+    });
+
+    expect(finalized).toBe(true);
+    const row = await readStatus(id);
+    expect(row?.status).toBe('launched');
+    expect(row?.launchedTaskId).toBe(launchedTaskId);
+  });
+
+  it('finalize with a stale token fails after a reclaim (fencing)', async () => {
+    const launchedTaskId = await seedLaunchedTaskId();
+    // Seed a stale launching claim so the second launcher can reclaim it.
+    const staleClaimedAt = new Date(
+      Date.now() - WORK_ITEM_LAUNCH_STALE_CLAIM_MS - 60_000,
+    );
+    const id = await seedWorkItem({
+      status: 'launching',
+      launchClaimedAt: staleClaimedAt,
+    });
+
+    // The second launcher reclaims, minting a fresh token.
+    const reclaimed = await claimWorkItem(db, { id });
+    expect(reclaimed).not.toBeNull();
+    expect(reclaimed!.launchClaimedAt.getTime()).toBeGreaterThan(
+      staleClaimedAt.getTime(),
+    );
+
+    // The original (slow) launcher's stale token no longer matches, so its
+    // finalize is rejected and cannot stomp the new claimant's state.
+    const staleFinalize = await finalizeWorkItemLaunched(db, {
+      id,
+      taskId: launchedTaskId,
+      claimedAt: staleClaimedAt,
+    });
+    expect(staleFinalize).toBe(false);
+    expect((await readStatus(id))?.status).toBe('launching');
+
+    // The new claimant's matching token still finalizes.
+    const freshFinalize = await finalizeWorkItemLaunched(db, {
+      id,
+      taskId: launchedTaskId,
+      claimedAt: reclaimed!.launchClaimedAt,
+    });
+    expect(freshFinalize).toBe(true);
+    const row = await readStatus(id);
+    expect(row?.status).toBe('launched');
+    expect(row?.launchedTaskId).toBe(launchedTaskId);
+  });
+
+  it('release with a stale token fails after a reclaim (fencing)', async () => {
+    const staleClaimedAt = new Date(
+      Date.now() - WORK_ITEM_LAUNCH_STALE_CLAIM_MS - 60_000,
+    );
+    const id = await seedWorkItem({
+      status: 'launching',
+      launchClaimedAt: staleClaimedAt,
+    });
+
+    const reclaimed = await claimWorkItem(db, { id });
+    expect(reclaimed).not.toBeNull();
+
+    // The slow launcher's stale release must not revert the new claimant's
+    // launching state back to open.
+    const staleRelease = await releaseWorkItemClaim(db, {
+      id,
+      claimedAt: staleClaimedAt,
+    });
+    expect(staleRelease).toBe(false);
+    expect((await readStatus(id))?.status).toBe('launching');
+
+    // The new claimant's matching token still releases.
+    const freshRelease = await releaseWorkItemClaim(db, {
+      id,
+      claimedAt: reclaimed!.launchClaimedAt,
+    });
+    expect(freshRelease).toBe(true);
+    expect((await readStatus(id))?.status).toBe('open');
   });
 });
 

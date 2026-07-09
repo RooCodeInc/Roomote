@@ -109,11 +109,14 @@ async function markWorkItemLaunched(params: {
   workItemId: string;
   trackedMessageId: string;
   taskId: string | null;
+  /** The claiming launcher's fencing token (claimed row's `launchClaimedAt`). */
+  claimedAt: Date;
   launchedThreadTs?: string;
 }): Promise<boolean> {
   const finalized = await finalizeWorkItemLaunched(db, {
     id: params.workItemId,
     taskId: params.taskId,
+    claimedAt: params.claimedAt,
   });
 
   if (!finalized) {
@@ -363,16 +366,19 @@ async function launchTaskSuggestionTaskFromReaction({
     return true;
   }
 
-  const didClaimSuggestionLaunch = Boolean(
-    await claimWorkItem(db, { id: workItemId }),
-  );
+  const claimedWorkItem = await claimWorkItem(db, { id: workItemId });
 
-  if (!didClaimSuggestionLaunch) {
+  if (!claimedWorkItem) {
     return true;
   }
 
+  // The claim's `launch_claimed_at` is this launcher's fencing token; thread it
+  // through every finalize/release so a slow launcher whose stale claim was
+  // reclaimed cannot stomp the new claimant's state.
+  const claimedAt = claimedWorkItem.launchClaimedAt;
+
   if (!suggestionWorkspace) {
-    await releaseWorkItemClaim(db, { id: workItemId });
+    await releaseWorkItemClaim(db, { id: workItemId, claimedAt });
 
     apiLogger.warn(
       `${logPrefix} suggestion launch failed before task start: ${launchFailureReason ?? 'missing launch workspace'}`,
@@ -440,7 +446,7 @@ async function launchTaskSuggestionTaskFromReaction({
     });
 
     if (!seededThreadTs) {
-      await releaseWorkItemClaim(db, { id: workItemId });
+      await releaseWorkItemClaim(db, { id: workItemId, claimedAt });
       apiLogger.debug(
         `${logPrefix} failed to seed top-level Slack message; launch canceled`,
       );
@@ -484,12 +490,18 @@ async function launchTaskSuggestionTaskFromReaction({
       workItemId,
       trackedMessageId: suggestionCard.id,
       taskId: cloudJob.taskId,
+      claimedAt,
       launchedThreadTs: seededThreadTs,
     });
 
     if (!launched) {
-      apiLogger.debug(
-        `[SlackWebhook] setup suggestion reaction became idempotent for ${channelId}:${messageTs}`,
+      // The task was already enqueued but the fencing guard rejected the
+      // finalize (our stale claim was reclaimed by another launcher), so this
+      // task now runs unlinked from the work item. No cleanly callable
+      // enqueue-level cancel helper is exposed to this surface, so log loudly
+      // with both ids for triage.
+      apiLogger.warn(
+        `${logPrefix} finalize lost the fencing guard for work item ${workItemId}; orphaned task ${cloudJob.taskId ?? 'null'} runs unlinked (claim reclaimed by another launcher)`,
       );
       return false;
     }
@@ -516,7 +528,7 @@ async function launchTaskSuggestionTaskFromReaction({
           .catch(() => {});
       }
 
-      await releaseWorkItemClaim(db, { id: workItemId });
+      await releaseWorkItemClaim(db, { id: workItemId, claimedAt });
       apiLogger.debug(
         `${logPrefix} reaction launch failed before cloud job start; claim released`,
       );
@@ -524,12 +536,22 @@ async function launchTaskSuggestionTaskFromReaction({
     }
 
     try {
-      await markWorkItemLaunched({
+      const recovered = await markWorkItemLaunched({
         workItemId,
         trackedMessageId: suggestionCard.id,
         taskId: cloudJob.taskId,
+        claimedAt,
         launchedThreadTs: seededThreadTs,
       });
+
+      if (!recovered) {
+        // Same orphan case as the happy path: the task is enqueued but the
+        // fencing guard rejected the finalize (claim reclaimed). Log loudly
+        // with both ids for triage; no clean enqueue-level cancel is available.
+        apiLogger.warn(
+          `${logPrefix} finalize lost the fencing guard during post-enqueue recovery for work item ${workItemId}; orphaned task ${cloudJob.taskId ?? 'null'} runs unlinked (claim reclaimed by another launcher)`,
+        );
+      }
 
       apiLogger.debug(
         `${logPrefix} reaction launch recovered after post-enqueue failure taskId=${cloudJob.taskId} launchedThreadTs=${seededThreadTs ?? 'unknown'}`,
@@ -558,7 +580,7 @@ async function launchTaskSuggestionTaskFromReaction({
       return true;
     } catch (recoveryError) {
       try {
-        await releaseWorkItemClaim(db, { id: workItemId });
+        await releaseWorkItemClaim(db, { id: workItemId, claimedAt });
       } catch (releaseError) {
         console.warn(
           `${logPrefix} failed to release claim after recovery failure: ${formatErrorForLog(releaseError)}`,
