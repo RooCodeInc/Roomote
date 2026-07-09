@@ -198,17 +198,54 @@ export function readOpenCodeDebugConfig(): string {
   });
 }
 
-function stopChildProcess(proc: ChildProcess): void {
-  if (proc.exitCode !== null || proc.signalCode !== null) {
+function signalProcessTree(proc: ChildProcess, signal: NodeJS.Signals): void {
+  if (proc.exitCode !== null || proc.signalCode !== null || !proc.pid) {
     return;
   }
 
-  proc.kill('SIGTERM');
-  setTimeout(() => {
-    if (proc.exitCode === null && proc.signalCode === null) {
-      proc.kill('SIGKILL');
+  // Servers are spawned detached into their own process group, so signaling
+  // the negative pid reaches the whole group — including the real opencode
+  // process when OPENCODE_COMMAND routes the spawn through a shell wrapper,
+  // where `proc` is only the shell.
+  try {
+    process.kill(-proc.pid, signal);
+  } catch {
+    try {
+      proc.kill(signal);
+    } catch {
+      // The process exited between the check and the signal.
     }
+  }
+}
+
+function stopChildProcess(proc: ChildProcess): void {
+  signalProcessTree(proc, 'SIGTERM');
+  setTimeout(() => {
+    signalProcessTree(proc, 'SIGKILL');
   }, 2_000).unref();
+}
+
+/**
+ * Every spawned OpenCode SDK server process, cached or still starting.
+ * Entries remove themselves on exit. Used by the shutdown hooks so no
+ * server can outlive the parent process — before this registry existed,
+ * dev-watch restarts of the API orphaned the servers to launchd where
+ * they leaked 300-650MB each.
+ */
+const liveOpenCodeSdkServerProcs = new Set<ChildProcess>();
+
+/**
+ * Immediately kills every live OpenCode SDK server process group. Uses
+ * SIGKILL because this runs while the parent is dying (process 'exit' or a
+ * terminating signal): the event loop is about to stop, so the usual
+ * SIGTERM-then-SIGKILL escalation timer would never fire, and an ignored
+ * SIGTERM would recreate the orphan leak. The servers are stateless
+ * localhost inference caches, so a hard kill loses nothing.
+ */
+export function killOpenCodeSdkServerProcessesForShutdown(): void {
+  for (const proc of liveOpenCodeSdkServerProcs) {
+    signalProcessTree(proc, 'SIGKILL');
+  }
 }
 
 type ManagedOpenCodeSdkServer = {
@@ -377,6 +414,14 @@ async function startManagedOpenCodeSdkServer(
   const proc = spawn(command.command, command.args, {
     env: buildOpenCodeCliEnv(extraEnv),
     stdio: ['ignore', 'pipe', 'pipe'],
+    // Own process group, so shutdown can signal the entire tree (shell
+    // wrappers included) via the negative pid.
+    detached: true,
+  });
+
+  liveOpenCodeSdkServerProcs.add(proc);
+  proc.once('exit', () => {
+    liveOpenCodeSdkServerProcs.delete(proc);
   });
 
   let output = '';
@@ -535,13 +580,6 @@ class OpenCodeSdkServerPool {
     server.close();
   }
 
-  private closeAll(): void {
-    for (const server of this.cache.values()) {
-      this.close(server);
-    }
-    this.startPromises.clear();
-  }
-
   private createLease(server: CachedOpenCodeSdkServer): OpenCodeSdkServerLease {
     server.activeLeases += 1;
 
@@ -572,7 +610,24 @@ class OpenCodeSdkServerPool {
     }
 
     this.shutdownRegistered = true;
-    process.once('exit', () => this.closeAll());
+    process.once('exit', () => {
+      killOpenCodeSdkServerProcessesForShutdown();
+    });
+
+    // A terminating signal with no handler kills Node without running
+    // 'exit' hooks, which is exactly what dev watchers (`node --watch`,
+    // `tsx watch`) and pm2 send on restart — the historical orphan path.
+    // Kill the servers first, then re-deliver the signal so the default
+    // termination still happens unless another handler owns shutdown.
+    for (const signal of ['SIGTERM', 'SIGINT', 'SIGHUP'] as const) {
+      process.once(signal, () => {
+        killOpenCodeSdkServerProcessesForShutdown();
+
+        if (process.listenerCount(signal) === 0) {
+          process.kill(process.pid, signal);
+        }
+      });
+    }
   }
 
   private scheduleIdleClose(server: CachedOpenCodeSdkServer): void {

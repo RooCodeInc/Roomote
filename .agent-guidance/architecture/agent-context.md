@@ -167,6 +167,16 @@ integration entry points can use their normal fallback UX, such as the Slack
 environment picker. Text-only non-task helper calls still use
 `opencode run --model`.
 
+The host-side SDK server pool
+(`packages/cloud-agents/src/server/opencode-runtime.ts`) spawns each
+`opencode serve` process detached into its own process group and tracks every
+live process. Shutdown hooks (`process` `exit` plus SIGTERM/SIGINT/SIGHUP
+handlers that re-deliver the signal when no other handler owns shutdown)
+SIGKILL the full process groups, so cached servers cannot outlive the parent —
+previously dev-watch restarts of `apps/api` orphaned them to launchd where
+they leaked several hundred MB each. A SIGKILLed parent still leaks its
+servers; nothing catches that.
+
 OpenRouter variant models (`openrouter/<model>:nitro`, `:free`, `:floor`, ...)
 are not catalog model IDs, so OpenCode would reject them with
 `ProviderModelNotFoundError`. Both config generators (worker
