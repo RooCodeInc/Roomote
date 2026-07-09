@@ -18,7 +18,7 @@
 #   Proxy routes by port, not process group, so the web app owns 443 and the
 #   API is exposed on port 8443 of the same hostname: `TRPC_URL` is
 #   `https://<app>.fly.dev:8443`. The `*.fly.dev` certificate covers
-#   TLS-handled ports other than 443, and GitHub webhooks and hosted-compute
+#   TLS-handled ports other than 443, and GitHub webhooks and hosted-sandbox
 #   workers call that origin directly.
 # - Every process group gets the same `[env]` block (Fly has no per-process
 #   env), so all services share `PORT=8080` — safe because each group runs
@@ -87,7 +87,7 @@ swap_size_mb = 512
   # custom domain, add the cert to this app and change only this value
   # (ROOMOTE_PUBLIC_URL stays unset; the app falls back to ROOMOTE_APP_URL).
   ROOMOTE_APP_URL = 'https://roomote-CHANGEME.fly.dev'
-  # Hosted-compute workers and GitHub webhooks call this origin directly;
+  # Hosted-sandbox workers and GitHub webhooks call this origin directly;
   # it is the api service on port 8443 of the same Fly hostname.
   TRPC_URL = 'https://roomote-CHANGEME.fly.dev:8443'
   # Tigris object storage (S3-compatible). `fly storage create` provisions
@@ -97,7 +97,7 @@ swap_size_mb = 512
   S3_REGION = 'auto'
   S3_BUCKET_ARTIFACTS = 'roomote-CHANGEME-artifacts'
   # The worker release archive is baked into the app image; the controller
-  # uploads it into hosted-compute sandboxes at spawn time and reads the
+  # uploads it into hosted sandboxes at spawn time and reads the
   # release version from the VERSION file inside the archive. Do not unset:
   # the fallback is GitHub worker releases, which do not exist for develop
   # builds. Only the controller consumes it; it is harmless elsewhere.

@@ -17,12 +17,12 @@ instead. For a managed PaaS with no server of your own, see
   `/_roomote-api` path routing. The web app, the API, and MinIO each get
   their own public domain through `SERVICE_FQDN_*` declarations in the
   compose file, so `TRPC_URL` points at the api service's domain directly.
-  GitHub webhooks and compute workers call that API origin, and Slack
+  GitHub webhooks and sandbox workers call that API origin, and Slack
   webhooks arrive at the web origin and are proxied to the API internally.
 - **The Docker socket is available.** Unlike Railway, the Coolify host runs
   Docker, so the `docker` sandbox provider works and is the template
   default: the controller mounts `/var/run/docker.sock` and runs task
-  workers on the same server. Hosted compute (Modal, E2B, or Daytona) is a
+  workers on the same server. Hosted sandboxes (Modal, E2B, or Daytona) are a
   config-only swap; see [Task execution](#task-execution).
 - **No openssl provisioning step.** The template sets
   `ROOMOTE_AUTO_GENERATE_KEYS=true`, so Roomote generates the `JOB_AUTH_*` /
@@ -196,9 +196,9 @@ addressing, and `S3_PRESIGN_ENDPOINT` must be reachable from workers.
    callback and webhook URLs from `ROOMOTE_APP_URL` and `TRPC_URL`, so no
    manual URL entry is needed.
 5. Enter the model provider key when the wizard asks. With the default
-   Docker provider there are no compute credentials to enter; with hosted
-   compute, enter the provider tokens and let the wizard build the E2B
-   template or Daytona snapshot when applicable.
+    Docker provider there are no sandbox credentials to enter; with hosted
+    sandboxes, enter the provider tokens and let the wizard build the E2B
+    template or Daytona snapshot when applicable.
 6. Pick repositories, create an environment, and run a small task end to end
    (the SELF_HOSTING.md verification checklist applies from step 2 onward).
 
@@ -233,7 +233,7 @@ wildcard-capable TLS setup on the Coolify proxy:
   config plus the generated environment values on the resource.
 - **Costs** are your server. With the default Docker provider everything —
   control plane and task execution — runs on the Coolify host. With hosted
-  compute, task execution bills through the provider and model usage bills
+  sandboxes, task execution bills through the provider and model usage bills
   through your model provider.
 
 ## Maintaining the template

@@ -218,7 +218,7 @@ S3_PRESIGN_ENDPOINT=https://$ROOMOTE_MINIO_HOST
 The `roomote-shared` group also sets
 `DOCKER_WORKER_RELEASE_PATH=/roomote/releases/worker-current.tar.gz`, which
 only the controller reads. The worker release archive is baked into the app
-image, and the controller uploads it into hosted-compute sandboxes at spawn
+image, and the controller uploads it into hosted sandboxes at spawn
 time — no shared volume is needed. The version-less `worker-current.tar.gz`
 name works
 because the controller reads the release version from the `VERSION` file
@@ -314,7 +314,7 @@ GitHub App created by the wizard) keep the callback URLs they were created
 with, so reconnect or update those in their provider settings if you change
 the domain after onboarding.
 
-Leave `ROOMOTE_API_HOST` on the api service's own domain — hosted-compute
+Leave `ROOMOTE_API_HOST` on the api service's own domain — hosted-sandbox
 workers and webhooks call it directly, and it never needs to match the
 domain users browse. (A custom domain on the api or MinIO services works the
 same way through `ROOMOTE_API_HOST` and `ROOMOTE_MINIO_HOST`.)

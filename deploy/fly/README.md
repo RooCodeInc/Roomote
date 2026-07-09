@@ -195,7 +195,7 @@ hosted-sandbox workers and browsers without any service in this app.
 
 Alternatively, point the S3 values at another external S3-compatible store
 (AWS S3, or Cloudflare R2 with `S3_REGION=auto`). Roomote uses path-style
-addressing, and `S3_PRESIGN_ENDPOINT` must be reachable from hosted-compute
+addressing, and `S3_PRESIGN_ENDPOINT` must be reachable from hosted-sandbox
 workers. Pre-create the bucket, or set `S3_AUTO_CREATE_BUCKET=true` in
 `[env]` if the configured credentials are allowed to create buckets.
 

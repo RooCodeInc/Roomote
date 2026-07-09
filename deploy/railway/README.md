@@ -195,7 +195,7 @@ DOCKER_WORKER_RELEASE_PATH=/roomote/releases/worker-current.tar.gz
 ```
 
 The worker release archive is baked into the app image, and the controller
-uploads it into hosted-compute sandboxes at spawn time — no shared volume is
+uploads it into hosted sandboxes at spawn time — no shared volume is
 needed. The version-less `worker-current.tar.gz` name works because the
 controller reads the release version from the `VERSION` file inside the
 archive. Do not leave `DOCKER_WORKER_RELEASE_PATH` unset: without it the

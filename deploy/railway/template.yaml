@@ -47,7 +47,7 @@
 # - The api service must be publicly reachable: hosted sandboxes workers and
 #   GitHub webhooks call `TRPC_URL` directly.
 # - Both published images are public on GHCR: Railway pulls roomote-app and
-#   hosted-compute builders pull roomote-worker anonymously, so no registry
+#   hosted-sandbox builders pull roomote-worker anonymously, so no registry
 #   credentials are needed.
 # - ROOMOTE_APP_URL on api is the single canonical-origin knob; the other
 #   app services reference ${{api.ROOMOTE_APP_URL}}. Note api's own value
@@ -194,7 +194,7 @@ services:
     env:
       <<: *app_service_env
       # The worker release archive is baked into the app image; the
-      # controller uploads it into hosted-compute sandboxes at spawn time.
+      # controller uploads it into hosted sandboxes at spawn time.
       # The version-less name works because the controller reads the release
       # version from the VERSION file inside the archive. Do not unset: the
       # fallback is GitHub worker releases, which only exist for tagged v*
