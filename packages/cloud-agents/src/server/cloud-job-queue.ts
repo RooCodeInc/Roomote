@@ -45,6 +45,8 @@ import {
   tasks,
   users,
   environments,
+  environmentRepositoryMappings,
+  repositories,
   and,
   desc,
   eq,
@@ -692,6 +694,55 @@ export interface EnqueueCloudTaskOptions {
   beforeEnqueue?: (cloudJob: CloudJob) => Promise<void>;
 }
 
+/**
+ * Infers the source-control provider for a launch workspace from the linked
+ * repository rows. Routed launches (Slack/Linear/Telegram/Teams mentions)
+ * select an environment or repository without stamping a provider, and a
+ * missing provider defaults to GitHub at runtime — which breaks credential
+ * setup when the workspace is backed by Azure DevOps, GitLab, or Gitea.
+ * Returns undefined when the workspace resolves to no repositories or to
+ * repositories from more than one provider.
+ */
+export async function inferWorkspaceSourceControlProvider(
+  workspace: ReturnType<typeof resolveCloudTaskWorkspace>,
+): Promise<SourceControlProvider | undefined> {
+  const providerRows =
+    workspace.type === 'environment'
+      ? await db
+          .select({ provider: repositories.sourceControlProvider })
+          .from(environmentRepositoryMappings)
+          .innerJoin(
+            repositories,
+            eq(environmentRepositoryMappings.repositoryId, repositories.id),
+          )
+          .where(
+            and(
+              eq(
+                environmentRepositoryMappings.environmentId,
+                workspace.environmentId,
+              ),
+              eq(repositories.isActive, true),
+            ),
+          )
+      : await db
+          .select({ provider: repositories.sourceControlProvider })
+          .from(repositories)
+          .where(
+            and(
+              eq(repositories.isActive, true),
+              workspace.type === 'repository'
+                ? eq(repositories.fullName, workspace.repo)
+                : workspace.type === 'repository_set'
+                  ? inArray(repositories.fullName, workspace.repositories)
+                  : undefined,
+            ),
+          );
+
+  const providers = [...new Set(providerRows.map((row) => row.provider))];
+
+  return providers.length === 1 ? providers[0] : undefined;
+}
+
 export async function enqueueCloudTask(
   task: CloudTask,
   options: EnqueueCloudTaskOptions = {},
@@ -754,6 +805,24 @@ export async function enqueueCloudTask(
 
       console.log(
         `[enqueueCloudTask] Auto-resolved environment ${envId} for ${workspace.repo}`,
+      );
+    }
+  }
+
+  // Routed launches (Slack/Linear/Telegram/Teams) select a workspace without
+  // stamping its source-control provider, and the runtime defaults a missing
+  // provider to GitHub — wrong credentials for ADO/GitLab/Gitea workspaces.
+  // Infer it from the resolved workspace. GitHub is the runtime default, so
+  // stamping an inferred GitHub would only churn existing payloads.
+  if (!task.payload.sourceControlProvider) {
+    const inferredProvider = await inferWorkspaceSourceControlProvider(
+      resolveCloudTaskWorkspace(task.payload),
+    );
+
+    if (inferredProvider && inferredProvider !== 'github') {
+      task.payload.sourceControlProvider = inferredProvider;
+      console.log(
+        `[enqueueCloudTask] Inferred source-control provider ${inferredProvider} for ${task.type} launch`,
       );
     }
   }

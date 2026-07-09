@@ -37,6 +37,12 @@ The current path supports:
 - launching Azure DevOps-backed manual, environment, and repository-set tasks
 - inferring `sourceControlProvider = 'ado'` for web-launched manual and
   environment tasks from the selected synced repository rows
+- inferring `sourceControlProvider` at enqueue time for any launch whose
+  payload omits it (`enqueueCloudTask` resolves the workspace's repository
+  rows), so router-launched tasks from Slack/Linear/Telegram/Teams mentions
+  get Azure DevOps credentials instead of the GitHub default when they route
+  to an ADO-backed environment; workspaces spanning multiple providers are
+  left unstamped
 - resolving `all_repositories` Azure DevOps workspaces from synced Azure
   DevOps repository rows
 - automatic Azure DevOps service-hook setup during repository sync for pull
