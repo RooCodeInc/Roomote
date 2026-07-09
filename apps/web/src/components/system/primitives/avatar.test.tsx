@@ -1,4 +1,4 @@
-import { fireEvent, render, screen } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 
 import { Avatar, getInitials } from './avatar';
 
@@ -70,6 +70,61 @@ describe('Avatar', () => {
     expect(document.querySelector('img')).toBeNull();
     expect(screen.getByText('MR')).toBeInTheDocument();
     expect(screen.queryByText('Matt Rubens')).not.toBeInTheDocument();
+  });
+
+  it('falls back to initials when the image is already complete and broken', async () => {
+    const completeDescriptor = Object.getOwnPropertyDescriptor(
+      HTMLImageElement.prototype,
+      'complete',
+    );
+    const naturalWidthDescriptor = Object.getOwnPropertyDescriptor(
+      HTMLImageElement.prototype,
+      'naturalWidth',
+    );
+
+    Object.defineProperty(HTMLImageElement.prototype, 'complete', {
+      configurable: true,
+      get() {
+        return true;
+      },
+    });
+    Object.defineProperty(HTMLImageElement.prototype, 'naturalWidth', {
+      configurable: true,
+      get() {
+        return 0;
+      },
+    });
+
+    try {
+      render(
+        <Avatar
+          imageUrl="https://example.com/cached-404.png"
+          name="Matt Rubens"
+          alt="Matt Rubens"
+        />,
+      );
+
+      await waitFor(() => {
+        expect(screen.getByText('MR')).toBeInTheDocument();
+      });
+      expect(document.querySelector('img')).toBeNull();
+      expect(screen.queryByText('Matt Rubens')).not.toBeInTheDocument();
+    } finally {
+      if (completeDescriptor) {
+        Object.defineProperty(
+          HTMLImageElement.prototype,
+          'complete',
+          completeDescriptor,
+        );
+      }
+      if (naturalWidthDescriptor) {
+        Object.defineProperty(
+          HTMLImageElement.prototype,
+          'naturalWidth',
+          naturalWidthDescriptor,
+        );
+      }
+    }
   });
 
   it('treats blank image URLs as missing and shows initials', () => {

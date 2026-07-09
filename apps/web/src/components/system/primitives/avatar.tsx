@@ -49,6 +49,10 @@ export function getInitials(name?: string | null, email?: string | null) {
   return '';
 }
 
+function isBrokenImage(img: HTMLImageElement) {
+  return img.complete && img.naturalWidth === 0;
+}
+
 export const Avatar = React.forwardRef<HTMLDivElement, AvatarProps>(
   function Avatar(
     {
@@ -64,14 +68,30 @@ export const Avatar = React.forwardRef<HTMLDivElement, AvatarProps>(
     ref,
   ) {
     const resolvedImageUrl = imageUrl?.trim() ? imageUrl.trim() : null;
-    const [imageFailed, setImageFailed] = React.useState(false);
+    const [failedImageUrl, setFailedImageUrl] = React.useState<string | null>(
+      null,
+    );
     const initials = getInitials(name, email);
     const label = alt ?? (name?.trim() || email?.trim() || '');
-    const showImage = resolvedImageUrl !== null && !imageFailed;
+    const showImage =
+      resolvedImageUrl !== null && failedImageUrl !== resolvedImageUrl;
 
-    React.useEffect(() => {
-      setImageFailed(false);
-    }, [resolvedImageUrl]);
+    const markImageFailed = React.useCallback((url: string) => {
+      setFailedImageUrl((previous) => (previous === url ? previous : url));
+    }, []);
+
+    const imageRef = React.useCallback(
+      (img: HTMLImageElement | null) => {
+        if (!img || !resolvedImageUrl) {
+          return;
+        }
+
+        if (isBrokenImage(img)) {
+          markImageFailed(resolvedImageUrl);
+        }
+      },
+      [markImageFailed, resolvedImageUrl],
+    );
 
     return (
       <div
@@ -88,12 +108,13 @@ export const Avatar = React.forwardRef<HTMLDivElement, AvatarProps>(
         {showImage ? (
           // eslint-disable-next-line @next/next/no-img-element -- external avatar URLs come from arbitrary OAuth provider hosts
           <img
+            ref={imageRef}
             src={resolvedImageUrl}
             alt=""
             className={cn('size-full object-cover', imgClassName)}
             loading="lazy"
             decoding="async"
-            onError={() => setImageFailed(true)}
+            onError={() => markImageFailed(resolvedImageUrl)}
           />
         ) : (
           <span aria-hidden="true">{initials || '?'}</span>
