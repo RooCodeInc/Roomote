@@ -677,7 +677,8 @@ describe('StepAuthEnvVars', () => {
     await waitFor(() => {
       expect(signInOauth2Mock).toHaveBeenCalledWith({
         providerId: 'slack',
-        callbackURL: expect.any(String),
+        callbackURL:
+          '/api/slack/install-after-auth?redirect=%2Fsetup%3Fstep%3Dauth-env-vars',
         disableRedirect: true,
       });
     });
@@ -743,7 +744,8 @@ describe('StepAuthEnvVars', () => {
     await waitFor(() => {
       expect(signInOauth2Mock).toHaveBeenCalledWith({
         providerId: 'slack',
-        callbackURL: expect.any(String),
+        callbackURL:
+          '/api/slack/install-after-auth?redirect=%2Fsetup%3Fstep%3Dauth-env-vars',
         disableRedirect: true,
       });
     });

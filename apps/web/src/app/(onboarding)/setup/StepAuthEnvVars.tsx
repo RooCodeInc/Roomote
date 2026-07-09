@@ -18,6 +18,7 @@ import {
 } from '@/components/system';
 
 import { StepTitle } from './StepTitle';
+import { getSetupStepPath } from './types';
 import {
   getSetupEffectiveFieldValue,
   getSetupSubmitValues,
@@ -85,7 +86,7 @@ export function StepAuthEnvVars({
         if (bootstrapMode && selectedProvider) {
           const callbackURL = getAuthProviderCallbackUrl(
             selectedProvider.id,
-            '/setup',
+            getSetupStepPath('auth-env-vars'),
           );
           const oauth2ProviderId = getOAuth2ProviderId(selectedProvider.id);
           const result = oauth2ProviderId

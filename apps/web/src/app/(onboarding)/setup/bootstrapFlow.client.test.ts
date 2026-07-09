@@ -2,6 +2,7 @@ import type { SetupAuthProviderId, SetupAuthStatus } from '@roomote/types';
 
 import {
   getBootstrapAuthProvider,
+  getBootstrapStepFromSetupStepParam,
   getBootstrapStepAfterWelcome,
   getNextBootstrapStep,
   shouldSkipBootstrapAccountStep,
@@ -83,5 +84,18 @@ describe('bootstrapFlow', () => {
     expect(getBootstrapAuthProvider(authSetup, pendingProvider)).toBe(
       'microsoft',
     );
+  });
+
+  it('maps only auth setup query steps into the signed-out bootstrap flow', () => {
+    expect(getBootstrapStepFromSetupStepParam('auth-provider')).toBe(
+      'auth-provider',
+    );
+    expect(getBootstrapStepFromSetupStepParam('auth-env-vars')).toBe(
+      'auth-env-vars',
+    );
+    expect(
+      getBootstrapStepFromSetupStepParam('source-control-config'),
+    ).toBeNull();
+    expect(getBootstrapStepFromSetupStepParam(null)).toBeNull();
   });
 });
