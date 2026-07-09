@@ -4,6 +4,7 @@ import { getRedis } from '@roomote/redis';
 import {
   buildCiFailureTriagePrompt,
   buildRepositoryCoverage,
+  deploymentHasActiveCredentialUser,
   enqueueCloudTask,
   getTaskUrl,
 } from '@roomote/cloud-agents/server';
@@ -246,6 +247,16 @@ export async function handleWorkflowRunCompleted(
       status: 'ok',
       message: 'CI failure triage already debounced for this repository',
     };
+  }
+
+  // Automation tasks enqueue with a null userId, but token minting still
+  // needs at least one active user's credentials. Bail up front so no run or
+  // announcement is recorded for a job that could never start.
+  if (!(await deploymentHasActiveCredentialUser())) {
+    console.warn(
+      `${LOG_PREFIX} No active user available to resolve credentials for CI failure triage`,
+    );
+    return { status: 'ok', message: 'No active user available' };
   }
 
   const workflowName = run.name ?? payload.workflow?.name ?? 'unknown';

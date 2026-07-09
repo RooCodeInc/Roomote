@@ -1,5 +1,6 @@
 const {
   mockDbSelect,
+  mockDeploymentHasActiveCredentialUser,
   mockEnqueueCloudTask,
   mockBuildRepositoryCoverage,
   mockGetBackgroundAgentSettingsForOrg,
@@ -13,6 +14,7 @@ const {
   mockRedisSet,
 } = vi.hoisted(() => ({
   mockDbSelect: vi.fn(),
+  mockDeploymentHasActiveCredentialUser: vi.fn(),
   mockEnqueueCloudTask: vi.fn(),
   mockBuildRepositoryCoverage: vi.fn(),
   mockGetBackgroundAgentSettingsForOrg: vi.fn(),
@@ -52,6 +54,8 @@ vi.mock('@roomote/cloud-agents/server', () => ({
     `$ci-failure-triage trigger=${params.trigger} run=${params.triggeringRun?.runUrl ?? 'none'} announced=${params.hasAnnouncementThread === true}`,
   buildRepositoryCoverage: (...args: unknown[]) =>
     mockBuildRepositoryCoverage(...args),
+  deploymentHasActiveCredentialUser: (...args: unknown[]) =>
+    mockDeploymentHasActiveCredentialUser(...args),
   enqueueCloudTask: (...args: unknown[]) => mockEnqueueCloudTask(...args),
   getTaskUrl: ({ taskId }: { taskId: string }) =>
     `https://app.example.com/task/${taskId}?utm_source=slack&utm_medium=link&utm_campaign=slack.thread_reply`,
@@ -155,6 +159,7 @@ describe('handleWorkflowRunCompleted', () => {
       }),
     }));
     mockEvaluateFeatureFlag.mockResolvedValue(true);
+    mockDeploymentHasActiveCredentialUser.mockResolvedValue(true);
     mockGetBackgroundAgentSettingsForOrg.mockResolvedValue({
       ciFailureTriageFrequency: 'daily',
       managerSlackChannelId: 'C123MANAGER',
@@ -377,6 +382,17 @@ describe('handleWorkflowRunCompleted', () => {
     const result = await handleWorkflowRunCompleted(buildPayload());
 
     expect(result.message).toContain('debounced');
+    expect(mockStartBackgroundAutomationRun).not.toHaveBeenCalled();
+    expect(mockEnqueueCloudTask).not.toHaveBeenCalled();
+  });
+
+  it('skips the launch when no active user can resolve credentials', async () => {
+    mockDeploymentHasActiveCredentialUser.mockResolvedValue(false);
+
+    const result = await handleWorkflowRunCompleted(buildPayload());
+
+    expect(result.status).toBe('ok');
+    expect(result.message).toContain('No active user');
     expect(mockStartBackgroundAutomationRun).not.toHaveBeenCalled();
     expect(mockEnqueueCloudTask).not.toHaveBeenCalled();
   });

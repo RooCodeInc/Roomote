@@ -1,4 +1,7 @@
-import { findEnvironmentForRepo } from '@roomote/cloud-agents/server';
+import {
+  deploymentHasActiveCredentialUser,
+  findEnvironmentForRepo,
+} from '@roomote/cloud-agents/server';
 import {
   db,
   slackInstallations,
@@ -161,6 +164,17 @@ export async function suggesterJob(
           windowDays: WINDOW_DAYS,
         })
       ) {
+        skipped++;
+        continue;
+      }
+
+      // Automation tasks enqueue with a null userId, but token minting still
+      // needs at least one active user's credentials. Skip up front so the
+      // run is not recorded as launched when the job could never start.
+      if (!(await deploymentHasActiveCredentialUser())) {
+        console.warn(
+          `${LOG_PREFIX} Skipping deployment: no active user available to resolve credentials for scheduled suggester task`,
+        );
         skipped++;
         continue;
       }

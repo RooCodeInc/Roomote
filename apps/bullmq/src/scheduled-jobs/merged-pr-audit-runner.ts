@@ -1,5 +1,6 @@
 import {
   buildRepositoryCoverage,
+  deploymentHasActiveCredentialUser,
   enqueueCloudTask,
   formatRepositoryEnvironmentLines,
   type RepositoryCoverage,
@@ -435,6 +436,28 @@ async function processDeployment(
       });
 
       return { kind: 'processed' };
+    }
+
+    // Automation tasks enqueue with a null userId, but token minting still
+    // needs at least one active user's credentials. Fail the run up front so
+    // it is not recorded as succeeded when the job could never start.
+    if (!(await deploymentHasActiveCredentialUser())) {
+      console.warn(
+        `${logPrefix} Skipping deployment: no active user available to resolve credentials for ${config.automationKey.replaceAll('_', ' ')} task`,
+      );
+      await completeBackgroundAutomationRun(db, {
+        runId,
+        automationKey: config.automationKey,
+        status: 'failed',
+        finishedAt: new Date(),
+        error: `No active user available to resolve credentials for ${config.automationKey.replaceAll('_', ' ')} cloud task.`,
+        lastRunAt: 'skip',
+        metadata: {
+          reason: 'no_user',
+          scanUpperBound: scanUpperBound.toISOString(),
+        },
+      });
+      return { kind: 'skipped' };
     }
 
     const recentThreadFeedback = await loadAutomationThreadFeedbackReport({

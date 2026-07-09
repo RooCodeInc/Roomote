@@ -34,3 +34,21 @@ export async function resolveCredentialUserIdForCloudJob(
 
   return user?.id ?? null;
 }
+
+/**
+ * Whether the deployment has at least one active user whose credentials a
+ * null-`userId` automation job could resolve at token-mint time.
+ *
+ * Automation launchers should check this before enqueueing so an empty
+ * deployment skips (or fails) the background run up front instead of
+ * recording it as succeeded while the job later fails credential resolution
+ * at dequeue.
+ */
+export async function deploymentHasActiveCredentialUser(): Promise<boolean> {
+  const user = await db.query.users.findFirst({
+    where: isNull(users.deletedAt),
+    columns: { id: true },
+  });
+
+  return Boolean(user);
+}

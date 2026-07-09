@@ -1,4 +1,7 @@
-import { enqueueCloudTask } from '@roomote/cloud-agents/server';
+import {
+  deploymentHasActiveCredentialUser,
+  enqueueCloudTask,
+} from '@roomote/cloud-agents/server';
 import {
   completeBackgroundAutomationRun,
   completeBackgroundAutomationRunByJobId,
@@ -150,6 +153,18 @@ export function createScheduledTriageJob(
             windowDays: WINDOW_DAYS,
           })
         ) {
+          skipped++;
+          continue;
+        }
+
+        // Automation tasks enqueue with a null userId, but token minting
+        // still needs at least one active user's credentials. Skip up front
+        // so the run is not recorded as succeeded when the job could never
+        // start.
+        if (!(await deploymentHasActiveCredentialUser())) {
+          console.warn(
+            `${logPrefix} Skipping deployment: no active user available to resolve credentials for scheduled ${config.automationKey.replaceAll('_', ' ')} task`,
+          );
           skipped++;
           continue;
         }
