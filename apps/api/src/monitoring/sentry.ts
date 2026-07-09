@@ -99,7 +99,7 @@ export function initApiSentry(): boolean {
     serverName: 'api',
     debug: false,
     maxValueLength: 8_192,
-    sendDefaultPii: true,
+    sendDefaultPii: false,
     initialScope: {
       tags: {
         'roomote.service': 'api',
