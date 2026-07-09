@@ -403,6 +403,9 @@ function TeamsBotStatus() {
   const teamsStatus = teamsIntegrationStatus.data;
   const teamsBotConfigured = Boolean(teamsStatus?.botConfigured);
   const teamsOpenInTeamsUrl = teamsStatus?.openInTeamsUrl ?? null;
+  const teamsPrimaryConversationReady = Boolean(
+    teamsStatus?.primaryConversationReady,
+  );
 
   const statusCopy = teamsBotConfigured ? (
     teamsStatus?.microsoftAuthConfigured ? (
@@ -440,6 +443,16 @@ function TeamsBotStatus() {
         )}
         <p className="text-sm text-muted-foreground">{statusCopy}</p>
       </div>
+      {teamsBotConfigured && !teamsPrimaryConversationReady ? (
+        <div className="flex items-start gap-2">
+          <TriangleAlert className="size-4 mt-0.5 shrink-0 text-amber-600" />
+          <p className="text-sm text-muted-foreground">
+            Roomote has not captured a Teams conversation yet, so setup and
+            automation messages cannot reach Teams. Install or open the Roomote
+            app in Teams and send the bot one message to finish connecting.
+          </p>
+        </div>
+      ) : null}
       {teamsOpenInTeamsUrl ? (
         <div>
           <Button asChild variant="outline" size="sm">

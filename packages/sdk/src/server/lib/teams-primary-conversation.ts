@@ -3,6 +3,7 @@ import { db, eq, sql, teamsInstallations } from '@roomote/db/server';
 export type TeamsPrimaryConversation = {
   conversationId: string;
   serviceUrl: string;
+  conversationType: string | null;
 };
 
 /**
@@ -17,6 +18,7 @@ export async function findTeamsPrimaryConversation(): Promise<TeamsPrimaryConver
       installationKey: teamsInstallations.installationKey,
       conversationId: teamsInstallations.conversationId,
       serviceUrl: teamsInstallations.serviceUrl,
+      conversationType: teamsInstallations.conversationType,
     })
     .from(teamsInstallations)
     .where(eq(teamsInstallations.isActive, true))
@@ -40,5 +42,6 @@ export async function findTeamsPrimaryConversation(): Promise<TeamsPrimaryConver
   return {
     conversationId: preferred.conversationId,
     serviceUrl: preferred.serviceUrl,
+    conversationType: preferred.conversationType,
   };
 }

@@ -20,6 +20,8 @@ const { connectSlackMutateMock, teamsStatusState } = vi.hoisted(() => ({
         'https://teams.microsoft.com/l/chat/0/0?users=28%3Abot-app-id' as
           | string
           | null,
+      primaryConversationReady: true,
+      primaryConversationType: 'channel' as string | null,
     },
     isPending: false,
     isError: false,
@@ -115,6 +117,8 @@ describe('StepCommunicationConnect', () => {
       webhookUrl: 'https://roomote.example.com/api/webhooks/teams',
       openInTeamsUrl:
         'https://teams.microsoft.com/l/chat/0/0?users=28%3Abot-app-id',
+      primaryConversationReady: true,
+      primaryConversationType: 'channel',
     };
     teamsStatusState.isPending = false;
     teamsStatusState.isError = false;
@@ -181,6 +185,43 @@ describe('StepCommunicationConnect', () => {
     expect(onContinue).toHaveBeenCalledTimes(1);
   });
 
+  it('nudges to send a first message when no Teams conversation was captured yet', () => {
+    teamsStatusState.data = {
+      ...teamsStatusState.data,
+      primaryConversationReady: false,
+      primaryConversationType: null,
+    };
+
+    render(
+      <StepCommunicationConnect
+        authSetup={buildAuthSetup('microsoft')}
+        onContinue={vi.fn()}
+        onSkip={vi.fn()}
+      />,
+    );
+
+    expect(
+      screen.getByText(/has not received a Teams message yet/i),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole('link', { name: /Open Microsoft Teams bot/i }),
+    ).toBeInTheDocument();
+  });
+
+  it('hides the first-message nudge when the Teams conversation is captured', () => {
+    render(
+      <StepCommunicationConnect
+        authSetup={buildAuthSetup('microsoft')}
+        onContinue={vi.fn()}
+        onSkip={vi.fn()}
+      />,
+    );
+
+    expect(
+      screen.queryByText(/has not received a Teams message yet/i),
+    ).not.toBeInTheDocument();
+  });
+
   it('renders a blocked state when Teams has no bot URL', () => {
     teamsStatusState.data = {
       botConfigured: false,
@@ -188,6 +229,8 @@ describe('StepCommunicationConnect', () => {
       microsoftAuthConfigured: true,
       webhookUrl: 'https://roomote.example.com/api/webhooks/teams',
       openInTeamsUrl: null,
+      primaryConversationReady: false,
+      primaryConversationType: null,
     };
     const onSkip = vi.fn();
 

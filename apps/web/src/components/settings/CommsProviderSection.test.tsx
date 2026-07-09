@@ -39,12 +39,16 @@ const state = vi.hoisted(() => ({
     microsoftAuthConfigured: false,
     webhookUrl: 'https://openmote.dev/api/webhooks/teams',
     openInTeamsUrl: null as string | null,
+    primaryConversationReady: false,
+    primaryConversationType: null as string | null,
   } as null | {
     botConfigured: boolean;
     botUsesTenantSpecificTokenFlow: boolean;
     microsoftAuthConfigured: boolean;
     webhookUrl: string;
     openInTeamsUrl: string | null;
+    primaryConversationReady: boolean;
+    primaryConversationType: string | null;
   },
   teamsStatusIsPending: false,
   teamsStatusIsError: false,
@@ -503,6 +507,8 @@ describe('CommsProviderSection', () => {
       microsoftAuthConfigured: false,
       webhookUrl: 'https://openmote.dev/api/webhooks/teams',
       openInTeamsUrl: null,
+      primaryConversationReady: false,
+      primaryConversationType: null,
     };
     state.teamsStatusIsPending = false;
     state.teamsStatusIsError = false;
@@ -763,6 +769,8 @@ describe('CommsProviderSection', () => {
         microsoftAuthConfigured: true,
         webhookUrl: 'https://openmote.dev/api/webhooks/teams',
         openInTeamsUrl: 'https://teams.microsoft.com/l/chat/0/0?users=28%3Abot',
+        primaryConversationReady: true,
+        primaryConversationType: 'channel',
       };
 
       render(
@@ -814,6 +822,8 @@ describe('CommsProviderSection', () => {
         microsoftAuthConfigured: false,
         webhookUrl: 'https://openmote.dev/api/webhooks/teams',
         openInTeamsUrl: 'https://teams.microsoft.com/l/chat/0/0?users=28%3Abot',
+        primaryConversationReady: true,
+        primaryConversationType: 'personal',
       };
 
       render(
@@ -839,6 +849,67 @@ describe('CommsProviderSection', () => {
       expect(
         screen.getByRole('link', { name: /Download Teams app package/ }),
       ).toBeInTheDocument();
+    });
+
+    it('nudges to send a first Teams message when the bot is configured but no conversation was captured', () => {
+      state.teamsStatus = {
+        botConfigured: true,
+        botUsesTenantSpecificTokenFlow: true,
+        microsoftAuthConfigured: true,
+        webhookUrl: 'https://openmote.dev/api/webhooks/teams',
+        openInTeamsUrl: 'https://teams.microsoft.com/l/chat/0/0?users=28%3Abot',
+        primaryConversationReady: false,
+        primaryConversationType: null,
+      };
+
+      render(
+        <CommsProviderSection
+          provider={buildMicrosoftProvider({
+            savedSatisfied: true,
+            setupSatisfied: true,
+          })}
+          onSave={vi.fn()}
+          onClear={vi.fn()}
+          savePending={false}
+          clearPending={false}
+        />,
+      );
+
+      expect(
+        screen.getByText(/has not captured a Teams conversation yet/),
+      ).toBeInTheDocument();
+      expect(
+        screen.getByRole('link', { name: /Open in Teams/ }),
+      ).toBeInTheDocument();
+    });
+
+    it('hides the capture nudge once a primary Teams conversation exists', () => {
+      state.teamsStatus = {
+        botConfigured: true,
+        botUsesTenantSpecificTokenFlow: true,
+        microsoftAuthConfigured: true,
+        webhookUrl: 'https://openmote.dev/api/webhooks/teams',
+        openInTeamsUrl: 'https://teams.microsoft.com/l/chat/0/0?users=28%3Abot',
+        primaryConversationReady: true,
+        primaryConversationType: 'channel',
+      };
+
+      render(
+        <CommsProviderSection
+          provider={buildMicrosoftProvider({
+            savedSatisfied: true,
+            setupSatisfied: true,
+          })}
+          onSave={vi.fn()}
+          onClear={vi.fn()}
+          savePending={false}
+          clearPending={false}
+        />,
+      );
+
+      expect(
+        screen.queryByText(/has not captured a Teams conversation yet/),
+      ).not.toBeInTheDocument();
     });
   });
 });
