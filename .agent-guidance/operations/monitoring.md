@@ -1,7 +1,7 @@
 ---
 title: Monitoring & Health Checks
 status: active
-last_reviewed: 2026-07-08
+last_reviewed: 2026-07-09
 owner: engineering
 summary: Technical documentation of local health monitoring covering API endpoints, request observability, optional Sentry capture, controller heartbeat, orphan detection, and common debugging patterns.
 ---
@@ -202,7 +202,7 @@ This is intended to answer "which endpoints are getting slow?" without enabling 
 The API process also keeps a per-instance, since-start tally of inbound requests grouped by method and endpoint.
 
 - Normal REST routes use Hono's matched route templates so dynamic segments collapse into stable keys like `/api/mcp/tasks/:taskId/messages`.
-- `GET /health/api`, `GET /health/liveness`, `GET /health/controller`, and `GET /` are excluded so the monitoring endpoint does not measure itself or count platform health probes.
+- `GET /health`, `GET /health/api`, `GET /health/liveness`, `GET /health/controller`, and `GET /` are excluded so the monitoring endpoint does not measure itself or count platform health probes.
 - `/trpc/*` keeps its raw pathname so procedure names remain distinct.
 - The tracked table is capped at `256` unique endpoints. If the process sees additional unseen endpoints after that, they do not evict existing rows; instead they increment `overflowedUniqueEndpointCount` and `overflowedRequestCount`.
 
@@ -214,7 +214,7 @@ Self-host Caddy exposes API health paths under
 `ROOMOTE_APP_DOMAIN/_roomote-api` and strips that prefix before proxying to
 Hono, so the health routes intentionally split their response shape:
 
-- unauthenticated requests to `GET /_roomote-api/`,
+- unauthenticated requests to `GET /_roomote-api/`, `GET /_roomote-api/health`,
   `GET /_roomote-api/health/api`, `GET /_roomote-api/health/liveness`, and
   `GET /_roomote-api/health/controller` return only `server`, `ok`, and
   `timestamp`
@@ -250,6 +250,7 @@ Explicit outbound timeouts now live only at the call sites that intentionally wa
 These settings are defined in `packages/env/src/index.ts` and default safely when unset:
 
 - `API_SLOW_REQUEST_THRESHOLD_MS` — inbound request warning threshold, default `5000`
+- `API_HEALTH_RATE_LIMIT_PER_MINUTE` — per-client-IP request budget for the `/health` alias, default `60`, `0` disables the limiter
 - `API_SLOW_EXTERNAL_REQUEST_THRESHOLD_MS` — outbound warning threshold, default `2000`
 - `SLACK_API_TIMEOUT_MS` — explicit timeout used by the Slack WebClient wrapper, default `10000`
 - `API_EXTERNAL_REQUEST_TIMEOUT_MS` — legacy compatibility fallback for `SLACK_API_TIMEOUT_MS`; the global observed `fetch` wrapper no longer applies this timeout automatically
@@ -296,7 +297,7 @@ environment metadata used for deeper operator diagnostics.
 
 ### GET /health/api
 
-Basic health check for the API server. Validates connectivity to PostgreSQL and Redis. Monitored externally by Better Stack (the "Roomote / API" monitor checks `/`, which serves the same handler).
+Basic health check for the API server. Validates connectivity to PostgreSQL and Redis, always running both checks in parallel so a database outage still reports Redis state. Monitored externally by Better Stack (the "Roomote / API" monitor checks `/`, which serves the same handler). `GET /health` serves the same handler as a convenience alias, with one difference: the `/health` path is rate limited per client IP by `healthRateLimitMiddleware` (in-memory fixed window, default 60 requests/minute via `API_HEALTH_RATE_LIMIT_PER_MINUTE`, `429` + `Retry-After` when exceeded, `0` disables). The `/` and `/health/api` mounts stay unlimited for external monitors, and deployment healthchecks use the untouched `/health/liveness`.
 
 **Implementation:** `apps/api/src/handlers/health/api.ts`
 
@@ -315,6 +316,7 @@ Basic health check for the API server. Validates connectivity to PostgreSQL and 
 ```json
 {
   "server": "api",
+  "version": "v1.2.3",
   "environment": {
     "NODE_ENV": "production",
     "APP_ENV": "production"
@@ -394,6 +396,8 @@ Basic health check for the API server. Validates connectivity to PostgreSQL and 
 
 - PostgreSQL: `SELECT 1`
 - Redis: `PING`
+- Both checks always run (in parallel); either failure yields `503`
+- Authenticated payloads include `version`: the baked `RELEASE_VERSION`, falling back to `VERCEL_GIT_COMMIT_SHA` / `GITHUB_SHA`, then `development`
 - Long-lived proxy stream snapshot:
   - `activeCount` is the number of currently streaming MCP proxy responses on this instance
   - `oldestAgeMs` and `countsByAge` show whether stream lifetimes are clustering in the 1m/5m/15m buckets (cumulative — a 6m stream counts in both `atLeast1m` and `atLeast5m`)
@@ -403,7 +407,7 @@ Basic health check for the API server. Validates connectivity to PostgreSQL and 
   - `sinceStartedAt` marks when this process started tracking requests
   - `endpoints` is sorted by request count, then average duration
   - dynamic REST routes are normalized to matched route templates, while `/trpc/*` keeps raw pathnames
-  - `/`, `/health/api`, `/health/liveness`, and `/health/controller` are excluded from the tally
+  - `/`, `/health`, `/health/api`, `/health/liveness`, and `/health/controller` are excluded from the tally
   - overflow counters indicate that more unique endpoints were seen than the in-memory table can retain
 
 ### GET /health/controller

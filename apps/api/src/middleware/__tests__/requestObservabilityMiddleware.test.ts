@@ -126,6 +126,7 @@ describe('requestObservabilityMiddleware', () => {
     const app = createApp();
 
     await app.request('http://localhost/');
+    await app.request('http://localhost/health');
     await app.request('http://localhost/health/api');
     await app.request('http://localhost/health/liveness');
     await app.request('http://localhost/health/controller');

@@ -9,6 +9,7 @@ const envMock = vi.hoisted(() => ({
     | 'production'
     | undefined,
   API_SLOW_REQUEST_THRESHOLD_MS: 3_000,
+  RELEASE_VERSION: 'test-release' as string | undefined,
 }));
 
 const dbExecuteMock = vi.hoisted(() => vi.fn());
@@ -73,6 +74,7 @@ describe('apiHealth', () => {
     vi.clearAllMocks();
     resetLongLivedProxyStreamRegistryForTests();
     resetRequestEndpointMetricsForTests();
+    envMock.RELEASE_VERSION = 'test-release';
     dbExecuteMock.mockResolvedValue(undefined);
     redisPingMock.mockResolvedValue('PONG');
     consoleWarnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
@@ -110,6 +112,7 @@ describe('apiHealth', () => {
     expect(response.status).toBe(200);
     await expect(response.json()).resolves.toEqual({
       server: 'api',
+      version: 'test-release',
       environment: {
         NODE_ENV: 'test',
         APP_ENV: 'development',
@@ -182,6 +185,7 @@ describe('apiHealth', () => {
     expect(response.status).toBe(200);
     await expect(response.json()).resolves.toEqual({
       server: 'api',
+      version: 'test-release',
       environment: {
         NODE_ENV: 'test',
         APP_ENV: 'development',
@@ -263,6 +267,47 @@ describe('apiHealth', () => {
     });
   });
 
+  it('returns a redacted healthy response without a version to unauthenticated callers', async () => {
+    const response = await createApp().request('/health/api');
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toEqual({
+      server: 'api',
+      ok: true,
+      timestamp: '2026-03-21T06:00:00.000Z',
+    });
+  });
+
+  it('reports an unhealthy response when only Redis is down', async () => {
+    redisPingMock.mockRejectedValue(new Error('redis unavailable'));
+
+    const response = await createApp(authContext).request('/health/api');
+
+    expect(response.status).toBe(503);
+    await expect(response.json()).resolves.toMatchObject({
+      ok: false,
+      error: 'redis unavailable',
+    });
+    expect(dbExecuteMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('falls back to a development version when no release metadata is set', async () => {
+    envMock.RELEASE_VERSION = undefined;
+    vi.stubEnv('VERCEL_GIT_COMMIT_SHA', '');
+    vi.stubEnv('GITHUB_SHA', '');
+
+    try {
+      const response = await createApp(authContext).request('/health/api');
+
+      expect(response.status).toBe(200);
+      await expect(response.json()).resolves.toMatchObject({
+        version: 'development',
+      });
+    } finally {
+      vi.unstubAllEnvs();
+    }
+  });
+
   it('returns detailed diagnostics to authenticated callers', async () => {
     registerLongLivedProxyStream({
       route: 'mcp:Docs',
@@ -320,7 +365,7 @@ describe('apiHealth', () => {
       error: 'database unavailable',
     });
     expect(consoleErrorSpy).toHaveBeenCalledTimes(1);
-    expect(redisPingMock).not.toHaveBeenCalled();
+    expect(redisPingMock).toHaveBeenCalledTimes(1);
 
     const [message] = consoleErrorSpy.mock.calls[0] ?? [];
     expect(message).toContain('[Health Check]');
@@ -328,7 +373,7 @@ describe('apiHealth', () => {
     expect(message).toContain('"status":"unhealthy"');
     expect(message).toContain('"name":"db"');
     expect(message).toContain('Error: database unavailable');
-    expect(message).not.toContain('"name":"redis"');
+    expect(message).toContain('"name":"redis"');
     expect(consoleWarnSpy).not.toHaveBeenCalled();
   });
 });
