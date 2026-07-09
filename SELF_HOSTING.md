@@ -578,6 +578,71 @@ MODAL_ECR_REGION=...
 MODAL_REGIONS=us
 ```
 
+## Declarative Environments
+
+Environments are normally created through the `/setup` wizard or
+Settings → Environments. Deployments that are managed as infrastructure as
+code can instead provision environments from declarative definitions at
+startup, without any human intervention:
+
+- `ROOMOTE_ENVIRONMENTS_DIR` — a directory of environment definition files
+  (`*.yaml`, `*.yml`, or `*.json`), one environment per file. Mount it into
+  the api container:
+
+  ```yaml
+  # docker-compose override for the api service
+  volumes:
+    - ./environments:/roomote/environments:ro
+  ```
+
+  ```sh
+  ROOMOTE_ENVIRONMENTS_DIR=/roomote/environments
+  ```
+
+- `ROOMOTE_ENVIRONMENTS_YAML` — one or more inline YAML documents (separated
+  by `---`) in a single env var, for platforms where mounting files is
+  awkward (Railway, Render, Fly, and similar).
+
+Each definition uses exactly the same YAML format as the environment editor's
+YAML view (`name`, `repositories`, `services`, `ports`, commands, and so on),
+so definitions copy/paste between the UI and the files. See
+[`.roomote/environments/roomote.yaml`](.roomote/environments/roomote.yaml) in
+this repository — Roomote's own environment definition — for a complete
+working example.
+
+Semantics:
+
+- The definition set is applied on every API startup. The environment name is
+  the identity key: missing environments are created, existing ones are
+  updated. Identical re-applies are no-ops.
+- **The declarative definition wins.** Environments provisioned this way stay
+  editable in the UI (they show a "Managed from file" badge), but edits are
+  overwritten the next time the deployment restarts and re-applies the file.
+  Every overwrite is recorded in the environment's config version history.
+- **Nothing is ever deleted.** Removing a definition returns its environment
+  to normal manual management; it keeps all data and loses only the badge.
+- Renaming `name` inside a definition creates a new environment under the new
+  name and orphans the old one.
+- Definitions may reference repositories that are not linked to the
+  deployment yet (for example before the GitHub App is installed). The
+  environment is created anyway and repository mappings backfill on the next
+  startup after the repositories are linked.
+- Invalid definitions are skipped with a logged error; they never prevent the
+  API from starting or other definitions from applying. A missing or
+  unreadable definitions directory is skipped the same way, so inline
+  `ROOMOTE_ENVIRONMENTS_YAML` definitions still apply. While any definition
+  fails to read or validate, the "removed definition" reconciliation above is
+  deferred, so a temporarily broken file never strips its environment's
+  managed marker.
+- Keep secrets out of definition files: the per-environment `env` map is
+  stored in plaintext. Use deployment environment variables or
+  Settings → Environment Variables for secret values.
+
+If you keep the definitions in a git repository, have your deploy pipeline
+check it out and mount the directory (or inject the content into
+`ROOMOTE_ENVIRONMENTS_YAML`). Roomote deliberately does not fetch remote
+config itself.
+
 ## Verification Checklist
 
 After startup:

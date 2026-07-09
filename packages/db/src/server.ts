@@ -49,6 +49,7 @@ export * from './lib/background-agent-settings';
 export * from './lib/background-automation-runs';
 export * from './lib/background-automation-slack-threads';
 export * from './lib/cloud-job-events';
+export * from './lib/declarative-environments';
 export * from './lib/environment-config-versions';
 export * from './lib/environment-definitions';
 export * from './lib/environment-snapshots';

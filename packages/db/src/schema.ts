@@ -3012,13 +3012,18 @@ export const environments = pgTable(
   {
     id: uuid('id').primaryKey().defaultRandom(),
     userId: text('user_id').references(() => users.id, { onDelete: 'cascade' }),
-    createdByUserId: text('created_by_user_id')
-      .notNull()
-      .references(() => users.id),
+    // Null when the environment was provisioned by the system (for example
+    // the declarative startup loader) before any user existed.
+    createdByUserId: text('created_by_user_id').references(() => users.id),
     name: text('name').notNull(),
     description: text('description'),
     config: jsonb('config').notNull().$type<EnvironmentConfig>(),
     isEval: boolean('is_eval').notNull().default(false),
+    // Source label for declaratively provisioned environments (file basename
+    // or inline-env-var document reference). Null for manually managed
+    // environments; cleared when the definition disappears from the
+    // declarative set.
+    declarativeSource: text('declarative_source'),
 
     snapshotId: text('snapshot_id'),
     snapshotCreatedAt: timestamp('snapshot_created_at'),
@@ -3043,6 +3048,7 @@ export const environmentConfigVersionSources = [
   'agent',
   'api',
   'setup',
+  'file',
 ] as const;
 
 export type EnvironmentConfigVersionSource =

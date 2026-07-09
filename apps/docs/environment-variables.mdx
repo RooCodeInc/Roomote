@@ -273,6 +273,16 @@ as per-task auth tokens or workspace paths.
 | `LINEAR_WEBHOOK_SECRET` | Linear   | Linear webhook secret.        |
 | `LINEAR_REDIRECT_URI`   | Optional | Linear redirect URI override. |
 
+### Declarative environments
+
+| Env var                     | Required | Used for                                                                                                                          |
+| --------------------------- | -------- | --------------------------------------------------------------------------------------------------------------------------------- |
+| `ROOMOTE_ENVIRONMENTS_DIR`  | Optional | Directory of environment definition files (`*.yaml`, `*.yml`, `*.json`) applied at API startup. One environment per file.        |
+| `ROOMOTE_ENVIRONMENTS_YAML` | Optional | Inline multi-document YAML with environment definitions applied at API startup, for platforms where mounting files is awkward. |
+
+See [Environments](/environments#provision-environments-declaratively) for the
+apply semantics.
+
 ### Live previews
 
 | Env var                     | Required        | Used for                                                                                                     |
