@@ -10,13 +10,19 @@ import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import type { SetupAuthStatus } from '@roomote/types';
 
-const { replaceMock, refreshMock, signInOauth2Mock, signInSocialMock } =
-  vi.hoisted(() => ({
-    replaceMock: vi.fn(),
-    refreshMock: vi.fn(),
-    signInOauth2Mock: vi.fn(),
-    signInSocialMock: vi.fn(),
-  }));
+const {
+  locationAssignMock,
+  replaceMock,
+  refreshMock,
+  signInOauth2Mock,
+  signInSocialMock,
+} = vi.hoisted(() => ({
+  locationAssignMock: vi.fn(),
+  replaceMock: vi.fn(),
+  refreshMock: vi.fn(),
+  signInOauth2Mock: vi.fn(),
+  signInSocialMock: vi.fn(),
+}));
 
 vi.mock('next/navigation', () => ({
   useRouter: () => ({
@@ -333,6 +339,7 @@ describe('StepAuthEnvVars', () => {
       writable: true,
       value: {
         ...window.location,
+        assign: locationAssignMock,
         origin: 'https://roomote.example.com',
       },
     });
@@ -478,7 +485,7 @@ describe('StepAuthEnvVars', () => {
     expect(
       screen.getByPlaceholderText('Microsoft Client ID'),
     ).toBeInTheDocument();
-    expectHeadingInNumberedStep('Enter the Microsoft app values.', 2);
+    expectHeadingInNumberedStep('Enter the Microsoft app generated values.', 2);
     expectHeadingInNumberedStep('Upload Roomote to Microsoft Teams.', 3);
     expectHeadingInNumberedStep('Add the Teams bot capability to that app.', 4);
   });
@@ -685,8 +692,10 @@ describe('StepAuthEnvVars', () => {
       expect(signInOauth2Mock).toHaveBeenCalledWith({
         providerId: 'slack',
         callbackURL: expect.any(String),
+        disableRedirect: true,
       });
     });
+    expect(locationAssignMock).toHaveBeenCalledWith('https://slack.test');
     expect(mutateAsync).toHaveBeenCalledWith({
       provider: 'slack',
       values: expect.objectContaining({
@@ -749,8 +758,10 @@ describe('StepAuthEnvVars', () => {
       expect(signInOauth2Mock).toHaveBeenCalledWith({
         providerId: 'slack',
         callbackURL: expect.any(String),
+        disableRedirect: true,
       });
     });
+    expect(locationAssignMock).toHaveBeenCalledWith('https://slack.test');
     expect(mutateAsync).toHaveBeenCalledWith({
       provider: 'slack',
       values: {},

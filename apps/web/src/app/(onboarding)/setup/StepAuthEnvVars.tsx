@@ -92,10 +92,12 @@ export function StepAuthEnvVars({
             ? await authClient.signIn.oauth2({
                 providerId: oauth2ProviderId,
                 callbackURL,
+                disableRedirect: true,
               })
             : await authClient.signIn.social({
                 provider: selectedProvider.id,
                 callbackURL,
+                disableRedirect: true,
               });
 
           if (result.error) {
@@ -103,11 +105,13 @@ export function StepAuthEnvVars({
             return;
           }
 
-          if (!result.data?.url) {
-            router.replace(callbackURL);
-            router.refresh();
+          if (result.data?.url) {
+            window.location.assign(result.data.url);
+            return;
           }
 
+          router.replace(callbackURL);
+          router.refresh();
           return;
         }
 
