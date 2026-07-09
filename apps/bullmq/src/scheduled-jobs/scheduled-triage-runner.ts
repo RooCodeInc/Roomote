@@ -165,6 +165,18 @@ export function createScheduledTriageJob(
           console.warn(
             `${logPrefix} Skipping deployment: no active user available to resolve credentials for scheduled ${config.automationKey.replaceAll('_', ' ')} task`,
           );
+          // Manual "Run now" triggers create a queued run before this job
+          // executes; complete it so it does not stay stuck in `queued`.
+          if (opts.bullmqJobId) {
+            await completeBackgroundAutomationRunByJobId(db, {
+              automationKey: config.automationKey,
+              bullmqJobId: opts.bullmqJobId,
+              status: 'skipped',
+              finishedAt: new Date(),
+              lastRunAt: 'skip',
+              metadata: { reason: 'no_user' },
+            });
+          }
           skipped++;
           continue;
         }

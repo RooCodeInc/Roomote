@@ -3,6 +3,7 @@ import {
   findEnvironmentForRepo,
 } from '@roomote/cloud-agents/server';
 import {
+  completeBackgroundAutomationRunByJobId,
   db,
   slackInstallations,
   taskSuggestions,
@@ -175,6 +176,18 @@ export async function suggesterJob(
         console.warn(
           `${LOG_PREFIX} Skipping deployment: no active user available to resolve credentials for scheduled suggester task`,
         );
+        // Manual "Run now" triggers create a queued run before this job
+        // executes; complete it so it does not stay stuck in `queued`.
+        if (opts.bullmqJobId) {
+          await completeBackgroundAutomationRunByJobId(db, {
+            automationKey: 'suggester',
+            bullmqJobId: opts.bullmqJobId,
+            status: 'skipped',
+            finishedAt: new Date(),
+            lastRunAt: 'skip',
+            metadata: { reason: 'no_user' },
+          });
+        }
         skipped++;
         continue;
       }
