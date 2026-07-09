@@ -92,27 +92,38 @@ The durable unit of work. One task = one conversation/piece of work; execution a
 - Unique constraint on `(userId, taskId)`
 - Composite index on `(userId, updatedAt)` for efficient recent pins queries
 
-**taskSuggestions**
+**workItems** (`work_items`)
 
-- Deployment-wide persisted Suggested Tasks batches for the Home-page onboarding rail and scheduled automation runs
-- Stores the suggestion title, prompt-ready brief, selected repository IDs, sort order, and optional `dismissedAt` timestamp
-- Unique index on `(sourceTaskId, sortOrder)` preserves ordering within a single source task's generated batch
-- `sourceTaskId` is nullable, so the database does not enforce deployment-wide uniqueness on `sortOrder` for rows that are not tied to a source task
+- Unified launchable-work table that replaced `taskSuggestions`, `automationWorkItems`, and `setupNewQueuedTasks`: one row shape with a `kind` discriminator (suggested task, auto-fix, onboarding-queued task, MCP recommendation, etc.)
+- Content columns: `title`, `brief`, `executionPrompt`, `investigationContext`, `category`, `priority`, `actionKind` (auto_fix only), plus `repositoryIds`, `targetRepositoryFullName`, `targetEnvironmentId`, and workspace-readiness fields
+- `automationKey` (nullable FK → `automations.key`; onboarding/manual launches have none), `sourceTaskId` (the scan/onboarding task that produced the item), `selectedByUserId` and `sourceWorkItemId` (onboarding provenance)
+- `fingerprint` is the dedup key (the old `task_suggestions.contentHash` folded in here)
+- **One launch state machine** for every launchable surface: `status` (`open` | `launching` | `launched` | `failed` | `dismissed`), `launchClaimedAt` (stale-claim recovery), `launchedTaskId` (FK → `tasks`, recorded by every surface that launches), `launchedAt`, `failedAt`, `launchError`, `dismissedAt`. MCP recommendations get real `work_items` rows too
+- Unique index on `(sourceTaskId, sortOrder)` preserves ordering within a source task's generated batch
 
-**backgroundAgentSettings**
+**backgroundAgentSettings** (`background_agent_settings`)
 
-- Singleton deployment-wide configuration for background automation
-- Includes shared `globalAgentInstructions` injected into all tasks, optional `styleGuidance` layered onto the default user-facing tone guidance, plus optional `suggesterInstructions` used only when generating Suggested Tasks
-- Stores the shared `managerSlackChannelId` used by manager-facing Slack delivery, plus legacy per-feature channel columns that still backfill or fall back until the shared manager channel is explicitly saved
-- Also stores the optional `platformIssueSlackChannelId` legacy row used for admin-visible Slack alerts when running tasks report admin-fixable platform blockers
-- Persists cadence and last-run state for scheduled automations so BullMQ can due-gate the deployment independently of the global hourly scheduler
+- Singleton (`id = 'default'`) holding only the genuinely global survivors after the rebuild: `managerSlackChannelId`, `globalAgentInstructions`, `authorshipInstructions` / compiled-authorship columns, `styleGuidance`, and the Slack summon/ack/completion emoji columns
+- Deleted from this table: the ~20 persona columns, the ~1250-line normalize/merge layer, the manager-channel triple fallback, per-feature Slack channel columns, `platformIssueSlackChannelId`, `suggesterInstructions`, and all per-automation cadence/last-run state (those now live on `automations`)
+- Channel resolution is now two levels only: the automation target, then the manager channel
 
-**backgroundAutomations / backgroundAutomationTargets**
+**automations** (`automations`)
 
-- Stores deployment-wide durable automation rows keyed by automation key, with optional JSON `schedule`, JSON `settings`, and destination/scope rows in `backgroundAutomationTargets`
-- `review_code` owns the Review Code automation config: enabled state, automatic review behavior (`reviewOnCommit`, `reviewDraftPrs`), whether automatic review includes PRs from authors outside Roomote (`reviewAllPullRequestAuthors`), comment-only approval policy, linked-task relay toggle, and `relayEligibleCreatorIds`
-- GitHub PR-review webhook handlers read the `review_code` row through `getReviewCodeAutomationSettings()` instead of reading any cloud-agent table
-- Slack-posting and scheduled automations store their per-automation destinations or repository/service scopes in `backgroundAutomationTargets` when the setting is target-shaped rather than a scalar JSON setting
+- Single deployment-wide automation table (key `text` primary key = the canonical snake_case automation key) that replaced `backgroundAutomations` + `backgroundAutomationTargets`. Targets are a JSONB `targets` array on the row rather than a separate join table
+- Rows for every known key are seeded idempotently by `ensureAutomationRows`, so `tasks.initiatorAutomation` and `work_items.automationKey` FKs always hold. `internal = true` rows launch tasks but are hidden from the settings UI
+- Columns: `enabled`, `internal`, JSONB `schedule` / `settings` / `targets`, `instructions`, `scanCursor`, and the run-history columns `lastRunAt`, `lastSucceededAt`, `lastFailedAt`, `lastError`
+- **Run history lives here, not in a runs table.** There is no `backgroundAutomationRuns` table: history for task-launching automations is `tasks WHERE initiator_automation = <key>`; announcer and manager-stats history come from the row's `last*` columns; dispatch failures land in `lastError`
+- `review_code` owns the Review Code automation config in its `settings` JSON (enabled state, `reviewOnCommit`, `reviewDraftPrs`, `reviewAllPullRequestAuthors`, comment-only approval policy, linked-task relay toggle, relay eligibility). GitHub PR-review webhook handlers read it through `getReviewCodeAutomationSettings()`
+
+**trackedMessages** (`tracked_messages`)
+
+- Pure outbound-message registry that replaced `agentSuggestionMessages` + `backgroundAutomationSlackThreads` + `mcpSetupManagerNotifications`
+- Stores chat coordinates only (`surface`, `kind`, `channelId`, `messageTs`, `threadTs`, `automationKey`, `createdByUserId`, `summaryText`, `metadata`) with `UNIQUE(kind, dedupeKey)` enforcing per-kind idempotency
+- Launch state is NOT here — it lives on `work_items`; the reaction-launch claim CAS runs against `work_items` via the nullable `workItemId` FK
+
+**slackQuickAnswers** (`slack_quick_answers`)
+
+- Renamed from `fastAgentSessions`; deliberately outside the task/run spine. Stores the fast Slack quick-answer conversation buffer (`userId`, `slackChannel`, `slackThreadTs`, `messages` JSON) with a unique `(slackChannel, slackThreadTs)` index
 
 **taskPlatformIssueReports**
 
@@ -120,11 +131,7 @@ The durable unit of work. One task = one conversation/piece of work; execution a
 - Links each report to the task, run, and optionally the persisted `task_messages` row that carried the tool result
 - Persists the raw `{ title, summary }` report payload plus `slackPostedAt` so Slack delivery stays one-alert-per-report when a deployment-level alert channel is configured
 
-**setupNewQueuedTasks**
-
-- Stores the prompts selected during `/setup` while the onboarding environment build is still running
-- Associates each queued prompt with the active setup onboarding task, the selecting user, and later the created environment plus launched task
-- Uses `(setupOnboardingTaskId, sortOrder)` as the ordered queue key for one launch queue per setup task
+(The prompts selected during `/setup` while the onboarding environment build is still running are now `work_items` rows of the onboarding-queued kind — there is no separate `setupNewQueuedTasks` table.)
 
 **taskArtifacts**
 
@@ -153,7 +160,7 @@ There is no `deletedTasks` tombstone table anymore; task deletion is a soft dele
 
 ### Task Runs & Execution
 
-**taskRuns** (`task_runs`; renamed from `cloud_jobs` — many TS identifiers such as `CloudJob` and `cloudJobId` still use the old vocabulary pending a later rename pass)
+**taskRuns** (`task_runs`; the DB table was renamed from `cloud_jobs`. Note: internal runtime code still uses "CloudJob" vocabulary on purpose — e.g. the Redis queue class `CloudJobQueue` / `cloud-job-queue.ts` and identifiers like `cloudJobId`. That naming is intentional and current, not stale; only the Postgres table was renamed)
 
 One row per sandbox execution attempt of a task. A task has 1:N runs: one `fresh` run plus any number of `resume` runs. Resume creates a new run row on the same task — there is no cross-run field copying and no chain-walking; "runs of task X" is the whole story.
 
@@ -537,7 +544,7 @@ pnpm --filter @roomote/db db:push
 - Named with pattern: `NNNN_adjective_character.sql`
 - Generated by Drizzle Kit based on schema changes
 - Tracked in `drizzle/meta/` snapshot files
-- The data-model rebuild collapsed historical migrations; intermediate migrations on the `data-model-simplification` branch are throwaway until the final baseline collapse lands
+- The data-model rebuild collapsed the previous 22+ migrations into a **single baseline migration** (`0000_amusing_magma.sql`). That baseline is the entire migration history and provisions all 56 tables; new migrations append after it as usual
 
 **Running migrations in scripts:**
 

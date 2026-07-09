@@ -1,7 +1,7 @@
 ---
 title: API App
 status: active
-last_reviewed: 2026-07-04
+last_reviewed: 2026-07-09
 owner: engineering
 summary: Technical documentation of the Hono API app covering route mounting, middleware, and the handler families hosted in apps/api.
 ---
@@ -104,7 +104,7 @@ The remaining handler families are application-owned rather than product-surface
 
 - `apps/api/src/handlers/artifacts/` implements artifact creation, upload completion, metadata reads, per-task artifact listing, and signed download URL helpers.
   These routes accept only `cj` bearer tokens and must bind the token claims to
-  the persisted `cloud_jobs` row. Artifact writes (creation and upload
+  the persisted `task_runs` row. Artifact writes (creation and upload
   completion) must confirm that row belongs to the requested task. Artifact
   reads (metadata, download URLs, and the `GET /api/tasks/:taskId/artifacts`
   listing, which returns the latest uploaded version per path with `viewUrl`

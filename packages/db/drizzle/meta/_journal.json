@@ -5,22 +5,8 @@
     {
       "idx": 0,
       "version": "7",
-      "when": 1783526937997,
-      "tag": "0000_stiff_lorna_dane",
-      "breakpoints": true
-    },
-    {
-      "idx": 1,
-      "version": "7",
-      "when": 1783570571104,
-      "tag": "0001_ancient_marvel_apes",
-      "breakpoints": true
-    },
-    {
-      "idx": 2,
-      "version": "7",
-      "when": 1783606092708,
-      "tag": "0002_misty_zemo",
+      "when": 1783610471106,
+      "tag": "0000_amusing_magma",
       "breakpoints": true
     }
   ]

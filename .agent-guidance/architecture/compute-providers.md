@@ -1,7 +1,7 @@
 ---
 title: Compute Providers
 status: active
-last_reviewed: 2026-07-06
+last_reviewed: 2026-07-09
 owner: engineering
 summary: Technical documentation of compute provider abstractions covering Docker, Modal, Daytona, E2B, fresh launch flows, worker release distribution, and worker bootstrap behavior.
 ---
@@ -53,7 +53,7 @@ The compute providers system is organized around three core concepts:
 2. **Environment Machine Helpers**: provider-neutral helpers normalize machine metadata, auth-bypass fields, and preview-surface bookkeeping
 3. **Environment Builders**: Provider-specific functions construct environment variables for workers
 
-At runtime, the controller dispatches per job using `cloud_jobs.vendor`.
+At runtime, the controller dispatches per job using `task_runs.vendor`.
 When a caller omits the provider, `enqueueCloudTask()` falls back to the
 deployment default resolved by
 `resolveDefaultComputeProvider()` (`packages/db/src/lib/compute-runtime-config.ts`),
@@ -418,7 +418,7 @@ adding a second billable row, and late `running` heartbeats are ignored once a
 final teardown action has been recorded.
 
 Provision and dispatch paths now also snapshot the effective provider resource
-configuration onto `cloud_jobs` so later usage accounting reads the resources
+configuration onto `task_runs` so later usage accounting reads the resources
 that actually backed the job instead of re-reading ambient env in the worker or
 BullMQ process.
 
@@ -449,7 +449,7 @@ high-level sequence:
    `.docker/sandbox/*` allowlist files plus the selected worker release
    tarball and run `install-worker.sh` so the shipped worker/runtime is
    refreshed in place; task snapshot resumes skip bootstrap entirely
-5. Update the `cloud_jobs` row with routing info and machine metadata
+5. Update the `task_runs` row with routing info and machine metadata
 6. Execute the provider-specific worker command in detached mode and store
    `sandboxCmdId` for log retrieval
 
@@ -470,7 +470,7 @@ For environment-backed workspaces, machine creation relies on the named preview 
 
 Modal intentionally does **not** rely on provider-side live startup-log
 streaming, and Roomote no longer mirrors worker harness logs into
-`cloud_jobs.log`. Startup surfaces therefore show phase/status progress for
+`task_runs.log`. Startup surfaces therefore show phase/status progress for
 Modal jobs without a live startup-log stream.
 
 ## Worker Release Distribution
@@ -512,7 +512,7 @@ tooling rather than any separate harness payload or GitHub fallback.
 Roomote now treats machine lifecycle as strictly
 job-scoped:
 
-1. The controller selects the provider from `cloud_jobs.vendor`.
+1. The controller selects the provider from `task_runs.vendor`.
 2. It chooses `fresh`, `environment_snapshot`, or `task_snapshot` launch mode.
 3. It creates or resumes exactly one machine for the target job.
 4. BullMQ snapshot or teardown paths later stop that machine and record final

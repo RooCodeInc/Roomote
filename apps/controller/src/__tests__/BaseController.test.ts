@@ -13,7 +13,6 @@ const {
   mockCloudJobsFindFirst,
   mockOrgsFindFirst,
   mockDequeueCloudTask,
-  mockResolveUserIdForCloudJob,
   mockGetOrphanedJob,
   mockRecordJobLifecycleEvent,
   mockRedisSet,
@@ -25,7 +24,6 @@ const {
   mockCloudJobsFindFirst: vi.fn(),
   mockOrgsFindFirst: vi.fn(),
   mockDequeueCloudTask: vi.fn().mockResolvedValue(null),
-  mockResolveUserIdForCloudJob: vi.fn().mockResolvedValue('user-1'),
   mockGetOrphanedJob: vi.fn().mockResolvedValue(null),
   mockRecordJobLifecycleEvent: vi.fn().mockResolvedValue(undefined),
   mockRedisSet: vi.fn().mockResolvedValue('OK'),
@@ -89,8 +87,6 @@ vi.mock('@roomote/redis', () => ({
 
 vi.mock('@roomote/cloud-agents/server', () => ({
   dequeueCloudTask: (...args: unknown[]) => mockDequeueCloudTask(...args),
-  resolveUserIdForCloudJob: (...args: unknown[]) =>
-    mockResolveUserIdForCloudJob(...args),
 }));
 
 vi.mock('../orphaned-cloud-jobs', () => ({
@@ -195,7 +191,6 @@ describe('BaseController.handleSpawnJobError', () => {
     vi.clearAllMocks();
     resetControllerMocks();
     mockDequeueCloudTask.mockResolvedValue(null);
-    mockResolveUserIdForCloudJob.mockResolvedValue('user-1');
     mockGetOrphanedJob.mockResolvedValue(null);
     mockOrgsFindFirst.mockResolvedValue({
       id: 'org-1',
@@ -376,7 +371,6 @@ describe('BaseController.dequeueCloudJob', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     resetControllerMocks();
-    mockResolveUserIdForCloudJob.mockResolvedValue('user-1');
     mockOrgsFindFirst.mockResolvedValue({
       id: 'org-1',
       deletedAt: null,

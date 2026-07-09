@@ -1,7 +1,7 @@
 ---
 title: Monitoring & Health Checks
 status: active
-last_reviewed: 2026-07-08
+last_reviewed: 2026-07-09
 owner: engineering
 summary: Technical documentation of local health monitoring covering API endpoints, request observability, optional Sentry capture, controller heartbeat, orphan detection, and common debugging patterns.
 ---
@@ -131,7 +131,7 @@ The worker initializes `@sentry/node` from `apps/worker/src/monitoring/sentry.ts
 
 This makes it possible to identify which shipped worker artifact produced a Sentry event even when the generic deploy-level release env vars are unset inside the sandbox.
 
-For job-scoped persistence, the worker also sends the same runtime artifact metadata through `sdk.cloudJobs.dequeue()` / `sdk.cloudJobs.resume()` so `cloud_jobs.workerReleaseTag`, `cloud_jobs.workerVersion`, and `cloud_jobs.workerCommit` record which worker runtime actually executed the job. Sentry remains the cross-event observability surface; the `cloud_jobs` row is now the durable per-job source of truth.
+For job-scoped persistence, the worker also sends the same runtime artifact metadata through `sdk.cloudJobs.dequeue()` / `sdk.cloudJobs.resume()` so `task_runs.workerReleaseTag`, `task_runs.workerVersion`, and `task_runs.workerCommit` record which worker runtime actually executed the job. Sentry remains the cross-event observability surface; the `task_runs` row is now the durable per-job source of truth.
 
 ### Captured Paths
 
@@ -532,9 +532,9 @@ When an orphaned job is detected:
 await releaseCloudTask(cloudJob);
 
 await db
-  .update(cloudJobs)
+  .update(taskRuns)
   .set({ dequeuedAt: null })
-  .where(eq(cloudJobs.id, cloudJob.id));
+  .where(eq(taskRuns.id, cloudJob.id));
 ```
 
 The orphan map prevents thrashing by tracking recovery attempts:
@@ -619,10 +619,10 @@ Returns detailed queue statistics and repeatable job schedules.
 **Runtime sleep-action job:**
 
 - File: `apps/bullmq/src/scheduled-jobs/sleep-check.ts`
-- Purpose: Claim due sandbox sleep actions once the persisted `cloud_jobs.sleepAt` deadline is due, then snapshot resumable jobs or shut down non-resumable ones. The same job also treats stale `cloud_jobs.workerHeartbeatAt` timestamps as a worker-health failure signal: if the sandbox is still running it snapshots resumable jobs or fails non-resumable ones, and if the sandbox is already gone it fails the job directly.
+- Purpose: Claim due sandbox sleep actions once the persisted `task_runs.sleepAt` deadline is due, then snapshot resumable jobs or shut down non-resumable ones. The same job also treats stale `task_runs.workerHeartbeatAt` timestamps as a worker-health failure signal: if the sandbox is still running it snapshots resumable jobs or fails non-resumable ones, and if the sandbox is already gone it fails the job directly.
 - Cloud job events: `sleep_check` now records candidate-evaluation start plus the observed provider status and timeout before it enqueues a snapshot, completes an idle job without a snapshot, or fails the job. That makes it possible to distinguish "snapshot was never claimed" from "snapshot was requested and later failed" using `cloud_job_events` alone.
 - Worker runtime events: `worker_runtime` records persisted runtime-state snapshots, harness connect/disconnect transitions, harness task-state events, shutdown signals, runtime task registration, and worker heartbeat loop failures. This is the primary source for understanding what the worker believed the task phase and sleep deadline were before BullMQ stale-worker recovery ran.
-- Terminal lifecycle preservation: `job_lifecycle` finish events now retain the previous `taskPhase`, `sleepAt`, `sleepRequestedAt`, `snapshotRequestedAt`, `snapshotCreatedAt`, `workerHeartbeatAt`, `runtimeTaskId`, and the persisted worker release tag/version/commit even though the terminal `cloud_jobs` row may clear some of those live runtime fields.
+- Terminal lifecycle preservation: `job_lifecycle` finish events now retain the previous `taskPhase`, `sleepAt`, `sleepRequestedAt`, `snapshotRequestedAt`, `snapshotCreatedAt`, `workerHeartbeatAt`, `runtimeTaskId`, and the persisted worker release tag/version/commit even though the terminal `task_runs` row may clear some of those live runtime fields.
 - Cadence: Every 60 seconds
 
 ## Debugging Patterns
@@ -678,7 +678,7 @@ const result = await redis.set(
 ```sql
 -- Find jobs stuck in Pending
 SELECT id, type, payload->>'repo', created_at, dequeued_at
-FROM cloud_jobs
+FROM task_runs
 WHERE dequeued_at IS NULL
   AND canceled_at IS NULL
   AND completed_at IS NULL
@@ -687,7 +687,7 @@ ORDER BY created_at DESC;
 
 -- Find jobs stuck after dequeue
 SELECT id, type, payload->>'repo', dequeued_at, started_at
-FROM cloud_jobs
+FROM task_runs
 WHERE dequeued_at IS NOT NULL
   AND started_at IS NULL
   AND canceled_at IS NULL
@@ -704,17 +704,17 @@ ORDER BY dequeued_at DESC;
 
 ```typescript
 import { releaseCloudTask } from '@roomote/cloud-agents/server';
-import { db, cloudJobs, eq } from '@roomote/db/server';
+import { db, taskRuns, eq } from '@roomote/db/server';
 
-const job = await db.query.cloudJobs.findFirst({
-  where: eq(cloudJobs.id, jobId),
+const job = await db.query.taskRuns.findFirst({
+  where: eq(taskRuns.id, jobId),
 });
 
 await releaseCloudTask(job);
 await db
-  .update(cloudJobs)
+  .update(taskRuns)
   .set({ dequeuedAt: null })
-  .where(eq(cloudJobs.id, jobId));
+  .where(eq(taskRuns.id, jobId));
 ```
 
 ### Snapshot Confusion
@@ -732,7 +732,7 @@ SELECT
   source_snapshot_id,
   payload->>'sourceCloudJobId' AS source_job,
   created_at
-FROM cloud_jobs
+FROM task_runs
 WHERE task_id = '<task-id>'
 ORDER BY created_at;
 ```

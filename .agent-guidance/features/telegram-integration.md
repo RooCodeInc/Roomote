@@ -1,7 +1,7 @@
 ---
 title: Telegram Integration
 status: active
-last_reviewed: 2026-07-08
+last_reviewed: 2026-07-09
 owner: engineering
 summary: Telegram bot task entry, webhook configuration, reply flow, and Slack parity notes.
 ---
@@ -104,8 +104,9 @@ intro in the captured primary chat (`setup-suggestions.ts`, forked from
 `submitTaskSuggestions`). Unlike Slack's root-plus-five-replies fan-out, the
 Telegram intro is a single message listing up to five ideas with one
 inline start button each — one notification total. Clicks claim the
-suggestion (`agentSuggestionMessages.launchClaimedAt`) so double taps cannot
-launch twice.
+suggestion through the `work_items` launch claim (a `status` CAS from `open`
+to `launching`, with `work_items.launchClaimedAt` recorded for stale-claim
+recovery) so double taps cannot launch twice.
 
 Scheduled automations (suggester, Sentry triage, Dependabot triage,
 security/code-quality auditors, CI failure triage) use the same fallback:

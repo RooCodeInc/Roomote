@@ -198,9 +198,9 @@ export async function seedDemoData(): Promise<DemoSeedSummary> {
   record(`environment ${demoSeedEnvironmentName}`, !existingEnvironment);
 
   // Demo tasks in a few representative states. Each task gets a matching
-  // cloud job because the task-history views only render tasks that have at
-  // least one cloud job, and `attributedUserId` so the tasks show up under
-  // the demo user's creator filter.
+  // task_run because the task-history views only render tasks that have at
+  // least one run, and initiatorUserId so the tasks show up under the demo
+  // user's initiator filter.
   for (const task of demoSeedTasks) {
     const existingTask = await db.query.tasks.findFirst({
       where: eq(tasks.id, task.id),

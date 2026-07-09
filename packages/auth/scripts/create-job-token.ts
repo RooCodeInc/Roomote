@@ -1,6 +1,6 @@
 // pnpm --silent --filter @roomote/auth development:create-job-token 123 [timeoutMs]
 
-import { db, cloudJobs, eq } from '@roomote/db/server';
+import { db, taskRuns, eq } from '@roomote/db/server';
 
 import { createJobToken } from '../src';
 
@@ -31,25 +31,20 @@ async function main() {
     }
   }
 
-  const cloudJob = await db.query.cloudJobs.findFirst({
-    where: eq(cloudJobs.id, cloudJobId),
+  const taskRun = await db.query.taskRuns.findFirst({
+    where: eq(taskRuns.id, cloudJobId),
   });
 
-  if (!cloudJob) {
-    console.error('Cloud job not found: ', cloudJobId);
+  if (!taskRun) {
+    console.error('Task run not found: ', cloudJobId);
     process.exit(1);
   }
 
-  const userId = cloudJob.userId;
-
-  if (!userId) {
-    console.error('Cloud job has no associated user: ', cloudJobId);
-    process.exit(1);
-  }
-
+  // A null acting user mints a deployment-service-principal token for
+  // automation-initiated runs with no human driver.
   const token = await createJobToken({
-    cloudJobId: cloudJob.id,
-    userId,
+    cloudJobId: taskRun.id,
+    userId: taskRun.actingUserId,
     timeoutMs,
   });
 

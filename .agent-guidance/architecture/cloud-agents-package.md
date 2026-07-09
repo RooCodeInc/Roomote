@@ -1,7 +1,7 @@
 ---
 title: Cloud Agents Package
 status: active
-last_reviewed: 2026-06-28
+last_reviewed: 2026-07-09
 owner: engineering
 summary: Technical documentation of the packages/cloud-agents workspace package covering prompt dispatch, strict Generalist pathway routing, packaged workflows, MCP self-setup helpers, and fast-agent subsystems.
 ---
@@ -18,7 +18,7 @@ Use this page for package-level ownership. Use the neighboring architecture docs
 | ---------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------- |
 | [`packages/cloud-agents/src/index.ts`](../../packages/cloud-agents/src/index.ts)                                             | Client-safe exports such as the Roomote system prompt, compact prompt, and task runtime defaults                |
 | [`packages/cloud-agents/src/server/index.ts`](../../packages/cloud-agents/src/server/index.ts)                               | Server-only export surface for routing, workflow, queueing, MCP self-setup, fast-agent, and video-agent helpers |
-| [`packages/cloud-agents/src/server/cloud-agent-workflow.ts`](../../packages/cloud-agents/src/server/cloud-agent-workflow.ts) | Prompt dispatch entrypoint keyed by `CloudTaskType`                                                             |
+| [`packages/cloud-agents/src/server/cloud-agent-workflow.ts`](../../packages/cloud-agents/src/server/cloud-agent-workflow.ts) | Prompt dispatch entrypoint keyed by `TaskPayloadKind`                                                           |
 | [`packages/cloud-agents/src/server/cloud-job-queue.ts`](../../packages/cloud-agents/src/server/cloud-job-queue.ts)           | Canonical enqueue path and Redis queue interface for new cloud tasks                                            |
 
 ## Child Surface Inventory
@@ -27,7 +27,7 @@ Use this page for package-level ownership. Use the neighboring architecture docs
 | ---------------------------------------------------------- | ------------ | ---------- | -------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------- |
 | `packages/cloud-agents/src/system-prompt.ts`               | architecture | documented | [Roomote Agent Context](./agent-context.md)                                            | Product-level Roomote identity and behavior in the OpenCode system-prompt layer.                                |
 | `packages/cloud-agents/src/compact-prompt.ts`              | architecture | documented | [Roomote Agent Context](./agent-context.md)                                            | OpenCode compaction override shipped with the worker runtime.                                                   |
-| `packages/cloud-agents/src/server/cloud-agent-workflow.ts` | architecture | documented | [Cloud Agents Package](./cloud-agents-package.md#prompt-dispatch-and-task-type-entry)  | Dispatches `CloudTaskType` values into prompt-builder workflows.                                                |
+| `packages/cloud-agents/src/server/cloud-agent-workflow.ts` | architecture | documented | [Cloud Agents Package](./cloud-agents-package.md#prompt-dispatch-and-task-type-entry)  | Dispatches `TaskPayloadKind` values into prompt-builder workflows.                                              |
 | `packages/cloud-agents/src/server/cloud-job-queue.ts`      | architecture | documented | [Cloud Job Execution Architecture](./cloud-job-execution.md#job-creation-and-queueing) | Owns enqueue semantics, queue scope, and compute-provider selection.                                            |
 | `packages/cloud-agents/src/server/router/`                 | architecture | documented | [LLM Routing System](./llm-routing.md)                                                 | Workspace routing, follow-up classification, MCP-assisted routing, and initial work-kind classification.        |
 | `packages/cloud-agents/src/server/workflows/`              | architecture | documented | [Workflow System](./workflow-system.md)                                                | Prompt-builder workflows and the standard packaged-skill catalog.                                               |
@@ -39,7 +39,7 @@ Use this page for package-level ownership. Use the neighboring architecture docs
 
 [`generatePrompt()` in `packages/cloud-agents/src/server/cloud-agent-workflow.ts`](../../packages/cloud-agents/src/server/cloud-agent-workflow.ts) is the package's main dispatch point. It combines:
 
-- the persisted `cloud_jobs` row,
+- the persisted `task_runs` row,
 - the `CloudTask` payload,
 - any GitHub token or agent settings needed by that task type,
 - and the task URL / user context used in downstream workflow prompts.
@@ -58,7 +58,7 @@ Every builder returns the same package-level shape:
 - `artifacts`: side-channel metadata such as GitHub review comment ids
 
 Fresh launches persist both `prompt` and `harnessInstructions` on the
-`cloud_jobs` row at dequeue time. `SnapshotResume` jobs intentionally do not run
+`task_runs` row at dequeue time. `SnapshotResume` jobs intentionally do not run
 `generatePrompt()` again; they reuse the source job's persisted
 `harnessInstructions`, resume the saved session, and queue any deferred
 follow-up after reconnect.

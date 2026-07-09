@@ -505,7 +505,7 @@ each job owns its own launch and there is no warm worker pool.
 
 **Launch Steps:**
 
-1. Dequeue the `cloud_jobs` row and create a job-scoped auth token.
+1. Dequeue the `task_runs` row and create a job-scoped auth token.
 2. Load the selected environment config plus any provider-specific snapshot
    state.
 3. Resolve the launch mode:
@@ -515,7 +515,7 @@ each job owns its own launch and there is no warm worker pool.
 4. Create or resume the provider instance.
 5. If `config.oidc` is present, write the initial token files after the machine
    exists and before the detached worker command starts.
-6. Persist machine metadata on the `cloud_jobs` row.
+6. Persist machine metadata on the `task_runs` row.
 7. Launch `worker run`, `worker resume`, or `worker snapshot` on that machine.
 
 ## Snapshot Management
@@ -566,8 +566,8 @@ snapshot.
 2. Web app calls `trpc.snapshots.createCloudJob({ cloudJobId })`
 3. Handler enqueues a snapshot request via BullMQ
 4. BullMQ worker calls the active provider's snapshot API on the running worker
-5. `snapshotId` is written to `cloudJobs.snapshotId`
-6. Snapshot metadata is written back to `cloudJobs` (and to `environments` for environment snapshots)
+5. `snapshotId` is written to `taskRuns.snapshotId`
+6. Snapshot metadata is written back to `taskRuns` (and to `environments` for environment snapshots)
 
 **Resume Flow:**
 

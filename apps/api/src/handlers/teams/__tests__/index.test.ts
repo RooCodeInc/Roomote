@@ -24,7 +24,6 @@ const {
   redisGetMock,
   queueCommunicationMessageMock,
   redisSetMock,
-  resolveUserIdForCloudJobMock,
   routeTaskMock,
   shouldRouteUnmentionedReplyMock,
   teamsInstallationsTable,
@@ -76,7 +75,6 @@ const {
   redisGetMock: vi.fn(),
   queueCommunicationMessageMock: vi.fn(),
   redisSetMock: vi.fn(),
-  resolveUserIdForCloudJobMock: vi.fn(),
   routeTaskMock: vi.fn(),
   shouldRouteUnmentionedReplyMock: vi.fn(),
   teamsInstallationsTable: {
@@ -248,7 +246,6 @@ vi.mock('@roomote/cloud-agents/server', () => ({
   buildTeamsRoutingContext: buildTeamsRoutingContextMock,
   enqueueCloudTask: enqueueCloudTaskMock,
   getTaskUrl: getTaskUrlMock,
-  resolveUserIdForCloudJob: resolveUserIdForCloudJobMock,
   routeTask: routeTaskMock,
 }));
 
@@ -348,7 +345,6 @@ describe('Teams webhook handler', () => {
     processImageAttachmentsMock.mockResolvedValue([
       'data:image/png;base64,abc123',
     ]);
-    resolveUserIdForCloudJobMock.mockResolvedValue('user-1');
     redisEvalMock.mockResolvedValue(null);
     redisGetMock.mockResolvedValue(null);
     redisSetMock.mockResolvedValue('OK');
@@ -869,7 +865,6 @@ describe('Teams webhook handler', () => {
       cloudJobId: 88,
     });
     expect(response.status).toBe(200);
-    expect(resolveUserIdForCloudJobMock).not.toHaveBeenCalled();
     expect(buildTeamsRoutingContextMock).toHaveBeenCalledWith(
       expect.objectContaining({
         userId: 'mapped-user-1',
@@ -1040,7 +1035,6 @@ describe('Teams webhook handler', () => {
       reason: 'account_link_required',
     });
     expect(response.status).toBe(200);
-    expect(resolveUserIdForCloudJobMock).not.toHaveBeenCalled();
     expect(buildTeamsRoutingContextMock).not.toHaveBeenCalled();
     expect(routeTaskMock).not.toHaveBeenCalled();
     expect(enqueueCloudTaskMock).not.toHaveBeenCalled();

@@ -1,7 +1,7 @@
 ---
 title: Preview Proxy
 status: active
-last_reviewed: 2026-07-03
+last_reviewed: 2026-07-09
 owner: engineering
 summary: Technical documentation of the preview proxy service that routes HTTP and WebSocket traffic to Roomote-managed sandbox surfaces and named preview ports via stable URLs.
 ---
@@ -463,7 +463,7 @@ pnpm --filter @roomote/preview-proxy dev
 
 ### Dependencies
 
-- **PostgreSQL** — cloudJobs, environments table access
+- **PostgreSQL** — task_runs, environments table access
 - **Redis** — State storage (OAuth state, redirect nonces)
 - **Main App** (`ROOMOTE_APP_URL`) — Auth redirects, preview token issuance
 

@@ -1,7 +1,7 @@
 ---
 title: Webhook Handlers
 status: active
-last_reviewed: 2026-07-08
+last_reviewed: 2026-07-09
 owner: engineering
 summary: Technical documentation of webhook handlers for GitHub, GitLab, Azure DevOps, Slack, Teams, Telegram, and Linear covering endpoints, event types, verification, and processing patterns.
 ---
@@ -244,7 +244,7 @@ existing PR task through `steerMessageToTask()` or `sendMessageToTask()`. If
 there is no reusable owner, it checks `findActiveGitHubPrReviewTask()` for the
 same PR/head SHA and posts an ADO comment linking to that review rather than
 enqueuing a duplicate. Only when no review is already running does it enqueue
-`CloudTaskType.GithubPrReview` with `sourceControlProvider: 'ado'`.
+`TaskPayloadKind.GithubPrReview` with `sourceControlProvider: 'ado'`.
 
 Acknowledgement comments are posted through
 `createAdoPullRequestComment()` in `packages/ado/src/api.ts`. When the webhook
@@ -381,7 +381,7 @@ For fresh task routing, the handler also claims `slack:routing-lock:{threadId}` 
 
 ### Message Processing Flow
 
-1. **Workflow-step start** — `function_executed` custom-step events claim event dedupe, acknowledge Slack with `{ ok: true }`, then continue in the background: parse the workflow `prompt` plus required `channel_id` and optional `message_ts` / `prompt_author_id` inputs, use `slack_installations.installed_by_user_id` as the job-token owner while leaving the initial `cloud_jobs.acting_user_id` unset, auto-route and start the routed workspace without Slack confirmation UI, then finish the step with `task_id` / `task_url` outputs or a workflow-step error. If `message_ts` is omitted, Roomote first posts a top-level kickoff message and uses that new message as the thread root for later replies. Function completion uses the per-execution workflow token first and falls back to the installed bot token; if both attempts fail, the failure is logged without releasing the event dedupe claim. Successful completions are cached by `function_execution_id` so a later duplicate delivery can re-complete the workflow step without starting another Roomote task.
+1. **Workflow-step start** — `function_executed` custom-step events claim event dedupe, acknowledge Slack with `{ ok: true }`, then continue in the background: parse the workflow `prompt` plus required `channel_id` and optional `message_ts` / `prompt_author_id` inputs, use `slack_installations.installed_by_user_id` as the job-token owner while leaving the initial `task_runs.acting_user_id` unset, auto-route and start the routed workspace without Slack confirmation UI, then finish the step with `task_id` / `task_url` outputs or a workflow-step error. If `message_ts` is omitted, Roomote first posts a top-level kickoff message and uses that new message as the thread root for later replies. Function completion uses the per-execution workflow token first and falls back to the installed bot token; if both attempts fail, the failure is logged without releasing the event dedupe claim. Successful completions are cached by `function_execution_id` so a later duplicate delivery can re-complete the workflow step without starting another Roomote task.
 2. **Automated app mention start** — `app_mention` events authored by another Slack app now auto-route for every org unless they were authored by Roomote itself. The handler uses `slack_installations.installed_by_user_id` as the launch user, uses the installer Slack mapping or bot user as the Slack sender, acquires the thread routing lock, and auto-routes without the interactive account-linking/configuration UI. Because that surface has no in-thread human `Configure` / `Ignore` affordance, it bypasses the Slack MCP setup interruption gate that still applies to the normal human-authored Slack routing flow.
 3. **Summon reaction start** — `reaction_added` events first give tracked setup-suggestion launches and coach recommendation launches (`:+1:` / `:thumbsup:`) priority. Otherwise, when the reaction name matches the org-configured summon emoji, the handler fetches the reacted source message, ignores inaccessible, bot-authored, or self-reacted sources, synthesizes a Slack-style entry event, and reuses the standard task-entry path against the source message's thread root.
 4. **Active job check** — If a non-terminal job already exists in the resolved thread, queue the message for the worker without adding the temporary acknowledgement reaction; this includes jobs that are still booting, so follow-up thread replies do not wait for the worker machine to finish starting.
