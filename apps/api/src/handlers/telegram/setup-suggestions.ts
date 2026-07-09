@@ -4,14 +4,15 @@ import {
   SETUP_SUGGESTIONS_TELEGRAM_START_INSTRUCTION,
 } from '@roomote/communication/chat-messages';
 import {
-  agentSuggestionMessages,
   and,
   db,
   eq,
   isNull,
-  like,
+  lt,
+  or,
   resolveTelegramRuntimeCredentials,
-  taskSuggestions,
+  trackedMessages,
+  workItems,
 } from '@roomote/db/server';
 import { enqueueTelegramSuggestedTasksOnboardingFollowup } from '@roomote/sdk/server';
 
@@ -115,6 +116,7 @@ export async function postSetupTaskSuggestionsToTelegram(params: {
 
   await insertSetupSuggestionMessageRows(
     buildSharedMessageSuggestionRows({
+      surface: 'telegram',
       messageId: posted.messageId,
       channelId: chatId,
       sourceTaskId,
@@ -139,10 +141,14 @@ export async function postSetupTaskSuggestionsToTelegram(params: {
   });
 }
 
+const TELEGRAM_SUGGESTION_LAUNCH_STALE_CLAIM_MS = 10 * 60 * 1000;
+
 /**
  * Atomically claim a suggestion button click so a double tap cannot launch
- * two tasks. Returns the suggestion to launch, or null when it was already
- * claimed or does not exist.
+ * two tasks. Returns the work item to launch, or null when it was already
+ * claimed/launched or does not exist. The suggestion id from the `idea:<id>`
+ * callback is the backing `work_items` row id; the chat id scopes the claim to
+ * a suggestion card actually posted in this Telegram chat.
  */
 export async function claimTelegramSuggestionLaunch(input: {
   suggestionId: string;
@@ -150,40 +156,51 @@ export async function claimTelegramSuggestionLaunch(input: {
 }): Promise<{
   id: string;
   title: string;
-  brief: string;
+  brief: string | null;
   investigationContext: string | null;
   targetRepositoryFullName: string | null;
 } | null> {
-  // The chat id scopes the claim; suggestion buttons from any Telegram
-  // suggestion surface (setup onboarding, scheduled automations) share the
-  // idea:<id> callback and this launch path.
-  const [claimed] = await db
-    .update(agentSuggestionMessages)
-    .set({ launchClaimedAt: new Date() })
-    .where(
-      and(
-        eq(agentSuggestionMessages.channelId, input.chatId),
-        like(agentSuggestionMessages.suggestionKey, `%:${input.suggestionId}`),
-        isNull(agentSuggestionMessages.launchClaimedAt),
-      ),
-    )
-    .returning({ id: agentSuggestionMessages.id });
+  // Scope: a suggestion card for this work item must have been posted in this
+  // chat. Suggestion buttons from any Telegram suggestion surface (setup
+  // onboarding, scheduled automations) share the idea:<id> callback and path.
+  const trackedCard = await db.query.trackedMessages.findFirst({
+    where: and(
+      eq(trackedMessages.kind, 'suggestion_card'),
+      eq(trackedMessages.channelId, input.chatId),
+      eq(trackedMessages.workItemId, input.suggestionId),
+    ),
+    columns: { id: true },
+  });
 
-  if (!claimed) {
+  if (!trackedCard) {
     return null;
   }
 
-  const [suggestion] = await db
-    .select({
-      id: taskSuggestions.id,
-      title: taskSuggestions.title,
-      brief: taskSuggestions.brief,
-      investigationContext: taskSuggestions.investigationContext,
-      targetRepositoryFullName: taskSuggestions.targetRepositoryFullName,
-    })
-    .from(taskSuggestions)
-    .where(eq(taskSuggestions.id, input.suggestionId))
-    .limit(1);
+  const now = new Date();
+  const staleClaimThreshold = new Date(
+    now.getTime() - TELEGRAM_SUGGESTION_LAUNCH_STALE_CLAIM_MS,
+  );
 
-  return suggestion ?? null;
+  const [claimed] = await db
+    .update(workItems)
+    .set({ status: 'launching', launchClaimedAt: now, updatedAt: now })
+    .where(
+      and(
+        eq(workItems.id, input.suggestionId),
+        eq(workItems.status, 'open'),
+        or(
+          isNull(workItems.launchClaimedAt),
+          lt(workItems.launchClaimedAt, staleClaimThreshold),
+        ),
+      ),
+    )
+    .returning({
+      id: workItems.id,
+      title: workItems.title,
+      brief: workItems.brief,
+      investigationContext: workItems.investigationContext,
+      targetRepositoryFullName: workItems.targetRepositoryFullName,
+    });
+
+  return claimed ?? null;
 }

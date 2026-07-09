@@ -2,7 +2,6 @@ import { SlackNotifier } from '@roomote/slack';
 import {
   and,
   asc,
-  automationWorkItems,
   db,
   eq,
   getAutomationRuntime,
@@ -13,6 +12,7 @@ import {
   taskRuns,
   tasks,
   upsertBackgroundAutomationSlackThread,
+  workItems,
 } from '@roomote/db/server';
 
 import { buildSuggestionBadgePrefix } from '../../slack/helpers/suggestion-workspace.js';
@@ -113,14 +113,22 @@ export async function bindLateSlackThreadToTask(params: {
 
     const [automationWorkItem] = await tx
       .select({
-        automationKey: automationWorkItems.automationKey,
-        sourceTaskId: automationWorkItems.sourceTaskId,
+        automationKey: workItems.automationKey,
+        sourceTaskId: workItems.sourceTaskId,
       })
-      .from(automationWorkItems)
-      .where(and(eq(automationWorkItems.id, params.automationWorkItemId)))
+      .from(workItems)
+      .where(
+        and(
+          eq(workItems.kind, 'auto_fix'),
+          eq(workItems.id, params.automationWorkItemId),
+        ),
+      )
       .limit(1);
 
-    if (!automationWorkItem?.sourceTaskId) {
+    if (
+      !automationWorkItem?.sourceTaskId ||
+      !automationWorkItem.automationKey
+    ) {
       return;
     }
 

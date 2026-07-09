@@ -10,8 +10,7 @@ import {
   environmentVariables,
   users,
   taskRuns,
-  taskSuggestions,
-  setupNewQueuedTasks,
+  workItems,
   slackInstallations,
   slackUserMappings,
   asc,
@@ -343,12 +342,17 @@ async function clearTaskSuggestions(
   }
 
   await executor
-    .delete(taskSuggestions)
-    .where(eq(taskSuggestions.sourceTaskId, sourceTaskId));
+    .delete(workItems)
+    .where(
+      and(
+        eq(workItems.sourceTaskId, sourceTaskId),
+        eq(workItems.kind, 'suggestion'),
+      ),
+    );
 }
 
 async function clearQueuedSetupTasks(executor: DatabaseOrTransaction = db) {
-  await executor.delete(setupNewQueuedTasks);
+  await executor.delete(workItems).where(eq(workItems.kind, 'onboarding'));
 }
 
 async function getActiveSlackInstallation(
@@ -532,16 +536,21 @@ async function getPersistedTaskSuggestionRows(suggestionIds?: string[]) {
 
   return db
     .select({
-      id: taskSuggestions.id,
-      title: taskSuggestions.title,
-      brief: taskSuggestions.brief,
-      sortOrder: taskSuggestions.sortOrder,
+      id: workItems.id,
+      title: workItems.title,
+      brief: workItems.brief,
+      sortOrder: workItems.sortOrder,
     })
-    .from(taskSuggestions)
+    .from(workItems)
     .where(
-      suggestionIds ? inArray(taskSuggestions.id, suggestionIds) : undefined,
+      suggestionIds
+        ? and(
+            eq(workItems.kind, 'suggestion'),
+            inArray(workItems.id, suggestionIds),
+          )
+        : eq(workItems.kind, 'suggestion'),
     )
-    .orderBy(asc(taskSuggestions.sortOrder));
+    .orderBy(asc(workItems.sortOrder));
 }
 
 async function getPersistedQueuedSetupTasks(
@@ -554,18 +563,23 @@ async function getPersistedQueuedSetupTasks(
 
   return executor
     .select({
-      id: setupNewQueuedTasks.id,
-      suggestionId: setupNewQueuedTasks.suggestionId,
-      title: setupNewQueuedTasks.title,
-      prompt: setupNewQueuedTasks.prompt,
-      sortOrder: setupNewQueuedTasks.sortOrder,
-      launchedTaskId: setupNewQueuedTasks.launchedTaskId,
-      launchedAt: setupNewQueuedTasks.launchedAt,
-      environmentId: setupNewQueuedTasks.environmentId,
+      id: workItems.id,
+      suggestionId: workItems.sourceWorkItemId,
+      title: workItems.title,
+      prompt: workItems.executionPrompt,
+      sortOrder: workItems.sortOrder,
+      launchedTaskId: workItems.launchedTaskId,
+      launchedAt: workItems.launchedAt,
+      environmentId: workItems.targetEnvironmentId,
     })
-    .from(setupNewQueuedTasks)
-    .where(eq(setupNewQueuedTasks.setupOnboardingTaskId, setupOnboardingTaskId))
-    .orderBy(asc(setupNewQueuedTasks.sortOrder));
+    .from(workItems)
+    .where(
+      and(
+        eq(workItems.sourceTaskId, setupOnboardingTaskId),
+        eq(workItems.kind, 'onboarding'),
+      ),
+    )
+    .orderBy(asc(workItems.sortOrder));
 }
 
 async function getMutableQueuedSetupTasks(
@@ -574,35 +588,49 @@ async function getMutableQueuedSetupTasks(
 ): Promise<MutableQueuedSetupTask[]> {
   return executor
     .select({
-      id: setupNewQueuedTasks.id,
-      suggestionId: setupNewQueuedTasks.suggestionId,
-      title: setupNewQueuedTasks.title,
-      prompt: setupNewQueuedTasks.prompt,
-      sortOrder: setupNewQueuedTasks.sortOrder,
-      launchedTaskId: setupNewQueuedTasks.launchedTaskId,
-      launchedAt: setupNewQueuedTasks.launchedAt,
-      environmentId: setupNewQueuedTasks.environmentId,
-      launchClaimedAt: setupNewQueuedTasks.launchClaimedAt,
+      id: workItems.id,
+      suggestionId: workItems.sourceWorkItemId,
+      title: workItems.title,
+      prompt: workItems.executionPrompt,
+      sortOrder: workItems.sortOrder,
+      launchedTaskId: workItems.launchedTaskId,
+      launchedAt: workItems.launchedAt,
+      environmentId: workItems.targetEnvironmentId,
+      launchClaimedAt: workItems.launchClaimedAt,
     })
-    .from(setupNewQueuedTasks)
-    .where(eq(setupNewQueuedTasks.setupOnboardingTaskId, setupOnboardingTaskId))
-    .orderBy(asc(setupNewQueuedTasks.sortOrder));
+    .from(workItems)
+    .where(
+      and(
+        eq(workItems.sourceTaskId, setupOnboardingTaskId),
+        eq(workItems.kind, 'onboarding'),
+      ),
+    )
+    .orderBy(asc(workItems.sortOrder));
 }
 
-async function markTaskSuggestionStarted(
+async function markSuggestionWorkItemLaunched(
   input: {
     suggestionId: string;
+    launchedTaskId: string;
     updatedAt: Date;
   },
   executor: DatabaseOrTransaction = db,
 ) {
   await executor
-    .update(taskSuggestions)
+    .update(workItems)
     .set({
-      status: 'started',
+      status: 'launched',
+      launchedTaskId: input.launchedTaskId,
+      launchedAt: input.updatedAt,
+      launchClaimedAt: null,
       updatedAt: input.updatedAt,
     })
-    .where(eq(taskSuggestions.id, input.suggestionId));
+    .where(
+      and(
+        eq(workItems.id, input.suggestionId),
+        eq(workItems.kind, 'suggestion'),
+      ),
+    );
 }
 
 function stripMutableQueuedSetupTask(
@@ -668,34 +696,40 @@ async function replaceQueuedSetupTasks({
     }
 
     await tx
-      .delete(setupNewQueuedTasks)
+      .delete(workItems)
       .where(
-        eq(setupNewQueuedTasks.setupOnboardingTaskId, setupOnboardingTaskId),
+        and(
+          eq(workItems.sourceTaskId, setupOnboardingTaskId),
+          eq(workItems.kind, 'onboarding'),
+        ),
       );
 
     const nextRows: Array<{
-      setupOnboardingTaskId: string;
+      kind: 'onboarding';
+      sourceTaskId: string;
       selectedByUserId: string;
-      suggestionId: string | null;
+      sourceWorkItemId: string | null;
       title: string;
-      prompt: string;
+      executionPrompt: string;
       sortOrder: number;
     }> = suggestionRows.map((suggestion, index) => ({
-      setupOnboardingTaskId,
+      kind: 'onboarding',
+      sourceTaskId: setupOnboardingTaskId,
       selectedByUserId,
-      suggestionId: suggestion.id,
+      sourceWorkItemId: suggestion.id,
       title: suggestion.title,
-      prompt: suggestion.brief,
+      executionPrompt: suggestion.brief ?? '',
       sortOrder: index,
     }));
 
     if (customTaskPrompt) {
       nextRows.push({
-        setupOnboardingTaskId,
+        kind: 'onboarding',
+        sourceTaskId: setupOnboardingTaskId,
         selectedByUserId,
-        suggestionId: null,
+        sourceWorkItemId: null,
         title: buildCustomQueuedTaskTitle(customTaskPrompt),
-        prompt: customTaskPrompt,
+        executionPrompt: customTaskPrompt,
         sortOrder: nextRows.length,
       });
     }
@@ -704,15 +738,15 @@ async function replaceQueuedSetupTasks({
       return [];
     }
 
-    return tx.insert(setupNewQueuedTasks).values(nextRows).returning({
-      id: setupNewQueuedTasks.id,
-      suggestionId: setupNewQueuedTasks.suggestionId,
-      title: setupNewQueuedTasks.title,
-      prompt: setupNewQueuedTasks.prompt,
-      sortOrder: setupNewQueuedTasks.sortOrder,
-      launchedTaskId: setupNewQueuedTasks.launchedTaskId,
-      launchedAt: setupNewQueuedTasks.launchedAt,
-      environmentId: setupNewQueuedTasks.environmentId,
+    return tx.insert(workItems).values(nextRows).returning({
+      id: workItems.id,
+      suggestionId: workItems.sourceWorkItemId,
+      title: workItems.title,
+      prompt: workItems.executionPrompt,
+      sortOrder: workItems.sortOrder,
+      launchedTaskId: workItems.launchedTaskId,
+      launchedAt: workItems.launchedAt,
+      environmentId: workItems.targetEnvironmentId,
     });
   });
 }
@@ -722,23 +756,25 @@ async function claimQueuedSetupTasksForLaunch(setupOnboardingTaskId: string) {
     const claimedAt = new Date();
 
     return tx
-      .update(setupNewQueuedTasks)
+      .update(workItems)
       .set({
+        status: 'launching',
         launchClaimedAt: claimedAt,
         updatedAt: claimedAt,
       })
       .where(
         and(
-          eq(setupNewQueuedTasks.setupOnboardingTaskId, setupOnboardingTaskId),
-          isNull(setupNewQueuedTasks.launchedAt),
-          isNull(setupNewQueuedTasks.launchClaimedAt),
+          eq(workItems.sourceTaskId, setupOnboardingTaskId),
+          eq(workItems.kind, 'onboarding'),
+          isNull(workItems.launchedAt),
+          isNull(workItems.launchClaimedAt),
         ),
       )
       .returning({
-        id: setupNewQueuedTasks.id,
-        suggestionId: setupNewQueuedTasks.suggestionId,
-        selectedByUserId: setupNewQueuedTasks.selectedByUserId,
-        prompt: setupNewQueuedTasks.prompt,
+        id: workItems.id,
+        suggestionId: workItems.sourceWorkItemId,
+        selectedByUserId: workItems.selectedByUserId,
+        prompt: workItems.executionPrompt,
       });
   });
 }
@@ -814,10 +850,13 @@ async function launchQueuedSetupTasksIfReady({
               ...(slackChannel ? { slackChannel } : {}),
               ...(slackThreadTs ? { slackThreadTs } : {}),
               ...communicationMetadata,
-              description: queuedTask.prompt,
+              description: queuedTask.prompt ?? '',
             },
           },
-          initiator: { kind: 'user', userId: queuedTask.selectedByUserId },
+          initiator: {
+            kind: 'user',
+            userId: queuedTask.selectedByUserId ?? SETUP_BOOTSTRAP_USER_ID,
+          },
           workflow: 'setup_onboarding',
           surface: 'web',
           trigger: 'manual',
@@ -835,19 +874,22 @@ async function launchQueuedSetupTasksIfReady({
 
         await db.transaction(async (tx) => {
           await tx
-            .update(setupNewQueuedTasks)
+            .update(workItems)
             .set({
-              environmentId: matchingEnvironmentId,
+              status: 'launched',
+              targetEnvironmentId: matchingEnvironmentId,
               launchedTaskId: launchResult.taskId,
               launchedAt,
+              launchClaimedAt: null,
               updatedAt: launchedAt,
             })
-            .where(eq(setupNewQueuedTasks.id, queuedTask.id));
+            .where(eq(workItems.id, queuedTask.id));
 
           if (queuedTask.suggestionId) {
-            await markTaskSuggestionStarted(
+            await markSuggestionWorkItemLaunched(
               {
                 suggestionId: queuedTask.suggestionId,
+                launchedTaskId: launchResult.taskId,
                 updatedAt: launchedAt,
               },
               tx,
@@ -856,12 +898,13 @@ async function launchQueuedSetupTasksIfReady({
         });
       } catch {
         await db
-          .update(setupNewQueuedTasks)
+          .update(workItems)
           .set({
+            status: 'open',
             launchClaimedAt: null,
             updatedAt: new Date(),
           })
-          .where(eq(setupNewQueuedTasks.id, queuedTask.id));
+          .where(eq(workItems.id, queuedTask.id));
       }
     }),
   );

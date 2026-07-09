@@ -25,9 +25,7 @@ import type {
   taskRuns,
   taskRunEvents,
   taskStartParallelCounts,
-  taskSuggestions,
-  automationWorkItems,
-  setupNewQueuedTasks,
+  workItems,
   taskMessages,
   taskInferenceUsageEvents,
   taskSlackReplyDetails,
@@ -43,7 +41,7 @@ import type {
   slackUserMappings,
   teamsInstallations,
   teamsUserMappings,
-  fastAgentSessions,
+  slackQuickAnswers,
   linearPendingSelections,
   environmentVariables,
   environments,
@@ -51,8 +49,7 @@ import type {
   environmentRepositoryMappings,
   backgroundAgentSettings,
   automations,
-  backgroundAutomationSlackThreads,
-  mcpSetupManagerNotifications,
+  trackedMessages,
 } from './schema';
 
 type Timestamp = 'createdAt' | 'updatedAt';
@@ -164,37 +161,13 @@ export type CreateTaskInferenceUsageEvent = Omit<
 >;
 
 /**
- * taskSuggestions
+ * workItems (Stage 4 merge of task_suggestions + automation_work_items +
+ * setup_new_queued_tasks)
  */
 
-export type TaskSuggestion = typeof taskSuggestions.$inferSelect;
+export type WorkItem = typeof workItems.$inferSelect;
 
-export type CreateTaskSuggestion = Omit<
-  typeof taskSuggestions.$inferInsert,
-  Generated
->;
-
-/**
- * automationWorkItems
- */
-
-export type AutomationWorkItem = typeof automationWorkItems.$inferSelect;
-
-export type CreateAutomationWorkItem = Omit<
-  typeof automationWorkItems.$inferInsert,
-  Generated
->;
-
-/**
- * setupNewQueuedTasks
- */
-
-export type SetupNewQueuedTask = typeof setupNewQueuedTasks.$inferSelect;
-
-export type CreateSetupNewQueuedTask = Omit<
-  typeof setupNewQueuedTasks.$inferInsert,
-  Generated
->;
+export type CreateWorkItem = Omit<typeof workItems.$inferInsert, Generated>;
 
 /**
  * taskMessages
@@ -298,13 +271,13 @@ export type CreateSlackAuthToken = Omit<
 >;
 
 /**
- * fastAgentSessions
+ * slackQuickAnswers (renamed from fastAgentSessions in Stage 4)
  */
 
-export type FastAgentSession = typeof fastAgentSessions.$inferSelect;
+export type SlackQuickAnswer = typeof slackQuickAnswers.$inferSelect;
 
-export type CreateFastAgentSession = Omit<
-  typeof fastAgentSessions.$inferInsert,
+export type CreateSlackQuickAnswer = Omit<
+  typeof slackQuickAnswers.$inferInsert,
   Generated
 >;
 
@@ -365,14 +338,14 @@ export type CreateTeamsUserMapping = Omit<
 >;
 
 /**
- * deployment_mcp_setup_manager_notifications
+ * trackedMessages (Stage 4 merge of agent_suggestion_messages +
+ * background_automation_slack_threads + mcp_setup_manager_notifications)
  */
 
-export type DeploymentMcpSetupManagerNotification =
-  typeof mcpSetupManagerNotifications.$inferSelect;
+export type TrackedMessage = typeof trackedMessages.$inferSelect;
 
-export type CreateDeploymentMcpSetupManagerNotification = Omit<
-  typeof mcpSetupManagerNotifications.$inferInsert,
+export type CreateTrackedMessage = Omit<
+  typeof trackedMessages.$inferInsert,
   Generated
 >;
 
@@ -509,15 +482,3 @@ export type CreateBackgroundAgentSettings = Omit<
 export type Automation = typeof automations.$inferSelect;
 
 export type CreateAutomation = Omit<typeof automations.$inferInsert, Timestamp>;
-
-/**
- * backgroundAutomationSlackThreads
- */
-
-export type BackgroundAutomationSlackThread =
-  typeof backgroundAutomationSlackThreads.$inferSelect;
-
-export type CreateBackgroundAutomationSlackThread = Omit<
-  typeof backgroundAutomationSlackThreads.$inferInsert,
-  Generated
->;

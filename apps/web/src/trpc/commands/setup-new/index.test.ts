@@ -98,13 +98,12 @@ vi.mock('@roomote/db/server', () => ({
     webhookSecret: null,
     botUsername: null,
   })),
-  setupNewQueuedTasks: {},
   slackInstallations: {},
   slackUserMappings: {},
   sql: vi.fn(),
   syncSetupQualificationBlock: vi.fn(),
-  taskSuggestions: {},
   users: {},
+  workItems: {},
 }));
 
 vi.mock('@/lib/server', () => ({

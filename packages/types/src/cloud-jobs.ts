@@ -216,7 +216,6 @@ export type SuggestionCategory =
   | 'improvement';
 
 export type SuggestionPriority = 'P0' | 'P1' | 'P2' | 'P3';
-export type TaskSuggestionStatus = 'open' | 'started' | 'dismissed';
 export const TASK_SUGGESTION_SOURCES = [
   'suggest_ideas',
   'sentry_triage',
@@ -229,17 +228,52 @@ export type TaskSuggestionSource = (typeof TASK_SUGGESTION_SOURCES)[number];
 export const AUTOMATION_WORK_ITEM_DISPOSITIONS = ['suggest', 'act'] as const;
 export type AutomationWorkItemDisposition =
   (typeof AUTOMATION_WORK_ITEM_DISPOSITIONS)[number];
-export const AUTOMATION_WORK_ITEM_STATUSES = [
+
+/**
+ * work_items (Stage 4): one table merges the old task_suggestions,
+ * automation_work_items, and setup_new_queued_tasks. `kind` selects the flavor
+ * and every launchable surface records its launched task via launchedTaskId.
+ */
+export const WORK_ITEM_KINDS = [
+  'suggestion',
+  'auto_fix',
+  'onboarding',
+  'mcp_recommendation',
+] as const;
+export type WorkItemKind = (typeof WORK_ITEM_KINDS)[number];
+
+/** One launch state machine shared by every work-item kind. */
+export const WORK_ITEM_STATUSES = [
   'open',
-  'acting',
-  'started',
+  'launching',
+  'launched',
   'failed',
   'dismissed',
 ] as const;
-export type AutomationWorkItemStatus =
-  (typeof AUTOMATION_WORK_ITEM_STATUSES)[number];
-export const ACTIVE_AUTOMATION_WORK_ITEM_STATUSES: readonly AutomationWorkItemStatus[] =
-  ['open', 'acting', 'started'] as const;
+export type WorkItemStatus = (typeof WORK_ITEM_STATUSES)[number];
+
+/** Statuses that count as live for fingerprint dedup and launch claims. */
+export const WORK_ITEM_ACTIVE_STATUSES: readonly WorkItemStatus[] = [
+  'open',
+  'launching',
+  'launched',
+] as const;
+
+/**
+ * tracked_messages (Stage 4): the registry of chat messages Roomote posted for
+ * a work item or automation. Pure registry — launch state lives on work_items.
+ */
+export const TRACKED_MESSAGE_SURFACES = ['slack', 'teams', 'telegram'] as const;
+export type TrackedMessageSurface = (typeof TRACKED_MESSAGE_SURFACES)[number];
+
+export const TRACKED_MESSAGE_KINDS = [
+  'suggestion_card',
+  'automation_thread',
+  'mcp_setup_nudge',
+  'announcement',
+  'stats_post',
+] as const;
+export type TrackedMessageKind = (typeof TRACKED_MESSAGE_KINDS)[number];
 
 /**
  * Launch classes used to choose runtime policy for cloud tasks.
@@ -287,15 +321,6 @@ export const SUGGESTION_PRIORITIES: readonly SuggestionPriority[] = [
   'P3',
 ] as const;
 
-export const TASK_SUGGESTION_STATUSES: readonly TaskSuggestionStatus[] = [
-  'open',
-  'started',
-  'dismissed',
-] as const;
-
-export const ACTIVE_TASK_SUGGESTION_STATUSES: readonly TaskSuggestionStatus[] =
-  ['open', 'started'] as const;
-
 export const SUGGESTION_CATEGORY_EMOJIS: Record<SuggestionCategory, string> = {
   bug: '🐛',
   security: '🔒',
@@ -329,9 +354,6 @@ export const SUGGESTION_PRIORITY_LABELS: Record<SuggestionPriority, string> = {
 };
 
 export const suggestionPrioritySet = new Set<string>(SUGGESTION_PRIORITIES);
-export const taskSuggestionStatusSet = new Set<string>(
-  TASK_SUGGESTION_STATUSES,
-);
 
 export const taskPayloadKinds = Object.values(
   TaskPayloadKind,

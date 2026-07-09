@@ -1,7 +1,4 @@
-export {
-  parseSetupSuggestionIdFromMessageKey,
-  parseSetupSuggestionIdFromSlackMessageMetadata,
-} from './setup-suggestion-metadata.js';
+export { parseSetupSuggestionIdFromSlackMessageMetadata } from './setup-suggestion-metadata.js';
 export {
   buildSeededSuggestionSlackText,
   buildSuggestionBadgePrefix,

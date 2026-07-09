@@ -17,32 +17,32 @@ const {
 vi.mock('@roomote/db/server', () => ({
   and: vi.fn((...args) => ({ type: 'and', args })),
   asc: vi.fn((...args) => ({ type: 'asc', args })),
-  automationWorkItems: {
-    id: 'automationWorkItems.id',
-    sourceTaskId: 'automationWorkItems.sourceTaskId',
-    automationKey: 'automationWorkItems.automationKey',
-    title: 'automationWorkItems.title',
-    brief: 'automationWorkItems.brief',
-    category: 'automationWorkItems.category',
-    priority: 'automationWorkItems.priority',
-    actionKind: 'automationWorkItems.actionKind',
-    disposition: 'automationWorkItems.disposition',
-    status: 'automationWorkItems.status',
-    investigationContext: 'automationWorkItems.investigationContext',
-    executionPrompt: 'automationWorkItems.executionPrompt',
-    fingerprint: 'automationWorkItems.fingerprint',
-    repositoryIds: 'automationWorkItems.repositoryIds',
-    targetRepositoryFullName: 'automationWorkItems.targetRepositoryFullName',
-    targetEnvironmentId: 'automationWorkItems.targetEnvironmentId',
-    workspaceReadiness: 'automationWorkItems.workspaceReadiness',
-    readinessMessage: 'automationWorkItems.readinessMessage',
-    sortOrder: 'automationWorkItems.sortOrder',
-    executionTaskId: 'automationWorkItems.executionTaskId',
-    launchError: 'automationWorkItems.launchError',
-    updatedAt: 'automationWorkItems.updatedAt',
-    createdAt: 'automationWorkItems.createdAt',
+  workItems: {
+    id: 'workItems.id',
+    kind: 'workItems.kind',
+    sourceTaskId: 'workItems.sourceTaskId',
+    automationKey: 'workItems.automationKey',
+    title: 'workItems.title',
+    brief: 'workItems.brief',
+    category: 'workItems.category',
+    priority: 'workItems.priority',
+    actionKind: 'workItems.actionKind',
+    disposition: 'workItems.disposition',
+    status: 'workItems.status',
+    investigationContext: 'workItems.investigationContext',
+    executionPrompt: 'workItems.executionPrompt',
+    fingerprint: 'workItems.fingerprint',
+    repositoryIds: 'workItems.repositoryIds',
+    targetRepositoryFullName: 'workItems.targetRepositoryFullName',
+    targetEnvironmentId: 'workItems.targetEnvironmentId',
+    workspaceReadiness: 'workItems.workspaceReadiness',
+    readinessMessage: 'workItems.readinessMessage',
+    sortOrder: 'workItems.sortOrder',
+    launchedTaskId: 'workItems.launchedTaskId',
+    launchError: 'workItems.launchError',
+    updatedAt: 'workItems.updatedAt',
+    createdAt: 'workItems.createdAt',
   },
-  buildTaskSuggestionContentHash: vi.fn(),
   db: {
     transaction: (...args: unknown[]) => mockDbTransaction(...args),
   },
@@ -52,10 +52,6 @@ vi.mock('@roomote/db/server', () => ({
     strings,
     values,
   })),
-  taskSuggestions: {
-    id: 'taskSuggestions.id',
-    automationWorkItemId: 'taskSuggestions.automationWorkItemId',
-  },
 }));
 
 vi.mock('../source.js', () => ({
@@ -65,6 +61,7 @@ vi.mock('../source.js', () => ({
 
 vi.mock('../row-projection.js', () => ({
   persistedAutomationWorkItemProjection: { id: 'persistedWorkItem.id' },
+  toPersistedAutomationWorkItem: vi.fn((row) => row),
 }));
 
 function createSelectChain(params: {

@@ -40,7 +40,7 @@ vi.mock('@roomote/db/server', () => ({
   lte: vi.fn((...args) => ({ type: 'lte', args })),
   or: vi.fn((...args) => ({ type: 'or', args })),
   sql: vi.fn(),
-  automationWorkItems: {},
+  workItems: {},
   taskRuns: {
     taskId: 'taskRuns.taskId',
   },

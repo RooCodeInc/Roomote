@@ -149,6 +149,9 @@ vi.mock('@roomote/db/server', () => ({
       telegramUserMappings: {
         findFirst: telegramMappingsFindFirstMock,
       },
+      trackedMessages: {
+        findFirst: vi.fn(),
+      },
     },
   },
   desc: vi.fn((column: unknown) => ({ desc: column })),
@@ -162,20 +165,22 @@ vi.mock('@roomote/db/server', () => ({
     telegramUserId: 'telegramUserId',
     userId: 'userId',
   },
-  agentSuggestionMessages: {
-    agentType: 'agentType',
-    channelId: 'channelId',
-    suggestionKey: 'suggestionKey',
-    launchClaimedAt: 'launchClaimedAt',
+  trackedMessages: {
     id: 'id',
+    kind: 'kind',
+    channelId: 'channelId',
     messageTs: 'messageTs',
+    workItemId: 'workItemId',
+    metadata: 'metadata',
   },
-  taskSuggestions: {
-    id: 'suggestionId',
+  workItems: {
+    id: 'id',
+    status: 'status',
     title: 'title',
     brief: 'brief',
     investigationContext: 'investigationContext',
     targetRepositoryFullName: 'targetRepositoryFullName',
+    launchClaimedAt: 'launchClaimedAt',
   },
   like: vi.fn((column: unknown, pattern: unknown) => ({
     like: [column, pattern],
@@ -185,6 +190,8 @@ vi.mock('@roomote/db/server', () => ({
     inArray: [column, values],
   })),
   isNull: vi.fn((column: unknown) => ({ isNull: column })),
+  lt: vi.fn((column: unknown, value: unknown) => ({ lt: [column, value] })),
+  or: vi.fn((...conditions: unknown[]) => ({ or: conditions })),
   sql: vi.fn((strings: TemplateStringsArray, ...values: unknown[]) => ({
     sql: strings,
     values,

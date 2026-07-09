@@ -4,13 +4,13 @@ import { Hono } from 'hono';
 import { Env } from '@roomote/env';
 import {
   and,
-  backgroundAutomationSlackThreads,
-  automationWorkItems,
   db,
   eq,
+  findBackgroundAutomationSlackThread,
   slackInstallations,
   taskRuns,
   tasks,
+  workItems,
 } from '@roomote/db/server';
 import {
   getTriggerableBackgroundAutomationDescriptorByKey,
@@ -206,14 +206,17 @@ async function buildLateBoundAutomationRootFooterBlocks(params: {
   taskUrl: string;
   taskId: string;
 }): Promise<SlackBlock[] | null> {
-  const workItem = await db.query.automationWorkItems.findFirst({
+  const workItem = await db.query.workItems.findFirst({
     columns: {
       automationKey: true,
     },
-    where: and(eq(automationWorkItems.id, params.automationWorkItemId)),
+    where: and(
+      eq(workItems.kind, 'auto_fix'),
+      eq(workItems.id, params.automationWorkItemId),
+    ),
   });
 
-  if (!workItem) {
+  if (!workItem?.automationKey) {
     return null;
   }
 
@@ -449,15 +452,9 @@ async function refreshTrackedAutomationThreadRootFooter(params: {
   // Slack thread registry plus the task's own channel bindings + initiator
   // stamp (tasks.initiator_automation).
   const [trackedThread, boundTask] = await Promise.all([
-    db.query.backgroundAutomationSlackThreads.findFirst({
-      columns: {
-        automationKey: true,
-        metadata: true,
-      },
-      where: and(
-        eq(backgroundAutomationSlackThreads.slackChannelId, params.channel),
-        eq(backgroundAutomationSlackThreads.threadTs, params.threadTs),
-      ),
+    findBackgroundAutomationSlackThread({
+      slackChannelId: params.channel,
+      threadTs: params.threadTs,
     }),
     db.query.tasks.findFirst({
       columns: {

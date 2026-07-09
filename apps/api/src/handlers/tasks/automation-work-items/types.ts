@@ -4,6 +4,7 @@ import {
   type CloudTaskPayload,
   type SuggestionCategory,
   type SuggestionPriority,
+  type WorkItemStatus,
   type WorkspaceReadiness,
 } from '@roomote/types';
 
@@ -41,7 +42,7 @@ export type PersistedAutomationWorkItem = {
   priority: SuggestionPriority | null;
   actionKind: string;
   disposition: AutomationWorkItemDisposition;
-  status: 'open' | 'acting' | 'started' | 'failed' | 'dismissed';
+  status: WorkItemStatus;
   investigationContext: string | null;
   executionPrompt: string | null;
   fingerprint: string;
@@ -51,7 +52,7 @@ export type PersistedAutomationWorkItem = {
   workspaceReadiness: WorkspaceReadiness | null;
   readinessMessage: string | null;
   sortOrder: number;
-  executionTaskId: string | null;
+  launchedTaskId: string | null;
   launchError: string | null;
 };
 

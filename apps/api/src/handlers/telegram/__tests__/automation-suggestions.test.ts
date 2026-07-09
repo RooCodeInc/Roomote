@@ -25,18 +25,20 @@ const {
 vi.mock('@roomote/env', () => ({ Env: envMock }));
 
 vi.mock('@roomote/db/server', () => ({
-  agentSuggestionMessages: {
+  trackedMessages: {
     id: 'id',
-    agentType: 'agentType',
+    kind: 'kind',
+    dedupeKey: 'dedupeKey',
     channelId: 'channelId',
     messageTs: 'messageTs',
-    suggestionKey: 'suggestionKey',
+    workItemId: 'workItemId',
+    metadata: 'metadata',
   },
   slackInstallations: { id: 'id', isActive: 'isActive' },
   and: vi.fn((...conditions: unknown[]) => ({ and: conditions })),
   eq: vi.fn((left: unknown, right: unknown) => ({ eq: [left, right] })),
-  like: vi.fn((column: unknown, pattern: unknown) => ({
-    like: [column, pattern],
+  sql: vi.fn((strings: TemplateStringsArray, ...values: unknown[]) => ({
+    sql: [Array.from(strings), values],
   })),
   resolveTelegramRuntimeCredentials: vi.fn(async () => ({
     botToken: envMock.TELEGRAM_BOT_TOKEN ?? null,
@@ -121,14 +123,21 @@ describe('postScheduledSuggestionsToTelegram', () => {
     ]);
 
     const rows = insertValuesMock.mock.calls[0]![0] as Array<{
-      agentType: string;
+      kind: string;
+      surface: string;
+      dedupeKey: string;
       messageTs: string;
+      workItemId: string;
+      metadata: { suggestionType: string; suggestionKey: string };
     }>;
-    expect(rows.map((row) => row.agentType)).toEqual([
+    expect(rows.map((row) => row.metadata.suggestionType)).toEqual([
       'sentry_triage',
       'sentry_triage',
     ]);
-    expect(new Set(rows.map((row) => row.messageTs)).size).toBe(2);
+    expect(rows.every((row) => row.kind === 'suggestion_card')).toBe(true);
+    expect(rows.every((row) => row.surface === 'telegram')).toBe(true);
+    expect(rows.map((row) => row.workItemId)).toEqual(['aaa', 'bbb']);
+    expect(new Set(rows.map((row) => row.dedupeKey)).size).toBe(2);
   });
 
   it('skips when an active Slack installation exists', async () => {

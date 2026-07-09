@@ -29,12 +29,14 @@ vi.mock('@roomote/env', () => ({
 }));
 
 vi.mock('@roomote/db/server', () => ({
-  agentSuggestionMessages: {
+  trackedMessages: {
     id: 'id',
-    agentType: 'agentType',
+    kind: 'kind',
+    dedupeKey: 'dedupeKey',
     channelId: 'channelId',
     messageTs: 'messageTs',
-    suggestionKey: 'suggestionKey',
+    workItemId: 'workItemId',
+    metadata: 'metadata',
   },
   environments: { id: 'id', name: 'name' },
   slackInstallations: { id: 'id', isActive: 'isActive' },
@@ -43,8 +45,8 @@ vi.mock('@roomote/db/server', () => ({
   inArray: vi.fn((column: unknown, values: unknown) => ({
     inArray: [column, values],
   })),
-  like: vi.fn((column: unknown, pattern: unknown) => ({
-    like: [column, pattern],
+  sql: vi.fn((strings: TemplateStringsArray, ...values: unknown[]) => ({
+    sql: [Array.from(strings), values],
   })),
   resolveTelegramRuntimeCredentials: telegramCredentialsMock,
   db: {
@@ -148,11 +150,19 @@ describe('postScheduledSuggestionsToTeams', () => {
     expect(posted.text).toContain('_Triage Sentry Issues_');
 
     const rows = insertValuesMock.mock.calls[0]![0] as Array<{
+      kind: string;
+      surface: string;
       channelId: string;
+      dedupeKey: string;
       messageTs: string;
+      workItemId: string;
+      metadata: { suggestionType: string; suggestionKey: string };
     }>;
     expect(rows).toHaveLength(2);
-    expect(new Set(rows.map((row) => row.messageTs)).size).toBe(2);
+    expect(rows.every((row) => row.kind === 'suggestion_card')).toBe(true);
+    expect(rows.every((row) => row.surface === 'teams')).toBe(true);
+    expect(new Set(rows.map((row) => row.dedupeKey)).size).toBe(2);
+    expect(rows.map((row) => row.workItemId)).toEqual(['aaa', 'bbb']);
     expect(rows[0]!.channelId).toBe('19:channel@thread.tacv2');
   });
 

@@ -1,13 +1,13 @@
 import {
-  agentSuggestionMessages,
   and,
   db,
   environments,
   eq,
   inArray,
-  like,
   resolveTelegramRuntimeCredentials,
   slackInstallations,
+  sql,
+  trackedMessages,
 } from '@roomote/db/server';
 import { getScheduledSuggestionBackgroundAutomationDescriptor } from '@roomote/types';
 import { Env } from '@roomote/env';
@@ -96,12 +96,13 @@ export async function postScheduledSuggestionsToTeams(params: {
   );
 
   const [existingSummaryMessage] = await db
-    .select({ id: agentSuggestionMessages.id })
-    .from(agentSuggestionMessages)
+    .select({ id: trackedMessages.id })
+    .from(trackedMessages)
     .where(
       and(
-        eq(agentSuggestionMessages.agentType, slackConfig.agentType),
-        like(agentSuggestionMessages.suggestionKey, `${sourceTaskId}:%`),
+        eq(trackedMessages.kind, 'suggestion_card'),
+        sql`${trackedMessages.metadata} ->> 'suggestionType' = ${slackConfig.agentType}`,
+        sql`${trackedMessages.metadata} ->> 'suggestionKey' LIKE ${`${sourceTaskId}:%`}`,
       ),
     )
     .limit(1);
@@ -167,19 +168,30 @@ export async function postScheduledSuggestionsToTeams(params: {
   }
 
   await db
-    .insert(agentSuggestionMessages)
+    .insert(trackedMessages)
     .values(
-      limitedSuggestions.map((suggestion) => ({
-        agentType: slackConfig.agentType,
-        // (channelId, messageTs) is unique; suffix the suggestion id so
-        // every tracked row survives the batch insert for a single message.
-        messageTs: `${posted.messageId}:${suggestion.id}`,
-        channelId: conversation.conversationId,
-        suggestionKey: `${sourceTaskId}:${suggestion.id}`,
-        createdByUserId,
-      })),
+      limitedSuggestions.map((suggestion) => {
+        // (kind, dedupeKey) is unique; suffix the suggestion id on messageTs
+        // so every tracked row survives the batch insert for a single message.
+        const messageTs = `${posted.messageId}:${suggestion.id}`;
+        return {
+          surface: 'teams' as const,
+          kind: 'suggestion_card' as const,
+          dedupeKey: `${conversation.conversationId}:${messageTs}`,
+          channelId: conversation.conversationId,
+          messageTs,
+          workItemId: suggestion.id,
+          createdByUserId,
+          metadata: {
+            suggestionType: slackConfig.agentType,
+            suggestionKey: `${sourceTaskId}:${suggestion.id}`,
+          },
+        };
+      }),
     )
-    .onConflictDoNothing();
+    .onConflictDoNothing({
+      target: [trackedMessages.kind, trackedMessages.dedupeKey],
+    });
 
   apiLogger.debug(
     `[AutomationSuggestionLifecycle] Published ${limitedSuggestions.length} ${slackConfig.automationKey} suggestions to Teams conversation ${conversation.conversationId} for sourceTaskId=${sourceTaskId}`,

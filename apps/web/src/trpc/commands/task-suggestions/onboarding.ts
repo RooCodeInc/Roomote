@@ -4,13 +4,14 @@ import {
   findEnvironmentForRepo,
 } from '@roomote/cloud-agents/server';
 import {
+  and,
   asc,
   db,
   deploymentSettings,
   eq,
   getBackgroundAgentSettingsForDeployment,
   resolveRepositorySelectionByIds,
-  taskSuggestions,
+  workItems,
 } from '@roomote/db/server';
 import {
   CloudTaskStatus,
@@ -81,21 +82,28 @@ async function getPersistedTaskSuggestions(
     return [];
   }
 
-  return db
+  const rows = await db
     .select({
-      id: taskSuggestions.id,
-      title: taskSuggestions.title,
-      brief: taskSuggestions.brief,
-      repositoryIds: taskSuggestions.repositoryIds,
-      sortOrder: taskSuggestions.sortOrder,
-      dismissedAt: taskSuggestions.dismissedAt,
-      targetRepositoryFullName: taskSuggestions.targetRepositoryFullName,
-      targetEnvironmentId: taskSuggestions.targetEnvironmentId,
-      readinessMessage: taskSuggestions.readinessMessage,
+      id: workItems.id,
+      title: workItems.title,
+      brief: workItems.brief,
+      repositoryIds: workItems.repositoryIds,
+      sortOrder: workItems.sortOrder,
+      dismissedAt: workItems.dismissedAt,
+      targetRepositoryFullName: workItems.targetRepositoryFullName,
+      targetEnvironmentId: workItems.targetEnvironmentId,
+      readinessMessage: workItems.readinessMessage,
     })
-    .from(taskSuggestions)
-    .where(eq(taskSuggestions.sourceTaskId, sourceTaskId))
-    .orderBy(asc(taskSuggestions.sortOrder));
+    .from(workItems)
+    .where(
+      and(
+        eq(workItems.sourceTaskId, sourceTaskId),
+        eq(workItems.kind, 'suggestion'),
+      ),
+    )
+    .orderBy(asc(workItems.sortOrder));
+
+  return rows.map((row) => ({ ...row, brief: row.brief ?? '' }));
 }
 
 async function getSuggestionTaskStatus(taskId: string | null) {
@@ -336,11 +344,16 @@ export async function dismissTaskSuggestionCommand(
 ) {
   const [suggestion] = await db
     .select({
-      id: taskSuggestions.id,
-      dismissedAt: taskSuggestions.dismissedAt,
+      id: workItems.id,
+      dismissedAt: workItems.dismissedAt,
     })
-    .from(taskSuggestions)
-    .where(eq(taskSuggestions.id, input.suggestionId))
+    .from(workItems)
+    .where(
+      and(
+        eq(workItems.id, input.suggestionId),
+        eq(workItems.kind, 'suggestion'),
+      ),
+    )
     .limit(1);
 
   if (!suggestion) {
@@ -351,13 +364,13 @@ export async function dismissTaskSuggestionCommand(
     const dismissedAt = new Date();
 
     await db
-      .update(taskSuggestions)
+      .update(workItems)
       .set({
         dismissedAt,
         status: 'dismissed',
         updatedAt: dismissedAt,
       })
-      .where(eq(taskSuggestions.id, input.suggestionId));
+      .where(eq(workItems.id, input.suggestionId));
   }
 
   return { success: true as const };

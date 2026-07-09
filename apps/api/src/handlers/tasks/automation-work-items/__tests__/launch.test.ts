@@ -40,13 +40,13 @@ vi.mock('@roomote/cloud-agents/server', () => ({
 
 vi.mock('@roomote/db/server', () => ({
   and: vi.fn((...args) => ({ type: 'and', args })),
-  automationWorkItems: {
-    id: 'automationWorkItems.id',
-    status: 'automationWorkItems.status',
-    executionTaskId: 'automationWorkItems.executionTaskId',
-    launchClaimedAt: 'automationWorkItems.launchClaimedAt',
-    launchError: 'automationWorkItems.launchError',
-    updatedAt: 'automationWorkItems.updatedAt',
+  workItems: {
+    id: 'workItems.id',
+    status: 'workItems.status',
+    launchedTaskId: 'workItems.launchedTaskId',
+    launchClaimedAt: 'workItems.launchClaimedAt',
+    launchError: 'workItems.launchError',
+    updatedAt: 'workItems.updatedAt',
   },
   db: {
     update: (...args: unknown[]) => mockDbUpdate(...args),
@@ -93,7 +93,7 @@ const workItem: PersistedAutomationWorkItem = {
   workspaceReadiness: 'bare_repo',
   readinessMessage: 'Bare repo launch.',
   sortOrder: 0,
-  executionTaskId: null,
+  launchedTaskId: null,
   launchError: null,
 };
 
@@ -186,10 +186,10 @@ describe('launchActWorkItems', () => {
       }),
     );
     expect(updateSets).toEqual([
-      expect.objectContaining({ status: 'acting' }),
+      expect.objectContaining({ status: 'launching' }),
       expect.objectContaining({
-        status: 'started',
-        executionTaskId: 'task-1',
+        status: 'launched',
+        launchedTaskId: 'task-1',
         launchError: null,
       }),
     ]);
@@ -208,10 +208,10 @@ describe('launchActWorkItems', () => {
 
     expect(result).toEqual({ launchedCount: 1, failedCount: 0 });
     expect(updateSets).toEqual([
-      expect.objectContaining({ status: 'acting' }),
+      expect.objectContaining({ status: 'launching' }),
       expect.objectContaining({
-        status: 'started',
-        executionTaskId: 'task-direct-1',
+        status: 'launched',
+        launchedTaskId: 'task-direct-1',
         launchError: null,
       }),
     ]);
@@ -357,10 +357,10 @@ describe('launchActWorkItems', () => {
     expect(enqueuePayload).not.toHaveProperty('thread_ts');
     expect(enqueuePayload).not.toHaveProperty('slackThreadTs');
     expect(updateSets).toEqual([
-      expect.objectContaining({ status: 'acting' }),
+      expect.objectContaining({ status: 'launching' }),
       expect.objectContaining({
-        status: 'started',
-        executionTaskId: 'task-direct-dependabot',
+        status: 'launched',
+        launchedTaskId: 'task-direct-dependabot',
       }),
     ]);
   });
@@ -449,10 +449,10 @@ describe('launchActWorkItems', () => {
     expect(enqueuePayload.channel).toBe('C456');
     expect(enqueuePayload.slackChannel).toBe('C456');
     expect(updateSets).toEqual([
-      expect.objectContaining({ status: 'acting' }),
+      expect.objectContaining({ status: 'launching' }),
       expect.objectContaining({
-        status: 'started',
-        executionTaskId: 'task-direct-sentry',
+        status: 'launched',
+        launchedTaskId: 'task-direct-sentry',
       }),
     ]);
   });
@@ -501,10 +501,10 @@ describe('launchActWorkItems', () => {
       }),
     );
     expect(updateSets).toEqual([
-      expect.objectContaining({ status: 'acting' }),
+      expect.objectContaining({ status: 'launching' }),
       expect.objectContaining({
-        status: 'started',
-        executionTaskId: 'task-direct-threaded',
+        status: 'launched',
+        launchedTaskId: 'task-direct-threaded',
       }),
     ]);
   });
@@ -627,7 +627,7 @@ describe('launchActWorkItems', () => {
 
     expect(result).toEqual({ launchedCount: 0, failedCount: 1 });
     expect(updateSets.map((values) => values.status)).toEqual([
-      'acting',
+      'launching',
       'failed',
     ]);
     expect(postLateBoundWorkItemFailureMessage).not.toHaveBeenCalled();
@@ -646,8 +646,8 @@ describe('launchActWorkItems', () => {
 
     expect(result).toEqual({ launchedCount: 0, failedCount: 1 });
     expect(updateSets.map((values) => values.status)).toEqual([
-      'acting',
-      'started',
+      'launching',
+      'launched',
       'failed',
     ]);
   });
@@ -676,14 +676,14 @@ describe('launchActWorkItems', () => {
 
     expect(result).toEqual({ launchedCount: 0, failedCount: 1 });
     expect(updateSets).toEqual([
-      expect.objectContaining({ status: 'acting' }),
+      expect.objectContaining({ status: 'launching' }),
       expect.objectContaining({
-        status: 'started',
-        executionTaskId: 'task-direct-1',
+        status: 'launched',
+        launchedTaskId: 'task-direct-1',
       }),
       expect.objectContaining({
         status: 'open',
-        executionTaskId: null,
+        launchedTaskId: null,
         launchedAt: null,
         failedAt: null,
       }),

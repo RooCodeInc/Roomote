@@ -2,8 +2,9 @@ import { findEnvironmentForRepo } from '@roomote/cloud-agents/server';
 import {
   db,
   slackInstallations,
-  taskSuggestions,
+  workItems,
   getAutomationRuntime,
+  and,
   count,
   desc,
   eq,
@@ -14,7 +15,7 @@ import {
   getFeatureFlagEvaluator,
 } from '@roomote/feature-flags/server';
 import { getRedis } from '@roomote/redis';
-import { type TaskSuggestionStatus } from '@roomote/types';
+import { type WorkItemStatus } from '@roomote/types';
 import {
   getActiveRepositoryFullNames,
   hasActiveGitHubInstallation,
@@ -84,19 +85,27 @@ async function getPreviousSuggestions(since: Date): Promise<
   Array<{
     title: string;
     brief: string;
-    status: TaskSuggestionStatus;
+    status: WorkItemStatus;
   }>
 > {
-  return db
+  const rows = await db
     .select({
-      title: taskSuggestions.title,
-      brief: taskSuggestions.brief,
-      status: taskSuggestions.status,
+      title: workItems.title,
+      brief: workItems.brief,
+      status: workItems.status,
     })
-    .from(taskSuggestions)
-    .where(gte(taskSuggestions.createdAt, since))
-    .orderBy(desc(taskSuggestions.createdAt))
+    .from(workItems)
+    .where(
+      and(eq(workItems.kind, 'suggestion'), gte(workItems.createdAt, since)),
+    )
+    .orderBy(desc(workItems.createdAt))
     .limit(50);
+
+  return rows.map((row) => ({
+    title: row.title,
+    brief: row.brief ?? '',
+    status: row.status,
+  }));
 }
 
 async function countOpenSuggestions(): Promise<number> {
@@ -104,8 +113,8 @@ async function countOpenSuggestions(): Promise<number> {
     .select({
       openSuggestionCount: count(),
     })
-    .from(taskSuggestions)
-    .where(eq(taskSuggestions.status, 'open'));
+    .from(workItems)
+    .where(and(eq(workItems.kind, 'suggestion'), eq(workItems.status, 'open')));
 
   return result?.openSuggestionCount ?? 0;
 }

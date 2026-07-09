@@ -118,8 +118,8 @@ function isLaunchableActWorkItem(
 ): boolean {
   return (
     workItem.disposition === 'act' &&
-    workItem.executionTaskId === null &&
-    (workItem.status === 'open' || workItem.status === 'acting')
+    workItem.launchedTaskId === null &&
+    (workItem.status === 'open' || workItem.status === 'launching')
   );
 }
 

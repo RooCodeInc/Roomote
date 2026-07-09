@@ -5,7 +5,6 @@ import {
 import { TaskPayloadKind, type BackgroundAutomationKey } from '@roomote/types';
 import {
   and,
-  automationWorkItems,
   db,
   eq,
   inArray,
@@ -13,6 +12,7 @@ import {
   lte,
   or,
   updateBackgroundAutomationSlackThreadMetadata,
+  workItems,
 } from '@roomote/db/server';
 
 import type { SlackNotifier } from '@roomote/slack';
@@ -24,7 +24,7 @@ import { postLateBoundWorkItemFailureToTeams } from './teams.js';
 import type { PersistedAutomationWorkItem } from './types.js';
 
 const LAUNCH_CLAIM_STALE_MS = 10 * 60 * 1000;
-const LAUNCHABLE_ACT_STATUSES = ['open', 'acting'] as const;
+const LAUNCHABLE_ACT_STATUSES = ['open', 'launching'] as const;
 
 type AutomationExecutionTaskBootstrap =
   | '$implement-changes'
@@ -172,24 +172,24 @@ export async function launchActWorkItems(params: {
     const claimStaleBefore = new Date(Date.now() - LAUNCH_CLAIM_STALE_MS);
 
     const [claimedWorkItem] = await db
-      .update(automationWorkItems)
+      .update(workItems)
       .set({
-        status: 'acting',
+        status: 'launching',
         launchClaimedAt: new Date(),
         updatedAt: new Date(),
       })
       .where(
         and(
-          eq(automationWorkItems.id, workItem.id),
-          isNull(automationWorkItems.executionTaskId),
-          inArray(automationWorkItems.status, [...LAUNCHABLE_ACT_STATUSES]),
+          eq(workItems.id, workItem.id),
+          isNull(workItems.launchedTaskId),
+          inArray(workItems.status, [...LAUNCHABLE_ACT_STATUSES]),
           or(
-            isNull(automationWorkItems.launchClaimedAt),
-            lte(automationWorkItems.launchClaimedAt, claimStaleBefore),
+            isNull(workItems.launchClaimedAt),
+            lte(workItems.launchClaimedAt, claimStaleBefore),
           ),
         ),
       )
-      .returning({ id: automationWorkItems.id });
+      .returning({ id: workItems.id });
 
     if (!claimedWorkItem) {
       continue;
@@ -206,17 +206,17 @@ export async function launchActWorkItems(params: {
 
       const markWorkItemStarted = async (taskId: string | null) => {
         const [startedWorkItem] = await db
-          .update(automationWorkItems)
+          .update(workItems)
           .set({
-            status: 'started',
-            executionTaskId: taskId,
+            status: 'launched',
+            launchedTaskId: taskId,
             launchedAt: new Date(),
             launchClaimedAt: null,
             launchError: null,
             updatedAt: new Date(),
           })
-          .where(and(eq(automationWorkItems.id, workItem.id)))
-          .returning({ id: automationWorkItems.id });
+          .where(and(eq(workItems.id, workItem.id)))
+          .returning({ id: workItems.id });
 
         if (!startedWorkItem) {
           throw new Error(
@@ -323,12 +323,12 @@ export async function launchActWorkItems(params: {
         error instanceof CloudJobQueueEnqueueError && linkedTaskId !== null;
 
       await db
-        .update(automationWorkItems)
+        .update(workItems)
         .set(
           shouldRetry
             ? {
                 status: 'open',
-                executionTaskId: null,
+                launchedTaskId: null,
                 launchedAt: null,
                 failedAt: null,
                 launchClaimedAt: null,
@@ -343,7 +343,7 @@ export async function launchActWorkItems(params: {
                 updatedAt: new Date(),
               },
         )
-        .where(eq(automationWorkItems.id, workItem.id));
+        .where(eq(workItems.id, workItem.id));
 
       if (params.chatTarget && !shouldRetry) {
         // Late-bound launches have no execution task to report through, so a

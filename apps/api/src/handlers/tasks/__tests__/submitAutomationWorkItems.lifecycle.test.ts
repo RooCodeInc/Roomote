@@ -126,7 +126,7 @@ function buildActWorkItem(
     workspaceReadiness: 'environment_backed',
     readinessMessage: null,
     sortOrder: 0,
-    executionTaskId: null,
+    launchedTaskId: null,
     launchError: null,
     ...overrides,
   };
@@ -242,8 +242,8 @@ describe('submitAutomationWorkItems lifecycle', () => {
     const actWorkItem = buildActWorkItem();
     const startedWorkItem = buildActWorkItem({
       id: 'act-work-item-2',
-      status: 'started',
-      executionTaskId: 'task-123',
+      status: 'launched',
+      launchedTaskId: 'task-123',
       fingerprint: 'fingerprint-2',
       targetEnvironmentId: environmentId,
     });

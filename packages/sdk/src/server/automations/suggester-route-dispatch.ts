@@ -4,7 +4,7 @@ import {
 } from '@roomote/cloud-agents/server';
 import { db, recordAutomationRunOutcome } from '@roomote/db/server';
 import { ALL_REPOSITORIES, TaskPayloadKind } from '@roomote/types';
-import type { TaskSuggestionStatus } from '@roomote/types';
+import type { WorkItemStatus } from '@roomote/types';
 
 import {
   formatSlackChannelName,
@@ -25,7 +25,7 @@ async function enqueueSuggestionRoute(params: {
   previousSuggestions: Array<{
     title: string;
     brief: string;
-    status: TaskSuggestionStatus;
+    status: WorkItemStatus;
   }>;
   repositoryCoverage: EnvironmentBackedRepositoryCoverage;
   repositoryFullNames: string[];
@@ -91,7 +91,7 @@ export async function dispatchSuggestionRoutes(params: {
   previousSuggestions: Array<{
     title: string;
     brief: string;
-    status: TaskSuggestionStatus;
+    status: WorkItemStatus;
   }>;
   repositoryCoverage: EnvironmentBackedRepositoryCoverage;
   repositoryFullNames: string[];

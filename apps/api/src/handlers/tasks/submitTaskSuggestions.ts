@@ -26,7 +26,6 @@ import {
   shouldPostHistoricalThreadFeedbackDebugSnippet,
 } from '@roomote/sdk/server';
 import {
-  agentSuggestionMessages,
   and,
   asc,
   buildTaskSuggestionContentHash,
@@ -34,7 +33,6 @@ import {
   environments,
   eq,
   inArray,
-  like,
   repositories,
   resolveRepositorySelectionByIds,
   slackInstallationChannels,
@@ -43,8 +41,9 @@ import {
   sql,
   taskRuns,
   tasks,
-  taskSuggestions,
+  trackedMessages,
   upsertBackgroundAutomationSlackThread,
+  workItems,
   getAutomationRuntime,
 } from '@roomote/db/server';
 
@@ -105,6 +104,26 @@ type PersistedTaskSuggestion = {
   readinessMessage: string | null;
 };
 
+/**
+ * Suggestion work_items always insert a non-empty brief (the payload requires
+ * `min(1)`), but the merged `work_items.brief` column is nullable. Normalize on
+ * read so downstream Slack/Telegram/Teams formatting keeps a plain string.
+ */
+function toPersistedTaskSuggestion(row: {
+  id: string;
+  title: string;
+  brief: string | null;
+  category: SuggestionCategory | null;
+  priority: SuggestionPriority | null;
+  investigationContext: string | null;
+  targetRepositoryFullName: string | null;
+  targetEnvironmentId: string | null;
+  workspaceReadiness: WorkspaceReadiness | null;
+  readinessMessage: string | null;
+}): PersistedTaskSuggestion {
+  return { ...row, brief: row.brief ?? '' };
+}
+
 type ResolvedRepository = {
   id: string;
   fullName: string;
@@ -131,14 +150,38 @@ type SuggestionAgentType =
   | 'code_quality_auditor'
   | 'ci_failure_triage';
 
-type AgentSuggestionMessageRow = {
-  agentType: SuggestionAgentType;
+type SuggestionCardMessageRow = {
+  suggestionType: SuggestionAgentType;
   messageTs: string;
   channelId: string;
+  workItemId: string;
   suggestionKey: string;
-  taskId: null;
   createdByUserId: string;
 };
+
+/**
+ * Map Slack suggestion-card rows to `tracked_messages` insert values. The
+ * launch state lives on the referenced `work_items` row; the tracked message
+ * carries only registry metadata (suggestion type + key) and dedups on
+ * `(kind, dedupeKey)` where dedupeKey is `${channelId}:${messageTs}`.
+ */
+function buildSlackSuggestionCardValues(
+  rows: SuggestionCardMessageRow[],
+): (typeof trackedMessages.$inferInsert)[] {
+  return rows.map((row) => ({
+    surface: 'slack' as const,
+    kind: 'suggestion_card' as const,
+    dedupeKey: `${row.channelId}:${row.messageTs}`,
+    channelId: row.channelId,
+    messageTs: row.messageTs,
+    workItemId: row.workItemId,
+    createdByUserId: row.createdByUserId,
+    metadata: {
+      suggestionType: row.suggestionType,
+      suggestionKey: row.suggestionKey,
+    },
+  }));
+}
 
 function buildSuggestionMessageKey(params: {
   sourceTaskId: string;
@@ -531,9 +574,7 @@ async function postTaskSuggestionsThreadToSlack(params: {
   automationSettingsHash?: string;
   historicalThreadFeedbackDebugSnippet?: string | null;
   suggestions: PersistedTaskSuggestion[];
-  insertSuggestionMessages: (
-    rows: AgentSuggestionMessageRow[],
-  ) => Promise<void>;
+  insertSuggestionMessages: (rows: SuggestionCardMessageRow[]) => Promise<void>;
 }): Promise<{ rootMessageTs: string; trackedMessages: number } | null> {
   const slack = new SlackNotifier(params.slackBotAccessToken);
   const targetEnvironmentIds = [
@@ -605,7 +646,7 @@ async function postTaskSuggestionsThreadToSlack(params: {
     });
   }
 
-  const suggestionMessageRows: AgentSuggestionMessageRow[] = [];
+  const suggestionMessageRows: SuggestionCardMessageRow[] = [];
   const useSharedSuggestionFormatting = usesSharedScheduledSuggestionSlackModel(
     params.agentType,
   );
@@ -691,14 +732,14 @@ async function postTaskSuggestionsThreadToSlack(params: {
     }
 
     suggestionMessageRows.push({
-      agentType: params.agentType,
+      suggestionType: params.agentType,
       messageTs,
       channelId: params.slackChannelId,
+      workItemId: suggestion.id,
       suggestionKey: buildSuggestionMessageKey({
         sourceTaskId: params.sourceTaskId,
         suggestionId: suggestion.id,
       }),
-      taskId: null,
       createdByUserId: params.createdByUserId,
     });
   }
@@ -774,13 +815,10 @@ async function postSetupTaskSuggestionsToSlack(params: {
     suggestions,
     insertSuggestionMessages: async (suggestionMessageRows) => {
       await db
-        .insert(agentSuggestionMessages)
-        .values(suggestionMessageRows)
+        .insert(trackedMessages)
+        .values(buildSlackSuggestionCardValues(suggestionMessageRows))
         .onConflictDoNothing({
-          target: [
-            agentSuggestionMessages.channelId,
-            agentSuggestionMessages.messageTs,
-          ],
+          target: [trackedMessages.kind, trackedMessages.dedupeKey],
         });
     },
   });
@@ -890,15 +928,13 @@ async function postSuggestedTasksSummaryToSlack(params: {
     );
 
     const [existingSummaryMessage] = await tx
-      .select({ id: agentSuggestionMessages.id })
-      .from(agentSuggestionMessages)
+      .select({ id: trackedMessages.id })
+      .from(trackedMessages)
       .where(
         and(
-          eq(agentSuggestionMessages.agentType, slackConfig.agentType),
-          like(
-            agentSuggestionMessages.suggestionKey,
-            `${params.sourceTaskId}:%`,
-          ),
+          eq(trackedMessages.kind, 'suggestion_card'),
+          sql`${trackedMessages.metadata} ->> 'suggestionType' = ${slackConfig.agentType}`,
+          sql`${trackedMessages.metadata} ->> 'suggestionKey' LIKE ${`${params.sourceTaskId}:%`}`,
         ),
       )
       .limit(1);
@@ -933,13 +969,10 @@ async function postSuggestedTasksSummaryToSlack(params: {
       suggestions: params.suggestions,
       insertSuggestionMessages: async (suggestionMessageRows) => {
         await tx
-          .insert(agentSuggestionMessages)
-          .values(suggestionMessageRows)
+          .insert(trackedMessages)
+          .values(buildSlackSuggestionCardValues(suggestionMessageRows))
           .onConflictDoNothing({
-            target: [
-              agentSuggestionMessages.channelId,
-              agentSuggestionMessages.messageTs,
-            ],
+            target: [trackedMessages.kind, trackedMessages.dedupeKey],
           });
       },
     });
@@ -1144,36 +1177,44 @@ export async function submitTaskSuggestions(
         );
 
     const persistedSuggestions = await db.transaction(async (tx) => {
+      const workItemColumns = {
+        id: workItems.id,
+        title: workItems.title,
+        brief: workItems.brief,
+        category: workItems.category,
+        priority: workItems.priority,
+        investigationContext: workItems.investigationContext,
+        targetRepositoryFullName: workItems.targetRepositoryFullName,
+        targetEnvironmentId: workItems.targetEnvironmentId,
+        workspaceReadiness: workItems.workspaceReadiness,
+        readinessMessage: workItems.readinessMessage,
+      };
+
       const existingSuggestions = await tx
-        .select({
-          id: taskSuggestions.id,
-          title: taskSuggestions.title,
-          brief: taskSuggestions.brief,
-          category: taskSuggestions.category,
-          priority: taskSuggestions.priority,
-          investigationContext: taskSuggestions.investigationContext,
-          targetRepositoryFullName: taskSuggestions.targetRepositoryFullName,
-          targetEnvironmentId: taskSuggestions.targetEnvironmentId,
-          workspaceReadiness: taskSuggestions.workspaceReadiness,
-          readinessMessage: taskSuggestions.readinessMessage,
-        })
-        .from(taskSuggestions)
-        .where(and(eq(taskSuggestions.sourceTaskId, taskId)))
-        .orderBy(asc(taskSuggestions.sortOrder));
+        .select(workItemColumns)
+        .from(workItems)
+        .where(
+          and(
+            eq(workItems.kind, 'suggestion'),
+            eq(workItems.sourceTaskId, taskId),
+          ),
+        )
+        .orderBy(asc(workItems.sortOrder));
 
       if (existingSuggestions.length > 0) {
-        return existingSuggestions;
+        return existingSuggestions.map(toPersistedTaskSuggestion);
       }
 
       if (suggestionsToPersist.length === 0) {
         return [] as PersistedTaskSuggestion[];
       }
 
-      return tx
-        .insert(taskSuggestions)
+      const insertedSuggestions = await tx
+        .insert(workItems)
         .values(
           suggestionsToPersist.map(
-            (suggestion, index): typeof taskSuggestions.$inferInsert => ({
+            (suggestion, index): typeof workItems.$inferInsert => ({
+              kind: 'suggestion',
               sourceTaskId: taskId,
               title: suggestion.title,
               brief: suggestion.brief,
@@ -1182,7 +1223,8 @@ export async function submitTaskSuggestions(
               investigationContext: suggestion.investigationContext,
               repositoryIds,
               targetRepositoryFullName: suggestion.targetRepositoryFullName,
-              contentHash: buildTaskSuggestionContentHash({
+              // task_suggestions.contentHash lives on work_items.fingerprint.
+              fingerprint: buildTaskSuggestionContentHash({
                 title: suggestion.title,
                 brief: suggestion.brief,
                 targetRepositoryFullName: suggestion.targetRepositoryFullName,
@@ -1196,18 +1238,9 @@ export async function submitTaskSuggestions(
             }),
           ),
         )
-        .returning({
-          id: taskSuggestions.id,
-          title: taskSuggestions.title,
-          brief: taskSuggestions.brief,
-          category: taskSuggestions.category,
-          priority: taskSuggestions.priority,
-          investigationContext: taskSuggestions.investigationContext,
-          targetRepositoryFullName: taskSuggestions.targetRepositoryFullName,
-          targetEnvironmentId: taskSuggestions.targetEnvironmentId,
-          workspaceReadiness: taskSuggestions.workspaceReadiness,
-          readinessMessage: taskSuggestions.readinessMessage,
-        });
+        .returning(workItemColumns);
+
+      return insertedSuggestions.map(toPersistedTaskSuggestion);
     });
 
     if (isOnboardingTrigger) {

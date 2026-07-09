@@ -117,6 +117,7 @@ export async function findRoomoteOwnedSlackThread(params: {
 
   const sourceTaskId =
     trackedAutomationThread &&
+    trackedAutomationThread.automationKey != null &&
     isBetaBackgroundAutomationKey(trackedAutomationThread.automationKey) &&
     typeof trackedAutomationThread.metadata?.sourceTaskId === 'string' &&
     trackedAutomationThread.metadata.sourceTaskId.trim().length > 0

@@ -30,7 +30,8 @@ import {
   populateSnapshotResumeSlackMetadata,
   populateSnapshotResumeCommunicationMetadata,
   suggestionPrioritySet,
-  taskSuggestionStatusSet,
+  WORK_ITEM_STATUSES,
+  WORK_ITEM_ACTIVE_STATUSES,
   shouldUseAppTokenOnly,
 } from '../cloud-jobs';
 
@@ -185,12 +186,23 @@ describe('suggestion priority display constants', () => {
   });
 });
 
-describe('task suggestion status constants', () => {
-  it('exports the lifecycle validation set', () => {
-    expect(taskSuggestionStatusSet.has('open')).toBe(true);
-    expect(taskSuggestionStatusSet.has('started')).toBe(true);
-    expect(taskSuggestionStatusSet.has('dismissed')).toBe(true);
-    expect(taskSuggestionStatusSet.has('unknown')).toBe(false);
+describe('work item status constants', () => {
+  it('exposes the unified launch state machine', () => {
+    expect(WORK_ITEM_STATUSES).toEqual([
+      'open',
+      'launching',
+      'launched',
+      'failed',
+      'dismissed',
+    ]);
+  });
+
+  it('treats open/launching/launched as active for dedup', () => {
+    expect(WORK_ITEM_ACTIVE_STATUSES).toEqual([
+      'open',
+      'launching',
+      'launched',
+    ]);
   });
 });
 

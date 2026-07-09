@@ -2,7 +2,7 @@ import {
   buildSuggestionTaskPromptText,
   enqueueCloudTask,
 } from '@roomote/cloud-agents/server';
-import { and, db, eq, or, taskSuggestions } from '@roomote/db/server';
+import { and, db, eq, or, workItems } from '@roomote/db/server';
 import { TaskPayloadKind } from '@roomote/types';
 
 import type { UserAuthSuccess } from '@/types';
@@ -21,49 +21,53 @@ export async function implementTaskSuggestionCommand(
 
   const [suggestion] = await db
     .select({
-      id: taskSuggestions.id,
-      title: taskSuggestions.title,
-      brief: taskSuggestions.brief,
-      status: taskSuggestions.status,
-      category: taskSuggestions.category,
-      priority: taskSuggestions.priority,
-      investigationContext: taskSuggestions.investigationContext,
-      repositoryIds: taskSuggestions.repositoryIds,
-      targetRepositoryFullName: taskSuggestions.targetRepositoryFullName,
-      targetEnvironmentId: taskSuggestions.targetEnvironmentId,
-      readinessMessage: taskSuggestions.readinessMessage,
-      sourceTaskId: taskSuggestions.sourceTaskId,
+      id: workItems.id,
+      title: workItems.title,
+      brief: workItems.brief,
+      status: workItems.status,
+      category: workItems.category,
+      priority: workItems.priority,
+      investigationContext: workItems.investigationContext,
+      repositoryIds: workItems.repositoryIds,
+      targetRepositoryFullName: workItems.targetRepositoryFullName,
+      targetEnvironmentId: workItems.targetEnvironmentId,
+      readinessMessage: workItems.readinessMessage,
+      sourceTaskId: workItems.sourceTaskId,
     })
-    .from(taskSuggestions)
-    .where(eq(taskSuggestions.id, input.suggestionId))
+    .from(workItems)
+    .where(
+      and(
+        eq(workItems.id, input.suggestionId),
+        eq(workItems.kind, 'suggestion'),
+      ),
+    )
     .limit(1);
 
   if (!suggestion) {
     throw new Error('Suggestion not found.');
   }
 
-  if (suggestion.status === 'started') {
+  if (suggestion.status === 'launched') {
     throw new Error('This suggestion has already been implemented.');
   }
 
   const claimedAt = new Date();
   const [claimedSuggestion] = await db
-    .update(taskSuggestions)
+    .update(workItems)
     .set({
-      status: 'started',
+      status: 'launching',
+      launchClaimedAt: claimedAt,
       dismissedAt: null,
       updatedAt: claimedAt,
     })
     .where(
       and(
-        eq(taskSuggestions.id, input.suggestionId),
-        or(
-          eq(taskSuggestions.status, 'open'),
-          eq(taskSuggestions.status, 'dismissed'),
-        ),
+        eq(workItems.id, input.suggestionId),
+        eq(workItems.kind, 'suggestion'),
+        or(eq(workItems.status, 'open'), eq(workItems.status, 'dismissed')),
       ),
     )
-    .returning({ id: taskSuggestions.id });
+    .returning({ id: workItems.id });
 
   if (!claimedSuggestion) {
     throw new Error('This suggestion has already been implemented.');
@@ -98,7 +102,7 @@ export async function implementTaskSuggestionCommand(
             : {}),
           description: buildSuggestionTaskPromptText({
             title: suggestion.title,
-            brief: suggestion.brief,
+            brief: suggestion.brief ?? '',
             agentType:
               automation === 'onboarding' ? 'setup_onboarding' : automation,
             investigationContext: suggestion.investigationContext,
@@ -116,6 +120,21 @@ export async function implementTaskSuggestionCommand(
       trigger: 'manual',
     });
 
+    // Record the launch link on the suggestion work_item. Previously the
+    // web-launched suggestion dropped the task association entirely.
+    const launchedAt = new Date();
+    await db
+      .update(workItems)
+      .set({
+        status: 'launched',
+        launchedTaskId: launchResult.taskId,
+        launchedAt,
+        launchClaimedAt: null,
+        dismissedAt: null,
+        updatedAt: launchedAt,
+      })
+      .where(eq(workItems.id, input.suggestionId));
+
     return {
       success: true as const,
       taskId: launchResult.taskId,
@@ -123,16 +142,18 @@ export async function implementTaskSuggestionCommand(
     };
   } catch (error) {
     await db
-      .update(taskSuggestions)
+      .update(workItems)
       .set({
         status: 'open',
+        launchClaimedAt: null,
         dismissedAt: null,
         updatedAt: new Date(),
       })
       .where(
         and(
-          eq(taskSuggestions.id, input.suggestionId),
-          eq(taskSuggestions.status, 'started'),
+          eq(workItems.id, input.suggestionId),
+          eq(workItems.kind, 'suggestion'),
+          eq(workItems.status, 'launching'),
         ),
       );
 
