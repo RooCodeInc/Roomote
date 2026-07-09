@@ -100,10 +100,11 @@ describe('UserProfileSection', () => {
     );
 
     expect(screen.getByText('Teammate')).toBeInTheDocument();
-    expect(screen.getByRole('img', { name: 'Teammate' })).toHaveAttribute(
-      'src',
-      'https://example.com/avatar.png',
-    );
+    const avatar = screen.getByLabelText('Teammate');
+    const image = avatar.querySelector('img');
+    expect(image).not.toBeNull();
+    expect(image).toHaveAttribute('src', 'https://example.com/avatar.png');
+    expect(image).toHaveAttribute('alt', '');
   });
 
   it('shows credential details and expands the edit form for credential users', () => {
