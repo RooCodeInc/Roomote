@@ -1,6 +1,6 @@
 'use client';
 
-import { Fragment, useEffect, useState } from 'react';
+import { Fragment, useEffect, useMemo, useState } from 'react';
 import {
   isComputeCredentialField,
   isComputeInfrastructureField,
@@ -38,6 +38,31 @@ const BRAND_ICON_BY_PROVIDER: Record<ComputeProvider, string> = {
 };
 
 type ComputeProviderStatus = SetupComputeStatus['providers'][number];
+
+function isSecretComputeField(
+  field: Pick<ComputeProviderStatus['fields'][number], 'secret'>,
+) {
+  return field.secret === true;
+}
+
+function getNonSecretFieldInitialValues(
+  fields: ComputeProviderStatus['fields'],
+): Record<string, string> {
+  const next: Record<string, string> = {};
+
+  for (const field of fields) {
+    if (isSecretComputeField(field) || field.runtimeSatisfied) {
+      continue;
+    }
+
+    const savedValue = field.savedValue?.trim();
+    if (savedValue) {
+      next[field.envVarName] = savedValue;
+    }
+  }
+
+  return next;
+}
 
 function ComputeProviderIcon({ provider }: { provider: ComputeProvider }) {
   const brandIconId = BRAND_ICON_BY_PROVIDER[provider];
@@ -110,19 +135,38 @@ export function ComputeProviderSection({
   const [expanded, setExpanded] = useState(
     () => hasNoInputFields || hasConfiguredValues,
   );
-  const [values, setValues] = useState<Record<string, string>>({});
+  // Key off field content, not array identity — query/refetch creates a new
+  // fields array each time and must not wipe in-progress edits (including
+  // clearing a saved optional non-secret value, which enables Save).
+  const nonSecretInitialValuesKey = provider.fields
+    .filter((field) => !isSecretComputeField(field))
+    .map(
+      (field) =>
+        `${field.envVarName}:${field.savedValue ?? ''}:${field.savedSatisfied}:${field.runtimeSatisfied}`,
+    )
+    .join('|');
+  const nonSecretInitialValues = useMemo(
+    () => getNonSecretFieldInitialValues(provider.fields),
+    // provider.fields is intentionally omitted; content key drives updates.
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- content-keyed
+    [nonSecretInitialValuesKey],
+  );
+  const [values, setValues] = useState<Record<string, string>>(
+    () => nonSecretInitialValues,
+  );
   const [editingSavedValues, setEditingSavedValues] = useState<
     Record<string, boolean>
   >({});
   const [removeDialogOpen, setRemoveDialogOpen] = useState(false);
 
   useEffect(() => {
-    setValues({});
+    setValues(nonSecretInitialValues);
     setEditingSavedValues({});
     setRemoveDialogOpen(false);
     setExpanded(hasNoInputFields || hasConfiguredValues);
   }, [
     provider.provider,
+    nonSecretInitialValues,
     hasNoInputFields,
     hasConfiguredValues,
     hasSavedValues,
@@ -168,8 +212,20 @@ export function ComputeProviderSection({
 
   const hasPendingValueChanges = [...inputFields, ...advancedInfraFields].some(
     (field) => {
+      if (field.runtimeSatisfied) {
+        return false;
+      }
+
       const nextValue = values[field.envVarName]?.trim() ?? '';
-      return !field.runtimeSatisfied && nextValue.length > 0;
+
+      // Non-secret fields are prefilled from savedValue, so both edits and
+      // clears of a previously saved value count as pending changes.
+      if (!isSecretComputeField(field)) {
+        return nextValue !== (field.savedValue?.trim() ?? '');
+      }
+
+      // Secrets are never prefilled; any non-empty entry is a pending update.
+      return nextValue.length > 0;
     },
   );
 
@@ -205,7 +261,9 @@ export function ComputeProviderSection({
 
   const renderFieldInput = (field: ComputeProviderStatus['fields'][number]) => {
     const value = values[field.envVarName] ?? '';
+    const isSecretField = isSecretComputeField(field);
     const shouldShowSavedValueMask =
+      isSecretField &&
       !field.runtimeSatisfied &&
       field.savedSatisfied &&
       value.length === 0 &&
@@ -222,14 +280,17 @@ export function ComputeProviderSection({
         </div>
         <div className="flex items-center gap-2">
           <Input
-            secret={field.secret && !field.runtimeSatisfied}
+            secret={isSecretField && !field.runtimeSatisfied}
+            type={isSecretField ? undefined : 'text'}
             className="font-mono"
             value={
-              field.runtimeSatisfied
+              isSecretField && field.runtimeSatisfied
                 ? MASKED_VALUE
                 : shouldShowSavedValueMask
                   ? MASKED_VALUE
-                  : value
+                  : field.runtimeSatisfied && !isSecretField
+                    ? (field.savedValue ?? value)
+                    : value
             }
             onFocus={() => {
               if (shouldShowSavedValueMask) {
@@ -240,7 +301,7 @@ export function ComputeProviderSection({
               }
             }}
             onBlur={() => {
-              if (field.savedSatisfied && value.length === 0) {
+              if (isSecretField && field.savedSatisfied && value.length === 0) {
                 setEditingSavedValues((current) => ({
                   ...current,
                   [field.envVarName]: false,

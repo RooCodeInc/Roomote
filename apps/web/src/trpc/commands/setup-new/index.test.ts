@@ -7,6 +7,7 @@ const {
   mockDbTransaction,
   mockUpsertDeploymentEnvironmentVariables,
   mockGetPersistedEnvironmentVariableNames,
+  mockGetPersistedEnvironmentVariableValues,
   mockGetSetupBootstrapState,
   mockSetupTokenState,
   mockRunComputeProvisioning,
@@ -18,6 +19,7 @@ const {
   mockDbTransaction: vi.fn(),
   mockUpsertDeploymentEnvironmentVariables: vi.fn(),
   mockGetPersistedEnvironmentVariableNames: vi.fn().mockResolvedValue([]),
+  mockGetPersistedEnvironmentVariableValues: vi.fn().mockResolvedValue({}),
   mockGetSetupBootstrapState: vi.fn(),
   mockSetupTokenState: {
     requiredToken: undefined as string | undefined,
@@ -147,6 +149,8 @@ vi.mock('../environment-variables', () => ({
     mockUpsertDeploymentEnvironmentVariables,
   getPersistedEnvironmentVariableNames:
     mockGetPersistedEnvironmentVariableNames,
+  getPersistedEnvironmentVariableValues:
+    mockGetPersistedEnvironmentVariableValues,
 }));
 
 vi.mock('../task-suggestions', () => ({
