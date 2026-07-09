@@ -478,9 +478,17 @@ telegram.post('/', async (c) => {
     });
   }
 
+  if (launch.status === 'confirmation_pending') {
+    return c.json({
+      ok: true,
+      queued: false,
+      confirmationPending: true,
+    });
+  }
+
   return c.json({
     ok: true,
     started: true,
-    cloudJobId: launch.launchResult!.id,
+    cloudJobId: launch.launchResult.id,
   });
 });
