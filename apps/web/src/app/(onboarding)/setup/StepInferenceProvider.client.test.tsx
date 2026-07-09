@@ -196,6 +196,61 @@ function setupQueryMocks(options: {
   } as unknown as ReturnType<typeof mockUseQuery>);
 }
 
+describe('StepInferenceProvider configured API key display', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockUseQueryClient.mockReturnValue({
+      invalidateQueries: vi.fn(),
+    } as unknown as ReturnType<typeof mockUseQueryClient>);
+    setupMutationMock();
+    setupQueryMocks({ chatgptConnected: false });
+  });
+
+  it('shows a mask for a runtime-satisfied API key', () => {
+    render(
+      <StepInferenceProvider
+        modelSetup={buildModelSetup({
+          providers: [
+            {
+              ...openrouterProviderStatus(),
+              runtimeApiKeySatisfied: true,
+            },
+            chatgptProviderStatus(false),
+          ],
+        })}
+        onContinue={vi.fn()}
+      />,
+    );
+
+    expect(
+      screen.getByDisplayValue('••••••••••••••••••••••••••••'),
+    ).toBeDisabled();
+  });
+
+  it('shows a mask for a saved API key until the field is edited', () => {
+    render(
+      <StepInferenceProvider
+        modelSetup={buildModelSetup({
+          providers: [
+            {
+              ...openrouterProviderStatus(),
+              savedApiKeySatisfied: true,
+            },
+            chatgptProviderStatus(false),
+          ],
+        })}
+        onContinue={vi.fn()}
+      />,
+    );
+
+    const input = screen.getByDisplayValue('••••••••••••••••••••••••••••');
+    expect(input).not.toBeDisabled();
+
+    fireEvent.focus(input);
+    expect(input).toHaveValue('');
+  });
+});
+
 describe('StepInferenceProvider ChatGPT subscription', () => {
   beforeEach(() => {
     vi.clearAllMocks();

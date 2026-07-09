@@ -156,6 +156,8 @@ export function StepInferenceProvider({
     hasSavedProviderKey &&
     apiKey.length === 0 &&
     !editingSavedValue;
+  const shouldShowConfiguredMask =
+    hasRuntimeProviderKey || shouldShowSavedValueMask;
   const canContinueWithoutApiKey = hasRuntimeProviderKey || hasSavedProviderKey;
   const hasMissingRequiredFields =
     !canContinueWithoutApiKey &&
@@ -209,13 +211,7 @@ export function StepInferenceProvider({
         {isChatGptProvider ? null : (
           <Input
             secret={!hasRuntimeProviderKey}
-            value={
-              hasRuntimeProviderKey
-                ? ''
-                : shouldShowSavedValueMask
-                  ? MASKED_VALUE
-                  : apiKey
-            }
+            value={shouldShowConfiguredMask ? MASKED_VALUE : apiKey}
             onFocus={() => {
               if (shouldShowSavedValueMask) {
                 setEditingSavedValue(true);
