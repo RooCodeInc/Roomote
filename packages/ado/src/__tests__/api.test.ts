@@ -222,6 +222,33 @@ describe('Azure DevOps API helpers', () => {
     );
   });
 
+  it('strips the organization userinfo Azure DevOps embeds in remote URLs', () => {
+    const repository = {
+      id: 'repo-1',
+      name: 'Test ADO',
+      project: {
+        id: 'project-1',
+        name: 'Test ADO',
+        description: null,
+        state: 'wellFormed',
+        visibility: 'private',
+      },
+      defaultBranch: 'refs/heads/main',
+      remoteUrl: 'https://acme@dev.azure.com/acme/Test%20ADO/_git/Test%20ADO',
+      webUrl: 'https://dev.azure.com/acme/Test%20ADO/_git/Test%20ADO',
+    } satisfies AdoRepository;
+
+    const values = buildAdoRepositoryValues({
+      repository,
+      linkedByUserId: 'user-1',
+      organization: 'acme',
+    });
+
+    expect(values.cloneUrl).toBe(
+      'https://dev.azure.com/acme/Test%20ADO/_git/Test%20ADO',
+    );
+  });
+
   it('maps Azure DevOps repository fields into provider-tagged repository rows', () => {
     const repository = {
       id: 'repo-1',
