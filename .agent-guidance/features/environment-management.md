@@ -522,10 +522,16 @@ Apply semantics:
 - Definitions that reference unlinked repositories still apply; mappings
   backfill on a later boot because the resolved `repositoryIds` set changes.
 - Never prunes: definitions removed from the set only get their
-  `declarative_source` cleared ("orphaned" to manual management).
-- Invalid definitions are skipped with logged errors; Postgres `42P01` is
-  retried with the same bounded backoff as the auth-keypair bootstrap so the
-  API can boot in parallel with `db-migrate`.
+  `declarative_source` cleared ("orphaned" to manual management). Orphan
+  reconciliation runs only when the whole declared set was read and validated
+  successfully; while any source fails to read or parse, markers are left
+  untouched (`orphaningDeferred`) so a temporarily broken file does not orphan
+  its environment.
+- Invalid definitions are skipped with logged errors; a missing or unreadable
+  `ROOMOTE_ENVIRONMENTS_DIR` is itself skipped so inline YAML definitions
+  still apply. Postgres `42P01` is retried with the same bounded backoff as
+  the auth-keypair bootstrap so the API can boot in parallel with
+  `db-migrate`.
 
 Both env vars are in `CONTROL_PLANE_ENV_VAR_NAMES`, so they are reserved from
 the env-var editor and stripped from task sandboxes. Roomote's own definition

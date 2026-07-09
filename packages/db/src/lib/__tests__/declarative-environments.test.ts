@@ -326,6 +326,53 @@ describe('declarative environments', () => {
     ]);
   });
 
+  it('applies inline YAML even when the definitions directory is unreadable', async () => {
+    const inlineName = environmentName('inline-survives');
+
+    const summary = await applyDeclarativeEnvironments({
+      dir: path.join(definitionsDir, 'does-not-exist'),
+      inlineYaml: definitionYaml(inlineName),
+    });
+
+    expect(summary.created).toEqual([inlineName]);
+    expect(summary.skipped).toHaveLength(1);
+    expect(summary.skipped[0]?.source).toBe('ROOMOTE_ENVIRONMENTS_DIR');
+    expect(summary.skipped[0]?.reason).toContain('Failed to read directory');
+    expect(summary.orphaningDeferred).toBe(true);
+
+    const environment = await db.query.environments.findFirst({
+      where: eq(environments.name, inlineName),
+    });
+    expect(environment?.declarativeSource).toBe('env:1');
+  });
+
+  it('keeps declarative markers when a still-present definition fails to parse', async () => {
+    const name = environmentName('broken-but-present');
+    const filePath = path.join(definitionsDir, 'broken-later.yaml');
+    await writeFile(filePath, definitionYaml(name));
+
+    await applyDeclarativeEnvironments({ dir: definitionsDir });
+
+    // The file is still present but temporarily invalid; its environment must
+    // keep its declarative marker instead of being orphaned.
+    await writeFile(filePath, 'name: [unclosed');
+
+    const summary = await applyDeclarativeEnvironments({
+      dir: definitionsDir,
+    });
+
+    expect(summary.orphaned).toEqual([]);
+    expect(summary.orphaningDeferred).toBe(true);
+    expect(summary.skipped.map((skip) => skip.source)).toEqual([
+      'broken-later.yaml',
+    ]);
+
+    const environment = await db.query.environments.findFirst({
+      where: eq(environments.name, name),
+    });
+    expect(environment?.declarativeSource).toBe('broken-later.yaml');
+  });
+
   it('never touches user-owned or eval environments with the same name', async () => {
     testUserId = randomUUID();
     await userFactory.create({ id: testUserId });
@@ -430,6 +477,7 @@ describe('declarative environments', () => {
         unchanged: [],
         skipped: [],
         orphaned: [],
+        orphaningDeferred: false,
         missingRepositories: [],
       };
 

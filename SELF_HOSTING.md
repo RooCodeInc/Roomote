@@ -626,7 +626,12 @@ Semantics:
   environment is created anyway and repository mappings backfill on the next
   startup after the repositories are linked.
 - Invalid definitions are skipped with a logged error; they never prevent the
-  API from starting or other definitions from applying.
+  API from starting or other definitions from applying. A missing or
+  unreadable definitions directory is skipped the same way, so inline
+  `ROOMOTE_ENVIRONMENTS_YAML` definitions still apply. While any definition
+  fails to read or validate, the "removed definition" reconciliation above is
+  deferred, so a temporarily broken file never strips its environment's
+  managed marker.
 - Keep secrets out of definition files: the per-environment `env` map is
   stored in plaintext. Use deployment environment variables or
   Settings → Environment Variables for secret values.

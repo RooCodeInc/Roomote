@@ -118,6 +118,12 @@ export type DeclarativeEnvironmentsSummary = {
   skipped: DeclarativeEnvironmentSkip[];
   /** Environment names whose declarative marker was cleared this run. */
   orphaned: string[];
+  /**
+   * True when orphan reconciliation was deferred because part of the declared
+   * set could not be read or validated, so the full set of declared names was
+   * unknown. Existing declarative markers are left untouched in that case.
+   */
+  orphaningDeferred: boolean;
   /** Configured repository names that are not linked to the deployment yet. */
   missingRepositories: string[];
 };
@@ -125,6 +131,13 @@ export type DeclarativeEnvironmentsSummary = {
 type ParsedDefinitions = {
   definitions: DeclarativeEnvironmentDefinition[];
   skipped: DeclarativeEnvironmentSkip[];
+  /**
+   * True when a source failed to read, parse, or validate, meaning the names
+   * it declares are unknown. Orphan reconciliation must be skipped then, so a
+   * transient typo in a still-present definition does not clear its
+   * environment's declarative marker.
+   */
+  hasUnresolvedNames: boolean;
 };
 
 function describeParseError(error: unknown): string {
@@ -159,18 +172,38 @@ function validateDefinition(
 async function readDefinitionsFromDir(dir: string): Promise<ParsedDefinitions> {
   const definitions: DeclarativeEnvironmentDefinition[] = [];
   const skipped: DeclarativeEnvironmentSkip[] = [];
+  let hasUnresolvedNames = false;
 
-  const entries = await readdir(dir, { withFileTypes: true });
-  const fileNames = entries
-    .filter(
-      (entry) =>
-        entry.isFile() &&
-        SUPPORTED_FILE_EXTENSIONS.has(path.extname(entry.name).toLowerCase()),
-    )
-    .map((entry) => entry.name)
-    // Bytewise comparison keeps duplicate-name precedence deterministic
-    // across locales.
-    .sort();
+  let fileNames: string[];
+
+  try {
+    const entries = await readdir(dir, { withFileTypes: true });
+    fileNames = entries
+      .filter(
+        (entry) =>
+          entry.isFile() &&
+          SUPPORTED_FILE_EXTENSIONS.has(path.extname(entry.name).toLowerCase()),
+      )
+      .map((entry) => entry.name)
+      // Bytewise comparison keeps duplicate-name precedence deterministic
+      // across locales.
+      .sort();
+  } catch (error) {
+    // A missing or unreadable directory must not abort the whole declarative
+    // apply: inline YAML definitions still deserve to be applied. The names
+    // the directory declares are unknown, so orphan reconciliation is
+    // deferred via hasUnresolvedNames.
+    return {
+      definitions,
+      skipped: [
+        {
+          source: DECLARATIVE_ENVIRONMENTS_DIR_ENV_VAR,
+          reason: `Failed to read directory "${dir}": ${describeParseError(error)}`,
+        },
+      ],
+      hasUnresolvedNames: true,
+    };
+  }
 
   for (const fileName of fileNames) {
     let raw: unknown;
@@ -186,6 +219,7 @@ async function readDefinitionsFromDir(dir: string): Promise<ParsedDefinitions> {
         source: fileName,
         reason: `Failed to parse: ${describeParseError(error)}`,
       });
+      hasUnresolvedNames = true;
       continue;
     }
 
@@ -193,17 +227,19 @@ async function readDefinitionsFromDir(dir: string): Promise<ParsedDefinitions> {
 
     if ('skip' in result) {
       skipped.push(result.skip);
+      hasUnresolvedNames = true;
     } else {
       definitions.push(result.definition);
     }
   }
 
-  return { definitions, skipped };
+  return { definitions, skipped, hasUnresolvedNames };
 }
 
 function readDefinitionsFromInlineYaml(inlineYaml: string): ParsedDefinitions {
   const definitions: DeclarativeEnvironmentDefinition[] = [];
   const skipped: DeclarativeEnvironmentSkip[] = [];
+  let hasUnresolvedNames = false;
 
   let documents: ReturnType<typeof YAML.parseAllDocuments>;
 
@@ -218,6 +254,7 @@ function readDefinitionsFromInlineYaml(inlineYaml: string): ParsedDefinitions {
           reason: `Failed to parse: ${describeParseError(error)}`,
         },
       ],
+      hasUnresolvedNames: true,
     };
   }
 
@@ -231,6 +268,7 @@ function readDefinitionsFromInlineYaml(inlineYaml: string): ParsedDefinitions {
           .map((error) => error.message)
           .join('; ')}`,
       });
+      hasUnresolvedNames = true;
       return;
     }
 
@@ -245,12 +283,13 @@ function readDefinitionsFromInlineYaml(inlineYaml: string): ParsedDefinitions {
 
     if ('skip' in result) {
       skipped.push(result.skip);
+      hasUnresolvedNames = true;
     } else {
       definitions.push(result.definition);
     }
   });
 
-  return { definitions, skipped };
+  return { definitions, skipped, hasUnresolvedNames };
 }
 
 function dedupeByName(parsed: ParsedDefinitions): ParsedDefinitions {
@@ -262,6 +301,8 @@ function dedupeByName(parsed: ParsedDefinitions): ParsedDefinitions {
     const existingSource = seenBySource.get(definition.config.name);
 
     if (existingSource) {
+      // Duplicate names are skipped but their name is known, so they do not
+      // block orphan reconciliation.
       skipped.push({
         source: definition.source,
         reason:
@@ -275,7 +316,11 @@ function dedupeByName(parsed: ParsedDefinitions): ParsedDefinitions {
     definitions.push(definition);
   }
 
-  return { definitions, skipped };
+  return {
+    definitions,
+    skipped,
+    hasUnresolvedNames: parsed.hasUnresolvedNames,
+  };
 }
 
 /**
@@ -289,20 +334,23 @@ export async function readDeclarativeEnvironmentDefinitions(options: {
 }): Promise<ParsedDefinitions> {
   const definitions: DeclarativeEnvironmentDefinition[] = [];
   const skipped: DeclarativeEnvironmentSkip[] = [];
+  let hasUnresolvedNames = false;
 
   if (options.dir) {
     const fromDir = await readDefinitionsFromDir(options.dir);
     definitions.push(...fromDir.definitions);
     skipped.push(...fromDir.skipped);
+    hasUnresolvedNames ||= fromDir.hasUnresolvedNames;
   }
 
   if (options.inlineYaml?.trim()) {
     const fromInline = readDefinitionsFromInlineYaml(options.inlineYaml);
     definitions.push(...fromInline.definitions);
     skipped.push(...fromInline.skipped);
+    hasUnresolvedNames ||= fromInline.hasUnresolvedNames;
   }
 
-  return dedupeByName({ definitions, skipped });
+  return dedupeByName({ definitions, skipped, hasUnresolvedNames });
 }
 
 async function resolveConfiguredRepositories(config: EnvironmentConfig) {
@@ -528,10 +576,11 @@ export async function applyDeclarativeEnvironments(options: {
     unchanged: [],
     skipped: [],
     orphaned: [],
+    orphaningDeferred: false,
     missingRepositories: [],
   };
 
-  const { definitions, skipped } =
+  const { definitions, skipped, hasUnresolvedNames } =
     await readDeclarativeEnvironmentDefinitions(options);
   summary.skipped.push(...skipped);
 
@@ -569,7 +618,16 @@ export async function applyDeclarativeEnvironments(options: {
   }
 
   summary.missingRepositories = [...missingRepositories];
-  summary.orphaned = await clearOrphanedDeclarativeMarkers(declaredNames);
+
+  if (hasUnresolvedNames) {
+    // Part of the declared set could not be read or validated, so the names
+    // it declares are unknown. Clearing markers now would incorrectly orphan
+    // environments whose definition is still present but temporarily broken;
+    // defer reconciliation until the whole set parses again.
+    summary.orphaningDeferred = true;
+  } else {
+    summary.orphaned = await clearOrphanedDeclarativeMarkers(declaredNames);
+  }
 
   return summary;
 }
@@ -652,6 +710,14 @@ export async function bootstrapDeclarativeEnvironments(
 
   for (const skip of summary.skipped) {
     log(`[declarative-environments] Skipped ${skip.source}: ${skip.reason}`);
+  }
+
+  if (summary.orphaningDeferred) {
+    log(
+      '[declarative-environments] Deferred orphan reconciliation: part of ' +
+        'the declared set could not be read or validated, so existing ' +
+        'declarative markers were left untouched.',
+    );
   }
 
   if (summary.missingRepositories.length > 0) {
