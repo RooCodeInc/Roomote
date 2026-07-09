@@ -954,29 +954,21 @@ export function filterUnifiedDiffToFiles(
   return kept.join('\n');
 }
 
-export interface ScopedSyncReviewDelta {
-  /** Whether the PR's authoritative Files Changed were successfully read. */
-  pullRequestFilesAvailable: boolean;
-  /** Range changed files scoped to the PR's Files Changed (unscoped on failure). */
-  changedFiles: string[];
-  /** Range diff scoped to the PR's Files Changed (unscoped/undefined on failure). */
-  diff: string | undefined;
-  /**
-   * Whether the reviewer has a delta to act on. False only when a trustworthy,
-   * successful read genuinely surfaced no PR-relevant change — a fetch
-   * failure or too-large diff keeps this true so the reviewer inspects
-   * manually rather than silently collapsing to a no-op.
-   */
-  hasReviewableChanges: boolean;
-}
-
 /**
- * Scope a since-last-review compare range to the PR's authoritative Files
- * Changed. The compare range uses three-dot semantics, so after a rebase it
- * carries base-branch commits; intersecting with the PR's `base...head` files
- * drops them. Both diff fetches return `{ diff: undefined, changedFiles: [] }`
- * on failure/too-large, so failure is treated as "inspect manually", never as
- * "no changes".
+ * Resolve the reviewable delta for a sync re-review, scoped to the pull
+ * request's own changes.
+ *
+ * The since-last-review compare range (`sha...currentHead`) uses three-dot
+ * semantics, so after a rebase it carries base-branch commits — and even for a
+ * file the PR also touches, that file's range section contains base-branch
+ * hunks that are outside the PR's `base...head` Files Changed. So the range is
+ * used only to identify *which* PR files changed since the last review; the
+ * diff content presented for review comes from the PR's authoritative
+ * `base...head` diff (`gh pr diff`), which never contains base-branch hunks.
+ *
+ * Both diff fetches return `{ diff: undefined, changedFiles: [] }` on failure
+ * or a too-large diff, so failure is treated as "inspect manually" (keep the
+ * delta), never as "no changes".
  */
 export function resolveScopedSyncReviewDelta({
   sameHeadAsLastReview,
@@ -984,9 +976,16 @@ export function resolveScopedSyncReviewDelta({
   rangeDiff,
 }: {
   sameHeadAsLastReview: boolean;
+  /** The PR's authoritative `base...head` diff (`gh pr diff`). */
   pullRequestDiff: { diff: string | undefined; changedFiles: string[] };
+  /** The three-dot `sha...currentHead` since-last-review compare range. */
   rangeDiff: { diff: string | undefined; changedFiles: string[] };
-}): ScopedSyncReviewDelta {
+}): {
+  pullRequestFilesAvailable: boolean;
+  changedFiles: string[];
+  diff: string | undefined;
+  hasReviewableChanges: boolean;
+} {
   if (sameHeadAsLastReview) {
     return {
       pullRequestFilesAvailable: true,
@@ -996,30 +995,45 @@ export function resolveScopedSyncReviewDelta({
     };
   }
 
-  const pullRequestFilesAvailable = pullRequestDiff.diff !== undefined;
-  const rangeFetchFailed = rangeDiff.diff === undefined;
+  // Without the authoritative PR diff we cannot scope; fall back to the raw
+  // range and let the reviewer inspect rather than dropping everything.
+  if (pullRequestDiff.diff === undefined) {
+    return {
+      pullRequestFilesAvailable: false,
+      changedFiles: rangeDiff.changedFiles,
+      diff: rangeDiff.diff,
+      hasReviewableChanges: true,
+    };
+  }
+
+  const pullRequestDiffText = pullRequestDiff.diff;
   const pullRequestChangedFileSet = new Set(pullRequestDiff.changedFiles);
 
-  const changedFiles = pullRequestFilesAvailable
-    ? rangeDiff.changedFiles.filter((file) =>
-        pullRequestChangedFileSet.has(file),
-      )
-    : rangeDiff.changedFiles;
+  // Range read failed: we cannot tell which PR files are new since the last
+  // review, so present the full authoritative PR diff for manual inspection.
+  if (rangeDiff.diff === undefined) {
+    return {
+      pullRequestFilesAvailable: true,
+      changedFiles: pullRequestDiff.changedFiles,
+      diff: pullRequestDiffText,
+      hasReviewableChanges: true,
+    };
+  }
+
+  // PR files that appear in the since-last-review range.
+  const changedFiles = rangeDiff.changedFiles.filter((file) =>
+    pullRequestChangedFileSet.has(file),
+  );
 
   const diff =
-    rangeDiff.diff === undefined
-      ? undefined
-      : pullRequestFilesAvailable
-        ? filterUnifiedDiffToFiles(rangeDiff.diff, pullRequestChangedFileSet)
-        : rangeDiff.diff;
-
-  const hasReviewableChanges =
-    rangeFetchFailed || !pullRequestFilesAvailable || changedFiles.length > 0;
+    changedFiles.length > 0
+      ? filterUnifiedDiffToFiles(pullRequestDiffText, new Set(changedFiles))
+      : undefined;
 
   return {
-    pullRequestFilesAvailable,
+    pullRequestFilesAvailable: true,
     changedFiles,
     diff,
-    hasReviewableChanges,
+    hasReviewableChanges: changedFiles.length > 0,
   };
 }

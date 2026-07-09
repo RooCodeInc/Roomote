@@ -12,7 +12,7 @@ import {
   getPrDetails,
   getCommits,
   getIssueDetails,
-  getDiffInRange,
+  getDiff,
   getMarkdownChecklist,
   getReviewComments,
   getIssueComments,
@@ -469,11 +469,14 @@ export async function githubPrReviewSync({
         ? getCommits(commits)
         : undefined,
       linked_issue: getIssueDetails(fullName, issue),
+      // `diff` is the PR's own base...head hunks for the files that changed
+      // since the last review (never the three-dot range content), so it is
+      // rendered as the pull-request diff rather than a compare range.
       diff_in_range: hasReviewableChanges
-        ? getDiffInRange({
+        ? getDiff({
+            prNumber,
             repo: fullName,
             diff,
-            range,
             lineLimit: 5_000,
             charLimit: 100_000,
           })

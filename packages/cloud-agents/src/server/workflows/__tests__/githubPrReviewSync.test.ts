@@ -163,21 +163,28 @@ No actionable issues found.
   });
 
   describe('resolveScopedSyncReviewDelta unit tests', () => {
+    // The PR's authoritative base...head diff: only its own hunk for the
+    // shared file (a base-branch hunk on that same file is NOT here).
     const prSectionDiff = [
       'diff --git a/apps/web/src/pr.ts b/apps/web/src/pr.ts',
-      '@@ -1 +1 @@',
-      '-const a = 1;',
-      '+const a = 2;',
+      '@@ -10 +10 @@',
+      '-const pr = 1;',
+      '+const pr = 2;',
     ].join('\n');
+    // The three-dot range after a rebase: the shared PR file section also
+    // carries a base-branch hunk, plus an unrelated base-only file.
     const rebaseRangeDiff = [
-      prSectionDiff,
+      'diff --git a/apps/web/src/pr.ts b/apps/web/src/pr.ts',
+      '@@ -1 +1 @@',
+      '-const base_touched_shared = 1;',
+      '+const base_touched_shared = 2;',
       'diff --git a/apps/api/src/base.ts b/apps/api/src/base.ts',
       '@@ -1 +1 @@',
       '-const b = 1;',
       '+const b = 2;',
     ].join('\n');
 
-    it('drops rebased-in base-branch files but keeps the PR files', () => {
+    it('presents the PR base...head hunks, not the range, for changed files', () => {
       const result = utils.resolveScopedSyncReviewDelta({
         sameHeadAsLastReview: false,
         pullRequestDiff: {
@@ -191,7 +198,10 @@ No actionable issues found.
       });
 
       expect(result.changedFiles).toEqual(['apps/web/src/pr.ts']);
-      expect(result.diff).toContain('apps/web/src/pr.ts');
+      // The PR's own hunk is shown; the base-branch hunk on the same file and
+      // the unrelated base-only file are both excluded.
+      expect(result.diff).toContain('const pr = 2;');
+      expect(result.diff).not.toContain('base_touched_shared');
       expect(result.diff).not.toContain('apps/api/src/base.ts');
       expect(result.hasReviewableChanges).toBe(true);
     });
@@ -210,10 +220,11 @@ No actionable issues found.
       });
 
       expect(result.changedFiles).toEqual([]);
+      expect(result.diff).toBeUndefined();
       expect(result.hasReviewableChanges).toBe(false);
     });
 
-    it('keeps reviewable changes (inspect manually) when the range fetch failed', () => {
+    it('keeps reviewable changes (full PR diff) when the range fetch failed', () => {
       const result = utils.resolveScopedSyncReviewDelta({
         sameHeadAsLastReview: false,
         pullRequestDiff: {
@@ -224,7 +235,7 @@ No actionable issues found.
         rangeDiff: { diff: undefined, changedFiles: [] },
       });
 
-      expect(result.diff).toBeUndefined();
+      expect(result.diff).toBe(prSectionDiff);
       expect(result.hasReviewableChanges).toBe(true);
     });
 
@@ -239,10 +250,6 @@ No actionable issues found.
       });
 
       expect(result.pullRequestFilesAvailable).toBe(false);
-      expect(result.changedFiles).toEqual([
-        'apps/web/src/pr.ts',
-        'apps/api/src/base.ts',
-      ]);
       expect(result.diff).toBe(rebaseRangeDiff);
       expect(result.hasReviewableChanges).toBe(true);
     });
