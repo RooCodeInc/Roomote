@@ -78,10 +78,10 @@ function getAdvancedInfrastructureDescription({
   hasMissingDefaultBlockingInfra: boolean;
 }) {
   if (hasMissingDefaultBlockingInfra) {
-    return `${provider.label} needs this provider artifact unless the shared worker image above is registry-qualified and can be used automatically.`;
+    return `${provider.label} needs this provider artifact unless a registry-qualified worker image is already configured (for example via DOCKER_WORKER_IMAGE) and can be used automatically.`;
   }
 
-  return 'Optional overrides. Leave blank to derive or provision these automatically from the shared worker image.';
+  return 'Optional overrides. Leave blank to derive or provision these automatically from the configured worker image.';
 }
 
 function getCreateAccountHeading(provider: ComputeProviderStatus) {
@@ -417,9 +417,12 @@ export function ComputeProviderSection({
                 </p>
                 {hasMissingDefaultBlockingInfra && (
                   <p className="max-w-xl text-sm text-muted-foreground mt-1">
-                    Add a registry-qualified hosted worker image above, or enter
-                    the required provider artifact here before selecting{' '}
-                    {provider.label} as the default.
+                    Configure a registry-qualified worker image via{' '}
+                    <code className="font-mono text-xs">
+                      DOCKER_WORKER_IMAGE
+                    </code>
+                    , or enter the required provider artifact here before
+                    selecting {provider.label} as the default.
                   </p>
                 )}
                 <div className="space-y-2 mt-3">

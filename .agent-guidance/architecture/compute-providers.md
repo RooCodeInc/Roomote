@@ -654,22 +654,22 @@ Admins can also manage compute providers after setup at `/settings/sandboxes`
   `deployment_settings.runtime_compute_config`, and the saved shared worker
   image, plus the deployment-wide `provisioning` map of per-provider worker
   base-image runs (stale in-flight runs presented as failed).
-- The page has a shared "Hosted sandbox worker image" section above the
-  provider sections (`ComputeWorkerImageSection`), backed by
-  `compute.saveWorkerImage` / `compute.clearWorkerImage`. Each provider section
+- The settings page does **not** expose a shared worker-image editor; the
+  worker image is deployment-managed via process env / release derivation
+  (`DOCKER_WORKER_IMAGE` and related resolution). Each provider section
   (`ComputeProviderSection`) shows credential fields normally plus an "Advanced
   infrastructure" expandable area for that provider's infrastructure values.
-- `compute.saveConfig` encrypts submitted account credentials, submitted
-  provider-specific infrastructure values, and a submitted shared worker image
-  into deployment env vars (with the same Modal base-image-ref derivation as
-  the wizard), but unlike the wizard it does **not** switch the deployment
-  default onto the provider and does not require missing infrastructure before
-  saving credentials. Runtime env values are locked and never overwritten. For
-  provisionable providers (E2B, Daytona) it behaves like the wizard: when no
-  manual artifact value is entered, a registry-qualified worker image exists,
-  and the required credentials are available, the save records the run as
-  pending and starts the detached provisioning; entering the artifact manually
-  persists it and skips provisioning. The logic is shared with the wizard via
+- `compute.saveConfig` encrypts submitted account credentials and submitted
+  provider-specific infrastructure values into deployment env vars (with the
+  same Modal base-image-ref derivation as the wizard), but unlike the wizard it
+  does **not** switch the deployment default onto the provider and does not
+  require missing infrastructure before saving credentials. Runtime env values
+  are locked and never overwritten. For provisionable providers (E2B, Daytona)
+  it behaves like the wizard: when no manual artifact value is entered, a
+  registry-qualified worker image exists, and the required credentials are
+  available, the save records the run as pending and starts the detached
+  provisioning; entering the artifact manually persists it and skips
+  provisioning. The logic is shared with the wizard via
   `apps/web/src/trpc/commands/compute/compute-provisioning.ts`.
 - `compute.setDefaultProvider` persists
   `deployment_settings.runtime_compute_config.defaultProvider`, allowing hosted
@@ -678,8 +678,7 @@ Admins can also manage compute providers after setup at `/settings/sandboxes`
   provisioning (i.e. `configSatisfied`).
 - `compute.clearConfig` deletes this provider's saved credential **and**
   provider-specific infrastructure deployment env vars (for Modal that includes
-  `MODAL_BASE_IMAGE_REF`); it does not touch the shared `DOCKER_WORKER_IMAGE`,
-  which is cleared from its own shared section via `compute.clearWorkerImage`.
+  `MODAL_BASE_IMAGE_REF`); it does not touch the shared `DOCKER_WORKER_IMAGE`.
   Clearing does not change the persisted default; the page warns when the
   effective default provider is missing configuration.
 

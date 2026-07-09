@@ -238,8 +238,6 @@ import {
 import {
   getComputeStatusCommand,
   saveComputeConfigCommand,
-  saveComputeWorkerImageCommand,
-  clearComputeWorkerImageCommand,
   clearComputeConfigCommand,
   setDefaultComputeProviderCommand,
 } from '../commands/compute';
@@ -1330,16 +1328,6 @@ export const appRouter = createRouter({
       .mutation(({ ctx: { auth }, input }) =>
         clearComputeConfigCommand(auth, input),
       ),
-
-    saveWorkerImage: protectedProcedure
-      .input(z.object({ value: z.string().trim() }))
-      .mutation(({ ctx: { auth }, input }) =>
-        saveComputeWorkerImageCommand(auth, input),
-      ),
-
-    clearWorkerImage: protectedProcedure.mutation(({ ctx: { auth } }) =>
-      clearComputeWorkerImageCommand(auth),
-    ),
 
     setDefaultProvider: protectedProcedure
       .input(z.object({ provider: z.enum(computeProviders) }))

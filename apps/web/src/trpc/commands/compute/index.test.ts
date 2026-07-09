@@ -72,10 +72,8 @@ vi.mock('../environment-variables', () => ({
 
 import {
   clearComputeConfigCommand,
-  clearComputeWorkerImageCommand,
   getComputeStatusCommand,
   saveComputeConfigCommand,
-  saveComputeWorkerImageCommand,
   setDefaultComputeProviderCommand,
 } from './index';
 
@@ -565,76 +563,6 @@ describe('compute commands', () => {
       await clearComputeConfigCommand(buildMockAuth(), { provider: 'docker' });
 
       expect(mockDbTransaction).not.toHaveBeenCalled();
-    });
-  });
-
-  describe('saveComputeWorkerImageCommand', () => {
-    beforeEach(() => {
-      mockDbTransaction.mockImplementation(async (callback) => {
-        return callback({
-          insert: createInsertChain(),
-        } as never);
-      });
-      delete process.env.DOCKER_WORKER_IMAGE;
-    });
-
-    afterEach(() => {
-      delete process.env.DOCKER_WORKER_IMAGE;
-    });
-
-    it('saves the shared worker image as a deployment env var', async () => {
-      await saveComputeWorkerImageCommand(buildMockAuth(), {
-        value: '  registry.example.com/worker:tag  ',
-      });
-
-      expect(mockUpsertDeploymentEnvironmentVariables).toHaveBeenCalledWith(
-        expect.anything(),
-        expect.objectContaining({
-          userId: 'compute-test-user',
-          values: [
-            {
-              name: 'DOCKER_WORKER_IMAGE',
-              value: 'registry.example.com/worker:tag',
-            },
-          ],
-        }),
-      );
-    });
-
-    it('rejects a blank worker image', async () => {
-      await expect(
-        saveComputeWorkerImageCommand(buildMockAuth(), { value: '   ' }),
-      ).rejects.toThrow('Enter a worker image reference to save.');
-    });
-
-    it('refuses to override an env-provided worker image', async () => {
-      process.env.DOCKER_WORKER_IMAGE = 'registry.example.com/env:tag';
-
-      await expect(
-        saveComputeWorkerImageCommand(buildMockAuth(), {
-          value: 'registry.example.com/worker:tag',
-        }),
-      ).rejects.toThrow(
-        'The worker image is set via an environment variable and cannot be overridden here.',
-      );
-    });
-  });
-
-  describe('clearComputeWorkerImageCommand', () => {
-    it('deletes the shared worker image deployment env var', async () => {
-      const txWhere = vi.fn(async () => undefined);
-      const txDelete = vi.fn(() => ({ where: txWhere }));
-      const { inArray: txInArray } = await import('@roomote/db/server');
-
-      mockDbTransaction.mockImplementation(async (callback) => {
-        return callback({ delete: txDelete } as never);
-      });
-
-      await clearComputeWorkerImageCommand(buildMockAuth());
-
-      expect(txInArray).toHaveBeenCalledWith('env.name', [
-        'DOCKER_WORKER_IMAGE',
-      ]);
     });
   });
 

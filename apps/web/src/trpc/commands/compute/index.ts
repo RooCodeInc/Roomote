@@ -359,58 +359,6 @@ export async function saveComputeConfigCommand(
   }
 }
 
-/**
- * Saves the shared hosted-compute worker image (`DOCKER_WORKER_IMAGE`) as an
- * encrypted deployment env var. Hosted providers derive or provision their
- * worker base image from this value. A process env value wins and locks the
- * field, so this is a no-op when the worker image is env-provided.
- */
-export async function saveComputeWorkerImageCommand(
-  auth: UserAuthSuccess,
-  input: { value: string },
-) {
-  assertAdmin(auth);
-
-  const { userId } = auth;
-  const value = input.value.trim();
-
-  if (!value) {
-    throw new Error('Enter a worker image reference to save.');
-  }
-
-  if (process.env[SHARED_WORKER_IMAGE_ENV_VAR]?.trim()) {
-    throw new Error(
-      'The worker image is set via an environment variable and cannot be overridden here.',
-    );
-  }
-
-  await db.transaction(async (tx) => {
-    await upsertDeploymentEnvironmentVariables(tx, {
-      userId,
-      values: [{ name: SHARED_WORKER_IMAGE_ENV_VAR, value }],
-    });
-  });
-}
-
-/**
- * Clears the saved shared worker image deployment env var. Does not affect a
- * worker image provided through the process environment.
- */
-export async function clearComputeWorkerImageCommand(auth: UserAuthSuccess) {
-  assertAdmin(auth);
-
-  await db.transaction(async (tx) => {
-    await tx
-      .delete(environmentVariables)
-      .where(
-        and(
-          isNull(environmentVariables.userId),
-          inArray(environmentVariables.name, [SHARED_WORKER_IMAGE_ENV_VAR]),
-        ),
-      );
-  });
-}
-
 export async function clearComputeConfigCommand(
   auth: UserAuthSuccess,
   input: { provider: ComputeProvider },

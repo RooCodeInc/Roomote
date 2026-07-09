@@ -98,9 +98,9 @@ For hosted providers, the provider must be able to pull or start from a
 registry-qualified worker image. A local tag such as `roomote-worker:local`
 only exists on your machine, so a hosted provider cannot use it directly.
 
-That is why **Settings > Sandboxes** includes a shared hosted sandbox worker
-image. Hosted providers use it to derive the provider-specific artifact they
-need:
+Hosted deployments set that worker image via environment (for example
+`DOCKER_WORKER_IMAGE` or release image derivation). Hosted providers use it to
+derive the provider-specific artifact they need:
 
 - Modal can use the worker image as its base image.
 - E2B builds a provider template from the worker image.
