@@ -95,6 +95,7 @@ vi.mock('@roomote/db/server', () => ({
   isNull: vi.fn(),
   markTaskStartParallelCountEndedAt: vi.fn(),
   resolveSavedWorkerImage: mockResolveSavedWorkerImage,
+  purgeSavedDeploymentWorkerImage: vi.fn(async () => undefined),
   resolveTelegramRuntimeCredentials: vi.fn(async () => ({
     botToken: null,
     webhookSecret: null,
@@ -861,7 +862,7 @@ describe('setup-new compute config commands', () => {
     expect(mockRunComputeProvisioning).not.toHaveBeenCalled();
   });
 
-  it('persists a submitted shared worker image for hosted providers', async () => {
+  it('uses a submitted worker image without sticky DOCKER_WORKER_IMAGE persist', async () => {
     const result = await saveSetupNewComputeConfigCommand(buildMockAuth(), {
       provider: 'modal',
       values: {
@@ -872,20 +873,18 @@ describe('setup-new compute config commands', () => {
     });
 
     expect(result.runtimeComputeConfig.defaultProvider).toBe('modal');
-    expect(mockUpsertDeploymentEnvironmentVariables).toHaveBeenCalledWith(
-      expect.anything(),
-      expect.objectContaining({
-        values: expect.arrayContaining([
-          {
-            name: 'DOCKER_WORKER_IMAGE',
-            value: 'registry.example.com/worker:tag',
-          },
-          {
-            name: 'MODAL_BASE_IMAGE_REF',
-            value: 'registry.example.com/worker:tag',
-          },
-        ]),
-      }),
+    const values = mockUpsertDeploymentEnvironmentVariables.mock.calls[0]?.[1]
+      ?.values as Array<{ name: string; value: string }>;
+    expect(values).toEqual(
+      expect.arrayContaining([
+        {
+          name: 'MODAL_BASE_IMAGE_REF',
+          value: 'registry.example.com/worker:tag',
+        },
+      ]),
+    );
+    expect(values.map((entry) => entry.name)).not.toContain(
+      'DOCKER_WORKER_IMAGE',
     );
   });
 });

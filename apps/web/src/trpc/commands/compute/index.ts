@@ -2,7 +2,7 @@ import {
   db,
   deploymentSettings,
   environmentVariables,
-  resolveSavedWorkerImage,
+  purgeSavedDeploymentWorkerImage,
   and,
   eq,
   inArray,
@@ -78,17 +78,16 @@ export async function savePersistedRuntimeComputeConfig(
 }
 
 /**
- * The worker image hosted providers should provision or derive from, given
- * a value the operator may be submitting in the same request. Process env
- * wins, then the submitted/saved deployment value, then the ref derived from
- * the baked RELEASE_VERSION.
+ * The worker image hosted providers should provision or derive from for this
+ * request. Process env wins, then an in-request submitted override (setup only
+ * — not persisted as deployment sticky state), then release derivation.
  */
 function resolveEffectiveWorkerImageForSave(
-  savedOrSubmittedWorkerImage: string | null,
+  submittedWorkerImage: string | null,
 ): string | undefined {
   return (
     process.env[SHARED_WORKER_IMAGE_ENV_VAR]?.trim() ||
-    savedOrSubmittedWorkerImage ||
+    submittedWorkerImage ||
     deriveWorkerImageFromReleaseVersion(process.env) ||
     undefined
   );
@@ -106,11 +105,14 @@ export async function getComputeStatusCommand(auth: UserAuthSuccess): Promise<
 > {
   assertAdmin(auth);
 
+  // Drop sticky DB-backed DOCKER_WORKER_IMAGE rows from the removed Settings
+  // editor so release-derived / process-env images always win.
+  await purgeSavedDeploymentWorkerImage();
+
   const [
     persistedEnvVarNames,
     persistedEnvVarValues,
     persistedComputeConfig,
-    savedWorkerImage,
     e2bProvisioning,
     daytonaProvisioning,
   ] = await Promise.all([
@@ -119,7 +121,6 @@ export async function getComputeStatusCommand(auth: UserAuthSuccess): Promise<
       ...NON_SECRET_COMPUTE_ENV_VAR_NAMES,
     ]),
     getPersistedRuntimeComputeConfig(),
-    resolveSavedWorkerImage(),
     getPersistedComputeProvisioning('e2b'),
     getPersistedComputeProvisioning('daytona'),
   ]);
@@ -130,7 +131,6 @@ export async function getComputeStatusCommand(auth: UserAuthSuccess): Promise<
       persistedEnvVarNames,
       persistedEnvVarValues,
       persistedComputeConfig,
-      savedWorkerImage,
     }),
     // Stale in-flight runs present as failed so the page offers a retry
     // instead of polling forever after a web-process restart.
@@ -154,30 +154,28 @@ export async function saveComputeConfigCommand(
   const provider = getSetupComputeProvider(input.provider);
 
   const provisioningToStart = await db.transaction(async (tx) => {
-    const [persistedComputeConfig, persistedEnvVarNames, savedWorkerImage] =
-      await Promise.all([
-        getPersistedRuntimeComputeConfig(tx),
-        getPersistedEnvironmentVariableNames(tx),
-        resolveSavedWorkerImage(tx),
-      ]);
+    await purgeSavedDeploymentWorkerImage(tx);
 
-    // The shared worker image (DOCKER_WORKER_IMAGE) may be submitted in the
-    // same request (guided setup) or already saved. Process env still wins
-    // and locks the field.
-    const workerImageLocked =
-      !!process.env[SHARED_WORKER_IMAGE_ENV_VAR]?.trim();
+    const [persistedComputeConfig, persistedEnvVarNames] = await Promise.all([
+      getPersistedRuntimeComputeConfig(tx),
+      getPersistedEnvironmentVariableNames(tx),
+    ]);
+
+    // DOCKER_WORKER_IMAGE may be submitted only for this request (setup).
+    // Process env wins; uploaded/DB sticky values are not used.
     const submittedWorkerImage =
       input.values?.[SHARED_WORKER_IMAGE_ENV_VAR]?.trim() || null;
-    const savedOrSubmittedWorkerImage = workerImageLocked
+    const effectiveSubmittedWorkerImage = process.env[
+      SHARED_WORKER_IMAGE_ENV_VAR
+    ]?.trim()
       ? null
-      : (submittedWorkerImage ?? savedWorkerImage);
+      : submittedWorkerImage;
 
     const computeStatus = buildSetupComputeStatus({
       runtimeEnv: process.env,
       persistedEnvVarNames,
       persistedComputeConfig,
       selectedProvider: input.provider,
-      savedWorkerImage: savedOrSubmittedWorkerImage,
     });
     const providerStatus = computeStatus.providers.find(
       (candidate) => candidate.provider === input.provider,
@@ -200,7 +198,7 @@ export async function saveComputeConfigCommand(
       const derivedBaseImageRef = resolveDerivedModalBaseImageRef({
         ...process.env,
         DOCKER_WORKER_IMAGE: resolveEffectiveWorkerImageForSave(
-          savedOrSubmittedWorkerImage,
+          effectiveSubmittedWorkerImage,
         ),
       });
 
@@ -215,18 +213,11 @@ export async function saveComputeConfigCommand(
       }
     }
 
-    // Credentials, submitted/derived infrastructure values, and the shared
-    // worker image are all persisted as encrypted deployment env vars.
-    // Runtime env values are locked and never overwritten from the UI.
+    // Credentials and submitted/derived infrastructure values are persisted as
+    // encrypted deployment env vars. DOCKER_WORKER_IMAGE is never persisted —
+    // it is process-env / release-derived only.
     const valuesToSave: Array<{ name: string; value: string }> = [];
     const envVarsToClear: string[] = [];
-
-    if (submittedWorkerImage && !workerImageLocked) {
-      valuesToSave.push({
-        name: SHARED_WORKER_IMAGE_ENV_VAR,
-        value: submittedWorkerImage,
-      });
-    }
 
     for (const field of providerStatus.fields) {
       if (field.runtimeSatisfied) {
@@ -330,12 +321,9 @@ export async function saveComputeConfigCommand(
           provider: provisionableProvider,
           providerStatus,
           existingState,
-          // The effective image includes the ref derived from the baked
-          // RELEASE_VERSION and any worker image saved through the UI, so
-          // provisioning also works on deployments that never set
-          // DOCKER_WORKER_IMAGE explicitly.
+          // Process env or in-request override, then RELEASE_VERSION derivation.
           dockerWorkerImage: resolveEffectiveWorkerImageForSave(
-            savedOrSubmittedWorkerImage,
+            effectiveSubmittedWorkerImage,
           ),
           runtimeEnv: process.env,
           markPending: (nextState) =>
@@ -395,20 +383,17 @@ export async function setDefaultComputeProviderCommand(
   assertAdmin(auth);
 
   return db.transaction(async (tx) => {
-    const [persistedComputeConfig, persistedEnvVarNames, savedWorkerImage] =
-      await Promise.all([
-        getPersistedRuntimeComputeConfig(tx),
-        getPersistedEnvironmentVariableNames(tx),
-        resolveSavedWorkerImage(tx),
-      ]);
+    await purgeSavedDeploymentWorkerImage(tx);
+
+    const [persistedComputeConfig, persistedEnvVarNames] = await Promise.all([
+      getPersistedRuntimeComputeConfig(tx),
+      getPersistedEnvironmentVariableNames(tx),
+    ]);
     const computeStatus = buildSetupComputeStatus({
       runtimeEnv: process.env,
       persistedEnvVarNames,
       persistedComputeConfig,
       selectedProvider: input.provider,
-      savedWorkerImage: process.env[SHARED_WORKER_IMAGE_ENV_VAR]?.trim()
-        ? null
-        : savedWorkerImage,
     });
     const providerStatus = computeStatus.providers.find(
       (candidate) => candidate.provider === input.provider,

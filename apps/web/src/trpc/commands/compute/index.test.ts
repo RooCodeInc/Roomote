@@ -54,6 +54,7 @@ vi.mock('@roomote/db/server', () => ({
   })),
   isNull: vi.fn((field: unknown) => ({ op: 'isNull', field })),
   resolveSavedWorkerImage: mockResolveSavedWorkerImage,
+  purgeSavedDeploymentWorkerImage: vi.fn(async () => undefined),
 }));
 
 vi.mock('../environment-variables', () => ({
@@ -238,7 +239,7 @@ describe('compute commands', () => {
       expect(mockRunComputeProvisioning).not.toHaveBeenCalled();
     });
 
-    it('persists a submitted shared worker image', async () => {
+    it('uses a submitted worker image to derive Modal base image without sticky persist', async () => {
       await saveComputeConfigCommand(buildMockAuth(), {
         provider: 'modal',
         values: {
@@ -248,20 +249,18 @@ describe('compute commands', () => {
         },
       });
 
-      expect(mockUpsertDeploymentEnvironmentVariables).toHaveBeenCalledWith(
-        expect.anything(),
-        expect.objectContaining({
-          values: expect.arrayContaining([
-            {
-              name: 'DOCKER_WORKER_IMAGE',
-              value: 'registry.example.com/worker:tag',
-            },
-            {
-              name: 'MODAL_BASE_IMAGE_REF',
-              value: 'registry.example.com/worker:tag',
-            },
-          ]),
-        }),
+      const values = mockUpsertDeploymentEnvironmentVariables.mock.calls[0]?.[1]
+        ?.values as Array<{ name: string; value: string }>;
+      expect(values).toEqual(
+        expect.arrayContaining([
+          {
+            name: 'MODAL_BASE_IMAGE_REF',
+            value: 'registry.example.com/worker:tag',
+          },
+        ]),
+      );
+      expect(values.map((entry) => entry.name)).not.toContain(
+        'DOCKER_WORKER_IMAGE',
       );
     });
 
@@ -412,14 +411,13 @@ describe('compute commands', () => {
       });
     });
 
-    it('starts the E2B template build from a saved worker image', async () => {
-      mockResolveSavedWorkerImage.mockResolvedValue(
-        'registry.example.com/worker:tag',
-      );
-
+    it('starts the E2B template build from a submitted worker image', async () => {
       await saveComputeConfigCommand(buildMockAuth(), {
         provider: 'e2b',
-        values: { E2B_API_KEY: 'e2b-key' },
+        values: {
+          E2B_API_KEY: 'e2b-key',
+          DOCKER_WORKER_IMAGE: 'registry.example.com/worker:tag',
+        },
       });
 
       expect(mockRunComputeProvisioning).toHaveBeenCalledWith({
