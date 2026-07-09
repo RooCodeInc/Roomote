@@ -80,6 +80,8 @@ function makeTxSelectChain() {
     'innerJoin',
     'orderBy',
     'limit',
+    // syncTaskStateFromRuns takes a SELECT ... FOR UPDATE lock on the task row.
+    'for',
   ]) {
     chain[method] = vi.fn().mockReturnValue(chain);
   }
