@@ -45,9 +45,7 @@ describe('AuthForm', () => {
 
     render(<AuthForm />);
 
-    fireEvent.click(
-      screen.getByRole('button', { name: 'Continue with Slack' }),
-    );
+    fireEvent.click(screen.getByRole('button', { name: 'Login with Slack' }));
 
     await waitFor(() => {
       expect(signInOauth2Mock).toHaveBeenCalledWith({
@@ -64,7 +62,7 @@ describe('AuthForm', () => {
     render(<AuthForm />);
 
     fireEvent.click(
-      screen.getByRole('button', { name: 'Continue with Microsoft Teams' }),
+      screen.getByRole('button', { name: 'Login with Microsoft Teams' }),
     );
 
     await waitFor(() => {
@@ -81,7 +79,7 @@ describe('AuthForm', () => {
     render(<AuthForm />);
 
     fireEvent.click(
-      screen.getByRole('button', { name: 'Continue with Microsoft Teams' }),
+      screen.getByRole('button', { name: 'Login with Microsoft Teams' }),
     );
 
     await waitFor(() => {
@@ -98,7 +96,7 @@ describe('AuthForm', () => {
     render(<AuthForm />);
 
     fireEvent.click(
-      screen.getByRole('button', { name: 'Continue with Microsoft Teams' }),
+      screen.getByRole('button', { name: 'Login with Microsoft Teams' }),
     );
 
     await waitFor(() => {
@@ -115,9 +113,7 @@ describe('AuthForm', () => {
 
     render(<AuthForm />);
 
-    fireEvent.click(
-      screen.getByRole('button', { name: 'Continue with Slack' }),
-    );
+    fireEvent.click(screen.getByRole('button', { name: 'Login with Slack' }));
 
     await waitFor(() => {
       expect(replaceMock).toHaveBeenCalledWith(
@@ -135,9 +131,7 @@ describe('AuthForm', () => {
 
     render(<AuthForm />);
 
-    fireEvent.click(
-      screen.getByRole('button', { name: 'Continue with Slack' }),
-    );
+    fireEvent.click(screen.getByRole('button', { name: 'Login with Slack' }));
 
     expect(await screen.findByText('Provider is not configured')).toBeVisible();
     expect(replaceMock).not.toHaveBeenCalled();
@@ -148,11 +142,11 @@ describe('AuthForm', () => {
 
     expect(
       screen.getByRole('heading', {
-        name: 'Hi there, welcome to Roomote.',
+        name: 'Welcome! Come on in.',
       }),
     ).toBeVisible();
     expect(
-      screen.getByRole('button', { name: 'Continue with email' }),
+      screen.getByRole('button', { name: 'Login in with email' }),
     ).toBeVisible();
     expect(screen.queryByLabelText('Email')).not.toBeInTheDocument();
     expect(screen.queryByLabelText('Password')).not.toBeInTheDocument();
@@ -162,20 +156,20 @@ describe('AuthForm', () => {
     render(<AuthForm />);
 
     fireEvent.click(
-      screen.getByRole('button', { name: 'Continue with email' }),
+      screen.getByRole('button', { name: 'Login in with email' }),
     );
 
     expect(screen.getByLabelText('Email')).toBeVisible();
     expect(screen.getByLabelText('Password')).toBeVisible();
     expect(screen.getByRole('button', { name: 'Sign in' })).toBeVisible();
     expect(
-      screen.queryByRole('button', { name: 'Continue with email' }),
+      screen.queryByRole('button', { name: 'Login in with email' }),
     ).not.toBeInTheDocument();
     expect(
-      screen.queryByRole('button', { name: 'Continue with Slack' }),
+      screen.queryByRole('button', { name: 'Login with Slack' }),
     ).not.toBeInTheDocument();
     expect(
-      screen.queryByRole('button', { name: 'Continue with Microsoft Teams' }),
+      screen.queryByRole('button', { name: 'Login with Microsoft Teams' }),
     ).not.toBeInTheDocument();
   });
 
@@ -183,17 +177,17 @@ describe('AuthForm', () => {
     render(<AuthForm enabledProviders={[]} />);
 
     expect(
-      screen.queryByRole('button', { name: 'Continue with Slack' }),
+      screen.queryByRole('button', { name: 'Login with Slack' }),
     ).not.toBeInTheDocument();
     expect(
       screen.queryByRole('button', { name: 'Continue with Telegram' }),
     ).not.toBeInTheDocument();
     expect(
-      screen.queryByRole('button', { name: 'Continue with Microsoft Teams' }),
+      screen.queryByRole('button', { name: 'Login with Microsoft Teams' }),
     ).not.toBeInTheDocument();
     expect(
       screen.getByRole('heading', {
-        name: 'Hi there, welcome to Roomote.',
+        name: 'Welcome! Come on in.',
       }),
     ).toBeVisible();
     expect(screen.getByLabelText('Email')).toBeVisible();
@@ -223,7 +217,7 @@ describe('AuthForm', () => {
     render(<AuthForm canSignUp />);
 
     fireEvent.click(
-      screen.getByRole('button', { name: 'Continue with email' }),
+      screen.getByRole('button', { name: 'Login in with email' }),
     );
 
     expect(
@@ -238,7 +232,7 @@ describe('AuthForm', () => {
     render(<AuthForm />);
 
     fireEvent.click(
-      screen.getByRole('button', { name: 'Continue with email' }),
+      screen.getByRole('button', { name: 'Login in with email' }),
     );
 
     expect(
@@ -268,7 +262,7 @@ describe('AuthForm', () => {
     render(<AuthForm canSignUp />);
 
     fireEvent.click(
-      screen.getByRole('button', { name: 'Continue with email' }),
+      screen.getByRole('button', { name: 'Login in with email' }),
     );
 
     expect(screen.getByLabelText('Name')).toBeVisible();
@@ -283,7 +277,7 @@ describe('AuthForm', () => {
     render(<AuthForm />);
 
     fireEvent.click(
-      screen.getByRole('button', { name: 'Continue with email' }),
+      screen.getByRole('button', { name: 'Login in with email' }),
     );
 
     expect(screen.queryByLabelText('Name')).not.toBeInTheDocument();
@@ -298,7 +292,7 @@ describe('AuthForm', () => {
     expect(screen.getByText(/reached its licensed user limit/)).toBeVisible();
     // Sign-in stays available: existing users are never blocked by the gate.
     fireEvent.click(
-      screen.getByRole('button', { name: 'Continue with email' }),
+      screen.getByRole('button', { name: 'Login in with email' }),
     );
     expect(screen.getByRole('button', { name: 'Sign in' })).toBeVisible();
   });
