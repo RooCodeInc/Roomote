@@ -2169,6 +2169,11 @@ describe('OpenCodeServerHarness', () => {
 
   it('abandons the pending question when a steer aborts and replays the turn', async () => {
     const { client, harness } = createHarness();
+    const persistedEnvelopes: AcpPersistedEnvelope[] = [];
+
+    harness.subscribeRuntimePersistedEnvelope((envelope) =>
+      persistedEnvelopes.push(envelope),
+    );
 
     try {
       await connectHarness(harness, client);
@@ -2234,6 +2239,20 @@ describe('OpenCodeServerHarness', () => {
 
       await vi.waitFor(() => {
         expect(harness.getPendingUserInputRequests()).toEqual([]);
+      });
+
+      // A cancelled response is emitted for the abandoned question so
+      // consumers that clear pending state only on a response (Slack,
+      // Linear, the web store) cannot later accept a stale answer.
+      const cancelledResponse = persistedEnvelopes.find(
+        (envelope) =>
+          envelope.eventType ===
+            ACP_ENVELOPE_EVENT_TYPES.RequestUserInputResponse &&
+          envelope.payload.requestId ===
+            'rui:ses_1:msg_question:question_call_1',
+      );
+      expect(cancelledResponse?.payload).toMatchObject({
+        resolution: 'cancelled',
       });
     } finally {
       harness.dispose();

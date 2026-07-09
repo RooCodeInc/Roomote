@@ -2616,9 +2616,20 @@ export class OpenCodeServerHarness
     // superseded by a prioritized queued/steered prompt. Abandon pending
     // questions so the replayed turn starts clean and downstream state
     // (harness manager phase, UI) does not stay stuck on an obsolete
-    // request. The answer path deletes its own request and emits a response
-    // before reaching here; this only sweeps questions the replay abandons.
+    // request. Emit a cancelled response for each so consumers that only
+    // clear pending state on request_user_input_response (Slack, Linear,
+    // the web store) drop it too — otherwise a late answer to the dead
+    // question could still be accepted and injected into the replayed turn.
+    // The answer path deletes its own request and emits its response before
+    // reaching here, so this only sweeps questions the replay abandons.
     if (this.pendingUserInputRequests.size > 0) {
+      for (const pending of this.pendingUserInputRequests.values()) {
+        this.runtimeEvents.requestUserInputResponse({
+          request: pending,
+          answers: {},
+          resolution: 'cancelled',
+        });
+      }
       this.pendingUserInputRequests.clear();
     }
 
