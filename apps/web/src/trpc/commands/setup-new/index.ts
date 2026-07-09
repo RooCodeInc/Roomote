@@ -1423,6 +1423,7 @@ export async function saveSetupNewComputeConfigCommand(
       // worker image are persisted as encrypted deployment env vars. Runtime
       // env values are locked and never overwritten from the UI.
       const valuesToSave: Array<{ name: string; value: string }> = [];
+      const envVarsToClear: string[] = [];
 
       if (submittedWorkerImage && !workerImageLocked) {
         valuesToSave.push({
@@ -1444,6 +1445,13 @@ export async function saveSetupNewComputeConfigCommand(
             : '');
 
         if (!nextValue) {
+          if (
+            field.secret !== true &&
+            !isRequiredComputeField(field) &&
+            field.savedSatisfied
+          ) {
+            envVarsToClear.push(field.envVarName);
+          }
           continue;
         }
 
@@ -1481,6 +1489,17 @@ export async function saveSetupNewComputeConfigCommand(
           userId,
           values: valuesToSave,
         });
+      }
+
+      if (envVarsToClear.length > 0) {
+        await tx
+          .delete(environmentVariables)
+          .where(
+            and(
+              isNull(environmentVariables.userId),
+              inArray(environmentVariables.name, envVarsToClear),
+            ),
+          );
       }
 
       const setupNewState = normalizeSetupNewState({

@@ -294,6 +294,60 @@ describe('compute commands', () => {
       }
     });
 
+    it('clears a saved optional non-secret field when the operator empties it', async () => {
+      mockGetPersistedEnvironmentVariableNames.mockResolvedValue([
+        'MODAL_TOKEN_ID',
+        'MODAL_TOKEN_SECRET',
+        'MODAL_REGIONS',
+      ]);
+      const txWhere = vi.fn(async () => undefined);
+      const txDelete = vi.fn(() => ({ where: txWhere }));
+      const {
+        and: txAnd,
+        inArray: txInArray,
+        isNull: txIsNull,
+      } = await import('@roomote/db/server');
+
+      mockDbTransaction.mockImplementation(async (callback) => {
+        return callback({
+          select: createSelectChain(),
+          insert: createInsertChain(),
+          delete: txDelete,
+        } as never);
+      });
+
+      await saveComputeConfigCommand(buildMockAuth(), {
+        provider: 'modal',
+        values: {
+          MODAL_REGIONS: '',
+        },
+      });
+
+      expect(mockUpsertDeploymentEnvironmentVariables).not.toHaveBeenCalled();
+      expect(txDelete).toHaveBeenCalled();
+      expect(txIsNull).toHaveBeenCalledWith('env.user_id');
+      expect(txInArray).toHaveBeenCalledWith('env.name', ['MODAL_REGIONS']);
+      expect(txAnd).toHaveBeenCalledWith(
+        { op: 'isNull', field: 'env.user_id' },
+        {
+          op: 'inArray',
+          field: 'env.name',
+          values: ['MODAL_REGIONS'],
+        },
+      );
+      expect(txWhere).toHaveBeenCalledWith({
+        op: 'and',
+        conditions: [
+          { op: 'isNull', field: 'env.user_id' },
+          {
+            op: 'inArray',
+            field: 'env.name',
+            values: ['MODAL_REGIONS'],
+          },
+        ],
+      });
+    });
+
     it('does not block credential saves on missing env-only infrastructure', async () => {
       await expect(
         saveComputeConfigCommand(buildMockAuth(), {

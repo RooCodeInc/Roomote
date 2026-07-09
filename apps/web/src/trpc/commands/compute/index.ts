@@ -219,6 +219,7 @@ export async function saveComputeConfigCommand(
     // worker image are all persisted as encrypted deployment env vars.
     // Runtime env values are locked and never overwritten from the UI.
     const valuesToSave: Array<{ name: string; value: string }> = [];
+    const envVarsToClear: string[] = [];
 
     if (submittedWorkerImage && !workerImageLocked) {
       valuesToSave.push({
@@ -240,6 +241,15 @@ export async function saveComputeConfigCommand(
           : '');
 
       if (!nextValue) {
+        // Empty secret inputs mean "leave unchanged". Empty optional
+        // non-secret inputs clear a previously saved deployment value.
+        if (
+          field.secret !== true &&
+          !isRequiredComputeField(field) &&
+          field.savedSatisfied
+        ) {
+          envVarsToClear.push(field.envVarName);
+        }
         continue;
       }
 
@@ -274,6 +284,17 @@ export async function saveComputeConfigCommand(
         userId,
         values: valuesToSave,
       });
+    }
+
+    if (envVarsToClear.length > 0) {
+      await tx
+        .delete(environmentVariables)
+        .where(
+          and(
+            isNull(environmentVariables.userId),
+            inArray(environmentVariables.name, envVarsToClear),
+          ),
+        );
     }
 
     // Provisionable providers' base images (E2B worker template, Daytona

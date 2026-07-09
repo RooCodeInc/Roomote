@@ -205,15 +205,15 @@ export function ComputeProviderSection({
       }
 
       const nextValue = values[field.envVarName]?.trim() ?? '';
-      if (nextValue.length === 0) {
-        return false;
-      }
 
+      // Non-secret fields are prefilled from savedValue, so both edits and
+      // clears of a previously saved value count as pending changes.
       if (!isSecretComputeField(field)) {
         return nextValue !== (field.savedValue?.trim() ?? '');
       }
 
-      return true;
+      // Secrets are never prefilled; any non-empty entry is a pending update.
+      return nextValue.length > 0;
     },
   );
 
