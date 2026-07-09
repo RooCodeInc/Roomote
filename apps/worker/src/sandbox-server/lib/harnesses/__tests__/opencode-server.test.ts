@@ -2167,6 +2167,79 @@ describe('OpenCodeServerHarness', () => {
     }
   });
 
+  it('abandons the pending question when a steer aborts and replays the turn', async () => {
+    const { client, harness } = createHarness();
+
+    try {
+      await connectHarness(harness, client);
+
+      expect(
+        harness.sendCommand({
+          commandName: TaskCommandName.StartNewTask,
+          data: {
+            text: 'Ask for input.',
+            visibleInTranscript: true,
+          },
+        }),
+      ).toBe(true);
+
+      await vi.waitFor(() => {
+        expect(client.promptAsync).toHaveBeenCalledTimes(1);
+      });
+
+      await client.emit({
+        type: 'message.part.updated',
+        properties: {
+          part: {
+            id: 'question_part_1',
+            sessionID: 'ses_1',
+            messageID: 'msg_question',
+            type: 'tool',
+            callID: 'question_call_1',
+            tool: 'question',
+            state: {
+              status: 'running',
+              input: {
+                questions: [
+                  {
+                    id: 'color',
+                    header: 'Color',
+                    question: 'Which color should I use?',
+                    options: [{ label: 'Blue', description: 'Use blue.' }],
+                  },
+                ],
+              },
+              title: 'Ask user',
+            },
+          },
+        },
+      });
+
+      expect(harness.getPendingUserInputRequests()).toHaveLength(1);
+
+      // A steer sent while the question blocks the turn cannot inject
+      // natively, so it enqueues and triggers abort-and-replay. That
+      // abandons the question — the pending map must be cleared so
+      // downstream phase/UI state does not stay blocked on it.
+      expect(
+        harness.sendCommand({
+          commandName: TaskCommandName.SendMessage,
+          data: {
+            text: 'Actually, change direction.',
+            autoSteerWhenQueued: true,
+            visibleInTranscript: true,
+          },
+        }),
+      ).toBe(true);
+
+      await vi.waitFor(() => {
+        expect(harness.getPendingUserInputRequests()).toEqual([]);
+      });
+    } finally {
+      harness.dispose();
+    }
+  });
+
   it('honors an explicit custom-answer opt-out on OpenCode question input', async () => {
     const { client, harness } = createHarness();
 

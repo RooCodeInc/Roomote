@@ -2612,6 +2612,16 @@ export class OpenCodeServerHarness
   }
 
   private async interruptForQueuedReplay(): Promise<void> {
+    // The in-flight turn (and any question it was blocked on) is being
+    // superseded by a prioritized queued/steered prompt. Abandon pending
+    // questions so the replayed turn starts clean and downstream state
+    // (harness manager phase, UI) does not stay stuck on an obsolete
+    // request. The answer path deletes its own request and emits a response
+    // before reaching here; this only sweeps questions the replay abandons.
+    if (this.pendingUserInputRequests.size > 0) {
+      this.pendingUserInputRequests.clear();
+    }
+
     const sessionId = this.sessionId;
 
     if (!sessionId) {

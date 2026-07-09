@@ -275,13 +275,14 @@ export class HarnessManager extends EventEmitter<HarnessManagerEvents> {
       if (hasPendingUserInput) {
         // The harness cannot inject a prompt while a question blocks the
         // turn — the message is at best queued (or about to trigger an
-        // abort-and-replay, whose lifecycle events will re-settle the
-        // phase). Report the blocked state instead of claiming active
-        // work, so the UI shows the question rather than "Working".
+        // abort-and-replay that abandons the question, whose drained
+        // user_prompt then promotes the phase back to running). Report the
+        // blocked state for now instead of claiming active work, so the UI
+        // shows the question rather than "Working". (shutting_down already
+        // returned above.)
         if (
           this.phase !== 'waiting_for_user_input' &&
-          this.phase !== 'stopped' &&
-          this.phase !== 'shutting_down'
+          this.phase !== 'stopped'
         ) {
           this.setPhase('waiting_for_user_input');
         }
@@ -1027,8 +1028,21 @@ export class HarnessManager extends EventEmitter<HarnessManagerEvents> {
       // drained queue follow-up, a steered replay, or a question answer.
       // Those paths do not go through startNewTask/sendFollowUpPrompt, so
       // without this the phase stays settled and the UI keeps showing the
-      // idle countdown while the agent is actively working.
-      if (this.phase === 'idle' || this.phase === 'waiting_for_prompt') {
+      // idle countdown (or a stale question-blocked state) while the agent
+      // is actively working. Do not promote past a question that is still
+      // genuinely pending for this session — a steered replay abandons the
+      // question and clears it, so only a live one blocks promotion.
+      const promotableFromPhase =
+        this.phase === 'idle' ||
+        this.phase === 'waiting_for_prompt' ||
+        this.phase === 'waiting_for_user_input';
+      const stillPending =
+        this.harness
+          .getPendingUserInputRequests?.()
+          .some((request) => request.sessionId === this.state.sessionId) ??
+        false;
+
+      if (promotableFromPhase && !stillPending) {
         this.clearTurnSettlementState();
         this.setPhase('running');
       }

@@ -473,6 +473,20 @@ describe('HarnessManager phase reporting', () => {
         eventName: TaskEventName.TaskStarted,
         payload: [taskId],
       } as TaskEvent);
+      // The real harness populates its pending-request map when it emits a
+      // RequestUserInput event; mirror that so getPendingUserInputRequests
+      // reflects a genuinely blocked turn.
+      harness.pendingUserInputRequests = [
+        {
+          requestId: `rui:${taskId}:turn-1:call-1`,
+          sessionId: taskId,
+          turnId: 'turn-1',
+          callId: 'call-1',
+          status: 'pending',
+          questions: [],
+          ts: 1,
+        },
+      ];
       harness.emitRuntimeOutput({
         id: `${taskId}:rui-1`,
         ts: 5,
@@ -492,6 +506,8 @@ describe('HarnessManager phase reporting', () => {
       } as AcpMessage);
       expect(manager.getStatus().phase).toBe('waiting_for_user_input');
 
+      // A user_prompt arrives while the question is still genuinely
+      // pending: the phase must stay blocked.
       harness.emitRuntimeOutput({
         id: `${taskId}:prompt-1`,
         ts: 10,
@@ -504,6 +520,65 @@ describe('HarnessManager phase reporting', () => {
       } as AcpMessage);
 
       expect(manager.getStatus().phase).toBe('waiting_for_user_input');
+    } finally {
+      manager.dispose();
+      harness.dispose();
+    }
+  });
+
+  it('promotes out of waiting_for_user_input when the question is cleared before the replayed prompt', () => {
+    const { harness, manager } = createManager();
+
+    try {
+      const taskId = 'task-phase-steer-replay';
+      manager.initializeWithoutPrompt();
+      manager.startNewTaskFromPrompt({ prompt: 'hello' });
+      harness.emitTaskEvent({
+        eventName: TaskEventName.TaskStarted,
+        payload: [taskId],
+      } as TaskEvent);
+      harness.pendingUserInputRequests = [
+        {
+          requestId: `rui:${taskId}:turn-1:call-1`,
+          sessionId: taskId,
+          status: 'pending',
+          questions: [],
+          ts: 1,
+        },
+      ];
+      harness.emitRuntimeOutput({
+        id: `${taskId}:rui-1`,
+        ts: 5,
+        eventType: ACP_ENVELOPE_EVENT_TYPES.RequestUserInput,
+        kind: 'unknown',
+        role: 'assistant',
+        contentBlocks: [],
+        metadata: { sessionId: taskId, sequence: 1 },
+        payload: {
+          requestId: `rui:${taskId}:turn-1:call-1`,
+          sessionId: taskId,
+          status: 'pending',
+          questions: [],
+        },
+      } as AcpMessage);
+      expect(manager.getStatus().phase).toBe('waiting_for_user_input');
+
+      // The auto-steer abort-and-replay abandons the question (the harness
+      // clears its pending map) and then drains the steered prompt as a
+      // user_prompt. The phase must promote back to running.
+      harness.pendingUserInputRequests = [];
+      harness.emitRuntimeOutput({
+        id: `${taskId}:prompt-steer`,
+        ts: 10,
+        eventType: ACP_ENVELOPE_EVENT_TYPES.UserPrompt,
+        kind: 'text',
+        role: 'user',
+        contentBlocks: [{ type: 'text', text: 'steer while blocked' }],
+        metadata: { sessionId: taskId, sequence: 2 },
+        payload: { sessionId: taskId, text: 'steer while blocked' },
+      } as AcpMessage);
+
+      expect(manager.getStatus().phase).toBe('running');
     } finally {
       manager.dispose();
       harness.dispose();
