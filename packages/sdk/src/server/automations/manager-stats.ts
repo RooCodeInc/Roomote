@@ -52,8 +52,8 @@ function formatManagerStatsText({
   const lines = [
     '*My weekly stats*',
     `· Active users: *${stats.activeUsers}*`,
-    `· PRs opened with me: *${stats.roomotePullRequests} (${Math.round(stats.roomotePullRequestPercentage)}% of ${stats.totalPullRequests})*`,
-    `· PR merged with me: *${stats.mergedRoomotePullRequests} (${Math.round(stats.mergedRoomotePullRequestPercentage)}% of ${stats.roomotePullRequests})*`,
+    `· PRs opened with me: *${stats.roomotePullRequests} (${Math.round(stats.roomotePullRequestPercentage)}% of ${stats.totalPullRequests})* — ${stats.authoredPullRequests} authored, ${stats.reviewedPullRequests} reviewed`,
+    `· PR merged with me: *${stats.mergedRoomotePullRequests} (${Math.round(stats.mergedRoomotePullRequestPercentage)}% of ${stats.authoredPullRequests} authored)*`,
     `· LOC added / removed: *+${stats.additions} / -${stats.deletions}*`,
     `· Most active repo: ${
       stats.mostActiveRepo

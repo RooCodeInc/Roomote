@@ -56,10 +56,12 @@ import { formatManagerStatsMessage } from '../manager-stats';
 const stats = {
   activeUsers: 3,
   roomotePullRequests: 4,
+  authoredPullRequests: 3,
+  reviewedPullRequests: 1,
   roomotePullRequestPercentage: 40,
   totalPullRequests: 10,
   mergedRoomotePullRequests: 2,
-  mergedRoomotePullRequestPercentage: 50,
+  mergedRoomotePullRequestPercentage: 67,
   additions: 123,
   deletions: 45,
   mostActiveRepo: {
@@ -88,8 +90,12 @@ describe('formatManagerStatsMessage', () => {
       stats,
     });
 
-    expect(message.text).toContain('· PRs opened with me: *4 (40% of 10)*');
-    expect(message.text).toContain('· PR merged with me: *2 (50% of 4)*');
+    expect(message.text).toContain(
+      '· PRs opened with me: *4 (40% of 10)* — 3 authored, 1 reviewed',
+    );
+    expect(message.text).toContain(
+      '· PR merged with me: *2 (67% of 3 authored)*',
+    );
     expect(message.text).not.toContain('Share of total PRs');
   });
 

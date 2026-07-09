@@ -44,14 +44,32 @@ function getInitiatorLabel(row: TaskInitiatorRow): string {
   );
 }
 
+/**
+ * How a Roomote-linked PR relates to Roomote:
+ * - `authored`: a Roomote task produced this PR (any workflow other than
+ *   `pr_review`), or it was opened directly by the Roomote bot account.
+ * - `reviewed`: Roomote reviewed someone else's PR (a `pr_review` task row).
+ */
+export type PullRequestClassification = 'authored' | 'reviewed';
+
 type PullRequestMetadata = {
   canonicalTaskId: string;
   userLabel: string;
+  classification: PullRequestClassification;
+};
+
+type PullRequestMetadataRow = TaskInitiatorRow & {
+  taskId: string;
+  repository: string | null;
+  prNumber: number | null;
+  workflow: string | null;
 };
 
 export type ManagerStatsDigest = {
   activeUsers: number;
   roomotePullRequests: number;
+  authoredPullRequests: number;
+  reviewedPullRequests: number;
   totalPullRequests: number;
   roomotePullRequestPercentage: number;
   mergedRoomotePullRequests: number;
@@ -72,6 +90,14 @@ function getPullRequestKey(repoFullName: string, prNumber: number) {
   return `${repoFullName.toLowerCase()}#${prNumber}`;
 }
 
+/**
+ * A `pr_review` task reviewed someone else's PR; any other workflow means the
+ * task produced (authored) the PR.
+ */
+function classifyWorkflow(workflow: string | null): PullRequestClassification {
+  return workflow === 'pr_review' ? 'reviewed' : 'authored';
+}
+
 function isRoomotePullRequestAuthor(login: string | null) {
   if (!login) {
     return false;
@@ -86,12 +112,56 @@ function isRoomotePullRequestAuthor(login: string | null) {
   );
 }
 
+/**
+ * Fold task/PR rows into per-PR metadata, keyed by repo#number.
+ *
+ * A single PR key can appear with rows from both an authoring task and a
+ * review task. `authored` always wins: Roomote making the PR is not demoted by
+ * a later review of that same PR. Among rows of the same classification the
+ * first seen wins.
+ */
+export function buildRoomotePullRequestMetadata(
+  rows: PullRequestMetadataRow[],
+): Map<string, PullRequestMetadata> {
+  const metadataByKey = new Map<string, PullRequestMetadata>();
+
+  for (const row of rows) {
+    if (!row.repository || row.prNumber === null) {
+      continue;
+    }
+
+    const key = getPullRequestKey(row.repository, row.prNumber);
+    const classification = classifyWorkflow(row.workflow);
+    const existing = metadataByKey.get(key);
+
+    if (existing) {
+      // Keep an existing `authored` classification (authored wins), and keep
+      // the first-seen row when both share a classification.
+      if (
+        existing.classification === 'authored' ||
+        classification === 'reviewed'
+      ) {
+        continue;
+      }
+    }
+
+    metadataByKey.set(key, {
+      canonicalTaskId: row.taskId,
+      userLabel: getInitiatorLabel(row),
+      classification,
+    });
+  }
+
+  return metadataByKey;
+}
+
 async function getRoomotePullRequestMetadataByKey() {
   const results = await db
     .select({
       taskId: taskPullRequests.taskId,
       repository: taskPullRequests.repository,
       prNumber: taskPullRequests.prNumber,
+      workflow: tasks.workflow,
       initiatorKind: tasks.initiatorKind,
       initiatorUserId: tasks.initiatorUserId,
       initiatorAutomation: tasks.initiatorAutomation,
@@ -104,20 +174,7 @@ async function getRoomotePullRequestMetadataByKey() {
     .innerJoin(tasks, eq(tasks.id, taskPullRequests.taskId))
     .leftJoin(users, eq(users.id, tasks.initiatorUserId));
 
-  const metadataByKey = new Map<string, PullRequestMetadata>();
-
-  for (const row of results) {
-    if (!row.repository || row.prNumber === null) {
-      continue;
-    }
-
-    metadataByKey.set(getPullRequestKey(row.repository, row.prNumber), {
-      canonicalTaskId: row.taskId,
-      userLabel: getInitiatorLabel(row),
-    });
-  }
-
-  return metadataByKey;
+  return buildRoomotePullRequestMetadata(results);
 }
 
 async function getAnalyticsRepositoryIds() {
@@ -156,6 +213,70 @@ async function getActiveUserCount(since: Date) {
   return new Set(humanCreatorKeys).size;
 }
 
+type RoomotePullRequestInput = {
+  repoFullName: string;
+  number: number;
+  state: string;
+  authorLogin: string | null;
+};
+
+type ClassifiedPullRequest<T extends RoomotePullRequestInput> = {
+  pullRequest: T;
+  classification: PullRequestClassification;
+};
+
+/**
+ * Filter the analytics PRs down to Roomote-linked ones and classify each as
+ * authored or reviewed.
+ *
+ * A PR reaches here if it has task metadata OR was opened by the Roomote bot.
+ * `authored` wins whenever any authored signal is present: an authoring task
+ * row (`metadata.classification === 'authored'`) or a bot-authored PR, even if
+ * a `pr_review` task also touched it. A PR is only `reviewed` when its metadata
+ * is a review row and Roomote is not the PR author.
+ */
+export function summarizeRoomotePullRequests<
+  T extends RoomotePullRequestInput,
+>({
+  pullRequests,
+  metadataByKey,
+}: {
+  pullRequests: T[];
+  metadataByKey: Map<string, PullRequestMetadata>;
+}) {
+  const roomotePullRequests: Array<ClassifiedPullRequest<T>> = [];
+
+  for (const pullRequest of pullRequests) {
+    const metadata = metadataByKey.get(
+      getPullRequestKey(pullRequest.repoFullName, pullRequest.number),
+    );
+    const isAuthorMatch = isRoomotePullRequestAuthor(pullRequest.authorLogin);
+
+    if (!metadata && !isAuthorMatch) {
+      continue;
+    }
+
+    const classification: PullRequestClassification =
+      !metadata || metadata.classification === 'authored' || isAuthorMatch
+        ? 'authored'
+        : 'reviewed';
+
+    roomotePullRequests.push({ pullRequest, classification });
+  }
+
+  const authored = roomotePullRequests.filter(
+    (entry) => entry.classification === 'authored',
+  );
+  const reviewed = roomotePullRequests.filter(
+    (entry) => entry.classification === 'reviewed',
+  );
+  const mergedAuthored = authored.filter(
+    (entry) => entry.pullRequest.state === 'merged',
+  );
+
+  return { roomotePullRequests, authored, reviewed, mergedAuthored };
+}
+
 export async function buildManagerStatsDigest(params: {
   actorUserId: string;
   since: Date;
@@ -166,6 +287,8 @@ export async function buildManagerStatsDigest(params: {
     return {
       activeUsers: await getActiveUserCount(params.since),
       roomotePullRequests: 0,
+      authoredPullRequests: 0,
+      reviewedPullRequests: 0,
       totalPullRequests: 0,
       roomotePullRequestPercentage: 0,
       mergedRoomotePullRequests: 0,
@@ -186,15 +309,20 @@ export async function buildManagerStatsDigest(params: {
     getRoomotePullRequestMetadataByKey(),
   ]);
 
-  const roomotePullRequests = pullRequests.filter((pullRequest) => {
-    return (
-      metadataByKey.has(
-        getPullRequestKey(pullRequest.repoFullName, pullRequest.number),
-      ) || isRoomotePullRequestAuthor(pullRequest.authorLogin)
-    );
-  });
-  const mergedRoomotePullRequests = roomotePullRequests.filter(
-    (pullRequest) => pullRequest.state === 'merged',
+  const {
+    roomotePullRequests: classifiedPullRequests,
+    authored,
+    reviewed,
+    mergedAuthored,
+  } = summarizeRoomotePullRequests({ pullRequests, metadataByKey });
+
+  const roomotePullRequests = classifiedPullRequests.map(
+    (entry) => entry.pullRequest,
+  );
+  // A merged PR that Roomote merely reviewed is not Roomote's merge outcome, so
+  // merged stats are scoped to authored PRs only.
+  const mergedRoomotePullRequests = mergedAuthored.map(
+    (entry) => entry.pullRequest,
   );
 
   let additions = 0;
@@ -279,16 +407,19 @@ export async function buildManagerStatsDigest(params: {
   return {
     activeUsers: await getActiveUserCount(params.since),
     roomotePullRequests: roomotePullRequests.length,
+    authoredPullRequests: authored.length,
+    reviewedPullRequests: reviewed.length,
     totalPullRequests: pullRequests.length,
     roomotePullRequestPercentage:
       pullRequests.length === 0
         ? 0
         : (roomotePullRequests.length / pullRequests.length) * 100,
     mergedRoomotePullRequests: mergedRoomotePullRequests.length,
+    // Denominator is authored PRs since merged stats are authored-only.
     mergedRoomotePullRequestPercentage:
-      roomotePullRequests.length === 0
+      authored.length === 0
         ? 0
-        : (mergedRoomotePullRequests.length / roomotePullRequests.length) * 100,
+        : (mergedRoomotePullRequests.length / authored.length) * 100,
     additions,
     deletions,
     mostActiveRepo,
