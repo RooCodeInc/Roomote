@@ -151,6 +151,8 @@ S3_ACCESS_KEY_ID=roomote
 S3_REGION=us-east-1
 S3_BUCKET_ARTIFACTS=roomote-artifacts
 S3_AUTO_CREATE_BUCKET=true
+SETUP_TOKEN=${{secret(32)}}
+ROOMOTE_PING_BASE_URL=https://ping.openmote.dev
 DEFAULT_COMPUTE_PROVIDER=modal
 EXCLUDED_COMPUTE_PROVIDERS=docker
 DATABASE_URL=${{Postgres.DATABASE_URL}}
@@ -174,6 +176,8 @@ S3_SECRET_ACCESS_KEY=${{api.S3_SECRET_ACCESS_KEY}}
 S3_ACCESS_KEY_ID=${{api.S3_ACCESS_KEY_ID}}
 S3_REGION=${{api.S3_REGION}}
 S3_BUCKET_ARTIFACTS=${{api.S3_BUCKET_ARTIFACTS}}
+SETUP_TOKEN=${{api.SETUP_TOKEN}}
+ROOMOTE_PING_BASE_URL=${{api.ROOMOTE_PING_BASE_URL}}
 DEFAULT_COMPUTE_PROVIDER=${{api.DEFAULT_COMPUTE_PROVIDER}}
 EXCLUDED_COMPUTE_PROVIDERS=${{api.EXCLUDED_COMPUTE_PROVIDERS}}
 DATABASE_URL=${{Postgres.DATABASE_URL}}
@@ -225,13 +229,18 @@ Notes:
   `/setup` wizard (or Settings → Compute / Models) after first boot; they are
   stored encrypted in Postgres. Setting them as env vars still works and
   takes precedence, but is unnecessary.
-- `SETUP_TOKEN` is optional and the template does not set it. When unset,
-  the pre-auth `/setup` wizard is open until the founding admin account is
-  created — on a publicly reachable Railway domain that is a short race
-  window you accept in exchange for a simpler first-run. To gate the wizard,
-  add `SETUP_TOKEN=${{secret(16)}}` on api: visitors to `/setup` are then
-  prompted for the token, which the operator copies from the api service's
-  variables panel. The URL form `/setup?token=<value>` also works.
+- `SETUP_TOKEN` gates the pre-auth `/setup` wizard and is **required**: the
+  app refuses tokenless first-admin bootstrap everywhere except local
+  development, so a deployment without it cannot complete setup at all.
+  The template generates it with `${{secret(32)}}`. Visitors to `/setup`
+  are prompted for the token, which the operator copies from the api
+  service's Variables tab in the deployed project. The URL form
+  `/setup?token=<value>` also works.
+- `ROOMOTE_PING_BASE_URL` is the endpoint for Roomote's anonymous analytics
+  and version checks (the image default is `https://ping.roomote.dev`; the
+  template points at the openmote ping service). Admins can opt out of
+  anonymous analytics in the setup wizard or **Settings → Misc**; version
+  checks ignore that setting.
 - Leave `PREVIEW_PROXY_BASE_URL` and `PREVIEW_DOMAINS` unset unless you
   enable live previews. Roomote boots without them; previews report as not
   configured in **Settings → Live Previews** until set.
@@ -272,8 +281,9 @@ logs a warning when creation fails).
    first boot also generates and persists the auth keypairs (watch for
    `[auth-keypairs] Generated ...` in an app service's logs — whichever app
    service boots first wins the race and generates them).
-2. Open `https://<web-domain>/setup` (append `?token=<SETUP_TOKEN>` or paste
-   the token into the wizard's token step if you configured one). If you
+2. Open `https://<web-domain>/setup` and paste the `SETUP_TOKEN` value from
+   the api service's Variables tab into the wizard's token step (or append
+   `?token=<SETUP_TOKEN>` to the URL). If you
    entered a custom domain in the `ROOMOTE_APP_URL` prompt at deploy time,
    attach that domain to the web service and finish DNS first, then open
    `/setup` on the custom domain — the generated domain will reject auth
@@ -436,8 +446,9 @@ Two published templates mirror the one spec in
 (`railway.com/deploy/bP3Lsu`). They differ only in the app image alias
 (`:main` vs `:develop`); everything else must stay identical. When the spec
 changes, edit `template.yaml` first, then mirror the change into **both**
-published templates through Railway's Template Composer (Railway has no
-template-duplicate feature, so each is edited by hand). Re-run the
+published templates through Railway's Template Composer (the Templates list
+has a Duplicate action for seeding a new template, but edits to existing
+templates are applied to each by hand). Re-run the
 first-boot verification on a scratch Railway project before publishing an
 update (one scratch run on either channel covers a change that does not
 touch the image fields). When the change touches reference variables — in
@@ -447,8 +458,9 @@ tab on the scratch project and confirm the resolved values are real URLs,
 not literal `${{...}}` strings.
 
 The `ROOMOTE_APP_URL` deploy-time prompt needs its own check on the scratch
-deploy: confirm the deploy screen shows the variable with the description
-from `template.yaml` and the reference default pre-filled, that leaving the
-default still resolves to the generated web domain after deploy, and that
-overriding it with a test value reaches the app services as that literal
-value.
+deploy: on the deploy screen, open the api service's **Configure** step and
+expand its pre-configured environment variables — `ROOMOTE_APP_URL` must
+appear as an editable field with the description from `template.yaml` and
+the reference default pre-filled. Confirm that leaving the default still
+resolves to the generated web domain after deploy, and that overriding it
+with a test value reaches the app services as that literal value.

@@ -52,13 +52,15 @@
 # - ROOMOTE_APP_URL on api is the single canonical-origin knob; the other
 #   app services reference ${{api.ROOMOTE_APP_URL}}. Note api's own value
 #   is itself a reference (https://${{web.RAILWAY_PUBLIC_DOMAIN}}), so this
-#   is a reference to a reference — a pattern Railway's docs neither
-#   promise nor rule out. The mandatory scratch-project first-boot run (see
-#   "Maintaining the marketplace template" in README.md) must confirm the
-#   app services receive the resolved URL, not a literal ${{...}} string;
-#   if resolution ever fails, fall back to repeating the raw
-#   https://${{web.RAILWAY_PUBLIC_DOMAIN}} value per service and accept the
-#   multi-service edit when changing domains. A custom domain is either set
+#   is a reference to a reference. Verified working on a scratch deploy
+#   (2026-07-08): the app services receive the resolved URL, not a literal
+#   ${{...}} string. Re-check it on the scratch-project first-boot run
+#   after template changes (see "Maintaining the marketplace template" in
+#   README.md); if resolution ever regresses, fall back to repeating the
+#   raw https://${{web.RAILWAY_PUBLIC_DOMAIN}} value per service and accept
+#   the multi-service edit when changing domains. Do NOT flatten the
+#   ${{api.*}} references to raw values in the Composer — that silently
+#   breaks the one-variable custom-domain edit. A custom domain is either set
 #   at deploy time through the ROOMOTE_APP_URL prompt or attached later as
 #   a one-variable edit; see "Attaching a custom domain" in README.md.
 #   ROOMOTE_PUBLIC_URL is intentionally not set — the app falls
@@ -66,9 +68,16 @@
 #   update RAILWAY_PUBLIC_DOMAIN when a custom domain is attached, and
 #   browsing an origin the app was not told about fails auth with 403
 #   "Invalid origin".
-# - SETUP_TOKEN is intentionally unset for a simpler first run; /setup is
-#   open until the founding admin exists. Deployments that want to gate the
-#   wizard add SETUP_TOKEN=${{secret(16)}} on api (see README.md).
+# - SETUP_TOKEN=${{secret(32)}} gates the /setup wizard. The app requires a
+#   setup token everywhere except local development — a deployment without
+#   one cannot bootstrap its founding admin at all — so the template must
+#   generate it. The operator copies the value from the api service's
+#   Variables tab and pastes it into the wizard's token step (the URL form
+#   /setup?token=<value> also works).
+# - ROOMOTE_PING_BASE_URL points the anonymous-analytics and version-check
+#   pings at the openmote ping service (the code default is
+#   https://ping.roomote.dev). Admins can opt out of analytics in the setup
+#   wizard or Settings -> Misc; version checks ignore that setting.
 # - Live previews stay disabled by default. They need a customer-owned
 #   wildcard custom domain; see the preview-proxy section in README.md.
 
@@ -123,6 +132,8 @@ services:
       S3_REGION: us-east-1
       S3_BUCKET_ARTIFACTS: roomote-artifacts
       S3_AUTO_CREATE_BUCKET: 'true' # api creates the MinIO bucket at boot; no manual mc step
+      SETUP_TOKEN: ${{secret(32)}} # gates /setup; required outside local dev (see design notes)
+      ROOMOTE_PING_BASE_URL: https://ping.openmote.dev # anonymous-analytics / version-check pings
       DEFAULT_COMPUTE_PROVIDER: modal
       EXCLUDED_COMPUTE_PROVIDERS: docker
       DATABASE_URL: ${{Postgres.DATABASE_URL}}
@@ -165,6 +176,8 @@ services:
       S3_ACCESS_KEY_ID: ${{api.S3_ACCESS_KEY_ID}}
       S3_REGION: ${{api.S3_REGION}}
       S3_BUCKET_ARTIFACTS: ${{api.S3_BUCKET_ARTIFACTS}}
+      SETUP_TOKEN: ${{api.SETUP_TOKEN}}
+      ROOMOTE_PING_BASE_URL: ${{api.ROOMOTE_PING_BASE_URL}}
       DEFAULT_COMPUTE_PROVIDER: ${{api.DEFAULT_COMPUTE_PROVIDER}}
       EXCLUDED_COMPUTE_PROVIDERS: ${{api.EXCLUDED_COMPUTE_PROVIDERS}}
       DATABASE_URL: ${{Postgres.DATABASE_URL}}
