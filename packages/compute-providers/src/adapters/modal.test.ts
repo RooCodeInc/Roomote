@@ -44,6 +44,9 @@ vi.mock('modal', () => {
     public readonly images = {
       fromRegistry: imageFromRegistryMock,
       fromAwsEcr: imageFromAwsEcrMock,
+      // Snapshot resume loads images through the constructed client (auth
+      // travels with it), not the static Image.fromId.
+      fromId: imageFromIdMock,
     };
 
     public constructor(_config: unknown) {}
@@ -51,9 +54,6 @@ vi.mock('modal', () => {
 
   return {
     ModalClient: MockSdkModalClient,
-    Image: {
-      fromId: imageFromIdMock,
-    },
   };
 });
 
