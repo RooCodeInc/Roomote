@@ -148,12 +148,15 @@ export async function startNewTelegramTask(input: {
     };
   }
 
+  const chatIsForum = input.message.chat.is_forum === true;
+
   if (!input.skipRoutingConfirmation) {
     const confirmation = await maybeRequestTelegramRoutingConfirmation({
       routingDecision,
       launchOwnerUserId: input.launchOwnerUserId,
       queuedMessage: input.queuedMessage,
       metadata: input.metadata,
+      chatIsForum,
     });
 
     if (confirmation) {
@@ -182,6 +185,7 @@ export async function startNewTelegramTask(input: {
     queuedMessage: input.queuedMessage,
     metadata: input.metadata,
     workspace,
+    chatIsForum,
   });
 
   return {

@@ -20,6 +20,8 @@ const telegramChatSchema = z
     username: z.string().optional(),
     first_name: z.string().optional(),
     last_name: z.string().optional(),
+    /** Topics-enabled supergroup — tasks can get a forum topic each. */
+    is_forum: z.boolean().optional(),
   })
   .passthrough();
 

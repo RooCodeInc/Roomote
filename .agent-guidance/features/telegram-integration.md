@@ -102,7 +102,18 @@ otherwise the LLM router and workers silently fall back or fail.
    account may click; a new task-entry message in the same chat/topic
    invalidates the previous pending card. Suggestion
    buttons and other explicit-intent launches skip the card
-   (`skipRoutingConfirmation`). Bot commands count as invocations — for both
+   (`skipRoutingConfirmation`). In a Topics-enabled supergroup
+   (`chat.is_forum`), a task launched outside any topic gets **its own forum
+   topic** (`launchTelegramTask` in `task-launch.ts`): the bot creates a
+   topic named after the request (`createForumTopic`, requires admin with
+   the manage-topics right), the job's `communicationThreadId` points at it,
+   the started card posts inside it, and a pointer with an "Open topic" deep
+   link is left as a reply to the launch message. Worker replies re-anchor
+   to the in-topic started card (`setLatestInboundMessageId`), so the whole
+   conversation lives in the topic — Telegram's native equivalent of a Slack
+   thread. Launches from inside an existing topic stay there;
+   topic-creation failure (plain groups, missing rights) falls back to the
+   main chat instead of dropping the task. Bot commands count as invocations — for both
    entry detection and invocation stripping — only when they lead the message
    (offset 0, or preceded only by this bot's mention); a `/command` mentioned
    mid-sentence is ordinary message content and survives into queued text.
@@ -281,7 +292,9 @@ manual workspace picker (same Yes/Nope-then-picker two-step as Slack, via
 inline keyboard + `editMessageText`; same 0.95 confidence gate but a ~5s
 auto-confirm vs Slack's 30s constant; router fallback shows the picker
 instead of silently launching in all repos), and a "typing…" indicator while
-a reply is delivered (`sendChatAction` heartbeat, bounded to the send).
+a reply is delivered (`sendChatAction` heartbeat, bounded to the send), and
+per-task forum topics in Topics-enabled supergroups (the closest analog to
+Slack threads; DMs and plain groups keep chat-scoped continuity).
 Unlike Slack there is no free-text correction while a confirmation is
 pending — a new message in the chat starts a fresh routing flow and
 invalidates the old card.

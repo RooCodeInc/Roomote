@@ -290,6 +290,68 @@ describe('MockTelegramServer', () => {
     ).rejects.toThrow('message to edit not found');
   });
 
+  it('creates forum topics and scopes posts to them', async () => {
+    const state = baseState();
+    state.chats = [
+      ...state.chats.filter((chat) => chat.id !== -100222000222),
+      {
+        id: -100222000222,
+        type: 'supergroup',
+        title: 'roomote-dev',
+        is_forum: true,
+      },
+    ];
+    const { server, baseUrl } = await startServer(state);
+    onCleanup(() => server.stop());
+
+    const provider = providerFor(baseUrl);
+    const topic = await provider.createForumTopic({
+      channelId: '-100222000222',
+      name: 'Fix the flaky login test',
+    });
+
+    expect(topic.name).toBe('Fix the flaky login test');
+    expect(server.getState().forumTopics).toEqual([
+      {
+        chat_id: '-100222000222',
+        message_thread_id: Number(topic.threadId),
+        name: 'Fix the flaky login test',
+      },
+    ]);
+
+    const posted = await provider.postMessage({
+      channelId: '-100222000222',
+      threadId: topic.threadId,
+      text: 'Started a task in web-app.',
+    });
+    const message = (server.getState().messages ?? []).find(
+      (m) => String(m.message_id) === posted.messageId,
+    );
+    expect(message?.message_thread_id).toBe(Number(topic.threadId));
+
+    // Posting into a topic that was never created fails like real Telegram.
+    await expect(
+      provider.postMessage({
+        channelId: '-100222000222',
+        threadId: '424242',
+        text: 'lost message',
+      }),
+    ).rejects.toThrow('message thread not found');
+  });
+
+  it('rejects createForumTopic outside forum supergroups', async () => {
+    const { server, baseUrl } = await startServer();
+    onCleanup(() => server.stop());
+
+    const provider = providerFor(baseUrl);
+    await expect(
+      provider.createForumTopic({
+        channelId: '-100222000222',
+        name: 'nope',
+      }),
+    ).rejects.toThrow('not a forum');
+  });
+
   it('records typing chat actions through sendChatAction', async () => {
     const { server, baseUrl } = await startServer();
     onCleanup(() => server.stop());

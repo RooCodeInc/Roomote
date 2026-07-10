@@ -71,6 +71,8 @@ type PendingTelegramRoute = {
    * in picker mode (after Nope, or on router fallback) — never auto-starts.
    */
   suggestedIndex: number | null;
+  /** Topics-enabled supergroup: launches may create a per-task topic. */
+  chatIsForum?: boolean;
   confirmMessageId?: string;
 };
 
@@ -342,6 +344,7 @@ async function autoConfirmTelegramRouting(
     queuedMessage: pending.queuedMessage,
     metadata: pending.metadata,
     workspace,
+    chatIsForum: pending.chatIsForum ?? false,
   });
 }
 
@@ -363,6 +366,7 @@ export async function maybeRequestTelegramRoutingConfirmation(input: {
   launchOwnerUserId: string;
   queuedMessage: QueuedTelegramCommunicationMessage;
   metadata: TelegramUpdateCommunicationMetadata;
+  chatIsForum?: boolean;
 }): Promise<{ pendingRouteId: string } | null> {
   const routed =
     input.routingDecision.status === 'routed'
@@ -395,6 +399,7 @@ export async function maybeRequestTelegramRoutingConfirmation(input: {
       metadata: input.metadata,
       options,
       suggestedIndex,
+      ...(input.chatIsForum ? { chatIsForum: true } : {}),
     };
 
     await invalidatePreviousPendingRoute(input.metadata);
@@ -625,6 +630,7 @@ export async function handleTelegramRoutingCallback(params: {
       queuedMessage: claimed.queuedMessage,
       metadata: claimed.metadata,
       workspace,
+      chatIsForum: claimed.chatIsForum ?? false,
     });
   } catch (error) {
     apiLogger.warn(

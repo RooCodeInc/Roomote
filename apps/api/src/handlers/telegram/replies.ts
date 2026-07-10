@@ -87,6 +87,36 @@ export async function editTelegramMessageBestEffort(input: {
   }
 }
 
+/**
+ * Create a forum topic for a task in a Topics-enabled supergroup. Best-effort:
+ * plain groups, missing manage-topics rights, or API errors return null and
+ * the caller falls back to launching in the main chat.
+ */
+export async function createTelegramForumTopicBestEffort(input: {
+  chatId: string;
+  name: string;
+}): Promise<{ threadId: string; name: string } | null> {
+  const provider = await createTelegramCommunicationProvider();
+
+  if (!provider) {
+    return null;
+  }
+
+  try {
+    return await provider.createForumTopic({
+      channelId: input.chatId,
+      name: input.name,
+    });
+  } catch (error) {
+    apiLogger.warn(
+      `[telegram] Failed to create a task forum topic in chat ${input.chatId}: ${
+        error instanceof Error ? error.message : String(error)
+      }`,
+    );
+    return null;
+  }
+}
+
 /** Answer a callback query so the clicked button stops showing a spinner. */
 export async function answerTelegramCallbackQueryBestEffort(input: {
   callbackQueryId: string;

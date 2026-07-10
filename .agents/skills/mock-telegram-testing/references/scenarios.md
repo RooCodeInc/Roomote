@@ -47,11 +47,22 @@ Groups only enter tasks on explicit address. Requires `TELEGRAM_BOT_USERNAME=roo
 - Follow-ups in the group while that job is active queue to it even without a mention (chat-id continuity), which is intentional but worth observing.
 - Assert: state message list; DB job payload `communicationChannelId: '-100222000222'`.
 
-## 6. forum-topic-isolation
+## 6. forum-topic-per-task (verified live 2026-07-09)
+
+In a Topics-enabled supergroup (state chat has `"is_forum": true`), a task launched outside any topic gets its own forum topic.
+
+- Inject: `message` in the forum chat with a bot mention and NO `message_thread_id` (i.e. from General).
+- Expect (after routing confirmation resolves): `createForumTopic` named after the request appears in state `.forumTopics`; the started card (Follow/Cancel buttons) posts **inside** the topic (`message_thread_id` set, unanchored); a pointer reply "Started in its own topic: …" with an `Open topic` deep-link button lands next to the launch message; the job payload carries `communicationThreadId` = the topic id.
+- Follow-ups typed in the topic queue to the job; worker replies land in the topic (they re-anchor to the in-topic started card). Cancel works from the in-topic card.
+- Variants: launch from **inside** an existing topic (`message_thread_id` set) must NOT create a nested topic — the task stays in that topic. Topic-creation failure (chat not a forum, missing manage-topics right) falls back to launching in the main chat.
+- Assert: state `.forumTopics`, `.messages[].message_thread_id`; DB `communicationThreadId`.
+- Note: the harness enforces forum semantics — `createForumTopic` on a non-forum chat 400s, and posting a `message_thread_id` that references no topic in a forum chat 400s ("message thread not found").
+
+## 6b. forum-topic-isolation
 
 Forum supergroups scope conversations per topic via `message_thread_id`.
 
-- Inject: task entry with `message_thread_id: 7`; then a follow-up with `message_thread_id: 8`.
+- Inject: task entry with `message_thread_id: 7` (create the topic first, or seed `.forumTopics`); then a follow-up with `message_thread_id: 8`.
 - Expect: the topic-8 message does **not** queue to the topic-7 job (thread id is part of the active-job key) — it is its own task entry.
 - Assert: DB `communicationThreadId` on each job; bot replies carry the matching `message_thread_id` in state.
 
