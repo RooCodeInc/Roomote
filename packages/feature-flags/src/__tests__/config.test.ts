@@ -41,10 +41,4 @@ describe('FEATURE_FLAG_CONFIG', () => {
       'opencode_background_subagents',
     ]);
   });
-
-  it('PrReviewNotifications defaults to false', () => {
-    const config = FEATURE_FLAG_CONFIG[FeatureFlag.PrReviewNotifications];
-    expect(config.defaultValue).toBe(false);
-    expect(config.metadataKey).toBe('pr_review_notifications');
-  });
 });

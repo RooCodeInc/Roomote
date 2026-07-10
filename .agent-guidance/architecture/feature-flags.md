@@ -1,7 +1,7 @@
 ---
 title: Feature Flags
 status: active
-last_reviewed: 2026-07-06
+last_reviewed: 2026-07-10
 owner: engineering
 summary: Current database-backed feature flag system, evaluation order, the admin Experimental settings page, and the active Roomote flag catalog.
 ---
@@ -92,7 +92,6 @@ export enum FeatureFlag {
   VisualProofAutoScreencast = 'VisualProofAutoScreencast',
   AuthorshipRules = 'AuthorshipRules',
   BackgroundSubagents = 'BackgroundSubagents',
-  PrReviewNotifications = 'PrReviewNotifications',
 }
 ```
 
@@ -137,13 +136,6 @@ metadata descriptors/tests, and any guidance or UI copy that names the flag.
   `background_subagents`, with `opencode_background_subagents` retained as a
   legacy key; note an explicit `background_subagents: true` in deployment
   metadata still enables the flag over the off default.
-- `PrReviewNotifications` gates the experimental notification-only relay of
-  GitHub PR review feedback into the originating conversation (Slack, Teams,
-  or Telegram) of the task that owns the pull request, delivered once the
-  task is idle. Checked at both webhook enqueue time and BullMQ delivery
-  time, so turning the flag off also drains already-queued notifications
-  silently. See the PR Review Notification Queue section of
-  [`redis-queues.md`](./redis-queues.md).
 
 ## Admin Metadata Descriptors
 

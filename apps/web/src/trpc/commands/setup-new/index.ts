@@ -59,6 +59,7 @@ import {
   getSetupAuthProvider,
   getSetupComputeProvider,
   getSetupModelProvider,
+  isAutoProvisionedComputeArtifactField,
   isComputeInfrastructureField,
   isConfiguredEnvValue,
   isExitedCloudTaskStatus,
@@ -1598,11 +1599,11 @@ export async function saveSetupNewComputeConfigCommand(
 
       // Provisionable providers' base images (the E2B worker template, the
       // Daytona worker snapshot) cannot be derived like the Modal base image
-      // — they are artifacts inside the operator's provider account. When the
-      // operator entered a manual artifact value, it is persisted directly and
-      // no provisioning runs. Otherwise, when a registry-qualified worker
-      // image exists, the save records the credentials, marks the run as
-      // pending, and the run executes detached after commit.
+      // — they are artifacts inside the operator's provider account. Manual
+      // form overrides are not accepted; process env or auto-provisioning
+      // owns them. When a registry-qualified worker image exists, the save
+      // records credentials, marks the run as pending, and the run executes
+      // detached after commit.
       const setupProvisioningFieldNames = new Set<string>();
 
       if (isSetupProvisionableComputeProvider(input.provider)) {
@@ -1611,52 +1612,53 @@ export async function saveSetupNewComputeConfigCommand(
           provisionableProvider === 'e2b'
             ? 'E2B_TEMPLATE_ID'
             : 'DAYTONA_SNAPSHOT_NAME';
-        const manualArtifact = input.values?.[artifactEnvVar]?.trim();
+        const provisioning = await prepareComputeProvisioningStart({
+          provider: provisionableProvider,
+          providerStatus,
+          existingState: getSetupNewComputeProvisioningState(
+            currentState,
+            provisionableProvider,
+          ),
+          // Process env, in-request override, or RELEASE_VERSION derivation.
+          dockerWorkerImage: effectiveWorkerImage,
+          runtimeEnv: process.env,
+          markPending: (nextState) => {
+            provisioningToStart = {
+              provider: provisionableProvider,
+              imageRef: nextState.imageRef,
+              templateRef: nextState.templateRef ?? '',
+            };
+          },
+        });
 
-        if (!manualArtifact) {
-          const provisioning = await prepareComputeProvisioningStart({
-            provider: provisionableProvider,
-            providerStatus,
-            existingState: getSetupNewComputeProvisioningState(
-              currentState,
-              provisionableProvider,
-            ),
-            // Process env, in-request override, or RELEASE_VERSION derivation.
-            dockerWorkerImage: effectiveWorkerImage,
-            runtimeEnv: process.env,
-            markPending: (nextState) => {
-              provisioningToStart = {
-                provider: provisionableProvider,
-                imageRef: nextState.imageRef,
-                templateRef: nextState.templateRef ?? '',
-              };
-            },
-          });
-
-          if (provisioning.fieldPending) {
-            if (!provisioning.provisionable) {
-              throw new Error(
-                `${providerStatus.label} needs a worker base image. Add a hosted worker image, or enter the ${artifactEnvVar} manually.`,
-              );
-            }
-
-            setupProvisioningFieldNames.add(artifactEnvVar);
+        if (provisioning.fieldPending) {
+          if (!provisioning.provisionable) {
+            throw new Error(
+              `${providerStatus.label} needs a registry-qualified worker image (for example via DOCKER_WORKER_IMAGE) so Roomote can provision the worker base image automatically.`,
+            );
           }
 
-          if (provisioning.start) {
-            provisioningToStart = provisioning.start;
-          }
+          setupProvisioningFieldNames.add(artifactEnvVar);
+        }
+
+        if (provisioning.start) {
+          provisioningToStart = provisioning.start;
         }
       }
 
       // Credentials and submitted/derived infrastructure values are persisted
       // as encrypted deployment env vars. DOCKER_WORKER_IMAGE is never sticky-
-      // saved — runtime is process-env / release-derived only.
+      // saved — runtime is process-env / release-derived only. Auto-provisioned
+      // template/snapshot IDs are only written by the provisioning runner.
       const valuesToSave: Array<{ name: string; value: string }> = [];
       const envVarsToClear: string[] = [];
 
       for (const field of providerStatus.fields) {
         if (field.runtimeSatisfied) {
+          continue;
+        }
+
+        if (isAutoProvisionedComputeArtifactField(field)) {
           continue;
         }
 

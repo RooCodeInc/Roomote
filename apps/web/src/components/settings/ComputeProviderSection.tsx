@@ -2,8 +2,10 @@
 
 import { Fragment, useEffect, useMemo, useState } from 'react';
 import {
+  isAutoProvisionedComputeArtifactField,
   isComputeCredentialField,
   isComputeInfrastructureField,
+  isComputeOperatorEditableField,
   type ComputeProvider,
   type SetupComputeStatus,
   type SetupNewComputeProvisioningState,
@@ -51,7 +53,11 @@ function getNonSecretFieldInitialValues(
   const next: Record<string, string> = {};
 
   for (const field of fields) {
-    if (isSecretComputeField(field) || field.runtimeSatisfied) {
+    if (
+      isSecretComputeField(field) ||
+      field.runtimeSatisfied ||
+      !isComputeOperatorEditableField(field)
+    ) {
       continue;
     }
 
@@ -78,10 +84,10 @@ function getAdvancedInfrastructureDescription({
   hasMissingDefaultBlockingInfra: boolean;
 }) {
   if (hasMissingDefaultBlockingInfra) {
-    return `${provider.label} needs this provider artifact unless a registry-qualified worker image is already configured (for example via DOCKER_WORKER_IMAGE) and can be used automatically.`;
+    return `${provider.label} needs a registry-qualified worker image (for example via DOCKER_WORKER_IMAGE) so worker artifacts can be derived or provisioned automatically.`;
   }
 
-  return 'Optional overrides. Leave blank to derive or provision these automatically from the configured worker image.';
+  return 'Optional overrides. Leave blank to derive or provision worker artifacts automatically from the configured worker image.';
 }
 
 function getCreateAccountHeading(provider: ComputeProviderStatus) {
@@ -111,15 +117,20 @@ export function ComputeProviderSection({
   clearPending,
 }: ComputeProviderSectionProps) {
   const inputFields = provider.fields.filter(isComputeCredentialField);
-  // Provider-specific infrastructure values (base image ref, template id,
-  // snapshot name, domain/region) offered as advanced overrides. Runtime-env
-  // values are locked and hidden from the editable list.
+  // Operator-editable infrastructure (Modal base image, domain/region). Auto-
+  // provisioned E2B template / Daytona snapshot IDs are never form inputs —
+  // process env or detached provisioning owns them.
   const advancedInfraFields = provider.fields.filter(
-    (field) => isComputeInfrastructureField(field) && !field.runtimeSatisfied,
-  );
-  const missingDefaultBlockingInfraFields = advancedInfraFields.filter(
     (field) =>
+      isComputeInfrastructureField(field) &&
+      isComputeOperatorEditableField(field) &&
+      !field.runtimeSatisfied,
+  );
+  const missingDefaultBlockingInfraFields = provider.fields.filter(
+    (field) =>
+      isComputeInfrastructureField(field) &&
       field.required !== false &&
+      !field.runtimeSatisfied &&
       !field.savedSatisfied &&
       !field.defaultSatisfied &&
       !field.setupProvisionable,
@@ -178,37 +189,36 @@ export function ComputeProviderSection({
   // saved (the E2B worker template build, the Daytona snapshot registration).
   const provisionableEnvOnlyFields = provider.fields.filter(
     (field) =>
-      isComputeInfrastructureField(field) &&
+      isAutoProvisionedComputeArtifactField(field) &&
       field.setupProvisionable &&
       !field.runtimeSatisfied &&
       !field.savedSatisfied,
   );
   const provisioningRunning = provisioning?.status === 'building';
-  // Provisionable artifact fields (E2B_TEMPLATE_ID / DAYTONA_SNAPSHOT_NAME)
-  // are editable advanced overrides that also auto-provision when left blank,
-  // so their status is rendered inline with the advanced input rather than as
-  // a separate row.
-  const isProvisionableArtifactField = (
-    field: ComputeProviderStatus['fields'][number],
-  ) =>
-    isComputeInfrastructureField(field) &&
-    field.setupProvisionable &&
-    !field.runtimeSatisfied &&
-    !field.savedSatisfied;
+  // Credentials are already satisfied when a save can still start or retry
+  // auto-provisioning without retyping values (existing installs that later
+  // gain a registry-qualified worker image).
+  const credentialsSatisfiedForProvisioning = inputFields.every((field) => {
+    const nextValue = values[field.envVarName]?.trim() ?? '';
+    return (
+      field.required === false ||
+      field.runtimeSatisfied ||
+      field.savedSatisfied ||
+      nextValue.length > 0
+    );
+  });
   // A failed run is retried by saving again — even with no new values, as
   // long as the required credentials are already satisfied.
   const canRetryProvisioning =
     provisioning?.status === 'failed' &&
     provisionableEnvOnlyFields.length > 0 &&
-    inputFields.every((field) => {
-      const nextValue = values[field.envVarName]?.trim() ?? '';
-      return (
-        field.required === false ||
-        field.runtimeSatisfied ||
-        field.savedSatisfied ||
-        nextValue.length > 0
-      );
-    });
+    credentialsSatisfiedForProvisioning;
+  // First-time (or re-)provisioning with already-saved credentials and no
+  // field edits must still be actionable from Settings.
+  const canStartProvisioning =
+    provisionableEnvOnlyFields.length > 0 &&
+    credentialsSatisfiedForProvisioning &&
+    !provisioningRunning;
 
   const hasPendingValueChanges = [...inputFields, ...advancedInfraFields].some(
     (field) => {
@@ -242,7 +252,7 @@ export function ComputeProviderSection({
   const isActionDisabled =
     provisioningRunning ||
     hasMissingRequiredValue ||
-    (!hasPendingValueChanges && !canRetryProvisioning);
+    (!hasPendingValueChanges && !canRetryProvisioning && !canStartProvisioning);
 
   const hasEditableFields =
     inputFields.some((field) => !field.runtimeSatisfied) ||
@@ -420,49 +430,12 @@ export function ComputeProviderSection({
                     Configure a registry-qualified worker image via{' '}
                     <code className="font-mono text-xs">
                       DOCKER_WORKER_IMAGE
-                    </code>
-                    , or enter the required provider artifact here before
-                    selecting {provider.label} as the default.
+                    </code>{' '}
+                    before selecting {provider.label} as the default.
                   </p>
                 )}
                 <div className="space-y-2 mt-3">
-                  {advancedInfraFields.map((field) => {
-                    const manualValue = values[field.envVarName]?.trim() ?? '';
-                    const showProvisioningNote =
-                      isProvisionableArtifactField(field) &&
-                      manualValue.length === 0;
-
-                    return (
-                      <Fragment key={field.envVarName}>
-                        {renderFieldInput(field)}
-                        {showProvisioningNote && (
-                          <div className="md:pl-[228px]">
-                            {provisioningRunning ? (
-                              <span className="flex items-center gap-2 text-xs text-muted-foreground">
-                                <Spinner className="size-4 shrink-0" />
-                                Provisioning the worker base image in your{' '}
-                                {provider.label} account — this takes a couple
-                                of minutes.
-                              </span>
-                            ) : provisioning?.status === 'failed' ? (
-                              <span className="text-xs text-destructive">
-                                Provisioning failed
-                                {provisioning.error
-                                  ? `: ${provisioning.error}`
-                                  : '.'}{' '}
-                                Save again to retry.
-                              </span>
-                            ) : (
-                              <span className="text-xs text-muted-foreground">
-                                Leave blank to provision automatically in your{' '}
-                                {provider.label} account when saved.
-                              </span>
-                            )}
-                          </div>
-                        )}
-                      </Fragment>
-                    );
-                  })}
+                  {advancedInfraFields.map((field) => renderFieldInput(field))}
                 </div>
               </div>
             )}
@@ -471,8 +444,14 @@ export function ComputeProviderSection({
               <EnvVarsInfoNote runtimeConfigured={runtimeConfigured} />
             )}
 
-            {(hasSavedValues || hasEditableFields || canRetryProvisioning) &&
-              (inputFields.length > 0 || advancedInfraFields.length > 0) && (
+            {(hasSavedValues ||
+              hasEditableFields ||
+              canRetryProvisioning ||
+              canStartProvisioning) &&
+              (inputFields.length > 0 ||
+                advancedInfraFields.length > 0 ||
+                canRetryProvisioning ||
+                canStartProvisioning) && (
                 <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
                   {hasSavedValues && (
                     <Button
@@ -486,7 +465,9 @@ export function ComputeProviderSection({
                       {clearPending ? <Spinner /> : null}
                     </Button>
                   )}
-                  {(hasEditableFields || canRetryProvisioning) && (
+                  {(hasEditableFields ||
+                    canRetryProvisioning ||
+                    canStartProvisioning) && (
                     <Button
                       type="button"
                       onClick={handleSave}
@@ -496,9 +477,9 @@ export function ComputeProviderSection({
                       {savePending
                         ? 'Saving...'
                         : provisioningRunning
-                          ? 'Provisioning...'
+                          ? 'Saving...'
                           : canRetryProvisioning && !hasPendingValueChanges
-                            ? 'Retry provisioning'
+                            ? 'Save'
                             : 'Save'}
                       {savePending || provisioningRunning ? <Spinner /> : null}
                     </Button>

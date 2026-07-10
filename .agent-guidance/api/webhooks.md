@@ -1,7 +1,7 @@
 ---
 title: Webhook Handlers
 status: active
-last_reviewed: 2026-07-09
+last_reviewed: 2026-07-10
 owner: engineering
 summary: Technical documentation of webhook handlers for GitHub, GitLab, Azure DevOps, Slack, Teams, Telegram, and Linear covering endpoints, event types, verification, and processing patterns.
 ---
@@ -84,7 +84,7 @@ All events are registered via `.on(event, handler)` and wrapped in `recordWebhoo
 
 **Review-Feedback Slack Notifications:**
 
-- `notifyPrReviewActivity.ts` — Classify non-mention `pull_request_review.submitted` and `pull_request_review_comment.created` events (skipping `@roomote` mentions, synthetic empty `commented` review wrappers, and Roomote-authored replies to existing threads) and schedule a debounced, notification-only message to the originating conversation (Slack, Teams, or Telegram) of the task that owns the PR via `enqueuePrReviewNotification()` with a 1-minute debounce window; gated behind the experimental `PrReviewNotifications` feature flag, delivery waits until the task is idle and asks the user whether they want follow-up action (see the PR Review Notification Queue in [`redis-queues.md`](../architecture/redis-queues.md)). Also classifies `issue_comment.created`/`issue_comment.edited` events on PRs that are Roomote `roomote-review-summary` comments with a terminal status (reviews post the summary in "in progress" form and patch in the results, so the terminal content usually arrives via the edit) into `review_summary` notification events, deduplicated per comment and review head SHA so later checklist edits do not re-notify
+- `notifyPrReviewActivity.ts` — Classify non-mention `pull_request_review.submitted` and `pull_request_review_comment.created` events (skipping `@roomote` mentions, synthetic empty `commented` review wrappers, and Roomote-authored replies to existing threads) and schedule a debounced, notification-only message to the originating conversation (Slack, Teams, or Telegram) of the task that owns the PR via `enqueuePrReviewNotification()` with a 1-minute debounce window; delivery waits until the task is idle and asks the user whether they want follow-up action (see the PR Review Notification Queue in [`redis-queues.md`](../architecture/redis-queues.md)). Also classifies `issue_comment.created`/`issue_comment.edited` events on PRs that are Roomote `roomote-review-summary` comments with a terminal status (reviews post the summary in "in progress" form and patch in the results, so the terminal content usually arrives via the edit) into `review_summary` notification events, deduplicated per comment and review head SHA so later checklist edits do not re-notify
 
 **Conflict Resolution:**
 

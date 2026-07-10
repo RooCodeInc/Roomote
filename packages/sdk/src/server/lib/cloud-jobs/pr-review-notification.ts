@@ -11,7 +11,6 @@ import {
   taskRuns,
   tasks,
 } from '@roomote/db/server';
-import { FeatureFlag } from '@roomote/feature-flags/server';
 import { getRedis } from '@roomote/redis';
 import {
   type CommunicationProvider,
@@ -22,7 +21,6 @@ import {
   sourceControlProviderSchema,
 } from '@roomote/types';
 
-import { resolveFeatureFlagForUser } from './resolve-feature-flag-for-user';
 import { resolveSlackJobRouting } from './slack-job-routing';
 
 export const PR_REVIEW_NOTIFICATION_QUEUE_NAME = 'pr-review-notification-jobs';
@@ -374,32 +372,16 @@ export async function requeuePendingPrReviewActivity({
 }
 
 /**
- * Returns whether the experimental PR review-feedback notification flow is
- * enabled for this deployment.
- */
-export async function isPrReviewNotificationEnabled(
-  tag: string,
-): Promise<boolean> {
-  return resolveFeatureFlagForUser(FeatureFlag.PrReviewNotifications, tag);
-}
-
-/**
  * Records PR review activity (submitted reviews and review comments) for the
  * conversation-backed tasks that own the pull request, and schedules a
  * debounced notification job per task. The notification is informational
  * only: it tells the user about the review feedback once the task is idle.
  * No agent turn is started.
- *
- * Gated behind the experimental `PrReviewNotifications` feature flag.
  */
 export async function enqueuePrReviewNotification(
   input: EnqueuePrReviewNotificationInput,
 ): Promise<EnqueuePrReviewNotificationResult> {
   const parsedInput = enqueuePrReviewNotificationInputSchema.parse(input);
-
-  if (!(await isPrReviewNotificationEnabled('[enqueuePrReviewNotification]'))) {
-    return { notifiedTaskCount: 0, reason: 'feature_flag_disabled' };
-  }
 
   const prTaskLinks = await db.query.taskPullRequests.findMany({
     where: and(

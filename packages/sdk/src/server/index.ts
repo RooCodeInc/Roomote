@@ -116,7 +116,6 @@ export {
   enqueuePrReviewNotificationInputSchema,
   formatPrReviewActivityMessage,
   hasPrReviewNotificationThreadContext,
-  isPrReviewNotificationEnabled,
   prReviewActivityEventSchema,
   prReviewNotificationRequestSchema,
   requeuePendingPrReviewActivity,

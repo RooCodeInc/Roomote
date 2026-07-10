@@ -46,13 +46,16 @@ export function UserProfileSection({
   const [isUploading, setIsUploading] = useState(false);
   const [isRemoving, setIsRemoving] = useState(false);
   const [isEditing, setIsEditing] = useState(false);
+  const [name, setName] = useState(profile.name);
   const [email, setEmail] = useState(profile.email);
   const [currentPassword, setCurrentPassword] = useState('');
   const [newPassword, setNewPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
 
+  const trimmedName = name.trim();
   const trimmedEmail = email.trim();
+  const hasNameChange = trimmedName !== profile.name;
   const hasEmailChange = trimmedEmail !== profile.email;
   const hasPasswordChange =
     currentPassword.length > 0 ||
@@ -136,8 +139,13 @@ export function UserProfileSection({
   const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
 
-    if (!hasEmailChange && !hasPasswordChange) {
+    if (!hasNameChange && !hasEmailChange && !hasPasswordChange) {
       setIsEditing(false);
+      return;
+    }
+
+    if (!trimmedName) {
+      toast.error('Enter your name.');
       return;
     }
 
@@ -159,8 +167,22 @@ export function UserProfileSection({
     }
 
     setIsSubmitting(true);
+    let nameUpdated = false;
 
     try {
+      if (hasNameChange) {
+        const result = await authClient.updateUser({ name: trimmedName });
+
+        if (result.error) {
+          toast.error(
+            getAuthErrorMessage(result.error, 'Unable to change your name.'),
+          );
+          return;
+        }
+
+        nameUpdated = true;
+      }
+
       if (hasEmailChange) {
         const result = await authClient.changeEmail({
           newEmail: trimmedEmail,
@@ -202,6 +224,9 @@ export function UserProfileSection({
       );
     } finally {
       setIsSubmitting(false);
+      if (nameUpdated) {
+        router.refresh();
+      }
     }
   };
 
@@ -311,9 +336,20 @@ export function UserProfileSection({
         ) : (
           <form className="space-y-4 max-w-md" onSubmit={handleSubmit}>
             <p className="text-muted-foreground">
-              Update your email or password. Your profile picture can be changed
-              from the profile view.
+              Update your name, email, or password. Your profile picture can be
+              changed from the profile view.
             </p>
+            <div className="space-y-1">
+              <Label htmlFor="personal-name">Name</Label>
+              <Input
+                id="personal-name"
+                autoComplete="name"
+                required
+                value={name}
+                onChange={(event) => setName(event.target.value)}
+                disabled={isSubmitting}
+              />
+            </div>
             <div className="space-y-1">
               <Label htmlFor="personal-email">Email</Label>
               <Input
@@ -376,6 +412,7 @@ export function UserProfileSection({
                 variant="outline"
                 disabled={isSubmitting}
                 onClick={() => {
+                  setName(profile.name);
                   setEmail(profile.email);
                   resetPasswordFields();
                   setIsEditing(false);

@@ -218,7 +218,7 @@ launch error instead of adding a fallback queue UI.
 
 Usage analytics with:
 
-- **AnalyticsObjectSwitcher**: Left-rail object switching between `PRs` and `Tasks`, plus a `Live Queue` route when its narrower flag is enabled.
+- **AnalyticsObjectSwitcher**: Left-rail object switching with `Tasks` as the first and default view, followed by `PRs`, plus a `Live Queue` route when its narrower flag is enabled. PR analytics are addressable at `/analytics?object=pullRequests`.
 - **Right-side analytics surface**: Dedicated object header, desktop download action, and card-based chart presentation
 - **AnalyticsFilterBar**: Object-specific filters, plus the mobile filter dialog for `Time range`
 - **AnalyticsControlRow**: `By` tabs with a desktop `Time range` select

@@ -95,7 +95,7 @@ describe('resolveEffectiveHarnessModelState', () => {
   it('keeps an explicit harness model override even for PR review tasks', () => {
     const { model } = resolveEffectiveHarnessModelState({
       task: makeTask(
-        { 'opencode-server': 'openrouter/openai/gpt-5.4' },
+        { 'opencode-server': 'openrouter/openai/gpt-5.6-terra' },
         TaskPayloadKind.GithubPrReview,
       ),
       targetHarness: 'opencode-server',
@@ -103,6 +103,6 @@ describe('resolveEffectiveHarnessModelState', () => {
       deploymentCodeReviewModelId: 'openrouter/z-ai/glm-5.2',
     });
 
-    expect(model).toBe('openrouter/openai/gpt-5.4');
+    expect(model).toBe('openrouter/openai/gpt-5.6-terra');
   });
 });
