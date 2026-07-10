@@ -715,11 +715,6 @@ export const taskArtifacts = pgTable(
     index('task_artifacts_uploaded_idx').on(table.uploaded),
     index('task_artifacts_created_at_idx').on(table.createdAt),
     index('task_artifacts_path_idx').on(table.taskId, table.path),
-    index('task_artifacts_version_idx').on(
-      table.taskId,
-      table.path,
-      table.version,
-    ),
     unique('task_artifacts_task_id_path_version_unique').on(
       table.taskId,
       table.path,
@@ -939,14 +934,6 @@ export const taskRuns = pgTable(
     sourceSnapshotId: text('source_snapshot_id'), // Snapshot this job was resumed from.
 
     /**
-     * Git HEAD SHAs captured at task start for each repo in the workspace.
-     * Used to compute diffs showing what changed during the task.
-     * @example { ".": "abc123" } for single-repo
-     * @example { "frontend": "abc123", "backend": "def456" } for multi-repo
-     */
-    baseShas: jsonb('base_shas').$type<Record<string, string>>(),
-
-    /**
      * Value for the auth bypass header (`x-bypass-roomote-auth`).
      * When set, requests with this value in the bypass header skip authentication.
      * Generated randomly when `auth_bypass_header: true` in environment config,
@@ -1102,8 +1089,6 @@ export const taskStartParallelCountsRelations = relations(
  * task_messages
  */
 
-const LEGACY_TASK_MESSAGE_CONTENT_SCHEMA = 'mcp.contentblock@2025-06-18';
-
 export const taskMessages = pgTable(
   'task_messages',
   {
@@ -1119,11 +1104,6 @@ export const taskMessages = pgTable(
     eventType: text('event_type').notNull().$type<TaskMessageEventType>(),
     role: text('role').$type<TaskMessageRole>(),
     protocol: text('protocol').notNull().$type<TaskMessageProtocol>(),
-    // Deprecated: new code should not reference this column directly.
-    // Keep a runtime default until a DB migration drops `content_schema`.
-    contentSchema: text('content_schema')
-      .notNull()
-      .$defaultFn(() => LEGACY_TASK_MESSAGE_CONTENT_SCHEMA),
     /**
      * Canonical renderable body for the message.
      *
@@ -1660,7 +1640,6 @@ export const githubUserMappings = pgTable(
   },
   (table) => [
     index('github_user_mappings_github_login_idx').on(table.githubLogin),
-    index('github_user_mappings_github_user_id_idx').on(table.githubUserId),
     index('github_user_mappings_user_id_idx').on(table.userId),
     unique('github_user_mappings_unique').on(table.githubUserId),
   ],
@@ -1723,10 +1702,6 @@ export const repositories = pgTable(
     ),
     index('repositories_installation_id_idx').on(table.installationId),
     index('repositories_full_name_idx').on(table.fullName),
-    index('repositories_provider_full_name_idx').on(
-      table.sourceControlProvider,
-      table.fullName,
-    ),
     index('repositories_provider_host_full_name_idx').on(
       table.sourceControlProvider,
       table.host,
@@ -1929,7 +1904,6 @@ export const slackInstallations = pgTable(
     updatedAt: timestamp('updated_at').notNull().defaultNow(),
   },
   (table) => [
-    index('slack_installations_team_id_idx').on(table.teamId),
     index('slack_installations_bot_user_id_idx').on(table.botUserId),
     index('slack_installations_active_idx').on(table.isActive),
   ],
@@ -1998,10 +1972,6 @@ export const slackUserMappings = pgTable(
     updatedAt: timestamp('updated_at').notNull().defaultNow(),
   },
   (table) => [
-    index('slack_user_mappings_slack_user_idx').on(
-      table.slackUserId,
-      table.slackTeamId,
-    ),
     index('slack_user_mappings_user_id_idx').on(table.userId),
     unique('slack_user_mappings_unique').on(
       table.slackUserId,
@@ -2104,10 +2074,6 @@ export const teamsUserMappings = pgTable(
     updatedAt: timestamp('updated_at').notNull().defaultNow(),
   },
   (table) => [
-    index('teams_user_mappings_teams_user_idx').on(
-      table.teamsUserId,
-      table.teamsTenantId,
-    ),
     index('teams_user_mappings_aad_object_idx').on(
       table.teamsAadObjectId,
       table.teamsTenantId,
@@ -2147,10 +2113,7 @@ export const slackAuthTokens = pgTable(
     expiresAt: timestamp('expires_at').notNull(),
     createdAt: timestamp('created_at').notNull().defaultNow(),
   },
-  (table) => [
-    index('slack_auth_tokens_token_idx').on(table.token),
-    index('slack_auth_tokens_expires_at_idx').on(table.expiresAt),
-  ],
+  (table) => [index('slack_auth_tokens_expires_at_idx').on(table.expiresAt)],
 );
 
 export const slackAuthTokensRelations = relations(slackAuthTokens, () => ({}));
@@ -2325,7 +2288,6 @@ export const linearPendingSelections = pgTable(
     updatedAt: timestamp('updated_at').notNull().defaultNow(),
   },
   (table) => [
-    index('linear_pending_selections_session_id_idx').on(table.sessionId),
     index('linear_pending_selections_expires_at_idx').on(table.expiresAt),
     index('linear_pending_selections_step_idx').on(table.step),
   ],
@@ -2559,7 +2521,6 @@ export const webhooks = pgTable(
     payload: jsonb('payload').notNull(),
     succeededAt: timestamp('succeeded_at'),
     failedAt: timestamp('failed_at'),
-    ignoredAt: timestamp('ignored_at'),
     error: text('error'),
     createdAt: timestamp('created_at').notNull().defaultNow(),
   },
@@ -2567,13 +2528,11 @@ export const webhooks = pgTable(
     index('webhooks_provider_idx').on(table.provider),
     index('webhooks_event_idx').on(table.event),
     index('webhooks_created_at_idx').on(table.createdAt),
-    index('webhooks_delivery_id_idx').on(table.deliveryId),
     check(
       'webhooks_status_exclusive',
       sql`(
         (succeeded_at IS NOT NULL)::int +
-        (failed_at IS NOT NULL)::int +
-        (ignored_at IS NOT NULL)::int
+        (failed_at IS NOT NULL)::int
       ) <= 1`,
     ),
   ],

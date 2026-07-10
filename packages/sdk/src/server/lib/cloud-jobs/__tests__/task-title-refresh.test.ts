@@ -67,7 +67,6 @@ async function seedTaskWithPrompt({
     ts: Date.now(),
     eventType: ACP_ENVELOPE_EVENT_TYPES.UserPrompt,
     protocol: 'roomote_runtime',
-    contentSchema: 'acp.v1',
     contentBlocks: [
       { type: 'text', text: '$review-code <request>Review this PR</request>' },
     ],
