@@ -272,24 +272,14 @@ export function useSetupFlow(
       return (
         !!status &&
         (status.onboardingSucceeded ||
+          (status.setupNewState.onboardingTaskId !== null &&
+            !status.onboardingFailed) ||
           forceUnlocked ||
           hasUnlockedPostOnboardingFlow())
       );
     },
     [hasUnlockedPostOnboardingFlow, status],
   );
-
-  const hasOnboardingProgress = useCallback(() => {
-    if (!status) {
-      return false;
-    }
-
-    return (
-      status.selectedRepositories.length > 0 ||
-      status.setupNewState.selectedRepositoryIds.length > 0 ||
-      status.setupNewState.onboardingTaskId !== null
-    );
-  }, [status]);
 
   const shouldSkip = useCallback(
     (candidate: SetupStep): boolean => {
@@ -407,15 +397,8 @@ export function useSetupFlow(
         case 'repo-selection':
           return (
             !replayEntryVisit &&
-            hasOnboardingProgress() &&
+            status.setupNewState.onboardingTaskId !== null &&
             !status.onboardingFailed
-          );
-        case 'onboarding-agent':
-          return (
-            !hasOnboardingProgress() ||
-            status.onboardingSucceeded ||
-            hasUnlockedPostOnboardingFlow() ||
-            status.onboardingFailed
           );
         case 'invoke':
           return !hasPostOnboardingAccess();
@@ -426,8 +409,8 @@ export function useSetupFlow(
     [
       communicationStepResolved,
       hasOnboardingProgress,
+      communicationStepSkipped,
       hasPostOnboardingAccess,
-      hasUnlockedPostOnboardingFlow,
       pendingAuthProvider,
       status,
     ],
@@ -462,9 +445,9 @@ export function useSetupFlow(
         }
       }
 
-      return status?.onboardingSucceeded ? 'invoke' : 'onboarding-agent';
+      return hasPostOnboardingAccess() ? 'invoke' : 'repo-selection';
     },
-    [shouldSkip, status?.onboardingSucceeded],
+    [hasPostOnboardingAccess, shouldSkip],
   );
 
   const findNextPostOnboardingStep = useCallback(

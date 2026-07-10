@@ -44,7 +44,6 @@ import { StepCommunicationConnect } from './StepCommunicationConnect';
 import { StepInvoke } from './StepInvoke';
 import { useSetupFlow } from './hooks';
 import { StepRepoSelection, type SetupRetryReason } from './StepRepoSelection';
-import { StepOnboardingAgent } from './StepOnboardingAgent';
 import { getSetupStepPath } from './types';
 import {
   getBootstrapAuthProvider,
@@ -521,37 +520,16 @@ export default function SetupPage() {
           onReviewComputeProvider={() =>
             goToStep('compute-provider', { revisit: true })
           }
-          onContinue={() => goToStep('onboarding-agent')}
+          onContinue={() => goToStep('invoke')}
           onSkip={() => {
             setupSession.unlockPostOnboardingFlow();
             goToNextPostOnboardingStep(true);
           }}
         />
       )}
-      {step === 'onboarding-agent' && (
-        <StepOnboardingAgent
-          selectedRepositories={status.selectedRepositories}
-          onboardingTaskId={status.setupNewState.onboardingTaskId}
-          onboardingTaskStartedAt={status.setupNewState.onboardingTaskStartedAt}
-          slackChannel={status.setupNewState.slackChannel}
-          slackThreadTs={status.setupNewState.slackThreadTs}
-          chatHandoffProvider={status.setupNewState.chatHandoffProvider}
-          onboardingFinished={status.onboardingSucceeded}
-          onContinue={() => {
-            setupSession.unlockPostOnboardingFlow();
-            goToNextPostOnboardingStep(true);
-          }}
-          onDoLater={() => {
-            setupSession.unlockPostOnboardingFlow();
-            goToNextPostOnboardingStep(true);
-          }}
-          onReturnToSelection={() => goToStep('repo-selection')}
-          onStartFailure={() => undefined}
-          onTaskStarted={() => undefined}
-        />
-      )}
       {step === 'invoke' && (
         <StepInvoke
+          onboardingTaskId={status.setupNewState.onboardingTaskId}
           communicationProviders={
             status.authSetup.selectedProvider
               ? [status.authSetup.selectedProvider]

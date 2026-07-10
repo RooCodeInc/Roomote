@@ -173,6 +173,71 @@ function mockStatus(overrides: Partial<Record<string, unknown>> = {}) {
   } as unknown as ReturnType<typeof mockUseQuery>);
 }
 
+function mockReadyForRepository({
+  onboardingTaskId = null,
+  selectedRepositoryIds = [],
+  onboardingFailed = false,
+}: {
+  onboardingTaskId?: string | null;
+  selectedRepositoryIds?: string[];
+  onboardingFailed?: boolean;
+} = {}) {
+  setupSessionState.session = {
+    ...setupSessionState.session,
+    communicationStep: { state: 'skipped' },
+  };
+  mockStatus({
+    onboardingFailed,
+    authSetup: {
+      setupSatisfiedByRuntimeEnv: true,
+      selectedProvider: 'slack',
+      preselectedProvider: 'slack',
+      runtimeConfiguredProvider: 'slack',
+      runtimeConfiguredProviders: ['slack'],
+      lockReason: 'runtime_env',
+      providers: [
+        {
+          id: 'slack',
+          label: 'Slack',
+          fields: [],
+          runtimeSatisfied: true,
+          savedSatisfied: false,
+          setupSatisfied: true,
+        },
+      ],
+    },
+    modelSetup: {
+      setupSatisfied: true,
+      setupSatisfiedByRuntimeEnv: true,
+      preselectedProvider: 'openrouter',
+    },
+    sourceControlSetup: {
+      setupSatisfied: true,
+      setupSatisfiedByRuntimeEnv: true,
+      selectedProvider: 'github',
+      preselectedProvider: 'github',
+      runtimeConfiguredProvider: 'github',
+      runtimeConfiguredProviders: ['github'],
+      lockReason: 'runtime_env',
+      connectedProvider: 'github',
+      providers: [],
+    },
+    setupNewState: {
+      authProvider: 'slack',
+      modelProvider: 'openrouter',
+      computeProvider: null,
+      sourceControlProvider: 'github',
+      selectedRepositoryIds,
+      onboardingTaskId,
+      onboardingTaskStartedAt: onboardingTaskId
+        ? '2026-07-10T10:00:00.000Z'
+        : null,
+      slackChannel: null,
+      slackThreadTs: null,
+    },
+  });
+}
+
 function setLocationSearch(search: string) {
   Object.defineProperty(window, 'location', {
     writable: true,
@@ -991,6 +1056,58 @@ describe('useSetupFlow', () => {
     await waitFor(() => {
       expect(result.current.step).toBe('invoke');
     });
+  });
+
+  it('keeps a saved selection without a task recoverable at repository selection', async () => {
+    mockReadyForRepository({ selectedRepositoryIds: ['repo-1'] });
+
+    const { result } = renderHook(() => useSetupFlow());
+
+    await waitFor(() => {
+      expect(result.current.step).toBe('repo-selection');
+    });
+  });
+
+  it('advances a persisted onboarding task to invoke before the environment exists', async () => {
+    mockReadyForRepository({
+      selectedRepositoryIds: ['repo-1'],
+      onboardingTaskId: 'task-onboarding-1',
+    });
+
+    const { result } = renderHook(() => useSetupFlow());
+
+    await waitFor(() => {
+      expect(result.current.step).toBe('invoke');
+    });
+  });
+
+  it('returns a failed onboarding task to repository selection', async () => {
+    mockReadyForRepository({
+      selectedRepositoryIds: ['repo-1'],
+      onboardingTaskId: 'task-failed',
+      onboardingFailed: true,
+    });
+
+    const { result } = renderHook(() => useSetupFlow());
+
+    await waitFor(() => {
+      expect(result.current.step).toBe('repo-selection');
+    });
+  });
+
+  it('resolves obsolete onboarding-agent deep links to the current step', async () => {
+    mockReadyForRepository({
+      selectedRepositoryIds: ['repo-1'],
+      onboardingTaskId: 'task-onboarding-1',
+    });
+    setLocationSearch('?step=onboarding-agent');
+
+    const { result } = renderHook(() => useSetupFlow());
+
+    await waitFor(() => {
+      expect(result.current.step).toBe('invoke');
+    });
+    expect(routerMock.replace).toHaveBeenCalledWith('/setup?step=invoke');
   });
 
   it('saved-only source-control config still shows the provider chooser', async () => {

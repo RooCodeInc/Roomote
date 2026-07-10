@@ -125,6 +125,7 @@ vi.mock('@/components/system', () => ({
     />
   ),
   Loader2: () => <span>Loader2</span>,
+  CornerDownRight: () => <span>CornerDownRight</span>,
   LinearLogo: () => <span>LinearLogo</span>,
   ArrowRight: () => <span>ArrowRight</span>,
   Zap: () => <span>Zap</span>,
@@ -246,6 +247,27 @@ describe('Setup StepInvoke', () => {
     await waitFor(() => {
       expect(replaceMock).toHaveBeenCalledWith('/');
     });
+  });
+
+  it('explains the background setup task and finishes onboarding at its canonical task page', async () => {
+    render(<StepInvoke onboardingTaskId="task-onboarding-1" />);
+
+    expect(
+      screen.getByText(
+        /once your environment is ready, you can work with roomote in these ways/i,
+      ),
+    ).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: /finish onboarding/i }));
+
+    await waitFor(() => {
+      expect(invalidateQueriesMock).toHaveBeenCalledWith({
+        queryKey: queryKeys.setupStatus,
+      });
+    });
+    expect(replaceMock).toHaveBeenCalledWith('/task/task-onboarding-1');
+    expect(replaceMock).not.toHaveBeenCalledWith(
+      expect.stringContaining('environmentId='),
+    );
   });
 
   it('clarifies that GitHub mentions work on any PR', () => {

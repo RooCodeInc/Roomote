@@ -5,13 +5,18 @@ import { useRouter } from 'next/navigation';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { PRODUCT_NAME } from '@roomote/types';
 import type { SourceControlProvider } from '@roomote/types';
-import { Button, Loader2, ArrowRight, Checkbox } from '@/components/system';
+import {
+  Button,
+  Loader2,
+  ArrowRight,
+  Checkbox,
+  CornerDownRight,
+} from '@/components/system';
 import { useTRPC } from '@/trpc/client';
 import { useEnvironments } from '@/hooks/environments/useEnvironments';
 import { buildInvokeMethods } from '../invokeMethods';
 import { StepTitle } from './StepTitle';
 import { getSetupStepDefinition } from './types';
-import { CornerDownRight } from 'lucide-react';
 
 const INVOKE_STEP = getSetupStepDefinition('invoke');
 
@@ -19,12 +24,14 @@ type CommunicationProviderId = 'slack' | 'microsoft' | 'telegram';
 
 export function StepInvoke({
   onTryItOut,
+  onboardingTaskId,
   linkSuggestedTasks = false,
   communicationProviders = [],
   sourceControlProviders = [],
   includeLinear = false,
 }: {
   onTryItOut?: () => void;
+  onboardingTaskId?: string | null;
   linkSuggestedTasks?: boolean;
   communicationProviders?: readonly CommunicationProviderId[];
   sourceControlProviders?: readonly SourceControlProvider[];
@@ -33,7 +40,7 @@ export function StepInvoke({
   const router = useRouter();
   const trpc = useTRPC();
   const queryClient = useQueryClient();
-  const environments = useEnvironments();
+  const environments = useEnvironments({ enabled: !onboardingTaskId });
   const commsStatus = useQuery(trpc.comms.status.queryOptions());
   const effectiveCommunicationProviders = [
     ...communicationProviders,
@@ -87,6 +94,11 @@ export function StepInvoke({
           queryKey: trpc.github.installations.queryKey(),
         });
 
+        if (onboardingTaskId) {
+          router.replace(`/task/${onboardingTaskId}`);
+          return;
+        }
+
         const envs = environments.data;
         const params = new URLSearchParams();
         const targetEnv = envs?.[0];
@@ -108,7 +120,11 @@ export function StepInvoke({
   return (
     <div className="relative w-full max-w-2xl space-y-6 py-2 md:py-0">
       <StepTitle text={INVOKE_STEP.title} />
-      <p className="mb-4">How to work with {PRODUCT_NAME}:</p>
+      <p className="mb-4">
+        {onboardingTaskId
+          ? `Once your environment is ready, you can work with ${PRODUCT_NAME} in these ways:`
+          : `How to work with ${PRODUCT_NAME}:`}
+      </p>
       <div className="space-y-5">
         {methods.map((method) => (
           <div key={method.title} className="flex items-start gap-3 group">
@@ -162,7 +178,7 @@ export function StepInvoke({
           {completeSetup.isPending && (
             <Loader2 className="animate-spin size-4 mr-2" />
           )}
-          Let&apos;s go
+          {onboardingTaskId ? 'Finish onboarding' : "Let's go"}
           <ArrowRight />
         </Button>
       </div>

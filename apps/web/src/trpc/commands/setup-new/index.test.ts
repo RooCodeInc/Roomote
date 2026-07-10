@@ -1024,6 +1024,7 @@ describe('setup-new onboarding task start command', () => {
     expect(enqueueTask).toHaveBeenCalledTimes(1);
     expect(enqueueTask).toHaveBeenCalledWith(
       expect.objectContaining({
+        title: 'Set up your first environment',
         task: expect.objectContaining({
           type: TaskPayloadKind.StandardTask,
           payload: expect.objectContaining({
@@ -1096,6 +1097,7 @@ describe('setup-new onboarding task start command', () => {
     expect(SlackNotifier).not.toHaveBeenCalled();
     expect(enqueueTask).toHaveBeenCalledWith(
       expect.objectContaining({
+        title: 'Set up your first environment',
         task: expect.objectContaining({
           type: TaskPayloadKind.StandardTask,
           payload: expect.objectContaining({
@@ -1162,6 +1164,7 @@ describe('setup-new onboarding task start command', () => {
     expect(SlackNotifier).not.toHaveBeenCalled();
     expect(enqueueTask).toHaveBeenCalledWith(
       expect.objectContaining({
+        title: 'Set up your first environment',
         task: expect.objectContaining({
           type: TaskPayloadKind.StandardTask,
           payload: expect.objectContaining({
@@ -1356,6 +1359,7 @@ describe('setup-new onboarding task start command', () => {
 
     expect(enqueueTask).toHaveBeenCalledWith(
       expect.objectContaining({
+        title: 'Set up your first environment',
         task: expect.objectContaining({
           harness: 'opencode-server',
           type: TaskPayloadKind.StandardTask,
@@ -1418,6 +1422,7 @@ describe('setup-new onboarding task start command', () => {
     expect(openConversationMock).toHaveBeenCalledWith('U1');
     expect(enqueueTask).toHaveBeenCalledWith(
       expect.objectContaining({
+        title: 'Set up your first environment',
         task: expect.objectContaining({
           type: TaskPayloadKind.SlackAppMention,
           payload: expect.objectContaining({

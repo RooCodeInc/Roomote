@@ -55,10 +55,6 @@ const SETUP_STEP_DEFINITIONS = [
     title: 'Set up environment',
   },
   {
-    id: 'onboarding-agent',
-    title: 'Set up environment',
-  },
-  {
     id: 'invoke',
     title: "You're all set!",
   },

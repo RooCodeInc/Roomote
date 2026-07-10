@@ -819,6 +819,8 @@ type FreshTask = Exclude<
  */
 export type FreshTaskLaunch = {
   task: FreshTask;
+  /** Explicit user-facing title. Locked against all LLM title generation. */
+  title?: string;
   initiator: TaskInitiator;
   workflow: TaskWorkflow;
   surface: TaskSurface;
@@ -1249,14 +1251,20 @@ async function enqueueFreshLaunch(
   const keepaliveMs = resolvedTaskPolicy.keepaliveMs;
   const nowTs = Math.floor(Date.now() / 1000);
 
-  const title = generateTaskRunTitle(
-    taskWithHarnessOverrides,
-    10_000,
-    'description' in taskWithHarnessOverrides.payload &&
-      taskWithHarnessOverrides.payload.description
-      ? taskWithHarnessOverrides.payload.description
-      : null,
-  );
+  const explicitTitle = input.title?.trim() || null;
+  const title =
+    explicitTitle ??
+    generateTaskRunTitle(
+      taskWithHarnessOverrides,
+      10_000,
+      'description' in taskWithHarnessOverrides.payload &&
+        taskWithHarnessOverrides.payload.description
+        ? taskWithHarnessOverrides.payload.description
+        : null,
+    );
+  const titleIsLocked =
+    explicitTitle !== null ||
+    hasDeterministicTaskRunTitle(taskWithHarnessOverrides.type);
   const targetComputeProvider = resolveComputeProviderTarget(
     task.computeProvider,
     await resolveDefaultComputeProvider(),
@@ -1323,7 +1331,7 @@ async function enqueueFreshLaunch(
         modelProvider: DEFAULT_STANDARD_TASK_MODEL_PROVIDER,
         model: effectiveTaskModel,
         title,
-        ...(hasDeterministicTaskRunTitle(taskWithHarnessOverrides.type)
+        ...(titleIsLocked
           ? { llmTitleCheckpoint: LLM_TITLE_LOCKED_CHECKPOINT }
           : {}),
         prompt: initialPrompt,
@@ -1422,6 +1430,7 @@ async function enqueueFreshLaunch(
 
   if (
     !options.skipEarlyTitleGeneration &&
+    !explicitTitle &&
     !hasDeterministicTaskRunTitle(task.type) &&
     typeof description === 'string' &&
     description.trim()

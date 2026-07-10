@@ -164,6 +164,41 @@ type ActiveSetupQualificationBlock = {
   lastBlockedAt: Date;
 };
 
+const SETUP_BOOTSTRAP_USER_ID = 'setup-bootstrap-user';
+const SETUP_ONBOARDING_TASK_TITLE = 'Set up your first environment';
+
+async function ensureSetupBootstrapAuditUser(
+  executor: DatabaseOrTransaction,
+): Promise<string> {
+  const [existingUser] = await executor
+    .select({ id: users.id })
+    .from(users)
+    .where(eq(users.id, SETUP_BOOTSTRAP_USER_ID))
+    .limit(1);
+
+  if (existingUser) {
+    return existingUser.id;
+  }
+
+  await executor.insert(users).values({
+    id: SETUP_BOOTSTRAP_USER_ID,
+    name: 'Setup Bootstrap',
+    email: 'setup-bootstrap@roomote.local',
+    imageUrl: '',
+    entity: {
+      id: SETUP_BOOTSTRAP_USER_ID,
+      name: 'Setup Bootstrap',
+      email: 'setup-bootstrap@roomote.local',
+      imageUrl: '',
+    },
+    metadata: {
+      system: true,
+    },
+  });
+
+  return SETUP_BOOTSTRAP_USER_ID;
+}
+
 async function assertSetupBootstrapOpen() {
   const bootstrapState = await getSetupBootstrapState();
 
@@ -2315,6 +2350,7 @@ export async function startSetupNewOnboardingTaskCommand(
         if (kickoffMessageId && kickoffChannelId) {
           const startedAt = new Date().toISOString();
           const launchResult = await enqueueTask({
+            title: SETUP_ONBOARDING_TASK_TITLE,
             task: {
               ...(modelSelection.harness
                 ? { harness: modelSelection.harness }
@@ -2390,6 +2426,7 @@ export async function startSetupNewOnboardingTaskCommand(
 
       const startedAt = new Date().toISOString();
       const launchResult = await enqueueTask({
+        title: SETUP_ONBOARDING_TASK_TITLE,
         task: {
           ...(modelSelection.harness
             ? { harness: modelSelection.harness }
@@ -2467,6 +2504,7 @@ export async function startSetupNewOnboardingTaskCommand(
 
     try {
       launchResult = await enqueueTask({
+        title: SETUP_ONBOARDING_TASK_TITLE,
         task: {
           ...(modelSelection.harness
             ? { harness: modelSelection.harness }
