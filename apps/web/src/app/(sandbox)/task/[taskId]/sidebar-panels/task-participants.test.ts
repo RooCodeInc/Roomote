@@ -102,4 +102,13 @@ describe('getTaskParticipants', () => {
       },
     ]);
   });
+
+  it('ignores automation prompts without a persisted user identity', () => {
+    const participants = getTaskParticipants(
+      [createUserMessage('automatic-review-prompt')],
+      null,
+    );
+
+    expect(participants).toEqual([]);
+  });
 });

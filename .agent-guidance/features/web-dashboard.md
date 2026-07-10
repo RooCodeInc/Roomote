@@ -1,7 +1,7 @@
 ---
 title: Web Dashboard
 status: active
-last_reviewed: 2026-07-08
+last_reviewed: 2026-07-10
 owner: engineering
 summary: Technical documentation of the Next.js 16 web dashboard covering route structure, design system components, page architecture, setup sequencing, and state management.
 ---
@@ -272,6 +272,7 @@ The sandbox uses:
 - `HistoricalSandboxProvider`: Snapshot-based read-only view
 - `useSandboxStore`: Zustand store for UI state (active tab, panel visibility)
 - `TaskInfoPanel`: Task metadata sidebar. It shows the current inference cost by reading `task.inferenceUsage.costMicroUsd`, which the web tRPC task lookup computes from raw `task_inference_usage_events` rows on each fetch. The value refreshes with the task page's existing session polling; there is no denormalized task-level inference-cost rollup to maintain.
+- `TaskInfoPanel` derives Participants only from transcript messages that carry a persisted user identity. System and automation prompts keep a null user identity at the web read boundary, so automatic Roomote-agent work does not appear as an `Unknown user`; its agent attribution remains in the Creator row.
 - When preview URLs exist, the task view exposes a `Live Preview` entry point.
   It opens the preview side panel against the cloud job's current preview URL,
   keeps the same-origin iframe auth trampoline, and includes an `Open` action
