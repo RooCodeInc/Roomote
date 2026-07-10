@@ -87,6 +87,7 @@ const state = vi.hoisted(() => ({
         channelAutoStartSlackChannels: {
           C123BUGS: '#bugs',
         },
+        managerSlackChannel: '#roomote-managers',
         managerStatsSlackChannel: null,
         suggesterSlackChannel: null,
         announcerSlackChannel: null,

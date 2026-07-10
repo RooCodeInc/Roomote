@@ -250,6 +250,7 @@ export async function getSlackChannelAccessWarnings({
 export async function getSlackChannelDisplayNames({
   notifier,
   channelAutoStartSlackChannelIds,
+  managerSlackChannelId,
   managerStatsSlackChannelId,
   suggesterSlackChannelId,
   announcerSlackChannelId,
@@ -262,6 +263,7 @@ export async function getSlackChannelDisplayNames({
 }: {
   notifier: SlackNotifier | null;
   channelAutoStartSlackChannelIds: string[];
+  managerSlackChannelId: string | null;
   managerStatsSlackChannelId: string | null;
   suggesterSlackChannelId: string | null;
   announcerSlackChannelId: string | null;
@@ -291,6 +293,7 @@ export async function getSlackChannelDisplayNames({
   const uniqueChannelIds = [...new Set(channelAutoStartSlackChannelIds)];
   const [
     channelAutoStartChannelNames,
+    managerSlackChannel,
     managerStatsSlackChannel,
     suggesterSlackChannel,
     announcerSlackChannel,
@@ -307,6 +310,9 @@ export async function getSlackChannelDisplayNames({
         await notifier.getChannelName(channelId),
       ]),
     ),
+    managerSlackChannelId
+      ? notifier.getChannelName(managerSlackChannelId)
+      : Promise.resolve(null),
     managerStatsSlackChannelId
       ? notifier.getChannelName(managerStatsSlackChannelId)
       : Promise.resolve(null),
@@ -343,7 +349,7 @@ export async function getSlackChannelDisplayNames({
         channelName ? `#${channelName}` : null,
       ]),
     ),
-    managerSlackChannel: null,
+    managerSlackChannel: managerSlackChannel ? `#${managerSlackChannel}` : null,
     managerStatsSlackChannel: managerStatsSlackChannel
       ? `#${managerStatsSlackChannel}`
       : null,
