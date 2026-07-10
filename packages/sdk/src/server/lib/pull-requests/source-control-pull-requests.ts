@@ -392,15 +392,17 @@ async function createOrUpdateGitHubPullRequest({
   if (pullRequest) {
     action = 'updated';
     targetBranch = resolveTargetBranchForUpdate(input, pullRequest.base?.ref);
+    // An update never sends base: an explicit targetBranch already scoped
+    // the lookup to that base, and an omitted one means "keep the existing
+    // base". Retargeting an open pull request is not something this tool
+    // does; an explicit targetBranch with no matching pull request opens a
+    // new one against that base instead.
     const { data } = await octokit.rest.pulls.update({
       owner,
       repo,
       pull_number: pullRequest.number,
       title: input.title,
       body: input.body,
-      // Only retarget when the agent asked for a base explicitly; an omitted
-      // targetBranch means "keep the existing base".
-      ...(input.targetBranch ? { base: input.targetBranch } : {}),
     });
     pullRequest = data;
   } else {
@@ -716,6 +718,17 @@ async function createOrUpdateGiteaPullRequest({
   };
 }
 
+const GITEA_PULLS_PAGE_SIZE = 50;
+const GITEA_PULLS_MAX_PAGES = 40;
+
+/**
+ * Gitea's pulls listing has no head/base filter, so matching happens
+ * client-side and must walk pages: stopping at the first page could
+ * falsely conclude no pull request exists for the source branch. The walk
+ * ends as soon as the caller has what it needs — one match when the target
+ * branch pins a unique head+base pair, two when an omitted targetBranch
+ * only needs enough to prove ambiguity.
+ */
 async function listGiteaPullRequests({
   apiBaseUrl,
   owner,
@@ -731,22 +744,38 @@ async function listGiteaPullRequests({
   token: string;
   fetchImpl: FetchImpl;
 }) {
-  const pullRequests = await requestJson({
-    fetchImpl,
-    url: buildApiUrl(
-      apiBaseUrl,
-      `/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/pulls`,
-      { state: 'open', limit: 50 },
-    ),
-    tokenHeader: { name: 'Authorization', value: `token ${token}` },
-    schema: giteaPullRequestListSchema,
-  });
+  const matches: z.infer<typeof giteaPullRequestSchema>[] = [];
+  const enoughMatches = input.targetBranch ? 1 : 2;
 
-  return pullRequests.filter(
-    (pullRequest) =>
-      pullRequest.head?.ref === input.sourceBranch &&
-      (!input.targetBranch || pullRequest.base?.ref === input.targetBranch),
-  );
+  for (let page = 1; page <= GITEA_PULLS_MAX_PAGES; page++) {
+    const pullRequests = await requestJson({
+      fetchImpl,
+      url: buildApiUrl(
+        apiBaseUrl,
+        `/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/pulls`,
+        { state: 'open', limit: GITEA_PULLS_PAGE_SIZE, page },
+      ),
+      tokenHeader: { name: 'Authorization', value: `token ${token}` },
+      schema: giteaPullRequestListSchema,
+    });
+
+    matches.push(
+      ...pullRequests.filter(
+        (pullRequest) =>
+          pullRequest.head?.ref === input.sourceBranch &&
+          (!input.targetBranch || pullRequest.base?.ref === input.targetBranch),
+      ),
+    );
+
+    if (
+      matches.length >= enoughMatches ||
+      pullRequests.length < GITEA_PULLS_PAGE_SIZE
+    ) {
+      break;
+    }
+  }
+
+  return matches;
 }
 
 async function createOrUpdateAdoPullRequest({

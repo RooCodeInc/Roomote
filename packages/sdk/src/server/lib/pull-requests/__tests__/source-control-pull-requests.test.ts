@@ -669,18 +669,20 @@ describe('optional targetBranch', () => {
     );
   });
 
-  it('still retargets a GitHub pull request when targetBranch is explicit', async () => {
+  it('scopes the lookup by base and updates without retargeting when targetBranch is explicit', async () => {
+    // The base-scoped lookup can only return a pull request that already
+    // targets the requested base, so the update never sends base.
     const existing = {
       number: 11,
       node_id: 'node-11',
       html_url: 'https://github.com/acme/web/pull/11',
       title: 'Old title',
       draft: false,
-      base: { ref: 'main' },
+      base: { ref: 'develop' },
     };
     const octokit = makeOctokit({
       list: [existing],
-      updated: { ...existing, title: '[Feature] X', base: { ref: 'develop' } },
+      updated: { ...existing, title: '[Feature] X' },
     });
 
     const result = await createOrUpdateSourceControlPullRequestForCloudJob({
@@ -691,10 +693,50 @@ describe('optional targetBranch', () => {
     expect(octokit.rest.pulls.list).toHaveBeenCalledWith(
       expect.objectContaining({ base: 'develop' }),
     );
-    expect(octokit.rest.pulls.update).toHaveBeenCalledWith(
+    expect(octokit.rest.pulls.update).toHaveBeenCalledTimes(1);
+    expect(octokit.rest.pulls.update.mock.calls[0]?.[0]).not.toHaveProperty(
+      'base',
+    );
+    expect(octokit.rest.pulls.create).not.toHaveBeenCalled();
+    expect(result).toMatchObject({
+      action: 'updated',
+      targetBranch: 'develop',
+    });
+  });
+
+  it('creates a new GitHub pull request against an explicit base the branch has no open PR for', async () => {
+    // A pull request from the same head to a different base is out of scope
+    // for the base-filtered lookup, so an explicit targetBranch opens a new
+    // pull request against that base instead of retargeting the other one.
+    const octokit = makeOctokit({
+      list: [],
+      created: {
+        number: 13,
+        node_id: 'node-13',
+        html_url: 'https://github.com/acme/web/pull/13',
+        title: '[Feature] X',
+        draft: true,
+        base: { ref: 'develop' },
+      },
+    });
+
+    const result = await createOrUpdateSourceControlPullRequestForCloudJob({
+      cloudJob: makeCloudJob({ repo: 'acme/web' }),
+      input: { ...baseInput, targetBranch: 'develop' },
+    });
+
+    expect(octokit.rest.pulls.list).toHaveBeenCalledWith(
       expect.objectContaining({ base: 'develop' }),
     );
-    expect(result.targetBranch).toBe('develop');
+    expect(octokit.rest.pulls.update).not.toHaveBeenCalled();
+    expect(octokit.rest.pulls.create).toHaveBeenCalledWith(
+      expect.objectContaining({ base: 'develop', head: 'feature/x' }),
+    );
+    expect(result).toMatchObject({
+      action: 'created',
+      number: 13,
+      targetBranch: 'develop',
+    });
   });
 
   it('rejects creating a GitHub pull request without targetBranch with actionable guidance', async () => {
@@ -874,6 +916,117 @@ describe('optional targetBranch', () => {
     expect(fetchImpl.mock.calls[1]?.[1]).toMatchObject({ method: 'PATCH' });
     expect(result).toMatchObject({
       action: 'updated',
+      targetBranch: 'develop',
+    });
+  });
+
+  function makeGiteaFillerPulls(count: number) {
+    return Array.from({ length: count }, (_, index) => ({
+      number: 100 + index,
+      title: `Other ${index}`,
+      html_url: `https://git.example.com/acme/tools/pulls/${100 + index}`,
+      draft: false,
+      head: { ref: `other/${index}` },
+      base: { ref: 'main' },
+    }));
+  }
+
+  const giteaMatchingPull = {
+    number: 3,
+    title: 'Old title',
+    html_url: 'https://git.example.com/acme/tools/pulls/3',
+    draft: false,
+    head: { ref: 'feature/x' },
+    base: { ref: 'develop' },
+  };
+
+  it('walks Gitea pages until it finds the pull request for the source branch', async () => {
+    mockRepositoriesFindFirst.mockResolvedValue({
+      installationId: null,
+      externalRepoId: '7',
+      fullName: 'acme/tools',
+      htmlUrl: 'https://git.example.com/acme/tools',
+    });
+    const fetchImpl = vi
+      .fn()
+      // Full first page without the branch's pull request must not end the
+      // search.
+      .mockResolvedValueOnce(jsonResponse(makeGiteaFillerPulls(50)))
+      .mockResolvedValueOnce(jsonResponse([giteaMatchingPull]))
+      .mockResolvedValueOnce(
+        jsonResponse({
+          number: 3,
+          title: '[Feature] X',
+          html_url: 'https://git.example.com/acme/tools/pulls/3',
+          draft: false,
+        }),
+      );
+
+    const result = await createOrUpdateSourceControlPullRequestForCloudJob({
+      cloudJob: makeCloudJob({
+        repo: 'acme/tools',
+        sourceControlProvider: 'gitea',
+      }),
+      input: {
+        ...baseInput,
+        repositoryFullName: 'acme/tools',
+        sourceControlProvider: 'gitea' as const,
+      },
+      fetchImpl,
+    });
+
+    expect(String(fetchImpl.mock.calls[0]?.[0])).toContain('page=1');
+    expect(String(fetchImpl.mock.calls[1]?.[0])).toContain('page=2');
+    expect(fetchImpl.mock.calls[2]?.[1]).toMatchObject({ method: 'PATCH' });
+    expect(result).toMatchObject({
+      action: 'updated',
+      number: 3,
+      targetBranch: 'develop',
+    });
+  });
+
+  it('stops paging Gitea once an explicit targetBranch match is found', async () => {
+    mockRepositoriesFindFirst.mockResolvedValue({
+      installationId: null,
+      externalRepoId: '7',
+      fullName: 'acme/tools',
+      htmlUrl: 'https://git.example.com/acme/tools',
+    });
+    const fetchImpl = vi
+      .fn()
+      // A full page that already contains the head+base match: no second
+      // list request should follow.
+      .mockResolvedValueOnce(
+        jsonResponse([...makeGiteaFillerPulls(49), giteaMatchingPull]),
+      )
+      .mockResolvedValueOnce(
+        jsonResponse({
+          number: 3,
+          title: '[Feature] X',
+          html_url: 'https://git.example.com/acme/tools/pulls/3',
+          draft: false,
+        }),
+      );
+
+    const result = await createOrUpdateSourceControlPullRequestForCloudJob({
+      cloudJob: makeCloudJob({
+        repo: 'acme/tools',
+        sourceControlProvider: 'gitea',
+      }),
+      input: {
+        ...baseInput,
+        repositoryFullName: 'acme/tools',
+        sourceControlProvider: 'gitea' as const,
+        targetBranch: 'develop',
+      },
+      fetchImpl,
+    });
+
+    expect(fetchImpl).toHaveBeenCalledTimes(2);
+    expect(fetchImpl.mock.calls[1]?.[1]).toMatchObject({ method: 'PATCH' });
+    expect(result).toMatchObject({
+      action: 'updated',
+      number: 3,
       targetBranch: 'develop',
     });
   });
