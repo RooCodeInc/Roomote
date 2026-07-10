@@ -347,6 +347,8 @@ export const PromptInput = forwardRef<PromptInputHandle, PromptInputProps>(
       [focusTextarea, insertFile, insertCommand],
     );
 
+    const cancelledByName = currentUserInfo?.userName ?? user?.name ?? null;
+
     const handleCancel = useCallback(async () => {
       if (cancellingRef.current) {
         return;
@@ -355,13 +357,18 @@ export const PromptInput = forwardRef<PromptInputHandle, PromptInputProps>(
       cancellingRef.current = true;
 
       try {
-        await client?.commands.cancelTask.mutate();
+        await client?.commands.cancelTask.mutate({
+          cancelledBy: {
+            ...(cancelledByName ? { name: cancelledByName } : {}),
+            source: 'web',
+          },
+        });
       } catch (err) {
         console.error('[sandbox] cancelTask error:', err);
       } finally {
         cancellingRef.current = false;
       }
-    }, [client]);
+    }, [client, cancelledByName]);
 
     const handleSubmit = useCallback(
       async (message: PromptInputMessage) => {

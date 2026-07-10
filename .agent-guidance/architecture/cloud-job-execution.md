@@ -442,7 +442,7 @@ Harnesses:
   are persisted as Roomote runtime subagent-start tool calls. The harness arms
   a per-spawn subagent watchdog (keyed to the child session id from the task
   tool part metadata, `sessionId` or `jobId`) with two deadlines: a total run
-  timeout (default 12 minutes, `ROOMOTE_SUBAGENT_TASK_TIMEOUT_MS`) and a
+  timeout (default 30 minutes, `ROOMOTE_SUBAGENT_TASK_TIMEOUT_MS`) and a
   sliding inactivity deadline (default 3 minutes,
   `ROOMOTE_SUBAGENT_TASK_INACTIVITY_TIMEOUT_MS`) refreshed by every
   child-session event (streamed text, tool state, message completion). The
@@ -457,7 +457,13 @@ Harnesses:
   child that goes silent between tools past the inactivity window — or any
   spawn that exceeds the total timeout — has its child sessions aborted so the
   parent turn continues with the aborted task result instead of hanging; a
-  terminal tool status normally disarms the watchdog. Background launches
+  terminal tool status, or a child `session.error` (the abort surfaces as a
+  MessageAbortedError attributed to the child), disarms the watchdog. Expiry
+  aborts the watchdog's own captured child session; when the child session id
+  was never captured it falls back to listing the parent's children, but skips
+  any child still owned by another live watchdog so a stale watchdog cannot
+  take down a healthy concurrent sibling (all subagents of one turn share the
+  parent session). Background launches
   (`background: true` in the task tool input or background metadata) complete
   the parent tool part instantly while the child session keeps working, so a
   completed background part keeps the watchdog armed; the watchdog disarms
@@ -512,11 +518,30 @@ Persistence model:
   active session as hidden follow-up prompts. The response envelope preserves
   `submitted` versus `cancelled` resolution, and the hidden answer replay
   carries the answering user's `userId` so queued-prompt preparation can
-  refresh actor-scoped MCP state at the next turn boundary. For Slack-backed
+  refresh actor-scoped MCP state at the next turn boundary. An explicit user
+  stop (web Stop button, Slack/Telegram cancel, `POST /api/tasks/:taskId/stop`)
+  threads `cancelledBy` attribution through the sandbox `cancelTask`
+  procedure; the harness then flushes the aborted turn's partial assistant
+  output as its persisted message, emits cancelled responses for any pending
+  questions, persists a `roomote_runtime.task_cancelled` marker envelope
+  (rendered by the web transcript as a centered "Stopped by …" divider), and
+  drops trailing post-abort assistant stream/finalize events until the next
+  prompt. API-side stop paths (`stopTaskJob` and the MCP direct cancel)
+  additionally persist `cloud_jobs.cancelRequestedAt` before invoking the
+  sandbox cancel, so a sandbox that dies mid-cancel still leaves durable
+  evidence that the stop was deliberate. Internal cancels (steer replay,
+  env-var resumable stop, task replacement) carry no attribution, emit no
+  marker, and do not set `cancelRequestedAt`. For Slack-backed
   tasks, the harness evaluates the generated stop hook before completion; when
   a terminal Slack-visible closeout is missing, it sends the hook reminder back
   as a hidden queued prompt and withholds `TaskCompleted` until the closeout is
-  satisfied or the guard reaches its retry cap.
+  satisfied or the guard reaches its retry cap. Because that reminder awaits a
+  fresh turn to re-evaluate, a fail-safe deadline (default 10 minutes,
+  `ROOMOTE_STOP_HOOK_REMINDER_STALL_TIMEOUT_MS`) guards against a session that
+  wedges and never produces the follow-up turn: on expiry it force-completes
+  the turn (emits `TaskCompleted`) so the job reaches a terminal state instead
+  of hanging `running` while the sandbox keeps heart-beating. Any normal turn
+  re-entry or teardown disarms it first, so it only fires on genuine silence.
 - Worker startup log UIs rely on provider-side command output streaming when the compute provider supports it. The worker no longer mirrors harness logs into `task_runs.log`.
 
 ### Harness Transport Boundary
@@ -561,6 +586,7 @@ Enqueue + processing:
 - `sleepCheckJob()` writes durable per-job decision events into `task_run_events` for candidate dedupe, instance-status checks, deadline extensions, snapshot handoff claims, and failure paths so operators can reconstruct why a given job was or was not snapshotted. Snapshot handoffs include a `snapshotIntentId`, trigger path, and BullMQ queue job id so later `snapshot_request` and `snapshot_queue` events can be correlated back to the sleep-check owner.
 - Once a worker has already transitioned a resumable task to `idle` and BullMQ has claimed the external sleep action, late worker-side finalization errors are treated as non-fatal noise rather than downgrading the task into a failed terminal state. In that phase, BullMQ snapshot processing is the source of truth for the eventual completion outcome.
 - Stale-worker recovery now scans both `running` and `idle` jobs on snapshot-capable providers so resumable sessions that lose their worker heartbeat while waiting for follow-up can still be snapshotted or finalized with an explicit audit trail instead of going silent until manual cancellation.
+- Before finalizing a swept job as failed (instance gone, or destroy-and-fail for non-resumable types), `sleepCheckJob()` re-reads `cloud_jobs.cancelRequestedAt`. When a user stop was requested, the job is finalized as `canceled` instead of `failed`, and `finishCloudJob` independently suppresses Slack/Teams/Linear failure notifications for any `failed` finalization of a cancel-requested job — so a deliberately stopped task never posts a "ran into a hiccup" failure reply.
 - While the worker is still alive, it also sends periodic `recordComputeProviderUsage(... lifecycleAction='running')` updates on the worker-heartbeat cadence. Those writes provide a rolling estimate of the active task-owned compute segment before any BullMQ teardown action happens.
 - Fresh launch paths snapshot the effective provider compute resources onto
   `task_runs` so later teardown accounting does not have to guess which
@@ -674,7 +700,7 @@ See [Database Architecture](./database.md) for the full column inventory; the ru
 `task_runs` (`packages/db/src/schema.ts`):
 
 - Identity: `id`, `taskId` (real FK → `tasks`), `kind` (`fresh` \| `resume`), `sourceRunId`, `payloadKind`, `actingUserId`, `harness`
-- Lifecycle: `status`, `taskPhase`, `createdAt`, `dequeuedAt`, `provisionStartedAt`, `provisionReadyAt`, `startedAt`, `setupCompletedAt`, `harnessStartedAt`, `runtimeTaskStartedAt`, `firstAssistantOutputAt`, `completedAt`, `canceledAt`
+- Lifecycle: `status`, `taskPhase`, `createdAt`, `dequeuedAt`, `provisionStartedAt`, `provisionReadyAt`, `startedAt`, `setupCompletedAt`, `harnessStartedAt`, `runtimeTaskStartedAt`, `firstAssistantOutputAt`, `completedAt`, `cancelRequestedAt` (user stop intent, set by stop paths before the sandbox cancel), `canceledAt`
 - Launch mode (captured once per run): `launchMode` (`fresh` \| `environment_snapshot` \| `task_snapshot`); provisioning latency is only comparable within the same launch mode
 - Runtime routing: `vendor`, `machineId`, `sandboxCmdId`, `machineDomains`, `proxyPorts`, `sandboxServerUrl`
 - Worker runtime identity: `workerReleaseTag`, `workerVersion`, `workerCommit` capture the actual worker artifact metadata reported by the running worker during bootstrap

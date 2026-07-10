@@ -50,6 +50,7 @@ export async function stopTask(
     const result = await stopTaskJob({
       job,
       authUserId: auth.userId,
+      cancelledBy: { source: 'api' },
     });
 
     if (!result.success) {

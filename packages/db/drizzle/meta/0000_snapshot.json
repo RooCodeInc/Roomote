@@ -1,5 +1,5 @@
 {
-  "id": "8b7a7aed-9afb-439d-b613-ea5a8d900fec",
+  "id": "1b92789b-5d37-4e9a-bd65-e16f8fb9cf78",
   "prevId": "00000000-0000-0000-0000-000000000000",
   "version": "7",
   "dialect": "postgresql",
@@ -6741,6 +6741,12 @@
         },
         "completed_at": {
           "name": "completed_at",
+          "type": "timestamp",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "cancel_requested_at": {
+          "name": "cancel_requested_at",
           "type": "timestamp",
           "primaryKey": false,
           "notNull": false

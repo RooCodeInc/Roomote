@@ -1014,6 +1014,13 @@ export const taskRuns = pgTable(
     runtimeTaskStartedAt: timestamp('runtime_task_started_at'),
     firstAssistantOutputAt: timestamp('first_assistant_output_at'),
     completedAt: timestamp('completed_at'),
+    /**
+     * When a user-initiated stop was requested for this job. Stop paths set
+     * this before asking the sandbox to cancel so recovery sweeps and
+     * finishCloudJob can tell a deliberate stop from a runtime failure even
+     * if the worker dies before the row reaches a terminal state.
+     */
+    cancelRequestedAt: timestamp('cancel_requested_at'),
     canceledAt: timestamp('canceled_at'),
     launchMode: text('launch_mode').$type<ComputeProviderLaunchMode>(),
   },

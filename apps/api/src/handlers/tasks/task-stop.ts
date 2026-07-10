@@ -1,6 +1,13 @@
 import { TRPCClientError } from '@trpc/client';
 import { withSandboxServerRpcClient } from '@roomote/sdk/server';
-import { cancelTaskRunDirect, db, eq, taskRuns } from '@roomote/db/server';
+import {
+  and,
+  cancelTaskRunDirect,
+  db,
+  eq,
+  isNull,
+  taskRuns,
+} from '@roomote/db/server';
 import { type CloudTaskStatus, isExitedCloudTaskStatus } from '@roomote/types';
 
 interface StopTaskJob {
@@ -8,6 +15,15 @@ interface StopTaskJob {
   status: CloudTaskStatus;
   sandboxServerUrl: string | null;
   actingUserId: string | null;
+}
+
+/**
+ * Attribution for the user stop, forwarded to the sandbox so the transcript
+ * gets a visible `task_cancelled` marker naming who stopped the task.
+ */
+interface StopTaskAttribution {
+  name?: string;
+  source?: string;
 }
 
 type StopTaskJobResult =
@@ -34,6 +50,19 @@ async function findCurrentStopTaskJob(
       },
     })) ?? null
   );
+}
+
+/**
+ * Persist the stop request on the cloud job row before the cancel is carried
+ * out. If the sandbox dies before the row reaches a terminal state, recovery
+ * sweeps use this to finalize the job as canceled instead of misreporting the
+ * deliberate stop as a runtime failure. Keeps the earliest request time.
+ */
+async function markCancelRequested(jobId: number): Promise<void> {
+  await db
+    .update(taskRuns)
+    .set({ cancelRequestedAt: new Date() })
+    .where(and(eq(taskRuns.id, jobId), isNull(taskRuns.cancelRequestedAt)));
 }
 
 async function cancelTaskJobDirect(jobId: number): Promise<boolean> {
@@ -111,8 +140,9 @@ async function readCurrentStopTaskResolution(
 async function stopTaskSandboxJob(params: {
   job: StopTaskJob & { sandboxServerUrl: string };
   authUserId?: string | null;
+  cancelledBy?: StopTaskAttribution;
 }): Promise<StopTaskJobResult> {
-  const { job, authUserId } = params;
+  const { job, authUserId, cancelledBy } = params;
   const tokenUserId = authUserId ?? job.actingUserId;
 
   if (!tokenUserId) {
@@ -123,12 +153,17 @@ async function stopTaskSandboxJob(params: {
     };
   }
 
+  await markCancelRequested(job.id);
+
   try {
     await withSandboxServerRpcClient({
       cloudJobId: job.id,
       userId: tokenUserId,
       sandboxServerUrl: job.sandboxServerUrl,
-      call: (client) => client.commands.cancelTask.mutate(),
+      call: (client) =>
+        client.commands.cancelTask.mutate(
+          cancelledBy ? { cancelledBy } : undefined,
+        ),
     });
 
     return { success: true, mode: 'sandbox_stop' };
@@ -149,8 +184,10 @@ export async function stopTaskJob(params: {
   job: StopTaskJob;
   authUserId?: string | null;
   allowDirectCancelWithoutSandbox?: boolean;
+  cancelledBy?: StopTaskAttribution;
 }): Promise<StopTaskJobResult> {
-  const { job, authUserId, allowDirectCancelWithoutSandbox } = params;
+  const { job, authUserId, allowDirectCancelWithoutSandbox, cancelledBy } =
+    params;
 
   const initialResolution = resolveStopTaskJob(job);
 
@@ -162,6 +199,7 @@ export async function stopTaskJob(params: {
     return await stopTaskSandboxJob({
       job: initialResolution.job,
       authUserId,
+      cancelledBy,
     });
   }
 
@@ -175,6 +213,7 @@ export async function stopTaskJob(params: {
     return await stopTaskSandboxJob({
       job: refreshedResolution.job,
       authUserId,
+      cancelledBy,
     });
   }
 
@@ -192,6 +231,7 @@ export async function stopTaskJob(params: {
     return await stopTaskSandboxJob({
       job: racedResolution.job,
       authUserId,
+      cancelledBy,
     });
   }
 

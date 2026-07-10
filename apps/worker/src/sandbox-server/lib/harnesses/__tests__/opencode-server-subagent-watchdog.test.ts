@@ -105,14 +105,18 @@ function createTaskToolPart(options: {
   metadata?: Record<string, unknown>;
   output?: string;
   input?: Record<string, unknown>;
+  callId?: string;
+  messageId?: string;
 }) {
+  const callId = options.callId ?? 'call_task_1';
+
   return {
-    id: 'prt_task_1',
+    id: `prt_${callId}`,
     sessionID: 'ses_1',
-    messageID: 'msg_1',
+    messageID: options.messageId ?? 'msg_1',
     type: 'tool',
     tool: 'task',
-    callID: 'call_task_1',
+    callID: callId,
     state: {
       status: options.status ?? 'running',
       input: {
@@ -277,6 +281,109 @@ describe('OpenCode subagent watchdog', () => {
       expect(client.abort).toHaveBeenCalledWith(
         expect.objectContaining({ sessionId: 'child_2' }),
       );
+    } finally {
+      harness.dispose();
+    }
+  });
+
+  it('does not abort sibling child sessions still owned by a live watchdog', async () => {
+    const { client, harness } = createHarness();
+
+    try {
+      await connectHarness(harness, client);
+      vi.useFakeTimers();
+
+      // Watchdog A: no child session id ever captured, so its expiry takes the
+      // list-all-children fallback.
+      await client.emit({
+        type: 'message.part.updated',
+        properties: {
+          part: createTaskToolPart({ status: 'pending', callId: 'call_A' }),
+        },
+      });
+
+      // Watchdog B is armed half a window later, so at A's deadline B is still
+      // live (its own deadline is further out). B owns child session
+      // ses_child_B.
+      await vi.advanceTimersByTimeAsync(SUBAGENT_TASK_TIMEOUT_MS / 2);
+      await client.emit({
+        type: 'message.part.updated',
+        properties: {
+          part: createTaskToolPart({
+            status: 'running',
+            callId: 'call_B',
+            metadata: { sessionId: 'ses_child_B' },
+          }),
+        },
+      });
+
+      // The parent session lists both children when A's fallback runs.
+      client.children.mockResolvedValueOnce([
+        { id: 'ses_child_A', parentID: 'ses_1' },
+        { id: 'ses_child_B', parentID: 'ses_1' },
+      ]);
+
+      // Advance to A's total-timeout deadline (B still has half a window left).
+      await vi.advanceTimersByTimeAsync(SUBAGENT_TASK_TIMEOUT_MS / 2);
+
+      expect(client.children).toHaveBeenCalledTimes(1);
+      // Only the orphaned child is aborted; the sibling owned by live watchdog
+      // B is spared.
+      expect(client.abort).toHaveBeenCalledTimes(1);
+      expect(client.abort).toHaveBeenCalledWith(
+        expect.objectContaining({ sessionId: 'ses_child_A' }),
+      );
+      expect(client.abort).not.toHaveBeenCalledWith(
+        expect.objectContaining({ sessionId: 'ses_child_B' }),
+      );
+    } finally {
+      harness.dispose();
+    }
+  });
+
+  it('disarms a watchdog when its child session errors (aborted elsewhere)', async () => {
+    const { client, harness } = createHarness();
+
+    try {
+      await connectHarness(harness, client);
+
+      // Establish the parent session so the child error routes through the
+      // child-session branch of the dispatcher.
+      harness.sendCommand({
+        commandName: TaskCommandName.StartNewTask,
+        data: { text: 'Do work.', visibleInTranscript: true },
+      });
+      await vi.waitFor(() => {
+        expect(client.createSession).toHaveBeenCalled();
+      });
+
+      vi.useFakeTimers();
+
+      await client.emit({
+        type: 'message.part.updated',
+        properties: {
+          part: createTaskToolPart({
+            status: 'running',
+            metadata: { sessionId: 'ses_child_1' },
+          }),
+        },
+      });
+
+      // The child is aborted by some other path; OpenCode surfaces that as a
+      // session.error attributed to the child. The watchdog must disarm so it
+      // never fires its own deadline later.
+      await client.emit({
+        type: 'session.error',
+        properties: {
+          sessionID: 'ses_child_1',
+          error: { name: 'MessageAbortedError' },
+        },
+      });
+
+      await vi.advanceTimersByTimeAsync(SUBAGENT_TASK_TIMEOUT_MS * 2);
+
+      expect(client.children).not.toHaveBeenCalled();
+      expect(client.abort).not.toHaveBeenCalled();
     } finally {
       harness.dispose();
     }

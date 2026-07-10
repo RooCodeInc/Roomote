@@ -14,6 +14,7 @@ const {
   mockCreateComputeProviderMutationEventRecorder,
   mockRecordCloudJobEvent,
   mockMarkTaskStartParallelCountEndedAt,
+  mockDbQueryTaskRunsFindFirst,
   captureBullMqMessageMock,
   transactionFn,
   eqFn,
@@ -75,6 +76,7 @@ const {
     mockCreateComputeProviderMutationEventRecorder: vi.fn() as AnyMock,
     mockRecordCloudJobEvent: vi.fn() as AnyMock,
     mockMarkTaskStartParallelCountEndedAt: vi.fn() as AnyMock,
+    mockDbQueryTaskRunsFindFirst: vi.fn() as AnyMock,
     captureBullMqMessageMock: vi.fn() as AnyMock,
     transactionFn: vi.fn() as AnyMock,
     eqFn,
@@ -120,6 +122,11 @@ vi.mock('@roomote/db/server', () => ({
     select: selectFn,
     transaction: transactionFn,
     update: updateFn,
+    query: {
+      taskRuns: {
+        findFirst: mockDbQueryTaskRunsFindFirst,
+      },
+    },
   },
   taskRuns: {
     machineId: 'machineId',
@@ -237,6 +244,8 @@ describe('sleepCheckJob', () => {
     });
     returningFn.mockResolvedValue([]);
     mockFinishCloudJob.mockResolvedValue(undefined);
+    // No stop request persisted on the row unless a test opts in.
+    mockDbQueryTaskRunsFindFirst.mockResolvedValue(undefined);
   });
 
   afterEach(() => {
@@ -1100,6 +1109,47 @@ describe('sleepCheckJob', () => {
     );
   });
 
+  it('finalizes stale-worker jobs as canceled when a stop was requested and the sandbox is already gone', async () => {
+    const mockJob = {
+      id: 101,
+      machineId: 'sb-gone-after-stop',
+      payloadKind: TaskPayloadKind.StandardTask,
+      status: CloudTaskStatus.Running,
+      taskPhase: 'stopped',
+      vendor: 'modal',
+      workerHeartbeatAt: new Date(Date.now() - 5 * 60 * 1_000),
+      snapshotId: null,
+      sleepRequestedAt: null,
+      snapshotRequestedAt: null,
+      sleepAt: null,
+    };
+
+    mockJobQueries({ staleJobs: [mockJob] });
+    mockGetInstanceStatus.mockResolvedValue({ status: 'stopped' });
+    mockDbQueryTaskRunsFindFirst.mockResolvedValue({
+      cancelRequestedAt: new Date(),
+    });
+
+    await sleepCheckJob();
+
+    expect(mockCreateSnapshot).not.toHaveBeenCalled();
+    expect(mockFinishCloudJob).toHaveBeenCalledWith({
+      id: 101,
+      status: CloudTaskStatus.Canceled,
+      error:
+        'Worker heartbeat stale and instance sb-gone-after-stop is stopped',
+    });
+    expect(mockRecordCloudJobEvent).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({
+        runId: 101,
+        eventType: 'decision',
+        source: 'sleep_check',
+        message: expect.stringContaining('after its stop request'),
+      }),
+    );
+  });
+
   it('does not fail stale-worker jobs while the sandbox is snapshotting', async () => {
     const mockJob = {
       id: 96,
@@ -1260,6 +1310,53 @@ describe('sleepCheckJob', () => {
       expect.objectContaining({
         component: 'sleep-check',
         signal: 'sandbox-destroy',
+      }),
+    );
+  });
+
+  it('destroys and cancels stale non-resumable jobs when a stop was requested', async () => {
+    const mockJob = {
+      id: 102,
+      machineId: 'sb-non-resumable-stopped',
+      payloadKind: TaskPayloadKind.GithubPrReview,
+      status: CloudTaskStatus.Running,
+      taskPhase: 'waiting_for_prompt',
+      vendor: 'modal',
+      workerHeartbeatAt: new Date(Date.now() - 5 * 60 * 1_000),
+      snapshotId: null,
+      sleepRequestedAt: null,
+      snapshotRequestedAt: null,
+      sleepAt: null,
+    };
+
+    mockJobQueries({ staleJobs: [mockJob] });
+    mockGetInstanceStatus.mockResolvedValue({
+      status: 'running',
+      timeoutRemainingMs: 30 * 60 * 1_000,
+    });
+    mockDbQueryTaskRunsFindFirst.mockResolvedValue({
+      cancelRequestedAt: new Date(),
+    });
+
+    await sleepCheckJob();
+
+    expect(mockDestroyInstance).toHaveBeenCalledWith({
+      instanceId: 'sb-non-resumable-stopped',
+    });
+    expect(mockFinishCloudJob).toHaveBeenCalledWith({
+      id: 102,
+      status: CloudTaskStatus.Canceled,
+      error: 'Worker heartbeat stale for instance sb-non-resumable-stopped',
+    });
+    expect(mockRecordCloudJobEvent).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({
+        runId: 102,
+        eventType: 'decision',
+        source: 'sleep_check',
+        details: expect.objectContaining({
+          decision: 'destroy_and_cancel_after_stop_request',
+        }),
       }),
     );
   });

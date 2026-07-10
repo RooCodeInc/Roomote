@@ -33,6 +33,10 @@ export async function cancelTaskRunDirect(params: {
       .update(taskRuns)
       .set({
         status: CloudTaskStatus.Canceled,
+        // Stamp the stop intent alongside the terminal write so a later
+        // Failed finalization (e.g. the sandbox dying mid-cancel) reports as
+        // canceled, not as a runtime failure.
+        cancelRequestedAt: endedAt,
         canceledAt: endedAt,
         ...(params.error ? { error: params.error } : {}),
       })

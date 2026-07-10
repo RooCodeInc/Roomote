@@ -226,6 +226,21 @@ export const finishCloudJob = async ({
     });
   }
 
+  // A stop request persisted on the row (cancelRequestedAt) means a Failed
+  // finalization is the fallout of a deliberate user stop — e.g. the sandbox
+  // died before the cancel completed — so failure reporting would tell the
+  // user a task they stopped "ran into a hiccup". Downstream, this suppresses
+  // the Slack/Teams/Linear failure notifications and reports GitHub-facing
+  // terminal outcomes as canceled rather than failed.
+  const failedAfterStopRequest =
+    status === CloudTaskStatus.Failed && job.cancelRequestedAt != null;
+
+  if (failedAfterStopRequest) {
+    console.log(
+      `[finishCloudJob] Reporting the failed finalization of job ${id} as canceled: a stop was requested at ${job.cancelRequestedAt!.toISOString()}`,
+    );
+  }
+
   if (
     status === CloudTaskStatus.Completed ||
     status === CloudTaskStatus.Failed
@@ -288,7 +303,11 @@ export const finishCloudJob = async ({
 
   // Slack failure notification: post a thread reply when the job failed and
   // was triggered from Slack (the task carries a Slack thread binding).
-  if (status === CloudTaskStatus.Failed && task.slackThreadTs) {
+  if (
+    status === CloudTaskStatus.Failed &&
+    !failedAfterStopRequest &&
+    task.slackThreadTs
+  ) {
     try {
       await sendSlackFailureNotification(job, sanitizedError);
     } catch (err) {
@@ -304,6 +323,7 @@ export const finishCloudJob = async ({
   // was triggered from Teams (payload carries Teams communication metadata).
   if (
     status === CloudTaskStatus.Failed &&
+    !failedAfterStopRequest &&
     !task.slackThreadTs &&
     getCommunicationProviderFromTaskPayload(job.payload) === 'teams'
   ) {
@@ -354,7 +374,11 @@ export const finishCloudJob = async ({
 
   // Linear failure notification: emit an error activity when the job failed
   // and was triggered from Linear (the task carries a Linear session binding).
-  if (status === CloudTaskStatus.Failed && task.linearSessionId) {
+  if (
+    status === CloudTaskStatus.Failed &&
+    !failedAfterStopRequest &&
+    task.linearSessionId
+  ) {
     try {
       await sendLinearFailureNotification(job, sanitizedError);
     } catch (err) {
@@ -369,7 +393,8 @@ export const finishCloudJob = async ({
   // GitHub PR conflict resolution comment
   if (
     task.workflow === 'pr_conflict_resolve' &&
-    (status === CloudTaskStatus.Completed || status === CloudTaskStatus.Failed)
+    (status === CloudTaskStatus.Completed ||
+      (status === CloudTaskStatus.Failed && !failedAfterStopRequest))
   ) {
     try {
       await postConflictResolutionComment(job, status, sanitizedError);
@@ -407,6 +432,11 @@ async function cleanupGithubPrReviewArtifacts(
     | CloudTaskStatus.Canceled
     | CloudTaskStatus.Idle,
 ): Promise<void> {
+  // A Failed finalization after a persisted stop request is a deliberate stop;
+  // GitHub-facing outcomes report it as canceled (see finishCloudJob).
+  const failedAfterStopRequest =
+    status === CloudTaskStatus.Failed && job.cancelRequestedAt != null;
+
   let prRows: TaskPullRequest[];
 
   try {
@@ -493,7 +523,7 @@ async function cleanupGithubPrReviewArtifacts(
         const outcome =
           status === CloudTaskStatus.Completed
             ? 'completed'
-            : status === CloudTaskStatus.Failed
+            : status === CloudTaskStatus.Failed && !failedAfterStopRequest
               ? 'failed'
               : 'canceled';
         const terminalStatus = buildTerminalReviewStatus({

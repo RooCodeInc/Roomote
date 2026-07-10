@@ -52,6 +52,7 @@ export async function cancelTask(
         .update(taskRuns)
         .set({
           status: CloudTaskStatus.Canceled,
+          cancelRequestedAt: endedAt,
           canceledAt: endedAt,
         })
         .where(eq(taskRuns.id, job.id));

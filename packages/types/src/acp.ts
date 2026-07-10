@@ -31,6 +31,7 @@ export const ACP_ENVELOPE_EVENT_TYPES = {
   QueuedMessagesUpdate: 'roomote_runtime.queued_messages_update',
   RequestUserInput: 'roomote_runtime.request_user_input',
   RequestUserInputResponse: 'roomote_runtime.request_user_input_response',
+  TaskCancelled: 'roomote_runtime.task_cancelled',
 } as const;
 
 export type AcpEnvelopeEventType =
@@ -176,6 +177,38 @@ export interface AcpRequestUserInputResponsePayload {
   callId: string;
   answers: AcpRequestUserInputAnswers;
   resolution: 'submitted' | 'cancelled';
+}
+
+/**
+ * Payload of the persisted `task_cancelled` marker envelope emitted when a
+ * user explicitly stops an in-flight turn. Internal aborts (steer replay,
+ * env-var resumable stop) do not emit this marker.
+ */
+export interface AcpTaskCancelledPayload {
+  sessionId: string;
+  /** Display name of the user who stopped the task, when known. */
+  cancelledByName?: string;
+  /** Surface the stop came from, e.g. `web`, `slack`, `telegram`, `api`. */
+  source?: string;
+}
+
+export function parseAcpTaskCancelledPayload(
+  payload: Record<string, unknown> | null,
+): AcpTaskCancelledPayload | null {
+  const sessionId = asStringOrNull(payload?.sessionId);
+
+  if (!sessionId) {
+    return null;
+  }
+
+  const cancelledByName = asStringOrNull(payload?.cancelledByName);
+  const source = asStringOrNull(payload?.source);
+
+  return {
+    sessionId,
+    ...(cancelledByName ? { cancelledByName } : {}),
+    ...(source ? { source } : {}),
+  };
 }
 
 export interface ParsedAcpRequestUserInputReply {
@@ -610,6 +643,7 @@ export type AcpMessageKind =
   | 'tool_call'
   | 'tool_result'
   | 'plan'
+  | 'task_cancelled'
   | 'unknown';
 
 export function inferAcpMessageKind(
@@ -630,6 +664,8 @@ export function inferAcpMessageKind(
     case ACP_ENVELOPE_EVENT_TYPES.ToolCallUpdate:
     case ACP_ENVELOPE_EVENT_TYPES.ToolResult:
       return 'tool_result';
+    case ACP_ENVELOPE_EVENT_TYPES.TaskCancelled:
+      return 'task_cancelled';
     default:
       return 'unknown';
   }

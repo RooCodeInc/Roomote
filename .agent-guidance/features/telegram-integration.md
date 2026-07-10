@@ -199,6 +199,15 @@ current user.
   (`apps/api/src/handlers/mcp/slack.ts`). Image artifacts are sent as native
   photos via `sendPhoto` (Telegram fetches the artifact URL), falling back to
   a caption-plus-link text message when Telegram rejects the URL.
+- While a reply is being delivered, `sendTelegramThreadReply` shows a
+  "typing…" chat action (`provider.sendChatAction`) on a ~4s heartbeat
+  (`startTelegramTypingHeartbeat`), stopping the instant delivery finishes.
+  The reply text is composed on the worker before the API is called, so this
+  spans the delivery window (chunks, photo fetch, footer), not the work
+  phase — it never lingers during idle or long silences, and a chat-action
+  failure never blocks the reply. Telegram auto-clears the action after ~5s
+  and when the message lands, so it is a fire-and-forget burst, not a state
+  to turn off.
 - Inbound messages that are queued to an active job or accepted as task
   entries get an eyes-emoji ack reaction (`ackTelegramMessageBestEffort`),
   mirroring Slack's ack. Bot reactions are limited to Telegram's fixed
@@ -272,9 +281,17 @@ codes, analogous to `slack_user_mappings`), routing confirmation with a
 manual workspace picker (same Yes/Nope-then-picker two-step as Slack, via
 inline keyboard + `editMessageText`; same 0.95 confidence gate but a ~5s
 auto-confirm vs Slack's 30s constant; router fallback shows the picker
-instead of silently launching in all repos). Unlike Slack there is no free-text correction
-while a confirmation is pending — a new message in the chat starts a fresh
-routing flow and invalidates the old card.
+instead of silently launching in all repos), and a "typing…" indicator while
+a reply is delivered (`sendChatAction` heartbeat, bounded to the send).
+Unlike Slack there is no free-text correction while a confirmation is
+pending — a new message in the chat starts a fresh routing flow and
+invalidates the old card.
+
+The typing indicator is scoped to reply delivery, not the work phase: there
+is no worker→API progress signal before a reply is composed (the worker
+sends the finished text), so the long silence between the eyes ack and the
+first reply is still unfilled. A "still working" status line during that
+silence remains a possible future addition (would reuse `editMessageText`).
 
 Not supported (Bot API or product limitations): thread/channel history reads,
 account-link education, MCP setup

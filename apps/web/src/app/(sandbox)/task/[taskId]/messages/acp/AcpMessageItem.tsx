@@ -3,6 +3,7 @@ import { memo, type ReactNode } from 'react';
 import type { AcpUiMessage } from './types';
 import { AcpCommandOutputMessage } from './AcpCommandOutputMessage';
 import { AcpReasoningMessage } from './AcpReasoningMessage';
+import { AcpTaskCancelledMessage } from './AcpTaskCancelledMessage';
 import { AcpTodoSectionMessage } from './AcpTodoSectionMessage';
 import { AcpTextMessage } from './AcpTextMessage';
 import { AcpToolMessage } from './AcpToolMessage';
@@ -45,6 +46,8 @@ function AcpMessageItemBase({
     case 'plan':
       // Displayed in the header.
       return null;
+    case 'task_cancelled':
+      return <AcpTaskCancelledMessage msg={msg} />;
     default:
       return <AcpUnknownMessage msg={msg} />;
   }

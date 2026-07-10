@@ -631,6 +631,26 @@ async function mergeSleepCheckCandidates(
   }
 }
 
+/**
+ * Terminal status for a swept job that can no longer keep running. User stop
+ * paths persist cancel_requested_at before asking the sandbox to cancel, so a
+ * job whose worker died mid-cancel is finalized as Canceled instead of being
+ * misreported (and notified) as a runtime failure. Reads a fresh row because
+ * the candidate batch may predate the stop request.
+ */
+async function resolveSweptJobFinalStatus(
+  jobId: number,
+): Promise<CloudTaskStatus.Failed | CloudTaskStatus.Canceled> {
+  const job = await db.query.taskRuns.findFirst({
+    where: eq(taskRuns.id, jobId),
+    columns: { cancelRequestedAt: true },
+  });
+
+  return job?.cancelRequestedAt
+    ? CloudTaskStatus.Canceled
+    : CloudTaskStatus.Failed;
+}
+
 async function handleTimedSleepCandidate(params: {
   job: SleepCheckJob;
   path: 'due_sleep' | 'hard_limit';
@@ -676,15 +696,19 @@ async function handleTimedSleepCandidate(params: {
       return { snapshotted: 0, shutDown: 0, failed: 0 };
     }
 
+    const finalStatus = await resolveSweptJobFinalStatus(job.id);
+
     await recordSleepCheckEvent(
       job,
-      'failed',
-      `${describeSleepCheckPath(path)} found active instance ${job.machineId} in status ${status}; failing the cloud job.`,
+      finalStatus === CloudTaskStatus.Canceled ? 'decision' : 'failed',
+      finalStatus === CloudTaskStatus.Canceled
+        ? `${describeSleepCheckPath(path)} found active instance ${job.machineId} in status ${status}; finalizing cloud job #${job.id} as canceled after its stop request.`
+        : `${describeSleepCheckPath(path)} found active instance ${job.machineId} in status ${status}; failing the cloud job.`,
       details,
     );
     await finishCloudJob({
       id: job.id,
-      status: CloudTaskStatus.Failed,
+      status: finalStatus,
       error: `${describeSleepCheckPath(path)} found active instance ${job.machineId} in status ${status}`,
     });
     return { snapshotted: 0, shutDown: 0, failed: 1 };
@@ -981,21 +1005,35 @@ async function handleHeartbeatRecoveryCandidate(params: {
       return { snapshotted: 0, failed: 0 };
     }
 
+    const finalStatus = await resolveSweptJobFinalStatus(job.id);
+
     await finishCloudJob({
       id: job.id,
-      status: CloudTaskStatus.Failed,
+      status: finalStatus,
       error: config.notRunning.failureError(job.machineId, status),
     });
 
-    await recordSleepCheckEvent(
-      job,
-      'failed',
-      config.notRunning.eventMessage(job.id, job.machineId, status),
-      details,
-    );
-    console.warn(
-      config.notRunning.consoleMessage(job.id, job.machineId, status),
-    );
+    if (finalStatus === CloudTaskStatus.Canceled) {
+      await recordSleepCheckEvent(
+        job,
+        'decision',
+        `Canceled cloud job #${job.id} after its stop request because instance ${job.machineId} was ${status}.`,
+        details,
+      );
+      console.warn(
+        `[sleepCheck] Canceled job #${job.id} after stop request: instance ${job.machineId} is ${status}`,
+      );
+    } else {
+      await recordSleepCheckEvent(
+        job,
+        'failed',
+        config.notRunning.eventMessage(job.id, job.machineId, status),
+        details,
+      );
+      console.warn(
+        config.notRunning.consoleMessage(job.id, job.machineId, status),
+      );
+    }
     return { snapshotted: 0, failed: 1 };
   }
 
@@ -1020,23 +1058,41 @@ async function handleHeartbeatRecoveryCandidate(params: {
     'sleepCheck',
   );
 
+  const finalStatus = await resolveSweptJobFinalStatus(job.id);
+
   await finishCloudJob({
     id: job.id,
-    status: CloudTaskStatus.Failed,
+    status: finalStatus,
     error: config.destroyAndFail.failureError(job.machineId),
   });
 
-  await recordSleepCheckEvent(
-    job,
-    'failed',
-    config.destroyAndFail.eventMessage(job.id, job.machineId),
-    {
-      path: config.path,
-      decision: 'destroy_and_fail_non_resumable',
-      ...buildSleepCheckDetails(job),
-    },
-  );
-  console.warn(config.destroyAndFail.consoleMessage(job.id));
+  if (finalStatus === CloudTaskStatus.Canceled) {
+    await recordSleepCheckEvent(
+      job,
+      'decision',
+      `Destroyed instance ${job.machineId} and canceled cloud job #${job.id} after its stop request.`,
+      {
+        path: config.path,
+        decision: 'destroy_and_cancel_after_stop_request',
+        ...buildSleepCheckDetails(job),
+      },
+    );
+    console.warn(
+      `[sleepCheck] Destroyed instance and canceled job #${job.id} after stop request`,
+    );
+  } else {
+    await recordSleepCheckEvent(
+      job,
+      'failed',
+      config.destroyAndFail.eventMessage(job.id, job.machineId),
+      {
+        path: config.path,
+        decision: 'destroy_and_fail_non_resumable',
+        ...buildSleepCheckDetails(job),
+      },
+    );
+    console.warn(config.destroyAndFail.consoleMessage(job.id));
+  }
   return { snapshotted: 0, failed: 1 };
 }
 

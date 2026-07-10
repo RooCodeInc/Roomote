@@ -683,6 +683,7 @@ CREATE TABLE "task_runs" (
 	"runtime_task_started_at" timestamp,
 	"first_assistant_output_at" timestamp,
 	"completed_at" timestamp,
+	"cancel_requested_at" timestamp,
 	"canceled_at" timestamp,
 	"launch_mode" text
 );

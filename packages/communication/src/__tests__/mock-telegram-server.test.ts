@@ -290,6 +290,38 @@ describe('MockTelegramServer', () => {
     ).rejects.toThrow('message to edit not found');
   });
 
+  it('records typing chat actions through sendChatAction', async () => {
+    const { server, baseUrl } = await startServer();
+    onCleanup(() => server.stop());
+
+    const provider = providerFor(baseUrl);
+    await provider.sendChatAction({ channelId: '111000111' });
+    await provider.sendChatAction({
+      channelId: '-100222000222',
+      action: 'upload_photo',
+      threadId: '7',
+    });
+
+    expect(server.getState().chatActions).toEqual([
+      { chat_id: '111000111', action: 'typing' },
+      {
+        chat_id: '-100222000222',
+        action: 'upload_photo',
+        message_thread_id: 7,
+      },
+    ]);
+  });
+
+  it('rejects a chat action to an unknown chat', async () => {
+    const { server, baseUrl } = await startServer();
+    onCleanup(() => server.stop());
+
+    const provider = providerFor(baseUrl);
+    await expect(
+      provider.sendChatAction({ channelId: '999999999' }),
+    ).rejects.toThrow('chat not found');
+  });
+
   it('replaces the inline keyboard through editMessageReplyMarkup', async () => {
     const { server, baseUrl } = await startServer();
     onCleanup(() => server.stop());

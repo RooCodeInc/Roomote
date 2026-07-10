@@ -146,12 +146,21 @@ vi.mock('@roomote/db/server', async () => {
 });
 
 const mockSuggestSlackQuestionChannels = vi.fn();
+const mockBuildTerminalReviewStatus = vi
+  .fn()
+  .mockReturnValue('terminal-status');
+const mockFinalizeGithubPrReviewComment = vi.fn().mockResolvedValue(false);
+
 vi.mock('@roomote/cloud-agents/server', () => ({
   enqueueCloudTask: vi.fn(),
   releaseCloudTask: vi.fn().mockResolvedValue(undefined),
   getTaskUrl: vi.fn().mockReturnValue('https://example.com/task'),
   suggestSlackQuestionChannels: (...args: unknown[]) =>
     mockSuggestSlackQuestionChannels(...args),
+  buildTerminalReviewStatus: (...args: unknown[]) =>
+    mockBuildTerminalReviewStatus(...args),
+  finalizeGithubPrReviewComment: (...args: unknown[]) =>
+    mockFinalizeGithubPrReviewComment(...args),
 }));
 
 vi.mock('@roomote/redis', () => ({
@@ -1351,6 +1360,41 @@ describe('finishCloudJob', () => {
       });
     });
 
+    it('suppresses the failure notification when a stop was requested before the failure', async () => {
+      const job = makeRun(
+        {
+          payloadKind: TaskPayloadKind.SlackAppMention,
+          cancelRequestedAt: new Date(),
+          payload: {
+            repo: 'owner/repo',
+            channel: 'C123',
+            user: 'U456',
+            text: 'test',
+            ts: '111.222',
+          },
+        },
+        { slackChannelId: 'C123', slackThreadTs: '111.222' },
+      );
+      mockFindFirstRun.mockResolvedValue(job);
+      mockFindFirstTask.mockResolvedValue(job.task);
+      mockGetSlackStartedMessageTs.mockResolvedValue('111.333');
+      mockFindFirstSlackInstallation.mockResolvedValue({
+        id: 'slack-inst-1',
+        botAccessToken: 'xoxb-test',
+        isActive: true,
+      });
+
+      await finishCloudJob({
+        id: 1,
+        status: CloudTaskStatus.Failed,
+        error: 'Worker heartbeat stale and instance sb-1 is stopped',
+      });
+
+      expect(mockBuildTaskFailedMessage).not.toHaveBeenCalled();
+      expect(mockUpdateMessage).not.toHaveBeenCalled();
+      expect(mockPostMessage).not.toHaveBeenCalled();
+    });
+
     it('posts a text-only thread reply when a SnapshotResume Slack job fails', async () => {
       const job = makeRun(
         {
@@ -1636,6 +1680,22 @@ describe('finishCloudJob', () => {
       });
     });
 
+    it('suppresses the Teams notification when a stop was requested before the failure', async () => {
+      const job = makeRun({
+        payload: teamsPayload,
+        cancelRequestedAt: new Date(),
+      });
+      mockFindFirstRun.mockResolvedValue(job);
+
+      await finishCloudJob({
+        id: 1,
+        status: CloudTaskStatus.Failed,
+        error: 'spawn timeout',
+      });
+
+      expect(mockTeamsPostMessage).not.toHaveBeenCalled();
+    });
+
     it('posts runtime-failure copy when the runtime task already started', async () => {
       const job = makeRun({
         payload: teamsPayload,
@@ -1830,6 +1890,26 @@ describe('finishCloudJob', () => {
 
       expect(mockCreateIssueComment).not.toHaveBeenCalled();
     });
+
+    it('skips the failure comment when the failed conflict run had a stop request', async () => {
+      const job = makeRun(
+        {
+          payloadKind: TaskPayloadKind.GithubPrConflictResolve,
+          cancelRequestedAt: new Date(),
+        },
+        { workflow: 'pr_conflict_resolve', surface: 'github' },
+      );
+      mockFindFirstRun.mockResolvedValue(job);
+      mockFindManyTaskPullRequests.mockResolvedValue([conflictPrRow]);
+
+      await finishCloudJob({
+        id: 1,
+        status: CloudTaskStatus.Failed,
+        error: 'Patch did not apply cleanly.',
+      });
+
+      expect(mockCreateIssueComment).not.toHaveBeenCalled();
+    });
   });
 
   describe('Linear failure notification', () => {
@@ -1854,6 +1934,25 @@ describe('finishCloudJob', () => {
         'session-abc',
         'spawn failure',
       );
+    });
+
+    it('suppresses the Linear notification when a stop was requested before the failure', async () => {
+      const job = makeRun(
+        { cancelRequestedAt: new Date() },
+        { linearSessionId: 'session-abc' },
+      );
+      mockFindFirstRun.mockResolvedValue(job);
+      mockFindLinearDeploymentMcpConnection.mockResolvedValue({
+        id: 'linear-conn-1',
+      });
+
+      await finishCloudJob({
+        id: 1,
+        status: CloudTaskStatus.Failed,
+        error: 'spawn failure',
+      });
+
+      expect(mockEmitError).not.toHaveBeenCalled();
     });
 
     it('skips Linear notification when the task has no linearSessionId binding', async () => {

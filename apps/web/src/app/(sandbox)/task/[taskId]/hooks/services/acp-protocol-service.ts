@@ -362,6 +362,14 @@ export function toAcpUiMessage(
       };
     }
 
+    case 'task_cancelled':
+      return {
+        ...base,
+        role: 'system',
+        kind: 'task_cancelled',
+        data: payloadRecord,
+      };
+
     default:
       return {
         ...base,
@@ -1786,6 +1794,18 @@ export class AcpProtocolService {
           text: formatRequestUserInputResponseText(request, payload),
           data: buildRequestUserInputResponseData(envelope.payload, request),
         });
+
+        continue;
+      }
+
+      if (envelope.eventType === ACP_ENVELOPE_EVENT_TYPES.TaskCancelled) {
+        const message = toAcpUiMessage(envelope);
+
+        // The turn was cut short, not completed — drop any pending completion
+        // so the aborted trailing assistant message is not styled as a
+        // finished turn.
+        clearPendingCompletion(message.sessionId);
+        acpMessages = this.appendPersistedMessage(acpMessages, message);
 
         continue;
       }
