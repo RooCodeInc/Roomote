@@ -245,88 +245,26 @@ RUN mkdir -p /runtime-deps && cd /runtime-deps && npm init -y >/dev/null && \
     "pino-pretty@$(cd /roomote/apps/preview-proxy && node -p "require('pino-pretty/package.json').version")"
 
 # ---------------------------------------------------------------------------
-# Runtime image: bundled app output plus runtime tools only. The build stages
-# above keep the full workspace out of the shipped image.
+# Runtime base: only health-check/TLS/process-init tooling shared by control
+# plane services. Git, GitHub CLI, Python, and OpenCode belong in the worker
+# image, not in long-lived application containers.
 # ---------------------------------------------------------------------------
-FROM node:24.13.1-slim AS runtime
+FROM node:24.13.1-slim AS runtime-base
 
-# Connects the GHCR package to this repository and links pulled images back
-# to their source.
 LABEL org.opencontainers.image.source=https://github.com/RooCodeInc/Roomote
-
-ARG OPENCODE_CLI_VERSION=1.17.8
-
-COPY --from=docker-cli /usr/local/bin/docker /usr/local/bin/docker
 
 RUN apt -qq update && \
   apt -qq install -y \
   ca-certificates \
   curl \
-  wget \
-  unzip \
-  jq \
-  git \
-  python3 \
   tini \
   && rm -rf /var/lib/apt/lists/*
-
-# Install gh cli
-RUN ARCH=$(dpkg --print-architecture) && \
-  if [ "$ARCH" = "amd64" ]; then \
-    GH_CLI_URL="https://github.com/cli/cli/releases/download/v2.81.0/gh_2.81.0_linux_amd64.deb"; \
-  elif [ "$ARCH" = "arm64" ]; then \
-    GH_CLI_URL="https://github.com/cli/cli/releases/download/v2.81.0/gh_2.81.0_linux_arm64.deb"; \
-  else \
-    echo "Unsupported architecture: $ARCH" && exit 1; \
-  fi && \
-  curl -L "$GH_CLI_URL" -o "gh_2.81.0_linux.deb" && \
-  dpkg -i gh_2.81.0_linux.deb && \
-  rm -rf gh_2.81.0_linux.deb
-
-RUN npm install --prefix /opt/opencode-cli --no-save --no-package-lock \
-    "opencode-ai@${OPENCODE_CLI_VERSION}" \
-  && test -x /opt/opencode-cli/node_modules/.bin/opencode \
-  && test "$(/opt/opencode-cli/node_modules/.bin/opencode --version)" = "${OPENCODE_CLI_VERSION}" \
-  && ln -sf /opt/opencode-cli/node_modules/.bin/opencode /usr/local/bin/opencode
 
 WORKDIR /roomote
 
 COPY .docker/run-with-dotenvx.sh ./.docker/
 COPY .docker/app/entrypoint.sh ./.docker/app/entrypoint.sh
-COPY .docker/sandbox ./.docker/sandbox/
-# Workspace marker: controller path resolution walks up from cwd looking for
-# pnpm-workspace.yaml (apps/controller/src/repo-paths.ts).
-COPY pnpm-workspace.yaml ./
-COPY apps/preview-proxy/entrypoint.sh /entrypoint.sh
-RUN chmod +x /entrypoint.sh /roomote/.docker/app/entrypoint.sh
-
-# web: the traced Next.js standalone output expands into /roomote (its own
-# node_modules tree plus apps/web/server.js).
-COPY --from=build-web /roomote/apps/web/.next/standalone ./
-COPY --from=build-web /roomote/apps/web/.next/static ./apps/web/.next/static/
-COPY --from=build-web /roomote/apps/web/public ./apps/web/public/
-
-# api
-COPY --from=build-api /roomote/apps/api/package.json ./apps/api/
-COPY --from=build-api /roomote/apps/api/dist ./apps/api/dist/
-COPY --from=build-api /runtime-deps/node_modules ./apps/api/node_modules/
-COPY --from=build-api /migrate /roomote/migrate/
-
-# controller
-COPY --from=build-controller /roomote/releases /roomote/releases/
-COPY --from=build-controller /roomote/apps/controller/package.json ./apps/controller/
-COPY --from=build-controller /roomote/apps/controller/dist ./apps/controller/dist/
-COPY --from=build-controller /runtime-deps/node_modules ./apps/controller/node_modules/
-
-# bullmq
-COPY --from=build-bullmq /roomote/apps/bullmq/package.json ./apps/bullmq/
-COPY --from=build-bullmq /roomote/apps/bullmq/dist ./apps/bullmq/dist/
-COPY --from=build-bullmq /runtime-deps/node_modules ./apps/bullmq/node_modules/
-
-# preview-proxy
-COPY --from=build-preview-proxy /roomote/apps/preview-proxy/package.json ./apps/preview-proxy/
-COPY --from=build-preview-proxy /roomote/apps/preview-proxy/dist ./apps/preview-proxy/dist/
-COPY --from=build-preview-proxy /runtime-deps/node_modules ./apps/preview-proxy/node_modules/
+RUN chmod +x /roomote/.docker/app/entrypoint.sh
 
 ARG APP_ENV
 ARG RELEASE_VERSION
@@ -334,6 +272,141 @@ ENV APP_ENV=${APP_ENV}
 ENV RELEASE_VERSION=${RELEASE_VERSION}
 ENV NODE_ENV=production
 ENV NEXT_TELEMETRY_DISABLED=1
+ENV HOME=/tmp
 
+ENTRYPOINT ["/usr/bin/tini", "--", "/roomote/.docker/app/entrypoint.sh"]
+
+# ---------------------------------------------------------------------------
+# Service-specific runtime targets. Each target contains one application and
+# runs as its own unprivileged account. The controller is the sole target that
+# receives the Docker CLI and worker-release assets.
+# ---------------------------------------------------------------------------
+FROM runtime-base AS runtime-web
+
+ENV ROOMOTE_SERVICE=web
+
+RUN groupadd --system --gid 10001 roomote-web && \
+  useradd --system --uid 10001 --gid roomote-web --home-dir /nonexistent --shell /usr/sbin/nologin roomote-web
+
+COPY --from=build-web /roomote/apps/web/.next/standalone ./
+COPY --from=build-web /roomote/apps/web/.next/static ./apps/web/.next/static/
+COPY --from=build-web /roomote/apps/web/public ./apps/web/public/
+
+USER roomote-web:roomote-web
+EXPOSE 3000
+CMD ["web"]
+
+FROM runtime-base AS runtime-api
+
+ENV ROOMOTE_SERVICE=api
+
+RUN groupadd --system --gid 10002 roomote-api && \
+  useradd --system --uid 10002 --gid roomote-api --home-dir /nonexistent --shell /usr/sbin/nologin roomote-api
+
+COPY --from=build-api /roomote/apps/api/package.json ./apps/api/
+COPY --from=build-api /roomote/apps/api/dist ./apps/api/dist/
+COPY --from=build-api /runtime-deps/node_modules ./apps/api/node_modules/
+
+USER roomote-api:roomote-api
+EXPOSE 3001
+CMD ["api"]
+
+FROM runtime-base AS runtime-controller
+
+ENV ROOMOTE_SERVICE=controller
+
+COPY --from=docker-cli /usr/local/bin/docker /usr/local/bin/docker
+COPY .docker/sandbox ./.docker/sandbox/
+# Workspace marker: controller path resolution walks up from cwd looking for
+# pnpm-workspace.yaml (apps/controller/src/repo-paths.ts).
+COPY pnpm-workspace.yaml ./
+COPY --from=build-controller /roomote/releases /roomote/releases/
+COPY --from=build-controller /roomote/apps/controller/package.json ./apps/controller/
+COPY --from=build-controller /roomote/apps/controller/dist ./apps/controller/dist/
+COPY --from=build-controller /runtime-deps/node_modules ./apps/controller/node_modules/
+
+RUN groupadd --system --gid 10003 roomote-controller && \
+  useradd --system --uid 10003 --gid roomote-controller --home-dir /nonexistent --shell /usr/sbin/nologin roomote-controller
+
+USER roomote-controller:roomote-controller
+CMD ["controller"]
+
+FROM runtime-base AS runtime-bullmq
+
+ENV ROOMOTE_SERVICE=bullmq
+
+RUN groupadd --system --gid 10004 roomote-bullmq && \
+  useradd --system --uid 10004 --gid roomote-bullmq --home-dir /nonexistent --shell /usr/sbin/nologin roomote-bullmq
+
+COPY --from=build-bullmq /roomote/apps/bullmq/package.json ./apps/bullmq/
+COPY --from=build-bullmq /roomote/apps/bullmq/dist ./apps/bullmq/dist/
+COPY --from=build-bullmq /runtime-deps/node_modules ./apps/bullmq/node_modules/
+
+USER roomote-bullmq:roomote-bullmq
+EXPOSE 3002
+CMD ["bullmq"]
+
+FROM runtime-base AS runtime-preview-proxy
+
+ENV ROOMOTE_SERVICE=preview-proxy
+
+RUN groupadd --system --gid 10005 roomote-preview && \
+  useradd --system --uid 10005 --gid roomote-preview --home-dir /nonexistent --shell /usr/sbin/nologin roomote-preview
+
+COPY apps/preview-proxy/entrypoint.sh /entrypoint.sh
+COPY --from=build-preview-proxy /roomote/apps/preview-proxy/package.json ./apps/preview-proxy/
+COPY --from=build-preview-proxy /roomote/apps/preview-proxy/dist ./apps/preview-proxy/dist/
+COPY --from=build-preview-proxy /runtime-deps/node_modules ./apps/preview-proxy/node_modules/
+RUN chmod +x /entrypoint.sh
+
+USER roomote-preview:roomote-preview
+EXPOSE 8081
+CMD ["preview-proxy"]
+
+FROM runtime-base AS runtime-migrate
+
+ENV ROOMOTE_SERVICE=db-migrate
+
+RUN groupadd --system --gid 10006 roomote-migrate && \
+  useradd --system --uid 10006 --gid roomote-migrate --home-dir /nonexistent --shell /usr/sbin/nologin roomote-migrate
+
+COPY --from=build-api /migrate /roomote/migrate/
+
+USER roomote-migrate:roomote-migrate
+CMD ["db-migrate"]
+
+# Compatibility target for platforms such as Fly that require multiple
+# process groups to share one image. It remains non-root and deliberately has
+# no Docker CLI; Docker-backed self-hosting uses runtime-controller instead.
+FROM runtime-base AS runtime-app
+
+ENV ROOMOTE_SERVICE=
+
+RUN groupadd --system --gid 10000 roomote-app && \
+  useradd --system --uid 10000 --gid roomote-app --home-dir /nonexistent --shell /usr/sbin/nologin roomote-app
+
+COPY .docker/sandbox ./.docker/sandbox/
+COPY pnpm-workspace.yaml ./
+COPY apps/preview-proxy/entrypoint.sh /entrypoint.sh
+RUN chmod +x /entrypoint.sh
+
+COPY --from=build-web /roomote/apps/web/.next/standalone ./
+COPY --from=build-web /roomote/apps/web/.next/static ./apps/web/.next/static/
+COPY --from=build-web /roomote/apps/web/public ./apps/web/public/
+COPY --from=build-api /roomote/apps/api/package.json ./apps/api/
+COPY --from=build-api /roomote/apps/api/dist ./apps/api/dist/
+COPY --from=build-api /runtime-deps/node_modules ./apps/api/node_modules/
+COPY --from=build-api /migrate /roomote/migrate/
+COPY --from=build-controller /roomote/releases /roomote/releases/
+COPY --from=build-controller /roomote/apps/controller/package.json ./apps/controller/
+COPY --from=build-controller /roomote/apps/controller/dist ./apps/controller/dist/
+COPY --from=build-controller /runtime-deps/node_modules ./apps/controller/node_modules/
+COPY --from=build-bullmq /roomote/apps/bullmq/package.json ./apps/bullmq/
+COPY --from=build-bullmq /roomote/apps/bullmq/dist ./apps/bullmq/dist/
+COPY --from=build-bullmq /runtime-deps/node_modules ./apps/bullmq/node_modules/
+COPY --from=build-preview-proxy /roomote/apps/preview-proxy/package.json ./apps/preview-proxy/
+COPY --from=build-preview-proxy /roomote/apps/preview-proxy/dist ./apps/preview-proxy/dist/
+COPY --from=build-preview-proxy /runtime-deps/node_modules ./apps/preview-proxy/node_modules/
+
+USER roomote-app:roomote-app
 EXPOSE 3000 3001 3002 8081
-ENTRYPOINT ["/roomote/.docker/app/entrypoint.sh"]

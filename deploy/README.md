@@ -58,13 +58,21 @@ The published GHCR images are public and need no pull credentials.
 Production deployments pull these images by immutable tag:
 
 ```text
-ghcr.io/roocodeinc/roomote-app:<version>
+ghcr.io/roocodeinc/roomote-web:<version>
+ghcr.io/roocodeinc/roomote-api:<version>
+ghcr.io/roocodeinc/roomote-controller:<version>
+ghcr.io/roocodeinc/roomote-bullmq:<version>
+ghcr.io/roocodeinc/roomote-preview-proxy:<version>
+ghcr.io/roocodeinc/roomote-migrate:<version>
 ghcr.io/roocodeinc/roomote-worker:<version>
 ```
 
-`roomote-app` is one shared application image that ships web, api, controller,
-bullmq, preview-proxy, and the db-migrate one-shot; each Compose service
-selects its process through the image's entrypoint dispatcher.
+The control-plane images share build stages but ship only their own runtime
+bundle. They run as dedicated non-root users; only `roomote-controller`
+contains the Docker CLI and worker-release assets. A non-root
+`roomote-app:<version>` compatibility image is also published for platforms
+that require several process groups to share one image, but the production
+Compose deployment uses the service-specific images above.
 
 Do not deploy `latest`. Pushes to `develop` automatically publish
 `develop-<short-sha>` image tags built with `APP_ENV=preview` for preview soak
@@ -84,8 +92,8 @@ metadata from the CLI arguments, and sets:
 chmod 600 /opt/roomote/.env
 ```
 
-Deployment-owned image metadata includes the app image tag, worker image, and
-the controller-local `DOCKER_WORKER_RELEASE_PATH`. The release path is
+Deployment-owned image metadata includes the control-plane image tag, worker
+image, and the controller-local `DOCKER_WORKER_RELEASE_PATH`. The release path is
 versioned as `/roomote/releases/worker-v<version>.tar.gz` so hosted providers
 such as Modal can derive worker release metadata from the archive filename.
 The installer and deployer also keep `MODAL_BASE_IMAGE_REF` aligned with
