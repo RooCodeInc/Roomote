@@ -280,7 +280,13 @@ export const cloudJobsRouter = router({
       status: z.nativeEnum(RunStatus).optional(),
       taskPhase: z.string().nullish(),
       sleepAt: z.date().nullish(),
-      taskId: z.string().optional(),
+      // `taskId` is intentionally NOT writable here. This mutation is
+      // reachable with a run-scoped job token (held by the sandbox runtime),
+      // and a run's task binding is what attribution, visibility, and PR
+      // linkage hang off of. Letting the sandbox re-point its run at a
+      // different task would corrupt run->task integrity; runs are bound to a
+      // task at enqueue time and never re-parented. No worker code path sends
+      // this field.
       actingUserId: z.string().optional(),
       result: z.record(z.unknown()).optional(),
     }),

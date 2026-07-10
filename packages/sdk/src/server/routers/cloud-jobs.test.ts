@@ -1,6 +1,10 @@
 import { z } from 'zod';
 
-import { ACP_ENVELOPE_EVENT_TYPES, TaskPayloadKind } from '@roomote/types';
+import {
+  ACP_ENVELOPE_EVENT_TYPES,
+  RunStatus,
+  TaskPayloadKind,
+} from '@roomote/types';
 import type { AuthTokenContext, JobTokenContext } from '@roomote/types';
 
 const {
@@ -17,6 +21,7 @@ const {
   mockQueueLinearMessage,
   mockRecordTaskMessageEnvelope,
   mockRecordTaskInferenceUsage,
+  mockUpdateCloudJob,
 } = vi.hoisted(() => ({
   mockEnqueueTask: vi.fn(),
   mockEvaluateFeatureFlag: vi.fn(),
@@ -31,6 +36,7 @@ const {
   mockQueueLinearMessage: vi.fn(),
   mockRecordTaskMessageEnvelope: vi.fn(),
   mockRecordTaskInferenceUsage: vi.fn(),
+  mockUpdateCloudJob: vi.fn(),
 }));
 
 vi.mock('@roomote/cloud-agents/server', () => ({
@@ -102,7 +108,7 @@ vi.mock('../lib/cloud-jobs', () => ({
   setTaskHarnessSessionId: vi.fn(),
   stampCloudJobMilestone: vi.fn(),
   touchCloudJobHeartbeat: vi.fn(),
-  updateCloudJob: vi.fn(),
+  updateCloudJob: mockUpdateCloudJob,
   updateCloudJobRuntimeState: vi.fn(),
 }));
 
@@ -174,6 +180,25 @@ describe('cloudJobsRouter queue message guards', () => {
     mockQueueLinearMessage.mockResolvedValue(undefined);
     mockRecordTaskMessageEnvelope.mockResolvedValue(undefined);
     mockRecordTaskInferenceUsage.mockResolvedValue({ recorded: true });
+    mockUpdateCloudJob.mockResolvedValue(undefined);
+  });
+
+  it('strips taskId from job-token update input (run->task binding guard)', async () => {
+    // A job token is held by the sandbox runtime. Allowing it to write taskId
+    // would let a compromised sandbox re-point its run at a different task,
+    // corrupting attribution, visibility, and PR linkage. The schema must drop
+    // the field so it never reaches the persistence layer.
+    await createJobCaller().update({
+      id: 42,
+      status: RunStatus.Running,
+      taskId: 'attacker-task',
+    } as never);
+
+    expect(mockUpdateCloudJob).toHaveBeenCalledTimes(1);
+    const [persistedId, persistedValues] = mockUpdateCloudJob.mock.calls[0]!;
+    expect(persistedId).toBe(42);
+    expect(persistedValues).not.toHaveProperty('taskId');
+    expect(persistedValues).toEqual({ status: RunStatus.Running });
   });
 
   it('rejects queueSlackMessage for auth-token callers', async () => {
