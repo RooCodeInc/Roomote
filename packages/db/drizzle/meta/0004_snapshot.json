@@ -1,6 +1,6 @@
 {
-  "id": "8a3eadf3-220e-4eed-8be3-080e75e81657",
-  "prevId": "7b54331a-c5c8-4941-83c0-7eef770680ca",
+  "id": "69f8ea7b-325f-4986-b5b0-fb24d11ef49a",
+  "prevId": "8a3eadf3-220e-4eed-8be3-080e75e81657",
   "version": "7",
   "dialect": "postgresql",
   "tables": {
@@ -6351,6 +6351,12 @@
           "notNull": true,
           "default": "'pending'"
         },
+        "queue_scope": {
+          "name": "queue_scope",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
         "task_phase": {
           "name": "task_phase",
           "type": "text",
@@ -6641,6 +6647,21 @@
           "columns": [
             {
               "expression": "task_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "task_runs_queue_scope_idx": {
+          "name": "task_runs_queue_scope_idx",
+          "columns": [
+            {
+              "expression": "queue_scope",
               "isExpression": false,
               "asc": true,
               "nulls": "last"
