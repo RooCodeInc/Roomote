@@ -217,9 +217,15 @@ verify_stack() {
   compose exec -T bullmq curl -fsS --max-time 5 http://127.0.0.1:3002/admin/health >/dev/null
 
   if [ "$release" = 'candidate' ]; then
-    compose exec -T api sh -ceu 'command -v gh >/dev/null; command -v opencode >/dev/null'
-    compose exec -T web sh -ceu 'command -v opencode >/dev/null'
-    compose exec -T bullmq sh -ceu 'command -v opencode >/dev/null'
+    # Execute OpenCode (not just locate it) as the container user: startup
+    # writes state under HOME, so this catches images the runtime user cannot
+    # actually run it in. Note the Compose stack mounts a fresh tmpfs over
+    # /tmp, so root-owned HOME artifacts baked into the image layer are masked
+    # here and only bite hosts that run the raw image (e.g. Railway); that
+    # case is prevented at the Dockerfile layer instead.
+    compose exec -T api sh -ceu 'command -v gh >/dev/null; opencode --version >/dev/null'
+    compose exec -T web sh -ceu 'opencode --version >/dev/null'
+    compose exec -T bullmq sh -ceu 'opencode --version >/dev/null'
   fi
 }
 
