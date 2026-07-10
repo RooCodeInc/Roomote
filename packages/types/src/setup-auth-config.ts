@@ -121,6 +121,12 @@ export const SETUP_AUTH_PROVIDER_CATALOG = [
         label: 'Teams Bot Tenant ID',
       },
       {
+        envVarName: 'TEAMS_BOT_NAME',
+        acceptedEnvVarNames: ['TEAMS_BOT_NAME'],
+        label: 'Teams Bot Display Name',
+        required: false,
+      },
+      {
         envVarName: 'TEAMS_BOT_TOKEN_ENDPOINT',
         acceptedEnvVarNames: ['TEAMS_BOT_TOKEN_ENDPOINT'],
         label: 'Teams Bot Token Endpoint',

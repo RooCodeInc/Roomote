@@ -71,6 +71,7 @@ export * from './lib/setup-qualification-blocks';
 export * from './lib/repositories';
 export * from './lib/telemetry-ids';
 export * from './lib/instance-report';
+export * from './lib/invocation-identities';
 
 export {
   users,

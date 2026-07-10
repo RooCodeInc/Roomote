@@ -31,7 +31,9 @@ const GUID_PATTERN =
 export async function GET(request: Request) {
   await bootstrapWebRuntimeEnv();
 
-  const botAppId = new URL(request.url).searchParams.get('botAppId')?.trim();
+  const searchParams = new URL(request.url).searchParams;
+  const botAppId = searchParams.get('botAppId')?.trim();
+  const botName = searchParams.get('botName')?.trim() || undefined;
 
   if (!botAppId || !GUID_PATTERN.test(botAppId)) {
     return new Response(JSON.stringify({ error: 'invalid_bot_app_id' }), {
@@ -47,7 +49,7 @@ export async function GET(request: Request) {
   ]);
 
   const packageZip = buildTeamsAppPackage({
-    manifestJson: buildTeamsAppManifest({ botAppId, appUrl }),
+    manifestJson: buildTeamsAppManifest({ botAppId, appUrl, botName }),
     colorIcon,
     outlineIcon,
   });

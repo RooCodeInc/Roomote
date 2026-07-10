@@ -22,6 +22,7 @@ export * from './environment-variables';
 export * from './error-utils';
 export * from './git-diff';
 export * from './hostname';
+export * from './invocation-identity';
 export * from './keepalive-policy';
 export * from './linear';
 export * from './llm-citation-artifacts';

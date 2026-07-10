@@ -1952,6 +1952,8 @@ export const slackInstallations = pgTable(
     enterpriseName: text('enterprise_name'),
     appId: text('app_id').notNull(),
     botUserId: text('bot_user_id').notNull(),
+    botName: text('bot_name'),
+    appName: text('app_name'),
     botAccessToken: text('bot_access_token').notNull(),
     userAccessToken: text('user_access_token'),
     scopes: jsonb('scopes').notNull(),

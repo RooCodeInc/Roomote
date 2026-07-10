@@ -1,7 +1,10 @@
 import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 
-import { resolveTeamsBotRuntimeCredentials } from '@roomote/db/server';
+import {
+  resolveTeamsBotRuntimeCredentials,
+  resolveTeamsInvocationBotName,
+} from '@roomote/db/server';
 
 import { Env, authorize } from '@/lib/server';
 import { bootstrapWebRuntimeEnv } from '@/lib/server/bootstrap-runtime-env';
@@ -35,6 +38,7 @@ export async function GET() {
   }
 
   const appUrl = Env.ROOMOTE_PUBLIC_URL ?? Env.ROOMOTE_APP_URL;
+  const botName = await resolveTeamsInvocationBotName();
   const [colorIcon, outlineIcon] = await Promise.all([
     readFile(path.join(process.cwd(), 'public', 'teams-app-icon-color.png')),
     readFile(path.join(process.cwd(), 'public', 'teams-app-icon-outline.png')),
@@ -44,6 +48,7 @@ export async function GET() {
     manifestJson: buildTeamsAppManifest({
       botAppId: credentials.botAppId,
       appUrl,
+      botName,
     }),
     colorIcon,
     outlineIcon,
