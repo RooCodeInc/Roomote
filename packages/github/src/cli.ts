@@ -16,6 +16,7 @@ import {
   isValidReviewComment,
   isValidIssueComment,
 } from './schema';
+import { resolveConfiguredGitHubAppSlug } from './resolve-app-slug';
 
 export interface FetchParams {
   gitHubToken: string;
@@ -368,6 +369,10 @@ export async function fetchReviewComments({
     { shell: true, env },
   );
 
+  // isValidReviewComment classifies the deployment's own bot login from the
+  // cached configured slug.
+  await resolveConfiguredGitHubAppSlug();
+
   try {
     return z
       .array(reviewCommentSchema)
@@ -419,6 +424,10 @@ export async function fetchIssueComments({
       ['api', `repos/${repo}/issues/${prNumber}/comments`],
       { shell: true, env },
     );
+
+    // isValidIssueComment classifies the deployment's own bot login from the
+    // cached configured slug.
+    await resolveConfiguredGitHubAppSlug();
 
     return z
       .array(issueCommentSchema)

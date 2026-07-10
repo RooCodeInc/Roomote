@@ -13,6 +13,7 @@ import {
   listAutomations,
   tasks,
 } from '@roomote/db/server';
+import { resolveConfiguredGitHubAppSlug } from '@roomote/github';
 import { SlackNotifier } from '@roomote/slack';
 
 import type { UserAuthSuccess } from '@/types';
@@ -266,6 +267,10 @@ export async function getBackgroundAgentSettingsCommand(
     ciFailureTriageSlackChannelId:
       visibleSettings.ciFailureTriageSlackChannelId,
   });
+
+  // The reviewer mapping derives its managed-login list synchronously from
+  // the cached configured app slug.
+  await resolveConfiguredGitHubAppSlug();
 
   return {
     settings: visibleSettings,
