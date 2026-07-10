@@ -220,7 +220,7 @@ MINIO_ROOT_PASSWORD=${{api.S3_SECRET_ACCESS_KEY}}
 Notes:
 
 - `ROOMOTE_APP_URL` on api is the **single canonical-origin knob**: it is the
-  URL users browse, and web/controller/bullmq reference
+  URL users browse, and web/controller/bullmq/preview-proxy reference
   `${{api.ROOMOTE_APP_URL}}` rather than repeating the value. It is also the
   template's one optional deploy-time prompt — the deploy screen shows it
   pre-filled with the generated-domain reference so a custom domain can be
@@ -399,7 +399,7 @@ domain, which requires a domain you control:
 - **Back up** the Railway Postgres database (Railway backups or `pg_dump`)
   and the MinIO volume or external bucket. Everything else is reproducible
   from config.
-- **Costs** split three ways: Railway hosts the control plane (web, api,
+- **Costs** split three ways: Railway hosts the control plane (web, api, preview-proxy,
   controller, bullmq, Postgres, Redis, MinIO), while task execution bills
   through your sandbox provider (Modal/E2B/Daytona) and model usage bills
   through your model provider.
