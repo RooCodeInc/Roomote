@@ -17,10 +17,15 @@ Commands:
   status                 Show the state of every Roomote service
   logs [service...]      Follow logs (default: web api controller caddy)
   setup-url              Print the /setup link with the setup token
-  upgrade [version]      Upgrade (or roll back) to an image tag; defaults to
-                         the latest GitHub release
+  upgrade [version] [options]
+                         Upgrade (or roll back) to an image tag; defaults to
+                         the latest GitHub release. Creates an encrypted
+                         pre-upgrade backup and applies database migrations
+                         before replacing services (see roomote upgrade --help)
                          Set ROOMOTE_IMAGE_RETENTION_RELEASES to control how
                          many Roomote release tags are kept after upgrade
+  rollback               Re-deploy the release that was running before the
+                         last upgrade
   backup [options]       Create an encrypted deployment backup bundle
   restore <file> --yes   Restore a bundle, OVERWRITING deployment state
   restart [service...]   Restart services (default: all)
@@ -59,6 +64,22 @@ Options:
 
 ROOMOTE_BACKUP_PASSPHRASE may be used instead of --passphrase-file. If neither
 is set, an interactive terminal is required.
+EOF
+}
+
+upgrade_usage() {
+  cat <<'EOF'
+usage: roomote upgrade [version] [options]
+
+Options:
+  --skip-backup                   Do not create a pre-upgrade backup bundle
+  --backup-passphrase-file <file> Encrypt the pre-upgrade backup with this
+                                  passphrase instead of a generated one
+
+ROOMOTE_BACKUP_PASSPHRASE may be used instead of --backup-passphrase-file.
+Without either, upgrade generates a passphrase and stores it next to the
+bundle under /opt/roomote/backups; move both off-host if the bundle should
+also serve as a disaster-recovery copy.
 EOF
 }
 
@@ -414,10 +435,65 @@ resolve_latest_version() {
   printf '%s' "$latest"
 }
 
+# Encrypted pre-upgrade backup so every upgrade has a restore-tested rollback
+# point. Reuses cmd_backup, so the bundle format and consistency guarantees
+# match a manual `roomote backup`.
+pre_upgrade_backup() {
+  local previous_version="$1"
+  local passphrase_arg="$2"
+  local bundle passphrase_file
+
+  mkdir -p "$install_root/backups"
+  bundle="$install_root/backups/pre-upgrade-${previous_version:-unknown}-$(date +%F-%H%M%S).roomote"
+  log "Creating a pre-upgrade backup (skip with roomote upgrade --skip-backup)"
+  if [ -n "$passphrase_arg" ]; then
+    cmd_backup --passphrase-file "$passphrase_arg" --output "$bundle"
+  elif [ -n "${ROOMOTE_BACKUP_PASSPHRASE:-}" ]; then
+    cmd_backup --output "$bundle"
+  else
+    # No operator passphrase: generate one and keep it beside the bundle.
+    # Both stay in the host's existing trust domain (like /opt/roomote/.env);
+    # move them off-host to double as a disaster-recovery copy.
+    passphrase_file="$bundle.passphrase"
+    (umask 077 && openssl rand -base64 32 >"$passphrase_file")
+    log "Generated backup passphrase file $passphrase_file"
+    cmd_backup --passphrase-file "$passphrase_file" --output "$bundle"
+  fi
+  log "Pre-upgrade backup written to $bundle"
+}
+
 cmd_upgrade() {
-  local version="${1:-}"
+  local version=''
+  local skip_backup='false'
+  local backup_passphrase_arg=''
   local repo image_registry image_namespace previous_worker_image worker_image
-  local modal_base_image_ref fetch_ref app_domain
+  local modal_base_image_ref fetch_ref app_domain previous_version
+
+  while [ "$#" -gt 0 ]; do
+    case "$1" in
+      --skip-backup)
+        skip_backup='true'
+        shift
+        ;;
+      --backup-passphrase-file)
+        backup_passphrase_arg="${2:-}"
+        shift 2
+        ;;
+      --help | -h)
+        upgrade_usage
+        return
+        ;;
+      --*)
+        upgrade_usage >&2
+        die "unknown upgrade option: $1"
+        ;;
+      *)
+        [ -z "$version" ] || die "only one upgrade version may be given"
+        version="$1"
+        shift
+        ;;
+    esac
+  done
 
   repo="$(read_env_value ROOMOTE_REPO)"
   repo="${repo:-RooCodeInc/Roomote}"
@@ -426,6 +502,27 @@ cmd_upgrade() {
     log "Resolving the latest Roomote release"
     version="$(resolve_latest_version "$repo")"
     [ -n "$version" ] || die "could not resolve a release tag from github.com/$repo; pass a version explicitly"
+  fi
+
+  previous_version="$(read_env_value ROOMOTE_VERSION)"
+  if [ "$skip_backup" = 'true' ]; then
+    log "Skipping the pre-upgrade backup (--skip-backup)"
+  else
+    pre_upgrade_backup "$previous_version" "$backup_passphrase_arg"
+  fi
+
+  # Keep a copy of the current deployment files so a failed migration can put
+  # the previous release's configuration back exactly as it was. Deliberately
+  # not a local: the EXIT trap must still see it after bash unwinds function
+  # scope on a set -e failure in a nested call.
+  mkdir -p "$install_root/backups"
+  upgrade_rollback_dir="$(mktemp -d "$install_root/backups/.upgrade-staging.XXXXXX")"
+  chmod 700 "$upgrade_rollback_dir"
+  trap 'rm -rf "${upgrade_rollback_dir:-}"' EXIT
+  install -m 600 "$env_file" "$upgrade_rollback_dir/.env"
+  install -m 600 "$compose_file" "$upgrade_rollback_dir/docker-compose.prod.yml"
+  if [ -f "$install_root/caddy/Caddyfile" ]; then
+    install -m 600 "$install_root/caddy/Caddyfile" "$upgrade_rollback_dir/Caddyfile"
   fi
 
   image_registry="$(read_env_value IMAGE_REGISTRY)"
@@ -448,6 +545,11 @@ cmd_upgrade() {
   fetch_deploy_file "$repo" "$fetch_ref" deploy/caddy/Caddyfile "$install_root/caddy/Caddyfile"
 
   set_env_value ROOMOTE_VERSION "$version"
+  # Recorded for `roomote rollback`; skipped for same-version re-runs so a
+  # retry cannot overwrite the real rollback target with itself.
+  if [ -n "$previous_version" ] && [ "$previous_version" != "$version" ]; then
+    set_env_value ROOMOTE_PREVIOUS_VERSION "$previous_version"
+  fi
   set_env_value TRPC_URL "https://$app_domain/_roomote-api"
   set_env_value IMAGE_REGISTRY "$image_registry"
   set_env_value IMAGE_NAMESPACE "$image_namespace"
@@ -472,6 +574,22 @@ cmd_upgrade() {
   log "Pulling images for $version"
   docker pull "$worker_image"
   compose pull
+  # Migrations run before any running service is replaced. Drizzle applies
+  # all pending migrations in a single transaction, so a failure here rolls
+  # the schema back and the previous release keeps serving.
+  log "Applying database migrations for $version before replacing services"
+  if ! compose run --rm db-migrate; then
+    log "Migration failed; restoring the previous deployment configuration"
+    install -m 600 "$upgrade_rollback_dir/.env" "$env_file"
+    install -m 600 "$upgrade_rollback_dir/docker-compose.prod.yml" "$compose_file"
+    if [ -f "$upgrade_rollback_dir/Caddyfile" ]; then
+      install -m 600 "$upgrade_rollback_dir/Caddyfile" "$install_root/caddy/Caddyfile"
+    fi
+    compose start controller || true
+    die "database migrations for $version failed and were rolled back; the previous release${previous_version:+ ($previous_version)} is still running"
+  fi
+  rm -rf "$upgrade_rollback_dir"
+  trap - EXIT
   log "Starting Roomote $version"
   compose up -d --wait --wait-timeout 600
   systemctl enable roomote-compose.service >/dev/null 2>&1 || true
@@ -480,6 +598,19 @@ cmd_upgrade() {
     log "Warning: image retention failed; upgrade is still healthy"
   fi
   log "Upgrade to $version complete"
+}
+
+# Emergency path back to the release recorded by the last upgrade. Skips the
+# pre-upgrade backup on purpose: the bundle from the failed upgrade already
+# exists, and a backup against an unhealthy stack could block the rollback.
+cmd_rollback() {
+  local previous_version
+
+  [ "$#" -eq 0 ] || die "usage: roomote rollback"
+  previous_version="$(read_env_value ROOMOTE_PREVIOUS_VERSION)"
+  [ -n "$previous_version" ] || die "no previous release recorded in $env_file; run 'roomote upgrade <version>' with an explicit tag instead"
+  log "Rolling back to the previously deployed release $previous_version"
+  cmd_upgrade "$previous_version" --skip-backup
 }
 
 stop_task_workers() {
@@ -880,6 +1011,7 @@ case "$command" in
   logs) cmd_logs "$@" ;;
   setup-url) cmd_setup_url "$@" ;;
   upgrade) cmd_upgrade "$@" ;;
+  rollback) cmd_rollback "$@" ;;
   backup) cmd_backup "$@" ;;
   restore) cmd_restore "$@" ;;
   restart) compose restart "$@" ;;
