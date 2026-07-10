@@ -149,6 +149,7 @@ export async function createHarness({
   const reconnectableHarness = new ReconnectableHarness({
     logger,
     spawnHarness,
+    diagnosticEvents,
   });
   await reconnectableHarness.start({ initialSessionId: harnessSessionId });
   stampHarnessStarted();
