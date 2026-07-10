@@ -20,6 +20,7 @@ const { connectSlackMutateMock, teamsStatusState } = vi.hoisted(() => ({
         'https://teams.microsoft.com/l/chat/0/0?users=28%3Abot-app-id' as
           | string
           | null,
+      botName: 'Roomote',
       primaryConversationReady: true,
       primaryConversationType: 'channel' as string | null,
     },
@@ -80,6 +81,20 @@ vi.mock('@/components/system', () => ({
   },
 }));
 
+vi.mock('@/components/sandbox', () => ({
+  TaskStatusIndicator: ({
+    phase,
+    compact,
+  }: {
+    phase?: string | null;
+    compact?: boolean;
+  }) => (
+    <span data-compact={String(Boolean(compact))} data-testid="task-status">
+      {phase}
+    </span>
+  ),
+}));
+
 vi.mock('./StepTitle', () => ({
   StepTitle: ({ text }: { text: string }) => <h1>{text}</h1>,
 }));
@@ -117,6 +132,7 @@ describe('StepCommunicationConnect', () => {
       webhookUrl: 'https://roomote.example.com/api/webhooks/teams',
       openInTeamsUrl:
         'https://teams.microsoft.com/l/chat/0/0?users=28%3Abot-app-id',
+      botName: 'Roomote',
       primaryConversationReady: true,
       primaryConversationType: 'channel',
     };
@@ -185,9 +201,10 @@ describe('StepCommunicationConnect', () => {
     expect(onContinue).toHaveBeenCalledTimes(1);
   });
 
-  it('nudges to send a first message when no Teams conversation was captured yet', () => {
+  it('shows a yellow waiting status before a Teams conversation is captured', () => {
     teamsStatusState.data = {
       ...teamsStatusState.data,
+      botName: 'Acme Assistant',
       primaryConversationReady: false,
       primaryConversationType: null,
     };
@@ -200,15 +217,19 @@ describe('StepCommunicationConnect', () => {
       />,
     );
 
+    expect(screen.getByText('Waiting for bot message')).toBeInTheDocument();
     expect(
-      screen.getByText(/has not received a Teams message yet/i),
+      screen.getByText(
+        'Send a message to the Acme Assistant bot on Teams to complete the connection',
+      ),
     ).toBeInTheDocument();
+    expect(screen.getByTestId('task-status')).toHaveTextContent('stopped');
     expect(
       screen.getByRole('link', { name: /Open Microsoft Teams bot/i }),
     ).toBeInTheDocument();
   });
 
-  it('hides the first-message nudge when the Teams conversation is captured', () => {
+  it('shows a green waiting status when the Teams conversation is captured', () => {
     render(
       <StepCommunicationConnect
         authSetup={buildAuthSetup('microsoft')}
@@ -217,9 +238,15 @@ describe('StepCommunicationConnect', () => {
       />,
     );
 
+    expect(screen.getByText('Waiting for bot message')).toBeInTheDocument();
     expect(
-      screen.queryByText(/has not received a Teams message yet/i),
-    ).not.toBeInTheDocument();
+      screen.getByText(
+        'Send a message to the Roomote bot on Teams to complete the connection',
+      ),
+    ).toBeInTheDocument();
+    expect(screen.getByTestId('task-status')).toHaveTextContent(
+      'waiting_for_prompt',
+    );
   });
 
   it('renders a blocked state when Teams has no bot URL', () => {
@@ -229,16 +256,16 @@ describe('StepCommunicationConnect', () => {
       microsoftAuthConfigured: true,
       webhookUrl: 'https://roomote.example.com/api/webhooks/teams',
       openInTeamsUrl: null,
+      botName: 'Roomote',
       primaryConversationReady: false,
       primaryConversationType: null,
     };
-    const onSkip = vi.fn();
 
     render(
       <StepCommunicationConnect
         authSetup={buildAuthSetup('microsoft')}
         onContinue={vi.fn()}
-        onSkip={onSkip}
+        onSkip={vi.fn()}
       />,
     );
 
@@ -246,8 +273,5 @@ describe('StepCommunicationConnect', () => {
     expect(
       screen.queryByRole('link', { name: /Open Microsoft Teams bot/i }),
     ).not.toBeInTheDocument();
-
-    fireEvent.click(screen.getByRole('button', { name: 'Do this later' }));
-    expect(onSkip).toHaveBeenCalledTimes(1);
   });
 });

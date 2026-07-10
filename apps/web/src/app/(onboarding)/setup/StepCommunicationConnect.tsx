@@ -5,7 +5,14 @@ import { toast } from 'sonner';
 
 import { useConnectSlack } from '@/hooks/slack';
 import { useTeamsIntegrationStatus } from '@/hooks/teams';
-import { BrandIcon, Button, ExternalLink, Spinner } from '@/components/system';
+import { TaskStatusIndicator } from '@/components/sandbox';
+import {
+  ArrowRight,
+  BrandIcon,
+  Button,
+  ExternalLink,
+  Spinner,
+} from '@/components/system';
 
 import { StepTitle } from './StepTitle';
 import { getSetupStepDefinition } from './types';
@@ -52,6 +59,7 @@ export function StepCommunicationConnect({
   if (provider === 'microsoft') {
     const teamsStatus = teamsIntegrationStatus.data;
     const openInTeamsUrl = teamsStatus?.openInTeamsUrl ?? null;
+    const teamsBotName = teamsStatus?.botName?.trim() || 'Roomote';
     const teamsReady =
       teamsStatus?.botConfigured === true &&
       teamsStatus.microsoftAuthConfigured &&
@@ -64,8 +72,8 @@ export function StepCommunicationConnect({
       <div className="relative w-full max-w-xl space-y-6 py-2 md:py-0">
         <StepTitle text="Finish connecting Teams" />
         <p className="text-foreground">
-          Config for team is almost there. To finish it, Microsoft needs you to
-          send a message (just "Hi!" works) to finish connecting your tenant.
+          Almost there. Teams just needs you to send a message (just "Hi!"
+          works) to Roomote to finish.
         </p>
 
         {teamsIntegrationStatus.isPending ? (
@@ -76,44 +84,27 @@ export function StepCommunicationConnect({
           </p>
         ) : teamsReady ? (
           <>
-            <p className="text-sm text-muted-foreground">
-              If you get a message about not having enough permissions, send
-              this message to a Teams admin:
-            </p>
-
-            <div className="bg-foreground/10 px-4 py-3 leading-normal rounded-xl text-sm">
-              Can you please install our Roomote custom Teams app?
-              <br />
-              1. Go to Teams admin center → Teams apps → Manage apps.
-              <br />
-              2. Upload the Roomote app package zip.
-              <br />
-              3. Allow/make the app available to me or the right users/group.
-              <br />
-              4. If needed, preinstall it for us or allow me to add it in Teams.
-            </div>
-
-            <p>
-              <a
-                className="underline underline-offset-4 hover:text-foreground"
-                href="/api/teams/app-package"
-                download
-              >
-                Download the app package
-              </a>{' '}
-              and upload it in Teams under Apps → Manage your apps → Upload an
-              app.
-            </p>
-
-            {!primaryConversationReady ? (
-              <p className="text-sm text-muted-foreground">
-                Roomote has not received a Teams message yet. Open the bot and
-                send it one message so Roomote can capture the conversation that
-                setup and automation updates post into.
+            <div>
+              <div className="flex items-center gap-2 font-semibold">
+                <TaskStatusIndicator
+                  phase={
+                    primaryConversationReady ? 'waiting_for_prompt' : 'stopped'
+                  }
+                  compact={true}
+                />
+                <span>
+                  {primaryConversationReady
+                    ? 'Received!'
+                    : 'Waiting for bot message'}
+                </span>
+              </div>
+              <p className="pl-4 text-muted-foreground">
+                Send a message to the {teamsBotName} bot on Teams to complete
+                the connection
               </p>
-            ) : null}
+            </div>
             <div className="flex flex-col items-stretch gap-3 sm:flex-row sm:items-center">
-              <Button asChild className="w-full sm:w-auto">
+              <Button asChild variant="outline">
                 <a
                   href={openInTeamsUrl}
                   target="_blank"
@@ -126,11 +117,12 @@ export function StepCommunicationConnect({
               </Button>
               <Button
                 type="button"
-                variant="outline"
                 className="w-full sm:w-auto"
                 onClick={onContinue}
+                disabled={!primaryConversationReady}
               >
                 Continue
+                <ArrowRight />
               </Button>
             </div>
           </>

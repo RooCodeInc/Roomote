@@ -527,6 +527,13 @@ function MicrosoftSetupExperience(props: ProviderSetupExperienceProps) {
           />
         </div>
       </NumberedStep>
+
+      <NumberedStep number={5} className={pendingStepClassName}>
+        <p className="font-semibold">Add the app</p>
+        <p className="text-sm text-muted-foreground">
+          Click on "Preview in Teams" → Add
+        </p>
+      </NumberedStep>
     </div>
   );
 }
