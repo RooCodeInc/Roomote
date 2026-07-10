@@ -10,8 +10,23 @@
 // finalize/release, mirror all run against Postgres) and mocks only the cloud
 // task enqueue and the source-control provider resolution.
 
-const { mockEnqueueCloudTask } = vi.hoisted(() => ({
+const {
+  mockEnqueueCloudTask,
+  mockCancelTaskRunDirect,
+  mockFinalizeWorkItemLaunched,
+  mockClaimWorkItem,
+  actualDbServer,
+} = vi.hoisted(() => ({
   mockEnqueueCloudTask: vi.fn(),
+  mockCancelTaskRunDirect: vi.fn(),
+  // Overridable, but delegate to the real implementations by default (reset in
+  // beforeEach) so every test but the failure-injection ones keeps real
+  // finalize/claim behavior against the database.
+  mockFinalizeWorkItemLaunched: vi.fn(),
+  mockClaimWorkItem: vi.fn(),
+  actualDbServer: {
+    current: null as null | typeof import('@roomote/db/server'),
+  },
 }));
 
 vi.mock('@roomote/github', () => ({
@@ -26,6 +41,24 @@ vi.mock('@roomote/gitea', () => ({
 vi.mock('@roomote/cloud-agents/server', () => ({
   enqueueCloudTask: mockEnqueueCloudTask,
 }));
+
+// Keep the real database (and all shared launch helpers) while overriding only
+// the orphan-cancel writer so the lost-finalize path can be observed without
+// seeding real task_runs rows. `finalizeWorkItemLaunched` and `claimWorkItem`
+// are also routed through overridable spies that delegate to the real
+// implementations by default (re-bound in beforeEach), so individual tests can
+// inject a throw at the finalize or suggestion-mirror boundary while every other
+// test exercises the true fenced CAS against Postgres.
+vi.mock('@roomote/db/server', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@roomote/db/server')>();
+  actualDbServer.current = actual;
+  return {
+    ...actual,
+    cancelTaskRunDirect: mockCancelTaskRunDirect,
+    finalizeWorkItemLaunched: mockFinalizeWorkItemLaunched,
+    claimWorkItem: mockClaimWorkItem,
+  };
+});
 
 vi.mock('@roomote/slack', () => ({
   SlackNotifier: vi.fn(),
@@ -215,6 +248,17 @@ describe('launchQueuedSetupTasksIfReady (fenced onboarding-queue launch)', () =>
   beforeEach(async () => {
     vi.clearAllMocks();
 
+    // Restore the delegate-to-real defaults after clearing so failure-injection
+    // in one test never leaks into the next.
+    mockFinalizeWorkItemLaunched.mockReset();
+    mockFinalizeWorkItemLaunched.mockImplementation((tx, params) =>
+      actualDbServer.current!.finalizeWorkItemLaunched(tx, params),
+    );
+    mockClaimWorkItem.mockReset();
+    mockClaimWorkItem.mockImplementation((tx, params) =>
+      actualDbServer.current!.claimWorkItem(tx, params),
+    );
+
     const user = await userFactory.create({});
     selectedByUserId = user.id;
 
@@ -372,11 +416,12 @@ describe('launchQueuedSetupTasksIfReady (fenced onboarding-queue launch)', () =>
     expect(suggestion?.dismissedAt).toBeNull();
   });
 
-  it('does not stomp state when its claim token was superseded before finalize (fencing)', async () => {
+  it('does not stomp state when its claim token was superseded before finalize (fencing), and cancels the orphaned run', async () => {
     const onboardingId = await seedOnboardingItem({ sortOrder: 0 });
     const supersededClaimAt = new Date(Date.now() + 5_000);
     const launchedTaskId = await seedLaunchTargetTaskId();
 
+    mockCancelTaskRunDirect.mockResolvedValue(true);
     const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
 
     // Simulate another launcher reclaiming this row while our enqueue is in
@@ -386,7 +431,7 @@ describe('launchQueuedSetupTasksIfReady (fenced onboarding-queue launch)', () =>
         .update(workItems)
         .set({ launchClaimedAt: supersededClaimAt })
         .where(eq(workItems.id, onboardingId));
-      return { taskId: launchedTaskId, id: 'cloud-job-1' };
+      return { taskId: launchedTaskId, id: 909 };
     });
 
     try {
@@ -399,8 +444,13 @@ describe('launchQueuedSetupTasksIfReady (fenced onboarding-queue launch)', () =>
       expect(row?.launchedTaskId).toBeNull();
       expect(row?.targetEnvironmentId).toBeNull();
       expect(row?.launchClaimedAt?.getTime()).toBe(supersededClaimAt.getTime());
+
+      // The orphaned run is best-effort canceled while still pre-sandbox.
+      expect(mockCancelTaskRunDirect).toHaveBeenCalledWith(
+        expect.objectContaining({ runId: 909 }),
+      );
       expect(warnSpy).toHaveBeenCalledWith(
-        expect.stringContaining('orphaned task'),
+        expect.stringContaining('orphaned run canceled'),
       );
     } finally {
       warnSpy.mockRestore();
@@ -449,17 +499,177 @@ describe('launchQueuedSetupTasksIfReady (fenced onboarding-queue launch)', () =>
     }
   });
 
-  it('releases the claim back to open when the enqueue fails', async () => {
+  it('releases the claim back to open when the enqueue fails and logs the failure', async () => {
     const onboardingId = await seedOnboardingItem({ sortOrder: 0 });
 
     mockEnqueueCloudTask.mockRejectedValue(new Error('enqueue failed'));
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
 
-    await launch();
+    try {
+      await launch();
 
-    const row = await readRow(onboardingId);
-    expect(row?.status).toBe('open');
-    expect(row?.launchClaimedAt).toBeNull();
-    expect(row?.launchedTaskId).toBeNull();
-    expect(row?.targetEnvironmentId).toBeNull();
+      const row = await readRow(onboardingId);
+      expect(row?.status).toBe('open');
+      expect(row?.launchClaimedAt).toBeNull();
+      expect(row?.launchedTaskId).toBeNull();
+      expect(row?.targetEnvironmentId).toBeNull();
+
+      expect(warnSpy).toHaveBeenCalledWith(
+        expect.stringContaining('enqueue failed'),
+      );
+    } finally {
+      warnSpy.mockRestore();
+    }
+  });
+
+  it('best-effort cancels the run and keeps the claim when finalize throws after enqueue', async () => {
+    const onboardingId = await seedOnboardingItem({ sortOrder: 0 });
+    const launchedTaskId = await seedLaunchTargetTaskId();
+
+    mockEnqueueCloudTask.mockResolvedValue({
+      taskId: launchedTaskId,
+      id: 'cloud-job-throw',
+    });
+    mockCancelTaskRunDirect.mockResolvedValue(true);
+
+    // The task is already enqueued when the finalize UPDATE throws (transient
+    // db error). Post-enqueue this must be treated as a lost finalize — cancel
+    // the orphaned run, do NOT release the claim (releasing would invite an
+    // immediate duplicate launch; stale-claim recovery retries safely later).
+    mockFinalizeWorkItemLaunched.mockImplementationOnce(async () => {
+      throw new Error('finalize transient failure');
+    });
+
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+
+    try {
+      await launch();
+
+      // The orphaned run is best-effort canceled with the enqueue's run id.
+      expect(mockCancelTaskRunDirect).toHaveBeenCalledWith(
+        expect.objectContaining({ runId: 'cloud-job-throw' }),
+      );
+      expect(warnSpy).toHaveBeenCalledWith(
+        expect.stringContaining('orphaned run canceled'),
+      );
+
+      // The claim is left in place (never released back to `open`): still
+      // `launching` with its claim token intact and no launched link, so
+      // stale-claim recovery — not an immediate re-claim — retries it.
+      const row = await readRow(onboardingId);
+      expect(row?.status).toBe('launching');
+      expect(row?.launchClaimedAt).not.toBeNull();
+      expect(row?.launchedTaskId).toBeNull();
+      expect(row?.targetEnvironmentId).toBeNull();
+    } finally {
+      warnSpy.mockRestore();
+    }
+  });
+
+  it('keeps a finalized launch when the suggestion mirror throws', async () => {
+    const suggestionId = await seedSuggestionItem({ status: 'open' });
+    const onboardingId = await seedOnboardingItem({
+      sortOrder: 0,
+      sourceWorkItemId: suggestionId,
+    });
+
+    const launchedTaskId = await seedLaunchTargetTaskId();
+    mockEnqueueCloudTask.mockResolvedValue({
+      taskId: launchedTaskId,
+      id: 'cloud-job-mirror',
+    });
+
+    // The onboarding-queue claim passes through to the real CAS; only the
+    // suggestion mirror's claim throws. The mirror is the sole claim that opts
+    // `dismissed` into the claimable set, so key the failure off that param.
+    mockClaimWorkItem.mockImplementation((tx, params) => {
+      if (params.additionalClaimableStatuses) {
+        throw new Error('suggestion mirror claim failure');
+      }
+      return actualDbServer.current!.claimWorkItem(tx, params);
+    });
+
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+
+    try {
+      await launch();
+
+      // The onboarding launch finalizes and stays finalized: the mirror throw is
+      // swallowed and never rolls back the committed launch link.
+      const onboarding = await readRow(onboardingId);
+      expect(onboarding?.status).toBe('launched');
+      expect(onboarding?.launchedTaskId).toBe(launchedTaskId);
+      expect(onboarding?.targetEnvironmentId).toBe(environmentId);
+      expect(onboarding?.launchClaimedAt).toBeNull();
+
+      // The mirror failure is best-effort: logged, no orphan cancel.
+      expect(mockCancelTaskRunDirect).not.toHaveBeenCalled();
+      expect(warnSpy).toHaveBeenCalledWith(
+        expect.stringContaining('failed to mirror launched state'),
+      );
+
+      // The suggestion is untouched by the failed mirror.
+      const suggestion = await readRow(suggestionId);
+      expect(suggestion?.status).toBe('open');
+      expect(suggestion?.launchedTaskId).toBeNull();
+      expect(suggestion?.launchClaimedAt).toBeNull();
+    } finally {
+      warnSpy.mockRestore();
+    }
+  });
+
+  it('rolls back the suggestion claim when the mirror finalize throws', async () => {
+    const suggestionId = await seedSuggestionItem({ status: 'open' });
+    const onboardingId = await seedOnboardingItem({
+      sortOrder: 0,
+      sourceWorkItemId: suggestionId,
+    });
+
+    const launchedTaskId = await seedLaunchTargetTaskId();
+    mockEnqueueCloudTask.mockResolvedValue({
+      taskId: launchedTaskId,
+      id: 'cloud-job-mirror-finalize-throw',
+    });
+
+    // The onboarding finalize passes through to the real CAS; only the
+    // suggestion mirror's finalize throws. The mirror finalize is the sole call
+    // that passes `clearDismissedAt` without a `targetEnvironmentId`, so key the
+    // failure strictly off those params to avoid breaking the onboarding call.
+    mockFinalizeWorkItemLaunched.mockImplementation((tx, params) => {
+      if (params.clearDismissedAt && !params.targetEnvironmentId) {
+        throw new Error('suggestion mirror finalize failure');
+      }
+      return actualDbServer.current!.finalizeWorkItemLaunched(tx, params);
+    });
+
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+
+    try {
+      await launch();
+
+      // The onboarding launch finalizes and stays finalized: the mirror finalize
+      // throw rolls back only its own transaction, never the committed launch.
+      const onboarding = await readRow(onboardingId);
+      expect(onboarding?.status).toBe('launched');
+      expect(onboarding?.launchedTaskId).toBe(launchedTaskId);
+      expect(onboarding?.targetEnvironmentId).toBe(environmentId);
+      expect(onboarding?.launchClaimedAt).toBeNull();
+
+      // The suggestion is fully untouched: the claim+finalize transaction rolled
+      // back, so the row never lingers in `launching` with a live claim. Without
+      // the transaction it would be `launching` with a stranded claim token.
+      const suggestion = await readRow(suggestionId);
+      expect(suggestion?.status).toBe('open');
+      expect(suggestion?.launchClaimedAt).toBeNull();
+      expect(suggestion?.launchedTaskId).toBeNull();
+
+      // The mirror failure is best-effort: logged, no orphan cancel.
+      expect(mockCancelTaskRunDirect).not.toHaveBeenCalled();
+      expect(warnSpy).toHaveBeenCalledWith(
+        expect.stringContaining('failed to mirror launched state'),
+      );
+    } finally {
+      warnSpy.mockRestore();
+    }
   });
 });

@@ -24,6 +24,7 @@ import {
   inArray,
   isNull,
   sql,
+  cancelTaskRunDirect,
   claimWorkItem,
   finalizeWorkItemLaunched,
   releaseWorkItemClaim,
@@ -656,6 +657,10 @@ async function getMutableQueuedSetupTasks(
  * when its onboarding copy launches. That is the least-surprising state: the
  * work genuinely launched, so the suggestions UI should reflect it rather than
  * showing the row as merely dismissed.
+ *
+ * The claim and finalize run in one transaction so a finalize failure rolls the
+ * claim back rather than stranding the suggestion in `launching` with a live
+ * claim until the 10-minute stale-claim recovery.
  */
 async function markSuggestionWorkItemLaunched(
   input: {
@@ -664,35 +669,37 @@ async function markSuggestionWorkItemLaunched(
   },
   executor: DatabaseOrTransaction = db,
 ) {
-  const claimedSuggestion = await claimWorkItem(executor, {
-    id: input.suggestionId,
-    additionalClaimableStatuses: ['dismissed'],
-    extraConditions: [eq(workItems.kind, 'suggestion')],
+  await executor.transaction(async (tx) => {
+    const claimedSuggestion = await claimWorkItem(tx, {
+      id: input.suggestionId,
+      additionalClaimableStatuses: ['dismissed'],
+      extraConditions: [eq(workItems.kind, 'suggestion')],
+    });
+
+    if (!claimedSuggestion) {
+      // Another surface holds a fresh claim, the suggestion already launched, or
+      // it is terminally failed. Skip the mirror rather than overwrite it.
+      console.warn(
+        `[setup-new] Skipped mirroring launched state onto suggestion ${input.suggestionId}: it is already launched or another surface holds a fresh claim.`,
+      );
+      return;
+    }
+
+    const finalized = await finalizeWorkItemLaunched(tx, {
+      id: input.suggestionId,
+      taskId: input.launchedTaskId,
+      claimedAt: claimedSuggestion.launchClaimedAt,
+      clearDismissedAt: true,
+    });
+
+    if (!finalized) {
+      // Our claim token was superseded between claim and finalize; leave the new
+      // claimant's state untouched.
+      console.warn(
+        `[setup-new] Suggestion ${input.suggestionId} mirror lost the fencing guard after claiming; another surface reclaimed it. Leaving its state untouched.`,
+      );
+    }
   });
-
-  if (!claimedSuggestion) {
-    // Another surface holds a fresh claim, the suggestion already launched, or
-    // it is terminally failed. Skip the mirror rather than overwrite it.
-    console.warn(
-      `[setup-new] Skipped mirroring launched state onto suggestion ${input.suggestionId}: it is already launched or another surface holds a fresh claim.`,
-    );
-    return;
-  }
-
-  const finalized = await finalizeWorkItemLaunched(executor, {
-    id: input.suggestionId,
-    taskId: input.launchedTaskId,
-    claimedAt: claimedSuggestion.launchClaimedAt,
-    clearDismissedAt: true,
-  });
-
-  if (!finalized) {
-    // Our claim token was superseded between claim and finalize; leave the new
-    // claimant's state untouched.
-    console.warn(
-      `[setup-new] Suggestion ${input.suggestionId} mirror lost the fencing guard after claiming; another surface reclaimed it. Leaving its state untouched.`,
-    );
-  }
 }
 
 function stripMutableQueuedSetupTask(
@@ -954,8 +961,10 @@ export async function launchQueuedSetupTasksIfReady({
 
   await Promise.allSettled(
     claimedTasks.map(async (queuedTask) => {
+      let launchResult: Awaited<ReturnType<typeof enqueueCloudTask>>;
+
       try {
-        const launchResult = await enqueueCloudTask({
+        launchResult = await enqueueCloudTask({
           task: {
             type: TaskPayloadKind.StandardTask,
             payload: {
@@ -987,65 +996,108 @@ export async function launchQueuedSetupTasksIfReady({
               }
             : {}),
         });
-
-        await db.transaction(async (tx) => {
-          // Fenced finalize: `launching` -> `launched` only when our claim
-          // token still matches. If it returns false our claim was reclaimed
-          // by another launcher between claim and enqueue.
-          const finalized = await finalizeWorkItemLaunched(tx, {
-            id: queuedTask.id,
-            taskId: launchResult.taskId,
-            claimedAt: queuedTask.claimedAt,
-          });
-
-          if (!finalized) {
-            // The task is already enqueued but the fencing guard rejected the
-            // finalize, so it now runs unlinked from this work item. No
-            // enqueue-level cancel helper is exposed to this surface, so log
-            // loudly for triage and leave the new claimant's state untouched
-            // (matches the implement.ts / launchActWorkItems orphan handling).
-            console.warn(
-              `[setup-new] finalize lost the fencing guard for onboarding work item ${queuedTask.id}; orphaned task ${launchResult.taskId} runs unlinked (claim reclaimed by another launcher).`,
-            );
-            return;
-          }
-
-          // `finalizeWorkItemLaunched` does not stamp `targetEnvironmentId`, so
-          // set it separately in the same transaction. Guarded on the freshly
-          // written `launchedTaskId` so a superseded launcher can never stamp
-          // onto the new claimant's row.
-          await tx
-            .update(workItems)
-            .set({
-              targetEnvironmentId: matchingEnvironmentId,
-              updatedAt: new Date(),
-            })
-            .where(
-              and(
-                eq(workItems.id, queuedTask.id),
-                eq(workItems.launchedTaskId, launchResult.taskId),
-              ),
-            );
-
-          if (queuedTask.suggestionId) {
-            await markSuggestionWorkItemLaunched(
-              {
-                suggestionId: queuedTask.suggestionId,
-                launchedTaskId: launchResult.taskId,
-              },
-              tx,
-            );
-          }
-        });
-      } catch {
-        // Release our claim back to `open` so a later trigger can retry. The
-        // fenced release never reverts a `launched` item and never reverts a
-        // claim that was already reclaimed by another launcher.
+      } catch (error) {
+        // The enqueue never succeeded, so no run exists: release our claim back
+        // to `open` so a later trigger can retry promptly. The fenced release
+        // never reverts a `launched` item and never reverts a claim already
+        // reclaimed by another launcher. Only a pre-enqueue failure may release;
+        // see the post-enqueue invariant below.
         await releaseWorkItemClaim(db, {
           id: queuedTask.id,
           claimedAt: queuedTask.claimedAt,
           extraConditions: [eq(workItems.kind, 'onboarding')],
         });
+
+        console.warn(
+          `[setup-new] enqueue failed for onboarding work item ${queuedTask.id}; released its claim back to open — ${
+            error instanceof Error ? error.message : String(error)
+          }.`,
+        );
+        return;
+      }
+
+      // Fenced finalize: `launching` -> `launched` only when our claim token
+      // still matches, stamping `targetEnvironmentId` in the same guarded write.
+      // Runs directly against `db` (not a transaction): it is a single fenced
+      // UPDATE, and the suggestion mirror below deliberately no longer shares
+      // its atomicity so a mirror failure can never roll back a healthy launch.
+      //
+      // Invariant: once the task is enqueued, a failure of unknown cause must
+      // never release the claim. Releasing would let the next readiness pass
+      // re-claim and launch a duplicate immediately, while leaving the claim in
+      // place lets stale-claim recovery retry safely only after the shared
+      // window. So a throw here is treated exactly like a lost finalize
+      // (`finalized = false`), which drives the orphan-cancel branch. In the
+      // rare ambiguous case where the finalize committed but its ack was lost,
+      // the cancel may kill a healthy linked run; that trade is intentional — a
+      // visibly canceled task beats a silent duplicate.
+      let finalized: boolean;
+
+      try {
+        finalized = await finalizeWorkItemLaunched(db, {
+          id: queuedTask.id,
+          taskId: launchResult.taskId,
+          claimedAt: queuedTask.claimedAt,
+          targetEnvironmentId: matchingEnvironmentId,
+        });
+      } catch (error) {
+        console.warn(
+          `[setup-new] finalize threw for onboarding work item ${queuedTask.id} after enqueuing task ${launchResult.taskId} (run ${launchResult.id}); treating as a lost finalize and leaving the claim for stale-claim recovery — ${
+            error instanceof Error ? error.message : String(error)
+          }.`,
+        );
+        finalized = false;
+      }
+
+      if (!finalized) {
+        // The task is already enqueued but the finalize did not commit (the
+        // fencing guard rejected it, or it threw), so the run is orphaned from
+        // this work item. Best-effort cancel it while it is still pre-sandbox,
+        // and log loudly either way with the cancel outcome (matches the
+        // implement.ts orphan handling). Return before the mirror: a lost or
+        // failed finalize must never mirror a launch that did not link.
+        let cancelNote = 'orphaned run left running';
+
+        try {
+          const canceled = await cancelTaskRunDirect({
+            runId: launchResult.id,
+            error:
+              'Canceled: setup-new queued task launch finalize lost the claim fencing guard',
+          });
+          cancelNote = canceled
+            ? 'orphaned run canceled'
+            : 'orphaned run cancel did not apply (already started or terminal)';
+        } catch (cancelError) {
+          cancelNote = `orphaned run cancel failed: ${
+            cancelError instanceof Error
+              ? cancelError.message
+              : String(cancelError)
+          }`;
+        }
+
+        console.warn(
+          `[setup-new] finalize lost the fencing guard for onboarding work item ${queuedTask.id}; orphaned task ${launchResult.taskId} (run ${launchResult.id}) runs unlinked — ${cancelNote}.`,
+        );
+        return;
+      }
+
+      // Mirror the launched state onto the source suggestion only after a
+      // committed finalize, outside any transaction and best-effort: the launch
+      // link is already finalized and must stay finalized, so a mirror throw is
+      // logged and swallowed rather than allowed to undo the launch.
+      if (queuedTask.suggestionId) {
+        try {
+          await markSuggestionWorkItemLaunched({
+            suggestionId: queuedTask.suggestionId,
+            launchedTaskId: launchResult.taskId,
+          });
+        } catch (error) {
+          console.warn(
+            `[setup-new] failed to mirror launched state onto suggestion ${queuedTask.suggestionId} for task ${launchResult.taskId}; the onboarding launch stays finalized — ${
+              error instanceof Error ? error.message : String(error)
+            }.`,
+          );
+        }
       }
     }),
   );
