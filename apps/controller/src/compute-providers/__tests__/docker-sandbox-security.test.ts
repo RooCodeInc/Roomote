@@ -192,10 +192,10 @@ describe('attachDockerEgressPolicy', () => {
       ]),
     );
     const routeScript = helperRun?.at(-1);
-    expect(routeScript).toContain('ip route add blackhole 169.254.0.0/16');
-    expect(routeScript).toContain('ip route add blackhole 10.0.0.0/8');
+    expect(routeScript).toContain('ip route replace blackhole 169.254.0.0/16');
+    expect(routeScript).toContain('ip route replace blackhole 10.0.0.0/8');
     expect(routeScript).toContain('ip route show default');
-    expect(routeScript).toContain('ip route add blackhole "$gateway/32"');
+    expect(routeScript).toContain('ip route replace blackhole "$gateway/32"');
   });
 
   it('keeps private host routes reachable for host-based local development', async () => {
@@ -217,10 +217,14 @@ describe('attachDockerEgressPolicy', () => {
       .find((args) => args[0] === 'run');
     const routeScript = helperRun?.at(-1);
     expect(routeScript).not.toContain('ip route show default');
-    expect(routeScript).not.toContain('ip route add blackhole 10.0.0.0/8');
-    expect(routeScript).not.toContain('ip route add blackhole 172.16.0.0/12');
-    expect(routeScript).not.toContain('ip route add blackhole 192.168.0.0/16');
-    expect(routeScript).toContain('ip route add blackhole 169.254.0.0/16');
+    expect(routeScript).not.toContain('ip route replace blackhole 10.0.0.0/8');
+    expect(routeScript).not.toContain(
+      'ip route replace blackhole 172.16.0.0/12',
+    );
+    expect(routeScript).not.toContain(
+      'ip route replace blackhole 192.168.0.0/16',
+    );
+    expect(routeScript).toContain('ip route replace blackhole 169.254.0.0/16');
   });
 });
 
@@ -349,28 +353,134 @@ describe('cleanupStaleDockerSandboxes', () => {
     );
   });
 
-  it('does not remove task resources when Docker inspection fails', async () => {
-    const taskNetwork = getDockerTaskNetworkName(97);
+  it('skips a network whose inspection fails without removing it or aborting the sweep', async () => {
+    const failingNetwork = getDockerTaskNetworkName(97);
+    const orphanedNetwork = getDockerTaskNetworkName(98);
     const runDocker = vi.fn<DockerCommand>(async (args) => {
       if (args[0] === 'network' && args[1] === 'ls') {
-        return `${taskNetwork}\n`;
+        return `${failingNetwork}\n${orphanedNetwork}\n`;
       }
-      if (args[0] === 'network' && args[1] === 'inspect') {
+      if (
+        args[0] === 'network' &&
+        args[1] === 'inspect' &&
+        args[2] === failingNetwork
+      ) {
         throw new Error('Docker daemon unavailable');
+      }
+      if (
+        args[0] === 'network' &&
+        args[1] === 'inspect' &&
+        args[2] === orphanedNetwork
+      ) {
+        return JSON.stringify([{ Labels: {} }]);
       }
       return '';
     });
 
     await expect(
       cleanupStaleDockerSandboxes({ nowMs: 20 * 60 * 1_000 }, runDocker),
-    ).rejects.toThrow('Docker daemon unavailable');
+    ).resolves.toBeUndefined();
     expect(runDocker).not.toHaveBeenCalledWith(
-      ['network', 'rm', taskNetwork],
+      ['network', 'rm', failingNetwork],
       expect.anything(),
     );
-    expect(runDocker).not.toHaveBeenCalledWith(
-      expect.arrayContaining(['network', 'disconnect']),
+    // The failing network must not stop later networks from being reconciled.
+    expect(runDocker).toHaveBeenCalledWith(
+      ['network', 'rm', orphanedNetwork],
       expect.anything(),
     );
+  });
+
+  it('keeps a running container whose process list cannot be read or whose task-run label is corrupt', async () => {
+    for (const taskRunLabel of ['99', 'not-a-number']) {
+      const taskNetwork = getDockerTaskNetworkName(99);
+      const containerName = 'roomote-worker-99';
+      const runDocker = vi.fn<DockerCommand>(async (args) => {
+        if (args[0] === 'network' && args[1] === 'ls') {
+          return `${taskNetwork}\n`;
+        }
+        if (args[0] === 'network' && args[1] === 'inspect') {
+          return JSON.stringify([
+            {
+              Labels: {
+                'dev.roomote.sandbox.container': containerName,
+                'dev.roomote.sandbox.auto-remove': 'true',
+                'dev.roomote.task-run-id': taskRunLabel,
+                'dev.roomote.sandbox.created-at-ms': '1000',
+              },
+            },
+          ]);
+        }
+        if (args[0] === 'inspect' && args[1] === containerName) {
+          return JSON.stringify([{ State: { Running: true } }]);
+        }
+        if (args[0] === 'exec') {
+          throw new Error('container is restarting');
+        }
+        return '';
+      });
+
+      await cleanupStaleDockerSandboxes({ nowMs: 20 * 60 * 1_000 }, runDocker);
+
+      expect(runDocker).not.toHaveBeenCalledWith(
+        ['rm', '-f', containerName],
+        expect.anything(),
+      );
+      expect(runDocker).not.toHaveBeenCalledWith(
+        ['network', 'rm', taskNetwork],
+        expect.anything(),
+      );
+    }
+  });
+
+  it('tolerates losing the inspect-then-connect race for a trusted service', async () => {
+    const taskNetwork = getDockerTaskNetworkName(95);
+    const runDocker = vi.fn<DockerCommand>(async (args) => {
+      if (
+        args[0] === 'network' &&
+        args[1] === 'inspect' &&
+        args[2] === 'roomote-control'
+      ) {
+        return JSON.stringify([
+          {
+            Id: 'control-network-id',
+            Containers: { apiContainerId: { Name: 'roomote-api' } },
+          },
+        ]);
+      }
+      if (args[0] === 'inspect' && args[1] === 'apiContainerId') {
+        return JSON.stringify([
+          {
+            Config: { Labels: { 'com.docker.compose.service': 'api' } },
+            NetworkSettings: {
+              Networks: {
+                roomoteControl: {
+                  NetworkID: 'control-network-id',
+                  Aliases: ['api'],
+                },
+              },
+            },
+          },
+        ]);
+      }
+      if (args[0] === 'network' && args[1] === 'connect') {
+        throw new Error(
+          `endpoint with name roomote-api already exists in network ${taskNetwork}`,
+        );
+      }
+      return '';
+    });
+
+    await expect(
+      prepareDockerTaskNetwork(
+        {
+          taskRunId: 95,
+          controlNetwork: 'roomote-control',
+          egressPolicy: 'internet',
+          autoRemove: true,
+        },
+        runDocker,
+      ),
+    ).resolves.toBe(taskNetwork);
   });
 });

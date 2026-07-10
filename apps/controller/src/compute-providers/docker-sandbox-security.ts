@@ -271,17 +271,19 @@ export async function attachDockerEgressPolicy(
     '/bin/sh',
     params.image,
     '-c',
+    // `replace` keeps the script idempotent when a helper is re-run against a
+    // network namespace that already holds some of the routes.
     [
       ...BLOCKED_METADATA_ROUTES.map(
-        (route) => `ip route add blackhole ${route}`,
+        (route) => `ip route replace blackhole ${route}`,
       ),
       ...(params.blockDockerGateway
         ? [
             ...BLOCKED_PRIVATE_ROUTES.map(
-              (route) => `ip route add blackhole ${route}`,
+              (route) => `ip route replace blackhole ${route}`,
             ),
             `gateway="$(ip route show default | awk 'NR == 1 { print $3 }')"`,
-            'if [ -n "$gateway" ]; then ip route add blackhole "$gateway/32"; fi',
+            'if [ -n "$gateway" ]; then ip route replace blackhole "$gateway/32"; fi',
           ]
         : []),
     ].join(' && '),
@@ -321,68 +323,99 @@ export async function cleanupStaleDockerSandboxes(
     .split('\n')
     .map((line) => line.trim())
     .filter((line) => line.startsWith(TASK_NETWORK_PREFIX))) {
-    const network = await inspectNetwork(taskNetwork, runDocker);
-    const labels = network?.Labels ?? {};
-    const containerName = labels[EXPECTED_CONTAINER_LABEL];
-    const createdAtMs = Number(labels[CREATED_AT_MS_LABEL]);
-    const isPastProvisioningTimeout =
-      !Number.isFinite(createdAtMs) ||
-      nowMs - createdAtMs >= STALE_PROVISIONING_TIMEOUT_MS;
-
-    if (!containerName) {
-      await removeDockerTaskNetwork(taskNetwork, runDocker);
-      continue;
-    }
-
-    const container = await inspectContainer(containerName, runDocker);
-
-    if (!container) {
-      // A concurrent spawn creates and wires the network immediately before
-      // creating the worker container. Do not let the periodic reaper race
-      // that valid provisioning window.
-      if (isPastProvisioningTimeout) {
-        await removeDockerTaskNetwork(taskNetwork, runDocker);
-      }
-      continue;
-    }
-
-    if (!container.State?.Running) {
-      if (labels[AUTO_REMOVE_LABEL] === 'true') {
-        await removeDockerSandboxResources(
-          { containerName, taskNetwork },
-          runDocker,
-        );
-      }
-      continue;
-    }
-
-    if (options.controlNetwork) {
-      await connectTrustedControlPlaneServices(
-        options.controlNetwork,
+    try {
+      await reconcileTaskNetwork(
         taskNetwork,
+        options.controlNetwork,
+        nowMs,
         runDocker,
       );
+    } catch (error) {
+      // One unreconcilable network must not stop the sweep: skip it and let
+      // the next cycle retry. Nothing is removed for a network that throws.
+      console.error(
+        `[cleanupStaleDockerSandboxes] Skipping ${taskNetwork} this cycle: ${error instanceof Error ? error.message : String(error)}`,
+      );
     }
+  }
+}
 
-    if (!isPastProvisioningTimeout || labels[AUTO_REMOVE_LABEL] !== 'true') {
-      continue;
+async function reconcileTaskNetwork(
+  taskNetwork: string,
+  controlNetwork: string | undefined,
+  nowMs: number,
+  runDocker: DockerCommand,
+): Promise<void> {
+  const network = await inspectNetwork(taskNetwork, runDocker);
+  const labels = network?.Labels ?? {};
+  const containerName = labels[EXPECTED_CONTAINER_LABEL];
+  const createdAtMs = Number(labels[CREATED_AT_MS_LABEL]);
+  const isPastProvisioningTimeout =
+    !Number.isFinite(createdAtMs) ||
+    nowMs - createdAtMs >= STALE_PROVISIONING_TIMEOUT_MS;
+
+  if (!containerName) {
+    await removeDockerTaskNetwork(taskNetwork, runDocker);
+    return;
+  }
+
+  const container = await inspectContainer(containerName, runDocker);
+
+  if (!container) {
+    // A concurrent spawn creates and wires the network immediately before
+    // creating the worker container. Do not let the periodic reaper race
+    // that valid provisioning window.
+    if (isPastProvisioningTimeout) {
+      await removeDockerTaskNetwork(taskNetwork, runDocker);
     }
+    return;
+  }
 
-    const taskRunId = Number(labels[TASK_RUN_ID_LABEL]);
-    const processList = await runDocker([
-      'exec',
-      containerName,
-      'ps',
-      '-eo',
-      'args',
-    ]);
-
-    if (!processListIncludesDockerWorkerRun(processList, taskRunId)) {
+  if (!container.State?.Running) {
+    if (labels[AUTO_REMOVE_LABEL] === 'true') {
       await removeDockerSandboxResources(
         { containerName, taskNetwork },
         runDocker,
       );
     }
+    return;
+  }
+
+  if (controlNetwork) {
+    await connectTrustedControlPlaneServices(
+      controlNetwork,
+      taskNetwork,
+      runDocker,
+    );
+  }
+
+  if (!isPastProvisioningTimeout || labels[AUTO_REMOVE_LABEL] !== 'true') {
+    return;
+  }
+
+  // Fail open from here: never force-remove a running container whose task
+  // run we cannot positively identify as finished.
+  const taskRunId = Number(labels[TASK_RUN_ID_LABEL]);
+
+  if (!Number.isInteger(taskRunId)) {
+    return;
+  }
+
+  let processList: string;
+
+  try {
+    processList = await runDocker(['exec', containerName, 'ps', '-eo', 'args']);
+  } catch {
+    // The container likely exited between inspect and exec; the next cycle
+    // observes the stopped state and reaps it through the branch above.
+    return;
+  }
+
+  if (!processListIncludesDockerWorkerRun(processList, taskRunId)) {
+    await removeDockerSandboxResources(
+      { containerName, taskNetwork },
+      runDocker,
+    );
   }
 }
 
@@ -422,13 +455,21 @@ async function connectTrustedControlPlaneServices(
     );
 
     if (!container?.NetworkSettings?.Networks?.[taskNetworkName]) {
-      await runDocker([
-        'network',
-        'connect',
-        ...[...new Set(aliases)].flatMap((alias) => ['--alias', alias]),
-        taskNetworkName,
-        containerId,
-      ]);
+      try {
+        await runDocker([
+          'network',
+          'connect',
+          ...[...new Set(aliases)].flatMap((alias) => ['--alias', alias]),
+          taskNetworkName,
+          containerId,
+        ]);
+      } catch (error) {
+        // A concurrent spawn or reaper cycle can win the inspect-then-connect
+        // race; the endpoint existing is the outcome we wanted.
+        if (!isDockerAlreadyConnectedError(error)) {
+          throw error;
+        }
+      }
     }
     connectedServices.add(service);
   }
@@ -532,4 +573,12 @@ function isDockerObjectNotFoundError(error: unknown): boolean {
     /no such (?:object|container|network)/i,
     /network .+ not found/i,
   ].some((pattern) => pattern.test(output));
+}
+
+function isDockerAlreadyConnectedError(error: unknown): boolean {
+  const output = getDockerErrorOutput(error);
+
+  return [/already exists in network/i, /is already attached to network/i].some(
+    (pattern) => pattern.test(output),
+  );
 }

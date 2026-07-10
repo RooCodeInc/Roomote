@@ -194,18 +194,25 @@ export class RoomoteController extends BaseController {
     };
   }
 
-  protected override async setup(): Promise<void> {
-    await cleanupStaleDockerSandboxes({
-      controlNetwork: Env.DOCKER_WORKER_NETWORK,
-    });
-    this.dockerCleanupInterval = setInterval(() => {
-      void cleanupStaleDockerSandboxes({
+  // Reaping is best-effort: a transient Docker daemon or control-network
+  // error (for example a rolling deploy replacing the API container) must not
+  // crash the controller, especially not during startup.
+  private async cleanStaleDockerSandboxes(): Promise<void> {
+    try {
+      await cleanupStaleDockerSandboxes({
         controlNetwork: Env.DOCKER_WORKER_NETWORK,
-      }).catch((error) => {
-        console.error(
-          `[RoomoteController] Failed to clean stale Docker sandboxes: ${error instanceof Error ? error.message : String(error)}`,
-        );
       });
+    } catch (error) {
+      console.error(
+        `[RoomoteController] Failed to clean stale Docker sandboxes: ${error instanceof Error ? error.message : String(error)}`,
+      );
+    }
+  }
+
+  protected override async setup(): Promise<void> {
+    await this.cleanStaleDockerSandboxes();
+    this.dockerCleanupInterval = setInterval(() => {
+      void this.cleanStaleDockerSandboxes();
     }, 60_000);
     this.dockerCleanupInterval.unref();
   }
