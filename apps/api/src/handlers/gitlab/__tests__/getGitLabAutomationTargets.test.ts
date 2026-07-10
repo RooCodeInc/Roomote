@@ -56,8 +56,6 @@ vi.mock('@roomote/db/server', () => ({
   desc: (value: unknown) => mockDesc(value),
 }));
 
-import { CloudAgentType } from '@roomote/types';
-
 import { getGitLabAutomationTargets } from '../getGitLabAutomationTargets';
 
 describe('getGitLabAutomationTargets', () => {
@@ -81,7 +79,7 @@ describe('getGitLabAutomationTargets', () => {
     mockAuthAccountsFindFirst.mockResolvedValue({ userId: 'linked-user-1' });
 
     const result = await getGitLabAutomationTargets({
-      type: CloudAgentType.PrReviewer,
+      workflow: 'pr_review',
       payload: {
         project: { id: 42, path_with_namespace: 'acme/backend' },
         user: { id: 987, username: 'alice' },
@@ -94,7 +92,7 @@ describe('getGitLabAutomationTargets', () => {
       status: 'ok',
       targets: [
         {
-          id: 'gitlab:PR Reviewer:repo-1',
+          id: 'gitlab:pr_review:repo-1',
           userId: 'linked-user-1',
         },
       ],
@@ -115,7 +113,7 @@ describe('getGitLabAutomationTargets', () => {
     mockSelectWhere.mockResolvedValue([]);
 
     const result = await getGitLabAutomationTargets({
-      type: CloudAgentType.PrReviewer,
+      workflow: 'pr_review',
       payload: {
         project: { id: 42, path_with_namespace: 'acme/backend' },
         user: { id: 987, username: 'alice' },
@@ -137,7 +135,7 @@ describe('getGitLabAutomationTargets', () => {
     mockSelectWhere.mockResolvedValue([]);
 
     const result = await getGitLabAutomationTargets({
-      type: CloudAgentType.PrReviewer,
+      workflow: 'pr_review',
       payload: {
         project: { id: 42, path_with_namespace: 'acme/backend' },
         user: { id: 987, username: 'alice' },

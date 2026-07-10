@@ -7,7 +7,6 @@
 
 import { Hono } from 'hono';
 import { createHmac } from 'node:crypto';
-import { CloudAgentType } from '@roomote/types';
 
 // ── Mocks ──────────────────────────────────────────────────────────────
 
@@ -529,7 +528,6 @@ describe('CLO-1133: active task run takes priority over routing confirmation and
     vi.mocked(routeTask).mockResolvedValue({
       status: 'routed',
       result: {
-        agentType: CloudAgentType.StandardTask,
         workspace: { type: 'all_repositories' },
         reasoning: 'Best fit for new task',
       },

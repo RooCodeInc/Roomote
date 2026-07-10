@@ -1,6 +1,5 @@
 import {
   type GithubPrConflictResolveTask,
-  CloudAgentType,
   getSkillCommandDelimiter,
 } from '@roomote/types';
 import type { ResolvedTaskCommitAuthor } from '../commit-author';
@@ -31,7 +30,7 @@ export function githubPrConflictResolve({
     taskContext: {
       repository: repo,
       pull_request_number: prNumber,
-      agent_type: CloudAgentType.Fixer,
+      workflow: 'pr_conflict_resolve',
       task_link_follow: `[Follow](${taskRunUrl})`,
       task_link_see: `[See task](${taskRunUrl})`,
       pull_request_title: prTitle,

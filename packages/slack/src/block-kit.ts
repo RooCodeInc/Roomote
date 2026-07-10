@@ -898,7 +898,6 @@ function postSlackFinalRouterDebug({
   source,
   sourceLink,
   taskDescription,
-  selectedAgent,
   selectedWorkspace,
   reasoning,
   routingDebug,
@@ -908,7 +907,6 @@ function postSlackFinalRouterDebug({
   source: string;
   sourceLink?: string;
   taskDescription: string;
-  selectedAgent: { name: string; type: string };
   selectedWorkspace: { name: string; type: string };
   reasoning?: string;
   routingDebug?: RoutingDebugInfo;
@@ -919,7 +917,6 @@ function postSlackFinalRouterDebug({
     source,
     sourceLink,
     taskDescription,
-    selectedAgent,
     selectedWorkspace,
     reasoning: reasoning ?? '',
     routingDebug,
@@ -1152,7 +1149,7 @@ export async function showTaskConfiguration({
         });
 
         console.log(
-          `[LLM Router] Attempting to route Slack task (channel: ${event.channel}, agents: ${routingContext.availableAgents.length}, envs: ${routingContext.availableEnvironments.length})`,
+          `[LLM Router] Attempting to route Slack task (channel: ${event.channel}, envs: ${routingContext.availableEnvironments.length})`,
         );
 
         // Attempt LLM routing - result is used to pre-fill the selection UI
@@ -1183,8 +1180,7 @@ export async function showTaskConfiguration({
 
         if (decision.status === 'routed') {
           console.log(
-            `[LLM Router] Slack routing suggestion: ${decision.result.agentType} agent ` +
-              `(workspace: ${JSON.stringify(decision.result.workspace)})`,
+            `[LLM Router] Slack workspace suggestion: ${JSON.stringify(decision.result.workspace)}`,
           );
 
           routingResult = decision.result;
@@ -1963,10 +1959,6 @@ export async function handleTaskConfiguration(
       threadMessages?.map((message) => message.ts) ?? [],
     );
 
-    const routerSelectedAgent = {
-      name: prefill?.agentName ?? agentName,
-      type: prefill?.agentName ?? agentName,
-    };
     const routerSelectedWorkspace = prefill
       ? {
           name: prefill.workspaceDisplayName,
@@ -1986,7 +1978,6 @@ export async function handleTaskConfiguration(
           threadTs: threadId || originalEvent.ts,
         }) ?? undefined,
       taskDescription: taskText,
-      selectedAgent: routerSelectedAgent,
       selectedWorkspace: routerSelectedWorkspace,
       reasoning: prefill?.reasoning,
       routingDebug: prefill?.routingDebug,
@@ -2605,7 +2596,6 @@ export async function handleSlackRoutingCorrection({
 
   // Use the LLM to classify the user's follow-up as confirm, cancel, or correct
   const classification = await classifyFollowUp({
-    suggestedAgentName: oldPrefill.agentName,
     suggestedWorkspace: oldPrefill.workspaceDisplayName,
     userResponse: correctionText,
     userId: userMapping.userId,
@@ -2755,7 +2745,6 @@ export async function handleSlackRoutingCorrection({
 
     // Add the previous suggestion so the router can revise the workspace.
     routingContext.previousSuggestion = {
-      agentType: oldPrefill.agentName,
       workspaceValue: oldPrefill.workspaceValue,
       workspaceDisplayName: oldPrefill.workspaceDisplayName,
       modelId: oldPrefill.modelId,

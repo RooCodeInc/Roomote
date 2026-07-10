@@ -1,7 +1,7 @@
 import {
-  CloudAgentType,
-  DEFAULT_PR_REVIEWER_SETTINGS,
-  type PrReviewerSettings,
+  DEFAULT_PR_REVIEW_SETTINGS,
+  type PrReviewSettings,
+  type SourceControlAutomationWorkflow,
 } from '@roomote/types';
 import { Schemas as GitHubSchemas } from '@roomote/github';
 import {
@@ -25,8 +25,8 @@ import type {
 
 type GitHubAutomationTarget = {
   id: string;
-  type: CloudAgentType;
-  settings: PrReviewerSettings | null;
+  workflow: SourceControlAutomationWorkflow;
+  settings: PrReviewSettings | null;
   repo: Repository;
   collaborators: Array<{ githubLogin: string }>;
   repositoryIds: string[];
@@ -34,7 +34,7 @@ type GitHubAutomationTarget = {
 };
 
 type GetGitHubAutomationTargetsOptions = {
-  type: CloudAgentType;
+  workflow: SourceControlAutomationWorkflow;
   installation?: WebhookInstallation;
   repository: WebhookRepository;
   sender: WebhookUser;
@@ -44,7 +44,7 @@ type GetGitHubAutomationTargetsOptions = {
 };
 
 export const getGitHubAutomationTargets = async ({
-  type,
+  workflow,
   installation,
   repository,
   sender,
@@ -105,14 +105,11 @@ export const getGitHubAutomationTargets = async ({
   }
 
   const reviewerSettings =
-    type === CloudAgentType.PrReviewer
-      ? await getReviewCodeAutomationSettings()
-      : null;
+    workflow === 'pr_review' ? await getReviewCodeAutomationSettings() : null;
 
   if (
-    type === CloudAgentType.PrReviewer &&
-    (reviewerSettings?.enabled ?? DEFAULT_PR_REVIEWER_SETTINGS.enabled) ===
-      false
+    workflow === 'pr_review' &&
+    (reviewerSettings?.enabled ?? DEFAULT_PR_REVIEW_SETTINGS.enabled) === false
   ) {
     return { status: 'ok', targets: [] };
   }
@@ -126,10 +123,7 @@ export const getGitHubAutomationTargets = async ({
       eq(environmentRepositoryMappings.repositoryId, result.repositories.id),
     );
 
-  if (
-    type === CloudAgentType.PrReviewer &&
-    repositoryEnvironmentIds.length === 0
-  ) {
+  if (workflow === 'pr_review' && repositoryEnvironmentIds.length === 0) {
     console.error(
       `[getGitHubAutomationTargets] [${githubInstallationId}, ${repository.full_name}] -> no_environment_mapping`,
     );
@@ -142,13 +136,13 @@ export const getGitHubAutomationTargets = async ({
 
   const reviewerReviewsAllPrs =
     reviewerSettings?.reviewAllPullRequestAuthors ??
-    DEFAULT_PR_REVIEWER_SETTINGS.reviewAllPullRequestAuthors;
+    DEFAULT_PR_REVIEW_SETTINGS.reviewAllPullRequestAuthors;
   const isRoomoteManagedAuthor = collaboratorLogin
     ? Boolean(GitHubSchemas.isRoomoteGitHubLogin(collaboratorLogin))
     : true;
 
   if (
-    type === CloudAgentType.PrReviewer &&
+    workflow === 'pr_review' &&
     collaboratorLogin &&
     !ignoreRoomoteAuthorRequirement &&
     !isRoomoteManagedAuthor &&
@@ -166,8 +160,8 @@ export const getGitHubAutomationTargets = async ({
 
   const userId = githubUserMapping?.userId;
   const target: GitHubAutomationTarget = {
-    id: `github:${type}:${result.repositories.id}`,
-    type,
+    id: `github:${workflow}:${result.repositories.id}`,
+    workflow,
     settings: reviewerSettings,
     repo: result.repositories,
     collaborators: [],

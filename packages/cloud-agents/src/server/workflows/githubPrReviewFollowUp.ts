@@ -49,8 +49,6 @@ export async function githubPrReviewFollowUp({
     },
   } = taskSpec;
 
-  const agentType = 'Standard Task';
-
   const params: GitHubCli.FetchParams = { gitHubToken, repo: fullName };
   const prParams: GitHubCli.FetchPrParams = { ...params, prNumber };
 
@@ -95,7 +93,7 @@ export async function githubPrReviewFollowUp({
   const taskContext = {
     repository: fullName,
     pull_request_number: prNumber,
-    agent_type: agentType,
+    workflow: 'pr_review',
     pull_request_base_sha: pr.baseRefOid,
     revert_commit_base_url: revertCommitBaseUrl,
     comment_header_starting: '',

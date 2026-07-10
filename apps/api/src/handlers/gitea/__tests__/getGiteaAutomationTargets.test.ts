@@ -56,8 +56,6 @@ vi.mock('@roomote/db/server', () => ({
   desc: (value: unknown) => mockDesc(value),
 }));
 
-import { CloudAgentType } from '@roomote/types';
-
 import { getGiteaAutomationTargets } from '../getGiteaAutomationTargets';
 
 describe('getGiteaAutomationTargets', () => {
@@ -79,7 +77,7 @@ describe('getGiteaAutomationTargets', () => {
 
   it('returns reviewer targets for active synced Gitea repositories', async () => {
     const result = await getGiteaAutomationTargets({
-      type: CloudAgentType.PrReviewer,
+      workflow: 'pr_review',
       payload: {
         repository: { id: 42, full_name: 'acme/backend' },
         sender: { id: 987, login: 'roomote-bot' },
@@ -90,7 +88,7 @@ describe('getGiteaAutomationTargets', () => {
       status: 'ok',
       targets: [
         {
-          id: 'gitea:PR Reviewer:repo-1',
+          id: 'gitea:pr_review:repo-1',
           // The repo-linker fallback owner is gone: webhook launches carry
           // an automation initiator instead of a forged owner.
           userId: null,
@@ -103,7 +101,7 @@ describe('getGiteaAutomationTargets', () => {
     mockSelectWhere.mockResolvedValue([]);
 
     const result = await getGiteaAutomationTargets({
-      type: CloudAgentType.PrReviewer,
+      workflow: 'pr_review',
       payload: {
         repository: { id: 42, full_name: 'acme/backend' },
         sender: { id: 987, login: 'roomote-bot' },
@@ -120,7 +118,7 @@ describe('getGiteaAutomationTargets', () => {
   it('applies PR author policy unless explicitly ignored', async () => {
     await expect(
       getGiteaAutomationTargets({
-        type: CloudAgentType.PrReviewer,
+        workflow: 'pr_review',
         payload: {
           repository: { id: 42, full_name: 'acme/backend' },
           sender: { id: 987, login: 'alice' },
@@ -133,7 +131,7 @@ describe('getGiteaAutomationTargets', () => {
 
     await expect(
       getGiteaAutomationTargets({
-        type: CloudAgentType.PrReviewer,
+        workflow: 'pr_review',
         payload: {
           repository: { id: 42, full_name: 'acme/backend' },
           sender: { id: 987, login: 'alice' },
@@ -147,7 +145,7 @@ describe('getGiteaAutomationTargets', () => {
     mockAuthAccountsFindFirst.mockResolvedValue({ userId: 'commenter-user-1' });
 
     const result = await getGiteaAutomationTargets({
-      type: CloudAgentType.PrReviewer,
+      workflow: 'pr_review',
       payload: {
         repository: { id: 42, full_name: 'acme/backend' },
         sender: { id: 10, login: 'repo-owner' },
@@ -161,7 +159,7 @@ describe('getGiteaAutomationTargets', () => {
       status: 'ok',
       targets: [
         {
-          id: 'gitea:PR Reviewer:repo-1',
+          id: 'gitea:pr_review:repo-1',
           userId: 'commenter-user-1',
         },
       ],
@@ -182,7 +180,7 @@ describe('getGiteaAutomationTargets', () => {
     mockSelectWhere.mockResolvedValue([]);
 
     const result = await getGiteaAutomationTargets({
-      type: CloudAgentType.PrReviewer,
+      workflow: 'pr_review',
       payload: {
         repository: { id: 42, full_name: 'acme/backend' },
         sender: { id: 10, login: 'repo-owner' },
@@ -205,7 +203,7 @@ describe('getGiteaAutomationTargets', () => {
     mockSelectWhere.mockResolvedValue([]);
 
     const result = await getGiteaAutomationTargets({
-      type: CloudAgentType.PrReviewer,
+      workflow: 'pr_review',
       payload: {
         repository: { id: 42, full_name: 'acme/backend' },
         sender: { id: 10, login: 'repo-owner' },

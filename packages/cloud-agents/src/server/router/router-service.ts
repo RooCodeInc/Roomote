@@ -1,7 +1,6 @@
 import { z } from 'zod';
 
 import {
-  CloudAgentType,
   formatSingleLineLog,
   getDefaultTaskModel,
   getTaskModelOptionById,
@@ -234,7 +233,6 @@ function buildGeneralistRoutingResult(
     return {
       status: 'routed',
       result: {
-        agentType: CloudAgentType.StandardTask,
         workspace,
         model: resolveRoutedTaskModel(response, context),
         reasoning: response.reasoning,
@@ -334,10 +332,7 @@ async function runRoutingDecision(
     context.routingModel?.trim() || ROOMOTE_SMALL_MODEL_LABEL;
 
   try {
-    const promptContext: RoutingContext = {
-      ...context,
-      availableAgents: [],
-    };
+    const promptContext = context;
 
     const routingPrompt = buildWorkspaceRoutingPrompt({
       forceDisablePlatformWorkspace: options?.forceDisablePlatformWorkspace,
@@ -552,7 +547,6 @@ export async function routeTask(
           needsExternalLookup,
           confidence: debug.confidence,
           workspaceRemapped: debug.workspaceRemapped,
-          agentType: decision.result.agentType,
           workspaceValue:
             decision.result.workspace.type === 'environment'
               ? decision.result.workspace.name
@@ -615,10 +609,6 @@ export async function routeGitHubTask(
     };
 
     const result = {
-      agentType:
-        response.followUpMode === 'review'
-          ? CloudAgentType.PrReviewer
-          : CloudAgentType.StandardTask,
       reasoning: response.reasoning,
       followUpMode: response.followUpMode,
       debug,
@@ -633,7 +623,7 @@ export async function routeGitHubTask(
         needsExternalLookup: false,
         confidence: response.confidence,
         workspaceRemapped: false,
-        agentType: result.agentType,
+        followUpMode: result.followUpMode,
         reasoning: truncateText(result.reasoning, 280),
       }),
     );
@@ -690,17 +680,15 @@ const followUpResponseSchema = z.object({
  * Classifies a user's follow-up response to a routing confirmation.
  */
 export async function classifyFollowUp(params: {
-  suggestedAgentName: string;
   suggestedWorkspace: string;
   userResponse: string;
   userId?: string | null;
 }): Promise<FollowUpClassification> {
-  const { suggestedAgentName, suggestedWorkspace, userResponse, userId } =
-    params;
+  const { suggestedWorkspace, userResponse, userId } = params;
 
   try {
     const contextPrompt =
-      `**Routing Suggestion**: ${suggestedAgentName} working on ${suggestedWorkspace}\n` +
+      `**Workspace Suggestion**: ${suggestedWorkspace}\n` +
       `**User Response**: ${truncateText(userResponse, 500)}`;
 
     const { object: response } = await generateTrackedNonTaskObject({

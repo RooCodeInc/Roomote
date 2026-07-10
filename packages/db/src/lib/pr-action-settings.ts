@@ -9,7 +9,7 @@ const PR_ACTION_METADATA_KEY = 'pr_action';
 
 /**
  * Deployment-wide default delivery mode for repository-changing tasks,
- * mirroring the upstream Coder agent `prAction` setting: 'draft' opens draft
+ * mirroring the task-run `prAction` setting: 'draft' opens draft
  * PRs (default), 'create' opens ready-for-review PRs, 'push' pushes the
  * branch without opening a PR. Stored in deployment public metadata so no
  * migration is required.

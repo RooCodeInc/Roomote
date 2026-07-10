@@ -259,7 +259,7 @@ describe('dequeueTaskRun', () => {
     });
   });
 
-  it('treats null-agent StandardTask jobs as implicit Generalist jobs', async () => {
+  it('treats StandardTask jobs without identity metadata as runnable', async () => {
     const taskRun = makeStandardTaskRun();
 
     mockTxExecute.mockResolvedValue([{ id: taskRun.id }]);
@@ -605,7 +605,7 @@ describe('dequeueTaskRun', () => {
     ).toBe(false);
   });
 
-  it('keeps implicit Generalist jobs runnable during dequeue', async () => {
+  it('keeps standard jobs runnable during dequeue', async () => {
     const taskRun = makeStandardTaskRun();
 
     mockTxExecute.mockResolvedValue([{ id: taskRun.id }]);

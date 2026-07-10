@@ -126,13 +126,11 @@ describe('startAutoRoutedSlackTask', () => {
     vi.clearAllMocks();
     detectSlackMcpSetupRequirementMock.mockResolvedValue(null);
     buildSlackRoutingContextMock.mockResolvedValue({
-      availableAgents: [{}],
       availableEnvironments: [{}],
     });
     routeTaskMock.mockResolvedValue({
       status: 'routed',
       result: {
-        agentType: 'standard_task',
         workspace: { type: 'environment', id: 'env_1' },
         workspaceOnly: true,
         reasoning: 'Use App.',
@@ -844,7 +842,6 @@ describe('startAutoRoutedSlackTask', () => {
 
   it('constrains routing by repository and forwards launch overrides', async () => {
     buildSlackRoutingContextMock.mockResolvedValueOnce({
-      availableAgents: [{}],
       availableEnvironments: [
         {
           id: 'env_1',
@@ -861,7 +858,6 @@ describe('startAutoRoutedSlackTask', () => {
     routeTaskMock.mockResolvedValueOnce({
       status: 'routed',
       result: {
-        agentType: 'standard_task',
         workspace: { type: 'environment', id: 'env_2' },
         workspaceOnly: true,
         reasoning: 'Use Worker.',

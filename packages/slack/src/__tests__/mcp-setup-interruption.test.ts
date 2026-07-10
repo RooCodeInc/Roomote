@@ -199,7 +199,6 @@ describe('Slack MCP setup interruption flow', () => {
       reason: 'missing_manager_channel',
     });
     buildSlackRoutingContextMock.mockResolvedValue({
-      availableAgents: [],
       availableEnvironments: [],
     });
     routeTaskMock.mockResolvedValue({
