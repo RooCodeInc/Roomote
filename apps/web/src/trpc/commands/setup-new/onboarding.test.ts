@@ -222,12 +222,6 @@ function createSelectChain(result: unknown) {
   };
 }
 
-function createFromOnlySelectChain(result: unknown) {
-  return {
-    from: vi.fn(async () => result),
-  };
-}
-
 describe('setup-new onboarding task start command', () => {
   const insertOnConflictMock = vi.fn(async () => undefined);
   const insertValuesMock = vi.fn(() => ({
