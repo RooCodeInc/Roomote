@@ -21,7 +21,7 @@ jobs:
     runs-on: blacksmith-4vcpu-ubuntu-2404
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
         with:
           # Prefer RELEASE_BOT_TOKEN so the Version PR triggers CI when it is
           # opened. Fall back to GITHUB_TOKEN when the secret is not yet set
@@ -35,7 +35,7 @@ jobs:
           frozen-lockfile: 'true'
 
       - name: Create or update Version Packages PR
-        uses: changesets/action@v1
+        uses: changesets/action@a45c4d594aa4e2c509dc14a9f2b3b67ba3780d0d # v1.9.0
         with:
           version: pnpm run version
           title: 'Release Roomote'
@@ -51,7 +51,7 @@ jobs:
     needs: version
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
         with:
           token: ${{ secrets.RELEASE_BOT_TOKEN || secrets.GITHUB_TOKEN }}
           fetch-depth: 0

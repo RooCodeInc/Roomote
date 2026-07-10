@@ -11,6 +11,7 @@ import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
   computeNextVersion,
+  insertChangelogSection,
   parsePendingChangesets,
   readCurrentProductVersion,
 } from './lib.mjs';
@@ -62,37 +63,8 @@ const newSection = sections.join('\n').trimEnd() + '\n';
 const changelogPath = join(repoRoot, 'CHANGELOG.md');
 const existing = existsSync(changelogPath)
   ? readFileSync(changelogPath, 'utf8')
-  : '# Changelog\n\nThis file tracks product releases for Roomote (single monorepo version).\n\n';
+  : '# Changelog\n\nThis file tracks product releases for Roomote (single monorepo version). Automated release entries are prepended by `pnpm run version`.\n\n';
 
-let nextContent;
-if (existing.includes('# Changelog')) {
-  // Insert after the first heading block (title + optional intro paragraphs)
-  const lines = existing.split(/\r?\n/);
-  let insertAt = 1;
-  // Skip blank lines and intro paragraph lines until the first ## release heading or EOF
-  while (insertAt < lines.length && !/^##\s+/.test(lines[insertAt])) {
-    insertAt++;
-  }
-  // Prefer to leave the intro; insert just before first ## or at end of intro
-  // Recompute: after title line, keep following non-heading lines as intro, then insert.
-  insertAt = 1;
-  while (
-    insertAt < lines.length &&
-    lines[insertAt].trim() !== '' &&
-    !/^##\s+/.test(lines[insertAt])
-  ) {
-    insertAt++;
-  }
-  while (insertAt < lines.length && lines[insertAt].trim() === '') {
-    insertAt++;
-  }
-  const before = lines.slice(0, insertAt).join('\n').replace(/\s*$/, '\n\n');
-  const after = lines.slice(insertAt).join('\n').replace(/^\s*/, '');
-  nextContent = `${before}${newSection}\n${after}`.replace(/\n{3,}/g, '\n\n');
-  if (!nextContent.endsWith('\n')) nextContent += '\n';
-} else {
-  nextContent = `# Changelog\n\n${newSection}\n${existing}`;
-}
-
+const nextContent = insertChangelogSection(existing, newSection);
 writeFileSync(changelogPath, nextContent);
 console.log(`Prepended CHANGELOG section for ${next}`);

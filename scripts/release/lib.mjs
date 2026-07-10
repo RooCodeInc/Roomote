@@ -99,6 +99,55 @@ export function readCurrentProductVersion(repoRoot) {
 }
 
 /**
+ * Insert a new release section after the changelog title and intro prose,
+ * before the first `##` release heading. Preserves any intro paragraph(s)
+ * under `# Changelog` instead of inserting between the title and intro.
+ *
+ * @param {string} existingChangelogMarkdown
+ * @param {string} newSection markdown for one release (starts with `## …`)
+ * @returns {string}
+ */
+export function insertChangelogSection(
+  existingChangelogMarkdown,
+  newSection,
+) {
+  const section = newSection.replace(/^\s+/, '').replace(/\s*$/, '\n');
+
+  if (!existingChangelogMarkdown.includes('# Changelog')) {
+    return `# Changelog\n\n${section}\n${existingChangelogMarkdown}`.replace(
+      /\n{3,}/g,
+      '\n\n',
+    );
+  }
+
+  const lines = existingChangelogMarkdown.split(/\r?\n/);
+  let firstRelease = -1;
+  for (let i = 0; i < lines.length; i++) {
+    if (/^##\s+/.test(lines[i])) {
+      firstRelease = i;
+      break;
+    }
+  }
+  if (firstRelease === -1) firstRelease = lines.length;
+
+  const headerLines = lines.slice(0, firstRelease);
+  while (
+    headerLines.length > 1 &&
+    headerLines[headerLines.length - 1].trim() === ''
+  ) {
+    headerLines.pop();
+  }
+  const header = headerLines.join('\n').replace(/\s*$/, '') + '\n\n';
+  const rest = lines.slice(firstRelease).join('\n').replace(/^\s*/, '');
+  let next = rest
+    ? `${header}${section}\n${rest}`
+    : `${header}${section}`;
+  next = next.replace(/\n{3,}/g, '\n\n');
+  if (!next.endsWith('\n')) next += '\n';
+  return next;
+}
+
+/**
  * Extract the markdown body for a given version heading from CHANGELOG.md.
  * Matches headings like `## 0.1.1` or `## v0.1.1`.
  */
