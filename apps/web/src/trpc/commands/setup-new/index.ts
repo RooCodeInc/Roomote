@@ -955,8 +955,10 @@ export async function launchQueuedSetupTasksIfReady({
 
   await Promise.allSettled(
     claimedTasks.map(async (queuedTask) => {
+      let launchResult: Awaited<ReturnType<typeof enqueueCloudTask>>;
+
       try {
-        const launchResult = await enqueueCloudTask({
+        launchResult = await enqueueCloudTask({
           task: {
             type: TaskPayloadKind.StandardTask,
             payload: {
@@ -988,69 +990,12 @@ export async function launchQueuedSetupTasksIfReady({
               }
             : {}),
         });
-
-        const finalized = await db.transaction(async (tx) => {
-          // Fenced finalize: `launching` -> `launched` only when our claim
-          // token still matches, stamping `targetEnvironmentId` in the same
-          // guarded write. If it returns false our claim was reclaimed by
-          // another launcher between claim and enqueue.
-          const didFinalize = await finalizeWorkItemLaunched(tx, {
-            id: queuedTask.id,
-            taskId: launchResult.taskId,
-            claimedAt: queuedTask.claimedAt,
-            targetEnvironmentId: matchingEnvironmentId,
-          });
-
-          if (!didFinalize) {
-            return false;
-          }
-
-          if (queuedTask.suggestionId) {
-            await markSuggestionWorkItemLaunched(
-              {
-                suggestionId: queuedTask.suggestionId,
-                launchedTaskId: launchResult.taskId,
-              },
-              tx,
-            );
-          }
-
-          return true;
-        });
-
-        if (!finalized) {
-          // The task is already enqueued but the fencing guard rejected the
-          // finalize (our claim was reclaimed by another launcher), so the run
-          // is orphaned from this work item. Best-effort cancel it while it is
-          // still pre-sandbox, and log loudly either way with the cancel
-          // outcome (matches the implement.ts orphan handling).
-          let cancelNote = 'orphaned run left running';
-
-          try {
-            const canceled = await cancelTaskRunDirect({
-              runId: launchResult.id,
-              error:
-                'Canceled: setup-new queued task launch finalize lost the claim fencing guard',
-            });
-            cancelNote = canceled
-              ? 'orphaned run canceled'
-              : 'orphaned run cancel did not apply (already started or terminal)';
-          } catch (cancelError) {
-            cancelNote = `orphaned run cancel failed: ${
-              cancelError instanceof Error
-                ? cancelError.message
-                : String(cancelError)
-            }`;
-          }
-
-          console.warn(
-            `[setup-new] finalize lost the fencing guard for onboarding work item ${queuedTask.id}; orphaned task ${launchResult.taskId} (run ${launchResult.id}) runs unlinked — ${cancelNote}.`,
-          );
-        }
       } catch (error) {
-        // Release our claim back to `open` so a later trigger can retry. The
-        // fenced release never reverts a `launched` item and never reverts a
-        // claim that was already reclaimed by another launcher.
+        // The enqueue never succeeded, so no run exists: release our claim back
+        // to `open` so a later trigger can retry promptly. The fenced release
+        // never reverts a `launched` item and never reverts a claim already
+        // reclaimed by another launcher. Only a pre-enqueue failure may release;
+        // see the post-enqueue invariant below.
         await releaseWorkItemClaim(db, {
           id: queuedTask.id,
           claimedAt: queuedTask.claimedAt,
@@ -1058,10 +1003,95 @@ export async function launchQueuedSetupTasksIfReady({
         });
 
         console.warn(
-          `[setup-new] enqueue/finalize failed for onboarding work item ${queuedTask.id}; released its claim back to open — ${
+          `[setup-new] enqueue failed for onboarding work item ${queuedTask.id}; released its claim back to open — ${
             error instanceof Error ? error.message : String(error)
           }.`,
         );
+        return;
+      }
+
+      // Fenced finalize: `launching` -> `launched` only when our claim token
+      // still matches, stamping `targetEnvironmentId` in the same guarded write.
+      // Runs directly against `db` (not a transaction): it is a single fenced
+      // UPDATE, and the suggestion mirror below deliberately no longer shares
+      // its atomicity so a mirror failure can never roll back a healthy launch.
+      //
+      // Invariant: once the task is enqueued, a failure of unknown cause must
+      // never release the claim. Releasing would let the next readiness pass
+      // re-claim and launch a duplicate immediately, while leaving the claim in
+      // place lets stale-claim recovery retry safely only after the shared
+      // window. So a throw here is treated exactly like a lost finalize
+      // (`finalized = false`), which drives the orphan-cancel branch. In the
+      // rare ambiguous case where the finalize committed but its ack was lost,
+      // the cancel may kill a healthy linked run; that trade is intentional — a
+      // visibly canceled task beats a silent duplicate.
+      let finalized: boolean;
+
+      try {
+        finalized = await finalizeWorkItemLaunched(db, {
+          id: queuedTask.id,
+          taskId: launchResult.taskId,
+          claimedAt: queuedTask.claimedAt,
+          targetEnvironmentId: matchingEnvironmentId,
+        });
+      } catch (error) {
+        console.warn(
+          `[setup-new] finalize threw for onboarding work item ${queuedTask.id} after enqueuing task ${launchResult.taskId} (run ${launchResult.id}); treating as a lost finalize and leaving the claim for stale-claim recovery — ${
+            error instanceof Error ? error.message : String(error)
+          }.`,
+        );
+        finalized = false;
+      }
+
+      if (!finalized) {
+        // The task is already enqueued but the finalize did not commit (the
+        // fencing guard rejected it, or it threw), so the run is orphaned from
+        // this work item. Best-effort cancel it while it is still pre-sandbox,
+        // and log loudly either way with the cancel outcome (matches the
+        // implement.ts orphan handling). Return before the mirror: a lost or
+        // failed finalize must never mirror a launch that did not link.
+        let cancelNote = 'orphaned run left running';
+
+        try {
+          const canceled = await cancelTaskRunDirect({
+            runId: launchResult.id,
+            error:
+              'Canceled: setup-new queued task launch finalize lost the claim fencing guard',
+          });
+          cancelNote = canceled
+            ? 'orphaned run canceled'
+            : 'orphaned run cancel did not apply (already started or terminal)';
+        } catch (cancelError) {
+          cancelNote = `orphaned run cancel failed: ${
+            cancelError instanceof Error
+              ? cancelError.message
+              : String(cancelError)
+          }`;
+        }
+
+        console.warn(
+          `[setup-new] finalize lost the fencing guard for onboarding work item ${queuedTask.id}; orphaned task ${launchResult.taskId} (run ${launchResult.id}) runs unlinked — ${cancelNote}.`,
+        );
+        return;
+      }
+
+      // Mirror the launched state onto the source suggestion only after a
+      // committed finalize, outside any transaction and best-effort: the launch
+      // link is already finalized and must stay finalized, so a mirror throw is
+      // logged and swallowed rather than allowed to undo the launch.
+      if (queuedTask.suggestionId) {
+        try {
+          await markSuggestionWorkItemLaunched({
+            suggestionId: queuedTask.suggestionId,
+            launchedTaskId: launchResult.taskId,
+          });
+        } catch (error) {
+          console.warn(
+            `[setup-new] failed to mirror launched state onto suggestion ${queuedTask.suggestionId} for task ${launchResult.taskId}; the onboarding launch stays finalized — ${
+              error instanceof Error ? error.message : String(error)
+            }.`,
+          );
+        }
       }
     }),
   );
