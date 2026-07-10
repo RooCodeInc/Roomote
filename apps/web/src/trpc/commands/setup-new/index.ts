@@ -13,7 +13,6 @@ import {
   deploymentSettings,
   environments,
   environmentVariables,
-  users,
   taskRuns,
   workItems,
   slackInstallations,
@@ -160,40 +159,6 @@ type ActiveSetupQualificationBlock = {
   githubAccountType: string | null;
   lastBlockedAt: Date;
 };
-
-const SETUP_BOOTSTRAP_USER_ID = 'setup-bootstrap-user';
-
-async function ensureSetupBootstrapAuditUser(
-  executor: DatabaseOrTransaction,
-): Promise<string> {
-  const [existingUser] = await executor
-    .select({ id: users.id })
-    .from(users)
-    .where(eq(users.id, SETUP_BOOTSTRAP_USER_ID))
-    .limit(1);
-
-  if (existingUser) {
-    return existingUser.id;
-  }
-
-  await executor.insert(users).values({
-    id: SETUP_BOOTSTRAP_USER_ID,
-    name: 'Setup Bootstrap',
-    email: 'setup-bootstrap@roomote.local',
-    imageUrl: '',
-    entity: {
-      id: SETUP_BOOTSTRAP_USER_ID,
-      name: 'Setup Bootstrap',
-      email: 'setup-bootstrap@roomote.local',
-      imageUrl: '',
-    },
-    metadata: {
-      system: true,
-    },
-  });
-
-  return SETUP_BOOTSTRAP_USER_ID;
-}
 
 async function assertSetupBootstrapOpen() {
   const bootstrapState = await getSetupBootstrapState();
@@ -966,6 +931,12 @@ export async function launchQueuedSetupTasksIfReady({
       let launchResult: Awaited<ReturnType<typeof enqueueTask>>;
 
       try {
+        if (!queuedTask.selectedByUserId) {
+          throw new Error(
+            `Queued setup task ${queuedTask.id} has no selecting user.`,
+          );
+        }
+
         launchResult = await enqueueTask({
           task: {
             type: TaskPayloadKind.StandardTask,
@@ -984,7 +955,7 @@ export async function launchQueuedSetupTasksIfReady({
           },
           initiator: {
             kind: 'user',
-            userId: queuedTask.selectedByUserId ?? SETUP_BOOTSTRAP_USER_ID,
+            userId: queuedTask.selectedByUserId,
           },
           workflow: 'setup_onboarding',
           surface: 'web',
@@ -1896,11 +1867,8 @@ async function saveSetupAuthConfig(input: {
     }
 
     if (valuesToSave.length > 0) {
-      const auditUserId =
-        input.actorUserId ?? (await ensureSetupBootstrapAuditUser(tx));
-
       await upsertDeploymentEnvironmentVariables(tx, {
-        userId: auditUserId,
+        userId: input.actorUserId,
         values: valuesToSave,
       });
     }

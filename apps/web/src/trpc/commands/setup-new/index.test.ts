@@ -290,6 +290,24 @@ describe('setup-new auth config commands', () => {
     );
   });
 
+  it('records bootstrap auth config without manufacturing a user', async () => {
+    mockGetSetupBootstrapState.mockResolvedValue({ setupOpen: true });
+
+    await saveSetupBootstrapAuthConfigCommand({
+      provider: 'slack',
+      values: {
+        SLACK_CLIENT_ID: 'client-id',
+        SLACK_CLIENT_SECRET: 'client-secret',
+        SLACK_SIGNING_SECRET: 'signing-secret',
+      },
+    });
+
+    expect(mockUpsertDeploymentEnvironmentVariables).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({ userId: null }),
+    );
+  });
+
   it('still blocks anonymous bootstrap saves once bootstrap closes', async () => {
     mockGetSetupBootstrapState.mockResolvedValue({ setupOpen: false });
 
