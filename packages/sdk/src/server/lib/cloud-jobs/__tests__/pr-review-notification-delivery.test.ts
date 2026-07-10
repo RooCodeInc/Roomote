@@ -72,7 +72,7 @@ vi.mock('@roomote/slack', () => ({
   setLatestSlackBotReply: mockSetLatestSlackBotReply,
 }));
 
-import type { CloudJob } from '@roomote/db/server';
+import type { Run } from '@roomote/db/server';
 import type { PrReviewActivityEvent } from '../pr-review-notification';
 
 import {
@@ -90,7 +90,7 @@ const request = {
   deferrals: 0,
 };
 
-const cloudJob = { id: 1, payload: {} } as unknown as CloudJob;
+const cloudJob = { id: 1, payload: {} } as unknown as Run;
 
 const events: PrReviewActivityEvent[] = [
   { kind: 'review', authorLogin: 'alice', reviewState: 'approved' },

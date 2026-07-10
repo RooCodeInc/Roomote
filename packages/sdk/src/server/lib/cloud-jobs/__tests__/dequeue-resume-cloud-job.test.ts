@@ -1,5 +1,5 @@
 import { CloudTaskStatus, TaskPayloadKind } from '@roomote/types';
-import type { CloudJob } from '@roomote/db/server';
+import type { Run } from '@roomote/db/server';
 
 const {
   mockDbTransaction,
@@ -93,7 +93,7 @@ vi.mock('../slack-job-routing', () => ({
 
 import { dequeueResumeCloudJob } from '../dequeue-resume-cloud-job';
 
-type RunWithTask = CloudJob & { task: Record<string, unknown> };
+type RunWithTask = Run & { task: Record<string, unknown> };
 
 function makeTaskRow(overrides: Record<string, unknown> = {}) {
   return {
@@ -175,9 +175,9 @@ describe('dequeueResumeCloudJob', () => {
         error,
         cloudJob,
       }: {
-        callback?: (error: Error, cloudJob: CloudJob) => void;
+        callback?: (error: Error, cloudJob: Run) => void;
         error: Error;
-        cloudJob: CloudJob;
+        cloudJob: Run;
       }) => callback?.(error, cloudJob),
     );
 

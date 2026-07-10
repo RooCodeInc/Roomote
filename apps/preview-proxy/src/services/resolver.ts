@@ -6,13 +6,7 @@ import {
   SANDBOX_SNAPSHOT_EXPIRY_MS,
   slugToPortKey,
 } from '@roomote/types';
-import {
-  type CloudJob,
-  taskRuns,
-  desc,
-  environments,
-  eq,
-} from '@roomote/db/server';
+import { type Run, taskRuns, desc, environments, eq } from '@roomote/db/server';
 
 import { db } from '../lib/db';
 import { logger, escapeForLog } from '../lib/logger';
@@ -39,7 +33,7 @@ export interface ResolvedRequest {
    * Used with 'redirect_to_direct' status after auth validation.
    */
   directUrl?: string;
-  cloudJob: CloudJob | null;
+  cloudJob: Run | null;
   requiresAuth: boolean;
   /**
    * Whether this specific port has an auth-proxy instance in front of it.
@@ -389,7 +383,7 @@ function uniqueNonEmptyPaths(paths: Array<string | undefined>): string[] {
  * Also returns whether the port is proxied (for cookie forwarding decision).
  */
 async function checkPortConfig(
-  cloudJob: CloudJob,
+  cloudJob: Run,
   portName: string,
 ): Promise<PortAuthResult> {
   const portKey = slugToPortKey(portName);

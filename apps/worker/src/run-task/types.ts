@@ -7,7 +7,7 @@ import type {
   EnvironmentConfig,
   RequestedWorkKind,
 } from '@roomote/types';
-import type { CloudJob, DequeuedCloudJob } from '@roomote/sdk/client';
+import type { Run, DequeuedCloudJob } from '@roomote/sdk/client';
 
 import type {
   TaskPhase,
@@ -99,18 +99,18 @@ export type CallbackEvent =
 
 export type RunTaskCallbacks = {
   onStart?: (
-    cloudJob: CloudJob,
+    cloudJob: Run,
     taskId: string,
     context: RunTaskContext,
   ) => Promise<void>;
   onMessage?: (
-    cloudJob: CloudJob,
+    cloudJob: Run,
     taskId: string,
     event: CallbackEvent,
     context: RunTaskContext,
   ) => Promise<void>;
   onExit?: (
-    cloudJob: CloudJob,
+    cloudJob: Run,
     status: CloudTaskStatus,
     context: RunTaskContext,
   ) => Promise<void>;

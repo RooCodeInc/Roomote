@@ -17,7 +17,7 @@ import {
   getFeatureFlagEvaluator,
 } from '@roomote/feature-flags/server';
 import {
-  type CloudJob,
+  type Run,
   db,
   eq,
   tasks,
@@ -53,7 +53,7 @@ export async function generatePrompt({
   cloudTask,
   gitHubToken,
 }: {
-  cloudJob: CloudJob;
+  cloudJob: Run;
   cloudTask: CloudTask;
   gitHubToken: string;
 }): Promise<{

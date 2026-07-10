@@ -1,7 +1,7 @@
 import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest';
 
 import { CloudTaskStatus, TaskPayloadKind } from '@roomote/types';
-import type { CloudJob } from '@roomote/db/server';
+import type { Run } from '@roomote/db/server';
 
 const {
   mockEnvironmentVariablesFindMany,
@@ -73,7 +73,7 @@ import {
   type GiteaRepository,
 } from '../api';
 
-function makeCloudJob(payload: CloudJob['payload']): CloudJob {
+function makeCloudJob(payload: Run['payload']): Run {
   return {
     id: 123,
     status: CloudTaskStatus.Dequeued,
@@ -84,7 +84,7 @@ function makeCloudJob(payload: CloudJob['payload']): CloudJob {
     payload,
     result: null,
     artifacts: null,
-  } as CloudJob;
+  } as Run;
 }
 
 describe('Gitea API helpers', () => {

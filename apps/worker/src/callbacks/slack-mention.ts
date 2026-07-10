@@ -13,7 +13,7 @@ import {
   buildStartedBlocks,
   convertMarkdownToSlack,
 } from '@roomote/slack/client';
-import { type CloudJob, sdk } from '@roomote/sdk/client';
+import { type Run, sdk } from '@roomote/sdk/client';
 
 import type {
   CallbackEvent,
@@ -75,7 +75,7 @@ function getSlackRequestUserInputPromptMessageTs(
 }
 
 function getInitiatingSlackUserIdForStartedMessage(
-  cloudJob: CloudJob,
+  cloudJob: Run,
   startedData: {
     initiatingSlackUserId?: string;
   },
@@ -100,7 +100,7 @@ function getInitiatingSlackUserIdForStartedMessage(
 }
 
 async function recordOutboundSlackMessageForCloudJob(params: {
-  cloudJob: CloudJob;
+  cloudJob: Run;
   messageTs: string | null | undefined;
   text: string;
   source: string;
@@ -127,11 +127,7 @@ async function recordOutboundSlackMessageForCloudJob(params: {
 }
 
 export const slackMentionCallbacks: RunTaskCallbacks = {
-  onStart: async (
-    cloudJob: CloudJob,
-    taskId: string,
-    context: RunTaskContext,
-  ) => {
+  onStart: async (cloudJob: Run, taskId: string, context: RunTaskContext) => {
     if (!context.sessionId) {
       context.sessionId = taskId;
     }
@@ -215,7 +211,7 @@ export const slackMentionCallbacks: RunTaskCallbacks = {
     }
   },
   onMessage: async (
-    cloudJob: CloudJob,
+    cloudJob: Run,
     _taskId: string,
     event: CallbackEvent,
     context: RunTaskContext,
@@ -236,7 +232,7 @@ export const slackMentionCallbacks: RunTaskCallbacks = {
       await handleFollowup(cloudJob, event, context);
     }
   },
-  onExit: async (cloudJob: CloudJob) => {
+  onExit: async (cloudJob: Run) => {
     try {
       const { thread_ts: threadTs } = getSlackConversation(cloudJob);
       await sdk.cloudJobs.clearPendingSlackRequestUserInput({
@@ -259,7 +255,7 @@ export const slackMentionCallbacks: RunTaskCallbacks = {
 };
 
 async function handleCompletion(
-  cloudJob: CloudJob,
+  cloudJob: Run,
   event: CallbackEvent & { type: 'completion' },
   context: RunTaskContext,
 ) {
@@ -290,7 +286,7 @@ async function handleCompletion(
 }
 
 async function handleRequestUserInput(
-  cloudJob: CloudJob,
+  cloudJob: Run,
   event: CallbackEvent & { type: 'request_user_input' },
   context: RunTaskContext,
 ) {
@@ -410,7 +406,7 @@ async function handleRequestUserInput(
 }
 
 async function handleRequestUserInputResponse(
-  cloudJob: CloudJob,
+  cloudJob: Run,
   event: CallbackEvent & { type: 'request_user_input_response' },
 ) {
   try {
@@ -434,7 +430,7 @@ async function handleRequestUserInputResponse(
 }
 
 async function handleFollowup(
-  cloudJob: CloudJob,
+  cloudJob: Run,
   event: CallbackEvent & { type: 'followup' },
   context: RunTaskContext,
 ) {
@@ -546,7 +542,7 @@ async function getSlackNotifier() {
 }
 
 async function removeSlackAckReaction(
-  cloudJob: CloudJob,
+  cloudJob: Run,
   slack: SlackNotifier,
 ): Promise<void> {
   const originMessageTs = getSlackOriginMessageTs(cloudJob);
@@ -583,7 +579,7 @@ async function removeSlackAckReaction(
   }
 }
 
-function getSlackConversation(cloudJob: CloudJob) {
+function getSlackConversation(cloudJob: Run) {
   // For SlackAppMention jobs, channel and thread_ts are in the payload.
   if (cloudJob.payloadKind === TaskPayloadKind.SlackAppMention) {
     const { channel, thread_ts } = cloudJob.payload as CloudTaskPayload<
@@ -627,7 +623,7 @@ function getSlackConversation(cloudJob: CloudJob) {
   );
 }
 
-function getSlackOriginMessageTs(cloudJob: CloudJob): string | null {
+function getSlackOriginMessageTs(cloudJob: Run): string | null {
   if (cloudJob.payloadKind === TaskPayloadKind.SlackAppMention) {
     const { ts } = cloudJob.payload as CloudTaskPayload<
       typeof TaskPayloadKind.SlackAppMention
@@ -647,14 +643,11 @@ function getSlackOriginMessageTs(cloudJob: CloudJob): string | null {
   return null;
 }
 
-function getStoredSlackAckEmoji(cloudJob: CloudJob): string {
+function getStoredSlackAckEmoji(cloudJob: Run): string {
   return getSlackPayloadEmoji(cloudJob, 'ackEmoji') ?? DEFAULT_SLACK_ACK_EMOJI;
 }
 
-function getSlackPayloadEmoji(
-  cloudJob: CloudJob,
-  key: 'ackEmoji',
-): string | null {
+function getSlackPayloadEmoji(cloudJob: Run, key: 'ackEmoji'): string | null {
   const payload =
     cloudJob.payload && typeof cloudJob.payload === 'object'
       ? (cloudJob.payload as Record<string, unknown>)

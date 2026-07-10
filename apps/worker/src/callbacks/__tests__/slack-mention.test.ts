@@ -110,11 +110,11 @@ vi.mock('../request-user-input', () => ({
 }));
 
 import { CloudTaskStatus, TaskPayloadKind } from '@roomote/types';
-import { type CloudJob, sdk } from '@roomote/sdk/client';
+import { type Run, sdk } from '@roomote/sdk/client';
 
 import { slackMentionCallbacks } from '../slack-mention';
 
-function createCloudJob(): CloudJob {
+function createCloudJob(): Run {
   return {
     id: 123,
     taskId: 'task_row_123',
@@ -127,10 +127,10 @@ function createCloudJob(): CloudJob {
       ts: '1710000000.100',
       thread_ts: '1710000000.123',
     },
-  } as unknown as CloudJob;
+  } as unknown as Run;
 }
 
-function createSnapshotResumeCloudJob(): CloudJob {
+function createSnapshotResumeCloudJob(): Run {
   return {
     id: 123,
     taskId: 'task_row_123',
@@ -140,7 +140,7 @@ function createSnapshotResumeCloudJob(): CloudJob {
       thread_ts: '1710000000.123',
       slackOriginMessageTs: '1710000000.100',
     },
-  } as unknown as CloudJob;
+  } as unknown as Run;
 }
 
 describe('slackMentionCallbacks', () => {
@@ -354,7 +354,7 @@ describe('slackMentionCallbacks', () => {
         ...createCloudJob().payload,
         ackEmoji: 'hourglass',
       },
-    } as CloudJob;
+    } as Run;
     const context = {};
 
     await slackMentionCallbacks.onStart?.(cloudJob, 'task_123', context);
@@ -373,7 +373,7 @@ describe('slackMentionCallbacks', () => {
         ...createCloudJob().payload,
         completionEmoji: 'rocket',
       },
-    } as CloudJob;
+    } as Run;
     const context = {};
 
     await slackMentionCallbacks.onMessage?.(

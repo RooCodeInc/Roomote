@@ -1,4 +1,4 @@
-import type { CloudJob } from '@roomote/db/server';
+import type { Run } from '@roomote/db/server';
 import { CloudTaskStatus, type EnvironmentConfig } from '@roomote/types';
 
 const {
@@ -29,7 +29,7 @@ vi.mock('../lib/db', () => ({
 
 import { resolveRequest } from './resolver';
 
-function createRunningCloudJob(overrides: Partial<CloudJob> = {}): CloudJob {
+function createRunningCloudJob(overrides: Partial<Run> = {}): Run {
   return {
     id: 1,
     taskId: 'outertask12345',
@@ -46,7 +46,7 @@ function createRunningCloudJob(overrides: Partial<CloudJob> = {}): CloudJob {
     authBypassValue: null,
     authBypassHeaderName: null,
     ...overrides,
-  } as unknown as CloudJob;
+  } as unknown as Run;
 }
 
 function createEnvironmentConfig(

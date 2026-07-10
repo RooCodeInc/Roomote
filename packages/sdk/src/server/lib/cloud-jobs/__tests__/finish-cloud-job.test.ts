@@ -1,5 +1,5 @@
 import { CloudTaskStatus, TaskPayloadKind } from '@roomote/types';
-import { tasks, type CloudJob, type Task } from '@roomote/db/server';
+import { tasks, type Run, type Task } from '@roomote/db/server';
 
 // ── Mocks ────────────────────────────────────────────────────────────────────
 
@@ -272,10 +272,10 @@ function makeTask(overrides: Partial<Task> = {}): Task {
   } as Task;
 }
 
-type RunWithTask = CloudJob & { task: Task };
+type RunWithTask = Run & { task: Task };
 
 function makeRun(
-  overrides: Partial<CloudJob> = {},
+  overrides: Partial<Run> = {},
   taskOverrides: Partial<Task> = {},
 ): RunWithTask {
   const task = makeTask(taskOverrides);
@@ -724,7 +724,7 @@ describe('finishCloudJob', () => {
             thread_ts: '111.222',
             webPath: '/setup',
             environmentDefinitionId: 'env-123',
-          } as CloudJob['payload'],
+          } as Run['payload'],
         },
         { slackChannelId: 'C123', slackThreadTs: '111.222' },
       );
@@ -765,7 +765,7 @@ describe('finishCloudJob', () => {
             thread_ts: '111.222',
             webPath: '/setup',
             environmentDefinitionId: 'env-123',
-          } as CloudJob['payload'],
+          } as Run['payload'],
         },
         { slackChannelId: 'C123', slackThreadTs: '111.222' },
       );
@@ -1706,7 +1706,7 @@ describe('finishCloudJob', () => {
       communicationChannelId: 'conversation-1',
       communicationServiceUrl: 'https://smba.trafficmanager.net/amer/',
       communicationThreadId: 'activity-root',
-    } as unknown as CloudJob['payload'];
+    } as unknown as Run['payload'];
 
     beforeEach(() => {
       mockCreateTeamsCommunicationProviderFromEnv.mockReturnValue({

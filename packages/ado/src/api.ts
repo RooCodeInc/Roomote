@@ -7,7 +7,7 @@ import {
   type SourceControlProvider,
 } from '@roomote/types';
 import {
-  type CloudJob,
+  type Run,
   db,
   environments,
   repositories,
@@ -1336,7 +1336,7 @@ function normalizeRepositorySelection(repositoryNames: string[]): string[] {
 }
 
 async function resolveAdoRepositoryNamesForCloudJob(
-  cloudJob: CloudJob,
+  cloudJob: Run,
 ): Promise<string[] | null> {
   if (cloudJob.payload.environmentId) {
     const environment = await db.query.environments.findFirst({
@@ -1373,7 +1373,7 @@ async function resolveAdoRepositoryNamesForCloudJob(
   return null;
 }
 
-async function resolveAdoRepositoryRowsForCloudJob(cloudJob: CloudJob) {
+async function resolveAdoRepositoryRowsForCloudJob(cloudJob: Run) {
   const repositoryNames = await resolveAdoRepositoryNamesForCloudJob(cloudJob);
   const queryConditions = [
     eq(repositories.sourceControlProvider, ADO_PROVIDER),
@@ -1491,7 +1491,7 @@ function buildAdoGitCredential({
 }
 
 export async function createCloudJobAdoCredentials(
-  cloudJob: CloudJob,
+  cloudJob: Run,
   options?: {
     token?: string;
     baseUrl?: string;

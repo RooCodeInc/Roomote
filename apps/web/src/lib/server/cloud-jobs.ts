@@ -6,7 +6,7 @@ import {
   type SourceControlProvider,
 } from '@roomote/types';
 import {
-  type CloudJob,
+  type Run,
   type User,
   db,
   taskRuns,
@@ -139,7 +139,7 @@ export const getLatestCloudJobsByTaskId = async (
   return Object.fromEntries(latestByTask);
 };
 
-export type CloudJobDetail = CloudJob & {
+export type CloudJobDetail = Run & {
   refetchInterval?: number;
   user: User | null;
   actingUser?: User | null;

@@ -9,7 +9,7 @@ import {
   isExitedCloudTaskStatus,
   resolveComputeProviderTarget,
 } from '@roomote/types';
-import type { CloudJob } from '@roomote/db';
+import type { Run } from '@roomote/db';
 
 import { getBootStatus, useSandboxLogs } from '@/components/sandbox';
 import { getCloudJobError } from '@/lib/cloud-job-errors';
@@ -18,7 +18,7 @@ import type { StartupStep } from './StartupMessage';
 
 interface UseStartupProgressOptions {
   cloudJobId: number;
-  initialCloudJob?: CloudJob;
+  initialCloudJob?: Run;
   onStatusChange?: (status: CloudTaskStatus) => void;
 }
 
@@ -36,7 +36,7 @@ export function useStartupProgress({
     },
   ]);
 
-  const streamedCloudJob = useSSE<CloudJob | undefined>('message', undefined);
+  const streamedCloudJob = useSSE<Run | undefined>('message', undefined);
 
   const cloudJob = streamedCloudJob ?? initialCloudJob;
   const status = cloudJob?.status ?? initialStatus;

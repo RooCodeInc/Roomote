@@ -10,7 +10,7 @@ import {
   WORKER_HEARTBEAT_STALE_MS,
 } from '@roomote/types';
 import {
-  type CloudJob,
+  type Run,
   db,
   taskRuns,
   createComputeProviderMutationEventRecorder,
@@ -67,7 +67,7 @@ type DestroyInstanceReason =
   | 'booting_no_heartbeat';
 
 type SleepCheckJob = Pick<
-  CloudJob,
+  Run,
   | 'id'
   | 'payloadKind'
   | 'status'
@@ -169,7 +169,7 @@ function isSnapshotResumableSleepCandidate(job: SleepCheckJob): boolean {
 }
 
 function getSleepCheckCandidateKey(
-  job: Pick<CloudJob, 'machineId' | 'vendor'>,
+  job: Pick<Run, 'machineId' | 'vendor'>,
 ): string | null {
   if (!job.machineId || !job.vendor) {
     return null;

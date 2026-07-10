@@ -3,7 +3,7 @@ import {
   CONFLICT_RESOLUTION_SUMMARY_RESULT_KEY,
   type ConflictResolutionSummary,
 } from '@roomote/types';
-import { type CloudJob, sdk } from '@roomote/sdk/client';
+import { type Run, sdk } from '@roomote/sdk/client';
 
 import { ExecutionError } from '../../command-executor';
 import type { HarnessLogger } from '../../logging';
@@ -80,7 +80,7 @@ function describeJobFailure(error: unknown): string {
 
 function buildWorkerExceptionContext(params: {
   error: unknown;
-  cloudJob: CloudJob | undefined;
+  cloudJob: Run | undefined;
 }): WorkerRuntimeContext {
   const { error, cloudJob } = params;
   const context: WorkerRuntimeContext = {
@@ -117,7 +117,7 @@ export async function finalizeJob({
     status: CloudTaskStatus;
     error?: string;
   };
-  cloudJob: CloudJob;
+  cloudJob: Run;
   logger: HarnessLogger;
   callbacks: RunTaskCallbacks;
   context: RunTaskContext;
@@ -190,7 +190,7 @@ export async function handleJobError({
   context,
 }: {
   error: unknown;
-  cloudJob: CloudJob | undefined;
+  cloudJob: Run | undefined;
   logger: HarnessLogger | undefined;
   callbacks: RunTaskCallbacks;
   context: RunTaskContext;

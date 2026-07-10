@@ -2,7 +2,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { CloudTaskStatus, TaskPayloadKind } from '@roomote/types';
-import type { CloudJob } from '@roomote/db/server';
+import type { Run } from '@roomote/db/server';
 
 // ── Mocks ────────────────────────────────────────────────────────────────────
 
@@ -111,7 +111,7 @@ class TestController extends BaseController {
   }
 
   protected async spawnFreshWorker(
-    _cloudJob: CloudJob,
+    _cloudJob: Run,
     _authToken: string,
     _deploymentSlug: string,
     _sandboxTimeoutMs: number,
@@ -121,7 +121,7 @@ class TestController extends BaseController {
 
   // Expose handleSpawnJobError for direct testing.
   public async testHandleSpawnJobError(
-    cloudJob: CloudJob,
+    cloudJob: Run,
     error: unknown,
   ): Promise<void> {
     return this.handleSpawnJobError(cloudJob, error);
@@ -133,7 +133,7 @@ class TestController extends BaseController {
     };
   }
 
-  public async testDequeueCloudJob(cloudJob: CloudJob) {
+  public async testDequeueCloudJob(cloudJob: Run) {
     return this.dequeueCloudJob(cloudJob);
   }
 }
@@ -144,7 +144,7 @@ class SaturatedTestController extends TestController {
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
-function makeCloudJob(overrides: Partial<CloudJob> = {}): CloudJob {
+function makeCloudJob(overrides: Partial<Run> = {}): Run {
   return {
     id: 42,
     payloadKind: TaskPayloadKind.StandardTask,
@@ -166,7 +166,7 @@ function makeCloudJob(overrides: Partial<CloudJob> = {}): CloudJob {
     canceledAt: null,
     completedAt: null,
     ...overrides,
-  } as CloudJob;
+  } as Run;
 }
 
 function resetControllerMocks() {

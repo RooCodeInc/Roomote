@@ -31,7 +31,7 @@ import {
 } from '@roomote/types';
 import { Env } from '@roomote/env';
 import {
-  type CloudJob,
+  type Run,
   type DatabaseTransaction,
   db,
   deploymentSettings,
@@ -96,7 +96,7 @@ function getErrorMessage(error: unknown, fallback: string): string {
 }
 
 async function cancelCloudJobBeforeQueue(
-  cloudJob: CloudJob,
+  cloudJob: Run,
   message: string,
   failureContext: string,
 ): Promise<void> {
@@ -679,13 +679,13 @@ export interface EnqueueCloudTaskOptions {
    */
   afterCreateInTransaction?: (
     tx: DatabaseTransaction,
-    cloudJob: CloudJob,
+    cloudJob: Run,
   ) => Promise<void>;
   /**
    * Runs after the run row is created but before it is pushed onto the
    * controller queue. If this throws, the run is canceled and never queued.
    */
-  beforeEnqueue?: (cloudJob: CloudJob) => Promise<void>;
+  beforeEnqueue?: (cloudJob: Run) => Promise<void>;
 }
 
 /**
@@ -796,7 +796,7 @@ export function resolveQueueScope(params: {
   return randomUUID();
 }
 
-function getRunLockScope(cloudJob: CloudJob): string {
+function getRunLockScope(cloudJob: Run): string {
   if (PR_SCOPED_PAYLOAD_KINDS.has(cloudJob.payloadKind)) {
     const payload = cloudJob.payload as { repo?: string; prNumber?: number };
 
@@ -926,7 +926,7 @@ async function resolveEnvironmentContext(
 }
 
 async function pushRunOntoQueue(params: {
-  cloudJob: CloudJob;
+  cloudJob: Run;
   scope: string;
   options: EnqueueCloudTaskOptions;
 }): Promise<void> {
@@ -1016,7 +1016,7 @@ async function pushRunOntoQueue(params: {
 export async function enqueueCloudTask(
   input: EnqueueCloudTaskInput,
   options: EnqueueCloudTaskOptions = {},
-): Promise<CloudJob> {
+): Promise<Run> {
   await assertDeploymentIsActive();
 
   if (input.task.type === TaskPayloadKind.SnapshotResume) {
@@ -1029,7 +1029,7 @@ export async function enqueueCloudTask(
 async function enqueueFreshLaunch(
   input: FreshCloudTaskLaunch,
   options: EnqueueCloudTaskOptions,
-): Promise<CloudJob> {
+): Promise<Run> {
   const { task, initiator, workflow, surface, trigger } = input;
   const visibility: TaskVisibility = input.visibility ?? 'visible';
   const linkedUserId = getInitiatorLinkedUserId(initiator);
@@ -1339,7 +1339,7 @@ async function enqueueFreshLaunch(
 async function enqueueSnapshotResume(
   input: ResumeCloudTaskLaunch,
   options: EnqueueCloudTaskOptions,
-): Promise<CloudJob> {
+): Promise<Run> {
   const { task } = input;
   const actingUserId = options.skipInitialActingUser
     ? null
@@ -1440,7 +1440,7 @@ async function enqueueSnapshotResume(
     sandboxTimeoutMs: TASK_TIMEOUT_MS,
   });
 
-  let cloudJob: CloudJob;
+  let cloudJob: Run;
 
   try {
     cloudJob = await db.transaction(async (tx) => {
@@ -1561,14 +1561,14 @@ export async function dequeueCloudTask(): Promise<number | null> {
   return entry ? entry.id : null;
 }
 
-export function releaseCloudTask(cloudJob: CloudJob): Promise<boolean> {
+export function releaseCloudTask(cloudJob: Run): Promise<boolean> {
   return CloudJobQueue.getInstance().releaseLock(getRunLockScope(cloudJob));
 }
 
-export async function isLockedCloudTask(cloudJob: CloudJob): Promise<boolean> {
+export async function isLockedCloudTask(cloudJob: Run): Promise<boolean> {
   return CloudJobQueue.getInstance().isLocked(getRunLockScope(cloudJob));
 }
 
-export async function getCloudTaskLockTTL(cloudJob: CloudJob): Promise<number> {
+export async function getCloudTaskLockTTL(cloudJob: Run): Promise<number> {
   return CloudJobQueue.getInstance().getLockTTL(getRunLockScope(cloudJob));
 }

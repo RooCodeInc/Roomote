@@ -1,8 +1,8 @@
-import { type UpdateCloudJob, db, taskRuns, eq } from '@roomote/db/server';
+import { type UpdateRun, db, taskRuns, eq } from '@roomote/db/server';
 
 export async function updateCloudJob(
   cloudJobId: number,
-  values: UpdateCloudJob,
+  values: UpdateRun,
 ): Promise<void> {
   try {
     await db.update(taskRuns).set(values).where(eq(taskRuns.id, cloudJobId));

@@ -3,7 +3,7 @@ import type {
   AgentSessionPlanStep,
   AgentSessionPlanStepStatus,
 } from '@roomote/linear/client';
-import { type CloudJob, sdk } from '@roomote/sdk/client';
+import { type Run, sdk } from '@roomote/sdk/client';
 
 import type {
   CallbackEvent,
@@ -104,7 +104,7 @@ function convertTodosToAgentPlan(todos: TodoItem[]): AgentSessionPlanStep[] {
   return result.steps;
 }
 
-function getLinearSessionId(cloudJob: CloudJob): string {
+function getLinearSessionId(cloudJob: Run): string {
   // For LinearAgentSession jobs, sessionId is in the payload
   if (cloudJob.payloadKind === TaskPayloadKind.LinearAgentSession) {
     const { sessionId } = cloudJob.payload as CloudTaskPayload<
@@ -130,11 +130,7 @@ function getLinearSessionId(cloudJob: CloudJob): string {
 }
 
 export const linearAgentCallbacks: RunTaskCallbacks = {
-  onStart: async (
-    cloudJob: CloudJob,
-    taskId: string,
-    context: RunTaskContext,
-  ) => {
+  onStart: async (cloudJob: Run, taskId: string, context: RunTaskContext) => {
     if (context.sessionId) {
       return;
     }
@@ -142,7 +138,7 @@ export const linearAgentCallbacks: RunTaskCallbacks = {
     context.sessionId = taskId;
   },
   onMessage: async (
-    cloudJob: CloudJob,
+    cloudJob: Run,
     _taskId: string,
     event: CallbackEvent,
     context: RunTaskContext,
@@ -401,7 +397,7 @@ export const linearAgentCallbacks: RunTaskCallbacks = {
       }
     }
   },
-  onExit: async (cloudJob: CloudJob) => {
+  onExit: async (cloudJob: Run) => {
     try {
       await sdk.cloudJobs.clearPendingLinearRequestUserInput({
         cloudJobId: cloudJob.id,

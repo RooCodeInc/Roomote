@@ -1,4 +1,4 @@
-import { type CloudJob } from '@roomote/sdk/client';
+import { type Run } from '@roomote/sdk/client';
 
 import { createWorkerRuntimeEventRecorder } from '../../run-task/cloud-job-events';
 import type { EnvironmentSetupWarning } from '../setup/workspace/types';
@@ -21,7 +21,7 @@ type SettledBackgroundEnvironmentSetup =
     };
 
 interface BackgroundEnvironmentSetupControllerOptions {
-  cloudJob?: CloudJob;
+  cloudJob?: Run;
   backgroundSetupPromise?: Promise<EnvironmentSetupWarning[]>;
   recordWorkerRuntimeEvent: ReturnType<typeof createWorkerRuntimeEventRecorder>;
 }
@@ -29,7 +29,7 @@ interface BackgroundEnvironmentSetupControllerOptions {
 export class BackgroundEnvironmentSetupController {
   private readonly taskAbortController = new AbortController();
   private readonly backgroundSetupPromise?: Promise<EnvironmentSetupWarning[]>;
-  private readonly cloudJob?: CloudJob;
+  private readonly cloudJob?: Run;
   private readonly recordWorkerRuntimeEvent: ReturnType<
     typeof createWorkerRuntimeEventRecorder
   >;

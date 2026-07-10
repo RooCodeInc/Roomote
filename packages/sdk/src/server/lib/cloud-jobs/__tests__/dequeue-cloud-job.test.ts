@@ -1,5 +1,5 @@
 import { CloudTaskStatus, TaskPayloadKind } from '@roomote/types';
-import type { CloudJob } from '@roomote/db/server';
+import type { Run } from '@roomote/db/server';
 
 const {
   mockDbTransaction,
@@ -99,7 +99,7 @@ vi.mock('../dequeue-helpers', () => ({
 
 import { dequeueCloudJob } from '../dequeue-cloud-job';
 
-type RunWithTask = CloudJob & { task: Record<string, unknown> };
+type RunWithTask = Run & { task: Record<string, unknown> };
 
 function makeTaskRow(overrides: Record<string, unknown> = {}) {
   return {
@@ -201,9 +201,9 @@ describe('dequeueCloudJob', () => {
         error,
         cloudJob,
       }: {
-        callback?: (error: Error, cloudJob: CloudJob) => void;
+        callback?: (error: Error, cloudJob: Run) => void;
         error: Error;
-        cloudJob: CloudJob;
+        cloudJob: Run;
       }) => callback?.(error, cloudJob),
     );
     mockGeneratePrompt.mockResolvedValue({

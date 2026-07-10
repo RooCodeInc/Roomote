@@ -89,8 +89,8 @@ describe('launchTask', () => {
     mockGetMembershipRole.mockResolvedValue('org:admin');
   });
 
-  it('returns the LaunchTaskResponse success envelope shape, not the raw CloudJob row', async () => {
-    // enqueueCloudTask resolves with the CloudJob DB row, which has `id` +
+  it('returns the LaunchTaskResponse success envelope shape, not the raw Run row', async () => {
+    // enqueueCloudTask resolves with the Run DB row, which has `id` +
     // `taskId` but no `success`/`cloudJobId`/`error` envelope fields. The
     // handler must map this to the contract the worker MCP client expects.
     mockEnqueueCloudTask.mockResolvedValue({ id: 99, taskId: 'task-new' });

@@ -9,7 +9,7 @@ import {
   type SourceControlTokenMetadata,
 } from '@roomote/types';
 import {
-  type CloudJob,
+  type Run,
   db,
   taskRuns,
   tasks,
@@ -204,7 +204,7 @@ async function loadPersistedDeploymentEnvVarsFromDb(): Promise<
  * Cancels a cloud job with an error message and releases its cloud task lock.
  */
 export async function cancelAndReleaseCloudJob(
-  cloudJob: CloudJob,
+  cloudJob: Run,
   errorMessage: string,
   logPrefix: string,
 ): Promise<void> {
@@ -260,7 +260,7 @@ export type SourceControlRuntimeToken = SourceControlTokenMetadata & {
  * when the workspace repositories are unknown or span providers.
  */
 async function resolveJobSourceControlProvider(
-  cloudJob: Pick<CloudJob, 'payload'>,
+  cloudJob: Pick<Run, 'payload'>,
 ): Promise<SourceControlProvider> {
   const payload = cloudJob.payload as { sourceControlProvider?: unknown };
 
@@ -290,7 +290,7 @@ async function resolveJobSourceControlProvider(
 }
 
 async function createProviderToken(
-  cloudJob: CloudJob,
+  cloudJob: Run,
 ): Promise<SourceControlRuntimeToken> {
   const provider = await resolveJobSourceControlProvider(cloudJob);
 
@@ -365,7 +365,7 @@ async function createProviderToken(
  * Returns null if all attempts fail (caller should handle the error).
  */
 export async function createSourceControlTokenForJob(
-  cloudJob: CloudJob,
+  cloudJob: Run,
   logPrefix: string,
   {
     maxRetries = SOURCE_CONTROL_TOKEN_MAX_RETRIES,
@@ -407,7 +407,7 @@ export async function cancelCloudJob(
   error: string,
   options?: {
     bootstrapFailureReason?: string;
-    existingArtifacts?: CloudJob['artifacts'];
+    existingArtifacts?: Run['artifacts'];
   },
 ): Promise<void> {
   const artifacts = options?.bootstrapFailureReason
@@ -457,9 +457,9 @@ export function reportBootstrapFailure({
   cloudJob,
   logPrefix,
 }: {
-  callback?: (error: Error, cloudJob: CloudJob) => void;
+  callback?: (error: Error, cloudJob: Run) => void;
   error: Error;
-  cloudJob: CloudJob;
+  cloudJob: Run;
   logPrefix: string;
 }): void {
   try {
@@ -477,7 +477,7 @@ export function reportBootstrapFailure({
 
 export async function resolveGitAuthor(
   tx: DbTx,
-  cloudJob: Pick<CloudJob, 'id' | 'taskId'>,
+  cloudJob: Pick<Run, 'id' | 'taskId'>,
 ): Promise<GitAuthor> {
   const task = await tx.query.tasks.findFirst({
     where: eq(tasks.id, cloudJob.taskId),

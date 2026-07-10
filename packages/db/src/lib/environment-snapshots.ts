@@ -6,7 +6,7 @@ import { and, eq, inArray, isNull, lte, sql } from 'drizzle-orm';
 
 import { db, type DatabaseOrTransaction } from '../db';
 import { environmentSnapshots, environments } from '../schema';
-import type { CloudJob } from '../types';
+import type { Run } from '../types';
 import { runInTransactionIfAvailable } from './transaction-utils';
 
 export type EnvironmentSnapshotStatus =
@@ -83,7 +83,7 @@ function getPendingSnapshotAttachmentSource(
 }
 
 export function getEnvironmentSnapshotAttachmentSourceForCloudJob(
-  cloudJob: Pick<CloudJob, 'payload'>,
+  cloudJob: Pick<Run, 'payload'>,
 ): EnvironmentSnapshotAttachmentSource | null {
   return 'environmentSnapshotAttachment' in cloudJob.payload
     ? (cloudJob.payload.environmentSnapshotAttachment ?? null)
@@ -91,7 +91,7 @@ export function getEnvironmentSnapshotAttachmentSourceForCloudJob(
 }
 
 export function buildPendingEnvironmentSnapshotMatchForCloudJob(
-  cloudJob: Pick<CloudJob, 'payload' | 'createdAt'>,
+  cloudJob: Pick<Run, 'payload' | 'createdAt'>,
 ): PendingEnvironmentSnapshotMatch {
   const attachmentSource =
     getEnvironmentSnapshotAttachmentSourceForCloudJob(cloudJob);

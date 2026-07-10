@@ -2,7 +2,7 @@ import type {
   AcpRequestUserInputPayload,
   AcpRequestUserInputQuestion,
 } from '@roomote/types';
-import type { CloudJob } from '@roomote/sdk/client';
+import type { Run } from '@roomote/sdk/client';
 
 function formatQuestionOptions(
   question: AcpRequestUserInputQuestion,
@@ -33,7 +33,7 @@ function formatQuestion(
 }
 
 export function buildRequestUserInputTaskUrl(
-  cloudJob: CloudJob,
+  cloudJob: Run,
   source: 'slack' | 'linear',
 ): string {
   const webPath =

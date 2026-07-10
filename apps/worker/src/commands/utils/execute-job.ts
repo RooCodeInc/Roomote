@@ -11,7 +11,7 @@ import {
   resolveComputeProviderTarget,
   resolveSourceControlProviderFromPayload,
 } from '@roomote/types';
-import { type CloudJob, sdk } from '@roomote/sdk/client';
+import { type Run, sdk } from '@roomote/sdk/client';
 
 import { WorkerEnv } from '../../env';
 import {
@@ -49,7 +49,7 @@ import { buildServiceContextForPreviewProxy } from './service-context';
 import { finalizeJob, handleJobError } from './job-lifecycle';
 
 interface PreparedJobBase {
-  cloudJob: CloudJob;
+  cloudJob: Run;
   envVars: Record<string, string>;
   sourceControlToken?: SourceControlTokenMetadata;
   gitAuthor?: { name: string; email: string };
@@ -146,7 +146,7 @@ function serializeRepositoryPreparationIssues(
 }
 
 function buildRepositoryPreparationEventInput(params: {
-  cloudJob: CloudJob;
+  cloudJob: Run;
   outcome:
     | WorkspaceRepositoryPreparationContinued
     | WorkspaceRepositoryPreparationFailure;
@@ -198,7 +198,7 @@ function hasSnapshotLifecycleActivity(job: {
 }
 
 function isSetupOnboardingTask(params: {
-  cloudJob: CloudJob;
+  cloudJob: Run;
   jobContext: PreparedJobBase;
 }): boolean {
   const { cloudJob, jobContext } = params;
@@ -216,7 +216,7 @@ function isSetupOnboardingTask(params: {
 }
 
 function shouldRunParallelTaskEnvironmentSetup(params: {
-  cloudJob: CloudJob;
+  cloudJob: Run;
   jobContext: PreparedJobBase;
   setupMode: SetupMode;
   workspace: WorkspaceConfig;
@@ -231,7 +231,7 @@ function shouldRunParallelTaskEnvironmentSetup(params: {
 }
 
 async function shouldSuppressFinalizeError(params: {
-  cloudJob: CloudJob;
+  cloudJob: Run;
   result: {
     status: CloudTaskStatus;
     error?: string;
@@ -248,7 +248,7 @@ async function shouldSuppressFinalizeError(params: {
     return false;
   }
 
-  let latestJob: CloudJob | undefined;
+  let latestJob: Run | undefined;
 
   try {
     latestJob = await sdk.cloudJobs.findFirstById(cloudJob.id);
@@ -303,7 +303,7 @@ export async function executeJob<TPrepared extends PreparedJobBase>({
   workspaceConfigFn,
   runFn,
 }: ExecuteJobConfig<TPrepared>): Promise<boolean> {
-  let cloudJob: CloudJob | undefined = undefined;
+  let cloudJob: Run | undefined = undefined;
   let harnessLogger: HarnessLogger | undefined = undefined;
   let workerHeartbeatInterval: NodeJS.Timeout | undefined = undefined;
 

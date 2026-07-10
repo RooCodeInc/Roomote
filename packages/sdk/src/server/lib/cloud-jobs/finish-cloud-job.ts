@@ -18,7 +18,7 @@ import {
 } from '@roomote/communication/chat-messages';
 import { createTeamsCommunicationProviderFromRuntimeCredentials } from '../teams-communication';
 import {
-  type CloudJob,
+  type Run,
   type Task,
   type TaskPullRequest,
   db,
@@ -86,7 +86,7 @@ const DEFAULT_DEPLOYMENT_ID = 'default';
  * read conversation cargo (channel bindings, requestedWorkKind, initiator)
  * from `task` and attempt-scoped state from the run row.
  */
-type FinishedRun = CloudJob & { task: Task };
+type FinishedRun = Run & { task: Task };
 
 export const finishCloudJob = async ({
   id,
@@ -550,7 +550,7 @@ async function cleanupGithubPrReviewArtifacts(
   }
 }
 
-function getRuntimeTaskId(job: CloudJob): string | null {
+function getRuntimeTaskId(job: Run): string | null {
   if (
     !job.result ||
     typeof job.result !== 'object' ||
@@ -564,7 +564,7 @@ function getRuntimeTaskId(job: CloudJob): string | null {
   return typeof result.runtimeTaskId === 'string' ? result.runtimeTaskId : null;
 }
 
-function hasReachedTaskRuntime(job: CloudJob): boolean {
+function hasReachedTaskRuntime(job: Run): boolean {
   return (
     getRuntimeTaskId(job) !== null ||
     job.runtimeTaskStartedAt != null ||

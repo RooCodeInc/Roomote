@@ -1,4 +1,4 @@
-import type { CloudJob } from '@roomote/db';
+import type { Run } from '@roomote/db';
 import type { PreviewTokenContext } from '@roomote/types';
 
 import type { ResolvedRequest } from '../services/resolver';
@@ -44,13 +44,13 @@ export function createMockCloudJob(
     actingUserId?: string | null;
     payload?: Record<string, unknown> | null;
   } = {},
-): CloudJob {
+): Run {
   return {
     id: overrides.id ?? 1,
     taskId: 'taskId' in overrides ? overrides.taskId : TEST_TASK_ID,
     actingUserId: overrides.actingUserId ?? null,
     payload: overrides.payload ?? null,
-  } as unknown as CloudJob;
+  } as unknown as Run;
 }
 
 /**

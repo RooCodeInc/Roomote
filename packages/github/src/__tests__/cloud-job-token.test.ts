@@ -45,15 +45,15 @@ vi.mock('@roomote/db/server', () => ({
   },
 }));
 
-import type { CloudJob } from '@roomote/db/server';
+import type { Run } from '@roomote/db/server';
 
 import { createCloudJobGitHubToken } from '../api';
 
-function buildCloudJob(payload: CloudJob['payload']): CloudJob {
+function buildCloudJob(payload: Run['payload']): Run {
   return {
     id: 123,
     payload,
-  } as CloudJob;
+  } as Run;
 }
 
 function buildEnvironmentConfig(repositories: string[]) {
@@ -111,7 +111,7 @@ describe('createCloudJobGitHubToken', () => {
             'LogSharpDoo/ViradaBMS-BE',
             'LogSharpDoo/ViradaBMS-React',
           ],
-        } as CloudJob['payload']),
+        } as Run['payload']),
       ),
     ).resolves.toBe('ghs_test_token');
 
@@ -141,7 +141,7 @@ describe('createCloudJobGitHubToken', () => {
         buildCloudJob({
           repo: '__all_repositories__',
           environmentId: '14f1f7c4-b126-4b3f-a6a8-e37f7d299f4d',
-        } as CloudJob['payload']),
+        } as Run['payload']),
       ),
     ).resolves.toBe('ghs_test_token');
 
@@ -174,7 +174,7 @@ describe('createCloudJobGitHubToken', () => {
         buildCloudJob({
           repo: '__all_repositories__',
           environmentId: '14f1f7c4-b126-4b3f-a6a8-e37f7d299f4d',
-        } as CloudJob['payload']),
+        } as Run['payload']),
       ),
     ).rejects.toThrow(
       'Environment repositories for cloud job 123 span multiple GitHub installations',
@@ -200,7 +200,7 @@ describe('createCloudJobGitHubToken', () => {
         buildCloudJob({
           repo: '__all_repositories__',
           selectedRepositories: ['owner-a/api', 'owner-b/web'],
-        } as CloudJob['payload']),
+        } as Run['payload']),
       ),
     ).rejects.toThrow(
       'Selected repositories for cloud job 123 span multiple GitHub installations',
@@ -223,7 +223,7 @@ describe('createCloudJobGitHubToken', () => {
         buildCloudJob({
           repo: '__all_repositories__',
           selectedRepositories: ['owner-a/api'],
-        } as CloudJob['payload']),
+        } as Run['payload']),
       ),
     ).rejects.toThrow(
       'Selected repositories for cloud job 123 resolved no GitHub repository ids',
@@ -235,7 +235,7 @@ describe('createCloudJobGitHubToken', () => {
   it('falls back to the active installation for true all-repository tasks', async () => {
     await expect(
       createCloudJobGitHubToken(
-        buildCloudJob({ repo: '__all_repositories__' } as CloudJob['payload']),
+        buildCloudJob({ repo: '__all_repositories__' } as Run['payload']),
       ),
     ).resolves.toBe('ghs_test_token');
 

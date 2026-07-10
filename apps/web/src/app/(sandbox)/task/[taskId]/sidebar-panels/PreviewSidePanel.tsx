@@ -10,7 +10,7 @@ import {
 } from 'react';
 
 import { appendInitialPath, getPrimaryPortName } from '@roomote/types';
-import type { CloudJob } from '@roomote/db';
+import type { Run } from '@roomote/db';
 
 import {
   ArrowLeft,
@@ -119,7 +119,7 @@ export function PreviewSidePanel({
   cloudJob,
   onClose,
 }: {
-  cloudJob?: CloudJob;
+  cloudJob?: Run;
   onClose: () => void;
 }) {
   const {

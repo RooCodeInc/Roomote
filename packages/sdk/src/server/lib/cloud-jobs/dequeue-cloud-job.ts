@@ -8,7 +8,7 @@ import {
   resolveSourceControlProviderFromPayload,
 } from '@roomote/types';
 import {
-  type CloudJob,
+  type Run,
   type Task,
   db,
   taskRuns,
@@ -71,11 +71,11 @@ export function buildDequeuedTaskContext(task: Task): DequeuedTaskContext {
 type DequeueResult =
   | {
       error: true;
-      cloudJob?: CloudJob;
+      cloudJob?: Run;
     }
   | {
       error: false;
-      cloudJob: CloudJob;
+      cloudJob: Run;
       task: DequeuedTaskContext;
       requestedWorkKind: RequestedWorkKind;
       gitHubToken: string;
@@ -119,7 +119,7 @@ export function shouldInitializeWithoutPrompt(cloudTask: CloudTask): boolean {
  * discriminated union re-keys on `type`, which is stored as
  * `task_runs.payload_kind`.
  */
-function buildCloudTaskCandidate(run: CloudJob): Record<string, unknown> {
+function buildCloudTaskCandidate(run: Run): Record<string, unknown> {
   return {
     type: run.payloadKind,
     harness: run.harness,
@@ -218,7 +218,7 @@ async function recordBootstrapPhase<T>(input: {
  */
 async function persistGithubPrReviewCommentId(
   taskId: string,
-  payload: CloudJob['payload'],
+  payload: Run['payload'],
   commentId: number,
 ): Promise<void> {
   const repository =
@@ -256,7 +256,7 @@ export const dequeueCloudJob = async (
   {
     onBootstrapFailure,
   }: {
-    onBootstrapFailure?: (error: Error, cloudJob: CloudJob) => void;
+    onBootstrapFailure?: (error: Error, cloudJob: Run) => void;
   } = {},
 ) => {
   try {
@@ -266,10 +266,10 @@ export const dequeueCloudJob = async (
     const tag = '[dequeueCloudJob]';
 
     type TransactionResult =
-      | { error: true; cloudJob?: CloudJob }
+      | { error: true; cloudJob?: Run }
       | {
           error: false;
-          cloudJob: CloudJob;
+          cloudJob: Run;
           task: Task;
           cloudTask: CloudTask;
           envVars: Record<string, string>;
@@ -288,7 +288,7 @@ export const dequeueCloudJob = async (
       // 2. SKIP LOCKED means if another transaction has already locked a row, skip it.
       // 3. The UPDATE then modifies only that specific locked row.
       // 4. This ensures only ONE worker can claim each run, even with concurrent requests.
-      const [dequeued] = await tx.execute<Pick<CloudJob, 'id'>>(query);
+      const [dequeued] = await tx.execute<Pick<Run, 'id'>>(query);
 
       const cloudJob = dequeued
         ? await tx.query.taskRuns.findFirst({

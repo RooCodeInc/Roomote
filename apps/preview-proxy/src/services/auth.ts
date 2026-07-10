@@ -2,7 +2,7 @@ import * as redis from '../lib/redis';
 import { logger } from '../lib/logger';
 import { validatePreviewToken } from '@roomote/auth';
 import type { PreviewTokenContext } from '@roomote/types';
-import type { CloudJob } from '@roomote/db';
+import type { Run } from '@roomote/db';
 
 // Backward compatibility wrapper for validateToken
 export async function validateToken(
@@ -56,12 +56,12 @@ interface AuthValidationResult {
 }
 
 /**
- * Validate an auth cookie against a known CloudJob.
+ * Validate an auth cookie against a known Run.
  * This avoids repeating DB lookups when the caller already has the job.
  */
 export async function validateAuthCookieForCloudJob(
   authCookie: string | undefined,
-  cloudJob: CloudJob,
+  cloudJob: Run,
 ): Promise<AuthValidationResult> {
   const taskId = cloudJob.taskId ?? undefined;
 
