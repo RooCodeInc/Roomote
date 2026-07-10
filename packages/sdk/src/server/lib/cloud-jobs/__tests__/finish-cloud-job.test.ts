@@ -1393,6 +1393,60 @@ describe('finishCloudJob', () => {
       expect(mockBuildTaskFailedMessage).not.toHaveBeenCalled();
       expect(mockUpdateMessage).not.toHaveBeenCalled();
       expect(mockPostMessage).not.toHaveBeenCalled();
+      // Persist/report consistency: the stop-normalized status is also what
+      // gets PERSISTED — the run is written as canceled (canceledAt set,
+      // completedAt cleared) so the derived tasks.state reads canceled, while
+      // the sanitized error stays on the run for debugging.
+      expect(mockDbUpdateSet).toHaveBeenCalledWith(
+        expect.objectContaining({
+          status: CloudTaskStatus.Canceled,
+          canceledAt: expect.any(Date),
+          completedAt: null,
+          error: expect.stringContaining('Worker heartbeat stale'),
+        }),
+      );
+    });
+
+    it('persists failed and still notifies when the failure has no stop request', async () => {
+      const job = makeRun(
+        {
+          payloadKind: TaskPayloadKind.SlackAppMention,
+          payload: {
+            repo: 'owner/repo',
+            channel: 'C123',
+            user: 'U456',
+            text: 'test',
+            ts: '111.222',
+          },
+        },
+        { slackChannelId: 'C123', slackThreadTs: '111.222' },
+      );
+      mockFindFirstRun.mockResolvedValue(job);
+      mockFindFirstTask.mockResolvedValue(job.task);
+      mockGetSlackStartedMessageTs.mockResolvedValue('111.333');
+      mockFindFirstSlackInstallation.mockResolvedValue({
+        id: 'slack-inst-1',
+        botAccessToken: 'xoxb-test',
+        isActive: true,
+      });
+
+      await finishCloudJob({
+        id: 1,
+        status: CloudTaskStatus.Failed,
+        error: 'spawn timeout',
+      });
+
+      // No stop request -> no normalization: persisted as failed with
+      // completedAt stamped, and the failure notification goes out.
+      expect(mockDbUpdateSet).toHaveBeenCalledWith(
+        expect.objectContaining({
+          status: CloudTaskStatus.Failed,
+          canceledAt: null,
+          completedAt: expect.any(Date),
+        }),
+      );
+      expect(mockBuildTaskFailedMessage).toHaveBeenCalled();
+      expect(mockUpdateMessage).toHaveBeenCalled();
     });
 
     it('posts a text-only thread reply when a SnapshotResume Slack job fails', async () => {
@@ -1694,6 +1748,14 @@ describe('finishCloudJob', () => {
       });
 
       expect(mockTeamsPostMessage).not.toHaveBeenCalled();
+      // The stop-normalized status is also persisted as canceled.
+      expect(mockDbUpdateSet).toHaveBeenCalledWith(
+        expect.objectContaining({
+          status: CloudTaskStatus.Canceled,
+          canceledAt: expect.any(Date),
+          completedAt: null,
+        }),
+      );
     });
 
     it('posts runtime-failure copy when the runtime task already started', async () => {
@@ -1909,6 +1971,14 @@ describe('finishCloudJob', () => {
       });
 
       expect(mockCreateIssueComment).not.toHaveBeenCalled();
+      // The stop-normalized status is also persisted as canceled.
+      expect(mockDbUpdateSet).toHaveBeenCalledWith(
+        expect.objectContaining({
+          status: CloudTaskStatus.Canceled,
+          canceledAt: expect.any(Date),
+          completedAt: null,
+        }),
+      );
     });
   });
 
@@ -1953,6 +2023,14 @@ describe('finishCloudJob', () => {
       });
 
       expect(mockEmitError).not.toHaveBeenCalled();
+      // The stop-normalized status is also persisted as canceled.
+      expect(mockDbUpdateSet).toHaveBeenCalledWith(
+        expect.objectContaining({
+          status: CloudTaskStatus.Canceled,
+          canceledAt: expect.any(Date),
+          completedAt: null,
+        }),
+      );
     });
 
     it('skips Linear notification when the task has no linearSessionId binding', async () => {

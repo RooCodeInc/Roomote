@@ -112,6 +112,21 @@ export const finishCloudJob = async ({
 
   const task = job.task;
 
+  // Persist/report consistency for user-stopped runs: a stop request persisted
+  // on the row (cancelRequestedAt) means a Failed finalization is the fallout
+  // of a deliberate user stop — e.g. the sandbox died before the cancel
+  // completed. Normalize the status up front so EVERYTHING downstream agrees:
+  // the persisted run status, the derived tasks.state (the canonical read for
+  // task history, analytics, and unfurls), the lifecycle event, notifications,
+  // and GitHub-facing outcomes all see Canceled. The sanitized error is still
+  // written to the run's `error` column below for debugging.
+  if (status === CloudTaskStatus.Failed && job.cancelRequestedAt != null) {
+    console.log(
+      `[finishCloudJob] Persisting the failed finalization of job ${id} as canceled: a stop was requested at ${job.cancelRequestedAt.toISOString()}`,
+    );
+    status = CloudTaskStatus.Canceled;
+  }
+
   try {
     await releaseCloudTask(job);
   } catch (error) {
@@ -226,21 +241,6 @@ export const finishCloudJob = async ({
     });
   }
 
-  // A stop request persisted on the row (cancelRequestedAt) means a Failed
-  // finalization is the fallout of a deliberate user stop — e.g. the sandbox
-  // died before the cancel completed — so failure reporting would tell the
-  // user a task they stopped "ran into a hiccup". Downstream, this suppresses
-  // the Slack/Teams/Linear failure notifications and reports GitHub-facing
-  // terminal outcomes as canceled rather than failed.
-  const failedAfterStopRequest =
-    status === CloudTaskStatus.Failed && job.cancelRequestedAt != null;
-
-  if (failedAfterStopRequest) {
-    console.log(
-      `[finishCloudJob] Reporting the failed finalization of job ${id} as canceled: a stop was requested at ${job.cancelRequestedAt!.toISOString()}`,
-    );
-  }
-
   if (
     status === CloudTaskStatus.Completed ||
     status === CloudTaskStatus.Failed
@@ -303,11 +303,7 @@ export const finishCloudJob = async ({
 
   // Slack failure notification: post a thread reply when the job failed and
   // was triggered from Slack (the task carries a Slack thread binding).
-  if (
-    status === CloudTaskStatus.Failed &&
-    !failedAfterStopRequest &&
-    task.slackThreadTs
-  ) {
+  if (status === CloudTaskStatus.Failed && task.slackThreadTs) {
     try {
       await sendSlackFailureNotification(job, sanitizedError);
     } catch (err) {
@@ -323,7 +319,6 @@ export const finishCloudJob = async ({
   // was triggered from Teams (payload carries Teams communication metadata).
   if (
     status === CloudTaskStatus.Failed &&
-    !failedAfterStopRequest &&
     !task.slackThreadTs &&
     getCommunicationProviderFromTaskPayload(job.payload) === 'teams'
   ) {
@@ -374,11 +369,7 @@ export const finishCloudJob = async ({
 
   // Linear failure notification: emit an error activity when the job failed
   // and was triggered from Linear (the task carries a Linear session binding).
-  if (
-    status === CloudTaskStatus.Failed &&
-    !failedAfterStopRequest &&
-    task.linearSessionId
-  ) {
+  if (status === CloudTaskStatus.Failed && task.linearSessionId) {
     try {
       await sendLinearFailureNotification(job, sanitizedError);
     } catch (err) {
@@ -393,8 +384,7 @@ export const finishCloudJob = async ({
   // GitHub PR conflict resolution comment
   if (
     task.workflow === 'pr_conflict_resolve' &&
-    (status === CloudTaskStatus.Completed ||
-      (status === CloudTaskStatus.Failed && !failedAfterStopRequest))
+    (status === CloudTaskStatus.Completed || status === CloudTaskStatus.Failed)
   ) {
     try {
       await postConflictResolutionComment(job, status, sanitizedError);
@@ -432,11 +422,6 @@ async function cleanupGithubPrReviewArtifacts(
     | CloudTaskStatus.Canceled
     | CloudTaskStatus.Idle,
 ): Promise<void> {
-  // A Failed finalization after a persisted stop request is a deliberate stop;
-  // GitHub-facing outcomes report it as canceled (see finishCloudJob).
-  const failedAfterStopRequest =
-    status === CloudTaskStatus.Failed && job.cancelRequestedAt != null;
-
   let prRows: TaskPullRequest[];
 
   try {
@@ -520,10 +505,12 @@ async function cleanupGithubPrReviewArtifacts(
     if (status !== CloudTaskStatus.Idle) {
       try {
         const token = await createCloudJobGitHubToken(job);
+        // A user-stopped run arrives here already normalized to Canceled (see
+        // finishCloudJob), so the review outcome maps naturally.
         const outcome =
           status === CloudTaskStatus.Completed
             ? 'completed'
-            : status === CloudTaskStatus.Failed && !failedAfterStopRequest
+            : status === CloudTaskStatus.Failed
               ? 'failed'
               : 'canceled';
         const terminalStatus = buildTerminalReviewStatus({
