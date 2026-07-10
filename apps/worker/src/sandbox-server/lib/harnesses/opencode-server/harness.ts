@@ -81,8 +81,6 @@ interface OpenCodeServerHarnessOptions {
   eventStreamReadyTimeoutMs?: number;
   executeToolProgressInitialDelayMs?: number;
   executeToolProgressIntervalMs?: number;
-  subagentTaskTimeoutMs?: number;
-  subagentTaskInactivityTimeoutMs?: number;
   stopHookReminderStallTimeoutMs?: number;
   queuedPromptRetryDelayMs?: number;
   mcpServerNames?: string[];
@@ -187,6 +185,11 @@ interface ActiveOpenCodeExecuteToolProgress {
   timer: ReturnType<typeof setTimeout>;
 }
 
+// Tracks a live subagent spawn. Subagent runs are not time-bounded: the only
+// terminal signals are the task tool part settling, the child session going
+// idle (background launches), or parent-turn teardown. This tracker exists to
+// route child-session events — live activity folded into the spawn row,
+// inference-usage attribution, and the background idle disarm.
 interface ActiveOpenCodeSubagentWatchdog {
   sessionId: string;
   /** Background launches outlive the parent turn; turn finish must not disarm them. */
@@ -197,17 +200,6 @@ interface ActiveOpenCodeSubagentWatchdog {
   agentType: string | null;
   childSessionId: string | null;
   startedAtMs: number;
-  lastActivityAtMs: number;
-  // Child tool calls observed in a non-terminal state. While any are in
-  // flight the inactivity deadline is suspended: a silently running tool is
-  // indistinguishable from a hung one by event flow alone. OpenCode's shell
-  // tool bounds that state itself (default 2-minute timeout that kills the
-  // command and emits a terminal tool event); other tool kinds (MCP calls,
-  // webfetch, nested task spawns) are not self-bounding, so a hang inside
-  // one falls back to the total timeout — a deliberate trade-off, since a
-  // wrong kill of legitimate slow work is worse than a slow abort.
-  activeChildToolCallIds: Set<string>;
-  timer: ReturnType<typeof setTimeout>;
   updatePayload: Record<string, unknown>;
   activitySeenChildToolCallIds: Set<string>;
   activityLastAction: string | null;
@@ -231,26 +223,6 @@ const OPENCODE_STOP_HOOK_REMINDER_STALL_TIMEOUT_MS = 10 * 60_000;
 const EXPECTED_REPLAY_ABORT_SUPPRESSION_MS = 10_000;
 const DEFAULT_EXECUTE_TOOL_PROGRESS_INITIAL_DELAY_MS = 15_000;
 const DEFAULT_EXECUTE_TOOL_PROGRESS_INTERVAL_MS = 30_000;
-// Kill switch for runaway subagent runs: a subagent that produces no terminal
-// signal within this window is presumed dead and its child sessions are
-// aborted so the parent turn can continue instead of hanging silently. Sized
-// for large review/audit subagents that legitimately read hundreds of files;
-// 12 minutes was too tight and killed in-progress work (the sliding inactivity
-// deadline below is the primary wedge detector, so this only backstops a child
-// that stays superficially active but never terminates).
-const DEFAULT_SUBAGENT_TASK_TIMEOUT_MS = 30 * 60_000;
-// Sliding inactivity deadline for subagent runs: once the child session is
-// known, every event it emits (streamed text, tool state, message completion)
-// counts as liveness. A child that goes silent for this window is presumed
-// wedged and aborted without waiting for the total timeout above. Only
-// enforced when it is a strong signal: the child session id must be known
-// (otherwise there is no activity feed to judge by) and no child tool call
-// may be in flight (a legitimately silent long-running tool is
-// indistinguishable from a hung one; OpenCode's own shell-tool timeout
-// bounds that state and its kill emits a terminal tool event). Between
-// tools, a live child streams tokens or issues its next tool call — silence
-// there means the loop is dead.
-const DEFAULT_SUBAGENT_TASK_INACTIVITY_TIMEOUT_MS = 3 * 60_000;
 const DEFAULT_QUEUED_PROMPT_RETRY_DELAY_MS = 1_000;
 const MAX_PROGRESS_COMMAND_CHARS = 240;
 const FALLBACK_OPENCODE_STOP_HOOK_REMINDER =
@@ -1445,8 +1417,6 @@ export class OpenCodeServerHarness
   private readonly eventStreamReadyTimeoutMs: number;
   private readonly executeToolProgressInitialDelayMs: number;
   private readonly executeToolProgressIntervalMs: number;
-  private readonly subagentTaskTimeoutMs: number;
-  private readonly subagentTaskInactivityTimeoutMs: number;
   private readonly stopHookReminderStallTimeoutMs: number;
   private readonly queuedPromptRetryDelayMs: number;
   private readonly streamedPartText = new Map<string, string>();
@@ -1536,11 +1506,6 @@ export class OpenCodeServerHarness
     this.executeToolProgressIntervalMs =
       options.executeToolProgressIntervalMs ??
       DEFAULT_EXECUTE_TOOL_PROGRESS_INTERVAL_MS;
-    this.subagentTaskTimeoutMs =
-      options.subagentTaskTimeoutMs ?? DEFAULT_SUBAGENT_TASK_TIMEOUT_MS;
-    this.subagentTaskInactivityTimeoutMs =
-      options.subagentTaskInactivityTimeoutMs ??
-      DEFAULT_SUBAGENT_TASK_INACTIVITY_TIMEOUT_MS;
     this.stopHookReminderStallTimeoutMs =
       options.stopHookReminderStallTimeoutMs ??
       OPENCODE_STOP_HOOK_REMINDER_STALL_TIMEOUT_MS;
@@ -2206,12 +2171,11 @@ export class OpenCodeServerHarness
     // error, queued replay, dispose) also means the awaited reminder response
     // either arrived or is moot, so disarm the pending fail-safe.
     this.clearStopHookReminderStall();
-    // Subagent watchdogs share the same lifecycle: every teardown point that
-    // clears execute-tool heartbeats (turn finish, cancel, session error,
-    // queued replay, dispose) must also disarm pending subagent watchdogs.
+    // Subagent run tracking shares the same lifecycle: every teardown point
+    // that clears execute-tool heartbeats (turn finish, cancel, session error,
+    // queued replay, dispose) must also drop pending subagent trackers.
     // Exception: background launches outlive the parent turn by design, so
-    // turn finish keeps their watchdogs armed until the child idles or the
-    // timeout aborts it.
+    // turn finish keeps their trackers until the child session goes idle.
     this.clearAllSubagentWatchdogs(options);
   }
 
@@ -2231,23 +2195,19 @@ export class OpenCodeServerHarness
     const existing = this.activeSubagentWatchdogs.get(eventKey);
 
     if (existing) {
-      // Keep the original timer, but pick up details (like the child session
-      // id or the background flag) that only appear on later part updates. A
-      // parent-side part update is itself a liveness signal for the spawn, so
-      // refresh the inactivity clock alongside the details.
+      // Pick up details (like the child session id or the background flag)
+      // that only appear on later part updates.
       existing.background = existing.background || input.background;
       existing.childSessionId = input.childSessionId ?? existing.childSessionId;
       existing.agentType = input.agentType ?? existing.agentType;
       existing.title = input.title;
       existing.updatePayload = input.updatePayload;
-      existing.lastActivityAtMs = Date.now();
       if (existing.childSessionId) {
         this.childSessionWatchdogKeys.set(existing.childSessionId, eventKey);
       }
       return;
     }
 
-    const nowMs = Date.now();
     const watchdog: ActiveOpenCodeSubagentWatchdog = {
       sessionId: input.sessionId,
       background: input.background,
@@ -2256,16 +2216,7 @@ export class OpenCodeServerHarness
       title: input.title,
       agentType: input.agentType,
       childSessionId: input.childSessionId,
-      startedAtMs: nowMs,
-      lastActivityAtMs: nowMs,
-      activeChildToolCallIds: new Set(),
-      timer: this.armSubagentWatchdogTimer(
-        eventKey,
-        Math.min(
-          this.subagentTaskInactivityTimeoutMs,
-          this.subagentTaskTimeoutMs,
-        ),
-      ),
+      startedAtMs: Date.now(),
       updatePayload: input.updatePayload,
       activitySeenChildToolCallIds: new Set(),
       activityLastAction: null,
@@ -2276,77 +2227,9 @@ export class OpenCodeServerHarness
       this.childSessionWatchdogKeys.set(input.childSessionId, eventKey);
     }
     this.logger.info(
-      `Armed OpenCode subagent watchdog timeoutMs=${this.subagentTaskTimeoutMs} inactivityTimeoutMs=${this.subagentTaskInactivityTimeoutMs} toolCallId=${input.toolCallId} agentType=${
+      `Tracking OpenCode subagent run toolCallId=${input.toolCallId} agentType=${
         input.agentType ?? 'unknown'
       } childSessionId=${input.childSessionId ?? 'pending'}`,
-    );
-  }
-
-  private armSubagentWatchdogTimer(
-    eventKey: string,
-    delayMs: number,
-  ): ReturnType<typeof setTimeout> {
-    const timer = setTimeout(() => {
-      void this.handleSubagentWatchdogDeadline(eventKey);
-    }, delayMs);
-    timer.unref?.();
-    return timer;
-  }
-
-  /**
-   * Sliding-deadline check: the timer fires at the earliest possible expiry,
-   * then either expires the watchdog or re-arms it for the remaining window.
-   * Liveness comes from structured child-session events (see
-   * `markSubagentSessionActivity`); the inactivity deadline is only enforced
-   * while it is a strong signal — the child session id is known and no child
-   * tool call is in flight (see `activeChildToolCallIds`). While it is not
-   * enforceable, the timer keeps waking at the inactivity interval so a tool
-   * completion followed by silence is still caught one idle window after the
-   * completion event, and the total timeout always applies.
-   */
-  private async handleSubagentWatchdogDeadline(
-    eventKey: string,
-  ): Promise<void> {
-    const watchdog = this.activeSubagentWatchdogs.get(eventKey);
-
-    if (!watchdog) {
-      return;
-    }
-
-    const nowMs = Date.now();
-    const elapsedMs = nowMs - watchdog.startedAtMs;
-    const idleMs = nowMs - watchdog.lastActivityAtMs;
-
-    if (elapsedMs >= this.subagentTaskTimeoutMs) {
-      await this.expireSubagentWatchdog(
-        eventKey,
-        watchdog,
-        `exceeded the ${this.subagentTaskTimeoutMs}ms watchdog timeout (elapsed=${elapsedMs}ms)`,
-      );
-      return;
-    }
-
-    const idleEnforceable =
-      watchdog.childSessionId !== null &&
-      watchdog.activeChildToolCallIds.size === 0;
-
-    if (idleEnforceable && idleMs >= this.subagentTaskInactivityTimeoutMs) {
-      await this.expireSubagentWatchdog(
-        eventKey,
-        watchdog,
-        `stalled with no child-session events for ${idleMs}ms (inactivity limit ${this.subagentTaskInactivityTimeoutMs}ms, elapsed=${elapsedMs}ms)`,
-      );
-      return;
-    }
-
-    const remainingTotalMs = this.subagentTaskTimeoutMs - elapsedMs;
-    const remainingIdleMs = idleEnforceable
-      ? this.subagentTaskInactivityTimeoutMs - idleMs
-      : this.subagentTaskInactivityTimeoutMs;
-
-    watchdog.timer = this.armSubagentWatchdogTimer(
-      eventKey,
-      Math.min(remainingTotalMs, remainingIdleMs),
     );
   }
 
@@ -2363,8 +2246,8 @@ export class OpenCodeServerHarness
     if (isTerminalOpenCodeToolStatus(normalized.status)) {
       // A background launch's tool call completes immediately while the child
       // session keeps working, so a completed background part must keep the
-      // watchdog armed (keyed to the child session) until the child session
-      // goes idle or the timeout aborts it.
+      // run tracked (keyed to the child session) until the child session
+      // goes idle.
       if (
         normalized.status === 'completed' &&
         isOpenCodeBackgroundTaskToolPart(toolPart)
@@ -2433,24 +2316,10 @@ export class OpenCodeServerHarness
       return;
     }
 
-    clearTimeout(watchdog.timer);
     if (watchdog.childSessionId) {
       this.childSessionWatchdogKeys.delete(watchdog.childSessionId);
     }
     this.activeSubagentWatchdogs.delete(eventKey);
-  }
-
-  /**
-   * True when `childSessionId` is currently tracked by a live watchdog. Used by
-   * the expiry fallback to avoid aborting sibling subagents that are still
-   * being independently monitored — a watchdog with an unknown child session id
-   * must not take down healthy concurrent children of the shared parent
-   * session.
-   */
-  private isChildSessionOwnedByActiveWatchdog(childSessionId: string): boolean {
-    const eventKey = this.childSessionWatchdogKeys.get(childSessionId);
-
-    return eventKey !== undefined && this.activeSubagentWatchdogs.has(eventKey);
   }
 
   private clearAllSubagentWatchdogs(options?: {
@@ -2461,28 +2330,10 @@ export class OpenCodeServerHarness
         continue;
       }
 
-      clearTimeout(watchdog.timer);
       this.activeSubagentWatchdogs.delete(eventKey);
       if (watchdog.childSessionId) {
         this.childSessionWatchdogKeys.delete(watchdog.childSessionId);
       }
-    }
-  }
-
-  /**
-   * Every event a known child session emits — streamed text, tool state,
-   * message completion — counts as liveness for its spawn watchdog. The
-   * inactivity deadline in `handleSubagentWatchdogDeadline` measures against
-   * this clock.
-   */
-  private markSubagentSessionActivity(childSessionId: string): void {
-    const eventKey = this.childSessionWatchdogKeys.get(childSessionId);
-    const watchdog = eventKey
-      ? this.activeSubagentWatchdogs.get(eventKey)
-      : undefined;
-
-    if (watchdog) {
-      watchdog.lastActivityAtMs = Date.now();
     }
   }
 
@@ -2512,19 +2363,9 @@ export class OpenCodeServerHarness
     }
 
     const childToolCallId = asString(part.callID) ?? asString(part.id);
-    const childToolStatus = normalizeOpenCodeToolStatus(
-      asString(asRecord(part.state)?.status),
-    );
 
     if (childToolCallId) {
       watchdog.activitySeenChildToolCallIds.add(childToolCallId);
-      // Track in-flight child tool calls so the inactivity deadline is only
-      // enforced between tools, where silence is a strong wedge signal.
-      if (isTerminalOpenCodeToolStatus(childToolStatus)) {
-        watchdog.activeChildToolCallIds.delete(childToolCallId);
-      } else {
-        watchdog.activeChildToolCallIds.add(childToolCallId);
-      }
     }
 
     const state = asRecord(part.state);
@@ -2632,75 +2473,6 @@ export class OpenCodeServerHarness
       : undefined;
 
     return watchdog?.agentType ?? undefined;
-  }
-
-  private async expireSubagentWatchdog(
-    eventKey: string,
-    watchdog: ActiveOpenCodeSubagentWatchdog,
-    reason: string,
-  ): Promise<void> {
-    this.stopSubagentWatchdog(eventKey);
-    this.logger.warn(
-      `OpenCode subagent run ${reason} toolCallId=${watchdog.toolCallId} agentType=${
-        watchdog.agentType ?? 'unknown'
-      } title=${watchdog.title}; aborting child sessions of sessionId=${watchdog.sessionId}`,
-    );
-
-    // Abort only the child (subagent) sessions — never the parent session.
-    // Child sessions have their own session ids, so the MessageAbortedError
-    // each abort raises arrives as a session.error attributed to the child and
-    // is dropped by the sessionId guard in handleEvent; no replay-abort
-    // suppression is needed here. Prefer the exact child session captured
-    // from the task tool part metadata; fall back to listing all children.
-    //
-    // The fallback lists every child of the parent session, so it must never
-    // abort a child that belongs to a *different, still-live* watchdog: sibling
-    // subagents run concurrently under one parent session, and a healthy
-    // sibling is independently monitored by its own watchdog. Aborting it here
-    // is collateral damage that kills in-progress work. Exclude any child
-    // session still owned by another active watchdog. (This watchdog's own
-    // mapping was already removed by stopSubagentWatchdog above, so only other
-    // watchdogs remain.) The exact-child path is inherently scoped and needs no
-    // filtering.
-    try {
-      const childSessionIds = watchdog.childSessionId
-        ? [watchdog.childSessionId]
-        : (
-            await this.client.children({
-              sessionId: watchdog.sessionId,
-              signal: this.eventAbortController.signal,
-            })
-          )
-            .map((child) => child.id)
-            .filter(
-              (childSessionId) =>
-                !this.isChildSessionOwnedByActiveWatchdog(childSessionId),
-            );
-
-      for (const childSessionId of childSessionIds) {
-        try {
-          await this.client.abort({
-            sessionId: childSessionId,
-            signal: this.eventAbortController.signal,
-          });
-          this.logger.warn(
-            `Aborted OpenCode child session ${childSessionId} after the subagent watchdog expired for toolCallId=${watchdog.toolCallId}`,
-          );
-        } catch (error) {
-          this.logger.warn(
-            `Failed to abort OpenCode child session ${childSessionId} after the subagent watchdog expired: ${
-              error instanceof Error ? error.message : String(error)
-            }`,
-          );
-        }
-      }
-    } catch (error) {
-      this.logger.warn(
-        `Failed to list OpenCode child sessions for sessionId=${watchdog.sessionId} after the subagent watchdog expired: ${
-          error instanceof Error ? error.message : String(error)
-        }`,
-      );
-    }
   }
 
   private updateExecuteToolProgress(
@@ -3144,18 +2916,13 @@ export class OpenCodeServerHarness
     const sessionId = eventSessionId(payload);
 
     if (sessionId && this.sessionId && sessionId !== this.sessionId) {
-      // Child-session (subagent) events are otherwise dropped here; refresh
-      // the spawn watchdog's inactivity clock, fold tool activity into the
-      // parent spawn row, and record hidden inference usage before returning.
-      // A child session going idle is its completion signal — for background
-      // launches this disarms the watchdog that outlived the instant
-      // task-tool completion. A child `session.error` is equally terminal:
-      // aborting a child (our own watchdog expiry, or a sibling watchdog's
-      // fallback abort) surfaces here as a MessageAbortedError attributed to
-      // the child. Disarm on it too, so a watchdog whose child was already
-      // aborted elsewhere does not linger and fire its own deadline later
-      // (which, with an unknown child session id, would abort whatever
-      // children exist by then — including a fresh, healthy wave).
+      // Child-session (subagent) events are otherwise dropped here; fold tool
+      // activity into the parent spawn row and record hidden inference usage
+      // before returning. A child session going idle or erroring is its
+      // terminal signal — it ends run tracking (for background launches this
+      // is what ends the tracking that outlived the instant task-tool
+      // completion), and a child's idle or error must never finish the
+      // parent turn.
       if (payload.type === 'session.idle' || payload.type === 'session.error') {
         const watchdogKey = this.childSessionWatchdogKeys.get(sessionId);
 
@@ -3166,7 +2933,6 @@ export class OpenCodeServerHarness
         return;
       }
 
-      this.markSubagentSessionActivity(sessionId);
       this.handleChildSessionToolActivity(sessionId, payload);
       this.handleChildSessionMessageUpdated(sessionId, payload);
       return;
