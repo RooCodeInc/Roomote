@@ -1,0 +1,125 @@
+name: Release
+
+on:
+  push:
+    branches:
+      - develop
+
+# One release automation lane on develop: refresh the Version PR and the
+# develop→main promote PR without cancelling in-flight work.
+concurrency:
+  group: release-develop
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  version:
+    name: Changesets version PR
+    runs-on: blacksmith-4vcpu-ubuntu-2404
+    steps:
+      - name: Checkout
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          # Prefer RELEASE_BOT_TOKEN so the Version PR triggers CI when it is
+          # opened. Fall back to GITHUB_TOKEN when the secret is not yet set
+          # (first-time bootstrap still opens the PR; CI may need a re-run).
+          token: ${{ secrets.RELEASE_BOT_TOKEN || secrets.GITHUB_TOKEN }}
+          fetch-depth: 0
+
+      - name: Setup environment
+        uses: ./.github/actions/setup-environment
+        with:
+          frozen-lockfile: 'true'
+
+      - name: Create or update Version Packages PR
+        uses: changesets/action@a45c4d594aa4e2c509dc14a9f2b3b67ba3780d0d # v1.9.0
+        with:
+          version: pnpm run version
+          title: 'Release Roomote'
+          commit: 'chore(release): version roomote'
+          createGithubReleases: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.RELEASE_BOT_TOKEN || secrets.GITHUB_TOKEN }}
+          HUSKY: '0'
+
+  promote:
+    name: Open or refresh Promote PR
+    runs-on: blacksmith-4vcpu-ubuntu-2404
+    needs: version
+    steps:
+      - name: Checkout
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          token: ${{ secrets.RELEASE_BOT_TOKEN || secrets.GITHUB_TOKEN }}
+          fetch-depth: 0
+
+      - name: Open develop → main promote PR when version is releaseable
+        env:
+          GH_TOKEN: ${{ secrets.RELEASE_BOT_TOKEN || secrets.GITHUB_TOKEN }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          version="$(node -p "require('./package.json').version")"
+          : "${version:?missing package.json version}"
+          tag="v${version}"
+
+          if git rev-parse "$tag" >/dev/null 2>&1 || git ls-remote --tags origin "refs/tags/$tag" | grep -q .; then
+            echo "Tag $tag already exists; nothing to promote."
+            exit 0
+          fi
+
+          pending="$(find .changeset -maxdepth 1 -type f -name '*.md' ! -iname 'README.md' 2>/dev/null | wc -l | tr -d ' ')"
+          if [ "${pending:-0}" -gt 0 ]; then
+            echo "Pending changesets remain; wait for the Version Packages PR to merge."
+            exit 0
+          fi
+
+          git fetch origin main develop --quiet
+
+          if ! git show-ref --verify --quiet refs/remotes/origin/main; then
+            echo "origin/main is missing; create main before promoting."
+            exit 1
+          fi
+
+          if [ "$(git rev-parse origin/main)" = "$(git rev-parse origin/develop)" ]; then
+            echo "main already matches develop tip."
+            exit 0
+          fi
+
+          notes="$(node scripts/release/extract-changelog-section.mjs "$version" || true)"
+          body_file="$(mktemp)"
+          {
+            echo "## Promote ${tag}"
+            echo
+            echo "develop is ahead of main and product version \`${version}\` is not tagged yet."
+            echo
+            echo "- Merge this PR with a **merge commit** (do not squash or rebase)."
+            echo "- Merging publishes a GitHub Release for \`${tag}\` and triggers the existing GHCR \`v*\` image publish (\`latest\` channel)."
+            echo
+            echo "### Changelog"
+            echo
+            if [ -n "$notes" ]; then
+              echo "$notes"
+            else
+              echo "_No CHANGELOG section found for ${version}; see commits on develop._"
+            fi
+          } > "$body_file"
+
+          existing="$(gh pr list --base main --head develop --state open --json number,url --jq '.[0].url // empty')"
+          if [ -n "$existing" ]; then
+            echo "Promote PR already open: $existing"
+            gh pr edit "$existing" --title "Promote ${tag} to production" --body-file "$body_file"
+            rm -f "$body_file"
+            exit 0
+          fi
+
+          gh pr create \
+            --base main \
+            --head develop \
+            --title "Promote ${tag} to production" \
+            --body-file "$body_file"
+          rm -f "$body_file"

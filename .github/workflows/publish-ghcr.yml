@@ -343,6 +343,80 @@ jobs:
           docker buildx imagetools create "${tag_args[@]}" "${digest_refs[@]}"
           docker buildx imagetools inspect "$IMAGE:$VERSION"
 
+  # Product v* tags: only publish the GitHub Release after multi-arch images for
+  # both roomote-app and roomote-worker exist at :$version, so self-host install
+  # (releases/latest) never points at a tag whose images are not ready yet.
+  create-github-release:
+    name: Create GitHub Release
+    runs-on: blacksmith-4vcpu-ubuntu-2404
+    needs: [prepare, publish]
+    if: ${{ github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v') && needs.prepare.outputs.docs_only != 'true' }}
+    permissions:
+      contents: write
+      packages: read
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          token: ${{ secrets.RELEASE_BOT_TOKEN || secrets.GITHUB_TOKEN }}
+          fetch-depth: 0
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
+
+      - name: Log in to GHCR
+        uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Publish GitHub Release for product tag
+        env:
+          GH_TOKEN: ${{ secrets.RELEASE_BOT_TOKEN || secrets.GITHUB_TOKEN }}
+          VERSION: ${{ needs.prepare.outputs.version }}
+          OWNER: ${{ needs.prepare.outputs.owner }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          : "${VERSION:?version is required}"
+          tag="$VERSION"
+          case "$tag" in
+            v*) ;;
+            *)
+              echo "Expected a v* product tag, got: $tag" >&2
+              exit 1
+              ;;
+          esac
+
+          version_no_v="${tag#v}"
+          for image in roomote-app roomote-worker; do
+            ref="${REGISTRY}/${OWNER}/${image}:${VERSION}"
+            echo "Verifying image exists: $ref"
+            docker buildx imagetools inspect "$ref" >/dev/null
+          done
+
+          if gh release view "$tag" >/dev/null 2>&1; then
+            echo "GitHub Release $tag already exists; skip."
+            exit 0
+          fi
+
+          notes_file="$(mktemp)"
+          node scripts/release/extract-changelog-section.mjs "$version_no_v" > "$notes_file" || true
+          if [ ! -s "$notes_file" ]; then
+            printf 'Roomote %s\n' "$tag" > "$notes_file"
+          fi
+
+          gh release create "$tag" \
+            --title "Roomote $tag" \
+            --notes-file "$notes_file" \
+            --target "$(git rev-parse HEAD)" \
+            --latest
+
+          rm -f "$notes_file"
+          echo "Published GitHub Release $tag (images ready)"
+
   notify-ops:
     name: Notify ops repository
     runs-on: ubuntu-latest
