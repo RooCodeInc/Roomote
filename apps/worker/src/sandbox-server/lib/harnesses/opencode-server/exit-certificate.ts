@@ -4,10 +4,10 @@ import { readFileSync } from 'node:fs';
 // logs are gone by the time anyone investigates, so the facts that identify
 // the killer are collected while the process runs and handed to the caller
 // the moment it exits: exit code and signal (137 = killed for memory), the
-// last output lines, uptime, and a memory snapshot taken at the instant of
-// death. Collection is bounded: a fixed-size line ring with per-line caps, so
-// the cost per output line is constant regardless of how chatty the process
-// is.
+// last output lines, uptime, and a sandbox memory reading taken just after
+// the exit. Collection is bounded: a fixed-size line ring with per-line caps,
+// so the cost per output line is constant regardless of how chatty the
+// process is.
 const MAX_TAIL_LINES = 50;
 const MAX_LINE_CHARS = 300;
 
@@ -16,14 +16,18 @@ export interface OpenCodeExitCertificate {
   signal: string | null;
   uptimeMs: number;
   outputTail: string[];
-  memory: {
+  // Sandbox-wide memory observed just after the exit — by then the kernel has
+  // reclaimed the dead process's pages, so an OOM kill can already look
+  // recovered here; the exit code/signal is the authoritative OOM signal.
+  // workerRssBytes is the surviving sandbox-server process, not the victim.
+  memoryAfterExit: {
     memTotalKb: number;
     memAvailableKb: number;
     workerRssBytes: number;
   } | null;
 }
 
-function readMemorySnapshot(): OpenCodeExitCertificate['memory'] {
+function readMemorySnapshot(): OpenCodeExitCertificate['memoryAfterExit'] {
   try {
     const meminfo = readFileSync('/proc/meminfo', 'utf8');
     const readKb = (field: string): number | null => {
@@ -81,7 +85,7 @@ export function createOpenCodeExitCertificateCollector(): {
         signal: input.signal,
         uptimeMs: Date.now() - startedAtMs,
         outputTail: [...tail],
-        memory: readMemorySnapshot(),
+        memoryAfterExit: readMemorySnapshot(),
       };
     },
   };

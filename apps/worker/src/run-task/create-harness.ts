@@ -129,7 +129,7 @@ export async function createHarness({
             exitCode: certificate.exitCode,
             signal: certificate.signal,
             uptimeMs: certificate.uptimeMs,
-            memory: certificate.memory,
+            memoryAfterExit: certificate.memoryAfterExit,
             outputTail: certificate.outputTail,
           },
         });

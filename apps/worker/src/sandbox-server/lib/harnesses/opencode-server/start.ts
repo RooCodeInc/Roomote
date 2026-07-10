@@ -13,6 +13,7 @@ import {
   createOpenCodeExitCertificateCollector,
   type OpenCodeExitCertificate,
 } from './exit-certificate';
+import { isExpectedSubprocessExit } from './expected-exit';
 import { OpenCodeServerHarness } from './harness';
 
 interface StartOpenCodeServerHarnessOptions {
@@ -120,7 +121,6 @@ function waitForOpenCodeServerUrl(options: {
   stderr: NodeJS.ReadableStream;
   logger: HarnessLogger;
   timeoutMs: number;
-  onLine?: (stream: 'stdout' | 'stderr', line: string) => void;
 }): Promise<string> {
   const log = createPrefixedLogger(options.logger, '[opencode-server]');
   const stdoutLog = createPrefixedLogger(
@@ -180,7 +180,6 @@ function waitForOpenCodeServerUrl(options: {
         stdoutLog.info(line);
       }
 
-      options.onLine?.('stdout', line);
       maybeResolve('stdout', line);
     };
 
@@ -189,7 +188,6 @@ function waitForOpenCodeServerUrl(options: {
         stderrLog.info(line);
       }
 
-      options.onLine?.('stderr', line);
       maybeResolve('stderr', line);
     };
 
@@ -256,11 +254,33 @@ export async function startOpenCodeServerHarness({
     }
 
     if (onUnexpectedExit) {
+      // The certificate needs the process's last words, not its first: these
+      // readers stay attached for the whole subprocess lifetime, independent
+      // of the startup URL wait and its listener lifecycle.
+      const stdoutTailReader = readline.createInterface({
+        input: subprocess.stdout,
+        crlfDelay: Infinity,
+      });
+      const stderrTailReader = readline.createInterface({
+        input: subprocess.stderr,
+        crlfDelay: Infinity,
+      });
+      stdoutTailReader.on('line', (line) =>
+        exitCertificate.appendLine('stdout', line),
+      );
+      stderrTailReader.on('line', (line) =>
+        exitCertificate.appendLine('stderr', line),
+      );
+
+      const spawnedSubprocess = subprocess;
       const certifyExit = (input: {
         exitCode: number | null;
         signal: string | null;
       }) => {
-        if (cancelSignal.aborted) {
+        if (
+          cancelSignal.aborted ||
+          isExpectedSubprocessExit(spawnedSubprocess)
+        ) {
           return;
         }
 
@@ -313,7 +333,6 @@ export async function startOpenCodeServerHarness({
         stderr: subprocess.stderr,
         logger,
         timeoutMs: 30_000,
-        onLine: (stream, line) => exitCertificate.appendLine(stream, line),
       }),
       subprocess.then(
         () => {

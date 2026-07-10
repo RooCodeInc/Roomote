@@ -1,4 +1,4 @@
-import { asc, db, eq, taskRunEvents } from '@roomote/db/server';
+import { db, desc, eq, taskRunEvents } from '@roomote/db/server';
 
 const MAX_RUN_EVENTS = 500;
 
@@ -20,8 +20,11 @@ export async function getTaskRunEventsCommand(input: { taskId: string }) {
     })
     .from(taskRunEvents)
     .where(eq(taskRunEvents.taskId, input.taskId))
-    .orderBy(asc(taskRunEvents.createdAt))
+    // Newest first under the limit: diagnostics cluster at the end of a run,
+    // and a busy task must never push them out of the window. Reversed after
+    // the query so callers still get chronological order.
+    .orderBy(desc(taskRunEvents.createdAt))
     .limit(MAX_RUN_EVENTS);
 
-  return { events };
+  return { events: events.reverse() };
 }
