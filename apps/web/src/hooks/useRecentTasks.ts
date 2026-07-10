@@ -1,7 +1,9 @@
 import { useCallback, useMemo } from 'react';
 import { useLocalStorage } from 'usehooks-ts';
 
-const STORAGE_KEY = 'roomote-recent-tasks';
+import { useAuthorizedUser } from '@/hooks/useUser';
+
+const STORAGE_KEY_PREFIX = 'roomote-recent-tasks';
 const MAX_RECENT = 20;
 
 type RecentEntry = { id: string; visitedAt: number };
@@ -9,9 +11,14 @@ type RecentEntry = { id: string; visitedAt: number };
 /**
  * Hook to track recently visited task IDs in localStorage.
  * Returns the ordered list of recent IDs and a function to record a visit.
+ * Storage is scoped per signed-in user so account switches do not leak history.
  */
 export function useRecentTasks() {
-  const [entries, setEntries] = useLocalStorage<RecentEntry[]>(STORAGE_KEY, []);
+  const { userId } = useAuthorizedUser();
+  const [entries, setEntries] = useLocalStorage<RecentEntry[]>(
+    `${STORAGE_KEY_PREFIX}:${userId}`,
+    [],
+  );
 
   const recordVisit = useCallback(
     (taskId: string) => {

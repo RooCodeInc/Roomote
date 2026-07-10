@@ -437,9 +437,10 @@ export const getTasks = async ({
 /**
  * Search Tasks
  *
- * Simple search by title with ILIKE, scoped to the whole deployment. "My
- * tasks" filtering happens through the creator filter (initiatorUserId), not
- * through an implicit owner scope.
+ * Simple search by title with ILIKE, scoped to tasks initiated by the
+ * current user (matches the default tasks list). Explicit `includeIds`
+ * (pins / recently visited) can still surface specific visible tasks the
+ * user has interacted with, even when they were not the initiator.
  */
 
 type SearchTaskResult = {
@@ -451,6 +452,7 @@ type SearchTaskResult = {
 };
 
 export const searchTasks = async ({
+  userId,
   query,
   limit = 10,
   includeIds,
@@ -461,19 +463,22 @@ export const searchTasks = async ({
   /** Task IDs that should always be included in the results (e.g. recently visited). */
   includeIds?: string[];
 }): Promise<SearchTaskResult[]> => {
-  const baseConditions = [
+  const visibleConditions = [
     isNull(tasks.deletedAt),
     eq(tasks.visibility, 'visible'),
   ];
 
-  const searchConditions = [...baseConditions];
+  const searchConditions = [
+    ...visibleConditions,
+    eq(tasks.initiatorUserId, userId),
+  ];
 
   if (query && query.trim().length > 0) {
     const escaped = query.trim().replace(/%/g, '\\%').replace(/_/g, '\\_');
     searchConditions.push(sql`${tasks.title} ILIKE ${'%' + escaped + '%'}`);
   }
 
-  // Main search query.
+  // Main search query: only the current user's tasks.
   const searchResults = await db
     .select({
       id: tasks.id,
@@ -486,7 +491,9 @@ export const searchTasks = async ({
     .orderBy(desc(tasks.activityAt), desc(tasks.id))
     .limit(limit);
 
-  // Fetch pinned tasks that aren't already in the search results.
+  // Fetch pinned / visited tasks that aren't already in the search results.
+  // Absolute visibility is required, but initiator is not — pins and direct
+  // visits can include other users' tasks the current user already opened.
   const searchResultIds = new Set(searchResults.map((t) => t.id));
 
   const missingIds = (includeIds ?? []).filter(
@@ -504,7 +511,7 @@ export const searchTasks = async ({
         activityAt: tasks.activityAt,
       })
       .from(tasks)
-      .where(and(...baseConditions, inArray(tasks.id, missingIds)))
+      .where(and(...visibleConditions, inArray(tasks.id, missingIds)))
       .orderBy(desc(tasks.activityAt), desc(tasks.id));
   }
 
