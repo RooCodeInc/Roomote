@@ -1,7 +1,7 @@
 ---
 title: Compute Providers
 status: active
-last_reviewed: 2026-07-06
+last_reviewed: 2026-07-10
 owner: engineering
 summary: Technical documentation of compute provider abstractions covering Docker, Modal, Daytona, E2B, fresh launch flows, worker release distribution, and worker bootstrap behavior.
 ---
@@ -578,24 +578,28 @@ Runtime credential resolution is process-env-first with a database fallback:
   inline.
   - **Credential fields** (Modal token pair, Daytona API key, E2B API key)
     are the primary inputs.
-  - **Infrastructure fields** (`MODAL_BASE_IMAGE_REF`, `E2B_TEMPLATE_ID`,
-    `E2B_DOMAIN`, `DAYTONA_SNAPSHOT_NAME`, `DAYTONA_API_URL`,
-    `DAYTONA_TARGET`) are UI-editable advanced overrides. They are usually
-    derived or provisioned automatically from the shared worker image, so
-    they are surfaced behind an "advanced infrastructure" area rather than as
-    primary inputs.
-  - The **shared worker image** (`DOCKER_WORKER_IMAGE`) is configured once for
-    the whole deployment. Hosted providers derive or provision their worker
-    base image from it. `buildSetupComputeStatus()` returns a `workerImage`
-    status (`runtimeSatisfied`, `savedSatisfied`, `hostedImageRef`,
-    `hostedReady`) computed with the runtime precedence: process env wins,
-    then a saved deployment env var (`resolveSavedWorkerImage()` in
-    `packages/db/src/lib/compute-runtime-config.ts`), then the ref derived
-    from the baked `RELEASE_VERSION`. Only a registry-qualified ref is
-    hosted-ready; a bare local tag such as `roomote-worker:local` is not
-    itself pullable by hosted providers. In local development, Modal still
-    reports hosted-ready through its separate
-    `ghcr.io/roocodeinc/roomote-worker:latest` base-image fallback.
+  - **Infrastructure fields**:
+    - Operator-editable advanced overrides: `MODAL_BASE_IMAGE_REF`,
+      `E2B_DOMAIN`, `DAYTONA_API_URL`, `DAYTONA_TARGET` (and optional Modal
+      regions). Use `isComputeOperatorEditableField()`.
+    - Auto-provisioned worker artifacts: `E2B_TEMPLATE_ID` and
+      `DAYTONA_SNAPSHOT_NAME`. These are **not** Settings/setup form inputs
+      (use `isAutoProvisionedComputeArtifactField()`). Operators satisfy
+      them via process env or detached provisioning after credentials + a
+      registry-qualified worker image are available; UI/API form submissions
+      for those names are ignored.
+  - The **shared worker image** (`DOCKER_WORKER_IMAGE`) is deployment-managed
+    via process env / release derivation only (no Settings sticky editor).
+    Hosted providers derive or provision their worker base image from it.
+    `buildSetupComputeStatus()` returns a `workerImage` status
+    (`runtimeSatisfied`, `savedSatisfied`, `hostedImageRef`, `hostedReady`)
+    with process env first, then the ref derived from the baked
+    `RELEASE_VERSION` (legacy DB-backed worker-image rows are ignored and
+    purged). Only a registry-qualified ref is hosted-ready; a bare local tag
+    such as `roomote-worker:local` is not itself pullable by hosted
+    providers. In local development, Modal still reports hosted-ready through
+    its separate `ghcr.io/roocodeinc/roomote-worker:latest` base-image
+    fallback.
 - The provider picker no longer hides hosted providers when infrastructure is
   missing: every provider is offered. The compute config step shows the shared
   worker-image field for hosted providers when no registry-qualified worker
@@ -603,8 +607,9 @@ Runtime credential resolution is process-env-first with a database fallback:
   hosted worker image.
 - Runtime env values lock their field in the UI and are never overwritten by a
   save. Otherwise the setup wizard and the Settings → Sandboxes save commands
-  persist submitted credentials, submitted infrastructure values, and the
-  shared worker image as encrypted deployment env vars.
+  persist submitted credentials and operator-editable infrastructure values as
+  encrypted deployment env vars. Auto-provisioned template/snapshot IDs are
+  written only by the provisioning runner (or via process env).
 - For Modal, `MODAL_BASE_IMAGE_REF` is derived from the effective worker image
   by default (via `resolveDerivedModalBaseImageRef()`) and persisted when the
   operator did not enter it, is not env-provided, and is not already saved. The
@@ -623,21 +628,22 @@ Runtime credential resolution is process-env-first with a database fallback:
   spawn time regardless of save order.
 - For E2B and Daytona, `E2B_TEMPLATE_ID` / `DAYTONA_SNAPSHOT_NAME` report
   `setupProvisionable` when a registry-qualified worker image exists. Saving
-  credentials without a manual artifact starts a detached provisioning run in
-  the operator's provider account (the E2B worker-template build or the
-  Daytona snapshot registration, via `runComputeProvisioning` in
+  credentials starts a detached provisioning run in the operator's provider
+  account when the field is not already runtime- or saved-satisfied (the E2B
+  worker-template build or the Daytona snapshot registration, via
+  `runComputeProvisioning` in
   `apps/web/src/trpc/commands/compute/compute-provisioning.ts`). Progress
   persists on `setupNewState.e2bTemplateBuild` /
   `setupNewState.daytonaSnapshotBuild`, the wizard polls the setup status
   until the artifact ref lands as an encrypted deployment env var, and a
   `building` entry older than ten minutes reads as failed so the operator can
-  retry after a web-process restart. If the operator instead enters the
-  artifact value manually in the advanced field, it is persisted directly and
-  no provisioning runs. `setupProvisionable` counts toward
-  `infrastructureSatisfied` but not `configSatisfied`, so setup cannot complete
-  before the artifact actually exists. Daytona snapshot registration has no
-  per-call registry credentials, so the worker image must be public or its
-  registry configured in the Daytona organization.
+  retry after a web-process restart. The Settings and setup UIs do not collect
+  template ID / snapshot name; pin them with process env when needed.
+  `setupProvisionable` counts toward `infrastructureSatisfied` but not
+  `configSatisfied`, so setup cannot complete before the artifact actually
+  exists. Daytona snapshot registration has no per-call registry credentials,
+  so the worker image must be public or its registry configured in the Daytona
+  organization.
 - Registry auth (Modal ECR OIDC or registry username/password pairs),
   endpoints, and timeouts stay env-only and are not surfaced by the UI.
 
@@ -657,19 +663,20 @@ Admins can also manage compute providers after setup at `/settings/sandboxes`
 - The settings page does **not** expose a shared worker-image editor; the
   worker image is deployment-managed via process env / release derivation
   (`DOCKER_WORKER_IMAGE` and related resolution). Each provider section
-  (`ComputeProviderSection`) shows credential fields normally plus an "Advanced
-  infrastructure" expandable area for that provider's infrastructure values.
+  (`ComputeProviderSection`) shows credential fields plus operator-editable
+  advanced infrastructure (Modal base image, domain/region). Worker Template ID
+  (E2B) and Worker Snapshot Name (Daytona) are not form inputs; status notes
+  describe automatic provisioning instead.
 - `compute.saveConfig` encrypts submitted account credentials and submitted
-  provider-specific infrastructure values into deployment env vars (with the
+  operator-editable infrastructure values into deployment env vars (with the
   same Modal base-image-ref derivation as the wizard), but unlike the wizard it
   does **not** switch the deployment default onto the provider and does not
   require missing infrastructure before saving credentials. Runtime env values
-  are locked and never overwritten. For provisionable providers (E2B, Daytona)
-  it behaves like the wizard: when no manual artifact value is entered, a
-  registry-qualified worker image exists, and the required credentials are
-  available, the save records the run as pending and starts the detached
-  provisioning; entering the artifact manually persists it and skips
-  provisioning. The logic is shared with the wizard via
+  are locked and never overwritten. Submitted `E2B_TEMPLATE_ID` /
+  `DAYTONA_SNAPSHOT_NAME` values are ignored. For provisionable providers (E2B,
+  Daytona), when a registry-qualified worker image exists and the required
+  credentials are available, the save records the run as pending and starts the
+  detached provisioning. The logic is shared with the wizard via
   `apps/web/src/trpc/commands/compute/compute-provisioning.ts`.
 - `compute.setDefaultProvider` persists
   `deployment_settings.runtime_compute_config.defaultProvider`, allowing hosted

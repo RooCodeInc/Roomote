@@ -216,7 +216,7 @@ describe('compute commands', () => {
       delete process.env.DAYTONA_SNAPSHOT_NAME;
     });
 
-    it('persists submitted credential and infrastructure values together', async () => {
+    it('persists credentials and ignores submitted auto-provisioned artifacts', async () => {
       await saveComputeConfigCommand(buildMockAuth(), {
         provider: 'e2b',
         values: {
@@ -225,18 +225,16 @@ describe('compute commands', () => {
         },
       });
 
-      expect(mockUpsertDeploymentEnvironmentVariables).toHaveBeenCalledWith(
-        expect.anything(),
-        expect.objectContaining({
-          userId: 'compute-test-user',
-          values: [
-            { name: 'E2B_API_KEY', value: 'e2b-key' },
-            { name: 'E2B_TEMPLATE_ID', value: 'manual-template' },
-          ],
-        }),
+      const values = mockUpsertDeploymentEnvironmentVariables.mock.calls[0]?.[1]
+        ?.values as Array<{ name: string; value: string }>;
+      expect(values).toEqual(
+        expect.arrayContaining([{ name: 'E2B_API_KEY', value: 'e2b-key' }]),
       );
-      // A manual artifact value skips auto-provisioning.
-      expect(mockRunComputeProvisioning).not.toHaveBeenCalled();
+      expect(values.map((entry) => entry.name)).not.toContain(
+        'E2B_TEMPLATE_ID',
+      );
+      // Manual form template/snapshot overrides are ignored; provisioning still
+      // runs when a registry-qualified worker image is available.
     });
 
     it('uses a submitted worker image to derive Modal base image without sticky persist', async () => {

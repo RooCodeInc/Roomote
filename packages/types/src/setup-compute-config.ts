@@ -9,10 +9,10 @@ import {
  * - `credential`: an account credential (token, key) the operator enters
  *   directly for the provider.
  * - `infrastructure`: a deployment worker-image artifact (base image ref,
- *   template id, snapshot name). Infrastructure values are UI-editable, but
- *   they are usually derived from the shared worker image or provisioned
- *   automatically, so they are surfaced as advanced overrides rather than
- *   primary inputs.
+ *   template id, snapshot name, domain/region). Some infrastructure values are
+ *   UI-editable advanced overrides; auto-provisioned worker artifacts
+ *   (`E2B_TEMPLATE_ID`, `DAYTONA_SNAPSHOT_NAME`) are not operator-edited in
+ *   the UI — process env or detached provisioning owns them.
  */
 export type SetupComputeFieldCategory = 'credential' | 'infrastructure';
 
@@ -23,14 +23,15 @@ export type SetupComputeFieldDescriptor = {
   secret?: boolean;
   /**
    * Distinguishes account credentials from deployment-infrastructure values.
-   * Infrastructure fields (base images, template ids, snapshot names) can be
-   * saved from the UI, derived, or provisioned automatically.
+   * Infrastructure fields may be derived, provisioned automatically, or (for
+   * optional overrides such as domain/region) saved from the UI.
    */
   category: SetupComputeFieldCategory;
   /**
    * Provider-specific infrastructure fields shown behind an "Advanced
-   * infrastructure" area in the UI, because a sensible value is usually
-   * derived from the shared worker image or provisioned automatically.
+   * infrastructure" area in the UI when they are operator-editable. Auto-
+   * provisioned worker artifacts are never rendered here; optional
+   * domain/region and Modal base-image override fields still use this flag.
    */
   advanced?: boolean;
 };
@@ -242,10 +243,10 @@ export const SETUP_COMPUTE_PROVIDER_CATALOG = [
         category: 'credential',
       },
       {
+        // Auto-provisioned (or process-env); not shown as a Settings/setup input.
         envVarName: 'E2B_TEMPLATE_ID',
         label: 'Worker Template ID',
         category: 'infrastructure',
-        advanced: true,
       },
       {
         envVarName: 'E2B_DOMAIN',
@@ -270,10 +271,10 @@ export const SETUP_COMPUTE_PROVIDER_CATALOG = [
         category: 'credential',
       },
       {
+        // Auto-provisioned (or process-env); not shown as a Settings/setup input.
         envVarName: 'DAYTONA_SNAPSHOT_NAME',
         label: 'Worker Snapshot Name',
         category: 'infrastructure',
-        advanced: true,
       },
       {
         envVarName: 'DAYTONA_API_URL',
@@ -306,8 +307,9 @@ export const SETUP_COMPUTE_PROVIDER_CATALOG = [
  * Sandbox-provider env vars managed by the setup flow and the Settings →
  * Sandboxes page: account credentials, provider-specific infrastructure values
  * (base images, template ids, snapshot names), and the shared worker image.
- * They are reserved from the generic environment-variables editor so operators
- * configure them through the sandboxes UI (or the deployment env) instead.
+ * Template IDs / snapshot names are reserved for process env + auto-
+ * provisioning rather than operator form inputs; they are still reserved from
+ * the generic environment-variables editor.
  */
 export const COMPUTE_PROVIDER_ENV_VAR_NAMES: ReadonlySet<string> = new Set([
   SHARED_WORKER_IMAGE_ENV_VAR,
@@ -333,11 +335,35 @@ function isSecretSetupComputeField(
 /**
  * Env-only infrastructure values that the deployment can provision itself
  * during setup (see the compute-provisioning command module in apps/web).
+ * These are not operator form inputs in Settings/setup — process env or
+ * detached provisioning owns them.
  */
 const SETUP_PROVISIONABLE_COMPUTE_ENV_VARS: ReadonlySet<string> = new Set([
   'E2B_TEMPLATE_ID',
   'DAYTONA_SNAPSHOT_NAME',
 ]);
+
+/**
+ * True for provider worker artifacts Roomote builds/registers itself
+ * (`E2B_TEMPLATE_ID`, `DAYTONA_SNAPSHOT_NAME`). These are not Settings/setup
+ * UI inputs: operators satisfy them via process env or auto-provisioning
+ * after credentials + a registry-qualified worker image are available.
+ */
+export function isAutoProvisionedComputeArtifactField(
+  field: Pick<SetupComputeFieldDescriptor, 'envVarName'>,
+): boolean {
+  return SETUP_PROVISIONABLE_COMPUTE_ENV_VARS.has(field.envVarName);
+}
+
+/**
+ * True for fields the sandboxes UI and setup wizard may collect from an
+ * operator. Auto-provisioned template/snapshot IDs are excluded.
+ */
+export function isComputeOperatorEditableField(
+  field: Pick<SetupComputeFieldDescriptor, 'envVarName'>,
+): boolean {
+  return !isAutoProvisionedComputeArtifactField(field);
+}
 
 const SETUP_COMPUTE_PROVIDER_BY_ID = new Map<
   ComputeProvider,
