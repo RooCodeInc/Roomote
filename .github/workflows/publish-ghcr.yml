@@ -156,6 +156,15 @@ jobs:
           pnpm-version: 10.29.3
       - name: Set up Docker builder
         uses: useblacksmith/setup-docker-builder@47a5d0102cc44712a17a633c2599f755008cc40e # v1
+      # The smoke test pulls the previous published release from GHCR as its
+      # upgrade baseline. The packages are public today, but authenticate
+      # anyway so a visibility change cannot silently break the release gate.
+      - name: Log in to GHCR
+        uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
       - name: Resolve previous published channel
         id: baseline
         shell: bash
@@ -208,78 +217,6 @@ jobs:
             dockerfile: .docker/app/Dockerfile
             target: runtime-app
             image: roomote-app
-            arch: arm64
-            runner: blacksmith-4vcpu-ubuntu-2404-arm
-          - app: web
-            dockerfile: .docker/app/Dockerfile
-            target: runtime-web
-            image: roomote-web
-            arch: amd64
-            runner: blacksmith-4vcpu-ubuntu-2404
-          - app: web
-            dockerfile: .docker/app/Dockerfile
-            target: runtime-web
-            image: roomote-web
-            arch: arm64
-            runner: blacksmith-4vcpu-ubuntu-2404-arm
-          - app: api
-            dockerfile: .docker/app/Dockerfile
-            target: runtime-api
-            image: roomote-api
-            arch: amd64
-            runner: blacksmith-4vcpu-ubuntu-2404
-          - app: api
-            dockerfile: .docker/app/Dockerfile
-            target: runtime-api
-            image: roomote-api
-            arch: arm64
-            runner: blacksmith-4vcpu-ubuntu-2404-arm
-          - app: controller
-            dockerfile: .docker/app/Dockerfile
-            target: runtime-controller
-            image: roomote-controller
-            arch: amd64
-            runner: blacksmith-4vcpu-ubuntu-2404
-          - app: controller
-            dockerfile: .docker/app/Dockerfile
-            target: runtime-controller
-            image: roomote-controller
-            arch: arm64
-            runner: blacksmith-4vcpu-ubuntu-2404-arm
-          - app: bullmq
-            dockerfile: .docker/app/Dockerfile
-            target: runtime-bullmq
-            image: roomote-bullmq
-            arch: amd64
-            runner: blacksmith-4vcpu-ubuntu-2404
-          - app: bullmq
-            dockerfile: .docker/app/Dockerfile
-            target: runtime-bullmq
-            image: roomote-bullmq
-            arch: arm64
-            runner: blacksmith-4vcpu-ubuntu-2404-arm
-          - app: preview-proxy
-            dockerfile: .docker/app/Dockerfile
-            target: runtime-preview-proxy
-            image: roomote-preview-proxy
-            arch: amd64
-            runner: blacksmith-4vcpu-ubuntu-2404
-          - app: preview-proxy
-            dockerfile: .docker/app/Dockerfile
-            target: runtime-preview-proxy
-            image: roomote-preview-proxy
-            arch: arm64
-            runner: blacksmith-4vcpu-ubuntu-2404-arm
-          - app: migrate
-            dockerfile: .docker/app/Dockerfile
-            target: runtime-migrate
-            image: roomote-migrate
-            arch: amd64
-            runner: blacksmith-4vcpu-ubuntu-2404
-          - app: migrate
-            dockerfile: .docker/app/Dockerfile
-            target: runtime-migrate
-            image: roomote-migrate
             arch: arm64
             runner: blacksmith-4vcpu-ubuntu-2404-arm
           - app: worker
@@ -354,18 +291,6 @@ jobs:
         include:
           - app: app
             image: roomote-app
-          - app: web
-            image: roomote-web
-          - app: api
-            image: roomote-api
-          - app: controller
-            image: roomote-controller
-          - app: bullmq
-            image: roomote-bullmq
-          - app: preview-proxy
-            image: roomote-preview-proxy
-          - app: migrate
-            image: roomote-migrate
           - app: worker
             image: roomote-worker
     steps:
