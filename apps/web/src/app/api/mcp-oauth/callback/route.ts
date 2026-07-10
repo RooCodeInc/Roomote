@@ -83,7 +83,7 @@ export async function GET(request: NextRequest) {
   const errorDescription =
     request.nextUrl.searchParams.get('error_description');
 
-  const webUrl = webEnv.ROOMOTE_APP_URL;
+  const webUrl = webEnv.R_APP_URL;
   const redirectPath = readRedirectPathFromState(state);
 
   // Handle OAuth errors
@@ -183,7 +183,7 @@ export async function GET(request: NextRequest) {
     }
 
     const serverMetadata = await discoverOAuthEndpoints(integration.url);
-    const redirectUri = `${webEnv.ROOMOTE_APP_URL}/api/mcp-oauth/callback`;
+    const redirectUri = `${webEnv.R_APP_URL}/api/mcp-oauth/callback`;
 
     const tokens = await exchangeCodeForTokens(
       serverMetadata.token_endpoint,

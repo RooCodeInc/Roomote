@@ -12,7 +12,7 @@ export const isMention = (comment: {
   return (
     comment.body
       .toLowerCase()
-      .includes(`@${Env.NEXT_PUBLIC_GITHUB_APP_SLUG.toLowerCase()}`) &&
+      .includes(`@${Env.R_GITHUB_APP_SLUG.toLowerCase()}`) &&
     !GitHubSchemas.isRoomoteGitHubLogin(comment.user.login)
   );
 };

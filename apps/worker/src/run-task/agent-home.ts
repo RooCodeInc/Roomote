@@ -701,7 +701,7 @@ function createJudgeModelInstructions(): string {
   return [
     `A hidden OpenCode \`${ROOMOTE_OPENCODE_JUDGE_AGENT_NAME}\` subagent is always configured for implementation review support.`,
     '',
-    'When `ROOMOTE_CODE_REVIEW_MODEL` is configured, the judge uses that review model. Otherwise it falls back to the active coding model for the task.',
+    'When `R_CODE_REVIEW_MODEL` is configured, the judge uses that review model. Otherwise it falls back to the active coding model for the task.',
     '',
     `After implementation and validation, when the task has a concrete plan, checklist, or explicit requested outcome to compare against, delegate one focused compare pass to the \`${ROOMOTE_OPENCODE_JUDGE_AGENT_NAME}\` subagent with the Task tool.`,
     '',
@@ -735,55 +735,55 @@ function resolveModelBackedOpenCodeConfig(
   runtimeEnv: Record<string, string>,
   modelOverride?: string,
 ): Record<string, unknown> | null {
-  const rawModel = runtimeEnv.ROOMOTE_MODEL?.trim();
+  const rawModel = runtimeEnv.R_MODEL?.trim();
 
   if (!rawModel) {
     return null;
   }
 
-  const rawSmallModel = runtimeEnv.ROOMOTE_SMALL_MODEL?.trim();
-  const rawVisionModel = runtimeEnv.ROOMOTE_VISION_MODEL?.trim();
-  const rawCodeReviewModel = runtimeEnv.ROOMOTE_CODE_REVIEW_MODEL?.trim();
-  const rawExploreModel = runtimeEnv.ROOMOTE_EXPLORE_MODEL?.trim();
-  const rawPlanningModel = runtimeEnv.ROOMOTE_PLANNING_MODEL?.trim();
+  const rawSmallModel = runtimeEnv.R_SMALL_MODEL?.trim();
+  const rawVisionModel = runtimeEnv.R_VISION_MODEL?.trim();
+  const rawCodeReviewModel = runtimeEnv.R_CODE_REVIEW_MODEL?.trim();
+  const rawExploreModel = runtimeEnv.R_EXPLORE_MODEL?.trim();
+  const rawPlanningModel = runtimeEnv.R_PLANNING_MODEL?.trim();
   const modelReasoningEffort = normalizeOptionalReasoningEffort(
-    runtimeEnv.ROOMOTE_MODEL_REASONING_EFFORT?.trim(),
+    runtimeEnv.R_MODEL_REASONING_EFFORT?.trim(),
   );
   const smallModelReasoningEffort = normalizeOptionalReasoningEffort(
-    runtimeEnv.ROOMOTE_SMALL_MODEL_REASONING_EFFORT?.trim(),
+    runtimeEnv.R_SMALL_MODEL_REASONING_EFFORT?.trim(),
   );
   const visionModelReasoningEffort = normalizeOptionalReasoningEffort(
-    runtimeEnv.ROOMOTE_VISION_MODEL_REASONING_EFFORT?.trim(),
+    runtimeEnv.R_VISION_MODEL_REASONING_EFFORT?.trim(),
   );
   const codeReviewModelReasoningEffort = normalizeOptionalReasoningEffort(
-    runtimeEnv.ROOMOTE_CODE_REVIEW_MODEL_REASONING_EFFORT?.trim(),
+    runtimeEnv.R_CODE_REVIEW_MODEL_REASONING_EFFORT?.trim(),
   );
   const exploreModelReasoningEffort = normalizeOptionalReasoningEffort(
-    runtimeEnv.ROOMOTE_EXPLORE_MODEL_REASONING_EFFORT?.trim(),
+    runtimeEnv.R_EXPLORE_MODEL_REASONING_EFFORT?.trim(),
   );
   const planningModelReasoningEffort = normalizeOptionalReasoningEffort(
-    runtimeEnv.ROOMOTE_PLANNING_MODEL_REASONING_EFFORT?.trim(),
+    runtimeEnv.R_PLANNING_MODEL_REASONING_EFFORT?.trim(),
   );
-  validateRoomoteModelEnv('ROOMOTE_MODEL', rawModel);
+  validateRoomoteModelEnv('R_MODEL', rawModel);
 
   if (rawSmallModel) {
-    validateRoomoteModelEnv('ROOMOTE_SMALL_MODEL', rawSmallModel);
+    validateRoomoteModelEnv('R_SMALL_MODEL', rawSmallModel);
   }
 
   if (rawVisionModel) {
-    validateRoomoteModelEnv('ROOMOTE_VISION_MODEL', rawVisionModel);
+    validateRoomoteModelEnv('R_VISION_MODEL', rawVisionModel);
   }
 
   if (rawCodeReviewModel) {
-    validateRoomoteModelEnv('ROOMOTE_CODE_REVIEW_MODEL', rawCodeReviewModel);
+    validateRoomoteModelEnv('R_CODE_REVIEW_MODEL', rawCodeReviewModel);
   }
 
   if (rawExploreModel) {
-    validateRoomoteModelEnv('ROOMOTE_EXPLORE_MODEL', rawExploreModel);
+    validateRoomoteModelEnv('R_EXPLORE_MODEL', rawExploreModel);
   }
 
   if (rawPlanningModel) {
-    validateRoomoteModelEnv('ROOMOTE_PLANNING_MODEL', rawPlanningModel);
+    validateRoomoteModelEnv('R_PLANNING_MODEL', rawPlanningModel);
   }
 
   // OpenRouter variant models (`:nitro`, `:free`, ...) are rewritten to their
@@ -814,19 +814,19 @@ function resolveModelBackedOpenCodeConfig(
     : undefined;
   const effectiveCodingModel = normalizedModelOverride ?? model;
 
-  delete runtimeEnv.ROOMOTE_MODEL;
-  delete runtimeEnv.ROOMOTE_SMALL_MODEL;
-  delete runtimeEnv.ROOMOTE_VISION_MODEL;
-  delete runtimeEnv.ROOMOTE_CODE_REVIEW_MODEL;
-  delete runtimeEnv.ROOMOTE_EXPLORE_MODEL;
-  delete runtimeEnv.ROOMOTE_PLANNING_MODEL;
-  delete runtimeEnv.ROOMOTE_MODEL_REASONING_EFFORT;
-  delete runtimeEnv.ROOMOTE_SMALL_MODEL_REASONING_EFFORT;
-  delete runtimeEnv.ROOMOTE_VISION_MODEL_REASONING_EFFORT;
-  delete runtimeEnv.ROOMOTE_CODE_REVIEW_MODEL_REASONING_EFFORT;
-  delete runtimeEnv.ROOMOTE_EXPLORE_MODEL_REASONING_EFFORT;
-  delete runtimeEnv.ROOMOTE_PLANNING_MODEL_REASONING_EFFORT;
-  delete runtimeEnv.ROOMOTE_MODEL_ENV_KEYS;
+  delete runtimeEnv.R_MODEL;
+  delete runtimeEnv.R_SMALL_MODEL;
+  delete runtimeEnv.R_VISION_MODEL;
+  delete runtimeEnv.R_CODE_REVIEW_MODEL;
+  delete runtimeEnv.R_EXPLORE_MODEL;
+  delete runtimeEnv.R_PLANNING_MODEL;
+  delete runtimeEnv.R_MODEL_REASONING_EFFORT;
+  delete runtimeEnv.R_SMALL_MODEL_REASONING_EFFORT;
+  delete runtimeEnv.R_VISION_MODEL_REASONING_EFFORT;
+  delete runtimeEnv.R_CODE_REVIEW_MODEL_REASONING_EFFORT;
+  delete runtimeEnv.R_EXPLORE_MODEL_REASONING_EFFORT;
+  delete runtimeEnv.R_PLANNING_MODEL_REASONING_EFFORT;
+  delete runtimeEnv.R_MODEL_ENV_KEYS;
 
   const visualAgent =
     visionModel && visionModel !== effectiveCodingModel
@@ -985,7 +985,7 @@ function loadOperatorOpenCodeConfig({
   }
 
   throw new Error(
-    'Model configuration is required. Set ROOMOTE_MODEL to a provider/model ID. Set ROOMOTE_SMALL_MODEL when routing and title generation should use a different small model.',
+    'Model configuration is required. Set R_MODEL to a provider/model ID. Set R_SMALL_MODEL when routing and title generation should use a different small model.',
   );
 }
 

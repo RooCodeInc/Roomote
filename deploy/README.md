@@ -122,9 +122,9 @@ The file must include the required production values from
 - `ENCRYPTION_KEY`
 - `ARTIFACT_SIGNING_KEY`
 - `DASHBOARD_PASSWORD`
-- `NEXT_PUBLIC_GITHUB_APP_SLUG`
+- `R_GITHUB_APP_SLUG`
 
-Model provider values such as `ROOMOTE_MODEL` and `ROOMOTE_SMALL_MODEL` are
+Model provider values such as `R_MODEL` and `R_SMALL_MODEL` are
 optional env-level overrides. Leave them unset when task models are managed
 through Roomote runtime settings.
 
@@ -187,7 +187,7 @@ openssl rand -base64 32 # ARTIFACT_SIGNING_KEY
 openssl rand -base64 24 # DASHBOARD_PASSWORD
 ```
 
-`GITHUB_APP_PRIVATE_KEY` is the exception: download it from the GitHub App
+`R_GITHUB_APP_PRIVATE_KEY` is the exception: download it from the GitHub App
 settings page and store the raw PEM with newlines escaped as `\n`, not as
 base64.
 

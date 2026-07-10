@@ -23,47 +23,45 @@ function filterWorkerExtraEnv(
 }
 
 function getOperatorModelProviderEnvKeys(): string[] {
-  const configured = parseModelProviderEnvKeys(
-    process.env.ROOMOTE_MODEL_ENV_KEYS,
-  );
+  const configured = parseModelProviderEnvKeys(process.env.R_MODEL_ENV_KEYS);
 
   return [...new Set([...DEFAULT_MODEL_PROVIDER_ENV_KEYS, ...configured])];
 }
 
 function buildOperatorModelProviderEnv(): Record<string, string> {
   const env: Record<string, string> = {};
-  const model = process.env.ROOMOTE_MODEL?.trim();
-  const smallModel = process.env.ROOMOTE_SMALL_MODEL?.trim();
-  const visionModel = process.env.ROOMOTE_VISION_MODEL?.trim();
-  const codeReviewModel = process.env.ROOMOTE_CODE_REVIEW_MODEL?.trim();
-  const exploreModel = process.env.ROOMOTE_EXPLORE_MODEL?.trim();
+  const model = process.env.R_MODEL?.trim();
+  const smallModel = process.env.R_SMALL_MODEL?.trim();
+  const visionModel = process.env.R_VISION_MODEL?.trim();
+  const codeReviewModel = process.env.R_CODE_REVIEW_MODEL?.trim();
+  const exploreModel = process.env.R_EXPLORE_MODEL?.trim();
 
   if (model) {
-    env.ROOMOTE_MODEL = model;
+    env.R_MODEL = model;
   }
 
   if (smallModel) {
-    env.ROOMOTE_SMALL_MODEL = smallModel;
+    env.R_SMALL_MODEL = smallModel;
   }
 
   if (visionModel) {
-    env.ROOMOTE_VISION_MODEL = visionModel;
+    env.R_VISION_MODEL = visionModel;
   }
 
   if (codeReviewModel) {
-    env.ROOMOTE_CODE_REVIEW_MODEL = codeReviewModel;
+    env.R_CODE_REVIEW_MODEL = codeReviewModel;
   }
 
   if (exploreModel) {
-    env.ROOMOTE_EXPLORE_MODEL = exploreModel;
+    env.R_EXPLORE_MODEL = exploreModel;
   }
 
   for (const key of [
-    'ROOMOTE_MODEL_REASONING_EFFORT',
-    'ROOMOTE_SMALL_MODEL_REASONING_EFFORT',
-    'ROOMOTE_VISION_MODEL_REASONING_EFFORT',
-    'ROOMOTE_CODE_REVIEW_MODEL_REASONING_EFFORT',
-    'ROOMOTE_EXPLORE_MODEL_REASONING_EFFORT',
+    'R_MODEL_REASONING_EFFORT',
+    'R_SMALL_MODEL_REASONING_EFFORT',
+    'R_VISION_MODEL_REASONING_EFFORT',
+    'R_CODE_REVIEW_MODEL_REASONING_EFFORT',
+    'R_EXPLORE_MODEL_REASONING_EFFORT',
   ] as const) {
     const value = process.env[key]?.trim();
 
@@ -72,8 +70,8 @@ function buildOperatorModelProviderEnv(): Record<string, string> {
     }
   }
 
-  if (process.env.ROOMOTE_MODEL_ENV_KEYS?.trim()) {
-    env.ROOMOTE_MODEL_ENV_KEYS = process.env.ROOMOTE_MODEL_ENV_KEYS;
+  if (process.env.R_MODEL_ENV_KEYS?.trim()) {
+    env.R_MODEL_ENV_KEYS = process.env.R_MODEL_ENV_KEYS;
   }
 
   for (const key of getOperatorModelProviderEnvKeys()) {
@@ -106,12 +104,12 @@ export function buildBaseWorkerEnv({
     // deploy context, not necessarily the environment the worker should
     // operate in.
     ...(process.env.APP_ENV && {
-      ROOMOTE_APP_ENV: process.env.APP_ENV,
+      R_APP_ENV: process.env.APP_ENV,
     }),
     ...(sandboxExpiresAtMs !== undefined && {
       SANDBOX_EXPIRES_AT_MS: String(sandboxExpiresAtMs),
     }),
-    ROOMOTE_APP_URL: Env.ROOMOTE_APP_URL,
+    R_APP_URL: Env.R_APP_URL,
     TRPC_URL: Env.TRPC_URL,
     SKIP_ENV_VALIDATION: '1',
     // These are launcher-to-worker transport values. Keep them tied to the

@@ -14,7 +14,7 @@ let cachedSigningSecret: {
  * webhook verification path does not hit the database on every event.
  */
 export async function resolveSlackSigningSecret(): Promise<string | null> {
-  const fromEnv = process.env.SLACK_SIGNING_SECRET?.trim();
+  const fromEnv = process.env.R_SLACK_SIGNING_SECRET?.trim();
 
   if (fromEnv) {
     return fromEnv;
@@ -27,7 +27,7 @@ export async function resolveSlackSigningSecret(): Promise<string | null> {
   }
 
   const deploymentEnvVars = await resolveEffectiveDeploymentEnvVars();
-  const value = deploymentEnvVars.SLACK_SIGNING_SECRET?.trim() || null;
+  const value = deploymentEnvVars.R_SLACK_SIGNING_SECRET?.trim() || null;
 
   cachedSigningSecret = { value, expiresAtMs: nowMs + CACHE_TTL_MS };
 

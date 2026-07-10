@@ -8,9 +8,9 @@ const { envMock, mockBootstrapWebRuntimeEnv, mockIsWebServerBindExposed } =
   vi.hoisted(() => ({
     envMock: {
       APP_ENV: 'development',
-      ROOMOTE_APP_URL: 'http://localhost:3000',
+      R_APP_URL: 'http://localhost:3000',
       WEB_DEV_LOGIN_EMAIL: 'local@roomote.dev',
-      ROOMOTE_ALLOWED_EMAILS: undefined as string | undefined,
+      R_ALLOWED_EMAILS: undefined as string | undefined,
       ENCRYPTION_KEY: 'local-roomote-encryption-key-0001',
     },
     mockBootstrapWebRuntimeEnv: vi.fn(),
@@ -70,9 +70,9 @@ describe('GET /auth/dev-login', () => {
   beforeEach(async () => {
     vi.clearAllMocks();
     envMock.APP_ENV = 'development';
-    envMock.ROOMOTE_APP_URL = 'http://localhost:3000';
+    envMock.R_APP_URL = 'http://localhost:3000';
     envMock.WEB_DEV_LOGIN_EMAIL = 'local@roomote.dev';
-    envMock.ROOMOTE_ALLOWED_EMAILS = undefined;
+    envMock.R_ALLOWED_EMAILS = undefined;
     mockIsWebServerBindExposed.mockReturnValue(false);
     await deleteDevLoginRows();
   });
@@ -144,7 +144,7 @@ describe('GET /auth/dev-login', () => {
   });
 
   it('rejects a dev login email that is outside the Roomote allowlist', async () => {
-    envMock.ROOMOTE_ALLOWED_EMAILS = 'someone-else@example.com';
+    envMock.R_ALLOWED_EMAILS = 'someone-else@example.com';
 
     const response = await GET(
       new NextRequest('http://localhost:3000/auth/dev-login', {

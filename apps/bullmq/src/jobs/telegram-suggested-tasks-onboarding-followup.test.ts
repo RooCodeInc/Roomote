@@ -3,7 +3,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const { envMock, getSettingsMock, postMessageMock } = vi.hoisted(() => ({
   envMock: {
-    ROOMOTE_APP_URL: 'https://app.example.com',
+    R_APP_URL: 'https://app.example.com',
     TELEGRAM_BOT_TOKEN: 'bot-token' as string | undefined,
   },
   getSettingsMock: vi.fn(),

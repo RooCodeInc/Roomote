@@ -229,9 +229,9 @@ export async function createInviteCommand(
     inviteId: invite.id,
     // The raw token is only available at creation time; the list endpoint
     // can never reconstruct the link. Build on the public origin: in local
-    // dev ROOMOTE_APP_URL is plain-http localhost, which invitees cannot
+    // dev R_APP_URL is plain-http localhost, which invitees cannot
     // reach and which HTTPS-first browsers refuse to load.
-    url: buildInviteUrl(Env.ROOMOTE_PUBLIC_URL ?? Env.ROOMOTE_APP_URL, token),
+    url: buildInviteUrl(Env.R_PUBLIC_URL ?? Env.R_APP_URL, token),
   };
 }
 

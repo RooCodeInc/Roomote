@@ -1,24 +1,27 @@
-import { buildSetupSourceControlStatus } from './setup-source-control-config';
+import {
+  SETUP_SOURCE_CONTROL_PROVIDER_CATALOG,
+  buildSetupSourceControlStatus,
+} from './setup-source-control-config';
 
 describe('buildSetupSourceControlStatus', () => {
   it('returns plain-text savedValue for non-secret fields only', () => {
     const status = buildSetupSourceControlStatus({
       runtimeEnv: {
-        NEXT_PUBLIC_GITHUB_APP_SLUG: 'runtime-slug',
-        GITHUB_APP_ID: '123',
-        GITHUB_APP_PRIVATE_KEY: 'runtime-private-key',
+        R_GITHUB_APP_SLUG: 'runtime-slug',
+        R_GITHUB_APP_ID: '123',
+        R_GITHUB_APP_PRIVATE_KEY: 'runtime-private-key',
       },
       persistedEnvVarNames: [
-        'NEXT_PUBLIC_GITHUB_APP_SLUG',
-        'GITHUB_APP_ID',
-        'GITHUB_APP_PRIVATE_KEY',
-        'GITHUB_CLIENT_ID',
+        'R_GITHUB_APP_SLUG',
+        'R_GITHUB_APP_ID',
+        'R_GITHUB_APP_PRIVATE_KEY',
+        'R_GITHUB_CLIENT_ID',
       ],
       persistedEnvVarValues: {
-        NEXT_PUBLIC_GITHUB_APP_SLUG: 'saved-slug',
-        GITHUB_APP_ID: '999',
-        GITHUB_APP_PRIVATE_KEY: 'should-never-surface',
-        GITHUB_CLIENT_ID: 'saved-client-id',
+        R_GITHUB_APP_SLUG: 'saved-slug',
+        R_GITHUB_APP_ID: '999',
+        R_GITHUB_APP_PRIVATE_KEY: 'should-never-surface',
+        R_GITHUB_CLIENT_ID: 'saved-client-id',
       },
     });
     const github = status.providers.find(
@@ -27,16 +30,16 @@ describe('buildSetupSourceControlStatus', () => {
 
     expect(
       github?.fields.find(
-        (field) => field.envVarName === 'NEXT_PUBLIC_GITHUB_APP_SLUG',
+        (field) => field.envVarName === 'R_GITHUB_APP_SLUG',
       )?.savedValue,
     ).toBe('runtime-slug');
     expect(
-      github?.fields.find((field) => field.envVarName === 'GITHUB_CLIENT_ID')
+      github?.fields.find((field) => field.envVarName === 'R_GITHUB_CLIENT_ID')
         ?.savedValue,
     ).toBe('saved-client-id');
     expect(
       github?.fields.find(
-        (field) => field.envVarName === 'GITHUB_APP_PRIVATE_KEY',
+        (field) => field.envVarName === 'R_GITHUB_APP_PRIVATE_KEY',
       )?.savedValue,
     ).toBeNull();
   });
@@ -44,12 +47,12 @@ describe('buildSetupSourceControlStatus', () => {
   it('counts a provider as setup-complete only when connected with repositories', () => {
     const status = buildSetupSourceControlStatus({
       runtimeEnv: {
-        GITHUB_APP_ID: '123',
-        GITHUB_APP_PRIVATE_KEY: 'private-key',
-        GITHUB_CLIENT_ID: 'client-id',
-        GITHUB_CLIENT_SECRET: 'client-secret',
-        GITHUB_WEBHOOK_SECRET: 'webhook-secret',
-        NEXT_PUBLIC_GITHUB_APP_SLUG: 'roomote',
+        R_GITHUB_APP_ID: '123',
+        R_GITHUB_APP_PRIVATE_KEY: 'private-key',
+        R_GITHUB_CLIENT_ID: 'client-id',
+        R_GITHUB_CLIENT_SECRET: 'client-secret',
+        R_GITHUB_WEBHOOK_SECRET: 'webhook-secret',
+        R_GITHUB_APP_SLUG: 'roomote',
       },
       connectedProviders: ['github'],
       repositoryCounts: { github: 4 },
@@ -157,12 +160,12 @@ describe('buildSetupSourceControlStatus', () => {
   it('resolves multiple runtime-configured providers by source-control priority', () => {
     const status = buildSetupSourceControlStatus({
       runtimeEnv: {
-        GITHUB_APP_ID: '123',
-        GITHUB_APP_PRIVATE_KEY: 'private-key',
-        GITHUB_CLIENT_ID: 'client-id',
-        GITHUB_CLIENT_SECRET: 'client-secret',
-        GITHUB_WEBHOOK_SECRET: 'webhook-secret',
-        NEXT_PUBLIC_GITHUB_APP_SLUG: 'roomote',
+        R_GITHUB_APP_ID: '123',
+        R_GITHUB_APP_PRIVATE_KEY: 'private-key',
+        R_GITHUB_CLIENT_ID: 'client-id',
+        R_GITHUB_CLIENT_SECRET: 'client-secret',
+        R_GITHUB_WEBHOOK_SECRET: 'webhook-secret',
+        R_GITHUB_APP_SLUG: 'roomote',
         GITLAB_TOKEN: 'gitlab-token',
       },
     });
@@ -292,18 +295,18 @@ describe('buildSetupSourceControlStatus', () => {
     });
   });
 
-  it('resolves saved satisfaction through accepted env var aliases', () => {
+  it('resolves saved satisfaction through canonical env var names', () => {
     const status = buildSetupSourceControlStatus({
-      persistedEnvVarNames: ['GITHUB_APP_SLUG'],
+      persistedEnvVarNames: ['R_GITHUB_APP_SLUG'],
     });
 
     const github = status.providers.find((p) => p.provider === 'github');
     const slugField = github?.fields.find(
-      (f) => f.envVarName === 'NEXT_PUBLIC_GITHUB_APP_SLUG',
+      (f) => f.envVarName === 'R_GITHUB_APP_SLUG',
     );
     expect(slugField).toMatchObject({
       savedSatisfied: true,
-      satisfiedByEnvVarName: 'GITHUB_APP_SLUG',
+      satisfiedByEnvVarName: 'R_GITHUB_APP_SLUG',
     });
   });
 
@@ -314,6 +317,14 @@ describe('buildSetupSourceControlStatus', () => {
     });
 
     expect(status.connectedProvider).toBe('github');
+  });
+
+  it('does not accept env var aliases in setup fields', () => {
+    for (const provider of SETUP_SOURCE_CONTROL_PROVIDER_CATALOG) {
+      for (const field of provider.fields) {
+        expect(field.acceptedEnvVarNames).toEqual([field.envVarName]);
+      }
+    }
   });
 
   it('reports setup satisfied by runtime env when the connected provider is runtime-configured', () => {

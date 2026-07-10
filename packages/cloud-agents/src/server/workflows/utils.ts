@@ -27,7 +27,7 @@ import { Schemas } from '@roomote/github';
 import { buildSlackThreadPromptBlocks } from '../../utils';
 import type { ResolvedTaskCommitAuthor } from '../commit-author';
 
-const DEFAULT_GITHUB_APP_SLUG = 'roomote';
+const DEFAULT_R_GITHUB_APP_SLUG = 'roomote';
 
 export function resolveConflictResolverLabel(
   conflictResolverLabel?: string,
@@ -52,7 +52,7 @@ export function getPrBodyAttributionLine({
   teamsMessageId,
   teamsTenantId,
   teamsBotAppId,
-  githubAppSlug = Env.NEXT_PUBLIC_GITHUB_APP_SLUG,
+  githubAppSlug = Env.R_GITHUB_APP_SLUG,
   escapeDoubleQuotes = false,
 }: {
   attribution: ResolvedTaskCommitAuthor;
@@ -180,7 +180,7 @@ function buildPrBodyAttributionLine({
     ? escapeValue(resolvedSlackConversationUrl)
     : undefined;
   const appMention = getGitHubAppMention(
-    githubAppSlug?.trim() || DEFAULT_GITHUB_APP_SLUG,
+    githubAppSlug?.trim() || DEFAULT_R_GITHUB_APP_SLUG,
   );
   const isChatSurface =
     taskSurface === 'slack' ||
@@ -566,7 +566,7 @@ function isRoomoteIssueCommentAuthor(user: {
 }): boolean {
   const normalizedLogin = user.login.toLowerCase();
   const appSlugs = new Set([
-    (Env.NEXT_PUBLIC_GITHUB_APP_SLUG || DEFAULT_GITHUB_APP_SLUG).toLowerCase(),
+    (Env.R_GITHUB_APP_SLUG || DEFAULT_R_GITHUB_APP_SLUG).toLowerCase(),
     'roomote',
     'roomote-dev',
   ]);

@@ -85,8 +85,8 @@ swap_size_mb = 512
   EXCLUDED_COMPUTE_PROVIDERS = 'docker'
   # The single canonical-origin knob: the URL users browse. To attach a
   # custom domain, add the cert to this app and change only this value
-  # (ROOMOTE_PUBLIC_URL stays unset; the app falls back to ROOMOTE_APP_URL).
-  ROOMOTE_APP_URL = 'https://roomote-CHANGEME.fly.dev'
+  # (R_PUBLIC_URL stays unset; the app falls back to R_APP_URL).
+  R_APP_URL = 'https://roomote-CHANGEME.fly.dev'
   # Hosted-sandbox workers and GitHub webhooks call this origin directly;
   # it is the api service on port 8443 of the same Fly hostname.
   TRPC_URL = 'https://roomote-CHANGEME.fly.dev:8443'

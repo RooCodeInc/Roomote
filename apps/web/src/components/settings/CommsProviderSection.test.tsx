@@ -336,16 +336,16 @@ function buildSlackProvider(
     label: 'Slack',
     fields: [
       {
-        envVarName: 'SLACK_CLIENT_ID',
-        acceptedEnvVarNames: ['SLACK_CLIENT_ID'],
+        envVarName: 'R_SLACK_CLIENT_ID',
+        acceptedEnvVarNames: ['R_SLACK_CLIENT_ID'],
         label: 'Slack Client ID',
         runtimeSatisfied: false,
         savedSatisfied: false,
         satisfiedByEnvVarName: null,
       },
       {
-        envVarName: 'SLACK_CLIENT_SECRET',
-        acceptedEnvVarNames: ['SLACK_CLIENT_SECRET'],
+        envVarName: 'R_SLACK_CLIENT_SECRET',
+        acceptedEnvVarNames: ['R_SLACK_CLIENT_SECRET'],
         label: 'Slack Client Secret',
         secret: true,
         runtimeSatisfied: false,
@@ -353,8 +353,8 @@ function buildSlackProvider(
         satisfiedByEnvVarName: null,
       },
       {
-        envVarName: 'SLACK_SIGNING_SECRET',
-        acceptedEnvVarNames: ['SLACK_SIGNING_SECRET'],
+        envVarName: 'R_SLACK_SIGNING_SECRET',
+        acceptedEnvVarNames: ['R_SLACK_SIGNING_SECRET'],
         label: 'Slack Signing Secret',
         secret: true,
         runtimeSatisfied: false,
@@ -377,16 +377,16 @@ function buildMicrosoftProvider(
     label: 'Microsoft Teams',
     fields: [
       {
-        envVarName: 'ROOMOTE_AUTH_MICROSOFT_CLIENT_ID',
-        acceptedEnvVarNames: ['ROOMOTE_AUTH_MICROSOFT_CLIENT_ID'],
+        envVarName: 'R_MICROSOFT_CLIENT_ID',
+        acceptedEnvVarNames: ['R_MICROSOFT_CLIENT_ID'],
         label: 'Microsoft Client ID',
         runtimeSatisfied: false,
         savedSatisfied: false,
         satisfiedByEnvVarName: null,
       },
       {
-        envVarName: 'ROOMOTE_AUTH_MICROSOFT_CLIENT_SECRET',
-        acceptedEnvVarNames: ['ROOMOTE_AUTH_MICROSOFT_CLIENT_SECRET'],
+        envVarName: 'R_MICROSOFT_CLIENT_SECRET',
+        acceptedEnvVarNames: ['R_MICROSOFT_CLIENT_SECRET'],
         label: 'Microsoft Client Secret',
         secret: true,
         runtimeSatisfied: false,
@@ -394,24 +394,24 @@ function buildMicrosoftProvider(
         satisfiedByEnvVarName: null,
       },
       {
-        envVarName: 'ROOMOTE_AUTH_MICROSOFT_TENANT_ID',
-        acceptedEnvVarNames: ['ROOMOTE_AUTH_MICROSOFT_TENANT_ID'],
+        envVarName: 'R_MICROSOFT_TENANT_ID',
+        acceptedEnvVarNames: ['R_MICROSOFT_TENANT_ID'],
         label: 'Microsoft Tenant ID',
         runtimeSatisfied: false,
         savedSatisfied: false,
         satisfiedByEnvVarName: null,
       },
       {
-        envVarName: 'TEAMS_BOT_APP_ID',
-        acceptedEnvVarNames: ['TEAMS_BOT_APP_ID'],
+        envVarName: 'R_TEAMS_BOT_APP_ID',
+        acceptedEnvVarNames: ['R_TEAMS_BOT_APP_ID'],
         label: 'Teams Bot App ID',
         runtimeSatisfied: false,
         savedSatisfied: false,
         satisfiedByEnvVarName: null,
       },
       {
-        envVarName: 'TEAMS_BOT_APP_PASSWORD',
-        acceptedEnvVarNames: ['TEAMS_BOT_APP_PASSWORD'],
+        envVarName: 'R_TEAMS_BOT_APP_PASSWORD',
+        acceptedEnvVarNames: ['R_TEAMS_BOT_APP_PASSWORD'],
         label: 'Teams Bot App Password',
         secret: true,
         runtimeSatisfied: false,
@@ -419,24 +419,24 @@ function buildMicrosoftProvider(
         satisfiedByEnvVarName: null,
       },
       {
-        envVarName: 'TEAMS_BOT_TENANT_ID',
-        acceptedEnvVarNames: ['TEAMS_BOT_TENANT_ID'],
+        envVarName: 'R_TEAMS_BOT_TENANT_ID',
+        acceptedEnvVarNames: ['R_TEAMS_BOT_TENANT_ID'],
         label: 'Teams Bot Tenant ID',
         runtimeSatisfied: false,
         savedSatisfied: false,
         satisfiedByEnvVarName: null,
       },
       {
-        envVarName: 'TEAMS_BOT_TOKEN_ENDPOINT',
-        acceptedEnvVarNames: ['TEAMS_BOT_TOKEN_ENDPOINT'],
+        envVarName: 'R_TEAMS_BOT_TOKEN_ENDPOINT',
+        acceptedEnvVarNames: ['R_TEAMS_BOT_TOKEN_ENDPOINT'],
         label: 'Teams Bot Token Endpoint',
         runtimeSatisfied: false,
         savedSatisfied: false,
         satisfiedByEnvVarName: null,
       },
       {
-        envVarName: 'TEAMS_BOT_OAUTH_SCOPE',
-        acceptedEnvVarNames: ['TEAMS_BOT_OAUTH_SCOPE'],
+        envVarName: 'R_TEAMS_BOT_OAUTH_SCOPE',
+        acceptedEnvVarNames: ['R_TEAMS_BOT_OAUTH_SCOPE'],
         label: 'Teams Bot OAuth Scope',
         runtimeSatisfied: false,
         savedSatisfied: false,
@@ -811,11 +811,11 @@ describe('CommsProviderSection', () => {
       );
 
       expect(
-        screen.getByText(/TEAMS_BOT_APP_ID and TEAMS_BOT_APP_PASSWORD/),
+        screen.getByText(/R_TEAMS_BOT_APP_ID and R_TEAMS_BOT_APP_PASSWORD/),
       ).toBeInTheDocument();
     });
 
-    it('shows bot status and app-package download when only TEAMS_BOT_* is configured (no Microsoft sign-in)', () => {
+    it('shows bot status and app-package download when only R_TEAMS_BOT_* is configured (no Microsoft sign-in)', () => {
       state.teamsStatus = {
         botConfigured: true,
         botUsesTenantSpecificTokenFlow: true,

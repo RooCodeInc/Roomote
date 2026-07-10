@@ -13,7 +13,7 @@ import {
 } from '../utils';
 
 const originalTrpcUrl = process.env.TRPC_URL;
-const originalRoomoteAppUrl = process.env.ROOMOTE_APP_URL;
+const originalRoomoteAppUrl = process.env.R_APP_URL;
 const originalPreviewProxyBaseUrl = process.env.PREVIEW_PROXY_BASE_URL;
 const originalPreviewDomains = process.env.PREVIEW_DOMAINS;
 const originalRoomotePreviewDomain = process.env.ROOMOTE_PREVIEW_DOMAIN;
@@ -90,7 +90,7 @@ describe('getNamedPortsForTaskRun', () => {
       },
     });
     delete process.env.TRPC_URL;
-    delete process.env.ROOMOTE_APP_URL;
+    delete process.env.R_APP_URL;
     process.env.PREVIEW_PROXY_BASE_URL = 'https://preview.roomote.test';
     process.env.PREVIEW_DOMAINS = 'preview.roomote.test';
     delete process.env.ROOMOTE_PREVIEW_DOMAIN;
@@ -104,9 +104,9 @@ describe('getNamedPortsForTaskRun', () => {
     }
 
     if (originalRoomoteAppUrl === undefined) {
-      delete process.env.ROOMOTE_APP_URL;
+      delete process.env.R_APP_URL;
     } else {
-      process.env.ROOMOTE_APP_URL = originalRoomoteAppUrl;
+      process.env.R_APP_URL = originalRoomoteAppUrl;
     }
 
     if (originalPreviewProxyBaseUrl === undefined) {
@@ -244,7 +244,7 @@ describe('getNamedPortsForTaskRun', () => {
 
   it('does not expose callback ports from loopback controller URLs', async () => {
     process.env.TRPC_URL = 'http://127.0.0.1:3001';
-    process.env.ROOMOTE_APP_URL = 'http://localhost:3000';
+    process.env.R_APP_URL = 'http://localhost:3000';
     vi.mocked(db.query.environments.findFirst).mockResolvedValue({
       id: 'env-123',
       config: mockEnvironmentConfig(),

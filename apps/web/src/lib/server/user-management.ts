@@ -189,10 +189,7 @@ export async function removeUser({
 }
 
 function getPasswordResetRedirectUrl(): string {
-  return new URL(
-    '/reset-password',
-    Env.ROOMOTE_PUBLIC_URL ?? Env.ROOMOTE_APP_URL,
-  ).href;
+  return new URL('/reset-password', Env.R_PUBLIC_URL ?? Env.R_APP_URL).href;
 }
 
 export async function createPasswordResetLinkForUser({

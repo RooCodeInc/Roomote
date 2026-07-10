@@ -223,8 +223,8 @@ export async function spawnDockerWorker(
             process.env.SLACK_API_BASE_URL,
           ),
         }),
-        ROOMOTE_APP_URL: toContainerReachableUrl(
-          process.env.ROOMOTE_APP_URL ?? Env.ROOMOTE_APP_URL,
+        R_APP_URL: toContainerReachableUrl(
+          process.env.R_APP_URL ?? Env.R_APP_URL,
         ),
         ...(resolvedPreviewRuntimeConfig.effective.previewProxyBaseUrl && {
           PREVIEW_PROXY_BASE_URL:

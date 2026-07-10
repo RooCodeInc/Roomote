@@ -65,7 +65,7 @@ const TELEGRAM_WEBHOOK_REQUIRED_UPDATES = ['message', 'callback_query'];
 const TELEGRAM_BOT_API_TIMEOUT_MS = 5_000;
 
 function buildExpectedTelegramWebhookUrl(): string {
-  return new URL('/api/webhooks/telegram', Env.ROOMOTE_APP_URL).toString();
+  return new URL('/api/webhooks/telegram', Env.R_APP_URL).toString();
 }
 
 function createTelegramBotApiFetch(): typeof fetch {

@@ -21,7 +21,7 @@ export function resolveAppEnv(
   env: NodeJS.ProcessEnv = process.env,
   fallback: AppEnv = 'development',
 ): AppEnv {
-  const candidates = [env.APP_ENV, env.ROOMOTE_APP_ENV];
+  const candidates = [env.R_APP_ENV];
 
   for (const candidate of candidates) {
     const normalized = normalizeAppEnvCandidate(candidate);
@@ -72,9 +72,7 @@ export function getDefaultRoomoteAppUrl(appEnv: AppEnv): string {
     return 'http://localhost:13000';
   }
 
-  throw new Error(
-    `ROOMOTE_APP_URL must be configured explicitly for ${appEnv}`,
-  );
+  throw new Error(`R_APP_URL must be configured explicitly for ${appEnv}`);
 }
 
 export function getDefaultTrpcUrl(appEnv: AppEnv): string {

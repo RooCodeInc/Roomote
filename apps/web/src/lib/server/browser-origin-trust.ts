@@ -1,7 +1,7 @@
 import { getBetterAuthBaseUrlConfig } from './better-auth-base-url';
 
 export interface BrowserOriginAssessment {
-  /** The origin this deployment treats as canonical (from ROOMOTE_APP_URL). */
+  /** The origin this deployment treats as canonical (from R_APP_URL). */
   canonicalOrigin: string;
   /**
    * Whether the auth layer would accept requests from the given browser

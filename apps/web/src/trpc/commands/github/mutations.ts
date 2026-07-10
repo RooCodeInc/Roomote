@@ -122,12 +122,12 @@ function getUnauthorizedResult() {
 const GITHUB_APP_MANIFEST_TARGET = 'https://github.com/settings/apps/new';
 const GITHUB_API_VERSION = '2022-11-28';
 const GITHUB_APP_REQUIRED_CREDENTIAL_GROUPS = [
-  ['NEXT_PUBLIC_GITHUB_APP_SLUG', 'GITHUB_APP_SLUG'],
-  ['GITHUB_APP_ID'],
-  ['GITHUB_APP_PRIVATE_KEY'],
-  ['GITHUB_CLIENT_ID'],
-  ['GITHUB_CLIENT_SECRET'],
-  ['GITHUB_WEBHOOK_SECRET'],
+  ['R_GITHUB_APP_SLUG'],
+  ['R_GITHUB_APP_ID'],
+  ['R_GITHUB_APP_PRIVATE_KEY'],
+  ['R_GITHUB_CLIENT_ID'],
+  ['R_GITHUB_CLIENT_SECRET'],
+  ['R_GITHUB_WEBHOOK_SECRET'],
 ] as const;
 
 // GitHub logins are 1-39 characters of alphanumerics and hyphens, without
@@ -159,14 +159,11 @@ function resolveGitHubAppManifestTarget(
 }
 
 async function resolveGitHubAppSlug(): Promise<string | null> {
-  const [publicSlug, privateSlug] = await Promise.all([
-    resolveDeploymentEnvVar('NEXT_PUBLIC_GITHUB_APP_SLUG'),
-    resolveDeploymentEnvVar('GITHUB_APP_SLUG'),
-  ]);
+  const slug = await resolveDeploymentEnvVar('R_GITHUB_APP_SLUG');
 
   // Do not fall back to the hosted product slug (`roomote`). Unconfigured
   // deployments must create or enter their own app credentials first.
-  return publicSlug?.trim() || privateSlug?.trim() || null;
+  return slug?.trim() || null;
 }
 
 async function isGitHubAppConfigured(): Promise<boolean> {
@@ -187,13 +184,13 @@ const GITHUB_APP_NOT_CONFIGURED_ERROR =
   'Configure a GitHub App for this deployment before installing. Create one or enter its credentials first.';
 
 function getGitHubCallbackUrl() {
-  return new URL('/github/callback', Env.ROOMOTE_APP_URL).toString();
+  return new URL('/github/callback', Env.R_APP_URL).toString();
 }
 
 function getGitHubWebhookUrl() {
   const trpcUrl = new URL(Env.TRPC_URL);
   const webhookBaseUrl = isLoopbackHostname(trpcUrl.hostname)
-    ? Env.ROOMOTE_APP_URL
+    ? Env.R_APP_URL
     : Env.TRPC_URL;
 
   return new URL('/api/webhooks/github', webhookBaseUrl).toString();
@@ -204,7 +201,7 @@ function buildGitHubManifestName() {
   const GITHUB_APP_NAME_MAX_LENGTH = 34;
   const prefix = 'roomote-';
 
-  const host = new URL(Env.ROOMOTE_APP_URL).hostname
+  const host = new URL(Env.R_APP_URL).hostname
     .replace(/[^a-zA-Z0-9-]+/g, '-')
     .replace(/^-+|-+$/g, '');
 
@@ -285,12 +282,12 @@ function parseManifestConversionResponse(
   return {
     success: true,
     values: [
-      { name: 'GITHUB_APP_ID', value: id },
-      { name: 'GITHUB_APP_PRIVATE_KEY', value: privateKey },
-      { name: 'GITHUB_CLIENT_ID', value: clientId },
-      { name: 'GITHUB_CLIENT_SECRET', value: clientSecret },
-      { name: 'GITHUB_WEBHOOK_SECRET', value: webhookSecret },
-      { name: 'NEXT_PUBLIC_GITHUB_APP_SLUG', value: slug },
+      { name: 'R_GITHUB_APP_ID', value: id },
+      { name: 'R_GITHUB_APP_PRIVATE_KEY', value: privateKey },
+      { name: 'R_GITHUB_CLIENT_ID', value: clientId },
+      { name: 'R_GITHUB_CLIENT_SECRET', value: clientSecret },
+      { name: 'R_GITHUB_WEBHOOK_SECRET', value: webhookSecret },
+      { name: 'R_GITHUB_APP_SLUG', value: slug },
     ],
   };
 }
@@ -344,8 +341,8 @@ async function getGitHubOAuthUser({
   | { success: false; error: string }
 > {
   const params = new URLSearchParams({
-    client_id: Env.GITHUB_CLIENT_ID,
-    client_secret: Env.GITHUB_CLIENT_SECRET,
+    client_id: Env.R_GITHUB_CLIENT_ID,
+    client_secret: Env.R_GITHUB_CLIENT_SECRET,
     code,
   });
 
@@ -488,7 +485,7 @@ export async function startCreateGitHubInstallationCommand(
     };
   }
 
-  const baseUrl = Env.ROOMOTE_APP_URL;
+  const baseUrl = Env.R_APP_URL;
   const params = new URLSearchParams();
 
   if (state) {
@@ -778,9 +775,9 @@ export async function startAuthenticateGitHubAccountCommand(
   state?: Record<string, string>,
 ): Promise<{ success: true; url: string } | { success: false; error: string }> {
   try {
-    const baseUrl = Env.ROOMOTE_APP_URL;
+    const baseUrl = Env.R_APP_URL;
     const params = new URLSearchParams({
-      client_id: Env.GITHUB_CLIENT_ID,
+      client_id: Env.R_GITHUB_CLIENT_ID,
       scope: 'read:user',
       state: encodeRecord({ ...(state ?? {}), mode: 'auth' }),
     });

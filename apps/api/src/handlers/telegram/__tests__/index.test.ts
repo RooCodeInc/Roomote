@@ -46,7 +46,7 @@ const {
   environmentsFindFirstMock: vi.fn(),
   getAvailableEnvironmentsMock: vi.fn(),
   envMock: {
-    ROOMOTE_APP_URL: 'https://app.example.com',
+    R_APP_URL: 'https://app.example.com',
     TELEGRAM_BOT_TOKEN: 'bot-token' as string | undefined,
     TELEGRAM_BOT_USERNAME: 'roomote_bot' as string | undefined,
     TELEGRAM_WEBHOOK_SECRET: 'secret' as string | undefined,
@@ -329,7 +329,7 @@ describe('Telegram webhook handler', () => {
     telegramMappingsFindFirstMock.mockReset();
     consumeLinkCodeMock.mockReset();
 
-    envMock.ROOMOTE_APP_URL = 'https://app.example.com';
+    envMock.R_APP_URL = 'https://app.example.com';
     envMock.TELEGRAM_BOT_TOKEN = 'bot-token';
     envMock.TELEGRAM_BOT_USERNAME = 'roomote_bot';
     envMock.TELEGRAM_WEBHOOK_SECRET = 'secret';

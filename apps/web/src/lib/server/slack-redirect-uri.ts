@@ -8,8 +8,5 @@ export function getSlackRedirectUri(): string {
     return configuredUri;
   }
 
-  return new URL(
-    SLACK_APP_INSTALL_CALLBACK_PATH,
-    Env.ROOMOTE_APP_URL,
-  ).toString();
+  return new URL(SLACK_APP_INSTALL_CALLBACK_PATH, Env.R_APP_URL).toString();
 }

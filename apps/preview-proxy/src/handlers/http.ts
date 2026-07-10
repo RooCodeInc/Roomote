@@ -134,7 +134,7 @@ function buildAuthRedirectUrl(
 ): string {
   const redirectUri = `${protocol}://${host}/auth/callback`;
 
-  const authUrl = new URL('/api/auth/preview', config.ROOMOTE_APP_URL);
+  const authUrl = new URL('/api/auth/preview', config.R_APP_URL);
   authUrl.searchParams.set('task_id', taskId);
   authUrl.searchParams.set('state', state);
   authUrl.searchParams.set('redirect_uri', redirectUri);

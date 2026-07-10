@@ -50,7 +50,7 @@ vi.mock('@roomote/communication/telegram-provider', () => ({
 }));
 
 vi.mock('@/lib/server/env', () => ({
-  Env: { ROOMOTE_APP_URL: 'https://app.example.com' },
+  Env: { R_APP_URL: 'https://app.example.com' },
 }));
 
 vi.mock('../environment-variables', () => ({
@@ -112,9 +112,9 @@ describe('comms commands', () => {
 
     it('returns providers with status from persisted env var names', async () => {
       mockGetPersistedEnvironmentVariableNames.mockResolvedValue([
-        'SLACK_CLIENT_ID',
-        'SLACK_CLIENT_SECRET',
-        'SLACK_SIGNING_SECRET',
+        'R_SLACK_CLIENT_ID',
+        'R_SLACK_CLIENT_SECRET',
+        'R_SLACK_SIGNING_SECRET',
       ]);
 
       const status = await getCommsStatusCommand(buildMockAuth());
@@ -128,7 +128,7 @@ describe('comms commands', () => {
 
   describe('saveCommsAuthConfigCommand', () => {
     it('upserts only non-empty submitted values', async () => {
-      process.env.SLACK_CLIENT_SECRET = 'env-secret';
+      process.env.R_SLACK_CLIENT_SECRET = 'env-secret';
       mockDbTransaction.mockImplementation(async (callback) => {
         return callback({} as never);
       });
@@ -137,13 +137,13 @@ describe('comms commands', () => {
         await saveCommsAuthConfigCommand(buildMockAuth(), {
           provider: 'slack',
           values: {
-            SLACK_CLIENT_ID: 'client-id',
-            SLACK_CLIENT_SECRET: '  ',
-            SLACK_SIGNING_SECRET: 'signing-secret',
+            R_SLACK_CLIENT_ID: 'client-id',
+            R_SLACK_CLIENT_SECRET: '  ',
+            R_SLACK_SIGNING_SECRET: 'signing-secret',
           },
         });
       } finally {
-        delete process.env.SLACK_CLIENT_SECRET;
+        delete process.env.R_SLACK_CLIENT_SECRET;
       }
 
       expect(mockUpsertDeploymentEnvironmentVariables).toHaveBeenCalledWith(
@@ -151,8 +151,8 @@ describe('comms commands', () => {
         expect.objectContaining({
           userId: 'comms-test-user',
           values: [
-            expect.objectContaining({ name: 'SLACK_CLIENT_ID' }),
-            expect.objectContaining({ name: 'SLACK_SIGNING_SECRET' }),
+            expect.objectContaining({ name: 'R_SLACK_CLIENT_ID' }),
+            expect.objectContaining({ name: 'R_SLACK_SIGNING_SECRET' }),
           ],
         }),
       );
@@ -169,7 +169,7 @@ describe('comms commands', () => {
       await expect(
         saveCommsAuthConfigCommand(buildMockAuth(), {
           provider: 'slack',
-          values: { SLACK_CLIENT_ID: 'client-id' },
+          values: { R_SLACK_CLIENT_ID: 'client-id' },
         }),
       ).rejects.toThrow(
         'Enter the required Slack configuration values to continue.',
@@ -179,7 +179,7 @@ describe('comms commands', () => {
     });
 
     it('does not require fields already satisfied by env', async () => {
-      process.env.SLACK_CLIENT_ID = 'env-client-id';
+      process.env.R_SLACK_CLIENT_ID = 'env-client-id';
       mockDbTransaction.mockImplementation(async (callback) => {
         return callback({} as never);
       });
@@ -188,13 +188,13 @@ describe('comms commands', () => {
         saveCommsAuthConfigCommand(buildMockAuth(), {
           provider: 'slack',
           values: {
-            SLACK_CLIENT_SECRET: 'secret',
-            SLACK_SIGNING_SECRET: 'signing',
+            R_SLACK_CLIENT_SECRET: 'secret',
+            R_SLACK_SIGNING_SECRET: 'signing',
           },
         }),
       ).resolves.toEqual({ telegramWebhook: null });
 
-      delete process.env.SLACK_CLIENT_ID;
+      delete process.env.R_SLACK_CLIENT_ID;
     });
 
     it('reports Telegram webhook registration state after saving', async () => {
@@ -265,11 +265,9 @@ describe('comms commands', () => {
       expect(txInArray).toHaveBeenCalledWith(
         'env.name',
         expect.arrayContaining([
-          'SLACK_CLIENT_ID',
-          'ROOMOTE_AUTH_SLACK_CLIENT_ID',
-          'SLACK_CLIENT_SECRET',
-          'ROOMOTE_AUTH_SLACK_CLIENT_SECRET',
-          'SLACK_SIGNING_SECRET',
+          'R_SLACK_CLIENT_ID',
+          'R_SLACK_CLIENT_SECRET',
+          'R_SLACK_SIGNING_SECRET',
         ]),
       );
     });
@@ -292,14 +290,14 @@ describe('comms commands', () => {
       expect(txInArray).toHaveBeenCalledWith(
         'env.name',
         expect.arrayContaining([
-          'ROOMOTE_AUTH_MICROSOFT_CLIENT_ID',
-          'ROOMOTE_AUTH_MICROSOFT_CLIENT_SECRET',
-          'ROOMOTE_AUTH_MICROSOFT_TENANT_ID',
-          'TEAMS_BOT_APP_ID',
-          'TEAMS_BOT_APP_PASSWORD',
-          'TEAMS_BOT_TENANT_ID',
-          'TEAMS_BOT_TOKEN_ENDPOINT',
-          'TEAMS_BOT_OAUTH_SCOPE',
+          'R_MICROSOFT_CLIENT_ID',
+          'R_MICROSOFT_CLIENT_SECRET',
+          'R_MICROSOFT_TENANT_ID',
+          'R_TEAMS_BOT_APP_ID',
+          'R_TEAMS_BOT_APP_PASSWORD',
+          'R_TEAMS_BOT_TENANT_ID',
+          'R_TEAMS_BOT_TOKEN_ENDPOINT',
+          'R_TEAMS_BOT_OAUTH_SCOPE',
         ]),
       );
     });
@@ -313,12 +311,12 @@ describe('comms commands', () => {
         saveCommsAuthConfigCommand(buildMockAuth(), {
           provider: 'microsoft',
           values: {
-            ROOMOTE_AUTH_MICROSOFT_CLIENT_ID: 'ms-client-id',
-            ROOMOTE_AUTH_MICROSOFT_CLIENT_SECRET: 'ms-client-secret',
-            ROOMOTE_AUTH_MICROSOFT_TENANT_ID: 'ms-tenant-id',
-            TEAMS_BOT_APP_ID: 'bot-app-id',
-            TEAMS_BOT_APP_PASSWORD: 'bot-secret',
-            TEAMS_BOT_TENANT_ID: 'bot-tenant-id',
+            R_MICROSOFT_CLIENT_ID: 'ms-client-id',
+            R_MICROSOFT_CLIENT_SECRET: 'ms-client-secret',
+            R_MICROSOFT_TENANT_ID: 'ms-tenant-id',
+            R_TEAMS_BOT_APP_ID: 'bot-app-id',
+            R_TEAMS_BOT_APP_PASSWORD: 'bot-secret',
+            R_TEAMS_BOT_TENANT_ID: 'bot-tenant-id',
           },
         }),
       ).resolves.toEqual({ telegramWebhook: null });
@@ -329,14 +327,14 @@ describe('comms commands', () => {
           userId: 'comms-test-user',
           values: expect.arrayContaining([
             expect.objectContaining({
-              name: 'ROOMOTE_AUTH_MICROSOFT_CLIENT_ID',
+              name: 'R_MICROSOFT_CLIENT_ID',
             }),
             expect.objectContaining({
-              name: 'ROOMOTE_AUTH_MICROSOFT_CLIENT_SECRET',
+              name: 'R_MICROSOFT_CLIENT_SECRET',
             }),
-            expect.objectContaining({ name: 'TEAMS_BOT_APP_ID' }),
-            expect.objectContaining({ name: 'TEAMS_BOT_APP_PASSWORD' }),
-            expect.objectContaining({ name: 'TEAMS_BOT_TENANT_ID' }),
+            expect.objectContaining({ name: 'R_TEAMS_BOT_APP_ID' }),
+            expect.objectContaining({ name: 'R_TEAMS_BOT_APP_PASSWORD' }),
+            expect.objectContaining({ name: 'R_TEAMS_BOT_TENANT_ID' }),
           ]),
         }),
       );

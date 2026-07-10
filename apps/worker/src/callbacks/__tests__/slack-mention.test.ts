@@ -144,10 +144,10 @@ function createSnapshotResumeTaskRun(): TaskRun {
 }
 
 describe('slackMentionCallbacks', () => {
-  const originalRoomoteAppUrl = process.env.ROOMOTE_APP_URL;
+  const originalRoomoteAppUrl = process.env.R_APP_URL;
 
   beforeEach(() => {
-    process.env.ROOMOTE_APP_URL = 'http://localhost:13000';
+    process.env.R_APP_URL = 'http://localhost:13000';
     vi.clearAllMocks();
     mockGetSlackStartedMessageData.mockResolvedValue({
       ts: 'started-ts',
@@ -189,9 +189,9 @@ describe('slackMentionCallbacks', () => {
 
   afterAll(() => {
     if (originalRoomoteAppUrl === undefined) {
-      delete process.env.ROOMOTE_APP_URL;
+      delete process.env.R_APP_URL;
     } else {
-      process.env.ROOMOTE_APP_URL = originalRoomoteAppUrl;
+      process.env.R_APP_URL = originalRoomoteAppUrl;
     }
   });
 

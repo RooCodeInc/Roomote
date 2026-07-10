@@ -56,7 +56,7 @@ function getRoomoteReviewerLogins(): string[] {
   // bootstrap the Node.js runtime before server routes import this module.
   if (!roomoteReviewerLogins) {
     roomoteReviewerLogins = normalizeGitHubLogins(
-      getRoomoteManagedGitHubLogins(Env.NEXT_PUBLIC_GITHUB_APP_SLUG),
+      getRoomoteManagedGitHubLogins(Env.R_GITHUB_APP_SLUG),
     );
   }
 

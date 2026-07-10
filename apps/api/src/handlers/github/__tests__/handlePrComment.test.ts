@@ -51,8 +51,8 @@ vi.mock('../../tasks/sendMessageToTask', () => ({
 
 vi.mock('@roomote/env', () => ({
   Env: {
-    NEXT_PUBLIC_GITHUB_APP_SLUG: 'roomote',
-    ROOMOTE_APP_URL: 'https://app.roomote.dev',
+    R_GITHUB_APP_SLUG: 'roomote',
+    R_APP_URL: 'https://app.roomote.dev',
   },
 }));
 

@@ -9,7 +9,7 @@ describe('isRoomoteGitHubLogin', () => {
 
       return {
         ...actual,
-        Env: { NEXT_PUBLIC_GITHUB_APP_SLUG: 'roomote-dev' },
+        Env: { R_GITHUB_APP_SLUG: 'roomote-dev' },
       };
     });
 

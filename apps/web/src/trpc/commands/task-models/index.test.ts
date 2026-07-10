@@ -87,7 +87,7 @@ const PROVIDER_ENV_VAR_NAMES = [
   'GOOGLE_VERTEX_PROJECT',
   'GOOGLE_VERTEX_LOCATION',
   'GEMINI_API_KEY',
-  'ROOMOTE_MODEL',
+  'R_MODEL',
 ] as const;
 
 function buildMockAuth(
@@ -121,12 +121,12 @@ describe('lookupTaskModelCommand', () => {
   // them all per test to keep results machine-independent.
   const originalProviderEnvValues = new Map<string, string | undefined>();
   const originalOpenRouterKey = process.env.OPENROUTER_API_KEY;
-  const originalRoomoteModel = process.env.ROOMOTE_MODEL;
-  const originalRoomoteSmallModel = process.env.ROOMOTE_SMALL_MODEL;
-  const originalRoomoteVisionModel = process.env.ROOMOTE_VISION_MODEL;
-  const originalRoomoteCodeReviewModel = process.env.ROOMOTE_CODE_REVIEW_MODEL;
-  const originalRoomoteExploreModel = process.env.ROOMOTE_EXPLORE_MODEL;
-  const originalRoomotePlanningModel = process.env.ROOMOTE_PLANNING_MODEL;
+  const originalRoomoteModel = process.env.R_MODEL;
+  const originalRoomoteSmallModel = process.env.R_SMALL_MODEL;
+  const originalRoomoteVisionModel = process.env.R_VISION_MODEL;
+  const originalRoomoteCodeReviewModel = process.env.R_CODE_REVIEW_MODEL;
+  const originalRoomoteExploreModel = process.env.R_EXPLORE_MODEL;
+  const originalRoomotePlanningModel = process.env.R_PLANNING_MODEL;
   const fetchMock = vi.fn();
 
   beforeEach(() => {
@@ -136,18 +136,18 @@ describe('lookupTaskModelCommand', () => {
       originalProviderEnvValues.set(name, process.env[name]);
       delete process.env[name];
     }
-    delete process.env.ROOMOTE_MODEL;
-    delete process.env.ROOMOTE_SMALL_MODEL;
-    delete process.env.ROOMOTE_VISION_MODEL;
-    delete process.env.ROOMOTE_CODE_REVIEW_MODEL;
-    delete process.env.ROOMOTE_EXPLORE_MODEL;
-    delete process.env.ROOMOTE_PLANNING_MODEL;
-    delete process.env.ROOMOTE_MODEL_REASONING_EFFORT;
-    delete process.env.ROOMOTE_SMALL_MODEL_REASONING_EFFORT;
-    delete process.env.ROOMOTE_VISION_MODEL_REASONING_EFFORT;
-    delete process.env.ROOMOTE_CODE_REVIEW_MODEL_REASONING_EFFORT;
-    delete process.env.ROOMOTE_EXPLORE_MODEL_REASONING_EFFORT;
-    delete process.env.ROOMOTE_PLANNING_MODEL_REASONING_EFFORT;
+    delete process.env.R_MODEL;
+    delete process.env.R_SMALL_MODEL;
+    delete process.env.R_VISION_MODEL;
+    delete process.env.R_CODE_REVIEW_MODEL;
+    delete process.env.R_EXPLORE_MODEL;
+    delete process.env.R_PLANNING_MODEL;
+    delete process.env.R_MODEL_REASONING_EFFORT;
+    delete process.env.R_SMALL_MODEL_REASONING_EFFORT;
+    delete process.env.R_VISION_MODEL_REASONING_EFFORT;
+    delete process.env.R_CODE_REVIEW_MODEL_REASONING_EFFORT;
+    delete process.env.R_EXPLORE_MODEL_REASONING_EFFORT;
+    delete process.env.R_PLANNING_MODEL_REASONING_EFFORT;
     mockIsChatGptSubscriptionConnected.mockResolvedValue(false);
     mockFindDeploymentSettings.mockImplementation(async (options) => {
       const columns = (options as { columns?: Record<string, boolean> })
@@ -197,47 +197,47 @@ describe('lookupTaskModelCommand', () => {
     }
 
     if (originalRoomoteModel === undefined) {
-      delete process.env.ROOMOTE_MODEL;
+      delete process.env.R_MODEL;
     } else {
-      process.env.ROOMOTE_MODEL = originalRoomoteModel;
+      process.env.R_MODEL = originalRoomoteModel;
     }
 
     if (originalRoomoteSmallModel === undefined) {
-      delete process.env.ROOMOTE_SMALL_MODEL;
+      delete process.env.R_SMALL_MODEL;
     } else {
-      process.env.ROOMOTE_SMALL_MODEL = originalRoomoteSmallModel;
+      process.env.R_SMALL_MODEL = originalRoomoteSmallModel;
     }
 
     if (originalRoomoteVisionModel === undefined) {
-      delete process.env.ROOMOTE_VISION_MODEL;
+      delete process.env.R_VISION_MODEL;
     } else {
-      process.env.ROOMOTE_VISION_MODEL = originalRoomoteVisionModel;
+      process.env.R_VISION_MODEL = originalRoomoteVisionModel;
     }
 
     if (originalRoomoteCodeReviewModel === undefined) {
-      delete process.env.ROOMOTE_CODE_REVIEW_MODEL;
+      delete process.env.R_CODE_REVIEW_MODEL;
     } else {
-      process.env.ROOMOTE_CODE_REVIEW_MODEL = originalRoomoteCodeReviewModel;
+      process.env.R_CODE_REVIEW_MODEL = originalRoomoteCodeReviewModel;
     }
 
     if (originalRoomoteExploreModel === undefined) {
-      delete process.env.ROOMOTE_EXPLORE_MODEL;
+      delete process.env.R_EXPLORE_MODEL;
     } else {
-      process.env.ROOMOTE_EXPLORE_MODEL = originalRoomoteExploreModel;
+      process.env.R_EXPLORE_MODEL = originalRoomoteExploreModel;
     }
 
     if (originalRoomotePlanningModel === undefined) {
-      delete process.env.ROOMOTE_PLANNING_MODEL;
+      delete process.env.R_PLANNING_MODEL;
     } else {
-      process.env.ROOMOTE_PLANNING_MODEL = originalRoomotePlanningModel;
+      process.env.R_PLANNING_MODEL = originalRoomotePlanningModel;
     }
 
-    delete process.env.ROOMOTE_MODEL_REASONING_EFFORT;
-    delete process.env.ROOMOTE_SMALL_MODEL_REASONING_EFFORT;
-    delete process.env.ROOMOTE_VISION_MODEL_REASONING_EFFORT;
-    delete process.env.ROOMOTE_CODE_REVIEW_MODEL_REASONING_EFFORT;
-    delete process.env.ROOMOTE_EXPLORE_MODEL_REASONING_EFFORT;
-    delete process.env.ROOMOTE_PLANNING_MODEL_REASONING_EFFORT;
+    delete process.env.R_MODEL_REASONING_EFFORT;
+    delete process.env.R_SMALL_MODEL_REASONING_EFFORT;
+    delete process.env.R_VISION_MODEL_REASONING_EFFORT;
+    delete process.env.R_CODE_REVIEW_MODEL_REASONING_EFFORT;
+    delete process.env.R_EXPLORE_MODEL_REASONING_EFFORT;
+    delete process.env.R_PLANNING_MODEL_REASONING_EFFORT;
   });
 
   it('returns the built-in model metadata without calling OpenRouter', async () => {
@@ -701,7 +701,7 @@ describe('lookupTaskModelCommand', () => {
   });
 
   it('does not DB-override an env-managed coding model, preserving the persisted value', async () => {
-    process.env.ROOMOTE_MODEL = 'openrouter/z-ai/glm-5.2';
+    process.env.R_MODEL = 'openrouter/z-ai/glm-5.2';
     mockFindDeploymentSettings.mockResolvedValue({
       taskModelSettings: null,
       runtimeModelConfig: {
@@ -765,7 +765,7 @@ describe('lookupTaskModelCommand', () => {
   });
 
   it('does not DB-override an env-managed helper model, preserving the persisted value', async () => {
-    process.env.ROOMOTE_SMALL_MODEL = 'openrouter/z-ai/glm-5.2';
+    process.env.R_SMALL_MODEL = 'openrouter/z-ai/glm-5.2';
     mockFindDeploymentSettings.mockResolvedValue({
       taskModelSettings: null,
       runtimeModelConfig: {
@@ -829,7 +829,7 @@ describe('lookupTaskModelCommand', () => {
   });
 
   it('does not DB-override an env-managed vision model, preserving the persisted value', async () => {
-    process.env.ROOMOTE_VISION_MODEL = 'openrouter/z-ai/glm-5.2';
+    process.env.R_VISION_MODEL = 'openrouter/z-ai/glm-5.2';
     mockFindDeploymentSettings.mockResolvedValue({
       taskModelSettings: null,
       runtimeModelConfig: {
@@ -960,7 +960,7 @@ describe('lookupTaskModelCommand', () => {
   });
 
   it('persists the selected reasoning effort when the env override is invalid', async () => {
-    process.env.ROOMOTE_MODEL_REASONING_EFFORT = 'turbo';
+    process.env.R_MODEL_REASONING_EFFORT = 'turbo';
 
     const result = await updateTaskModelSettingsCommand(buildMockAuth(), {
       models: [
@@ -1008,7 +1008,7 @@ describe('lookupTaskModelCommand', () => {
   });
 
   it('does not DB-override an env-managed reasoning effort, preserving the persisted value', async () => {
-    process.env.ROOMOTE_MODEL_REASONING_EFFORT = 'medium';
+    process.env.R_MODEL_REASONING_EFFORT = 'medium';
     mockFindDeploymentSettings.mockResolvedValue({
       taskModelSettings: null,
       runtimeModelConfig: {

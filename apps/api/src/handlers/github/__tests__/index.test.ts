@@ -308,7 +308,7 @@ describe('github webhook router', () => {
 
     expect(response.status).toBe(200);
     expect(mockResolveDeploymentEnvVar).toHaveBeenCalledWith(
-      'GITHUB_WEBHOOK_SECRET',
+      'R_GITHUB_WEBHOOK_SECRET',
     );
     expect(webhooksConstructorParams).toEqual([{ secret: 'db-only-secret' }]);
     expect(mockHandlePushConflictCheck).toHaveBeenCalled();

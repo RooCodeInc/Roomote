@@ -55,7 +55,7 @@ function getModelProviderKeyCandidates({
   fileValues: Record<string, string>;
 }): string[] {
   const configuredKeyList = getConfiguredEnvValue(
-    'ROOMOTE_MODEL_ENV_KEYS',
+    'R_MODEL_ENV_KEYS',
     fileValues,
   );
 
@@ -76,9 +76,8 @@ export class EnvService {
     }
 
     const fileValues = readEnvFileValues(envLocalPath);
-    const publicUrl =
-      process.env.ROOMOTE_PUBLIC_URL ?? fileValues.ROOMOTE_PUBLIC_URL;
-    const model = getConfiguredEnvValue('ROOMOTE_MODEL', fileValues)?.trim();
+    const publicUrl = process.env.R_PUBLIC_URL ?? fileValues.R_PUBLIC_URL;
+    const model = getConfiguredEnvValue('R_MODEL', fileValues)?.trim();
 
     if (isConfiguredEnvValue(model)) {
       const provider = resolveModelProviderIdFromModel(model)?.toLowerCase();
@@ -86,11 +85,11 @@ export class EnvService {
       if (!provider) {
         checkEnvVars.fail();
         throw new Error(
-          'ROOMOTE_MODEL must use provider/model format.\n' +
+          'R_MODEL must use provider/model format.\n' +
             '\n' +
             'Example:\n' +
             '\n' +
-            'ROOMOTE_MODEL=openrouter/anthropic/claude-sonnet-4\n',
+            'R_MODEL=openrouter/anthropic/claude-sonnet-4\n',
         );
       }
 
@@ -106,17 +105,17 @@ export class EnvService {
         const suggestedKeys =
           modelProviderKeyCandidates.length > 0
             ? modelProviderKeyCandidates.join(', ')
-            : 'ROOMOTE_MODEL_ENV_KEYS=<provider-key-env-name>';
+            : 'R_MODEL_ENV_KEYS=<provider-key-env-name>';
 
         checkEnvVars.fail();
         throw new Error(
           'Model provider credentials are required for local Roomote tasks.\n' +
             '\n' +
-            `ROOMOTE_MODEL uses provider "${provider}". Add one of these values to .env.local:\n` +
+            `R_MODEL uses provider "${provider}". Add one of these values to .env.local:\n` +
             '\n' +
             `${suggestedKeys}\n` +
             '\n' +
-            'If your provider uses a different env var name, set ROOMOTE_MODEL_ENV_KEYS to that name.',
+            'If your provider uses a different env var name, set R_MODEL_ENV_KEYS to that name.',
         );
       }
     }
@@ -124,13 +123,13 @@ export class EnvService {
     if (!isConfiguredEnvValue(publicUrl)) {
       checkEnvVars.fail();
       throw new Error(
-        'ROOMOTE_PUBLIC_URL is required for local Roomote callbacks.\n' +
+        'R_PUBLIC_URL is required for local Roomote callbacks.\n' +
           '\n' +
           'Set it to any public HTTPS URL that reaches port 13000 (an ngrok\n' +
           'domain, Cloudflare Tunnel, Tailscale Funnel, or your own domain). For\n' +
           'an ngrok domain, pnpm dev starts and reuses the tunnel for you:\n' +
           '\n' +
-          'ROOMOTE_PUBLIC_URL=https://roomote-matt.ngrok.app\n',
+          'R_PUBLIC_URL=https://roomote-matt.ngrok.app\n',
       );
     }
 

@@ -35,10 +35,7 @@ interface DeploymentContext {
 }
 
 function buildAnalyticsUrl() {
-  return new URL(
-    '/analytics?object=pullRequests',
-    Env.ROOMOTE_APP_URL,
-  ).toString();
+  return new URL('/analytics?object=pullRequests', Env.R_APP_URL).toString();
 }
 
 function formatManagerStatsText({

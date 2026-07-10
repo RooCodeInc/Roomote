@@ -116,7 +116,7 @@ async function resolveGitHubWebhookSecret(): Promise<string | null> {
     return webhookSecretCache.value;
   }
 
-  const secret = await resolveDeploymentEnvVar('GITHUB_WEBHOOK_SECRET');
+  const secret = await resolveDeploymentEnvVar('R_GITHUB_WEBHOOK_SECRET');
 
   if (!secret) {
     return null;

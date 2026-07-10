@@ -78,17 +78,17 @@ async function updateLinearSessionTaskUrlForDirectLaunch({
   await linearClient.updateSessionExternalUrls(sessionId, [
     {
       label: 'Open task',
-      url: `${Env.ROOMOTE_APP_URL}/task/${runResult.taskId}`,
+      url: `${Env.R_APP_URL}/task/${runResult.taskId}`,
     },
   ]);
 }
 
 /**
  * Get the base URL for auth links.
- * Uses ROOMOTE_APP_URL which is already set per-environment (ngrok in dev, production URLs in prod).
+ * Uses R_APP_URL which is already set per-environment (ngrok in dev, production URLs in prod).
  */
 function getAuthBaseUrl(): string {
-  return Env.ROOMOTE_APP_URL;
+  return Env.R_APP_URL;
 }
 
 async function findLinearDeploymentMcpConnectionByOrganizationId(
@@ -848,7 +848,7 @@ async function handleAgentSessionEvent(
 
         await linearClient.updateSessionExternalUrl(
           sessionId,
-          `${Env.ROOMOTE_APP_URL}/task/${resumeLaunch.taskId}`,
+          `${Env.R_APP_URL}/task/${resumeLaunch.taskId}`,
         );
 
         console.log(
@@ -928,7 +928,7 @@ async function handleAgentSessionEvent(
         body: c.body,
         username: c.user?.name,
       })),
-      apiBaseUrl: Env.TRPC_URL ?? Env.ROOMOTE_APP_URL,
+      apiBaseUrl: Env.TRPC_URL ?? Env.R_APP_URL,
     });
 
     // Attempt LLM routing

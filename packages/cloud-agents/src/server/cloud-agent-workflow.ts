@@ -285,7 +285,7 @@ export async function generatePrompt({
         teamsTenantId: teamsTenantId ?? undefined,
         teamsBotAppId:
           nonSlackChatProvider === 'teams'
-            ? (Env.TEAMS_BOT_APP_ID ?? undefined)
+            ? (Env.R_TEAMS_BOT_APP_ID ?? undefined)
             : undefined,
         interactiveMode: taskSpec.payload.bootstrap?.interactiveMode,
         requestFormat,

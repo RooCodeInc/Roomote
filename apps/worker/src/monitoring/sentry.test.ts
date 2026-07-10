@@ -74,7 +74,7 @@ describe('worker sentry monitoring', () => {
     vi.clearAllMocks();
     delete process.env.WORKER_SENTRY_DSN;
     delete process.env.SENTRY_DSN;
-    delete process.env.ROOMOTE_APP_ENV;
+    delete process.env.R_APP_ENV;
     delete process.env.APP_ENV;
     delete process.env.NODE_ENV;
     delete process.env.WORKER_RELEASE_TAG;
@@ -94,7 +94,7 @@ describe('worker sentry monitoring', () => {
   });
 
   it('initializes the worker Sentry client from an explicit DSN and prefers worker release metadata', async () => {
-    process.env.ROOMOTE_APP_ENV = 'production';
+    process.env.R_APP_ENV = 'production';
     process.env.WORKER_SENTRY_DSN = 'https://worker.example/1';
     process.env.VERCEL_GIT_COMMIT_SHA = 'abc123';
     process.env.WORKER_RELEASE_TAG = 'worker-v1.2.3';
@@ -134,7 +134,7 @@ describe('worker sentry monitoring', () => {
   });
 
   it('stays disabled outside development when no DSN is configured', async () => {
-    process.env.ROOMOTE_APP_ENV = 'production';
+    process.env.R_APP_ENV = 'production';
     delete process.env.SENTRY_DSN;
 
     const { initWorkerSentry } = await import('./sentry');
@@ -182,7 +182,7 @@ describe('worker sentry monitoring', () => {
   });
 
   it('prefers the installed worker release tag metadata over app-env inference when the env var is missing', async () => {
-    process.env.ROOMOTE_APP_ENV = 'preview';
+    process.env.R_APP_ENV = 'preview';
 
     readFileSyncMock.mockImplementation((path: string) => {
       if (path === '/sandbox/worker/WORKER_RELEASE_TAG') {
@@ -249,7 +249,7 @@ describe('worker sentry monitoring', () => {
   });
 
   it('disables Sentry in development', async () => {
-    process.env.ROOMOTE_APP_ENV = 'development';
+    process.env.R_APP_ENV = 'development';
 
     const { initWorkerSentry } = await import('./sentry');
 
@@ -263,7 +263,7 @@ describe('worker sentry monitoring', () => {
   });
 
   it('does not register a beforeSend hook for worker Sentry', async () => {
-    process.env.ROOMOTE_APP_ENV = 'preview';
+    process.env.R_APP_ENV = 'preview';
 
     const { initWorkerSentry } = await import('./sentry');
 
@@ -277,7 +277,7 @@ describe('worker sentry monitoring', () => {
   });
 
   it('captures worker exceptions when enabled', async () => {
-    process.env.ROOMOTE_APP_ENV = 'preview';
+    process.env.R_APP_ENV = 'preview';
     process.env.ROOMOTE_WORKER_DEPLOYMENT_SLUG = 'roomote';
     process.env.ROOMOTE_WORKER_ENVIRONMENT_ID = 'env_123';
     process.env.ROOMOTE_WORKER_COMPUTE_PROVIDER = 'roomote';
@@ -330,7 +330,7 @@ describe('worker sentry monitoring', () => {
   });
 
   it('uses a stable auth-proxy fingerprint for loopback ECONNREFUSED errors', async () => {
-    process.env.ROOMOTE_APP_ENV = 'preview';
+    process.env.R_APP_ENV = 'preview';
 
     const { captureWorkerException, initWorkerSentry } =
       await import('./sentry');
@@ -376,7 +376,7 @@ describe('worker sentry monitoring', () => {
   });
 
   it('falls back to task run id for worker exception fingerprints when task id is unavailable', async () => {
-    process.env.ROOMOTE_APP_ENV = 'preview';
+    process.env.R_APP_ENV = 'preview';
 
     const { captureWorkerException, initWorkerSentry } =
       await import('./sentry');
@@ -395,7 +395,7 @@ describe('worker sentry monitoring', () => {
   });
 
   it('keeps the existing fallback fingerprinting for non-auth-proxy loopback ECONNREFUSED errors', async () => {
-    process.env.ROOMOTE_APP_ENV = 'preview';
+    process.env.R_APP_ENV = 'preview';
 
     const { captureWorkerException, initWorkerSentry } =
       await import('./sentry');
@@ -414,7 +414,7 @@ describe('worker sentry monitoring', () => {
   });
 
   it('keeps the existing fallback fingerprinting for non-ECONNREFUSED auth-proxy errors', async () => {
-    process.env.ROOMOTE_APP_ENV = 'preview';
+    process.env.R_APP_ENV = 'preview';
 
     const { captureWorkerException, initWorkerSentry } =
       await import('./sentry');
@@ -433,7 +433,7 @@ describe('worker sentry monitoring', () => {
   });
 
   it('fingerprints TRPC client errors by message, environment, and compute provider', async () => {
-    process.env.ROOMOTE_APP_ENV = 'preview';
+    process.env.R_APP_ENV = 'preview';
     process.env.ROOMOTE_WORKER_COMPUTE_PROVIDER = 'roomote';
 
     const { captureWorkerException, initWorkerSentry } =
@@ -459,7 +459,7 @@ describe('worker sentry monitoring', () => {
   });
 
   it('falls back to environment id for worker exception fingerprints when task and task run ids are unavailable', async () => {
-    process.env.ROOMOTE_APP_ENV = 'preview';
+    process.env.R_APP_ENV = 'preview';
 
     const { captureWorkerException, initWorkerSentry } =
       await import('./sentry');
@@ -478,7 +478,7 @@ describe('worker sentry monitoring', () => {
   });
 
   it('falls back to stage for worker exception fingerprints when no richer context exists', async () => {
-    process.env.ROOMOTE_APP_ENV = 'preview';
+    process.env.R_APP_ENV = 'preview';
 
     const { captureWorkerException, initWorkerSentry } =
       await import('./sentry');
@@ -496,7 +496,7 @@ describe('worker sentry monitoring', () => {
   });
 
   it('captures worker messages and generic error logs when enabled', async () => {
-    process.env.ROOMOTE_APP_ENV = 'preview';
+    process.env.R_APP_ENV = 'preview';
 
     const { captureWorkerErrorLog, captureWorkerMessage, initWorkerSentry } =
       await import('./sentry');
@@ -522,7 +522,7 @@ describe('worker sentry monitoring', () => {
   });
 
   it('captures worker warning messages with custom signal and component tags', async () => {
-    process.env.ROOMOTE_APP_ENV = 'preview';
+    process.env.R_APP_ENV = 'preview';
 
     const { captureWorkerMessage, initWorkerSentry } = await import('./sentry');
 
@@ -554,7 +554,7 @@ describe('worker sentry monitoring', () => {
   });
 
   it('captures worker messages with additional custom tags', async () => {
-    process.env.ROOMOTE_APP_ENV = 'preview';
+    process.env.R_APP_ENV = 'preview';
 
     const { captureWorkerMessage, initWorkerSentry } = await import('./sentry');
 
@@ -595,7 +595,7 @@ describe('worker sentry monitoring', () => {
   });
 
   it('creates fatal process handlers that capture and exit on unhandled failures', async () => {
-    process.env.ROOMOTE_APP_ENV = 'preview';
+    process.env.R_APP_ENV = 'preview';
 
     const { createWorkerFatalProcessHandlers, initWorkerSentry } =
       await import('./sentry');

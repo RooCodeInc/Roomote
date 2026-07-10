@@ -22,7 +22,7 @@ describe('roomote mcp config helpers', () => {
   it('uses the platform API URL for artifact operations', () => {
     process.env.ROOMOTE_CLOUD_TOKEN = 'run-token';
     process.env.ROOMOTE_PLATFORM_API_URL = 'https://platform.example.com';
-    process.env.ROOMOTE_APP_URL = 'https://app.example.com';
+    process.env.R_APP_URL = 'https://app.example.com';
     process.env.ROOMOTE_WORKSPACE_PATH = '/workspace';
 
     expect(getArtifactConfig()).toEqual({

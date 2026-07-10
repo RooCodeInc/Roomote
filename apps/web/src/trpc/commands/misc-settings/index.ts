@@ -108,7 +108,7 @@ function getMissingRequiredEnvVars(): string[] {
   const required = [
     'DATABASE_URL',
     'REDIS_URL',
-    'ROOMOTE_APP_URL',
+    'R_APP_URL',
     'TRPC_URL',
     'DASHBOARD_PASSWORD',
     'ENCRYPTION_KEY',
@@ -124,11 +124,11 @@ function getMissingRequiredEnvVars(): string[] {
 }
 
 function hasPublicUrlCallbackMismatch(): DiagnosticsStatus {
-  const publicUrl = Env.ROOMOTE_PUBLIC_URL ?? Env.ROOMOTE_APP_URL;
+  const publicUrl = Env.R_PUBLIC_URL ?? Env.R_APP_URL;
   const callbackUrls = [
     Env.SLACK_REDIRECT_URI,
     Env.LINEAR_REDIRECT_URI,
-    Env.TEAMS_BOT_TOKEN_ENDPOINT,
+    Env.R_TEAMS_BOT_TOKEN_ENDPOINT,
   ].filter(present);
 
   if (!present(publicUrl) || callbackUrls.length === 0) {
@@ -147,10 +147,10 @@ function hasPublicUrlCallbackMismatch(): DiagnosticsStatus {
 
 function hasWebhookSecretConfigured(): DiagnosticsStatus {
   return [
-    Env.GITHUB_WEBHOOK_SECRET,
+    Env.R_GITHUB_WEBHOOK_SECRET,
     Env.GITLAB_WEBHOOK_SECRET,
     Env.GITLAB_WEBHOOK_SIGNING_TOKEN,
-    Env.SLACK_SIGNING_SECRET,
+    Env.R_SLACK_SIGNING_SECRET,
     Env.TELEGRAM_WEBHOOK_SECRET,
     Env.LINEAR_WEBHOOK_SECRET,
   ].some(present)
@@ -333,7 +333,7 @@ async function getProviderDiagnostics() {
   if ((slackActive[0]?.total ?? 0) > 0 || present(Env.SLACK_APP_ID)) {
     comms.push('slack');
   }
-  if ((teamsActive[0]?.total ?? 0) > 0 || present(Env.TEAMS_BOT_APP_ID)) {
+  if ((teamsActive[0]?.total ?? 0) > 0 || present(Env.R_TEAMS_BOT_APP_ID)) {
     comms.push('teams');
   }
   if (

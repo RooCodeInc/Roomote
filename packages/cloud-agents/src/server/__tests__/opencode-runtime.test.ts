@@ -13,10 +13,10 @@ import {
 describe('buildOpenCodeCliEnv', () => {
   const managedKeys = [
     'OPENCODE_CONFIG_CONTENT',
-    'ROOMOTE_MODEL',
-    'ROOMOTE_SMALL_MODEL',
-    'ROOMOTE_MODEL_REASONING_EFFORT',
-    'ROOMOTE_SMALL_MODEL_REASONING_EFFORT',
+    'R_MODEL',
+    'R_SMALL_MODEL',
+    'R_MODEL_REASONING_EFFORT',
+    'R_SMALL_MODEL_REASONING_EFFORT',
     'GOOGLE_APPLICATION_CREDENTIALS',
   ] as const;
   const originalValues = new Map<string, string | undefined>();
@@ -42,7 +42,7 @@ describe('buildOpenCodeCliEnv', () => {
 
   it('builds a model-backed config without reasoning options by default', () => {
     const env = buildOpenCodeCliEnv({
-      ROOMOTE_MODEL: 'openrouter/openai/gpt-5.4',
+      R_MODEL: 'openrouter/openai/gpt-5.4',
     });
 
     expect(JSON.parse(env.OPENCODE_CONFIG_CONTENT ?? '{}')).toEqual({
@@ -53,10 +53,10 @@ describe('buildOpenCodeCliEnv', () => {
 
   it('applies per-role reasoning options to the model-backed config', () => {
     const env = buildOpenCodeCliEnv({
-      ROOMOTE_MODEL: 'openrouter/openai/gpt-5.4',
-      ROOMOTE_SMALL_MODEL: 'openrouter/z-ai/glm-5.2',
-      ROOMOTE_MODEL_REASONING_EFFORT: 'high',
-      ROOMOTE_SMALL_MODEL_REASONING_EFFORT: 'low',
+      R_MODEL: 'openrouter/openai/gpt-5.4',
+      R_SMALL_MODEL: 'openrouter/z-ai/glm-5.2',
+      R_MODEL_REASONING_EFFORT: 'high',
+      R_SMALL_MODEL_REASONING_EFFORT: 'low',
     });
 
     expect(JSON.parse(env.OPENCODE_CONFIG_CONTENT ?? '{}')).toEqual({
@@ -79,8 +79,8 @@ describe('buildOpenCodeCliEnv', () => {
 
   it('rewrites OpenRouter variant models to catalog base models with per-model options', () => {
     const env = buildOpenCodeCliEnv({
-      ROOMOTE_MODEL: 'openrouter/z-ai/glm-5.2:nitro',
-      ROOMOTE_MODEL_REASONING_EFFORT: 'high',
+      R_MODEL: 'openrouter/z-ai/glm-5.2:nitro',
+      R_MODEL_REASONING_EFFORT: 'high',
     });
 
     expect(JSON.parse(env.OPENCODE_CONFIG_CONTENT ?? '{}')).toEqual({
@@ -103,8 +103,8 @@ describe('buildOpenCodeCliEnv', () => {
 
   it('lets the coding model variant win when roles disagree on a shared base model', () => {
     const env = buildOpenCodeCliEnv({
-      ROOMOTE_MODEL: 'openrouter/z-ai/glm-5.2:nitro',
-      ROOMOTE_SMALL_MODEL: 'openrouter/z-ai/glm-5.2:free',
+      R_MODEL: 'openrouter/z-ai/glm-5.2:nitro',
+      R_SMALL_MODEL: 'openrouter/z-ai/glm-5.2:free',
     });
 
     expect(JSON.parse(env.OPENCODE_CONFIG_CONTENT ?? '{}')).toEqual({
@@ -122,10 +122,10 @@ describe('buildOpenCodeCliEnv', () => {
 
   it('lets the coding model reasoning level win when both roles share a model', () => {
     const env = buildOpenCodeCliEnv({
-      ROOMOTE_MODEL: 'openrouter/openai/gpt-5.4',
-      ROOMOTE_SMALL_MODEL: 'openrouter/openai/gpt-5.4',
-      ROOMOTE_MODEL_REASONING_EFFORT: 'high',
-      ROOMOTE_SMALL_MODEL_REASONING_EFFORT: 'low',
+      R_MODEL: 'openrouter/openai/gpt-5.4',
+      R_SMALL_MODEL: 'openrouter/openai/gpt-5.4',
+      R_MODEL_REASONING_EFFORT: 'high',
+      R_SMALL_MODEL_REASONING_EFFORT: 'low',
     });
 
     expect(JSON.parse(env.OPENCODE_CONFIG_CONTENT ?? '{}')).toEqual({

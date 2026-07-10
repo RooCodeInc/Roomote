@@ -1,7 +1,7 @@
 import { getDefaultDocsUrl, resolveAppEnv } from './app-env';
 
 describe('resolveAppEnv', () => {
-  it('maps APP_ENV and ROOMOTE_APP_ENV values', () => {
+  it('maps APP_ENV and R_APP_ENV values', () => {
     expect(
       resolveAppEnv({
         NODE_ENV: 'test',
@@ -11,7 +11,7 @@ describe('resolveAppEnv', () => {
     expect(
       resolveAppEnv({
         NODE_ENV: 'test',
-        ROOMOTE_APP_ENV: 'production',
+        R_APP_ENV: 'production',
       } as NodeJS.ProcessEnv),
     ).toBe('production');
   });

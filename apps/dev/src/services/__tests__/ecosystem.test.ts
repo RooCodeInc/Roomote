@@ -101,10 +101,10 @@ describe('ecosystem.config.js', () => {
   it('passes model config and configured provider keys to controller services', () => {
     process.env = {
       ...originalEnv,
-      ROOMOTE_MODEL: 'openrouter/openai/gpt-5.4',
-      ROOMOTE_SMALL_MODEL: 'openrouter/openai/gpt-5.4-mini',
-      ROOMOTE_VISION_MODEL: 'openrouter/openai/gpt-5.5',
-      ROOMOTE_MODEL_ENV_KEYS: 'CUSTOM_PROVIDER_API_KEY',
+      R_MODEL: 'openrouter/openai/gpt-5.4',
+      R_SMALL_MODEL: 'openrouter/openai/gpt-5.4-mini',
+      R_VISION_MODEL: 'openrouter/openai/gpt-5.5',
+      R_MODEL_ENV_KEYS: 'CUSTOM_PROVIDER_API_KEY',
       OPENROUTER_API_KEY: 'test-openrouter-key',
       CUSTOM_PROVIDER_API_KEY: 'custom-provider-key',
     };
@@ -113,27 +113,27 @@ describe('ecosystem.config.js', () => {
     const controllerApp = apps.find((app) => app.name === 'roomote-controller');
 
     expect(controllerApp?.env).toMatchObject({
-      ROOMOTE_MODEL: 'openrouter/openai/gpt-5.4',
-      ROOMOTE_SMALL_MODEL: 'openrouter/openai/gpt-5.4-mini',
-      ROOMOTE_VISION_MODEL: 'openrouter/openai/gpt-5.5',
-      ROOMOTE_MODEL_ENV_KEYS: 'CUSTOM_PROVIDER_API_KEY',
+      R_MODEL: 'openrouter/openai/gpt-5.4',
+      R_SMALL_MODEL: 'openrouter/openai/gpt-5.4-mini',
+      R_VISION_MODEL: 'openrouter/openai/gpt-5.5',
+      R_MODEL_ENV_KEYS: 'CUSTOM_PROVIDER_API_KEY',
       OPENROUTER_API_KEY: 'test-openrouter-key',
       CUSTOM_PROVIDER_API_KEY: 'custom-provider-key',
     });
   });
 
-  it('uses ROOMOTE_PUBLIC_URL as the local app callback base', () => {
+  it('uses R_PUBLIC_URL as the local app callback base', () => {
     process.env = {
       ...originalEnv,
-      ROOMOTE_PUBLIC_URL: 'https://roomote-matt.ngrok.app',
+      R_PUBLIC_URL: 'https://roomote-matt.ngrok.app',
     };
 
     const apps = loadEcosystemApps();
     const webApp = apps.find((app) => app.name === 'roomote-web');
 
     expect(webApp?.env).toMatchObject({
-      ROOMOTE_PUBLIC_URL: 'https://roomote-matt.ngrok.app',
-      ROOMOTE_APP_URL: 'https://roomote-matt.ngrok.app',
+      R_PUBLIC_URL: 'https://roomote-matt.ngrok.app',
+      R_APP_URL: 'https://roomote-matt.ngrok.app',
       SLACK_REDIRECT_URI: 'https://roomote-matt.ngrok.app/api/slack/callback',
       SLACK_AUTH_URI: 'https://roomote-matt.ngrok.app/api/slack/auth',
       LINEAR_REDIRECT_URI: 'https://roomote-matt.ngrok.app/api/linear/callback',

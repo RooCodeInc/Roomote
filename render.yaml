@@ -22,7 +22,7 @@
 #   service receives host-only references (`ROOMOTE_WEB_HOST`,
 #   `ROOMOTE_API_HOST`, `ROOMOTE_MINIO_HOST`, `ROOMOTE_MINIO_HOSTPORT`) and
 #   the entrypoint dispatcher composes the URL-shaped variables
-#   (`ROOMOTE_APP_URL`, `TRPC_URL`, `S3_ENDPOINT`, `S3_PRESIGN_ENDPOINT`)
+#   (`R_APP_URL`, `TRPC_URL`, `S3_ENDPOINT`, `S3_PRESIGN_ENDPOINT`)
 #   from them when they are unset. The cross-service references use
 #   Render's `fromService` + `envVarKey` form against the Render-provided
 #   `RENDER_EXTERNAL_HOSTNAME`; the first-boot verification in

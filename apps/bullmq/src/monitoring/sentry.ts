@@ -68,7 +68,7 @@ function resolveBullMqSentryDsn(): string | undefined {
 
 function resolveBullMqSentryEnvironment(): string | undefined {
   return (
-    process.env.ROOMOTE_APP_ENV?.trim() ||
+    process.env.R_APP_ENV?.trim() ||
     process.env.APP_ENV?.trim() ||
     process.env.NODE_ENV?.trim() ||
     'development'

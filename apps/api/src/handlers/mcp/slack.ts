@@ -109,7 +109,7 @@ function buildSlackThreadReplyTaskUrl({
   taskId: string;
   payload: unknown;
 }): string {
-  const origin = Env.ROOMOTE_APP_URL;
+  const origin = Env.R_APP_URL;
   const webPath = getSlackThreadReplyWebPath(payload);
   const baseUrl = webPath ? `${origin}${webPath}` : `${origin}/task/${taskId}`;
   const url = new URL(baseUrl);
@@ -122,7 +122,7 @@ function buildSlackThreadReplyTaskUrl({
 }
 
 function absolutizeSetupMarkdownLinks(text: string): string {
-  const origin = Env.ROOMOTE_APP_URL;
+  const origin = Env.R_APP_URL;
 
   return text.replace(
     /\[([^\]]+)\]\((\/setup(?:[/?#][^)]+)?)\)/g,

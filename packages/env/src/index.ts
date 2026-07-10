@@ -48,6 +48,7 @@ function emptyStringDefault() {
 }
 
 const serverSchema = {
+  R_APP_ENV: z.enum(['development', 'preview', 'production']).optional(),
   APP_ENV: z.enum(['development', 'preview', 'production']).optional(),
   DEFAULT_COMPUTE_PROVIDER: z
     .enum(['modal', 'docker', 'daytona', 'e2b'])
@@ -67,8 +68,8 @@ const serverSchema = {
     .default(process.arch === 'arm64' ? 'linux/arm64' : 'linux/amd64'),
   DOCKER_WORKER_NETWORK: z.string().min(1).optional(),
   DOCKER_WORKER_RELEASE_PATH: z.string().min(1).optional(),
-  ROOMOTE_PUBLIC_URL: z.string().url().optional(),
-  ROOMOTE_APP_URL: z.string().min(1),
+  R_PUBLIC_URL: z.string().url().optional(),
+  R_APP_URL: z.string().min(1),
   // Anonymous telemetry + version checks (Ping service).
   ROOMOTE_PING_BASE_URL: z.string().url().default('https://ping.roomote.dev'),
   // Force-enable telemetry in environments that would otherwise stay silent
@@ -77,19 +78,19 @@ const serverSchema = {
   // Release tag baked into published app images by the publish workflow.
   RELEASE_VERSION: z.string().min(1).optional(),
   TRPC_URL: z.string().min(1),
-  ROOMOTE_MODEL: z.string().min(1).optional(),
-  ROOMOTE_SMALL_MODEL: z.string().min(1).optional(),
-  ROOMOTE_VISION_MODEL: z.string().min(1).optional(),
-  ROOMOTE_CODE_REVIEW_MODEL: z.string().min(1).optional(),
-  ROOMOTE_EXPLORE_MODEL: z.string().min(1).optional(),
-  ROOMOTE_PLANNING_MODEL: z.string().min(1).optional(),
-  ROOMOTE_MODEL_REASONING_EFFORT: z.string().min(1).optional(),
-  ROOMOTE_SMALL_MODEL_REASONING_EFFORT: z.string().min(1).optional(),
-  ROOMOTE_VISION_MODEL_REASONING_EFFORT: z.string().min(1).optional(),
-  ROOMOTE_CODE_REVIEW_MODEL_REASONING_EFFORT: z.string().min(1).optional(),
-  ROOMOTE_EXPLORE_MODEL_REASONING_EFFORT: z.string().min(1).optional(),
-  ROOMOTE_PLANNING_MODEL_REASONING_EFFORT: z.string().min(1).optional(),
-  ROOMOTE_MODEL_ENV_KEYS: z.string().min(1).optional(),
+  R_MODEL: z.string().min(1).optional(),
+  R_SMALL_MODEL: z.string().min(1).optional(),
+  R_VISION_MODEL: z.string().min(1).optional(),
+  R_CODE_REVIEW_MODEL: z.string().min(1).optional(),
+  R_EXPLORE_MODEL: z.string().min(1).optional(),
+  R_PLANNING_MODEL: z.string().min(1).optional(),
+  R_MODEL_REASONING_EFFORT: z.string().min(1).optional(),
+  R_SMALL_MODEL_REASONING_EFFORT: z.string().min(1).optional(),
+  R_VISION_MODEL_REASONING_EFFORT: z.string().min(1).optional(),
+  R_CODE_REVIEW_MODEL_REASONING_EFFORT: z.string().min(1).optional(),
+  R_EXPLORE_MODEL_REASONING_EFFORT: z.string().min(1).optional(),
+  R_PLANNING_MODEL_REASONING_EFFORT: z.string().min(1).optional(),
+  R_MODEL_ENV_KEYS: z.string().min(1).optional(),
   DATABASE_URL: z.string().min(1),
   REDIS_URL: z.string().min(1),
   ROOMOTE_AUTO_GENERATE_KEYS: z.string().optional(),
@@ -100,22 +101,23 @@ const serverSchema = {
   SANDBOX_OIDC_PRIVATE_KEY: z.string().min(1).optional(),
   SANDBOX_OIDC_PUBLIC_KEY: z.string().min(1).optional(),
   SANDBOX_OIDC_PUBLIC_KEY_SECONDARY: z.string().min(1).optional(),
-  GITHUB_APP_ID: emptyStringDefault(),
-  GITHUB_APP_PRIVATE_KEY: emptyStringDefault(),
-  GITHUB_CLIENT_ID: emptyStringDefault(),
-  GITHUB_CLIENT_SECRET: emptyStringDefault(),
+  R_GITHUB_APP_ID: emptyStringDefault(),
+  R_GITHUB_APP_SLUG: z.string().min(1).default('roomote'),
+  R_GITHUB_APP_PRIVATE_KEY: emptyStringDefault(),
+  R_GITHUB_CLIENT_ID: emptyStringDefault(),
+  R_GITHUB_CLIENT_SECRET: emptyStringDefault(),
   GITHUB_MCP_SERVER_URL: z.string().min(1).optional(),
-  GITHUB_WEBHOOK_SECRET: emptyStringDefault(),
+  R_GITHUB_WEBHOOK_SECRET: emptyStringDefault(),
   GITLAB_WEBHOOK_SECRET: emptyStringDefault(),
   GITLAB_WEBHOOK_SIGNING_TOKEN: emptyStringDefault(),
   WORKER_RELEASE_CHANNEL: z.enum(['stable', 'preview']).optional(),
   WORKER_RELEASE_VERSION: z.string().min(1).optional(),
   SLACK_APP_ID: emptyStringDefault(),
-  SLACK_CLIENT_ID: emptyStringDefault(),
-  SLACK_CLIENT_SECRET: emptyStringDefault(),
+  R_SLACK_CLIENT_ID: z.string().min(1).optional(),
+  R_SLACK_CLIENT_SECRET: z.string().min(1).optional(),
   SLACK_REDIRECT_URI: emptyStringDefault(),
   SLACK_AUTH_URI: emptyStringDefault(),
-  SLACK_SIGNING_SECRET: emptyStringDefault(),
+  R_SLACK_SIGNING_SECRET: z.string().min(1).optional(),
   SLACK_API_BASE_URL: z.string().url().default('https://slack.com/api/'),
   SLACK_UNFURL_ALLOWED_DOMAINS: z.string().optional(),
   ROUTER_DEBUG_CHANNEL_ID: z.string().optional(),
@@ -123,21 +125,19 @@ const serverSchema = {
   // CONTROL_PLANE_ENV_VAR_NAMES (packages/types/src/control-plane-env-vars.ts)
   // unless it is already a `secret` field in a setup catalog, or it leaks into
   // task sandboxes.
-  TEAMS_BOT_APP_ID: z.string().min(1).optional(),
-  TEAMS_BOT_APP_PASSWORD: z.string().min(1).optional(),
-  TEAMS_BOT_TENANT_ID: z.string().min(1).optional(),
-  TEAMS_BOT_NAME: z.string().min(1).optional(),
-  TEAMS_BOT_TOKEN_ENDPOINT: z.string().url().optional(),
-  TEAMS_BOT_OAUTH_SCOPE: z.string().min(1).optional(),
+  R_TEAMS_BOT_APP_ID: z.string().min(1).optional(),
+  R_TEAMS_BOT_APP_PASSWORD: z.string().min(1).optional(),
+  R_TEAMS_BOT_TENANT_ID: z.string().min(1).optional(),
+  R_TEAMS_BOT_NAME: z.string().min(1).optional(),
+  R_TEAMS_BOT_TOKEN_ENDPOINT: z.string().url().optional(),
+  R_TEAMS_BOT_OAUTH_SCOPE: z.string().min(1).optional(),
   TELEGRAM_BOT_TOKEN: z.string().min(1).optional(),
   TELEGRAM_WEBHOOK_SECRET: z.string().min(1).optional(),
   TELEGRAM_BOT_USERNAME: z.string().min(1).optional(),
   TELEGRAM_API_BASE_URL: z.string().url().default('https://api.telegram.org'),
-  ROOMOTE_AUTH_SLACK_CLIENT_ID: z.string().min(1).optional(),
-  ROOMOTE_AUTH_SLACK_CLIENT_SECRET: z.string().min(1).optional(),
-  ROOMOTE_AUTH_MICROSOFT_CLIENT_ID: z.string().min(1).optional(),
-  ROOMOTE_AUTH_MICROSOFT_CLIENT_SECRET: z.string().min(1).optional(),
-  ROOMOTE_AUTH_MICROSOFT_TENANT_ID: z.string().min(1).optional(),
+  R_MICROSOFT_CLIENT_ID: z.string().min(1).optional(),
+  R_MICROSOFT_CLIENT_SECRET: z.string().min(1).optional(),
+  R_MICROSOFT_TENANT_ID: z.string().min(1).optional(),
   LINEAR_CLIENT_ID: z.string().min(1).optional(),
   LINEAR_CLIENT_SECRET: z.string().min(1).optional(),
   LINEAR_WEBHOOK_SECRET: z.string().min(1).optional(),
@@ -191,7 +191,7 @@ const serverSchema = {
   GITHUB_AUTOMATED_SKIP_REPOS: z.string().optional(),
   GITHUB_AUTOMATED_SKIP_OWNERS: z.string().optional(),
   PREVIEW_DOMAINS: emptyStringDefault(),
-  ROOMOTE_ALLOWED_EMAILS: z.string().optional(),
+  R_ALLOWED_EMAILS: z.string().optional(),
   PREVIEW_TOKEN_TTL_SECONDS: z.coerce.number().int().positive().default(3600),
   SLACK_API_TIMEOUT_MS: z.coerce.number().int().positive().default(10_000),
   API_EXTERNAL_REQUEST_TIMEOUT_MS: z.coerce
@@ -225,7 +225,7 @@ export type RoomoteService = (typeof ROOMOTE_SERVICE_VALUES)[number];
 type ServerEnvKey = keyof typeof serverSchema;
 
 const REQUIRED_SERVER_ENV_KEYS = new Set<ServerEnvKey>([
-  'ROOMOTE_APP_URL',
+  'R_APP_URL',
   'TRPC_URL',
   'DATABASE_URL',
   'REDIS_URL',
@@ -248,7 +248,7 @@ const REQUIRED_SERVER_ENV_KEYS = new Set<ServerEnvKey>([
 export const SERVICE_REQUIRED_SERVER_ENV_KEYS = {
   web: [...REQUIRED_SERVER_ENV_KEYS],
   api: [
-    'ROOMOTE_APP_URL',
+    'R_APP_URL',
     'TRPC_URL',
     'DATABASE_URL',
     'REDIS_URL',
@@ -262,20 +262,20 @@ export const SERVICE_REQUIRED_SERVER_ENV_KEYS = {
     'S3_BUCKET_ARTIFACTS',
   ],
   controller: [
-    'ROOMOTE_APP_URL',
+    'R_APP_URL',
     'TRPC_URL',
     'DATABASE_URL',
     'REDIS_URL',
     'ENCRYPTION_KEY',
   ],
   bullmq: [
-    'ROOMOTE_APP_URL',
+    'R_APP_URL',
     'DATABASE_URL',
     'REDIS_URL',
     'DASHBOARD_PASSWORD',
     'ENCRYPTION_KEY',
   ],
-  'preview-proxy': ['ROOMOTE_APP_URL', 'DATABASE_URL', 'REDIS_URL'],
+  'preview-proxy': ['R_APP_URL', 'DATABASE_URL', 'REDIS_URL'],
   'db-migrate': ['DATABASE_URL'],
 } as const satisfies Record<RoomoteService, readonly ServerEnvKey[]>;
 
@@ -307,17 +307,16 @@ function buildServiceServerSchema(
   ) as typeof serverSchema;
 }
 
-const clientSchema = {
-  NEXT_PUBLIC_GITHUB_APP_SLUG: z.string().min(1).default('roomote'),
-};
+const clientSchema = {};
 
 /** Keys whose runtime resolution requires more than a plain `resolve(key)`. */
 const OVERRIDE_KEYS = new Set(['NODE_ENV', 'APP_ENV', 'SLACK_API_TIMEOUT_MS']);
 
 const OPTIONAL_NON_EMPTY_KEYS = new Set([
   'DOCKER_WORKER_IMAGE',
-  'ROOMOTE_PUBLIC_URL',
-  'ROOMOTE_APP_URL',
+  'R_APP_ENV',
+  'R_PUBLIC_URL',
+  'R_APP_URL',
   'ROOMOTE_AUTO_GENERATE_KEYS',
   'S3_AUTO_CREATE_BUCKET',
   'SANDBOX_OIDC_PRIVATE_KEY',
@@ -330,20 +329,20 @@ const OPTIONAL_NON_EMPTY_KEYS = new Set([
   'ROOMOTE_PING_BASE_URL',
   'SLACK_UNFURL_ALLOWED_DOMAINS',
   'ROUTER_DEBUG_CHANNEL_ID',
-  'TEAMS_BOT_APP_ID',
-  'TEAMS_BOT_APP_PASSWORD',
-  'TEAMS_BOT_TENANT_ID',
-  'TEAMS_BOT_NAME',
-  'TEAMS_BOT_TOKEN_ENDPOINT',
-  'TEAMS_BOT_OAUTH_SCOPE',
+  'R_TEAMS_BOT_APP_ID',
+  'R_TEAMS_BOT_APP_PASSWORD',
+  'R_TEAMS_BOT_TENANT_ID',
+  'R_TEAMS_BOT_NAME',
+  'R_TEAMS_BOT_TOKEN_ENDPOINT',
+  'R_TEAMS_BOT_OAUTH_SCOPE',
   'TELEGRAM_BOT_TOKEN',
   'TELEGRAM_WEBHOOK_SECRET',
   'TELEGRAM_BOT_USERNAME',
-  'ROOMOTE_AUTH_SLACK_CLIENT_ID',
-  'ROOMOTE_AUTH_SLACK_CLIENT_SECRET',
-  'ROOMOTE_AUTH_MICROSOFT_CLIENT_ID',
-  'ROOMOTE_AUTH_MICROSOFT_CLIENT_SECRET',
-  'ROOMOTE_AUTH_MICROSOFT_TENANT_ID',
+  'R_SLACK_CLIENT_ID',
+  'R_SLACK_CLIENT_SECRET',
+  'R_MICROSOFT_CLIENT_ID',
+  'R_MICROSOFT_CLIENT_SECRET',
+  'R_MICROSOFT_TENANT_ID',
   'LINEAR_CLIENT_ID',
   'LINEAR_CLIENT_SECRET',
   'LINEAR_WEBHOOK_SECRET',
@@ -382,21 +381,21 @@ const OPTIONAL_NON_EMPTY_KEYS = new Set([
   'DOCKER_WORKER_RELEASE_PATH',
   'GITHUB_AUTOMATED_SKIP_REPOS',
   'GITHUB_AUTOMATED_SKIP_OWNERS',
-  'ROOMOTE_MODEL',
-  'ROOMOTE_SMALL_MODEL',
-  'ROOMOTE_VISION_MODEL',
-  'ROOMOTE_CODE_REVIEW_MODEL',
-  'ROOMOTE_EXPLORE_MODEL',
-  'ROOMOTE_PLANNING_MODEL',
-  'ROOMOTE_MODEL_REASONING_EFFORT',
-  'ROOMOTE_SMALL_MODEL_REASONING_EFFORT',
-  'ROOMOTE_VISION_MODEL_REASONING_EFFORT',
-  'ROOMOTE_CODE_REVIEW_MODEL_REASONING_EFFORT',
-  'ROOMOTE_EXPLORE_MODEL_REASONING_EFFORT',
-  'ROOMOTE_PLANNING_MODEL_REASONING_EFFORT',
-  'ROOMOTE_MODEL_ENV_KEYS',
-  'ROOMOTE_ALLOWED_EMAILS',
-  'NEXT_PUBLIC_GITHUB_APP_SLUG',
+  'R_MODEL',
+  'R_SMALL_MODEL',
+  'R_VISION_MODEL',
+  'R_CODE_REVIEW_MODEL',
+  'R_EXPLORE_MODEL',
+  'R_PLANNING_MODEL',
+  'R_MODEL_REASONING_EFFORT',
+  'R_SMALL_MODEL_REASONING_EFFORT',
+  'R_VISION_MODEL_REASONING_EFFORT',
+  'R_CODE_REVIEW_MODEL_REASONING_EFFORT',
+  'R_EXPLORE_MODEL_REASONING_EFFORT',
+  'R_PLANNING_MODEL_REASONING_EFFORT',
+  'R_MODEL_ENV_KEYS',
+  'R_ALLOWED_EMAILS',
+  'R_GITHUB_APP_SLUG',
 ]);
 
 /**
@@ -564,16 +563,16 @@ function assertAuthKeypairEnv(
 }
 
 type MicrosoftAuthEnv = {
-  ROOMOTE_AUTH_MICROSOFT_CLIENT_ID?: string;
-  ROOMOTE_AUTH_MICROSOFT_CLIENT_SECRET?: string;
-  ROOMOTE_AUTH_MICROSOFT_TENANT_ID?: string;
+  R_MICROSOFT_CLIENT_ID?: string;
+  R_MICROSOFT_CLIENT_SECRET?: string;
+  R_MICROSOFT_TENANT_ID?: string;
 };
 
 function assertCompleteMicrosoftAuthEnv(env: MicrosoftAuthEnv) {
   const keys = [
-    'ROOMOTE_AUTH_MICROSOFT_CLIENT_ID',
-    'ROOMOTE_AUTH_MICROSOFT_CLIENT_SECRET',
-    'ROOMOTE_AUTH_MICROSOFT_TENANT_ID',
+    'R_MICROSOFT_CLIENT_ID',
+    'R_MICROSOFT_CLIENT_SECRET',
+    'R_MICROSOFT_TENANT_ID',
   ] as const;
   const configuredKeys = keys.filter((key) => Boolean(env[key]));
 
@@ -583,7 +582,7 @@ function assertCompleteMicrosoftAuthEnv(env: MicrosoftAuthEnv) {
 
   const missingKeys = keys.filter((key) => !env[key]);
   throw new Error(
-    `Microsoft auth requires ${missingKeys.join(', ')} when any ROOMOTE_AUTH_MICROSOFT_* value is set.`,
+    `Microsoft auth requires ${missingKeys.join(', ')} when any R_MICROSOFT_* value is set.`,
   );
 }
 
@@ -631,7 +630,7 @@ function buildRoomoteRuntimeEnv(
   const appEnv = resolveAppEnv(processEnv);
 
   if (nodeEnv !== 'production' && appEnv === 'development') {
-    env.ROOMOTE_APP_URL ??= getDefaultRoomoteAppUrl(appEnv);
+    env.R_APP_URL ??= getDefaultRoomoteAppUrl(appEnv);
     env.TRPC_URL ??= getDefaultTrpcUrl(appEnv);
     env.DATABASE_URL ??=
       nodeEnv === 'test'
@@ -655,8 +654,8 @@ function buildRoomoteRuntimeEnv(
   // Slack rejects the whole account-linking DM (invalid_blocks) when the
   // "Link accounts" button URL is not absolute, so an unset SLACK_AUTH_URI
   // must fall back to the web app's linking route rather than empty string.
-  if (!env.SLACK_AUTH_URI && env.ROOMOTE_APP_URL) {
-    env.SLACK_AUTH_URI = `${env.ROOMOTE_APP_URL.replace(/\/+$/, '')}/api/slack/auth`;
+  if (!env.SLACK_AUTH_URI && env.R_APP_URL) {
+    env.SLACK_AUTH_URI = `${env.R_APP_URL.replace(/\/+$/, '')}/api/slack/auth`;
   }
 
   return env;

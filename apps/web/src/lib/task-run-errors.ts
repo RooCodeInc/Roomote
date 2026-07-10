@@ -96,7 +96,7 @@ export function getTaskRunErrorDisplayMessage(
   const providerMessage = parsedBody?.error?.message?.trim();
 
   if (parsedBody?.error?.code === 'invalid_api_key') {
-    return 'Model provider request failed because a configured provider key is invalid. Check ROOMOTE_MODEL, ROOMOTE_SMALL_MODEL, ROOMOTE_VISION_MODEL, and the matching provider API key env vars.';
+    return 'Model provider request failed because a configured provider key is invalid. Check R_MODEL, R_SMALL_MODEL, R_VISION_MODEL, and the matching provider API key env vars.';
   }
 
   if (providerMessage) {

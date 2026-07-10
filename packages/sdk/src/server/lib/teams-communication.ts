@@ -12,18 +12,20 @@ function teamsBotEnvConfigFromCredentials(
   credentials: TeamsBotRuntimeCredentials,
 ): TeamsBotEnvConfig {
   return {
-    ...(credentials.botAppId ? { TEAMS_BOT_APP_ID: credentials.botAppId } : {}),
+    ...(credentials.botAppId
+      ? { R_TEAMS_BOT_APP_ID: credentials.botAppId }
+      : {}),
     ...(credentials.botAppPassword
-      ? { TEAMS_BOT_APP_PASSWORD: credentials.botAppPassword }
+      ? { R_TEAMS_BOT_APP_PASSWORD: credentials.botAppPassword }
       : {}),
     ...(credentials.botTenantId
-      ? { TEAMS_BOT_TENANT_ID: credentials.botTenantId }
+      ? { R_TEAMS_BOT_TENANT_ID: credentials.botTenantId }
       : {}),
     ...(credentials.botTokenEndpoint
-      ? { TEAMS_BOT_TOKEN_ENDPOINT: credentials.botTokenEndpoint }
+      ? { R_TEAMS_BOT_TOKEN_ENDPOINT: credentials.botTokenEndpoint }
       : {}),
     ...(credentials.botOauthScope
-      ? { TEAMS_BOT_OAUTH_SCOPE: credentials.botOauthScope }
+      ? { R_TEAMS_BOT_OAUTH_SCOPE: credentials.botOauthScope }
       : {}),
   };
 }

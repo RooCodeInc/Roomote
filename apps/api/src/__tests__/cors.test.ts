@@ -1,8 +1,8 @@
 const { mockEnv } = vi.hoisted(() => ({
   mockEnv: {
     APP_ENV: 'production' as string | undefined,
-    ROOMOTE_APP_URL: 'https://app.example.com',
-    ROOMOTE_PUBLIC_URL: undefined as string | undefined,
+    R_APP_URL: 'https://app.example.com',
+    R_PUBLIC_URL: undefined as string | undefined,
   },
 }));
 
@@ -18,8 +18,8 @@ async function loadResolver() {
 describe('resolveApiCorsOrigin', () => {
   beforeEach(() => {
     mockEnv.APP_ENV = 'production';
-    mockEnv.ROOMOTE_APP_URL = 'https://app.example.com';
-    mockEnv.ROOMOTE_PUBLIC_URL = undefined;
+    mockEnv.R_APP_URL = 'https://app.example.com';
+    mockEnv.R_PUBLIC_URL = undefined;
   });
 
   it('reflects a configured app origin in production', async () => {
@@ -33,7 +33,7 @@ describe('resolveApiCorsOrigin', () => {
   });
 
   it('also allows the configured public URL origin', async () => {
-    mockEnv.ROOMOTE_PUBLIC_URL = 'https://roomote.ngrok.app';
+    mockEnv.R_PUBLIC_URL = 'https://roomote.ngrok.app';
     const resolve = await loadResolver();
     expect(resolve('https://roomote.ngrok.app')).toBe(
       'https://roomote.ngrok.app',

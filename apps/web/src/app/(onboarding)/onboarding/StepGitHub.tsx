@@ -11,7 +11,7 @@ import { StepCompletedBadge } from '../setup/StepCompletedBadge';
 import { StepTitle } from '../setup/StepTitle';
 
 const githubAppMention = getGitHubAppMention(
-  process.env.NEXT_PUBLIC_GITHUB_APP_SLUG || 'roomote',
+  process.env.R_GITHUB_APP_SLUG || 'roomote',
 );
 
 export function StepGitHub({

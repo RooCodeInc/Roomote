@@ -98,10 +98,7 @@ export async function postScheduledSuggestionsToTeams(params: {
     MAX_TEAMS_AUTOMATION_SUGGESTIONS,
   );
   const overflowCount = suggestions.length - limitedSuggestions.length;
-  const automationsUrl = new URL(
-    '/automations',
-    Env.ROOMOTE_APP_URL,
-  ).toString();
+  const automationsUrl = new URL('/automations', Env.R_APP_URL).toString();
   const automationLabel =
     getScheduledSuggestionBackgroundAutomationDescriptor(
       params.suggestionSource,

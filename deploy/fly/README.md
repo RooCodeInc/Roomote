@@ -162,9 +162,9 @@ Everything sensitive is a Fly secret, set once for the app:
 
 Notes:
 
-- `ROOMOTE_APP_URL` is the **single canonical-origin knob**: it is the URL
-  users browse. Do not set `ROOMOTE_PUBLIC_URL` — it is optional and the app
-  falls back to `ROOMOTE_APP_URL` everywhere it would apply. See
+- `R_APP_URL` is the **single canonical-origin knob**: it is the URL
+  users browse. Do not set `R_PUBLIC_URL` — it is optional and the app
+  falls back to `R_APP_URL` everywhere it would apply. See
   [Attaching a custom domain](#attaching-a-custom-domain).
 - Leave `DOCKER_WORKER_IMAGE` and `MODAL_BASE_IMAGE_REF` **unset**. The app
   derives both from the `RELEASE_VERSION` baked into the running image, so
@@ -211,7 +211,7 @@ workers. Pre-create the bucket, or set `S3_AUTO_CREATE_BUCKET=true` in
 3. Create the founding admin account (email/password works immediately;
    Slack or Microsoft sign-in can be added later).
 4. Connect GitHub with **Create GitHub App** — the manifest flow derives the
-   callback and webhook URLs from `ROOMOTE_APP_URL` and `TRPC_URL`, so no
+   callback and webhook URLs from `R_APP_URL` and `TRPC_URL`, so no
    manual URL entry is needed.
 5. Enter the sandbox provider credentials (Modal token pair for the default)
    and the model provider key when the wizard asks. When swapping to E2B or
@@ -223,7 +223,7 @@ workers. Pre-create the bucket, or set `S3_AUTO_CREATE_BUCKET=true` in
 
 ## Attaching a custom domain
 
-The app boots on its `fly.dev` hostname, and `ROOMOTE_APP_URL` — the origin
+The app boots on its `fly.dev` hostname, and `R_APP_URL` — the origin
 users browse — is stamped into `fly.toml` at launch. Adding a certificate
 alone does not change what the app treats as canonical; the symptom of a
 mismatch is a working dashboard that rejects signup, login, and OAuth flows
@@ -231,7 +231,7 @@ with `403 {"error":"Invalid origin"}`.
 
 1. Point a CNAME (or A/AAAA from `fly ips list`) at the app and run
    `fly certs add app.example.com`.
-2. In `fly.toml`, set `ROOMOTE_APP_URL = 'https://app.example.com'` and run
+2. In `fly.toml`, set `R_APP_URL = 'https://app.example.com'` and run
    `fly deploy`.
 
 Everything derived from the canonical origin follows: auth origins, OAuth

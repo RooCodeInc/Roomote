@@ -79,8 +79,8 @@ vi.mock('@/lib/server', () => ({
 
 vi.mock('@/lib/server/env', () => ({
   Env: {
-    ROOMOTE_APP_URL: 'https://roomote.example.com',
-    ROOMOTE_PUBLIC_URL: undefined,
+    R_APP_URL: 'https://roomote.example.com',
+    R_PUBLIC_URL: undefined,
   },
 }));
 

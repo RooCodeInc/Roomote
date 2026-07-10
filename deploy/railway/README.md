@@ -46,7 +46,7 @@ Compose paths in [SELF_HOSTING.md](../../SELF_HOSTING.md) instead.
   ships with zero required deploy-time inputs. Modal tokens and the model
   provider API key are entered in the `/setup` wizard (or Settings) after
   first boot and stored encrypted in Postgres. The one optional prompt on
-  the deploy screen is `ROOMOTE_APP_URL`, for deployers who want a custom
+  the deploy screen is `R_APP_URL`, for deployers who want a custom
   domain from the start (see
   [Attaching a custom domain](#attaching-a-custom-domain)).
 - **Live previews are off by default, but the proxy ships ready.** Preview
@@ -162,7 +162,7 @@ DEFAULT_COMPUTE_PROVIDER=modal
 EXCLUDED_COMPUTE_PROVIDERS=docker
 DATABASE_URL=${{Postgres.DATABASE_URL}}
 REDIS_URL=${{Redis.REDIS_URL}}
-ROOMOTE_APP_URL=https://${{web.RAILWAY_PUBLIC_DOMAIN}}
+R_APP_URL=https://${{web.RAILWAY_PUBLIC_DOMAIN}}
 TRPC_URL=https://${{api.RAILWAY_PUBLIC_DOMAIN}}
 S3_ENDPOINT=http://${{minio.RAILWAY_PRIVATE_DOMAIN}}:9000
 S3_PRESIGN_ENDPOINT=https://${{minio.RAILWAY_PUBLIC_DOMAIN}}
@@ -190,7 +190,7 @@ DEFAULT_COMPUTE_PROVIDER=${{api.DEFAULT_COMPUTE_PROVIDER}}
 EXCLUDED_COMPUTE_PROVIDERS=${{api.EXCLUDED_COMPUTE_PROVIDERS}}
 DATABASE_URL=${{Postgres.DATABASE_URL}}
 REDIS_URL=${{Redis.REDIS_URL}}
-ROOMOTE_APP_URL=${{api.ROOMOTE_APP_URL}}
+R_APP_URL=${{api.R_APP_URL}}
 TRPC_URL=${{api.TRPC_URL}}
 S3_ENDPOINT=${{api.S3_ENDPOINT}}
 S3_PRESIGN_ENDPOINT=${{api.S3_PRESIGN_ENDPOINT}}
@@ -219,13 +219,13 @@ MINIO_ROOT_PASSWORD=${{api.S3_SECRET_ACCESS_KEY}}
 
 Notes:
 
-- `ROOMOTE_APP_URL` on api is the **single canonical-origin knob**: it is the
+- `R_APP_URL` on api is the **single canonical-origin knob**: it is the
   URL users browse, and web/controller/bullmq/preview-proxy reference
-  `${{api.ROOMOTE_APP_URL}}` rather than repeating the value. It is also the
+  `${{api.R_APP_URL}}` rather than repeating the value. It is also the
   template's one optional deploy-time prompt — the deploy screen shows it
   pre-filled with the generated-domain reference so a custom domain can be
-  entered before first boot. Do not set `ROOMOTE_PUBLIC_URL` — it is
-  optional and the app falls back to `ROOMOTE_APP_URL` everywhere it would
+  entered before first boot. Do not set `R_PUBLIC_URL` — it is
+  optional and the app falls back to `R_APP_URL` everywhere it would
   apply. See [Attaching a custom domain](#attaching-a-custom-domain).
 - Leave `DOCKER_WORKER_IMAGE` and `MODAL_BASE_IMAGE_REF` **unset**. The app
   derives both from the `RELEASE_VERSION` baked into the running image, so
@@ -295,14 +295,14 @@ logs a warning when creation fails).
 2. Open `https://<web-domain>/setup` and paste the `SETUP_TOKEN` value from
    the api service's Variables tab into the wizard's token step (or append
    `?token=<SETUP_TOKEN>` to the URL). If you
-   entered a custom domain in the `ROOMOTE_APP_URL` prompt at deploy time,
+   entered a custom domain in the `R_APP_URL` prompt at deploy time,
    attach that domain to the web service and finish DNS first, then open
    `/setup` on the custom domain — the generated domain will reject auth
    with `403 Invalid origin`.
 3. Create the founding admin account (email/password works immediately;
    Slack or Microsoft sign-in can be added later).
 4. Connect GitHub with **Create GitHub App** — the manifest flow derives the
-   callback and webhook URLs from `ROOMOTE_APP_URL` and `TRPC_URL`, so no
+   callback and webhook URLs from `R_APP_URL` and `TRPC_URL`, so no
    manual URL entry is needed.
 5. Enter the sandbox provider credentials (Modal token pair for the default)
    and the model provider key when the wizard asks. When swapping to E2B or
@@ -315,7 +315,7 @@ logs a warning when creation fails).
 ## Attaching a custom domain
 
 By default the template boots on Railway-generated domains, and
-`ROOMOTE_APP_URL` — the origin users browse — derives from the web service's
+`R_APP_URL` — the origin users browse — derives from the web service's
 generated domain. A custom domain can be set either at deploy time (through
 the template's one optional prompt) or after deploy (a one-variable edit).
 Setting it at deploy time is preferable when you already own the domain:
@@ -323,7 +323,7 @@ everything the setup wizard registers — in particular the GitHub App's OAuth
 callback and webhook URLs — derives from the canonical origin, so getting it
 right before `/setup` avoids reconnecting integrations later.
 
-**At deploy time.** The deploy screen shows `ROOMOTE_APP_URL` on the api
+**At deploy time.** The deploy screen shows `R_APP_URL` on the api
 service pre-filled with the generated-domain reference
 (`https://${{web.RAILWAY_PUBLIC_DOMAIN}}`). Replace it with your domain, for
 example `https://app.example.com`. Then, after the project deploys:
@@ -331,7 +331,7 @@ example `https://app.example.com`. Then, after the project deploys:
 1. Add `app.example.com` as a custom domain on the **web** service and
    complete the DNS setup.
 2. Open `/setup` on the custom domain — not the generated one. Once
-   `ROOMOTE_APP_URL` points at the custom domain, the generated web domain
+   `R_APP_URL` points at the custom domain, the generated web domain
    rejects signup and login with `403 {"error":"Invalid origin"}`, which is
    expected: only the canonical origin is trusted.
 
@@ -340,13 +340,13 @@ running deployment, Railway does **not** update `RAILWAY_PUBLIC_DOMAIN`, so
 the app keeps treating the generated domain as canonical. The symptom is a
 working dashboard that rejects signup, login, and OAuth flows with
 `403 {"error":"Invalid origin"}`: the browser sends the custom domain as its
-`Origin`, and the auth layer only trusts `ROOMOTE_APP_URL`. The fix is a
+`Origin`, and the auth layer only trusts `R_APP_URL`. The fix is a
 one-variable edit, because the app services all reference
-`${{api.ROOMOTE_APP_URL}}`:
+`${{api.R_APP_URL}}`:
 
 1. Add the custom domain (for example `app.example.com`) to the **web**
    service in Railway and complete the DNS setup.
-2. On the **api** service, set `ROOMOTE_APP_URL=https://app.example.com` and
+2. On the **api** service, set `R_APP_URL=https://app.example.com` and
    accept Railway's prompt to redeploy the app services.
 
 Everything derived from the canonical origin follows: auth origins, OAuth
@@ -436,13 +436,13 @@ first-boot verification on a scratch Railway project before publishing an
 update (one scratch run on either channel covers a change that does not
 touch the image fields). When the change touches reference variables — in
 particular the `${{api.*}}` references to values that are themselves
-references, like `ROOMOTE_APP_URL` — also open each app service's Variables
+references, like `R_APP_URL` — also open each app service's Variables
 tab on the scratch project and confirm the resolved values are real URLs,
 not literal `${{...}}` strings.
 
-The `ROOMOTE_APP_URL` deploy-time prompt needs its own check on the scratch
+The `R_APP_URL` deploy-time prompt needs its own check on the scratch
 deploy: on the deploy screen, open the api service's **Configure** step and
-expand its pre-configured environment variables — `ROOMOTE_APP_URL` must
+expand its pre-configured environment variables — `R_APP_URL` must
 appear as an editable field with the description from `template.yaml` and
 the reference default pre-filled. Confirm that leaving the default still
 resolves to the generated web domain after deploy, and that overriding it

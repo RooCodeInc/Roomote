@@ -117,7 +117,7 @@ export type ReviewComment = z.infer<typeof reviewCommentSchema>;
 export const isRoomoteGitHubLogin = (login: string) => {
   const normalizedLogin = login.toLowerCase();
   const appSlugs = new Set([
-    Env.NEXT_PUBLIC_GITHUB_APP_SLUG.toLowerCase(),
+    Env.R_GITHUB_APP_SLUG.toLowerCase(),
     'roomote',
     'roomote-dev',
   ]);

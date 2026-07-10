@@ -133,7 +133,7 @@ export async function startNewTelegramTask(input: {
         text: input.queuedMessage.text,
       },
     ],
-    apiBaseUrl: Env.TRPC_URL ?? Env.ROOMOTE_APP_URL,
+    apiBaseUrl: Env.TRPC_URL ?? Env.R_APP_URL,
   });
   const routingDecision = await routeTask(routingContext);
 

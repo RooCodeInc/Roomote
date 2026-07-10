@@ -237,7 +237,7 @@ export async function startAutoRoutedSlackTask({
         taskDescription,
         {
           userId: launchUserId,
-          apiBaseUrl: Env.ROOMOTE_APP_URL,
+          apiBaseUrl: Env.R_APP_URL,
         },
       );
 

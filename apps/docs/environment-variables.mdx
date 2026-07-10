@@ -28,7 +28,7 @@ The exact order depends on the setting. A few important cases:
 
 - Provider credentials usually resolve as process env first, then saved
   deployment env vars.
-- Model role env vars such as `ROOMOTE_MODEL` override the same role selected
+- Model role env vars such as `R_MODEL` override the same role selected
   in **Settings > Models**.
 - Preview env vars such as `PREVIEW_PROXY_BASE_URL` override values saved from
   **Settings > Live Previews**.
@@ -66,8 +66,8 @@ Use environment variables when:
 
 For production and shared self-hosted deployments:
 
-- Set `NODE_ENV=production` and `APP_ENV=production`.
-- Set stable public URLs with `ROOMOTE_APP_URL`, `TRPC_URL`, and, when previews
+- Set `NODE_ENV=production` and `R_APP_ENV=production`.
+- Set stable public URLs with `R_APP_URL`, `TRPC_URL`, and, when previews
   are enabled, `PREVIEW_PROXY_BASE_URL`.
 - Provide `DATABASE_URL`, `REDIS_URL`, and S3-compatible artifact storage.
 - Generate strong `ENCRYPTION_KEY`, `ARTIFACT_SIGNING_KEY`, and
@@ -90,12 +90,12 @@ as per-task auth tokens or workspace paths.
 | Env var                       | Required             | Used for                                                                                                                                                                                                                                                                                                                                                                                                                              |
 | ----------------------------- | -------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `NODE_ENV`                    | Production           | Node runtime mode: `development`, `test`, or `production`. Production deploys should set `production`.                                                                                                                                                                                                                                                                                                                                |
-| `APP_ENV`                     | Recommended          | Roomote app environment: `development`, `preview`, or `production`. Also affects monitoring and local URL defaults.                                                                                                                                                                                                                                                                                                                   |
-| `ROOMOTE_PUBLIC_URL`          | Local callbacks      | Stable public HTTPS origin used by local development for OAuth and webhook callbacks.                                                                                                                                                                                                                                                                                                                                                 |
-| `ROOMOTE_APP_URL`             | Production           | Public web app origin. Workers and integrations use it for links back to Roomote.                                                                                                                                                                                                                                                                                                                                                     |
+| `R_APP_ENV`                   | Recommended          | Roomote app environment: `development`, `preview`, or `production`. Also affects monitoring and local URL defaults.                                                                                                                                                                                                                                                                                                                   |
+| `R_PUBLIC_URL`          | Local callbacks      | Stable public HTTPS origin used by local development for OAuth and webhook callbacks.                                                                                                                                                                                                                                                                                                                                                 |
+| `R_APP_URL`             | Production           | Public web app origin. Workers and integrations use it for links back to Roomote.                                                                                                                                                                                                                                                                                                                                                     |
 | `TRPC_URL`                    | Production           | API/tRPC origin used by workers and services. In single-origin production, this is often the app URL plus `/_roomote-api`.                                                                                                                                                                                                                                                                                                            |
-| `NEXT_PUBLIC_GITHUB_APP_SLUG` | GitHub setup         | GitHub App slug exposed to the browser. `GITHUB_APP_SLUG` is also accepted during source-control setup.                                                                                                                                                                                                                                                                                                                               |
-| `SETUP_TOKEN`                 | Required (non-local) | One-time bootstrap token that admits the first admin at `/setup`. Required on every non-local deployment — tokenless bootstrap is allowed only when `NODE_ENV` is not `production` and `APP_ENV` is `development`, so anything running with `NODE_ENV=production` needs it. Without it, first-admin bootstrap stays closed so nobody can claim the founding-admin slot by reaching the URL first. Optional only in local development. |
+| `R_GITHUB_APP_SLUG`           | GitHub setup         | GitHub App slug used by server-rendered setup and GitHub integration flows.                                                                                                                                                                                                                                                                                                                                                            |
+| `SETUP_TOKEN`                 | Required (non-local) | One-time bootstrap token that admits the first admin at `/setup`. Required on every non-local deployment — tokenless bootstrap is allowed only when `NODE_ENV` is not `production` and `R_APP_ENV` is `development`, so anything running with `NODE_ENV=production` needs it. Without it, first-admin bootstrap stays closed so nobody can claim the founding-admin slot by reaching the URL first. Optional only in local development. |
 | `DASHBOARD_PASSWORD`          | Production           | Local fallback/admin password value used by the deployment. Generate a strong secret.                                                                                                                                                                                                                                                                                                                                                 |
 | `WEB_DEV_LOGIN_EMAIL`         | Local only           | Convenience email for development login flows. Do not use as production access control.                                                                                                                                                                                                                                                                                                                                               |
 | `SKIP_ENV_VALIDATION`         | Avoid                | Skips env validation when present. Useful for narrow tooling cases, not normal deployments.                                                                                                                                                                                                                                                                                                                                           |
@@ -135,19 +135,19 @@ as per-task auth tokens or workspace paths.
 
 | Env var                                      | Required     | Used for                                                                                                                                |
 | -------------------------------------------- | ------------ | --------------------------------------------------------------------------------------------------------------------------------------- |
-| `ROOMOTE_MODEL`                              | Optional     | Env-level default coding model. Overrides the default selected in **Settings > Models** for new task starts.                            |
-| `ROOMOTE_SMALL_MODEL`                        | Optional     | Helper model for routing, titles, summaries, and lightweight model calls.                                                               |
-| `ROOMOTE_VISION_MODEL`                       | Optional     | Vision-capable model for visual inspection and screenshot/image work.                                                                   |
-| `ROOMOTE_CODE_REVIEW_MODEL`                  | Optional     | Model for initial PR/MR review and review-sync tasks.                                                                                   |
-| `ROOMOTE_EXPLORE_MODEL`                      | Optional     | Exploration/helper model for investigation-oriented subtasks.                                                                           |
-| `ROOMOTE_PLANNING_MODEL`                     | Optional     | Planning model used for longer coding-task planning.                                                                                    |
-| `ROOMOTE_MODEL_REASONING_EFFORT`             | Optional     | Reasoning level for the coding model: `low`, `medium`, `high`, or `xhigh`.                                                              |
-| `ROOMOTE_SMALL_MODEL_REASONING_EFFORT`       | Optional     | Reasoning level for the helper model.                                                                                                   |
-| `ROOMOTE_VISION_MODEL_REASONING_EFFORT`      | Optional     | Reasoning level for the vision model.                                                                                                   |
-| `ROOMOTE_CODE_REVIEW_MODEL_REASONING_EFFORT` | Optional     | Reasoning level for the code review model.                                                                                              |
-| `ROOMOTE_EXPLORE_MODEL_REASONING_EFFORT`     | Optional     | Reasoning level for the exploration model.                                                                                              |
-| `ROOMOTE_PLANNING_MODEL_REASONING_EFFORT`    | Optional     | Reasoning level for the planning model.                                                                                                 |
-| `ROOMOTE_MODEL_ENV_KEYS`                     | Optional     | Comma- or space-separated list of extra provider key env vars to forward to task workers.                                               |
+| `R_MODEL`                              | Optional     | Env-level default coding model. Overrides the default selected in **Settings > Models** for new task starts.                            |
+| `R_SMALL_MODEL`                        | Optional     | Helper model for routing, titles, summaries, and lightweight model calls.                                                               |
+| `R_VISION_MODEL`                       | Optional     | Vision-capable model for visual inspection and screenshot/image work.                                                                   |
+| `R_CODE_REVIEW_MODEL`                  | Optional     | Model for initial PR/MR review and review-sync tasks.                                                                                   |
+| `R_EXPLORE_MODEL`                      | Optional     | Exploration/helper model for investigation-oriented subtasks.                                                                           |
+| `R_PLANNING_MODEL`                     | Optional     | Planning model used for longer coding-task planning.                                                                                    |
+| `R_MODEL_REASONING_EFFORT`             | Optional     | Reasoning level for the coding model: `low`, `medium`, `high`, or `xhigh`.                                                              |
+| `R_SMALL_MODEL_REASONING_EFFORT`       | Optional     | Reasoning level for the helper model.                                                                                                   |
+| `R_VISION_MODEL_REASONING_EFFORT`      | Optional     | Reasoning level for the vision model.                                                                                                   |
+| `R_CODE_REVIEW_MODEL_REASONING_EFFORT` | Optional     | Reasoning level for the code review model.                                                                                              |
+| `R_EXPLORE_MODEL_REASONING_EFFORT`     | Optional     | Reasoning level for the exploration model.                                                                                              |
+| `R_PLANNING_MODEL_REASONING_EFFORT`    | Optional     | Reasoning level for the planning model.                                                                                                 |
+| `R_MODEL_ENV_KEYS`                     | Optional     | Comma- or space-separated list of extra provider key env vars to forward to task workers.                                               |
 | `OPENROUTER_API_KEY`                         | Provider key | OpenRouter API key. Can also be saved from **Settings > Models**.                                                                       |
 | `AI_GATEWAY_API_KEY`                         | Provider key | Vercel AI Gateway API key.                                                                                                              |
 | `OPENAI_API_KEY`                             | Provider key | OpenAI API key.                                                                                                                         |
@@ -203,13 +203,12 @@ as per-task auth tokens or workspace paths.
 
 | Env var                        | Required     | Used for                                                                                               |
 | ------------------------------ | ------------ | ------------------------------------------------------------------------------------------------------ |
-| `NEXT_PUBLIC_GITHUB_APP_SLUG`  | GitHub       | Browser-visible GitHub App slug.                                                                       |
-| `GITHUB_APP_SLUG`              | GitHub       | Alternate setup-time GitHub App slug accepted by source-control setup.                                 |
-| `GITHUB_APP_ID`                | GitHub       | GitHub App ID.                                                                                         |
-| `GITHUB_APP_PRIVATE_KEY`       | GitHub       | Raw GitHub App private key PEM, usually with newlines escaped as `\\n`.                                |
-| `GITHUB_CLIENT_ID`             | GitHub       | GitHub OAuth client ID.                                                                                |
-| `GITHUB_CLIENT_SECRET`         | GitHub       | GitHub OAuth client secret.                                                                            |
-| `GITHUB_WEBHOOK_SECRET`        | GitHub       | GitHub webhook secret.                                                                                 |
+| `R_GITHUB_APP_SLUG`              | GitHub       | GitHub App slug.                                                                                       |
+| `R_GITHUB_APP_ID`                | GitHub       | GitHub App ID.                                                                                         |
+| `R_GITHUB_APP_PRIVATE_KEY`       | GitHub       | Raw GitHub App private key PEM, usually with newlines escaped as `\\n`.                                |
+| `R_GITHUB_CLIENT_ID`             | GitHub       | GitHub OAuth client ID.                                                                                |
+| `R_GITHUB_CLIENT_SECRET`         | GitHub       | GitHub OAuth client secret.                                                                            |
+| `R_GITHUB_WEBHOOK_SECRET`        | GitHub       | GitHub webhook secret.                                                                                 |
 | `GITHUB_MCP_SERVER_URL`        | Optional     | GitHub MCP server URL override.                                                                        |
 | `GITHUB_AUTOMATED_SKIP_REPOS`  | Optional     | Repository skip list for automated GitHub processing.                                                  |
 | `GITHUB_AUTOMATED_SKIP_OWNERS` | Optional     | Owner skip list for automated GitHub processing.                                                       |
@@ -231,7 +230,7 @@ as per-task auth tokens or workspace paths.
 | `ADO_USERNAME`                 | Optional     | Azure DevOps username.                                                                                 |
 | `ADO_CLIENT_ID`                | Optional     | Microsoft Entra client ID for Azure DevOps OAuth.                                                      |
 | `ADO_CLIENT_SECRET`            | Optional     | Microsoft Entra client secret for Azure DevOps OAuth.                                                  |
-| `ADO_TENANT_ID`                | Optional     | Microsoft Entra tenant ID for Azure DevOps OAuth. `ROOMOTE_AUTH_MICROSOFT_TENANT_ID` is also accepted. |
+| `ADO_TENANT_ID`                | Optional     | Microsoft Entra tenant ID for Azure DevOps OAuth. `R_MICROSOFT_TENANT_ID` is also accepted. |
 | `ADO_WEBHOOK_SECRET`           | Optional     | Azure DevOps webhook secret.                                                                           |
 
 ### Communications and sign-in
@@ -239,31 +238,31 @@ as per-task auth tokens or workspace paths.
 | Env var                                | Required          | Used for                                                                        |
 | -------------------------------------- | ----------------- | ------------------------------------------------------------------------------- |
 | `SLACK_APP_ID`                         | Slack app         | Slack app ID for communications setup.                                          |
-| `SLACK_CLIENT_ID`                      | Slack app/auth    | Slack OAuth client ID. Also accepted for Slack sign-in setup.                   |
-| `SLACK_CLIENT_SECRET`                  | Slack app/auth    | Slack OAuth client secret. Also accepted for Slack sign-in setup.               |
+| `R_SLACK_CLIENT_ID`                      | Slack app/auth    | Slack OAuth client ID. Also accepted for Slack sign-in setup.                   |
+| `R_SLACK_CLIENT_SECRET`                  | Slack app/auth    | Slack OAuth client secret. Also accepted for Slack sign-in setup.               |
 | `SLACK_REDIRECT_URI`                   | Optional          | Slack redirect URI override.                                                    |
-| `SLACK_AUTH_URI`                       | Optional          | Slack auth URI override. Defaults to `ROOMOTE_APP_URL` + `/api/slack/auth`.     |
-| `SLACK_SIGNING_SECRET`                 | Slack app/auth    | Slack signing secret for webhook verification.                                  |
+| `SLACK_AUTH_URI`                       | Optional          | Slack auth URI override.                                                        |
+| `R_SLACK_SIGNING_SECRET`                 | Slack app/auth    | Slack signing secret for webhook verification.                                  |
 | `SLACK_API_BASE_URL`                   | Optional          | Slack API base URL. Defaults to `https://slack.com/api/`.                       |
 | `SLACK_UNFURL_ALLOWED_DOMAINS`         | Optional          | Domains Slack unfurl handling may allow.                                        |
 | `SLACK_API_TIMEOUT_MS`                 | Optional          | Slack API timeout. Defaults to `API_EXTERNAL_REQUEST_TIMEOUT_MS` or 10 seconds. |
 | `SLACK_DEBUG_LOGS`                     | Optional          | Set to `true` or `1` to enable extra Slack logs.                                |
 | `ROUTER_DEBUG_CHANNEL_ID`              | Optional          | Slack channel ID for router debug output.                                       |
-| `TEAMS_BOT_APP_ID`                     | Teams             | Microsoft Teams bot app ID.                                                     |
-| `TEAMS_BOT_APP_PASSWORD`               | Teams             | Microsoft Teams bot password.                                                   |
-| `TEAMS_BOT_TENANT_ID`                  | Optional          | Microsoft Teams bot tenant ID.                                                  |
-| `TEAMS_BOT_NAME`                       | Optional          | Teams bot display name for generated app packages and invocation guidance.      |
-| `TEAMS_BOT_TOKEN_ENDPOINT`             | Optional          | Teams bot token endpoint override.                                              |
-| `TEAMS_BOT_OAUTH_SCOPE`                | Optional          | Teams bot OAuth scope override.                                                 |
+| `R_TEAMS_BOT_APP_ID`                     | Teams             | Microsoft Teams bot app ID.                                                     |
+| `R_TEAMS_BOT_APP_PASSWORD`               | Teams             | Microsoft Teams bot password.                                                   |
+| `R_TEAMS_BOT_TENANT_ID`                  | Optional          | Microsoft Teams bot tenant ID.                                                  |
+| `R_TEAMS_BOT_NAME`                       | Optional          | Teams bot display name for generated app packages and invocation guidance.      |
+| `R_TEAMS_BOT_TOKEN_ENDPOINT`             | Optional          | Teams bot token endpoint override.                                              |
+| `R_TEAMS_BOT_OAUTH_SCOPE`                | Optional          | Teams bot OAuth scope override.                                                 |
 | `TELEGRAM_BOT_TOKEN`                   | Telegram          | Telegram bot token.                                                             |
 | `TELEGRAM_WEBHOOK_SECRET`              | Telegram          | Telegram webhook secret.                                                        |
 | `TELEGRAM_BOT_USERNAME`                | Telegram          | Telegram bot username.                                                          |
-| `ROOMOTE_AUTH_SLACK_CLIENT_ID`         | Slack sign-in     | Slack sign-in client ID. `SLACK_CLIENT_ID` is also accepted.                    |
-| `ROOMOTE_AUTH_SLACK_CLIENT_SECRET`     | Slack sign-in     | Slack sign-in client secret. `SLACK_CLIENT_SECRET` is also accepted.            |
-| `ROOMOTE_AUTH_MICROSOFT_CLIENT_ID`     | Microsoft sign-in | Microsoft OAuth client ID.                                                      |
-| `ROOMOTE_AUTH_MICROSOFT_CLIENT_SECRET` | Microsoft sign-in | Microsoft OAuth client secret.                                                  |
-| `ROOMOTE_AUTH_MICROSOFT_TENANT_ID`     | Microsoft sign-in | Microsoft tenant ID. Also accepted as the Azure DevOps tenant ID fallback.      |
-| `ROOMOTE_ALLOWED_EMAILS`               | Optional          | Comma-separated email allowlist for deployments that restrict sign-in by email. |
+| `R_SLACK_CLIENT_ID`         | Slack sign-in     | Slack sign-in client ID. `R_SLACK_CLIENT_ID` is also accepted.                    |
+| `R_SLACK_CLIENT_SECRET`     | Slack sign-in     | Slack sign-in client secret. `R_SLACK_CLIENT_SECRET` is also accepted.            |
+| `R_MICROSOFT_CLIENT_ID`     | Microsoft sign-in | Microsoft OAuth client ID.                                                      |
+| `R_MICROSOFT_CLIENT_SECRET` | Microsoft sign-in | Microsoft OAuth client secret.                                                  |
+| `R_MICROSOFT_TENANT_ID`     | Microsoft sign-in | Microsoft tenant ID. Also accepted as the Azure DevOps tenant ID fallback.      |
+| `R_ALLOWED_EMAILS`               | Optional          | Comma-separated email allowlist for deployments that restrict sign-in by email. |
 
 ### Integrations
 

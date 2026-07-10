@@ -30,7 +30,7 @@ const {
   mockValidateAdoToken: vi.fn(),
   mockValidateGiteaToken: vi.fn(),
   mockEnv: {
-    ROOMOTE_APP_URL: 'https://roomote.example.com',
+    R_APP_URL: 'https://roomote.example.com',
     TRPC_URL: 'http://localhost:3000/trpc',
   },
 }));
@@ -119,7 +119,7 @@ function buildMockAuth(
 describe('source-control commands', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    mockEnv.ROOMOTE_APP_URL = 'https://roomote.example.com';
+    mockEnv.R_APP_URL = 'https://roomote.example.com';
     mockEnv.TRPC_URL = 'http://localhost:3000/trpc';
     mockResolveDeploymentEnvVar.mockResolvedValue(null);
     mockEnvironmentMappingRows.rows = [

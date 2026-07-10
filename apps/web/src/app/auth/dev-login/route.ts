@@ -98,7 +98,7 @@ export async function GET(request: NextRequest) {
   );
 
   const identity = getDevLoginIdentity();
-  if (!isRoomoteEmailAllowed(identity.email, Env.ROOMOTE_ALLOWED_EMAILS)) {
+  if (!isRoomoteEmailAllowed(identity.email, Env.R_ALLOWED_EMAILS)) {
     return NextResponse.json(
       {
         error: 'Dev login email is not allowed for this Roomote instance.',

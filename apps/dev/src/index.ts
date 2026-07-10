@@ -52,8 +52,8 @@ class LocalDevStarter {
 
       options.autoNgrok = publicUrlResolution.autoNgrok;
       options.publicUrl = publicUrlResolution.publicUrl;
-      process.env.ROOMOTE_PUBLIC_URL = publicUrlResolution.publicUrl;
-      process.env.ROOMOTE_APP_URL = publicUrlResolution.publicUrl;
+      process.env.R_PUBLIC_URL = publicUrlResolution.publicUrl;
+      process.env.R_APP_URL = publicUrlResolution.publicUrl;
       // Match the deployed TRPC_URL contract so hosted compute workers
       // (Vercel Sandbox, Modal, Daytona, E2B) can reach the API through the
       // public app URL instead of an unreachable localhost address.

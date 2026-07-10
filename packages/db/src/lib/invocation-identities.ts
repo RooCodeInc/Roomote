@@ -44,15 +44,16 @@ export async function resolveInvocationIdentities(): Promise<
     }),
   ]);
 
-  const githubSlug =
-    readConfiguredValue('NEXT_PUBLIC_GITHUB_APP_SLUG', deploymentEnvVars) ??
-    readConfiguredValue('GITHUB_APP_SLUG', deploymentEnvVars);
+  const githubSlug = readConfiguredValue(
+    'R_GITHUB_APP_SLUG',
+    deploymentEnvVars,
+  );
   const telegramUsername = readConfiguredValue(
     'TELEGRAM_BOT_USERNAME',
     deploymentEnvVars,
   );
   const configuredTeamsBotName = readConfiguredValue(
-    'TEAMS_BOT_NAME',
+    'R_TEAMS_BOT_NAME',
     deploymentEnvVars,
   );
   const teamsBotName =

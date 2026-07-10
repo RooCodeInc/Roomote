@@ -14,14 +14,11 @@ import {
 } from '../teams-runtime-credentials';
 
 const ENV_VAR_NAMES = [
-  'TEAMS_BOT_APP_ID',
-  'TEAMS_BOT_APP_PASSWORD',
-  'TEAMS_BOT_TENANT_ID',
-  'TEAMS_BOT_TOKEN_ENDPOINT',
-  'TEAMS_BOT_OAUTH_SCOPE',
-  'ROOMOTE_AUTH_MICROSOFT_CLIENT_ID',
-  'ROOMOTE_AUTH_MICROSOFT_CLIENT_SECRET',
-  'ROOMOTE_AUTH_MICROSOFT_TENANT_ID',
+  'R_TEAMS_BOT_APP_ID',
+  'R_TEAMS_BOT_APP_PASSWORD',
+  'R_TEAMS_BOT_TENANT_ID',
+  'R_TEAMS_BOT_TOKEN_ENDPOINT',
+  'R_TEAMS_BOT_OAUTH_SCOPE',
 ] as const;
 
 describe('resolveTeamsBotRuntimeCredentials', () => {
@@ -39,10 +36,10 @@ describe('resolveTeamsBotRuntimeCredentials', () => {
     vi.unstubAllEnvs();
   });
 
-  it('uses the dedicated TEAMS_BOT_* pair from process env without touching the database', async () => {
-    vi.stubEnv('TEAMS_BOT_APP_ID', 'bot-id');
-    vi.stubEnv('TEAMS_BOT_APP_PASSWORD', 'bot-secret');
-    vi.stubEnv('TEAMS_BOT_TENANT_ID', 'bot-tenant');
+  it('uses the dedicated R_TEAMS_BOT_* pair from process env without touching the database', async () => {
+    vi.stubEnv('R_TEAMS_BOT_APP_ID', 'bot-id');
+    vi.stubEnv('R_TEAMS_BOT_APP_PASSWORD', 'bot-secret');
+    vi.stubEnv('R_TEAMS_BOT_TENANT_ID', 'bot-tenant');
 
     await expect(resolveTeamsBotRuntimeCredentials()).resolves.toMatchObject({
       botAppId: 'bot-id',
@@ -53,39 +50,37 @@ describe('resolveTeamsBotRuntimeCredentials', () => {
     expect(resolveEffectiveDeploymentEnvVarsMock).not.toHaveBeenCalled();
   });
 
-  it('falls back to the Microsoft sign-in app saved from the settings UI', async () => {
+  it('does not fall back to the Microsoft sign-in app saved from the settings UI', async () => {
     resolveEffectiveDeploymentEnvVarsMock.mockResolvedValue({
-      ROOMOTE_AUTH_MICROSOFT_CLIENT_ID: 'signin-id',
-      ROOMOTE_AUTH_MICROSOFT_CLIENT_SECRET: 'signin-secret',
-      ROOMOTE_AUTH_MICROSOFT_TENANT_ID: 'signin-tenant',
+      R_MICROSOFT_CLIENT_ID: 'signin-id',
+      R_MICROSOFT_CLIENT_SECRET: 'signin-secret',
+      R_MICROSOFT_TENANT_ID: 'signin-tenant',
     });
 
     await expect(resolveTeamsBotRuntimeCredentials()).resolves.toMatchObject({
-      botAppId: 'signin-id',
-      botAppPassword: 'signin-secret',
-      botTenantId: 'signin-tenant',
-      source: 'microsoft_auth',
+      botAppId: null,
+      botAppPassword: null,
+      botTenantId: null,
+      source: null,
     });
   });
 
-  it('never mixes a TEAMS_BOT id with a Microsoft sign-in secret', async () => {
-    // Bot app id without its password: the pair is incomplete, so the
-    // Microsoft trio is used as a unit instead.
-    vi.stubEnv('TEAMS_BOT_APP_ID', 'bot-id');
-    vi.stubEnv('ROOMOTE_AUTH_MICROSOFT_CLIENT_ID', 'signin-id');
-    vi.stubEnv('ROOMOTE_AUTH_MICROSOFT_CLIENT_SECRET', 'signin-secret');
+  it('never mixes a Teams bot id with a Microsoft sign-in secret', async () => {
+    vi.stubEnv('R_TEAMS_BOT_APP_ID', 'bot-id');
+    vi.stubEnv('R_MICROSOFT_CLIENT_ID', 'signin-id');
+    vi.stubEnv('R_MICROSOFT_CLIENT_SECRET', 'signin-secret');
 
     await expect(resolveTeamsBotRuntimeCredentials()).resolves.toMatchObject({
-      botAppId: 'signin-id',
-      botAppPassword: 'signin-secret',
-      source: 'microsoft_auth',
+      botAppId: null,
+      botAppPassword: null,
+      source: null,
     });
   });
 
   it('completes a partial TEAMS_BOT env pair from saved deployment env vars', async () => {
-    vi.stubEnv('TEAMS_BOT_APP_ID', 'bot-id');
+    vi.stubEnv('R_TEAMS_BOT_APP_ID', 'bot-id');
     resolveEffectiveDeploymentEnvVarsMock.mockResolvedValue({
-      TEAMS_BOT_APP_PASSWORD: 'saved-bot-secret',
+      R_TEAMS_BOT_APP_PASSWORD: 'saved-bot-secret',
     });
 
     await expect(resolveTeamsBotRuntimeCredentials()).resolves.toMatchObject({
@@ -105,8 +100,8 @@ describe('resolveTeamsBotRuntimeCredentials', () => {
 
   it('caches database-backed lookups until invalidated', async () => {
     resolveEffectiveDeploymentEnvVarsMock.mockResolvedValue({
-      ROOMOTE_AUTH_MICROSOFT_CLIENT_ID: 'signin-id',
-      ROOMOTE_AUTH_MICROSOFT_CLIENT_SECRET: 'signin-secret',
+      R_TEAMS_BOT_APP_ID: 'bot-id',
+      R_TEAMS_BOT_APP_PASSWORD: 'bot-secret',
     });
 
     await resolveTeamsBotRuntimeCredentials();

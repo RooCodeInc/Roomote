@@ -24,7 +24,7 @@
  *   pnpm --filter @roomote/cloud-agents tsx scripts/test-llm-router.ts --interactive
  *
  * Environment:
- *   Requires ROOMOTE_MODEL. Uses ROOMOTE_SMALL_MODEL when set.
+ *   Requires R_MODEL. Uses R_SMALL_MODEL when set.
  */
 
 import { createInterface } from 'readline';
@@ -359,7 +359,7 @@ function printHelp(): void {
 │   tsx scripts/test-llm-router.ts -i                            │
 │                                                                               │
 │ Environment:                                                                  │
-│   Requires ROOMOTE_MODEL. Uses ROOMOTE_SMALL_MODEL when set.          │
+│   Requires R_MODEL. Uses R_SMALL_MODEL when set.          │
 │                                                                               │
 ╰───────────────────────────────────────────────────────────────────────────────╯
 `);
@@ -475,7 +475,7 @@ function printResult(
 ${colors.cyan}╭───────────────────────────────────────────────────────────────────────────────╮${colors.reset}
 ${colors.cyan}│${colors.reset} ${colors.bold}LLM Router Test${colors.reset}                                                              ${colors.cyan}│${colors.reset}
 ${colors.cyan}├───────────────────────────────────────────────────────────────────────────────┤${colors.reset}
-${colors.cyan}│${colors.reset} ${colors.dim}Model:${colors.reset} ${(resolveOpenCodeSmallModel() ?? 'ROOMOTE_SMALL_MODEL/ROOMOTE_MODEL').padEnd(63)} ${colors.cyan}│${colors.reset}
+${colors.cyan}│${colors.reset} ${colors.dim}Model:${colors.reset} ${(resolveOpenCodeSmallModel() ?? 'R_SMALL_MODEL/R_MODEL').padEnd(63)} ${colors.cyan}│${colors.reset}
 ${colors.cyan}│${colors.reset} ${colors.dim}Duration:${colors.reset} ${(durationMs + 'ms').padEnd(60)} ${colors.cyan}│${colors.reset}
 ${colors.cyan}├───────────────────────────────────────────────────────────────────────────────┤${colors.reset}
 ${colors.cyan}│${colors.reset} ${colors.dim}Task:${colors.reset}                                                                        ${colors.cyan}│${colors.reset}`);

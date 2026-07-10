@@ -269,9 +269,9 @@ describe('setup-new auth config commands', () => {
     const result = await saveSetupNewAuthConfigCommand(buildMockAuth(), {
       provider: 'slack',
       values: {
-        SLACK_CLIENT_ID: 'client-id',
-        SLACK_CLIENT_SECRET: 'client-secret',
-        SLACK_SIGNING_SECRET: 'signing-secret',
+        R_SLACK_CLIENT_ID: 'client-id',
+        R_SLACK_CLIENT_SECRET: 'client-secret',
+        R_SLACK_SIGNING_SECRET: 'signing-secret',
       },
     });
 
@@ -282,9 +282,9 @@ describe('setup-new auth config commands', () => {
       expect.objectContaining({
         userId: 'setup-test-user',
         values: expect.arrayContaining([
-          expect.objectContaining({ name: 'SLACK_CLIENT_ID' }),
-          expect.objectContaining({ name: 'SLACK_CLIENT_SECRET' }),
-          expect.objectContaining({ name: 'SLACK_SIGNING_SECRET' }),
+          expect.objectContaining({ name: 'R_SLACK_CLIENT_ID' }),
+          expect.objectContaining({ name: 'R_SLACK_CLIENT_SECRET' }),
+          expect.objectContaining({ name: 'R_SLACK_SIGNING_SECRET' }),
         ]),
       }),
     );
@@ -297,9 +297,9 @@ describe('setup-new auth config commands', () => {
       saveSetupBootstrapAuthConfigCommand({
         provider: 'slack',
         values: {
-          SLACK_CLIENT_ID: 'client-id',
-          SLACK_CLIENT_SECRET: 'client-secret',
-          SLACK_SIGNING_SECRET: 'signing-secret',
+          R_SLACK_CLIENT_ID: 'client-id',
+          R_SLACK_CLIENT_SECRET: 'client-secret',
+          R_SLACK_SIGNING_SECRET: 'signing-secret',
         },
       }),
     ).rejects.toThrow('Initial setup is no longer open.');
@@ -387,9 +387,9 @@ describe('setup bootstrap token gating', () => {
       saveSetupBootstrapAuthConfigCommand({
         provider: 'slack',
         values: {
-          SLACK_CLIENT_ID: 'client-id',
-          SLACK_CLIENT_SECRET: 'client-secret',
-          SLACK_SIGNING_SECRET: 'signing-secret',
+          R_SLACK_CLIENT_ID: 'client-id',
+          R_SLACK_CLIENT_SECRET: 'client-secret',
+          R_SLACK_SIGNING_SECRET: 'signing-secret',
         },
         setupToken: 'wrong-token',
       }),

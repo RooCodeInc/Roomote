@@ -217,7 +217,7 @@ function resolveWorkerSentryDsn(): string | undefined {
 
 function resolveWorkerSentryEnvironment(): string | undefined {
   return (
-    process.env.ROOMOTE_APP_ENV?.trim() ||
+    process.env.R_APP_ENV?.trim() ||
     process.env.APP_ENV?.trim() ||
     'development'
   );

@@ -50,7 +50,7 @@ export async function GET(request: Request) {
     });
   }
 
-  const appUrl = Env.ROOMOTE_PUBLIC_URL ?? Env.ROOMOTE_APP_URL;
+  const appUrl = Env.R_PUBLIC_URL ?? Env.R_APP_URL;
   const [colorIcon, outlineIcon] = await Promise.all([
     readFile(path.join(process.cwd(), 'public', 'teams-app-icon-color.png')),
     readFile(path.join(process.cwd(), 'public', 'teams-app-icon-outline.png')),

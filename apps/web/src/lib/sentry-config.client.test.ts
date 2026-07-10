@@ -26,7 +26,7 @@ describe('web sentry config', () => {
   it('uses roomote app env in browser-safe contexts', () => {
     expect(
       resolveWebSentryEnvironment({
-        ROOMOTE_APP_ENV: 'preview',
+        R_APP_ENV: 'preview',
         NODE_ENV: 'production',
       }),
     ).toBe('preview');

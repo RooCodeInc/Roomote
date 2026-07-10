@@ -73,7 +73,7 @@ describe('OriginMismatchAlert', () => {
       'https://web-production-1234.up.railway.example.app',
     );
     expect(
-      screen.getByText(`ROOMOTE_APP_URL=${window.location.origin}`),
+      screen.getByText(`R_APP_URL=${window.location.origin}`),
     ).toBeInTheDocument();
   });
 

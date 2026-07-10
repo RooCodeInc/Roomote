@@ -15,8 +15,8 @@ vi.mock('@roomote/db/server', () => ({
 
 vi.mock('./env', () => ({
   Env: {
-    ROOMOTE_ALLOWED_EMAILS: undefined,
-    ROOMOTE_APP_URL: 'http://localhost:3000',
+    R_ALLOWED_EMAILS: undefined,
+    R_APP_URL: 'http://localhost:3000',
   },
 }));
 
@@ -31,9 +31,9 @@ describe('resolveAuthProviderConfig', () => {
     const config = await resolveAuthProviderConfig({
       runtimeEnv: {},
       deploymentEnvVars: {
-        ROOMOTE_AUTH_MICROSOFT_CLIENT_ID: 'microsoft-client-id',
-        ROOMOTE_AUTH_MICROSOFT_CLIENT_SECRET: 'microsoft-client-secret',
-        ROOMOTE_AUTH_MICROSOFT_TENANT_ID: 'microsoft-tenant-id',
+        R_MICROSOFT_CLIENT_ID: 'microsoft-client-id',
+        R_MICROSOFT_CLIENT_SECRET: 'microsoft-client-secret',
+        R_MICROSOFT_TENANT_ID: 'microsoft-tenant-id',
       },
     });
 
@@ -44,34 +44,18 @@ describe('resolveAuthProviderConfig', () => {
     expect(mockBootstrapWebRuntimeEnv).not.toHaveBeenCalled();
   });
 
-  it('prefers shared Slack credentials while honoring auth-specific fallback', async () => {
+  it('resolves canonical Slack credentials', async () => {
     const config = await resolveAuthProviderConfig({
       runtimeEnv: {},
       deploymentEnvVars: {
-        ROOMOTE_AUTH_SLACK_CLIENT_ID: 'fallback-client-id',
-        ROOMOTE_AUTH_SLACK_CLIENT_SECRET: 'fallback-client-secret',
+        R_SLACK_CLIENT_ID: 'client-id',
+        R_SLACK_CLIENT_SECRET: 'client-secret',
       },
     });
 
     expect(config.enabledProviders).toEqual(['slack']);
-    expect(config.slackClientId).toBe('fallback-client-id');
-    expect(config.slackClientSecret).toBe('fallback-client-secret');
-  });
-
-  it('prefers shared Slack credentials when both Slack env families exist', async () => {
-    const config = await resolveAuthProviderConfig({
-      runtimeEnv: {},
-      deploymentEnvVars: {
-        SLACK_CLIENT_ID: 'shared-client-id',
-        SLACK_CLIENT_SECRET: 'shared-client-secret',
-        ROOMOTE_AUTH_SLACK_CLIENT_ID: 'fallback-client-id',
-        ROOMOTE_AUTH_SLACK_CLIENT_SECRET: 'fallback-client-secret',
-      },
-    });
-
-    expect(config.enabledProviders).toEqual(['slack']);
-    expect(config.slackClientId).toBe('shared-client-id');
-    expect(config.slackClientSecret).toBe('shared-client-secret');
+    expect(config.slackClientId).toBe('client-id');
+    expect(config.slackClientSecret).toBe('client-secret');
   });
 
   it('resolves GitLab OAuth credentials without changing the setup auth provider list', async () => {
@@ -145,11 +129,11 @@ describe('resolveAuthProviderConfig', () => {
     expect(config.adoBaseUrl).toBe('https://dev.azure.example.com');
   });
 
-  it('uses the Roomote Microsoft tenant for Azure DevOps Entra linking when no ADO tenant is configured', async () => {
+  it('does not use the Microsoft tenant for Azure DevOps Entra linking when no ADO tenant is configured', async () => {
     const config = await resolveAuthProviderConfig({
       runtimeEnv: {},
       deploymentEnvVars: {
-        ROOMOTE_AUTH_MICROSOFT_TENANT_ID: 'microsoft-tenant-id',
+        R_MICROSOFT_TENANT_ID: 'microsoft-tenant-id',
         ADO_CLIENT_ID: 'ado-client-id',
         ADO_CLIENT_SECRET: 'ado-client-secret',
         ADO_ORGANIZATION: 'ado-org',
@@ -157,14 +141,14 @@ describe('resolveAuthProviderConfig', () => {
     });
 
     expect(config.enabledProviders).toEqual([]);
-    expect(config.adoTenantId).toBe('microsoft-tenant-id');
+    expect(config.adoTenantId).toBeNull();
   });
 
   it('bootstraps the web runtime before resolving default deployment env vars', async () => {
     mockResolveEffectiveDeploymentEnvVars.mockResolvedValue({
-      ROOMOTE_AUTH_MICROSOFT_CLIENT_ID: 'microsoft-client-id',
-      ROOMOTE_AUTH_MICROSOFT_CLIENT_SECRET: 'microsoft-client-secret',
-      ROOMOTE_AUTH_MICROSOFT_TENANT_ID: 'microsoft-tenant-id',
+      R_MICROSOFT_CLIENT_ID: 'microsoft-client-id',
+      R_MICROSOFT_CLIENT_SECRET: 'microsoft-client-secret',
+      R_MICROSOFT_TENANT_ID: 'microsoft-tenant-id',
     });
 
     const config = await resolveAuthProviderConfig({

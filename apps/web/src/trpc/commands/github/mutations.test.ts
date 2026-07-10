@@ -52,11 +52,11 @@ vi.mock('@roomote/db/server', () => ({
 
 vi.mock('@/lib/server', () => ({
   Env: {
-    ROOMOTE_APP_URL: 'https://roomote.example.com',
+    R_APP_URL: 'https://roomote.example.com',
     TRPC_URL: 'http://localhost:3000',
-    NEXT_PUBLIC_GITHUB_APP_SLUG: 'roomote',
-    GITHUB_CLIENT_ID: 'client-id',
-    GITHUB_CLIENT_SECRET: 'client-secret',
+    R_GITHUB_APP_SLUG: 'roomote',
+    R_GITHUB_CLIENT_ID: 'client-id',
+    R_GITHUB_CLIENT_SECRET: 'client-secret',
   },
 }));
 
@@ -288,17 +288,17 @@ describe('GitHub App manifest commands', () => {
       {
         userId: 'github-manifest-test-user',
         values: [
-          { name: 'GITHUB_APP_ID', value: '12345' },
+          { name: 'R_GITHUB_APP_ID', value: '12345' },
           {
-            name: 'GITHUB_APP_PRIVATE_KEY',
+            name: 'R_GITHUB_APP_PRIVATE_KEY',
             value:
               '-----BEGIN RSA PRIVATE KEY-----\nprivate\n-----END RSA PRIVATE KEY-----\n',
           },
-          { name: 'GITHUB_CLIENT_ID', value: 'Iv1.client' },
-          { name: 'GITHUB_CLIENT_SECRET', value: 'client-secret-value' },
-          { name: 'GITHUB_WEBHOOK_SECRET', value: 'webhook-secret-value' },
+          { name: 'R_GITHUB_CLIENT_ID', value: 'Iv1.client' },
+          { name: 'R_GITHUB_CLIENT_SECRET', value: 'client-secret-value' },
+          { name: 'R_GITHUB_WEBHOOK_SECRET', value: 'webhook-secret-value' },
           {
-            name: 'NEXT_PUBLIC_GITHUB_APP_SLUG',
+            name: 'R_GITHUB_APP_SLUG',
             value: 'created-roomote-app',
           },
         ],
@@ -323,16 +323,16 @@ describe('GitHub App manifest commands', () => {
     );
   });
 
-  it('uses the GITHUB_APP_SLUG alias when building the install URL', async () => {
+  it('uses the canonical GitHub App slug when building the install URL', async () => {
     mockResolveDeploymentEnvVar.mockImplementation(async (name: string) => {
       switch (name) {
-        case 'GITHUB_APP_SLUG':
-          return 'aliased-roomote-app';
-        case 'GITHUB_APP_ID':
-        case 'GITHUB_APP_PRIVATE_KEY':
-        case 'GITHUB_CLIENT_ID':
-        case 'GITHUB_CLIENT_SECRET':
-        case 'GITHUB_WEBHOOK_SECRET':
+        case 'R_GITHUB_APP_SLUG':
+          return 'configured-roomote-app';
+        case 'R_GITHUB_APP_ID':
+        case 'R_GITHUB_APP_PRIVATE_KEY':
+        case 'R_GITHUB_CLIENT_ID':
+        case 'R_GITHUB_CLIENT_SECRET':
+        case 'R_GITHUB_WEBHOOK_SECRET':
           return 'configured-value';
         default:
           return null;
@@ -350,12 +350,11 @@ describe('GitHub App manifest commands', () => {
     }
 
     expect(new URL(result.url).pathname).toBe(
-      '/apps/aliased-roomote-app/installations/new',
+      '/apps/configured-roomote-app/installations/new',
     );
     expect(mockResolveDeploymentEnvVar).toHaveBeenCalledWith(
-      'NEXT_PUBLIC_GITHUB_APP_SLUG',
+      'R_GITHUB_APP_SLUG',
     );
-    expect(mockResolveDeploymentEnvVar).toHaveBeenCalledWith('GITHUB_APP_SLUG');
   });
 
   it('refuses to start installation when GitHub App credentials are not configured', async () => {
@@ -388,13 +387,13 @@ describe('GitHub App manifest commands', () => {
     );
     mockResolveDeploymentEnvVar.mockImplementation(async (name: string) => {
       switch (name) {
-        case 'NEXT_PUBLIC_GITHUB_APP_SLUG':
+        case 'R_GITHUB_APP_SLUG':
           return 'created-roomote-app';
-        case 'GITHUB_APP_ID':
-        case 'GITHUB_APP_PRIVATE_KEY':
-        case 'GITHUB_CLIENT_ID':
-        case 'GITHUB_CLIENT_SECRET':
-        case 'GITHUB_WEBHOOK_SECRET':
+        case 'R_GITHUB_APP_ID':
+        case 'R_GITHUB_APP_PRIVATE_KEY':
+        case 'R_GITHUB_CLIENT_ID':
+        case 'R_GITHUB_CLIENT_SECRET':
+        case 'R_GITHUB_WEBHOOK_SECRET':
           return 'configured-value';
         default:
           return null;

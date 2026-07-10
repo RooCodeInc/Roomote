@@ -40,7 +40,7 @@ function withSetupRedirect(
 
 export async function GET(request: NextRequest) {
   const webEnv = await bootstrapWebRuntimeEnv();
-  const webUrl = webEnv.ROOMOTE_APP_URL;
+  const webUrl = webEnv.R_APP_URL;
 
   const code = request.nextUrl.searchParams.get('code');
   const oauthError = request.nextUrl.searchParams.get('error');

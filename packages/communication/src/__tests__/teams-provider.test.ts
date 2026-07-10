@@ -1048,12 +1048,12 @@ describe('createTeamsCommunicationProviderFromEnv', () => {
     expect(createTeamsCommunicationProviderFromEnv({})).toBeNull();
     expect(
       createTeamsCommunicationProviderFromEnv({
-        TEAMS_BOT_APP_ID: 'bot-app-id',
+        R_TEAMS_BOT_APP_ID: 'bot-app-id',
       }),
     ).toBeNull();
     expect(
       createTeamsCommunicationProviderFromEnv({
-        TEAMS_BOT_APP_PASSWORD: 'bot-secret',
+        R_TEAMS_BOT_APP_PASSWORD: 'bot-secret',
       }),
     ).toBeNull();
   });
@@ -1061,11 +1061,11 @@ describe('createTeamsCommunicationProviderFromEnv', () => {
   it('builds a provider when the required bot credentials are configured', () => {
     expect(
       createTeamsCommunicationProviderFromEnv({
-        TEAMS_BOT_APP_ID: 'bot-app-id',
-        TEAMS_BOT_APP_PASSWORD: 'bot-secret',
-        TEAMS_BOT_TENANT_ID: 'tenant-id',
-        TEAMS_BOT_TOKEN_ENDPOINT: 'https://login.example.test/token',
-        TEAMS_BOT_OAUTH_SCOPE: 'https://api.botframework.com/.default',
+        R_TEAMS_BOT_APP_ID: 'bot-app-id',
+        R_TEAMS_BOT_APP_PASSWORD: 'bot-secret',
+        R_TEAMS_BOT_TENANT_ID: 'tenant-id',
+        R_TEAMS_BOT_TOKEN_ENDPOINT: 'https://login.example.test/token',
+        R_TEAMS_BOT_OAUTH_SCOPE: 'https://api.botframework.com/.default',
       }),
     ).toBeInstanceOf(TeamsCommunicationProvider);
   });

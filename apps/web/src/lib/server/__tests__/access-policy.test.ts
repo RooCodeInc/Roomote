@@ -9,7 +9,7 @@ const {
   mockDbSelect: vi.fn(),
   mockDbUpdate: vi.fn(),
   mockEnvState: {
-    ROOMOTE_ALLOWED_EMAILS: undefined as string | undefined,
+    R_ALLOWED_EMAILS: undefined as string | undefined,
     SETUP_TOKEN: undefined as string | undefined,
   },
   mockProviderConfig: {
@@ -120,7 +120,7 @@ function resetMocks() {
   // test explicitly simulates a non-local deployment.
   vi.stubEnv('NODE_ENV', 'development');
   vi.stubEnv('APP_ENV', 'development');
-  mockEnvState.ROOMOTE_ALLOWED_EMAILS = undefined;
+  mockEnvState.R_ALLOWED_EMAILS = undefined;
   mockEnvState.SETUP_TOKEN = undefined;
   mockInviteState.requestToken = null;
   mockInviteState.usableInvite = null;
@@ -151,7 +151,7 @@ describe('evaluateSignInAccess', () => {
   beforeEach(resetMocks);
 
   it('denies when the env allowlist rejects the email', async () => {
-    mockEnvState.ROOMOTE_ALLOWED_EMAILS = 'only@example.com';
+    mockEnvState.R_ALLOWED_EMAILS = 'only@example.com';
 
     await expect(
       evaluateSignInAccess({ userId: 'user-1', email: 'other@example.com' }),

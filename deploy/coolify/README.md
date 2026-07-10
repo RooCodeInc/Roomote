@@ -194,7 +194,7 @@ addressing, and `S3_PRESIGN_ENDPOINT` must be reachable from workers.
 3. Create the founding admin account (email/password works immediately;
    Slack or Microsoft sign-in can be added later).
 4. Connect GitHub with **Create GitHub App** — the manifest flow derives the
-   callback and webhook URLs from `ROOMOTE_APP_URL` and `TRPC_URL`, so no
+   callback and webhook URLs from `R_APP_URL` and `TRPC_URL`, so no
    manual URL entry is needed.
 5. Enter the model provider key when the wizard asks. With the default
    Docker provider there are no sandbox credentials to enter; with hosted
