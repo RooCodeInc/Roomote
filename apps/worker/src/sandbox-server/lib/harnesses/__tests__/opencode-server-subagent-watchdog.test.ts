@@ -76,8 +76,7 @@ function createHarness(
     logger,
     model: TEST_OPENCODE_MODEL,
     eventStreamReadyTimeoutMs: 100,
-    subagentTaskUnobservedTimeoutMs: SUBAGENT_TASK_TIMEOUT_MS,
-    subagentTaskInactivityTimeoutMs: SUBAGENT_TASK_TIMEOUT_MS,
+    subagentTaskTimeoutMs: SUBAGENT_TASK_TIMEOUT_MS,
     ...overrides,
   });
 
@@ -207,7 +206,7 @@ describe('OpenCode subagent watchdog', () => {
     vi.useRealTimers();
   });
 
-  it('aborts the child session recorded on the task tool part when it becomes inactive', async () => {
+  it('aborts the child session recorded on the task tool part when the timeout expires', async () => {
     const { client, harness, logger } = createHarness();
 
     try {
@@ -245,7 +244,7 @@ describe('OpenCode subagent watchdog', () => {
         expect.objectContaining({ sessionId: 'ses_1' }),
       );
       expect(logger.warn).toHaveBeenCalledWith(
-        expect.stringContaining('stalled with no child-session events'),
+        expect.stringContaining('subagent run exceeded'),
       );
     } finally {
       harness.dispose();
@@ -269,18 +268,7 @@ describe('OpenCode subagent watchdog', () => {
         properties: { part: createTaskToolPart({ status: 'pending' }) },
       });
 
-      await vi.advanceTimersByTimeAsync(SUBAGENT_TASK_TIMEOUT_MS / 2);
-      await client.emit({
-        type: 'message.part.updated',
-        properties: { part: createTaskToolPart({ status: 'pending' }) },
-      });
-      await vi.advanceTimersByTimeAsync(SUBAGENT_TASK_TIMEOUT_MS / 2);
-
-      // Parent-side progress keeps an unobservable launch alive too.
-      expect(client.children).not.toHaveBeenCalled();
-      expect(client.abort).not.toHaveBeenCalled();
-
-      await vi.advanceTimersByTimeAsync(SUBAGENT_TASK_TIMEOUT_MS / 2);
+      await vi.advanceTimersByTimeAsync(SUBAGENT_TASK_TIMEOUT_MS);
 
       expect(client.children).toHaveBeenCalledTimes(1);
       expect(client.children).toHaveBeenCalledWith(
@@ -335,8 +323,7 @@ describe('OpenCode subagent watchdog', () => {
         { id: 'ses_child_B', parentID: 'ses_1' },
       ]);
 
-      // Advance to A's unobservable-launch deadline (B still has half a
-      // window left).
+      // Advance to A's total-timeout deadline (B still has half a window left).
       await vi.advanceTimersByTimeAsync(SUBAGENT_TASK_TIMEOUT_MS / 2);
 
       expect(client.children).toHaveBeenCalledTimes(1);
@@ -415,8 +402,8 @@ describe('OpenCode subagent watchdog', () => {
         properties: { part: createTaskToolPart({ status: 'pending' }) },
       });
       await vi.advanceTimersByTimeAsync(SUBAGENT_TASK_TIMEOUT_MS / 2);
-      // Second update: running with the child session id. Must not duplicate
-      // the timer, and its observed progress slides the inactivity deadline.
+      // Second update: running with the child session id. Must not reset or
+      // duplicate the timer, but must record the child session id.
       await client.emit({
         type: 'message.part.updated',
         properties: {
@@ -429,10 +416,6 @@ describe('OpenCode subagent watchdog', () => {
       await vi.advanceTimersByTimeAsync(SUBAGENT_TASK_TIMEOUT_MS / 2);
 
       expect(client.children).not.toHaveBeenCalled();
-      expect(client.abort).not.toHaveBeenCalled();
-
-      await vi.advanceTimersByTimeAsync(SUBAGENT_TASK_TIMEOUT_MS / 2);
-
       expect(client.abort).toHaveBeenCalledTimes(1);
       expect(client.abort).toHaveBeenCalledWith(
         expect.objectContaining({ sessionId: 'ses_child_1' }),
@@ -1098,20 +1081,20 @@ describe('OpenCode subagent inactivity deadline', () => {
     }
   });
 
-  it('keeps an active child alive indefinitely while it continues emitting events', async () => {
-    const { client, harness } = createInactivityHarness();
+  it('keeps an active child alive past the inactivity window and still enforces the total timeout', async () => {
+    const { client, harness, logger } = createInactivityHarness();
 
     try {
       await connectHarness(harness, client);
       vi.useFakeTimers();
       await armSpawn(client, harness);
 
-      // Child streams an event every half inactivity window for well beyond
-      // the old wall-clock deadline.
+      // Child streams an event every half inactivity window until just
+      // before the total timeout.
       const stepMs = SUBAGENT_INACTIVITY_TIMEOUT_MS / 2;
       for (
         let elapsedMs = stepMs;
-        elapsedMs < SUBAGENT_TASK_TIMEOUT_MS * 2;
+        elapsedMs < SUBAGENT_TASK_TIMEOUT_MS;
         elapsedMs += stepMs
       ) {
         await vi.advanceTimersByTimeAsync(stepMs);
@@ -1122,12 +1105,19 @@ describe('OpenCode subagent inactivity deadline', () => {
       }
 
       expect(client.abort).not.toHaveBeenCalled();
+
+      await vi.advanceTimersByTimeAsync(stepMs);
+
+      expect(client.abort).toHaveBeenCalledTimes(1);
+      expect(logger.warn).toHaveBeenCalledWith(
+        expect.stringContaining('exceeded the'),
+      );
     } finally {
       await harness.dispose();
     }
   });
 
-  it('does not impose a wall-clock timeout while a child tool call is in flight', async () => {
+  it('suspends the inactivity deadline while a child tool call is in flight', async () => {
     const { client, harness } = createInactivityHarness();
 
     try {
@@ -1135,7 +1125,8 @@ describe('OpenCode subagent inactivity deadline', () => {
       vi.useFakeTimers();
       await armSpawn(client, harness);
 
-      // A silently long-running tool must not be mistaken for a wedged child.
+      // A silently long-running tool must not be mistaken for a wedged
+      // child: only the total timeout applies while it is in flight.
       await client.emit({
         type: 'message.part.updated',
         properties: {
@@ -1143,8 +1134,11 @@ describe('OpenCode subagent inactivity deadline', () => {
         },
       });
 
-      await vi.advanceTimersByTimeAsync(SUBAGENT_TASK_TIMEOUT_MS * 2);
+      await vi.advanceTimersByTimeAsync(SUBAGENT_TASK_TIMEOUT_MS - 1);
       expect(client.abort).not.toHaveBeenCalled();
+
+      await vi.advanceTimersByTimeAsync(1);
+      expect(client.abort).toHaveBeenCalledTimes(1);
     } finally {
       await harness.dispose();
     }
@@ -1207,8 +1201,11 @@ describe('OpenCode subagent inactivity deadline', () => {
         },
       });
 
-      await vi.advanceTimersByTimeAsync(SUBAGENT_TASK_TIMEOUT_MS * 2);
+      await vi.advanceTimersByTimeAsync(SUBAGENT_TASK_TIMEOUT_MS - 1);
       expect(client.abort).not.toHaveBeenCalled();
+
+      await vi.advanceTimersByTimeAsync(1);
+      expect(client.abort).toHaveBeenCalledTimes(1);
     } finally {
       await harness.dispose();
     }
@@ -1229,8 +1226,11 @@ describe('OpenCode subagent inactivity deadline', () => {
         },
       });
 
-      await vi.advanceTimersByTimeAsync(SUBAGENT_TASK_TIMEOUT_MS * 2);
+      await vi.advanceTimersByTimeAsync(SUBAGENT_TASK_TIMEOUT_MS - 1);
       expect(client.abort).not.toHaveBeenCalled();
+
+      await vi.advanceTimersByTimeAsync(1);
+      expect(client.abort).toHaveBeenCalledTimes(1);
     } finally {
       await harness.dispose();
     }
@@ -1254,8 +1254,11 @@ describe('OpenCode subagent inactivity deadline', () => {
         properties: { part },
       });
 
-      await vi.advanceTimersByTimeAsync(SUBAGENT_TASK_TIMEOUT_MS * 2);
+      await vi.advanceTimersByTimeAsync(SUBAGENT_TASK_TIMEOUT_MS - 1);
       expect(client.abort).not.toHaveBeenCalled();
+
+      await vi.advanceTimersByTimeAsync(1);
+      expect(client.abort).toHaveBeenCalledTimes(1);
     } finally {
       await harness.dispose();
     }
@@ -1306,7 +1309,7 @@ describe('OpenCode subagent inactivity deadline', () => {
       vi.useFakeTimers();
 
       // Spawn with no child session id: there is no activity feed to judge
-      // liveness by, so the unobservable-launch fallback applies.
+      // liveness by, so only the total timeout applies.
       await client.emit({
         type: 'message.part.updated',
         properties: { part: createTaskToolPart({ status: 'pending' }) },
