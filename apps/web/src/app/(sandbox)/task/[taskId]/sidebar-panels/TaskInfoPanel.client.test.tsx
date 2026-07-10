@@ -93,7 +93,7 @@ const baseTask = {
   id: 'task-1',
   userId: 'user-1',
   title: 'Task title',
-  model: 'openrouter/openai/gpt-5.4',
+  model: 'openrouter/openai/gpt-5.6-terra',
   user: null,
 };
 
@@ -156,7 +156,9 @@ describe('TaskInfoPanel', () => {
       />,
     );
 
-    expect(screen.getByText('GPT 5.4 via OpenRouter')).toBeInTheDocument();
+    expect(
+      screen.getByText('GPT 5.6 Terra via OpenRouter'),
+    ).toBeInTheDocument();
   });
 
   it('omits the inference provider suffix for bare model ids', () => {
@@ -201,9 +203,11 @@ describe('TaskInfoPanel', () => {
     );
 
     expect(screen.getByText('Model')).toBeInTheDocument();
-    expect(screen.getByText('GPT 5.4 via OpenRouter')).toBeInTheDocument();
     expect(
-      screen.getByText('GPT 5.4 via OpenRouter').closest('span'),
+      screen.getByText('GPT 5.6 Terra via OpenRouter'),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText('GPT 5.6 Terra via OpenRouter').closest('span'),
     ).toHaveClass('truncate');
   });
 
@@ -227,7 +231,7 @@ describe('TaskInfoPanel', () => {
     );
 
     expect(
-      screen.getByText('GPT 5.4 via OpenRouter • High'),
+      screen.getByText('GPT 5.6 Terra via OpenRouter • High'),
     ).toBeInTheDocument();
   });
 
