@@ -15,7 +15,7 @@ const WORKER_CONTAINER_PREFIX = 'roomote-worker-';
 const STALE_PROVISIONING_TIMEOUT_MS = 15 * 60 * 1_000;
 
 const TRUSTED_COMPOSE_SERVICES = new Set(['api', 'preview-proxy']);
-const REQUIRED_TRUSTED_COMPOSE_SERVICES = ['api', 'preview-proxy'] as const;
+const REQUIRED_TRUSTED_COMPOSE_SERVICES = ['api'] as const;
 
 type DockerNetworkInspect = {
   Id?: string;
@@ -58,17 +58,20 @@ type DockerWorkerResourceLimits = {
   cpuLimit: number;
   memoryLimit: string;
   pidsLimit: number;
-  diskLimit: string;
+  diskLimit?: string;
   logMaxSize: string;
   logMaxFiles: number;
 };
 
-const BLOCKED_EGRESS_ROUTES = [
-  '10.0.0.0/8',
+const BLOCKED_METADATA_ROUTES = [
   '100.64.0.0/10',
   '169.254.0.0/16',
-  '172.16.0.0/12',
   '192.0.0.0/24',
+] as const;
+
+const BLOCKED_PRIVATE_ROUTES = [
+  '10.0.0.0/8',
+  '172.16.0.0/12',
   '192.168.0.0/16',
 ] as const;
 
@@ -129,8 +132,7 @@ export function buildDockerWorkerResourceArgs(
     limits.memoryLimit,
     '--pids-limit',
     String(limits.pidsLimit),
-    '--storage-opt',
-    `size=${limits.diskLimit}`,
+    ...(limits.diskLimit ? ['--storage-opt', `size=${limits.diskLimit}`] : []),
     '--log-driver',
     'json-file',
     '--log-opt',
@@ -142,6 +144,55 @@ export function buildDockerWorkerResourceArgs(
     '--cap-drop',
     'NET_RAW',
   ];
+}
+
+export function isUnsupportedDockerDiskLimitError(error: unknown): boolean {
+  const errorWithOutput = error as {
+    message?: unknown;
+    stderr?: unknown;
+    stdout?: unknown;
+  };
+  const output = [
+    errorWithOutput?.message,
+    errorWithOutput?.stderr,
+    errorWithOutput?.stdout,
+  ]
+    .filter((value): value is string => typeof value === 'string')
+    .join('\n');
+
+  return [
+    /storage-opt.*supported only/i,
+    /storage-opt.*not supported/i,
+    /unknown.*storage.*(?:option|opt)/i,
+    /storage (?:option|opt).*size.*not supported/i,
+    /storage driver.*does not support.*(?:size|quota|limit)/i,
+    /filesystem.*does not support.*quota/i,
+  ].some((pattern) => pattern.test(output));
+}
+
+export function processListIncludesDockerWorkerRun(
+  processList: string,
+  taskRunId: number,
+): boolean {
+  if (!Number.isInteger(taskRunId)) {
+    return false;
+  }
+
+  const escapedTaskRunId = String(taskRunId).replace(
+    /[.*+?^${}()|[\]\\]/g,
+    '\\$&',
+  );
+
+  return processList
+    .split('\n')
+    .some((line) =>
+      [
+        new RegExp(`(?:^|\\s)worker\\s+run\\s+${escapedTaskRunId}(?:\\s|$)`),
+        new RegExp(
+          `(?:^|[\\s/])worker\\.js\\s+run\\s+${escapedTaskRunId}(?:\\s|$)`,
+        ),
+      ].some((pattern) => pattern.test(line)),
+    );
 }
 
 export async function prepareDockerTaskNetwork(
@@ -232,11 +283,14 @@ export async function attachDockerEgressPolicy(
     params.image,
     '-c',
     [
-      ...BLOCKED_EGRESS_ROUTES.map(
+      ...BLOCKED_METADATA_ROUTES.map(
         (route) => `ip route add blackhole ${route}`,
       ),
       ...(params.blockDockerGateway
         ? [
+            ...BLOCKED_PRIVATE_ROUTES.map(
+              (route) => `ip route add blackhole ${route}`,
+            ),
             `gateway="$(ip route show default | awk 'NR == 1 { print $3 }')"`,
             'if [ -n "$gateway" ]; then ip route add blackhole "$gateway/32"; fi',
           ]
@@ -323,7 +377,7 @@ export async function cleanupStaleDockerSandboxes(
       { allowFailure: true },
     );
 
-    if (!processListIncludesWorkerRun(processList, taskRunId)) {
+    if (!processListIncludesDockerWorkerRun(processList, taskRunId)) {
       await removeDockerSandboxResources(
         { containerName, taskNetwork },
         runDocker,
@@ -437,22 +491,4 @@ async function inspectContainer(
 
   const parsed = JSON.parse(output) as DockerContainerInspect[];
   return parsed[0];
-}
-
-function processListIncludesWorkerRun(
-  processList: string,
-  taskRunId: number,
-): boolean {
-  if (!Number.isInteger(taskRunId)) {
-    return false;
-  }
-
-  return processList
-    .split('\n')
-    .some((line) =>
-      [
-        new RegExp(`(?:^|\\s)worker\\s+run\\s+${taskRunId}(?:\\s|$)`),
-        new RegExp(`(?:^|[\\s/])worker\\.js\\s+run\\s+${taskRunId}(?:\\s|$)`),
-      ].some((pattern) => pattern.test(line)),
-    );
 }

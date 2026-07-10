@@ -5,12 +5,13 @@ import {
   buildDockerWorkerResourceArgs,
   cleanupStaleDockerSandboxes,
   getDockerTaskNetworkName,
+  isUnsupportedDockerDiskLimitError,
   prepareDockerTaskNetwork,
   type DockerCommand,
 } from '../docker-sandbox-security';
 
 describe('buildDockerWorkerResourceArgs', () => {
-  it('enforces CPU, memory, swap, PID, disk, log, and capability bounds', () => {
+  it('enforces CPU, memory, swap, PID, configured disk, log, and capability bounds', () => {
     expect(
       buildDockerWorkerResourceArgs({
         cpuLimit: 2,
@@ -43,6 +44,34 @@ describe('buildDockerWorkerResourceArgs', () => {
       'NET_RAW',
     ]);
   });
+
+  it('omits the storage option when the driver cannot enforce a disk limit', () => {
+    expect(
+      buildDockerWorkerResourceArgs({
+        cpuLimit: 2,
+        memoryLimit: '4g',
+        pidsLimit: 512,
+        logMaxSize: '10m',
+        logMaxFiles: 3,
+      }),
+    ).not.toContain('--storage-opt');
+  });
+});
+
+describe('isUnsupportedDockerDiskLimitError', () => {
+  it('recognizes quota capability errors from common Docker storage drivers', () => {
+    expect(
+      isUnsupportedDockerDiskLimitError({
+        stderr:
+          "--storage-opt is supported only for overlay over xfs with 'pquota' mount option",
+      }),
+    ).toBe(true);
+    expect(
+      isUnsupportedDockerDiskLimitError(
+        new Error('image roomote-worker:test not found'),
+      ),
+    ).toBe(false);
+  });
 });
 
 describe('prepareDockerTaskNetwork', () => {
@@ -67,6 +96,65 @@ describe('prepareDockerTaskNetwork', () => {
         'create',
         '--internal',
         'roomote-task-91',
+      ]),
+    );
+  });
+
+  it('requires the API but allows deployments without a preview proxy', async () => {
+    const runDocker = vi.fn<DockerCommand>(async (args) => {
+      if (
+        args[0] === 'network' &&
+        args[1] === 'inspect' &&
+        args[2] === 'roomote-control'
+      ) {
+        return JSON.stringify([
+          {
+            Id: 'control-network-id',
+            Containers: {
+              apiContainerId: { Name: 'roomote-api' },
+            },
+          },
+        ]);
+      }
+      if (args[0] === 'inspect' && args[1] === 'apiContainerId') {
+        return JSON.stringify([
+          {
+            Config: {
+              Labels: { 'com.docker.compose.service': 'api' },
+            },
+            NetworkSettings: {
+              Networks: {
+                roomoteControl: {
+                  NetworkID: 'control-network-id',
+                  Aliases: ['api'],
+                },
+              },
+            },
+          },
+        ]);
+      }
+      return '';
+    });
+
+    await expect(
+      prepareDockerTaskNetwork(
+        {
+          taskRunId: 95,
+          controlNetwork: 'roomote-control',
+          egressPolicy: 'internet',
+          autoRemove: true,
+        },
+        runDocker,
+      ),
+    ).resolves.toBe('roomote-task-95');
+    expect(runDocker).toHaveBeenCalledWith(
+      expect.arrayContaining([
+        'network',
+        'connect',
+        '--alias',
+        'api',
+        'roomote-task-95',
+        'apiContainerId',
       ]),
     );
   });
@@ -110,7 +198,7 @@ describe('attachDockerEgressPolicy', () => {
     expect(routeScript).toContain('ip route add blackhole "$gateway/32"');
   });
 
-  it('keeps the Docker gateway reachable for host-based local development', async () => {
+  it('keeps private host routes reachable for host-based local development', async () => {
     const runDocker = vi.fn<DockerCommand>().mockResolvedValue('');
 
     await attachDockerEgressPolicy(
@@ -127,7 +215,12 @@ describe('attachDockerEgressPolicy', () => {
     const helperRun = runDocker.mock.calls
       .map(([args]) => args)
       .find((args) => args[0] === 'run');
-    expect(helperRun?.at(-1)).not.toContain('ip route show default');
+    const routeScript = helperRun?.at(-1);
+    expect(routeScript).not.toContain('ip route show default');
+    expect(routeScript).not.toContain('ip route add blackhole 10.0.0.0/8');
+    expect(routeScript).not.toContain('ip route add blackhole 172.16.0.0/12');
+    expect(routeScript).not.toContain('ip route add blackhole 192.168.0.0/16');
+    expect(routeScript).toContain('ip route add blackhole 169.254.0.0/16');
   });
 });
 

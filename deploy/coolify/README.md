@@ -141,13 +141,13 @@ the same server. Two things matter in this mode:
 
 - **Worker network.** The controller uses the network named by
   `DOCKER_WORKER_NETWORK` (`roomote_default`, declared at the bottom of the
-  compose file) to discover the labeled API and preview-proxy containers. It
-  creates a separate bridge network for each task and attaches only those two
-  trusted services, so workers do not join `roomote_default`, see sibling
-  tasks, or reach Postgres, Redis, and MinIO. If worker containers fail to
-  start after a deploy, confirm the configured discovery network exists with
-  `docker network ls` and that Coolify preserved the standard Compose service
-  labels.
+  compose file) to discover the labeled API and optional preview-proxy
+  containers. It creates a separate bridge network for each task and attaches
+  only the API plus the preview proxy when enabled, so workers do not join
+  `roomote_default`, see sibling tasks, or reach Postgres, Redis, and MinIO. If
+  worker containers fail to start after a deploy, confirm the configured
+  discovery network exists with `docker network ls` and that Coolify preserved
+  the standard Compose service labels.
 
 - **Trust boundary.** Mounting the Docker socket gives the controller
   control of the host Docker daemon. This matches the single-host

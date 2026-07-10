@@ -208,8 +208,9 @@ services:
       # stack. Verify with `docker network ls` on the Coolify server.
       #
       # The controller uses this network only to discover the labeled API and
-      # preview-proxy services. Spawned workers receive per-task networks, so
-      # they do not join roomote_default or gain access to its datastores.
+      # optional preview-proxy services. Spawned workers receive per-task
+      # networks, so they do not join roomote_default or gain access to its
+      # datastores.
       DOCKER_WORKER_NETWORK: roomote_default
 
   bullmq:

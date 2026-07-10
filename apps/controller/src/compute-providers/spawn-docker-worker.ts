@@ -37,7 +37,9 @@ import {
   docker,
   getDockerTaskNetworkName,
   getDockerWorkerContainerName,
+  isUnsupportedDockerDiskLimitError,
   prepareDockerTaskNetwork,
+  processListIncludesDockerWorkerRun,
   removeDockerSandboxResources,
   type DockerWorkerEgressPolicy,
 } from './docker-sandbox-security';
@@ -147,8 +149,8 @@ export async function spawnDockerWorker(
 
   let containerId = '';
 
-  try {
-    containerId = (
+  const startContainer = async (diskLimit?: string): Promise<string> =>
+    (
       await docker([
         'run',
         '-d',
@@ -161,7 +163,7 @@ export async function spawnDockerWorker(
         dockerNetwork,
         '--network-alias',
         containerName,
-        ...buildDockerWorkerResourceArgs(config),
+        ...buildDockerWorkerResourceArgs({ ...config, diskLimit }),
         ...buildDockerWorkerLabels({
           taskRunId: cloudJob.id,
           autoRemove: autoRemoveContainer,
@@ -175,6 +177,21 @@ export async function spawnDockerWorker(
         ...DOCKER_CONTAINER_READY_ARGS,
       ])
     ).trim();
+
+  try {
+    try {
+      containerId = await startContainer(config.diskLimit);
+    } catch (error) {
+      if (!config.diskLimit || !isUnsupportedDockerDiskLimitError(error)) {
+        throw error;
+      }
+
+      console.warn(
+        `[spawnDockerWorker] Docker storage driver cannot enforce writable-layer limit ${config.diskLimit}; continuing without --storage-opt size. Configure host-level Docker storage quotas to retain a hard disk bound.`,
+      );
+      await docker(['rm', '-f', containerName], { allowFailure: true });
+      containerId = await startContainer();
+    }
 
     await attachDockerEgressPolicy({
       containerName,
@@ -391,27 +408,6 @@ async function hasCloudJobStarted(cloudJobId: number): Promise<boolean> {
   });
 
   return Boolean(cloudJob?.startedAt);
-}
-
-export function processListIncludesDockerWorkerRun(
-  processList: string,
-  cloudJobId: number,
-): boolean {
-  const escapedCloudJobId = String(cloudJobId).replace(
-    /[.*+?^${}()|[\]\\]/g,
-    '\\$&',
-  );
-
-  return processList
-    .split('\n')
-    .some((line) =>
-      [
-        new RegExp(`(?:^|\\s)worker\\s+run\\s+${escapedCloudJobId}(?:\\s|$)`),
-        new RegExp(
-          `(?:^|[\\s/])worker\\.js\\s+run\\s+${escapedCloudJobId}(?:\\s|$)`,
-        ),
-      ].some((pattern) => pattern.test(line)),
-    );
 }
 
 export function buildDockerSandboxServerUrl(params: {

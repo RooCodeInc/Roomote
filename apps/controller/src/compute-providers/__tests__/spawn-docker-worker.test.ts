@@ -1,8 +1,8 @@
 import { describe, expect, it } from 'vitest';
 
+import { processListIncludesDockerWorkerRun } from '../docker-sandbox-security';
 import {
   buildDockerSandboxServerUrl,
-  processListIncludesDockerWorkerRun,
   resolveDockerWorkerOwnershipTargetFromLookup,
   shouldAutoRemoveDockerWorkerContainer,
   toContainerReachableUrl,

@@ -58,16 +58,19 @@ tag when workers need a published image instead of a local tag.
 ## Resource and network isolation
 
 Every Docker task receives a dedicated bridge network. In Compose deployments,
-Roomote attaches only the API and preview proxy to that network; sibling task
-containers and datastore containers are not reachable. The controller removes
-empty task networks periodically and reaps stale provisioning containers after
-a restart.
+Roomote attaches the API and, when enabled, the optional preview proxy to that
+network; sibling task containers and datastore containers are not reachable.
+The controller removes empty task networks periodically and reaps stale
+provisioning containers after a restart.
 
 Workers default to 2 CPUs, 4 GiB of memory with no additional swap, 512 PIDs,
-a 20 GiB writable layer, and three 10 MiB JSON log files. The variables above
-can tune those bounds. The writable-layer quota requires a Docker storage
-driver that supports `--storage-opt size`; worker creation fails closed when
-the configured daemon cannot enforce it.
+a requested 20 GiB writable-layer quota, and three 10 MiB JSON log files. The
+variables above can tune those bounds. Writable-layer quotas require a Docker
+storage driver that supports `--storage-opt size`. When the driver rejects that
+option, Roomote logs a warning and starts the worker without it so existing
+overlay2-on-ext4 and similar deployments continue working. Configure a
+quota-capable Docker data root or host-level storage quota when a hard disk
+bound is required.
 
 The default `internet` egress policy allows public repository and tool access
 while installing immutable blackhole routes for private, shared-address, and
@@ -75,9 +78,9 @@ cloud metadata ranges (including AWS/GCP/Azure, Alibaba, and Oracle endpoints).
 The task's own, more-specific network route still reaches its API and preview
 proxy peers. In networked self-host deployments, direct connections to the
 Docker bridge gateway are also blocked without disrupting its use as the
-public-egress next hop. Local development retains gateway access because its
-API runs on the host. The worker never receives the network-administration
-capability needed to remove the policy. Set
+public-egress next hop. Local development blocks metadata ranges but retains
+private and gateway access because its API runs on the host. The worker never
+receives the network-administration capability needed to remove the policy. Set
 `DOCKER_WORKER_EGRESS_POLICY=none` for tasks that need only the Roomote API and
 preview proxy.
 
@@ -102,6 +105,7 @@ operators or repositories.
   and configure a worker image for self-hosted production.
 - **The task cannot reach Roomote services.** Check `DOCKER_WORKER_NETWORK` and
   the Compose network used by the API and controller.
-- **A worker fails with a storage option error.** Configure a Docker storage
-  driver with per-container writable-layer quota support; Roomote does not run
-  an unbounded fallback.
+- **A worker logs that its disk limit is unsupported.** Configure a Docker
+  storage driver with per-container writable-layer quota support or enforce a
+  host-level quota. Roomote continues without `--storage-opt size` for
+  compatibility.

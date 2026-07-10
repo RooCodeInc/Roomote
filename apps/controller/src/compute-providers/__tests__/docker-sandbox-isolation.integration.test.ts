@@ -1,3 +1,5 @@
+import { createServer } from 'node:http';
+
 import { afterAll, describe, expect, it } from 'vitest';
 
 import {
@@ -16,6 +18,8 @@ const runIntegrationTests =
 const dockerImage = process.env.DOCKER_SANDBOX_TEST_IMAGE ?? 'alpine:3.20';
 const firstTaskRunId = 900_000_000 + process.pid * 2;
 const taskRunIds = [firstTaskRunId, firstTaskRunId + 1];
+const localTaskRunId = firstTaskRunId + 2;
+const allTaskRunIds = [...taskRunIds, localTaskRunId];
 const controlNetwork = `roomote-isolation-test-${process.pid}`;
 const trustedContainers = [
   `roomote-isolation-api-${process.pid}`,
@@ -33,7 +37,7 @@ const resourceArgs = buildDockerWorkerResourceArgs({
 describe.runIf(runIntegrationTests)('Docker task network isolation', () => {
   afterAll(async () => {
     await Promise.all(
-      taskRunIds.map((taskRunId) =>
+      allTaskRunIds.map((taskRunId) =>
         removeDockerSandboxResources({
           containerName: getDockerWorkerContainerName(taskRunId),
           taskNetwork: getDockerTaskNetworkName(taskRunId),
@@ -247,4 +251,91 @@ describe.runIf(runIntegrationTests)('Docker task network isolation', () => {
       ).rejects.toThrow();
     }
   }, 30_000);
+
+  it('keeps host.docker.internal reachable for host-based local development', async () => {
+    const server = createServer((_request, response) => {
+      response.end('ok');
+    });
+    await new Promise<void>((resolve, reject) => {
+      server.once('error', reject);
+      server.listen(0, '0.0.0.0', resolve);
+    });
+
+    const address = server.address();
+    if (!address || typeof address === 'string') {
+      throw new Error('Expected a TCP address for the local host test server');
+    }
+
+    const containerName = getDockerWorkerContainerName(localTaskRunId);
+    const taskNetwork = getDockerTaskNetworkName(localTaskRunId);
+
+    try {
+      await prepareDockerTaskNetwork({
+        taskRunId: localTaskRunId,
+        egressPolicy: 'internet',
+        autoRemove: true,
+      });
+      await docker([
+        'run',
+        '-d',
+        '--rm',
+        '--name',
+        containerName,
+        '--network',
+        taskNetwork,
+        '--add-host',
+        'host.docker.internal:host-gateway',
+        dockerImage,
+        'sleep',
+        'infinity',
+      ]);
+      await attachDockerEgressPolicy({
+        containerName,
+        egressPolicy: 'internet',
+        image: dockerImage,
+        platform: process.arch === 'arm64' ? 'linux/arm64' : 'linux/amd64',
+        blockDockerGateway: false,
+      });
+
+      await expect(
+        docker([
+          'exec',
+          containerName,
+          'nc',
+          '-z',
+          '-w',
+          '2',
+          'host.docker.internal',
+          String(address.port),
+        ]),
+      ).resolves.toBe('');
+
+      const hostAddress = (
+        await docker([
+          'exec',
+          containerName,
+          'getent',
+          'ahostsv4',
+          'host.docker.internal',
+        ])
+      )
+        .trim()
+        .split(/\s+/)[0];
+      const route = await docker([
+        'exec',
+        containerName,
+        'ip',
+        'route',
+        'get',
+        hostAddress!,
+      ]);
+      expect(route).not.toContain('blackhole');
+      expect(route).not.toContain('unreachable');
+    } finally {
+      await removeDockerSandboxResources({ containerName, taskNetwork });
+      await new Promise<void>((resolve, reject) => {
+        server.close((error) => (error ? reject(error) : resolve()));
+      });
+    }
+  }, 20_000);
 });

@@ -511,9 +511,11 @@ using Docker sandboxes. That overlay:
 - mounts `/var/run/docker.sock` into the controller;
 - sets `DOCKER_WORKER_NETWORK=roomote_worker` as the trusted-service discovery
   network; each worker receives its own network containing only that worker,
-  the API, and preview proxy, never sibling tasks, Postgres, Redis, or MinIO;
-- enforces CPU, memory, PID, writable-layer, and log limits and blocks private
-  and cloud metadata ranges under the default `internet` egress policy;
+  the API, and the optional preview proxy when enabled, never sibling tasks,
+  Postgres, Redis, or MinIO;
+- enforces CPU, memory, PID, supported writable-layer quotas, and log limits
+  and blocks private and cloud metadata ranges under the default `internet`
+  egress policy;
 - points `DOCKER_WORKER_RELEASE_PATH` at the controller image's packaged worker
   release archive.
 
