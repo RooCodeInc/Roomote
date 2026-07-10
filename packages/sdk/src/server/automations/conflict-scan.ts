@@ -21,7 +21,7 @@ import {
   getInstallationOctokit,
   isRepoSkipped,
 } from '@roomote/github';
-import { enqueueCloudTask } from '@roomote/cloud-agents/server';
+import { enqueueTask } from '@roomote/cloud-agents/server';
 import {
   TaskPayloadKind,
   RunStatus,
@@ -309,7 +309,7 @@ export async function conflictScanJob(
               const prAuthorId = pr.user?.id;
               const prAuthorLogin = pr.user?.login;
 
-              const launchResult = await enqueueCloudTask({
+              const launchResult = await enqueueTask({
                 task: {
                   type: TaskPayloadKind.GithubPrConflictResolve,
                   payload: {

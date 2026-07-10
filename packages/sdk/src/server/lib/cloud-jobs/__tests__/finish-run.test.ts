@@ -152,7 +152,7 @@ const mockBuildTerminalReviewStatus = vi
 const mockFinalizeGithubPrReviewComment = vi.fn().mockResolvedValue(false);
 
 vi.mock('@roomote/cloud-agents/server', () => ({
-  enqueueCloudTask: vi.fn(),
+  enqueueTask: vi.fn(),
   releaseCloudTask: vi.fn().mockResolvedValue(undefined),
   getTaskUrl: vi.fn().mockReturnValue('https://example.com/task'),
   suggestSlackQuestionChannels: (...args: unknown[]) =>
@@ -239,9 +239,9 @@ vi.mock('../../sandbox-oidc', () => ({
     mockCleanupSandboxOidcTargetsForCloudJob(...args),
 }));
 
-import { finishCloudJob } from '../finish-cloud-job';
+import { finishRun } from '../finish-run';
 import { createCloudJobGitHubToken } from '@roomote/github';
-import { enqueueCloudTask } from '@roomote/cloud-agents/server';
+import { enqueueTask } from '@roomote/cloud-agents/server';
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -300,7 +300,7 @@ function makeRun(
 
 // ── Tests ────────────────────────────────────────────────────────────────────
 
-describe('finishCloudJob', () => {
+describe('finishRun', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     joinedSelectRows = [];
@@ -372,7 +372,7 @@ describe('finishCloudJob', () => {
   it('cleans up sandbox OIDC targets when a job reaches a terminal status', async () => {
     mockFindFirstRun.mockResolvedValue(makeRun());
 
-    await finishCloudJob({
+    await finishRun({
       id: 1,
       status: RunStatus.Completed,
     });
@@ -387,7 +387,7 @@ describe('finishCloudJob', () => {
       { id: 1, status: RunStatus.Completed, startedAt: new Date() },
     ];
 
-    await finishCloudJob({
+    await finishRun({
       id: 1,
       status: RunStatus.Completed,
     });
@@ -403,7 +403,7 @@ describe('finishCloudJob', () => {
     mockFindFirstRun.mockResolvedValue(makeRun());
     syncRunRows = [{ id: 1, status: RunStatus.Canceled, startedAt: null }];
 
-    await finishCloudJob({
+    await finishRun({
       id: 1,
       status: RunStatus.Canceled,
     });
@@ -419,7 +419,7 @@ describe('finishCloudJob', () => {
     mockFindFirstRun.mockResolvedValue(makeRun());
     syncRunRows = [{ id: 1, status: RunStatus.Failed, startedAt: new Date() }];
 
-    await finishCloudJob({
+    await finishRun({
       id: 1,
       status: RunStatus.Failed,
       error: 'boom',
@@ -437,7 +437,7 @@ describe('finishCloudJob', () => {
     // The idle run is non-terminal, so the derivation resolves to 'active'.
     syncRunRows = [{ id: 1, status: RunStatus.Idle, startedAt: new Date() }];
 
-    await finishCloudJob({
+    await finishRun({
       id: 1,
       status: RunStatus.Idle,
     });
@@ -463,7 +463,7 @@ describe('finishCloudJob', () => {
       { id: 2, status: RunStatus.Canceled, startedAt: null },
     ];
 
-    await finishCloudJob({
+    await finishRun({
       id: 2,
       status: RunStatus.Canceled,
     });
@@ -478,7 +478,7 @@ describe('finishCloudJob', () => {
   it('skips sandbox OIDC cleanup when a job transitions to idle', async () => {
     mockFindFirstRun.mockResolvedValue(makeRun());
 
-    await finishCloudJob({
+    await finishRun({
       id: 1,
       status: RunStatus.Idle,
     });
@@ -521,18 +521,18 @@ describe('finishCloudJob', () => {
     mockFindFirstRun
       .mockResolvedValueOnce(resumeRun)
       .mockResolvedValueOnce(resumeRun);
-    vi.mocked(enqueueCloudTask).mockResolvedValue({
+    vi.mocked(enqueueTask).mockResolvedValue({
       id: 444,
       taskId: 'fallback-task-444',
     } as never);
 
-    await finishCloudJob({
+    await finishRun({
       id: 303,
       status: RunStatus.Failed,
       error: 'snapshot resume failed',
     });
 
-    expect(enqueueCloudTask).toHaveBeenCalledWith({
+    expect(enqueueTask).toHaveBeenCalledWith({
       task: {
         type: TaskPayloadKind.GithubPrReviewFollowUp,
         payload: {
@@ -598,7 +598,7 @@ describe('finishCloudJob', () => {
     });
     mockFindFirstRun.mockResolvedValue(job);
 
-    await finishCloudJob({
+    await finishRun({
       id: 12,
       status: RunStatus.Failed,
       error: 'spawn timeout',
@@ -655,7 +655,7 @@ describe('finishCloudJob', () => {
         botAccessToken: 'xoxb-test',
       });
 
-      await finishCloudJob({
+      await finishRun({
         id: 1,
         status: RunStatus.Completed,
       });
@@ -689,7 +689,7 @@ describe('finishCloudJob', () => {
       });
       mockGetSlackStartedMessageTs.mockResolvedValue('111.333');
 
-      await finishCloudJob({
+      await finishRun({
         id: 1,
         status: RunStatus.Completed,
       });
@@ -731,7 +731,7 @@ describe('finishCloudJob', () => {
       });
       mockGetSlackStartedMessageTs.mockResolvedValue('111.333');
 
-      await finishCloudJob({
+      await finishRun({
         id: 1,
         status: RunStatus.Idle,
       });
@@ -772,7 +772,7 @@ describe('finishCloudJob', () => {
       });
       mockGetSlackStartedMessageTs.mockResolvedValue('111.333');
 
-      await finishCloudJob({
+      await finishRun({
         id: 1,
         status: RunStatus.Idle,
       });
@@ -806,7 +806,7 @@ describe('finishCloudJob', () => {
       });
       mockGetSlackStartedMessageTs.mockResolvedValue('111.333');
 
-      await finishCloudJob({
+      await finishRun({
         id: 1,
         status: RunStatus.Idle,
       });
@@ -840,7 +840,7 @@ describe('finishCloudJob', () => {
       });
       mockGetSlackStartedMessageTs.mockResolvedValue('111.333');
 
-      await finishCloudJob({
+      await finishRun({
         id: 1,
         status: RunStatus.Completed,
       });
@@ -896,7 +896,7 @@ describe('finishCloudJob', () => {
       });
       mockGetSlackStartedMessageTs.mockResolvedValue('111.333');
 
-      await finishCloudJob({
+      await finishRun({
         id: 2,
         status: RunStatus.Completed,
       });
@@ -952,7 +952,7 @@ describe('finishCloudJob', () => {
       });
       mockGetSlackStartedMessageTs.mockResolvedValue('111.333');
 
-      await finishCloudJob({
+      await finishRun({
         id: 2,
         status: RunStatus.Idle,
       });
@@ -1023,11 +1023,11 @@ describe('finishCloudJob', () => {
       mockGetSlackStartedMessageTs.mockResolvedValue('111.333');
       mockRedisSet.mockResolvedValueOnce('OK').mockResolvedValueOnce(null);
 
-      await finishCloudJob({
+      await finishRun({
         id: 2,
         status: RunStatus.Idle,
       });
-      await finishCloudJob({
+      await finishRun({
         id: 3,
         status: RunStatus.Idle,
       });
@@ -1094,7 +1094,7 @@ describe('finishCloudJob', () => {
         { id: 'CGENERAL', name: 'general' },
       ]);
 
-      await finishCloudJob({
+      await finishRun({
         id: 2,
         status: RunStatus.Completed,
       });
@@ -1139,7 +1139,7 @@ describe('finishCloudJob', () => {
         joinedChannels: [{ channelId: 'CJOINED' }],
       });
 
-      await finishCloudJob({
+      await finishRun({
         id: 2,
         status: RunStatus.Completed,
       });
@@ -1178,7 +1178,7 @@ describe('finishCloudJob', () => {
         updatedAt: new Date('2026-04-08T10:00:00.000Z'),
       });
 
-      await finishCloudJob({
+      await finishRun({
         id: 2,
         status: RunStatus.Completed,
       });
@@ -1194,7 +1194,7 @@ describe('finishCloudJob', () => {
       );
       mockFindFirstRun.mockResolvedValue(job);
 
-      await finishCloudJob({
+      await finishRun({
         id: 2,
         status: RunStatus.Completed,
       });
@@ -1214,7 +1214,7 @@ describe('finishCloudJob', () => {
         slackOnboardingStage: 'done',
       });
 
-      await finishCloudJob({
+      await finishRun({
         id: 2,
         status: RunStatus.Completed,
       });
@@ -1254,7 +1254,7 @@ describe('finishCloudJob', () => {
         },
       ];
 
-      await finishCloudJob({
+      await finishRun({
         id: 2,
         status: RunStatus.Completed,
       });
@@ -1294,7 +1294,7 @@ describe('finishCloudJob', () => {
       });
       mockRedisSet.mockResolvedValue(null);
 
-      await finishCloudJob({
+      await finishRun({
         id: 2,
         status: RunStatus.Completed,
       });
@@ -1327,7 +1327,7 @@ describe('finishCloudJob', () => {
         isActive: true,
       });
 
-      await finishCloudJob({
+      await finishRun({
         id: 1,
         status: RunStatus.Failed,
         error: 'spawn timeout',
@@ -1378,7 +1378,7 @@ describe('finishCloudJob', () => {
         isActive: true,
       });
 
-      await finishCloudJob({
+      await finishRun({
         id: 1,
         status: RunStatus.Failed,
         error: 'Worker heartbeat stale and instance sb-1 is stopped',
@@ -1424,7 +1424,7 @@ describe('finishCloudJob', () => {
         isActive: true,
       });
 
-      await finishCloudJob({
+      await finishRun({
         id: 1,
         status: RunStatus.Failed,
         error: 'spawn timeout',
@@ -1468,7 +1468,7 @@ describe('finishCloudJob', () => {
         isActive: true,
       });
 
-      await finishCloudJob({
+      await finishRun({
         id: 1,
         status: RunStatus.Failed,
         error: 'resume bootstrap timeout',
@@ -1513,7 +1513,7 @@ describe('finishCloudJob', () => {
         isActive: true,
       });
 
-      await finishCloudJob({
+      await finishRun({
         id: 1,
         status: RunStatus.Failed,
         error: 'spawn timeout',
@@ -1557,7 +1557,7 @@ describe('finishCloudJob', () => {
         isActive: true,
       });
 
-      await finishCloudJob({
+      await finishRun({
         id: 1,
         status: RunStatus.Failed,
         error: 'worker heartbeat stale',
@@ -1608,7 +1608,7 @@ describe('finishCloudJob', () => {
         isActive: true,
       });
 
-      await finishCloudJob({
+      await finishRun({
         id: 1,
         status: RunStatus.Failed,
         error: 'spawn timeout',
@@ -1627,7 +1627,7 @@ describe('finishCloudJob', () => {
       const job = makeRun({}, { slackThreadTs: null });
       mockFindFirstRun.mockResolvedValue(job);
 
-      await finishCloudJob({
+      await finishRun({
         id: 1,
         status: RunStatus.Failed,
         error: 'some error',
@@ -1653,7 +1653,7 @@ describe('finishCloudJob', () => {
       mockFindFirstRun.mockResolvedValue(job);
       mockFindFirstTask.mockResolvedValue(job.task);
 
-      await finishCloudJob({
+      await finishRun({
         id: 1,
         status: RunStatus.Completed,
       });
@@ -1685,7 +1685,7 @@ describe('finishCloudJob', () => {
       mockPostMessage.mockRejectedValue(new Error('Slack API error'));
 
       // Should not throw
-      await finishCloudJob({
+      await finishRun({
         id: 1,
         status: RunStatus.Failed,
         error: 'test error',
@@ -1712,7 +1712,7 @@ describe('finishCloudJob', () => {
       const job = makeRun({ payload: teamsPayload });
       mockFindFirstRun.mockResolvedValue(job);
 
-      await finishCloudJob({
+      await finishRun({
         id: 1,
         status: RunStatus.Failed,
         error: 'spawn timeout',
@@ -1735,7 +1735,7 @@ describe('finishCloudJob', () => {
       });
       mockFindFirstRun.mockResolvedValue(job);
 
-      await finishCloudJob({
+      await finishRun({
         id: 1,
         status: RunStatus.Failed,
         error: 'spawn timeout',
@@ -1759,7 +1759,7 @@ describe('finishCloudJob', () => {
       });
       mockFindFirstRun.mockResolvedValue(job);
 
-      await finishCloudJob({
+      await finishRun({
         id: 1,
         status: RunStatus.Failed,
         error: 'runtime crash',
@@ -1778,7 +1778,7 @@ describe('finishCloudJob', () => {
       const job = makeRun({ payload: { repo: 'owner/repo' } });
       mockFindFirstRun.mockResolvedValue(job);
 
-      await finishCloudJob({
+      await finishRun({
         id: 1,
         status: RunStatus.Failed,
         error: 'some error',
@@ -1791,7 +1791,7 @@ describe('finishCloudJob', () => {
       const job = makeRun({ payload: teamsPayload });
       mockFindFirstRun.mockResolvedValue(job);
 
-      await finishCloudJob({
+      await finishRun({
         id: 1,
         status: RunStatus.Completed,
       });
@@ -1804,7 +1804,7 @@ describe('finishCloudJob', () => {
       mockFindFirstRun.mockResolvedValue(job);
       mockCreateTeamsCommunicationProviderFromEnv.mockReturnValue(null);
 
-      await finishCloudJob({
+      await finishRun({
         id: 1,
         status: RunStatus.Failed,
         error: 'some error',
@@ -1819,7 +1819,7 @@ describe('finishCloudJob', () => {
       mockTeamsPostMessage.mockRejectedValue(new Error('Teams API error'));
 
       // Should not throw
-      await finishCloudJob({
+      await finishRun({
         id: 1,
         status: RunStatus.Failed,
         error: 'test error',
@@ -1859,7 +1859,7 @@ describe('finishCloudJob', () => {
       mockFindFirstRun.mockResolvedValue(job);
       mockFindManyTaskPullRequests.mockResolvedValue([conflictPrRow]);
 
-      await finishCloudJob({
+      await finishRun({
         id: 1,
         status: RunStatus.Completed,
       });
@@ -1888,7 +1888,7 @@ describe('finishCloudJob', () => {
       mockFindFirstRun.mockResolvedValue(job);
       mockFindManyTaskPullRequests.mockResolvedValue([conflictPrRow]);
 
-      await finishCloudJob({
+      await finishRun({
         id: 1,
         status: RunStatus.Completed,
       });
@@ -1911,7 +1911,7 @@ describe('finishCloudJob', () => {
       mockFindFirstRun.mockResolvedValue(job);
       mockFindManyTaskPullRequests.mockResolvedValue([conflictPrRow]);
 
-      await finishCloudJob({
+      await finishRun({
         id: 1,
         status: RunStatus.Failed,
         error: 'Patch did not apply cleanly.',
@@ -1938,7 +1938,7 @@ describe('finishCloudJob', () => {
       mockFindFirstRun.mockResolvedValue(job);
       mockFindManyTaskPullRequests.mockResolvedValue([]);
 
-      await finishCloudJob({
+      await finishRun({
         id: 1,
         status: RunStatus.Failed,
         error: 'Patch did not apply cleanly.',
@@ -1958,7 +1958,7 @@ describe('finishCloudJob', () => {
       mockFindFirstRun.mockResolvedValue(job);
       mockFindManyTaskPullRequests.mockResolvedValue([conflictPrRow]);
 
-      await finishCloudJob({
+      await finishRun({
         id: 1,
         status: RunStatus.Failed,
         error: 'Patch did not apply cleanly.',
@@ -1984,7 +1984,7 @@ describe('finishCloudJob', () => {
         id: 'linear-conn-1',
       });
 
-      await finishCloudJob({
+      await finishRun({
         id: 1,
         status: RunStatus.Failed,
         error: 'spawn failure',
@@ -2010,7 +2010,7 @@ describe('finishCloudJob', () => {
         id: 'linear-conn-1',
       });
 
-      await finishCloudJob({
+      await finishRun({
         id: 1,
         status: RunStatus.Failed,
         error: 'spawn failure',
@@ -2031,7 +2031,7 @@ describe('finishCloudJob', () => {
       const job = makeRun({}, { linearSessionId: null });
       mockFindFirstRun.mockResolvedValue(job);
 
-      await finishCloudJob({
+      await finishRun({
         id: 1,
         status: RunStatus.Failed,
         error: 'some error',
@@ -2044,7 +2044,7 @@ describe('finishCloudJob', () => {
       const job = makeRun({}, { linearSessionId: 'session-abc' });
       mockFindFirstRun.mockResolvedValue(job);
 
-      await finishCloudJob({
+      await finishRun({
         id: 1,
         status: RunStatus.Completed,
       });
@@ -2061,7 +2061,7 @@ describe('finishCloudJob', () => {
       mockEmitError.mockRejectedValue(new Error('Linear API error'));
 
       // Should not throw
-      await finishCloudJob({
+      await finishRun({
         id: 1,
         status: RunStatus.Failed,
         error: 'test error',

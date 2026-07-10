@@ -1,5 +1,5 @@
 import { TRPCClientError } from '@trpc/client';
-import { enqueueCloudTask } from '@roomote/cloud-agents/server';
+import { enqueueTask } from '@roomote/cloud-agents/server';
 import { withSandboxServerRpcClient } from '@roomote/sdk/server';
 import {
   and,
@@ -496,7 +496,7 @@ async function resumeTaskFromSnapshot({
 
   // Resumes never create tasks and never re-attribute; the follow-up sender
   // becomes the new run's acting user.
-  const resumeLaunch = await enqueueCloudTask(
+  const resumeLaunch = await enqueueTask(
     {
       task: {
         type: TaskPayloadKind.SnapshotResume,

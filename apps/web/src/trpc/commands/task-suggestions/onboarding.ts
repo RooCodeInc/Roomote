@@ -1,6 +1,6 @@
 import {
   buildSuggestedTasksPrompt,
-  enqueueCloudTask,
+  enqueueTask,
   findEnvironmentForRepo,
 } from '@roomote/cloud-agents/server';
 import {
@@ -144,7 +144,7 @@ async function launchSuggestedTasksTask(input: {
   const scanSourceControlProvider = resolveSingleSourceControlProvider(
     scanRepositoryRows.map((row) => row.sourceControlProvider),
   );
-  const launchResult = await enqueueCloudTask(
+  const launchResult = await enqueueTask(
     {
       task: {
         type: TaskPayloadKind.Scan,

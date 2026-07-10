@@ -9,7 +9,7 @@ import {
   resolveComputeProviderTarget,
 } from '@roomote/types';
 import type { ModalClient as _ModalSdkClient } from 'modal';
-import { enqueueCloudTask } from '@roomote/cloud-agents/server';
+import { enqueueTask } from '@roomote/cloud-agents/server';
 import { createComputeProviderClient } from '@roomote/compute-providers/factory';
 import { createClient } from '@roomote/sdk/client';
 import {
@@ -203,7 +203,7 @@ export async function createEnvironmentSnapshotCommand(
     }
 
     try {
-      const snapshotLaunch = await enqueueCloudTask({
+      const snapshotLaunch = await enqueueTask({
         task: {
           computeProvider: provider,
           type: TaskPayloadKind.SnapshotEnvironment,
@@ -527,7 +527,7 @@ export async function restoreCloudJobSnapshotCommand(
       sourceJob.sourceRunId,
     );
 
-    const resumeLaunch = await enqueueCloudTask({
+    const resumeLaunch = await enqueueTask({
       task: {
         computeProvider:
           sourceJob.vendor ?? resolveComputeProviderTarget(undefined),

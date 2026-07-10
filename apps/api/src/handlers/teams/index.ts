@@ -56,7 +56,7 @@ import {
 } from '@roomote/types';
 import {
   buildTeamsRoutingContext,
-  enqueueCloudTask,
+  enqueueTask,
   getTaskUrl,
   routeTask,
   type RoutingWorkspace,
@@ -994,7 +994,7 @@ async function resumeTeamsTaskFromSnapshot(input: {
 
       // Resumes never create tasks and never re-attribute; the resuming
       // human becomes the new run's acting user.
-      const resumeLaunch = await enqueueCloudTask(
+      const resumeLaunch = await enqueueTask(
         {
           task: {
             type: TaskPayloadKind.SnapshotResume,
@@ -1295,7 +1295,7 @@ async function startNewTeamsTask(input: {
         ...input.metadata,
       },
     };
-  const launchResult = await enqueueCloudTask(
+  const launchResult = await enqueueTask(
     {
       task,
       initiator: { kind: 'user', userId: launchUserId },

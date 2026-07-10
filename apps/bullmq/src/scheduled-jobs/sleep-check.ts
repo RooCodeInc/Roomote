@@ -32,7 +32,7 @@ import {
 import { createComputeProviderClient } from '@roomote/compute-providers';
 import {
   createSnapshot,
-  finishCloudJob,
+  finishRun,
   refreshTaskTitleOnCompletion,
 } from '@roomote/sdk/server';
 
@@ -701,7 +701,7 @@ async function handleTimedSleepCandidate(params: {
         : `${describeSleepCheckPath(path)} found active instance ${job.machineId} in status ${status}; failing the cloud job.`,
       details,
     );
-    await finishCloudJob({
+    await finishRun({
       id: job.id,
       status: finalStatus,
       error: `${describeSleepCheckPath(path)} found active instance ${job.machineId} in status ${status}`,
@@ -828,7 +828,7 @@ async function handleTimedSleepCandidate(params: {
       })
       .where(eq(taskRuns.id, job.id));
 
-    // Direct-completion path (not via finishCloudJob): derive the task state
+    // Direct-completion path (not via finishRun): derive the task state
     // from all its runs now that this run is completed.
     await syncTaskStateFromRuns(tx, job.taskId);
 
@@ -999,7 +999,7 @@ async function handleHeartbeatRecoveryCandidate(params: {
 
     const finalStatus = await resolveSweptJobFinalStatus(job.id);
 
-    await finishCloudJob({
+    await finishRun({
       id: job.id,
       status: finalStatus,
       error: config.notRunning.failureError(job.machineId, status),
@@ -1052,7 +1052,7 @@ async function handleHeartbeatRecoveryCandidate(params: {
 
   const finalStatus = await resolveSweptJobFinalStatus(job.id);
 
-  await finishCloudJob({
+  await finishRun({
     id: job.id,
     status: finalStatus,
     error: config.destroyAndFail.failureError(job.machineId),
@@ -1316,7 +1316,7 @@ async function completeIdleJobWithoutSnapshot(
   );
 
   try {
-    await finishCloudJob({
+    await finishRun({
       id: job.id,
       status: RunStatus.Completed,
       error: errorMessage,

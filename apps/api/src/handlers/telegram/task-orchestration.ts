@@ -12,7 +12,7 @@ import {
 } from '@roomote/types';
 import {
   buildTelegramRoutingContext,
-  enqueueCloudTask,
+  enqueueTask,
   getTaskUrl,
   routeTask,
 } from '@roomote/cloud-agents/server';
@@ -75,7 +75,7 @@ export async function resumeTelegramTaskFromSnapshot(input: {
 
   // Resumes never create tasks and never re-attribute; the resuming human
   // becomes the new run's acting user.
-  return enqueueCloudTask(
+  return enqueueTask(
     {
       task: {
         type: TaskPayloadKind.SnapshotResume,

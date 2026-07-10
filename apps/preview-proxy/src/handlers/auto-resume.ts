@@ -7,7 +7,7 @@ import {
   type PreviewTokenContext,
 } from '@roomote/types';
 import { taskRuns, and, eq, inArray } from '@roomote/db/server';
-import { enqueueCloudTask } from '@roomote/cloud-agents/server';
+import { enqueueTask } from '@roomote/cloud-agents/server';
 
 import { db } from '../lib/db';
 import { logger, escapeForLog } from '../lib/logger';
@@ -110,7 +110,7 @@ export async function triggerAutoResume(
     // Resumes never create tasks and carry no initiator; the resuming human
     // (source run's acting user, else the preview token's user) becomes the
     // new run's acting user.
-    const resumeLaunch = await enqueueCloudTask({
+    const resumeLaunch = await enqueueTask({
       task: {
         type: TaskPayloadKind.SnapshotResume,
         sourceSnapshotId: snapshotId,

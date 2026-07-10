@@ -1,4 +1,4 @@
-import { enqueueCloudTask } from '@roomote/cloud-agents/server';
+import { enqueueTask } from '@roomote/cloud-agents/server';
 import { db, eq, sql, taskRuns } from '@roomote/db/server';
 import {
   TaskPayloadKind,
@@ -144,7 +144,7 @@ export async function ensureSnapshotResumeGitHubFollowUpFallback({
       typeof TaskPayloadKind.GithubPrReviewFollowUp
     >;
 
-    const fallbackLaunch = await enqueueCloudTask({
+    const fallbackLaunch = await enqueueTask({
       task: {
         type: TaskPayloadKind.GithubPrReviewFollowUp,
         payload: fallbackPayload,

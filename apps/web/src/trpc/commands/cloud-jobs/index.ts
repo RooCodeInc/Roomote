@@ -13,7 +13,7 @@ import {
 import {
   type RoutingDecision,
   buildSlackRoutingContext,
-  enqueueCloudTask,
+  enqueueTask,
   getTaskUrl,
   routeTask,
 } from '@roomote/cloud-agents/server';
@@ -387,7 +387,7 @@ export async function createStandardTaskCloudJobCommand(
       },
     };
 
-    const launchResult = await enqueueCloudTask({
+    const launchResult = await enqueueTask({
       task,
       initiator: { kind: 'user', userId: auth.userId },
       workflow: 'standard',

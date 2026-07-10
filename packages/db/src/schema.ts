@@ -505,7 +505,7 @@ export const tasks = pgTable(
       .notNull()
       .default('visible')
       .$type<TaskVisibility>(),
-    // Terminal task state. Only written by the finishCloudJob terminal path;
+    // Terminal task state. Only written by the finishRun terminal path;
     // live runtime phase stays on runs.
     state: text('state').notNull().default('active').$type<TaskState>(),
 
@@ -1014,7 +1014,7 @@ export const taskRuns = pgTable(
     /**
      * When a user-initiated stop was requested for this job. Stop paths set
      * this before asking the sandbox to cancel so recovery sweeps and
-     * finishCloudJob can tell a deliberate stop from a runtime failure even
+     * finishRun can tell a deliberate stop from a runtime failure even
      * if the worker dies before the row reaches a terminal state.
      */
     cancelRequestedAt: timestamp('cancel_requested_at'),

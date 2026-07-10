@@ -88,7 +88,7 @@ const DEFAULT_DEPLOYMENT_ID = 'default';
  */
 type FinishedRun = Run & { task: Task };
 
-export const finishCloudJob = async ({
+export const finishRun = async ({
   id,
   status,
   error,
@@ -122,7 +122,7 @@ export const finishCloudJob = async ({
   // written to the run's `error` column below for debugging.
   if (status === RunStatus.Failed && job.cancelRequestedAt != null) {
     console.log(
-      `[finishCloudJob] Persisting the failed finalization of job ${id} as canceled: a stop was requested at ${job.cancelRequestedAt.toISOString()}`,
+      `[finishRun] Persisting the failed finalization of job ${id} as canceled: a stop was requested at ${job.cancelRequestedAt.toISOString()}`,
     );
     status = RunStatus.Canceled;
   }
@@ -131,7 +131,7 @@ export const finishCloudJob = async ({
     await releaseCloudTask(job);
   } catch (error) {
     console.error(
-      `[finishCloudJob] Failed to release lock for job ${id}: ${
+      `[finishRun] Failed to release lock for job ${id}: ${
         error instanceof Error ? error.message : String(error)
       }`,
     );
@@ -248,7 +248,7 @@ export const finishCloudJob = async ({
       });
     } catch (error) {
       console.warn(
-        `[finishCloudJob] Failed to refresh final title for job ${id}: ${
+        `[finishRun] Failed to refresh final title for job ${id}: ${
           error instanceof Error ? error.message : String(error)
         }`,
       );
@@ -260,7 +260,7 @@ export const finishCloudJob = async ({
       await cleanupSandboxOidcTargetsForCloudJob(id);
     } catch (error) {
       console.warn(
-        `[finishCloudJob] Failed to clean sandbox OIDC targets for job ${id}: ${
+        `[finishRun] Failed to clean sandbox OIDC targets for job ${id}: ${
           error instanceof Error ? error.message : String(error)
         }`,
       );
@@ -272,7 +272,7 @@ export const finishCloudJob = async ({
       await revokeCloudJobScopedGitLabTokens(job);
     } catch (error) {
       console.warn(
-        `[finishCloudJob] Failed to revoke GitLab scoped tokens for job ${id}: ${
+        `[finishRun] Failed to revoke GitLab scoped tokens for job ${id}: ${
           error instanceof Error ? error.message : String(error)
         }`,
       );
@@ -284,7 +284,7 @@ export const finishCloudJob = async ({
       await ensureSnapshotResumeGitHubFollowUpFallback({ resumeJobId: job.id });
     } catch (err) {
       console.error(
-        `[finishCloudJob] Failed to enqueue deferred SnapshotResume GitHub fallback for job ${id}: ${
+        `[finishRun] Failed to enqueue deferred SnapshotResume GitHub fallback for job ${id}: ${
           err instanceof Error ? err.message : String(err)
         }`,
       );
@@ -304,7 +304,7 @@ export const finishCloudJob = async ({
       await sendSlackFailureNotification(job, sanitizedError);
     } catch (err) {
       console.error(
-        `[finishCloudJob] Failed to send Slack failure notification for job ${id}: ${
+        `[finishRun] Failed to send Slack failure notification for job ${id}: ${
           err instanceof Error ? err.message : String(err)
         }`,
       );
@@ -322,7 +322,7 @@ export const finishCloudJob = async ({
       await sendTeamsFailureNotification(job);
     } catch (err) {
       console.error(
-        `[finishCloudJob] Failed to send Teams failure notification for job ${id}: ${
+        `[finishRun] Failed to send Teams failure notification for job ${id}: ${
           err instanceof Error ? err.message : String(err)
         }`,
       );
@@ -344,7 +344,7 @@ export const finishCloudJob = async ({
       await sendSlackSetupCompletionNotification(job);
     } catch (err) {
       console.error(
-        `[finishCloudJob] Failed to send Slack setup completion notification for job ${id}: ${
+        `[finishRun] Failed to send Slack setup completion notification for job ${id}: ${
           err instanceof Error ? err.message : String(err)
         }`,
       );
@@ -356,7 +356,7 @@ export const finishCloudJob = async ({
       await maybeSendSlackQuestionChannelInvite(job);
     } catch (err) {
       console.error(
-        `[finishCloudJob] Failed to send Slack question-channel invite for job ${id}: ${
+        `[finishRun] Failed to send Slack question-channel invite for job ${id}: ${
           err instanceof Error ? err.message : String(err)
         }`,
       );
@@ -370,7 +370,7 @@ export const finishCloudJob = async ({
       await sendLinearFailureNotification(job, sanitizedError);
     } catch (err) {
       console.error(
-        `[finishCloudJob] Failed to send Linear failure notification for job ${id}: ${
+        `[finishRun] Failed to send Linear failure notification for job ${id}: ${
           err instanceof Error ? err.message : String(err)
         }`,
       );
@@ -386,7 +386,7 @@ export const finishCloudJob = async ({
       await postConflictResolutionComment(job, status, sanitizedError);
     } catch (err) {
       console.error(
-        `[finishCloudJob] Failed to post conflict resolution comment for job ${id}: ${
+        `[finishRun] Failed to post conflict resolution comment for job ${id}: ${
           err instanceof Error ? err.message : String(err)
         }`,
       );
@@ -424,7 +424,7 @@ async function cleanupGithubPrReviewArtifacts(
     prRows = await findTaskPullRequests(job.taskId);
   } catch (error) {
     console.error(
-      `[finishCloudJob] Failed to load task_pull_requests for task ${job.taskId}: ${
+      `[finishRun] Failed to load task_pull_requests for task ${job.taskId}: ${
         error instanceof Error ? error.message : String(error)
       }`,
     );
@@ -463,7 +463,7 @@ async function cleanupGithubPrReviewArtifacts(
           .where(eq(taskPullRequests.id, prRow.id));
       } catch (error) {
         console.error(
-          `[finishCloudJob] Failed to delete reaction for job ${job.id}: ${
+          `[finishRun] Failed to delete reaction for job ${job.id}: ${
             error instanceof Error ? error.message : String(error)
           }`,
         );
@@ -483,7 +483,7 @@ async function cleanupGithubPrReviewArtifacts(
         });
       } catch (error) {
         console.error(
-          `[finishCloudJob] Failed to complete check run for job ${job.id}: ${
+          `[finishRun] Failed to complete check run for job ${job.id}: ${
             error instanceof Error ? error.message : String(error)
           }`,
         );
@@ -502,7 +502,7 @@ async function cleanupGithubPrReviewArtifacts(
       try {
         const token = await createCloudJobGitHubToken(job);
         // A user-stopped run arrives here already normalized to Canceled (see
-        // finishCloudJob), so the review outcome maps naturally.
+        // finishRun), so the review outcome maps naturally.
         const outcome =
           status === RunStatus.Completed
             ? 'completed'
@@ -532,12 +532,12 @@ async function cleanupGithubPrReviewArtifacts(
 
         if (finalized) {
           console.log(
-            `[finishCloudJob] Finalized stale PR review summary comment for job ${job.id} on ${prRow.repository}#${prRow.prNumber}`,
+            `[finishRun] Finalized stale PR review summary comment for job ${job.id} on ${prRow.repository}#${prRow.prNumber}`,
           );
         }
       } catch (error) {
         console.error(
-          `[finishCloudJob] Failed to finalize PR review summary comment for job ${job.id}: ${
+          `[finishRun] Failed to finalize PR review summary comment for job ${job.id}: ${
             error instanceof Error ? error.message : String(error)
           }`,
         );
@@ -579,7 +579,7 @@ async function sendTeamsFailureNotification(job: FinishedRun): Promise<void> {
 
   if (!provider) {
     console.warn(
-      `[finishCloudJob] Teams bot credentials are not configured, skipping Teams failure notification for job ${job.id}`,
+      `[finishRun] Teams bot credentials are not configured, skipping Teams failure notification for job ${job.id}`,
     );
     return;
   }
@@ -589,7 +589,7 @@ async function sendTeamsFailureNotification(job: FinishedRun): Promise<void> {
 
   if (!channelId || !serviceUrl) {
     console.warn(
-      `[finishCloudJob] Missing Teams conversation metadata for job ${job.id}, skipping Teams failure notification`,
+      `[finishRun] Missing Teams conversation metadata for job ${job.id}, skipping Teams failure notification`,
     );
     return;
   }
@@ -617,9 +617,7 @@ async function sendTeamsFailureNotification(job: FinishedRun): Promise<void> {
     textFormat: 'markdown',
   });
 
-  console.log(
-    `[finishCloudJob] Sent Teams failure notification for job ${job.id}`,
-  );
+  console.log(`[finishRun] Sent Teams failure notification for job ${job.id}`);
 }
 
 /**
@@ -641,7 +639,7 @@ async function sendSlackFailureNotification(
 
   if (!slackInstallation) {
     console.warn(
-      `[finishCloudJob] No active Slack installation, skipping Slack notification`,
+      `[finishRun] No active Slack installation, skipping Slack notification`,
     );
     return;
   }
@@ -650,7 +648,7 @@ async function sendSlackFailureNotification(
 
   if (!channel) {
     console.warn(
-      `[finishCloudJob] No channel found for job ${job.id}, skipping Slack notification`,
+      `[finishRun] No channel found for job ${job.id}, skipping Slack notification`,
     );
     return;
   }
@@ -713,7 +711,7 @@ async function sendSlackFailureNotification(
     }
 
     console.log(
-      `[finishCloudJob] Sent Slack failure notification for job ${job.id}`,
+      `[finishRun] Sent Slack failure notification for job ${job.id}`,
     );
     return;
   }
@@ -735,7 +733,7 @@ async function sendSlackFailureNotification(
 
   if (failureSubject && messageTs) {
     await recordSlackConversationMessageBestEffort({
-      logContext: 'finishCloudJob.setupFailure',
+      logContext: 'finishRun.setupFailure',
       ...failureSubject,
       slackChannelId: channel,
       conversationKind: 'thread',
@@ -750,9 +748,7 @@ async function sendSlackFailureNotification(
     });
   }
 
-  console.log(
-    `[finishCloudJob] Sent Slack failure notification for job ${job.id}`,
-  );
+  console.log(`[finishRun] Sent Slack failure notification for job ${job.id}`);
 }
 
 function formatSlackChannelSuggestionList(
@@ -956,13 +952,13 @@ async function maybeSendSlackQuestionChannelInvite(
   if (!messageTs) {
     await redis.del(claimKey);
     console.warn(
-      `[finishCloudJob] Failed to send Slack question-channel invite DM for job ${job.id}`,
+      `[finishRun] Failed to send Slack question-channel invite DM for job ${job.id}`,
     );
     return;
   }
 
   await recordSlackConversationMessageBestEffort({
-    logContext: 'finishCloudJob.questionChannelInvite',
+    logContext: 'finishRun.questionChannelInvite',
     subjectUserId: invitedUserId,
     slackTeamId: slackInstallation.teamId,
     subjectSlackUserId: slackUserMapping.slackUserId,
@@ -1003,7 +999,7 @@ async function sendSlackSetupCompletionNotification(job: FinishedRun) {
 
   if (!channel) {
     console.warn(
-      `[finishCloudJob] No channel found for setup completion job ${job.id}, skipping Slack notification`,
+      `[finishRun] No channel found for setup completion job ${job.id}, skipping Slack notification`,
     );
     return;
   }
@@ -1014,7 +1010,7 @@ async function sendSlackSetupCompletionNotification(job: FinishedRun) {
 
   if (!slackInstallation) {
     console.warn(
-      `[finishCloudJob] No active Slack installation, skipping setup completion Slack notification`,
+      `[finishRun] No active Slack installation, skipping setup completion Slack notification`,
     );
     return;
   }
@@ -1070,7 +1066,7 @@ async function sendSlackSetupCompletionNotification(job: FinishedRun) {
   if (!messageTs) {
     await redis.del(claimKey);
     console.warn(
-      `[finishCloudJob] Failed to send setup completion Slack notification for job ${job.id}`,
+      `[finishRun] Failed to send setup completion Slack notification for job ${job.id}`,
     );
     return;
   }
@@ -1084,7 +1080,7 @@ async function sendSlackSetupCompletionNotification(job: FinishedRun) {
 
   if (completionSubject && messageTs) {
     await recordSlackConversationMessageBestEffort({
-      logContext: 'finishCloudJob.setupCompletion',
+      logContext: 'finishRun.setupCompletion',
       ...completionSubject,
       slackChannelId: channel,
       conversationKind: 'thread',
@@ -1190,7 +1186,7 @@ async function sendLinearFailureNotification(
   const connection = await findLinearDeploymentMcpConnection();
   if (!connection) {
     console.warn(
-      `[finishCloudJob] No active Linear MCP connection, skipping Linear notification`,
+      `[finishRun] No active Linear MCP connection, skipping Linear notification`,
     );
     return;
   }
@@ -1202,7 +1198,7 @@ async function sendLinearFailureNotification(
 
   if (!accessToken) {
     console.warn(
-      `[finishCloudJob] Could not obtain valid Linear access token, skipping Linear notification`,
+      `[finishRun] Could not obtain valid Linear access token, skipping Linear notification`,
     );
     return;
   }
@@ -1212,9 +1208,7 @@ async function sendLinearFailureNotification(
 
   await client.emitError(job.task.linearSessionId!, errorMessage);
 
-  console.log(
-    `[finishCloudJob] Sent Linear failure notification for job ${job.id}`,
-  );
+  console.log(`[finishRun] Sent Linear failure notification for job ${job.id}`);
 }
 
 async function postConflictResolutionComment(
@@ -1230,13 +1224,13 @@ async function postConflictResolutionComment(
 
   if (!prRow?.repository || !prRow.prNumber) {
     console.warn(
-      `[finishCloudJob] Skipping conflict resolution comment for job ${job.id}: no linked GitHub pull request row`,
+      `[finishRun] Skipping conflict resolution comment for job ${job.id}: no linked GitHub pull request row`,
     );
     return;
   }
 
   console.log(
-    `[finishCloudJob] postConflictResolutionComment called for job ${job.id} (status=${status}, repo=${prRow.repository}, pr=${prRow.prNumber})`,
+    `[finishRun] postConflictResolutionComment called for job ${job.id} (status=${status}, repo=${prRow.repository}, pr=${prRow.prNumber})`,
   );
 
   const token = await createCloudJobGitHubToken(job);
@@ -1244,7 +1238,7 @@ async function postConflictResolutionComment(
 
   if (!owner || !repo) {
     console.warn(
-      `[finishCloudJob] Skipping conflict resolution comment: malformed repository (${prRow.repository})`,
+      `[finishRun] Skipping conflict resolution comment: malformed repository (${prRow.repository})`,
     );
 
     return;
@@ -1283,6 +1277,6 @@ async function postConflictResolutionComment(
   }
 
   console.log(
-    `[finishCloudJob] Posted conflict resolution ${status} comment for job ${job.id} on ${prRow.repository}#${prRow.prNumber}`,
+    `[finishRun] Posted conflict resolution ${status} comment for job ${job.id} on ${prRow.repository}#${prRow.prNumber}`,
   );
 }

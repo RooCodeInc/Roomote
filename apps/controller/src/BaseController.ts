@@ -26,7 +26,7 @@ import {
   isNull,
 } from '@roomote/db/server';
 import { dequeueCloudTask } from '@roomote/cloud-agents/server';
-import { finishCloudJob } from '@roomote/sdk/server';
+import { finishRun } from '@roomote/sdk/server';
 
 import { getOrphanedJob } from './orphaned-cloud-jobs';
 import {
@@ -508,7 +508,7 @@ export abstract class BaseController {
 
     // Use the centralized termination path so all side-effects (email, Slack,
     // Linear notifications, lock release, etc.) are applied consistently.
-    await finishCloudJob({
+    await finishRun({
       id: cloudJob.id,
       status: RunStatus.Failed,
       error: errorMessage,

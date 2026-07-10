@@ -7,7 +7,7 @@ import type { Run } from '@roomote/db/server';
 // ── Mocks ────────────────────────────────────────────────────────────────────
 
 const {
-  mockFinishCloudJob,
+  mockFinishRun,
   mockCaptureControllerException,
   mockCaptureControllerMessage,
   mockCloudJobsFindFirst,
@@ -18,7 +18,7 @@ const {
   mockRedisSet,
   mockUpdateWhere,
 } = vi.hoisted(() => ({
-  mockFinishCloudJob: vi.fn().mockResolvedValue(undefined),
+  mockFinishRun: vi.fn().mockResolvedValue(undefined),
   mockCaptureControllerException: vi.fn(),
   mockCaptureControllerMessage: vi.fn(),
   mockCloudJobsFindFirst: vi.fn(),
@@ -33,7 +33,7 @@ const {
 }));
 
 vi.mock('@roomote/sdk/server', () => ({
-  finishCloudJob: (...args: unknown[]) => mockFinishCloudJob(...args),
+  finishRun: (...args: unknown[]) => mockFinishRun(...args),
 }));
 
 const mockDbUpdateSet = vi.fn().mockReturnValue({
@@ -210,7 +210,7 @@ describe('BaseController.handleSpawnJobError', () => {
     delete process.env.USE_WORKER_RELEASE;
   });
 
-  it('calls finishCloudJob with Failed status and error message', async () => {
+  it('calls finishRun with Failed status and error message', async () => {
     const job = makeCloudJob({ id: 42 });
     const error = new Error('Machine unavailable');
 
@@ -218,7 +218,7 @@ describe('BaseController.handleSpawnJobError', () => {
       controller.testHandleSpawnJobError(job, error),
     ).rejects.toThrow('Machine unavailable');
 
-    expect(mockFinishCloudJob).toHaveBeenCalledWith({
+    expect(mockFinishRun).toHaveBeenCalledWith({
       id: 42,
       status: RunStatus.Failed,
       error: 'Machine unavailable',
@@ -247,7 +247,7 @@ describe('BaseController.handleSpawnJobError', () => {
       controller.testHandleSpawnJobError(job, error),
     ).rejects.toThrow('Snapshot failed');
 
-    expect(mockFinishCloudJob).toHaveBeenCalledWith({
+    expect(mockFinishRun).toHaveBeenCalledWith({
       id: 99,
       status: RunStatus.Failed,
       error: 'Snapshot failed',
@@ -268,7 +268,7 @@ describe('BaseController.handleSpawnJobError', () => {
     );
   });
 
-  it('re-throws the original error after calling finishCloudJob', async () => {
+  it('re-throws the original error after calling finishRun', async () => {
     const job = makeCloudJob();
     const originalError = new Error('original');
 
@@ -284,7 +284,7 @@ describe('BaseController.handleSpawnJobError', () => {
       controller.testHandleSpawnJobError(job, 'string error'),
     ).rejects.toBe('string error');
 
-    expect(mockFinishCloudJob).toHaveBeenCalledWith({
+    expect(mockFinishRun).toHaveBeenCalledWith({
       id: 7,
       status: RunStatus.Failed,
       error: 'string error',

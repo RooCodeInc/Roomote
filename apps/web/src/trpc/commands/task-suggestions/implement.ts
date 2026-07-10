@@ -1,6 +1,6 @@
 import {
   buildSuggestionTaskPromptText,
-  enqueueCloudTask,
+  enqueueTask,
 } from '@roomote/cloud-agents/server';
 import {
   and,
@@ -92,7 +92,7 @@ export async function implementTaskSuggestionCommand(
       throw new Error(resolution.failureReason);
     }
 
-    const launchResult = await enqueueCloudTask({
+    const launchResult = await enqueueTask({
       task: {
         type: TaskPayloadKind.StandardTask,
         payload: {

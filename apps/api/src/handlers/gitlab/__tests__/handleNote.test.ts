@@ -1,5 +1,5 @@
 const {
-  mockEnqueueCloudTask,
+  mockEnqueueTask,
   mockGetTaskUrl,
   mockGetGitLabAutomationTargets,
   mockFindReusableGitHubPrFollowUpOwner,
@@ -9,7 +9,7 @@ const {
   mockSendMessageToTask,
   mockSteerMessageToTask,
 } = vi.hoisted(() => ({
-  mockEnqueueCloudTask: vi.fn(),
+  mockEnqueueTask: vi.fn(),
   mockGetTaskUrl: vi.fn(),
   mockGetGitLabAutomationTargets: vi.fn(),
   mockFindReusableGitHubPrFollowUpOwner: vi.fn(),
@@ -21,7 +21,7 @@ const {
 }));
 
 vi.mock('@roomote/cloud-agents/server', () => ({
-  enqueueCloudTask: mockEnqueueCloudTask,
+  enqueueTask: mockEnqueueTask,
   getTaskUrl: mockGetTaskUrl,
 }));
 
@@ -99,7 +99,7 @@ function makeNotePayload(
 
 describe('handleGitLabNote', () => {
   beforeEach(() => {
-    mockEnqueueCloudTask.mockReset();
+    mockEnqueueTask.mockReset();
     mockGetTaskUrl.mockReset();
     mockGetGitLabAutomationTargets.mockReset();
     mockFindReusableGitHubPrFollowUpOwner.mockReset();
@@ -127,7 +127,7 @@ describe('handleGitLabNote', () => {
       username: 'roomote-bot',
     });
     mockCreateGitLabMergeRequestNote.mockResolvedValue({ id: 1 });
-    mockEnqueueCloudTask.mockResolvedValue({ id: 1234, taskId: 'task-1' });
+    mockEnqueueTask.mockResolvedValue({ id: 1234, taskId: 'task-1' });
     mockGetTaskUrl.mockReturnValue('https://app.roomote.dev/task/task-1');
   });
 
@@ -135,7 +135,7 @@ describe('handleGitLabNote', () => {
     const result = await handleGitLabNote(makeNotePayload());
 
     expect(result).toEqual({ status: 'ok', metadata: { ids: [1234] } });
-    expect(mockEnqueueCloudTask).toHaveBeenCalledWith(
+    expect(mockEnqueueTask).toHaveBeenCalledWith(
       expect.objectContaining({
         task: expect.objectContaining({
           type: TaskPayloadKind.GithubPrReview,
@@ -193,7 +193,7 @@ describe('handleGitLabNote', () => {
       prNumber: 42,
       headSha: 'abc123',
     });
-    expect(mockEnqueueCloudTask).not.toHaveBeenCalled();
+    expect(mockEnqueueTask).not.toHaveBeenCalled();
     expect(mockCreateGitLabMergeRequestNote).toHaveBeenCalledWith(
       expect.objectContaining({
         body: expect.stringContaining('already running'),
@@ -207,7 +207,7 @@ describe('handleGitLabNote', () => {
     );
 
     expect(mockFindActiveGitHubPrReviewTask).not.toHaveBeenCalled();
-    expect(mockEnqueueCloudTask).toHaveBeenCalled();
+    expect(mockEnqueueTask).toHaveBeenCalled();
   });
 
   it('steers the note into an actively running reusable owner task', async () => {
@@ -232,7 +232,7 @@ describe('handleGitLabNote', () => {
         senderMode: 'github_pr_follow_up',
       }),
     );
-    expect(mockEnqueueCloudTask).not.toHaveBeenCalled();
+    expect(mockEnqueueTask).not.toHaveBeenCalled();
     expect(mockCreateGitLabMergeRequestNote).toHaveBeenCalledWith(
       expect.objectContaining({
         body: expect.stringContaining('existing task'),
@@ -283,7 +283,7 @@ describe('handleGitLabNote', () => {
     const result = await handleGitLabNote(makeNotePayload());
 
     expect(result).toEqual({ status: 'ok', metadata: { ids: [1234] } });
-    expect(mockEnqueueCloudTask).toHaveBeenCalled();
+    expect(mockEnqueueTask).toHaveBeenCalled();
   });
 
   it('ignores notes without an @roomote mention', async () => {
@@ -292,7 +292,7 @@ describe('handleGitLabNote', () => {
     );
 
     expect(result).toEqual({ status: 'ok', message: 'no_mention' });
-    expect(mockEnqueueCloudTask).not.toHaveBeenCalled();
+    expect(mockEnqueueTask).not.toHaveBeenCalled();
     expect(mockCreateGitLabMergeRequestNote).not.toHaveBeenCalled();
   });
 
@@ -324,7 +324,7 @@ describe('handleGitLabNote', () => {
     );
 
     expect(result).toEqual({ status: 'ok', message: 'roomote_authored_note' });
-    expect(mockEnqueueCloudTask).not.toHaveBeenCalled();
+    expect(mockEnqueueTask).not.toHaveBeenCalled();
   });
 
   it('ignores notes authored by a project access token bot identity', async () => {
@@ -343,7 +343,7 @@ describe('handleGitLabNote', () => {
     );
 
     expect(result).toEqual({ status: 'ok', message: 'system_note' });
-    expect(mockEnqueueCloudTask).not.toHaveBeenCalled();
+    expect(mockEnqueueTask).not.toHaveBeenCalled();
   });
 
   it('ignores notes on non-merge-request targets', async () => {
@@ -358,7 +358,7 @@ describe('handleGitLabNote', () => {
       status: 'ok',
       message: 'unsupported_noteable_type:Issue',
     });
-    expect(mockEnqueueCloudTask).not.toHaveBeenCalled();
+    expect(mockEnqueueTask).not.toHaveBeenCalled();
   });
 
   it('posts a reviewer-gate note when no automation target is found', async () => {
@@ -376,7 +376,7 @@ describe('handleGitLabNote', () => {
         mergeRequestIid: 42,
       }),
     );
-    expect(mockEnqueueCloudTask).not.toHaveBeenCalled();
+    expect(mockEnqueueTask).not.toHaveBeenCalled();
   });
 
   it('prompts the commenter to link GitLab before starting work', async () => {
@@ -394,7 +394,7 @@ describe('handleGitLabNote', () => {
         body: expect.stringContaining('GitLab account linked'),
       }),
     );
-    expect(mockEnqueueCloudTask).not.toHaveBeenCalled();
+    expect(mockEnqueueTask).not.toHaveBeenCalled();
   });
 
   it('bypasses the MR author policy for mentions', async () => {

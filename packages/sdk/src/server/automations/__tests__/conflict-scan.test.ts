@@ -4,7 +4,7 @@ const {
   mockGetCommitCommittedAt,
   mockGetInstallationOctokit,
   mockIsRepoSkipped,
-  mockEnqueueCloudTask,
+  mockEnqueueTask,
   mockFindActiveGitHubBranchWork,
   mockHasRecentGitHubBranchCommit,
   mockSelectLimit,
@@ -19,7 +19,7 @@ const {
     mockGetCommitCommittedAt: vi.fn() as AnyMock,
     mockGetInstallationOctokit: vi.fn() as AnyMock,
     mockIsRepoSkipped: vi.fn() as AnyMock,
-    mockEnqueueCloudTask: vi.fn() as AnyMock,
+    mockEnqueueTask: vi.fn() as AnyMock,
     mockFindActiveGitHubBranchWork: vi.fn() as AnyMock,
     mockHasRecentGitHubBranchCommit: vi.fn() as AnyMock,
     mockSelectLimit: vi.fn() as AnyMock,
@@ -31,7 +31,7 @@ const {
 });
 
 vi.mock('@roomote/cloud-agents/server', () => ({
-  enqueueCloudTask: mockEnqueueCloudTask,
+  enqueueTask: mockEnqueueTask,
 }));
 
 vi.mock('@roomote/env', async (importOriginal) => {
@@ -196,7 +196,7 @@ describe('conflictScanJob', () => {
 
     const octokit = await mockGetInstallationOctokit.mock.results[0]!.value;
     expect(octokit.paginate).not.toHaveBeenCalled();
-    expect(mockEnqueueCloudTask).not.toHaveBeenCalled();
+    expect(mockEnqueueTask).not.toHaveBeenCalled();
     expect(octokit.rest.issues.createComment).not.toHaveBeenCalled();
   });
 
@@ -295,7 +295,7 @@ describe('conflictScanJob', () => {
       branchName: 'feature/work',
     });
     expect(mockGetCommitCommittedAt).not.toHaveBeenCalled();
-    expect(mockEnqueueCloudTask).not.toHaveBeenCalled();
+    expect(mockEnqueueTask).not.toHaveBeenCalled();
   });
 
   it('skips conflicting PRs when the branch has a recent commit', async () => {
@@ -342,7 +342,7 @@ describe('conflictScanJob', () => {
     expect(mockHasRecentGitHubBranchCommit).toHaveBeenCalledWith({
       latestCommitAt: new Date('2026-03-17T21:50:00.000Z'),
     });
-    expect(mockEnqueueCloudTask).not.toHaveBeenCalled();
+    expect(mockEnqueueTask).not.toHaveBeenCalled();
   });
 
   it('looks up fork PR head commits in the head repository', async () => {
@@ -396,7 +396,7 @@ describe('conflictScanJob', () => {
     mockSelectLimit
       .mockResolvedValueOnce([])
       .mockResolvedValueOnce([{ id: 'agent-1', orgId: 'org-1' }]);
-    mockEnqueueCloudTask.mockResolvedValueOnce({ id: 1, taskId: 'task-1' });
+    mockEnqueueTask.mockResolvedValueOnce({ id: 1, taskId: 'task-1' });
 
     const octokit = {
       paginate: vi.fn().mockResolvedValue([
@@ -426,7 +426,7 @@ describe('conflictScanJob', () => {
 
     const result = await conflictScanJob();
 
-    expect(mockEnqueueCloudTask).toHaveBeenCalledWith(
+    expect(mockEnqueueTask).toHaveBeenCalledWith(
       expect.objectContaining({
         task: expect.objectContaining({
           type: 'github_pr_conflict_resolve',
@@ -451,9 +451,7 @@ describe('conflictScanJob', () => {
         }),
       }),
     );
-    expect(mockEnqueueCloudTask.mock.calls[0]?.[0]).not.toHaveProperty(
-      'userId',
-    );
+    expect(mockEnqueueTask.mock.calls[0]?.[0]).not.toHaveProperty('userId');
     expect(result.launchedTaskId).toBe('task-1');
     expect(octokit.rest.issues.createComment).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -499,6 +497,6 @@ describe('conflictScanJob', () => {
 
     expect(octokit.rest.pulls.get).not.toHaveBeenCalled();
     expect(mockGetCommitCommittedAt).not.toHaveBeenCalled();
-    expect(mockEnqueueCloudTask).not.toHaveBeenCalled();
+    expect(mockEnqueueTask).not.toHaveBeenCalled();
   });
 });

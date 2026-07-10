@@ -1,4 +1,4 @@
-import { enqueueCloudTask } from '@roomote/cloud-agents/server';
+import { enqueueTask } from '@roomote/cloud-agents/server';
 import {
   db,
   eq,
@@ -157,7 +157,7 @@ export function createScheduledTriageJob(
         // Automation scans run as the deployment service principal; a manual
         // trigger is still an automation launch, just with a manual trigger
         // kind on the task record.
-        const launchResult = await enqueueCloudTask({
+        const launchResult = await enqueueTask({
           task: {
             type: TaskPayloadKind.Scan,
             payload: scanTask.payload,

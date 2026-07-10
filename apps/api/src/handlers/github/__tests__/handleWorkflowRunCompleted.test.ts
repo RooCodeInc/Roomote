@@ -1,6 +1,6 @@
 const {
   mockDbSelect,
-  mockEnqueueCloudTask,
+  mockEnqueueTask,
   mockBuildRepositoryCoverage,
   mockGetBackgroundAgentSettingsForOrg,
   mockEvaluateFeatureFlag,
@@ -12,7 +12,7 @@ const {
   mockRedisSet,
 } = vi.hoisted(() => ({
   mockDbSelect: vi.fn(),
-  mockEnqueueCloudTask: vi.fn(),
+  mockEnqueueTask: vi.fn(),
   mockBuildRepositoryCoverage: vi.fn(),
   mockGetBackgroundAgentSettingsForOrg: vi.fn(),
   mockEvaluateFeatureFlag: vi.fn(),
@@ -50,7 +50,7 @@ vi.mock('@roomote/cloud-agents/server', () => ({
     `$ci-failure-triage trigger=${params.trigger} run=${params.triggeringRun?.runUrl ?? 'none'} announced=${params.hasAnnouncementThread === true}`,
   buildRepositoryCoverage: (...args: unknown[]) =>
     mockBuildRepositoryCoverage(...args),
-  enqueueCloudTask: (...args: unknown[]) => mockEnqueueCloudTask(...args),
+  enqueueTask: (...args: unknown[]) => mockEnqueueTask(...args),
   getTaskUrl: ({ taskId }: { taskId: string }) =>
     `https://app.example.com/task/${taskId}?utm_source=slack&utm_medium=link&utm_campaign=slack.thread_reply`,
 }));
@@ -186,7 +186,7 @@ describe('handleWorkflowRunCompleted', () => {
     );
     mockUpsertBackgroundAutomationSlackThread.mockResolvedValue(undefined);
     mockRecordAutomationRunOutcome.mockResolvedValue(undefined);
-    mockEnqueueCloudTask.mockResolvedValue({
+    mockEnqueueTask.mockResolvedValue({
       success: true,
       cloudJobId: 7,
       taskId: 'task-scan-1',
@@ -197,7 +197,7 @@ describe('handleWorkflowRunCompleted', () => {
     const result = await handleWorkflowRunCompleted(buildPayload());
 
     expect(result.status).toBe('ok');
-    expect(mockEnqueueCloudTask).toHaveBeenCalledWith(
+    expect(mockEnqueueTask).toHaveBeenCalledWith(
       expect.objectContaining({
         task: expect.objectContaining({
           type: TaskPayloadKind.Scan,
@@ -311,7 +311,7 @@ describe('handleWorkflowRunCompleted', () => {
     const result = await handleWorkflowRunCompleted(buildPayload());
 
     expect(result.status).toBe('ok');
-    const payload = mockEnqueueCloudTask.mock.calls[0]?.[0].task.payload;
+    const payload = mockEnqueueTask.mock.calls[0]?.[0].task.payload;
     expect(payload.thread_ts).toBeUndefined();
     expect(payload.slackChannel).toBeUndefined();
     expect(payload.description).toContain('announced=false');
@@ -325,7 +325,7 @@ describe('handleWorkflowRunCompleted', () => {
     );
 
     expect(result.message).toContain('non-failure');
-    expect(mockEnqueueCloudTask).not.toHaveBeenCalled();
+    expect(mockEnqueueTask).not.toHaveBeenCalled();
   });
 
   it('ignores failures outside the default branch', async () => {
@@ -334,7 +334,7 @@ describe('handleWorkflowRunCompleted', () => {
     );
 
     expect(result.message).toContain('outside the default branch');
-    expect(mockEnqueueCloudTask).not.toHaveBeenCalled();
+    expect(mockEnqueueTask).not.toHaveBeenCalled();
   });
 
   it('skips orgs with the automation disabled', async () => {
@@ -346,7 +346,7 @@ describe('handleWorkflowRunCompleted', () => {
     const result = await handleWorkflowRunCompleted(buildPayload());
 
     expect(result.message).toContain('disabled');
-    expect(mockEnqueueCloudTask).not.toHaveBeenCalled();
+    expect(mockEnqueueTask).not.toHaveBeenCalled();
   });
 
   it('skips repositories without a configured environment', async () => {
@@ -357,7 +357,7 @@ describe('handleWorkflowRunCompleted', () => {
     const result = await handleWorkflowRunCompleted(buildPayload());
 
     expect(result.message).toContain('no configured environment');
-    expect(mockEnqueueCloudTask).not.toHaveBeenCalled();
+    expect(mockEnqueueTask).not.toHaveBeenCalled();
   });
 
   it('debounces repeated failures for the same repository', async () => {
@@ -367,11 +367,11 @@ describe('handleWorkflowRunCompleted', () => {
 
     expect(result.message).toContain('debounced');
     expect(mockRecordAutomationRunOutcome).not.toHaveBeenCalled();
-    expect(mockEnqueueCloudTask).not.toHaveBeenCalled();
+    expect(mockEnqueueTask).not.toHaveBeenCalled();
   });
 
   it('records the failure on the automations row and resolves the announcement thread when the launch throws', async () => {
-    mockEnqueueCloudTask.mockRejectedValue(new Error('enqueue failed'));
+    mockEnqueueTask.mockRejectedValue(new Error('enqueue failed'));
 
     const result = await handleWorkflowRunCompleted(buildPayload());
 

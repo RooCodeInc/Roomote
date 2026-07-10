@@ -19,7 +19,7 @@ import {
   isNull,
   sql,
 } from '@roomote/db/server';
-import { enqueueCloudTask } from '@roomote/cloud-agents/server';
+import { enqueueTask } from '@roomote/cloud-agents/server';
 
 import type { WebhookResponse } from '../../types';
 
@@ -139,7 +139,7 @@ export async function handlePrSynchronize({
       reviewerSettings: currentTarget.settings,
     });
 
-    return enqueueCloudTask({
+    return enqueueTask({
       task: {
         type: shouldRunSyncReview
           ? TaskPayloadKind.GithubPrReviewSync

@@ -11,13 +11,13 @@
 // task enqueue and the source-control provider resolution.
 
 const {
-  mockEnqueueCloudTask,
+  mockEnqueueTask,
   mockCancelTaskRunDirect,
   mockFinalizeWorkItemLaunched,
   mockClaimWorkItem,
   actualDbServer,
 } = vi.hoisted(() => ({
-  mockEnqueueCloudTask: vi.fn(),
+  mockEnqueueTask: vi.fn(),
   mockCancelTaskRunDirect: vi.fn(),
   // Overridable, but delegate to the real implementations by default (reset in
   // beforeEach) so every test but the failure-injection ones keeps real
@@ -39,7 +39,7 @@ vi.mock('@roomote/gitea', () => ({
 }));
 
 vi.mock('@roomote/cloud-agents/server', () => ({
-  enqueueCloudTask: mockEnqueueCloudTask,
+  enqueueTask: mockEnqueueTask,
 }));
 
 // Keep the real database (and all shared launch helpers) while overriding only
@@ -304,14 +304,14 @@ describe('launchQueuedSetupTasksIfReady (fenced onboarding-queue launch)', () =>
       await seedLaunchTargetTaskId(),
     ];
     let call = 0;
-    mockEnqueueCloudTask.mockImplementation(async () => ({
+    mockEnqueueTask.mockImplementation(async () => ({
       taskId: launchedTaskIds[call++],
       id: `cloud-job-${call}`,
     }));
 
     await launch();
 
-    expect(mockEnqueueCloudTask).toHaveBeenCalledTimes(3);
+    expect(mockEnqueueTask).toHaveBeenCalledTimes(3);
     for (const id of [itemA, itemB, itemC]) {
       const row = await readRow(id);
       expect(row?.status).toBe('launched');
@@ -340,7 +340,7 @@ describe('launchQueuedSetupTasksIfReady (fenced onboarding-queue launch)', () =>
       await seedLaunchTargetTaskId(),
     ];
     let call = 0;
-    mockEnqueueCloudTask.mockImplementation(async () => ({
+    mockEnqueueTask.mockImplementation(async () => ({
       taskId: launchedTaskIds[call++],
       id: `cloud-job-${call}`,
     }));
@@ -348,7 +348,7 @@ describe('launchQueuedSetupTasksIfReady (fenced onboarding-queue launch)', () =>
     await launch();
 
     // Only the open item and the stale (crash-recovered) item launch.
-    expect(mockEnqueueCloudTask).toHaveBeenCalledTimes(2);
+    expect(mockEnqueueTask).toHaveBeenCalledTimes(2);
 
     expect((await readRow(openItem))?.status).toBe('launched');
 
@@ -371,7 +371,7 @@ describe('launchQueuedSetupTasksIfReady (fenced onboarding-queue launch)', () =>
     });
 
     const launchedTaskId = await seedLaunchTargetTaskId();
-    mockEnqueueCloudTask.mockResolvedValue({
+    mockEnqueueTask.mockResolvedValue({
       taskId: launchedTaskId,
       id: 'cloud-job-1',
     });
@@ -401,7 +401,7 @@ describe('launchQueuedSetupTasksIfReady (fenced onboarding-queue launch)', () =>
     });
 
     const launchedTaskId = await seedLaunchTargetTaskId();
-    mockEnqueueCloudTask.mockResolvedValue({
+    mockEnqueueTask.mockResolvedValue({
       taskId: launchedTaskId,
       id: 'cloud-job-1',
     });
@@ -426,7 +426,7 @@ describe('launchQueuedSetupTasksIfReady (fenced onboarding-queue launch)', () =>
 
     // Simulate another launcher reclaiming this row while our enqueue is in
     // flight: re-stamp launchClaimedAt to a token that no longer matches ours.
-    mockEnqueueCloudTask.mockImplementationOnce(async () => {
+    mockEnqueueTask.mockImplementationOnce(async () => {
       await db
         .update(workItems)
         .set({ launchClaimedAt: supersededClaimAt })
@@ -469,7 +469,7 @@ describe('launchQueuedSetupTasksIfReady (fenced onboarding-queue launch)', () =>
     });
 
     const launchedTaskId = await seedLaunchTargetTaskId();
-    mockEnqueueCloudTask.mockResolvedValue({
+    mockEnqueueTask.mockResolvedValue({
       taskId: launchedTaskId,
       id: 'cloud-job-1',
     });
@@ -502,7 +502,7 @@ describe('launchQueuedSetupTasksIfReady (fenced onboarding-queue launch)', () =>
   it('releases the claim back to open when the enqueue fails and logs the failure', async () => {
     const onboardingId = await seedOnboardingItem({ sortOrder: 0 });
 
-    mockEnqueueCloudTask.mockRejectedValue(new Error('enqueue failed'));
+    mockEnqueueTask.mockRejectedValue(new Error('enqueue failed'));
     const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
 
     try {
@@ -526,7 +526,7 @@ describe('launchQueuedSetupTasksIfReady (fenced onboarding-queue launch)', () =>
     const onboardingId = await seedOnboardingItem({ sortOrder: 0 });
     const launchedTaskId = await seedLaunchTargetTaskId();
 
-    mockEnqueueCloudTask.mockResolvedValue({
+    mockEnqueueTask.mockResolvedValue({
       taskId: launchedTaskId,
       id: 'cloud-job-throw',
     });
@@ -574,7 +574,7 @@ describe('launchQueuedSetupTasksIfReady (fenced onboarding-queue launch)', () =>
     });
 
     const launchedTaskId = await seedLaunchTargetTaskId();
-    mockEnqueueCloudTask.mockResolvedValue({
+    mockEnqueueTask.mockResolvedValue({
       taskId: launchedTaskId,
       id: 'cloud-job-mirror',
     });
@@ -626,7 +626,7 @@ describe('launchQueuedSetupTasksIfReady (fenced onboarding-queue launch)', () =>
     });
 
     const launchedTaskId = await seedLaunchTargetTaskId();
-    mockEnqueueCloudTask.mockResolvedValue({
+    mockEnqueueTask.mockResolvedValue({
       taskId: launchedTaskId,
       id: 'cloud-job-mirror-finalize-throw',
     });

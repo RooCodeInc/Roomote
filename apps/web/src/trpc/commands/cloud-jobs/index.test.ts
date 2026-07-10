@@ -4,13 +4,13 @@ import { ALL_REPOSITORIES, TaskPayloadKind } from '@roomote/types';
 import type { UserAuthSuccess } from '@/types';
 
 const {
-  mockEnqueueCloudTask,
+  mockEnqueueTask,
   mockGetRepositories,
   mockDbWhere,
   mockDbSelect,
   mockResolveWorkspaceProvider,
 } = vi.hoisted(() => ({
-  mockEnqueueCloudTask: vi.fn(),
+  mockEnqueueTask: vi.fn(),
   mockGetRepositories: vi.fn(),
   mockDbWhere: vi.fn(),
   mockDbSelect: vi.fn(),
@@ -19,7 +19,7 @@ const {
 
 vi.mock('@roomote/cloud-agents/server', () => ({
   buildSlackRoutingContext: vi.fn(),
-  enqueueCloudTask: (...args: unknown[]) => mockEnqueueCloudTask(...args),
+  enqueueTask: (...args: unknown[]) => mockEnqueueTask(...args),
   getTaskUrl: vi.fn(() => 'https://roomote.test/tasks/task-123'),
   routeTask: vi.fn(),
 }));
@@ -123,7 +123,7 @@ const auth = {
 } satisfies UserAuthSuccess;
 
 function mockSuccessfulEnqueue() {
-  mockEnqueueCloudTask.mockResolvedValue({
+  mockEnqueueTask.mockResolvedValue({
     id: 123,
     taskId: 'task-123',
   });
@@ -167,7 +167,7 @@ describe('createStandardTaskCloudJobCommand', () => {
       id: 123,
       taskId: 'task-123',
     });
-    expect(mockEnqueueCloudTask).toHaveBeenCalledWith(
+    expect(mockEnqueueTask).toHaveBeenCalledWith(
       expect.objectContaining({
         task: expect.objectContaining({
           type: TaskPayloadKind.StandardTask,
@@ -206,7 +206,7 @@ describe('createStandardTaskCloudJobCommand', () => {
       id: 123,
       taskId: 'task-123',
     });
-    expect(mockEnqueueCloudTask).toHaveBeenCalledWith(
+    expect(mockEnqueueTask).toHaveBeenCalledWith(
       expect.objectContaining({
         task: expect.objectContaining({
           type: TaskPayloadKind.StandardTask,
@@ -235,7 +235,7 @@ describe('createStandardTaskCloudJobCommand', () => {
       id: 123,
       taskId: 'task-123',
     });
-    expect(mockEnqueueCloudTask).toHaveBeenCalledWith(
+    expect(mockEnqueueTask).toHaveBeenCalledWith(
       expect.objectContaining({
         task: expect.objectContaining({
           type: TaskPayloadKind.StandardTask,
@@ -263,7 +263,7 @@ describe('createStandardTaskCloudJobCommand', () => {
       success: false,
       error: 'Select an environment before starting a task.',
     });
-    expect(mockEnqueueCloudTask).not.toHaveBeenCalled();
+    expect(mockEnqueueTask).not.toHaveBeenCalled();
   });
 
   it('stamps an environment source-control provider from its repository mappings', async () => {
@@ -283,7 +283,7 @@ describe('createStandardTaskCloudJobCommand', () => {
       id: 123,
       taskId: 'task-123',
     });
-    expect(mockEnqueueCloudTask).toHaveBeenCalledWith(
+    expect(mockEnqueueTask).toHaveBeenCalledWith(
       expect.objectContaining({
         task: expect.objectContaining({
           type: TaskPayloadKind.StandardTask,

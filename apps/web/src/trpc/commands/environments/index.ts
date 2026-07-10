@@ -1,4 +1,4 @@
-import { enqueueCloudTask } from '@roomote/cloud-agents/server';
+import { enqueueTask } from '@roomote/cloud-agents/server';
 import {
   createEnvironmentConfigVersionSnapshot,
   db,
@@ -730,7 +730,7 @@ export async function startEnvironmentDefinitionTaskCommand(
   );
 
   const startedAt = new Date().toISOString();
-  const launchResult = await enqueueCloudTask({
+  const launchResult = await enqueueTask({
     task: {
       type: TaskPayloadKind.StandardTask,
       payload: {

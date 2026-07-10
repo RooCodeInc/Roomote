@@ -11,7 +11,7 @@ const {
   restoreLinkCodeMock,
   editMessageReplyMarkupMock,
   editMessageTextMock,
-  enqueueCloudTaskMock,
+  enqueueTaskMock,
   environmentsFindFirstMock,
   envMock,
   getAvailableEnvironmentsMock,
@@ -42,7 +42,7 @@ const {
   restoreLinkCodeMock: vi.fn(),
   editMessageReplyMarkupMock: vi.fn(),
   editMessageTextMock: vi.fn(),
-  enqueueCloudTaskMock: vi.fn(),
+  enqueueTaskMock: vi.fn(),
   environmentsFindFirstMock: vi.fn(),
   getAvailableEnvironmentsMock: vi.fn(),
   envMock: {
@@ -253,7 +253,7 @@ vi.mock('../../tasks/task-stop.js', () => ({
 
 vi.mock('@roomote/cloud-agents/server', () => ({
   buildTelegramRoutingContext: buildTelegramRoutingContextMock,
-  enqueueCloudTask: enqueueCloudTaskMock,
+  enqueueTask: enqueueTaskMock,
   getAvailableEnvironments: getAvailableEnvironmentsMock,
   getTaskUrl: getTaskUrlMock,
   routeTask: routeTaskMock,
@@ -368,7 +368,7 @@ describe('Telegram webhook handler', () => {
         reasoning: 'all repos',
       },
     });
-    enqueueCloudTaskMock.mockResolvedValue({
+    enqueueTaskMock.mockResolvedValue({
       id: 88,
       taskId: 'task-new',
     });
@@ -393,7 +393,7 @@ describe('Telegram webhook handler', () => {
     );
     expect(cloudJobsFindFirstMock).not.toHaveBeenCalled();
     expect(queueCommunicationMessageMock).not.toHaveBeenCalled();
-    expect(enqueueCloudTaskMock).not.toHaveBeenCalled();
+    expect(enqueueTaskMock).not.toHaveBeenCalled();
     expect(postMessageMock).toHaveBeenCalledWith(
       expect.objectContaining({
         channelId: '222',
@@ -419,7 +419,7 @@ describe('Telegram webhook handler', () => {
       queued: false,
       reason: 'telegram_sender_not_linked',
     });
-    expect(enqueueCloudTaskMock).not.toHaveBeenCalled();
+    expect(enqueueTaskMock).not.toHaveBeenCalled();
     expect(routeTaskMock).not.toHaveBeenCalled();
     expect(postMessageMock).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -468,7 +468,7 @@ describe('Telegram webhook handler', () => {
       queued: false,
       reason: 'telegram_sender_not_linked',
     });
-    expect(enqueueCloudTaskMock).not.toHaveBeenCalled();
+    expect(enqueueTaskMock).not.toHaveBeenCalled();
     expect(postMessageMock).toHaveBeenCalledWith(
       expect.objectContaining({
         buttons: [
@@ -504,7 +504,7 @@ describe('Telegram webhook handler', () => {
       reason: 'telegram_sender_not_linked',
     });
     expect(postMessageMock).not.toHaveBeenCalled();
-    expect(enqueueCloudTaskMock).not.toHaveBeenCalled();
+    expect(enqueueTaskMock).not.toHaveBeenCalled();
   });
 
   it('silently ignores unaddressed group messages from unlinked senders', async () => {
@@ -523,7 +523,7 @@ describe('Telegram webhook handler', () => {
       reason: 'telegram_sender_not_linked',
     });
     expect(postMessageMock).not.toHaveBeenCalled();
-    expect(enqueueCloudTaskMock).not.toHaveBeenCalled();
+    expect(enqueueTaskMock).not.toHaveBeenCalled();
     expect(queueCommunicationMessageMock).not.toHaveBeenCalled();
   });
 
@@ -541,7 +541,7 @@ describe('Telegram webhook handler', () => {
       ok: true,
       linkNudged: true,
     });
-    expect(enqueueCloudTaskMock).not.toHaveBeenCalled();
+    expect(enqueueTaskMock).not.toHaveBeenCalled();
     expect(routeTaskMock).not.toHaveBeenCalled();
     expect(postMessageMock).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -634,7 +634,7 @@ describe('Telegram webhook handler', () => {
         taskDescription: 'please check this',
       }),
     );
-    expect(enqueueCloudTaskMock).toHaveBeenCalledWith(
+    expect(enqueueTaskMock).toHaveBeenCalledWith(
       expect.objectContaining({
         task: expect.objectContaining({
           type: 'standard',
@@ -707,7 +707,7 @@ describe('Telegram webhook handler', () => {
       repliedInline: true,
     });
     expect(response.status).toBe(200);
-    expect(enqueueCloudTaskMock).not.toHaveBeenCalled();
+    expect(enqueueTaskMock).not.toHaveBeenCalled();
     expect(postMessageMock).toHaveBeenCalledWith(
       expect.objectContaining({
         channelId: '222',
@@ -734,7 +734,7 @@ describe('Telegram webhook handler', () => {
       snapshotId: 'snapshot-1',
       snapshotCreatedAt: new Date(),
     });
-    enqueueCloudTaskMock.mockResolvedValueOnce({
+    enqueueTaskMock.mockResolvedValueOnce({
       id: 99,
       taskId: 'task-resumed',
     });
@@ -757,7 +757,7 @@ describe('Telegram webhook handler', () => {
       cloudJobId: 99,
     });
     expect(response.status).toBe(200);
-    expect(enqueueCloudTaskMock).toHaveBeenCalledWith(
+    expect(enqueueTaskMock).toHaveBeenCalledWith(
       expect.objectContaining({
         actingUserId: 'launch-owner-4',
         task: expect.objectContaining({
@@ -829,7 +829,7 @@ describe('Telegram webhook handler', () => {
     });
     expect(response.status).toBe(200);
     // A fresh StandardTask is enqueued, not a snapshot.resume.
-    expect(enqueueCloudTaskMock).toHaveBeenCalledWith(
+    expect(enqueueTaskMock).toHaveBeenCalledWith(
       expect.objectContaining({
         task: expect.objectContaining({
           type: 'standard',
@@ -868,7 +868,7 @@ describe('Telegram webhook handler', () => {
       started: true,
       cloudJobId: 88,
     });
-    expect(enqueueCloudTaskMock).toHaveBeenCalledWith(
+    expect(enqueueTaskMock).toHaveBeenCalledWith(
       expect.objectContaining({
         task: expect.objectContaining({
           type: 'standard',
@@ -898,7 +898,7 @@ describe('Telegram webhook handler', () => {
       queued: false,
       repliedInline: true,
     });
-    expect(enqueueCloudTaskMock).not.toHaveBeenCalled();
+    expect(enqueueTaskMock).not.toHaveBeenCalled();
     expect(routeTaskMock).not.toHaveBeenCalled();
     expect(postMessageMock).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -933,7 +933,7 @@ describe('Telegram webhook handler', () => {
       queued: false,
       repliedInline: true,
     });
-    expect(enqueueCloudTaskMock).not.toHaveBeenCalled();
+    expect(enqueueTaskMock).not.toHaveBeenCalled();
     expect(routeTaskMock).not.toHaveBeenCalled();
     expect(queueCommunicationMessageMock).not.toHaveBeenCalled();
     expect(postMessageMock).toHaveBeenCalledWith(
@@ -1010,7 +1010,7 @@ describe('Telegram webhook handler', () => {
         text: 'ping me when you are /done with the build',
       }),
     );
-    expect(enqueueCloudTaskMock).not.toHaveBeenCalled();
+    expect(enqueueTaskMock).not.toHaveBeenCalled();
   });
 
   it('starts a fresh task for a mention-prefixed /new in a group', async () => {
@@ -1035,7 +1035,7 @@ describe('Telegram webhook handler', () => {
       started: true,
       cloudJobId: 88,
     });
-    expect(enqueueCloudTaskMock).toHaveBeenCalledWith(
+    expect(enqueueTaskMock).toHaveBeenCalledWith(
       expect.objectContaining({
         task: expect.objectContaining({
           type: 'standard',
@@ -1064,7 +1064,7 @@ describe('Telegram webhook handler', () => {
       ok: true,
       welcomed: true,
     });
-    expect(enqueueCloudTaskMock).not.toHaveBeenCalled();
+    expect(enqueueTaskMock).not.toHaveBeenCalled();
     expect(queueCommunicationMessageMock).not.toHaveBeenCalled();
     expect(postMessageMock).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -1090,7 +1090,7 @@ describe('Telegram webhook handler', () => {
       welcomed: true,
     });
     expect(response.status).toBe(200);
-    expect(enqueueCloudTaskMock).not.toHaveBeenCalled();
+    expect(enqueueTaskMock).not.toHaveBeenCalled();
     expect(queueCommunicationMessageMock).not.toHaveBeenCalled();
     // An unlinked sender has no user to attribute the primary chat capture
     // to yet, so nothing should be persisted.
@@ -1192,7 +1192,7 @@ describe('Telegram webhook handler', () => {
     });
 
     expect(response.status).toBe(200);
-    expect(enqueueCloudTaskMock).not.toHaveBeenCalled();
+    expect(enqueueTaskMock).not.toHaveBeenCalled();
     expect(answerCallbackQueryMock).toHaveBeenCalledWith(
       expect.objectContaining({
         callbackQueryId: 'cb-6',
@@ -1214,7 +1214,7 @@ describe('Telegram webhook handler', () => {
       ok: true,
       linked: true,
     });
-    expect(enqueueCloudTaskMock).not.toHaveBeenCalled();
+    expect(enqueueTaskMock).not.toHaveBeenCalled();
     // Mapping upsert + primary chat capture both insert.
     expect(insertValuesMock).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -1270,7 +1270,7 @@ describe('Telegram webhook handler', () => {
         text: expect.stringContaining('invalid or has expired'),
       }),
     );
-    expect(enqueueCloudTaskMock).not.toHaveBeenCalled();
+    expect(enqueueTaskMock).not.toHaveBeenCalled();
   });
 
   it('restores the link code when storing the mapping fails', async () => {
@@ -1365,7 +1365,7 @@ describe('Telegram webhook handler', () => {
       reason: 'telegram_sender_not_linked',
     });
     expect(queueCommunicationMessageMock).not.toHaveBeenCalled();
-    expect(enqueueCloudTaskMock).not.toHaveBeenCalled();
+    expect(enqueueTaskMock).not.toHaveBeenCalled();
     expect(telegramMappingsFindFirstMock).toHaveBeenCalledTimes(1);
     expect(usersFindFirstMock).toHaveBeenCalledTimes(1);
     expect(authUsersFindFirstMock).not.toHaveBeenCalled();
@@ -1561,7 +1561,7 @@ describe('Telegram webhook handler', () => {
       queued: false,
       confirmationPending: true,
     });
-    expect(enqueueCloudTaskMock).not.toHaveBeenCalled();
+    expect(enqueueTaskMock).not.toHaveBeenCalled();
     expect(postMessageMock).toHaveBeenCalledWith(
       expect.objectContaining({
         channelId: '222',
@@ -1609,7 +1609,7 @@ describe('Telegram webhook handler', () => {
       queued: false,
       confirmationPending: true,
     });
-    expect(enqueueCloudTaskMock).not.toHaveBeenCalled();
+    expect(enqueueTaskMock).not.toHaveBeenCalled();
     expect(postMessageMock).toHaveBeenCalledWith(
       expect.objectContaining({
         text: expect.stringContaining('could not confidently pick a workspace'),
@@ -1651,7 +1651,7 @@ describe('Telegram webhook handler', () => {
       started: true,
       cloudJobId: 88,
     });
-    expect(enqueueCloudTaskMock).toHaveBeenCalledWith(
+    expect(enqueueTaskMock).toHaveBeenCalledWith(
       expect.objectContaining({
         task: expect.objectContaining({
           payload: expect.objectContaining({
@@ -1721,7 +1721,7 @@ describe('Telegram webhook handler', () => {
     expect(redisGetdelMock).toHaveBeenCalledWith(
       'telegram:pending_route:abc123XYZ789',
     );
-    expect(enqueueCloudTaskMock).toHaveBeenCalledWith(
+    expect(enqueueTaskMock).toHaveBeenCalledWith(
       expect.objectContaining({
         initiator: { kind: 'user', userId: 'launch-owner-23' },
         task: expect.objectContaining({
@@ -1794,7 +1794,7 @@ describe('Telegram webhook handler', () => {
     });
 
     expect(response.status).toBe(200);
-    expect(enqueueCloudTaskMock).not.toHaveBeenCalled();
+    expect(enqueueTaskMock).not.toHaveBeenCalled();
     // Same message becomes the picker, keyed by a fresh pending-route id so
     // the old auto-confirm timer can never fire the suggestion.
     expect(editMessageTextMock).toHaveBeenCalledWith(
@@ -1882,7 +1882,7 @@ describe('Telegram webhook handler', () => {
     expect(redisGetdelMock).not.toHaveBeenCalledWith(
       'telegram:pending_route:abc123XYZ789',
     );
-    expect(enqueueCloudTaskMock).not.toHaveBeenCalled();
+    expect(enqueueTaskMock).not.toHaveBeenCalled();
     expect(answerCallbackQueryMock).toHaveBeenCalledWith(
       expect.objectContaining({
         callbackQueryId: 'cb-11',
@@ -1908,7 +1908,7 @@ describe('Telegram webhook handler', () => {
     });
 
     expect(response.status).toBe(200);
-    expect(enqueueCloudTaskMock).not.toHaveBeenCalled();
+    expect(enqueueTaskMock).not.toHaveBeenCalled();
     expect(answerCallbackQueryMock).toHaveBeenCalledWith(
       expect.objectContaining({
         callbackQueryId: 'cb-12',
@@ -1959,7 +1959,7 @@ describe('Telegram webhook handler', () => {
     });
 
     expect(response.status).toBe(200);
-    expect(enqueueCloudTaskMock).not.toHaveBeenCalled();
+    expect(enqueueTaskMock).not.toHaveBeenCalled();
     expect(answerCallbackQueryMock).toHaveBeenCalledWith(
       expect.objectContaining({
         callbackQueryId: 'cb-13',

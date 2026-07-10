@@ -1,7 +1,7 @@
 import type { Context } from 'hono';
 
 import {
-  enqueueCloudTask,
+  enqueueTask,
   resolveRequestedWorkKindDecision,
 } from '@roomote/cloud-agents/server';
 import {
@@ -346,7 +346,7 @@ export async function launchTask(
     // A human explicitly asked for this launch via the API, so the human is
     // the initiator even for the hidden scan branch (the old automation stamp
     // made the requesting human invisible).
-    const launchResult = await enqueueCloudTask(
+    const launchResult = await enqueueTask(
       {
         task,
         initiator: { kind: 'user', userId: auth.userId },

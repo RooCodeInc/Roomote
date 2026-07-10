@@ -41,8 +41,8 @@ const {
   mockSpawnModalWorker: vi.fn(),
 }));
 
-const { mockFinishCloudJob } = vi.hoisted(() => ({
-  mockFinishCloudJob: vi.fn().mockResolvedValue(undefined),
+const { mockFinishRun } = vi.hoisted(() => ({
+  mockFinishRun: vi.fn().mockResolvedValue(undefined),
 }));
 
 vi.mock('@roomote/env', async (importOriginal) => {
@@ -74,7 +74,7 @@ vi.mock('@roomote/db/server', async () => {
 });
 
 vi.mock('@roomote/sdk/server', () => ({
-  finishCloudJob: (...args: unknown[]) => mockFinishCloudJob(...args),
+  finishRun: (...args: unknown[]) => mockFinishRun(...args),
 }));
 
 vi.mock('../compute-providers', () => ({

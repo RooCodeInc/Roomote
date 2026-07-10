@@ -1,7 +1,7 @@
 import {
   buildGitHubExistingTaskFollowUpMessage,
   buildGitHubRoutingContext,
-  enqueueCloudTask,
+  enqueueTask,
   getTaskUrl,
   routeGitHubTask,
 } from '@roomote/cloud-agents/server';
@@ -1031,7 +1031,7 @@ async function resumeExistingTaskAndDeliverFollowUp({
 
   // Resumes never create tasks and never re-attribute; the resuming human
   // becomes the new run's acting user.
-  const resumeLaunch = await enqueueCloudTask(
+  const resumeLaunch = await enqueueTask(
     {
       task: {
         type: TaskPayloadKind.SnapshotResume,
@@ -1293,8 +1293,7 @@ export async function handlePrComment(
       branchName,
     };
 
-    const reviewLaunches: Array<Awaited<ReturnType<typeof enqueueCloudTask>>> =
-      [];
+    const reviewLaunches: Array<Awaited<ReturnType<typeof enqueueTask>>> = [];
     const failedReviewerIds: string[] = [];
 
     for (const reviewer of reviewers) {
@@ -1317,7 +1316,7 @@ export async function handlePrComment(
           );
         }
 
-        const reviewLaunch = await enqueueCloudTask({
+        const reviewLaunch = await enqueueTask({
           task: {
             type: TaskPayloadKind.GithubPrReview,
             githubLogin: reviewer.properties.githubLogin,
@@ -1583,7 +1582,7 @@ export async function handlePrComment(
       );
     }
 
-    const followUpLaunch = await enqueueCloudTask({
+    const followUpLaunch = await enqueueTask({
       task: {
         type: TaskPayloadKind.GithubPrReviewFollowUp,
         githubLogin: reviewer.properties.githubLogin,

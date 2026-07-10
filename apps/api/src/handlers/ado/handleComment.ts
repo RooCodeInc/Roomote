@@ -1,4 +1,4 @@
-import { enqueueCloudTask, getTaskUrl } from '@roomote/cloud-agents/server';
+import { enqueueTask, getTaskUrl } from '@roomote/cloud-agents/server';
 import {
   findActiveGitHubPrReviewTask,
   findReusableGitHubPrFollowUpOwner,
@@ -414,7 +414,7 @@ export async function handleAdoComment(
   try {
     // A human @roomote mention started this review: the commenter is the
     // initiator (the old automatic/ado attribution override is gone).
-    const launch = await enqueueCloudTask({
+    const launch = await enqueueTask({
       task: {
         type: TaskPayloadKind.GithubPrReview,
         payload: reviewPayload,

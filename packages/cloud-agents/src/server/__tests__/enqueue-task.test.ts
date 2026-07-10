@@ -1,4 +1,4 @@
-// pnpm --filter @roomote/cloud-agents test src/server/__tests__/enqueue-cloud-task.test.ts
+// pnpm --filter @roomote/cloud-agents test src/server/__tests__/enqueue-task.test.ts
 //
 // Real-database integration tests for the Stage 2 enqueue rewrite: initiator
 // stamping, resume semantics, enqueue-time PR linkage, and pr_review queue
@@ -30,7 +30,7 @@ import {
 
 import {
   CloudJobQueue,
-  enqueueCloudTask,
+  enqueueTask,
   resolveQueueScope,
   type FreshCloudTaskLaunch,
 } from '../cloud-job-queue';
@@ -69,7 +69,7 @@ async function launchFresh(
     task?: FreshCloudTaskLaunch['task'];
   },
 ) {
-  const run = await enqueueCloudTask(
+  const run = await enqueueTask(
     {
       task: standardTaskInput(),
       ...input,
@@ -97,7 +97,7 @@ afterAll(async () => {
   }
 });
 
-describe('enqueueCloudTask initiator stamping', () => {
+describe('enqueueTask initiator stamping', () => {
   it('persists a linked-user initiator with CHECK-valid shape', async () => {
     const userId = await createUser();
 
@@ -228,7 +228,7 @@ describe('enqueueCloudTask initiator stamping', () => {
   });
 });
 
-describe('enqueueCloudTask snapshot resume', () => {
+describe('enqueueTask snapshot resume', () => {
   it('attaches a resume run to the source task without re-attribution', async () => {
     const initiatorUserId = await createUser();
     const resumerUserId = await createUser();
@@ -253,7 +253,7 @@ describe('enqueueCloudTask snapshot resume', () => {
       },
     } as SnapshotResumeTask;
 
-    const resumeRun = await enqueueCloudTask(
+    const resumeRun = await enqueueTask(
       {
         task: resumeTask,
         actingUserId: resumerUserId,
@@ -293,12 +293,12 @@ describe('enqueueCloudTask snapshot resume', () => {
     } as SnapshotResumeTask;
 
     await expect(
-      enqueueCloudTask({ task: resumeTask }, { enqueue: false }),
+      enqueueTask({ task: resumeTask }, { enqueue: false }),
     ).rejects.toThrow('source run id');
   });
 });
 
-describe('enqueueCloudTask PR linkage', () => {
+describe('enqueueTask PR linkage', () => {
   it('inserts the task_pull_requests row inside the create transaction', async () => {
     const prTask = {
       type: TaskPayloadKind.GithubPrReview,
@@ -362,7 +362,7 @@ describe('enqueueCloudTask PR linkage', () => {
     } as Extract<TaskSpec, { type: 'github_pr_review' }>;
 
     await expect(
-      enqueueCloudTask(
+      enqueueTask(
         {
           task: prTask,
           initiator: { kind: 'automation', key: 'review_code' },
@@ -378,7 +378,7 @@ describe('enqueueCloudTask PR linkage', () => {
 
 describe('enqueue-failure cancel task state', () => {
   // A run canceled before it is queued must leave the owning task in a
-  // terminal state. finishCloudJob never runs for these runs, so
+  // terminal state. finishRun never runs for these runs, so
   // cancelCloudJobBeforeQueue is responsible for the tasks.state write.
   // Regression guard for tasks stranded in 'active' with a canceled run.
   it('marks the task canceled when the run is canceled before it is queued', async () => {
@@ -387,7 +387,7 @@ describe('enqueue-failure cancel task state', () => {
     let capturedTaskId: string | undefined;
 
     await expect(
-      enqueueCloudTask(
+      enqueueTask(
         {
           task: standardTaskInput(),
           initiator: { kind: 'user', userId },
@@ -425,7 +425,7 @@ describe('enqueue-failure cancel task state', () => {
   });
 });
 
-describe('enqueueCloudTask source-control provider stamping', () => {
+describe('enqueueTask source-control provider stamping', () => {
   const createdEnvironmentIds: string[] = [];
   const createdRepositoryIds: string[] = [];
 

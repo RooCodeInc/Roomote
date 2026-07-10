@@ -114,13 +114,13 @@ async function cancelCloudJobBeforeQueue(
         .where(eq(taskRuns.id, cloudJob.id));
 
       // Derive the task state from all its runs. Enqueue-failure cancels
-      // bypass finishCloudJob entirely, so without this sync the task stays
+      // bypass finishRun entirely, so without this sync the task stays
       // 'active' forever. The shared @roomote/db helper keeps siblings honest.
       await syncTaskStateFromRuns(tx, cloudJob.taskId);
     });
   } catch (cancelError) {
     console.warn(
-      `[enqueueCloudTask] Failed to cancel run ${cloudJob.id} after ${failureContext}: ${getErrorMessage(
+      `[enqueueTask] Failed to cancel run ${cloudJob.id} after ${failureContext}: ${getErrorMessage(
         cancelError,
         'Unknown cancellation error',
       )}`,
@@ -645,7 +645,7 @@ export async function findEnvironmentForRepo(
   return matches[0]!.id;
 }
 
-export interface EnqueueCloudTaskOptions {
+export interface EnqueueTaskOptions {
   /**
    * Optional explicit launch-class override used to resolve runtime keepalive
    * policy. When omitted, automation-initiated launches derive the
@@ -761,9 +761,7 @@ export type ResumeCloudTaskLaunch = {
   prLinkage?: never;
 };
 
-export type EnqueueCloudTaskInput =
-  | FreshCloudTaskLaunch
-  | ResumeCloudTaskLaunch;
+export type EnqueueTaskInput = FreshCloudTaskLaunch | ResumeCloudTaskLaunch;
 
 const PR_LINKAGE_REQUIRED_WORKFLOWS: ReadonlySet<TaskWorkflow> = new Set([
   'pr_review',
@@ -928,7 +926,7 @@ async function resolveEnvironmentContext(
 async function pushRunOntoQueue(params: {
   cloudJob: Run;
   scope: string;
-  options: EnqueueCloudTaskOptions;
+  options: EnqueueTaskOptions;
 }): Promise<void> {
   const { cloudJob, scope, options } = params;
 
@@ -1004,7 +1002,7 @@ async function pushRunOntoQueue(params: {
     });
   } catch (loggingError) {
     console.warn(
-      `[enqueueCloudTask] Failed to record task-start parallel count for run ${cloudJob.id}: ${
+      `[enqueueTask] Failed to record task-start parallel count for run ${cloudJob.id}: ${
         loggingError instanceof Error
           ? loggingError.message
           : String(loggingError)
@@ -1013,9 +1011,9 @@ async function pushRunOntoQueue(params: {
   }
 }
 
-export async function enqueueCloudTask(
-  input: EnqueueCloudTaskInput,
-  options: EnqueueCloudTaskOptions = {},
+export async function enqueueTask(
+  input: EnqueueTaskInput,
+  options: EnqueueTaskOptions = {},
 ): Promise<Run> {
   await assertDeploymentIsActive();
 
@@ -1028,7 +1026,7 @@ export async function enqueueCloudTask(
 
 async function enqueueFreshLaunch(
   input: FreshCloudTaskLaunch,
-  options: EnqueueCloudTaskOptions,
+  options: EnqueueTaskOptions,
 ): Promise<Run> {
   const { task, initiator, workflow, surface, trigger } = input;
   const visibility: TaskVisibility = input.visibility ?? 'visible';
@@ -1087,7 +1085,7 @@ async function enqueueFreshLaunch(
       task.payload.environmentId = envId;
 
       console.log(
-        `[enqueueCloudTask] Auto-resolved environment ${envId} for ${workspace.repo}`,
+        `[enqueueTask] Auto-resolved environment ${envId} for ${workspace.repo}`,
       );
     }
   }
@@ -1325,7 +1323,7 @@ async function enqueueFreshLaunch(
           );
       } catch (error) {
         console.warn(
-          `[enqueueCloudTask] Failed to generate early LLM title for task ${cloudJob.taskId}: ${
+          `[enqueueTask] Failed to generate early LLM title for task ${cloudJob.taskId}: ${
             error instanceof Error ? error.message : String(error)
           }`,
         );
@@ -1338,7 +1336,7 @@ async function enqueueFreshLaunch(
 
 async function enqueueSnapshotResume(
   input: ResumeCloudTaskLaunch,
-  options: EnqueueCloudTaskOptions,
+  options: EnqueueTaskOptions,
 ): Promise<Run> {
   const { task } = input;
   const actingUserId = options.skipInitialActingUser
@@ -1397,7 +1395,7 @@ async function enqueueSnapshotResume(
 
   if (task.harness && sourceJobHarness !== task.harness) {
     console.warn(
-      `[enqueueCloudTask] SnapshotResume harness override: requested=${task.harness}, source=${sourceJobHarness}`,
+      `[enqueueTask] SnapshotResume harness override: requested=${task.harness}, source=${sourceJobHarness}`,
     );
   }
 
@@ -1407,7 +1405,7 @@ async function enqueueSnapshotResume(
     sourceJobVendor !== task.computeProvider
   ) {
     console.warn(
-      `[enqueueCloudTask] SnapshotResume computeProvider override: requested=${task.computeProvider}, source=${sourceJobVendor}`,
+      `[enqueueTask] SnapshotResume computeProvider override: requested=${task.computeProvider}, source=${sourceJobVendor}`,
     );
   }
 
@@ -1549,7 +1547,7 @@ async function recordSnapshotResumeRequestEvent(input: {
     });
   } catch (error) {
     console.warn(
-      `[enqueueCloudTask] Failed to persist snapshot resume event for source run #${input.runId}: ${
+      `[enqueueTask] Failed to persist snapshot resume event for source run #${input.runId}: ${
         error instanceof Error ? error.message : String(error)
       }`,
     );

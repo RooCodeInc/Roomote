@@ -220,7 +220,7 @@ export async function cancelAndReleaseCloudJob(
       })
       .where(eq(taskRuns.id, cloudJob.id));
 
-    // Derive the owning task's state from all its runs. finishCloudJob never
+    // Derive the owning task's state from all its runs. finishRun never
     // runs for runs canceled before/at dequeue, so without this sync the task
     // would stay 'active' forever. The shared helper deprioritizes this
     // never-started cancel, so an earlier completed sibling still wins.
@@ -429,7 +429,7 @@ export async function cancelCloudJob(
     .where(eq(taskRuns.id, cloudJobId));
 
   // Derive the owning task's state from all its runs. This runs on the dequeue
-  // path (invalid job, bootstrap failure) where finishCloudJob never executes,
+  // path (invalid job, bootstrap failure) where finishRun never executes,
   // so the task must be resolved here or it stays 'active' forever. The caller
   // only has the run id, so resolve the task via the run row, then sync.
   const [runRow] = await tx

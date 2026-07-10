@@ -1,5 +1,5 @@
 const {
-  mockEnqueueCloudTask,
+  mockEnqueueTask,
   mockGetTaskUrl,
   mockGetAdoAutomationTargets,
   mockGetAdoDeploymentUser,
@@ -9,7 +9,7 @@ const {
   mockSendMessageToTask,
   mockSteerMessageToTask,
 } = vi.hoisted(() => ({
-  mockEnqueueCloudTask: vi.fn(),
+  mockEnqueueTask: vi.fn(),
   mockGetTaskUrl: vi.fn(),
   mockGetAdoAutomationTargets: vi.fn(),
   mockGetAdoDeploymentUser: vi.fn(),
@@ -21,7 +21,7 @@ const {
 }));
 
 vi.mock('@roomote/cloud-agents/server', () => ({
-  enqueueCloudTask: mockEnqueueCloudTask,
+  enqueueTask: mockEnqueueTask,
   getTaskUrl: mockGetTaskUrl,
 }));
 
@@ -126,7 +126,7 @@ function makeCommentPayload(
 
 describe('handleAdoComment', () => {
   beforeEach(() => {
-    mockEnqueueCloudTask.mockReset();
+    mockEnqueueTask.mockReset();
     mockGetTaskUrl.mockReset();
     mockGetAdoAutomationTargets.mockReset();
     mockGetAdoDeploymentUser.mockReset();
@@ -158,7 +158,7 @@ describe('handleAdoComment', () => {
     });
     mockFindActiveGitHubPrReviewTask.mockResolvedValue(null);
     mockFindReusableGitHubPrFollowUpOwner.mockResolvedValue(null);
-    mockEnqueueCloudTask.mockResolvedValue({ id: 1234, taskId: 'task-1' });
+    mockEnqueueTask.mockResolvedValue({ id: 1234, taskId: 'task-1' });
     mockGetTaskUrl.mockReturnValue('https://roomote.example/tasks/task-1');
     mockSendMessageToTask.mockResolvedValue({ success: true });
     mockSteerMessageToTask.mockResolvedValue({ success: true });
@@ -168,7 +168,7 @@ describe('handleAdoComment', () => {
     const result = await handleAdoComment(makeCommentPayload());
 
     expect(result).toEqual({ status: 'ok', metadata: { ids: [1234] } });
-    expect(mockEnqueueCloudTask).toHaveBeenCalledWith(
+    expect(mockEnqueueTask).toHaveBeenCalledWith(
       expect.objectContaining({
         task: expect.objectContaining({
           type: TaskPayloadKind.GithubPrReview,
@@ -231,7 +231,7 @@ describe('handleAdoComment', () => {
         repoFullName: 'acme/Platform/backend',
       }),
     );
-    expect(mockEnqueueCloudTask).toHaveBeenCalledWith(
+    expect(mockEnqueueTask).toHaveBeenCalledWith(
       expect.objectContaining({
         task: expect.objectContaining({
           payload: expect.objectContaining({
@@ -268,7 +268,7 @@ describe('handleAdoComment', () => {
         senderMode: 'github_pr_follow_up',
       }),
     );
-    expect(mockEnqueueCloudTask).not.toHaveBeenCalled();
+    expect(mockEnqueueTask).not.toHaveBeenCalled();
     expect(mockCreateAdoPullRequestComment).toHaveBeenCalledWith(
       expect.objectContaining({
         body: expect.stringContaining('existing task'),
@@ -298,7 +298,7 @@ describe('handleAdoComment', () => {
       prNumber: 42,
       headSha: 'abc123',
     });
-    expect(mockEnqueueCloudTask).not.toHaveBeenCalled();
+    expect(mockEnqueueTask).not.toHaveBeenCalled();
     expect(mockCreateAdoPullRequestComment).toHaveBeenCalledWith(
       expect.objectContaining({
         body: expect.stringContaining('already running'),
@@ -312,7 +312,7 @@ describe('handleAdoComment', () => {
     );
 
     expect(result).toEqual({ status: 'ok', message: 'no_mention' });
-    expect(mockEnqueueCloudTask).not.toHaveBeenCalled();
+    expect(mockEnqueueTask).not.toHaveBeenCalled();
     expect(mockCreateAdoPullRequestComment).not.toHaveBeenCalled();
   });
 
@@ -337,7 +337,7 @@ describe('handleAdoComment', () => {
       status: 'ok',
       message: 'roomote_authored_comment',
     });
-    expect(mockEnqueueCloudTask).not.toHaveBeenCalled();
+    expect(mockEnqueueTask).not.toHaveBeenCalled();
     expect(mockGetAdoAutomationTargets).not.toHaveBeenCalled();
   });
 
@@ -357,7 +357,7 @@ describe('handleAdoComment', () => {
     );
 
     expect(result).toEqual({ status: 'ok', metadata: { ids: [1234] } });
-    expect(mockEnqueueCloudTask).toHaveBeenCalled();
+    expect(mockEnqueueTask).toHaveBeenCalled();
   });
 
   it('posts a reviewer-gate comment when no automation target is found', async () => {
@@ -376,7 +376,7 @@ describe('handleAdoComment', () => {
         body: expect.stringContaining('could not start work'),
       }),
     );
-    expect(mockEnqueueCloudTask).not.toHaveBeenCalled();
+    expect(mockEnqueueTask).not.toHaveBeenCalled();
   });
 
   it('bypasses the PR author policy for explicit mentions', async () => {
@@ -411,7 +411,7 @@ describe('handleAdoComment', () => {
         body: expect.stringContaining('Azure DevOps account linked'),
       }),
     );
-    expect(mockEnqueueCloudTask).not.toHaveBeenCalled();
+    expect(mockEnqueueTask).not.toHaveBeenCalled();
   });
 
   it('creates a new response thread when the comment thread link is absent', async () => {

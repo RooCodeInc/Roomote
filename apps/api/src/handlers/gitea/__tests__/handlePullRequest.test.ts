@@ -1,5 +1,5 @@
 const {
-  mockEnqueueCloudTask,
+  mockEnqueueTask,
   mockGetGiteaAutomationTargets,
   mockUpdateTaskPrStatus,
   mockRepositoriesFindFirst,
@@ -8,7 +8,7 @@ const {
   mockNotifyTelegramAndLinearPrMerge,
   mockFindActiveGitHubPrReviewTask,
 } = vi.hoisted(() => ({
-  mockEnqueueCloudTask: vi.fn(),
+  mockEnqueueTask: vi.fn(),
   mockGetGiteaAutomationTargets: vi.fn(),
   mockUpdateTaskPrStatus: vi.fn(),
   mockRepositoriesFindFirst: vi.fn(),
@@ -19,7 +19,7 @@ const {
 }));
 
 vi.mock('@roomote/cloud-agents/server', () => ({
-  enqueueCloudTask: mockEnqueueCloudTask,
+  enqueueTask: mockEnqueueTask,
 }));
 
 vi.mock('@roomote/sdk/server', () => ({
@@ -100,7 +100,7 @@ function makePayload(
 
 describe('handleGiteaPullRequest', () => {
   beforeEach(() => {
-    mockEnqueueCloudTask.mockReset();
+    mockEnqueueTask.mockReset();
     mockGetGiteaAutomationTargets.mockReset();
     mockUpdateTaskPrStatus.mockReset();
     mockRepositoriesFindFirst.mockReset();
@@ -125,7 +125,7 @@ describe('handleGiteaPullRequest', () => {
         },
       ],
     });
-    mockEnqueueCloudTask.mockResolvedValue({
+    mockEnqueueTask.mockResolvedValue({
       id: 1234,
       taskId: 'task-1',
     });
@@ -141,7 +141,7 @@ describe('handleGiteaPullRequest', () => {
         ids: [1234],
       },
     });
-    expect(mockEnqueueCloudTask).toHaveBeenCalledWith(
+    expect(mockEnqueueTask).toHaveBeenCalledWith(
       expect.objectContaining({
         task: expect.objectContaining({
           type: TaskPayloadKind.GithubPrReview,
@@ -180,7 +180,7 @@ describe('handleGiteaPullRequest', () => {
   it('enqueues sync reviews for synchronized pull requests', async () => {
     await handleGiteaPullRequest(makePayload('synchronized'));
 
-    expect(mockEnqueueCloudTask).toHaveBeenCalledWith(
+    expect(mockEnqueueTask).toHaveBeenCalledWith(
       expect.objectContaining({
         task: expect.objectContaining({
           type: TaskPayloadKind.GithubPrReviewSync,
@@ -216,14 +216,14 @@ describe('handleGiteaPullRequest', () => {
       headSha: 'abc123',
       sourceControlProvider: 'gitea',
     });
-    expect(mockEnqueueCloudTask).not.toHaveBeenCalled();
+    expect(mockEnqueueTask).not.toHaveBeenCalled();
   });
 
   it('does not run head-SHA dedup for opened pull requests', async () => {
     await handleGiteaPullRequest(makePayload('opened'));
 
     expect(mockFindActiveGitHubPrReviewTask).not.toHaveBeenCalled();
-    expect(mockEnqueueCloudTask).toHaveBeenCalled();
+    expect(mockEnqueueTask).toHaveBeenCalled();
   });
 
   it('updates tracked task PR status and notifications for merged pull requests', async () => {
@@ -261,7 +261,7 @@ describe('handleGiteaPullRequest', () => {
       mergedBy: 'roomote-bot',
       sourceControlProvider: 'gitea',
     });
-    expect(mockEnqueueCloudTask).not.toHaveBeenCalled();
+    expect(mockEnqueueTask).not.toHaveBeenCalled();
   });
 
   it('updates tracked task PR status without notifications for closed pull requests', async () => {

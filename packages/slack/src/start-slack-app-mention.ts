@@ -5,7 +5,7 @@ import {
   wrapSlackThreadContext,
   wrapSlackTurnPolicy,
 } from '@roomote/cloud-agents';
-import { enqueueCloudTask } from '@roomote/cloud-agents/server';
+import { enqueueTask } from '@roomote/cloud-agents/server';
 import { db, eq, sql, taskRuns } from '@roomote/db/server';
 import {
   type ReasoningEffort,
@@ -313,7 +313,7 @@ export async function startSlackAppMentionTask(input: {
     },
   } satisfies SlackAppMentionTask;
 
-  const launchResult = await enqueueCloudTask(
+  const launchResult = await enqueueTask(
     {
       task,
       initiator: input.initiator,

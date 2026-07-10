@@ -1,6 +1,6 @@
 import {
   CloudJobQueueEnqueueError,
-  enqueueCloudTask,
+  enqueueTask,
 } from '@roomote/cloud-agents/server';
 import { TaskPayloadKind, type BackgroundAutomationKey } from '@roomote/types';
 import {
@@ -198,7 +198,7 @@ export async function launchActWorkItems(params: {
         linkedTaskId = taskId;
       };
 
-      await enqueueCloudTask(
+      await enqueueTask(
         {
           task: {
             type: TaskPayloadKind.StandardTask,

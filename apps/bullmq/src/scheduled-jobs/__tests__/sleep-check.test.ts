@@ -8,7 +8,7 @@ const {
   mockDestroyInstance,
   mockGetInstanceStatus,
   mockCreateSnapshot,
-  mockFinishCloudJob,
+  mockFinishRun,
   mockRecordComputeProviderUsage,
   mockRecordMutation,
   mockCreateComputeProviderMutationEventRecorder,
@@ -70,7 +70,7 @@ const {
     mockDestroyInstance: vi.fn() as AnyMock,
     mockGetInstanceStatus: vi.fn() as AnyMock,
     mockCreateSnapshot: vi.fn() as AnyMock,
-    mockFinishCloudJob: vi.fn() as AnyMock,
+    mockFinishRun: vi.fn() as AnyMock,
     mockRecordComputeProviderUsage: vi.fn() as AnyMock,
     mockRecordMutation: vi.fn() as AnyMock,
     mockCreateComputeProviderMutationEventRecorder: vi.fn() as AnyMock,
@@ -109,7 +109,7 @@ vi.mock('@roomote/compute-providers', () => ({
 
 vi.mock('@roomote/sdk/server', () => ({
   createSnapshot: mockCreateSnapshot,
-  finishCloudJob: mockFinishCloudJob,
+  finishRun: mockFinishRun,
   recordComputeProviderUsage: mockRecordComputeProviderUsage,
 }));
 
@@ -243,7 +243,7 @@ describe('sleepCheckJob', () => {
       return result;
     });
     returningFn.mockResolvedValue([]);
-    mockFinishCloudJob.mockResolvedValue(undefined);
+    mockFinishRun.mockResolvedValue(undefined);
     // No stop request persisted on the row unless a test opts in.
     mockDbQueryTaskRunsFindFirst.mockResolvedValue(undefined);
   });
@@ -356,7 +356,7 @@ describe('sleepCheckJob', () => {
       sleepRequestedAt: expect.any(Date),
       snapshotFailedAt: expect.any(Date),
     });
-    expect(mockFinishCloudJob).toHaveBeenCalledWith({
+    expect(mockFinishRun).toHaveBeenCalledWith({
       id: 42,
       status: RunStatus.Completed,
       error: 'Auto-snapshot could not run because instance sb-1 was stopped.',
@@ -385,7 +385,7 @@ describe('sleepCheckJob', () => {
 
     await sleepCheckJob();
 
-    expect(mockFinishCloudJob).not.toHaveBeenCalled();
+    expect(mockFinishRun).not.toHaveBeenCalled();
     expect(mockRecordCloudJobEvent).toHaveBeenCalledWith(
       expect.anything(),
       expect.objectContaining({
@@ -877,7 +877,7 @@ describe('sleepCheckJob', () => {
         triggerPath: 'booting_no_heartbeat',
       }),
     );
-    expect(mockFinishCloudJob).not.toHaveBeenCalled();
+    expect(mockFinishRun).not.toHaveBeenCalled();
   });
 
   it('snapshots stale resumable jobs whose worker heartbeat stopped updating', async () => {
@@ -914,7 +914,7 @@ describe('sleepCheckJob', () => {
         triggerPath: 'stale_worker',
       }),
     );
-    expect(mockFinishCloudJob).not.toHaveBeenCalled();
+    expect(mockFinishRun).not.toHaveBeenCalled();
   });
 
   it('fails booting jobs when the initial heartbeat never arrives and the sandbox is already gone', async () => {
@@ -939,7 +939,7 @@ describe('sleepCheckJob', () => {
     await sleepCheckJob();
 
     expect(mockCreateSnapshot).not.toHaveBeenCalled();
-    expect(mockFinishCloudJob).toHaveBeenCalledWith({
+    expect(mockFinishRun).toHaveBeenCalledWith({
       id: 95,
       status: RunStatus.Failed,
       error:
@@ -1077,7 +1077,7 @@ describe('sleepCheckJob', () => {
     await sleepCheckJob();
 
     expect(mockCreateSnapshot).not.toHaveBeenCalled();
-    expect(mockFinishCloudJob).toHaveBeenCalledWith({
+    expect(mockFinishRun).toHaveBeenCalledWith({
       id: 91,
       status: RunStatus.Failed,
       error: 'Worker heartbeat stale and instance sb-gone is stopped',
@@ -1133,7 +1133,7 @@ describe('sleepCheckJob', () => {
     await sleepCheckJob();
 
     expect(mockCreateSnapshot).not.toHaveBeenCalled();
-    expect(mockFinishCloudJob).toHaveBeenCalledWith({
+    expect(mockFinishRun).toHaveBeenCalledWith({
       id: 101,
       status: RunStatus.Canceled,
       error:
@@ -1171,7 +1171,7 @@ describe('sleepCheckJob', () => {
     await sleepCheckJob();
 
     expect(mockCreateSnapshot).not.toHaveBeenCalled();
-    expect(mockFinishCloudJob).not.toHaveBeenCalled();
+    expect(mockFinishRun).not.toHaveBeenCalled();
     expect(mockRecordCloudJobEvent).toHaveBeenCalledWith(
       expect.anything(),
       expect.objectContaining({
@@ -1210,7 +1210,7 @@ describe('sleepCheckJob', () => {
     await sleepCheckJob();
 
     expect(mockCreateSnapshot).not.toHaveBeenCalled();
-    expect(mockFinishCloudJob).not.toHaveBeenCalled();
+    expect(mockFinishRun).not.toHaveBeenCalled();
     expect(mockRecordCloudJobEvent).toHaveBeenCalledWith(
       expect.anything(),
       expect.objectContaining({
@@ -1257,7 +1257,7 @@ describe('sleepCheckJob', () => {
     expect(mockDestroyInstance).toHaveBeenCalledWith({
       instanceId: 'sb-non-resumable-stale',
     });
-    expect(mockFinishCloudJob).toHaveBeenCalledWith({
+    expect(mockFinishRun).toHaveBeenCalledWith({
       id: 92,
       status: RunStatus.Failed,
       error: 'Worker heartbeat stale for instance sb-non-resumable-stale',
@@ -1343,7 +1343,7 @@ describe('sleepCheckJob', () => {
     expect(mockDestroyInstance).toHaveBeenCalledWith({
       instanceId: 'sb-non-resumable-stopped',
     });
-    expect(mockFinishCloudJob).toHaveBeenCalledWith({
+    expect(mockFinishRun).toHaveBeenCalledWith({
       id: 102,
       status: RunStatus.Canceled,
       error: 'Worker heartbeat stale for instance sb-non-resumable-stopped',
@@ -1393,7 +1393,7 @@ describe('sleepCheckJob', () => {
     expect(mockDestroyInstance).toHaveBeenCalledWith({
       instanceId: 'sb-non-resumable-booting',
     });
-    expect(mockFinishCloudJob).toHaveBeenCalledWith({
+    expect(mockFinishRun).toHaveBeenCalledWith({
       id: 98,
       status: RunStatus.Failed,
       error:

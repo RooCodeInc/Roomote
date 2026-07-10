@@ -34,8 +34,8 @@ import {
   queueCommunicationMessage,
 } from '@roomote/communication/messages';
 import {
-  enqueueCloudTask,
-  type EnqueueCloudTaskInput,
+  enqueueTask,
+  type EnqueueTaskInput,
 } from '@roomote/cloud-agents/server';
 import {
   clearPendingSlackRequestUserInput,
@@ -73,7 +73,7 @@ import {
   touchCloudJobHeartbeat,
   dequeueCloudJob,
   dequeueResumeCloudJob,
-  finishCloudJob,
+  finishRun,
   revertPrCommit,
   createSnapshot,
   refreshGitHubTokenWithMetadata,
@@ -215,7 +215,7 @@ const resumeEnqueueInputSchema = z.object({
   actingUserId: z.string().nullish(),
 });
 
-const enqueueCloudTaskInputSchema = z.union([
+const enqueueTaskInputSchema = z.union([
   freshEnqueueInputSchema,
   resumeEnqueueInputSchema,
 ]);
@@ -325,11 +325,9 @@ export const cloudJobsRouter = router({
     }),
   ),
   enqueue: nonJobProcedure
-    .input(enqueueCloudTaskInputSchema)
+    .input(enqueueTaskInputSchema)
     .mutation(async ({ input }) => {
-      const launchResult = await enqueueCloudTask(
-        input as EnqueueCloudTaskInput,
-      );
+      const launchResult = await enqueueTask(input as EnqueueTaskInput);
 
       return {
         id: launchResult.id,
@@ -351,7 +349,7 @@ export const cloudJobsRouter = router({
       error: z.string().optional(),
     }),
     'id',
-  ).mutation(({ input }) => finishCloudJob(input)),
+  ).mutation(({ input }) => finishRun(input)),
   recordEvent: jobScoped(
     z.object({
       cloudJobId: z.number(),

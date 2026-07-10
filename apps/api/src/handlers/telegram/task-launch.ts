@@ -6,7 +6,7 @@ import {
 } from '@roomote/types';
 import { db, environments, eq } from '@roomote/db/server';
 import {
-  enqueueCloudTask,
+  enqueueTask,
   getTaskUrl,
   type RoutingWorkspace,
 } from '@roomote/cloud-agents/server';
@@ -77,7 +77,7 @@ export async function launchTelegramTask(input: {
         ...input.metadata,
       },
     };
-  const launchResult = await enqueueCloudTask(
+  const launchResult = await enqueueTask(
     {
       task,
       initiator: { kind: 'user', userId: input.launchOwnerUserId },
