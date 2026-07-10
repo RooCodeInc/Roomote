@@ -9,6 +9,10 @@ import { createPrefixedLogger, describeUnknownError } from '../logging';
 
 import { prepareOpenCodeCommandEnv } from './bootstrap';
 import { OpenCodeServerClient } from './client';
+import {
+  createOpenCodeExitCertificateCollector,
+  type OpenCodeExitCertificate,
+} from './exit-certificate';
 import { OpenCodeServerHarness } from './harness';
 
 interface StartOpenCodeServerHarnessOptions {
@@ -20,6 +24,12 @@ interface StartOpenCodeServerHarnessOptions {
   initialSessionId?: string;
   modelOverride?: string;
   developerInstructionsContent?: string;
+  /**
+   * Invoked when the OpenCode server subprocess exits while the task was not
+   * being cancelled — the death certificate for post-mortems. Observer-only:
+   * failures inside the callback must not affect the harness lifecycle.
+   */
+  onUnexpectedExit?: (certificate: OpenCodeExitCertificate) => void;
   beforeQueuedPrompt?: (input: { userId?: string }) => Promise<void | {
     shouldReconnect: boolean;
     shouldBlockPrompt?: boolean;
@@ -110,6 +120,7 @@ function waitForOpenCodeServerUrl(options: {
   stderr: NodeJS.ReadableStream;
   logger: HarnessLogger;
   timeoutMs: number;
+  onLine?: (stream: 'stdout' | 'stderr', line: string) => void;
 }): Promise<string> {
   const log = createPrefixedLogger(options.logger, '[opencode-server]');
   const stdoutLog = createPrefixedLogger(
@@ -169,6 +180,7 @@ function waitForOpenCodeServerUrl(options: {
         stdoutLog.info(line);
       }
 
+      options.onLine?.('stdout', line);
       maybeResolve('stdout', line);
     };
 
@@ -177,6 +189,7 @@ function waitForOpenCodeServerUrl(options: {
         stderrLog.info(line);
       }
 
+      options.onLine?.('stderr', line);
       maybeResolve('stderr', line);
     };
 
@@ -194,6 +207,7 @@ export async function startOpenCodeServerHarness({
   initialSessionId,
   modelOverride,
   developerInstructionsContent,
+  onUnexpectedExit,
   beforeQueuedPrompt,
 }: StartOpenCodeServerHarnessOptions): Promise<StartOpenCodeServerHarnessResult> {
   const log = createPrefixedLogger(logger, '[opencode-server]');
@@ -224,6 +238,7 @@ export async function startOpenCodeServerHarness({
   );
 
   let subprocess: ResultPromise | null = null;
+  const exitCertificate = createOpenCodeExitCertificateCollector();
 
   try {
     subprocess = execa(resolved.command, resolved.args, {
@@ -237,6 +252,49 @@ export async function startOpenCodeServerHarness({
     if (!subprocess.stdout || !subprocess.stderr) {
       throw new Error(
         'OpenCode server subprocess is missing stdout or stderr.',
+      );
+    }
+
+    if (onUnexpectedExit) {
+      const certifyExit = (input: {
+        exitCode: number | null;
+        signal: string | null;
+      }) => {
+        if (cancelSignal.aborted) {
+          return;
+        }
+
+        try {
+          onUnexpectedExit(exitCertificate.build(input));
+        } catch (error) {
+          log.warn(
+            `Failed to report unexpected OpenCode server exit: ${describeUnknownError(error)}`,
+          );
+        }
+      };
+
+      void subprocess.then(
+        (result) =>
+          certifyExit({
+            exitCode: result.exitCode ?? null,
+            signal: result.signal ?? null,
+          }),
+        (error: unknown) => {
+          const execaError = error as {
+            exitCode?: number;
+            signal?: string;
+            isCanceled?: boolean;
+          };
+
+          if (execaError?.isCanceled) {
+            return;
+          }
+
+          certifyExit({
+            exitCode: execaError?.exitCode ?? null,
+            signal: execaError?.signal ?? null,
+          });
+        },
       );
     }
 
@@ -255,6 +313,7 @@ export async function startOpenCodeServerHarness({
         stderr: subprocess.stderr,
         logger,
         timeoutMs: 30_000,
+        onLine: (stream, line) => exitCertificate.appendLine(stream, line),
       }),
       subprocess.then(
         () => {
