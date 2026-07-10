@@ -34,6 +34,47 @@ type CloudActionResult =
   | { success: true; redirectUrl: string }
   | { success: false; error: string };
 
+const GITHUB_APP_DEFAULT_EVENTS = [
+  'check_run',
+  'check_suite',
+  'commit_comment',
+  'create',
+  'delete',
+  'dependabot_alert',
+  'deploy_key',
+  'deployment',
+  'deployment_protection_rule',
+  'deployment_review',
+  'deployment_status',
+  'fork',
+  'gollum',
+  'installation_target',
+  'issue_comment',
+  'issue_dependencies',
+  'issues',
+  'label',
+  'merge_group',
+  'meta',
+  'milestone',
+  'public',
+  'pull_request',
+  'pull_request_review',
+  'pull_request_review_comment',
+  'pull_request_review_thread',
+  'push',
+  'release',
+  'repository',
+  'repository_dispatch',
+  'security_advisory',
+  'star',
+  'status',
+  'sub_issues',
+  'watch',
+  'workflow_dispatch',
+  'workflow_job',
+  'workflow_run',
+] as const;
+
 type GitHubAppManifest = {
   name: string;
   url: string;
@@ -46,19 +87,18 @@ type GitHubAppManifest = {
   setup_url: string;
   public: boolean;
   default_permissions: {
+    actions: 'write';
+    checks: 'write';
     contents: 'write';
+    deployments: 'read';
     issues: 'write';
     metadata: 'read';
     pull_requests: 'write';
+    statuses: 'read';
+    vulnerability_alerts: 'read';
     workflows: 'write';
   };
-  default_events: [
-    'issue_comment',
-    'pull_request',
-    'pull_request_review_comment',
-    'push',
-    'workflow_run',
-  ];
+  default_events: (typeof GITHUB_APP_DEFAULT_EVENTS)[number][];
   request_oauth_on_install: boolean;
   setup_on_update: boolean;
 };
@@ -193,19 +233,18 @@ function buildGitHubAppManifest(): GitHubAppManifest {
       active: true,
     },
     default_permissions: {
+      actions: 'write',
+      checks: 'write',
       contents: 'write',
+      deployments: 'read',
       issues: 'write',
       metadata: 'read',
       pull_requests: 'write',
+      statuses: 'read',
+      vulnerability_alerts: 'read',
       workflows: 'write',
     },
-    default_events: [
-      'issue_comment',
-      'pull_request',
-      'pull_request_review_comment',
-      'push',
-      'workflow_run',
-    ],
+    default_events: [...GITHUB_APP_DEFAULT_EVENTS],
     request_oauth_on_install: true,
     setup_on_update: true,
     public: false,

@@ -15,9 +15,8 @@ import type {
   AcpUiMessage,
 } from './types';
 import {
-  hasSubagentLiveActivity,
+  isSubagentSpawnRowMessage,
   isSubagentToolMessage,
-  shouldHidePendingSubagentMessage,
 } from './subagent-tool';
 
 export type ExplorationStepKind = 'list' | 'read' | 'search';
@@ -509,23 +508,15 @@ function resolveMessageRenderState(
   if (
     options.showInternalMessages === false &&
     (isSubagentToolMessage(msg) || isInternalDebugToolCallMessage(msg)) &&
-    // Live subagent spawns render as inline tool rows even without debug UI.
-    !hasSubagentLiveActivity(msg)
+    // Spawn rows render inline even without debug UI. Keyed on the stable
+    // payload shape, never on live-only activity data: activity does not
+    // survive a transcript rebuild, and a row that vanishes on refresh reads
+    // as a lost subagent.
+    !isSubagentSpawnRowMessage(msg)
   ) {
     return {
       visibility: 'hidden',
       behavior: 'boundary',
-    };
-  }
-
-  if (
-    options.displayMode === 'narration' &&
-    !shouldShowInternalMessageInNarration &&
-    shouldHidePendingSubagentMessage(msg)
-  ) {
-    return {
-      visibility: 'hidden',
-      behavior: 'transparent',
     };
   }
 

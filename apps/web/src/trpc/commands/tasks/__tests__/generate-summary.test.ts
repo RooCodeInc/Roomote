@@ -111,7 +111,6 @@ describe('generateTaskSummaryCommand', () => {
 
     expect(mockGetTaskMessageEnvelopes).toHaveBeenCalledWith({
       taskId: 'task-empty',
-      userId: auth.userId,
     });
     expect(mockGenerateTrackedNonTaskObject).not.toHaveBeenCalled();
     expect(result).toEqual({

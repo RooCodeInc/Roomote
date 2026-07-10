@@ -740,40 +740,6 @@ export const taskArtifactsRelations = relations(taskArtifacts, ({ one }) => ({
 }));
 
 /**
- * task_shares
- */
-
-export const taskShares = pgTable(
-  'task_shares',
-  {
-    id: uuid('id').primaryKey().defaultRandom(),
-    taskId: text('task_id').notNull(),
-    createdByUserId: text('created_by_user_id')
-      .notNull()
-      .references(() => users.id),
-    shareToken: text('share_token').notNull().unique(),
-    visibility: text('visibility').notNull().default('deployment'),
-    expiresAt: timestamp('expires_at'),
-    createdAt: timestamp('created_at').notNull().defaultNow(),
-    updatedAt: timestamp('updated_at').notNull().defaultNow(),
-  },
-  (table) => [
-    index('task_shares_share_token_idx').on(table.shareToken),
-    index('task_shares_task_id_idx').on(table.taskId),
-    index('task_shares_expires_at_idx').on(table.expiresAt),
-    index('task_shares_created_by_user_id_idx').on(table.createdByUserId),
-    index('task_shares_visibility_idx').on(table.visibility),
-  ],
-);
-
-export const taskSharesRelations = relations(taskShares, ({ one }) => ({
-  createdByUser: one(users, {
-    fields: [taskShares.createdByUserId],
-    references: [users.id],
-  }),
-}));
-
-/**
  * task_pull_requests
  */
 
