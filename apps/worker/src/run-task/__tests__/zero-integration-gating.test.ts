@@ -1,7 +1,5 @@
 import { EventEmitter } from 'node:events';
 
-import { CloudTaskType } from '@roomote/types';
-
 const {
   activateSkillsFolderMock,
   createHarnessMock,
@@ -260,7 +258,7 @@ describe('Zero integration runtime gating', () => {
       cloudJob: {
         id: 201,
         taskId: 'task-zero-disabled',
-        type: CloudTaskType.StandardTask,
+        type: 'standard.task',
         harness: 'opencode-server',
         payload: {},
         result: null,
@@ -284,7 +282,7 @@ describe('Zero integration runtime gating', () => {
       cloudJob: {
         id: 202,
         taskId: 'task-zero-enabled',
-        type: CloudTaskType.StandardTask,
+        type: 'standard.task',
         harness: 'opencode-server',
         payload: {},
         result: null,
