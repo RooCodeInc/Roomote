@@ -13,11 +13,11 @@ import type { Variables } from '../../types';
 
 type ArtifactRouteAuthContext = {
   /**
-   * Null for deployment-principal job tokens. Authorization stays scoped to
-   * the cloud job itself: `findCloudJobByJobTokenClaims` matches by
-   * `cloudJobId` and only requires `userId` to agree when the job has an
-   * owner, so an ownerless job's deployment token is authorized exactly like
-   * the job's own user would have been.
+   * Null for deployment-principal job tokens. Authorization is scoped to the
+   * cloud job itself: `findCloudJobByJobTokenClaims` resolves by `cloudJobId`
+   * only. The token's userId is mint-time attribution and is never compared
+   * against the mutable `task_runs.actingUserId`, which web steer and
+   * follow-up delivery legitimately switch mid-run.
    */
   userId: string | null;
   cloudJobId: number;

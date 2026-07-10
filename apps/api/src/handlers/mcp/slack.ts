@@ -871,17 +871,12 @@ slackMcp.post('/thread_reply', async (c) => {
     return c.json({ error: 'Cloud job not found for this MCP token' }, 404);
   }
 
-  // The token principal must match the run's acting user: a user token must
-  // carry the run's acting user, and a deployment-service-principal token is
-  // only valid for a run with no acting user (null === null). Replies are
-  // posted with the deployment Slack bot token, so no human actor is
-  // required here.
-  if ((cloudJob.actingUserId ?? null) !== authContext.userId) {
-    return c.json(
-      { error: 'MCP token principal does not match cloud job' },
-      403,
-    );
-  }
+  // No principal equality check: the run-scoped token IS the authorization
+  // (only this run's sandbox holds it), and replies go out via the deployment
+  // Slack bot token, so there is no impersonation vector. The token's userId
+  // is mint-time attribution while task_runs.actingUserId is current-steering
+  // attribution — they legitimately diverge once a web steer or follow-up
+  // switches the acting user mid-run.
 
   let parsedBody: {
     text?: string;
@@ -1489,16 +1484,12 @@ slackMcp.post('/thread_lookup', async (c) => {
     return c.json({ error: 'Cloud job not found for this MCP token' }, 404);
   }
 
-  // The token principal must match the run's acting user; a
-  // deployment-service-principal token is valid for a run with no acting
-  // user (null === null). This endpoint operates via the deployment Slack
-  // bot token, so no human actor is required.
-  if ((run.actingUserId ?? null) !== authContext.userId) {
-    return c.json(
-      { error: 'MCP token principal does not match cloud job' },
-      403,
-    );
-  }
+  // No principal equality check: the run-scoped token IS the authorization
+  // (only this run's sandbox holds it), and this endpoint operates via the
+  // deployment Slack bot token, so there is no impersonation vector. The
+  // token's userId is mint-time attribution while task_runs.actingUserId is
+  // current-steering attribution — they legitimately diverge once a web steer
+  // or follow-up switches the acting user mid-run.
 
   const bindings = await getTaskChannelBindings(run.taskId);
   const cloudJob = {
@@ -1565,16 +1556,12 @@ slackMcp.post('/reaction_add', async (c) => {
     return c.json({ error: 'Cloud job not found for this MCP token' }, 404);
   }
 
-  // The token principal must match the run's acting user; a
-  // deployment-service-principal token is valid for a run with no acting
-  // user (null === null). This endpoint operates via the deployment Slack
-  // bot token, so no human actor is required.
-  if ((cloudJob.actingUserId ?? null) !== authContext.userId) {
-    return c.json(
-      { error: 'MCP token principal does not match cloud job' },
-      403,
-    );
-  }
+  // No principal equality check: the run-scoped token IS the authorization
+  // (only this run's sandbox holds it), and this endpoint operates via the
+  // deployment Slack bot token, so there is no impersonation vector. The
+  // token's userId is mint-time attribution while task_runs.actingUserId is
+  // current-steering attribution — they legitimately diverge once a web steer
+  // or follow-up switches the acting user mid-run.
 
   let parsedBody: {
     channel: string;
@@ -1680,16 +1667,12 @@ slackMcp.post('/channel_messages', async (c) => {
     return c.json({ error: 'Cloud job not found for this MCP token' }, 404);
   }
 
-  // The token principal must match the run's acting user; a
-  // deployment-service-principal token is valid for a run with no acting
-  // user (null === null). This endpoint operates via the deployment Slack
-  // bot token, so no human actor is required.
-  if ((run.actingUserId ?? null) !== authContext.userId) {
-    return c.json(
-      { error: 'MCP token principal does not match cloud job' },
-      403,
-    );
-  }
+  // No principal equality check: the run-scoped token IS the authorization
+  // (only this run's sandbox holds it), and this endpoint operates via the
+  // deployment Slack bot token, so there is no impersonation vector. The
+  // token's userId is mint-time attribution while task_runs.actingUserId is
+  // current-steering attribution — they legitimately diverge once a web steer
+  // or follow-up switches the acting user mid-run.
 
   const bindings = await getTaskChannelBindings(run.taskId);
   const cloudJob = {
@@ -1765,16 +1748,12 @@ slackMcp.post('/channel_post', async (c) => {
     return c.json({ error: 'Cloud job not found for this MCP token' }, 404);
   }
 
-  // The token principal must match the run's acting user; a
-  // deployment-service-principal token is valid for a run with no acting
-  // user (null === null). This endpoint operates via the deployment Slack
-  // bot token, so no human actor is required.
-  if ((cloudJob.actingUserId ?? null) !== authContext.userId) {
-    return c.json(
-      { error: 'MCP token principal does not match cloud job' },
-      403,
-    );
-  }
+  // No principal equality check: the run-scoped token IS the authorization
+  // (only this run's sandbox holds it), and this endpoint operates via the
+  // deployment Slack bot token, so there is no impersonation vector. The
+  // token's userId is mint-time attribution while task_runs.actingUserId is
+  // current-steering attribution — they legitimately diverge once a web steer
+  // or follow-up switches the acting user mid-run.
 
   let parsedBody: {
     channel: string;

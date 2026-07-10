@@ -72,11 +72,12 @@ export function toMcpToolResult<T extends Record<string, unknown>>(payload: T) {
 /**
  * Resolve the effective user for downstream MCP credential lookup.
  *
- * Job tokens remain tied to the run's acting user for authorization checks;
- * integration MCPs execute as the most recent human who launched or replied
- * to the task. That live actor is stored on `task_runs.actingUserId` rather
- * than inferred from `task_messages`, because transcript persistence is async
- * and may lag behind the turn that is about to make MCP calls.
+ * Job tokens are authorized by their run binding (cloudJobId); integration
+ * MCPs execute as the most recent human who launched or replied to the task.
+ * That live actor is stored on `task_runs.actingUserId` rather than inferred
+ * from `task_messages`, because transcript persistence is async and may lag
+ * behind the turn that is about to make MCP calls. The token's own userId is
+ * mint-time attribution and deliberately plays no role here.
  */
 export async function resolveActingUserId(
   auth: McpAuthContext,
@@ -153,11 +154,19 @@ export async function resolveActingUserIdOrNull(
   return cloudJob.actingUserId ?? null;
 }
 
-async function verifyCloudJobTokenMatchesJob(
+/**
+ * Validates that the job token's run still exists. No principal equality
+ * check: the run-scoped token IS the authorization (only that run's sandbox
+ * holds it). The token's userId is mint-time attribution while
+ * `task_runs.actingUserId` is current-steering attribution — web steer and
+ * follow-up delivery mutate the acting user mid-run, so the two legitimately
+ * diverge and must not be compared for authorization.
+ */
+async function verifyCloudJobTokenJobExists(
   auth: JobTokenContext,
 ): Promise<Response | null> {
   const cloudJob = await db.query.taskRuns.findFirst({
-    columns: { id: true, actingUserId: true },
+    columns: { id: true },
     where: eq(taskRuns.id, auth.cloudJobId),
   });
 
@@ -169,25 +178,13 @@ async function verifyCloudJobTokenMatchesJob(
     );
   }
 
-  // The token principal must match the run's acting user: a user token must
-  // carry the run's acting user, and a deployment-service-principal token is
-  // only valid for a run with no acting user. Both being null is the
-  // automation case and is valid.
-  if ((cloudJob.actingUserId ?? null) !== auth.userId) {
-    return jsonRpcErrorResponse(
-      403,
-      -32000,
-      'MCP token principal does not match cloud job',
-    );
-  }
-
   return null;
 }
 
-export async function assertCloudJobTokenMatchesCloudJobUser(
+export async function assertCloudJobTokenJobExists(
   auth: JobTokenContext,
 ): Promise<void> {
-  const validationError = await verifyCloudJobTokenMatchesJob(auth);
+  const validationError = await verifyCloudJobTokenJobExists(auth);
 
   if (!validationError) {
     return;
@@ -406,7 +403,7 @@ export function createMcpProxy(config: McpProxyConfig) {
     resolveCredentials,
     timeoutMs = 30_000,
     allowAuthTokens = false,
-    validateCloudJobToken = verifyCloudJobTokenMatchesJob,
+    validateCloudJobToken = verifyCloudJobTokenJobExists,
     allowedToolNames,
   } = config;
 

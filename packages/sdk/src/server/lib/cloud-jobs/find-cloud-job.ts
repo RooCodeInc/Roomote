@@ -34,24 +34,21 @@ export const findCloudJobForAccess = async (id: number) =>
     columns: { id: true },
   });
 
+/**
+ * Resolve the run a job token is bound to. The token's `cloudJobId` binding IS
+ * the authorization: only that run's sandbox holds the token, so no principal
+ * equality against `task_runs.actingUserId` is performed. The token's userId
+ * is mint-time attribution while actingUserId is current-steering attribution
+ * — web steer and follow-up delivery mutate the acting user mid-run, so the
+ * two legitimately diverge and must not be compared for authorization.
+ */
 export const findCloudJobByJobTokenClaims = async ({
   cloudJobId,
-  userId,
-}: Pick<JobTokenContext, 'cloudJobId' | 'userId'>) => {
+}: Pick<JobTokenContext, 'cloudJobId'>) => {
   const run = await db.query.taskRuns.findFirst({
     where: eq(taskRuns.id, cloudJobId),
-    columns: { id: true, actingUserId: true },
+    columns: { id: true },
   });
 
-  if (!run) {
-    return null;
-  }
-
-  // Token/run match rule: (run.actingUserId ?? null) === token.userId.
-  // null === null is a valid deployment-principal match.
-  if ((run.actingUserId ?? null) !== (userId ?? null)) {
-    return null;
-  }
-
-  return { id: run.id };
+  return run ? { id: run.id } : null;
 };
