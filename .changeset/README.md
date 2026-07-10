@@ -27,8 +27,8 @@ Chores, docs-only, and pure-internal refactors can skip a changeset; they ride a
 ## How a release ships
 
 1. Merge code to `develop`. When pending changesets exist, CI keeps a **Release PR** open against `develop` that bumps versions and updates the root `CHANGELOG.md`.
-2. Merging that Release PR (or any push to `develop` whose version is untagged) opens or refreshes a **Promote PR** (`develop` → `main`).
-3. Merging the Promote PR with a **merge commit** (not squash) into `main` tags `vX.Y.Z`, then GHCR builds the matching images; the GitHub Release is created only after those images exist so `releases/latest` never points at a missing image set.
+2. Merging that Release PR (or any push to `develop` whose version is untagged) cuts a frozen `release/vX.Y.Z` branch at the version-bump commit and opens or refreshes a **Promote PR** (`release/vX.Y.Z` → `main`). Commits merged to `develop` after the version bump wait for the next release instead of riding along.
+3. Merging the Promote PR with a **merge commit** (not squash) into `main` tags `vX.Y.Z`, then GHCR builds the matching images; the GitHub Release is created only after those images exist so `releases/latest` never points at a missing image set. The `release/vX.Y.Z` branch can be deleted after the merge.
 
 Branch rules (must match GitHub rulesets):
 

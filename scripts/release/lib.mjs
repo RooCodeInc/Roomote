@@ -3,6 +3,7 @@
  * Root package name is `roomote`; workspace packages use `@roomote/*`.
  */
 
+import { execFileSync } from 'node:child_process';
 import { readdirSync, readFileSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
 
@@ -174,4 +175,45 @@ export function extractChangelogSection(changelogMarkdown, version) {
     }
   }
   return lines.slice(start, end).join('\n').trim();
+}
+
+/**
+ * Find the commit that introduced the given product version on a ref.
+ *
+ * Walks commits that touched the root package.json from the tip of `ref`
+ * backwards, and returns the oldest contiguous commit whose version equals
+ * `version` — i.e. the Version PR merge commit that bumped to it. Returns
+ * null when the tip of `ref` is not on `version` (the version is stale) or
+ * the version never appears.
+ *
+ * Versions only change in commits that touch package.json, so the oldest
+ * contiguous match from the tip is exactly the commit that introduced it.
+ *
+ * @param {{ cwd: string, version: string, ref?: string }} options
+ * @returns {string | null} full commit SHA or null
+ */
+export function findVersionCommit({ cwd, version, ref = 'HEAD' }) {
+  const git = (args) =>
+    execFileSync('git', args, {
+      cwd,
+      encoding: 'utf8',
+      stdio: ['ignore', 'pipe', 'pipe'],
+    });
+
+  const shas = git(['rev-list', ref, '--', 'package.json'])
+    .split('\n')
+    .filter(Boolean);
+
+  let candidate = null;
+  for (const sha of shas) {
+    let commitVersion = null;
+    try {
+      commitVersion = JSON.parse(git(['show', `${sha}:package.json`])).version;
+    } catch {
+      break;
+    }
+    if (commitVersion !== version) break;
+    candidate = sha;
+  }
+  return candidate;
 }

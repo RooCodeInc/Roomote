@@ -49,9 +49,10 @@ Any `@roomote/*` package selection is equivalent under the fixed group. See
 1. Merge work to `develop` (squash). When pending changesets exist, automation
    opens a **Release Roomote** Version PR that bumps lockstep versions and
    `CHANGELOG.md`.
-2. When the product version is untagged and no changesets remain, automation
-   opens or refreshes a **Promote `vX.Y.Z` to production** PR (`develop` →
-   `main`).
+2. When the product version is untagged, automation cuts a frozen
+   `release/vX.Y.Z` branch at the version-bump commit and opens or refreshes a
+   **Promote `vX.Y.Z` to production** PR (`release/vX.Y.Z` → `main`). Work
+   merged to `develop` after the version bump waits for the next release.
 3. Merge that promote PR with a **merge commit** (branch rules on `main` allow
    merge only; `develop` stays squash-only). Tagging (`vX.Y.Z`), GHCR image
    publish (`latest`), and the GitHub Release follow from `main` / tag workflows.

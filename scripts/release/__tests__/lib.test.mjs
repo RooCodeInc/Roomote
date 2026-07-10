@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict'
+import { execFileSync } from 'node:child_process'
 import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -6,6 +7,7 @@ import { describe, it } from 'node:test'
 import {
   computeNextVersion,
   extractChangelogSection,
+  findVersionCommit,
   insertChangelogSection,
   parsePendingChangesets,
 } from '../lib.mjs'
@@ -103,5 +105,51 @@ This file tracks product releases for Roomote (single monorepo version). Automat
       '## 1.0.0\n\n- Boot\n',
     )
     assert.match(onlyTitle, /Intro only\.\n\n## 1\.0\.0/)
+  })
+
+  it('findVersionCommit returns the commit that introduced the tip version', () => {
+    const root = mkdtempSync(join(tmpdir(), 'roomote-version-commit-'))
+    const git = (...args) =>
+      execFileSync('git', args, { cwd: root, encoding: 'utf8' }).trim()
+    try {
+      git('init', '--quiet', '--initial-branch=develop')
+      git('config', 'user.name', 'Test')
+      git('config', 'user.email', 'test@example.com')
+
+      const commit = (message) => {
+        git('add', '-A')
+        git('commit', '--quiet', '-m', message)
+        return git('rev-parse', 'HEAD')
+      }
+      const setPkg = (fields) =>
+        writeFileSync(
+          join(root, 'package.json'),
+          JSON.stringify({ name: 'roomote', ...fields }, null, 2),
+        )
+
+      setPkg({ version: '0.0.1' })
+      commit('initial 0.0.1')
+
+      writeFileSync(join(root, 'other.txt'), 'unrelated\n')
+      commit('unrelated change')
+
+      setPkg({ version: '0.0.2' })
+      const bumpSha = commit('chore(release): version roomote 0.0.2')
+
+      setPkg({ version: '0.0.2', dependencies: { left: '1.0.0' } })
+      commit('dep change keeps version')
+
+      writeFileSync(join(root, 'other.txt'), 'rider feature\n')
+      commit('rider feature after the bump')
+
+      // The bump commit, not the tip or the later package.json touch.
+      assert.equal(findVersionCommit({ cwd: root, version: '0.0.2' }), bumpSha)
+      // A superseded version is no longer contiguous from the tip.
+      assert.equal(findVersionCommit({ cwd: root, version: '0.0.1' }), null)
+      // Unknown versions resolve to nothing.
+      assert.equal(findVersionCommit({ cwd: root, version: '9.9.9' }), null)
+    } finally {
+      rmSync(root, { recursive: true, force: true })
+    }
   })
 })
