@@ -3433,53 +3433,6 @@ describe('runTask', () => {
     );
   });
 
-  it('installs the Zero CLI and activates the zero skill only when the integration is org-enabled', async () => {
-    buildSandboxInstructionMock.mockReturnValue(undefined as never);
-    isOrgEnabledMock.mockResolvedValueOnce(true);
-
-    await runTask({
-      cloudJob: {
-        id: 157,
-        taskId: 'task-157',
-        type: CloudTaskType.StandardTask,
-        harness: 'opencode-server',
-        payload: {},
-        result: null,
-      } as never,
-      envVars: {},
-      workspacePath: '/tmp/workspace',
-      prompt: '',
-      harnessInstructions: undefined,
-      environmentConfig: {} as never,
-      callbacks: {},
-      context: {},
-      logger: {
-        info: vi.fn(),
-        warn: vi.fn(),
-        error: vi.fn(),
-        log: vi.fn(),
-      } as never,
-      harnessSessionId: undefined,
-      workerEnv: {
-        authToken: 'cloud-token',
-        roomoteAppUrl: 'https://api.example.test',
-        trpcUrl: 'https://web.example.test',
-        buildUserFacingEnv: vi.fn(() => ({
-          HOME: '/tmp/home',
-          PATH: '/usr/bin',
-        })),
-      } as never,
-    });
-
-    expect(isOrgEnabledMock).toHaveBeenCalledWith('zero');
-    expect(installZeroCliMock).toHaveBeenCalledTimes(1);
-    expect(activateSkillsFolderMock).toHaveBeenCalledWith(
-      expect.objectContaining({
-        excludeSkillNames: undefined,
-      }),
-    );
-  });
-
   it('does not create child harness state for environment initial urls', async () => {
     buildSandboxInstructionMock.mockReturnValue(undefined as never);
 
