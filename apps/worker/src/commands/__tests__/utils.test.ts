@@ -6,7 +6,7 @@ import {
   writeCommonEnvFile,
   isValidEnvVarName,
 } from '../utils/env-vars';
-import type { CloudJob } from '@roomote/sdk/client';
+import type { Run } from '@roomote/sdk/client';
 
 vi.mock('fs', () => ({
   existsSync: vi.fn(),
@@ -105,7 +105,7 @@ describe('injectEnvVars', () => {
     const cloudJob = {
       authBypassValue: 'cloud-job-bypass-value',
       authBypassHeaderName: 'x-cloud-job-bypass',
-    } as CloudJob;
+    } as Run;
 
     process.env.ROOMOTE_AUTH_BYPASS_VALUE = 'runtime-bypass-value';
     process.env.ROOMOTE_AUTH_BYPASS_HEADER_NAME = 'x-runtime-bypass';
@@ -121,7 +121,7 @@ describe('injectEnvVars', () => {
     const cloudJob = {
       authBypassValue: 'bypass-value',
       authBypassHeaderName: 'x-bypass-roomote-auth',
-    } as CloudJob;
+    } as Run;
 
     await injectEnvVars(envVars, cloudJob);
 
@@ -158,7 +158,7 @@ describe('injectEnvVars', () => {
       proxyPorts: {
         WEB: 4321,
       },
-    } as unknown as CloudJob;
+    } as unknown as Run;
 
     await injectEnvVars(envVars, cloudJob, {
       previewProxyBaseUrl: 'https://preview.newmote.run',

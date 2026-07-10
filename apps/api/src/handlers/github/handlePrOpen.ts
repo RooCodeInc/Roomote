@@ -1,13 +1,13 @@
 import pMap from 'p-map';
 
 import {
-  type CloudTaskPayload,
+  type TaskPayload,
   DEFAULT_PR_REVIEWER_SETTINGS,
   type PrReviewerSettings,
   TaskPayloadKind,
   CloudAgentType,
 } from '@roomote/types';
-import { enqueueCloudTask } from '@roomote/cloud-agents/server';
+import { enqueueTask } from '@roomote/cloud-agents/server';
 
 import type { WebhookResponse } from '../../types';
 
@@ -73,7 +73,7 @@ export async function handlePrOpen(
   }
 
   console.log(
-    `[handlePrOpen] ${repository.full_name}#${pr.number} -> enqueueCloudTask (background_review_task: true)`,
+    `[handlePrOpen] ${repository.full_name}#${pr.number} -> enqueueTask (background_review_task: true)`,
   );
 
   const enqueued = await pMap(targets, async (target) => {
@@ -85,7 +85,7 @@ export async function handlePrOpen(
       reviewerSettings: target.settings,
     });
 
-    return enqueueCloudTask({
+    return enqueueTask({
       task: {
         type: TaskPayloadKind.GithubPrReview,
         ...getBackgroundGithubTaskProperties(target.properties),
@@ -97,7 +97,7 @@ export async function handlePrOpen(
           headSha: pr.head.sha,
           branchName: pr.head.ref,
           ...relayPayload,
-        } satisfies CloudTaskPayload<typeof TaskPayloadKind.GithubPrReview>,
+        } satisfies TaskPayload<typeof TaskPayloadKind.GithubPrReview>,
       },
       initiator: {
         kind: 'automation',

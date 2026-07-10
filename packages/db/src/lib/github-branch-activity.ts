@@ -1,13 +1,13 @@
 import { and, desc, eq, inArray, isNull, ne, sql } from 'drizzle-orm';
 
 import {
-  type CloudTaskPayload,
-  bootingCloudTaskStatuses,
-  CloudTaskStatus,
+  type TaskPayload,
+  bootingRunStatuses,
+  RunStatus,
   TaskPayloadKind,
-  isActivelyRunningCloudTask,
-  isExitedCloudTaskStatus,
-  isResumableCloudTaskType,
+  isActivelyRunningTask,
+  isExitedRunStatus,
+  isResumableTaskPayloadKind,
   type SourceControlProvider,
 } from '@roomote/types';
 
@@ -20,7 +20,7 @@ export interface ActiveGitHubBranchWork {
   jobId: number;
   taskId: string;
   type: TaskPayloadKind;
-  status: CloudTaskStatus;
+  status: RunStatus;
   taskPhase: string | null;
   match: 'task_pull_request' | 'branch';
 }
@@ -30,8 +30,8 @@ export interface ReusableGitHubPrFollowUpOwner extends ActiveGitHubBranchWork {
 }
 
 const ACTIVE_WORK_STATUSES = [
-  ...bootingCloudTaskStatuses,
-  CloudTaskStatus.Running,
+  ...bootingRunStatuses,
+  RunStatus.Running,
 ] as const;
 
 const ACTIVE_WORK_COLUMNS = {
@@ -66,9 +66,9 @@ type ActiveFollowUpOwnerCandidate = {
   id: number;
   taskId: string;
   type: TaskPayloadKind;
-  status: CloudTaskStatus;
+  status: RunStatus;
   taskPhase: string | null;
-  payload: CloudTaskPayload;
+  payload: TaskPayload;
   snapshotId: string | null;
   sourceRunId: number | null;
 };
@@ -76,7 +76,7 @@ type ActiveFollowUpOwnerCandidate = {
 type RunReuseMetadata = {
   id: number;
   type: TaskPayloadKind;
-  payload: CloudTaskPayload;
+  payload: TaskPayload;
   snapshotId: string | null;
   sourceRunId: number | null;
 };
@@ -86,13 +86,13 @@ function pickActiveWork(
     jobId: number;
     taskId: string;
     type: TaskPayloadKind;
-    status: CloudTaskStatus;
+    status: RunStatus;
     taskPhase: string | null;
   }>,
   match: ActiveGitHubBranchWork['match'],
 ): ActiveGitHubBranchWork | null {
   const activeRow = rows.find((row) =>
-    isActivelyRunningCloudTask(row.status, row.taskPhase),
+    isActivelyRunningTask(row.status, row.taskPhase),
   );
 
   if (!activeRow) {
@@ -411,7 +411,7 @@ async function pickReusableFollowUpOwner(
       continue;
     }
 
-    if (!isExitedCloudTaskStatus(latestJob.status)) {
+    if (!isExitedRunStatus(latestJob.status)) {
       return {
         jobId: latestJob.id,
         taskId: latestJob.taskId,
@@ -425,8 +425,8 @@ async function pickReusableFollowUpOwner(
 
     if (
       latestJob.snapshotId &&
-      isResumableCloudTaskType(latestJob.type) &&
-      !isActivelyRunningCloudTask(latestJob.status, latestJob.taskPhase)
+      isResumableTaskPayloadKind(latestJob.type) &&
+      !isActivelyRunningTask(latestJob.status, latestJob.taskPhase)
     ) {
       return {
         jobId: latestJob.id,

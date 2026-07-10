@@ -1,15 +1,15 @@
 import {
   CONTROL_PLANE_ENV_VAR_NAMES,
-  CloudTaskStatus,
+  RunStatus,
   buildSourceControlTokenMetadata,
   getSourceControlProviderLabel,
-  resolveCloudTaskWorkspace,
+  resolveTaskWorkspace,
   resolveSourceControlProviderFromPayload,
   type SourceControlProvider,
   type SourceControlTokenMetadata,
 } from '@roomote/types';
 import {
-  type CloudJob,
+  type Run,
   db,
   taskRuns,
   tasks,
@@ -108,9 +108,9 @@ export function redactSourceControlProviderEnvVars(
  */
 export function claimJobById(cloudJobId: number) {
   return sql`
-    UPDATE task_runs SET status = ${CloudTaskStatus.Processing} WHERE id = (
+    UPDATE task_runs SET status = ${RunStatus.Processing} WHERE id = (
       SELECT id FROM task_runs
-      WHERE id = ${cloudJobId} AND status = ${CloudTaskStatus.Dequeued}
+      WHERE id = ${cloudJobId} AND status = ${RunStatus.Dequeued}
       FOR UPDATE SKIP LOCKED
     )
     RETURNING id
@@ -204,7 +204,7 @@ async function loadPersistedDeploymentEnvVarsFromDb(): Promise<
  * Cancels a cloud job with an error message and releases its cloud task lock.
  */
 export async function cancelAndReleaseCloudJob(
-  cloudJob: CloudJob,
+  cloudJob: Run,
   errorMessage: string,
   logPrefix: string,
 ): Promise<void> {
@@ -214,13 +214,13 @@ export async function cancelAndReleaseCloudJob(
     await tx
       .update(taskRuns)
       .set({
-        status: CloudTaskStatus.Canceled,
+        status: RunStatus.Canceled,
         canceledAt: endedAt,
         error: errorMessage,
       })
       .where(eq(taskRuns.id, cloudJob.id));
 
-    // Derive the owning task's state from all its runs. finishCloudJob never
+    // Derive the owning task's state from all its runs. finishRun never
     // runs for runs canceled before/at dequeue, so without this sync the task
     // would stay 'active' forever. The shared helper deprioritizes this
     // never-started cancel, so an earlier completed sibling still wins.
@@ -260,7 +260,7 @@ export type SourceControlRuntimeToken = SourceControlTokenMetadata & {
  * when the workspace repositories are unknown or span providers.
  */
 async function resolveJobSourceControlProvider(
-  cloudJob: Pick<CloudJob, 'payload'>,
+  cloudJob: Pick<Run, 'payload'>,
 ): Promise<SourceControlProvider> {
   const payload = cloudJob.payload as { sourceControlProvider?: unknown };
 
@@ -276,7 +276,7 @@ async function resolveJobSourceControlProvider(
   // shared resolver (covers every workspace shape). It returns undefined when
   // the provider is ambiguous or unknown, in which case fall back to the
   // GitHub default that resolveSourceControlProviderFromPayload applies.
-  const workspace = resolveCloudTaskWorkspace(cloudJob.payload);
+  const workspace = resolveTaskWorkspace(cloudJob.payload);
   const resolvedProvider = await resolveWorkspaceSourceControlProvider(
     db,
     workspace,
@@ -290,7 +290,7 @@ async function resolveJobSourceControlProvider(
 }
 
 async function createProviderToken(
-  cloudJob: CloudJob,
+  cloudJob: Run,
 ): Promise<SourceControlRuntimeToken> {
   const provider = await resolveJobSourceControlProvider(cloudJob);
 
@@ -365,7 +365,7 @@ async function createProviderToken(
  * Returns null if all attempts fail (caller should handle the error).
  */
 export async function createSourceControlTokenForJob(
-  cloudJob: CloudJob,
+  cloudJob: Run,
   logPrefix: string,
   {
     maxRetries = SOURCE_CONTROL_TOKEN_MAX_RETRIES,
@@ -407,7 +407,7 @@ export async function cancelCloudJob(
   error: string,
   options?: {
     bootstrapFailureReason?: string;
-    existingArtifacts?: CloudJob['artifacts'];
+    existingArtifacts?: Run['artifacts'];
   },
 ): Promise<void> {
   const artifacts = options?.bootstrapFailureReason
@@ -421,7 +421,7 @@ export async function cancelCloudJob(
   await tx
     .update(taskRuns)
     .set({
-      status: CloudTaskStatus.Canceled,
+      status: RunStatus.Canceled,
       canceledAt: endedAt,
       error,
       ...(artifacts ? { artifacts } : {}),
@@ -429,7 +429,7 @@ export async function cancelCloudJob(
     .where(eq(taskRuns.id, cloudJobId));
 
   // Derive the owning task's state from all its runs. This runs on the dequeue
-  // path (invalid job, bootstrap failure) where finishCloudJob never executes,
+  // path (invalid job, bootstrap failure) where finishRun never executes,
   // so the task must be resolved here or it stays 'active' forever. The caller
   // only has the run id, so resolve the task via the run row, then sync.
   const [runRow] = await tx
@@ -457,9 +457,9 @@ export function reportBootstrapFailure({
   cloudJob,
   logPrefix,
 }: {
-  callback?: (error: Error, cloudJob: CloudJob) => void;
+  callback?: (error: Error, cloudJob: Run) => void;
   error: Error;
-  cloudJob: CloudJob;
+  cloudJob: Run;
   logPrefix: string;
 }): void {
   try {
@@ -477,7 +477,7 @@ export function reportBootstrapFailure({
 
 export async function resolveGitAuthor(
   tx: DbTx,
-  cloudJob: Pick<CloudJob, 'id' | 'taskId'>,
+  cloudJob: Pick<Run, 'id' | 'taskId'>,
 ): Promise<GitAuthor> {
   const task = await tx.query.tasks.findFirst({
     where: eq(tasks.id, cloudJob.taskId),

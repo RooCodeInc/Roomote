@@ -1,4 +1,4 @@
-import { CloudTaskStatus, TaskPayloadKind } from '@roomote/types';
+import { RunStatus, TaskPayloadKind } from '@roomote/types';
 
 import type { CloudJobDetail } from '@/lib/server';
 import { getCloudJobVisiblePrompt } from '@/lib';
@@ -22,7 +22,7 @@ function createCloudJobDetail(
     actingUserId: null,
     payloadKind: TaskPayloadKind.StandardTask,
     payload: { repo: 'owner/repo', description: 'Test task' },
-    status: CloudTaskStatus.Pending,
+    status: RunStatus.Pending,
     taskPhase: null,
     error: null,
     prompt: null,
@@ -60,7 +60,7 @@ function createCloudJobDetail(
 describe('getSessionState', () => {
   it('treats canceled jobs with an early boot error as boot-failed', () => {
     const cloudJob = createCloudJobDetail({
-      status: CloudTaskStatus.Canceled,
+      status: RunStatus.Canceled,
       error:
         'OpenAI admin request failed (401): {"error":{"message":"Incorrect API key provided.","code":"invalid_api_key"}}',
     });
@@ -75,7 +75,7 @@ describe('getSessionState', () => {
 
   it('keeps ordinary canceled jobs in historical mode', () => {
     const cloudJob = createCloudJobDetail({
-      status: CloudTaskStatus.Canceled,
+      status: RunStatus.Canceled,
       error: null,
     });
 
@@ -89,7 +89,7 @@ describe('getSessionState', () => {
 
   it('treats canceled jobs with result.error as boot-failed before any messages exist', () => {
     const cloudJob = createCloudJobDetail({
-      status: CloudTaskStatus.Canceled,
+      status: RunStatus.Canceled,
       error: null,
       result: {
         error:
@@ -107,7 +107,7 @@ describe('getSessionState', () => {
 
   it('keeps running jobs in startup until the harness emits a first message', () => {
     const cloudJob = createCloudJobDetail({
-      status: CloudTaskStatus.Running,
+      status: RunStatus.Running,
     });
 
     expect(
@@ -127,7 +127,7 @@ describe('getSessionState', () => {
 
   it('keeps snapshot resumes in resuming mode until a first harness message', () => {
     const cloudJob = createCloudJobDetail({
-      status: CloudTaskStatus.Running,
+      status: RunStatus.Running,
       payloadKind: TaskPayloadKind.SnapshotResume,
     });
 
@@ -149,7 +149,7 @@ describe('getSessionState', () => {
   it('falls through to interactive after 7s without harness messages', () => {
     const startedAt = new Date('2025-01-01T00:00:00Z');
     const cloudJob = createCloudJobDetail({
-      status: CloudTaskStatus.Running,
+      status: RunStatus.Running,
       startedAt,
     });
 
@@ -175,7 +175,7 @@ describe('getSessionState', () => {
   it('falls through to interactive after 7s for snapshot resumes without harness messages', () => {
     const startedAt = new Date('2025-01-01T00:00:00Z');
     const cloudJob = createCloudJobDetail({
-      status: CloudTaskStatus.Running,
+      status: RunStatus.Running,
       payloadKind: TaskPayloadKind.SnapshotResume,
       startedAt,
     });
@@ -220,7 +220,7 @@ describe('isWaitingForFirstHarnessMessage', () => {
   it('returns false once session state is interactive even if no harness message exists', () => {
     const startedAt = new Date('2025-01-01T00:00:00Z');
     const cloudJob = createCloudJobDetail({
-      status: CloudTaskStatus.Running,
+      status: RunStatus.Running,
       startedAt,
     });
 
@@ -253,7 +253,7 @@ describe('shouldPollForFirstHarnessMessage', () => {
     expect(
       shouldPollForFirstHarnessMessage({
         sessionState: 'interactive',
-        cloudJobStatus: CloudTaskStatus.Running,
+        cloudJobStatus: RunStatus.Running,
         hasHarnessMessages: false,
         hasInitialPrompt: true,
       }),
@@ -264,7 +264,7 @@ describe('shouldPollForFirstHarnessMessage', () => {
     expect(
       shouldPollForFirstHarnessMessage({
         sessionState: 'interactive',
-        cloudJobStatus: CloudTaskStatus.Running,
+        cloudJobStatus: RunStatus.Running,
         hasHarnessMessages: false,
         hasInitialPrompt: false,
       }),
@@ -275,7 +275,7 @@ describe('shouldPollForFirstHarnessMessage', () => {
     expect(
       shouldPollForFirstHarnessMessage({
         sessionState: 'interactive',
-        cloudJobStatus: CloudTaskStatus.Running,
+        cloudJobStatus: RunStatus.Running,
         hasHarnessMessages: true,
         hasInitialPrompt: true,
       }),
@@ -284,7 +284,7 @@ describe('shouldPollForFirstHarnessMessage', () => {
     expect(
       shouldPollForFirstHarnessMessage({
         sessionState: 'historical',
-        cloudJobStatus: CloudTaskStatus.Completed,
+        cloudJobStatus: RunStatus.Completed,
         hasHarnessMessages: false,
         hasInitialPrompt: true,
       }),

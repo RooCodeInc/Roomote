@@ -5,17 +5,17 @@ import { z } from 'zod';
 import {
   type AuthorshipRuleActor,
   type BackgroundAutomationKey,
-  type CloudTask,
+  type TaskSpec,
   type CodingHarness,
   type SnapshotResumeTask,
-  type CloudTaskLaunchClass,
+  type RunLaunchClass,
   type SourceControlProvider,
   type TaskInitiator,
   type TaskSurface,
   type TaskTrigger,
   type TaskVisibility,
   type TaskWorkflow,
-  CloudTaskStatus,
+  RunStatus,
   TaskPayloadKind,
   DEFAULT_DELEGATED_KEEPALIVE_MS,
   DEFAULT_KEEPALIVE_MS,
@@ -25,13 +25,13 @@ import {
   isConfiguredEnvValue,
   normalizeDeploymentModelConfig,
   resolveCloudTaskRuntimePolicy,
-  resolveCloudTaskWorkspace,
+  resolveTaskWorkspace,
   resolveComputeProviderTarget,
   TASK_TIMEOUT_MS,
 } from '@roomote/types';
 import { Env } from '@roomote/env';
 import {
-  type CloudJob,
+  type Run,
   type DatabaseTransaction,
   db,
   deploymentSettings,
@@ -96,7 +96,7 @@ function getErrorMessage(error: unknown, fallback: string): string {
 }
 
 async function cancelCloudJobBeforeQueue(
-  cloudJob: CloudJob,
+  cloudJob: Run,
   message: string,
   failureContext: string,
 ): Promise<void> {
@@ -107,20 +107,20 @@ async function cancelCloudJobBeforeQueue(
       await tx
         .update(taskRuns)
         .set({
-          status: CloudTaskStatus.Canceled,
+          status: RunStatus.Canceled,
           canceledAt: endedAt,
           error: message,
         })
         .where(eq(taskRuns.id, cloudJob.id));
 
       // Derive the task state from all its runs. Enqueue-failure cancels
-      // bypass finishCloudJob entirely, so without this sync the task stays
+      // bypass finishRun entirely, so without this sync the task stays
       // 'active' forever. The shared @roomote/db helper keeps siblings honest.
       await syncTaskStateFromRuns(tx, cloudJob.taskId);
     });
   } catch (cancelError) {
     console.warn(
-      `[enqueueCloudTask] Failed to cancel run ${cloudJob.id} after ${failureContext}: ${getErrorMessage(
+      `[enqueueTask] Failed to cancel run ${cloudJob.id} after ${failureContext}: ${getErrorMessage(
         cancelError,
         'Unknown cancellation error',
       )}`,
@@ -204,7 +204,7 @@ function resolveCodeReviewModelId(
 }
 
 async function resolveRequestedHarness(
-  task: CloudTask,
+  task: TaskSpec,
 ): Promise<ResolvedHarnessSelection> {
   const deployment = await db.query.deploymentSettings.findFirst({
     where: eq(deploymentSettings.id, DEFAULT_DEPLOYMENT_ID),
@@ -226,7 +226,7 @@ async function resolveRequestedHarness(
   };
 }
 
-function getInitialTaskPrompt(task: CloudTask): string | undefined {
+function getInitialTaskPrompt(task: TaskSpec): string | undefined {
   switch (task.type) {
     case TaskPayloadKind.StandardTask:
     case TaskPayloadKind.Scan:
@@ -246,7 +246,7 @@ function getInitialTaskPrompt(task: CloudTask): string | undefined {
 }
 
 function getRequestedWorkKindBootstrapSkill(
-  task: CloudTask,
+  task: TaskSpec,
 ): 'explain-repo-code' | 'plan-repo-implementation' | undefined {
   if (task.type !== TaskPayloadKind.StandardTask) {
     return undefined;
@@ -301,7 +301,7 @@ export class CloudJobQueue {
               const [canceledRun] = await tx
                 .update(taskRuns)
                 .set({
-                  status: CloudTaskStatus.Canceled,
+                  status: RunStatus.Canceled,
                   canceledAt: endedAt,
                   error: 'Superseded by a newer cloud job.',
                 })
@@ -309,8 +309,8 @@ export class CloudJobQueue {
                   and(
                     eq(taskRuns.id, otherEntry.id),
                     inArray(taskRuns.status, [
-                      CloudTaskStatus.Pending,
-                      CloudTaskStatus.Dequeued,
+                      RunStatus.Pending,
+                      RunStatus.Dequeued,
                     ]),
                   ),
                 )
@@ -645,14 +645,14 @@ export async function findEnvironmentForRepo(
   return matches[0]!.id;
 }
 
-export interface EnqueueCloudTaskOptions {
+export interface EnqueueTaskOptions {
   /**
    * Optional explicit launch-class override used to resolve runtime keepalive
    * policy. When omitted, automation-initiated launches derive the
    * 'automation' class from the initiator and everything else falls back to
    * the payload-kind inference.
    */
-  launchClass?: CloudTaskLaunchClass;
+  launchClass?: RunLaunchClass;
   /**
    * Leave `actingUserId` unset until a real follow-up sender can be resolved
    * (Slack channel auto-start path).
@@ -668,7 +668,7 @@ export interface EnqueueCloudTaskOptions {
    * Initial persisted status for the new run. Defaults to `pending`, matching
    * normal queue-driven launches.
    */
-  initialStatus?: CloudTaskStatus.Pending | CloudTaskStatus.Dequeued;
+  initialStatus?: RunStatus.Pending | RunStatus.Dequeued;
   /**
    * Avoid best-effort LLM title generation for short-lived synthetic jobs.
    */
@@ -679,13 +679,13 @@ export interface EnqueueCloudTaskOptions {
    */
   afterCreateInTransaction?: (
     tx: DatabaseTransaction,
-    cloudJob: CloudJob,
+    cloudJob: Run,
   ) => Promise<void>;
   /**
    * Runs after the run row is created but before it is pushed onto the
    * controller queue. If this throws, the run is canceled and never queued.
    */
-  beforeEnqueue?: (cloudJob: CloudJob) => Promise<void>;
+  beforeEnqueue?: (cloudJob: Run) => Promise<void>;
 }
 
 /**
@@ -722,7 +722,7 @@ export type TaskPrLinkage = {
 };
 
 type FreshCloudTask = Exclude<
-  CloudTask,
+  TaskSpec,
   { type: typeof TaskPayloadKind.SnapshotResume }
 >;
 
@@ -761,9 +761,7 @@ export type ResumeCloudTaskLaunch = {
   prLinkage?: never;
 };
 
-export type EnqueueCloudTaskInput =
-  | FreshCloudTaskLaunch
-  | ResumeCloudTaskLaunch;
+export type EnqueueTaskInput = FreshCloudTaskLaunch | ResumeCloudTaskLaunch;
 
 const PR_LINKAGE_REQUIRED_WORKFLOWS: ReadonlySet<TaskWorkflow> = new Set([
   'pr_review',
@@ -796,7 +794,7 @@ export function resolveQueueScope(params: {
   return randomUUID();
 }
 
-function getRunLockScope(cloudJob: CloudJob): string {
+function getRunLockScope(cloudJob: Run): string {
   if (PR_SCOPED_PAYLOAD_KINDS.has(cloudJob.payloadKind)) {
     const payload = cloudJob.payload as { repo?: string; prNumber?: number };
 
@@ -885,7 +883,7 @@ type EnvironmentContext = {
  * paths. Mutates `task.payload.port` like the launch flow always has.
  */
 async function resolveEnvironmentContext(
-  task: CloudTask,
+  task: TaskSpec,
 ): Promise<EnvironmentContext> {
   let initialPaths: Record<string, string> | undefined;
 
@@ -926,9 +924,9 @@ async function resolveEnvironmentContext(
 }
 
 async function pushRunOntoQueue(params: {
-  cloudJob: CloudJob;
+  cloudJob: Run;
   scope: string;
-  options: EnqueueCloudTaskOptions;
+  options: EnqueueTaskOptions;
 }): Promise<void> {
   const { cloudJob, scope, options } = params;
 
@@ -988,7 +986,7 @@ async function pushRunOntoQueue(params: {
 
       if (
         !persistedRun ||
-        persistedRun.status === CloudTaskStatus.Canceled ||
+        persistedRun.status === RunStatus.Canceled ||
         persistedRun.canceledAt !== null ||
         persistedRun.completedAt !== null
       ) {
@@ -1004,7 +1002,7 @@ async function pushRunOntoQueue(params: {
     });
   } catch (loggingError) {
     console.warn(
-      `[enqueueCloudTask] Failed to record task-start parallel count for run ${cloudJob.id}: ${
+      `[enqueueTask] Failed to record task-start parallel count for run ${cloudJob.id}: ${
         loggingError instanceof Error
           ? loggingError.message
           : String(loggingError)
@@ -1013,10 +1011,10 @@ async function pushRunOntoQueue(params: {
   }
 }
 
-export async function enqueueCloudTask(
-  input: EnqueueCloudTaskInput,
-  options: EnqueueCloudTaskOptions = {},
-): Promise<CloudJob> {
+export async function enqueueTask(
+  input: EnqueueTaskInput,
+  options: EnqueueTaskOptions = {},
+): Promise<Run> {
   await assertDeploymentIsActive();
 
   if (input.task.type === TaskPayloadKind.SnapshotResume) {
@@ -1028,8 +1026,8 @@ export async function enqueueCloudTask(
 
 async function enqueueFreshLaunch(
   input: FreshCloudTaskLaunch,
-  options: EnqueueCloudTaskOptions,
-): Promise<CloudJob> {
+  options: EnqueueTaskOptions,
+): Promise<Run> {
   const { task, initiator, workflow, surface, trigger } = input;
   const visibility: TaskVisibility = input.visibility ?? 'visible';
   const linkedUserId = getInitiatorLinkedUserId(initiator);
@@ -1050,7 +1048,7 @@ async function enqueueFreshLaunch(
     TaskPayloadKind.GithubPrReviewSync,
     TaskPayloadKind.GithubPrReviewFollowUp,
   ]);
-  const workspace = resolveCloudTaskWorkspace(task.payload);
+  const workspace = resolveTaskWorkspace(task.payload);
 
   // Stamp the source-control provider once at launch when the caller omitted
   // it. Downstream consumers (token minting, worker repository resolution)
@@ -1087,7 +1085,7 @@ async function enqueueFreshLaunch(
       task.payload.environmentId = envId;
 
       console.log(
-        `[enqueueCloudTask] Auto-resolved environment ${envId} for ${workspace.repo}`,
+        `[enqueueTask] Auto-resolved environment ${envId} for ${workspace.repo}`,
       );
     }
   }
@@ -1238,8 +1236,8 @@ async function enqueueFreshLaunch(
         kind: 'fresh',
         payloadKind: taskWithHarnessOverrides.type,
         actingUserId: options.skipInitialActingUser ? null : linkedUserId,
-        status: options.initialStatus ?? CloudTaskStatus.Pending,
-        ...(options.initialStatus === CloudTaskStatus.Dequeued
+        status: options.initialStatus ?? RunStatus.Pending,
+        ...(options.initialStatus === RunStatus.Dequeued
           ? { dequeuedAt: new Date() }
           : {}),
         harness: targetHarness,
@@ -1325,7 +1323,7 @@ async function enqueueFreshLaunch(
           );
       } catch (error) {
         console.warn(
-          `[enqueueCloudTask] Failed to generate early LLM title for task ${cloudJob.taskId}: ${
+          `[enqueueTask] Failed to generate early LLM title for task ${cloudJob.taskId}: ${
             error instanceof Error ? error.message : String(error)
           }`,
         );
@@ -1338,8 +1336,8 @@ async function enqueueFreshLaunch(
 
 async function enqueueSnapshotResume(
   input: ResumeCloudTaskLaunch,
-  options: EnqueueCloudTaskOptions,
-): Promise<CloudJob> {
+  options: EnqueueTaskOptions,
+): Promise<Run> {
   const { task } = input;
   const actingUserId = options.skipInitialActingUser
     ? null
@@ -1397,7 +1395,7 @@ async function enqueueSnapshotResume(
 
   if (task.harness && sourceJobHarness !== task.harness) {
     console.warn(
-      `[enqueueCloudTask] SnapshotResume harness override: requested=${task.harness}, source=${sourceJobHarness}`,
+      `[enqueueTask] SnapshotResume harness override: requested=${task.harness}, source=${sourceJobHarness}`,
     );
   }
 
@@ -1407,7 +1405,7 @@ async function enqueueSnapshotResume(
     sourceJobVendor !== task.computeProvider
   ) {
     console.warn(
-      `[enqueueCloudTask] SnapshotResume computeProvider override: requested=${task.computeProvider}, source=${sourceJobVendor}`,
+      `[enqueueTask] SnapshotResume computeProvider override: requested=${task.computeProvider}, source=${sourceJobVendor}`,
     );
   }
 
@@ -1440,7 +1438,7 @@ async function enqueueSnapshotResume(
     sandboxTimeoutMs: TASK_TIMEOUT_MS,
   });
 
-  let cloudJob: CloudJob;
+  let cloudJob: Run;
 
   try {
     cloudJob = await db.transaction(async (tx) => {
@@ -1452,8 +1450,8 @@ async function enqueueSnapshotResume(
           sourceRunId: sourceRun.id,
           payloadKind: TaskPayloadKind.SnapshotResume,
           actingUserId,
-          status: options.initialStatus ?? CloudTaskStatus.Pending,
-          ...(options.initialStatus === CloudTaskStatus.Dequeued
+          status: options.initialStatus ?? RunStatus.Pending,
+          ...(options.initialStatus === RunStatus.Dequeued
             ? { dequeuedAt: new Date() }
             : {}),
           harness: targetHarness,
@@ -1549,7 +1547,7 @@ async function recordSnapshotResumeRequestEvent(input: {
     });
   } catch (error) {
     console.warn(
-      `[enqueueCloudTask] Failed to persist snapshot resume event for source run #${input.runId}: ${
+      `[enqueueTask] Failed to persist snapshot resume event for source run #${input.runId}: ${
         error instanceof Error ? error.message : String(error)
       }`,
     );
@@ -1561,14 +1559,14 @@ export async function dequeueCloudTask(): Promise<number | null> {
   return entry ? entry.id : null;
 }
 
-export function releaseCloudTask(cloudJob: CloudJob): Promise<boolean> {
+export function releaseCloudTask(cloudJob: Run): Promise<boolean> {
   return CloudJobQueue.getInstance().releaseLock(getRunLockScope(cloudJob));
 }
 
-export async function isLockedCloudTask(cloudJob: CloudJob): Promise<boolean> {
+export async function isLockedCloudTask(cloudJob: Run): Promise<boolean> {
   return CloudJobQueue.getInstance().isLocked(getRunLockScope(cloudJob));
 }
 
-export async function getCloudTaskLockTTL(cloudJob: CloudJob): Promise<number> {
+export async function getCloudTaskLockTTL(cloudJob: Run): Promise<number> {
   return CloudJobQueue.getInstance().getLockTTL(getRunLockScope(cloudJob));
 }

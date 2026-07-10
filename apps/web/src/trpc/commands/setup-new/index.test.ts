@@ -53,7 +53,7 @@ vi.mock('@roomote/gitea', () => ({
 }));
 
 vi.mock('@roomote/cloud-agents/server', () => ({
-  enqueueCloudTask: vi.fn(),
+  enqueueTask: vi.fn(),
 }));
 
 vi.mock('@roomote/slack', () => ({
@@ -180,7 +180,7 @@ import {
   startSetupNewOnboardingTaskCommand,
 } from './index';
 import { TaskPayloadKind } from '@roomote/types';
-import { enqueueCloudTask } from '@roomote/cloud-agents/server';
+import { enqueueTask } from '@roomote/cloud-agents/server';
 import { TelegramCommunicationProvider } from '@roomote/communication/telegram-provider';
 import { resolveTelegramRuntimeCredentials } from '@roomote/db/server';
 import {
@@ -989,10 +989,10 @@ describe('setup-new onboarding task start command', () => {
     vi.mocked(
       createTeamsCommunicationProviderFromRuntimeCredentials,
     ).mockResolvedValue(null);
-    vi.mocked(enqueueCloudTask).mockResolvedValue({
+    vi.mocked(enqueueTask).mockResolvedValue({
       taskId: 'task-onboarding-1',
       id: 'cloud-job-1',
-    } as unknown as Awaited<ReturnType<typeof enqueueCloudTask>>);
+    } as unknown as Awaited<ReturnType<typeof enqueueTask>>);
   });
 
   it('launches a web onboarding task when no Slack workspace is connected', async () => {
@@ -1001,8 +1001,8 @@ describe('setup-new onboarding task start command', () => {
     const result = await startSetupNewOnboardingTaskCommand(buildMockAuth());
 
     expect(result.taskId).toBe('task-onboarding-1');
-    expect(enqueueCloudTask).toHaveBeenCalledTimes(1);
-    expect(enqueueCloudTask).toHaveBeenCalledWith(
+    expect(enqueueTask).toHaveBeenCalledTimes(1);
+    expect(enqueueTask).toHaveBeenCalledWith(
       expect.objectContaining({
         task: expect.objectContaining({
           type: TaskPayloadKind.StandardTask,
@@ -1061,7 +1061,7 @@ describe('setup-new onboarding task start command', () => {
       expect.objectContaining({ channelId: '8846357662' }),
     );
     expect(SlackNotifier).not.toHaveBeenCalled();
-    expect(enqueueCloudTask).toHaveBeenCalledWith(
+    expect(enqueueTask).toHaveBeenCalledWith(
       expect.objectContaining({
         task: expect.objectContaining({
           type: TaskPayloadKind.StandardTask,
@@ -1125,7 +1125,7 @@ describe('setup-new onboarding task start command', () => {
       }),
     );
     expect(SlackNotifier).not.toHaveBeenCalled();
-    expect(enqueueCloudTask).toHaveBeenCalledWith(
+    expect(enqueueTask).toHaveBeenCalledWith(
       expect.objectContaining({
         task: expect.objectContaining({
           type: TaskPayloadKind.StandardTask,
@@ -1176,9 +1176,9 @@ describe('setup-new onboarding task start command', () => {
       const result = await startSetupNewOnboardingTaskCommand(buildMockAuth());
 
       expect(result.taskId).toBe('task-onboarding-1');
-      expect(enqueueCloudTask).toHaveBeenCalledTimes(1);
+      expect(enqueueTask).toHaveBeenCalledTimes(1);
 
-      const enqueueInput = vi.mocked(enqueueCloudTask).mock.calls[0]?.[0];
+      const enqueueInput = vi.mocked(enqueueTask).mock.calls[0]?.[0];
       expect(enqueueInput?.task.payload).toBeDefined();
       expect(enqueueInput?.task.payload).not.toHaveProperty(
         'communicationProvider',
@@ -1230,9 +1230,9 @@ describe('setup-new onboarding task start command', () => {
 
       expect(result.taskId).toBe('task-onboarding-1');
       expect(teamsPostMessage).toHaveBeenCalled();
-      expect(enqueueCloudTask).toHaveBeenCalledTimes(1);
+      expect(enqueueTask).toHaveBeenCalledTimes(1);
 
-      const enqueueInput = vi.mocked(enqueueCloudTask).mock.calls[0]?.[0];
+      const enqueueInput = vi.mocked(enqueueTask).mock.calls[0]?.[0];
       expect(enqueueInput?.task.payload).toBeDefined();
       expect(enqueueInput?.task.payload).not.toHaveProperty(
         'communicationProvider',
@@ -1291,7 +1291,7 @@ describe('setup-new onboarding task start command', () => {
         expect.stringContaining('returned no message id'),
       );
 
-      const enqueueInput = vi.mocked(enqueueCloudTask).mock.calls[0]?.[0];
+      const enqueueInput = vi.mocked(enqueueTask).mock.calls[0]?.[0];
       expect(enqueueInput?.task.payload).toBeDefined();
       expect(enqueueInput?.task.payload).not.toHaveProperty(
         'communicationProvider',
@@ -1319,7 +1319,7 @@ describe('setup-new onboarding task start command', () => {
 
     await startSetupNewOnboardingTaskCommand(buildMockAuth());
 
-    expect(enqueueCloudTask).toHaveBeenCalledWith(
+    expect(enqueueTask).toHaveBeenCalledWith(
       expect.objectContaining({
         task: expect.objectContaining({
           harness: 'opencode-server',
@@ -1348,7 +1348,7 @@ describe('setup-new onboarding task start command', () => {
 
     expect(result.taskId).toBe('task-onboarding-1');
     expect(SlackNotifier).not.toHaveBeenCalled();
-    expect(enqueueCloudTask).toHaveBeenCalledWith(
+    expect(enqueueTask).toHaveBeenCalledWith(
       expect.objectContaining({
         task: expect.objectContaining({
           type: TaskPayloadKind.StandardTask,
@@ -1381,7 +1381,7 @@ describe('setup-new onboarding task start command', () => {
 
     expect(result.taskId).toBe('task-onboarding-1');
     expect(openConversationMock).toHaveBeenCalledWith('U1');
-    expect(enqueueCloudTask).toHaveBeenCalledWith(
+    expect(enqueueTask).toHaveBeenCalledWith(
       expect.objectContaining({
         task: expect.objectContaining({
           type: TaskPayloadKind.SlackAppMention,

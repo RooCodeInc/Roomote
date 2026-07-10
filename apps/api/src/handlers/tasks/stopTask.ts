@@ -1,5 +1,5 @@
 import type { Context } from 'hono';
-import { isExitedCloudTaskStatus } from '@roomote/types';
+import { isExitedRunStatus } from '@roomote/types';
 
 import type { Variables } from '../../types';
 import type { McpAuth } from '../mcp/middleware';
@@ -37,7 +37,7 @@ export async function stopTask(
       return c.json({ success: false, error: 'Task not found' }, 404);
     }
 
-    if (isExitedCloudTaskStatus(job.status)) {
+    if (isExitedRunStatus(job.status)) {
       return c.json(
         {
           success: false,

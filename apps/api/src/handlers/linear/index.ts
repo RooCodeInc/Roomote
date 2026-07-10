@@ -4,7 +4,7 @@ import { Hono } from 'hono';
 
 import {
   AGENT_DISPLAY_NAME,
-  type CloudTaskPayload,
+  type TaskPayload,
   TaskPayloadKind,
   formatErrorForLog,
   parseAcpRequestUserInputAnswerReply,
@@ -17,7 +17,7 @@ import { Env } from '@roomote/env';
 import {
   type RoutingDebugInfo,
   type RoutingWorkspace,
-  enqueueCloudTask,
+  enqueueTask,
   routeTask,
   buildLinearRoutingContext,
 } from '@roomote/cloud-agents/server';
@@ -808,7 +808,7 @@ async function handleAgentSessionEvent(
           typeof completedPayload?.environmentId === 'string'
             ? completedPayload.environmentId
             : undefined;
-        const resumePayload: CloudTaskPayload<
+        const resumePayload: TaskPayload<
           typeof TaskPayloadKind.SnapshotResume
         > = {
           repo,
@@ -828,7 +828,7 @@ async function handleAgentSessionEvent(
 
         // Resumes never create tasks and never re-attribute; the resuming
         // human becomes the new run's acting user.
-        const resumeLaunch = await enqueueCloudTask(
+        const resumeLaunch = await enqueueTask(
           {
             task: {
               type: TaskPayloadKind.SnapshotResume,

@@ -6,7 +6,7 @@ import {
   userFactory,
 } from '../../server';
 import {
-  CloudTaskStatus,
+  RunStatus,
   TaskPayloadKind,
   type SourceControlProvider,
 } from '@roomote/types';
@@ -61,7 +61,7 @@ async function createPrLinkedTaskJob({
   prNumber,
   userId,
   payloadKind,
-  status = CloudTaskStatus.Pending,
+  status = RunStatus.Pending,
   taskPhase,
   prSha,
   sourceControlProvider,
@@ -70,7 +70,7 @@ async function createPrLinkedTaskJob({
   prNumber: number;
   userId: string;
   payloadKind: TaskPayloadKind;
-  status?: CloudTaskStatus;
+  status?: RunStatus;
   taskPhase?: string;
   prSha?: string;
   sourceControlProvider?: SourceControlProvider;
@@ -118,7 +118,7 @@ async function createSlackPrLinkedTaskJob({
     actingUserId: userId,
     taskId,
     payloadKind: TaskPayloadKind.SlackAppMention,
-    status: CloudTaskStatus.Pending,
+    status: RunStatus.Pending,
     payload: {
       repo: repoFullName,
       channel: 'C123',
@@ -148,7 +148,7 @@ async function createLinearPrLinkedTaskJob({
     actingUserId: userId,
     taskId,
     payloadKind: TaskPayloadKind.LinearAgentSession,
-    status: CloudTaskStatus.Pending,
+    status: RunStatus.Pending,
     payload: {
       repo: repoFullName,
       sessionId: 'linear-session-1',
@@ -178,7 +178,7 @@ async function createSnapshotResumeJob({
     taskId,
     payloadKind: TaskPayloadKind.SnapshotResume,
     kind: 'resume',
-    status: CloudTaskStatus.Running,
+    status: RunStatus.Running,
     taskPhase: 'running',
     sourceRunId,
     payload: {
@@ -214,7 +214,7 @@ describe('findActiveGitHubBranchWork', () => {
       prNumber,
       userId: user.id,
       payloadKind: TaskPayloadKind.GithubPrReview,
-      status: CloudTaskStatus.Running,
+      status: RunStatus.Running,
       taskPhase: 'running',
     });
 
@@ -228,7 +228,7 @@ describe('findActiveGitHubBranchWork', () => {
       jobId: job.id,
       taskId: job.taskId,
       type: TaskPayloadKind.GithubPrReview,
-      status: CloudTaskStatus.Running,
+      status: RunStatus.Running,
       taskPhase: 'running',
       match: 'task_pull_request',
     });
@@ -251,7 +251,7 @@ describe('findActiveGitHubBranchWork', () => {
       prNumber,
       userId: user.id,
       payloadKind: TaskPayloadKind.GithubPrReviewSync,
-      status: CloudTaskStatus.Running,
+      status: RunStatus.Running,
       taskPhase: 'running',
       prSha: 'def5678',
     });
@@ -266,7 +266,7 @@ describe('findActiveGitHubBranchWork', () => {
       jobId: newestJob.id,
       taskId: newestJob.taskId,
       type: TaskPayloadKind.GithubPrReviewSync,
-      status: CloudTaskStatus.Running,
+      status: RunStatus.Running,
       taskPhase: 'running',
       match: 'task_pull_request',
     });
@@ -281,7 +281,7 @@ describe('findActiveGitHubBranchWork', () => {
     const job = await runFactory.create({
       actingUserId: user.id,
       payloadKind: TaskPayloadKind.StandardTask,
-      status: CloudTaskStatus.Running,
+      status: RunStatus.Running,
       taskPhase: 'running',
       payload: {
         repo: repoFullName,
@@ -300,7 +300,7 @@ describe('findActiveGitHubBranchWork', () => {
       jobId: job.id,
       taskId: job.taskId,
       type: TaskPayloadKind.StandardTask,
-      status: CloudTaskStatus.Running,
+      status: RunStatus.Running,
       taskPhase: 'running',
       match: 'branch',
     });
@@ -315,7 +315,7 @@ describe('findActiveGitHubBranchWork', () => {
     await runFactory.create({
       actingUserId: user.id,
       payloadKind: TaskPayloadKind.StandardTask,
-      status: CloudTaskStatus.Running,
+      status: RunStatus.Running,
       taskPhase: 'waiting_for_prompt',
       payload: {
         repo: repoFullName,
@@ -327,7 +327,7 @@ describe('findActiveGitHubBranchWork', () => {
     await runFactory.create({
       actingUserId: user.id,
       payloadKind: TaskPayloadKind.StandardTask,
-      status: CloudTaskStatus.Completed,
+      status: RunStatus.Completed,
       payload: {
         repo: repoFullName,
         branch: branchName,
@@ -363,7 +363,7 @@ describe('findReusableGitHubPrFollowUpOwner', () => {
       prNumber,
       userId: user.id,
       payloadKind: TaskPayloadKind.GithubPrReviewSync,
-      status: CloudTaskStatus.Running,
+      status: RunStatus.Running,
       taskPhase: 'running',
       prSha: 'def5678',
     });
@@ -378,7 +378,7 @@ describe('findReusableGitHubPrFollowUpOwner', () => {
       jobId: reusableJob.id,
       taskId: reusableJob.taskId,
       type: TaskPayloadKind.StandardTask,
-      status: CloudTaskStatus.Pending,
+      status: RunStatus.Pending,
       taskPhase: null,
       match: 'task_pull_request',
       delivery: 'attach',
@@ -406,7 +406,7 @@ describe('findReusableGitHubPrFollowUpOwner', () => {
       jobId: slackJob.id,
       taskId: slackJob.taskId,
       type: TaskPayloadKind.SlackAppMention,
-      status: CloudTaskStatus.Pending,
+      status: RunStatus.Pending,
       taskPhase: null,
       match: 'task_pull_request',
       delivery: 'attach',
@@ -434,7 +434,7 @@ describe('findReusableGitHubPrFollowUpOwner', () => {
       jobId: linearJob.id,
       taskId: linearJob.taskId,
       type: TaskPayloadKind.LinearAgentSession,
-      status: CloudTaskStatus.Pending,
+      status: RunStatus.Pending,
       taskPhase: null,
       match: 'task_pull_request',
       delivery: 'attach',
@@ -463,7 +463,7 @@ describe('findReusableGitHubPrFollowUpOwner', () => {
       actingUserId: user.id,
       taskId: followUpTaskId,
       payloadKind: TaskPayloadKind.GithubPrReviewFollowUp,
-      status: CloudTaskStatus.Running,
+      status: RunStatus.Running,
       taskPhase: 'running',
       payload: {
         repo: repoFullName,
@@ -483,7 +483,7 @@ describe('findReusableGitHubPrFollowUpOwner', () => {
       jobId: reusableJob.id,
       taskId: reusableJob.taskId,
       type: TaskPayloadKind.StandardTask,
-      status: CloudTaskStatus.Pending,
+      status: RunStatus.Pending,
       taskPhase: null,
       match: 'task_pull_request',
       delivery: 'attach',
@@ -504,7 +504,7 @@ describe('findReusableGitHubPrFollowUpOwner', () => {
       actingUserId: user.id,
       taskId,
       payloadKind: TaskPayloadKind.SlackAppMention,
-      status: CloudTaskStatus.Completed,
+      status: RunStatus.Completed,
       payload: {
         repo: repoFullName,
         channel: 'C123',
@@ -538,7 +538,7 @@ describe('findReusableGitHubPrFollowUpOwner', () => {
       jobId: activeResume.id,
       taskId: activeResume.taskId,
       type: TaskPayloadKind.SnapshotResume,
-      status: CloudTaskStatus.Running,
+      status: RunStatus.Running,
       taskPhase: 'running',
       match: 'task_pull_request',
       delivery: 'attach',
@@ -559,7 +559,7 @@ describe('findReusableGitHubPrFollowUpOwner', () => {
       actingUserId: user.id,
       taskId,
       payloadKind: TaskPayloadKind.LinearAgentSession,
-      status: CloudTaskStatus.Completed,
+      status: RunStatus.Completed,
       payload: {
         repo: repoFullName,
         sessionId: 'linear-session-1',
@@ -589,7 +589,7 @@ describe('findReusableGitHubPrFollowUpOwner', () => {
       jobId: activeResume.id,
       taskId: activeResume.taskId,
       type: TaskPayloadKind.SnapshotResume,
-      status: CloudTaskStatus.Running,
+      status: RunStatus.Running,
       taskPhase: 'running',
       match: 'task_pull_request',
       delivery: 'attach',
@@ -610,7 +610,7 @@ describe('findReusableGitHubPrFollowUpOwner', () => {
       actingUserId: user.id,
       taskId,
       payloadKind: TaskPayloadKind.GithubPrReviewFollowUp,
-      status: CloudTaskStatus.Completed,
+      status: RunStatus.Completed,
       payload: {
         repo: repoFullName,
         prNumber,
@@ -658,7 +658,7 @@ describe('findReusableGitHubPrFollowUpOwner', () => {
         actingUserId: user.id,
         taskId,
         payloadKind: TaskPayloadKind.GithubPrReviewSync,
-        status: CloudTaskStatus.Completed,
+        status: RunStatus.Completed,
         payload: {
           repo: repoFullName,
           prNumber,
@@ -686,7 +686,7 @@ describe('findReusableGitHubPrFollowUpOwner', () => {
       jobId: reusableJob.id,
       taskId: reusableJob.taskId,
       type: TaskPayloadKind.StandardTask,
-      status: CloudTaskStatus.Pending,
+      status: RunStatus.Pending,
       taskPhase: null,
       match: 'task_pull_request',
       delivery: 'attach',
@@ -708,7 +708,7 @@ describe('findReusableGitHubPrFollowUpOwner', () => {
       actingUserId: user.id,
       taskId,
       payloadKind: TaskPayloadKind.StandardTask,
-      status: CloudTaskStatus.Completed,
+      status: RunStatus.Completed,
       snapshotId: 'snapshot-547',
       payload: {
         repo: repoFullName,
@@ -726,7 +726,7 @@ describe('findReusableGitHubPrFollowUpOwner', () => {
       jobId: completedJob.id,
       taskId: completedJob.taskId,
       type: TaskPayloadKind.StandardTask,
-      status: CloudTaskStatus.Completed,
+      status: RunStatus.Completed,
       taskPhase: null,
       match: 'task_pull_request',
       delivery: 'resume',
@@ -745,7 +745,7 @@ describe('findActiveGitHubPrReviewTask', () => {
       prNumber,
       userId: user.id,
       payloadKind: TaskPayloadKind.GithubPrReview,
-      status: CloudTaskStatus.Running,
+      status: RunStatus.Running,
       taskPhase: 'running',
       prSha: 'def5678',
     });
@@ -755,7 +755,7 @@ describe('findActiveGitHubPrReviewTask', () => {
       prNumber,
       userId: user.id,
       payloadKind: TaskPayloadKind.GithubPrReviewSync,
-      status: CloudTaskStatus.Running,
+      status: RunStatus.Running,
       taskPhase: 'running',
       prSha: 'def5678',
     });
@@ -770,7 +770,7 @@ describe('findActiveGitHubPrReviewTask', () => {
       jobId: newestReview.id,
       taskId: newestReview.taskId,
       type: TaskPayloadKind.GithubPrReviewSync,
-      status: CloudTaskStatus.Running,
+      status: RunStatus.Running,
       taskPhase: 'running',
       match: 'task_pull_request',
     });
@@ -786,7 +786,7 @@ describe('findActiveGitHubPrReviewTask', () => {
       prNumber,
       userId: user.id,
       payloadKind: TaskPayloadKind.GithubPrReview,
-      status: CloudTaskStatus.Running,
+      status: RunStatus.Running,
       taskPhase: 'waiting_for_prompt',
       prSha: 'abc1234',
     });
@@ -810,7 +810,7 @@ describe('findActiveGitHubPrReviewTask', () => {
       prNumber,
       userId: user.id,
       payloadKind: TaskPayloadKind.GithubPrReview,
-      status: CloudTaskStatus.Running,
+      status: RunStatus.Running,
       taskPhase: 'running',
       prSha: 'old-head-sha',
     });
@@ -834,7 +834,7 @@ describe('findActiveGitHubPrReviewTask', () => {
       prNumber,
       userId: user.id,
       payloadKind: TaskPayloadKind.GithubPrReviewSync,
-      status: CloudTaskStatus.Running,
+      status: RunStatus.Running,
       taskPhase: 'running',
       prSha: 'shared-head-sha',
       sourceControlProvider: 'gitlab',
@@ -851,7 +851,7 @@ describe('findActiveGitHubPrReviewTask', () => {
       jobId: gitlabReview.id,
       taskId: gitlabReview.taskId,
       type: TaskPayloadKind.GithubPrReviewSync,
-      status: CloudTaskStatus.Running,
+      status: RunStatus.Running,
       taskPhase: 'running',
       match: 'task_pull_request',
     });

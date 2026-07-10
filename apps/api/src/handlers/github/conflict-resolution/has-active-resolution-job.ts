@@ -7,7 +7,7 @@ import {
   and,
   inArray,
 } from '@roomote/db/server';
-import { CloudTaskStatus } from '@roomote/types';
+import { RunStatus } from '@roomote/types';
 
 import { LOG_PREFIX } from './constants';
 
@@ -23,7 +23,7 @@ export async function hasActiveResolutionJob(
   repoFullName: string,
   prNumber: number,
 ): Promise<boolean> {
-  const activeStatuses = [CloudTaskStatus.Pending, CloudTaskStatus.Running];
+  const activeStatuses = [RunStatus.Pending, RunStatus.Running];
 
   const existing = await db
     .select({ id: taskRuns.id })

@@ -6,7 +6,7 @@ import {
   getComputeProviderCapabilities,
 } from '@roomote/compute-providers/factory';
 import {
-  isExitedCloudTaskStatus,
+  isExitedRunStatus,
   resolveComputeProviderTarget,
 } from '@roomote/types';
 
@@ -70,7 +70,7 @@ export async function GET(
     });
 
     while (!disconnected && (!machineId || !sandboxCmdId)) {
-      if (isExitedCloudTaskStatus(status)) {
+      if (isExitedRunStatus(status)) {
         break;
       }
 

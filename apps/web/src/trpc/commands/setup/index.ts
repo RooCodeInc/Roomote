@@ -20,7 +20,7 @@ import { ANONYMOUS_ANALYTICS_METADATA_KEY } from '@roomote/feature-flags';
 import { captureEvent } from '@roomote/telemetry/server';
 import {
   AVAILABLE_SETUP_MCP_INTEGRATIONS,
-  enqueueCloudTask,
+  enqueueTask,
   normalizeEnabledSetupMcpIntegrationIds,
   type CurrentMcpConfig,
 } from '@roomote/cloud-agents/server';
@@ -351,7 +351,7 @@ async function sendSetupCompletionMcpRecommendations(
       return;
     }
 
-    await enqueueCloudTask({
+    await enqueueTask({
       task: {
         type: TaskPayloadKind.McpRecommendations,
         payload: {

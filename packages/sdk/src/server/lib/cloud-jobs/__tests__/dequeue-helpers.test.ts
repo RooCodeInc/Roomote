@@ -1,5 +1,5 @@
-import { CloudTaskStatus, TaskPayloadKind } from '@roomote/types';
-import type { CloudJob } from '@roomote/db/server';
+import { RunStatus, TaskPayloadKind } from '@roomote/types';
+import type { Run } from '@roomote/db/server';
 
 const {
   mockDecryptSecrets,
@@ -85,17 +85,17 @@ import {
   redactSourceControlProviderEnvVars,
 } from '../dequeue-helpers';
 
-function makeCloudJob(payload: CloudJob['payload']): CloudJob {
+function makeCloudJob(payload: Run['payload']): Run {
   return {
     id: 123,
-    status: CloudTaskStatus.Dequeued,
+    status: RunStatus.Dequeued,
     kind: 'fresh',
     payloadKind: TaskPayloadKind.StandardTask,
     taskId: 'task-123',
     actingUserId: 'user-123',
     payload,
     result: null,
-  } as CloudJob;
+  } as Run;
 }
 
 describe('createSourceControlTokenForJob', () => {

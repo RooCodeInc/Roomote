@@ -1,6 +1,6 @@
 import React from 'react';
 import { fireEvent, render, screen } from '@testing-library/react';
-import { CloudTaskStatus, PRODUCT_NAME } from '@roomote/types';
+import { RunStatus, PRODUCT_NAME } from '@roomote/types';
 
 const { routerPushMock } = vi.hoisted(() => ({
   routerPushMock: vi.fn(),
@@ -145,7 +145,7 @@ function createTask(overrides?: Partial<TaskCardTask>): TaskCardTask {
       imageUrl: 'https://example.com/avatar.png',
     },
     cloudJob: {
-      status: CloudTaskStatus.Completed,
+      status: RunStatus.Completed,
       taskPhase: null,
       payload: {
         environmentId: 'env-1',

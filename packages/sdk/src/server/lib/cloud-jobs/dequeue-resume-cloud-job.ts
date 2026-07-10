@@ -1,14 +1,14 @@
 import {
   type AuthTokenContext,
   type JobTokenContext,
-  type CloudTaskPayload,
+  type TaskPayload,
   type RequestedWorkKind,
-  CloudTaskStatus,
+  RunStatus,
   TaskPayloadKind,
   resolveSourceControlProviderFromPayload,
 } from '@roomote/types';
 import {
-  type CloudJob,
+  type Run,
   type Task,
   db,
   taskRuns,
@@ -40,7 +40,7 @@ import { resolveSlackJobRouting } from './slack-job-routing';
 type DequeueResumeCloudJobResult =
   | undefined
   | {
-      cloudJob: CloudJob;
+      cloudJob: Run;
       task: DequeuedTaskContext;
       requestedWorkKind: RequestedWorkKind;
       gitHubToken: string;
@@ -100,7 +100,7 @@ export const dequeueResumeCloudJob = async (
   {
     onBootstrapFailure,
   }: {
-    onBootstrapFailure?: (error: Error, cloudJob: CloudJob) => void;
+    onBootstrapFailure?: (error: Error, cloudJob: Run) => void;
   } = {},
 ): Promise<DequeueResumeCloudJobResult> => {
   const tag = '[dequeueResumeCloudJob]';
@@ -119,12 +119,12 @@ export const dequeueResumeCloudJob = async (
     type TransactionResult =
       | {
           error: true;
-          cloudJob?: CloudJob;
+          cloudJob?: Run;
           bootstrapFailureEvent?: SnapshotResumeBootstrapEvent;
         }
       | {
           error: false;
-          cloudJob: CloudJob;
+          cloudJob: Run;
           task: Task;
           envVars: Record<string, string>;
           orgAgentInstructions?: string;
@@ -137,7 +137,7 @@ export const dequeueResumeCloudJob = async (
         };
 
     const result: TransactionResult = await db.transaction(async (tx) => {
-      const [dequeued] = await tx.execute<Pick<CloudJob, 'id'>>(query);
+      const [dequeued] = await tx.execute<Pick<Run, 'id'>>(query);
 
       const cloudJob = dequeued
         ? await tx.query.taskRuns.findFirst({
@@ -188,7 +188,7 @@ export const dequeueResumeCloudJob = async (
         return { error: true, cloudJob, bootstrapFailureEvent };
       }
 
-      const resumePayload = cloudJob.payload as CloudTaskPayload<
+      const resumePayload = cloudJob.payload as TaskPayload<
         typeof TaskPayloadKind.SnapshotResume
       >;
       const sourceRunId =
@@ -312,7 +312,7 @@ export const dequeueResumeCloudJob = async (
           'Worker claimed dequeued snapshot-resume job and started resume bootstrap.',
         details: {
           stage: 'worker_bootstrap',
-          status: CloudTaskStatus.Processing,
+          status: RunStatus.Processing,
           vendor: cloudJob.vendor ?? null,
           machineId: cloudJob.machineId ?? null,
           sourceSnapshotId: cloudJob.sourceSnapshotId ?? null,

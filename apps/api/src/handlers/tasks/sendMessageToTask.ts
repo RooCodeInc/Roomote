@@ -1,5 +1,5 @@
 import { TRPCClientError } from '@trpc/client';
-import { enqueueCloudTask } from '@roomote/cloud-agents/server';
+import { enqueueTask } from '@roomote/cloud-agents/server';
 import { withSandboxServerRpcClient } from '@roomote/sdk/server';
 import {
   and,
@@ -12,7 +12,7 @@ import {
 } from '@roomote/db/server';
 import type {
   AuthTokenContext,
-  CloudTaskPayload,
+  TaskPayload,
   JobTokenContext,
   PullRequestStatus,
 } from '@roomote/types';
@@ -20,7 +20,7 @@ import {
   TaskPayloadKind,
   EXPIRED_SNAPSHOT_RESUME_ERROR,
   isLinkedReviewResultsMessage,
-  isExitedCloudTaskStatus,
+  isExitedRunStatus,
   isSnapshotResumable,
   parseLinkedReviewResults,
   populateSnapshotResumeSlackMetadata,
@@ -452,7 +452,7 @@ async function resumeTaskFromSnapshot({
     source,
   });
   const normalizedClientMessageId = normalizeOptionalString(clientMessageId);
-  const payload: CloudTaskPayload<typeof TaskPayloadKind.SnapshotResume> = {
+  const payload: TaskPayload<typeof TaskPayloadKind.SnapshotResume> = {
     repo: repo ?? '',
     environmentId,
     port: sourceJob.port ?? undefined,
@@ -481,7 +481,7 @@ async function resumeTaskFromSnapshot({
 
   // Resumes never create tasks and never re-attribute; the follow-up sender
   // becomes the new run's acting user.
-  const resumeLaunch = await enqueueCloudTask(
+  const resumeLaunch = await enqueueTask(
     {
       task: {
         type: TaskPayloadKind.SnapshotResume,
@@ -714,7 +714,7 @@ export async function sendMessageToTask({
       };
     }
 
-    if (isExitedCloudTaskStatus(job.status)) {
+    if (isExitedRunStatus(job.status)) {
       const resumeResult = await resumeTaskFromSnapshot({
         taskId,
         userId: linkedReviewHandoff.senderUserId,
@@ -877,7 +877,7 @@ export async function steerMessageToTask({
 
     const channelBindings = (await getTaskChannelBindings(taskId)) ?? null;
 
-    if (isExitedCloudTaskStatus(job.status)) {
+    if (isExitedRunStatus(job.status)) {
       const resumeResult = await resumeTaskFromSnapshot({
         taskId,
         userId,

@@ -8,11 +8,11 @@ import {
   isNull,
   taskRuns,
 } from '@roomote/db/server';
-import { type CloudTaskStatus, isExitedCloudTaskStatus } from '@roomote/types';
+import { type RunStatus, isExitedRunStatus } from '@roomote/types';
 
 interface StopTaskJob {
   id: number;
-  status: CloudTaskStatus;
+  status: RunStatus;
   sandboxServerUrl: string | null;
   actingUserId: string | null;
 }
@@ -32,7 +32,7 @@ type StopTaskJobResult =
 
 type StopTaskJobResolution =
   | { kind: 'not_found' }
-  | { kind: 'terminal'; status: CloudTaskStatus }
+  | { kind: 'terminal'; status: RunStatus }
   | { kind: 'no_sandbox' }
   | { kind: 'sandbox'; job: StopTaskJob & { sandboxServerUrl: string } };
 
@@ -80,7 +80,7 @@ function createTaskNotFoundResult(): StopTaskJobResult {
   };
 }
 
-function createTaskNotActiveResult(status: CloudTaskStatus): StopTaskJobResult {
+function createTaskNotActiveResult(status: RunStatus): StopTaskJobResult {
   return {
     success: false,
     statusCode: 409,
@@ -101,7 +101,7 @@ function resolveStopTaskJob(job: StopTaskJob | null): StopTaskJobResolution {
     return { kind: 'not_found' };
   }
 
-  if (isExitedCloudTaskStatus(job.status)) {
+  if (isExitedRunStatus(job.status)) {
     return { kind: 'terminal', status: job.status };
   }
 

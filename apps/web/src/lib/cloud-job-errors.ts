@@ -1,4 +1,4 @@
-import { stripCloudJobErrorMarkers } from '@roomote/types';
+import { stripRunErrorMarkers } from '@roomote/types';
 
 interface CloudJobErrorSource {
   error?: string | null;
@@ -71,7 +71,7 @@ export function getCloudJobError(
 export function getCloudJobErrorDisplayMessage(
   error?: string | null,
 ): string | undefined {
-  const stripped = stripCloudJobErrorMarkers(error);
+  const stripped = stripRunErrorMarkers(error);
 
   if (!stripped) {
     return undefined;

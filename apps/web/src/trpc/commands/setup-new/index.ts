@@ -1,5 +1,5 @@
 import * as GitHub from '@roomote/github';
-import { enqueueCloudTask } from '@roomote/cloud-agents/server';
+import { enqueueTask } from '@roomote/cloud-agents/server';
 import {
   resolveEnvironmentSourceControlProvider,
   resolveSingleSourceControlProvider,
@@ -50,7 +50,7 @@ import {
   buildSetupSourceControlStatus,
   collectSetupModelProviderCredentialValues,
   createEmptySetupNewState,
-  CloudTaskStatus,
+  RunStatus,
   TaskPayloadKind,
   resolveEvalHarnessSelection,
   type ComputeProvider,
@@ -62,9 +62,10 @@ import {
   isAutoProvisionedComputeArtifactField,
   isComputeInfrastructureField,
   isConfiguredEnvValue,
-  isExitedCloudTaskStatus,
+  isExitedRunStatus,
   isRequiredComputeField,
   NON_SECRET_COMPUTE_ENV_VAR_NAMES,
+  NON_SECRET_SOURCE_CONTROL_ENV_VAR_NAMES,
   normalizeDeploymentComputeConfig,
   normalizeDeploymentModelConfig,
   getSetupNewComputeProvisioningState,
@@ -962,10 +963,10 @@ export async function launchQueuedSetupTasksIfReady({
 
   await Promise.allSettled(
     claimedTasks.map(async (queuedTask) => {
-      let launchResult: Awaited<ReturnType<typeof enqueueCloudTask>>;
+      let launchResult: Awaited<ReturnType<typeof enqueueTask>>;
 
       try {
-        launchResult = await enqueueCloudTask({
+        launchResult = await enqueueTask({
           task: {
             type: TaskPayloadKind.StandardTask,
             payload: {
@@ -1182,6 +1183,7 @@ export async function getSetupNewStatusCommand(auth: UserAuthSuccess) {
     persistedRuntimeComputeConfig,
     envVarNames,
     nonSecretComputeEnvValues,
+    nonSecretSourceControlEnvValues,
     chatgptConnected,
   ] = await Promise.all([
     getSetupBaseStatus(auth),
@@ -1191,6 +1193,9 @@ export async function getSetupNewStatusCommand(auth: UserAuthSuccess) {
     getPersistedEnvironmentVariableNames(),
     getPersistedEnvironmentVariableValues([
       ...NON_SECRET_COMPUTE_ENV_VAR_NAMES,
+    ]),
+    getPersistedEnvironmentVariableValues([
+      ...NON_SECRET_SOURCE_CONTROL_ENV_VAR_NAMES,
     ]),
     isChatGptSubscriptionConnected(),
   ]);
@@ -1304,6 +1309,7 @@ export async function getSetupNewStatusCommand(auth: UserAuthSuccess) {
   const sourceControlSetup = buildSetupSourceControlStatus({
     runtimeEnv: process.env,
     persistedEnvVarNames: envVarNames,
+    persistedEnvVarValues: nonSecretSourceControlEnvValues,
     selectedProvider: setupNewState.sourceControlProvider,
     connectedProviders: sourceControlConnection.connectedProviders,
     repositoryCounts: sourceControlConnection.repositoryCounts,
@@ -2256,7 +2262,7 @@ export async function startSetupNewOnboardingTaskCommand(
 
         if (kickoffMessageId && kickoffChannelId) {
           const startedAt = new Date().toISOString();
-          const launchResult = await enqueueCloudTask({
+          const launchResult = await enqueueTask({
             task: {
               ...(modelSelection.harness
                 ? { harness: modelSelection.harness }
@@ -2323,7 +2329,7 @@ export async function startSetupNewOnboardingTaskCommand(
       }
 
       const startedAt = new Date().toISOString();
-      const launchResult = await enqueueCloudTask({
+      const launchResult = await enqueueTask({
         task: {
           ...(modelSelection.harness
             ? { harness: modelSelection.harness }
@@ -2397,10 +2403,10 @@ export async function startSetupNewOnboardingTaskCommand(
     }
 
     const startedAt = new Date().toISOString();
-    let launchResult: Awaited<ReturnType<typeof enqueueCloudTask>>;
+    let launchResult: Awaited<ReturnType<typeof enqueueTask>>;
 
     try {
-      launchResult = await enqueueCloudTask({
+      launchResult = await enqueueTask({
         task: {
           ...(modelSelection.harness
             ? { harness: modelSelection.harness }
@@ -2517,7 +2523,7 @@ export async function cancelSetupNewOnboardingTaskCommand(
     .where(eq(taskRuns.taskId, currentState.onboardingTaskId));
 
   const activeJobIds = jobs
-    .filter((job) => !isExitedCloudTaskStatus(job.status))
+    .filter((job) => !isExitedRunStatus(job.status))
     .map((job) => job.id);
 
   if (activeJobIds.length > 0) {
@@ -2527,7 +2533,7 @@ export async function cancelSetupNewOnboardingTaskCommand(
       await tx
         .update(taskRuns)
         .set({
-          status: CloudTaskStatus.Canceled,
+          status: RunStatus.Canceled,
           canceledAt: endedAt,
         })
         .where(inArray(taskRuns.id, activeJobIds));

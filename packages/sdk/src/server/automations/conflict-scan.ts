@@ -21,10 +21,10 @@ import {
   getInstallationOctokit,
   isRepoSkipped,
 } from '@roomote/github';
-import { enqueueCloudTask } from '@roomote/cloud-agents/server';
+import { enqueueTask } from '@roomote/cloud-agents/server';
 import {
   TaskPayloadKind,
-  CloudTaskStatus,
+  RunStatus,
   DEFAULT_CONFLICT_RESOLUTION_MAX_PR_AGE_DAYS,
   isConflictResolverMaxPrAgeDays,
 } from '@roomote/types';
@@ -91,7 +91,7 @@ async function hasActiveResolutionJob(
   repoFullName: string,
   prNumber: number,
 ): Promise<boolean> {
-  const activeStatuses = [CloudTaskStatus.Pending, CloudTaskStatus.Running];
+  const activeStatuses = [RunStatus.Pending, RunStatus.Running];
 
   const existing = await db
     .select({ id: taskRuns.id })
@@ -309,7 +309,7 @@ export async function conflictScanJob(
               const prAuthorId = pr.user?.id;
               const prAuthorLogin = pr.user?.login;
 
-              const launchResult = await enqueueCloudTask({
+              const launchResult = await enqueueTask({
                 task: {
                   type: TaskPayloadKind.GithubPrConflictResolve,
                   payload: {

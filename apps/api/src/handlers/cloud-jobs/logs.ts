@@ -9,7 +9,7 @@ import {
   taskRuns,
 } from '@roomote/db/server';
 import {
-  isExitedCloudTaskStatus,
+  isExitedRunStatus,
   resolveComputeProviderTarget,
 } from '@roomote/types';
 
@@ -93,7 +93,7 @@ async function streamCloudJobLogs({
     const startedAt = Date.now();
 
     while (!signal.aborted && (!machineId || !sandboxCmdId)) {
-      if (isExitedCloudTaskStatus(status)) {
+      if (isExitedRunStatus(status)) {
         break;
       }
 

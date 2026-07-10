@@ -1,10 +1,10 @@
 import pWaitFor from 'p-wait-for';
 
 import {
-  isExitedCloudTaskStatus,
+  isExitedRunStatus,
   isSleepCheckManagedComputeProvider,
   isSnapshotCapableComputeProvider,
-  isResumableCloudTaskType,
+  isResumableTaskPayloadKind,
 } from '@roomote/types';
 import { type DequeuedCloudJob, sdk } from '@roomote/sdk/client';
 
@@ -58,7 +58,7 @@ export async function waitForExternalSleepAction({
 
   // Non-snapshot providers (Daytona) exit via destroy, never via snapshot.
   const isResumable =
-    isResumableCloudTaskType(cloudJob.payloadKind) &&
+    isResumableTaskPayloadKind(cloudJob.payloadKind) &&
     isSnapshotCapableComputeProvider(cloudJob.vendor);
   let sleepRequested = false;
 
@@ -132,7 +132,7 @@ export async function waitForExternalSleepAction({
           return Boolean(updatedJob.snapshotCreatedAt);
         }
 
-        return isExitedCloudTaskStatus(updatedJob.status);
+        return isExitedRunStatus(updatedJob.status);
       },
       {
         interval: SNAPSHOT_POLL_INTERVAL_MS,

@@ -1,6 +1,6 @@
 const {
   dbUpdateSetMock,
-  enqueueCloudTaskMock,
+  enqueueTaskMock,
   dbUpdateWhereMock,
   consoleWarnMock,
   findActiveSlackJobMock,
@@ -8,7 +8,7 @@ const {
   resolveSlackReactionNamesMock,
 } = vi.hoisted(() => ({
   dbUpdateSetMock: vi.fn(),
-  enqueueCloudTaskMock: vi.fn(),
+  enqueueTaskMock: vi.fn(),
   dbUpdateWhereMock: vi.fn(),
   consoleWarnMock: vi.fn(),
   findActiveSlackJobMock: vi.fn(),
@@ -30,7 +30,7 @@ vi.mock('@roomote/cloud-agents', () => ({
 }));
 
 vi.mock('@roomote/cloud-agents/server', () => ({
-  enqueueCloudTask: enqueueCloudTaskMock,
+  enqueueTask: enqueueTaskMock,
 }));
 
 vi.mock('@roomote/db/server', () => ({
@@ -65,7 +65,7 @@ describe('startSlackAppMentionTask', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     vi.spyOn(console, 'warn').mockImplementation(consoleWarnMock);
-    enqueueCloudTaskMock.mockResolvedValue({ id: 42, taskId: 'task_123' });
+    enqueueTaskMock.mockResolvedValue({ id: 42, taskId: 'task_123' });
     dbUpdateSetMock.mockClear();
     dbUpdateWhereMock.mockResolvedValue(undefined);
     findActiveSlackJobMock.mockResolvedValue(null);
@@ -97,7 +97,7 @@ describe('startSlackAppMentionTask', () => {
         ' https://acme-team.slack.com/archives/C123/p111000?thread_ts=111.000&cid=C123 ',
     });
 
-    expect(enqueueCloudTaskMock).toHaveBeenCalledWith(
+    expect(enqueueTaskMock).toHaveBeenCalledWith(
       expect.objectContaining({
         initiator: { kind: 'user', userId: 'user_123' },
         workflow: 'standard',

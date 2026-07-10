@@ -1,5 +1,5 @@
-import { CloudTaskStatus, TaskPayloadKind } from '@roomote/types';
-import type { CloudJob } from '@roomote/db/server';
+import { RunStatus, TaskPayloadKind } from '@roomote/types';
+import type { Run } from '@roomote/db/server';
 
 const {
   mockDbTransaction,
@@ -99,7 +99,7 @@ vi.mock('../dequeue-helpers', () => ({
 
 import { dequeueCloudJob } from '../dequeue-cloud-job';
 
-type RunWithTask = CloudJob & { task: Record<string, unknown> };
+type RunWithTask = Run & { task: Record<string, unknown> };
 
 function makeTaskRow(overrides: Record<string, unknown> = {}) {
   return {
@@ -126,7 +126,7 @@ function makeStandardTaskJob(
   return {
     id: 101,
     harness: 'opencode-server',
-    status: CloudTaskStatus.Dequeued,
+    status: RunStatus.Dequeued,
     kind: 'fresh',
     payloadKind: TaskPayloadKind.StandardTask,
     taskId: 'task-101',
@@ -149,7 +149,7 @@ function makeSlackAppMentionJob(
   return {
     id: 202,
     harness: 'opencode-server',
-    status: CloudTaskStatus.Dequeued,
+    status: RunStatus.Dequeued,
     kind: 'fresh',
     payloadKind: TaskPayloadKind.SlackAppMention,
     taskId: 'task-202',
@@ -201,9 +201,9 @@ describe('dequeueCloudJob', () => {
         error,
         cloudJob,
       }: {
-        callback?: (error: Error, cloudJob: CloudJob) => void;
+        callback?: (error: Error, cloudJob: Run) => void;
         error: Error;
-        cloudJob: CloudJob;
+        cloudJob: Run;
       }) => callback?.(error, cloudJob),
     );
     mockGeneratePrompt.mockResolvedValue({
@@ -453,7 +453,7 @@ describe('dequeueCloudJob', () => {
         message: expect.stringContaining('started execution bootstrap'),
         details: expect.objectContaining({
           stage: 'worker_bootstrap',
-          status: CloudTaskStatus.Processing,
+          status: RunStatus.Processing,
           vendor: 'modal',
           machineId: 'sb_123',
           sourceSnapshotId: 'snap_env_123',

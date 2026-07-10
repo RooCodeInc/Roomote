@@ -1,5 +1,5 @@
-import { CloudTaskStatus, TaskPayloadKind } from '@roomote/types';
-import type { CloudJob } from '@roomote/db/server';
+import { RunStatus, TaskPayloadKind } from '@roomote/types';
+import type { Run } from '@roomote/db/server';
 
 const {
   mockDbTransaction,
@@ -93,7 +93,7 @@ vi.mock('../slack-job-routing', () => ({
 
 import { dequeueResumeCloudJob } from '../dequeue-resume-cloud-job';
 
-type RunWithTask = CloudJob & { task: Record<string, unknown> };
+type RunWithTask = Run & { task: Record<string, unknown> };
 
 function makeTaskRow(overrides: Record<string, unknown> = {}) {
   return {
@@ -119,7 +119,7 @@ function makeSnapshotResumeJob(
   return {
     id: 101,
     harness: 'opencode-server',
-    status: CloudTaskStatus.Dequeued,
+    status: RunStatus.Dequeued,
     kind: 'resume',
     payloadKind: TaskPayloadKind.SnapshotResume,
     taskId: 'task-101',
@@ -175,9 +175,9 @@ describe('dequeueResumeCloudJob', () => {
         error,
         cloudJob,
       }: {
-        callback?: (error: Error, cloudJob: CloudJob) => void;
+        callback?: (error: Error, cloudJob: Run) => void;
         error: Error;
-        cloudJob: CloudJob;
+        cloudJob: Run;
       }) => callback?.(error, cloudJob),
     );
 
@@ -257,7 +257,7 @@ describe('dequeueResumeCloudJob', () => {
         message: expect.stringContaining('started resume bootstrap'),
         details: expect.objectContaining({
           stage: 'worker_bootstrap',
-          status: CloudTaskStatus.Processing,
+          status: RunStatus.Processing,
           sourceSnapshotId: 'snap-1',
           sourceRunId: 99,
           harnessSessionId: 'session-canonical',

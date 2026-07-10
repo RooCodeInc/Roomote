@@ -3,7 +3,7 @@ import { randomUUID } from 'node:crypto';
 import {
   type SlackBlock,
   AGENT_DISPLAY_NAME,
-  type CloudTaskPayload,
+  type TaskPayload,
   TaskPayloadKind,
   ALL_REPOSITORIES,
   PRODUCT_NAME,
@@ -3283,7 +3283,7 @@ export async function handleRetryFailedTask(
     return;
   }
 
-  const originalPayload = retryJob.payload as CloudTaskPayload<
+  const originalPayload = retryJob.payload as TaskPayload<
     typeof TaskPayloadKind.SlackAppMention
   >;
 

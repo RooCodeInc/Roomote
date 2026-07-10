@@ -1,7 +1,7 @@
 import {
   type CommunicationProvider,
   type AcpRequestUserInputAnswers,
-  CloudTaskStatus,
+  RunStatus,
   TaskPayloadKind,
   type QueuedCommunicationMessage,
   getSlackChannelFromTaskPayload,
@@ -514,7 +514,7 @@ export const runTask = async ({
 }: RunTaskOptions) => {
   await sdk.cloudJobs.update({
     id: cloudJob.id,
-    status: CloudTaskStatus.Spawning,
+    status: RunStatus.Spawning,
   });
 
   // Register the process-level crash listeners (at most once per process) and
@@ -784,7 +784,7 @@ export const runTask = async ({
 
     await sdk.cloudJobs.update({
       id: cloudJob.id,
-      status: CloudTaskStatus.Connecting,
+      status: RunStatus.Connecting,
     });
 
     const recordWorkerRuntimeEvent = createWorkerRuntimeEventRecorder({
@@ -1025,7 +1025,7 @@ export const runTask = async ({
           });
           await sdk.cloudJobs.done({
             id: cloudJob.id,
-            status: CloudTaskStatus.Idle,
+            status: RunStatus.Idle,
           });
         },
       },
@@ -1482,7 +1482,7 @@ export const runTask = async ({
 
     await sdk.cloudJobs.update({
       id: cloudJob.id,
-      status: CloudTaskStatus.Running,
+      status: RunStatus.Running,
     });
 
     // Subscribe to HarnessManager state changes BEFORE starting/resuming a task
@@ -1516,7 +1516,7 @@ export const runTask = async ({
       }
 
       return {
-        status: CloudTaskStatus.Canceled,
+        status: RunStatus.Canceled,
         error: 'Task aborted',
       };
     } else if (harnessSessionId) {

@@ -24,7 +24,7 @@ export type { LinearInstallation } from '../linear-installations';
 export type { Repository } from '../repositories';
 export type { ParsedPR } from '../pull-request-links';
 export type {
-  CloudJob,
+  Run,
   DequeuedCloudJob,
   DequeuedResumeCloudJob,
 } from '../cloud-jobs';

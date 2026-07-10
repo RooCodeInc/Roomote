@@ -1,5 +1,5 @@
 import {
-  CloudTaskStatus,
+  RunStatus,
   ORPHANED_AFTER_DEQUEUE_THRESHOLD_MS,
   ORPHANED_PENDING_THRESHOLD_MS,
 } from '@roomote/types';
@@ -19,7 +19,7 @@ const orphanMap = new Map<number, number>();
 const getOrphanedBeforeDequeueJobs = () =>
   db.query.taskRuns.findMany({
     where: and(
-      eq(taskRuns.status, CloudTaskStatus.Pending),
+      eq(taskRuns.status, RunStatus.Pending),
       lt(
         taskRuns.createdAt,
         new Date(Date.now() - ORPHANED_PENDING_THRESHOLD_MS),
@@ -32,7 +32,7 @@ const getOrphanedBeforeDequeueJobs = () =>
 const getOrphanedAfterDequeueJobs = () =>
   db.query.taskRuns.findMany({
     where: and(
-      eq(taskRuns.status, CloudTaskStatus.Dequeued),
+      eq(taskRuns.status, RunStatus.Dequeued),
       lt(
         taskRuns.dequeuedAt,
         new Date(Date.now() - ORPHANED_AFTER_DEQUEUE_THRESHOLD_MS),

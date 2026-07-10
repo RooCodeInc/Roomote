@@ -6,7 +6,7 @@ import {
   taskRuns,
   userFactory,
 } from '@roomote/db/server';
-import { CloudTaskStatus, TaskPayloadKind } from '@roomote/types';
+import { RunStatus, TaskPayloadKind } from '@roomote/types';
 import type { FeatureFlag } from '@roomote/feature-flags';
 
 import type { UserAuthSuccess } from '@/types';
@@ -50,7 +50,7 @@ describe('takeOverBrowserControlCommand', () => {
     const staleCloudJob = await runFactory.create({
       taskId: task.id,
       actingUserId: owner.id,
-      status: CloudTaskStatus.Completed,
+      status: RunStatus.Completed,
       snapshotId: 'snapshot-1',
     });
     const activeCloudJob = await runFactory.create({
@@ -59,7 +59,7 @@ describe('takeOverBrowserControlCommand', () => {
       kind: 'resume',
       payloadKind: TaskPayloadKind.SnapshotResume,
       actingUserId: owner.id,
-      status: CloudTaskStatus.Running,
+      status: RunStatus.Running,
     });
 
     const result = await takeOverBrowserControlCommand(

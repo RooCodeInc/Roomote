@@ -2,7 +2,7 @@ import pWaitFor from 'p-wait-for';
 
 import {
   DEFAULT_SOURCE_CONTROL_PROVIDER,
-  CloudTaskStatus,
+  RunStatus,
   TaskPayloadKind,
 } from '@roomote/types';
 import { sdk } from '@roomote/sdk/client';
@@ -51,7 +51,7 @@ export async function snapshot({
   try {
     await sdk.cloudJobs.update({
       id: cloudJobId,
-      status: CloudTaskStatus.Preparing,
+      status: RunStatus.Preparing,
     });
 
     const {
@@ -105,7 +105,7 @@ export async function snapshot({
 
     await sdk.cloudJobs.update({
       id: cloudJobId,
-      status: CloudTaskStatus.Running,
+      status: RunStatus.Running,
     });
 
     // Enqueue snapshot request via SDK.
@@ -143,7 +143,7 @@ export async function snapshot({
 
     await sdk.cloudJobs.done({
       id: cloudJobId,
-      status: CloudTaskStatus.Failed,
+      status: RunStatus.Failed,
       error: message,
     });
 

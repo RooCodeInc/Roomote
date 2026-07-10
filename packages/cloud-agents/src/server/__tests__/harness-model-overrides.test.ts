@@ -1,5 +1,5 @@
 import {
-  type CloudTask,
+  type TaskSpec,
   TaskPayloadKind,
   DEFAULT_TASK_MODEL_SETTINGS,
   getDefaultTaskModelId,
@@ -9,15 +9,15 @@ import { describe, expect, it } from 'vitest';
 import { resolveEffectiveHarnessModelState } from '../harness-model-overrides';
 
 function makeTask(
-  harnessModelOverrides?: CloudTask['payload']['harnessModelOverrides'],
+  harnessModelOverrides?: TaskSpec['payload']['harnessModelOverrides'],
   type: TaskPayloadKind = TaskPayloadKind.StandardTask,
-): CloudTask {
+): TaskSpec {
   return {
     type,
     payload: {
       ...(harnessModelOverrides ? { harnessModelOverrides } : {}),
     },
-  } as unknown as CloudTask;
+  } as unknown as TaskSpec;
 }
 
 describe('resolveEffectiveHarnessModelState', () => {

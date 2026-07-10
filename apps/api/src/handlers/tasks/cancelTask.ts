@@ -7,7 +7,7 @@ import {
   syncTaskStateFromRuns,
   taskRuns,
 } from '@roomote/db/server';
-import { CloudTaskStatus, isExitedCloudTaskStatus } from '@roomote/types';
+import { RunStatus, isExitedRunStatus } from '@roomote/types';
 
 import type { Variables } from '../../types';
 import type { McpAuth } from '../mcp/middleware';
@@ -35,7 +35,7 @@ export async function cancelTask(
       return c.json({ success: false, error: 'Task not found' }, 404);
     }
 
-    if (isExitedCloudTaskStatus(job.status)) {
+    if (isExitedRunStatus(job.status)) {
       return c.json(
         {
           success: false,
@@ -51,7 +51,7 @@ export async function cancelTask(
       await tx
         .update(taskRuns)
         .set({
-          status: CloudTaskStatus.Canceled,
+          status: RunStatus.Canceled,
           cancelRequestedAt: endedAt,
           canceledAt: endedAt,
         })

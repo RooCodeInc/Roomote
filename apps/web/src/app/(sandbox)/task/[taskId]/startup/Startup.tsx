@@ -3,8 +3,8 @@
 import { useCallback } from 'react';
 import { SSEProvider } from 'react-hooks-sse';
 
-import { TaskPayloadKind, type CloudTaskStatus } from '@roomote/types';
-import type { CloudJob } from '@roomote/db';
+import { TaskPayloadKind, type RunStatus } from '@roomote/types';
+import type { Run } from '@roomote/db';
 
 import { useRestoreCloudJobSnapshot } from '@/hooks/snapshots';
 import { getCloudJobError } from '@/lib/cloud-job-errors';
@@ -14,8 +14,8 @@ import { useStartupProgress } from './useStartupProgress';
 
 interface StartupProps {
   cloudJobId: number;
-  initialCloudJob?: CloudJob;
-  onStatusChange?: (status: CloudTaskStatus) => void;
+  initialCloudJob?: Run;
+  onStatusChange?: (status: RunStatus) => void;
 }
 
 export const Startup = ({
@@ -47,8 +47,8 @@ export const Startup = ({
 
 interface StartupInnerProps {
   cloudJobId: number;
-  initialCloudJob?: CloudJob;
-  onStatusChange?: (status: CloudTaskStatus) => void;
+  initialCloudJob?: Run;
+  onStatusChange?: (status: RunStatus) => void;
 }
 
 const StartupInner = ({
@@ -92,7 +92,7 @@ const StartupInner = ({
 
 interface SnapshotResumeFailureFooterProps {
   cloudJob: Pick<
-    CloudJob,
+    Run,
     | 'error'
     | 'result'
     | 'sourceRunId'

@@ -4,7 +4,7 @@ import { fileURLToPath } from 'node:url';
 
 import {
   type ComputeProvider,
-  CloudTaskStatus,
+  RunStatus,
   TaskPayloadKind,
   resolveComputeProviderTarget,
   SANDBOX_ORPHAN_SCAN_INTERVAL_MS,
@@ -14,7 +14,7 @@ import { createJobToken } from '@roomote/auth';
 import { Env } from '@roomote/env';
 import { getRedis, REDIS_KEYS } from '@roomote/redis';
 import {
-  type CloudJob,
+  type Run,
   db,
   taskRuns,
   buildPendingEnvironmentSnapshotMatchForCloudJob,
@@ -26,7 +26,7 @@ import {
   isNull,
 } from '@roomote/db/server';
 import { dequeueCloudTask } from '@roomote/cloud-agents/server';
-import { finishCloudJob } from '@roomote/sdk/server';
+import { finishRun } from '@roomote/sdk/server';
 
 import { getOrphanedJob } from './orphaned-cloud-jobs';
 import {
@@ -307,14 +307,14 @@ export abstract class BaseController {
   }
 
   protected abstract spawnFreshWorker(
-    cloudJob: CloudJob,
+    cloudJob: Run,
     authToken: string,
     deploymentSlug: string,
     sandboxTimeoutMs: number,
     provider: ComputeProvider,
   ): Promise<void>;
 
-  protected async spawnWorker(cloudJob: CloudJob): Promise<void> {
+  protected async spawnWorker(cloudJob: Run): Promise<void> {
     try {
       const dequeuedJob = await this.dequeueCloudJob(cloudJob);
 
@@ -345,7 +345,7 @@ export abstract class BaseController {
     }
   }
 
-  private spawnWorkerInBackground(cloudJob: CloudJob): boolean {
+  private spawnWorkerInBackground(cloudJob: Run): boolean {
     if (this.inFlightSpawns.has(cloudJob.id)) {
       console.warn(
         `[BaseController] Job #${cloudJob.id} is already being spawned, skipping`,
@@ -406,8 +406,8 @@ export abstract class BaseController {
   }
 
   protected async dequeueCloudJob(
-    cloudJob: CloudJob,
-  ): Promise<{ cloudJob: CloudJob; authToken: string } | null> {
+    cloudJob: Run,
+  ): Promise<{ cloudJob: Run; authToken: string } | null> {
     const sandboxTimeoutMs = SANDBOX_TIMEOUT_MS;
 
     // Jobs without a human driver run as the deployment service principal;
@@ -429,7 +429,7 @@ export abstract class BaseController {
     await db.transaction(async (tx) => {
       const updatedJobs = await tx
         .update(taskRuns)
-        .set({ status: CloudTaskStatus.Dequeued, dequeuedAt: new Date() })
+        .set({ status: RunStatus.Dequeued, dequeuedAt: new Date() })
         .where(
           and(
             eq(taskRuns.id, cloudJob.id),
@@ -452,7 +452,7 @@ export abstract class BaseController {
           'Controller dequeued cloud job and handed it to provider dispatch.',
         details: {
           stage: 'controller_dequeue',
-          status: CloudTaskStatus.Dequeued,
+          status: RunStatus.Dequeued,
           provider: resolveComputeProviderTarget(
             cloudJob.vendor,
             fallbackComputeProvider,
@@ -472,10 +472,7 @@ export abstract class BaseController {
         },
       });
 
-      if (
-        latestJob?.canceledAt ||
-        latestJob?.status === CloudTaskStatus.Canceled
-      ) {
+      if (latestJob?.canceledAt || latestJob?.status === RunStatus.Canceled) {
         return null;
       }
 
@@ -484,7 +481,7 @@ export abstract class BaseController {
       }
 
       throw new Error(
-        `Job ${cloudJob.id}: failed to transition from ${cloudJob.status} to ${CloudTaskStatus.Dequeued}`,
+        `Job ${cloudJob.id}: failed to transition from ${cloudJob.status} to ${RunStatus.Dequeued}`,
       );
     }
 
@@ -492,7 +489,7 @@ export abstract class BaseController {
   }
 
   protected async handleSpawnJobError(
-    cloudJob: CloudJob,
+    cloudJob: Run,
     error: unknown,
   ): Promise<void> {
     const errorMessage = error instanceof Error ? error.message : String(error);
@@ -511,9 +508,9 @@ export abstract class BaseController {
 
     // Use the centralized termination path so all side-effects (email, Slack,
     // Linear notifications, lock release, etc.) are applied consistently.
-    await finishCloudJob({
+    await finishRun({
       id: cloudJob.id,
-      status: CloudTaskStatus.Failed,
+      status: RunStatus.Failed,
       error: errorMessage,
     });
 

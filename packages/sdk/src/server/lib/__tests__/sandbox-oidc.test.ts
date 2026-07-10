@@ -39,7 +39,7 @@ vi.mock('@roomote/types', async (importOriginal) => {
 
   return {
     ...actual,
-    CloudTaskStatus: {
+    RunStatus: {
       Completed: 'completed',
       Failed: 'failed',
       Canceled: 'canceled',

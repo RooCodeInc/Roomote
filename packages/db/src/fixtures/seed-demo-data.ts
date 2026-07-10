@@ -1,6 +1,6 @@
 import { and, eq } from 'drizzle-orm';
 
-import { CloudTaskStatus } from '@roomote/types';
+import { RunStatus } from '@roomote/types';
 
 import type { CreateUser } from '../types';
 import {
@@ -47,7 +47,7 @@ export const demoSeedTasks = [
     title: 'Fix login redirect loop on expired sessions',
     mode: 'code',
     state: 'completed',
-    cloudJobStatus: CloudTaskStatus.Completed,
+    cloudJobStatus: RunStatus.Completed,
     repositoryFullName: 'roomote-demo/demo-web',
   },
   {
@@ -55,7 +55,7 @@ export const demoSeedTasks = [
     title: 'Add webhook retries with exponential backoff',
     mode: 'code',
     state: 'completed',
-    cloudJobStatus: CloudTaskStatus.Completed,
+    cloudJobStatus: RunStatus.Completed,
     repositoryFullName: 'roomote-demo/demo-api',
   },
   {
@@ -63,7 +63,7 @@ export const demoSeedTasks = [
     title: 'Explain how session tokens are validated',
     mode: 'ask',
     state: 'active',
-    cloudJobStatus: CloudTaskStatus.Running,
+    cloudJobStatus: RunStatus.Running,
     repositoryFullName: 'roomote-demo/demo-api',
   },
 ] as const;

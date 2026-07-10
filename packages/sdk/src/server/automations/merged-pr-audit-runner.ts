@@ -1,6 +1,6 @@
 import {
   buildRepositoryCoverage,
-  enqueueCloudTask,
+  enqueueTask,
   formatRepositoryEnvironmentLines,
   type RepositoryCoverage,
 } from '@roomote/cloud-agents/server';
@@ -398,7 +398,7 @@ async function processDeployment(
 
     // Automation scans run as the deployment service principal; a manual
     // trigger is still an automation launch, just with a manual trigger.
-    const launchResult = await enqueueCloudTask({
+    const launchResult = await enqueueTask({
       task: {
         type: TaskPayloadKind.Scan,
         payload: {

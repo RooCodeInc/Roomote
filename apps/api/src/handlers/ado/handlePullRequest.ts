@@ -1,12 +1,12 @@
 import pMap from 'p-map';
 
 import {
-  type CloudTaskPayload,
+  type TaskPayload,
   DEFAULT_PR_REVIEWER_SETTINGS,
   type PrReviewerSettings,
   TaskPayloadKind,
   CloudAgentType,
-  CloudTaskStatus,
+  RunStatus,
 } from '@roomote/types';
 import {
   db,
@@ -20,7 +20,7 @@ import {
   isNull,
   sql,
 } from '@roomote/db/server';
-import { enqueueCloudTask } from '@roomote/cloud-agents/server';
+import { enqueueTask } from '@roomote/cloud-agents/server';
 import { updateTaskPrStatus } from '@roomote/sdk/server';
 
 import type { WebhookResponse } from '../../types';
@@ -163,7 +163,7 @@ async function getAdoSyncReviewDecision({
         eq(taskPullRequests.repository, repoFullName),
         eq(taskPullRequests.prNumber, prNumber),
         eq(taskPullRequests.prSha, headSha),
-        sql`${taskRuns.status} != ${CloudTaskStatus.Failed}`,
+        sql`${taskRuns.status} != ${RunStatus.Failed}`,
         isNull(taskRuns.canceledAt),
       ),
     )
@@ -191,7 +191,7 @@ async function getAdoSyncReviewDecision({
         eq(taskPullRequests.sourceControlProvider, 'ado'),
         eq(taskPullRequests.repository, repoFullName),
         eq(taskPullRequests.prNumber, prNumber),
-        sql`${taskRuns.status} != ${CloudTaskStatus.Failed}`,
+        sql`${taskRuns.status} != ${RunStatus.Failed}`,
         sql`${taskPullRequests.prSha} != ${headSha}`,
         isNotNull(taskPullRequests.prSha),
         isNull(taskRuns.canceledAt),
@@ -325,7 +325,7 @@ export async function handleAdoPullRequest(
   const prAuthorId = pullRequest.createdBy?.id?.trim() || prAuthorName;
 
   const enqueued = await pMap(targets, async (_target) =>
-    enqueueCloudTask(
+    enqueueTask(
       {
         task: {
           type: taskType,
@@ -340,7 +340,7 @@ export async function handleAdoPullRequest(
             ...(branchName ? { branch: branchName } : {}),
             ...(headSha ? { sha: headSha } : {}),
             targetBranch,
-          } satisfies CloudTaskPayload<typeof taskType>,
+          } satisfies TaskPayload<typeof taskType>,
         },
         initiator: {
           kind: 'automation',

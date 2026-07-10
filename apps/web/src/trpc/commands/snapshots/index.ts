@@ -1,6 +1,6 @@
 import {
-  type CloudTaskPayload,
-  activeCloudTaskStatuses,
+  type TaskPayload,
+  activeRunStatuses,
   TaskPayloadKind,
   ORPHANED_PENDING_THRESHOLD_MS,
   populateSnapshotResumeSlackMetadata,
@@ -9,7 +9,7 @@ import {
   resolveComputeProviderTarget,
 } from '@roomote/types';
 import type { ModalClient as _ModalSdkClient } from 'modal';
-import { enqueueCloudTask } from '@roomote/cloud-agents/server';
+import { enqueueTask } from '@roomote/cloud-agents/server';
 import { createComputeProviderClient } from '@roomote/compute-providers/factory';
 import { createClient } from '@roomote/sdk/client';
 import {
@@ -103,7 +103,7 @@ async function findActiveEnvironmentSnapshotJob(params: {
       and(
         eq(tasks.workflow, 'env_snapshot'),
         eq(taskRuns.vendor, params.provider),
-        inArray(taskRuns.status, [...activeCloudTaskStatuses]),
+        inArray(taskRuns.status, [...activeRunStatuses]),
         sql`${taskRuns.payload}->>'environmentId' = ${params.environmentId}`,
       ),
     )
@@ -203,7 +203,7 @@ export async function createEnvironmentSnapshotCommand(
     }
 
     try {
-      const snapshotLaunch = await enqueueCloudTask({
+      const snapshotLaunch = await enqueueTask({
         task: {
           computeProvider: provider,
           type: TaskPayloadKind.SnapshotEnvironment,
@@ -497,7 +497,7 @@ export async function restoreCloudJobSnapshotCommand(
       outOfBandContext = await claimOutOfBandContextForPrompt(sourceJob.taskId);
     }
 
-    const payload: CloudTaskPayload<typeof TaskPayloadKind.SnapshotResume> = {
+    const payload: TaskPayload<typeof TaskPayloadKind.SnapshotResume> = {
       repo: sourceJob.payload.repo,
       environmentId: sourceJob.payload.environmentId,
       port: sourceJob.port ?? undefined,
@@ -527,7 +527,7 @@ export async function restoreCloudJobSnapshotCommand(
       sourceJob.sourceRunId,
     );
 
-    const resumeLaunch = await enqueueCloudTask({
+    const resumeLaunch = await enqueueTask({
       task: {
         computeProvider:
           sourceJob.vendor ?? resolveComputeProviderTarget(undefined),

@@ -26,6 +26,8 @@ export type SetupSourceControlFieldStatus =
   SetupSourceControlFieldDescriptor & {
     runtimeSatisfied: boolean;
     savedSatisfied: boolean;
+    /** Plain-text value for non-secret fields; secrets never round-trip here. */
+    savedValue?: string | null;
     satisfiedByEnvVarName: string | null;
   };
 
@@ -67,6 +69,12 @@ export function isRequiredField(field: SetupSourceControlFieldDescriptor) {
   return field.required !== false;
 }
 
+function isSecretSourceControlField(
+  field: Pick<SetupSourceControlFieldDescriptor, 'secret'>,
+): boolean {
+  return field.secret === true;
+}
+
 function isConfiguredEnvValue(
   value: string | null | undefined,
 ): value is string {
@@ -85,6 +93,20 @@ export const SETUP_SOURCE_CONTROL_PROVIDER_CATALOG = sourceControlProviders.map(
     };
   },
 );
+
+/**
+ * Non-secret source-control env var names (including accepted aliases) that
+ * the Settings/setup UIs may surface as plain text via `savedValue`.
+ */
+export const NON_SECRET_SOURCE_CONTROL_ENV_VAR_NAMES: readonly string[] = [
+  ...new Set(
+    SETUP_SOURCE_CONTROL_PROVIDER_CATALOG.flatMap((descriptor) =>
+      descriptor.fields
+        .filter((field) => !isSecretSourceControlField(field))
+        .flatMap((field) => field.acceptedEnvVarNames),
+    ),
+  ),
+];
 
 const SETUP_SOURCE_CONTROL_PROVIDER_BY_PROVIDER = new Map<
   SourceControlProvider,
@@ -296,6 +318,7 @@ function buildProviderFields(
 export function buildSetupSourceControlStatus(input: {
   runtimeEnv?: Partial<Record<string, string | undefined>> | null;
   persistedEnvVarNames?: Iterable<string>;
+  persistedEnvVarValues?: Partial<Record<string, string>>;
   selectedProvider?: SourceControlProvider | null;
   connectedProviders?: Iterable<SourceControlProvider>;
   repositoryCounts?: Partial<Record<SourceControlProvider, number>>;
@@ -305,6 +328,7 @@ export function buildSetupSourceControlStatus(input: {
   const persistedEnvVarNameSet = new Set(
     Array.from(input.persistedEnvVarNames ?? []).map((name) => name.trim()),
   );
+  const persistedEnvVarValues = input.persistedEnvVarValues ?? {};
   const connectedProviderSet = new Set(input.connectedProviders ?? []);
   const repositoryCounts = input.repositoryCounts ?? {};
 
@@ -316,11 +340,21 @@ export function buildSetupSourceControlStatus(input: {
       const savedMatch = field.acceptedEnvVarNames.find((envVarName) =>
         persistedEnvVarNameSet.has(envVarName),
       );
+      const runtimeValue = runtimeMatch
+        ? runtimeEnv[runtimeMatch]?.trim() || null
+        : null;
+      const persistedValue = savedMatch
+        ? persistedEnvVarValues[savedMatch]?.trim() || null
+        : null;
+      const savedValue = isSecretSourceControlField(field)
+        ? null
+        : (runtimeValue ?? persistedValue);
 
       return {
         ...field,
         runtimeSatisfied: runtimeMatch !== undefined,
         savedSatisfied: savedMatch !== undefined,
+        savedValue,
         satisfiedByEnvVarName: runtimeMatch ?? savedMatch ?? null,
       };
     });

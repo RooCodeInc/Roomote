@@ -151,7 +151,7 @@ export async function startAutoRoutedSlackTask({
     'botUserId' | 'teamId' | 'teamDomain'
   >;
   slack: SlackNotifier;
-  /** Forwarded verbatim to startSlackAppMentionTask / enqueueCloudTask. */
+  /** Forwarded verbatim to startSlackAppMentionTask / enqueueTask. */
   initiator: TaskInitiator;
   trigger: TaskTrigger;
   workflow?: Extract<TaskWorkflow, 'standard' | 'eval'>;

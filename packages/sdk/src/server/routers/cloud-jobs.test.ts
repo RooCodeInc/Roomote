@@ -2,13 +2,13 @@ import { z } from 'zod';
 
 import {
   ACP_ENVELOPE_EVENT_TYPES,
-  CloudTaskStatus,
+  RunStatus,
   TaskPayloadKind,
 } from '@roomote/types';
 import type { AuthTokenContext, JobTokenContext } from '@roomote/types';
 
 const {
-  mockEnqueueCloudTask,
+  mockEnqueueTask,
   mockEvaluateFeatureFlag,
   mockFindCloudJob,
   mockFindCloudJobForAccess,
@@ -23,7 +23,7 @@ const {
   mockRecordTaskInferenceUsage,
   mockUpdateCloudJob,
 } = vi.hoisted(() => ({
-  mockEnqueueCloudTask: vi.fn(),
+  mockEnqueueTask: vi.fn(),
   mockEvaluateFeatureFlag: vi.fn(),
   mockFindCloudJob: vi.fn(),
   mockFindCloudJobForAccess: vi.fn(),
@@ -40,7 +40,7 @@ const {
 }));
 
 vi.mock('@roomote/cloud-agents/server', () => ({
-  enqueueCloudTask: mockEnqueueCloudTask,
+  enqueueTask: mockEnqueueTask,
 }));
 
 vi.mock('@roomote/feature-flags/server', () => ({
@@ -96,7 +96,7 @@ vi.mock('../lib/cloud-jobs', () => ({
   findCloudJob: mockFindCloudJob,
   findCloudJobByIdAndOrgId: mockFindCloudJobByIdAndOrgId,
   findCloudJobByJobTokenClaims: mockFindCloudJobByJobTokenClaims,
-  finishCloudJob: vi.fn(),
+  finishRun: vi.fn(),
   getMessageSources: vi.fn(),
   getResolvedGitAuthor: vi.fn(),
   getResolvedRuntimeEnvVars: vi.fn(),
@@ -165,7 +165,7 @@ function createJobCaller() {
 describe('cloudJobsRouter queue message guards', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    mockEnqueueCloudTask.mockResolvedValue({ id: 99, taskId: 'task-99' });
+    mockEnqueueTask.mockResolvedValue({ id: 99, taskId: 'task-99' });
     mockEvaluateFeatureFlag.mockResolvedValue(false);
     mockFindCloudJob.mockResolvedValue({ id: 42 });
     mockFindCloudJobForAccess.mockResolvedValue({ id: 42 });
@@ -190,7 +190,7 @@ describe('cloudJobsRouter queue message guards', () => {
     // drop the field so it never reaches the persistence layer.
     await createJobCaller().update({
       id: 42,
-      status: CloudTaskStatus.Running,
+      status: RunStatus.Running,
       actingUserId: 'victim-user',
     } as never);
 
@@ -198,18 +198,36 @@ describe('cloudJobsRouter queue message guards', () => {
     const [persistedId, persistedValues] = mockUpdateCloudJob.mock.calls[0]!;
     expect(persistedId).toBe(42);
     expect(persistedValues).not.toHaveProperty('actingUserId');
-    expect(persistedValues).toEqual({ status: CloudTaskStatus.Running });
+    expect(persistedValues).toEqual({ status: RunStatus.Running });
   });
 
-  it('still persists legitimate non-actingUserId update fields for the job token', async () => {
+  it('strips taskId from job-token update input (run->task binding guard)', async () => {
+    // A job token is held by the sandbox runtime. Allowing it to write taskId
+    // would let a compromised sandbox re-point its run at a different task,
+    // corrupting attribution, visibility, and PR linkage. The schema must drop
+    // the field so it never reaches the persistence layer.
     await createJobCaller().update({
       id: 42,
-      status: CloudTaskStatus.Running,
+      status: RunStatus.Running,
+      taskId: 'attacker-task',
+    } as never);
+
+    expect(mockUpdateCloudJob).toHaveBeenCalledTimes(1);
+    const [persistedId2, persistedValues2] = mockUpdateCloudJob.mock.calls[0]!;
+    expect(persistedId2).toBe(42);
+    expect(persistedValues2).not.toHaveProperty('taskId');
+    expect(persistedValues2).toEqual({ status: RunStatus.Running });
+  });
+
+  it('still persists legitimate non-stripped update fields for the job token', async () => {
+    await createJobCaller().update({
+      id: 42,
+      status: RunStatus.Running,
       result: { ok: true },
     });
 
     expect(mockUpdateCloudJob).toHaveBeenCalledWith(42, {
-      status: CloudTaskStatus.Running,
+      status: RunStatus.Running,
       result: { ok: true },
     });
   });
@@ -552,7 +570,7 @@ describe('cloudJobsRouter queue message guards', () => {
       }),
     ).resolves.toEqual({ id: 99, taskId: 'task-99' });
 
-    expect(mockEnqueueCloudTask).toHaveBeenCalledWith(
+    expect(mockEnqueueTask).toHaveBeenCalledWith(
       expect.objectContaining({
         task: expect.objectContaining({
           computeProvider: 'modal',
@@ -579,7 +597,7 @@ describe('cloudJobsRouter queue message guards', () => {
     ).resolves.toEqual({ id: 99, taskId: 'task-99' });
 
     expect(mockEvaluateFeatureFlag).not.toHaveBeenCalled();
-    expect(mockEnqueueCloudTask).toHaveBeenCalledWith({
+    expect(mockEnqueueTask).toHaveBeenCalledWith({
       task: {
         type: TaskPayloadKind.StandardTask,
         payload: {
@@ -610,7 +628,7 @@ describe('cloudJobsRouter queue message guards', () => {
       } as never),
     ).rejects.toThrow();
 
-    expect(mockEnqueueCloudTask).not.toHaveBeenCalled();
+    expect(mockEnqueueTask).not.toHaveBeenCalled();
   });
 
   it('accepts snapshot resumes through the resume input shape', async () => {
@@ -628,7 +646,7 @@ describe('cloudJobsRouter queue message guards', () => {
       }),
     ).resolves.toEqual({ id: 99, taskId: 'task-99' });
 
-    expect(mockEnqueueCloudTask).toHaveBeenCalledWith(
+    expect(mockEnqueueTask).toHaveBeenCalledWith(
       expect.objectContaining({
         actingUserId: 'user-2',
         task: expect.objectContaining({

@@ -3,7 +3,7 @@ import { z } from 'zod';
 
 import {
   ALL_REPOSITORIES,
-  type CloudTaskPayload,
+  type TaskPayload,
   TaskPayloadKind,
   getScheduledSuggestionBackgroundAutomationDescriptor,
   isBetaBackgroundAutomationKey,
@@ -89,7 +89,7 @@ const submitTaskSuggestionsBodySchema = z.object({
 const SETUP_ONBOARDING_SUGGESTION_METADATA_EVENT_TYPE =
   'roomote.setup_onboarding_suggestion';
 
-type SuggestedTasksPayload = CloudTaskPayload<typeof TaskPayloadKind.Scan>;
+type SuggestedTasksPayload = TaskPayload<typeof TaskPayloadKind.Scan>;
 
 type PersistedTaskSuggestion = {
   id: string;

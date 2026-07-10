@@ -1,11 +1,11 @@
 import {
   ALL_REPOSITORIES,
-  type CloudTaskPayload,
+  type TaskPayload,
   TaskPayloadKind,
   populateSnapshotResumeSlackMetadata,
   restoreSnapshotResumeVisiblePromptFields,
 } from '@roomote/types';
-import { enqueueCloudTask } from '@roomote/cloud-agents/server';
+import { enqueueTask } from '@roomote/cloud-agents/server';
 import { getRedis } from '@roomote/redis';
 
 import { peekLinearMessageCount } from './peek-linear-messages';
@@ -117,9 +117,7 @@ export async function drainLinearMessagesToResumeJob(
     selectedRepositories && selectedRepositories.length > 0
       ? selectedRepositories
       : undefined;
-  const payloadForResume: CloudTaskPayload<
-    typeof TaskPayloadKind.SnapshotResume
-  > = {
+  const payloadForResume: TaskPayload<typeof TaskPayloadKind.SnapshotResume> = {
     repo,
     environmentId,
     selectedRepositories: scopedSelectedRepositories,
@@ -134,7 +132,7 @@ export async function drainLinearMessagesToResumeJob(
   restoreSnapshotResumeVisiblePromptFields(payloadForResume, payload);
 
   let messages: Awaited<ReturnType<typeof getLinearMessages>> = [];
-  let resumeLaunch: Awaited<ReturnType<typeof enqueueCloudTask>>;
+  let resumeLaunch: Awaited<ReturnType<typeof enqueueTask>>;
 
   try {
     messages = await getLinearMessages(sourceJob.id);
@@ -154,7 +152,7 @@ export async function drainLinearMessagesToResumeJob(
     const resumeActingUserId =
       [...messages].reverse().find((message) => message.userId)?.userId ?? null;
 
-    resumeLaunch = await enqueueCloudTask({
+    resumeLaunch = await enqueueTask({
       task: {
         type: TaskPayloadKind.SnapshotResume,
         sourceSnapshotId: snapshotId,

@@ -1,14 +1,14 @@
 import {
-  type CloudTask,
+  type TaskSpec,
   type AuthTokenContext,
   type JobTokenContext,
   type RequestedWorkKind,
-  CloudTaskStatus,
-  cloudTaskSchema,
+  RunStatus,
+  taskSpecSchema,
   resolveSourceControlProviderFromPayload,
 } from '@roomote/types';
 import {
-  type CloudJob,
+  type Run,
   type Task,
   db,
   taskRuns,
@@ -71,11 +71,11 @@ export function buildDequeuedTaskContext(task: Task): DequeuedTaskContext {
 type DequeueResult =
   | {
       error: true;
-      cloudJob?: CloudJob;
+      cloudJob?: Run;
     }
   | {
       error: false;
-      cloudJob: CloudJob;
+      cloudJob: Run;
       task: DequeuedTaskContext;
       requestedWorkKind: RequestedWorkKind;
       gitHubToken: string;
@@ -90,7 +90,7 @@ type DequeueResult =
       artifacts: Record<string, unknown>;
     };
 
-export function shouldInitializeWithoutPrompt(cloudTask: CloudTask): boolean {
+export function shouldInitializeWithoutPrompt(cloudTask: TaskSpec): boolean {
   if (
     'description' in cloudTask.payload &&
     typeof cloudTask.payload.description === 'string' &&
@@ -115,11 +115,11 @@ export function shouldInitializeWithoutPrompt(cloudTask: CloudTask): boolean {
 }
 
 /**
- * Builds the CloudTask candidate for schema validation from a run row. The
+ * Builds the TaskSpec candidate for schema validation from a run row. The
  * discriminated union re-keys on `type`, which is stored as
  * `task_runs.payload_kind`.
  */
-function buildCloudTaskCandidate(run: CloudJob): Record<string, unknown> {
+function buildCloudTaskCandidate(run: Run): Record<string, unknown> {
   return {
     type: run.payloadKind,
     harness: run.harness,
@@ -218,7 +218,7 @@ async function recordBootstrapPhase<T>(input: {
  */
 async function persistGithubPrReviewCommentId(
   taskId: string,
-  payload: CloudJob['payload'],
+  payload: Run['payload'],
   commentId: number,
 ): Promise<void> {
   const repository =
@@ -256,7 +256,7 @@ export const dequeueCloudJob = async (
   {
     onBootstrapFailure,
   }: {
-    onBootstrapFailure?: (error: Error, cloudJob: CloudJob) => void;
+    onBootstrapFailure?: (error: Error, cloudJob: Run) => void;
   } = {},
 ) => {
   try {
@@ -266,12 +266,12 @@ export const dequeueCloudJob = async (
     const tag = '[dequeueCloudJob]';
 
     type TransactionResult =
-      | { error: true; cloudJob?: CloudJob }
+      | { error: true; cloudJob?: Run }
       | {
           error: false;
-          cloudJob: CloudJob;
+          cloudJob: Run;
           task: Task;
-          cloudTask: CloudTask;
+          cloudTask: TaskSpec;
           envVars: Record<string, string>;
           orgAgentInstructions?: string;
           styleGuidance?: string;
@@ -288,7 +288,7 @@ export const dequeueCloudJob = async (
       // 2. SKIP LOCKED means if another transaction has already locked a row, skip it.
       // 3. The UPDATE then modifies only that specific locked row.
       // 4. This ensures only ONE worker can claim each run, even with concurrent requests.
-      const [dequeued] = await tx.execute<Pick<CloudJob, 'id'>>(query);
+      const [dequeued] = await tx.execute<Pick<Run, 'id'>>(query);
 
       const cloudJob = dequeued
         ? await tx.query.taskRuns.findFirst({
@@ -318,13 +318,13 @@ export const dequeueCloudJob = async (
         },
       });
 
-      const parsed = cloudTaskSchema.safeParse(
+      const parsed = taskSpecSchema.safeParse(
         buildCloudTaskCandidate(cloudJob),
       );
 
       if (!parsed.success) {
         console.error(
-          `${tag} cloudTaskSchema.safeParse failed: ${parsed.error.message} -> ${JSON.stringify(cloudJob)}`,
+          `${tag} taskSpecSchema.safeParse failed: ${parsed.error.message} -> ${JSON.stringify(cloudJob)}`,
         );
 
         reportBootstrapFailure({
@@ -364,7 +364,7 @@ export const dequeueCloudJob = async (
           'Worker claimed dequeued cloud job and started execution bootstrap.',
         details: {
           stage: 'worker_bootstrap',
-          status: CloudTaskStatus.Processing,
+          status: RunStatus.Processing,
           vendor: cloudJob.vendor ?? null,
           machineId: cloudJob.machineId ?? null,
           sourceSnapshotId: cloudJob.sourceSnapshotId ?? null,

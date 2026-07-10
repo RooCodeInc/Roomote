@@ -1,7 +1,7 @@
 const {
   buildSlackRoutingContextMock,
   routeTaskMock,
-  enqueueCloudTaskMock,
+  enqueueTaskMock,
   findActiveSlackJobMock,
   classifyFollowUpMock,
   getTaskUrlMock,
@@ -31,7 +31,7 @@ const {
 } = vi.hoisted(() => ({
   buildSlackRoutingContextMock: vi.fn(),
   routeTaskMock: vi.fn(),
-  enqueueCloudTaskMock: vi.fn(),
+  enqueueTaskMock: vi.fn(),
   findActiveSlackJobMock: vi.fn(),
   classifyFollowUpMock: vi.fn(),
   getTaskUrlMock: vi.fn(),
@@ -63,7 +63,7 @@ const {
 vi.mock('@roomote/cloud-agents/server', () => ({
   buildSlackRoutingContext: buildSlackRoutingContextMock,
   routeTask: routeTaskMock,
-  enqueueCloudTask: enqueueCloudTaskMock,
+  enqueueTask: enqueueTaskMock,
   classifyFollowUp: classifyFollowUpMock,
   detectSlackMcpSetupRequirement: vi.fn().mockResolvedValue(null),
   getTaskUrl: getTaskUrlMock,
@@ -243,7 +243,7 @@ describe('Slack deleted-mention suppression', () => {
       },
     });
     findActiveSlackJobMock.mockResolvedValue(null);
-    enqueueCloudTaskMock.mockResolvedValue({ id: 42, taskId: 'task_123' });
+    enqueueTaskMock.mockResolvedValue({ id: 42, taskId: 'task_123' });
     normalizeIncomingTextMock.mockImplementation(async (text: string) => text);
     getChannelNameMock.mockResolvedValue('eng-routing');
     fetchThreadMessagesMock.mockResolvedValue([]);
@@ -299,7 +299,7 @@ describe('Slack deleted-mention suppression', () => {
       threadTs: '111.222',
       messageTs: '111.222',
     });
-    expect(enqueueCloudTaskMock).not.toHaveBeenCalled();
+    expect(enqueueTaskMock).not.toHaveBeenCalled();
     expect(postMessageMock).not.toHaveBeenCalled();
     expect(hsetMock).not.toHaveBeenCalled();
   });
@@ -343,7 +343,7 @@ describe('Slack deleted-mention suppression', () => {
     expect(
       JSON.stringify(postMessageMock.mock.calls.at(-1)?.[0] ?? {}),
     ).not.toMatch(/Cloud Agents|background agents/);
-    expect(enqueueCloudTaskMock).not.toHaveBeenCalled();
+    expect(enqueueTaskMock).not.toHaveBeenCalled();
   });
 
   it('starts immediate routed tasks without passing pre-classified requested work kind', async () => {
@@ -371,7 +371,7 @@ describe('Slack deleted-mention suppression', () => {
       threadId: '111.222',
       startedImmediately: true,
     });
-    expect(enqueueCloudTaskMock).toHaveBeenCalledWith(
+    expect(enqueueTaskMock).toHaveBeenCalledWith(
       expect.objectContaining({
         channels: expect.objectContaining({
           slackThreadTs: '111.222',
@@ -379,7 +379,7 @@ describe('Slack deleted-mention suppression', () => {
       }),
       expect.anything(),
     );
-    expect(enqueueCloudTaskMock).toHaveBeenCalledWith(
+    expect(enqueueTaskMock).toHaveBeenCalledWith(
       expect.objectContaining({
         task: expect.not.objectContaining({
           requestedWorkKindDecision: expect.anything(),
@@ -449,7 +449,7 @@ describe('Slack deleted-mention suppression', () => {
         ],
       }),
     );
-    expect(enqueueCloudTaskMock).toHaveBeenCalledWith(
+    expect(enqueueTaskMock).toHaveBeenCalledWith(
       expect.objectContaining({
         task: expect.objectContaining({
           payload: expect.objectContaining({
@@ -667,7 +667,7 @@ describe('Slack deleted-mention suppression', () => {
       startedImmediately: true,
     });
     expect(hsetMock).not.toHaveBeenCalled();
-    expect(enqueueCloudTaskMock).toHaveBeenCalledWith(
+    expect(enqueueTaskMock).toHaveBeenCalledWith(
       expect.objectContaining({
         task: expect.objectContaining({
           payload: expect.objectContaining({
@@ -721,6 +721,6 @@ describe('Slack deleted-mention suppression', () => {
     expect(evalMock).toHaveBeenCalledTimes(1);
     expect(updateMessageMock).not.toHaveBeenCalled();
     expect(postMessageMock).not.toHaveBeenCalled();
-    expect(enqueueCloudTaskMock).not.toHaveBeenCalled();
+    expect(enqueueTaskMock).not.toHaveBeenCalled();
   });
 });

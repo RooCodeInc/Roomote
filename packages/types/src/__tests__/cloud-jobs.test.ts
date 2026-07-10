@@ -1,7 +1,7 @@
 // pnpm --filter @roomote/types test src/__tests__/cloud-jobs.test.ts
 
 import {
-  type CloudTaskPayload,
+  type TaskPayload,
   DEFAULT_CODING_HARNESS,
   DEFAULT_LAUNCH_CODING_HARNESS,
   getCommunicationChannelFromTaskPayload,
@@ -12,19 +12,19 @@ import {
   getSlackThreadTsFromTaskPayload,
   getTaskToolActionIdFromInvocation,
   getTaskToolInvocation,
-  CloudTaskStatus,
+  RunStatus,
   TaskPayloadKind,
   EXPIRED_SNAPSHOT_RESUME_ERROR,
-  bootingCloudTaskStatuses,
-  cloudTaskSchema,
+  bootingRunStatuses,
+  taskSpecSchema,
   coerceLaunchCodingHarness,
-  isActivelyRunningCloudTask,
-  isCloudTaskExecutingTurn,
+  isActivelyRunningTask,
+  isTaskExecutingTurn,
   isPrReviewJob,
-  isResumableCloudTaskType,
+  isResumableTaskPayloadKind,
   isLaunchCodingHarness,
   isSnapshotResumable,
-  resolveCloudTaskWorkspace,
+  resolveTaskWorkspace,
   SUGGESTION_PRIORITY_EMOJIS,
   SUGGESTION_PRIORITY_LABELS,
   populateSnapshotResumeSlackMetadata,
@@ -37,7 +37,7 @@ import {
 
 describe('isPrReviewJob', () => {
   it('returns true for GithubPrReview type', () => {
-    const payload: CloudTaskPayload<typeof TaskPayloadKind.GithubPrReview> = {
+    const payload: TaskPayload<typeof TaskPayloadKind.GithubPrReview> = {
       repo: 'owner/repo',
       prNumber: 123,
       prTitle: 'Test PR',
@@ -49,14 +49,13 @@ describe('isPrReviewJob', () => {
   });
 
   it('returns true for GithubPrReviewSync type', () => {
-    const payload: CloudTaskPayload<typeof TaskPayloadKind.GithubPrReviewSync> =
-      {
-        repo: 'owner/repo',
-        prNumber: 123,
-        prTitle: 'Test PR',
-        prUrl: 'https://github.com/owner/repo/pull/123',
-        headSha: 'abc123',
-      };
+    const payload: TaskPayload<typeof TaskPayloadKind.GithubPrReviewSync> = {
+      repo: 'owner/repo',
+      prNumber: 123,
+      prTitle: 'Test PR',
+      prUrl: 'https://github.com/owner/repo/pull/123',
+      headSha: 'abc123',
+    };
 
     expect(isPrReviewJob(TaskPayloadKind.GithubPrReviewSync, payload)).toBe(
       true,
@@ -64,7 +63,7 @@ describe('isPrReviewJob', () => {
   });
 
   it('returns false for non-PR review types', () => {
-    const payload: CloudTaskPayload<typeof TaskPayloadKind.StandardTask> = {
+    const payload: TaskPayload<typeof TaskPayloadKind.StandardTask> = {
       repo: 'owner/repo',
       description: 'Test task',
     };
@@ -105,17 +104,17 @@ describe('shouldUseAppTokenOnly', () => {
   });
 });
 
-describe('isResumableCloudTaskType', () => {
+describe('isResumableTaskPayloadKind', () => {
   it('returns true for StandardTask jobs', () => {
-    expect(isResumableCloudTaskType(TaskPayloadKind.StandardTask)).toBe(true);
+    expect(isResumableTaskPayloadKind(TaskPayloadKind.StandardTask)).toBe(true);
   });
 
   it('returns true for Suggested Tasks jobs', () => {
-    expect(isResumableCloudTaskType(TaskPayloadKind.Scan)).toBe(true);
+    expect(isResumableTaskPayloadKind(TaskPayloadKind.Scan)).toBe(true);
   });
 
   it('returns false for GithubPrReview', () => {
-    expect(isResumableCloudTaskType(TaskPayloadKind.GithubPrReview)).toBe(
+    expect(isResumableTaskPayloadKind(TaskPayloadKind.GithubPrReview)).toBe(
       false,
     );
   });
@@ -242,9 +241,9 @@ describe('Task Tool invocation helpers', () => {
   });
 });
 
-describe('cloudTaskSchema', () => {
+describe('taskSpecSchema', () => {
   it('preserves sourceControlProvider on StandardTask payloads', () => {
-    const parsed = cloudTaskSchema.parse({
+    const parsed = taskSpecSchema.parse({
       userId: 'user-1',
       type: TaskPayloadKind.StandardTask,
       payload: {
@@ -264,7 +263,7 @@ describe('cloudTaskSchema', () => {
   });
 
   it('allows GitLab target branch metadata on PR review payloads', () => {
-    const parsed = cloudTaskSchema.parse({
+    const parsed = taskSpecSchema.parse({
       type: TaskPayloadKind.GithubPrReview,
       userId: 'user-1',
       payload: {
@@ -287,7 +286,7 @@ describe('cloudTaskSchema', () => {
   });
 
   it('allows Gitea target branch metadata on PR review payloads', () => {
-    const parsed = cloudTaskSchema.parse({
+    const parsed = taskSpecSchema.parse({
       type: TaskPayloadKind.GithubPrReview,
       userId: 'user-1',
       payload: {
@@ -311,7 +310,7 @@ describe('cloudTaskSchema', () => {
   });
 
   it('allows Azure DevOps target branch metadata on PR review payloads', () => {
-    const parsed = cloudTaskSchema.parse({
+    const parsed = taskSpecSchema.parse({
       type: TaskPayloadKind.GithubPrReview,
       userId: 'user-1',
       payload: {
@@ -336,7 +335,7 @@ describe('cloudTaskSchema', () => {
   });
 
   it('parses GithubPrReviewFollowUp payloads without any inner bootstrap mode', () => {
-    const parsed = cloudTaskSchema.parse({
+    const parsed = taskSpecSchema.parse({
       userId: 'user-1',
       type: TaskPayloadKind.GithubPrReviewFollowUp,
       payload: {
@@ -358,7 +357,7 @@ describe('cloudTaskSchema', () => {
   });
 
   it('normalizes legacy explicit_fix GithubPrReviewFollowUp payloads for backward compatibility', () => {
-    const parsed = cloudTaskSchema.parse({
+    const parsed = taskSpecSchema.parse({
       userId: 'user-1',
       type: TaskPayloadKind.GithubPrReviewFollowUp,
       payload: {
@@ -380,7 +379,7 @@ describe('cloudTaskSchema', () => {
   });
 
   it('parses SuggestedTasks payloads', () => {
-    const parsed = cloudTaskSchema.parse({
+    const parsed = taskSpecSchema.parse({
       userId: 'user-1',
       type: TaskPayloadKind.Scan,
       payload: {
@@ -410,7 +409,7 @@ describe('cloudTaskSchema', () => {
   });
 
   it('parses SuggestedTasks payloads with Slack routing metadata', () => {
-    const parsed = cloudTaskSchema.parse({
+    const parsed = taskSpecSchema.parse({
       userId: 'user-1',
       type: TaskPayloadKind.Scan,
       slackThreadTs: '111.222',
@@ -433,7 +432,7 @@ describe('cloudTaskSchema', () => {
   });
 
   it('parses Dependabot suggestion sources on SuggestedTasks payloads', () => {
-    const parsed = cloudTaskSchema.parse({
+    const parsed = taskSpecSchema.parse({
       userId: 'user-1',
       type: TaskPayloadKind.Scan,
       payload: {
@@ -453,7 +452,7 @@ describe('cloudTaskSchema', () => {
   });
 
   it('parses McpRecommendations payloads', () => {
-    const parsed = cloudTaskSchema.parse({
+    const parsed = taskSpecSchema.parse({
       userId: 'user-1',
       type: TaskPayloadKind.McpRecommendations,
       payload: {
@@ -489,7 +488,7 @@ describe('cloudTaskSchema', () => {
   });
 
   it('parses SlackAppMention payloads with an optional web return path', () => {
-    const parsed = cloudTaskSchema.parse({
+    const parsed = taskSpecSchema.parse({
       userId: 'user-1',
       type: TaskPayloadKind.SlackAppMention,
       payload: {
@@ -513,7 +512,7 @@ describe('cloudTaskSchema', () => {
   });
 
   it('parses StandardTask payloads', () => {
-    const parsed = cloudTaskSchema.parse({
+    const parsed = taskSpecSchema.parse({
       userId: 'user-1',
       type: TaskPayloadKind.StandardTask,
       payload: {
@@ -532,7 +531,7 @@ describe('cloudTaskSchema', () => {
   });
 
   it('parses shared reasoningEffort overrides on task payloads', () => {
-    const parsed = cloudTaskSchema.parse({
+    const parsed = taskSpecSchema.parse({
       userId: 'user-1',
       type: TaskPayloadKind.StandardTask,
       payload: {
@@ -550,7 +549,7 @@ describe('cloudTaskSchema', () => {
   });
 
   it('parses xhigh reasoningEffort overrides on task payloads', () => {
-    const parsed = cloudTaskSchema.parse({
+    const parsed = taskSpecSchema.parse({
       userId: 'user-1',
       type: TaskPayloadKind.StandardTask,
       payload: {
@@ -568,7 +567,7 @@ describe('cloudTaskSchema', () => {
   });
 
   it('parses OpenCode harness model overrides on task payloads', () => {
-    const parsed = cloudTaskSchema.parse({
+    const parsed = taskSpecSchema.parse({
       userId: 'user-1',
       type: TaskPayloadKind.StandardTask,
       payload: {
@@ -590,7 +589,7 @@ describe('cloudTaskSchema', () => {
   });
 
   it('parses hidden StandardTask bootstrap metadata without changing the description', () => {
-    const parsed = cloudTaskSchema.parse({
+    const parsed = taskSpecSchema.parse({
       userId: 'user-1',
       harness: 'opencode-server',
       type: TaskPayloadKind.StandardTask,
@@ -618,7 +617,7 @@ describe('cloudTaskSchema', () => {
   });
 
   it('parses top-level requested work kind metadata on cloud tasks', () => {
-    const parsed = cloudTaskSchema.parse({
+    const parsed = taskSpecSchema.parse({
       userId: 'user-1',
       requestedWorkKindDecision: {
         kind: 'plan',
@@ -640,7 +639,7 @@ describe('cloudTaskSchema', () => {
   });
 
   it('parses multi-repo subset payloads', () => {
-    const parsed = cloudTaskSchema.parse({
+    const parsed = taskSpecSchema.parse({
       userId: 'user-1',
       type: TaskPayloadKind.StandardTask,
       payload: {
@@ -661,7 +660,7 @@ describe('cloudTaskSchema', () => {
   });
 
   it('preserves visible prompt fields on SnapshotResume payloads', () => {
-    const parsed = cloudTaskSchema.parse({
+    const parsed = taskSpecSchema.parse({
       userId: 'user-1',
       type: TaskPayloadKind.SnapshotResume,
       payload: {
@@ -686,7 +685,7 @@ describe('cloudTaskSchema', () => {
   });
 
   it('normalizes legacy SnapshotEnvironment row attachments without source identity', () => {
-    const parsed = cloudTaskSchema.parse({
+    const parsed = taskSpecSchema.parse({
       userId: 'user-1',
       computeProvider: 'modal',
       type: TaskPayloadKind.SnapshotEnvironment,
@@ -711,7 +710,7 @@ describe('cloudTaskSchema', () => {
   });
 
   it('parses SnapshotEnvironment pending-row attachments', () => {
-    const parsed = cloudTaskSchema.parse({
+    const parsed = taskSpecSchema.parse({
       userId: 'user-1',
       computeProvider: 'modal',
       type: TaskPayloadKind.SnapshotEnvironment,
@@ -738,7 +737,7 @@ describe('cloudTaskSchema', () => {
   });
 
   it('parses SnapshotResume payloads with canonical Slack routing metadata', () => {
-    const parsed = cloudTaskSchema.parse({
+    const parsed = taskSpecSchema.parse({
       userId: 'user-1',
       type: TaskPayloadKind.SnapshotResume,
       payload: {
@@ -763,7 +762,7 @@ describe('cloudTaskSchema', () => {
   it.each([null, undefined])(
     'accepts shared-task slackThreadTs when the value is %s',
     (slackThreadTs) => {
-      const parsed = cloudTaskSchema.safeParse({
+      const parsed = taskSpecSchema.safeParse({
         userId: 'user-1',
         type: TaskPayloadKind.StandardTask,
         slackThreadTs,
@@ -780,7 +779,7 @@ describe('cloudTaskSchema', () => {
   it.each([null, undefined])(
     'accepts snapshot resume slackThreadTs when the value is %s',
     (slackThreadTs) => {
-      const parsed = cloudTaskSchema.safeParse({
+      const parsed = taskSpecSchema.safeParse({
         userId: 'user-1',
         type: TaskPayloadKind.SnapshotResume,
         slackThreadTs,
@@ -925,7 +924,7 @@ describe('cloudTaskSchema', () => {
   });
 
   it('parses SnapshotResume payloads with queued provider-neutral messages', () => {
-    const parsed = cloudTaskSchema.safeParse({
+    const parsed = taskSpecSchema.safeParse({
       userId: 'user-1',
       type: TaskPayloadKind.SnapshotResume,
       sourceSnapshotId: 'snap-123',
@@ -954,7 +953,7 @@ describe('cloudTaskSchema', () => {
   });
 
   it('does not parse unknown delegated task payloads', () => {
-    const parsed = cloudTaskSchema.safeParse({
+    const parsed = taskSpecSchema.safeParse({
       userId: 'user-1',
       type: 'invalid.task',
       payload: {
@@ -967,7 +966,7 @@ describe('cloudTaskSchema', () => {
   });
 
   it('rejects invalid reasoningEffort values on shared task payloads', () => {
-    const parsed = cloudTaskSchema.safeParse({
+    const parsed = taskSpecSchema.safeParse({
       userId: 'user-1',
       type: TaskPayloadKind.StandardTask,
       payload: {
@@ -981,7 +980,7 @@ describe('cloudTaskSchema', () => {
   });
 
   it('rejects non-OpenCode-format harness model overrides on task payloads', () => {
-    const parsed = cloudTaskSchema.safeParse({
+    const parsed = taskSpecSchema.safeParse({
       userId: 'user-1',
       type: TaskPayloadKind.StandardTask,
       payload: {
@@ -998,7 +997,7 @@ describe('cloudTaskSchema', () => {
 
   it('resolves a repository workspace from a single repo payload', () => {
     expect(
-      resolveCloudTaskWorkspace({
+      resolveTaskWorkspace({
         repo: 'owner/repo',
         branch: 'main',
         sha: 'abc1234',
@@ -1013,7 +1012,7 @@ describe('cloudTaskSchema', () => {
 
   it('resolves a repository_set workspace from a scoped all-repositories payload', () => {
     expect(
-      resolveCloudTaskWorkspace({
+      resolveTaskWorkspace({
         repo: '__all_repositories__',
         selectedRepositories: ['acme/api', 'acme/web', 'acme/api'],
       }),
@@ -1025,7 +1024,7 @@ describe('cloudTaskSchema', () => {
 
   it('resolves an environment workspace while preserving source pin context', () => {
     expect(
-      resolveCloudTaskWorkspace({
+      resolveTaskWorkspace({
         repo: 'acme/api',
         branch: 'main',
         sha: 'abc1234',
@@ -1041,125 +1040,95 @@ describe('cloudTaskSchema', () => {
   });
 });
 
-describe('isActivelyRunningCloudTask', () => {
+describe('isActivelyRunningTask', () => {
   it('returns false for undefined/null status', () => {
-    expect(isActivelyRunningCloudTask(undefined, null)).toBe(false);
-    expect(isActivelyRunningCloudTask(null, null)).toBe(false);
+    expect(isActivelyRunningTask(undefined, null)).toBe(false);
+    expect(isActivelyRunningTask(null, null)).toBe(false);
   });
 
   it('returns true for booting statuses regardless of taskPhase', () => {
-    const bootingStatuses = [...bootingCloudTaskStatuses];
+    const bootingStatuses = [...bootingRunStatuses];
 
     for (const status of bootingStatuses) {
-      expect(isActivelyRunningCloudTask(status, null)).toBe(true);
-      expect(isActivelyRunningCloudTask(status, 'idle')).toBe(true);
-      expect(isActivelyRunningCloudTask(status, 'running')).toBe(true);
+      expect(isActivelyRunningTask(status, null)).toBe(true);
+      expect(isActivelyRunningTask(status, 'idle')).toBe(true);
+      expect(isActivelyRunningTask(status, 'running')).toBe(true);
     }
   });
 
   it('returns true for Running status with taskPhase "running"', () => {
-    expect(isActivelyRunningCloudTask(CloudTaskStatus.Running, 'running')).toBe(
-      true,
-    );
+    expect(isActivelyRunningTask(RunStatus.Running, 'running')).toBe(true);
   });
 
   it('returns true for Running status with null taskPhase (backwards compat)', () => {
-    expect(isActivelyRunningCloudTask(CloudTaskStatus.Running, null)).toBe(
-      true,
-    );
-    expect(isActivelyRunningCloudTask(CloudTaskStatus.Running, undefined)).toBe(
-      true,
-    );
+    expect(isActivelyRunningTask(RunStatus.Running, null)).toBe(true);
+    expect(isActivelyRunningTask(RunStatus.Running, undefined)).toBe(true);
   });
 
   it('returns false for Running status with idle/waiting phases', () => {
-    expect(isActivelyRunningCloudTask(CloudTaskStatus.Running, 'idle')).toBe(
+    expect(isActivelyRunningTask(RunStatus.Running, 'idle')).toBe(false);
+    expect(isActivelyRunningTask(RunStatus.Running, 'waiting_for_prompt')).toBe(
       false,
     );
-    expect(
-      isActivelyRunningCloudTask(CloudTaskStatus.Running, 'waiting_for_prompt'),
-    ).toBe(false);
-    expect(isActivelyRunningCloudTask(CloudTaskStatus.Running, 'stopped')).toBe(
+    expect(isActivelyRunningTask(RunStatus.Running, 'stopped')).toBe(false);
+    expect(isActivelyRunningTask(RunStatus.Running, 'shutting_down')).toBe(
       false,
     );
-    expect(
-      isActivelyRunningCloudTask(CloudTaskStatus.Running, 'shutting_down'),
-    ).toBe(false);
   });
 
   it('returns false for Idle status', () => {
-    expect(isActivelyRunningCloudTask(CloudTaskStatus.Idle, null)).toBe(false);
-    expect(isActivelyRunningCloudTask(CloudTaskStatus.Idle, 'running')).toBe(
-      false,
-    );
+    expect(isActivelyRunningTask(RunStatus.Idle, null)).toBe(false);
+    expect(isActivelyRunningTask(RunStatus.Idle, 'running')).toBe(false);
   });
 
   it('returns false for exited statuses', () => {
-    expect(isActivelyRunningCloudTask(CloudTaskStatus.Completed, null)).toBe(
-      false,
-    );
-    expect(isActivelyRunningCloudTask(CloudTaskStatus.Failed, null)).toBe(
-      false,
-    );
-    expect(isActivelyRunningCloudTask(CloudTaskStatus.Canceled, null)).toBe(
-      false,
-    );
+    expect(isActivelyRunningTask(RunStatus.Completed, null)).toBe(false);
+    expect(isActivelyRunningTask(RunStatus.Failed, null)).toBe(false);
+    expect(isActivelyRunningTask(RunStatus.Canceled, null)).toBe(false);
   });
 });
 
-describe('isCloudTaskExecutingTurn', () => {
+describe('isTaskExecutingTurn', () => {
   it('returns false for undefined/null status', () => {
-    expect(isCloudTaskExecutingTurn(undefined, 'running')).toBe(false);
-    expect(isCloudTaskExecutingTurn(null, 'running')).toBe(false);
+    expect(isTaskExecutingTurn(undefined, 'running')).toBe(false);
+    expect(isTaskExecutingTurn(null, 'running')).toBe(false);
   });
 
   it('returns true for booting statuses regardless of taskPhase', () => {
-    for (const status of [...bootingCloudTaskStatuses]) {
-      expect(isCloudTaskExecutingTurn(status, null)).toBe(true);
-      expect(isCloudTaskExecutingTurn(status, 'waiting_for_prompt')).toBe(true);
-      expect(isCloudTaskExecutingTurn(status, 'running')).toBe(true);
+    for (const status of [...bootingRunStatuses]) {
+      expect(isTaskExecutingTurn(status, null)).toBe(true);
+      expect(isTaskExecutingTurn(status, 'waiting_for_prompt')).toBe(true);
+      expect(isTaskExecutingTurn(status, 'running')).toBe(true);
     }
   });
 
   it('returns true while a turn is executing regardless of Running/Idle status', () => {
-    expect(isCloudTaskExecutingTurn(CloudTaskStatus.Running, 'running')).toBe(
-      true,
-    );
+    expect(isTaskExecutingTurn(RunStatus.Running, 'running')).toBe(true);
     // Follow-up turns on a live sandbox run with Idle status.
-    expect(isCloudTaskExecutingTurn(CloudTaskStatus.Idle, 'running')).toBe(
-      true,
-    );
+    expect(isTaskExecutingTurn(RunStatus.Idle, 'running')).toBe(true);
   });
 
   it('returns true for Running status with no phase info yet', () => {
-    expect(isCloudTaskExecutingTurn(CloudTaskStatus.Running, null)).toBe(true);
-    expect(isCloudTaskExecutingTurn(CloudTaskStatus.Running, undefined)).toBe(
-      true,
-    );
+    expect(isTaskExecutingTurn(RunStatus.Running, null)).toBe(true);
+    expect(isTaskExecutingTurn(RunStatus.Running, undefined)).toBe(true);
   });
 
   it('returns false while the task waits between turns', () => {
-    expect(
-      isCloudTaskExecutingTurn(CloudTaskStatus.Idle, 'waiting_for_prompt'),
-    ).toBe(false);
-    expect(
-      isCloudTaskExecutingTurn(CloudTaskStatus.Running, 'waiting_for_prompt'),
-    ).toBe(false);
-    expect(isCloudTaskExecutingTurn(CloudTaskStatus.Idle, null)).toBe(false);
-    expect(
-      isCloudTaskExecutingTurn(CloudTaskStatus.Idle, 'waiting_for_user_input'),
-    ).toBe(false);
+    expect(isTaskExecutingTurn(RunStatus.Idle, 'waiting_for_prompt')).toBe(
+      false,
+    );
+    expect(isTaskExecutingTurn(RunStatus.Running, 'waiting_for_prompt')).toBe(
+      false,
+    );
+    expect(isTaskExecutingTurn(RunStatus.Idle, null)).toBe(false);
+    expect(isTaskExecutingTurn(RunStatus.Idle, 'waiting_for_user_input')).toBe(
+      false,
+    );
   });
 
   it('returns false for exited statuses even with a stale running phase', () => {
-    expect(isCloudTaskExecutingTurn(CloudTaskStatus.Completed, 'running')).toBe(
-      false,
-    );
-    expect(isCloudTaskExecutingTurn(CloudTaskStatus.Failed, 'running')).toBe(
-      false,
-    );
-    expect(isCloudTaskExecutingTurn(CloudTaskStatus.Canceled, 'running')).toBe(
-      false,
-    );
+    expect(isTaskExecutingTurn(RunStatus.Completed, 'running')).toBe(false);
+    expect(isTaskExecutingTurn(RunStatus.Failed, 'running')).toBe(false);
+    expect(isTaskExecutingTurn(RunStatus.Canceled, 'running')).toBe(false);
   });
 });

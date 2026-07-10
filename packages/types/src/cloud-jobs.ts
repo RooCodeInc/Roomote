@@ -279,13 +279,13 @@ export type TrackedMessageKind = (typeof TRACKED_MESSAGE_KINDS)[number];
  * Launch classes used to choose runtime policy for cloud tasks.
  */
 
-export const CLOUD_TASK_LAUNCH_CLASSES = [
+export const RUN_LAUNCH_CLASSES = [
   'human',
   'automation',
   'maintenance',
 ] as const;
 
-export type CloudTaskLaunchClass = (typeof CLOUD_TASK_LAUNCH_CLASSES)[number];
+export type RunLaunchClass = (typeof RUN_LAUNCH_CLASSES)[number];
 
 export const REASONING_EFFORT_VALUES = [
   'low',
@@ -384,7 +384,7 @@ export function isImplicitGeneralistTaskType(type: TaskPayloadKind): boolean {
  * Uses a deny list approach - services are enabled for all types except those
  * that explicitly don't need them.
  */
-export function isServicesEnabledCloudTaskType(
+export function isServicesEnabledTaskPayloadKind(
   _type: TaskPayloadKind,
 ): boolean {
   return true;
@@ -403,7 +403,7 @@ const RESUMABLE_PAYLOAD_KINDS: ReadonlySet<TaskPayloadKind> = new Set([
  * Returns true when a task type should be auto-snapshotted at `sleepAt` and
  * therefore supports resuming from that automatic sleep transition.
  */
-export function isResumableCloudTaskType(type: TaskPayloadKind): boolean {
+export function isResumableTaskPayloadKind(type: TaskPayloadKind): boolean {
   return RESUMABLE_PAYLOAD_KINDS.has(type);
 }
 
@@ -548,7 +548,7 @@ export const HARNESS_LABELS: Record<CodingHarness, string> = {
   'opencode-server': 'OpenCode',
 };
 
-export function stripCloudJobErrorMarkers(
+export function stripRunErrorMarkers(
   error?: string | null,
 ): string | undefined {
   const sanitizedError = error?.trim();
@@ -698,7 +698,7 @@ export const WORKER_HEARTBEAT_STALE_MS = 2 * 60 * 1000; // 2 minutes.
  * Durable audit sources for cloud job lifecycle events.
  * These are intended for operator debugging and post-mortem analysis.
  */
-export const cloudJobEventSources = [
+export const runEventSources = [
   'job_lifecycle',
   'worker_runtime',
   'sleep_check',
@@ -709,7 +709,7 @@ export const cloudJobEventSources = [
   'snapshot_resume',
 ] as const;
 
-export type CloudJobEventSource = (typeof cloudJobEventSources)[number];
+export type RunEventSource = (typeof runEventSources)[number];
 
 /**
  * Durable event categories for cloud job audit history.
@@ -717,7 +717,7 @@ export type CloudJobEventSource = (typeof cloudJobEventSources)[number];
  * Rich decision metadata lives in the accompanying JSON details so callers can
  * extend the shape without a schema change for every new branch reason.
  */
-export const cloudJobEventTypes = [
+export const runEventTypes = [
   'decision',
   'enqueued',
   'started',
@@ -726,9 +726,9 @@ export const cloudJobEventTypes = [
   'phase',
 ] as const;
 
-export type CloudJobEventType = (typeof cloudJobEventTypes)[number];
+export type RunEventType = (typeof runEventTypes)[number];
 
-export type CloudJobEventDetails = Record<string, unknown>;
+export type RunEventDetails = Record<string, unknown>;
 
 export const computeProviderLaunchModes = [
   'fresh',
@@ -754,10 +754,10 @@ export type ComputeProviderMutationOperation =
 export interface ComputeProviderMutationEvent {
   provider: ComputeProvider;
   operation: ComputeProviderMutationOperation;
-  eventType: Extract<CloudJobEventType, 'started' | 'completed' | 'failed'>;
+  eventType: Extract<RunEventType, 'started' | 'completed' | 'failed'>;
   instanceId?: string;
   message?: string;
-  details?: CloudJobEventDetails;
+  details?: RunEventDetails;
 }
 
 export type ComputeProviderMutationObserver = (
@@ -765,7 +765,7 @@ export type ComputeProviderMutationObserver = (
 ) => Promise<void> | void;
 
 /**
- * CloudTask
+ * TaskSpec
  */
 
 const sharedTaskSchema = z.object({
@@ -1750,7 +1750,7 @@ export function populateSnapshotResumeCommunicationMetadata(
  * Discriminated union of all cloud task schemas.
  * Use this schema for runtime validation of cloud task payloads.
  */
-export const cloudTaskSchema = z.discriminatedUnion('type', [
+export const taskSpecSchema = z.discriminatedUnion('type', [
   githubPullRequestReviewFollowUpSchema,
   githubPullRequestReviewOpenSchema,
   githubPullRequestReviewSyncSchema,
@@ -1764,16 +1764,18 @@ export const cloudTaskSchema = z.discriminatedUnion('type', [
   snapshotResumeSchema,
 ]);
 
-export type CloudTask = z.infer<typeof cloudTaskSchema>;
+export type TaskSpec = z.infer<typeof taskSpecSchema>;
 
 /**
- * CloudTaskPayload
+ * TaskPayload
  */
 
-export type CloudTaskPayload<T extends TaskPayloadKind = TaskPayloadKind> =
-  Extract<CloudTask, { type: T }>['payload'];
+export type TaskPayload<T extends TaskPayloadKind = TaskPayloadKind> = Extract<
+  TaskSpec,
+  { type: T }
+>['payload'];
 
-type CloudTaskWorkspacePayload = {
+type TaskWorkspacePayload = {
   repo?: string;
   branch?: string;
   sha?: string;
@@ -1781,7 +1783,7 @@ type CloudTaskWorkspacePayload = {
   selectedRepositories?: string[];
 };
 
-export type CloudTaskWorkspace =
+export type TaskWorkspace =
   | {
       type: 'repository';
       repo: string;
@@ -1814,9 +1816,9 @@ function normalizeSelectedRepositories(
   return normalized.length > 0 ? normalized : undefined;
 }
 
-export function resolveCloudTaskWorkspace(
-  payload: CloudTaskWorkspacePayload,
-): CloudTaskWorkspace {
+export function resolveTaskWorkspace(
+  payload: TaskWorkspacePayload,
+): TaskWorkspace {
   if (payload.environmentId) {
     return {
       type: 'environment',
@@ -1857,15 +1859,15 @@ export function resolveCloudTaskWorkspace(
 }
 
 /**
- * CloudTaskPayload Type Guards
+ * TaskPayload Type Guards
  */
 
 export function isPrReviewJob(
   type: TaskPayloadKind,
-  _payload: CloudTaskPayload,
+  _payload: TaskPayload,
 ): _payload is
-  | CloudTaskPayload<typeof TaskPayloadKind.GithubPrReview>
-  | CloudTaskPayload<typeof TaskPayloadKind.GithubPrReviewSync> {
+  | TaskPayload<typeof TaskPayloadKind.GithubPrReview>
+  | TaskPayload<typeof TaskPayloadKind.GithubPrReviewSync> {
   return (
     type === TaskPayloadKind.GithubPrReview ||
     type === TaskPayloadKind.GithubPrReviewSync
@@ -1873,10 +1875,10 @@ export function isPrReviewJob(
 }
 
 /**
- * CloudTaskStatus
+ * RunStatus
  */
 
-export enum CloudTaskStatus {
+export enum RunStatus {
   Pending = 'pending', // Job is created, but not yet dequeued by the controller.
   Dequeued = 'dequeued', // Job is dequeued by the controller but not yet started by the worker.
   Processing = 'processing', // Job is dequeued by the worker.
@@ -1890,50 +1892,47 @@ export enum CloudTaskStatus {
   Idle = 'idle', // Job is technically completed, but the container is still running and waiting for optional interaction.
 }
 
-export const bootingCloudTaskStatuses = [
-  CloudTaskStatus.Pending,
-  CloudTaskStatus.Dequeued,
-  CloudTaskStatus.Processing,
-  CloudTaskStatus.Preparing,
-  CloudTaskStatus.Spawning,
-  CloudTaskStatus.Connecting,
+export const bootingRunStatuses = [
+  RunStatus.Pending,
+  RunStatus.Dequeued,
+  RunStatus.Processing,
+  RunStatus.Preparing,
+  RunStatus.Spawning,
+  RunStatus.Connecting,
 ] as const;
 
-export const activeCloudTaskStatuses = [
-  ...bootingCloudTaskStatuses,
-  CloudTaskStatus.Running,
-  CloudTaskStatus.Idle,
+export const activeRunStatuses = [
+  ...bootingRunStatuses,
+  RunStatus.Running,
+  RunStatus.Idle,
 ] as const;
 
-export const doneCloudTaskStatuses = [
-  CloudTaskStatus.Completed,
-  CloudTaskStatus.Failed,
-  CloudTaskStatus.Canceled,
-  CloudTaskStatus.Idle,
+export const doneRunStatuses = [
+  RunStatus.Completed,
+  RunStatus.Failed,
+  RunStatus.Canceled,
+  RunStatus.Idle,
 ] as const;
 
-export const runningCloudTaskStatuses = [
-  CloudTaskStatus.Running,
-  CloudTaskStatus.Idle,
+export const runningRunStatuses = [RunStatus.Running, RunStatus.Idle] as const;
+
+const runningStatuses = new Set<RunStatus>(runningRunStatuses);
+
+export const exitedRunStatuses = [
+  RunStatus.Completed,
+  RunStatus.Failed,
+  RunStatus.Canceled,
 ] as const;
 
-const runningStatuses = new Set<CloudTaskStatus>(runningCloudTaskStatuses);
+const exitedStatuses = new Set<RunStatus>(exitedRunStatuses);
 
-export const exitedCloudTaskStatuses = [
-  CloudTaskStatus.Completed,
-  CloudTaskStatus.Failed,
-  CloudTaskStatus.Canceled,
-] as const;
-
-const exitedStatuses = new Set<CloudTaskStatus>(exitedCloudTaskStatuses);
-
-export const isBootingCloudTaskStatus = (status?: CloudTaskStatus): boolean =>
+export const isBootingRunStatus = (status?: RunStatus): boolean =>
   !!status && !runningStatuses.has(status) && !exitedStatuses.has(status);
 
-export const isRunningCloudTaskStatus = (status?: CloudTaskStatus): boolean =>
+export const isRunningRunStatus = (status?: RunStatus): boolean =>
   !!status && runningStatuses.has(status);
 
-export const isExitedCloudTaskStatus = (status?: CloudTaskStatus): boolean =>
+export const isExitedRunStatus = (status?: RunStatus): boolean =>
   !!status && exitedStatuses.has(status);
 
 /**
@@ -1999,14 +1998,14 @@ export function isActiveTaskPhase(phase: TaskPhase): boolean {
  * Returns true when the cloud task is actively consuming attention -- either
  * still booting or the agent is actively working.  Use this to drive loading
  * indicators and "running" badge counts instead of relying solely on
- * CloudTaskStatus.
+ * RunStatus.
  *
  * The `taskPhase` column is populated by the worker once the job reaches
  * the Running status.  For older jobs that never set a phase we fall back
  * to the legacy behaviour (treat Running status as active).
  */
-export function isActivelyRunningCloudTask(
-  status?: CloudTaskStatus | null,
+export function isActivelyRunningTask(
+  status?: RunStatus | null,
   taskPhase?: string | null,
 ): boolean {
   if (!status) {
@@ -2019,17 +2018,17 @@ export function isActivelyRunningCloudTask(
   }
 
   // Booting jobs (Pending → Connecting) are always active.
-  if (isBootingCloudTaskStatus(status)) {
+  if (isBootingRunStatus(status)) {
     return true;
   }
 
   // Idle status means the job completed (container still alive for keepalive).
-  if (status === CloudTaskStatus.Idle) {
+  if (status === RunStatus.Idle) {
     return false;
   }
 
   // Running status: check the task phase.
-  if (status === CloudTaskStatus.Running) {
+  if (status === RunStatus.Running) {
     // No phase info yet (still initialising or legacy job) → treat as active.
     if (!taskPhase) {
       return true;
@@ -2045,7 +2044,7 @@ export function isActivelyRunningCloudTask(
  * Returns true when the cloud task is busy executing a turn, or booting
  * toward one.
  *
- * Unlike {@link isActivelyRunningCloudTask}, which drives UI "running" badge
+ * Unlike {@link isActivelyRunningTask}, which drives UI "running" badge
  * counts and short-circuits on the Idle status, this treats the
  * worker-reported task phase as the source of truth for live sandboxes: a
  * cloud job row only holds the Running status during its first turn, flips to
@@ -2055,8 +2054,8 @@ export function isActivelyRunningCloudTask(
  * deliver conversation messages that should only arrive while the task is not
  * mid-turn.
  */
-export function isCloudTaskExecutingTurn(
-  status?: CloudTaskStatus | null,
+export function isTaskExecutingTurn(
+  status?: RunStatus | null,
   taskPhase?: string | null,
 ): boolean {
   if (!status) {
@@ -2069,13 +2068,13 @@ export function isCloudTaskExecutingTurn(
   }
 
   // Booting jobs (Pending → Connecting) are about to execute a turn.
-  if (isBootingCloudTaskStatus(status)) {
+  if (isBootingRunStatus(status)) {
     return true;
   }
 
   // Running with no phase info yet (still initialising or legacy job) →
   // treat as mid-turn.
-  if (status === CloudTaskStatus.Running && !taskPhase) {
+  if (status === RunStatus.Running && !taskPhase) {
     return true;
   }
 

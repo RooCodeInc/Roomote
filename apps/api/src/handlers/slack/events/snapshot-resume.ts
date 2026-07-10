@@ -5,7 +5,7 @@ import {
   restoreSnapshotResumeVisiblePromptFields,
 } from '@roomote/types';
 import { withContention } from '@roomote/redis';
-import { enqueueCloudTask } from '@roomote/cloud-agents/server';
+import { enqueueTask } from '@roomote/cloud-agents/server';
 import {
   appendSlackVideoDescriptionsToText,
   clearLatestUserMessage,
@@ -180,7 +180,7 @@ export async function processSnapshotResume(
         onAcquired: async () => {
           // Resumes never create tasks and never re-attribute; the Slack
           // follow-up sender becomes the new run's acting user.
-          const resumeLaunch = await enqueueCloudTask(
+          const resumeLaunch = await enqueueTask(
             {
               task: {
                 type: TaskPayloadKind.SnapshotResume,

@@ -11,8 +11,8 @@ import {
   tasks,
 } from '@roomote/db/server';
 import {
-  CloudTaskStatus,
-  activeCloudTaskStatuses,
+  RunStatus,
+  activeRunStatuses,
   isSnapshotResumable,
 } from '@roomote/types';
 
@@ -129,7 +129,7 @@ export async function findActiveTeamsJob(input: {
         teamsProviderMatch,
         conversationMatch,
         threadMatch,
-        inArray(taskRuns.status, [...activeCloudTaskStatuses]),
+        inArray(taskRuns.status, [...activeRunStatuses]),
         isNull(taskRuns.canceledAt),
       ),
     )
@@ -154,7 +154,7 @@ export async function findCompletedTeamsJobWithSnapshot(input: {
         teamsProviderMatch,
         conversationMatch,
         threadMatch,
-        inArray(taskRuns.status, [CloudTaskStatus.Completed]),
+        inArray(taskRuns.status, [RunStatus.Completed]),
         isNull(taskRuns.canceledAt),
         sql`${taskRuns.snapshotId} IS NOT NULL`,
         sql`${taskRuns.snapshotCreatedAt} IS NOT NULL`,

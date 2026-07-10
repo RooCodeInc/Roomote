@@ -4,7 +4,7 @@ export * from './update-runtime-state';
 export * from './touch-worker-heartbeat';
 export * from './dequeue-cloud-job';
 export * from './dequeue-resume-cloud-job';
-export * from './finish-cloud-job';
+export * from './finish-run';
 export * from './enqueue-snapshot';
 export * from './revert-pr-commit';
 export * from './refresh-github-token';

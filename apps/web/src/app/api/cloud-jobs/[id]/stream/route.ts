@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { createResponse } from 'better-sse';
 import { z } from 'zod';
 
-import { CloudTaskStatus, isExitedCloudTaskStatus } from '@roomote/types';
+import { RunStatus, isExitedRunStatus } from '@roomote/types';
 import { db, eq, taskRuns } from '@roomote/db/server';
 
 import { authorizeUserToken } from '@/lib/server';
@@ -56,12 +56,11 @@ export async function GET(
         break;
       }
 
-      if (isExitedCloudTaskStatus(cloudJob.status)) {
+      if (isExitedRunStatus(cloudJob.status)) {
         break;
       }
 
-      const timeout =
-        cloudJob.status === CloudTaskStatus.Running ? 10_000 : 1_000;
+      const timeout = cloudJob.status === RunStatus.Running ? 10_000 : 1_000;
 
       await new Promise((resolve) => setTimeout(resolve, timeout));
     }

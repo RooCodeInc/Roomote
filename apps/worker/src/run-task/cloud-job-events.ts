@@ -1,4 +1,4 @@
-import type { CloudJobEventDetails, CloudJobEventType } from '@roomote/types';
+import type { RunEventDetails, RunEventType } from '@roomote/types';
 import { sdk } from '@roomote/sdk/client';
 
 function formatError(error: unknown): string {
@@ -66,9 +66,9 @@ export function createWorkerRuntimeEventRecorder(options: {
   logger: Pick<Console, 'warn'>;
 }) {
   return async (input: {
-    eventType: CloudJobEventType;
+    eventType: RunEventType;
     message: string;
-    details?: CloudJobEventDetails;
+    details?: RunEventDetails;
   }): Promise<void> => {
     try {
       await sdk.cloudJobs.recordEvent({

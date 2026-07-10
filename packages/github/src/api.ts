@@ -12,7 +12,7 @@ import {
 import {
   type GitHubInstallation,
   type Repository,
-  type CloudJob,
+  type Run,
   db,
   githubPendingInstallations,
   githubInstallations,
@@ -37,7 +37,7 @@ async function createTokenForRepositoryNames({
   missingMessagePrefix,
   spanningMessagePrefix,
 }: {
-  cloudJob: CloudJob;
+  cloudJob: Run;
   repositoryNames: string[];
   missingMessagePrefix: string;
   spanningMessagePrefix: string;
@@ -161,7 +161,7 @@ type Checks = RestEndpointMethodTypes['checks'];
  */
 
 export const createCloudJobGitHubToken = async (
-  cloudJob: CloudJob,
+  cloudJob: Run,
 ): Promise<string> => {
   if (cloudJob.payload.environmentId) {
     const environment = await db.query.environments.findFirst({
@@ -245,7 +245,7 @@ export type CloudJobWorkerGitHubToken = {
  * token with its constrained permission set.
  */
 export async function createCloudJobWorkerGitHubTokenWithMetadata(
-  cloudJob: CloudJob,
+  cloudJob: Run,
 ): Promise<CloudJobWorkerGitHubToken> {
   return {
     token: await createCloudJobGitHubToken(cloudJob),
@@ -255,7 +255,7 @@ export async function createCloudJobWorkerGitHubTokenWithMetadata(
 }
 
 export async function createCloudJobWorkerGitHubToken(
-  cloudJob: CloudJob,
+  cloudJob: Run,
 ): Promise<string> {
   const result = await createCloudJobWorkerGitHubTokenWithMetadata(cloudJob);
   return result.token;

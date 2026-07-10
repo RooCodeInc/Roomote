@@ -1,7 +1,7 @@
 const {
   mockCreateJobToken,
   mockCreateTRPCProxyClient,
-  mockEnqueueCloudTask,
+  mockEnqueueTask,
   mockGetTaskChannelBindings,
   mockFindLatestCloudJob,
   mockHttpBatchLink,
@@ -13,7 +13,7 @@ const {
 } = vi.hoisted(() => ({
   mockCreateJobToken: vi.fn(),
   mockCreateTRPCProxyClient: vi.fn(),
-  mockEnqueueCloudTask: vi.fn(),
+  mockEnqueueTask: vi.fn(),
   mockGetTaskChannelBindings: vi.fn(),
   mockFindLatestCloudJob: vi.fn(),
   mockHttpBatchLink: vi.fn((options) => options),
@@ -46,7 +46,7 @@ vi.mock('@trpc/client', () => ({
 }));
 
 vi.mock('@roomote/cloud-agents/server', () => ({
-  enqueueCloudTask: mockEnqueueCloudTask,
+  enqueueTask: mockEnqueueTask,
 }));
 
 vi.mock('@roomote/slack', () => ({
@@ -165,7 +165,7 @@ describe('sendMessageToTask', () => {
     mockHttpBatchLink.mockImplementation((options) => options);
     mockSendPromptMutate.mockResolvedValue({ ok: true });
     mockSteerTaskMutate.mockResolvedValue({ ok: true });
-    mockEnqueueCloudTask.mockResolvedValue({ id: 77, taskId: 'task-1' });
+    mockEnqueueTask.mockResolvedValue({ id: 77, taskId: 'task-1' });
     mockGetTaskChannelBindings.mockResolvedValue({
       slackChannelId: 'C123',
       slackThreadTs: '111.222',
@@ -358,7 +358,7 @@ describe('sendMessageToTask', () => {
       userName: 'Alice',
       onError: expect.any(Function),
     });
-    expect(mockEnqueueCloudTask).toHaveBeenCalledWith(
+    expect(mockEnqueueTask).toHaveBeenCalledWith(
       expect.objectContaining({
         task: expect.objectContaining({
           payload: expect.objectContaining({
@@ -400,7 +400,7 @@ describe('sendMessageToTask', () => {
       error: EXPIRED_SNAPSHOT_RESUME_ERROR,
       status: 409,
     });
-    expect(mockEnqueueCloudTask).not.toHaveBeenCalled();
+    expect(mockEnqueueTask).not.toHaveBeenCalled();
     expect(mockTrackLatestUserMessageForSlackQuote).not.toHaveBeenCalled();
   });
 

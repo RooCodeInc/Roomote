@@ -2,7 +2,7 @@ import { getRedis } from '@roomote/redis';
 import {
   buildCiFailureTriagePrompt,
   buildRepositoryCoverage,
-  enqueueCloudTask,
+  enqueueTask,
   getTaskUrl,
 } from '@roomote/cloud-agents/server';
 import {
@@ -303,7 +303,7 @@ export async function handleWorkflowRunCompleted(
 
   try {
     // CI failure triage runs as the deployment service principal.
-    const launchResult = await enqueueCloudTask(
+    const launchResult = await enqueueTask(
       {
         task: {
           type: TaskPayloadKind.Scan,

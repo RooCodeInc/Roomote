@@ -17,7 +17,7 @@ const { mockCloudJobFindFirst, mockTaskFindFirst } = vi.hoisted(() => ({
 
 vi.mock('@roomote/cloud-agents/server', () => ({
   CloudJobQueueEnqueueError: class CloudJobQueueEnqueueError extends Error {},
-  enqueueCloudTask: vi.fn(),
+  enqueueTask: vi.fn(),
 }));
 
 vi.mock('@roomote/slack', () => ({

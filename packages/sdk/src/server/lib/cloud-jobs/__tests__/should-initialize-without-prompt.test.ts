@@ -1,7 +1,7 @@
 import { TaskPayloadKind, standardTaskSchema } from '@roomote/types';
 import { shouldInitializeWithoutPrompt } from '../dequeue-cloud-job';
 
-// Minimal shared fields required by all CloudTask variants.
+// Minimal shared fields required by all TaskSpec variants.
 const sharedFields = {
   userId: 'user_123',
 };

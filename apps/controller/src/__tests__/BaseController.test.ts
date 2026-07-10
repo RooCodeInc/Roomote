@@ -1,13 +1,13 @@
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import { CloudTaskStatus, TaskPayloadKind } from '@roomote/types';
-import type { CloudJob } from '@roomote/db/server';
+import { RunStatus, TaskPayloadKind } from '@roomote/types';
+import type { Run } from '@roomote/db/server';
 
 // ── Mocks ────────────────────────────────────────────────────────────────────
 
 const {
-  mockFinishCloudJob,
+  mockFinishRun,
   mockCaptureControllerException,
   mockCaptureControllerMessage,
   mockCloudJobsFindFirst,
@@ -18,7 +18,7 @@ const {
   mockRedisSet,
   mockUpdateWhere,
 } = vi.hoisted(() => ({
-  mockFinishCloudJob: vi.fn().mockResolvedValue(undefined),
+  mockFinishRun: vi.fn().mockResolvedValue(undefined),
   mockCaptureControllerException: vi.fn(),
   mockCaptureControllerMessage: vi.fn(),
   mockCloudJobsFindFirst: vi.fn(),
@@ -33,7 +33,7 @@ const {
 }));
 
 vi.mock('@roomote/sdk/server', () => ({
-  finishCloudJob: (...args: unknown[]) => mockFinishCloudJob(...args),
+  finishRun: (...args: unknown[]) => mockFinishRun(...args),
 }));
 
 const mockDbUpdateSet = vi.fn().mockReturnValue({
@@ -111,7 +111,7 @@ class TestController extends BaseController {
   }
 
   protected async spawnFreshWorker(
-    _cloudJob: CloudJob,
+    _cloudJob: Run,
     _authToken: string,
     _deploymentSlug: string,
     _sandboxTimeoutMs: number,
@@ -121,7 +121,7 @@ class TestController extends BaseController {
 
   // Expose handleSpawnJobError for direct testing.
   public async testHandleSpawnJobError(
-    cloudJob: CloudJob,
+    cloudJob: Run,
     error: unknown,
   ): Promise<void> {
     return this.handleSpawnJobError(cloudJob, error);
@@ -133,7 +133,7 @@ class TestController extends BaseController {
     };
   }
 
-  public async testDequeueCloudJob(cloudJob: CloudJob) {
+  public async testDequeueCloudJob(cloudJob: Run) {
     return this.dequeueCloudJob(cloudJob);
   }
 }
@@ -144,13 +144,13 @@ class SaturatedTestController extends TestController {
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
-function makeCloudJob(overrides: Partial<CloudJob> = {}): CloudJob {
+function makeCloudJob(overrides: Partial<Run> = {}): Run {
   return {
     id: 42,
     payloadKind: TaskPayloadKind.StandardTask,
     userId: 'user-1',
     harness: 'opencode-server',
-    status: CloudTaskStatus.Running,
+    status: RunStatus.Running,
     payload: { repo: 'owner/repo' },
     taskId: 'task-1',
     slackThreadTs: null,
@@ -166,7 +166,7 @@ function makeCloudJob(overrides: Partial<CloudJob> = {}): CloudJob {
     canceledAt: null,
     completedAt: null,
     ...overrides,
-  } as CloudJob;
+  } as Run;
 }
 
 function resetControllerMocks() {
@@ -210,7 +210,7 @@ describe('BaseController.handleSpawnJobError', () => {
     delete process.env.USE_WORKER_RELEASE;
   });
 
-  it('calls finishCloudJob with Failed status and error message', async () => {
+  it('calls finishRun with Failed status and error message', async () => {
     const job = makeCloudJob({ id: 42 });
     const error = new Error('Machine unavailable');
 
@@ -218,9 +218,9 @@ describe('BaseController.handleSpawnJobError', () => {
       controller.testHandleSpawnJobError(job, error),
     ).rejects.toThrow('Machine unavailable');
 
-    expect(mockFinishCloudJob).toHaveBeenCalledWith({
+    expect(mockFinishRun).toHaveBeenCalledWith({
       id: 42,
-      status: CloudTaskStatus.Failed,
+      status: RunStatus.Failed,
       error: 'Machine unavailable',
     });
   });
@@ -247,9 +247,9 @@ describe('BaseController.handleSpawnJobError', () => {
       controller.testHandleSpawnJobError(job, error),
     ).rejects.toThrow('Snapshot failed');
 
-    expect(mockFinishCloudJob).toHaveBeenCalledWith({
+    expect(mockFinishRun).toHaveBeenCalledWith({
       id: 99,
-      status: CloudTaskStatus.Failed,
+      status: RunStatus.Failed,
       error: 'Snapshot failed',
     });
 
@@ -268,7 +268,7 @@ describe('BaseController.handleSpawnJobError', () => {
     );
   });
 
-  it('re-throws the original error after calling finishCloudJob', async () => {
+  it('re-throws the original error after calling finishRun', async () => {
     const job = makeCloudJob();
     const originalError = new Error('original');
 
@@ -284,9 +284,9 @@ describe('BaseController.handleSpawnJobError', () => {
       controller.testHandleSpawnJobError(job, 'string error'),
     ).rejects.toBe('string error');
 
-    expect(mockFinishCloudJob).toHaveBeenCalledWith({
+    expect(mockFinishRun).toHaveBeenCalledWith({
       id: 7,
-      status: CloudTaskStatus.Failed,
+      status: RunStatus.Failed,
       error: 'string error',
     });
   });
@@ -312,7 +312,7 @@ describe('BaseController.handleSpawnJobError', () => {
   it('captures a Sentry issue when the controller starts a job from database fallback', async () => {
     const job = makeCloudJob({
       id: 108,
-      status: CloudTaskStatus.Pending,
+      status: RunStatus.Pending,
       vendor: 'modal',
     });
 
@@ -325,7 +325,7 @@ describe('BaseController.handleSpawnJobError', () => {
         'Controller started task using database fallback logic',
         expect.objectContaining({
           jobId: 108,
-          jobStatus: CloudTaskStatus.Pending,
+          jobStatus: RunStatus.Pending,
           jobType: TaskPayloadKind.StandardTask,
           phase: 'database_fallback',
           provider: 'modal',
@@ -347,7 +347,7 @@ describe('BaseController.handleSpawnJobError', () => {
     const saturatedController = new SaturatedTestController();
     const job = makeCloudJob({
       id: 109,
-      status: CloudTaskStatus.Pending,
+      status: RunStatus.Pending,
       vendor: 'modal',
     });
 
@@ -391,7 +391,7 @@ describe('BaseController.dequeueCloudJob', () => {
   it('records a controller_dequeue lifecycle event', async () => {
     const job = makeCloudJob({
       id: 77,
-      status: CloudTaskStatus.Pending,
+      status: RunStatus.Pending,
       vendor: 'modal',
       payload: {
         repo: 'owner/repo',
@@ -412,7 +412,7 @@ describe('BaseController.dequeueCloudJob', () => {
         message: expect.stringContaining('Controller dequeued'),
         details: expect.objectContaining({
           stage: 'controller_dequeue',
-          status: CloudTaskStatus.Dequeued,
+          status: RunStatus.Dequeued,
           provider: 'modal',
           environmentId: 'env-1',
         }),
@@ -423,14 +423,14 @@ describe('BaseController.dequeueCloudJob', () => {
   it('does not revive a job canceled during the dequeue window', async () => {
     const job = makeCloudJob({
       id: 78,
-      status: CloudTaskStatus.Pending,
+      status: RunStatus.Pending,
     });
 
     mockUpdateWhere.mockReturnValueOnce({
       returning: vi.fn().mockResolvedValue([]),
     });
     mockCloudJobsFindFirst.mockResolvedValueOnce({
-      status: CloudTaskStatus.Canceled,
+      status: RunStatus.Canceled,
       canceledAt: new Date(),
     });
 
@@ -443,7 +443,7 @@ describe('BaseController.dequeueCloudJob', () => {
   it('treats preparing jobs as recoverable before controller dequeue', async () => {
     const job = makeCloudJob({
       id: 80,
-      status: CloudTaskStatus.Preparing,
+      status: RunStatus.Preparing,
     });
 
     const result = await controller.testDequeueCloudJob(job);
@@ -456,7 +456,7 @@ describe('BaseController.dequeueCloudJob', () => {
         runId: 80,
         details: expect.objectContaining({
           stage: 'controller_dequeue',
-          status: CloudTaskStatus.Dequeued,
+          status: RunStatus.Dequeued,
         }),
       }),
     );
@@ -465,14 +465,14 @@ describe('BaseController.dequeueCloudJob', () => {
   it('treats an already-advanced dequeue race as a no-op', async () => {
     const job = makeCloudJob({
       id: 79,
-      status: CloudTaskStatus.Pending,
+      status: RunStatus.Pending,
     });
 
     mockUpdateWhere.mockReturnValueOnce({
       returning: vi.fn().mockResolvedValue([]),
     });
     mockCloudJobsFindFirst.mockResolvedValueOnce({
-      status: CloudTaskStatus.Dequeued,
+      status: RunStatus.Dequeued,
       canceledAt: null,
     });
 

@@ -1,5 +1,5 @@
 import {
-  type CloudTask,
+  type TaskSpec,
   TaskPayloadKind,
   getCommunicationChannelFromTaskPayload,
   getCommunicationMessageIdFromTaskPayload,
@@ -17,7 +17,7 @@ import {
   getFeatureFlagEvaluator,
 } from '@roomote/feature-flags/server';
 import {
-  type CloudJob,
+  type Run,
   db,
   eq,
   tasks,
@@ -53,8 +53,8 @@ export async function generatePrompt({
   cloudTask,
   gitHubToken,
 }: {
-  cloudJob: CloudJob;
-  cloudTask: CloudTask;
+  cloudJob: Run;
+  cloudTask: TaskSpec;
   gitHubToken: string;
 }): Promise<{
   prompt: string;

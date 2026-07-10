@@ -12,7 +12,7 @@ import {
   taskRuns,
 } from '@roomote/db/server';
 import {
-  type CloudTaskPayload,
+  type TaskPayload,
   environmentConfigSchema,
   getEnvironmentRepositoryInstallationError,
 } from '@roomote/types';
@@ -120,7 +120,7 @@ export async function attachEnvironmentIdToCloudJob(
       payload: {
         ...payload,
         environmentDefinitionId: environmentId,
-      } as unknown as CloudTaskPayload,
+      } as unknown as TaskPayload,
     })
     .where(eq(taskRuns.id, cloudJob.id));
 }

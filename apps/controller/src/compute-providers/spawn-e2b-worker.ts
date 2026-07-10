@@ -4,7 +4,7 @@ import {
   getPrimaryPortFromConfig,
 } from '@roomote/types';
 import {
-  type CloudJob,
+  type Run,
   createComputeProviderMutationEventRecorder,
   db,
   taskRuns,
@@ -76,9 +76,7 @@ function buildDetachedWorkerExitError(
   });
 }
 
-function getWorkerLaunchCommand(
-  cloudJob: CloudJob,
-): 'snapshot' | 'resume' | 'run' {
+function getWorkerLaunchCommand(cloudJob: Run): 'snapshot' | 'resume' | 'run' {
   return cloudJob.payloadKind === TaskPayloadKind.SnapshotEnvironment
     ? 'snapshot'
     : cloudJob.payloadKind === TaskPayloadKind.SnapshotResume
@@ -86,7 +84,7 @@ function getWorkerLaunchCommand(
       : 'run';
 }
 
-function getWorkerLaunchArgs(cloudJob: CloudJob, machineId: string): string[] {
+function getWorkerLaunchArgs(cloudJob: Run, machineId: string): string[] {
   const command = getWorkerLaunchCommand(cloudJob);
 
   return cloudJob.payloadKind === TaskPayloadKind.SnapshotEnvironment
@@ -103,7 +101,7 @@ function getWorkerLaunchArgs(cloudJob: CloudJob, machineId: string): string[] {
 }
 
 export async function spawnE2bWorker(
-  cloudJob: CloudJob,
+  cloudJob: Run,
   authToken: string,
   config: {
     e2bApiKey: string;

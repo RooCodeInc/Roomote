@@ -5,7 +5,7 @@ import type { inferRouterOutputs } from '@trpc/server';
 import {
   ACP_ENVELOPE_EVENT_TYPES,
   type CodingHarness,
-  isExitedCloudTaskStatus,
+  isExitedRunStatus,
   DEFAULT_CODING_HARNESS,
 } from '@roomote/types';
 
@@ -147,7 +147,7 @@ export function useCloudSession(
           sessionQuery.data?.cloudJob?.sleepRequestedAt ||
           sessionQuery.data?.cloudJob?.snapshotRequestedAt
         ) &&
-          !isExitedCloudTaskStatus(sessionQuery.data?.cloudJob?.status) &&
+          !isExitedRunStatus(sessionQuery.data?.cloudJob?.status) &&
           !sessionQuery.data?.cloudJob?.snapshotCreatedAt &&
           !sessionQuery.data?.cloudJob?.snapshotFailedAt,
       ),

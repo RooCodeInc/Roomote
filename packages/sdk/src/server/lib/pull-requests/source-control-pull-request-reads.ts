@@ -15,7 +15,7 @@ import {
   resolveGitLabBaseUrl,
   resolveGitLabToken,
 } from '@roomote/gitlab';
-import { type CloudJob } from '@roomote/db/server';
+import { type Run } from '@roomote/db/server';
 import {
   buildPullRequestUrl,
   getSourceControlProviderLabel,
@@ -347,7 +347,7 @@ export async function readSourceControlPullRequestForCloudJob({
   input,
   fetchImpl = fetch,
 }: {
-  cloudJob: CloudJob;
+  cloudJob: Run;
   input: SourceControlPullRequestReadInput;
   fetchImpl?: FetchImpl;
 }): Promise<SourceControlPullRequestReadResult> {

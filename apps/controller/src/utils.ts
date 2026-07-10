@@ -11,7 +11,7 @@ import {
   normalizeMetadataRecord,
 } from '@roomote/feature-flags';
 import {
-  type CloudJob,
+  type Run,
   type DatabaseOrTransaction,
   db,
   taskRuns,
@@ -109,7 +109,7 @@ export function shouldEnableAuthBypassForCloudJob({
  * non-expired snapshot.
  */
 export async function getNamedPortsForCloudJob(
-  cloudJob: CloudJob,
+  cloudJob: Run,
 ): Promise<NamedPortsResult> {
   let namedPorts = getNamedPortsForEnvironment({});
   let environmentSnapshotId: string | undefined;
@@ -160,7 +160,7 @@ export async function getNamedPortsForCloudJob(
 }
 
 type UpdateCloudJobMachineInfoParams = {
-  cloudJob: CloudJob;
+  cloudJob: Run;
   vendor?: ComputeProvider;
   machineId: string;
   proxyPorts?: Record<string, number>;

@@ -1,7 +1,7 @@
 import { Job, UnrecoverableError } from 'bullmq';
 
 import {
-  CloudTaskStatus,
+  RunStatus,
   TaskPayloadKind,
   extractErrorDetails,
   isObservedTimeoutError,
@@ -11,7 +11,7 @@ import {
   withoutCompleteTaskOnSnapshot,
 } from '@roomote/types';
 import {
-  type CloudJob,
+  type Run,
   and,
   buildPendingEnvironmentSnapshotMatchForCloudJob,
   createComputeProviderMutationEventRecorder,
@@ -198,7 +198,7 @@ export const snapshotJob = async (job: SnapshotJob): Promise<void> => {
   const shouldCompleteTask = shouldCompleteTaskOnSnapshot(cloudJob.payload);
   const clearedCompletionPayload = withoutCompleteTaskOnSnapshot(
     cloudJob.payload,
-  ) as CloudJob['payload'];
+  ) as Run['payload'];
 
   await recordSnapshotQueueEvent(cloudJob, {
     eventType: 'decision',
@@ -555,7 +555,7 @@ export const snapshotJob = async (job: SnapshotJob): Promise<void> => {
         snapshotFailedAt: null,
         sleepAt: null,
         taskPhase: null,
-        status: CloudTaskStatus.Completed,
+        status: RunStatus.Completed,
         completedAt: now,
       })
       .where(eq(taskRuns.id, cloudJobId));
@@ -733,7 +733,7 @@ export const snapshotJob = async (job: SnapshotJob): Promise<void> => {
 };
 
 async function recordSnapshotQueueEvent(
-  cloudJob: CloudJob,
+  cloudJob: Run,
   input: {
     eventType: 'started' | 'decision' | 'completed' | 'failed';
     message: string;
@@ -763,7 +763,7 @@ function getQueueMaxAttempts(job: SnapshotJob): number {
 }
 
 async function reconcileSnapshottingFailure(input: {
-  cloudJob: CloudJob;
+  cloudJob: Run;
   client: ComputeProviderClient;
   errorDetails: Record<string, unknown>;
   instanceId: string;
@@ -790,7 +790,7 @@ async function reconcileSnapshottingFailure(input: {
 }
 
 async function reconcileSnapshotAfterRetryStatusChange(input: {
-  cloudJob: CloudJob;
+  cloudJob: Run;
   client: ComputeProviderClient;
   instanceId: string;
   instanceStatus: string;
@@ -827,7 +827,7 @@ async function reconcileSnapshotAfterRetryStatusChange(input: {
 
 async function findSnapshotBySourceInstanceWithReconcile(
   input: {
-    cloudJob: CloudJob;
+    cloudJob: Run;
     client: ComputeProviderClient;
     instanceId: string;
     postFailureInstanceStatus: string | null;

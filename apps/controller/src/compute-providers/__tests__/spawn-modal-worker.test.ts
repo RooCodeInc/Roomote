@@ -1,4 +1,4 @@
-import type { CloudJob } from '@roomote/db/server';
+import type { Run } from '@roomote/db/server';
 import { TaskPayloadKind } from '@roomote/types';
 
 const mockCreateModalMachine = vi.fn();
@@ -21,16 +21,14 @@ const mockShouldEnableAuthBypassForCloudJob = vi.fn(
 );
 const mockPrimeEnvironmentOidcForMachine = vi.fn();
 
-function mockCloudJob(
-  overrides: Partial<CloudJob> & Pick<CloudJob, 'payloadKind'>,
-): CloudJob {
+function mockCloudJob(overrides: Partial<Run> & Pick<Run, 'payloadKind'>): Run {
   return {
     id: 123,
     vendor: 'modal',
     sourceSnapshotId: null,
     payload: { repo: 'test/repo' },
     ...overrides,
-  } as unknown as CloudJob;
+  } as unknown as Run;
 }
 
 vi.mock('@roomote/db/server', async (importOriginal) => {

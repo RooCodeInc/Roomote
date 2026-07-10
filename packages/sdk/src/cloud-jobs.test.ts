@@ -1,4 +1,4 @@
-import { CloudTaskStatus } from '@roomote/types';
+import { RunStatus } from '@roomote/types';
 
 const {
   mockDequeue,
@@ -125,7 +125,7 @@ describe('dequeue', () => {
     const onBootstrapFailure = vi.fn();
     const cloudJob = {
       id: 42,
-      status: CloudTaskStatus.Canceled,
+      status: RunStatus.Canceled,
       startedAt: null,
       error: 'Cloud job is not valid.',
       type: 'GithubPrReview',
@@ -161,7 +161,7 @@ describe('dequeue', () => {
     mockDequeue.mockResolvedValueOnce(undefined);
     mockFindFirstById.mockResolvedValueOnce({
       id: 42,
-      status: CloudTaskStatus.Canceled,
+      status: RunStatus.Canceled,
       startedAt: new Date('2026-04-21T00:00:00.000Z'),
       error: 'Failed to create GitHub token.',
       type: 'GithubPrReview',
@@ -188,7 +188,7 @@ describe('dequeue', () => {
     mockDequeue.mockResolvedValueOnce(undefined);
     mockFindFirstById.mockResolvedValueOnce({
       id: 42,
-      status: CloudTaskStatus.Canceled,
+      status: RunStatus.Canceled,
       startedAt: null,
       error: 'Superseded by a newer cloud job.',
       type: 'StandardTask',
@@ -241,7 +241,7 @@ describe('resume', () => {
     const onBootstrapFailure = vi.fn();
     const cloudJob = {
       id: 84,
-      status: CloudTaskStatus.Canceled,
+      status: RunStatus.Canceled,
       startedAt: null,
       error: 'SnapshotResume job 84 has no sourceCloudJobId',
       type: 'SnapshotResume',

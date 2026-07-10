@@ -1,7 +1,7 @@
 import pMap from 'p-map';
 
 import {
-  type CloudTaskPayload,
+  type TaskPayload,
   DEFAULT_PR_REVIEWER_SETTINGS,
   type PrReviewerSettings,
   TaskPayloadKind,
@@ -14,7 +14,7 @@ import {
   eq,
   findActiveGitHubPrReviewTask,
 } from '@roomote/db/server';
-import { enqueueCloudTask } from '@roomote/cloud-agents/server';
+import { enqueueTask } from '@roomote/cloud-agents/server';
 import { updateTaskPrStatus } from '@roomote/sdk/server';
 
 import type { WebhookResponse } from '../../types';
@@ -196,7 +196,7 @@ export async function handleGitLabMergeRequest(
   const mrAuthorName = payload.user?.name ?? payload.user?.username;
 
   const enqueued = await pMap(targets, async (_target) =>
-    enqueueCloudTask(
+    enqueueTask(
       {
         task: {
           type: taskType,
@@ -213,7 +213,7 @@ export async function handleGitLabMergeRequest(
               : {}),
             ...(headSha ? { sha: headSha } : {}),
             targetBranch: mergeRequest.target_branch,
-          } satisfies CloudTaskPayload<typeof taskType>,
+          } satisfies TaskPayload<typeof taskType>,
         },
         initiator: {
           kind: 'automation',

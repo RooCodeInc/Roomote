@@ -1,11 +1,11 @@
 import {
   ALL_REPOSITORIES,
-  type CloudTaskPayload,
+  type TaskPayload,
   TaskPayloadKind,
   populateSnapshotResumeSlackMetadata,
   restoreSnapshotResumeVisiblePromptFields,
 } from '@roomote/types';
-import { enqueueCloudTask } from '@roomote/cloud-agents/server';
+import { enqueueTask } from '@roomote/cloud-agents/server';
 import { getRedis } from '@roomote/redis';
 
 import { getSlackMessages, prependSlackMessages } from './slack-messages';
@@ -125,7 +125,7 @@ export async function drainSlackMessagesToResumeJob(
   // Drain before creating the resume job so its payload is self-contained.
   // Restore the drained messages on failure.
   let messages: Awaited<ReturnType<typeof getSlackMessages>> = [];
-  let resumeLaunch: Awaited<ReturnType<typeof enqueueCloudTask>>;
+  let resumeLaunch: Awaited<ReturnType<typeof enqueueTask>>;
 
   try {
     messages = await getSlackMessages(sourceJob.id);
@@ -135,7 +135,7 @@ export async function drainSlackMessagesToResumeJob(
       return { resumed: false, reason: 'no_pending_messages' };
     }
 
-    const payload: CloudTaskPayload<typeof TaskPayloadKind.SnapshotResume> = {
+    const payload: TaskPayload<typeof TaskPayloadKind.SnapshotResume> = {
       repo,
       environmentId,
       selectedRepositories: scopedSelectedRepositories,
@@ -156,7 +156,7 @@ export async function drainSlackMessagesToResumeJob(
     const resumeActingUserId =
       [...messages].reverse().find((message) => message.userId)?.userId ?? null;
 
-    resumeLaunch = await enqueueCloudTask({
+    resumeLaunch = await enqueueTask({
       task: {
         type: TaskPayloadKind.SnapshotResume,
         sourceSnapshotId: snapshotId,
