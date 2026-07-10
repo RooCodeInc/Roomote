@@ -534,9 +534,7 @@ export const appRouter = createRouter({
 
     messageEnvelopes: protectedProcedure
       .input(z.object({ taskId: z.string() }))
-      .query(({ ctx: { auth }, input }) =>
-        getTaskMessageEnvelopesCommand(auth, input),
-      ),
+      .query(({ input }) => getTaskMessageEnvelopesCommand(input)),
 
     generateSummary: protectedProcedure
       .input(z.object({ taskId: z.string() }))
