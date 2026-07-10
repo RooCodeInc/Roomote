@@ -14,6 +14,8 @@ const {
   queueSlackMessageMock,
   selectLimitMock,
   setPendingSlackRequestUserInputPromptMessageTsMock,
+  setTrustedRunActingUserMock,
+  setTrustedRunActingUserOnSuccessMock,
   submitPendingSlackRequestUserInputAnswerMock,
   updateMessageMock,
 } = vi.hoisted(() => ({
@@ -44,6 +46,11 @@ const {
   queueSlackMessageMock: vi.fn(),
   selectLimitMock: vi.fn(),
   setPendingSlackRequestUserInputPromptMessageTsMock: vi.fn(),
+  setTrustedRunActingUserMock: vi.fn(),
+  setTrustedRunActingUserOnSuccessMock: vi.fn(
+    async ({ operation }: { operation: () => Promise<boolean> }) =>
+      await operation(),
+  ),
   submitPendingSlackRequestUserInputAnswerMock: vi.fn(),
   updateMessageMock: vi.fn().mockResolvedValue(true),
 }));
@@ -72,6 +79,8 @@ vi.mock('@roomote/db/server', () => ({
   })),
   slackInstallations: { teamId: 'teamId' },
   slackUserMappings: { slackTeamId: 'slackTeamId', slackUserId: 'slackUserId' },
+  setTrustedRunActingUser: setTrustedRunActingUserMock,
+  setTrustedRunActingUserOnSuccess: setTrustedRunActingUserOnSuccessMock,
 }));
 
 vi.mock('../find-active-slack-job', () => ({
@@ -215,6 +224,7 @@ describe('handleFollowupAnswer', () => {
     postMessageMock.mockResolvedValue('posted-ts');
     queueSlackMessageMock.mockResolvedValue(undefined);
     setPendingSlackRequestUserInputPromptMessageTsMock.mockResolvedValue(true);
+    setTrustedRunActingUserMock.mockResolvedValue(undefined);
     submitPendingSlackRequestUserInputAnswerMock.mockResolvedValue(true);
     updateMessageMock.mockResolvedValue(true);
     promptSlackAccountLinkMock.mockResolvedValue({ dmPromptSent: true });
@@ -462,6 +472,13 @@ describe('handleFollowupAnswer', () => {
         userId: 'user-1',
       }),
     );
+    expect(setTrustedRunActingUserMock).toHaveBeenCalledWith({
+      runId: 42,
+      userId: 'user-1',
+    });
+    expect(
+      setTrustedRunActingUserMock.mock.invocationCallOrder[0]!,
+    ).toBeLessThan(queueSlackMessageMock.mock.invocationCallOrder[0]!);
     expect(postMessageMock).toHaveBeenCalledWith(
       expect.objectContaining({
         channel: 'C123',
@@ -526,6 +543,18 @@ describe('handleFollowupAnswer', () => {
         user: 'U123',
         userId: 'user-1',
       }),
+    );
+    expect(setTrustedRunActingUserOnSuccessMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        runId: 42,
+        userId: 'user-1',
+        operation: expect.any(Function),
+      }),
+    );
+    expect(
+      setTrustedRunActingUserOnSuccessMock.mock.invocationCallOrder[0]!,
+    ).toBeLessThan(
+      submitPendingSlackRequestUserInputAnswerMock.mock.invocationCallOrder[0]!,
     );
     expect(queueSlackMessageMock).not.toHaveBeenCalled();
     expect(consoleErrorMock).not.toHaveBeenCalled();

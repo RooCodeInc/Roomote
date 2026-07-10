@@ -242,9 +242,7 @@ describe('createLinearMessageInterval', () => {
         },
         userId: 'user-2',
       });
-      expect(prepareActorScopedTurn).toHaveBeenNthCalledWith(1, 'user-2', {
-        onMismatch: 'skip',
-      });
+      expect(prepareActorScopedTurn).toHaveBeenNthCalledWith(1, 'user-2');
       expect(prepareActorScopedTurn).toHaveBeenNthCalledWith(2, 'user-2', {
         allowMcpReconnect: false,
         onMismatch: 'skip',
@@ -356,9 +354,10 @@ describe('createLinearMessageInterval', () => {
           },
         ],
       );
-      expect(mockPrepareActorScopedTurn).toHaveBeenCalledWith('user-2', {
-        onMismatch: 'skip',
-      });
+      expect(mockPrepareActorScopedTurn).toHaveBeenCalledWith(
+        'user-2',
+        undefined,
+      );
       expect(mockGetLinearMessages).not.toHaveBeenCalled();
     } finally {
       clearInterval(interval);

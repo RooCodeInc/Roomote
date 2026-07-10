@@ -72,14 +72,13 @@ export function createLinearMessageInterval({
         );
 
         for (const [index, answer] of queuedAnswers.entries()) {
-          // Polled answers have no trusted per-message actor write; a
-          // mismatched sender's answer is skipped (with a resend notice)
-          // rather than run under the server actor or stalling the queue.
-          const answerPrep = await prepareActorScopedTurn(answer.userId, {
-            onMismatch: 'skip',
-          });
+          // The API couples answer queueing to its trusted actor write. If the
+          // worker drains Redis just before that DB transaction commits,
+          // block and requeue instead of dropping an answer that is already
+          // marked submitted and cannot be resent.
+          const answerPrep = await prepareActorScopedTurn(answer.userId);
 
-          if (answerPrep === false) {
+          if (answerPrep === false || answerPrep.skippedMismatch) {
             logger.warn(
               `[listenForLinearEvents] Delaying request_user_input answer for task ${state.sessionId} until actor-scoped turn preparation succeeds (requestId=${answer.requestId})`,
             );
@@ -99,13 +98,6 @@ export function createLinearMessageInterval({
             }
 
             return;
-          }
-
-          if (answerPrep.skippedMismatch) {
-            logger.warn(
-              `[listenForLinearEvents] Skipped request_user_input answer for task ${state.sessionId}: sender is not the server-side acting user (requestId=${answer.requestId})`,
-            );
-            continue;
           }
 
           const sent = answerUserInputRequest({

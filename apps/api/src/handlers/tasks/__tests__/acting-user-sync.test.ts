@@ -1,25 +1,20 @@
-const { mockDbUpdate, mockDbSet, mockDbWhere, mockLogHandlerError } =
-  vi.hoisted(() => {
-    const mockDbWhere = vi.fn();
-    const mockDbSet = vi.fn(() => ({ where: mockDbWhere }));
-    const mockDbUpdate = vi.fn(() => ({ set: mockDbSet }));
-
-    return {
-      mockDbUpdate,
-      mockDbSet,
-      mockDbWhere,
-      mockLogHandlerError: vi.fn(),
-    };
-  });
+const {
+  mockCompareAndSetTrustedRunActingUser,
+  mockSetTrustedRunActingUser,
+  mockLogHandlerError,
+} = vi.hoisted(() => ({
+  mockCompareAndSetTrustedRunActingUser: vi.fn(),
+  mockSetTrustedRunActingUser: vi.fn(),
+  mockLogHandlerError: vi.fn(),
+}));
 
 vi.mock('@roomote/db/server', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@roomote/db/server')>();
 
   return {
     ...actual,
-    db: {
-      update: mockDbUpdate,
-    },
+    compareAndSetTrustedRunActingUser: mockCompareAndSetTrustedRunActingUser,
+    setTrustedRunActingUser: mockSetTrustedRunActingUser,
   };
 });
 
@@ -28,6 +23,7 @@ vi.mock('../../utils', () => ({
 }));
 
 import {
+  restoreActingUserIdAfterFailedDelivery,
   syncActingUserForInboundMessage,
   updateActingUserIdIfNeeded,
 } from '../acting-user-sync';
@@ -35,7 +31,7 @@ import {
 describe('updateActingUserIdIfNeeded', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    mockDbWhere.mockResolvedValue(undefined);
+    mockCompareAndSetTrustedRunActingUser.mockResolvedValue(true);
   });
 
   it('writes the next acting user when it differs', async () => {
@@ -46,7 +42,11 @@ describe('updateActingUserIdIfNeeded', () => {
       preserveActor: false,
     });
 
-    expect(mockDbSet).toHaveBeenCalledWith({ actingUserId: 'user-2' });
+    expect(mockCompareAndSetTrustedRunActingUser).toHaveBeenCalledWith({
+      runId: 42,
+      expectedUserId: 'user-1',
+      nextUserId: 'user-2',
+    });
   });
 
   it('is idempotent: skips the write when the actor already matches', async () => {
@@ -57,7 +57,7 @@ describe('updateActingUserIdIfNeeded', () => {
       preserveActor: false,
     });
 
-    expect(mockDbUpdate).not.toHaveBeenCalled();
+    expect(mockCompareAndSetTrustedRunActingUser).not.toHaveBeenCalled();
   });
 
   it('never overwrites the actor for actor-preserving sender modes', async () => {
@@ -68,11 +68,13 @@ describe('updateActingUserIdIfNeeded', () => {
       preserveActor: true,
     });
 
-    expect(mockDbUpdate).not.toHaveBeenCalled();
+    expect(mockCompareAndSetTrustedRunActingUser).not.toHaveBeenCalled();
   });
 
   it('propagates write failures so callers can abort delivery', async () => {
-    mockDbWhere.mockRejectedValueOnce(new Error('db unavailable'));
+    mockCompareAndSetTrustedRunActingUser.mockRejectedValueOnce(
+      new Error('db unavailable'),
+    );
 
     await expect(
       updateActingUserIdIfNeeded({
@@ -85,10 +87,52 @@ describe('updateActingUserIdIfNeeded', () => {
   });
 });
 
+describe('restoreActingUserIdAfterFailedDelivery', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockCompareAndSetTrustedRunActingUser.mockResolvedValue(true);
+  });
+
+  it('rolls back only while the attempted actor still owns the run', async () => {
+    await restoreActingUserIdAfterFailedDelivery({
+      handlerName: 'sendMessageToTask',
+      jobId: 42,
+      previousActingUserId: 'user-1',
+      attemptedActingUserId: 'user-2',
+    });
+
+    expect(mockCompareAndSetTrustedRunActingUser).toHaveBeenCalledWith({
+      runId: 42,
+      expectedUserId: 'user-2',
+      nextUserId: 'user-1',
+    });
+  });
+
+  it('keeps the delivery error primary when rollback fails', async () => {
+    mockCompareAndSetTrustedRunActingUser.mockRejectedValueOnce(
+      new Error('rollback unavailable'),
+    );
+
+    await expect(
+      restoreActingUserIdAfterFailedDelivery({
+        handlerName: 'sendMessageToTask',
+        jobId: 42,
+        previousActingUserId: 'user-1',
+        attemptedActingUserId: 'user-2',
+      }),
+    ).resolves.toBeUndefined();
+
+    expect(mockLogHandlerError).toHaveBeenCalledWith(
+      'sendMessageToTask',
+      expect.stringContaining('rollback unavailable'),
+    );
+  });
+});
+
 describe('syncActingUserForInboundMessage', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    mockDbWhere.mockResolvedValue(undefined);
+    mockSetTrustedRunActingUser.mockResolvedValue(undefined);
   });
 
   it('writes the mapped sender as the acting user before the message is queued', async () => {
@@ -98,7 +142,10 @@ describe('syncActingUserForInboundMessage', () => {
       senderUserId: 'user-2',
     });
 
-    expect(mockDbSet).toHaveBeenCalledWith({ actingUserId: 'user-2' });
+    expect(mockSetTrustedRunActingUser).toHaveBeenCalledWith({
+      runId: 42,
+      userId: 'user-2',
+    });
   });
 
   it('skips unmapped senders so the run keeps its current actor', async () => {
@@ -113,13 +160,15 @@ describe('syncActingUserForInboundMessage', () => {
       senderUserId: null,
     });
 
-    expect(mockDbUpdate).not.toHaveBeenCalled();
+    expect(mockSetTrustedRunActingUser).not.toHaveBeenCalled();
   });
 
   it('is non-fatal: logs write failures instead of throwing', async () => {
     // If this write fails the worker detects the mismatch at delivery time
-    // and runs the turn under the server actor — queueing must not break.
-    mockDbWhere.mockRejectedValueOnce(new Error('db unavailable'));
+    // and skips the message — queueing the webhook itself must not break.
+    mockSetTrustedRunActingUser.mockRejectedValueOnce(
+      new Error('db unavailable'),
+    );
 
     await expect(
       syncActingUserForInboundMessage({

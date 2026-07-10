@@ -416,47 +416,6 @@ describe('createSlackMessageInterval', () => {
     }
   });
 
-  it('skips a mismatched request_user_input answer without stalling the answer queue', async () => {
-    mockGetSlackRequestUserInputAnswers.mockResolvedValueOnce([
-      {
-        requestId: 'req-1',
-        answers: { q1: { answers: ['from user-2'] } },
-        userId: 'user-2',
-      },
-      {
-        requestId: 'req-2',
-        answers: { q1: { answers: ['from user-1'] } },
-        userId: 'user-1',
-      },
-    ]);
-    mockPrepareActorScopedTurn.mockImplementation(
-      async (targetUserId?: string) =>
-        targetUserId === 'user-2'
-          ? { skippedMismatch: true as const }
-          : { effectiveUserId: targetUserId ?? null },
-    );
-
-    const { options, answerUserInputRequest } = createListenerOptions({
-      actingUserId: 'user-1',
-    });
-
-    const interval = createSlackMessageInterval(options);
-
-    try {
-      await vi.advanceTimersByTimeAsync(5_000);
-
-      expect(answerUserInputRequest).toHaveBeenCalledTimes(1);
-      expect(answerUserInputRequest).toHaveBeenCalledWith({
-        requestId: 'req-2',
-        answers: { q1: { answers: ['from user-1'] } },
-        userId: 'user-1',
-      });
-      expect(mockPrependSlackRequestUserInputAnswers).not.toHaveBeenCalled();
-    } finally {
-      clearInterval(interval);
-    }
-  });
-
   it('sends a preformatted Slack prompt when queued context is provided', async () => {
     mockGetSlackMessages.mockResolvedValueOnce([
       {
@@ -538,9 +497,7 @@ describe('createSlackMessageInterval', () => {
         },
         userId: 'user-2',
       });
-      expect(prepareActorScopedTurn).toHaveBeenNthCalledWith(1, 'user-2', {
-        onMismatch: 'skip',
-      });
+      expect(prepareActorScopedTurn).toHaveBeenNthCalledWith(1, 'user-2');
       expect(prepareActorScopedTurn).toHaveBeenNthCalledWith(2, 'user-2', {
         allowMcpReconnect: false,
         onMismatch: 'skip',

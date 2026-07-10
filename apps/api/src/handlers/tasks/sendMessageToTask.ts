@@ -33,7 +33,10 @@ import {
 } from '@roomote/slack';
 
 import { findLatestCloudJob, getTaskChannelBindings } from './helpers';
-import { updateActingUserIdIfNeeded } from './acting-user-sync';
+import {
+  restoreActingUserIdAfterFailedDelivery,
+  updateActingUserIdIfNeeded,
+} from './acting-user-sync';
 import { logHandlerError } from '../utils';
 
 const LINKED_REVIEW_HANDOFF_SOURCE = 'linked_review_handoff';
@@ -336,10 +339,9 @@ async function maybeCreateSlackReplyQuoteContext(params: {
  * turn whose sender does not match the server-side acting user. Writing
  * after delivery (the previous design) opened a window where the new
  * sender's prompt ran while credential routes still resolved the previous
- * actor. Writing before delivery closes that window; if delivery then
- * fails, the run merely attributes to the latest human who attempted to
- * engage — no prompt of theirs ran, and the write is idempotent, so the
- * next successful send (from any sender) re-syncs it.
+ * actor. Writing before delivery closes that window. If delivery fails, the
+ * caller compare-and-set rolls the actor back so the previous in-flight turn
+ * cannot continue resolving credentials as a sender whose prompt never ran.
  *
  * Errors propagate: proceeding with delivery after a failed required switch
  * would only bounce off the worker's mismatch guard with a less clear error.
@@ -354,8 +356,8 @@ async function syncActingUserIdBeforeDelivery({
   currentActingUserId: string | null;
   nextActingUserId: string;
   preserveActor: boolean;
-}): Promise<void> {
-  await updateActingUserIdIfNeeded({
+}): Promise<boolean> {
+  return await updateActingUserIdIfNeeded({
     jobId,
     currentActingUserId,
     nextActingUserId,
@@ -750,6 +752,10 @@ export async function sendMessageToTask({
 
     const shouldPreserveActor =
       !!senderMode && ACTOR_PRESERVING_MODES.has(senderMode);
+    const requiresActorHandoff =
+      !shouldPreserveActor && job.actingUserId !== senderUserId;
+
+    let didSwitchActingUser = false;
 
     try {
       await maybeCreateSlackReplyQuoteContext({
@@ -774,7 +780,7 @@ export async function sendMessageToTask({
       // The actor switch must land before the prompt reaches the sandbox so
       // credential resolution and turn attribution agree. See
       // syncActingUserIdBeforeDelivery for the ordering rationale.
-      await syncActingUserIdBeforeDelivery({
+      didSwitchActingUser = await syncActingUserIdBeforeDelivery({
         jobId: job.id,
         currentActingUserId: job.actingUserId,
         nextActingUserId: senderUserId,
@@ -796,12 +802,25 @@ export async function sendMessageToTask({
             ...(resolvedQuoteUserName
               ? { userName: resolvedQuoteUserName }
               : {}),
+            // Do not leave the previous actor's turn running after the live
+            // credential identity changes. Native steering injects at the
+            // next step; fallback steering aborts and replays promptly.
+            ...(requiresActorHandoff ? { autoSteerWhenQueued: true } : {}),
             ...(images?.length ? { images } : {}),
           }),
       });
 
       return { success: true, result };
     } catch (error) {
+      if (didSwitchActingUser) {
+        await restoreActingUserIdAfterFailedDelivery({
+          handlerName: 'sendMessageToTask',
+          jobId: job.id,
+          previousActingUserId: job.actingUserId,
+          attemptedActingUserId: senderUserId,
+        });
+      }
+
       if (error instanceof SandboxNotReadyError) {
         return {
           success: false,
@@ -907,6 +926,8 @@ export async function steerMessageToTask({
       };
     }
 
+    let didSwitchActingUser = false;
+
     try {
       await maybeCreateSlackReplyQuoteContext({
         cloudJobId: job.id,
@@ -924,7 +945,7 @@ export async function steerMessageToTask({
       // The actor switch must land before the steer reaches the sandbox so
       // credential resolution and turn attribution agree. See
       // syncActingUserIdBeforeDelivery for the ordering rationale.
-      await syncActingUserIdBeforeDelivery({
+      didSwitchActingUser = await syncActingUserIdBeforeDelivery({
         jobId: job.id,
         currentActingUserId: job.actingUserId,
         nextActingUserId: userId,
@@ -948,6 +969,15 @@ export async function steerMessageToTask({
 
       return { success: true, result };
     } catch (error) {
+      if (didSwitchActingUser) {
+        await restoreActingUserIdAfterFailedDelivery({
+          handlerName: 'steerMessageToTask',
+          jobId: job.id,
+          previousActingUserId: job.actingUserId,
+          attemptedActingUserId: userId,
+        });
+      }
+
       if (error instanceof SandboxNotReadyError) {
         return {
           success: false,

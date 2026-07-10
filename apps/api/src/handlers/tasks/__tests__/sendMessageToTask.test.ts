@@ -8,6 +8,7 @@ const {
   mockSendPromptMutate,
   mockSteerTaskMutate,
   mockTrackLatestUserMessageForSlackQuote,
+  mockRestoreActingUserIdAfterFailedDelivery,
   mockUpdateActingUserIdIfNeeded,
   mockUserFindFirst,
 } = vi.hoisted(() => ({
@@ -20,11 +21,14 @@ const {
   mockSendPromptMutate: vi.fn(),
   mockSteerTaskMutate: vi.fn(),
   mockTrackLatestUserMessageForSlackQuote: vi.fn(),
+  mockRestoreActingUserIdAfterFailedDelivery: vi.fn(),
   mockUpdateActingUserIdIfNeeded: vi.fn(),
   mockUserFindFirst: vi.fn(),
 }));
 
 vi.mock('../acting-user-sync', () => ({
+  restoreActingUserIdAfterFailedDelivery:
+    mockRestoreActingUserIdAfterFailedDelivery,
   updateActingUserIdIfNeeded: mockUpdateActingUserIdIfNeeded,
 }));
 
@@ -174,7 +178,11 @@ describe('sendMessageToTask', () => {
       linearOrganizationId: null,
     });
     mockTrackLatestUserMessageForSlackQuote.mockResolvedValue(undefined);
-    mockUpdateActingUserIdIfNeeded.mockResolvedValue(undefined);
+    mockRestoreActingUserIdAfterFailedDelivery.mockResolvedValue(undefined);
+    mockUpdateActingUserIdIfNeeded.mockImplementation(
+      async ({ currentActingUserId, nextActingUserId, preserveActor }) =>
+        !preserveActor && currentActingUserId !== nextActingUserId,
+    );
     mockUserFindFirst.mockResolvedValue({
       name: 'Alice',
       email: 'alice@example.com',
@@ -205,6 +213,10 @@ describe('sendMessageToTask', () => {
     expect(
       mockUpdateActingUserIdIfNeeded.mock.invocationCallOrder[0]!,
     ).toBeLessThan(mockSendPromptMutate.mock.invocationCallOrder[0]!);
+    expect(mockSendPromptMutate).toHaveBeenCalledWith({
+      prompt: 'Continue as the new sender.',
+      autoSteerWhenQueued: true,
+    });
   });
 
   it('does not deliver the prompt when the pre-delivery acting-user write fails', async () => {
@@ -227,6 +239,34 @@ describe('sendMessageToTask', () => {
       status: 500,
     });
     expect(mockSendPromptMutate).not.toHaveBeenCalled();
+    expect(mockRestoreActingUserIdAfterFailedDelivery).not.toHaveBeenCalled();
+  });
+
+  it('rolls back the actor when prompt delivery fails after the switch', async () => {
+    mockFindLatestCloudJob.mockResolvedValue(
+      createActiveJob({ actingUserId: 'user-1' }),
+    );
+    mockSendPromptMutate.mockRejectedValueOnce(
+      new Error('sandbox delivery failed'),
+    );
+
+    const result = await sendMessageToTask({
+      taskId: 'task-1',
+      userId: 'user-2',
+      message: 'Continue as the new sender.',
+    });
+
+    expect(result).toEqual({
+      success: false,
+      error: 'sandbox delivery failed',
+      status: 500,
+    });
+    expect(mockRestoreActingUserIdAfterFailedDelivery).toHaveBeenCalledWith({
+      handlerName: 'sendMessageToTask',
+      jobId: 42,
+      previousActingUserId: 'user-1',
+      attemptedActingUserId: 'user-2',
+    });
   });
 
   it('writes the acting user BEFORE delivering steering prompts to the sandbox', async () => {
@@ -250,6 +290,33 @@ describe('sendMessageToTask', () => {
     expect(
       mockUpdateActingUserIdIfNeeded.mock.invocationCallOrder[0]!,
     ).toBeLessThan(mockSteerTaskMutate.mock.invocationCallOrder[0]!);
+  });
+
+  it('rolls back the actor when steering delivery fails after the switch', async () => {
+    mockFindLatestCloudJob.mockResolvedValue(
+      createActiveJob({ actingUserId: 'user-1' }),
+    );
+    mockSteerTaskMutate.mockRejectedValueOnce(
+      new Error('sandbox delivery failed'),
+    );
+
+    const result = await steerMessageToTask({
+      taskId: 'task-1',
+      userId: 'user-2',
+      message: 'Steer as the new sender.',
+    });
+
+    expect(result).toEqual({
+      success: false,
+      error: 'sandbox delivery failed',
+      status: 500,
+    });
+    expect(mockRestoreActingUserIdAfterFailedDelivery).toHaveBeenCalledWith({
+      handlerName: 'steerMessageToTask',
+      jobId: 42,
+      previousActingUserId: 'user-1',
+      attemptedActingUserId: 'user-2',
+    });
   });
 
   it('stores the latest user message for active Slack-thread tasks', async () => {

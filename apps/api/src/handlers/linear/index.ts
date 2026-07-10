@@ -23,6 +23,7 @@ import {
 } from '@roomote/cloud-agents/server';
 import { getRedis } from '@roomote/redis';
 import { postRouterDebugMessage } from '@roomote/slack';
+import { setTrustedRunActingUserOnSuccess } from '@roomote/db/server';
 import {
   createMcpOauthReplay,
   findLinearDeploymentMcpConnectionByIdentity,
@@ -578,17 +579,29 @@ async function handleAgentSessionEvent(
           );
 
           if (parsedReply) {
-            await queueLinearRequestUserInputAnswer(activeJob.id, {
-              requestId: pendingRequest.requestId,
-              answers: parsedReply.answers,
+            // Question answers return before the normal active-message actor
+            // sync below, so apply the trusted sender before marking the
+            // request submitted. Otherwise the worker drops a different
+            // linked user's answer as a mismatch and it cannot be resent.
+            await setTrustedRunActingUserOnSuccess({
+              runId: activeJob.id,
               userId,
-              timestamp: Date.now(),
-            });
+              operation: async () => {
+                await queueLinearRequestUserInputAnswer(activeJob.id, {
+                  requestId: pendingRequest.requestId,
+                  answers: parsedReply.answers,
+                  userId,
+                  timestamp: Date.now(),
+                });
 
-            await markPendingLinearRequestUserInputSubmitted(
-              sessionId,
-              pendingRequest.requestId,
-            );
+                await markPendingLinearRequestUserInputSubmitted(
+                  sessionId,
+                  pendingRequest.requestId,
+                );
+
+                return true;
+              },
+            });
 
             return { status: 'ok' };
           }

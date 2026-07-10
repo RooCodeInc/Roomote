@@ -1,4 +1,7 @@
-import { and, db, eq, isNull, ne, or, taskRuns } from '@roomote/db/server';
+import {
+  compareAndSetTrustedRunActingUser,
+  setTrustedRunActingUser,
+} from '@roomote/db/server';
 
 import { logHandlerError } from '../utils';
 
@@ -28,15 +31,48 @@ export async function updateActingUserIdIfNeeded({
   currentActingUserId: string | null;
   nextActingUserId: string;
   preserveActor: boolean;
-}): Promise<void> {
+}): Promise<boolean> {
   if (preserveActor || currentActingUserId === nextActingUserId) {
-    return;
+    return false;
   }
 
-  await db
-    .update(taskRuns)
-    .set({ actingUserId: nextActingUserId })
-    .where(eq(taskRuns.id, jobId));
+  return await compareAndSetTrustedRunActingUser({
+    runId: jobId,
+    expectedUserId: currentActingUserId,
+    nextUserId: nextActingUserId,
+  });
+}
+
+/**
+ * Best-effort compare-and-set rollback for a trusted actor switch whose
+ * sandbox delivery failed. The CAS avoids overwriting a newer sender that
+ * won the race after this request changed the actor.
+ */
+export async function restoreActingUserIdAfterFailedDelivery({
+  handlerName,
+  jobId,
+  previousActingUserId,
+  attemptedActingUserId,
+}: {
+  handlerName: 'sendMessageToTask' | 'steerMessageToTask';
+  jobId: number;
+  previousActingUserId: string | null;
+  attemptedActingUserId: string;
+}): Promise<void> {
+  try {
+    await compareAndSetTrustedRunActingUser({
+      runId: jobId,
+      expectedUserId: attemptedActingUserId,
+      nextUserId: previousActingUserId,
+    });
+  } catch (error) {
+    logHandlerError(
+      handlerName,
+      `Failed to roll back actingUserId after sandbox delivery failed for run ${jobId} ` +
+        `(attempted=${attemptedActingUserId}, previous=${previousActingUserId ?? 'null'}): ` +
+        `${error instanceof Error ? error.message : String(error)}`,
+    );
+  }
 }
 
 /**
@@ -66,18 +102,7 @@ export async function syncActingUserForInboundMessage({
   }
 
   try {
-    await db
-      .update(taskRuns)
-      .set({ actingUserId: senderUserId })
-      .where(
-        and(
-          eq(taskRuns.id, jobId),
-          or(
-            isNull(taskRuns.actingUserId),
-            ne(taskRuns.actingUserId, senderUserId),
-          ),
-        ),
-      );
+    await setTrustedRunActingUser({ runId: jobId, userId: senderUserId });
   } catch (error) {
     logHandlerError(
       logContext,
