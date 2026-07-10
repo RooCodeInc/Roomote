@@ -239,6 +239,9 @@ verify_stack() {
   compose exec -T web curl -fsS --max-time 10 "http://127.0.0.1:3000/setup?token=$setup_token" >/dev/null
   compose exec -T controller curl -fsS --max-time 5 http://api:3001/health/controller >/dev/null
   compose exec -T bullmq curl -fsS --max-time 5 http://127.0.0.1:3002/admin/health >/dev/null
+  compose exec -T api sh -ceu 'command -v gh >/dev/null; command -v opencode >/dev/null'
+  compose exec -T web sh -ceu 'command -v opencode >/dev/null'
+  compose exec -T bullmq sh -ceu 'command -v opencode >/dev/null'
 }
 
 write_marker() {

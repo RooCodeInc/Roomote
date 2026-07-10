@@ -246,8 +246,8 @@ RUN mkdir -p /runtime-deps && cd /runtime-deps && npm init -y >/dev/null && \
 
 # ---------------------------------------------------------------------------
 # Runtime base: only health-check/TLS/process-init tooling shared by control
-# plane services. Git, GitHub CLI, Python, and OpenCode belong in the worker
-# image, not in long-lived application containers.
+# plane services. Runtime tools are layered onto only the services that execute
+# the corresponding control-plane workflows.
 # ---------------------------------------------------------------------------
 FROM node:24.13.1-slim AS runtime-base
 
@@ -276,12 +276,43 @@ ENV HOME=/tmp
 
 ENTRYPOINT ["/usr/bin/tini", "--", "/roomote/.docker/app/entrypoint.sh"]
 
+# Non-task inference (routing, summaries, automation planning, and related
+# control-plane calls) starts a managed OpenCode SDK server in-process.
+FROM runtime-base AS runtime-inference-base
+
+ARG OPENCODE_CLI_VERSION=1.17.8
+
+RUN npm install --prefix /opt/opencode-cli --no-save --no-package-lock \
+    "opencode-ai@${OPENCODE_CLI_VERSION}" \
+  && test -x /opt/opencode-cli/node_modules/.bin/opencode \
+  && test "$(/opt/opencode-cli/node_modules/.bin/opencode --version)" = "${OPENCODE_CLI_VERSION}" \
+  && ln -sf /opt/opencode-cli/node_modules/.bin/opencode /usr/local/bin/opencode
+
+# GitHub PR prompt generation still uses the gh CLI in the API process. Keep
+# the installer isolated so only API-bearing runtime targets receive it.
+FROM runtime-base AS github-cli
+
+RUN apt -qq update && \
+  apt -qq install -y git && \
+  ARCH="$(dpkg --print-architecture)" && \
+  if [ "$ARCH" = "amd64" ]; then \
+    GH_CLI_URL="https://github.com/cli/cli/releases/download/v2.81.0/gh_2.81.0_linux_amd64.deb"; \
+  elif [ "$ARCH" = "arm64" ]; then \
+    GH_CLI_URL="https://github.com/cli/cli/releases/download/v2.81.0/gh_2.81.0_linux_arm64.deb"; \
+  else \
+    echo "Unsupported architecture: $ARCH" && exit 1; \
+  fi && \
+  curl -fsSL "$GH_CLI_URL" -o /tmp/gh.deb && \
+  dpkg -i /tmp/gh.deb && \
+  rm -f /tmp/gh.deb && \
+  test -x /usr/bin/gh
+
 # ---------------------------------------------------------------------------
 # Service-specific runtime targets. Each target contains one application and
 # runs as its own unprivileged account. The controller is the sole target that
 # receives the Docker CLI and worker-release assets.
 # ---------------------------------------------------------------------------
-FROM runtime-base AS runtime-web
+FROM runtime-inference-base AS runtime-web
 
 ENV ROOMOTE_SERVICE=web
 
@@ -291,12 +322,13 @@ RUN groupadd --system --gid 10001 roomote-web && \
 COPY --from=build-web /roomote/apps/web/.next/standalone ./
 COPY --from=build-web /roomote/apps/web/.next/static ./apps/web/.next/static/
 COPY --from=build-web /roomote/apps/web/public ./apps/web/public/
+RUN command -v opencode >/dev/null
 
 USER roomote-web:roomote-web
 EXPOSE 3000
 CMD ["web"]
 
-FROM runtime-base AS runtime-api
+FROM runtime-inference-base AS runtime-api
 
 ENV ROOMOTE_SERVICE=api
 
@@ -306,6 +338,8 @@ RUN groupadd --system --gid 10002 roomote-api && \
 COPY --from=build-api /roomote/apps/api/package.json ./apps/api/
 COPY --from=build-api /roomote/apps/api/dist ./apps/api/dist/
 COPY --from=build-api /runtime-deps/node_modules ./apps/api/node_modules/
+COPY --from=github-cli /usr/bin/gh /usr/local/bin/gh
+RUN command -v gh >/dev/null && command -v opencode >/dev/null
 
 USER roomote-api:roomote-api
 EXPOSE 3001
@@ -331,7 +365,7 @@ RUN groupadd --system --gid 10003 roomote-controller && \
 USER roomote-controller:roomote-controller
 CMD ["controller"]
 
-FROM runtime-base AS runtime-bullmq
+FROM runtime-inference-base AS runtime-bullmq
 
 ENV ROOMOTE_SERVICE=bullmq
 
@@ -341,6 +375,7 @@ RUN groupadd --system --gid 10004 roomote-bullmq && \
 COPY --from=build-bullmq /roomote/apps/bullmq/package.json ./apps/bullmq/
 COPY --from=build-bullmq /roomote/apps/bullmq/dist ./apps/bullmq/dist/
 COPY --from=build-bullmq /runtime-deps/node_modules ./apps/bullmq/node_modules/
+RUN command -v opencode >/dev/null
 
 USER roomote-bullmq:roomote-bullmq
 EXPOSE 3002
@@ -378,7 +413,7 @@ CMD ["db-migrate"]
 # Compatibility target for platforms such as Fly that require multiple
 # process groups to share one image. It remains non-root and deliberately has
 # no Docker CLI; Docker-backed self-hosting uses runtime-controller instead.
-FROM runtime-base AS runtime-app
+FROM runtime-inference-base AS runtime-app
 
 ENV ROOMOTE_SERVICE=
 
@@ -407,6 +442,8 @@ COPY --from=build-bullmq /runtime-deps/node_modules ./apps/bullmq/node_modules/
 COPY --from=build-preview-proxy /roomote/apps/preview-proxy/package.json ./apps/preview-proxy/
 COPY --from=build-preview-proxy /roomote/apps/preview-proxy/dist ./apps/preview-proxy/dist/
 COPY --from=build-preview-proxy /runtime-deps/node_modules ./apps/preview-proxy/node_modules/
+COPY --from=github-cli /usr/bin/gh /usr/local/bin/gh
+RUN command -v gh >/dev/null && command -v opencode >/dev/null
 
 USER roomote-app:roomote-app
 EXPOSE 3000 3001 3002 8081
