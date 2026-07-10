@@ -73,16 +73,96 @@ import {
 import { resolveRequestedWorkKindDecision } from './router/requested-work-kind';
 
 enum TaskRunQueueKeys {
-  Queue = 'queue:task-runs',
-  // Rolling-deploy drain path only. New entries are never written here, so
-  // this key disappears naturally after pre-migration work is dequeued.
+  // Version the storage layout so old and new controllers can coexist during
+  // a rolling deployment. Both versions still contend on the same scope lock.
   LegacyQueue = 'queue:cloud-jobs',
+  Queue = 'queue:cloud-jobs:v2',
+  Entries = 'queue:cloud-jobs:v2:entries',
+  EntryScopes = 'queue:cloud-jobs:v2:entry-scopes',
+  Scopes = 'queue:cloud-jobs:v2:scopes',
 }
 
-const taskRunQueueReadKeys = [
-  TaskRunQueueKeys.LegacyQueue,
-  TaskRunQueueKeys.Queue,
-] as const;
+const ATOMIC_ENQUEUE_SCRIPT = `
+local incomingId = ARGV[1]
+local incomingScope = ARGV[2]
+local incomingRaw = ARGV[3]
+local existingId = redis.call('HGET', KEYS[2], incomingScope)
+local evictedId = ''
+
+if existingId then
+  redis.call('LREM', KEYS[1], 0, existingId)
+
+  if existingId ~= incomingId then
+    evictedId = existingId
+    redis.call('HDEL', KEYS[3], existingId)
+    redis.call('HDEL', KEYS[4], existingId)
+  end
+end
+
+redis.call('HSET', KEYS[2], incomingScope, incomingId)
+redis.call('HSET', KEYS[3], incomingId, incomingRaw)
+redis.call('HSET', KEYS[4], incomingId, incomingScope)
+redis.call('RPUSH', KEYS[1], incomingId)
+
+return evictedId
+`;
+
+const ATOMIC_DEQUEUE_SCRIPT = `
+local queueLength = redis.call('LLEN', KEYS[1])
+local lockTtlSeconds = tonumber(ARGV[1])
+
+for _ = 1, queueLength do
+  local entryId = redis.call('LPOP', KEYS[1])
+
+  if entryId then
+    local rawValue = redis.call('HGET', KEYS[3], entryId)
+    local entryScope = redis.call('HGET', KEYS[4], entryId)
+
+    if rawValue and entryScope then
+      local acquired = redis.call(
+        'SET',
+        entryScope,
+        entryId,
+        'EX',
+        lockTtlSeconds,
+        'NX'
+      )
+
+      if acquired then
+        redis.call('HDEL', KEYS[3], entryId)
+        redis.call('HDEL', KEYS[4], entryId)
+
+        if redis.call('HGET', KEYS[2], entryScope) == entryId then
+          redis.call('HDEL', KEYS[2], entryScope)
+        end
+
+        return rawValue
+      end
+
+      redis.call('RPUSH', KEYS[1], entryId)
+    else
+      redis.call('HDEL', KEYS[3], entryId)
+      redis.call('HDEL', KEYS[4], entryId)
+    end
+  end
+end
+
+return nil
+`;
+
+const RELEASE_OWNED_LOCK_SCRIPT = `
+if redis.call('GET', KEYS[1]) == ARGV[1] then
+  return redis.call('DEL', KEYS[1])
+end
+
+return 0
+`;
+
+// BLPOP cannot atomically combine queue removal with the scope-lock claim in
+// ATOMIC_DEQUEUE_SCRIPT. Polling trades four idle EVAL calls per controller
+// per second for a bounded 250ms wake-up delay; a future dedicated wake-up
+// connection can remove that tradeoff without weakening claim atomicity.
+const DEQUEUE_POLL_INTERVAL_MS = 250;
 
 const taskRunQueueEntrySchema = z.object({
   id: z.number(),
@@ -106,34 +186,24 @@ function getErrorMessage(error: unknown, fallback: string): string {
 async function cancelTaskRunBeforeQueue(
   taskRun: TaskRun,
   message: string,
-  failureContext: string,
 ): Promise<void> {
-  try {
-    const endedAt = new Date();
+  const endedAt = new Date();
 
-    await db.transaction(async (tx) => {
-      await tx
-        .update(taskRuns)
-        .set({
-          status: RunStatus.Canceled,
-          canceledAt: endedAt,
-          error: message,
-        })
-        .where(eq(taskRuns.id, taskRun.id));
+  await db.transaction(async (tx) => {
+    await tx
+      .update(taskRuns)
+      .set({
+        status: RunStatus.Canceled,
+        canceledAt: endedAt,
+        error: message,
+      })
+      .where(eq(taskRuns.id, taskRun.id));
 
-      // Derive the task state from all its runs. Enqueue-failure cancels
-      // bypass finishRun entirely, so without this sync the task stays
-      // 'active' forever. The shared @roomote/db helper keeps siblings honest.
-      await syncTaskStateFromRuns(tx, taskRun.taskId);
-    });
-  } catch (cancelError) {
-    console.warn(
-      `[enqueueTask] Failed to cancel run ${taskRun.id} after ${failureContext}: ${getErrorMessage(
-        cancelError,
-        'Unknown cancellation error',
-      )}`,
-    );
-  }
+    // Derive the task state from all its runs. Enqueue-failure cancels bypass
+    // finishRun entirely, so this transaction must either commit both state
+    // changes or surface the cancellation failure to the producer.
+    await syncTaskStateFromRuns(tx, taskRun.taskId);
+  });
 }
 
 async function resolveMatchedHumanActor(
@@ -195,7 +265,7 @@ async function assertDeploymentIsActive(): Promise<void> {
   });
 
   if (isRoomoteDeploymentDisabled(deployment?.metadata)) {
-    throw new Error('Cannot create task for disabled deployment.');
+    throw new Error('Cannot create task run for disabled deployment.');
   }
 }
 
@@ -276,143 +346,135 @@ export class TaskRunQueue {
     }
   }
 
-  public async enqueue(entry: TaskRunQueueEntry): Promise<void> {
-    // Discard entries with the same scope from both the current queue and the
-    // rolling-deploy drain queue. Otherwise an older queued run could execute
-    // after its replacement once the current queue becomes empty.
-    for (const queueKey of taskRunQueueReadKeys) {
-      const entries = await this.redis.lrange(queueKey, 0, -1);
+  public async enqueue(entry: TaskRunQueueEntry): Promise<TaskRunQueueEntry[]> {
+    const evictedEntries: TaskRunQueueEntry[] = [];
+    const legacyEntries = await this.redis.lrange(
+      TaskRunQueueKeys.LegacyQueue,
+      0,
+      -1,
+    );
 
-      for (const rawValue of entries) {
-        try {
-          const otherEntry = taskRunQueueEntrySchema.parse(
-            JSON.parse(rawValue),
-          );
+    for (const rawValue of legacyEntries) {
+      try {
+        const legacyEntry = taskRunQueueEntrySchema.parse(JSON.parse(rawValue));
 
-          if (otherEntry.scope === entry.scope) {
-            const removed = await this.redis.lrem(queueKey, 0, rawValue);
-
-            // If lrem removed nothing the entry was already claimed off the
-            // queue by a worker; that worker owns the run's terminal state, so
-            // skip the DB cancel + sync entirely to avoid racing it.
-            if (removed === 0) {
-              continue;
-            }
-
-            // Best-effort cancel in DB; do not block queue behavior during
-            // deduplication.
-            void db
-              .transaction(async (tx) => {
-                const endedAt = new Date();
-
-                // Only cancel a run still waiting in the queue
-                // (pending/dequeued). If it already advanced past dequeue it
-                // is claimed, so leave it and its task state to the owner.
-                const [canceledRun] = await tx
-                  .update(taskRuns)
-                  .set({
-                    status: RunStatus.Canceled,
-                    canceledAt: endedAt,
-                    error: 'Superseded by a newer task run.',
-                  })
-                  .where(
-                    and(
-                      eq(taskRuns.id, otherEntry.id),
-                      inArray(taskRuns.status, [
-                        RunStatus.Pending,
-                        RunStatus.Dequeued,
-                      ]),
-                    ),
-                  )
-                  .returning({ taskId: taskRuns.taskId });
-
-                // The run was already claimed/terminal; nothing to sync.
-                if (!canceledRun) {
-                  return;
-                }
-
-                // Derive the task state from all its runs so the superseded
-                // run's task does not stay active forever.
-                await syncTaskStateFromRuns(tx, canceledRun.taskId);
-
-                await markTaskStartParallelCountEndedAt(tx, {
-                  runId: otherEntry.id,
-                  endedAt,
-                });
-              })
-              .catch(() => {
-                // Ignore DB errors; deduplication should proceed regardless.
-              });
-
-            console.log(
-              `[TaskRunQueue] evicted ${otherEntry.id} (${otherEntry.scope})`,
-            );
-          }
-        } catch {
-          // Ignore invalid entries.
+        if (legacyEntry.scope !== entry.scope) {
+          continue;
         }
+
+        const removed = await this.redis.lrem(
+          TaskRunQueueKeys.LegacyQueue,
+          0,
+          rawValue,
+        );
+
+        if (removed > 0 && legacyEntry.id !== entry.id) {
+          evictedEntries.push(legacyEntry);
+        }
+      } catch {
+        // Leave malformed legacy entries for dequeue to discard.
       }
     }
 
-    await this.redis.rpush(TaskRunQueueKeys.Queue, JSON.stringify(entry));
+    const result = await this.redis.eval(
+      ATOMIC_ENQUEUE_SCRIPT,
+      4,
+      TaskRunQueueKeys.Queue,
+      TaskRunQueueKeys.Scopes,
+      TaskRunQueueKeys.Entries,
+      TaskRunQueueKeys.EntryScopes,
+      entry.id.toString(),
+      entry.scope,
+      JSON.stringify(entry),
+    );
+
+    if (typeof result !== 'string') {
+      throw new Error('Atomic queue enqueue returned an invalid result.');
+    }
+
+    if (result) {
+      evictedEntries.push({ id: Number(result), scope: entry.scope });
+    }
+
+    return evictedEntries;
   }
 
   public async dequeue(blocking = true): Promise<TaskRunQueueEntry | null> {
-    const seen = new Set<number>();
+    const deadline = Date.now() + this.timeout * 1000;
 
-    while (true) {
-      // Check the drain queue on every cycle, then preserve the established
-      // blocking behavior on the current queue. A rolling old producer that
-      // races this check is picked up on the next dequeue cycle.
-      const legacyValue = await this.redis.lpop(TaskRunQueueKeys.LegacyQueue);
-      const rawValue =
-        legacyValue ??
-        (blocking
-          ? (await this.redis.blpop(TaskRunQueueKeys.Queue, this.timeout))?.[1]
-          : await this.redis.lpop(TaskRunQueueKeys.Queue));
+    do {
+      const legacyRawValue = await this.redis.lpop(
+        TaskRunQueueKeys.LegacyQueue,
+      );
 
-      if (!rawValue) {
-        return null;
+      if (legacyRawValue) {
+        try {
+          const legacyEntry = taskRunQueueEntrySchema.parse(
+            JSON.parse(legacyRawValue),
+          );
+          const acquired = await this.redis.set(
+            legacyEntry.scope,
+            legacyEntry.id,
+            'EX',
+            Math.ceil(TASK_TIMEOUT_MS / 1000),
+            'NX',
+          );
+
+          if (acquired === 'OK') {
+            console.log(
+              `[TaskRunQueue] acquired lock for ${legacyEntry.scope}`,
+            );
+            return legacyEntry;
+          }
+
+          await this.redis.rpush(TaskRunQueueKeys.LegacyQueue, legacyRawValue);
+        } catch {
+          // Invalid legacy entries are intentionally discarded.
+        }
       }
 
-      let entry;
+      const rawValue = await this.redis.eval(
+        ATOMIC_DEQUEUE_SCRIPT,
+        4,
+        TaskRunQueueKeys.Queue,
+        TaskRunQueueKeys.Scopes,
+        TaskRunQueueKeys.Entries,
+        TaskRunQueueKeys.EntryScopes,
+        Math.ceil(TASK_TIMEOUT_MS / 1000).toString(),
+      );
 
-      try {
-        entry = taskRunQueueEntrySchema.parse(JSON.parse(rawValue));
-      } catch {
+      if (!rawValue) {
+        if (!blocking || Date.now() >= deadline) {
+          return null;
+        }
+
+        await new Promise((resolve) =>
+          setTimeout(resolve, DEQUEUE_POLL_INTERVAL_MS),
+        );
         continue;
       }
 
-      if (seen.has(entry.id)) {
-        await this.enqueue(entry);
-        return null;
-      }
-
-      seen.add(entry.id);
-
-      if (await this.acquireLock(entry)) {
+      try {
+        const entry = taskRunQueueEntrySchema.parse(
+          JSON.parse(String(rawValue)),
+        );
         console.log(`[TaskRunQueue] acquired lock for ${entry.scope}`);
         return entry;
+      } catch {
+        continue;
       }
+    } while (blocking && Date.now() < deadline);
 
-      await this.enqueue(entry);
-    }
+    return null;
   }
 
-  private async acquireLock(entry: TaskRunQueueEntry): Promise<boolean> {
-    const result = await this.redis.set(
-      entry.scope,
-      entry.id,
-      'EX',
-      Math.ceil(TASK_TIMEOUT_MS / 1000), // TTL in seconds - 1h.
-      'NX',
+  public async releaseLock(scope: string, ownerId: number): Promise<boolean> {
+    const result = await this.redis.eval(
+      RELEASE_OWNED_LOCK_SCRIPT,
+      1,
+      scope,
+      ownerId.toString(),
     );
-
-    return result === 'OK';
-  }
-
-  public async releaseLock(scope: string): Promise<boolean> {
-    const result = await this.redis.del(scope);
     return result === 1;
   }
 
@@ -605,7 +667,7 @@ async function findHistoricalEnvironmentForRepo({
  *
  * Disambiguation strategy for PR Reviewer/Fixer tasks:
  * 1. Prefer exact lineage from a delegated task that created the PR
- * 2. Otherwise prefer the environment with the most historical delegated-task runs
+ * 2. Otherwise prefer the environment with the most historical delegated-task jobs
  * 3. Fall back to environments where the repo is primary (first-listed)
  * 4. Among remaining ties, prefer fewer repositories (most specific)
  *
@@ -676,7 +738,7 @@ export interface EnqueueTaskOptions {
   skipInitialActingUser?: boolean;
   /**
    * Persist the run without pushing it onto the controller Redis queue.
-   * Intended for direct-run runs that are claimed by an explicitly invoked
+   * Intended for direct-run jobs that are claimed by an explicitly invoked
    * worker command inside an already-running sandbox.
    */
   enqueue?: boolean;
@@ -686,7 +748,7 @@ export interface EnqueueTaskOptions {
    */
   initialStatus?: RunStatus.Pending | RunStatus.Dequeued;
   /**
-   * Avoid best-effort LLM title generation for short-lived synthetic runs.
+   * Avoid best-effort LLM title generation for short-lived synthetic jobs.
    */
   skipEarlyTitleGeneration?: boolean;
   /**
@@ -737,7 +799,7 @@ export type TaskPrLinkage = {
   githubReviewCommentId?: number | null;
 };
 
-type FreshTaskSpec = Exclude<
+type FreshTask = Exclude<
   TaskSpec,
   { type: typeof TaskPayloadKind.SnapshotResume }
 >;
@@ -747,7 +809,7 @@ type FreshTaskSpec = Exclude<
  * commit-author block, channel bindings) plus its first run.
  */
 export type FreshTaskLaunch = {
-  task: FreshTaskSpec;
+  task: FreshTask;
   initiator: TaskInitiator;
   workflow: TaskWorkflow;
   surface: TaskSurface;
@@ -810,7 +872,14 @@ export function resolveQueueScope(params: {
   return randomUUID();
 }
 
-function getRunLockScope(taskRun: TaskRun): string {
+function getRunLockScope(taskRun: TaskRun): string | null {
+  if (taskRun.queueScope) {
+    return taskRun.queueScope;
+  }
+
+  // Compatibility for rows created before queue_scope was introduced. PR
+  // scopes were deterministic; unique scopes were not and cannot be safely
+  // reconstructed after the fact.
   if (PR_SCOPED_PAYLOAD_KINDS.has(taskRun.payloadKind)) {
     const payload = taskRun.payload as { repo?: string; prNumber?: number };
 
@@ -819,7 +888,7 @@ function getRunLockScope(taskRun: TaskRun): string {
     }
   }
 
-  return randomUUID();
+  return null;
 }
 
 function getInitiatorLinkedUserId(initiator: TaskInitiator): string | null {
@@ -885,7 +954,7 @@ async function assertUserIsNotDeleted(userId: string | null): Promise<void> {
   });
 
   if (user?.deletedAt) {
-    throw new Error('Cannot create task for deleted user.');
+    throw new Error('Cannot create task run for deleted user.');
   }
 }
 
@@ -956,28 +1025,79 @@ async function pushRunOntoQueue(params: {
     } catch (error) {
       const message = getErrorMessage(error, 'Failed before task run enqueue');
 
-      await cancelTaskRunBeforeQueue(taskRun, message, 'beforeEnqueue failed');
+      try {
+        await cancelTaskRunBeforeQueue(taskRun, message);
+      } catch (cancelError) {
+        throw new AggregateError(
+          [error, cancelError],
+          `beforeEnqueue and cancellation both failed for task run ${taskRun.id}`,
+        );
+      }
 
       throw error;
     }
   }
 
   try {
-    await TaskRunQueue.getInstance().enqueue({
+    await db
+      .update(taskRuns)
+      .set({ queueScope: scope })
+      .where(eq(taskRuns.id, taskRun.id));
+
+    const evictedEntries = await TaskRunQueue.getInstance().enqueue({
       id: taskRun.id,
       scope,
     });
+
+    if (evictedEntries.length > 0) {
+      await db.transaction(async (tx) => {
+        const endedAt = new Date();
+        const evictedIds = evictedEntries.map((entry) => entry.id);
+        const canceledRuns = await tx
+          .update(taskRuns)
+          .set({
+            status: RunStatus.Canceled,
+            canceledAt: endedAt,
+            error: 'Superseded by a newer task run.',
+          })
+          .where(
+            and(
+              inArray(taskRuns.id, evictedIds),
+              eq(taskRuns.status, RunStatus.Pending),
+            ),
+          )
+          .returning({ id: taskRuns.id, taskId: taskRuns.taskId });
+
+        for (const canceledRun of canceledRuns) {
+          await syncTaskStateFromRuns(tx, canceledRun.taskId);
+          await markTaskStartParallelCountEndedAt(tx, {
+            runId: canceledRun.id,
+            endedAt,
+          });
+
+          console.log(`[TaskRunQueue] evicted ${canceledRun.id} (${scope})`);
+        }
+      });
+    }
   } catch (error) {
-    await cancelTaskRunBeforeQueue(
-      taskRun,
-      getErrorMessage(error, 'Failed to enqueue task run'),
-      'queue enqueue failed',
-    );
+    let originalError = error;
+
+    try {
+      await cancelTaskRunBeforeQueue(
+        taskRun,
+        getErrorMessage(error, 'Failed to enqueue task run'),
+      );
+    } catch (cancelError) {
+      originalError = new AggregateError(
+        [error, cancelError],
+        `Queue enqueue and cancellation both failed for task run ${taskRun.id}`,
+      );
+    }
 
     throw new TaskRunQueueEnqueueError({
       runId: taskRun.id,
       taskId: taskRun.taskId,
-      originalError: error,
+      originalError,
     });
   }
 
@@ -1053,7 +1173,7 @@ async function enqueueFreshLaunch(
   }
 
   // Auto-resolve environment for PR tasks when no environmentId is set.
-  // This allows PR Reviewer review/follow-up runs to benefit from project
+  // This allows PR Reviewer review/follow-up jobs to benefit from project
   // configuration (setup commands, env vars, services, agent instructions).
   const PR_TASK_TYPES = new Set<TaskPayloadKind>([
     TaskPayloadKind.GithubPrReview,
@@ -1397,32 +1517,32 @@ async function enqueueSnapshotResume(
 
   const { initialPaths } = await resolveEnvironmentContext(task);
 
-  const sourceRunHarness = sourceRun.harness;
-  const sourceRunVendor = resolveComputeProviderTarget(sourceRun.vendor);
+  const sourceJobHarness = sourceRun.harness;
+  const sourceJobVendor = resolveComputeProviderTarget(sourceRun.vendor);
   const sourceRunHarnessModelOverrides = (
     sourceRun.payload as {
       harnessModelOverrides?: import('@roomote/types').HarnessModelOverrides;
     }
   )?.harnessModelOverrides;
 
-  if (task.harness && sourceRunHarness !== task.harness) {
+  if (task.harness && sourceJobHarness !== task.harness) {
     console.warn(
-      `[enqueueTask] SnapshotResume harness override: requested=${task.harness}, source=${sourceRunHarness}`,
+      `[enqueueTask] SnapshotResume harness override: requested=${task.harness}, source=${sourceJobHarness}`,
     );
   }
 
   if (
-    sourceRunVendor &&
+    sourceJobVendor &&
     task.computeProvider &&
-    sourceRunVendor !== task.computeProvider
+    sourceJobVendor !== task.computeProvider
   ) {
     console.warn(
-      `[enqueueTask] SnapshotResume computeProvider override: requested=${task.computeProvider}, source=${sourceRunVendor}`,
+      `[enqueueTask] SnapshotResume computeProvider override: requested=${task.computeProvider}, source=${sourceJobVendor}`,
     );
   }
 
   const resolvedHarness = await resolveRequestedHarness(task);
-  const targetHarness = sourceRunHarness ?? resolvedHarness.harness;
+  const targetHarness = sourceJobHarness ?? resolvedHarness.harness;
   const { task: taskWithHarnessOverrides } = resolveEffectiveHarnessModelState({
     task,
     targetHarness,
@@ -1435,7 +1555,7 @@ async function enqueueSnapshotResume(
   });
 
   const targetComputeProvider =
-    sourceRunVendor ??
+    sourceJobVendor ??
     resolveComputeProviderTarget(
       task.computeProvider,
       await resolveDefaultComputeProvider(),
@@ -1572,13 +1692,19 @@ export async function dequeueTaskRun(): Promise<number | null> {
 }
 
 export function releaseTaskRun(taskRun: TaskRun): Promise<boolean> {
-  return TaskRunQueue.getInstance().releaseLock(getRunLockScope(taskRun));
+  const scope = getRunLockScope(taskRun);
+
+  return scope
+    ? TaskRunQueue.getInstance().releaseLock(scope, taskRun.id)
+    : Promise.resolve(false);
 }
 
 export async function isTaskRunLocked(taskRun: TaskRun): Promise<boolean> {
-  return TaskRunQueue.getInstance().isLocked(getRunLockScope(taskRun));
+  const scope = getRunLockScope(taskRun);
+  return scope ? TaskRunQueue.getInstance().isLocked(scope) : false;
 }
 
 export async function getTaskRunLockTTL(taskRun: TaskRun): Promise<number> {
-  return TaskRunQueue.getInstance().getLockTTL(getRunLockScope(taskRun));
+  const scope = getRunLockScope(taskRun);
+  return scope ? TaskRunQueue.getInstance().getLockTTL(scope) : -2;
 }
