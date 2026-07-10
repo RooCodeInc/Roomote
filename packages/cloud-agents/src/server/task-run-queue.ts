@@ -665,7 +665,7 @@ async function findHistoricalEnvironmentForRepo({
 /**
  * Finds the best-matching environment for a given repository.
  *
- * Disambiguation strategy for PR Reviewer/Fixer tasks:
+ * Disambiguation strategy for PR review and conflict-resolution workflows:
  * 1. Prefer exact lineage from a delegated task that created the PR
  * 2. Otherwise prefer the environment with the most historical delegated-task jobs
  * 3. Fall back to environments where the repo is primary (first-listed)
@@ -1173,8 +1173,8 @@ async function enqueueFreshLaunch(
   }
 
   // Auto-resolve environment for PR tasks when no environmentId is set.
-  // This allows PR Reviewer review/follow-up jobs to benefit from project
-  // configuration (setup commands, env vars, services, agent instructions).
+  // This allows PR review/follow-up jobs to benefit from project configuration
+  // (setup commands, env vars, services, task instructions).
   const PR_TASK_TYPES = new Set<TaskPayloadKind>([
     TaskPayloadKind.GithubPrReview,
     TaskPayloadKind.GithubPrReviewSync,

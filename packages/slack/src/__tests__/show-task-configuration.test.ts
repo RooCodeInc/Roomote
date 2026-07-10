@@ -220,13 +220,11 @@ describe('Slack deleted-mention suppression', () => {
       config: { repositories: [{ repository: 'owner/repo' }] },
     });
     buildSlackRoutingContextMock.mockResolvedValue({
-      availableAgents: [{}],
       availableEnvironments: [{}],
     });
     routeTaskMock.mockResolvedValue({
       status: 'routed',
       result: {
-        agentType: 'standard_task',
         workspace: {
           type: 'environment',
           id: 'env_1',

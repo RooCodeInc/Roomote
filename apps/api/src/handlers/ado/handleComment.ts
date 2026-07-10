@@ -10,7 +10,6 @@ import {
 } from '@roomote/ado';
 import {
   type TaskPayload,
-  CloudAgentType,
   TaskPayloadKind,
   PRODUCT_NAME,
   isActivelyRunningTask,
@@ -282,7 +281,7 @@ export async function handleAdoComment(
     comment,
   };
   const targetsResult = await getAdoAutomationTargets({
-    type: CloudAgentType.PrReviewer,
+    workflow: 'pr_review',
     payload: {
       resource: pullRequest,
       repositoryFullName: repoFullName,

@@ -16,7 +16,6 @@ function postSlackFinalRouterDebug({
   source,
   sourceLink,
   taskDescription,
-  selectedAgent,
   selectedWorkspace,
   reasoning,
   routingDebug,
@@ -26,7 +25,6 @@ function postSlackFinalRouterDebug({
   source: string;
   sourceLink?: string;
   taskDescription: string;
-  selectedAgent: { name: string; type: string };
   selectedWorkspace: { name: string; type: string };
   reasoning?: string;
   routingDebug?: RoutingDebugInfo;
@@ -37,7 +35,6 @@ function postSlackFinalRouterDebug({
     source,
     sourceLink,
     taskDescription,
-    selectedAgent,
     selectedWorkspace,
     reasoning: reasoning ?? '',
     routingDebug,
@@ -150,10 +147,6 @@ export async function finishRoutedStart({
         threadTs: threadId,
       }) ?? undefined,
     taskDescription,
-    selectedAgent: {
-      name: agentName,
-      type: agentName,
-    },
     selectedWorkspace: {
       name: workspaceDisplayName,
       type: workspaceType,

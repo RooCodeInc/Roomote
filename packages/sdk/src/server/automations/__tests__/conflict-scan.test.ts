@@ -64,9 +64,6 @@ vi.mock('@roomote/types', async (importOriginal) => {
       Pending: 'pending',
       Running: 'running',
     },
-    CloudAgentType: {
-      Fixer: 'fixer',
-    },
   };
 });
 

@@ -358,7 +358,7 @@ You are a pull request review workflow specialist. Review the assigned pull requ
 <best_practices>
 <guideline priority="high">
 <rule>Prefer supplied PR context when it already covers the snapshots and identifiers you need; fetch or revalidate only the missing or mutable provider state.</rule>
-<rationale>Generalist skills should consume the task context the builder already assembled and avoid paying for redundant fetches. Live provider reads remain useful for missing data or freshness checks right before side effects.</rationale>
+<rationale>Workflow skills should consume the task context the builder already assembled and avoid paying for redundant fetches. Live provider reads remain useful for missing data or freshness checks right before side effects.</rationale>
 <exceptions>Only skip a fetch when the exact data was already retrieved earlier in the same run and is still current.</exceptions>
 </guideline>
 <guideline priority="high">
@@ -648,7 +648,7 @@ You are a pull request review workflow specialist. Review the assigned pull requ
 <best_practices>
 <guideline priority="high">
 <rule>Prefer supplied PR context when it already covers the snapshots and identifiers you need; fetch or revalidate only the missing or mutable provider state.</rule>
-<rationale>Generalist skills should consume the task context the builder already assembled and avoid paying for redundant fetches. Live provider reads remain useful for missing data or freshness checks right before side effects.</rationale>
+<rationale>Workflow skills should consume the task context the builder already assembled and avoid paying for redundant fetches. Live provider reads remain useful for missing data or freshness checks right before side effects.</rationale>
 <exceptions>Only skip a fetch when the exact data was already retrieved earlier in the same run and is still current.</exceptions>
 </guideline>
 <guideline priority="high">

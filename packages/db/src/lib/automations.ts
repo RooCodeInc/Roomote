@@ -12,7 +12,7 @@ import {
   type ConflictResolverMaxPrAgeDays,
   type DependabotTriageFrequency,
   type ManagerStatsFrequency,
-  type PrReviewerSettings,
+  type PrReviewSettings,
   type SecurityAuditorFrequency,
   type SentryTriageFrequency,
   type SuggesterFrequency,
@@ -21,7 +21,7 @@ import {
   BACKGROUND_AUTOMATION_KEYS,
   DEFAULT_CONFLICT_RESOLUTION_MAX_PR_AGE_DAYS,
   DEFAULT_CHANNEL_AUTO_START_LAUNCH_MODE,
-  DEFAULT_PR_REVIEWER_SETTINGS,
+  DEFAULT_PR_REVIEW_SETTINGS,
   DEFAULT_SLACK_ACK_EMOJI,
   DEFAULT_SLACK_COMPLETION_EMOJI,
   DEFAULT_SUGGESTER_ROUTING_MODE,
@@ -268,33 +268,33 @@ function getChannelAutoStartTargets(
 
 export function normalizeReviewCodeAutomationSettings(
   automation: Automation | undefined,
-): PrReviewerSettings {
+): PrReviewSettings {
   return {
-    ...DEFAULT_PR_REVIEWER_SETTINGS,
+    ...DEFAULT_PR_REVIEW_SETTINGS,
     backgroundAgentManaged: true,
-    enabled: automation?.enabled ?? DEFAULT_PR_REVIEWER_SETTINGS.enabled,
+    enabled: automation?.enabled ?? DEFAULT_PR_REVIEW_SETTINGS.enabled,
     environmentScope: 'all',
     environmentIds: [],
     authorReviewMode: 'specific',
     reviewAllPullRequestAuthors:
       getAutomationSettingBoolean(automation, 'reviewAllPullRequestAuthors') ??
-      DEFAULT_PR_REVIEWER_SETTINGS.reviewAllPullRequestAuthors,
+      DEFAULT_PR_REVIEW_SETTINGS.reviewAllPullRequestAuthors,
     reviewOnCommit:
       getAutomationSettingBoolean(automation, 'reviewOnCommit') ??
-      DEFAULT_PR_REVIEWER_SETTINGS.reviewOnCommit,
+      DEFAULT_PR_REVIEW_SETTINGS.reviewOnCommit,
     reviewDraftPrs:
       getAutomationSettingBoolean(automation, 'reviewDraftPrs') ??
-      DEFAULT_PR_REVIEWER_SETTINGS.reviewDraftPrs,
+      DEFAULT_PR_REVIEW_SETTINGS.reviewDraftPrs,
     relayReviewResultsToTask:
       getAutomationSettingBoolean(automation, 'relayReviewResultsToTask') ??
-      DEFAULT_PR_REVIEWER_SETTINGS.relayReviewResultsToTask,
+      DEFAULT_PR_REVIEW_SETTINGS.relayReviewResultsToTask,
     relayEligibleCreatorIds: getAutomationSettingStringArray(
       automation,
       'relayEligibleCreatorIds',
     ),
     approvePr:
       getAutomationSettingBoolean(automation, 'approvePr') ??
-      DEFAULT_PR_REVIEWER_SETTINGS.approvePr,
+      DEFAULT_PR_REVIEW_SETTINGS.approvePr,
   };
 }
 
@@ -780,7 +780,7 @@ export async function getBackgroundAgentSettingsForDeployment(): Promise<Backgro
   return getBackgroundAgentSettings();
 }
 
-export async function getReviewCodeAutomationSettings(): Promise<PrReviewerSettings> {
+export async function getReviewCodeAutomationSettings(): Promise<PrReviewSettings> {
   const automation = await db.query.automations.findFirst({
     where: eq(automations.key, 'review_code'),
   });

@@ -6,7 +6,7 @@ import {
   waitFor,
 } from '@testing-library/react';
 
-import { ALL_REPOSITORIES, CloudAgentType } from '@roomote/types';
+import { ALL_REPOSITORIES } from '@roomote/types';
 import { FeatureFlag } from '@roomote/feature-flags';
 import type { RoutingDecision } from '@roomote/cloud-agents/server';
 import type { PromptInputMessage } from '@/components/ai-elements';
@@ -282,7 +282,6 @@ vi.mock('@/components/tasks', async () => {
 const routedEnvironmentSuggestion: RoutingDecision = {
   status: 'routed',
   result: {
-    agentType: CloudAgentType.StandardTask,
     workspace: {
       type: 'environment',
       id: 'env-routed',
@@ -295,7 +294,6 @@ const routedEnvironmentSuggestion: RoutingDecision = {
 const routedEnvironmentSuggestionWithModel: RoutingDecision = {
   status: 'routed',
   result: {
-    agentType: CloudAgentType.StandardTask,
     workspace: {
       type: 'environment',
       id: 'env-routed',
@@ -313,7 +311,6 @@ const routedEnvironmentSuggestionWithModel: RoutingDecision = {
 const routedEnvironmentSuggestionWithDefaultModel: RoutingDecision = {
   status: 'routed',
   result: {
-    agentType: CloudAgentType.StandardTask,
     workspace: {
       type: 'environment',
       id: 'env-routed',
@@ -381,7 +378,7 @@ describe('Home', () => {
     });
   });
 
-  it('renders as implicit Generalist without an agent selector and does not launch on fallback', async () => {
+  it('renders without an agent selector and does not launch on fallback', async () => {
     render(<Home initialPlaceholderIndex={0} />);
 
     expect(screen.queryByText(/Select agent /)).not.toBeInTheDocument();

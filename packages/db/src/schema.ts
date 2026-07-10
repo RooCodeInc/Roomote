@@ -2267,7 +2267,7 @@ export const slackQuickAnswersRelations = relations(
  *
  * Stores pending workspace selection state during the Linear elicitation flow.
  * When LLM routing is unavailable, we ask the user to select a workspace for
- * the delegated Generalist path. This table tracks which step we're at and
+ * the standard delegated-task path. This table tracks which step we're at and
  * stores the workspace choices shown to the user.
  */
 

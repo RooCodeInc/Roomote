@@ -8,7 +8,7 @@ import type {
   ConflictResolverMaxPrAgeDays,
   DependabotTriageFrequency,
   ManagerStatsFrequency,
-  PrReviewerSettings,
+  PrReviewSettings,
   SecurityAuditorFrequency,
   SentryTriageFrequency,
   SuggesterFrequency,
@@ -420,7 +420,7 @@ export type BackgroundAgentSettings = StoredBackgroundAgentSettings & {
   channelAutoStartEnabled: boolean;
   channelAutoStartSlackChannelIds: string[];
   channelAutoStartInstructions: string | null;
-  reviewCodeSettings: PrReviewerSettings;
+  reviewCodeSettings: PrReviewSettings;
   conflictResolverFrequency: ConflictResolverFrequency;
   conflictResolverLabel: string;
   conflictResolverInstructions: string | null;

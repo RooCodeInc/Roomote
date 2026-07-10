@@ -43,6 +43,15 @@ export const TASK_WORKFLOWS = [
 
 export type TaskWorkflow = (typeof TASK_WORKFLOWS)[number];
 
+/**
+ * Source-control automation workflows accepted by webhook routing gates.
+ * These are workflow discriminators, not persisted agent identities.
+ */
+export type SourceControlAutomationWorkflow = Extract<
+  TaskWorkflow,
+  'pr_review' | 'pr_conflict_resolve'
+>;
+
 export const TASK_SURFACES = [
   'web',
   'api',
@@ -363,22 +372,6 @@ export function isTaskPayloadKind(value: string): value is TaskPayloadKind {
   return taskPayloadKinds.includes(value as TaskPayloadKind);
 }
 
-const IMPLICIT_GENERALIST_PAYLOAD_KINDS: ReadonlySet<TaskPayloadKind> = new Set(
-  [
-    TaskPayloadKind.StandardTask,
-    TaskPayloadKind.Scan,
-    TaskPayloadKind.McpRecommendations,
-    TaskPayloadKind.GithubPrReviewFollowUp,
-    TaskPayloadKind.SlackAppMention,
-    TaskPayloadKind.LinearAgentSession,
-    TaskPayloadKind.SnapshotResume,
-  ],
-);
-
-export function isImplicitGeneralistTaskType(type: TaskPayloadKind): boolean {
-  return IMPLICIT_GENERALIST_PAYLOAD_KINDS.has(type);
-}
-
 /**
  * Returns true if the given task type should have environment services started.
  * Uses a deny list approach - services are enabled for all types except those
@@ -469,12 +462,10 @@ export function withoutCompleteTaskOnSnapshot(
  * Returns true if the given task type should always use the app-scoped
  * GitHub installation token instead of a linked user token.
  *
- * This applies to task types spawned by *autonomous* agents (see
- * `isAutonomousAgent()` in cloud-agents.ts). Those agents act as
- * their own entity -- PR Reviewer review and follow-up tasks comment on behalf
- * of the app so their feedback is clearly distinguishable from human comments.
- * Without this, linking a GitHub account causes these agents to
- * masquerade as the user.
+ * This applies to app-authored GitHub workflows. Review, review follow-up, and
+ * conflict-resolution runs comment on behalf of the app so their feedback is
+ * clearly distinguishable from human comments. Without this, linking a GitHub
+ * account causes these workflows to masquerade as the user.
  */
 export function shouldUseAppTokenOnly(type: TaskPayloadKind): boolean {
   const appTokenOnlyTypes: TaskPayloadKind[] = [

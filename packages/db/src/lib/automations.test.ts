@@ -1,4 +1,4 @@
-import { DEFAULT_PR_REVIEWER_SETTINGS } from '@roomote/types';
+import { DEFAULT_PR_REVIEW_SETTINGS } from '@roomote/types';
 
 import { normalizeReviewCodeAutomationSettings } from './automations';
 
@@ -7,7 +7,7 @@ describe('normalizeReviewCodeAutomationSettings', () => {
     const settings = normalizeReviewCodeAutomationSettings(undefined);
 
     expect(settings.reviewAllPullRequestAuthors).toBe(
-      DEFAULT_PR_REVIEWER_SETTINGS.reviewAllPullRequestAuthors,
+      DEFAULT_PR_REVIEW_SETTINGS.reviewAllPullRequestAuthors,
     );
   });
 
