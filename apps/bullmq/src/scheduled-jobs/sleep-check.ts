@@ -651,6 +651,50 @@ async function resolveSweptJobFinalStatus(
     : CloudTaskStatus.Failed;
 }
 
+/**
+ * Shared cancel-vs-fail finalization for swept recovery paths. Resolves the
+ * terminal status once, finishes the cloud job, records a sleep-check event,
+ * and optionally logs — so each recovery branch only supplies copy + details.
+ */
+async function finalizeSweptJob(params: {
+  job: SleepCheckJob;
+  error: string;
+  canceled: {
+    message: string;
+    details: Record<string, unknown>;
+    consoleMessage?: string;
+  };
+  failed: {
+    message: string;
+    details: Record<string, unknown>;
+    consoleMessage?: string;
+  };
+}): Promise<CloudTaskStatus.Failed | CloudTaskStatus.Canceled> {
+  const finalStatus = await resolveSweptJobFinalStatus(params.job.id);
+  const isCanceled = finalStatus === CloudTaskStatus.Canceled;
+  const outcome = isCanceled ? params.canceled : params.failed;
+
+  // Record before finishing so the decision is durable even if finish throws.
+  await recordSleepCheckEvent(
+    params.job,
+    isCanceled ? 'decision' : 'failed',
+    outcome.message,
+    outcome.details,
+  );
+
+  if (outcome.consoleMessage) {
+    console.warn(outcome.consoleMessage);
+  }
+
+  await finishCloudJob({
+    id: params.job.id,
+    status: finalStatus,
+    error: params.error,
+  });
+
+  return finalStatus;
+}
+
 async function handleTimedSleepCandidate(params: {
   job: SleepCheckJob;
   path: 'due_sleep' | 'hard_limit';
@@ -696,20 +740,17 @@ async function handleTimedSleepCandidate(params: {
       return { snapshotted: 0, shutDown: 0, failed: 0 };
     }
 
-    const finalStatus = await resolveSweptJobFinalStatus(job.id);
-
-    await recordSleepCheckEvent(
+    await finalizeSweptJob({
       job,
-      finalStatus === CloudTaskStatus.Canceled ? 'decision' : 'failed',
-      finalStatus === CloudTaskStatus.Canceled
-        ? `${describeSleepCheckPath(path)} found active instance ${job.machineId} in status ${status}; finalizing cloud job #${job.id} as canceled after its stop request.`
-        : `${describeSleepCheckPath(path)} found active instance ${job.machineId} in status ${status}; failing the cloud job.`,
-      details,
-    );
-    await finishCloudJob({
-      id: job.id,
-      status: finalStatus,
       error: `${describeSleepCheckPath(path)} found active instance ${job.machineId} in status ${status}`,
+      canceled: {
+        message: `${describeSleepCheckPath(path)} found active instance ${job.machineId} in status ${status}; finalizing cloud job #${job.id} as canceled after its stop request.`,
+        details,
+      },
+      failed: {
+        message: `${describeSleepCheckPath(path)} found active instance ${job.machineId} in status ${status}; failing the cloud job.`,
+        details,
+      },
     });
     return { snapshotted: 0, shutDown: 0, failed: 1 };
   }
@@ -1005,35 +1046,24 @@ async function handleHeartbeatRecoveryCandidate(params: {
       return { snapshotted: 0, failed: 0 };
     }
 
-    const finalStatus = await resolveSweptJobFinalStatus(job.id);
-
-    await finishCloudJob({
-      id: job.id,
-      status: finalStatus,
+    await finalizeSweptJob({
+      job,
       error: config.notRunning.failureError(job.machineId, status),
+      canceled: {
+        message: `Canceled cloud job #${job.id} after its stop request because instance ${job.machineId} was ${status}.`,
+        details,
+        consoleMessage: `[sleepCheck] Canceled job #${job.id} after stop request: instance ${job.machineId} is ${status}`,
+      },
+      failed: {
+        message: config.notRunning.eventMessage(job.id, job.machineId, status),
+        details,
+        consoleMessage: config.notRunning.consoleMessage(
+          job.id,
+          job.machineId,
+          status,
+        ),
+      },
     });
-
-    if (finalStatus === CloudTaskStatus.Canceled) {
-      await recordSleepCheckEvent(
-        job,
-        'decision',
-        `Canceled cloud job #${job.id} after its stop request because instance ${job.machineId} was ${status}.`,
-        details,
-      );
-      console.warn(
-        `[sleepCheck] Canceled job #${job.id} after stop request: instance ${job.machineId} is ${status}`,
-      );
-    } else {
-      await recordSleepCheckEvent(
-        job,
-        'failed',
-        config.notRunning.eventMessage(job.id, job.machineId, status),
-        details,
-      );
-      console.warn(
-        config.notRunning.consoleMessage(job.id, job.machineId, status),
-      );
-    }
     return { snapshotted: 0, failed: 1 };
   }
 
@@ -1058,41 +1088,28 @@ async function handleHeartbeatRecoveryCandidate(params: {
     'sleepCheck',
   );
 
-  const finalStatus = await resolveSweptJobFinalStatus(job.id);
-
-  await finishCloudJob({
-    id: job.id,
-    status: finalStatus,
+  await finalizeSweptJob({
+    job,
     error: config.destroyAndFail.failureError(job.machineId),
-  });
-
-  if (finalStatus === CloudTaskStatus.Canceled) {
-    await recordSleepCheckEvent(
-      job,
-      'decision',
-      `Destroyed instance ${job.machineId} and canceled cloud job #${job.id} after its stop request.`,
-      {
+    canceled: {
+      message: `Destroyed instance ${job.machineId} and canceled cloud job #${job.id} after its stop request.`,
+      details: {
         path: config.path,
         decision: 'destroy_and_cancel_after_stop_request',
         ...buildSleepCheckDetails(job),
       },
-    );
-    console.warn(
-      `[sleepCheck] Destroyed instance and canceled job #${job.id} after stop request`,
-    );
-  } else {
-    await recordSleepCheckEvent(
-      job,
-      'failed',
-      config.destroyAndFail.eventMessage(job.id, job.machineId),
-      {
+      consoleMessage: `[sleepCheck] Destroyed instance and canceled job #${job.id} after stop request`,
+    },
+    failed: {
+      message: config.destroyAndFail.eventMessage(job.id, job.machineId),
+      details: {
         path: config.path,
         decision: 'destroy_and_fail_non_resumable',
         ...buildSleepCheckDetails(job),
       },
-    );
-    console.warn(config.destroyAndFail.consoleMessage(job.id));
-  }
+      consoleMessage: config.destroyAndFail.consoleMessage(job.id),
+    },
+  });
   return { snapshotted: 0, failed: 1 };
 }
 
