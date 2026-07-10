@@ -5,8 +5,22 @@
 // certification checks the mark before recording anything.
 const expectedExits = new WeakSet<object>();
 
-export function markExpectedSubprocessExit(subprocess: object): void {
+/**
+ * Marks the subprocess as deliberately terminated — but only while it is
+ * still alive. A process that already exited died on its own: the teardown
+ * that follows a crash-induced disconnect must not retroactively suppress
+ * the very certificate the crash should produce.
+ */
+export function markExpectedSubprocessExitIfAlive(subprocess: {
+  exitCode: number | null;
+  killed: boolean;
+}): boolean {
+  if (subprocess.exitCode !== null || subprocess.killed) {
+    return false;
+  }
+
   expectedExits.add(subprocess);
+  return true;
 }
 
 export function isExpectedSubprocessExit(subprocess: object): boolean {
