@@ -65,6 +65,7 @@ import {
   isExitedCloudTaskStatus,
   isRequiredComputeField,
   NON_SECRET_COMPUTE_ENV_VAR_NAMES,
+  NON_SECRET_SOURCE_CONTROL_ENV_VAR_NAMES,
   normalizeDeploymentComputeConfig,
   normalizeDeploymentModelConfig,
   getSetupNewComputeProvisioningState,
@@ -1182,6 +1183,7 @@ export async function getSetupNewStatusCommand(auth: UserAuthSuccess) {
     persistedRuntimeComputeConfig,
     envVarNames,
     nonSecretComputeEnvValues,
+    nonSecretSourceControlEnvValues,
     chatgptConnected,
   ] = await Promise.all([
     getSetupBaseStatus(auth),
@@ -1191,6 +1193,9 @@ export async function getSetupNewStatusCommand(auth: UserAuthSuccess) {
     getPersistedEnvironmentVariableNames(),
     getPersistedEnvironmentVariableValues([
       ...NON_SECRET_COMPUTE_ENV_VAR_NAMES,
+    ]),
+    getPersistedEnvironmentVariableValues([
+      ...NON_SECRET_SOURCE_CONTROL_ENV_VAR_NAMES,
     ]),
     isChatGptSubscriptionConnected(),
   ]);
@@ -1304,6 +1309,7 @@ export async function getSetupNewStatusCommand(auth: UserAuthSuccess) {
   const sourceControlSetup = buildSetupSourceControlStatus({
     runtimeEnv: process.env,
     persistedEnvVarNames: envVarNames,
+    persistedEnvVarValues: nonSecretSourceControlEnvValues,
     selectedProvider: setupNewState.sourceControlProvider,
     connectedProviders: sourceControlConnection.connectedProviders,
     repositoryCounts: sourceControlConnection.repositoryCounts,
