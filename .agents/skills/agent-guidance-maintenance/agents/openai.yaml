@@ -1,4 +1,0 @@
-interface:
-  display_name: 'Repo Agent Guidance Workflow'
-  short_description: 'Maintain internal agent guidance for guidance-only, code-plus-guidance, and repo-wide agent-guidance work'
-  default_prompt: 'Use $agent-guidance-maintenance for guidance-only maintenance, for code changes that must ship with agent-guidance updates, and for repo-wide agent-guidance backbone or coverage work.'

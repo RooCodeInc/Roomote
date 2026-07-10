@@ -16,9 +16,9 @@ Public, user-facing documentation:
 
 ## What does NOT belong here
 
-Internal architecture, implementation notes, runbooks, and other
-contributor-facing guidance stay in [`.agent-guidance/`](../../.agent-guidance/).
-Do not duplicate internal guidance into the public docs.
+Internal architecture, implementation notes, and other contributor-only
+runbooks do not belong here. Keep public docs focused on operator and user
+workflows.
 
 ## Voice and positioning
 
@@ -79,5 +79,3 @@ Iconify does not provide the logo.
   are caught. `check-links` alone is not enough for changed pages.
 - Quote frontmatter strings that contain YAML-significant characters such as
   `:` to avoid parser errors.
-- Fuller internal guidance for this workspace lives in
-  [`.agent-guidance/features/public-docs-site.md`](../../.agent-guidance/features/public-docs-site.md).

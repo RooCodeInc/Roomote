@@ -10,12 +10,12 @@ Treat Roomote agents as the core product surface.
 ## Start Here
 
 - Read `packages/types/src/cloud-agents.ts` for the current agent types, metadata, and autonomous vs delegated behavior.
-- Read `.agent-guidance/README.md` and `.agent-guidance/features/README.md` for the top-level product framing.
-- Read the surface doc that matches the user path you are touching:
-  - `.agent-guidance/features/web-dashboard.md`
-  - `.agent-guidance/features/slack-integration.md`
-  - `.agent-guidance/features/linear-integration.md`
-  - `.agent-guidance/features/github-integration.md`
+- Read surface code that matches the user path you are touching:
+  - web dashboard under `apps/web/`
+  - Slack integration under packages/apps serving Slack
+  - Linear integration under packages/apps serving Linear
+  - GitHub integration under packages/apps serving GitHub
+  - public docs under `apps/docs/`
 
 ## Product Model
 
@@ -41,12 +41,11 @@ Treat Roomote agents as the core product surface.
 
 ## When The Task Touches Behavior
 
-- Read `.agent-guidance/architecture/agent-context.md` when the task touches prompts, personality, harness behavior, or channel-specific wrapping.
-- Read `.agent-guidance/architecture/llm-routing.md` when the task touches agent selection, workspace routing, follow-up classification, or confirmation flows.
-- Read `.agent-guidance/architecture/cloud-job-execution.md` when the task touches how user intent becomes a running Roomote agent task.
+- Read `packages/cloud-agents/src/system-prompt.ts` and workflow builders under `packages/cloud-agents/src/server/workflows/` when the task touches prompts, personality, harness behavior, or channel-specific wrapping.
+- Read routing code under `packages/cloud-agents/` when the task touches agent selection, workspace routing, follow-up classification, or confirmation flows.
+- Read dequeue and run-task paths under `packages/sdk/` and `apps/worker/` when the task touches how user intent becomes a running Roomote agent task.
 
 ## Output Standard
 
 - Make the agent type and interaction surface explicit.
 - Keep product framing consistent across docs, UI copy, and implementation notes.
-- If a change affects how a Roomote agent is invoked, selected, or presented, update the matching feature doc.

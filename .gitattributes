@@ -1,6 +1,3 @@
-# Collapse internal agent-guidance changes by default in GitHub diffs
-.agent-guidance/** linguist-generated=true
-
 # Collapse test-heavy paths and common test file patterns by default in GitHub diffs
 **/*.test.* linguist-generated=true
 

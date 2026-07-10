@@ -122,7 +122,7 @@ const serverSchema = {
   // When adding an integration/instance secret below, also add it to
   // CONTROL_PLANE_ENV_VAR_NAMES (packages/types/src/control-plane-env-vars.ts)
   // unless it is already a `secret` field in a setup catalog, or it leaks into
-  // task sandboxes. See .agent-guidance/architecture/runtime-env.md.
+  // task sandboxes.
   TEAMS_BOT_APP_ID: z.string().min(1).optional(),
   TEAMS_BOT_APP_PASSWORD: z.string().min(1).optional(),
   TEAMS_BOT_TENANT_ID: z.string().min(1).optional(),
