@@ -75,6 +75,7 @@ export interface SourceControlPullRequestResponse {
   number: number;
   url: string;
   title: string;
+  targetBranch: string;
   draft: boolean;
   warnings: string[];
 }

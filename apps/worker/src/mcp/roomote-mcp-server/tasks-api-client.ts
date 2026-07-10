@@ -245,7 +245,9 @@ export async function manageSourceControl(
     action: 'create_or_update_pull_request';
     repositoryFullName: string;
     sourceBranch: string;
-    targetBranch: string;
+    // Omitted when updating an existing open PR; the platform defaults to
+    // that PR's current base and only requires it for creation.
+    targetBranch?: string;
     title: string;
     body: string;
     labels?: string[];
