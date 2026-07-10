@@ -344,7 +344,7 @@ describe('routeTask', () => {
         confidence: 0.92,
         needsExternalLookup: false,
         externalReference: null,
-        requestedModelId: 'openrouter/openai/gpt-5.4',
+        requestedModelId: 'openrouter/openai/gpt-5.6-terra',
         modelConfidence: 0.4,
       },
     });
@@ -371,8 +371,8 @@ describe('routeTask', () => {
       displayName: 'Claude Opus 4.8',
       source: 'preserved',
       rejectedPick: {
-        id: 'openrouter/openai/gpt-5.4',
-        displayName: 'GPT 5.4',
+        id: 'openrouter/openai/gpt-5.6-terra',
+        displayName: 'GPT 5.6 Terra',
         confidence: 0.4,
         reason: 'below_threshold',
       },

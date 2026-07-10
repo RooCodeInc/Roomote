@@ -149,7 +149,9 @@ describe('router helpers', () => {
     expect(prompt).toContain(
       '- Claude Sonnet 5 [id: openrouter/anthropic/claude-sonnet-5]',
     );
-    expect(prompt).toContain('- GPT 5.4 [id: openrouter/openai/gpt-5.4]');
+    expect(prompt).toContain(
+      '- GPT 5.6 Terra [id: openrouter/openai/gpt-5.6-terra]',
+    );
     expect(prompt).toContain('- No model mentioned [id: __no_model__]');
   });
 
