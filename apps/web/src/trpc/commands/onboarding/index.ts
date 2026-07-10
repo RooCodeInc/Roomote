@@ -12,6 +12,7 @@ import {
   isNull,
   or,
 } from '@roomote/db/server';
+import { resolveConfiguredGitHubAppSlug } from '@roomote/github';
 import {
   isDeploymentScopedMcpIntegration,
   MCP_INTEGRATIONS,
@@ -37,6 +38,10 @@ export async function getOnboardingStatusCommand(auth: UserAuthSuccess) {
     slackLinkedResult,
     linearLinkedResult,
     enabledUserLevelMcpResult,
+    // The GitHub step renders the deployment's bot handle; resolve it through
+    // the deployment env layer so a slug configured only in the database (the
+    // /setup manifest flow) is shown instead of the hosted-product default.
+    githubAppSlug,
   ] = await Promise.all([
     db
       .select({
@@ -91,6 +96,7 @@ export async function getOnboardingStatusCommand(auth: UserAuthSuccess) {
               inArray(deploymentMcpEnablements.mcpId, mcpIntegrationIds),
             ),
           ),
+    resolveConfiguredGitHubAppSlug(),
   ]);
 
   const enabledUserLevelMcpIds = enabledUserLevelMcpResult.map(
@@ -148,6 +154,7 @@ export async function getOnboardingStatusCommand(auth: UserAuthSuccess) {
     userHasConnectedEnabledUserLevelMcp:
       userConnectedEnabledMcpResult.length > 0,
     enabledUserLevelMcpIds,
+    githubAppSlug,
   };
 }
 
