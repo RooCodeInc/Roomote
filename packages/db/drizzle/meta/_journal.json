@@ -43,6 +43,13 @@
       "when": 1783712152138,
       "tag": "0005_powerful_doctor_octopus",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1783716055364,
+      "tag": "0006_schema_hardening",
+      "breakpoints": true
     }
   ]
 }

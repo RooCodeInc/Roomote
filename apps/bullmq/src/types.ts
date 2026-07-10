@@ -9,6 +9,7 @@ export enum ScheduledJobName {
   SleepCheck = 'SleepCheck',
   PullRequestAnalyticsSync = 'PullRequestAnalyticsSync',
   InstancePing = 'InstancePing',
+  WebhookCleanup = 'WebhookCleanup',
 }
 
 /**

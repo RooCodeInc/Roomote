@@ -16,7 +16,7 @@ export {
 export * from './style-guidance';
 export {
   DEFAULT_STANDARD_TASK_MODEL,
-  DEFAULT_STANDARD_TASK_PROVIDER,
+  DEFAULT_STANDARD_TASK_MODEL_PROVIDER,
   DEFAULT_STANDARD_TASK_REASONING_EFFORT,
 } from './task-runtime-defaults';
 export {
