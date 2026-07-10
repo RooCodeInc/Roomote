@@ -167,7 +167,11 @@ archive_volume() {
   docker run --rm \
     --volume "$volume:/source:ro" \
     --volume "$staging_dir:/backup" \
-    redis:7-alpine sh -c "tar -C /source -cf /backup/$archive_name ."
+    --env "ARCHIVE_NAME=$archive_name" \
+    --env "BACKUP_UID=$(id -u)" \
+    --env "BACKUP_GID=$(id -g)" \
+    redis:7-alpine sh -c \
+    'tar -C /source -cf "/backup/$ARCHIVE_NAME" . && chown "$BACKUP_UID:$BACKUP_GID" "/backup/$ARCHIVE_NAME" && chmod 600 "/backup/$ARCHIVE_NAME"'
 }
 
 restore_volume() {
@@ -662,6 +666,7 @@ cmd_backup() {
 EOF
 
   (
+    trap - EXIT
     cd "$staging_dir"
     find . -type f ! -name SHA256SUMS -print0 | sort -z | xargs -0 sha256sum >SHA256SUMS
   )
@@ -790,7 +795,7 @@ cmd_restore() {
   [ -f "$staging_dir/images.txt" ] || die "image identities are missing"
   grep -Eq '"format"[[:space:]]*:[[:space:]]*"roomote-backup"' "$staging_dir/manifest.json" || die "not a Roomote backup bundle"
   grep -Eq '"formatVersion"[[:space:]]*:[[:space:]]*1([,[:space:]]|$)' "$staging_dir/manifest.json" || die "unsupported Roomote backup format version"
-  (cd "$staging_dir" && sha256sum -c SHA256SUMS)
+  (trap - EXIT; cd "$staging_dir" && sha256sum -c SHA256SUMS)
 
   if awk '
     /"redis"[[:space:]]*:/ { in_redis = 1; next }
