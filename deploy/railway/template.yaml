@@ -30,9 +30,8 @@
 #   worker-current.tar.gz. Production deployments can pin an immutable tag
 #   (v*, develop-<sha>, or main-<sha>) in the four image fields instead;
 #   nothing else needs editing. Railway does not redeploy when a mutable
-#   alias moves; develop-channel deployments that want every develop build
-#   automatically can enable the publish workflow's deploy-railway job
-#   (README.md "Auto-deploying every develop build" — develop-only today).
+#   alias moves; redeploys can be automated against Railway's GraphQL API
+#   (README.md "Auto-deploying every develop build").
 # - Railway has no Docker socket, so task execution must use a hosted
 #   sandbox provider (modal by default; e2b and daytona also work).
 #   EXCLUDED_COMPUTE_PROVIDERS=docker hides the unusable provider.

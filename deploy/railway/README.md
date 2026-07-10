@@ -380,8 +380,8 @@ Live previews need a wildcard domain, which requires a domain you control:
   pin, bump the tag in the four image fields first. The api service's
   `db-migrate` pre-deploy applies any schema changes, and the
   auto-generated keypairs persist in Postgres, so sessions, job tokens, and
-  preview tokens survive redeploys. Develop-channel deployments can make
-  this happen automatically on every develop build — see
+  preview tokens survive redeploys. These redeploys can be automated against
+  Railway's GraphQL API — see
   [Auto-deploying every develop build](#auto-deploying-every-develop-build-optional).
 - **Back up** the Railway Postgres database (Railway backups or `pg_dump`)
   and the MinIO volume or external bucket. Everything else is reproducible
@@ -393,50 +393,20 @@ Live previews need a wildcard domain, which requires a domain you control:
 
 ## Auto-deploying every develop build (optional)
 
-Railway never redeploys on its own when a mutable tag like `:develop` or
+Railway never redeploys on its own when a mutable alias like `:develop` or
 `:main` moves, so a deployment tracking a channel alias only picks up new
-builds when someone redeploys the app services. The `Publish GHCR Images`
-workflow has an optional `deploy-railway` job that closes that gap for the
-**develop channel**: after each develop build's images publish, it calls
-Railway's public GraphQL API directly, finds every service in the
-environment running the `roomote-app` image, points it at the new immutable
-`develop-<short-sha>` tag, and redeploys it. Nothing extra runs inside the
-Railway project. The job only fires on develop pushes today; main-channel
-deployments upgrade by redeploying the app services after a main build.
+builds when the app services are redeployed.
 
-Setup, once:
-
-1. In the Railway project, create a **project token** for the target
-   environment (Project Settings → Tokens). Project tokens are scoped to
-   that one environment and can be revoked there at any time.
-2. On the GitHub repository, create a `railway` environment restricted to
-   the `develop` branch, with a single secret:
-   `ROOMOTE_RAILWAY_PROJECT_TOKEN`.
-3. Set the repository variable `ROOMOTE_RAILWAY_AUTODEPLOY=true`. The job is
-   skipped entirely while the variable is unset, so forks and deployments
-   that do not want auto-deploy need no other configuration.
-
-No project or environment IDs need to be configured: the job resolves the
-environment from the token itself (`query { projectToken { environmentId } }`).
-
-Each run matches services whose image starts with
-`ghcr.io/<owner>/roomote-app` — api, web, controller, bullmq, and
-preview-proxy when present — then issues `serviceInstanceUpdate` with the
-pinned tag and `serviceInstanceDeploy` for each. The api service's
-`db-migrate` pre-deploy runs as usual. MinIO, Postgres, and Redis never
-match the prefix and are untouched. The first run permanently moves the
-matched services from the `:develop` alias to immutable
-`develop-<short-sha>` pins — intentional, since the pins make the deployed
-version visible in the Railway UI and make rollback a tag switch: edit the
-image field back to an older tag (or re-run the job from an older commit)
-to roll back.
-
-Security notes: the only credential is the project token, which can touch a
-single Railway environment and nothing else in the workspace. It lives in a
-GitHub environment secret, is never printed by the job, and GitHub does not
-expose environment secrets to fork pull requests, so open-sourcing the
-repository does not widen access. Rotate or revoke the token from the
-Railway project's token settings.
+Those redeploys can be automated from any CI system against Railway's public
+GraphQL API using a **project token** (scoped to a single environment).
+Resolve the environment from the token itself
+(`query { projectToken { environmentId } }`), find the services whose image
+starts with `ghcr.io/<owner>/roomote-app`, then for each issue
+`serviceInstanceUpdate` pointing at an immutable tag (e.g.
+`develop-<short-sha>` or `v1.2.3`) followed by `serviceInstanceDeploy`. Both
+mutations are idempotent, so a retried or partially failed run is safe to
+re-run, and pinning immutable tags makes rollback a tag switch — point the
+image field back at an older tag and deploy.
 
 ## Maintaining the marketplace template
 
