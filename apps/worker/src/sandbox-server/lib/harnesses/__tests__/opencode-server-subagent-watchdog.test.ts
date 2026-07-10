@@ -574,6 +574,92 @@ describe('OpenCode subagent settlement recovery', () => {
     }
   });
 
+  it('never aborts a child whose latest assistant message is still in flight', async () => {
+    const { client, harness, logger } = createHarness();
+
+    try {
+      await connectHarness(harness, client);
+      vi.useFakeTimers();
+      await armSpawn(client, harness);
+
+      // The child looks terminal, but its persisted state says it is still
+      // mid-message — a silent revival or a lookup we cannot trust. Recovery
+      // must keep waiting instead of killing possibly-live work.
+      client.messages.mockResolvedValue([
+        {
+          info: {
+            id: 'msg_child_live',
+            sessionID: 'ses_child_1',
+            role: 'assistant',
+            time: { created: 1 },
+          },
+          parts: [],
+        },
+      ] as unknown as OpenCodeSessionMessage[]);
+
+      await client.emit({
+        type: 'session.idle',
+        properties: { sessionID: 'ses_child_1' },
+      });
+
+      await vi.advanceTimersByTimeAsync(SETTLEMENT_GRACE_MS * 3);
+
+      expect(client.abort).not.toHaveBeenCalled();
+      expect(logger.warn).toHaveBeenCalledWith(
+        expect.stringContaining('not aborting'),
+      );
+
+      // Once the child's work is genuinely finished, the next re-check
+      // recovers the still-unsettled spawn.
+      client.messages.mockResolvedValue([
+        {
+          info: {
+            id: 'msg_child_live',
+            sessionID: 'ses_child_1',
+            role: 'assistant',
+            time: { created: 1, completed: 2 },
+          },
+          parts: [],
+        },
+      ] as unknown as OpenCodeSessionMessage[]);
+
+      await vi.advanceTimersByTimeAsync(SETTLEMENT_GRACE_MS);
+
+      expect(client.abort).toHaveBeenCalledTimes(1);
+      expect(client.abort).toHaveBeenCalledWith(
+        expect.objectContaining({ sessionId: 'ses_child_1' }),
+      );
+    } finally {
+      harness.dispose();
+    }
+  });
+
+  it('never aborts when the pre-abort verification cannot reach the child', async () => {
+    const { client, harness, logger } = createHarness();
+
+    try {
+      await connectHarness(harness, client);
+      vi.useFakeTimers();
+      await armSpawn(client, harness);
+
+      client.messages.mockRejectedValue(new Error('connection reset'));
+
+      await client.emit({
+        type: 'session.idle',
+        properties: { sessionID: 'ses_child_1' },
+      });
+
+      await vi.advanceTimersByTimeAsync(SETTLEMENT_GRACE_MS * 3);
+
+      expect(client.abort).not.toHaveBeenCalled();
+      expect(logger.warn).toHaveBeenCalledWith(
+        expect.stringContaining('Could not verify'),
+      );
+    } finally {
+      harness.dispose();
+    }
+  });
+
   it('does not recover when the task tool part settles within the grace', async () => {
     const { client, harness } = createHarness();
 

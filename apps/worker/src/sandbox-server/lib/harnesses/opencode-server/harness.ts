@@ -233,9 +233,11 @@ const DEFAULT_EXECUTE_TOOL_PROGRESS_INTERVAL_MS = 30_000;
 // task tool part settling. OpenCode settles the spawn from the child's
 // completion within seconds; a spawn still unsettled after this window has
 // leaked inside OpenCode and the parent would wait on it forever. The window
-// is generous so provider-retry cycles that follow a child error are not
-// mistaken for a leak, and any further child event cancels it.
-const DEFAULT_SUBAGENT_SETTLEMENT_GRACE_MS = 120_000;
+// is deliberately oversized: a false abort kills real work while a slow leak
+// recovery only delays an already-stuck spawn, so every margin here leans
+// toward waiting. Any further child event cancels the pending recovery, and
+// expiry re-verifies the child's state before acting.
+const DEFAULT_SUBAGENT_SETTLEMENT_GRACE_MS = 10 * 60_000;
 const DEFAULT_QUEUED_PROMPT_RETRY_DELAY_MS = 1_000;
 const MAX_PROGRESS_COMMAND_CHARS = 240;
 const FALLBACK_OPENCODE_STOP_HOOK_REMINDER =
@@ -2418,13 +2420,67 @@ export class OpenCodeServerHarness
 
     watchdog.settlementTimer = null;
     const childSessionId = watchdog.childSessionId;
-    // Drop the tracker first: whether the abort below settles the spawn or
-    // the spawn is fully leaked, recovery must not re-arm.
-    this.stopSubagentWatchdog(eventKey);
 
     if (!childSessionId) {
+      this.stopSubagentWatchdog(eventKey);
       return;
     }
+
+    // Verify before acting: abort only a child whose latest assistant message
+    // is completed — finished work with an unsettled spawn is a provable leak.
+    // An in-flight latest message means the child may still be producing (a
+    // silent revival whose busy transition we missed), and a failed lookup
+    // proves nothing; in both cases never abort — re-arm and check again.
+    // Bias: a false abort kills real work, an extra wait only delays recovery
+    // of an already-stuck spawn.
+    let childFinishedItsWork = false;
+
+    try {
+      const messages = await this.client.messages({
+        sessionId: childSessionId,
+        limit: 20,
+        signal: this.eventAbortController.signal,
+      });
+      const latestAssistantMessage = [...messages]
+        .reverse()
+        .find((message) => message.info.role === 'assistant');
+
+      childFinishedItsWork =
+        latestAssistantMessage === undefined ||
+        Boolean(latestAssistantMessage.info.time?.completed);
+    } catch (error) {
+      this.logger.warn(
+        `Could not verify OpenCode child session ${childSessionId} before recovering an unsettled spawn; leaving it running: ${
+          error instanceof Error ? error.message : String(error)
+        }`,
+      );
+    }
+
+    if (!childFinishedItsWork) {
+      if (this.disposed || !this.activeSubagentWatchdogs.has(eventKey)) {
+        return;
+      }
+
+      this.logger.warn(
+        `OpenCode subagent child session ${childSessionId} reported terminal but its latest assistant message is not completed; not aborting, re-checking in ${this.subagentSettlementGraceMs}ms toolCallId=${watchdog.toolCallId}`,
+      );
+      const timer = setTimeout(() => {
+        void this.recoverUnsettledSpawn(eventKey);
+      }, this.subagentSettlementGraceMs);
+      timer.unref?.();
+      watchdog.settlementTimer = timer;
+      return;
+    }
+
+    // The spawn may have settled while the verification round-tripped; a
+    // removed tracker means there is nothing left to recover.
+    if (!this.activeSubagentWatchdogs.has(eventKey)) {
+      return;
+    }
+
+    // Drop the tracker before aborting: whether the abort settles the spawn
+    // or the spawn is fully leaked, recovery must not re-arm.
+    this.stopSubagentWatchdog(eventKey);
 
     this.logger.warn(
       `OpenCode subagent child session ${childSessionId} finished but its task tool call did not settle within ${this.subagentSettlementGraceMs}ms toolCallId=${watchdog.toolCallId} agentType=${
