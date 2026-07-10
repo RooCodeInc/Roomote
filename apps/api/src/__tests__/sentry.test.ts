@@ -51,14 +51,17 @@ describe('API Sentry integration', () => {
     delete process.env.API_SENTRY_DSN;
   });
 
+  // The ad-hoc error routes below live under the public `/health/api` prefix
+  // so the central route policy gate (default-deny for unclassified paths)
+  // lets the requests reach them.
   it('captures uncaught request errors and returns the shared 500 payload', async () => {
     const app = createApiApp();
 
-    app.get('/boom', () => {
+    app.get('/health/api/boom', () => {
       throw new Error('boom');
     });
 
-    const response = await app.request('http://localhost/boom', {
+    const response = await app.request('http://localhost/health/api/boom', {
       headers: {
         'x-request-id': 'req-api-sentry-1',
       },
@@ -82,7 +85,10 @@ describe('API Sentry integration', () => {
       }),
     );
     expect(sentryState.setTag).toHaveBeenCalledWith('roomote.method', 'GET');
-    expect(sentryState.setTag).toHaveBeenCalledWith('roomote.path', '/boom');
+    expect(sentryState.setTag).toHaveBeenCalledWith(
+      'roomote.path',
+      '/health/api/boom',
+    );
     expect(sentryState.setTag).toHaveBeenCalledWith(
       'roomote.request_id',
       'req-api-sentry-1',
@@ -91,7 +97,7 @@ describe('API Sentry integration', () => {
       'request',
       expect.objectContaining({
         method: 'GET',
-        path: '/boom',
+        path: '/health/api/boom',
         requestId: 'req-api-sentry-1',
       }),
     );
@@ -100,13 +106,13 @@ describe('API Sentry integration', () => {
   it('does not report expected HTTPException responses to Sentry', async () => {
     const app = createApiApp();
 
-    app.get('/teapot', () => {
+    app.get('/health/api/teapot', () => {
       throw new HTTPException(418, {
         message: 'teapot',
       });
     });
 
-    const response = await app.request('http://localhost/teapot');
+    const response = await app.request('http://localhost/health/api/teapot');
 
     expect(response.status).toBe(418);
     expect(sentryState.captureException).not.toHaveBeenCalled();
@@ -115,13 +121,15 @@ describe('API Sentry integration', () => {
   it('still reports HTTPException responses that represent server errors', async () => {
     const app = createApiApp();
 
-    app.get('/server-error', () => {
+    app.get('/health/api/server-error', () => {
       throw new HTTPException(503, {
         message: 'upstream unavailable',
       });
     });
 
-    const response = await app.request('http://localhost/server-error');
+    const response = await app.request(
+      'http://localhost/health/api/server-error',
+    );
 
     expect(response.status).toBe(503);
     expect(sentryState.captureException).toHaveBeenCalledTimes(1);
