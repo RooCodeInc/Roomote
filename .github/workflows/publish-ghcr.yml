@@ -137,10 +137,6 @@ jobs:
           echo "app_env=$app_env" >> "$GITHUB_OUTPUT"
           echo "extra_tag=$extra_tag" >> "$GITHUB_OUTPUT"
 
-  # TEMPORARILY NON-GATING (Jul 2026): this job still runs and fails visibly,
-  # but `build` no longer depends on it, so publishes proceed while the smoke
-  # test is being stabilized. Restore `deployment-acceptance` to build.needs
-  # once it is reliable.
   deployment-acceptance:
     name: Deployment acceptance (amd64)
     needs: prepare
@@ -198,7 +194,7 @@ jobs:
 
   build:
     name: Build ${{ matrix.app }} (${{ matrix.arch }})
-    needs: prepare
+    needs: [prepare, deployment-acceptance]
     if: ${{ needs.prepare.outputs.docs_only != 'true' }}
     runs-on: ${{ matrix.runner }}
     permissions:
