@@ -7,6 +7,7 @@ import {
 
 import { BaseController } from './BaseController';
 import {
+  cleanupStaleDockerSandboxes,
   spawnDaytonaWorker,
   spawnDockerWorker,
   spawnE2bWorker,
@@ -14,6 +15,8 @@ import {
 } from './compute-providers';
 
 export class RoomoteController extends BaseController {
+  private dockerCleanupInterval?: NodeJS.Timeout;
+
   public constructor(
     protected readonly appEnv: 'development' | 'preview' | 'production',
   ) {
@@ -111,6 +114,14 @@ export class RoomoteController extends BaseController {
           platform: Env.DOCKER_WORKER_PLATFORM,
           network: Env.DOCKER_WORKER_NETWORK,
           dockerTimeoutMs: timeoutMs,
+          cpuLimit: Env.DOCKER_WORKER_CPU_LIMIT,
+          memoryLimit: Env.DOCKER_WORKER_MEMORY_LIMIT,
+          pidsLimit: Env.DOCKER_WORKER_PIDS_LIMIT,
+          diskLimit: Env.DOCKER_WORKER_DISK_LIMIT,
+          allowUnboundedDisk: Env.DOCKER_WORKER_ALLOW_UNBOUNDED_DISK,
+          logMaxSize: Env.DOCKER_WORKER_LOG_MAX_SIZE,
+          logMaxFiles: Env.DOCKER_WORKER_LOG_MAX_FILES,
+          egressPolicy: Env.DOCKER_WORKER_EGRESS_POLICY,
           localWorkerReleasePath: this.localWorkerReleasePath,
           deploymentSlug: deploymentSlug,
         });
@@ -181,5 +192,35 @@ export class RoomoteController extends BaseController {
     return {
       app_environment: this.appEnv,
     };
+  }
+
+  // Reaping is best-effort: a transient Docker daemon or control-network
+  // error (for example a rolling deploy replacing the API container) must not
+  // crash the controller, especially not during startup.
+  private async cleanStaleDockerSandboxes(): Promise<void> {
+    try {
+      await cleanupStaleDockerSandboxes({
+        controlNetwork: Env.DOCKER_WORKER_NETWORK,
+      });
+    } catch (error) {
+      console.error(
+        `[RoomoteController] Failed to clean stale Docker sandboxes: ${error instanceof Error ? error.message : String(error)}`,
+      );
+    }
+  }
+
+  protected override async setup(): Promise<void> {
+    await this.cleanStaleDockerSandboxes();
+    this.dockerCleanupInterval = setInterval(() => {
+      void this.cleanStaleDockerSandboxes();
+    }, 60_000);
+    this.dockerCleanupInterval.unref();
+  }
+
+  protected override async teardown(): Promise<void> {
+    if (this.dockerCleanupInterval) {
+      clearInterval(this.dockerCleanupInterval);
+      this.dockerCleanupInterval = undefined;
+    }
   }
 }

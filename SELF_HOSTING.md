@@ -7,14 +7,14 @@ below.
 
 ## Deployment Modes
 
-| Mode                       | Command                            | Use case                                                                                                   |
-| -------------------------- | ---------------------------------- | ---------------------------------------------------------------------------------------------------------- |
-| One-command install        | `curl get.roomote.dev \| bash`     | Fresh server, guided browser setup, published images (start here)                                          |
-| Local development          | `pnpm dev`                         | Fast source edits with PM2-managed local services                                                          |
-| Single-host production     | `docker compose ... up -d --build` | Put web, API, controller, queues, preview proxy, and Caddy on one host                                     |
+| Mode                       | Command                            | Use case                                                                                                     |
+| -------------------------- | ---------------------------------- | ------------------------------------------------------------------------------------------------------------ |
+| One-command install        | `curl get.roomote.dev \| bash`     | Fresh server, guided browser setup, published images (start here)                                            |
+| Local development          | `pnpm dev`                         | Fast source edits with PM2-managed local services                                                            |
+| Single-host production     | `docker compose ... up -d --build` | Put web, API, controller, queues, preview proxy, and Caddy on one host                                       |
 | Railway (PaaS)             | Railway template                   | Managed platform deploy with hosted sandboxes; see [deploy/railway](deploy/railway/README.md)                |
 | Render (PaaS)              | Render Blueprint                   | Managed platform deploy with hosted sandboxes; see [deploy/render](deploy/render/README.md)                  |
-| Coolify (self-hosted PaaS) | Docker Compose resource            | Run the published images on a Coolify-managed server; see [deploy/coolify](deploy/coolify/README.md)       |
+| Coolify (self-hosted PaaS) | Docker Compose resource            | Run the published images on a Coolify-managed server; see [deploy/coolify](deploy/coolify/README.md)         |
 | Fly.io (PaaS)              | `flyctl` + maintained `fly.toml`   | One Fly app with managed Postgres/Redis/storage and hosted sandboxes; see [deploy/fly](deploy/fly/README.md) |
 
 The application stack is web, API, controller, BullMQ, preview proxy,
@@ -542,11 +542,19 @@ using Docker sandboxes. That overlay:
 
 - builds the `DOCKER_WORKER_IMAGE` from `apps/worker/Dockerfile`;
 - mounts `/var/run/docker.sock` into the controller;
-- sets `DOCKER_WORKER_NETWORK=roomote_worker` so worker containers join a
-  dedicated network that reaches the API, controller, and preview proxy but not
+- sets `DOCKER_WORKER_NETWORK=roomote_worker` as the trusted-service discovery
+  network; each worker receives its own network containing only that worker,
+  the API, and the optional preview proxy when enabled, never sibling tasks,
   Postgres, Redis, or MinIO;
+- enforces CPU, memory, PID, supported writable-layer quotas, and log limits
+  and blocks private and cloud metadata ranges under the default `internet`
+  egress policy;
 - points `DOCKER_WORKER_RELEASE_PATH` at the controller image's packaged worker
   release archive.
+
+Docker tasks fail closed when the host storage driver cannot enforce
+`DOCKER_WORKER_DISK_LIMIT`. Set `DOCKER_WORKER_ALLOW_UNBOUNDED_DISK=true` only
+when the host already provides an equivalent storage quota outside Docker.
 
 Docker sandboxes are the simplest single-host deployment path:
 

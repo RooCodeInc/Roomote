@@ -47,6 +47,17 @@ function emptyStringDefault() {
   return z.string().default('');
 }
 
+function dockerSize() {
+  return z.string().regex(/^\d+(?:\.\d+)?[kmgt]?b?$/i, 'Invalid Docker size');
+}
+
+function optInBoolean() {
+  return z
+    .enum(['true', 'false', '1', '0'])
+    .default('false')
+    .transform((value) => value === 'true' || value === '1');
+}
+
 const serverSchema = {
   APP_ENV: z.enum(['development', 'preview', 'production']).optional(),
   DEFAULT_COMPUTE_PROVIDER: z
@@ -67,6 +78,14 @@ const serverSchema = {
     .default(process.arch === 'arm64' ? 'linux/arm64' : 'linux/amd64'),
   DOCKER_WORKER_NETWORK: z.string().min(1).optional(),
   DOCKER_WORKER_RELEASE_PATH: z.string().min(1).optional(),
+  DOCKER_WORKER_CPU_LIMIT: z.coerce.number().positive().default(2),
+  DOCKER_WORKER_MEMORY_LIMIT: dockerSize().default('4g'),
+  DOCKER_WORKER_PIDS_LIMIT: z.coerce.number().int().positive().default(512),
+  DOCKER_WORKER_DISK_LIMIT: dockerSize().default('20g'),
+  DOCKER_WORKER_ALLOW_UNBOUNDED_DISK: optInBoolean(),
+  DOCKER_WORKER_LOG_MAX_SIZE: dockerSize().default('10m'),
+  DOCKER_WORKER_LOG_MAX_FILES: z.coerce.number().int().positive().default(3),
+  DOCKER_WORKER_EGRESS_POLICY: z.enum(['internet', 'none']).default('internet'),
   ROOMOTE_PUBLIC_URL: z.string().url().optional(),
   ROOMOTE_APP_URL: z.string().min(1),
   // Anonymous telemetry + version checks (Ping service).
