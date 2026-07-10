@@ -24,6 +24,10 @@ import {
   inArray,
   isNull,
   sql,
+  claimWorkItem,
+  finalizeWorkItemLaunched,
+  releaseWorkItemClaim,
+  WORK_ITEM_LAUNCH_STALE_CLAIM_MS,
   markTaskStartParallelCountEndedAt,
   resolveDeploymentEnvVar,
   purgeSavedDeploymentWorkerImage,
@@ -634,29 +638,61 @@ async function getMutableQueuedSetupTasks(
     .orderBy(asc(workItems.sortOrder));
 }
 
+/**
+ * Mirrors a launched onboarding copy back onto its source suggestion so the
+ * suggestions UI shows the suggestion as launched once its queued onboarding
+ * copy launches. This is a status *mirror*, not a launch of its own, so it must
+ * never stomp a live claim held by another surface.
+ *
+ * It goes through the shared fenced CAS: `claimWorkItem` the suggestion, and
+ * only `finalizeWorkItemLaunched` when the claim succeeded. When another surface
+ * (e.g. web-implement) already holds a fresh claim, or the suggestion is already
+ * `launched`, the claim returns null and the mirror is skipped — never
+ * overwriting that surface's status/token.
+ *
+ * `dismissed` is opted into the claimable set (matching the web-implement
+ * surface in task-suggestions/implement.ts) with `clearDismissedAt`, so a
+ * suggestion that was dismissed after being queued still flips to `launched`
+ * when its onboarding copy launches. That is the least-surprising state: the
+ * work genuinely launched, so the suggestions UI should reflect it rather than
+ * showing the row as merely dismissed.
+ */
 async function markSuggestionWorkItemLaunched(
   input: {
     suggestionId: string;
     launchedTaskId: string;
-    updatedAt: Date;
   },
   executor: DatabaseOrTransaction = db,
 ) {
-  await executor
-    .update(workItems)
-    .set({
-      status: 'launched',
-      launchedTaskId: input.launchedTaskId,
-      launchedAt: input.updatedAt,
-      launchClaimedAt: null,
-      updatedAt: input.updatedAt,
-    })
-    .where(
-      and(
-        eq(workItems.id, input.suggestionId),
-        eq(workItems.kind, 'suggestion'),
-      ),
+  const claimedSuggestion = await claimWorkItem(executor, {
+    id: input.suggestionId,
+    additionalClaimableStatuses: ['dismissed'],
+    extraConditions: [eq(workItems.kind, 'suggestion')],
+  });
+
+  if (!claimedSuggestion) {
+    // Another surface holds a fresh claim, the suggestion already launched, or
+    // it is terminally failed. Skip the mirror rather than overwrite it.
+    console.warn(
+      `[setup-new] Skipped mirroring launched state onto suggestion ${input.suggestionId}: it is already launched or another surface holds a fresh claim.`,
     );
+    return;
+  }
+
+  const finalized = await finalizeWorkItemLaunched(executor, {
+    id: input.suggestionId,
+    taskId: input.launchedTaskId,
+    claimedAt: claimedSuggestion.launchClaimedAt,
+    clearDismissedAt: true,
+  });
+
+  if (!finalized) {
+    // Our claim token was superseded between claim and finalize; leave the new
+    // claimant's state untouched.
+    console.warn(
+      `[setup-new] Suggestion ${input.suggestionId} mirror lost the fencing guard after claiming; another surface reclaimed it. Leaving its state untouched.`,
+    );
+  }
 }
 
 function stripMutableQueuedSetupTask(
@@ -712,10 +748,22 @@ async function replaceQueuedSetupTasks({
       tx,
     );
 
+    // Refuse to replace the queue while a launch is genuinely in flight or an
+    // item already launched. A *stale* `launchClaimedAt` (older than the shared
+    // stale-claim window) is left by a crash between claim and finalize; with
+    // per-item stale-claim recovery now in place that row is recoverable, so it
+    // must not block re-queuing forever. Only a launched row or a fresh claim
+    // blocks replacement.
+    const staleClaimThreshold = new Date(
+      Date.now() - WORK_ITEM_LAUNCH_STALE_CLAIM_MS,
+    );
+
     if (
       existingRows.some(
         (queuedTask) =>
-          queuedTask.launchClaimedAt !== null || queuedTask.launchedAt !== null,
+          queuedTask.launchedAt !== null ||
+          (queuedTask.launchClaimedAt !== null &&
+            queuedTask.launchClaimedAt > staleClaimThreshold),
       )
     ) {
       return existingRows.map(stripMutableQueuedSetupTask);
@@ -777,35 +825,73 @@ async function replaceQueuedSetupTasks({
   });
 }
 
-async function claimQueuedSetupTasksForLaunch(setupOnboardingTaskId: string) {
-  return db.transaction(async (tx) => {
-    const claimedAt = new Date();
+type ClaimedQueuedSetupTask = {
+  id: string;
+  suggestionId: string | null;
+  selectedByUserId: string | null;
+  prompt: string | null;
+  /** The `launchClaimedAt` fencing token for this claim. */
+  claimedAt: Date;
+};
 
-    return tx
-      .update(workItems)
-      .set({
-        status: 'launching',
-        launchClaimedAt: claimedAt,
-        updatedAt: claimedAt,
-      })
-      .where(
-        and(
-          eq(workItems.sourceTaskId, setupOnboardingTaskId),
-          eq(workItems.kind, 'onboarding'),
-          isNull(workItems.launchedAt),
-          isNull(workItems.launchClaimedAt),
-        ),
-      )
-      .returning({
-        id: workItems.id,
-        suggestionId: workItems.sourceWorkItemId,
-        selectedByUserId: workItems.selectedByUserId,
-        prompt: workItems.executionPrompt,
-      });
-  });
+/**
+ * Claims the queued onboarding items for a setup task through the shared fenced
+ * CAS, preserving the previous batch semantics: fetch the candidate onboarding
+ * rows for the setup task in queue order, attempt to claim each, and return
+ * whichever claims succeeded (each carrying its own fencing token).
+ *
+ * Migrated off the single batch UPDATE gated on `launchedAt IS NULL AND
+ * launchClaimedAt IS NULL`, which had no stale-claim recovery: a crash between
+ * claim and finalize left an item `launching` forever. `claimWorkItem` instead
+ * claims `open` OR a stale `launching` row (older than the shared stale-claim
+ * window) and guards `launched_task_id IS NULL`, so a crashed launch recovers,
+ * a fresh in-flight claim on one item is skipped (only that item), and an
+ * already-launched item is never re-claimed. Onboarding rows are inserted with
+ * the `work_items.status` default of `open`, so the claim predicate matches the
+ * rows produced by `replaceQueuedSetupTasks`. Each claim is its own atomic CAS,
+ * so no wrapping transaction is needed.
+ */
+async function claimQueuedSetupTasksForLaunch(
+  setupOnboardingTaskId: string,
+): Promise<ClaimedQueuedSetupTask[]> {
+  const candidates = await db
+    .select({ id: workItems.id })
+    .from(workItems)
+    .where(
+      and(
+        eq(workItems.sourceTaskId, setupOnboardingTaskId),
+        eq(workItems.kind, 'onboarding'),
+      ),
+    )
+    .orderBy(asc(workItems.sortOrder));
+
+  const claimedTasks: ClaimedQueuedSetupTask[] = [];
+
+  for (const candidate of candidates) {
+    const claimed = await claimWorkItem(db, {
+      id: candidate.id,
+      extraConditions: [eq(workItems.kind, 'onboarding')],
+    });
+
+    if (!claimed) {
+      continue;
+    }
+
+    claimedTasks.push({
+      id: claimed.id,
+      suggestionId: claimed.sourceWorkItemId,
+      selectedByUserId: claimed.selectedByUserId,
+      prompt: claimed.executionPrompt,
+      claimedAt: claimed.launchClaimedAt,
+    });
+  }
+
+  return claimedTasks;
 }
 
-async function launchQueuedSetupTasksIfReady({
+// Exported for the DB-backed launch-lifecycle tests, which exercise the fenced
+// claim/finalize/release flow directly. Not part of the tRPC command surface.
+export async function launchQueuedSetupTasksIfReady({
   setupOnboardingTaskId,
   matchingEnvironmentId,
   slackTeamId,
@@ -902,41 +988,64 @@ async function launchQueuedSetupTasksIfReady({
             : {}),
         });
 
-        const launchedAt = new Date();
-
         await db.transaction(async (tx) => {
+          // Fenced finalize: `launching` -> `launched` only when our claim
+          // token still matches. If it returns false our claim was reclaimed
+          // by another launcher between claim and enqueue.
+          const finalized = await finalizeWorkItemLaunched(tx, {
+            id: queuedTask.id,
+            taskId: launchResult.taskId,
+            claimedAt: queuedTask.claimedAt,
+          });
+
+          if (!finalized) {
+            // The task is already enqueued but the fencing guard rejected the
+            // finalize, so it now runs unlinked from this work item. No
+            // enqueue-level cancel helper is exposed to this surface, so log
+            // loudly for triage and leave the new claimant's state untouched
+            // (matches the implement.ts / launchActWorkItems orphan handling).
+            console.warn(
+              `[setup-new] finalize lost the fencing guard for onboarding work item ${queuedTask.id}; orphaned task ${launchResult.taskId} runs unlinked (claim reclaimed by another launcher).`,
+            );
+            return;
+          }
+
+          // `finalizeWorkItemLaunched` does not stamp `targetEnvironmentId`, so
+          // set it separately in the same transaction. Guarded on the freshly
+          // written `launchedTaskId` so a superseded launcher can never stamp
+          // onto the new claimant's row.
           await tx
             .update(workItems)
             .set({
-              status: 'launched',
               targetEnvironmentId: matchingEnvironmentId,
-              launchedTaskId: launchResult.taskId,
-              launchedAt,
-              launchClaimedAt: null,
-              updatedAt: launchedAt,
+              updatedAt: new Date(),
             })
-            .where(eq(workItems.id, queuedTask.id));
+            .where(
+              and(
+                eq(workItems.id, queuedTask.id),
+                eq(workItems.launchedTaskId, launchResult.taskId),
+              ),
+            );
 
           if (queuedTask.suggestionId) {
             await markSuggestionWorkItemLaunched(
               {
                 suggestionId: queuedTask.suggestionId,
                 launchedTaskId: launchResult.taskId,
-                updatedAt: launchedAt,
               },
               tx,
             );
           }
         });
       } catch {
-        await db
-          .update(workItems)
-          .set({
-            status: 'open',
-            launchClaimedAt: null,
-            updatedAt: new Date(),
-          })
-          .where(eq(workItems.id, queuedTask.id));
+        // Release our claim back to `open` so a later trigger can retry. The
+        // fenced release never reverts a `launched` item and never reverts a
+        // claim that was already reclaimed by another launcher.
+        await releaseWorkItemClaim(db, {
+          id: queuedTask.id,
+          claimedAt: queuedTask.claimedAt,
+          extraConditions: [eq(workItems.kind, 'onboarding')],
+        });
       }
     }),
   );

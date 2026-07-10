@@ -8,9 +8,11 @@ import { workItems } from '../schema';
 /**
  * Shared launch claim/release/finalize helpers for the work_items launch state
  * machine. Every launchable surface (Slack reactions, Telegram buttons,
- * automation act items, web implement) drives its single-item launch through
- * these so the claim CAS, stale-claim recovery, and launched-guard are
- * identical everywhere.
+ * automation act items, web implement, the web setup-new onboarding queue)
+ * drives its launch through these so the claim CAS, stale-claim recovery, and
+ * launched-guard are identical everywhere. The setup-new onboarding queue is a
+ * batch launcher: it claims each queued onboarding item individually and mirrors
+ * the launched state back onto the source suggestion through the same helpers.
  *
  * Why one module: stale-claim recovery used to be dead code on some surfaces —
  * a claim requires `open`, but a stale claim is always `launching`, so a crash
