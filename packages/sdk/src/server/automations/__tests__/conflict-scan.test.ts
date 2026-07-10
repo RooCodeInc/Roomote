@@ -60,7 +60,7 @@ vi.mock('@roomote/types', async (importOriginal) => {
     CONFLICT_RESOLUTION_COMMENT_MARKER: '<!-- conflict-resolution -->',
     DEFAULT_CONFLICT_SCAN_LOOKBACK_DAYS: 7,
     DEFAULT_CONFLICT_RESOLUTION_MAX_PR_AGE_DAYS: 30,
-    CloudTaskStatus: {
+    RunStatus: {
       Pending: 'pending',
       Running: 'running',
     },

@@ -26,8 +26,8 @@ import type {
   TaskInitiatorKind,
   CommitAuthorKind,
   RunKind,
-  CloudTaskStatus,
-  CloudTaskPayload,
+  RunStatus,
+  TaskPayload,
   RequestedWorkKind,
   RequestedWorkKindSource,
   ComputeProvider,
@@ -36,9 +36,9 @@ import type {
   DeploymentComputeConfig,
   DeploymentModelConfig,
   CodingHarness,
-  CloudJobEventDetails,
-  CloudJobEventSource,
-  CloudJobEventType,
+  RunEventDetails,
+  RunEventSource,
+  RunEventType,
   EnvironmentConfig,
   TaskMessageEventType,
   TaskMessageRole,
@@ -907,12 +907,9 @@ export const taskRuns = pgTable(
       .default('opencode-server')
       .$type<CodingHarness>(),
 
-    status: text('status')
-      .notNull()
-      .default('pending')
-      .$type<CloudTaskStatus>(),
+    status: text('status').notNull().default('pending').$type<RunStatus>(),
     taskPhase: text('task_phase'),
-    payload: jsonb('payload').notNull().$type<CloudTaskPayload>(),
+    payload: jsonb('payload').notNull().$type<TaskPayload>(),
     // Per-attempt prompt, including the deferred resume prompt.
     prompt: text('prompt'),
     log: text('log'),
@@ -1063,13 +1060,10 @@ export const taskRunEvents = pgTable(
     taskId: text('task_id')
       .notNull()
       .references(() => tasks.id, { onDelete: 'cascade' }),
-    source: text('source').notNull().$type<CloudJobEventSource>(),
-    eventType: text('event_type').notNull().$type<CloudJobEventType>(),
+    source: text('source').notNull().$type<RunEventSource>(),
+    eventType: text('event_type').notNull().$type<RunEventType>(),
     message: text('message'),
-    details: jsonb('details')
-      .notNull()
-      .default({})
-      .$type<CloudJobEventDetails>(),
+    details: jsonb('details').notNull().default({}).$type<RunEventDetails>(),
     createdAt: timestamp('created_at').notNull().defaultNow(),
   },
   (table) => [

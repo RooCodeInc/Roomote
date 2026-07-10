@@ -1,9 +1,9 @@
 import {
   type AuthTokenContext,
   type JobTokenContext,
-  type CloudTaskPayload,
+  type TaskPayload,
   type RequestedWorkKind,
-  CloudTaskStatus,
+  RunStatus,
   TaskPayloadKind,
   resolveSourceControlProviderFromPayload,
 } from '@roomote/types';
@@ -188,7 +188,7 @@ export const dequeueResumeCloudJob = async (
         return { error: true, cloudJob, bootstrapFailureEvent };
       }
 
-      const resumePayload = cloudJob.payload as CloudTaskPayload<
+      const resumePayload = cloudJob.payload as TaskPayload<
         typeof TaskPayloadKind.SnapshotResume
       >;
       const sourceRunId =
@@ -312,7 +312,7 @@ export const dequeueResumeCloudJob = async (
           'Worker claimed dequeued snapshot-resume job and started resume bootstrap.',
         details: {
           stage: 'worker_bootstrap',
-          status: CloudTaskStatus.Processing,
+          status: RunStatus.Processing,
           vendor: cloudJob.vendor ?? null,
           machineId: cloudJob.machineId ?? null,
           sourceSnapshotId: cloudJob.sourceSnapshotId ?? null,

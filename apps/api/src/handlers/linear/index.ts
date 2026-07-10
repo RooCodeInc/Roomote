@@ -4,7 +4,7 @@ import { Hono } from 'hono';
 
 import {
   AGENT_DISPLAY_NAME,
-  type CloudTaskPayload,
+  type TaskPayload,
   TaskPayloadKind,
   formatErrorForLog,
   parseAcpRequestUserInputAnswerReply,
@@ -800,7 +800,7 @@ async function handleAgentSessionEvent(
           typeof completedPayload?.environmentId === 'string'
             ? completedPayload.environmentId
             : undefined;
-        const resumePayload: CloudTaskPayload<
+        const resumePayload: TaskPayload<
           typeof TaskPayloadKind.SnapshotResume
         > = {
           repo,

@@ -1,7 +1,7 @@
 import { Job, UnrecoverableError } from 'bullmq';
 
 import {
-  CloudTaskStatus,
+  RunStatus,
   TaskPayloadKind,
   extractErrorDetails,
   isObservedTimeoutError,
@@ -555,7 +555,7 @@ export const snapshotJob = async (job: SnapshotJob): Promise<void> => {
         snapshotFailedAt: null,
         sleepAt: null,
         taskPhase: null,
-        status: CloudTaskStatus.Completed,
+        status: RunStatus.Completed,
         completedAt: now,
       })
       .where(eq(taskRuns.id, cloudJobId));

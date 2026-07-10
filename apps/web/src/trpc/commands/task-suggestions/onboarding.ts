@@ -16,11 +16,11 @@ import {
   workItems,
 } from '@roomote/db/server';
 import {
-  CloudTaskStatus,
+  RunStatus,
   TaskPayloadKind,
   buildEnvironmentDefinitionWorkspacePayload,
   createEmptySetupNewState,
-  isExitedCloudTaskStatus,
+  isExitedRunStatus,
   normalizeSetupNewState,
 } from '@roomote/types';
 
@@ -287,17 +287,14 @@ async function ensureTaskSuggestions(auth: UserAuthSuccess): Promise<{
   let launchState = setupNewState;
 
   if (setupNewState.suggestionTaskId) {
-    if (
-      suggestionTaskStatus &&
-      !isExitedCloudTaskStatus(suggestionTaskStatus)
-    ) {
+    if (suggestionTaskStatus && !isExitedRunStatus(suggestionTaskStatus)) {
       return {
         generationStatus: 'pending',
         suggestions: [],
       };
     }
 
-    if (suggestionTaskStatus === CloudTaskStatus.Completed) {
+    if (suggestionTaskStatus === RunStatus.Completed) {
       return {
         generationStatus: 'empty',
         suggestions: [],
@@ -306,7 +303,7 @@ async function ensureTaskSuggestions(auth: UserAuthSuccess): Promise<{
 
     if (
       suggestionTaskStatus === null ||
-      (suggestionTaskStatus && isExitedCloudTaskStatus(suggestionTaskStatus))
+      (suggestionTaskStatus && isExitedRunStatus(suggestionTaskStatus))
     ) {
       launchState = await clearPersistedSuggestionTask({
         currentState: setupNewState,

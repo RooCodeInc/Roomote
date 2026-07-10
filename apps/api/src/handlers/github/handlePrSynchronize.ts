@@ -1,12 +1,12 @@
 import pMap from 'p-map';
 
 import {
-  type CloudTaskPayload,
+  type TaskPayload,
   DEFAULT_PR_REVIEWER_SETTINGS,
   type PrReviewerSettings,
   TaskPayloadKind,
   CloudAgentType,
-  CloudTaskStatus,
+  RunStatus,
 } from '@roomote/types';
 import {
   db,
@@ -88,7 +88,7 @@ export async function handlePrSynchronize({
           eq(taskPullRequests.repository, repository.full_name),
           eq(taskPullRequests.prNumber, pr.number),
           eq(taskPullRequests.prSha, pr.head.sha),
-          sql`${taskRuns.status} != ${CloudTaskStatus.Failed}`,
+          sql`${taskRuns.status} != ${RunStatus.Failed}`,
           isNotNull(taskRuns.startedAt),
           isNull(taskRuns.canceledAt),
         ),
@@ -114,7 +114,7 @@ export async function handlePrSynchronize({
           eq(taskPullRequests.sourceControlProvider, 'github'),
           eq(taskPullRequests.repository, repository.full_name),
           eq(taskPullRequests.prNumber, pr.number),
-          sql`${taskRuns.status} != ${CloudTaskStatus.Failed}`,
+          sql`${taskRuns.status} != ${RunStatus.Failed}`,
           sql`${taskPullRequests.prSha} != ${pr.head.sha}`,
           isNotNull(taskPullRequests.prSha),
           isNotNull(taskRuns.startedAt),
@@ -153,7 +153,7 @@ export async function handlePrSynchronize({
           headSha: pr.head.sha,
           branchName: pr.head.ref,
           ...relayPayload,
-        } satisfies CloudTaskPayload<
+        } satisfies TaskPayload<
           | typeof TaskPayloadKind.GithubPrReviewSync
           | typeof TaskPayloadKind.GithubPrReview
         >,

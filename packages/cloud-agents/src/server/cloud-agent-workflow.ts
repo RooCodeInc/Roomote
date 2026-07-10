@@ -1,5 +1,5 @@
 import {
-  type CloudTask,
+  type TaskSpec,
   TaskPayloadKind,
   getCommunicationChannelFromTaskPayload,
   getCommunicationMessageIdFromTaskPayload,
@@ -54,7 +54,7 @@ export async function generatePrompt({
   gitHubToken,
 }: {
   cloudJob: Run;
-  cloudTask: CloudTask;
+  cloudTask: TaskSpec;
   gitHubToken: string;
 }): Promise<{
   prompt: string;

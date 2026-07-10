@@ -1,7 +1,7 @@
 import {
   ALL_REPOSITORIES,
   TaskPayloadKind,
-  CloudTaskStatus,
+  RunStatus,
   getCommunicationChannelFromTaskPayload,
   getCommunicationMessageIdFromTaskPayload,
   getCommunicationProviderFromTaskPayload,
@@ -9,7 +9,7 @@ import {
   getCommunicationThreadIdFromTaskPayload,
   getEnvironmentDefinitionIdFromPayload,
   parseConflictResolutionSummary,
-  stripCloudJobErrorMarkers,
+  stripRunErrorMarkers,
 } from '@roomote/types';
 import {
   formatMarkdownLink,
@@ -95,10 +95,10 @@ export const finishCloudJob = async ({
 }: {
   id: number;
   status:
-    | CloudTaskStatus.Completed
-    | CloudTaskStatus.Failed
-    | CloudTaskStatus.Canceled
-    | CloudTaskStatus.Idle;
+    | RunStatus.Completed
+    | RunStatus.Failed
+    | RunStatus.Canceled
+    | RunStatus.Idle;
   error?: string;
 }) => {
   const job = await db.query.taskRuns.findFirst({
@@ -120,11 +120,11 @@ export const finishCloudJob = async ({
   // task history, analytics, and unfurls), the lifecycle event, notifications,
   // and GitHub-facing outcomes all see Canceled. The sanitized error is still
   // written to the run's `error` column below for debugging.
-  if (status === CloudTaskStatus.Failed && job.cancelRequestedAt != null) {
+  if (status === RunStatus.Failed && job.cancelRequestedAt != null) {
     console.log(
       `[finishCloudJob] Persisting the failed finalization of job ${id} as canceled: a stop was requested at ${job.cancelRequestedAt.toISOString()}`,
     );
-    status = CloudTaskStatus.Canceled;
+    status = RunStatus.Canceled;
   }
 
   try {
@@ -138,7 +138,7 @@ export const finishCloudJob = async ({
   }
 
   const { payloadKind } = job;
-  const sanitizedError = stripCloudJobErrorMarkers(error);
+  const sanitizedError = stripRunErrorMarkers(error);
 
   const now = new Date();
   const existingResult =
@@ -150,17 +150,17 @@ export const finishCloudJob = async ({
       ? existingResult.runtimeTaskId
       : null;
   const lifecycleEvent =
-    status === CloudTaskStatus.Completed
+    status === RunStatus.Completed
       ? {
           eventType: 'completed' as const,
           message: 'Cloud job finished successfully.',
         }
-      : status === CloudTaskStatus.Failed
+      : status === RunStatus.Failed
         ? {
             eventType: 'failed' as const,
             message: 'Cloud job finished with a failure.',
           }
-        : status === CloudTaskStatus.Canceled
+        : status === RunStatus.Canceled
           ? {
               eventType: 'decision' as const,
               message: 'Cloud job was canceled.',
@@ -176,11 +176,11 @@ export const finishCloudJob = async ({
       .update(taskRuns)
       .set({
         status,
-        taskPhase: status === CloudTaskStatus.Idle ? job.taskPhase : null,
-        sleepAt: status === CloudTaskStatus.Idle ? job.sleepAt : null,
+        taskPhase: status === RunStatus.Idle ? job.taskPhase : null,
+        sleepAt: status === RunStatus.Idle ? job.sleepAt : null,
         error: sanitizedError,
-        canceledAt: status === CloudTaskStatus.Canceled ? now : job.canceledAt,
-        completedAt: status === CloudTaskStatus.Canceled ? null : now,
+        canceledAt: status === RunStatus.Canceled ? now : job.canceledAt,
+        completedAt: status === RunStatus.Canceled ? null : now,
       })
       .where(eq(taskRuns.id, id));
 
@@ -219,9 +219,8 @@ export const finishCloudJob = async ({
           job.snapshotRequestedAt?.toISOString() ?? null,
         previousSnapshotCreatedAt: job.snapshotCreatedAt?.toISOString() ?? null,
         previousWorkerHeartbeatAt: job.workerHeartbeatAt?.toISOString() ?? null,
-        sleepAt:
-          status === CloudTaskStatus.Idle ? job.sleepAt?.toISOString() : null,
-        taskPhase: status === CloudTaskStatus.Idle ? job.taskPhase : null,
+        sleepAt: status === RunStatus.Idle ? job.sleepAt?.toISOString() : null,
+        taskPhase: status === RunStatus.Idle ? job.taskPhase : null,
         error: sanitizedError ?? null,
       },
       createdAt: now,
@@ -230,7 +229,7 @@ export const finishCloudJob = async ({
 
   // Anonymous analytics (no-op unless enabled): terminal task outcome with
   // non-identifying routing facts only.
-  if (status === CloudTaskStatus.Completed) {
+  if (status === RunStatus.Completed) {
     void captureEvent('task_completed', {
       ...(job.actingUserId ? { userId: job.actingUserId } : {}),
       properties: {
@@ -241,10 +240,7 @@ export const finishCloudJob = async ({
     });
   }
 
-  if (
-    status === CloudTaskStatus.Completed ||
-    status === CloudTaskStatus.Failed
-  ) {
+  if (status === RunStatus.Completed || status === RunStatus.Failed) {
     try {
       await refreshTaskTitleOnCompletion({
         taskId: job.taskId,
@@ -259,7 +255,7 @@ export const finishCloudJob = async ({
     }
   }
 
-  if (status !== CloudTaskStatus.Idle) {
+  if (status !== RunStatus.Idle) {
     try {
       await cleanupSandboxOidcTargetsForCloudJob(id);
     } catch (error) {
@@ -271,7 +267,7 @@ export const finishCloudJob = async ({
     }
   }
 
-  if (status !== CloudTaskStatus.Idle) {
+  if (status !== RunStatus.Idle) {
     try {
       await revokeCloudJobScopedGitLabTokens(job);
     } catch (error) {
@@ -303,7 +299,7 @@ export const finishCloudJob = async ({
 
   // Slack failure notification: post a thread reply when the job failed and
   // was triggered from Slack (the task carries a Slack thread binding).
-  if (status === CloudTaskStatus.Failed && task.slackThreadTs) {
+  if (status === RunStatus.Failed && task.slackThreadTs) {
     try {
       await sendSlackFailureNotification(job, sanitizedError);
     } catch (err) {
@@ -318,7 +314,7 @@ export const finishCloudJob = async ({
   // Teams failure notification: post a thread reply when the job failed and
   // was triggered from Teams (payload carries Teams communication metadata).
   if (
-    status === CloudTaskStatus.Failed &&
+    status === RunStatus.Failed &&
     !task.slackThreadTs &&
     getCommunicationProviderFromTaskPayload(job.payload) === 'teams'
   ) {
@@ -334,12 +330,12 @@ export const finishCloudJob = async ({
   }
 
   const linkedEnvironmentDefinitionId =
-    status === CloudTaskStatus.Idle && job.taskPhase === 'waiting_for_prompt'
+    status === RunStatus.Idle && job.taskPhase === 'waiting_for_prompt'
       ? await resolveSetupCompletionEnvironmentDefinitionId(job)
       : null;
 
   if (
-    (status === CloudTaskStatus.Completed ||
+    (status === RunStatus.Completed ||
       linkedEnvironmentDefinitionId !== null) &&
     (payloadKind === TaskPayloadKind.SlackAppMention ||
       payloadKind === TaskPayloadKind.SnapshotResume)
@@ -355,7 +351,7 @@ export const finishCloudJob = async ({
     }
   }
 
-  if (status === CloudTaskStatus.Completed) {
+  if (status === RunStatus.Completed) {
     try {
       await maybeSendSlackQuestionChannelInvite(job);
     } catch (err) {
@@ -369,7 +365,7 @@ export const finishCloudJob = async ({
 
   // Linear failure notification: emit an error activity when the job failed
   // and was triggered from Linear (the task carries a Linear session binding).
-  if (status === CloudTaskStatus.Failed && task.linearSessionId) {
+  if (status === RunStatus.Failed && task.linearSessionId) {
     try {
       await sendLinearFailureNotification(job, sanitizedError);
     } catch (err) {
@@ -384,7 +380,7 @@ export const finishCloudJob = async ({
   // GitHub PR conflict resolution comment
   if (
     task.workflow === 'pr_conflict_resolve' &&
-    (status === CloudTaskStatus.Completed || status === CloudTaskStatus.Failed)
+    (status === RunStatus.Completed || status === RunStatus.Failed)
   ) {
     try {
       await postConflictResolutionComment(job, status, sanitizedError);
@@ -417,10 +413,10 @@ async function findTaskPullRequests(
 async function cleanupGithubPrReviewArtifacts(
   job: FinishedRun,
   status:
-    | CloudTaskStatus.Completed
-    | CloudTaskStatus.Failed
-    | CloudTaskStatus.Canceled
-    | CloudTaskStatus.Idle,
+    | RunStatus.Completed
+    | RunStatus.Failed
+    | RunStatus.Canceled
+    | RunStatus.Idle,
 ): Promise<void> {
   let prRows: TaskPullRequest[];
 
@@ -502,15 +498,15 @@ async function cleanupGithubPrReviewArtifacts(
     // ensures the comment reflects the terminal job outcome without clobbering
     // a real agent completion (it only patches comments still showing an
     // in-progress status line).
-    if (status !== CloudTaskStatus.Idle) {
+    if (status !== RunStatus.Idle) {
       try {
         const token = await createCloudJobGitHubToken(job);
         // A user-stopped run arrives here already normalized to Canceled (see
         // finishCloudJob), so the review outcome maps naturally.
         const outcome =
-          status === CloudTaskStatus.Completed
+          status === RunStatus.Completed
             ? 'completed'
-            : status === CloudTaskStatus.Failed
+            : status === RunStatus.Failed
               ? 'failed'
               : 'canceled';
         const terminalStatus = buildTerminalReviewStatus({
@@ -905,7 +901,7 @@ async function maybeSendSlackQuestionChannelInvite(
       and(
         eq(tasks.initiatorUserId, invitedUserId),
         eq(tasks.state, 'completed'),
-        eq(taskRuns.status, CloudTaskStatus.Completed),
+        eq(taskRuns.status, RunStatus.Completed),
         isNotNull(taskRuns.completedAt),
       ),
     );
@@ -1223,7 +1219,7 @@ async function sendLinearFailureNotification(
 
 async function postConflictResolutionComment(
   job: FinishedRun,
-  status: CloudTaskStatus.Completed | CloudTaskStatus.Failed,
+  status: RunStatus.Completed | RunStatus.Failed,
   error?: string,
 ): Promise<void> {
   const prRows = await findTaskPullRequests(job.taskId);
@@ -1266,7 +1262,7 @@ async function postConflictResolutionComment(
       ? parseConflictResolutionSummary(fallbackCompletionText)
       : null);
 
-  if (status === CloudTaskStatus.Completed) {
+  if (status === RunStatus.Completed) {
     await createIssueComment(token, {
       owner,
       repo,

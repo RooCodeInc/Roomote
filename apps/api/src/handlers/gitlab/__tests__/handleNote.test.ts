@@ -50,7 +50,7 @@ vi.mock('../../tasks/sendMessageToTask', () => ({
   steerMessageToTask: mockSteerMessageToTask,
 }));
 
-import { CloudTaskStatus, TaskPayloadKind } from '@roomote/types';
+import { RunStatus, TaskPayloadKind } from '@roomote/types';
 
 import { handleGitLabNote } from '../handleNote';
 import type { GitLabNoteWebhook } from '../types';
@@ -177,7 +177,7 @@ describe('handleGitLabNote', () => {
       taskId: 'review-task',
       jobId: 9,
       type: TaskPayloadKind.GithubPrReview,
-      status: CloudTaskStatus.Running,
+      status: RunStatus.Running,
       taskPhase: 'running',
       match: 'github_pr',
     });
@@ -215,7 +215,7 @@ describe('handleGitLabNote', () => {
       taskId: 'owner-task',
       jobId: 5,
       type: TaskPayloadKind.StandardTask,
-      status: CloudTaskStatus.Running,
+      status: RunStatus.Running,
       taskPhase: 'running',
       match: 'task_pull_request',
       delivery: 'attach',
@@ -245,7 +245,7 @@ describe('handleGitLabNote', () => {
       taskId: 'owner-task',
       jobId: 5,
       type: TaskPayloadKind.StandardTask,
-      status: CloudTaskStatus.Completed,
+      status: RunStatus.Completed,
       taskPhase: null,
       match: 'task_pull_request',
       delivery: 'resume',
@@ -269,7 +269,7 @@ describe('handleGitLabNote', () => {
       taskId: 'owner-task',
       jobId: 5,
       type: TaskPayloadKind.StandardTask,
-      status: CloudTaskStatus.Running,
+      status: RunStatus.Running,
       taskPhase: 'running',
       match: 'task_pull_request',
       delivery: 'attach',

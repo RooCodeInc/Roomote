@@ -1,7 +1,7 @@
 import pMap from 'p-map';
 
 import {
-  type CloudTaskPayload,
+  type TaskPayload,
   DEFAULT_PR_REVIEWER_SETTINGS,
   type PrReviewerSettings,
   TaskPayloadKind,
@@ -213,7 +213,7 @@ export async function handleGitLabMergeRequest(
               : {}),
             ...(headSha ? { sha: headSha } : {}),
             targetBranch: mergeRequest.target_branch,
-          } satisfies CloudTaskPayload<typeof taskType>,
+          } satisfies TaskPayload<typeof taskType>,
         },
         initiator: {
           kind: 'automation',

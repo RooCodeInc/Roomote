@@ -1,5 +1,5 @@
 import type { TelegramCallbackQuery } from '@roomote/communication/telegram-update';
-import { activeCloudTaskStatuses } from '@roomote/types';
+import { activeRunStatuses } from '@roomote/types';
 import {
   and,
   db,
@@ -41,7 +41,7 @@ async function findCancelableCloudJob(cloudJobId: number, chatId: string) {
       // inbound message path is chat-scoped the same way.
       sql`${taskRuns.payload}->>'communicationProvider' = 'telegram'`,
       sql`${taskRuns.payload}->>'communicationChannelId' = ${chatId}`,
-      inArray(taskRuns.status, [...activeCloudTaskStatuses]),
+      inArray(taskRuns.status, [...activeRunStatuses]),
       isNull(taskRuns.canceledAt),
     ),
     columns: {

@@ -2,7 +2,7 @@ import type {
   AcpRequestUserInputAnswers,
   AcpRequestUserInputPayload,
   AcpRequestUserInputResponsePayload,
-  CloudTaskStatus,
+  RunStatus,
   CommunicationProvider,
   EnvironmentConfig,
   RequestedWorkKind,
@@ -111,7 +111,7 @@ export type RunTaskCallbacks = {
   ) => Promise<void>;
   onExit?: (
     cloudJob: Run,
-    status: CloudTaskStatus,
+    status: RunStatus,
     context: RunTaskContext,
   ) => Promise<void>;
 };

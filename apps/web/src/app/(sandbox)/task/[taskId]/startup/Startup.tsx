@@ -3,7 +3,7 @@
 import { useCallback } from 'react';
 import { SSEProvider } from 'react-hooks-sse';
 
-import { TaskPayloadKind, type CloudTaskStatus } from '@roomote/types';
+import { TaskPayloadKind, type RunStatus } from '@roomote/types';
 import type { Run } from '@roomote/db';
 
 import { useRestoreCloudJobSnapshot } from '@/hooks/snapshots';
@@ -15,7 +15,7 @@ import { useStartupProgress } from './useStartupProgress';
 interface StartupProps {
   cloudJobId: number;
   initialCloudJob?: Run;
-  onStatusChange?: (status: CloudTaskStatus) => void;
+  onStatusChange?: (status: RunStatus) => void;
 }
 
 export const Startup = ({
@@ -48,7 +48,7 @@ export const Startup = ({
 interface StartupInnerProps {
   cloudJobId: number;
   initialCloudJob?: Run;
-  onStatusChange?: (status: CloudTaskStatus) => void;
+  onStatusChange?: (status: RunStatus) => void;
 }
 
 const StartupInner = ({

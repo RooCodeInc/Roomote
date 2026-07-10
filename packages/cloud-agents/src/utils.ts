@@ -1,5 +1,5 @@
 import {
-  type CloudTaskPayload,
+  type TaskPayload,
   TaskPayloadKind,
   PRODUCT_NAME,
 } from '@roomote/types';
@@ -247,13 +247,13 @@ export function buildSlackThreadPromptBlocks({
 }
 
 export function generateCloudJobTitle(
-  { type, payload }: { type: TaskPayloadKind; payload: CloudTaskPayload },
+  { type, payload }: { type: TaskPayloadKind; payload: TaskPayload },
   limit: number = 10_000,
   fallbackTitle?: string | null,
 ): string {
   switch (type) {
     case TaskPayloadKind.GithubPrReview: {
-      const prPayload = payload as CloudTaskPayload<
+      const prPayload = payload as TaskPayload<
         typeof TaskPayloadKind.GithubPrReview
       >;
 
@@ -261,7 +261,7 @@ export function generateCloudJobTitle(
     }
 
     case TaskPayloadKind.GithubPrReviewSync: {
-      const prPayload = payload as CloudTaskPayload<
+      const prPayload = payload as TaskPayload<
         typeof TaskPayloadKind.GithubPrReviewSync
       >;
 
@@ -271,7 +271,7 @@ export function generateCloudJobTitle(
     }
 
     case TaskPayloadKind.GithubPrReviewFollowUp: {
-      const commentPayload = payload as CloudTaskPayload<
+      const commentPayload = payload as TaskPayload<
         typeof TaskPayloadKind.GithubPrReviewFollowUp
       >;
 
@@ -279,7 +279,7 @@ export function generateCloudJobTitle(
     }
 
     case TaskPayloadKind.SlackAppMention: {
-      const slackPayload = payload as CloudTaskPayload<
+      const slackPayload = payload as TaskPayload<
         typeof TaskPayloadKind.SlackAppMention
       >;
 
@@ -292,7 +292,7 @@ export function generateCloudJobTitle(
     }
 
     case TaskPayloadKind.LinearAgentSession: {
-      const linearPayload = payload as CloudTaskPayload<
+      const linearPayload = payload as TaskPayload<
         typeof TaskPayloadKind.LinearAgentSession
       >;
 
@@ -303,9 +303,9 @@ export function generateCloudJobTitle(
     case TaskPayloadKind.Scan:
     case TaskPayloadKind.McpRecommendations: {
       const standardPayload = payload as
-        | CloudTaskPayload<typeof TaskPayloadKind.StandardTask>
-        | CloudTaskPayload<typeof TaskPayloadKind.Scan>
-        | CloudTaskPayload<typeof TaskPayloadKind.McpRecommendations>;
+        | TaskPayload<typeof TaskPayloadKind.StandardTask>
+        | TaskPayload<typeof TaskPayloadKind.Scan>
+        | TaskPayload<typeof TaskPayloadKind.McpRecommendations>;
 
       if (!standardPayload.description) {
         return UNTITLED_TASK;
@@ -319,7 +319,7 @@ export function generateCloudJobTitle(
     }
 
     case TaskPayloadKind.GithubPrConflictResolve: {
-      const conflictPayload = payload as CloudTaskPayload<
+      const conflictPayload = payload as TaskPayload<
         typeof TaskPayloadKind.GithubPrConflictResolve
       >;
 

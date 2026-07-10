@@ -1,4 +1,4 @@
-import { CloudTaskStatus, TaskPayloadKind } from '@roomote/types';
+import { RunStatus, TaskPayloadKind } from '@roomote/types';
 import { tasks, type Run, type Task } from '@roomote/db/server';
 
 // ── Mocks ────────────────────────────────────────────────────────────────────
@@ -66,7 +66,7 @@ function makeSelectChain() {
  */
 let syncRunRows: Array<{
   id: number;
-  status: CloudTaskStatus;
+  status: RunStatus;
   startedAt: Date | null;
 }> = [];
 
@@ -286,7 +286,7 @@ function makeRun(
     payloadKind: TaskPayloadKind.StandardTask,
     actingUserId: 'user-1',
     harness: 'opencode-server',
-    status: CloudTaskStatus.Running,
+    status: RunStatus.Running,
     payload: { repo: 'owner/repo' },
     taskId: task.id,
     sourceRunId: null,
@@ -374,7 +374,7 @@ describe('finishCloudJob', () => {
 
     await finishCloudJob({
       id: 1,
-      status: CloudTaskStatus.Completed,
+      status: RunStatus.Completed,
     });
 
     expect(mockCleanupSandboxOidcTargetsForCloudJob).toHaveBeenCalledWith(1);
@@ -384,12 +384,12 @@ describe('finishCloudJob', () => {
     mockFindFirstRun.mockResolvedValue(makeRun());
     // syncTaskStateFromRuns reads the run status just written above.
     syncRunRows = [
-      { id: 1, status: CloudTaskStatus.Completed, startedAt: new Date() },
+      { id: 1, status: RunStatus.Completed, startedAt: new Date() },
     ];
 
     await finishCloudJob({
       id: 1,
-      status: CloudTaskStatus.Completed,
+      status: RunStatus.Completed,
     });
 
     expect(mockDbUpdate).toHaveBeenNthCalledWith(2, tasks);
@@ -401,13 +401,11 @@ describe('finishCloudJob', () => {
 
   it('derives tasks.state canceled via the shared sync when the job is canceled', async () => {
     mockFindFirstRun.mockResolvedValue(makeRun());
-    syncRunRows = [
-      { id: 1, status: CloudTaskStatus.Canceled, startedAt: null },
-    ];
+    syncRunRows = [{ id: 1, status: RunStatus.Canceled, startedAt: null }];
 
     await finishCloudJob({
       id: 1,
-      status: CloudTaskStatus.Canceled,
+      status: RunStatus.Canceled,
     });
 
     expect(mockDbUpdate).toHaveBeenNthCalledWith(2, tasks);
@@ -419,13 +417,11 @@ describe('finishCloudJob', () => {
 
   it('derives tasks.state failed via the shared sync when the job fails', async () => {
     mockFindFirstRun.mockResolvedValue(makeRun());
-    syncRunRows = [
-      { id: 1, status: CloudTaskStatus.Failed, startedAt: new Date() },
-    ];
+    syncRunRows = [{ id: 1, status: RunStatus.Failed, startedAt: new Date() }];
 
     await finishCloudJob({
       id: 1,
-      status: CloudTaskStatus.Failed,
+      status: RunStatus.Failed,
       error: 'boom',
     });
 
@@ -439,13 +435,11 @@ describe('finishCloudJob', () => {
   it('keeps the task active (not terminal) when the finishing run goes idle', async () => {
     mockFindFirstRun.mockResolvedValue(makeRun());
     // The idle run is non-terminal, so the derivation resolves to 'active'.
-    syncRunRows = [
-      { id: 1, status: CloudTaskStatus.Idle, startedAt: new Date() },
-    ];
+    syncRunRows = [{ id: 1, status: RunStatus.Idle, startedAt: new Date() }];
 
     await finishCloudJob({
       id: 1,
-      status: CloudTaskStatus.Idle,
+      status: RunStatus.Idle,
     });
 
     // The shared sync still runs, but only ever derives 'active' here; it never
@@ -465,13 +459,13 @@ describe('finishCloudJob', () => {
     // The prior run completed (started); this resume never started before it
     // was canceled, so the derivation keeps the task 'completed'.
     syncRunRows = [
-      { id: 1, status: CloudTaskStatus.Completed, startedAt: new Date() },
-      { id: 2, status: CloudTaskStatus.Canceled, startedAt: null },
+      { id: 1, status: RunStatus.Completed, startedAt: new Date() },
+      { id: 2, status: RunStatus.Canceled, startedAt: null },
     ];
 
     await finishCloudJob({
       id: 2,
-      status: CloudTaskStatus.Canceled,
+      status: RunStatus.Canceled,
     });
 
     expect(mockDbUpdate).toHaveBeenNthCalledWith(2, tasks);
@@ -486,7 +480,7 @@ describe('finishCloudJob', () => {
 
     await finishCloudJob({
       id: 1,
-      status: CloudTaskStatus.Idle,
+      status: RunStatus.Idle,
     });
 
     expect(mockCleanupSandboxOidcTargetsForCloudJob).not.toHaveBeenCalled();
@@ -534,7 +528,7 @@ describe('finishCloudJob', () => {
 
     await finishCloudJob({
       id: 303,
-      status: CloudTaskStatus.Failed,
+      status: RunStatus.Failed,
       error: 'snapshot resume failed',
     });
 
@@ -568,7 +562,7 @@ describe('finishCloudJob', () => {
     expect(mockDbUpdateSet).toHaveBeenNthCalledWith(
       1,
       expect.objectContaining({
-        status: CloudTaskStatus.Failed,
+        status: RunStatus.Failed,
         error: 'snapshot resume failed',
       }),
     );
@@ -606,7 +600,7 @@ describe('finishCloudJob', () => {
 
     await finishCloudJob({
       id: 12,
-      status: CloudTaskStatus.Failed,
+      status: RunStatus.Failed,
       error: 'spawn timeout',
     });
 
@@ -619,7 +613,7 @@ describe('finishCloudJob', () => {
         message: 'Cloud job finished with a failure.',
         details: expect.objectContaining({
           stage: 'finish_cloud_job',
-          status: CloudTaskStatus.Failed,
+          status: RunStatus.Failed,
           vendor: 'modal',
           machineId: 'sb-modal-12',
           sourceSnapshotId: 'snap_env_12',
@@ -663,7 +657,7 @@ describe('finishCloudJob', () => {
 
       await finishCloudJob({
         id: 1,
-        status: CloudTaskStatus.Completed,
+        status: RunStatus.Completed,
       });
 
       expect(mockPostMessage).not.toHaveBeenCalled();
@@ -697,7 +691,7 @@ describe('finishCloudJob', () => {
 
       await finishCloudJob({
         id: 1,
-        status: CloudTaskStatus.Completed,
+        status: RunStatus.Completed,
       });
 
       expect(mockPostMessage).toHaveBeenCalledWith({
@@ -739,7 +733,7 @@ describe('finishCloudJob', () => {
 
       await finishCloudJob({
         id: 1,
-        status: CloudTaskStatus.Idle,
+        status: RunStatus.Idle,
       });
 
       expect(mockPostMessage).toHaveBeenCalledWith({
@@ -780,7 +774,7 @@ describe('finishCloudJob', () => {
 
       await finishCloudJob({
         id: 1,
-        status: CloudTaskStatus.Idle,
+        status: RunStatus.Idle,
       });
 
       expect(mockPostMessage).not.toHaveBeenCalled();
@@ -814,7 +808,7 @@ describe('finishCloudJob', () => {
 
       await finishCloudJob({
         id: 1,
-        status: CloudTaskStatus.Idle,
+        status: RunStatus.Idle,
       });
 
       expect(mockPostMessage).not.toHaveBeenCalled();
@@ -848,7 +842,7 @@ describe('finishCloudJob', () => {
 
       await finishCloudJob({
         id: 1,
-        status: CloudTaskStatus.Completed,
+        status: RunStatus.Completed,
       });
 
       expect(mockPostMessage).toHaveBeenCalledWith({
@@ -904,7 +898,7 @@ describe('finishCloudJob', () => {
 
       await finishCloudJob({
         id: 2,
-        status: CloudTaskStatus.Completed,
+        status: RunStatus.Completed,
       });
 
       expect(mockPostMessage).toHaveBeenCalledWith({
@@ -960,7 +954,7 @@ describe('finishCloudJob', () => {
 
       await finishCloudJob({
         id: 2,
-        status: CloudTaskStatus.Idle,
+        status: RunStatus.Idle,
       });
 
       expect(mockPostMessage).toHaveBeenCalledWith({
@@ -1031,11 +1025,11 @@ describe('finishCloudJob', () => {
 
       await finishCloudJob({
         id: 2,
-        status: CloudTaskStatus.Idle,
+        status: RunStatus.Idle,
       });
       await finishCloudJob({
         id: 3,
-        status: CloudTaskStatus.Idle,
+        status: RunStatus.Idle,
       });
 
       // The claim is task-scoped, so repeated idle cycles share one key.
@@ -1102,7 +1096,7 @@ describe('finishCloudJob', () => {
 
       await finishCloudJob({
         id: 2,
-        status: CloudTaskStatus.Completed,
+        status: RunStatus.Completed,
       });
 
       expect(mockOpenConversation).toHaveBeenCalledWith('UINSTALLER');
@@ -1147,7 +1141,7 @@ describe('finishCloudJob', () => {
 
       await finishCloudJob({
         id: 2,
-        status: CloudTaskStatus.Completed,
+        status: RunStatus.Completed,
       });
 
       expect(mockOpenConversation).not.toHaveBeenCalled();
@@ -1186,7 +1180,7 @@ describe('finishCloudJob', () => {
 
       await finishCloudJob({
         id: 2,
-        status: CloudTaskStatus.Completed,
+        status: RunStatus.Completed,
       });
 
       expect(mockOpenConversation).not.toHaveBeenCalled();
@@ -1202,7 +1196,7 @@ describe('finishCloudJob', () => {
 
       await finishCloudJob({
         id: 2,
-        status: CloudTaskStatus.Completed,
+        status: RunStatus.Completed,
       });
 
       expect(mockFindFirstSlackInstallation).not.toHaveBeenCalled();
@@ -1222,7 +1216,7 @@ describe('finishCloudJob', () => {
 
       await finishCloudJob({
         id: 2,
-        status: CloudTaskStatus.Completed,
+        status: RunStatus.Completed,
       });
 
       expect(mockFindFirstSlackInstallation).not.toHaveBeenCalled();
@@ -1262,7 +1256,7 @@ describe('finishCloudJob', () => {
 
       await finishCloudJob({
         id: 2,
-        status: CloudTaskStatus.Completed,
+        status: RunStatus.Completed,
       });
 
       expect(mockOpenConversation).not.toHaveBeenCalled();
@@ -1302,7 +1296,7 @@ describe('finishCloudJob', () => {
 
       await finishCloudJob({
         id: 2,
-        status: CloudTaskStatus.Completed,
+        status: RunStatus.Completed,
       });
 
       expect(mockPostMessage).not.toHaveBeenCalled();
@@ -1335,7 +1329,7 @@ describe('finishCloudJob', () => {
 
       await finishCloudJob({
         id: 1,
-        status: CloudTaskStatus.Failed,
+        status: RunStatus.Failed,
         error: 'spawn timeout',
       });
 
@@ -1386,7 +1380,7 @@ describe('finishCloudJob', () => {
 
       await finishCloudJob({
         id: 1,
-        status: CloudTaskStatus.Failed,
+        status: RunStatus.Failed,
         error: 'Worker heartbeat stale and instance sb-1 is stopped',
       });
 
@@ -1399,7 +1393,7 @@ describe('finishCloudJob', () => {
       // the sanitized error stays on the run for debugging.
       expect(mockDbUpdateSet).toHaveBeenCalledWith(
         expect.objectContaining({
-          status: CloudTaskStatus.Canceled,
+          status: RunStatus.Canceled,
           canceledAt: expect.any(Date),
           completedAt: null,
           error: expect.stringContaining('Worker heartbeat stale'),
@@ -1432,7 +1426,7 @@ describe('finishCloudJob', () => {
 
       await finishCloudJob({
         id: 1,
-        status: CloudTaskStatus.Failed,
+        status: RunStatus.Failed,
         error: 'spawn timeout',
       });
 
@@ -1440,7 +1434,7 @@ describe('finishCloudJob', () => {
       // completedAt stamped, and the failure notification goes out.
       expect(mockDbUpdateSet).toHaveBeenCalledWith(
         expect.objectContaining({
-          status: CloudTaskStatus.Failed,
+          status: RunStatus.Failed,
           canceledAt: null,
           completedAt: expect.any(Date),
         }),
@@ -1476,7 +1470,7 @@ describe('finishCloudJob', () => {
 
       await finishCloudJob({
         id: 1,
-        status: CloudTaskStatus.Failed,
+        status: RunStatus.Failed,
         error: 'resume bootstrap timeout',
       });
 
@@ -1521,7 +1515,7 @@ describe('finishCloudJob', () => {
 
       await finishCloudJob({
         id: 1,
-        status: CloudTaskStatus.Failed,
+        status: RunStatus.Failed,
         error: 'spawn timeout',
       });
 
@@ -1565,7 +1559,7 @@ describe('finishCloudJob', () => {
 
       await finishCloudJob({
         id: 1,
-        status: CloudTaskStatus.Failed,
+        status: RunStatus.Failed,
         error: 'worker heartbeat stale',
       });
 
@@ -1616,7 +1610,7 @@ describe('finishCloudJob', () => {
 
       await finishCloudJob({
         id: 1,
-        status: CloudTaskStatus.Failed,
+        status: RunStatus.Failed,
         error: 'spawn timeout',
       });
 
@@ -1635,7 +1629,7 @@ describe('finishCloudJob', () => {
 
       await finishCloudJob({
         id: 1,
-        status: CloudTaskStatus.Failed,
+        status: RunStatus.Failed,
         error: 'some error',
       });
 
@@ -1661,7 +1655,7 @@ describe('finishCloudJob', () => {
 
       await finishCloudJob({
         id: 1,
-        status: CloudTaskStatus.Completed,
+        status: RunStatus.Completed,
       });
 
       expect(mockPostMessage).not.toHaveBeenCalled();
@@ -1693,7 +1687,7 @@ describe('finishCloudJob', () => {
       // Should not throw
       await finishCloudJob({
         id: 1,
-        status: CloudTaskStatus.Failed,
+        status: RunStatus.Failed,
         error: 'test error',
       });
     });
@@ -1720,7 +1714,7 @@ describe('finishCloudJob', () => {
 
       await finishCloudJob({
         id: 1,
-        status: CloudTaskStatus.Failed,
+        status: RunStatus.Failed,
         error: 'spawn timeout',
       });
 
@@ -1743,7 +1737,7 @@ describe('finishCloudJob', () => {
 
       await finishCloudJob({
         id: 1,
-        status: CloudTaskStatus.Failed,
+        status: RunStatus.Failed,
         error: 'spawn timeout',
       });
 
@@ -1751,7 +1745,7 @@ describe('finishCloudJob', () => {
       // The stop-normalized status is also persisted as canceled.
       expect(mockDbUpdateSet).toHaveBeenCalledWith(
         expect.objectContaining({
-          status: CloudTaskStatus.Canceled,
+          status: RunStatus.Canceled,
           canceledAt: expect.any(Date),
           completedAt: null,
         }),
@@ -1767,7 +1761,7 @@ describe('finishCloudJob', () => {
 
       await finishCloudJob({
         id: 1,
-        status: CloudTaskStatus.Failed,
+        status: RunStatus.Failed,
         error: 'runtime crash',
       });
 
@@ -1786,7 +1780,7 @@ describe('finishCloudJob', () => {
 
       await finishCloudJob({
         id: 1,
-        status: CloudTaskStatus.Failed,
+        status: RunStatus.Failed,
         error: 'some error',
       });
 
@@ -1799,7 +1793,7 @@ describe('finishCloudJob', () => {
 
       await finishCloudJob({
         id: 1,
-        status: CloudTaskStatus.Completed,
+        status: RunStatus.Completed,
       });
 
       expect(mockTeamsPostMessage).not.toHaveBeenCalled();
@@ -1812,7 +1806,7 @@ describe('finishCloudJob', () => {
 
       await finishCloudJob({
         id: 1,
-        status: CloudTaskStatus.Failed,
+        status: RunStatus.Failed,
         error: 'some error',
       });
 
@@ -1827,7 +1821,7 @@ describe('finishCloudJob', () => {
       // Should not throw
       await finishCloudJob({
         id: 1,
-        status: CloudTaskStatus.Failed,
+        status: RunStatus.Failed,
         error: 'test error',
       });
     });
@@ -1867,7 +1861,7 @@ describe('finishCloudJob', () => {
 
       await finishCloudJob({
         id: 1,
-        status: CloudTaskStatus.Completed,
+        status: RunStatus.Completed,
       });
 
       expect(mockCreateIssueComment).toHaveBeenCalledWith('github-token', {
@@ -1896,7 +1890,7 @@ describe('finishCloudJob', () => {
 
       await finishCloudJob({
         id: 1,
-        status: CloudTaskStatus.Completed,
+        status: RunStatus.Completed,
       });
 
       expect(mockCreateIssueComment).toHaveBeenCalledWith('github-token', {
@@ -1919,7 +1913,7 @@ describe('finishCloudJob', () => {
 
       await finishCloudJob({
         id: 1,
-        status: CloudTaskStatus.Failed,
+        status: RunStatus.Failed,
         error: 'Patch did not apply cleanly.',
       });
 
@@ -1946,7 +1940,7 @@ describe('finishCloudJob', () => {
 
       await finishCloudJob({
         id: 1,
-        status: CloudTaskStatus.Failed,
+        status: RunStatus.Failed,
         error: 'Patch did not apply cleanly.',
       });
 
@@ -1966,7 +1960,7 @@ describe('finishCloudJob', () => {
 
       await finishCloudJob({
         id: 1,
-        status: CloudTaskStatus.Failed,
+        status: RunStatus.Failed,
         error: 'Patch did not apply cleanly.',
       });
 
@@ -1974,7 +1968,7 @@ describe('finishCloudJob', () => {
       // The stop-normalized status is also persisted as canceled.
       expect(mockDbUpdateSet).toHaveBeenCalledWith(
         expect.objectContaining({
-          status: CloudTaskStatus.Canceled,
+          status: RunStatus.Canceled,
           canceledAt: expect.any(Date),
           completedAt: null,
         }),
@@ -1992,7 +1986,7 @@ describe('finishCloudJob', () => {
 
       await finishCloudJob({
         id: 1,
-        status: CloudTaskStatus.Failed,
+        status: RunStatus.Failed,
         error: 'spawn failure',
       });
 
@@ -2018,7 +2012,7 @@ describe('finishCloudJob', () => {
 
       await finishCloudJob({
         id: 1,
-        status: CloudTaskStatus.Failed,
+        status: RunStatus.Failed,
         error: 'spawn failure',
       });
 
@@ -2026,7 +2020,7 @@ describe('finishCloudJob', () => {
       // The stop-normalized status is also persisted as canceled.
       expect(mockDbUpdateSet).toHaveBeenCalledWith(
         expect.objectContaining({
-          status: CloudTaskStatus.Canceled,
+          status: RunStatus.Canceled,
           canceledAt: expect.any(Date),
           completedAt: null,
         }),
@@ -2039,7 +2033,7 @@ describe('finishCloudJob', () => {
 
       await finishCloudJob({
         id: 1,
-        status: CloudTaskStatus.Failed,
+        status: RunStatus.Failed,
         error: 'some error',
       });
 
@@ -2052,7 +2046,7 @@ describe('finishCloudJob', () => {
 
       await finishCloudJob({
         id: 1,
-        status: CloudTaskStatus.Completed,
+        status: RunStatus.Completed,
       });
 
       expect(mockEmitError).not.toHaveBeenCalled();
@@ -2069,7 +2063,7 @@ describe('finishCloudJob', () => {
       // Should not throw
       await finishCloudJob({
         id: 1,
-        status: CloudTaskStatus.Failed,
+        status: RunStatus.Failed,
         error: 'test error',
       });
     });

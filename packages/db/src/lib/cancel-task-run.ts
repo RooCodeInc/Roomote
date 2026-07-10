@@ -1,5 +1,5 @@
 import { and, eq, inArray, isNull, not } from 'drizzle-orm';
-import { CloudTaskStatus, exitedCloudTaskStatuses } from '@roomote/types';
+import { RunStatus, exitedRunStatuses } from '@roomote/types';
 
 import { db } from '../db';
 import { taskRuns } from '../schema';
@@ -32,7 +32,7 @@ export async function cancelTaskRunDirect(params: {
     const [run] = await tx
       .update(taskRuns)
       .set({
-        status: CloudTaskStatus.Canceled,
+        status: RunStatus.Canceled,
         // Stamp the stop intent alongside the terminal write so a later
         // Failed finalization (e.g. the sandbox dying mid-cancel) reports as
         // canceled, not as a runtime failure.
@@ -47,7 +47,7 @@ export async function cancelTaskRunDirect(params: {
           not(
             inArray(
               taskRuns.status,
-              exitedCloudTaskStatuses as unknown as CloudTaskStatus[],
+              exitedRunStatuses as unknown as RunStatus[],
             ),
           ),
         ),

@@ -9,7 +9,7 @@ import {
   isNull,
   desc,
 } from '@roomote/db/server';
-import { activeCloudTaskStatuses } from '@roomote/types';
+import { activeRunStatuses } from '@roomote/types';
 
 import { slackDebug } from './logging';
 
@@ -37,7 +37,7 @@ export async function findActiveSlackJob(slackThreadTs: string) {
     .where(
       and(
         eq(tasks.slackThreadTs, slackThreadTs),
-        inArray(taskRuns.status, [...activeCloudTaskStatuses]),
+        inArray(taskRuns.status, [...activeRunStatuses]),
         isNull(taskRuns.canceledAt),
       ),
     )

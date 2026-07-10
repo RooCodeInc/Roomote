@@ -1,5 +1,5 @@
 import {
-  type CloudTaskPayload,
+  type TaskPayload,
   type SlackBlock,
   TaskPayloadKind,
   DEFAULT_SLACK_ACK_EMOJI,
@@ -582,7 +582,7 @@ async function removeSlackAckReaction(
 function getSlackConversation(cloudJob: Run) {
   // For SlackAppMention jobs, channel and thread_ts are in the payload.
   if (cloudJob.payloadKind === TaskPayloadKind.SlackAppMention) {
-    const { channel, thread_ts } = cloudJob.payload as CloudTaskPayload<
+    const { channel, thread_ts } = cloudJob.payload as TaskPayload<
       typeof TaskPayloadKind.SlackAppMention
     >;
 
@@ -625,7 +625,7 @@ function getSlackConversation(cloudJob: Run) {
 
 function getSlackOriginMessageTs(cloudJob: Run): string | null {
   if (cloudJob.payloadKind === TaskPayloadKind.SlackAppMention) {
-    const { ts } = cloudJob.payload as CloudTaskPayload<
+    const { ts } = cloudJob.payload as TaskPayload<
       typeof TaskPayloadKind.SlackAppMention
     >;
 

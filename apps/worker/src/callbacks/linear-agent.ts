@@ -1,4 +1,4 @@
-import { type CloudTaskPayload, TaskPayloadKind } from '@roomote/types';
+import { type TaskPayload, TaskPayloadKind } from '@roomote/types';
 import type {
   AgentSessionPlanStep,
   AgentSessionPlanStepStatus,
@@ -107,7 +107,7 @@ function convertTodosToAgentPlan(todos: TodoItem[]): AgentSessionPlanStep[] {
 function getLinearSessionId(cloudJob: Run): string {
   // For LinearAgentSession jobs, sessionId is in the payload
   if (cloudJob.payloadKind === TaskPayloadKind.LinearAgentSession) {
-    const { sessionId } = cloudJob.payload as CloudTaskPayload<
+    const { sessionId } = cloudJob.payload as TaskPayload<
       typeof TaskPayloadKind.LinearAgentSession
     >;
 

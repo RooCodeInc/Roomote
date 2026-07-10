@@ -2,7 +2,7 @@ import { enqueueCloudTask } from '@roomote/cloud-agents/server';
 import { db, eq, sql, taskRuns } from '@roomote/db/server';
 import {
   TaskPayloadKind,
-  type CloudTaskPayload,
+  type TaskPayload,
   type SnapshotResumePromptFallbackTask,
   type TaskInitiator,
 } from '@roomote/types';
@@ -140,7 +140,7 @@ export async function ensureSnapshotResumeGitHubFollowUpFallback({
       return null;
     }
 
-    const fallbackPayload = fallbackTask.payload as CloudTaskPayload<
+    const fallbackPayload = fallbackTask.payload as TaskPayload<
       typeof TaskPayloadKind.GithubPrReviewFollowUp
     >;
 

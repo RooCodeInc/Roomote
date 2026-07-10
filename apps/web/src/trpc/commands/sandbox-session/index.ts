@@ -1,8 +1,8 @@
 import {
-  CloudTaskStatus,
+  RunStatus,
   TaskPayloadKind,
-  isBootingCloudTaskStatus,
-  isExitedCloudTaskStatus,
+  isBootingRunStatus,
+  isExitedRunStatus,
   taskToolDispatchPayloadSchema,
 } from '@roomote/types';
 import { createJobToken } from '@roomote/auth';
@@ -384,7 +384,7 @@ async function getResolvedSandboxCloudJobForTaskAccess(
   // If the resolved cloud job has exited and has a snapshot, check for an active
   // successor (e.g. a SnapshotResume job triggered from Linear). This ensures the
   // web UI shows the running resumed session instead of the old "Went to sleep" state.
-  if (isExitedCloudTaskStatus(cloudJob.status) && cloudJob.snapshotId) {
+  if (isExitedRunStatus(cloudJob.status) && cloudJob.snapshotId) {
     const successor = await findActiveSuccessorCloudJob(
       cloudJob.id,
       auth,
@@ -480,12 +480,11 @@ export async function getSandboxSessionByTaskIdCommand(
   }).catch(() => []);
 
   const shouldCheckBootFailureMessages =
-    cloudJob.status === CloudTaskStatus.Failed ||
-    cloudJob.status === CloudTaskStatus.Canceled;
+    cloudJob.status === RunStatus.Failed ||
+    cloudJob.status === RunStatus.Canceled;
 
   const shouldCheckHarnessMessages =
-    !isExitedCloudTaskStatus(cloudJob.status) &&
-    !isBootingCloudTaskStatus(cloudJob.status);
+    !isExitedRunStatus(cloudJob.status) && !isBootingRunStatus(cloudJob.status);
 
   // Check whether the task ever produced messages. Used to distinguish boot
   // failures (no messages) from runtime failures (has conversation history).
@@ -543,7 +542,7 @@ export async function getSandboxSessionByTaskIdCommand(
 
     if (
       (cloudJob.sleepRequestedAt || cloudJob.snapshotRequestedAt) &&
-      !isExitedCloudTaskStatus(cloudJob.status) &&
+      !isExitedRunStatus(cloudJob.status) &&
       !cloudJob.snapshotCreatedAt &&
       !cloudJob.snapshotFailedAt
     ) {

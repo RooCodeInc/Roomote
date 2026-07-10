@@ -10,19 +10,19 @@ import {
 } from '@roomote/db/server';
 
 import {
-  CloudTaskStatus,
+  RunStatus,
   TASK_SURFACES,
   TASK_TRIGGERS,
   TASK_VISIBILITIES,
   TASK_WORKFLOWS,
   TaskPayloadKind,
-  cloudJobEventSources,
-  cloudJobEventTypes,
-  cloudTaskSchema,
+  runEventSources,
+  runEventTypes,
+  taskSpecSchema,
   communicationProviderSchema,
   computeProviderLaunchModes,
   computeProviderUsageLifecycleActions,
-  doneCloudTaskStatuses,
+  doneRunStatuses,
   queuedCommunicationMessageSchema,
   snapshotResumeSchema,
   sourceControlProviderSchema,
@@ -193,7 +193,7 @@ const taskPrLinkageSchema = z.object({
  * bindings, optional PR linkage) plus its first run.
  */
 const freshEnqueueInputSchema = z.object({
-  task: cloudTaskSchema.refine(
+  task: taskSpecSchema.refine(
     (task) => task.type !== TaskPayloadKind.SnapshotResume,
     { message: 'Snapshot resumes must use the resume input shape.' },
   ),
@@ -277,7 +277,7 @@ export const cloudJobsRouter = router({
   update: jobScoped(
     z.object({
       id: z.number(),
-      status: z.nativeEnum(CloudTaskStatus).optional(),
+      status: z.nativeEnum(RunStatus).optional(),
       taskPhase: z.string().nullish(),
       sleepAt: z.date().nullish(),
       taskId: z.string().optional(),
@@ -347,7 +347,7 @@ export const cloudJobsRouter = router({
   done: jobScoped(
     z.object({
       id: z.number(),
-      status: z.enum(doneCloudTaskStatuses),
+      status: z.enum(doneRunStatuses),
       error: z.string().optional(),
     }),
     'id',
@@ -355,8 +355,8 @@ export const cloudJobsRouter = router({
   recordEvent: jobScoped(
     z.object({
       cloudJobId: z.number(),
-      source: z.enum(cloudJobEventSources),
-      eventType: z.enum(cloudJobEventTypes),
+      source: z.enum(runEventSources),
+      eventType: z.enum(runEventTypes),
       message: z.string().optional(),
       details: z.record(z.unknown()).optional(),
     }),

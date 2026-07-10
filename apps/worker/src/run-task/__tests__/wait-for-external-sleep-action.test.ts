@@ -12,7 +12,7 @@ vi.mock('@roomote/sdk/client', () => ({
 
 import { TaskPayloadKind } from '@roomote/types';
 
-import { CloudTaskStatus } from '@roomote/types';
+import { RunStatus } from '@roomote/types';
 import { waitForExternalSleepAction } from '../wait-for-external-sleep-action';
 
 describe('waitForExternalSleepAction', () => {
@@ -28,7 +28,7 @@ describe('waitForExternalSleepAction', () => {
         snapshotCreatedAt: null,
         snapshotFailedAt: null,
         error: null,
-        status: CloudTaskStatus.Running,
+        status: RunStatus.Running,
       })
       .mockResolvedValueOnce({
         sleepRequestedAt: new Date(),
@@ -36,7 +36,7 @@ describe('waitForExternalSleepAction', () => {
         snapshotCreatedAt: new Date(),
         snapshotFailedAt: null,
         error: null,
-        status: CloudTaskStatus.Completed,
+        status: RunStatus.Completed,
       });
 
     const logger = {
@@ -70,7 +70,7 @@ describe('waitForExternalSleepAction', () => {
         snapshotCreatedAt: null,
         snapshotFailedAt: null,
         error: null,
-        status: CloudTaskStatus.Idle,
+        status: RunStatus.Idle,
       })
       .mockResolvedValueOnce({
         sleepRequestedAt: new Date(),
@@ -78,7 +78,7 @@ describe('waitForExternalSleepAction', () => {
         snapshotCreatedAt: null,
         snapshotFailedAt: null,
         error: null,
-        status: CloudTaskStatus.Completed,
+        status: RunStatus.Completed,
       });
 
     const logger = {
@@ -112,7 +112,7 @@ describe('waitForExternalSleepAction', () => {
         snapshotCreatedAt: null,
         snapshotFailedAt: null,
         error: null,
-        status: CloudTaskStatus.Running,
+        status: RunStatus.Running,
       })
       .mockResolvedValueOnce({
         sleepRequestedAt: new Date(),
@@ -120,7 +120,7 @@ describe('waitForExternalSleepAction', () => {
         snapshotCreatedAt: new Date(),
         snapshotFailedAt: null,
         error: null,
-        status: CloudTaskStatus.Completed,
+        status: RunStatus.Completed,
       });
 
     const logger = {

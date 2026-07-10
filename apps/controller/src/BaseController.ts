@@ -4,7 +4,7 @@ import { fileURLToPath } from 'node:url';
 
 import {
   type ComputeProvider,
-  CloudTaskStatus,
+  RunStatus,
   TaskPayloadKind,
   resolveComputeProviderTarget,
   SANDBOX_ORPHAN_SCAN_INTERVAL_MS,
@@ -429,7 +429,7 @@ export abstract class BaseController {
     await db.transaction(async (tx) => {
       const updatedJobs = await tx
         .update(taskRuns)
-        .set({ status: CloudTaskStatus.Dequeued, dequeuedAt: new Date() })
+        .set({ status: RunStatus.Dequeued, dequeuedAt: new Date() })
         .where(
           and(
             eq(taskRuns.id, cloudJob.id),
@@ -452,7 +452,7 @@ export abstract class BaseController {
           'Controller dequeued cloud job and handed it to provider dispatch.',
         details: {
           stage: 'controller_dequeue',
-          status: CloudTaskStatus.Dequeued,
+          status: RunStatus.Dequeued,
           provider: resolveComputeProviderTarget(
             cloudJob.vendor,
             fallbackComputeProvider,
@@ -472,10 +472,7 @@ export abstract class BaseController {
         },
       });
 
-      if (
-        latestJob?.canceledAt ||
-        latestJob?.status === CloudTaskStatus.Canceled
-      ) {
+      if (latestJob?.canceledAt || latestJob?.status === RunStatus.Canceled) {
         return null;
       }
 
@@ -484,7 +481,7 @@ export abstract class BaseController {
       }
 
       throw new Error(
-        `Job ${cloudJob.id}: failed to transition from ${cloudJob.status} to ${CloudTaskStatus.Dequeued}`,
+        `Job ${cloudJob.id}: failed to transition from ${cloudJob.status} to ${RunStatus.Dequeued}`,
       );
     }
 
@@ -513,7 +510,7 @@ export abstract class BaseController {
     // Linear notifications, lock release, etc.) are applied consistently.
     await finishCloudJob({
       id: cloudJob.id,
-      status: CloudTaskStatus.Failed,
+      status: RunStatus.Failed,
       error: errorMessage,
     });
 

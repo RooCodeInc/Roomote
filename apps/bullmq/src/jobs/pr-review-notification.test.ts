@@ -97,7 +97,7 @@ vi.mock('@roomote/communication/telegram-provider', () => ({
 
 import type { Job } from 'bullmq';
 
-import { CloudTaskStatus } from '@roomote/types';
+import { RunStatus } from '@roomote/types';
 
 import { prReviewNotificationJob } from './pr-review-notification';
 
@@ -125,7 +125,7 @@ describe('prReviewNotificationJob', () => {
       payload: { channel: 'C123' },
       slackThreadTs: '111.222',
       sourceCloudJobId: null,
-      status: CloudTaskStatus.Idle,
+      status: RunStatus.Idle,
       taskPhase: 'waiting_for_prompt',
     });
     mockFindFirstTaskPullRequest.mockResolvedValue({ status: 'open' });
@@ -249,7 +249,7 @@ describe('prReviewNotificationJob', () => {
       payload: {},
       slackThreadTs: '111.222',
       sourceCloudJobId: null,
-      status: CloudTaskStatus.Running,
+      status: RunStatus.Running,
       taskPhase: 'running',
     });
 
@@ -269,7 +269,7 @@ describe('prReviewNotificationJob', () => {
       payload: {},
       slackThreadTs: '111.222',
       sourceCloudJobId: null,
-      status: CloudTaskStatus.Idle,
+      status: RunStatus.Idle,
       taskPhase: 'running',
     });
 
@@ -289,7 +289,7 @@ describe('prReviewNotificationJob', () => {
       payload: {},
       slackThreadTs: '111.222',
       sourceCloudJobId: null,
-      status: CloudTaskStatus.Running,
+      status: RunStatus.Running,
       taskPhase: 'running',
     });
 

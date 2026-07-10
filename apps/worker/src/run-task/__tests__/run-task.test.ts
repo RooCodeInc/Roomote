@@ -242,7 +242,7 @@ vi.mock('../../sandbox-server/procedures/slackReplyTurnTracking', () => ({
   recordSandboxPromptSlackTurnStart: recordSandboxPromptSlackTurnStartMock,
 }));
 
-import { CloudTaskStatus, TaskPayloadKind } from '@roomote/types';
+import { RunStatus, TaskPayloadKind } from '@roomote/types';
 
 import { getDefaultKeepaliveMs } from '../completion';
 import { runTask } from '../run-task';
@@ -270,7 +270,7 @@ describe('runTask', () => {
       taskFinishedAt: undefined,
       taskAbortedAt: undefined,
     });
-    resolveStatusMock.mockReturnValue(CloudTaskStatus.Idle);
+    resolveStatusMock.mockReturnValue(RunStatus.Idle);
     waitForExternalSleepActionMock.mockResolvedValue({
       claimed: false,
       completed: false,
@@ -1870,7 +1870,7 @@ describe('runTask', () => {
     cancelController.abort(new Error('background environment setup failed'));
 
     await expect(runTaskPromise).resolves.toEqual({
-      status: CloudTaskStatus.Canceled,
+      status: RunStatus.Canceled,
       error: 'Task aborted',
     });
 
@@ -2548,7 +2548,7 @@ describe('runTask', () => {
     cancelController.abort(new Error('background environment setup failed'));
 
     await expect(runTaskPromise).resolves.toEqual({
-      status: CloudTaskStatus.Canceled,
+      status: RunStatus.Canceled,
       error: 'Task aborted',
     });
 
@@ -2619,7 +2619,7 @@ describe('runTask', () => {
     cancelController.abort(new Error('background environment setup failed'));
 
     await expect(runTaskPromise).resolves.toEqual({
-      status: CloudTaskStatus.Canceled,
+      status: RunStatus.Canceled,
       error: 'Task aborted',
     });
 
@@ -3771,7 +3771,7 @@ describe('runTask', () => {
 
     expect(cloudJobsDoneMock).toHaveBeenCalledWith({
       id: 104,
-      status: CloudTaskStatus.Idle,
+      status: RunStatus.Idle,
     });
   });
 

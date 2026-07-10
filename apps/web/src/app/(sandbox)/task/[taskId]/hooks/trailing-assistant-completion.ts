@@ -1,4 +1,4 @@
-import { CloudTaskStatus, type TaskPhase } from '@roomote/types';
+import { RunStatus, type TaskPhase } from '@roomote/types';
 
 const TURN_COMPLETION_TASK_PHASES = new Set<TaskPhase>([
   'idle',
@@ -11,12 +11,9 @@ export function shouldMarkTrailingAssistantCompletion({
   taskStatus,
 }: {
   taskPhase?: TaskPhase | null;
-  taskStatus?: CloudTaskStatus | null;
+  taskStatus?: RunStatus | null;
 }): boolean {
-  if (
-    taskStatus === CloudTaskStatus.Failed ||
-    taskStatus === CloudTaskStatus.Canceled
-  ) {
+  if (taskStatus === RunStatus.Failed || taskStatus === RunStatus.Canceled) {
     return false;
   }
 
@@ -24,8 +21,5 @@ export function shouldMarkTrailingAssistantCompletion({
     return TURN_COMPLETION_TASK_PHASES.has(taskPhase);
   }
 
-  return (
-    taskStatus === CloudTaskStatus.Completed ||
-    taskStatus === CloudTaskStatus.Idle
-  );
+  return taskStatus === RunStatus.Completed || taskStatus === RunStatus.Idle;
 }

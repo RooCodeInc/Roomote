@@ -1,9 +1,9 @@
 import { asc, desc, eq } from 'drizzle-orm';
 
 import type {
-  CloudJobEventDetails,
-  CloudJobEventSource,
-  CloudJobEventType,
+  RunEventDetails,
+  RunEventSource,
+  RunEventType,
   ComputeProviderMutationEvent,
   ComputeProviderMutationObserver,
 } from '@roomote/types';
@@ -14,10 +14,10 @@ import { taskRunEvents, taskRuns } from '../schema';
 interface RecordCloudJobEventInput {
   runId: number;
   taskId?: string;
-  source: CloudJobEventSource;
-  eventType: CloudJobEventType;
+  source: RunEventSource;
+  eventType: RunEventType;
   message?: string;
-  details?: CloudJobEventDetails;
+  details?: RunEventDetails;
   createdAt?: Date;
 }
 
@@ -30,7 +30,7 @@ interface ListCloudJobEventsOptions {
 interface RecordComputeProviderMutationEventInput extends ComputeProviderMutationEvent {
   runId: number;
   taskId?: string;
-  details?: CloudJobEventDetails;
+  details?: RunEventDetails;
   createdAt?: Date;
 }
 
@@ -80,9 +80,9 @@ export async function recordSnapshotResumeEvent(
   input: {
     runId: number;
     taskId?: string;
-    eventType: CloudJobEventType;
+    eventType: RunEventType;
     message: string;
-    details?: CloudJobEventDetails;
+    details?: RunEventDetails;
   },
 ) {
   return recordCloudJobEvent(database, {
@@ -100,9 +100,9 @@ export async function recordJobLifecycleEvent(
   input: {
     runId: number;
     taskId?: string;
-    eventType: CloudJobEventType;
+    eventType: RunEventType;
     message: string;
-    details?: CloudJobEventDetails;
+    details?: RunEventDetails;
     createdAt?: Date;
   },
 ) {

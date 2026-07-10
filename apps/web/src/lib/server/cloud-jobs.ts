@@ -1,8 +1,8 @@
 import {
-  type CloudTaskStatus,
-  type CloudTaskPayload,
+  type RunStatus,
+  type TaskPayload,
   type TaskPayloadKind,
-  exitedCloudTaskStatuses,
+  exitedRunStatuses,
   type SourceControlProvider,
 } from '@roomote/types';
 import {
@@ -23,8 +23,8 @@ import {
 export type SimpleCloudJob = {
   id: number;
   payloadKind: TaskPayloadKind;
-  payload: CloudTaskPayload;
-  status: CloudTaskStatus;
+  payload: TaskPayload;
+  status: RunStatus;
   taskPhase: string | null;
   firstAssistantOutputAt: Date | null;
   prRepo: string | null;
@@ -164,7 +164,7 @@ export const findActiveSuccessorCloudJob = async (
   const successor = await db.query.taskRuns.findFirst({
     where: and(
       jobFilter,
-      not(inArray(taskRuns.status, [...exitedCloudTaskStatuses])),
+      not(inArray(taskRuns.status, [...exitedRunStatuses])),
     ),
     orderBy: [desc(taskRuns.id)],
   });

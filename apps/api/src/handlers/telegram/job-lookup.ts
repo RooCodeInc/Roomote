@@ -1,6 +1,6 @@
 import {
-  CloudTaskStatus,
-  activeCloudTaskStatuses,
+  RunStatus,
+  activeRunStatuses,
   isSnapshotResumable,
 } from '@roomote/types';
 import {
@@ -81,7 +81,7 @@ export async function findActiveTelegramJob(input: TelegramConversationRef) {
         telegramProviderMatch,
         conversationMatch,
         threadMatch,
-        inArray(taskRuns.status, [...activeCloudTaskStatuses]),
+        inArray(taskRuns.status, [...activeRunStatuses]),
         isNull(taskRuns.canceledAt),
       ),
     )
@@ -105,7 +105,7 @@ export async function findCompletedTelegramJobWithSnapshot(
         telegramProviderMatch,
         conversationMatch,
         threadMatch,
-        inArray(taskRuns.status, [CloudTaskStatus.Completed]),
+        inArray(taskRuns.status, [RunStatus.Completed]),
         isNull(taskRuns.canceledAt),
         sql`${taskRuns.snapshotId} IS NOT NULL`,
         sql`${taskRuns.snapshotCreatedAt} IS NOT NULL`,

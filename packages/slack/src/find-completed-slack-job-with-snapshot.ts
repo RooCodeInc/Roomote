@@ -10,7 +10,7 @@ import {
   isNotNull,
   desc,
 } from '@roomote/db/server';
-import { CloudTaskStatus, SANDBOX_SNAPSHOT_EXPIRY_MS } from '@roomote/types';
+import { RunStatus, SANDBOX_SNAPSHOT_EXPIRY_MS } from '@roomote/types';
 
 import { slackDebug } from './logging';
 
@@ -49,10 +49,7 @@ export async function findCompletedSlackJobWithSnapshot(slackThreadTs: string) {
     .where(
       and(
         eq(tasks.slackThreadTs, slackThreadTs),
-        inArray(taskRuns.status, [
-          CloudTaskStatus.Completed,
-          CloudTaskStatus.Idle,
-        ]),
+        inArray(taskRuns.status, [RunStatus.Completed, RunStatus.Idle]),
         isNotNull(taskRuns.snapshotId),
         isNull(taskRuns.snapshotFailedAt),
         isNull(taskRuns.canceledAt),

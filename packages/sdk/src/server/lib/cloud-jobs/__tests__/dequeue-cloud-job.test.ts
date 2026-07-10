@@ -1,4 +1,4 @@
-import { CloudTaskStatus, TaskPayloadKind } from '@roomote/types';
+import { RunStatus, TaskPayloadKind } from '@roomote/types';
 import type { Run } from '@roomote/db/server';
 
 const {
@@ -126,7 +126,7 @@ function makeStandardTaskJob(
   return {
     id: 101,
     harness: 'opencode-server',
-    status: CloudTaskStatus.Dequeued,
+    status: RunStatus.Dequeued,
     kind: 'fresh',
     payloadKind: TaskPayloadKind.StandardTask,
     taskId: 'task-101',
@@ -149,7 +149,7 @@ function makeSlackAppMentionJob(
   return {
     id: 202,
     harness: 'opencode-server',
-    status: CloudTaskStatus.Dequeued,
+    status: RunStatus.Dequeued,
     kind: 'fresh',
     payloadKind: TaskPayloadKind.SlackAppMention,
     taskId: 'task-202',
@@ -453,7 +453,7 @@ describe('dequeueCloudJob', () => {
         message: expect.stringContaining('started execution bootstrap'),
         details: expect.objectContaining({
           stage: 'worker_bootstrap',
-          status: CloudTaskStatus.Processing,
+          status: RunStatus.Processing,
           vendor: 'modal',
           machineId: 'sb_123',
           sourceSnapshotId: 'snap_env_123',

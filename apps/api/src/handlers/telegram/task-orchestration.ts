@@ -6,7 +6,7 @@ import { Env } from '@roomote/env';
 import {
   ALL_REPOSITORIES,
   TaskPayloadKind,
-  type CloudTaskPayload,
+  type TaskPayload,
   populateSnapshotResumeCommunicationMetadata,
   restoreSnapshotResumeVisiblePromptFields,
 } from '@roomote/types';
@@ -55,15 +55,14 @@ export async function resumeTelegramTaskFromSnapshot(input: {
     typeof completedPayload.environmentId === 'string'
       ? completedPayload.environmentId
       : undefined;
-  const resumePayload: CloudTaskPayload<typeof TaskPayloadKind.SnapshotResume> =
-    {
-      repo,
-      ...(environmentId ? { environmentId } : {}),
-      ...(input.completedJob.port ? { port: input.completedJob.port } : {}),
-      sourceSnapshotId,
-      sourceCloudJobId: input.completedJob.id,
-      queuedCommunicationMessages: [input.queuedMessage],
-    };
+  const resumePayload: TaskPayload<typeof TaskPayloadKind.SnapshotResume> = {
+    repo,
+    ...(environmentId ? { environmentId } : {}),
+    ...(input.completedJob.port ? { port: input.completedJob.port } : {}),
+    sourceSnapshotId,
+    sourceCloudJobId: input.completedJob.id,
+    queuedCommunicationMessages: [input.queuedMessage],
+  };
 
   populateSnapshotResumeCommunicationMetadata(resumePayload, {
     provider: 'telegram',

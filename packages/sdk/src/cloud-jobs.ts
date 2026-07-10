@@ -1,4 +1,4 @@
-import { CloudTaskStatus } from '@roomote/types';
+import { RunStatus } from '@roomote/types';
 
 import {
   type AppRouterInput,
@@ -37,7 +37,7 @@ function isImmediateBootstrapFailure(
   cloudJob: Run,
 ): cloudJob is Run & { error: string } {
   return (
-    cloudJob.status === CloudTaskStatus.Canceled &&
+    cloudJob.status === RunStatus.Canceled &&
     cloudJob.startedAt == null &&
     typeof cloudJob.error === 'string' &&
     cloudJob.error.length > 0 &&

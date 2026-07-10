@@ -25,7 +25,7 @@ import {
   schedulePrReviewNotificationJob,
 } from '@roomote/sdk/server';
 import { SlackNotifier } from '@roomote/slack';
-import { isCloudTaskExecutingTurn } from '@roomote/types';
+import { isTaskExecutingTurn } from '@roomote/types';
 
 type PrReviewNotificationJob = Job<PrReviewNotificationRequest, void, string>;
 
@@ -172,7 +172,7 @@ export const prReviewNotificationJob = async (
   // the task is actively working, and once the deferral cap is reached (the
   // task has effectively been running for the whole pending-events window),
   // drop the pending feedback instead of posting mid-run.
-  if (isCloudTaskExecutingTurn(latestJob.status, latestJob.taskPhase)) {
+  if (isTaskExecutingTurn(latestJob.status, latestJob.taskPhase)) {
     if (data.deferrals < PR_REVIEW_NOTIFICATION_MAX_DEFERRALS) {
       await schedulePrReviewNotificationJob({
         request: { ...data, deferrals: data.deferrals + 1 },

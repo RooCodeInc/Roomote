@@ -53,7 +53,7 @@ vi.mock('../../tasks/sendMessageToTask', () => ({
   steerMessageToTask: mockSteerMessageToTask,
 }));
 
-import { CloudTaskStatus, TaskPayloadKind } from '@roomote/types';
+import { RunStatus, TaskPayloadKind } from '@roomote/types';
 
 import { handleGiteaComment } from '../handleComment';
 import type { GiteaPullRequestCommentWebhook } from '../types';
@@ -179,7 +179,7 @@ describe('handleGiteaComment', () => {
   it('routes mentions into a reusable active task before starting a new review', async () => {
     mockFindReusableGitHubPrFollowUpOwner.mockResolvedValue({
       taskId: 'task-existing',
-      status: CloudTaskStatus.Running,
+      status: RunStatus.Running,
       taskPhase: 'running',
     });
     mockGetTaskUrl.mockReturnValue(

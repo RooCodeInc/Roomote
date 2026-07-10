@@ -1,7 +1,7 @@
 import {
-  type CloudTaskPayload,
+  type TaskPayload,
   TaskPayloadKind,
-  activeCloudTaskStatuses,
+  activeRunStatuses,
   populateSnapshotResumeSlackMetadata,
   restoreSnapshotResumeVisiblePromptFields,
   type PreviewTokenContext,
@@ -56,7 +56,7 @@ export async function triggerAutoResume(
     const existingResume = await db.query.taskRuns.findFirst({
       where: and(
         eq(taskRuns.sourceRunId, cloudJob.id),
-        inArray(taskRuns.status, [...activeCloudTaskStatuses]),
+        inArray(taskRuns.status, [...activeRunStatuses]),
       ),
       columns: { id: true, status: true },
     });
@@ -93,7 +93,7 @@ export async function triggerAutoResume(
       },
       'Creating auto-resume job',
     );
-    const payload: CloudTaskPayload<typeof TaskPayloadKind.SnapshotResume> = {
+    const payload: TaskPayload<typeof TaskPayloadKind.SnapshotResume> = {
       repo: sourcePayload.repo,
       environmentId: sourcePayload.environmentId,
       port: cloudJob.port ?? undefined,

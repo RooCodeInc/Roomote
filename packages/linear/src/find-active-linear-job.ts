@@ -8,7 +8,7 @@ import {
   isNull,
   desc,
 } from '@roomote/db/server';
-import { activeCloudTaskStatuses } from '@roomote/types';
+import { activeRunStatuses } from '@roomote/types';
 
 import type { ActiveLinearJobResult } from './types';
 
@@ -59,7 +59,7 @@ export async function findActiveLinearJob(
     .where(
       and(
         eq(tasks.linearSessionId, linearSessionId),
-        inArray(taskRuns.status, [...activeCloudTaskStatuses]),
+        inArray(taskRuns.status, [...activeRunStatuses]),
         isNull(taskRuns.canceledAt),
       ),
     )
@@ -87,7 +87,7 @@ export async function findActiveLinearJob(
       .where(
         and(
           eq(tasks.linearIssueId, linearIssueId),
-          inArray(taskRuns.status, [...activeCloudTaskStatuses]),
+          inArray(taskRuns.status, [...activeRunStatuses]),
           isNull(taskRuns.canceledAt),
         ),
       )
@@ -126,7 +126,7 @@ export async function findActiveLinearJobByOrganization(
     .where(
       and(
         eq(tasks.linearOrganizationId, linearOrganizationId),
-        inArray(taskRuns.status, [...activeCloudTaskStatuses]),
+        inArray(taskRuns.status, [...activeRunStatuses]),
         isNull(taskRuns.canceledAt),
       ),
     )

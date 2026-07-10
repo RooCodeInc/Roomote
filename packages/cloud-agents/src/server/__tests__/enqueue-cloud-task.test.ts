@@ -6,9 +6,9 @@
 import Redis from 'ioredis-mock';
 
 import {
-  type CloudTask,
+  type TaskSpec,
   type SnapshotResumeTask,
-  CloudTaskStatus,
+  RunStatus,
   TaskPayloadKind,
 } from '@roomote/types';
 import {
@@ -45,8 +45,8 @@ const explicitWorkKind = {
 } as const;
 
 function standardTaskInput(
-  overrides: Partial<Extract<CloudTask, { type: 'standard' }>> = {},
-): Extract<CloudTask, { type: 'standard' }> {
+  overrides: Partial<Extract<TaskSpec, { type: 'standard' }>> = {},
+): Extract<TaskSpec, { type: 'standard' }> {
   return {
     type: TaskPayloadKind.StandardTask,
     requestedWorkKindDecision: explicitWorkKind,
@@ -55,7 +55,7 @@ function standardTaskInput(
       description: 'Do the thing',
     },
     ...overrides,
-  } as Extract<CloudTask, { type: 'standard' }>;
+  } as Extract<TaskSpec, { type: 'standard' }>;
 }
 
 async function createUser(): Promise<string> {
@@ -310,7 +310,7 @@ describe('enqueueCloudTask PR linkage', () => {
         prUrl: 'https://github.com/acme/widgets/pull/77',
         headSha: 'a'.repeat(40),
       },
-    } as Extract<CloudTask, { type: 'github_pr_review' }>;
+    } as Extract<TaskSpec, { type: 'github_pr_review' }>;
 
     const run = await launchFresh({
       task: prTask,
@@ -359,7 +359,7 @@ describe('enqueueCloudTask PR linkage', () => {
         prUrl: 'https://github.com/acme/widgets/pull/78',
         headSha: 'c'.repeat(40),
       },
-    } as Extract<CloudTask, { type: 'github_pr_review' }>;
+    } as Extract<TaskSpec, { type: 'github_pr_review' }>;
 
     await expect(
       enqueueCloudTask(
@@ -420,7 +420,7 @@ describe('enqueue-failure cancel task state', () => {
 
     expect(task!.state).toBe('canceled');
     expect(runs).toHaveLength(1);
-    expect(runs[0]!.status).toBe(CloudTaskStatus.Canceled);
+    expect(runs[0]!.status).toBe(RunStatus.Canceled);
     expect(runs[0]!.canceledAt).not.toBeNull();
   });
 });

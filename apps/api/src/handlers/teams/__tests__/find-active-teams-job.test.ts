@@ -60,7 +60,7 @@ vi.mock('@roomote/db/server', () => ({
   })),
 }));
 
-import { activeCloudTaskStatuses } from '@roomote/types';
+import { activeRunStatuses } from '@roomote/types';
 
 import {
   buildTeamsJobMatchConditions,
@@ -201,6 +201,6 @@ describe('findActiveTeamsJob', () => {
     for (const condition of conversationMatch!.or) {
       expect(condition.values).toContain('19:conv@thread.tacv2');
     }
-    expect([...activeCloudTaskStatuses]).toContain('running');
+    expect([...activeRunStatuses]).toContain('running');
   });
 });

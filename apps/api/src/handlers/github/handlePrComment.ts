@@ -12,15 +12,15 @@ import {
 import { getInstallationOctokit } from '@roomote/github';
 import { ensureSnapshotResumeGitHubFollowUpFallback } from '@roomote/sdk/server';
 import {
-  type CloudTaskPayload,
+  type TaskPayload,
   CloudAgentType,
-  CloudTaskStatus,
+  RunStatus,
   TaskPayloadKind,
   EXPIRED_SNAPSHOT_RESUME_ERROR,
   PRODUCT_NAME,
   type SnapshotResumePromptFallbackTask,
-  isActivelyRunningCloudTask,
-  isExitedCloudTaskStatus,
+  isActivelyRunningTask,
+  isExitedRunStatus,
   populateSnapshotResumeSlackMetadata,
   isSnapshotResumable,
   restoreSnapshotResumeVisiblePromptFields,
@@ -699,7 +699,7 @@ async function waitForTaskToAcceptMessages({
       sandboxServerUrl: true,
     });
 
-    if (!latestJob || isExitedCloudTaskStatus(latestJob.status)) {
+    if (!latestJob || isExitedRunStatus(latestJob.status)) {
       return null;
     }
 
@@ -739,7 +739,7 @@ async function waitForResumeJobToAcceptDeferredPrompt({
   let latestJob:
     | {
         id: number;
-        status: CloudTaskStatus;
+        status: RunStatus;
         result: unknown;
       }
     | null
@@ -763,7 +763,7 @@ async function waitForResumeJobToAcceptDeferredPrompt({
         return true;
       }
 
-      if (accepted === false || isExitedCloudTaskStatus(latestJob.status)) {
+      if (accepted === false || isExitedRunStatus(latestJob.status)) {
         return false;
       }
     }
@@ -783,7 +783,7 @@ async function waitForResumeJobToAcceptDeferredPrompt({
     return true;
   }
 
-  if (accepted === false || isExitedCloudTaskStatus(latestJob.status)) {
+  if (accepted === false || isExitedRunStatus(latestJob.status)) {
     return false;
   }
 
@@ -852,7 +852,7 @@ async function deliverFollowUpToExistingTask({
   taskId: string;
   userId?: string | null;
   message: string;
-  status: CloudTaskStatus;
+  status: RunStatus;
   taskPhase: string | null;
   commenterDisplayName?: string;
 }) {
@@ -873,10 +873,10 @@ async function deliverFollowUpToExistingTask({
     status,
     taskPhase,
   }: {
-    status: CloudTaskStatus;
+    status: RunStatus;
     taskPhase: string | null;
   }) =>
-    isActivelyRunningCloudTask(status, taskPhase)
+    isActivelyRunningTask(status, taskPhase)
       ? steerMessageToTask({
           taskId,
           userId: senderUserId,
@@ -970,7 +970,7 @@ async function resumeExistingTaskAndDeliverFollowUp({
     };
   }
 
-  if (!isExitedCloudTaskStatus(sourceJob.status)) {
+  if (!isExitedRunStatus(sourceJob.status)) {
     return deliverFollowUpToExistingTask({
       taskId,
       userId,
@@ -1021,7 +1021,7 @@ async function resumeExistingTaskAndDeliverFollowUp({
     resumePrompt: message,
     resumePromptSource: 'github',
     resumePromptFallbackTask,
-  } satisfies CloudTaskPayload<typeof TaskPayloadKind.SnapshotResume>;
+  } satisfies TaskPayload<typeof TaskPayloadKind.SnapshotResume>;
   populateSnapshotResumeSlackMetadata(resumePayload, {
     sourcePayload,
     channel: channelBindings?.slackChannelId,
@@ -1308,7 +1308,7 @@ export async function handlePrComment(
       const reviewPayload = {
         ...reviewPayloadBase,
         ...relayPayload,
-      } satisfies CloudTaskPayload<typeof TaskPayloadKind.GithubPrReview>;
+      } satisfies TaskPayload<typeof TaskPayloadKind.GithubPrReview>;
 
       try {
         if (!reviewer.properties.userId) {
@@ -1574,7 +1574,7 @@ export async function handlePrComment(
     ...(!isSubmittedReview ? { commentId: rest.comment.id } : {}),
     commentBody: mention.body ?? '',
     followUpSource: 'github_mention',
-  } satisfies CloudTaskPayload<typeof TaskPayloadKind.GithubPrReviewFollowUp>;
+  } satisfies TaskPayload<typeof TaskPayloadKind.GithubPrReviewFollowUp>;
 
   try {
     if (!reviewer.properties.userId) {

@@ -12,7 +12,7 @@ import {
 } from '@roomote/db/server';
 import type {
   AuthTokenContext,
-  CloudTaskPayload,
+  TaskPayload,
   JobTokenContext,
   PullRequestStatus,
 } from '@roomote/types';
@@ -20,7 +20,7 @@ import {
   TaskPayloadKind,
   EXPIRED_SNAPSHOT_RESUME_ERROR,
   isLinkedReviewResultsMessage,
-  isExitedCloudTaskStatus,
+  isExitedRunStatus,
   isSnapshotResumable,
   parseLinkedReviewResults,
   populateSnapshotResumeSlackMetadata,
@@ -467,7 +467,7 @@ async function resumeTaskFromSnapshot({
     source,
   });
   const normalizedClientMessageId = normalizeOptionalString(clientMessageId);
-  const payload: CloudTaskPayload<typeof TaskPayloadKind.SnapshotResume> = {
+  const payload: TaskPayload<typeof TaskPayloadKind.SnapshotResume> = {
     repo: repo ?? '',
     environmentId,
     port: sourceJob.port ?? undefined,
@@ -729,7 +729,7 @@ export async function sendMessageToTask({
       };
     }
 
-    if (isExitedCloudTaskStatus(job.status)) {
+    if (isExitedRunStatus(job.status)) {
       const resumeResult = await resumeTaskFromSnapshot({
         taskId,
         userId: linkedReviewHandoff.senderUserId,
@@ -889,7 +889,7 @@ export async function steerMessageToTask({
 
     const channelBindings = (await getTaskChannelBindings(taskId)) ?? null;
 
-    if (isExitedCloudTaskStatus(job.status)) {
+    if (isExitedRunStatus(job.status)) {
       const resumeResult = await resumeTaskFromSnapshot({
         taskId,
         userId,

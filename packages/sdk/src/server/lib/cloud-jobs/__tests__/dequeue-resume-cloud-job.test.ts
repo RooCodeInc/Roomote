@@ -1,4 +1,4 @@
-import { CloudTaskStatus, TaskPayloadKind } from '@roomote/types';
+import { RunStatus, TaskPayloadKind } from '@roomote/types';
 import type { Run } from '@roomote/db/server';
 
 const {
@@ -119,7 +119,7 @@ function makeSnapshotResumeJob(
   return {
     id: 101,
     harness: 'opencode-server',
-    status: CloudTaskStatus.Dequeued,
+    status: RunStatus.Dequeued,
     kind: 'resume',
     payloadKind: TaskPayloadKind.SnapshotResume,
     taskId: 'task-101',
@@ -257,7 +257,7 @@ describe('dequeueResumeCloudJob', () => {
         message: expect.stringContaining('started resume bootstrap'),
         details: expect.objectContaining({
           stage: 'worker_bootstrap',
-          status: CloudTaskStatus.Processing,
+          status: RunStatus.Processing,
           sourceSnapshotId: 'snap-1',
           sourceRunId: 99,
           harnessSessionId: 'session-canonical',

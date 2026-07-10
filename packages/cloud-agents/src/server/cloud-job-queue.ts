@@ -5,17 +5,17 @@ import { z } from 'zod';
 import {
   type AuthorshipRuleActor,
   type BackgroundAutomationKey,
-  type CloudTask,
+  type TaskSpec,
   type CodingHarness,
   type SnapshotResumeTask,
-  type CloudTaskLaunchClass,
+  type RunLaunchClass,
   type SourceControlProvider,
   type TaskInitiator,
   type TaskSurface,
   type TaskTrigger,
   type TaskVisibility,
   type TaskWorkflow,
-  CloudTaskStatus,
+  RunStatus,
   TaskPayloadKind,
   DEFAULT_DELEGATED_KEEPALIVE_MS,
   DEFAULT_KEEPALIVE_MS,
@@ -25,7 +25,7 @@ import {
   isConfiguredEnvValue,
   normalizeDeploymentModelConfig,
   resolveCloudTaskRuntimePolicy,
-  resolveCloudTaskWorkspace,
+  resolveTaskWorkspace,
   resolveComputeProviderTarget,
   TASK_TIMEOUT_MS,
 } from '@roomote/types';
@@ -107,7 +107,7 @@ async function cancelCloudJobBeforeQueue(
       await tx
         .update(taskRuns)
         .set({
-          status: CloudTaskStatus.Canceled,
+          status: RunStatus.Canceled,
           canceledAt: endedAt,
           error: message,
         })
@@ -204,7 +204,7 @@ function resolveCodeReviewModelId(
 }
 
 async function resolveRequestedHarness(
-  task: CloudTask,
+  task: TaskSpec,
 ): Promise<ResolvedHarnessSelection> {
   const deployment = await db.query.deploymentSettings.findFirst({
     where: eq(deploymentSettings.id, DEFAULT_DEPLOYMENT_ID),
@@ -226,7 +226,7 @@ async function resolveRequestedHarness(
   };
 }
 
-function getInitialTaskPrompt(task: CloudTask): string | undefined {
+function getInitialTaskPrompt(task: TaskSpec): string | undefined {
   switch (task.type) {
     case TaskPayloadKind.StandardTask:
     case TaskPayloadKind.Scan:
@@ -246,7 +246,7 @@ function getInitialTaskPrompt(task: CloudTask): string | undefined {
 }
 
 function getRequestedWorkKindBootstrapSkill(
-  task: CloudTask,
+  task: TaskSpec,
 ): 'explain-repo-code' | 'plan-repo-implementation' | undefined {
   if (task.type !== TaskPayloadKind.StandardTask) {
     return undefined;
@@ -301,7 +301,7 @@ export class CloudJobQueue {
               const [canceledRun] = await tx
                 .update(taskRuns)
                 .set({
-                  status: CloudTaskStatus.Canceled,
+                  status: RunStatus.Canceled,
                   canceledAt: endedAt,
                   error: 'Superseded by a newer cloud job.',
                 })
@@ -309,8 +309,8 @@ export class CloudJobQueue {
                   and(
                     eq(taskRuns.id, otherEntry.id),
                     inArray(taskRuns.status, [
-                      CloudTaskStatus.Pending,
-                      CloudTaskStatus.Dequeued,
+                      RunStatus.Pending,
+                      RunStatus.Dequeued,
                     ]),
                   ),
                 )
@@ -652,7 +652,7 @@ export interface EnqueueCloudTaskOptions {
    * 'automation' class from the initiator and everything else falls back to
    * the payload-kind inference.
    */
-  launchClass?: CloudTaskLaunchClass;
+  launchClass?: RunLaunchClass;
   /**
    * Leave `actingUserId` unset until a real follow-up sender can be resolved
    * (Slack channel auto-start path).
@@ -668,7 +668,7 @@ export interface EnqueueCloudTaskOptions {
    * Initial persisted status for the new run. Defaults to `pending`, matching
    * normal queue-driven launches.
    */
-  initialStatus?: CloudTaskStatus.Pending | CloudTaskStatus.Dequeued;
+  initialStatus?: RunStatus.Pending | RunStatus.Dequeued;
   /**
    * Avoid best-effort LLM title generation for short-lived synthetic jobs.
    */
@@ -722,7 +722,7 @@ export type TaskPrLinkage = {
 };
 
 type FreshCloudTask = Exclude<
-  CloudTask,
+  TaskSpec,
   { type: typeof TaskPayloadKind.SnapshotResume }
 >;
 
@@ -885,7 +885,7 @@ type EnvironmentContext = {
  * paths. Mutates `task.payload.port` like the launch flow always has.
  */
 async function resolveEnvironmentContext(
-  task: CloudTask,
+  task: TaskSpec,
 ): Promise<EnvironmentContext> {
   let initialPaths: Record<string, string> | undefined;
 
@@ -988,7 +988,7 @@ async function pushRunOntoQueue(params: {
 
       if (
         !persistedRun ||
-        persistedRun.status === CloudTaskStatus.Canceled ||
+        persistedRun.status === RunStatus.Canceled ||
         persistedRun.canceledAt !== null ||
         persistedRun.completedAt !== null
       ) {
@@ -1050,7 +1050,7 @@ async function enqueueFreshLaunch(
     TaskPayloadKind.GithubPrReviewSync,
     TaskPayloadKind.GithubPrReviewFollowUp,
   ]);
-  const workspace = resolveCloudTaskWorkspace(task.payload);
+  const workspace = resolveTaskWorkspace(task.payload);
 
   // Stamp the source-control provider once at launch when the caller omitted
   // it. Downstream consumers (token minting, worker repository resolution)
@@ -1238,8 +1238,8 @@ async function enqueueFreshLaunch(
         kind: 'fresh',
         payloadKind: taskWithHarnessOverrides.type,
         actingUserId: options.skipInitialActingUser ? null : linkedUserId,
-        status: options.initialStatus ?? CloudTaskStatus.Pending,
-        ...(options.initialStatus === CloudTaskStatus.Dequeued
+        status: options.initialStatus ?? RunStatus.Pending,
+        ...(options.initialStatus === RunStatus.Dequeued
           ? { dequeuedAt: new Date() }
           : {}),
         harness: targetHarness,
@@ -1452,8 +1452,8 @@ async function enqueueSnapshotResume(
           sourceRunId: sourceRun.id,
           payloadKind: TaskPayloadKind.SnapshotResume,
           actingUserId,
-          status: options.initialStatus ?? CloudTaskStatus.Pending,
-          ...(options.initialStatus === CloudTaskStatus.Dequeued
+          status: options.initialStatus ?? RunStatus.Pending,
+          ...(options.initialStatus === RunStatus.Dequeued
             ? { dequeuedAt: new Date() }
             : {}),
           harness: targetHarness,

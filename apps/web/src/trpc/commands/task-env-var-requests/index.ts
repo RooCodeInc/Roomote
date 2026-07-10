@@ -12,7 +12,7 @@ import {
   ACP_ENVELOPE_EVENT_TYPES,
   ROOMOTE_RUNTIME_TASK_MESSAGE_PROTOCOL,
   isEnvVarRequestFulfillmentClientMessageId,
-  isExitedCloudTaskStatus,
+  isExitedRunStatus,
   deploymentEnvVarNameSchema,
 } from '@roomote/types';
 import { recordTaskMessageEnvelope } from '@roomote/sdk/server';
@@ -129,7 +129,7 @@ export async function fulfillTaskEnvVarRequestCommand(
       names: requestedNames,
       canReload:
         !!activeCloudJob &&
-        !isExitedCloudTaskStatus(activeCloudJob.status) &&
+        !isExitedRunStatus(activeCloudJob.status) &&
         !!activeCloudJob.sandboxServerUrl,
       cloudJobId: activeCloudJob?.id ?? null,
     };

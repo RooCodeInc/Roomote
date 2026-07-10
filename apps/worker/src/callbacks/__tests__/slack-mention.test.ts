@@ -109,7 +109,7 @@ vi.mock('../request-user-input', () => ({
   supportsIntegrationRequestUserInput: mockSupportsIntegrationRequestUserInput,
 }));
 
-import { CloudTaskStatus, TaskPayloadKind } from '@roomote/types';
+import { RunStatus, TaskPayloadKind } from '@roomote/types';
 import { type Run, sdk } from '@roomote/sdk/client';
 
 import { slackMentionCallbacks } from '../slack-mention';
@@ -941,7 +941,7 @@ describe('slackMentionCallbacks', () => {
 
     try {
       await expect(
-        slackMentionCallbacks.onExit?.(cloudJob, CloudTaskStatus.Completed, {}),
+        slackMentionCallbacks.onExit?.(cloudJob, RunStatus.Completed, {}),
       ).resolves.toBe(undefined);
       expect(errorSpy).toHaveBeenCalledWith(
         '[slackMentionCallbacks#onExit] Failed to clear pending request_user_input state: cleanup failed',

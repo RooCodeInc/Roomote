@@ -1,9 +1,9 @@
 import {
   CONTROL_PLANE_ENV_VAR_NAMES,
-  CloudTaskStatus,
+  RunStatus,
   buildSourceControlTokenMetadata,
   getSourceControlProviderLabel,
-  resolveCloudTaskWorkspace,
+  resolveTaskWorkspace,
   resolveSourceControlProviderFromPayload,
   type SourceControlProvider,
   type SourceControlTokenMetadata,
@@ -108,9 +108,9 @@ export function redactSourceControlProviderEnvVars(
  */
 export function claimJobById(cloudJobId: number) {
   return sql`
-    UPDATE task_runs SET status = ${CloudTaskStatus.Processing} WHERE id = (
+    UPDATE task_runs SET status = ${RunStatus.Processing} WHERE id = (
       SELECT id FROM task_runs
-      WHERE id = ${cloudJobId} AND status = ${CloudTaskStatus.Dequeued}
+      WHERE id = ${cloudJobId} AND status = ${RunStatus.Dequeued}
       FOR UPDATE SKIP LOCKED
     )
     RETURNING id
@@ -214,7 +214,7 @@ export async function cancelAndReleaseCloudJob(
     await tx
       .update(taskRuns)
       .set({
-        status: CloudTaskStatus.Canceled,
+        status: RunStatus.Canceled,
         canceledAt: endedAt,
         error: errorMessage,
       })
@@ -276,7 +276,7 @@ async function resolveJobSourceControlProvider(
   // shared resolver (covers every workspace shape). It returns undefined when
   // the provider is ambiguous or unknown, in which case fall back to the
   // GitHub default that resolveSourceControlProviderFromPayload applies.
-  const workspace = resolveCloudTaskWorkspace(cloudJob.payload);
+  const workspace = resolveTaskWorkspace(cloudJob.payload);
   const resolvedProvider = await resolveWorkspaceSourceControlProvider(
     db,
     workspace,
@@ -421,7 +421,7 @@ export async function cancelCloudJob(
   await tx
     .update(taskRuns)
     .set({
-      status: CloudTaskStatus.Canceled,
+      status: RunStatus.Canceled,
       canceledAt: endedAt,
       error,
       ...(artifacts ? { artifacts } : {}),

@@ -1,7 +1,7 @@
 import pMap from 'p-map';
 
 import {
-  type CloudTaskPayload,
+  type TaskPayload,
   DEFAULT_PR_REVIEWER_SETTINGS,
   type PrReviewerSettings,
   TaskPayloadKind,
@@ -212,7 +212,7 @@ export async function handleGiteaPullRequest(
             ...(pullRequest.head?.ref ? { branch: pullRequest.head.ref } : {}),
             ...(headSha ? { sha: headSha } : {}),
             targetBranch: pullRequest.base?.ref,
-          } satisfies CloudTaskPayload<typeof taskType>,
+          } satisfies TaskPayload<typeof taskType>,
         },
         initiator: {
           kind: 'automation',

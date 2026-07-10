@@ -1,5 +1,5 @@
 import {
-  CloudTaskStatus,
+  RunStatus,
   CONFLICT_RESOLUTION_SUMMARY_RESULT_KEY,
   type ConflictResolutionSummary,
 } from '@roomote/types';
@@ -114,7 +114,7 @@ export async function finalizeJob({
   context,
 }: {
   result: {
-    status: CloudTaskStatus;
+    status: RunStatus;
     error?: string;
   };
   cloudJob: Run;
@@ -156,10 +156,10 @@ export async function finalizeJob({
     await sdk.cloudJobs.done({
       id: cloudJob.id,
       status: status as
-        | CloudTaskStatus.Completed
-        | CloudTaskStatus.Failed
-        | CloudTaskStatus.Canceled
-        | CloudTaskStatus.Idle,
+        | RunStatus.Completed
+        | RunStatus.Failed
+        | RunStatus.Canceled
+        | RunStatus.Idle,
       ...(error && { error }),
     });
   } catch (doneError) {
@@ -178,7 +178,7 @@ export async function finalizeJob({
     );
   }
 
-  if (status !== CloudTaskStatus.Completed) {
+  if (status !== RunStatus.Completed) {
     console.error(`Job exited with status: ${status}`);
   }
 }
@@ -205,11 +205,11 @@ export async function handleJobError({
   if (cloudJob) {
     await sdk.cloudJobs.done({
       id: cloudJob.id,
-      status: CloudTaskStatus.Failed,
+      status: RunStatus.Failed,
       error: message,
     });
 
-    await callbacks.onExit?.(cloudJob, CloudTaskStatus.Failed, context);
+    await callbacks.onExit?.(cloudJob, RunStatus.Failed, context);
   }
 
   console.error(`❌ Job ${cloudJob?.id ?? '<unknown>'} failed: ${message}`);

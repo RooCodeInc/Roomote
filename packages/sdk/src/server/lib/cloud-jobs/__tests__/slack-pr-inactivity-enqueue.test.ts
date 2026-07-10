@@ -1,4 +1,4 @@
-import { CloudTaskStatus, TaskPayloadKind } from '@roomote/types';
+import { RunStatus, TaskPayloadKind } from '@roomote/types';
 import type { Run } from '@roomote/db/server';
 
 const mockFindFirstCloudJob = vi.fn();
@@ -75,7 +75,7 @@ function makeCloudJob(overrides: Partial<RunWithTask> = {}): RunWithTask {
     payloadKind: TaskPayloadKind.SlackAppMention,
     actingUserId: 'user-1',
     harness: 'opencode-server',
-    status: CloudTaskStatus.Completed,
+    status: RunStatus.Completed,
     payload: {
       channel: 'C123',
       repo: 'owner/repo',

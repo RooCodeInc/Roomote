@@ -1,13 +1,13 @@
 import * as path from 'node:path';
 
 import {
-  CloudTaskStatus,
+  RunStatus,
   type SourceControlTokenMetadata,
   type TaskPayloadKind,
   WORKER_HEARTBEAT_INTERVAL_MS,
   buildRoomoteDeployMarker,
   formatRoomoteDeployMarker,
-  resolveCloudTaskWorkspace,
+  resolveTaskWorkspace,
   resolveComputeProviderTarget,
   resolveSourceControlProviderFromPayload,
 } from '@roomote/types';
@@ -79,7 +79,7 @@ interface ExecuteJobConfig<TJobContext extends PreparedJobBase> {
     logger: HarnessLogger;
     workerEnv: WorkerEnv;
   }) => Promise<{
-    status: CloudTaskStatus;
+    status: RunStatus;
     error?: string;
   }>;
 }
@@ -233,7 +233,7 @@ function shouldRunParallelTaskEnvironmentSetup(params: {
 async function shouldSuppressFinalizeError(params: {
   cloudJob: Run;
   result: {
-    status: CloudTaskStatus;
+    status: RunStatus;
     error?: string;
   };
   error: unknown;
@@ -241,10 +241,7 @@ async function shouldSuppressFinalizeError(params: {
 }): Promise<boolean> {
   const { cloudJob, result, error, logger } = params;
 
-  if (
-    result.status === CloudTaskStatus.Failed ||
-    result.status === CloudTaskStatus.Idle
-  ) {
+  if (result.status === RunStatus.Failed || result.status === RunStatus.Idle) {
     return false;
   }
 
@@ -265,11 +262,11 @@ async function shouldSuppressFinalizeError(params: {
   }
 
   const statusAlreadyPersisted =
-    latestJob.status === CloudTaskStatus.Completed ||
-    latestJob.status === CloudTaskStatus.Canceled;
+    latestJob.status === RunStatus.Completed ||
+    latestJob.status === RunStatus.Canceled;
 
   const snapshotOwnedPostRunState =
-    latestJob.status === CloudTaskStatus.Idle &&
+    latestJob.status === RunStatus.Idle &&
     hasSnapshotLifecycleActivity(latestJob);
 
   if (!statusAlreadyPersisted && !snapshotOwnedPostRunState) {
@@ -375,7 +372,7 @@ export async function executeJob<TPrepared extends PreparedJobBase>({
 
     // Worker config values are read once here so their captured values
     // (auth keys, API URLs) can be reused throughout setup and runtime.
-    const cloudTaskWorkspace = resolveCloudTaskWorkspace(cloudJob.payload);
+    const cloudTaskWorkspace = resolveTaskWorkspace(cloudJob.payload);
 
     const environmentId =
       cloudTaskWorkspace.type === 'environment'
@@ -404,7 +401,7 @@ export async function executeJob<TPrepared extends PreparedJobBase>({
     if (cloudJob.canceledAt) {
       await backgroundEnvironmentSetupController.flush();
       startupLogger.debug.log('Task is already canceled, exiting');
-      await callbacks.onExit?.(cloudJob, CloudTaskStatus.Canceled, context);
+      await callbacks.onExit?.(cloudJob, RunStatus.Canceled, context);
       return true;
     }
 
@@ -470,7 +467,7 @@ export async function executeJob<TPrepared extends PreparedJobBase>({
 
     await sdk.cloudJobs.update({
       id: cloudJob.id,
-      status: CloudTaskStatus.Preparing,
+      status: RunStatus.Preparing,
     });
 
     const workspace = await recordWorkerPhase({
@@ -616,7 +613,7 @@ export async function executeJob<TPrepared extends PreparedJobBase>({
     if (cloudJob.canceledAt) {
       await backgroundEnvironmentSetupController.flush();
       startupLogger.debug.log('Task is already canceled, exiting');
-      await callbacks.onExit?.(cloudJob, CloudTaskStatus.Canceled, context);
+      await callbacks.onExit?.(cloudJob, RunStatus.Canceled, context);
       return true;
     }
 

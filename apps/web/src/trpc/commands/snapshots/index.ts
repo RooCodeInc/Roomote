@@ -1,6 +1,6 @@
 import {
-  type CloudTaskPayload,
-  activeCloudTaskStatuses,
+  type TaskPayload,
+  activeRunStatuses,
   TaskPayloadKind,
   ORPHANED_PENDING_THRESHOLD_MS,
   populateSnapshotResumeSlackMetadata,
@@ -103,7 +103,7 @@ async function findActiveEnvironmentSnapshotJob(params: {
       and(
         eq(tasks.workflow, 'env_snapshot'),
         eq(taskRuns.vendor, params.provider),
-        inArray(taskRuns.status, [...activeCloudTaskStatuses]),
+        inArray(taskRuns.status, [...activeRunStatuses]),
         sql`${taskRuns.payload}->>'environmentId' = ${params.environmentId}`,
       ),
     )
@@ -497,7 +497,7 @@ export async function restoreCloudJobSnapshotCommand(
       outOfBandContext = await claimOutOfBandContextForPrompt(sourceJob.taskId);
     }
 
-    const payload: CloudTaskPayload<typeof TaskPayloadKind.SnapshotResume> = {
+    const payload: TaskPayload<typeof TaskPayloadKind.SnapshotResume> = {
       repo: sourceJob.payload.repo,
       environmentId: sourceJob.payload.environmentId,
       port: sourceJob.port ?? undefined,

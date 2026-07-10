@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { CloudTaskStatus, TaskPayloadKind } from '@roomote/types';
+import { RunStatus, TaskPayloadKind } from '@roomote/types';
 import type { Run } from '@roomote/db/server';
 
 const {
@@ -124,7 +124,7 @@ import { createOrUpdateSourceControlPullRequestForCloudJob } from '../source-con
 function makeCloudJob(payload: Run['payload']): Run {
   return {
     id: 123,
-    status: CloudTaskStatus.Dequeued,
+    status: RunStatus.Dequeued,
     kind: 'fresh',
     payloadKind: TaskPayloadKind.StandardTask,
     taskId: 'task-123',

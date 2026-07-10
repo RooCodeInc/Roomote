@@ -1,10 +1,10 @@
 import {
   type ComputeProvider,
   type TaskPhase,
-  CloudTaskStatus,
+  RunStatus,
   sleepCheckManagedComputeProviders,
   isSnapshotCapableComputeProvider,
-  isResumableCloudTaskType,
+  isResumableTaskPayloadKind,
   ACTIVE_TASK_PHASES,
   SNAPSHOT_CHECK_THRESHOLD_MS,
   WORKER_HEARTBEAT_STALE_MS,
@@ -41,15 +41,12 @@ import { captureBullMqMessage } from '../monitoring/sentry';
 
 const ACTIVE_SLEEP_BACKSTOP_EXTENSION_MS = 90 * 1_000;
 const SLEEP_CHECK_BATCH_LIMIT = 500;
-const ACTIVE_SLEEP_CHECK_STATUSES = [
-  CloudTaskStatus.Running,
-  CloudTaskStatus.Idle,
-];
+const ACTIVE_SLEEP_CHECK_STATUSES = [RunStatus.Running, RunStatus.Idle];
 const BOOTING_NO_HEARTBEAT_STATUSES = [
-  CloudTaskStatus.Processing,
-  CloudTaskStatus.Preparing,
-  CloudTaskStatus.Spawning,
-  CloudTaskStatus.Connecting,
+  RunStatus.Processing,
+  RunStatus.Preparing,
+  RunStatus.Spawning,
+  RunStatus.Connecting,
 ];
 
 const SLEEP_CHECK_PROVIDERS = sleepCheckManagedComputeProviders;
@@ -163,7 +160,7 @@ async function createSleepCheckClient(provider: ComputeProvider) {
  */
 function isSnapshotResumableSleepCandidate(job: SleepCheckJob): boolean {
   return (
-    isResumableCloudTaskType(job.payloadKind) &&
+    isResumableTaskPayloadKind(job.payloadKind) &&
     isSnapshotCapableComputeProvider(job.vendor)
   );
 }
@@ -424,7 +421,7 @@ export const sleepCheckJob = async () => {
         .update(taskRuns)
         .set({
           sleepRequestedAt: null,
-          ...(isResumableCloudTaskType(preferredJob.payloadKind)
+          ...(isResumableTaskPayloadKind(preferredJob.payloadKind)
             ? { snapshotRequestedAt: null }
             : {}),
         })
@@ -462,7 +459,7 @@ export const sleepCheckJob = async () => {
 };
 
 function getBaseSleepCheckCandidateConditions(
-  statuses: CloudTaskStatus[] = ACTIVE_SLEEP_CHECK_STATUSES,
+  statuses: RunStatus[] = ACTIVE_SLEEP_CHECK_STATUSES,
 ) {
   return [
     inArray(taskRuns.status, statuses),
@@ -640,15 +637,13 @@ async function mergeSleepCheckCandidates(
  */
 async function resolveSweptJobFinalStatus(
   jobId: number,
-): Promise<CloudTaskStatus.Failed | CloudTaskStatus.Canceled> {
+): Promise<RunStatus.Failed | RunStatus.Canceled> {
   const job = await db.query.taskRuns.findFirst({
     where: eq(taskRuns.id, jobId),
     columns: { cancelRequestedAt: true },
   });
 
-  return job?.cancelRequestedAt
-    ? CloudTaskStatus.Canceled
-    : CloudTaskStatus.Failed;
+  return job?.cancelRequestedAt ? RunStatus.Canceled : RunStatus.Failed;
 }
 
 async function handleTimedSleepCandidate(params: {
@@ -681,7 +676,7 @@ async function handleTimedSleepCandidate(params: {
       ...buildSleepCheckDetails(job),
     };
 
-    if (job.status === CloudTaskStatus.Idle) {
+    if (job.status === RunStatus.Idle) {
       await recordSleepCheckEvent(
         job,
         'decision',
@@ -700,8 +695,8 @@ async function handleTimedSleepCandidate(params: {
 
     await recordSleepCheckEvent(
       job,
-      finalStatus === CloudTaskStatus.Canceled ? 'decision' : 'failed',
-      finalStatus === CloudTaskStatus.Canceled
+      finalStatus === RunStatus.Canceled ? 'decision' : 'failed',
+      finalStatus === RunStatus.Canceled
         ? `${describeSleepCheckPath(path)} found active instance ${job.machineId} in status ${status}; finalizing cloud job #${job.id} as canceled after its stop request.`
         : `${describeSleepCheckPath(path)} found active instance ${job.machineId} in status ${status}; failing the cloud job.`,
       details,
@@ -828,7 +823,7 @@ async function handleTimedSleepCandidate(params: {
       .set({
         sleepAt: null,
         taskPhase: null,
-        status: CloudTaskStatus.Completed,
+        status: RunStatus.Completed,
         completedAt: endedAt,
       })
       .where(eq(taskRuns.id, job.id));
@@ -987,10 +982,7 @@ async function handleHeartbeatRecoveryCandidate(params: {
       ...buildSleepCheckDetails(job),
     };
 
-    if (
-      config.completeIdleInsteadOfFailing &&
-      job.status === CloudTaskStatus.Idle
-    ) {
+    if (config.completeIdleInsteadOfFailing && job.status === RunStatus.Idle) {
       await recordSleepCheckEvent(
         job,
         'decision',
@@ -1013,7 +1005,7 @@ async function handleHeartbeatRecoveryCandidate(params: {
       error: config.notRunning.failureError(job.machineId, status),
     });
 
-    if (finalStatus === CloudTaskStatus.Canceled) {
+    if (finalStatus === RunStatus.Canceled) {
       await recordSleepCheckEvent(
         job,
         'decision',
@@ -1066,7 +1058,7 @@ async function handleHeartbeatRecoveryCandidate(params: {
     error: config.destroyAndFail.failureError(job.machineId),
   });
 
-  if (finalStatus === CloudTaskStatus.Canceled) {
+  if (finalStatus === RunStatus.Canceled) {
     await recordSleepCheckEvent(
       job,
       'decision',
@@ -1211,7 +1203,7 @@ function buildSleepCheckDetails(job: SleepCheckJob) {
     sleepRequestedAt: job.sleepRequestedAt?.toISOString() ?? null,
     snapshotRequestedAt: job.snapshotRequestedAt?.toISOString() ?? null,
     workerHeartbeatAt: job.workerHeartbeatAt?.toISOString() ?? null,
-    resumable: isResumableCloudTaskType(job.payloadKind),
+    resumable: isResumableTaskPayloadKind(job.payloadKind),
     taskId: job.taskId,
   };
 }
@@ -1326,7 +1318,7 @@ async function completeIdleJobWithoutSnapshot(
   try {
     await finishCloudJob({
       id: job.id,
-      status: CloudTaskStatus.Completed,
+      status: RunStatus.Completed,
       error: errorMessage,
     });
   } catch (error) {

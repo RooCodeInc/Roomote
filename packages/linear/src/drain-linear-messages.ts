@@ -1,6 +1,6 @@
 import {
   ALL_REPOSITORIES,
-  type CloudTaskPayload,
+  type TaskPayload,
   TaskPayloadKind,
   populateSnapshotResumeSlackMetadata,
   restoreSnapshotResumeVisiblePromptFields,
@@ -117,9 +117,7 @@ export async function drainLinearMessagesToResumeJob(
     selectedRepositories && selectedRepositories.length > 0
       ? selectedRepositories
       : undefined;
-  const payloadForResume: CloudTaskPayload<
-    typeof TaskPayloadKind.SnapshotResume
-  > = {
+  const payloadForResume: TaskPayload<typeof TaskPayloadKind.SnapshotResume> = {
     repo,
     environmentId,
     selectedRepositories: scopedSelectedRepositories,

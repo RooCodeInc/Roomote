@@ -46,8 +46,8 @@ import {
 import { getRedis, withContention } from '@roomote/redis';
 import {
   ALL_REPOSITORIES,
-  type CloudTask,
-  type CloudTaskPayload,
+  type TaskSpec,
+  type TaskPayload,
   TaskPayloadKind,
   PRODUCT_NAME,
   type QueuedCommunicationMessage,
@@ -966,16 +966,15 @@ async function resumeTeamsTaskFromSnapshot(input: {
         typeof completedPayload.environmentId === 'string'
           ? completedPayload.environmentId
           : undefined;
-      const resumePayload: CloudTaskPayload<
-        typeof TaskPayloadKind.SnapshotResume
-      > = {
-        repo,
-        ...(environmentId ? { environmentId } : {}),
-        ...(completedJob.port ? { port: completedJob.port } : {}),
-        sourceSnapshotId,
-        sourceCloudJobId: completedJob.id,
-        queuedCommunicationMessages: [queuedMessage],
-      };
+      const resumePayload: TaskPayload<typeof TaskPayloadKind.SnapshotResume> =
+        {
+          repo,
+          ...(environmentId ? { environmentId } : {}),
+          ...(completedJob.port ? { port: completedJob.port } : {}),
+          sourceSnapshotId,
+          sourceCloudJobId: completedJob.id,
+          queuedCommunicationMessages: [queuedMessage],
+        };
 
       populateSnapshotResumeCommunicationMetadata(resumePayload, {
         provider: 'teams',
@@ -1281,23 +1280,21 @@ async function startNewTeamsTask(input: {
     throw new Error('Teams task routing selected an unavailable workspace.');
   }
 
-  const task: Extract<
-    CloudTask,
-    { type: typeof TaskPayloadKind.StandardTask }
-  > = {
-    type: TaskPayloadKind.StandardTask,
-    payload: {
-      repo: workspace.repoForPayload,
-      ...(workspace.environmentId
-        ? { environmentId: workspace.environmentId }
-        : {}),
-      description: input.queuedMessage.text,
-      ...(input.queuedMessage.images?.length
-        ? { images: input.queuedMessage.images }
-        : {}),
-      ...input.metadata,
-    },
-  };
+  const task: Extract<TaskSpec, { type: typeof TaskPayloadKind.StandardTask }> =
+    {
+      type: TaskPayloadKind.StandardTask,
+      payload: {
+        repo: workspace.repoForPayload,
+        ...(workspace.environmentId
+          ? { environmentId: workspace.environmentId }
+          : {}),
+        description: input.queuedMessage.text,
+        ...(input.queuedMessage.images?.length
+          ? { images: input.queuedMessage.images }
+          : {}),
+        ...input.metadata,
+      },
+    };
   const launchResult = await enqueueCloudTask(
     {
       task,

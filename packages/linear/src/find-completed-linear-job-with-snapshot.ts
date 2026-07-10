@@ -10,7 +10,7 @@ import {
   isNotNull,
   desc,
 } from '@roomote/db/server';
-import { CloudTaskStatus, SANDBOX_SNAPSHOT_EXPIRY_MS } from '@roomote/types';
+import { RunStatus, SANDBOX_SNAPSHOT_EXPIRY_MS } from '@roomote/types';
 
 /**
  * Find the most recent completed/idle run for a Linear issue that has a
@@ -53,10 +53,7 @@ export async function findCompletedLinearJobWithSnapshot(
     .where(
       and(
         eq(tasks.linearIssueId, linearIssueId),
-        inArray(taskRuns.status, [
-          CloudTaskStatus.Completed,
-          CloudTaskStatus.Idle,
-        ]),
+        inArray(taskRuns.status, [RunStatus.Completed, RunStatus.Idle]),
         isNotNull(taskRuns.snapshotId),
         isNull(taskRuns.snapshotFailedAt),
         isNull(taskRuns.canceledAt),

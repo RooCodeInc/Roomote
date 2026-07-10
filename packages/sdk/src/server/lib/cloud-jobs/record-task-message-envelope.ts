@@ -36,7 +36,7 @@ import {
   extractVisibleAcpPromptText,
   extractAcpMessageText,
   getRequestedDeploymentEnvVarNamesFromToolPayload,
-  isExitedCloudTaskStatus,
+  isExitedRunStatus,
   isSystemInjectedAcpPromptText,
   isVisibleInTranscript,
   normalizeTranscriptUserText,
@@ -477,7 +477,7 @@ async function maybeStopTaskAfterEnvVarRequest(
     )
     .limit(1);
 
-  if (!job || isExitedCloudTaskStatus(job.status) || !job.sandboxServerUrl) {
+  if (!job || isExitedRunStatus(job.status) || !job.sandboxServerUrl) {
     return;
   }
 

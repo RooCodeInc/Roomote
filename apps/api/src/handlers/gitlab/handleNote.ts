@@ -8,11 +8,11 @@ import {
   getGitLabDeploymentUser,
 } from '@roomote/gitlab';
 import {
-  type CloudTaskPayload,
+  type TaskPayload,
   CloudAgentType,
   TaskPayloadKind,
   PRODUCT_NAME,
-  isActivelyRunningCloudTask,
+  isActivelyRunningTask,
 } from '@roomote/types';
 
 import type { WebhookResponse } from '../../types';
@@ -289,7 +289,7 @@ export async function handleGitLabNote(
       commenter,
       noteBody: note.note,
     });
-    const delivery = isActivelyRunningCloudTask(
+    const delivery = isActivelyRunningTask(
       activeOwner.status,
       activeOwner.taskPhase,
     )
@@ -374,7 +374,7 @@ export async function handleGitLabNote(
       : {}),
     ...(headSha ? { sha: headSha } : {}),
     targetBranch: mergeRequest.target_branch,
-  } satisfies CloudTaskPayload<typeof TaskPayloadKind.GithubPrReview>;
+  } satisfies TaskPayload<typeof TaskPayloadKind.GithubPrReview>;
 
   try {
     // A human @roomote mention started this review: the commenter is the

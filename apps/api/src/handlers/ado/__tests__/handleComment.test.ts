@@ -54,7 +54,7 @@ vi.mock('../../tasks/sendMessageToTask', () => ({
   steerMessageToTask: mockSteerMessageToTask,
 }));
 
-import { CloudTaskStatus, TaskPayloadKind } from '@roomote/types';
+import { RunStatus, TaskPayloadKind } from '@roomote/types';
 
 import { handleAdoComment } from '../handleComment';
 import type { AdoPullRequestCommentWebhook } from '../types';
@@ -250,7 +250,7 @@ describe('handleAdoComment', () => {
   it('routes mentions into a reusable active task before starting a new review', async () => {
     mockFindReusableGitHubPrFollowUpOwner.mockResolvedValue({
       taskId: 'task-existing',
-      status: CloudTaskStatus.Running,
+      status: RunStatus.Running,
       taskPhase: 'running',
     });
     mockGetTaskUrl.mockReturnValue(
@@ -281,7 +281,7 @@ describe('handleAdoComment', () => {
       taskId: 'review-task',
       jobId: 9,
       type: TaskPayloadKind.GithubPrReview,
-      status: CloudTaskStatus.Running,
+      status: RunStatus.Running,
       taskPhase: 'running',
       match: 'github_pr',
     });

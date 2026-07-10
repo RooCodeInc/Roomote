@@ -50,7 +50,7 @@ import {
   buildSetupSourceControlStatus,
   collectSetupModelProviderCredentialValues,
   createEmptySetupNewState,
-  CloudTaskStatus,
+  RunStatus,
   TaskPayloadKind,
   resolveEvalHarnessSelection,
   type ComputeProvider,
@@ -62,7 +62,7 @@ import {
   isAutoProvisionedComputeArtifactField,
   isComputeInfrastructureField,
   isConfiguredEnvValue,
-  isExitedCloudTaskStatus,
+  isExitedRunStatus,
   isRequiredComputeField,
   NON_SECRET_COMPUTE_ENV_VAR_NAMES,
   normalizeDeploymentComputeConfig,
@@ -2517,7 +2517,7 @@ export async function cancelSetupNewOnboardingTaskCommand(
     .where(eq(taskRuns.taskId, currentState.onboardingTaskId));
 
   const activeJobIds = jobs
-    .filter((job) => !isExitedCloudTaskStatus(job.status))
+    .filter((job) => !isExitedRunStatus(job.status))
     .map((job) => job.id);
 
   if (activeJobIds.length > 0) {
@@ -2527,7 +2527,7 @@ export async function cancelSetupNewOnboardingTaskCommand(
       await tx
         .update(taskRuns)
         .set({
-          status: CloudTaskStatus.Canceled,
+          status: RunStatus.Canceled,
           canceledAt: endedAt,
         })
         .where(inArray(taskRuns.id, activeJobIds));

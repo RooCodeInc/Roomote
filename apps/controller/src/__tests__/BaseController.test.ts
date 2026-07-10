@@ -1,7 +1,7 @@
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import { CloudTaskStatus, TaskPayloadKind } from '@roomote/types';
+import { RunStatus, TaskPayloadKind } from '@roomote/types';
 import type { Run } from '@roomote/db/server';
 
 // ── Mocks ────────────────────────────────────────────────────────────────────
@@ -150,7 +150,7 @@ function makeCloudJob(overrides: Partial<Run> = {}): Run {
     payloadKind: TaskPayloadKind.StandardTask,
     userId: 'user-1',
     harness: 'opencode-server',
-    status: CloudTaskStatus.Running,
+    status: RunStatus.Running,
     payload: { repo: 'owner/repo' },
     taskId: 'task-1',
     slackThreadTs: null,
@@ -220,7 +220,7 @@ describe('BaseController.handleSpawnJobError', () => {
 
     expect(mockFinishCloudJob).toHaveBeenCalledWith({
       id: 42,
-      status: CloudTaskStatus.Failed,
+      status: RunStatus.Failed,
       error: 'Machine unavailable',
     });
   });
@@ -249,7 +249,7 @@ describe('BaseController.handleSpawnJobError', () => {
 
     expect(mockFinishCloudJob).toHaveBeenCalledWith({
       id: 99,
-      status: CloudTaskStatus.Failed,
+      status: RunStatus.Failed,
       error: 'Snapshot failed',
     });
 
@@ -286,7 +286,7 @@ describe('BaseController.handleSpawnJobError', () => {
 
     expect(mockFinishCloudJob).toHaveBeenCalledWith({
       id: 7,
-      status: CloudTaskStatus.Failed,
+      status: RunStatus.Failed,
       error: 'string error',
     });
   });
@@ -312,7 +312,7 @@ describe('BaseController.handleSpawnJobError', () => {
   it('captures a Sentry issue when the controller starts a job from database fallback', async () => {
     const job = makeCloudJob({
       id: 108,
-      status: CloudTaskStatus.Pending,
+      status: RunStatus.Pending,
       vendor: 'modal',
     });
 
@@ -325,7 +325,7 @@ describe('BaseController.handleSpawnJobError', () => {
         'Controller started task using database fallback logic',
         expect.objectContaining({
           jobId: 108,
-          jobStatus: CloudTaskStatus.Pending,
+          jobStatus: RunStatus.Pending,
           jobType: TaskPayloadKind.StandardTask,
           phase: 'database_fallback',
           provider: 'modal',
@@ -347,7 +347,7 @@ describe('BaseController.handleSpawnJobError', () => {
     const saturatedController = new SaturatedTestController();
     const job = makeCloudJob({
       id: 109,
-      status: CloudTaskStatus.Pending,
+      status: RunStatus.Pending,
       vendor: 'modal',
     });
 
@@ -391,7 +391,7 @@ describe('BaseController.dequeueCloudJob', () => {
   it('records a controller_dequeue lifecycle event', async () => {
     const job = makeCloudJob({
       id: 77,
-      status: CloudTaskStatus.Pending,
+      status: RunStatus.Pending,
       vendor: 'modal',
       payload: {
         repo: 'owner/repo',
@@ -412,7 +412,7 @@ describe('BaseController.dequeueCloudJob', () => {
         message: expect.stringContaining('Controller dequeued'),
         details: expect.objectContaining({
           stage: 'controller_dequeue',
-          status: CloudTaskStatus.Dequeued,
+          status: RunStatus.Dequeued,
           provider: 'modal',
           environmentId: 'env-1',
         }),
@@ -423,14 +423,14 @@ describe('BaseController.dequeueCloudJob', () => {
   it('does not revive a job canceled during the dequeue window', async () => {
     const job = makeCloudJob({
       id: 78,
-      status: CloudTaskStatus.Pending,
+      status: RunStatus.Pending,
     });
 
     mockUpdateWhere.mockReturnValueOnce({
       returning: vi.fn().mockResolvedValue([]),
     });
     mockCloudJobsFindFirst.mockResolvedValueOnce({
-      status: CloudTaskStatus.Canceled,
+      status: RunStatus.Canceled,
       canceledAt: new Date(),
     });
 
@@ -443,7 +443,7 @@ describe('BaseController.dequeueCloudJob', () => {
   it('treats preparing jobs as recoverable before controller dequeue', async () => {
     const job = makeCloudJob({
       id: 80,
-      status: CloudTaskStatus.Preparing,
+      status: RunStatus.Preparing,
     });
 
     const result = await controller.testDequeueCloudJob(job);
@@ -456,7 +456,7 @@ describe('BaseController.dequeueCloudJob', () => {
         runId: 80,
         details: expect.objectContaining({
           stage: 'controller_dequeue',
-          status: CloudTaskStatus.Dequeued,
+          status: RunStatus.Dequeued,
         }),
       }),
     );
@@ -465,14 +465,14 @@ describe('BaseController.dequeueCloudJob', () => {
   it('treats an already-advanced dequeue race as a no-op', async () => {
     const job = makeCloudJob({
       id: 79,
-      status: CloudTaskStatus.Pending,
+      status: RunStatus.Pending,
     });
 
     mockUpdateWhere.mockReturnValueOnce({
       returning: vi.fn().mockResolvedValue([]),
     });
     mockCloudJobsFindFirst.mockResolvedValueOnce({
-      status: CloudTaskStatus.Dequeued,
+      status: RunStatus.Dequeued,
       canceledAt: null,
     });
 

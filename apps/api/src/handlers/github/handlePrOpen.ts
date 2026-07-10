@@ -1,7 +1,7 @@
 import pMap from 'p-map';
 
 import {
-  type CloudTaskPayload,
+  type TaskPayload,
   DEFAULT_PR_REVIEWER_SETTINGS,
   type PrReviewerSettings,
   TaskPayloadKind,
@@ -97,7 +97,7 @@ export async function handlePrOpen(
           headSha: pr.head.sha,
           branchName: pr.head.ref,
           ...relayPayload,
-        } satisfies CloudTaskPayload<typeof TaskPayloadKind.GithubPrReview>,
+        } satisfies TaskPayload<typeof TaskPayloadKind.GithubPrReview>,
       },
       initiator: {
         kind: 'automation',

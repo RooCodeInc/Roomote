@@ -1,10 +1,10 @@
 import {
-  type CloudTask,
+  type TaskSpec,
   type AuthTokenContext,
   type JobTokenContext,
   type RequestedWorkKind,
-  CloudTaskStatus,
-  cloudTaskSchema,
+  RunStatus,
+  taskSpecSchema,
   resolveSourceControlProviderFromPayload,
 } from '@roomote/types';
 import {
@@ -90,7 +90,7 @@ type DequeueResult =
       artifacts: Record<string, unknown>;
     };
 
-export function shouldInitializeWithoutPrompt(cloudTask: CloudTask): boolean {
+export function shouldInitializeWithoutPrompt(cloudTask: TaskSpec): boolean {
   if (
     'description' in cloudTask.payload &&
     typeof cloudTask.payload.description === 'string' &&
@@ -115,7 +115,7 @@ export function shouldInitializeWithoutPrompt(cloudTask: CloudTask): boolean {
 }
 
 /**
- * Builds the CloudTask candidate for schema validation from a run row. The
+ * Builds the TaskSpec candidate for schema validation from a run row. The
  * discriminated union re-keys on `type`, which is stored as
  * `task_runs.payload_kind`.
  */
@@ -271,7 +271,7 @@ export const dequeueCloudJob = async (
           error: false;
           cloudJob: Run;
           task: Task;
-          cloudTask: CloudTask;
+          cloudTask: TaskSpec;
           envVars: Record<string, string>;
           orgAgentInstructions?: string;
           styleGuidance?: string;
@@ -318,13 +318,13 @@ export const dequeueCloudJob = async (
         },
       });
 
-      const parsed = cloudTaskSchema.safeParse(
+      const parsed = taskSpecSchema.safeParse(
         buildCloudTaskCandidate(cloudJob),
       );
 
       if (!parsed.success) {
         console.error(
-          `${tag} cloudTaskSchema.safeParse failed: ${parsed.error.message} -> ${JSON.stringify(cloudJob)}`,
+          `${tag} taskSpecSchema.safeParse failed: ${parsed.error.message} -> ${JSON.stringify(cloudJob)}`,
         );
 
         reportBootstrapFailure({
@@ -364,7 +364,7 @@ export const dequeueCloudJob = async (
           'Worker claimed dequeued cloud job and started execution bootstrap.',
         details: {
           stage: 'worker_bootstrap',
-          status: CloudTaskStatus.Processing,
+          status: RunStatus.Processing,
           vendor: cloudJob.vendor ?? null,
           machineId: cloudJob.machineId ?? null,
           sourceSnapshotId: cloudJob.sourceSnapshotId ?? null,

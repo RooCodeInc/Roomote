@@ -1,5 +1,5 @@
 import {
-  CloudTaskStatus,
+  RunStatus,
   TaskPayloadKind,
   type RunKind,
   type TaskState,
@@ -26,7 +26,7 @@ async function makeTask(state: TaskState = 'active') {
 
 async function insertRun(params: {
   taskId: string;
-  status: CloudTaskStatus;
+  status: RunStatus;
   startedAt?: Date | null;
   kind?: RunKind;
 }) {
@@ -84,7 +84,7 @@ describe('deriveTaskStateFromRuns', () => {
   it('returns active when any run is non-terminal', () => {
     expect(
       deriveTaskStateFromRuns([
-        { id: 1, status: CloudTaskStatus.Running, startedAt: new Date() },
+        { id: 1, status: RunStatus.Running, startedAt: new Date() },
       ]),
     ).toBe('active');
   });
@@ -92,8 +92,8 @@ describe('deriveTaskStateFromRuns', () => {
   it('treats idle as non-terminal so an idle sibling keeps the task active', () => {
     expect(
       deriveTaskStateFromRuns([
-        { id: 1, status: CloudTaskStatus.Completed, startedAt: new Date() },
-        { id: 2, status: CloudTaskStatus.Idle, startedAt: new Date() },
+        { id: 1, status: RunStatus.Completed, startedAt: new Date() },
+        { id: 2, status: RunStatus.Idle, startedAt: new Date() },
       ]),
     ).toBe('active');
   });
@@ -101,9 +101,9 @@ describe('deriveTaskStateFromRuns', () => {
   it('lets an earlier completed run beat a never-started canceled resume', () => {
     expect(
       deriveTaskStateFromRuns([
-        { id: 1, status: CloudTaskStatus.Completed, startedAt: new Date() },
+        { id: 1, status: RunStatus.Completed, startedAt: new Date() },
         // Higher id but never started (bootstrap-failed resume) -> deprioritized.
-        { id: 2, status: CloudTaskStatus.Canceled, startedAt: null },
+        { id: 2, status: RunStatus.Canceled, startedAt: null },
       ]),
     ).toBe('completed');
   });
@@ -111,7 +111,7 @@ describe('deriveTaskStateFromRuns', () => {
   it('maps an only-run cancel-before-start to canceled', () => {
     expect(
       deriveTaskStateFromRuns([
-        { id: 1, status: CloudTaskStatus.Canceled, startedAt: null },
+        { id: 1, status: RunStatus.Canceled, startedAt: null },
       ]),
     ).toBe('canceled');
   });
@@ -119,7 +119,7 @@ describe('deriveTaskStateFromRuns', () => {
   it('maps an only failed run to failed', () => {
     expect(
       deriveTaskStateFromRuns([
-        { id: 1, status: CloudTaskStatus.Failed, startedAt: new Date() },
+        { id: 1, status: RunStatus.Failed, startedAt: new Date() },
       ]),
     ).toBe('failed');
   });
@@ -127,8 +127,8 @@ describe('deriveTaskStateFromRuns', () => {
   it('prefers the latest progressed terminal run among siblings', () => {
     expect(
       deriveTaskStateFromRuns([
-        { id: 1, status: CloudTaskStatus.Completed, startedAt: new Date() },
-        { id: 2, status: CloudTaskStatus.Failed, startedAt: new Date() },
+        { id: 1, status: RunStatus.Completed, startedAt: new Date() },
+        { id: 2, status: RunStatus.Failed, startedAt: new Date() },
       ]),
     ).toBe('failed');
   });
@@ -139,12 +139,12 @@ describe('syncTaskStateFromRuns', () => {
     const task = await makeTask('completed');
     await insertRun({
       taskId: task.id,
-      status: CloudTaskStatus.Completed,
+      status: RunStatus.Completed,
       startedAt: new Date(),
     });
     await insertRun({
       taskId: task.id,
-      status: CloudTaskStatus.Idle,
+      status: RunStatus.Idle,
       startedAt: new Date(),
     });
 
@@ -157,13 +157,13 @@ describe('syncTaskStateFromRuns', () => {
     const task = await makeTask('completed');
     await insertRun({
       taskId: task.id,
-      status: CloudTaskStatus.Completed,
+      status: RunStatus.Completed,
       startedAt: new Date(),
     });
     // The resume never started (canceled at/before dequeue on bootstrap fail).
     await insertRun({
       taskId: task.id,
-      status: CloudTaskStatus.Canceled,
+      status: RunStatus.Canceled,
       startedAt: null,
       kind: 'resume',
     });
@@ -177,7 +177,7 @@ describe('syncTaskStateFromRuns', () => {
     const task = await makeTask('active');
     await insertRun({
       taskId: task.id,
-      status: CloudTaskStatus.Canceled,
+      status: RunStatus.Canceled,
       startedAt: null,
     });
 
@@ -188,7 +188,7 @@ describe('syncTaskStateFromRuns', () => {
 
   it('does not write when the derived state is unchanged', async () => {
     const task = await makeTask('active');
-    await insertRun({ taskId: task.id, status: CloudTaskStatus.Pending });
+    await insertRun({ taskId: task.id, status: RunStatus.Pending });
 
     const before = await readTask(task.id);
     await syncTaskStateFromRuns(db, task.id);

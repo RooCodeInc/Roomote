@@ -1,5 +1,5 @@
 import type { Run } from '@roomote/db/server';
-import { CloudTaskStatus, type EnvironmentConfig } from '@roomote/types';
+import { RunStatus, type EnvironmentConfig } from '@roomote/types';
 
 const {
   cloudJobFindFirstMock,
@@ -33,7 +33,7 @@ function createRunningCloudJob(overrides: Partial<Run> = {}): Run {
   return {
     id: 1,
     taskId: 'outertask12345',
-    status: CloudTaskStatus.Running,
+    status: RunStatus.Running,
     payload: {
       environmentId: 'env_app',
     },

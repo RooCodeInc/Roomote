@@ -1,4 +1,4 @@
-import { CloudTaskStatus } from '@roomote/types';
+import { RunStatus } from '@roomote/types';
 import {
   db,
   taskRuns,
@@ -55,7 +55,7 @@ export async function cancelLinearJob(
       await tx
         .update(taskRuns)
         .set({
-          status: CloudTaskStatus.Canceled,
+          status: RunStatus.Canceled,
           canceledAt: endedAt,
           error: 'Canceled by user via stop signal',
         })

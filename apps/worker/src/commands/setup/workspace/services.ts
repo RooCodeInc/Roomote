@@ -2,7 +2,7 @@ import {
   type EnvironmentConfig,
   type ServiceInfo,
   TaskPayloadKind,
-  isServicesEnabledCloudTaskType,
+  isServicesEnabledTaskPayloadKind,
 } from '@roomote/types';
 
 import type { StartupLogger } from '../../../logging';
@@ -110,7 +110,7 @@ async function startSystemServices({
 
   if (
     environmentConfig &&
-    isServicesEnabledCloudTaskType(cloudJobType) &&
+    isServicesEnabledTaskPayloadKind(cloudJobType) &&
     environmentConfig.services &&
     environmentConfig.services.length > 0
   ) {

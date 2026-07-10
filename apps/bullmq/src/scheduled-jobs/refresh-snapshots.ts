@@ -1,7 +1,7 @@
 import {
   type ComputeProvider,
   type SnapshotEnvironmentAttachment,
-  activeCloudTaskStatuses,
+  activeRunStatuses,
   TaskPayloadKind,
   resolveComputeProviderTarget,
 } from '@roomote/types';
@@ -288,7 +288,7 @@ async function findActiveSnapshotRefreshJob(
       and(
         eq(tasks.workflow, 'env_snapshot'),
         eq(taskRuns.vendor, candidate.provider),
-        inArray(taskRuns.status, [...activeCloudTaskStatuses]),
+        inArray(taskRuns.status, [...activeRunStatuses]),
         sql`${taskRuns.payload}->>'environmentId' = ${candidate.environmentId}`,
       ),
     )
