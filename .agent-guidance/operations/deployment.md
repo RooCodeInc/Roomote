@@ -554,18 +554,14 @@ Preview soak hosts are upgraded manually with `roomote-deploy upgrade` after the
 GHCR workflow publishes the matching `develop-<short-sha>` image tag. The
 publish workflow no longer auto-deploys a DigitalOcean preview droplet.
 
-The same workflow has an optional `deploy-railway` job that keeps a Railway
-deployment current with every develop build. It is gated on the repository
-variable `ROOMOTE_RAILWAY_AUTODEPLOY=true` (skipped otherwise) and runs in the
-GitHub `railway` environment with a single environment-scoped secret,
-`ROOMOTE_RAILWAY_PROJECT_TOKEN` — a Railway project token that can only touch
-one environment. The job calls Railway's public GraphQL API directly
-(`Project-Access-Token` header): it resolves the environment from the token,
-matches services whose image starts with `ghcr.io/<owner>/roomote-app`, then
-issues `serviceInstanceUpdate` with the immutable `develop-<short-sha>` tag
-and `serviceInstanceDeploy` for each. There is no intermediary service and no
-public endpoint. The operator runbook is the "Auto-deploying every develop
-build" section of `deploy/railway/README.md`.
+The same workflow has a `notify-ops` job that, on develop pushes, sends a
+`repository_dispatch` event (`roomote-develop-build`, with `client_payload`
+fields `image_tag`/`sha`/`ref`) to the repository named by the
+`ROOMOTE_OPS_REPO` repository variable, authenticated by the
+`ROOMOTE_OPS_DISPATCH_TOKEN` secret (a fine-grained token with access to only
+that repository). The job is skipped while `ROOMOTE_OPS_REPO` is unset.
+Deployment automation that consumes the event lives in that external
+repository, not in this one.
 
 Upgrade and rollback are intentionally tag switches. `roomote-deploy upgrade`
 copies the new Compose/Caddy files, removes stale systemd loading of bootstrap
