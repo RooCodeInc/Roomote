@@ -1,7 +1,7 @@
 export const DEFAULT_OPENCODE_STOP_HOOK_REMINDER_STALL_TIMEOUT_MS = 10 * 60_000;
 export const MAX_OPENCODE_STOP_HOOK_REMINDERS = 3;
 
-export interface OpenCodeStopHookReminderStallCallbacks {
+interface OpenCodeStopHookReminderStallCallbacks {
   logger: {
     warn: (message: string) => void;
   };

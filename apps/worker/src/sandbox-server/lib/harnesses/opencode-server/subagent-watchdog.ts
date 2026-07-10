@@ -13,13 +13,13 @@ export const DEFAULT_SUBAGENT_TASK_INACTIVITY_TIMEOUT_MS = 3 * 60_000;
 // tool part whose state carries input.subagent_type and, once the child
 // session exists, metadata.sessionId pointing at it. (`subtask` parts are a
 // separate command-driven surface that never reports a status.)
-export const OPEN_CODE_SUBAGENT_TASK_TOOL_NAME = 'task';
+const OPEN_CODE_SUBAGENT_TASK_TOOL_NAME = 'task';
 
 const SUBAGENT_ACTIVITY_EMIT_INTERVAL_MS = 5_000;
 
-export type OpenCodeSubagentToolStatus = 'in_progress' | 'completed' | 'failed';
+type OpenCodeSubagentToolStatus = 'in_progress' | 'completed' | 'failed';
 
-export interface OpenCodeSubagentNormalizedToolPart {
+interface OpenCodeSubagentNormalizedToolPart {
   toolCallId: string;
   title: string;
   status: OpenCodeSubagentToolStatus;
@@ -53,7 +53,7 @@ interface ActiveOpenCodeSubagentWatchdog {
   activityLastEmitAtMs: number;
 }
 
-export interface OpenCodeSubagentWatchdogCallbacks {
+interface OpenCodeSubagentWatchdogCallbacks {
   logger: {
     info: (message: string) => void;
     warn: (message: string) => void;
@@ -107,7 +107,7 @@ export function isOpenCodeSubagentTaskTool(toolName: string): boolean {
   return toolName.toLowerCase() === OPEN_CODE_SUBAGENT_TASK_TOOL_NAME;
 }
 
-export function extractOpenCodeTaskToolChildSessionId(
+function extractOpenCodeTaskToolChildSessionId(
   toolPart: OpenCodeToolPart,
 ): string | null {
   const metadata = asRecord(toolPart.state?.metadata);
@@ -116,16 +116,14 @@ export function extractOpenCodeTaskToolChildSessionId(
   return asString(metadata?.sessionId) ?? asString(metadata?.jobId) ?? null;
 }
 
-export function isOpenCodeBackgroundTaskToolPart(
-  toolPart: OpenCodeToolPart,
-): boolean {
+function isOpenCodeBackgroundTaskToolPart(toolPart: OpenCodeToolPart): boolean {
   return (
     asBoolean(asRecord(toolPart.state?.input)?.background) === true ||
     asBoolean(asRecord(toolPart.state?.metadata)?.background) === true
   );
 }
 
-export function extractOpenCodeTaskToolAgentType(
+function extractOpenCodeTaskToolAgentType(
   toolPart: OpenCodeToolPart,
 ): string | null {
   return asString(asRecord(toolPart.state?.input)?.subagent_type) ?? null;

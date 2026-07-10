@@ -5,9 +5,9 @@ export const DEFAULT_EXECUTE_TOOL_PROGRESS_INTERVAL_MS = 30_000;
 
 const MAX_PROGRESS_COMMAND_CHARS = 240;
 
-export type OpenCodeProgressToolStatus = 'in_progress' | 'completed' | 'failed';
+type OpenCodeProgressToolStatus = 'in_progress' | 'completed' | 'failed';
 
-export interface OpenCodeExecuteToolProgressNormalizedPart {
+interface OpenCodeExecuteToolProgressNormalizedPart {
   toolCallId: string;
   toolName: string;
   title: string;
@@ -31,7 +31,7 @@ interface ActiveOpenCodeExecuteToolProgress {
   timer: ReturnType<typeof setTimeout>;
 }
 
-export interface OpenCodeExecuteToolProgressCallbacks {
+interface OpenCodeExecuteToolProgressCallbacks {
   emitToolUpdate: (event: {
     sessionId: string;
     messageId?: string;
