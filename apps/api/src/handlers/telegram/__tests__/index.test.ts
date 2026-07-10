@@ -8,6 +8,7 @@ const {
   buildTelegramRoutingContextMock,
   cloudJobsFindFirstMock,
   consumeLinkCodeMock,
+  createForumTopicMock,
   restoreLinkCodeMock,
   editMessageReplyMarkupMock,
   editMessageTextMock,
@@ -39,6 +40,7 @@ const {
   buildTelegramRoutingContextMock: vi.fn(),
   cloudJobsFindFirstMock: vi.fn(),
   consumeLinkCodeMock: vi.fn(),
+  createForumTopicMock: vi.fn(),
   restoreLinkCodeMock: vi.fn(),
   editMessageReplyMarkupMock: vi.fn(),
   editMessageTextMock: vi.fn(),
@@ -191,6 +193,7 @@ vi.mock('@roomote/communication/telegram-provider', () => ({
     return {
       addReaction: addReactionMock,
       answerCallbackQuery: answerCallbackQueryMock,
+      createForumTopic: createForumTopicMock,
       editMessageReplyMarkup: editMessageReplyMarkupMock,
       editMessageText: editMessageTextMock,
       postMessage: postMessageMock,
@@ -292,6 +295,10 @@ describe('Telegram webhook handler', () => {
     environmentsFindFirstMock.mockResolvedValue(undefined);
     getAvailableEnvironmentsMock.mockResolvedValue([]);
     editMessageTextMock.mockResolvedValue(undefined);
+    createForumTopicMock.mockResolvedValue({
+      threadId: '777',
+      name: 'fix the flaky login test',
+    });
     setLatestInboundMessageIdMock.mockResolvedValue(undefined);
     authUsersFindFirstMock.mockResolvedValue(null);
     usersFindFirstMock.mockResolvedValue(null);
@@ -1848,6 +1855,154 @@ describe('Telegram webhook handler', () => {
     );
     expect(editMessageReplyMarkupMock).toHaveBeenCalledWith(
       expect.objectContaining({ channelId: '222', messageId: '992' }),
+    );
+  });
+
+  it('creates a forum topic per task when launching from a Topics-enabled supergroup', async () => {
+    mockTelegramLinkedSender('launch-owner-30');
+
+    const response = await postTelegramUpdate(
+      createTelegramUpdate({
+        message: {
+          text: '@roomote_bot fix the flaky login test',
+          chat: {
+            id: -100333000333,
+            type: 'supergroup',
+            title: 'roomote-dev',
+            is_forum: true,
+          },
+          entities: [{ type: 'mention', offset: 0, length: 12 }],
+        },
+      }),
+    );
+
+    await expect(response.json()).resolves.toEqual({
+      ok: true,
+      started: true,
+      cloudJobId: 88,
+    });
+    expect(createForumTopicMock).toHaveBeenCalledWith({
+      channelId: '-100333000333',
+      name: 'fix the flaky login test',
+    });
+    // The job is thread-scoped to the new topic, so follow-ups typed in the
+    // topic queue to it and worker replies land there.
+    expect(enqueueCloudTaskMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        payload: expect.objectContaining({
+          communicationChannelId: '-100333000333',
+          communicationThreadId: '777',
+        }),
+      }),
+      { launchClass: 'human' },
+    );
+    // Started card goes into the topic, unanchored (replies cannot cross topics).
+    expect(postMessageMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        channelId: '-100333000333',
+        threadId: '777',
+        text: 'Started a task in all repos.',
+      }),
+    );
+    const startedCall = postMessageMock.mock.calls.find(
+      (call) => call[0]?.text === 'Started a task in all repos.',
+    );
+    expect(startedCall?.[0]?.replyToMessageId).toBeUndefined();
+    // Worker replies anchor to the in-topic started card, not the launch message.
+    expect(setLatestInboundMessageIdMock).toHaveBeenCalledWith(
+      'telegram',
+      88,
+      'telegram-response',
+    );
+    // A pointer stays where the user asked, deep-linking to the topic.
+    expect(postMessageMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        channelId: '-100333000333',
+        replyToMessageId: '456',
+        text: expect.stringContaining('Started in its own topic'),
+        buttons: [
+          [
+            expect.objectContaining({
+              text: 'Open topic',
+              url: 'https://t.me/c/333000333/777',
+            }),
+          ],
+        ],
+      }),
+    );
+  });
+
+  it('keeps a task in the topic it was requested from instead of nesting a new one', async () => {
+    mockTelegramLinkedSender('launch-owner-31');
+
+    const response = await postTelegramUpdate(
+      createTelegramUpdate({
+        message: {
+          text: '@roomote_bot fix the flaky login test',
+          message_thread_id: 55,
+          chat: {
+            id: -100333000333,
+            type: 'supergroup',
+            title: 'roomote-dev',
+            is_forum: true,
+          },
+          entities: [{ type: 'mention', offset: 0, length: 12 }],
+        },
+      }),
+    );
+
+    expect(response.status).toBe(200);
+    expect(createForumTopicMock).not.toHaveBeenCalled();
+    expect(enqueueCloudTaskMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        payload: expect.objectContaining({
+          communicationThreadId: '55',
+        }),
+      }),
+      { launchClass: 'human' },
+    );
+  });
+
+  it('falls back to launching in the main chat when topic creation fails', async () => {
+    mockTelegramLinkedSender('launch-owner-32');
+    createForumTopicMock.mockRejectedValueOnce(
+      new Error('not enough rights to manage topics'),
+    );
+
+    const response = await postTelegramUpdate(
+      createTelegramUpdate({
+        message: {
+          text: '@roomote_bot fix the flaky login test',
+          chat: {
+            id: -100333000333,
+            type: 'supergroup',
+            title: 'roomote-dev',
+            is_forum: true,
+          },
+          entities: [{ type: 'mention', offset: 0, length: 12 }],
+        },
+      }),
+    );
+
+    await expect(response.json()).resolves.toEqual({
+      ok: true,
+      started: true,
+      cloudJobId: 88,
+    });
+    expect(enqueueCloudTaskMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        payload: expect.not.objectContaining({
+          communicationThreadId: expect.anything(),
+        }),
+      }),
+      { launchClass: 'human' },
+    );
+    expect(postMessageMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        channelId: '-100333000333',
+        replyToMessageId: '456',
+        text: 'Started a task in all repos.',
+      }),
     );
   });
 

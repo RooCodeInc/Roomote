@@ -66,6 +66,12 @@ export type MockTelegramChatAction = {
   message_thread_id?: number;
 };
 
+export type MockTelegramForumTopic = {
+  chat_id: string;
+  message_thread_id: number;
+  name: string;
+};
+
 /**
  * Failure-injection knobs. Real Telegram rejects whole requests for these
  * cases; the flags let tests exercise the provider's fallback paths.
@@ -91,6 +97,7 @@ export type MockTelegramState = {
   webhook?: MockTelegramWebhookRegistration;
   callbackAnswers?: MockTelegramCallbackAnswer[];
   chatActions?: MockTelegramChatAction[];
+  forumTopics?: MockTelegramForumTopic[];
   behavior?: MockTelegramBehavior;
 };
 
@@ -172,6 +179,7 @@ function normalizeState(state: MockTelegramState): MockTelegramState {
     })),
     callbackAnswers: [...(state.callbackAnswers ?? [])],
     chatActions: [...(state.chatActions ?? [])],
+    forumTopics: [...(state.forumTopics ?? [])],
   };
 }
 
@@ -765,6 +773,46 @@ export class MockTelegramServer {
         return;
       }
 
+      case 'createForumTopic': {
+        const chat = this.findChat(body.chat_id);
+
+        if (!chat) {
+          apiError(response, 400, 'Bad Request: chat not found');
+          return;
+        }
+
+        if (chat.is_forum !== true) {
+          apiError(
+            response,
+            400,
+            'Bad Request: the chat is not a forum supergroup chat',
+          );
+          return;
+        }
+
+        const name = String(body.name ?? '').trim();
+
+        if (!name || name.length > 128) {
+          apiError(response, 400, 'Bad Request: TOPIC_TITLE_INVALID');
+          return;
+        }
+
+        // Real Telegram allocates the topic id from the message-id space
+        // (it is the id of the topic's service message).
+        const topic: MockTelegramForumTopic = {
+          chat_id: String(chat.id),
+          message_thread_id: this.nextMessageId(),
+          name,
+        };
+        this.state.forumTopics = [...(this.state.forumTopics ?? []), topic];
+        apiResult(response, {
+          message_thread_id: topic.message_thread_id,
+          name: topic.name,
+          icon_color: 7322096,
+        });
+        return;
+      }
+
       case 'setWebhook': {
         this.state.webhook = {
           url: String(body.url ?? ''),
@@ -833,6 +881,22 @@ export class MockTelegramServer {
 
     if (!chat) {
       apiError(response, 400, 'Bad Request: chat not found');
+      return undefined;
+    }
+
+    // In forum chats a message_thread_id must reference an existing topic —
+    // real Telegram rejects unknown threads, so posting into a topic that
+    // was never created fails loudly here too.
+    if (
+      chat.is_forum === true &&
+      typeof body.message_thread_id === 'number' &&
+      !(this.state.forumTopics ?? []).some(
+        (topic) =>
+          topic.chat_id === String(chat.id) &&
+          topic.message_thread_id === body.message_thread_id,
+      )
+    ) {
+      apiError(response, 400, 'Bad Request: message thread not found');
       return undefined;
     }
 

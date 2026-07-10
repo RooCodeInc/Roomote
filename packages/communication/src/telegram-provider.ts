@@ -404,6 +404,32 @@ export class TelegramCommunicationProvider implements CommunicationProviderAdapt
     });
   }
 
+  /**
+   * Create a forum topic in a Topics-enabled supergroup. Requires the bot to
+   * be an admin with the manage-topics right. The returned thread id is what
+   * `message_thread_id` / `threadId` refer to when posting into the topic.
+   */
+  async createForumTopic(input: {
+    channelId: string;
+    name: string;
+  }): Promise<{ threadId: string; name: string }> {
+    const result = (await this.callBotApi('createForumTopic', {
+      chat_id: input.channelId,
+      name: input.name,
+    })) as { message_thread_id?: number; name?: string };
+
+    if (typeof result.message_thread_id !== 'number') {
+      throw new Error(
+        'Telegram createForumTopic returned no message_thread_id.',
+      );
+    }
+
+    return {
+      threadId: String(result.message_thread_id),
+      name: result.name ?? input.name,
+    };
+  }
+
   /** Delete a message the bot sent (Bot API allows this within 48 hours). */
   async deleteMessage(input: {
     channelId: string;
