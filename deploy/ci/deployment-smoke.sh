@@ -141,14 +141,39 @@ TRPC_URL=http://api:3001
 EOF
 }
 
+app_service_images=(
+  'roomote-web:runtime-web'
+  'roomote-api:runtime-api'
+  'roomote-controller:runtime-controller'
+  'roomote-bullmq:runtime-bullmq'
+  'roomote-preview-proxy:runtime-preview-proxy'
+  'roomote-migrate:runtime-migrate'
+)
+
 build_candidate_images() {
   if [ "${DEPLOYMENT_CI_SKIP_BUILD:-false}" = 'true' ]; then
     return
   fi
 
+  local image target
+  for entry in "${app_service_images[@]}"; do
+    image="${entry%%:*}"
+    target="${entry##*:}"
+    printf 'Building candidate %s image (%s)\n' "$image" "$platform"
+    docker buildx build --load \
+      --platform "$platform" \
+      --target "$target" \
+      --build-arg APP_ENV=production \
+      --build-arg "RELEASE_VERSION=$candidate_version" \
+      --tag "localhost/roomote/${image}:$candidate_version" \
+      --file "$repo_root/.docker/app/Dockerfile" \
+      "$repo_root"
+  done
+
   printf 'Building candidate app image (%s)\n' "$platform"
   docker buildx build --load \
     --platform "$platform" \
+    --target runtime-app \
     --build-arg APP_ENV=production \
     --build-arg "RELEASE_VERSION=$candidate_version" \
     --tag "localhost/roomote/roomote-app:$candidate_version" \
@@ -168,7 +193,16 @@ prepare_baseline_images() {
     return 0
   fi
 
+  local image
   printf 'Pulling previous release %s for upgrade validation\n' "$baseline_version"
+  for entry in "${app_service_images[@]}"; do
+    image="${entry%%:*}"
+    docker pull --platform "$platform" "ghcr.io/roocodeinc/${image}:$baseline_version"
+    docker tag \
+      "ghcr.io/roocodeinc/${image}:$baseline_version" \
+      "localhost/roomote/${image}:baseline"
+  done
+
   docker pull --platform "$platform" "ghcr.io/roocodeinc/roomote-app:$baseline_version"
   docker pull --platform "$platform" "ghcr.io/roocodeinc/roomote-worker:$baseline_version"
   docker tag \
