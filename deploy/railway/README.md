@@ -11,7 +11,7 @@ This guide covers deploying Roomote on [Railway](https://railway.com) — either
 through an official Roomote template or by composing the services manually.
 Both templates are mirrored from the same maintained service specification,
 [`template.yaml`](template.yaml), and differ only in which image alias the
-four app services track; everything in this guide applies to both. Railway
+five app services track; everything in this guide applies to both. Railway
 does not read that file directly, but it is the source of truth that
 maintainers mirror into Railway's Template Composer.
 
@@ -95,7 +95,7 @@ Nothing else in either template encodes a version:
   constant.
 
 To pin instead (recommended for production deployments): put the same
-immutable tag (`v*`, `main-<sha>`, or `develop-<sha>`) in the four
+immutable tag (`v*`, `main-<sha>`, or `develop-<sha>`) in the five
 app-service image fields. No other edits are needed — the derived values
 follow the image.
 
@@ -388,9 +388,9 @@ domain, which requires a domain you control:
   templates, not Docker-image-based ones like this. Template changes affect
   new deploys only.
 - **Upgrade a deployment on a channel alias** (`:main` or `:develop`) by
-  redeploying the four app services — they pull the current alias, and
+  redeploying the five app services — they pull the current alias, and
   everything version-coupled derives from the new image. On an immutable
-  pin, bump the tag in the four image fields first. The api service's
+  pin, bump the tag in the five image fields first. The api service's
   `db-migrate` pre-deploy applies any schema changes, and the
   auto-generated keypairs persist in Postgres, so sessions, job tokens, and
   preview tokens survive redeploys. These redeploys can be automated against
