@@ -58,21 +58,16 @@ The published GHCR images are public and need no pull credentials.
 Production deployments pull these images by immutable tag:
 
 ```text
-ghcr.io/roocodeinc/roomote-web:<version>
-ghcr.io/roocodeinc/roomote-api:<version>
-ghcr.io/roocodeinc/roomote-controller:<version>
-ghcr.io/roocodeinc/roomote-bullmq:<version>
-ghcr.io/roocodeinc/roomote-preview-proxy:<version>
-ghcr.io/roocodeinc/roomote-migrate:<version>
+ghcr.io/roocodeinc/roomote-app:<version>
 ghcr.io/roocodeinc/roomote-worker:<version>
 ```
 
-The control-plane images share build stages but ship only their own runtime
-bundle. They run as dedicated non-root users; only `roomote-controller`
-contains the Docker CLI and worker-release assets. A non-root
-`roomote-app:<version>` compatibility image is also published for platforms
-that require several process groups to share one image, but the production
-Compose deployment uses the service-specific images above.
+Every control-plane service (web, API, controller, BullMQ, preview proxy, and
+migrations) runs from the shared non-root `roomote-app` image; the container
+command and `ROOMOTE_SERVICE` select the service and its environment contract.
+Privilege separation lives in the Compose files: read-only filesystems,
+dropped capabilities, per-service env contracts, and a Docker socket proxy
+reachable only from the controller service.
 
 Do not deploy `latest`. Pushes to `develop` automatically publish
 `develop-<short-sha>` image tags built with `APP_ENV=preview` for preview soak

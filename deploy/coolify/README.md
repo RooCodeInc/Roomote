@@ -60,8 +60,7 @@ instead. For a managed PaaS with no server of your own, see
 
 ## Image access
 
-The published compatibility, controller, and worker images
-(`ghcr.io/roocodeinc/roomote-app`, `ghcr.io/roocodeinc/roomote-controller`, and
+The published app and worker images (`ghcr.io/roocodeinc/roomote-app` and
 `ghcr.io/roocodeinc/roomote-worker`) are public and pulled anonymously; no
 registry login is needed.
 
@@ -75,9 +74,9 @@ and the controller reads the worker release version from the `VERSION` file
 inside `worker-current.tar.gz`.
 
 To pin instead (recommended for production deployments): change the
-`x-roomote-app-image` and `x-roomote-controller-image` anchors at the top of
-the compose file to the same immutable tag (`v*` or `develop-<sha>`). No other
-edits are needed — the derived values follow the images.
+`x-roomote-app-image` anchor at the top of the compose file to an immutable
+tag (`v*` or `develop-<sha>`). No other edits are needed — the derived values
+follow the image.
 
 ## Create the resource
 
@@ -98,17 +97,17 @@ edits are needed — the derived values follow the images.
 
 ## Service topology
 
-| Service         | Image                  | Public domain              | Healthcheck        |
-| --------------- | ---------------------- | -------------------------- | ------------------ |
-| `postgres`      | pinned `postgres:17.5` | no                         | `pg_isready`       |
-| `redis`         | pinned `redis:7-alpine` | no                        | `redis-cli ping`   |
-| `minio`         | pinned MinIO + volume  | yes (routed to port 9000)  | `mc ready local`   |
-| `db-migrate`    | `roomote-app:develop`  | no (one-shot)              | excluded           |
-| `web`           | `roomote-app:develop`  | yes (port 3000)            | `/health`          |
-| `api`           | `roomote-app:develop`  | yes (port 3001)            | `/health/liveness` |
-| `controller`    | `roomote-app:develop`  | no                         | `/health/controller` via API |
-| `bullmq`        | `roomote-app:develop`  | no                         | `/admin/health`    |
-| `preview-proxy` | `roomote-app:develop`  | optional (wildcard domain) | `/health`          |
+| Service         | Image                   | Public domain              | Healthcheck                  |
+| --------------- | ----------------------- | -------------------------- | ---------------------------- |
+| `postgres`      | pinned `postgres:17.5`  | no                         | `pg_isready`                 |
+| `redis`         | pinned `redis:7-alpine` | no                         | `redis-cli ping`             |
+| `minio`         | pinned MinIO + volume   | yes (routed to port 9000)  | `mc ready local`             |
+| `db-migrate`    | `roomote-app:develop`   | no (one-shot)              | excluded                     |
+| `web`           | `roomote-app:develop`   | yes (port 3000)            | `/health`                    |
+| `api`           | `roomote-app:develop`   | yes (port 3001)            | `/health/liveness`           |
+| `controller`    | `roomote-app:develop`   | no                         | `/health/controller` via API |
+| `bullmq`        | `roomote-app:develop`   | no                         | `/admin/health`              |
+| `preview-proxy` | `roomote-app:develop`   | optional (wildcard domain) | `/health`                    |
 
 ## Environment variables
 
@@ -227,8 +226,8 @@ wildcard-capable TLS setup on the Coolify proxy:
   Coolify pulls the current alias, `db-migrate` applies any schema changes
   before the app services restart, and the auto-generated keypairs persist
   in Postgres, so sessions, job tokens, and preview tokens survive
-  redeploys. On an immutable pin, bump the tags in the `x-roomote-app-image`
-  and `x-roomote-controller-image` anchors first.
+  redeploys. On an immutable pin, bump the tag in the `x-roomote-app-image`
+  anchor first.
 - **Back up** the Postgres volume (or run `pg_dump` against the `postgres`
   container) and the MinIO volume. Everything else is reproducible from
   config plus the generated environment values on the resource.

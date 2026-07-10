@@ -30,12 +30,16 @@ jq -e '
   ["web", "api", "controller", "bullmq", "preview-proxy", "db-migrate"] as $apps |
 
   ([$apps[] | . as $name | $root.services[$name] | hardened] | all) and
-  (.services.web.image | endswith("/roomote-web:security-contract-test")) and
-  (.services.api.image | endswith("/roomote-api:security-contract-test")) and
-  (.services.controller.image | endswith("/roomote-controller:security-contract-test")) and
-  (.services.bullmq.image | endswith("/roomote-bullmq:security-contract-test")) and
-  (.services["preview-proxy"].image | endswith("/roomote-preview-proxy:security-contract-test")) and
-  (.services["db-migrate"].image | endswith("/roomote-migrate:security-contract-test")) and
+  ([$apps[] | . as $name | $root.services[$name].image |
+    endswith("/roomote-app:security-contract-test")] | all) and
+  # ROOMOTE_SERVICE selects the per-service env contract (packages/env) now
+  # that every service shares one image.
+  (.services.web.environment.ROOMOTE_SERVICE == "web") and
+  (.services.api.environment.ROOMOTE_SERVICE == "api") and
+  (.services.controller.environment.ROOMOTE_SERVICE == "controller") and
+  (.services.bullmq.environment.ROOMOTE_SERVICE == "bullmq") and
+  (.services["preview-proxy"].environment.ROOMOTE_SERVICE == "preview-proxy") and
+  (.services["db-migrate"].environment.ROOMOTE_SERVICE == "db-migrate") and
   (.services["docker-proxy"].image == "ghcr.io/tecnativa/docker-socket-proxy:v0.4.2@sha256:1f3a6f303320723d199d2316a3e82b2e2685d86c275d5e3deeaf182573b47476") and
 
   ([.services | to_entries[] |
@@ -76,7 +80,8 @@ jq -e '
   (.services.api.environment.ANTHROPIC_API_KEY != null) and
   (.services.bullmq.environment.OPENAI_API_KEY != null) and
   ((.services["db-migrate"].environment | keys | sort) == [
-    "APP_ENV", "DATABASE_URL", "NODE_ENV", "ROOMOTE_DOCKER_LOAD_ENV_FILE"
+    "APP_ENV", "DATABASE_URL", "NODE_ENV", "ROOMOTE_DOCKER_LOAD_ENV_FILE",
+    "ROOMOTE_SERVICE"
   ])
 ' "$rendered_config" >/dev/null
 

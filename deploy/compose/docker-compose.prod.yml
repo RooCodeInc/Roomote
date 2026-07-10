@@ -3,12 +3,10 @@ name: roomote
 # Compose's --env-file supplies interpolation values only. Application
 # services intentionally do not use `env_file`: doing so would inject every
 # deployment secret into every process before the explicit contracts below.
-x-roomote-web-image: &roomote-web-image ${IMAGE_REGISTRY:-ghcr.io}/${IMAGE_NAMESPACE:-roocodeinc}/roomote-web:${ROOMOTE_VERSION:?ROOMOTE_VERSION is required}
-x-roomote-api-image: &roomote-api-image ${IMAGE_REGISTRY:-ghcr.io}/${IMAGE_NAMESPACE:-roocodeinc}/roomote-api:${ROOMOTE_VERSION:?ROOMOTE_VERSION is required}
-x-roomote-controller-image: &roomote-controller-image ${IMAGE_REGISTRY:-ghcr.io}/${IMAGE_NAMESPACE:-roocodeinc}/roomote-controller:${ROOMOTE_VERSION:?ROOMOTE_VERSION is required}
-x-roomote-bullmq-image: &roomote-bullmq-image ${IMAGE_REGISTRY:-ghcr.io}/${IMAGE_NAMESPACE:-roocodeinc}/roomote-bullmq:${ROOMOTE_VERSION:?ROOMOTE_VERSION is required}
-x-roomote-preview-proxy-image: &roomote-preview-proxy-image ${IMAGE_REGISTRY:-ghcr.io}/${IMAGE_NAMESPACE:-roocodeinc}/roomote-preview-proxy:${ROOMOTE_VERSION:?ROOMOTE_VERSION is required}
-x-roomote-migrate-image: &roomote-migrate-image ${IMAGE_REGISTRY:-ghcr.io}/${IMAGE_NAMESPACE:-roocodeinc}/roomote-migrate:${ROOMOTE_VERSION:?ROOMOTE_VERSION is required}
+# Every control-plane service runs from the shared app image; the command and
+# ROOMOTE_SERVICE select which service a container becomes, and the env
+# contract for that service is enforced by packages/env.
+x-roomote-app-image: &roomote-app-image ${IMAGE_REGISTRY:-ghcr.io}/${IMAGE_NAMESPACE:-roocodeinc}/roomote-app:${ROOMOTE_VERSION:?ROOMOTE_VERSION is required}
 
 x-roomote-base-env: &roomote-base-env
   NODE_ENV: production
@@ -301,7 +299,7 @@ services:
 
   db-migrate:
     <<: *roomote-service
-    image: *roomote-migrate-image
+    image: *roomote-app-image
     restart: 'no'
     depends_on:
       postgres:
@@ -309,6 +307,7 @@ services:
         required: false
     command: ['db-migrate']
     environment:
+      ROOMOTE_SERVICE: db-migrate
       NODE_ENV: production
       APP_ENV: ${APP_ENV:-production}
       ROOMOTE_DOCKER_LOAD_ENV_FILE: 'false'
@@ -316,17 +315,18 @@ services:
 
   web:
     <<: *roomote-service
-    image: *roomote-web-image
+    image: *roomote-app-image
     command: ['web']
     depends_on:
       api:
         condition: service_started
     environment:
       <<: *roomote-web-env
+      ROOMOTE_SERVICE: web
       PORT: 3000
     tmpfs:
       - /tmp:rw,noexec,nosuid,nodev,size=64m,mode=1777
-      - /roomote/apps/web/.next/cache:rw,noexec,nosuid,nodev,size=128m,uid=10001,gid=10001,mode=700
+      - /roomote/apps/web/.next/cache:rw,noexec,nosuid,nodev,size=128m,uid=10000,gid=10000,mode=700
     healthcheck:
       test:
         [
@@ -340,7 +340,7 @@ services:
 
   api:
     <<: *roomote-service
-    image: *roomote-api-image
+    image: *roomote-app-image
     command: ['api']
     # Reachable from task worker containers (worker -> API over TRPC_URL).
     networks: [default, worker]
@@ -353,6 +353,7 @@ services:
         condition: service_completed_successfully
     environment:
       <<: *roomote-api-env
+      ROOMOTE_SERVICE: api
       PORT: 3001
     healthcheck:
       test:
@@ -367,7 +368,7 @@ services:
 
   controller:
     <<: *roomote-service
-    image: *roomote-controller-image
+    image: *roomote-app-image
     command: ['controller']
     # Spawns and reaches task worker containers on the worker network.
     networks: [default, worker, docker-api]
@@ -385,6 +386,7 @@ services:
         condition: service_started
     environment:
       <<: *roomote-controller-env
+      ROOMOTE_SERVICE: controller
     healthcheck:
       test:
         [
@@ -398,7 +400,7 @@ services:
 
   bullmq:
     <<: *roomote-service
-    image: *roomote-bullmq-image
+    image: *roomote-app-image
     command: ['bullmq']
     depends_on:
       redis:
@@ -407,6 +409,7 @@ services:
         condition: service_completed_successfully
     environment:
       <<: *roomote-bullmq-env
+      ROOMOTE_SERVICE: bullmq
       PORT: 3002
     healthcheck:
       test:
@@ -421,7 +424,7 @@ services:
 
   preview-proxy:
     <<: *roomote-service
-    image: *roomote-preview-proxy-image
+    image: *roomote-app-image
     command: ['preview-proxy']
     # Proxies preview traffic into task worker containers.
     networks: [default, worker]
@@ -430,6 +433,7 @@ services:
         condition: service_completed_successfully
     environment:
       <<: *roomote-preview-proxy-env
+      ROOMOTE_SERVICE: preview-proxy
       PORT: 8081
     healthcheck:
       test:

@@ -246,8 +246,8 @@ RUN mkdir -p /runtime-deps && cd /runtime-deps && npm init -y >/dev/null && \
 
 # ---------------------------------------------------------------------------
 # Runtime base: only health-check/TLS/process-init tooling shared by control
-# plane services. Runtime tools are layered onto only the services that execute
-# the corresponding control-plane workflows.
+# plane services. Heavier runtime tools (OpenCode, gh, Docker CLI) are layered
+# on via dedicated stages below.
 # ---------------------------------------------------------------------------
 FROM node:24.13.1-slim AS runtime-base
 
@@ -308,111 +308,12 @@ RUN apt -qq update && \
   test -x /usr/bin/gh
 
 # ---------------------------------------------------------------------------
-# Service-specific runtime targets. Each target contains one application and
-# runs as its own unprivileged account. The controller is the sole target that
-# receives the Docker CLI and worker-release assets.
+# Shared control-plane runtime target. One image runs every control-plane
+# service; the entrypoint's first argument selects which one. It is non-root,
+# and privilege separation between services lives in the Compose files:
+# read-only filesystems, per-service env contracts (ROOMOTE_SERVICE), and a
+# Docker socket proxy reachable only from the controller service.
 # ---------------------------------------------------------------------------
-FROM runtime-inference-base AS runtime-web
-
-ENV ROOMOTE_SERVICE=web
-
-RUN groupadd --system --gid 10001 roomote-web && \
-  useradd --system --uid 10001 --gid roomote-web --home-dir /nonexistent --shell /usr/sbin/nologin roomote-web
-
-COPY --from=build-web /roomote/apps/web/.next/standalone ./
-COPY --from=build-web /roomote/apps/web/.next/static ./apps/web/.next/static/
-COPY --from=build-web /roomote/apps/web/public ./apps/web/public/
-RUN command -v opencode >/dev/null
-
-USER roomote-web:roomote-web
-EXPOSE 3000
-CMD ["web"]
-
-FROM runtime-inference-base AS runtime-api
-
-ENV ROOMOTE_SERVICE=api
-
-RUN groupadd --system --gid 10002 roomote-api && \
-  useradd --system --uid 10002 --gid roomote-api --home-dir /nonexistent --shell /usr/sbin/nologin roomote-api
-
-COPY --from=build-api /roomote/apps/api/package.json ./apps/api/
-COPY --from=build-api /roomote/apps/api/dist ./apps/api/dist/
-COPY --from=build-api /runtime-deps/node_modules ./apps/api/node_modules/
-COPY --from=github-cli /usr/bin/gh /usr/local/bin/gh
-RUN command -v gh >/dev/null && command -v opencode >/dev/null
-
-USER roomote-api:roomote-api
-EXPOSE 3001
-CMD ["api"]
-
-FROM runtime-base AS runtime-controller
-
-ENV ROOMOTE_SERVICE=controller
-
-COPY --from=docker-cli /usr/local/bin/docker /usr/local/bin/docker
-COPY .docker/sandbox ./.docker/sandbox/
-# Workspace marker: controller path resolution walks up from cwd looking for
-# pnpm-workspace.yaml (apps/controller/src/repo-paths.ts).
-COPY pnpm-workspace.yaml ./
-COPY --from=build-controller /roomote/releases /roomote/releases/
-COPY --from=build-controller /roomote/apps/controller/package.json ./apps/controller/
-COPY --from=build-controller /roomote/apps/controller/dist ./apps/controller/dist/
-COPY --from=build-controller /runtime-deps/node_modules ./apps/controller/node_modules/
-
-RUN groupadd --system --gid 10003 roomote-controller && \
-  useradd --system --uid 10003 --gid roomote-controller --home-dir /nonexistent --shell /usr/sbin/nologin roomote-controller
-
-USER roomote-controller:roomote-controller
-CMD ["controller"]
-
-FROM runtime-inference-base AS runtime-bullmq
-
-ENV ROOMOTE_SERVICE=bullmq
-
-RUN groupadd --system --gid 10004 roomote-bullmq && \
-  useradd --system --uid 10004 --gid roomote-bullmq --home-dir /nonexistent --shell /usr/sbin/nologin roomote-bullmq
-
-COPY --from=build-bullmq /roomote/apps/bullmq/package.json ./apps/bullmq/
-COPY --from=build-bullmq /roomote/apps/bullmq/dist ./apps/bullmq/dist/
-COPY --from=build-bullmq /runtime-deps/node_modules ./apps/bullmq/node_modules/
-RUN command -v opencode >/dev/null
-
-USER roomote-bullmq:roomote-bullmq
-EXPOSE 3002
-CMD ["bullmq"]
-
-FROM runtime-base AS runtime-preview-proxy
-
-ENV ROOMOTE_SERVICE=preview-proxy
-
-RUN groupadd --system --gid 10005 roomote-preview && \
-  useradd --system --uid 10005 --gid roomote-preview --home-dir /nonexistent --shell /usr/sbin/nologin roomote-preview
-
-COPY apps/preview-proxy/entrypoint.sh /entrypoint.sh
-COPY --from=build-preview-proxy /roomote/apps/preview-proxy/package.json ./apps/preview-proxy/
-COPY --from=build-preview-proxy /roomote/apps/preview-proxy/dist ./apps/preview-proxy/dist/
-COPY --from=build-preview-proxy /runtime-deps/node_modules ./apps/preview-proxy/node_modules/
-RUN chmod +x /entrypoint.sh
-
-USER roomote-preview:roomote-preview
-EXPOSE 8081
-CMD ["preview-proxy"]
-
-FROM runtime-base AS runtime-migrate
-
-ENV ROOMOTE_SERVICE=db-migrate
-
-RUN groupadd --system --gid 10006 roomote-migrate && \
-  useradd --system --uid 10006 --gid roomote-migrate --home-dir /nonexistent --shell /usr/sbin/nologin roomote-migrate
-
-COPY --from=build-api /migrate /roomote/migrate/
-
-USER roomote-migrate:roomote-migrate
-CMD ["db-migrate"]
-
-# Compatibility target for platforms such as Fly that require multiple
-# process groups to share one image. It remains non-root and deliberately has
-# no Docker CLI; Docker-backed self-hosting uses runtime-controller instead.
 FROM runtime-inference-base AS runtime-app
 
 ENV ROOMOTE_SERVICE=
@@ -420,7 +321,10 @@ ENV ROOMOTE_SERVICE=
 RUN groupadd --system --gid 10000 roomote-app && \
   useradd --system --uid 10000 --gid roomote-app --home-dir /nonexistent --shell /usr/sbin/nologin roomote-app
 
+COPY --from=docker-cli /usr/local/bin/docker /usr/local/bin/docker
 COPY .docker/sandbox ./.docker/sandbox/
+# Workspace marker: controller path resolution walks up from cwd looking for
+# pnpm-workspace.yaml (apps/controller/src/repo-paths.ts).
 COPY pnpm-workspace.yaml ./
 COPY apps/preview-proxy/entrypoint.sh /entrypoint.sh
 RUN chmod +x /entrypoint.sh

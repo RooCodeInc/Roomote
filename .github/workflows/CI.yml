@@ -196,24 +196,6 @@ jobs:
           - app: app
             dockerfile: .docker/app/Dockerfile
             target: runtime-app
-          - app: web
-            dockerfile: .docker/app/Dockerfile
-            target: runtime-web
-          - app: api
-            dockerfile: .docker/app/Dockerfile
-            target: runtime-api
-          - app: controller
-            dockerfile: .docker/app/Dockerfile
-            target: runtime-controller
-          - app: bullmq
-            dockerfile: .docker/app/Dockerfile
-            target: runtime-bullmq
-          - app: preview-proxy
-            dockerfile: .docker/app/Dockerfile
-            target: runtime-preview-proxy
-          - app: migrate
-            dockerfile: .docker/app/Dockerfile
-            target: runtime-migrate
           - app: worker
             dockerfile: apps/worker/Dockerfile
             target: runtime
