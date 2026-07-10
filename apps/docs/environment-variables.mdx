@@ -242,7 +242,7 @@ as per-task auth tokens or workspace paths.
 | `SLACK_CLIENT_ID`                      | Slack app/auth    | Slack OAuth client ID. Also accepted for Slack sign-in setup.                   |
 | `SLACK_CLIENT_SECRET`                  | Slack app/auth    | Slack OAuth client secret. Also accepted for Slack sign-in setup.               |
 | `SLACK_REDIRECT_URI`                   | Optional          | Slack redirect URI override.                                                    |
-| `SLACK_AUTH_URI`                       | Optional          | Slack auth URI override.                                                        |
+| `SLACK_AUTH_URI`                       | Optional          | Slack auth URI override. Defaults to `ROOMOTE_APP_URL` + `/api/slack/auth`.     |
 | `SLACK_SIGNING_SECRET`                 | Slack app/auth    | Slack signing secret for webhook verification.                                  |
 | `SLACK_API_BASE_URL`                   | Optional          | Slack API base URL. Defaults to `https://slack.com/api/`.                       |
 | `SLACK_UNFURL_ALLOWED_DOMAINS`         | Optional          | Domains Slack unfurl handling may allow.                                        |

@@ -541,6 +541,13 @@ function buildRoomoteRuntimeEnv(
     env.S3_BUCKET_ARTIFACTS ??= LOCAL_S3_BUCKET_ARTIFACTS;
   }
 
+  // Slack rejects the whole account-linking DM (invalid_blocks) when the
+  // "Link accounts" button URL is not absolute, so an unset SLACK_AUTH_URI
+  // must fall back to the web app's linking route rather than empty string.
+  if (!env.SLACK_AUTH_URI && env.ROOMOTE_APP_URL) {
+    env.SLACK_AUTH_URI = `${env.ROOMOTE_APP_URL.replace(/\/+$/, '')}/api/slack/auth`;
+  }
+
   return env;
 }
 
