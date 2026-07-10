@@ -54,8 +54,22 @@ describe('buildSetupComputeStatus', () => {
 
     expect(status.selectedProvider).toBeNull();
     expect(status.setupSatisfied).toBe(false);
+    expect(status.setupSatisfiedByRuntimeEnv).toBe(false);
     expect(status.preselectedProvider).toBe('docker');
     expect(status.runtimeDefaultProvider).toBe('docker');
+  });
+
+  it('is satisfied when any hosted provider is configured in the runtime env', () => {
+    const status = buildSetupComputeStatus({
+      runtimeEnv: {
+        E2B_API_KEY: 'key',
+        E2B_TEMPLATE_ID: 'template',
+      },
+    });
+
+    expect(status.selectedProvider).toBeNull();
+    expect(status.setupSatisfiedByRuntimeEnv).toBe(true);
+    expect(status.setupSatisfied).toBe(true);
   });
 
   it('is satisfied when docker is chosen because it needs no credentials', () => {
@@ -458,6 +472,7 @@ describe('buildSetupComputeStatus', () => {
     });
     expect(modal?.configSatisfied).toBe(true);
     expect(modal?.runtimeConfigSatisfied).toBe(false);
+    expect(status.setupSatisfiedByRuntimeEnv).toBe(true);
     expect(status.setupSatisfied).toBe(true);
   });
 
