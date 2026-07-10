@@ -1738,7 +1738,6 @@ slackMcp.post('/channel_post', async (c) => {
   const cloudJob = await db.query.taskRuns.findFirst({
     columns: {
       id: true,
-      actingUserId: true,
       taskId: true,
     },
     where: eq(taskRuns.id, authContext.cloudJobId),

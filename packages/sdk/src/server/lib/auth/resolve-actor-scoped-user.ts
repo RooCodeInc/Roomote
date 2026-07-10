@@ -16,10 +16,11 @@ export interface ActorScopedUserContext {
 /**
  * Resolve the effective human for actor-scoped integration lookups.
  *
- * Job tokens stay authorized as the original job owner, but live-task
- * follow-ups may switch `cloud_jobs.actingUserId` to the latest human who is
- * speaking to the task. Actor-scoped integration lookups should follow that
- * override when present.
+ * Job tokens are authorized by their run-scoped `cloudJobId` binding; the
+ * token's userId is only mint-time attribution. Live-task steers and
+ * follow-ups switch `task_runs.actingUserId` to the latest human who is
+ * speaking to the task, so actor-scoped integration lookups follow that
+ * live value when present and fall back to the token's mint-time user.
  */
 export async function resolveActorScopedUserContext(
   auth: ActorScopedAuthContext | null | undefined,
