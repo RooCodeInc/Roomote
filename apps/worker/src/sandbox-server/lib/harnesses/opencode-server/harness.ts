@@ -53,6 +53,23 @@ import {
   PLAN_WORKFLOW_SKILL,
   resolveWorkflowSkillTransition,
 } from './workflow-skill-transition';
+import {
+  DEFAULT_EXECUTE_TOOL_PROGRESS_INITIAL_DELAY_MS,
+  DEFAULT_EXECUTE_TOOL_PROGRESS_INTERVAL_MS,
+  OpenCodeExecuteToolProgress,
+} from './execute-tool-progress';
+import {
+  MAX_OPENCODE_STOP_HOOK_REMINDERS,
+  DEFAULT_OPENCODE_STOP_HOOK_REMINDER_STALL_TIMEOUT_MS,
+  OpenCodeStopHookReminderStall,
+} from './stop-hook-reminder-stall';
+import { OpenCodeResolvedUserInputTracker } from './resolved-user-input-tracker';
+import {
+  DEFAULT_SUBAGENT_TASK_TIMEOUT_MS,
+  DEFAULT_SUBAGENT_TASK_INACTIVITY_TIMEOUT_MS,
+  OpenCodeSubagentWatchdog,
+  isOpenCodeSubagentTaskTool,
+} from './subagent-watchdog';
 import type {
   OpenCodeEventPayload,
   OpenCodeGlobalEvent,
@@ -175,84 +192,11 @@ interface OpenCodeNormalizedSubtaskPart {
   callPayload: Record<string, unknown>;
 }
 
-interface ActiveOpenCodeExecuteToolProgress {
-  sessionId: string;
-  messageId?: string;
-  toolCallId: string;
-  toolName: string;
-  title: string;
-  command: string | null | undefined;
-  payload: Record<string, unknown>;
-  startedAtMs: number;
-  timer: ReturnType<typeof setTimeout>;
-}
-
-interface ActiveOpenCodeSubagentWatchdog {
-  sessionId: string;
-  /** Background launches outlive the parent turn; turn finish must not disarm them. */
-  background: boolean;
-  messageId: string | undefined;
-  toolCallId: string;
-  title: string;
-  agentType: string | null;
-  childSessionId: string | null;
-  startedAtMs: number;
-  lastActivityAtMs: number;
-  // Child tool calls observed in a non-terminal state. While any are in
-  // flight the inactivity deadline is suspended: a silently running tool is
-  // indistinguishable from a hung one by event flow alone. OpenCode's shell
-  // tool bounds that state itself (default 2-minute timeout that kills the
-  // command and emits a terminal tool event); other tool kinds (MCP calls,
-  // webfetch, nested task spawns) are not self-bounding, so a hang inside
-  // one falls back to the total timeout — a deliberate trade-off, since a
-  // wrong kill of legitimate slow work is worse than a slow abort.
-  activeChildToolCallIds: Set<string>;
-  timer: ReturnType<typeof setTimeout>;
-  updatePayload: Record<string, unknown>;
-  activitySeenChildToolCallIds: Set<string>;
-  activityLastAction: string | null;
-  activityLastEmitAtMs: number;
-}
-
 const OPEN_CODE_EXECUTE_TOOLS = new Set(['bash', 'shell']);
 const OPEN_CODE_READ_TOOLS = new Set(['read']);
 const OPEN_CODE_SEARCH_TOOLS = new Set(['grep', 'glob', 'find', 'list', 'ls']);
-const MAX_OPENCODE_STOP_HOOK_REMINDERS = 3;
-// Fail-safe for a wedged stop-hook reminder cycle. After a turn finishes
-// without the required Slack closeout, we resubmit a reminder prompt and then
-// wait for a fresh turn (a future session.idle re-enters finishCurrentTurn).
-// If OpenCode never produces that turn — the session wedged, e.g. after a mass
-// subagent abort — nothing else bounds the wait and the job hangs "running"
-// indefinitely while the sandbox keeps heart-beating. This deadline force-
-// completes the turn so the job reaches a terminal state instead. Any normal
-// turn re-entry (or teardown) clears it first via clearAllExecuteToolProgress,
-// so it only ever fires on a genuine silence.
-const OPENCODE_STOP_HOOK_REMINDER_STALL_TIMEOUT_MS = 10 * 60_000;
 const EXPECTED_REPLAY_ABORT_SUPPRESSION_MS = 10_000;
-const DEFAULT_EXECUTE_TOOL_PROGRESS_INITIAL_DELAY_MS = 15_000;
-const DEFAULT_EXECUTE_TOOL_PROGRESS_INTERVAL_MS = 30_000;
-// Kill switch for runaway subagent runs: a subagent that produces no terminal
-// signal within this window is presumed dead and its child sessions are
-// aborted so the parent turn can continue instead of hanging silently. Sized
-// for large review/audit subagents that legitimately read hundreds of files;
-// 12 minutes was too tight and killed in-progress work (the sliding inactivity
-// deadline below is the primary wedge detector, so this only backstops a child
-// that stays superficially active but never terminates).
-const DEFAULT_SUBAGENT_TASK_TIMEOUT_MS = 30 * 60_000;
-// Sliding inactivity deadline for subagent runs: once the child session is
-// known, every event it emits (streamed text, tool state, message completion)
-// counts as liveness. A child that goes silent for this window is presumed
-// wedged and aborted without waiting for the total timeout above. Only
-// enforced when it is a strong signal: the child session id must be known
-// (otherwise there is no activity feed to judge by) and no child tool call
-// may be in flight (a legitimately silent long-running tool is
-// indistinguishable from a hung one; OpenCode's own shell-tool timeout
-// bounds that state and its kill emits a terminal tool event). Between
-// tools, a live child streams tokens or issues its next tool call — silence
-// there means the loop is dead.
-const DEFAULT_SUBAGENT_TASK_INACTIVITY_TIMEOUT_MS = 3 * 60_000;
 const DEFAULT_QUEUED_PROMPT_RETRY_DELAY_MS = 1_000;
-const MAX_PROGRESS_COMMAND_CHARS = 240;
 const FALLBACK_OPENCODE_STOP_HOOK_REMINDER =
   'Before finalizing, post a terminal Slack-visible reply for the current turn.';
 const ROOMOTE_OPENCODE_VISUAL_AGENT_NAME = 'visual';
@@ -1007,8 +951,6 @@ function isOpenCodeMessageAbortedError(error: unknown): boolean {
 
 const SESSION_ERROR_FALLBACK_MAX_CHARS = 600;
 
-const MAX_RESOLVED_USER_INPUT_REQUEST_IDS = 256;
-
 /**
  * Session errors used to be dumped into the transcript as the raw
  * `JSON.stringify(error)` blob (status codes, response headers, provider
@@ -1158,82 +1100,8 @@ function isOpenCodeTodoWriteTool(toolName: string): boolean {
   return toolName.toLowerCase() === 'todowrite';
 }
 
-// Real OpenCode subagent spawns surface on the parent session as a `task`
-// tool part whose state carries input.subagent_type and, once the child
-// session exists, metadata.sessionId pointing at it. (`subtask` parts are a
-// separate command-driven surface that never reports a status.)
-const OPEN_CODE_SUBAGENT_TASK_TOOL_NAME = 'task';
-
-const SUBAGENT_ACTIVITY_EMIT_INTERVAL_MS = 5_000;
-
-function isOpenCodeSubagentTaskTool(toolName: string): boolean {
-  return toolName.toLowerCase() === OPEN_CODE_SUBAGENT_TASK_TOOL_NAME;
-}
-
-function extractOpenCodeTaskToolChildSessionId(
-  toolPart: OpenCodeToolPart,
-): string | null {
-  const metadata = asRecord(toolPart.state?.metadata);
-
-  // Background task launches report the child session id as `jobId`.
-  return asString(metadata?.sessionId) ?? asString(metadata?.jobId) ?? null;
-}
-
-function isOpenCodeBackgroundTaskToolPart(toolPart: OpenCodeToolPart): boolean {
-  return (
-    asBoolean(asRecord(toolPart.state?.input)?.background) === true ||
-    asBoolean(asRecord(toolPart.state?.metadata)?.background) === true
-  );
-}
-
-function extractOpenCodeTaskToolAgentType(
-  toolPart: OpenCodeToolPart,
-): string | null {
-  return asString(asRecord(toolPart.state?.input)?.subagent_type) ?? null;
-}
-
 function isTerminalOpenCodeToolStatus(status: AcpToolStatus): boolean {
   return status === 'completed' || status === 'failed';
-}
-
-function truncateProgressCommand(command: string): string {
-  if (command.length <= MAX_PROGRESS_COMMAND_CHARS) {
-    return command;
-  }
-
-  return `${command.slice(0, MAX_PROGRESS_COMMAND_CHARS - 3)}...`;
-}
-
-function formatProgressElapsed(elapsedMs: number): string {
-  const totalSeconds = Math.max(1, Math.round(elapsedMs / 1000));
-
-  if (totalSeconds < 60) {
-    return `${totalSeconds}s`;
-  }
-
-  const minutes = Math.floor(totalSeconds / 60);
-  const seconds = totalSeconds % 60;
-
-  return seconds > 0 ? `${minutes}m ${seconds}s` : `${minutes}m`;
-}
-
-function formatExecuteToolProgressOutput(
-  progress: ActiveOpenCodeExecuteToolProgress,
-  nowMs: number,
-): string {
-  const lines = [
-    `Command still running for about ${formatProgressElapsed(
-      nowMs - progress.startedAtMs,
-    )}.`,
-  ];
-
-  if (progress.command) {
-    lines.push(`Command: ${truncateProgressCommand(progress.command)}`);
-  }
-
-  lines.push('No command output has been reported yet.');
-
-  return lines.join('\n');
 }
 
 function hasMeaningfulOpenCodeToolCallDetails(
@@ -1443,29 +1311,17 @@ export class OpenCodeServerHarness
   private readonly runtimeEvents: OpenCodeRuntimeEventEmitter;
   private readonly prompts: RuntimePromptQueue;
   private readonly eventStreamReadyTimeoutMs: number;
-  private readonly executeToolProgressInitialDelayMs: number;
-  private readonly executeToolProgressIntervalMs: number;
-  private readonly subagentTaskTimeoutMs: number;
-  private readonly subagentTaskInactivityTimeoutMs: number;
-  private readonly stopHookReminderStallTimeoutMs: number;
   private readonly queuedPromptRetryDelayMs: number;
+  private readonly executeToolProgress: OpenCodeExecuteToolProgress;
+  private readonly subagentWatchdogs: OpenCodeSubagentWatchdog;
+  private readonly stopHookReminderStall: OpenCodeStopHookReminderStall;
+  private readonly resolvedUserInputRequests: OpenCodeResolvedUserInputTracker;
   private readonly streamedPartText = new Map<string, string>();
   private readonly streamedMessageIds = new Set<string>();
   private readonly streamedReasoningMessageIds = new Set<string>();
   private readonly persistedMessageIds = new Set<string>();
-  private readonly recordedChildUsageMessageIds = new Set<string>();
   private readonly emittedToolCallKeys = new Set<string>();
   private readonly persistedToolResultKeys = new Set<string>();
-  private readonly activeExecuteToolProgress = new Map<
-    string,
-    ActiveOpenCodeExecuteToolProgress
-  >();
-  private readonly childSessionWatchdogKeys = new Map<string, string>();
-
-  private readonly activeSubagentWatchdogs = new Map<
-    string,
-    ActiveOpenCodeSubagentWatchdog
-  >();
   private readonly emittedTodoPlanKeys = new Set<string>();
   private readonly submittedUserMessageIds = new Set<string>();
   private readonly messageRoleById = new Map<string, OpenCodeMessageRole>();
@@ -1473,12 +1329,6 @@ export class OpenCodeServerHarness
     string,
     HarnessPendingUserInputRequest
   >();
-  // Request ids that have already been answered or abandoned. A late answer
-  // (e.g. a web POST opened before a steer abandoned the question) for one
-  // of these must be rejected rather than fabricated into the replayed turn.
-  // Bounded, oldest-evicted, since ids are per-turn and only need to outlive
-  // in-flight answer round-trips.
-  private readonly resolvedUserInputRequestIds = new Set<string>();
   private readonly knownMcpServerNames: string[];
   private readonly visualAttachmentDirectories = new Set<string>();
 
@@ -1494,9 +1344,6 @@ export class OpenCodeServerHarness
   // turns can run on the built-in read-only `plan` agent.
   private activeWorkflowSkill: string | null = null;
   private commandEnv: Record<string, string> | undefined;
-  private stopHookReminderCount = 0;
-  private stopHookReminderStallTimer: ReturnType<typeof setTimeout> | null =
-    null;
   private resolveEventStreamReady: (() => void) | undefined;
   private rejectEventStreamReady: ((error: unknown) => void) | undefined;
   private finalizedAssistantTurn: FinalizedAssistantTurn | null = null;
@@ -1530,20 +1377,6 @@ export class OpenCodeServerHarness
       ? { ...options.commandEnv }
       : undefined;
     this.eventStreamReadyTimeoutMs = options.eventStreamReadyTimeoutMs ?? 5_000;
-    this.executeToolProgressInitialDelayMs =
-      options.executeToolProgressInitialDelayMs ??
-      DEFAULT_EXECUTE_TOOL_PROGRESS_INITIAL_DELAY_MS;
-    this.executeToolProgressIntervalMs =
-      options.executeToolProgressIntervalMs ??
-      DEFAULT_EXECUTE_TOOL_PROGRESS_INTERVAL_MS;
-    this.subagentTaskTimeoutMs =
-      options.subagentTaskTimeoutMs ?? DEFAULT_SUBAGENT_TASK_TIMEOUT_MS;
-    this.subagentTaskInactivityTimeoutMs =
-      options.subagentTaskInactivityTimeoutMs ??
-      DEFAULT_SUBAGENT_TASK_INACTIVITY_TIMEOUT_MS;
-    this.stopHookReminderStallTimeoutMs =
-      options.stopHookReminderStallTimeoutMs ??
-      OPENCODE_STOP_HOOK_REMINDER_STALL_TIMEOUT_MS;
     this.queuedPromptRetryDelayMs =
       options.queuedPromptRetryDelayMs ?? DEFAULT_QUEUED_PROMPT_RETRY_DELAY_MS;
     this.knownMcpServerNames = [
@@ -1566,6 +1399,61 @@ export class OpenCodeServerHarness
       getNextSequence: () => this.runtimeEvents.nextTs(),
       emitRuntimeOutput: (event) => this.emit('runtimeOutput', event),
     });
+    this.executeToolProgress = new OpenCodeExecuteToolProgress(
+      {
+        initialDelayMs:
+          options.executeToolProgressInitialDelayMs ??
+          DEFAULT_EXECUTE_TOOL_PROGRESS_INITIAL_DELAY_MS,
+        intervalMs:
+          options.executeToolProgressIntervalMs ??
+          DEFAULT_EXECUTE_TOOL_PROGRESS_INTERVAL_MS,
+      },
+      {
+        emitToolUpdate: (event) => this.runtimeEvents.toolUpdate(event),
+      },
+    );
+    this.subagentWatchdogs = new OpenCodeSubagentWatchdog(
+      {
+        taskTimeoutMs:
+          options.subagentTaskTimeoutMs ?? DEFAULT_SUBAGENT_TASK_TIMEOUT_MS,
+        inactivityTimeoutMs:
+          options.subagentTaskInactivityTimeoutMs ??
+          DEFAULT_SUBAGENT_TASK_INACTIVITY_TIMEOUT_MS,
+      },
+      {
+        logger: this.logger,
+        emitToolUpdate: (event) => this.runtimeEvents.toolUpdate(event),
+        emitInferenceUsage: (info, fallbackAgent) => {
+          this.emit(
+            'runtimeInferenceUsage',
+            createInferenceUsageEvent(
+              info,
+              createTokenUsage(info),
+              fallbackAgent,
+            ),
+          );
+        },
+        listChildSessions: (sessionId, signal) =>
+          this.client.children({ sessionId, signal }),
+        abortChildSession: (sessionId, signal) =>
+          this.client.abort({ sessionId, signal }),
+        getAbortSignal: () => this.eventAbortController.signal,
+      },
+    );
+    this.stopHookReminderStall = new OpenCodeStopHookReminderStall(
+      options.stopHookReminderStallTimeoutMs ??
+        DEFAULT_OPENCODE_STOP_HOOK_REMINDER_STALL_TIMEOUT_MS,
+      {
+        logger: this.logger,
+        isDisposed: () => this.disposed,
+        onStall: async (sessionId) => {
+          this.inFlight = false;
+          this.runtimeEvents.taskCompleted(sessionId, undefined);
+          await this.drainQueuedPrompts();
+        },
+      },
+    );
+    this.resolvedUserInputRequests = new OpenCodeResolvedUserInputTracker();
   }
 
   async connect(): Promise<void> {
@@ -1929,7 +1817,7 @@ export class OpenCodeServerHarness
   ): Promise<void> {
     this.prompts.clear();
     this.clearAllExecuteToolProgress();
-    this.stopHookReminderCount = 0;
+    this.stopHookReminderStall.resetCount();
     this.currentWorkflowPhase = command.data.workflowPhase ?? null;
     this.activeWorkflowSkill = null;
 
@@ -1944,7 +1832,7 @@ export class OpenCodeServerHarness
 
   private async handleSendMessage(command: SendMessageCommand): Promise<void> {
     const text = command.data.text ?? '';
-    this.stopHookReminderCount = 0;
+    this.stopHookReminderStall.resetCount();
 
     if (command.data.workflowPhase) {
       this.currentWorkflowPhase = command.data.workflowPhase;
@@ -2062,7 +1950,7 @@ export class OpenCodeServerHarness
           answers: {},
           resolution: 'cancelled',
         });
-        this.recordResolvedUserInputRequest(pending.requestId);
+        this.resolvedUserInputRequests.record(pending.requestId);
       }
       this.pendingUserInputRequests.clear();
     }
@@ -2138,620 +2026,20 @@ export class OpenCodeServerHarness
     this.suppressNextReplayAbortError = false;
   }
 
-  private scheduleExecuteToolProgress(
-    eventKey: string,
-    delayMs: number,
-  ): ReturnType<typeof setTimeout> {
-    const timer = setTimeout(() => {
-      this.emitExecuteToolProgress(eventKey);
-    }, delayMs);
-    timer.unref?.();
-    return timer;
-  }
-
-  private emitExecuteToolProgress(eventKey: string): void {
-    const progress = this.activeExecuteToolProgress.get(eventKey);
-
-    if (!progress) {
-      return;
-    }
-
-    const nowMs = Date.now();
-    const output = formatExecuteToolProgressOutput(progress, nowMs);
-
-    this.runtimeEvents.toolUpdate({
-      sessionId: progress.sessionId,
-      messageId: progress.messageId,
-      toolCallId: progress.toolCallId,
-      toolName: progress.toolName,
-      status: 'in_progress',
-      output,
-      payload: {
-        ...progress.payload,
-        status: 'in_progress',
-        running: true,
-        progressKind: 'execute_tool_heartbeat',
-        progressStartedAtMs: progress.startedAtMs,
-        progressElapsedMs: nowMs - progress.startedAtMs,
-      },
-    });
-
-    progress.timer = this.scheduleExecuteToolProgress(
-      eventKey,
-      this.executeToolProgressIntervalMs,
-    );
-  }
-
-  private stopExecuteToolProgress(eventKey: string): void {
-    const progress = this.activeExecuteToolProgress.get(eventKey);
-
-    if (!progress) {
-      return;
-    }
-
-    clearTimeout(progress.timer);
-    this.activeExecuteToolProgress.delete(eventKey);
-  }
-
   private clearAllExecuteToolProgress(options?: {
     keepBackgroundWatchdogs?: boolean;
   }): void {
-    for (const progress of this.activeExecuteToolProgress.values()) {
-      clearTimeout(progress.timer);
-    }
-
-    this.activeExecuteToolProgress.clear();
-    // The stop-hook reminder fail-safe shares this teardown lifecycle: every
-    // point that clears execute-tool heartbeats (turn finish, cancel, session
-    // error, queued replay, dispose) also means the awaited reminder response
-    // either arrived or is moot, so disarm the pending fail-safe.
-    this.clearStopHookReminderStall();
-    // Subagent watchdogs share the same lifecycle: every teardown point that
+    // Shared teardown funnel for execute-tool heartbeats, the stop-hook
+    // reminder fail-safe, and subagent watchdogs. Every teardown point that
     // clears execute-tool heartbeats (turn finish, cancel, session error,
-    // queued replay, dispose) must also disarm pending subagent watchdogs.
+    // queued replay, dispose) also means the awaited reminder response either
+    // arrived or is moot, and must disarm pending subagent watchdogs.
     // Exception: background launches outlive the parent turn by design, so
     // turn finish keeps their watchdogs armed until the child idles or the
     // timeout aborts it.
-    this.clearAllSubagentWatchdogs(options);
-  }
-
-  private startSubagentWatchdog(
-    eventKey: string,
-    input: {
-      sessionId: string;
-      messageId: string | undefined;
-      toolCallId: string;
-      title: string;
-      agentType: string | null;
-      childSessionId: string | null;
-      background: boolean;
-      updatePayload: Record<string, unknown>;
-    },
-  ): void {
-    const existing = this.activeSubagentWatchdogs.get(eventKey);
-
-    if (existing) {
-      // Keep the original timer, but pick up details (like the child session
-      // id or the background flag) that only appear on later part updates. A
-      // parent-side part update is itself a liveness signal for the spawn, so
-      // refresh the inactivity clock alongside the details.
-      existing.background = existing.background || input.background;
-      existing.childSessionId = input.childSessionId ?? existing.childSessionId;
-      existing.agentType = input.agentType ?? existing.agentType;
-      existing.title = input.title;
-      existing.updatePayload = input.updatePayload;
-      existing.lastActivityAtMs = Date.now();
-      if (existing.childSessionId) {
-        this.childSessionWatchdogKeys.set(existing.childSessionId, eventKey);
-      }
-      return;
-    }
-
-    const nowMs = Date.now();
-    const watchdog: ActiveOpenCodeSubagentWatchdog = {
-      sessionId: input.sessionId,
-      background: input.background,
-      messageId: input.messageId,
-      toolCallId: input.toolCallId,
-      title: input.title,
-      agentType: input.agentType,
-      childSessionId: input.childSessionId,
-      startedAtMs: nowMs,
-      lastActivityAtMs: nowMs,
-      activeChildToolCallIds: new Set(),
-      timer: this.armSubagentWatchdogTimer(
-        eventKey,
-        Math.min(
-          this.subagentTaskInactivityTimeoutMs,
-          this.subagentTaskTimeoutMs,
-        ),
-      ),
-      updatePayload: input.updatePayload,
-      activitySeenChildToolCallIds: new Set(),
-      activityLastAction: null,
-      activityLastEmitAtMs: 0,
-    };
-    this.activeSubagentWatchdogs.set(eventKey, watchdog);
-    if (input.childSessionId) {
-      this.childSessionWatchdogKeys.set(input.childSessionId, eventKey);
-    }
-    this.logger.info(
-      `Armed OpenCode subagent watchdog timeoutMs=${this.subagentTaskTimeoutMs} inactivityTimeoutMs=${this.subagentTaskInactivityTimeoutMs} toolCallId=${input.toolCallId} agentType=${
-        input.agentType ?? 'unknown'
-      } childSessionId=${input.childSessionId ?? 'pending'}`,
-    );
-  }
-
-  private armSubagentWatchdogTimer(
-    eventKey: string,
-    delayMs: number,
-  ): ReturnType<typeof setTimeout> {
-    const timer = setTimeout(() => {
-      void this.handleSubagentWatchdogDeadline(eventKey);
-    }, delayMs);
-    timer.unref?.();
-    return timer;
-  }
-
-  /**
-   * Sliding-deadline check: the timer fires at the earliest possible expiry,
-   * then either expires the watchdog or re-arms it for the remaining window.
-   * Liveness comes from structured child-session events (see
-   * `markSubagentSessionActivity`); the inactivity deadline is only enforced
-   * while it is a strong signal — the child session id is known and no child
-   * tool call is in flight (see `activeChildToolCallIds`). While it is not
-   * enforceable, the timer keeps waking at the inactivity interval so a tool
-   * completion followed by silence is still caught one idle window after the
-   * completion event, and the total timeout always applies.
-   */
-  private async handleSubagentWatchdogDeadline(
-    eventKey: string,
-  ): Promise<void> {
-    const watchdog = this.activeSubagentWatchdogs.get(eventKey);
-
-    if (!watchdog) {
-      return;
-    }
-
-    const nowMs = Date.now();
-    const elapsedMs = nowMs - watchdog.startedAtMs;
-    const idleMs = nowMs - watchdog.lastActivityAtMs;
-
-    if (elapsedMs >= this.subagentTaskTimeoutMs) {
-      await this.expireSubagentWatchdog(
-        eventKey,
-        watchdog,
-        `exceeded the ${this.subagentTaskTimeoutMs}ms watchdog timeout (elapsed=${elapsedMs}ms)`,
-      );
-      return;
-    }
-
-    const idleEnforceable =
-      watchdog.childSessionId !== null &&
-      watchdog.activeChildToolCallIds.size === 0;
-
-    if (idleEnforceable && idleMs >= this.subagentTaskInactivityTimeoutMs) {
-      await this.expireSubagentWatchdog(
-        eventKey,
-        watchdog,
-        `stalled with no child-session events for ${idleMs}ms (inactivity limit ${this.subagentTaskInactivityTimeoutMs}ms, elapsed=${elapsedMs}ms)`,
-      );
-      return;
-    }
-
-    const remainingTotalMs = this.subagentTaskTimeoutMs - elapsedMs;
-    const remainingIdleMs = idleEnforceable
-      ? this.subagentTaskInactivityTimeoutMs - idleMs
-      : this.subagentTaskInactivityTimeoutMs;
-
-    watchdog.timer = this.armSubagentWatchdogTimer(
-      eventKey,
-      Math.min(remainingTotalMs, remainingIdleMs),
-    );
-  }
-
-  private updateSubagentWatchdogForToolPart(
-    eventKey: string,
-    toolPart: OpenCodeToolPart,
-    normalized: OpenCodeNormalizedToolPart,
-    context: { sessionId: string; messageId?: string },
-  ): void {
-    if (!isOpenCodeSubagentTaskTool(toolPart.tool ?? '')) {
-      return;
-    }
-
-    if (isTerminalOpenCodeToolStatus(normalized.status)) {
-      // A background launch's tool call completes immediately while the child
-      // session keeps working, so a completed background part must keep the
-      // watchdog armed (keyed to the child session) until the child session
-      // goes idle or the timeout aborts it.
-      if (
-        normalized.status === 'completed' &&
-        isOpenCodeBackgroundTaskToolPart(toolPart)
-      ) {
-        this.startSubagentWatchdog(eventKey, {
-          sessionId: context.sessionId,
-          messageId: context.messageId,
-          toolCallId: normalized.toolCallId,
-          title: normalized.title,
-          agentType: extractOpenCodeTaskToolAgentType(toolPart),
-          childSessionId: extractOpenCodeTaskToolChildSessionId(toolPart),
-          background: true,
-          updatePayload: normalized.updatePayload,
-        });
-        return;
-      }
-
-      this.stopSubagentWatchdog(eventKey);
-      return;
-    }
-
-    this.startSubagentWatchdog(eventKey, {
-      sessionId: context.sessionId,
-      messageId: context.messageId,
-      toolCallId: normalized.toolCallId,
-      title: normalized.title,
-      agentType: extractOpenCodeTaskToolAgentType(toolPart),
-      childSessionId: extractOpenCodeTaskToolChildSessionId(toolPart),
-      background: isOpenCodeBackgroundTaskToolPart(toolPart),
-      updatePayload: normalized.updatePayload,
-    });
-  }
-
-  private captureTerminalSubagentActivity(
-    eventKey: string,
-    toolPart: OpenCodeToolPart,
-    normalized: OpenCodeNormalizedToolPart,
-  ): Record<string, unknown> | null {
-    if (
-      !isOpenCodeSubagentTaskTool(toolPart.tool ?? '') ||
-      !isTerminalOpenCodeToolStatus(normalized.status)
-    ) {
-      return null;
-    }
-
-    const watchdog = this.activeSubagentWatchdogs.get(eventKey);
-
-    if (!watchdog) {
-      return null;
-    }
-
-    return {
-      agentType: watchdog.agentType,
-      lastAction: watchdog.activityLastAction,
-      toolCallCount: watchdog.activitySeenChildToolCallIds.size,
-      startedAtMs: watchdog.startedAtMs,
-      elapsedMs: Date.now() - watchdog.startedAtMs,
-      terminal: true,
-    };
-  }
-
-  private stopSubagentWatchdog(eventKey: string): void {
-    const watchdog = this.activeSubagentWatchdogs.get(eventKey);
-
-    if (!watchdog) {
-      return;
-    }
-
-    clearTimeout(watchdog.timer);
-    if (watchdog.childSessionId) {
-      this.childSessionWatchdogKeys.delete(watchdog.childSessionId);
-    }
-    this.activeSubagentWatchdogs.delete(eventKey);
-  }
-
-  /**
-   * True when `childSessionId` is currently tracked by a live watchdog. Used by
-   * the expiry fallback to avoid aborting sibling subagents that are still
-   * being independently monitored — a watchdog with an unknown child session id
-   * must not take down healthy concurrent children of the shared parent
-   * session.
-   */
-  private isChildSessionOwnedByActiveWatchdog(childSessionId: string): boolean {
-    const eventKey = this.childSessionWatchdogKeys.get(childSessionId);
-
-    return eventKey !== undefined && this.activeSubagentWatchdogs.has(eventKey);
-  }
-
-  private clearAllSubagentWatchdogs(options?: {
-    keepBackgroundWatchdogs?: boolean;
-  }): void {
-    for (const [eventKey, watchdog] of this.activeSubagentWatchdogs) {
-      if (options?.keepBackgroundWatchdogs && watchdog.background) {
-        continue;
-      }
-
-      clearTimeout(watchdog.timer);
-      this.activeSubagentWatchdogs.delete(eventKey);
-      if (watchdog.childSessionId) {
-        this.childSessionWatchdogKeys.delete(watchdog.childSessionId);
-      }
-    }
-  }
-
-  /**
-   * Every event a known child session emits — streamed text, tool state,
-   * message completion — counts as liveness for its spawn watchdog. The
-   * inactivity deadline in `handleSubagentWatchdogDeadline` measures against
-   * this clock.
-   */
-  private markSubagentSessionActivity(childSessionId: string): void {
-    const eventKey = this.childSessionWatchdogKeys.get(childSessionId);
-    const watchdog = eventKey
-      ? this.activeSubagentWatchdogs.get(eventKey)
-      : undefined;
-
-    if (watchdog) {
-      watchdog.lastActivityAtMs = Date.now();
-    }
-  }
-
-  /**
-   * Live activity for the inline subagent row: child-session tool events are
-   * folded into throttled toolUpdate emissions on the parent spawn tool call,
-   * mirroring the execute_tool_heartbeat pattern (same logical row, so
-   * persistence upserts instead of appending transcript messages).
-   */
-  private handleChildSessionToolActivity(
-    childSessionId: string,
-    payload: OpenCodeEventPayload,
-  ): void {
-    const eventKey = this.childSessionWatchdogKeys.get(childSessionId);
-    const watchdog = eventKey
-      ? this.activeSubagentWatchdogs.get(eventKey)
-      : undefined;
-
-    if (!watchdog || payload.type !== 'message.part.updated') {
-      return;
-    }
-
-    const part = asRecord(asRecord(payload.properties)?.part);
-
-    if (!part || asString(part.type) !== 'tool') {
-      return;
-    }
-
-    const childToolCallId = asString(part.callID) ?? asString(part.id);
-    const childToolStatus = normalizeOpenCodeToolStatus(
-      asString(asRecord(part.state)?.status),
-    );
-
-    if (childToolCallId) {
-      watchdog.activitySeenChildToolCallIds.add(childToolCallId);
-      // Track in-flight child tool calls so the inactivity deadline is only
-      // enforced between tools, where silence is a strong wedge signal.
-      if (isTerminalOpenCodeToolStatus(childToolStatus)) {
-        watchdog.activeChildToolCallIds.delete(childToolCallId);
-      } else {
-        watchdog.activeChildToolCallIds.add(childToolCallId);
-      }
-    }
-
-    const state = asRecord(part.state);
-    const input = asRecord(state?.input);
-    const action = [
-      asString(part.tool),
-      asString(input?.command) ??
-        asString(input?.description) ??
-        asString(state?.title) ??
-        asString(input?.pattern) ??
-        asString(input?.filePath),
-    ]
-      .filter(Boolean)
-      .join(' ')
-      .slice(0, 120);
-
-    if (action) {
-      watchdog.activityLastAction = action;
-    }
-
-    const nowMs = Date.now();
-
-    if (
-      nowMs - watchdog.activityLastEmitAtMs <
-      SUBAGENT_ACTIVITY_EMIT_INTERVAL_MS
-    ) {
-      return;
-    }
-
-    watchdog.activityLastEmitAtMs = nowMs;
-    this.runtimeEvents.toolUpdate({
-      sessionId: watchdog.sessionId,
-      messageId: watchdog.messageId,
-      toolCallId: watchdog.toolCallId,
-      toolName: OPEN_CODE_SUBAGENT_TASK_TOOL_NAME,
-      status: 'in_progress',
-      payload: {
-        ...watchdog.updatePayload,
-        status: 'in_progress',
-        running: true,
-        progressKind: 'subagent_activity',
-        subagentActivity: {
-          agentType: watchdog.agentType,
-          lastAction: watchdog.activityLastAction,
-          toolCallCount: watchdog.activitySeenChildToolCallIds.size,
-          startedAtMs: watchdog.startedAtMs,
-          elapsedMs: nowMs - watchdog.startedAtMs,
-        },
-      },
-    });
-  }
-
-  /**
-   * Hidden accounting for subagent (child-session) turns: completed assistant
-   * messages on child sessions never reach the main-session finalize path, so
-   * emit their inference usage directly from the event payload. The agent name
-   * comes from the message itself, with the parent spawn watchdog's agentType
-   * as a fallback.
-   */
-  private handleChildSessionMessageUpdated(
-    childSessionId: string,
-    payload: OpenCodeEventPayload,
-  ): void {
-    if (payload.type !== 'message.updated') {
-      return;
-    }
-
-    const info = asRecord(asRecord(payload.properties)?.info) as
-      | (OpenCodeMessageInfo & Record<string, unknown>)
-      | null;
-
-    if (!info || !info.id || info.sessionID !== childSessionId) {
-      return;
-    }
-
-    if (parseOpenCodeMessageRole(info.role) !== 'assistant') {
-      return;
-    }
-
-    if (!info.time?.completed) {
-      return;
-    }
-
-    if (this.recordedChildUsageMessageIds.has(info.id)) {
-      return;
-    }
-
-    this.recordedChildUsageMessageIds.add(info.id);
-    this.emit(
-      'runtimeInferenceUsage',
-      createInferenceUsageEvent(
-        info,
-        createTokenUsage(info),
-        this.resolveChildSessionAgentType(childSessionId),
-      ),
-    );
-  }
-
-  private resolveChildSessionAgentType(
-    childSessionId: string,
-  ): string | undefined {
-    const eventKey = this.childSessionWatchdogKeys.get(childSessionId);
-    const watchdog = eventKey
-      ? this.activeSubagentWatchdogs.get(eventKey)
-      : undefined;
-
-    return watchdog?.agentType ?? undefined;
-  }
-
-  private async expireSubagentWatchdog(
-    eventKey: string,
-    watchdog: ActiveOpenCodeSubagentWatchdog,
-    reason: string,
-  ): Promise<void> {
-    this.stopSubagentWatchdog(eventKey);
-    this.logger.warn(
-      `OpenCode subagent run ${reason} toolCallId=${watchdog.toolCallId} agentType=${
-        watchdog.agentType ?? 'unknown'
-      } title=${watchdog.title}; aborting child sessions of sessionId=${watchdog.sessionId}`,
-    );
-
-    // Abort only the child (subagent) sessions — never the parent session.
-    // Child sessions have their own session ids, so the MessageAbortedError
-    // each abort raises arrives as a session.error attributed to the child and
-    // is dropped by the sessionId guard in handleEvent; no replay-abort
-    // suppression is needed here. Prefer the exact child session captured
-    // from the task tool part metadata; fall back to listing all children.
-    //
-    // The fallback lists every child of the parent session, so it must never
-    // abort a child that belongs to a *different, still-live* watchdog: sibling
-    // subagents run concurrently under one parent session, and a healthy
-    // sibling is independently monitored by its own watchdog. Aborting it here
-    // is collateral damage that kills in-progress work. Exclude any child
-    // session still owned by another active watchdog. (This watchdog's own
-    // mapping was already removed by stopSubagentWatchdog above, so only other
-    // watchdogs remain.) The exact-child path is inherently scoped and needs no
-    // filtering.
-    try {
-      const childSessionIds = watchdog.childSessionId
-        ? [watchdog.childSessionId]
-        : (
-            await this.client.children({
-              sessionId: watchdog.sessionId,
-              signal: this.eventAbortController.signal,
-            })
-          )
-            .map((child) => child.id)
-            .filter(
-              (childSessionId) =>
-                !this.isChildSessionOwnedByActiveWatchdog(childSessionId),
-            );
-
-      for (const childSessionId of childSessionIds) {
-        try {
-          await this.client.abort({
-            sessionId: childSessionId,
-            signal: this.eventAbortController.signal,
-          });
-          this.logger.warn(
-            `Aborted OpenCode child session ${childSessionId} after the subagent watchdog expired for toolCallId=${watchdog.toolCallId}`,
-          );
-        } catch (error) {
-          this.logger.warn(
-            `Failed to abort OpenCode child session ${childSessionId} after the subagent watchdog expired: ${
-              error instanceof Error ? error.message : String(error)
-            }`,
-          );
-        }
-      }
-    } catch (error) {
-      this.logger.warn(
-        `Failed to list OpenCode child sessions for sessionId=${watchdog.sessionId} after the subagent watchdog expired: ${
-          error instanceof Error ? error.message : String(error)
-        }`,
-      );
-    }
-  }
-
-  private updateExecuteToolProgress(
-    eventKey: string,
-    normalized: OpenCodeNormalizedToolPart,
-    context: {
-      sessionId: string;
-      messageId?: string;
-    },
-  ): void {
-    if (normalized.callPayload.isExecute !== true) {
-      this.stopExecuteToolProgress(eventKey);
-      return;
-    }
-
-    if (
-      isTerminalOpenCodeToolStatus(normalized.status) ||
-      normalized.output.length > 0 ||
-      normalized.error
-    ) {
-      this.stopExecuteToolProgress(eventKey);
-      return;
-    }
-
-    if (normalized.rawStatus !== 'running') {
-      return;
-    }
-
-    const existing = this.activeExecuteToolProgress.get(eventKey);
-
-    if (existing) {
-      existing.title = normalized.title;
-      existing.command = asString(normalized.callPayload.command);
-      existing.payload = normalized.updatePayload;
-      return;
-    }
-
-    this.activeExecuteToolProgress.set(eventKey, {
-      sessionId: context.sessionId,
-      messageId: context.messageId,
-      toolCallId: normalized.toolCallId,
-      toolName: normalized.toolName,
-      title: normalized.title,
-      command: asString(normalized.callPayload.command),
-      payload: normalized.updatePayload,
-      startedAtMs: Date.now(),
-      timer: this.scheduleExecuteToolProgress(
-        eventKey,
-        this.executeToolProgressInitialDelayMs,
-      ),
-    });
+    this.executeToolProgress.clearAll();
+    this.stopHookReminderStall.clear();
+    this.subagentWatchdogs.clearAll(options);
   }
 
   private async interruptForQueuedReplay(): Promise<void> {
@@ -2772,7 +2060,7 @@ export class OpenCodeServerHarness
           answers: {},
           resolution: 'cancelled',
         });
-        this.recordResolvedUserInputRequest(pending.requestId);
+        this.resolvedUserInputRequests.record(pending.requestId);
       }
       this.pendingUserInputRequests.clear();
     }
@@ -2806,7 +2094,7 @@ export class OpenCodeServerHarness
     // before the harness registered the request; a resolved id is not that.
     if (
       !this.pendingUserInputRequests.has(command.data.requestId) &&
-      this.resolvedUserInputRequestIds.has(command.data.requestId)
+      this.resolvedUserInputRequests.has(command.data.requestId)
     ) {
       this.logger.warn(
         `OpenCode harness ignoring AnswerUserInputRequest for already-resolved requestId=${command.data.requestId}`,
@@ -2826,7 +2114,7 @@ export class OpenCodeServerHarness
     }
 
     this.pendingUserInputRequests.delete(command.data.requestId);
-    this.recordResolvedUserInputRequest(command.data.requestId);
+    this.resolvedUserInputRequests.record(command.data.requestId);
     const resolution = getRequestUserInputResponseResolution(
       command.data.answers,
     );
@@ -2867,25 +2155,6 @@ export class OpenCodeServerHarness
       source: 'request_user_input_response',
       userId: command.data.userId,
     });
-  }
-
-  private recordResolvedUserInputRequest(requestId: string): void {
-    // Re-insert to move to the end (most-recently-resolved) for eviction.
-    this.resolvedUserInputRequestIds.delete(requestId);
-    this.resolvedUserInputRequestIds.add(requestId);
-
-    while (
-      this.resolvedUserInputRequestIds.size >
-      MAX_RESOLVED_USER_INPUT_REQUEST_IDS
-    ) {
-      const oldest = this.resolvedUserInputRequestIds.values().next().value;
-
-      if (oldest === undefined) {
-        break;
-      }
-
-      this.resolvedUserInputRequestIds.delete(oldest);
-    }
   }
 
   private createFallbackUserInputRequest(
@@ -3157,18 +2426,22 @@ export class OpenCodeServerHarness
       // (which, with an unknown child session id, would abort whatever
       // children exist by then — including a fresh, healthy wave).
       if (payload.type === 'session.idle' || payload.type === 'session.error') {
-        const watchdogKey = this.childSessionWatchdogKeys.get(sessionId);
+        const watchdogKey =
+          this.subagentWatchdogs.getEventKeyForChildSession(sessionId);
 
         if (watchdogKey) {
-          this.stopSubagentWatchdog(watchdogKey);
+          this.subagentWatchdogs.stop(watchdogKey);
         }
 
         return;
       }
 
-      this.markSubagentSessionActivity(sessionId);
-      this.handleChildSessionToolActivity(sessionId, payload);
-      this.handleChildSessionMessageUpdated(sessionId, payload);
+      this.subagentWatchdogs.markSessionActivity(sessionId);
+      this.subagentWatchdogs.handleChildSessionToolActivity(sessionId, payload);
+      this.subagentWatchdogs.handleChildSessionMessageUpdated(
+        sessionId,
+        payload,
+      );
       return;
     }
 
@@ -3219,13 +2492,14 @@ export class OpenCodeServerHarness
       asString(properties?.sessionID) ?? asString(properties?.sessionId);
 
     if (sessionId) {
-      const watchdogKey = this.childSessionWatchdogKeys.get(sessionId);
+      const watchdogKey =
+        this.subagentWatchdogs.getEventKeyForChildSession(sessionId);
 
       if (watchdogKey) {
         // A subagent child session going idle is its completion signal — for
         // background launches this is what disarms the watchdog. A child
         // session's idle must never finish the parent turn.
-        this.stopSubagentWatchdog(watchdogKey);
+        this.subagentWatchdogs.stop(watchdogKey);
         return;
       }
     }
@@ -3407,19 +2681,20 @@ export class OpenCodeServerHarness
 
     // Capture the final activity summary before the terminal status disarms
     // the watchdog, so the settled spawn row keeps its receipt.
-    const terminalSubagentActivity = this.captureTerminalSubagentActivity(
-      eventKey,
-      toolPart,
-      normalized,
-    );
+    const terminalSubagentActivity =
+      this.subagentWatchdogs.captureTerminalActivity(
+        eventKey,
+        toolPart,
+        normalized,
+      );
 
-    this.updateSubagentWatchdogForToolPart(eventKey, toolPart, normalized, {
+    this.subagentWatchdogs.updateForToolPart(eventKey, toolPart, normalized, {
       sessionId: context.sessionId,
       messageId: context.messageId,
     });
 
     if (isOpenCodeTodoWriteTool(normalized.toolName)) {
-      this.stopExecuteToolProgress(eventKey);
+      this.executeToolProgress.stop(eventKey);
       const entries = extractOpenCodeTodoEntries(normalized);
 
       if (entries !== null) {
@@ -3455,7 +2730,7 @@ export class OpenCodeServerHarness
       });
     }
 
-    this.updateExecuteToolProgress(eventKey, normalized, {
+    this.executeToolProgress.update(eventKey, normalized, {
       sessionId: context.sessionId,
       messageId: context.messageId,
     });
@@ -3559,9 +2834,9 @@ export class OpenCodeServerHarness
         normalizeOpenCodeToolStatus(rawSubtaskStatus),
       )
     ) {
-      this.stopSubagentWatchdog(eventKey);
+      this.subagentWatchdogs.stop(eventKey);
     } else if (normalized.callPayload.isSubagentSpawn === true) {
-      this.startSubagentWatchdog(eventKey, {
+      this.subagentWatchdogs.start(eventKey, {
         sessionId: context.sessionId,
         messageId: context.messageId,
         toolCallId: normalized.toolCallId,
@@ -3649,14 +2924,13 @@ export class OpenCodeServerHarness
         const reason =
           stopDecision.reason ?? FALLBACK_OPENCODE_STOP_HOOK_REMINDER;
 
-        if (this.stopHookReminderCount >= MAX_OPENCODE_STOP_HOOK_REMINDERS) {
+        if (!this.stopHookReminderStall.tryConsumeReminder()) {
           // Give up gracefully: complete the turn without a Slack closeout
           // instead of aborting the task.
           this.logger.warn(
             `OpenCode Slack closeout hook still blocked after ${MAX_OPENCODE_STOP_HOOK_REMINDERS} reminders; completing the turn without a Slack closeout reason=${reason}`,
           );
         } else {
-          this.stopHookReminderCount += 1;
           await this.submitPrompt({
             text: reason,
             visibleInTranscript: false,
@@ -3665,12 +2939,12 @@ export class OpenCodeServerHarness
           // We now await a fresh turn to re-enter this method. Arm a fail-safe
           // so a session that never produces that turn (wedged after the
           // reminder) still reaches a terminal state instead of hanging.
-          this.armStopHookReminderStall(sessionId);
+          this.stopHookReminderStall.arm(sessionId);
           return;
         }
       }
 
-      this.stopHookReminderCount = 0;
+      this.stopHookReminderStall.resetCount();
 
       if (finalized?.text.trim()) {
         this.runtimeEvents.turnCompleted(sessionId, finalized.text);
@@ -3678,48 +2952,6 @@ export class OpenCodeServerHarness
 
       this.runtimeEvents.taskCompleted(sessionId, finalized?.tokenUsage);
     }
-
-    await this.drainQueuedPrompts();
-  }
-
-  private armStopHookReminderStall(sessionId: string): void {
-    this.clearStopHookReminderStall();
-    const timer = setTimeout(() => {
-      void this.handleStopHookReminderStall(sessionId);
-    }, this.stopHookReminderStallTimeoutMs);
-    timer.unref?.();
-    this.stopHookReminderStallTimer = timer;
-  }
-
-  private clearStopHookReminderStall(): void {
-    if (this.stopHookReminderStallTimer) {
-      clearTimeout(this.stopHookReminderStallTimer);
-      this.stopHookReminderStallTimer = null;
-    }
-  }
-
-  /**
-   * Fires when a resubmitted stop-hook reminder produced no follow-up turn
-   * within the deadline: the OpenCode session is presumed wedged. Force the
-   * turn to a terminal state (mirroring the reminder give-up branch) so the
-   * job completes instead of hanging "running" forever while the sandbox keeps
-   * heart-beating. Any normal turn re-entry or teardown disarms this first, so
-   * reaching here always means a genuine silence.
-   */
-  private async handleStopHookReminderStall(sessionId: string): Promise<void> {
-    this.clearStopHookReminderStall();
-
-    if (this.disposed) {
-      return;
-    }
-
-    this.logger.warn(
-      `OpenCode stop-hook reminder produced no follow-up turn within ${this.stopHookReminderStallTimeoutMs}ms; the session appears wedged. Force-completing the turn so the task reaches a terminal state.`,
-    );
-
-    this.inFlight = false;
-    this.stopHookReminderCount = 0;
-    this.runtimeEvents.taskCompleted(sessionId, undefined);
 
     await this.drainQueuedPrompts();
   }
