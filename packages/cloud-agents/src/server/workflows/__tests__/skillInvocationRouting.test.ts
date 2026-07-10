@@ -89,6 +89,8 @@ describe('packaged skill invocation routing', () => {
     expect(skillContent).toContain('name: zero');
     expect(skillContent).toContain('hidden: true');
     expect(skillContent).toContain('zero search');
+    expect(skillContent).toContain('admin has enabled');
+    expect(skillContent).not.toContain('bakes the CLI into the worker runtime');
   });
 
   it('ships beta chore skills in the standard packaged skill catalog', () => {

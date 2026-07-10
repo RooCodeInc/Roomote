@@ -29,8 +29,9 @@ answers from your own knowledge, local files, shell commands, math.
 
 ## Resolving `zero`
 
-Roomote bakes the CLI into the worker runtime. Prefer bare `zero` on `$PATH`.
-If it is missing, fall back to:
+Because this skill is active, Roomote installed the `zero` CLI for this task
+after the Zero integration was admin-enabled. Prefer bare `zero` on `$PATH`.
+If it is still missing, fall back to:
 
 ```bash
 npx -y @zeroxyz/cli@latest --help
