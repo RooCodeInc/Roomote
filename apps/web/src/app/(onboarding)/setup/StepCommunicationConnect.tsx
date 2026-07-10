@@ -72,8 +72,8 @@ export function StepCommunicationConnect({
       <div className="relative w-full max-w-xl space-y-6 py-2 md:py-0">
         <StepTitle text="Finish connecting Teams" />
         <p className="text-foreground">
-          Almost there. Teams just needs you to send a message (just "Hi!"
-          works) to Roomote to finish.
+          Almost there. Teams just needs you to send a message (just
+          &quot;Hi!&quot; works) to Roomote to finish.
         </p>
 
         {teamsIntegrationStatus.isPending ? (
