@@ -83,6 +83,7 @@ interface OpenCodeServerHarnessOptions {
   executeToolProgressIntervalMs?: number;
   subagentTaskTimeoutMs?: number;
   subagentTaskInactivityTimeoutMs?: number;
+  stopHookReminderStallTimeoutMs?: number;
   queuedPromptRetryDelayMs?: number;
   mcpServerNames?: string[];
   beforeQueuedPrompt?: (input: { userId?: string }) => Promise<void | {
@@ -217,13 +218,27 @@ const OPEN_CODE_EXECUTE_TOOLS = new Set(['bash', 'shell']);
 const OPEN_CODE_READ_TOOLS = new Set(['read']);
 const OPEN_CODE_SEARCH_TOOLS = new Set(['grep', 'glob', 'find', 'list', 'ls']);
 const MAX_OPENCODE_STOP_HOOK_REMINDERS = 3;
+// Fail-safe for a wedged stop-hook reminder cycle. After a turn finishes
+// without the required Slack closeout, we resubmit a reminder prompt and then
+// wait for a fresh turn (a future session.idle re-enters finishCurrentTurn).
+// If OpenCode never produces that turn — the session wedged, e.g. after a mass
+// subagent abort — nothing else bounds the wait and the job hangs "running"
+// indefinitely while the sandbox keeps heart-beating. This deadline force-
+// completes the turn so the job reaches a terminal state instead. Any normal
+// turn re-entry (or teardown) clears it first via clearAllExecuteToolProgress,
+// so it only ever fires on a genuine silence.
+const OPENCODE_STOP_HOOK_REMINDER_STALL_TIMEOUT_MS = 10 * 60_000;
 const EXPECTED_REPLAY_ABORT_SUPPRESSION_MS = 10_000;
 const DEFAULT_EXECUTE_TOOL_PROGRESS_INITIAL_DELAY_MS = 15_000;
 const DEFAULT_EXECUTE_TOOL_PROGRESS_INTERVAL_MS = 30_000;
 // Kill switch for runaway subagent runs: a subagent that produces no terminal
 // signal within this window is presumed dead and its child sessions are
-// aborted so the parent turn can continue instead of hanging silently.
-const DEFAULT_SUBAGENT_TASK_TIMEOUT_MS = 12 * 60_000;
+// aborted so the parent turn can continue instead of hanging silently. Sized
+// for large review/audit subagents that legitimately read hundreds of files;
+// 12 minutes was too tight and killed in-progress work (the sliding inactivity
+// deadline below is the primary wedge detector, so this only backstops a child
+// that stays superficially active but never terminates).
+const DEFAULT_SUBAGENT_TASK_TIMEOUT_MS = 30 * 60_000;
 // Sliding inactivity deadline for subagent runs: once the child session is
 // known, every event it emits (streamed text, tool state, message completion)
 // counts as liveness. A child that goes silent for this window is presumed
@@ -1432,6 +1447,7 @@ export class OpenCodeServerHarness
   private readonly executeToolProgressIntervalMs: number;
   private readonly subagentTaskTimeoutMs: number;
   private readonly subagentTaskInactivityTimeoutMs: number;
+  private readonly stopHookReminderStallTimeoutMs: number;
   private readonly queuedPromptRetryDelayMs: number;
   private readonly streamedPartText = new Map<string, string>();
   private readonly streamedMessageIds = new Set<string>();
@@ -1479,6 +1495,8 @@ export class OpenCodeServerHarness
   private activeWorkflowSkill: string | null = null;
   private commandEnv: Record<string, string> | undefined;
   private stopHookReminderCount = 0;
+  private stopHookReminderStallTimer: ReturnType<typeof setTimeout> | null =
+    null;
   private resolveEventStreamReady: (() => void) | undefined;
   private rejectEventStreamReady: ((error: unknown) => void) | undefined;
   private finalizedAssistantTurn: FinalizedAssistantTurn | null = null;
@@ -1523,6 +1541,9 @@ export class OpenCodeServerHarness
     this.subagentTaskInactivityTimeoutMs =
       options.subagentTaskInactivityTimeoutMs ??
       DEFAULT_SUBAGENT_TASK_INACTIVITY_TIMEOUT_MS;
+    this.stopHookReminderStallTimeoutMs =
+      options.stopHookReminderStallTimeoutMs ??
+      OPENCODE_STOP_HOOK_REMINDER_STALL_TIMEOUT_MS;
     this.queuedPromptRetryDelayMs =
       options.queuedPromptRetryDelayMs ?? DEFAULT_QUEUED_PROMPT_RETRY_DELAY_MS;
     this.knownMcpServerNames = [
@@ -2180,6 +2201,11 @@ export class OpenCodeServerHarness
     }
 
     this.activeExecuteToolProgress.clear();
+    // The stop-hook reminder fail-safe shares this teardown lifecycle: every
+    // point that clears execute-tool heartbeats (turn finish, cancel, session
+    // error, queued replay, dispose) also means the awaited reminder response
+    // either arrived or is moot, so disarm the pending fail-safe.
+    this.clearStopHookReminderStall();
     // Subagent watchdogs share the same lifecycle: every teardown point that
     // clears execute-tool heartbeats (turn finish, cancel, session error,
     // queued replay, dispose) must also disarm pending subagent watchdogs.
@@ -2414,6 +2440,19 @@ export class OpenCodeServerHarness
     this.activeSubagentWatchdogs.delete(eventKey);
   }
 
+  /**
+   * True when `childSessionId` is currently tracked by a live watchdog. Used by
+   * the expiry fallback to avoid aborting sibling subagents that are still
+   * being independently monitored — a watchdog with an unknown child session id
+   * must not take down healthy concurrent children of the shared parent
+   * session.
+   */
+  private isChildSessionOwnedByActiveWatchdog(childSessionId: string): boolean {
+    const eventKey = this.childSessionWatchdogKeys.get(childSessionId);
+
+    return eventKey !== undefined && this.activeSubagentWatchdogs.has(eventKey);
+  }
+
   private clearAllSubagentWatchdogs(options?: {
     keepBackgroundWatchdogs?: boolean;
   }): void {
@@ -2613,6 +2652,16 @@ export class OpenCodeServerHarness
     // is dropped by the sessionId guard in handleEvent; no replay-abort
     // suppression is needed here. Prefer the exact child session captured
     // from the task tool part metadata; fall back to listing all children.
+    //
+    // The fallback lists every child of the parent session, so it must never
+    // abort a child that belongs to a *different, still-live* watchdog: sibling
+    // subagents run concurrently under one parent session, and a healthy
+    // sibling is independently monitored by its own watchdog. Aborting it here
+    // is collateral damage that kills in-progress work. Exclude any child
+    // session still owned by another active watchdog. (This watchdog's own
+    // mapping was already removed by stopSubagentWatchdog above, so only other
+    // watchdogs remain.) The exact-child path is inherently scoped and needs no
+    // filtering.
     try {
       const childSessionIds = watchdog.childSessionId
         ? [watchdog.childSessionId]
@@ -2621,7 +2670,12 @@ export class OpenCodeServerHarness
               sessionId: watchdog.sessionId,
               signal: this.eventAbortController.signal,
             })
-          ).map((child) => child.id);
+          )
+            .map((child) => child.id)
+            .filter(
+              (childSessionId) =>
+                !this.isChildSessionOwnedByActiveWatchdog(childSessionId),
+            );
 
       for (const childSessionId of childSessionIds) {
         try {
@@ -3095,8 +3149,14 @@ export class OpenCodeServerHarness
       // parent spawn row, and record hidden inference usage before returning.
       // A child session going idle is its completion signal — for background
       // launches this disarms the watchdog that outlived the instant
-      // task-tool completion.
-      if (payload.type === 'session.idle') {
+      // task-tool completion. A child `session.error` is equally terminal:
+      // aborting a child (our own watchdog expiry, or a sibling watchdog's
+      // fallback abort) surfaces here as a MessageAbortedError attributed to
+      // the child. Disarm on it too, so a watchdog whose child was already
+      // aborted elsewhere does not linger and fire its own deadline later
+      // (which, with an unknown child session id, would abort whatever
+      // children exist by then — including a fresh, healthy wave).
+      if (payload.type === 'session.idle' || payload.type === 'session.error') {
         const watchdogKey = this.childSessionWatchdogKeys.get(sessionId);
 
         if (watchdogKey) {
@@ -3602,6 +3662,10 @@ export class OpenCodeServerHarness
             visibleInTranscript: false,
             source: 'opencode-stop-hook',
           });
+          // We now await a fresh turn to re-enter this method. Arm a fail-safe
+          // so a session that never produces that turn (wedged after the
+          // reminder) still reaches a terminal state instead of hanging.
+          this.armStopHookReminderStall(sessionId);
           return;
         }
       }
@@ -3614,6 +3678,48 @@ export class OpenCodeServerHarness
 
       this.runtimeEvents.taskCompleted(sessionId, finalized?.tokenUsage);
     }
+
+    await this.drainQueuedPrompts();
+  }
+
+  private armStopHookReminderStall(sessionId: string): void {
+    this.clearStopHookReminderStall();
+    const timer = setTimeout(() => {
+      void this.handleStopHookReminderStall(sessionId);
+    }, this.stopHookReminderStallTimeoutMs);
+    timer.unref?.();
+    this.stopHookReminderStallTimer = timer;
+  }
+
+  private clearStopHookReminderStall(): void {
+    if (this.stopHookReminderStallTimer) {
+      clearTimeout(this.stopHookReminderStallTimer);
+      this.stopHookReminderStallTimer = null;
+    }
+  }
+
+  /**
+   * Fires when a resubmitted stop-hook reminder produced no follow-up turn
+   * within the deadline: the OpenCode session is presumed wedged. Force the
+   * turn to a terminal state (mirroring the reminder give-up branch) so the
+   * job completes instead of hanging "running" forever while the sandbox keeps
+   * heart-beating. Any normal turn re-entry or teardown disarms this first, so
+   * reaching here always means a genuine silence.
+   */
+  private async handleStopHookReminderStall(sessionId: string): Promise<void> {
+    this.clearStopHookReminderStall();
+
+    if (this.disposed) {
+      return;
+    }
+
+    this.logger.warn(
+      `OpenCode stop-hook reminder produced no follow-up turn within ${this.stopHookReminderStallTimeoutMs}ms; the session appears wedged. Force-completing the turn so the task reaches a terminal state.`,
+    );
+
+    this.inFlight = false;
+    this.stopHookReminderCount = 0;
+    this.runtimeEvents.taskCompleted(sessionId, undefined);
 
     await this.drainQueuedPrompts();
   }

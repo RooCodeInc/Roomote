@@ -90,6 +90,7 @@ function createHarness(
     executeToolProgressInitialDelayMs?: number;
     executeToolProgressIntervalMs?: number;
     queuedPromptRetryDelayMs?: number;
+    stopHookReminderStallTimeoutMs?: number;
     mcpServerNames?: string[];
     model?: string;
   } = {},
@@ -105,6 +106,7 @@ function createHarness(
       options.executeToolProgressInitialDelayMs,
     executeToolProgressIntervalMs: options.executeToolProgressIntervalMs,
     queuedPromptRetryDelayMs: options.queuedPromptRetryDelayMs,
+    stopHookReminderStallTimeoutMs: options.stopHookReminderStallTimeoutMs,
     mcpServerNames: options.mcpServerNames,
     beforeQueuedPrompt: options.beforeQueuedPrompt,
   });
@@ -1739,6 +1741,149 @@ describe('OpenCodeServerHarness', () => {
         ),
       ).toBe(false);
       expect(client.promptAsync).toHaveBeenCalledTimes(4);
+    } finally {
+      harness.dispose();
+      fs.rmSync(tempDir, { recursive: true, force: true });
+    }
+  });
+
+  it('force-completes the turn when a stop-hook reminder wedges with no follow-up turn', async () => {
+    const tempDir = fs.mkdtempSync(
+      path.join(os.tmpdir(), 'roomote-opencode-stop-guard-wedge-'),
+    );
+    const stateFilePath = path.join(tempDir, 'slack-state.json');
+    const stopHookPath = path.join(tempDir, 'stop-hook.cjs');
+
+    fs.writeFileSync(
+      stateFilePath,
+      JSON.stringify({
+        currentTurnMessageTs: '111.222',
+        currentTurnStartedAtMs: Date.now() - 1_000,
+      }),
+      'utf8',
+    );
+    fs.writeFileSync(stopHookPath, SLACK_STOP_HOOK_SCRIPT, 'utf8');
+
+    const { client, harness } = createHarness(new FakeOpenCodeServerClient(), {
+      commandEnv: {
+        ROOMOTE_SLACK_REPLY_SATISFACTION_STATE_FILE: stateFilePath,
+        ROOMOTE_OPENCODE_SLACK_STOP_HOOK_SCRIPT: stopHookPath,
+      },
+      stopHookReminderStallTimeoutMs: 50,
+    });
+    const taskEvents: TaskEvent[] = [];
+
+    harness.subscribe((event) => taskEvents.push(event));
+
+    try {
+      await connectHarness(harness, client);
+
+      expect(
+        harness.sendCommand({
+          commandName: TaskCommandName.StartNewTask,
+          data: { text: 'Do work.', visibleInTranscript: true },
+        }),
+      ).toBe(true);
+
+      await vi.waitFor(() => {
+        expect(client.promptAsync).toHaveBeenCalledTimes(1);
+      });
+
+      // The blocked turn-end injects a closeout reminder and then awaits a
+      // fresh turn to re-evaluate.
+      await client.emit({
+        type: 'session.idle',
+        properties: { sessionID: 'ses_1' },
+      });
+      await vi.waitFor(() => {
+        expect(client.promptAsync).toHaveBeenCalledTimes(2);
+      });
+
+      // The session then wedges: no further events ever arrive. The fail-safe
+      // fires and force-completes the turn so the task reaches a terminal
+      // state instead of hanging "running" forever.
+      await vi.waitFor(() => {
+        expect(
+          taskEvents.some(
+            (event) => event.eventName === TaskEventName.TaskCompleted,
+          ),
+        ).toBe(true);
+      });
+      expect(
+        taskEvents.some(
+          (event) => event.eventName === TaskEventName.TaskAborted,
+        ),
+      ).toBe(false);
+      // No extra reminder was injected — the fail-safe completed the turn.
+      expect(client.promptAsync).toHaveBeenCalledTimes(2);
+    } finally {
+      harness.dispose();
+      fs.rmSync(tempDir, { recursive: true, force: true });
+    }
+  });
+
+  it('disarms the stop-hook reminder fail-safe on teardown', async () => {
+    const tempDir = fs.mkdtempSync(
+      path.join(os.tmpdir(), 'roomote-opencode-stop-guard-teardown-'),
+    );
+    const stateFilePath = path.join(tempDir, 'slack-state.json');
+    const stopHookPath = path.join(tempDir, 'stop-hook.cjs');
+
+    fs.writeFileSync(
+      stateFilePath,
+      JSON.stringify({
+        currentTurnMessageTs: '111.222',
+        currentTurnStartedAtMs: Date.now() - 1_000,
+      }),
+      'utf8',
+    );
+    fs.writeFileSync(stopHookPath, SLACK_STOP_HOOK_SCRIPT, 'utf8');
+
+    const { client, harness } = createHarness(new FakeOpenCodeServerClient(), {
+      commandEnv: {
+        ROOMOTE_SLACK_REPLY_SATISFACTION_STATE_FILE: stateFilePath,
+        ROOMOTE_OPENCODE_SLACK_STOP_HOOK_SCRIPT: stopHookPath,
+      },
+      stopHookReminderStallTimeoutMs: 50,
+    });
+    const taskEvents: TaskEvent[] = [];
+
+    harness.subscribe((event) => taskEvents.push(event));
+
+    try {
+      await connectHarness(harness, client);
+
+      expect(
+        harness.sendCommand({
+          commandName: TaskCommandName.StartNewTask,
+          data: { text: 'Do work.', visibleInTranscript: true },
+        }),
+      ).toBe(true);
+
+      await vi.waitFor(() => {
+        expect(client.promptAsync).toHaveBeenCalledTimes(1);
+      });
+
+      // Blocked turn-end injects a reminder and arms the fail-safe.
+      await client.emit({
+        type: 'session.idle',
+        properties: { sessionID: 'ses_1' },
+      });
+      await vi.waitFor(() => {
+        expect(client.promptAsync).toHaveBeenCalledTimes(2);
+      });
+
+      // Teardown must disarm the pending fail-safe. Dispose, then wait well
+      // past the stall window and confirm it never force-completed a disposed
+      // harness.
+      harness.dispose();
+      await new Promise((resolve) => setTimeout(resolve, 120));
+
+      expect(
+        taskEvents.some(
+          (event) => event.eventName === TaskEventName.TaskCompleted,
+        ),
+      ).toBe(false);
     } finally {
       harness.dispose();
       fs.rmSync(tempDir, { recursive: true, force: true });
