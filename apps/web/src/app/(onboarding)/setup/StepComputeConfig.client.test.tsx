@@ -170,4 +170,60 @@ describe('StepComputeConfig', () => {
       screen.queryByRole('button', { name: /advanced options/i }),
     ).not.toBeInTheDocument();
   });
+
+  it('disables continue when only a local worker image is configured', () => {
+    render(
+      <StepComputeConfig
+        computeSetup={buildComputeSetup({
+          workerImage: {
+            envVarName: 'DOCKER_WORKER_IMAGE',
+            label: 'Worker Image',
+            runtimeSatisfied: true,
+            savedSatisfied: false,
+            hostedImageRef: null,
+            hostedReady: false,
+          },
+          providers: [
+            {
+              ...buildHostedProvider('e2b'),
+              provider: 'e2b',
+              label: 'E2B',
+              fields: [
+                {
+                  envVarName: 'E2B_API_KEY',
+                  label: 'E2B API Key',
+                  secret: true,
+                  category: 'credential',
+                  runtimeSatisfied: false,
+                  savedSatisfied: true,
+                  defaultSatisfied: false,
+                  setupProvisionable: false,
+                },
+                {
+                  envVarName: 'E2B_DOMAIN',
+                  label: 'E2B Domain',
+                  required: false,
+                  category: 'infrastructure',
+                  advanced: true,
+                  runtimeSatisfied: false,
+                  savedSatisfied: false,
+                  defaultSatisfied: false,
+                  setupProvisionable: false,
+                },
+              ],
+            },
+          ],
+        })}
+        selectedProviderId="e2b"
+        onContinue={vi.fn()}
+      />,
+    );
+
+    expect(
+      screen.getByText(/registry-qualified worker image/i),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole('button', { name: /continue|save and continue/i }),
+    ).toBeDisabled();
+  });
 });

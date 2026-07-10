@@ -4,6 +4,7 @@ import { Fragment, useEffect, useMemo, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import {
+  deriveModalBaseImageRefDefault,
   getSetupNewComputeProvisioningState,
   isComputeCredentialField,
   isComputeInfrastructureField,
@@ -202,16 +203,20 @@ export function StepComputeConfig({
         isComputeOperatorEditableField(field) &&
         !field.runtimeSatisfied,
     ) ?? [];
-  // Hosted providers derive/provision their worker base image from the shared
-  // worker image. Missing or editable worker image values live in the advanced
-  // section instead of the primary credentials step.
+  // Hosted providers derive/provision their worker base image from a
+  // registry-qualified worker image. Missing or editable worker image values
+  // live in the advanced section instead of the primary credentials step.
   const isHostedProvider =
     selectedProvider?.fields.some(isComputeInfrastructureField) ?? false;
   const workerImage = computeSetup.workerImage;
-  const missingHostedWorkerImage =
-    isHostedProvider &&
-    !workerImage.runtimeSatisfied &&
-    !workerImage.hostedReady;
+  const workerImageValue = values[SHARED_WORKER_IMAGE_ENV_VAR]?.trim() ?? '';
+  // Local tags (e.g. roomote-worker:local) satisfy Docker but not E2B/Daytona
+  // provisioning — only registry-qualified refs are hosted-ready.
+  const submittedHostedWorkerImageReady =
+    deriveModalBaseImageRefDefault(workerImageValue) !== null;
+  const hostedWorkerImageReady =
+    workerImage.hostedReady || submittedHostedWorkerImageReady;
+  const missingHostedWorkerImage = isHostedProvider && !hostedWorkerImageReady;
   const canEditAdvancedWorkerImage =
     isHostedProvider && !workerImage.runtimeSatisfied;
   const shouldRenderAdvancedWorkerImage =
@@ -219,11 +224,6 @@ export function StepComputeConfig({
     (missingHostedWorkerImage || advancedExpanded);
   const shouldRenderAdvancedSettingsToggle =
     isHostedProvider && !missingHostedWorkerImage;
-  const workerImageValue = values[SHARED_WORKER_IMAGE_ENV_VAR]?.trim() ?? '';
-  const workerImageAvailable =
-    workerImage.runtimeSatisfied ||
-    workerImage.hostedReady ||
-    workerImageValue.length > 0;
 
   const credentialsHint = selectedProvider
     ? getComputeCredentialsHint(selectedProvider.provider)
@@ -234,11 +234,12 @@ export function StepComputeConfig({
       ? (values.MODAL_BASE_IMAGE_REF?.trim() ?? '')
       : '';
 
-  // A hosted provider needs a worker image to derive/provision its base image,
-  // unless the operator supplies a manual Modal base-image override.
+  // Hosted providers need a pullable (registry-qualified) worker image, unless
+  // Modal is given a manual base-image override. A bare process-env local tag
+  // must not enable Save — server provisioning will reject it.
   const hostedRequirementMet =
     !isHostedProvider ||
-    workerImageAvailable ||
+    hostedWorkerImageReady ||
     manualModalBaseImage.length > 0;
 
   const credentialsMet = credentialFields.every(
@@ -260,7 +261,6 @@ export function StepComputeConfig({
         field.savedSatisfied,
     ) &&
     (!isHostedProvider ||
-      workerImage.runtimeSatisfied ||
       workerImage.hostedReady ||
       (selectedProvider?.fields
         .filter(
@@ -492,6 +492,28 @@ export function StepComputeConfig({
                         : 'Configured'}
                     </span>
                   </div>
+                </div>
+              ) : missingHostedWorkerImage ? (
+                <div className="space-y-1 max-w-xl">
+                  <div className="text-sm font-medium">
+                    Roomote worker image
+                  </div>
+                  <p className="text-sm text-muted-foreground">
+                    Hosted providers need a registry-qualified worker image (for
+                    example{' '}
+                    <code className="font-mono text-xs">
+                      ghcr.io/roocodeinc/roomote-worker:tag
+                    </code>
+                    ). A local tag such as{' '}
+                    <code className="font-mono text-xs">
+                      roomote-worker:local
+                    </code>{' '}
+                    only works on this host. Set{' '}
+                    <code className="font-mono text-xs">
+                      DOCKER_WORKER_IMAGE
+                    </code>{' '}
+                    to a pullable image before continuing.
+                  </p>
                 </div>
               ) : null}
 
