@@ -273,15 +273,9 @@ export function TaskInfoPanel({
                             name={participant.name}
                             email={participant.email}
                             size="sm"
-                            alt={
-                              participant.name ?? participant.email ?? 'User'
-                            }
+                            alt={participant.displayName}
                           />
-                          <span>
-                            {participant.name ??
-                              participant.email ??
-                              'Unknown user'}
-                          </span>
+                          <span>{participant.displayName}</span>
                         </span>
                       ))}
                     </div>
