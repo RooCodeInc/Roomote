@@ -2462,12 +2462,11 @@ export const environmentVariables = pgTable(
     userId: text('user_id').references(() => users.id, { onDelete: 'cascade' }),
     name: text('name').notNull(),
     value: encryptedJson<string>('value').notNull(),
-    createdByUserId: text('created_by_user_id')
-      .notNull()
-      .references(() => users.id),
-    lastUpdatedByUserId: text('last_updated_by_user_id')
-      .notNull()
-      .references(() => users.id),
+    // Null denotes a system/bootstrap write performed before a user exists.
+    createdByUserId: text('created_by_user_id').references(() => users.id),
+    lastUpdatedByUserId: text('last_updated_by_user_id').references(
+      () => users.id,
+    ),
     createdAt: timestamp('created_at').notNull().defaultNow(),
     updatedAt: timestamp('updated_at').notNull().defaultNow(),
   },
