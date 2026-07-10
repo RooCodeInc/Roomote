@@ -192,9 +192,14 @@ jobs:
           CANDIDATE_VERSION: ${{ needs.prepare.outputs.version }}
         run: pnpm deployment:smoke
 
+  # Builds run concurrently with the acceptance gate: the gate builds its own
+  # local images for the smoke test, so nothing here depends on it. The gate
+  # instead blocks `publish` — builds only push untagged per-arch digests, and
+  # nothing is consumable until publish assembles the tagged manifests, so a
+  # failed gate still prevents any image from shipping.
   build:
     name: Build ${{ matrix.app }} (${{ matrix.arch }})
-    needs: [prepare, deployment-acceptance]
+    needs: prepare
     if: ${{ needs.prepare.outputs.docs_only != 'true' }}
     runs-on: ${{ matrix.runner }}
     permissions:
@@ -280,7 +285,7 @@ jobs:
 
   publish:
     name: Publish ${{ matrix.app }} manifest
-    needs: [prepare, build]
+    needs: [prepare, build, deployment-acceptance]
     runs-on: blacksmith-4vcpu-ubuntu-2404
     permissions:
       contents: read
