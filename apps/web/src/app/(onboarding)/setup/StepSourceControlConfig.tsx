@@ -30,6 +30,32 @@ import { getSourceControlSetupCopy } from './sourceControlSetupCopy';
 
 const MASKED_VALUE = '••••••••••••••••••••••••••••';
 
+type SourceControlField =
+  SetupSourceControlStatus['providers'][number]['fields'][number];
+
+function isSecretSourceControlField(field: Pick<SourceControlField, 'secret'>) {
+  return field.secret === true;
+}
+
+function getNonSecretFieldInitialValues(
+  fields: readonly SourceControlField[],
+): Record<string, string> {
+  const next: Record<string, string> = {};
+
+  for (const field of fields) {
+    if (isSecretSourceControlField(field) || field.runtimeSatisfied) {
+      continue;
+    }
+
+    const savedValue = field.savedValue?.trim();
+    if (savedValue) {
+      next[field.envVarName] = savedValue;
+    }
+  }
+
+  return next;
+}
+
 type GitHubAppManifestForm = {
   postTarget: string;
   values: {
@@ -54,7 +80,6 @@ export function StepSourceControlConfig({
     selectedProviderId ??
     sourceControlSetup.selectedProvider ??
     sourceControlSetup.preselectedProvider;
-  const [values, setValues] = useState<Record<string, string>>({});
   const [editingSavedValues, setEditingSavedValues] = useState<
     Record<string, boolean>
   >({});
@@ -88,20 +113,6 @@ export function StepSourceControlConfig({
       toast.error('Failed to start GitHub App creation. Please try again.'),
   });
 
-  useEffect(() => {
-    setValues({});
-    setEditingSavedValues({});
-    setShowManualGitHubValues(false);
-    setGithubOrganization('');
-    setManifestForm(null);
-  }, [effectiveSelectedProviderId]);
-
-  useEffect(() => {
-    if (manifestForm) {
-      manifestFormRef.current?.submit();
-    }
-  }, [manifestForm]);
-
   const selectedProvider = useMemo(
     () =>
       sourceControlSetup.providers.find(
@@ -109,6 +120,39 @@ export function StepSourceControlConfig({
       ),
     [sourceControlSetup.providers, effectiveSelectedProviderId],
   );
+
+  // Key off field content, not array identity — parent refreshes create a new
+  // fields array each time and must not wipe in-progress edits.
+  const nonSecretInitialValuesKey = (selectedProvider?.fields ?? [])
+    .filter((field) => !isSecretSourceControlField(field))
+    .map(
+      (field) =>
+        `${field.envVarName}:${field.savedValue ?? ''}:${field.savedSatisfied}:${field.runtimeSatisfied}`,
+    )
+    .join('|');
+  const nonSecretInitialValues = useMemo(
+    () => getNonSecretFieldInitialValues(selectedProvider?.fields ?? []),
+    // fields array identity is intentionally omitted; content key drives updates.
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- content-keyed
+    [nonSecretInitialValuesKey],
+  );
+  const [values, setValues] = useState<Record<string, string>>(
+    () => nonSecretInitialValues,
+  );
+
+  useEffect(() => {
+    setValues(nonSecretInitialValues);
+    setEditingSavedValues({});
+    setShowManualGitHubValues(false);
+    setGithubOrganization('');
+    setManifestForm(null);
+  }, [effectiveSelectedProviderId, nonSecretInitialValues]);
+
+  useEffect(() => {
+    if (manifestForm) {
+      manifestFormRef.current?.submit();
+    }
+  }, [manifestForm]);
   const canContinueWithoutNewValues =
     selectedProvider?.fields.every(
       (field) =>
@@ -369,7 +413,9 @@ export function StepSourceControlConfig({
       <div className="space-y-2 pl-10">
         {selectedProvider?.fields.map((field) => {
           const value = values[field.envVarName] ?? '';
+          const isSecretField = isSecretSourceControlField(field);
           const shouldShowSavedValueMask =
+            isSecretField &&
             !field.runtimeSatisfied &&
             field.savedSatisfied &&
             value.length === 0 &&
@@ -389,14 +435,17 @@ export function StepSourceControlConfig({
               <div>
                 <div className="flex items-center gap-2">
                   <Input
-                    secret={field.secret && !field.runtimeSatisfied}
+                    secret={isSecretField && !field.runtimeSatisfied}
+                    type={isSecretField ? undefined : 'text'}
                     className="font-mono"
                     value={
-                      field.runtimeSatisfied && field.secret
+                      isSecretField && field.runtimeSatisfied
                         ? MASKED_VALUE
                         : shouldShowSavedValueMask
                           ? MASKED_VALUE
-                          : value
+                          : field.runtimeSatisfied && !isSecretField
+                            ? (field.savedValue ?? value)
+                            : value
                     }
                     onFocus={() => {
                       if (shouldShowSavedValueMask) {
@@ -407,7 +456,11 @@ export function StepSourceControlConfig({
                       }
                     }}
                     onBlur={() => {
-                      if (field.savedSatisfied && value.length === 0) {
+                      if (
+                        isSecretField &&
+                        field.savedSatisfied &&
+                        value.length === 0
+                      ) {
                         setEditingSavedValues((current) => ({
                           ...current,
                           [field.envVarName]: false,
