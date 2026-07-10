@@ -43,11 +43,11 @@ describe('handleLaunchTask', () => {
     });
   });
 
-  it('uses the implicit Generalist path for standard launches', async () => {
+  it('uses the implicit standard-workflow path for standard launches', async () => {
     vi.mocked(tasksApiClient.launchTask).mockResolvedValueOnce({
       success: true,
       runId: 100,
-      taskId: 'task-generalist',
+      taskId: 'task-standard',
     });
 
     const result = await handleLaunchTask(
@@ -69,7 +69,7 @@ describe('handleLaunchTask', () => {
     const text = result.content[0]?.text ?? '';
     const parsed = JSON.parse(text);
     expect(parsed.success).toBe(true);
-    expect(parsed.taskId).toBe('task-generalist');
+    expect(parsed.taskId).toBe('task-standard');
   });
 
   it('should return error when API returns success=false', async () => {

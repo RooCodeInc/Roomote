@@ -169,18 +169,22 @@ export async function updateBackgroundAgentSettingsCommand(
   assertAdmin(auth);
   const fieldErrors: BackgroundAgentFieldErrors = {};
   const existingSettings = await getBackgroundAgentSettingsForDeployment();
-  const shouldUpdateChannelAutoStart = input.savingAgent === 'channelAutoStart';
-  const shouldUpdateManagerStats = input.savingAgent === 'managerStats';
-  const shouldUpdateSentryTriage = input.savingAgent === 'sentryTriage';
-  const shouldUpdateDependabotTriage = input.savingAgent === 'dependabotTriage';
-  const shouldUpdateSuggester = input.savingAgent === 'suggester';
-  const shouldUpdateAnnouncer = input.savingAgent === 'announcer';
+  const shouldUpdateChannelAutoStart =
+    input.savingAutomation === 'channelAutoStart';
+  const shouldUpdateManagerStats = input.savingAutomation === 'managerStats';
+  const shouldUpdateSentryTriage = input.savingAutomation === 'sentryTriage';
+  const shouldUpdateDependabotTriage =
+    input.savingAutomation === 'dependabotTriage';
+  const shouldUpdateSuggester = input.savingAutomation === 'suggester';
+  const shouldUpdateAnnouncer = input.savingAutomation === 'announcer';
   const shouldUpdatePlatformIssueAlerts =
-    input.savingAgent === 'platformIssueAlerts';
-  const shouldUpdateSecurityAuditor = input.savingAgent === 'securityAuditor';
+    input.savingAutomation === 'platformIssueAlerts';
+  const shouldUpdateSecurityAuditor =
+    input.savingAutomation === 'securityAuditor';
   const shouldUpdateCodeQualityAuditor =
-    input.savingAgent === 'codeQualityAuditor';
-  const shouldUpdateCiFailureTriage = input.savingAgent === 'ciFailureTriage';
+    input.savingAutomation === 'codeQualityAuditor';
+  const shouldUpdateCiFailureTriage =
+    input.savingAutomation === 'ciFailureTriage';
 
   const conflictResolverLabel =
     input.conflictResolverLabel.trim() || DEFAULT_CONFLICT_RESOLVER_LABEL;
@@ -248,7 +252,7 @@ export async function updateBackgroundAgentSettingsCommand(
     : existingSettings.suggesterRoutingInstructions;
   const shouldValidateSuggesterRoutingPreview =
     suggestionRoutingEnabled &&
-    input.savingAgent === 'suggester' &&
+    input.savingAutomation === 'suggester' &&
     effectiveSuggesterRoutingMode === 'group_by_instructions';
   let suggesterRoutingPreview: SuggestionRoutingPreviewRoute[] | null = null;
 
@@ -269,7 +273,8 @@ export async function updateBackgroundAgentSettingsCommand(
     fieldErrors.announcerInstructions = 'Announcer instructions are too long.';
   }
 
-  const shouldUpdateManagerChannel = input.savingAgent === 'managerChannel';
+  const shouldUpdateManagerChannel =
+    input.savingAutomation === 'managerChannel';
   const submittedManagerSlackChannel = normalizeOptionalText(
     input.managerSlackChannel ?? null,
   );
@@ -567,7 +572,7 @@ export async function updateBackgroundAgentSettingsCommand(
     ({ channelId }) => channelId,
   );
   const managerChannelHasApp =
-    input.savingAgent === 'managerChannel' &&
+    input.savingAutomation === 'managerChannel' &&
     managerChannelChanged &&
     managerChannelResult.channelId &&
     notifier

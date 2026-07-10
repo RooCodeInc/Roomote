@@ -114,7 +114,7 @@ export interface ResolvedChannelAutoStartRow {
 }
 
 export interface UpdateBackgroundAgentSettingsInput extends ScheduleOnlyAutomationInputFields {
-  savingAgent:
+  savingAutomation:
     | 'channelAutoStart'
     | 'managerChannel'
     | 'managerStats'

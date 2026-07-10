@@ -72,7 +72,7 @@ interface InternalRoutingResult {
   workspaceRemapped: boolean;
 }
 
-type GeneralistRoutingBuildResult =
+type StandardTaskRoutingBuildResult =
   | {
       status: 'meta_question';
       reasoning: string;
@@ -220,10 +220,10 @@ function resolveRoutedTaskModel(
   };
 }
 
-function buildGeneralistRoutingResult(
+function buildStandardTaskRoutingResult(
   response: WorkspaceResponse,
   context: RoutingContext,
-): GeneralistRoutingBuildResult {
+): StandardTaskRoutingBuildResult {
   const workspace = mapWorkspace(response.workspaceValue, context);
   const workspaceRemapped = wasWorkspaceRemapped(
     response.workspaceValue,
@@ -351,7 +351,7 @@ async function runRoutingDecision(
     );
 
     if (responseResult.response) {
-      const built = buildGeneralistRoutingResult(
+      const built = buildStandardTaskRoutingResult(
         responseResult.response,
         promptContext,
       );

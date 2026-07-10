@@ -85,7 +85,7 @@ export function buildSuggestionTaskPromptText(params: {
   brief: string;
   investigationContext: string | null;
   readinessMessage?: string | null;
-  agentType?: string | null;
+  suggestionType?: string | null;
   category?: SuggestionCategory | null;
   priority?: SuggestionPriority | null;
   targetRepositoryFullName?: string | null;
@@ -93,7 +93,7 @@ export function buildSuggestionTaskPromptText(params: {
   const baseText = buildSuggestionSlackText(params);
   const investigationContext = params.investigationContext?.trim();
 
-  if (params.agentType === 'sentry_triage') {
+  if (params.suggestionType === 'sentry_triage') {
     return buildSentryTriageSuggestionTaskPromptText({
       ...params,
       baseText,
@@ -101,7 +101,7 @@ export function buildSuggestionTaskPromptText(params: {
     });
   }
 
-  if (params.agentType === 'dependabot_triage') {
+  if (params.suggestionType === 'dependabot_triage') {
     return buildDependabotTriageSuggestionTaskPromptText({
       ...params,
       baseText,

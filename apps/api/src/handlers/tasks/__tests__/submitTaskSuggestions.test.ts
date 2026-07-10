@@ -139,7 +139,7 @@ vi.mock('@roomote/sdk/server', () => ({
 
 vi.mock('../background-automation-slack', () => ({
   resolveScheduledSuggestionSlackConfig: vi.fn(() => ({
-    agentType: 'suggested_tasks',
+    suggestionType: 'suggested_tasks',
     automationKey: 'suggest_ideas',
     automationSettingsHash: undefined,
     actionFooterText: 'footer',

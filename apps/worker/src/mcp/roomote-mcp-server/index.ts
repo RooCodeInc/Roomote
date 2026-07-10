@@ -389,7 +389,7 @@ const manageTasksToolDescription =
   `Use action "get_summary" to inspect a specific task's latest status and failure details (requires taskId). ` +
   'Use action "get_compute_logs" to fetch all compute logs for a task, including per-job command output for compute providers that support output lookup when the job has both a machine id and sandbox command id (requires taskId). ' +
   'Use action "get_messages" to retrieve the latest message history for a task (requires taskId, returns newest first). ' +
-  `Use action "launch" to create and start a new task against an environment using ${PRODUCT_NAME}'s default Generalist flow (requires prompt and environmentId). ` +
+  `Use action "launch" to create and start a new task against an environment using ${PRODUCT_NAME}'s default standard workflow (requires prompt and environmentId). ` +
   'Use action "cancel" to cancel an active task (requires taskId). ' +
   'Use action "send_message" to send a follow-up message to a running task (requires taskId and message).';
 

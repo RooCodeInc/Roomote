@@ -18,7 +18,7 @@ export function buildGitHubMessageInstructions(): string {
 export function buildGitHubMentionFollowUpHarnessInstructions(): string {
   return `
 <github_pr_follow_up_policy>
-  <rule>Apply this policy before the default Standard Task initial routing step for mention-driven GitHub PR follow-up work.</rule>
+  <rule>Apply this policy before the standard workflow's default initial routing step for mention-driven GitHub PR follow-up work.</rule>
   <rule>If the triggering GitHub mention is only gratitude or other non-actionable conversation with no requested review, explanation, planning, verification, or repository change, do not route into \`implement-changes\`, \`plan-repo-implementation\`, or \`explain-repo-code\` just to satisfy the default router.</rule>
   <rule>For that non-actionable mention case, leave one brief GitHub reply on the same PR conversation surface if a reply is still useful, then conclude with a no-op result.</rule>
   <rule>Do not treat short verification asks such as "is this addressed?" or "did we fix everything from the last round?" as no-op; those are actionable follow-up and should continue through normal routing.</rule>

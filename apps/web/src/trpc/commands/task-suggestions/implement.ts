@@ -103,7 +103,7 @@ export async function implementTaskSuggestionCommand(
           description: buildSuggestionTaskPromptText({
             title: suggestion.title,
             brief: suggestion.brief ?? '',
-            agentType:
+            suggestionType:
               automation === 'onboarding' ? 'setup_onboarding' : automation,
             investigationContext: suggestion.investigationContext,
             readinessMessage: resolution.workspace.readinessMessage,

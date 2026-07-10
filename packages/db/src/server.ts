@@ -179,7 +179,7 @@ export {
 export * from './fixtures/factories/index';
 
 export type {
-  BackgroundAgentSuggestionType,
+  SuggestionType,
   ManagerMcpSetupNotificationReason,
   EnvironmentConfigVersionSource,
 } from './schema';

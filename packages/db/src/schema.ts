@@ -2353,7 +2353,7 @@ export type ManagerMcpSetupNotificationReason =
   | 'deployment_disabled'
   | 'deployment_auth_required';
 
-export type BackgroundAgentSuggestionType =
+export type SuggestionType =
   | 'setup_onboarding'
   | 'suggested_tasks'
   | 'sentry_triage'

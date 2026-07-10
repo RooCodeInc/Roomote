@@ -10,8 +10,7 @@ import { apiLogger } from '../../logging';
  * claims; only the message shape differs per surface. The launch state
  * machine lives on the backing `work_items` row referenced by `workItemId`.
  */
-export const SETUP_ONBOARDING_SUGGESTION_AGENT_TYPE =
-  'setup_onboarding' as const;
+export const SETUP_ONBOARDING_SUGGESTION_TYPE = 'setup_onboarding' as const;
 
 export const MAX_SETUP_SUGGESTIONS = 5;
 
@@ -36,7 +35,7 @@ export async function hasTrackedSetupSuggestionMessages(
     .where(
       and(
         eq(trackedMessages.kind, 'suggestion_card'),
-        sql`${trackedMessages.metadata} ->> 'suggestionType' = ${SETUP_ONBOARDING_SUGGESTION_AGENT_TYPE}`,
+        sql`${trackedMessages.metadata} ->> 'suggestionType' = ${SETUP_ONBOARDING_SUGGESTION_TYPE}`,
         sql`${trackedMessages.metadata} ->> 'suggestionKey' LIKE ${`${sourceTaskId}:%`}`,
       ),
     )
@@ -73,7 +72,7 @@ export async function insertSetupSuggestionMessageRows(
         workItemId: row.workItemId,
         createdByUserId: row.createdByUserId,
         metadata: {
-          suggestionType: SETUP_ONBOARDING_SUGGESTION_AGENT_TYPE,
+          suggestionType: SETUP_ONBOARDING_SUGGESTION_TYPE,
           suggestionKey: row.suggestionKey,
         },
       })),
