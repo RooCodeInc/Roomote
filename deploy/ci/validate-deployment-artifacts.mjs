@@ -194,17 +194,10 @@ for (const [name, contract] of Object.entries(catalog.runtimeServices)) {
 
 const fly = parseToml(read('deploy/fly/fly.toml'));
 for (const [name, contract] of Object.entries(catalog.runtimeServices)) {
-  if (name === 'api' || name === 'web') {
-    assert(
-      fly.processes?.[name] === contract.command,
-      `fly: ${name} command drifted from the catalog`,
-    );
-  } else {
-    assert(
-      fly.processes?.[name] === contract.command,
-      `fly: missing ${name} process`,
-    );
-  }
+  assert(
+    fly.processes?.[name] === contract.command,
+    `fly: ${name} command drifted from the catalog`,
+  );
 }
 assert(
   fly.deploy?.release_command === 'db-migrate',
