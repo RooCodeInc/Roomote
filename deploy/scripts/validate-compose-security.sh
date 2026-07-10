@@ -66,13 +66,15 @@ jq -e '
   ][] | . as $key | $root.services["preview-proxy"].environment[$key] == null] | all) and
   ([[
     "JOB_AUTH_PRIVATE_KEY", "JOB_AUTH_PUBLIC_KEY", "PREVIEW_AUTH_PRIVATE_KEY",
-    "PREVIEW_AUTH_PUBLIC_KEY", "S3_SECRET_ACCESS_KEY", "OPENAI_API_KEY",
+    "PREVIEW_AUTH_PUBLIC_KEY", "S3_SECRET_ACCESS_KEY",
     "GITHUB_CLIENT_SECRET", "SLACK_CLIENT_SECRET"
   ][] | . as $key | $root.services.bullmq.environment[$key] == null] | all) and
   ([[
-    "OPENAI_API_KEY", "ANTHROPIC_API_KEY", "MODAL_TOKEN_SECRET",
-    "PREVIEW_AUTH_PRIVATE_KEY"
+    "MODAL_TOKEN_SECRET", "PREVIEW_AUTH_PRIVATE_KEY"
   ][] | . as $key | $root.services.api.environment[$key] == null] | all) and
+  (.services.api.environment.OPENAI_API_KEY != null) and
+  (.services.api.environment.ANTHROPIC_API_KEY != null) and
+  (.services.bullmq.environment.OPENAI_API_KEY != null) and
   ((.services["db-migrate"].environment | keys | sort) == [
     "APP_ENV", "DATABASE_URL", "NODE_ENV", "ROOMOTE_DOCKER_LOAD_ENV_FILE"
   ])
