@@ -74,10 +74,8 @@ export const automationWorkItemInputSchema = {
     ),
 };
 
-const automationWorkItemObjectSchema = z.object(automationWorkItemInputSchema);
-
-export type AutomationWorkItemToolParams = z.infer<
-  typeof automationWorkItemObjectSchema
+type AutomationWorkItemToolParams = z.infer<
+  z.ZodObject<typeof automationWorkItemInputSchema>
 >;
 
 export function buildAutomationWorkItem(params: AutomationWorkItemToolParams) {
