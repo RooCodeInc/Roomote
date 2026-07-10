@@ -7,7 +7,6 @@ const {
   mockConsumePending,
   mockRequeuePending,
   mockSchedule,
-  mockIsEnabled,
   mockPrepareDelivery,
   mockRecordDelivery,
   mockPostMessage,
@@ -21,7 +20,6 @@ const {
   mockConsumePending: vi.fn(),
   mockRequeuePending: vi.fn(),
   mockSchedule: vi.fn(),
-  mockIsEnabled: vi.fn(),
   mockPrepareDelivery: vi.fn(),
   mockRecordDelivery: vi.fn(),
   mockPostMessage: vi.fn(),
@@ -79,7 +77,6 @@ vi.mock('@roomote/sdk/server', () => ({
   consumePendingPrReviewActivity: mockConsumePending,
   requeuePendingPrReviewActivity: mockRequeuePending,
   schedulePrReviewNotificationJob: mockSchedule,
-  isPrReviewNotificationEnabled: mockIsEnabled,
   createTeamsCommunicationProviderFromRuntimeCredentials:
     mockCreateTeamsProvider,
   preparePrReviewNotificationDelivery: mockPrepareDelivery,
@@ -135,7 +132,6 @@ describe('prReviewNotificationJob', () => {
     mockFindFirstSlackInstallation.mockResolvedValue({
       botAccessToken: 'xoxb-token',
     });
-    mockIsEnabled.mockResolvedValue(true);
     mockConsumePending.mockResolvedValue(events);
     mockPrepareDelivery.mockResolvedValue({
       post: true,
@@ -245,17 +241,6 @@ describe('prReviewNotificationJob', () => {
       text: 'formatted-message',
     });
     expect(mockPostMessage).not.toHaveBeenCalled();
-  });
-
-  it('drops pending activity without posting when the feature flag is off', async () => {
-    mockIsEnabled.mockResolvedValue(false);
-
-    await prReviewNotificationJob(makeJob() as never);
-
-    expect(mockConsumePending).toHaveBeenCalled();
-    expect(mockPostMessage).not.toHaveBeenCalled();
-    expect(mockSchedule).not.toHaveBeenCalled();
-    expect(mockPrepareDelivery).not.toHaveBeenCalled();
   });
 
   it('defers while the task is actively running', async () => {

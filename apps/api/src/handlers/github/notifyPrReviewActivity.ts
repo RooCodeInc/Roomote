@@ -237,9 +237,9 @@ async function enqueuePrReviewSummaryNotificationOnce(
   }
 
   // Keep the claim only when something was actually scheduled. Releasing it
-  // on no-op results (flag disabled, PR not linked to a conversation-backed
-  // task yet) or on errors lets a later created/edited delivery of the same
-  // terminal summary retry instead of being suppressed for the TTL.
+  // on no-op results (PR not linked to a conversation-backed task yet) or on
+  // errors lets a later created/edited delivery of the same terminal summary
+  // retry instead of being suppressed for the TTL.
   try {
     const result = await enqueuePrReviewNotification(notification.input);
 
