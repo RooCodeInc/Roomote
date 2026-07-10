@@ -20,7 +20,6 @@ import type {
   deploymentSettings,
   tasks,
   taskPins,
-  taskShares,
   taskPullRequests,
   taskRuns,
   taskRunEvents,
@@ -89,14 +88,6 @@ export type CreateTask = typeof tasks.$inferInsert;
 export type TaskPin = typeof taskPins.$inferSelect;
 
 export type CreateTaskPin = Omit<typeof taskPins.$inferInsert, Generated>;
-
-/**
- * taskShares
- */
-
-export type TaskShare = typeof taskShares.$inferSelect;
-
-export type CreateTaskShare = Omit<typeof taskShares.$inferInsert, Generated>;
 
 /**
  * taskPullRequests
