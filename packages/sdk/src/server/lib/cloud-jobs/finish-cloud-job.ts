@@ -200,6 +200,21 @@ export const finishCloudJob = async ({
     });
   });
 
+  // A stop request persisted on the row (cancelRequestedAt) means a Failed
+  // finalization is the fallout of a deliberate user stop — e.g. the sandbox
+  // died before the cancel completed — so failure reporting would tell the
+  // user a task they stopped "ran into a hiccup". Downstream, this suppresses
+  // the Slack/Teams/Linear failure notifications and reports GitHub-facing
+  // terminal outcomes as canceled rather than failed.
+  const failedAfterStopRequest =
+    status === CloudTaskStatus.Failed && job.cancelRequestedAt != null;
+
+  if (failedAfterStopRequest) {
+    console.log(
+      `[finishCloudJob] Reporting the failed finalization of job ${id} as canceled: a stop was requested at ${job.cancelRequestedAt!.toISOString()}`,
+    );
+  }
+
   // Anonymous analytics (no-op unless enabled): terminal task outcome with
   // non-identifying routing facts only.
   if (status === CloudTaskStatus.Completed) {
@@ -335,7 +350,7 @@ export const finishCloudJob = async ({
         const outcome =
           status === CloudTaskStatus.Completed
             ? 'completed'
-            : status === CloudTaskStatus.Failed
+            : status === CloudTaskStatus.Failed && !failedAfterStopRequest
               ? 'failed'
               : 'canceled';
         const terminalStatus = buildTerminalReviewStatus({
@@ -372,19 +387,6 @@ export const finishCloudJob = async ({
         );
       }
     }
-  }
-
-  // A stop request persisted on the row (cancelRequestedAt) means a Failed
-  // finalization is the fallout of a deliberate user stop — e.g. the sandbox
-  // died before the cancel completed — so failure notifications would tell
-  // the user a task they stopped "ran into a hiccup". Suppress them.
-  const failedAfterStopRequest =
-    status === CloudTaskStatus.Failed && job.cancelRequestedAt != null;
-
-  if (failedAfterStopRequest) {
-    console.log(
-      `[finishCloudJob] Suppressing failure notifications for job ${id}: a stop was requested at ${job.cancelRequestedAt!.toISOString()}`,
-    );
   }
 
   // Slack failure notification: post a thread reply when the job failed and
@@ -481,7 +483,8 @@ export const finishCloudJob = async ({
     jobType === CloudTaskType.GithubPrConflictResolve &&
     job.prRepo &&
     job.prNumber &&
-    (status === CloudTaskStatus.Completed || status === CloudTaskStatus.Failed)
+    (status === CloudTaskStatus.Completed ||
+      (status === CloudTaskStatus.Failed && !failedAfterStopRequest))
   ) {
     try {
       await postConflictResolutionComment(job, status, sanitizedError);

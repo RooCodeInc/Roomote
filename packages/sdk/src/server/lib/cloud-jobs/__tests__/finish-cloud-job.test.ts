@@ -75,12 +75,21 @@ vi.mock('@roomote/db/server', async () => {
 });
 
 const mockSuggestSlackQuestionChannels = vi.fn();
+const mockBuildTerminalReviewStatus = vi
+  .fn()
+  .mockReturnValue('terminal-status');
+const mockFinalizeGithubPrReviewComment = vi.fn().mockResolvedValue(false);
+
 vi.mock('@roomote/cloud-agents/server', () => ({
   enqueueCloudTask: vi.fn(),
   releaseCloudTask: vi.fn().mockResolvedValue(undefined),
   getTaskUrl: vi.fn().mockReturnValue('https://example.com/task'),
   suggestSlackQuestionChannels: (...args: unknown[]) =>
     mockSuggestSlackQuestionChannels(...args),
+  buildTerminalReviewStatus: (...args: unknown[]) =>
+    mockBuildTerminalReviewStatus(...args),
+  finalizeGithubPrReviewComment: (...args: unknown[]) =>
+    mockFinalizeGithubPrReviewComment(...args),
 }));
 
 vi.mock('@roomote/redis', () => ({
@@ -1703,6 +1712,68 @@ describe('finishCloudJob', () => {
           'Patch did not apply cleanly.',
         ].join('\n'),
       });
+    });
+
+    it('skips the failure comment when the failed conflict job had a stop request', async () => {
+      const job = makeCloudJob({
+        type: CloudTaskType.GithubPrConflictResolve,
+        prRepo: 'owner/repo',
+        prNumber: 42,
+        cancelRequestedAt: new Date(),
+      });
+      mockFindFirstCloudJob.mockResolvedValue(job);
+
+      await finishCloudJob({
+        id: 1,
+        status: CloudTaskStatus.Failed,
+        error: 'Patch did not apply cleanly.',
+      });
+
+      expect(mockCreateIssueComment).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('GitHub PR review terminal summary', () => {
+    it('finalizes the summary with a failed outcome when a review job fails', async () => {
+      const job = makeCloudJob({
+        type: CloudTaskType.GithubPrReview,
+        prRepo: 'owner/repo',
+        prNumber: 42,
+        payload: { repo: 'owner/repo', prNumber: 42 } as CloudJob['payload'],
+      });
+      mockFindFirstCloudJob.mockResolvedValue(job);
+
+      await finishCloudJob({
+        id: 1,
+        status: CloudTaskStatus.Failed,
+        error: 'spawn timeout',
+      });
+
+      expect(mockBuildTerminalReviewStatus).toHaveBeenCalledWith(
+        expect.objectContaining({ outcome: 'failed' }),
+      );
+      expect(mockFinalizeGithubPrReviewComment).toHaveBeenCalled();
+    });
+
+    it('reports a canceled outcome when the failed review job had a stop request', async () => {
+      const job = makeCloudJob({
+        type: CloudTaskType.GithubPrReview,
+        prRepo: 'owner/repo',
+        prNumber: 42,
+        cancelRequestedAt: new Date(),
+        payload: { repo: 'owner/repo', prNumber: 42 } as CloudJob['payload'],
+      });
+      mockFindFirstCloudJob.mockResolvedValue(job);
+
+      await finishCloudJob({
+        id: 1,
+        status: CloudTaskStatus.Failed,
+        error: 'Worker heartbeat stale and instance sb-1 is stopped',
+      });
+
+      expect(mockBuildTerminalReviewStatus).toHaveBeenCalledWith(
+        expect.objectContaining({ outcome: 'canceled' }),
+      );
     });
   });
 
