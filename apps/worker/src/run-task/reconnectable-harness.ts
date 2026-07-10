@@ -15,6 +15,7 @@ import {
 } from '@roomote/types';
 
 import type { Harness } from '../sandbox-server';
+import { markExpectedSubprocessExit } from '../sandbox-server/lib/harnesses/opencode-server/expected-exit';
 import type {
   HarnessEvents,
   HarnessInferenceUsageEvent,
@@ -449,6 +450,7 @@ export class ReconnectableHarness
     }
 
     try {
+      markExpectedSubprocessExit(subprocess);
       const terminated = subprocess.kill('SIGTERM');
       this.logger.info(
         `[ReconnectableHarness] Terminated subprocess during ${reason} sentSignal=${terminated}`,

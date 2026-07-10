@@ -46,9 +46,9 @@ describe('createOpenCodeExitCertificateCollector', () => {
     expect(certificate.outputTail).toEqual([]);
     // /proc/meminfo may not exist on the test host; the snapshot is either a
     // complete reading or null, never a throw.
-    if (certificate.memory !== null) {
-      expect(certificate.memory.memTotalKb).toBeGreaterThan(0);
-      expect(certificate.memory.workerRssBytes).toBeGreaterThan(0);
+    if (certificate.memoryAfterExit !== null) {
+      expect(certificate.memoryAfterExit.memTotalKb).toBeGreaterThan(0);
+      expect(certificate.memoryAfterExit.workerRssBytes).toBeGreaterThan(0);
     }
   });
 });
