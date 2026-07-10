@@ -84,4 +84,7 @@ export function parseCreatorFilterValue(
 
 // `formatAutomationLabel` now lives in `@roomote/types` so web + server-side
 // stats share one implementation. Re-exported here for existing web callers.
-export { formatAutomationLabel } from '@roomote/types';
+export {
+  formatAutomationAttributionLabel,
+  formatAutomationLabel,
+} from '@roomote/types';

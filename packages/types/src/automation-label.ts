@@ -17,3 +17,13 @@ export function formatAutomationLabel(key: string): string {
     )
     .join(' ');
 }
+
+/**
+ * Task-owner attribution for automation-created work.
+ * Prefer "{name} Automation" so the owner reads as work done by an automation,
+ * not as a separate agent identity.
+ */
+export function formatAutomationAttributionLabel(key: string): string {
+  const name = formatAutomationLabel(key);
+  return name ? `${name} Automation` : '';
+}
