@@ -17,7 +17,7 @@ hidden: true
 
 Zero is a search engine and payment layer for AI agents: discover external paid
 capabilities, call them, and pay per use from the deployment-connected Zero
-wallet (Path C runtime). Roomote only installs this skill and the `zero` CLI
+wallet. Roomote only installs this skill and the `zero` CLI
 when a deployment operator has enabled Zero. Prefer that CLI for the capability
 loop. The Zero MCP connector (`https://mcp.zero.xyz`) is for authentication and
 funding when the workspace connection is present in Settings.
@@ -52,7 +52,7 @@ calls. Capture `runId` from `zero fetch --json`.
 
 ## Authentication in Roomote tasks
 
-Path C in Roomote is org-scoped: one operator connects Zero once for the
+Zero in Roomote is org-scoped: one operator connects Zero once for the
 deployment from Settings > Integrations.
 
 1. Prefer the workspace Zero MCP connection when it is available. Use the

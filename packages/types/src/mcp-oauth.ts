@@ -446,7 +446,7 @@ export const MCP_INTEGRATIONS: McpIntegration[] = [
       buttonLabel: 'Connect',
     },
     instructions: [
-      'Zero Path C is available because a deployment operator connected Zero: the `zero` CLI and skill are installed for this task, and the Zero MCP connector handles authentication and funding.',
+      'Zero is available because a deployment operator connected it: the `zero` CLI and skill are installed for this task, and the Zero MCP connector handles authentication and funding.',
       '',
       'Prefer the `zero` CLI for the capability loop: `zero search` → `zero get` → `zero fetch` → `zero review`. Use the Zero MCP tools when the skill requires them for auth or funding.',
       '',

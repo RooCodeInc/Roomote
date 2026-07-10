@@ -75,7 +75,7 @@ describe('packaged skill invocation routing', () => {
     }
   });
 
-  it('ships the zero Path C skill in the standard packaged skill catalog', () => {
+  it('ships the zero skill in the standard packaged skill catalog', () => {
     const skillPath = path.join(
       workflowsDir,
       'skills',

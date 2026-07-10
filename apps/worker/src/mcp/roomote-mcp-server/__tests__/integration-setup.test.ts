@@ -64,7 +64,7 @@ describe('integration setup guide', () => {
     );
   });
 
-  it('documents the deployment-scoped Zero Path C setup flow', () => {
+  it('documents the deployment-scoped Zero setup flow', () => {
     expect(INTEGRATION_SETUP_CONTENT).toContain('# Zero');
     expect(INTEGRATION_SETUP_CONTENT).toContain(
       'That operator connects Zero once for the workspace via OAuth.',

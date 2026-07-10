@@ -619,8 +619,8 @@ export const runTask = async ({
 
     const homeDir = runtimeEnv.HOME ?? sanitizedEnv.HOME ?? '';
 
-    // Admin opt-in for Zero Path C: only install the CLI / activate the skill
-    // when Settings > Integrations has Zero enabled for the deployment.
+    // Admin opt-in for Zero: only install the CLI / activate the skill when
+    // Settings > Integrations has Zero enabled for the deployment.
     let zeroIntegrationEnabled = false;
 
     try {

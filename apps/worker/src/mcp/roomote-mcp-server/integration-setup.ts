@@ -129,7 +129,7 @@ Once connected, I can save shared memories and recall relevant context from earl
 
 # Zero
 
-Zero uses Path C (CLI in the runtime with user/capability discovery, connected once for the deployment):
+Zero uses a CLI in the runtime (capability discovery and paid calls), connected once for the deployment:
 1. A deployment operator enables Zero from Settings > Integrations.
 2. That operator connects Zero once for the workspace via OAuth.
 
