@@ -1,5 +1,7 @@
-import { Env } from '@roomote/env';
-import { Schemas as GitHubSchemas } from '@roomote/github';
+import {
+  getEffectiveGitHubAppSlug,
+  Schemas as GitHubSchemas,
+} from '@roomote/github';
 
 export const isMention = (comment: {
   body: string;
@@ -12,7 +14,7 @@ export const isMention = (comment: {
   return (
     comment.body
       .toLowerCase()
-      .includes(`@${Env.NEXT_PUBLIC_GITHUB_APP_SLUG.toLowerCase()}`) &&
+      .includes(`@${getEffectiveGitHubAppSlug().toLowerCase()}`) &&
     !GitHubSchemas.isRoomoteGitHubLogin(comment.user.login)
   );
 };

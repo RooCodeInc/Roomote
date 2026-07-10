@@ -20,6 +20,7 @@ import {
 } from '@roomote/db/server';
 import { validateSuggestionRoutingInstructions } from '@roomote/cloud-agents/server';
 import { FeatureFlag } from '@roomote/feature-flags';
+import { resolveConfiguredGitHubAppSlug } from '@roomote/github';
 import { SlackNotifier } from '@roomote/slack';
 
 import type { UserAuthSuccess } from '@/types';
@@ -973,6 +974,10 @@ export async function updateBackgroundAgentSettingsCommand(
     auth,
     getRelayEligibleCreatorIds(updatedSettings.reviewCodeSettings),
   );
+
+  // The reviewer mapping derives its managed-login list synchronously from
+  // the cached configured app slug.
+  await resolveConfiguredGitHubAppSlug();
 
   return {
     success: true,

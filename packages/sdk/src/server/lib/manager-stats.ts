@@ -281,6 +281,10 @@ export async function buildManagerStatsDigest(params: {
   actorUserId: string;
   since: Date;
 }) {
+  // isRoomotePullRequestAuthor classifies logins synchronously from the
+  // cached configured app slug.
+  await GitHub.resolveConfiguredGitHubAppSlug();
+
   const repositoryIds = await getAnalyticsRepositoryIds();
 
   if (repositoryIds.length === 0) {
