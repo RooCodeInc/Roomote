@@ -1,7 +1,7 @@
 import { db, ensureAutomationRows, eq, taskRuns } from '@roomote/db/server';
 import { ALL_REPOSITORIES, RunStatus, TaskPayloadKind } from '@roomote/types';
 
-import { enqueueTask } from './cloud-job-queue';
+import { enqueueTask } from './task-run-queue';
 
 const timeoutMs = Number(process.env.DEPLOYMENT_CI_TASK_TIMEOUT_MS ?? 90_000);
 
