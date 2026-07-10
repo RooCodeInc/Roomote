@@ -148,7 +148,7 @@ describe('usePersonalPreferences', () => {
 
     expect(result.current.preferences).toEqual({
       colorTheme: 'system',
-      narrationMode: true,
+      narrationMode: false,
       showDebugUI: false,
     });
   });
