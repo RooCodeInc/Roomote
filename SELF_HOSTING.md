@@ -519,6 +519,10 @@ using Docker sandboxes. That overlay:
 - points `DOCKER_WORKER_RELEASE_PATH` at the controller image's packaged worker
   release archive.
 
+Docker tasks fail closed when the host storage driver cannot enforce
+`DOCKER_WORKER_DISK_LIMIT`. Set `DOCKER_WORKER_ALLOW_UNBOUNDED_DISK=true` only
+when the host already provides an equivalent storage quota outside Docker.
+
 Docker sandboxes are the simplest single-host deployment path:
 
 ```sh

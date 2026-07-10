@@ -150,6 +150,11 @@ the same server. Two things matter in this mode:
   discovery network exists with `docker network ls` and that Coolify preserved
   the standard Compose service labels.
 
+  Docker task writable layers fail closed when the host storage driver cannot
+  enforce `DOCKER_WORKER_DISK_LIMIT`. Keep
+  `DOCKER_WORKER_ALLOW_UNBOUNDED_DISK=false` unless the host already enforces an
+  equivalent quota outside Docker.
+
 - **Trust boundary.** Mounting the Docker socket gives the controller
   control of the host Docker daemon. This matches the single-host
   production shape and is intended for a trusted, single-tenant server.

@@ -98,6 +98,7 @@ describe('Env', () => {
       expect(env.DOCKER_WORKER_MEMORY_LIMIT).toBe('4g');
       expect(env.DOCKER_WORKER_PIDS_LIMIT).toBe(512);
       expect(env.DOCKER_WORKER_DISK_LIMIT).toBe('20g');
+      expect(env.DOCKER_WORKER_ALLOW_UNBOUNDED_DISK).toBe(false);
       expect(env.DOCKER_WORKER_LOG_MAX_SIZE).toBe('10m');
       expect(env.DOCKER_WORKER_LOG_MAX_FILES).toBe(3);
       expect(env.DOCKER_WORKER_EGRESS_POLICY).toBe('internet');
@@ -128,6 +129,15 @@ describe('Env', () => {
         process.env.SKIP_ENV_VALIDATION = previousSkipEnvValidation;
       }
     }
+  });
+
+  it('requires an explicit opt-in for unbounded Docker task disks', () => {
+    expect(
+      createRoomoteEnv({
+        ...process.env,
+        DOCKER_WORKER_ALLOW_UNBOUNDED_DISK: 'true',
+      }).DOCKER_WORKER_ALLOW_UNBOUNDED_DISK,
+    ).toBe(true);
   });
 
   it('derives DOCKER_WORKER_IMAGE from the baked release version', () => {

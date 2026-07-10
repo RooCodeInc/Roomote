@@ -4,6 +4,7 @@ import { processListIncludesDockerWorkerRun } from '../docker-sandbox-security';
 import {
   buildDockerSandboxServerUrl,
   resolveDockerWorkerOwnershipTargetFromLookup,
+  shouldRetryDockerWorkerWithoutDiskLimit,
   shouldAutoRemoveDockerWorkerContainer,
   toContainerReachableUrl,
 } from '../spawn-docker-worker';
@@ -39,6 +40,39 @@ describe('processListIncludesDockerWorkerRun', () => {
         '/sandbox/worker/dist/worker.js run 13',
         12,
       ),
+    ).toBe(false);
+  });
+});
+
+describe('shouldRetryDockerWorkerWithoutDiskLimit', () => {
+  const unsupportedStorageError = {
+    stderr: '--storage-opt is not supported by the overlay2 storage driver',
+  };
+
+  it('fails closed unless unbounded disk use is explicitly allowed', () => {
+    expect(() =>
+      shouldRetryDockerWorkerWithoutDiskLimit({
+        diskLimit: '20g',
+        allowUnboundedDisk: false,
+        error: unsupportedStorageError,
+      }),
+    ).toThrow('Refusing to start an unbounded task');
+  });
+
+  it('retries only for an opted-in unsupported storage driver', () => {
+    expect(
+      shouldRetryDockerWorkerWithoutDiskLimit({
+        diskLimit: '20g',
+        allowUnboundedDisk: true,
+        error: unsupportedStorageError,
+      }),
+    ).toBe(true);
+    expect(
+      shouldRetryDockerWorkerWithoutDiskLimit({
+        diskLimit: '20g',
+        allowUnboundedDisk: true,
+        error: new Error('image not found'),
+      }),
     ).toBe(false);
   });
 });

@@ -236,6 +236,8 @@ services:
       # networks, so they do not join roomote_default or gain access to its
       # datastores.
       DOCKER_WORKER_NETWORK: roomote_default
+      # Keep false unless the host enforces an equivalent storage quota.
+      DOCKER_WORKER_ALLOW_UNBOUNDED_DISK: ${DOCKER_WORKER_ALLOW_UNBOUNDED_DISK:-false}
 
   bullmq:
     image: *roomote-app-image

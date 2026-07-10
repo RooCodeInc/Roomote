@@ -267,4 +267,110 @@ describe('cleanupStaleDockerSandboxes', () => {
       allowFailure: true,
     });
   });
+
+  it('reattaches a replacement API container to a running task network', async () => {
+    const taskNetwork = getDockerTaskNetworkName(96);
+    const controlNetwork = 'roomote-control';
+    const runDocker = vi.fn<DockerCommand>(async (args) => {
+      if (args[0] === 'network' && args[1] === 'ls') {
+        return `${taskNetwork}\n`;
+      }
+      if (
+        args[0] === 'network' &&
+        args[1] === 'inspect' &&
+        args[2] === taskNetwork
+      ) {
+        return JSON.stringify([
+          {
+            Id: 'task-network-id',
+            Labels: {
+              'dev.roomote.sandbox.container': 'roomote-worker-96',
+              'dev.roomote.sandbox.auto-remove': 'true',
+              'dev.roomote.task-run-id': '96',
+              'dev.roomote.sandbox.created-at-ms': '1000',
+            },
+          },
+        ]);
+      }
+      if (
+        args[0] === 'network' &&
+        args[1] === 'inspect' &&
+        args[2] === controlNetwork
+      ) {
+        return JSON.stringify([
+          {
+            Id: 'control-network-id',
+            Containers: { replacementApi: { Name: 'roomote-api-new' } },
+          },
+        ]);
+      }
+      if (args[0] === 'inspect' && args[1] === 'roomote-worker-96') {
+        return JSON.stringify([{ State: { Running: true } }]);
+      }
+      if (args[0] === 'inspect' && args[1] === 'replacementApi') {
+        return JSON.stringify([
+          {
+            Config: { Labels: { 'com.docker.compose.service': 'api' } },
+            NetworkSettings: {
+              Networks: {
+                [controlNetwork]: {
+                  NetworkID: 'control-network-id',
+                  Aliases: ['api'],
+                },
+              },
+            },
+          },
+        ]);
+      }
+      if (args[0] === 'exec') {
+        return 'worker run 96';
+      }
+      return '';
+    });
+
+    await cleanupStaleDockerSandboxes(
+      { nowMs: 20 * 60 * 1_000, controlNetwork },
+      runDocker,
+    );
+
+    expect(runDocker).toHaveBeenCalledWith([
+      'network',
+      'connect',
+      '--alias',
+      'api',
+      '--alias',
+      'roomote-api-new',
+      taskNetwork,
+      'replacementApi',
+    ]);
+    expect(runDocker).not.toHaveBeenCalledWith(
+      ['rm', '-f', 'roomote-worker-96'],
+      expect.anything(),
+    );
+  });
+
+  it('does not remove task resources when Docker inspection fails', async () => {
+    const taskNetwork = getDockerTaskNetworkName(97);
+    const runDocker = vi.fn<DockerCommand>(async (args) => {
+      if (args[0] === 'network' && args[1] === 'ls') {
+        return `${taskNetwork}\n`;
+      }
+      if (args[0] === 'network' && args[1] === 'inspect') {
+        throw new Error('Docker daemon unavailable');
+      }
+      return '';
+    });
+
+    await expect(
+      cleanupStaleDockerSandboxes({ nowMs: 20 * 60 * 1_000 }, runDocker),
+    ).rejects.toThrow('Docker daemon unavailable');
+    expect(runDocker).not.toHaveBeenCalledWith(
+      ['network', 'rm', taskNetwork],
+      expect.anything(),
+    );
+    expect(runDocker).not.toHaveBeenCalledWith(
+      expect.arrayContaining(['network', 'disconnect']),
+      expect.anything(),
+    );
+  });
 });

@@ -118,6 +118,7 @@ export class RoomoteController extends BaseController {
           memoryLimit: Env.DOCKER_WORKER_MEMORY_LIMIT,
           pidsLimit: Env.DOCKER_WORKER_PIDS_LIMIT,
           diskLimit: Env.DOCKER_WORKER_DISK_LIMIT,
+          allowUnboundedDisk: Env.DOCKER_WORKER_ALLOW_UNBOUNDED_DISK,
           logMaxSize: Env.DOCKER_WORKER_LOG_MAX_SIZE,
           logMaxFiles: Env.DOCKER_WORKER_LOG_MAX_FILES,
           egressPolicy: Env.DOCKER_WORKER_EGRESS_POLICY,
@@ -194,9 +195,13 @@ export class RoomoteController extends BaseController {
   }
 
   protected override async setup(): Promise<void> {
-    await cleanupStaleDockerSandboxes();
+    await cleanupStaleDockerSandboxes({
+      controlNetwork: Env.DOCKER_WORKER_NETWORK,
+    });
     this.dockerCleanupInterval = setInterval(() => {
-      void cleanupStaleDockerSandboxes().catch((error) => {
+      void cleanupStaleDockerSandboxes({
+        controlNetwork: Env.DOCKER_WORKER_NETWORK,
+      }).catch((error) => {
         console.error(
           `[RoomoteController] Failed to clean stale Docker sandboxes: ${error instanceof Error ? error.message : String(error)}`,
         );

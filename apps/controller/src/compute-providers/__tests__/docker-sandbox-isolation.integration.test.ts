@@ -186,6 +186,32 @@ describe.runIf(runIntegrationTests)('Docker task network isolation', () => {
     await expect(
       docker(['exec', sourceContainer, 'nc', '-z', '-w', '1', 'api', '7777']),
     ).resolves.toBe('');
+
+    // Compose and Coolify replace control-plane containers during deploys.
+    // Reconciliation must attach the replacement to every live task network.
+    await docker(['rm', '-f', trustedContainers[0]!]);
+    await docker([
+      'run',
+      '-d',
+      '--rm',
+      '--name',
+      trustedContainers[0]!,
+      '--label',
+      'com.docker.compose.service=api',
+      '--network',
+      controlNetwork,
+      '--network-alias',
+      'api',
+      dockerImage,
+      'sh',
+      '-c',
+      'while true; do echo api-replacement | nc -l -p 7777; done',
+    ]);
+    await cleanupStaleDockerSandboxes({ controlNetwork });
+    await expect(
+      docker(['exec', sourceContainer, 'nc', '-z', '-w', '1', 'api', '7777']),
+    ).resolves.toBe('');
+
     await expect(
       docker([
         'exec',

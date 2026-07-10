@@ -51,6 +51,13 @@ function dockerSize() {
   return z.string().regex(/^\d+(?:\.\d+)?[kmgt]?b?$/i, 'Invalid Docker size');
 }
 
+function optInBoolean() {
+  return z
+    .enum(['true', 'false', '1', '0'])
+    .default('false')
+    .transform((value) => value === 'true' || value === '1');
+}
+
 const serverSchema = {
   APP_ENV: z.enum(['development', 'preview', 'production']).optional(),
   DEFAULT_COMPUTE_PROVIDER: z
@@ -75,6 +82,7 @@ const serverSchema = {
   DOCKER_WORKER_MEMORY_LIMIT: dockerSize().default('4g'),
   DOCKER_WORKER_PIDS_LIMIT: z.coerce.number().int().positive().default(512),
   DOCKER_WORKER_DISK_LIMIT: dockerSize().default('20g'),
+  DOCKER_WORKER_ALLOW_UNBOUNDED_DISK: optInBoolean(),
   DOCKER_WORKER_LOG_MAX_SIZE: dockerSize().default('10m'),
   DOCKER_WORKER_LOG_MAX_FILES: z.coerce.number().int().positive().default(3),
   DOCKER_WORKER_EGRESS_POLICY: z.enum(['internet', 'none']).default('internet'),

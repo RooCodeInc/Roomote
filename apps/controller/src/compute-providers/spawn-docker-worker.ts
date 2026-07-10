@@ -64,6 +64,7 @@ export async function spawnDockerWorker(
     memoryLimit: string;
     pidsLimit: number;
     diskLimit: string;
+    allowUnboundedDisk: boolean;
     logMaxSize: string;
     logMaxFiles: number;
     egressPolicy: DockerWorkerEgressPolicy;
@@ -182,12 +183,18 @@ export async function spawnDockerWorker(
     try {
       containerId = await startContainer(config.diskLimit);
     } catch (error) {
-      if (!config.diskLimit || !isUnsupportedDockerDiskLimitError(error)) {
+      if (
+        !shouldRetryDockerWorkerWithoutDiskLimit({
+          diskLimit: config.diskLimit,
+          allowUnboundedDisk: config.allowUnboundedDisk,
+          error,
+        })
+      ) {
         throw error;
       }
 
       console.warn(
-        `[spawnDockerWorker] Docker storage driver cannot enforce writable-layer limit ${config.diskLimit}; continuing without --storage-opt size. Configure host-level Docker storage quotas to retain a hard disk bound.`,
+        `[spawnDockerWorker] Docker storage driver cannot enforce writable-layer limit ${config.diskLimit}; DOCKER_WORKER_ALLOW_UNBOUNDED_DISK is enabled, so this task will continue without --storage-opt size.`,
       );
       await docker(['rm', '-f', containerName], { allowFailure: true });
       containerId = await startContainer();
@@ -333,6 +340,24 @@ export async function spawnDockerWorker(
     }
     throw error;
   }
+}
+
+export function shouldRetryDockerWorkerWithoutDiskLimit(params: {
+  diskLimit?: string;
+  allowUnboundedDisk: boolean;
+  error: unknown;
+}): boolean {
+  if (!params.diskLimit || !isUnsupportedDockerDiskLimitError(params.error)) {
+    return false;
+  }
+
+  if (!params.allowUnboundedDisk) {
+    throw new NonRetryableSpawnError(
+      `Docker storage driver cannot enforce writable-layer limit ${params.diskLimit}. Refusing to start an unbounded task. Configure a quota-capable Docker data root or set DOCKER_WORKER_ALLOW_UNBOUNDED_DISK=true to explicitly accept the host disk-exhaustion risk.`,
+    );
+  }
+
+  return true;
 }
 
 async function assertDetachedWorkerStarted(

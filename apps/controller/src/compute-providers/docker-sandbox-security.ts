@@ -147,18 +147,7 @@ export function buildDockerWorkerResourceArgs(
 }
 
 export function isUnsupportedDockerDiskLimitError(error: unknown): boolean {
-  const errorWithOutput = error as {
-    message?: unknown;
-    stderr?: unknown;
-    stdout?: unknown;
-  };
-  const output = [
-    errorWithOutput?.message,
-    errorWithOutput?.stderr,
-    errorWithOutput?.stdout,
-  ]
-    .filter((value): value is string => typeof value === 'string')
-    .join('\n');
+  const output = getDockerErrorOutput(error);
 
   return [
     /storage-opt.*supported only/i,
@@ -312,7 +301,7 @@ export async function removeDockerSandboxResources(
 }
 
 export async function cleanupStaleDockerSandboxes(
-  options: { nowMs?: number } = {},
+  options: { nowMs?: number; controlNetwork?: string } = {},
   runDocker: DockerCommand = docker,
 ): Promise<void> {
   const output = await runDocker(
@@ -367,15 +356,26 @@ export async function cleanupStaleDockerSandboxes(
       continue;
     }
 
+    if (options.controlNetwork) {
+      await connectTrustedControlPlaneServices(
+        options.controlNetwork,
+        taskNetwork,
+        runDocker,
+      );
+    }
+
     if (!isPastProvisioningTimeout || labels[AUTO_REMOVE_LABEL] !== 'true') {
       continue;
     }
 
     const taskRunId = Number(labels[TASK_RUN_ID_LABEL]);
-    const processList = await runDocker(
-      ['exec', containerName, 'ps', '-eo', 'args'],
-      { allowFailure: true },
-    );
+    const processList = await runDocker([
+      'exec',
+      containerName,
+      'ps',
+      '-eo',
+      'args',
+    ]);
 
     if (!processListIncludesDockerWorkerRun(processList, taskRunId)) {
       await removeDockerSandboxResources(
@@ -421,13 +421,15 @@ async function connectTrustedControlPlaneServices(
       (alias): alias is string => Boolean(alias && !alias.includes(':')),
     );
 
-    await runDocker([
-      'network',
-      'connect',
-      ...[...new Set(aliases)].flatMap((alias) => ['--alias', alias]),
-      taskNetworkName,
-      containerId,
-    ]);
+    if (!container?.NetworkSettings?.Networks?.[taskNetworkName]) {
+      await runDocker([
+        'network',
+        'connect',
+        ...[...new Set(aliases)].flatMap((alias) => ['--alias', alias]),
+        taskNetworkName,
+        containerId,
+      ]);
+    }
     connectedServices.add(service);
   }
 
@@ -465,9 +467,16 @@ async function inspectNetwork(
   networkName: string,
   runDocker: DockerCommand,
 ): Promise<DockerNetworkInspect | undefined> {
-  const output = await runDocker(['network', 'inspect', networkName], {
-    allowFailure: true,
-  });
+  let output: string;
+
+  try {
+    output = await runDocker(['network', 'inspect', networkName]);
+  } catch (error) {
+    if (isDockerObjectNotFoundError(error)) {
+      return undefined;
+    }
+    throw error;
+  }
 
   if (!output.trim()) {
     return undefined;
@@ -481,9 +490,16 @@ async function inspectContainer(
   containerIdOrName: string,
   runDocker: DockerCommand,
 ): Promise<DockerContainerInspect | undefined> {
-  const output = await runDocker(['inspect', containerIdOrName], {
-    allowFailure: true,
-  });
+  let output: string;
+
+  try {
+    output = await runDocker(['inspect', containerIdOrName]);
+  } catch (error) {
+    if (isDockerObjectNotFoundError(error)) {
+      return undefined;
+    }
+    throw error;
+  }
 
   if (!output.trim()) {
     return undefined;
@@ -491,4 +507,29 @@ async function inspectContainer(
 
   const parsed = JSON.parse(output) as DockerContainerInspect[];
   return parsed[0];
+}
+
+function getDockerErrorOutput(error: unknown): string {
+  const errorWithOutput = error as {
+    message?: unknown;
+    stderr?: unknown;
+    stdout?: unknown;
+  };
+
+  return [
+    errorWithOutput?.message,
+    errorWithOutput?.stderr,
+    errorWithOutput?.stdout,
+  ]
+    .filter((value): value is string => typeof value === 'string')
+    .join('\n');
+}
+
+function isDockerObjectNotFoundError(error: unknown): boolean {
+  const output = getDockerErrorOutput(error);
+
+  return [
+    /no such (?:object|container|network)/i,
+    /network .+ not found/i,
+  ].some((pattern) => pattern.test(output));
 }
