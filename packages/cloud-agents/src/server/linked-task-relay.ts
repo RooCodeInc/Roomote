@@ -5,7 +5,7 @@ import {
   getReviewCodeAutomationSettings,
   tasks,
 } from '@roomote/db/server';
-import { type PrReviewerSettings } from '@roomote/types';
+import { type PrReviewSettings } from '@roomote/types';
 
 export type LinkedTaskRelayState = {
   linkedTaskId: string | null;
@@ -14,7 +14,7 @@ export type LinkedTaskRelayState = {
 };
 
 function getRelayEligibleCreatorIds(
-  settings: PrReviewerSettings | null | undefined,
+  settings: PrReviewSettings | null | undefined,
 ): Set<string> {
   if (!Array.isArray(settings?.relayEligibleCreatorIds)) {
     return new Set();
@@ -37,7 +37,7 @@ export async function getLinkedTaskRelayState({
   repository: string;
   prNumber: number;
   branchName: string;
-  reviewerSettings?: PrReviewerSettings | null;
+  reviewerSettings?: PrReviewSettings | null;
   ownerLookupPendingOnMiss?: boolean;
 }): Promise<LinkedTaskRelayState> {
   const settings =
@@ -68,7 +68,7 @@ export async function getLinkedTaskRelayState({
     where: eq(tasks.id, linkedTaskOwner.taskId),
     columns: {
       id: true,
-      userId: true,
+      initiatorUserId: true,
     },
   });
 
@@ -79,7 +79,7 @@ export async function getLinkedTaskRelayState({
     };
   }
 
-  if (!linkedTask.userId) {
+  if (!linkedTask.initiatorUserId) {
     return {
       linkedTaskId: linkedTask.id,
       relayEnabled: false,
@@ -88,7 +88,9 @@ export async function getLinkedTaskRelayState({
 
   return {
     linkedTaskId: linkedTask.id,
-    relayEnabled: getRelayEligibleCreatorIds(settings).has(linkedTask.userId),
+    relayEnabled: getRelayEligibleCreatorIds(settings).has(
+      linkedTask.initiatorUserId,
+    ),
   };
 }
 
@@ -101,7 +103,7 @@ export async function isLinkedTaskCreatorRelayEnabled({
   repository: string;
   prNumber: number;
   branchName: string;
-  reviewerSettings?: PrReviewerSettings | null;
+  reviewerSettings?: PrReviewSettings | null;
 }): Promise<boolean> {
   return (
     await getLinkedTaskRelayState({

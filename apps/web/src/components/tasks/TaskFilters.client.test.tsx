@@ -1,6 +1,8 @@
 import React from 'react';
 import { render } from '@testing-library/react';
-import { cloudTaskTypes } from '@roomote/types';
+import { TASK_WORKFLOWS } from '@roomote/types';
+
+import { formatAutomationLabel } from '@/lib/task-creator-filter';
 
 const {
   useUsersForFilterMock,
@@ -27,8 +29,10 @@ function Icon() {
 }
 
 vi.mock('@/components/system', () => ({
+  Bug: Icon,
   Calendar: Icon,
   ChevronDown: Icon,
+  FileText: Icon,
   VectorSquare: Icon,
   Brain: Icon,
   GitPullRequest: Icon,
@@ -112,7 +116,7 @@ describe('TaskFilters', () => {
     });
   });
 
-  it('renders all cloud task types when the task-type filter is visible', () => {
+  it('renders all task workflows when the task-type filter is visible', () => {
     const { getByText } = render(
       <TaskFilters
         {...baseProps}
@@ -122,8 +126,8 @@ describe('TaskFilters', () => {
       />,
     );
 
-    for (const taskType of cloudTaskTypes) {
-      expect(getByText(taskType)).toBeInTheDocument();
+    for (const workflow of TASK_WORKFLOWS) {
+      expect(getByText(formatAutomationLabel(workflow))).toBeInTheDocument();
     }
   });
 });

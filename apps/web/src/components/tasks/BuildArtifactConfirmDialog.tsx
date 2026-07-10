@@ -30,7 +30,7 @@ import { ModelSelect } from './ModelSelect';
 
 /**
  * Form schema for selecting where to build the artifact.
- * Uses the same structure as CreateCloudTask but only the fields needed for workspace selection.
+ * Uses the same structure as CreateTaskFormValues but only the fields needed for workspace selection.
  */
 const buildArtifactFormSchema = z.object({
   repository: z.string().min(1, 'Repository is required.'),

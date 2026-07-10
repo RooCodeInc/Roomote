@@ -1,16 +1,16 @@
 import {
-  CloudTaskType,
+  TaskPayloadKind,
   NonRetryableSpawnError,
   getPrimaryPortFromConfig,
 } from '@roomote/types';
 import {
-  type CloudJob,
+  type TaskRun,
   createComputeProviderMutationEventRecorder,
   db,
-  cloudJobs,
+  taskRuns,
   eq,
 } from '@roomote/db/server';
-import { stampCloudJobMilestone } from '@roomote/sdk/server';
+import { stampTaskRunMilestone } from '@roomote/sdk/server';
 import {
   buildComputeProviderMutationDetails,
   buildE2bWorkerEnv,
@@ -23,9 +23,9 @@ import {
 
 import { primeEnvironmentOidcForMachine } from '../sandbox-oidc';
 import {
-  getNamedPortsForCloudJob,
-  shouldEnableAuthBypassForCloudJob,
-  updateCloudJobMachine,
+  getNamedPortsForTaskRun,
+  shouldEnableAuthBypassForTaskRun,
+  updateTaskRunMachine,
 } from '../utils';
 
 const E2B_LAUNCH_OUTPUT_TEXT_LIMIT = 500;
@@ -77,33 +77,33 @@ function buildDetachedWorkerExitError(
 }
 
 function getWorkerLaunchCommand(
-  cloudJob: CloudJob,
+  taskRun: TaskRun,
 ): 'snapshot' | 'resume' | 'run' {
-  return cloudJob.type === CloudTaskType.SnapshotEnvironment
+  return taskRun.payloadKind === TaskPayloadKind.SnapshotEnvironment
     ? 'snapshot'
-    : cloudJob.type === CloudTaskType.SnapshotResume
+    : taskRun.payloadKind === TaskPayloadKind.SnapshotResume
       ? 'resume'
       : 'run';
 }
 
-function getWorkerLaunchArgs(cloudJob: CloudJob, machineId: string): string[] {
-  const command = getWorkerLaunchCommand(cloudJob);
+function getWorkerLaunchArgs(taskRun: TaskRun, machineId: string): string[] {
+  const command = getWorkerLaunchCommand(taskRun);
 
-  return cloudJob.type === CloudTaskType.SnapshotEnvironment
+  return taskRun.payloadKind === TaskPayloadKind.SnapshotEnvironment
     ? [
         'snapshot',
-        '--cloud-job-id',
-        cloudJob.id.toString(),
+        '--task-run-id',
+        taskRun.id.toString(),
         '--environment-id',
-        cloudJob.payload.environmentId ?? '',
+        taskRun.payload.environmentId ?? '',
         '--sandbox-id',
         machineId,
       ]
-    : [command, cloudJob.id.toString()];
+    : [command, taskRun.id.toString()];
 }
 
 export async function spawnE2bWorker(
-  cloudJob: CloudJob,
+  taskRun: TaskRun,
   authToken: string,
   config: {
     e2bApiKey: string;
@@ -128,12 +128,12 @@ export async function spawnE2bWorker(
     e2bTags,
   } = config;
 
-  const environmentId = cloudJob.payload.environmentId;
+  const environmentId = taskRun.payload.environmentId;
 
   const { namedPorts, environmentSnapshotId, environmentConfig } =
-    await getNamedPortsForCloudJob(cloudJob);
+    await getNamedPortsForTaskRun(taskRun);
 
-  const shouldEnableAuthBypass = shouldEnableAuthBypassForCloudJob({
+  const shouldEnableAuthBypass = shouldEnableAuthBypassForTaskRun({
     environmentConfig,
     namedPorts,
   });
@@ -151,12 +151,12 @@ export async function spawnE2bWorker(
     | { launchMode: 'environment_snapshot'; sourceSnapshotId: string }
     | { launchMode: 'task_snapshot'; sourceSnapshotId: string };
 
-  if (cloudJob.type === CloudTaskType.SnapshotResume) {
-    const snapshotId = cloudJob.sourceSnapshotId;
+  if (taskRun.payloadKind === TaskPayloadKind.SnapshotResume) {
+    const snapshotId = taskRun.sourceSnapshotId;
 
     if (!snapshotId) {
       throw new NonRetryableSpawnError(
-        `SnapshotResume job #${cloudJob.id} missing sourceSnapshotId`,
+        `SnapshotResume task run #${taskRun.id} missing sourceSnapshotId`,
       );
     }
 
@@ -164,17 +164,17 @@ export async function spawnE2bWorker(
       launchMode: 'task_snapshot',
       sourceSnapshotId: snapshotId,
     };
-  } else if (cloudJob.type === CloudTaskType.SnapshotEnvironment) {
+  } else if (taskRun.payloadKind === TaskPayloadKind.SnapshotEnvironment) {
     // Environment snapshot refreshes must rebuild from the configured base
     // template instead of inheriting the previous environment snapshot.
     launchOptions = { launchMode: 'fresh' };
   } else {
-    // For all other job types, any
-    // available snapshot—whether persisted on the job or resolved from the
+    // For all other task run kinds, any
+    // available snapshot—whether persisted on the task run or resolved from the
     // environment—is treated as a cached base image. The latest shipped
     // worker/runtime is reinstalled on top before work begins.
     const snapshotId =
-      cloudJob.sourceSnapshotId ?? environmentSnapshotId ?? undefined;
+      taskRun.sourceSnapshotId ?? environmentSnapshotId ?? undefined;
 
     launchOptions = snapshotId
       ? { launchMode: 'environment_snapshot', sourceSnapshotId: snapshotId }
@@ -182,16 +182,16 @@ export async function spawnE2bWorker(
   }
 
   if (
-    cloudJob.type === CloudTaskType.SnapshotEnvironment &&
-    !cloudJob.payload.environmentId
+    taskRun.payloadKind === TaskPayloadKind.SnapshotEnvironment &&
+    !taskRun.payload.environmentId
   ) {
     throw new Error(
-      `SnapshotEnvironment job #${cloudJob.id} missing environmentId in payload`,
+      `SnapshotEnvironment task run #${taskRun.id} missing environmentId in payload`,
     );
   }
 
   console.log(
-    `[spawnE2bWorker] Creating E2B instance for job #${cloudJob.id}... ${JSON.stringify(
+    `[spawnE2bWorker] Creating E2B instance for task run #${taskRun.id}... ${JSON.stringify(
       {
         ...launchOptions,
         namedPorts: namedPorts.map((p) => p.name),
@@ -213,8 +213,8 @@ export async function spawnE2bWorker(
   const recordMutation = createComputeProviderMutationEventRecorder(
     db,
     {
-      cloudJobId: cloudJob.id,
-      taskId: cloudJob.taskId,
+      runId: taskRun.id,
+      taskId: taskRun.taskId,
     },
     { logPrefix: 'spawnE2bWorker', logger: console },
   );
@@ -231,13 +231,13 @@ export async function spawnE2bWorker(
 
   // Stamp provisionStartedAt + launchMode before the E2B API call. Only-if-
   // null semantics preserve the earliest provision timestamp.
-  await stampCloudJobMilestone({
-    cloudJobId: cloudJob.id,
+  await stampTaskRunMilestone({
+    runId: taskRun.id,
     field: 'provisionStartedAt',
     launchMode: launchOptions.launchMode,
   }).catch((error) => {
     console.warn(
-      `[spawnE2bWorker] Failed to stamp provisionStartedAt for job #${cloudJob.id}: ${error instanceof Error ? error.message : String(error)}`,
+      `[spawnE2bWorker] Failed to stamp provisionStartedAt for task run #${taskRun.id}: ${error instanceof Error ? error.message : String(error)}`,
     );
   });
 
@@ -256,12 +256,12 @@ export async function spawnE2bWorker(
     ...launchOptions,
   });
 
-  const command = getWorkerLaunchCommand(cloudJob);
-  const args = getWorkerLaunchArgs(cloudJob, machine.machineId);
+  const command = getWorkerLaunchCommand(taskRun);
+  const args = getWorkerLaunchArgs(taskRun, machine.machineId);
 
   try {
-    await updateCloudJobMachine({
-      cloudJob,
+    await updateTaskRunMachine({
+      taskRun,
       vendor: 'e2b',
       machineId: machine.machineId,
       namedPorts,
@@ -279,29 +279,29 @@ export async function spawnE2bWorker(
     });
 
     // Infrastructure is usable; worker.js hand-off follows.
-    await stampCloudJobMilestone({
-      cloudJobId: cloudJob.id,
+    await stampTaskRunMilestone({
+      runId: taskRun.id,
       field: 'provisionReadyAt',
     }).catch((error) => {
       console.warn(
-        `[spawnE2bWorker] Failed to stamp provisionReadyAt for job #${cloudJob.id}: ${error instanceof Error ? error.message : String(error)}`,
+        `[spawnE2bWorker] Failed to stamp provisionReadyAt for task run #${taskRun.id}: ${error instanceof Error ? error.message : String(error)}`,
       );
     });
 
     if (environmentId && environmentConfig) {
       await primeEnvironmentOidcForMachine({
-        taskId: cloudJob.taskId,
+        taskId: taskRun.taskId,
         environmentId,
         environmentConfig,
         computeProvider: 'e2b',
         computeProviderId: machine.machineId,
-        cloudJobId: cloudJob.id,
+        runId: taskRun.id,
         context: 'Fresh E2B launch',
       });
     }
 
     console.log(
-      `[spawnE2bWorker] E2B instance created for job #${cloudJob.id} in ${Date.now() - createMachineStart}ms ${JSON.stringify(
+      `[spawnE2bWorker] E2B instance created for task run #${taskRun.id} in ${Date.now() - createMachineStart}ms ${JSON.stringify(
         { machineId: machine.machineId },
       )}`,
     );
@@ -360,9 +360,9 @@ export async function spawnE2bWorker(
 
     if (result.commandId) {
       await db
-        .update(cloudJobs)
+        .update(taskRuns)
         .set({ sandboxCmdId: result.commandId })
-        .where(eq(cloudJobs.id, cloudJob.id));
+        .where(eq(taskRuns.id, taskRun.id));
     }
 
     return {

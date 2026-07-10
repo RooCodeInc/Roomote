@@ -5,13 +5,15 @@ import {
   type SlackInstallation,
   slackInstallations,
   slackUserMappings,
+  setTrustedRunActingUser,
+  setTrustedRunActingUserOnSuccess,
   and,
   eq,
 } from '@roomote/db/server';
 
 import type { SlackInteractivePayload } from './types';
 import { queueSlackMessage } from './slack-messages';
-import { findActiveSlackJob } from './find-active-slack-job';
+import { findActiveSlackTaskRun } from './find-active-slack-task-run';
 import {
   postSlackAccountLinkThreadReply,
   promptSlackAccountLink,
@@ -162,11 +164,11 @@ export async function handleFollowupAnswer(payload: SlackInteractivePayload) {
       return;
     }
 
-    const activeJob = await findActiveSlackJob(threadId);
+    const activeRun = await findActiveSlackTaskRun(threadId);
 
-    if (!activeJob) {
+    if (!activeRun) {
       console.error(
-        `❌ No active job found for thread ${threadId} to send followup answer`,
+        `❌ No active task run found for thread ${threadId} to send followup answer`,
       );
 
       await postSlackInteractiveResponse(payload.response_url, {
@@ -219,7 +221,7 @@ export async function handleFollowupAnswer(payload: SlackInteractivePayload) {
     }
 
     console.log(
-      `✅ Queueing followup answer for job ${activeJob.id}: "${answerValue}"`,
+      `✅ Queueing followup answer for job ${activeRun.id}: "${answerValue}"`,
     );
 
     const structuredAnswer =
@@ -242,7 +244,7 @@ export async function handleFollowupAnswer(payload: SlackInteractivePayload) {
         return;
       }
 
-      if (pendingRequest.cloudJobId !== activeJob.id) {
+      if (pendingRequest.runId !== activeRun.id) {
         await clearPendingSlackRequestUserInput(threadId, {
           requestId: pendingRequest.requestId,
         }).catch(() => {});
@@ -272,16 +274,21 @@ export async function handleFollowupAnswer(payload: SlackInteractivePayload) {
       }
 
       if (structuredAnswer.cancel) {
-        const submitted = await submitPendingSlackRequestUserInputAnswer(
-          threadId,
-          pendingRequest,
-          {
-            answers: {},
-            user: payload.user.id,
-            userId: userMapping.userId,
-            ts: new Date().toISOString(),
-          },
-        );
+        const submitted = await setTrustedRunActingUserOnSuccess({
+          runId: activeRun.id,
+          userId: userMapping.userId,
+          operation: async () =>
+            await submitPendingSlackRequestUserInputAnswer(
+              threadId,
+              pendingRequest,
+              {
+                answers: {},
+                user: payload.user.id,
+                userId: userMapping.userId,
+                ts: new Date().toISOString(),
+              },
+            ),
+        });
 
         if (!submitted) {
           await postRequestUserInputAlreadyReceivedResponse(
@@ -318,16 +325,21 @@ export async function handleFollowupAnswer(payload: SlackInteractivePayload) {
       const nextQuestionIndex = currentQuestion.questionIndex + 1;
 
       if (nextQuestionIndex >= pendingRequest.questions.length) {
-        const submitted = await submitPendingSlackRequestUserInputAnswer(
-          threadId,
-          pendingRequest,
-          {
-            answers: nextAnswers,
-            user: payload.user.id,
-            userId: userMapping.userId,
-            ts: new Date().toISOString(),
-          },
-        );
+        const submitted = await setTrustedRunActingUserOnSuccess({
+          runId: activeRun.id,
+          userId: userMapping.userId,
+          operation: async () =>
+            await submitPendingSlackRequestUserInputAnswer(
+              threadId,
+              pendingRequest,
+              {
+                answers: nextAnswers,
+                user: payload.user.id,
+                userId: userMapping.userId,
+                ts: new Date().toISOString(),
+              },
+            ),
+        });
 
         if (!submitted) {
           await postRequestUserInputAlreadyReceivedResponse(
@@ -387,12 +399,14 @@ export async function handleFollowupAnswer(payload: SlackInteractivePayload) {
           answers: nextAnswers,
           footerText: await getSlackThreadFooterText({
             taskUrl: buildSlackRequestUserInputTaskUrl({
-              taskId: activeJob.taskId,
-              payload: activeJob.payload,
+              taskId: activeRun.taskId,
+              payload: activeRun.payload,
             }),
-            taskId: activeJob.taskId,
-            prRepo: activeJob.prRepo ?? null,
-            prNumber: activeJob.prNumber ?? null,
+            taskId: activeRun.taskId,
+            // PR linkage lives on task_pull_requests now; the footer context
+            // resolves it from the taskId, so no run-level fallback remains.
+            prRepo: null,
+            prNumber: null,
             channelId: payload.channel.id,
             threadTs: threadId,
           }),
@@ -411,7 +425,11 @@ export async function handleFollowupAnswer(payload: SlackInteractivePayload) {
       return;
     }
 
-    await queueSlackMessage(activeJob.id, {
+    await setTrustedRunActingUser({
+      runId: activeRun.id,
+      userId: userMapping.userId,
+    });
+    await queueSlackMessage(activeRun.id, {
       text: answerValue,
       user: payload.user.id,
       userId: userMapping.userId,

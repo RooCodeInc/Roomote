@@ -1,7 +1,10 @@
 'use client';
 
 import Link from 'next/link';
-import type { SetupAuthStatus } from '@roomote/types';
+import {
+  MICROSOFT_SINGLE_APP_TEAMS_BOT_FIELD_SOURCES,
+  type SetupAuthStatus,
+} from '@roomote/types';
 
 import { buildSlackManifestPrefillUrl } from '@/lib/slack-app-manifest';
 import {
@@ -22,19 +25,24 @@ import { StepTitle } from './StepTitle';
 import { ProviderSetupInstructions } from './ProviderSetupInstructions';
 import { getProviderSetupCopy } from './providerSetupCopy';
 
-type ProviderStatus = SetupAuthStatus['providers'][number];
+type ProviderSetupExperienceProvider =
+  | SetupAuthStatus['providers'][number]
+  | {
+      id: SetupAuthStatus['providers'][number]['id'] | 'telegram';
+      label: string;
+      fields: SetupAuthStatus['providers'][number]['fields'];
+      runtimeSatisfied: boolean;
+      savedSatisfied: boolean;
+      setupSatisfied: boolean;
+    };
+
+type ProviderStatus = ProviderSetupExperienceProvider;
 type ProviderFieldStatus = ProviderStatus['fields'][number];
 
 const MASKED_VALUE = '••••••••••••••••••••••••••••';
 
-const MICROSOFT_SINGLE_APP_BOT_FIELD_SOURCES: Record<string, string> = {
-  TEAMS_BOT_APP_ID: 'ROOMOTE_AUTH_MICROSOFT_CLIENT_ID',
-  TEAMS_BOT_APP_PASSWORD: 'ROOMOTE_AUTH_MICROSOFT_CLIENT_SECRET',
-  TEAMS_BOT_TENANT_ID: 'ROOMOTE_AUTH_MICROSOFT_TENANT_ID',
-};
-
 const MICROSOFT_SETUP_HIDDEN_ENV_VAR_NAMES = new Set([
-  ...Object.keys(MICROSOFT_SINGLE_APP_BOT_FIELD_SOURCES),
+  ...Object.keys(MICROSOFT_SINGLE_APP_TEAMS_BOT_FIELD_SOURCES),
   'TEAMS_BOT_TOKEN_ENDPOINT',
   'TEAMS_BOT_OAUTH_SCOPE',
 ]);
@@ -77,7 +85,9 @@ export function getSetupEffectiveFieldValue({
   }
 
   const sourceEnvVarName =
-    MICROSOFT_SINGLE_APP_BOT_FIELD_SOURCES[field.envVarName];
+    MICROSOFT_SINGLE_APP_TEAMS_BOT_FIELD_SOURCES[
+      field.envVarName as keyof typeof MICROSOFT_SINGLE_APP_TEAMS_BOT_FIELD_SOURCES
+    ];
 
   return sourceEnvVarName ? (values[sourceEnvVarName] ?? '') : '';
 }
@@ -113,7 +123,7 @@ export function getSetupSubmitValues({
 
   if (provider.id === 'microsoft') {
     for (const [envVarName, sourceEnvVarName] of Object.entries(
-      MICROSOFT_SINGLE_APP_BOT_FIELD_SOURCES,
+      MICROSOFT_SINGLE_APP_TEAMS_BOT_FIELD_SOURCES,
     )) {
       if (nextValues[envVarName]?.trim()) {
         continue;
@@ -141,15 +151,27 @@ function NumberedStep({
 }) {
   return (
     <div className={`flex gap-2 items-start ${className ?? ''}`}>
-      <span className="rounded-full bg-foreground text-background font-bold size-8 inline-flex items-center justify-center shrink-0 mt-1">
+      <span className="rounded-full bg-foreground text-background font-bold size-8 inline-flex items-center justify-center shrink-0">
         {number}
       </span>
-      <div className="min-w-0 flex-1">{children}</div>
+      <div className="min-w-0 flex-1 space-y-1">{children}</div>
     </div>
   );
 }
 
 function InstructionUrl({ heading, url }: { heading: string; url: string }) {
+  return <InstructionUrlContent heading={heading} url={url} />;
+}
+
+function InstructionUrlContent({
+  heading,
+  url,
+  disabled = false,
+}: {
+  heading: string;
+  url: string;
+  disabled?: boolean;
+}) {
   return (
     <div className="space-y-1 flex gap-2 items-center">
       <p className="font-semibold text-foreground text-sm w-45 shrink-0">
@@ -164,6 +186,7 @@ function InstructionUrl({ heading, url }: { heading: string; url: string }) {
         <CopyIconButton
           aria-label={`Copy ${heading}`}
           content={url}
+          disabled={disabled}
           tooltip={`Copy ${heading}`}
         />
       </div>
@@ -258,10 +281,6 @@ function ProviderFields({
           </div>
         );
       })}
-
-      <div className="space-y-2 text-sm text-muted-foreground">
-        <EnvVarsInfoNote runtimeConfigured={provider.runtimeSatisfied} />
-      </div>
     </div>
   );
 }
@@ -275,6 +294,8 @@ type ProviderSetupExperienceProps = {
   clearedSavedValues: Record<string, boolean>;
   teamsAppPackageHref: string | null;
   showManualSlackValues: boolean;
+  surface?: 'setup' | 'settings';
+  envVarsInfoNote?: React.ReactNode;
   onShowManualSlackValues: () => void;
   onValueChange: (envVarName: string, value: string) => void;
   onEditingSavedValueChange: (envVarName: string, editing: boolean) => void;
@@ -282,15 +303,43 @@ type ProviderSetupExperienceProps = {
   onBack?: () => void;
 };
 
+function SettingsEnvVarsInfoNote({
+  runtimeConfigured,
+  children,
+}: {
+  runtimeConfigured: boolean;
+  children?: React.ReactNode;
+}) {
+  return (
+    <EnvVarsInfoNote runtimeConfigured={runtimeConfigured}>
+      {children}
+    </EnvVarsInfoNote>
+  );
+}
+
+function ProviderSetupTitle({
+  surface,
+  text,
+}: {
+  surface?: 'setup' | 'settings';
+  text: string;
+}) {
+  return surface === 'settings' ? null : <StepTitle text={text} />;
+}
+
 function SlackSetupExperience(props: ProviderSetupExperienceProps) {
   const slackManifestPrefillUrl = buildSlackManifestPrefillUrl({
     publicOrigin: props.publicOrigin,
   });
 
-  if (!props.showManualSlackValues && !props.provider.runtimeSatisfied) {
+  if (
+    !props.showManualSlackValues &&
+    !props.provider.runtimeSatisfied &&
+    !props.provider.savedSatisfied
+  ) {
     return (
       <div className="relative w-full max-w-2xl space-y-4 py-2 md:py-0">
-        <StepTitle text="Create Slack app" />
+        <ProviderSetupTitle surface={props.surface} text="Create Slack app" />
 
         <div className="space-y-3 max-w-xl">
           <p>
@@ -342,10 +391,36 @@ function MicrosoftSetupExperience(props: ProviderSetupExperienceProps) {
   const providerSetupCopy = getProviderSetupCopy(props.provider.id);
   const webRedirectUri = `${props.publicOrigin}/api/auth/oauth2/callback/microsoft-entra-id`;
   const teamsWebhookUrl = `${props.publicOrigin}/api/webhooks/teams`;
+  const teamsAppValuesComplete = fields.every((field) => {
+    if (field.required === false || field.runtimeSatisfied) {
+      return true;
+    }
+
+    if (field.savedSatisfied && !props.clearedSavedValues[field.envVarName]) {
+      return true;
+    }
+
+    return (
+      getSetupEffectiveFieldValue({
+        provider: props.provider,
+        field,
+        values: props.values,
+      }).trim().length > 0
+    );
+  });
+  const teamsAppPackageAvailable =
+    Boolean(props.teamsAppPackageHref) &&
+    (teamsAppValuesComplete || props.surface === 'settings');
+  const pendingStepClassName = teamsAppPackageAvailable
+    ? undefined
+    : 'opacity-50';
 
   return (
     <div className="relative w-full max-w-2xl space-y-5 py-2 md:py-0">
-      <StepTitle text="Configure Microsoft Teams app" />
+      <ProviderSetupTitle
+        surface={props.surface}
+        text="Configure Microsoft Teams app"
+      />
 
       <NumberedStep number={1} className="mt-6">
         <p className="font-semibold">Create a Microsoft Entra app.</p>
@@ -372,22 +447,25 @@ function MicrosoftSetupExperience(props: ProviderSetupExperienceProps) {
       </NumberedStep>
 
       <NumberedStep number={2}>
-        <p className="font-semibold">Enter the Microsoft app values.</p>
-        <p className="text-sm text-muted-foreground max-w-xl">
-          Roomote stores these values for Microsoft sign-in and also saves
-          hidden Teams bot credentials copied from them.
+        <p className="font-semibold">
+          Enter the Microsoft app generated values.
         </p>
         <ProviderFields fields={fields} {...props} />
+        {props.surface === 'settings' ? (
+          <SettingsEnvVarsInfoNote
+            runtimeConfigured={props.provider.runtimeSatisfied}
+          />
+        ) : null}
       </NumberedStep>
 
-      <NumberedStep number={3}>
+      <NumberedStep number={3} className={pendingStepClassName}>
         <div className="space-y-2">
           <p className="font-semibold">Upload Roomote to Microsoft Teams.</p>
           <p className="text-sm text-muted-foreground">
             Download your pre-filled Teams app package (manifest + icons), go to
             the Teams Developer Portal → Import App.
           </p>
-          {props.teamsAppPackageHref ? (
+          {teamsAppPackageAvailable && props.teamsAppPackageHref ? (
             <div className="flex items-center gap-2">
               <Button asChild variant="outline" size="sm">
                 <a href={props.teamsAppPackageHref} download>
@@ -406,14 +484,20 @@ function MicrosoftSetupExperience(props: ProviderSetupExperienceProps) {
               </Button>
             </div>
           ) : (
-            <p className="text-sm text-muted-foreground">
-              Enter the Microsoft Client ID above to enable the download.
-            </p>
+            <div className="flex items-center gap-2">
+              <Button variant="outline" size="sm" disabled>
+                <Download />
+                Download Teams app package
+              </Button>
+              <Button variant="outline" size="sm" disabled>
+                Go <ExternalLink className="inline size-3 -mt-1 ml-1" />
+              </Button>
+            </div>
           )}
         </div>
       </NumberedStep>
 
-      <NumberedStep number={4}>
+      <NumberedStep number={4} className={pendingStepClassName}>
         <p className="font-semibold">
           Add the Teams bot capability to that app.
         </p>
@@ -423,9 +507,10 @@ function MicrosoftSetupExperience(props: ProviderSetupExperienceProps) {
             Use the same Client ID for the bot app ID. Set this messaging
             endpoint for the bot:
           </p>
-          <InstructionUrl
+          <InstructionUrlContent
             heading="Bot messaging endpoint"
             url={teamsWebhookUrl}
+            disabled={!teamsAppPackageAvailable}
           />
         </div>
       </NumberedStep>
@@ -441,7 +526,10 @@ function GenericSetupExperience(props: ProviderSetupExperienceProps) {
 
   return (
     <div className="relative w-full max-w-2xl space-y-5 py-2 md:py-0">
-      <StepTitle text={`Configure ${providerSetupLabel}`} />
+      <ProviderSetupTitle
+        surface={props.surface}
+        text={`Configure ${providerSetupLabel}`}
+      />
 
       <NumberedStep number={1} className="mt-6">
         <p className="font-semibold">
@@ -483,20 +571,24 @@ function GenericSetupExperience(props: ProviderSetupExperienceProps) {
       <NumberedStep number={3}>
         <p className="font-semibold">Enter the values below:</p>
         <ProviderFields fields={fields} {...props} />
+        {props.surface === 'settings' ? (
+          <SettingsEnvVarsInfoNote
+            runtimeConfigured={props.provider.runtimeSatisfied}
+          >
+            {props.envVarsInfoNote}
+          </SettingsEnvVarsInfoNote>
+        ) : null}
       </NumberedStep>
     </div>
   );
 }
 
-const PROVIDER_SETUP_EXPERIENCES = {
+const PROVIDER_SETUP_EXPERIENCES: Partial<
+  Record<ProviderSetupExperienceProvider['id'], typeof GenericSetupExperience>
+> = {
   slack: SlackSetupExperience,
   microsoft: MicrosoftSetupExperience,
-} satisfies Partial<
-  Record<
-    SetupAuthStatus['providers'][number]['id'],
-    typeof GenericSetupExperience
-  >
->;
+};
 
 export function ProviderSetupExperience(props: ProviderSetupExperienceProps) {
   const Component =

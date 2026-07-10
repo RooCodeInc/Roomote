@@ -1,5 +1,3 @@
-import { CloudAgentType } from '@roomote/types';
-
 import {
   getAllowedRouterMcpToolNames,
   getMissingRequiredRouterMcpToolGroups,
@@ -27,24 +25,10 @@ import {
   wasWorkspaceRemapped,
   workspaceResponseSchema,
 } from '../routing-resolution';
-import type {
-  RoutingContext,
-  RoutableAgent,
-  RoutableEnvironment,
-} from '../types';
+import type { RoutingContext, RoutableEnvironment } from '../types';
 import { PLATFORM_WORKSPACE_VALUE } from '../types';
 
 describe('router helpers', () => {
-  const baseDate = new Date('2024-01-01');
-  const agents: RoutableAgent[] = [
-    {
-      id: 'agent-1',
-      name: 'My Generalist',
-      type: CloudAgentType.StandardTask,
-      createdAt: baseDate,
-    },
-  ];
-
   const environments: RoutableEnvironment[] = [
     {
       id: 'env-1',
@@ -59,7 +43,6 @@ describe('router helpers', () => {
   ): RoutingContext => ({
     taskDescription: 'Fix the login bug',
     source: { type: 'slack', channelName: 'engineering' },
-    availableAgents: agents,
     availableEnvironments: environments,
     ...overrides,
   });
@@ -68,7 +51,6 @@ describe('router helpers', () => {
     const prompt = buildContextPrompt(createContext());
 
     expect(prompt).toContain('**Task Description**:');
-    expect(prompt).toContain('**Available Agents**:');
     expect(prompt).toContain('**Available Environments**:');
     expect(prompt).toContain(
       `- ${PLATFORM_WORKSPACE_VALUE}: Generic Roomote platform questions about identity, capabilities, or getting started.`,
@@ -88,7 +70,7 @@ describe('router helpers', () => {
     const prompt = buildWorkspaceRoutingPrompt();
 
     expect(prompt).toContain('You are a workspace routing assistant');
-    expect(prompt).toContain('forwarded to the Generalist agent');
+    expect(prompt).toContain('forwarded to a task run');
     expect(prompt).toContain(`## The ${PLATFORM_WORKSPACE_VALUE} Environment`);
     expect(prompt).toContain('"What can you do?" → __platform__');
     expect(prompt).toContain(
@@ -149,7 +131,9 @@ describe('router helpers', () => {
     expect(prompt).toContain(
       '- Claude Sonnet 5 [id: openrouter/anthropic/claude-sonnet-5]',
     );
-    expect(prompt).toContain('- GPT 5.4 [id: openrouter/openai/gpt-5.4]');
+    expect(prompt).toContain(
+      '- GPT 5.6 Terra [id: openrouter/openai/gpt-5.6-terra]',
+    );
     expect(prompt).toContain('- No model mentioned [id: __no_model__]');
   });
 

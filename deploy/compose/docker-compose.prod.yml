@@ -1,44 +1,24 @@
 name: roomote
 
-x-roomote-env-file: &roomote-env-file
-  env_file:
-    - .env
-
-# One shared application image ships web, api, controller, bullmq,
-# preview-proxy, and the db-migrate one-shot. Each service selects its process
-# through the image's entrypoint dispatcher (see .docker/app/entrypoint.sh).
+# Compose's --env-file supplies interpolation values only. Application
+# services intentionally do not use `env_file`: doing so would inject every
+# deployment secret into every process before the explicit contracts below.
+# Every control-plane service runs from the shared app image; the command and
+# ROOMOTE_SERVICE select which service a container becomes, and the env
+# contract for that service is enforced by packages/env.
 x-roomote-app-image: &roomote-app-image ${IMAGE_REGISTRY:-ghcr.io}/${IMAGE_NAMESPACE:-roocodeinc}/roomote-app:${ROOMOTE_VERSION:?ROOMOTE_VERSION is required}
 
-x-roomote-production-env: &roomote-production-env
+x-roomote-base-env: &roomote-base-env
   NODE_ENV: production
   APP_ENV: ${APP_ENV:-production}
   ROOMOTE_DOCKER_LOAD_ENV_FILE: 'false'
   HOST: 0.0.0.0
-  DATABASE_URL: ${DATABASE_URL:-postgres://postgres:roomote-postgres-password@postgres:5432/roomote}
-  REDIS_URL: ${REDIS_URL:-redis://redis:6379}
-  S3_ENDPOINT: ${S3_ENDPOINT:-http://minio:9000}
-  S3_PRESIGN_ENDPOINT: ${S3_PRESIGN_ENDPOINT:-https://${ROOMOTE_APP_DOMAIN:?ROOMOTE_APP_DOMAIN is required}}
-  S3_REGION: ${S3_REGION:-us-east-1}
-  S3_ACCESS_KEY_ID: ${S3_ACCESS_KEY_ID:-roomote}
-  S3_SECRET_ACCESS_KEY: ${S3_SECRET_ACCESS_KEY:?S3_SECRET_ACCESS_KEY is required}
-  S3_BUCKET_ARTIFACTS: ${S3_BUCKET_ARTIFACTS:-roomote-artifacts}
-  JOB_AUTH_PRIVATE_KEY: ${JOB_AUTH_PRIVATE_KEY:?JOB_AUTH_PRIVATE_KEY is required}
-  JOB_AUTH_PUBLIC_KEY: ${JOB_AUTH_PUBLIC_KEY:?JOB_AUTH_PUBLIC_KEY is required}
-  PREVIEW_AUTH_PRIVATE_KEY: ${PREVIEW_AUTH_PRIVATE_KEY:?PREVIEW_AUTH_PRIVATE_KEY is required}
-  PREVIEW_AUTH_PUBLIC_KEY: ${PREVIEW_AUTH_PUBLIC_KEY:?PREVIEW_AUTH_PUBLIC_KEY is required}
-  ENCRYPTION_KEY: ${ENCRYPTION_KEY:?ENCRYPTION_KEY is required}
-  ARTIFACT_SIGNING_KEY: ${ARTIFACT_SIGNING_KEY:?ARTIFACT_SIGNING_KEY is required}
-  ARTIFACT_SIGNING_KEY_PREVIOUS: ${ARTIFACT_SIGNING_KEY_PREVIOUS:-}
-  DASHBOARD_PASSWORD: ${DASHBOARD_PASSWORD:?DASHBOARD_PASSWORD is required}
   ROOMOTE_APP_URL: https://${ROOMOTE_APP_DOMAIN:?ROOMOTE_APP_DOMAIN is required}
   ROOMOTE_PUBLIC_URL: https://${ROOMOTE_APP_DOMAIN:?ROOMOTE_APP_DOMAIN is required}
   TRPC_URL: ${TRPC_URL:-https://${ROOMOTE_APP_DOMAIN:?ROOMOTE_APP_DOMAIN is required}/_roomote-api}
-  PREVIEW_PROXY_BASE_URL: https://${ROOMOTE_PREVIEW_DOMAIN:?ROOMOTE_PREVIEW_DOMAIN is required}
-  NEXT_PUBLIC_PREVIEW_PROXY_BASE_URL: https://${ROOMOTE_PREVIEW_DOMAIN:?ROOMOTE_PREVIEW_DOMAIN is required}
-  PREVIEW_DOMAINS: ${ROOMOTE_PREVIEW_DOMAIN:?ROOMOTE_PREVIEW_DOMAIN is required}
-  ROOMOTE_ALLOWED_EMAILS: ${ROOMOTE_ALLOWED_EMAILS:-}
-  ROOMOTE_AUTH_SLACK_CLIENT_ID: ${ROOMOTE_AUTH_SLACK_CLIENT_ID:-}
-  ROOMOTE_AUTH_SLACK_CLIENT_SECRET: ${ROOMOTE_AUTH_SLACK_CLIENT_SECRET:-}
+
+x-roomote-inference-env: &roomote-inference-env
+  <<: *roomote-base-env
   ROOMOTE_MODEL: ${ROOMOTE_MODEL:-}
   ROOMOTE_SMALL_MODEL: ${ROOMOTE_SMALL_MODEL:-}
   ROOMOTE_VISION_MODEL: ${ROOMOTE_VISION_MODEL:-}
@@ -63,6 +43,31 @@ x-roomote-production-env: &roomote-production-env
   OPENCODE_API_KEY: ${OPENCODE_API_KEY:-}
   BASETEN_API_KEY: ${BASETEN_API_KEY:-}
   TOGETHER_API_KEY: ${TOGETHER_API_KEY:-}
+
+x-roomote-web-env: &roomote-web-env
+  <<: *roomote-inference-env
+  DATABASE_URL: ${DATABASE_URL:-postgres://postgres:roomote-postgres-password@postgres:5432/roomote}
+  REDIS_URL: ${REDIS_URL:-redis://redis:6379}
+  S3_ENDPOINT: ${S3_ENDPOINT:-http://minio:9000}
+  S3_PRESIGN_ENDPOINT: ${S3_PRESIGN_ENDPOINT:-https://${ROOMOTE_APP_DOMAIN:?ROOMOTE_APP_DOMAIN is required}}
+  S3_REGION: ${S3_REGION:-us-east-1}
+  S3_ACCESS_KEY_ID: ${S3_ACCESS_KEY_ID:-roomote}
+  S3_SECRET_ACCESS_KEY: ${S3_SECRET_ACCESS_KEY:?S3_SECRET_ACCESS_KEY is required}
+  S3_BUCKET_ARTIFACTS: ${S3_BUCKET_ARTIFACTS:-roomote-artifacts}
+  JOB_AUTH_PRIVATE_KEY: ${JOB_AUTH_PRIVATE_KEY:?JOB_AUTH_PRIVATE_KEY is required}
+  JOB_AUTH_PUBLIC_KEY: ${JOB_AUTH_PUBLIC_KEY:?JOB_AUTH_PUBLIC_KEY is required}
+  PREVIEW_AUTH_PRIVATE_KEY: ${PREVIEW_AUTH_PRIVATE_KEY:?PREVIEW_AUTH_PRIVATE_KEY is required}
+  PREVIEW_AUTH_PUBLIC_KEY: ${PREVIEW_AUTH_PUBLIC_KEY:?PREVIEW_AUTH_PUBLIC_KEY is required}
+  ENCRYPTION_KEY: ${ENCRYPTION_KEY:?ENCRYPTION_KEY is required}
+  ARTIFACT_SIGNING_KEY: ${ARTIFACT_SIGNING_KEY:?ARTIFACT_SIGNING_KEY is required}
+  ARTIFACT_SIGNING_KEY_PREVIOUS: ${ARTIFACT_SIGNING_KEY_PREVIOUS:-}
+  DASHBOARD_PASSWORD: ${DASHBOARD_PASSWORD:?DASHBOARD_PASSWORD is required}
+  PREVIEW_PROXY_BASE_URL: https://${ROOMOTE_PREVIEW_DOMAIN:?ROOMOTE_PREVIEW_DOMAIN is required}
+  NEXT_PUBLIC_PREVIEW_PROXY_BASE_URL: https://${ROOMOTE_PREVIEW_DOMAIN:?ROOMOTE_PREVIEW_DOMAIN is required}
+  PREVIEW_DOMAINS: ${ROOMOTE_PREVIEW_DOMAIN:?ROOMOTE_PREVIEW_DOMAIN is required}
+  ROOMOTE_ALLOWED_EMAILS: ${ROOMOTE_ALLOWED_EMAILS:-}
+  ROOMOTE_AUTH_SLACK_CLIENT_ID: ${ROOMOTE_AUTH_SLACK_CLIENT_ID:-}
+  ROOMOTE_AUTH_SLACK_CLIENT_SECRET: ${ROOMOTE_AUTH_SLACK_CLIENT_SECRET:-}
   NEXT_PUBLIC_GITHUB_APP_SLUG: ${NEXT_PUBLIC_GITHUB_APP_SLUG:-}
   SETUP_TOKEN: ${SETUP_TOKEN:-}
   GITHUB_APP_ID: ${GITHUB_APP_ID:-}
@@ -92,6 +97,14 @@ x-roomote-production-env: &roomote-production-env
   DOCKER_WORKER_PLATFORM: ${DOCKER_WORKER_PLATFORM:-linux/amd64}
   DOCKER_WORKER_NETWORK: ${DOCKER_WORKER_NETWORK:-roomote_worker}
   DOCKER_WORKER_RELEASE_PATH: ${DOCKER_WORKER_RELEASE_PATH:-/roomote/releases/worker-current.tar.gz}
+  DOCKER_WORKER_CPU_LIMIT: ${DOCKER_WORKER_CPU_LIMIT:-2}
+  DOCKER_WORKER_MEMORY_LIMIT: ${DOCKER_WORKER_MEMORY_LIMIT:-4g}
+  DOCKER_WORKER_PIDS_LIMIT: ${DOCKER_WORKER_PIDS_LIMIT:-512}
+  DOCKER_WORKER_DISK_LIMIT: ${DOCKER_WORKER_DISK_LIMIT:-20g}
+  DOCKER_WORKER_ALLOW_UNBOUNDED_DISK: ${DOCKER_WORKER_ALLOW_UNBOUNDED_DISK:-false}
+  DOCKER_WORKER_LOG_MAX_SIZE: ${DOCKER_WORKER_LOG_MAX_SIZE:-10m}
+  DOCKER_WORKER_LOG_MAX_FILES: ${DOCKER_WORKER_LOG_MAX_FILES:-3}
+  DOCKER_WORKER_EGRESS_POLICY: ${DOCKER_WORKER_EGRESS_POLICY:-internet}
   MODAL_TOKEN_ID: ${MODAL_TOKEN_ID:-}
   MODAL_TOKEN_SECRET: ${MODAL_TOKEN_SECRET:-}
   MODAL_ENDPOINT: ${MODAL_ENDPOINT:-}
@@ -104,15 +117,125 @@ x-roomote-production-env: &roomote-production-env
   MODAL_ECR_REGION: ${MODAL_ECR_REGION:-}
   MODAL_REGIONS: ${MODAL_REGIONS:-}
 
+x-roomote-api-env: &roomote-api-env
+  <<: *roomote-inference-env
+  DATABASE_URL: ${DATABASE_URL:-postgres://postgres:roomote-postgres-password@postgres:5432/roomote}
+  REDIS_URL: ${REDIS_URL:-redis://redis:6379}
+  S3_ENDPOINT: ${S3_ENDPOINT:-http://minio:9000}
+  S3_PRESIGN_ENDPOINT: ${S3_PRESIGN_ENDPOINT:-https://${ROOMOTE_APP_DOMAIN:?ROOMOTE_APP_DOMAIN is required}}
+  S3_REGION: ${S3_REGION:-us-east-1}
+  S3_ACCESS_KEY_ID: ${S3_ACCESS_KEY_ID:-roomote}
+  S3_SECRET_ACCESS_KEY: ${S3_SECRET_ACCESS_KEY:?S3_SECRET_ACCESS_KEY is required}
+  S3_BUCKET_ARTIFACTS: ${S3_BUCKET_ARTIFACTS:-roomote-artifacts}
+  JOB_AUTH_PRIVATE_KEY: ${JOB_AUTH_PRIVATE_KEY:?JOB_AUTH_PRIVATE_KEY is required}
+  JOB_AUTH_PUBLIC_KEY: ${JOB_AUTH_PUBLIC_KEY:?JOB_AUTH_PUBLIC_KEY is required}
+  ENCRYPTION_KEY: ${ENCRYPTION_KEY:?ENCRYPTION_KEY is required}
+  ARTIFACT_SIGNING_KEY: ${ARTIFACT_SIGNING_KEY:?ARTIFACT_SIGNING_KEY is required}
+  ARTIFACT_SIGNING_KEY_PREVIOUS: ${ARTIFACT_SIGNING_KEY_PREVIOUS:-}
+  DASHBOARD_PASSWORD: ${DASHBOARD_PASSWORD:?DASHBOARD_PASSWORD is required}
+  PREVIEW_PROXY_BASE_URL: https://${ROOMOTE_PREVIEW_DOMAIN:?ROOMOTE_PREVIEW_DOMAIN is required}
+  PREVIEW_DOMAINS: ${ROOMOTE_PREVIEW_DOMAIN:?ROOMOTE_PREVIEW_DOMAIN is required}
+  NEXT_PUBLIC_GITHUB_APP_SLUG: ${NEXT_PUBLIC_GITHUB_APP_SLUG:-}
+  GITHUB_APP_ID: ${GITHUB_APP_ID:-}
+  GITHUB_APP_PRIVATE_KEY: ${GITHUB_APP_PRIVATE_KEY:-}
+  GITHUB_CLIENT_ID: ${GITHUB_CLIENT_ID:-}
+  GITHUB_CLIENT_SECRET: ${GITHUB_CLIENT_SECRET:-}
+  GITHUB_WEBHOOK_SECRET: ${GITHUB_WEBHOOK_SECRET:-}
+  GITLAB_TOKEN: ${GITLAB_TOKEN:-}
+  GITLAB_WEBHOOK_SECRET: ${GITLAB_WEBHOOK_SECRET:-}
+  GITLAB_WEBHOOK_SIGNING_TOKEN: ${GITLAB_WEBHOOK_SIGNING_TOKEN:-}
+  SLACK_APP_ID: ${SLACK_APP_ID:-}
+  SLACK_CLIENT_ID: ${SLACK_CLIENT_ID:-}
+  SLACK_CLIENT_SECRET: ${SLACK_CLIENT_SECRET:-}
+  SLACK_SIGNING_SECRET: ${SLACK_SIGNING_SECRET:-}
+  TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN:-}
+  TELEGRAM_WEBHOOK_SECRET: ${TELEGRAM_WEBHOOK_SECRET:-}
+  TELEGRAM_BOT_USERNAME: ${TELEGRAM_BOT_USERNAME:-}
+  LINEAR_CLIENT_ID: ${LINEAR_CLIENT_ID:-}
+  LINEAR_CLIENT_SECRET: ${LINEAR_CLIENT_SECRET:-}
+  LINEAR_WEBHOOK_SECRET: ${LINEAR_WEBHOOK_SECRET:-}
+  ROOMOTE_AUTH_MICROSOFT_CLIENT_ID: ${ROOMOTE_AUTH_MICROSOFT_CLIENT_ID:-}
+  ROOMOTE_AUTH_MICROSOFT_CLIENT_SECRET: ${ROOMOTE_AUTH_MICROSOFT_CLIENT_SECRET:-}
+  ROOMOTE_AUTH_MICROSOFT_TENANT_ID: ${ROOMOTE_AUTH_MICROSOFT_TENANT_ID:-}
+
+x-roomote-controller-env: &roomote-controller-env
+  <<: *roomote-base-env
+  DATABASE_URL: ${DATABASE_URL:-postgres://postgres:roomote-postgres-password@postgres:5432/roomote}
+  REDIS_URL: ${REDIS_URL:-redis://redis:6379}
+  JOB_AUTH_PRIVATE_KEY: ${JOB_AUTH_PRIVATE_KEY:?JOB_AUTH_PRIVATE_KEY is required}
+  JOB_AUTH_PUBLIC_KEY: ${JOB_AUTH_PUBLIC_KEY:?JOB_AUTH_PUBLIC_KEY is required}
+  ENCRYPTION_KEY: ${ENCRYPTION_KEY:?ENCRYPTION_KEY is required}
+  PREVIEW_PROXY_BASE_URL: https://${ROOMOTE_PREVIEW_DOMAIN:?ROOMOTE_PREVIEW_DOMAIN is required}
+  PREVIEW_DOMAINS: ${ROOMOTE_PREVIEW_DOMAIN:?ROOMOTE_PREVIEW_DOMAIN is required}
+  DEFAULT_COMPUTE_PROVIDER: ${DEFAULT_COMPUTE_PROVIDER:-docker}
+  DOCKER_HOST: tcp://docker-proxy:2375
+  DOCKER_WORKER_IMAGE: ${DOCKER_WORKER_IMAGE:-}
+  ROOMOTE_WORKER_IMAGE_REPO: ${ROOMOTE_WORKER_IMAGE_REPO:-${IMAGE_REGISTRY:-ghcr.io}/${IMAGE_NAMESPACE:-roocodeinc}/roomote-worker}
+  DOCKER_WORKER_PLATFORM: ${DOCKER_WORKER_PLATFORM:-linux/amd64}
+  DOCKER_WORKER_NETWORK: ${DOCKER_WORKER_NETWORK:-roomote_worker}
+  DOCKER_WORKER_RELEASE_PATH: ${DOCKER_WORKER_RELEASE_PATH:-/roomote/releases/worker-current.tar.gz}
+  DOCKER_WORKER_CPU_LIMIT: ${DOCKER_WORKER_CPU_LIMIT:-2}
+  DOCKER_WORKER_MEMORY_LIMIT: ${DOCKER_WORKER_MEMORY_LIMIT:-4g}
+  DOCKER_WORKER_PIDS_LIMIT: ${DOCKER_WORKER_PIDS_LIMIT:-512}
+  DOCKER_WORKER_DISK_LIMIT: ${DOCKER_WORKER_DISK_LIMIT:-20g}
+  DOCKER_WORKER_ALLOW_UNBOUNDED_DISK: ${DOCKER_WORKER_ALLOW_UNBOUNDED_DISK:-false}
+  DOCKER_WORKER_LOG_MAX_SIZE: ${DOCKER_WORKER_LOG_MAX_SIZE:-10m}
+  DOCKER_WORKER_LOG_MAX_FILES: ${DOCKER_WORKER_LOG_MAX_FILES:-3}
+  DOCKER_WORKER_EGRESS_POLICY: ${DOCKER_WORKER_EGRESS_POLICY:-internet}
+  MODAL_TOKEN_ID: ${MODAL_TOKEN_ID:-}
+  MODAL_TOKEN_SECRET: ${MODAL_TOKEN_SECRET:-}
+  MODAL_ENDPOINT: ${MODAL_ENDPOINT:-}
+  MODAL_ENVIRONMENT: ${MODAL_ENVIRONMENT:-}
+  MODAL_APP_NAME: ${MODAL_APP_NAME:-}
+  MODAL_BASE_IMAGE_REF: ${MODAL_BASE_IMAGE_REF:-}
+  MODAL_REGISTRY_USERNAME: ${MODAL_REGISTRY_USERNAME:-}
+  MODAL_REGISTRY_PASSWORD: ${MODAL_REGISTRY_PASSWORD:-}
+  MODAL_ECR_OIDC_ROLE_ARN: ${MODAL_ECR_OIDC_ROLE_ARN:-}
+  MODAL_ECR_REGION: ${MODAL_ECR_REGION:-}
+  MODAL_REGIONS: ${MODAL_REGIONS:-}
+
+x-roomote-bullmq-env: &roomote-bullmq-env
+  <<: *roomote-inference-env
+  DATABASE_URL: ${DATABASE_URL:-postgres://postgres:roomote-postgres-password@postgres:5432/roomote}
+  REDIS_URL: ${REDIS_URL:-redis://redis:6379}
+  DASHBOARD_PASSWORD: ${DASHBOARD_PASSWORD:?DASHBOARD_PASSWORD is required}
+  ENCRYPTION_KEY: ${ENCRYPTION_KEY:?ENCRYPTION_KEY is required}
+  DEFAULT_COMPUTE_PROVIDER: ${DEFAULT_COMPUTE_PROVIDER:-docker}
+  TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN:-}
+  MODAL_TOKEN_ID: ${MODAL_TOKEN_ID:-}
+  MODAL_TOKEN_SECRET: ${MODAL_TOKEN_SECRET:-}
+  MODAL_ENDPOINT: ${MODAL_ENDPOINT:-}
+  MODAL_ENVIRONMENT: ${MODAL_ENVIRONMENT:-}
+  MODAL_APP_NAME: ${MODAL_APP_NAME:-}
+  MODAL_BASE_IMAGE_REF: ${MODAL_BASE_IMAGE_REF:-}
+  MODAL_REGISTRY_USERNAME: ${MODAL_REGISTRY_USERNAME:-}
+  MODAL_REGISTRY_PASSWORD: ${MODAL_REGISTRY_PASSWORD:-}
+  MODAL_ECR_OIDC_ROLE_ARN: ${MODAL_ECR_OIDC_ROLE_ARN:-}
+  MODAL_ECR_REGION: ${MODAL_ECR_REGION:-}
+  MODAL_REGIONS: ${MODAL_REGIONS:-}
+
+x-roomote-preview-proxy-env: &roomote-preview-proxy-env
+  <<: *roomote-base-env
+  DATABASE_URL: ${DATABASE_URL:-postgres://postgres:roomote-postgres-password@postgres:5432/roomote}
+  REDIS_URL: ${REDIS_URL:-redis://redis:6379}
+  JOB_AUTH_PUBLIC_KEY: ${JOB_AUTH_PUBLIC_KEY:?JOB_AUTH_PUBLIC_KEY is required}
+  PREVIEW_AUTH_PUBLIC_KEY: ${PREVIEW_AUTH_PUBLIC_KEY:?PREVIEW_AUTH_PUBLIC_KEY is required}
+  PREVIEW_PROXY_BASE_URL: https://${ROOMOTE_PREVIEW_DOMAIN:?ROOMOTE_PREVIEW_DOMAIN is required}
+  PREVIEW_DOMAINS: ${ROOMOTE_PREVIEW_DOMAIN:?ROOMOTE_PREVIEW_DOMAIN is required}
+
 x-roomote-service: &roomote-service
-  <<: *roomote-env-file
   restart: unless-stopped
-  environment:
-    <<: *roomote-production-env
+  read_only: true
+  tmpfs:
+    - /tmp:rw,noexec,nosuid,nodev,size=64m,mode=1777
+  cap_drop:
+    - ALL
+  security_opt:
+    - no-new-privileges:true
 
 services:
   postgres:
-    image: postgres:17.5
+    image: postgres:17.5@sha256:aadf2c0696f5ef357aa7a68da995137f0cf17bad0bf6e1f17de06ae5c769b302
     profiles:
       - local-postgres
     restart: unless-stopped
@@ -130,14 +253,14 @@ services:
       start_period: 30s
 
   redis:
-    image: redis:7-alpine
+    image: redis:7-alpine@sha256:6ab0b6e7381779332f97b8ca76193e45b0756f38d4c0dcda72dbb3c32061ab99
     restart: unless-stopped
     volumes:
       - redis_data:/data
     command: redis-server --appendonly yes
 
   minio:
-    image: minio/minio:latest
+    image: minio/minio:RELEASE.2025-09-07T16-13-09Z@sha256:14cea493d9a34af32f524e538b8346cf79f3321eff8e708c1e2960462bd8936e
     restart: unless-stopped
     volumes:
       - minio_data:/data
@@ -147,7 +270,7 @@ services:
     command: server /data --console-address ':9001'
 
   minio-init:
-    image: minio/mc:latest
+    image: minio/mc:RELEASE.2025-08-13T08-35-41Z@sha256:a7fe349ef4bd8521fb8497f55c6042871b2ae640607cf99d9bede5e9bdf11727
     restart: 'no'
     depends_on:
       minio:
@@ -164,6 +287,32 @@ services:
         done
         mc mb --ignore-existing "roomote/$$S3_BUCKET_ARTIFACTS"
 
+  # The only service with the host Docker socket. Its API is reachable solely
+  # from the controller over an internal network, and all unrelated Docker API
+  # sections remain denied by the proxy defaults.
+  docker-proxy:
+    image: ghcr.io/tecnativa/docker-socket-proxy:v0.4.2@sha256:1f3a6f303320723d199d2316a3e82b2e2685d86c275d5e3deeaf182573b47476
+    restart: unless-stopped
+    read_only: true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,nodev,size=16m,mode=1777
+      - /run:rw,noexec,nosuid,nodev,size=4m,mode=755
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    environment:
+      CONTAINERS: '1'
+      ALLOW_START: '1'
+      EXEC: '1'
+      IMAGES: '1'
+      NETWORKS: '1'
+      POST: '1'
+      EVENTS: '0'
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    networks: [docker-api]
+
   db-migrate:
     <<: *roomote-service
     image: *roomote-app-image
@@ -173,6 +322,12 @@ services:
         condition: service_healthy
         required: false
     command: ['db-migrate']
+    environment:
+      ROOMOTE_SERVICE: db-migrate
+      NODE_ENV: production
+      APP_ENV: ${APP_ENV:-production}
+      ROOMOTE_DOCKER_LOAD_ENV_FILE: 'false'
+      DATABASE_URL: ${DATABASE_URL:-postgres://postgres:roomote-postgres-password@postgres:5432/roomote}
 
   web:
     <<: *roomote-service
@@ -182,8 +337,12 @@ services:
       api:
         condition: service_started
     environment:
-      <<: *roomote-production-env
+      <<: *roomote-web-env
+      ROOMOTE_SERVICE: web
       PORT: 3000
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,nodev,size=64m,mode=1777
+      - /roomote/apps/web/.next/cache:rw,noexec,nosuid,nodev,size=128m,uid=10000,gid=10000,mode=700
     healthcheck:
       test:
         [
@@ -209,7 +368,8 @@ services:
       db-migrate:
         condition: service_completed_successfully
     environment:
-      <<: *roomote-production-env
+      <<: *roomote-api-env
+      ROOMOTE_SERVICE: api
       PORT: 3001
     healthcheck:
       test:
@@ -227,7 +387,7 @@ services:
     image: *roomote-app-image
     command: ['controller']
     # Spawns and reaches task worker containers on the worker network.
-    networks: [default, worker]
+    networks: [default, worker, docker-api]
     stop_grace_period: 7m
     depends_on:
       redis:
@@ -238,8 +398,21 @@ services:
         condition: service_completed_successfully
       api:
         condition: service_started
-    volumes:
-      - /var/run/docker.sock:/var/run/docker.sock
+      docker-proxy:
+        condition: service_started
+    environment:
+      <<: *roomote-controller-env
+      ROOMOTE_SERVICE: controller
+    healthcheck:
+      test:
+        [
+          'CMD-SHELL',
+          'curl -fsS --max-time 5 http://api:3001/health/controller >/dev/null',
+        ]
+      interval: 5s
+      timeout: 6s
+      retries: 12
+      start_period: 20s
 
   bullmq:
     <<: *roomote-service
@@ -251,8 +424,19 @@ services:
       db-migrate:
         condition: service_completed_successfully
     environment:
-      <<: *roomote-production-env
+      <<: *roomote-bullmq-env
+      ROOMOTE_SERVICE: bullmq
       PORT: 3002
+    healthcheck:
+      test:
+        [
+          'CMD-SHELL',
+          'curl -fsS --max-time 5 http://127.0.0.1:3002/admin/health >/dev/null',
+        ]
+      interval: 5s
+      timeout: 6s
+      retries: 12
+      start_period: 20s
 
   preview-proxy:
     <<: *roomote-service
@@ -264,7 +448,8 @@ services:
       db-migrate:
         condition: service_completed_successfully
     environment:
-      <<: *roomote-production-env
+      <<: *roomote-preview-proxy-env
+      ROOMOTE_SERVICE: preview-proxy
       PORT: 8081
     healthcheck:
       test:
@@ -278,7 +463,7 @@ services:
       start_period: 20s
 
   caddy:
-    image: caddy:2.10-alpine
+    image: caddy:2.10-alpine@sha256:4c6e91c6ed0e2fa03efd5b44747b625fec79bc9cd06ac5235a779726618e530d
     restart: unless-stopped
     depends_on:
       api:
@@ -317,3 +502,9 @@ networks:
   worker:
     name: roomote_worker
     driver: bridge
+  # No published ports and no route to application/datastore networks. Only
+  # the controller and the socket proxy join this network.
+  docker-api:
+    name: roomote_docker_api
+    driver: bridge
+    internal: true

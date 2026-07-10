@@ -3,9 +3,8 @@ import crypto from 'node:crypto';
 import { Hono } from 'hono';
 
 import {
-  AGENT_DISPLAY_NAME,
-  type CloudTaskPayload,
-  CloudTaskType,
+  type TaskPayload,
+  TaskPayloadKind,
   formatErrorForLog,
   parseAcpRequestUserInputAnswerReply,
   ALL_REPOSITORIES,
@@ -17,12 +16,13 @@ import { Env } from '@roomote/env';
 import {
   type RoutingDebugInfo,
   type RoutingWorkspace,
-  enqueueCloudTask,
+  enqueueTask,
   routeTask,
   buildLinearRoutingContext,
 } from '@roomote/cloud-agents/server';
 import { getRedis } from '@roomote/redis';
 import { postRouterDebugMessage } from '@roomote/slack';
+import { setTrustedRunActingUserOnSuccess } from '@roomote/db/server';
 import {
   createMcpOauthReplay,
   findLinearDeploymentMcpConnectionByIdentity,
@@ -37,47 +37,48 @@ import {
   isWebhookTimestampValid,
   createLinearClient,
   LinearClient,
-  findActiveLinearJob,
-  findCompletedLinearJobWithSnapshot,
+  findActiveLinearTaskRun,
+  findCompletedLinearTaskRunWithSnapshot,
   queueLinearMessage,
   getPendingLinearRequestUserInput,
   clearPendingLinearRequestUserInput,
   markPendingLinearRequestUserInputSubmitted,
   queueLinearRequestUserInputAnswer,
-  cancelLinearJob,
+  cancelLinearTaskRun,
   parseAgentSessionEventPayload,
-  createLinearAgentJob,
+  createLinearAgentRun,
   startElicitationFallback,
   findPendingSelection,
   handleElicitationResponse,
   deletePendingSelection,
   enrichSessionComments,
-  type CreateLinearAgentJobResult,
+  type CreateLinearAgentRunResult,
 } from '@roomote/linear';
 
 import type { WebhookResponse } from '../../types';
+import { syncActingUserForInboundMessage } from '../tasks/acting-user-sync.js';
 
 import { recordLinearWebhook } from './recordWebhook';
 
-function describeLinearJobResult(
-  jobResult: Exclude<CreateLinearAgentJobResult, { status: 'error' }>,
+function describeLinearRunResult(
+  runResult: Exclude<CreateLinearAgentRunResult, { status: 'error' }>,
 ): string {
-  return `cloud job ${jobResult.jobId}`;
+  return `task run ${runResult.runId}`;
 }
 
 async function updateLinearSessionTaskUrlForDirectLaunch({
   linearClient,
   sessionId,
-  jobResult,
+  runResult,
 }: {
   linearClient: LinearClient;
   sessionId: string;
-  jobResult: Exclude<CreateLinearAgentJobResult, { status: 'error' }>;
+  runResult: Exclude<CreateLinearAgentRunResult, { status: 'error' }>;
 }): Promise<void> {
   await linearClient.updateSessionExternalUrls(sessionId, [
     {
       label: 'Open task',
-      url: `${Env.ROOMOTE_APP_URL}/task/${jobResult.taskId}`,
+      url: `${Env.ROOMOTE_APP_URL}/task/${runResult.taskId}`,
     },
   ]);
 }
@@ -171,7 +172,6 @@ function getLinearTaskDescription(payload: AgentSessionEventPayload): string {
 
 function postLinearFinalRouterDebug({
   payload,
-  selectedAgent,
   selectedWorkspace,
   reasoning,
   routingDebug,
@@ -179,7 +179,6 @@ function postLinearFinalRouterDebug({
   userRoute,
 }: {
   payload: AgentSessionEventPayload;
-  selectedAgent: { name: string; type: string };
   selectedWorkspace: { name: string; type: string };
   reasoning?: string;
   routingDebug?: RoutingDebugInfo;
@@ -189,7 +188,6 @@ function postLinearFinalRouterDebug({
   void postRouterDebugMessage({
     source: formatLinearRouterDebugSource(payload),
     taskDescription: getLinearTaskDescription(payload),
-    selectedAgent,
     selectedWorkspace,
     reasoning: reasoning ?? '',
     routingDebug,
@@ -199,8 +197,6 @@ function postLinearFinalRouterDebug({
 }
 
 interface RoutedLinearTask {
-  agentName: string;
-  agentType: string;
   workspaceSelection: WorkspaceSelection;
   workspaceDisplayName: string;
   workspaceType: 'environment' | 'all_repositories';
@@ -231,7 +227,7 @@ async function startLinearTask({
     true,
   );
 
-  const jobResult = await createLinearAgentJob({
+  const runResult = await createLinearAgentRun({
     agentSession,
     payload,
     userId,
@@ -239,25 +235,21 @@ async function startLinearTask({
     environmentId: routedTask.workspaceSelection.environmentId,
   });
 
-  if (jobResult.status === 'error') {
+  if (runResult.status === 'error') {
     console.error(
-      `[LinearWebhook] Failed to create job for session ${sessionId}: ${jobResult.message}`,
+      `[LinearWebhook] Failed to create task run for session ${sessionId}: ${runResult.message}`,
     );
 
     await linearClient.emitError(
       sessionId,
-      `Failed to start agent: ${jobResult.message}`,
+      `Failed to start agent: ${runResult.message}`,
     );
 
-    return { status: 'error', message: jobResult.message };
+    return { status: 'error', message: runResult.message };
   }
 
   postLinearFinalRouterDebug({
     payload,
-    selectedAgent: {
-      name: routedTask.agentName,
-      type: routedTask.agentType,
-    },
     selectedWorkspace: {
       name: routedTask.workspaceDisplayName,
       type: routedTask.workspaceType,
@@ -271,11 +263,11 @@ async function startLinearTask({
   await updateLinearSessionTaskUrlForDirectLaunch({
     linearClient,
     sessionId,
-    jobResult,
+    runResult,
   });
 
   console.log(
-    `[LinearWebhook] Created ${describeLinearJobResult(jobResult)} for session ${sessionId}`,
+    `[LinearWebhook] Created ${describeLinearRunResult(runResult)} for session ${sessionId}`,
   );
 
   return { status: 'ok' };
@@ -426,7 +418,7 @@ async function handleAgentSessionEvent(
   const linearClient = createLinearClient(accessToken);
 
   // Check for stop signal - handle it immediately without further processing
-  // Stop signals are allowed even if user isn't linked (to cancel jobs started before auth was required)
+  // Stop signals are allowed even if user isn't linked (to cancel task runs started before auth was required)
   if (signal === 'stop') {
     console.log(
       `[LinearWebhook] Received stop signal for session ${sessionId}`,
@@ -538,18 +530,18 @@ async function handleAgentSessionEvent(
 
   // Check if this is a follow-up prompt for an existing session
   if (action === 'prompted') {
-    // First, check for an active job. When a job is running (e.g. waiting
+    // First, check for an active task run. When a job is running (e.g. waiting
     // on ask_followup_question), the user's reply must be delivered to it
     // immediately. This takes priority over routing confirmation and
     // elicitation checks which are only relevant before a job starts.
-    const activeJob = await findActiveLinearJob(
+    const activeRun = await findActiveLinearTaskRun(
       sessionId,
       agentSession.issue.id,
     );
 
-    if (activeJob) {
+    if (activeRun) {
       console.log(
-        `[LinearWebhook] Found active job ${activeJob.id} for session ${sessionId} - queuing message`,
+        `[LinearWebhook] Found active task run ${activeRun.id} for session ${sessionId} - queuing message`,
       );
 
       // Also clean up any stale pending elicitation selection.
@@ -558,7 +550,7 @@ async function handleAgentSessionEvent(
       const pendingRequest = await getPendingLinearRequestUserInput(sessionId);
 
       if (pendingRequest) {
-        if (pendingRequest.cloudJobId !== activeJob.id) {
+        if (pendingRequest.runId !== activeRun.id) {
           await clearPendingLinearRequestUserInput(sessionId, {
             requestId: pendingRequest.requestId,
           }).catch(() => {});
@@ -577,17 +569,29 @@ async function handleAgentSessionEvent(
           );
 
           if (parsedReply) {
-            await queueLinearRequestUserInputAnswer(activeJob.id, {
-              requestId: pendingRequest.requestId,
-              answers: parsedReply.answers,
+            // Question answers return before the normal active-message actor
+            // sync below, so apply the trusted sender before marking the
+            // request submitted. Otherwise the worker drops a different
+            // linked user's answer as a mismatch and it cannot be resent.
+            await setTrustedRunActingUserOnSuccess({
+              runId: activeRun.id,
               userId,
-              timestamp: Date.now(),
-            });
+              operation: async () => {
+                await queueLinearRequestUserInputAnswer(activeRun.id, {
+                  requestId: pendingRequest.requestId,
+                  answers: parsedReply.answers,
+                  userId,
+                  timestamp: Date.now(),
+                });
 
-            await markPendingLinearRequestUserInputSubmitted(
-              sessionId,
-              pendingRequest.requestId,
-            );
+                await markPendingLinearRequestUserInputSubmitted(
+                  sessionId,
+                  pendingRequest.requestId,
+                );
+
+                return true;
+              },
+            });
 
             return { status: 'ok' };
           }
@@ -597,8 +601,15 @@ async function handleAgentSessionEvent(
         }
       }
 
+      // Trusted pre-queue actor switch; see acting-user-sync.ts. The worker
+      // only runs the queued turn as this sender if the server actor matches.
+      await syncActingUserForInboundMessage({
+        logContext: 'linear.activeRunMessage',
+        runId: activeRun.id,
+        senderUserId: userId,
+      });
       // Queue the message for the running worker to pick up
-      await queueLinearMessage(activeJob.id, sessionId, payload, userId);
+      await queueLinearMessage(activeRun.id, sessionId, payload, userId);
 
       return { status: 'ok' };
     }
@@ -655,13 +666,12 @@ async function handleAgentSessionEvent(
           originalPayload.agentSession,
         );
 
-        // Create the cloud job with the delegated Generalist path and the
-        // selected workspace.
+        // Create the standard task run with the selected workspace.
         const elicitationWorkspace = mapElicitationWorkspaceToSelection(
           elicitationResult.workspaceType,
           elicitationResult.repo,
         );
-        const jobResult = await createLinearAgentJob({
+        const runResult = await createLinearAgentRun({
           agentSession: enrichedElicitationSession,
           payload: originalPayload,
           userId,
@@ -669,25 +679,25 @@ async function handleAgentSessionEvent(
           environmentId: elicitationWorkspace.environmentId,
         });
 
-        if (jobResult.status === 'error') {
+        if (runResult.status === 'error') {
           console.error(
-            `[LinearWebhook] Failed to create job: ${jobResult.message}`,
+            `[LinearWebhook] Failed to create task run: ${runResult.message}`,
           );
           await linearClient.emitError(
             sessionId,
-            `Failed to start agent: ${jobResult.message}`,
+            `Failed to start agent: ${runResult.message}`,
           );
-          return { status: 'error', message: jobResult.message };
+          return { status: 'error', message: runResult.message };
         }
 
         console.log(
-          `[LinearWebhook] Created ${describeLinearJobResult(jobResult)} for session ${sessionId}`,
+          `[LinearWebhook] Created ${describeLinearRunResult(runResult)} for session ${sessionId}`,
         );
 
         await updateLinearSessionTaskUrlForDirectLaunch({
           linearClient,
           sessionId,
-          jobResult,
+          runResult,
         });
 
         return { status: 'ok' };
@@ -717,22 +727,22 @@ async function handleAgentSessionEvent(
       // not_found - fall through to normal flow
     }
 
-    // No active job found - check for a completed job with snapshot to resume from
+    // No active task run found - check for a completed task run with snapshot to resume from
     console.log(
-      `[LinearWebhook] No active job for session ${sessionId} - checking for snapshot resume`,
+      `[LinearWebhook] No active task run for session ${sessionId} - checking for snapshot resume`,
     );
 
-    const completedJob = await findCompletedLinearJobWithSnapshot(
+    const completedRun = await findCompletedLinearTaskRunWithSnapshot(
       agentSession.issue.id,
     );
 
-    if (completedJob && completedJob.snapshotId) {
+    if (completedRun && completedRun.snapshotId) {
       console.log(
-        `[LinearWebhook] Found completed job ${completedJob.id} with snapshot ${completedJob.snapshotId} - creating SnapshotResume job`,
+        `[LinearWebhook] Found completed task run ${completedRun.id} with snapshot ${completedRun.snapshotId} - creating SnapshotResume run`,
       );
 
       // Acquire a short-lived distributed lock on the issue ID to prevent
-      // concurrent webhook deliveries from creating duplicate resume jobs.
+      // concurrent webhook deliveries from creating duplicate resume task runs.
       const redis = getRedis();
       const lockKey = `linear:resume-lock:${agentSession.issue.id}`;
       const lockTTLSeconds = 30;
@@ -747,38 +757,39 @@ async function handleAgentSessionEvent(
 
       if (!acquired) {
         console.log(
-          `[LinearWebhook] Resume lock already held for issue ${agentSession.issue.id} - polling for resume job`,
+          `[LinearWebhook] Resume lock already held for issue ${agentSession.issue.id} - polling for resume task run`,
         );
 
-        // Another handler is already creating the resume job. Poll for
-        // the new active job so we can queue the message to the correct
-        // (resume) job ID instead of the completed source job.
+        // Another handler is already creating the resume task run. Poll for
+        // the new active task run so we can queue the message to the correct
+        // (resume) job ID instead of the completed source task run.
         const POLL_INTERVAL_MS = 500;
         const MAX_POLL_ATTEMPTS = 10;
-        let resumeJob: Awaited<ReturnType<typeof findActiveLinearJob>> = null;
+        let resumeRun: Awaited<ReturnType<typeof findActiveLinearTaskRun>> =
+          null;
 
         for (let attempt = 1; attempt <= MAX_POLL_ATTEMPTS; attempt++) {
           await new Promise((resolve) => setTimeout(resolve, POLL_INTERVAL_MS));
 
-          resumeJob = await findActiveLinearJob(
+          resumeRun = await findActiveLinearTaskRun(
             sessionId,
             agentSession.issue.id,
           );
 
-          if (resumeJob) {
+          if (resumeRun) {
             console.log(
-              `[LinearWebhook] Found resume job ${resumeJob.id} after ${attempt} poll attempt(s)`,
+              `[LinearWebhook] Found resume task run ${resumeRun.id} after ${attempt} poll attempt(s)`,
             );
 
             break;
           }
         }
 
-        if (resumeJob) {
-          await queueLinearMessage(resumeJob.id, sessionId, payload, userId);
+        if (resumeRun) {
+          await queueLinearMessage(resumeRun.id, sessionId, payload, userId);
         } else {
           console.warn(
-            `[LinearWebhook] Could not find resume job for issue ${agentSession.issue.id} after ${MAX_POLL_ATTEMPTS} attempts - message may be lost`,
+            `[LinearWebhook] Could not find resume task run for issue ${agentSession.issue.id} after ${MAX_POLL_ATTEMPTS} attempts - message may be lost`,
           );
         }
 
@@ -786,7 +797,7 @@ async function handleAgentSessionEvent(
       }
 
       try {
-        const completedPayload = completedJob.payload as Record<
+        const completedPayload = completedRun.payload as Record<
           string,
           unknown
         >;
@@ -800,35 +811,35 @@ async function handleAgentSessionEvent(
           typeof completedPayload?.environmentId === 'string'
             ? completedPayload.environmentId
             : undefined;
-        const resumePayload: CloudTaskPayload<CloudTaskType.SnapshotResume> = {
+        const resumePayload: TaskPayload<
+          typeof TaskPayloadKind.SnapshotResume
+        > = {
           repo,
           environmentId,
-          port: completedJob.port ?? undefined,
-          sourceSnapshotId: completedJob.snapshotId,
-          sourceCloudJobId: completedJob.id,
+          port: completedRun.port ?? undefined,
+          sourceSnapshotId: completedRun.snapshotId,
+          sourceRunId: completedRun.id,
         };
         populateSnapshotResumeSlackMetadata(resumePayload, {
           sourcePayload: completedPayload,
-          threadTs: completedJob.slackThreadTs,
+          threadTs: completedRun.slackThreadTs,
         });
         restoreSnapshotResumeVisiblePromptFields(
           resumePayload,
           completedPayload,
         );
 
-        const resumeLaunch = await enqueueCloudTask(
+        // Resumes never create tasks and never re-attribute; the resuming
+        // human becomes the new run's acting user.
+        const resumeLaunch = await enqueueTask(
           {
-            type: CloudTaskType.SnapshotResume,
-            userId: completedJob.userId,
-            linearSessionId: sessionId,
-            linearIssueId: agentSession.issue.id,
-            linearOrganizationId: organizationId,
-            sourceSnapshotId: completedJob.snapshotId,
-            sourceCloudJobId: completedJob.id,
-            ...(completedJob.slackThreadTs
-              ? { slackThreadTs: completedJob.slackThreadTs }
-              : {}),
-            payload: resumePayload,
+            task: {
+              type: TaskPayloadKind.SnapshotResume,
+              sourceSnapshotId: completedRun.snapshotId,
+              sourceRunId: completedRun.id,
+              payload: resumePayload,
+            },
+            actingUserId: userId ?? completedRun.actingUserId ?? null,
           },
           {},
         );
@@ -841,7 +852,7 @@ async function handleAgentSessionEvent(
         );
 
         console.log(
-          `[LinearWebhook] Created snapshot resume cloud job ${resumeLaunch.id} for session ${sessionId}`,
+          `[LinearWebhook] Created snapshot resume task run ${resumeLaunch.id} for session ${sessionId}`,
         );
 
         // Emit thought so user sees activity
@@ -857,19 +868,19 @@ async function handleAgentSessionEvent(
         await redis.del(lockKey).catch(() => {});
 
         console.error(
-          `[LinearWebhook] Failed to create snapshot resume job for session ${sessionId}: ${error instanceof Error ? error.message : String(error)}`,
+          `[LinearWebhook] Failed to create snapshot resume task run for session ${sessionId}: ${error instanceof Error ? error.message : String(error)}`,
         );
 
         // Fall through to fresh job creation.
       }
     } else {
       console.log(
-        `[LinearWebhook] No completed job with snapshot for session ${sessionId} - creating new job`,
+        `[LinearWebhook] No completed task run with snapshot for session ${sessionId} - creating new task run`,
       );
     }
   }
 
-  // Immediately emit a "thought" activity to acknowledge receipt (only for new jobs)
+  // Immediately emit a "thought" activity to acknowledge receipt (only for new task runs)
   const thoughtResult = await linearClient.emitThought(
     sessionId,
     'Getting started...',
@@ -945,12 +956,10 @@ async function handleAgentSessionEvent(
 
       console.log(
         `[LinearWebhook] LLM routing decision: ` +
-          `agentType=${result.agentType}, ` +
           `workspace=${result.workspace.type}${result.workspace.type === 'environment' ? `(${result.workspace.name})` : ''}, ` +
           `reasoning="${result.reasoning}"`,
       );
 
-      const agentName = AGENT_DISPLAY_NAME;
       const ws = mapWorkspaceToSelection(result.workspace);
 
       const wsDesc =
@@ -966,8 +975,6 @@ async function handleAgentSessionEvent(
         payload,
         userId,
         routedTask: {
-          agentName,
-          agentType: agentName,
           workspaceSelection: ws,
           workspaceDisplayName: wsDesc,
           workspaceType: deriveWorkspaceType(ws),
@@ -1058,8 +1065,8 @@ async function handleAgentSessionEvent(
     return { status: 'ok' };
   }
 
-  // Create the cloud job
-  const jobResult = await createLinearAgentJob({
+  // Create the task run
+  const runResult = await createLinearAgentRun({
     agentSession: enrichedSession,
     payload,
     userId,
@@ -1067,12 +1074,14 @@ async function handleAgentSessionEvent(
     environmentId: workspaceSelection.environmentId,
   });
 
-  if (jobResult.status === 'error') {
-    console.error(`[LinearWebhook] Failed to create job: ${jobResult.message}`);
+  if (runResult.status === 'error') {
+    console.error(
+      `[LinearWebhook] Failed to create task run: ${runResult.message}`,
+    );
 
     const errorResult = await linearClient.emitError(
       sessionId,
-      `Failed to start agent: ${jobResult.message}`,
+      `Failed to start agent: ${runResult.message}`,
     );
 
     if (!errorResult.success) {
@@ -1081,17 +1090,17 @@ async function handleAgentSessionEvent(
       );
     }
 
-    return { status: 'error', message: jobResult.message };
+    return { status: 'error', message: runResult.message };
   }
 
   console.log(
-    `[LinearWebhook] Created ${describeLinearJobResult(jobResult)} for session ${sessionId}`,
+    `[LinearWebhook] Created ${describeLinearRunResult(runResult)} for session ${sessionId}`,
   );
 
   await updateLinearSessionTaskUrlForDirectLaunch({
     linearClient,
     sessionId,
-    jobResult,
+    runResult,
   });
 
   return { status: 'ok' };
@@ -1102,7 +1111,7 @@ async function handleAgentSessionEvent(
  *
  * The stop signal instructs the agent to halt work immediately.
  * This function will:
- * 1. Cancel any active job for the session
+ * 1. Cancel any active task run for the session
  * 2. Clear any pending messages in the queue
  * 3. Emit a response to Linear confirming the stop
  */
@@ -1112,20 +1121,20 @@ async function handleStopSignal(
   linearIssueId?: string,
 ): Promise<WebhookResponse> {
   try {
-    // Find any active job for this session (or same issue via fallback)
-    const activeJob = await findActiveLinearJob(sessionId, linearIssueId);
+    // Find any active task run for this session (or same issue via fallback)
+    const activeRun = await findActiveLinearTaskRun(sessionId, linearIssueId);
 
-    if (activeJob) {
+    if (activeRun) {
       console.log(
-        `[LinearWebhook] Canceling active job ${activeJob.id} for session ${sessionId}`,
+        `[LinearWebhook] Canceling active task run ${activeRun.id} for session ${sessionId}`,
       );
 
       // Cancel the job and clear the message queue
-      const cancelResult = await cancelLinearJob(activeJob, sessionId);
+      const cancelResult = await cancelLinearTaskRun(activeRun, sessionId);
 
       if (!cancelResult.success) {
         console.error(
-          `[LinearWebhook] Failed to cancel job ${activeJob.id}: ${cancelResult.error}`,
+          `[LinearWebhook] Failed to cancel task run ${activeRun.id}: ${cancelResult.error}`,
         );
 
         const errorResult = await linearClient.emitError(
@@ -1141,7 +1150,7 @@ async function handleStopSignal(
 
         return {
           status: 'error',
-          message: cancelResult.error ?? 'Failed to cancel job',
+          message: cancelResult.error ?? 'Failed to cancel task run',
         };
       }
 
@@ -1158,14 +1167,14 @@ async function handleStopSignal(
       }
 
       console.log(
-        `[LinearWebhook] Successfully stopped job ${activeJob.id} for session ${sessionId}`,
+        `[LinearWebhook] Successfully stopped job ${activeRun.id} for session ${sessionId}`,
       );
     } else {
       console.log(
-        `[LinearWebhook] No active job found for session ${sessionId}`,
+        `[LinearWebhook] No active task run found for session ${sessionId}`,
       );
 
-      // No active job means no queue to clear (queue is keyed by cloudJobId)
+      // No active task run means no queue to clear (queue is keyed by runId)
       // Emit a response confirming the stop
       const responseResult = await linearClient.emitResponse(
         sessionId,

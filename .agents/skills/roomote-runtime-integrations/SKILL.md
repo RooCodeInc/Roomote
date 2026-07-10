@@ -9,9 +9,10 @@ Trace the full Roomote agent path before changing runtime code.
 
 ## Start Here
 
-- Read `.agent-guidance/architecture/cloud-job-execution.md` for the end-to-end job lifecycle.
-- Read `.agent-guidance/architecture/redis-queues.md` for queueing, locks, BullMQ, and message handoff behavior.
-- Read `.agent-guidance/architecture/agent-context.md` for prompt assembly, harness setup, and channel-specific wrappers.
+- Read `packages/cloud-agents/src/server/cloud-job-queue.ts` for queue claim/release behavior.
+- Read `apps/controller/src/BaseController.ts` and `apps/controller/src/orphaned-cloud-jobs.ts` for dispatch and recovery.
+- Read `apps/worker/src/run-task/*` and `apps/worker/src/commands/*` for worker execution and harness startup.
+- Read `packages/cloud-agents/src/system-prompt.ts` and `packages/cloud-agents/src/server/workflows/` for prompt assembly and workflow builders.
 
 ## Runtime Map
 
@@ -47,16 +48,13 @@ harness behavior with the currently checked-in repo surfaces.
   - `apps/worker/src/commands/*`
   - `apps/worker/src/run-task/*`
 - Preview URLs, auth, and nested routing:
-  - `.agent-guidance/features/preview-proxy.md`
-  - `.agent-guidance/features/environment-management.md`
   - `apps/preview-proxy/src/*`
+  - environment package code under `packages/` related to environment config
 - Slack / Linear / GitHub flows:
-  - `.agent-guidance/features/slack-integration.md`
-  - `.agent-guidance/features/linear-integration.md`
-  - `.agent-guidance/features/github-integration.md`
-  - `.agent-guidance/api/webhooks.md`
+  - webhook handlers under `apps/api/src/handlers/`
+  - related packages under `packages/slack`, `packages/linear`, and GitHub handlers
 - MCP setup:
-  - `.agent-guidance/features/mcp-servers.md`
+  - `packages/types/src/mcp-oauth.ts`
   - `apps/worker/src/commands/setup/setup-mcps.ts`
   - `apps/api/src/handlers/mcp/index.ts`
   - `apps/api/src/handlers/mcp/routing.ts`
@@ -68,13 +66,11 @@ harness behavior with the currently checked-in repo surfaces.
 - Local preview-proxy runs on port `8081`.
 - Webhook mounts are under `/api/webhooks/*`.
 - GitHub MCP is router-side today. The worker-side integration catalog is no
-  longer just Linear; treat `packages/types/src/mcp-oauth.ts` and
-  `.agent-guidance/features/mcp-servers.md` as the source of truth for the
-  current task-facing integrations.
+  longer just Linear; treat `packages/types/src/mcp-oauth.ts` as the source of
+  truth for the current task-facing integrations.
 - GitHub App installation flow and GitHub user OAuth flow are separate concepts.
 
 ## Output Standard
 
 - Name the exact entry surface affected by the change.
 - Trace the handoff path end-to-end before proposing a fix.
-- Update the matching architecture/feature doc if the runtime behavior changes.

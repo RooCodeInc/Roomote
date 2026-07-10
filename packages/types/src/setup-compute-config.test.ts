@@ -6,8 +6,10 @@ import {
   deriveModalBaseImageRefDefault,
   deriveWorkerImageFromReleaseVersion,
   getDefaultAvailableComputeProvider,
+  isAutoProvisionedComputeArtifactField,
   isComputeCredentialField,
   isComputeInfrastructureField,
+  isComputeOperatorEditableField,
   normalizeDeploymentComputeConfig,
   parseExcludedComputeProviders,
   resolveDerivedModalBaseImageRef,
@@ -130,14 +132,31 @@ describe('buildSetupComputeStatus', () => {
     const modalBaseImage = status.providers
       .find((provider) => provider.provider === 'modal')
       ?.fields.find((field) => field.envVarName === 'MODAL_BASE_IMAGE_REF');
-    expect(modalBaseImage?.advanced).toBe(true);
+    expect(modalBaseImage?.advanced).toBeUndefined();
     expect(modalBaseImage?.category).toBe('infrastructure');
+    expect(isComputeOperatorEditableField(modalBaseImage!)).toBe(false);
 
     const modalRegions = status.providers
       .find((provider) => provider.provider === 'modal')
       ?.fields.find((field) => field.envVarName === 'MODAL_REGIONS');
+    expect(modalRegions?.advanced).toBe(true);
+    expect(isComputeOperatorEditableField(modalRegions!)).toBe(true);
     expect(modalRegions?.secret).toBe(false);
     expect(modalRegions?.required).toBe(false);
+
+    const e2bTemplate = status.providers
+      .find((provider) => provider.provider === 'e2b')
+      ?.fields.find((field) => field.envVarName === 'E2B_TEMPLATE_ID');
+    expect(e2bTemplate?.advanced).toBeUndefined();
+    expect(isAutoProvisionedComputeArtifactField(e2bTemplate!)).toBe(true);
+    expect(isComputeOperatorEditableField(e2bTemplate!)).toBe(false);
+
+    const daytonaSnapshot = status.providers
+      .find((provider) => provider.provider === 'daytona')
+      ?.fields.find((field) => field.envVarName === 'DAYTONA_SNAPSHOT_NAME');
+    expect(daytonaSnapshot?.advanced).toBeUndefined();
+    expect(isAutoProvisionedComputeArtifactField(daytonaSnapshot!)).toBe(true);
+    expect(isComputeOperatorEditableField(daytonaSnapshot!)).toBe(false);
 
     const modalToken = status.providers
       .find((provider) => provider.provider === 'modal')
@@ -216,7 +235,7 @@ describe('buildSetupComputeStatus', () => {
     expect(status.workerImage.hostedImageRef).toBeNull();
   });
 
-  it('treats a registry-qualified saved worker image as hosted-ready', () => {
+  it('ignores a registry-qualified saved worker image for hosted readiness', () => {
     const status = buildSetupComputeStatus({
       persistedEnvVarNames: ['DOCKER_WORKER_IMAGE'],
       savedWorkerImage: 'ghcr.io/roocodeinc/roomote-worker:v9.9.9',
@@ -224,28 +243,27 @@ describe('buildSetupComputeStatus', () => {
 
     expect(status.workerImage).toMatchObject({
       runtimeSatisfied: false,
-      savedSatisfied: true,
-      hostedImageRef: 'ghcr.io/roocodeinc/roomote-worker:v9.9.9',
-      hostedReady: true,
+      savedSatisfied: false,
+      hostedImageRef: null,
+      hostedReady: false,
     });
 
-    // A saved registry-qualified worker image satisfies hosted provisioning
-    // prerequisites: Modal derives its base image and E2B/Daytona become
-    // provisionable.
+    // Legacy saved DOCKER_WORKER_IMAGE rows no longer satisfy hosted readiness.
+    // Release derivation / process env must provide a registry-qualified image.
     const modal = status.providers.find(
       (provider) => provider.provider === 'modal',
     );
     expect(
       modal?.fields.find((field) => field.envVarName === 'MODAL_BASE_IMAGE_REF')
         ?.defaultSatisfied,
-    ).toBe(true);
+    ).toBe(false);
     const e2b = status.providers.find(
       (provider) => provider.provider === 'e2b',
     );
     expect(
       e2b?.fields.find((field) => field.envVarName === 'E2B_TEMPLATE_ID')
         ?.setupProvisionable,
-    ).toBe(true);
+    ).toBe(false);
   });
 
   it('satisfies provider config from manually saved infrastructure values', () => {

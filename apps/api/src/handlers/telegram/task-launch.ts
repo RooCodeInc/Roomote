@@ -1,12 +1,12 @@
 import type { TelegramUpdateCommunicationMetadata } from '@roomote/communication/telegram-update';
 import {
   ALL_REPOSITORIES,
-  CloudTaskType,
-  type CloudTask,
+  TaskPayloadKind,
+  type TaskSpec,
 } from '@roomote/types';
 import { db, environments, eq } from '@roomote/db/server';
 import {
-  enqueueCloudTask,
+  enqueueTask,
   getTaskUrl,
   type RoutingWorkspace,
 } from '@roomote/cloud-agents/server';
@@ -54,7 +54,7 @@ export async function resolveTelegramWorkspace(
 }
 
 /**
- * Enqueue a standard cloud task for a Telegram request and post the
+ * Enqueue a standard task for a Telegram request and post the
  * task-started message (with follow/cancel buttons) back to the chat. Shared
  * by the immediate launch path, the routing-confirmation buttons, and the
  * confirmation auto-start timer.
@@ -65,21 +65,30 @@ export async function launchTelegramTask(input: {
   metadata: TelegramUpdateCommunicationMetadata;
   workspace: TelegramWorkspaceSelection;
 }) {
-  const task: Extract<CloudTask, { type: CloudTaskType.StandardTask }> = {
-    type: CloudTaskType.StandardTask,
-    userId: input.launchOwnerUserId,
-    payload: {
-      repo: input.workspace.repoForPayload,
-      ...(input.workspace.environmentId
-        ? { environmentId: input.workspace.environmentId }
-        : {}),
-      description: input.queuedMessage.text,
-      ...input.metadata,
+  const task: Extract<TaskSpec, { type: typeof TaskPayloadKind.StandardTask }> =
+    {
+      type: TaskPayloadKind.StandardTask,
+      payload: {
+        repo: input.workspace.repoForPayload,
+        ...(input.workspace.environmentId
+          ? { environmentId: input.workspace.environmentId }
+          : {}),
+        description: input.queuedMessage.text,
+        ...input.metadata,
+      },
+    };
+  const launchResult = await enqueueTask(
+    {
+      task,
+      initiator: { kind: 'user', userId: input.launchOwnerUserId },
+      workflow: 'standard',
+      surface: 'telegram',
+      trigger: 'message',
     },
-  };
-  const launchResult = await enqueueCloudTask(task, {
-    launchClass: 'human',
-  });
+    {
+      launchClass: 'human',
+    },
+  );
 
   const taskUrl = getTaskUrl({
     taskId: launchResult.taskId,

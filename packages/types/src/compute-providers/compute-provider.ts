@@ -3,7 +3,7 @@ import { SANDBOX_FILES_DIR } from './worker-runtime';
 /**
  * ComputeProvider
  *
- * Determines which infrastructure vendor will execute the cloud job.
+ * Determines which infrastructure vendor will execute the task run.
  */
 
 export const computeProviders = ['modal', 'docker', 'daytona', 'e2b'] as const;
@@ -174,7 +174,7 @@ export function resolveWorkerRuntimePaths(options?: {
  * Resolves a provider string into a valid compute provider.
  * Falls back to "docker" (or a caller-provided fallback) for undefined
  * or unsupported values — including the removed "sandbox" (Vercel Sandbox)
- * vendor persisted on historical cloud jobs.
+ * vendor persisted on historical task runs.
  */
 export function resolveComputeProviderTarget(
   provider: string | null | undefined,

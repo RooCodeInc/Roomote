@@ -1,7 +1,7 @@
-import type { AuthTokenContext, JobTokenContext } from '@roomote/types';
+import type { AuthTokenContext, RunTokenContext } from '@roomote/types';
 
 const {
-  mockFindCloudJob,
+  mockFindTaskRun,
   mockFindEnablements,
   mockFindConnections,
   mockSelect,
@@ -32,7 +32,7 @@ const {
   }));
 
   return {
-    mockFindCloudJob: vi.fn(),
+    mockFindTaskRun: vi.fn(),
     mockFindEnablements: vi.fn(),
     mockFindConnections: vi.fn(),
     mockSelect,
@@ -61,7 +61,7 @@ vi.mock('@roomote/db/server', () => ({
   db: {
     select: mockSelect,
     query: {
-      cloudJobs: { findFirst: mockFindCloudJob },
+      taskRuns: { findFirst: mockFindTaskRun },
       deploymentMcpEnablements: {
         findFirst: vi.fn(),
         findMany: mockFindEnablements,
@@ -79,8 +79,8 @@ vi.mock('@roomote/db/server', () => ({
     enabled: 'connection.enabled',
     createdAt: 'connection.createdAt',
   },
-  cloudJobs: {
-    id: 'cloudJob.id',
+  taskRuns: {
+    id: 'taskRun.id',
   },
   deploymentMcpEnablements: {
     mcpId: 'enablement.mcpId',
@@ -126,10 +126,11 @@ function createCaller(requestUrl?: string) {
 }
 
 function createJobCaller(requestUrl?: string) {
-  const auth: JobTokenContext = {
-    cloudJobId: 42,
+  const auth: RunTokenContext = {
+    runId: 42,
     userId: 'owner-user',
-    tokenType: 'cj',
+    principal: 'user',
+    tokenType: 'run',
     version: 1,
   };
 
@@ -177,8 +178,7 @@ function buildEnabledOnlyRow(mcpId: string) {
 describe('mcpConnectionsRouter.getMcpServerConfigs', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    mockFindCloudJob.mockResolvedValue({
-      userId: 'user-1',
+    mockFindTaskRun.mockResolvedValue({
       actingUserId: null,
     });
     mockFindEnablements.mockResolvedValue([]);
@@ -586,9 +586,8 @@ describe('mcpConnectionsRouter.getMcpServerConfigs', () => {
     );
   });
 
-  it('uses cloudJobs.actingUserId for job-token actor-scoped lookups', async () => {
-    mockFindCloudJob.mockResolvedValueOnce({
-      userId: 'owner-user',
+  it('uses taskRuns.actingUserId for run-token actor-scoped lookups', async () => {
+    mockFindTaskRun.mockResolvedValueOnce({
       actingUserId: 'actor-user',
     });
     mockGetValidAccessToken.mockResolvedValue('notion-raw-access-token');

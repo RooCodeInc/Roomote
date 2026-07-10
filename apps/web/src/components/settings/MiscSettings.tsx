@@ -5,9 +5,26 @@ import { toast } from 'sonner';
 
 import { useTRPC } from '@/trpc/client';
 
-import { Skeleton, Switch } from '@/components/system';
+import {
+  Bug,
+  Button,
+  CopyIconButton,
+  EarOff,
+  Mail,
+  MessageSquarePlus,
+  Skeleton,
+  Stethoscope,
+  Switch,
+} from '@/components/system';
 import { Section } from '@/components/settings';
 import type { MiscSettings as MiscSettingsData } from '@/trpc/commands/misc-settings';
+
+function getBugReportUrl(diagnostics: string): string {
+  const url = new URL('https://github.com/RooCodeInc/Roomote/issues/new');
+  url.searchParams.set('template', 'bug.yml');
+  url.searchParams.set('diagnostics', diagnostics);
+  return url.toString();
+}
 
 export function MiscSettings() {
   const trpc = useTRPC();
@@ -58,7 +75,33 @@ export function MiscSettings() {
 
   return (
     <div className="space-y-4">
-      <Section title="Privacy">
+      <Section title="Feedback" icon={Mail}>
+        <p className="text-muted-foreground">Help us make Roomote better!</p>
+        <div className="flex flex-wrap gap-2">
+          <Button asChild variant="outline" size="sm">
+            <a
+              href={getBugReportUrl(settingsQuery.data.diagnostics.plainText)}
+              rel="noreferrer"
+              target="_blank"
+            >
+              <Bug />
+              File a bug
+            </a>
+          </Button>
+          <Button asChild variant="outline" size="sm">
+            <a
+              href="https://github.com/RooCodeInc/Roomote/issues/new?template=feature.yml"
+              rel="noreferrer"
+              target="_blank"
+            >
+              <MessageSquarePlus />
+              Request a feature
+            </a>
+          </Button>
+        </div>
+      </Section>
+
+      <Section icon={EarOff} title="Privacy">
         <div className="flex gap-3">
           <Switch
             aria-label="Toggle anonymous analytics"
@@ -67,15 +110,44 @@ export function MiscSettings() {
             onCheckedChange={(checked) => void handleToggle(checked === true)}
           />
           <div className="space-y-1">
-            <p className="text-sm font-semibold text-foreground">
-              Anonymous analytics
-            </p>
-            <p className="text-sm text-foreground">
+            <p className="text-sm font-semibold">Anonymous analytics</p>
+            <p className="text-sm text-muted-foreground">
               Share anonymous usage analytics with the Roomote team to help
               improve the product. Activity is identified only by random IDs
               that are never linked to your company, users, or repositories. No
               prompts, conversations or code is ever shared.
             </p>
+          </div>
+        </div>
+      </Section>
+
+      <Section icon={Stethoscope} title="Diagnostics">
+        <div className="space-y-3">
+          <p className="text-sm text-muted-foreground">
+            This information is useful to the team when dealing with issues.
+          </p>
+          <div className="relative rounded-lg bg-muted p-4 pr-12 max-w-2xl">
+            <CopyIconButton
+              aria-label="Copy diagnostics"
+              className="absolute right-2 top-2"
+              content={settingsQuery.data.diagnostics.plainText}
+              tooltip="Copy diagnostics"
+            />
+            <div className="space-y-6">
+              {settingsQuery.data.diagnostics.sections.map((section) => (
+                <section className="space-y-2" key={section.title}>
+                  <h3 className="text-sm font-semibold">{section.title}</h3>
+                  <dl className="grid grid-cols-[16rem_minmax(0,1fr)] gap-x-3 gap-y-1.5 text-sm">
+                    {section.items.map((item) => (
+                      <div className="contents" key={item.label}>
+                        <dt className="text-foreground">{item.label}</dt>
+                        <dd className="break-words font-mono">{item.value}</dd>
+                      </div>
+                    ))}
+                  </dl>
+                </section>
+              ))}
+            </div>
           </div>
         </div>
       </Section>

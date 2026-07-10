@@ -3,7 +3,7 @@
 import { memo, useState, type MouseEventHandler } from 'react';
 
 import { SideNavItem } from '@/components/layout/side-nav/SideNavItem';
-import { useRestoreCloudJobSnapshot } from '@/hooks/snapshots';
+import { useRestoreTaskRunSnapshot } from '@/hooks/snapshots';
 import {
   AppWindow,
   Button,
@@ -25,19 +25,19 @@ import { buildPreviewIframeUrl, isModifiedClick } from '../preview-iframe-url';
 
 import type { SidebarActionBaseProps } from './types';
 
-import { isCloudJobAsleep } from './utils';
+import { isTaskRunAsleep } from './utils';
 
 function LivePreviewButtonBase({
-  cloudJob,
+  taskRun,
   disabled: disabledUntilReady = false,
 }: SidebarActionBaseProps & { disabled?: boolean }) {
   const [showWakeDialog, setShowWakeDialog] = useState(false);
   const { initialPaths, previewUrl, previewUrls, primaryPortName } =
-    usePreviewUrls(cloudJob ?? {});
+    usePreviewUrls(taskRun ?? {});
   const { isViewActive, openPreviewView, previewPath, previewServiceName } =
     useTaskSidePanel();
   const { openPreviewPane } = usePreviewPane();
-  const restoreSnapshot = useRestoreCloudJobSnapshot({
+  const restoreSnapshot = useRestoreTaskRunSnapshot({
     onSuccess: () => setShowWakeDialog(false),
   });
   const {
@@ -52,16 +52,16 @@ function LivePreviewButtonBase({
     primaryPortName,
   });
 
-  const asleep = isCloudJobAsleep(cloudJob);
+  const asleep = isTaskRunAsleep(taskRun);
   const canWakeForPreview =
-    asleep && !!cloudJob?.snapshotId && !!resolvedPreviewUrl;
+    asleep && !!taskRun?.snapshotId && !!resolvedPreviewUrl;
   const openUrl =
-    resolvedPreviewUrl && cloudJob
-      ? buildPreviewIframeUrl(resolvedPreviewUrl, cloudJob.id)
+    resolvedPreviewUrl && taskRun
+      ? buildPreviewIframeUrl(resolvedPreviewUrl, taskRun.id)
       : null;
   const disabled =
     disabledUntilReady ||
-    !cloudJob ||
+    !taskRun ||
     !resolvedPreviewUrl ||
     (asleep && !canWakeForPreview);
   const tooltip = disabledUntilReady
@@ -75,14 +75,14 @@ function LivePreviewButtonBase({
           : 'Live Preview';
 
   const handleWakeConfirm = async () => {
-    if (!cloudJob?.snapshotId || restoreSnapshot.isPending) {
+    if (!taskRun?.snapshotId || restoreSnapshot.isPending) {
       return;
     }
 
     try {
       await restoreSnapshot.mutateAsync({
-        sourceSnapshotId: cloudJob.snapshotId,
-        sourceCloudJobId: cloudJob.id,
+        sourceSnapshotId: taskRun.snapshotId,
+        sourceRunId: taskRun.id,
         resumePrompt: '',
       });
     } catch {
@@ -91,7 +91,7 @@ function LivePreviewButtonBase({
   };
 
   const handleClick: MouseEventHandler<HTMLAnchorElement> = (event) => {
-    if (!cloudJob || !resolvedPreviewUrl) {
+    if (!taskRun || !resolvedPreviewUrl) {
       return;
     }
 
@@ -102,12 +102,12 @@ function LivePreviewButtonBase({
     event.preventDefault();
     openPreviewPane(
       resolvedPreviewUrl,
-      cloudJob.id,
+      taskRun.id,
       resolvedPreviewServiceName ?? undefined,
     );
     openPreviewView(
       resolvedPreviewUrl,
-      cloudJob.id,
+      taskRun.id,
       resolvedPreviewServiceName ?? undefined,
     );
   };

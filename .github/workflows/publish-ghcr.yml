@@ -36,7 +36,7 @@ jobs:
       extra_tag: ${{ steps.vars.outputs.extra_tag }}
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
         with:
           fetch-depth: 0
       - name: Classify changed paths
@@ -76,7 +76,7 @@ jobs:
           docs_only=true
           while IFS= read -r path; do
             case "$path" in
-              apps/docs/*|.agent-guidance/*|*.md|*.mdx)
+              apps/docs/*|*.md|*.mdx)
                 ;;
               *)
                 docs_only=false
@@ -137,6 +137,66 @@ jobs:
           echo "app_env=$app_env" >> "$GITHUB_OUTPUT"
           echo "extra_tag=$extra_tag" >> "$GITHUB_OUTPUT"
 
+  deployment-acceptance:
+    name: Deployment acceptance (amd64)
+    needs: prepare
+    if: ${{ needs.prepare.outputs.docs_only != 'true' }}
+    runs-on: blacksmith-4vcpu-ubuntu-2404
+    permissions:
+      contents: read
+      packages: read
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - name: Setup environment
+        uses: ./.github/actions/setup-environment
+        with:
+          frozen-lockfile: 'true'
+          node-version: 24.13.1
+          pnpm-version: 10.29.3
+      - name: Set up Docker builder
+        uses: useblacksmith/setup-docker-builder@47a5d0102cc44712a17a633c2599f755008cc40e # v1
+      # The smoke test pulls the previous published release from GHCR as its
+      # upgrade baseline. The packages are public today, but authenticate
+      # anyway so a visibility change cannot silently break the release gate.
+      - name: Log in to GHCR
+        uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Resolve previous published channel
+        id: baseline
+        shell: bash
+        env:
+          EXTRA_TAG: ${{ needs.prepare.outputs.extra_tag }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          baseline="$EXTRA_TAG"
+          if [ "$baseline" = 'latest' ]; then
+            baseline="$(gh api "repos/$GITHUB_REPOSITORY/releases/latest" --jq .tag_name 2>/dev/null || true)"
+            # v0.0.1 predates the current migration baseline. Use the prior
+            # main candidate for the first gated release; later releases use
+            # the immediately preceding immutable release tag.
+            if [ -z "$baseline" ] || [ "$baseline" = 'v0.0.1' ]; then
+              baseline='main'
+            fi
+          elif [ -z "$baseline" ]; then
+            baseline='main'
+          fi
+          echo "version=$baseline" >> "$GITHUB_OUTPUT"
+      - name: Exercise deployment lifecycle
+        env:
+          BASELINE_VERSION: ${{ steps.baseline.outputs.version }}
+          CANDIDATE_VERSION: ${{ needs.prepare.outputs.version }}
+        run: pnpm deployment:smoke
+
+  # Builds run concurrently with the acceptance gate: the gate builds its own
+  # local images for the smoke test, so nothing here depends on it. The gate
+  # instead blocks `publish` — builds only push untagged per-arch digests, and
+  # nothing is consumable until publish assembles the tagged manifests, so a
+  # failed gate still prevents any image from shipping.
   build:
     name: Build ${{ matrix.app }} (${{ matrix.arch }})
     needs: prepare
@@ -154,37 +214,41 @@ jobs:
         include:
           - app: app
             dockerfile: .docker/app/Dockerfile
+            target: runtime-app
             image: roomote-app
             arch: amd64
             runner: blacksmith-4vcpu-ubuntu-2404
           - app: app
             dockerfile: .docker/app/Dockerfile
+            target: runtime-app
             image: roomote-app
             arch: arm64
             runner: blacksmith-4vcpu-ubuntu-2404-arm
           - app: worker
             dockerfile: apps/worker/Dockerfile
+            target: runtime
             image: roomote-worker
             arch: amd64
             runner: blacksmith-4vcpu-ubuntu-2404
           - app: worker
             dockerfile: apps/worker/Dockerfile
+            target: runtime
             image: roomote-worker
             arch: arm64
             runner: blacksmith-4vcpu-ubuntu-2404-arm
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
 
       # Blacksmith's builder mounts a persistent NVMe layer cache into the
       # runner (per repo/Dockerfile/arch). Unlike type=gha caching this has
       # no 10GB repo cap or per-ref scoping, and skips the multi-minute
       # cache export upload at the end of every build.
       - name: Set up Docker builder
-        uses: useblacksmith/setup-docker-builder@v1
+        uses: useblacksmith/setup-docker-builder@47a5d0102cc44712a17a633c2599f755008cc40e # v1
 
       - name: Log in to GHCR
-        uses: docker/login-action@v3
+        uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3
         with:
           registry: ${{ env.REGISTRY }}
           username: ${{ github.actor }}
@@ -192,10 +256,11 @@ jobs:
 
       - name: Build and push ${{ matrix.app }} (${{ matrix.arch }}) by digest
         id: build
-        uses: useblacksmith/build-push-action@v2
+        uses: useblacksmith/build-push-action@fb9e3e6a9299c78462bfadd0d93352c316adc9b8 # v2
         with:
           context: .
           file: ${{ matrix.dockerfile }}
+          target: ${{ matrix.target }}
           platforms: linux/${{ matrix.arch }}
           outputs: type=image,name=${{ env.REGISTRY }}/${{ needs.prepare.outputs.owner }}/${{ matrix.image }},push-by-digest=true,name-canonical=true,push=true
           build-args: |
@@ -211,7 +276,7 @@ jobs:
           touch "/tmp/digests/${digest#sha256:}"
 
       - name: Upload digest
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: digests-${{ matrix.app }}-${{ matrix.arch }}
           path: /tmp/digests/*
@@ -220,7 +285,7 @@ jobs:
 
   publish:
     name: Publish ${{ matrix.app }} manifest
-    needs: [prepare, build]
+    needs: [prepare, build, deployment-acceptance]
     runs-on: blacksmith-4vcpu-ubuntu-2404
     permissions:
       contents: read
@@ -235,17 +300,17 @@ jobs:
             image: roomote-worker
     steps:
       - name: Download digests
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         with:
           pattern: digests-${{ matrix.app }}-*
           path: /tmp/digests
           merge-multiple: true
 
       - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
+        uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
 
       - name: Log in to GHCR
-        uses: docker/login-action@v3
+        uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3
         with:
           registry: ${{ env.REGISTRY }}
           username: ${{ github.actor }}
@@ -352,156 +417,23 @@ jobs:
           rm -f "$notes_file"
           echo "Published GitHub Release $tag (images ready)"
 
-  deploy-preview:
-    name: Deploy preview
-    runs-on: blacksmith-4vcpu-ubuntu-2404
+  notify-ops:
+    name: Notify ops repository
+    runs-on: ubuntu-latest
     needs: publish
-    if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/develop' }}
-    environment: preview
-    concurrency:
-      group: preview-deploy
-      cancel-in-progress: false
+    if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/develop' && vars.ROOMOTE_OPS_REPO != '' }}
     permissions:
       contents: read
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-
-      - name: Resolve preview version
-        id: vars
-        shell: bash
-        run: |
-          set -euo pipefail
-          echo "version=develop-${GITHUB_SHA:0:8}" >> "$GITHUB_OUTPUT"
-
-      - name: Configure SSH
-        shell: bash
+      - name: Send repository dispatch
         env:
-          SSH_PRIVATE_KEY: ${{ secrets.ROOMOTE_PREVIEW_SSH_PRIVATE_KEY }}
-          KNOWN_HOSTS: ${{ vars.ROOMOTE_PREVIEW_KNOWN_HOSTS }}
+          GH_TOKEN: ${{ secrets.ROOMOTE_OPS_DISPATCH_TOKEN }}
+          OPS_REPO: ${{ vars.ROOMOTE_OPS_REPO }}
         run: |
           set -euo pipefail
-          : "${SSH_PRIVATE_KEY:?ROOMOTE_PREVIEW_SSH_PRIVATE_KEY is required}"
-          : "${KNOWN_HOSTS:?ROOMOTE_PREVIEW_KNOWN_HOSTS is required}"
-
-          install -d -m 700 ~/.ssh
-          printf '%s\n' "$SSH_PRIVATE_KEY" > ~/.ssh/roomote-preview-deploy
-          printf '%s\n' "$KNOWN_HOSTS" > ~/.ssh/known_hosts
-          chmod 600 ~/.ssh/roomote-preview-deploy ~/.ssh/known_hosts
-
-      - name: Upgrade preview deployment
-        shell: bash
-        env:
-          ROOMOTE_PREVIEW_CUSTOMER: ${{ vars.ROOMOTE_PREVIEW_CUSTOMER }}
-          ROOMOTE_PREVIEW_HOST: ${{ vars.ROOMOTE_PREVIEW_HOST }}
-          ROOMOTE_PREVIEW_SSH_USER: ${{ vars.ROOMOTE_PREVIEW_SSH_USER }}
-          ROOMOTE_IMAGE_RETENTION_RELEASES: ${{ vars.ROOMOTE_IMAGE_RETENTION_RELEASES || '3' }}
-          VERSION: ${{ steps.vars.outputs.version }}
-        run: |
-          set -euo pipefail
-          : "${ROOMOTE_PREVIEW_CUSTOMER:?ROOMOTE_PREVIEW_CUSTOMER is required}"
-          : "${ROOMOTE_PREVIEW_HOST:?ROOMOTE_PREVIEW_HOST is required}"
-          : "${VERSION:?version is required}"
-
-          deploy/scripts/roomote-deploy upgrade \
-            --customer "$ROOMOTE_PREVIEW_CUSTOMER" \
-            --host "$ROOMOTE_PREVIEW_HOST" \
-            --ssh-user "${ROOMOTE_PREVIEW_SSH_USER:-root}" \
-            --ssh-private-key "$HOME/.ssh/roomote-preview-deploy" \
-            --version "$VERSION"
-
-  # Optional: keep a Railway deployment pinned to every develop build. The
-  # job talks to Railway's public GraphQL API with an environment-scoped
-  # project token: it finds every service in that environment running the
-  # roomote-app image, points it at the new immutable develop-<sha> tag,
-  # and redeploys it. See deploy/railway/README.md for the setup runbook.
-  deploy-railway:
-    name: Deploy Railway preview
-    runs-on: blacksmith-4vcpu-ubuntu-2404
-    needs: publish
-    if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/develop' && vars.ROOMOTE_RAILWAY_AUTODEPLOY == 'true' }}
-    environment: railway
-    concurrency:
-      group: railway-deploy
-      cancel-in-progress: false
-    permissions:
-      contents: read
-    steps:
-      - name: Point Railway services at the new image tag
-        shell: bash
-        env:
-          RAILWAY_PROJECT_TOKEN: ${{ secrets.ROOMOTE_RAILWAY_PROJECT_TOKEN }}
-        run: |
-          set -euo pipefail
-          : "${RAILWAY_PROJECT_TOKEN:?ROOMOTE_RAILWAY_PROJECT_TOKEN is required}"
-
-          api=https://backboard.railway.com/graphql/v2
-
-          # POST one GraphQL operation. Fails on transport errors and on
-          # GraphQL-level errors, and prints only the data payload.
-          gql() {
-            local query="$1" variables="${2:-null}" response
-            response="$(jq -n --arg query "$query" --argjson variables "$variables" \
-              '{query: $query, variables: $variables}' \
-              | curl -sS --fail-with-body --retry 3 --retry-all-errors \
-                  -X POST "$api" \
-                  -H 'Content-Type: application/json' \
-                  -H "Project-Access-Token: ${RAILWAY_PROJECT_TOKEN}" \
-                  --data-binary @-)"
-            if [ "$(jq 'has("errors")' <<< "$response")" = "true" ]; then
-              jq -r '.errors[].message' <<< "$response" >&2
-              return 1
-            fi
-            jq '.data' <<< "$response"
-          }
-
-          owner="$(printf '%s' "$GITHUB_REPOSITORY_OWNER" | tr '[:upper:]' '[:lower:]')"
-          prefix="ghcr.io/${owner}/roomote-app"
-          image="${prefix}:develop-${GITHUB_SHA:0:8}"
-
-          # A project token is scoped to a single environment; resolve it
-          # from the token instead of configuring it separately.
-          environment_id="$(gql 'query { projectToken { environmentId } }' \
-            | jq -r '.projectToken.environmentId')"
-
-          services="$(gql 'query ($environmentId: String!) {
-            environment(id: $environmentId) {
-              serviceInstances {
-                edges { node { serviceId serviceName source { image } } }
-              }
-            }
-          }' "$(jq -n --arg environmentId "$environment_id" '{environmentId: $environmentId}')" \
-            | jq -c --arg prefix "$prefix" \
-                '[.environment.serviceInstances.edges[].node
-                  | select(.source.image != null and (.source.image | startswith($prefix)))]')"
-
-          count="$(jq 'length' <<< "$services")"
-          if [ "$count" -eq 0 ]; then
-            echo "No Railway services run an image with prefix $prefix" >&2
-            exit 1
-          fi
-
-          # Both mutations are idempotent (set the image, then deploy), so
-          # a retried or partially failed run is safe to re-run.
-          for i in $(seq 0 $((count - 1))); do
-            service_id="$(jq -r ".[$i].serviceId" <<< "$services")"
-            service_name="$(jq -r ".[$i].serviceName" <<< "$services")"
-            echo "Updating $service_name to $image"
-            gql 'mutation ($environmentId: String!, $serviceId: String!, $input: ServiceInstanceUpdateInput!) {
-              serviceInstanceUpdate(environmentId: $environmentId, serviceId: $serviceId, input: $input)
-            }' "$(jq -n \
-                  --arg environmentId "$environment_id" \
-                  --arg serviceId "$service_id" \
-                  --arg image "$image" \
-                  '{environmentId: $environmentId, serviceId: $serviceId, input: {source: {image: $image}}}')" \
-              > /dev/null
-            gql 'mutation ($environmentId: String!, $serviceId: String!) {
-              serviceInstanceDeploy(environmentId: $environmentId, serviceId: $serviceId, latestCommit: false)
-            }' "$(jq -n \
-                  --arg environmentId "$environment_id" \
-                  --arg serviceId "$service_id" \
-                  '{environmentId: $environmentId, serviceId: $serviceId}')" \
-              > /dev/null
-          done
-
-          echo "Updated $count service(s) to $image"
+          : "${GH_TOKEN:?ROOMOTE_OPS_DISPATCH_TOKEN is required}"
+          gh api "repos/${OPS_REPO}/dispatches" \
+            -f event_type=roomote-develop-build \
+            -f "client_payload[image_tag]=develop-${GITHUB_SHA:0:8}" \
+            -f "client_payload[sha]=${GITHUB_SHA}" \
+            -f "client_payload[ref]=${GITHUB_REF}"

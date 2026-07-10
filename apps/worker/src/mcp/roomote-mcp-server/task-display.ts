@@ -1,8 +1,4 @@
-import {
-  CloudTaskStatus,
-  HARNESS_LABELS,
-  isCodingHarness,
-} from '@roomote/types';
+import { RunStatus, HARNESS_LABELS, isCodingHarness } from '@roomote/types';
 
 function getPhaseLabel(taskPhase: string | null): string | null {
   switch (taskPhase) {
@@ -23,29 +19,29 @@ function getPhaseLabel(taskPhase: string | null): string | null {
   }
 }
 
-function getCloudJobStatusLabel(status: string): string {
+function getTaskRunStatusLabel(status: string): string {
   switch (status) {
-    case CloudTaskStatus.Pending:
+    case RunStatus.Pending:
       return 'Pending';
-    case CloudTaskStatus.Dequeued:
+    case RunStatus.Dequeued:
       return 'Dequeued';
-    case CloudTaskStatus.Processing:
+    case RunStatus.Processing:
       return 'Processing';
-    case CloudTaskStatus.Preparing:
+    case RunStatus.Preparing:
       return 'Preparing';
-    case CloudTaskStatus.Spawning:
+    case RunStatus.Spawning:
       return 'Spawning';
-    case CloudTaskStatus.Connecting:
+    case RunStatus.Connecting:
       return 'Connecting';
-    case CloudTaskStatus.Running:
+    case RunStatus.Running:
       return 'Running';
-    case CloudTaskStatus.Idle:
+    case RunStatus.Idle:
       return 'Idle';
-    case CloudTaskStatus.Completed:
+    case RunStatus.Completed:
       return 'Completed';
-    case CloudTaskStatus.Failed:
+    case RunStatus.Failed:
       return 'Failed';
-    case CloudTaskStatus.Canceled:
+    case RunStatus.Canceled:
       return 'Canceled';
     default:
       return status;
@@ -54,24 +50,24 @@ function getCloudJobStatusLabel(status: string): string {
 
 export function getTaskStatusLabel(input: {
   completed: boolean;
-  cloudJobStatus: string | null;
+  taskRunStatus: string | null;
   taskPhase: string | null;
 }): string {
-  const { completed, cloudJobStatus, taskPhase } = input;
+  const { completed, taskRunStatus, taskPhase } = input;
 
-  if (!cloudJobStatus) {
+  if (!taskRunStatus) {
     return completed ? 'Completed' : 'Active';
   }
 
-  if (cloudJobStatus === CloudTaskStatus.Running) {
+  if (taskRunStatus === RunStatus.Running) {
     return getPhaseLabel(taskPhase) ?? 'Running';
   }
 
-  if (cloudJobStatus === CloudTaskStatus.Idle) {
+  if (taskRunStatus === RunStatus.Idle) {
     return getPhaseLabel(taskPhase) ?? 'Idle';
   }
 
-  return getCloudJobStatusLabel(cloudJobStatus);
+  return getTaskRunStatusLabel(taskRunStatus);
 }
 
 export function getHarnessLabel(harness: string | null): string | null {

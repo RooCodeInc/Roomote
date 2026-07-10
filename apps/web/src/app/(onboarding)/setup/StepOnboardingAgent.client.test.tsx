@@ -232,7 +232,7 @@ describe('StepOnboardingAgent', () => {
     resetSelectionMutateMock.mockResolvedValue(undefined);
     useEnvironmentDefinitionAgentStateMock.mockReturnValue({
       session: {
-        cloudJob: {
+        taskRun: {
           status: 'running',
           taskPhase: 'running',
         },
@@ -348,7 +348,7 @@ describe('StepOnboardingAgent', () => {
   it('shows the setup summary and enables continue after setup succeeds', () => {
     useEnvironmentDefinitionAgentStateMock.mockReturnValue({
       session: {
-        cloudJob: {
+        taskRun: {
           status: 'completed',
           taskPhase: 'done',
         },
@@ -408,7 +408,7 @@ describe('StepOnboardingAgent', () => {
   it('keeps the defer action visible when the agent task fails', () => {
     useEnvironmentDefinitionAgentStateMock.mockReturnValue({
       session: {
-        cloudJob: {
+        taskRun: {
           status: 'failed',
           taskPhase: 'failed',
         },

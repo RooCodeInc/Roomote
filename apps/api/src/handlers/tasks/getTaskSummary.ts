@@ -7,7 +7,7 @@ import type { Variables } from '../../types';
 import type { McpAuth } from '../mcp/middleware';
 
 import {
-  getLatestCloudJobsByTaskIds,
+  getLatestTaskRunsByTaskIds,
   TASK_SELECT_COLUMNS,
   visibleTaskHistoryCondition,
 } from './helpers';
@@ -38,10 +38,10 @@ export async function getTaskSummary(
       return c.json({ error: 'Task not found' }, 404);
     }
 
-    const latestJobs = await getLatestCloudJobsByTaskIds([task.id]);
-    const latestJob = latestJobs[task.id] ?? null;
+    const latestRuns = await getLatestTaskRunsByTaskIds([task.id]);
+    const latestRun = latestRuns[task.id] ?? null;
     const linkedEnvironmentId = getEnvironmentDefinitionIdFromPayload(
-      latestJob?.payload,
+      latestRun?.payload,
     );
     const linkedEnvironment = linkedEnvironmentId
       ? await db.query.environments.findFirst({
@@ -54,13 +54,14 @@ export async function getTaskSummary(
       id: task.id,
       title: task.title,
       mode: task.mode,
-      completed: task.completed,
+      completed: task.state === 'completed',
+      state: task.state,
       repositoryName: task.repositoryName,
       harness: task.harness,
       createdAt: task.timestamp,
-      cloudJobStatus: latestJob?.status ?? null,
-      taskPhase: latestJob?.taskPhase ?? null,
-      cloudJobError: latestJob?.error ?? null,
+      taskRunStatus: latestRun?.status ?? null,
+      taskPhase: latestRun?.taskPhase ?? null,
+      taskRunError: latestRun?.error ?? null,
       linkedEnvironmentId: linkedEnvironmentId ?? null,
       linkedEnvironmentName: linkedEnvironment?.name ?? null,
     });

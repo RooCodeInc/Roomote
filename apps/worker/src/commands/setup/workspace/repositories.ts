@@ -53,7 +53,7 @@ async function discoverWorkspaceRepoLocalSkills({
 }
 
 /**
- * Prepare workspace for a cloud job.
+ * Prepare workspace for a task run.
  * Supports single-repository, scoped multi-repository, all-repositories, and
  * environment workspaces.
  *

@@ -2,15 +2,15 @@ import { initTRPC, TRPCError } from '@trpc/server';
 import superjson from 'superjson';
 import { z } from 'zod';
 
-import type { AuthTokenContext, JobTokenContext } from '@roomote/types';
+import type { AuthTokenContext, RunTokenContext } from '@roomote/types';
 
 import {
-  findCloudJobForAccess,
-  findCloudJobByJobTokenClaims,
-} from './lib/cloud-jobs/find-cloud-job';
+  findTaskRunForAccess,
+  findTaskRunByRunTokenClaims,
+} from './lib/task-runs/find-task-run';
 
 export interface Context {
-  auth: AuthTokenContext | JobTokenContext | null;
+  auth: AuthTokenContext | RunTokenContext | null;
   req?: Request;
 }
 
@@ -21,16 +21,16 @@ const t = initTRPC.context<Context>().create({
 export const router = t.router;
 
 /**
- * Type guard to check if an auth context is a job token.
+ * Type guard to check if an auth context is a run token.
  */
-export function isJobToken(
-  auth: AuthTokenContext | JobTokenContext | null,
-): auth is JobTokenContext {
-  return auth !== null && 'cloudJobId' in auth;
+export function isRunToken(
+  auth: AuthTokenContext | RunTokenContext | null,
+): auth is RunTokenContext {
+  return auth !== null && 'runId' in auth;
 }
 
 /**
- * Requires authentication but allows any token type (auth or job).
+ * Requires authentication but allows any token type (auth or run).
  */
 export const authenticatedProcedure = t.procedure.use(async (opts) => {
   const { ctx } = opts;
@@ -48,9 +48,9 @@ export const authenticatedProcedure = t.procedure.use(async (opts) => {
 });
 
 /**
- * Blocks job tokens entirely. For endpoints workers should never access.
+ * Blocks run tokens entirely. For endpoints workers should never access.
  */
-export const nonJobProcedure = t.procedure.use(async (opts) => {
+export const userOnlyProcedure = t.procedure.use(async (opts) => {
   if (!opts.ctx.auth) {
     throw new TRPCError({
       code: 'UNAUTHORIZED',
@@ -58,10 +58,10 @@ export const nonJobProcedure = t.procedure.use(async (opts) => {
     });
   }
 
-  if (isJobToken(opts.ctx.auth)) {
+  if (isRunToken(opts.ctx.auth)) {
     throw new TRPCError({
       code: 'FORBIDDEN',
-      message: 'This endpoint is not available to job tokens',
+      message: 'This endpoint is not available to run tokens',
     });
   }
 
@@ -71,58 +71,58 @@ export const nonJobProcedure = t.procedure.use(async (opts) => {
 });
 
 /**
- * Procedure builder with cloudJobId enforcement. When a job token is used,
- * validates that the input's cloudJobId matches the token's cloudJobId.
- * Auth token callers are restricted to jobs that exist in this deployment.
+ * Procedure builder with runId enforcement. When a run token is used,
+ * validates that the input's runId matches the token's runId.
+ * Auth token callers are restricted to runs that exist in this deployment.
  *
  * @param schema - Zod schema for the input
- * @param extractJobId - Field name or extractor function to get cloudJobId from input
+ * @param extractRunId - Field name or extractor function to get runId from input
  */
-export function jobScoped<T extends z.ZodType>(
+export function runScoped<T extends z.ZodType>(
   schema: T,
-  extractJobId: keyof z.infer<T> | ((input: z.infer<T>) => number),
+  extractRunId: keyof z.infer<T> | ((input: z.infer<T>) => number),
 ) {
   return authenticatedProcedure
     .input(schema)
     .use(async ({ ctx, input, next }) => {
       const targetId = (
-        typeof extractJobId === 'function'
-          ? extractJobId(input)
-          : (input as Record<string, unknown>)[extractJobId as string]
+        typeof extractRunId === 'function'
+          ? extractRunId(input)
+          : (input as Record<string, unknown>)[extractRunId as string]
       ) as number;
 
-      if (isJobToken(ctx.auth)) {
-        const cloudJobId = ctx.auth.cloudJobId;
+      if (isRunToken(ctx.auth)) {
+        const runId = ctx.auth.runId;
 
-        if (targetId !== cloudJobId) {
+        if (targetId !== runId) {
           throw new TRPCError({
             code: 'FORBIDDEN',
-            message: 'Cannot access resources from a different job',
+            message: 'Cannot access resources from a different run',
           });
         }
 
-        const scopedJob = await findCloudJobByJobTokenClaims(ctx.auth);
+        const scopedRun = await findTaskRunByRunTokenClaims(ctx.auth);
 
-        if (!scopedJob) {
+        if (!scopedRun) {
           throw new TRPCError({
             code: 'FORBIDDEN',
-            message: 'Cannot access resources from a different job',
+            message: 'Cannot access resources from a different run',
           });
         }
 
-        return next({ ctx: { ...ctx, cloudJobId } });
+        return next({ ctx: { ...ctx, runId } });
       }
 
-      const scopedJob = await findCloudJobForAccess(targetId);
+      const scopedRun = await findTaskRunForAccess(targetId);
 
-      if (!scopedJob) {
+      if (!scopedRun) {
         throw new TRPCError({
           code: 'FORBIDDEN',
-          message: 'Cannot access resources for an unknown job',
+          message: 'Cannot access resources for an unknown run',
         });
       }
 
-      return next({ ctx: { ...ctx, cloudJobId: targetId } });
+      return next({ ctx: { ...ctx, runId: targetId } });
     });
 }
 

@@ -10,7 +10,7 @@ import {
 } from '@/components/system';
 import { TaskSidePanelDesktop } from './sidebar-panels/TaskSidePanel';
 
-import type { CloudSession, GitDiffResponse } from './hooks';
+import type { TaskSession, GitDiffResponse } from './hooks';
 
 import { useTaskSidePanel } from './hooks/use-task-side-panel';
 
@@ -22,7 +22,7 @@ interface DiffPanelProps {
 }
 
 interface PreviewPaneLayoutProps {
-  session: CloudSession;
+  session: TaskSession;
   children: ReactNode;
   diffPanel?: DiffPanelProps;
 }

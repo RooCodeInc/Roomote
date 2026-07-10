@@ -15,16 +15,16 @@ type AnalyticsShellItemId = AnalyticsObject;
 
 export function getAnalyticsHref(itemId: AnalyticsShellItemId) {
   switch (itemId) {
-    case 'pullRequests':
-      return '/analytics';
     case 'tasks':
-      return '/analytics?object=tasks';
+      return '/analytics';
+    case 'pullRequests':
+      return '/analytics?object=pullRequests';
   }
 }
 
 const ANALYTICS_SHELL_ITEMS = [
-  { id: 'pullRequests', label: 'PRs', icon: GitPullRequest },
   { id: 'tasks', label: 'Tasks', icon: ChartColumnIncreasing },
+  { id: 'pullRequests', label: 'PRs', icon: GitPullRequest },
 ] as const satisfies Array<{
   id: AnalyticsObject;
   label: string;
@@ -56,7 +56,7 @@ export function AnalyticsShell({
   const resolvedActiveItemId =
     (items.some((item) => item.id === activeItemId)
       ? activeItemId
-      : items[0]?.id) ?? 'pullRequests';
+      : items[0]?.id) ?? 'tasks';
 
   return (
     <PageNavigationShell

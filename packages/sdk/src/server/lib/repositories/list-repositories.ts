@@ -1,18 +1,16 @@
 import type {
   AuthTokenContext,
-  JobTokenContext,
+  RunTokenContext,
   SourceControlProvider,
 } from '@roomote/types';
 import { db, repositories, eq, and } from '@roomote/db/server';
 
 export const listRepositories = (
-  auth: AuthTokenContext | JobTokenContext,
+  auth: AuthTokenContext | RunTokenContext,
   input?: { sourceControlProvider?: SourceControlProvider },
 ) => {
-  if (!auth.userId) {
-    throw new Error('Invalid authorization token.');
-  }
-
+  // Repositories are deployment-scoped: any authenticated principal may
+  // read them, including deployment-service-principal run tokens.
   return db.query.repositories.findMany({
     where: input?.sourceControlProvider
       ? and(

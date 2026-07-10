@@ -111,7 +111,7 @@ function createManager(
     sandboxTimeoutMs?: number;
     sandboxExpiresAtMs?: number;
     nativeTurnSteering?: boolean;
-    cloudJobId?: number;
+    runId?: number;
     taskId?: string | null;
   } & HarnessManagerCallbacks = {},
 ) {
@@ -127,7 +127,7 @@ function createManager(
     sandboxTimeoutMs,
     sandboxExpiresAtMs,
     nativeTurnSteering,
-    cloudJobId,
+    runId,
     taskId,
     ...callbacks
   } = options;
@@ -141,7 +141,7 @@ function createManager(
     keepaliveMs,
     sandboxTimeoutMs,
     sandboxExpiresAtMs,
-    cloudJobId,
+    runId,
     taskId,
     logger,
     callbacks,
@@ -415,6 +415,231 @@ describe('HarnessManager reorderQueuedMessage', () => {
   });
 });
 
+describe('HarnessManager phase reporting', () => {
+  function startAndSettleTask(
+    harness: FakeHarness,
+    manager: HarnessManager,
+    taskId = 'task-phase-1',
+  ) {
+    manager.initializeWithoutPrompt();
+    manager.startNewTaskFromPrompt({ prompt: 'hello' });
+    harness.emitTaskEvent({
+      eventName: TaskEventName.TaskStarted,
+      payload: [taskId],
+    } as TaskEvent);
+    harness.emitTaskEvent({
+      eventName: TaskEventName.TaskCompleted,
+      payload: [taskId],
+    } as TaskEvent);
+    expect(manager.getStatus().phase).toBe('waiting_for_prompt');
+    return taskId;
+  }
+
+  it('promotes a settled task back to running when a user prompt starts a turn', () => {
+    const { harness, manager } = createManager();
+
+    try {
+      const taskId = startAndSettleTask(harness, manager);
+
+      // A drained queue follow-up / steered replay / question answer is
+      // delivered as a user_prompt runtime event without going through
+      // startNewTask or sendFollowUpPrompt.
+      harness.emitRuntimeOutput({
+        id: `${taskId}:prompt-1`,
+        ts: 10,
+        eventType: ACP_ENVELOPE_EVENT_TYPES.UserPrompt,
+        kind: 'text',
+        role: 'user',
+        contentBlocks: [{ type: 'text', text: 'drained follow-up' }],
+        metadata: { sessionId: taskId, sequence: 2 },
+        payload: { sessionId: taskId, text: 'drained follow-up' },
+      } as AcpMessage);
+
+      expect(manager.getStatus().phase).toBe('running');
+    } finally {
+      manager.dispose();
+      harness.dispose();
+    }
+  });
+
+  it('does not promote past a pending question on a user prompt event', () => {
+    const { harness, manager } = createManager();
+
+    try {
+      const taskId = 'task-phase-question';
+      manager.initializeWithoutPrompt();
+      manager.startNewTaskFromPrompt({ prompt: 'hello' });
+      harness.emitTaskEvent({
+        eventName: TaskEventName.TaskStarted,
+        payload: [taskId],
+      } as TaskEvent);
+      // The real harness populates its pending-request map when it emits a
+      // RequestUserInput event; mirror that so getPendingUserInputRequests
+      // reflects a genuinely blocked turn.
+      harness.pendingUserInputRequests = [
+        {
+          requestId: `rui:${taskId}:turn-1:call-1`,
+          sessionId: taskId,
+          turnId: 'turn-1',
+          callId: 'call-1',
+          status: 'pending',
+          questions: [],
+          ts: 1,
+        },
+      ];
+      harness.emitRuntimeOutput({
+        id: `${taskId}:rui-1`,
+        ts: 5,
+        eventType: ACP_ENVELOPE_EVENT_TYPES.RequestUserInput,
+        kind: 'unknown',
+        role: 'assistant',
+        contentBlocks: [],
+        metadata: { sessionId: taskId, sequence: 1 },
+        payload: {
+          requestId: `rui:${taskId}:turn-1:call-1`,
+          sessionId: taskId,
+          turnId: 'turn-1',
+          callId: 'call-1',
+          status: 'pending',
+          questions: [],
+        },
+      } as AcpMessage);
+      expect(manager.getStatus().phase).toBe('waiting_for_user_input');
+
+      // A user_prompt arrives while the question is still genuinely
+      // pending: the phase must stay blocked.
+      harness.emitRuntimeOutput({
+        id: `${taskId}:prompt-1`,
+        ts: 10,
+        eventType: ACP_ENVELOPE_EVENT_TYPES.UserPrompt,
+        kind: 'text',
+        role: 'user',
+        contentBlocks: [{ type: 'text', text: 'unrelated' }],
+        metadata: { sessionId: taskId, sequence: 2 },
+        payload: { sessionId: taskId, text: 'unrelated' },
+      } as AcpMessage);
+
+      expect(manager.getStatus().phase).toBe('waiting_for_user_input');
+    } finally {
+      manager.dispose();
+      harness.dispose();
+    }
+  });
+
+  it('promotes out of waiting_for_user_input when the question is cleared before the replayed prompt', () => {
+    const { harness, manager } = createManager();
+
+    try {
+      const taskId = 'task-phase-steer-replay';
+      manager.initializeWithoutPrompt();
+      manager.startNewTaskFromPrompt({ prompt: 'hello' });
+      harness.emitTaskEvent({
+        eventName: TaskEventName.TaskStarted,
+        payload: [taskId],
+      } as TaskEvent);
+      harness.pendingUserInputRequests = [
+        {
+          requestId: `rui:${taskId}:turn-1:call-1`,
+          sessionId: taskId,
+          status: 'pending',
+          questions: [],
+          ts: 1,
+        },
+      ];
+      harness.emitRuntimeOutput({
+        id: `${taskId}:rui-1`,
+        ts: 5,
+        eventType: ACP_ENVELOPE_EVENT_TYPES.RequestUserInput,
+        kind: 'unknown',
+        role: 'assistant',
+        contentBlocks: [],
+        metadata: { sessionId: taskId, sequence: 1 },
+        payload: {
+          requestId: `rui:${taskId}:turn-1:call-1`,
+          sessionId: taskId,
+          status: 'pending',
+          questions: [],
+        },
+      } as AcpMessage);
+      expect(manager.getStatus().phase).toBe('waiting_for_user_input');
+
+      // The auto-steer abort-and-replay abandons the question (the harness
+      // clears its pending map) and then drains the steered prompt as a
+      // user_prompt. The phase must promote back to running.
+      harness.pendingUserInputRequests = [];
+      harness.emitRuntimeOutput({
+        id: `${taskId}:prompt-steer`,
+        ts: 10,
+        eventType: ACP_ENVELOPE_EVENT_TYPES.UserPrompt,
+        kind: 'text',
+        role: 'user',
+        contentBlocks: [{ type: 'text', text: 'steer while blocked' }],
+        metadata: { sessionId: taskId, sequence: 2 },
+        payload: { sessionId: taskId, text: 'steer while blocked' },
+      } as AcpMessage);
+
+      expect(manager.getStatus().phase).toBe('running');
+    } finally {
+      manager.dispose();
+      harness.dispose();
+    }
+  });
+
+  it('reports waiting_for_user_input instead of running when a follow-up is sent behind a pending question', () => {
+    const { harness, manager } = createManager();
+
+    try {
+      const taskId = 'task-phase-blocked';
+      manager.initializeWithoutPrompt();
+      manager.startNewTaskFromPrompt({ prompt: 'hello' });
+      harness.emitTaskEvent({
+        eventName: TaskEventName.TaskStarted,
+        payload: [taskId],
+      } as TaskEvent);
+      expect(manager.getStatus().phase).toBe('running');
+
+      harness.pendingUserInputRequests = [
+        {
+          requestId: `rui:${taskId}:turn-1:call-1`,
+          sessionId: taskId,
+          turnId: 'turn-1',
+          callId: 'call-1',
+          status: 'pending',
+          questions: [],
+          ts: 1,
+        },
+      ];
+
+      const sent = manager.sendFollowUpPrompt({
+        prompt: 'steer while blocked',
+        autoSteerWhenQueued: true,
+      });
+
+      expect(sent).toBe(true);
+      expect(manager.getStatus().phase).toBe('waiting_for_user_input');
+    } finally {
+      manager.dispose();
+      harness.dispose();
+    }
+  });
+
+  it('still promotes a settled task to running for a follow-up with no pending question', () => {
+    const { harness, manager } = createManager();
+
+    try {
+      startAndSettleTask(harness, manager, 'task-phase-follow-up');
+
+      const sent = manager.sendFollowUpPrompt({ prompt: 'more work' });
+
+      expect(sent).toBe(true);
+      expect(manager.getStatus().phase).toBe('running');
+    } finally {
+      manager.dispose();
+      harness.dispose();
+    }
+  });
+});
+
 describe('HarnessManager cancelTask', () => {
   it('cancels while running even before sessionId is known', () => {
     const { harness, manager, logger } = createManager();
@@ -436,6 +661,45 @@ describe('HarnessManager cancelTask', () => {
       expect(logger.warn).not.toHaveBeenCalledWith(
         '[HarnessManager#cancelTask] No active task',
       );
+    } finally {
+      manager.dispose();
+      harness.dispose();
+    }
+  });
+
+  it('forwards user-stop attribution to the harness cancel command', () => {
+    const { harness, manager } = createManager();
+
+    try {
+      manager.initializeWithoutPrompt();
+      manager.startNewTaskFromPrompt({ prompt: 'hello' });
+
+      manager.cancelTask({
+        cancelledBy: { name: 'Daniel', source: 'web' },
+      });
+
+      expect(harness.sentCommands.at(-1)).toMatchObject({
+        commandName: TaskCommandName.CancelTask,
+        data: { cancelledBy: { name: 'Daniel', source: 'web' } },
+      });
+    } finally {
+      manager.dispose();
+      harness.dispose();
+    }
+  });
+
+  it('sends the cancel command without data when no attribution is given', () => {
+    const { harness, manager } = createManager();
+
+    try {
+      manager.initializeWithoutPrompt();
+      manager.startNewTaskFromPrompt({ prompt: 'hello' });
+
+      manager.cancelTask();
+
+      const command = harness.sentCommands.at(-1);
+      expect(command?.commandName).toBe(TaskCommandName.CancelTask);
+      expect(command).not.toHaveProperty('data');
     } finally {
       manager.dispose();
       harness.dispose();
@@ -2316,7 +2580,7 @@ describe('HarnessManager touchKeepalive', () => {
 describe('HarnessManager error status', () => {
   it('shuts down when the harness disconnects during an active task', async () => {
     const { harness, manager } = createManager({
-      cloudJobId: 51,
+      runId: 51,
       taskId: 'task-harness-disconnect',
     });
     const onStateChange = vi.fn();
@@ -2351,7 +2615,7 @@ describe('HarnessManager error status', () => {
       expect(captureWorkerMessageMock).toHaveBeenCalledWith(
         'Harness exhausted reconnect attempts and is shutting down the sandbox runtime',
         expect.objectContaining({
-          cloudJobId: 51,
+          runId: 51,
           taskId: 'task-harness-disconnect',
           runtimeTaskId: 'task-disconnect',
           taskPhase: 'running',

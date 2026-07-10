@@ -74,7 +74,11 @@ export const answerUserInputRequest = publicProcedure
   )
   .mutation(async ({ input, ctx }) => {
     const userId =
-      ctx.auth && 'userId' in ctx.auth ? ctx.auth.userId : undefined;
+      // Deployment-principal run tokens have a null userId; treat them as no
+      // acting user rather than fabricating one.
+      ctx.auth && 'userId' in ctx.auth
+        ? (ctx.auth.userId ?? undefined)
+        : undefined;
 
     const canDeliver = (await ctx.prepareActorScopedTurn?.(userId)) !== false;
 
@@ -103,7 +107,7 @@ export const answerUserInputRequest = publicProcedure
 
     try {
       trackedSlackQuote = await trackLatestUserMessageForSlackThreadQuote({
-        cloudJobId: ctx.cloudJobId,
+        runId: ctx.runId,
         text: formatRequestUserInputResponseText(pendingRequest ?? null, {
           resolution: getRequestUserInputResponseResolution(input.answers),
           answers: input.answers,
@@ -131,7 +135,7 @@ export const answerUserInputRequest = publicProcedure
     } catch (error) {
       if (trackedSlackQuote) {
         await clearLatestUserMessageForSlackThreadQuote({
-          cloudJobId: ctx.cloudJobId,
+          runId: ctx.runId,
           logPrefix: 'answerUserInputRequest',
           warn: (message) => ctx.harnessLogger?.warn(message),
         });

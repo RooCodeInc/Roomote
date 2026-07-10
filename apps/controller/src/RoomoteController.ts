@@ -1,12 +1,13 @@
 import { type ComputeProvider } from '@roomote/types';
 import { Env } from '@roomote/env';
 import {
-  type CloudJob,
+  type TaskRun,
   resolveComputeProviderEnvValues,
 } from '@roomote/db/server';
 
 import { BaseController } from './BaseController';
 import {
+  cleanupStaleDockerSandboxes,
   spawnDaytonaWorker,
   spawnDockerWorker,
   spawnE2bWorker,
@@ -14,6 +15,8 @@ import {
 } from './compute-providers';
 
 export class RoomoteController extends BaseController {
+  private dockerCleanupInterval?: NodeJS.Timeout;
+
   public constructor(
     protected readonly appEnv: 'development' | 'preview' | 'production',
   ) {
@@ -55,7 +58,7 @@ export class RoomoteController extends BaseController {
   }
 
   protected async spawnFreshWorker(
-    cloudJob: CloudJob,
+    taskRun: TaskRun,
     authToken: string,
     deploymentSlug: string,
     timeoutMs: number,
@@ -86,7 +89,7 @@ export class RoomoteController extends BaseController {
           );
         }
 
-        await spawnModalWorker(cloudJob, authToken, {
+        await spawnModalWorker(taskRun, authToken, {
           deploymentSlug: deploymentSlug,
           modalTags: this.buildSandboxTags(),
           modalTokenId,
@@ -106,11 +109,19 @@ export class RoomoteController extends BaseController {
         return;
       }
       case 'docker': {
-        await spawnDockerWorker(cloudJob, authToken, {
+        await spawnDockerWorker(taskRun, authToken, {
           image: Env.DOCKER_WORKER_IMAGE,
           platform: Env.DOCKER_WORKER_PLATFORM,
           network: Env.DOCKER_WORKER_NETWORK,
           dockerTimeoutMs: timeoutMs,
+          cpuLimit: Env.DOCKER_WORKER_CPU_LIMIT,
+          memoryLimit: Env.DOCKER_WORKER_MEMORY_LIMIT,
+          pidsLimit: Env.DOCKER_WORKER_PIDS_LIMIT,
+          diskLimit: Env.DOCKER_WORKER_DISK_LIMIT,
+          allowUnboundedDisk: Env.DOCKER_WORKER_ALLOW_UNBOUNDED_DISK,
+          logMaxSize: Env.DOCKER_WORKER_LOG_MAX_SIZE,
+          logMaxFiles: Env.DOCKER_WORKER_LOG_MAX_FILES,
+          egressPolicy: Env.DOCKER_WORKER_EGRESS_POLICY,
           localWorkerReleasePath: this.localWorkerReleasePath,
           deploymentSlug: deploymentSlug,
         });
@@ -132,7 +143,7 @@ export class RoomoteController extends BaseController {
           );
         }
 
-        await spawnDaytonaWorker(cloudJob, authToken, {
+        await spawnDaytonaWorker(taskRun, authToken, {
           deploymentSlug: deploymentSlug,
           daytonaTags: this.buildSandboxTags(),
           daytonaApiKey,
@@ -156,7 +167,7 @@ export class RoomoteController extends BaseController {
           throw new Error('E2B_TEMPLATE_ID is required to spawn E2B workers');
         }
 
-        await spawnE2bWorker(cloudJob, authToken, {
+        await spawnE2bWorker(taskRun, authToken, {
           deploymentSlug: deploymentSlug,
           e2bTags: this.buildSandboxTags(),
           e2bApiKey,
@@ -164,7 +175,7 @@ export class RoomoteController extends BaseController {
           e2bTemplateId,
           // E2B rejects sandbox timeouts above the plan's lifetime cap, so
           // clamp to the configured ceiling; sleep-check's provider-timeout
-          // backstop reads the real deadline and winds the job down first.
+          // backstop reads the real deadline and winds the task run down first.
           e2bTimeoutMs: Math.min(timeoutMs, Env.E2B_MAX_SANDBOX_TIMEOUT_MS),
           localTarballPath: this.localWorkerReleasePath,
         });
@@ -181,5 +192,35 @@ export class RoomoteController extends BaseController {
     return {
       app_environment: this.appEnv,
     };
+  }
+
+  // Reaping is best-effort: a transient Docker daemon or control-network
+  // error (for example a rolling deploy replacing the API container) must not
+  // crash the controller, especially not during startup.
+  private async cleanStaleDockerSandboxes(): Promise<void> {
+    try {
+      await cleanupStaleDockerSandboxes({
+        controlNetwork: Env.DOCKER_WORKER_NETWORK,
+      });
+    } catch (error) {
+      console.error(
+        `[RoomoteController] Failed to clean stale Docker sandboxes: ${error instanceof Error ? error.message : String(error)}`,
+      );
+    }
+  }
+
+  protected override async setup(): Promise<void> {
+    await this.cleanStaleDockerSandboxes();
+    this.dockerCleanupInterval = setInterval(() => {
+      void this.cleanStaleDockerSandboxes();
+    }, 60_000);
+    this.dockerCleanupInterval.unref();
+  }
+
+  protected override async teardown(): Promise<void> {
+    if (this.dockerCleanupInterval) {
+      clearInterval(this.dockerCleanupInterval);
+      this.dockerCleanupInterval = undefined;
+    }
   }
 }

@@ -1,5 +1,5 @@
 import { Hono } from 'hono';
-import type { AuthTokenContext, JobTokenContext } from '@roomote/types';
+import type { AuthTokenContext, RunTokenContext } from '@roomote/types';
 
 import type { Variables } from '../../../types';
 
@@ -20,15 +20,19 @@ const {
 vi.mock('@roomote/db/server', () => ({
   db: {
     query: {
-      cloudJobs: { findFirst: vi.fn() },
+      taskRuns: { findFirst: vi.fn() },
+      tasks: { findFirst: vi.fn() },
       slackInstallations: { findFirst: vi.fn() },
       taskArtifacts: { findMany: vi.fn() },
     },
   },
-  cloudJobs: { id: 'id' },
+  taskRuns: { id: 'id' },
+  tasks: { id: 'id' },
   slackInstallations: { orgId: 'orgId', isActive: 'isActive' },
   taskArtifacts: { id: 'id' },
   eq: vi.fn(),
+  desc: vi.fn(),
+  isVisibleTask: vi.fn(() => ({})),
   and: vi.fn(),
   inArray: vi.fn(),
 }));
@@ -110,27 +114,28 @@ async function postChannelMessage(
   });
 }
 
-function mockCloudJob(
+function mockTaskRun(
   overrides: Partial<{
     id: number;
     orgId: string;
-    userId: string | null;
+    actingUserId: string | null;
     taskId: string;
   }> = {},
 ) {
   return {
     id: 42,
-    userId: 'user-1',
+    actingUserId: 'user-1',
     taskId: 'task-1',
     ...overrides,
   };
 }
 
 describe('slack channel post MCP endpoint', () => {
-  const jobToken: JobTokenContext = {
-    cloudJobId: 42,
+  const runToken: RunTokenContext = {
+    runId: 42,
     userId: 'user-1',
-    tokenType: 'cj',
+    principal: 'user',
+    tokenType: 'run',
     version: 1,
   };
 
@@ -146,7 +151,7 @@ describe('slack channel post MCP endpoint', () => {
     isAppInChannelMock.mockResolvedValue(true);
   });
 
-  it('rejects non-job tokens', async () => {
+  it('rejects non-run tokens', async () => {
     const authToken: AuthTokenContext = {
       userId: 'user-1',
       tokenType: 'auth',
@@ -161,16 +166,16 @@ describe('slack channel post MCP endpoint', () => {
 
     expect(response.status).toBe(403);
     expect(body.error).toBe(
-      'Slack channel post MCP is only available for cloud job tokens',
+      'Slack channel post MCP is only available for task run tokens',
     );
   });
 
   it('rejects invalid channel formats', async () => {
-    vi.mocked(db.query.cloudJobs.findFirst).mockResolvedValue(
-      mockCloudJob() as never,
+    vi.mocked(db.query.taskRuns.findFirst).mockResolvedValue(
+      mockTaskRun() as never,
     );
 
-    const response = await postChannelMessage(jobToken, {
+    const response = await postChannelMessage(runToken, {
       channel: 'eng room',
       text: 'hello',
     });
@@ -183,11 +188,11 @@ describe('slack channel post MCP endpoint', () => {
   });
 
   it('rejects direct-message IDs', async () => {
-    vi.mocked(db.query.cloudJobs.findFirst).mockResolvedValue(
-      mockCloudJob() as never,
+    vi.mocked(db.query.taskRuns.findFirst).mockResolvedValue(
+      mockTaskRun() as never,
     );
 
-    const response = await postChannelMessage(jobToken, {
+    const response = await postChannelMessage(runToken, {
       channel: 'D123ABC456',
       text: 'hello',
     });
@@ -200,11 +205,11 @@ describe('slack channel post MCP endpoint', () => {
   });
 
   it('rejects lowercase direct-message IDs', async () => {
-    vi.mocked(db.query.cloudJobs.findFirst).mockResolvedValue(
-      mockCloudJob() as never,
+    vi.mocked(db.query.taskRuns.findFirst).mockResolvedValue(
+      mockTaskRun() as never,
     );
 
-    const response = await postChannelMessage(jobToken, {
+    const response = await postChannelMessage(runToken, {
       channel: 'd123abc456',
       text: 'hello',
     });
@@ -217,15 +222,15 @@ describe('slack channel post MCP endpoint', () => {
   });
 
   it('accepts raw channel IDs', async () => {
-    vi.mocked(db.query.cloudJobs.findFirst).mockResolvedValue(
-      mockCloudJob() as never,
+    vi.mocked(db.query.taskRuns.findFirst).mockResolvedValue(
+      mockTaskRun() as never,
     );
     vi.mocked(db.query.slackInstallations.findFirst).mockResolvedValue({
       botAccessToken: 'xoxb-test',
     } as never);
     resolveChannelIdMock.mockResolvedValueOnce('C123ABC456');
 
-    const response = await postChannelMessage(jobToken, {
+    const response = await postChannelMessage(runToken, {
       channel: 'C123ABC456',
       text: 'hello',
     });
@@ -243,9 +248,60 @@ describe('slack channel post MCP endpoint', () => {
     });
   });
 
+  it('posts with a token minted for user A after the acting user switched to user B', async () => {
+    // Web steer / follow-up delivery mutate task_runs.actingUserId mid-run;
+    // the run-scoped token stays authorized (the token's userId is mint-time
+    // attribution and is never compared against the mutable acting user).
+    vi.mocked(db.query.taskRuns.findFirst).mockResolvedValue(
+      mockTaskRun({ actingUserId: 'user-2' }) as never,
+    );
+    vi.mocked(db.query.slackInstallations.findFirst).mockResolvedValue({
+      botAccessToken: 'xoxb-test',
+    } as never);
+    resolveChannelIdMock.mockResolvedValueOnce('C123ABC456');
+
+    const response = await postChannelMessage(runToken, {
+      channel: 'C123ABC456',
+      text: 'closeout message',
+    });
+
+    expect(response.status).toBe(200);
+    expect(postMessageMock).toHaveBeenCalled();
+  });
+
+  it('posts with a deployment-principal token after a human became the acting user', async () => {
+    // A human replying in the thread of an automation run switches the acting
+    // user from null to that human; the run-scoped null-principal token must
+    // keep working so the automation can still post its Slack closeout.
+    vi.mocked(db.query.taskRuns.findFirst).mockResolvedValue(
+      mockTaskRun({ actingUserId: 'user-2' }) as never,
+    );
+    vi.mocked(db.query.slackInstallations.findFirst).mockResolvedValue({
+      botAccessToken: 'xoxb-test',
+    } as never);
+    resolveChannelIdMock.mockResolvedValueOnce('C123ABC456');
+
+    const response = await postChannelMessage(
+      {
+        runId: 42,
+        userId: null,
+        principal: 'deployment',
+        tokenType: 'run',
+        version: 1,
+      },
+      {
+        channel: 'C123ABC456',
+        text: 'automation closeout',
+      },
+    );
+
+    expect(response.status).toBe(200);
+    expect(postMessageMock).toHaveBeenCalled();
+  });
+
   it('passes markdown tables through channel posts unchanged', async () => {
-    vi.mocked(db.query.cloudJobs.findFirst).mockResolvedValue(
-      mockCloudJob() as never,
+    vi.mocked(db.query.taskRuns.findFirst).mockResolvedValue(
+      mockTaskRun() as never,
     );
     vi.mocked(db.query.slackInstallations.findFirst).mockResolvedValue({
       botAccessToken: 'xoxb-test',
@@ -259,7 +315,7 @@ describe('slack channel post MCP endpoint', () => {
       '| Slack CTA | in progress |',
     ].join('\n');
 
-    const response = await postChannelMessage(jobToken, {
+    const response = await postChannelMessage(runToken, {
       channel: 'C123ABC456',
       text: tableText,
     });
@@ -276,15 +332,15 @@ describe('slack channel post MCP endpoint', () => {
   });
 
   it('accepts lowercase raw channel IDs', async () => {
-    vi.mocked(db.query.cloudJobs.findFirst).mockResolvedValue(
-      mockCloudJob() as never,
+    vi.mocked(db.query.taskRuns.findFirst).mockResolvedValue(
+      mockTaskRun() as never,
     );
     vi.mocked(db.query.slackInstallations.findFirst).mockResolvedValue({
       botAccessToken: 'xoxb-test',
     } as never);
     resolveChannelIdMock.mockResolvedValueOnce('C123ABC456');
 
-    const response = await postChannelMessage(jobToken, {
+    const response = await postChannelMessage(runToken, {
       channel: 'c123abc456',
       text: 'hello',
     });
@@ -303,15 +359,15 @@ describe('slack channel post MCP endpoint', () => {
   });
 
   it('accepts Slack channel mentions', async () => {
-    vi.mocked(db.query.cloudJobs.findFirst).mockResolvedValue(
-      mockCloudJob() as never,
+    vi.mocked(db.query.taskRuns.findFirst).mockResolvedValue(
+      mockTaskRun() as never,
     );
     vi.mocked(db.query.slackInstallations.findFirst).mockResolvedValue({
       botAccessToken: 'xoxb-test',
     } as never);
     resolveChannelIdMock.mockResolvedValueOnce('C123ABC456');
 
-    const response = await postChannelMessage(jobToken, {
+    const response = await postChannelMessage(runToken, {
       channel: '<#C123ABC456|eng>',
       text: 'hello',
     });
@@ -323,15 +379,15 @@ describe('slack channel post MCP endpoint', () => {
   });
 
   it('accepts lowercase Slack channel mentions', async () => {
-    vi.mocked(db.query.cloudJobs.findFirst).mockResolvedValue(
-      mockCloudJob() as never,
+    vi.mocked(db.query.taskRuns.findFirst).mockResolvedValue(
+      mockTaskRun() as never,
     );
     vi.mocked(db.query.slackInstallations.findFirst).mockResolvedValue({
       botAccessToken: 'xoxb-test',
     } as never);
     resolveChannelIdMock.mockResolvedValueOnce('C123ABC456');
 
-    const response = await postChannelMessage(jobToken, {
+    const response = await postChannelMessage(runToken, {
       channel: '<#c123abc456|eng>',
       text: 'hello',
     });
@@ -343,14 +399,14 @@ describe('slack channel post MCP endpoint', () => {
   });
 
   it('normalizes bare channel names before resolving them', async () => {
-    vi.mocked(db.query.cloudJobs.findFirst).mockResolvedValue(
-      mockCloudJob() as never,
+    vi.mocked(db.query.taskRuns.findFirst).mockResolvedValue(
+      mockTaskRun() as never,
     );
     vi.mocked(db.query.slackInstallations.findFirst).mockResolvedValue({
       botAccessToken: 'xoxb-test',
     } as never);
 
-    const response = await postChannelMessage(jobToken, {
+    const response = await postChannelMessage(runToken, {
       channel: 'eng',
       text: 'hello world',
     });
@@ -362,14 +418,14 @@ describe('slack channel post MCP endpoint', () => {
   });
 
   it('treats c/g-prefixed bare names as channel names, not IDs', async () => {
-    vi.mocked(db.query.cloudJobs.findFirst).mockResolvedValue(
-      mockCloudJob() as never,
+    vi.mocked(db.query.taskRuns.findFirst).mockResolvedValue(
+      mockTaskRun() as never,
     );
     vi.mocked(db.query.slackInstallations.findFirst).mockResolvedValue({
       botAccessToken: 'xoxb-test',
     } as never);
 
-    const response = await postChannelMessage(jobToken, {
+    const response = await postChannelMessage(runToken, {
       channel: 'general',
       text: 'hello world',
     });
@@ -381,15 +437,15 @@ describe('slack channel post MCP endpoint', () => {
   });
 
   it('rejects when the Slack app cannot resolve the channel', async () => {
-    vi.mocked(db.query.cloudJobs.findFirst).mockResolvedValue(
-      mockCloudJob() as never,
+    vi.mocked(db.query.taskRuns.findFirst).mockResolvedValue(
+      mockTaskRun() as never,
     );
     vi.mocked(db.query.slackInstallations.findFirst).mockResolvedValue({
       botAccessToken: 'xoxb-test',
     } as never);
     resolveChannelIdMock.mockResolvedValue(null);
 
-    const response = await postChannelMessage(jobToken, {
+    const response = await postChannelMessage(runToken, {
       channel: '#unknown',
       text: 'hello',
     });
@@ -400,15 +456,15 @@ describe('slack channel post MCP endpoint', () => {
   });
 
   it('rejects channels the Slack app is not a member of', async () => {
-    vi.mocked(db.query.cloudJobs.findFirst).mockResolvedValue(
-      mockCloudJob() as never,
+    vi.mocked(db.query.taskRuns.findFirst).mockResolvedValue(
+      mockTaskRun() as never,
     );
     vi.mocked(db.query.slackInstallations.findFirst).mockResolvedValue({
       botAccessToken: 'xoxb-test',
     } as never);
     isAppInChannelMock.mockResolvedValue(false);
 
-    const response = await postChannelMessage(jobToken, {
+    const response = await postChannelMessage(runToken, {
       channel: '#eng',
       text: 'hello',
     });
@@ -419,14 +475,14 @@ describe('slack channel post MCP endpoint', () => {
   });
 
   it('posts top-level messages to resolved channels', async () => {
-    vi.mocked(db.query.cloudJobs.findFirst).mockResolvedValue(
-      mockCloudJob() as never,
+    vi.mocked(db.query.taskRuns.findFirst).mockResolvedValue(
+      mockTaskRun() as never,
     );
     vi.mocked(db.query.slackInstallations.findFirst).mockResolvedValue({
       botAccessToken: 'xoxb-test',
     } as never);
 
-    const response = await postChannelMessage(jobToken, {
+    const response = await postChannelMessage(runToken, {
       channel: '#eng',
       text: 'hello world',
     });
@@ -445,14 +501,14 @@ describe('slack channel post MCP endpoint', () => {
   });
 
   it('normalizes hashed channel names before resolving them', async () => {
-    vi.mocked(db.query.cloudJobs.findFirst).mockResolvedValue(
-      mockCloudJob() as never,
+    vi.mocked(db.query.taskRuns.findFirst).mockResolvedValue(
+      mockTaskRun() as never,
     );
     vi.mocked(db.query.slackInstallations.findFirst).mockResolvedValue({
       botAccessToken: 'xoxb-test',
     } as never);
 
-    const response = await postChannelMessage(jobToken, {
+    const response = await postChannelMessage(runToken, {
       channel: '#Eng',
       text: 'hello world',
     });
@@ -464,8 +520,8 @@ describe('slack channel post MCP endpoint', () => {
   });
 
   it('posts inside existing threads and includes image blocks', async () => {
-    vi.mocked(db.query.cloudJobs.findFirst).mockResolvedValue(
-      mockCloudJob() as never,
+    vi.mocked(db.query.taskRuns.findFirst).mockResolvedValue(
+      mockTaskRun() as never,
     );
     vi.mocked(db.query.slackInstallations.findFirst).mockResolvedValue({
       botAccessToken: 'xoxb-test',
@@ -474,14 +530,14 @@ describe('slack channel post MCP endpoint', () => {
       {
         id: 'art-1',
         taskId: 'task-1',
-        cloudJobId: 42,
+        runId: 42,
         contentType: 'image/png',
         uploaded: true,
         path: 'screenshots/capture.png',
       },
     ] as never);
 
-    const response = await postChannelMessage(jobToken, {
+    const response = await postChannelMessage(runToken, {
       channel: 'C123',
       threadTs: '111.222',
       images: [{ artifactId: 'art-1' }],
@@ -507,15 +563,15 @@ describe('slack channel post MCP endpoint', () => {
   });
 
   it('rejects threaded channel posts when the Slack thread source message is gone', async () => {
-    vi.mocked(db.query.cloudJobs.findFirst).mockResolvedValue(
-      mockCloudJob() as never,
+    vi.mocked(db.query.taskRuns.findFirst).mockResolvedValue(
+      mockTaskRun() as never,
     );
     vi.mocked(db.query.slackInstallations.findFirst).mockResolvedValue({
       botAccessToken: 'xoxb-test',
     } as never);
     postMessageMock.mockResolvedValue(undefined);
 
-    const response = await postChannelMessage(jobToken, {
+    const response = await postChannelMessage(runToken, {
       channel: 'C123',
       threadTs: '111.222',
       text: 'hello world',
@@ -534,15 +590,15 @@ describe('slack channel post MCP endpoint', () => {
   });
 
   it('returns 502 when Slack does not return a message timestamp', async () => {
-    vi.mocked(db.query.cloudJobs.findFirst).mockResolvedValue(
-      mockCloudJob() as never,
+    vi.mocked(db.query.taskRuns.findFirst).mockResolvedValue(
+      mockTaskRun() as never,
     );
     vi.mocked(db.query.slackInstallations.findFirst).mockResolvedValue({
       botAccessToken: 'xoxb-test',
     } as never);
     postMessageMock.mockResolvedValue(undefined);
 
-    const response = await postChannelMessage(jobToken, {
+    const response = await postChannelMessage(runToken, {
       channel: '#eng',
       text: 'hello',
     });

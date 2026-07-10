@@ -130,8 +130,17 @@ When the router is unsure (confidence < 0.95, workspace remapped, or all-reposit
 - Expect: suggestion claimed atomically (double taps do not double-launch), task launched through normal routing.
 - Assert: DB `agentSuggestionMessages.launchClaimedAt`; state.
 
+## 17. typing-indicator
+
+While a worker reply is being delivered, the bot shows "typing…".
+
+- Drive a running task to post a `send_chat_reply` (or call the MCP thread-reply endpoint directly), OR unit-test the provider: `provider.sendChatAction({ channelId })`.
+- Expect: one or more `sendChatAction` calls with `action: "typing"` for the chat, fired on a ~4s heartbeat that stops the moment delivery finishes. It never fires during the idle/work phase (no worker→API signal exists before the reply is composed).
+- Assert: state `.chatActions` (array of `{ chat_id, action, message_thread_id? }`); the reply message(s) still land even if the typing action errors (best-effort).
+- Note: Telegram auto-clears a chat action after ~5s and when the message lands, so a single short reply shows one brief flash; a long chunked/photo reply re-fires until the last message posts.
+
 ## Known parity gaps (do not file as harness bugs)
 
-- No progress streaming or typing indicator: between the eyes ack and the final reply, the chat is silent by design (current gap).
+- No "still working" indicator during the long silence: the typing indicator is scoped to reply _delivery_, so the gap between the eyes ack and the first reply is unfilled (no worker→API pre-reply signal exists). A status line via `editMessageText` would be a future addition.
 - No free-text routing correction: while a confirmation card is pending, a new message starts a fresh routing flow (and invalidates the old card) instead of being classified as confirm/cancel/correct like Slack.
 - No thread/channel history reads: the Bot API cannot fetch history, so routing sees only the current message and queued follow-ups.

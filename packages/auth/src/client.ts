@@ -1,8 +1,8 @@
 export {
-  type CreateJobTokenOptions,
-  createJobTokenOptionsSchema,
-  validateJobToken,
-} from './job-token';
+  type CreateRunTokenOptions,
+  createRunTokenOptionsSchema,
+  validateRunToken,
+} from './run-token';
 
 export {
   type CreateAuthTokenOptions,

@@ -83,8 +83,13 @@ type SlackChannelMessagesPayload = {
   }>;
 };
 
-type SlackReplyTargetCloudJob = {
-  type: string;
+/**
+ * Slack routing context for a run. Channel bindings live on the tasks row
+ * (`tasks.slackChannelId` / `tasks.slackThreadTs`); the payload keeps its
+ * legacy launch-time channel/thread fields as a fallback.
+ */
+type SlackReplyTargetTaskRun = {
+  slackChannelId?: string | null;
   slackThreadTs: string | null;
   payload: unknown;
   actingUserId?: string | null;
@@ -166,11 +171,12 @@ function normalizeSlackChannelMessages(messages: SlackThreadMessage[]) {
 }
 
 export function getSlackReplyTarget(
-  cloudJob: SlackReplyTargetCloudJob,
+  taskRun: SlackReplyTargetTaskRun,
 ): { channel: string; threadTs?: string } | null {
-  const channel = getSlackChannelFromTaskPayload(cloudJob.payload);
+  const channel =
+    taskRun.slackChannelId ?? getSlackChannelFromTaskPayload(taskRun.payload);
   const threadTs =
-    getSlackThreadTsFromTaskPayload(cloudJob.payload) ?? cloudJob.slackThreadTs;
+    taskRun.slackThreadTs ?? getSlackThreadTsFromTaskPayload(taskRun.payload);
 
   if (channel) {
     return {
@@ -304,7 +310,7 @@ export async function resolveVerifiedSlackChannel(options: {
 
 async function resolveSlackLookupChannel(options: {
   channel?: string;
-  cloudJob?: SlackReplyTargetCloudJob | null;
+  taskRun?: SlackReplyTargetTaskRun | null;
   actingSlackMembershipUserId?: string | null;
   missingChannelError: string;
   missingLinkedAccountErrorMessage?: string;
@@ -312,13 +318,13 @@ async function resolveSlackLookupChannel(options: {
   requirePublicChannel?: boolean;
   publicChannelErrorMessage?: string;
 }): Promise<{ channelId: string; slack: SlackNotifier }> {
-  const slackOriginChannel = options.cloudJob
-    ? (getSlackReplyTarget(options.cloudJob)?.channel ?? null)
+  const slackOriginChannel = options.taskRun
+    ? (getSlackReplyTarget(options.taskRun)?.channel ?? null)
     : null;
-  const actingSlackMembershipUserId = options.cloudJob
-    ? typeof options.cloudJob.actingUserId === 'string' &&
-      options.cloudJob.actingUserId.trim().length > 0
-      ? options.cloudJob.actingUserId
+  const actingSlackMembershipUserId = options.taskRun
+    ? typeof options.taskRun.actingUserId === 'string' &&
+      options.taskRun.actingUserId.trim().length > 0
+      ? options.taskRun.actingUserId
       : null
     : (options.actingSlackMembershipUserId ?? null);
 
@@ -444,7 +450,7 @@ function normalizeSlackTimeBoundary(
 export async function lookupSlackThread(options: {
   messageTs: string;
   channel?: string;
-  cloudJob?: SlackReplyTargetCloudJob | null;
+  taskRun?: SlackReplyTargetTaskRun | null;
   actingSlackMembershipUserId?: string | null;
 }): Promise<SlackThreadLookupPayload> {
   const requestedMessageTs = options.messageTs.trim();
@@ -454,7 +460,7 @@ export async function lookupSlackThread(options: {
 
   const { channelId: lookupChannel, slack } = await resolveSlackLookupChannel({
     channel: options.channel,
-    cloudJob: options.cloudJob,
+    taskRun: options.taskRun,
     actingSlackMembershipUserId: options.actingSlackMembershipUserId,
     missingChannelError:
       'channel is required when Slack thread lookup is not running from a Slack-originated job',
@@ -514,7 +520,7 @@ export async function lookupSlackChannelMessages(options: {
   channel?: string;
   oldest?: string;
   latest?: string;
-  cloudJob?: SlackReplyTargetCloudJob | null;
+  taskRun?: SlackReplyTargetTaskRun | null;
   actingSlackMembershipUserId?: string | null;
 }): Promise<SlackChannelMessagesPayload> {
   const oldestBoundary = normalizeSlackTimeBoundary(options.oldest, 'oldest');
@@ -530,7 +536,7 @@ export async function lookupSlackChannelMessages(options: {
 
   const { channelId, slack } = await resolveSlackLookupChannel({
     channel: options.channel,
-    cloudJob: options.cloudJob,
+    taskRun: options.taskRun,
     actingSlackMembershipUserId: options.actingSlackMembershipUserId,
     missingChannelError:
       'channel is required when Slack channel message lookup is not running from a Slack-originated job',

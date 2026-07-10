@@ -2,8 +2,8 @@ import {
   getScheduledSuggestionBackgroundAutomationDescriptor,
   getTriggerableBackgroundAutomationSettingsHash,
   type TaskSuggestionSource,
-  type TriggerableBackgroundAutomationAgentId,
   type TriggerableBackgroundAutomationDescriptorItem,
+  type TriggerableBackgroundAutomationKey,
 } from '@roomote/types';
 
 type ScheduledSuggestionSummaryPromptConfig = {
@@ -39,13 +39,6 @@ export type ScheduledSuggestionSlackConfig = {
   agentType: ScheduledSuggestionSurfaceConfig['agentType'];
   automationSettingsHash: string;
   actionFooterText: string;
-  managerChannelKind:
-    | 'suggester'
-    | 'sentryTriage'
-    | 'dependabotTriage'
-    | 'securityAuditor'
-    | 'codeQualityAuditor'
-    | 'ciFailureTriage';
   summaryKind: ScheduledSuggestionSurfaceConfig['summaryKind'];
   automationKey:
     | 'suggester'
@@ -59,11 +52,11 @@ export type ScheduledSuggestionSlackConfig = {
 
 const SCHEDULED_SUGGESTION_SURFACE_CONFIG: Record<
   | 'suggester'
-  | 'sentryTriage'
-  | 'dependabotTriage'
-  | 'securityAuditor'
-  | 'codeQualityAuditor'
-  | 'ciFailureTriage',
+  | 'sentry_triage'
+  | 'dependabot_triage'
+  | 'security_auditor'
+  | 'code_quality_auditor'
+  | 'ci_failure_triage',
   ScheduledSuggestionSurfaceConfig
 > = {
   suggester: {
@@ -86,7 +79,7 @@ const SCHEDULED_SUGGESTION_SURFACE_CONFIG: Record<
         'I went looking for follow-up work worth picking up next, and a few ideas stood out as worth doing now.',
     },
   },
-  sentryTriage: {
+  sentry_triage: {
     agentType: 'sentry_triage',
     summaryKind: 'sentry_triage',
     actionFooterText:
@@ -106,7 +99,7 @@ const SCHEDULED_SUGGESTION_SURFACE_CONFIG: Record<
         'I went through Sentry for errors that are actually hitting users, and a few stood out as worth acting on now.',
     },
   },
-  dependabotTriage: {
+  dependabot_triage: {
     agentType: 'dependabot_triage',
     summaryKind: 'dependabot_triage',
     actionFooterText:
@@ -126,7 +119,7 @@ const SCHEDULED_SUGGESTION_SURFACE_CONFIG: Record<
         'I went through the open Dependabot alerts for updates worth taking now, and a few low-risk ones stood out.',
     },
   },
-  securityAuditor: {
+  security_auditor: {
     agentType: 'security_auditor',
     summaryKind: 'security_auditor',
     actionFooterText:
@@ -146,7 +139,7 @@ const SCHEDULED_SUGGESTION_SURFACE_CONFIG: Record<
         'I went through the latest merged PRs for security gaps that could have slipped past review, and a few follow-ups stood out as worth fixing now.',
     },
   },
-  codeQualityAuditor: {
+  code_quality_auditor: {
     agentType: 'code_quality_auditor',
     summaryKind: 'code_quality_auditor',
     actionFooterText:
@@ -167,7 +160,7 @@ const SCHEDULED_SUGGESTION_SURFACE_CONFIG: Record<
         'I went through the latest merged PRs for maintainability issues that get more expensive to fix later, and a few cleanups stood out as worth doing now.',
     },
   },
-  ciFailureTriage: {
+  ci_failure_triage: {
     agentType: 'ci_failure_triage',
     summaryKind: 'ci_failure_triage',
     actionFooterText:
@@ -193,32 +186,22 @@ function isScheduledSuggestionDescriptor(
   descriptor: TriggerableBackgroundAutomationDescriptorItem | null,
 ): descriptor is TriggerableBackgroundAutomationDescriptorItem & {
   scheduledSuggestionSource: TaskSuggestionSource;
-  managerChannelKind:
-    | 'suggester'
-    | 'sentryTriage'
-    | 'dependabotTriage'
-    | 'securityAuditor'
-    | 'codeQualityAuditor';
 } {
-  return Boolean(
-    descriptor &&
-    'scheduledSuggestionSource' in descriptor &&
-    'managerChannelKind' in descriptor,
-  );
+  return Boolean(descriptor && 'scheduledSuggestionSource' in descriptor);
 }
 
 function getScheduledSuggestionSurfaceConfig(
-  agentId: TriggerableBackgroundAutomationAgentId,
+  automationKey: TriggerableBackgroundAutomationKey,
 ) {
   if (
-    agentId === 'suggester' ||
-    agentId === 'sentryTriage' ||
-    agentId === 'dependabotTriage' ||
-    agentId === 'securityAuditor' ||
-    agentId === 'codeQualityAuditor' ||
-    agentId === 'ciFailureTriage'
+    automationKey === 'suggester' ||
+    automationKey === 'sentry_triage' ||
+    automationKey === 'dependabot_triage' ||
+    automationKey === 'security_auditor' ||
+    automationKey === 'code_quality_auditor' ||
+    automationKey === 'ci_failure_triage'
   ) {
-    return SCHEDULED_SUGGESTION_SURFACE_CONFIG[agentId];
+    return SCHEDULED_SUGGESTION_SURFACE_CONFIG[automationKey];
   }
 
   return null;
@@ -237,9 +220,11 @@ export function resolveScheduledSuggestionSlackConfig(
   }
 
   const automationSettingsHash = getTriggerableBackgroundAutomationSettingsHash(
-    descriptor.agentId,
+    descriptor.automationKey,
   );
-  const surfaceConfig = getScheduledSuggestionSurfaceConfig(descriptor.agentId);
+  const surfaceConfig = getScheduledSuggestionSurfaceConfig(
+    descriptor.automationKey,
+  );
 
   if (!automationSettingsHash || !surfaceConfig) {
     throw new Error(
@@ -251,7 +236,6 @@ export function resolveScheduledSuggestionSlackConfig(
     agentType: surfaceConfig.agentType,
     automationSettingsHash,
     actionFooterText: surfaceConfig.actionFooterText,
-    managerChannelKind: descriptor.managerChannelKind,
     summaryKind: surfaceConfig.summaryKind,
     automationKey:
       surfaceConfig.summaryKind === 'suggested_tasks'

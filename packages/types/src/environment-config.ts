@@ -135,9 +135,17 @@ export interface ServiceInfo {
 const toolVersionsSchema = z.record(z.string().min(1), z.string().min(1));
 
 export const environmentRepositoryConfigSchema = z.object({
+  /**
+   * Repository full name as stored in the repositories table. GitHub and
+   * Gitea use owner/repo; GitLab subgroups and Azure DevOps
+   * (organization/project/repo) produce three or more segments.
+   */
   repository: z
     .string()
-    .regex(/^[^/]+\/[^/]+$/, 'Must be in owner/repo format'),
+    .regex(
+      /^[^/]+(?:\/[^/]+)+$/,
+      'Must be a slash-separated repository full name such as owner/repo',
+    ),
   /**
    * Branch to checkout for this repository.
    * If not specified, uses the repository's default branch.

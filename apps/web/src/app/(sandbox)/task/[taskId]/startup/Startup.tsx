@@ -3,42 +3,41 @@
 import { useCallback } from 'react';
 import { SSEProvider } from 'react-hooks-sse';
 
-import { CloudTaskType, type CloudTaskStatus } from '@roomote/types';
-import type { CloudJob } from '@roomote/db';
+import { TaskPayloadKind, type RunStatus } from '@roomote/types';
+import type { TaskRun } from '@roomote/db';
 
-import { useRestoreCloudJobSnapshot } from '@/hooks/snapshots';
-import { getCloudJobError } from '@/lib/cloud-job-errors';
+import { useRestoreTaskRunSnapshot } from '@/hooks/snapshots';
+import { getTaskRunError } from '@/lib/task-run-errors';
 
 import { StartupFailureMessage, StartupSequence } from './StartupMessage';
 import { useStartupProgress } from './useStartupProgress';
 
 interface StartupProps {
-  cloudJobId: number;
-  initialCloudJob?: CloudJob;
-  onStatusChange?: (status: CloudTaskStatus) => void;
+  runId: number;
+  initialTaskRun?: TaskRun;
+  onStatusChange?: (status: RunStatus) => void;
 }
 
 export const Startup = ({
-  cloudJobId,
-  initialCloudJob,
+  runId,
+  initialTaskRun,
   onStatusChange,
 }: StartupProps) => {
   const eventSource = useCallback(() => {
-    const eventSource = new EventSource(
-      `/api/cloud-jobs/${cloudJobId}/stream`,
-      { withCredentials: true },
-    );
+    const eventSource = new EventSource(`/api/task-runs/${runId}/stream`, {
+      withCredentials: true,
+    });
 
     eventSource.addEventListener('error', () => eventSource.close());
 
     return eventSource;
-  }, [cloudJobId]);
+  }, [runId]);
 
   return (
     <SSEProvider source={eventSource}>
       <StartupInner
-        cloudJobId={cloudJobId}
-        initialCloudJob={initialCloudJob}
+        runId={runId}
+        initialTaskRun={initialTaskRun}
         onStatusChange={onStatusChange}
       />
     </SSEProvider>
@@ -46,26 +45,26 @@ export const Startup = ({
 };
 
 interface StartupInnerProps {
-  cloudJobId: number;
-  initialCloudJob?: CloudJob;
-  onStatusChange?: (status: CloudTaskStatus) => void;
+  runId: number;
+  initialTaskRun?: TaskRun;
+  onStatusChange?: (status: RunStatus) => void;
 }
 
 const StartupInner = ({
-  cloudJobId,
-  initialCloudJob,
+  runId,
+  initialTaskRun,
   onStatusChange,
 }: StartupInnerProps) => {
-  const restoreSnapshot = useRestoreCloudJobSnapshot();
+  const restoreSnapshot = useRestoreTaskRunSnapshot();
 
   const { steps, error, showLogs, sandboxLogs, logsConnected, logsError } =
-    useStartupProgress({ cloudJobId, initialCloudJob, onStatusChange });
+    useStartupProgress({ runId, initialTaskRun, onStatusChange });
 
   const canRetryResume =
-    initialCloudJob?.type === CloudTaskType.SnapshotResume &&
-    typeof initialCloudJob.sourceSnapshotId === 'string' &&
-    initialCloudJob.sourceSnapshotId.length > 0 &&
-    typeof initialCloudJob.sourceCloudJobId === 'number';
+    initialTaskRun?.payloadKind === TaskPayloadKind.SnapshotResume &&
+    typeof initialTaskRun.sourceSnapshotId === 'string' &&
+    initialTaskRun.sourceSnapshotId.length > 0 &&
+    typeof initialTaskRun.sourceRunId === 'number';
 
   return (
     <StartupSequence
@@ -79,8 +78,8 @@ const StartupInner = ({
           ? {
               onClick: () =>
                 restoreSnapshot.mutate({
-                  sourceSnapshotId: initialCloudJob.sourceSnapshotId!,
-                  sourceCloudJobId: initialCloudJob.sourceCloudJobId!,
+                  sourceSnapshotId: initialTaskRun.sourceSnapshotId!,
+                  sourceRunId: initialTaskRun.sourceRunId!,
                 }),
               pending: restoreSnapshot.isPending,
             }
@@ -91,39 +90,39 @@ const StartupInner = ({
 };
 
 interface SnapshotResumeFailureFooterProps {
-  cloudJob: Pick<
-    CloudJob,
+  taskRun: Pick<
+    TaskRun,
     | 'error'
     | 'result'
-    | 'sourceCloudJobId'
+    | 'sourceRunId'
     | 'sourceSnapshotId'
     | 'status'
-    | 'type'
+    | 'payloadKind'
   >;
 }
 
 export const SnapshotResumeFailureFooter = ({
-  cloudJob,
+  taskRun,
 }: SnapshotResumeFailureFooterProps) => {
-  const restoreSnapshot = useRestoreCloudJobSnapshot();
+  const restoreSnapshot = useRestoreTaskRunSnapshot();
 
   const canRetryResume =
-    cloudJob.type === CloudTaskType.SnapshotResume &&
-    typeof cloudJob.sourceSnapshotId === 'string' &&
-    cloudJob.sourceSnapshotId.length > 0 &&
-    typeof cloudJob.sourceCloudJobId === 'number';
+    taskRun.payloadKind === TaskPayloadKind.SnapshotResume &&
+    typeof taskRun.sourceSnapshotId === 'string' &&
+    taskRun.sourceSnapshotId.length > 0 &&
+    typeof taskRun.sourceRunId === 'number';
 
   return (
     <StartupFailureMessage
-      status={cloudJob.status}
-      error={getCloudJobError(cloudJob)}
+      status={taskRun.status}
+      error={getTaskRunError(taskRun)}
       retryAction={
         canRetryResume
           ? {
               onClick: () =>
                 restoreSnapshot.mutate({
-                  sourceSnapshotId: cloudJob.sourceSnapshotId!,
-                  sourceCloudJobId: cloudJob.sourceCloudJobId!,
+                  sourceSnapshotId: taskRun.sourceSnapshotId!,
+                  sourceRunId: taskRun.sourceRunId!,
                 }),
               pending: restoreSnapshot.isPending,
             }

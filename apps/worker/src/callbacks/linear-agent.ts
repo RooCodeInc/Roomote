@@ -1,9 +1,9 @@
-import { type CloudTaskPayload, CloudTaskType } from '@roomote/types';
+import { type TaskPayload, TaskPayloadKind } from '@roomote/types';
 import type {
   AgentSessionPlanStep,
   AgentSessionPlanStepStatus,
 } from '@roomote/linear/client';
-import { type CloudJob, sdk } from '@roomote/sdk/client';
+import { type TaskRun, sdk } from '@roomote/sdk/client';
 
 import type {
   CallbackEvent,
@@ -11,6 +11,8 @@ import type {
   RunTaskContext,
 } from '../run-task';
 import { captureWorkerException } from '../monitoring/sentry';
+
+import { getLinearSessionIdFromResumePayload } from '../run-task/linear-resume-payload';
 
 import { getCallbackEventKey } from './utils';
 import {
@@ -24,10 +26,10 @@ import {
 function reportLinearCallbackError(
   error: unknown,
   stage: string,
-  cloudJobId: number,
+  runId: number,
 ): void {
   captureWorkerException(error, {
-    cloudJobId,
+    runId,
     stage,
   });
 }
@@ -102,11 +104,12 @@ function convertTodosToAgentPlan(todos: TodoItem[]): AgentSessionPlanStep[] {
   return result.steps;
 }
 
-function getLinearSessionId(cloudJob: CloudJob): string {
+function getLinearSessionId(taskRun: TaskRun): string {
   // For LinearAgentSession jobs, sessionId is in the payload
-  if (cloudJob.type === CloudTaskType.LinearAgentSession) {
-    const { sessionId } =
-      cloudJob.payload as CloudTaskPayload<CloudTaskType.LinearAgentSession>;
+  if (taskRun.payloadKind === TaskPayloadKind.LinearAgentSession) {
+    const { sessionId } = taskRun.payload as TaskPayload<
+      typeof TaskPayloadKind.LinearAgentSession
+    >;
 
     if (!sessionId) {
       throw new Error('Session ID not found in payload.');
@@ -115,17 +118,20 @@ function getLinearSessionId(cloudJob: CloudJob): string {
     return sessionId;
   }
 
-  // For SnapshotResume jobs with Linear metadata, sessionId is on the job row
-  if (cloudJob.linearSessionId) {
-    return cloudJob.linearSessionId;
+  // For SnapshotResume runs with Linear metadata, the session id rides along
+  // with the queued Linear follow-up messages in the payload.
+  const resumeSessionId = getLinearSessionIdFromResumePayload(taskRun.payload);
+
+  if (resumeSessionId) {
+    return resumeSessionId;
   }
 
-  throw new Error('Cloud job has no Linear session ID');
+  throw new Error('Task run has no Linear session ID');
 }
 
 export const linearAgentCallbacks: RunTaskCallbacks = {
   onStart: async (
-    cloudJob: CloudJob,
+    taskRun: TaskRun,
     taskId: string,
     context: RunTaskContext,
   ) => {
@@ -136,7 +142,7 @@ export const linearAgentCallbacks: RunTaskCallbacks = {
     context.sessionId = taskId;
   },
   onMessage: async (
-    cloudJob: CloudJob,
+    taskRun: TaskRun,
     _taskId: string,
     event: CallbackEvent,
     context: RunTaskContext,
@@ -167,7 +173,7 @@ export const linearAgentCallbacks: RunTaskCallbacks = {
     }
 
     processedEventKeys.add(eventKey);
-    const sessionId = getLinearSessionId(cloudJob);
+    const sessionId = getLinearSessionId(taskRun);
 
     if (event.type === 'reasoning') {
       try {
@@ -176,7 +182,7 @@ export const linearAgentCallbacks: RunTaskCallbacks = {
         reportLinearCallbackError(
           error,
           'linearAgentCallbacks.onMessage.emitReasoning',
-          cloudJob.id,
+          taskRun.id,
         );
         console.error(
           `[linearAgentCallbacks#onMessage] Failed to emit reasoning: ${
@@ -193,7 +199,7 @@ export const linearAgentCallbacks: RunTaskCallbacks = {
         reportLinearCallbackError(
           error,
           'linearAgentCallbacks.onMessage.emitText',
-          cloudJob.id,
+          taskRun.id,
         );
         console.error(
           `[linearAgentCallbacks#onMessage] Failed to emit text: ${
@@ -211,7 +217,7 @@ export const linearAgentCallbacks: RunTaskCallbacks = {
         reportLinearCallbackError(
           error,
           'linearAgentCallbacks.onMessage.emitResponse',
-          cloudJob.id,
+          taskRun.id,
         );
         console.error(
           `[linearAgentCallbacks#onMessage] Failed to emit response: ${
@@ -241,7 +247,7 @@ export const linearAgentCallbacks: RunTaskCallbacks = {
         reportLinearCallbackError(
           error,
           'linearAgentCallbacks.onMessage.emitFollowup',
-          cloudJob.id,
+          taskRun.id,
         );
         console.error(
           `[linearAgentCallbacks#onMessage] Failed to emit followup: ${
@@ -261,7 +267,7 @@ export const linearAgentCallbacks: RunTaskCallbacks = {
 
       try {
         if (!supportsIntegrationRequestUserInput(event.request)) {
-          const taskUrl = buildRequestUserInputTaskUrl(cloudJob, 'linear');
+          const taskUrl = buildRequestUserInputTaskUrl(taskRun, 'linear');
 
           await sdk.linearSessions.emitElicitation(
             sessionId,
@@ -271,11 +277,11 @@ export const linearAgentCallbacks: RunTaskCallbacks = {
           return;
         }
 
-        await sdk.cloudJobs.setPendingLinearRequestUserInput({
-          cloudJobId: cloudJob.id,
+        await sdk.taskRuns.setPendingLinearRequestUserInput({
+          runId: taskRun.id,
           sessionId,
           requestId: event.request.requestId,
-          taskId: cloudJob.taskId,
+          taskId: taskRun.taskId,
           questions: event.request.questions,
         });
 
@@ -304,7 +310,7 @@ export const linearAgentCallbacks: RunTaskCallbacks = {
         reportLinearCallbackError(
           error,
           'linearAgentCallbacks.onMessage.emitRequestUserInput',
-          cloudJob.id,
+          taskRun.id,
         );
         console.error(
           `[linearAgentCallbacks#onMessage] Failed to emit request_user_input: ${
@@ -316,8 +322,8 @@ export const linearAgentCallbacks: RunTaskCallbacks = {
 
     if (event.type === 'request_user_input_response') {
       try {
-        await sdk.cloudJobs.clearPendingLinearRequestUserInput({
-          cloudJobId: cloudJob.id,
+        await sdk.taskRuns.clearPendingLinearRequestUserInput({
+          runId: taskRun.id,
           sessionId,
           requestId: event.response.requestId,
         });
@@ -325,7 +331,7 @@ export const linearAgentCallbacks: RunTaskCallbacks = {
         reportLinearCallbackError(
           error,
           'linearAgentCallbacks.onMessage.clearPendingRequestUserInput',
-          cloudJob.id,
+          taskRun.id,
         );
         console.error(
           `[linearAgentCallbacks#onMessage] Failed to clear request_user_input state: ${
@@ -346,7 +352,7 @@ export const linearAgentCallbacks: RunTaskCallbacks = {
         reportLinearCallbackError(
           error,
           'linearAgentCallbacks.onMessage.emitToolAction',
-          cloudJob.id,
+          taskRun.id,
         );
         console.error(
           `[linearAgentCallbacks#onMessage] Failed to emit tool action: ${
@@ -364,7 +370,7 @@ export const linearAgentCallbacks: RunTaskCallbacks = {
         reportLinearCallbackError(
           error,
           'linearAgentCallbacks.onMessage.updateTodoList',
-          cloudJob.id,
+          taskRun.id,
         );
         console.error(
           `[linearAgentCallbacks#onMessage] Failed to update TODO list: ${
@@ -385,7 +391,7 @@ export const linearAgentCallbacks: RunTaskCallbacks = {
         reportLinearCallbackError(
           error,
           'linearAgentCallbacks.onMessage.emitMcpAction',
-          cloudJob.id,
+          taskRun.id,
         );
         console.error(
           `[linearAgentCallbacks#onMessage] Failed to emit MCP action: ${
@@ -395,17 +401,17 @@ export const linearAgentCallbacks: RunTaskCallbacks = {
       }
     }
   },
-  onExit: async (cloudJob: CloudJob) => {
+  onExit: async (taskRun: TaskRun) => {
     try {
-      await sdk.cloudJobs.clearPendingLinearRequestUserInput({
-        cloudJobId: cloudJob.id,
-        sessionId: getLinearSessionId(cloudJob),
+      await sdk.taskRuns.clearPendingLinearRequestUserInput({
+        runId: taskRun.id,
+        sessionId: getLinearSessionId(taskRun),
       });
     } catch (error) {
       reportLinearCallbackError(
         error,
         'linearAgentCallbacks.onExit.clearPendingRequestUserInput',
-        cloudJob.id,
+        taskRun.id,
       );
       console.error(
         `[linearAgentCallbacks#onExit] Failed to clear pending request_user_input state: ${

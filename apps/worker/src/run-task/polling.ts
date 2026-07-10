@@ -1,8 +1,11 @@
 import {
-  CloudTaskType,
+  TaskPayloadKind,
   getCommunicationProviderFromTaskPayload,
   getSlackChannelFromTaskPayload,
+  getSlackThreadTsFromTaskPayload,
 } from '@roomote/types';
+
+import { getLinearSessionIdFromResumePayload } from './linear-resume-payload';
 
 import type { ListenerOptions, RunTaskState } from './types';
 import {
@@ -14,18 +17,22 @@ import {
 } from './polling/index';
 
 export const startPolling = (options: ListenerOptions) => {
-  const { cloudJob, state, logger } = options;
+  const { taskRun, task, state, logger } = options;
   state.cancelInterval = createCancelInterval(options);
 
+  // Prefer the task channel bindings from the dequeue/resume response; fall
+  // back to payload-derived extraction for payloads that predate them.
   if (
-    cloudJob.slackThreadTs ||
-    getSlackChannelFromTaskPayload(cloudJob.payload)
+    task?.slackThreadTs ||
+    task?.slackChannelId ||
+    getSlackThreadTsFromTaskPayload(taskRun.payload) ||
+    getSlackChannelFromTaskPayload(taskRun.payload)
   ) {
     state.slackMessageInterval = createSlackMessageInterval(options);
   }
 
   const communicationProvider = getCommunicationProviderFromTaskPayload(
-    cloudJob.payload,
+    taskRun.payload,
   );
   if (communicationProvider && communicationProvider !== 'slack') {
     state.communicationMessageIntervals ??= {};
@@ -37,15 +44,18 @@ export const startPolling = (options: ListenerOptions) => {
   }
 
   if (
-    cloudJob.type === CloudTaskType.LinearAgentSession ||
-    (cloudJob.type === CloudTaskType.SnapshotResume &&
-      !!cloudJob.linearSessionId)
+    taskRun.payloadKind === TaskPayloadKind.LinearAgentSession ||
+    (taskRun.payloadKind === TaskPayloadKind.SnapshotResume &&
+      !!(
+        task?.linearSessionId ??
+        getLinearSessionIdFromResumePayload(taskRun.payload)
+      ))
   ) {
     state.linearMessageInterval = createLinearMessageInterval(options);
   }
 
   state.githubTokenRefreshInterval = createGitHubTokenRefreshInterval({
-    cloudJobId: cloudJob.id,
+    runId: taskRun.id,
     logger,
   });
 };

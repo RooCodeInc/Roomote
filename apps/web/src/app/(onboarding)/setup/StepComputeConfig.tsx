@@ -4,9 +4,11 @@ import { Fragment, useEffect, useMemo, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import {
+  deriveModalBaseImageRefDefault,
   getSetupNewComputeProvisioningState,
   isComputeCredentialField,
   isComputeInfrastructureField,
+  isComputeOperatorEditableField,
   isSetupProvisionableComputeProvider,
   type ComputeProvider,
   type SetupComputeStatus,
@@ -19,7 +21,6 @@ import {
   Button,
   Check,
   ChevronDown,
-  EnvVarsInfoNote,
   Input,
   Spinner,
 } from '@/components/system';
@@ -42,7 +43,11 @@ function getNonSecretFieldInitialValues(
   const next: Record<string, string> = {};
 
   for (const field of fields) {
-    if (isSecretComputeField(field) || field.runtimeSatisfied) {
+    if (
+      isSecretComputeField(field) ||
+      field.runtimeSatisfied ||
+      !isComputeOperatorEditableField(field)
+    ) {
       continue;
     }
 
@@ -172,7 +177,8 @@ export function StepComputeConfig({
     } else if (templateBuild?.status === 'failed') {
       setAwaitingTemplateBuild(false);
       toast.error(
-        templateBuild.error ?? 'Provisioning the worker base image failed.',
+        templateBuild.error ??
+          'Failed to prepare the sandbox provider setup. Try saving again.',
       );
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -188,20 +194,29 @@ export function StepComputeConfig({
 
   const credentialFields =
     selectedProvider?.fields.filter(isComputeCredentialField) ?? [];
+  // Operator-editable infrastructure only (Modal base image, domain/region).
+  // Auto-provisioned E2B template / Daytona snapshot IDs are not form inputs.
   const advancedInfraFields =
     selectedProvider?.fields.filter(
-      (field) => isComputeInfrastructureField(field) && !field.runtimeSatisfied,
+      (field) =>
+        isComputeInfrastructureField(field) &&
+        isComputeOperatorEditableField(field) &&
+        !field.runtimeSatisfied,
     ) ?? [];
-  // Hosted providers derive/provision their worker base image from the shared
-  // worker image. Missing or editable worker image values live in the advanced
-  // section instead of the primary credentials step.
+  // Hosted providers derive/provision their worker base image from a
+  // registry-qualified worker image. Missing or editable worker image values
+  // live in the advanced section instead of the primary credentials step.
   const isHostedProvider =
     selectedProvider?.fields.some(isComputeInfrastructureField) ?? false;
   const workerImage = computeSetup.workerImage;
-  const missingHostedWorkerImage =
-    isHostedProvider &&
-    !workerImage.runtimeSatisfied &&
-    !workerImage.hostedReady;
+  const workerImageValue = values[SHARED_WORKER_IMAGE_ENV_VAR]?.trim() ?? '';
+  // Local tags (e.g. roomote-worker:local) satisfy Docker but not E2B/Daytona
+  // provisioning — only registry-qualified refs are hosted-ready.
+  const submittedHostedWorkerImageReady =
+    deriveModalBaseImageRefDefault(workerImageValue) !== null;
+  const hostedWorkerImageReady =
+    workerImage.hostedReady || submittedHostedWorkerImageReady;
+  const missingHostedWorkerImage = isHostedProvider && !hostedWorkerImageReady;
   const canEditAdvancedWorkerImage =
     isHostedProvider && !workerImage.runtimeSatisfied;
   const shouldRenderAdvancedWorkerImage =
@@ -209,42 +224,15 @@ export function StepComputeConfig({
     (missingHostedWorkerImage || advancedExpanded);
   const shouldRenderAdvancedSettingsToggle =
     isHostedProvider && !missingHostedWorkerImage;
-  const workerImageValue = values[SHARED_WORKER_IMAGE_ENV_VAR]?.trim() ?? '';
-  const workerImageAvailable =
-    workerImage.runtimeSatisfied ||
-    workerImage.hostedReady ||
-    workerImageValue.length > 0;
 
   const credentialsHint = selectedProvider
     ? getComputeCredentialsHint(selectedProvider.provider)
     : null;
 
-  const provisionableProvider =
-    selectedProvider &&
-    isSetupProvisionableComputeProvider(selectedProvider.provider)
-      ? selectedProvider.provider
-      : null;
-  const artifactEnvVar =
-    provisionableProvider === 'e2b'
-      ? 'E2B_TEMPLATE_ID'
-      : provisionableProvider === 'daytona'
-        ? 'DAYTONA_SNAPSHOT_NAME'
-        : null;
-  const manualArtifactValue = artifactEnvVar
-    ? (values[artifactEnvVar]?.trim() ?? '')
-    : '';
-  const manualModalBaseImage =
-    selectedProvider?.provider === 'modal'
-      ? (values.MODAL_BASE_IMAGE_REF?.trim() ?? '')
-      : '';
-
-  // A hosted provider needs a worker image to derive/provision its base image,
-  // unless the operator supplies a manual provider artifact directly.
-  const hostedRequirementMet =
-    !isHostedProvider ||
-    workerImageAvailable ||
-    manualArtifactValue.length > 0 ||
-    manualModalBaseImage.length > 0;
+  // Hosted providers need a pullable (registry-qualified) worker image. A bare
+  // process-env local tag must not enable Save — Modal/E2B/Daytona derive or
+  // provision from that image server-side, not from form base-image fields.
+  const hostedRequirementMet = !isHostedProvider || hostedWorkerImageReady;
 
   const credentialsMet = credentialFields.every(
     (field) =>
@@ -265,27 +253,17 @@ export function StepComputeConfig({
         field.savedSatisfied,
     ) &&
     (!isHostedProvider ||
-      workerImage.runtimeSatisfied ||
       workerImage.hostedReady ||
       (selectedProvider?.fields
         .filter(
-          (field) => isComputeInfrastructureField(field) && field.advanced,
+          (field) =>
+            isComputeInfrastructureField(field) &&
+            isComputeOperatorEditableField(field) &&
+            field.advanced,
         )
         .some((field) => field.savedSatisfied) ??
         false));
 
-  // Provisionable worker images build automatically once credentials + a
-  // worker image are saved and no manual artifact was supplied.
-  const showProvisioningNotice =
-    !!provisionableProvider &&
-    manualArtifactValue.length === 0 &&
-    (workerImageAvailable || awaitingTemplateBuild) &&
-    !selectedProvider?.fields.find(
-      (field) => field.envVarName === artifactEnvVar,
-    )?.savedSatisfied &&
-    !selectedProvider?.fields.find(
-      (field) => field.envVarName === artifactEnvVar,
-    )?.runtimeSatisfied;
   const shouldRenderAdvancedSettings =
     isHostedProvider && (missingHostedWorkerImage || advancedExpanded);
 
@@ -440,8 +418,6 @@ export function StepComputeConfig({
                 </div>
               ) : null}
 
-              {!advancedExpanded && <EnvVarsInfoNote />}
-
               {isHostedProvider && workerImage.hostedReady ? (
                 <div className="flex items-start gap-2 text-muted-foreground mt-4">
                   <Check className="inline size-4 mt-0.5 shrink-0 text-foreground" />
@@ -509,29 +485,27 @@ export function StepComputeConfig({
                     </span>
                   </div>
                 </div>
-              ) : null}
-
-              {showProvisioningNotice ? (
-                <div className="mt-6 grid gap-2 md:grid-cols-[220px_minmax(0,1fr)] md:items-center max-w-xl">
-                  <div className="text-sm font-medium">Worker base image</div>
-                  <div className="flex items-center gap-2 text-sm">
-                    {awaitingTemplateBuild ? (
-                      <>
-                        <Spinner className="size-4 shrink-0" />
-                        <span className="text-xs text-muted-foreground">
-                          Provisioning the worker base image in your{' '}
-                          {selectedProvider?.label ?? 'provider'} account — this
-                          takes a couple of minutes.
-                        </span>
-                      </>
-                    ) : (
-                      <span className="text-xs text-muted-foreground">
-                        Added automatically to your{' '}
-                        {selectedProvider?.label ?? 'provider'} account when you
-                        save.
-                      </span>
-                    )}
+              ) : missingHostedWorkerImage ? (
+                <div className="space-y-1 max-w-xl">
+                  <div className="text-sm font-medium">
+                    Roomote worker image
                   </div>
+                  <p className="text-sm text-muted-foreground">
+                    Hosted providers need a registry-qualified worker image (for
+                    example{' '}
+                    <code className="font-mono text-xs">
+                      ghcr.io/roocodeinc/roomote-worker:tag
+                    </code>
+                    ). A local tag such as{' '}
+                    <code className="font-mono text-xs">
+                      roomote-worker:local
+                    </code>{' '}
+                    only works on this host. Set{' '}
+                    <code className="font-mono text-xs">
+                      DOCKER_WORKER_IMAGE
+                    </code>{' '}
+                    to a pullable image before continuing.
+                  </p>
                 </div>
               ) : null}
 
@@ -542,8 +516,6 @@ export function StepComputeConfig({
                   )}
                 </div>
               ) : null}
-
-              {advancedExpanded && <EnvVarsInfoNote />}
             </div>
           </div>
         ) : null}

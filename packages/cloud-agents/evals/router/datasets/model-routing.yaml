@@ -91,7 +91,7 @@
   vars:
     context: |
       **Task Description**:
-      Select GPT 5.4 for this and use the Analytics Lab environment to investigate the retention dashboard regression.
+      Select GPT 5.6 Terra for this and use the Analytics Lab environment to investigate the retention dashboard regression.
 
       **Source**: Slack
       **Channel**: #analytics
@@ -106,7 +106,7 @@
       **Available Environments**:
       - Analytics Lab: Dashboard and metrics services (repos: acme/analytics-web, acme/metrics-api)
     expectedWorkspaceValue: "Analytics Lab"
-    expectedRequestedModelId: "openrouter/openai/gpt-5.4"
+    expectedRequestedModelId: "openrouter/openai/gpt-5.6-terra"
   assert:
     - type: javascript
       value: file://assertions/routing-assertions.ts:isValidRoutingJson

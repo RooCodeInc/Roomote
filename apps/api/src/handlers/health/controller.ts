@@ -9,7 +9,7 @@ import { getRedis, REDIS_KEYS } from '@roomote/redis';
 import {
   db,
   sql,
-  cloudJobs,
+  taskRuns,
   isNull,
   isNotNull,
   and,
@@ -36,26 +36,26 @@ async function checkStuckInQueue(): Promise<CheckResult> {
   try {
     const thresholdTime = sql`NOW() - INTERVAL '${sql.raw(String(STUCK_IN_QUEUE_THRESHOLD_MINUTES))} minutes'`;
 
-    const stuckJobs = await db
-      .select({ id: cloudJobs.id })
-      .from(cloudJobs)
+    const stuckRuns = await db
+      .select({ id: taskRuns.id })
+      .from(taskRuns)
       .where(
         and(
-          isNull(cloudJobs.dequeuedAt),
-          isNull(cloudJobs.canceledAt),
-          isNull(cloudJobs.completedAt),
-          lt(cloudJobs.createdAt, thresholdTime),
+          isNull(taskRuns.dequeuedAt),
+          isNull(taskRuns.canceledAt),
+          isNull(taskRuns.completedAt),
+          lt(taskRuns.createdAt, thresholdTime),
         ),
       );
 
-    if (stuckJobs.length > 0) {
-      const ids = stuckJobs.map((job) => job.id).join(', ');
+    if (stuckRuns.length > 0) {
+      const ids = stuckRuns.map((job) => job.id).join(', ');
 
       return {
         ok: false,
         error: `Jobs stuck in queue (not dequeued within ${STUCK_IN_QUEUE_THRESHOLD_MINUTES} min): [${ids}]`,
         summary: {
-          stuckInQueueCount: stuckJobs.length,
+          stuckInQueueCount: stuckRuns.length,
         },
       };
     }
@@ -81,27 +81,27 @@ async function checkStuckAfterDequeue(): Promise<CheckResult> {
   try {
     const thresholdTime = sql`NOW() - INTERVAL '${sql.raw(String(STUCK_AFTER_DEQUEUE_THRESHOLD_MINUTES))} minutes'`;
 
-    const stuckJobs = await db
-      .select({ id: cloudJobs.id })
-      .from(cloudJobs)
+    const stuckRuns = await db
+      .select({ id: taskRuns.id })
+      .from(taskRuns)
       .where(
         and(
-          isNotNull(cloudJobs.dequeuedAt),
-          isNull(cloudJobs.startedAt),
-          isNull(cloudJobs.canceledAt),
-          isNull(cloudJobs.completedAt),
-          lt(cloudJobs.dequeuedAt, thresholdTime),
+          isNotNull(taskRuns.dequeuedAt),
+          isNull(taskRuns.startedAt),
+          isNull(taskRuns.canceledAt),
+          isNull(taskRuns.completedAt),
+          lt(taskRuns.dequeuedAt, thresholdTime),
         ),
       );
 
-    if (stuckJobs.length > 0) {
-      const ids = stuckJobs.map((job) => job.id).join(', ');
+    if (stuckRuns.length > 0) {
+      const ids = stuckRuns.map((job) => job.id).join(', ');
 
       return {
         ok: false,
         error: `Jobs stuck after dequeue (not started within ${STUCK_AFTER_DEQUEUE_THRESHOLD_MINUTES} min): [${ids}]`,
         summary: {
-          stuckAfterDequeueCount: stuckJobs.length,
+          stuckAfterDequeueCount: stuckRuns.length,
         },
       };
     }

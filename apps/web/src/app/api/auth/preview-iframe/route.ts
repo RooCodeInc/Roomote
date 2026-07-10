@@ -12,7 +12,7 @@ export const runtime = 'nodejs';
  * The iframe's initial `src` points here (same origin as the parent page),
  * so app session cookies are sent. This endpoint:
  * 1. Authenticates the user via the app auth context
- * 2. Validates access to the cloud job
+ * 2. Validates access to the task run
  * 3. Generates a preview auth token
  * 4. Redirects to the preview URL with an inline `__preview_token`
  *
@@ -25,16 +25,16 @@ export async function GET(request: NextRequest) {
   try {
     const searchParams = request.nextUrl.searchParams;
     const previewUrl = searchParams.get('preview_url');
-    const cloudJobId = searchParams.get('cloud_job_id');
-    if (!previewUrl || !cloudJobId) {
+    const runId = searchParams.get('task_run_id');
+    if (!previewUrl || !runId) {
       return NextResponse.json(
-        { error: 'Missing required parameters: preview_url, cloud_job_id' },
+        { error: 'Missing required parameters: preview_url, task_run_id' },
         { status: 400 },
       );
     }
 
     const session = await createPreviewSession({
-      cloudJobId,
+      runId,
       previewUrl,
     });
 

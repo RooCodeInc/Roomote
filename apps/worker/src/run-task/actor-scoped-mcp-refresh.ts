@@ -15,9 +15,8 @@ interface FetchActorScopedSnapshotResult {
 }
 
 interface CreateActorScopedMcpRefresherOptions {
-  cloudJob: {
+  taskRun: {
     id: number;
-    userId?: string | null;
     actingUserId?: string | null;
   };
   integrations: IntegrationMcpOptions;
@@ -139,12 +138,12 @@ function applySnapshotToIntegrations(
 }
 
 export function createActorScopedMcpRefresher({
-  cloudJob,
+  taskRun,
   integrations,
   requestReconnect,
   logger,
 }: CreateActorScopedMcpRefresherOptions) {
-  let mountedActorUserId = cloudJob.actingUserId ?? cloudJob.userId ?? null;
+  let mountedActorUserId = taskRun.actingUserId ?? null;
   let mountedSnapshot = snapshotFromIntegrations(integrations);
 
   return async function refreshActorScopedMcpForUser(

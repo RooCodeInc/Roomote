@@ -37,7 +37,7 @@ vi.mock('@roomote/db/server', () => ({
       taskPullRequests: {
         findMany: vi.fn(),
       },
-      cloudJobs: {
+      tasks: {
         findMany: vi.fn(),
       },
       slackInstallations: {
@@ -45,7 +45,7 @@ vi.mock('@roomote/db/server', () => ({
       },
     },
   },
-  cloudJobs: {},
+  tasks: {},
   slackInstallations: {},
   githubInstallations: {},
   taskPullRequests: {},
@@ -62,7 +62,7 @@ const mockedGithubFind = vi.mocked(db.query.githubInstallations.findFirst);
 const mockedTaskPullRequestsFind = vi.mocked(
   db.query.taskPullRequests.findMany,
 );
-const mockedCloudJobsFind = vi.mocked(db.query.cloudJobs.findMany);
+const mockedTasksFind = vi.mocked(db.query.tasks.findMany);
 const mockedSlackFind = vi.mocked(db.query.slackInstallations.findFirst);
 
 describe('notifySlackPrMerge', () => {
@@ -88,11 +88,10 @@ describe('notifySlackPrMerge', () => {
   it('posts a thread message and adds a white_check_mark reaction to the originating message', async () => {
     mockedGithubFind.mockResolvedValue({ orgId: 'org-1' } as any);
     mockedTaskPullRequestsFind.mockResolvedValue([{ taskId: 'task-1' }] as any);
-    mockedCloudJobsFind.mockResolvedValue([
+    mockedTasksFind.mockResolvedValue([
       {
         slackThreadTs: 'thread-ts-1',
-        userId: 'user-1',
-        payload: { channel: 'C123' },
+        slackChannelId: 'C123',
       },
     ] as any);
     mockedSlackFind.mockResolvedValue({
@@ -127,11 +126,10 @@ describe('notifySlackPrMerge', () => {
   it('uses the configured acknowledgement and completion emoji names', async () => {
     mockedGithubFind.mockResolvedValue({ orgId: 'org-1' } as any);
     mockedTaskPullRequestsFind.mockResolvedValue([{ taskId: 'task-1' }] as any);
-    mockedCloudJobsFind.mockResolvedValue([
+    mockedTasksFind.mockResolvedValue([
       {
         slackThreadTs: 'thread-ts-1',
-        userId: 'user-1',
-        payload: { channel: 'C123' },
+        slackChannelId: 'C123',
       },
     ] as any);
     mockedSlackFind.mockResolvedValue({
@@ -157,14 +155,13 @@ describe('notifySlackPrMerge', () => {
     });
   });
 
-  it('uses slackChannel from snapshot resume payloads', async () => {
+  it('uses the slack channel bound on the task row', async () => {
     mockedGithubFind.mockResolvedValue({ orgId: 'org-1' } as any);
     mockedTaskPullRequestsFind.mockResolvedValue([{ taskId: 'task-1' }] as any);
-    mockedCloudJobsFind.mockResolvedValue([
+    mockedTasksFind.mockResolvedValue([
       {
         slackThreadTs: 'thread-ts-1',
-        userId: 'user-1',
-        payload: { slackChannel: 'C999' },
+        slackChannelId: 'C999',
       },
     ] as any);
     mockedSlackFind.mockResolvedValue({
@@ -207,16 +204,16 @@ describe('notifySlackPrMerge', () => {
 
     await notifySlackPrMerge(baseParams);
 
-    expect(mockedCloudJobsFind).not.toHaveBeenCalled();
+    expect(mockedTasksFind).not.toHaveBeenCalled();
     expect(mockPostMessage).not.toHaveBeenCalled();
     expect(mockAddReaction).not.toHaveBeenCalled();
     expect(mockRemoveReaction).not.toHaveBeenCalled();
   });
 
-  it('does not send notifications when no cloud jobs with Slack threads are found', async () => {
+  it('does not send notifications when no tasks with Slack threads are found', async () => {
     mockedGithubFind.mockResolvedValue({ orgId: 'org-1' } as any);
     mockedTaskPullRequestsFind.mockResolvedValue([{ taskId: 'task-1' }] as any);
-    mockedCloudJobsFind.mockResolvedValue([]);
+    mockedTasksFind.mockResolvedValue([]);
 
     await notifySlackPrMerge(baseParams);
 
@@ -231,16 +228,14 @@ describe('notifySlackPrMerge', () => {
       { taskId: 'task-1' },
       { taskId: 'task-2' },
     ] as any);
-    mockedCloudJobsFind.mockResolvedValue([
+    mockedTasksFind.mockResolvedValue([
       {
         slackThreadTs: 'thread-ts-1',
-        userId: 'user-1',
-        payload: { channel: 'C123' },
+        slackChannelId: 'C123',
       },
       {
         slackThreadTs: 'thread-ts-1',
-        userId: 'user-2',
-        payload: { channel: 'C123' },
+        slackChannelId: 'C123',
       },
     ] as any);
     mockedSlackFind.mockResolvedValue({
@@ -249,7 +244,7 @@ describe('notifySlackPrMerge', () => {
 
     await notifySlackPrMerge(baseParams);
 
-    // Should only post once and react once despite two jobs with same thread
+    // Should only post once and react once despite two tasks with same thread
     expect(mockPostMessage).toHaveBeenCalledTimes(1);
     expect(mockAddReaction).toHaveBeenCalledTimes(1);
     expect(mockRemoveReaction).toHaveBeenCalledTimes(1);
@@ -258,11 +253,10 @@ describe('notifySlackPrMerge', () => {
   it('continues posting even if addReaction fails', async () => {
     mockedGithubFind.mockResolvedValue({ orgId: 'org-1' } as any);
     mockedTaskPullRequestsFind.mockResolvedValue([{ taskId: 'task-1' }] as any);
-    mockedCloudJobsFind.mockResolvedValue([
+    mockedTasksFind.mockResolvedValue([
       {
         slackThreadTs: 'thread-ts-1',
-        userId: 'user-1',
-        payload: { channel: 'C123' },
+        slackChannelId: 'C123',
       },
     ] as any);
     mockedSlackFind.mockResolvedValue({

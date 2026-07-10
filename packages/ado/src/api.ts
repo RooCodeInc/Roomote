@@ -3,10 +3,11 @@ import { z } from 'zod';
 import {
   ALL_REPOSITORIES,
   buildRepositoryCloneUrl,
+  stripCloneUrlUserInfo,
   type SourceControlProvider,
 } from '@roomote/types';
 import {
-  type CloudJob,
+  type TaskRun,
   db,
   environments,
   repositories,
@@ -374,6 +375,83 @@ export async function getAdoDeploymentUser(options?: {
 
 export function clearAdoDeploymentUserCache(): void {
   cachedAdoDeploymentUser = null;
+}
+
+/**
+ * Normalizes an Azure DevOps identity to the key used for linked-account
+ * matching. Azure DevOps exposes a user's identity under different ids per
+ * surface: the Entra OAuth `connectionData` returns a vssps user id, while
+ * pull request comment webhooks deliver an org identity id — the two never
+ * match, and neither equals the Entra object id. The `uniqueName` (UPN /
+ * email) is the one value present identically on both surfaces, so linked
+ * accounts key off it. Lowercasing and trimming keeps the link side and the
+ * webhook side in agreement.
+ */
+export function normalizeAdoLinkedAccountKey(
+  value: string | null | undefined,
+): string | null {
+  const normalized = value?.trim().toLowerCase();
+
+  return normalized ? normalized : null;
+}
+
+const adoPullRequestDetailsSchema = z
+  .object({ pullRequestId: z.number() })
+  .passthrough();
+
+/**
+ * Fetches a pull request by repository UUID and pull request number.
+ * Returns the raw Azure DevOps pull request resource (repository, refs,
+ * identities, ...), used to rehydrate webhook payloads that only carry
+ * resource links.
+ */
+export async function getAdoPullRequest({
+  repositoryId,
+  pullRequestNumber,
+  token,
+  organization,
+  baseUrl,
+  organizationApiBaseUrl,
+  fetchImpl,
+}: {
+  repositoryId: string;
+  pullRequestNumber: number;
+  token?: string;
+  organization?: string;
+  baseUrl?: string;
+  organizationApiBaseUrl?: string;
+  fetchImpl?: typeof fetch;
+}): Promise<Record<string, unknown>> {
+  const adoToken = token ?? (await resolveAdoToken());
+
+  if (!adoToken?.trim()) {
+    throw new Error(
+      'ADO_TOKEN is required to read Azure DevOps pull requests.',
+    );
+  }
+
+  const resolvedOrganizationApiBaseUrl = await resolveAdoOrganizationApiBaseUrl(
+    { organization, baseUrl, organizationApiBaseUrl },
+  );
+
+  if (!resolvedOrganizationApiBaseUrl) {
+    throw new Error(
+      'ADO_ORGANIZATION is required to read Azure DevOps pull requests.',
+    );
+  }
+
+  const { data } = await requestAdoJson({
+    organizationApiBaseUrl: resolvedOrganizationApiBaseUrl,
+    fetchImpl,
+    path: `/_apis/git/repositories/${encodeURIComponent(
+      repositoryId,
+    )}/pullRequests/${pullRequestNumber}`,
+    params: { 'api-version': ADO_API_VERSION },
+    token: adoToken,
+    schema: adoPullRequestDetailsSchema,
+  });
+
+  return data;
 }
 
 export type AdoTokenValidationResult =
@@ -1115,13 +1193,17 @@ export function buildAdoRepositoryValues({
 }): AdoRepositoryValues {
   const fullName = buildAdoRepositoryFullName(organization, repository);
   const host = hostFromBaseUrl(baseUrl);
-  const cloneUrl =
+  // Azure DevOps remoteUrl embeds the organization as URL userinfo
+  // (https://org@dev.azure.com/...), which breaks the worker's git
+  // insteadOf proxy rewrite, so store the clone URL without it.
+  const cloneUrl = stripCloneUrlUserInfo(
     repository.remoteUrl ??
-    buildRepositoryCloneUrl({
-      provider: ADO_PROVIDER,
-      host,
-      repositoryFullName: fullName,
-    });
+      buildRepositoryCloneUrl({
+        provider: ADO_PROVIDER,
+        host,
+        repositoryFullName: fullName,
+      }),
+  );
 
   return {
     sourceControlProvider: ADO_PROVIDER,
@@ -1253,17 +1335,17 @@ function normalizeRepositorySelection(repositoryNames: string[]): string[] {
   return [...new Set(repositoryNames.filter(Boolean))];
 }
 
-async function resolveAdoRepositoryNamesForCloudJob(
-  cloudJob: CloudJob,
+async function resolveAdoRepositoryNamesForTaskRun(
+  taskRun: TaskRun,
 ): Promise<string[] | null> {
-  if (cloudJob.payload.environmentId) {
+  if (taskRun.payload.environmentId) {
     const environment = await db.query.environments.findFirst({
-      where: eq(environments.id, cloudJob.payload.environmentId),
+      where: eq(environments.id, taskRun.payload.environmentId),
     });
 
     if (!environment) {
       throw new Error(
-        `Environment not found for cloud job ${cloudJob.id}: ${cloudJob.payload.environmentId}`,
+        `Environment not found for task run ${taskRun.id}: ${taskRun.payload.environmentId}`,
       );
     }
 
@@ -1274,9 +1356,9 @@ async function resolveAdoRepositoryNamesForCloudJob(
     );
   }
 
-  if (Array.isArray(cloudJob.payload.selectedRepositories)) {
+  if (Array.isArray(taskRun.payload.selectedRepositories)) {
     const selectedRepositories = normalizeRepositorySelection(
-      cloudJob.payload.selectedRepositories,
+      taskRun.payload.selectedRepositories,
     );
 
     if (selectedRepositories.length > 0) {
@@ -1284,15 +1366,15 @@ async function resolveAdoRepositoryNamesForCloudJob(
     }
   }
 
-  if (cloudJob.payload.repo && cloudJob.payload.repo !== ALL_REPOSITORIES) {
-    return [cloudJob.payload.repo];
+  if (taskRun.payload.repo && taskRun.payload.repo !== ALL_REPOSITORIES) {
+    return [taskRun.payload.repo];
   }
 
   return null;
 }
 
-async function resolveAdoRepositoryRowsForCloudJob(cloudJob: CloudJob) {
-  const repositoryNames = await resolveAdoRepositoryNamesForCloudJob(cloudJob);
+async function resolveAdoRepositoryRowsForTaskRun(taskRun: TaskRun) {
+  const repositoryNames = await resolveAdoRepositoryNamesForTaskRun(taskRun);
   const queryConditions = [
     eq(repositories.sourceControlProvider, ADO_PROVIDER),
     eq(repositories.isActive, true),
@@ -1313,7 +1395,7 @@ async function resolveAdoRepositoryRowsForCloudJob(cloudJob: CloudJob) {
   if (repositoryNames === null) {
     if (repositoryRows.length === 0) {
       throw new Error(
-        `No synced Azure DevOps repositories found for cloud job ${cloudJob.id}.`,
+        `No synced Azure DevOps repositories found for task run ${taskRun.id}.`,
       );
     }
 
@@ -1329,7 +1411,7 @@ async function resolveAdoRepositoryRowsForCloudJob(cloudJob: CloudJob) {
 
   if (missingRepositories.length > 0) {
     throw new Error(
-      `Selected Azure DevOps repositories not found for cloud job ${cloudJob.id}: ${missingRepositories.join(', ')}`,
+      `Selected Azure DevOps repositories not found for task run ${taskRun.id}: ${missingRepositories.join(', ')}`,
     );
   }
 
@@ -1408,8 +1490,8 @@ function buildAdoGitCredential({
   }
 }
 
-export async function createCloudJobAdoCredentials(
-  cloudJob: CloudJob,
+export async function createTaskRunAdoCredentials(
+  taskRun: TaskRun,
   options?: {
     token?: string;
     baseUrl?: string;
@@ -1435,7 +1517,7 @@ export async function createCloudJobAdoCredentials(
     (await resolveAdoUsername()) ??
     DEFAULT_ADO_GIT_USERNAME;
   const host = hostFromBaseUrl(baseUrl);
-  const repositoriesList = await resolveAdoRepositoryRowsForCloudJob(cloudJob);
+  const repositoriesList = await resolveAdoRepositoryRowsForTaskRun(taskRun);
 
   return {
     credentials: repositoriesList.map((repository) =>

@@ -39,6 +39,5 @@ frontmatter and MDX syntax errors as well as broken internal links.
 ## Content boundaries
 
 This site is for **public, user-facing** documentation: setup, product
-concepts, admin workflows, integrations, and common tasks. Internal
-architecture, implementation notes, and runbooks belong in `.agent-guidance/`,
-not here. See [`AGENTS.md`](./AGENTS.md) for the full policy.
+concepts, admin workflows, integrations, and common tasks. See
+[`AGENTS.md`](./AGENTS.md) for the full policy.

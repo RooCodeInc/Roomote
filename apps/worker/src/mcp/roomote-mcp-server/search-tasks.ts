@@ -33,7 +33,7 @@ export async function handleSearchTasks(
       const segments = [
         task.repositoryName ? `repo: ${task.repositoryName}` : null,
         harnessLabel ? `harness: ${harnessLabel}` : null,
-        task.cloudJobError ? `error: ${task.cloudJobError}` : null,
+        task.taskRunError ? `error: ${task.taskRunError}` : null,
       ].filter(Boolean);
 
       return `${index + 1}. [${getTaskStatusLabel(task)}] ${title} (id: ${task.id})${segments.length > 0 ? ` | ${segments.join(' | ')}` : ''}`;

@@ -2,7 +2,7 @@ import type { SlackBlock } from '@roomote/types';
 
 export interface CancelTaskActionValue {
   taskId?: string;
-  cloudJobId?: number;
+  runId?: number;
   slackUserId?: string;
 }
 
@@ -102,7 +102,7 @@ export function parseTaskCancellationActionValue(
     ) {
       const parsedObject = parsed as Partial<{
         taskId: string;
-        cloudJobId: number | string;
+        runId: number | string;
         slackUserId: string;
       }>;
       const taskId =
@@ -110,20 +110,18 @@ export function parseTaskCancellationActionValue(
         parsedObject.taskId.trim().length > 0
           ? parsedObject.taskId
           : undefined;
-      const cloudJobId =
-        typeof parsedObject.cloudJobId === 'number'
-          ? parsedObject.cloudJobId
-          : Number.parseInt(parsedObject.cloudJobId ?? '', 10);
+      const runId =
+        typeof parsedObject.runId === 'number'
+          ? parsedObject.runId
+          : Number.parseInt(parsedObject.runId ?? '', 10);
 
-      if (!taskId && (!Number.isInteger(cloudJobId) || cloudJobId <= 0)) {
+      if (!taskId && (!Number.isInteger(runId) || runId <= 0)) {
         return null;
       }
 
       return {
         ...(taskId ? { taskId } : {}),
-        ...(Number.isInteger(cloudJobId) && cloudJobId > 0
-          ? { cloudJobId }
-          : {}),
+        ...(Number.isInteger(runId) && runId > 0 ? { runId } : {}),
         slackUserId:
           typeof parsedObject.slackUserId === 'string' &&
           parsedObject.slackUserId.length > 0

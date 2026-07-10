@@ -29,8 +29,8 @@ MODAL_TOKEN_SECRET=...
 ```
 
 Modal also needs a base image. Roomote usually derives `MODAL_BASE_IMAGE_REF`
-from the shared worker image configured in **Settings > Sandboxes** or
-`DOCKER_WORKER_IMAGE`:
+from the shared worker image (`DOCKER_WORKER_IMAGE` or the derived release
+image):
 
 ```sh
 DOCKER_WORKER_IMAGE=ghcr.io/roocodeinc/roomote-worker:<version>

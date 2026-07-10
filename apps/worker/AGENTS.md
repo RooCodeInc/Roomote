@@ -11,7 +11,7 @@ the place for general Roomote app-server internals or product business logic.
 
 - Prefer `@roomote/types`, `@roomote/sdk/client`, and other explicit
   worker-safe root or `./client` exports.
-- Pass Roomote state through cloud-job payloads, environment config, injected
+- Pass Roomote state through task-run payloads, environment config, injected
   env vars, or SDK calls.
 - Keep subprocess environments explicit and minimal.
 - Treat nested sandbox behavior as a first-class constraint when touching env

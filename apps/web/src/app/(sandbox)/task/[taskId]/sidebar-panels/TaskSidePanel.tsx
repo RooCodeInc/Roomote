@@ -3,7 +3,7 @@
 import { FramedSurface } from '@/components/layout';
 import { cn } from '@/lib/utils';
 
-import type { CloudSession, GitDiffResponse } from '../hooks';
+import type { TaskSession, GitDiffResponse } from '../hooks';
 
 import { useTaskSidePanel } from '../hooks';
 
@@ -22,7 +22,7 @@ interface DiffPanelProps {
 }
 
 interface TaskSidePanelDesktopProps {
-  session: CloudSession;
+  session: TaskSession;
   diffPanel?: DiffPanelProps;
 }
 
@@ -54,7 +54,7 @@ export function TaskSidePanelDesktop({
       >
         {activeView === 'preview' ? (
           <PreviewSidePanel
-            cloudJob={session.cloudJob ?? undefined}
+            taskRun={session.taskRun ?? undefined}
             onClose={closeSidePanel}
           />
         ) : null}
@@ -83,11 +83,11 @@ export function TaskSidePanelDesktop({
           activeView === 'task-info' ? 'flex' : 'hidden',
         )}
       >
-        {session.task && session.cloudJob ? (
+        {session.task && session.taskRun ? (
           <TaskInfoPanel
             active={activeView === 'task-info'}
             task={session.task}
-            cloudJob={session.cloudJob}
+            taskRun={session.taskRun}
             harness={session.harness}
             onClose={closeSidePanel}
           />
@@ -100,7 +100,7 @@ export function TaskSidePanelDesktop({
           activeView === 'terminal' ? 'flex' : 'hidden',
         )}
       >
-        {session.cloudJob && session.sessionState === 'interactive' ? (
+        {session.taskRun && session.sessionState === 'interactive' ? (
           <TerminalSidePanel
             active={activeView === 'terminal'}
             onClose={closeSidePanel}
@@ -114,7 +114,7 @@ export function TaskSidePanelDesktop({
           activeView === 'logs' ? 'flex' : 'hidden',
         )}
       >
-        {session.cloudJob && session.sessionState === 'interactive' ? (
+        {session.taskRun && session.sessionState === 'interactive' ? (
           <LogsSidePanel
             active={activeView === 'logs'}
             onClose={closeSidePanel}

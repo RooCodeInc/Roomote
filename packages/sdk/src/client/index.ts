@@ -9,7 +9,7 @@ import * as slackInstallations from '../slack-installations';
 import * as linearInstallations from '../linear-installations';
 import * as linearSessions from '../linear-sessions';
 import * as repositories from '../repositories';
-import * as cloudJobs from '../cloud-jobs';
+import * as taskRuns from '../task-runs';
 import * as environments from '../environments';
 import * as featureFlags from '../feature-flags';
 import * as mcpConnections from '../mcp-connections';
@@ -24,10 +24,10 @@ export type { LinearInstallation } from '../linear-installations';
 export type { Repository } from '../repositories';
 export type { ParsedPR } from '../pull-request-links';
 export type {
-  CloudJob,
-  DequeuedCloudJob,
-  DequeuedResumeCloudJob,
-} from '../cloud-jobs';
+  TaskRun,
+  DequeuedTaskRun,
+  DequeuedResumeTaskRun,
+} from '../task-runs';
 export type { Environment, EnvironmentListItem } from '../environments';
 export {
   detectPullRequestsFromToolResultEnvelope,
@@ -47,7 +47,7 @@ export const sdk = {
   linearInstallations,
   linearSessions,
   repositories,
-  cloudJobs,
+  taskRuns,
   environments,
   featureFlags,
   mcpConnections,
@@ -95,9 +95,9 @@ const RETRYABLE_WORKER_TRPC_MUTATION_PATHS = new Map<
   string,
   WorkerQueryRetryOptions
 >([
-  ['cloudJobs.recordMessageEnvelope', {}],
-  ['cloudJobs.dequeue', WORKER_STARTUP_MUTATION_RETRY_OPTIONS],
-  ['cloudJobs.resume', WORKER_STARTUP_MUTATION_RETRY_OPTIONS],
+  ['taskRuns.recordMessageEnvelope', {}],
+  ['taskRuns.dequeue', WORKER_STARTUP_MUTATION_RETRY_OPTIONS],
+  ['taskRuns.resume', WORKER_STARTUP_MUTATION_RETRY_OPTIONS],
 ]);
 
 function isQueryRequest(method?: string): boolean {
@@ -317,8 +317,8 @@ export function createWorkerFetchWithRetry(
  *   },
  * });
  *
- * const result = await client.cloudJobs.createSnapshot.mutate({
- *   cloudJobId: 123,
+ * const result = await client.taskRuns.createSnapshot.mutate({
+ *   runId: 123,
  *   sandboxId: 'sandbox-abc',
  * });
  */

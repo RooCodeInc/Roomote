@@ -14,7 +14,7 @@ import { createSandboxServerRpcClient } from '@roomote/sdk/sandbox-router';
 
 import type { SandboxClient } from '../types';
 
-import type { SandboxConnectionTarget } from './use-cloud-session';
+import type { SandboxConnectionTarget } from './use-task-session';
 
 interface ConnectionStateOverride {
   override: SandboxConnectionTarget | null;

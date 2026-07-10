@@ -1,6 +1,6 @@
 import type { ReactNode } from 'react';
 import { render, screen } from '@testing-library/react';
-import { CloudTaskType } from '@roomote/types';
+import { TaskPayloadKind } from '@roomote/types';
 
 const {
   useSandboxMessagesMock,
@@ -91,13 +91,14 @@ import { TaskInfoPanel } from './TaskInfoPanel';
 
 const baseTask = {
   id: 'task-1',
-  userId: 'user-1',
+  initiatorKind: 'user',
+  initiatorUserId: 'user-1',
   title: 'Task title',
-  model: 'openrouter/openai/gpt-5.4',
+  model: 'openrouter/openai/gpt-5.6-terra',
   user: null,
 };
 
-const baseCloudJob = {
+const baseTaskRun = {
   payload: {
     environmentId: 'env-1',
   },
@@ -105,7 +106,7 @@ const baseCloudJob = {
   vendor: 'docker',
   startedAt: new Date('2026-05-01T12:00:00.000Z'),
   error: null,
-  type: CloudTaskType.StandardTask,
+  payloadKind: TaskPayloadKind.StandardTask,
 };
 
 describe('TaskInfoPanel', () => {
@@ -135,7 +136,7 @@ describe('TaskInfoPanel', () => {
       <TaskInfoPanel
         active={true}
         task={baseTask as never}
-        cloudJob={baseCloudJob as never}
+        taskRun={baseTaskRun as never}
         harness="opencode-server"
         onClose={vi.fn()}
       />,
@@ -150,13 +151,15 @@ describe('TaskInfoPanel', () => {
       <TaskInfoPanel
         active={true}
         task={baseTask as never}
-        cloudJob={baseCloudJob as never}
+        taskRun={baseTaskRun as never}
         harness="opencode-server"
         onClose={vi.fn()}
       />,
     );
 
-    expect(screen.getByText('GPT 5.4 via OpenRouter')).toBeInTheDocument();
+    expect(
+      screen.getByText('GPT 5.6 Terra via OpenRouter'),
+    ).toBeInTheDocument();
   });
 
   it('omits the inference provider suffix for bare model ids', () => {
@@ -164,7 +167,7 @@ describe('TaskInfoPanel', () => {
       <TaskInfoPanel
         active={true}
         task={{ ...baseTask, model: 'gpt-4' } as never}
-        cloudJob={baseCloudJob as never}
+        taskRun={baseTaskRun as never}
         harness="opencode-server"
         onClose={vi.fn()}
       />,
@@ -179,7 +182,7 @@ describe('TaskInfoPanel', () => {
       <TaskInfoPanel
         active={true}
         task={baseTask as never}
-        cloudJob={baseCloudJob as never}
+        taskRun={baseTaskRun as never}
         harness="opencode-server"
         onClose={vi.fn()}
       />,
@@ -194,16 +197,18 @@ describe('TaskInfoPanel', () => {
       <TaskInfoPanel
         active={true}
         task={baseTask as never}
-        cloudJob={baseCloudJob as never}
+        taskRun={baseTaskRun as never}
         harness="opencode-server"
         onClose={vi.fn()}
       />,
     );
 
     expect(screen.getByText('Model')).toBeInTheDocument();
-    expect(screen.getByText('GPT 5.4 via OpenRouter')).toBeInTheDocument();
     expect(
-      screen.getByText('GPT 5.4 via OpenRouter').closest('span'),
+      screen.getByText('GPT 5.6 Terra via OpenRouter'),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText('GPT 5.6 Terra via OpenRouter').closest('span'),
     ).toHaveClass('truncate');
   });
 
@@ -212,11 +217,11 @@ describe('TaskInfoPanel', () => {
       <TaskInfoPanel
         active={true}
         task={baseTask as never}
-        cloudJob={
+        taskRun={
           {
-            ...baseCloudJob,
+            ...baseTaskRun,
             payload: {
-              ...baseCloudJob.payload,
+              ...baseTaskRun.payload,
               reasoningEffort: 'high',
             },
           } as never
@@ -227,7 +232,7 @@ describe('TaskInfoPanel', () => {
     );
 
     expect(
-      screen.getByText('GPT 5.4 via OpenRouter • High'),
+      screen.getByText('GPT 5.6 Terra via OpenRouter • High'),
     ).toBeInTheDocument();
   });
 
@@ -244,7 +249,7 @@ describe('TaskInfoPanel', () => {
             },
           } as never
         }
-        cloudJob={baseCloudJob as never}
+        taskRun={baseTaskRun as never}
         harness="opencode-server"
         onClose={vi.fn()}
       />,
@@ -259,7 +264,7 @@ describe('TaskInfoPanel', () => {
       <TaskInfoPanel
         active={true}
         task={baseTask as never}
-        cloudJob={baseCloudJob as never}
+        taskRun={baseTaskRun as never}
         harness="opencode-server"
         onClose={vi.fn()}
       />,
@@ -284,7 +289,7 @@ describe('TaskInfoPanel', () => {
       <TaskInfoPanel
         active={true}
         task={baseTask as never}
-        cloudJob={baseCloudJob as never}
+        taskRun={baseTaskRun as never}
         harness="opencode-server"
         onClose={vi.fn()}
       />,
@@ -302,9 +307,9 @@ describe('TaskInfoPanel', () => {
       <TaskInfoPanel
         active={true}
         task={baseTask as never}
-        cloudJob={
+        taskRun={
           {
-            ...baseCloudJob,
+            ...baseTaskRun,
             prRepo: 'RooCodeInc/Roomote',
             prNumber: 123,
             error: 'Something broke',
@@ -331,7 +336,7 @@ describe('TaskInfoPanel', () => {
       <TaskInfoPanel
         active={true}
         task={baseTask as never}
-        cloudJob={baseCloudJob as never}
+        taskRun={baseTaskRun as never}
         harness="opencode-server"
         onClose={vi.fn()}
       />,
@@ -346,7 +351,7 @@ describe('TaskInfoPanel', () => {
       <TaskInfoPanel
         active={true}
         task={baseTask as never}
-        cloudJob={baseCloudJob as never}
+        taskRun={baseTaskRun as never}
         harness="opencode-server"
         onClose={vi.fn()}
       />,
@@ -362,7 +367,7 @@ describe('TaskInfoPanel', () => {
       <TaskInfoPanel
         active={true}
         task={baseTask as never}
-        cloudJob={baseCloudJob as never}
+        taskRun={baseTaskRun as never}
         harness="opencode-server"
         onClose={vi.fn()}
       />,
@@ -371,16 +376,16 @@ describe('TaskInfoPanel', () => {
     expect(screen.queryByText('Runtime')).not.toBeInTheDocument();
   });
 
-  it('falls back to the session harness when the cloud job harness is absent', () => {
+  it('falls back to the session harness when the task run harness is absent', () => {
     showDebugUiState.isDebugUIVisible = true;
 
     render(
       <TaskInfoPanel
         active={true}
         task={baseTask as never}
-        cloudJob={
+        taskRun={
           {
-            ...baseCloudJob,
+            ...baseTaskRun,
             harness: undefined,
           } as never
         }
@@ -397,11 +402,11 @@ describe('TaskInfoPanel', () => {
       <TaskInfoPanel
         active={true}
         task={baseTask as never}
-        cloudJob={
+        taskRun={
           {
-            ...baseCloudJob,
+            ...baseTaskRun,
             payload: {
-              ...baseCloudJob.payload,
+              ...baseTaskRun.payload,
               communicationProvider: 'telegram',
             },
           } as never
@@ -419,11 +424,11 @@ describe('TaskInfoPanel', () => {
       <TaskInfoPanel
         active={true}
         task={baseTask as never}
-        cloudJob={
+        taskRun={
           {
-            ...baseCloudJob,
+            ...baseTaskRun,
             payload: {
-              ...baseCloudJob.payload,
+              ...baseTaskRun.payload,
               communicationProvider: 'teams',
             },
           } as never
@@ -441,12 +446,12 @@ describe('TaskInfoPanel', () => {
       <TaskInfoPanel
         active={true}
         task={baseTask as never}
-        cloudJob={
+        taskRun={
           {
-            ...baseCloudJob,
-            type: CloudTaskType.GithubPrReview,
+            ...baseTaskRun,
+            payloadKind: TaskPayloadKind.GithubPrReview,
             payload: {
-              ...baseCloudJob.payload,
+              ...baseTaskRun.payload,
               sourceControlProvider: 'gitlab',
             },
           } as never
@@ -464,12 +469,12 @@ describe('TaskInfoPanel', () => {
       <TaskInfoPanel
         active={true}
         task={baseTask as never}
-        cloudJob={
+        taskRun={
           {
-            ...baseCloudJob,
-            type: CloudTaskType.GithubPrReview,
+            ...baseTaskRun,
+            payloadKind: TaskPayloadKind.GithubPrReview,
             payload: {
-              ...baseCloudJob.payload,
+              ...baseTaskRun.payload,
               sourceControlProvider: 'gitea',
             },
           } as never
@@ -487,12 +492,12 @@ describe('TaskInfoPanel', () => {
       <TaskInfoPanel
         active={true}
         task={baseTask as never}
-        cloudJob={
+        taskRun={
           {
-            ...baseCloudJob,
-            type: CloudTaskType.GithubPrReview,
+            ...baseTaskRun,
+            payloadKind: TaskPayloadKind.GithubPrReview,
             payload: {
-              ...baseCloudJob.payload,
+              ...baseTaskRun.payload,
               sourceControlProvider: 'ado',
             },
           } as never
@@ -510,10 +515,10 @@ describe('TaskInfoPanel', () => {
       <TaskInfoPanel
         active={true}
         task={baseTask as never}
-        cloudJob={
+        taskRun={
           {
-            ...baseCloudJob,
-            type: CloudTaskType.GithubPrReview,
+            ...baseTaskRun,
+            payloadKind: TaskPayloadKind.GithubPrReview,
             prRepo: 'RooCodeInc/Roomote',
             prNumber: 42,
           } as never
@@ -531,7 +536,7 @@ describe('TaskInfoPanel', () => {
       <TaskInfoPanel
         active={true}
         task={baseTask as never}
-        cloudJob={baseCloudJob as never}
+        taskRun={baseTaskRun as never}
         harness="opencode-server"
         onClose={vi.fn()}
       />,

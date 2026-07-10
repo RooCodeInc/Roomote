@@ -1,31 +1,30 @@
 import {
-  type CloudTask,
-  CloudTaskType,
+  type TaskSpec,
   PRODUCT_NAME,
   buildSlackThreadPermalink,
   buildTeamsMessagePermalink,
   buildTelegramMessagePermalink,
   getGitHubAppMention,
-  resolveCloudTaskWorkspace,
+  resolveTaskWorkspace,
 } from '@roomote/types';
 import {
-  type ResolvedTaskAttributionDisplay,
   db,
   repositories,
   environmentRepositoryMappings,
-  cloudJobs,
+  taskPullRequests,
+  taskRuns,
+  tasks,
   eq,
+  ne,
   and,
-  inArray,
   isNull,
   isNotNull,
   desc,
   asc,
-  sql,
 } from '@roomote/db/server';
-import { Env } from '@roomote/env';
-import { Schemas } from '@roomote/github';
+import { Schemas, getEffectiveGitHubAppSlug } from '@roomote/github';
 import { buildSlackThreadPromptBlocks } from '../../utils';
+import type { ResolvedTaskCommitAuthor } from '../commit-author';
 
 const DEFAULT_GITHUB_APP_SLUG = 'roomote';
 
@@ -52,10 +51,10 @@ export function getPrBodyAttributionLine({
   teamsMessageId,
   teamsTenantId,
   teamsBotAppId,
-  githubAppSlug = Env.NEXT_PUBLIC_GITHUB_APP_SLUG,
+  githubAppSlug = getEffectiveGitHubAppSlug(),
   escapeDoubleQuotes = false,
 }: {
-  attribution: ResolvedTaskAttributionDisplay;
+  attribution: ResolvedTaskCommitAuthor;
   taskUrl?: string;
   taskSurface?:
     | 'web'
@@ -84,7 +83,7 @@ export function getPrBodyAttributionLine({
   escapeDoubleQuotes?: boolean;
 }) {
   if (
-    !attribution.githubDisplay &&
+    attribution.kind === 'roomote' &&
     !taskUrl &&
     !(slackChannel && slackThreadTs) &&
     !(telegramChatId && telegramMessageId) &&
@@ -137,7 +136,7 @@ function buildPrBodyAttributionLine({
   githubAppSlug,
   escapeDoubleQuotes = false,
 }: {
-  attribution: ResolvedTaskAttributionDisplay;
+  attribution: ResolvedTaskCommitAuthor;
   taskUrl?: string;
   taskSurface?:
     | 'web'
@@ -235,13 +234,11 @@ function buildPrBodyAttributionLine({
       ? `${taskLink} or ${defaultFollowUpInstruction}`
       : defaultFollowUpInstruction;
 
-  if (attribution.authorKind === 'roomote') {
+  if (attribution.kind === 'roomote') {
     return `> Created by Roomote. ${instruction}`;
   }
 
-  const safeUserName = escapeValue(
-    attribution.githubDisplay ?? attribution.productDisplay ?? PRODUCT_NAME,
-  );
+  const safeUserName = escapeValue(attribution.displayName || PRODUCT_NAME);
 
   return `> Opened on behalf of ${safeUserName}. ${instruction}`;
 }
@@ -568,7 +565,10 @@ function isRoomoteIssueCommentAuthor(user: {
 }): boolean {
   const normalizedLogin = user.login.toLowerCase();
   const appSlugs = new Set([
-    (Env.NEXT_PUBLIC_GITHUB_APP_SLUG || DEFAULT_GITHUB_APP_SLUG).toLowerCase(),
+    // The effective slug prefers the database-configured value cached by
+    // resolveConfiguredGitHubAppSlug (refreshed at workflow entry) so
+    // deployments configured through the /setup flow recognize their own bot.
+    getEffectiveGitHubAppSlug().toLowerCase(),
     'roomote',
     'roomote-dev',
   ]);
@@ -706,9 +706,9 @@ function getUniqueRepositoryFullNames(
 }
 
 export async function getWorkspaceRepositoryFullNames(
-  cloudTask: CloudTask,
+  taskSpec: TaskSpec,
 ): Promise<string[] | undefined> {
-  const workspace = resolveCloudTaskWorkspace(cloudTask.payload);
+  const workspace = resolveTaskWorkspace(taskSpec.payload);
 
   if (workspace.type === 'repository') {
     return undefined;
@@ -752,36 +752,37 @@ export async function getWorkspaceRepositoryFullNames(
 }
 
 export async function getPrSha({
-  currentCloudJobId,
+  currentRunId,
   repo,
   prNumber,
 }: {
-  currentCloudJobId?: number;
+  currentRunId?: number;
   repo: string;
   prNumber: number;
 }) {
   const conditions = [
-    inArray(cloudJobs.type, [
-      CloudTaskType.GithubPrReview,
-      CloudTaskType.GithubPrReviewSync,
-    ]),
-    eq(cloudJobs.prRepo, repo),
-    eq(cloudJobs.prNumber, prNumber),
-    isNotNull(cloudJobs.startedAt),
-    isNotNull(cloudJobs.prSha),
-    isNull(cloudJobs.canceledAt),
+    eq(tasks.workflow, 'pr_review'),
+    eq(taskPullRequests.repository, repo),
+    eq(taskPullRequests.prNumber, prNumber),
+    isNotNull(taskPullRequests.prSha),
+    isNotNull(taskRuns.startedAt),
+    isNull(taskRuns.canceledAt),
   ];
 
-  if (typeof currentCloudJobId === 'number') {
-    conditions.push(sql`${cloudJobs.id} != ${currentCloudJobId}`);
+  if (typeof currentRunId === 'number') {
+    conditions.push(ne(taskRuns.id, currentRunId));
   }
 
-  const result = await db.query.cloudJobs.findFirst({
-    where: and(...conditions),
-    orderBy: [desc(cloudJobs.createdAt)],
-  });
+  const [result] = await db
+    .select({ prSha: taskPullRequests.prSha })
+    .from(taskPullRequests)
+    .innerJoin(tasks, eq(tasks.id, taskPullRequests.taskId))
+    .innerJoin(taskRuns, eq(taskRuns.taskId, tasks.id))
+    .where(and(...conditions))
+    .orderBy(desc(taskRuns.createdAt))
+    .limit(1);
 
-  return result?.prSha;
+  return result?.prSha ?? undefined;
 }
 
 export async function getPrReviewCommentId({
@@ -791,17 +792,22 @@ export async function getPrReviewCommentId({
   repo: string;
   prNumber: number;
 }) {
-  const result = await db.query.cloudJobs.findFirst({
-    where: and(
-      eq(cloudJobs.type, CloudTaskType.GithubPrReview),
-      eq(cloudJobs.prRepo, repo),
-      eq(cloudJobs.prNumber, prNumber),
-      isNotNull(cloudJobs.githubPrReviewCommentId),
-    ),
-    orderBy: [asc(cloudJobs.createdAt)],
-  });
+  const [result] = await db
+    .select({ githubReviewCommentId: taskPullRequests.githubReviewCommentId })
+    .from(taskPullRequests)
+    .innerJoin(tasks, eq(tasks.id, taskPullRequests.taskId))
+    .where(
+      and(
+        eq(tasks.workflow, 'pr_review'),
+        eq(taskPullRequests.repository, repo),
+        eq(taskPullRequests.prNumber, prNumber),
+        isNotNull(taskPullRequests.githubReviewCommentId),
+      ),
+    )
+    .orderBy(asc(taskPullRequests.createdAt))
+    .limit(1);
 
-  return result?.githubPrReviewCommentId;
+  return result?.githubReviewCommentId ?? undefined;
 }
 
 export function getTriggeringComment(
@@ -911,4 +917,129 @@ export function formatChangedFiles(
   }
 
   return fileList;
+}
+
+const DIFF_FILE_SECTION_HEADER = /^diff --git a\/.+ b\/(.+)$/;
+
+/**
+ * Restrict a unified diff to only the per-file sections whose target path is
+ * in `allowedFiles`. Used to intersect a "since last review" range diff
+ * (which, after a rebase, contains commits pulled in from the base branch)
+ * with the pull request's authoritative Files Changed set, so the reviewer
+ * never sees — and cannot flag — code the PR does not actually touch.
+ */
+export function filterUnifiedDiffToFiles(
+  diff: string,
+  allowedFiles: Iterable<string>,
+): string {
+  const allowed = new Set(allowedFiles);
+  const lines = diff.split('\n');
+  const kept: string[] = [];
+  let includingSection = false;
+  let sawSectionHeader = false;
+
+  for (const line of lines) {
+    const headerMatch = DIFF_FILE_SECTION_HEADER.exec(line);
+
+    if (headerMatch) {
+      sawSectionHeader = true;
+      includingSection = allowed.has(headerMatch[1]!);
+    }
+
+    if (includingSection) {
+      kept.push(line);
+    }
+  }
+
+  // No `diff --git` headers at all — not a per-file unified diff we can
+  // safely filter (e.g. an empty or truncated diff). Leave it untouched.
+  if (!sawSectionHeader) {
+    return diff;
+  }
+
+  return kept.join('\n');
+}
+
+/**
+ * Resolve the reviewable delta for a sync re-review, scoped to the pull
+ * request's own changes.
+ *
+ * The since-last-review compare range (`sha...currentHead`) uses three-dot
+ * semantics, so after a rebase it carries base-branch commits — and even for a
+ * file the PR also touches, that file's range section contains base-branch
+ * hunks that are outside the PR's `base...head` Files Changed. So the range is
+ * used only to identify *which* PR files changed since the last review; the
+ * diff content presented for review comes from the PR's authoritative
+ * `base...head` diff (`gh pr diff`), which never contains base-branch hunks.
+ *
+ * Both diff fetches return `{ diff: undefined, changedFiles: [] }` on failure
+ * or a too-large diff, so failure is treated as "inspect manually" (keep the
+ * delta), never as "no changes".
+ */
+export function resolveScopedSyncReviewDelta({
+  sameHeadAsLastReview,
+  pullRequestDiff,
+  rangeDiff,
+}: {
+  sameHeadAsLastReview: boolean;
+  /** The PR's authoritative `base...head` diff (`gh pr diff`). */
+  pullRequestDiff: { diff: string | undefined; changedFiles: string[] };
+  /** The three-dot `sha...currentHead` since-last-review compare range. */
+  rangeDiff: { diff: string | undefined; changedFiles: string[] };
+}): {
+  pullRequestFilesAvailable: boolean;
+  changedFiles: string[];
+  diff: string | undefined;
+  hasReviewableChanges: boolean;
+} {
+  if (sameHeadAsLastReview) {
+    return {
+      pullRequestFilesAvailable: true,
+      changedFiles: [],
+      diff: undefined,
+      hasReviewableChanges: false,
+    };
+  }
+
+  // Without the authoritative PR diff we cannot scope; fall back to the raw
+  // range and let the reviewer inspect rather than dropping everything.
+  if (pullRequestDiff.diff === undefined) {
+    return {
+      pullRequestFilesAvailable: false,
+      changedFiles: rangeDiff.changedFiles,
+      diff: rangeDiff.diff,
+      hasReviewableChanges: true,
+    };
+  }
+
+  const pullRequestDiffText = pullRequestDiff.diff;
+  const pullRequestChangedFileSet = new Set(pullRequestDiff.changedFiles);
+
+  // Range read failed: we cannot tell which PR files are new since the last
+  // review, so present the full authoritative PR diff for manual inspection.
+  if (rangeDiff.diff === undefined) {
+    return {
+      pullRequestFilesAvailable: true,
+      changedFiles: pullRequestDiff.changedFiles,
+      diff: pullRequestDiffText,
+      hasReviewableChanges: true,
+    };
+  }
+
+  // PR files that appear in the since-last-review range.
+  const changedFiles = rangeDiff.changedFiles.filter((file) =>
+    pullRequestChangedFileSet.has(file),
+  );
+
+  const diff =
+    changedFiles.length > 0
+      ? filterUnifiedDiffToFiles(pullRequestDiffText, new Set(changedFiles))
+      : undefined;
+
+  return {
+    pullRequestFilesAvailable: true,
+    changedFiles,
+    diff,
+    hasReviewableChanges: changedFiles.length > 0,
+  };
 }

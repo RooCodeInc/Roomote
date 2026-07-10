@@ -108,7 +108,7 @@ describe('BullMQ Sentry monitoring', () => {
     captureBullMqMessage(
       'Snapshot creation failed',
       {
-        cloudJobId: 123,
+        runId: 123,
         computeProvider: 'modal',
         providerErrorCode: 'sandbox_snapshotting',
         providerResponseStatus: 422,
@@ -137,7 +137,7 @@ describe('BullMQ Sentry monitoring', () => {
       'roomote.component',
       'snapshot_queue',
     );
-    expect(scopeSetTagMock).toHaveBeenCalledWith('roomote.cloud_job_id', '123');
+    expect(scopeSetTagMock).toHaveBeenCalledWith('roomote.task_run_id', '123');
     expect(scopeSetTagMock).toHaveBeenCalledWith(
       'roomote.compute_provider',
       'modal',
@@ -176,7 +176,7 @@ describe('BullMQ Sentry monitoring', () => {
       'due_sleep',
     );
     expect(scopeSetContextMock).toHaveBeenCalledWith('bullmq', {
-      cloudJobId: 123,
+      runId: 123,
       computeProvider: 'modal',
       providerErrorCode: 'sandbox_snapshotting',
       providerResponseStatus: 422,

@@ -60,7 +60,7 @@ instead. For a managed PaaS with no server of your own, see
 
 ## Image access
 
-Both published images (`ghcr.io/roocodeinc/roomote-app` and
+The published app and worker images (`ghcr.io/roocodeinc/roomote-app` and
 `ghcr.io/roocodeinc/roomote-worker`) are public and pulled anonymously; no
 registry login is needed.
 
@@ -74,9 +74,9 @@ and the controller reads the worker release version from the `VERSION` file
 inside `worker-current.tar.gz`.
 
 To pin instead (recommended for production deployments): change the
-`x-roomote-app-image` anchor at the top of the compose file to the same
-immutable tag (`v*` or `develop-<sha>`). No other edits are needed — the
-derived values follow the image.
+`x-roomote-app-image` anchor at the top of the compose file to an immutable
+tag (`v*` or `develop-<sha>`). No other edits are needed — the derived values
+follow the image.
 
 ## Create the resource
 
@@ -97,17 +97,17 @@ derived values follow the image.
 
 ## Service topology
 
-| Service         | Image                  | Public domain              | Healthcheck        |
-| --------------- | ---------------------- | -------------------------- | ------------------ |
-| `postgres`      | `postgres:17.5`        | no                         | `pg_isready`       |
-| `redis`         | `redis:7-alpine`       | no                         | `redis-cli ping`   |
-| `minio`         | `minio/minio` + volume | yes (routed to port 9000)  | `mc ready local`   |
-| `db-migrate`    | `roomote-app:develop`  | no (one-shot)              | excluded           |
-| `web`           | `roomote-app:develop`  | yes (port 3000)            | `/health`          |
-| `api`           | `roomote-app:develop`  | yes (port 3001)            | `/health/liveness` |
-| `controller`    | `roomote-app:develop`  | no                         | —                  |
-| `bullmq`        | `roomote-app:develop`  | no                         | —                  |
-| `preview-proxy` | `roomote-app:develop`  | optional (wildcard domain) | `/health`          |
+| Service         | Image                   | Public domain              | Healthcheck                  |
+| --------------- | ----------------------- | -------------------------- | ---------------------------- |
+| `postgres`      | pinned `postgres:17.5`  | no                         | `pg_isready`                 |
+| `redis`         | pinned `redis:7-alpine` | no                         | `redis-cli ping`             |
+| `minio`         | pinned MinIO + volume   | yes (routed to port 9000)  | `mc ready local`             |
+| `db-migrate`    | `roomote-app:develop`   | no (one-shot)              | excluded                     |
+| `web`           | `roomote-app:develop`   | yes (port 3000)            | `/health`                    |
+| `api`           | `roomote-app:develop`   | yes (port 3001)            | `/health/liveness`           |
+| `controller`    | `roomote-app:develop`   | no                         | `/health/controller` via API |
+| `bullmq`        | `roomote-app:develop`   | no                         | `/admin/health`              |
+| `preview-proxy` | `roomote-app:develop`   | optional (wildcard domain) | `/health`                    |
 
 ## Environment variables
 
@@ -139,21 +139,20 @@ The template defaults to `DEFAULT_COMPUTE_PROVIDER=docker`: the controller
 mounts the host Docker socket and starts one worker container per task on
 the same server. Two things matter in this mode:
 
-- **Worker network.** The controller attaches spawned workers to the
-  network named by `DOCKER_WORKER_NETWORK` (`roomote_default`, declared at
-  the bottom of the compose file). If worker containers fail to start after
-  a deploy, confirm the network exists with `docker network ls` on the
-  Coolify server and adjust the variable if your Coolify version renames
-  compose networks.
+- **Worker network.** The controller uses the network named by
+  `DOCKER_WORKER_NETWORK` (`roomote_default`, declared at the bottom of the
+  compose file) to discover the labeled API and optional preview-proxy
+  containers. It creates a separate bridge network for each task and attaches
+  only the API plus the preview proxy when enabled, so workers do not join
+  `roomote_default`, see sibling tasks, or reach Postgres, Redis, and MinIO. If
+  worker containers fail to start after a deploy, confirm the configured
+  discovery network exists with `docker network ls` and that Coolify preserved
+  the standard Compose service labels.
 
-  Unlike the installer and deployer stacks, this path does **not** yet
-  isolate workers on a dedicated network: workers share `roomote_default`
-  with Postgres, Redis, and MinIO, so a task sandbox can reach the
-  datastores over the network. Coolify rewrites compose network definitions
-  during deploys, so the dedicated `roomote_worker` network used elsewhere
-  is not wired up here until it can be verified against a live Coolify
-  deployment. Treat Coolify deployments accordingly (trusted, single-tenant
-  use).
+  Docker task writable layers fail closed when the host storage driver cannot
+  enforce `DOCKER_WORKER_DISK_LIMIT`. Keep
+  `DOCKER_WORKER_ALLOW_UNBOUNDED_DISK=false` unless the host already enforces an
+  equivalent quota outside Docker.
 
 - **Trust boundary.** Mounting the Docker socket gives the controller
   control of the host Docker daemon. This matches the single-host
@@ -196,9 +195,9 @@ addressing, and `S3_PRESIGN_ENDPOINT` must be reachable from workers.
    callback and webhook URLs from `ROOMOTE_APP_URL` and `TRPC_URL`, so no
    manual URL entry is needed.
 5. Enter the model provider key when the wizard asks. With the default
-    Docker provider there are no sandbox credentials to enter; with hosted
-    sandboxes, enter the provider tokens and let the wizard build the E2B
-    template or Daytona snapshot when applicable.
+   Docker provider there are no sandbox credentials to enter; with hosted
+   sandboxes, enter the provider tokens and let the wizard build the E2B
+   template or Daytona snapshot when applicable.
 6. Pick repositories, create an environment, and run a small task end to end
    (the SELF_HOSTING.md verification checklist applies from step 2 onward).
 

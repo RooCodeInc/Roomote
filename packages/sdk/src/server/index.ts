@@ -12,27 +12,28 @@ export {
   optionalAuthProcedure,
 } from './trpc';
 
-export { finishCloudJob } from './lib/cloud-jobs/finish-cloud-job';
-export { findCloudJobByJobTokenClaims } from './lib/cloud-jobs/find-cloud-job';
-export { createSnapshot } from './lib/cloud-jobs/enqueue-snapshot';
-export { recordComputeProviderUsage } from './lib/cloud-jobs/record-compute-provider-usage';
+export { finishRun } from './lib/task-runs/finish-run';
+export { findTaskRunByRunTokenClaims } from './lib/task-runs/find-task-run';
+export { createSnapshot } from './lib/task-runs/enqueue-snapshot';
+export { recordComputeProviderUsage } from './lib/task-runs/record-compute-provider-usage';
 export {
   recordTaskMessageEnvelope,
   refreshTaskTitleOnCompletion,
-} from './lib/cloud-jobs/record-task-message-envelope';
-export { ensureSnapshotResumeGitHubFollowUpFallback } from './lib/cloud-jobs/ensure-snapshot-resume-github-follow-up-fallback';
+} from './lib/task-runs/record-task-message-envelope';
+export { ensureSnapshotResumeGitHubFollowUpFallback } from './lib/task-runs/ensure-snapshot-resume-github-follow-up-fallback';
 export * from './lib/manager-slack';
+export * from './automations';
 export * from './lib/manager-stats';
 export {
-  cleanupSandboxOidcTargetsForCloudJob,
+  cleanupSandboxOidcTargetsForTaskRun,
   primeSandboxOidcTargets,
   refreshDueSandboxOidcTargets,
 } from './lib/sandbox-oidc';
 export {
-  stampCloudJobMilestone,
-  cloudJobMilestoneFields,
-  type CloudJobMilestoneField,
-} from './lib/cloud-jobs/stamp-milestone';
+  stampTaskRunMilestone,
+  taskRunMilestoneFields,
+  type TaskRunMilestoneField,
+} from './lib/task-runs/stamp-milestone';
 
 export {
   buildSignedArtifactRawUrl,
@@ -95,7 +96,7 @@ export {
   SLACK_PR_INACTIVITY_QUEUE_NAME,
   enqueueSlackPrInactivityCheck,
   enqueueSlackPrInactivityCheckInputSchema,
-  fetchPullRequestSnapshotForCloudJob,
+  fetchPullRequestSnapshotForTaskRun,
   hasPullRequestMoved,
   isPullRequestTerminal,
   pullRequestActivitySnapshotSchema,
@@ -103,7 +104,7 @@ export {
   type EnqueueSlackPrInactivityCheckInput,
   type PullRequestActivitySnapshot,
   type SlackPrInactivityCheckRequest,
-} from './lib/cloud-jobs/slack-pr-inactivity-check';
+} from './lib/task-runs/slack-pr-inactivity-check';
 
 export {
   PR_REVIEW_NOTIFICATION_DEBOUNCE_MS,
@@ -115,7 +116,6 @@ export {
   enqueuePrReviewNotificationInputSchema,
   formatPrReviewActivityMessage,
   hasPrReviewNotificationThreadContext,
-  isPrReviewNotificationEnabled,
   prReviewActivityEventSchema,
   prReviewNotificationRequestSchema,
   requeuePendingPrReviewActivity,
@@ -125,7 +125,7 @@ export {
   type PrReviewActivityEvent,
   type PrReviewNotificationRequest,
   type PrReviewNotificationRoute,
-} from './lib/cloud-jobs/pr-review-notification';
+} from './lib/task-runs/pr-review-notification';
 export {
   gatherPrReviewTriageContext,
   preparePrReviewNotificationDelivery,
@@ -133,9 +133,9 @@ export {
   triagePrReviewActivity,
   type PreparedPrReviewNotification,
   type PrReviewTriageContext,
-} from './lib/cloud-jobs/pr-review-notification-delivery';
+} from './lib/task-runs/pr-review-notification-delivery';
 
-export { resolveSlackJobRouting } from './lib/cloud-jobs/slack-job-routing';
+export { resolveSlackTaskRunRouting } from './lib/task-runs/slack-task-run-routing';
 
 export {
   findSlackConversationSubjectByUserId,
@@ -146,15 +146,15 @@ export {
 
 export { updateTaskPrStatus } from './lib/pull-requests/update-task-pr-status';
 export {
-  createOrUpdateSourceControlPullRequestForCloudJob,
-  findCloudJobForSourceControlMutation,
+  createOrUpdateSourceControlPullRequestForTaskRun,
+  findTaskRunForSourceControlMutation,
   sourceControlPullRequestMutationInputSchema,
   SourceControlMutationError,
   type SourceControlPullRequestMutationInput,
   type SourceControlPullRequestMutationResult,
 } from './lib/pull-requests/source-control-pull-requests';
 export {
-  readSourceControlPullRequestForCloudJob,
+  readSourceControlPullRequestForTaskRun,
   sourceControlPullRequestReadInputSchema,
   SourceControlReadError,
   type SourceControlPullRequestReadInput,
@@ -162,7 +162,7 @@ export {
   type SourceControlPullRequestCommentsResult,
 } from './lib/pull-requests/source-control-pull-request-reads';
 export {
-  writeSourceControlPullRequestForCloudJob,
+  writeSourceControlPullRequestForTaskRun,
   sourceControlPullRequestWriteInputSchema,
   SourceControlWriteError,
   type SourceControlPullRequestWriteInput,

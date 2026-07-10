@@ -1,12 +1,98 @@
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { z } from 'zod';
 
-import { workspaceReadinessSchema } from '@roomote/types';
-
 import { automationWorkItemsResultHasSubmittedWorkItems } from './automation-slack-summary-state.js';
 import { handleSubmitAutomationWorkItems } from './submit-automation-work-items.js';
 import { errorResult } from './tool-result.js';
 import type { RoomoteConfig, ToolResult } from './types.js';
+
+// One flat work item per call. The previous array-of-nested-objects schema
+// was routinely mangled by some models (arrays sent as JSON strings, fields
+// dropped, reasoning leaking into optional fields), wedging automation scans
+// in retry loops. Fields the platform derives or rejects for automation act
+// items (disposition, workspaceReadiness, readinessMessage) are omitted.
+export const automationWorkItemInputSchema = {
+  title: z.string().trim().min(1).max(140).describe('Short work item title.'),
+  brief: z
+    .string()
+    .trim()
+    .min(1)
+    .max(2000)
+    .describe('What is wrong and why it is worth acting on.'),
+  category: z
+    .enum(['bug', 'security', 'chore', 'feature', 'improvement'])
+    .optional(),
+  priority: z.enum(['P0', 'P1', 'P2', 'P3']).optional(),
+  actionKind: z
+    .string()
+    .trim()
+    .min(1)
+    .max(120)
+    .describe(
+      'Action kind for policy and reporting, such as code_change_pr or sentry_issue_mutation.',
+    ),
+  disposition: z
+    .enum(['act'])
+    .optional()
+    .describe(
+      'Optional; always act. Roomote starts the work immediately. Approval-gated suggestions are no longer accepted.',
+    ),
+  executionPrompt: z
+    .string()
+    .trim()
+    .min(1)
+    .max(6000)
+    .describe('Execution instructions for the auto-started execution task.'),
+  investigationContext: z
+    .string()
+    .trim()
+    .min(1)
+    .max(4000)
+    .optional()
+    .describe(
+      'Optional hidden implementation context for the execution task. Not shown to Slack users.',
+    ),
+  fingerprint: z
+    .string()
+    .trim()
+    .min(1)
+    .max(255)
+    .optional()
+    .describe(
+      'Optional stable duplicate-suppression fingerprint for this work item.',
+    ),
+  targetRepositoryFullName: z
+    .string()
+    .trim()
+    .min(1)
+    .describe('Owner/repo launch target for this work item.'),
+  targetEnvironmentId: z
+    .string()
+    .uuid()
+    .describe(
+      'Environment UUID for the environment-backed launch. Copy it from the repository environments list.',
+    ),
+};
+
+type AutomationWorkItemToolParams = z.infer<
+  z.ZodObject<typeof automationWorkItemInputSchema>
+>;
+
+export function buildAutomationWorkItem(params: AutomationWorkItemToolParams) {
+  return {
+    title: params.title,
+    brief: params.brief,
+    category: params.category,
+    priority: params.priority,
+    actionKind: params.actionKind,
+    disposition: 'act' as const,
+    investigationContext: params.investigationContext,
+    executionPrompt: params.executionPrompt,
+    fingerprint: params.fingerprint,
+    targetRepositoryFullName: params.targetRepositoryFullName,
+    targetEnvironmentId: params.targetEnvironmentId,
+  };
+}
 
 export function registerAutomationWorkItemsTool(params: {
   server: McpServer;
@@ -17,87 +103,11 @@ export function registerAutomationWorkItemsTool(params: {
   params.server.registerTool(
     params.toolName,
     {
-      title: 'Submit Automation Work Items',
+      title: 'Submit Automation Work Item',
       description:
-        'Persist automation-discovered work items for the current scan task. Every item uses disposition `act` and auto-starts a silent execution task that reports its own result; automations no longer submit approval-gated suggestions.',
-      inputSchema: {
-        workItems: z
-          .array(
-            z.object({
-              title: z.string().min(1).max(140),
-              brief: z.string().min(1).max(2000),
-              category: z
-                .enum(['bug', 'security', 'chore', 'feature', 'improvement'])
-                .optional(),
-              priority: z.enum(['P0', 'P1', 'P2', 'P3']).optional(),
-              actionKind: z
-                .string()
-                .min(1)
-                .max(120)
-                .describe(
-                  'Action kind for policy and reporting, such as code_change_pr or sentry_issue_mutation.',
-                ),
-              disposition: z
-                .enum(['suggest', 'act'])
-                .describe(
-                  'Always use act: Roomote starts the work immediately. suggest is no longer accepted for automation scans and will be rejected.',
-                ),
-              investigationContext: z
-                .string()
-                .min(1)
-                .max(4000)
-                .optional()
-                .describe(
-                  'Optional hidden implementation context for the later execution task or approved suggestion launch.',
-                ),
-              executionPrompt: z
-                .string()
-                .min(1)
-                .max(6000)
-                .optional()
-                .describe(
-                  'Execution instructions for act items. Required when disposition is act.',
-                ),
-              fingerprint: z
-                .string()
-                .min(1)
-                .max(255)
-                .optional()
-                .describe(
-                  'Optional stable duplicate-suppression fingerprint for this work item.',
-                ),
-              targetRepositoryFullName: z
-                .string()
-                .min(1)
-                .optional()
-                .describe(
-                  'Owner/repo launch target for this work item. Required when disposition is act.',
-                ),
-              targetEnvironmentId: z
-                .string()
-                .uuid()
-                .optional()
-                .describe(
-                  'Optional environment UUID for environment-backed launches.',
-                ),
-              workspaceReadiness: workspaceReadinessSchema
-                .optional()
-                .describe(
-                  'Optional readiness mode for this work item: environment_backed or bare_repo.',
-                ),
-              readinessMessage: z
-                .string()
-                .min(1)
-                .max(500)
-                .optional()
-                .describe(
-                  'Optional short readiness note for bare-repo launches.',
-                ),
-            }),
-          )
-          .max(5)
-          .describe('Ordered list of up to 5 automation work items to persist'),
-      },
+        'Persist one automation-discovered work item for the current scan task and auto-start a silent execution task that reports its own result. ' +
+        'Call this tool once per work item. Every item uses disposition `act`; automations no longer submit approval-gated suggestions.',
+      inputSchema: automationWorkItemInputSchema,
       annotations: {
         readOnlyHint: false,
         destructiveHint: false,
@@ -119,7 +129,7 @@ export function registerAutomationWorkItemsTool(params: {
       const result = await handleSubmitAutomationWorkItems(
         {
           taskId,
-          workItems: toolParams.workItems,
+          workItems: [buildAutomationWorkItem(toolParams)],
         },
         config,
       );

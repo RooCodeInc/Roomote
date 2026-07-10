@@ -1,3 +1,8 @@
+import {
+  resolveTeamsBotCredentialEnvVarNames,
+  type TeamsBotInferredFieldEnvVarName,
+} from './teams-bot-credentials';
+
 export const SETUP_AUTH_PROVIDER_IDS = ['slack', 'microsoft'] as const;
 
 export type SetupAuthProviderId = (typeof SETUP_AUTH_PROVIDER_IDS)[number];
@@ -91,18 +96,18 @@ export const SETUP_AUTH_PROVIDER_CATALOG = [
       {
         envVarName: 'ROOMOTE_AUTH_MICROSOFT_CLIENT_ID',
         acceptedEnvVarNames: ['ROOMOTE_AUTH_MICROSOFT_CLIENT_ID'],
-        label: 'App Client ID',
+        label: 'App (Client) ID',
       },
       {
         envVarName: 'ROOMOTE_AUTH_MICROSOFT_CLIENT_SECRET',
         acceptedEnvVarNames: ['ROOMOTE_AUTH_MICROSOFT_CLIENT_SECRET'],
-        label: 'Client Secret',
+        label: 'Client Secret Value',
         secret: true,
       },
       {
         envVarName: 'ROOMOTE_AUTH_MICROSOFT_TENANT_ID',
         acceptedEnvVarNames: ['ROOMOTE_AUTH_MICROSOFT_TENANT_ID'],
-        label: 'Tenant ID',
+        label: 'Directory (Tenant) ID',
       },
       {
         envVarName: 'TEAMS_BOT_APP_ID',
@@ -119,6 +124,12 @@ export const SETUP_AUTH_PROVIDER_CATALOG = [
         envVarName: 'TEAMS_BOT_TENANT_ID',
         acceptedEnvVarNames: ['TEAMS_BOT_TENANT_ID'],
         label: 'Teams Bot Tenant ID',
+      },
+      {
+        envVarName: 'TEAMS_BOT_NAME',
+        acceptedEnvVarNames: ['TEAMS_BOT_NAME'],
+        label: 'Teams Bot Display Name',
+        required: false,
       },
       {
         envVarName: 'TEAMS_BOT_TOKEN_ENDPOINT',
@@ -175,14 +186,35 @@ export function buildSetupAuthStatus(input: {
     Array.from(input.persistedEnvVarNames ?? []).map((name) => name.trim()),
   );
 
+  const effectiveTeamsBotCredentialEnvVarNames =
+    resolveTeamsBotCredentialEnvVarNames({
+      hasConfiguredEnvVar: (name) =>
+        isConfiguredEnvValue(runtimeEnv[name]) ||
+        persistedEnvVarNameSet.has(name),
+    }).fieldSourceEnvVarNames;
+
   const providers = SETUP_AUTH_PROVIDER_CATALOG.map((provider) => {
     const fields = provider.fields.map((field) => {
-      const runtimeMatch = field.acceptedEnvVarNames.find((envVarName) =>
-        isConfiguredEnvValue(runtimeEnv[envVarName]),
-      );
-      const savedMatch = field.acceptedEnvVarNames.find((envVarName) =>
-        persistedEnvVarNameSet.has(envVarName),
-      );
+      const inferredMatch =
+        provider.id === 'microsoft'
+          ? effectiveTeamsBotCredentialEnvVarNames[
+              field.envVarName as TeamsBotInferredFieldEnvVarName
+            ]
+          : undefined;
+      const runtimeMatch =
+        (inferredMatch && isConfiguredEnvValue(runtimeEnv[inferredMatch])
+          ? inferredMatch
+          : undefined) ??
+        field.acceptedEnvVarNames.find((envVarName) =>
+          isConfiguredEnvValue(runtimeEnv[envVarName]),
+        );
+      const savedMatch =
+        (inferredMatch && persistedEnvVarNameSet.has(inferredMatch)
+          ? inferredMatch
+          : undefined) ??
+        field.acceptedEnvVarNames.find((envVarName) =>
+          persistedEnvVarNameSet.has(envVarName),
+        );
 
       return {
         ...field,

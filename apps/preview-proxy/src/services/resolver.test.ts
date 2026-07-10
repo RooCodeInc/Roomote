@@ -1,12 +1,12 @@
-import type { CloudJob } from '@roomote/db/server';
-import { CloudTaskStatus, type EnvironmentConfig } from '@roomote/types';
+import type { TaskRun } from '@roomote/db/server';
+import { RunStatus, type EnvironmentConfig } from '@roomote/types';
 
 const {
-  cloudJobFindFirstMock,
+  taskRunFindFirstMock,
   environmentFindFirstMock,
   deploymentSettingsFindFirstMock,
 } = vi.hoisted(() => ({
-  cloudJobFindFirstMock: vi.fn(),
+  taskRunFindFirstMock: vi.fn(),
   environmentFindFirstMock: vi.fn(),
   deploymentSettingsFindFirstMock: vi.fn(),
 }));
@@ -14,8 +14,8 @@ const {
 vi.mock('../lib/db', () => ({
   db: {
     query: {
-      cloudJobs: {
-        findFirst: cloudJobFindFirstMock,
+      taskRuns: {
+        findFirst: taskRunFindFirstMock,
       },
       environments: {
         findFirst: environmentFindFirstMock,
@@ -29,11 +29,11 @@ vi.mock('../lib/db', () => ({
 
 import { resolveRequest } from './resolver';
 
-function createRunningCloudJob(overrides: Partial<CloudJob> = {}): CloudJob {
+function createRunningTaskRun(overrides: Partial<TaskRun> = {}): TaskRun {
   return {
     id: 1,
     taskId: 'outertask12345',
-    status: CloudTaskStatus.Running,
+    status: RunStatus.Running,
     payload: {
       environmentId: 'env_app',
     },
@@ -46,7 +46,7 @@ function createRunningCloudJob(overrides: Partial<CloudJob> = {}): CloudJob {
     authBypassValue: null,
     authBypassHeaderName: null,
     ...overrides,
-  } as unknown as CloudJob;
+  } as unknown as TaskRun;
 }
 
 function createEnvironmentConfig(
@@ -66,7 +66,7 @@ function createEnvironmentConfig(
 describe('resolveRequest', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    cloudJobFindFirstMock.mockResolvedValue(createRunningCloudJob());
+    taskRunFindFirstMock.mockResolvedValue(createRunningTaskRun());
     deploymentSettingsFindFirstMock.mockResolvedValue({ metadata: {} });
   });
 
@@ -115,8 +115,8 @@ describe('resolveRequest', () => {
   });
 
   it('requires auth for system API surfaces that are not user-defined ports', async () => {
-    cloudJobFindFirstMock.mockResolvedValue(
-      createRunningCloudJob({
+    taskRunFindFirstMock.mockResolvedValue(
+      createRunningTaskRun({
         machineDomains: {
           API: 'http://127.0.0.1:3001',
         },
@@ -141,8 +141,8 @@ describe('resolveRequest', () => {
   });
 
   it('only uses explicitly configured auth bypass paths for user-defined API ports', async () => {
-    cloudJobFindFirstMock.mockResolvedValue(
-      createRunningCloudJob({
+    taskRunFindFirstMock.mockResolvedValue(
+      createRunningTaskRun({
         machineDomains: {
           API: 'http://127.0.0.1:3001',
         },
@@ -169,8 +169,8 @@ describe('resolveRequest', () => {
   });
 
   it('proxies sandbox server requests without preview auth', async () => {
-    cloudJobFindFirstMock.mockResolvedValue(
-      createRunningCloudJob({
+    taskRunFindFirstMock.mockResolvedValue(
+      createRunningTaskRun({
         machineDomains: {
           SANDBOX_SERVER: 'http://roomote-worker-1:4200',
         },
@@ -195,7 +195,7 @@ describe('resolveRequest', () => {
   it('fails closed for legacy GUI hosts', async () => {
     const result = await resolveRequest({ taskId: 'outertask12345' }, 'gui');
 
-    expect(cloudJobFindFirstMock).not.toHaveBeenCalled();
+    expect(taskRunFindFirstMock).not.toHaveBeenCalled();
     expect(result).toMatchObject({
       status: 'not_found',
       requestedPortKey: 'GUI',

@@ -132,7 +132,10 @@ describe('review-code GitHub workflow paths', () => {
       'If no actionable code issues remain, use a short status line in the hidden status block, such as `No code issues found.`',
     );
     expect(skillContent).toContain(
-      'Record optional task-context values if they are supplied: `last_review_sha`, `current_head_sha`, `task_link_follow`, `task_link_see`, `TOP_LEVEL_COMMENT_ID`, `linked_implementation_task_id`, `top_level_review_comment`, `prior_summary_checklist`, `pull_request_details`, `changed_files_since_last_review`, `commits_since_last_review`, `linked_issue`, `diff_in_range`, `existing_review_comments`, and `issue_comments`.',
+      'Record optional task-context values if they are supplied: `last_review_sha`, `current_head_sha`, `task_link_follow`, `task_link_see`, `TOP_LEVEL_COMMENT_ID`, `linked_implementation_task_id`, `top_level_review_comment`, `prior_summary_checklist`, `pull_request_details`, `pull_request_changed_files`, `changed_files_since_last_review`, `commits_since_last_review`, `linked_issue`, `diff_in_range`, `existing_review_comments`, and `issue_comments`.',
+    );
+    expect(skillContent).toContain(
+      'When `pull_request_changed_files` is supplied, treat it as the authoritative set of files this pull request changes',
     );
     expect(skillContent).toContain(
       'If `prior_summary_checklist` is supplied, treat it as the parsed checklist inventory you must preserve in the refreshed summary.',

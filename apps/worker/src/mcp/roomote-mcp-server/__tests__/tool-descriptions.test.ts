@@ -128,7 +128,7 @@ describe('roomote MCP tool descriptions', () => {
     );
   });
 
-  it('documents the cloud job log debugging action on manage_tasks', async () => {
+  it('documents the task run log debugging action on manage_tasks', async () => {
     const { registeredTools } = await importRoomoteMcpServer();
     const manageTasksTool = getRegisteredTool(registeredTools, 'manage_tasks');
 
@@ -458,7 +458,7 @@ describe('roomote MCP tool descriptions', () => {
     );
 
     const { registeredTools } = await importRoomoteMcpServer({
-      ROOMOTE_CLOUD_TOKEN: 'job-token',
+      ROOMOTE_CLOUD_TOKEN: 'run-token',
       ROOMOTE_PLATFORM_API_URL: 'https://platform.example.com',
     });
     const lookupTool = getRegisteredTool(registeredTools, 'get_slack_thread');
@@ -504,7 +504,7 @@ describe('roomote MCP tool descriptions', () => {
     );
 
     const { registeredTools } = await importRoomoteMcpServer({
-      ROOMOTE_CLOUD_TOKEN: 'job-token',
+      ROOMOTE_CLOUD_TOKEN: 'run-token',
       ROOMOTE_PLATFORM_API_URL: 'https://platform.example.com',
     });
     const lookupTool = getRegisteredTool(
@@ -648,8 +648,8 @@ describe('roomote MCP tool descriptions', () => {
       'utf8',
     );
 
-    expect(source).toContain('CloudTaskType.StandardTask');
-    expect(source).toContain('CloudTaskType.SlackAppMention');
+    expect(source).toContain('TaskPayloadKind.StandardTask');
+    expect(source).toContain('TaskPayloadKind.SlackAppMention');
     expect(source).toContain(
       'const WEB_TASK_TYPES_WITH_SECURE_ENV_REQUESTS = new Set<string>([',
     );

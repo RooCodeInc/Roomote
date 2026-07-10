@@ -1,6 +1,6 @@
 import {
-  type CloudTask,
-  CloudTaskType,
+  type TaskSpec,
+  TaskPayloadKind,
   getCommunicationChannelFromTaskPayload,
   getCommunicationMessageIdFromTaskPayload,
   getCommunicationProviderFromTaskPayload,
@@ -17,14 +17,16 @@ import {
   getFeatureFlagEvaluator,
 } from '@roomote/feature-flags/server';
 import {
-  type CloudJob,
+  type TaskRun,
   db,
-  resolveTaskAttribution,
+  eq,
+  tasks,
   getBackgroundAgentSettings,
   DEFAULT_CONFLICT_RESOLVER_LABEL,
   getDeploymentPrAction,
 } from '@roomote/db/server';
 import { Env } from '@roomote/env';
+import { resolveConfiguredGitHubAppSlug } from '@roomote/github';
 import { getRedis } from '@roomote/redis';
 
 import { githubPrReview } from './workflows/githubPrReview';
@@ -40,49 +42,52 @@ import {
 import { linearAgentSession } from './workflows/linearAgentSession';
 import { githubPrConflictResolve } from './workflows/githubPrConflictResolve';
 import { getWorkspaceRepositoryFullNames } from './workflows/utils';
+import {
+  DEFAULT_ROOMOTE_COMMIT_AUTHOR,
+  resolveTaskCommitAuthor,
+} from './commit-author';
 
-import { getTaskUrl } from './cloud-job-id-coder';
+import { getTaskUrl } from './task-url';
 
 export async function generatePrompt({
-  cloudJob,
-  cloudTask,
+  taskRun,
+  taskSpec,
   gitHubToken,
 }: {
-  cloudJob: CloudJob;
-  cloudTask: CloudTask;
+  taskRun: TaskRun;
+  taskSpec: TaskSpec;
   gitHubToken: string;
 }): Promise<{
   prompt: string;
   harnessInstructions?: string;
   artifacts: Record<string, unknown>;
 }> {
-  const cloudJobUrl = getTaskUrl({
-    taskId: cloudJob.taskId,
-    utm: { campaign: cloudJob.type, source: 'github-comment' },
+  const taskRunUrl = getTaskUrl({
+    taskId: taskRun.taskId,
+    utm: { campaign: taskRun.payloadKind, source: 'github-comment' },
   });
 
-  const attribution = await resolveTaskAttribution(db, {
-    attributionKind: cloudJob.attributionKind,
-    attributedUserId: cloudJob.attributedUserId,
-    attributionSourceKind: cloudJob.attributionSourceKind,
-    attributionSourceDisplayName: cloudJob.attributionSourceDisplayName,
-    attributionSourceExternalId: cloudJob.attributionSourceExternalId,
-    attributedGithubLogin: cloudJob.attributedGithubLogin,
-    attributedGithubUserId: cloudJob.attributedGithubUserId,
-    effectiveAuthorKind: cloudJob.effectiveAuthorKind,
-    effectiveAuthorUserId: cloudJob.effectiveAuthorUserId,
-    effectiveAuthorDisplayName: cloudJob.effectiveAuthorDisplayName,
-    effectiveAuthorGithubLogin: cloudJob.effectiveAuthorGithubLogin,
-    effectiveAuthorGithubUserId: cloudJob.effectiveAuthorGithubUserId,
-    effectiveAuthorReason: cloudJob.effectiveAuthorReason,
-    effectiveAuthorRuleId: cloudJob.effectiveAuthorRuleId,
-    effectivePrOwnerKind: cloudJob.effectivePrOwnerKind,
-    effectivePrOwnerUserId: cloudJob.effectivePrOwnerUserId,
-    effectivePrOwnerDisplayName: cloudJob.effectivePrOwnerDisplayName,
-    effectivePrOwnerGithubLogin: cloudJob.effectivePrOwnerGithubLogin,
-    effectivePrOwnerReason: cloudJob.effectivePrOwnerReason,
-    effectivePrOwnerRuleId: cloudJob.effectivePrOwnerRuleId,
+  // The workflow prompt builders classify logins synchronously (bot-identity
+  // checks, review-summary comment reuse, PR attribution mentions); refresh
+  // the configured app slug first so an app created through the /setup flow
+  // is recognized as ourselves.
+  await resolveConfiguredGitHubAppSlug();
+
+  const taskRow = await db.query.tasks.findFirst({
+    where: eq(tasks.id, taskRun.taskId),
+    columns: {
+      commitAuthorKind: true,
+      commitAuthorUserId: true,
+      commitAuthorLogin: true,
+      commitAuthorExternalId: true,
+      prAssigneeLogin: true,
+      actorDisplayName: true,
+      slackThreadTs: true,
+    },
   });
+  const commitAuthor = taskRow
+    ? await resolveTaskCommitAuthor(db, taskRow)
+    : DEFAULT_ROOMOTE_COMMIT_AUTHOR;
   const { conflictResolverFrequency, conflictResolverLabel } =
     await getBackgroundAgentSettings().catch(() => ({
       conflictResolverFrequency: 'every_6_hours' as const,
@@ -95,7 +100,7 @@ export async function generatePrompt({
     await featureFlagEvaluator
       .evaluate(flag, {
         isDeploymentContext: false,
-        userId: cloudJob.userId ?? cloudTask.userId ?? 'deployment',
+        userId: taskRun.actingUserId ?? 'deployment',
       })
       .catch(() => false);
   const visualProofAutoScreencastEnabled = await evaluateOrgFeatureFlag(
@@ -106,89 +111,88 @@ export async function generatePrompt({
   );
   const prAction = await getDeploymentPrAction().catch(() => undefined);
 
-  switch (cloudTask.type) {
-    // <Agent: PR Reviewer, Trigger: GitHub>
-    case CloudTaskType.GithubPrReview:
+  switch (taskSpec.type) {
+    // <Workflow: PR review, Trigger: GitHub>
+    case TaskPayloadKind.GithubPrReview:
       return githubPrReview({
-        cloudTask,
+        taskSpec,
         gitHubToken,
-        cloudJobUrl,
-        attribution,
+        taskRunUrl,
+        attribution: commitAuthor,
         visualProofAutoScreencastEnabled,
         backgroundProofCaptureEnabled,
       });
-    case CloudTaskType.GithubPrReviewSync:
+    case TaskPayloadKind.GithubPrReviewSync:
       return githubPrReviewSync({
-        cloudJobId: cloudJob.id,
-        cloudTask,
+        runId: taskRun.id,
+        taskSpec,
         gitHubToken,
-        cloudJobUrl,
-        attribution,
+        taskRunUrl,
+        attribution: commitAuthor,
         visualProofAutoScreencastEnabled,
         backgroundProofCaptureEnabled,
       });
 
-    // <Agent: PR Reviewer follow-up, Trigger: GitHub>
-    case CloudTaskType.GithubPrReviewFollowUp:
+    // <Workflow: PR review follow-up, Trigger: GitHub>
+    case TaskPayloadKind.GithubPrReviewFollowUp:
       return githubPrReviewFollowUp({
-        cloudTask,
+        taskSpec,
         gitHubToken,
-        cloudJobUrl,
-        attribution,
+        taskRunUrl,
+        attribution: commitAuthor,
         visualProofAutoScreencastEnabled,
         backgroundProofCaptureEnabled,
       });
 
-    // <Agent: Fixer, Trigger: GitHub (conflict resolution)>
-    case CloudTaskType.GithubPrConflictResolve:
+    // <Workflow: PR conflict resolution, Trigger: GitHub>
+    case TaskPayloadKind.GithubPrConflictResolve:
       return githubPrConflictResolve({
-        cloudTask,
-        cloudJobUrl,
-        attribution,
+        taskSpec,
+        taskRunUrl,
+        attribution: commitAuthor,
         visualProofAutoScreencastEnabled,
         backgroundProofCaptureEnabled,
       });
 
-    // <Agent: Generalist, Trigger: Slack>
-    case CloudTaskType.SlackAppMention: {
+    // <Workflow: standard, Trigger: Slack>
+    case TaskPayloadKind.SlackAppMention: {
       return slackAppMention({
-        cloudTask,
-        repoFullNames: await getWorkspaceRepositoryFullNames(cloudTask),
+        taskSpec,
+        repoFullNames: await getWorkspaceRepositoryFullNames(taskSpec),
         conflictResolverLabel: enabledConflictResolverLabel,
-        cloudJobUrl,
-        attribution,
+        taskRunUrl,
+        attribution: commitAuthor,
         visualProofAutoScreencastEnabled,
         backgroundProofCaptureEnabled,
         prAction,
       });
     }
 
-    // <Agent: Generalist, Trigger: Linear>
-    case CloudTaskType.LinearAgentSession:
+    // <Workflow: standard, Trigger: Linear>
+    case TaskPayloadKind.LinearAgentSession:
       return linearAgentSession({
-        cloudTask,
-        repoFullNames: await getWorkspaceRepositoryFullNames(cloudTask),
+        taskSpec,
+        repoFullNames: await getWorkspaceRepositoryFullNames(taskSpec),
         conflictResolverLabel: enabledConflictResolverLabel,
-        cloudJobUrl,
-        attribution,
+        taskRunUrl,
+        attribution: commitAuthor,
         visualProofAutoScreencastEnabled,
         backgroundProofCaptureEnabled,
         prAction,
       });
 
-    // <Agent: Generalist, Trigger: Manual>
-    case CloudTaskType.StandardTask:
-    case CloudTaskType.SuggestedTasks:
-    case CloudTaskType.McpRecommendations:
-    case CloudTaskType.LegacyOnboardingSuggestions: {
-      const baseDescription = cloudTask.payload.description;
+    // <Workflow: standard, Trigger: Manual>
+    case TaskPayloadKind.StandardTask:
+    case TaskPayloadKind.Scan:
+    case TaskPayloadKind.McpRecommendations: {
+      const baseDescription = taskSpec.payload.description;
       if (!baseDescription) {
-        throw new Error(`Description is required for ${cloudTask.type}`);
+        throw new Error(`Description is required for ${taskSpec.type}`);
       }
 
-      const bootstrapSkill = cloudTask.payload.bootstrap?.skill;
+      const bootstrapSkill = taskSpec.payload.bootstrap?.skill;
       const baseDescriptionWithBootstrap = bootstrapSkill
-        ? `${getSkillCommandDelimiter(cloudTask.harness)}${bootstrapSkill}\n${baseDescription}`
+        ? `${getSkillCommandDelimiter(taskSpec.harness)}${bootstrapSkill}\n${baseDescription}`
         : baseDescription;
 
       // When the description starts with an explicit skill invocation —
@@ -216,9 +220,9 @@ export async function generatePrompt({
       const requestFormat: 'plain' | 'structured' | undefined = skillPrefixMatch
         ? 'structured'
         : undefined;
-      const slackChannel = getSlackChannelFromTaskPayload(cloudTask.payload);
+      const slackChannel = getSlackChannelFromTaskPayload(taskSpec.payload);
       const communicationProvider = getCommunicationProviderFromTaskPayload(
-        cloudTask.payload,
+        taskSpec.payload,
       );
       const nonSlackChatProvider =
         communicationProvider === 'teams' ||
@@ -226,39 +230,39 @@ export async function generatePrompt({
           ? communicationProvider
           : null;
       const slackThreadTs =
-        getSlackThreadTsFromTaskPayload(cloudTask.payload) ??
-        cloudJob.slackThreadTs ??
+        getSlackThreadTsFromTaskPayload(taskSpec.payload) ??
+        taskRow?.slackThreadTs ??
         null;
       // Telegram and Teams persist generic conversation ids on the payload;
       // resolve them into the surface-specific fields the PR provenance line
       // needs to deep-link back to the originating chat message.
       const communicationChannelId = getCommunicationChannelFromTaskPayload(
-        cloudTask.payload,
+        taskSpec.payload,
       );
       const communicationThreadId = getCommunicationThreadIdFromTaskPayload(
-        cloudTask.payload,
+        taskSpec.payload,
       );
       const communicationMessageId = getCommunicationMessageIdFromTaskPayload(
-        cloudTask.payload,
+        taskSpec.payload,
       );
       const teamsTenantId = getCommunicationTenantIdFromTaskPayload(
-        cloudTask.payload,
+        taskSpec.payload,
       );
 
       const result = standardTask({
         description,
-        repo: cloudTask.payload.repo,
-        repoFullNames: await getWorkspaceRepositoryFullNames(cloudTask),
+        repo: taskSpec.payload.repo,
+        repoFullNames: await getWorkspaceRepositoryFullNames(taskSpec),
         taskSurface: slackChannel
           ? 'slack'
           : nonSlackChatProvider
             ? nonSlackChatProvider
             : 'web',
         conflictResolverLabel: enabledConflictResolverLabel,
-        cloudJobUrl,
-        attribution,
+        taskRunUrl,
+        attribution: commitAuthor,
         slackTeamDomain:
-          getSlackTeamDomainFromTaskPayload(cloudTask.payload) ?? undefined,
+          getSlackTeamDomainFromTaskPayload(taskSpec.payload) ?? undefined,
         slackChannel: slackChannel ?? undefined,
         slackThreadTs: slackThreadTs ?? undefined,
         telegramChatId:
@@ -290,13 +294,13 @@ export async function generatePrompt({
           nonSlackChatProvider === 'teams'
             ? (Env.TEAMS_BOT_APP_ID ?? undefined)
             : undefined,
-        interactiveMode: cloudTask.payload.bootstrap?.interactiveMode,
+        interactiveMode: taskSpec.payload.bootstrap?.interactiveMode,
         requestFormat,
-        linkedWorkItems: cloudTask.payload.linkedWorkItems,
+        linkedWorkItems: taskSpec.payload.linkedWorkItems,
         visualProofAutoScreencastEnabled,
         backgroundProofCaptureEnabled,
         sourceControlProvider: resolveSourceControlProviderFromPayload(
-          cloudTask.payload,
+          taskSpec.payload,
         ),
         prAction,
       });
@@ -324,6 +328,6 @@ export async function generatePrompt({
     }
 
     default:
-      throw new Error(`Unsupported cloud task type: ${cloudTask.type}`);
+      throw new Error(`Unsupported task type: ${taskSpec.type}`);
   }
 }

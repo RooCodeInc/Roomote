@@ -11,16 +11,16 @@ const LATEST_INBOUND_MESSAGE_ID_TTL_SECONDS = 60 * 60 * 24;
 
 function getCommunicationMessagesKey(
   provider: CommunicationProvider,
-  cloudJobId: number,
+  runId: number,
 ): string {
-  return `${getCommunicationProviderQueuePrefix(provider)}${cloudJobId}`;
+  return `${getCommunicationProviderQueuePrefix(provider)}${runId}`;
 }
 
 function getLatestInboundMessageIdKey(
   provider: CommunicationProvider,
-  cloudJobId: number,
+  runId: number,
 ): string {
-  return `${provider}:latest_inbound_message_id:${cloudJobId}`;
+  return `${provider}:latest_inbound_message_id:${runId}`;
 }
 
 function getRedisExecCommandError(
@@ -37,10 +37,10 @@ function parseQueuedCommunicationMessages(
   provider: CommunicationProvider,
   rawMessages: string[],
   {
-    cloudJobId,
+    runId,
     operation,
   }: {
-    cloudJobId: number;
+    runId: number;
     operation: string;
   },
 ): QueuedCommunicationMessage[] {
@@ -54,7 +54,7 @@ function parseQueuedCommunicationMessages(
 
       if (!parsed.success) {
         console.error(
-          `[${operation}] Failed to parse ${provider} message for cloud job ${cloudJobId}: ${parsed.error.message}`,
+          `[${operation}] Failed to parse ${provider} message for task run ${runId}: ${parsed.error.message}`,
         );
         continue;
       }
@@ -62,7 +62,7 @@ function parseQueuedCommunicationMessages(
       messages.push(parsed.data);
     } catch (error) {
       console.error(
-        `[${operation}] Failed to parse ${provider} message for cloud job ${cloudJobId}: ${error instanceof Error ? error.message : String(error)}`,
+        `[${operation}] Failed to parse ${provider} message for task run ${runId}: ${error instanceof Error ? error.message : String(error)}`,
       );
     }
   }
@@ -72,11 +72,11 @@ function parseQueuedCommunicationMessages(
 
 export async function queueCommunicationMessage(
   provider: CommunicationProvider,
-  cloudJobId: number,
+  runId: number,
   message: QueuedCommunicationMessage,
 ): Promise<void> {
   const redis = getRedis();
-  const key = getCommunicationMessagesKey(provider, cloudJobId);
+  const key = getCommunicationMessagesKey(provider, runId);
 
   await redis.rpush(key, JSON.stringify(message));
   await redis.expire(key, COMMUNICATION_MESSAGE_TTL_SECONDS);
@@ -84,7 +84,7 @@ export async function queueCommunicationMessage(
 
 export async function prependCommunicationMessages(
   provider: CommunicationProvider,
-  cloudJobId: number,
+  runId: number,
   messages: QueuedCommunicationMessage[],
 ): Promise<void> {
   if (messages.length === 0) {
@@ -92,7 +92,7 @@ export async function prependCommunicationMessages(
   }
 
   const redis = getRedis();
-  const key = getCommunicationMessagesKey(provider, cloudJobId);
+  const key = getCommunicationMessagesKey(provider, runId);
   const multi = redis.multi();
 
   for (const message of [...messages].reverse()) {
@@ -116,10 +116,10 @@ export async function prependCommunicationMessages(
 
 export async function hasQueuedCommunicationMessages(
   provider: CommunicationProvider,
-  cloudJobId: number,
+  runId: number,
 ): Promise<boolean> {
   const redis = getRedis();
-  const key = getCommunicationMessagesKey(provider, cloudJobId);
+  const key = getCommunicationMessagesKey(provider, runId);
   const count = await redis.llen(key);
 
   return count > 0;
@@ -127,27 +127,27 @@ export async function hasQueuedCommunicationMessages(
 
 export async function peekCommunicationMessageCount(
   provider: CommunicationProvider,
-  cloudJobId: number,
+  runId: number,
 ): Promise<number> {
   const redis = getRedis();
-  const key = getCommunicationMessagesKey(provider, cloudJobId);
+  const key = getCommunicationMessagesKey(provider, runId);
 
   return redis.llen(key);
 }
 
 export async function getCommunicationMessages(
   provider: CommunicationProvider,
-  cloudJobId: number,
+  runId: number,
 ): Promise<QueuedCommunicationMessage[]> {
   const redis = getRedis();
-  const key = getCommunicationMessagesKey(provider, cloudJobId);
+  const key = getCommunicationMessagesKey(provider, runId);
   let results: Array<[unknown, unknown]> | null | undefined;
 
   try {
     results = await redis.multi().lrange(key, 0, -1).del(key).exec();
   } catch (error) {
     console.error(
-      `[getCommunicationMessages] Redis multi exec failed for ${provider} cloud job ${cloudJobId}: ${
+      `[getCommunicationMessages] Redis multi exec failed for ${provider} task run ${runId}: ${
         error instanceof Error ? error.message : String(error)
       }`,
     );
@@ -163,7 +163,7 @@ export async function getCommunicationMessages(
 
   if (lrangeError) {
     console.error(
-      `[getCommunicationMessages] Redis lrange failed for ${provider} cloud job ${cloudJobId}: ${lrangeError instanceof Error ? lrangeError.message : String(lrangeError)}`,
+      `[getCommunicationMessages] Redis lrange failed for ${provider} task run ${runId}: ${lrangeError instanceof Error ? lrangeError.message : String(lrangeError)}`,
     );
 
     return [];
@@ -173,7 +173,7 @@ export async function getCommunicationMessages(
 
   if (delError) {
     console.error(
-      `[getCommunicationMessages] Redis del failed for ${provider} cloud job ${cloudJobId}: ${delError instanceof Error ? delError.message : String(delError)}`,
+      `[getCommunicationMessages] Redis del failed for ${provider} task run ${runId}: ${delError instanceof Error ? delError.message : String(delError)}`,
     );
   }
 
@@ -184,13 +184,13 @@ export async function getCommunicationMessages(
   }
 
   return parseQueuedCommunicationMessages(provider, rawMessages, {
-    cloudJobId,
+    runId,
     operation: 'getCommunicationMessages',
   });
 }
 
 /**
- * Track the most recent inbound user message id for a cloud job so outbound
+ * Track the most recent inbound user message id for a task run so outbound
  * replies can quote/reply-to the latest user message instead of the original
  * launch message. Telegram task payloads carry the launch message id once at
  * task start; without this tracker every bot reply would keep quoting that
@@ -198,7 +198,7 @@ export async function getCommunicationMessages(
  */
 export async function setLatestInboundMessageId(
   provider: CommunicationProvider,
-  cloudJobId: number,
+  runId: number,
   messageId: string,
 ): Promise<void> {
   const trimmed = messageId.trim();
@@ -208,17 +208,17 @@ export async function setLatestInboundMessageId(
   }
 
   const redis = getRedis();
-  const key = getLatestInboundMessageIdKey(provider, cloudJobId);
+  const key = getLatestInboundMessageIdKey(provider, runId);
 
   await redis.set(key, trimmed, 'EX', LATEST_INBOUND_MESSAGE_ID_TTL_SECONDS);
 }
 
 export async function getLatestInboundMessageId(
   provider: CommunicationProvider,
-  cloudJobId: number,
+  runId: number,
 ): Promise<string | null> {
   const redis = getRedis();
-  const key = getLatestInboundMessageIdKey(provider, cloudJobId);
+  const key = getLatestInboundMessageIdKey(provider, runId);
   const raw = await redis.get(key);
 
   if (typeof raw !== 'string') {

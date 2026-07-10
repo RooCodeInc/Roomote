@@ -1,10 +1,10 @@
 import type {
-  CloudTaskPayload,
-  CloudTaskType,
+  TaskPayload,
   SuggestionCategory,
   SuggestionPriority,
+  TaskPayloadKind,
   TaskSuggestionSource,
-  TaskSuggestionStatus,
+  WorkItemStatus,
 } from '@roomote/types';
 
 export type PersistedTaskSuggestion = {
@@ -27,9 +27,11 @@ export type TaskSuggestionGenerationStatus =
 
 export type SuggestionHistoryAutomation = TaskSuggestionSource | 'onboarding';
 
+// Suggestions are now work_items(kind='suggestion'); the old 'started' status
+// maps to the merged model's 'launched'.
 export type VisibleTaskSuggestionStatus = Extract<
-  TaskSuggestionStatus,
-  'open' | 'started' | 'dismissed'
+  WorkItemStatus,
+  'open' | 'launched' | 'dismissed'
 >;
 
 export type SuggestionHistoryStatusFilter =
@@ -53,10 +55,7 @@ export type SuggestionHistoryItem = {
   readinessMessage: string | null;
 };
 
-export type SuggestionSourceCloudJob = {
-  id: number;
-  taskId: string;
-  type: CloudTaskType;
-  payload: CloudTaskPayload;
-  sourceCloudJobId: number | null;
+export type SuggestionSourceTaskRun = {
+  payloadKind: TaskPayloadKind;
+  payload: TaskPayload;
 };

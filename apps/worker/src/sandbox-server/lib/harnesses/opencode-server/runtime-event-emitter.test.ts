@@ -118,4 +118,59 @@ describe('OpenCodeRuntimeEventEmitter', () => {
       payload: { logicalEventId },
     });
   });
+
+  it('emits and persists a task_cancelled marker with attribution', () => {
+    const { emitter, runtimeOutput, runtimePersistedEnvelope } =
+      createEmitter();
+
+    emitter.taskCancelled({
+      sessionId: 'session-1',
+      cancelledByName: 'Daniel',
+      source: 'web',
+    });
+
+    const liveEvent = runtimeOutput.mock.calls[0]?.[0];
+    const persistedEnvelope = runtimePersistedEnvelope.mock.calls[0]?.[0];
+
+    expect(liveEvent).toMatchObject({
+      eventType: ACP_ENVELOPE_EVENT_TYPES.TaskCancelled,
+      kind: 'task_cancelled',
+      role: 'system',
+      text: 'Stopped by Daniel',
+      payload: {
+        sessionId: 'session-1',
+        cancelledByName: 'Daniel',
+        source: 'web',
+      },
+    });
+    expect(persistedEnvelope).toMatchObject({
+      eventType: ACP_ENVELOPE_EVENT_TYPES.TaskCancelled,
+      role: 'system',
+      payload: {
+        sessionId: 'session-1',
+        cancelledByName: 'Daniel',
+        source: 'web',
+      },
+    });
+    // Live and persisted share one logical id so they reconcile as the same
+    // transcript item.
+    expect(liveEvent?.logicalEventId).toBeDefined();
+    expect(liveEvent?.logicalEventId).toBe(persistedEnvelope?.logicalEventId);
+  });
+
+  it('keeps repeated task_cancelled markers logically distinct', () => {
+    const { emitter, runtimePersistedEnvelope } = createEmitter();
+
+    emitter.taskCancelled({ sessionId: 'session-1' });
+    emitter.taskCancelled({ sessionId: 'session-1' });
+
+    const [first, second] = runtimePersistedEnvelope.mock.calls.map(
+      (call) => call[0],
+    );
+
+    expect(first?.payload).not.toHaveProperty('cancelledByName');
+    expect(first?.logicalEventId).toBeDefined();
+    expect(second?.logicalEventId).toBeDefined();
+    expect(first?.logicalEventId).not.toBe(second?.logicalEventId);
+  });
 });

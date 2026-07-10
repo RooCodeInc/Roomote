@@ -4,13 +4,13 @@ import { useMemo } from 'react';
 
 import { cn } from '@/lib/utils';
 
-import type { CloudSession } from '../hooks';
+import type { TaskSession } from '../hooks';
 import { useArtifactByPath, useTaskSidePanel } from '../hooks';
 import { ArtifactList } from './artifacts/ArtifactList';
 import { ArtifactDetail } from './artifacts/ArtifactDetail';
 
 interface ArtifactsSidePanelProps {
-  session: CloudSession;
+  session: TaskSession;
 }
 
 export function ArtifactsSidePanel({ session }: ArtifactsSidePanelProps) {

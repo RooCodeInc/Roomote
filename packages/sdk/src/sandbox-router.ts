@@ -117,6 +117,17 @@ export interface SandboxAnswerUserInputRequestInput {
   userName?: string;
 }
 
+export interface SandboxCancelTaskInput {
+  /**
+   * Attribution for an explicit user stop; makes the harness leave a visible
+   * `task_cancelled` marker in the transcript.
+   */
+  cancelledBy?: {
+    name?: string;
+    source?: string;
+  };
+}
+
 export interface SandboxSuccessResult {
   success: true;
 }
@@ -185,7 +196,10 @@ export interface SandboxServerRpcClient {
       SandboxSuccessResult
     >;
     sandboxStream: SandboxSubscription<undefined, SandboxStreamEvent>;
-    cancelTask: SandboxMutation<undefined, SandboxSuccessResult>;
+    cancelTask: SandboxMutation<
+      SandboxCancelTaskInput | undefined,
+      SandboxSuccessResult
+    >;
     touchKeepalive: SandboxMutation<undefined, SandboxSuccessResult>;
     reloadDeploymentEnvVars: SandboxMutation<undefined, SandboxSuccessResult>;
   };

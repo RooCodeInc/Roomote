@@ -23,7 +23,6 @@ import {
 
 import { Section } from './Section';
 import { ComputeProviderSection } from './ComputeProviderSection';
-import { ComputeWorkerImageSection } from './ComputeWorkerImageSection';
 
 type ComputeProviderStatus = SetupComputeStatus['providers'][number];
 
@@ -74,30 +73,6 @@ export function ComputeProviders() {
       },
       onError: (error) => {
         toast.error(error.message || 'Failed to save credentials.');
-      },
-    }),
-  );
-
-  const saveWorkerImage = useMutation(
-    trpc.compute.saveWorkerImage.mutationOptions({
-      onSuccess: async () => {
-        await invalidateComputeQueries();
-        toast.success('Worker image saved.');
-      },
-      onError: (error) => {
-        toast.error(error.message || 'Failed to save the worker image.');
-      },
-    }),
-  );
-
-  const clearWorkerImage = useMutation(
-    trpc.compute.clearWorkerImage.mutationOptions({
-      onSuccess: async () => {
-        await invalidateComputeQueries();
-        toast.success('Worker image cleared.');
-      },
-      onError: (error) => {
-        toast.error(error.message || 'Failed to clear the worker image.');
       },
     }),
   );
@@ -215,15 +190,6 @@ export function ComputeProviders() {
           )}
         </div>
       </Section>
-      {status.data ? (
-        <ComputeWorkerImageSection
-          workerImage={status.data.workerImage}
-          onSave={(value) => saveWorkerImage.mutate({ value })}
-          onClear={() => clearWorkerImage.mutate()}
-          savePending={saveWorkerImage.isPending}
-          clearPending={clearWorkerImage.isPending}
-        />
-      ) : null}
       {providers.map((provider) => (
         <ComputeProviderSection
           key={provider.provider}

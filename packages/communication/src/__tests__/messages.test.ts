@@ -178,7 +178,7 @@ describe('communication message queues', () => {
     expect(multiDelMock).toHaveBeenCalledWith('teams:messages:45');
     expect(consoleErrorMock).toHaveBeenCalledWith(
       expect.stringContaining(
-        '[getCommunicationMessages] Failed to parse teams message for cloud job 45:',
+        '[getCommunicationMessages] Failed to parse teams message for task run 45:',
       ),
     );
     consoleErrorMock.mockRestore();

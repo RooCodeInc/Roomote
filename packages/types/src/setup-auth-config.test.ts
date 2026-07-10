@@ -40,12 +40,56 @@ describe('buildSetupAuthStatus', () => {
     });
   });
 
-  it('does not satisfy Teams setup with only Microsoft sign-in values', () => {
+  it('satisfies Teams setup by inferring bot values from Microsoft sign-in values', () => {
     const status = buildSetupAuthStatus({
       persistedEnvVarNames: [
         'ROOMOTE_AUTH_MICROSOFT_CLIENT_ID',
         'ROOMOTE_AUTH_MICROSOFT_CLIENT_SECRET',
         'ROOMOTE_AUTH_MICROSOFT_TENANT_ID',
+      ],
+    });
+
+    expect(status.setupSatisfiedByRuntimeEnv).toBe(false);
+    expect(status.preselectedProvider).toBe('microsoft');
+    expect(status.selectedProvider).toBeNull();
+    expect(status.runtimeConfiguredProvider).toBeNull();
+    expect(status.runtimeConfiguredProviders).toEqual([]);
+    expect(status.lockReason).toBeNull();
+    expect(
+      status.providers.find((provider) => provider.id === 'microsoft'),
+    ).toMatchObject({
+      runtimeSatisfied: false,
+      savedSatisfied: true,
+      setupSatisfied: true,
+    });
+    expect(
+      status.providers.find((provider) => provider.id === 'microsoft')?.fields,
+    ).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          envVarName: 'TEAMS_BOT_APP_ID',
+          savedSatisfied: true,
+          satisfiedByEnvVarName: 'ROOMOTE_AUTH_MICROSOFT_CLIENT_ID',
+        }),
+        expect.objectContaining({
+          envVarName: 'TEAMS_BOT_APP_PASSWORD',
+          savedSatisfied: true,
+          satisfiedByEnvVarName: 'ROOMOTE_AUTH_MICROSOFT_CLIENT_SECRET',
+        }),
+        expect.objectContaining({
+          envVarName: 'TEAMS_BOT_TENANT_ID',
+          savedSatisfied: true,
+          satisfiedByEnvVarName: 'ROOMOTE_AUTH_MICROSOFT_TENANT_ID',
+        }),
+      ]),
+    );
+  });
+
+  it('does not infer complete Teams setup from incomplete Microsoft sign-in values', () => {
+    const status = buildSetupAuthStatus({
+      persistedEnvVarNames: [
+        'ROOMOTE_AUTH_MICROSOFT_CLIENT_ID',
+        'ROOMOTE_AUTH_MICROSOFT_CLIENT_SECRET',
       ],
     });
 
@@ -82,6 +126,64 @@ describe('buildSetupAuthStatus', () => {
       savedSatisfied: true,
       setupSatisfied: true,
     });
+  });
+
+  it('resolves inferred Teams bot fields from the effective merged credential source', () => {
+    const status = buildSetupAuthStatus({
+      runtimeEnv: {
+        ROOMOTE_AUTH_MICROSOFT_CLIENT_ID: 'microsoft-client-id',
+        ROOMOTE_AUTH_MICROSOFT_CLIENT_SECRET: 'microsoft-client-secret',
+        ROOMOTE_AUTH_MICROSOFT_TENANT_ID: 'microsoft-tenant-id',
+      },
+      persistedEnvVarNames: [
+        'TEAMS_BOT_APP_ID',
+        'TEAMS_BOT_APP_PASSWORD',
+        'TEAMS_BOT_TENANT_ID',
+      ],
+    });
+    const microsoft = status.providers.find(
+      (provider) => provider.id === 'microsoft',
+    );
+
+    expect(status.setupSatisfiedByRuntimeEnv).toBe(false);
+    expect(status.preselectedProvider).toBe('microsoft');
+    expect(status.selectedProvider).toBeNull();
+    expect(status.runtimeConfiguredProvider).toBeNull();
+    expect(status.runtimeConfiguredProviders).toEqual([]);
+    expect(status.lockReason).toBeNull();
+    expect(microsoft).toMatchObject({
+      runtimeSatisfied: false,
+      savedSatisfied: false,
+      setupSatisfied: true,
+    });
+    expect(microsoft?.fields).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          envVarName: 'ROOMOTE_AUTH_MICROSOFT_CLIENT_ID',
+          runtimeSatisfied: true,
+          savedSatisfied: false,
+          satisfiedByEnvVarName: 'ROOMOTE_AUTH_MICROSOFT_CLIENT_ID',
+        }),
+        expect.objectContaining({
+          envVarName: 'TEAMS_BOT_APP_ID',
+          runtimeSatisfied: false,
+          savedSatisfied: true,
+          satisfiedByEnvVarName: 'TEAMS_BOT_APP_ID',
+        }),
+        expect.objectContaining({
+          envVarName: 'TEAMS_BOT_APP_PASSWORD',
+          runtimeSatisfied: false,
+          savedSatisfied: true,
+          satisfiedByEnvVarName: 'TEAMS_BOT_APP_PASSWORD',
+        }),
+        expect.objectContaining({
+          envVarName: 'TEAMS_BOT_TENANT_ID',
+          runtimeSatisfied: false,
+          savedSatisfied: true,
+          satisfiedByEnvVarName: 'TEAMS_BOT_TENANT_ID',
+        }),
+      ]),
+    );
   });
 
   it('honors Slack shared-credential fallback compatibility', () => {
@@ -176,5 +278,22 @@ describe('buildSetupAuthStatus', () => {
     expect(status.runtimeConfiguredProviders).toEqual(['slack', 'microsoft']);
     expect(status.selectedProvider).toBe('slack');
     expect(status.lockReason).toBe('runtime_env');
+  });
+
+  it('runtime-satisfies Teams setup from the Microsoft sign-in app when no dedicated bot pair is configured', () => {
+    const status = buildSetupAuthStatus({
+      runtimeEnv: {
+        ROOMOTE_AUTH_MICROSOFT_CLIENT_ID: 'microsoft-client-id',
+        ROOMOTE_AUTH_MICROSOFT_CLIENT_SECRET: 'microsoft-client-secret',
+        ROOMOTE_AUTH_MICROSOFT_TENANT_ID: 'microsoft-tenant-id',
+      },
+    });
+
+    expect(status.runtimeConfiguredProvider).toBe('microsoft');
+    expect(status.runtimeConfiguredProviders).toEqual(['microsoft']);
+    expect(status.selectedProvider).toBe('microsoft');
+    expect(status.preselectedProvider).toBe('microsoft');
+    expect(status.lockReason).toBe('runtime_env');
+    expect(status.setupSatisfiedByRuntimeEnv).toBe(true);
   });
 });

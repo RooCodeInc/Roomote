@@ -122,8 +122,8 @@ as per-task auth tokens or workspace paths.
 | `BETTER_AUTH_SECRET`                | Optional                         | Dedicated secret for signing sign-in session cookies. At least 32 characters. Falls back to `ENCRYPTION_KEY` when unset; setting it later invalidates existing sessions. |
 | `ARTIFACT_SIGNING_KEY`              | Production                       | Secret used to sign artifact access. Must be at least 32 characters.                                                                                                     |
 | `ARTIFACT_SIGNING_KEY_PREVIOUS`     | Rotation                         | Previous artifact signing key during rotation.                                                                                                                           |
-| `JOB_AUTH_PRIVATE_KEY`              | Production unless auto-generated | Base64-encoded P-256 private key for job auth tokens.                                                                                                                    |
-| `JOB_AUTH_PUBLIC_KEY`               | Production unless auto-generated | Base64-encoded P-256 public key for job auth token verification.                                                                                                         |
+| `JOB_AUTH_PRIVATE_KEY`              | Production unless auto-generated | Base64-encoded P-256 private key for run and user auth tokens.                                                                                                           |
+| `JOB_AUTH_PUBLIC_KEY`               | Production unless auto-generated | Base64-encoded P-256 public key for run and user auth token verification.                                                                                                |
 | `PREVIEW_AUTH_PRIVATE_KEY`          | Production unless auto-generated | Base64-encoded P-256 private key for preview auth tokens.                                                                                                                |
 | `PREVIEW_AUTH_PUBLIC_KEY`           | Production unless auto-generated | Base64-encoded P-256 public key for preview auth token verification.                                                                                                     |
 | `ROOMOTE_AUTO_GENERATE_KEYS`        | Optional                         | Set to `true` or `1` to generate missing job and preview keypairs at first startup and persist them encrypted in the database.                                           |
@@ -133,71 +133,79 @@ as per-task auth tokens or workspace paths.
 
 ### Models and inference providers
 
-| Env var                                      | Required     | Used for                                                                                                     |
-| -------------------------------------------- | ------------ | ------------------------------------------------------------------------------------------------------------ |
-| `ROOMOTE_MODEL`                              | Optional     | Env-level default coding model. Overrides the default selected in **Settings > Models** for new task starts. |
-| `ROOMOTE_SMALL_MODEL`                        | Optional     | Helper model for routing, titles, summaries, and lightweight model calls.                                    |
-| `ROOMOTE_VISION_MODEL`                       | Optional     | Vision-capable model for visual inspection and screenshot/image work.                                        |
-| `ROOMOTE_CODE_REVIEW_MODEL`                  | Optional     | Model for initial PR/MR review and review-sync tasks.                                                        |
-| `ROOMOTE_EXPLORE_MODEL`                      | Optional     | Exploration/helper model for investigation-oriented subtasks.                                                |
-| `ROOMOTE_PLANNING_MODEL`                     | Optional     | Planning model used for longer coding-task planning.                                                         |
-| `ROOMOTE_MODEL_REASONING_EFFORT`             | Optional     | Reasoning level for the coding model: `low`, `medium`, `high`, or `xhigh`.                                   |
-| `ROOMOTE_SMALL_MODEL_REASONING_EFFORT`       | Optional     | Reasoning level for the helper model.                                                                        |
-| `ROOMOTE_VISION_MODEL_REASONING_EFFORT`      | Optional     | Reasoning level for the vision model.                                                                        |
-| `ROOMOTE_CODE_REVIEW_MODEL_REASONING_EFFORT` | Optional     | Reasoning level for the code review model.                                                                   |
-| `ROOMOTE_EXPLORE_MODEL_REASONING_EFFORT`     | Optional     | Reasoning level for the exploration model.                                                                   |
-| `ROOMOTE_PLANNING_MODEL_REASONING_EFFORT`    | Optional     | Reasoning level for the planning model.                                                                      |
-| `ROOMOTE_MODEL_ENV_KEYS`                     | Optional     | Comma- or space-separated list of extra provider key env vars to forward to task workers.                    |
-| `OPENROUTER_API_KEY`                         | Provider key | OpenRouter API key. Can also be saved from **Settings > Models**.                                            |
-| `AI_GATEWAY_API_KEY`                         | Provider key | Vercel AI Gateway API key.                                                                                   |
-| `OPENAI_API_KEY`                             | Provider key | OpenAI API key.                                                                                              |
-| `ANTHROPIC_API_KEY`                          | Provider key | Anthropic API key.                                                                                           |
-| `XAI_API_KEY`                                | Provider key | xAI / Grok API key.                                                                                          |
-| `MOONSHOT_API_KEY`                           | Provider key | Moonshot AI / Kimi API key.                                                                                  |
-| `MINIMAX_API_KEY`                            | Provider key | MiniMax API key.                                                                                             |
-| `OPENCODE_API_KEY`                           | Provider key | OpenCode Zen / Go API key.                                                                                   |
-| `GEMINI_API_KEY`                             | Provider key | Google Gemini API key. Can also be saved from **Settings > Models**.                                         |
-| `GOOGLE_GENERATIVE_AI_API_KEY`               | Provider key | Alternate Google/Gemini provider key forwarded when configured or inferred.                                  |
-| `AWS_BEARER_TOKEN_BEDROCK`                   | Provider key | Amazon Bedrock API key (bearer token). Can also be saved from **Settings > Models**.                         |
-| `AWS_REGION`                                 | Provider key | AWS region for Amazon Bedrock models. Defaults to `us-east-1` at the runtime when unset.                     |
+| Env var                                      | Required     | Used for                                                                                                                                |
+| -------------------------------------------- | ------------ | --------------------------------------------------------------------------------------------------------------------------------------- |
+| `ROOMOTE_MODEL`                              | Optional     | Env-level default coding model. Overrides the default selected in **Settings > Models** for new task starts.                            |
+| `ROOMOTE_SMALL_MODEL`                        | Optional     | Helper model for routing, titles, summaries, and lightweight model calls.                                                               |
+| `ROOMOTE_VISION_MODEL`                       | Optional     | Vision-capable model for visual inspection and screenshot/image work.                                                                   |
+| `ROOMOTE_CODE_REVIEW_MODEL`                  | Optional     | Model for initial PR/MR review and review-sync tasks.                                                                                   |
+| `ROOMOTE_EXPLORE_MODEL`                      | Optional     | Exploration/helper model for investigation-oriented subtasks.                                                                           |
+| `ROOMOTE_PLANNING_MODEL`                     | Optional     | Planning model used for longer coding-task planning.                                                                                    |
+| `ROOMOTE_MODEL_REASONING_EFFORT`             | Optional     | Reasoning level for the coding model: `low`, `medium`, `high`, or `xhigh`.                                                              |
+| `ROOMOTE_SMALL_MODEL_REASONING_EFFORT`       | Optional     | Reasoning level for the helper model.                                                                                                   |
+| `ROOMOTE_VISION_MODEL_REASONING_EFFORT`      | Optional     | Reasoning level for the vision model.                                                                                                   |
+| `ROOMOTE_CODE_REVIEW_MODEL_REASONING_EFFORT` | Optional     | Reasoning level for the code review model.                                                                                              |
+| `ROOMOTE_EXPLORE_MODEL_REASONING_EFFORT`     | Optional     | Reasoning level for the exploration model.                                                                                              |
+| `ROOMOTE_PLANNING_MODEL_REASONING_EFFORT`    | Optional     | Reasoning level for the planning model.                                                                                                 |
+| `ROOMOTE_MODEL_ENV_KEYS`                     | Optional     | Comma- or space-separated list of extra provider key env vars to forward to task workers.                                               |
+| `OPENROUTER_API_KEY`                         | Provider key | OpenRouter API key. Can also be saved from **Settings > Models**.                                                                       |
+| `AI_GATEWAY_API_KEY`                         | Provider key | Vercel AI Gateway API key.                                                                                                              |
+| `OPENAI_API_KEY`                             | Provider key | OpenAI API key.                                                                                                                         |
+| `ANTHROPIC_API_KEY`                          | Provider key | Anthropic API key.                                                                                                                      |
+| `XAI_API_KEY`                                | Provider key | xAI / Grok API key.                                                                                                                     |
+| `MOONSHOT_API_KEY`                           | Provider key | Moonshot AI / Kimi API key.                                                                                                             |
+| `MINIMAX_API_KEY`                            | Provider key | MiniMax API key.                                                                                                                        |
+| `OPENCODE_API_KEY`                           | Provider key | OpenCode Zen / Go API key.                                                                                                              |
+| `GEMINI_API_KEY`                             | Provider key | Google Gemini API key. Can also be saved from **Settings > Models**.                                                                    |
+| `GOOGLE_GENERATIVE_AI_API_KEY`               | Provider key | Alternate Google/Gemini provider key forwarded when configured or inferred.                                                             |
+| `AWS_BEARER_TOKEN_BEDROCK`                   | Provider key | Amazon Bedrock API key (bearer token). Can also be saved from **Settings > Models**.                                                    |
+| `AWS_REGION`                                 | Provider key | AWS region for Amazon Bedrock models. Defaults to `us-east-1` at the runtime when unset.                                                |
 | `GOOGLE_APPLICATION_CREDENTIALS`             | Provider key | Google Vertex AI service account credentials: a file path, or pasted JSON contents that Roomote materializes to a file for the runtime. |
-| `GOOGLE_VERTEX_PROJECT`                      | Provider key | Google Cloud project ID for Vertex AI models.                                                                |
-| `GOOGLE_VERTEX_LOCATION`                     | Provider key | Vertex AI location. Defaults to `us-central1` at the runtime when unset.                                     |
-| `MISTRAL_API_KEY`                            | Provider key | Mistral provider key forwarded when configured.                                                              |
+| `GOOGLE_VERTEX_PROJECT`                      | Provider key | Google Cloud project ID for Vertex AI models.                                                                                           |
+| `GOOGLE_VERTEX_LOCATION`                     | Provider key | Vertex AI location. Defaults to `us-central1` at the runtime when unset.                                                                |
+| `MISTRAL_API_KEY`                            | Provider key | Mistral provider key forwarded when configured.                                                                                         |
 
 ### Sandbox providers
 
-| Env var                      | Required          | Used for                                                                                                                       |
-| ---------------------------- | ----------------- | ------------------------------------------------------------------------------------------------------------------------------ |
-| `DEFAULT_COMPUTE_PROVIDER`   | Optional          | Runtime default sandbox provider when no admin default is saved. Supported values are `docker`, `modal`, `e2b`, and `daytona`. |
-| `EXCLUDED_COMPUTE_PROVIDERS` | Optional          | Comma-separated provider IDs to hide or exclude from default selection.                                                        |
-| `DOCKER_WORKER_IMAGE`        | Optional          | Worker image used by Docker and for hosted sandbox derivation. In production, prefer an immutable registry-qualified tag.              |
-| `ROOMOTE_WORKER_IMAGE_REPO`  | Optional          | Registry repository used to derive the worker image from `RELEASE_VERSION` when `DOCKER_WORKER_IMAGE` is unset.                |
-| `DOCKER_WORKER_PLATFORM`     | Optional          | Docker worker platform. Defaults to the host architecture (`linux/arm64` on arm hosts, `linux/amd64` otherwise). |
-| `DOCKER_WORKER_NETWORK`      | Self-host Docker  | Docker network for worker containers in Compose/self-host mode.                                                                |
-| `DOCKER_WORKER_RELEASE_PATH` | Optional          | Path to a packaged worker release archive used by Docker worker bootstrap.                                                     |
-| `MODAL_TOKEN_ID`             | Modal             | Modal token ID. Can also be saved from **Settings > Sandboxes**.                                                                 |
-| `MODAL_TOKEN_SECRET`         | Modal             | Modal token secret.                                                                                                            |
-| `MODAL_BASE_IMAGE_REF`       | Modal             | Modal base image reference. Usually derived from the worker image; set only to pin a custom image.                             |
-| `MODAL_ENDPOINT`             | Optional          | Modal endpoint override.                                                                                                       |
-| `MODAL_ENVIRONMENT`          | Optional          | Modal environment name.                                                                                                        |
-| `MODAL_APP_NAME`             | Optional          | Modal app name override.                                                                                                       |
-| `MODAL_REGISTRY_USERNAME`    | Private registry  | Registry username for private non-ECR image pulls.                                                                             |
-| `MODAL_REGISTRY_PASSWORD`    | Private registry  | Registry password for private non-ECR image pulls.                                                                             |
-| `MODAL_ECR_OIDC_ROLE_ARN`    | ECR               | AWS IAM role ARN used by Modal for ECR OIDC pulls.                                                                             |
-| `MODAL_ECR_REGION`           | ECR               | AWS region for Modal ECR OIDC pulls.                                                                                           |
-| `MODAL_REGIONS`              | Optional          | Comma-separated Modal sandbox placement regions (for example `us` or `us-west`). Unset keeps Modal default placement.         |
-| `E2B_API_KEY`                | E2B               | E2B API key. Can also be saved from **Settings > Sandboxes**.                                                                    |
-| `E2B_TEMPLATE_ID`            | E2B               | Worker template ID. Usually provisioned from the worker image by Roomote.                                                      |
-| `E2B_DOMAIN`                 | Optional          | E2B domain for self-hosted or custom E2B clusters.                                                                             |
-| `E2B_MAX_SANDBOX_TIMEOUT_MS` | Optional          | Maximum E2B sandbox timeout Roomote will request. Defaults to one hour.                                                        |
-| `DAYTONA_API_KEY`            | Daytona           | Daytona API key. Can also be saved from **Settings > Sandboxes**.                                                                |
-| `DAYTONA_API_URL`            | Optional          | Daytona API URL override.                                                                                                      |
-| `DAYTONA_TARGET`             | Optional          | Daytona target or region.                                                                                                      |
-| `DAYTONA_SNAPSHOT_NAME`      | Daytona           | Worker snapshot name. Usually registered from the worker image by Roomote.                                                     |
-| `WORKER_RELEASE_CHANNEL`     | Optional          | Worker release channel, `stable` or `preview`, for hosted worker release selection.                                            |
-| `WORKER_RELEASE_VERSION`     | Optional          | Explicit worker release version for hosted worker bootstrap.                                                                   |
-| `LOCAL_SANDBOX_FILES_DIR`    | Local development | Local override for sandbox bootstrap files. Used only by development workflows.                                                |
+| Env var                              | Required          | Used for                                                                                                                        |
+| ------------------------------------ | ----------------- | ------------------------------------------------------------------------------------------------------------------------------- |
+| `DEFAULT_COMPUTE_PROVIDER`           | Optional          | Runtime default sandbox provider when no admin default is saved. Supported values are `docker`, `modal`, `e2b`, and `daytona`.  |
+| `EXCLUDED_COMPUTE_PROVIDERS`         | Optional          | Comma-separated provider IDs to hide or exclude from default selection.                                                         |
+| `DOCKER_WORKER_IMAGE`                | Optional          | Worker image used by Docker and for hosted sandbox derivation. In production, prefer an immutable registry-qualified tag.       |
+| `ROOMOTE_WORKER_IMAGE_REPO`          | Optional          | Registry repository used to derive the worker image from `RELEASE_VERSION` when `DOCKER_WORKER_IMAGE` is unset.                 |
+| `DOCKER_WORKER_PLATFORM`             | Optional          | Docker worker platform. Defaults to the host architecture (`linux/arm64` on arm hosts, `linux/amd64` otherwise).                |
+| `DOCKER_WORKER_NETWORK`              | Self-host Docker  | Docker network for worker containers in Compose/self-host mode.                                                                 |
+| `DOCKER_WORKER_RELEASE_PATH`         | Optional          | Path to a packaged worker release archive used by Docker worker bootstrap.                                                      |
+| `DOCKER_WORKER_CPU_LIMIT`            | Optional          | CPU limit per Docker task. Defaults to `2`.                                                                                     |
+| `DOCKER_WORKER_MEMORY_LIMIT`         | Optional          | Memory and memory+swap limit per Docker task. Defaults to `4g`.                                                                 |
+| `DOCKER_WORKER_PIDS_LIMIT`           | Optional          | Process limit per Docker task. Defaults to `512`.                                                                               |
+| `DOCKER_WORKER_DISK_LIMIT`           | Optional          | Writable-layer limit. Defaults to `20g`; tasks fail closed when the Docker storage driver cannot enforce it.                    |
+| `DOCKER_WORKER_ALLOW_UNBOUNDED_DISK` | Optional          | Explicitly permits startup without `--storage-opt size`. Defaults to `false`; use only with an equivalent host-level quota.     |
+| `DOCKER_WORKER_LOG_MAX_SIZE`         | Optional          | Maximum size of each Docker JSON log file. Defaults to `10m`.                                                                   |
+| `DOCKER_WORKER_LOG_MAX_FILES`        | Optional          | Number of rotated Docker JSON log files retained. Defaults to `3`.                                                              |
+| `DOCKER_WORKER_EGRESS_POLICY`        | Optional          | `internet` (public egress; self-host blocks private+metadata ranges, local dev blocks metadata) or `none` (no external egress). |
+| `MODAL_TOKEN_ID`                     | Modal             | Modal token ID. Can also be saved from **Settings > Sandboxes**.                                                                |
+| `MODAL_TOKEN_SECRET`                 | Modal             | Modal token secret.                                                                                                             |
+| `MODAL_BASE_IMAGE_REF`               | Modal             | Modal base image reference. Usually derived from the worker image; set only to pin a custom image.                              |
+| `MODAL_ENDPOINT`                     | Optional          | Modal endpoint override.                                                                                                        |
+| `MODAL_ENVIRONMENT`                  | Optional          | Modal environment name.                                                                                                         |
+| `MODAL_APP_NAME`                     | Optional          | Modal app name override.                                                                                                        |
+| `MODAL_REGISTRY_USERNAME`            | Private registry  | Registry username for private non-ECR image pulls.                                                                              |
+| `MODAL_REGISTRY_PASSWORD`            | Private registry  | Registry password for private non-ECR image pulls.                                                                              |
+| `MODAL_ECR_OIDC_ROLE_ARN`            | ECR               | AWS IAM role ARN used by Modal for ECR OIDC pulls.                                                                              |
+| `MODAL_ECR_REGION`                   | ECR               | AWS region for Modal ECR OIDC pulls.                                                                                            |
+| `MODAL_REGIONS`                      | Optional          | Comma-separated Modal sandbox placement regions (for example `us` or `us-west`). Unset keeps Modal default placement.           |
+| `E2B_API_KEY`                        | E2B               | E2B API key. Can also be saved from **Settings > Sandboxes**.                                                                   |
+| `E2B_TEMPLATE_ID`                    | E2B               | Worker template ID. Usually provisioned from the worker image by Roomote.                                                       |
+| `E2B_DOMAIN`                         | Optional          | E2B domain for self-hosted or custom E2B clusters.                                                                              |
+| `E2B_MAX_SANDBOX_TIMEOUT_MS`         | Optional          | Maximum E2B sandbox timeout Roomote will request. Defaults to one hour.                                                         |
+| `DAYTONA_API_KEY`                    | Daytona           | Daytona API key. Can also be saved from **Settings > Sandboxes**.                                                               |
+| `DAYTONA_API_URL`                    | Optional          | Daytona API URL override.                                                                                                       |
+| `DAYTONA_TARGET`                     | Optional          | Daytona target or region.                                                                                                       |
+| `DAYTONA_SNAPSHOT_NAME`              | Daytona           | Worker snapshot name. Usually registered from the worker image by Roomote.                                                      |
+| `WORKER_RELEASE_CHANNEL`             | Optional          | Worker release channel, `stable` or `preview`, for hosted worker release selection.                                             |
+| `WORKER_RELEASE_VERSION`             | Optional          | Explicit worker release version for hosted worker bootstrap.                                                                    |
+| `LOCAL_SANDBOX_FILES_DIR`            | Local development | Local override for sandbox bootstrap files. Used only by development workflows.                                                 |
 
 ### Source control providers
 
@@ -242,7 +250,7 @@ as per-task auth tokens or workspace paths.
 | `SLACK_CLIENT_ID`                      | Slack app/auth    | Slack OAuth client ID. Also accepted for Slack sign-in setup.                   |
 | `SLACK_CLIENT_SECRET`                  | Slack app/auth    | Slack OAuth client secret. Also accepted for Slack sign-in setup.               |
 | `SLACK_REDIRECT_URI`                   | Optional          | Slack redirect URI override.                                                    |
-| `SLACK_AUTH_URI`                       | Optional          | Slack auth URI override.                                                        |
+| `SLACK_AUTH_URI`                       | Optional          | Slack auth URI override. Defaults to `ROOMOTE_APP_URL` + `/api/slack/auth`.     |
 | `SLACK_SIGNING_SECRET`                 | Slack app/auth    | Slack signing secret for webhook verification.                                  |
 | `SLACK_API_BASE_URL`                   | Optional          | Slack API base URL. Defaults to `https://slack.com/api/`.                       |
 | `SLACK_UNFURL_ALLOWED_DOMAINS`         | Optional          | Domains Slack unfurl handling may allow.                                        |
@@ -252,6 +260,7 @@ as per-task auth tokens or workspace paths.
 | `TEAMS_BOT_APP_ID`                     | Teams             | Microsoft Teams bot app ID.                                                     |
 | `TEAMS_BOT_APP_PASSWORD`               | Teams             | Microsoft Teams bot password.                                                   |
 | `TEAMS_BOT_TENANT_ID`                  | Optional          | Microsoft Teams bot tenant ID.                                                  |
+| `TEAMS_BOT_NAME`                       | Optional          | Teams bot display name for generated app packages and invocation guidance.      |
 | `TEAMS_BOT_TOKEN_ENDPOINT`             | Optional          | Teams bot token endpoint override.                                              |
 | `TEAMS_BOT_OAUTH_SCOPE`                | Optional          | Teams bot OAuth scope override.                                                 |
 | `TELEGRAM_BOT_TOKEN`                   | Telegram          | Telegram bot token.                                                             |
@@ -275,9 +284,9 @@ as per-task auth tokens or workspace paths.
 
 ### Declarative environments
 
-| Env var                     | Required | Used for                                                                                                                          |
-| --------------------------- | -------- | --------------------------------------------------------------------------------------------------------------------------------- |
-| `ROOMOTE_ENVIRONMENTS_DIR`  | Optional | Directory of environment definition files (`*.yaml`, `*.yml`, `*.json`) applied at API startup. One environment per file.        |
+| Env var                     | Required | Used for                                                                                                                       |
+| --------------------------- | -------- | ------------------------------------------------------------------------------------------------------------------------------ |
+| `ROOMOTE_ENVIRONMENTS_DIR`  | Optional | Directory of environment definition files (`*.yaml`, `*.yml`, `*.json`) applied at API startup. One environment per file.      |
 | `ROOMOTE_ENVIRONMENTS_YAML` | Optional | Inline multi-document YAML with environment definitions applied at API startup, for platforms where mounting files is awkward. |
 
 See [Environments](/environments#provision-environments-declaratively) for the

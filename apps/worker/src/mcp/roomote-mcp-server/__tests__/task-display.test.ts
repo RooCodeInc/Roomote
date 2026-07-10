@@ -3,17 +3,17 @@ import { getHarnessLabel, getTaskStatusLabel } from '../task-display.js';
 describe('getTaskStatusLabel', () => {
   it.each([
     [
-      { completed: false, cloudJobStatus: 'pending', taskPhase: null },
+      { completed: false, taskRunStatus: 'pending', taskPhase: null },
       'Pending',
     ],
     [
-      { completed: false, cloudJobStatus: 'running', taskPhase: 'running' },
+      { completed: false, taskRunStatus: 'running', taskPhase: 'running' },
       'Working',
     ],
     [
       {
         completed: false,
-        cloudJobStatus: 'running',
+        taskRunStatus: 'running',
         taskPhase: 'waiting_for_prompt',
       },
       'Ready',
@@ -21,27 +21,27 @@ describe('getTaskStatusLabel', () => {
     [
       {
         completed: false,
-        cloudJobStatus: 'running',
+        taskRunStatus: 'running',
         taskPhase: 'waiting_for_user_input',
       },
       'Needs input',
     ],
     [
-      { completed: false, cloudJobStatus: 'running', taskPhase: null },
+      { completed: false, taskRunStatus: 'running', taskPhase: null },
       'Running',
     ],
-    [{ completed: false, cloudJobStatus: 'idle', taskPhase: null }, 'Idle'],
+    [{ completed: false, taskRunStatus: 'idle', taskPhase: null }, 'Idle'],
     [
-      { completed: true, cloudJobStatus: 'completed', taskPhase: null },
+      { completed: true, taskRunStatus: 'completed', taskPhase: null },
       'Completed',
     ],
-    [{ completed: false, cloudJobStatus: 'failed', taskPhase: null }, 'Failed'],
+    [{ completed: false, taskRunStatus: 'failed', taskPhase: null }, 'Failed'],
     [
-      { completed: false, cloudJobStatus: 'canceled', taskPhase: null },
+      { completed: false, taskRunStatus: 'canceled', taskPhase: null },
       'Canceled',
     ],
-    [{ completed: true, cloudJobStatus: null, taskPhase: null }, 'Completed'],
-    [{ completed: false, cloudJobStatus: null, taskPhase: null }, 'Active'],
+    [{ completed: true, taskRunStatus: null, taskPhase: null }, 'Completed'],
+    [{ completed: false, taskRunStatus: null, taskPhase: null }, 'Active'],
   ])('maps %j to %s', (input, expected) => {
     expect(getTaskStatusLabel(input)).toBe(expected);
   });

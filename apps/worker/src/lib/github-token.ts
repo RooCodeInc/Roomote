@@ -623,6 +623,20 @@ async function ensureSourceControlProxyPort(): Promise<number> {
 
         res.statusCode = response.status;
         response.headers.forEach((value, key) => {
+          // fetch transparently decodes compressed upstream bodies, so
+          // forwarding these headers makes git try to decode the plain body
+          // again ("incorrect header check" on gzip-served hosts like
+          // gitlab.com).
+          const lowerKey = key.toLowerCase();
+          if (
+            lowerKey === 'content-encoding' ||
+            lowerKey === 'content-length' ||
+            lowerKey === 'transfer-encoding' ||
+            lowerKey === 'connection'
+          ) {
+            return;
+          }
+
           res.setHeader(key, value);
         });
 

@@ -2,8 +2,8 @@ import { Hono } from 'hono';
 
 import {
   type AuthTokenContext,
-  CloudTaskType,
-  type JobTokenContext,
+  TaskPayloadKind,
+  type RunTokenContext,
 } from '@roomote/types';
 
 import type { Variables } from '../../../types';
@@ -11,21 +11,21 @@ import { mcpAuthMiddleware } from '../../mcp/middleware';
 import { submitAutomationWorkItems } from '../submitAutomationWorkItems';
 
 const {
-  mockAutomationRunFindFirst,
-  mockCloudJobFindFirst,
+  mockTaskRunFindFirst,
   mockLaunchActWorkItems,
   mockPersistAutomationWorkItems,
   mockResolveAutomationSlackTarget,
   mockResolvePreparedAutomationWorkItems,
   mockResolveRepositoryIdsForSuggestedTask,
+  mockTaskFindFirst,
 } = vi.hoisted(() => ({
-  mockAutomationRunFindFirst: vi.fn(),
-  mockCloudJobFindFirst: vi.fn(),
+  mockTaskRunFindFirst: vi.fn(),
   mockLaunchActWorkItems: vi.fn(),
   mockPersistAutomationWorkItems: vi.fn(),
   mockResolveAutomationSlackTarget: vi.fn(),
   mockResolvePreparedAutomationWorkItems: vi.fn(),
   mockResolveRepositoryIdsForSuggestedTask: vi.fn(),
+  mockTaskFindFirst: vi.fn(),
 }));
 
 vi.mock('../automation-work-items/telegram.js', () => ({
@@ -45,19 +45,19 @@ vi.mock('@roomote/db/server', () => ({
     botUsername: null,
   })),
   and: vi.fn((...args) => ({ type: 'and', args })),
-  backgroundAutomationRuns: {
-    taskId: 'backgroundAutomationRuns.taskId',
+  taskRuns: {
+    taskId: 'taskRuns.taskId',
   },
-  cloudJobs: {
-    taskId: 'cloudJobs.taskId',
+  tasks: {
+    id: 'tasks.id',
   },
   db: {
     query: {
-      backgroundAutomationRuns: {
-        findFirst: (...args: unknown[]) => mockAutomationRunFindFirst(...args),
+      taskRuns: {
+        findFirst: (...args: unknown[]) => mockTaskRunFindFirst(...args),
       },
-      cloudJobs: {
-        findFirst: (...args: unknown[]) => mockCloudJobFindFirst(...args),
+      tasks: {
+        findFirst: (...args: unknown[]) => mockTaskFindFirst(...args),
       },
     },
   },
@@ -89,7 +89,7 @@ vi.mock('../automation-work-items/slack.js', () => ({
     mockResolveAutomationSlackTarget(...args),
 }));
 
-function createApp(authContext?: AuthTokenContext | JobTokenContext) {
+function createApp(authContext?: AuthTokenContext | RunTokenContext) {
   const app = new Hono<{ Variables: Variables }>();
 
   app.use('*', async (c, next) => {
@@ -126,41 +126,42 @@ function buildActWorkItem(
     workspaceReadiness: 'environment_backed',
     readinessMessage: null,
     sortOrder: 0,
-    executionTaskId: null,
+    launchedTaskId: null,
     launchError: null,
     ...overrides,
   };
 }
 
 describe('submitAutomationWorkItems lifecycle', () => {
-  const authContext: JobTokenContext = {
+  const authContext: RunTokenContext = {
     userId: 'user-1',
-    cloudJobId: 1,
-    tokenType: 'cj',
+    principal: 'user',
+    runId: 1,
+    tokenType: 'run',
     version: 1,
   };
 
   beforeEach(() => {
-    mockAutomationRunFindFirst.mockReset();
-    mockCloudJobFindFirst.mockReset();
+    mockTaskFindFirst.mockReset();
+    mockTaskRunFindFirst.mockReset();
     mockLaunchActWorkItems.mockReset();
     mockPersistAutomationWorkItems.mockReset();
     mockResolveAutomationSlackTarget.mockReset();
     mockResolvePreparedAutomationWorkItems.mockReset();
     mockResolveRepositoryIdsForSuggestedTask.mockReset();
 
-    mockCloudJobFindFirst.mockResolvedValue({
-      type: CloudTaskType.SuggestedTasks,
-      userId: 'user-1',
+    mockTaskRunFindFirst.mockResolvedValue({
+      payloadKind: TaskPayloadKind.Scan,
+      actingUserId: 'user-1',
       payload: {
         repo: 'acme/app',
         selectedRepositories: ['acme/app'],
         suggestionSource: 'sentry_triage',
       },
     });
-    mockAutomationRunFindFirst.mockResolvedValue({
-      id: 'run-1',
-      automationKey: 'sentry_triage',
+    mockTaskFindFirst.mockResolvedValue({
+      initiatorUserId: null,
+      initiatorAutomation: 'sentry_triage',
     });
     mockResolveRepositoryIdsForSuggestedTask.mockResolvedValue([
       { id: 'repo-1', fullName: 'acme/app' },
@@ -224,7 +225,9 @@ describe('submitAutomationWorkItems lifecycle', () => {
       duplicateCount: 0,
     });
     expect(mockLaunchActWorkItems).toHaveBeenCalledWith({
-      userId: 'user-1',
+      // The launch is stamped with the originating automation's key instead
+      // of a config-owner userId.
+      automationKey: 'sentry_triage',
       workItems: [actWorkItem],
       executionTaskBootstrap: '$implement-changes',
       chatTarget: expect.objectContaining({
@@ -239,8 +242,8 @@ describe('submitAutomationWorkItems lifecycle', () => {
     const actWorkItem = buildActWorkItem();
     const startedWorkItem = buildActWorkItem({
       id: 'act-work-item-2',
-      status: 'started',
-      executionTaskId: 'task-123',
+      status: 'launched',
+      launchedTaskId: 'task-123',
       fingerprint: 'fingerprint-2',
       targetEnvironmentId: environmentId,
     });
@@ -370,18 +373,18 @@ describe('submitAutomationWorkItems lifecycle', () => {
       readinessMessage: null,
       category: 'security',
     });
-    mockCloudJobFindFirst.mockResolvedValueOnce({
-      type: CloudTaskType.SuggestedTasks,
-      userId: 'user-1',
+    mockTaskRunFindFirst.mockResolvedValueOnce({
+      payloadKind: TaskPayloadKind.Scan,
+      actingUserId: 'user-1',
       payload: {
         repo: 'acme/app',
         selectedRepositories: ['acme/app'],
         suggestionSource: 'dependabot_triage',
       },
     });
-    mockAutomationRunFindFirst.mockResolvedValueOnce({
-      id: 'run-1',
-      automationKey: 'dependabot_triage',
+    mockTaskFindFirst.mockResolvedValueOnce({
+      initiatorUserId: null,
+      initiatorAutomation: 'dependabot_triage',
     });
     mockResolvePreparedAutomationWorkItems.mockResolvedValueOnce([
       { title: 'Update braces to resolve Dependabot alert' },
@@ -472,18 +475,18 @@ describe('submitAutomationWorkItems lifecycle', () => {
         workspaceReadiness: 'environment_backed',
         readinessMessage: null,
       });
-      mockCloudJobFindFirst.mockResolvedValueOnce({
-        type: CloudTaskType.SuggestedTasks,
-        userId: 'user-1',
+      mockTaskRunFindFirst.mockResolvedValueOnce({
+        payloadKind: TaskPayloadKind.Scan,
+        actingUserId: 'user-1',
         payload: {
           repo: 'acme/app',
           selectedRepositories: ['acme/app'],
           suggestionSource: source,
         },
       });
-      mockAutomationRunFindFirst.mockResolvedValueOnce({
-        id: 'run-1',
-        automationKey: source,
+      mockTaskFindFirst.mockResolvedValueOnce({
+        initiatorUserId: null,
+        initiatorAutomation: source,
       });
       mockPersistAutomationWorkItems.mockResolvedValueOnce({
         created: true,
@@ -527,9 +530,9 @@ describe('submitAutomationWorkItems lifecycle', () => {
   it('passes the scan task announcement thread through to execution launches', async () => {
     const environmentId = '11111111-1111-1111-1111-111111111111';
     const actWorkItem = buildActWorkItem();
-    mockCloudJobFindFirst.mockResolvedValueOnce({
-      type: CloudTaskType.SuggestedTasks,
-      userId: 'user-1',
+    mockTaskRunFindFirst.mockResolvedValueOnce({
+      payloadKind: TaskPayloadKind.Scan,
+      actingUserId: 'user-1',
       payload: {
         repo: 'acme/app',
         selectedRepositories: ['acme/app'],
@@ -538,9 +541,9 @@ describe('submitAutomationWorkItems lifecycle', () => {
         slackThreadTs: '1781300000.000100',
       },
     });
-    mockAutomationRunFindFirst.mockResolvedValueOnce({
-      id: 'run-1',
-      automationKey: 'ci_failure_triage',
+    mockTaskFindFirst.mockResolvedValueOnce({
+      initiatorUserId: null,
+      initiatorAutomation: 'ci_failure_triage',
     });
     mockPersistAutomationWorkItems.mockResolvedValueOnce({
       created: true,

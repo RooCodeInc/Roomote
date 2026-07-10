@@ -10,7 +10,12 @@ type Data =
   | { success: true; installUrl: string }
   | { success: false; error: string };
 
-type Variables = string;
+type Variables =
+  | string
+  | {
+      code: string;
+      redirect?: string | null;
+    };
 
 type UseFinishCreateGitHubAppManifestOptions = Omit<
   UseMutationOptions<Data, Error, Variables>,
@@ -25,8 +30,18 @@ export const useFinishCreateGitHubAppManifest = (
   const queryClient = useQueryClient();
 
   return useMutation({
-    mutationFn: (code) =>
-      trpcClient.github.finishCreateAppManifest.mutate({ code }),
+    mutationFn: (variables) => {
+      const code = typeof variables === 'string' ? variables : variables.code;
+      const redirect =
+        typeof variables === 'string'
+          ? undefined
+          : variables.redirect?.trim() || undefined;
+
+      return trpcClient.github.finishCreateAppManifest.mutate({
+        code,
+        ...(redirect ? { redirect } : {}),
+      });
+    },
     onSuccess: (data, variables, onMutateResult, context) => {
       queryClient.invalidateQueries({
         queryKey: trpc.github.installations.queryKey(),
@@ -34,6 +49,10 @@ export const useFinishCreateGitHubAppManifest = (
 
       queryClient.invalidateQueries({
         queryKey: trpc.sourceControl.repositories.queryKey(),
+      });
+
+      queryClient.invalidateQueries({
+        queryKey: trpc.sourceControl.configStatus.queryKey(),
       });
 
       options?.onSuccess?.(data, variables, onMutateResult, context);

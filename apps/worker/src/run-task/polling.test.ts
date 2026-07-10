@@ -1,4 +1,4 @@
-import { CloudTaskType } from '@roomote/types';
+import { TaskPayloadKind } from '@roomote/types';
 
 import type { HarnessLogger } from '../logging';
 import { startPolling } from './polling';
@@ -28,7 +28,7 @@ vi.mock('./polling/index', () => ({
 
 function createLogger(): HarnessLogger {
   return {
-    cloudJobId: 42,
+    runId: 42,
     filePath: '/tmp/harness.log',
     log: vi.fn(),
     info: vi.fn(),
@@ -56,16 +56,17 @@ function createState(): RunTaskState {
 }
 
 function createListenerOptions(
-  cloudJob: Partial<ListenerOptions['cloudJob']>,
+  taskRun: Partial<ListenerOptions['taskRun']>,
+  task?: ListenerOptions['task'],
 ): ListenerOptions {
   return {
-    cloudJob: {
+    taskRun: {
       id: 42,
-      type: CloudTaskType.StandardTask,
-      slackThreadTs: null,
-      linearSessionId: null,
-      ...cloudJob,
-    } as ListenerOptions['cloudJob'],
+      payloadKind: TaskPayloadKind.StandardTask,
+      payload: {},
+      ...taskRun,
+    } as ListenerOptions['taskRun'],
+    task,
     state: createState(),
     logger: createLogger(),
     workingDirectory: '/tmp/workspace',
@@ -74,7 +75,10 @@ function createListenerOptions(
     answerUserInputRequest: vi.fn<ListenerOptions['answerUserInputRequest']>(
       () => true,
     ),
-    prepareActorScopedTurn: vi.fn(async () => true),
+    prepareActorScopedTurn: vi.fn(
+      async (targetUserId?: string) =>
+        ({ effectiveUserId: targetUserId ?? null }) as const,
+    ),
   };
 }
 
@@ -104,10 +108,14 @@ describe('startPolling', () => {
     vi.useRealTimers();
   });
 
-  it('starts Slack message polling for any Slack-linked cloud job', () => {
+  it('starts Slack message polling for any Slack-linked task run', () => {
     const options = createListenerOptions({
-      type: CloudTaskType.SuggestedTasks,
-      slackThreadTs: '111.222',
+      payloadKind: TaskPayloadKind.Scan,
+      payload: {
+        repo: 'owner/repo',
+        description: 'Suggest follow-up tasks',
+        thread_ts: '111.222',
+      },
     });
 
     startPolling(options);
@@ -118,8 +126,7 @@ describe('startPolling', () => {
 
   it('starts Slack message polling for jobs with Slack channel metadata before a thread exists', () => {
     const options = createListenerOptions({
-      type: CloudTaskType.SuggestedTasks,
-      slackThreadTs: null,
+      payloadKind: TaskPayloadKind.Scan,
       payload: {
         repo: 'owner/repo',
         description: 'Suggest follow-up tasks',
@@ -135,8 +142,7 @@ describe('startPolling', () => {
 
   it('does not start Slack message polling without Slack thread or channel linkage', () => {
     const options = createListenerOptions({
-      type: CloudTaskType.SuggestedTasks,
-      slackThreadTs: null,
+      payloadKind: TaskPayloadKind.Scan,
       payload: {
         repo: 'owner/repo',
         description: 'Suggest follow-up tasks',
@@ -149,9 +155,75 @@ describe('startPolling', () => {
     expect(options.state.slackMessageInterval).toBeUndefined();
   });
 
-  it('starts generic communication polling for Teams-linked cloud jobs', () => {
+  it('starts Slack message polling from task channel bindings without payload metadata', () => {
+    const options = createListenerOptions(
+      {
+        payloadKind: TaskPayloadKind.StandardTask,
+        payload: {
+          repo: 'owner/repo',
+          description: 'Task-bound Slack job',
+        },
+      },
+      {
+        slackChannelId: 'C123',
+        slackThreadTs: '111.222',
+        linearSessionId: null,
+      },
+    );
+
+    startPolling(options);
+
+    expect(mockCreateSlackMessageInterval).toHaveBeenCalledWith(options);
+    expect(options.state.slackMessageInterval).toBeDefined();
+  });
+
+  it('starts Linear message polling for snapshot resumes from task channel bindings', () => {
+    const options = createListenerOptions(
+      {
+        payloadKind: TaskPayloadKind.SnapshotResume,
+        payload: {
+          repo: 'owner/repo',
+        },
+      },
+      {
+        slackChannelId: null,
+        slackThreadTs: null,
+        linearSessionId: 'linear-session-1',
+      },
+    );
+
+    startPolling(options);
+
+    expect(mockCreateLinearMessageInterval).toHaveBeenCalledWith(options);
+    expect(options.state.linearMessageInterval).toBeDefined();
+  });
+
+  it('falls back to payload extraction for snapshot resumes without task bindings', () => {
     const options = createListenerOptions({
-      type: CloudTaskType.StandardTask,
+      payloadKind: TaskPayloadKind.SnapshotResume,
+      payload: {
+        repo: 'owner/repo',
+        queuedLinearMessages: [
+          {
+            sessionId: 'linear-session-2',
+            organizationId: 'org-1',
+            action: 'prompted' as const,
+            timestamp: 1,
+            payload: {},
+          },
+        ],
+      },
+    });
+
+    startPolling(options);
+
+    expect(mockCreateLinearMessageInterval).toHaveBeenCalledWith(options);
+    expect(options.state.linearMessageInterval).toBeDefined();
+  });
+
+  it('starts generic communication polling for Teams-linked task runs', () => {
+    const options = createListenerOptions({
+      payloadKind: TaskPayloadKind.StandardTask,
       payload: {
         repo: 'owner/repo',
         description: 'Teams-originated task',
@@ -171,9 +243,9 @@ describe('startPolling', () => {
     expect(options.state.communicationMessageIntervals?.teams).toBeDefined();
   });
 
-  it('starts generic communication polling for Telegram-linked cloud jobs', () => {
+  it('starts generic communication polling for Telegram-linked task runs', () => {
     const options = createListenerOptions({
-      type: CloudTaskType.StandardTask,
+      payloadKind: TaskPayloadKind.StandardTask,
       payload: {
         repo: 'owner/repo',
         description: 'Telegram-originated task',

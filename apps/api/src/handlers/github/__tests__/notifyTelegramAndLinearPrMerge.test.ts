@@ -46,17 +46,22 @@ vi.mock('@roomote/db/server', () => ({
       taskPullRequests: {
         findMany: vi.fn(),
       },
-      cloudJobs: {
+      taskRuns: {
+        findMany: vi.fn(),
+      },
+      tasks: {
         findMany: vi.fn(),
       },
     },
   },
-  cloudJobs: {},
+  taskRuns: {},
+  tasks: {},
   githubInstallations: {},
   taskPullRequests: {},
   eq: vi.fn(),
   and: vi.fn(),
   inArray: vi.fn(),
+  isNotNull: vi.fn(),
 }));
 
 import { db } from '@roomote/db/server';
@@ -66,7 +71,8 @@ const mockedGithubFind = vi.mocked(db.query.githubInstallations.findFirst);
 const mockedTaskPullRequestsFind = vi.mocked(
   db.query.taskPullRequests.findMany,
 );
-const mockedCloudJobsFind = vi.mocked(db.query.cloudJobs.findMany);
+const mockedTaskRunsFind = vi.mocked(db.query.taskRuns.findMany);
+const mockedTasksFind = vi.mocked(db.query.tasks.findMany);
 
 const telegramPayload = {
   communicationProvider: 'telegram',
@@ -78,6 +84,8 @@ const telegramPayload = {
 describe('notifyTelegramAndLinearPrMerge', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mockedTaskRunsFind.mockResolvedValue([]);
+    mockedTasksFind.mockResolvedValue([]);
     mockPostTelegramMessageBestEffort.mockResolvedValue({ messageId: 'msg-1' });
     mockLinearEmitResponse.mockResolvedValue({ success: true });
     mockCreateLinearClient.mockReturnValue({
@@ -100,9 +108,7 @@ describe('notifyTelegramAndLinearPrMerge', () => {
   it('posts a markdown merge notification into the Telegram chat', async () => {
     mockedGithubFind.mockResolvedValue({ id: 1 } as any);
     mockedTaskPullRequestsFind.mockResolvedValue([{ taskId: 'task-1' }] as any);
-    mockedCloudJobsFind.mockResolvedValue([
-      { linearSessionId: null, payload: telegramPayload },
-    ] as any);
+    mockedTaskRunsFind.mockResolvedValue([{ payload: telegramPayload }] as any);
 
     await notifyTelegramAndLinearPrMerge(baseParams);
 
@@ -118,8 +124,8 @@ describe('notifyTelegramAndLinearPrMerge', () => {
   it('emits a closing response activity to the linked Linear session', async () => {
     mockedGithubFind.mockResolvedValue({ id: 1 } as any);
     mockedTaskPullRequestsFind.mockResolvedValue([{ taskId: 'task-1' }] as any);
-    mockedCloudJobsFind.mockResolvedValue([
-      { linearSessionId: 'session-1', payload: null },
+    mockedTasksFind.mockResolvedValue([
+      { linearSessionId: 'session-1' },
     ] as any);
 
     await notifyTelegramAndLinearPrMerge(baseParams);
@@ -133,8 +139,9 @@ describe('notifyTelegramAndLinearPrMerge', () => {
   it('notifies both Telegram and Linear from the same merged PR', async () => {
     mockedGithubFind.mockResolvedValue({ id: 1 } as any);
     mockedTaskPullRequestsFind.mockResolvedValue([{ taskId: 'task-1' }] as any);
-    mockedCloudJobsFind.mockResolvedValue([
-      { linearSessionId: 'session-1', payload: telegramPayload },
+    mockedTaskRunsFind.mockResolvedValue([{ payload: telegramPayload }] as any);
+    mockedTasksFind.mockResolvedValue([
+      { linearSessionId: 'session-1' },
     ] as any);
 
     await notifyTelegramAndLinearPrMerge(baseParams);
@@ -146,12 +153,9 @@ describe('notifyTelegramAndLinearPrMerge', () => {
   it('skips jobs whose payload is not Telegram-backed', async () => {
     mockedGithubFind.mockResolvedValue({ id: 1 } as any);
     mockedTaskPullRequestsFind.mockResolvedValue([{ taskId: 'task-1' }] as any);
-    mockedCloudJobsFind.mockResolvedValue([
-      {
-        linearSessionId: null,
-        payload: { channel: 'C123', thread_ts: 'ts-1' },
-      },
-      { linearSessionId: null, payload: null },
+    mockedTaskRunsFind.mockResolvedValue([
+      { payload: { channel: 'C123', thread_ts: 'ts-1' } },
+      { payload: null },
     ] as any);
 
     await notifyTelegramAndLinearPrMerge(baseParams);
@@ -163,11 +167,8 @@ describe('notifyTelegramAndLinearPrMerge', () => {
   it('skips Telegram payloads that are missing a chat id', async () => {
     mockedGithubFind.mockResolvedValue({ id: 1 } as any);
     mockedTaskPullRequestsFind.mockResolvedValue([{ taskId: 'task-1' }] as any);
-    mockedCloudJobsFind.mockResolvedValue([
-      {
-        linearSessionId: null,
-        payload: { communicationProvider: 'telegram' },
-      },
+    mockedTaskRunsFind.mockResolvedValue([
+      { payload: { communicationProvider: 'telegram' } },
     ] as any);
 
     await notifyTelegramAndLinearPrMerge(baseParams);
@@ -181,9 +182,9 @@ describe('notifyTelegramAndLinearPrMerge', () => {
       { taskId: 'task-1' },
       { taskId: 'task-2' },
     ] as any);
-    mockedCloudJobsFind.mockResolvedValue([
-      { linearSessionId: null, payload: telegramPayload },
-      { linearSessionId: null, payload: telegramPayload },
+    mockedTaskRunsFind.mockResolvedValue([
+      { payload: telegramPayload },
+      { payload: telegramPayload },
     ] as any);
 
     await notifyTelegramAndLinearPrMerge(baseParams);
@@ -197,9 +198,9 @@ describe('notifyTelegramAndLinearPrMerge', () => {
       { taskId: 'task-1' },
       { taskId: 'task-2' },
     ] as any);
-    mockedCloudJobsFind.mockResolvedValue([
-      { linearSessionId: 'session-1', payload: null },
-      { linearSessionId: 'session-1', payload: null },
+    mockedTasksFind.mockResolvedValue([
+      { linearSessionId: 'session-1' },
+      { linearSessionId: 'session-1' },
     ] as any);
 
     await notifyTelegramAndLinearPrMerge(baseParams);
@@ -210,8 +211,8 @@ describe('notifyTelegramAndLinearPrMerge', () => {
   it('skips Linear when no active connection is available', async () => {
     mockedGithubFind.mockResolvedValue({ id: 1 } as any);
     mockedTaskPullRequestsFind.mockResolvedValue([{ taskId: 'task-1' }] as any);
-    mockedCloudJobsFind.mockResolvedValue([
-      { linearSessionId: 'session-1', payload: null },
+    mockedTasksFind.mockResolvedValue([
+      { linearSessionId: 'session-1' },
     ] as any);
     mockFindLinearDeploymentMcpConnection.mockResolvedValue(null);
 
@@ -235,7 +236,8 @@ describe('notifyTelegramAndLinearPrMerge', () => {
 
     await notifyTelegramAndLinearPrMerge(baseParams);
 
-    expect(mockedCloudJobsFind).not.toHaveBeenCalled();
+    expect(mockedTaskRunsFind).not.toHaveBeenCalled();
+    expect(mockedTasksFind).not.toHaveBeenCalled();
     expect(mockPostTelegramMessageBestEffort).not.toHaveBeenCalled();
     expect(mockLinearEmitResponse).not.toHaveBeenCalled();
   });
@@ -243,9 +245,7 @@ describe('notifyTelegramAndLinearPrMerge', () => {
   it('does not throw when posting to Telegram fails', async () => {
     mockedGithubFind.mockResolvedValue({ id: 1 } as any);
     mockedTaskPullRequestsFind.mockResolvedValue([{ taskId: 'task-1' }] as any);
-    mockedCloudJobsFind.mockResolvedValue([
-      { linearSessionId: null, payload: telegramPayload },
-    ] as any);
+    mockedTaskRunsFind.mockResolvedValue([{ payload: telegramPayload }] as any);
     mockPostTelegramMessageBestEffort.mockRejectedValue(
       new Error('Telegram down'),
     );
@@ -258,8 +258,8 @@ describe('notifyTelegramAndLinearPrMerge', () => {
   it('does not throw when emitting to Linear returns a failure result', async () => {
     mockedGithubFind.mockResolvedValue({ id: 1 } as any);
     mockedTaskPullRequestsFind.mockResolvedValue([{ taskId: 'task-1' }] as any);
-    mockedCloudJobsFind.mockResolvedValue([
-      { linearSessionId: 'session-1', payload: null },
+    mockedTasksFind.mockResolvedValue([
+      { linearSessionId: 'session-1' },
     ] as any);
     mockLinearEmitResponse.mockResolvedValue({
       success: false,
@@ -274,8 +274,8 @@ describe('notifyTelegramAndLinearPrMerge', () => {
   it('does not throw when emitting to Linear rejects', async () => {
     mockedGithubFind.mockResolvedValue({ id: 1 } as any);
     mockedTaskPullRequestsFind.mockResolvedValue([{ taskId: 'task-1' }] as any);
-    mockedCloudJobsFind.mockResolvedValue([
-      { linearSessionId: 'session-1', payload: null },
+    mockedTasksFind.mockResolvedValue([
+      { linearSessionId: 'session-1' },
     ] as any);
     mockLinearEmitResponse.mockRejectedValue(new Error('Linear down'));
 
@@ -286,9 +286,7 @@ describe('notifyTelegramAndLinearPrMerge', () => {
 
   it('works without an installation gate (non-GitHub providers)', async () => {
     mockedTaskPullRequestsFind.mockResolvedValue([{ taskId: 'task-1' }] as any);
-    mockedCloudJobsFind.mockResolvedValue([
-      { linearSessionId: null, payload: telegramPayload },
-    ] as any);
+    mockedTaskRunsFind.mockResolvedValue([{ payload: telegramPayload }] as any);
 
     await notifyTelegramAndLinearPrMerge({
       ...baseParams,

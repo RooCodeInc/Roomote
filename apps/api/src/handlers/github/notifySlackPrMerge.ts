@@ -1,9 +1,9 @@
 import {
   db,
-  cloudJobs,
   slackInstallations,
   githubInstallations,
   taskPullRequests,
+  tasks,
   eq,
   and,
   inArray,
@@ -11,10 +11,7 @@ import {
 } from '@roomote/db/server';
 import { buildPullRequestMergedNotificationText } from '@roomote/communication/chat-messages';
 import { resolveSlackReactionNames, SlackNotifier } from '@roomote/slack';
-import {
-  getSlackChannelFromTaskPayload,
-  type SourceControlProvider,
-} from '@roomote/types';
+import { type SourceControlProvider } from '@roomote/types';
 
 interface NotifySlackPrMergeParams {
   /**
@@ -37,7 +34,7 @@ interface NotifySlackPrMergeParams {
 
 /**
  * Notifies Slack threads associated with a PR that the PR has been merged.
- * Queries for cloud jobs that reference the PR and have a Slack thread,
+ * Queries for task runs that reference the PR and have a Slack thread,
  * filtering by GitHub installation to ensure only the tracked deployment
  * receives notifications.
  */
@@ -88,20 +85,16 @@ export async function notifySlackPrMerge({
       return;
     }
 
-    // Find cloud jobs for linked tasks that have Slack threads.
-    const jobsWithSlackThreads = await db.query.cloudJobs.findMany({
-      where: and(
-        inArray(cloudJobs.taskId, taskIds),
-        isNotNull(cloudJobs.slackThreadTs),
-      ),
+    // Find linked tasks that have Slack thread bindings.
+    const tasksWithSlackThreads = await db.query.tasks.findMany({
+      where: and(inArray(tasks.id, taskIds), isNotNull(tasks.slackThreadTs)),
       columns: {
         slackThreadTs: true,
-        userId: true,
-        payload: true,
+        slackChannelId: true,
       },
     });
 
-    if (jobsWithSlackThreads.length === 0) {
+    if (tasksWithSlackThreads.length === 0) {
       console.log(
         `[notifySlackPrMerge] No Slack threads found for PR ${repository}#${prNumber}`,
       );
@@ -109,7 +102,7 @@ export async function notifySlackPrMerge({
     }
 
     console.log(
-      `[notifySlackPrMerge] Found ${jobsWithSlackThreads.length} Slack thread(s) for PR ${repository}#${prNumber}`,
+      `[notifySlackPrMerge] Found ${tasksWithSlackThreads.length} Slack thread(s) for PR ${repository}#${prNumber}`,
     );
 
     const slackInstallation = await db.query.slackInstallations.findFirst({
@@ -125,8 +118,8 @@ export async function notifySlackPrMerge({
     // Send notification to each unique thread
     const notifiedThreads = new Set<string>();
 
-    for (const job of jobsWithSlackThreads) {
-      const { slackThreadTs, payload } = job;
+    for (const task of tasksWithSlackThreads) {
+      const { slackThreadTs, slackChannelId } = task;
 
       if (!slackThreadTs) {
         continue;
@@ -138,18 +131,11 @@ export async function notifySlackPrMerge({
       }
 
       try {
-        if (!payload || typeof payload !== 'object') {
-          console.warn(
-            `[notifySlackPrMerge] No payload found for thread ${slackThreadTs}`,
-          );
-          continue;
-        }
-
-        const channel = getSlackChannelFromTaskPayload(payload);
+        const channel = slackChannelId;
 
         if (!channel) {
           console.warn(
-            `[notifySlackPrMerge] No channel found in payload for thread ${slackThreadTs}`,
+            `[notifySlackPrMerge] No Slack channel bound for thread ${slackThreadTs}`,
           );
 
           continue;

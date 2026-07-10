@@ -7,6 +7,7 @@ import {
   buildSetupSourceControlStatus,
   getSetupSourceControlProvider,
   isLoopbackHostname,
+  NON_SECRET_SOURCE_CONTROL_ENV_VAR_NAMES,
   type SetupSourceControlProviderStatus,
   type SetupSourceControlStatus,
   type PrAction,
@@ -30,6 +31,7 @@ import { Env } from '@/lib/server/env';
 
 import {
   assertAdmin,
+  getPersistedEnvironmentVariableValues,
   upsertDeploymentEnvironmentVariables,
 } from '../environment-variables';
 
@@ -57,12 +59,19 @@ export async function getSourceControlConfigStatusCommand(
 ): Promise<SetupSourceControlStatus> {
   assertAdmin(auth);
 
-  const persistedEnvVarNames = await getPersistedEnvironmentVariableNames();
-  const gitlabBaseUrl = await resolveDeploymentEnvVar('GITLAB_BASE_URL');
+  const [persistedEnvVarNames, persistedEnvVarValues, gitlabBaseUrl] =
+    await Promise.all([
+      getPersistedEnvironmentVariableNames(),
+      getPersistedEnvironmentVariableValues([
+        ...NON_SECRET_SOURCE_CONTROL_ENV_VAR_NAMES,
+      ]),
+      resolveDeploymentEnvVar('GITLAB_BASE_URL'),
+    ]);
 
   return buildSetupSourceControlStatus({
     runtimeEnv: process.env,
     persistedEnvVarNames,
+    persistedEnvVarValues,
     gitlabBaseUrl,
   });
 }

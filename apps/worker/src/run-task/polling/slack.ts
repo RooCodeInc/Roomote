@@ -20,7 +20,7 @@ import {
 const SLACK_MESSAGE_CHECK_INTERVAL_MS = 5_000;
 
 type QueuedSlackMessages = Awaited<
-  ReturnType<typeof sdk.cloudJobs.getSlackMessages>
+  ReturnType<typeof sdk.taskRuns.getSlackMessages>
 >;
 
 function getSlackClientMessageId(message: QueuedSlackMessages[number]): string {
@@ -28,25 +28,25 @@ function getSlackClientMessageId(message: QueuedSlackMessages[number]): string {
 }
 
 async function requeueSlackRequestUserInputAnswers(
-  cloudJobId: number,
+  runId: number,
   queuedAnswers: Awaited<
-    ReturnType<typeof sdk.cloudJobs.getSlackRequestUserInputAnswers>
+    ReturnType<typeof sdk.taskRuns.getSlackRequestUserInputAnswers>
   >,
   startIndex: number,
 ): Promise<void> {
   await prependSlackRequestUserInputAnswers(
-    cloudJobId,
+    runId,
     queuedAnswers.slice(startIndex),
   );
 }
 
 async function requeueSlackMessages(
-  cloudJobId: number,
+  runId: number,
   deliveryOrder: QueuedSlackMessages,
   startIndex: number,
 ): Promise<void> {
   const remainingQueueOrder = [...deliveryOrder.slice(startIndex)].reverse();
-  await prependSlackMessages(cloudJobId, remainingQueueOrder);
+  await prependSlackMessages(runId, remainingQueueOrder);
 }
 
 function getQueuedSlackTurnReactionAllowance(
@@ -56,7 +56,7 @@ function getQueuedSlackTurnReactionAllowance(
 }
 
 export function createSlackMessageInterval({
-  cloudJob,
+  taskRun,
   sendPrompt,
   slackReplySatisfactionStateFile,
   answerUserInputRequest,
@@ -80,16 +80,16 @@ export function createSlackMessageInterval({
     try {
       const queuedAnswers = await runPollingSdkCall({
         execute: () =>
-          sdk.cloudJobs.getSlackRequestUserInputAnswers({
-            cloudJobId: cloudJob.id,
+          sdk.taskRuns.getSlackRequestUserInputAnswers({
+            runId: taskRun.id,
           }),
         stage: 'listenForSlackEvents',
-        cloudJobId: cloudJob.id,
+        runId: taskRun.id,
         sessionId: state.sessionId,
-        sdkMethod: 'cloudJobs.getSlackRequestUserInputAnswers',
+        sdkMethod: 'taskRuns.getSlackRequestUserInputAnswers',
         failurePoint: 'queuedSlackRequestUserInputAnswers',
         logger,
-        message: `[listenForSlackEvents] Failed to check for queued Slack request_user_input answers for job ${cloudJob.id}`,
+        message: `[listenForSlackEvents] Failed to check for queued Slack request_user_input answers for job ${taskRun.id}`,
       });
 
       if (!queuedAnswers) {
@@ -98,27 +98,30 @@ export function createSlackMessageInterval({
 
       if (queuedAnswers.length > 0) {
         logger.log(
-          `[listenForSlackEvents] Found ${queuedAnswers.length} queued Slack request_user_input answer(s) for job ${cloudJob.id}`,
+          `[listenForSlackEvents] Found ${queuedAnswers.length} queued Slack request_user_input answer(s) for job ${taskRun.id}`,
         );
 
         for (const [index, answer] of queuedAnswers.entries()) {
-          const canDeliver =
-            (await prepareActorScopedTurn(answer.userId)) !== false;
+          // The API atomically couples the winning answer claim to its
+          // trusted actor write. If the worker drains Redis just before that
+          // DB transaction commits, block and requeue instead of dropping an
+          // answer that is already marked submitted and cannot be resent.
+          const answerPrep = await prepareActorScopedTurn(answer.userId);
 
-          if (!canDeliver) {
+          if (answerPrep === false || answerPrep.skippedMismatch) {
             logger.warn(
               `[listenForSlackEvents] Delaying request_user_input answer for task ${state.sessionId} until actor-scoped turn preparation succeeds (requestId=${answer.requestId})`,
             );
 
             try {
               await requeueSlackRequestUserInputAnswers(
-                cloudJob.id,
+                taskRun.id,
                 queuedAnswers,
                 index,
               );
             } catch (error) {
               logger.error(
-                `[listenForSlackEvents] Failed to requeue delayed request_user_input answer for cloud job ${cloudJob.id}: ${
+                `[listenForSlackEvents] Failed to requeue delayed request_user_input answer for task run ${taskRun.id}: ${
                   error instanceof Error ? error.message : String(error)
                 }`,
               );
@@ -130,7 +133,8 @@ export function createSlackMessageInterval({
           const sent = answerUserInputRequest({
             requestId: answer.requestId,
             answers: answer.answers,
-            userId: answer.userId,
+            // The delivered sender always equals the server-side acting user.
+            userId: answerPrep.effectiveUserId ?? undefined,
           });
 
           logger.log(
@@ -144,13 +148,13 @@ export function createSlackMessageInterval({
 
             try {
               await requeueSlackRequestUserInputAnswers(
-                cloudJob.id,
+                taskRun.id,
                 queuedAnswers,
                 index,
               );
             } catch (error) {
               logger.error(
-                `[listenForSlackEvents] Failed to requeue request_user_input answer for cloud job ${cloudJob.id}: ${
+                `[listenForSlackEvents] Failed to requeue request_user_input answer for task run ${taskRun.id}: ${
                   error instanceof Error ? error.message : String(error)
                 }`,
               );
@@ -163,16 +167,16 @@ export function createSlackMessageInterval({
 
       const slackMessages = await runPollingSdkCall({
         execute: () =>
-          sdk.cloudJobs.getSlackMessages({
-            cloudJobId: cloudJob.id,
+          sdk.taskRuns.getSlackMessages({
+            runId: taskRun.id,
           }),
         stage: 'listenForSlackEvents',
-        cloudJobId: cloudJob.id,
+        runId: taskRun.id,
         sessionId: state.sessionId,
-        sdkMethod: 'cloudJobs.getSlackMessages',
+        sdkMethod: 'taskRuns.getSlackMessages',
         failurePoint: 'queuedSlackMessages',
         logger,
-        message: `[listenForSlackEvents] Failed to check for queued Slack messages for job ${cloudJob.id}`,
+        message: `[listenForSlackEvents] Failed to check for queued Slack messages for job ${taskRun.id}`,
       });
 
       if (!slackMessages) {
@@ -181,7 +185,7 @@ export function createSlackMessageInterval({
 
       if (slackMessages.length > 0) {
         logger.log(
-          `[listenForSlackEvents] Found ${slackMessages.length} queued Slack message(s) for job ${cloudJob.id}`,
+          `[listenForSlackEvents] Found ${slackMessages.length} queued Slack message(s) for job ${taskRun.id}`,
         );
 
         const deliveryOrder = [...slackMessages].reverse();
@@ -199,27 +203,39 @@ export function createSlackMessageInterval({
             !isActiveTaskPhase(state.phase) ||
             state.isConnected === false;
 
-          const canDeliver =
-            (await prepareActorScopedTurn(msg.userId, {
-              allowMcpReconnect,
-            })) !== false;
+          // The API performs a trusted pre-queue actor sync for these
+          // messages; a residual mismatch (e.g. two senders racing the poll)
+          // skips that message's content (with a resend notice) rather than
+          // running it under the server actor or stalling the queue.
+          const msgPrep = await prepareActorScopedTurn(msg.userId, {
+            allowMcpReconnect,
+            onMismatch: 'skip',
+          });
 
-          if (!canDeliver) {
+          if (msgPrep === false) {
             logger.warn(
               `[listenForSlackEvents] Delaying Slack follow-up for task ${state.sessionId} until actor-scoped turn preparation succeeds`,
             );
 
             try {
-              await requeueSlackMessages(cloudJob.id, deliveryOrder, index);
+              await requeueSlackMessages(taskRun.id, deliveryOrder, index);
             } catch (error) {
               logger.error(
-                `[listenForSlackEvents] Failed to requeue delayed Slack message for cloud job ${cloudJob.id}: ${
+                `[listenForSlackEvents] Failed to requeue delayed Slack message for task run ${taskRun.id}: ${
                   error instanceof Error ? error.message : String(error)
                 }`,
               );
             }
 
             break;
+          }
+
+          if (msgPrep.skippedMismatch) {
+            logger.warn(
+              `[listenForSlackEvents] Skipped Slack follow-up for task ${state.sessionId}: sender is not the server-side acting user (ts=${msg.ts})`,
+            );
+            index += 1;
+            continue;
           }
 
           const prompt =
@@ -232,7 +248,8 @@ export function createSlackMessageInterval({
             images: msg.images,
             autoSteerWhenQueued: true,
             source: 'slack',
-            userId: msg.userId,
+            // The delivered sender always equals the server-side acting user.
+            userId: msgPrep.effectiveUserId ?? undefined,
             clientMessageId: getSlackClientMessageId(msg),
           });
 
@@ -246,10 +263,10 @@ export function createSlackMessageInterval({
             );
 
             try {
-              await requeueSlackMessages(cloudJob.id, deliveryOrder, index);
+              await requeueSlackMessages(taskRun.id, deliveryOrder, index);
             } catch (error) {
               logger.error(
-                `[listenForSlackEvents] Failed to requeue Slack follow-up for cloud job ${cloudJob.id}: ${
+                `[listenForSlackEvents] Failed to requeue Slack follow-up for task run ${taskRun.id}: ${
                   error instanceof Error ? error.message : String(error)
                 }`,
               );
@@ -271,13 +288,13 @@ export function createSlackMessageInterval({
     } catch (error) {
       logPollingTransportError({
         stage: 'listenForSlackEvents',
-        cloudJobId: cloudJob.id,
+        runId: taskRun.id,
         sessionId: state.sessionId,
         sdkMethod: 'listenForSlackEvents.delivery',
         failurePoint: 'queuedSlackDelivery',
         logger,
         error,
-        message: `[listenForSlackEvents] Unexpected error while delivering queued Slack events for job ${cloudJob.id}`,
+        message: `[listenForSlackEvents] Unexpected error while delivering queued Slack events for job ${taskRun.id}`,
       });
     }
   };

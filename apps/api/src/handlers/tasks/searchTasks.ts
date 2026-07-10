@@ -1,18 +1,16 @@
 import type { Context } from 'hono';
-import {
-  HAS_PULL_REQUEST_FILTER_VALUE,
-  isHiddenCloudTaskType,
-} from '@roomote/types';
+import { HAS_PULL_REQUEST_FILTER_VALUE } from '@roomote/types';
 
 import {
   and,
-  cloudJobs,
   db,
   desc,
   eq,
   lt,
+  ne,
   sql,
   taskPullRequests,
+  taskRuns,
   tasks,
 } from '@roomote/db/server';
 
@@ -20,7 +18,7 @@ import type { Variables } from '../../types';
 import type { McpAuth } from '../mcp/middleware';
 import {
   TASK_SELECT_COLUMNS,
-  getLatestCloudJobsByTaskIds,
+  getLatestTaskRunsByTaskIds,
   visibleTaskHistoryCondition,
 } from './helpers';
 import { logHandlerError } from '../utils';
@@ -147,9 +145,9 @@ export async function searchTasks(
           ${tasks.title} ILIKE ${'%' + escaped + '%'} ESCAPE '\\'
           OR EXISTS (
             SELECT 1
-            FROM ${cloudJobs}
-            WHERE ${cloudJobs.taskId} = ${tasks.id}
-              AND ${cloudJobs.payload}->>'description' ILIKE ${'%' + escaped + '%'} ESCAPE '\\'
+            FROM ${taskRuns}
+            WHERE ${taskRuns.taskId} = ${tasks.id}
+              AND ${taskRuns.payload}->>'description' ILIKE ${'%' + escaped + '%'} ESCAPE '\\'
           )
         )`,
       );
@@ -180,9 +178,11 @@ export async function searchTasks(
     }
 
     if (status === 'active') {
-      conditions.push(eq(tasks.completed, false));
+      // Preserves the legacy `completed = false` semantics: failed and
+      // canceled tasks still show up under the "active" filter.
+      conditions.push(ne(tasks.state, 'completed'));
     } else if (status === 'completed') {
-      conditions.push(eq(tasks.completed, true));
+      conditions.push(eq(tasks.state, 'completed'));
     }
 
     if (cursorActivityAt !== undefined) {
@@ -215,25 +215,24 @@ export async function searchTasks(
     const taskList = hasMore ? results.slice(0, limit) : results;
 
     const taskIds = taskList.map((task) => task.id);
-    const latestJobs = await getLatestCloudJobsByTaskIds(taskIds);
-    const visibleTaskList = taskList.filter((task) => {
-      const latestJob = latestJobs[task.id];
-      return latestJob ? !isHiddenCloudTaskType(latestJob.type) : true;
-    });
+    const latestRuns = await getLatestTaskRunsByTaskIds(taskIds);
 
+    // Hidden tasks are excluded by visibleTaskHistoryCondition
+    // (tasks.visibility = 'visible'); no per-run type filter is needed.
     return c.json({
-      tasks: visibleTaskList.map((t) => ({
+      tasks: taskList.map((t) => ({
         id: t.id,
         title: t.title,
         mode: t.mode,
-        completed: t.completed,
+        completed: t.state === 'completed',
+        state: t.state,
         repositoryName: t.repositoryName,
         harness: t.harness,
         createdAt: t.timestamp,
         lastMessageAt: t.activityAt,
-        cloudJobStatus: latestJobs[t.id]?.status ?? null,
-        taskPhase: latestJobs[t.id]?.taskPhase ?? null,
-        cloudJobError: latestJobs[t.id]?.error ?? null,
+        taskRunStatus: latestRuns[t.id]?.status ?? null,
+        taskPhase: latestRuns[t.id]?.taskPhase ?? null,
+        taskRunError: latestRuns[t.id]?.error ?? null,
       })),
       hasMore,
       nextCursor,

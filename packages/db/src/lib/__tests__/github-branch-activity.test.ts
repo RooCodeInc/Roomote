@@ -1,11 +1,15 @@
 import {
-  cloudJobFactory,
+  runFactory,
   db,
   taskFactory,
   taskPullRequests,
   userFactory,
 } from '../../server';
-import { CloudTaskStatus, CloudTaskType } from '@roomote/types';
+import {
+  RunStatus,
+  TaskPayloadKind,
+  type SourceControlProvider,
+} from '@roomote/types';
 
 import {
   DEFAULT_CONFLICT_RESOLUTION_IDLE_WINDOW_MS,
@@ -21,36 +25,81 @@ async function createActor() {
   return { user };
 }
 
-async function createPrLinkedTaskJob({
+async function createPrLinkedTask({
   repoFullName,
   prNumber,
   userId,
-  type,
+  prSha,
+  sourceControlProvider = 'github',
 }: {
   repoFullName: string;
   prNumber: number;
   userId: string;
-  type: CloudTaskType;
+  prSha?: string;
+  sourceControlProvider?: SourceControlProvider;
+}) {
+  const task = await taskFactory.create({
+    initiatorUserId: userId,
+  });
+
+  await db.insert(taskPullRequests).values({
+    taskId: task.id,
+    prUrl: `https://github.com/${repoFullName}/pull/${prNumber}`,
+    prNumber,
+    prTitle: 'Test PR',
+    repository: repoFullName,
+    prSha: prSha ?? null,
+    sourceControlProvider,
+    status: 'open',
+  });
+
+  return task.id;
+}
+
+async function createPrLinkedTaskRun({
+  repoFullName,
+  prNumber,
+  userId,
+  payloadKind,
+  status = RunStatus.Pending,
+  taskPhase,
+  prSha,
+  sourceControlProvider,
+}: {
+  repoFullName: string;
+  prNumber: number;
+  userId: string;
+  payloadKind: TaskPayloadKind;
+  status?: RunStatus;
+  taskPhase?: string;
+  prSha?: string;
+  sourceControlProvider?: SourceControlProvider;
 }) {
   const taskId = await createPrLinkedTask({
     repoFullName,
     prNumber,
     userId,
+    prSha,
+    sourceControlProvider,
   });
 
-  return cloudJobFactory.create({
-    userId,
+  return runFactory.create({
+    actingUserId: userId,
     taskId,
-    type,
-    status: CloudTaskStatus.Pending,
+    payloadKind,
+    status,
+    taskPhase,
     payload: {
       repo: repoFullName,
-      description: 'Make changes on this PR branch',
+      prNumber,
+      prTitle: 'Test PR',
+      prUrl: `https://github.com/${repoFullName}/pull/${prNumber}`,
+      headSha: prSha ?? 'abc1234',
     },
   });
 }
 
-async function createSlackPrLinkedTaskJob({
+async function createSlackPrLinkedTaskRun({
   repoFullName,
   prNumber,
   userId,
@@ -65,11 +114,11 @@ async function createSlackPrLinkedTaskJob({
     userId,
   });
 
-  return cloudJobFactory.create({
-    userId,
+  return runFactory.create({
+    actingUserId: userId,
     taskId,
-    type: CloudTaskType.SlackAppMention,
-    status: CloudTaskStatus.Pending,
+    payloadKind: TaskPayloadKind.SlackAppMention,
+    status: RunStatus.Pending,
     payload: {
       repo: repoFullName,
       channel: 'C123',
@@ -80,7 +129,7 @@ async function createSlackPrLinkedTaskJob({
   });
 }
 
-async function createLinearPrLinkedTaskJob({
+async function createLinearPrLinkedTaskRun({
   repoFullName,
   prNumber,
   userId,
@@ -95,13 +144,11 @@ async function createLinearPrLinkedTaskJob({
     userId,
   });
 
-  return cloudJobFactory.create({
-    userId,
+  return runFactory.create({
+    actingUserId: userId,
     taskId,
-    type: CloudTaskType.LinearAgentSession,
-    status: CloudTaskStatus.Pending,
-    linearSessionId: 'linear-session-1',
-    linearOrganizationId: 'linear-org-1',
+    payloadKind: TaskPayloadKind.LinearAgentSession,
+    status: RunStatus.Pending,
     payload: {
       repo: repoFullName,
       sessionId: 'linear-session-1',
@@ -115,59 +162,35 @@ async function createLinearPrLinkedTaskJob({
   });
 }
 
-async function createPrLinkedTask({
-  repoFullName,
-  prNumber,
-  userId,
-}: {
-  repoFullName: string;
-  prNumber: number;
-  userId: string;
-}) {
-  const task = await taskFactory.create({
-    userId,
-  });
-
-  await db.insert(taskPullRequests).values({
-    taskId: task.id,
-    prUrl: `https://github.com/${repoFullName}/pull/${prNumber}`,
-    prNumber,
-    prTitle: 'Test PR',
-    repository: repoFullName,
-    status: 'open',
-  });
-
-  return task.id;
-}
-
-async function createSnapshotResumeJob({
+async function createSnapshotResumeRun({
   userId,
   taskId,
   repoFullName,
-  sourceCloudJobId,
+  sourceRunId,
 }: {
   userId: string;
   taskId: string;
   repoFullName: string;
-  sourceCloudJobId: number;
+  sourceRunId: number;
 }) {
-  return cloudJobFactory.create({
-    userId,
+  return runFactory.create({
+    actingUserId: userId,
     taskId,
-    type: CloudTaskType.SnapshotResume,
-    status: CloudTaskStatus.Running,
+    payloadKind: TaskPayloadKind.SnapshotResume,
+    kind: 'resume',
+    status: RunStatus.Running,
     taskPhase: 'running',
-    sourceCloudJobId,
+    sourceRunId,
     payload: {
       repo: repoFullName,
-      sourceSnapshotId: `snapshot-${sourceCloudJobId}`,
-      sourceCloudJobId,
+      sourceSnapshotId: `snapshot-${sourceRunId}`,
+      sourceRunId: sourceRunId,
     },
   });
 }
 
 describe('findActiveGitHubBranchWork', () => {
-  it('returns null when no matching jobs exist', async () => {
+  it('returns null when no matching runs exist', async () => {
     const repoFullName = 'owner/repo-no-match-unique';
     const prNumber = 9_999;
     const branchName = 'feature/no-match';
@@ -181,25 +204,18 @@ describe('findActiveGitHubBranchWork', () => {
     expect(result).toBeNull();
   });
 
-  it('matches an active job already tied to the same PR', async () => {
+  it('matches an active run linked to the same PR', async () => {
     const { user } = await createActor();
     const repoFullName = 'owner/repo-github-pr';
     const prNumber = 142;
 
-    const job = await cloudJobFactory.create({
+    const run = await createPrLinkedTaskRun({
+      repoFullName,
+      prNumber,
       userId: user.id,
-      type: CloudTaskType.GithubPrReview,
-      status: CloudTaskStatus.Running,
+      payloadKind: TaskPayloadKind.GithubPrReview,
+      status: RunStatus.Running,
       taskPhase: 'running',
-      prRepo: repoFullName,
-      prNumber: prNumber,
-      payload: {
-        repo: repoFullName,
-        prNumber,
-        prTitle: 'Test PR',
-        prUrl: `https://github.com/${repoFullName}/pull/${prNumber}`,
-        headSha: 'abc1234',
-      },
     });
 
     const result = await findActiveGitHubBranchWork({
@@ -209,68 +225,35 @@ describe('findActiveGitHubBranchWork', () => {
     });
 
     expect(result).toEqual({
-      jobId: job.id,
-      taskId: job.taskId,
-      type: CloudTaskType.GithubPrReview,
-      status: CloudTaskStatus.Running,
+      runId: run.id,
+      taskId: run.taskId,
+      type: TaskPayloadKind.GithubPrReview,
+      status: RunStatus.Running,
       taskPhase: 'running',
-      match: 'github_pr',
-    });
-  });
-
-  it('matches an active task linked to the PR through taskPullRequests', async () => {
-    const { user } = await createActor();
-    const repoFullName = 'owner/repo-task-link';
-    const prNumber = 242;
-    const job = await createPrLinkedTaskJob({
-      repoFullName,
-      prNumber,
-      userId: user.id,
-      type: CloudTaskType.StandardTask,
-    });
-
-    const result = await findActiveGitHubBranchWork({
-      repoFullName,
-      prNumber,
-      branchName: 'feature/work',
-    });
-
-    expect(result).toEqual({
-      jobId: job.id,
-      taskId: job.taskId,
-      type: CloudTaskType.StandardTask,
-      status: CloudTaskStatus.Pending,
-      taskPhase: null,
       match: 'task_pull_request',
     });
   });
 
-  it('still returns the newest active PR job even when an older reusable owner exists', async () => {
+  it('still returns the newest active PR run even when an older reusable owner exists', async () => {
     const { user } = await createActor();
     const repoFullName = 'owner/repo-active-any-work';
     const prNumber = 243;
 
-    await createPrLinkedTaskJob({
+    await createPrLinkedTaskRun({
       repoFullName,
       prNumber,
       userId: user.id,
-      type: CloudTaskType.StandardTask,
+      payloadKind: TaskPayloadKind.StandardTask,
     });
 
-    const newestJob = await cloudJobFactory.create({
+    const newestRun = await createPrLinkedTaskRun({
+      repoFullName,
+      prNumber,
       userId: user.id,
-      type: CloudTaskType.GithubPrReviewSync,
-      status: CloudTaskStatus.Running,
+      payloadKind: TaskPayloadKind.GithubPrReviewSync,
+      status: RunStatus.Running,
       taskPhase: 'running',
-      prRepo: repoFullName,
-      prNumber: prNumber,
-      payload: {
-        repo: repoFullName,
-        prNumber,
-        prTitle: 'Test PR',
-        prUrl: `https://github.com/${repoFullName}/pull/${prNumber}`,
-        headSha: 'def5678',
-      },
+      prSha: 'def5678',
     });
 
     const result = await findActiveGitHubBranchWork({
@@ -280,25 +263,25 @@ describe('findActiveGitHubBranchWork', () => {
     });
 
     expect(result).toEqual({
-      jobId: newestJob.id,
-      taskId: newestJob.taskId,
-      type: CloudTaskType.GithubPrReviewSync,
-      status: CloudTaskStatus.Running,
+      runId: newestRun.id,
+      taskId: newestRun.taskId,
+      type: TaskPayloadKind.GithubPrReviewSync,
+      status: RunStatus.Running,
       taskPhase: 'running',
-      match: 'github_pr',
+      match: 'task_pull_request',
     });
   });
 
-  it('matches an active job working on the same repo branch', async () => {
+  it('matches an active run working on the same repo branch', async () => {
     const { user } = await createActor();
     const repoFullName = 'owner/repo-branch';
     const prNumber = 342;
     const branchName = 'feature/work-branch';
 
-    const job = await cloudJobFactory.create({
-      userId: user.id,
-      type: CloudTaskType.StandardTask,
-      status: CloudTaskStatus.Running,
+    const run = await runFactory.create({
+      actingUserId: user.id,
+      payloadKind: TaskPayloadKind.StandardTask,
+      status: RunStatus.Running,
       taskPhase: 'running',
       payload: {
         repo: repoFullName,
@@ -314,25 +297,25 @@ describe('findActiveGitHubBranchWork', () => {
     });
 
     expect(result).toEqual({
-      jobId: job.id,
-      taskId: job.taskId,
-      type: CloudTaskType.StandardTask,
-      status: CloudTaskStatus.Running,
+      runId: run.id,
+      taskId: run.taskId,
+      type: TaskPayloadKind.StandardTask,
+      status: RunStatus.Running,
       taskPhase: 'running',
       match: 'branch',
     });
   });
 
-  it('ignores jobs that are not actively running anymore', async () => {
+  it('ignores runs that are not actively running anymore', async () => {
     const { user } = await createActor();
     const repoFullName = 'owner/repo-inactive';
     const prNumber = 442;
     const branchName = 'feature/inactive';
 
-    await cloudJobFactory.create({
-      userId: user.id,
-      type: CloudTaskType.StandardTask,
-      status: CloudTaskStatus.Running,
+    await runFactory.create({
+      actingUserId: user.id,
+      payloadKind: TaskPayloadKind.StandardTask,
+      status: RunStatus.Running,
       taskPhase: 'waiting_for_prompt',
       payload: {
         repo: repoFullName,
@@ -341,10 +324,10 @@ describe('findActiveGitHubBranchWork', () => {
       },
     });
 
-    await cloudJobFactory.create({
-      userId: user.id,
-      type: CloudTaskType.StandardTask,
-      status: CloudTaskStatus.Completed,
+    await runFactory.create({
+      actingUserId: user.id,
+      payloadKind: TaskPayloadKind.StandardTask,
+      status: RunStatus.Completed,
       payload: {
         repo: repoFullName,
         branch: branchName,
@@ -363,32 +346,26 @@ describe('findActiveGitHubBranchWork', () => {
 });
 
 describe('findReusableGitHubPrFollowUpOwner', () => {
-  it('returns an older reusable owner when a newer non-reusable PR job exists', async () => {
+  it('returns an older reusable owner when a newer non-reusable PR run exists', async () => {
     const { user } = await createActor();
     const repoFullName = 'owner/repo-reusable-owner';
     const prNumber = 542;
 
-    const reusableJob = await createPrLinkedTaskJob({
+    const reusableRun = await createPrLinkedTaskRun({
       repoFullName,
       prNumber,
       userId: user.id,
-      type: CloudTaskType.StandardTask,
+      payloadKind: TaskPayloadKind.StandardTask,
     });
 
-    await cloudJobFactory.create({
+    await createPrLinkedTaskRun({
+      repoFullName,
+      prNumber,
       userId: user.id,
-      type: CloudTaskType.GithubPrReviewSync,
-      status: CloudTaskStatus.Running,
+      payloadKind: TaskPayloadKind.GithubPrReviewSync,
+      status: RunStatus.Running,
       taskPhase: 'running',
-      prRepo: repoFullName,
-      prNumber: prNumber,
-      payload: {
-        repo: repoFullName,
-        prNumber,
-        prTitle: 'Test PR',
-        prUrl: `https://github.com/${repoFullName}/pull/${prNumber}`,
-        headSha: 'def5678',
-      },
+      prSha: 'def5678',
     });
 
     const result = await findReusableGitHubPrFollowUpOwner({
@@ -398,10 +375,10 @@ describe('findReusableGitHubPrFollowUpOwner', () => {
     });
 
     expect(result).toEqual({
-      jobId: reusableJob.id,
-      taskId: reusableJob.taskId,
-      type: CloudTaskType.StandardTask,
-      status: CloudTaskStatus.Pending,
+      runId: reusableRun.id,
+      taskId: reusableRun.taskId,
+      type: TaskPayloadKind.StandardTask,
+      status: RunStatus.Pending,
       taskPhase: null,
       match: 'task_pull_request',
       delivery: 'attach',
@@ -413,7 +390,7 @@ describe('findReusableGitHubPrFollowUpOwner', () => {
     const repoFullName = 'owner/repo-implementation-follow-up';
     const prNumber = 543;
 
-    const slackJob = await createSlackPrLinkedTaskJob({
+    const slackTaskRun = await createSlackPrLinkedTaskRun({
       repoFullName,
       prNumber,
       userId: user.id,
@@ -426,10 +403,10 @@ describe('findReusableGitHubPrFollowUpOwner', () => {
     });
 
     expect(result).toEqual({
-      jobId: slackJob.id,
-      taskId: slackJob.taskId,
-      type: CloudTaskType.SlackAppMention,
-      status: CloudTaskStatus.Pending,
+      runId: slackTaskRun.id,
+      taskId: slackTaskRun.taskId,
+      type: TaskPayloadKind.SlackAppMention,
+      status: RunStatus.Pending,
       taskPhase: null,
       match: 'task_pull_request',
       delivery: 'attach',
@@ -441,7 +418,7 @@ describe('findReusableGitHubPrFollowUpOwner', () => {
     const repoFullName = 'owner/repo-linear-follow-up';
     const prNumber = 544;
 
-    const linearJob = await createLinearPrLinkedTaskJob({
+    const linearRun = await createLinearPrLinkedTaskRun({
       repoFullName,
       prNumber,
       userId: user.id,
@@ -454,10 +431,10 @@ describe('findReusableGitHubPrFollowUpOwner', () => {
     });
 
     expect(result).toEqual({
-      jobId: linearJob.id,
-      taskId: linearJob.taskId,
-      type: CloudTaskType.LinearAgentSession,
-      status: CloudTaskStatus.Pending,
+      runId: linearRun.id,
+      taskId: linearRun.taskId,
+      type: TaskPayloadKind.LinearAgentSession,
+      status: RunStatus.Pending,
       taskPhase: null,
       match: 'task_pull_request',
       delivery: 'attach',
@@ -469,20 +446,25 @@ describe('findReusableGitHubPrFollowUpOwner', () => {
     const repoFullName = 'owner/repo-pr-review-follow-up';
     const prNumber = 545;
 
-    const reusableJob = await createPrLinkedTaskJob({
+    const reusableRun = await createPrLinkedTaskRun({
       repoFullName,
       prNumber,
       userId: user.id,
-      type: CloudTaskType.StandardTask,
+      payloadKind: TaskPayloadKind.StandardTask,
     });
 
-    await cloudJobFactory.create({
+    const followUpTaskId = await createPrLinkedTask({
+      repoFullName,
+      prNumber,
       userId: user.id,
-      type: CloudTaskType.GithubPrReviewFollowUp,
-      status: CloudTaskStatus.Running,
+    });
+
+    await runFactory.create({
+      actingUserId: user.id,
+      taskId: followUpTaskId,
+      payloadKind: TaskPayloadKind.GithubPrReviewFollowUp,
+      status: RunStatus.Running,
       taskPhase: 'running',
-      prRepo: repoFullName,
-      prNumber: prNumber,
       payload: {
         repo: repoFullName,
         prNumber,
@@ -498,10 +480,10 @@ describe('findReusableGitHubPrFollowUpOwner', () => {
     });
 
     expect(result).toEqual({
-      jobId: reusableJob.id,
-      taskId: reusableJob.taskId,
-      type: CloudTaskType.StandardTask,
-      status: CloudTaskStatus.Pending,
+      runId: reusableRun.id,
+      taskId: reusableRun.taskId,
+      type: TaskPayloadKind.StandardTask,
+      status: RunStatus.Pending,
       taskPhase: null,
       match: 'task_pull_request',
       delivery: 'attach',
@@ -518,11 +500,11 @@ describe('findReusableGitHubPrFollowUpOwner', () => {
       userId: user.id,
     });
 
-    const sourceJob = await cloudJobFactory.create({
-      userId: user.id,
+    const sourceRun = await runFactory.create({
+      actingUserId: user.id,
       taskId,
-      type: CloudTaskType.SlackAppMention,
-      status: CloudTaskStatus.Completed,
+      payloadKind: TaskPayloadKind.SlackAppMention,
+      status: RunStatus.Completed,
       payload: {
         repo: repoFullName,
         channel: 'C123',
@@ -532,18 +514,18 @@ describe('findReusableGitHubPrFollowUpOwner', () => {
       },
     });
 
-    const firstResume = await createSnapshotResumeJob({
+    const firstResume = await createSnapshotResumeRun({
       userId: user.id,
       taskId,
       repoFullName,
-      sourceCloudJobId: sourceJob.id,
+      sourceRunId: sourceRun.id,
     });
 
-    const activeResume = await createSnapshotResumeJob({
+    const activeResume = await createSnapshotResumeRun({
       userId: user.id,
       taskId,
       repoFullName,
-      sourceCloudJobId: firstResume.id,
+      sourceRunId: firstResume.id,
     });
 
     const result = await findReusableGitHubPrFollowUpOwner({
@@ -553,10 +535,10 @@ describe('findReusableGitHubPrFollowUpOwner', () => {
     });
 
     expect(result).toEqual({
-      jobId: activeResume.id,
+      runId: activeResume.id,
       taskId: activeResume.taskId,
-      type: CloudTaskType.SnapshotResume,
-      status: CloudTaskStatus.Running,
+      type: TaskPayloadKind.SnapshotResume,
+      status: RunStatus.Running,
       taskPhase: 'running',
       match: 'task_pull_request',
       delivery: 'attach',
@@ -573,13 +555,11 @@ describe('findReusableGitHubPrFollowUpOwner', () => {
       userId: user.id,
     });
 
-    const planningSourceJob = await cloudJobFactory.create({
-      userId: user.id,
+    const planningSourceRun = await runFactory.create({
+      actingUserId: user.id,
       taskId,
-      type: CloudTaskType.LinearAgentSession,
-      status: CloudTaskStatus.Completed,
-      linearSessionId: 'linear-session-1',
-      linearOrganizationId: 'linear-org-1',
+      payloadKind: TaskPayloadKind.LinearAgentSession,
+      status: RunStatus.Completed,
       payload: {
         repo: repoFullName,
         sessionId: 'linear-session-1',
@@ -592,11 +572,11 @@ describe('findReusableGitHubPrFollowUpOwner', () => {
       },
     });
 
-    const activeResume = await createSnapshotResumeJob({
+    const activeResume = await createSnapshotResumeRun({
       userId: user.id,
       taskId,
       repoFullName,
-      sourceCloudJobId: planningSourceJob.id,
+      sourceRunId: planningSourceRun.id,
     });
 
     const result = await findReusableGitHubPrFollowUpOwner({
@@ -606,10 +586,10 @@ describe('findReusableGitHubPrFollowUpOwner', () => {
     });
 
     expect(result).toEqual({
-      jobId: activeResume.id,
+      runId: activeResume.id,
       taskId: activeResume.taskId,
-      type: CloudTaskType.SnapshotResume,
-      status: CloudTaskStatus.Running,
+      type: TaskPayloadKind.SnapshotResume,
+      status: RunStatus.Running,
       taskPhase: 'running',
       match: 'task_pull_request',
       delivery: 'attach',
@@ -626,13 +606,11 @@ describe('findReusableGitHubPrFollowUpOwner', () => {
       userId: user.id,
     });
 
-    const sourceJob = await cloudJobFactory.create({
-      userId: user.id,
+    const sourceRun = await runFactory.create({
+      actingUserId: user.id,
       taskId,
-      type: CloudTaskType.GithubPrReviewFollowUp,
-      status: CloudTaskStatus.Completed,
-      prRepo: repoFullName,
-      prNumber: prNumber,
+      payloadKind: TaskPayloadKind.GithubPrReviewFollowUp,
+      status: RunStatus.Completed,
       payload: {
         repo: repoFullName,
         prNumber,
@@ -641,11 +619,11 @@ describe('findReusableGitHubPrFollowUpOwner', () => {
       },
     });
 
-    await createSnapshotResumeJob({
+    await createSnapshotResumeRun({
       userId: user.id,
       taskId,
       repoFullName,
-      sourceCloudJobId: sourceJob.id,
+      sourceRunId: sourceRun.id,
     });
 
     const result = await findReusableGitHubPrFollowUpOwner({
@@ -662,11 +640,11 @@ describe('findReusableGitHubPrFollowUpOwner', () => {
     const repoFullName = 'owner/repo-resume-mask';
     const prNumber = 546;
 
-    const reusableJob = await createPrLinkedTaskJob({
+    const reusableRun = await createPrLinkedTaskRun({
       repoFullName,
       prNumber,
       userId: user.id,
-      type: CloudTaskType.StandardTask,
+      payloadKind: TaskPayloadKind.StandardTask,
     });
 
     for (let index = 0; index < 10; index += 1) {
@@ -676,13 +654,11 @@ describe('findReusableGitHubPrFollowUpOwner', () => {
         userId: user.id,
       });
 
-      const nonReusableSourceJob = await cloudJobFactory.create({
-        userId: user.id,
+      const nonReusableSourceRun = await runFactory.create({
+        actingUserId: user.id,
         taskId,
-        type: CloudTaskType.GithubPrReviewSync,
-        status: CloudTaskStatus.Completed,
-        prRepo: repoFullName,
-        prNumber: prNumber,
+        payloadKind: TaskPayloadKind.GithubPrReviewSync,
+        status: RunStatus.Completed,
         payload: {
           repo: repoFullName,
           prNumber,
@@ -692,11 +668,11 @@ describe('findReusableGitHubPrFollowUpOwner', () => {
         },
       });
 
-      await createSnapshotResumeJob({
+      await createSnapshotResumeRun({
         userId: user.id,
         taskId,
         repoFullName,
-        sourceCloudJobId: nonReusableSourceJob.id,
+        sourceRunId: nonReusableSourceRun.id,
       });
     }
 
@@ -707,10 +683,10 @@ describe('findReusableGitHubPrFollowUpOwner', () => {
     });
 
     expect(result).toEqual({
-      jobId: reusableJob.id,
-      taskId: reusableJob.taskId,
-      type: CloudTaskType.StandardTask,
-      status: CloudTaskStatus.Pending,
+      runId: reusableRun.id,
+      taskId: reusableRun.taskId,
+      type: TaskPayloadKind.StandardTask,
+      status: RunStatus.Pending,
       taskPhase: null,
       match: 'task_pull_request',
       delivery: 'attach',
@@ -728,11 +704,11 @@ describe('findReusableGitHubPrFollowUpOwner', () => {
       userId: user.id,
     });
 
-    const completedJob = await cloudJobFactory.create({
-      userId: user.id,
+    const completedRun = await runFactory.create({
+      actingUserId: user.id,
       taskId,
-      type: CloudTaskType.StandardTask,
-      status: CloudTaskStatus.Completed,
+      payloadKind: TaskPayloadKind.StandardTask,
+      status: RunStatus.Completed,
       snapshotId: 'snapshot-547',
       payload: {
         repo: repoFullName,
@@ -747,10 +723,10 @@ describe('findReusableGitHubPrFollowUpOwner', () => {
     });
 
     expect(result).toEqual({
-      jobId: completedJob.id,
-      taskId: completedJob.taskId,
-      type: CloudTaskType.StandardTask,
-      status: CloudTaskStatus.Completed,
+      runId: completedRun.id,
+      taskId: completedRun.taskId,
+      type: TaskPayloadKind.StandardTask,
+      status: RunStatus.Completed,
       taskPhase: null,
       match: 'task_pull_request',
       delivery: 'resume',
@@ -764,38 +740,24 @@ describe('findActiveGitHubPrReviewTask', () => {
     const repoFullName = 'owner/repo-review-active';
     const prNumber = 642;
 
-    await cloudJobFactory.create({
+    await createPrLinkedTaskRun({
+      repoFullName,
+      prNumber,
       userId: user.id,
-      type: CloudTaskType.GithubPrReview,
-      status: CloudTaskStatus.Running,
+      payloadKind: TaskPayloadKind.GithubPrReview,
+      status: RunStatus.Running,
       taskPhase: 'running',
-      prRepo: repoFullName,
-      prNumber: prNumber,
       prSha: 'def5678',
-      payload: {
-        repo: repoFullName,
-        prNumber,
-        prTitle: 'Older review run',
-        prUrl: `https://github.com/${repoFullName}/pull/${prNumber}`,
-        headSha: 'abc1234',
-      },
     });
 
-    const newestReview = await cloudJobFactory.create({
+    const newestReview = await createPrLinkedTaskRun({
+      repoFullName,
+      prNumber,
       userId: user.id,
-      type: CloudTaskType.GithubPrReviewSync,
-      status: CloudTaskStatus.Running,
+      payloadKind: TaskPayloadKind.GithubPrReviewSync,
+      status: RunStatus.Running,
       taskPhase: 'running',
-      prRepo: repoFullName,
-      prNumber: prNumber,
       prSha: 'def5678',
-      payload: {
-        repo: repoFullName,
-        prNumber,
-        prTitle: 'Newest review run',
-        prUrl: `https://github.com/${repoFullName}/pull/${prNumber}`,
-        headSha: 'def5678',
-      },
     });
 
     const result = await findActiveGitHubPrReviewTask({
@@ -805,35 +767,28 @@ describe('findActiveGitHubPrReviewTask', () => {
     });
 
     expect(result).toEqual({
-      jobId: newestReview.id,
+      runId: newestReview.id,
       taskId: newestReview.taskId,
-      type: CloudTaskType.GithubPrReviewSync,
-      status: CloudTaskStatus.Running,
+      type: TaskPayloadKind.GithubPrReviewSync,
+      status: RunStatus.Running,
       taskPhase: 'running',
-      match: 'github_pr',
+      match: 'task_pull_request',
     });
   });
 
-  it('ignores review jobs that are only waiting for prompt', async () => {
+  it('ignores review runs that are only waiting for prompt', async () => {
     const { user } = await createActor();
     const repoFullName = 'owner/repo-review-warm';
     const prNumber = 643;
 
-    await cloudJobFactory.create({
+    await createPrLinkedTaskRun({
+      repoFullName,
+      prNumber,
       userId: user.id,
-      type: CloudTaskType.GithubPrReview,
-      status: CloudTaskStatus.Running,
+      payloadKind: TaskPayloadKind.GithubPrReview,
+      status: RunStatus.Running,
       taskPhase: 'waiting_for_prompt',
-      prRepo: repoFullName,
-      prNumber: prNumber,
       prSha: 'abc1234',
-      payload: {
-        repo: repoFullName,
-        prNumber,
-        prTitle: 'Warm review run',
-        prUrl: `https://github.com/${repoFullName}/pull/${prNumber}`,
-        headSha: 'abc1234',
-      },
     });
 
     const result = await findActiveGitHubPrReviewTask({
@@ -845,26 +800,19 @@ describe('findActiveGitHubPrReviewTask', () => {
     expect(result).toBeNull();
   });
 
-  it('ignores active review jobs for an older PR head SHA', async () => {
+  it('ignores active review runs for an older PR head SHA', async () => {
     const { user } = await createActor();
     const repoFullName = 'owner/repo-review-stale-sha';
     const prNumber = 644;
 
-    await cloudJobFactory.create({
+    await createPrLinkedTaskRun({
+      repoFullName,
+      prNumber,
       userId: user.id,
-      type: CloudTaskType.GithubPrReview,
-      status: CloudTaskStatus.Running,
+      payloadKind: TaskPayloadKind.GithubPrReview,
+      status: RunStatus.Running,
       taskPhase: 'running',
-      prRepo: repoFullName,
-      prNumber: prNumber,
       prSha: 'old-head-sha',
-      payload: {
-        repo: repoFullName,
-        prNumber,
-        prTitle: 'Older review run',
-        prUrl: `https://github.com/${repoFullName}/pull/${prNumber}`,
-        headSha: 'old-head-sha',
-      },
     });
 
     const result = await findActiveGitHubPrReviewTask({
@@ -881,22 +829,15 @@ describe('findActiveGitHubPrReviewTask', () => {
     const repoFullName = 'owner/repo-provider-scope';
     const prNumber = 645;
 
-    const gitlabReview = await cloudJobFactory.create({
+    const gitlabReview = await createPrLinkedTaskRun({
+      repoFullName,
+      prNumber,
       userId: user.id,
-      type: CloudTaskType.GithubPrReviewSync,
-      status: CloudTaskStatus.Running,
+      payloadKind: TaskPayloadKind.GithubPrReviewSync,
+      status: RunStatus.Running,
       taskPhase: 'running',
-      prRepo: repoFullName,
-      prNumber: prNumber,
       prSha: 'shared-head-sha',
-      prSourceControlProvider: 'gitlab',
-      payload: {
-        repo: repoFullName,
-        prNumber,
-        prTitle: 'GitLab sync review',
-        prUrl: `https://gitlab.com/${repoFullName}/-/merge_requests/${prNumber}`,
-        headSha: 'shared-head-sha',
-      },
+      sourceControlProvider: 'gitlab',
     });
 
     const matched = await findActiveGitHubPrReviewTask({
@@ -907,12 +848,12 @@ describe('findActiveGitHubPrReviewTask', () => {
     });
 
     expect(matched).toEqual({
-      jobId: gitlabReview.id,
+      runId: gitlabReview.id,
       taskId: gitlabReview.taskId,
-      type: CloudTaskType.GithubPrReviewSync,
-      status: CloudTaskStatus.Running,
+      type: TaskPayloadKind.GithubPrReviewSync,
+      status: RunStatus.Running,
       taskPhase: 'running',
-      match: 'github_pr',
+      match: 'task_pull_request',
     });
 
     const unmatched = await findActiveGitHubPrReviewTask({

@@ -1,4 +1,4 @@
-import { CloudTaskStatus } from '@roomote/types';
+import { RunStatus } from '@roomote/types';
 
 import { resolveStatus } from '../resolve-status';
 
@@ -20,7 +20,7 @@ describe('resolveStatus', () => {
       githubTokenRefreshInterval: undefined,
     });
 
-    expect(result.status).toBe(CloudTaskStatus.Canceled);
+    expect(result.status).toBe(RunStatus.Canceled);
     expect(result.error).toBe(
       'unexpected status 401 Unauthorized: Incorrect API key provided: [redacted-api-key]',
     );

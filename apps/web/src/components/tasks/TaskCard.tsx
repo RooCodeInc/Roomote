@@ -2,7 +2,7 @@ import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { formatDistanceToNow } from 'date-fns';
 
-import { isActivelyRunningCloudTask, PRODUCT_NAME } from '@roomote/types';
+import { isActivelyRunningTask, PRODUCT_NAME } from '@roomote/types';
 
 import { type Task } from '@/lib/server';
 import {
@@ -16,7 +16,6 @@ import { cn } from '@/lib/utils';
 import type { TaskFilterState } from '@/hooks/tasks';
 
 import {
-  Ban,
   Tooltip,
   TooltipContent,
   TooltipTrigger,
@@ -38,7 +37,6 @@ type TaskCardProps = {
   isSelected?: boolean;
   inSelectionMode?: boolean;
   onSelectionChange?: (taskId: string, selected: boolean) => void;
-  canDelete?: boolean;
 };
 
 export const TaskCard = ({
@@ -47,7 +45,6 @@ export const TaskCard = ({
   isSelected = false,
   inSelectionMode = false,
   onSelectionChange,
-  canDelete = false,
 }: TaskCardProps) => {
   const router = useRouter();
 
@@ -117,37 +114,23 @@ export const TaskCard = ({
         {onSelectionChange && (
           <div
             className={cn(
-              'flex items-center justify-center absolute left-2 right-2 top-0 bottom-0 z-10 transition-transform rounded-full',
-              canDelete ? 'bg-primary' : 'bg-muted',
+              'flex items-center justify-center absolute left-2 right-2 top-0 bottom-0 z-10 transition-transform rounded-full bg-primary',
               inSelectionMode
                 ? 'scale-100 opacity-100'
                 : 'scale-0 opacity-0 pointer-events-none',
             )}
             onClick={(e) => e.stopPropagation()}
           >
-            {canDelete ? (
-              <Checkbox
-                checked={isSelected}
-                onCheckedChange={(checked) => {
-                  if (typeof checked === 'boolean') {
-                    onSelectionChange?.(task.id, checked);
-                  }
-                }}
-                className="cursor-pointer"
-                aria-label={`Select task ${task.title}`}
-              />
-            ) : (
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <div className="cursor-not-allowed">
-                    <Ban className="size-4 text-muted-foreground" />
-                  </div>
-                </TooltipTrigger>
-                <TooltipContent>
-                  <p>You can only delete your own tasks.</p>
-                </TooltipContent>
-              </Tooltip>
-            )}
+            <Checkbox
+              checked={isSelected}
+              onCheckedChange={(checked) => {
+                if (typeof checked === 'boolean') {
+                  onSelectionChange?.(task.id, checked);
+                }
+              }}
+              className="cursor-pointer"
+              aria-label={`Select task ${task.title}`}
+            />
           </div>
         )}
       </div>
@@ -161,9 +144,9 @@ export const TaskCard = ({
               <span>started a task</span>
             </span>
             <span>
-              {isActivelyRunningCloudTask(
-                task.cloudJob.status,
-                task.cloudJob.taskPhase,
+              {isActivelyRunningTask(
+                task.taskRun.status,
+                task.taskRun.taskPhase,
               ) && <Spinner className="size-3 animate-spin" />}
             </span>
           </div>
@@ -193,16 +176,14 @@ export const TaskCard = ({
         {/* Metadata */}
         <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-muted-foreground text-xs min-w-0 overflow-hidden">
           <WorkspaceBadge
-            environmentId={task.cloudJob.payload.environmentId}
-            repo={
-              task.cloudJob.payload.repo ?? task.repositoryName ?? undefined
-            }
+            environmentId={task.taskRun.payload.environmentId}
+            repo={task.taskRun.payload.repo ?? task.repositoryName ?? undefined}
             iconClassName="size-3"
           />
-          {task.cloudJob.prRepo && task.cloudJob.prNumber && (
+          {task.taskRun.prRepo && task.taskRun.prNumber && (
             <PullRequestBadge
-              repo={task.cloudJob.prRepo}
-              prNumber={task.cloudJob.prNumber}
+              repo={task.taskRun.prRepo}
+              prNumber={task.taskRun.prNumber}
               iconClassName="size-3"
             />
           )}

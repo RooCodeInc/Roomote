@@ -1,12 +1,12 @@
 import {
-  cloudJobFactory,
+  runFactory,
   db,
-  cloudJobs,
   eq,
   taskFactory,
+  taskRuns,
   userFactory,
 } from '@roomote/db/server';
-import { CloudTaskStatus, CloudTaskType } from '@roomote/types';
+import { RunStatus, TaskPayloadKind } from '@roomote/types';
 import type { FeatureFlag } from '@roomote/feature-flags';
 
 import type { UserAuthSuccess } from '@/types';
@@ -41,26 +41,25 @@ function buildMockAuth(
 }
 
 describe('takeOverBrowserControlCommand', () => {
-  it("updates actingUserId on the task's current cloud job", async () => {
+  it("updates actingUserId on the task's current task run", async () => {
     const owner = await userFactory.create();
     const viewer = await userFactory.create();
     const task = await taskFactory.create({
-      userId: owner.id,
+      initiatorUserId: owner.id,
     });
-    const staleCloudJob = await cloudJobFactory.create({
-      userId: owner.id,
+    const staleTaskRun = await runFactory.create({
       taskId: task.id,
       actingUserId: owner.id,
-      status: CloudTaskStatus.Completed,
+      status: RunStatus.Completed,
       snapshotId: 'snapshot-1',
     });
-    const activeCloudJob = await cloudJobFactory.create({
-      userId: owner.id,
+    const activeTaskRun = await runFactory.create({
       taskId: task.id,
-      sourceCloudJobId: staleCloudJob.id,
-      type: CloudTaskType.SnapshotResume,
+      sourceRunId: staleTaskRun.id,
+      kind: 'resume',
+      payloadKind: TaskPayloadKind.SnapshotResume,
       actingUserId: owner.id,
-      status: CloudTaskStatus.Running,
+      status: RunStatus.Running,
     });
 
     const result = await takeOverBrowserControlCommand(
@@ -72,24 +71,24 @@ describe('takeOverBrowserControlCommand', () => {
 
     expect(result).toEqual({
       success: true,
-      cloudJob: {
-        id: activeCloudJob.id,
+      taskRun: {
+        id: activeTaskRun.id,
         actingUserId: viewer.id,
       },
     });
 
-    const updatedCloudJobs = await db
+    const updatedTaskRuns = await db
       .select({
-        id: cloudJobs.id,
-        actingUserId: cloudJobs.actingUserId,
+        id: taskRuns.id,
+        actingUserId: taskRuns.actingUserId,
       })
-      .from(cloudJobs)
-      .where(eq(cloudJobs.taskId, task.id));
+      .from(taskRuns)
+      .where(eq(taskRuns.taskId, task.id));
 
-    expect(updatedCloudJobs).toEqual(
+    expect(updatedTaskRuns).toEqual(
       expect.arrayContaining([
-        { id: staleCloudJob.id, actingUserId: owner.id },
-        { id: activeCloudJob.id, actingUserId: viewer.id },
+        { id: staleTaskRun.id, actingUserId: owner.id },
+        { id: activeTaskRun.id, actingUserId: viewer.id },
       ]),
     );
   });

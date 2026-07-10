@@ -44,6 +44,7 @@ import { StepOnboardingAgent } from './StepOnboardingAgent';
 import { getSetupStepPath } from './types';
 import {
   getBootstrapAuthProvider,
+  getBootstrapStepFromSetupStepParam,
   getBootstrapStepAfterWelcome,
   getNextBootstrapStep,
   type BootstrapStep,
@@ -75,6 +76,18 @@ function getSetupRetryReason(status: {
   return 'task-failed';
 }
 
+function getInitialBootstrapStep(): BootstrapStep {
+  if (typeof window === 'undefined') {
+    return 'welcome';
+  }
+
+  return (
+    getBootstrapStepFromSetupStepParam(
+      new URLSearchParams(window.location.search).get('step'),
+    ) ?? 'welcome'
+  );
+}
+
 export default function SetupPage() {
   const router = useRouter();
   const setupBootstrapOpen = useSetupBootstrapOpen();
@@ -84,7 +97,9 @@ export default function SetupPage() {
     authStatus === 'signed-out' && !setupBootstrapOpen;
   const trpc = useTRPC();
   const queryClient = useQueryClient();
-  const [bootstrapStep, setBootstrapStep] = useState<BootstrapStep>('welcome');
+  const [bootstrapStep, setBootstrapStep] = useState<BootstrapStep>(
+    getInitialBootstrapStep,
+  );
   const [pendingAuthProvider, setPendingAuthProvider] =
     useState<SetupAuthProviderId | null>(null);
   const [pendingSourceControlProvider, setPendingSourceControlProvider] =

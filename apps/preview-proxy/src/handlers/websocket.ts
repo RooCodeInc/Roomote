@@ -9,7 +9,7 @@ import {
   type ResolverIdentifier,
 } from '../services/resolver';
 import { tryNestedFallback } from '../lib/nested-routing';
-import { validateAuthCookieForCloudJob } from '../services/auth';
+import { validateAuthCookieForTaskRun } from '../services/auth';
 import { proxyWebSocket } from '../lib/proxy';
 import { logger, escapeForLog } from '../lib/logger';
 import { emitWsAccessLog } from '../lib/access-log';
@@ -244,7 +244,7 @@ export async function handleWebSocketUpgrade(
     // 2b. Check auth if required
     const inlineToken = requestUrl.searchParams.get('__preview_token');
     let inlineAuthResult: Awaited<
-      ReturnType<typeof validateAuthCookieForCloudJob>
+      ReturnType<typeof validateAuthCookieForTaskRun>
     > | null = null;
     let previewAuthCookie = getCookie(req, config.PREVIEW_AUTH_COOKIE_NAME);
 
@@ -252,10 +252,10 @@ export async function handleWebSocketUpgrade(
       requestUrl.searchParams.delete('__preview_token');
       req.url = requestUrl.pathname + requestUrl.search;
 
-      if (resolution.cloudJob) {
-        inlineAuthResult = await validateAuthCookieForCloudJob(
+      if (resolution.taskRun) {
+        inlineAuthResult = await validateAuthCookieForTaskRun(
           inlineToken,
-          resolution.cloudJob,
+          resolution.taskRun,
         );
 
         if (inlineAuthResult.valid) {
@@ -270,16 +270,16 @@ export async function handleWebSocketUpgrade(
     }
 
     const authResult =
-      requiresAuth && resolution.cloudJob
+      requiresAuth && resolution.taskRun
         ? inlineAuthResult?.valid
           ? inlineAuthResult
-          : await validateAuthCookieForCloudJob(
+          : await validateAuthCookieForTaskRun(
               previewAuthCookie,
-              resolution.cloudJob,
+              resolution.taskRun,
             )
         : null;
 
-    if (requiresAuth && resolution.cloudJob) {
+    if (requiresAuth && resolution.taskRun) {
       if (!authResult?.valid) {
         logger.warn({ host: escapeForLog(host) }, 'WebSocket auth failed');
         emitWsAccessLog(req, {
@@ -373,7 +373,7 @@ export async function handleWebSocketUpgrade(
     );
     setRequestContext({
       taskId: resolution.taskId,
-      cloudJobId: resolution.cloudJob?.id,
+      runId: resolution.taskRun?.id,
       upstreamTarget: resolution.sandboxUrl,
       outcome: 'proxied',
     });

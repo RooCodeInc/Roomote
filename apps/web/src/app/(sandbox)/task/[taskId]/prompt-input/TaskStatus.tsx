@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import type { CloudJobDetail } from '@/lib/server';
+import type { TaskRunDetail } from '@/lib/server';
 
 import { TaskStatusIndicator } from '@/components/sandbox';
 import { BasicTooltip } from '@/components/system';
@@ -18,7 +18,7 @@ function formatSleepMinutes(ms: number): string {
 }
 
 interface TaskStatusProps {
-  cloudJob?: CloudJobDetail | null;
+  taskRun?: TaskRunDetail | null;
 }
 
 function isPersistedIdleTaskPhase(
@@ -31,14 +31,14 @@ function isLiveSleepBadgePhase(phase: string | null | undefined): boolean {
   return phase === 'idle' || phase === 'waiting_for_prompt';
 }
 
-export function TaskStatus({ cloudJob }: TaskStatusProps) {
+export function TaskStatus({ taskRun }: TaskStatusProps) {
   const { phase, lastErrorMessage } = useSandboxTaskStatusDisplay();
 
-  const sleepDeadlineMs = parseSleepDeadlineMs(cloudJob?.sleepAt);
+  const sleepDeadlineMs = parseSleepDeadlineMs(taskRun?.sleepAt);
 
   const showSleepBadge =
     isLiveSleepBadgePhase(phase) &&
-    isPersistedIdleTaskPhase(cloudJob?.taskPhase);
+    isPersistedIdleTaskPhase(taskRun?.taskPhase);
 
   const [now, setNow] = useState(() => Date.now());
 

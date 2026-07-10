@@ -1,6 +1,6 @@
 'use client';
 
-import type { CloudSession } from './hooks/use-cloud-session';
+import type { TaskSession } from './hooks/use-task-session';
 import {
   PendingUserInputRequestPanel,
   usePendingUserInputRequestState,
@@ -20,7 +20,7 @@ export function TaskInputStack({
   onBootStatusChange,
   scrollToBottom,
 }: {
-  session: CloudSession;
+  session: TaskSession;
   promptInputRef: { current: PromptInputHandle | null };
   onFileSearchOpen: (insertPosition?: number) => void;
   onCommandSearchOpen: (insertPosition?: number) => void;
@@ -28,8 +28,8 @@ export function TaskInputStack({
   scrollToBottom: () => void;
 }) {
   const { shouldHidePromptInput } = usePendingUserInputRequestState();
-  const bootingCloudJob =
-    session.sessionState === 'booting' ? session.cloudJob : null;
+  const bootingTaskRun =
+    session.sessionState === 'booting' ? session.taskRun : null;
 
   return (
     <>
@@ -38,11 +38,11 @@ export function TaskInputStack({
       <PendingUserInputRequestPanel />
       <PendingEnvVarRequestPanel taskId={session.taskId} />
       <QueuedMessages />
-      {bootingCloudJob ? (
+      {bootingTaskRun ? (
         <div className="flex max-h-[50vh] min-h-0 flex-col">
           <Startup
-            cloudJobId={bootingCloudJob.id}
-            initialCloudJob={bootingCloudJob}
+            runId={bootingTaskRun.id}
+            initialTaskRun={bootingTaskRun}
             onStatusChange={onBootStatusChange}
           />
         </div>
@@ -53,7 +53,7 @@ export function TaskInputStack({
             initialPrompt={session.draftPrompt ?? ''}
             onFileSearchOpen={onFileSearchOpen}
             onCommandSearchOpen={onCommandSearchOpen}
-            cloudJob={session.cloudJob}
+            taskRun={session.taskRun}
             hasTransportError={session.hasTransportError}
             scrollToBottom={scrollToBottom}
           />

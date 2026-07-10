@@ -7,7 +7,7 @@ import remarkBreaks from 'remark-breaks';
 import type { BundledLanguage } from 'shiki';
 import { toast } from 'sonner';
 
-import { ALL_REPOSITORIES, type CloudTaskPayload } from '@roomote/types';
+import { ALL_REPOSITORIES, type TaskPayload } from '@roomote/types';
 
 import type { ArtifactWithContent } from '@/types';
 
@@ -17,7 +17,7 @@ import { humanizeFilename } from '@/lib';
 import { cn } from '@/lib/utils';
 
 import { useTask } from '@/hooks/tasks';
-import { useCreateStandardTaskCloudJob } from '@/hooks/cloud-jobs';
+import { useCreateStandardTaskRun } from '@/hooks/task-runs';
 
 import {
   Download,
@@ -161,7 +161,7 @@ export function ArtifactViewerContent({
   const [isRawUrlCopied, setIsRawUrlCopied] = useState(false);
   const [isBuildDialogOpen, setIsBuildDialogOpen] = useState(false);
 
-  const createCloudJob = useCreateStandardTaskCloudJob({
+  const createTaskRun = useCreateStandardTaskRun({
     onSuccess: (result) => {
       if (result.success) {
         toast.success('status' in result ? 'Task queued.' : 'Task started.');
@@ -220,7 +220,7 @@ export function ArtifactViewerContent({
     (isMarkdown && artifact.content) ||
     ((isImage || isVideo || isPDF) && artifact.downloadUrl);
 
-  const taskPayload = task?.cloudJob?.payload as CloudTaskPayload | undefined;
+  const taskPayload = task?.taskRun?.payload as TaskPayload | undefined;
   // Build requires the fetched plan content so the new task's prompt isn't
   // silently empty. Content is only fetched for text artifacts within the
   // preview byte cap (see getArtifactByPathCommand), so a plan larger than
@@ -239,7 +239,7 @@ export function ArtifactViewerContent({
       artifactContent: artifact.content,
     });
 
-    createCloudJob.mutate({
+    createTaskRun.mutate({
       model: values.modelId,
       sourceTaskId: taskId,
       sourceArtifactId: artifact.id,
@@ -298,7 +298,7 @@ export function ArtifactViewerContent({
                     variant="ghost"
                     className="h-7 gap-1.5 px-2 text-sm font-medium hover:text-accent-foreground"
                     onClick={() => setIsBuildDialogOpen(true)}
-                    disabled={createCloudJob.isPending}
+                    disabled={createTaskRun.isPending}
                   >
                     <Hammer className="size-3.5" />
                     <span className="text-xs">Build this</span>
@@ -481,7 +481,7 @@ export function ArtifactViewerContent({
         taskBranch={taskPayload?.branch}
         taskEnvironmentId={taskPayload?.environmentId}
         onConfirm={handleCreateBuildTask}
-        isPending={createCloudJob.isPending}
+        isPending={createTaskRun.isPending}
       />
     </>
   );

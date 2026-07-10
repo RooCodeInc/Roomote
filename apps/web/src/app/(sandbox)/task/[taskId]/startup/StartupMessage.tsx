@@ -14,10 +14,10 @@ import {
   SquareDashedMousePointer,
 } from '@/components/system';
 
-import { CloudTaskStatus } from '@roomote/types';
+import { RunStatus } from '@roomote/types';
 import type { SandboxLogEntry } from '@roomote/types';
 
-import { getCloudJobErrorDisplayMessage } from '@/lib/cloud-job-errors';
+import { getTaskRunErrorDisplayMessage } from '@/lib/task-run-errors';
 
 import { Message, MessageContent, Shimmer } from '@/components/ai-elements';
 
@@ -25,7 +25,7 @@ import { SandboxLogsTerminal } from '@/components/sandbox';
 import { MessageSquareWarning, RotateCcw } from 'lucide-react';
 
 export interface StartupStep {
-  status: CloudTaskStatus;
+  status: RunStatus;
   completed: boolean;
 }
 
@@ -37,29 +37,29 @@ interface StartupMessageProps {
 const getStepIcon = (step: StartupStep): LucideIcon => {
   if (
     step.completed &&
-    step.status !== CloudTaskStatus.Failed &&
-    step.status !== CloudTaskStatus.Canceled
+    step.status !== RunStatus.Failed &&
+    step.status !== RunStatus.Canceled
   ) {
     return Check;
   }
 
   switch (step.status) {
-    case CloudTaskStatus.Pending:
+    case RunStatus.Pending:
       return Hourglass;
-    case CloudTaskStatus.Dequeued:
+    case RunStatus.Dequeued:
       return HardDriveUpload;
-    case CloudTaskStatus.Processing:
+    case RunStatus.Processing:
       return Ghost;
-    case CloudTaskStatus.Preparing:
+    case RunStatus.Preparing:
       return SquareDashedMousePointer;
-    case CloudTaskStatus.Spawning:
+    case RunStatus.Spawning:
       return BotMessageSquare;
-    case CloudTaskStatus.Connecting:
+    case RunStatus.Connecting:
       return Plug;
-    case CloudTaskStatus.Running:
+    case RunStatus.Running:
       return Drum;
-    case CloudTaskStatus.Failed:
-    case CloudTaskStatus.Canceled:
+    case RunStatus.Failed:
+    case RunStatus.Canceled:
       return ThumbsDown;
     default:
       return Check;
@@ -69,27 +69,27 @@ const getStepIcon = (step: StartupStep): LucideIcon => {
 const getStepMessage = (step: StartupStep) => {
   return (() => {
     switch (step.status) {
-      case CloudTaskStatus.Pending:
+      case RunStatus.Pending:
         return 'Queueing';
-      case CloudTaskStatus.Dequeued:
+      case RunStatus.Dequeued:
         return 'Booting environment';
-      case CloudTaskStatus.Processing:
+      case RunStatus.Processing:
         return 'Manifesting the worker';
-      case CloudTaskStatus.Preparing:
+      case RunStatus.Preparing:
         return 'Preparing workspace';
-      case CloudTaskStatus.Spawning:
+      case RunStatus.Spawning:
         return 'Calling the agent';
-      case CloudTaskStatus.Connecting:
+      case RunStatus.Connecting:
         return 'Almost there';
-      case CloudTaskStatus.Running:
+      case RunStatus.Running:
         return 'Warming up my GPUs';
-      case CloudTaskStatus.Idle:
+      case RunStatus.Idle:
         return 'Idle';
-      case CloudTaskStatus.Completed:
+      case RunStatus.Completed:
         return 'Completed';
-      case CloudTaskStatus.Failed:
+      case RunStatus.Failed:
         return 'Failed to start';
-      case CloudTaskStatus.Canceled:
+      case RunStatus.Canceled:
         return 'Canceled';
       default:
         return step.status;
@@ -120,7 +120,7 @@ const StartupMessage = ({ step, isActive }: StartupMessageProps) => {
 };
 
 interface StartupErrorMessageProps {
-  status: CloudTaskStatus;
+  status: RunStatus;
   error?: string;
   retryAction?: {
     onClick: () => void;
@@ -133,9 +133,9 @@ export const StartupFailureMessage = ({
   error,
   retryAction,
 }: StartupErrorMessageProps) => {
-  const isFailed = status === CloudTaskStatus.Failed;
-  const isCanceled = status === CloudTaskStatus.Canceled;
-  const displayError = getCloudJobErrorDisplayMessage(error);
+  const isFailed = status === RunStatus.Failed;
+  const isCanceled = status === RunStatus.Canceled;
+  const displayError = getTaskRunErrorDisplayMessage(error);
 
   if ((isFailed || (isCanceled && displayError)) && displayError) {
     return (
@@ -221,23 +221,23 @@ export const StartupSequence = ({
   retryAction,
 }: StartupSequenceProps) => {
   const lastStep = steps[steps.length - 1];
-  const status = lastStep?.status ?? CloudTaskStatus.Pending;
+  const status = lastStep?.status ?? RunStatus.Pending;
 
   const preparingStepIndex = steps.findIndex(
-    (step) => step.status === CloudTaskStatus.Preparing,
+    (step) => step.status === RunStatus.Preparing,
   );
 
   const hasReachedPreparingPhase =
     preparingStepIndex >= 0 ||
     steps.some((step) =>
       [
-        CloudTaskStatus.Spawning,
-        CloudTaskStatus.Connecting,
-        CloudTaskStatus.Running,
-        CloudTaskStatus.Idle,
-        CloudTaskStatus.Completed,
-        CloudTaskStatus.Failed,
-        CloudTaskStatus.Canceled,
+        RunStatus.Spawning,
+        RunStatus.Connecting,
+        RunStatus.Running,
+        RunStatus.Idle,
+        RunStatus.Completed,
+        RunStatus.Failed,
+        RunStatus.Canceled,
       ].includes(step.status),
     );
 

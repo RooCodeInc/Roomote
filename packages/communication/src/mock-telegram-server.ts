@@ -60,6 +60,12 @@ export type MockTelegramCallbackAnswer = {
   text?: string;
 };
 
+export type MockTelegramChatAction = {
+  chat_id: string;
+  action: string;
+  message_thread_id?: number;
+};
+
 /**
  * Failure-injection knobs. Real Telegram rejects whole requests for these
  * cases; the flags let tests exercise the provider's fallback paths.
@@ -84,6 +90,7 @@ export type MockTelegramState = {
   messages?: MockTelegramStoredMessage[];
   webhook?: MockTelegramWebhookRegistration;
   callbackAnswers?: MockTelegramCallbackAnswer[];
+  chatActions?: MockTelegramChatAction[];
   behavior?: MockTelegramBehavior;
 };
 
@@ -164,6 +171,7 @@ function normalizeState(state: MockTelegramState): MockTelegramState {
       reactions: message.reactions ?? [],
     })),
     callbackAnswers: [...(state.callbackAnswers ?? [])],
+    chatActions: [...(state.chatActions ?? [])],
   };
 }
 
@@ -729,6 +737,28 @@ export class MockTelegramServer {
           {
             callback_query_id: callbackQueryId,
             ...(typeof body.text === 'string' ? { text: body.text } : {}),
+          },
+        ];
+        apiResult(response, true);
+        return;
+      }
+
+      case 'sendChatAction': {
+        const chat = this.findChat(body.chat_id);
+
+        if (!chat) {
+          apiError(response, 400, 'Bad Request: chat not found');
+          return;
+        }
+
+        this.state.chatActions = [
+          ...(this.state.chatActions ?? []),
+          {
+            chat_id: String(body.chat_id),
+            action: String(body.action ?? ''),
+            ...(typeof body.message_thread_id === 'number'
+              ? { message_thread_id: body.message_thread_id }
+              : {}),
           },
         ];
         apiResult(response, true);

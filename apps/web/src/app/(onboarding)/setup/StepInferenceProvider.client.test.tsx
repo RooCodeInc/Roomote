@@ -75,9 +75,6 @@ vi.mock('@/components/system', () => ({
     </button>
   ),
   Check: (props: SVGProps<SVGSVGElement>) => <svg {...props} />,
-  EnvVarsInfoNote: ({ children }: { children?: ReactNode }) => (
-    <p>{children}</p>
-  ),
   Input: ({
     secret: _secret,
     ...props

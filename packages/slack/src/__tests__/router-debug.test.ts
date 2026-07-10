@@ -58,7 +58,6 @@ describe('postRouterDebugMessage', () => {
       sourceLink:
         'https://app.slack.com/archives/C123/p123456?thread_ts=123.456&cid=C123',
       taskDescription: 'Use GPT 5.4 for this one.',
-      selectedAgent: { name: 'Generalist', type: 'standard_task' },
       selectedWorkspace: { name: 'App', type: 'environment' },
       reasoning: 'App is the best fit.',
       routingDebug: {
@@ -122,7 +121,6 @@ describe('postRouterDebugMessage', () => {
     await postRouterDebugMessage({
       source: 'Slack C123',
       taskDescription: 'Delete the Google Drive integration.',
-      selectedAgent: { name: 'Generalist', type: 'standard_task' },
       selectedWorkspace: { name: 'App', type: 'environment' },
       reasoning: 'App is the best fit.',
       routingDebug: {
@@ -174,7 +172,6 @@ describe('postRouterDebugMessage', () => {
     await postRouterDebugMessage({
       source: 'Slack C123',
       taskDescription: 'Delete the Google Drive integration.',
-      selectedAgent: { name: 'Generalist', type: 'standard_task' },
       selectedWorkspace: { name: 'App', type: 'environment' },
       reasoning: 'App is the best fit.',
       routingDebug: {
@@ -213,7 +210,6 @@ describe('postRouterDebugMessage', () => {
     await postRouterDebugMessage({
       source: 'Slack C123',
       taskDescription: 'Fix the login flow.',
-      selectedAgent: { name: 'Generalist', type: 'standard_task' },
       selectedWorkspace: { name: 'App', type: 'environment' },
       reasoning: 'App is the best fit.',
       routingDebug: {

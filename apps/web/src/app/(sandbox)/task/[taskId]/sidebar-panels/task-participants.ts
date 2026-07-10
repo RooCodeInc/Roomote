@@ -9,6 +9,7 @@ type TaskCreator = {
 interface TaskParticipant {
   key: string;
   userId: string | null;
+  displayName: string;
   name: string | null;
   email: string | null;
   imageUrl: string | null;
@@ -55,8 +56,9 @@ export function getTaskParticipants(
     }
 
     const key = getIdentityKey(message);
+    const displayName = message.userName?.trim() || message.userEmail?.trim();
 
-    if (!key || seen.has(key)) {
+    if (!key || !displayName || seen.has(key)) {
       continue;
     }
 
@@ -64,6 +66,7 @@ export function getTaskParticipants(
     participants.push({
       key,
       userId: message.userId ?? null,
+      displayName,
       name: message.userName ?? null,
       email: message.userEmail ?? null,
       imageUrl: message.userImageUrl ?? null,

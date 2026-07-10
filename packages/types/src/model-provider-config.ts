@@ -2,7 +2,7 @@ import {
   isReasoningEffort,
   REASONING_EFFORT_VALUES,
   type ReasoningEffort,
-} from './cloud-jobs';
+} from './task-runs';
 import {
   OPENROUTER_RECOMMENDED_TASK_MODEL_SLUGS,
   mapRecommendedTaskModels,
@@ -98,16 +98,16 @@ export const SETUP_MODEL_PROVIDER_CATALOG = [
     id: 'vercel',
     label: 'Vercel AI Gateway',
     envVarName: 'AI_GATEWAY_API_KEY',
-    defaultRoomoteModel: 'vercel/openai/gpt-5.4',
+    defaultRoomoteModel: 'vercel/openai/gpt-5.6-terra',
     authKind: 'api-key',
     suggestedTaskModels: mapRecommendedTaskModels({
       'claude-fable-5': 'vercel/anthropic/claude-fable-5',
       'claude-haiku-4-5': 'vercel/anthropic/claude-haiku-4.5',
       'claude-opus-4-8': 'vercel/anthropic/claude-opus-4.8',
       'claude-sonnet-5': 'vercel/anthropic/claude-sonnet-5',
-      'gpt-5-5': 'vercel/openai/gpt-5.5',
-      'gpt-5-4': 'vercel/openai/gpt-5.4',
-      'gpt-5-4-mini': 'vercel/openai/gpt-5.4-mini',
+      'gpt-5-6-sol': 'vercel/openai/gpt-5.6-sol',
+      'gpt-5-6-terra': 'vercel/openai/gpt-5.6-terra',
+      'gpt-5-6-luna': 'vercel/openai/gpt-5.6-luna',
       'gemini-3-1-pro': 'vercel/google/gemini-3.1-pro-preview',
       'gemini-3-5-flash': 'vercel/google/gemini-3.5-flash',
       'deepseek-v4-flash': 'vercel/deepseek/deepseek-v4-flash',
@@ -124,13 +124,12 @@ export const SETUP_MODEL_PROVIDER_CATALOG = [
     id: 'requesty',
     label: 'Requesty',
     envVarName: 'REQUESTY_API_KEY',
-    defaultRoomoteModel: 'requesty/openai/gpt-5.4',
+    defaultRoomoteModel: 'requesty/anthropic/claude-haiku-4-5',
     authKind: 'api-key',
-    // Requesty's models.dev catalog tops out at Claude Sonnet 4.6 and
-    // Gemini 3 previews, so only these recommended models resolve there.
+    // Requesty's models.dev catalog does not yet list GPT 5.6 Sol/Terra/Luna,
+    // so only recommended models that resolve there are suggested.
     suggestedTaskModels: mapRecommendedTaskModels({
       'claude-haiku-4-5': 'requesty/anthropic/claude-haiku-4-5',
-      'gpt-5-4': 'requesty/openai/gpt-5.4',
     }),
   },
   {
@@ -166,12 +165,12 @@ export const SETUP_MODEL_PROVIDER_CATALOG = [
     id: 'openai',
     label: 'OpenAI',
     envVarName: 'OPENAI_API_KEY',
-    defaultRoomoteModel: 'openai/gpt-5.4',
+    defaultRoomoteModel: 'openai/gpt-5.6-terra',
     authKind: 'api-key',
     suggestedTaskModels: mapRecommendedTaskModels({
-      'gpt-5-5': 'openai/gpt-5.5',
-      'gpt-5-4': 'openai/gpt-5.4',
-      'gpt-5-4-mini': 'openai/gpt-5.4-mini',
+      'gpt-5-6-sol': 'openai/gpt-5.6-sol',
+      'gpt-5-6-terra': 'openai/gpt-5.6-terra',
+      'gpt-5-6-luna': 'openai/gpt-5.6-luna',
     }),
   },
   {
@@ -218,9 +217,6 @@ export const SETUP_MODEL_PROVIDER_CATALOG = [
       'claude-haiku-4-5': 'opencode/claude-haiku-4-5',
       'claude-opus-4-8': 'opencode/claude-opus-4-8',
       'claude-sonnet-5': 'opencode/claude-sonnet-5',
-      'gpt-5-5': 'opencode/gpt-5.5',
-      'gpt-5-4': 'opencode/gpt-5.4',
-      'gpt-5-4-mini': 'opencode/gpt-5.4-mini',
       'gemini-3-1-pro': 'opencode/gemini-3.1-pro',
       'gemini-3-5-flash': 'opencode/gemini-3.5-flash',
       'deepseek-v4-flash': 'opencode/deepseek-v4-flash',
@@ -258,8 +254,6 @@ export const SETUP_MODEL_PROVIDER_CATALOG = [
         'amazon-bedrock/global.anthropic.claude-haiku-4-5-20251001-v1:0',
       'claude-opus-4-8': 'amazon-bedrock/global.anthropic.claude-opus-4-8',
       'claude-sonnet-5': 'amazon-bedrock/global.anthropic.claude-sonnet-5',
-      'gpt-5-5': 'amazon-bedrock/openai.gpt-5.5',
-      'gpt-5-4': 'amazon-bedrock/openai.gpt-5.4',
     }),
   },
   {
@@ -326,12 +320,12 @@ export const SETUP_MODEL_PROVIDER_CATALOG = [
     id: CHATGPT_SUBSCRIPTION_PROVIDER_ID,
     label: 'ChatGPT (subscription)',
     envVarName: undefined,
-    defaultRoomoteModel: 'openai/gpt-5.4',
+    defaultRoomoteModel: 'openai/gpt-5.6-terra',
     authKind: 'oauth',
     suggestedTaskModels: mapRecommendedTaskModels({
-      'gpt-5-5': 'openai/gpt-5.5',
-      'gpt-5-4': 'openai/gpt-5.4',
-      'gpt-5-4-mini': 'openai/gpt-5.4-mini',
+      'gpt-5-6-sol': 'openai/gpt-5.6-sol',
+      'gpt-5-6-terra': 'openai/gpt-5.6-terra',
+      'gpt-5-6-luna': 'openai/gpt-5.6-luna',
     }),
   },
 ] as const satisfies readonly SetupModelProviderDescriptor[];

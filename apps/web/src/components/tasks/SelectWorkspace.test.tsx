@@ -3,7 +3,7 @@ import { render, screen } from '@testing-library/react';
 
 import { ALL_REPOSITORIES } from '@roomote/types';
 
-import type { CreateCloudTask } from '@/types';
+import type { CreateTaskFormValues } from '@/types';
 
 import { AUTO_WORKSPACE_VALUE } from './constants';
 import { SelectWorkspace } from './SelectWorkspace';
@@ -36,7 +36,7 @@ vi.mock('./SelectBranch', () => ({
   ),
 }));
 
-const DEFAULT_VALUES: CreateCloudTask = {
+const DEFAULT_VALUES: CreateTaskFormValues = {
   repository: AUTO_WORKSPACE_VALUE,
   branch: '',
   environmentId: undefined,
@@ -51,12 +51,12 @@ const SelectWorkspaceHarness = ({
   environmentBranchRepositoryFullName,
   environmentBranchDefault,
 }: {
-  defaultValues: Partial<CreateCloudTask>;
+  defaultValues: Partial<CreateTaskFormValues>;
   allowBranchSelection?: boolean;
   environmentBranchRepositoryFullName?: string;
   environmentBranchDefault?: string;
 }) => {
-  const form = useForm<CreateCloudTask>({
+  const form = useForm<CreateTaskFormValues>({
     defaultValues: {
       ...DEFAULT_VALUES,
       ...defaultValues,

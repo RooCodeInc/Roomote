@@ -1,6 +1,6 @@
 import { setTimeout as delay } from 'node:timers/promises';
 
-import { type PrReviewerSettings } from '@roomote/types';
+import { type PrReviewSettings } from '@roomote/types';
 
 import { getLinkedTaskRelayState } from '../linked-task-relay';
 
@@ -19,7 +19,7 @@ export async function resolveLinkedTaskReviewHandoff({
   repository: string;
   prNumber: number;
   branchName?: string;
-  reviewerSettings?: PrReviewerSettings | null;
+  reviewerSettings?: PrReviewSettings | null;
   payloadRelayReviewResultsToTask?: boolean;
   payloadLinkedTaskId?: string;
   payloadLinkedTaskRelayLookupPending?: boolean;

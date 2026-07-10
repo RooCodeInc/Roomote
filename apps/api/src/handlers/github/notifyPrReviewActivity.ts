@@ -54,6 +54,7 @@ export function buildPrReviewActivityNotificationInput(
     repository: eventPayload.repository.full_name,
     prNumber: eventPayload.pull_request.number,
     prUrl: eventPayload.pull_request.html_url,
+    sourceControlProvider: 'github' as const,
   };
 
   if ('review' in eventPayload) {
@@ -206,6 +207,7 @@ export function buildPrReviewSummaryNotification(
       prNumber: eventPayload.issue.number,
       prUrl:
         eventPayload.issue.pull_request.html_url ?? eventPayload.issue.html_url,
+      sourceControlProvider: 'github',
       event: {
         kind: 'review_summary',
         authorLogin,
@@ -237,9 +239,9 @@ async function enqueuePrReviewSummaryNotificationOnce(
   }
 
   // Keep the claim only when something was actually scheduled. Releasing it
-  // on no-op results (flag disabled, PR not linked to a conversation-backed
-  // task yet) or on errors lets a later created/edited delivery of the same
-  // terminal summary retry instead of being suppressed for the TTL.
+  // on no-op results (PR not linked to a conversation-backed task yet) or on
+  // errors lets a later created/edited delivery of the same terminal summary
+  // retry instead of being suppressed for the TTL.
   try {
     const result = await enqueuePrReviewNotification(notification.input);
 

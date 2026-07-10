@@ -46,7 +46,7 @@ import {
   useSandboxReadOnly,
   useSandboxTaskPhase,
 } from '../hooks/SandboxProvider';
-import type { CloudJobDetail } from '@/lib/server/cloud-jobs';
+import type { TaskRunDetail } from '@/lib/server/task-runs';
 import { TaskToolsButton } from '../sidebar-actions/TaskToolsButton';
 import { shouldShowTaskToolsActions } from '../sidebar-actions/utils';
 import { useOptionalPendingUserInputRequestState } from '../PendingUserInputRequestPanel';
@@ -73,7 +73,7 @@ interface PromptInputProps {
   onFileSearchOpen: (insertPosition?: number) => void;
   onCommandSearchOpen: (insertPosition?: number) => void;
   scrollToBottom?: () => void;
-  cloudJob?: CloudJobDetail | null;
+  taskRun?: TaskRunDetail | null;
   showTaskStatus?: boolean;
   showContextIndicator?: boolean;
   showTaskToolsMenu?: boolean;
@@ -89,7 +89,7 @@ export const PromptInput = forwardRef<PromptInputHandle, PromptInputProps>(
       onFileSearchOpen,
       onCommandSearchOpen,
       scrollToBottom,
-      cloudJob,
+      taskRun,
       showTaskStatus = true,
       showContextIndicator = true,
       showTaskToolsMenu = true,
@@ -119,7 +119,7 @@ export const PromptInput = forwardRef<PromptInputHandle, PromptInputProps>(
     const cancellingRef = useRef(false);
     const steeringQueuedMessageRef = useRef(false);
     const textareaRef = useRef<HTMLTextAreaElement | null>(null);
-    const cloudJobId = cloudJob?.id;
+    const runId = taskRun?.id;
 
     const draftSaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(
       null,
@@ -127,12 +127,12 @@ export const PromptInput = forwardRef<PromptInputHandle, PromptInputProps>(
     const latestPromptRef = useRef(initialPrompt);
     const lastSavedPromptRef = useRef(initialPrompt);
     const lastKeepaliveTouchRef = useRef(0);
-    const activeCloudJobIdRef = useRef(cloudJobId);
+    const activeRunIdRef = useRef(runId);
 
     const { mutate: saveDraft } = useMutation(
       trpc.sandboxSession.saveDraftPrompt.mutationOptions({
         onSuccess: (_data, variables) => {
-          if (variables.cloudJobId !== activeCloudJobIdRef.current) {
+          if (variables.runId !== activeRunIdRef.current) {
             return;
           }
 
@@ -186,13 +186,13 @@ export const PromptInput = forwardRef<PromptInputHandle, PromptInputProps>(
       (
         text: string,
         options?: {
-          cloudJobIdOverride?: number;
+          runIdOverride?: number;
           force?: boolean;
         },
       ) => {
-        const targetCloudJobId = options?.cloudJobIdOverride ?? cloudJobId;
+        const targetRunId = options?.runIdOverride ?? runId;
 
-        if (!targetCloudJobId) {
+        if (!targetRunId) {
           return;
         }
 
@@ -200,13 +200,13 @@ export const PromptInput = forwardRef<PromptInputHandle, PromptInputProps>(
           return;
         }
 
-        saveDraft({ cloudJobId: targetCloudJobId, draftPrompt: text });
+        saveDraft({ runId: targetRunId, draftPrompt: text });
       },
-      [cloudJobId, saveDraft],
+      [runId, saveDraft],
     );
 
     const flushDraft = useCallback(
-      (options?: { cloudJobIdOverride?: number; force?: boolean }) => {
+      (options?: { runIdOverride?: number; force?: boolean }) => {
         if (draftSaveTimerRef.current) {
           clearTimeout(draftSaveTimerRef.current);
           draftSaveTimerRef.current = null;
@@ -255,12 +255,12 @@ export const PromptInput = forwardRef<PromptInputHandle, PromptInputProps>(
     );
 
     const handleMessageSent = useCallback(() => {
-      if (cloudJobId) {
+      if (runId) {
         latestPromptRef.current = '';
         setPrompt('');
         flushDraft({ force: true });
       }
-    }, [cloudJobId, flushDraft]);
+    }, [runId, flushDraft]);
 
     const updatePrompt = useCallback(
       (
@@ -347,6 +347,8 @@ export const PromptInput = forwardRef<PromptInputHandle, PromptInputProps>(
       [focusTextarea, insertFile, insertCommand],
     );
 
+    const cancelledByName = currentUserInfo?.userName ?? user?.name ?? null;
+
     const handleCancel = useCallback(async () => {
       if (cancellingRef.current) {
         return;
@@ -355,13 +357,18 @@ export const PromptInput = forwardRef<PromptInputHandle, PromptInputProps>(
       cancellingRef.current = true;
 
       try {
-        await client?.commands.cancelTask.mutate();
+        await client?.commands.cancelTask.mutate({
+          cancelledBy: {
+            ...(cancelledByName ? { name: cancelledByName } : {}),
+            source: 'web',
+          },
+        });
       } catch (err) {
         console.error('[sandbox] cancelTask error:', err);
       } finally {
         cancellingRef.current = false;
       }
-    }, [client]);
+    }, [client, cancelledByName]);
 
     const handleSubmit = useCallback(
       async (message: PromptInputMessage) => {
@@ -377,7 +384,7 @@ export const PromptInput = forwardRef<PromptInputHandle, PromptInputProps>(
         if (
           (!text && !hasAttachments) ||
           !client ||
-          !cloudJob?.taskId ||
+          !taskRun?.taskId ||
           sending
         ) {
           return;
@@ -412,7 +419,7 @@ export const PromptInput = forwardRef<PromptInputHandle, PromptInputProps>(
           // rather than sitting in the queue until the turn ends.
           optimisticLocation = 'transcript';
           const { clientMessageId } = startOptimisticPromptSubmission({
-            taskId: cloudJob.taskId,
+            taskId: taskRun.taskId,
             prompt: preparedPrompt.text,
             images: preparedPrompt.images,
             location: optimisticLocation,
@@ -420,7 +427,7 @@ export const PromptInput = forwardRef<PromptInputHandle, PromptInputProps>(
           optimisticClientMessageId = clientMessageId;
 
           await trpcClient.sandboxSession.sendPrompt.mutate({
-            taskId: cloudJob.taskId,
+            taskId: taskRun.taskId,
             prompt: preparedPrompt.text,
             images: preparedPrompt.images,
             source: 'web',
@@ -436,7 +443,7 @@ export const PromptInput = forwardRef<PromptInputHandle, PromptInputProps>(
 
             if (optimisticLocation) {
               rollbackOptimisticPromptSubmission({
-                taskId: cloudJob.taskId,
+                taskId: taskRun.taskId,
                 clientMessageId: failedClientMessageId,
                 location: optimisticLocation,
               });
@@ -457,7 +464,7 @@ export const PromptInput = forwardRef<PromptInputHandle, PromptInputProps>(
         handlePromptChange,
         scrollToBottom,
         handleMessageSent,
-        cloudJob,
+        taskRun,
         trpcClient,
         rollbackOptimisticPromptSubmission,
         startOptimisticPromptSubmission,
@@ -501,15 +508,15 @@ export const PromptInput = forwardRef<PromptInputHandle, PromptInputProps>(
     });
 
     useEffect(() => {
-      if (activeCloudJobIdRef.current === cloudJobId) {
+      if (activeRunIdRef.current === runId) {
         return;
       }
 
-      if (activeCloudJobIdRef.current) {
-        flushDraft({ cloudJobIdOverride: activeCloudJobIdRef.current });
+      if (activeRunIdRef.current) {
+        flushDraft({ runIdOverride: activeRunIdRef.current });
       }
 
-      activeCloudJobIdRef.current = cloudJobId;
+      activeRunIdRef.current = runId;
       latestPromptRef.current = initialPrompt;
       lastSavedPromptRef.current = initialPrompt;
       lastKeepaliveTouchRef.current = 0;
@@ -519,11 +526,11 @@ export const PromptInput = forwardRef<PromptInputHandle, PromptInputProps>(
         clearTimeout(draftSaveTimerRef.current);
         draftSaveTimerRef.current = null;
       }
-    }, [cloudJobId, flushDraft, initialPrompt]);
+    }, [runId, flushDraft, initialPrompt]);
 
     useEffect(
       () => () => {
-        flushDraft({ cloudJobIdOverride: activeCloudJobIdRef.current });
+        flushDraft({ runIdOverride: activeRunIdRef.current });
       },
       [flushDraft],
     );
@@ -684,9 +691,9 @@ export const PromptInput = forwardRef<PromptInputHandle, PromptInputProps>(
                 </PromptInputActionMenu>
               )}
               {showTaskToolsMenu &&
-                cloudJob &&
-                shouldShowTaskToolsActions(cloudJob.type) && (
-                  <TaskToolsButton cloudJob={cloudJob} />
+                taskRun &&
+                shouldShowTaskToolsActions(taskRun.payloadKind) && (
+                  <TaskToolsButton taskRun={taskRun} />
                 )}
             </PromptInputTools>
             <div className="flex items-center gap-2">
@@ -701,7 +708,7 @@ export const PromptInput = forwardRef<PromptInputHandle, PromptInputProps>(
                 </div>
               )}
               {showTaskStatus && !showConnectingStatus && (
-                <TaskStatus cloudJob={cloudJob} />
+                <TaskStatus taskRun={taskRun} />
               )}
               {showContextIndicator && (
                 <div className="hidden debug:block">

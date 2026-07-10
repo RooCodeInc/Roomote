@@ -3,10 +3,10 @@
  * Unified worker CLI entry point.
  *
  * Usage:
- *   worker run <cloud-job-id>
- *   worker run-direct <cloud-job-id>
- *   worker resume <cloud-job-id>
- *   worker snapshot --cloud-job-id 123 --environment-id abc --sandbox-id xyz
+ *   worker run <task-run-id>
+ *   worker run-direct <task-run-id>
+ *   worker resume <task-run-id>
+ *   worker snapshot --task-run-id 123 --environment-id abc --sandbox-id xyz
  *   worker reset-repo [path]
  *   worker service <name> [--port <port>]
  *   worker repo <owner/repo> [--branch <branch>]
@@ -20,7 +20,7 @@ import { Command } from 'commander';
 
 import {
   type ServiceName,
-  CloudTaskType,
+  TaskPayloadKind,
   serviceNames,
   PRODUCT_NAME,
 } from '@roomote/types';
@@ -47,43 +47,35 @@ program
 
 program
   .command('run')
-  .description('Run a specific cloud job')
-  .argument(
-    '<cloud-job-id>',
-    'The ID of the cloud job to process',
-    parseCloudJobId,
-  )
-  .action(async (cloudJobId: number) => {
+  .description('Run a specific task run')
+  .argument('<task-run-id>', 'The ID of the task run to process', parseRunId)
+  .action(async (runId: number) => {
     if (!process.env.AUTH_TOKEN) {
       console.error('Unauthorized');
       await flushAndExit(1);
     }
 
-    const success = await run({ cloudJobId, setupMode: 'full' });
+    const success = await run({ runId, setupMode: 'full' });
     await flushAndExit(success ? 0 : 1);
   });
 
 program
   .command('run-direct')
-  .description('Run a direct cloud job inside the current local runtime')
-  .argument(
-    '<cloud-job-id>',
-    'The ID of the cloud job to process',
-    parseCloudJobId,
-  )
+  .description('Run a direct task run inside the current local runtime')
+  .argument('<task-run-id>', 'The ID of the task run to process', parseRunId)
   .option(
     '--keepalive-ms <ms>',
     'Override the post-turn keepalive window in milliseconds',
     parseNonNegativeInteger,
   )
-  .action(async (cloudJobId: number, options: { keepaliveMs?: number }) => {
+  .action(async (runId: number, options: { keepaliveMs?: number }) => {
     if (!process.env.AUTH_TOKEN) {
       console.error('Unauthorized');
       await flushAndExit(1);
     }
 
     const success = await run({
-      cloudJobId,
+      runId,
       setupMode: 'directDispatch',
       preserveGitState: false,
       keepaliveMsOverride: options.keepaliveMs,
@@ -93,19 +85,15 @@ program
 
 program
   .command('resume')
-  .description('Resume a cloud job from snapshot')
-  .argument(
-    '<cloud-job-id>',
-    'The ID of the cloud job to resume',
-    parseCloudJobId,
-  )
-  .action(async (cloudJobId: number) => {
+  .description('Resume a task run from snapshot')
+  .argument('<task-run-id>', 'The ID of the task run to resume', parseRunId)
+  .action(async (runId: number) => {
     if (!process.env.AUTH_TOKEN) {
       console.error('Unauthorized');
       await flushAndExit(1);
     }
 
-    const success = await resume(cloudJobId);
+    const success = await resume(runId);
     await flushAndExit(success ? 0 : 1);
   });
 
@@ -113,9 +101,9 @@ program
   .command('snapshot')
   .description('Create an environment snapshot')
   .requiredOption(
-    '--cloud-job-id <id>',
-    'The ID of the cloud job to process',
-    parseCloudJobId,
+    '--task-run-id <id>',
+    'The ID of the task run to process',
+    parseRunId,
   )
   .requiredOption(
     '--environment-id <id>',
@@ -124,7 +112,7 @@ program
   .requiredOption('--sandbox-id <id>', 'The current sandbox ID')
   .action(
     async (options: {
-      cloudJobId: number;
+      runId: number;
       environmentId: string;
       sandboxId: string;
     }) => {
@@ -243,7 +231,7 @@ program
             branch: options.branch,
           },
           envVars: {},
-          cloudJobType: CloudTaskType.LinearAgentSession,
+          taskRunType: TaskPayloadKind.LinearAgentSession,
           preserveGitState: options.preserveGit,
         },
         logger: createStartupLogger(),
@@ -337,11 +325,11 @@ process.on('unhandledRejection', (reason) => {
   void flushAndExit(1);
 });
 
-function parseCloudJobId(value: string): number {
+function parseRunId(value: string): number {
   const parsed = parseInt(value, 10);
 
   if (isNaN(parsed) || parsed <= 0) {
-    throw new Error('cloud-job-id must be a positive integer');
+    throw new Error('task-run-id must be a positive integer');
   }
 
   return parsed;

@@ -5,6 +5,10 @@ import {
   type ChannelAutoStartLaunchMode,
   DEFAULT_CHANNEL_AUTO_START_LAUNCH_MODE,
   type ReasoningEffort,
+  type TaskInitiator,
+  type TaskTrigger,
+  type TaskVisibility,
+  type TaskWorkflow,
 } from '@roomote/types';
 import {
   appendAttachmentTextsToPromptText,
@@ -48,7 +52,7 @@ export type StartAutoRoutedSlackTaskResult =
   | {
       status: 'started';
       threadId: string;
-      cloudJobId: number | null;
+      runId: number | null;
       taskId: string | null;
       taskUrl?: string;
     }
@@ -110,6 +114,10 @@ function buildRoutingFallbackRequiresPickerResult(
 export async function startAutoRoutedSlackTask({
   slackInstallation,
   slack,
+  initiator,
+  trigger,
+  workflow,
+  visibility,
   launchUserId,
   slackUserId,
   persistedSlackUserId,
@@ -143,7 +151,17 @@ export async function startAutoRoutedSlackTask({
     'botUserId' | 'teamId' | 'teamDomain'
   >;
   slack: SlackNotifier;
-  launchUserId: string;
+  /** Forwarded verbatim to startSlackAppMentionTask / enqueueTask. */
+  initiator: TaskInitiator;
+  trigger: TaskTrigger;
+  workflow?: Extract<TaskWorkflow, 'standard' | 'eval'>;
+  visibility?: TaskVisibility;
+  /**
+   * Linked launching user for routing context, MCP-setup detection, and
+   * last-workspace memory. Omit for automation initiators (bot-authored
+   * channel auto-start); identity for attribution lives on `initiator`.
+   */
+  launchUserId?: string | null;
   slackUserId: string;
   persistedSlackUserId?: string | null;
   initiatingSlackUserId?: string;
@@ -214,7 +232,7 @@ export async function startAutoRoutedSlackTask({
       await slack.normalizeIncomingText(stripLeadingRawSlackMention(prompt)),
     );
 
-    if (!skipMcpSetupInterrupt) {
+    if (!skipMcpSetupInterrupt && launchUserId) {
       const setupRequirement = await detectSlackMcpSetupRequirement(
         taskDescription,
         {
@@ -315,7 +333,7 @@ export async function startAutoRoutedSlackTask({
     const channelName = (await slack.getChannelName?.(channel)) ?? undefined;
 
     const routingContext = await buildSlackRoutingContext({
-      userId: launchUserId,
+      userId: launchUserId ?? undefined,
       taskDescription: taskDescriptionWithAttachments,
       channelName,
       threadMessages: threadMessages?.map((message) => ({
@@ -417,8 +435,11 @@ export async function startAutoRoutedSlackTask({
         channel,
         messageTs: threadId,
       })) ?? null;
-    const cloudJob = await startSlackAppMentionTask({
-      userId: launchUserId,
+    const taskRun = await startSlackAppMentionTask({
+      initiator,
+      trigger,
+      workflow,
+      visibility,
       channel,
       teamId: slackInstallation.teamId,
       teamDomain: slackInstallation.teamDomain ?? undefined,
@@ -467,15 +488,15 @@ export async function startAutoRoutedSlackTask({
       threadMessages?.map((message) => message.ts) ?? [],
     );
 
-    if (cloudJob.reusedExistingJob) {
+    if (taskRun.reusedExistingRun) {
       return {
         status: 'started',
         threadId,
-        cloudJobId: cloudJob.id,
-        taskId: cloudJob.taskId,
-        taskUrl: cloudJob.taskId
+        runId: taskRun.id,
+        taskId: taskRun.taskId,
+        taskUrl: taskRun.taskId
           ? getTaskUrl({
-              taskId: cloudJob.taskId,
+              taskId: taskRun.taskId,
               utm: { source: 'slack', campaign: 'workflow_step' },
             })
           : undefined,
@@ -483,8 +504,8 @@ export async function startAutoRoutedSlackTask({
     }
 
     await finishRoutedStart({
-      cloudJobId: cloudJob.id,
-      taskId: cloudJob.taskId,
+      runId: taskRun.id,
+      taskId: taskRun.taskId,
       taskDescription: taskText,
       userId: launchUserId,
       initiatingSlackUserId,
@@ -506,11 +527,11 @@ export async function startAutoRoutedSlackTask({
     return {
       status: 'started',
       threadId,
-      cloudJobId: cloudJob.id,
-      taskId: cloudJob.taskId,
-      taskUrl: cloudJob.taskId
+      runId: taskRun.id,
+      taskId: taskRun.taskId,
+      taskUrl: taskRun.taskId
         ? getTaskUrl({
-            taskId: cloudJob.taskId,
+            taskId: taskRun.taskId,
             utm: { source: 'slack', campaign: 'workflow_step' },
           })
         : undefined,

@@ -7,12 +7,12 @@ import type {
   TeamsGraphMessageMention,
 } from '@roomote/communication/teams-graph-client';
 
-const { findLatestTeamsThreadJobMock } = vi.hoisted(() => ({
-  findLatestTeamsThreadJobMock: vi.fn(),
+const { findLatestTeamsThreadTaskRunMock } = vi.hoisted(() => ({
+  findLatestTeamsThreadTaskRunMock: vi.fn(),
 }));
 
-vi.mock('../find-active-teams-job.js', () => ({
-  findLatestTeamsThreadJob: findLatestTeamsThreadJobMock,
+vi.mock('../find-active-teams-run.js', () => ({
+  findLatestTeamsThreadTaskRun: findLatestTeamsThreadTaskRunMock,
 }));
 
 import { shouldRouteUnmentionedTeamsThreadReplyToAgent } from '../unmentioned-thread-reply';
@@ -106,7 +106,10 @@ async function routeDecision(
 describe('shouldRouteUnmentionedTeamsThreadReplyToAgent', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    findLatestTeamsThreadJobMock.mockResolvedValue({ id: 7, userId: 'user-1' });
+    findLatestTeamsThreadTaskRunMock.mockResolvedValue({
+      id: 7,
+      userId: 'user-1',
+    });
     fetchThreadMessagesMock.mockResolvedValue(null);
   });
 
@@ -205,7 +208,7 @@ describe('shouldRouteUnmentionedTeamsThreadReplyToAgent', () => {
   });
 
   it('ignores a first-time sender replying after the bot until they mention the bot', async () => {
-    findLatestTeamsThreadJobMock.mockResolvedValue({
+    findLatestTeamsThreadTaskRunMock.mockResolvedValue({
       id: 7,
       userId: 'user-1',
     });
@@ -256,7 +259,7 @@ describe('shouldRouteUnmentionedTeamsThreadReplyToAgent', () => {
   });
 
   it('lets the thread root author reply without a mention even without a prior bot mention', async () => {
-    findLatestTeamsThreadJobMock.mockResolvedValue({ id: 7, userId: null });
+    findLatestTeamsThreadTaskRunMock.mockResolvedValue({ id: 7, userId: null });
     fetchThreadMessagesMock.mockResolvedValue([
       humanGraphMessage({
         id: THREAD_ROOT_ID,
@@ -270,7 +273,7 @@ describe('shouldRouteUnmentionedTeamsThreadReplyToAgent', () => {
   });
 
   it('lets the thread task owner reply without a mention in a bot-started thread', async () => {
-    findLatestTeamsThreadJobMock.mockResolvedValue({
+    findLatestTeamsThreadTaskRunMock.mockResolvedValue({
       id: 7,
       userId: 'user-4',
     });
@@ -366,7 +369,7 @@ describe('shouldRouteUnmentionedTeamsThreadReplyToAgent', () => {
         }),
       ),
     ).resolves.toBe(false);
-    expect(findLatestTeamsThreadJobMock).not.toHaveBeenCalled();
+    expect(findLatestTeamsThreadTaskRunMock).not.toHaveBeenCalled();
   });
 
   it('ignores personal conversations (they already route without a mention)', async () => {
@@ -381,14 +384,14 @@ describe('shouldRouteUnmentionedTeamsThreadReplyToAgent', () => {
         }),
       ),
     ).resolves.toBe(false);
-    expect(findLatestTeamsThreadJobMock).not.toHaveBeenCalled();
+    expect(findLatestTeamsThreadTaskRunMock).not.toHaveBeenCalled();
   });
 
   it('requires a mention from unlinked senders', async () => {
     await expect(
       routeDecision(threadReplyActivity(), { mappedUserId: null }),
     ).resolves.toBe(false);
-    expect(findLatestTeamsThreadJobMock).not.toHaveBeenCalled();
+    expect(findLatestTeamsThreadTaskRunMock).not.toHaveBeenCalled();
   });
 
   it('requires a mention when thread history is unavailable', async () => {
@@ -398,7 +401,7 @@ describe('shouldRouteUnmentionedTeamsThreadReplyToAgent', () => {
   });
 
   it('ignores replies in threads Roomote does not own', async () => {
-    findLatestTeamsThreadJobMock.mockResolvedValue(undefined);
+    findLatestTeamsThreadTaskRunMock.mockResolvedValue(undefined);
 
     await expect(routeDecision(threadReplyActivity())).resolves.toBe(false);
     expect(fetchThreadMessagesMock).not.toHaveBeenCalled();

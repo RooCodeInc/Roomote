@@ -15,7 +15,7 @@ import {
   withThreadReplyFooterLock,
 } from './chat-reply-helpers';
 
-export type CommunicationReplyCloudJob = {
+export type CommunicationReplyTaskRun = {
   id: number;
   taskId: string;
   prRepo?: string | null;
@@ -68,20 +68,20 @@ function buildThreadReplyTaskUrl(
 
 async function buildCommunicationThreadReplyFooterText(params: {
   provider: CommunicationThreadReplyProvider;
-  cloudJob: CommunicationReplyCloudJob;
+  taskRun: CommunicationReplyTaskRun;
 }): Promise<string | null> {
-  if (isSetupThreadReplyPayload(params.cloudJob.payload)) {
+  if (isSetupThreadReplyPayload(params.taskRun.payload)) {
     return null;
   }
 
   const context = await resolveThreadReplyFooterContext({
-    taskId: params.cloudJob.taskId,
-    prRepo: params.cloudJob.prRepo ?? null,
-    prNumber: params.cloudJob.prNumber ?? null,
+    taskId: params.taskRun.taskId,
+    prRepo: params.taskRun.prRepo ?? null,
+    prNumber: params.taskRun.prNumber ?? null,
   });
 
   return buildThreadReplyFooterText({
-    taskUrl: buildThreadReplyTaskUrl(params.provider, params.cloudJob.taskId),
+    taskUrl: buildThreadReplyTaskUrl(params.provider, params.taskRun.taskId),
     ...context,
     formatLink: formatMarkdownLink,
   });
@@ -90,14 +90,14 @@ async function buildCommunicationThreadReplyFooterText(params: {
 export async function buildCommunicationThreadReplyFooterTextBestEffort(params: {
   provider: CommunicationThreadReplyProvider;
   providerLabel: string;
-  cloudJob: CommunicationReplyCloudJob;
+  taskRun: CommunicationReplyTaskRun;
   logContext: string;
 }): Promise<string | null> {
   try {
     return await buildCommunicationThreadReplyFooterText(params);
   } catch (error) {
     console.error(
-      `[${params.logContext}] Failed to build ${params.providerLabel} reply footer for cloud job ${params.cloudJob.id}: ${
+      `[${params.logContext}] Failed to build ${params.providerLabel} reply footer for task run ${params.taskRun.id}: ${
         error instanceof Error ? error.message : String(error)
       }`,
     );
@@ -106,7 +106,7 @@ export async function buildCommunicationThreadReplyFooterTextBestEffort(params: 
 }
 
 export async function getCommunicationReplyImages(params: {
-  cloudJob: Pick<CommunicationReplyCloudJob, 'id' | 'taskId'>;
+  taskRun: Pick<CommunicationReplyTaskRun, 'id' | 'taskId'>;
   parsedBody: ParsedThreadReplyBody;
 }): Promise<{
   images: ThreadReplyImage[];
@@ -120,7 +120,7 @@ export async function getCommunicationReplyImages(params: {
     return {
       images: await buildThreadReplyImages({
         artifactIds,
-        cloudJob: params.cloudJob,
+        taskRun: params.taskRun,
       }),
       errorResponse: null,
     };
@@ -147,7 +147,7 @@ export async function deliverManagedThreadReplyFooter<
   channelId: string;
   footerStateThreadId: string;
   lockKey: string;
-  cloudJobId: number;
+  runId: number;
   logContext: string;
   postReplyWithFooter: () => Promise<PostedFooterRecord<TReply>>;
   clearPreviousFooter: (
@@ -166,7 +166,7 @@ export async function deliverManagedThreadReplyFooter<
         );
       } catch (error) {
         console.error(
-          `[${params.logContext}] Failed to read previous ${params.providerLabel} footer record for cloud job ${params.cloudJobId}: ${
+          `[${params.logContext}] Failed to read previous ${params.providerLabel} footer record for task run ${params.runId}: ${
             error instanceof Error ? error.message : String(error)
           }`,
         );

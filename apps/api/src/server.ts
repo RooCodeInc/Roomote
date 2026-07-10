@@ -44,7 +44,7 @@ import {
   telegram,
   mcp,
   mcpRouting,
-  cloudJobsRouter,
+  taskRunsRouter,
   artifactsRouter,
   taskArtifactsRouter,
   oidcRouter,
@@ -182,7 +182,7 @@ export function createApiApp(): ApiApp {
   app.route('/api/webhooks/telegram', telegram);
   app.route('/api/mcp', mcp);
   app.route('/api/mcp-routing', mcpRouting);
-  app.route('/api/cloud-jobs', cloudJobsRouter);
+  app.route('/api/task-runs', taskRunsRouter);
   app.route('/api/artifacts', artifactsRouter);
   app.route('/api/tasks', taskArtifactsRouter);
   app.route('/', oidcRouter);

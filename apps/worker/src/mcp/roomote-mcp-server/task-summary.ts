@@ -24,7 +24,7 @@ export async function handleGetTaskSummary(
       result.linkedEnvironmentId
         ? `Linked Environment ID: ${result.linkedEnvironmentId}`
         : null,
-      result.cloudJobError ? `Error: ${result.cloudJobError}` : null,
+      result.taskRunError ? `Error: ${result.taskRunError}` : null,
     ].filter(Boolean);
 
     return textResult(lines.join('\n'));

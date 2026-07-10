@@ -1,7 +1,7 @@
 ---
 title: Sandboxes
 icon: cpu
-description: "Choose where Roomote runs task sandboxes: local Docker or a hosted sandbox backend."
+description: 'Choose where Roomote runs task sandboxes: local Docker or a hosted sandbox backend.'
 ---
 
 import { IntegrationName } from '/snippets/integration-name.jsx';
@@ -37,12 +37,12 @@ You configure sandbox providers during setup and can change them later from
 
 Roomote supports local and hosted sandbox backends:
 
-| Provider | Best for | Notes |
-| -------- | -------- | ----- |
-| <IntegrationName href="/providers/compute/docker" icon="docker" name="Docker" /> | Local development and trusted single-host self-hosting | Runs task sandboxes as Docker containers on the same machine as the deployment. |
-| <IntegrationName href="/providers/compute/modal" icon="modal" name="Modal" /> | Hosted task sandboxes with snapshot support | Uses a hosted runtime and can resume some sandboxes from snapshots. |
-| <IntegrationName href="/providers/compute/e2b" icon="e2b" name="E2B" /> | Hosted task sandboxes with snapshot support | Uses a hosted template created from the Roomote worker image. |
-| <IntegrationName href="/providers/compute/daytona" icon="daytona" name="Daytona" /> | Hosted task sandboxes with simple API-key setup | Runs fresh task sandboxes and destroys them when they are no longer needed. |
+| Provider                                                                            | Best for                                               | Notes                                                                           |
+| ----------------------------------------------------------------------------------- | ------------------------------------------------------ | ------------------------------------------------------------------------------- |
+| <IntegrationName href="/providers/compute/docker" icon="docker" name="Docker" />    | Local development and trusted single-host self-hosting | Runs task sandboxes as Docker containers on the same machine as the deployment. |
+| <IntegrationName href="/providers/compute/modal" icon="modal" name="Modal" />       | Hosted task sandboxes with snapshot support            | Uses a hosted runtime and can resume some sandboxes from snapshots.             |
+| <IntegrationName href="/providers/compute/e2b" icon="e2b" name="E2B" />             | Hosted task sandboxes with snapshot support            | Uses a hosted template created from the Roomote worker image.                   |
+| <IntegrationName href="/providers/compute/daytona" icon="daytona" name="Daytona" /> | Hosted task sandboxes with simple API-key setup        | Runs fresh task sandboxes and destroys them when they are no longer needed.     |
 
 Docker is the default because it works well for local development and simple
 self-hosted deployments. Hosted providers are useful when you want task work to
@@ -64,10 +64,12 @@ This is a good fit when:
 
 The tradeoff is that Docker uses the same host that runs the rest of your
 deployment. Heavy tasks can compete with the web app, API, database, queues, or
-other local services. Docker also depends on the controller having access to
-the host Docker socket, which is powerful and should be treated as trusted
-infrastructure. It is not a multi-host scheduler, and some resume or snapshot
-flows require a hosted provider.
+other local services. Docker also depends on a restricted socket proxy that
+can create and manage worker containers on the host. The proxy is still
+privileged infrastructure, but the controller does not receive the raw host
+socket and unrelated Docker API sections remain blocked. Docker is not a
+multi-host scheduler, and some resume or snapshot flows require a hosted
+provider.
 
 Hosted providers move the task sandbox into a provider-managed environment.
 Roomote still controls the task, streams logs, and connects previews, but the
@@ -98,9 +100,9 @@ For hosted providers, the provider must be able to pull or start from a
 registry-qualified worker image. A local tag such as `roomote-worker:local`
 only exists on your machine, so a hosted provider cannot use it directly.
 
-That is why **Settings > Sandboxes** includes a shared hosted sandbox worker
-image. Hosted providers use it to derive the provider-specific artifact they
-need:
+Hosted deployments set that worker image via environment (for example
+`DOCKER_WORKER_IMAGE` or release image derivation). Hosted providers use it to
+derive the provider-specific artifact they need:
 
 - Modal can use the worker image as its base image.
 - E2B builds a provider template from the worker image.
