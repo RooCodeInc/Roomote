@@ -930,13 +930,35 @@ export async function launchQueuedSetupTasksIfReady({
     claimedTasks.map(async (queuedTask) => {
       let launchResult: Awaited<ReturnType<typeof enqueueTask>>;
 
-      try {
-        if (!queuedTask.selectedByUserId) {
-          throw new Error(
-            `Queued setup task ${queuedTask.id} has no selecting user.`,
-          );
-        }
+      if (!queuedTask.selectedByUserId) {
+        const failedAt = new Date();
+        const launchError = 'Queued setup task has no selecting user.';
 
+        await db
+          .update(workItems)
+          .set({
+            status: 'failed',
+            failedAt,
+            launchError,
+            launchClaimedAt: null,
+            updatedAt: failedAt,
+          })
+          .where(
+            and(
+              eq(workItems.id, queuedTask.id),
+              eq(workItems.kind, 'onboarding'),
+              eq(workItems.status, 'launching'),
+              eq(workItems.launchClaimedAt, queuedTask.claimedAt),
+            ),
+          );
+
+        console.warn(
+          `[setup-new] onboarding work item ${queuedTask.id} cannot launch: ${launchError}`,
+        );
+        return;
+      }
+
+      try {
         launchResult = await enqueueTask({
           task: {
             type: TaskPayloadKind.StandardTask,
