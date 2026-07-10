@@ -18,7 +18,6 @@ import {
   type PrReviewNotificationRequest,
   type PrReviewNotificationRoute,
   consumePendingPrReviewActivity,
-  isPrReviewNotificationEnabled,
   preparePrReviewNotificationDelivery,
   prReviewNotificationRequestSchema,
   recordPrReviewNotificationDeliveryBestEffort,
@@ -155,16 +154,6 @@ export const prReviewNotificationJob = async (
     repository: data.repository,
     prNumber: data.prNumber,
   };
-
-  // Re-check the experimental flag at delivery time so pending notifications
-  // drain silently if the flag is turned off after events were queued.
-  if (!(await isPrReviewNotificationEnabled('[PrReviewNotification]'))) {
-    console.log(
-      `[PrReviewNotification] Feature flag disabled, dropping pending review activity for task ${data.taskId} on ${data.repository}#${data.prNumber}`,
-    );
-    await consumePendingPrReviewActivity(target);
-    return;
-  }
 
   const latestJob = await db.query.cloudJobs.findFirst({
     where: eq(cloudJobs.taskId, data.taskId),
