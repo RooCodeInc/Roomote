@@ -6,6 +6,7 @@ import {
   getTaskModelOptionById,
   isTaskModelIdAllowed,
 } from '@roomote/types';
+import { resolveConfiguredGitHubAppSlug } from '@roomote/github';
 
 import type {
   FollowUpClassification,
@@ -591,6 +592,11 @@ export async function routeGitHubTask(
   }
 
   try {
+    // The routing prompt embeds the deployment's bot handle synchronously;
+    // refresh the configured app slug first so an app created through the
+    // /setup flow is addressed by its own slug.
+    await resolveConfiguredGitHubAppSlug();
+
     const { object: response } = await generateTrackedNonTaskObject({
       userId: context.routingActor?.userId,
       surface: NON_TASK_INFERENCE_SURFACES.routerGitHubRouting,
