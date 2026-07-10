@@ -316,7 +316,7 @@ describe('useSetupFlow', () => {
     });
   });
 
-  it('puts auth-env-vars before model setup once the auth provider is chosen', async () => {
+  it('puts communication connection between auth config and model setup', async () => {
     mockStatus({
       authSetup: {
         setupSatisfiedByRuntimeEnv: false,
@@ -356,6 +356,11 @@ describe('useSetupFlow', () => {
     act(() => {
       result.current.goToNextStep();
     });
+    expect(result.current.step).toBe('slack');
+
+    act(() => {
+      result.current.goToNextStep();
+    });
     expect(result.current.step).toBe('env-vars');
 
     act(() => {
@@ -366,6 +371,7 @@ describe('useSetupFlow', () => {
 
   it('shows compute-provider after source control when compute setup is pending', async () => {
     mockStatus({
+      hasSlack: true,
       authSetup: {
         setupSatisfiedByRuntimeEnv: false,
         selectedProvider: 'slack',
@@ -430,6 +436,7 @@ describe('useSetupFlow', () => {
 
   it('shows compute-config when a compute provider is chosen but not yet configured', async () => {
     mockStatus({
+      hasSlack: true,
       authSetup: {
         setupSatisfiedByRuntimeEnv: false,
         selectedProvider: 'slack',
@@ -738,6 +745,7 @@ describe('useSetupFlow', () => {
 
   it('skips auth-env-vars and env-vars when runtime auth and model setup are already satisfied', async () => {
     mockStatus({
+      hasSlack: true,
       authSetup: {
         setupSatisfiedByRuntimeEnv: true,
         selectedProvider: 'slack',
@@ -781,19 +789,19 @@ describe('useSetupFlow', () => {
     });
   });
 
-  it('runtime-configured Slack skips auth setup and lands on communication connect after source-control sync', async () => {
+  it('finishes connecting Teams before source control', async () => {
     mockStatus({
       authSetup: {
         setupSatisfiedByRuntimeEnv: true,
-        selectedProvider: 'slack',
-        preselectedProvider: 'slack',
-        runtimeConfiguredProvider: 'slack',
-        runtimeConfiguredProviders: ['slack'],
+        selectedProvider: 'microsoft',
+        preselectedProvider: 'microsoft',
+        runtimeConfiguredProvider: 'microsoft',
+        runtimeConfiguredProviders: ['microsoft'],
         lockReason: 'runtime_env',
         providers: [
           {
-            id: 'slack',
-            label: 'Slack',
+            id: 'microsoft',
+            label: 'Microsoft Teams',
             fields: [],
             runtimeSatisfied: true,
             savedSatisfied: false,
@@ -845,14 +853,14 @@ describe('useSetupFlow', () => {
     const { result } = renderHook(() => useSetupFlow());
 
     await waitFor(() => {
-      expect(result.current.step).toBe('source-control-connect');
+      expect(result.current.step).toBe('slack');
     });
 
     act(() => {
       result.current.goToNextStep();
     });
 
-    expect(result.current.step).toBe('slack');
+    expect(result.current.step).toBe('source-control-connect');
   });
 
   it('skips the communication provider chooser when the session marks communication skipped', async () => {
@@ -1112,6 +1120,7 @@ describe('useSetupFlow', () => {
 
   it('saved-only source-control config still shows the provider chooser', async () => {
     mockStatus({
+      hasSlack: true,
       authSetup: {
         setupSatisfiedByRuntimeEnv: false,
         selectedProvider: 'slack',
@@ -1180,6 +1189,7 @@ describe('useSetupFlow', () => {
 
   it('skips env-vars when persisted model setup is satisfied even without runtime env vars', async () => {
     mockStatus({
+      hasSlack: true,
       authSetup: {
         setupSatisfiedByRuntimeEnv: false,
         selectedProvider: 'slack',
