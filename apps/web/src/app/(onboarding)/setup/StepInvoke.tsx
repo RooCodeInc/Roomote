@@ -94,8 +94,15 @@ export function StepInvoke({
           queryKey: trpc.github.installations.queryKey(),
         });
 
-        if (onboardingTaskId) {
-          router.replace(`/task/${onboardingTaskId}`);
+        const refreshedSetupNewStatus = await queryClient.fetchQuery(
+          trpc.setupNew.status.queryOptions(undefined, { staleTime: 0 }),
+        );
+        const targetTaskId =
+          refreshedSetupNewStatus.setupNewState.onboardingTaskId ??
+          onboardingTaskId;
+
+        if (targetTaskId) {
+          router.replace(`/task/${targetTaskId}`);
           return;
         }
 
@@ -178,7 +185,7 @@ export function StepInvoke({
           {completeSetup.isPending && (
             <Loader2 className="animate-spin size-4 mr-2" />
           )}
-          {onboardingTaskId ? 'Finish onboarding' : "Let's go"}
+          {onboardingTaskId ? 'Finish setup' : "Let's go"}
           <ArrowRight />
         </Button>
       </div>

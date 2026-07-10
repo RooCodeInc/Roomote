@@ -3,6 +3,7 @@ const replaceMock = vi.fn();
 const setQueryDataMock = vi.fn();
 const invalidateQueriesMock = vi.fn().mockResolvedValue(undefined);
 const removeQueriesMock = vi.fn();
+const fetchQueryMock = vi.fn();
 const mutationOptionsMock = vi.fn((options) => options);
 const environmentState = vi.hoisted(() => ({
   environments: [{ id: 'env-1' }],
@@ -45,6 +46,7 @@ vi.mock('@tanstack/react-query', async () => {
       setQueryData: setQueryDataMock,
       invalidateQueries: invalidateQueriesMock,
       removeQueries: removeQueriesMock,
+      fetchQuery: fetchQueryMock,
     }),
   };
 });
@@ -57,6 +59,11 @@ vi.mock('@/trpc/client', () => ({
       },
       status: {
         queryKey: () => queryKeys.setupStatus,
+      },
+    },
+    setupNew: {
+      status: {
+        queryOptions: () => ({ queryKey: ['setupNew.status'] }),
       },
     },
     onboarding: {
@@ -152,6 +159,9 @@ describe('Setup StepInvoke', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     invalidateQueriesMock.mockResolvedValue(undefined);
+    fetchQueryMock.mockResolvedValue({
+      setupNewState: { onboardingTaskId: null },
+    });
     environmentState.environments = [{ id: 'env-1' }];
   });
 
@@ -257,17 +267,34 @@ describe('Setup StepInvoke', () => {
         /once your environment is ready, you can work with roomote in these ways/i,
       ),
     ).toBeInTheDocument();
-    fireEvent.click(screen.getByRole('button', { name: /finish onboarding/i }));
+    fireEvent.click(screen.getByRole('button', { name: /finish setup/i }));
 
     await waitFor(() => {
       expect(invalidateQueriesMock).toHaveBeenCalledWith({
         queryKey: queryKeys.setupStatus,
       });
     });
+    expect(fetchQueryMock).toHaveBeenCalledWith({
+      queryKey: ['setupNew.status'],
+    });
     expect(replaceMock).toHaveBeenCalledWith('/task/task-onboarding-1');
     expect(replaceMock).not.toHaveBeenCalledWith(
       expect.stringContaining('environmentId='),
     );
+  });
+
+  it('uses the refreshed onboarding task id when finishing setup', async () => {
+    fetchQueryMock.mockResolvedValueOnce({
+      setupNewState: { onboardingTaskId: 'task-refreshed' },
+    });
+
+    render(<StepInvoke />);
+
+    fireEvent.click(screen.getByRole('button', { name: /let'?s go/i }));
+
+    await waitFor(() => {
+      expect(replaceMock).toHaveBeenCalledWith('/task/task-refreshed');
+    });
   });
 
   it('clarifies that GitHub mentions work on any PR', () => {

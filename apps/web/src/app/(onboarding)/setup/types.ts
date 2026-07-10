@@ -56,7 +56,7 @@ const SETUP_STEP_DEFINITIONS = [
   },
   {
     id: 'invoke',
-    title: "You're all set!",
+    title: "That's it!",
   },
 ] as const satisfies readonly SetupStepConfig[];
 

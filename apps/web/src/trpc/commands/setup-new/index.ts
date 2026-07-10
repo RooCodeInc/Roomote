@@ -165,7 +165,17 @@ type ActiveSetupQualificationBlock = {
 };
 
 const SETUP_BOOTSTRAP_USER_ID = 'setup-bootstrap-user';
-const SETUP_ONBOARDING_TASK_TITLE = 'Set up your first environment';
+function buildSetupOnboardingTaskTitle(repositoryFullNames: string[]) {
+  const repositoryNames = repositoryFullNames
+    .map((fullName) => fullName.split('/').at(-1)?.trim() || fullName.trim())
+    .filter(Boolean);
+
+  if (repositoryNames.length === 0) {
+    return 'Set up your first environment';
+  }
+
+  return `Set up the ${repositoryNames.join(' + ')} environment`;
+}
 
 async function ensureSetupBootstrapAuditUser(
   executor: DatabaseOrTransaction,
@@ -2241,6 +2251,9 @@ export async function startSetupNewOnboardingTaskCommand(
     const selectedRepositoryFullNames = selectedRepositories.map(
       (repository) => repository.fullName,
     );
+    const onboardingTaskTitle = buildSetupOnboardingTaskTitle(
+      selectedRepositoryFullNames,
+    );
     const workspacePayload = buildSetupNewWorkspacePayload(
       selectedRepositoryFullNames,
     );
@@ -2350,7 +2363,7 @@ export async function startSetupNewOnboardingTaskCommand(
         if (kickoffMessageId && kickoffChannelId) {
           const startedAt = new Date().toISOString();
           const launchResult = await enqueueTask({
-            title: SETUP_ONBOARDING_TASK_TITLE,
+            title: onboardingTaskTitle,
             task: {
               ...(modelSelection.harness
                 ? { harness: modelSelection.harness }
@@ -2426,7 +2439,7 @@ export async function startSetupNewOnboardingTaskCommand(
 
       const startedAt = new Date().toISOString();
       const launchResult = await enqueueTask({
-        title: SETUP_ONBOARDING_TASK_TITLE,
+        title: onboardingTaskTitle,
         task: {
           ...(modelSelection.harness
             ? { harness: modelSelection.harness }
@@ -2504,7 +2517,7 @@ export async function startSetupNewOnboardingTaskCommand(
 
     try {
       launchResult = await enqueueTask({
-        title: SETUP_ONBOARDING_TASK_TITLE,
+        title: onboardingTaskTitle,
         task: {
           ...(modelSelection.harness
             ? { harness: modelSelection.harness }
