@@ -100,14 +100,14 @@ edits are needed — the derived values follow the images.
 
 | Service         | Image                  | Public domain              | Healthcheck        |
 | --------------- | ---------------------- | -------------------------- | ------------------ |
-| `postgres`      | `postgres:17.5`        | no                         | `pg_isready`       |
-| `redis`         | `redis:7-alpine`       | no                         | `redis-cli ping`   |
-| `minio`         | `minio/minio` + volume | yes (routed to port 9000)  | `mc ready local`   |
+| `postgres`      | pinned `postgres:17.5` | no                         | `pg_isready`       |
+| `redis`         | pinned `redis:7-alpine` | no                        | `redis-cli ping`   |
+| `minio`         | pinned MinIO + volume  | yes (routed to port 9000)  | `mc ready local`   |
 | `db-migrate`    | `roomote-app:develop`  | no (one-shot)              | excluded           |
 | `web`           | `roomote-app:develop`  | yes (port 3000)            | `/health`          |
 | `api`           | `roomote-app:develop`  | yes (port 3001)            | `/health/liveness` |
-| `controller`    | `roomote-app:develop`  | no                         | —                  |
-| `bullmq`        | `roomote-app:develop`  | no                         | —                  |
+| `controller`    | `roomote-app:develop`  | no                         | `/health/controller` via API |
+| `bullmq`        | `roomote-app:develop`  | no                         | `/admin/health`    |
 | `preview-proxy` | `roomote-app:develop`  | optional (wildcard domain) | `/health`          |
 
 ## Environment variables

@@ -3,7 +3,7 @@ name: roomote
 services:
   postgres:
     container_name: roomote-postgres
-    image: postgres:17.5
+    image: postgres:17.5@sha256:aadf2c0696f5ef357aa7a68da995137f0cf17bad0bf6e1f17de06ae5c769b302
     # Publish datastore ports to loopback only so Postgres, Redis, and MinIO are
     # never reachable from another host. The production Caddy overlay resets
     # these to none; use an SSH tunnel or reverse proxy if remote access is
@@ -26,7 +26,7 @@ services:
 
   redis:
     container_name: roomote-redis
-    image: redis:7-alpine
+    image: redis:7-alpine@sha256:6ab0b6e7381779332f97b8ca76193e45b0756f38d4c0dcda72dbb3c32061ab99
     ports:
       - '127.0.0.1:16379:6379'
     volumes:
@@ -35,7 +35,7 @@ services:
 
   minio:
     container_name: roomote-minio
-    image: minio/minio:latest
+    image: minio/minio:RELEASE.2025-09-07T16-13-09Z@sha256:14cea493d9a34af32f524e538b8346cf79f3321eff8e708c1e2960462bd8936e
     ports:
       - '127.0.0.1:19000:9000'
       - '127.0.0.1:19001:9001'
@@ -47,7 +47,7 @@ services:
     command: server /data --console-address ':9001'
 
   minio-init:
-    image: minio/mc:latest
+    image: minio/mc:RELEASE.2025-08-13T08-35-41Z@sha256:a7fe349ef4bd8521fb8497f55c6042871b2ae640607cf99d9bede5e9bdf11727
     restart: 'no'
     depends_on:
       minio:
@@ -70,7 +70,7 @@ services:
   # workers can reach the API through the public app URL.
   caddy-dev:
     container_name: roomote-caddy-dev
-    image: caddy:2.10-alpine
+    image: caddy:2.10-alpine@sha256:4c6e91c6ed0e2fa03efd5b44747b625fec79bc9cd06ac5235a779726618e530d
     ports:
       - '127.0.0.1:18080:18080'
     volumes:

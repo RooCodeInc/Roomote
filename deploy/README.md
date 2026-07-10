@@ -284,9 +284,11 @@ docker compose --env-file .env -f docker-compose.prod.yml pull
 docker compose --env-file .env -f docker-compose.prod.yml up -d --wait --wait-timeout 600
 ```
 
-The Compose file defines container healthchecks for `web`, `api`, and
-`preview-proxy`, and `up --wait` holds the deploy command until those services
-are healthy. The deployer stops the controller before deployment metadata
+The Compose file defines container healthchecks for `web`, `api`, `controller`,
+`bullmq`, and `preview-proxy`. The controller probe uses the API's Redis
+heartbeat and stuck-task checks; the BullMQ probe queries its queues. `up
+--wait` holds the deploy command until the complete execution plane is healthy.
+The deployer stops the controller before deployment metadata
 changes and image pulls so new tasks remain queued during rollout instead of
 being claimed by the old controller. The wait timeout is intentionally longer
 than the controller stop grace so any already-active hosted-provider spawn can
@@ -326,7 +328,7 @@ Equivalent remote command:
 cd /opt/roomote
 mkdir -p backups
 docker run --rm --network roomote_default --env-file /opt/roomote/.env \
-  postgres:17.5 sh -c 'pg_dump --clean --if-exists --no-owner --no-privileges "$DATABASE_URL"' \
+  postgres:17.5@sha256:aadf2c0696f5ef357aa7a68da995137f0cf17bad0bf6e1f17de06ae5c769b302 sh -c 'pg_dump --clean --if-exists --no-owner --no-privileges "$DATABASE_URL"' \
   > "backups/backup-$(date +%F-%H%M%S).sql"
 ```
 
@@ -353,9 +355,9 @@ cd /opt/roomote
 docker compose --env-file .env -f docker-compose.prod.yml \
   stop web api controller bullmq preview-proxy
 docker run --rm --network roomote_default --env-file /opt/roomote/.env \
-  postgres:17.5 sh -c 'psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -c "DROP SCHEMA IF EXISTS public CASCADE; CREATE SCHEMA public;"'
+  postgres:17.5@sha256:aadf2c0696f5ef357aa7a68da995137f0cf17bad0bf6e1f17de06ae5c769b302 sh -c 'psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -c "DROP SCHEMA IF EXISTS public CASCADE; CREATE SCHEMA public;"'
 docker run --rm --network roomote_default --env-file /opt/roomote/.env -i \
-  postgres:17.5 sh -c 'psql "$DATABASE_URL" -v ON_ERROR_STOP=1' \
+  postgres:17.5@sha256:aadf2c0696f5ef357aa7a68da995137f0cf17bad0bf6e1f17de06ae5c769b302 sh -c 'psql "$DATABASE_URL" -v ON_ERROR_STOP=1' \
   < /opt/roomote/backups/backup.sql
 docker compose --env-file .env -f docker-compose.prod.yml \
   up -d --wait --wait-timeout 600

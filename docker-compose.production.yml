@@ -104,35 +104,85 @@ services:
     environment:
       <<: *roomote-production-env
     ports: !reset []
+    healthcheck:
+      test:
+        [
+          'CMD-SHELL',
+          'curl -fsS --max-time 2 http://127.0.0.1:3000/health >/dev/null',
+        ]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+      start_period: 20s
 
   api:
     environment:
       <<: *roomote-production-env
     ports: !reset []
+    healthcheck:
+      test:
+        [
+          'CMD-SHELL',
+          'curl -fsS --max-time 2 http://127.0.0.1:3001/health/liveness >/dev/null',
+        ]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+      start_period: 20s
 
   controller:
     environment:
       <<: *roomote-production-env
+    healthcheck:
+      test:
+        [
+          'CMD-SHELL',
+          'curl -fsS --max-time 5 http://api:3001/health/controller >/dev/null',
+        ]
+      interval: 5s
+      timeout: 6s
+      retries: 12
+      start_period: 20s
 
   bullmq:
     environment:
       <<: *roomote-production-env
     ports: !reset []
+    healthcheck:
+      test:
+        [
+          'CMD-SHELL',
+          'curl -fsS --max-time 5 http://127.0.0.1:3002/admin/health >/dev/null',
+        ]
+      interval: 5s
+      timeout: 6s
+      retries: 12
+      start_period: 20s
 
   preview-proxy:
     environment:
       <<: *roomote-production-env
     ports: !reset []
+    healthcheck:
+      test:
+        [
+          'CMD-SHELL',
+          'curl -fsS --max-time 2 http://127.0.0.1:8081/health >/dev/null',
+        ]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+      start_period: 20s
 
   caddy:
-    image: caddy:2.10-alpine
+    image: caddy:2.10-alpine@sha256:4c6e91c6ed0e2fa03efd5b44747b625fec79bc9cd06ac5235a779726618e530d
     container_name: roomote-caddy
     restart: unless-stopped
     depends_on:
       web:
-        condition: service_started
+        condition: service_healthy
       preview-proxy:
-        condition: service_started
+        condition: service_healthy
     environment:
       ROOMOTE_APP_DOMAIN: ${ROOMOTE_APP_DOMAIN:?ROOMOTE_APP_DOMAIN is required}
       ROOMOTE_PREVIEW_DOMAIN: ${ROOMOTE_PREVIEW_DOMAIN:?ROOMOTE_PREVIEW_DOMAIN is required}
