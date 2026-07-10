@@ -8,6 +8,7 @@ import {
 import { createJobToken } from '@roomote/auth';
 import {
   and,
+  compareAndSetTrustedRunActingUser,
   db,
   eq,
   isNotNull,
@@ -139,6 +140,67 @@ export const answerSandboxUserInputRequestInputSchema = z.object({
 });
 
 /**
+ * Trusted actor switch, applied BEFORE the prompt reaches the sandbox.
+ *
+ * The worker refuses to run a turn whose sender does not match the
+ * server-side `task_runs.actingUserId` (see prepareActorScopedTurn), so runs
+ * that start without an acting user — e.g. automation-started tasks — would
+ * otherwise reject every web prompt with an actor-scoped credentials error.
+ * Mirrors `syncActingUserIdBeforeDelivery` in the API's sendMessageToTask:
+ * the write must land before delivery so credential resolution and turn
+ * attribution agree, and a failed delivery rolls the actor back via
+ * {@link restoreActingUserIdAfterFailedSandboxDelivery}.
+ */
+async function syncActingUserIdBeforeSandboxDelivery({
+  runId,
+  currentActingUserId,
+  nextActingUserId,
+}: {
+  runId: number;
+  currentActingUserId: string | null;
+  nextActingUserId: string;
+}): Promise<boolean> {
+  if (currentActingUserId === nextActingUserId) {
+    return false;
+  }
+
+  return await compareAndSetTrustedRunActingUser({
+    runId,
+    expectedUserId: currentActingUserId,
+    nextUserId: nextActingUserId,
+  });
+}
+
+/**
+ * Best-effort compare-and-set rollback for a trusted actor switch whose
+ * sandbox delivery failed. The CAS avoids overwriting a newer sender that
+ * won the race after this request changed the actor.
+ */
+async function restoreActingUserIdAfterFailedSandboxDelivery({
+  runId,
+  previousActingUserId,
+  attemptedActingUserId,
+}: {
+  runId: number;
+  previousActingUserId: string | null;
+  attemptedActingUserId: string;
+}): Promise<void> {
+  try {
+    await compareAndSetTrustedRunActingUser({
+      runId,
+      expectedUserId: attemptedActingUserId,
+      nextUserId: previousActingUserId,
+    });
+  } catch (error) {
+    console.error(
+      `Failed to roll back actingUserId after sandbox delivery failed for run ${runId} ` +
+        `(attempted=${attemptedActingUserId}, previous=${previousActingUserId ?? 'null'}):`,
+      error,
+    );
+  }
+}
+
+/**
  * Persists the user's in-progress prompt text so it survives sleep/wake cycles.
  * Also acts as an implicit keepalive signal (the caller should throttle on the
  * client side — ~10 s is a reasonable interval).
@@ -204,7 +266,20 @@ export async function sendSandboxPromptCommand(
     SANDBOX_PROMPT_TIMEOUT_MS,
   );
 
+  const previousActingUserId = cloudJob.actingUserId;
+  const requiresActorHandoff = previousActingUserId !== auth.userId;
+  let didSwitchActingUser = false;
+
   try {
+    // The actor switch must land before the prompt reaches the sandbox so the
+    // worker's sender-vs-acting-user guard passes (critical for runs that
+    // start without an acting user, e.g. automation-started tasks).
+    didSwitchActingUser = await syncActingUserIdBeforeSandboxDelivery({
+      runId: cloudJob.id,
+      currentActingUserId: previousActingUserId,
+      nextActingUserId: auth.userId,
+    });
+
     const client = createSandboxServerRpcClient({
       links: [
         httpBatchLink({
@@ -228,10 +303,22 @@ export async function sendSandboxPromptCommand(
       clientMessageId: parsed.clientMessageId,
       userName: getAuthenticatedPromptUserName(auth),
       userImageUrl: parsed.userImageUrl,
-      autoSteerWhenQueued: parsed.autoSteerWhenQueued,
+      // Do not leave the previous actor's turn running after the live
+      // credential identity changes (mirrors the API follow-up path).
+      autoSteerWhenQueued: requiresActorHandoff
+        ? true
+        : parsed.autoSteerWhenQueued,
     });
   } catch (error) {
     await releaseOutOfBandContext(outOfBandContext);
+
+    if (didSwitchActingUser) {
+      await restoreActingUserIdAfterFailedSandboxDelivery({
+        runId: cloudJob.id,
+        previousActingUserId,
+        attemptedActingUserId: auth.userId,
+      });
+    }
 
     if (error instanceof TRPCClientError) {
       throw new TRPCError({
@@ -275,7 +362,21 @@ export async function answerSandboxUserInputRequestCommand(
     SANDBOX_PROMPT_TIMEOUT_MS,
   );
 
+  const previousActingUserId = cloudJob.actingUserId;
+  let didSwitchActingUser = false;
+
   try {
+    // Same trusted pre-delivery actor switch as sendSandboxPromptCommand: the
+    // worker blocks answers whose sender is not the run's acting user. Note
+    // this resolves the actor before delivery rather than through the atomic
+    // winner claim (setTrustedRunActingUserOnSuccess) used for contended chat
+    // answers, so a losing concurrent answerer may briefly hold attribution.
+    didSwitchActingUser = await syncActingUserIdBeforeSandboxDelivery({
+      runId: cloudJob.id,
+      currentActingUserId: previousActingUserId,
+      nextActingUserId: auth.userId,
+    });
+
     const client = createSandboxServerRpcClient({
       links: [
         httpBatchLink({
@@ -294,6 +395,14 @@ export async function answerSandboxUserInputRequestCommand(
       userName: getAuthenticatedPromptUserName(auth),
     });
   } catch (error) {
+    if (didSwitchActingUser) {
+      await restoreActingUserIdAfterFailedSandboxDelivery({
+        runId: cloudJob.id,
+        previousActingUserId,
+        attemptedActingUserId: auth.userId,
+      });
+    }
+
     if (error instanceof TRPCClientError) {
       throw new TRPCError({
         code: 'BAD_GATEWAY',
