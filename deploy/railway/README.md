@@ -11,7 +11,7 @@ This guide covers deploying Roomote on [Railway](https://railway.com) — either
 through an official Roomote template or by composing the services manually.
 Both templates are mirrored from the same maintained service specification,
 [`template.yaml`](template.yaml), and differ only in which image alias the
-four app services track; everything in this guide applies to both. Railway
+five app services track; everything in this guide applies to both. Railway
 does not read that file directly, but it is the source of truth that
 maintainers mirror into Railway's Template Composer.
 
@@ -49,10 +49,12 @@ Compose paths in [SELF_HOSTING.md](../../SELF_HOSTING.md) instead.
   the deploy screen is `ROOMOTE_APP_URL`, for deployers who want a custom
   domain from the start (see
   [Attaching a custom domain](#attaching-a-custom-domain)).
-- **Live previews are off by default.** Preview subdomains need a wildcard
-  domain, and Railway-generated service domains are single-label. Previews
-  can be enabled later with a wildcard custom domain (see below); everything
-  else works without them.
+- **Live previews are off by default, but the proxy ships ready.** Preview
+  subdomains need a wildcard domain, and Railway-generated service domains
+  are single-label. The `preview-proxy` service is part of the template and
+  boots healthy with the `PREVIEW_*` variables empty; enabling previews
+  later is a wildcard custom domain plus three variable values (see below).
+  Everything else works without them.
 
 ## What you need
 
@@ -93,7 +95,7 @@ Nothing else in either template encodes a version:
   constant.
 
 To pin instead (recommended for production deployments): put the same
-immutable tag (`v*`, `main-<sha>`, or `develop-<sha>`) in the four
+immutable tag (`v*`, `main-<sha>`, or `develop-<sha>`) in the five
 app-service image fields. No other edits are needed — the derived values
 follow the image.
 
@@ -101,16 +103,16 @@ follow the image.
 
 `<channel>` below is `main` or `develop`, per template.
 
-| Railway service | Source                             | Start command                                      | Public domain                | Healthcheck        |
-| --------------- | ---------------------------------- | -------------------------------------------------- | ---------------------------- | ------------------ |
-| `Postgres`      | Railway managed PostgreSQL         | —                                                  | no                           | managed            |
-| `Redis`         | Railway managed Redis              | —                                                  | no                           | managed            |
-| `minio`         | `minio/minio` + volume at `/data`  | `minio server /data --console-address :9001`       | yes (HTTP proxy port 9000)   | —                  |
-| `web`           | `roomote-app:<channel>`            | `/roomote/.docker/app/entrypoint.sh web`           | yes (HTTP proxy port 8080)   | `/health`          |
-| `api`           | `roomote-app:<channel>`            | `/roomote/.docker/app/entrypoint.sh api`           | yes (HTTP proxy port 8080)   | `/health/liveness` |
-| `controller`    | `roomote-app:<channel>`            | `/roomote/.docker/app/entrypoint.sh controller`    | no                           | —                  |
-| `bullmq`        | `roomote-app:<channel>`            | `/roomote/.docker/app/entrypoint.sh bullmq`        | no                           | —                  |
-| `preview-proxy` | `roomote-app:<channel>` (optional) | `/roomote/.docker/app/entrypoint.sh preview-proxy` | yes + wildcard custom domain | `/health`          |
+| Railway service | Source                            | Start command                                      | Public domain              | Healthcheck        |
+| --------------- | --------------------------------- | -------------------------------------------------- | -------------------------- | ------------------ |
+| `Postgres`      | Railway managed PostgreSQL        | —                                                  | no                         | managed            |
+| `Redis`         | Railway managed Redis             | —                                                  | no                         | managed            |
+| `minio`         | `minio/minio` + volume at `/data` | `minio server /data --console-address :9001`       | yes (HTTP proxy port 9000) | —                  |
+| `web`           | `roomote-app:<channel>`           | `/roomote/.docker/app/entrypoint.sh web`           | yes (HTTP proxy port 8080) | `/health`          |
+| `api`           | `roomote-app:<channel>`           | `/roomote/.docker/app/entrypoint.sh api`           | yes (HTTP proxy port 8080) | `/health/liveness` |
+| `controller`    | `roomote-app:<channel>`           | `/roomote/.docker/app/entrypoint.sh controller`    | no                         | —                  |
+| `bullmq`        | `roomote-app:<channel>`           | `/roomote/.docker/app/entrypoint.sh bullmq`        | no                         | —                  |
+| `preview-proxy` | `roomote-app:<channel>`           | `/roomote/.docker/app/entrypoint.sh preview-proxy` | yes (HTTP proxy port 8080) | `/health`          |
 
 Railway's custom start command **bypasses the image entrypoint** and executes
 the command directly, so the full `/roomote/.docker/app/entrypoint.sh <service>`
@@ -153,6 +155,9 @@ S3_BUCKET_ARTIFACTS=roomote-artifacts
 S3_AUTO_CREATE_BUCKET=true
 SETUP_TOKEN=${{secret(32)}}
 ROOMOTE_PING_BASE_URL=https://ping.openmote.dev
+PREVIEW_PROXY_BASE_URL=
+NEXT_PUBLIC_PREVIEW_PROXY_BASE_URL=
+PREVIEW_DOMAINS=
 DEFAULT_COMPUTE_PROVIDER=modal
 EXCLUDED_COMPUTE_PROVIDERS=docker
 DATABASE_URL=${{Postgres.DATABASE_URL}}
@@ -163,7 +168,7 @@ S3_ENDPOINT=http://${{minio.RAILWAY_PRIVATE_DOMAIN}}:9000
 S3_PRESIGN_ENDPOINT=https://${{minio.RAILWAY_PUBLIC_DOMAIN}}
 ```
 
-web and bullmq (identical block):
+web, bullmq, and preview-proxy (identical block):
 
 ```sh
 APP_ENV=${{api.APP_ENV}}
@@ -178,6 +183,9 @@ S3_REGION=${{api.S3_REGION}}
 S3_BUCKET_ARTIFACTS=${{api.S3_BUCKET_ARTIFACTS}}
 SETUP_TOKEN=${{api.SETUP_TOKEN}}
 ROOMOTE_PING_BASE_URL=${{api.ROOMOTE_PING_BASE_URL}}
+PREVIEW_PROXY_BASE_URL=${{api.PREVIEW_PROXY_BASE_URL}}
+NEXT_PUBLIC_PREVIEW_PROXY_BASE_URL=${{api.NEXT_PUBLIC_PREVIEW_PROXY_BASE_URL}}
+PREVIEW_DOMAINS=${{api.PREVIEW_DOMAINS}}
 DEFAULT_COMPUTE_PROVIDER=${{api.DEFAULT_COMPUTE_PROVIDER}}
 EXCLUDED_COMPUTE_PROVIDERS=${{api.EXCLUDED_COMPUTE_PROVIDERS}}
 DATABASE_URL=${{Postgres.DATABASE_URL}}
@@ -188,7 +196,7 @@ S3_ENDPOINT=${{api.S3_ENDPOINT}}
 S3_PRESIGN_ENDPOINT=${{api.S3_PRESIGN_ENDPOINT}}
 ```
 
-controller: the same block as web/bullmq **plus**
+controller: the same block **plus**
 
 ```sh
 DOCKER_WORKER_RELEASE_PATH=/roomote/releases/worker-current.tar.gz
@@ -212,7 +220,7 @@ MINIO_ROOT_PASSWORD=${{api.S3_SECRET_ACCESS_KEY}}
 Notes:
 
 - `ROOMOTE_APP_URL` on api is the **single canonical-origin knob**: it is the
-  URL users browse, and web/controller/bullmq reference
+  URL users browse, and web/controller/bullmq/preview-proxy reference
   `${{api.ROOMOTE_APP_URL}}` rather than repeating the value. It is also the
   template's one optional deploy-time prompt — the deploy screen shows it
   pre-filled with the generated-domain reference so a custom domain can be
@@ -241,9 +249,12 @@ Notes:
   template points at the openmote ping service). Admins can opt out of
   anonymous analytics in the setup wizard or **Settings → Misc**; version
   checks ignore that setting.
-- Leave `PREVIEW_PROXY_BASE_URL` and `PREVIEW_DOMAINS` unset unless you
-  enable live previews. Roomote boots without them; previews report as not
-  configured in **Settings → Live Previews** until set.
+- The three `PREVIEW_*` variables ship **empty** (mark them optional in the
+  Template Composer so the deploy screen does not prompt for them). Roomote
+  and the preview-proxy service boot fine with them empty; previews report
+  as not configured in **Settings → Live Previews** until the values are
+  filled in on api (see
+  [Enabling live previews](#enabling-live-previews-optional)).
 - Leave `JOB_AUTH_*` and `PREVIEW_AUTH_*` unset —
   `ROOMOTE_AUTO_GENERATE_KEYS=true` manages them. If you later provide
   explicit env values, they take precedence over the persisted keypairs.
@@ -353,19 +364,21 @@ you want one: they are separate values on api, `TRPC_URL` and
 
 ## Enabling live previews (optional)
 
-Live previews need a wildcard domain, which requires a domain you control:
+The `preview-proxy` service is already part of the template and boots
+healthy with previews unconfigured. Enabling previews needs a wildcard
+domain, which requires a domain you control:
 
-1. Add the `preview-proxy` service (see the topology table).
-2. Point `previews.<your-domain>` and `*.previews.<your-domain>` at Railway
+1. Point `previews.<your-domain>` and `*.previews.<your-domain>` at Railway
    as custom domains on the preview-proxy service, following Railway's
    wildcard-domain docs.
-3. Set `PREVIEW_PROXY_BASE_URL=https://previews.<your-domain>`,
+2. Fill in the three empty `PREVIEW_*` values on **api**:
+   `PREVIEW_PROXY_BASE_URL=https://previews.<your-domain>`,
    `NEXT_PUBLIC_PREVIEW_PROXY_BASE_URL=https://previews.<your-domain>`, and
-   `PREVIEW_DOMAINS=previews.<your-domain>` on api and reference them from
-   the app services and preview-proxy. The `NEXT_PUBLIC_` variant is what
-   the web client uses to build preview links, so the `web` service must
-   have it; the production Compose overlay sets both for the same reason.
-4. Opt in from **Settings → Live Previews**, which validates the wildcard
+   `PREVIEW_DOMAINS=previews.<your-domain>`, then redeploy the app
+   services. The other services already reference `${{api.*}}` for all
+   three; the `NEXT_PUBLIC_` variant is what the web client uses to build
+   preview links, so it must reach the `web` service.
+3. Opt in from **Settings → Live Previews**, which validates the wildcard
    hostname and enables previews per deployment and environment.
 
 ## Upgrades, backups, and costs
@@ -375,9 +388,9 @@ Live previews need a wildcard domain, which requires a domain you control:
   templates, not Docker-image-based ones like this. Template changes affect
   new deploys only.
 - **Upgrade a deployment on a channel alias** (`:main` or `:develop`) by
-  redeploying the four app services — they pull the current alias, and
+  redeploying the five app services — they pull the current alias, and
   everything version-coupled derives from the new image. On an immutable
-  pin, bump the tag in the four image fields first. The api service's
+  pin, bump the tag in the five image fields first. The api service's
   `db-migrate` pre-deploy applies any schema changes, and the
   auto-generated keypairs persist in Postgres, so sessions, job tokens, and
   preview tokens survive redeploys. These redeploys can be automated against
@@ -386,7 +399,7 @@ Live previews need a wildcard domain, which requires a domain you control:
 - **Back up** the Railway Postgres database (Railway backups or `pg_dump`)
   and the MinIO volume or external bucket. Everything else is reproducible
   from config.
-- **Costs** split three ways: Railway hosts the control plane (web, api,
+- **Costs** split three ways: Railway hosts the control plane (web, api, preview-proxy,
   controller, bullmq, Postgres, Redis, MinIO), while task execution bills
   through your sandbox provider (Modal/E2B/Daytona) and model usage bills
   through your model provider.

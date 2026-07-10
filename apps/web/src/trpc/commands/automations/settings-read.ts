@@ -251,6 +251,7 @@ export async function getBackgroundAgentSettingsCommand(
       visibleSettings.channelAutoStartSlackChannels.map(
         ({ channelId }) => channelId,
       ),
+    managerSlackChannelId: visibleSettings.managerSlackChannelId,
     managerStatsSlackChannelId: visibleSettings.managerStatsSlackChannelId,
     suggesterSlackChannelId: visibleSettings.suggesterSlackChannelId,
     announcerSlackChannelId: visibleSettings.announcerSlackChannelId,
