@@ -82,6 +82,7 @@ interface OpenCodeServerHarnessOptions {
   executeToolProgressInitialDelayMs?: number;
   executeToolProgressIntervalMs?: number;
   stopHookReminderStallTimeoutMs?: number;
+  subagentSettlementGraceMs?: number;
   queuedPromptRetryDelayMs?: number;
   mcpServerNames?: string[];
   beforeQueuedPrompt?: (input: { userId?: string }) => Promise<void | {
@@ -201,6 +202,10 @@ interface ActiveOpenCodeSubagentWatchdog {
   agentType: string | null;
   childSessionId: string | null;
   startedAtMs: number;
+  // Armed when the child session reports terminal (idle or error) while the
+  // spawn's task tool part is still unsettled; cleared by settlement or by any
+  // further child event. See handleChildSessionTerminal.
+  settlementTimer: ReturnType<typeof setTimeout> | null;
   updatePayload: Record<string, unknown>;
   activitySeenChildToolCallIds: Set<string>;
   activityLastAction: string | null;
@@ -224,6 +229,13 @@ const OPENCODE_STOP_HOOK_REMINDER_STALL_TIMEOUT_MS = 10 * 60_000;
 const EXPECTED_REPLAY_ABORT_SUPPRESSION_MS = 10_000;
 const DEFAULT_EXECUTE_TOOL_PROGRESS_INITIAL_DELAY_MS = 15_000;
 const DEFAULT_EXECUTE_TOOL_PROGRESS_INTERVAL_MS = 30_000;
+// Grace between a child session reporting terminal (idle or error) and its
+// task tool part settling. OpenCode settles the spawn from the child's
+// completion within seconds; a spawn still unsettled after this window has
+// leaked inside OpenCode and the parent would wait on it forever. The window
+// is generous so provider-retry cycles that follow a child error are not
+// mistaken for a leak, and any further child event cancels it.
+const DEFAULT_SUBAGENT_SETTLEMENT_GRACE_MS = 120_000;
 const DEFAULT_QUEUED_PROMPT_RETRY_DELAY_MS = 1_000;
 const MAX_PROGRESS_COMMAND_CHARS = 240;
 const FALLBACK_OPENCODE_STOP_HOOK_REMINDER =
@@ -1419,6 +1431,7 @@ export class OpenCodeServerHarness
   private readonly executeToolProgressInitialDelayMs: number;
   private readonly executeToolProgressIntervalMs: number;
   private readonly stopHookReminderStallTimeoutMs: number;
+  private readonly subagentSettlementGraceMs: number;
   private readonly queuedPromptRetryDelayMs: number;
   private readonly streamedPartText = new Map<string, string>();
   private readonly streamedMessageIds = new Set<string>();
@@ -1510,6 +1523,8 @@ export class OpenCodeServerHarness
     this.stopHookReminderStallTimeoutMs =
       options.stopHookReminderStallTimeoutMs ??
       OPENCODE_STOP_HOOK_REMINDER_STALL_TIMEOUT_MS;
+    this.subagentSettlementGraceMs =
+      options.subagentSettlementGraceMs ?? DEFAULT_SUBAGENT_SETTLEMENT_GRACE_MS;
     this.queuedPromptRetryDelayMs =
       options.queuedPromptRetryDelayMs ?? DEFAULT_QUEUED_PROMPT_RETRY_DELAY_MS;
     this.knownMcpServerNames = [
@@ -2218,6 +2233,7 @@ export class OpenCodeServerHarness
       agentType: input.agentType,
       childSessionId: input.childSessionId,
       startedAtMs: Date.now(),
+      settlementTimer: null,
       updatePayload: input.updatePayload,
       activitySeenChildToolCallIds: new Set(),
       activityLastAction: null,
@@ -2317,6 +2333,9 @@ export class OpenCodeServerHarness
       return;
     }
 
+    if (watchdog.settlementTimer) {
+      clearTimeout(watchdog.settlementTimer);
+    }
     if (watchdog.childSessionId) {
       this.childSessionWatchdogKeys.delete(watchdog.childSessionId);
     }
@@ -2331,10 +2350,99 @@ export class OpenCodeServerHarness
         continue;
       }
 
+      if (watchdog.settlementTimer) {
+        clearTimeout(watchdog.settlementTimer);
+      }
       this.activeSubagentWatchdogs.delete(eventKey);
       if (watchdog.childSessionId) {
         this.childSessionWatchdogKeys.delete(watchdog.childSessionId);
       }
+    }
+  }
+
+  /**
+   * A tracked child session reported terminal (idle or error). For background
+   * launches that IS the run's completion signal, so tracking ends. For a
+   * foreground spawn the task tool part must now settle — OpenCode resolves
+   * the spawn from the child's completion within seconds — so a spawn still
+   * unsettled after the grace window has leaked inside OpenCode and the
+   * parent turn would wait on it forever. Aborting the finished child forces
+   * OpenCode's task tool to settle as cancelled, which resumes the parent
+   * with a visible failed spawn. Any further event from the child (a provider
+   * retry picking the session back up) cancels the pending recovery.
+   */
+  private handleChildSessionTerminal(childSessionId: string): void {
+    const eventKey = this.childSessionWatchdogKeys.get(childSessionId);
+    const watchdog = eventKey
+      ? this.activeSubagentWatchdogs.get(eventKey)
+      : undefined;
+
+    if (!eventKey || !watchdog) {
+      return;
+    }
+
+    if (watchdog.background) {
+      this.stopSubagentWatchdog(eventKey);
+      return;
+    }
+
+    if (watchdog.settlementTimer) {
+      return;
+    }
+
+    const timer = setTimeout(() => {
+      void this.recoverUnsettledSpawn(eventKey);
+    }, this.subagentSettlementGraceMs);
+    timer.unref?.();
+    watchdog.settlementTimer = timer;
+  }
+
+  private clearSubagentSettlement(childSessionId: string): void {
+    const eventKey = this.childSessionWatchdogKeys.get(childSessionId);
+    const watchdog = eventKey
+      ? this.activeSubagentWatchdogs.get(eventKey)
+      : undefined;
+
+    if (watchdog?.settlementTimer) {
+      clearTimeout(watchdog.settlementTimer);
+      watchdog.settlementTimer = null;
+    }
+  }
+
+  private async recoverUnsettledSpawn(eventKey: string): Promise<void> {
+    const watchdog = this.activeSubagentWatchdogs.get(eventKey);
+
+    if (!watchdog) {
+      return;
+    }
+
+    watchdog.settlementTimer = null;
+    const childSessionId = watchdog.childSessionId;
+    // Drop the tracker first: whether the abort below settles the spawn or
+    // the spawn is fully leaked, recovery must not re-arm.
+    this.stopSubagentWatchdog(eventKey);
+
+    if (!childSessionId) {
+      return;
+    }
+
+    this.logger.warn(
+      `OpenCode subagent child session ${childSessionId} finished but its task tool call did not settle within ${this.subagentSettlementGraceMs}ms toolCallId=${watchdog.toolCallId} agentType=${
+        watchdog.agentType ?? 'unknown'
+      } title=${watchdog.title}; aborting the child session so the spawn settles`,
+    );
+
+    try {
+      await this.client.abort({
+        sessionId: childSessionId,
+        signal: this.eventAbortController.signal,
+      });
+    } catch (error) {
+      this.logger.warn(
+        `Failed to abort OpenCode child session ${childSessionId} while recovering an unsettled spawn: ${
+          error instanceof Error ? error.message : String(error)
+        }`,
+      );
     }
   }
 
@@ -2920,20 +3028,14 @@ export class OpenCodeServerHarness
       // Child-session (subagent) events are otherwise dropped here; fold tool
       // activity into the parent spawn row and record hidden inference usage
       // before returning. A child session going idle or erroring is its
-      // terminal signal — it ends run tracking (for background launches this
-      // is what ends the tracking that outlived the instant task-tool
-      // completion), and a child's idle or error must never finish the
-      // parent turn.
+      // terminal signal — handled per launch kind by
+      // handleChildSessionTerminal — and must never finish the parent turn.
       if (payload.type === 'session.idle' || payload.type === 'session.error') {
-        const watchdogKey = this.childSessionWatchdogKeys.get(sessionId);
-
-        if (watchdogKey) {
-          this.stopSubagentWatchdog(watchdogKey);
-        }
-
+        this.handleChildSessionTerminal(sessionId);
         return;
       }
 
+      this.clearSubagentSettlement(sessionId);
       this.handleChildSessionToolActivity(sessionId, payload);
       this.handleChildSessionMessageUpdated(sessionId, payload);
       return;

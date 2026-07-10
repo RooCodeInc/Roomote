@@ -65,6 +65,8 @@ function createLogger() {
   };
 }
 
+const SETTLEMENT_GRACE_MS = 10_000;
+
 function createHarness(client = new FakeOpenCodeServerClient()) {
   const logger = createLogger();
   const harness = new OpenCodeServerHarness({
@@ -73,6 +75,7 @@ function createHarness(client = new FakeOpenCodeServerClient()) {
     logger,
     model: TEST_OPENCODE_MODEL,
     eventStreamReadyTimeoutMs: 100,
+    subagentSettlementGraceMs: SETTLEMENT_GRACE_MS,
   });
 
   return { client, harness, logger };
@@ -335,7 +338,7 @@ describe('OpenCode subagent run tracking', () => {
     }
   });
 
-  it('disarms tracking on child session.error without finishing the parent turn', async () => {
+  it('never finishes the parent turn from a child session.error', async () => {
     const { client, harness } = createHarness();
     const taskEvents: TaskEvent[] = [];
     harness.subscribe((event) => taskEvents.push(event));
@@ -516,6 +519,233 @@ describe('OpenCode subagent run tracking', () => {
       });
 
       expect(subagentActivityEvents(outputs)).toHaveLength(settledCount);
+      expect(client.abort).not.toHaveBeenCalled();
+    } finally {
+      harness.dispose();
+    }
+  });
+});
+
+describe('OpenCode subagent settlement recovery', () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it('aborts a finished child whose task tool call never settles', async () => {
+    const { client, harness, logger } = createHarness();
+    const taskEvents: TaskEvent[] = [];
+    harness.subscribe((event) => taskEvents.push(event));
+
+    try {
+      await connectHarness(harness, client);
+      vi.useFakeTimers();
+      await armSpawn(client, harness);
+
+      // The child session finishes, but no terminal task tool part ever
+      // arrives: the spawn leaked inside OpenCode.
+      await client.emit({
+        type: 'session.idle',
+        properties: { sessionID: 'ses_child_1' },
+      });
+
+      await vi.advanceTimersByTimeAsync(SETTLEMENT_GRACE_MS - 1);
+      expect(client.abort).not.toHaveBeenCalled();
+
+      await vi.advanceTimersByTimeAsync(1);
+
+      expect(client.abort).toHaveBeenCalledTimes(1);
+      expect(client.abort).toHaveBeenCalledWith(
+        expect.objectContaining({ sessionId: 'ses_child_1' }),
+      );
+      expect(client.children).not.toHaveBeenCalled();
+      expect(logger.warn).toHaveBeenCalledWith(
+        expect.stringContaining('did not settle'),
+      );
+      // Recovery acts on the child only; the parent turn is untouched.
+      expect(
+        taskEvents.some(
+          (event) =>
+            event.eventName === TaskEventName.TaskCompleted ||
+            event.eventName === TaskEventName.TaskAborted,
+        ),
+      ).toBe(false);
+    } finally {
+      harness.dispose();
+    }
+  });
+
+  it('does not recover when the task tool part settles within the grace', async () => {
+    const { client, harness } = createHarness();
+
+    try {
+      await connectHarness(harness, client);
+      vi.useFakeTimers();
+      await armSpawn(client, harness);
+
+      await client.emit({
+        type: 'session.idle',
+        properties: { sessionID: 'ses_child_1' },
+      });
+      await client.emit({
+        type: 'message.part.updated',
+        properties: {
+          part: createTaskToolPart({
+            status: 'completed',
+            metadata: { sessionId: 'ses_child_1' },
+            output: '<task_result>done</task_result>',
+          }),
+        },
+      });
+
+      await vi.advanceTimersByTimeAsync(SETTLEMENT_GRACE_MS * 3);
+
+      expect(client.abort).not.toHaveBeenCalled();
+    } finally {
+      harness.dispose();
+    }
+  });
+
+  it('cancels pending recovery when the child emits again', async () => {
+    const { client, harness } = createHarness();
+
+    try {
+      await connectHarness(harness, client);
+      vi.useFakeTimers();
+      await armSpawn(client, harness);
+
+      await client.emit({
+        type: 'session.idle',
+        properties: { sessionID: 'ses_child_1' },
+      });
+
+      // A provider retry picks the child session back up before the grace
+      // expires: the child is alive, so nothing may abort it.
+      await vi.advanceTimersByTimeAsync(SETTLEMENT_GRACE_MS - 1);
+      await client.emit({
+        type: 'message.part.updated',
+        properties: {
+          part: createChildToolPart({ callId: 'c_retry', command: 'ls' }),
+        },
+      });
+
+      await vi.advanceTimersByTimeAsync(SETTLEMENT_GRACE_MS * 3);
+
+      expect(client.abort).not.toHaveBeenCalled();
+    } finally {
+      harness.dispose();
+    }
+  });
+
+  it('arms the same recovery for a child session error', async () => {
+    const { client, harness } = createHarness();
+
+    try {
+      await connectHarness(harness, client);
+      vi.useFakeTimers();
+      await armSpawn(client, harness);
+
+      await client.emit({
+        type: 'session.error',
+        properties: {
+          sessionID: 'ses_child_1',
+          error: { name: 'ProviderError' },
+        },
+      });
+
+      await vi.advanceTimersByTimeAsync(SETTLEMENT_GRACE_MS);
+
+      expect(client.abort).toHaveBeenCalledTimes(1);
+      expect(client.abort).toHaveBeenCalledWith(
+        expect.objectContaining({ sessionId: 'ses_child_1' }),
+      );
+    } finally {
+      harness.dispose();
+    }
+  });
+
+  it('does not arm recovery for background launches', async () => {
+    const { client, harness } = createHarness();
+
+    try {
+      await connectHarness(harness, client);
+
+      harness.sendCommand({
+        commandName: TaskCommandName.StartNewTask,
+        data: { text: 'Do work.', visibleInTranscript: true },
+      });
+      await vi.waitFor(() => {
+        expect(client.createSession).toHaveBeenCalled();
+      });
+
+      vi.useFakeTimers();
+
+      await client.emit({
+        type: 'message.part.updated',
+        properties: {
+          part: createTaskToolPart({
+            status: 'completed',
+            input: { background: true },
+            metadata: { sessionId: 'ses_child_1' },
+            output: '<task id="job_1" state="running" />',
+          }),
+        },
+      });
+      await client.emit({
+        type: 'session.idle',
+        properties: { sessionID: 'ses_child_1' },
+      });
+
+      await vi.advanceTimersByTimeAsync(SETTLEMENT_GRACE_MS * 3);
+
+      expect(client.abort).not.toHaveBeenCalled();
+    } finally {
+      harness.dispose();
+    }
+  });
+
+  it('cancels pending recovery when the parent turn finishes', async () => {
+    const { client, harness } = createHarness();
+
+    try {
+      await connectHarness(harness, client);
+      vi.useFakeTimers();
+      await armSpawn(client, harness);
+
+      await client.emit({
+        type: 'session.idle',
+        properties: { sessionID: 'ses_child_1' },
+      });
+      // Parent turn finish tears down foreground spawn tracking, and with it
+      // the pending recovery.
+      await client.emit({
+        type: 'session.idle',
+        properties: { sessionID: 'ses_1' },
+      });
+
+      await vi.advanceTimersByTimeAsync(SETTLEMENT_GRACE_MS * 3);
+
+      expect(client.abort).not.toHaveBeenCalled();
+    } finally {
+      harness.dispose();
+    }
+  });
+
+  it('cancels pending recovery on dispose', async () => {
+    const { client, harness } = createHarness();
+
+    try {
+      await connectHarness(harness, client);
+      vi.useFakeTimers();
+      await armSpawn(client, harness);
+
+      await client.emit({
+        type: 'session.idle',
+        properties: { sessionID: 'ses_child_1' },
+      });
+
+      harness.dispose();
+      await vi.advanceTimersByTimeAsync(SETTLEMENT_GRACE_MS * 3);
+
       expect(client.abort).not.toHaveBeenCalled();
     } finally {
       harness.dispose();
