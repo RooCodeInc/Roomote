@@ -79,7 +79,7 @@
 #   wizard or Settings -> Misc; version checks ignore that setting.
 # - Live previews ship disabled but ready: the preview-proxy service is in
 #   the template and boots healthy with the PREVIEW_* variables empty (it
-#   only hard-requires ROOMOTE_APP_URL, DATABASE_URL, and REDIS_URL, all in
+#   only hard-requires R_APP_URL, DATABASE_URL, and REDIS_URL, all in
 #   the shared block). Enabling previews needs a customer-owned wildcard
 #   custom domain plus the three PREVIEW_* values on api; see "Enabling
 #   live previews" in README.md. The PREVIEW_* variables on api are empty

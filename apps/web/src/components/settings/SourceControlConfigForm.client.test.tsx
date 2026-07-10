@@ -99,35 +99,32 @@ describe('SourceControlConfigForm', () => {
         provider="github"
         configStatus={buildConfigStatus([
           {
-            envVarName: 'NEXT_PUBLIC_GITHUB_APP_SLUG',
-            acceptedEnvVarNames: [
-              'NEXT_PUBLIC_GITHUB_APP_SLUG',
-              'GITHUB_APP_SLUG',
-            ],
+            envVarName: 'R_GITHUB_APP_SLUG',
+            acceptedEnvVarNames: ['R_GITHUB_APP_SLUG'],
             label: 'GitHub App Slug',
             runtimeSatisfied: true,
             savedSatisfied: false,
             savedValue: 'roomote-app',
-            satisfiedByEnvVarName: 'NEXT_PUBLIC_GITHUB_APP_SLUG',
+            satisfiedByEnvVarName: 'R_GITHUB_APP_SLUG',
           },
           {
-            envVarName: 'GITHUB_APP_ID',
-            acceptedEnvVarNames: ['GITHUB_APP_ID'],
+            envVarName: 'R_GITHUB_APP_ID',
+            acceptedEnvVarNames: ['R_GITHUB_APP_ID'],
             label: 'GitHub App ID',
             runtimeSatisfied: true,
             savedSatisfied: false,
             savedValue: '12345',
-            satisfiedByEnvVarName: 'GITHUB_APP_ID',
+            satisfiedByEnvVarName: 'R_GITHUB_APP_ID',
           },
           {
-            envVarName: 'GITHUB_APP_PRIVATE_KEY',
-            acceptedEnvVarNames: ['GITHUB_APP_PRIVATE_KEY'],
+            envVarName: 'R_GITHUB_APP_PRIVATE_KEY',
+            acceptedEnvVarNames: ['R_GITHUB_APP_PRIVATE_KEY'],
             label: 'GitHub App Private Key',
             secret: true,
             runtimeSatisfied: true,
             savedSatisfied: false,
             savedValue: null,
-            satisfiedByEnvVarName: 'GITHUB_APP_PRIVATE_KEY',
+            satisfiedByEnvVarName: 'R_GITHUB_APP_PRIVATE_KEY',
           },
         ])}
       />,
@@ -144,26 +141,23 @@ describe('SourceControlConfigForm', () => {
         provider="github"
         configStatus={buildConfigStatus([
           {
-            envVarName: 'NEXT_PUBLIC_GITHUB_APP_SLUG',
-            acceptedEnvVarNames: [
-              'NEXT_PUBLIC_GITHUB_APP_SLUG',
-              'GITHUB_APP_SLUG',
-            ],
+            envVarName: 'R_GITHUB_APP_SLUG',
+            acceptedEnvVarNames: ['R_GITHUB_APP_SLUG'],
             label: 'GitHub App Slug',
             runtimeSatisfied: false,
             savedSatisfied: true,
             savedValue: 'saved-slug',
-            satisfiedByEnvVarName: 'NEXT_PUBLIC_GITHUB_APP_SLUG',
+            satisfiedByEnvVarName: 'R_GITHUB_APP_SLUG',
           },
           {
-            envVarName: 'GITHUB_CLIENT_SECRET',
-            acceptedEnvVarNames: ['GITHUB_CLIENT_SECRET'],
+            envVarName: 'R_GITHUB_CLIENT_SECRET',
+            acceptedEnvVarNames: ['R_GITHUB_CLIENT_SECRET'],
             label: 'GitHub OAuth Client Secret',
             secret: true,
             runtimeSatisfied: false,
             savedSatisfied: true,
             savedValue: null,
-            satisfiedByEnvVarName: 'GITHUB_CLIENT_SECRET',
+            satisfiedByEnvVarName: 'R_GITHUB_CLIENT_SECRET',
           },
         ])}
       />,
@@ -176,23 +170,23 @@ describe('SourceControlConfigForm', () => {
   it('clears plaintext secrets after a successful secret-only save', async () => {
     const fields = [
       {
-        envVarName: 'NEXT_PUBLIC_GITHUB_APP_SLUG',
-        acceptedEnvVarNames: ['NEXT_PUBLIC_GITHUB_APP_SLUG', 'GITHUB_APP_SLUG'],
+        envVarName: 'R_GITHUB_APP_SLUG',
+        acceptedEnvVarNames: ['R_GITHUB_APP_SLUG'],
         label: 'GitHub App Slug',
         runtimeSatisfied: false,
         savedSatisfied: true,
         savedValue: 'saved-slug',
-        satisfiedByEnvVarName: 'NEXT_PUBLIC_GITHUB_APP_SLUG',
+        satisfiedByEnvVarName: 'R_GITHUB_APP_SLUG',
       },
       {
-        envVarName: 'GITHUB_CLIENT_SECRET',
-        acceptedEnvVarNames: ['GITHUB_CLIENT_SECRET'],
+        envVarName: 'R_GITHUB_CLIENT_SECRET',
+        acceptedEnvVarNames: ['R_GITHUB_CLIENT_SECRET'],
         label: 'GitHub OAuth Client Secret',
         secret: true as const,
         runtimeSatisfied: false,
         savedSatisfied: true,
         savedValue: null,
-        satisfiedByEnvVarName: 'GITHUB_CLIENT_SECRET',
+        satisfiedByEnvVarName: 'R_GITHUB_CLIENT_SECRET',
       },
     ];
 

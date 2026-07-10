@@ -294,7 +294,7 @@ describe('Env', () => {
       NODE_ENV: 'production',
       APP_ENV: 'production',
       ROOMOTE_SERVICE: 'controller',
-      ROOMOTE_APP_URL: 'https://roomote.example.com',
+      R_APP_URL: 'https://roomote.example.com',
       TRPC_URL: 'https://api.roomote.example.com',
       DATABASE_URL: 'postgres://postgres:password@postgres:5432/roomote',
       REDIS_URL: 'redis://redis:6379',
@@ -316,7 +316,7 @@ describe('Env', () => {
       NODE_ENV: 'production',
       APP_ENV: 'production',
       ROOMOTE_SERVICE: 'preview-proxy',
-      ROOMOTE_APP_URL: 'https://roomote.example.com',
+      R_APP_URL: 'https://roomote.example.com',
       DATABASE_URL: 'postgres://postgres:password@postgres:5432/roomote',
       REDIS_URL: 'redis://redis:6379',
       JOB_AUTH_PUBLIC_KEY: 'job-public-key',
@@ -336,15 +336,16 @@ describe('Env', () => {
       NODE_ENV: 'production',
       APP_ENV: 'production',
       ROOMOTE_SERVICE: 'controller',
-      ROOMOTE_APP_URL: 'https://roomote.example.com',
-      TRPC_URL: 'https://api.roomote.example.com',
+      R_APP_URL: 'https://roomote.example.com',
       DATABASE_URL: 'postgres://postgres:password@postgres:5432/roomote',
       REDIS_URL: 'redis://redis:6379',
       JOB_AUTH_PUBLIC_KEY: 'job-public-key',
       ENCRYPTION_KEY: '12345678901234567890123456789012',
     };
 
-    expect(() => createRoomoteEnv(runtimeEnv)).toThrow(/JOB_AUTH_PRIVATE_KEY/);
+    expect(() => createRoomoteEnv(runtimeEnv)).toThrow(
+      'Invalid environment variables',
+    );
   });
 
   it('does not require preview runtime settings for production startup', () => {
@@ -476,7 +477,7 @@ describe('Env', () => {
     }
   });
 
-  it('derives SLACK_AUTH_URI from ROOMOTE_APP_URL when unset or empty', () => {
+  it('derives SLACK_AUTH_URI from R_APP_URL when unset or empty', () => {
     const previousSkipEnvValidation = process.env.SKIP_ENV_VALIDATION;
 
     const unsetEnv = { ...productionCoreEnv };
@@ -486,14 +487,14 @@ describe('Env', () => {
     const emptyEnv: NodeJS.ProcessEnv = {
       ...unsetEnv,
       SLACK_AUTH_URI: '',
-      ROOMOTE_APP_URL: 'https://roomote.example.com/',
+      R_APP_URL: 'https://roomote.example.com/',
     };
 
     try {
       expect(createRoomoteEnv(unsetEnv).SLACK_AUTH_URI).toBe(
         'https://roomote.example.com/api/slack/auth',
       );
-      // Trailing slashes on ROOMOTE_APP_URL must not produce a double slash.
+      // Trailing slashes on R_APP_URL must not produce a double slash.
       expect(createRoomoteEnv(emptyEnv).SLACK_AUTH_URI).toBe(
         'https://roomote.example.com/api/slack/auth',
       );

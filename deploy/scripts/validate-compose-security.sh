@@ -57,7 +57,7 @@ jq -e '
   }) and
 
   ([[
-    "S3_SECRET_ACCESS_KEY", "GITHUB_APP_PRIVATE_KEY", "SLACK_CLIENT_SECRET",
+    "S3_SECRET_ACCESS_KEY", "R_GITHUB_APP_PRIVATE_KEY", "R_SLACK_CLIENT_SECRET",
     "OPENAI_API_KEY"
   ][] | . as $key | $root.services.controller.environment[$key] == null] | all) and
   ([[
@@ -67,7 +67,7 @@ jq -e '
   ([[
     "JOB_AUTH_PRIVATE_KEY", "JOB_AUTH_PUBLIC_KEY", "PREVIEW_AUTH_PRIVATE_KEY",
     "PREVIEW_AUTH_PUBLIC_KEY", "S3_SECRET_ACCESS_KEY", "OPENAI_API_KEY",
-    "GITHUB_CLIENT_SECRET", "SLACK_CLIENT_SECRET"
+    "R_GITHUB_CLIENT_SECRET", "R_SLACK_CLIENT_SECRET"
   ][] | . as $key | $root.services.bullmq.environment[$key] == null] | all) and
   ([[
     "OPENAI_API_KEY", "ANTHROPIC_API_KEY", "MODAL_TOKEN_SECRET",
