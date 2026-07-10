@@ -1,7 +1,10 @@
 'use client';
 
 import Link from 'next/link';
-import type { SetupAuthStatus } from '@roomote/types';
+import {
+  MICROSOFT_SINGLE_APP_TEAMS_BOT_FIELD_SOURCES,
+  type SetupAuthStatus,
+} from '@roomote/types';
 
 import { buildSlackManifestPrefillUrl } from '@/lib/slack-app-manifest';
 import {
@@ -38,14 +41,8 @@ type ProviderFieldStatus = ProviderStatus['fields'][number];
 
 const MASKED_VALUE = '••••••••••••••••••••••••••••';
 
-const MICROSOFT_SINGLE_APP_BOT_FIELD_SOURCES: Record<string, string> = {
-  TEAMS_BOT_APP_ID: 'ROOMOTE_AUTH_MICROSOFT_CLIENT_ID',
-  TEAMS_BOT_APP_PASSWORD: 'ROOMOTE_AUTH_MICROSOFT_CLIENT_SECRET',
-  TEAMS_BOT_TENANT_ID: 'ROOMOTE_AUTH_MICROSOFT_TENANT_ID',
-};
-
 const MICROSOFT_SETUP_HIDDEN_ENV_VAR_NAMES = new Set([
-  ...Object.keys(MICROSOFT_SINGLE_APP_BOT_FIELD_SOURCES),
+  ...Object.keys(MICROSOFT_SINGLE_APP_TEAMS_BOT_FIELD_SOURCES),
   'TEAMS_BOT_TOKEN_ENDPOINT',
   'TEAMS_BOT_OAUTH_SCOPE',
 ]);
@@ -88,7 +85,9 @@ export function getSetupEffectiveFieldValue({
   }
 
   const sourceEnvVarName =
-    MICROSOFT_SINGLE_APP_BOT_FIELD_SOURCES[field.envVarName];
+    MICROSOFT_SINGLE_APP_TEAMS_BOT_FIELD_SOURCES[
+      field.envVarName as keyof typeof MICROSOFT_SINGLE_APP_TEAMS_BOT_FIELD_SOURCES
+    ];
 
   return sourceEnvVarName ? (values[sourceEnvVarName] ?? '') : '';
 }
@@ -124,7 +123,7 @@ export function getSetupSubmitValues({
 
   if (provider.id === 'microsoft') {
     for (const [envVarName, sourceEnvVarName] of Object.entries(
-      MICROSOFT_SINGLE_APP_BOT_FIELD_SOURCES,
+      MICROSOFT_SINGLE_APP_TEAMS_BOT_FIELD_SOURCES,
     )) {
       if (nextValues[envVarName]?.trim()) {
         continue;
