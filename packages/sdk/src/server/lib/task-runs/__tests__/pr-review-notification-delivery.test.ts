@@ -226,6 +226,7 @@ describe('triagePrReviewActivity', () => {
 
     const prompt = mockGenerateObject.mock.calls[0]?.[0]?.prompt as string;
 
+    expect(prompt).toContain('Source control provider: GitHub');
     expect(prompt).toContain('Repository: owner/repo');
     expect(prompt).toContain('Pull request: #42');
     expect(prompt).toContain(
@@ -239,6 +240,28 @@ describe('triagePrReviewActivity', () => {
       '(URL: https://github.com/owner/repo/pull/42#issuecomment-7)',
     );
     expect(prompt).not.toContain('Current pull request state:');
+  });
+
+  it('passes the source-control provider label into the triage prompt', async () => {
+    mockGenerateObject.mockResolvedValue({
+      object: { worthNotifying: true, summary: 'ok.' },
+    });
+
+    await triagePrReviewActivity({
+      ...request,
+      sourceControlProvider: 'gitlab',
+      events,
+    });
+
+    const prompt = mockGenerateObject.mock.calls[0]?.[0]?.prompt as string;
+    const system = mockGenerateObject.mock.calls[0]?.[0]?.system as string;
+
+    expect(prompt).toContain('Source control provider: GitLab');
+    expect(system).toContain('on GitHub and flagged two issues');
+    expect(system).toContain('on GitLab and found no code');
+    expect(system).toContain(
+      'do not omit the platform name on these self-review messages',
+    );
   });
 
   it('includes the latest Roomote review summary comment verbatim for self-review results', async () => {
