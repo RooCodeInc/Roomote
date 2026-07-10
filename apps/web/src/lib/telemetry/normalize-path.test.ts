@@ -53,8 +53,8 @@ describe('normalizePath', () => {
     expect(normalizePath('/settings/experimental')).toEqual({
       path: '/settings/experimental',
     });
-    expect(normalizePath('/settings/misc')).toEqual({
-      path: '/settings/misc',
+    expect(normalizePath('/settings/deployment')).toEqual({
+      path: '/settings/deployment',
     });
   });
 

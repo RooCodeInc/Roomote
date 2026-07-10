@@ -314,9 +314,9 @@ import {
   updateExperimentalFlagCommand,
 } from '../commands/feature-flags';
 import {
-  getMiscSettingsCommand,
+  getDeploymentSettingsCommand,
   setAnonymousAnalyticsCommand,
-} from '../commands/misc-settings';
+} from '../commands/deployment-settings';
 
 const standardTaskPayloadSchema = standardTaskSchema.shape.payload;
 const stateRecordSchema = z.record(z.string());
@@ -2046,9 +2046,9 @@ export const appRouter = createRouter({
       ),
   }),
 
-  miscSettings: createRouter({
+  deploymentSettings: createRouter({
     get: protectedProcedure.query(({ ctx: { auth } }) =>
-      getMiscSettingsCommand(auth),
+      getDeploymentSettingsCommand(auth),
     ),
 
     setAnonymousAnalytics: protectedProcedure

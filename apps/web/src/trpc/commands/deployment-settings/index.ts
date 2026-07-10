@@ -45,7 +45,7 @@ export type DeploymentDiagnostics = {
   plainText: string;
 };
 
-export type MiscSettings = {
+export type DeploymentSettings = {
   /** The admin-controlled opt-out setting (default: enabled). */
   anonymousAnalyticsEnabled: boolean;
   /**
@@ -541,9 +541,9 @@ async function collectDeploymentDiagnostics(): Promise<DeploymentDiagnostics> {
   };
 }
 
-export async function getMiscSettingsCommand(
+export async function getDeploymentSettingsCommand(
   auth: UserAuthSuccess,
-): Promise<MiscSettings> {
+): Promise<DeploymentSettings> {
   assertAdmin(auth);
 
   const metadata = await readDeploymentMetadata();
@@ -560,7 +560,7 @@ export async function getMiscSettingsCommand(
 export async function setAnonymousAnalyticsCommand(
   auth: UserAuthSuccess,
   input: { enabled: boolean },
-): Promise<MiscSettings> {
+): Promise<DeploymentSettings> {
   assertAdmin(auth);
 
   const existingSettings = await db.query.deploymentSettings.findFirst({

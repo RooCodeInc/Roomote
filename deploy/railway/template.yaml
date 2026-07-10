@@ -76,7 +76,7 @@
 # - ROOMOTE_PING_BASE_URL points the anonymous-analytics and version-check
 #   pings at the openmote ping service (the code default is
 #   https://ping.roomote.dev). Admins can opt out of analytics in the setup
-#   wizard or Settings -> Misc; version checks ignore that setting.
+#   wizard or Settings -> Deployment; version checks ignore that setting.
 # - Live previews stay disabled by default. They need a customer-owned
 #   wildcard custom domain; see the preview-proxy section in README.md.
 

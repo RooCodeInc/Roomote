@@ -33,7 +33,7 @@ export type SettingsPageId =
   | 'skills'
   | 'vibes'
   | 'experimental'
-  | 'misc';
+  | 'deployment';
 
 type SettingsNavigationItem = {
   id: SettingsPageId;
@@ -190,14 +190,14 @@ const SETTINGS_NAVIGATION_ITEMS: SettingsNavigationItem[] = [
     matches: (pathname) => pathname.startsWith(SETTINGS_PATHS.experimental),
   },
   {
-    id: 'misc',
+    id: 'deployment',
     label: 'Deployment',
     title: 'Deployment',
     description: 'Deployment-wide settings and diagnostics.',
-    href: SETTINGS_PATHS.misc,
+    href: SETTINGS_PATHS.deployment,
     icon: ServerCog,
     adminOnly: true,
-    matches: (pathname) => pathname.startsWith(SETTINGS_PATHS.misc),
+    matches: (pathname) => pathname.startsWith(SETTINGS_PATHS.deployment),
   },
 ];
 

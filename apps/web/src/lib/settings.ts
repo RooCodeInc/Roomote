@@ -14,7 +14,7 @@ export const SETTINGS_PATHS = {
   skills: '/settings/skills',
   vibes: '/settings/vibes',
   experimental: '/settings/experimental',
-  misc: '/settings/misc',
+  deployment: '/settings/deployment',
   newEnvironment: '/settings/environments/new',
   editEnvironment: (environmentId: string) =>
     `/settings/environments/${encodeURIComponent(environmentId)}/edit`,

@@ -239,7 +239,7 @@ Notes:
 - `ROOMOTE_PING_BASE_URL` is the endpoint for Roomote's anonymous analytics
   and version checks (the image default is `https://ping.roomote.dev`; the
   template points at the openmote ping service). Admins can opt out of
-  anonymous analytics in the setup wizard or **Settings → Misc**; version
+  anonymous analytics in the setup wizard or **Settings → Deployment**; version
   checks ignore that setting.
 - Leave `PREVIEW_PROXY_BASE_URL` and `PREVIEW_DOMAINS` unset unless you
   enable live previews. Roomote boots without them; previews report as not

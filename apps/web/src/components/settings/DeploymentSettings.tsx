@@ -17,7 +17,7 @@ import {
   Switch,
 } from '@/components/system';
 import { Section } from '@/components/settings';
-import type { MiscSettings as MiscSettingsData } from '@/trpc/commands/misc-settings';
+import type { DeploymentSettings as DeploymentSettingsData } from '@/trpc/commands/deployment-settings';
 
 function getBugReportUrl(diagnostics: string): string {
   const url = new URL('https://github.com/RooCodeInc/Roomote/issues/new');
@@ -26,29 +26,29 @@ function getBugReportUrl(diagnostics: string): string {
   return url.toString();
 }
 
-export function MiscSettings() {
+export function DeploymentSettings() {
   const trpc = useTRPC();
   const queryClient = useQueryClient();
-  const queryKey = trpc.miscSettings.get.queryKey();
-  const settingsQuery = useQuery(trpc.miscSettings.get.queryOptions());
+  const queryKey = trpc.deploymentSettings.get.queryKey();
+  const settingsQuery = useQuery(trpc.deploymentSettings.get.queryOptions());
   const updateMutation = useMutation(
-    trpc.miscSettings.setAnonymousAnalytics.mutationOptions(),
+    trpc.deploymentSettings.setAnonymousAnalytics.mutationOptions(),
   );
 
   const handleToggle = async (nextValue: boolean) => {
     const previous = settingsQuery.data;
-    queryClient.setQueryData<MiscSettingsData>(queryKey, (current) =>
+    queryClient.setQueryData<DeploymentSettingsData>(queryKey, (current) =>
       current ? { ...current, anonymousAnalyticsEnabled: nextValue } : current,
     );
 
     try {
       const updated = await updateMutation.mutateAsync({ enabled: nextValue });
-      queryClient.setQueryData<MiscSettingsData>(queryKey, updated);
+      queryClient.setQueryData<DeploymentSettingsData>(queryKey, updated);
       toast.success(
         `Anonymous analytics ${nextValue ? 'enabled' : 'disabled'}`,
       );
     } catch (error) {
-      queryClient.setQueryData<MiscSettingsData>(queryKey, previous);
+      queryClient.setQueryData<DeploymentSettingsData>(queryKey, previous);
       toast.error(
         error instanceof Error
           ? error.message
