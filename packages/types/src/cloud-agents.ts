@@ -1,15 +1,3 @@
-/**
- * Roomote has no persisted or public agent-identity enum. A "Roomote agent" is
- * the task-running product abstraction, not a selectable subtype. Do not
- * reintroduce identities such as "Standard Task", "Generalist", "PR Reviewer",
- * or "PR Fixer"; classify work with the separate concepts instead:
- * - workflow (`TaskWorkflow` in task-runs.ts): durable kind of work;
- * - payload kind (`TaskPayloadKind` in task-runs.ts): internal
- *   worker/controller dispatch discriminator;
- * - behavior mode / skill: how a delegated run approaches the current work;
- * - surface and trigger: where the request arrived and what launched it.
- */
-
 /** Default user-facing label for a task runner when no specific name applies. */
 export const AGENT_DISPLAY_NAME = 'Agent';
 
