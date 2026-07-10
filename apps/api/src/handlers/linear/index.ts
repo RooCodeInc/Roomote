@@ -23,6 +23,7 @@ import {
 } from '@roomote/cloud-agents/server';
 import { getRedis } from '@roomote/redis';
 import { postRouterDebugMessage } from '@roomote/slack';
+import { setTrustedRunActingUserOnSuccess } from '@roomote/db/server';
 import {
   createMcpOauthReplay,
   findLinearDeploymentMcpConnectionByIdentity,
@@ -56,6 +57,7 @@ import {
 } from '@roomote/linear';
 
 import type { WebhookResponse } from '../../types';
+import { syncActingUserForInboundMessage } from '../tasks/acting-user-sync.js';
 
 import { recordLinearWebhook } from './recordWebhook';
 
@@ -577,17 +579,29 @@ async function handleAgentSessionEvent(
           );
 
           if (parsedReply) {
-            await queueLinearRequestUserInputAnswer(activeJob.id, {
-              requestId: pendingRequest.requestId,
-              answers: parsedReply.answers,
+            // Question answers return before the normal active-message actor
+            // sync below, so apply the trusted sender before marking the
+            // request submitted. Otherwise the worker drops a different
+            // linked user's answer as a mismatch and it cannot be resent.
+            await setTrustedRunActingUserOnSuccess({
+              runId: activeJob.id,
               userId,
-              timestamp: Date.now(),
-            });
+              operation: async () => {
+                await queueLinearRequestUserInputAnswer(activeJob.id, {
+                  requestId: pendingRequest.requestId,
+                  answers: parsedReply.answers,
+                  userId,
+                  timestamp: Date.now(),
+                });
 
-            await markPendingLinearRequestUserInputSubmitted(
-              sessionId,
-              pendingRequest.requestId,
-            );
+                await markPendingLinearRequestUserInputSubmitted(
+                  sessionId,
+                  pendingRequest.requestId,
+                );
+
+                return true;
+              },
+            });
 
             return { status: 'ok' };
           }
@@ -597,6 +611,13 @@ async function handleAgentSessionEvent(
         }
       }
 
+      // Trusted pre-queue actor switch; see acting-user-sync.ts. The worker
+      // only runs the queued turn as this sender if the server actor matches.
+      await syncActingUserForInboundMessage({
+        logContext: 'linear.activeJobMessage',
+        jobId: activeJob.id,
+        senderUserId: userId,
+      });
       // Queue the message for the running worker to pick up
       await queueLinearMessage(activeJob.id, sessionId, payload, userId);
 

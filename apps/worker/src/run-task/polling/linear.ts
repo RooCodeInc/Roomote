@@ -72,10 +72,13 @@ export function createLinearMessageInterval({
         );
 
         for (const [index, answer] of queuedAnswers.entries()) {
-          const canDeliver =
-            (await prepareActorScopedTurn(answer.userId)) !== false;
+          // The API couples answer queueing to its trusted actor write. If the
+          // worker drains Redis just before that DB transaction commits,
+          // block and requeue instead of dropping an answer that is already
+          // marked submitted and cannot be resent.
+          const answerPrep = await prepareActorScopedTurn(answer.userId);
 
-          if (!canDeliver) {
+          if (answerPrep === false || answerPrep.skippedMismatch) {
             logger.warn(
               `[listenForLinearEvents] Delaying request_user_input answer for task ${state.sessionId} until actor-scoped turn preparation succeeds (requestId=${answer.requestId})`,
             );
@@ -100,7 +103,8 @@ export function createLinearMessageInterval({
           const sent = answerUserInputRequest({
             requestId: answer.requestId,
             answers: answer.answers,
-            userId: answer.userId,
+            // The delivered sender always equals the server-side acting user.
+            userId: answerPrep.effectiveUserId ?? undefined,
           });
 
           if (!sent) {
@@ -170,12 +174,16 @@ export function createLinearMessageInterval({
             !isActiveTaskPhase(state.phase) ||
             state.isConnected === false;
 
-          const canDeliver =
-            (await prepareActorScopedTurn(msg.userId, {
-              allowMcpReconnect,
-            })) !== false;
+          // The API performs a trusted pre-queue actor sync for these
+          // messages; a residual mismatch skips that message's content (with
+          // a resend notice) rather than running it under the server actor
+          // or stalling the queue.
+          const msgPrep = await prepareActorScopedTurn(msg.userId, {
+            allowMcpReconnect,
+            onMismatch: 'skip',
+          });
 
-          if (!canDeliver) {
+          if (msgPrep === false) {
             logger.warn(
               `[listenForLinearEvents] Delaying Linear follow-up for task ${state.sessionId} until actor-scoped turn preparation succeeds`,
             );
@@ -193,6 +201,13 @@ export function createLinearMessageInterval({
             break;
           }
 
+          if (msgPrep.skippedMismatch) {
+            logger.warn(
+              `[listenForLinearEvents] Skipped Linear follow-up for task ${state.sessionId}: sender is not the server-side acting user`,
+            );
+            continue;
+          }
+
           const sent = sendPrompt({
             prompt: text,
             source: 'linear',
@@ -200,7 +215,8 @@ export function createLinearMessageInterval({
             // the loop can pick them up, abort-and-replay when the turn is
             // blocked on a pending question tool call.
             autoSteerWhenQueued: true,
-            userId: msg.userId,
+            // The delivered sender always equals the server-side acting user.
+            userId: msgPrep.effectiveUserId ?? undefined,
           });
 
           if (!sent) {

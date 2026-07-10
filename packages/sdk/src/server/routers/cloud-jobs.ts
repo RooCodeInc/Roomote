@@ -287,7 +287,18 @@ export const cloudJobsRouter = router({
       // different task would corrupt run->task integrity; runs are bound to a
       // task at enqueue time and never re-parented. No worker code path sends
       // this field.
-      actingUserId: z.string().optional(),
+      // `actingUserId` is intentionally NOT writable here either. This
+      // mutation is reachable with a run-scoped job token, which the sandbox
+      // runtime holds. `task_runs.actingUserId` feeds actor-scoped credential
+      // resolution (resolveActorScopedUserContext -> userApiKeys /
+      // mcpConnections), so letting a job token set it would be a confused
+      // deputy: a compromised sandbox could point the run at an arbitrary
+      // user and read that user's decrypted keys / connections. Acting-user
+      // reassignment is reserved for trusted server-side writers (web steer
+      // in apps/web sandbox-session, pre-delivery sync in
+      // apps/api sendMessageToTask and the webhook queue sites), which write
+      // task_runs directly. Both fields sent by a job-token caller are
+      // stripped by this schema.
       result: z.record(z.unknown()).optional(),
     }),
     'id',

@@ -36,6 +36,7 @@ interface CreateHarnessOptions {
   prepareQueuedPromptActorScope?: (targetUserId?: string) => Promise<{
     shouldReconnect: boolean;
     shouldBlockPrompt?: boolean;
+    shouldSkipPrompt?: boolean;
     reason?: string;
   }>;
 }

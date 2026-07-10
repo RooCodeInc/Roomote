@@ -90,12 +90,16 @@ export function createCommunicationMessageInterval({
           !isActiveTaskPhase(state.phase) ||
           state.isConnected === false;
 
-        const canDeliver =
-          (await prepareActorScopedTurn(message.userId, {
-            allowMcpReconnect,
-          })) !== false;
+        // The API performs a trusted pre-queue actor sync for these
+        // messages; a residual mismatch skips that message's content (with a
+        // resend notice) rather than running it under the server actor or
+        // stalling the queue.
+        const msgPrep = await prepareActorScopedTurn(message.userId, {
+          allowMcpReconnect,
+          onMismatch: 'skip',
+        });
 
-        if (!canDeliver) {
+        if (msgPrep === false) {
           logger.warn(
             `[listenFor${provider}Events] Delaying ${provider} follow-up for task ${state.sessionId} until actor-scoped turn preparation succeeds`,
           );
@@ -118,6 +122,14 @@ export function createCommunicationMessageInterval({
           return;
         }
 
+        if (msgPrep.skippedMismatch) {
+          logger.warn(
+            `[listenFor${provider}Events] Skipped ${provider} follow-up for task ${state.sessionId}: sender is not the server-side acting user (ts=${message.ts})`,
+          );
+          index += 1;
+          continue;
+        }
+
         const prompt =
           message.formattedPrompt ??
           wrapCommunicationMessage(provider, message);
@@ -126,7 +138,8 @@ export function createCommunicationMessageInterval({
           images: message.images,
           autoSteerWhenQueued: true,
           source: provider,
-          userId: message.userId,
+          // The delivered sender always equals the server-side acting user.
+          userId: msgPrep.effectiveUserId ?? undefined,
           clientMessageId: getCommunicationClientMessageId(provider, message),
         });
 

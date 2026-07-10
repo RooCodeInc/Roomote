@@ -18,6 +18,7 @@ import {
 } from '@roomote/communication/telegram-update';
 
 import { apiLogger } from '../../logging.js';
+import { syncActingUserForInboundMessage } from '../tasks/acting-user-sync.js';
 import {
   findActiveTelegramJob,
   findCompletedTelegramJobWithSnapshot,
@@ -360,6 +361,13 @@ telegram.post('/', async (c) => {
       return c.json({ ok: true, ignored: 'unsupported_update' });
     }
 
+    // Trusted pre-queue actor switch; see acting-user-sync.ts. The worker
+    // only runs the queued turn as this sender if the server actor matches.
+    await syncActingUserForInboundMessage({
+      logContext: 'telegram.activeJobMessage',
+      jobId: activeJob.id,
+      senderUserId: queuedMessage.userId,
+    });
     await queueCommunicationMessage('telegram', activeJob.id, queuedMessage);
     // Track the latest inbound user message id so later outbound replies quote
     // the most recent user message instead of the original launch message.

@@ -183,6 +183,24 @@ describe('cloudJobsRouter queue message guards', () => {
     mockUpdateCloudJob.mockResolvedValue(undefined);
   });
 
+  it('strips actingUserId from job-token update input (confused-deputy guard)', async () => {
+    // A job token is held by the sandbox runtime. Allowing it to write
+    // actingUserId would let a compromised sandbox reassign the run's acting
+    // user and read another user's actor-scoped credentials. The schema must
+    // drop the field so it never reaches the persistence layer.
+    await createJobCaller().update({
+      id: 42,
+      status: RunStatus.Running,
+      actingUserId: 'victim-user',
+    } as never);
+
+    expect(mockUpdateCloudJob).toHaveBeenCalledTimes(1);
+    const [persistedId, persistedValues] = mockUpdateCloudJob.mock.calls[0]!;
+    expect(persistedId).toBe(42);
+    expect(persistedValues).not.toHaveProperty('actingUserId');
+    expect(persistedValues).toEqual({ status: RunStatus.Running });
+  });
+
   it('strips taskId from job-token update input (run->task binding guard)', async () => {
     // A job token is held by the sandbox runtime. Allowing it to write taskId
     // would let a compromised sandbox re-point its run at a different task,
@@ -195,10 +213,23 @@ describe('cloudJobsRouter queue message guards', () => {
     } as never);
 
     expect(mockUpdateCloudJob).toHaveBeenCalledTimes(1);
-    const [persistedId, persistedValues] = mockUpdateCloudJob.mock.calls[0]!;
-    expect(persistedId).toBe(42);
-    expect(persistedValues).not.toHaveProperty('taskId');
-    expect(persistedValues).toEqual({ status: RunStatus.Running });
+    const [persistedId2, persistedValues2] = mockUpdateCloudJob.mock.calls[0]!;
+    expect(persistedId2).toBe(42);
+    expect(persistedValues2).not.toHaveProperty('taskId');
+    expect(persistedValues2).toEqual({ status: RunStatus.Running });
+  });
+
+  it('still persists legitimate non-stripped update fields for the job token', async () => {
+    await createJobCaller().update({
+      id: 42,
+      status: RunStatus.Running,
+      result: { ok: true },
+    });
+
+    expect(mockUpdateCloudJob).toHaveBeenCalledWith(42, {
+      status: RunStatus.Running,
+      result: { ok: true },
+    });
   });
 
   it('rejects queueSlackMessage for auth-token callers', async () => {

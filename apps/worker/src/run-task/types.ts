@@ -17,6 +17,10 @@ import type {
 import type { WorkerEnv } from '../env';
 import type { HarnessLogger } from '../logging';
 import type { RepoLocalSkill } from '../workspace/repo-local-skills';
+import type {
+  ActorMismatchPolicy,
+  PrepareActorScopedTurnResult,
+} from './prepare-actor-scoped-turn';
 
 export type RunTaskContext = Record<string, unknown>;
 
@@ -257,7 +261,8 @@ export interface ListenerOptions {
     options?: {
       allowMcpReconnect?: boolean;
       deferReconnectUntilTurnBoundary?: boolean;
+      onMismatch?: ActorMismatchPolicy;
     },
-  ) => Promise<boolean>;
+  ) => Promise<PrepareActorScopedTurnResult>;
   getVisibleQueuedPromptCount?: () => number;
 }

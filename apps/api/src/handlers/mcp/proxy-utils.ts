@@ -78,6 +78,12 @@ export function toMcpToolResult<T extends Record<string, unknown>>(payload: T) {
  * from `task_messages`, because transcript persistence is async and may lag
  * behind the turn that is about to make MCP calls. The token's own userId is
  * mint-time attribution and deliberately plays no role here.
+ *
+ * Since this column selects whose credentials MCP calls run as, it is written
+ * only by trusted server-side actors (web steer, follow-up delivery). Job
+ * tokens cannot reassign it — `cloudJobs.update` strips `actingUserId` from
+ * job-token input — so a compromised sandbox cannot steer MCP calls to
+ * another user's connections.
  */
 export async function resolveActingUserId(
   auth: McpAuthContext,

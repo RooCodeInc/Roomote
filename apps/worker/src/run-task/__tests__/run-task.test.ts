@@ -39,7 +39,12 @@ const {
   cloudJobsDoneMock: vi.fn().mockResolvedValue(undefined),
   cloudJobsRecordEventMock: vi.fn().mockResolvedValue(undefined),
   cloudJobsStampMilestoneMock: vi.fn().mockResolvedValue(undefined),
-  cloudJobsSyncActingUserIdMock: vi.fn().mockResolvedValue('unchanged'),
+  cloudJobsSyncActingUserIdMock: vi
+    .fn()
+    .mockImplementation(async ({ newUserId }: { newUserId: string }) => ({
+      result: 'unchanged',
+      actingUserId: newUserId,
+    })),
   cloudJobsSetHarnessSessionIdMock: vi.fn().mockResolvedValue(undefined),
   cloudJobsUpdateRuntimeStateMock: vi.fn().mockResolvedValue({ updated: true }),
   cloudJobsUpdateMock: vi.fn().mockResolvedValue(undefined),
@@ -242,6 +247,14 @@ vi.mock('../../sandbox-server/procedures/slackReplyTurnTracking', () => ({
   recordSandboxPromptSlackTurnStart: recordSandboxPromptSlackTurnStartMock,
 }));
 
+const { actorMismatchSkipNotifierMock } = vi.hoisted(() => ({
+  actorMismatchSkipNotifierMock: vi.fn().mockResolvedValue(undefined),
+}));
+
+vi.mock('../actor-mismatch-notice', () => ({
+  createActorMismatchSkipNotifier: vi.fn(() => actorMismatchSkipNotifierMock),
+}));
+
 import { RunStatus, TaskPayloadKind } from '@roomote/types';
 
 import { getDefaultKeepaliveMs } from '../completion';
@@ -295,7 +308,12 @@ describe('runTask', () => {
     cloudJobsStampMilestoneMock.mockReset();
     cloudJobsStampMilestoneMock.mockResolvedValue(undefined);
     cloudJobsSyncActingUserIdMock.mockReset();
-    cloudJobsSyncActingUserIdMock.mockResolvedValue('unchanged');
+    cloudJobsSyncActingUserIdMock.mockImplementation(
+      async ({ newUserId }: { newUserId: string }) => ({
+        result: 'unchanged',
+        actingUserId: newUserId,
+      }),
+    );
     mkdirSyncMock.mockReset();
     writeFileSyncMock.mockReset();
     syncRuntimeGitAuthorMock.mockReset();
@@ -1704,7 +1722,12 @@ describe('runTask', () => {
   });
 
   it('queues a deferred resume prompt from SnapshotResume payloads', async () => {
-    cloudJobsSyncActingUserIdMock.mockResolvedValue('updated');
+    cloudJobsSyncActingUserIdMock.mockImplementation(
+      async ({ newUserId }: { newUserId: string }) => ({
+        result: 'updated',
+        actingUserId: newUserId,
+      }),
+    );
     const onStart = vi.fn().mockResolvedValue(undefined);
     const requestReconnect = vi.fn().mockResolvedValue(undefined);
     createHarnessMock.mockResolvedValueOnce({
@@ -1784,6 +1807,7 @@ describe('runTask', () => {
     expect(cloudJobsSyncActingUserIdMock).toHaveBeenCalledWith({
       cloudJobId: 303,
       newUserId: 'user-2',
+      lastKnownUserId: null,
     });
     expect(syncRuntimeGitAuthorMock).toHaveBeenCalledWith({
       cloudJobId: 303,
@@ -1884,7 +1908,12 @@ describe('runTask', () => {
   });
 
   it('passes explicit workflow phases through deferred resume prompts', async () => {
-    cloudJobsSyncActingUserIdMock.mockResolvedValue('updated');
+    cloudJobsSyncActingUserIdMock.mockImplementation(
+      async ({ newUserId }: { newUserId: string }) => ({
+        result: 'updated',
+        actingUserId: newUserId,
+      }),
+    );
     const onStart = vi.fn().mockResolvedValue(undefined);
     createHarnessMock.mockResolvedValueOnce({
       harness: {
@@ -2001,6 +2030,72 @@ describe('runTask', () => {
     expect(syncRuntimeGitAuthorMock).not.toHaveBeenCalled();
   });
 
+  it('skips a queued prompt whose sender is not the server-side acting user and notifies the sender', async () => {
+    // The harness queue can hold a prompt from user B accepted before a
+    // trusted write switched the run to user A. B's content must not run
+    // under A's credential resolution, so the prompt is skipped (not
+    // blocked-and-retried, which would stall the queue forever).
+    await runTask({
+      cloudJob: {
+        id: 407,
+        taskId: 'task-407',
+        payloadKind: TaskPayloadKind.StandardTask,
+        harness: 'opencode-server',
+        actingUserId: 'user-1',
+        payload: {},
+        result: null,
+      } as never,
+      envVars: {},
+      workspacePath: '/tmp/workspace',
+      prompt: '',
+      harnessInstructions: undefined,
+      agentInstructions: undefined,
+      environmentConfig: undefined,
+      callbacks: {},
+      context: {},
+      logger: {
+        info: vi.fn(),
+        warn: vi.fn(),
+        error: vi.fn(),
+        log: vi.fn(),
+      } as never,
+      workerEnv: {
+        buildUserFacingEnv: vi.fn(() => ({})),
+        roomoteAppUrl: 'http://localhost:3000',
+        trpcUrl: 'http://localhost:3001',
+        authToken: 'auth-token',
+        appEnv: 'test',
+        setRuntimeEnv: vi.fn(),
+      } as never,
+    });
+
+    const prepareQueuedPromptActorScope =
+      createHarnessMock.mock.calls[0]?.[0].prepareQueuedPromptActorScope;
+
+    expect(prepareQueuedPromptActorScope).toBeTypeOf('function');
+
+    cloudJobsSyncActingUserIdMock.mockResolvedValueOnce({
+      result: 'mismatch',
+      actingUserId: 'user-1',
+    });
+
+    await expect(prepareQueuedPromptActorScope?.('user-2')).resolves.toEqual({
+      shouldReconnect: false,
+      shouldSkipPrompt: true,
+      reason:
+        'queued prompt sender is not the server-side acting user; the prompt was skipped',
+    });
+
+    // No credential surface was touched for the mismatched sender and the
+    // sender was asked to resend.
+    expect(getDecryptedKeyMock).not.toHaveBeenCalled();
+    expect(syncRuntimeGitAuthorMock).not.toHaveBeenCalled();
+    expect(actorMismatchSkipNotifierMock).toHaveBeenCalledWith({
+      senderUserId: 'user-2',
+      serverActorUserId: 'user-1',
+    });
+  });
+
   it('allows queued actor-scoped prompts to continue when the same-actor refresh recheck fails', async () => {
     getMcpServerConfigsMock
       .mockResolvedValueOnce({
@@ -2086,7 +2181,12 @@ describe('runTask', () => {
     const requestReconnect = vi.fn().mockResolvedValue(undefined);
 
     waitForShutdownMock.mockReturnValueOnce(waitForShutdownPromise);
-    cloudJobsSyncActingUserIdMock.mockResolvedValue('updated');
+    cloudJobsSyncActingUserIdMock.mockImplementation(
+      async ({ newUserId }: { newUserId: string }) => ({
+        result: 'updated',
+        actingUserId: newUserId,
+      }),
+    );
     getMcpServerConfigsMock
       .mockRejectedValueOnce(new Error('temporary failure'))
       .mockResolvedValueOnce({
