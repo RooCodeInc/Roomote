@@ -52,10 +52,9 @@ Key principles:
         <title>Read repository guidance</title>
         <description>Anchor the scan in Roomote's existing knowledge map.</description>
         <actions>
-          <action>Read `AGENTS.md` for the top-level docs map and the surface-ownership notes.</action>
-          <action>Read `.agent-guidance/architecture/repository-surface-map.md` to see the major surfaces and their owning docs.</action>
-          <action>If the prompt names a specific area (a package, an app, a workflow), read the matching `.agent-guidance/architecture/*.md` and `.agent-guidance/features/*.md` pages first. They often record decisions you should not re-litigate. Treat existing docs as the project's domain language. Name candidates using the terms the docs already use, not invented synonyms.</action>
-          <action>Roomote does not currently keep an ADR tree. When you find a load-bearing decision recorded in `.agent-guidance/architecture/`, treat it the way an ADR would be treated: do not propose a candidate that contradicts it unless friction is real enough to justify revisiting the doc, and say so explicitly when you do.</action>
+          <action>Read `AGENTS.md` and package-level `AGENTS.md` files for surface-ownership notes and quick-start guidance.</action>
+          <action>If the prompt names a specific area (a package, an app, a workflow), inspect that area's owned source and nearby docs first. Treat existing domain language in code and docs as the project's vocabulary. Name candidates using the terms already in use, not invented synonyms.</action>
+          <action>When you find a load-bearing architectural decision embodied in current code or docs, do not propose a candidate that contradicts it unless friction is real enough to justify revisiting that decision, and say so explicitly when you do.</action>
         </actions>
         <validation>The scan starts from documented surface ownership and the project's own vocabulary.</validation>
       </step>
@@ -64,7 +63,7 @@ Key principles:
         <description>Pick the right scan width for this run.</description>
         <actions>
           <action>If the prompt names a package, app, file glob, or subsystem, scan only that scope.</action>
-          <action>If the prompt is open-ended, treat the repository as the survey scope, but do a deliberate breadth-first pass instead of trying to read everything deeply. Start from `.agent-guidance/architecture/repository-surface-map.md`, sample several major surfaces, and keep moving until you have candidate coverage across multiple areas of the codebase.</action>
+          <action>If the prompt is open-ended, treat the repository as the survey scope, but do a deliberate breadth-first pass instead of trying to read everything deeply. Sample several major apps and packages under `apps/` and `packages/`, and keep moving until you have candidate coverage across multiple areas of the codebase.</action>
           <action>For broad scans, state both the survey scope and the sampling shape at the top of the report: which major surfaces you looked at, which ones only got a light pass, and any important exclusions. The goal is a repo-wide candidate pool, not repo-wide deep reading.</action>
         </actions>
         <validation>The run either respects an explicit user-provided scope or performs a deliberate broad survey across multiple major surfaces confirmed in current source.</validation>
@@ -92,7 +91,7 @@ Key principles:
         <title>Apply prior decisions from docs</title>
         <description>Filter out anything guidance already settled.</description>
         <actions>
-          <action>Drop candidates that contradict a load-bearing decision recorded in `.agent-guidance/architecture/` unless the friction is real enough to argue for revisiting the doc. In that case, mark the candidate as "contradicts <doc> - but worth reopening because..."</action>
+          <action>Drop candidates that contradict a load-bearing decision embodied in current architecture or docs unless the friction is real enough to argue for revisiting it. In that case, mark the candidate as "contradicts <decision> - but worth reopening because..."</action>
         </actions>
         <validation>The candidate list does not silently fight an existing architectural decision.</validation>
       </step>
@@ -162,7 +161,7 @@ Key principles:
           <action>If the candidate came from an earlier report with a linked plan artifact, read that artifact first so the grilling conversation starts from the same implementation brief the user reviewed.</action>
           <action>Re-read the involved files and any neighbors that would shift if the deepening landed. Restate the friction in your own words to confirm you and the user agree on the problem.</action>
           <action>Walk the design space: what sits behind the seam, what the interface should know about (types, invariants, error modes, ordering, config), which adapters exist or would need to exist, what tests survive or need to be added, and what behavior risk the change carries.</action>
-          <action>Sharpen vocabulary as needed. If the deepened module wants a name that does not exist in `AGENTS.md` or the relevant `.agent-guidance/architecture/*.md`, propose adding it to the guidance page as part of the change. Do not invent a parallel glossary.</action>
+          <action>Sharpen vocabulary as needed. If the deepened module wants a name that does not exist in `AGENTS.md` or nearby docs, propose adding it there as part of the change. Do not invent a parallel glossary.</action>
           <action>If the user rejects the candidate with a load-bearing reason that future scans should respect, call it out explicitly in the report instead of silently dropping it.</action>
         </actions>
         <validation>The design conversation walks constraints, dependencies, the deepened shape, and the test surface without writing implementation code.</validation>
@@ -194,7 +193,7 @@ Key principles:
   </phase>
 
 <completion_criteria>
-<criterion>The scan started from `AGENTS.md` and the relevant `.agent-guidance/architecture/*.md` pages and used the project's existing vocabulary.</criterion>
+<criterion>The scan started from `AGENTS.md` and major repository surfaces and used the project's existing vocabulary.</criterion>
 <criterion>The candidate report was numbered, based on either an explicit user-provided scope or a broad multi-area survey, used the architecture vocabulary above for friction descriptions, and linked to plan artifacts for the top 5 candidates when artifact tooling was available.</criterion>
 <criterion>The skill did not edit source files. Implementation, when requested, was handed off to a separate delivery-policy-aware skill.</criterion>
 </completion_criteria>
@@ -209,7 +208,7 @@ Key principles:
 <guideline priority="high">
 <rule>Use the project's own vocabulary first, and the architecture vocabulary above for the meta-shape.</rule>
 <rationale>Consistent naming is the test for whether a candidate is real. Drift into "component" or "service" usually signals a candidate that has not been thought through.</rationale>
-<exceptions>None. If the project lacks a name for a concept the candidate needs, propose adding it to `AGENTS.md` or the relevant `.agent-guidance/architecture/*.md` as part of the change.</exceptions>
+<exceptions>None. If the project lacks a name for a concept the candidate needs, propose adding it to `AGENTS.md` or nearby docs as part of the change.</exceptions>
 </guideline>
 <guideline priority="high">
 <rule>Broad survey first, detailed plans second.</rule>
@@ -231,7 +230,7 @@ Key principles:
 <patterns>
   <pattern name="scheduled_broad_survey">
     <description>Default scheduled run: repo-wide survey, ranked candidate pool, top-5 plans, no implementation.</description>
-    <template>read AGENTS.md and relevant .agent-guidance/architecture -> use `.agent-guidance/architecture/repository-surface-map.md` to sample multiple major surfaces -> walk the codebase with the deepening lens -> rank candidates by leverage, breadth of pain, confidence, and cost or risk -> create plan artifacts for the top 5 candidates when tooling is available -> present the full ranked list plus linked top-5 plans -> stop for user selection</template>
+    <template>read AGENTS.md and sample major apps/packages -> walk the codebase with the deepening lens -> rank candidates by leverage, breadth of pain, confidence, and cost or risk -> create plan artifacts for the top 5 candidates when tooling is available -> present the full ranked list plus linked top-5 plans -> stop for user selection</template>
   </pattern>
   <pattern name="interactive_grill">
     <description>User picks a candidate from a previous run; walk the design without writing code.</description>

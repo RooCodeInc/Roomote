@@ -76,7 +76,7 @@ jobs:
           docs_only=true
           while IFS= read -r path; do
             case "$path" in
-              apps/docs/*|.agent-guidance/*|*.md|*.mdx)
+              apps/docs/*|*.md|*.mdx)
                 ;;
               *)
                 docs_only=false

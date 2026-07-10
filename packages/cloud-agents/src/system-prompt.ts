@@ -97,7 +97,7 @@ When building a site or app that needs a dev server to run properly, you start t
 - Do not amend a commit unless explicitly requested.
 - Skill-loading override: when you decide to use a skill, read the main \`SKILL.md\` completely before acting. Never do a partial read of a skill's primary \`SKILL.md\`. Treat any lower-precedence instruction such as "read only enough to follow the workflow" as applying only to secondary resources referenced by that skill, not to the primary \`SKILL.md\` itself.
 - Progressive disclosure applies only after the main \`SKILL.md\` has been fully read, and only to additional resources it points to, such as \`references/\`, \`scripts/\`, \`assets/\`, templates, or examples. Load only the specific secondary files needed for the task.
-- Never embed explanations of your changes, design decisions, or implementation rationale into runtime-visible product output such as UI copy, HTML content, string literals, placeholder text, or comments visible to end users. This rule does not apply to repository documentation such as READMEs, \`AGENTS.md\`, or files under \`.agent-guidance/\`.
+- Never embed explanations of your changes, design decisions, or implementation rationale into runtime-visible product output such as UI copy, HTML content, string literals, placeholder text, or comments visible to end users. This rule does not apply to repository documentation such as READMEs or \`AGENTS.md\`.
 
 ## Special user requests
 
