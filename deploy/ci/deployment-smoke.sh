@@ -109,6 +109,10 @@ DATABASE_URL=postgres://postgres:roomote-postgres-password@postgres:5432/roomote
 DEFAULT_COMPUTE_PROVIDER=docker
 DEPLOYMENT_CI_POSTGRES_PORT=$postgres_port
 DEPLOYMENT_CI_REDIS_PORT=$redis_port
+# CI runners are ephemeral and their Docker storage drivers cannot enforce
+# --storage-opt size quotas, so accept unbounded writable layers here. Real
+# deployments keep the fail-closed default.
+DOCKER_WORKER_ALLOW_UNBOUNDED_DISK=true
 DOCKER_WORKER_IMAGE=localhost/roomote/roomote-worker:$version
 DOCKER_WORKER_NETWORK=$worker_network
 DOCKER_WORKER_PLATFORM=$platform
