@@ -28,6 +28,35 @@ pnpm test
 Use the narrower package-level test commands from `AGENTS.md` when a full suite
 is not necessary.
 
+## Product releases
+
+Roomote ships a **single product version** for the monorepo (not per-package npm
+releases). Workspace `package.json` versions move in lockstep via
+[Changesets](https://github.com/changesets/changesets). The canonical version is
+the root `package.json` field and is published as GitHub Release / tag `vX.Y.Z`.
+
+Optional contributor entrypoint when your change should show up in the changelog:
+
+```sh
+pnpm changeset
+```
+
+Any `@roomote/*` package selection is equivalent under the fixed group. See
+[`.changeset/README.md`](.changeset/README.md).
+
+### How a release ships
+
+1. Merge work to `develop` (squash). When pending changesets exist, automation
+   opens a **Release Roomote** Version PR that bumps lockstep versions and
+   `CHANGELOG.md`.
+2. When the product version is untagged and no changesets remain, automation
+   opens or refreshes a **Promote `vX.Y.Z` to production** PR (`develop` →
+   `main`).
+3. Merge that promote PR with a **merge commit** (branch rules on `main` allow
+   merge only; `develop` stays squash-only). Tagging (`vX.Y.Z`), GHCR image
+   publish (`latest`), and the GitHub Release follow from `main` / tag workflows.
+   Product tagging requires the `RELEASE_BOT_TOKEN` repository secret.
+
 ## Contributor License Agreement
 
 All contributors are required to sign the Roomote

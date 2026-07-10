@@ -28,6 +28,11 @@ Chores, docs-only, and pure-internal refactors can skip a changeset; they ride a
 
 1. Merge code to `develop`. When pending changesets exist, CI keeps a **Release PR** open against `develop` that bumps versions and updates the root `CHANGELOG.md`.
 2. Merging that Release PR (or any push to `develop` whose version is untagged) opens or refreshes a **Promote PR** (`develop` → `main`).
-3. Merging the Promote PR (merge commit, not squash) tags `vX.Y.Z` on `main`, then GHCR builds the matching images; the GitHub Release is created only after those images exist so `releases/latest` never points at a missing image set.
+3. Merging the Promote PR with a **merge commit** (not squash) into `main` tags `vX.Y.Z`, then GHCR builds the matching images; the GitHub Release is created only after those images exist so `releases/latest` never points at a missing image set.
 
-Details live in [`.agent-guidance/operations/deployment.md`](../.agent-guidance/operations/deployment.md).
+Branch rules (must match GitHub rulesets):
+
+- **`develop`**: squash-only merges for feature and Version PRs.
+- **`main`**: merge-commit-only so promote PRs keep shared history with `develop`.
+
+Maintainers: product tagging requires repository secret `RELEASE_BOT_TOKEN` (see `.github/workflows/tag-release.yml`). Contributor overview: [CONTRIBUTING.md](../CONTRIBUTING.md#product-releases).
