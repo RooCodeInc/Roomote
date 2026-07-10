@@ -73,8 +73,95 @@ import {
 import { resolveRequestedWorkKindDecision } from './router/requested-work-kind';
 
 enum CloudJobQueueKeys {
-  Queue = 'queue:cloud-jobs',
+  // Version the storage layout so old and new controllers can coexist during
+  // a rolling deployment. Both versions still contend on the same scope lock.
+  Queue = 'queue:cloud-jobs:v2',
+  Entries = 'queue:cloud-jobs:v2:entries',
+  EntryScopes = 'queue:cloud-jobs:v2:entry-scopes',
+  Scopes = 'queue:cloud-jobs:v2:scopes',
 }
+
+const ATOMIC_ENQUEUE_SCRIPT = `
+local incomingId = ARGV[1]
+local incomingScope = ARGV[2]
+local incomingRaw = ARGV[3]
+local existingId = redis.call('HGET', KEYS[2], incomingScope)
+local evictedId = ''
+
+if existingId then
+  redis.call('LREM', KEYS[1], 0, existingId)
+
+  if existingId ~= incomingId then
+    evictedId = existingId
+    redis.call('HDEL', KEYS[3], existingId)
+    redis.call('HDEL', KEYS[4], existingId)
+  end
+end
+
+redis.call('HSET', KEYS[2], incomingScope, incomingId)
+redis.call('HSET', KEYS[3], incomingId, incomingRaw)
+redis.call('HSET', KEYS[4], incomingId, incomingScope)
+redis.call('RPUSH', KEYS[1], incomingId)
+
+return evictedId
+`;
+
+const ATOMIC_DEQUEUE_SCRIPT = `
+local queueLength = redis.call('LLEN', KEYS[1])
+local lockTtlSeconds = tonumber(ARGV[1])
+
+for _ = 1, queueLength do
+  local entryId = redis.call('LPOP', KEYS[1])
+
+  if entryId then
+    local rawValue = redis.call('HGET', KEYS[3], entryId)
+    local entryScope = redis.call('HGET', KEYS[4], entryId)
+
+    if rawValue and entryScope then
+      local acquired = redis.call(
+        'SET',
+        entryScope,
+        entryId,
+        'EX',
+        lockTtlSeconds,
+        'NX'
+      )
+
+      if acquired then
+        redis.call('HDEL', KEYS[3], entryId)
+        redis.call('HDEL', KEYS[4], entryId)
+
+        if redis.call('HGET', KEYS[2], entryScope) == entryId then
+          redis.call('HDEL', KEYS[2], entryScope)
+        end
+
+        return rawValue
+      end
+
+      redis.call('RPUSH', KEYS[1], entryId)
+    else
+      redis.call('HDEL', KEYS[3], entryId)
+      redis.call('HDEL', KEYS[4], entryId)
+    end
+  end
+end
+
+return nil
+`;
+
+const RELEASE_OWNED_LOCK_SCRIPT = `
+if redis.call('GET', KEYS[1]) == ARGV[1] then
+  return redis.call('DEL', KEYS[1])
+end
+
+return 0
+`;
+
+// BLPOP cannot atomically combine queue removal with the scope-lock claim in
+// ATOMIC_DEQUEUE_SCRIPT. Polling trades four idle EVAL calls per controller
+// per second for a bounded 250ms wake-up delay; a future dedicated wake-up
+// connection can remove that tradeoff without weakening claim atomicity.
+const DEQUEUE_POLL_INTERVAL_MS = 250;
 
 const cloudJobQueueEntrySchema = z.object({
   id: z.number(),
@@ -98,34 +185,24 @@ function getErrorMessage(error: unknown, fallback: string): string {
 async function cancelCloudJobBeforeQueue(
   cloudJob: Run,
   message: string,
-  failureContext: string,
 ): Promise<void> {
-  try {
-    const endedAt = new Date();
+  const endedAt = new Date();
 
-    await db.transaction(async (tx) => {
-      await tx
-        .update(taskRuns)
-        .set({
-          status: RunStatus.Canceled,
-          canceledAt: endedAt,
-          error: message,
-        })
-        .where(eq(taskRuns.id, cloudJob.id));
+  await db.transaction(async (tx) => {
+    await tx
+      .update(taskRuns)
+      .set({
+        status: RunStatus.Canceled,
+        canceledAt: endedAt,
+        error: message,
+      })
+      .where(eq(taskRuns.id, cloudJob.id));
 
-      // Derive the task state from all its runs. Enqueue-failure cancels
-      // bypass finishRun entirely, so without this sync the task stays
-      // 'active' forever. The shared @roomote/db helper keeps siblings honest.
-      await syncTaskStateFromRuns(tx, cloudJob.taskId);
-    });
-  } catch (cancelError) {
-    console.warn(
-      `[enqueueTask] Failed to cancel run ${cloudJob.id} after ${failureContext}: ${getErrorMessage(
-        cancelError,
-        'Unknown cancellation error',
-      )}`,
-    );
-  }
+    // Derive the task state from all its runs. Enqueue-failure cancels bypass
+    // finishRun entirely, so this transaction must either commit both state
+    // changes or surface the cancellation failure to the producer.
+    await syncTaskStateFromRuns(tx, cloudJob.taskId);
+  });
 }
 
 async function resolveMatchedHumanActor(
@@ -268,135 +345,74 @@ export class CloudJobQueue {
     }
   }
 
-  public async enqueue(entry: CloudJobQueueEntry): Promise<void> {
-    const entries = await this.redis.lrange(CloudJobQueueKeys.Queue, 0, -1);
+  public async enqueue(
+    entry: CloudJobQueueEntry,
+  ): Promise<CloudJobQueueEntry[]> {
+    const result = await this.redis.eval(
+      ATOMIC_ENQUEUE_SCRIPT,
+      4,
+      CloudJobQueueKeys.Queue,
+      CloudJobQueueKeys.Scopes,
+      CloudJobQueueKeys.Entries,
+      CloudJobQueueKeys.EntryScopes,
+      entry.id.toString(),
+      entry.scope,
+      JSON.stringify(entry),
+    );
 
-    // Discard entries with the same scope.
-    for (const rawValue of entries) {
-      try {
-        const otherEntry = cloudJobQueueEntrySchema.parse(JSON.parse(rawValue));
-
-        if (otherEntry.scope === entry.scope) {
-          const removed = await this.redis.lrem(
-            CloudJobQueueKeys.Queue,
-            0,
-            rawValue,
-          );
-
-          // If lrem removed nothing the entry was already claimed off the
-          // queue by a worker; that worker owns the run's terminal state, so
-          // skip the DB cancel + sync entirely to avoid racing it.
-          if (removed === 0) {
-            continue;
-          }
-
-          // Best-effort cancel in DB; do not block queue behavior during dedup.
-          void db
-            .transaction(async (tx) => {
-              const endedAt = new Date();
-
-              // Only cancel a run still waiting in the queue (pending/dequeued).
-              // If it already advanced past dequeue it is claimed, so leave it
-              // and its task state to the owning worker.
-              const [canceledRun] = await tx
-                .update(taskRuns)
-                .set({
-                  status: RunStatus.Canceled,
-                  canceledAt: endedAt,
-                  error: 'Superseded by a newer cloud job.',
-                })
-                .where(
-                  and(
-                    eq(taskRuns.id, otherEntry.id),
-                    inArray(taskRuns.status, [
-                      RunStatus.Pending,
-                      RunStatus.Dequeued,
-                    ]),
-                  ),
-                )
-                .returning({ taskId: taskRuns.taskId });
-
-              // The run was already claimed/terminal; nothing to sync.
-              if (!canceledRun) {
-                return;
-              }
-
-              // Derive the task state from all its runs so the superseded run's
-              // task does not stay 'active' forever, while an already-completed
-              // sibling still wins.
-              await syncTaskStateFromRuns(tx, canceledRun.taskId);
-
-              await markTaskStartParallelCountEndedAt(tx, {
-                runId: otherEntry.id,
-                endedAt,
-              });
-            })
-            .catch(() => {
-              // Ignore DB errors here; deduplication should proceed regardless.
-            });
-
-          console.log(
-            `[CloudJobQueue] evicted ${otherEntry.id} (${otherEntry.scope})`,
-          );
-        }
-      } catch {
-        // Ignore invalid entries.
-      }
+    if (typeof result !== 'string') {
+      throw new Error('Atomic queue enqueue returned an invalid result.');
     }
 
-    await this.redis.rpush(CloudJobQueueKeys.Queue, JSON.stringify(entry));
+    return result ? [{ id: Number(result), scope: entry.scope }] : [];
   }
 
   public async dequeue(blocking = true): Promise<CloudJobQueueEntry | null> {
-    const seen = new Set<number>();
+    const deadline = Date.now() + this.timeout * 1000;
 
-    while (true) {
-      const rawValue = blocking
-        ? (await this.redis.blpop(CloudJobQueueKeys.Queue, this.timeout))?.[1]
-        : await this.redis.lpop(CloudJobQueueKeys.Queue);
+    do {
+      const rawValue = await this.redis.eval(
+        ATOMIC_DEQUEUE_SCRIPT,
+        4,
+        CloudJobQueueKeys.Queue,
+        CloudJobQueueKeys.Scopes,
+        CloudJobQueueKeys.Entries,
+        CloudJobQueueKeys.EntryScopes,
+        Math.ceil(TASK_TIMEOUT_MS / 1000).toString(),
+      );
 
       if (!rawValue) {
-        return null;
-      }
+        if (!blocking || Date.now() >= deadline) {
+          return null;
+        }
 
-      let entry;
-
-      try {
-        entry = cloudJobQueueEntrySchema.parse(JSON.parse(rawValue));
-      } catch {
+        await new Promise((resolve) =>
+          setTimeout(resolve, DEQUEUE_POLL_INTERVAL_MS),
+        );
         continue;
       }
 
-      if (seen.has(entry.id)) {
-        await this.enqueue(entry);
-        return null;
-      }
-
-      seen.add(entry.id);
-
-      if (await this.acquireLock(entry)) {
+      try {
+        const entry = cloudJobQueueEntrySchema.parse(
+          JSON.parse(String(rawValue)),
+        );
         console.log(`[CloudJobQueue] acquired lock for ${entry.scope}`);
         return entry;
+      } catch {
+        continue;
       }
+    } while (blocking && Date.now() < deadline);
 
-      await this.enqueue(entry);
-    }
+    return null;
   }
 
-  private async acquireLock(entry: CloudJobQueueEntry): Promise<boolean> {
-    const result = await this.redis.set(
-      entry.scope,
-      entry.id,
-      'EX',
-      Math.ceil(TASK_TIMEOUT_MS / 1000), // TTL in seconds - 1h.
-      'NX',
+  public async releaseLock(scope: string, ownerId: number): Promise<boolean> {
+    const result = await this.redis.eval(
+      RELEASE_OWNED_LOCK_SCRIPT,
+      1,
+      scope,
+      ownerId.toString(),
     );
-
-    return result === 'OK';
-  }
-
-  public async releaseLock(scope: string): Promise<boolean> {
-    const result = await this.redis.del(scope);
     return result === 1;
   }
 
@@ -794,7 +810,14 @@ export function resolveQueueScope(params: {
   return randomUUID();
 }
 
-function getRunLockScope(cloudJob: Run): string {
+function getRunLockScope(cloudJob: Run): string | null {
+  if (cloudJob.queueScope) {
+    return cloudJob.queueScope;
+  }
+
+  // Compatibility for rows created before queue_scope was introduced. PR
+  // scopes were deterministic; unique scopes were not and cannot be safely
+  // reconstructed after the fact.
   if (PR_SCOPED_PAYLOAD_KINDS.has(cloudJob.payloadKind)) {
     const payload = cloudJob.payload as { repo?: string; prNumber?: number };
 
@@ -803,7 +826,7 @@ function getRunLockScope(cloudJob: Run): string {
     }
   }
 
-  return randomUUID();
+  return null;
 }
 
 function getInitiatorLinkedUserId(initiator: TaskInitiator): string | null {
@@ -940,32 +963,79 @@ async function pushRunOntoQueue(params: {
     } catch (error) {
       const message = getErrorMessage(error, 'Failed before cloud job enqueue');
 
-      await cancelCloudJobBeforeQueue(
-        cloudJob,
-        message,
-        'beforeEnqueue failed',
-      );
+      try {
+        await cancelCloudJobBeforeQueue(cloudJob, message);
+      } catch (cancelError) {
+        throw new AggregateError(
+          [error, cancelError],
+          `beforeEnqueue and cancellation both failed for cloud job ${cloudJob.id}`,
+        );
+      }
 
       throw error;
     }
   }
 
   try {
-    await CloudJobQueue.getInstance().enqueue({
+    await db
+      .update(taskRuns)
+      .set({ queueScope: scope })
+      .where(eq(taskRuns.id, cloudJob.id));
+
+    const evictedEntries = await CloudJobQueue.getInstance().enqueue({
       id: cloudJob.id,
       scope,
     });
+
+    if (evictedEntries.length > 0) {
+      await db.transaction(async (tx) => {
+        const endedAt = new Date();
+        const evictedIds = evictedEntries.map((entry) => entry.id);
+        const canceledRuns = await tx
+          .update(taskRuns)
+          .set({
+            status: RunStatus.Canceled,
+            canceledAt: endedAt,
+            error: 'Superseded by a newer cloud job.',
+          })
+          .where(
+            and(
+              inArray(taskRuns.id, evictedIds),
+              eq(taskRuns.status, RunStatus.Pending),
+            ),
+          )
+          .returning({ id: taskRuns.id, taskId: taskRuns.taskId });
+
+        for (const canceledRun of canceledRuns) {
+          await syncTaskStateFromRuns(tx, canceledRun.taskId);
+          await markTaskStartParallelCountEndedAt(tx, {
+            runId: canceledRun.id,
+            endedAt,
+          });
+
+          console.log(`[CloudJobQueue] evicted ${canceledRun.id} (${scope})`);
+        }
+      });
+    }
   } catch (error) {
-    await cancelCloudJobBeforeQueue(
-      cloudJob,
-      getErrorMessage(error, 'Failed to enqueue cloud job'),
-      'queue enqueue failed',
-    );
+    let originalError = error;
+
+    try {
+      await cancelCloudJobBeforeQueue(
+        cloudJob,
+        getErrorMessage(error, 'Failed to enqueue cloud job'),
+      );
+    } catch (cancelError) {
+      originalError = new AggregateError(
+        [error, cancelError],
+        `Queue enqueue and cancellation both failed for cloud job ${cloudJob.id}`,
+      );
+    }
 
     throw new CloudJobQueueEnqueueError({
       cloudJobId: cloudJob.id,
       taskId: cloudJob.taskId,
-      originalError: error,
+      originalError,
     });
   }
 
@@ -1560,13 +1630,19 @@ export async function dequeueCloudTask(): Promise<number | null> {
 }
 
 export function releaseCloudTask(cloudJob: Run): Promise<boolean> {
-  return CloudJobQueue.getInstance().releaseLock(getRunLockScope(cloudJob));
+  const scope = getRunLockScope(cloudJob);
+
+  return scope
+    ? CloudJobQueue.getInstance().releaseLock(scope, cloudJob.id)
+    : Promise.resolve(false);
 }
 
 export async function isLockedCloudTask(cloudJob: Run): Promise<boolean> {
-  return CloudJobQueue.getInstance().isLocked(getRunLockScope(cloudJob));
+  const scope = getRunLockScope(cloudJob);
+  return scope ? CloudJobQueue.getInstance().isLocked(scope) : false;
 }
 
 export async function getCloudTaskLockTTL(cloudJob: Run): Promise<number> {
-  return CloudJobQueue.getInstance().getLockTTL(getRunLockScope(cloudJob));
+  const scope = getRunLockScope(cloudJob);
+  return scope ? CloudJobQueue.getInstance().getLockTTL(scope) : -2;
 }

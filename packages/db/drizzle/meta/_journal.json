@@ -29,6 +29,13 @@
       "when": 1783703067901,
       "tag": "0003_clean_unused_schema",
       "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1783703543449,
+      "tag": "0004_task_run_queue_scope",
+      "breakpoints": true
     }
   ]
 }

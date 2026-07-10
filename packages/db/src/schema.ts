@@ -869,6 +869,10 @@ export const taskRuns = pgTable(
       .$type<CodingHarness>(),
 
     status: text('status').notNull().default('pending').$type<RunStatus>(),
+    // Stable ownership scope used by the controller queue. Persisting the
+    // exact value lets every process release and inspect the same lock instead
+    // of attempting to reconstruct ephemeral Redis state.
+    queueScope: text('queue_scope'),
     taskPhase: text('task_phase'),
     payload: jsonb('payload').notNull().$type<TaskPayload>(),
     // Per-attempt prompt, including the deferred resume prompt.
@@ -976,6 +980,7 @@ export const taskRuns = pgTable(
   },
   (table) => [
     index('task_runs_task_id_idx').on(table.taskId),
+    index('task_runs_queue_scope_idx').on(table.queueScope),
     index('task_runs_acting_user_id_idx').on(table.actingUserId),
     index('task_runs_snapshot_id_idx').on(table.snapshotId),
     index('task_runs_sleep_at_idx').on(table.sleepAt),

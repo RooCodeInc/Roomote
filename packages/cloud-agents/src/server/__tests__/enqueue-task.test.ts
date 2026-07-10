@@ -492,6 +492,21 @@ describe('enqueueTask source-control provider stamping', () => {
 });
 
 describe('pr_review queue scope dedup', () => {
+  let previousQueue: CloudJobQueue | null;
+  let queueRedis: InstanceType<typeof Redis>;
+
+  beforeEach(() => {
+    previousQueue = CloudJobQueue.queue;
+    queueRedis = new Redis();
+    CloudJobQueue.queue = new CloudJobQueue({ redis: queueRedis, timeout: 1 });
+  });
+
+  afterEach(async () => {
+    CloudJobQueue.queue = previousQueue;
+    await queueRedis.flushall();
+    queueRedis.disconnect();
+  });
+
   const prLinkage = {
     provider: 'github' as const,
     repository: 'acme/widgets',
@@ -553,5 +568,60 @@ describe('pr_review queue scope dedup', () => {
     expect(empty).toBeNull();
 
     await redis.flushall();
+  });
+
+  it('persists the scope and transactionally cancels the evicted run', async () => {
+    const uniquePrNumber = 424_242;
+    const scope = `acme/queue-atomic:${uniquePrNumber}`;
+    const linkage = {
+      provider: 'github' as const,
+      repository: 'acme/queue-atomic',
+      prNumber: uniquePrNumber,
+      prUrl: `https://github.com/acme/queue-atomic/pull/${uniquePrNumber}`,
+    };
+    const makeInput = (headSha: string): FreshCloudTaskLaunch => ({
+      task: {
+        type: TaskPayloadKind.GithubPrReview,
+        requestedWorkKindDecision: explicitWorkKind,
+        payload: {
+          repo: linkage.repository,
+          prNumber: linkage.prNumber,
+          prTitle: 'Atomic queue review',
+          prUrl: linkage.prUrl,
+          headSha,
+        },
+      },
+      initiator: { kind: 'automation', key: 'review_code' },
+      workflow: 'pr_review',
+      surface: 'github',
+      trigger: 'webhook',
+      prLinkage: linkage,
+    });
+
+    const older = await enqueueTask(makeInput('a'.repeat(40)), {
+      skipEarlyTitleGeneration: true,
+    });
+    createdTaskIds.push(older.taskId);
+
+    const newer = await enqueueTask(makeInput('b'.repeat(40)), {
+      skipEarlyTitleGeneration: true,
+    });
+    createdTaskIds.push(newer.taskId);
+
+    const persistedRuns = await db.query.taskRuns.findMany({
+      where: inArray(taskRuns.id, [older.id, newer.id]),
+    });
+    const persistedOlder = persistedRuns.find((run) => run.id === older.id);
+    const persistedNewer = persistedRuns.find((run) => run.id === newer.id);
+
+    expect(persistedOlder?.queueScope).toBe(scope);
+    expect(persistedOlder?.status).toBe(RunStatus.Canceled);
+    expect(persistedOlder?.canceledAt).not.toBeNull();
+    expect(persistedNewer?.queueScope).toBe(scope);
+    expect(persistedNewer?.status).toBe(RunStatus.Pending);
+
+    const queued = await CloudJobQueue.getInstance().dequeue(false);
+    expect(queued).toEqual({ id: newer.id, scope });
+    await CloudJobQueue.getInstance().releaseLock(scope, newer.id);
   });
 });
