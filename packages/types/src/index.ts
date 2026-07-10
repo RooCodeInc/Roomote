@@ -51,6 +51,7 @@ export * from './setup-source-control-config';
 export * from './source-control';
 export * from './slack';
 export * from './teams';
+export * from './teams-bot-credentials';
 export * from './telegram';
 export * from './task-env-var-requests';
 export * from './task-events';
