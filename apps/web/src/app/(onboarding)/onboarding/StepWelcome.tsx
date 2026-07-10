@@ -4,7 +4,6 @@ import { PRODUCT_NAME } from '@roomote/types';
 
 import { Button, ArrowRight } from '@/components/system';
 import { StepTitle } from '../setup/StepTitle';
-import { OnboardingWordmark } from '../OnboardingWordmark';
 
 export function StepWelcome({ onContinue }: { onContinue: () => void }) {
   return (
@@ -20,7 +19,7 @@ export function StepWelcome({ onContinue }: { onContinue: () => void }) {
       </p>
       <p>
         You don&apos;t even need to be an engineer. {PRODUCT_NAME} runs in
-        isolated sandboxes and verifies its own work, so it doesn't blindly
+        isolated sandboxes and verifies its own work, so it doesn&apos;t blindly
         break things. You can be confident you&apos;re having an impact and not
         making mistakes.
       </p>

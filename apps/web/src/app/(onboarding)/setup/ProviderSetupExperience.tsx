@@ -432,8 +432,9 @@ function MicrosoftSetupExperience(props: ProviderSetupExperienceProps) {
       />
 
       <p className="max-w-xl">
-        First, let&apos;s take a deep breath together – MS doesn't make this
-        easy. Second, you may need to ask an admin to do some of this for you.
+        First, let&apos;s take a deep breath together – MS doesn&apos;t make
+        this easy. Second, you may need to ask an admin to do some of this for
+        you.
       </p>
 
       <NumberedStep number={1} className="mt-6">
@@ -531,7 +532,7 @@ function MicrosoftSetupExperience(props: ProviderSetupExperienceProps) {
       <NumberedStep number={5} className={pendingStepClassName}>
         <p className="font-semibold">Add the app</p>
         <p className="text-sm text-muted-foreground">
-          Click on "Preview in Teams" → Add
+          Click on &quot;Preview in Teams&quot; → Add
         </p>
       </NumberedStep>
     </div>

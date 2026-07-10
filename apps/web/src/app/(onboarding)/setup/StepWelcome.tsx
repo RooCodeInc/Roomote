@@ -2,7 +2,6 @@
 
 import { Button, ArrowRight } from '@/components/system';
 import { PRODUCT_NAME } from '@roomote/types';
-import { OnboardingWordmark } from '../OnboardingWordmark';
 import { StepTitle } from './StepTitle';
 import { getSetupStepDefinition } from './types';
 import { markSetupWelcomeSeen } from './welcome-seen';
