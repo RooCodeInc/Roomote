@@ -260,7 +260,7 @@ describe('ConnectionStatusBanner', () => {
             taskId: 'task-123',
             hasTransportError: false,
             refreshConnection: vi.fn(),
-            cloudJob: {
+            taskRun: {
               sleepRequestedAt: new Date(),
               snapshotRequestedAt: new Date(),
               snapshotCreatedAt: null,
@@ -291,7 +291,7 @@ describe('ConnectionStatusBanner', () => {
             taskId: 'task-123',
             hasTransportError: false,
             refreshConnection: vi.fn(),
-            cloudJob: {
+            taskRun: {
               sleepRequestedAt: null,
               snapshotRequestedAt: new Date(),
               snapshotCreatedAt: new Date(),
@@ -322,7 +322,7 @@ describe('ConnectionStatusBanner', () => {
             taskId: 'task-123',
             hasTransportError: false,
             refreshConnection: vi.fn(),
-            cloudJob: {
+            taskRun: {
               sleepRequestedAt: new Date(),
               snapshotRequestedAt: null,
               snapshotCreatedAt: null,
@@ -355,7 +355,7 @@ describe('ConnectionStatusBanner', () => {
             taskId: 'task-123',
             hasTransportError: false,
             refreshConnection: vi.fn(),
-            cloudJob: {
+            taskRun: {
               sleepRequestedAt: null,
               snapshotRequestedAt: new Date(),
               snapshotCreatedAt: null,
@@ -386,7 +386,7 @@ describe('ConnectionStatusBanner', () => {
             taskId: 'task-123',
             hasTransportError: false,
             refreshConnection: vi.fn(),
-            cloudJob: {
+            taskRun: {
               sleepRequestedAt: new Date(),
               snapshotRequestedAt: new Date(),
               snapshotCreatedAt: null,

@@ -9,7 +9,7 @@ place for prompt policy or product-surface behavior.
 ## Dos
 
 - Think in terms of lifecycle consistency across Redis queue state,
-  `cloud_jobs` rows, and provider machine state.
+  `task_runs` rows, and provider machine state.
 - Preserve bounded retries, timeout envelopes, and orphan-recovery behavior
   when changing dispatch loops or spawn paths.
 - Keep provider-neutral orchestration in `BaseController` and put

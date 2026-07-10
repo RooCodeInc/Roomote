@@ -15,7 +15,7 @@ import {
   resolveGitLabBaseUrl,
   resolveGitLabToken,
 } from '@roomote/gitlab';
-import { type Run } from '@roomote/db/server';
+import { type TaskRun } from '@roomote/db/server';
 import {
   buildPullRequestUrl,
   getSourceControlProviderLabel,
@@ -25,7 +25,7 @@ import {
 } from '@roomote/types';
 import { z } from 'zod';
 import {
-  assertRepositoryInCloudJobScope,
+  assertRepositoryInTaskRunScope,
   buildAdoBasicAuthHeader,
   buildApiUrl,
   formatResponseBody,
@@ -342,17 +342,17 @@ const gitHubReviewThreadsQueryResponseSchema = z.object({
     .nullable(),
 });
 
-export async function readSourceControlPullRequestForCloudJob({
-  cloudJob,
+export async function readSourceControlPullRequestForTaskRun({
+  taskRun,
   input,
   fetchImpl = fetch,
 }: {
-  cloudJob: Run;
+  taskRun: TaskRun;
   input: SourceControlPullRequestReadInput;
   fetchImpl?: FetchImpl;
 }): Promise<SourceControlPullRequestReadResult> {
   const payloadProvider = resolveSourceControlProviderFromPayload(
-    getPayloadRecord(cloudJob.payload),
+    getPayloadRecord(taskRun.payload),
   );
   const provider = input.sourceControlProvider ?? payloadProvider;
 
@@ -364,7 +364,7 @@ export async function readSourceControlPullRequestForCloudJob({
     );
   }
 
-  await assertRepositoryInCloudJobScope(cloudJob, input.repositoryFullName);
+  await assertRepositoryInTaskRunScope(taskRun, input.repositoryFullName);
 
   const repository = await resolveRepositoryRow({
     provider,

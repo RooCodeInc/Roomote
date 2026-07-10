@@ -317,8 +317,8 @@ export async function launchTask(
       computeProvider: body.computeProvider,
       requestedWorkKindDecision,
       ...(requestedType === 'environment-definition' &&
-      'cloudJobId' in auth.authContext
-        ? { sourceCloudJobId: auth.authContext.cloudJobId }
+      'runId' in auth.authContext
+        ? { sourceRunId: auth.authContext.runId }
         : {}),
     };
 
@@ -365,7 +365,7 @@ export async function launchTask(
 
     return c.json({
       success: true,
-      cloudJobId: launchResult.id,
+      runId: launchResult.id,
       taskId: launchResult.taskId,
     });
   } catch (error) {

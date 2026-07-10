@@ -750,7 +750,7 @@ export async function startEnvironmentDefinitionTaskCommand(
 
   return {
     taskId: launchResult.taskId,
-    cloudJobId: launchResult.id,
+    runId: launchResult.id,
     startedAt,
   };
 }
@@ -769,11 +769,11 @@ export async function cancelEnvironmentDefinitionTaskCommand(
     .from(taskRuns)
     .where(eq(taskRuns.taskId, input.taskId));
 
-  const activeJobIds = jobs
+  const activeRunIds = jobs
     .filter((job) => !isExitedRunStatus(job.status))
     .map((job) => job.id);
 
-  if (activeJobIds.length === 0) {
+  if (activeRunIds.length === 0) {
     return { success: true as const };
   }
 
@@ -786,10 +786,10 @@ export async function cancelEnvironmentDefinitionTaskCommand(
         status: RunStatus.Canceled,
         canceledAt: endedAt,
       })
-      .where(inArray(taskRuns.id, activeJobIds));
+      .where(inArray(taskRuns.id, activeRunIds));
 
     await Promise.all(
-      activeJobIds.map((runId) =>
+      activeRunIds.map((runId) =>
         markTaskStartParallelCountEndedAt(tx, {
           runId,
           endedAt,

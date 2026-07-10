@@ -16,7 +16,7 @@ describe('opencode-server bootstrap', () => {
 
   function createLogger() {
     return {
-      cloudJobId: 1,
+      runId: 1,
       filePath: '/tmp/test.log',
       info: vi.fn(),
       warn: vi.fn(),
@@ -189,7 +189,7 @@ describe('opencode-server bootstrap', () => {
           type: 'streamable-http',
           url: 'https://api.test.com/api/mcp/supermemory',
           headers: {
-            Authorization: 'Bearer cloud-job-token',
+            Authorization: 'Bearer task-run-token',
           },
         },
       },
@@ -228,7 +228,7 @@ describe('opencode-server bootstrap', () => {
           type: 'streamable-http',
           url: 'https://api.test.com/api/mcp/linear',
           headers: {
-            Authorization: 'Bearer cloud-job-token',
+            Authorization: 'Bearer task-run-token',
           },
         },
       },

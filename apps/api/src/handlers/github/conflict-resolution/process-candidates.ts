@@ -1,4 +1,4 @@
-import { TaskPayloadKind, CloudAgentType, PRODUCT_NAME } from '@roomote/types';
+import { TaskPayloadKind, PRODUCT_NAME } from '@roomote/types';
 import { enqueueTask, getTaskUrl } from '@roomote/cloud-agents/server';
 import {
   DEFAULT_CONFLICT_RESOLUTION_IDLE_WINDOW_MS,
@@ -16,7 +16,7 @@ import {
   postWorkingOnItComment,
 } from './post-comment';
 import { acquireRepoLock } from './repo-lock';
-import { hasActiveResolutionJob } from './has-active-resolution-job';
+import { hasActiveResolutionRun } from './has-active-resolution-run';
 import { getBackgroundGithubTaskProperties } from '../backgroundGithubTaskProperties';
 
 import { getGitHubAutomationTargets } from '../getGitHubAutomationTargets';
@@ -35,9 +35,9 @@ interface ProcessCandidatesContext {
  * Process a list of conflict candidates for a single repository.
  *
  * Acquires a per-repo lock, checks mergeability for each candidate,
- * and for conflicting PRs enqueues a cloud task to resolve conflicts.
- * Falls back to posting a failure comment if no Fixer agent is found
- * or if enqueueing fails.
+ * and for conflicting PRs enqueues a task to resolve conflicts.
+ * Falls back to posting a failure comment if conflict-resolution work cannot
+ * be enqueued.
  *
  * @returns The number of PRs that were found to be conflicting.
  */
@@ -87,7 +87,7 @@ export async function processConflictCandidates(
         );
 
         // Check for existing active resolution job (dedup guard)
-        const alreadyActive = await hasActiveResolutionJob(
+        const alreadyActive = await hasActiveResolutionRun(
           repoFullName,
           candidate.prNumber,
         );
@@ -104,7 +104,7 @@ export async function processConflictCandidates(
 
         if (activeBranchWork) {
           console.log(
-            `${LOG_PREFIX} Skipping ${repoFullName}#${candidate.prNumber} — active ${PRODUCT_NAME} job ${activeBranchWork.jobId} (${activeBranchWork.type}, match=${activeBranchWork.match}) is still working on the branch`,
+            `${LOG_PREFIX} Skipping ${repoFullName}#${candidate.prNumber} — active ${PRODUCT_NAME} task run ${activeBranchWork.runId} (${activeBranchWork.type}, match=${activeBranchWork.match}) is still working on the branch`,
           );
           continue;
         }
@@ -130,7 +130,7 @@ export async function processConflictCandidates(
           continue;
         }
 
-        // Try to enqueue a cloud task for conflict resolution
+        // Try to enqueue a task for conflict resolution
         const enqueued = await tryEnqueueResolution(
           octokit,
           candidate,
@@ -168,9 +168,9 @@ export async function processConflictCandidates(
 }
 
 /**
- * Attempt to resolve conflicts by enqueueing a cloud task via a Fixer agent.
+ * Attempt to resolve conflicts by enqueueing a conflict-resolution workflow.
  *
- * @returns `true` if at least one cloud task was enqueued, `false` otherwise.
+ * @returns `true` if at least one task was enqueued, `false` otherwise.
  */
 async function tryEnqueueResolution(
   octokit: OctokitClient,
@@ -181,14 +181,14 @@ async function tryEnqueueResolution(
   try {
     // Use the PR author as the "sender" so that automation target resolution maps
     // the correct userId via githubUserMappings — matching the pattern
-    // used by PR reviewer and issue fixer tasks.
+    // used by PR review and conflict-resolution tasks.
     const sender = {
       login: candidate.authorLogin,
       id: candidate.authorId,
     } as WebhookUser;
 
     const targetResult = await getGitHubAutomationTargets({
-      type: CloudAgentType.Fixer,
+      workflow: 'pr_conflict_resolve',
       installation: context.installation,
       repository: context.repository,
       sender,
@@ -197,7 +197,7 @@ async function tryEnqueueResolution(
 
     if (targetResult.status !== 'ok' || targetResult.targets.length === 0) {
       console.log(
-        `${LOG_PREFIX} No Fixer targets found for ${repoFullName} — falling back to comment`,
+        `${LOG_PREFIX} No conflict-resolution targets found for ${repoFullName} — falling back to comment`,
       );
       return false;
     }
@@ -247,7 +247,7 @@ async function tryEnqueueResolution(
           campaign: 'conflict-resolution',
         },
       });
-      const launchTarget = `cloud job ${launchResult.id}`;
+      const launchTarget = `task run ${launchResult.id}`;
 
       console.log(
         `${LOG_PREFIX} Launched conflict resolution ${launchTarget} for ${repoFullName}#${candidate.prNumber} (target ${target.id})`,

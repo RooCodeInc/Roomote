@@ -19,7 +19,7 @@ import { ReconnectableHarness } from '../reconnectable-harness';
 
 function createLogger() {
   return {
-    cloudJobId: 1,
+    runId: 1,
     filePath: '/tmp/test.log',
     info: vi.fn(),
     warn: vi.fn(),

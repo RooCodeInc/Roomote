@@ -40,14 +40,14 @@ describe('createActorScopedMcpRefresher', () => {
     });
 
     const refreshActorScopedMcp = createActorScopedMcpRefresher({
-      cloudJob: {
+      taskRun: {
         id: 42,
         actingUserId: 'owner-user',
       },
       integrations,
       requestReconnect,
       logger: {
-        cloudJobId: 42,
+        runId: 42,
         filePath: '/tmp/test.log',
         info: vi.fn(),
         warn: vi.fn(),
@@ -97,14 +97,14 @@ describe('createActorScopedMcpRefresher', () => {
     });
 
     const refreshActorScopedMcp = createActorScopedMcpRefresher({
-      cloudJob: {
+      taskRun: {
         id: 42,
         actingUserId: 'owner-user',
       },
       integrations,
       requestReconnect,
       logger: {
-        cloudJobId: 42,
+        runId: 42,
         filePath: '/tmp/test.log',
         info: vi.fn(),
         warn: vi.fn(),
@@ -137,14 +137,14 @@ describe('createActorScopedMcpRefresher', () => {
     });
 
     const refreshActorScopedMcp = createActorScopedMcpRefresher({
-      cloudJob: {
+      taskRun: {
         id: 42,
         actingUserId: 'owner-user',
       },
       integrations,
       requestReconnect,
       logger: {
-        cloudJobId: 42,
+        runId: 42,
         filePath: '/tmp/test.log',
         info: vi.fn(),
         warn: vi.fn(),
@@ -191,14 +191,14 @@ describe('createActorScopedMcpRefresher', () => {
     });
 
     const refreshActorScopedMcp = createActorScopedMcpRefresher({
-      cloudJob: {
+      taskRun: {
         id: 42,
         actingUserId: 'owner-user',
       },
       integrations,
       requestReconnect,
       logger: {
-        cloudJobId: 42,
+        runId: 42,
         filePath: '/tmp/test.log',
         info: vi.fn(),
         warn: vi.fn(),
@@ -233,14 +233,14 @@ describe('createActorScopedMcpRefresher', () => {
       });
 
     const refreshActorScopedMcp = createActorScopedMcpRefresher({
-      cloudJob: {
+      taskRun: {
         id: 42,
         actingUserId: 'owner-user',
       },
       integrations,
       requestReconnect,
       logger: {
-        cloudJobId: 42,
+        runId: 42,
         filePath: '/tmp/test.log',
         info: vi.fn(),
         warn: vi.fn(),
@@ -283,14 +283,14 @@ describe('createActorScopedMcpRefresher', () => {
     });
 
     const refreshActorScopedMcp = createActorScopedMcpRefresher({
-      cloudJob: {
+      taskRun: {
         id: 42,
         actingUserId: 'owner-user',
       },
       integrations,
       requestReconnect,
       logger: {
-        cloudJobId: 42,
+        runId: 42,
         filePath: '/tmp/test.log',
         info: vi.fn(),
         warn: vi.fn(),
@@ -328,14 +328,14 @@ describe('createActorScopedMcpRefresher', () => {
     });
 
     const refreshActorScopedMcp = createActorScopedMcpRefresher({
-      cloudJob: {
+      taskRun: {
         id: 42,
         actingUserId: 'owner-user',
       },
       integrations,
       requestReconnect,
       logger: {
-        cloudJobId: 42,
+        runId: 42,
         filePath: '/tmp/test.log',
         info: vi.fn(),
         warn: vi.fn(),

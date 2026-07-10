@@ -11,19 +11,15 @@ import {
 
 interface PreviewPaneState {
   url: string;
-  cloudJobId: number;
+  runId: number;
   serviceName: string | null;
 }
 
 interface PreviewPaneContextType {
   previewPaneUrl: string | null;
-  previewPaneCloudJobId: number | null;
+  previewPaneRunId: number | null;
   previewPaneServiceName: string | null;
-  openPreviewPane: (
-    url: string,
-    cloudJobId: number,
-    serviceName?: string,
-  ) => void;
+  openPreviewPane: (url: string, runId: number, serviceName?: string) => void;
   closePreviewPane: () => void;
   /** Whether the preview pane was already auto-opened in this session. */
   hasAutoOpened: boolean;
@@ -31,17 +27,13 @@ interface PreviewPaneContextType {
   setHasAutoOpened: (value: boolean) => void;
 }
 
-const noopOpen = (
-  _url: string,
-  _cloudJobId: number,
-  _serviceName?: string,
-) => {};
+const noopOpen = (_url: string, _runId: number, _serviceName?: string) => {};
 const noopClose = () => {};
 const noopSetBoolean = (_value: boolean) => {};
 
 const defaultValue: PreviewPaneContextType = {
   previewPaneUrl: null,
-  previewPaneCloudJobId: null,
+  previewPaneRunId: null,
   previewPaneServiceName: null,
   openPreviewPane: noopOpen,
   closePreviewPane: noopClose,
@@ -69,8 +61,8 @@ export function PreviewPaneProvider({ children }: PreviewPaneProviderProps) {
   }, []);
 
   const openPreviewPane = useCallback(
-    (url: string, cloudJobId: number, serviceName?: string) => {
-      setState({ url, cloudJobId, serviceName: serviceName ?? null });
+    (url: string, runId: number, serviceName?: string) => {
+      setState({ url, runId, serviceName: serviceName ?? null });
     },
     [],
   );
@@ -84,7 +76,7 @@ export function PreviewPaneProvider({ children }: PreviewPaneProviderProps) {
     <PreviewPaneContext.Provider
       value={{
         previewPaneUrl: state?.url ?? null,
-        previewPaneCloudJobId: state?.cloudJobId ?? null,
+        previewPaneRunId: state?.runId ?? null,
         previewPaneServiceName: state?.serviceName ?? null,
         openPreviewPane,
         closePreviewPane,

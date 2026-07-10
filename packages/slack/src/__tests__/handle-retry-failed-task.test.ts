@@ -1,13 +1,13 @@
 import { AGENT_DISPLAY_NAME, TaskPayloadKind } from '@roomote/types';
 
 const {
-  cloudJobFindFirstMock,
+  taskRunFindFirstMock,
   taskFindFirstMock,
   slackInstallationFindFirstMock,
   slackUserMappingFindFirstMock,
   environmentFindFirstMock,
 } = vi.hoisted(() => ({
-  cloudJobFindFirstMock: vi.fn(),
+  taskRunFindFirstMock: vi.fn(),
   taskFindFirstMock: vi.fn(),
   slackInstallationFindFirstMock: vi.fn(),
   slackUserMappingFindFirstMock: vi.fn(),
@@ -50,7 +50,7 @@ vi.mock('@roomote/db/server', () => ({
   db: {
     query: {
       taskRuns: {
-        findFirst: cloudJobFindFirstMock,
+        findFirst: taskRunFindFirstMock,
       },
       tasks: {
         findFirst: taskFindFirstMock,
@@ -174,7 +174,7 @@ describe('handleRetryFailedTask', () => {
     startSlackAppMentionTaskMock.mockResolvedValue({
       id: 77,
       taskId: 'task-77',
-      reusedExistingJob: false,
+      reusedExistingRun: false,
     });
     slackInstallationFindFirstMock.mockResolvedValue({
       id: 'slack-inst-1',
@@ -203,7 +203,7 @@ describe('handleRetryFailedTask', () => {
   });
 
   it('restarts the failed Slack task for the original requester', async () => {
-    cloudJobFindFirstMock.mockResolvedValue({
+    taskRunFindFirstMock.mockResolvedValue({
       id: 42,
       taskId: 'task-42',
       payloadKind: TaskPayloadKind.SlackAppMention,
@@ -225,7 +225,7 @@ describe('handleRetryFailedTask', () => {
     });
 
     await handleRetryFailedTask(
-      buildRetryPayload(JSON.stringify({ cloudJobId: 42 })),
+      buildRetryPayload(JSON.stringify({ runId: 42 })),
     );
 
     expect(startSlackAppMentionTaskMock).toHaveBeenCalledWith({
@@ -331,7 +331,7 @@ describe('handleRetryFailedTask', () => {
   });
 
   it('retries the failed Slack task when a different Slack user clicks Try again', async () => {
-    cloudJobFindFirstMock.mockResolvedValue({
+    taskRunFindFirstMock.mockResolvedValue({
       id: 42,
       taskId: 'task-42',
       payloadKind: TaskPayloadKind.SlackAppMention,
@@ -347,7 +347,7 @@ describe('handleRetryFailedTask', () => {
     });
 
     await handleRetryFailedTask(
-      buildRetryPayload(JSON.stringify({ cloudJobId: 42 }), 'U456'),
+      buildRetryPayload(JSON.stringify({ runId: 42 }), 'U456'),
     );
 
     expect(startSlackAppMentionTaskMock).toHaveBeenCalledWith(
@@ -399,10 +399,10 @@ describe('handleRetryFailedTask', () => {
   });
 
   it('posts an error when the original failed job cannot be found', async () => {
-    cloudJobFindFirstMock.mockResolvedValue(null);
+    taskRunFindFirstMock.mockResolvedValue(null);
 
     await handleRetryFailedTask(
-      buildRetryPayload(JSON.stringify({ cloudJobId: 42 })),
+      buildRetryPayload(JSON.stringify({ runId: 42 })),
     );
 
     expect(fetchMock).toHaveBeenCalledWith(
@@ -417,7 +417,7 @@ describe('handleRetryFailedTask', () => {
   });
 
   it('posts a fallback error when the retry attempt fails', async () => {
-    cloudJobFindFirstMock.mockResolvedValue({
+    taskRunFindFirstMock.mockResolvedValue({
       id: 42,
       taskId: 'task-42',
       payloadKind: TaskPayloadKind.SlackAppMention,
@@ -434,7 +434,7 @@ describe('handleRetryFailedTask', () => {
     startSlackAppMentionTaskMock.mockRejectedValue(new Error('queue failed'));
 
     await handleRetryFailedTask(
-      buildRetryPayload(JSON.stringify({ cloudJobId: 42 })),
+      buildRetryPayload(JSON.stringify({ runId: 42 })),
     );
 
     expect(fetchMock).toHaveBeenCalledWith(
@@ -450,7 +450,7 @@ describe('handleRetryFailedTask', () => {
 
   it('posts an error when the original environment is no longer available', async () => {
     environmentFindFirstMock.mockResolvedValue(null);
-    cloudJobFindFirstMock.mockResolvedValue({
+    taskRunFindFirstMock.mockResolvedValue({
       id: 42,
       taskId: 'task-42',
       payloadKind: TaskPayloadKind.SlackAppMention,
@@ -467,7 +467,7 @@ describe('handleRetryFailedTask', () => {
     });
 
     await handleRetryFailedTask(
-      buildRetryPayload(JSON.stringify({ cloudJobId: 42 })),
+      buildRetryPayload(JSON.stringify({ runId: 42 })),
     );
 
     expect(startSlackAppMentionTaskMock).not.toHaveBeenCalled();

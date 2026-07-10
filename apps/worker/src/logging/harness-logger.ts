@@ -18,7 +18,7 @@ interface HarnessLoggerOptions {
 }
 
 export const createHarnessLogger = (
-  cloudJobId: number,
+  runId: number,
   options: HarnessLoggerOptions,
 ): HarnessLogger => {
   const baseConsole = globalThis.console;
@@ -36,7 +36,7 @@ export const createHarnessLogger = (
     }
   } catch (error) {
     captureWorkerException(error, {
-      cloudJobId,
+      runId,
       filePath,
       stage: 'harnessLogger.prepareLogFile',
     });
@@ -66,7 +66,7 @@ export const createHarnessLogger = (
       .then(() => fs.promises.appendFile(filePath, `${line}\n`))
       .catch((error) => {
         captureWorkerException(error, {
-          cloudJobId,
+          runId,
           filePath,
           stage: 'harnessLogger.appendToFile',
         });
@@ -94,13 +94,13 @@ export const createHarnessLogger = (
         logger: 'harness',
         level,
         message: renderedArgs,
-        cloudJobId,
+        runId,
         filePath,
       });
 
       if (level === 'error') {
         captureWorkerErrorLog(args, {
-          cloudJobId,
+          runId,
           component: 'harnessLogger',
           filePath,
         });
@@ -108,7 +108,7 @@ export const createHarnessLogger = (
     };
 
   return {
-    cloudJobId,
+    runId,
     filePath,
     flush: () => writePromise,
     log: wrap('log'),

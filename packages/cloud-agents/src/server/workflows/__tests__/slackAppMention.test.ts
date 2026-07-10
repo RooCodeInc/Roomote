@@ -31,7 +31,7 @@ const matchedSlackAttribution: ResolvedTaskCommitAuthor = {
 
 describe('slackAppMention', () => {
   it('attaches Slack instructions for Slack app mention tasks', async () => {
-    const cloudTask: SlackAppMentionTask = {
+    const taskSpec: SlackAppMentionTask = {
       type: TaskPayloadKind.SlackAppMention,
       payload: {
         repo: 'Roomote/example-app',
@@ -43,8 +43,8 @@ describe('slackAppMention', () => {
     };
 
     const result = await slackAppMention({
-      cloudTask,
-      cloudJobUrl: 'https://example.com/tasks/1',
+      taskSpec,
+      taskRunUrl: 'https://example.com/tasks/1',
     });
 
     expect(result.prompt).toContain(
@@ -271,7 +271,7 @@ describe('slackAppMention', () => {
   });
 
   it('guides normal Slack frequency answers toward short concrete replies', async () => {
-    const cloudTask: SlackAppMentionTask = {
+    const taskSpec: SlackAppMentionTask = {
       type: TaskPayloadKind.SlackAppMention,
       payload: {
         repo: 'Roomote/example-app',
@@ -283,8 +283,8 @@ describe('slackAppMention', () => {
     };
 
     const result = await slackAppMention({
-      cloudTask,
-      cloudJobUrl: 'https://example.com/tasks/1',
+      taskSpec,
+      taskRunUrl: 'https://example.com/tasks/1',
     });
 
     expect(result.prompt).toContain(
@@ -351,7 +351,7 @@ describe('slackAppMention', () => {
   });
 
   it('adds a Slack conversation permalink to delegated PR instructions when the Slack payload includes thread metadata', async () => {
-    const cloudTask: SlackAppMentionTask = {
+    const taskSpec: SlackAppMentionTask = {
       type: TaskPayloadKind.SlackAppMention,
       payload: {
         repo: 'Roomote/example-app',
@@ -365,8 +365,8 @@ describe('slackAppMention', () => {
     };
 
     const result = await slackAppMention({
-      cloudTask,
-      cloudJobUrl: 'https://example.com/task/123',
+      taskSpec,
+      taskRunUrl: 'https://example.com/task/123',
       attribution: matchedSlackAttribution,
     });
 
@@ -376,7 +376,7 @@ describe('slackAppMention', () => {
   });
 
   it('prefers an exact Slack conversation permalink when the Slack payload provides one', async () => {
-    const cloudTask: SlackAppMentionTask = {
+    const taskSpec: SlackAppMentionTask = {
       type: TaskPayloadKind.SlackAppMention,
       payload: {
         repo: 'Roomote/example-app',
@@ -391,8 +391,8 @@ describe('slackAppMention', () => {
     };
 
     const result = await slackAppMention({
-      cloudTask,
-      cloudJobUrl: 'https://example.com/task/123',
+      taskSpec,
+      taskRunUrl: 'https://example.com/task/123',
       attribution: matchedSlackAttribution,
     });
 
@@ -402,7 +402,7 @@ describe('slackAppMention', () => {
   });
 
   it('falls back to the source message ts when a Slack app mention is not yet in a thread', async () => {
-    const cloudTask: SlackAppMentionTask = {
+    const taskSpec: SlackAppMentionTask = {
       type: TaskPayloadKind.SlackAppMention,
       payload: {
         repo: 'Roomote/example-app',
@@ -415,8 +415,8 @@ describe('slackAppMention', () => {
     };
 
     const result = await slackAppMention({
-      cloudTask,
-      cloudJobUrl: 'https://example.com/task/123',
+      taskSpec,
+      taskRunUrl: 'https://example.com/task/123',
       attribution: matchedSlackAttribution,
     });
 
@@ -426,7 +426,7 @@ describe('slackAppMention', () => {
   });
 
   it('keeps the latest bot reply out of thread_context and highlights it separately', async () => {
-    const cloudTask: SlackAppMentionTask = {
+    const taskSpec: SlackAppMentionTask = {
       type: TaskPayloadKind.SlackAppMention,
       payload: {
         repo: 'Roomote/example-app',
@@ -464,8 +464,8 @@ describe('slackAppMention', () => {
     };
 
     const result = await slackAppMention({
-      cloudTask,
-      cloudJobUrl: 'https://example.com/tasks/1',
+      taskSpec,
+      taskRunUrl: 'https://example.com/tasks/1',
     });
     const botReplyOccurrences = (
       result.prompt.match(/Roomote: bot reply/g) ?? []
@@ -488,7 +488,7 @@ describe('slackAppMention', () => {
   });
 
   it('includes bare-repo workspace readiness context in the prompt', async () => {
-    const cloudTask: SlackAppMentionTask = {
+    const taskSpec: SlackAppMentionTask = {
       type: TaskPayloadKind.SlackAppMention,
       payload: {
         repo: 'Roomote/example-app',
@@ -503,8 +503,8 @@ describe('slackAppMention', () => {
     };
 
     const result = await slackAppMention({
-      cloudTask,
-      cloudJobUrl: 'https://example.com/tasks/1',
+      taskSpec,
+      taskRunUrl: 'https://example.com/tasks/1',
     });
 
     expect(result.prompt).toContain(
@@ -522,7 +522,7 @@ describe('slackAppMention', () => {
   });
 
   it('uses agentPromptText for the agent prompt while keeping payload text separate', async () => {
-    const cloudTask: SlackAppMentionTask = {
+    const taskSpec: SlackAppMentionTask = {
       type: TaskPayloadKind.SlackAppMention,
       payload: {
         repo: 'Roomote/example-app',
@@ -536,8 +536,8 @@ describe('slackAppMention', () => {
     };
 
     const result = await slackAppMention({
-      cloudTask,
-      cloudJobUrl: 'https://example.com/tasks/1',
+      taskSpec,
+      taskRunUrl: 'https://example.com/tasks/1',
     });
 
     expect(result.prompt).toContain(
@@ -546,7 +546,7 @@ describe('slackAppMention', () => {
   });
 
   it('documents built-in proof delivery for Slack visual proof', async () => {
-    const cloudTask: SlackAppMentionTask = {
+    const taskSpec: SlackAppMentionTask = {
       type: TaskPayloadKind.SlackAppMention,
       payload: {
         repo: 'Roomote/example-app',
@@ -558,8 +558,8 @@ describe('slackAppMention', () => {
     };
 
     const result = await slackAppMention({
-      cloudTask,
-      cloudJobUrl: 'https://example.com/tasks/1',
+      taskSpec,
+      taskRunUrl: 'https://example.com/tasks/1',
     });
 
     expect(result.harnessInstructions).toContain(

@@ -5,7 +5,7 @@ import jwt from 'jsonwebtoken';
 import {
   configureAuthClientEnv,
   validateAuthToken,
-  validateJobToken,
+  validateRunToken,
 } from '@roomote/auth/client';
 
 import { WorkerEnv } from '../worker-env';
@@ -355,18 +355,18 @@ describe('WorkerEnv', () => {
           r: {
             u: 'user-123',
             o: 'org-456',
-            t: 'cj',
+            t: 'run',
           },
         },
         privateKey,
         { algorithm: 'ES256' },
       );
 
-      await expect(validateJobToken(token)).resolves.toEqual({
-        cloudJobId: 123,
+      await expect(validateRunToken(token)).resolves.toEqual({
+        runId: 123,
         userId: 'user-123',
         principal: 'user',
-        tokenType: 'cj',
+        tokenType: 'run',
         version: 1,
       });
 

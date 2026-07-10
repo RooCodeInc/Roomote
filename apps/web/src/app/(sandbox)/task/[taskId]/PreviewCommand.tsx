@@ -1,7 +1,7 @@
 'use client';
 
 import { useMemo } from 'react';
-import type { Run } from '@roomote/db';
+import type { TaskRun } from '@roomote/db';
 
 import { AppWindow } from '@/components/system';
 import { useRegisterCommands } from '@/components/layout';
@@ -11,13 +11,13 @@ import { usePreviewPane } from './hooks/use-preview-pane';
 import { resolvePreviewTarget, usePreviewUrls } from './hooks/use-preview-urls';
 
 interface PreviewCommandProps {
-  cloudJob: Run | null;
+  taskRun: TaskRun | null;
   asleep: boolean;
 }
 
-export function PreviewCommand({ cloudJob, asleep }: PreviewCommandProps) {
+export function PreviewCommand({ taskRun, asleep }: PreviewCommandProps) {
   const { initialPaths, previewUrl, previewUrls, primaryPortName } =
-    usePreviewUrls(cloudJob ?? {});
+    usePreviewUrls(taskRun ?? {});
   const { openPreviewView, previewPath, previewServiceName } =
     useTaskSidePanel();
   const { openPreviewPane } = usePreviewPane();
@@ -40,7 +40,7 @@ export function PreviewCommand({ cloudJob, asleep }: PreviewCommandProps) {
 
     const commands: Parameters<typeof useRegisterCommands>[0] = [];
 
-    if (resolvedPreviewUrl && cloudJob?.id) {
+    if (resolvedPreviewUrl && taskRun?.id) {
       commands.push({
         id: 'task-live-preview',
         icon: AppWindow,
@@ -49,12 +49,12 @@ export function PreviewCommand({ cloudJob, asleep }: PreviewCommandProps) {
         action: () => {
           openPreviewPane(
             resolvedPreviewUrl,
-            cloudJob.id,
+            taskRun.id,
             resolvedPreviewServiceName ?? undefined,
           );
           openPreviewView(
             resolvedPreviewUrl,
-            cloudJob.id,
+            taskRun.id,
             resolvedPreviewServiceName ?? undefined,
           );
         },
@@ -65,7 +65,7 @@ export function PreviewCommand({ cloudJob, asleep }: PreviewCommandProps) {
     return commands;
   }, [
     asleep,
-    cloudJob,
+    taskRun,
     openPreviewPane,
     openPreviewView,
     resolvedPreviewServiceName,

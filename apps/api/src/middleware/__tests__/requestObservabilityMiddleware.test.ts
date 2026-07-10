@@ -107,7 +107,7 @@ describe('requestObservabilityMiddleware', () => {
   it('keeps tRPC procedures distinct by raw pathname', async () => {
     const app = createApp();
 
-    await app.request('http://localhost/trpc/cloudJobs.recordLog');
+    await app.request('http://localhost/trpc/taskRuns.recordLog');
     await app.request(
       'http://localhost/trpc/mcpConnections.getMcpServerConfigs',
     );
@@ -117,8 +117,8 @@ describe('requestObservabilityMiddleware', () => {
         .endpoints.map((endpoint) => endpoint.route)
         .sort(),
     ).toEqual([
-      '/trpc/cloudJobs.recordLog',
       '/trpc/mcpConnections.getMcpServerConfigs',
+      '/trpc/taskRuns.recordLog',
     ]);
   });
 

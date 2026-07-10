@@ -136,7 +136,7 @@ vi.mock('@roomote/db/server', () => ({
   },
   db: {
     insert: insertMock,
-    // The Teams job lookups moved from db.query.cloudJobs.findFirst to
+    // The Teams job lookups moved from db.query.taskRuns.findFirst to
     // db.select(...).from(taskRuns).innerJoin(tasks). Adapt the select chain
     // onto the same sequential findFirstMock queue so existing per-test row
     // sequences keep working; legacy `userId` keys map to run actingUserId.
@@ -391,7 +391,7 @@ describe('Teams webhook handler', () => {
     expect(insertMock).not.toHaveBeenCalled();
   });
 
-  it('queues Teams message activities for matching active jobs', async () => {
+  it('queues Teams message activities for matching active task runs', async () => {
     teamsUserMappingFindFirstMock.mockResolvedValueOnce({
       userId: 'mapped-user-1',
     });
@@ -407,7 +407,7 @@ describe('Teams webhook handler', () => {
     await expect(response.json()).resolves.toEqual({
       ok: true,
       queued: true,
-      cloudJobId: 77,
+      runId: 77,
     });
     expect(response.status).toBe(200);
     expect(insertValuesMock).toHaveBeenCalledWith(
@@ -448,7 +448,7 @@ describe('Teams webhook handler', () => {
     });
   });
 
-  it('queues untagged Teams thread replies for matching active jobs using the root thread id', async () => {
+  it('queues untagged Teams thread replies for matching active task runs using the root thread id', async () => {
     teamsUserMappingFindFirstMock.mockResolvedValueOnce({
       userId: 'mapped-user-1',
     });
@@ -476,7 +476,7 @@ describe('Teams webhook handler', () => {
     await expect(response.json()).resolves.toEqual({
       ok: true,
       queued: true,
-      cloudJobId: 77,
+      runId: 77,
     });
     expect(enqueueTaskMock).not.toHaveBeenCalled();
     expect(queueCommunicationMessageMock).toHaveBeenCalledWith('teams', 77, {
@@ -532,7 +532,7 @@ describe('Teams webhook handler', () => {
     expect(postMessageMock).not.toHaveBeenCalled();
   });
 
-  it('queues Teams image attachments for matching active jobs', async () => {
+  it('queues Teams image attachments for matching active task runs', async () => {
     teamsUserMappingFindFirstMock.mockResolvedValueOnce({
       userId: 'mapped-user-1',
     });
@@ -558,7 +558,7 @@ describe('Teams webhook handler', () => {
     await expect(response.json()).resolves.toEqual({
       ok: true,
       queued: true,
-      cloudJobId: 77,
+      runId: 77,
     });
     expect(processImageAttachmentsMock).toHaveBeenCalledWith(
       [
@@ -579,7 +579,7 @@ describe('Teams webhook handler', () => {
     );
   });
 
-  it('queues image-only Teams attachments for matching active jobs', async () => {
+  it('queues image-only Teams attachments for matching active task runs', async () => {
     teamsUserMappingFindFirstMock.mockResolvedValueOnce({
       userId: 'mapped-user-1',
     });
@@ -606,7 +606,7 @@ describe('Teams webhook handler', () => {
     await expect(response.json()).resolves.toEqual({
       ok: true,
       queued: true,
-      cloudJobId: 77,
+      runId: 77,
     });
     expect(queueCommunicationMessageMock).toHaveBeenCalledWith(
       'teams',
@@ -648,7 +648,7 @@ describe('Teams webhook handler', () => {
     await expect(response.json()).resolves.toEqual({
       ok: true,
       queued: true,
-      cloudJobId: 77,
+      runId: 77,
     });
     expect(fetchMessageImageDataUrlsMock).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -688,7 +688,7 @@ describe('Teams webhook handler', () => {
     await expect(response.json()).resolves.toEqual({
       ok: true,
       queued: true,
-      cloudJobId: 77,
+      runId: 77,
     });
     expect(insertMock).toHaveBeenCalledWith(teamsUserMappingsTable);
     expect(insertValuesMock).toHaveBeenCalledWith(
@@ -745,7 +745,7 @@ describe('Teams webhook handler', () => {
     await expect(response.json()).resolves.toEqual({
       ok: true,
       queued: true,
-      cloudJobId: 77,
+      runId: 77,
     });
     expect(authAccountsFindManyMock).not.toHaveBeenCalled();
     expect(queueCommunicationMessageMock).toHaveBeenCalledWith(
@@ -781,7 +781,7 @@ describe('Teams webhook handler', () => {
     await expect(response.json()).resolves.toEqual({
       ok: true,
       queued: true,
-      cloudJobId: 77,
+      runId: 77,
     });
     expect(insertValuesMock).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -815,7 +815,7 @@ describe('Teams webhook handler', () => {
     await expect(response.json()).resolves.toEqual({
       ok: true,
       queued: true,
-      cloudJobId: 77,
+      runId: 77,
     });
     expect(response.status).toBe(200);
     expect(verifyBotFrameworkJwtMock).toHaveBeenCalledWith({
@@ -845,7 +845,7 @@ describe('Teams webhook handler', () => {
     expect(queueCommunicationMessageMock).not.toHaveBeenCalled();
   });
 
-  it('starts a new Teams task when the bot is mentioned without an active job', async () => {
+  it('starts a new Teams task when the bot is mentioned without an active task run', async () => {
     findFirstMock.mockResolvedValueOnce(null).mockResolvedValueOnce(null);
     teamsUserMappingFindFirstMock.mockResolvedValueOnce({
       userId: 'mapped-user-1',
@@ -862,7 +862,7 @@ describe('Teams webhook handler', () => {
     await expect(response.json()).resolves.toEqual({
       ok: true,
       started: true,
-      cloudJobId: 88,
+      runId: 88,
     });
     expect(response.status).toBe(200);
     expect(buildTeamsRoutingContextMock).toHaveBeenCalledWith(
@@ -929,7 +929,7 @@ describe('Teams webhook handler', () => {
     await expect(response.json()).resolves.toEqual({
       ok: true,
       started: true,
-      cloudJobId: 88,
+      runId: 88,
     });
     expect(processImageAttachmentsMock).toHaveBeenCalledWith(
       [
@@ -995,7 +995,7 @@ describe('Teams webhook handler', () => {
     await expect(response.json()).resolves.toEqual({
       ok: true,
       started: true,
-      cloudJobId: 88,
+      runId: 88,
     });
     expect(enqueueTaskMock).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -1151,7 +1151,7 @@ describe('Teams webhook handler', () => {
     await expect(response.json()).resolves.toEqual({
       success: true,
       status: 'started',
-      cloudJobId: 88,
+      runId: 88,
       taskId: 'task-new',
       taskUrl: 'https://app.example.com/task/task-new',
     });
@@ -1248,7 +1248,7 @@ describe('Teams webhook handler', () => {
     await expect(response.json()).resolves.toEqual({
       ok: true,
       started: true,
-      cloudJobId: 88,
+      runId: 88,
     });
     const { task } = enqueueTaskMock.mock.calls[0]?.[0] as {
       task: { payload: Record<string, unknown> };
@@ -1268,7 +1268,7 @@ describe('Teams webhook handler', () => {
     expect(reply).not.toHaveProperty('replyToMessageId');
   });
 
-  it('ignores channel messages without a bot mention when no active job exists', async () => {
+  it('ignores channel messages without a bot mention when no active task run exists', async () => {
     findFirstMock.mockResolvedValueOnce(null);
     const response = await createApp().request('/teams', {
       method: 'POST',
@@ -1321,7 +1321,7 @@ describe('Teams webhook handler', () => {
     await expect(response.json()).resolves.toEqual({
       ok: true,
       started: true,
-      cloudJobId: 88,
+      runId: 88,
     });
     expect(response.status).toBe(200);
     expect(shouldRouteUnmentionedReplyMock).toHaveBeenCalledWith(
@@ -1386,7 +1386,7 @@ describe('Teams webhook handler', () => {
     await expect(response.json()).resolves.toEqual({
       ok: true,
       resumed: true,
-      cloudJobId: 88,
+      runId: 88,
     });
     expect(response.status).toBe(200);
     expect(enqueueTaskMock).toHaveBeenCalledWith(
@@ -1394,7 +1394,7 @@ describe('Teams webhook handler', () => {
         task: expect.objectContaining({
           type: 'snapshot_resume',
           sourceSnapshotId: 'snap-1',
-          sourceCloudJobId: 77,
+          sourceRunId: 77,
         }),
         actingUserId: 'mapped-user-1',
       }),
@@ -1429,7 +1429,7 @@ describe('Teams webhook handler', () => {
     await expect(response.json()).resolves.toEqual({
       ok: true,
       resumed: true,
-      cloudJobId: 88,
+      runId: 88,
     });
     expect(response.status).toBe(200);
     expect(withContentionMock).toHaveBeenCalledWith(
@@ -1441,7 +1441,7 @@ describe('Teams webhook handler', () => {
         task: expect.objectContaining({
           type: 'snapshot_resume',
           sourceSnapshotId: 'snap-1',
-          sourceCloudJobId: 77,
+          sourceRunId: 77,
         }),
         actingUserId: 'mapped-user-1',
       }),
@@ -1455,7 +1455,7 @@ describe('Teams webhook handler', () => {
     );
   });
 
-  it('queues the follow-up to the leader resume job when the resume lock is contended', async () => {
+  it('queues the follow-up to the leader resume task run when the resume lock is contended', async () => {
     findFirstMock
       .mockResolvedValueOnce(null)
       .mockResolvedValueOnce({
@@ -1498,7 +1498,7 @@ describe('Teams webhook handler', () => {
     await expect(response.json()).resolves.toEqual({
       ok: true,
       queued: true,
-      cloudJobId: 99,
+      runId: 99,
     });
     expect(response.status).toBe(200);
     expect(enqueueTaskMock).not.toHaveBeenCalled();

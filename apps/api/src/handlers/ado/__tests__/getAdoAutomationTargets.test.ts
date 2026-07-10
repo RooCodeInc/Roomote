@@ -56,8 +56,6 @@ vi.mock('@roomote/db/server', () => ({
   or: (...args: unknown[]) => mockOr(...args),
 }));
 
-import { CloudAgentType } from '@roomote/types';
-
 import {
   getAdoAutomationTargets,
   isRoomoteAdoIdentity,
@@ -96,7 +94,7 @@ describe('getAdoAutomationTargets', () => {
 
   it('returns reviewer targets for active synced Azure DevOps repositories', async () => {
     const result = await getAdoAutomationTargets({
-      type: CloudAgentType.PrReviewer,
+      workflow: 'pr_review',
       payload,
     });
 
@@ -104,7 +102,7 @@ describe('getAdoAutomationTargets', () => {
       status: 'ok',
       targets: [
         {
-          id: 'ado:PR Reviewer:repo-1',
+          id: 'ado:pr_review:repo-1',
           // The repo-linker fallback owner is gone: webhook launches carry an
           // automation initiator instead of a forged owner.
           userId: null,
@@ -117,7 +115,7 @@ describe('getAdoAutomationTargets', () => {
     mockSelectWhere.mockResolvedValue([]);
 
     const result = await getAdoAutomationTargets({
-      type: CloudAgentType.PrReviewer,
+      workflow: 'pr_review',
       payload,
     });
 
@@ -139,7 +137,7 @@ describe('getAdoAutomationTargets', () => {
 
     await expect(
       getAdoAutomationTargets({
-        type: CloudAgentType.PrReviewer,
+        workflow: 'pr_review',
         payload: humanPayload,
       }),
     ).resolves.toEqual({
@@ -149,7 +147,7 @@ describe('getAdoAutomationTargets', () => {
 
     await expect(
       getAdoAutomationTargets({
-        type: CloudAgentType.PrReviewer,
+        workflow: 'pr_review',
         payload: humanPayload,
         ignoreAuthorPolicy: true,
       }),
@@ -160,7 +158,7 @@ describe('getAdoAutomationTargets', () => {
     mockAuthAccountsFindFirst.mockResolvedValue({ userId: 'commenter-user-1' });
 
     const result = await getAdoAutomationTargets({
-      type: CloudAgentType.PrReviewer,
+      workflow: 'pr_review',
       payload: {
         ...payload,
         commentAuthor: {
@@ -198,7 +196,7 @@ describe('getAdoAutomationTargets', () => {
 
   it('requires a link when the commenter has no uniqueName to match', async () => {
     const result = await getAdoAutomationTargets({
-      type: CloudAgentType.PrReviewer,
+      workflow: 'pr_review',
       payload: {
         ...payload,
         commentAuthor: {
@@ -219,7 +217,7 @@ describe('getAdoAutomationTargets', () => {
 
   it('requires an Azure DevOps linked account when comment attribution is required', async () => {
     const result = await getAdoAutomationTargets({
-      type: CloudAgentType.PrReviewer,
+      workflow: 'pr_review',
       payload: {
         ...payload,
         commentAuthor: {

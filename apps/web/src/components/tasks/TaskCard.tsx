@@ -145,8 +145,8 @@ export const TaskCard = ({
             </span>
             <span>
               {isActivelyRunningTask(
-                task.cloudJob.status,
-                task.cloudJob.taskPhase,
+                task.taskRun.status,
+                task.taskRun.taskPhase,
               ) && <Spinner className="size-3 animate-spin" />}
             </span>
           </div>
@@ -176,16 +176,14 @@ export const TaskCard = ({
         {/* Metadata */}
         <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-muted-foreground text-xs min-w-0 overflow-hidden">
           <WorkspaceBadge
-            environmentId={task.cloudJob.payload.environmentId}
-            repo={
-              task.cloudJob.payload.repo ?? task.repositoryName ?? undefined
-            }
+            environmentId={task.taskRun.payload.environmentId}
+            repo={task.taskRun.payload.repo ?? task.repositoryName ?? undefined}
             iconClassName="size-3"
           />
-          {task.cloudJob.prRepo && task.cloudJob.prNumber && (
+          {task.taskRun.prRepo && task.taskRun.prNumber && (
             <PullRequestBadge
-              repo={task.cloudJob.prRepo}
-              prNumber={task.cloudJob.prNumber}
+              repo={task.taskRun.prRepo}
+              prNumber={task.taskRun.prNumber}
               iconClassName="size-3"
             />
           )}

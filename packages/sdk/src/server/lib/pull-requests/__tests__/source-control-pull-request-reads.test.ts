@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { RunStatus, TaskPayloadKind } from '@roomote/types';
-import type { Run } from '@roomote/db/server';
+import type { TaskRun } from '@roomote/db/server';
 
 const {
   mockCreateGitHubToken,
@@ -81,9 +81,9 @@ vi.mock('@roomote/db/server', () => ({
   eq: vi.fn((left: unknown, right: unknown) => ({ type: 'eq', left, right })),
 }));
 
-import { readSourceControlPullRequestForCloudJob } from '../source-control-pull-request-reads';
+import { readSourceControlPullRequestForTaskRun } from '../source-control-pull-request-reads';
 
-function makeCloudJob(payload: Run['payload']): Run {
+function makeTaskRun(payload: TaskRun['payload']): TaskRun {
   return {
     id: 123,
     status: RunStatus.Dequeued,
@@ -94,7 +94,7 @@ function makeCloudJob(payload: Run['payload']): Run {
     payload,
     result: null,
     artifacts: null,
-  } as Run;
+  } as TaskRun;
 }
 
 function jsonResponse(body: unknown, status = 200): Response {
@@ -104,7 +104,7 @@ function jsonResponse(body: unknown, status = 200): Response {
   });
 }
 
-describe('readSourceControlPullRequestForCloudJob', () => {
+describe('readSourceControlPullRequestForTaskRun', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockEnvironmentsFindFirst.mockResolvedValue(null);
@@ -155,8 +155,8 @@ describe('readSourceControlPullRequestForCloudJob', () => {
       rest: { pulls: { get: pullsGet } },
     });
 
-    const result = await readSourceControlPullRequestForCloudJob({
-      cloudJob: makeCloudJob({
+    const result = await readSourceControlPullRequestForTaskRun({
+      taskRun: makeTaskRun({
         repo: 'acme/backend',
         sourceControlProvider: 'github',
       }),
@@ -229,8 +229,8 @@ describe('readSourceControlPullRequestForCloudJob', () => {
       }),
     );
 
-    const result = await readSourceControlPullRequestForCloudJob({
-      cloudJob: makeCloudJob({
+    const result = await readSourceControlPullRequestForTaskRun({
+      taskRun: makeTaskRun({
         repo: 'acme/backend',
         sourceControlProvider: 'gitlab',
       }),
@@ -296,8 +296,8 @@ describe('readSourceControlPullRequestForCloudJob', () => {
       }),
     );
 
-    const result = await readSourceControlPullRequestForCloudJob({
-      cloudJob: makeCloudJob({
+    const result = await readSourceControlPullRequestForTaskRun({
+      taskRun: makeTaskRun({
         repo: 'acme/Platform/backend',
         sourceControlProvider: 'ado',
       }),
@@ -383,8 +383,8 @@ describe('readSourceControlPullRequestForCloudJob', () => {
       ]),
     );
 
-    const result = await readSourceControlPullRequestForCloudJob({
-      cloudJob: makeCloudJob({
+    const result = await readSourceControlPullRequestForTaskRun({
+      taskRun: makeTaskRun({
         repo: 'acme/backend',
         sourceControlProvider: 'gitlab',
       }),
@@ -511,8 +511,8 @@ describe('readSourceControlPullRequestForCloudJob', () => {
       }),
     );
 
-    const result = await readSourceControlPullRequestForCloudJob({
-      cloudJob: makeCloudJob({
+    const result = await readSourceControlPullRequestForTaskRun({
+      taskRun: makeTaskRun({
         repo: 'acme/Platform/backend',
         sourceControlProvider: 'ado',
       }),
@@ -593,8 +593,8 @@ describe('readSourceControlPullRequestForCloudJob', () => {
     const fetchImpl = vi.fn();
 
     await expect(
-      readSourceControlPullRequestForCloudJob({
-        cloudJob: makeCloudJob({
+      readSourceControlPullRequestForTaskRun({
+        taskRun: makeTaskRun({
           repo: 'acme/backend',
           sourceControlProvider: 'gitlab',
         }),

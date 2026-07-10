@@ -27,12 +27,12 @@ export class PreviewSessionError extends Error {
   }
 }
 
-function validateCloudJobId(cloudJobId: string): number {
-  if (!/^\d+$/.test(cloudJobId)) {
-    throw new PreviewSessionError(400, 'Invalid cloud job ID format');
+function validateRunId(runId: string): number {
+  if (!/^\d+$/.test(runId)) {
+    throw new PreviewSessionError(400, 'Invalid task run ID format');
   }
 
-  return parseInt(cloudJobId, 10);
+  return parseInt(runId, 10);
 }
 
 function parsePreviewUrl(previewUrl: string): URL {
@@ -82,11 +82,11 @@ function buildPreviewWebSocketUrl(previewUrl: URL, token: string): string {
 }
 
 export async function createPreviewSession(params: {
-  cloudJobId: string;
+  runId: string;
   previewUrl: string;
 }): Promise<PreviewSession> {
   const previewUrl = parsePreviewUrl(params.previewUrl);
-  const cloudJobId = validateCloudJobId(params.cloudJobId);
+  const runId = validateRunId(params.runId);
 
   await validatePreviewUrlDomain(previewUrl);
 
@@ -96,12 +96,12 @@ export async function createPreviewSession(params: {
     throw new PreviewSessionError(401, 'Unauthorized');
   }
 
-  const cloudJob = await db.query.taskRuns.findFirst({
-    where: eq(taskRuns.id, cloudJobId),
+  const taskRun = await db.query.taskRuns.findFirst({
+    where: eq(taskRuns.id, runId),
   });
 
-  if (!cloudJob) {
-    throw new PreviewSessionError(404, 'Cloud job not found or access denied');
+  if (!taskRun) {
+    throw new PreviewSessionError(404, 'Task run not found or access denied');
   }
 
   const token = await createPreviewToken({

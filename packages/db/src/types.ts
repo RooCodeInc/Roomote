@@ -8,7 +8,7 @@ import type {
   ConflictResolverMaxPrAgeDays,
   DependabotTriageFrequency,
   ManagerStatsFrequency,
-  PrReviewerSettings,
+  PrReviewSettings,
   SecurityAuditorFrequency,
   SentryTriageFrequency,
   SuggesterFrequency,
@@ -20,7 +20,6 @@ import type {
   deploymentSettings,
   tasks,
   taskPins,
-  taskShares,
   taskPullRequests,
   taskRuns,
   taskRunEvents,
@@ -91,14 +90,6 @@ export type TaskPin = typeof taskPins.$inferSelect;
 export type CreateTaskPin = Omit<typeof taskPins.$inferInsert, Generated>;
 
 /**
- * taskShares
- */
-
-export type TaskShare = typeof taskShares.$inferSelect;
-
-export type CreateTaskShare = Omit<typeof taskShares.$inferInsert, Generated>;
-
-/**
  * taskPullRequests
  */
 
@@ -108,19 +99,22 @@ export type TaskPullRequest = typeof taskPullRequests.$inferSelect;
  * taskRuns
  */
 
-export type Run = typeof taskRuns.$inferSelect;
+export type TaskRun = typeof taskRuns.$inferSelect;
 
-export type CreateRun = Omit<typeof taskRuns.$inferInsert, Generated>;
+export type CreateTaskRun = Omit<typeof taskRuns.$inferInsert, Generated>;
 
-export type UpdateRun = Partial<Omit<Run, 'id' | 'createdAt'>>;
+export type UpdateTaskRun = Partial<Omit<TaskRun, 'id' | 'createdAt'>>;
 
 /**
  * taskRunEvents
  */
 
-export type RunEvent = typeof taskRunEvents.$inferSelect;
+export type TaskRunEvent = typeof taskRunEvents.$inferSelect;
 
-export type CreateRunEvent = Omit<typeof taskRunEvents.$inferInsert, Generated>;
+export type CreateTaskRunEvent = Omit<
+  typeof taskRunEvents.$inferInsert,
+  Generated
+>;
 
 /**
  * task_start_parallel_counts
@@ -426,7 +420,7 @@ export type BackgroundAgentSettings = StoredBackgroundAgentSettings & {
   channelAutoStartEnabled: boolean;
   channelAutoStartSlackChannelIds: string[];
   channelAutoStartInstructions: string | null;
-  reviewCodeSettings: PrReviewerSettings;
+  reviewCodeSettings: PrReviewSettings;
   conflictResolverFrequency: ConflictResolverFrequency;
   conflictResolverLabel: string;
   conflictResolverInstructions: string | null;

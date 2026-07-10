@@ -22,7 +22,7 @@ function isSkippedLinkedReviewHandoffResult(
 
 function isResumedTaskResult(
   result: unknown,
-): result is { resumed: true; cloudJobId?: number; taskId?: string } {
+): result is { resumed: true; runId?: number; taskId?: string } {
   return (
     typeof result === 'object' &&
     result !== null &&

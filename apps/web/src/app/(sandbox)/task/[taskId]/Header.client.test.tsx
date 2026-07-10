@@ -52,7 +52,7 @@ function renderHeader(
   });
 
   const session = {
-    cloudJob: {
+    taskRun: {
       payload: {
         environmentId: 'env-1',
       },
@@ -112,7 +112,7 @@ describe('Header', () => {
 
   it('keeps the header clean when the task uses OpenCode', () => {
     renderHeader({
-      cloudJob: {
+      taskRun: {
         payload: {
           environmentId: 'env-1',
         },
@@ -124,9 +124,9 @@ describe('Header', () => {
     expect(screen.queryByText('OpenCode')).not.toBeInTheDocument();
   });
 
-  it('still hides the runtime indicator when the cloud job does not expose a harness', () => {
+  it('still hides the runtime indicator when the task run does not expose a harness', () => {
     renderHeader({
-      cloudJob: {
+      taskRun: {
         payload: {
           environmentId: 'env-1',
         },

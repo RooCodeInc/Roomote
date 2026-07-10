@@ -42,8 +42,8 @@ vi.mock('@roomote/env', () => ({
 
 const auth = {
   userId: 'user-1',
-  cloudJobId: 42,
-  tokenType: 'cj' as const,
+  runId: 42,
+  tokenType: 'run' as const,
 };
 
 function createApp() {
@@ -58,7 +58,7 @@ function artifactRow(overrides: Record<string, unknown> = {}) {
   return {
     id: 'art-1',
     taskId: 'task-1',
-    cloudJobId: 42,
+    runId: 42,
     artifactType: 'general',
     contentType: 'text/markdown',
     path: 'notes/summary.md',
@@ -163,11 +163,11 @@ describe('listTaskArtifacts', () => {
     expect(mockListArtifactsByTask).not.toHaveBeenCalled();
   });
 
-  it('rejects non cloud-job callers', async () => {
+  it('rejects non task-run callers', async () => {
     mockResolveArtifactRouteAuth.mockReturnValue({
       ok: false,
       status: 403,
-      error: 'Artifact API is only available for cloud job tokens',
+      error: 'Artifact API is only available for task run tokens',
     });
 
     const response = await createApp().request(
@@ -178,11 +178,11 @@ describe('listTaskArtifacts', () => {
     expect(mockListArtifactsByTask).not.toHaveBeenCalled();
   });
 
-  it('rejects tasks the cloud job token cannot read', async () => {
+  it('rejects tasks the task run token cannot read', async () => {
     mockVerifyArtifactRouteTaskReadAccess.mockResolvedValue({
       ok: false,
       status: 403,
-      error: 'Cloud job token does not grant read access to requested task',
+      error: 'Task run token does not grant read access to requested task',
     });
 
     const response = await createApp().request(
@@ -191,7 +191,7 @@ describe('listTaskArtifacts', () => {
 
     expect(response.status).toBe(403);
     expect(await response.json()).toEqual({
-      error: 'Cloud job token does not grant read access to requested task',
+      error: 'Task run token does not grant read access to requested task',
     });
     expect(mockListArtifactsByTask).not.toHaveBeenCalled();
   });

@@ -5,14 +5,14 @@ import { Image, FileText, VideoIcon } from '@/components/system';
 
 import { humanizeFilename } from '@/lib';
 
-import type { CloudSession, TaskArtifact } from '../../hooks';
+import type { TaskSession, TaskArtifact } from '../../hooks';
 import type { ArtifactGroup } from '../../sidebar-actions/types';
 import { useTaskSidePanel } from '../../hooks';
 import { groupArtifactsByPath } from '../../sidebar-actions/utils';
 import { SidePanelHeader } from '../SidePanelHeader';
 
 interface ArtifactListProps {
-  session: CloudSession;
+  session: TaskSession;
 }
 
 function isScreenshotGroup(group: ArtifactGroup<TaskArtifact>): boolean {

@@ -2,11 +2,11 @@ import { db } from '@roomote/db/server';
 
 import { SLACK_TASK_REPLY_SYNC_TOLERANCE_MS } from '../constants.js';
 
-async function getLatestCloudJobTaskMessage(
-  cloudJobId: number,
+async function getLatestTaskRunTaskMessage(
+  runId: number,
 ): Promise<{ ts: number } | null> {
   const latestMessage = await db.query.taskMessages.findFirst({
-    where: (taskMessages, { eq }) => eq(taskMessages.runId, cloudJobId),
+    where: (taskMessages, { eq }) => eq(taskMessages.runId, runId),
     orderBy: (taskMessages, { desc }) => [
       desc(taskMessages.ts),
       desc(taskMessages.createdAt),
@@ -28,10 +28,10 @@ function slackTimestampToMs(ts: string): number | null {
 }
 
 export async function getIsSlackDiverged(params: {
-  cloudJobId: number;
+  runId: number;
   trackedBotReply: { ts: string; text: string; outOfBand?: boolean } | null;
 }): Promise<boolean> {
-  const { cloudJobId, trackedBotReply } = params;
+  const { runId, trackedBotReply } = params;
 
   if (!trackedBotReply) {
     return true;
@@ -53,7 +53,7 @@ export async function getIsSlackDiverged(params: {
     return true;
   }
 
-  const latestTaskMessage = await getLatestCloudJobTaskMessage(cloudJobId);
+  const latestTaskMessage = await getLatestTaskRunTaskMessage(runId);
 
   if (latestTaskMessage === null) {
     return true;

@@ -36,7 +36,7 @@ import { TaskSidePanelDesktop } from './TaskSidePanel';
 
 describe('TaskSidePanelDesktop', () => {
   const session = {
-    cloudJob: {
+    taskRun: {
       id: 123,
     },
     sessionState: 'interactive',

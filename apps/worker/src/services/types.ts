@@ -6,8 +6,8 @@ import { CommandExecutor } from '../command-executor';
  * Built from WorkerEnv values (not process.env) to ensure correct key pairing.
  */
 export interface ServiceContext {
-  /** Cloud job ID for direct preview-token binding. */
-  cloudJobId?: number;
+  /** Task run ID for direct preview-token binding. */
+  runId?: number;
   /** Task ID for this worker - used for logging/diagnostics. */
   taskId?: string;
   /**
@@ -38,7 +38,7 @@ export interface ServiceContext {
    */
   subdomains?: Record<string, string>;
   /**
-   * Explicit primary port name from the cloud job, computed at write time.
+   * Explicit primary port name from the task run, computed at write time.
    */
   primaryPortName?: string | null;
   /**

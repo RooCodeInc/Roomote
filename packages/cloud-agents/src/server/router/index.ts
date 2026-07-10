@@ -12,7 +12,6 @@ export type {
   GitHubRoutingSource,
   GitHubRoutingResult,
   GitHubRoutingDecision,
-  RoutableAgent,
   RoutableEnvironment,
   RoutingWorkspace,
   RoutingPhase,
@@ -79,6 +78,4 @@ export {
   buildLinearRoutingContext,
   buildGitHubRoutingContext,
   getAvailableEnvironments,
-  NON_ROUTABLE_AGENT_TYPES,
-  GITHUB_ONLY_AGENT_TYPES,
 } from './context-builders';

@@ -1,4 +1,4 @@
-import type { Run } from '@roomote/sdk/client';
+import type { TaskRun } from '@roomote/sdk/client';
 
 import {
   buildRequestUserInputTaskUrl,
@@ -184,16 +184,16 @@ describe('buildRequestUserInputTaskUrl', () => {
     }
   });
 
-  function makeCloudJob(payload: unknown): Run {
+  function makeTaskRun(payload: unknown): TaskRun {
     return {
       taskId: 'task-123',
       payload,
-    } as Run;
+    } as TaskRun;
   }
 
   it('builds a task URL when no webPath override exists', () => {
     const url = buildRequestUserInputTaskUrl(
-      makeCloudJob({ repo: 'owner/repo' }),
+      makeTaskRun({ repo: 'owner/repo' }),
       'slack',
     );
 
@@ -204,7 +204,7 @@ describe('buildRequestUserInputTaskUrl', () => {
 
   it('uses payload.webPath for setup-onboarding requests', () => {
     const url = buildRequestUserInputTaskUrl(
-      makeCloudJob({ webPath: '/setup' }),
+      makeTaskRun({ webPath: '/setup' }),
       'slack',
     );
 

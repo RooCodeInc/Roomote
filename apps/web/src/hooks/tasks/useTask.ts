@@ -32,12 +32,12 @@ export const useTask = (
     () =>
       setIsSnapshotting(
         !!(
-          query.data?.cloudJob?.sleepRequestedAt ||
-          query.data?.cloudJob?.snapshotRequestedAt
+          query.data?.taskRun?.sleepRequestedAt ||
+          query.data?.taskRun?.snapshotRequestedAt
         ) &&
-          !isExitedRunStatus(query.data?.cloudJob?.status) &&
-          !query.data?.cloudJob?.snapshotCreatedAt &&
-          !query.data?.cloudJob?.snapshotFailedAt,
+          !isExitedRunStatus(query.data?.taskRun?.status) &&
+          !query.data?.taskRun?.snapshotCreatedAt &&
+          !query.data?.taskRun?.snapshotFailedAt,
       ),
     [query.data],
   );

@@ -9,7 +9,7 @@ import {
 } from '@roomote/types';
 
 interface UseSandboxLogsOptions {
-  cloudJobId: number | undefined;
+  runId: number | undefined;
   enabled?: boolean;
 }
 
@@ -20,7 +20,7 @@ interface UseSandboxLogsResult {
 }
 
 export function useSandboxLogs({
-  cloudJobId,
+  runId,
   enabled = true,
 }: UseSandboxLogsOptions): UseSandboxLogsResult {
   const [logs, setLogs] = useState<SandboxLogEntry[]>([]);
@@ -38,12 +38,12 @@ export function useSandboxLogs({
   }, []);
 
   useEffect(() => {
-    if (!cloudJobId || !enabled) {
+    if (!runId || !enabled) {
       cleanup();
       return;
     }
 
-    const eventSource = new EventSource(`/api/cloud-jobs/${cloudJobId}/logs`, {
+    const eventSource = new EventSource(`/api/task-runs/${runId}/logs`, {
       withCredentials: true,
     });
 
@@ -93,7 +93,7 @@ export function useSandboxLogs({
     eventSource.addEventListener('disconnect', () => cleanup());
 
     return cleanup;
-  }, [cloudJobId, enabled, cleanup]);
+  }, [runId, enabled, cleanup]);
 
   return { logs, error, isConnected };
 }

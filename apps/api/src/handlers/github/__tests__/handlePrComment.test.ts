@@ -40,7 +40,7 @@ vi.mock('../getGitHubAutomationTargets', async () => {
 });
 
 vi.mock('../../tasks/helpers', () => ({
-  findLatestCloudJob: vi.fn(),
+  findLatestTaskRun: vi.fn(),
 }));
 
 vi.mock('../../tasks/sendMessageToTask', () => ({

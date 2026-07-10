@@ -77,7 +77,7 @@ describe('seedDemoData', () => {
 
     expect(withoutSettings(summary.skipped)).toEqual([]);
     expect(withoutSettings(summary.created)).toHaveLength(
-      // user + installation + environment + repositories + tasks + cloud jobs
+      // user + installation + environment + repositories + tasks + task runs
       3 + demoSeedRepositories.length + demoSeedTasks.length * 2,
     );
 
@@ -128,11 +128,11 @@ describe('seedDemoData', () => {
       expect(task?.initiatorUserId).toBe(demoSeedUserId);
       expect(task?.title).toBe(seedTask.title);
 
-      const cloudJob = await db.query.taskRuns.findFirst({
+      const taskRun = await db.query.taskRuns.findFirst({
         where: eq(taskRuns.taskId, seedTask.id),
       });
-      expect(cloudJob).toBeDefined();
-      expect(cloudJob?.status).toBe(seedTask.cloudJobStatus);
+      expect(taskRun).toBeDefined();
+      expect(taskRun?.status).toBe(seedTask.taskRunStatus);
     }
   });
 
@@ -160,9 +160,9 @@ describe('seedDemoData', () => {
     });
     expect(seededTasks).toHaveLength(demoSeedTasks.length);
 
-    const seededCloudJobs = await db.query.taskRuns.findMany({
+    const seededTaskRuns = await db.query.taskRuns.findMany({
       where: inArray(taskRuns.taskId, demoTaskIds),
     });
-    expect(seededCloudJobs).toHaveLength(demoSeedTasks.length);
+    expect(seededTaskRuns).toHaveLength(demoSeedTasks.length);
   });
 });

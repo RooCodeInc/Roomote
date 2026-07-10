@@ -32,7 +32,6 @@ if (!match?.[1]) {
 const FOLLOWUP_PROMPT = match[1];
 
 interface PromptVars {
-  suggestedAgentName?: string;
   suggestedWorkspace?: string;
   userResponse?: string;
   context?: string;
@@ -52,10 +51,8 @@ function buildContext(vars: PromptVars): string {
   // Build context from structured variables
   const parts: string[] = [];
 
-  if (vars.suggestedAgentName && vars.suggestedWorkspace) {
-    parts.push(
-      `**Routing Suggestion**: ${vars.suggestedAgentName} working on ${vars.suggestedWorkspace}`,
-    );
+  if (vars.suggestedWorkspace) {
+    parts.push(`**Workspace Suggestion**: ${vars.suggestedWorkspace}`);
   }
 
   if (vars.userResponse) {

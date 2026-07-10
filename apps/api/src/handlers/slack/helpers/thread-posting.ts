@@ -94,7 +94,7 @@ export async function postTaskSuggestionStartedMessage(params: {
   channelId: string;
   threadTs: string;
   workspaceName: string;
-  cloudJobId: number | null;
+  runId: number | null;
   initiatingSlackUserId: string;
   taskId: string | null;
   readinessNote?: string;
@@ -104,7 +104,7 @@ export async function postTaskSuggestionStartedMessage(params: {
     channelId,
     threadTs,
     workspaceName,
-    cloudJobId,
+    runId,
     initiatingSlackUserId,
     taskId,
     readinessNote,
@@ -126,7 +126,7 @@ export async function postTaskSuggestionStartedMessage(params: {
       thread_ts: threadTs,
       blocks: buildStartedBlocks({
         workspaceDisplayName: workspaceName,
-        cloudJobId,
+        runId,
         taskId,
         initiatingSlackUserId,
         taskUrl: taskUrl?.toString(),
@@ -134,8 +134,8 @@ export async function postTaskSuggestionStartedMessage(params: {
       }),
     });
 
-    if (startedMessageTs && cloudJobId) {
-      await setSlackStartedMessageTs(cloudJobId, startedMessageTs, {
+    if (startedMessageTs && runId) {
+      await setSlackStartedMessageTs(runId, startedMessageTs, {
         agentName: AGENT_DISPLAY_NAME,
         initiatingSlackUserId,
         workspaceDisplayName: workspaceName,

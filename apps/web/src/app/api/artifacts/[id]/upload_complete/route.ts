@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 
 import { db, taskArtifacts, eq } from '@roomote/db/server';
 
-import { authorizeJobToken, getArtifactById } from '@/lib/server';
+import { authorizeRunToken, getArtifactById } from '@/lib/server';
 
 export const runtime = 'nodejs';
 
@@ -13,7 +13,7 @@ export async function POST(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> },
 ) {
-  const authResult = await authorizeJobToken(request);
+  const authResult = await authorizeRunToken(request);
 
   if (!authResult.success) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });

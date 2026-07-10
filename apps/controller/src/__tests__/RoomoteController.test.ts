@@ -1,4 +1,4 @@
-import type { Run } from '@roomote/db/server';
+import type { TaskRun } from '@roomote/db/server';
 
 const {
   mockEnv,
@@ -142,7 +142,7 @@ describe('RoomoteController', () => {
     await (
       controller as unknown as {
         spawnFreshWorker: (
-          cloudJob: Run,
+          taskRun: TaskRun,
           authToken: string,
           deploymentSlug: string,
           timeoutMs: number,
@@ -153,7 +153,7 @@ describe('RoomoteController', () => {
       {
         id: 48,
         payload: { environmentId: 'env_123' },
-      } as Run,
+      } as TaskRun,
       'auth-token',
       'roomote',
       60_000,
@@ -187,7 +187,7 @@ describe('RoomoteController', () => {
       (
         controller as unknown as {
           spawnFreshWorker: (
-            cloudJob: Run,
+            taskRun: TaskRun,
             authToken: string,
             deploymentSlug: string,
             timeoutMs: number,
@@ -198,7 +198,7 @@ describe('RoomoteController', () => {
         {
           id: 46,
           payload: { environmentId: 'env_123' },
-        } as Run,
+        } as TaskRun,
         'auth-token',
         'roomote',
         60_000,
@@ -215,7 +215,7 @@ describe('RoomoteController', () => {
     await (
       controller as unknown as {
         spawnFreshWorker: (
-          cloudJob: Run,
+          taskRun: TaskRun,
           authToken: string,
           deploymentSlug: string,
           timeoutMs: number,
@@ -226,7 +226,7 @@ describe('RoomoteController', () => {
       {
         id: 49,
         payload: { environmentId: 'env_123' },
-      } as Run,
+      } as TaskRun,
       'auth-token',
       'roomote',
       60_000,
@@ -256,7 +256,7 @@ describe('RoomoteController', () => {
       (
         controller as unknown as {
           spawnFreshWorker: (
-            cloudJob: Run,
+            taskRun: TaskRun,
             authToken: string,
             deploymentSlug: string,
             timeoutMs: number,
@@ -267,7 +267,7 @@ describe('RoomoteController', () => {
         {
           id: 50,
           payload: { environmentId: 'env_123' },
-        } as Run,
+        } as TaskRun,
         'auth-token',
         'roomote',
         60_000,
@@ -284,7 +284,7 @@ describe('RoomoteController', () => {
     await (
       controller as unknown as {
         spawnFreshWorker: (
-          cloudJob: Run,
+          taskRun: TaskRun,
           authToken: string,
           deploymentSlug: string,
           timeoutMs: number,
@@ -295,7 +295,7 @@ describe('RoomoteController', () => {
       {
         id: 51,
         payload: { environmentId: 'env_123' },
-      } as Run,
+      } as TaskRun,
       'auth-token',
       'roomote',
       60_000,
@@ -323,7 +323,7 @@ describe('RoomoteController', () => {
     await (
       controller as unknown as {
         spawnFreshWorker: (
-          cloudJob: Run,
+          taskRun: TaskRun,
           authToken: string,
           deploymentSlug: string,
           timeoutMs: number,
@@ -334,7 +334,7 @@ describe('RoomoteController', () => {
       {
         id: 53,
         payload: { environmentId: 'env_123' },
-      } as Run,
+      } as TaskRun,
       'auth-token',
       'roomote',
       5 * 60 * 60 * 1_000,
@@ -358,7 +358,7 @@ describe('RoomoteController', () => {
       (
         controller as unknown as {
           spawnFreshWorker: (
-            cloudJob: Run,
+            taskRun: TaskRun,
             authToken: string,
             deploymentSlug: string,
             timeoutMs: number,
@@ -369,7 +369,7 @@ describe('RoomoteController', () => {
         {
           id: 52,
           payload: { environmentId: 'env_123' },
-        } as Run,
+        } as TaskRun,
         'auth-token',
         'roomote',
         60_000,
@@ -398,7 +398,7 @@ describe('RoomoteController', () => {
     await (
       controller as unknown as {
         spawnFreshWorker: (
-          cloudJob: Run,
+          taskRun: TaskRun,
           authToken: string,
           deploymentSlug: string,
           timeoutMs: number,
@@ -409,7 +409,7 @@ describe('RoomoteController', () => {
       {
         id: 44,
         payload: { environmentId: 'env_123' },
-      } as Run,
+      } as TaskRun,
       'auth-token',
       'roomote',
       60_000,

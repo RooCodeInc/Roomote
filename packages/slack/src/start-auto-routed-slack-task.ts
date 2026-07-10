@@ -52,7 +52,7 @@ export type StartAutoRoutedSlackTaskResult =
   | {
       status: 'started';
       threadId: string;
-      cloudJobId: number | null;
+      runId: number | null;
       taskId: string | null;
       taskUrl?: string;
     }
@@ -435,7 +435,7 @@ export async function startAutoRoutedSlackTask({
         channel,
         messageTs: threadId,
       })) ?? null;
-    const cloudJob = await startSlackAppMentionTask({
+    const taskRun = await startSlackAppMentionTask({
       initiator,
       trigger,
       workflow,
@@ -488,15 +488,15 @@ export async function startAutoRoutedSlackTask({
       threadMessages?.map((message) => message.ts) ?? [],
     );
 
-    if (cloudJob.reusedExistingJob) {
+    if (taskRun.reusedExistingRun) {
       return {
         status: 'started',
         threadId,
-        cloudJobId: cloudJob.id,
-        taskId: cloudJob.taskId,
-        taskUrl: cloudJob.taskId
+        runId: taskRun.id,
+        taskId: taskRun.taskId,
+        taskUrl: taskRun.taskId
           ? getTaskUrl({
-              taskId: cloudJob.taskId,
+              taskId: taskRun.taskId,
               utm: { source: 'slack', campaign: 'workflow_step' },
             })
           : undefined,
@@ -504,8 +504,8 @@ export async function startAutoRoutedSlackTask({
     }
 
     await finishRoutedStart({
-      cloudJobId: cloudJob.id,
-      taskId: cloudJob.taskId,
+      runId: taskRun.id,
+      taskId: taskRun.taskId,
       taskDescription: taskText,
       userId: launchUserId,
       initiatingSlackUserId,
@@ -527,11 +527,11 @@ export async function startAutoRoutedSlackTask({
     return {
       status: 'started',
       threadId,
-      cloudJobId: cloudJob.id,
-      taskId: cloudJob.taskId,
-      taskUrl: cloudJob.taskId
+      runId: taskRun.id,
+      taskId: taskRun.taskId,
+      taskUrl: taskRun.taskId
         ? getTaskUrl({
-            taskId: cloudJob.taskId,
+            taskId: taskRun.taskId,
             utm: { source: 'slack', campaign: 'workflow_step' },
           })
         : undefined,

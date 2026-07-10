@@ -61,7 +61,7 @@ import type { UserAuthSuccess } from '@/types';
 import { getUserDisplayName } from '@/lib/user-display-name';
 import { formatAutomationLabel } from '@/lib/task-creator-filter';
 
-import { getLatestCloudJobsByTaskId } from './cloud-jobs';
+import { getLatestTaskRunsByTaskId } from './task-runs';
 import { getRepositories } from './source-control';
 import {
   getPullRequestFactRepositoryIdsNeedingBackfill,
@@ -1103,7 +1103,7 @@ async function getTaskAnalyticsBaseRows(
     ? taskResults.filter((task) => task.timestamp >= cutoff)
     : taskResults;
 
-  const latestJobsByTaskId = await getLatestCloudJobsByTaskId(
+  const latestRunsByTaskId = await getLatestTaskRunsByTaskId(
     filteredTasks.map((task) => task.id),
   );
 
@@ -1111,7 +1111,7 @@ async function getTaskAnalyticsBaseRows(
     ...new Set(
       filteredTasks
         .map((task) => {
-          const payload = latestJobsByTaskId[task.id]?.payload;
+          const payload = latestRunsByTaskId[task.id]?.payload;
           if (
             payload &&
             typeof payload === 'object' &&
@@ -1166,8 +1166,8 @@ async function getTaskAnalyticsBaseRows(
   }
 
   return filteredTasks.map((task) => {
-    const latestJob = latestJobsByTaskId[task.id];
-    const payload = latestJob?.payload;
+    const latestRun = latestRunsByTaskId[task.id];
+    const payload = latestRun?.payload;
     const environmentId =
       payload &&
       typeof payload === 'object' &&

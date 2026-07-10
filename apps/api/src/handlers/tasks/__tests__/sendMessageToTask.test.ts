@@ -1,9 +1,9 @@
 const {
-  mockCreateJobToken,
+  mockCreateRunToken,
   mockCreateTRPCProxyClient,
   mockEnqueueTask,
   mockGetTaskChannelBindings,
-  mockFindLatestCloudJob,
+  mockFindLatestTaskRun,
   mockHttpBatchLink,
   mockSendPromptMutate,
   mockSteerTaskMutate,
@@ -12,11 +12,11 @@ const {
   mockUpdateActingUserIdIfNeeded,
   mockUserFindFirst,
 } = vi.hoisted(() => ({
-  mockCreateJobToken: vi.fn(),
+  mockCreateRunToken: vi.fn(),
   mockCreateTRPCProxyClient: vi.fn(),
   mockEnqueueTask: vi.fn(),
   mockGetTaskChannelBindings: vi.fn(),
-  mockFindLatestCloudJob: vi.fn(),
+  mockFindLatestTaskRun: vi.fn(),
   mockHttpBatchLink: vi.fn((options) => options),
   mockSendPromptMutate: vi.fn(),
   mockSteerTaskMutate: vi.fn(),
@@ -37,7 +37,7 @@ vi.mock('@roomote/auth', async (importOriginal) => {
 
   return {
     ...actual,
-    createJobToken: mockCreateJobToken,
+    createRunToken: mockCreateRunToken,
   };
 });
 
@@ -77,7 +77,7 @@ vi.mock('@roomote/slack', () => ({
 }));
 
 vi.mock('../helpers', () => ({
-  findLatestCloudJob: mockFindLatestCloudJob,
+  findLatestTaskRun: mockFindLatestTaskRun,
   getTaskChannelBindings: mockGetTaskChannelBindings,
 }));
 
@@ -112,7 +112,7 @@ import { EXPIRED_SNAPSHOT_RESUME_ERROR } from '@roomote/types';
 
 import { sendMessageToTask, steerMessageToTask } from '../sendMessageToTask';
 
-function createActiveJob(
+function createActiveRun(
   overrides: Partial<{
     id: number;
     status: string;
@@ -155,7 +155,7 @@ function createActiveJob(
 describe('sendMessageToTask', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    mockCreateJobToken.mockResolvedValue('job-token');
+    mockCreateRunToken.mockResolvedValue('run-token');
     mockCreateTRPCProxyClient.mockImplementation(() => ({
       commands: {
         sendPrompt: {
@@ -193,8 +193,8 @@ describe('sendMessageToTask', () => {
     // Ordering is the security property: the run's actingUserId selects
     // whose credentials actor-scoped routes resolve, so the trusted switch
     // must land before the new sender's prompt can run.
-    mockFindLatestCloudJob.mockResolvedValue(
-      createActiveJob({ actingUserId: 'user-1' }),
+    mockFindLatestTaskRun.mockResolvedValue(
+      createActiveRun({ actingUserId: 'user-1' }),
     );
 
     const result = await sendMessageToTask({
@@ -205,7 +205,7 @@ describe('sendMessageToTask', () => {
 
     expect(result).toEqual({ success: true, result: { ok: true } });
     expect(mockUpdateActingUserIdIfNeeded).toHaveBeenCalledWith({
-      jobId: 42,
+      runId: 42,
       currentActingUserId: 'user-1',
       nextActingUserId: 'user-2',
       preserveActor: false,
@@ -220,8 +220,8 @@ describe('sendMessageToTask', () => {
   });
 
   it('does not deliver the prompt when the pre-delivery acting-user write fails', async () => {
-    mockFindLatestCloudJob.mockResolvedValue(
-      createActiveJob({ actingUserId: 'user-1' }),
+    mockFindLatestTaskRun.mockResolvedValue(
+      createActiveRun({ actingUserId: 'user-1' }),
     );
     mockUpdateActingUserIdIfNeeded.mockRejectedValueOnce(
       new Error('db unavailable'),
@@ -243,8 +243,8 @@ describe('sendMessageToTask', () => {
   });
 
   it('rolls back the actor when prompt delivery fails after the switch', async () => {
-    mockFindLatestCloudJob.mockResolvedValue(
-      createActiveJob({ actingUserId: 'user-1' }),
+    mockFindLatestTaskRun.mockResolvedValue(
+      createActiveRun({ actingUserId: 'user-1' }),
     );
     mockSendPromptMutate.mockRejectedValueOnce(
       new Error('sandbox delivery failed'),
@@ -263,15 +263,15 @@ describe('sendMessageToTask', () => {
     });
     expect(mockRestoreActingUserIdAfterFailedDelivery).toHaveBeenCalledWith({
       handlerName: 'sendMessageToTask',
-      jobId: 42,
+      runId: 42,
       previousActingUserId: 'user-1',
       attemptedActingUserId: 'user-2',
     });
   });
 
   it('writes the acting user BEFORE delivering steering prompts to the sandbox', async () => {
-    mockFindLatestCloudJob.mockResolvedValue(
-      createActiveJob({ actingUserId: 'user-1' }),
+    mockFindLatestTaskRun.mockResolvedValue(
+      createActiveRun({ actingUserId: 'user-1' }),
     );
 
     const result = await steerMessageToTask({
@@ -282,7 +282,7 @@ describe('sendMessageToTask', () => {
 
     expect(result).toEqual({ success: true, result: { ok: true } });
     expect(mockUpdateActingUserIdIfNeeded).toHaveBeenCalledWith({
-      jobId: 42,
+      runId: 42,
       currentActingUserId: 'user-1',
       nextActingUserId: 'user-2',
       preserveActor: false,
@@ -293,8 +293,8 @@ describe('sendMessageToTask', () => {
   });
 
   it('rolls back the actor when steering delivery fails after the switch', async () => {
-    mockFindLatestCloudJob.mockResolvedValue(
-      createActiveJob({ actingUserId: 'user-1' }),
+    mockFindLatestTaskRun.mockResolvedValue(
+      createActiveRun({ actingUserId: 'user-1' }),
     );
     mockSteerTaskMutate.mockRejectedValueOnce(
       new Error('sandbox delivery failed'),
@@ -313,14 +313,14 @@ describe('sendMessageToTask', () => {
     });
     expect(mockRestoreActingUserIdAfterFailedDelivery).toHaveBeenCalledWith({
       handlerName: 'steerMessageToTask',
-      jobId: 42,
+      runId: 42,
       previousActingUserId: 'user-1',
       attemptedActingUserId: 'user-2',
     });
   });
 
   it('stores the latest user message for active Slack-thread tasks', async () => {
-    mockFindLatestCloudJob.mockResolvedValue(createActiveJob());
+    mockFindLatestTaskRun.mockResolvedValue(createActiveRun());
 
     const result = await sendMessageToTask({
       taskId: 'task-1',
@@ -335,13 +335,13 @@ describe('sendMessageToTask', () => {
       result: { ok: true },
     });
     expect(mockTrackLatestUserMessageForSlackQuote).toHaveBeenCalledWith({
-      cloudJobId: 42,
+      runId: 42,
       text: 'Please keep the existing payout logic.',
       userName: 'Alice',
       onError: expect.any(Function),
     });
-    expect(mockCreateJobToken).toHaveBeenCalledWith({
-      cloudJobId: 42,
+    expect(mockCreateRunToken).toHaveBeenCalledWith({
+      runId: 42,
       userId: 'user-1',
       timeoutMs: 15 * 60 * 1000,
     });
@@ -351,7 +351,7 @@ describe('sendMessageToTask', () => {
       }),
     );
     expect(mockHttpBatchLink.mock.calls[0]?.[0].headers()).toEqual({
-      Authorization: 'Bearer job-token',
+      Authorization: 'Bearer run-token',
     });
     expect(mockSendPromptMutate).toHaveBeenCalledWith({
       prompt: 'Please keep the existing payout logic.',
@@ -361,8 +361,8 @@ describe('sendMessageToTask', () => {
   });
 
   it('does not store the latest user message for tasks without Slack thread context', async () => {
-    mockFindLatestCloudJob.mockResolvedValue(
-      createActiveJob({
+    mockFindLatestTaskRun.mockResolvedValue(
+      createActiveRun({
         payload: { repo: 'acme/app' },
       }),
     );
@@ -390,9 +390,9 @@ describe('sendMessageToTask', () => {
     });
   });
 
-  it('stores the latest user message on the resumed Slack job when resuming from snapshot', async () => {
-    mockFindLatestCloudJob.mockResolvedValue(
-      createActiveJob({
+  it('stores the latest user message on the resumed Slack run when resuming from snapshot', async () => {
+    mockFindLatestTaskRun.mockResolvedValue(
+      createActiveRun({
         status: 'completed',
         sandboxServerUrl: null,
         snapshotId: 'snap-1',
@@ -415,12 +415,12 @@ describe('sendMessageToTask', () => {
       success: true,
       result: {
         resumed: true,
-        cloudJobId: 77,
+        runId: 77,
         taskId: 'task-1',
       },
     });
     expect(mockTrackLatestUserMessageForSlackQuote).toHaveBeenCalledWith({
-      cloudJobId: 77,
+      runId: 77,
       text: 'Resume and use the same thread.',
       userName: 'Alice',
       onError: expect.any(Function),
@@ -442,8 +442,8 @@ describe('sendMessageToTask', () => {
   });
 
   it('returns a clear error when a sleeping task snapshot has expired', async () => {
-    mockFindLatestCloudJob.mockResolvedValue(
-      createActiveJob({
+    mockFindLatestTaskRun.mockResolvedValue(
+      createActiveRun({
         status: 'completed',
         sandboxServerUrl: null,
         snapshotId: 'snap-expired',
@@ -472,7 +472,7 @@ describe('sendMessageToTask', () => {
   });
 
   it('still sends prompts when Slack quote context lookup fails', async () => {
-    mockFindLatestCloudJob.mockResolvedValue(createActiveJob());
+    mockFindLatestTaskRun.mockResolvedValue(createActiveRun());
     mockUserFindFirst.mockRejectedValueOnce(new Error('db failed'));
 
     const result = await sendMessageToTask({
@@ -492,7 +492,7 @@ describe('sendMessageToTask', () => {
   });
 
   it('passes the resolved display name to the worker for GitHub PR follow-up sendPrompt messages', async () => {
-    mockFindLatestCloudJob.mockResolvedValue(createActiveJob());
+    mockFindLatestTaskRun.mockResolvedValue(createActiveRun());
     mockUserFindFirst.mockResolvedValue({
       name: 'Matt Rubens',
       email: 'matt@example.com',
@@ -517,7 +517,7 @@ describe('sendMessageToTask', () => {
   });
 
   it('stores the latest user message for steerMessageToTask on active Slack-thread tasks', async () => {
-    mockFindLatestCloudJob.mockResolvedValue(createActiveJob());
+    mockFindLatestTaskRun.mockResolvedValue(createActiveRun());
 
     const result = await steerMessageToTask({
       taskId: 'task-1',
@@ -530,13 +530,13 @@ describe('sendMessageToTask', () => {
       result: { ok: true },
     });
     expect(mockTrackLatestUserMessageForSlackQuote).toHaveBeenCalledWith({
-      cloudJobId: 42,
+      runId: 42,
       text: 'Pause the implementation and inspect the failing test.',
       userName: 'Alice',
       onError: expect.any(Function),
     });
-    expect(mockCreateJobToken).toHaveBeenCalledWith({
-      cloudJobId: 42,
+    expect(mockCreateRunToken).toHaveBeenCalledWith({
+      runId: 42,
       userId: 'user-1',
       timeoutMs: 15 * 60 * 1000,
     });
@@ -546,7 +546,7 @@ describe('sendMessageToTask', () => {
   });
 
   it('skips API-side Slack quote tracking for GitHub PR follow-up steering messages but passes the resolved display name to the worker', async () => {
-    mockFindLatestCloudJob.mockResolvedValue(createActiveJob());
+    mockFindLatestTaskRun.mockResolvedValue(createActiveRun());
     mockUserFindFirst.mockResolvedValue({
       name: 'Matt Rubens',
       email: 'matt@example.com',
@@ -572,7 +572,7 @@ describe('sendMessageToTask', () => {
   });
 
   it('uses an explicit workerQuoteUserName override instead of resolving the sender user, so unlinked commenters are not misattributed to the task owner', async () => {
-    mockFindLatestCloudJob.mockResolvedValue(createActiveJob());
+    mockFindLatestTaskRun.mockResolvedValue(createActiveRun());
 
     const result = await steerMessageToTask({
       taskId: 'task-1',
@@ -594,7 +594,7 @@ describe('sendMessageToTask', () => {
   });
 
   it('still steers GitHub PR follow-ups when the display name lookup fails', async () => {
-    mockFindLatestCloudJob.mockResolvedValue(createActiveJob());
+    mockFindLatestTaskRun.mockResolvedValue(createActiveRun());
     mockUserFindFirst.mockRejectedValueOnce(new Error('db failed'));
 
     const result = await steerMessageToTask({
@@ -614,8 +614,8 @@ describe('sendMessageToTask', () => {
   });
 
   it('skips Slack quote tracking when GitHub PR follow-up steering resumes from snapshot', async () => {
-    mockFindLatestCloudJob.mockResolvedValue(
-      createActiveJob({
+    mockFindLatestTaskRun.mockResolvedValue(
+      createActiveRun({
         status: 'completed',
         sandboxServerUrl: null,
         snapshotId: 'snap-1',
@@ -638,7 +638,7 @@ describe('sendMessageToTask', () => {
       success: true,
       result: {
         resumed: true,
-        cloudJobId: 77,
+        runId: 77,
         taskId: 'task-1',
       },
     });

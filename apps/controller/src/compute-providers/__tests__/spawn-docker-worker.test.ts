@@ -33,7 +33,7 @@ describe('processListIncludesDockerWorkerRun', () => {
     ).toBe(true);
   });
 
-  it('does not match other cloud jobs', () => {
+  it('does not match other task runs', () => {
     expect(
       processListIncludesDockerWorkerRun(
         '/sandbox/worker/dist/worker.js run 13',

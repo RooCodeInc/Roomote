@@ -7,7 +7,7 @@ export * from './use-preview-pane';
 export * from './use-close-preview-on-sleep';
 export * from './use-task-side-panel';
 export * from './use-sandbox-store';
-export * from './use-cloud-session';
+export * from './use-task-session';
 export * from './use-sleep-invalidation';
 export * from './use-task-completion-notification';
 export * from './use-task-message-envelopes';

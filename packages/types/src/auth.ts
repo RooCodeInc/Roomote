@@ -1,10 +1,10 @@
 import { z } from 'zod';
 
 /**
- * JobTokenPayload
+ * RunTokenPayload
  */
 
-export const jobTokenPayloadSchema = z.object({
+export const runTokenPayloadSchema = z.object({
   iss: z.string().min(1, 'Issuer (iss) is required'),
   sub: z.string().min(1, 'Subject (sub) is required'), // Run ID
   exp: z.number().int().positive('Expiration (exp) must be a positive integer'),
@@ -12,32 +12,32 @@ export const jobTokenPayloadSchema = z.object({
   nbf: z.number().int().positive('Not before (nbf) must be a positive integer'),
   v: z.literal(1, { errorMap: () => ({ message: 'Version must be 1' }) }),
   r: z.object({
-    // Absent user claim means the job runs as the deployment service
+    // Absent user claim means the run runs as the deployment service
     // principal (automation-initiated work with no human driver).
     u: z.string().min(1, 'User ID must be non-empty when present').optional(),
-    t: z.literal('cj', {
-      errorMap: () => ({ message: 'Token type must be "cj"' }),
+    t: z.literal('run', {
+      errorMap: () => ({ message: 'Token type must be "run"' }),
     }),
   }),
 });
 
-export type JobTokenPayload = z.infer<typeof jobTokenPayloadSchema>;
+export type RunTokenPayload = z.infer<typeof runTokenPayloadSchema>;
 
 /**
- * JobTokenContext
+ * RunTokenContext
  *
- * `principal` distinguishes a human-scoped job token from one minted for the
+ * `principal` distinguishes a human-scoped run token from one minted for the
  * deployment service principal. `userId` is null exactly when
  * `principal === 'deployment'`.
  */
 
-export type JobTokenPrincipal = 'user' | 'deployment';
+export type RunTokenPrincipal = 'user' | 'deployment';
 
-export interface JobTokenContext {
-  cloudJobId: number;
+export interface RunTokenContext {
+  runId: number;
   userId: string | null;
-  principal: JobTokenPrincipal;
-  tokenType: 'cj';
+  principal: RunTokenPrincipal;
+  tokenType: 'run';
   version: number;
 }
 

@@ -1,6 +1,9 @@
 import { type ComputeProvider } from '@roomote/types';
 import { Env } from '@roomote/env';
-import { type Run, resolveComputeProviderEnvValues } from '@roomote/db/server';
+import {
+  type TaskRun,
+  resolveComputeProviderEnvValues,
+} from '@roomote/db/server';
 
 import { BaseController } from './BaseController';
 import {
@@ -55,7 +58,7 @@ export class RoomoteController extends BaseController {
   }
 
   protected async spawnFreshWorker(
-    cloudJob: Run,
+    taskRun: TaskRun,
     authToken: string,
     deploymentSlug: string,
     timeoutMs: number,
@@ -86,7 +89,7 @@ export class RoomoteController extends BaseController {
           );
         }
 
-        await spawnModalWorker(cloudJob, authToken, {
+        await spawnModalWorker(taskRun, authToken, {
           deploymentSlug: deploymentSlug,
           modalTags: this.buildSandboxTags(),
           modalTokenId,
@@ -106,7 +109,7 @@ export class RoomoteController extends BaseController {
         return;
       }
       case 'docker': {
-        await spawnDockerWorker(cloudJob, authToken, {
+        await spawnDockerWorker(taskRun, authToken, {
           image: Env.DOCKER_WORKER_IMAGE,
           platform: Env.DOCKER_WORKER_PLATFORM,
           network: Env.DOCKER_WORKER_NETWORK,
@@ -139,7 +142,7 @@ export class RoomoteController extends BaseController {
           );
         }
 
-        await spawnDaytonaWorker(cloudJob, authToken, {
+        await spawnDaytonaWorker(taskRun, authToken, {
           deploymentSlug: deploymentSlug,
           daytonaTags: this.buildSandboxTags(),
           daytonaApiKey,
@@ -163,7 +166,7 @@ export class RoomoteController extends BaseController {
           throw new Error('E2B_TEMPLATE_ID is required to spawn E2B workers');
         }
 
-        await spawnE2bWorker(cloudJob, authToken, {
+        await spawnE2bWorker(taskRun, authToken, {
           deploymentSlug: deploymentSlug,
           e2bTags: this.buildSandboxTags(),
           e2bApiKey,
@@ -171,7 +174,7 @@ export class RoomoteController extends BaseController {
           e2bTemplateId,
           // E2B rejects sandbox timeouts above the plan's lifetime cap, so
           // clamp to the configured ceiling; sleep-check's provider-timeout
-          // backstop reads the real deadline and winds the job down first.
+          // backstop reads the real deadline and winds the task run down first.
           e2bTimeoutMs: Math.min(timeoutMs, Env.E2B_MAX_SANDBOX_TIMEOUT_MS),
           localTarballPath: this.localWorkerReleasePath,
         });

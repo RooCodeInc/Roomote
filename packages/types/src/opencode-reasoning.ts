@@ -1,4 +1,4 @@
-import type { ReasoningEffort } from './cloud-jobs';
+import type { ReasoningEffort } from './task-runs';
 
 /**
  * Maps a Roomote reasoning effort to the Anthropic extended-thinking token

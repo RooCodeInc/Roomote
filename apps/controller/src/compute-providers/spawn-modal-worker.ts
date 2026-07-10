@@ -5,13 +5,13 @@ import {
   getPrimaryPortFromConfig,
 } from '@roomote/types';
 import {
-  type Run,
+  type TaskRun,
   createComputeProviderMutationEventRecorder,
   db,
   taskRuns,
   eq,
 } from '@roomote/db/server';
-import { stampCloudJobMilestone } from '@roomote/sdk/server';
+import { stampTaskRunMilestone } from '@roomote/sdk/server';
 import {
   buildComputeProviderMutationDetails,
   buildModalWorkerEnv,
@@ -25,9 +25,9 @@ import {
 
 import { primeEnvironmentOidcForMachine } from '../sandbox-oidc';
 import {
-  getNamedPortsForCloudJob,
-  shouldEnableAuthBypassForCloudJob,
-  updateCloudJobMachine,
+  getNamedPortsForTaskRun,
+  shouldEnableAuthBypassForTaskRun,
+  updateTaskRunMachine,
 } from '../utils';
 
 const MODAL_LAUNCH_OUTPUT_TEXT_LIMIT = 500;
@@ -87,32 +87,34 @@ function buildDetachedWorkerExitError(
   });
 }
 
-function getWorkerLaunchCommand(cloudJob: Run): 'snapshot' | 'resume' | 'run' {
-  return cloudJob.payloadKind === TaskPayloadKind.SnapshotEnvironment
+function getWorkerLaunchCommand(
+  taskRun: TaskRun,
+): 'snapshot' | 'resume' | 'run' {
+  return taskRun.payloadKind === TaskPayloadKind.SnapshotEnvironment
     ? 'snapshot'
-    : cloudJob.payloadKind === TaskPayloadKind.SnapshotResume
+    : taskRun.payloadKind === TaskPayloadKind.SnapshotResume
       ? 'resume'
       : 'run';
 }
 
-function getWorkerLaunchArgs(cloudJob: Run, machineId: string): string[] {
-  const command = getWorkerLaunchCommand(cloudJob);
+function getWorkerLaunchArgs(taskRun: TaskRun, machineId: string): string[] {
+  const command = getWorkerLaunchCommand(taskRun);
 
-  return cloudJob.payloadKind === TaskPayloadKind.SnapshotEnvironment
+  return taskRun.payloadKind === TaskPayloadKind.SnapshotEnvironment
     ? [
         'snapshot',
-        '--cloud-job-id',
-        cloudJob.id.toString(),
+        '--task-run-id',
+        taskRun.id.toString(),
         '--environment-id',
-        cloudJob.payload.environmentId ?? '',
+        taskRun.payload.environmentId ?? '',
         '--sandbox-id',
         machineId,
       ]
-    : [command, cloudJob.id.toString()];
+    : [command, taskRun.id.toString()];
 }
 
 export async function spawnModalWorker(
-  cloudJob: Run,
+  taskRun: TaskRun,
   authToken: string,
   config: {
     modalTokenId: string;
@@ -154,12 +156,12 @@ export async function spawnModalWorker(
     modalTags,
   } = config;
   const parsedModalRegions = parseModalRegions(modalRegions);
-  const environmentId = cloudJob.payload.environmentId;
+  const environmentId = taskRun.payload.environmentId;
 
   const { namedPorts, environmentSnapshotId, environmentConfig } =
-    await getNamedPortsForCloudJob(cloudJob);
+    await getNamedPortsForTaskRun(taskRun);
 
-  const shouldEnableAuthBypass = shouldEnableAuthBypassForCloudJob({
+  const shouldEnableAuthBypass = shouldEnableAuthBypassForTaskRun({
     environmentConfig,
     namedPorts,
   });
@@ -177,12 +179,12 @@ export async function spawnModalWorker(
     | { launchMode: 'environment_snapshot'; sourceSnapshotId: string }
     | { launchMode: 'task_snapshot'; sourceSnapshotId: string };
 
-  if (cloudJob.payloadKind === TaskPayloadKind.SnapshotResume) {
-    const snapshotId = cloudJob.sourceSnapshotId;
+  if (taskRun.payloadKind === TaskPayloadKind.SnapshotResume) {
+    const snapshotId = taskRun.sourceSnapshotId;
 
     if (!snapshotId) {
       throw new NonRetryableSpawnError(
-        `SnapshotResume job #${cloudJob.id} missing sourceSnapshotId`,
+        `SnapshotResume task run #${taskRun.id} missing sourceSnapshotId`,
       );
     }
 
@@ -190,17 +192,17 @@ export async function spawnModalWorker(
       launchMode: 'task_snapshot',
       sourceSnapshotId: snapshotId,
     };
-  } else if (cloudJob.payloadKind === TaskPayloadKind.SnapshotEnvironment) {
+  } else if (taskRun.payloadKind === TaskPayloadKind.SnapshotEnvironment) {
     // Environment snapshot refreshes must rebuild from the configured base
     // image path instead of inheriting the previous environment snapshot.
     launchOptions = { launchMode: 'fresh' };
   } else {
-    // For all other job types, any
-    // available snapshot—whether persisted on the job or resolved from the
+    // For all other task run kinds, any
+    // available snapshot—whether persisted on the task run or resolved from the
     // environment—is treated as a cached base image. The latest shipped
     // worker/runtime is reinstalled on top before work begins.
     const snapshotId =
-      cloudJob.sourceSnapshotId ?? environmentSnapshotId ?? undefined;
+      taskRun.sourceSnapshotId ?? environmentSnapshotId ?? undefined;
 
     launchOptions = snapshotId
       ? { launchMode: 'environment_snapshot', sourceSnapshotId: snapshotId }
@@ -208,16 +210,16 @@ export async function spawnModalWorker(
   }
 
   if (
-    cloudJob.payloadKind === TaskPayloadKind.SnapshotEnvironment &&
-    !cloudJob.payload.environmentId
+    taskRun.payloadKind === TaskPayloadKind.SnapshotEnvironment &&
+    !taskRun.payload.environmentId
   ) {
     throw new Error(
-      `SnapshotEnvironment job #${cloudJob.id} missing environmentId in payload`,
+      `SnapshotEnvironment task run #${taskRun.id} missing environmentId in payload`,
     );
   }
 
   console.log(
-    `[spawnModalWorker] Creating modal instance for job #${cloudJob.id}... ${JSON.stringify(
+    `[spawnModalWorker] Creating modal instance for task run #${taskRun.id}... ${JSON.stringify(
       {
         ...launchOptions,
         namedPorts: namedPorts.map((p) => p.name),
@@ -239,8 +241,8 @@ export async function spawnModalWorker(
   const recordMutation = createComputeProviderMutationEventRecorder(
     db,
     {
-      runId: cloudJob.id,
-      taskId: cloudJob.taskId,
+      runId: taskRun.id,
+      taskId: taskRun.taskId,
     },
     { logPrefix: 'spawnModalWorker', logger: console },
   );
@@ -281,13 +283,13 @@ export async function spawnModalWorker(
 
   // Stamp provisionStartedAt + launchMode before the Modal API call. Only-if-
   // null semantics preserve the earliest provision timestamp.
-  await stampCloudJobMilestone({
-    cloudJobId: cloudJob.id,
+  await stampTaskRunMilestone({
+    runId: taskRun.id,
     field: 'provisionStartedAt',
     launchMode: launchOptions.launchMode,
   }).catch((error) => {
     console.warn(
-      `[spawnModalWorker] Failed to stamp provisionStartedAt for job #${cloudJob.id}: ${error instanceof Error ? error.message : String(error)}`,
+      `[spawnModalWorker] Failed to stamp provisionStartedAt for task run #${taskRun.id}: ${error instanceof Error ? error.message : String(error)}`,
     );
   });
 
@@ -313,12 +315,12 @@ export async function spawnModalWorker(
     ...launchOptions,
   });
 
-  const command = getWorkerLaunchCommand(cloudJob);
-  const args = getWorkerLaunchArgs(cloudJob, machine.machineId);
+  const command = getWorkerLaunchCommand(taskRun);
+  const args = getWorkerLaunchArgs(taskRun, machine.machineId);
 
   try {
-    await updateCloudJobMachine({
-      cloudJob,
+    await updateTaskRunMachine({
+      taskRun,
       vendor: 'modal',
       machineId: machine.machineId,
       namedPorts,
@@ -337,29 +339,29 @@ export async function spawnModalWorker(
     });
 
     // Infrastructure is usable; worker.js hand-off follows.
-    await stampCloudJobMilestone({
-      cloudJobId: cloudJob.id,
+    await stampTaskRunMilestone({
+      runId: taskRun.id,
       field: 'provisionReadyAt',
     }).catch((error) => {
       console.warn(
-        `[spawnModalWorker] Failed to stamp provisionReadyAt for job #${cloudJob.id}: ${error instanceof Error ? error.message : String(error)}`,
+        `[spawnModalWorker] Failed to stamp provisionReadyAt for task run #${taskRun.id}: ${error instanceof Error ? error.message : String(error)}`,
       );
     });
 
     if (environmentId && environmentConfig) {
       await primeEnvironmentOidcForMachine({
-        taskId: cloudJob.taskId,
+        taskId: taskRun.taskId,
         environmentId,
         environmentConfig,
         computeProvider: 'modal',
         computeProviderId: machine.machineId,
-        cloudJobId: cloudJob.id,
+        runId: taskRun.id,
         context: 'Fresh Modal launch',
       });
     }
 
     console.log(
-      `[spawnModalWorker] Modal instance created for job #${cloudJob.id} in ${Date.now() - createMachineStart}ms ${JSON.stringify(
+      `[spawnModalWorker] Modal instance created for task run #${taskRun.id} in ${Date.now() - createMachineStart}ms ${JSON.stringify(
         { machineId: machine.machineId },
       )}`,
     );
@@ -417,7 +419,7 @@ export async function spawnModalWorker(
 
     if (!result.commandId) {
       console.warn(
-        `[spawnModalWorker] Missing command ID for detached "worker ${command}" on job #${cloudJob.id}; startup log streaming is reduced for modal v1`,
+        `[spawnModalWorker] Missing command ID for detached "worker ${command}" on task run #${taskRun.id}; startup log streaming is reduced for modal v1`,
       );
     }
 
@@ -425,7 +427,7 @@ export async function spawnModalWorker(
       await db
         .update(taskRuns)
         .set({ sandboxCmdId: result.commandId })
-        .where(eq(taskRuns.id, cloudJob.id));
+        .where(eq(taskRuns.id, taskRun.id));
     }
 
     return {

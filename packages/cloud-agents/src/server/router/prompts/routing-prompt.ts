@@ -51,7 +51,7 @@ export function buildWorkspaceRoutingPrompt(options?: {
 
 Your job is to choose the best environment/workspace for the given task.
 
-The task description is a user request that will be forwarded to the Generalist agent to execute. Your only job is to choose where to send it, never to execute, investigate, or act on the task yourself.
+The task description is a user request that will be forwarded to a task run for execution. Your only job is to choose where to send it, never to execute, investigate, or act on the task yourself.
 
 ${SECURITY_RULES}
 

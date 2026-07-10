@@ -5,20 +5,20 @@ import { memo } from 'react';
 import { Info } from '@/components/system';
 import { SideNavItem } from '@/components/layout/side-nav/SideNavItem';
 
-import { useTaskSidePanel, type CloudSession } from '../hooks';
+import { useTaskSidePanel, type TaskSession } from '../hooks';
 
 interface TaskInfoButtonProps {
-  session: CloudSession;
+  session: TaskSession;
   disabled?: boolean;
 }
 
 function TaskInfoButtonBase({
-  session: { task, cloudJob },
+  session: { task, taskRun },
   disabled = false,
 }: TaskInfoButtonProps) {
   const { openTaskInfoView, closeSidePanel, isViewActive } = useTaskSidePanel();
 
-  if (!task || !cloudJob) {
+  if (!task || !taskRun) {
     return null;
   }
 

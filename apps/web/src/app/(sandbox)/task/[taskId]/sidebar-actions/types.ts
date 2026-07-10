@@ -1,8 +1,8 @@
-import type { CloudJobDetail } from '@/lib/server/cloud-jobs';
+import type { TaskRunDetail } from '@/lib/server/task-runs';
 
 export interface SidebarActionBaseProps {
   taskId: string;
-  cloudJob: CloudJobDetail | null | undefined;
+  taskRun: TaskRunDetail | null | undefined;
 }
 
 export interface OverflowMenuProps extends SidebarActionBaseProps {

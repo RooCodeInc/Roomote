@@ -4,7 +4,7 @@
 //
 // `launchQueuedSetupTasksIfReady` claims each queued onboarding item through the
 // shared CAS (open OR stale-`launching`, guarded on `launched_task_id IS NULL`),
-// enqueues a cloud task, then finalizes with the claim's fencing token, stamps
+// enqueues a task, then finalizes with the claim's fencing token, stamps
 // `targetEnvironmentId`, and mirrors the launched state onto the source
 // suggestion. This suite keeps `@roomote/db/server` real (per-item claims,
 // finalize/release, mirror all run against Postgres) and mocks only the cloud
@@ -85,7 +85,7 @@ vi.mock('@/lib/server/source-control-provider', () => ({
 }));
 
 vi.mock('@/lib/server', () => ({
-  getLatestCloudJobsByTaskId: vi.fn(),
+  getLatestTaskRunsByTaskId: vi.fn(),
   getRepositories: vi.fn(),
   getRequestInviteToken: vi.fn(async () => null),
   getSourceControlConnectionSummary: vi.fn(),
@@ -306,7 +306,7 @@ describe('launchQueuedSetupTasksIfReady (fenced onboarding-queue launch)', () =>
     let call = 0;
     mockEnqueueTask.mockImplementation(async () => ({
       taskId: launchedTaskIds[call++],
-      id: `cloud-job-${call}`,
+      id: `task-run-${call}`,
     }));
 
     await launch();
@@ -342,7 +342,7 @@ describe('launchQueuedSetupTasksIfReady (fenced onboarding-queue launch)', () =>
     let call = 0;
     mockEnqueueTask.mockImplementation(async () => ({
       taskId: launchedTaskIds[call++],
-      id: `cloud-job-${call}`,
+      id: `task-run-${call}`,
     }));
 
     await launch();
@@ -373,7 +373,7 @@ describe('launchQueuedSetupTasksIfReady (fenced onboarding-queue launch)', () =>
     const launchedTaskId = await seedLaunchTargetTaskId();
     mockEnqueueTask.mockResolvedValue({
       taskId: launchedTaskId,
-      id: 'cloud-job-1',
+      id: 'task-run-1',
     });
 
     await launch();
@@ -403,7 +403,7 @@ describe('launchQueuedSetupTasksIfReady (fenced onboarding-queue launch)', () =>
     const launchedTaskId = await seedLaunchTargetTaskId();
     mockEnqueueTask.mockResolvedValue({
       taskId: launchedTaskId,
-      id: 'cloud-job-1',
+      id: 'task-run-1',
     });
 
     await launch();
@@ -471,7 +471,7 @@ describe('launchQueuedSetupTasksIfReady (fenced onboarding-queue launch)', () =>
     const launchedTaskId = await seedLaunchTargetTaskId();
     mockEnqueueTask.mockResolvedValue({
       taskId: launchedTaskId,
-      id: 'cloud-job-1',
+      id: 'task-run-1',
     });
 
     const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
@@ -528,7 +528,7 @@ describe('launchQueuedSetupTasksIfReady (fenced onboarding-queue launch)', () =>
 
     mockEnqueueTask.mockResolvedValue({
       taskId: launchedTaskId,
-      id: 'cloud-job-throw',
+      id: 'task-run-throw',
     });
     mockCancelTaskRunDirect.mockResolvedValue(true);
 
@@ -547,7 +547,7 @@ describe('launchQueuedSetupTasksIfReady (fenced onboarding-queue launch)', () =>
 
       // The orphaned run is best-effort canceled with the enqueue's run id.
       expect(mockCancelTaskRunDirect).toHaveBeenCalledWith(
-        expect.objectContaining({ runId: 'cloud-job-throw' }),
+        expect.objectContaining({ runId: 'task-run-throw' }),
       );
       expect(warnSpy).toHaveBeenCalledWith(
         expect.stringContaining('orphaned run canceled'),
@@ -576,7 +576,7 @@ describe('launchQueuedSetupTasksIfReady (fenced onboarding-queue launch)', () =>
     const launchedTaskId = await seedLaunchTargetTaskId();
     mockEnqueueTask.mockResolvedValue({
       taskId: launchedTaskId,
-      id: 'cloud-job-mirror',
+      id: 'task-run-mirror',
     });
 
     // The onboarding-queue claim passes through to the real CAS; only the
@@ -628,7 +628,7 @@ describe('launchQueuedSetupTasksIfReady (fenced onboarding-queue launch)', () =>
     const launchedTaskId = await seedLaunchTargetTaskId();
     mockEnqueueTask.mockResolvedValue({
       taskId: launchedTaskId,
-      id: 'cloud-job-mirror-finalize-throw',
+      id: 'task-run-mirror-finalize-throw',
     });
 
     // The onboarding finalize passes through to the real CAS; only the

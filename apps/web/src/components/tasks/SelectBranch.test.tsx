@@ -2,7 +2,7 @@ import { useEffect } from 'react';
 import { FormProvider, useForm, useFormContext } from 'react-hook-form';
 import { render, screen, waitFor } from '@testing-library/react';
 
-import type { CreateCloudTask } from '@/types';
+import type { CreateTaskFormValues } from '@/types';
 
 import { SelectBranch } from './SelectBranch';
 
@@ -49,7 +49,7 @@ vi.mock('@/components/system', async () => {
 
 import { useBranches } from '@/hooks/github';
 
-const DEFAULT_VALUES: CreateCloudTask = {
+const DEFAULT_VALUES: CreateTaskFormValues = {
   repository: 'Roomote/example-app',
   branch: '',
   environmentId: undefined,
@@ -69,12 +69,12 @@ const SelectBranchHarness = ({
   onBranchChange,
   repositoryFullName,
 }: {
-  defaultValues?: Partial<CreateCloudTask>;
+  defaultValues?: Partial<CreateTaskFormValues>;
   defaultBranch?: string;
   onBranchChange?: (branch: string | undefined) => void;
   repositoryFullName?: string;
 }) => {
-  const form = useForm<CreateCloudTask>({
+  const form = useForm<CreateTaskFormValues>({
     defaultValues: {
       ...DEFAULT_VALUES,
       ...defaultValues,
@@ -97,7 +97,7 @@ const BranchValueProbe = ({
 }: {
   onBranchChange?: (branch: string | undefined) => void;
 }) => {
-  const { watch } = useFormContext<CreateCloudTask>();
+  const { watch } = useFormContext<CreateTaskFormValues>();
   const branch = watch('branch');
 
   useEffect(() => {

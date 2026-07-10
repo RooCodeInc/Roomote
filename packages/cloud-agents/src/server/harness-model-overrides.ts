@@ -68,18 +68,18 @@ export function resolveEffectiveHarnessModelState<T extends TaskSpec>(options: {
   task: T;
   targetHarness: CodingHarness;
   isSnapshotResume: boolean;
-  sourceJobHarnessModelOverrides?: HarnessModelOverrides;
+  sourceRunHarnessModelOverrides?: HarnessModelOverrides;
   deploymentMetadata?: MetadataRecord | null;
   deploymentTaskModelSettings?: TaskModelSettings | null;
   deploymentCodeReviewModelId?: string | null;
 }): { task: T; model: string } {
   const shouldReuseSourceHarnessModelOverrides =
-    options.isSnapshotResume && Boolean(options.sourceJobHarnessModelOverrides);
+    options.isSnapshotResume && Boolean(options.sourceRunHarnessModelOverrides);
 
   if (shouldReuseSourceHarnessModelOverrides) {
     const nextTask = applyHarnessModelOverrides(
       options.task,
-      options.sourceJobHarnessModelOverrides,
+      options.sourceRunHarnessModelOverrides,
     );
 
     return {

@@ -1486,7 +1486,8 @@ export function AutomationsSettings() {
       channelAutoStartSlackChannelNames:
         settingsQuery.data.slackChannelDisplayNames
           .channelAutoStartSlackChannels,
-      managerSlackChannelName: null,
+      managerSlackChannelName:
+        settingsQuery.data.slackChannelDisplayNames.managerSlackChannel,
       managerStatsSlackChannelName:
         settingsQuery.data.slackChannelDisplayNames.managerStatsSlackChannel,
       sentryTriageSlackChannelName:
@@ -1603,7 +1604,8 @@ export function AutomationsSettings() {
           ...result.settings,
           channelAutoStartSlackChannelNames:
             result.slackChannelDisplayNames.channelAutoStartSlackChannels,
-          managerSlackChannelName: null,
+          managerSlackChannelName:
+            result.slackChannelDisplayNames.managerSlackChannel,
           managerStatsSlackChannelName:
             result.slackChannelDisplayNames.managerStatsSlackChannel,
           sentryTriageSlackChannelName:
@@ -2140,6 +2142,13 @@ export function AutomationsSettings() {
     ]),
   ) as Record<ScheduleOnlyBackgroundAutomationId, string | null>;
   const savedManagerChannelLabel = (() => {
+    const channelFromList = slackChannelChoices.find(
+      (channel) => channel.id === managerSlackChannelId,
+    );
+    if (channelFromList) {
+      return `#${channelFromList.name}`;
+    }
+
     const value = formatSlackChannelValue(savedState?.managerSlackChannel);
     if (!value) {
       return '#channel';

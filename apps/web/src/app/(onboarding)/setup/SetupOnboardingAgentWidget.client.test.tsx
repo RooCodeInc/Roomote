@@ -59,7 +59,7 @@ describe('SetupOnboardingAgentWidget', () => {
     vi.clearAllMocks();
     useEnvironmentDefinitionAgentStateMock.mockReturnValue({
       session: {
-        cloudJob: {
+        taskRun: {
           status: 'running',
           taskPhase: 'running',
         },
@@ -106,7 +106,7 @@ describe('SetupOnboardingAgentWidget', () => {
     const onOpenStep = vi.fn();
     useEnvironmentDefinitionAgentStateMock.mockReturnValue({
       session: {
-        cloudJob: {
+        taskRun: {
           status: 'failed',
           taskPhase: 'stopped',
         },
@@ -159,7 +159,7 @@ describe('SetupOnboardingAgentWidget', () => {
     const onExpandedChange = vi.fn();
     useEnvironmentDefinitionAgentStateMock.mockReturnValue({
       session: {
-        cloudJob: {
+        taskRun: {
           status: 'completed',
           taskPhase: 'stopped',
         },

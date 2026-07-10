@@ -30,10 +30,10 @@ export type ActorMismatchSkipNotifier = (
  * is the security decision, the notice is UX.
  */
 export function createActorMismatchSkipNotifier({
-  cloudJobId,
+  runId,
   logger,
 }: {
-  cloudJobId: number;
+  runId: number;
   logger: {
     warn?: (...args: unknown[]) => void;
     error: (...args: unknown[]) => void;
@@ -57,7 +57,7 @@ export function createActorMismatchSkipNotifier({
 
       if (!config) {
         warn(
-          `[actorMismatchNotice] Cannot post skip notice for run ${cloudJobId}: no cloud token available`,
+          `[actorMismatchNotice] Cannot post skip notice for run ${runId}: no cloud token available`,
         );
         return;
       }
@@ -67,7 +67,7 @@ export function createActorMismatchSkipNotifier({
       });
     } catch (error) {
       warn(
-        `[actorMismatchNotice] Failed to post skip notice for run ${cloudJobId} (sender ${senderUserId}): ${
+        `[actorMismatchNotice] Failed to post skip notice for run ${runId} (sender ${senderUserId}): ${
           error instanceof Error ? error.message : String(error)
         }`,
       );

@@ -1,6 +1,6 @@
 vi.mock('@roomote/sdk/client', () => ({
   sdk: {
-    cloudJobs: {
+    taskRuns: {
       setPendingLinearRequestUserInput: vi.fn().mockResolvedValue(undefined),
       clearPendingLinearRequestUserInput: vi.fn().mockResolvedValue(true),
     },
@@ -15,22 +15,22 @@ vi.mock('@roomote/sdk/client', () => ({
 }));
 
 import { TaskPayloadKind } from '@roomote/types';
-import { type Run, sdk } from '@roomote/sdk/client';
+import { type TaskRun, sdk } from '@roomote/sdk/client';
 
 import { linearAgentCallbacks } from '../linear-agent';
 
-function createCloudJob(): Run {
+function createTaskRun(): TaskRun {
   return {
     id: 123,
     taskId: 'task_123',
     payloadKind: TaskPayloadKind.LinearAgentSession,
     payload: { sessionId: 'session_123' },
-  } as unknown as Run;
+  } as unknown as TaskRun;
 }
 
 describe('linearAgentCallbacks', () => {
   const setPendingLinearRequestUserInputMock = vi.mocked(
-    sdk.cloudJobs.setPendingLinearRequestUserInput,
+    sdk.taskRuns.setPendingLinearRequestUserInput,
   );
   const emitActionMock = vi.mocked(sdk.linearSessions.emitAction);
   const emitElicitationMock = vi.mocked(sdk.linearSessions.emitElicitation);
@@ -45,12 +45,12 @@ describe('linearAgentCallbacks', () => {
 
   it('processes distinct same-timestamp events', async () => {
     const context = {};
-    const cloudJob = createCloudJob();
+    const taskRun = createTaskRun();
 
-    await linearAgentCallbacks.onStart?.(cloudJob, 'task_123', context);
+    await linearAgentCallbacks.onStart?.(taskRun, 'task_123', context);
 
     await linearAgentCallbacks.onMessage?.(
-      cloudJob,
+      taskRun,
       'task_123',
       {
         type: 'tool_action',
@@ -61,7 +61,7 @@ describe('linearAgentCallbacks', () => {
     );
 
     await linearAgentCallbacks.onMessage?.(
-      cloudJob,
+      taskRun,
       'task_123',
       {
         type: 'todo_update',
@@ -84,7 +84,7 @@ describe('linearAgentCallbacks', () => {
 
   it('dedupes exact duplicate same-timestamp events', async () => {
     const context = {};
-    const cloudJob = createCloudJob();
+    const taskRun = createTaskRun();
 
     const event = {
       type: 'todo_update' as const,
@@ -92,28 +92,18 @@ describe('linearAgentCallbacks', () => {
       ts: 2000,
     };
 
-    await linearAgentCallbacks.onMessage?.(
-      cloudJob,
-      'task_123',
-      event,
-      context,
-    );
-    await linearAgentCallbacks.onMessage?.(
-      cloudJob,
-      'task_123',
-      event,
-      context,
-    );
+    await linearAgentCallbacks.onMessage?.(taskRun, 'task_123', event, context);
+    await linearAgentCallbacks.onMessage?.(taskRun, 'task_123', event, context);
 
     expect(updateSessionPlanMock).toHaveBeenCalledTimes(1);
   });
 
-  it('stores pending request_user_input via sdk.cloudJobs before emitting the elicitation', async () => {
+  it('stores pending request_user_input via sdk.taskRuns before emitting the elicitation', async () => {
     const context = {};
-    const cloudJob = createCloudJob();
+    const taskRun = createTaskRun();
 
     await linearAgentCallbacks.onMessage?.(
-      cloudJob,
+      taskRun,
       'task_123',
       {
         type: 'request_user_input',
@@ -149,7 +139,7 @@ describe('linearAgentCallbacks', () => {
     );
 
     expect(setPendingLinearRequestUserInputMock).toHaveBeenCalledWith({
-      cloudJobId: 123,
+      runId: 123,
       sessionId: 'session_123',
       requestId: 'rui:session_123:turn_1:call_1',
       taskId: 'task_123',
@@ -181,7 +171,7 @@ describe('linearAgentCallbacks', () => {
 
   it('re-emits request_user_input when the same request id receives richer questions', async () => {
     const context = {};
-    const cloudJob = createCloudJob();
+    const taskRun = createTaskRun();
     const requestId = 'rui:session_123:turn_1:call_1';
     const placeholderQuestion = {
       id: 'response',
@@ -209,7 +199,7 @@ describe('linearAgentCallbacks', () => {
     };
 
     await linearAgentCallbacks.onMessage?.(
-      cloudJob,
+      taskRun,
       'task_123',
       {
         type: 'request_user_input',
@@ -227,7 +217,7 @@ describe('linearAgentCallbacks', () => {
     );
 
     await linearAgentCallbacks.onMessage?.(
-      cloudJob,
+      taskRun,
       'task_123',
       {
         type: 'request_user_input',
@@ -246,7 +236,7 @@ describe('linearAgentCallbacks', () => {
 
     expect(setPendingLinearRequestUserInputMock).toHaveBeenCalledTimes(2);
     expect(setPendingLinearRequestUserInputMock).toHaveBeenLastCalledWith({
-      cloudJobId: 123,
+      runId: 123,
       sessionId: 'session_123',
       requestId,
       taskId: 'task_123',

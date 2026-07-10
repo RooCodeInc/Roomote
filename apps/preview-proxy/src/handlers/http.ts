@@ -8,7 +8,7 @@ import {
   type ResolverIdentifier,
 } from '../services/resolver';
 import { tryNestedFallback } from '../lib/nested-routing';
-import { validateAuthCookieForCloudJob, storeState } from '../services/auth';
+import { validateAuthCookieForTaskRun, storeState } from '../services/auth';
 import * as redis from '../lib/redis';
 import { buildSetCookieHeader, getCookieDomain } from '../lib/cookies';
 import { proxyRequest } from '../lib/proxy';
@@ -274,11 +274,11 @@ async function handleRedirectToDirect(
   resolution: ResolvedRequest,
 ): Promise<void> {
   // Check auth if required
-  if (resolution.requiresAuth && resolution.cloudJob) {
+  if (resolution.requiresAuth && resolution.taskRun) {
     const authCookie = getCookie(req, config.PREVIEW_AUTH_COOKIE_NAME);
-    const authResult = await validateAuthCookieForCloudJob(
+    const authResult = await validateAuthCookieForTaskRun(
       authCookie,
-      resolution.cloudJob,
+      resolution.taskRun,
     );
 
     if (!authResult.valid) {
@@ -287,7 +287,7 @@ async function handleRedirectToDirect(
           const state = crypto.randomUUID();
           const protocol = getRequestProtocol(req);
           const originalUrl = `${protocol}://${host}${req.url || '/'}`;
-          await storeState(state, originalUrl, resolution.cloudJob.id);
+          await storeState(state, originalUrl, resolution.taskRun.id);
 
           const authUrl = buildAuthRedirectUrl(
             host,
@@ -320,7 +320,7 @@ async function handleRedirectToDirect(
 
 /**
  * Handle resumable status: auto-resume sandbox from snapshot if authenticated.
- * Shows a progress page that polls for job status and redirects when ready.
+ * Shows a progress page that polls for run status and redirects when ready.
  */
 async function handleResumableRequest(
   req: IncomingMessage,
@@ -330,15 +330,15 @@ async function handleResumableRequest(
   displayId: string,
 ): Promise<void> {
   // Always require auth for auto-resume
-  if (!resolution.cloudJob) {
+  if (!resolution.taskRun) {
     sendHtml(res, 410, renderCompletedPage(displayId));
     return;
   }
 
   const authCookie = getCookie(req, config.PREVIEW_AUTH_COOKIE_NAME);
-  const authResult = await validateAuthCookieForCloudJob(
+  const authResult = await validateAuthCookieForTaskRun(
     authCookie,
-    resolution.cloudJob,
+    resolution.taskRun,
   );
 
   if (!authResult.valid || !authResult.token) {
@@ -348,7 +348,7 @@ async function handleResumableRequest(
         const state = crypto.randomUUID();
         const protocol = getRequestProtocol(req);
         const originalUrl = `${protocol}://${host}${req.url || '/'}`;
-        await storeState(state, originalUrl, resolution.cloudJob.id);
+        await storeState(state, originalUrl, resolution.taskRun.id);
 
         const authUrl = buildAuthRedirectUrl(
           host,
@@ -386,7 +386,7 @@ async function handleResumableRequest(
 
   const resumeResult = await triggerAutoResume(resolution, authResult.token);
 
-  const resumeStatusId = resumeResult.newCloudJobId?.toString();
+  const resumeStatusId = resumeResult.newRunId?.toString();
 
   if (!resumeResult.success || !resumeStatusId) {
     // Failed to resume - show error
@@ -402,7 +402,7 @@ async function handleResumableRequest(
     if (!isNavigationRequest(req)) {
       sendJson(res, req, 500, {
         error: 'Resume failed',
-        message: resumeResult.error || 'Failed to create resume job',
+        message: resumeResult.error || 'Failed to create resume task run',
       });
       return;
     }
@@ -416,9 +416,7 @@ async function handleResumableRequest(
   if (!isNavigationRequest(req)) {
     sendJson(res, req, 202, {
       status: 'resuming',
-      ...(resumeResult.newCloudJobId
-        ? { cloudJobId: resumeResult.newCloudJobId }
-        : {}),
+      ...(resumeResult.newRunId ? { runId: resumeResult.newRunId } : {}),
       message:
         'Sandbox is being resumed. Poll /rooproxy/resume-status/' +
         resumeStatusId +
@@ -505,10 +503,10 @@ async function resolveAuthAndProxy(
     req.url = requestUrl.pathname + requestUrl.search;
   }
 
-  if (inlineToken && resolution.cloudJob) {
-    const tokenResult = await validateAuthCookieForCloudJob(
+  if (inlineToken && resolution.taskRun) {
+    const tokenResult = await validateAuthCookieForTaskRun(
       inlineToken,
-      resolution.cloudJob,
+      resolution.taskRun,
     );
 
     if (tokenResult.valid && tokenResult.token) {
@@ -599,14 +597,14 @@ async function resolveAuthAndProxy(
   // 3c. Check auth if required
   const previewAuthCookie = getCookie(req, config.PREVIEW_AUTH_COOKIE_NAME);
   const authResult =
-    requiresAuth && resolution.cloudJob
-      ? await validateAuthCookieForCloudJob(
+    requiresAuth && resolution.taskRun
+      ? await validateAuthCookieForTaskRun(
           previewAuthCookie,
-          resolution.cloudJob,
+          resolution.taskRun,
         )
       : null;
 
-  if (requiresAuth && resolution.cloudJob) {
+  if (requiresAuth && resolution.taskRun) {
     if (!authResult?.valid) {
       if (isNavigationRequest(req)) {
         if (resolution.taskId) {
@@ -614,7 +612,7 @@ async function resolveAuthAndProxy(
           const state = crypto.randomUUID();
           const protocol = getRequestProtocol(req);
           const originalUrl = `${protocol}://${host}${req.url || '/'}`;
-          await storeState(state, originalUrl, resolution.cloudJob.id);
+          await storeState(state, originalUrl, resolution.taskRun.id);
 
           const authUrl = buildAuthRedirectUrl(
             host,
@@ -707,7 +705,7 @@ async function resolveAuthAndProxy(
   accessLog.upstreamTarget = resolution.sandboxUrl!;
   setRequestContext({
     taskId: resolution.taskId,
-    cloudJobId: resolution.cloudJob?.id,
+    runId: resolution.taskRun?.id,
     upstreamTarget: resolution.sandboxUrl!,
     outcome: accessLog.outcome,
   });

@@ -46,7 +46,7 @@ describe('tryNestedFallback', () => {
       status: 'active' as const,
       sandboxUrl: 'http://sandbox.example.com:3000',
       wildcardPrefix: true,
-      cloudJob: null,
+      taskRun: null,
       requiresAuth: false,
       hasAuthProxy: false,
     };
@@ -75,7 +75,7 @@ describe('tryNestedFallback', () => {
 
     vi.mocked(resolveRequest).mockResolvedValue({
       status: 'not_found',
-      cloudJob: null,
+      taskRun: null,
       requiresAuth: false,
       hasAuthProxy: false,
     });
@@ -94,7 +94,7 @@ describe('tryNestedFallback', () => {
       status: 'active',
       sandboxUrl: 'http://sandbox.example.com:3000',
       wildcardPrefix: false,
-      cloudJob: null,
+      taskRun: null,
       requiresAuth: false,
       hasAuthProxy: false,
     });
@@ -113,7 +113,7 @@ describe('tryNestedFallback', () => {
       status: 'active',
       sandboxUrl: 'http://sandbox.example.com:3000',
       wildcardPrefix: true,
-      cloudJob: null,
+      taskRun: null,
       requiresAuth: false,
       hasAuthProxy: false,
     });
@@ -135,7 +135,7 @@ describe('tryNestedFallback', () => {
       status: 'active',
       sandboxUrl: 'http://sandbox.example.com:3000',
       wildcardPrefix: true,
-      cloudJob: null,
+      taskRun: null,
       requiresAuth: false,
       hasAuthProxy: false,
     });

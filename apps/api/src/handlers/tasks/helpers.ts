@@ -23,7 +23,7 @@ export const TASK_SELECT_COLUMNS = {
   repositoryName: tasks.repositoryName,
 };
 
-interface LatestCloudJobSummary {
+interface LatestTaskRunSummary {
   id: number;
   taskId: string | null;
   type: TaskPayloadKind;
@@ -39,9 +39,9 @@ export const visibleTaskHistoryCondition = isVisibleTask();
 /**
  * Fetch the latest run row for each task ID.
  */
-export async function getLatestCloudJobsByTaskIds(
+export async function getLatestTaskRunsByTaskIds(
   taskIds: string[],
-): Promise<Record<string, LatestCloudJobSummary>> {
+): Promise<Record<string, LatestTaskRunSummary>> {
   if (taskIds.length === 0) {
     return {};
   }
@@ -61,7 +61,7 @@ export async function getLatestCloudJobsByTaskIds(
     .where(inArray(taskRuns.taskId, taskIds))
     .orderBy(taskRuns.taskId, desc(taskRuns.id));
 
-  const latestByTask = new Map<string, LatestCloudJobSummary>();
+  const latestByTask = new Map<string, LatestTaskRunSummary>();
 
   for (const row of rows) {
     if (row.taskId && !latestByTask.has(row.taskId)) {
@@ -76,7 +76,7 @@ export async function getLatestCloudJobsByTaskIds(
  * Find the most recent run for a task.
  * Used by cancelTask and sendMessage.
  */
-export function findLatestCloudJob<
+export function findLatestTaskRun<
   T extends Record<string, boolean> | undefined,
 >(taskId: string, columns?: T) {
   return db.query.taskRuns.findFirst({

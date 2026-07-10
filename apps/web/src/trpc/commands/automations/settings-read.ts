@@ -1,7 +1,7 @@
 import {
   USER_FACING_AUTOMATION_KEYS,
   type BackgroundAutomationKey,
-  type PrReviewerSettings,
+  type PrReviewSettings,
   type TaskTrigger,
   type TaskState,
 } from '@roomote/types';
@@ -156,9 +156,9 @@ export async function getBackgroundAgentSettingsCommand(
   reviewer: {
     id: string;
     enabled: boolean;
-    environmentScope: NonNullable<PrReviewerSettings['environmentScope']>;
+    environmentScope: NonNullable<PrReviewSettings['environmentScope']>;
     environmentIds: string[];
-    authorReviewMode: NonNullable<PrReviewerSettings['authorReviewMode']>;
+    authorReviewMode: NonNullable<PrReviewSettings['authorReviewMode']>;
     collaboratorLogins: string[];
     excludedAuthors: string | null;
     reviewAllPullRequestAuthors: boolean;
@@ -251,6 +251,7 @@ export async function getBackgroundAgentSettingsCommand(
       visibleSettings.channelAutoStartSlackChannels.map(
         ({ channelId }) => channelId,
       ),
+    managerSlackChannelId: visibleSettings.managerSlackChannelId,
     managerStatsSlackChannelId: visibleSettings.managerStatsSlackChannelId,
     suggesterSlackChannelId: visibleSettings.suggesterSlackChannelId,
     announcerSlackChannelId: visibleSettings.announcerSlackChannelId,

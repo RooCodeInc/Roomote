@@ -4,13 +4,13 @@ import {
   getPrimaryPortFromConfig,
 } from '@roomote/types';
 import {
-  type Run,
+  type TaskRun,
   createComputeProviderMutationEventRecorder,
   db,
   taskRuns,
   eq,
 } from '@roomote/db/server';
-import { stampCloudJobMilestone } from '@roomote/sdk/server';
+import { stampTaskRunMilestone } from '@roomote/sdk/server';
 import {
   buildComputeProviderMutationDetails,
   buildDaytonaWorkerEnv,
@@ -23,9 +23,9 @@ import {
 
 import { primeEnvironmentOidcForMachine } from '../sandbox-oidc';
 import {
-  getNamedPortsForCloudJob,
-  shouldEnableAuthBypassForCloudJob,
-  updateCloudJobMachine,
+  getNamedPortsForTaskRun,
+  shouldEnableAuthBypassForTaskRun,
+  updateTaskRunMachine,
 } from '../utils';
 
 const DAYTONA_LAUNCH_OUTPUT_TEXT_LIMIT = 500;
@@ -74,7 +74,7 @@ function buildDetachedWorkerExitError(result: {
 }
 
 export async function spawnDaytonaWorker(
-  cloudJob: Run,
+  taskRun: TaskRun,
   authToken: string,
   config: {
     daytonaApiKey: string;
@@ -102,22 +102,22 @@ export async function spawnDaytonaWorker(
   } = config;
 
   // Daytona does not support environment or task snapshots yet, so snapshot
-  // job types cannot run on this provider.
+  // task run kinds cannot run on this provider.
   if (
-    cloudJob.payloadKind === TaskPayloadKind.SnapshotEnvironment ||
-    cloudJob.payloadKind === TaskPayloadKind.SnapshotResume
+    taskRun.payloadKind === TaskPayloadKind.SnapshotEnvironment ||
+    taskRun.payloadKind === TaskPayloadKind.SnapshotResume
   ) {
     throw new NonRetryableSpawnError(
-      `Daytona provider does not support ${cloudJob.payloadKind} jobs`,
+      `Daytona provider does not support ${taskRun.payloadKind} task run kinds`,
     );
   }
 
-  const environmentId = cloudJob.payload.environmentId;
+  const environmentId = taskRun.payload.environmentId;
 
   const { namedPorts, environmentConfig } =
-    await getNamedPortsForCloudJob(cloudJob);
+    await getNamedPortsForTaskRun(taskRun);
 
-  const shouldEnableAuthBypass = shouldEnableAuthBypassForCloudJob({
+  const shouldEnableAuthBypass = shouldEnableAuthBypassForTaskRun({
     environmentConfig,
     namedPorts,
   });
@@ -131,7 +131,7 @@ export async function spawnDaytonaWorker(
     : undefined;
 
   console.log(
-    `[spawnDaytonaWorker] Creating Daytona instance for job #${cloudJob.id}... ${JSON.stringify(
+    `[spawnDaytonaWorker] Creating Daytona instance for task run #${taskRun.id}... ${JSON.stringify(
       {
         launchMode: 'fresh',
         namedPorts: namedPorts.map((p) => p.name),
@@ -150,8 +150,8 @@ export async function spawnDaytonaWorker(
   const recordMutation = createComputeProviderMutationEventRecorder(
     db,
     {
-      runId: cloudJob.id,
-      taskId: cloudJob.taskId,
+      runId: taskRun.id,
+      taskId: taskRun.taskId,
     },
     { logPrefix: 'spawnDaytonaWorker', logger: console },
   );
@@ -169,13 +169,13 @@ export async function spawnDaytonaWorker(
 
   // Stamp provisionStartedAt + launchMode before the Daytona API call. Only-if-
   // null semantics preserve the earliest provision timestamp.
-  await stampCloudJobMilestone({
-    cloudJobId: cloudJob.id,
+  await stampTaskRunMilestone({
+    runId: taskRun.id,
     field: 'provisionStartedAt',
     launchMode: 'fresh',
   }).catch((error) => {
     console.warn(
-      `[spawnDaytonaWorker] Failed to stamp provisionStartedAt for job #${cloudJob.id}: ${error instanceof Error ? error.message : String(error)}`,
+      `[spawnDaytonaWorker] Failed to stamp provisionStartedAt for task run #${taskRun.id}: ${error instanceof Error ? error.message : String(error)}`,
     );
   });
 
@@ -194,11 +194,11 @@ export async function spawnDaytonaWorker(
     onMutation: recordMutation,
   });
 
-  const args = ['run', cloudJob.id.toString()];
+  const args = ['run', taskRun.id.toString()];
 
   try {
-    await updateCloudJobMachine({
-      cloudJob,
+    await updateTaskRunMachine({
+      taskRun,
       vendor: 'daytona',
       machineId: machine.machineId,
       namedPorts,
@@ -213,29 +213,29 @@ export async function spawnDaytonaWorker(
     });
 
     // Infrastructure is usable; worker.js hand-off follows.
-    await stampCloudJobMilestone({
-      cloudJobId: cloudJob.id,
+    await stampTaskRunMilestone({
+      runId: taskRun.id,
       field: 'provisionReadyAt',
     }).catch((error) => {
       console.warn(
-        `[spawnDaytonaWorker] Failed to stamp provisionReadyAt for job #${cloudJob.id}: ${error instanceof Error ? error.message : String(error)}`,
+        `[spawnDaytonaWorker] Failed to stamp provisionReadyAt for task run #${taskRun.id}: ${error instanceof Error ? error.message : String(error)}`,
       );
     });
 
     if (environmentId && environmentConfig) {
       await primeEnvironmentOidcForMachine({
-        taskId: cloudJob.taskId,
+        taskId: taskRun.taskId,
         environmentId,
         environmentConfig,
         computeProvider: 'daytona',
         computeProviderId: machine.machineId,
-        cloudJobId: cloudJob.id,
+        runId: taskRun.id,
         context: 'Fresh Daytona launch',
       });
     }
 
     console.log(
-      `[spawnDaytonaWorker] Daytona instance created for job #${cloudJob.id} in ${Date.now() - createMachineStart}ms ${JSON.stringify(
+      `[spawnDaytonaWorker] Daytona instance created for task run #${taskRun.id} in ${Date.now() - createMachineStart}ms ${JSON.stringify(
         { machineId: machine.machineId },
       )}`,
     );
@@ -296,7 +296,7 @@ export async function spawnDaytonaWorker(
       await db
         .update(taskRuns)
         .set({ sandboxCmdId: result.commandId })
-        .where(eq(taskRuns.id, cloudJob.id));
+        .where(eq(taskRuns.id, taskRun.id));
     }
 
     return {

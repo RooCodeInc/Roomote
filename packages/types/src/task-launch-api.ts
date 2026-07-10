@@ -1,6 +1,6 @@
 import { z } from 'zod';
 
-import { launchCodingHarnesses, REASONING_EFFORT_VALUES } from './cloud-jobs';
+import { launchCodingHarnesses, REASONING_EFFORT_VALUES } from './task-runs';
 import { computeProviders } from './compute-providers';
 import { ALL_REPOSITORIES } from './constants';
 import {

@@ -1,4 +1,4 @@
-import type { JobTokenContext } from '@roomote/types';
+import type { RunTokenContext } from '@roomote/types';
 
 import { WorkerEnv } from '../../../env';
 import { appRouter } from '../../routers';
@@ -13,7 +13,7 @@ const { mockGetResolvedRuntimeEnvVars, mockFindFirstById, mockInjectEnvVars } =
 
 vi.mock('@roomote/sdk/client', () => ({
   sdk: {
-    cloudJobs: {
+    taskRuns: {
       getResolvedRuntimeEnvVars: mockGetResolvedRuntimeEnvVars,
       findFirstById: mockFindFirstById,
     },
@@ -56,7 +56,7 @@ function createWorkerEnv() {
   return workerEnv;
 }
 
-function createCaller(workerEnv?: WorkerEnv, cloudJobId = 1) {
+function createCaller(workerEnv?: WorkerEnv, runId = 1) {
   const commandEnv = {
     HOME: '/home/testuser',
     PATH: '/usr/bin:/usr/local/bin',
@@ -85,13 +85,13 @@ function createCaller(workerEnv?: WorkerEnv, cloudJobId = 1) {
       }),
     },
     auth: {
-      cloudJobId,
+      runId,
       userId: 'user-1',
       principal: 'user',
-      tokenType: 'cj',
+      tokenType: 'run',
       version: 1,
-    } satisfies JobTokenContext,
-    cloudJobId,
+    } satisfies RunTokenContext,
+    runId,
     workerEnv,
   } as unknown as Context;
 
@@ -125,7 +125,7 @@ describe('reloadDeploymentEnvVars procedure', () => {
     );
     expect(result.names).toHaveLength(2);
     expect(mockGetResolvedRuntimeEnvVars).toHaveBeenCalledWith({
-      cloudJobId: 1,
+      runId: 1,
     });
     expect(mockFindFirstById).toHaveBeenCalledWith(1);
     expect(mockInjectEnvVars).toHaveBeenCalledTimes(1);

@@ -86,7 +86,7 @@ import {
 import type { UserAuthSuccess } from '@/types';
 import {
   assertSetupTokenValid,
-  getLatestCloudJobsByTaskId,
+  getLatestTaskRunsByTaskId,
   getRepositories,
   getRequestInviteToken,
   getSourceControlConnectionSummary,
@@ -552,13 +552,13 @@ async function getOnboardingTaskState(taskId: string | null) {
     };
   }
 
-  const latestCloudJobs = await getLatestCloudJobsByTaskId([taskId]);
-  const latestJob = latestCloudJobs[taskId];
+  const latestTaskRuns = await getLatestTaskRunsByTaskId([taskId]);
+  const latestRun = latestTaskRuns[taskId];
 
   return {
-    status: latestJob?.status ?? null,
-    taskPhase: latestJob?.taskPhase ?? null,
-    firstAssistantOutputAt: latestJob?.firstAssistantOutputAt ?? null,
+    status: latestRun?.status ?? null,
+    taskPhase: latestRun?.taskPhase ?? null,
+    firstAssistantOutputAt: latestRun?.firstAssistantOutputAt ?? null,
   };
 }
 
@@ -2477,7 +2477,7 @@ export async function startSetupNewOnboardingTaskCommand(
       source: 'setup_dm',
       text: kickoffMessage,
       taskId: launchResult.taskId,
-      cloudJobId: launchResult.id,
+      runId: launchResult.id,
     });
 
     return {
@@ -2522,11 +2522,11 @@ export async function cancelSetupNewOnboardingTaskCommand(
     .from(taskRuns)
     .where(eq(taskRuns.taskId, currentState.onboardingTaskId));
 
-  const activeJobIds = jobs
+  const activeRunIds = jobs
     .filter((job) => !isExitedRunStatus(job.status))
     .map((job) => job.id);
 
-  if (activeJobIds.length > 0) {
+  if (activeRunIds.length > 0) {
     const endedAt = new Date();
 
     await db.transaction(async (tx) => {
@@ -2536,10 +2536,10 @@ export async function cancelSetupNewOnboardingTaskCommand(
           status: RunStatus.Canceled,
           canceledAt: endedAt,
         })
-        .where(inArray(taskRuns.id, activeJobIds));
+        .where(inArray(taskRuns.id, activeRunIds));
 
       await Promise.all(
-        activeJobIds.map((runId) =>
+        activeRunIds.map((runId) =>
           markTaskStartParallelCountEndedAt(tx, {
             runId,
             endedAt,

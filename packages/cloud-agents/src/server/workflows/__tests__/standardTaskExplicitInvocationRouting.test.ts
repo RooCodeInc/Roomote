@@ -8,7 +8,7 @@ describe('Standard Task explicit invocation routing', () => {
       description:
         '$review-code\n\n<active_appendix_path>review-github-pr</active_appendix_path>',
       repo: 'Roomote/example-app',
-      cloudJobUrl: 'https://example.com/task/123',
+      taskRunUrl: 'https://example.com/task/123',
       requestFormat: 'structured',
     });
 
@@ -31,7 +31,7 @@ describe('Standard Task explicit invocation routing', () => {
     const { harnessInstructions } = standardTask({
       description: 'Fix one low-risk maintainer rough edge and validate it',
       repo: 'Roomote/example-app',
-      cloudJobUrl: 'https://example.com/task/123',
+      taskRunUrl: 'https://example.com/task/123',
     });
 
     expect(harnessInstructions).toContain(

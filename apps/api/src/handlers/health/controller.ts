@@ -36,7 +36,7 @@ async function checkStuckInQueue(): Promise<CheckResult> {
   try {
     const thresholdTime = sql`NOW() - INTERVAL '${sql.raw(String(STUCK_IN_QUEUE_THRESHOLD_MINUTES))} minutes'`;
 
-    const stuckJobs = await db
+    const stuckRuns = await db
       .select({ id: taskRuns.id })
       .from(taskRuns)
       .where(
@@ -48,14 +48,14 @@ async function checkStuckInQueue(): Promise<CheckResult> {
         ),
       );
 
-    if (stuckJobs.length > 0) {
-      const ids = stuckJobs.map((job) => job.id).join(', ');
+    if (stuckRuns.length > 0) {
+      const ids = stuckRuns.map((job) => job.id).join(', ');
 
       return {
         ok: false,
         error: `Jobs stuck in queue (not dequeued within ${STUCK_IN_QUEUE_THRESHOLD_MINUTES} min): [${ids}]`,
         summary: {
-          stuckInQueueCount: stuckJobs.length,
+          stuckInQueueCount: stuckRuns.length,
         },
       };
     }
@@ -81,7 +81,7 @@ async function checkStuckAfterDequeue(): Promise<CheckResult> {
   try {
     const thresholdTime = sql`NOW() - INTERVAL '${sql.raw(String(STUCK_AFTER_DEQUEUE_THRESHOLD_MINUTES))} minutes'`;
 
-    const stuckJobs = await db
+    const stuckRuns = await db
       .select({ id: taskRuns.id })
       .from(taskRuns)
       .where(
@@ -94,14 +94,14 @@ async function checkStuckAfterDequeue(): Promise<CheckResult> {
         ),
       );
 
-    if (stuckJobs.length > 0) {
-      const ids = stuckJobs.map((job) => job.id).join(', ');
+    if (stuckRuns.length > 0) {
+      const ids = stuckRuns.map((job) => job.id).join(', ');
 
       return {
         ok: false,
         error: `Jobs stuck after dequeue (not started within ${STUCK_AFTER_DEQUEUE_THRESHOLD_MINUTES} min): [${ids}]`,
         summary: {
-          stuckAfterDequeueCount: stuckJobs.length,
+          stuckAfterDequeueCount: stuckRuns.length,
         },
       };
     }

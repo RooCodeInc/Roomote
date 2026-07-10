@@ -35,7 +35,7 @@ describe('eval-command', () => {
     startAutoRoutedSlackTaskMock.mockResolvedValue({
       status: 'started',
       threadId: '111.000',
-      cloudJobId: 1,
+      runId: 1,
       taskId: 'task_123',
     });
     showManualPickerForAutoRouteFallbackMock.mockResolvedValue(false);

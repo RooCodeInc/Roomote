@@ -60,7 +60,8 @@ instead. For a managed PaaS with no server of your own, see
 
 ## Image access
 
-Both published images (`ghcr.io/roocodeinc/roomote-app` and
+The published compatibility, controller, and worker images
+(`ghcr.io/roocodeinc/roomote-app`, `ghcr.io/roocodeinc/roomote-controller`, and
 `ghcr.io/roocodeinc/roomote-worker`) are public and pulled anonymously; no
 registry login is needed.
 
@@ -74,9 +75,9 @@ and the controller reads the worker release version from the `VERSION` file
 inside `worker-current.tar.gz`.
 
 To pin instead (recommended for production deployments): change the
-`x-roomote-app-image` anchor at the top of the compose file to the same
-immutable tag (`v*` or `develop-<sha>`). No other edits are needed — the
-derived values follow the image.
+`x-roomote-app-image` and `x-roomote-controller-image` anchors at the top of
+the compose file to the same immutable tag (`v*` or `develop-<sha>`). No other
+edits are needed — the derived values follow the images.
 
 ## Create the resource
 
@@ -220,8 +221,8 @@ wildcard-capable TLS setup on the Coolify proxy:
   Coolify pulls the current alias, `db-migrate` applies any schema changes
   before the app services restart, and the auto-generated keypairs persist
   in Postgres, so sessions, job tokens, and preview tokens survive
-  redeploys. On an immutable pin, bump the tag in the `x-roomote-app-image`
-  anchor first.
+  redeploys. On an immutable pin, bump the tags in the `x-roomote-app-image`
+  and `x-roomote-controller-image` anchors first.
 - **Back up** the Postgres volume (or run `pg_dump` against the `postgres`
   container) and the MinIO volume. Everything else is reproducible from
   config plus the generated environment values on the resource.

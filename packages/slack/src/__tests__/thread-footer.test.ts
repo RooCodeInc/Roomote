@@ -1,12 +1,12 @@
 const {
   findFirstMock,
-  cloudJobFindFirstMock,
+  taskRunFindFirstMock,
   environmentFindFirstMock,
   resolveEffectivePreviewRuntimeConfigMock,
   redisGetMock,
 } = vi.hoisted(() => ({
   findFirstMock: vi.fn(),
-  cloudJobFindFirstMock: vi.fn(),
+  taskRunFindFirstMock: vi.fn(),
   environmentFindFirstMock: vi.fn(),
   resolveEffectivePreviewRuntimeConfigMock: vi.fn(),
   redisGetMock: vi.fn(),
@@ -19,7 +19,7 @@ vi.mock('@roomote/db/server', () => ({
         findFirst: findFirstMock,
       },
       taskRuns: {
-        findFirst: cloudJobFindFirstMock,
+        findFirst: taskRunFindFirstMock,
       },
       environments: {
         findFirst: environmentFindFirstMock,
@@ -55,10 +55,10 @@ vi.mock('@roomote/redis', () => ({
 
 import { getSlackThreadFooterText } from '../thread-footer';
 
-function mockEnvironmentBackedCloudJob(params?: {
+function mockEnvironmentBackedTaskRun(params?: {
   primaryPortName?: string | null;
 }): void {
-  cloudJobFindFirstMock.mockResolvedValue({
+  taskRunFindFirstMock.mockResolvedValue({
     payload: { environmentId: 'env-1' },
     primaryPortName: params?.primaryPortName ?? null,
   });
@@ -68,7 +68,7 @@ describe('getSlackThreadFooterText', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     findFirstMock.mockResolvedValue(null);
-    cloudJobFindFirstMock.mockResolvedValue(null);
+    taskRunFindFirstMock.mockResolvedValue(null);
     environmentFindFirstMock.mockResolvedValue(null);
     resolveEffectivePreviewRuntimeConfigMock.mockResolvedValue({
       effective: {
@@ -121,7 +121,7 @@ describe('getSlackThreadFooterText', () => {
     );
   });
 
-  it('falls back to the cloud job PR when no linked task PR row exists', async () => {
+  it('falls back to the task run PR when no linked task PR row exists', async () => {
     await expect(
       getSlackThreadFooterText({
         taskUrl: 'https://app.example.com/task/task-1',
@@ -137,7 +137,7 @@ describe('getSlackThreadFooterText', () => {
   });
 
   it('includes the live preview link alongside the PR for environment-backed tasks', async () => {
-    mockEnvironmentBackedCloudJob({ primaryPortName: 'WEB' });
+    mockEnvironmentBackedTaskRun({ primaryPortName: 'WEB' });
     environmentFindFirstMock.mockResolvedValue({
       config: {
         ports: [{ name: 'WEB', port: 3000, initial_path: '/auth/dev-login' }],
@@ -159,7 +159,7 @@ describe('getSlackThreadFooterText', () => {
   });
 
   it('includes the live preview link without a PR for environment-backed tasks', async () => {
-    mockEnvironmentBackedCloudJob({ primaryPortName: 'WEB' });
+    mockEnvironmentBackedTaskRun({ primaryPortName: 'WEB' });
     environmentFindFirstMock.mockResolvedValue({
       config: {
         ports: [{ name: 'WEB', port: 3000, initial_path: '/auth/dev-login' }],
@@ -180,8 +180,8 @@ describe('getSlackThreadFooterText', () => {
     );
   });
 
-  it('slugs the primary port name from the environment config when the cloud job has none', async () => {
-    mockEnvironmentBackedCloudJob();
+  it('slugs the primary port name from the environment config when the task run has none', async () => {
+    mockEnvironmentBackedTaskRun();
     environmentFindFirstMock.mockResolvedValue({
       config: {
         ports: [
@@ -211,7 +211,7 @@ describe('getSlackThreadFooterText', () => {
   });
 
   it('falls back to the base preview URL when the primary port has no initial path', async () => {
-    mockEnvironmentBackedCloudJob({ primaryPortName: 'WEB' });
+    mockEnvironmentBackedTaskRun({ primaryPortName: 'WEB' });
     environmentFindFirstMock.mockResolvedValue({
       config: {
         ports: [{ name: 'WEB', port: 3000 }],
@@ -233,7 +233,7 @@ describe('getSlackThreadFooterText', () => {
   });
 
   it('omits the live preview link when environment previews are disabled', async () => {
-    mockEnvironmentBackedCloudJob({ primaryPortName: 'WEB' });
+    mockEnvironmentBackedTaskRun({ primaryPortName: 'WEB' });
     environmentFindFirstMock.mockResolvedValue({
       config: {
         ports: [{ name: 'WEB', port: 3000 }],
@@ -256,7 +256,7 @@ describe('getSlackThreadFooterText', () => {
   });
 
   it('omits the live preview link when the environment has no configured ports', async () => {
-    mockEnvironmentBackedCloudJob();
+    mockEnvironmentBackedTaskRun();
     environmentFindFirstMock.mockResolvedValue({
       config: {},
     });
@@ -276,7 +276,7 @@ describe('getSlackThreadFooterText', () => {
   });
 
   it('omits the live preview link for repo-only tasks without an environment', async () => {
-    cloudJobFindFirstMock.mockResolvedValue({
+    taskRunFindFirstMock.mockResolvedValue({
       payload: { repo: 'roomote/app' },
       primaryPortName: null,
     });
@@ -298,7 +298,7 @@ describe('getSlackThreadFooterText', () => {
   });
 
   it('omits the live preview link when no preview proxy base URL is resolvable', async () => {
-    mockEnvironmentBackedCloudJob({ primaryPortName: 'WEB' });
+    mockEnvironmentBackedTaskRun({ primaryPortName: 'WEB' });
     environmentFindFirstMock.mockResolvedValue({
       config: {
         ports: [{ name: 'WEB', port: 3000 }],
@@ -325,7 +325,7 @@ describe('getSlackThreadFooterText', () => {
   });
 
   it('keeps the explicit-mention instruction with the live preview link', async () => {
-    mockEnvironmentBackedCloudJob({ primaryPortName: 'WEB' });
+    mockEnvironmentBackedTaskRun({ primaryPortName: 'WEB' });
     environmentFindFirstMock.mockResolvedValue({
       config: {
         ports: [{ name: 'WEB', port: 3000 }],

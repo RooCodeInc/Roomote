@@ -222,6 +222,102 @@ const serverSchema = {
     .default(2_000),
 };
 
+export const ROOMOTE_SERVICE_VALUES = [
+  'web',
+  'api',
+  'controller',
+  'bullmq',
+  'preview-proxy',
+  'db-migrate',
+] as const;
+
+export type RoomoteService = (typeof ROOMOTE_SERVICE_VALUES)[number];
+
+type ServerEnvKey = keyof typeof serverSchema;
+
+const REQUIRED_SERVER_ENV_KEYS = new Set<ServerEnvKey>([
+  'ROOMOTE_APP_URL',
+  'TRPC_URL',
+  'DATABASE_URL',
+  'REDIS_URL',
+  'DASHBOARD_PASSWORD',
+  'ENCRYPTION_KEY',
+  'ARTIFACT_SIGNING_KEY',
+  'S3_ENDPOINT',
+  'S3_REGION',
+  'S3_ACCESS_KEY_ID',
+  'S3_SECRET_ACCESS_KEY',
+  'S3_BUCKET_ARTIFACTS',
+]);
+
+/**
+ * Required non-optional values for each production process. Optional
+ * integration/provider settings keep their normal schemas and defaults, but a
+ * process no longer has to receive unrelated core secrets merely to satisfy
+ * the shared environment parser.
+ */
+export const SERVICE_REQUIRED_SERVER_ENV_KEYS = {
+  web: [...REQUIRED_SERVER_ENV_KEYS],
+  api: [
+    'ROOMOTE_APP_URL',
+    'TRPC_URL',
+    'DATABASE_URL',
+    'REDIS_URL',
+    'ENCRYPTION_KEY',
+    'ARTIFACT_SIGNING_KEY',
+    'DASHBOARD_PASSWORD',
+    'S3_ENDPOINT',
+    'S3_REGION',
+    'S3_ACCESS_KEY_ID',
+    'S3_SECRET_ACCESS_KEY',
+    'S3_BUCKET_ARTIFACTS',
+  ],
+  controller: [
+    'ROOMOTE_APP_URL',
+    'TRPC_URL',
+    'DATABASE_URL',
+    'REDIS_URL',
+    'ENCRYPTION_KEY',
+  ],
+  bullmq: [
+    'ROOMOTE_APP_URL',
+    'DATABASE_URL',
+    'REDIS_URL',
+    'DASHBOARD_PASSWORD',
+    'ENCRYPTION_KEY',
+  ],
+  'preview-proxy': ['ROOMOTE_APP_URL', 'DATABASE_URL', 'REDIS_URL'],
+  'db-migrate': ['DATABASE_URL'],
+} as const satisfies Record<RoomoteService, readonly ServerEnvKey[]>;
+
+function resolveRoomoteService(
+  value: string | undefined,
+): RoomoteService | undefined {
+  return ROOMOTE_SERVICE_VALUES.find((service) => service === value);
+}
+
+function buildServiceServerSchema(
+  service: RoomoteService | undefined,
+): typeof serverSchema {
+  if (!service) {
+    return serverSchema;
+  }
+
+  const requiredForService = new Set<ServerEnvKey>(
+    SERVICE_REQUIRED_SERVER_ENV_KEYS[service],
+  );
+
+  return Object.fromEntries(
+    Object.entries(serverSchema).map(([key, schema]) => [
+      key,
+      REQUIRED_SERVER_ENV_KEYS.has(key as ServerEnvKey) &&
+      !requiredForService.has(key as ServerEnvKey)
+        ? schema.optional()
+        : schema,
+    ]),
+  ) as typeof serverSchema;
+}
+
 const clientSchema = {
   NEXT_PUBLIC_GITHUB_APP_SLUG: z.string().min(1).default('roomote'),
 };
@@ -316,7 +412,7 @@ const OPTIONAL_NON_EMPTY_KEYS = new Set([
 
 /**
  * The base64-encoded P-256 keypair env keys that every deployment needs for
- * job-token and preview-token signing/verification.
+ * run-token and preview-token signing/verification.
  */
 export const AUTH_KEYPAIR_ENV_KEYS = [
   'JOB_AUTH_PRIVATE_KEY',
@@ -439,7 +535,19 @@ type AuthKeypairEnv = Partial<Record<AuthKeypairEnvKey, string>> & {
   APP_ENV?: string;
 };
 
-function assertAuthKeypairEnv(env: AuthKeypairEnv) {
+const SERVICE_AUTH_KEYPAIR_ENV_KEYS = {
+  web: AUTH_KEYPAIR_ENV_KEYS,
+  api: ['JOB_AUTH_PRIVATE_KEY', 'JOB_AUTH_PUBLIC_KEY'],
+  controller: ['JOB_AUTH_PRIVATE_KEY', 'JOB_AUTH_PUBLIC_KEY'],
+  bullmq: [],
+  'preview-proxy': ['JOB_AUTH_PUBLIC_KEY', 'PREVIEW_AUTH_PUBLIC_KEY'],
+  'db-migrate': [],
+} as const satisfies Record<RoomoteService, readonly AuthKeypairEnvKey[]>;
+
+function assertAuthKeypairEnv(
+  env: AuthKeypairEnv,
+  service: RoomoteService | undefined,
+) {
   // Development auto-generates missing keypairs at boot (see
   // shouldAutoGenerateAuthKeypairs); production and preview must supply them.
   if (
@@ -449,7 +557,10 @@ function assertAuthKeypairEnv(env: AuthKeypairEnv) {
     return;
   }
 
-  const missingKeys = AUTH_KEYPAIR_ENV_KEYS.filter((key) => !env[key]?.trim());
+  const requiredKeys = service
+    ? SERVICE_AUTH_KEYPAIR_ENV_KEYS[service]
+    : AUTH_KEYPAIR_ENV_KEYS;
+  const missingKeys = requiredKeys.filter((key) => !env[key]?.trim());
 
   if (missingKeys.length === 0) {
     return;
@@ -577,17 +688,18 @@ export function createRoomoteEnv(
   resolve: (key: string) => string | undefined = (key) => processEnv[key],
 ) {
   const skipValidation = typeof processEnv.SKIP_ENV_VALIDATION !== 'undefined';
+  const service = resolveRoomoteService(processEnv.ROOMOTE_SERVICE);
 
   const env = createEnv({
     shared: sharedSchema,
-    server: serverSchema,
+    server: buildServiceServerSchema(service),
     client: clientSchema,
     runtimeEnv: buildRoomoteRuntimeEnv(processEnv, resolve),
     skipValidation,
   });
 
   if (!skipValidation) {
-    assertAuthKeypairEnv(env);
+    assertAuthKeypairEnv(env, service);
   }
 
   assertCompleteMicrosoftAuthEnv(env);

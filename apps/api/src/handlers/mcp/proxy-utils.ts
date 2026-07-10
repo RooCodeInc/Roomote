@@ -4,7 +4,7 @@ import {
   filterMcpToolDefinitions,
   formatSingleLineLog,
   getEffectiveAllowedMcpToolNames,
-  type JobTokenContext,
+  type RunTokenContext,
   isMcpToolAllowed,
   isUserToken,
   parseMcpJsonRpcPayload,
@@ -45,13 +45,13 @@ function getJsonRpcRequestId(body: unknown): JsonRpcRequestId {
   return typeof id === 'string' || typeof id === 'number' ? id : null;
 }
 
-export function isJobTokenContext(
+export function isRunTokenContext(
   auth: Variables['authContext'],
-): auth is JobTokenContext {
-  return Boolean(auth && 'cloudJobId' in auth);
+): auth is RunTokenContext {
+  return Boolean(auth && 'runId' in auth);
 }
 
-export function hasRealCloudJobUser(
+export function hasRealTaskRunUser(
   userId: string | null | undefined,
 ): userId is string {
   return typeof userId === 'string' && userId.trim().length > 0;
@@ -72,7 +72,7 @@ export function toMcpToolResult<T extends Record<string, unknown>>(payload: T) {
 /**
  * Resolve the effective user for downstream MCP credential lookup.
  *
- * Job tokens are authorized by their run binding (cloudJobId); integration
+ * Run tokens are authorized by their run binding (runId); integration
  * MCPs execute as the most recent human who launched or replied to the task.
  * That live actor is stored on `task_runs.actingUserId` rather than inferred
  * from `task_messages`, because transcript persistence is async and may lag
@@ -81,15 +81,15 @@ export function toMcpToolResult<T extends Record<string, unknown>>(payload: T) {
  *
  * Since this column selects whose credentials MCP calls run as, it is written
  * only by trusted server-side actors (web steer, follow-up delivery). Job
- * tokens cannot reassign it — `cloudJobs.update` strips `actingUserId` from
- * job-token input — so a compromised sandbox cannot steer MCP calls to
+ * tokens cannot reassign it — `taskRuns.update` strips `actingUserId` from
+ * run-token input — so a compromised sandbox cannot steer MCP calls to
  * another user's connections.
  */
 export async function resolveActingUserId(
   auth: McpAuthContext,
 ): Promise<string> {
-  if (auth.tokenType !== 'cj') {
-    if (!hasRealCloudJobUser(auth.userId)) {
+  if (auth.tokenType !== 'run') {
+    if (!hasRealTaskRunUser(auth.userId)) {
       throw new McpProxyError(
         403,
         'This MCP requires a human actor; the request is authenticated as the deployment service principal',
@@ -98,25 +98,25 @@ export async function resolveActingUserId(
     return auth.userId;
   }
 
-  if (!auth.cloudJobId) {
+  if (!auth.runId) {
     throw new McpProxyError(
       403,
-      'MCP proxy requires a cloud job token with a cloud job id',
+      'MCP proxy requires a task run token with a task run id',
     );
   }
 
-  const cloudJob = await db.query.taskRuns.findFirst({
+  const taskRun = await db.query.taskRuns.findFirst({
     columns: { actingUserId: true },
-    where: eq(taskRuns.id, auth.cloudJobId),
+    where: eq(taskRuns.id, auth.runId),
   });
 
-  if (!cloudJob) {
-    throw new McpProxyError(404, 'Cloud job not found for this MCP token');
+  if (!taskRun) {
+    throw new McpProxyError(404, 'Task run not found for this MCP token');
   }
 
-  const actingUserId = cloudJob.actingUserId;
+  const actingUserId = taskRun.actingUserId;
 
-  if (!hasRealCloudJobUser(actingUserId)) {
+  if (!hasRealTaskRunUser(actingUserId)) {
     // Deployment-service-principal jobs have no human actor. Callers that
     // support deployment-scoped connections should use
     // resolveActingUserIdOrNull instead of failing here.
@@ -137,66 +137,66 @@ export async function resolveActingUserId(
 export async function resolveActingUserIdOrNull(
   auth: McpAuthContext,
 ): Promise<string | null> {
-  if (auth.tokenType !== 'cj') {
+  if (auth.tokenType !== 'run') {
     return auth.userId;
   }
 
-  if (!auth.cloudJobId) {
+  if (!auth.runId) {
     throw new McpProxyError(
       403,
-      'MCP proxy requires a cloud job token with a cloud job id',
+      'MCP proxy requires a task run token with a task run id',
     );
   }
 
-  const cloudJob = await db.query.taskRuns.findFirst({
+  const taskRun = await db.query.taskRuns.findFirst({
     columns: { actingUserId: true },
-    where: eq(taskRuns.id, auth.cloudJobId),
+    where: eq(taskRuns.id, auth.runId),
   });
 
-  if (!cloudJob) {
-    throw new McpProxyError(404, 'Cloud job not found for this MCP token');
+  if (!taskRun) {
+    throw new McpProxyError(404, 'Task run not found for this MCP token');
   }
 
-  return cloudJob.actingUserId ?? null;
+  return taskRun.actingUserId ?? null;
 }
 
 /**
- * Validates that the job token's run still exists. No principal equality
+ * Validates that the run token's run still exists. No principal equality
  * check: the run-scoped token IS the authorization (only that run's sandbox
  * holds it). The token's userId is mint-time attribution while
  * `task_runs.actingUserId` is current-steering attribution — web steer and
  * follow-up delivery mutate the acting user mid-run, so the two legitimately
  * diverge and must not be compared for authorization.
  */
-async function verifyCloudJobTokenJobExists(
-  auth: JobTokenContext,
+async function verifyTaskRunTokenTargetExists(
+  auth: RunTokenContext,
 ): Promise<Response | null> {
-  const cloudJob = await db.query.taskRuns.findFirst({
+  const taskRun = await db.query.taskRuns.findFirst({
     columns: { id: true },
-    where: eq(taskRuns.id, auth.cloudJobId),
+    where: eq(taskRuns.id, auth.runId),
   });
 
-  if (!cloudJob) {
+  if (!taskRun) {
     return jsonRpcErrorResponse(
       404,
       -32000,
-      'Cloud job not found for this MCP token',
+      'Task run not found for this MCP token',
     );
   }
 
   return null;
 }
 
-export async function assertCloudJobTokenJobExists(
-  auth: JobTokenContext,
+export async function assertTaskRunTokenTargetExists(
+  auth: RunTokenContext,
 ): Promise<void> {
-  const validationError = await verifyCloudJobTokenJobExists(auth);
+  const validationError = await verifyTaskRunTokenTargetExists(auth);
 
   if (!validationError) {
     return;
   }
 
-  let message = 'Cloud job token validation failed';
+  let message = 'Task run token validation failed';
   try {
     const body = (await validationError.clone().json()) as {
       error?: { message?: string };
@@ -292,12 +292,12 @@ interface ResolvedCredentials {
 export interface McpAuthContext {
   /**
    * Token principal. `null` means the request is authenticated as the
-   * deployment service principal (a cloud job with no human owner); it is
+   * deployment service principal (a task run with no human owner); it is
    * always a real user id for `auth` tokens.
    */
   userId: string | null;
-  tokenType: 'cj' | 'auth';
-  cloudJobId?: number;
+  tokenType: 'run' | 'auth';
+  runId?: number;
 }
 
 interface McpProxyConfig {
@@ -305,7 +305,7 @@ interface McpProxyConfig {
   upstream: string;
   resolveCredentials: (auth: McpAuthContext) => Promise<ResolvedCredentials>;
   allowAuthTokens?: boolean;
-  validateCloudJobToken?: (auth: JobTokenContext) => Promise<Response | null>;
+  validateTaskRunToken?: (auth: RunTokenContext) => Promise<Response | null>;
   allowedToolNames?: readonly string[];
   timeoutMs?: number;
 }
@@ -409,7 +409,7 @@ export function createMcpProxy(config: McpProxyConfig) {
     resolveCredentials,
     timeoutMs = 30_000,
     allowAuthTokens = false,
-    validateCloudJobToken = verifyCloudJobTokenJobExists,
+    validateTaskRunToken = verifyTaskRunTokenTargetExists,
     allowedToolNames,
   } = config;
 
@@ -440,27 +440,27 @@ export function createMcpProxy(config: McpProxyConfig) {
 
     let auth: McpAuthContext;
 
-    if (isJobTokenContext(rawAuth)) {
-      const cloudJobValidationError = await validateCloudJobToken(rawAuth);
-      if (cloudJobValidationError) {
+    if (isRunTokenContext(rawAuth)) {
+      const taskRunValidationError = await validateTaskRunToken(rawAuth);
+      if (taskRunValidationError) {
         console.warn(
-          formatSingleLineLog(`${logPrefix} Cloud job auth validation failed`, {
+          formatSingleLineLog(`${logPrefix} Task run auth validation failed`, {
             requestId,
             method,
             path,
             tokenType: rawAuth.tokenType,
-            cloudJobId: rawAuth.cloudJobId,
+            runId: rawAuth.runId,
             userId: rawAuth.userId,
-            status: cloudJobValidationError.status,
+            status: taskRunValidationError.status,
           }),
         );
-        return cloudJobValidationError;
+        return taskRunValidationError;
       }
 
       auth = {
         userId: rawAuth.userId,
-        tokenType: 'cj',
-        cloudJobId: rawAuth.cloudJobId,
+        tokenType: 'run',
+        runId: rawAuth.runId,
       };
     } else if (allowAuthTokens && isUserToken(rawAuth)) {
       auth = {
@@ -483,8 +483,8 @@ export function createMcpProxy(config: McpProxyConfig) {
         403,
         -32000,
         allowAuthTokens
-          ? `${name} MCP requires a user-scoped auth token or cloud job token`
-          : `${name} MCP is only available for cloud job tokens`,
+          ? `${name} MCP requires a user-scoped auth token or task run token`
+          : `${name} MCP is only available for task run tokens`,
       );
     }
 

@@ -1,5 +1,5 @@
 import {
-  CloudJobQueueEnqueueError,
+  TaskRunQueueEnqueueError,
   enqueueTask,
 } from '@roomote/cloud-agents/server';
 import { TaskPayloadKind, type BackgroundAutomationKey } from '@roomote/types';
@@ -267,7 +267,7 @@ export async function launchActWorkItems(params: {
         },
         {
           launchClass: 'automation',
-          beforeEnqueue: (cloudJob) => markWorkItemStarted(cloudJob.taskId),
+          beforeEnqueue: (taskRun) => markWorkItemStarted(taskRun.taskId),
         },
       );
 
@@ -291,7 +291,7 @@ export async function launchActWorkItems(params: {
           ? error.message
           : 'Failed to auto-start work item';
       const retryLaunchedTaskId =
-        error instanceof CloudJobQueueEnqueueError ? linkedTaskId : null;
+        error instanceof TaskRunQueueEnqueueError ? linkedTaskId : null;
       const shouldRetry = retryLaunchedTaskId !== null;
 
       // Both failure writes are fenced so a stale launcher whose claim was

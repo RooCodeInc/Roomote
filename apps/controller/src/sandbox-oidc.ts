@@ -11,7 +11,7 @@ export async function primeEnvironmentOidcForMachine(params: {
   environmentConfig: EnvironmentConfig | undefined;
   computeProvider: ComputeProvider;
   computeProviderId: string;
-  cloudJobId?: number;
+  runId?: number;
   context: string;
 }): Promise<void> {
   if (!params.environmentConfig) {
@@ -28,6 +28,6 @@ export async function primeEnvironmentOidcForMachine(params: {
     environmentConfig: params.environmentConfig,
     computeProvider: params.computeProvider,
     computeProviderId: params.computeProviderId,
-    cloudJobId: params.cloudJobId,
+    runId: params.runId,
   });
 }

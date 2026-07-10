@@ -7,7 +7,7 @@ import type {
   EnvironmentConfig,
   RequestedWorkKind,
 } from '@roomote/types';
-import type { Run, DequeuedCloudJob } from '@roomote/sdk/client';
+import type { TaskRun, DequeuedTaskRun } from '@roomote/sdk/client';
 
 import type {
   TaskPhase,
@@ -31,7 +31,7 @@ export type RunTaskContext = Record<string, unknown>;
  * fallback for payloads that predate the task columns.
  */
 type TaskChannelBindings = Pick<
-  DequeuedCloudJob['task'],
+  DequeuedTaskRun['task'],
   'slackChannelId' | 'slackThreadTs' | 'linearSessionId'
 >;
 
@@ -103,25 +103,25 @@ export type CallbackEvent =
 
 export type RunTaskCallbacks = {
   onStart?: (
-    cloudJob: Run,
+    taskRun: TaskRun,
     taskId: string,
     context: RunTaskContext,
   ) => Promise<void>;
   onMessage?: (
-    cloudJob: Run,
+    taskRun: TaskRun,
     taskId: string,
     event: CallbackEvent,
     context: RunTaskContext,
   ) => Promise<void>;
   onExit?: (
-    cloudJob: Run,
+    taskRun: TaskRun,
     status: RunStatus,
     context: RunTaskContext,
   ) => Promise<void>;
 };
 
 export type RunTaskOptions = {
-  cloudJob: DequeuedCloudJob['cloudJob'];
+  taskRun: DequeuedTaskRun['taskRun'];
   envVars: Record<string, string | undefined>;
   workspacePath: string;
   usesSharedWorkspaceRoot?: boolean;
@@ -226,7 +226,7 @@ export type RunTaskState = TaskState &
   };
 
 export interface ListenerOptions {
-  cloudJob: DequeuedCloudJob['cloudJob'];
+  taskRun: DequeuedTaskRun['taskRun'];
   /**
    * Task-level channel bindings from the SDK dequeue/resume response.
    * Preferred over payload-derived extraction when deciding which polling

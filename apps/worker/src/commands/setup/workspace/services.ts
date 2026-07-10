@@ -27,19 +27,19 @@ interface InitializeWorkspaceServicesResult {
 
 export async function initializeAllServices(
   logger: StartupLogger,
-  { workspace, envVars, cloudJobType, serviceContext }: PrepareWorkspaceOptions,
+  { workspace, envVars, taskRunType, serviceContext }: PrepareWorkspaceOptions,
 ): Promise<InitializeWorkspaceServicesResult> {
   const systemServices = await initializeSystemServices(logger, {
     workspace,
     envVars,
-    cloudJobType,
+    taskRunType,
     serviceContext,
   });
 
   const environmentServices = await initializeEnvironmentServices(logger, {
     workspace,
     envVars,
-    cloudJobType,
+    taskRunType,
     serviceContext,
   });
 
@@ -51,7 +51,7 @@ export async function initializeAllServices(
 
 export async function initializeSystemServices(
   logger: StartupLogger,
-  { workspace, envVars, cloudJobType }: PrepareWorkspaceOptions,
+  { workspace, envVars, taskRunType }: PrepareWorkspaceOptions,
 ): Promise<InitializeWorkspaceServicesResult> {
   const workspaceRoot = resolveRuntimePathsForWorker().workspaceReposDir;
 
@@ -63,7 +63,7 @@ export async function initializeSystemServices(
   const services = await startSystemServices({
     workspaceRoot,
     envVars,
-    cloudJobType,
+    taskRunType,
     environmentConfig,
     logger,
   });
@@ -96,13 +96,13 @@ export async function initializeEnvironmentServices(
 async function startSystemServices({
   workspaceRoot,
   envVars,
-  cloudJobType,
+  taskRunType,
   environmentConfig,
   logger,
 }: {
   workspaceRoot: string;
   envVars: Record<string, string | undefined>;
-  cloudJobType: TaskPayloadKind;
+  taskRunType: TaskPayloadKind;
   environmentConfig?: EnvironmentConfig;
   logger: StartupLogger;
 }): Promise<ServiceInfo[]> {
@@ -110,7 +110,7 @@ async function startSystemServices({
 
   if (
     environmentConfig &&
-    isServicesEnabledTaskPayloadKind(cloudJobType) &&
+    isServicesEnabledTaskPayloadKind(taskRunType) &&
     environmentConfig.services &&
     environmentConfig.services.length > 0
   ) {

@@ -5,7 +5,7 @@ import {
 } from '@roomote/types';
 
 /**
- * Generates a human-readable title from a cloud job.
+ * Generates a human-readable title from a task run.
  */
 
 const UNTITLED_TASK = 'Untitled task';
@@ -246,7 +246,7 @@ export function buildSlackThreadPromptBlocks({
   };
 }
 
-export function generateCloudJobTitle(
+export function generateTaskRunTitle(
   { type, payload }: { type: TaskPayloadKind; payload: TaskPayload },
   limit: number = 10_000,
   fallbackTitle?: string | null,
@@ -339,11 +339,11 @@ const DETERMINISTIC_TITLE_TASK_TYPES: ReadonlySet<TaskPayloadKind> = new Set([
 ]);
 
 /**
- * Task types whose `generateCloudJobTitle` result is a stable payload-derived
+ * Task types whose `generateTaskRunTitle` result is a stable payload-derived
  * string such as `Review PR #<n>: <prTitle>`. These titles carry structured
  * provenance the UI relies on, so LLM title refresh must never replace them
  * with a summary of the structured startup prompt.
  */
-export function hasDeterministicCloudJobTitle(type: TaskPayloadKind): boolean {
+export function hasDeterministicTaskRunTitle(type: TaskPayloadKind): boolean {
   return DETERMINISTIC_TITLE_TASK_TYPES.has(type);
 }

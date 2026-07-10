@@ -21,7 +21,7 @@ import {
   taskRuns,
   getDeploymentPrAction,
   taskPullRequests,
-  type Run,
+  type TaskRun,
 } from '@roomote/db/server';
 import {
   buildPullRequestUrl,
@@ -34,7 +34,7 @@ import {
 } from '@roomote/types';
 import { z } from 'zod';
 import {
-  assertRepositoryInCloudJobScope,
+  assertRepositoryInTaskRunScope,
   buildAdoBasicAuthHeader,
   buildApiUrl,
   formatResponseBody,
@@ -54,7 +54,9 @@ export const sourceControlPullRequestMutationInputSchema = z.object({
   action: z.literal('create_or_update_pull_request'),
   repositoryFullName: z.string().trim().min(1),
   sourceBranch: z.string().trim().min(1),
-  targetBranch: z.string().trim().min(1),
+  // Optional so agents can refresh an existing pull request without
+  // re-stating the base; creating a new pull request still requires it.
+  targetBranch: z.string().trim().min(1).optional(),
   title: z.string().trim().min(1),
   body: z.string(),
   labels: z.array(z.string().trim().min(1)).default([]),
@@ -74,6 +76,11 @@ export type SourceControlPullRequestMutationResult = {
   number: number;
   url: string;
   title: string;
+  /**
+   * The effective base branch: the input targetBranch when given, otherwise
+   * the existing pull request's base ref it defaulted to.
+   */
+  targetBranch: string;
   draft: boolean;
   warnings: string[];
 };
@@ -88,18 +95,72 @@ export class SourceControlMutationError extends Error {
   }
 }
 
+function requireTargetBranchForCreate(
+  input: SourceControlPullRequestMutationInput,
+): string {
+  if (!input.targetBranch) {
+    throw new SourceControlMutationError(
+      400,
+      `targetBranch is required to create a pull request: no open pull request was found for source branch "${input.sourceBranch}" in ${input.repositoryFullName}. Retry with targetBranch set (it is optional only when updating an existing open pull request).`,
+    );
+  }
+
+  return input.targetBranch;
+}
+
+function resolveTargetBranchForUpdate(
+  input: SourceControlPullRequestMutationInput,
+  existingBaseRef: string | undefined,
+): string {
+  const targetBranch = input.targetBranch ?? existingBaseRef;
+
+  if (!targetBranch) {
+    throw new SourceControlMutationError(
+      400,
+      `Could not determine the base branch of the existing open pull request for source branch "${input.sourceBranch}" in ${input.repositoryFullName}. Retry with targetBranch set.`,
+    );
+  }
+
+  return targetBranch;
+}
+
+/**
+ * Without a targetBranch filter, "the existing pull request for this source
+ * branch" is ambiguous when the branch has open pull requests against
+ * multiple bases; refusing beats silently updating an arbitrary one.
+ */
+function assertUnambiguousExistingPullRequest(
+  input: SourceControlPullRequestMutationInput,
+  existingTargetRefs: Array<string | undefined>,
+): void {
+  if (input.targetBranch || existingTargetRefs.length <= 1) {
+    return;
+  }
+
+  throw new SourceControlMutationError(
+    409,
+    `Multiple open pull requests exist for source branch "${input.sourceBranch}" in ${input.repositoryFullName} (target branches: ${existingTargetRefs
+      .map((ref) => ref ?? 'unknown')
+      .join(
+        ', ',
+      )}). Retry with targetBranch set to choose which one to update.`,
+  );
+}
+
 type GitHubPullRequestResult = {
   number: number;
   node_id: string;
   html_url: string;
   title: string;
   draft?: boolean;
+  base?: { ref: string };
 };
 
 const gitLabMergeRequestSchema = z.object({
   iid: z.number().int(),
   title: z.string(),
   web_url: z.string().url().optional(),
+  target_branch: z.string().optional(),
   draft: z.boolean().optional(),
   work_in_progress: z.boolean().optional(),
 });
@@ -123,23 +184,24 @@ const adoPullRequestSchema = z
     pullRequestId: z.number().int(),
     title: z.string(),
     isDraft: z.boolean().optional(),
+    targetRefName: z.string().optional(),
   })
   .passthrough();
 const adoPullRequestListSchema = z.object({
   value: z.array(adoPullRequestSchema),
 });
 
-export async function createOrUpdateSourceControlPullRequestForCloudJob({
-  cloudJob,
+export async function createOrUpdateSourceControlPullRequestForTaskRun({
+  taskRun,
   input,
   fetchImpl = fetch,
 }: {
-  cloudJob: Run;
+  taskRun: TaskRun;
   input: SourceControlPullRequestMutationInput;
   fetchImpl?: FetchImpl;
 }): Promise<SourceControlPullRequestMutationResult> {
   const payloadProvider = resolveSourceControlProviderFromPayload(
-    getPayloadRecord(cloudJob.payload),
+    getPayloadRecord(taskRun.payload),
   );
   const provider = input.sourceControlProvider ?? payloadProvider;
 
@@ -151,14 +213,14 @@ export async function createOrUpdateSourceControlPullRequestForCloudJob({
     );
   }
 
-  await assertRepositoryInCloudJobScope(cloudJob, input.repositoryFullName);
+  await assertRepositoryInTaskRunScope(taskRun, input.repositoryFullName);
 
   const repository = await resolveRepositoryRow({
     provider,
     repositoryFullName: input.repositoryFullName,
   });
 
-  const prAction = await resolveEffectivePrAction(cloudJob);
+  const prAction = await resolveEffectivePrAction(taskRun);
   const createDraft = prAction !== 'create';
 
   const result = await (() => {
@@ -198,8 +260,7 @@ export async function createOrUpdateSourceControlPullRequestForCloudJob({
   })();
 
   await persistSourceControlPullRequestAssociation({
-    cloudJob,
-    input,
+    taskRun,
     result,
     repository,
   });
@@ -209,15 +270,15 @@ export async function createOrUpdateSourceControlPullRequestForCloudJob({
 
 /**
  * Draft state is deployment policy, not agent choice. The effective PR
- * delivery action comes from the cloud job payload when a launch stamped one
+ * delivery action comes from the task run payload when a launch stamped one
  * (per-task override), falling back to the deployment-wide Source Control
  * setting. Only `prAction === 'create'` opens ready-for-review pull
  * requests; `draft` and `push` both open drafts when a pull request is
  * created at all. Updates never change an existing pull request's draft
  * state.
  */
-async function resolveEffectivePrAction(cloudJob: Run): Promise<PrAction> {
-  const payloadPrAction = getPayloadRecord(cloudJob.payload).prAction;
+async function resolveEffectivePrAction(taskRun: TaskRun): Promise<PrAction> {
+  const payloadPrAction = getPayloadRecord(taskRun.payload).prAction;
 
   if (prActions.includes(payloadPrAction as PrAction)) {
     return payloadPrAction as PrAction;
@@ -235,17 +296,15 @@ async function resolveEffectivePrAction(cloudJob: Run): Promise<PrAction> {
  * agent already performed.
  */
 async function persistSourceControlPullRequestAssociation({
-  cloudJob,
-  input,
+  taskRun,
   result,
   repository,
 }: {
-  cloudJob: Run;
-  input: SourceControlPullRequestMutationInput;
+  taskRun: TaskRun;
   result: SourceControlPullRequestMutationResult;
   repository: RepositoryRow;
 }): Promise<void> {
-  if (!cloudJob.taskId) {
+  if (!taskRun.taskId) {
     return;
   }
 
@@ -255,7 +314,7 @@ async function persistSourceControlPullRequestAssociation({
     await db
       .insert(taskPullRequests)
       .values({
-        taskId: cloudJob.taskId,
+        taskId: taskRun.taskId,
         sourceControlProvider: repository.sourceControlProvider,
         host: repository.host,
         repositoryId: repository.id,
@@ -264,7 +323,7 @@ async function persistSourceControlPullRequestAssociation({
         prTitle: result.title,
         repository: result.repositoryFullName,
         status,
-        prBaseRef: input.targetBranch,
+        prBaseRef: result.targetBranch,
       })
       .onConflictDoUpdate({
         target: [taskPullRequests.taskId, taskPullRequests.prUrl],
@@ -274,13 +333,13 @@ async function persistSourceControlPullRequestAssociation({
           repositoryId: repository.id,
           prTitle: result.title,
           status,
-          prBaseRef: input.targetBranch,
+          prBaseRef: result.targetBranch,
           updatedAt: new Date(),
         },
       });
   } catch (error) {
     console.warn(
-      `[persistSourceControlPullRequestAssociation] Failed to associate ${result.repositoryFullName}#${result.number} with task ${cloudJob.taskId}: ${
+      `[persistSourceControlPullRequestAssociation] Failed to associate ${result.repositoryFullName}#${result.number} with task ${taskRun.taskId}: ${
         error instanceof Error ? error.message : String(error)
       }`,
     );
@@ -316,34 +375,46 @@ async function createOrUpdateGitHubPullRequest({
     repo,
     state: 'open',
     head: `${owner}:${input.sourceBranch}`,
-    base: input.targetBranch,
-    per_page: 1,
+    ...(input.targetBranch ? { base: input.targetBranch } : {}),
+    per_page: 2,
   });
+
+  assertUnambiguousExistingPullRequest(
+    input,
+    existingPullRequests.map((pullRequest) => pullRequest.base?.ref),
+  );
 
   let action: SourceControlPullRequestMutationResult['action'];
   let pullRequest: GitHubPullRequestResult | undefined =
     existingPullRequests[0];
+  let targetBranch: string;
 
   if (pullRequest) {
     action = 'updated';
+    targetBranch = resolveTargetBranchForUpdate(input, pullRequest.base?.ref);
+    // An update never sends base: an explicit targetBranch already scoped
+    // the lookup to that base, and an omitted one means "keep the existing
+    // base". Retargeting an open pull request is not something this tool
+    // does; an explicit targetBranch with no matching pull request opens a
+    // new one against that base instead.
     const { data } = await octokit.rest.pulls.update({
       owner,
       repo,
       pull_number: pullRequest.number,
       title: input.title,
       body: input.body,
-      base: input.targetBranch,
     });
     pullRequest = data;
   } else {
     action = 'created';
+    targetBranch = requireTargetBranchForCreate(input);
     const { data } = await octokit.rest.pulls.create({
       owner,
       repo,
       title: input.title,
       body: input.body,
       head: input.sourceBranch,
-      base: input.targetBranch,
+      base: targetBranch,
       draft: createDraft,
     });
     pullRequest = data;
@@ -379,6 +450,7 @@ async function createOrUpdateGitHubPullRequest({
     number: pullRequest.number,
     url: pullRequest.html_url,
     title: pullRequest.title,
+    targetBranch,
     draft: Boolean(pullRequest.draft),
     warnings: [],
   };
@@ -413,13 +485,23 @@ async function createOrUpdateGitLabMergeRequest({
   const baseUrl = await resolveGitLabBaseUrl();
   const apiBaseUrl = buildGitLabApiBaseUrl(baseUrl);
   const host = new URL(baseUrl).host;
-  const existing = await listGitLabMergeRequest({
+  const existingMergeRequests = await listGitLabMergeRequests({
     apiBaseUrl,
     projectId: repository.externalRepoId,
     input,
     token,
     fetchImpl,
   });
+
+  assertUnambiguousExistingPullRequest(
+    input,
+    existingMergeRequests.map((mergeRequest) => mergeRequest.target_branch),
+  );
+
+  const existing = existingMergeRequests[0];
+  const targetBranch = existing
+    ? resolveTargetBranchForUpdate(input, existing.target_branch)
+    : requireTargetBranchForCreate(input);
   const title = applyDraftTitle(
     input.title,
     existing ? isGitLabDraft(existing) : createDraft,
@@ -463,7 +545,7 @@ async function createOrUpdateGitLabMergeRequest({
         tokenHeader: { name: 'PRIVATE-TOKEN', value: token },
         body: {
           source_branch: input.sourceBranch,
-          target_branch: input.targetBranch,
+          target_branch: targetBranch,
           remove_source_branch: false,
           ...common,
           ...(input.labels.length > 0
@@ -488,12 +570,13 @@ async function createOrUpdateGitLabMergeRequest({
         number: mergeRequest.iid,
       }),
     title: mergeRequest.title,
+    targetBranch,
     draft: isGitLabDraft(mergeRequest),
     warnings: buildUnsupportedWarnings(input, provider),
   };
 }
 
-async function listGitLabMergeRequest({
+async function listGitLabMergeRequests({
   apiBaseUrl,
   projectId,
   input,
@@ -506,7 +589,7 @@ async function listGitLabMergeRequest({
   token: string;
   fetchImpl: FetchImpl;
 }) {
-  const mergeRequests = await requestJson({
+  return requestJson({
     fetchImpl,
     url: buildApiUrl(
       apiBaseUrl,
@@ -514,15 +597,13 @@ async function listGitLabMergeRequest({
       {
         state: 'opened',
         source_branch: input.sourceBranch,
-        target_branch: input.targetBranch,
-        per_page: 1,
+        ...(input.targetBranch ? { target_branch: input.targetBranch } : {}),
+        per_page: 2,
       },
     ),
     tokenHeader: { name: 'PRIVATE-TOKEN', value: token },
     schema: gitLabMergeRequestListSchema,
   });
-
-  return mergeRequests[0];
 }
 
 async function createOrUpdateGiteaPullRequest({
@@ -552,7 +633,7 @@ async function createOrUpdateGiteaPullRequest({
 
   const [owner, repo] = splitRepositoryFullName(repository.fullName, provider);
   const apiBaseUrl = buildGiteaApiBaseUrl(baseUrl);
-  const existing = await listGiteaPullRequest({
+  const existingPullRequests = await listGiteaPullRequests({
     apiBaseUrl,
     owner,
     repo,
@@ -560,6 +641,16 @@ async function createOrUpdateGiteaPullRequest({
     token,
     fetchImpl,
   });
+
+  assertUnambiguousExistingPullRequest(
+    input,
+    existingPullRequests.map((pullRequest) => pullRequest.base?.ref),
+  );
+
+  const existing = existingPullRequests[0];
+  const targetBranch = existing
+    ? resolveTargetBranchForUpdate(input, existing.base?.ref)
+    : requireTargetBranchForCreate(input);
   const title = applyDraftTitle(
     input.title,
     existing
@@ -594,7 +685,7 @@ async function createOrUpdateGiteaPullRequest({
         ),
         tokenHeader: { name: 'Authorization', value: `token ${token}` },
         body: {
-          base: input.targetBranch,
+          base: targetBranch,
           head: input.sourceBranch,
           title,
           body: input.body,
@@ -621,12 +712,24 @@ async function createOrUpdateGiteaPullRequest({
         number,
       }),
     title: pullRequest.title ?? title,
+    targetBranch,
     draft: Boolean(pullRequest.draft) || isDraftTitle(pullRequest.title),
     warnings: buildUnsupportedWarnings(input, provider),
   };
 }
 
-async function listGiteaPullRequest({
+const GITEA_PULLS_PAGE_SIZE = 50;
+const GITEA_PULLS_MAX_PAGES = 40;
+
+/**
+ * Gitea's pulls listing has no head/base filter, so matching happens
+ * client-side and must walk pages: stopping at the first page could
+ * falsely conclude no pull request exists for the source branch. The walk
+ * ends as soon as the caller has what it needs — one match when the target
+ * branch pins a unique head+base pair, two when an omitted targetBranch
+ * only needs enough to prove ambiguity.
+ */
+async function listGiteaPullRequests({
   apiBaseUrl,
   owner,
   repo,
@@ -641,22 +744,38 @@ async function listGiteaPullRequest({
   token: string;
   fetchImpl: FetchImpl;
 }) {
-  const pullRequests = await requestJson({
-    fetchImpl,
-    url: buildApiUrl(
-      apiBaseUrl,
-      `/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/pulls`,
-      { state: 'open', limit: 50 },
-    ),
-    tokenHeader: { name: 'Authorization', value: `token ${token}` },
-    schema: giteaPullRequestListSchema,
-  });
+  const matches: z.infer<typeof giteaPullRequestSchema>[] = [];
+  const enoughMatches = input.targetBranch ? 1 : 2;
 
-  return pullRequests.find(
-    (pullRequest) =>
-      pullRequest.head?.ref === input.sourceBranch &&
-      pullRequest.base?.ref === input.targetBranch,
-  );
+  for (let page = 1; page <= GITEA_PULLS_MAX_PAGES; page++) {
+    const pullRequests = await requestJson({
+      fetchImpl,
+      url: buildApiUrl(
+        apiBaseUrl,
+        `/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/pulls`,
+        { state: 'open', limit: GITEA_PULLS_PAGE_SIZE, page },
+      ),
+      tokenHeader: { name: 'Authorization', value: `token ${token}` },
+      schema: giteaPullRequestListSchema,
+    });
+
+    matches.push(
+      ...pullRequests.filter(
+        (pullRequest) =>
+          pullRequest.head?.ref === input.sourceBranch &&
+          (!input.targetBranch || pullRequest.base?.ref === input.targetBranch),
+      ),
+    );
+
+    if (
+      matches.length >= enoughMatches ||
+      pullRequests.length < GITEA_PULLS_PAGE_SIZE
+    ) {
+      break;
+    }
+  }
+
+  return matches;
 }
 
 async function createOrUpdateAdoPullRequest({
@@ -698,13 +817,28 @@ async function createOrUpdateAdoPullRequest({
   )}/_apis/git/repositories/${encodeURIComponent(
     repository.externalRepoId,
   )}/pullrequests`;
-  const existing = await listAdoPullRequest({
+  const existingPullRequests = await listAdoPullRequests({
     organizationApiBaseUrl,
     repositoryPullRequestsPath,
     input,
     token,
     fetchImpl,
   });
+
+  assertUnambiguousExistingPullRequest(
+    input,
+    existingPullRequests.map((pullRequest) =>
+      stripAdoBranchRef(pullRequest.targetRefName),
+    ),
+  );
+
+  const existing = existingPullRequests[0];
+  const targetBranch = existing
+    ? resolveTargetBranchForUpdate(
+        input,
+        stripAdoBranchRef(existing.targetRefName),
+      )
+    : requireTargetBranchForCreate(input);
   // PATCH omits isDraft so an update never changes the existing draft state.
   const common = {
     title: input.title,
@@ -741,7 +875,7 @@ async function createOrUpdateAdoPullRequest({
         },
         body: {
           sourceRefName: normalizeAdoBranchRef(input.sourceBranch),
-          targetRefName: normalizeAdoBranchRef(input.targetBranch),
+          targetRefName: normalizeAdoBranchRef(targetBranch),
           isDraft: createDraft,
           ...common,
         },
@@ -763,12 +897,13 @@ async function createOrUpdateAdoPullRequest({
       number: pullRequest.pullRequestId,
     }),
     title: pullRequest.title,
+    targetBranch,
     draft: Boolean(pullRequest.isDraft),
     warnings: buildUnsupportedWarnings(input, provider),
   };
 }
 
-async function listAdoPullRequest({
+async function listAdoPullRequests({
   organizationApiBaseUrl,
   repositoryPullRequestsPath,
   input,
@@ -787,8 +922,14 @@ async function listAdoPullRequest({
       'api-version': ADO_API_VERSION,
       'searchCriteria.status': 'active',
       'searchCriteria.sourceRefName': normalizeAdoBranchRef(input.sourceBranch),
-      'searchCriteria.targetRefName': normalizeAdoBranchRef(input.targetBranch),
-      $top: 1,
+      ...(input.targetBranch
+        ? {
+            'searchCriteria.targetRefName': normalizeAdoBranchRef(
+              input.targetBranch,
+            ),
+          }
+        : {}),
+      $top: 2,
     }),
     tokenHeader: {
       name: 'Authorization',
@@ -797,7 +938,7 @@ async function listAdoPullRequest({
     schema: adoPullRequestListSchema,
   });
 
-  return result.value[0];
+  return result.value;
 }
 
 async function requestJson<T>({
@@ -852,6 +993,10 @@ function normalizeAdoBranchRef(branch: string): string {
   return branch.startsWith('refs/heads/') ? branch : `refs/heads/${branch}`;
 }
 
+function stripAdoBranchRef(ref: string | undefined): string | undefined {
+  return ref?.startsWith('refs/heads/') ? ref.slice('refs/heads/'.length) : ref;
+}
+
 function applyDraftTitle(
   title: string,
   draft: boolean,
@@ -896,30 +1041,30 @@ function buildUnsupportedWarnings(
   return warnings;
 }
 
-export async function findCloudJobForSourceControlMutation({
-  cloudJobId,
+export async function findTaskRunForSourceControlMutation({
+  runId,
   taskId,
 }: {
-  cloudJobId: number;
+  runId: number;
   taskId: string;
-}): Promise<Run> {
-  const cloudJob = await db.query.taskRuns.findFirst({
-    where: eq(taskRuns.id, cloudJobId),
+}): Promise<TaskRun> {
+  const taskRun = await db.query.taskRuns.findFirst({
+    where: eq(taskRuns.id, runId),
   });
 
-  if (!cloudJob) {
+  if (!taskRun) {
     throw new SourceControlMutationError(
       404,
-      'Cloud job not found for this MCP token.',
+      'Task run not found for this MCP token.',
     );
   }
 
-  if (cloudJob.taskId !== taskId) {
+  if (taskRun.taskId !== taskId) {
     throw new SourceControlMutationError(
       403,
-      'Cloud job token does not match the requested task.',
+      'Task run token does not match the requested task.',
     );
   }
 
-  return cloudJob;
+  return taskRun;
 }

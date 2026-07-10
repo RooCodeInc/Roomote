@@ -12,7 +12,7 @@ const {
 
 vi.mock('@roomote/sdk/client', () => ({
   sdk: {
-    cloudJobs: {
+    taskRuns: {
       findFirstById: mockFindFirstById,
     },
   },
@@ -65,16 +65,16 @@ describe('trackLatestUserMessageForSlackThreadQuote', () => {
       slackThreadTs: '111.222',
     });
     mockGetRoomoteConfig.mockReturnValue({
-      token: 'job-token',
+      token: 'run-token',
       platformApiUrl: 'https://platform.example.com',
     });
     mockTrackSlackReplyQuote.mockResolvedValue({ success: true });
     mockClearSlackReplyQuote.mockResolvedValue({ success: true });
   });
 
-  it('tracks the latest user message through the API when the cloud job has Slack thread context', async () => {
+  it('tracks the latest user message through the API when the task run has Slack thread context', async () => {
     await trackLatestUserMessageForSlackThreadQuote({
-      cloudJobId: 1,
+      runId: 1,
       text: 'Follow up from web',
       userName: 'Casey',
       logPrefix: 'testProcedure',
@@ -84,11 +84,11 @@ describe('trackLatestUserMessageForSlackThreadQuote', () => {
     expect(mockGetRoomoteConfig).toHaveBeenCalledTimes(1);
     expect(mockTrackSlackReplyQuote).toHaveBeenCalledWith(
       {
-        token: 'job-token',
+        token: 'run-token',
         platformApiUrl: 'https://platform.example.com',
       },
       {
-        cloudJobId: 1,
+        runId: 1,
         text: 'Follow up from web',
         userName: 'Casey',
       },
@@ -97,7 +97,7 @@ describe('trackLatestUserMessageForSlackThreadQuote', () => {
 
   it('does not leak raw user IDs into the stored Slack quote username', async () => {
     await trackLatestUserMessageForSlackThreadQuote({
-      cloudJobId: 1,
+      runId: 1,
       text: 'Follow up from web',
       userName: undefined,
       logPrefix: 'testProcedure',
@@ -105,25 +105,25 @@ describe('trackLatestUserMessageForSlackThreadQuote', () => {
 
     expect(mockTrackSlackReplyQuote).toHaveBeenCalledWith(
       {
-        token: 'job-token',
+        token: 'run-token',
         platformApiUrl: 'https://platform.example.com',
       },
       {
-        cloudJobId: 1,
+        runId: 1,
         text: 'Follow up from web',
         userName: 'Someone',
       },
     );
   });
 
-  it('does not store a message when the cloud job has no Slack thread context', async () => {
+  it('does not store a message when the task run has no Slack thread context', async () => {
     mockFindFirstById.mockResolvedValueOnce({
       payload: {},
       slackThreadTs: null,
     });
 
     await trackLatestUserMessageForSlackThreadQuote({
-      cloudJobId: 1,
+      runId: 1,
       text: 'Follow up from web',
       userName: undefined,
       logPrefix: 'testProcedure',
@@ -134,15 +134,15 @@ describe('trackLatestUserMessageForSlackThreadQuote', () => {
     expect(mockTrackSlackReplyQuote).not.toHaveBeenCalled();
   });
 
-  it('does not query the cloud job for empty text or missing cloud job IDs', async () => {
+  it('does not query the task run for empty text or missing task run IDs', async () => {
     await trackLatestUserMessageForSlackThreadQuote({
-      cloudJobId: 1,
+      runId: 1,
       text: '   ',
       userName: undefined,
       logPrefix: 'testProcedure',
     });
     await trackLatestUserMessageForSlackThreadQuote({
-      cloudJobId: undefined,
+      runId: undefined,
       text: 'Follow up from web',
       userName: undefined,
       logPrefix: 'testProcedure',
@@ -158,7 +158,7 @@ describe('trackLatestUserMessageForSlackThreadQuote', () => {
     mockFindFirstById.mockRejectedValueOnce(new Error('lookup failed'));
 
     await trackLatestUserMessageForSlackThreadQuote({
-      cloudJobId: 1,
+      runId: 1,
       text: 'Follow up from web',
       userName: undefined,
       logPrefix: 'testProcedure',
@@ -167,7 +167,7 @@ describe('trackLatestUserMessageForSlackThreadQuote', () => {
 
     expect(mockTrackSlackReplyQuote).not.toHaveBeenCalled();
     expect(warn).toHaveBeenCalledWith(
-      '[testProcedure] Non-fatal latest user message sync failure for cloud job 1: lookup failed',
+      '[testProcedure] Non-fatal latest user message sync failure for task run 1: lookup failed',
     );
   });
 
@@ -176,7 +176,7 @@ describe('trackLatestUserMessageForSlackThreadQuote', () => {
     mockGetRoomoteConfig.mockReturnValueOnce(null);
 
     await trackLatestUserMessageForSlackThreadQuote({
-      cloudJobId: 1,
+      runId: 1,
       text: 'Follow up from web',
       userName: undefined,
       logPrefix: 'testProcedure',
@@ -185,7 +185,7 @@ describe('trackLatestUserMessageForSlackThreadQuote', () => {
 
     expect(mockTrackSlackReplyQuote).not.toHaveBeenCalled();
     expect(warn).toHaveBeenCalledWith(
-      '[testProcedure] Non-fatal latest user message sync failure for cloud job 1: ROOMOTE_CLOUD_TOKEN/AUTH_TOKEN environment variable not set',
+      '[testProcedure] Non-fatal latest user message sync failure for task run 1: ROOMOTE_CLOUD_TOKEN/AUTH_TOKEN environment variable not set',
     );
   });
 
@@ -209,7 +209,7 @@ describe('trackLatestUserMessageForSlackThreadQuote', () => {
     ].join('\n');
 
     await trackLatestUserMessageForSlackThreadQuote({
-      cloudJobId: 1,
+      runId: 1,
       text: wrappedMessage,
       userName: 'Matt Rubens',
       logPrefix: 'testProcedure',
@@ -217,11 +217,11 @@ describe('trackLatestUserMessageForSlackThreadQuote', () => {
 
     expect(mockTrackSlackReplyQuote).toHaveBeenCalledWith(
       {
-        token: 'job-token',
+        token: 'run-token',
         platformApiUrl: 'https://platform.example.com',
       },
       {
-        cloudJobId: 1,
+        runId: 1,
         text: '@roomote please fix the failing CI test',
         userName: 'Matt Rubens',
       },
@@ -235,7 +235,7 @@ describe('trackLatestUserMessageForSlackThreadQuote', () => {
     ].join('\n');
 
     await trackLatestUserMessageForSlackThreadQuote({
-      cloudJobId: 1,
+      runId: 1,
       text: malformedMessage,
       userName: 'Matt Rubens',
       logPrefix: 'testProcedure',
@@ -243,20 +243,20 @@ describe('trackLatestUserMessageForSlackThreadQuote', () => {
 
     expect(mockTrackSlackReplyQuote).toHaveBeenCalledWith(
       {
-        token: 'job-token',
+        token: 'run-token',
         platformApiUrl: 'https://platform.example.com',
       },
       {
-        cloudJobId: 1,
+        runId: 1,
         text: 'This envelope is missing the requested-follow-up block so it will not fully parse.',
         userName: 'Matt Rubens',
       },
     );
   });
 
-  it('clears the latest user message through the API when the cloud job has Slack thread context', async () => {
+  it('clears the latest user message through the API when the task run has Slack thread context', async () => {
     await clearLatestUserMessageForSlackThreadQuote({
-      cloudJobId: 1,
+      runId: 1,
       logPrefix: 'testProcedure',
     });
 
@@ -264,11 +264,11 @@ describe('trackLatestUserMessageForSlackThreadQuote', () => {
     expect(mockGetRoomoteConfig).toHaveBeenCalledTimes(1);
     expect(mockClearSlackReplyQuote).toHaveBeenCalledWith(
       {
-        token: 'job-token',
+        token: 'run-token',
         platformApiUrl: 'https://platform.example.com',
       },
       {
-        cloudJobId: 1,
+        runId: 1,
       },
     );
   });

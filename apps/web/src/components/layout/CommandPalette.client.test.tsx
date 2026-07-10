@@ -23,7 +23,7 @@ vi.mock('@tanstack/react-query', () => ({
         title: 'Most recent task',
         timestamp: 1,
         lastMessageAt: 1,
-        cloudJob: {
+        taskRun: {
           payload: {
             environmentId: undefined,
             repo: undefined,

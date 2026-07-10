@@ -8,7 +8,7 @@ import { FramedSurface, useRegisterCommands } from '@/components/layout';
 import { FileDiffIcon, Info, Logs, Terminal } from '@/components/system';
 
 import {
-  type CloudSession,
+  type TaskSession,
   ArtifactLinkProvider,
   PreviewPaneProvider,
   useLogFiles,
@@ -19,7 +19,7 @@ import {
   TaskSidePanelProvider,
 } from './hooks';
 
-import { SidebarActions, isCloudJobAsleep } from './sidebar-actions';
+import { SidebarActions, isTaskRunAsleep } from './sidebar-actions';
 import type { PromptInputHandle } from './prompt-input';
 
 import { Header } from './Header';
@@ -33,7 +33,7 @@ import { PendingUserInputRequestStateProvider } from './PendingUserInputRequestP
 import { TaskInputStack } from './TaskInputStack';
 
 interface LiveContentProps {
-  session: CloudSession;
+  session: TaskSession;
   onBootStatusChange?: () => void;
   onTaskPhaseChange?: (phase: TaskPhase | null) => void;
 }
@@ -62,10 +62,10 @@ function LiveContentInner({
   onBootStatusChange,
   onTaskPhaseChange,
 }: LiveContentProps) {
-  const { payload } = session.cloudJob ?? {};
+  const { payload } = session.taskRun ?? {};
 
   const taskPhase = useSandboxTaskPhase();
-  const diffView = useDiffView(Boolean(session.cloudJob));
+  const diffView = useDiffView(Boolean(session.taskRun));
   const {
     openTaskInfoView,
     openDiffView,
@@ -87,7 +87,7 @@ function LiveContentInner({
     };
   }, [onTaskPhaseChange, taskPhase]);
 
-  const asleep = isCloudJobAsleep(session.cloudJob);
+  const asleep = isTaskRunAsleep(session.taskRun);
 
   const [messagesInitialScrollBehavior, setMessagesInitialScrollBehavior] =
     useState<'smooth' | 'instant'>('smooth');
@@ -178,7 +178,7 @@ function LiveContentInner({
   }, []);
 
   useRegisterCommands([
-    ...(session.task && session.cloudJob
+    ...(session.task && session.taskRun
       ? [
           {
             id: 'task-info',
@@ -190,7 +190,7 @@ function LiveContentInner({
           },
         ]
       : []),
-    ...(session.cloudJob
+    ...(session.taskRun
       ? [
           {
             id: 'task-terminal',
@@ -239,7 +239,7 @@ function LiveContentInner({
           >
             <ArtifactLinkProvider session={session}>
               <PreviewCommand
-                cloudJob={session.cloudJob ?? null}
+                taskRun={session.taskRun ?? null}
                 asleep={asleep}
               />
               <div className="flex h-full min-h-0 min-w-0 flex-1 flex-col rounded-r-3xl bg-background">
@@ -278,7 +278,7 @@ function LiveContentInner({
               onOpenChange={setCommandSearchOpen}
               onSelectCommand={handleSelectCommand}
             />
-            <SleepInvalidationEffect cloudJob={session.cloudJob} />
+            <SleepInvalidationEffect taskRun={session.taskRun} />
           </PreviewPaneLayout>
         </FramedSurface>
         <SidebarActions
@@ -296,11 +296,11 @@ function LiveContentInner({
 }
 
 function SleepInvalidationEffect({
-  cloudJob,
+  taskRun,
 }: {
-  cloudJob: CloudSession['cloudJob'];
+  taskRun: TaskSession['taskRun'];
 }) {
-  useSleepInvalidation(cloudJob);
+  useSleepInvalidation(taskRun);
   return null;
 }
 

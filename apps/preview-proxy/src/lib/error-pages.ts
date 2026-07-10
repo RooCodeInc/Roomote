@@ -287,7 +287,7 @@ export function renderResumingPage(
                     <path stroke-linecap="round" stroke-linejoin="round" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" fill="currentColor" stroke="none" />
                   </svg>
                 </span>
-                <span class="step-text">Queuing resume job</span>
+                <span class="step-text">Queuing resume task run</span>
               </div>
               <div class="step pending" id="step-create">
                 <span class="step-icon">
@@ -364,7 +364,7 @@ export function renderResumingPage(
               if (data.status === 'running' || data.status === 'idle') {
                 setTimeout(() => window.location.reload(), 500);
               } else if (data.status === 'failed' || data.status === 'canceled') {
-                showError(data.error || 'Resume job failed');
+                showError(data.error || 'Resume task run failed');
               } else {
                 setTimeout(checkStatus, checkInterval);
               }

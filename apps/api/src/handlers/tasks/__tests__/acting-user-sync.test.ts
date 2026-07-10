@@ -36,7 +36,7 @@ describe('updateActingUserIdIfNeeded', () => {
 
   it('writes the next acting user when it differs', async () => {
     await updateActingUserIdIfNeeded({
-      jobId: 42,
+      runId: 42,
       currentActingUserId: 'user-1',
       nextActingUserId: 'user-2',
       preserveActor: false,
@@ -51,7 +51,7 @@ describe('updateActingUserIdIfNeeded', () => {
 
   it('is idempotent: skips the write when the actor already matches', async () => {
     await updateActingUserIdIfNeeded({
-      jobId: 42,
+      runId: 42,
       currentActingUserId: 'user-2',
       nextActingUserId: 'user-2',
       preserveActor: false,
@@ -62,7 +62,7 @@ describe('updateActingUserIdIfNeeded', () => {
 
   it('never overwrites the actor for actor-preserving sender modes', async () => {
     await updateActingUserIdIfNeeded({
-      jobId: 42,
+      runId: 42,
       currentActingUserId: 'user-1',
       nextActingUserId: 'user-2',
       preserveActor: true,
@@ -78,7 +78,7 @@ describe('updateActingUserIdIfNeeded', () => {
 
     await expect(
       updateActingUserIdIfNeeded({
-        jobId: 42,
+        runId: 42,
         currentActingUserId: 'user-1',
         nextActingUserId: 'user-2',
         preserveActor: false,
@@ -96,7 +96,7 @@ describe('restoreActingUserIdAfterFailedDelivery', () => {
   it('rolls back only while the attempted actor still owns the run', async () => {
     await restoreActingUserIdAfterFailedDelivery({
       handlerName: 'sendMessageToTask',
-      jobId: 42,
+      runId: 42,
       previousActingUserId: 'user-1',
       attemptedActingUserId: 'user-2',
     });
@@ -116,7 +116,7 @@ describe('restoreActingUserIdAfterFailedDelivery', () => {
     await expect(
       restoreActingUserIdAfterFailedDelivery({
         handlerName: 'sendMessageToTask',
-        jobId: 42,
+        runId: 42,
         previousActingUserId: 'user-1',
         attemptedActingUserId: 'user-2',
       }),
@@ -138,7 +138,7 @@ describe('syncActingUserForInboundMessage', () => {
   it('writes the mapped sender as the acting user before the message is queued', async () => {
     await syncActingUserForInboundMessage({
       logContext: 'test.queue',
-      jobId: 42,
+      runId: 42,
       senderUserId: 'user-2',
     });
 
@@ -151,12 +151,12 @@ describe('syncActingUserForInboundMessage', () => {
   it('skips unmapped senders so the run keeps its current actor', async () => {
     await syncActingUserForInboundMessage({
       logContext: 'test.queue',
-      jobId: 42,
+      runId: 42,
       senderUserId: undefined,
     });
     await syncActingUserForInboundMessage({
       logContext: 'test.queue',
-      jobId: 42,
+      runId: 42,
       senderUserId: null,
     });
 
@@ -173,7 +173,7 @@ describe('syncActingUserForInboundMessage', () => {
     await expect(
       syncActingUserForInboundMessage({
         logContext: 'test.queue',
-        jobId: 42,
+        runId: 42,
         senderUserId: 'user-2',
       }),
     ).resolves.toBeUndefined();

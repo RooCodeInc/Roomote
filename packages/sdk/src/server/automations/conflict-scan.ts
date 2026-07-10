@@ -87,7 +87,7 @@ async function getActiveRepos(
  * Check if there's already an active (pending/running) conflict resolution
  * run for the given PR.
  */
-async function hasActiveResolutionJob(
+async function hasActiveResolutionRun(
   repoFullName: string,
   prNumber: number,
 ): Promise<boolean> {
@@ -263,10 +263,10 @@ export async function conflictScanJob(
               `${LOG_PREFIX} PR ${repo.fullName}#${pr.number} has conflicts`,
             );
 
-            // Check for existing active resolution job (dedup guard)
-            if (await hasActiveResolutionJob(repo.fullName, pr.number)) {
+            // Check for existing active resolution run (dedup guard)
+            if (await hasActiveResolutionRun(repo.fullName, pr.number)) {
               console.log(
-                `${LOG_PREFIX} Active resolution job exists for ${repo.fullName}#${pr.number} — skipping`,
+                `${LOG_PREFIX} Active resolution run exists for ${repo.fullName}#${pr.number} — skipping`,
               );
               continue;
             }
@@ -279,7 +279,7 @@ export async function conflictScanJob(
 
             if (activeBranchWork) {
               console.log(
-                `${LOG_PREFIX} Skipping ${repo.fullName}#${pr.number} — active Roomote job ${activeBranchWork.jobId} (${activeBranchWork.type}, match=${activeBranchWork.match}) is still working on the branch`,
+                `${LOG_PREFIX} Skipping ${repo.fullName}#${pr.number} — active Roomote run ${activeBranchWork.runId} (${activeBranchWork.type}, match=${activeBranchWork.match}) is still working on the branch`,
               );
               continue;
             }
@@ -353,7 +353,7 @@ export async function conflictScanJob(
               launchedTaskCount++;
               result.launchedTaskId ??= launchResult.taskId;
               console.log(
-                `${LOG_PREFIX} Launched conflict resolution cloud job ${launchResult.id} for ${repo.fullName}#${pr.number}`,
+                `${LOG_PREFIX} Launched conflict resolution task run ${launchResult.id} for ${repo.fullName}#${pr.number}`,
               );
 
               try {
@@ -434,7 +434,7 @@ export async function conflictScanJob(
 
 /**
  * Post a notification comment on a PR indicating merge conflicts were detected.
- * Used as a fallback when no Fixer agent is available or enqueue fails.
+ * Used as a fallback when conflict-resolution work cannot be enqueued.
  */
 async function postNotificationComment(
   octokit: Awaited<ReturnType<typeof getInstallationOctokit>>,

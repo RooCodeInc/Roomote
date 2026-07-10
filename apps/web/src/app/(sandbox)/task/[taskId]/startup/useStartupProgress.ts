@@ -9,25 +9,25 @@ import {
   isExitedRunStatus,
   resolveComputeProviderTarget,
 } from '@roomote/types';
-import type { Run } from '@roomote/db';
+import type { TaskRun } from '@roomote/db';
 
 import { getBootStatus, useSandboxLogs } from '@/components/sandbox';
-import { getCloudJobError } from '@/lib/cloud-job-errors';
+import { getTaskRunError } from '@/lib/task-run-errors';
 
 import type { StartupStep } from './StartupMessage';
 
 interface UseStartupProgressOptions {
-  cloudJobId: number;
-  initialCloudJob?: Run;
+  runId: number;
+  initialTaskRun?: TaskRun;
   onStatusChange?: (status: RunStatus) => void;
 }
 
 export function useStartupProgress({
-  cloudJobId,
-  initialCloudJob,
+  runId,
+  initialTaskRun,
   onStatusChange,
 }: UseStartupProgressOptions) {
-  const initialStatus = initialCloudJob?.status ?? RunStatus.Pending;
+  const initialStatus = initialTaskRun?.status ?? RunStatus.Pending;
 
   const [steps, setSteps] = useState<StartupStep[]>([
     {
@@ -36,14 +36,14 @@ export function useStartupProgress({
     },
   ]);
 
-  const streamedCloudJob = useSSE<Run | undefined>('message', undefined);
+  const streamedTaskRun = useSSE<TaskRun | undefined>('message', undefined);
 
-  const cloudJob = streamedCloudJob ?? initialCloudJob;
-  const status = cloudJob?.status ?? initialStatus;
+  const taskRun = streamedTaskRun ?? initialTaskRun;
+  const status = taskRun?.status ?? initialStatus;
   const statusRef = useRef(status);
-  const error = getCloudJobError(cloudJob ?? initialCloudJob);
+  const error = getTaskRunError(taskRun ?? initialTaskRun);
   const provider = resolveComputeProviderTarget(
-    cloudJob?.vendor ?? initialCloudJob?.vendor,
+    taskRun?.vendor ?? initialTaskRun?.vendor,
   );
   const canStreamLogs =
     getComputeProviderCapabilities(provider).supportsCommandOutputStreaming;
@@ -52,7 +52,7 @@ export function useStartupProgress({
     logs: sandboxLogs,
     error: logsError,
     isConnected: logsConnected,
-  } = useSandboxLogs({ cloudJobId, enabled: canStreamLogs });
+  } = useSandboxLogs({ runId, enabled: canStreamLogs });
 
   // Update steps when status changes.
   useEffect(() => {

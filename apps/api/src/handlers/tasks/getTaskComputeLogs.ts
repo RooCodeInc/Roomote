@@ -20,7 +20,7 @@ import type { McpAuth } from '../mcp/middleware';
 import { logHandlerError } from '../utils';
 import { visibleTaskHistoryCondition } from './helpers';
 
-interface CloudJobLogRow {
+interface TaskRunLogRow {
   id: number;
   status: string;
   vendor: string | null;
@@ -28,14 +28,12 @@ interface CloudJobLogRow {
   sandboxCmdId: string | null;
 }
 
-interface ResolvedCloudJobProvider {
+interface ResolvedTaskRunProvider {
   provider: ComputeProvider | null;
   responseVendor: string;
 }
 
-function resolveCloudJobProvider(
-  job: CloudJobLogRow,
-): ResolvedCloudJobProvider {
+function resolveTaskRunProvider(job: TaskRunLogRow): ResolvedTaskRunProvider {
   if (!job.vendor) {
     return { provider: 'docker', responseVendor: 'docker' };
   }
@@ -48,8 +46,8 @@ function resolveCloudJobProvider(
 }
 
 function getSkippedReason(
-  job: CloudJobLogRow,
-  providerInfo: ResolvedCloudJobProvider,
+  job: TaskRunLogRow,
+  providerInfo: ResolvedTaskRunProvider,
 ): string | null {
   if (!providerInfo.provider) {
     return `unsupported_provider:${providerInfo.responseVendor}`;
@@ -80,7 +78,7 @@ function getSkippedReason(
 /**
  * GET /api/mcp/tasks/:taskId/compute_logs
  *
- * Get the compute/runtime logs for every cloud job tied to a task and fetch
+ * Get the compute/runtime logs for every task run tied to a task and fetch
  * provider command output for jobs whose compute provider supports output
  * lookup and that have both a machine id and sandbox command id.
  */
@@ -124,7 +122,7 @@ export async function getTaskComputeLogs(
 
     const result = await Promise.all(
       jobs.map(async (job) => {
-        const providerInfo = resolveCloudJobProvider(job);
+        const providerInfo = resolveTaskRunProvider(job);
         const skippedReason = getSkippedReason(job, providerInfo);
         const provider = providerInfo.provider;
         const responseVendor = providerInfo.responseVendor;
@@ -206,7 +204,7 @@ export async function getTaskComputeLogs(
     return c.json({
       taskId,
       returned: result.length,
-      cloudJobs: result,
+      taskRuns: result,
     });
   } catch (error) {
     logHandlerError('getTaskComputeLogs', error);

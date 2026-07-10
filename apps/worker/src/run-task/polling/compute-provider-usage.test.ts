@@ -9,7 +9,7 @@ const { mockExecFile, mockReadFile, mockRecordComputeProviderUsage } =
 
 vi.mock('@roomote/sdk/client', () => ({
   sdk: {
-    cloudJobs: {
+    taskRuns: {
       recordComputeProviderUsage: mockRecordComputeProviderUsage,
     },
   },
@@ -117,7 +117,7 @@ describe('createComputeProviderUsageInterval', () => {
 
   it('records compute usage immediately and on each interval for sandbox jobs', async () => {
     const loop = createComputeProviderUsageInterval({
-      cloudJobId: 42,
+      runId: 42,
       computeProvider: 'modal',
       logger: {
         warn: vi.fn(),
@@ -128,7 +128,7 @@ describe('createComputeProviderUsageInterval', () => {
       await vi.advanceTimersByTimeAsync(0);
       expect(mockRecordComputeProviderUsage).toHaveBeenCalledTimes(1);
       expect(mockRecordComputeProviderUsage).toHaveBeenCalledWith({
-        cloudJobId: 42,
+        runId: 42,
         lifecycleAction: 'running',
         completedAt: expect.any(Date),
         details: {
@@ -159,7 +159,7 @@ describe('createComputeProviderUsageInterval', () => {
     });
 
     const loop = createComputeProviderUsageInterval({
-      cloudJobId: 84,
+      runId: 84,
       computeProvider: 'modal',
       logger: {
         warn: vi.fn(),
@@ -169,7 +169,7 @@ describe('createComputeProviderUsageInterval', () => {
     try {
       await vi.advanceTimersByTimeAsync(WORKER_HEARTBEAT_INTERVAL_MS);
       expect(mockRecordComputeProviderUsage).toHaveBeenCalledWith({
-        cloudJobId: 84,
+        runId: 84,
         lifecycleAction: 'running',
         completedAt: expect.any(Date),
         sampledCpuUsageNsTotal: 1_000_000_000,
@@ -186,7 +186,7 @@ describe('createComputeProviderUsageInterval', () => {
       await loop.flush({ updateKind: 'shutdown_flush' });
 
       expect(mockRecordComputeProviderUsage).toHaveBeenLastCalledWith({
-        cloudJobId: 84,
+        runId: 84,
         lifecycleAction: 'running',
         completedAt: expect.any(Date),
         sampledCpuUsageNsTotal: 1_000_000_000,
@@ -242,7 +242,7 @@ describe('createComputeProviderUsageInterval', () => {
     );
 
     const loop = createComputeProviderUsageInterval({
-      cloudJobId: 99,
+      runId: 99,
       computeProvider: 'modal',
       logger: {
         warn: vi.fn(),
@@ -254,7 +254,7 @@ describe('createComputeProviderUsageInterval', () => {
       await vi.advanceTimersByTimeAsync(0);
 
       expect(mockRecordComputeProviderUsage).toHaveBeenCalledWith({
-        cloudJobId: 99,
+        runId: 99,
         lifecycleAction: 'running',
         completedAt: expect.any(Date),
         sampledCpuUsageNsTotal: 1_000_000_000,
@@ -279,7 +279,7 @@ describe('createComputeProviderUsageInterval', () => {
       });
 
       expect(recordDiagnosticEvent).toHaveBeenCalledWith({
-        message: 'Captured Modal memory diagnostic snapshot for cloud job #99.',
+        message: 'Captured Modal memory diagnostic snapshot for task run #99.',
         details: expect.objectContaining({
           reason: 'modal_memory_pressure_diagnostic',
           diagnosticTriggerReasons: ['memory_pressure_elevated'],
@@ -308,7 +308,7 @@ describe('createComputeProviderUsageInterval', () => {
     });
 
     const loop = createComputeProviderUsageInterval({
-      cloudJobId: 101,
+      runId: 101,
       computeProvider: 'modal',
       logger: {
         warn: vi.fn(),
@@ -330,7 +330,7 @@ describe('createComputeProviderUsageInterval', () => {
   it('warns once and falls back when Modal cgroup counters are unavailable', async () => {
     const warn = vi.fn();
     const loop = createComputeProviderUsageInterval({
-      cloudJobId: 91,
+      runId: 91,
       computeProvider: 'modal',
       logger: { warn } as never,
     });
@@ -338,13 +338,13 @@ describe('createComputeProviderUsageInterval', () => {
     try {
       await vi.advanceTimersByTimeAsync(0);
       expect(warn).toHaveBeenCalledWith(
-        '[workerComputeUsage] Modal cgroup usage counters unavailable for cloud job 91; falling back to requested-resource estimates.',
+        '[workerComputeUsage] Modal cgroup usage counters unavailable for task run 91; falling back to requested-resource estimates.',
       );
 
       await vi.advanceTimersByTimeAsync(WORKER_HEARTBEAT_INTERVAL_MS);
       expect(warn).toHaveBeenCalledTimes(1);
       expect(mockRecordComputeProviderUsage).toHaveBeenLastCalledWith({
-        cloudJobId: 91,
+        runId: 91,
         lifecycleAction: 'running',
         completedAt: expect.any(Date),
         details: {
@@ -365,7 +365,7 @@ describe('createComputeProviderUsageInterval', () => {
     mockRecordComputeProviderUsage.mockResolvedValue(undefined);
 
     const loop = createComputeProviderUsageInterval({
-      cloudJobId: 84,
+      runId: 84,
       computeProvider: 'modal',
       logger: { warn } as never,
     });
@@ -373,12 +373,12 @@ describe('createComputeProviderUsageInterval', () => {
     try {
       await vi.advanceTimersByTimeAsync(0);
       expect(warn).toHaveBeenCalledWith(
-        '[workerComputeUsage] Failed to update compute usage for cloud job 84: network blip',
+        '[workerComputeUsage] Failed to update compute usage for task run 84: network blip',
       );
 
       await vi.advanceTimersByTimeAsync(WORKER_HEARTBEAT_INTERVAL_MS);
       expect(mockRecordComputeProviderUsage).toHaveBeenLastCalledWith({
-        cloudJobId: 84,
+        runId: 84,
         lifecycleAction: 'running',
         completedAt: expect.any(Date),
         details: {
@@ -411,7 +411,7 @@ describe('createComputeProviderUsageInterval', () => {
     });
 
     const loop = createComputeProviderUsageInterval({
-      cloudJobId: 142,
+      runId: 142,
       computeProvider: 'modal',
       logger: {
         warn: vi.fn(),
@@ -421,7 +421,7 @@ describe('createComputeProviderUsageInterval', () => {
     try {
       await vi.advanceTimersByTimeAsync(WORKER_HEARTBEAT_INTERVAL_MS);
       expect(mockRecordComputeProviderUsage).toHaveBeenCalledWith({
-        cloudJobId: 142,
+        runId: 142,
         lifecycleAction: 'running',
         completedAt: expect.any(Date),
         sampledCpuUsageNsTotal: 2_500_000_000,

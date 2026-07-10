@@ -22,7 +22,7 @@ describe('buildGitHubRoutingPrompt', () => {
     expect(prompt).toContain(
       'asking @newmote for review or follow-up work on the current pull request',
     );
-    expect(prompt).toContain('review: run or reuse PR Reviewer review work');
+    expect(prompt).toContain('review: run or reuse the PR review workflow');
     expect(prompt).toContain(
       'follow_up: any other actionable PR follow-up on the current pull request',
     );

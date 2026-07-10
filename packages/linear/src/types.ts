@@ -481,9 +481,9 @@ export interface LinearSessionMessage {
 }
 
 /**
- * Result of finding an active Linear job
+ * Result of finding an active Linear run
  */
-export interface ActiveLinearJobResult {
+export interface ActiveLinearTaskRunResult {
   id: number;
   status: string;
   machineId: string | null;

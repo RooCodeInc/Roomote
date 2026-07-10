@@ -55,7 +55,7 @@ export type SuggestionHistoryItem = {
   readinessMessage: string | null;
 };
 
-export type SuggestionSourceCloudJob = {
+export type SuggestionSourceTaskRun = {
   payloadKind: TaskPayloadKind;
   payload: TaskPayload;
 };

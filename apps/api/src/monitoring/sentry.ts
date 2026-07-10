@@ -73,14 +73,14 @@ function setRequestScope(
 
   scope.setTag('roomote.token_type', authContext.tokenType);
 
-  // Deployment-principal job tokens carry a null userId; leave the Sentry
+  // Deployment-principal run tokens carry a null userId; leave the Sentry
   // user unset for those instead of fabricating an identity.
   if ('userId' in authContext && authContext.userId !== null) {
     scope.setUser({ id: authContext.userId });
   }
 
-  if ('cloudJobId' in authContext) {
-    scope.setTag('roomote.cloud_job_id', String(authContext.cloudJobId));
+  if ('runId' in authContext) {
+    scope.setTag('roomote.task_run_id', String(authContext.runId));
   }
 }
 

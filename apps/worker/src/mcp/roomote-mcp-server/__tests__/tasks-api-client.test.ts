@@ -34,9 +34,9 @@ describe('searchTasks', () => {
           harness: 'opencode-server',
           createdAt: 1700000000,
           lastMessageAt: 1700000000,
-          cloudJobStatus: 'running',
+          taskRunStatus: 'running',
           taskPhase: 'running',
-          cloudJobError: null,
+          taskRunError: null,
         },
       ],
       hasMore: false,
@@ -131,9 +131,9 @@ describe('getTaskSummary', () => {
       repositoryName: 'owner/repo',
       harness: 'opencode-server',
       createdAt: 1700000000,
-      cloudJobStatus: 'completed',
+      taskRunStatus: 'completed',
       taskPhase: null,
-      cloudJobError: null,
+      taskRunError: null,
       linkedEnvironmentId: 'env-1',
       linkedEnvironmentName: 'Roomote App',
     };
@@ -147,7 +147,7 @@ describe('getTaskSummary', () => {
 
     expect(result.id).toBe('task-1');
     expect(result.completed).toBe(true);
-    expect(result.cloudJobStatus).toBe('completed');
+    expect(result.taskRunStatus).toBe('completed');
     expect(result.linkedEnvironmentId).toBe('env-1');
     expect(result.linkedEnvironmentName).toBe('Roomote App');
 
@@ -282,11 +282,11 @@ describe('submitAutomationWorkItems', () => {
 describe('getTaskComputeLogs', () => {
   afterEach(() => vi.restoreAllMocks());
 
-  it('should call the cloud job logs endpoint and return result', async () => {
+  it('should call the task run logs endpoint and return result', async () => {
     const mockResponse = {
       taskId: 'task-1',
       returned: 1,
-      cloudJobs: [
+      taskRuns: [
         {
           id: 101,
           status: 'failed',
@@ -309,7 +309,7 @@ describe('getTaskComputeLogs', () => {
 
     expect(result.taskId).toBe('task-1');
     expect(result.returned).toBe(1);
-    expect(result.cloudJobs[0]?.output).toBe('boot output');
+    expect(result.taskRuns[0]?.output).toBe('boot output');
 
     const fetchCall = vi.mocked(fetch).mock.calls[0];
     expect(fetchCall?.[0]).toContain('/api/mcp/tasks/task-1/compute_logs');
@@ -384,7 +384,7 @@ describe('launchTask', () => {
   it('should call POST /api/mcp/tasks and return result', async () => {
     const mockResponse = {
       success: true,
-      cloudJobId: 99,
+      runId: 99,
       taskId: 'task-new',
     };
 
@@ -401,7 +401,7 @@ describe('launchTask', () => {
     });
 
     expect(result.success).toBe(true);
-    expect(result.cloudJobId).toBe(99);
+    expect(result.runId).toBe(99);
     expect(result.taskId).toBe('task-new');
 
     const fetchCall = vi.mocked(fetch).mock.calls[0];
@@ -418,7 +418,7 @@ describe('launchTask', () => {
   it('sends a minimal standard launch payload for implicit Generalist tasks', async () => {
     const mockResponse = {
       success: true,
-      cloudJobId: 100,
+      runId: 100,
       taskId: 'task-generalist',
     };
 
@@ -443,7 +443,7 @@ describe('launchTask', () => {
   it('passes extended programmatic launch fields through unchanged', async () => {
     const mockResponse = {
       success: true,
-      cloudJobId: 101,
+      runId: 101,
       taskId: 'task-env-def',
     };
 
