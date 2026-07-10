@@ -100,13 +100,21 @@ export const stampMilestone = (
 ) => client.cloudJobs.stampMilestone.mutate(options);
 
 /**
- * Keep the cloud job's acting user aligned with the latest prompt sender.
+ * Reconcile the worker's view of the run's acting user with the server.
  *
- * This is separate from `cloudJob.userId`, which identifies the job owner used
- * for job-token scoping. Integration MCP proxies read `actingUserId` when
- * choosing whose OAuth credentials to use for a running task, so callers
- * update it before prompt delivery instead of inferring it later from
- * asynchronously persisted `task_messages`.
+ * `task_runs.actingUserId` feeds actor-scoped credential resolution, so it is
+ * writable ONLY by trusted server-side actors (web steer, follow-up delivery).
+ * Run-scoped job tokens can no longer reassign it: a compromised sandbox
+ * previously pointed `actingUserId` at an arbitrary user via `cloudJobs.update`
+ * and then read that user's decrypted credentials through actor-scoped routes
+ * (a confused deputy). The worker therefore only OBSERVES the server value here
+ * — it never steers it.
+ *
+ * Returns `not-found` when the job is gone (delivery should stop) and
+ * `unchanged` otherwise. When the server's acting user diverges from the
+ * requested one (rare, e.g. a multi-user resume batch), the turn still
+ * delivers under the server-authoritative actor; the worker no longer forces
+ * the switch.
  */
 export async function syncActingUserId(
   options: SyncActingUserIdOptions,
@@ -118,12 +126,17 @@ export async function syncActingUserId(
     return 'not-found';
   }
 
-  if ((cloudJob.actingUserId ?? null) === newUserId) {
-    return 'unchanged';
+  const currentUserId = cloudJob.actingUserId ?? null;
+
+  if (currentUserId !== newUserId) {
+    console.warn(
+      `[syncActingUserId] Cloud job ${cloudJobId} acting user ` +
+        `${currentUserId ?? 'none'} differs from requested ${newUserId}; ` +
+        'not overriding (job tokens cannot reassign the acting user).',
+    );
   }
 
-  await update({ id: cloudJobId, actingUserId: newUserId });
-  return 'updated';
+  return 'unchanged';
 }
 
 export const enqueue = (options: AppRouterInput['cloudJobs']['enqueue']) =>

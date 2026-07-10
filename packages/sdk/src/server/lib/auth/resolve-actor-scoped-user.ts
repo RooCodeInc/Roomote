@@ -21,6 +21,13 @@ export interface ActorScopedUserContext {
  * follow-ups switch `task_runs.actingUserId` to the latest human who is
  * speaking to the task, so actor-scoped integration lookups follow that
  * live value when present and fall back to the token's mint-time user.
+ *
+ * Because this PREFERS the live `actingUserId`, that column is a credential-
+ * resolution input and must only ever be written by trusted server-side
+ * actors (web steer, follow-up delivery). Run-scoped job tokens — which the
+ * sandbox holds — cannot write it: `cloudJobs.update` strips `actingUserId`
+ * from job-token input, closing the confused-deputy path where a compromised
+ * sandbox reassigns the run to a victim and reads that victim's credentials.
  */
 export async function resolveActorScopedUserContext(
   auth: ActorScopedAuthContext | null | undefined,

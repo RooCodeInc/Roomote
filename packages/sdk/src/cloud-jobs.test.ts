@@ -65,17 +65,22 @@ describe('syncActingUserId', () => {
     expect(mockUpdate).not.toHaveBeenCalled();
   });
 
-  it('updates the cloud job when actingUserId differs', async () => {
+  it('never reassigns actingUserId via the job token when it differs', async () => {
+    // Security: job tokens (held by the sandbox) must not be able to steer
+    // the run's acting user, or a compromised sandbox could pivot to another
+    // user's actor-scoped credentials. The worker only observes the value.
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
     mockFindFirstById.mockResolvedValueOnce({ actingUserId: 'user-1' });
-    mockUpdate.mockResolvedValueOnce(undefined);
 
     await expect(
       syncActingUserId({ cloudJobId: 42, newUserId: 'user-2' }),
-    ).resolves.toBe('updated');
-    expect(mockUpdate).toHaveBeenCalledWith({
-      id: 42,
-      actingUserId: 'user-2',
-    });
+    ).resolves.toBe('unchanged');
+    expect(mockUpdate).not.toHaveBeenCalled();
+    expect(warnSpy).toHaveBeenCalledWith(
+      expect.stringContaining('cannot reassign the acting user'),
+    );
+
+    warnSpy.mockRestore();
   });
 });
 
