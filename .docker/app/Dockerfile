@@ -390,9 +390,9 @@ COPY pnpm-workspace.yaml ./
 COPY apps/preview-proxy/entrypoint.sh /entrypoint.sh
 RUN chmod +x /entrypoint.sh
 
-COPY --from=build-web /roomote/apps/web/.next/standalone ./
-COPY --from=build-web /roomote/apps/web/.next/static ./apps/web/.next/static/
-COPY --from=build-web /roomote/apps/web/public ./apps/web/public/
+COPY --chown=roomote-app:roomote-app --from=build-web /roomote/apps/web/.next/standalone ./
+COPY --chown=roomote-app:roomote-app --from=build-web /roomote/apps/web/.next/static ./apps/web/.next/static/
+COPY --chown=roomote-app:roomote-app --from=build-web /roomote/apps/web/public ./apps/web/public/
 COPY --from=build-api /roomote/apps/api/package.json ./apps/api/
 COPY --from=build-api /roomote/apps/api/dist ./apps/api/dist/
 COPY --from=build-api /runtime-deps/node_modules ./apps/api/node_modules/
