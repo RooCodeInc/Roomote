@@ -76,20 +76,6 @@ function ComputeProviderIcon({ provider }: { provider: ComputeProvider }) {
   return <BrandIcon icon={brandIconId} name="" className="size-4 shrink-0" />;
 }
 
-function getAdvancedInfrastructureDescription({
-  provider,
-  hasMissingDefaultBlockingInfra,
-}: {
-  provider: ComputeProviderStatus;
-  hasMissingDefaultBlockingInfra: boolean;
-}) {
-  if (hasMissingDefaultBlockingInfra) {
-    return `${provider.label} needs a registry-qualified worker image (for example via DOCKER_WORKER_IMAGE) so worker artifacts can be derived or provisioned automatically.`;
-  }
-
-  return 'Optional overrides. Leave blank to derive or provision worker artifacts automatically from the configured worker image.';
-}
-
 function getCreateAccountHeading(provider: ComputeProviderStatus) {
   const article = provider.label === 'E2B' ? 'an' : 'a';
 
@@ -417,26 +403,17 @@ export function ComputeProviderSection({
             )}
 
             {advancedInfraFields.length > 0 && (
-              <div>
-                <p className="font-semibold text-sm">Provider infrastructure</p>
-                <p className="max-w-xl text-sm text-muted-foreground mt-1">
-                  {getAdvancedInfrastructureDescription({
-                    provider,
-                    hasMissingDefaultBlockingInfra,
-                  })}
-                </p>
-                {hasMissingDefaultBlockingInfra && (
-                  <p className="max-w-xl text-sm text-muted-foreground mt-1">
+              <div className="space-y-2">
+                {hasMissingDefaultBlockingInfra ? (
+                  <p className="max-w-xl text-sm text-muted-foreground">
                     Configure a registry-qualified worker image via{' '}
                     <code className="font-mono text-xs">
                       DOCKER_WORKER_IMAGE
                     </code>{' '}
                     before selecting {provider.label} as the default.
                   </p>
-                )}
-                <div className="space-y-2 mt-3">
-                  {advancedInfraFields.map((field) => renderFieldInput(field))}
-                </div>
+                ) : null}
+                {advancedInfraFields.map((field) => renderFieldInput(field))}
               </div>
             )}
 
