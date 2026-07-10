@@ -18,9 +18,8 @@ import {
 import {
   db,
   eq,
-  cloudJobs,
+  taskRuns,
   getDeploymentPrAction,
-  sql,
   taskPullRequests,
   type CloudJob,
 } from '@roomote/db/server';
@@ -265,6 +264,7 @@ async function persistSourceControlPullRequestAssociation({
         prTitle: result.title,
         repository: result.repositoryFullName,
         status,
+        prBaseRef: input.targetBranch,
       })
       .onConflictDoUpdate({
         target: [taskPullRequests.taskId, taskPullRequests.prUrl],
@@ -274,25 +274,10 @@ async function persistSourceControlPullRequestAssociation({
           repositoryId: repository.id,
           prTitle: result.title,
           status,
+          prBaseRef: input.targetBranch,
           updatedAt: new Date(),
         },
       });
-
-    // Mirror extract-pull-requests: the base SHA is only kept when the row
-    // already pointed at this PR, so a concurrent association with a different
-    // PR cannot leave a stale base stranded under this PR's repo/number.
-    const rowStillPointsAtThisPr = sql`${cloudJobs.prRepo} = ${result.repositoryFullName} AND ${cloudJobs.prNumber} = ${result.number}`;
-
-    await db
-      .update(cloudJobs)
-      .set({
-        prSourceControlProvider: repository.sourceControlProvider,
-        prRepo: result.repositoryFullName,
-        prNumber: result.number,
-        prBaseRef: input.targetBranch,
-        prBaseSha: sql`CASE WHEN ${rowStillPointsAtThisPr} THEN ${cloudJobs.prBaseSha} ELSE NULL END`,
-      })
-      .where(eq(cloudJobs.id, cloudJob.id));
   } catch (error) {
     console.warn(
       `[persistSourceControlPullRequestAssociation] Failed to associate ${result.repositoryFullName}#${result.number} with task ${cloudJob.taskId}: ${
@@ -918,8 +903,8 @@ export async function findCloudJobForSourceControlMutation({
   cloudJobId: number;
   taskId: string;
 }): Promise<CloudJob> {
-  const cloudJob = await db.query.cloudJobs.findFirst({
-    where: eq(cloudJobs.id, cloudJobId),
+  const cloudJob = await db.query.taskRuns.findFirst({
+    where: eq(taskRuns.id, cloudJobId),
   });
 
   if (!cloudJob) {

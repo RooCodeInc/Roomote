@@ -54,7 +54,7 @@ vi.mock('../../tasks/sendMessageToTask', () => ({
   steerMessageToTask: mockSteerMessageToTask,
 }));
 
-import { CloudTaskStatus, CloudTaskType } from '@roomote/types';
+import { CloudTaskStatus, TaskPayloadKind } from '@roomote/types';
 
 import { handleAdoComment } from '../handleComment';
 import type { AdoPullRequestCommentWebhook } from '../types';
@@ -170,21 +170,30 @@ describe('handleAdoComment', () => {
     expect(result).toEqual({ status: 'ok', metadata: { ids: [1234] } });
     expect(mockEnqueueCloudTask).toHaveBeenCalledWith(
       expect.objectContaining({
-        userId: 'user-1',
-        attributionOverride: { kind: 'automatic', sourceKind: 'ado' },
-        type: CloudTaskType.GithubPrReview,
-        payload: expect.objectContaining({
-          repo: 'acme/Platform/backend',
-          sourceControlProvider: 'ado',
+        task: expect.objectContaining({
+          type: TaskPayloadKind.GithubPrReview,
+          payload: expect.objectContaining({
+            repo: 'acme/Platform/backend',
+            sourceControlProvider: 'ado',
+            prNumber: 42,
+            prUrl:
+              'https://dev.azure.com/acme/Platform/_git/backend/pullrequest/42',
+            branch: 'feature/test',
+            sha: 'abc123',
+            targetBranch: 'main',
+          }),
+        }),
+        // A human @roomote mention: the linked commenter is the initiator.
+        initiator: { kind: 'user', userId: 'user-1' },
+        workflow: 'pr_review',
+        surface: 'ado',
+        trigger: 'message',
+        prLinkage: expect.objectContaining({
+          provider: 'ado',
+          repository: 'acme/Platform/backend',
           prNumber: 42,
-          prUrl:
-            'https://dev.azure.com/acme/Platform/_git/backend/pullrequest/42',
-          branch: 'feature/test',
-          sha: 'abc123',
-          targetBranch: 'main',
         }),
       }),
-      expect.objectContaining({ launchClass: 'automation' }),
     );
     expect(mockCreateAdoPullRequestComment).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -224,11 +233,12 @@ describe('handleAdoComment', () => {
     );
     expect(mockEnqueueCloudTask).toHaveBeenCalledWith(
       expect.objectContaining({
-        payload: expect.objectContaining({
-          repo: 'acme/Platform/backend',
+        task: expect.objectContaining({
+          payload: expect.objectContaining({
+            repo: 'acme/Platform/backend',
+          }),
         }),
       }),
-      expect.any(Object),
     );
     expect(mockCreateAdoPullRequestComment).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -270,7 +280,7 @@ describe('handleAdoComment', () => {
     mockFindActiveGitHubPrReviewTask.mockResolvedValue({
       taskId: 'review-task',
       jobId: 9,
-      type: CloudTaskType.GithubPrReview,
+      type: TaskPayloadKind.GithubPrReview,
       status: CloudTaskStatus.Running,
       taskPhase: 'running',
       match: 'github_pr',

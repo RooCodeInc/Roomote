@@ -24,12 +24,12 @@ vi.mock('better-sse', () => ({
 vi.mock('@roomote/db/server', () => ({
   db: {
     query: {
-      cloudJobs: {
+      taskRuns: {
         findFirst: (...args: unknown[]) => findFirstMock(...args),
       },
     },
   },
-  cloudJobs: { id: 'id', orgId: 'orgId' },
+  taskRuns: { id: 'id' },
   eq: vi.fn(),
   and: vi.fn(),
 }));

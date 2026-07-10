@@ -9,8 +9,7 @@ import {
   isUserToken,
   parseMcpJsonRpcPayload,
 } from '@roomote/types';
-import { resolveUserIdForCloudJob } from '@roomote/cloud-agents/server';
-import { cloudJobs, db, eq } from '@roomote/db/server';
+import { db, eq, taskRuns } from '@roomote/db/server';
 
 import type { Variables } from '../../types';
 import { fetchWithLongLivedStreamDispatcher } from '../long-lived-fetch';
@@ -73,15 +72,64 @@ export function toMcpToolResult<T extends Record<string, unknown>>(payload: T) {
 /**
  * Resolve the effective user for downstream MCP credential lookup.
  *
- * Job tokens remain tied to the cloud job owner for authorization checks, but
- * integration MCPs may need to execute as the most recent human who replied to
- * the task. That live actor is stored on `cloud_jobs.actingUserId` rather than
- * inferred from `task_messages`, because transcript persistence is async and
- * may lag behind the turn that is about to make MCP calls.
+ * Job tokens remain tied to the run's acting user for authorization checks;
+ * integration MCPs execute as the most recent human who launched or replied
+ * to the task. That live actor is stored on `task_runs.actingUserId` rather
+ * than inferred from `task_messages`, because transcript persistence is async
+ * and may lag behind the turn that is about to make MCP calls.
  */
 export async function resolveActingUserId(
   auth: McpAuthContext,
 ): Promise<string> {
+  if (auth.tokenType !== 'cj') {
+    if (!hasRealCloudJobUser(auth.userId)) {
+      throw new McpProxyError(
+        403,
+        'This MCP requires a human actor; the request is authenticated as the deployment service principal',
+      );
+    }
+    return auth.userId;
+  }
+
+  if (!auth.cloudJobId) {
+    throw new McpProxyError(
+      403,
+      'MCP proxy requires a cloud job token with a cloud job id',
+    );
+  }
+
+  const cloudJob = await db.query.taskRuns.findFirst({
+    columns: { actingUserId: true },
+    where: eq(taskRuns.id, auth.cloudJobId),
+  });
+
+  if (!cloudJob) {
+    throw new McpProxyError(404, 'Cloud job not found for this MCP token');
+  }
+
+  const actingUserId = cloudJob.actingUserId;
+
+  if (!hasRealCloudJobUser(actingUserId)) {
+    // Deployment-service-principal jobs have no human actor. Callers that
+    // support deployment-scoped connections should use
+    // resolveActingUserIdOrNull instead of failing here.
+    throw new McpProxyError(
+      403,
+      'This MCP requires a human actor on the task; the job is running as the deployment service principal',
+    );
+  }
+
+  return actingUserId;
+}
+
+/**
+ * Like resolveActingUserId, but returns null for deployment-service-principal
+ * jobs so callers can fall back to a deployment-scoped MCP connection instead
+ * of rejecting the request.
+ */
+export async function resolveActingUserIdOrNull(
+  auth: McpAuthContext,
+): Promise<string | null> {
   if (auth.tokenType !== 'cj') {
     return auth.userId;
   }
@@ -93,36 +141,24 @@ export async function resolveActingUserId(
     );
   }
 
-  const cloudJob = await db.query.cloudJobs.findFirst({
-    columns: { userId: true, actingUserId: true },
-    where: eq(cloudJobs.id, auth.cloudJobId),
+  const cloudJob = await db.query.taskRuns.findFirst({
+    columns: { actingUserId: true },
+    where: eq(taskRuns.id, auth.cloudJobId),
   });
 
   if (!cloudJob) {
     throw new McpProxyError(404, 'Cloud job not found for this MCP token');
   }
 
-  const resolvedUserId = await resolveUserIdForCloudJob({
-    id: auth.cloudJobId,
-    userId: cloudJob.userId,
-  });
-
-  if (!hasRealCloudJobUser(resolvedUserId)) {
-    throw new McpProxyError(
-      403,
-      'MCP proxy requires a cloud job associated with a real user',
-    );
-  }
-
-  return cloudJob.actingUserId ?? resolvedUserId;
+  return cloudJob.actingUserId ?? null;
 }
 
-async function verifyCloudJobHasRealUser(
+async function verifyCloudJobTokenMatchesJob(
   auth: JobTokenContext,
 ): Promise<Response | null> {
-  const cloudJob = await db.query.cloudJobs.findFirst({
-    columns: { id: true, userId: true },
-    where: eq(cloudJobs.id, auth.cloudJobId),
+  const cloudJob = await db.query.taskRuns.findFirst({
+    columns: { id: true, actingUserId: true },
+    where: eq(taskRuns.id, auth.cloudJobId),
   });
 
   if (!cloudJob) {
@@ -133,21 +169,15 @@ async function verifyCloudJobHasRealUser(
     );
   }
 
-  const resolvedUserId = await resolveUserIdForCloudJob(cloudJob);
-
-  if (!hasRealCloudJobUser(resolvedUserId)) {
+  // The token principal must match the run's acting user: a user token must
+  // carry the run's acting user, and a deployment-service-principal token is
+  // only valid for a run with no acting user. Both being null is the
+  // automation case and is valid.
+  if ((cloudJob.actingUserId ?? null) !== auth.userId) {
     return jsonRpcErrorResponse(
       403,
       -32000,
-      'MCP proxy requires a cloud job associated with a real user',
-    );
-  }
-
-  if (resolvedUserId !== auth.userId) {
-    return jsonRpcErrorResponse(
-      403,
-      -32000,
-      'MCP token user does not match cloud job user',
+      'MCP token principal does not match cloud job',
     );
   }
 
@@ -157,7 +187,7 @@ async function verifyCloudJobHasRealUser(
 export async function assertCloudJobTokenMatchesCloudJobUser(
   auth: JobTokenContext,
 ): Promise<void> {
-  const validationError = await verifyCloudJobHasRealUser(auth);
+  const validationError = await verifyCloudJobTokenMatchesJob(auth);
 
   if (!validationError) {
     return;
@@ -257,7 +287,12 @@ interface ResolvedCredentials {
 }
 
 export interface McpAuthContext {
-  userId: string;
+  /**
+   * Token principal. `null` means the request is authenticated as the
+   * deployment service principal (a cloud job with no human owner); it is
+   * always a real user id for `auth` tokens.
+   */
+  userId: string | null;
   tokenType: 'cj' | 'auth';
   cloudJobId?: number;
 }
@@ -371,7 +406,7 @@ export function createMcpProxy(config: McpProxyConfig) {
     resolveCredentials,
     timeoutMs = 30_000,
     allowAuthTokens = false,
-    validateCloudJobToken = verifyCloudJobHasRealUser,
+    validateCloudJobToken = verifyCloudJobTokenMatchesJob,
     allowedToolNames,
   } = config;
 
@@ -661,7 +696,7 @@ export function createMcpProxy(config: McpProxyConfig) {
             upstream,
             status: upstreamResponse.status,
             tokenType: auth.tokenType,
-            userId: auth.userId,
+            userId: auth.userId ?? undefined,
             elapsedMs: Date.now() - startedAt,
           }),
           trackingContext: {

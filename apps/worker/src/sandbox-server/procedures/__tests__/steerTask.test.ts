@@ -115,6 +115,7 @@ function createCaller(options?: {
     auth: {
       cloudJobId: 1,
       userId: 'sender-user-1',
+      principal: 'user',
       tokenType: 'cj',
       version: 1,
     } satisfies JobTokenContext,

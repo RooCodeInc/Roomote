@@ -48,7 +48,7 @@ import {
   ALL_REPOSITORIES,
   type CloudTask,
   type CloudTaskPayload,
-  CloudTaskType,
+  TaskPayloadKind,
   PRODUCT_NAME,
   type QueuedCommunicationMessage,
   populateSnapshotResumeCommunicationMetadata,
@@ -58,7 +58,6 @@ import {
   buildTeamsRoutingContext,
   enqueueCloudTask,
   getTaskUrl,
-  resolveUserIdForCloudJob,
   routeTask,
   type RoutingWorkspace,
 } from '@roomote/cloud-agents/server';
@@ -69,6 +68,11 @@ import {
   findActiveTeamsJob,
   findCompletedTeamsJobWithSnapshot,
 } from './find-active-teams-job.js';
+import {
+  launchClaimedTeamsSuggestion,
+  parseTeamsSuggestionStartText,
+  resolveAndClaimTeamsSuggestionStart,
+} from './suggestion-start.js';
 import { shouldRouteUnmentionedTeamsThreadReplyToAgent } from './unmentioned-thread-reply.js';
 
 const TEAMS_ACTIVITY_DEDUP_PREFIX = 'teams:activity:';
@@ -962,7 +966,9 @@ async function resumeTeamsTaskFromSnapshot(input: {
         typeof completedPayload.environmentId === 'string'
           ? completedPayload.environmentId
           : undefined;
-      const resumePayload: CloudTaskPayload<CloudTaskType.SnapshotResume> = {
+      const resumePayload: CloudTaskPayload<
+        typeof TaskPayloadKind.SnapshotResume
+      > = {
         repo,
         ...(environmentId ? { environmentId } : {}),
         ...(completedJob.port ? { port: completedJob.port } : {}),
@@ -982,26 +988,25 @@ async function resumeTeamsTaskFromSnapshot(input: {
       });
       restoreSnapshotResumeVisiblePromptFields(resumePayload, completedPayload);
 
-      const resumeUserId =
-        queuedMessage.userId ??
-        completedJob.userId ??
-        (await resolveUserIdForCloudJob(completedJob));
-      if (!resumeUserId) {
-        throw new Error(
-          'No active user is available for Teams snapshot resume.',
-        );
-      }
+      // Prefer the queued message sender, then the source run's acting user.
+      // No forged fallback: when neither is a real user the resume runs as
+      // the deployment service principal.
+      const resumeUserId = queuedMessage.userId ?? completedJob.userId ?? null;
 
+      // Resumes never create tasks and never re-attribute; the resuming
+      // human becomes the new run's acting user.
       const resumeLaunch = await enqueueCloudTask(
         {
-          type: CloudTaskType.SnapshotResume,
-          userId: resumeUserId,
-          sourceSnapshotId,
-          sourceCloudJobId: completedJob.id,
-          payload: resumePayload,
+          task: {
+            type: TaskPayloadKind.SnapshotResume,
+            sourceSnapshotId,
+            sourceCloudJobId: completedJob.id,
+            payload: resumePayload,
+          },
+          actingUserId: resumeUserId,
         },
         {
-          launchClass: 'human',
+          launchClass: resumeUserId ? 'human' : 'automation',
         },
       );
 
@@ -1276,9 +1281,11 @@ async function startNewTeamsTask(input: {
     throw new Error('Teams task routing selected an unavailable workspace.');
   }
 
-  const task: Extract<CloudTask, { type: CloudTaskType.StandardTask }> = {
-    type: CloudTaskType.StandardTask,
-    userId: launchUserId,
+  const task: Extract<
+    CloudTask,
+    { type: typeof TaskPayloadKind.StandardTask }
+  > = {
+    type: TaskPayloadKind.StandardTask,
     payload: {
       repo: workspace.repoForPayload,
       ...(workspace.environmentId
@@ -1291,9 +1298,18 @@ async function startNewTeamsTask(input: {
       ...input.metadata,
     },
   };
-  const launchResult = await enqueueCloudTask(task, {
-    launchClass: 'human',
-  });
+  const launchResult = await enqueueCloudTask(
+    {
+      task,
+      initiator: { kind: 'user', userId: launchUserId },
+      workflow: 'standard',
+      surface: 'teams',
+      trigger: 'message',
+    },
+    {
+      launchClass: 'human',
+    },
+  );
 
   const taskUrl = getTaskUrl({
     taskId: launchResult.taskId,
@@ -1629,6 +1645,90 @@ teams.post('/', async (c) => {
         queued: false,
         reason: 'account_link_required',
       });
+    }
+
+    // Structured "start idea N" hook for the posted suggestion lists. Matches
+    // are driven through the shared work-item claim state machine (claim ->
+    // launch -> fenced finalize/release) like the Slack reaction and Telegram
+    // button surfaces; anything that does not parse, or a conversation with no
+    // tracked suggestion cards, falls through to normal task entry unchanged.
+    // This runs before the snapshot resume so a suggestion start is never
+    // swallowed as a follow-up to the conversation's previous task.
+    const suggestionIdeaNumber = parseTeamsSuggestionStartText(
+      queuedMessage.text,
+    );
+
+    if (suggestionIdeaNumber !== null) {
+      const resolution = await resolveAndClaimTeamsSuggestionStart({
+        conversationId: metadata.communicationChannelId,
+        ideaNumber: suggestionIdeaNumber,
+      });
+
+      if (resolution.outcome === 'not_found') {
+        await postTeamsMessageBestEffort({
+          conversationId: metadata.communicationChannelId,
+          threadId: metadata.communicationThreadId,
+          serviceUrl: metadata.communicationServiceUrl,
+          text: `I couldn't find idea ${suggestionIdeaNumber} — the latest suggestions list has ${resolution.ideaCount} idea${resolution.ideaCount === 1 ? '' : 's'}.`,
+        });
+
+        return c.json({
+          ok: true,
+          queued: false,
+          reason: 'suggestion_not_found',
+        });
+      }
+
+      if (resolution.outcome === 'already_started') {
+        await postTeamsMessageBestEffort({
+          conversationId: metadata.communicationChannelId,
+          threadId: metadata.communicationThreadId,
+          serviceUrl: metadata.communicationServiceUrl,
+          text: `"${resolution.title}" was already started or is no longer available.`,
+        });
+
+        return c.json({
+          ok: true,
+          queued: false,
+          reason: 'suggestion_already_started',
+        });
+      }
+
+      if (resolution.outcome === 'claimed') {
+        const suggestionLaunch = await launchClaimedTeamsSuggestion({
+          suggestion: resolution.suggestion,
+          launchTask: (promptText) =>
+            startNewTeamsTask({
+              activity,
+              mappedUserId,
+              queuedMessage: { ...queuedMessage!, text: promptText },
+              metadata,
+            }),
+          postMessage: (text) =>
+            postTeamsMessageBestEffort({
+              conversationId: metadata.communicationChannelId,
+              threadId: metadata.communicationThreadId,
+              serviceUrl: metadata.communicationServiceUrl,
+              text,
+            }),
+        });
+
+        return c.json(
+          suggestionLaunch.result === 'started'
+            ? {
+                ok: true,
+                started: true,
+                cloudJobId: suggestionLaunch.cloudJobId,
+              }
+            : {
+                ok: true,
+                queued: false,
+                reason: `suggestion_${suggestionLaunch.result}`,
+              },
+        );
+      }
+
+      // outcome === 'no_cards': fall through to normal task entry.
     }
 
     queuedMessage = await attachTeamsActivityImagesToQueuedMessage(

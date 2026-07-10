@@ -1,4 +1,4 @@
-import { CloudTaskStatus, CloudTaskType } from '@roomote/types';
+import { CloudTaskStatus, TaskPayloadKind } from '@roomote/types';
 import type { CloudJob } from '@roomote/db/server';
 
 const {
@@ -29,9 +29,23 @@ vi.mock('@roomote/db/server', () => ({
           mockEnvironmentVariablesFindMany(...args),
       },
     },
+    select: () => ({
+      from: () => ({
+        where: async () => [],
+      }),
+    }),
     transaction: vi.fn(),
   },
   cloudJobs: { id: 'cloudJobs.id' },
+  repositories: {
+    fullName: 'repositories.fullName',
+    sourceControlProvider: 'repositories.sourceControlProvider',
+  },
+  // Shared provider resolver: default to "unresolved" so unstamped payloads
+  // fall through to the GitHub default. Provider-stamped payloads never reach
+  // it. Individual tests override with mockResolvedValueOnce when needed.
+  resolveWorkspaceSourceControlProvider: vi.fn(async () => undefined),
+  inArray: vi.fn(),
   markTaskStartParallelCountEndedAt: vi.fn(),
   resolveTaskAttribution: vi.fn(),
   stringifyDecryptedEnvVarValue: (value: unknown) => String(value),
@@ -63,6 +77,8 @@ vi.mock('@roomote/cloud-agents/server', () => ({
   releaseCloudTask: vi.fn(),
 }));
 
+import { resolveWorkspaceSourceControlProvider } from '@roomote/db/server';
+
 import {
   createSourceControlTokenForJob,
   redactControlPlaneEnvVars,
@@ -73,9 +89,10 @@ function makeCloudJob(payload: CloudJob['payload']): CloudJob {
   return {
     id: 123,
     status: CloudTaskStatus.Dequeued,
-    type: CloudTaskType.StandardTask,
+    kind: 'fresh',
+    payloadKind: TaskPayloadKind.StandardTask,
     taskId: 'task-123',
-    userId: 'user-123',
+    actingUserId: 'user-123',
     payload,
     result: null,
   } as CloudJob;
@@ -84,6 +101,11 @@ function makeCloudJob(payload: CloudJob['payload']): CloudJob {
 describe('createSourceControlTokenForJob', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    // Default: provider unresolved -> unstamped payloads fall to the GitHub
+    // default. clearAllMocks keeps implementations, so reset it explicitly.
+    vi.mocked(resolveWorkspaceSourceControlProvider).mockResolvedValue(
+      undefined,
+    );
     mockDecryptSecrets.mockImplementation(async (value) => value);
     mockEnvironmentVariablesFindMany.mockResolvedValue([]);
     mockCreateCloudJobWorkerGitHubToken.mockResolvedValue('ghs_app_token');
@@ -319,6 +341,31 @@ describe('createSourceControlTokenForJob', () => {
         }),
       }),
     );
+  });
+
+  it('resolves the provider via the shared resolver when the payload is unstamped', async () => {
+    // Environment-workspace payload (no repo, no explicit provider): the shared
+    // resolver reports gitlab, so a GitLab token is minted instead of the
+    // GitHub default.
+    // resolveJobSourceControlProvider runs twice per token creation (label +
+    // token mint), so use a persistent resolution rather than a one-shot.
+    vi.mocked(resolveWorkspaceSourceControlProvider).mockResolvedValue(
+      'gitlab',
+    );
+
+    const result = await createSourceControlTokenForJob(
+      makeCloudJob({
+        repo: '',
+        environmentId: 'env-123',
+        description: 'Work in a gitlab environment',
+      }),
+      '[test]',
+      { maxRetries: 1 },
+    );
+
+    expect(result).toMatchObject({ provider: 'gitlab' });
+    expect(mockCreateCloudJobWorkerGitHubToken).not.toHaveBeenCalled();
+    expect(mockCreateCloudJobScopedGitLabTokens).toHaveBeenCalled();
   });
 
   it('returns null when GitLab token is missing', async () => {

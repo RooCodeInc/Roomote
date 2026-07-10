@@ -6,7 +6,7 @@ import {
   getSourceControlProviderLabel,
   PRODUCT_NAME,
 } from '@roomote/types';
-import type { ResolvedTaskAttributionDisplay } from '@roomote/db/server';
+import type { ResolvedTaskCommitAuthor } from '../commit-author';
 
 import {
   escapeTaskContextText,
@@ -18,14 +18,15 @@ import {
 import { isRecognizedInitialSkillInvocation } from './skillInvocationRouting';
 import { renderLinkedWorkItemsSection } from './pr-linked-work-items';
 
-const DEFAULT_ATTRIBUTION: ResolvedTaskAttributionDisplay = {
-  authorKind: 'roomote',
-  kind: 'automatic',
-  sourceKind: 'system',
-  githubDisplay: null,
-  productDisplay: PRODUCT_NAME,
-  analyticsDisplay: PRODUCT_NAME,
-  assigneeGithubLogin: null,
+const DEFAULT_ATTRIBUTION: ResolvedTaskCommitAuthor = {
+  kind: 'roomote',
+  displayName: PRODUCT_NAME,
+  githubLogin: null,
+  prAssigneeLogin: null,
+  gitAuthor: {
+    name: PRODUCT_NAME,
+    email: 'roomote@roomote.dev',
+  },
 };
 
 type DeliverySkill = 'push' | 'create-pr' | 'create-draft-pr';
@@ -84,7 +85,7 @@ export function standardTask({
     | 'ado';
   conflictResolverLabel?: string;
   cloudJobUrl?: string;
-  attribution?: ResolvedTaskAttributionDisplay;
+  attribution?: ResolvedTaskCommitAuthor;
   username?: string;
   githubLogin?: string;
   slackTeamDomain?: string;
@@ -146,9 +147,9 @@ export function standardTask({
         `For this run, the delegated PR-delivery skill must use the conflict resolver label \`${resolvedConflictResolverLabel}\` instead of assuming a hardcoded default.`,
       );
     }
-    if (attribution.assigneeGithubLogin) {
+    if (attribution.prAssigneeLogin) {
       delegatedPrMetadataInstructions.push(
-        `For this run, because the creating user has linked GitHub login \`${attribution.assigneeGithubLogin}\`, the delegated PR-delivery skill must pass \`assignees: ['${attribution.assigneeGithubLogin}']\` in its \`mcp__roomote__manage_source_control\` calls so the created or refreshed pull request is assigned to that user when the provider supports it.`,
+        `For this run, because the creating user has linked GitHub login \`${attribution.prAssigneeLogin}\`, the delegated PR-delivery skill must pass \`assignees: ['${attribution.prAssigneeLogin}']\` in its \`mcp__roomote__manage_source_control\` calls so the created or refreshed pull request is assigned to that user when the provider supports it.`,
       );
     }
   }

@@ -1,15 +1,10 @@
-import {
-  and,
-  asc,
-  automationWorkItems,
-  db,
-  eq,
-  inArray,
-  sql,
-} from '@roomote/db/server';
-import { ACTIVE_AUTOMATION_WORK_ITEM_STATUSES } from '@roomote/types';
+import { and, asc, db, eq, inArray, sql, workItems } from '@roomote/db/server';
+import { WORK_ITEM_ACTIVE_STATUSES } from '@roomote/types';
 
-import { persistedAutomationWorkItemProjection } from './row-projection.js';
+import {
+  persistedAutomationWorkItemProjection,
+  toPersistedAutomationWorkItem,
+} from './row-projection.js';
 import {
   buildAutomationWorkItemsSummaryLockKey,
   type AutomationKey,
@@ -23,7 +18,6 @@ import type {
 export async function persistAutomationWorkItems(params: {
   sourceTaskId: string;
   automationKey: AutomationKey;
-  backgroundAutomationRunId: string | null;
   preparedWorkItems: PreparedAutomationWorkItem[];
   repositoryIds: string[];
 }): Promise<PersistedAutomationWorkItemsResult> {
@@ -38,16 +32,21 @@ export async function persistAutomationWorkItems(params: {
 
     const existingWorkItems = await tx
       .select(persistedAutomationWorkItemProjection)
-      .from(automationWorkItems)
-      .where(eq(automationWorkItems.sourceTaskId, params.sourceTaskId))
-      .orderBy(asc(automationWorkItems.sortOrder));
+      .from(workItems)
+      .where(
+        and(
+          eq(workItems.kind, 'auto_fix'),
+          eq(workItems.sourceTaskId, params.sourceTaskId),
+        ),
+      )
+      .orderBy(asc(workItems.sortOrder));
 
     if (existingWorkItems.length > 0) {
       return {
         created: false,
         duplicateCount: 0,
         duplicateWorkItemRefs: [],
-        workItems: existingWorkItems,
+        workItems: existingWorkItems.map(toPersistedAutomationWorkItem),
       };
     }
 
@@ -59,17 +58,16 @@ export async function persistAutomationWorkItems(params: {
         ? ([] as PersistedDuplicateWorkItemRef[])
         : await tx
             .select({
-              id: automationWorkItems.id,
-              fingerprint: automationWorkItems.fingerprint,
+              id: workItems.id,
+              fingerprint: workItems.fingerprint,
             })
-            .from(automationWorkItems)
+            .from(workItems)
             .where(
               and(
-                eq(automationWorkItems.automationKey, params.automationKey),
-                inArray(automationWorkItems.status, [
-                  ...ACTIVE_AUTOMATION_WORK_ITEM_STATUSES,
-                ]),
-                inArray(automationWorkItems.fingerprint, fingerprints),
+                eq(workItems.kind, 'auto_fix'),
+                eq(workItems.automationKey, params.automationKey),
+                inArray(workItems.status, [...WORK_ITEM_ACTIVE_STATUSES]),
+                inArray(workItems.fingerprint, fingerprints),
               ),
             );
     const duplicateWorkItemRefsByFingerprint = new Map<
@@ -78,14 +76,21 @@ export async function persistAutomationWorkItems(params: {
     >();
 
     for (const workItemRef of unorderedDuplicateWorkItemRefs) {
-      const existingRefs =
-        duplicateWorkItemRefsByFingerprint.get(workItemRef.fingerprint) ?? [];
+      // The WHERE clause filters on a non-null fingerprint set, so matched
+      // rows always carry a fingerprint despite the column being nullable.
+      if (workItemRef.fingerprint === null) {
+        continue;
+      }
 
-      existingRefs.push(workItemRef);
-      duplicateWorkItemRefsByFingerprint.set(
-        workItemRef.fingerprint,
-        existingRefs,
-      );
+      const ref: PersistedDuplicateWorkItemRef = {
+        id: workItemRef.id,
+        fingerprint: workItemRef.fingerprint,
+      };
+      const existingRefs =
+        duplicateWorkItemRefsByFingerprint.get(ref.fingerprint) ?? [];
+
+      existingRefs.push(ref);
+      duplicateWorkItemRefsByFingerprint.set(ref.fingerprint, existingRefs);
     }
 
     const duplicateWorkItemRefs = fingerprints.flatMap(
@@ -110,13 +115,13 @@ export async function persistAutomationWorkItems(params: {
     }
 
     const insertedWorkItems = await tx
-      .insert(automationWorkItems)
+      .insert(workItems)
       .values(
         workItemsToInsert.map(
-          (workItem, index): typeof automationWorkItems.$inferInsert => ({
+          (workItem, index): typeof workItems.$inferInsert => ({
+            kind: 'auto_fix',
             automationKey: params.automationKey,
             sourceTaskId: params.sourceTaskId,
-            backgroundAutomationRunId: params.backgroundAutomationRunId,
             title: workItem.title,
             brief: workItem.brief,
             category: workItem.category,
@@ -143,7 +148,7 @@ export async function persistAutomationWorkItems(params: {
       duplicateCount:
         params.preparedWorkItems.length - insertedWorkItems.length,
       duplicateWorkItemRefs,
-      workItems: insertedWorkItems,
+      workItems: insertedWorkItems.map(toPersistedAutomationWorkItem),
     };
   });
 }

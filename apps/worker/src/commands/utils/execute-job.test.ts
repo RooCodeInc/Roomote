@@ -82,8 +82,8 @@ vi.mock('../../run-task/polling/compute-provider-usage', () => ({
 
 vi.mock('../../callbacks', () => ({
   callbackMap: {
-    'standard.task': {},
-    'slack.app.mention': {},
+    standard: {},
+    slack_app_mention: {},
   },
 }));
 
@@ -107,7 +107,7 @@ vi.mock('./job-lifecycle', () => ({
   handleJobError: handleJobErrorMock,
 }));
 
-import { CloudTaskStatus, CloudTaskType } from '@roomote/types';
+import { CloudTaskStatus, TaskPayloadKind } from '@roomote/types';
 
 import { WorkspaceRepositoryPreparationError } from '../setup/workspace/types';
 import * as executeJobModule from './execute-job';
@@ -171,7 +171,7 @@ describe('executeJob', () => {
       cloudJob: {
         id: 42,
         taskId: 'task-42',
-        type: CloudTaskType.StandardTask,
+        payloadKind: TaskPayloadKind.StandardTask,
         harness: 'opencode-server',
         payload: {
           repo: 'owner/repo',
@@ -263,7 +263,7 @@ describe('executeJob', () => {
         cloudJob: {
           id: 42,
           taskId: 'task-42',
-          type: CloudTaskType.StandardTask,
+          payloadKind: TaskPayloadKind.StandardTask,
           harness: 'opencode-server',
           payload: {
             repo: 'owner/repo',
@@ -317,7 +317,7 @@ describe('executeJob', () => {
         cloudJob: {
           id: 42,
           taskId: 'task-42',
-          type: CloudTaskType.StandardTask,
+          payloadKind: TaskPayloadKind.StandardTask,
           harness: 'opencode-server',
           payload: {
             repo: 'owner/repo',
@@ -405,7 +405,7 @@ describe('executeJob', () => {
         cloudJob: {
           id: 42,
           taskId: 'task-42',
-          type: CloudTaskType.StandardTask,
+          payloadKind: TaskPayloadKind.StandardTask,
           harness: 'opencode-server',
           payload: {
             repo: 'owner/repo',
@@ -464,7 +464,7 @@ describe('executeJob', () => {
         cloudJob: {
           id: 42,
           taskId: 'task-42',
-          type: CloudTaskType.SlackAppMention,
+          payloadKind: TaskPayloadKind.SlackAppMention,
           harness: 'opencode-server',
           payload: {
             repo: 'owner/repo',
@@ -511,7 +511,7 @@ describe('executeJob', () => {
         cloudJob: {
           id: 42,
           taskId: 'task-42',
-          type: CloudTaskType.SlackAppMention,
+          payloadKind: TaskPayloadKind.SlackAppMention,
           harness: 'opencode-server',
           payload: {
             repo: 'owner/repo',
@@ -557,7 +557,7 @@ describe('executeJob', () => {
         cloudJob: {
           id: 42,
           taskId: 'task-42',
-          type: CloudTaskType.SnapshotResume,
+          payloadKind: TaskPayloadKind.SnapshotResume,
           harness: 'opencode-server',
           sourceCloudJobId: 41,
           payload: {
@@ -599,7 +599,7 @@ describe('executeJob', () => {
       cloudJob: {
         id: 42,
         taskId: 'task-42',
-        type: CloudTaskType.StandardTask,
+        payloadKind: TaskPayloadKind.StandardTask,
         harness: 'opencode-server',
         payload: {
           repo: 'owner/repo',
@@ -662,7 +662,7 @@ describe('executeJob', () => {
         cloudJob: {
           id: 42,
           taskId: 'task-42',
-          type: CloudTaskType.StandardTask,
+          payloadKind: TaskPayloadKind.StandardTask,
           harness: 'opencode-server',
           payload: { repo: 'owner/repo' },
         },
@@ -717,7 +717,7 @@ describe('executeJob', () => {
         cloudJob: {
           id: 42,
           taskId: 'task-42',
-          type: CloudTaskType.StandardTask,
+          payloadKind: TaskPayloadKind.StandardTask,
           harness: 'opencode-server',
           payload: { repo: 'owner/repo' },
         },
@@ -740,7 +740,7 @@ describe('executeJob', () => {
           reason: 'workspace_repository_prepare_failed',
           failureMode: 'continued',
           workspaceType: 'all_repositories',
-          cloudTaskType: CloudTaskType.StandardTask,
+          cloudTaskType: TaskPayloadKind.StandardTask,
           totalRepositories: 3,
           preparedRepositoryCount: 2,
           failedRepositoryCount: 1,
@@ -784,7 +784,7 @@ describe('executeJob', () => {
         cloudJob: {
           id: 42,
           taskId: 'task-42',
-          type: CloudTaskType.StandardTask,
+          payloadKind: TaskPayloadKind.StandardTask,
           harness: 'opencode-server',
           payload: { repo: 'owner/repo' },
         },
@@ -807,7 +807,7 @@ describe('executeJob', () => {
           reason: 'workspace_repository_prepare_failed',
           failureMode: 'continued',
           workspaceType: 'repository_set',
-          cloudTaskType: CloudTaskType.StandardTask,
+          cloudTaskType: TaskPayloadKind.StandardTask,
           totalRepositories: 2,
           preparedRepositoryCount: 1,
           failedRepositoryCount: 1,
@@ -828,7 +828,7 @@ describe('executeJob', () => {
       cloudJob: {
         id: 42,
         taskId: 'task-42',
-        type: CloudTaskType.StandardTask,
+        payloadKind: TaskPayloadKind.StandardTask,
         harness: 'opencode-server',
         payload: {
           repo: 'owner/repo',
@@ -865,7 +865,7 @@ describe('executeJob', () => {
       cloudJob: {
         id: 42,
         taskId: 'task-42',
-        type: CloudTaskType.StandardTask,
+        payloadKind: TaskPayloadKind.StandardTask,
         harness: 'opencode-server',
         payload: {
           repo: 'owner/repo',
@@ -940,7 +940,7 @@ describe('executeJob', () => {
       cloudJob: {
         id: 42,
         taskId: 'task-42',
-        type: CloudTaskType.StandardTask,
+        payloadKind: TaskPayloadKind.StandardTask,
         harness: 'opencode-server',
         payload: {
           repo: 'owner/repo',
@@ -988,7 +988,7 @@ describe('executeJob', () => {
       cloudJob: {
         id: 42,
         taskId: 'task-42',
-        type: CloudTaskType.SlackAppMention,
+        payloadKind: TaskPayloadKind.SlackAppMention,
         harness: 'opencode-server',
         payload: {
           repo: 'owner/repo',
@@ -1046,7 +1046,7 @@ describe('executeJob', () => {
       cloudJob: {
         id: 42,
         taskId: 'task-42',
-        type: CloudTaskType.StandardTask,
+        payloadKind: TaskPayloadKind.StandardTask,
         harness: 'opencode-server',
         payload: {
           repo: 'owner/repo',
@@ -1107,7 +1107,7 @@ describe('executeJob', () => {
         cloudJob: {
           id: 42,
           taskId: 'task-42',
-          type: CloudTaskType.StandardTask,
+          payloadKind: TaskPayloadKind.StandardTask,
           harness: 'opencode-server',
           payload: { repo: 'owner/repo' },
         },
@@ -1131,7 +1131,7 @@ describe('executeJob', () => {
           reason: 'workspace_repository_prepare_failed',
           failureMode: 'fatal',
           workspaceType: 'repository_set',
-          cloudTaskType: CloudTaskType.StandardTask,
+          cloudTaskType: TaskPayloadKind.StandardTask,
           totalRepositories: 2,
           preparedRepositoryCount: 1,
           failedRepositoryCount: 1,

@@ -240,12 +240,6 @@ importers:
       '@roomote/env':
         specifier: workspace:^
         version: link:../../packages/env
-      '@roomote/feature-flags':
-        specifier: workspace:^
-        version: link:../../packages/feature-flags
-      '@roomote/github':
-        specifier: workspace:^
-        version: link:../../packages/github
       '@roomote/linear':
         specifier: workspace:^
         version: link:../../packages/linear
@@ -630,9 +624,6 @@ importers:
       better-sse:
         specifier: ^0.16.1
         version: 0.16.1
-      bullmq:
-        specifier: ^5.78.0
-        version: 5.78.0
       change-case:
         specifier: ^5.4.4
         version: 5.4.4
@@ -1442,6 +1433,9 @@ importers:
       '@roomote/db':
         specifier: workspace:^
         version: link:../db
+      '@roomote/env':
+        specifier: workspace:*
+        version: link:../env
       '@roomote/feature-flags':
         specifier: workspace:^
         version: link:../feature-flags

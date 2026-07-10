@@ -1,4 +1,4 @@
-import { type CloudTaskPayload, CloudTaskType } from '@roomote/types';
+import { type CloudTaskPayload, TaskPayloadKind } from '@roomote/types';
 import type {
   AgentSessionPlanStep,
   AgentSessionPlanStepStatus,
@@ -11,6 +11,8 @@ import type {
   RunTaskContext,
 } from '../run-task';
 import { captureWorkerException } from '../monitoring/sentry';
+
+import { getLinearSessionIdFromResumePayload } from '../run-task/linear-resume-payload';
 
 import { getCallbackEventKey } from './utils';
 import {
@@ -104,9 +106,10 @@ function convertTodosToAgentPlan(todos: TodoItem[]): AgentSessionPlanStep[] {
 
 function getLinearSessionId(cloudJob: CloudJob): string {
   // For LinearAgentSession jobs, sessionId is in the payload
-  if (cloudJob.type === CloudTaskType.LinearAgentSession) {
-    const { sessionId } =
-      cloudJob.payload as CloudTaskPayload<CloudTaskType.LinearAgentSession>;
+  if (cloudJob.payloadKind === TaskPayloadKind.LinearAgentSession) {
+    const { sessionId } = cloudJob.payload as CloudTaskPayload<
+      typeof TaskPayloadKind.LinearAgentSession
+    >;
 
     if (!sessionId) {
       throw new Error('Session ID not found in payload.');
@@ -115,9 +118,12 @@ function getLinearSessionId(cloudJob: CloudJob): string {
     return sessionId;
   }
 
-  // For SnapshotResume jobs with Linear metadata, sessionId is on the job row
-  if (cloudJob.linearSessionId) {
-    return cloudJob.linearSessionId;
+  // For SnapshotResume jobs with Linear metadata, the session id rides along
+  // with the queued Linear follow-up messages in the payload.
+  const resumeSessionId = getLinearSessionIdFromResumePayload(cloudJob.payload);
+
+  if (resumeSessionId) {
+    return resumeSessionId;
   }
 
   throw new Error('Cloud job has no Linear session ID');

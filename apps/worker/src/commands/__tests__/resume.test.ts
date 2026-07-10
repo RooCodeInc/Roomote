@@ -29,7 +29,7 @@ vi.mock('../utils', () => ({
   executeJob: executeJobMock,
 }));
 
-import { CloudTaskType } from '@roomote/types';
+import { TaskPayloadKind } from '@roomote/types';
 
 import { resume } from '../resume';
 
@@ -45,7 +45,7 @@ describe('resume', () => {
         jobContext: {
           cloudJob: {
             id: 42,
-            type: CloudTaskType.StandardTask,
+            payloadKind: TaskPayloadKind.StandardTask,
             taskId: 'task-42',
           },
           envVars: {},
@@ -85,7 +85,7 @@ describe('resume', () => {
         jobContext: {
           cloudJob: {
             id: 43,
-            type: CloudTaskType.StandardTask,
+            payloadKind: TaskPayloadKind.StandardTask,
             taskId: 'task-43',
           },
           envVars: {},

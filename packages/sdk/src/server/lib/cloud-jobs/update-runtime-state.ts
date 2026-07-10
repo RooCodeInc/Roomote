@@ -1,5 +1,5 @@
 import type { CloudTaskStatus } from '@roomote/types';
-import { db, cloudJobs, eq } from '@roomote/db/server';
+import { db, taskRuns, eq } from '@roomote/db/server';
 
 type UpdateCloudJobRuntimeState = {
   taskPhase: string | null;
@@ -34,8 +34,8 @@ export async function updateCloudJobRuntimeState(
   values: UpdateCloudJobRuntimeState,
 ): Promise<{ updated: boolean }> {
   try {
-    const current = await db.query.cloudJobs.findFirst({
-      where: eq(cloudJobs.id, cloudJobId),
+    const current = await db.query.taskRuns.findFirst({
+      where: eq(taskRuns.id, cloudJobId),
       columns: { status: true, taskPhase: true, sleepAt: true },
     });
 
@@ -48,9 +48,9 @@ export async function updateCloudJobRuntimeState(
     }
 
     await db
-      .update(cloudJobs)
+      .update(taskRuns)
       .set({ taskPhase: values.taskPhase, sleepAt: values.sleepAt })
-      .where(eq(cloudJobs.id, cloudJobId));
+      .where(eq(taskRuns.id, cloudJobId));
 
     return { updated: true };
   } catch (error) {

@@ -91,7 +91,9 @@ describe('getGiteaAutomationTargets', () => {
       targets: [
         {
           id: 'gitea:PR Reviewer:repo-1',
-          userId: 'repo-owner-1',
+          // The repo-linker fallback owner is gone: webhook launches carry
+          // an automation initiator instead of a forged owner.
+          userId: null,
         },
       ],
     });

@@ -73,7 +73,9 @@ function setRequestScope(
 
   scope.setTag('roomote.token_type', authContext.tokenType);
 
-  if ('userId' in authContext) {
+  // Deployment-principal job tokens carry a null userId; leave the Sentry
+  // user unset for those instead of fabricating an identity.
+  if ('userId' in authContext && authContext.userId !== null) {
     scope.setUser({ id: authContext.userId });
   }
 

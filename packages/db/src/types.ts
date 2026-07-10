@@ -1,12 +1,17 @@
 import type {
-  DependabotTriageFrequency,
+  AnnouncerFrequency,
+  AutomationScanCursor,
   ChannelAutoStartLaunchMode,
   CiFailureTriageFrequency,
   CodeQualityAuditorFrequency,
+  ConflictResolverFrequency,
   ConflictResolverMaxPrAgeDays,
+  DependabotTriageFrequency,
+  ManagerStatsFrequency,
   PrReviewerSettings,
   SecurityAuditorFrequency,
   SentryTriageFrequency,
+  SuggesterFrequency,
   SuggesterRoutingMode,
 } from '@roomote/types';
 
@@ -16,12 +21,11 @@ import type {
   tasks,
   taskPins,
   taskShares,
-  cloudJobs,
-  cloudJobEvents,
+  taskPullRequests,
+  taskRuns,
+  taskRunEvents,
   taskStartParallelCounts,
-  taskSuggestions,
-  automationWorkItems,
-  setupNewQueuedTasks,
+  workItems,
   taskMessages,
   taskInferenceUsageEvents,
   taskSlackReplyDetails,
@@ -37,19 +41,14 @@ import type {
   slackUserMappings,
   teamsInstallations,
   teamsUserMappings,
-  fastAgentSessions,
+  slackQuickAnswers,
   linearPendingSelections,
   environmentVariables,
-  evalRuns,
   environments,
   environmentConfigVersions,
   environmentRepositoryMappings,
-  backgroundAgentSettings,
-  backgroundAutomations,
-  backgroundAutomationTargets,
-  backgroundAutomationRuns,
-  backgroundAutomationSlackThreads,
-  mcpSetupManagerNotifications,
+  automations,
+  trackedMessages,
 } from './schema';
 
 type Timestamp = 'createdAt' | 'updatedAt';
@@ -100,25 +99,41 @@ export type TaskShare = typeof taskShares.$inferSelect;
 export type CreateTaskShare = Omit<typeof taskShares.$inferInsert, Generated>;
 
 /**
- * cloudJobs
+ * taskPullRequests
  */
 
-export type CloudJob = typeof cloudJobs.$inferSelect;
-
-export type CreateCloudJob = Omit<typeof cloudJobs.$inferInsert, Generated>;
+export type TaskPullRequest = typeof taskPullRequests.$inferSelect;
 
 /**
- * cloudJobEvents
+ * taskRuns
  */
 
-export type UpdateCloudJob = Partial<Omit<CloudJob, 'id' | 'createdAt'>>;
+export type Run = typeof taskRuns.$inferSelect;
 
-export type CloudJobEvent = typeof cloudJobEvents.$inferSelect;
+export type CreateRun = Omit<typeof taskRuns.$inferInsert, Generated>;
 
-export type CreateCloudJobEvent = Omit<
-  typeof cloudJobEvents.$inferInsert,
-  Generated
->;
+export type UpdateRun = Partial<Omit<Run, 'id' | 'createdAt'>>;
+
+// TODO(stage5-rename): temporary type-only aliases to bound downstream churn
+// until the Stage 5 CloudJob -> Run vocabulary pass. Do not alias tables.
+export type CloudJob = Run;
+
+export type CreateCloudJob = CreateRun;
+
+export type UpdateCloudJob = UpdateRun;
+
+/**
+ * taskRunEvents
+ */
+
+export type RunEvent = typeof taskRunEvents.$inferSelect;
+
+export type CreateRunEvent = Omit<typeof taskRunEvents.$inferInsert, Generated>;
+
+// TODO(stage5-rename): temporary type-only aliases, see above.
+export type CloudJobEvent = RunEvent;
+
+export type CreateCloudJobEvent = CreateRunEvent;
 
 /**
  * task_start_parallel_counts
@@ -145,37 +160,13 @@ export type CreateTaskInferenceUsageEvent = Omit<
 >;
 
 /**
- * taskSuggestions
+ * workItems (Stage 4 merge of task_suggestions + automation_work_items +
+ * setup_new_queued_tasks)
  */
 
-export type TaskSuggestion = typeof taskSuggestions.$inferSelect;
+export type WorkItem = typeof workItems.$inferSelect;
 
-export type CreateTaskSuggestion = Omit<
-  typeof taskSuggestions.$inferInsert,
-  Generated
->;
-
-/**
- * automationWorkItems
- */
-
-export type AutomationWorkItem = typeof automationWorkItems.$inferSelect;
-
-export type CreateAutomationWorkItem = Omit<
-  typeof automationWorkItems.$inferInsert,
-  Generated
->;
-
-/**
- * setupNewQueuedTasks
- */
-
-export type SetupNewQueuedTask = typeof setupNewQueuedTasks.$inferSelect;
-
-export type CreateSetupNewQueuedTask = Omit<
-  typeof setupNewQueuedTasks.$inferInsert,
-  Generated
->;
+export type CreateWorkItem = Omit<typeof workItems.$inferInsert, Generated>;
 
 /**
  * taskMessages
@@ -279,13 +270,13 @@ export type CreateSlackAuthToken = Omit<
 >;
 
 /**
- * fastAgentSessions
+ * slackQuickAnswers (renamed from fastAgentSessions in Stage 4)
  */
 
-export type FastAgentSession = typeof fastAgentSessions.$inferSelect;
+export type SlackQuickAnswer = typeof slackQuickAnswers.$inferSelect;
 
-export type CreateFastAgentSession = Omit<
-  typeof fastAgentSessions.$inferInsert,
+export type CreateSlackQuickAnswer = Omit<
+  typeof slackQuickAnswers.$inferInsert,
   Generated
 >;
 
@@ -346,14 +337,14 @@ export type CreateTeamsUserMapping = Omit<
 >;
 
 /**
- * deployment_mcp_setup_manager_notifications
+ * trackedMessages (Stage 4 merge of agent_suggestion_messages +
+ * background_automation_slack_threads + mcp_setup_manager_notifications)
  */
 
-export type DeploymentMcpSetupManagerNotification =
-  typeof mcpSetupManagerNotifications.$inferSelect;
+export type TrackedMessage = typeof trackedMessages.$inferSelect;
 
-export type CreateDeploymentMcpSetupManagerNotification = Omit<
-  typeof mcpSetupManagerNotifications.$inferInsert,
+export type CreateTrackedMessage = Omit<
+  typeof trackedMessages.$inferInsert,
   Generated
 >;
 
@@ -367,14 +358,6 @@ export type CreateEnvironmentVariable = Omit<
   typeof environmentVariables.$inferInsert,
   Generated
 >;
-
-/**
- * evalRuns
- */
-
-export type EvalRun = typeof evalRuns.$inferSelect;
-
-export type CreateEvalRun = Omit<typeof evalRuns.$inferInsert, Generated>;
 
 /**
  * environments
@@ -421,102 +404,92 @@ export type CreateLinearPendingSelection = Omit<
 
 /**
  * backgroundAgentSettings
+ *
+ * The stored columns live on deployment_settings and hold deployment-wide
+ * agent settings (manager channel, global instructions, style guidance,
+ * authorship rules, Slack emoji preferences). The flat settings view consumed
+ * across the product adds a per-automation projection built from the
+ * automations table.
  */
 
-export type BackgroundAgentSettings =
-  typeof backgroundAgentSettings.$inferSelect & {
-    channelAutoStartSlackChannels: Array<{
-      channelId: string;
-      instructions: string | null;
-      launchMode: ChannelAutoStartLaunchMode;
-      launchCriteria: string | null;
-    }>;
-    channelAutoStartEnabled: boolean;
-    channelAutoStartSlackChannelIds: string[];
-    channelAutoStartInstructions: string | null;
-    reviewCodeSettings: PrReviewerSettings;
-    managerStatsSlackChannelId: string | null;
-    conflictResolverMaxPrAgeDays: ConflictResolverMaxPrAgeDays;
-    sentryTriageFrequency: SentryTriageFrequency;
-    sentryTriageSlackChannelId: string | null;
-    sentryTriageProjectSlugs: string | null;
-    sentryTriageLastRunAt: Date | null;
-    dependabotTriageFrequency: DependabotTriageFrequency;
-    dependabotTriageSlackChannelId: string | null;
-    dependabotTriageLastRunAt: Date | null;
-    suggesterRoutingMode: SuggesterRoutingMode;
-    suggesterRoutingInstructions: string | null;
-    securityAuditorFrequency: SecurityAuditorFrequency;
-    securityAuditorSlackChannelId: string | null;
-    securityAuditorLastRunAt: Date | null;
-    securityAuditorScanCursor?: SecurityAuditorScanCursor | null;
-    codeQualityAuditorFrequency: CodeQualityAuditorFrequency;
-    codeQualityAuditorSlackChannelId: string | null;
-    codeQualityAuditorLastRunAt: Date | null;
-    codeQualityAuditorScanCursor?: CodeQualityAuditorScanCursor | null;
-    ciFailureTriageFrequency: CiFailureTriageFrequency;
-    ciFailureTriageSlackChannelId: string | null;
-    ciFailureTriageLastRunAt: Date | null;
-    ciFailureTriageScanCursor?: CiFailureTriageScanCursor | null;
-  };
+type StoredBackgroundAgentSettings = Pick<
+  typeof deploymentSettings.$inferSelect,
+  | 'id'
+  | 'managerSlackChannelId'
+  | 'globalAgentInstructions'
+  | 'authorshipInstructions'
+  | 'compiledAuthorshipRules'
+  | 'compiledAuthorshipIssues'
+  | 'compiledAuthorshipAt'
+  | 'styleGuidance'
+  | 'slackSummonEmoji'
+  | 'slackAckEmoji'
+  | 'slackCompletionEmoji'
+  | 'createdAt'
+  | 'updatedAt'
+>;
 
-export type SecurityAuditorScanCursor = {
-  mergedAt: string;
-  externalPullRequestId: number;
+export type BackgroundAgentSettings = StoredBackgroundAgentSettings & {
+  channelAutoStartSlackChannels: Array<{
+    channelId: string;
+    instructions: string | null;
+    launchMode: ChannelAutoStartLaunchMode;
+    launchCriteria: string | null;
+  }>;
+  channelAutoStartEnabled: boolean;
+  channelAutoStartSlackChannelIds: string[];
+  channelAutoStartInstructions: string | null;
+  reviewCodeSettings: PrReviewerSettings;
+  conflictResolverFrequency: ConflictResolverFrequency;
+  conflictResolverLabel: string;
+  conflictResolverInstructions: string | null;
+  conflictResolverMaxPrAgeDays: ConflictResolverMaxPrAgeDays;
+  conflictResolverLastRunAt: Date | null;
+  suggesterFrequency: SuggesterFrequency;
+  suggesterSlackChannelId: string | null;
+  suggesterInstructions: string | null;
+  suggesterRoutingMode: SuggesterRoutingMode;
+  suggesterRoutingInstructions: string | null;
+  suggesterLastRunAt: Date | null;
+  announcerFrequency: AnnouncerFrequency;
+  announcerSlackChannelId: string | null;
+  announcerInstructions: string | null;
+  announcerLastRunAt: Date | null;
+  platformIssueSlackChannelId: string | null;
+  managerStatsFrequency: ManagerStatsFrequency;
+  managerStatsSlackChannelId: string | null;
+  managerStatsLastRunAt: Date | null;
+  sentryTriageFrequency: SentryTriageFrequency;
+  sentryTriageSlackChannelId: string | null;
+  sentryTriageProjectSlugs: string | null;
+  sentryTriageLastRunAt: Date | null;
+  dependabotTriageFrequency: DependabotTriageFrequency;
+  dependabotTriageSlackChannelId: string | null;
+  dependabotTriageLastRunAt: Date | null;
+  securityAuditorFrequency: SecurityAuditorFrequency;
+  securityAuditorSlackChannelId: string | null;
+  securityAuditorLastRunAt: Date | null;
+  securityAuditorScanCursor?: SecurityAuditorScanCursor | null;
+  codeQualityAuditorFrequency: CodeQualityAuditorFrequency;
+  codeQualityAuditorSlackChannelId: string | null;
+  codeQualityAuditorLastRunAt: Date | null;
+  codeQualityAuditorScanCursor?: CodeQualityAuditorScanCursor | null;
+  ciFailureTriageFrequency: CiFailureTriageFrequency;
+  ciFailureTriageSlackChannelId: string | null;
+  ciFailureTriageLastRunAt: Date | null;
+  ciFailureTriageScanCursor?: CiFailureTriageScanCursor | null;
 };
+
+export type SecurityAuditorScanCursor = AutomationScanCursor;
 
 export type CodeQualityAuditorScanCursor = SecurityAuditorScanCursor;
 
 export type CiFailureTriageScanCursor = SecurityAuditorScanCursor;
 
-export type CreateBackgroundAgentSettings = Omit<
-  typeof backgroundAgentSettings.$inferInsert,
-  Generated
->;
-
 /**
- * backgroundAutomations
+ * automations
  */
 
-export type BackgroundAutomation = typeof backgroundAutomations.$inferSelect;
+export type Automation = typeof automations.$inferSelect;
 
-export type CreateBackgroundAutomation = Omit<
-  typeof backgroundAutomations.$inferInsert,
-  Generated
->;
-
-/**
- * backgroundAutomationTargets
- */
-
-export type BackgroundAutomationTarget =
-  typeof backgroundAutomationTargets.$inferSelect;
-
-export type CreateBackgroundAutomationTarget = Omit<
-  typeof backgroundAutomationTargets.$inferInsert,
-  Generated
->;
-
-/**
- * backgroundAutomationSlackThreads
- */
-
-export type BackgroundAutomationSlackThread =
-  typeof backgroundAutomationSlackThreads.$inferSelect;
-
-export type CreateBackgroundAutomationSlackThread = Omit<
-  typeof backgroundAutomationSlackThreads.$inferInsert,
-  Generated
->;
-
-/**
- * backgroundAutomationRuns
- */
-
-export type BackgroundAutomationRun =
-  typeof backgroundAutomationRuns.$inferSelect;
-
-export type CreateBackgroundAutomationRun = Omit<
-  typeof backgroundAutomationRuns.$inferInsert,
-  Generated
->;
+export type CreateAutomation = Omit<typeof automations.$inferInsert, Timestamp>;

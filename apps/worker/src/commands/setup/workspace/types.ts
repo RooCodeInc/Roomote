@@ -1,6 +1,6 @@
 import type {
   CodingHarness,
-  CloudTaskType,
+  TaskPayloadKind,
   SourceControlProvider,
 } from '@roomote/types';
 
@@ -62,7 +62,7 @@ export interface PrepareWorkspaceOptions {
   /** User-specified environment variables stored (encrypted) in the database. */
   userEnvVars?: Record<string, string>;
   harness?: CodingHarness | null;
-  cloudJobType: CloudTaskType;
+  cloudJobType: TaskPayloadKind;
   preserveGitState?: boolean;
   cleanupLegacyPaths?: boolean;
   sourceControlProvider?: SourceControlProvider;

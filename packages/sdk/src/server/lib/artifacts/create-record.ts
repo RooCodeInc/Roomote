@@ -31,7 +31,7 @@ export async function createTaskArtifactRecord(input: {
       .insert(taskArtifacts)
       .values({
         taskId: input.taskId,
-        cloudJobId: input.cloudJobId ?? null,
+        runId: input.cloudJobId ?? null,
         artifactType: input.artifactType,
         contentType: input.contentType,
         path: input.path,

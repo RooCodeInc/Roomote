@@ -1,7 +1,7 @@
 ---
 title: Adding a Compute Provider
 status: active
-last_reviewed: 2026-07-03
+last_reviewed: 2026-07-09
 owner: engineering
 summary: End-to-end guide for adding a new sandbox-compatible compute provider, including controller wiring, snapshots, and pnpm dev integration.
 ---
@@ -76,7 +76,7 @@ Start by extending the provider union in
 [`packages/types/src/compute-providers/compute-provider.ts`](../../packages/types/src/compute-providers/compute-provider.ts).
 That one type flows into:
 
-- `cloudJobs.vendor` in
+- `taskRuns.vendor` in
   [`packages/db/src/schema.ts`](../../packages/db/src/schema.ts)
 - snapshot/log defaults such as `cloudJob.vendor ?? 'docker'` and the
   `resolveComputeProviderTarget()` fallback (also `docker`)
@@ -152,8 +152,8 @@ Roomote is intentionally simplified right now:
 Adding a second provider now means extending the shared dispatch rules. The
 cleanest path is:
 
-1. Keep the mixed controller branching on `cloudJobs.vendor`.
-2. Make sure every launch path persists the provider via `cloudJobs.vendor`.
+1. Keep the mixed controller branching on `taskRuns.vendor`.
+2. Make sure every launch path persists the provider via `taskRuns.vendor`.
 3. Only use explicit controller env vars for local/dev bootstrapping concerns,
    not as the primary runtime selector for queued jobs.
 

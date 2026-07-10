@@ -21,10 +21,10 @@ const {
 
 vi.mock('@roomote/db/server', () => ({
   and: andMock,
-  cloudJobs: { id: 'cloudJobs.id' },
+  taskRuns: { id: 'taskRuns.id' },
   db: {
     query: {
-      cloudJobs: {
+      taskRuns: {
         findFirst: mockCloudJobFindFirst,
       },
       tasks: {
@@ -97,7 +97,8 @@ describe('verifyArtifactRouteTaskReadAccess', () => {
     const result = await verifyArtifactRouteTaskReadAccess('task-other', auth);
 
     expect(result).toEqual({ ok: true });
-    expect(isVisibleTaskMock).toHaveBeenCalledWith('tasks.id');
+    // isVisibleTask is now a zero-arg visibility predicate on tasks.
+    expect(isVisibleTaskMock).toHaveBeenCalledWith();
   });
 
   it('rejects cross-task reads when the requested task is missing or hidden', async () => {

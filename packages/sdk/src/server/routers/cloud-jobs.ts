@@ -1,9 +1,21 @@
 import { TRPCError } from '@trpc/server';
 import { z } from 'zod';
-import { db, eq, slackInstallations } from '@roomote/db/server';
+import {
+  and,
+  db,
+  eq,
+  isNotNull,
+  slackInstallations,
+  taskPullRequests,
+} from '@roomote/db/server';
 
 import {
   CloudTaskStatus,
+  TASK_SURFACES,
+  TASK_TRIGGERS,
+  TASK_VISIBILITIES,
+  TASK_WORKFLOWS,
+  TaskPayloadKind,
   cloudJobEventSources,
   cloudJobEventTypes,
   cloudTaskSchema,
@@ -12,6 +24,8 @@ import {
   computeProviderUsageLifecycleActions,
   doneCloudTaskStatuses,
   queuedCommunicationMessageSchema,
+  snapshotResumeSchema,
+  sourceControlProviderSchema,
   ROOMOTE_RUNTIME_TASK_MESSAGE_PROTOCOL,
   type AcpPersistedEnvelope,
 } from '@roomote/types';
@@ -19,7 +33,10 @@ import {
   getCommunicationMessages,
   queueCommunicationMessage,
 } from '@roomote/communication/messages';
-import { enqueueCloudTask } from '@roomote/cloud-agents/server';
+import {
+  enqueueCloudTask,
+  type EnqueueCloudTaskInput,
+} from '@roomote/cloud-agents/server';
 import {
   clearPendingSlackRequestUserInput,
   getSlackThreadFooterText as buildSlackThreadFooterText,
@@ -117,6 +134,91 @@ const acpRequestUserInputAnswersSchema = z.record(
     answers: z.array(z.string()),
   }),
 );
+
+/**
+ * Launch-time initiator union. Mirrors the TaskInitiator discriminated shape:
+ * a 'user' initiator is either a linked user id or a raw external identity
+ * (optionally matched to a user), and an 'automation' initiator carries the
+ * automation key plus an optional external actor for context. There is no raw
+ * userId/attribution passthrough — attribution derives from this union only.
+ */
+const taskInitiatorSchema = z.union([
+  z.object({
+    kind: z.literal('user'),
+    userId: z.string().min(1),
+  }),
+  z.object({
+    kind: z.literal('user'),
+    externalId: z.string().min(1),
+    displayName: z.string().optional(),
+    matchedUserId: z.string().optional(),
+  }),
+  z.object({
+    kind: z.literal('automation'),
+    key: z.string().min(1),
+    actor: z
+      .object({
+        externalId: z.string().min(1),
+        displayName: z.string().optional(),
+      })
+      .optional(),
+  }),
+]);
+
+const taskChannelBindingsSchema = z.object({
+  slackChannelId: z.string().nullish(),
+  slackThreadTs: z.string().nullish(),
+  linearSessionId: z.string().nullish(),
+  linearIssueId: z.string().nullish(),
+  linearOrganizationId: z.string().nullish(),
+});
+
+const taskPrLinkageSchema = z.object({
+  provider: sourceControlProviderSchema,
+  host: z.string().nullish(),
+  repository: z.string().min(1),
+  prNumber: z.number().int().positive(),
+  prUrl: z.string().min(1),
+  prTitle: z.string().nullish(),
+  prSha: z.string().nullish(),
+  prBaseRef: z.string().nullish(),
+  prBaseSha: z.string().nullish(),
+  githubReactionId: z.number().nullish(),
+  githubCheckRunId: z.number().nullish(),
+  githubReviewCommentId: z.number().nullish(),
+});
+
+/**
+ * A fresh launch creates a task (initiator stamp, classification, channel
+ * bindings, optional PR linkage) plus its first run.
+ */
+const freshEnqueueInputSchema = z.object({
+  task: cloudTaskSchema.refine(
+    (task) => task.type !== TaskPayloadKind.SnapshotResume,
+    { message: 'Snapshot resumes must use the resume input shape.' },
+  ),
+  initiator: taskInitiatorSchema,
+  workflow: z.enum(TASK_WORKFLOWS),
+  surface: z.enum(TASK_SURFACES),
+  trigger: z.enum(TASK_TRIGGERS),
+  visibility: z.enum(TASK_VISIBILITIES).optional(),
+  channels: taskChannelBindingsSchema.optional(),
+  prLinkage: taskPrLinkageSchema.optional(),
+});
+
+/**
+ * A resume attaches a new run to the source run's task. It never creates a
+ * task and never re-attributes; the resumer becomes the run's actingUserId.
+ */
+const resumeEnqueueInputSchema = z.object({
+  task: snapshotResumeSchema,
+  actingUserId: z.string().nullish(),
+});
+
+const enqueueCloudTaskInputSchema = z.union([
+  freshEnqueueInputSchema,
+  resumeEnqueueInputSchema,
+]);
 
 const workerReleaseMetadataSchema = z.object({
   workerReleaseTag: z.string().optional(),
@@ -223,9 +325,11 @@ export const cloudJobsRouter = router({
     }),
   ),
   enqueue: nonJobProcedure
-    .input(cloudTaskSchema)
+    .input(enqueueCloudTaskInputSchema)
     .mutation(async ({ input }) => {
-      const launchResult = await enqueueCloudTask(input);
+      const launchResult = await enqueueCloudTask(
+        input as EnqueueCloudTaskInput,
+      );
 
       return {
         id: launchResult.id,
@@ -266,7 +370,10 @@ export const cloudJobsRouter = router({
     }),
     'cloudJobId',
   ).mutation(({ ctx, input }) => {
-    const userId = 'userId' in ctx.auth ? ctx.auth.userId : undefined;
+    // Deployment-principal job tokens carry no human user; leave the
+    // attribution unset so the envelope persists without a user id.
+    const userId =
+      'userId' in ctx.auth ? (ctx.auth.userId ?? undefined) : undefined;
 
     return recordTaskMessageEnvelope({
       cloudJobId: input.cloudJobId,
@@ -445,11 +552,27 @@ export const cloudJobsRouter = router({
       });
     }
 
+    // PR linkage lives on task_pull_requests; use the task's primary
+    // (earliest-detected) GitHub PR for the footer link.
+    const linkedPr = await db.query.taskPullRequests.findFirst({
+      where: and(
+        eq(taskPullRequests.taskId, cloudJob.taskId),
+        eq(taskPullRequests.sourceControlProvider, 'github'),
+        isNotNull(taskPullRequests.repository),
+        isNotNull(taskPullRequests.prNumber),
+      ),
+      orderBy: (row, { asc }) => [asc(row.detectedAt), asc(row.createdAt)],
+      columns: {
+        repository: true,
+        prNumber: true,
+      },
+    });
+
     return buildSlackThreadFooterText({
       taskUrl: input.taskUrl,
       taskId: cloudJob.taskId,
-      prRepo: cloudJob.prRepo ?? null,
-      prNumber: cloudJob.prNumber ?? null,
+      prRepo: linkedPr?.repository ?? null,
+      prNumber: linkedPr?.prNumber ?? null,
       channelId: input.slackChannelId,
       threadTs: input.threadTs,
     });
@@ -469,7 +592,7 @@ export const cloudJobsRouter = router({
   ).mutation(async ({ input }) => {
     const cloudJob = await findCloudJob(input.cloudJobId);
 
-    if (!cloudJob?.userId) {
+    if (!cloudJob?.actingUserId) {
       return;
     }
 
@@ -485,7 +608,7 @@ export const cloudJobsRouter = router({
     }
 
     const subject = await findSlackConversationSubjectByUserId({
-      userId: cloudJob.userId,
+      userId: cloudJob.actingUserId,
       slackTeamId: slackInstallation.teamId,
     });
 

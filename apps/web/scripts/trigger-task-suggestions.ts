@@ -5,8 +5,8 @@ import {
   deploymentSettings,
   eq,
   isNull,
-  taskSuggestions,
   users,
+  workItems,
 } from '@roomote/db/server';
 import { FeatureFlag } from '@roomote/feature-flags';
 import { normalizeSetupNewState } from '@roomote/types';
@@ -37,7 +37,7 @@ function printUsage(): void {
 
 async function forceResetTaskSuggestions(): Promise<void> {
   await db.transaction(async (tx) => {
-    await tx.delete(taskSuggestions);
+    await tx.delete(workItems).where(eq(workItems.kind, 'suggestion'));
 
     const [settings] = await tx
       .select({ setupNewState: deploymentSettings.setupNewState })

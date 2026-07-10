@@ -1,5 +1,5 @@
 import type { Mock } from 'vitest';
-import { CloudTaskStatus, CloudTaskType } from '@roomote/types';
+import { CloudTaskStatus, TaskPayloadKind } from '@roomote/types';
 
 // Hoist ALL mock functions so they're available inside vi.mock factories.
 const {
@@ -14,7 +14,7 @@ const {
   mockCreateComputeProviderMutationEventRecorder,
   mockRecordCloudJobEvent,
   mockMarkTaskStartParallelCountEndedAt,
-  mockDbQueryCloudJobsFindFirst,
+  mockDbQueryTaskRunsFindFirst,
   captureBullMqMessageMock,
   transactionFn,
   eqFn,
@@ -76,7 +76,7 @@ const {
     mockCreateComputeProviderMutationEventRecorder: vi.fn() as AnyMock,
     mockRecordCloudJobEvent: vi.fn() as AnyMock,
     mockMarkTaskStartParallelCountEndedAt: vi.fn() as AnyMock,
-    mockDbQueryCloudJobsFindFirst: vi.fn() as AnyMock,
+    mockDbQueryTaskRunsFindFirst: vi.fn() as AnyMock,
     captureBullMqMessageMock: vi.fn() as AnyMock,
     transactionFn: vi.fn() as AnyMock,
     eqFn,
@@ -123,12 +123,12 @@ vi.mock('@roomote/db/server', () => ({
     transaction: transactionFn,
     update: updateFn,
     query: {
-      cloudJobs: {
-        findFirst: mockDbQueryCloudJobsFindFirst,
+      taskRuns: {
+        findFirst: mockDbQueryTaskRunsFindFirst,
       },
     },
   },
-  cloudJobs: {
+  taskRuns: {
     machineId: 'machineId',
     createdAt: 'createdAt',
     startedAt: 'startedAt',
@@ -136,7 +136,7 @@ vi.mock('@roomote/db/server', () => ({
     taskPhase: 'taskPhase',
     sleepRequestedAt: 'sleepRequestedAt',
     workerHeartbeatAt: 'workerHeartbeatAt',
-    type: 'type',
+    payloadKind: 'payloadKind',
     status: 'status',
     snapshotId: 'snapshotId',
     snapshotRequestedAt: 'snapshotRequestedAt',
@@ -245,7 +245,7 @@ describe('sleepCheckJob', () => {
     returningFn.mockResolvedValue([]);
     mockFinishCloudJob.mockResolvedValue(undefined);
     // No stop request persisted on the row unless a test opts in.
-    mockDbQueryCloudJobsFindFirst.mockResolvedValue(undefined);
+    mockDbQueryTaskRunsFindFirst.mockResolvedValue(undefined);
   });
 
   afterEach(() => {
@@ -333,7 +333,7 @@ describe('sleepCheckJob', () => {
         {
           id: 42,
           machineId: 'sb-1',
-          type: CloudTaskType.StandardTask,
+          payloadKind: TaskPayloadKind.StandardTask,
           status: CloudTaskStatus.Idle,
           vendor: 'modal',
           snapshotId: null,
@@ -371,7 +371,7 @@ describe('sleepCheckJob', () => {
         {
           id: 42,
           machineId: 'sb-1',
-          type: CloudTaskType.StandardTask,
+          payloadKind: TaskPayloadKind.StandardTask,
           status: CloudTaskStatus.Idle,
           vendor: 'modal',
           snapshotId: null,
@@ -389,7 +389,7 @@ describe('sleepCheckJob', () => {
     expect(mockRecordCloudJobEvent).toHaveBeenCalledWith(
       expect.anything(),
       expect.objectContaining({
-        cloudJobId: 42,
+        runId: 42,
         eventType: 'decision',
         source: 'sleep_check',
       }),
@@ -400,7 +400,7 @@ describe('sleepCheckJob', () => {
     const mockJob = {
       id: 6622,
       machineId: 'sb-resume',
-      type: CloudTaskType.GithubIssueCommentRespond,
+      payloadKind: TaskPayloadKind.SlackAppMention,
       status: CloudTaskStatus.Idle,
       taskPhase: 'waiting_for_prompt',
       vendor: 'modal',
@@ -437,7 +437,7 @@ describe('sleepCheckJob', () => {
     const mockJob = {
       id: 6624,
       machineId: 'sb-hard-limit',
-      type: CloudTaskType.StandardTask,
+      payloadKind: TaskPayloadKind.StandardTask,
       status: CloudTaskStatus.Running,
       taskPhase: 'waiting_for_prompt',
       vendor: 'modal',
@@ -472,7 +472,7 @@ describe('sleepCheckJob', () => {
     expect(mockRecordCloudJobEvent).toHaveBeenCalledWith(
       expect.anything(),
       expect.objectContaining({
-        cloudJobId: 6624,
+        runId: 6624,
         source: 'sleep_check',
         details: expect.objectContaining({
           path: 'hard_limit',
@@ -485,7 +485,7 @@ describe('sleepCheckJob', () => {
     const mockJob = {
       id: 6623,
       machineId: 'sb-snapshot-resume',
-      type: CloudTaskType.SnapshotResume,
+      payloadKind: TaskPayloadKind.SnapshotResume,
       status: CloudTaskStatus.Idle,
       taskPhase: 'waiting_for_prompt',
       vendor: 'modal',
@@ -518,7 +518,7 @@ describe('sleepCheckJob', () => {
     const mockJob = {
       id: 6625,
       machineId: 'modal-resume',
-      type: CloudTaskType.StandardTask,
+      payloadKind: TaskPayloadKind.StandardTask,
       status: CloudTaskStatus.Idle,
       taskPhase: 'waiting_for_prompt',
       vendor: 'modal',
@@ -555,7 +555,7 @@ describe('sleepCheckJob', () => {
     const mockJob = {
       id: 99,
       machineId: 'sb-2',
-      type: CloudTaskType.GithubPrReview,
+      payloadKind: TaskPayloadKind.GithubPrReview,
       status: CloudTaskStatus.Running,
       taskPhase: 'waiting_for_prompt',
       vendor: 'modal',
@@ -612,7 +612,7 @@ describe('sleepCheckJob', () => {
     const mockJob = {
       id: 100,
       machineId: 'sb-hard-limit-destroy',
-      type: CloudTaskType.GithubPrReview,
+      payloadKind: TaskPayloadKind.GithubPrReview,
       status: CloudTaskStatus.Running,
       taskPhase: 'waiting_for_prompt',
       vendor: 'modal',
@@ -655,7 +655,7 @@ describe('sleepCheckJob', () => {
     const mockJob = {
       id: 77,
       machineId: 'sb-rollback',
-      type: CloudTaskType.StandardTask,
+      payloadKind: TaskPayloadKind.StandardTask,
       status: CloudTaskStatus.Running,
       taskPhase: 'waiting_for_prompt',
       vendor: 'modal',
@@ -681,7 +681,7 @@ describe('sleepCheckJob', () => {
     const mockJob = {
       id: 77,
       machineId: 'sb-rollback',
-      type: CloudTaskType.StandardTask,
+      payloadKind: TaskPayloadKind.StandardTask,
       status: CloudTaskStatus.Running,
       taskPhase: 'waiting_for_prompt',
       vendor: 'modal',
@@ -714,7 +714,7 @@ describe('sleepCheckJob', () => {
       {
         id: 10,
         machineId: 'sb-3',
-        type: CloudTaskType.StandardTask,
+        payloadKind: TaskPayloadKind.StandardTask,
         status: CloudTaskStatus.Running,
         taskPhase: 'waiting_for_prompt',
         vendor: 'modal',
@@ -725,7 +725,7 @@ describe('sleepCheckJob', () => {
       {
         id: 11,
         machineId: 'sb-4',
-        type: CloudTaskType.StandardTask,
+        payloadKind: TaskPayloadKind.StandardTask,
         status: CloudTaskStatus.Running,
         taskPhase: 'waiting_for_prompt',
         vendor: 'modal',
@@ -759,7 +759,7 @@ describe('sleepCheckJob', () => {
     const mockJob = {
       id: 85,
       machineId: 'sb-stale-running',
-      type: CloudTaskType.StandardTask,
+      payloadKind: TaskPayloadKind.StandardTask,
       status: CloudTaskStatus.Running,
       taskPhase: 'running',
       vendor: 'modal',
@@ -788,7 +788,7 @@ describe('sleepCheckJob', () => {
     const mockJob = {
       id: 87,
       machineId: 'sb-stale-waiting',
-      type: CloudTaskType.StandardTask,
+      payloadKind: TaskPayloadKind.StandardTask,
       status: CloudTaskStatus.Running,
       taskPhase: 'waiting_for_user_input',
       vendor: 'modal',
@@ -817,7 +817,7 @@ describe('sleepCheckJob', () => {
     const mockJob = {
       id: 86,
       machineId: 'sb-stale-race',
-      type: CloudTaskType.StandardTask,
+      payloadKind: TaskPayloadKind.StandardTask,
       status: CloudTaskStatus.Running,
       taskPhase: 'running',
       vendor: 'modal',
@@ -847,7 +847,7 @@ describe('sleepCheckJob', () => {
     const mockJob = {
       id: 89,
       machineId: 'sb-missing-first-heartbeat',
-      type: CloudTaskType.StandardTask,
+      payloadKind: TaskPayloadKind.StandardTask,
       status: CloudTaskStatus.Processing,
       taskPhase: null,
       vendor: 'modal',
@@ -885,7 +885,7 @@ describe('sleepCheckJob', () => {
     const mockJob = {
       id: 90,
       machineId: 'sb-stale-worker',
-      type: CloudTaskType.SlackAppMention,
+      payloadKind: TaskPayloadKind.SlackAppMention,
       status: CloudTaskStatus.Running,
       taskPhase: 'stopped',
       vendor: 'modal',
@@ -921,7 +921,7 @@ describe('sleepCheckJob', () => {
     const mockJob = {
       id: 95,
       machineId: 'sb-booting-gone',
-      type: CloudTaskType.StandardTask,
+      payloadKind: TaskPayloadKind.StandardTask,
       status: CloudTaskStatus.Processing,
       taskPhase: null,
       vendor: 'modal',
@@ -948,7 +948,7 @@ describe('sleepCheckJob', () => {
     expect(mockRecordCloudJobEvent).toHaveBeenCalledWith(
       expect.anything(),
       expect.objectContaining({
-        cloudJobId: 95,
+        runId: 95,
         eventType: 'started',
         source: 'sleep_check',
         details: expect.objectContaining({
@@ -963,7 +963,7 @@ describe('sleepCheckJob', () => {
     const mockJob = {
       id: 93,
       machineId: 'sb-hard-limit-wins',
-      type: CloudTaskType.StandardTask,
+      payloadKind: TaskPayloadKind.StandardTask,
       status: CloudTaskStatus.Idle,
       taskPhase: 'waiting_for_prompt',
       vendor: 'modal',
@@ -1002,7 +1002,7 @@ describe('sleepCheckJob', () => {
     expect(mockRecordCloudJobEvent).toHaveBeenCalledWith(
       expect.anything(),
       expect.objectContaining({
-        cloudJobId: 93,
+        runId: 93,
         eventType: 'started',
         source: 'sleep_check',
         details: expect.objectContaining({
@@ -1018,7 +1018,7 @@ describe('sleepCheckJob', () => {
     const mockJob = {
       id: 94,
       machineId: 'sb-stale-worker-fallback',
-      type: CloudTaskType.StandardTask,
+      payloadKind: TaskPayloadKind.StandardTask,
       status: CloudTaskStatus.Idle,
       taskPhase: 'waiting_for_prompt',
       vendor: 'modal',
@@ -1060,7 +1060,7 @@ describe('sleepCheckJob', () => {
     const mockJob = {
       id: 91,
       machineId: 'sb-gone',
-      type: CloudTaskType.StandardTask,
+      payloadKind: TaskPayloadKind.StandardTask,
       status: CloudTaskStatus.Running,
       taskPhase: 'stopped',
       vendor: 'modal',
@@ -1085,7 +1085,7 @@ describe('sleepCheckJob', () => {
     expect(mockRecordCloudJobEvent).toHaveBeenCalledWith(
       expect.anything(),
       expect.objectContaining({
-        cloudJobId: 91,
+        runId: 91,
         eventType: 'started',
         source: 'sleep_check',
         details: expect.objectContaining({
@@ -1097,7 +1097,7 @@ describe('sleepCheckJob', () => {
     expect(mockRecordCloudJobEvent).toHaveBeenCalledWith(
       expect.anything(),
       expect.objectContaining({
-        cloudJobId: 91,
+        runId: 91,
         eventType: 'decision',
         source: 'sleep_check',
         details: expect.objectContaining({
@@ -1113,7 +1113,7 @@ describe('sleepCheckJob', () => {
     const mockJob = {
       id: 101,
       machineId: 'sb-gone-after-stop',
-      type: CloudTaskType.StandardTask,
+      payloadKind: TaskPayloadKind.StandardTask,
       status: CloudTaskStatus.Running,
       taskPhase: 'stopped',
       vendor: 'modal',
@@ -1126,7 +1126,7 @@ describe('sleepCheckJob', () => {
 
     mockJobQueries({ staleJobs: [mockJob] });
     mockGetInstanceStatus.mockResolvedValue({ status: 'stopped' });
-    mockDbQueryCloudJobsFindFirst.mockResolvedValue({
+    mockDbQueryTaskRunsFindFirst.mockResolvedValue({
       cancelRequestedAt: new Date(),
     });
 
@@ -1142,7 +1142,7 @@ describe('sleepCheckJob', () => {
     expect(mockRecordCloudJobEvent).toHaveBeenCalledWith(
       expect.anything(),
       expect.objectContaining({
-        cloudJobId: 101,
+        runId: 101,
         eventType: 'decision',
         source: 'sleep_check',
         message: expect.stringContaining('after its stop request'),
@@ -1154,7 +1154,7 @@ describe('sleepCheckJob', () => {
     const mockJob = {
       id: 96,
       machineId: 'sb-snapshotting-stale',
-      type: CloudTaskType.StandardTask,
+      payloadKind: TaskPayloadKind.StandardTask,
       status: CloudTaskStatus.Running,
       taskPhase: 'running',
       vendor: 'modal',
@@ -1175,7 +1175,7 @@ describe('sleepCheckJob', () => {
     expect(mockRecordCloudJobEvent).toHaveBeenCalledWith(
       expect.anything(),
       expect.objectContaining({
-        cloudJobId: 96,
+        runId: 96,
         eventType: 'decision',
         source: 'sleep_check',
         details: expect.objectContaining({
@@ -1191,7 +1191,7 @@ describe('sleepCheckJob', () => {
     const mockJob = {
       id: 97,
       machineId: 'sb-hard-limit-snapshotting',
-      type: CloudTaskType.StandardTask,
+      payloadKind: TaskPayloadKind.StandardTask,
       status: CloudTaskStatus.Running,
       taskPhase: 'running',
       vendor: 'modal',
@@ -1214,7 +1214,7 @@ describe('sleepCheckJob', () => {
     expect(mockRecordCloudJobEvent).toHaveBeenCalledWith(
       expect.anything(),
       expect.objectContaining({
-        cloudJobId: 97,
+        runId: 97,
         eventType: 'decision',
         source: 'sleep_check',
         details: expect.objectContaining({
@@ -1230,7 +1230,7 @@ describe('sleepCheckJob', () => {
     const mockJob = {
       id: 92,
       machineId: 'sb-non-resumable-stale',
-      type: CloudTaskType.GithubPrReview,
+      payloadKind: TaskPayloadKind.GithubPrReview,
       status: CloudTaskStatus.Running,
       taskPhase: 'waiting_for_prompt',
       vendor: 'modal',
@@ -1265,7 +1265,7 @@ describe('sleepCheckJob', () => {
     expect(mockCreateComputeProviderMutationEventRecorder).toHaveBeenCalledWith(
       expect.anything(),
       expect.objectContaining({
-        cloudJobId: 92,
+        runId: 92,
       }),
       expect.anything(),
     );
@@ -1318,7 +1318,7 @@ describe('sleepCheckJob', () => {
     const mockJob = {
       id: 102,
       machineId: 'sb-non-resumable-stopped',
-      type: CloudTaskType.GithubPrReview,
+      payloadKind: TaskPayloadKind.GithubPrReview,
       status: CloudTaskStatus.Running,
       taskPhase: 'waiting_for_prompt',
       vendor: 'modal',
@@ -1334,7 +1334,7 @@ describe('sleepCheckJob', () => {
       status: 'running',
       timeoutRemainingMs: 30 * 60 * 1_000,
     });
-    mockDbQueryCloudJobsFindFirst.mockResolvedValue({
+    mockDbQueryTaskRunsFindFirst.mockResolvedValue({
       cancelRequestedAt: new Date(),
     });
 
@@ -1351,7 +1351,7 @@ describe('sleepCheckJob', () => {
     expect(mockRecordCloudJobEvent).toHaveBeenCalledWith(
       expect.anything(),
       expect.objectContaining({
-        cloudJobId: 102,
+        runId: 102,
         eventType: 'decision',
         source: 'sleep_check',
         details: expect.objectContaining({
@@ -1365,7 +1365,7 @@ describe('sleepCheckJob', () => {
     const mockJob = {
       id: 98,
       machineId: 'sb-non-resumable-booting',
-      type: CloudTaskType.GithubPrReview,
+      payloadKind: TaskPayloadKind.GithubPrReview,
       status: CloudTaskStatus.Processing,
       taskPhase: null,
       vendor: 'modal',

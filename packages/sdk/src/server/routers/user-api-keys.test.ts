@@ -17,11 +17,11 @@ const {
 vi.mock('@roomote/db/server', () => ({
   db: {
     query: {
-      cloudJobs: { findFirst: mockFindCloudJob },
+      taskRuns: { findFirst: mockFindCloudJob },
       userApiKeys: { findFirst: mockFindUserApiKey },
     },
   },
-  cloudJobs: {
+  taskRuns: {
     id: 'id',
   },
   userApiKeys: {
@@ -52,6 +52,7 @@ function createJobCaller() {
   const auth: JobTokenContext = {
     cloudJobId: 42,
     userId: 'owner-user',
+    principal: 'user',
     tokenType: 'cj',
     version: 1,
   };
@@ -88,9 +89,8 @@ describe('userApiKeysRouter', () => {
     );
   });
 
-  it('uses cloudJobs.actingUserId for job-token key lookups', async () => {
+  it('uses taskRuns.actingUserId for job-token key lookups', async () => {
     mockFindCloudJob.mockResolvedValueOnce({
-      userId: 'owner-user',
       actingUserId: 'actor-user',
     });
     mockFindUserApiKey.mockResolvedValueOnce({ apiKey: 'encrypted-api-key' });

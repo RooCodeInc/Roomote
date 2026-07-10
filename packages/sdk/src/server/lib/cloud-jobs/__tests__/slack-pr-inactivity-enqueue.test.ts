@@ -1,4 +1,4 @@
-import { CloudTaskStatus, CloudTaskType } from '@roomote/types';
+import { CloudTaskStatus, TaskPayloadKind } from '@roomote/types';
 import type { CloudJob } from '@roomote/db/server';
 
 const mockFindFirstCloudJob = vi.fn();
@@ -20,7 +20,7 @@ vi.mock('@roomote/db/server', async () => {
     ...actual,
     db: {
       query: {
-        cloudJobs: {
+        taskRuns: {
           findFirst: (...args: unknown[]) => mockFindFirstCloudJob(...args),
         },
         taskPullRequests: {
@@ -66,11 +66,14 @@ import {
   SLACK_PR_INACTIVITY_DELAY_MS,
 } from '../slack-pr-inactivity-check';
 
-function makeCloudJob(overrides: Partial<CloudJob> = {}): CloudJob {
+type RunWithTask = CloudJob & { task: Record<string, unknown> };
+
+function makeCloudJob(overrides: Partial<RunWithTask> = {}): RunWithTask {
   return {
     id: 1,
-    type: CloudTaskType.SlackAppMention,
-    userId: 'user-1',
+    kind: 'fresh',
+    payloadKind: TaskPayloadKind.SlackAppMention,
+    actingUserId: 'user-1',
     harness: 'opencode-server',
     status: CloudTaskStatus.Completed,
     payload: {
@@ -82,21 +85,19 @@ function makeCloudJob(overrides: Partial<CloudJob> = {}): CloudJob {
       thread_ts: '111.222',
     },
     taskId: 'task-1',
-    slackThreadTs: '111.222',
-    linearSessionId: null,
-    linearIssueId: null,
-    linearOrganizationId: null,
-    githubPrReactionId: null,
-    githubPrCheckRunId: null,
-    githubPrReviewCommentId: null,
-    prRepo: 'owner/repo',
-    prNumber: 42,
-    prSha: null,
     startedAt: null,
     canceledAt: null,
     completedAt: null,
+    task: {
+      id: 'task-1',
+      slackChannelId: 'C123',
+      slackThreadTs: '111.222',
+      linearSessionId: null,
+      linearIssueId: null,
+      linearOrganizationId: null,
+    },
     ...overrides,
-  } as CloudJob;
+  } as RunWithTask;
 }
 
 describe('enqueueSlackPrInactivityCheck', () => {

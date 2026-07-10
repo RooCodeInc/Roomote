@@ -1,6 +1,6 @@
 import {
   type CloudTaskPayload,
-  CloudTaskType,
+  TaskPayloadKind,
   PRODUCT_NAME,
 } from '@roomote/types';
 
@@ -247,50 +247,41 @@ export function buildSlackThreadPromptBlocks({
 }
 
 export function generateCloudJobTitle(
-  { type, payload }: { type: CloudTaskType; payload: CloudTaskPayload },
+  { type, payload }: { type: TaskPayloadKind; payload: CloudTaskPayload },
   limit: number = 10_000,
   fallbackTitle?: string | null,
 ): string {
   switch (type) {
-    case CloudTaskType.GithubPrReview: {
-      const prPayload =
-        payload as CloudTaskPayload<CloudTaskType.GithubPrReview>;
+    case TaskPayloadKind.GithubPrReview: {
+      const prPayload = payload as CloudTaskPayload<
+        typeof TaskPayloadKind.GithubPrReview
+      >;
 
       return `Review PR #${prPayload.prNumber}: ${prPayload.prTitle}`;
     }
 
-    case CloudTaskType.GithubPrReviewSync: {
-      const prPayload =
-        payload as CloudTaskPayload<CloudTaskType.GithubPrReviewSync>;
+    case TaskPayloadKind.GithubPrReviewSync: {
+      const prPayload = payload as CloudTaskPayload<
+        typeof TaskPayloadKind.GithubPrReviewSync
+      >;
 
       const shortSha = prPayload.headSha?.slice(0, 7) || 'unknown';
 
       return `Re-review PR #${prPayload.prNumber} at ${shortSha}: ${prPayload.prTitle}`;
     }
 
-    case CloudTaskType.GithubPrReviewFollowUp: {
-      const commentPayload =
-        payload as CloudTaskPayload<CloudTaskType.GithubPrReviewFollowUp>;
+    case TaskPayloadKind.GithubPrReviewFollowUp: {
+      const commentPayload = payload as CloudTaskPayload<
+        typeof TaskPayloadKind.GithubPrReviewFollowUp
+      >;
 
       return `Follow up on PR review #${commentPayload.prNumber}: ${commentPayload.prTitle}`;
     }
 
-    case CloudTaskType.GithubIssueFix: {
-      const issuePayload =
-        payload as CloudTaskPayload<CloudTaskType.GithubIssueFix>;
-
-      return `Fix issue #${issuePayload.issue}: ${issuePayload.title}`;
-    }
-
-    case CloudTaskType.GithubIssueCommentRespond: {
-      const issueCommentPayload =
-        payload as CloudTaskPayload<CloudTaskType.GithubIssueCommentRespond>;
-      return `Respond to comment on issue #${issueCommentPayload.issueNumber}: ${issueCommentPayload.issueTitle}`;
-    }
-
-    case CloudTaskType.SlackAppMention: {
-      const slackPayload =
-        payload as CloudTaskPayload<CloudTaskType.SlackAppMention>;
+    case TaskPayloadKind.SlackAppMention: {
+      const slackPayload = payload as CloudTaskPayload<
+        typeof TaskPayloadKind.SlackAppMention
+      >;
 
       const text = slackPayload.text.slice(0, limit);
 
@@ -300,22 +291,21 @@ export function generateCloudJobTitle(
       return `Respond to Slack message: ${truncated}`;
     }
 
-    case CloudTaskType.LinearAgentSession: {
-      const linearPayload =
-        payload as CloudTaskPayload<CloudTaskType.LinearAgentSession>;
+    case TaskPayloadKind.LinearAgentSession: {
+      const linearPayload = payload as CloudTaskPayload<
+        typeof TaskPayloadKind.LinearAgentSession
+      >;
 
       return `${linearPayload.issueIdentifier}: ${linearPayload.issueTitle}`;
     }
 
-    case CloudTaskType.StandardTask:
-    case CloudTaskType.SuggestedTasks:
-    case CloudTaskType.McpRecommendations:
-    case CloudTaskType.LegacyOnboardingSuggestions: {
+    case TaskPayloadKind.StandardTask:
+    case TaskPayloadKind.Scan:
+    case TaskPayloadKind.McpRecommendations: {
       const standardPayload = payload as
-        | CloudTaskPayload<CloudTaskType.StandardTask>
-        | CloudTaskPayload<CloudTaskType.SuggestedTasks>
-        | CloudTaskPayload<CloudTaskType.McpRecommendations>
-        | CloudTaskPayload<CloudTaskType.LegacyOnboardingSuggestions>;
+        | CloudTaskPayload<typeof TaskPayloadKind.StandardTask>
+        | CloudTaskPayload<typeof TaskPayloadKind.Scan>
+        | CloudTaskPayload<typeof TaskPayloadKind.McpRecommendations>;
 
       if (!standardPayload.description) {
         return UNTITLED_TASK;
@@ -328,9 +318,10 @@ export function generateCloudJobTitle(
         : desc;
     }
 
-    case CloudTaskType.GithubPrConflictResolve: {
-      const conflictPayload =
-        payload as CloudTaskPayload<CloudTaskType.GithubPrConflictResolve>;
+    case TaskPayloadKind.GithubPrConflictResolve: {
+      const conflictPayload = payload as CloudTaskPayload<
+        typeof TaskPayloadKind.GithubPrConflictResolve
+      >;
 
       return `Fix merge conflicts on PR #${conflictPayload.prNumber}`;
     }
@@ -340,13 +331,11 @@ export function generateCloudJobTitle(
   }
 }
 
-const DETERMINISTIC_TITLE_TASK_TYPES: ReadonlySet<CloudTaskType> = new Set([
-  CloudTaskType.GithubPrReview,
-  CloudTaskType.GithubPrReviewSync,
-  CloudTaskType.GithubPrReviewFollowUp,
-  CloudTaskType.GithubPrConflictResolve,
-  CloudTaskType.GithubIssueFix,
-  CloudTaskType.GithubIssueCommentRespond,
+const DETERMINISTIC_TITLE_TASK_TYPES: ReadonlySet<TaskPayloadKind> = new Set([
+  TaskPayloadKind.GithubPrReview,
+  TaskPayloadKind.GithubPrReviewSync,
+  TaskPayloadKind.GithubPrReviewFollowUp,
+  TaskPayloadKind.GithubPrConflictResolve,
 ]);
 
 /**
@@ -355,6 +344,6 @@ const DETERMINISTIC_TITLE_TASK_TYPES: ReadonlySet<CloudTaskType> = new Set([
  * provenance the UI relies on, so LLM title refresh must never replace them
  * with a summary of the structured startup prompt.
  */
-export function hasDeterministicCloudJobTitle(type: CloudTaskType): boolean {
+export function hasDeterministicCloudJobTitle(type: TaskPayloadKind): boolean {
   return DETERMINISTIC_TITLE_TASK_TYPES.has(type);
 }

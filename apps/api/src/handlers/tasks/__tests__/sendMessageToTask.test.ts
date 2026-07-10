@@ -2,6 +2,7 @@ const {
   mockCreateJobToken,
   mockCreateTRPCProxyClient,
   mockEnqueueCloudTask,
+  mockGetTaskChannelBindings,
   mockFindLatestCloudJob,
   mockHttpBatchLink,
   mockSendPromptMutate,
@@ -12,6 +13,7 @@ const {
   mockCreateJobToken: vi.fn(),
   mockCreateTRPCProxyClient: vi.fn(),
   mockEnqueueCloudTask: vi.fn(),
+  mockGetTaskChannelBindings: vi.fn(),
   mockFindLatestCloudJob: vi.fn(),
   mockHttpBatchLink: vi.fn((options) => options),
   mockSendPromptMutate: vi.fn(),
@@ -66,6 +68,7 @@ vi.mock('@roomote/slack', () => ({
 
 vi.mock('../helpers', () => ({
   findLatestCloudJob: mockFindLatestCloudJob,
+  getTaskChannelBindings: mockGetTaskChannelBindings,
 }));
 
 vi.mock('../../utils', () => ({
@@ -108,7 +111,7 @@ function createActiveJob(
     actingUserId: string | null;
     snapshotId: string | null;
     snapshotCreatedAt: Date | null;
-    sourceCloudJobId: number | null;
+    sourceRunId: number | null;
     payload: Record<string, unknown> | null;
     port: number | null;
     slackThreadTs: string | null;
@@ -125,7 +128,7 @@ function createActiveJob(
     actingUserId: 'user-1',
     snapshotId: null,
     snapshotCreatedAt: overrides.snapshotId ? new Date() : null,
-    sourceCloudJobId: null,
+    sourceRunId: null,
     payload: {
       channel: 'C123',
       thread_ts: '111.222',
@@ -157,6 +160,13 @@ describe('sendMessageToTask', () => {
     mockSendPromptMutate.mockResolvedValue({ ok: true });
     mockSteerTaskMutate.mockResolvedValue({ ok: true });
     mockEnqueueCloudTask.mockResolvedValue({ id: 77, taskId: 'task-1' });
+    mockGetTaskChannelBindings.mockResolvedValue({
+      slackChannelId: 'C123',
+      slackThreadTs: '111.222',
+      linearSessionId: null,
+      linearIssueId: null,
+      linearOrganizationId: null,
+    });
     mockTrackLatestUserMessageForSlackQuote.mockResolvedValue(undefined);
     mockUserFindFirst.mockResolvedValue({
       name: 'Alice',
@@ -209,9 +219,15 @@ describe('sendMessageToTask', () => {
     mockFindLatestCloudJob.mockResolvedValue(
       createActiveJob({
         payload: { repo: 'acme/app' },
-        slackThreadTs: null,
       }),
     );
+    mockGetTaskChannelBindings.mockResolvedValue({
+      slackChannelId: null,
+      slackThreadTs: null,
+      linearSessionId: null,
+      linearIssueId: null,
+      linearOrganizationId: null,
+    });
 
     const result = await sendMessageToTask({
       taskId: 'task-1',
@@ -235,7 +251,7 @@ describe('sendMessageToTask', () => {
         status: 'completed',
         sandboxServerUrl: null,
         snapshotId: 'snap-1',
-        sourceCloudJobId: null,
+        sourceRunId: null,
         payload: {
           repo: 'acme/app',
           slackChannel: 'C123',
@@ -266,11 +282,15 @@ describe('sendMessageToTask', () => {
     });
     expect(mockEnqueueCloudTask).toHaveBeenCalledWith(
       expect.objectContaining({
-        payload: expect.objectContaining({
-          resumePrompt: 'Resume and use the same thread.',
-          resumePromptSource: 'web',
-          resumePromptClientMessageId: 'client-2',
+        task: expect.objectContaining({
+          payload: expect.objectContaining({
+            resumePrompt: 'Resume and use the same thread.',
+            resumePromptSource: 'web',
+            resumePromptClientMessageId: 'client-2',
+          }),
         }),
+        // The follow-up sender becomes the resume run's acting user.
+        actingUserId: 'user-1',
       }),
       expect.any(Object),
     );
@@ -283,7 +303,7 @@ describe('sendMessageToTask', () => {
         sandboxServerUrl: null,
         snapshotId: 'snap-expired',
         snapshotCreatedAt: new Date(Date.now() - 8 * 24 * 60 * 60 * 1000),
-        sourceCloudJobId: null,
+        sourceRunId: null,
         payload: {
           repo: 'acme/app',
           slackChannel: 'C123',
@@ -454,7 +474,7 @@ describe('sendMessageToTask', () => {
         status: 'completed',
         sandboxServerUrl: null,
         snapshotId: 'snap-1',
-        sourceCloudJobId: null,
+        sourceRunId: null,
         payload: {
           repo: 'acme/app',
           slackChannel: 'C123',

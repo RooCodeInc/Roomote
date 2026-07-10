@@ -19,7 +19,7 @@ vi.mock('@roomote/db/server', async () => {
     ...actual,
     db: {
       query: {
-        cloudJobs: {
+        taskRuns: {
           findFirst: (...args: unknown[]) => mockFindFirstCloudJob(...args),
         },
       },

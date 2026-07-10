@@ -1,24 +1,23 @@
-import { CloudTaskType, type CloudTaskLaunchClass } from './cloud-jobs';
+import { TaskPayloadKind, type CloudTaskLaunchClass } from './cloud-jobs';
 import {
   DEFAULT_AUTOMATION_KEEPALIVE_MS,
   DEFAULT_MAINTENANCE_KEEPALIVE_MS,
 } from './constants';
 
-const TASK_TYPE_KEEPALIVE_MS_OVERRIDES = new Map<CloudTaskType, number>([
-  [CloudTaskType.GithubPrReviewFollowUp, 0],
+const TASK_TYPE_KEEPALIVE_MS_OVERRIDES = new Map<TaskPayloadKind, number>([
+  [TaskPayloadKind.GithubPrReviewFollowUp, 0],
 ]);
 
 export function inferLaunchClassForTaskType(
-  taskType: CloudTaskType,
+  taskType: TaskPayloadKind,
 ): CloudTaskLaunchClass {
   switch (taskType) {
-    case CloudTaskType.GithubPrReview:
-    case CloudTaskType.GithubPrReviewSync:
-    case CloudTaskType.SuggestedTasks:
-    case CloudTaskType.McpRecommendations:
-    case CloudTaskType.LegacyOnboardingSuggestions:
-    case CloudTaskType.GithubPrConflictResolve:
-    case CloudTaskType.SnapshotEnvironment:
+    case TaskPayloadKind.GithubPrReview:
+    case TaskPayloadKind.GithubPrReviewSync:
+    case TaskPayloadKind.Scan:
+    case TaskPayloadKind.McpRecommendations:
+    case TaskPayloadKind.GithubPrConflictResolve:
+    case TaskPayloadKind.SnapshotEnvironment:
       return 'maintenance';
     default:
       return 'human';
@@ -26,7 +25,7 @@ export function inferLaunchClassForTaskType(
 }
 
 export function resolveCloudTaskRuntimePolicy(options: {
-  taskType: CloudTaskType;
+  taskType: TaskPayloadKind;
   launchClass?: CloudTaskLaunchClass | null;
   appEnv?: 'development' | 'preview' | 'production' | 'test' | null;
   defaultKeepaliveMs: number;
@@ -69,7 +68,7 @@ function resolveHumanKeepaliveMs(options: {
 }
 
 function resolveKeepaliveMsForResolvedLaunchClass(options: {
-  taskType?: CloudTaskType | null;
+  taskType?: TaskPayloadKind | null;
   launchClass?: CloudTaskLaunchClass | null;
   appEnv?: 'development' | 'preview' | 'production' | 'test' | null;
   defaultKeepaliveMs: number;
@@ -116,7 +115,7 @@ function resolveKeepaliveMsForResolvedLaunchClass(options: {
 }
 
 export function resolveKeepaliveMs(options: {
-  taskType?: CloudTaskType | null;
+  taskType?: TaskPayloadKind | null;
   launchClass?: CloudTaskLaunchClass | null;
   appEnv?: 'development' | 'preview' | 'production' | 'test' | null;
   defaultKeepaliveMs: number;

@@ -36,10 +36,14 @@ vi.mock('@roomote/db/server', async () => {
           findMany: (...args: unknown[]) =>
             mockFindManyTaskPullRequests(...args),
         },
-        cloudJobs: {
-          findMany: (...args: unknown[]) => mockFindManyCloudJobs(...args),
-        },
       },
+      select: () => ({
+        from: () => ({
+          innerJoin: () => ({
+            where: (...args: unknown[]) => mockFindManyCloudJobs(...args),
+          }),
+        }),
+      }),
     },
   };
 });
@@ -183,7 +187,7 @@ describe('enqueuePrReviewNotification', () => {
 });
 
 describe('hasPrReviewNotificationThreadContext', () => {
-  it('detects Slack thread context from the cloud job column', () => {
+  it('detects Slack thread context from the task binding', () => {
     expect(
       hasPrReviewNotificationThreadContext({
         payload: {},
@@ -228,8 +232,7 @@ describe('resolvePrReviewNotificationRoute', () => {
         communicationThreadId: 'thread-1',
         communicationServiceUrl: 'https://smba.example.com',
       },
-      slackThreadTs: null,
-      sourceCloudJobId: null,
+      taskId: 'task-1',
     } as never);
 
     expect(route).toEqual({
@@ -248,8 +251,7 @@ describe('resolvePrReviewNotificationRoute', () => {
         communicationProvider: 'teams',
         communicationChannelId: '19:abc',
       },
-      slackThreadTs: null,
-      sourceCloudJobId: null,
+      taskId: 'task-1',
     } as never);
 
     expect(route).toBeNull();
@@ -263,8 +265,7 @@ describe('resolvePrReviewNotificationRoute', () => {
         communicationChannelId: '12345',
         communicationThreadId: '77',
       },
-      slackThreadTs: null,
-      sourceCloudJobId: null,
+      taskId: 'task-1',
     } as never);
 
     expect(route).toEqual({
@@ -274,7 +275,7 @@ describe('resolvePrReviewNotificationRoute', () => {
     });
   });
 
-  it('resolves Slack routes through the source-job chain resolver', async () => {
+  it('resolves Slack routes through the shared Slack routing resolver', async () => {
     mockResolveSlackJobRouting.mockResolvedValue({
       channel: 'C123',
       threadTs: '1.2',
@@ -284,8 +285,7 @@ describe('resolvePrReviewNotificationRoute', () => {
     const route = await resolvePrReviewNotificationRoute({
       id: 1,
       payload: { channel: 'C123' },
-      slackThreadTs: '1.2',
-      sourceCloudJobId: null,
+      taskId: 'task-1',
     } as never);
 
     expect(route).toEqual({
@@ -305,8 +305,7 @@ describe('resolvePrReviewNotificationRoute', () => {
     const route = await resolvePrReviewNotificationRoute({
       id: 1,
       payload: {},
-      slackThreadTs: null,
-      sourceCloudJobId: null,
+      taskId: 'task-1',
     } as never);
 
     expect(route).toBeNull();

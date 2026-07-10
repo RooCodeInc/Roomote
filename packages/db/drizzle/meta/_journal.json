@@ -5,22 +5,8 @@
     {
       "idx": 0,
       "version": "7",
-      "when": 1783526937997,
-      "tag": "0000_stiff_lorna_dane",
-      "breakpoints": true
-    },
-    {
-      "idx": 1,
-      "version": "7",
-      "when": 1783591302715,
-      "tag": "0001_lazy_rhino",
-      "breakpoints": true
-    },
-    {
-      "idx": 2,
-      "version": "7",
-      "when": 1783640808968,
-      "tag": "0002_lame_tinkerer",
+      "when": 1783649825042,
+      "tag": "0000_dapper_smasher",
       "breakpoints": true
     }
   ]

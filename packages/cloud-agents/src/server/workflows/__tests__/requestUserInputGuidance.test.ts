@@ -1,10 +1,10 @@
 import {
   ALL_REPOSITORIES,
-  CloudTaskType,
+  TaskPayloadKind,
   buildSlackThreadPermalink,
   type SlackAppMentionTask,
 } from '@roomote/types';
-import type { ResolvedTaskAttributionDisplay } from '@roomote/db/server';
+import type { ResolvedTaskCommitAuthor } from '../../commit-author';
 
 import { slackAppMention } from '../slackAppMention';
 import { standardTask } from '../standardTask';
@@ -30,18 +30,19 @@ const teamSlackPermalink = buildSlackThreadPermalink({
   slackChannelId: 'C456',
   threadTs: '1776819983.463289',
 });
-const matchedUserAttribution: ResolvedTaskAttributionDisplay = {
-  authorKind: 'human',
-  kind: 'matched_user',
-  sourceKind: 'web',
-  githubDisplay: 'Jane Doe',
-  productDisplay: 'Jane Doe',
-  analyticsDisplay: 'Jane Doe',
-  assigneeGithubLogin: null,
+const matchedUserAttribution: ResolvedTaskCommitAuthor = {
+  kind: 'user',
+  displayName: 'Jane Doe',
+  githubLogin: null,
+  prAssigneeLogin: null,
+  gitAuthor: {
+    name: 'Jane Doe',
+    email: '1+jane@users.noreply.github.com',
+  },
 };
-const matchedUserAttributionWithAssignee: ResolvedTaskAttributionDisplay = {
+const matchedUserAttributionWithAssignee: ResolvedTaskCommitAuthor = {
   ...matchedUserAttribution,
-  assigneeGithubLogin: 'octocat',
+  prAssigneeLogin: 'octocat',
 };
 
 describe('request_user_input guidance in workflow prompts', () => {
@@ -68,7 +69,7 @@ describe('request_user_input guidance in workflow prompts', () => {
 
   it('teaches Slack StandardTask runs to keep lightweight clarification in-thread and reserve request_user_input blocks for structured or private input', async () => {
     const cloudTask: SlackAppMentionTask = {
-      type: CloudTaskType.SlackAppMention,
+      type: TaskPayloadKind.SlackAppMention,
       payload: {
         repo: 'Roomote/example-app',
         channel: 'C123',
@@ -99,7 +100,7 @@ describe('request_user_input guidance in workflow prompts', () => {
 
   it('attaches the Slack-specific request_user_input guidance to all Slack app mention runs', async () => {
     const cloudTask: SlackAppMentionTask = {
-      type: CloudTaskType.SlackAppMention,
+      type: TaskPayloadKind.SlackAppMention,
       payload: {
         repo: 'Roomote/example-app',
         channel: 'C123',
@@ -261,10 +262,7 @@ describe('request_user_input guidance in workflow prompts', () => {
       description: 'Implement a repository change',
       repo: 'Roomote/example-app',
       cloudJobUrl: 'https://example.com/task/123',
-      attribution: {
-        ...matchedUserAttribution,
-        sourceKind: 'slack',
-      },
+      attribution: matchedUserAttribution,
       taskSurface: 'slack',
       slackChannel: 'C456',
       slackThreadTs: '1776819983.463289',
@@ -280,10 +278,7 @@ describe('request_user_input guidance in workflow prompts', () => {
       description: 'Implement a repository change',
       repo: 'Roomote/example-app',
       cloudJobUrl: 'https://example.com/task/123',
-      attribution: {
-        ...matchedUserAttribution,
-        sourceKind: 'slack',
-      },
+      attribution: matchedUserAttribution,
       taskSurface: 'slack',
     });
 
@@ -297,10 +292,7 @@ describe('request_user_input guidance in workflow prompts', () => {
       description: 'Implement a repository change',
       repo: 'Roomote/example-app',
       cloudJobUrl: 'https://example.com/task/123',
-      attribution: {
-        ...matchedUserAttribution,
-        sourceKind: 'slack',
-      },
+      attribution: matchedUserAttribution,
       taskSurface: 'slack',
       slackChannel: 'C456',
       slackThreadTs: '1776819983.463289',
@@ -316,10 +308,7 @@ describe('request_user_input guidance in workflow prompts', () => {
       description: 'Implement a repository change',
       repo: 'Roomote/example-app',
       cloudJobUrl: 'https://example.com/task/123',
-      attribution: {
-        ...matchedUserAttribution,
-        sourceKind: 'slack',
-      },
+      attribution: matchedUserAttribution,
       taskSurface: 'slack',
       slackTeamDomain: 'acme-team',
       slackChannel: 'C456',
@@ -336,10 +325,7 @@ describe('request_user_input guidance in workflow prompts', () => {
       description: 'Implement a repository change',
       repo: 'Roomote/example-app',
       cloudJobUrl: 'https://example.com/task/123',
-      attribution: {
-        ...matchedUserAttribution,
-        sourceKind: 'telegram',
-      },
+      attribution: matchedUserAttribution,
       taskSurface: 'telegram',
       telegramChatId: '-100456789',
       telegramThreadId: '7',
@@ -356,10 +342,7 @@ describe('request_user_input guidance in workflow prompts', () => {
       description: 'Implement a repository change',
       repo: 'Roomote/example-app',
       cloudJobUrl: 'https://example.com/task/123',
-      attribution: {
-        ...matchedUserAttribution,
-        sourceKind: 'telegram',
-      },
+      attribution: matchedUserAttribution,
       taskSurface: 'telegram',
       telegramChatId: '9876543',
       telegramMessageId: '42',
@@ -376,10 +359,7 @@ describe('request_user_input guidance in workflow prompts', () => {
       description: 'Implement a repository change',
       repo: 'Roomote/example-app',
       cloudJobUrl: 'https://example.com/task/123',
-      attribution: {
-        ...matchedUserAttribution,
-        sourceKind: 'telegram',
-      },
+      attribution: matchedUserAttribution,
       taskSurface: 'telegram',
       telegramChatId: '9876543',
       telegramMessageId: '42',
@@ -395,10 +375,7 @@ describe('request_user_input guidance in workflow prompts', () => {
       description: 'Implement a repository change',
       repo: 'Roomote/example-app',
       cloudJobUrl: 'https://example.com/task/123',
-      attribution: {
-        ...matchedUserAttribution,
-        sourceKind: 'teams',
-      },
+      attribution: matchedUserAttribution,
       taskSurface: 'teams',
       teamsConversationId: '19:channel@thread.v2',
       teamsMessageId: '1647012345678',
@@ -415,10 +392,7 @@ describe('request_user_input guidance in workflow prompts', () => {
       description: 'Implement a repository change',
       repo: 'Roomote/example-app',
       cloudJobUrl: 'https://example.com/task/123',
-      attribution: {
-        ...matchedUserAttribution,
-        sourceKind: 'teams',
-      },
+      attribution: matchedUserAttribution,
       taskSurface: 'teams',
       teamsConversationId: 'a:personal-conversation',
       teamsMessageId: 'activity-2',
@@ -436,10 +410,7 @@ describe('request_user_input guidance in workflow prompts', () => {
       description: 'Implement a repository change',
       repo: 'Roomote/example-app',
       cloudJobUrl: 'https://example.com/task/123',
-      attribution: {
-        ...matchedUserAttribution,
-        sourceKind: 'teams',
-      },
+      attribution: matchedUserAttribution,
       taskSurface: 'teams',
       teamsConversationId: 'a:personal-conversation',
       teamsMessageId: 'activity-2',
@@ -455,10 +426,7 @@ describe('request_user_input guidance in workflow prompts', () => {
       description: 'Implement a repository change',
       repo: 'Roomote/example-app',
       cloudJobUrl: 'https://example.com/task/123',
-      attribution: {
-        ...matchedUserAttribution,
-        sourceKind: 'teams',
-      },
+      attribution: matchedUserAttribution,
       taskSurface: 'teams',
     });
 

@@ -1,7 +1,7 @@
 ---
 title: Azure DevOps Connection Setup
 status: active
-last_reviewed: 2026-07-08
+last_reviewed: 2026-07-09
 owner: engineering
 summary: Operator-facing setup guide for connecting Azure DevOps to Roomote through deployment-token-backed source control, service hooks, and optional Entra-backed commenter account linking.
 ---
@@ -231,15 +231,15 @@ hook permissions.
 ADO pull request webhooks enqueue the existing PR-review task types with
 `sourceControlProvider: 'ado'`:
 
-- `git.pullrequest.created` starts `CloudTaskType.GithubPrReview`
+- `git.pullrequest.created` starts `TaskPayloadKind.GithubPrReview`
 - active source-branch `git.pullrequest.updated` deliveries start
-  `CloudTaskType.GithubPrReviewSync`
+  `TaskPayloadKind.GithubPrReviewSync`
 - abandoned PR updates mark tracked tasks as `closed`
 - completed PR updates mark tracked tasks as `merged` and notify connected
   Slack/Teams threads when applicable
 - `ms.vss-code.git-pullrequest-comment-event` deliveries route PR comments
   containing `@roomote` into reusable PR-owner tasks, link to active reviews
-  for the same head SHA, or start `CloudTaskType.GithubPrReview`
+  for the same head SHA, or start `TaskPayloadKind.GithubPrReview`
 
 ADO merge-attempted (`git.pullrequest.merged`) hooks are not configured for
 Roomote PR automation. Azure DevOps also emits the completed status update, and

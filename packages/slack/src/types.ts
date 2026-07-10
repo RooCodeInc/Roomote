@@ -231,7 +231,7 @@ export interface SlackMemberJoinedChannelEvent {
  * Slack `reaction_added` event payload.
  *
  * Triggered when a user adds a reaction to a message. Used for
- * reaction-driven automations (for example coach suggestion execution).
+ * reaction-driven automations (for example suggestion execution).
  */
 export interface SlackReactionAddedEvent {
   type: 'reaction_added';

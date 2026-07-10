@@ -1,59 +1,60 @@
+import { type TaskWorkflow } from '@roomote/types';
+
 import {
-  type CloudTaskType,
-  DEFAULT_VISIBLE_CLOUD_TASK_TYPES,
-  isCloudTaskType,
-} from '@roomote/types';
+  DEFAULT_VISIBLE_TASK_WORKFLOWS,
+  isTaskWorkflow,
+} from '@/lib/task-categories';
 
-const DEFAULT_TASK_TYPE_FILTER_SET = new Set(DEFAULT_VISIBLE_CLOUD_TASK_TYPES);
+const DEFAULT_TASK_TYPE_FILTER_SET = new Set<TaskWorkflow>(
+  DEFAULT_VISIBLE_TASK_WORKFLOWS,
+);
 
-export function parseTaskTypeFilterParam(
-  value: string,
-): CloudTaskType[] | null {
+export function parseTaskTypeFilterParam(value: string): TaskWorkflow[] | null {
   if (value === '') {
     return [];
   }
 
-  const taskTypes = [...new Set(value.split(',').filter(isCloudTaskType))];
+  const workflows = [...new Set(value.split(',').filter(isTaskWorkflow))];
 
-  return taskTypes.length > 0 ? taskTypes : null;
+  return workflows.length > 0 ? workflows : null;
 }
 
 export function isDefaultTaskTypeFilterSelection(
-  taskTypes: readonly CloudTaskType[],
+  workflows: readonly TaskWorkflow[],
 ): boolean {
-  if (taskTypes.length !== DEFAULT_VISIBLE_CLOUD_TASK_TYPES.length) {
+  if (workflows.length !== DEFAULT_VISIBLE_TASK_WORKFLOWS.length) {
     return false;
   }
 
-  return taskTypes.every((taskType) =>
-    DEFAULT_TASK_TYPE_FILTER_SET.has(taskType),
+  return workflows.every((workflow) =>
+    DEFAULT_TASK_TYPE_FILTER_SET.has(workflow),
   );
 }
 
 export function serializeTaskTypeFilterParam(
-  taskTypes: readonly CloudTaskType[],
+  workflows: readonly TaskWorkflow[],
 ): string | null {
-  if (isDefaultTaskTypeFilterSelection(taskTypes)) {
+  if (isDefaultTaskTypeFilterSelection(workflows)) {
     return null;
   }
 
-  return taskTypes.join(',');
+  return workflows.join(',');
 }
 
 export function getTaskTypeFilterButtonLabel(
-  taskTypes: readonly CloudTaskType[],
+  workflows: readonly TaskWorkflow[],
 ): string {
-  if (isDefaultTaskTypeFilterSelection(taskTypes)) {
+  if (isDefaultTaskTypeFilterSelection(workflows)) {
     return 'Task Type';
   }
 
-  if (taskTypes.length === 0) {
+  if (workflows.length === 0) {
     return 'No Types';
   }
 
-  if (taskTypes.length === 1) {
-    return taskTypes[0] ?? 'Task Type';
+  if (workflows.length === 1) {
+    return workflows[0] ?? 'Task Type';
   }
 
-  return `${taskTypes.length} Types`;
+  return `${workflows.length} Types`;
 }

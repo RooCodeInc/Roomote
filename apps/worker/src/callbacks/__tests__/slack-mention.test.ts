@@ -109,7 +109,7 @@ vi.mock('../request-user-input', () => ({
   supportsIntegrationRequestUserInput: mockSupportsIntegrationRequestUserInput,
 }));
 
-import { CloudTaskStatus, CloudTaskType } from '@roomote/types';
+import { CloudTaskStatus, TaskPayloadKind } from '@roomote/types';
 import { type CloudJob, sdk } from '@roomote/sdk/client';
 
 import { slackMentionCallbacks } from '../slack-mention';
@@ -118,7 +118,7 @@ function createCloudJob(): CloudJob {
   return {
     id: 123,
     taskId: 'task_row_123',
-    type: CloudTaskType.SlackAppMention,
+    payloadKind: TaskPayloadKind.SlackAppMention,
     payload: {
       channel: 'C123',
       teamId: 'T123',
@@ -134,10 +134,10 @@ function createSnapshotResumeCloudJob(): CloudJob {
   return {
     id: 123,
     taskId: 'task_row_123',
-    type: CloudTaskType.SnapshotResume,
-    slackThreadTs: '1710000000.123',
+    payloadKind: TaskPayloadKind.SnapshotResume,
     payload: {
       slackChannel: 'C123',
+      thread_ts: '1710000000.123',
       slackOriginMessageTs: '1710000000.100',
     },
   } as unknown as CloudJob;

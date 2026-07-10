@@ -5,7 +5,7 @@ import { fileURLToPath } from 'node:url';
 import {
   type ComputeProvider,
   CloudTaskStatus,
-  CloudTaskType,
+  TaskPayloadKind,
   resolveComputeProviderTarget,
   SANDBOX_ORPHAN_SCAN_INTERVAL_MS,
   SANDBOX_TIMEOUT_MS,
@@ -16,7 +16,7 @@ import { getRedis, REDIS_KEYS } from '@roomote/redis';
 import {
   type CloudJob,
   db,
-  cloudJobs,
+  taskRuns,
   buildPendingEnvironmentSnapshotMatchForCloudJob,
   recordJobLifecycleEvent,
   resolveDefaultComputeProvider,
@@ -25,10 +25,7 @@ import {
   and,
   isNull,
 } from '@roomote/db/server';
-import {
-  dequeueCloudTask,
-  resolveUserIdForCloudJob,
-} from '@roomote/cloud-agents/server';
+import { dequeueCloudTask } from '@roomote/cloud-agents/server';
 import { finishCloudJob } from '@roomote/sdk/server';
 
 import { getOrphanedJob } from './orphaned-cloud-jobs';
@@ -131,8 +128,8 @@ export abstract class BaseController {
         const id = await dequeueCloudTask();
 
         if (id) {
-          const cloudJob = await db.query.cloudJobs.findFirst({
-            where: eq(cloudJobs.id, id),
+          const cloudJob = await db.query.taskRuns.findFirst({
+            where: eq(taskRuns.id, id),
           });
 
           if (cloudJob) {
@@ -140,7 +137,7 @@ export abstract class BaseController {
             // The spawnWorkerInBackground method handles errors and cleanup.
             if (this.spawnWorkerInBackground(cloudJob)) {
               console.log(
-                `🎯 New job from redis: job #${cloudJob.id} of type ${cloudJob.type} in ${cloudJob.payload.repo} (in-flight: ${this.inFlightSpawns.size})`,
+                `🎯 New job from redis: job #${cloudJob.id} of type ${cloudJob.payloadKind} in ${cloudJob.payload.repo} (in-flight: ${this.inFlightSpawns.size})`,
               );
             }
           } else {
@@ -162,7 +159,7 @@ export abstract class BaseController {
                 {
                   jobId: cloudJob.id,
                   jobStatus: cloudJob.status,
-                  jobType: cloudJob.type,
+                  jobType: cloudJob.payloadKind,
                   provider: cloudJob.vendor,
                   repo: cloudJob.payload.repo,
                   phase: 'database_fallback',
@@ -175,7 +172,7 @@ export abstract class BaseController {
               );
 
               console.log(
-                `🎯 New job from database: job #${cloudJob.id} of type ${cloudJob.type} in ${cloudJob.payload.repo} (in-flight: ${this.inFlightSpawns.size})`,
+                `🎯 New job from database: job #${cloudJob.id} of type ${cloudJob.payloadKind} in ${cloudJob.payload.repo} (in-flight: ${this.inFlightSpawns.size})`,
               );
             }
           } else {
@@ -411,26 +408,19 @@ export abstract class BaseController {
   protected async dequeueCloudJob(
     cloudJob: CloudJob,
   ): Promise<{ cloudJob: CloudJob; authToken: string } | null> {
-    const userId = await resolveUserIdForCloudJob(cloudJob);
-
-    if (!userId) {
-      throw new Error(
-        `Job ${cloudJob.id}: cannot resolve a user for job token creation`,
-      );
-    }
-
     const sandboxTimeoutMs = SANDBOX_TIMEOUT_MS;
 
+    // Jobs without a human driver run as the deployment service principal;
+    // the token carries no user claim rather than borrowing an arbitrary
+    // user's identity.
     const authToken = await createJobToken({
       cloudJobId: cloudJob.id,
-      userId,
+      userId: cloudJob.actingUserId ?? null,
       timeoutMs: sandboxTimeoutMs,
     });
 
     if (!authToken) {
-      throw new Error(
-        `Failed to create job token for job ${cloudJob.id} from user ${userId}`,
-      );
+      throw new Error(`Failed to create job token for job ${cloudJob.id}`);
     }
 
     let dequeueSkipped = false;
@@ -438,13 +428,13 @@ export abstract class BaseController {
 
     await db.transaction(async (tx) => {
       const updatedJobs = await tx
-        .update(cloudJobs)
+        .update(taskRuns)
         .set({ status: CloudTaskStatus.Dequeued, dequeuedAt: new Date() })
         .where(
           and(
-            eq(cloudJobs.id, cloudJob.id),
-            eq(cloudJobs.status, cloudJob.status),
-            isNull(cloudJobs.canceledAt),
+            eq(taskRuns.id, cloudJob.id),
+            eq(taskRuns.status, cloudJob.status),
+            isNull(taskRuns.canceledAt),
           ),
         )
         .returning();
@@ -455,7 +445,7 @@ export abstract class BaseController {
       }
 
       await recordJobLifecycleEvent(tx, {
-        cloudJobId: cloudJob.id,
+        runId: cloudJob.id,
         taskId: cloudJob.taskId,
         eventType: 'decision',
         message:
@@ -474,8 +464,8 @@ export abstract class BaseController {
     });
 
     if (dequeueSkipped) {
-      const latestJob = await db.query.cloudJobs.findFirst({
-        where: eq(cloudJobs.id, cloudJob.id),
+      const latestJob = await db.query.taskRuns.findFirst({
+        where: eq(taskRuns.id, cloudJob.id),
         columns: {
           status: true,
           canceledAt: true,
@@ -509,14 +499,14 @@ export abstract class BaseController {
 
     captureControllerException(error, {
       jobId: cloudJob.id,
-      jobType: cloudJob.type,
+      jobType: cloudJob.payloadKind,
       provider: cloudJob.vendor,
       repo: cloudJob.payload.repo,
       phase: 'spawn_worker',
     });
 
     console.error(
-      `[BaseController] ❌ Error spawning ${cloudJob.type} worker for job #${cloudJob.id}: ${errorMessage}`,
+      `[BaseController] ❌ Error spawning ${cloudJob.payloadKind} worker for job #${cloudJob.id}: ${errorMessage}`,
     );
 
     // Use the centralized termination path so all side-effects (email, Slack,
@@ -530,7 +520,7 @@ export abstract class BaseController {
     // Snapshot-specific: only fail snapshots that are currently pending.
     // Scheduled refreshes keep the last ready snapshot in place while the
     // replacement is being created, so spawn failures must not overwrite it.
-    if (cloudJob.type === CloudTaskType.SnapshotEnvironment) {
+    if (cloudJob.payloadKind === TaskPayloadKind.SnapshotEnvironment) {
       const environmentId = cloudJob.payload.environmentId;
 
       if (environmentId) {

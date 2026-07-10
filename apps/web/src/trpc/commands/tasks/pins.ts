@@ -1,4 +1,13 @@
-import { and, count, db, desc, eq, taskPins, tasks } from '@roomote/db/server';
+import {
+  and,
+  count,
+  db,
+  desc,
+  eq,
+  isNull,
+  taskPins,
+  tasks,
+} from '@roomote/db/server';
 
 import type { UserAuthSuccess } from '@/types';
 
@@ -36,10 +45,11 @@ export async function setTaskPinnedCommand(
     return { success: true, pinned: false };
   }
 
+  // Any deployment member can pin any task; pins stay per-user via task_pins.
   const [task] = await db
     .select({ id: tasks.id })
     .from(tasks)
-    .where(and(eq(tasks.id, input.taskId), eq(tasks.userId, auth.userId)))
+    .where(and(eq(tasks.id, input.taskId), isNull(tasks.deletedAt)))
     .limit(1);
 
   if (!task) {

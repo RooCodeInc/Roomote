@@ -4,71 +4,66 @@ import { z } from 'zod';
 
 import {
   type AuthorshipRuleActor,
+  type BackgroundAutomationKey,
   type CloudTask,
-  type CloudTaskPayload,
   type CodingHarness,
-  type ComputeProvider,
-  type HarnessModelOverrides,
+  type SnapshotResumeTask,
   type CloudTaskLaunchClass,
-  type RequestedWorkKind,
+  type SourceControlProvider,
+  type TaskInitiator,
+  type TaskSurface,
+  type TaskTrigger,
+  type TaskVisibility,
+  type TaskWorkflow,
   CloudTaskStatus,
-  CloudTaskType,
+  TaskPayloadKind,
   DEFAULT_DELEGATED_KEEPALIVE_MS,
   DEFAULT_KEEPALIVE_MS,
   DEFAULT_LAUNCH_CODING_HARNESS,
   getUserDisplayName,
-  getSlackThreadTsFromTaskPayload,
   getPrimaryPortFromConfig,
-  isPrReviewJob,
   isConfiguredEnvValue,
   normalizeDeploymentModelConfig,
   resolveCloudTaskRuntimePolicy,
   resolveCloudTaskWorkspace,
   resolveComputeProviderTarget,
-  resolveSourceControlProviderFromPayload,
   TASK_TIMEOUT_MS,
-  type SourceControlProvider,
 } from '@roomote/types';
 import { Env } from '@roomote/env';
 import {
   type CloudJob,
   type DatabaseTransaction,
-  type TaskAttributionSnapshot,
   db,
   deploymentSettings,
-  buildTaskAttributionSnapshot,
+  ensureAutomationRowsOnce,
   createTaskWithRetry,
-  cloudJobs,
   markTaskStartParallelCountEndedAt,
   recordTaskStartParallelCount,
+  syncTaskStateFromRuns,
   taskPullRequests,
+  taskRuns,
   tasks,
   users,
   environments,
-  environmentRepositoryMappings,
-  repositories,
   and,
   desc,
   eq,
-  findLatestGithubIdentityForUser,
   inArray,
   isNull,
   lt,
   recordSnapshotResumeEvent,
   resolveDefaultComputeProvider,
+  resolveWorkspaceSourceControlProvider,
   sql,
 } from '@roomote/db/server';
-import {
-  evaluateFeatureFlagFromMetadata,
-  FeatureFlag,
-  type MetadataRecord,
-} from '@roomote/feature-flags/server';
+import type { MetadataRecord } from '@roomote/feature-flags/server';
 
 import { type Redis, getRedis } from '@roomote/redis';
 import { captureEvent } from '@roomote/telemetry/server';
 import { generateCloudJobTitle, hasDeterministicCloudJobTitle } from '../utils';
 import { DEFAULT_STANDARD_TASK_PROVIDER } from '../task-runtime-defaults';
-import { evaluateEffectiveAuthorship } from './authorship-rules';
+import { evaluateCommitAuthor } from './authorship-rules';
+import { findLatestGithubIdentityForUser } from './commit-author';
 import { resolveEffectiveHarnessModelState } from './harness-model-overrides';
 import {
   generateLlmTaskTitle,
@@ -106,17 +101,26 @@ async function cancelCloudJobBeforeQueue(
   failureContext: string,
 ): Promise<void> {
   try {
-    await db
-      .update(cloudJobs)
-      .set({
-        status: CloudTaskStatus.Canceled,
-        canceledAt: new Date(),
-        error: message,
-      })
-      .where(eq(cloudJobs.id, cloudJob.id));
+    const endedAt = new Date();
+
+    await db.transaction(async (tx) => {
+      await tx
+        .update(taskRuns)
+        .set({
+          status: CloudTaskStatus.Canceled,
+          canceledAt: endedAt,
+          error: message,
+        })
+        .where(eq(taskRuns.id, cloudJob.id));
+
+      // Derive the task state from all its runs. Enqueue-failure cancels
+      // bypass finishCloudJob entirely, so without this sync the task stays
+      // 'active' forever. The shared @roomote/db helper keeps siblings honest.
+      await syncTaskStateFromRuns(tx, cloudJob.taskId);
+    });
   } catch (cancelError) {
     console.warn(
-      `[enqueueCloudTask] Failed to cancel cloud job ${cloudJob.id} after ${failureContext}: ${getErrorMessage(
+      `[enqueueCloudTask] Failed to cancel run ${cloudJob.id} after ${failureContext}: ${getErrorMessage(
         cancelError,
         'Unknown cancellation error',
       )}`,
@@ -124,36 +128,16 @@ async function cancelCloudJobBeforeQueue(
   }
 }
 
-async function resolvePersistedTaskAttributionSnapshot(
-  tx: typeof db | Parameters<Parameters<typeof db.transaction>[0]>[0],
-  task: CloudTask,
-): Promise<TaskAttributionSnapshot> {
-  if (task.attributionOverride?.kind === 'automatic') {
-    return {
-      attributionKind: 'automatic',
-      attributedUserId: null,
-      attributionSourceKind:
-        task.attributionOverride.sourceKind ?? 'automation',
-      attributionSourceDisplayName: null,
-      attributionSourceExternalId: null,
-      attributedGithubLogin: null,
-      attributedGithubUserId: null,
-    };
-  }
-
-  return buildTaskAttributionSnapshot(tx, task);
-}
-
 async function resolveMatchedHumanActor(
   tx: typeof db | Parameters<Parameters<typeof db.transaction>[0]>[0],
-  attributedUserId: string | null,
+  linkedUserId: string | null,
 ): Promise<AuthorshipRuleActor | null> {
-  if (!attributedUserId) {
+  if (!linkedUserId) {
     return null;
   }
 
   const user = await tx.query.users.findFirst({
-    where: eq(users.id, attributedUserId),
+    where: eq(users.id, linkedUserId),
     columns: {
       id: true,
       name: true,
@@ -163,11 +147,11 @@ async function resolveMatchedHumanActor(
 
   const githubIdentity = await findLatestGithubIdentityForUser(
     tx,
-    attributedUserId,
+    linkedUserId,
   );
 
   return {
-    userId: attributedUserId,
+    userId: linkedUserId,
     displayName: getUserDisplayName(user),
     githubLogin: githubIdentity.githubLogin,
     githubUserId: githubIdentity.githubUserId,
@@ -222,27 +206,6 @@ function resolveCodeReviewModelId(
 async function resolveRequestedHarness(
   task: CloudTask,
 ): Promise<ResolvedHarnessSelection> {
-  if (task.harness) {
-    const deployment = await db.query.deploymentSettings.findFirst({
-      where: eq(deploymentSettings.id, DEFAULT_DEPLOYMENT_ID),
-      columns: {
-        metadata: true,
-        taskModelSettings: true,
-        runtimeModelConfig: true,
-      },
-    });
-
-    return {
-      harness: task.harness,
-      deploymentMetadata:
-        (deployment?.metadata as MetadataRecord | null | undefined) ?? null,
-      deploymentTaskModelSettings: deployment?.taskModelSettings ?? null,
-      deploymentCodeReviewModelId: resolveCodeReviewModelId(
-        normalizeDeploymentModelConfig(deployment?.runtimeModelConfig),
-      ),
-    };
-  }
-
   const deployment = await db.query.deploymentSettings.findFirst({
     where: eq(deploymentSettings.id, DEFAULT_DEPLOYMENT_ID),
     columns: {
@@ -253,7 +216,7 @@ async function resolveRequestedHarness(
   });
 
   return {
-    harness: DEFAULT_LAUNCH_CODING_HARNESS,
+    harness: task.harness ?? DEFAULT_LAUNCH_CODING_HARNESS,
     deploymentMetadata:
       (deployment?.metadata as MetadataRecord | null | undefined) ?? null,
     deploymentTaskModelSettings: deployment?.taskModelSettings ?? null,
@@ -263,13 +226,15 @@ async function resolveRequestedHarness(
   };
 }
 
-function getRequestedWorkKindPrompt(task: CloudTask): string | undefined {
+function getInitialTaskPrompt(task: CloudTask): string | undefined {
   switch (task.type) {
-    case CloudTaskType.StandardTask:
+    case TaskPayloadKind.StandardTask:
+    case TaskPayloadKind.Scan:
+    case TaskPayloadKind.McpRecommendations:
       return task.payload.description;
-    case CloudTaskType.SlackAppMention:
+    case TaskPayloadKind.SlackAppMention:
       return task.payload.text;
-    case CloudTaskType.LinearAgentSession:
+    case TaskPayloadKind.LinearAgentSession:
       return (
         task.payload.commentBody ||
         task.payload.issueDescription ||
@@ -283,7 +248,7 @@ function getRequestedWorkKindPrompt(task: CloudTask): string | undefined {
 function getRequestedWorkKindBootstrapSkill(
   task: CloudTask,
 ): 'explain-repo-code' | 'plan-repo-implementation' | undefined {
-  if (task.type !== CloudTaskType.StandardTask) {
+  if (task.type !== TaskPayloadKind.StandardTask) {
     return undefined;
   }
 
@@ -312,24 +277,57 @@ export class CloudJobQueue {
         const otherEntry = cloudJobQueueEntrySchema.parse(JSON.parse(rawValue));
 
         if (otherEntry.scope === entry.scope) {
-          await this.redis.lrem(CloudJobQueueKeys.Queue, 0, rawValue);
+          const removed = await this.redis.lrem(
+            CloudJobQueueKeys.Queue,
+            0,
+            rawValue,
+          );
+
+          // If lrem removed nothing the entry was already claimed off the
+          // queue by a worker; that worker owns the run's terminal state, so
+          // skip the DB cancel + sync entirely to avoid racing it.
+          if (removed === 0) {
+            continue;
+          }
 
           // Best-effort cancel in DB; do not block queue behavior during dedup.
           void db
             .transaction(async (tx) => {
               const endedAt = new Date();
 
-              await tx
-                .update(cloudJobs)
+              // Only cancel a run still waiting in the queue (pending/dequeued).
+              // If it already advanced past dequeue it is claimed, so leave it
+              // and its task state to the owning worker.
+              const [canceledRun] = await tx
+                .update(taskRuns)
                 .set({
                   status: CloudTaskStatus.Canceled,
                   canceledAt: endedAt,
                   error: 'Superseded by a newer cloud job.',
                 })
-                .where(eq(cloudJobs.id, otherEntry.id));
+                .where(
+                  and(
+                    eq(taskRuns.id, otherEntry.id),
+                    inArray(taskRuns.status, [
+                      CloudTaskStatus.Pending,
+                      CloudTaskStatus.Dequeued,
+                    ]),
+                  ),
+                )
+                .returning({ taskId: taskRuns.taskId });
+
+              // The run was already claimed/terminal; nothing to sync.
+              if (!canceledRun) {
+                return;
+              }
+
+              // Derive the task state from all its runs so the superseded run's
+              // task does not stay 'active' forever, while an already-completed
+              // sibling still wins.
+              await syncTaskStateFromRuns(tx, canceledRun.taskId);
 
               await markTaskStartParallelCountEndedAt(tx, {
-                cloudJobId: otherEntry.id,
+                runId: otherEntry.id,
                 endedAt,
               });
             })
@@ -446,13 +444,6 @@ export class CloudJobQueueEnqueueError extends Error {
   }
 }
 
-const NULL_AGENT_LINEAGE_TASK_TYPES = [
-  CloudTaskType.StandardTask,
-  CloudTaskType.SlackAppMention,
-  CloudTaskType.LinearAgentSession,
-  CloudTaskType.SnapshotResume,
-] as const;
-
 type EnvironmentMatch = { id: string; isPrimary: boolean; repoCount: number };
 
 async function findMatchingEnvironments(
@@ -501,21 +492,21 @@ async function findLineageEnvironmentForPr({
 
   const rows = await db
     .select({
-      environmentId: sql<string>`${cloudJobs.payload}->>'environmentId'`,
+      environmentId: sql<string>`${taskRuns.payload}->>'environmentId'`,
     })
     .from(taskPullRequests)
     .innerJoin(tasks, eq(tasks.id, taskPullRequests.taskId))
-    .innerJoin(cloudJobs, eq(cloudJobs.taskId, tasks.id))
+    .innerJoin(taskRuns, eq(taskRuns.taskId, tasks.id))
     .where(
       and(
         eq(taskPullRequests.sourceControlProvider, sourceControlProvider),
         eq(taskPullRequests.repository, repoFullName),
         eq(taskPullRequests.prNumber, prNumber),
-        inArray(cloudJobs.type, [...NULL_AGENT_LINEAGE_TASK_TYPES]),
-        sql`${cloudJobs.payload}->>'environmentId' IS NOT NULL`,
+        eq(tasks.workflow, 'standard'),
+        sql`${taskRuns.payload}->>'environmentId' IS NOT NULL`,
       ),
     )
-    .orderBy(desc(taskPullRequests.detectedAt), desc(cloudJobs.createdAt));
+    .orderBy(desc(taskPullRequests.detectedAt), desc(taskRuns.createdAt));
 
   const candidateSet = new Set(candidateEnvironmentIds);
 
@@ -536,20 +527,20 @@ async function findHistoricalEnvironmentForRepo({
     return undefined;
   }
 
-  const payloadRepo = sql<string>`${cloudJobs.payload}->>'repo'`;
+  const payloadRepo = sql<string>`${taskRuns.payload}->>'repo'`;
 
   const rows = await db
     .select({
-      environmentId: sql<string>`${cloudJobs.payload}->>'environmentId'`,
-      createdAt: cloudJobs.createdAt,
+      environmentId: sql<string>`${taskRuns.payload}->>'environmentId'`,
+      createdAt: taskRuns.createdAt,
     })
-    .from(cloudJobs)
-    .innerJoin(tasks, eq(tasks.id, cloudJobs.taskId))
+    .from(taskRuns)
+    .innerJoin(tasks, eq(tasks.id, taskRuns.taskId))
     .where(
       and(
-        inArray(cloudJobs.type, [...NULL_AGENT_LINEAGE_TASK_TYPES]),
+        eq(tasks.workflow, 'standard'),
         inArray(
-          sql<string>`${cloudJobs.payload}->>'environmentId'`,
+          sql<string>`${taskRuns.payload}->>'environmentId'`,
           candidateEnvironmentIds,
         ),
         sql`(
@@ -557,7 +548,7 @@ async function findHistoricalEnvironmentForRepo({
           OR EXISTS (
             SELECT 1
             FROM ${taskPullRequests}
-            WHERE ${taskPullRequests.taskId} = ${cloudJobs.taskId}
+            WHERE ${taskPullRequests.taskId} = ${taskRuns.taskId}
               AND ${taskPullRequests.sourceControlProvider} = ${sourceControlProvider}
               AND ${taskPullRequests.repository} = ${repoFullName}
           )
@@ -656,22 +647,25 @@ export async function findEnvironmentForRepo(
 
 export interface EnqueueCloudTaskOptions {
   /**
-   * Optional launch-class hint used only to resolve runtime keepalive policy.
+   * Optional explicit launch-class override used to resolve runtime keepalive
+   * policy. When omitted, automation-initiated launches derive the
+   * 'automation' class from the initiator and everything else falls back to
+   * the payload-kind inference.
    */
   launchClass?: CloudTaskLaunchClass;
   /**
-   * Keep the job owner for authorization, but leave `actingUserId` unset until
-   * a real follow-up sender can be resolved.
+   * Leave `actingUserId` unset until a real follow-up sender can be resolved
+   * (Slack channel auto-start path).
    */
   skipInitialActingUser?: boolean;
   /**
-   * Persist the job without pushing it onto the controller Redis queue.
+   * Persist the run without pushing it onto the controller Redis queue.
    * Intended for direct-run jobs that are claimed by an explicitly invoked
    * worker command inside an already-running sandbox.
    */
   enqueue?: boolean;
   /**
-   * Initial persisted status for the new job. Defaults to `pending`, matching
+   * Initial persisted status for the new run. Defaults to `pending`, matching
    * normal queue-driven launches.
    */
   initialStatus?: CloudTaskStatus.Pending | CloudTaskStatus.Dequeued;
@@ -680,7 +674,7 @@ export interface EnqueueCloudTaskOptions {
    */
   skipEarlyTitleGeneration?: boolean;
   /**
-   * Runs inside the cloud-job creation transaction after the new job row is
+   * Runs inside the run-creation transaction after the new run row is
    * inserted and before the transaction commits.
    */
   afterCreateInTransaction?: (
@@ -688,107 +682,396 @@ export interface EnqueueCloudTaskOptions {
     cloudJob: CloudJob,
   ) => Promise<void>;
   /**
-   * Runs after the cloud job row is created but before it is pushed onto the
-   * controller queue. If this throws, the job is canceled and never queued.
+   * Runs after the run row is created but before it is pushed onto the
+   * controller queue. If this throws, the run is canceled and never queued.
    */
   beforeEnqueue?: (cloudJob: CloudJob) => Promise<void>;
 }
 
 /**
- * Infers the source-control provider for a launch workspace from the linked
- * repository rows. Routed launches (Slack/Linear/Telegram/Teams mentions)
- * select an environment or repository without stamping a provider, and a
- * missing provider defaults to GitHub at runtime — which breaks credential
- * setup when the workspace is backed by Azure DevOps, GitLab, or Gitea.
- * Returns undefined when the workspace resolves to no repositories or to
- * repositories from more than one provider.
+ * Channel bindings stamped onto the tasks row at creation. Callers derive
+ * these from the surface context they already hold (webhook/message
+ * metadata); enqueue never sniffs them out of the payload.
  */
-export async function inferWorkspaceSourceControlProvider(
-  workspace: ReturnType<typeof resolveCloudTaskWorkspace>,
-): Promise<SourceControlProvider | undefined> {
-  const providerRows =
-    workspace.type === 'environment'
-      ? await db
-          .select({ provider: repositories.sourceControlProvider })
-          .from(environmentRepositoryMappings)
-          .innerJoin(
-            repositories,
-            eq(environmentRepositoryMappings.repositoryId, repositories.id),
-          )
-          .where(
-            and(
-              eq(
-                environmentRepositoryMappings.environmentId,
-                workspace.environmentId,
-              ),
-              eq(repositories.isActive, true),
-            ),
-          )
-      : await db
-          .select({ provider: repositories.sourceControlProvider })
-          .from(repositories)
-          .where(
-            and(
-              eq(repositories.isActive, true),
-              workspace.type === 'repository'
-                ? eq(repositories.fullName, workspace.repo)
-                : workspace.type === 'repository_set'
-                  ? inArray(repositories.fullName, workspace.repositories)
-                  : undefined,
-            ),
-          );
+export type TaskChannelBindings = {
+  slackChannelId?: string | null;
+  slackThreadTs?: string | null;
+  linearSessionId?: string | null;
+  linearIssueId?: string | null;
+  linearOrganizationId?: string | null;
+};
 
-  const providers = [...new Set(providerRows.map((row) => row.provider))];
+/**
+ * PR linkage persisted as a task_pull_requests row inside the create
+ * transaction. Required for 'pr_review' and 'pr_conflict_resolve' launches;
+ * callers have all of this from the triggering webhook.
+ */
+export type TaskPrLinkage = {
+  provider: SourceControlProvider;
+  host?: string | null;
+  repository: string;
+  prNumber: number;
+  prUrl: string;
+  prTitle?: string | null;
+  prSha?: string | null;
+  prBaseRef?: string | null;
+  prBaseSha?: string | null;
+  githubReactionId?: number | null;
+  githubCheckRunId?: number | null;
+  githubReviewCommentId?: number | null;
+};
 
-  return providers.length === 1 ? providers[0] : undefined;
+type FreshCloudTask = Exclude<
+  CloudTask,
+  { type: typeof TaskPayloadKind.SnapshotResume }
+>;
+
+/**
+ * A fresh launch creates a tasks row (initiator stamp, classification,
+ * commit-author block, channel bindings) plus its first run.
+ */
+export type FreshCloudTaskLaunch = {
+  task: FreshCloudTask;
+  initiator: TaskInitiator;
+  workflow: TaskWorkflow;
+  surface: TaskSurface;
+  trigger: TaskTrigger;
+  visibility?: TaskVisibility;
+  channels?: TaskChannelBindings;
+  /** Required when workflow is 'pr_review' or 'pr_conflict_resolve'. */
+  prLinkage?: TaskPrLinkage;
+  actingUserId?: never;
+};
+
+/**
+ * A resume attaches a new run (kind 'resume') to the source run's existing
+ * task. It never creates a task, never re-attributes, and must not carry
+ * initiator/classification fields.
+ */
+export type ResumeCloudTaskLaunch = {
+  task: SnapshotResumeTask;
+  /** The resuming human; null/omitted for automation-driven resumes. */
+  actingUserId?: string | null;
+  initiator?: never;
+  workflow?: never;
+  surface?: never;
+  trigger?: never;
+  visibility?: never;
+  channels?: never;
+  prLinkage?: never;
+};
+
+export type EnqueueCloudTaskInput =
+  | FreshCloudTaskLaunch
+  | ResumeCloudTaskLaunch;
+
+const PR_LINKAGE_REQUIRED_WORKFLOWS: ReadonlySet<TaskWorkflow> = new Set([
+  'pr_review',
+  'pr_conflict_resolve',
+]);
+
+const PR_SCOPED_PAYLOAD_KINDS: ReadonlySet<TaskPayloadKind> = new Set([
+  TaskPayloadKind.GithubPrReview,
+  TaskPayloadKind.GithubPrReviewSync,
+]);
+
+/**
+ * Computes the Redis queue scope for a fresh launch. PR review launches share
+ * a `${repository}:${prNumber}` scope so a newer review of the same PR
+ * supersedes a queued one; everything else gets a unique scope.
+ */
+export function resolveQueueScope(params: {
+  workflow: TaskWorkflow;
+  payloadKind: TaskPayloadKind;
+  prLinkage?: TaskPrLinkage | null;
+}): string {
+  if (
+    params.workflow === 'pr_review' &&
+    params.prLinkage &&
+    PR_SCOPED_PAYLOAD_KINDS.has(params.payloadKind)
+  ) {
+    return `${params.prLinkage.repository}:${params.prLinkage.prNumber}`;
+  }
+
+  return randomUUID();
+}
+
+function getRunLockScope(cloudJob: CloudJob): string {
+  if (PR_SCOPED_PAYLOAD_KINDS.has(cloudJob.payloadKind)) {
+    const payload = cloudJob.payload as { repo?: string; prNumber?: number };
+
+    if (payload.repo && typeof payload.prNumber === 'number') {
+      return `${payload.repo}:${payload.prNumber}`;
+    }
+  }
+
+  return randomUUID();
+}
+
+function getInitiatorLinkedUserId(initiator: TaskInitiator): string | null {
+  if (initiator.kind === 'automation') {
+    return null;
+  }
+
+  if ('userId' in initiator) {
+    return initiator.userId;
+  }
+
+  return initiator.matchedUserId ?? null;
+}
+
+type TaskInitiatorColumns = {
+  initiatorKind: 'user' | 'automation';
+  initiatorUserId: string | null;
+  initiatorAutomation: BackgroundAutomationKey | null;
+  actorExternalId: string | null;
+  actorDisplayName: string | null;
+};
+
+function resolveInitiatorColumns(
+  initiator: TaskInitiator,
+): TaskInitiatorColumns {
+  if (initiator.kind === 'automation') {
+    return {
+      initiatorKind: 'automation',
+      initiatorUserId: null,
+      initiatorAutomation: initiator.key,
+      actorExternalId: initiator.actor?.externalId ?? null,
+      actorDisplayName: initiator.actor?.displayName ?? null,
+    };
+  }
+
+  if ('userId' in initiator) {
+    return {
+      initiatorKind: 'user',
+      initiatorUserId: initiator.userId,
+      initiatorAutomation: null,
+      actorExternalId: null,
+      actorDisplayName: null,
+    };
+  }
+
+  return {
+    initiatorKind: 'user',
+    initiatorUserId: initiator.matchedUserId ?? null,
+    initiatorAutomation: null,
+    actorExternalId: initiator.externalId,
+    actorDisplayName: initiator.displayName ?? null,
+  };
+}
+
+async function assertUserIsNotDeleted(userId: string | null): Promise<void> {
+  if (!userId) {
+    return;
+  }
+
+  const user = await db.query.users.findFirst({
+    where: eq(users.id, userId),
+    columns: { deletedAt: true },
+  });
+
+  if (user?.deletedAt) {
+    throw new Error('Cannot create cloud task for deleted user.');
+  }
+}
+
+type EnvironmentContext = {
+  initialPaths: Record<string, string> | undefined;
+};
+
+/**
+ * Resolves the environment referenced by the payload, defaulting the payload
+ * port to the environment's primary port and collecting per-port initial
+ * paths. Mutates `task.payload.port` like the launch flow always has.
+ */
+async function resolveEnvironmentContext(
+  task: CloudTask,
+): Promise<EnvironmentContext> {
+  let initialPaths: Record<string, string> | undefined;
+
+  if (!task.payload.environmentId) {
+    return { initialPaths };
+  }
+
+  const environment = await db.query.environments.findFirst({
+    where: eq(environments.id, task.payload.environmentId),
+    columns: {
+      id: true,
+      config: true,
+    },
+  });
+
+  if (!environment) {
+    throw new Error('Selected environment was not found.');
+  }
+
+  const primaryPort = getPrimaryPortFromConfig(environment.config.ports);
+  if (!task.payload.port && primaryPort) {
+    task.payload.port = primaryPort.port;
+  }
+
+  if (environment.config.ports) {
+    const paths = Object.fromEntries(
+      environment.config.ports
+        .filter((port) => Boolean(port.initial_path))
+        .map((port) => [port.name.toUpperCase(), port.initial_path!]),
+    );
+
+    if (Object.keys(paths).length > 0) {
+      initialPaths = paths;
+    }
+  }
+
+  return { initialPaths };
+}
+
+async function pushRunOntoQueue(params: {
+  cloudJob: CloudJob;
+  scope: string;
+  options: EnqueueCloudTaskOptions;
+}): Promise<void> {
+  const { cloudJob, scope, options } = params;
+
+  if (options.enqueue === false) {
+    return;
+  }
+
+  if (options.beforeEnqueue) {
+    try {
+      await options.beforeEnqueue(cloudJob);
+    } catch (error) {
+      const message = getErrorMessage(error, 'Failed before cloud job enqueue');
+
+      await cancelCloudJobBeforeQueue(
+        cloudJob,
+        message,
+        'beforeEnqueue failed',
+      );
+
+      throw error;
+    }
+  }
+
+  try {
+    await CloudJobQueue.getInstance().enqueue({
+      id: cloudJob.id,
+      scope,
+    });
+  } catch (error) {
+    await cancelCloudJobBeforeQueue(
+      cloudJob,
+      getErrorMessage(error, 'Failed to enqueue cloud job'),
+      'queue enqueue failed',
+    );
+
+    throw new CloudJobQueueEnqueueError({
+      cloudJobId: cloudJob.id,
+      taskId: cloudJob.taskId,
+      originalError: error,
+    });
+  }
+
+  try {
+    await db.transaction(async (tx) => {
+      await tx.execute(
+        sql`SELECT id FROM task_runs WHERE id = ${cloudJob.id} FOR UPDATE`,
+      );
+
+      const persistedRun = await tx.query.taskRuns.findFirst({
+        where: eq(taskRuns.id, cloudJob.id),
+        columns: {
+          status: true,
+          canceledAt: true,
+          completedAt: true,
+        },
+      });
+
+      if (
+        !persistedRun ||
+        persistedRun.status === CloudTaskStatus.Canceled ||
+        persistedRun.canceledAt !== null ||
+        persistedRun.completedAt !== null
+      ) {
+        return;
+      }
+
+      await recordTaskStartParallelCount(tx, {
+        runId: cloudJob.id,
+        payloadKind: cloudJob.payloadKind,
+        taskId: cloudJob.taskId,
+        startedAt: new Date(),
+      });
+    });
+  } catch (loggingError) {
+    console.warn(
+      `[enqueueCloudTask] Failed to record task-start parallel count for run ${cloudJob.id}: ${
+        loggingError instanceof Error
+          ? loggingError.message
+          : String(loggingError)
+      }`,
+    );
+  }
 }
 
 export async function enqueueCloudTask(
-  task: CloudTask,
+  input: EnqueueCloudTaskInput,
   options: EnqueueCloudTaskOptions = {},
 ): Promise<CloudJob> {
-  const { userId } = task;
-  const slackThreadTs = resolveSlackThreadTs(task);
-
-  const githubUserId = 'githubUserId' in task ? task.githubUserId : undefined;
-
-  const snapshotResumeSourceCloudJobId =
-    task.type === CloudTaskType.SnapshotResume
-      ? (task.sourceCloudJobId ?? task.payload.sourceCloudJobId)
-      : null;
-
-  const snapshotResumeSourceSnapshotId =
-    task.type === CloudTaskType.SnapshotResume
-      ? (task.sourceSnapshotId ?? task.payload.sourceSnapshotId)
-      : null;
-
   await assertDeploymentIsActive();
 
-  if (!userId && !githubUserId) {
-    throw new Error('A cloud task must have a userId or a githubUserId.');
+  if (input.task.type === TaskPayloadKind.SnapshotResume) {
+    return enqueueSnapshotResume(input as ResumeCloudTaskLaunch, options);
   }
 
-  if (userId) {
-    const user = await db.query.users.findFirst({
-      where: eq(users.id, userId),
-      columns: { deletedAt: true },
-    });
+  return enqueueFreshLaunch(input as FreshCloudTaskLaunch, options);
+}
 
-    if (user?.deletedAt) {
-      throw new Error('Cannot create cloud task for deleted user.');
-    }
+async function enqueueFreshLaunch(
+  input: FreshCloudTaskLaunch,
+  options: EnqueueCloudTaskOptions,
+): Promise<CloudJob> {
+  const { task, initiator, workflow, surface, trigger } = input;
+  const visibility: TaskVisibility = input.visibility ?? 'visible';
+  const linkedUserId = getInitiatorLinkedUserId(initiator);
+
+  await assertUserIsNotDeleted(linkedUserId);
+
+  if (PR_LINKAGE_REQUIRED_WORKFLOWS.has(workflow) && !input.prLinkage) {
+    throw new Error(
+      `A '${workflow}' launch requires prLinkage so the pull request row can be created with the task.`,
+    );
   }
 
   // Auto-resolve environment for PR tasks when no environmentId is set.
   // This allows PR Reviewer review/follow-up jobs to benefit from project
-  // configuration
-  // (setup commands, env vars, services, agent instructions).
-  const PR_TASK_TYPES = new Set([
-    CloudTaskType.GithubPrReview,
-    CloudTaskType.GithubPrReviewSync,
-    CloudTaskType.GithubPrReviewFollowUp,
+  // configuration (setup commands, env vars, services, agent instructions).
+  const PR_TASK_TYPES = new Set<TaskPayloadKind>([
+    TaskPayloadKind.GithubPrReview,
+    TaskPayloadKind.GithubPrReviewSync,
+    TaskPayloadKind.GithubPrReviewFollowUp,
   ]);
   const workspace = resolveCloudTaskWorkspace(task.payload);
+
+  // Stamp the source-control provider once at launch when the caller omitted
+  // it. Downstream consumers (token minting, worker repository resolution)
+  // otherwise fall back to the GitHub default, which breaks GitLab/Gitea/ADO
+  // deployments for any launch surface that forgot the stamp. The shared
+  // resolver covers every workspace shape (repository, repository_set,
+  // environment, all_repositories) so environment- and all-repositories-based
+  // launches (e.g. Linear) get stamped too.
+  if (
+    !('sourceControlProvider' in task.payload) ||
+    !task.payload.sourceControlProvider
+  ) {
+    const resolvedProvider = await resolveWorkspaceSourceControlProvider(
+      db,
+      workspace,
+    );
+
+    if (resolvedProvider) {
+      task.payload.sourceControlProvider = resolvedProvider;
+    }
+  }
 
   if (
     PR_TASK_TYPES.has(task.type) &&
@@ -809,150 +1092,16 @@ export async function enqueueCloudTask(
     }
   }
 
-  // Routed launches (Slack/Linear/Telegram/Teams) select a workspace without
-  // stamping its source-control provider, and the runtime defaults a missing
-  // provider to GitHub — wrong credentials for ADO/GitLab/Gitea workspaces.
-  // Infer it from the resolved workspace. GitHub is the runtime default, so
-  // stamping an inferred GitHub would only churn existing payloads.
-  if (!task.payload.sourceControlProvider) {
-    const inferredProvider = await inferWorkspaceSourceControlProvider(
-      resolveCloudTaskWorkspace(task.payload),
-    );
-
-    if (inferredProvider && inferredProvider !== 'github') {
-      task.payload.sourceControlProvider = inferredProvider;
-      console.log(
-        `[enqueueCloudTask] Inferred source-control provider ${inferredProvider} for ${task.type} launch`,
-      );
-    }
-  }
-
-  let environment:
-    | Pick<typeof environments.$inferSelect, 'id' | 'config'>
-    | undefined;
-  let initialPaths: Record<string, string> | undefined;
-
-  if (task.payload.environmentId) {
-    environment = await db.query.environments.findFirst({
-      where: eq(environments.id, task.payload.environmentId),
-      columns: {
-        id: true,
-        config: true,
-      },
-    });
-
-    if (!environment) {
-      throw new Error('Selected environment was not found.');
-    }
-
-    const primaryPort = getPrimaryPortFromConfig(environment.config.ports);
-    if (!task.payload.port && primaryPort) {
-      task.payload.port = primaryPort.port;
-    }
-
-    if (environment.config.ports) {
-      const paths = Object.fromEntries(
-        environment.config.ports
-          .filter((port) => Boolean(port.initial_path))
-          .map((port) => [port.name.toUpperCase(), port.initial_path!]),
-      );
-
-      if (Object.keys(paths).length > 0) {
-        initialPaths = paths;
-      }
-    }
-  }
-
-  const prSourceControlProvider: SourceControlProvider =
-    resolveSourceControlProviderFromPayload(task.payload);
-
-  switch (task.type) {
-    case CloudTaskType.GithubPrReview:
-    case CloudTaskType.GithubPrReviewSync:
-      task.prSourceControlProvider = prSourceControlProvider;
-      task.prRepo = task.payload.repo;
-      task.prNumber = task.payload.prNumber;
-      task.prSha = task.payload.headSha;
-      break;
-    case CloudTaskType.GithubPrReviewFollowUp:
-      task.prSourceControlProvider = prSourceControlProvider;
-      task.prRepo = task.payload.repo;
-      task.prNumber = task.payload.prNumber;
-      break;
-    case CloudTaskType.GithubPrConflictResolve:
-      task.prSourceControlProvider = prSourceControlProvider;
-      task.prRepo = task.payload.repo;
-      task.prNumber = task.payload.prNumber;
-      break;
-    default:
-      break;
-  }
-
-  // Determine canonical internal task ID and harness:
-  // - SnapshotResume jobs inherit both from the source job when available.
-  // - New jobs get a newly created task record.
-  let internalTaskId: string | null = null;
-  let sourceJobHarness: CloudTask['harness'] | null = null;
-  let sourceJobVendor: ComputeProvider | null = null;
-  let sourceJobHarnessInstructions: string | null = null;
-  let sourceJobRequestedWorkKind: RequestedWorkKind | null = null;
-  let sourceJobHarnessModelOverrides: HarnessModelOverrides | undefined;
-  let sourceJobGithubPrRepo: string | null = null;
-  let sourceJobGithubPrNumber: number | null = null;
-  let sourceJobGithubPrSha: string | null = null;
-  let sourceJobPrSourceControlProvider: SourceControlProvider | null = null;
-
-  if (
-    task.type === CloudTaskType.SnapshotResume &&
-    task.payload.sourceCloudJobId
-  ) {
-    const sourceJob = await db.query.cloudJobs.findFirst({
-      where: eq(cloudJobs.id, task.payload.sourceCloudJobId),
-      columns: {
-        taskId: true,
-        harness: true,
-        vendor: true,
-        harnessInstructions: true,
-        requestedWorkKind: true,
-        prSourceControlProvider: true,
-        prRepo: true,
-        prNumber: true,
-        prSha: true,
-        payload: true,
-      },
-    });
-
-    internalTaskId = sourceJob?.taskId ?? null;
-    sourceJobHarness = sourceJob?.harness ?? null;
-    sourceJobVendor = resolveComputeProviderTarget(sourceJob?.vendor);
-    sourceJobHarnessInstructions = sourceJob?.harnessInstructions ?? null;
-    sourceJobRequestedWorkKind = sourceJob?.requestedWorkKind ?? null;
-    sourceJobPrSourceControlProvider =
-      sourceJob?.prSourceControlProvider ?? null;
-    sourceJobGithubPrRepo = sourceJob?.prRepo ?? null;
-    sourceJobGithubPrNumber = sourceJob?.prNumber ?? null;
-    sourceJobGithubPrSha = sourceJob?.prSha ?? null;
-    sourceJobHarnessModelOverrides = sourceJob?.payload?.harnessModelOverrides;
-  }
-
-  if (task.type === CloudTaskType.SnapshotResume) {
-    task.prSourceControlProvider =
-      task.prSourceControlProvider ??
-      sourceJobPrSourceControlProvider ??
-      'github';
-    task.prRepo = task.prRepo ?? sourceJobGithubPrRepo;
-    task.prNumber = task.prNumber ?? sourceJobGithubPrNumber;
-    task.prSha = task.prSha ?? sourceJobGithubPrSha;
-  }
+  const { initialPaths } = await resolveEnvironmentContext(task);
 
   const resolvedHarness = await resolveRequestedHarness(task);
-  const targetHarness = sourceJobHarness ?? resolvedHarness.harness;
+  const targetHarness = resolvedHarness.harness;
   const { task: taskWithHarnessOverrides, model: effectiveTaskModel } =
     resolveEffectiveHarnessModelState({
       task,
       targetHarness,
-      isSnapshotResume: task.type === CloudTaskType.SnapshotResume,
-      sourceJobHarnessModelOverrides,
+      isSnapshotResume: false,
+      sourceJobHarnessModelOverrides: undefined,
       deploymentMetadata: resolvedHarness.deploymentMetadata,
       deploymentTaskModelSettings: resolvedHarness.deploymentTaskModelSettings,
       deploymentCodeReviewModelId:
@@ -962,7 +1111,9 @@ export async function enqueueCloudTask(
   const repositoryName = taskWithHarnessOverrides.payload.repo || null;
   const resolvedTaskPolicy = resolveCloudTaskRuntimePolicy({
     taskType: taskWithHarnessOverrides.type,
-    launchClass: options.launchClass,
+    launchClass:
+      options.launchClass ??
+      (initiator.kind === 'automation' ? 'automation' : undefined),
     appEnv: Env.APP_ENV ?? 'development',
     defaultKeepaliveMs: DEFAULT_KEEPALIVE_MS,
     delegatedKeepaliveMs: DEFAULT_DELEGATED_KEEPALIVE_MS,
@@ -979,394 +1130,166 @@ export async function enqueueCloudTask(
       ? taskWithHarnessOverrides.payload.description
       : null,
   );
-  const requestedComputeProvider = resolveComputeProviderTarget(
+  const targetComputeProvider = resolveComputeProviderTarget(
     task.computeProvider,
     await resolveDefaultComputeProvider(),
   );
 
-  const targetComputeProvider = sourceJobVendor ?? requestedComputeProvider;
-
-  if (
-    task.type === CloudTaskType.SnapshotResume &&
-    sourceJobHarness &&
-    task.harness &&
-    sourceJobHarness !== task.harness
-  ) {
-    console.warn(
-      `[enqueueCloudTask] SnapshotResume harness override: requested=${task.harness}, source=${sourceJobHarness}`,
-    );
-  }
-
-  if (
-    task.type === CloudTaskType.SnapshotResume &&
-    sourceJobVendor &&
-    task.computeProvider &&
-    sourceJobVendor !== task.computeProvider
-  ) {
-    console.warn(
-      `[enqueueCloudTask] SnapshotResume computeProvider override: requested=${task.computeProvider}, source=${sourceJobVendor}`,
-    );
-  }
-
   const requestedWorkKindDecision =
-    task.type === CloudTaskType.SnapshotResume
-      ? await resolveRequestedWorkKindDecision({
-          inheritedKind: sourceJobRequestedWorkKind,
-          userId,
-          taskId: internalTaskId,
-        })
-      : (task.requestedWorkKindDecision ??
-        (await resolveRequestedWorkKindDecision({
-          prompt: getRequestedWorkKindPrompt(task),
-          bootstrapSkill: getRequestedWorkKindBootstrapSkill(task),
-          userId,
-          taskId: internalTaskId,
-        })));
+    task.requestedWorkKindDecision ??
+    (await resolveRequestedWorkKindDecision({
+      prompt: getInitialTaskPrompt(task),
+      bootstrapSkill: getRequestedWorkKindBootstrapSkill(task),
+      userId: linkedUserId,
+    }));
 
-  if (snapshotResumeSourceCloudJobId && snapshotResumeSourceSnapshotId) {
-    await recordSnapshotResumeRequestEvent({
-      cloudJobId: snapshotResumeSourceCloudJobId,
-      eventType: 'decision',
-      message: 'Snapshot resume requested.',
-      details: {
-        stage: 'request',
-        sourceCloudJobId: snapshotResumeSourceCloudJobId,
-        sourceSnapshotId: snapshotResumeSourceSnapshotId,
-        requestedCloudJobUserId: userId ?? null,
-      },
-    });
+  const initiatorColumns = resolveInitiatorColumns(initiator);
+
+  // tasks.initiator_automation references automations.key; make sure the
+  // seeded rows exist before stamping an automation initiator.
+  if (initiator.kind === 'automation') {
+    await ensureAutomationRowsOnce();
   }
 
-  // This is currently the only place where we create cloud jobs.
-  // Note that all of the validations above are enforced at the database level
-  // as well.
-  let cloudJob: CloudJob | null = null;
+  const initialPrompt = getInitialTaskPrompt(task) ?? null;
+  const externalGithubIdentity = {
+    githubLogin: 'githubLogin' in task ? task.githubLogin : null,
+    githubUserId: 'githubUserId' in task ? task.githubUserId : null,
+  };
 
-  try {
-    cloudJob = await db.transaction(async (tx) => {
-      const attributionSnapshot = await resolvePersistedTaskAttributionSnapshot(
-        tx,
-        taskWithHarnessOverrides,
-      );
-      // Gate the effective author / PR owner resolution behind the
-      // AuthorshipRules org flag. When the flag is off we skip the rule fetch
-      // and evaluation entirely and leave the effective-authorship columns
-      // null, which downstream git-author/display resolution treats as legacy
-      // attribution — so a flag-off launch is byte-identical to pre-rollout
-      // behavior.
-      const authorshipRulesEnabled = evaluateFeatureFlagFromMetadata(
-        FeatureFlag.AuthorshipRules,
-        resolvedHarness.deploymentMetadata ?? {},
-      );
-      const effectiveAuthorship = authorshipRulesEnabled
-        ? await (async () => {
-            const [authorshipSettingsRow, matchedHumanActor] =
-              await Promise.all([
-                tx.query.backgroundAgentSettings.findFirst({
-                  columns: {
-                    compiledAuthorshipRules: true,
-                  },
-                }),
-                resolveMatchedHumanActor(
-                  tx,
-                  attributionSnapshot.attributedUserId,
-                ),
-              ]);
-            return evaluateEffectiveAuthorship({
-              compiledRules:
-                authorshipSettingsRow?.compiledAuthorshipRules ?? [],
-              matchedHumanActor,
-              snapshot: attributionSnapshot,
-              task: taskWithHarnessOverrides,
-            });
-          })()
-        : null;
-      const persistedAttributionSnapshot = {
-        attributionKind: attributionSnapshot.attributionKind ?? undefined,
-        attributedUserId: attributionSnapshot.attributedUserId ?? null,
-        attributionSourceKind:
-          attributionSnapshot.attributionSourceKind ?? undefined,
-        attributionSourceDisplayName:
-          attributionSnapshot.attributionSourceDisplayName ?? null,
-        attributionSourceExternalId:
-          attributionSnapshot.attributionSourceExternalId ?? null,
-        attributedGithubLogin:
-          attributionSnapshot.attributedGithubLogin ?? null,
-        attributedGithubUserId:
-          attributionSnapshot.attributedGithubUserId ?? null,
-        effectiveAuthorKind: effectiveAuthorship?.effectiveAuthorKind ?? null,
-        effectiveAuthorUserId:
-          effectiveAuthorship?.effectiveAuthorUserId ?? null,
-        effectiveAuthorDisplayName:
-          effectiveAuthorship?.effectiveAuthorDisplayName ?? null,
-        effectiveAuthorGithubLogin:
-          effectiveAuthorship?.effectiveAuthorGithubLogin ?? null,
-        effectiveAuthorGithubUserId:
-          effectiveAuthorship?.effectiveAuthorGithubUserId ?? null,
-        effectiveAuthorReason:
-          effectiveAuthorship?.effectiveAuthorReason ?? null,
-        effectiveAuthorRuleId:
-          effectiveAuthorship?.effectiveAuthorRuleId ?? null,
-        effectivePrOwnerKind: effectiveAuthorship?.effectivePrOwnerKind ?? null,
-        effectivePrOwnerUserId:
-          effectiveAuthorship?.effectivePrOwnerUserId ?? null,
-        effectivePrOwnerDisplayName:
-          effectiveAuthorship?.effectivePrOwnerDisplayName ?? null,
-        effectivePrOwnerGithubLogin:
-          effectiveAuthorship?.effectivePrOwnerGithubLogin ?? null,
-        effectivePrOwnerReason:
-          effectiveAuthorship?.effectivePrOwnerReason ?? null,
-        effectivePrOwnerRuleId:
-          effectiveAuthorship?.effectivePrOwnerRuleId ?? null,
-      };
-      let taskId = internalTaskId ?? null;
-
-      if (taskId) {
-        const existingTask = await tx.query.tasks.findFirst({
-          where: eq(tasks.id, taskId),
-          columns: { id: true },
-        });
-
-        if (!existingTask) {
-          const createdTask = await createTaskWithRetry(
-            {
-              id: taskId,
-              userId: userId ?? null,
-              harness: targetHarness,
-              provider: DEFAULT_STANDARD_TASK_PROVIDER,
-              model: effectiveTaskModel,
-              title,
-              ...(hasDeterministicCloudJobTitle(taskWithHarnessOverrides.type)
-                ? { llmTitleCheckpoint: LLM_TITLE_LOCKED_CHECKPOINT }
-                : {}),
-              repositoryName,
-              repositoryUrl: repositoryName
-                ? `https://github.com/${repositoryName}`
-                : null,
-              defaultBranch: taskWithHarnessOverrides.payload.branch ?? null,
-              timestamp: nowTs,
-              ...persistedAttributionSnapshot,
-            },
-            { db: tx },
-          );
-
-          taskId = createdTask.id;
-        }
-      } else {
-        const createdTask = await createTaskWithRetry(
-          {
-            userId: userId ?? null,
-            harness: targetHarness,
-            provider: DEFAULT_STANDARD_TASK_PROVIDER,
-            model: effectiveTaskModel,
-            title,
-            ...(hasDeterministicCloudJobTitle(taskWithHarnessOverrides.type)
-              ? { llmTitleCheckpoint: LLM_TITLE_LOCKED_CHECKPOINT }
-              : {}),
-            repositoryName,
-            repositoryUrl: repositoryName
-              ? `https://github.com/${repositoryName}`
-              : null,
-            defaultBranch: taskWithHarnessOverrides.payload.branch ?? null,
-            timestamp: nowTs,
-            ...persistedAttributionSnapshot,
-          },
-          { db: tx },
-        );
-
-        taskId = createdTask.id;
-      }
-
-      const { computeProvider: _ignoredComputeProvider, ...taskInsertValues } =
-        taskWithHarnessOverrides;
-
-      const [insertedCloudJob] = await tx
-        .insert(cloudJobs)
-        .values({
-          status: options.initialStatus ?? CloudTaskStatus.Pending,
-          ...(options.initialStatus === CloudTaskStatus.Dequeued
-            ? { dequeuedAt: new Date() }
-            : {}),
-          vendor: targetComputeProvider,
-          port: task.payload.port,
-          initialPaths,
-          ...taskInsertValues,
-          slackThreadTs,
-          ...(sourceJobHarnessInstructions !== null
-            ? { harnessInstructions: sourceJobHarnessInstructions }
-            : {}),
-          harness: targetHarness,
-          title,
-          requestedWorkKind: requestedWorkKindDecision.kind,
-          requestedWorkKindSource: requestedWorkKindDecision.source,
-          requestedWorkKindConfidence: requestedWorkKindDecision.confidence,
-          actingUserId: options.skipInitialActingUser ? null : (userId ?? null),
-          keepaliveMs,
-          ...persistedAttributionSnapshot,
-          taskId,
-        })
-        .returning();
-
-      if (!insertedCloudJob) {
-        throw new Error('Failed to create `cloudJobs` record.');
-      }
-
-      if (options.afterCreateInTransaction) {
-        await options.afterCreateInTransaction(tx, insertedCloudJob);
-      }
-
-      return insertedCloudJob;
-    });
-  } catch (error) {
-    if (snapshotResumeSourceCloudJobId && snapshotResumeSourceSnapshotId) {
-      await recordSnapshotResumeRequestEvent({
-        cloudJobId: snapshotResumeSourceCloudJobId,
-        eventType: 'failed',
-        message:
-          'Snapshot resume request failed before a child job was created.',
-        details: {
-          stage: 'request',
-          sourceCloudJobId: snapshotResumeSourceCloudJobId,
-          sourceSnapshotId: snapshotResumeSourceSnapshotId,
-          requestedCloudJobUserId: userId ?? null,
-          error: error instanceof Error ? error.message : String(error),
+  // This is the only place where fresh tasks and their first runs are created.
+  const cloudJob = await db.transaction(async (tx) => {
+    // Commit-author evaluation is unconditional at fresh enqueue.
+    const [authorshipSettingsRow, matchedHumanActor] = await Promise.all([
+      tx.query.deploymentSettings.findFirst({
+        columns: {
+          compiledAuthorshipRules: true,
         },
+      }),
+      resolveMatchedHumanActor(tx, linkedUserId),
+    ]);
+    const commitAuthor = evaluateCommitAuthor({
+      compiledRules: authorshipSettingsRow?.compiledAuthorshipRules ?? [],
+      initiator,
+      matchedHumanActor,
+      externalGithubIdentity,
+      workflow,
+      surface,
+      repositoryFullName: repositoryName,
+    });
+
+    const createdTask = await createTaskWithRetry(
+      {
+        workflow,
+        surface,
+        trigger,
+        visibility,
+        state: 'active',
+        ...initiatorColumns,
+        ...commitAuthor,
+        slackChannelId: input.channels?.slackChannelId ?? null,
+        slackThreadTs: input.channels?.slackThreadTs ?? null,
+        linearSessionId: input.channels?.linearSessionId ?? null,
+        linearIssueId: input.channels?.linearIssueId ?? null,
+        linearOrganizationId: input.channels?.linearOrganizationId ?? null,
+        harness: targetHarness,
+        provider: DEFAULT_STANDARD_TASK_PROVIDER,
+        model: effectiveTaskModel,
+        title,
+        ...(hasDeterministicCloudJobTitle(taskWithHarnessOverrides.type)
+          ? { llmTitleCheckpoint: LLM_TITLE_LOCKED_CHECKPOINT }
+          : {}),
+        prompt: initialPrompt,
+        requestedWorkKind: requestedWorkKindDecision.kind,
+        requestedWorkKindSource: requestedWorkKindDecision.source,
+        requestedWorkKindConfidence: requestedWorkKindDecision.confidence,
+        repositoryName,
+        repositoryUrl: repositoryName
+          ? `https://github.com/${repositoryName}`
+          : null,
+        defaultBranch: taskWithHarnessOverrides.payload.branch ?? null,
+        timestamp: nowTs,
+      },
+      { db: tx },
+    );
+
+    if (input.prLinkage) {
+      await tx.insert(taskPullRequests).values({
+        taskId: createdTask.id,
+        sourceControlProvider: input.prLinkage.provider,
+        host: input.prLinkage.host ?? null,
+        repository: input.prLinkage.repository,
+        prNumber: input.prLinkage.prNumber,
+        prUrl: input.prLinkage.prUrl,
+        prTitle: input.prLinkage.prTitle ?? null,
+        prSha: input.prLinkage.prSha ?? null,
+        prBaseRef: input.prLinkage.prBaseRef ?? null,
+        prBaseSha: input.prLinkage.prBaseSha ?? null,
+        githubReactionId: input.prLinkage.githubReactionId ?? null,
+        githubCheckRunId: input.prLinkage.githubCheckRunId ?? null,
+        githubReviewCommentId: input.prLinkage.githubReviewCommentId ?? null,
       });
     }
 
-    throw error;
-  }
+    const [insertedRun] = await tx
+      .insert(taskRuns)
+      .values({
+        taskId: createdTask.id,
+        kind: 'fresh',
+        payloadKind: taskWithHarnessOverrides.type,
+        actingUserId: options.skipInitialActingUser ? null : linkedUserId,
+        status: options.initialStatus ?? CloudTaskStatus.Pending,
+        ...(options.initialStatus === CloudTaskStatus.Dequeued
+          ? { dequeuedAt: new Date() }
+          : {}),
+        harness: targetHarness,
+        vendor: targetComputeProvider,
+        port: task.payload.port,
+        initialPaths,
+        payload: taskWithHarnessOverrides.payload,
+        keepaliveMs,
+      })
+      .returning();
 
-  if (!cloudJob) {
-    throw new Error('Failed to create `cloudJobs` record.');
-  }
+    if (!insertedRun) {
+      throw new Error('Failed to create `task_runs` record.');
+    }
+
+    if (options.afterCreateInTransaction) {
+      await options.afterCreateInTransaction(tx, insertedRun);
+    }
+
+    return insertedRun;
+  });
 
   // Anonymous analytics (no-op unless enabled): task creation with
   // non-identifying routing facts only.
   void captureEvent('task_created', {
-    ...(userId ? { userId } : {}),
+    ...(linkedUserId ? { userId: linkedUserId } : {}),
     properties: {
-      taskType: cloudJob.type,
+      taskType: cloudJob.payloadKind,
+      workflow,
+      surface,
+      trigger,
       harness: cloudJob.harness ?? null,
       model: effectiveTaskModel,
       computeProvider: cloudJob.vendor ?? null,
     },
   });
 
-  if (snapshotResumeSourceCloudJobId && snapshotResumeSourceSnapshotId) {
-    await recordSnapshotResumeRequestEvent({
-      cloudJobId: snapshotResumeSourceCloudJobId,
-      eventType: 'enqueued',
-      message: `Created SnapshotResume job #${cloudJob.id}.`,
-      details: {
-        stage: 'request',
-        sourceCloudJobId: snapshotResumeSourceCloudJobId,
-        sourceSnapshotId: snapshotResumeSourceSnapshotId,
-        resumeCloudJobId: cloudJob.id,
-        resumeTaskId: cloudJob.taskId,
-        requestedCloudJobUserId: userId ?? null,
-      },
-    });
-  }
-
-  // [CloudTaskType]          [Agent(s)]               [Trigger(s)]
-  // ---------------------------------------------------------------------------
-  // StandardTask             Generalist                Manual
-  //
-  // GithubPrReview           PR Reviewer               GitHub, Manual (TODO: What happens if you manually trigger a PR that is already reviewed?)
-  // GithubPrReviewSync       PR Reviewer               GitHub
-  // GithubPrReviewFollowUp   PR Reviewer               GitHub
-  //
-  // SlackAppMention          Generalist                Slack
-  // ---------------------------------------------------------------------------
-  //
-  // The following task types are deprecated and currently unsupported in the standard GitHub workflow layer: GithubIssueFix, GithubIssueCommentRespond.
-  // They are reserved for a future issue-specific cloud agent path.
-
-  if (options.enqueue !== false) {
-    if (options.beforeEnqueue) {
-      try {
-        await options.beforeEnqueue(cloudJob);
-      } catch (error) {
-        const message = getErrorMessage(
-          error,
-          'Failed before cloud job enqueue',
-        );
-
-        await cancelCloudJobBeforeQueue(
-          cloudJob,
-          message,
-          'beforeEnqueue failed',
-        );
-
-        throw error;
-      }
-    }
-
-    try {
-      await CloudJobQueue.getInstance().enqueue({
-        id: cloudJob.id,
-        scope: getScope(task.type, task.payload),
-      });
-    } catch (error) {
-      await cancelCloudJobBeforeQueue(
-        cloudJob,
-        getErrorMessage(error, 'Failed to enqueue cloud job'),
-        'queue enqueue failed',
-      );
-
-      throw new CloudJobQueueEnqueueError({
-        cloudJobId: cloudJob.id,
-        taskId: cloudJob.taskId,
-        originalError: error,
-      });
-    }
-
-    try {
-      await db.transaction(async (tx) => {
-        await tx.execute(
-          sql`SELECT id FROM cloud_jobs WHERE id = ${cloudJob.id} FOR UPDATE`,
-        );
-
-        const persistedCloudJob = await tx.query.cloudJobs.findFirst({
-          where: eq(cloudJobs.id, cloudJob.id),
-          columns: {
-            status: true,
-            canceledAt: true,
-            completedAt: true,
-          },
-        });
-
-        if (
-          !persistedCloudJob ||
-          persistedCloudJob.status === CloudTaskStatus.Canceled ||
-          persistedCloudJob.canceledAt !== null ||
-          persistedCloudJob.completedAt !== null
-        ) {
-          return;
-        }
-
-        await recordTaskStartParallelCount(tx, {
-          cloudJobId: cloudJob.id,
-          cloudJobType: task.type,
-          taskId: cloudJob.taskId,
-          startedAt: new Date(),
-        });
-      });
-    } catch (loggingError) {
-      console.warn(
-        `[enqueueCloudTask] Failed to record task-start parallel count for cloud job ${cloudJob.id}: ${
-          loggingError instanceof Error
-            ? loggingError.message
-            : String(loggingError)
-        }`,
-      );
-    }
-  }
+  await pushRunOntoQueue({
+    cloudJob,
+    scope: resolveQueueScope({
+      workflow,
+      payloadKind: cloudJob.payloadKind,
+      prLinkage: input.prLinkage,
+    }),
+    options,
+  });
 
   // Fire-and-forget: generate an LLM title from the initial prompt during
   // startup so the user sees a meaningful title before the worker records
-  // the first envelope.
+  // the first envelope. Titles live on tasks only.
   const description =
     'description' in task.payload ? task.payload.description : undefined;
 
@@ -1379,14 +1302,14 @@ export async function enqueueCloudTask(
     void (async () => {
       try {
         const generatedTitle = await generateLlmTaskTitle({
-          userId: cloudJob.userId,
+          userId: linkedUserId,
           taskId: cloudJob.taskId,
           messages: [{ role: 'user', text: description }],
         });
         const shouldPersistGeneratedTitle =
           !isFallbackTaskTitle(generatedTitle);
 
-        const [updatedTask] = await db
+        await db
           .update(tasks)
           .set({
             llmTitleCheckpoint: 1,
@@ -1399,17 +1322,7 @@ export async function enqueueCloudTask(
               isNull(tasks.titleEditedByUserAt),
               lt(tasks.llmTitleCheckpoint, 1),
             ),
-          )
-          .returning({ id: tasks.id });
-
-        if (updatedTask) {
-          if (shouldPersistGeneratedTitle) {
-            await db
-              .update(cloudJobs)
-              .set({ title: generatedTitle })
-              .where(eq(cloudJobs.id, cloudJob.id));
-          }
-        }
+          );
       } catch (error) {
         console.warn(
           `[enqueueCloudTask] Failed to generate early LLM title for task ${cloudJob.taskId}: ${
@@ -1423,22 +1336,220 @@ export async function enqueueCloudTask(
   return cloudJob;
 }
 
+async function enqueueSnapshotResume(
+  input: ResumeCloudTaskLaunch,
+  options: EnqueueCloudTaskOptions,
+): Promise<CloudJob> {
+  const { task } = input;
+  const actingUserId = options.skipInitialActingUser
+    ? null
+    : (input.actingUserId ?? null);
+
+  const sourceRunId = task.sourceCloudJobId ?? task.payload.sourceCloudJobId;
+  const sourceSnapshotId =
+    task.sourceSnapshotId ?? task.payload.sourceSnapshotId;
+
+  if (!sourceRunId) {
+    throw new Error('A snapshot resume requires a source run id.');
+  }
+
+  await assertUserIsNotDeleted(actingUserId);
+
+  const sourceRun = await db.query.taskRuns.findFirst({
+    where: eq(taskRuns.id, sourceRunId),
+    columns: {
+      id: true,
+      taskId: true,
+      harness: true,
+      vendor: true,
+      payload: true,
+    },
+  });
+
+  if (!sourceRun) {
+    throw new Error(
+      `Source run ${sourceRunId} was not found for snapshot resume.`,
+    );
+  }
+
+  await recordSnapshotResumeRequestEvent({
+    runId: sourceRun.id,
+    taskId: sourceRun.taskId,
+    eventType: 'decision',
+    message: 'Snapshot resume requested.',
+    details: {
+      stage: 'request',
+      sourceRunId: sourceRun.id,
+      sourceSnapshotId: sourceSnapshotId ?? null,
+      actingUserId,
+    },
+  });
+
+  const { initialPaths } = await resolveEnvironmentContext(task);
+
+  const sourceJobHarness = sourceRun.harness;
+  const sourceJobVendor = resolveComputeProviderTarget(sourceRun.vendor);
+  const sourceJobHarnessModelOverrides = (
+    sourceRun.payload as {
+      harnessModelOverrides?: import('@roomote/types').HarnessModelOverrides;
+    }
+  )?.harnessModelOverrides;
+
+  if (task.harness && sourceJobHarness !== task.harness) {
+    console.warn(
+      `[enqueueCloudTask] SnapshotResume harness override: requested=${task.harness}, source=${sourceJobHarness}`,
+    );
+  }
+
+  if (
+    sourceJobVendor &&
+    task.computeProvider &&
+    sourceJobVendor !== task.computeProvider
+  ) {
+    console.warn(
+      `[enqueueCloudTask] SnapshotResume computeProvider override: requested=${task.computeProvider}, source=${sourceJobVendor}`,
+    );
+  }
+
+  const resolvedHarness = await resolveRequestedHarness(task);
+  const targetHarness = sourceJobHarness ?? resolvedHarness.harness;
+  const { task: taskWithHarnessOverrides } = resolveEffectiveHarnessModelState({
+    task,
+    targetHarness,
+    isSnapshotResume: true,
+    sourceJobHarnessModelOverrides,
+    deploymentMetadata: resolvedHarness.deploymentMetadata,
+    deploymentTaskModelSettings: resolvedHarness.deploymentTaskModelSettings,
+    deploymentCodeReviewModelId:
+      resolvedHarness.deploymentCodeReviewModelId ?? null,
+  });
+
+  const targetComputeProvider =
+    sourceJobVendor ??
+    resolveComputeProviderTarget(
+      task.computeProvider,
+      await resolveDefaultComputeProvider(),
+    );
+
+  const resolvedTaskPolicy = resolveCloudTaskRuntimePolicy({
+    taskType: TaskPayloadKind.SnapshotResume,
+    launchClass: options.launchClass,
+    appEnv: Env.APP_ENV ?? 'development',
+    defaultKeepaliveMs: DEFAULT_KEEPALIVE_MS,
+    delegatedKeepaliveMs: DEFAULT_DELEGATED_KEEPALIVE_MS,
+    sandboxTimeoutMs: TASK_TIMEOUT_MS,
+  });
+
+  let cloudJob: CloudJob;
+
+  try {
+    cloudJob = await db.transaction(async (tx) => {
+      const [insertedRun] = await tx
+        .insert(taskRuns)
+        .values({
+          taskId: sourceRun.taskId,
+          kind: 'resume',
+          sourceRunId: sourceRun.id,
+          payloadKind: TaskPayloadKind.SnapshotResume,
+          actingUserId,
+          status: options.initialStatus ?? CloudTaskStatus.Pending,
+          ...(options.initialStatus === CloudTaskStatus.Dequeued
+            ? { dequeuedAt: new Date() }
+            : {}),
+          harness: targetHarness,
+          vendor: targetComputeProvider,
+          port: task.payload.port,
+          initialPaths,
+          payload: taskWithHarnessOverrides.payload,
+          sourceSnapshotId: sourceSnapshotId ?? null,
+          keepaliveMs: resolvedTaskPolicy.keepaliveMs,
+        })
+        .returning();
+
+      if (!insertedRun) {
+        throw new Error('Failed to create `task_runs` record.');
+      }
+
+      if (options.afterCreateInTransaction) {
+        await options.afterCreateInTransaction(tx, insertedRun);
+      }
+
+      // The new resume run is non-terminal (pending/dequeued), so re-derive the
+      // task state: a task that had gone terminal on a prior attempt flips back
+      // to 'active' now that another attempt is queued.
+      await syncTaskStateFromRuns(tx, sourceRun.taskId);
+
+      return insertedRun;
+    });
+  } catch (error) {
+    await recordSnapshotResumeRequestEvent({
+      runId: sourceRun.id,
+      taskId: sourceRun.taskId,
+      eventType: 'failed',
+      message: 'Snapshot resume request failed before a child run was created.',
+      details: {
+        stage: 'request',
+        sourceRunId: sourceRun.id,
+        sourceSnapshotId: sourceSnapshotId ?? null,
+        actingUserId,
+        error: error instanceof Error ? error.message : String(error),
+      },
+    });
+
+    throw error;
+  }
+
+  void captureEvent('task_created', {
+    ...(actingUserId ? { userId: actingUserId } : {}),
+    properties: {
+      taskType: cloudJob.payloadKind,
+      harness: cloudJob.harness ?? null,
+      computeProvider: cloudJob.vendor ?? null,
+    },
+  });
+
+  await recordSnapshotResumeRequestEvent({
+    runId: sourceRun.id,
+    taskId: sourceRun.taskId,
+    eventType: 'enqueued',
+    message: `Created SnapshotResume run #${cloudJob.id}.`,
+    details: {
+      stage: 'request',
+      sourceRunId: sourceRun.id,
+      sourceSnapshotId: sourceSnapshotId ?? null,
+      resumeRunId: cloudJob.id,
+      resumeTaskId: cloudJob.taskId,
+      actingUserId,
+    },
+  });
+
+  await pushRunOntoQueue({
+    cloudJob,
+    scope: randomUUID(),
+    options,
+  });
+
+  return cloudJob;
+}
+
 async function recordSnapshotResumeRequestEvent(input: {
-  cloudJobId: number;
+  runId: number;
+  taskId?: string;
   eventType: 'decision' | 'enqueued' | 'failed';
   message: string;
   details: Record<string, unknown>;
 }): Promise<void> {
   try {
     await recordSnapshotResumeEvent(db, {
-      cloudJobId: input.cloudJobId,
+      runId: input.runId,
+      taskId: input.taskId,
       eventType: input.eventType,
       message: input.message,
       details: input.details,
     });
   } catch (error) {
     console.warn(
-      `[enqueueCloudTask] Failed to persist snapshot resume event for source job #${input.cloudJobId}: ${
+      `[enqueueCloudTask] Failed to persist snapshot resume event for source run #${input.runId}: ${
         error instanceof Error ? error.message : String(error)
       }`,
     );
@@ -1451,35 +1562,13 @@ export async function dequeueCloudTask(): Promise<number | null> {
 }
 
 export function releaseCloudTask(cloudJob: CloudJob): Promise<boolean> {
-  return CloudJobQueue.getInstance().releaseLock(
-    getScope(cloudJob.type, cloudJob.payload),
-  );
+  return CloudJobQueue.getInstance().releaseLock(getRunLockScope(cloudJob));
 }
 
 export async function isLockedCloudTask(cloudJob: CloudJob): Promise<boolean> {
-  return CloudJobQueue.getInstance().isLocked(
-    getScope(cloudJob.type, cloudJob.payload),
-  );
+  return CloudJobQueue.getInstance().isLocked(getRunLockScope(cloudJob));
 }
 
 export async function getCloudTaskLockTTL(cloudJob: CloudJob): Promise<number> {
-  return CloudJobQueue.getInstance().getLockTTL(
-    getScope(cloudJob.type, cloudJob.payload),
-  );
-}
-
-function resolveSlackThreadTs(task: CloudTask): string | undefined {
-  if (typeof task.slackThreadTs === 'string' && task.slackThreadTs.length > 0) {
-    return task.slackThreadTs;
-  }
-
-  return getSlackThreadTsFromTaskPayload(task.payload) ?? undefined;
-}
-
-function getScope(type: CloudTaskType, payload: CloudTaskPayload): string {
-  // Currently only PR review jobs require a scope to prevent multiple
-  // concurrent jobs for the same PR.
-  return isPrReviewJob(type, payload)
-    ? `${payload.repo}:${payload.prNumber}`
-    : randomUUID();
+  return CloudJobQueue.getInstance().getLockTTL(getRunLockScope(cloudJob));
 }

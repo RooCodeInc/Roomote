@@ -12,9 +12,8 @@ import {
   getSlackThreadTsFromTaskPayload,
   getTaskToolActionIdFromInvocation,
   getTaskToolInvocation,
-  isHiddenCloudTaskType,
   CloudTaskStatus,
-  CloudTaskType,
+  TaskPayloadKind,
   EXPIRED_SNAPSHOT_RESUME_ERROR,
   bootingCloudTaskStatuses,
   cloudTaskSchema,
@@ -31,13 +30,14 @@ import {
   populateSnapshotResumeSlackMetadata,
   populateSnapshotResumeCommunicationMetadata,
   suggestionPrioritySet,
-  taskSuggestionStatusSet,
+  WORK_ITEM_STATUSES,
+  WORK_ITEM_ACTIVE_STATUSES,
   shouldUseAppTokenOnly,
 } from '../cloud-jobs';
 
 describe('isPrReviewJob', () => {
   it('returns true for GithubPrReview type', () => {
-    const payload: CloudTaskPayload<CloudTaskType.GithubPrReview> = {
+    const payload: CloudTaskPayload<typeof TaskPayloadKind.GithubPrReview> = {
       repo: 'owner/repo',
       prNumber: 123,
       prTitle: 'Test PR',
@@ -45,94 +45,79 @@ describe('isPrReviewJob', () => {
       headSha: 'abc123',
     };
 
-    expect(isPrReviewJob(CloudTaskType.GithubPrReview, payload)).toBe(true);
+    expect(isPrReviewJob(TaskPayloadKind.GithubPrReview, payload)).toBe(true);
   });
 
   it('returns true for GithubPrReviewSync type', () => {
-    const payload: CloudTaskPayload<CloudTaskType.GithubPrReviewSync> = {
-      repo: 'owner/repo',
-      prNumber: 123,
-      prTitle: 'Test PR',
-      prUrl: 'https://github.com/owner/repo/pull/123',
-      headSha: 'abc123',
-    };
+    const payload: CloudTaskPayload<typeof TaskPayloadKind.GithubPrReviewSync> =
+      {
+        repo: 'owner/repo',
+        prNumber: 123,
+        prTitle: 'Test PR',
+        prUrl: 'https://github.com/owner/repo/pull/123',
+        headSha: 'abc123',
+      };
 
-    expect(isPrReviewJob(CloudTaskType.GithubPrReviewSync, payload)).toBe(true);
+    expect(isPrReviewJob(TaskPayloadKind.GithubPrReviewSync, payload)).toBe(
+      true,
+    );
   });
 
   it('returns false for non-PR review types', () => {
-    const payload: CloudTaskPayload<CloudTaskType.StandardTask> = {
+    const payload: CloudTaskPayload<typeof TaskPayloadKind.StandardTask> = {
       repo: 'owner/repo',
       description: 'Test task',
     };
 
-    expect(isPrReviewJob(CloudTaskType.GithubIssueFix, payload)).toBe(false);
-    expect(isPrReviewJob(CloudTaskType.SlackAppMention, payload)).toBe(false);
+    expect(isPrReviewJob(TaskPayloadKind.SlackAppMention, payload)).toBe(false);
   });
 });
 
 describe('shouldUseAppTokenOnly', () => {
   it('returns true for GithubPrReview', () => {
-    expect(shouldUseAppTokenOnly(CloudTaskType.GithubPrReview)).toBe(true);
+    expect(shouldUseAppTokenOnly(TaskPayloadKind.GithubPrReview)).toBe(true);
   });
 
   it('returns true for GithubPrReviewSync', () => {
-    expect(shouldUseAppTokenOnly(CloudTaskType.GithubPrReviewSync)).toBe(true);
+    expect(shouldUseAppTokenOnly(TaskPayloadKind.GithubPrReviewSync)).toBe(
+      true,
+    );
   });
 
   it('returns true for GithubPrReviewFollowUp (review follow-up)', () => {
-    expect(shouldUseAppTokenOnly(CloudTaskType.GithubPrReviewFollowUp)).toBe(
+    expect(shouldUseAppTokenOnly(TaskPayloadKind.GithubPrReviewFollowUp)).toBe(
       true,
     );
   });
 
   it('returns false for StandardTask', () => {
-    expect(shouldUseAppTokenOnly(CloudTaskType.StandardTask)).toBe(false);
-  });
-
-  it('returns false for GithubIssueFix', () => {
-    expect(shouldUseAppTokenOnly(CloudTaskType.GithubIssueFix)).toBe(false);
+    expect(shouldUseAppTokenOnly(TaskPayloadKind.StandardTask)).toBe(false);
   });
 
   it('returns false for LinearAgentSession', () => {
-    expect(shouldUseAppTokenOnly(CloudTaskType.LinearAgentSession)).toBe(false);
+    expect(shouldUseAppTokenOnly(TaskPayloadKind.LinearAgentSession)).toBe(
+      false,
+    );
   });
 
   it('returns false for SlackAppMention', () => {
-    expect(shouldUseAppTokenOnly(CloudTaskType.SlackAppMention)).toBe(false);
+    expect(shouldUseAppTokenOnly(TaskPayloadKind.SlackAppMention)).toBe(false);
   });
 });
 
 describe('isResumableCloudTaskType', () => {
   it('returns true for StandardTask jobs', () => {
-    expect(isResumableCloudTaskType(CloudTaskType.StandardTask)).toBe(true);
+    expect(isResumableCloudTaskType(TaskPayloadKind.StandardTask)).toBe(true);
   });
 
   it('returns true for Suggested Tasks jobs', () => {
-    expect(isResumableCloudTaskType(CloudTaskType.SuggestedTasks)).toBe(true);
-  });
-
-  it('returns true for GithubIssueCommentRespond', () => {
-    expect(
-      isResumableCloudTaskType(CloudTaskType.GithubIssueCommentRespond),
-    ).toBe(true);
+    expect(isResumableCloudTaskType(TaskPayloadKind.Scan)).toBe(true);
   });
 
   it('returns false for GithubPrReview', () => {
-    expect(isResumableCloudTaskType(CloudTaskType.GithubPrReview)).toBe(false);
-  });
-});
-
-describe('isHiddenCloudTaskType', () => {
-  it('returns true for hidden internal task types', () => {
-    expect(isHiddenCloudTaskType(CloudTaskType.SuggestedTasks)).toBe(true);
-    expect(isHiddenCloudTaskType(CloudTaskType.McpRecommendations)).toBe(true);
-    expect(isHiddenCloudTaskType(CloudTaskType.SnapshotEnvironment)).toBe(true);
-  });
-
-  it('returns false for user-visible task types', () => {
-    expect(isHiddenCloudTaskType(CloudTaskType.StandardTask)).toBe(false);
-    expect(isHiddenCloudTaskType(CloudTaskType.GithubPrReview)).toBe(false);
+    expect(isResumableCloudTaskType(TaskPayloadKind.GithubPrReview)).toBe(
+      false,
+    );
   });
 });
 
@@ -201,12 +186,23 @@ describe('suggestion priority display constants', () => {
   });
 });
 
-describe('task suggestion status constants', () => {
-  it('exports the lifecycle validation set', () => {
-    expect(taskSuggestionStatusSet.has('open')).toBe(true);
-    expect(taskSuggestionStatusSet.has('started')).toBe(true);
-    expect(taskSuggestionStatusSet.has('dismissed')).toBe(true);
-    expect(taskSuggestionStatusSet.has('unknown')).toBe(false);
+describe('work item status constants', () => {
+  it('exposes the unified launch state machine', () => {
+    expect(WORK_ITEM_STATUSES).toEqual([
+      'open',
+      'launching',
+      'launched',
+      'failed',
+      'dismissed',
+    ]);
+  });
+
+  it('treats open/launching/launched as active for dedup', () => {
+    expect(WORK_ITEM_ACTIVE_STATUSES).toEqual([
+      'open',
+      'launching',
+      'launched',
+    ]);
   });
 });
 
@@ -250,7 +246,7 @@ describe('cloudTaskSchema', () => {
   it('preserves sourceControlProvider on StandardTask payloads', () => {
     const parsed = cloudTaskSchema.parse({
       userId: 'user-1',
-      type: CloudTaskType.StandardTask,
+      type: TaskPayloadKind.StandardTask,
       payload: {
         repo: 'group/repo',
         sourceControlProvider: 'gitlab',
@@ -258,23 +254,19 @@ describe('cloudTaskSchema', () => {
       },
     });
 
-    expect(parsed.type).toBe(CloudTaskType.StandardTask);
+    expect(parsed.type).toBe(TaskPayloadKind.StandardTask);
 
-    if (parsed.type !== CloudTaskType.StandardTask) {
+    if (parsed.type !== TaskPayloadKind.StandardTask) {
       throw new Error('Expected StandardTask payload');
     }
 
     expect(parsed.payload.sourceControlProvider).toBe('gitlab');
   });
 
-  it('allows GitLab attribution override source and target branch metadata on PR review payloads', () => {
+  it('allows GitLab target branch metadata on PR review payloads', () => {
     const parsed = cloudTaskSchema.parse({
-      type: CloudTaskType.GithubPrReview,
+      type: TaskPayloadKind.GithubPrReview,
       userId: 'user-1',
-      attributionOverride: {
-        kind: 'automatic',
-        sourceKind: 'gitlab',
-      },
       payload: {
         repo: 'acme/backend',
         sourceControlProvider: 'gitlab',
@@ -287,23 +279,17 @@ describe('cloudTaskSchema', () => {
       },
     });
 
-    expect(parsed.attributionOverride?.sourceKind).toBe('gitlab');
-
-    if (parsed.type !== CloudTaskType.GithubPrReview) {
+    if (parsed.type !== TaskPayloadKind.GithubPrReview) {
       throw new Error('Expected GithubPrReview task');
     }
 
     expect(parsed.payload.targetBranch).toBe('main');
   });
 
-  it('allows Gitea attribution override source and target branch metadata on PR review payloads', () => {
+  it('allows Gitea target branch metadata on PR review payloads', () => {
     const parsed = cloudTaskSchema.parse({
-      type: CloudTaskType.GithubPrReview,
+      type: TaskPayloadKind.GithubPrReview,
       userId: 'user-1',
-      attributionOverride: {
-        kind: 'automatic',
-        sourceKind: 'gitea',
-      },
       payload: {
         repo: 'acme/backend',
         sourceControlProvider: 'gitea',
@@ -316,9 +302,7 @@ describe('cloudTaskSchema', () => {
       },
     });
 
-    expect(parsed.attributionOverride?.sourceKind).toBe('gitea');
-
-    if (parsed.type !== CloudTaskType.GithubPrReview) {
+    if (parsed.type !== TaskPayloadKind.GithubPrReview) {
       throw new Error('Expected GithubPrReview task');
     }
 
@@ -326,14 +310,10 @@ describe('cloudTaskSchema', () => {
     expect(parsed.payload.targetBranch).toBe('main');
   });
 
-  it('allows Azure DevOps attribution override source and target branch metadata on PR review payloads', () => {
+  it('allows Azure DevOps target branch metadata on PR review payloads', () => {
     const parsed = cloudTaskSchema.parse({
-      type: CloudTaskType.GithubPrReview,
+      type: TaskPayloadKind.GithubPrReview,
       userId: 'user-1',
-      attributionOverride: {
-        kind: 'automatic',
-        sourceKind: 'ado',
-      },
       payload: {
         repo: 'acme/Platform/backend',
         sourceControlProvider: 'ado',
@@ -347,9 +327,7 @@ describe('cloudTaskSchema', () => {
       },
     });
 
-    expect(parsed.attributionOverride?.sourceKind).toBe('ado');
-
-    if (parsed.type !== CloudTaskType.GithubPrReview) {
+    if (parsed.type !== TaskPayloadKind.GithubPrReview) {
       throw new Error('Expected GithubPrReview task');
     }
 
@@ -360,7 +338,7 @@ describe('cloudTaskSchema', () => {
   it('parses GithubPrReviewFollowUp payloads without any inner bootstrap mode', () => {
     const parsed = cloudTaskSchema.parse({
       userId: 'user-1',
-      type: CloudTaskType.GithubPrReviewFollowUp,
+      type: TaskPayloadKind.GithubPrReviewFollowUp,
       payload: {
         repo: 'owner/repo',
         prNumber: 123,
@@ -370,9 +348,9 @@ describe('cloudTaskSchema', () => {
       },
     });
 
-    expect(parsed.type).toBe(CloudTaskType.GithubPrReviewFollowUp);
+    expect(parsed.type).toBe(TaskPayloadKind.GithubPrReviewFollowUp);
 
-    if (parsed.type !== CloudTaskType.GithubPrReviewFollowUp) {
+    if (parsed.type !== TaskPayloadKind.GithubPrReviewFollowUp) {
       throw new Error('Expected GithubPrReviewFollowUp payload');
     }
 
@@ -382,7 +360,7 @@ describe('cloudTaskSchema', () => {
   it('normalizes legacy explicit_fix GithubPrReviewFollowUp payloads for backward compatibility', () => {
     const parsed = cloudTaskSchema.parse({
       userId: 'user-1',
-      type: CloudTaskType.GithubPrReviewFollowUp,
+      type: TaskPayloadKind.GithubPrReviewFollowUp,
       payload: {
         repo: 'owner/repo',
         prNumber: 123,
@@ -392,9 +370,9 @@ describe('cloudTaskSchema', () => {
       },
     });
 
-    expect(parsed.type).toBe(CloudTaskType.GithubPrReviewFollowUp);
+    expect(parsed.type).toBe(TaskPayloadKind.GithubPrReviewFollowUp);
 
-    if (parsed.type !== CloudTaskType.GithubPrReviewFollowUp) {
+    if (parsed.type !== TaskPayloadKind.GithubPrReviewFollowUp) {
       throw new Error('Expected GithubPrReviewFollowUp payload');
     }
 
@@ -404,7 +382,7 @@ describe('cloudTaskSchema', () => {
   it('parses SuggestedTasks payloads', () => {
     const parsed = cloudTaskSchema.parse({
       userId: 'user-1',
-      type: CloudTaskType.SuggestedTasks,
+      type: TaskPayloadKind.Scan,
       payload: {
         repo: 'owner/repo',
         description: 'Suggest a few tasks',
@@ -416,9 +394,9 @@ describe('cloudTaskSchema', () => {
       },
     });
 
-    expect(parsed.type).toBe(CloudTaskType.SuggestedTasks);
+    expect(parsed.type).toBe(TaskPayloadKind.Scan);
 
-    if (parsed.type !== CloudTaskType.SuggestedTasks) {
+    if (parsed.type !== TaskPayloadKind.Scan) {
       throw new Error('Expected SuggestedTasks payload');
     }
 
@@ -434,7 +412,7 @@ describe('cloudTaskSchema', () => {
   it('parses SuggestedTasks payloads with Slack routing metadata', () => {
     const parsed = cloudTaskSchema.parse({
       userId: 'user-1',
-      type: CloudTaskType.SuggestedTasks,
+      type: TaskPayloadKind.Scan,
       slackThreadTs: '111.222',
       payload: {
         repo: 'owner/repo',
@@ -445,7 +423,7 @@ describe('cloudTaskSchema', () => {
       },
     });
 
-    if (parsed.type !== CloudTaskType.SuggestedTasks) {
+    if (parsed.type !== TaskPayloadKind.Scan) {
       throw new Error('Expected SuggestedTasks payload');
     }
 
@@ -457,7 +435,7 @@ describe('cloudTaskSchema', () => {
   it('parses Dependabot suggestion sources on SuggestedTasks payloads', () => {
     const parsed = cloudTaskSchema.parse({
       userId: 'user-1',
-      type: CloudTaskType.SuggestedTasks,
+      type: TaskPayloadKind.Scan,
       payload: {
         repo: 'owner/repo',
         description: 'Suggest dependency updates',
@@ -467,7 +445,7 @@ describe('cloudTaskSchema', () => {
       },
     });
 
-    if (parsed.type !== CloudTaskType.SuggestedTasks) {
+    if (parsed.type !== TaskPayloadKind.Scan) {
       throw new Error('Expected SuggestedTasks payload');
     }
 
@@ -477,7 +455,7 @@ describe('cloudTaskSchema', () => {
   it('parses McpRecommendations payloads', () => {
     const parsed = cloudTaskSchema.parse({
       userId: 'user-1',
-      type: CloudTaskType.McpRecommendations,
+      type: TaskPayloadKind.McpRecommendations,
       payload: {
         repo: 'owner/repo',
         environmentId: '14f1f7c4-b126-4b3f-a6a8-e37f7d299f4d',
@@ -493,9 +471,9 @@ describe('cloudTaskSchema', () => {
       },
     });
 
-    expect(parsed.type).toBe(CloudTaskType.McpRecommendations);
+    expect(parsed.type).toBe(TaskPayloadKind.McpRecommendations);
 
-    if (parsed.type !== CloudTaskType.McpRecommendations) {
+    if (parsed.type !== TaskPayloadKind.McpRecommendations) {
       throw new Error('Expected McpRecommendations payload');
     }
 
@@ -513,7 +491,7 @@ describe('cloudTaskSchema', () => {
   it('parses SlackAppMention payloads with an optional web return path', () => {
     const parsed = cloudTaskSchema.parse({
       userId: 'user-1',
-      type: CloudTaskType.SlackAppMention,
+      type: TaskPayloadKind.SlackAppMention,
       payload: {
         repo: 'owner/repo',
         channel: 'C123',
@@ -525,9 +503,9 @@ describe('cloudTaskSchema', () => {
       },
     });
 
-    expect(parsed.type).toBe(CloudTaskType.SlackAppMention);
+    expect(parsed.type).toBe(TaskPayloadKind.SlackAppMention);
 
-    if (parsed.type !== CloudTaskType.SlackAppMention) {
+    if (parsed.type !== TaskPayloadKind.SlackAppMention) {
       throw new Error('Expected SlackAppMention payload');
     }
 
@@ -537,16 +515,16 @@ describe('cloudTaskSchema', () => {
   it('parses StandardTask payloads', () => {
     const parsed = cloudTaskSchema.parse({
       userId: 'user-1',
-      type: CloudTaskType.StandardTask,
+      type: TaskPayloadKind.StandardTask,
       payload: {
         repo: 'owner/repo',
         description: 'Investigate this flow',
       },
     });
 
-    expect(parsed.type).toBe(CloudTaskType.StandardTask);
+    expect(parsed.type).toBe(TaskPayloadKind.StandardTask);
 
-    if (parsed.type !== CloudTaskType.StandardTask) {
+    if (parsed.type !== TaskPayloadKind.StandardTask) {
       throw new Error('Expected StandardTask payload');
     }
 
@@ -556,7 +534,7 @@ describe('cloudTaskSchema', () => {
   it('parses shared reasoningEffort overrides on task payloads', () => {
     const parsed = cloudTaskSchema.parse({
       userId: 'user-1',
-      type: CloudTaskType.StandardTask,
+      type: TaskPayloadKind.StandardTask,
       payload: {
         repo: 'owner/repo',
         description: 'Investigate this flow',
@@ -564,7 +542,7 @@ describe('cloudTaskSchema', () => {
       },
     });
 
-    if (parsed.type !== CloudTaskType.StandardTask) {
+    if (parsed.type !== TaskPayloadKind.StandardTask) {
       throw new Error('Expected StandardTask payload');
     }
 
@@ -574,7 +552,7 @@ describe('cloudTaskSchema', () => {
   it('parses xhigh reasoningEffort overrides on task payloads', () => {
     const parsed = cloudTaskSchema.parse({
       userId: 'user-1',
-      type: CloudTaskType.StandardTask,
+      type: TaskPayloadKind.StandardTask,
       payload: {
         repo: 'owner/repo',
         description: 'Investigate this flow',
@@ -582,7 +560,7 @@ describe('cloudTaskSchema', () => {
       },
     });
 
-    if (parsed.type !== CloudTaskType.StandardTask) {
+    if (parsed.type !== TaskPayloadKind.StandardTask) {
       throw new Error('Expected StandardTask payload');
     }
 
@@ -592,7 +570,7 @@ describe('cloudTaskSchema', () => {
   it('parses OpenCode harness model overrides on task payloads', () => {
     const parsed = cloudTaskSchema.parse({
       userId: 'user-1',
-      type: CloudTaskType.StandardTask,
+      type: TaskPayloadKind.StandardTask,
       payload: {
         repo: 'owner/repo',
         description: 'Investigate this flow',
@@ -602,7 +580,7 @@ describe('cloudTaskSchema', () => {
       },
     });
 
-    if (parsed.type !== CloudTaskType.StandardTask) {
+    if (parsed.type !== TaskPayloadKind.StandardTask) {
       throw new Error('Expected StandardTask payload');
     }
 
@@ -615,7 +593,7 @@ describe('cloudTaskSchema', () => {
     const parsed = cloudTaskSchema.parse({
       userId: 'user-1',
       harness: 'opencode-server',
-      type: CloudTaskType.StandardTask,
+      type: TaskPayloadKind.StandardTask,
       payload: {
         repo: 'owner/repo',
         description: 'Explain the failing deploy pipeline',
@@ -626,7 +604,7 @@ describe('cloudTaskSchema', () => {
       },
     });
 
-    if (parsed.type !== CloudTaskType.StandardTask) {
+    if (parsed.type !== TaskPayloadKind.StandardTask) {
       throw new Error('Expected StandardTask payload');
     }
 
@@ -647,7 +625,7 @@ describe('cloudTaskSchema', () => {
         source: 'llm_classifier',
         confidence: 0.77,
       },
-      type: CloudTaskType.StandardTask,
+      type: TaskPayloadKind.StandardTask,
       payload: {
         repo: 'owner/repo',
         description: 'Plan the migration',
@@ -664,7 +642,7 @@ describe('cloudTaskSchema', () => {
   it('parses multi-repo subset payloads', () => {
     const parsed = cloudTaskSchema.parse({
       userId: 'user-1',
-      type: CloudTaskType.StandardTask,
+      type: TaskPayloadKind.StandardTask,
       payload: {
         repo: '__all_repositories__',
         selectedRepositories: ['acme/api', 'acme/web'],
@@ -672,7 +650,7 @@ describe('cloudTaskSchema', () => {
       },
     });
 
-    if (parsed.type !== CloudTaskType.StandardTask) {
+    if (parsed.type !== TaskPayloadKind.StandardTask) {
       throw new Error('Expected StandardTask payload');
     }
 
@@ -685,7 +663,7 @@ describe('cloudTaskSchema', () => {
   it('preserves visible prompt fields on SnapshotResume payloads', () => {
     const parsed = cloudTaskSchema.parse({
       userId: 'user-1',
-      type: CloudTaskType.SnapshotResume,
+      type: TaskPayloadKind.SnapshotResume,
       payload: {
         repo: 'owner/repo',
         sourceSnapshotId: 'snap-123',
@@ -696,7 +674,7 @@ describe('cloudTaskSchema', () => {
       },
     });
 
-    if (parsed.type !== CloudTaskType.SnapshotResume) {
+    if (parsed.type !== TaskPayloadKind.SnapshotResume) {
       throw new Error('Expected SnapshotResume payload');
     }
 
@@ -711,7 +689,7 @@ describe('cloudTaskSchema', () => {
     const parsed = cloudTaskSchema.parse({
       userId: 'user-1',
       computeProvider: 'modal',
-      type: CloudTaskType.SnapshotEnvironment,
+      type: TaskPayloadKind.SnapshotEnvironment,
       payload: {
         repo: '',
         environmentId: '14f1f7c4-b126-4b3f-a6a8-e37f7d299f4d',
@@ -722,7 +700,7 @@ describe('cloudTaskSchema', () => {
       },
     });
 
-    if (parsed.type !== CloudTaskType.SnapshotEnvironment) {
+    if (parsed.type !== TaskPayloadKind.SnapshotEnvironment) {
       throw new Error('Expected SnapshotEnvironment payload');
     }
 
@@ -736,7 +714,7 @@ describe('cloudTaskSchema', () => {
     const parsed = cloudTaskSchema.parse({
       userId: 'user-1',
       computeProvider: 'modal',
-      type: CloudTaskType.SnapshotEnvironment,
+      type: TaskPayloadKind.SnapshotEnvironment,
       payload: {
         repo: '',
         environmentId: '14f1f7c4-b126-4b3f-a6a8-e37f7d299f4d',
@@ -748,7 +726,7 @@ describe('cloudTaskSchema', () => {
       },
     });
 
-    if (parsed.type !== CloudTaskType.SnapshotEnvironment) {
+    if (parsed.type !== TaskPayloadKind.SnapshotEnvironment) {
       throw new Error('Expected SnapshotEnvironment payload');
     }
 
@@ -762,7 +740,7 @@ describe('cloudTaskSchema', () => {
   it('parses SnapshotResume payloads with canonical Slack routing metadata', () => {
     const parsed = cloudTaskSchema.parse({
       userId: 'user-1',
-      type: CloudTaskType.SnapshotResume,
+      type: TaskPayloadKind.SnapshotResume,
       payload: {
         repo: 'owner/repo',
         sourceSnapshotId: 'snap-123',
@@ -773,7 +751,7 @@ describe('cloudTaskSchema', () => {
       },
     });
 
-    if (parsed.type !== CloudTaskType.SnapshotResume) {
+    if (parsed.type !== TaskPayloadKind.SnapshotResume) {
       throw new Error('Expected SnapshotResume payload');
     }
 
@@ -787,7 +765,7 @@ describe('cloudTaskSchema', () => {
     (slackThreadTs) => {
       const parsed = cloudTaskSchema.safeParse({
         userId: 'user-1',
-        type: CloudTaskType.StandardTask,
+        type: TaskPayloadKind.StandardTask,
         slackThreadTs,
         payload: {
           repo: 'owner/repo',
@@ -804,7 +782,7 @@ describe('cloudTaskSchema', () => {
     (slackThreadTs) => {
       const parsed = cloudTaskSchema.safeParse({
         userId: 'user-1',
-        type: CloudTaskType.SnapshotResume,
+        type: TaskPayloadKind.SnapshotResume,
         slackThreadTs,
         payload: {
           repo: 'owner/repo',
@@ -949,7 +927,7 @@ describe('cloudTaskSchema', () => {
   it('parses SnapshotResume payloads with queued provider-neutral messages', () => {
     const parsed = cloudTaskSchema.safeParse({
       userId: 'user-1',
-      type: CloudTaskType.SnapshotResume,
+      type: TaskPayloadKind.SnapshotResume,
       sourceSnapshotId: 'snap-123',
       sourceCloudJobId: 42,
       payload: {
@@ -991,7 +969,7 @@ describe('cloudTaskSchema', () => {
   it('rejects invalid reasoningEffort values on shared task payloads', () => {
     const parsed = cloudTaskSchema.safeParse({
       userId: 'user-1',
-      type: CloudTaskType.StandardTask,
+      type: TaskPayloadKind.StandardTask,
       payload: {
         repo: 'owner/repo',
         description: 'Fix this',
@@ -1005,7 +983,7 @@ describe('cloudTaskSchema', () => {
   it('rejects non-OpenCode-format harness model overrides on task payloads', () => {
     const parsed = cloudTaskSchema.safeParse({
       userId: 'user-1',
-      type: CloudTaskType.StandardTask,
+      type: TaskPayloadKind.StandardTask,
       payload: {
         repo: 'owner/repo',
         description: 'Fix this',

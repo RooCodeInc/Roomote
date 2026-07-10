@@ -68,7 +68,7 @@ export async function getLinkedTaskRelayState({
     where: eq(tasks.id, linkedTaskOwner.taskId),
     columns: {
       id: true,
-      userId: true,
+      initiatorUserId: true,
     },
   });
 
@@ -79,7 +79,7 @@ export async function getLinkedTaskRelayState({
     };
   }
 
-  if (!linkedTask.userId) {
+  if (!linkedTask.initiatorUserId) {
     return {
       linkedTaskId: linkedTask.id,
       relayEnabled: false,
@@ -88,7 +88,9 @@ export async function getLinkedTaskRelayState({
 
   return {
     linkedTaskId: linkedTask.id,
-    relayEnabled: getRelayEligibleCreatorIds(settings).has(linkedTask.userId),
+    relayEnabled: getRelayEligibleCreatorIds(settings).has(
+      linkedTask.initiatorUserId,
+    ),
   };
 }
 

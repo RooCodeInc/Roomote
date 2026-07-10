@@ -1,7 +1,7 @@
 ---
 title: Compute Provider Usage Accounting
 status: active
-last_reviewed: 2026-07-03
+last_reviewed: 2026-07-09
 owner: engineering
 summary: How Roomote records compute-provider telemetry for Docker, Modal, Daytona, and E2B without turning it into billing or quota enforcement.
 ---
@@ -97,7 +97,7 @@ Docker-backed jobs are local or single-host self-host executions. Roomote
 records them for lifecycle visibility with the `roomote_observation`
 measurement source.
 
-Modal jobs store the provision-time requested resources from `cloud_jobs` and
+Modal jobs store the provision-time requested resources from `task_runs` and
 use `modal_requested_resources` when no cgroup samples exist. When worker
 cgroup samples exist, the final row uses `modal_cgroup_samples` and stores
 sample counts, last-sampled timestamps, and peak memory details for debugging.

@@ -3,12 +3,13 @@ import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { WebStandardStreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/webStandardStreamableHttp.js';
 import {
   and,
-  cloudJobs,
   db,
   eq,
   environments,
+  isNull,
   mcpConnections,
   deploymentMcpEnablements,
+  taskRuns,
 } from '@roomote/db/server';
 import {
   findLinearDeploymentMcpConnection,
@@ -28,7 +29,7 @@ import type { Variables } from '../../types';
 import {
   assertCloudJobTokenMatchesCloudJobUser,
   McpProxyError,
-  resolveActingUserId,
+  resolveActingUserIdOrNull,
   type McpAuthContext,
   isJobTokenContext,
   toMcpToolResult,
@@ -37,6 +38,7 @@ import {
   lookupSlackChannelMessages,
   lookupSlackThread,
 } from './slack-thread-lookup';
+import { getTaskChannelBindings } from '../tasks/helpers';
 
 const ROOMOTE_MCP_SERVER_INFO = {
   name: 'roomote-router-mcp',
@@ -111,7 +113,11 @@ async function resolveRoomoteMcpAuth(
 }
 
 async function buildAboutMePayload(options: {
-  userId: string;
+  /**
+   * The acting human user, or null when the job runs as the deployment
+   * service principal.
+   */
+  userId: string | null;
   operation: 'overview' | 'integrations';
 }) {
   const [environmentRows, linearRows, enabledDeploymentMcps, userConnections] =
@@ -136,7 +142,12 @@ async function buildAboutMePayload(options: {
       }),
       db.query.mcpConnections.findMany({
         where: and(
-          eq(mcpConnections.userId, options.userId),
+          // Deployment-service-principal jobs have no human actor; their
+          // legitimate connections are the deployment-scoped rows
+          // (userId IS NULL).
+          options.userId === null
+            ? isNull(mcpConnections.userId)
+            : eq(mcpConnections.userId, options.userId),
           eq(mcpConnections.enabled, true),
         ),
         columns: {
@@ -233,20 +244,52 @@ async function buildAboutMePayload(options: {
   };
 }
 
+type SlackLookupRunContext = {
+  actingUserId: string | null;
+  slackChannelId: string | null;
+  slackThreadTs: string | null;
+  payload: unknown;
+};
+
+/**
+ * Load the Slack routing context for a job-token request: the run's acting
+ * user and payload plus the owning task's Slack channel bindings (channel
+ * bindings moved from runs to tasks in the Stage 2 data-model
+ * simplification).
+ */
+async function loadSlackLookupRunContext(
+  cloudJobId: number,
+): Promise<SlackLookupRunContext> {
+  const run = await db.query.taskRuns.findFirst({
+    columns: {
+      actingUserId: true,
+      taskId: true,
+      payload: true,
+    },
+    where: eq(taskRuns.id, cloudJobId),
+  });
+
+  if (!run) {
+    throw new McpProxyError(404, 'Cloud job not found for this MCP token');
+  }
+
+  const bindings = await getTaskChannelBindings(run.taskId);
+
+  return {
+    actingUserId: run.actingUserId,
+    slackChannelId: bindings?.slackChannelId ?? null,
+    slackThreadTs: bindings?.slackThreadTs ?? null,
+    payload: run.payload,
+  };
+}
+
 async function buildSlackThreadPayload(options: {
   auth: McpAuthContext;
-  actingUserId: string;
+  actingUserId: string | null;
   channel?: string;
   messageTs: string;
 }) {
-  let cloudJob:
-    | {
-        actingUserId: string | null;
-        type: string;
-        slackThreadTs: string | null;
-        payload: unknown;
-      }
-    | undefined;
+  let cloudJob: SlackLookupRunContext | undefined;
 
   if (options.auth.tokenType === 'cj') {
     if (!options.auth.cloudJobId) {
@@ -256,19 +299,7 @@ async function buildSlackThreadPayload(options: {
       );
     }
 
-    cloudJob = await db.query.cloudJobs.findFirst({
-      columns: {
-        actingUserId: true,
-        type: true,
-        slackThreadTs: true,
-        payload: true,
-      },
-      where: eq(cloudJobs.id, options.auth.cloudJobId),
-    });
-
-    if (!cloudJob) {
-      throw new McpProxyError(404, 'Cloud job not found for this MCP token');
-    }
+    cloudJob = await loadSlackLookupRunContext(options.auth.cloudJobId);
   }
 
   return lookupSlackThread({
@@ -285,19 +316,12 @@ async function buildSlackThreadPayload(options: {
 
 async function buildSlackChannelMessagesPayload(options: {
   auth: McpAuthContext;
-  actingUserId: string;
+  actingUserId: string | null;
   channel?: string;
   oldest?: string;
   latest?: string;
 }) {
-  let cloudJob:
-    | {
-        actingUserId: string | null;
-        type: string;
-        slackThreadTs: string | null;
-        payload: unknown;
-      }
-    | undefined;
+  let cloudJob: SlackLookupRunContext | undefined;
 
   if (options.auth.tokenType === 'cj') {
     if (!options.auth.cloudJobId) {
@@ -307,19 +331,7 @@ async function buildSlackChannelMessagesPayload(options: {
       );
     }
 
-    cloudJob = await db.query.cloudJobs.findFirst({
-      columns: {
-        actingUserId: true,
-        type: true,
-        slackThreadTs: true,
-        payload: true,
-      },
-      where: eq(cloudJobs.id, options.auth.cloudJobId),
-    });
-
-    if (!cloudJob) {
-      throw new McpProxyError(404, 'Cloud job not found for this MCP token');
-    }
+    cloudJob = await loadSlackLookupRunContext(options.auth.cloudJobId);
   }
 
   return lookupSlackChannelMessages({
@@ -345,7 +357,10 @@ function createRoomoteTransport() {
   });
 }
 
-function createRoomoteMcpServer(auth: McpAuthContext, actingUserId: string) {
+function createRoomoteMcpServer(
+  auth: McpAuthContext,
+  actingUserId: string | null,
+) {
   const server = new McpServer(ROOMOTE_MCP_SERVER_INFO, {
     instructions:
       'Use get_about_me for Roomote platform, integration, and getting-started context. Use get_slack_thread when you need the surrounding Slack thread for a referenced Slack message. Use get_slack_channel_messages when you need history from a public Slack channel the app has already joined.',
@@ -487,7 +502,10 @@ roomoteMcp.on(['POST', 'GET', 'DELETE'], '/', async (c) => {
 
   try {
     const auth = await resolveRoomoteMcpAuth(c.get('authContext'));
-    const actingUserId = await resolveActingUserId(auth);
+    // Null means the job runs as the deployment service principal; the
+    // Roomote MCP tools are informational and operate on deployment-scoped
+    // data, so they support that case.
+    const actingUserId = await resolveActingUserIdOrNull(auth);
     const server = createRoomoteMcpServer(auth, actingUserId);
 
     await server.connect(transport);

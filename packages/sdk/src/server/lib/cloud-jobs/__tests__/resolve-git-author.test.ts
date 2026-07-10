@@ -1,27 +1,12 @@
-import type { CloudJob } from '@roomote/db/server';
-import { db, githubUserMappings, userFactory } from '@roomote/db/server';
+import {
+  db,
+  githubUserMappings,
+  taskFactory,
+  userFactory,
+} from '@roomote/db/server';
 import { PRODUCT_NAME } from '@roomote/types';
 
 import { resolveGitAuthor } from '../dequeue-helpers';
-
-function makeCloudJob(overrides: Partial<CloudJob> = {}): CloudJob {
-  return {
-    id: 1,
-    payload: { repo: 'owner/repo' },
-    githubLogin: null,
-    githubUserId: null,
-    userId: null,
-    actingUserId: null,
-    attributionKind: 'automatic',
-    attributedUserId: null,
-    attributionSourceKind: 'system',
-    attributionSourceDisplayName: null,
-    attributionSourceExternalId: null,
-    attributedGithubLogin: null,
-    attributedGithubUserId: null,
-    ...overrides,
-  } as CloudJob;
-}
 
 let githubUserIdSeed = Date.now() * 1000;
 function uniqueGitHubUserId(): number {
@@ -29,11 +14,18 @@ function uniqueGitHubUserId(): number {
   return githubUserIdSeed;
 }
 
+/**
+ * resolveGitAuthor reads the persisted commit-author block off the run's
+ * tasks row (commitAuthorKind/commitAuthorUserId/commitAuthorLogin/
+ * commitAuthorExternalId) and resolves it to a git identity.
+ */
 describe('resolveGitAuthor', () => {
-  it('returns default Roomote identity when no GitHub identity is linked', async () => {
-    const result = await db.transaction(async (tx) => {
-      return resolveGitAuthor(tx, makeCloudJob());
-    });
+  it('returns the default Roomote identity when the commit author is unevaluated', async () => {
+    const task = await taskFactory.create({});
+
+    const result = await db.transaction(async (tx) =>
+      resolveGitAuthor(tx, { id: 1, taskId: task.id }),
+    );
 
     expect(result).toEqual({
       name: 'Roomote',
@@ -41,42 +33,14 @@ describe('resolveGitAuthor', () => {
     });
   });
 
-  it('returns default when githubLogin is set but githubUserId is missing', async () => {
-    const result = await db.transaction(async (tx) => {
-      return resolveGitAuthor(tx, makeCloudJob({ githubLogin: 'testuser' }));
+  it('returns the default Roomote identity for roomote commit authorship', async () => {
+    const task = await taskFactory.create({
+      commitAuthorKind: 'roomote',
     });
 
-    expect(result).toEqual({
-      name: 'Roomote',
-      email: 'roomote@roomote.dev',
-    });
-  });
-
-  it('returns default when githubUserId is set but githubLogin is missing', async () => {
-    const result = await db.transaction(async (tx) => {
-      return resolveGitAuthor(tx, makeCloudJob({ githubUserId: 12345 }));
-    });
-
-    expect(result).toEqual({
-      name: 'Roomote',
-      email: 'roomote@roomote.dev',
-    });
-  });
-
-  it('returns noreply email with githubLogin as name when userId is not set', async () => {
-    const result = await db.transaction(async (tx) => {
-      return resolveGitAuthor(
-        tx,
-        makeCloudJob({
-          attributionKind: 'unlinked_user',
-          attributionSourceKind: 'github',
-          attributionSourceDisplayName: 'octocat',
-          attributionSourceExternalId: '12345',
-          attributedGithubLogin: 'octocat',
-          attributedGithubUserId: 12345,
-        }),
-      );
-    });
+    const result = await db.transaction(async (tx) =>
+      resolveGitAuthor(tx, { id: 1, taskId: task.id }),
+    );
 
     expect(result).toEqual({
       name: PRODUCT_NAME,
@@ -84,32 +48,7 @@ describe('resolveGitAuthor', () => {
     });
   });
 
-  it('falls back to the raw GitHub identity when a human effective author omits the numeric ID', async () => {
-    const result = await db.transaction(async (tx) => {
-      return resolveGitAuthor(
-        tx,
-        makeCloudJob({
-          attributionKind: 'unlinked_user',
-          attributionSourceKind: 'github',
-          attributionSourceDisplayName: 'octocat',
-          attributionSourceExternalId: '12345',
-          attributedGithubLogin: 'octocat',
-          attributedGithubUserId: 12345,
-          effectiveAuthorKind: 'human',
-          effectiveAuthorDisplayName: 'octocat',
-          effectiveAuthorGithubLogin: 'octocat',
-          effectiveAuthorGithubUserId: null,
-        }),
-      );
-    });
-
-    expect(result).toEqual({
-      name: 'octocat',
-      email: '12345+octocat@users.noreply.github.com',
-    });
-  });
-
-  it('uses the matched attribution user display name from the database', async () => {
+  it('resolves a user commit author to their noreply email via the GitHub mapping', async () => {
     const user = await userFactory.create({ name: 'Mona Lisa' });
     const githubUserId = uniqueGitHubUserId();
 
@@ -119,17 +58,15 @@ describe('resolveGitAuthor', () => {
       githubUserId,
     });
 
-    const result = await db.transaction(async (tx) => {
-      return resolveGitAuthor(
-        tx,
-        makeCloudJob({
-          userId: user.id,
-          attributionKind: 'matched_user',
-          attributedUserId: user.id,
-          attributionSourceKind: 'web',
-        }),
-      );
+    const task = await taskFactory.create({
+      initiatorUserId: user.id,
+      commitAuthorKind: 'user',
+      commitAuthorUserId: user.id,
     });
+
+    const result = await db.transaction(async (tx) =>
+      resolveGitAuthor(tx, { id: 1, taskId: task.id }),
+    );
 
     expect(result).toEqual({
       name: 'Mona Lisa',
@@ -137,49 +74,18 @@ describe('resolveGitAuthor', () => {
     });
   });
 
-  it('prefers the effective human author when launch-time authorship overrides raw attribution', async () => {
-    const user = await userFactory.create({ name: 'Assigned Author' });
-    const githubUserId = uniqueGitHubUserId();
+  it('falls back to Roomote when the user commit author has no GitHub mapping', async () => {
+    const user = await userFactory.create({ name: 'Unmapped User' });
 
-    await db.insert(githubUserMappings).values({
-      userId: user.id,
-      githubLogin: 'assigned-author',
-      githubUserId,
+    const task = await taskFactory.create({
+      initiatorUserId: user.id,
+      commitAuthorKind: 'user',
+      commitAuthorUserId: user.id,
     });
 
-    const result = await db.transaction(async (tx) => {
-      return resolveGitAuthor(
-        tx,
-        makeCloudJob({
-          attributionKind: 'automatic',
-          attributionSourceKind: 'automation',
-          effectiveAuthorKind: 'human',
-          effectiveAuthorUserId: user.id,
-          effectiveAuthorDisplayName: 'Assigned Author',
-          effectiveAuthorGithubLogin: 'assigned-author',
-          effectiveAuthorGithubUserId: githubUserId,
-        }),
-      );
-    });
-
-    expect(result).toEqual({
-      name: 'Assigned Author',
-      email: `${githubUserId}+assigned-author@users.noreply.github.com`,
-    });
-  });
-
-  it('falls back to Roomote when matched attribution user has no GitHub mapping', async () => {
-    const result = await db.transaction(async (tx) => {
-      return resolveGitAuthor(
-        tx,
-        makeCloudJob({
-          attributionKind: 'matched_user',
-          attributedUserId: 'non-existent-user-id',
-          attributionSourceKind: 'github',
-          attributedGithubLogin: 'ghost',
-        }),
-      );
-    });
+    const result = await db.transaction(async (tx) =>
+      resolveGitAuthor(tx, { id: 1, taskId: task.id }),
+    );
 
     expect(result).toEqual({
       name: PRODUCT_NAME,
@@ -187,104 +93,63 @@ describe('resolveGitAuthor', () => {
     });
   });
 
-  it('uses linked GitHub mapping when matched attribution snapshot omits GitHub identity', async () => {
-    const user = await userFactory.create({ name: 'John Richmond' });
-    const githubUserId = uniqueGitHubUserId();
-
-    await db.insert(githubUserMappings).values({
-      userId: user.id,
-      githubLogin: 'jr',
-      githubUserId,
+  it('resolves an external commit author to the noreply email from the frozen identity', async () => {
+    const task = await taskFactory.create({
+      commitAuthorKind: 'external',
+      commitAuthorLogin: 'octocat',
+      commitAuthorExternalId: '12345',
+      actorDisplayName: 'Octo Cat',
     });
 
-    const result = await db.transaction(async (tx) => {
-      return resolveGitAuthor(
-        tx,
-        makeCloudJob({
-          userId: user.id,
-          attributionKind: 'matched_user',
-          attributedUserId: user.id,
-          attributionSourceKind: 'web',
-        }),
-      );
-    });
+    const result = await db.transaction(async (tx) =>
+      resolveGitAuthor(tx, { id: 1, taskId: task.id }),
+    );
 
     expect(result).toEqual({
-      name: 'John Richmond',
-      email: `${githubUserId}+jr@users.noreply.github.com`,
+      name: 'Octo Cat',
+      email: '12345+octocat@users.noreply.github.com',
     });
   });
 
-  it('uses the matched attribution user instead of legacy owner fields', async () => {
-    const owner = await userFactory.create({ name: 'Original Owner' });
-    const replier = await userFactory.create({ name: 'Latest Replier' });
-    const ownerGithubUserId = uniqueGitHubUserId();
-    const replierGithubUserId = uniqueGitHubUserId();
-
-    await db.insert(githubUserMappings).values([
-      {
-        userId: owner.id,
-        githubLogin: 'owner-login',
-        githubUserId: ownerGithubUserId,
-      },
-      {
-        userId: replier.id,
-        githubLogin: 'replier-login',
-        githubUserId: replierGithubUserId,
-      },
-    ]);
-
-    const result = await db.transaction(async (tx) => {
-      return resolveGitAuthor(
-        tx,
-        makeCloudJob({
-          userId: owner.id,
-          actingUserId: replier.id,
-          githubLogin: 'owner-login',
-          githubUserId: ownerGithubUserId,
-          attributionKind: 'matched_user',
-          attributedUserId: replier.id,
-          attributionSourceKind: 'github',
-          attributedGithubLogin: 'replier-login',
-        }),
-      );
+  it('falls back to the login as the display name for external authors without a display name', async () => {
+    const task = await taskFactory.create({
+      commitAuthorKind: 'external',
+      commitAuthorLogin: 'octocat',
+      commitAuthorExternalId: '12345',
     });
 
+    const result = await db.transaction(async (tx) =>
+      resolveGitAuthor(tx, { id: 1, taskId: task.id }),
+    );
+
     expect(result).toEqual({
-      name: 'Latest Replier',
-      email: `${replierGithubUserId}+replier-login@users.noreply.github.com`,
+      name: 'octocat',
+      email: '12345+octocat@users.noreply.github.com',
     });
   });
 
-  it('does not fall back to legacy owner identity when the matched attribution user has no mapping', async () => {
-    const owner = await userFactory.create({ name: 'Original Owner' });
-    const replier = await userFactory.create({ name: 'Unlinked Replier' });
-    const githubUserId = uniqueGitHubUserId();
-
-    await db.insert(githubUserMappings).values({
-      userId: owner.id,
-      githubLogin: 'owner-login',
-      githubUserId,
+  it('falls back to Roomote when the external identity is incomplete', async () => {
+    const task = await taskFactory.create({
+      commitAuthorKind: 'external',
+      commitAuthorLogin: 'octocat',
+      commitAuthorExternalId: null,
     });
 
-    const result = await db.transaction(async (tx) => {
-      return resolveGitAuthor(
-        tx,
-        makeCloudJob({
-          userId: owner.id,
-          actingUserId: replier.id,
-          githubLogin: 'owner-login',
-          githubUserId,
-          attributionKind: 'matched_user',
-          attributedUserId: replier.id,
-          attributionSourceKind: 'github',
-        }),
-      );
-    });
+    const result = await db.transaction(async (tx) =>
+      resolveGitAuthor(tx, { id: 1, taskId: task.id }),
+    );
 
     expect(result).toEqual({
       name: PRODUCT_NAME,
       email: 'roomote@roomote.dev',
     });
+  });
+
+  it('throws when the run points at a missing task', async () => {
+    await expect(
+      db.transaction(async (tx) =>
+        resolveGitAuthor(tx, { id: 1, taskId: 'missing-task-id' }),
+      ),
+    ).rejects.toThrow(/not found/);
   });
 });

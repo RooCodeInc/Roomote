@@ -2,6 +2,7 @@ export * from './compute-providers';
 
 export * from './acp';
 export * from './auth';
+export * from './automation-label';
 export * from './background-agents';
 export * from './background-automation-registry';
 export * from './cloud-agents';

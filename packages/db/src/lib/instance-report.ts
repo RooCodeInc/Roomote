@@ -13,7 +13,7 @@ import { CloudTaskStatus, getMcpIntegration } from '@roomote/types';
 
 import { db } from '../db';
 import {
-  cloudJobs,
+  taskRuns,
   deploymentMcpEnablements,
   deploymentSettings,
   environments,
@@ -133,9 +133,11 @@ export async function collectInstanceReportStats(
       .from(users)
       .where(and(eq(users.role, 'admin'), isNull(users.deletedAt))),
     db
-      .select({ active: countDistinct(tasks.userId) })
+      .select({ active: countDistinct(tasks.initiatorUserId) })
       .from(tasks)
-      .where(and(gte(tasks.createdAt, since), isNotNull(tasks.userId))),
+      .where(
+        and(gte(tasks.createdAt, since), isNotNull(tasks.initiatorUserId)),
+      ),
     db
       .select({ total: count() })
       .from(environments)
@@ -154,11 +156,11 @@ export async function collectInstanceReportStats(
       .where(gte(tasks.createdAt, since)),
     db
       .select({ total: count() })
-      .from(cloudJobs)
+      .from(taskRuns)
       .where(
         and(
-          eq(cloudJobs.status, CloudTaskStatus.Completed),
-          gte(cloudJobs.completedAt, since),
+          eq(taskRuns.status, CloudTaskStatus.Completed),
+          gte(taskRuns.completedAt, since),
         ),
       ),
     db

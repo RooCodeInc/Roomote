@@ -46,7 +46,8 @@ export type JobAuthTokenSuccess = {
   success: true;
   userType: 'job';
   cloudJobId: number;
-  userId: string;
+  /** Null when the job token was minted for the deployment service principal. */
+  userId: string | null;
   name: string | null;
   primaryEmail: string | null;
   isAdmin: boolean;

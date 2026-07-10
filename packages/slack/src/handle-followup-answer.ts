@@ -391,8 +391,10 @@ export async function handleFollowupAnswer(payload: SlackInteractivePayload) {
               payload: activeJob.payload,
             }),
             taskId: activeJob.taskId,
-            prRepo: activeJob.prRepo ?? null,
-            prNumber: activeJob.prNumber ?? null,
+            // PR linkage lives on task_pull_requests now; the footer context
+            // resolves it from the taskId, so no run-level fallback remains.
+            prRepo: null,
+            prNumber: null,
             channelId: payload.channel.id,
             threadTs: threadId,
           }),

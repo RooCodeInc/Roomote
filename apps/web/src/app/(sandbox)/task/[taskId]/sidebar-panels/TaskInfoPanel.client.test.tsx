@@ -1,6 +1,6 @@
 import type { ReactNode } from 'react';
 import { render, screen } from '@testing-library/react';
-import { CloudTaskType } from '@roomote/types';
+import { TaskPayloadKind } from '@roomote/types';
 
 const {
   useSandboxMessagesMock,
@@ -91,7 +91,8 @@ import { TaskInfoPanel } from './TaskInfoPanel';
 
 const baseTask = {
   id: 'task-1',
-  userId: 'user-1',
+  initiatorKind: 'user',
+  initiatorUserId: 'user-1',
   title: 'Task title',
   model: 'openrouter/openai/gpt-5.6-terra',
   user: null,
@@ -105,7 +106,7 @@ const baseCloudJob = {
   vendor: 'docker',
   startedAt: new Date('2026-05-01T12:00:00.000Z'),
   error: null,
-  type: CloudTaskType.StandardTask,
+  payloadKind: TaskPayloadKind.StandardTask,
 };
 
 describe('TaskInfoPanel', () => {
@@ -448,7 +449,7 @@ describe('TaskInfoPanel', () => {
         cloudJob={
           {
             ...baseCloudJob,
-            type: CloudTaskType.GithubPrReview,
+            payloadKind: TaskPayloadKind.GithubPrReview,
             payload: {
               ...baseCloudJob.payload,
               sourceControlProvider: 'gitlab',
@@ -471,7 +472,7 @@ describe('TaskInfoPanel', () => {
         cloudJob={
           {
             ...baseCloudJob,
-            type: CloudTaskType.GithubPrReview,
+            payloadKind: TaskPayloadKind.GithubPrReview,
             payload: {
               ...baseCloudJob.payload,
               sourceControlProvider: 'gitea',
@@ -494,7 +495,7 @@ describe('TaskInfoPanel', () => {
         cloudJob={
           {
             ...baseCloudJob,
-            type: CloudTaskType.GithubPrReview,
+            payloadKind: TaskPayloadKind.GithubPrReview,
             payload: {
               ...baseCloudJob.payload,
               sourceControlProvider: 'ado',
@@ -517,7 +518,7 @@ describe('TaskInfoPanel', () => {
         cloudJob={
           {
             ...baseCloudJob,
-            type: CloudTaskType.GithubPrReview,
+            payloadKind: TaskPayloadKind.GithubPrReview,
             prRepo: 'RooCodeInc/Roomote',
             prNumber: 42,
           } as never

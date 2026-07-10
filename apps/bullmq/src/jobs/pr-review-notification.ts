@@ -3,12 +3,12 @@ import { Job } from 'bullmq';
 import { TelegramCommunicationProvider } from '@roomote/communication/telegram-provider';
 import {
   and,
-  cloudJobs,
   db,
   desc,
   eq,
   slackInstallations,
   taskPullRequests,
+  taskRuns,
 } from '@roomote/db/server';
 import { Env } from '@roomote/env';
 import {
@@ -155,14 +155,14 @@ export const prReviewNotificationJob = async (
     prNumber: data.prNumber,
   };
 
-  const latestJob = await db.query.cloudJobs.findFirst({
-    where: eq(cloudJobs.taskId, data.taskId),
-    orderBy: [desc(cloudJobs.createdAt)],
+  const latestJob = await db.query.taskRuns.findFirst({
+    where: eq(taskRuns.taskId, data.taskId),
+    orderBy: [desc(taskRuns.createdAt)],
   });
 
   if (!latestJob) {
     console.warn(
-      `[PrReviewNotification] No cloud job found for task ${data.taskId}, skipping`,
+      `[PrReviewNotification] No run found for task ${data.taskId}, skipping`,
     );
     await consumePendingPrReviewActivity(target);
     return;

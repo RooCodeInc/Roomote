@@ -5,7 +5,7 @@ import type {
 import { Env } from '@roomote/env';
 import {
   ALL_REPOSITORIES,
-  CloudTaskType,
+  TaskPayloadKind,
   type CloudTaskPayload,
   populateSnapshotResumeCommunicationMetadata,
   restoreSnapshotResumeVisiblePromptFields,
@@ -55,14 +55,15 @@ export async function resumeTelegramTaskFromSnapshot(input: {
     typeof completedPayload.environmentId === 'string'
       ? completedPayload.environmentId
       : undefined;
-  const resumePayload: CloudTaskPayload<CloudTaskType.SnapshotResume> = {
-    repo,
-    ...(environmentId ? { environmentId } : {}),
-    ...(input.completedJob.port ? { port: input.completedJob.port } : {}),
-    sourceSnapshotId,
-    sourceCloudJobId: input.completedJob.id,
-    queuedCommunicationMessages: [input.queuedMessage],
-  };
+  const resumePayload: CloudTaskPayload<typeof TaskPayloadKind.SnapshotResume> =
+    {
+      repo,
+      ...(environmentId ? { environmentId } : {}),
+      ...(input.completedJob.port ? { port: input.completedJob.port } : {}),
+      sourceSnapshotId,
+      sourceCloudJobId: input.completedJob.id,
+      queuedCommunicationMessages: [input.queuedMessage],
+    };
 
   populateSnapshotResumeCommunicationMetadata(resumePayload, {
     provider: 'telegram',
@@ -73,13 +74,17 @@ export async function resumeTelegramTaskFromSnapshot(input: {
   });
   restoreSnapshotResumeVisiblePromptFields(resumePayload, completedPayload);
 
+  // Resumes never create tasks and never re-attribute; the resuming human
+  // becomes the new run's acting user.
   return enqueueCloudTask(
     {
-      type: CloudTaskType.SnapshotResume,
-      userId: input.queuedMessage.userId,
-      sourceSnapshotId,
-      sourceCloudJobId: input.completedJob.id,
-      payload: resumePayload,
+      task: {
+        type: TaskPayloadKind.SnapshotResume,
+        sourceSnapshotId,
+        sourceCloudJobId: input.completedJob.id,
+        payload: resumePayload,
+      },
+      actingUserId: input.queuedMessage.userId ?? null,
     },
     {
       launchClass: 'human',

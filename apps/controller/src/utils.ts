@@ -14,7 +14,7 @@ import {
   type CloudJob,
   type DatabaseOrTransaction,
   db,
-  cloudJobs,
+  taskRuns,
   environments,
   eq,
   getEnvironmentSnapshot,
@@ -232,7 +232,7 @@ export async function updateCloudJobMachine(
   const database = options.db ?? db;
 
   await database
-    .update(cloudJobs)
+    .update(taskRuns)
     .set({
       ...(vendor ? { vendor } : {}),
       machineId,
@@ -256,5 +256,5 @@ export async function updateCloudJobMachine(
       ...(configuredCpuCores !== undefined ? { configuredCpuCores } : {}),
       ...(configuredMemoryMiB !== undefined ? { configuredMemoryMiB } : {}),
     })
-    .where(eq(cloudJobs.id, cloudJob.id));
+    .where(eq(taskRuns.id, cloudJob.id));
 }

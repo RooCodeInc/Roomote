@@ -5,21 +5,21 @@ import {
 } from './setup-status';
 
 describe('setup-status', () => {
-  it('routes orgs without GitHub to the setup flow', () => {
+  it('lets completed deployments through regardless of provider (GitLab-only has no GitHub installation)', () => {
     expect(
       getSetupRedirectPath({
         hasGitHub: false,
         hasEnvironments: false,
         setupCompletedAt: '2026-01-01T00:00:00.000Z',
       }),
-    ).toBe(DEFAULT_SETUP_REDIRECT_PATH);
+    ).toBeNull();
     expect(
       requiresSetup({
         hasGitHub: false,
         hasEnvironments: false,
         setupCompletedAt: '2026-01-01T00:00:00.000Z',
       }),
-    ).toBe(true);
+    ).toBe(false);
   });
 
   it('routes orgs missing environments back to setup while initial setup is still incomplete', () => {
@@ -79,23 +79,6 @@ describe('setup-status', () => {
         hasGitHub: true,
         hasEnvironments: true,
         setupCompletedAt: null,
-      }),
-    ).toBe(true);
-  });
-
-  it('requires setup when environments already exist without GitHub', () => {
-    expect(
-      getSetupRedirectPath({
-        hasGitHub: false,
-        hasEnvironments: true,
-        setupCompletedAt: '2026-01-01T00:00:00.000Z',
-      }),
-    ).toBe(DEFAULT_SETUP_REDIRECT_PATH);
-    expect(
-      requiresSetup({
-        hasGitHub: false,
-        hasEnvironments: true,
-        setupCompletedAt: '2026-01-01T00:00:00.000Z',
       }),
     ).toBe(true);
   });

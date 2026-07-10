@@ -1,7 +1,7 @@
 ---
 title: LLM Routing System
 status: active
-last_reviewed: 2026-07-05
+last_reviewed: 2026-07-09
 owner: engineering
 summary: Technical documentation of the LLM-enhanced routing system covering workspace selection, platform answers, context builders, Slack follow-up classification, and source-specific launch handling.
 ---
@@ -10,7 +10,7 @@ summary: Technical documentation of the LLM-enhanced routing system covering wor
 
 The LLM routing system chooses the delegated-task environment for Slack, Teams,
 Telegram, Linear, and Home Auto in the web app. Agent selection for these routed delegated flows
-is fixed to the user-facing Generalist path (`CloudTaskType.StandardTask`), so
+is fixed to the user-facing Generalist path (`TaskPayloadKind.StandardTask`), so
 the LLM only chooses the workspace dimension or, for short identity questions,
 the synthetic platform workspace value `__platform__`. Routed launches persist
 as `StandardTask` jobs and use the selected workspace without a separate
@@ -136,7 +136,7 @@ Classification rules:
 - for mixed or ambiguous asks, that classifier uses implementation straightforwardness as a tiebreaker: narrow low-decision execution routes to `implement`, while asks that still hide meaningful product, scope, or architecture choices route to `plan`
 - `unknown` is the conservative residual bucket when the request is still too conflicting or underspecified to judge that tiebreaker reliably, and the worker maps that fallback to `plan-repo-implementation`
 
-`enqueueCloudTask()` is the source of truth: it classifies the final submitted prompt when creating a new job, applies explicit bootstrap/task-tool overrides when present, and marks `SnapshotResume` jobs as `inherited` from the source `cloud_jobs` row instead of reclassifying the resumed task lifecycle from scratch.
+`enqueueCloudTask()` is the source of truth: it classifies the final submitted prompt when creating a new job, applies explicit bootstrap/task-tool overrides when present, and marks `SnapshotResume` jobs as `inherited` from the source `task_runs` row instead of reclassifying the resumed task lifecycle from scratch.
 
 ### Routing Phases
 
@@ -433,7 +433,7 @@ instead of assembling paginated PR history inside `buildGitHubRoutingContext()`.
 
 Slack, Teams, Telegram, and Linear context builders load the current routing inventory:
 
-1. **Available routed agent path** — The delegated route is fixed to `CloudTaskType.StandardTask`.
+1. **Available routed agent path** — The delegated route is fixed to `TaskPayloadKind.StandardTask`.
 2. **Available environments** — Returns all non-eval environments with their repository names loaded via JOIN.
 
 These queries ensure routed Slack, Teams, Telegram, and Linear flows only select environments

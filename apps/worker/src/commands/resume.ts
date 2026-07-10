@@ -1,4 +1,7 @@
-import { CloudTaskType } from '@roomote/types';
+import {
+  TaskPayloadKind,
+  getSlackThreadTsFromTaskPayload,
+} from '@roomote/types';
 import {
   type DequeuedResumeCloudJob as PreparedResumeCloudJob,
   sdk,
@@ -6,6 +9,7 @@ import {
 
 import { captureWorkerException } from '../monitoring/sentry';
 import { runTask } from '../run-task';
+import { getLinearSessionIdFromResumePayload } from '../run-task/linear-resume-payload';
 import { linearAgentCallbacks } from '../callbacks/linear-agent';
 import { slackMentionCallbacks } from '../callbacks/slack-mention';
 
@@ -25,7 +29,7 @@ export async function resume(cloudJobId: number): Promise<boolean> {
               cloudJobId: cloudJob.id,
               stage: 'resume.dequeueCloudJob.bootstrapFailure',
               taskId: cloudJob.taskId,
-              taskType: cloudJob.type,
+              taskType: cloudJob.payloadKind,
             });
           },
         },
@@ -48,14 +52,22 @@ export async function resume(cloudJobId: number): Promise<boolean> {
       logger,
       workerEnv,
     }) => {
-      // Override callbacks for SnapshotResume jobs with integration metadata
+      // Override callbacks for SnapshotResume jobs with integration metadata.
+      // Prefer the task channel bindings from the resume response; fall back
+      // to payload-derived extraction for payloads that predate them.
       const isLinearResume =
-        jobContext.cloudJob.type === CloudTaskType.SnapshotResume &&
-        jobContext.cloudJob.linearSessionId;
+        jobContext.cloudJob.payloadKind === TaskPayloadKind.SnapshotResume &&
+        Boolean(
+          jobContext.task?.linearSessionId ??
+          getLinearSessionIdFromResumePayload(jobContext.cloudJob.payload),
+        );
 
       const isSlackResume =
-        jobContext.cloudJob.type === CloudTaskType.SnapshotResume &&
-        jobContext.cloudJob.slackThreadTs;
+        jobContext.cloudJob.payloadKind === TaskPayloadKind.SnapshotResume &&
+        Boolean(
+          jobContext.task?.slackThreadTs ??
+          getSlackThreadTsFromTaskPayload(jobContext.cloudJob.payload),
+        );
 
       const callbacks = isLinearResume
         ? linearAgentCallbacks
@@ -78,6 +90,8 @@ export async function resume(cloudJobId: number): Promise<boolean> {
         workspacePath,
         prompt: '',
         harnessInstructions: jobContext.harnessInstructions,
+        requestedWorkKind: jobContext.requestedWorkKind,
+        task: jobContext.task,
         usesSharedWorkspaceRoot,
         repoPaths,
         repoLocalSkills,

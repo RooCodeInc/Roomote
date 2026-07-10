@@ -1,7 +1,7 @@
 ---
 title: MCP Server Configuration
 status: active
-last_reviewed: 2026-07-06
+last_reviewed: 2026-07-09
 owner: engineering
 summary: Technical documentation of MCP server setup covering built-in servers, conditional integrations, router-facing proxies, fast-agent shared-route usage, environment MCPs, worker-side auth bypass propagation, worker deployment, and Slack delivery guardrails.
 ---
@@ -23,7 +23,7 @@ MCP servers are resolved inside the worker and injected directly into the active
 
 At task startup, `resolveBuiltInMcpServers()` builds one merged server map. `createHarness()` hands that map to the `opencode-server` runtime, which rewrites the task-owned `~/.config/opencode/opencode.json`.
 
-For live multi-user tasks, Roomote also treats the MCP set as actor-scoped. Before each follow-up turn it synchronizes `cloud_jobs.actingUserId`, re-resolves OAuth-backed user MCP config, and logs whether the snapshot changed. That refresh check runs even when the speaking user did not change, so the next turn can pick up newly linked or revoked MCP connections for the same actor. If the snapshot change lands while a runtime turn is already running, the worker defers the harness restart until the current turn settles, then reconnects with the refreshed MCP config and replays any queued follow-ups onto the reloaded session.
+For live multi-user tasks, Roomote also treats the MCP set as actor-scoped. Before each follow-up turn it synchronizes `task_runs.actingUserId`, re-resolves OAuth-backed user MCP config, and logs whether the snapshot changed. That refresh check runs even when the speaking user did not change, so the next turn can pick up newly linked or revoked MCP connections for the same actor. If the snapshot change lands while a runtime turn is already running, the worker defers the harness restart until the current turn settles, then reconnects with the refreshed MCP config and replays any queued follow-ups onto the reloaded session.
 
 ## Built-in MCP Servers
 
@@ -387,7 +387,7 @@ Curated OAuth-backed MCP servers are connected from the platform UI and fetched 
 
 Deployment operators control which curated MCP integrations are available from Settings > Integrations in the web dashboard. That page reads from the shared `MCP_INTEGRATIONS` catalog in `packages/types/src/mcp-oauth.ts`, so new deployment-scoped curated integrations appear automatically when that list is rendered. Slack and Linear remain separate in Settings because they use custom deployment connection flows instead of the curated OAuth catalog.
 
-Most curated OAuth MCPs are still user-scoped: each user links their own account from Personal Settings, and actor-scoped task refresh continues to swap those MCP credentials when `cloud_jobs.actingUserId` changes.
+Most curated OAuth MCPs are still user-scoped: each user links their own account from Personal Settings, and actor-scoped task refresh continues to swap those MCP credentials when `task_runs.actingUserId` changes.
 
 Jira, Sentry, Pylon, Better Stack, Railway, PostHog, and Supermemory are the current curated OAuth exceptions. Their shared connections are deployment-scoped:
 
@@ -596,7 +596,7 @@ Slack quote tracking for worker-originated web replies uses the same MCP auth su
 ### Acting-User Credential Resolution
 
 For worker-facing integration MCPs, job tokens identify the cloud job owner,
-but OAuth credential lookup can also use `cloud_jobs.actingUserId` when a
+but OAuth credential lookup can also use `task_runs.actingUserId` when a
 follow-up path records a different human actor before prompt delivery.
 
 That acting-user override is now refreshed for:
@@ -606,7 +606,7 @@ That acting-user override is now refreshed for:
 - Linear follow-ups that drain through the worker poller
 
 In those paths, Roomote resolves user-scoped integration credentials from
-`cloud_jobs.actingUserId`, falling back to the job token `userId` only when no
+`task_runs.actingUserId`, falling back to the job token `userId` only when no
 override exists. Deployment-scoped curated MCPs such as Pylon instead
 resolve credentials from the deployment-owned connection row. This keeps multiplayer
 flows aligned with the human who most recently replied without forcing every

@@ -1,6 +1,6 @@
 import {
   CloudTaskStatus,
-  CloudTaskType,
+  TaskPayloadKind,
   isBootingCloudTaskStatus,
   isExitedCloudTaskStatus,
 } from '@roomote/types';
@@ -50,7 +50,8 @@ export function getSessionState(
   }
 
   if (isBootingCloudTaskStatus(cloudJobStatus)) {
-    if (cloudJob.type === CloudTaskType.SnapshotResume) {
+    // Runtime dispatch: payloadKind is the run-level resume signal.
+    if (cloudJob.payloadKind === TaskPayloadKind.SnapshotResume) {
       return 'resuming';
     }
     return 'booting';
@@ -71,7 +72,7 @@ export function getSessionState(
       now - cloudJob.startedAt.getTime() >= HARNESS_MESSAGE_TIMEOUT_MS;
 
     if (!timedOut) {
-      if (cloudJob.type === CloudTaskType.SnapshotResume) {
+      if (cloudJob.payloadKind === TaskPayloadKind.SnapshotResume) {
         return 'resuming';
       }
 

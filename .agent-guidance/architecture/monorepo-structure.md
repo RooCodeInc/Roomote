@@ -1,7 +1,7 @@
 ---
 title: Monorepo Structure
 status: active
-last_reviewed: 2026-07-05
+last_reviewed: 2026-07-09
 owner: engineering
 summary: Technical documentation of the pnpm monorepo layout covering apps, packages, Turborepo orchestration, ESM conventions, and tool management.
 ---
@@ -186,7 +186,7 @@ Shared libraries consumed by apps. Located in `packages/`. All use TypeScript so
 | **sdk**               | tRPC routers for cloudJobs, environments, repositories, and integrations                |
 | **cloud-agents**      | Cloud-agent workflows, job queueing, and LLM routing logic                              |
 | **compute-providers** | Abstracts execution targets (Docker, Modal, Daytona, E2B) - factory pattern             |
-| **types**             | Shared TypeScript types (CloudTaskType, CloudTaskStatus, EnvironmentConfig)             |
+| **types**             | Shared TypeScript types (TaskPayloadKind, CloudTaskStatus, EnvironmentConfig)           |
 | **redis**             | Connection factory for BullMQ, socket.io adapter, job queue                             |
 | **env**               | Zod-validated env vars via `@t3-oss/env-nextjs`; application code should prefer `Env.X` |
 | **feature-flags**     | Redis-backed feature flag evaluation with caching; has `/server` sub-export             |
@@ -275,7 +275,7 @@ When changing `apps/worker`, follow these additional rules:
 
 **Encrypted columns**: Custom Drizzle types `encryptedJson()` and `encryptedText()` - decrypt via `decryptSecrets()`/`decryptText()`
 
-**Test Factories**: fishery + faker - `userFactory`, `orgFactory`, `taskFactory`, `cloudJobFactory`, etc.
+**Test Factories**: fishery + faker - `userFactory`, `orgFactory`, `taskFactory`, `runFactory` (task runs; renamed from `cloudJobFactory`), etc.
 
 **Migration workflow**:
 

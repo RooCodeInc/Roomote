@@ -1,7 +1,7 @@
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import { CloudTaskStatus, CloudTaskType } from '@roomote/types';
+import { CloudTaskStatus, TaskPayloadKind } from '@roomote/types';
 import type { CloudJob } from '@roomote/db/server';
 
 // ── Mocks ────────────────────────────────────────────────────────────────────
@@ -13,7 +13,6 @@ const {
   mockCloudJobsFindFirst,
   mockOrgsFindFirst,
   mockDequeueCloudTask,
-  mockResolveUserIdForCloudJob,
   mockGetOrphanedJob,
   mockRecordJobLifecycleEvent,
   mockRedisSet,
@@ -25,7 +24,6 @@ const {
   mockCloudJobsFindFirst: vi.fn(),
   mockOrgsFindFirst: vi.fn(),
   mockDequeueCloudTask: vi.fn().mockResolvedValue(null),
-  mockResolveUserIdForCloudJob: vi.fn().mockResolvedValue('user-1'),
   mockGetOrphanedJob: vi.fn().mockResolvedValue(null),
   mockRecordJobLifecycleEvent: vi.fn().mockResolvedValue(undefined),
   mockRedisSet: vi.fn().mockResolvedValue('OK'),
@@ -59,7 +57,7 @@ vi.mock('@roomote/db/server', async () => {
     ...actual,
     db: {
       query: {
-        cloudJobs: {
+        taskRuns: {
           findFirst: (...args: unknown[]) => mockCloudJobsFindFirst(...args),
         },
         orgs: { findFirst: (...args: unknown[]) => mockOrgsFindFirst(...args) },
@@ -89,8 +87,6 @@ vi.mock('@roomote/redis', () => ({
 
 vi.mock('@roomote/cloud-agents/server', () => ({
   dequeueCloudTask: (...args: unknown[]) => mockDequeueCloudTask(...args),
-  resolveUserIdForCloudJob: (...args: unknown[]) =>
-    mockResolveUserIdForCloudJob(...args),
 }));
 
 vi.mock('../orphaned-cloud-jobs', () => ({
@@ -151,7 +147,7 @@ class SaturatedTestController extends TestController {
 function makeCloudJob(overrides: Partial<CloudJob> = {}): CloudJob {
   return {
     id: 42,
-    type: CloudTaskType.StandardTask,
+    payloadKind: TaskPayloadKind.StandardTask,
     userId: 'user-1',
     harness: 'opencode-server',
     status: CloudTaskStatus.Running,
@@ -195,7 +191,6 @@ describe('BaseController.handleSpawnJobError', () => {
     vi.clearAllMocks();
     resetControllerMocks();
     mockDequeueCloudTask.mockResolvedValue(null);
-    mockResolveUserIdForCloudJob.mockResolvedValue('user-1');
     mockGetOrphanedJob.mockResolvedValue(null);
     mockOrgsFindFirst.mockResolvedValue({
       id: 'org-1',
@@ -238,7 +233,7 @@ describe('BaseController.handleSpawnJobError', () => {
     };
     const job = makeCloudJob({
       id: 99,
-      type: CloudTaskType.SnapshotEnvironment,
+      payloadKind: TaskPayloadKind.SnapshotEnvironment,
       vendor: 'modal',
       payload: {
         repo: 'owner/repo',
@@ -331,7 +326,7 @@ describe('BaseController.handleSpawnJobError', () => {
         expect.objectContaining({
           jobId: 108,
           jobStatus: CloudTaskStatus.Pending,
-          jobType: CloudTaskType.StandardTask,
+          jobType: TaskPayloadKind.StandardTask,
           phase: 'database_fallback',
           provider: 'modal',
           repo: 'owner/repo',
@@ -376,7 +371,6 @@ describe('BaseController.dequeueCloudJob', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     resetControllerMocks();
-    mockResolveUserIdForCloudJob.mockResolvedValue('user-1');
     mockOrgsFindFirst.mockResolvedValue({
       id: 'org-1',
       deletedAt: null,
@@ -412,7 +406,7 @@ describe('BaseController.dequeueCloudJob', () => {
     expect(mockRecordJobLifecycleEvent).toHaveBeenCalledWith(
       expect.anything(),
       expect.objectContaining({
-        cloudJobId: 77,
+        runId: 77,
         taskId: 'task-1',
         eventType: 'decision',
         message: expect.stringContaining('Controller dequeued'),
@@ -459,7 +453,7 @@ describe('BaseController.dequeueCloudJob', () => {
     expect(mockRecordJobLifecycleEvent).toHaveBeenCalledWith(
       expect.anything(),
       expect.objectContaining({
-        cloudJobId: 80,
+        runId: 80,
         details: expect.objectContaining({
           stage: 'controller_dequeue',
           status: CloudTaskStatus.Dequeued,

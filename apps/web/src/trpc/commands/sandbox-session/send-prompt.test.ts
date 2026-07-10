@@ -29,7 +29,7 @@ vi.mock('@trpc/client', async () => {
   };
 });
 
-import { cloudJobFactory, taskFactory, userFactory } from '@roomote/db/server';
+import { runFactory, taskFactory, userFactory } from '@roomote/db/server';
 import { CloudTaskStatus } from '@roomote/types';
 import type { FeatureFlag } from '@roomote/feature-flags';
 
@@ -104,11 +104,11 @@ describe('sendSandboxPromptCommand', () => {
   it('uses the trimmed authenticated display name instead of trusting the browser payload', async () => {
     const user = await userFactory.create({ name: 'DB User' });
     const task = await taskFactory.create({
-      userId: user.id,
+      initiatorUserId: user.id,
     });
 
-    await cloudJobFactory.create({
-      userId: user.id,
+    await runFactory.create({
+      actingUserId: user.id,
       taskId: task.id,
       status: CloudTaskStatus.Running,
       sandboxServerUrl: 'http://sandbox.example.test',
@@ -139,11 +139,11 @@ describe('sendSandboxPromptCommand', () => {
   it('forwards autoSteerWhenQueued to the sandbox sendPrompt command', async () => {
     const user = await userFactory.create({ name: 'DB User' });
     const task = await taskFactory.create({
-      userId: user.id,
+      initiatorUserId: user.id,
     });
 
-    await cloudJobFactory.create({
-      userId: user.id,
+    await runFactory.create({
+      actingUserId: user.id,
       taskId: task.id,
       status: CloudTaskStatus.Running,
       sandboxServerUrl: 'http://sandbox.example.test',
@@ -176,11 +176,11 @@ describe('sendSandboxPromptCommand', () => {
       email: 'casey@example.com',
     });
     const task = await taskFactory.create({
-      userId: user.id,
+      initiatorUserId: user.id,
     });
 
-    await cloudJobFactory.create({
-      userId: user.id,
+    await runFactory.create({
+      actingUserId: user.id,
       taskId: task.id,
       status: CloudTaskStatus.Running,
       sandboxServerUrl: 'http://sandbox.example.test',
@@ -217,11 +217,11 @@ describe('sendSandboxPromptCommand', () => {
     );
     const user = await userFactory.create({ name: 'DB User' });
     const task = await taskFactory.create({
-      userId: user.id,
+      initiatorUserId: user.id,
     });
 
-    await cloudJobFactory.create({
-      userId: user.id,
+    await runFactory.create({
+      actingUserId: user.id,
       taskId: task.id,
       status: CloudTaskStatus.Running,
       sandboxServerUrl: 'http://sandbox.example.test',

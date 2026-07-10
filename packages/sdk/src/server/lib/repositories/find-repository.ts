@@ -10,10 +10,9 @@ export const findRepository = (
   fullName: string,
   input?: { sourceControlProvider?: SourceControlProvider },
 ) => {
-  if (!auth.userId) {
-    throw new Error('Invalid authorization token.');
-  }
-
+  // Repositories are deployment-scoped: any authenticated principal may
+  // read them, including deployment-service-principal job tokens minted for
+  // automation runs (which carry no user claim).
   return db.query.repositories.findFirst({
     where: and(
       eq(repositories.isActive, true),

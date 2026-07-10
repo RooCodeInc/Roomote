@@ -1,5 +1,12 @@
-import { cloudJobs, db, eq, taskMessages, tasks } from '@roomote/db/server';
-import { ACP_ENVELOPE_EVENT_TYPES, CloudTaskType } from '@roomote/types';
+import {
+  db,
+  eq,
+  taskFactory,
+  taskMessages,
+  taskRuns,
+  tasks,
+} from '@roomote/db/server';
+import { ACP_ENVELOPE_EVENT_TYPES, TaskPayloadKind } from '@roomote/types';
 import { LLM_TITLE_LOCKED_CHECKPOINT } from '@roomote/cloud-agents/server';
 
 import { refreshTaskTitleOnCompletion } from '../record-task-message-envelope';
@@ -29,33 +36,33 @@ async function seedTaskWithPrompt({
   llmTitleCheckpoint: number;
   titleEditedByUserAt?: Date | null;
 }) {
-  await db.insert(tasks).values({
+  await taskFactory.create({
     id: taskId,
     provider: 'roomote',
     model: 'test-model',
     title,
     llmTitleCheckpoint,
     titleEditedByUserAt,
-    timestamp: Math.floor(Date.now() / 1000),
-    activityAt: Date.now(),
+    workflow: 'pr_review',
+    surface: 'github',
+    trigger: 'webhook',
   });
 
   const [job] = await db
-    .insert(cloudJobs)
+    .insert(taskRuns)
     .values({
-      type: CloudTaskType.GithubPrReviewSync,
+      payloadKind: TaskPayloadKind.GithubPrReviewSync,
       payload: { repo: 'owner/repo' },
       taskId,
-      title,
     })
-    .returning({ id: cloudJobs.id });
+    .returning({ id: taskRuns.id });
 
   if (!job) {
     throw new Error('Failed to seed cloud job');
   }
 
   await db.insert(taskMessages).values({
-    cloudJobId: job.id,
+    runId: job.id,
     taskId,
     ts: Date.now(),
     eventType: ACP_ENVELOPE_EVENT_TYPES.UserPrompt,
@@ -95,13 +102,6 @@ describe('task title refresh', () => {
 
     expect(task?.title).toBe('Generated summary title');
     expect(task?.llmTitleCheckpoint).toBe(LLM_TITLE_LOCKED_CHECKPOINT);
-
-    const job = await db.query.cloudJobs.findFirst({
-      where: eq(cloudJobs.id, cloudJobId),
-      columns: { title: true },
-    });
-
-    expect(job?.title).toBe('Generated summary title');
   });
 
   it('never rewrites a locked deterministic title', async () => {
@@ -186,12 +186,5 @@ describe('task title refresh', () => {
     expect(task?.title).toBe('Checkpoint 20 title');
     expect(task?.llmTitleCheckpoint).toBe(20);
     expect(mockGenerateLlmTaskTitle).not.toHaveBeenCalled();
-
-    const job = await db.query.cloudJobs.findFirst({
-      where: eq(cloudJobs.id, cloudJobId),
-      columns: { title: true },
-    });
-
-    expect(job?.title).toBe('Checkpoint 20 title');
   });
 });

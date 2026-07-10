@@ -24,7 +24,6 @@ function clampOptionalInteger(value: number | null | undefined): number | null {
 interface RecordComputeProviderUsageSampleInput {
   provider: ComputeProvider;
   providerUsageId: string;
-  userId: string | null;
   cloudJobId: number;
   taskId: string | null;
   instanceId: string | null;
@@ -51,8 +50,7 @@ export async function recordComputeProviderUsageSample(
     .values({
       provider: input.provider,
       providerUsageId: input.providerUsageId,
-      userId: input.userId,
-      cloudJobId: input.cloudJobId,
+      runId: input.cloudJobId,
       taskId: input.taskId,
       instanceId: input.instanceId,
       sampledAt: input.sampledAt,

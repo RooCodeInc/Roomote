@@ -31,12 +31,11 @@ vi.mock('@roomote/slack', async (importOriginal) => {
 
 vi.mock('@roomote/db/server', () => ({
   and: vi.fn((...args: unknown[]) => ({ and: args })),
-  cloudJobs: {
+  taskRuns: {
     id: 'id',
     status: 'status',
     taskId: 'taskId',
     sandboxServerUrl: 'sandboxServerUrl',
-    userId: 'userId',
     actingUserId: 'actingUserId',
     createdAt: 'createdAt',
     canceledAt: 'canceledAt',
@@ -44,7 +43,7 @@ vi.mock('@roomote/db/server', () => ({
   db: {
     update: dbUpdateMock,
     query: {
-      cloudJobs: {
+      taskRuns: {
         findFirst: dbQueryFindFirstMock,
       },
     },

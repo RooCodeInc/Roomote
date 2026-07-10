@@ -1,10 +1,11 @@
 import type { Context } from 'hono';
 
 import {
-  cloudJobs,
   db,
   eq,
   markTaskStartParallelCountEndedAt,
+  syncTaskStateFromRuns,
+  taskRuns,
 } from '@roomote/db/server';
 import { CloudTaskStatus, isExitedCloudTaskStatus } from '@roomote/types';
 
@@ -48,16 +49,20 @@ export async function cancelTask(
 
     await db.transaction(async (tx) => {
       await tx
-        .update(cloudJobs)
+        .update(taskRuns)
         .set({
           status: CloudTaskStatus.Canceled,
           cancelRequestedAt: endedAt,
           canceledAt: endedAt,
         })
-        .where(eq(cloudJobs.id, job.id));
+        .where(eq(taskRuns.id, job.id));
+
+      // Derive the durable task state from all its runs after canceling this
+      // run, so a still-running or already-completed sibling is respected.
+      await syncTaskStateFromRuns(tx, taskId);
 
       await markTaskStartParallelCountEndedAt(tx, {
-        cloudJobId: job.id,
+        runId: job.id,
         endedAt,
       });
     });

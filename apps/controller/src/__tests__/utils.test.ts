@@ -57,7 +57,7 @@ vi.mock('@roomote/db/server', () => ({
     },
     update: (...args: unknown[]) => mockUpdate(...args),
   },
-  cloudJobs: { id: 'id' },
+  taskRuns: { id: 'id' },
   environments: {},
   deploymentSettings: {},
   eq: vi.fn(),

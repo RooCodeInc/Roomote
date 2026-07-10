@@ -2,25 +2,18 @@ import { TRPCClientError } from '@trpc/client';
 import { withSandboxServerRpcClient } from '@roomote/sdk/server';
 import {
   and,
-  cloudJobs,
+  cancelTaskRunDirect,
   db,
   eq,
-  inArray,
   isNull,
-  markTaskStartParallelCountEndedAt,
-  not,
+  taskRuns,
 } from '@roomote/db/server';
-import {
-  CloudTaskStatus,
-  exitedCloudTaskStatuses,
-  isExitedCloudTaskStatus,
-} from '@roomote/types';
+import { type CloudTaskStatus, isExitedCloudTaskStatus } from '@roomote/types';
 
 interface StopTaskJob {
   id: number;
   status: CloudTaskStatus;
   sandboxServerUrl: string | null;
-  userId: string | null;
   actingUserId: string | null;
 }
 
@@ -47,13 +40,12 @@ async function findCurrentStopTaskJob(
   jobId: number,
 ): Promise<StopTaskJob | null> {
   return (
-    (await db.query.cloudJobs.findFirst({
-      where: eq(cloudJobs.id, jobId),
+    (await db.query.taskRuns.findFirst({
+      where: eq(taskRuns.id, jobId),
       columns: {
         id: true,
         status: true,
         sandboxServerUrl: true,
-        userId: true,
         actingUserId: true,
       },
     })) ?? null
@@ -68,49 +60,16 @@ async function findCurrentStopTaskJob(
  */
 async function markCancelRequested(jobId: number): Promise<void> {
   await db
-    .update(cloudJobs)
+    .update(taskRuns)
     .set({ cancelRequestedAt: new Date() })
-    .where(and(eq(cloudJobs.id, jobId), isNull(cloudJobs.cancelRequestedAt)));
+    .where(and(eq(taskRuns.id, jobId), isNull(taskRuns.cancelRequestedAt)));
 }
 
 async function cancelTaskJobDirect(jobId: number): Promise<boolean> {
-  const endedAt = new Date();
-
-  const [updatedJob] = await db.transaction(async (tx) => {
-    const [job] = await tx
-      .update(cloudJobs)
-      .set({
-        status: CloudTaskStatus.Canceled,
-        cancelRequestedAt: endedAt,
-        canceledAt: endedAt,
-      })
-      .where(
-        and(
-          eq(cloudJobs.id, jobId),
-          isNull(cloudJobs.sandboxServerUrl),
-          not(
-            inArray(
-              cloudJobs.status,
-              exitedCloudTaskStatuses as unknown as CloudTaskStatus[],
-            ),
-          ),
-        ),
-      )
-      .returning({ id: cloudJobs.id });
-
-    if (!job) {
-      return [];
-    }
-
-    await markTaskStartParallelCountEndedAt(tx, {
-      cloudJobId: jobId,
-      endedAt,
-    });
-
-    return [true];
-  });
-
-  return Boolean(updatedJob);
+  // Shared @roomote/db helper (also used by the work-item launch surfaces to
+  // clean up an orphaned run after a lost fenced finalize): guarded
+  // pre-sandbox cancel + task-state re-derive + parallel-count close.
+  return cancelTaskRunDirect({ runId: jobId });
 }
 
 function createTaskNotFoundResult(): StopTaskJobResult {
@@ -184,7 +143,7 @@ async function stopTaskSandboxJob(params: {
   cancelledBy?: StopTaskAttribution;
 }): Promise<StopTaskJobResult> {
   const { job, authUserId, cancelledBy } = params;
-  const tokenUserId = authUserId ?? job.actingUserId ?? job.userId;
+  const tokenUserId = authUserId ?? job.actingUserId;
 
   if (!tokenUserId) {
     return {

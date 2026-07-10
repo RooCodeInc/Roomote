@@ -1,7 +1,7 @@
 import type { TelegramUpdateCommunicationMetadata } from '@roomote/communication/telegram-update';
 import {
   ALL_REPOSITORIES,
-  CloudTaskType,
+  TaskPayloadKind,
   type CloudTask,
 } from '@roomote/types';
 import { db, environments, eq } from '@roomote/db/server';
@@ -65,9 +65,11 @@ export async function launchTelegramTask(input: {
   metadata: TelegramUpdateCommunicationMetadata;
   workspace: TelegramWorkspaceSelection;
 }) {
-  const task: Extract<CloudTask, { type: CloudTaskType.StandardTask }> = {
-    type: CloudTaskType.StandardTask,
-    userId: input.launchOwnerUserId,
+  const task: Extract<
+    CloudTask,
+    { type: typeof TaskPayloadKind.StandardTask }
+  > = {
+    type: TaskPayloadKind.StandardTask,
     payload: {
       repo: input.workspace.repoForPayload,
       ...(input.workspace.environmentId
@@ -77,9 +79,18 @@ export async function launchTelegramTask(input: {
       ...input.metadata,
     },
   };
-  const launchResult = await enqueueCloudTask(task, {
-    launchClass: 'human',
-  });
+  const launchResult = await enqueueCloudTask(
+    {
+      task,
+      initiator: { kind: 'user', userId: input.launchOwnerUserId },
+      workflow: 'standard',
+      surface: 'telegram',
+      trigger: 'message',
+    },
+    {
+      launchClass: 'human',
+    },
+  );
 
   const taskUrl = getTaskUrl({
     taskId: launchResult.taskId,

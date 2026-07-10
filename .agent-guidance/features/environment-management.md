@@ -386,7 +386,7 @@ installing PM2 at runtime.
 
 Task snapshot resume jobs treat environment repository commands as
 best-effort. The source snapshot already captured a previously working
-environment, so `CloudTaskType.SnapshotResume` forces repository commands to
+environment, so `TaskPayloadKind.SnapshotResume` forces repository commands to
 continue on failure, emits a user-visible startup warning, and keeps detailed
 debug logs for the failed command. Fresh environment setup and environment
 snapshot creation still respect each command's configured `continue_on_error`
@@ -561,7 +561,7 @@ each job owns its own launch and there is no warm worker pool.
 
 **Launch Steps:**
 
-1. Dequeue the `cloud_jobs` row and create a job-scoped auth token.
+1. Dequeue the `task_runs` row and create a job-scoped auth token.
 2. Load the selected environment config plus any provider-specific snapshot
    state.
 3. Resolve the launch mode:
@@ -571,7 +571,7 @@ each job owns its own launch and there is no warm worker pool.
 4. Create or resume the provider instance.
 5. If `config.oidc` is present, write the initial token files after the machine
    exists and before the detached worker command starts.
-6. Persist machine metadata on the `cloud_jobs` row.
+6. Persist machine metadata on the `task_runs` row.
 7. Launch `worker run`, `worker resume`, or `worker snapshot` on that machine.
 
 ## Snapshot Management
@@ -591,7 +591,7 @@ worker/runtime before the task starts.
 
 1. User clicks "Create Snapshot" in the web UI
 2. Web app calls `trpc.snapshots.createEnvironment({ environmentId, provider })`
-3. Handler enqueues a `CloudTaskType.SnapshotEnvironment` job
+3. Handler enqueues a `TaskPayloadKind.SnapshotEnvironment` job
 4. Worker provisions the environment from the provider's fresh base-image path rather than inheriting the previous environment snapshot
 5. Worker calls the active provider's snapshot API to capture filesystem state
 6. BullMQ worker writes `snapshotId`, `snapshotCreatedAt`, `snapshotExpiresAt` to `environment_snapshots`
@@ -622,14 +622,14 @@ snapshot.
 2. Web app calls `trpc.snapshots.createCloudJob({ cloudJobId })`
 3. Handler enqueues a snapshot request via BullMQ
 4. BullMQ worker calls the active provider's snapshot API on the running worker
-5. `snapshotId` is written to `cloudJobs.snapshotId`
-6. Snapshot metadata is written back to `cloudJobs` (and to `environments` for environment snapshots)
+5. `snapshotId` is written to `taskRuns.snapshotId`
+6. Snapshot metadata is written back to `taskRuns` (and to `environments` for environment snapshots)
 
 **Resume Flow:**
 
 1. User clicks "Resume Snapshot" on a completed/paused task
 2. Web app calls `trpc.snapshots.restoreCloudJob({ sourceSnapshotId, sourceCloudJobId })`
-3. Handler enqueues a new `CloudTaskType.SnapshotResume` job
+3. Handler enqueues a new `TaskPayloadKind.SnapshotResume` job
 4. Worker creates a new instance from the snapshot on the same provider that created it
 5. Task execution resumes with the previous filesystem state intact
 

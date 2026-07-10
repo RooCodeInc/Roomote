@@ -58,7 +58,7 @@ export async function waitForExternalSleepAction({
 
   // Non-snapshot providers (Daytona) exit via destroy, never via snapshot.
   const isResumable =
-    isResumableCloudTaskType(cloudJob.type) &&
+    isResumableCloudTaskType(cloudJob.payloadKind) &&
     isSnapshotCapableComputeProvider(cloudJob.vendor);
   let sleepRequested = false;
 

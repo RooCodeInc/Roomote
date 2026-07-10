@@ -4,7 +4,7 @@ import {
   type CloudTaskPayload,
   DEFAULT_PR_REVIEWER_SETTINGS,
   type PrReviewerSettings,
-  CloudTaskType,
+  TaskPayloadKind,
   CloudAgentType,
 } from '@roomote/types';
 import {
@@ -41,15 +41,18 @@ function getPullRequestUrl(payload: GiteaPullRequestWebhook): string {
 
 function getReviewTaskType(
   payload: GiteaPullRequestWebhook,
-): CloudTaskType.GithubPrReview | CloudTaskType.GithubPrReviewSync | null {
+):
+  | typeof TaskPayloadKind.GithubPrReview
+  | typeof TaskPayloadKind.GithubPrReviewSync
+  | null {
   const action = payload.action;
 
   if (action === 'opened' || action === 'reopened') {
-    return CloudTaskType.GithubPrReview;
+    return TaskPayloadKind.GithubPrReview;
   }
 
   if (action === 'synchronized') {
-    return CloudTaskType.GithubPrReviewSync;
+    return TaskPayloadKind.GithubPrReviewSync;
   }
 
   return null;
@@ -168,7 +171,7 @@ export async function handleGiteaPullRequest(
 
   const headSha = getPullRequestHeadSha(payload);
 
-  if (taskType === CloudTaskType.GithubPrReviewSync && headSha) {
+  if (taskType === TaskPayloadKind.GithubPrReviewSync && headSha) {
     const activeReview = await findActiveGitHubPrReviewTask({
       repoFullName,
       prNumber: payload.number,
@@ -188,27 +191,54 @@ export async function handleGiteaPullRequest(
     }
   }
 
-  const enqueued = await pMap(targets, async (target) =>
+  const prUrl = getPullRequestUrl(payload);
+  const prAuthorName = getGiteaUsername(pullRequest.user);
+  const prAuthorId =
+    pullRequest.user?.id != null ? String(pullRequest.user.id) : prAuthorName;
+
+  const enqueued = await pMap(targets, async (_target) =>
     enqueueCloudTask(
       {
-        userId: target.userId,
-        attributionOverride: {
-          kind: 'automatic',
-          sourceKind: 'gitea',
+        task: {
+          type: taskType,
+          payload: {
+            repo: repoFullName,
+            sourceControlProvider: 'gitea',
+            prNumber: payload.number,
+            prTitle: pullRequest.title,
+            prUrl,
+            headSha,
+            branchName: pullRequest.head?.ref,
+            ...(pullRequest.head?.ref ? { branch: pullRequest.head.ref } : {}),
+            ...(headSha ? { sha: headSha } : {}),
+            targetBranch: pullRequest.base?.ref,
+          } satisfies CloudTaskPayload<typeof taskType>,
         },
-        type: taskType,
-        payload: {
-          repo: repoFullName,
-          sourceControlProvider: 'gitea',
+        initiator: {
+          kind: 'automation',
+          key: 'review_code',
+          ...(prAuthorId
+            ? {
+                actor: {
+                  externalId: prAuthorId,
+                  displayName: prAuthorName,
+                },
+              }
+            : {}),
+        },
+        workflow: 'pr_review',
+        surface: 'gitea',
+        trigger: 'webhook',
+        prLinkage: {
+          provider: 'gitea',
+          repository: repoFullName,
           prNumber: payload.number,
+          prUrl,
           prTitle: pullRequest.title,
-          prUrl: getPullRequestUrl(payload),
-          headSha,
-          branchName: pullRequest.head?.ref,
-          ...(pullRequest.head?.ref ? { branch: pullRequest.head.ref } : {}),
-          ...(headSha ? { sha: headSha } : {}),
-          targetBranch: pullRequest.base?.ref,
-        } satisfies CloudTaskPayload<typeof taskType>,
+          prSha: headSha || null,
+          prBaseRef: pullRequest.base?.ref ?? null,
+          prBaseSha: pullRequest.base?.sha ?? null,
+        },
       },
       {
         launchClass: 'automation',

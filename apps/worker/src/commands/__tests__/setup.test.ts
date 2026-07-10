@@ -1,4 +1,4 @@
-import { CloudTaskType } from '@roomote/types';
+import { TaskPayloadKind } from '@roomote/types';
 
 import type { StartupLogger } from '../../logging';
 
@@ -124,7 +124,7 @@ const workspaceOptions = {
     branch: 'main',
   },
   envVars: { FOO: 'bar' },
-  cloudJobType: CloudTaskType.StandardTask,
+  cloudJobType: TaskPayloadKind.StandardTask,
 };
 
 const environmentWorkspaceOptions = {
@@ -137,7 +137,7 @@ const environmentWorkspaceOptions = {
     },
   },
   envVars: { FOO: 'bar' },
-  cloudJobType: CloudTaskType.StandardTask,
+  cloudJobType: TaskPayloadKind.StandardTask,
 };
 
 describe('setup mode behavior', () => {
@@ -309,7 +309,7 @@ describe('setup mode behavior', () => {
       mode: 'full',
       workspace: {
         ...environmentWorkspaceOptions,
-        cloudJobType: CloudTaskType.SnapshotEnvironment,
+        cloudJobType: TaskPayloadKind.SnapshotEnvironment,
       },
       logger,
       workerEnv: mockWorkerEnv,
@@ -318,7 +318,7 @@ describe('setup mode behavior', () => {
     expect(mockInitializeWorkspaceRepositories).toHaveBeenCalledWith(logger, {
       ...environmentWorkspaceOptions,
       cleanupLegacyPaths: true,
-      cloudJobType: CloudTaskType.SnapshotEnvironment,
+      cloudJobType: TaskPayloadKind.SnapshotEnvironment,
       envVars: { BASE: 'base', FOO: 'bar' },
     });
     expect(mockSetupOrganizationEnvironment).toHaveBeenCalledWith(logger, {
@@ -431,7 +431,7 @@ describe('setup mode behavior', () => {
         mode: 'full',
         workspace: {
           ...environmentWorkspaceOptions,
-          cloudJobType: CloudTaskType.SnapshotEnvironment,
+          cloudJobType: TaskPayloadKind.SnapshotEnvironment,
         },
         logger,
         workerEnv: mockWorkerEnv,

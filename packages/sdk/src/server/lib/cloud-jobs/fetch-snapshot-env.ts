@@ -4,7 +4,7 @@ import {
   type JobTokenContext,
   type SourceControlTokenMetadata,
 } from '@roomote/types';
-import { db, cloudJobs, eq } from '@roomote/db/server';
+import { db, taskRuns, eq } from '@roomote/db/server';
 
 import {
   fetchEnvVars,
@@ -28,8 +28,8 @@ export async function fetchSnapshotEnv(
   const tag = '[fetchSnapshotEnv]';
   const { cloudJobId } = input;
 
-  const cloudJob = await db.query.cloudJobs.findFirst({
-    where: eq(cloudJobs.id, cloudJobId),
+  const cloudJob = await db.query.taskRuns.findFirst({
+    where: eq(taskRuns.id, cloudJobId),
   });
 
   if (!cloudJob) {
@@ -64,14 +64,14 @@ export async function fetchSnapshotEnv(
         : {};
 
     await db
-      .update(cloudJobs)
+      .update(taskRuns)
       .set({
         artifacts: {
           ...existingArtifacts,
           ...sourceControlToken.artifactsPatch,
         },
       })
-      .where(eq(cloudJobs.id, cloudJob.id));
+      .where(eq(taskRuns.id, cloudJob.id));
   }
 
   const gitHubToken =

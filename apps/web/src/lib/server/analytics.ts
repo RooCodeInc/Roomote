@@ -16,12 +16,9 @@ import { syncGitHubPullRequestFactsForOrg } from '@roomote/sdk/server';
 
 import {
   ALL_REPOSITORIES,
-  CloudTaskType,
-  type EffectiveAuthorKind,
   type PullRequestStatus,
   PRODUCT_NAME,
-  type TaskAttributionKind,
-  type TaskAttributionSourceKind,
+  type TaskSurface,
 } from '@roomote/types';
 import {
   db,
@@ -33,7 +30,7 @@ import {
   desc,
   eq,
   inArray,
-  resolveTaskAttributionDisplay,
+  isNull,
 } from '@roomote/db/server';
 
 import {
@@ -62,6 +59,7 @@ import {
 
 import type { UserAuthSuccess } from '@/types';
 import { getUserDisplayName } from '@/lib/user-display-name';
+import { formatAutomationLabel } from '@/lib/task-creator-filter';
 
 import { getLatestCloudJobsByTaskId } from './cloud-jobs';
 import { getRepositories } from './source-control';
@@ -84,10 +82,15 @@ const DAYS_PER_YEAR = 365;
 
 const SOURCE_ORDER = [
   'Slack',
+  'Teams',
+  'Telegram',
   'GitHub',
+  'GitLab',
+  'Gitea',
+  'Azure DevOps',
   'Linear',
   'Web',
-  'Automation',
+  'API',
   SYSTEM_SOURCE,
 ];
 const PR_STATUS_ORDER = ['Closed', 'Draft', 'Open', 'Merged'] as const;
@@ -345,111 +348,78 @@ function getCanonicalUserDimensionValue(user: {
   return createDimensionValue(key, label, formatDisambiguatedUserLabel(user));
 }
 
-function getCanonicalTaskAttributionDimensionValue(input: {
-  attributionKind: TaskAttributionKind | null;
-  attributedUserId: string | null;
-  attributionSourceKind: TaskAttributionSourceKind | null;
-  attributionSourceDisplayName: string | null;
-  attributionSourceExternalId: string | null;
-  attributedGithubLogin: string | null;
-  effectiveAuthorKind: EffectiveAuthorKind | null;
-  effectiveAuthorUserId: string | null;
-  effectiveAuthorDisplayName: string | null;
-  effectiveAuthorGithubLogin: string | null;
+/**
+ * Creator dimension: a pure function of the tasks initiator columns
+ * (GROUP BY initiatorKind + COALESCE(initiatorUserId, initiatorAutomation,
+ * actorExternalId) semantics, computed per row).
+ */
+function getTaskInitiatorDimensionValue(input: {
+  initiatorKind: 'user' | 'automation';
+  initiatorUserId: string | null;
+  initiatorAutomation: string | null;
+  actorExternalId: string | null;
+  actorDisplayName: string | null;
   userName: string | null;
   userEmail: string | null;
 }) {
-  const attribution = resolveTaskAttributionDisplay(
-    {
-      attributionKind: input.attributionKind,
-      attributedUserId: input.attributedUserId,
-      attributionSourceKind: input.attributionSourceKind,
-      attributionSourceDisplayName: input.attributionSourceDisplayName,
-      attributionSourceExternalId: input.attributionSourceExternalId,
-      attributedGithubLogin: input.attributedGithubLogin,
-      effectiveAuthorKind: input.effectiveAuthorKind,
-      effectiveAuthorUserId: input.effectiveAuthorUserId,
-      effectiveAuthorDisplayName: input.effectiveAuthorDisplayName,
-      effectiveAuthorGithubLogin: input.effectiveAuthorGithubLogin,
-    },
-    {
-      attributedUser: {
-        id: input.attributedUserId,
-        name: input.userName,
-        email: input.userEmail,
-      },
-    },
-  );
+  if (input.initiatorKind === 'automation') {
+    const key = input.initiatorAutomation ?? PRODUCT_NAME;
+    const label = input.initiatorAutomation
+      ? formatAutomationLabel(input.initiatorAutomation)
+      : PRODUCT_NAME;
 
-  if (attribution.kind === 'matched_user') {
-    const matchedUserId =
-      input.effectiveAuthorKind === 'human' && input.effectiveAuthorUserId
-        ? input.effectiveAuthorUserId
-        : input.attributedUserId;
-    const matchedUserName =
-      input.effectiveAuthorKind === 'human' &&
-      input.effectiveAuthorDisplayName &&
-      input.effectiveAuthorUserId !== input.attributedUserId
-        ? input.effectiveAuthorDisplayName
-        : input.userName;
-    const matchedUserEmail =
-      matchedUserId && matchedUserId === input.attributedUserId
-        ? input.userEmail
-        : null;
+    return createDimensionValue(`automation:${key}`, label);
+  }
 
+  if (input.initiatorUserId) {
     return getCanonicalUserDimensionValue({
-      id: matchedUserId,
-      name: matchedUserName,
-      email: matchedUserEmail,
+      id: input.initiatorUserId,
+      name: input.userName,
+      email: input.userEmail,
     });
   }
 
-  if (attribution.kind === 'unlinked_user') {
-    const key =
-      input.effectiveAuthorKind === 'human' &&
-      !input.effectiveAuthorUserId &&
-      attribution.analyticsDisplay
-        ? `unlinked:${attribution.sourceKind}:${attribution.analyticsDisplay}`
-        : input.attributionSourceExternalId
-          ? `unlinked:${input.attributionSourceKind}:${input.attributionSourceExternalId}`
-          : `unlinked:${attribution.analyticsDisplay}`;
+  const externalLabel =
+    input.actorDisplayName ?? input.actorExternalId ?? NO_VALUE_LABEL;
 
-    return createDimensionValue(key, attribution.analyticsDisplay);
-  }
-
-  return createLabelBackedDimensionValue(attribution.analyticsDisplay);
+  return createDimensionValue(
+    input.actorExternalId
+      ? `external:${input.actorExternalId}`
+      : `external:${externalLabel}`,
+    externalLabel,
+  );
 }
 
 function formatRepositoryLabel(repositoryName: string) {
   return repositoryName === ALL_REPOSITORIES ? ALL_REPOS_LABEL : repositoryName;
 }
 
-function mapTaskSource(taskType: CloudTaskType | string | null | undefined) {
-  if (!taskType) {
-    return SYSTEM_SOURCE;
+function mapTaskSource(surface: TaskSurface | null | undefined) {
+  switch (surface) {
+    case 'slack':
+      return 'Slack';
+    case 'teams':
+      return 'Teams';
+    case 'telegram':
+      return 'Telegram';
+    case 'github':
+      return 'GitHub';
+    case 'gitlab':
+      return 'GitLab';
+    case 'gitea':
+      return 'Gitea';
+    case 'ado':
+      return 'Azure DevOps';
+    case 'linear':
+      return 'Linear';
+    case 'web':
+      return 'Web';
+    case 'api':
+      return 'API';
+    case 'system':
+    default:
+      return SYSTEM_SOURCE;
   }
-
-  if (taskType.startsWith('slack.')) {
-    return 'Slack';
-  }
-
-  if (taskType.startsWith('github.')) {
-    return 'GitHub';
-  }
-
-  if (taskType.startsWith('linear.')) {
-    return 'Linear';
-  }
-
-  if (
-    taskType === CloudTaskType.StandardTask ||
-    taskType === CloudTaskType.SuggestedTasks ||
-    taskType === CloudTaskType.LegacyOnboardingSuggestions
-  ) {
-    return 'Web';
-  }
-
-  return SYSTEM_SOURCE;
 }
 
 type ProjectNameMatch = {
@@ -863,22 +833,17 @@ async function getRoomotePullRequestMetadataByKey(_auth: UserAuthSuccess) {
       prNumber: taskPullRequests.prNumber,
       detectedAt: taskPullRequests.detectedAt,
       updatedAt: taskPullRequests.updatedAt,
-      taskAttributionKind: tasks.attributionKind,
-      taskAttributedUserId: tasks.attributedUserId,
-      taskAttributionSourceKind: tasks.attributionSourceKind,
-      taskAttributionSourceDisplayName: tasks.attributionSourceDisplayName,
-      taskAttributionSourceExternalId: tasks.attributionSourceExternalId,
-      taskAttributedGithubLogin: tasks.attributedGithubLogin,
-      taskEffectiveAuthorKind: tasks.effectiveAuthorKind,
-      taskEffectiveAuthorUserId: tasks.effectiveAuthorUserId,
-      taskEffectiveAuthorDisplayName: tasks.effectiveAuthorDisplayName,
-      taskEffectiveAuthorGithubLogin: tasks.effectiveAuthorGithubLogin,
+      taskInitiatorKind: tasks.initiatorKind,
+      taskInitiatorUserId: tasks.initiatorUserId,
+      taskInitiatorAutomation: tasks.initiatorAutomation,
+      taskActorExternalId: tasks.actorExternalId,
+      taskActorDisplayName: tasks.actorDisplayName,
       taskUserName: users.name,
       taskUserEmail: users.email,
     })
     .from(taskPullRequests)
     .innerJoin(tasks, eq(tasks.id, taskPullRequests.taskId))
-    .leftJoin(users, eq(users.id, tasks.attributedUserId));
+    .leftJoin(users, eq(users.id, tasks.initiatorUserId));
 
   const deduped = new Map<
     string,
@@ -908,17 +873,12 @@ async function getRoomotePullRequestMetadataByKey(_auth: UserAuthSuccess) {
         canonicalTaskId: result.taskId,
         detectedAt: result.detectedAt,
         updatedAt: result.updatedAt,
-        userDimension: getCanonicalTaskAttributionDimensionValue({
-          attributionKind: result.taskAttributionKind,
-          attributedUserId: result.taskAttributedUserId,
-          attributionSourceKind: result.taskAttributionSourceKind,
-          attributionSourceDisplayName: result.taskAttributionSourceDisplayName,
-          attributionSourceExternalId: result.taskAttributionSourceExternalId,
-          attributedGithubLogin: result.taskAttributedGithubLogin,
-          effectiveAuthorKind: result.taskEffectiveAuthorKind,
-          effectiveAuthorUserId: result.taskEffectiveAuthorUserId,
-          effectiveAuthorDisplayName: result.taskEffectiveAuthorDisplayName,
-          effectiveAuthorGithubLogin: result.taskEffectiveAuthorGithubLogin,
+        userDimension: getTaskInitiatorDimensionValue({
+          initiatorKind: result.taskInitiatorKind,
+          initiatorUserId: result.taskInitiatorUserId,
+          initiatorAutomation: result.taskInitiatorAutomation,
+          actorExternalId: result.taskActorExternalId,
+          actorDisplayName: result.taskActorDisplayName,
           userName: result.taskUserName,
           userEmail: result.taskUserEmail,
         }),
@@ -1073,7 +1033,7 @@ async function getTaskAnalyticsRows(
   const taskRows = await getTaskAnalyticsBaseRows(auth, timePeriod, now);
 
   return taskRows.map((task) => {
-    const sourceLabel = mapTaskSource(task.latestJobType);
+    const sourceLabel = mapTaskSource(task.surface);
 
     return {
       id: task.id,
@@ -1106,7 +1066,7 @@ type TaskAnalyticsBaseRow = {
   id: string;
   title: string;
   timestamp: Date;
-  latestJobType: CloudTaskType | null;
+  surface: TaskSurface;
   projectLabel: string;
   userDimension: AnalyticsDimensionValue;
 };
@@ -1118,27 +1078,25 @@ async function getTaskAnalyticsBaseRows(
 ): Promise<TaskAnalyticsBaseRow[]> {
   const cutoff = getTimeCutoff(timePeriod, now);
 
+  // Single-table read: creator, source, and repo are all columns on tasks.
   const taskResults = await db
     .select({
       id: tasks.id,
       title: tasks.title,
       timestamp: tasks.createdAt,
       repositoryName: tasks.repositoryName,
-      attributionKind: tasks.attributionKind,
-      attributedUserId: tasks.attributedUserId,
-      attributionSourceKind: tasks.attributionSourceKind,
-      attributionSourceDisplayName: tasks.attributionSourceDisplayName,
-      attributionSourceExternalId: tasks.attributionSourceExternalId,
-      attributedGithubLogin: tasks.attributedGithubLogin,
-      effectiveAuthorKind: tasks.effectiveAuthorKind,
-      effectiveAuthorUserId: tasks.effectiveAuthorUserId,
-      effectiveAuthorDisplayName: tasks.effectiveAuthorDisplayName,
-      effectiveAuthorGithubLogin: tasks.effectiveAuthorGithubLogin,
+      surface: tasks.surface,
+      initiatorKind: tasks.initiatorKind,
+      initiatorUserId: tasks.initiatorUserId,
+      initiatorAutomation: tasks.initiatorAutomation,
+      actorExternalId: tasks.actorExternalId,
+      actorDisplayName: tasks.actorDisplayName,
       userName: users.name,
       userEmail: users.email,
     })
     .from(tasks)
-    .leftJoin(users, eq(users.id, tasks.attributedUserId))
+    .leftJoin(users, eq(users.id, tasks.initiatorUserId))
+    .where(isNull(tasks.deletedAt))
     .orderBy(desc(tasks.timestamp));
 
   const filteredTasks = cutoff
@@ -1218,25 +1176,13 @@ async function getTaskAnalyticsBaseRows(
         ? payload.environmentId
         : null;
 
-    const userDimension = getCanonicalTaskAttributionDimensionValue({
-      attributionKind: task.attributionKind,
-      attributedUserId: task.attributedUserId,
-      attributionSourceKind: task.attributionSourceKind,
-      attributionSourceDisplayName: task.attributionSourceDisplayName,
-      attributionSourceExternalId: task.attributionSourceExternalId,
-      attributedGithubLogin: task.attributedGithubLogin,
-      effectiveAuthorKind: task.effectiveAuthorKind,
-      effectiveAuthorUserId: task.effectiveAuthorUserId,
-      effectiveAuthorDisplayName: task.effectiveAuthorDisplayName,
-      effectiveAuthorGithubLogin: task.effectiveAuthorGithubLogin,
-      userName: task.userName,
-      userEmail: task.userEmail,
-    });
+    const userDimension = getTaskInitiatorDimensionValue(task);
+
     return {
       id: task.id,
       title: task.title,
       timestamp: task.timestamp,
-      latestJobType: latestJob?.type ?? null,
+      surface: task.surface,
       projectLabel: getProjectLabel(task.repositoryName, environmentId),
       userDimension,
     } satisfies TaskAnalyticsBaseRow;

@@ -61,7 +61,7 @@ vi.mock('../getGitLabAutomationTargets', () => ({
   getGitLabAutomationTargets: mockGetGitLabAutomationTargets,
 }));
 
-import { CloudTaskType } from '@roomote/types';
+import { TaskPayloadKind } from '@roomote/types';
 
 import { handleGitLabMergeRequest } from '../handleMergeRequest';
 import type { GitLabMergeRequestWebhook } from '../types';
@@ -137,22 +137,32 @@ describe('handleGitLabMergeRequest', () => {
     });
     expect(mockEnqueueCloudTask).toHaveBeenCalledWith(
       expect.objectContaining({
-        userId: 'user-1',
-        attributionOverride: {
-          kind: 'automatic',
-          sourceKind: 'gitlab',
-        },
-        type: CloudTaskType.GithubPrReview,
-        payload: expect.objectContaining({
-          repo: 'acme/backend',
-          sourceControlProvider: 'gitlab',
+        task: expect.objectContaining({
+          type: TaskPayloadKind.GithubPrReview,
+          payload: expect.objectContaining({
+            repo: 'acme/backend',
+            sourceControlProvider: 'gitlab',
+            prNumber: 42,
+            prUrl: 'https://gitlab.com/acme/backend/-/merge_requests/42',
+            headSha: 'abc123',
+            branchName: 'feature/test',
+            branch: 'feature/test',
+            sha: 'abc123',
+            targetBranch: 'main',
+          }),
+        }),
+        initiator: expect.objectContaining({
+          kind: 'automation',
+          key: 'review_code',
+        }),
+        workflow: 'pr_review',
+        surface: 'gitlab',
+        trigger: 'webhook',
+        prLinkage: expect.objectContaining({
+          provider: 'gitlab',
+          repository: 'acme/backend',
           prNumber: 42,
-          prUrl: 'https://gitlab.com/acme/backend/-/merge_requests/42',
-          headSha: 'abc123',
-          branchName: 'feature/test',
-          branch: 'feature/test',
-          sha: 'abc123',
-          targetBranch: 'main',
+          prSha: 'abc123',
         }),
       }),
       expect.objectContaining({
@@ -174,10 +184,12 @@ describe('handleGitLabMergeRequest', () => {
 
     expect(mockEnqueueCloudTask).toHaveBeenCalledWith(
       expect.objectContaining({
-        type: CloudTaskType.GithubPrReviewSync,
-        payload: expect.objectContaining({
-          branch: 'feature/test',
-          sha: 'abc123',
+        task: expect.objectContaining({
+          type: TaskPayloadKind.GithubPrReviewSync,
+          payload: expect.objectContaining({
+            branch: 'feature/test',
+            sha: 'abc123',
+          }),
         }),
       }),
       expect.any(Object),
@@ -188,7 +200,7 @@ describe('handleGitLabMergeRequest', () => {
     mockFindActiveGitHubPrReviewTask.mockResolvedValue({
       jobId: 99,
       taskId: 'running-task',
-      type: CloudTaskType.GithubPrReviewSync,
+      type: TaskPayloadKind.GithubPrReviewSync,
       status: 'running' as never,
       taskPhase: 'running',
       match: 'github_pr',

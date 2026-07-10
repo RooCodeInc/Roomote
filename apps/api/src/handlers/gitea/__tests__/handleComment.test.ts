@@ -53,7 +53,7 @@ vi.mock('../../tasks/sendMessageToTask', () => ({
   steerMessageToTask: mockSteerMessageToTask,
 }));
 
-import { CloudTaskStatus, CloudTaskType } from '@roomote/types';
+import { CloudTaskStatus, TaskPayloadKind } from '@roomote/types';
 
 import { handleGiteaComment } from '../handleComment';
 import type { GiteaPullRequestCommentWebhook } from '../types';
@@ -143,20 +143,29 @@ describe('handleGiteaComment', () => {
     expect(result).toEqual({ status: 'ok', metadata: { ids: [1234] } });
     expect(mockEnqueueCloudTask).toHaveBeenCalledWith(
       expect.objectContaining({
-        userId: 'user-1',
-        attributionOverride: { kind: 'automatic', sourceKind: 'gitea' },
-        type: CloudTaskType.GithubPrReview,
-        payload: expect.objectContaining({
-          repo: 'acme/backend',
-          sourceControlProvider: 'gitea',
+        task: expect.objectContaining({
+          type: TaskPayloadKind.GithubPrReview,
+          payload: expect.objectContaining({
+            repo: 'acme/backend',
+            sourceControlProvider: 'gitea',
+            prNumber: 42,
+            prUrl: 'https://git.example.com/acme/backend/pulls/42',
+            branch: 'feature/test',
+            sha: 'abc123',
+            targetBranch: 'main',
+          }),
+        }),
+        // A human @roomote mention: the linked commenter is the initiator.
+        initiator: { kind: 'user', userId: 'user-1' },
+        workflow: 'pr_review',
+        surface: 'gitea',
+        trigger: 'message',
+        prLinkage: expect.objectContaining({
+          provider: 'gitea',
+          repository: 'acme/backend',
           prNumber: 42,
-          prUrl: 'https://git.example.com/acme/backend/pulls/42',
-          branch: 'feature/test',
-          sha: 'abc123',
-          targetBranch: 'main',
         }),
       }),
-      expect.objectContaining({ launchClass: 'automation' }),
     );
     expect(mockCreateGiteaPullRequestComment).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -247,12 +256,13 @@ describe('handleGiteaComment', () => {
     expect(result).toEqual({ status: 'ok', metadata: { ids: [1234] } });
     expect(mockEnqueueCloudTask).toHaveBeenCalledWith(
       expect.objectContaining({
-        payload: expect.objectContaining({
-          prNumber: 42,
-          prTitle: 'Update backend',
+        task: expect.objectContaining({
+          payload: expect.objectContaining({
+            prNumber: 42,
+            prTitle: 'Update backend',
+          }),
         }),
       }),
-      expect.anything(),
     );
   });
 

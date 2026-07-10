@@ -1,6 +1,6 @@
 import {
   CloudTaskStatus,
-  CloudTaskType,
+  TaskPayloadKind,
   isBootingCloudTaskStatus,
   isExitedCloudTaskStatus,
   taskToolDispatchPayloadSchema,
@@ -8,14 +8,14 @@ import {
 import { createJobToken } from '@roomote/auth';
 import {
   and,
-  cloudJobs,
   db,
   eq,
   isNotNull,
   not,
   resolveEffectivePreviewRuntimeConfig,
   taskMessages,
-  users,
+  taskRuns,
+  tasks,
 } from '@roomote/db/server';
 import { httpBatchLink, TRPCClientError } from '@trpc/client';
 import { TRPCError } from '@trpc/server';
@@ -147,10 +147,19 @@ export async function saveDraftPromptCommand(
   auth: UserAuthSuccess,
   input: { cloudJobId: number; draftPrompt: string },
 ) {
-  await db
-    .update(cloudJobs)
-    .set({ draftPrompt: input.draftPrompt || null })
-    .where(eq(cloudJobs.id, input.cloudJobId));
+  // Draft prompts live on the task now (they survive run/resume boundaries);
+  // the input stays run-scoped so the tRPC procedure contract is unchanged.
+  const run = await db.query.taskRuns.findFirst({
+    where: eq(taskRuns.id, input.cloudJobId),
+    columns: { taskId: true },
+  });
+
+  if (run) {
+    await db
+      .update(tasks)
+      .set({ draftPrompt: input.draftPrompt || null })
+      .where(eq(tasks.id, run.taskId));
+  }
 
   return { success: true };
 }
@@ -316,20 +325,23 @@ type ResolvedSandboxTaskAccess = Extract<
   { kind: 'resolved' }
 >;
 
-function applyResolvedTaskPullRequestFallback<
-  T extends {
-    prRepo: string | null;
-    prNumber: number | null;
-  },
->(cloudJob: T, taskCloudJob: ResolvedSandboxTaskAccess['task']['cloudJob']): T {
-  if (cloudJob.prRepo !== null && cloudJob.prNumber !== null) {
-    return cloudJob;
-  }
+/**
+ * Runs no longer carry PR columns; the session view decorates the run with
+ * the task-level pull-request association resolved by tasks/by-id.
+ */
+type SandboxCloudJobDetail = CloudJobDetail & {
+  prRepo: string | null;
+  prNumber: number | null;
+};
 
+function applyResolvedTaskPullRequestFallback<T extends CloudJobDetail>(
+  cloudJob: T,
+  taskCloudJob: ResolvedSandboxTaskAccess['task']['cloudJob'],
+): T & { prRepo: string | null; prNumber: number | null } {
   return {
     ...cloudJob,
-    prRepo: cloudJob.prRepo ?? taskCloudJob?.prRepo ?? null,
-    prNumber: cloudJob.prNumber ?? taskCloudJob?.prNumber ?? null,
+    prRepo: taskCloudJob?.prRepo ?? null,
+    prNumber: taskCloudJob?.prNumber ?? null,
   };
 }
 
@@ -344,19 +356,30 @@ async function getResolvedSandboxCloudJobForTaskAccess(
     throw new Error(`Cloud job for task ${input.taskId} not found`);
   }
 
-  let cloudJob: CloudJobDetail | null =
-    (await db.query.cloudJobs.findFirst({
-      where: eq(cloudJobs.id, taskById.cloudJob.id),
-      with: { user: true },
-    })) ?? null;
+  const runRow = await db.query.taskRuns.findFirst({
+    where: eq(taskRuns.id, taskById.cloudJob.id),
+    with: { actingUser: true },
+  });
 
-  if (!cloudJob) {
+  if (!runRow) {
     throw new Error(
       `Cloud job ${taskById.cloudJob.id} for task ${input.taskId} not found`,
     );
   }
 
-  cloudJob = applyResolvedTaskPullRequestFallback(cloudJob, taskById.cloudJob);
+  // actingUserId is the only user column on runs; surface it as both `user`
+  // and `actingUser` on the detail shape.
+  const { actingUser: runActingUser, ...run } = runRow;
+
+  let cloudJob: SandboxCloudJobDetail = applyResolvedTaskPullRequestFallback(
+    {
+      ...run,
+      user: runActingUser ?? null,
+      actingUser: runActingUser ?? null,
+      refetchInterval: undefined,
+    },
+    taskById.cloudJob,
+  );
 
   // If the resolved cloud job has exited and has a snapshot, check for an active
   // successor (e.g. a SnapshotResume job triggered from Linear). This ensures the
@@ -389,12 +412,12 @@ export async function takeOverBrowserControlCommand(
   const { cloudJob } = await getResolvedSandboxCloudJobByTaskId(auth, input);
 
   const [updatedCloudJob] = await db
-    .update(cloudJobs)
+    .update(taskRuns)
     .set({ actingUserId: auth.userId })
-    .where(eq(cloudJobs.id, cloudJob.id))
+    .where(eq(taskRuns.id, cloudJob.id))
     .returning({
-      id: cloudJobs.id,
-      actingUserId: cloudJobs.actingUserId,
+      id: taskRuns.id,
+      actingUserId: taskRuns.actingUserId,
     });
 
   if (!updatedCloudJob) {
@@ -427,15 +450,16 @@ export async function getSandboxSessionByTaskIdCommand(
   const { cloudJob, task: taskById } =
     await getResolvedSandboxCloudJobForTaskAccess(auth, input, taskAccess);
 
-  // For SnapshotResume jobs, the payload doesn't include the original user
-  // prompt fields. Resolve them from the source cloud job so the web UI can
-  // display the same visible prompt after wake-up.
+  // For snapshot-resume runs, the payload doesn't include the original user
+  // prompt fields. Resolve them from the source run so the web UI can
+  // display the same visible prompt after wake-up. This is runtime dispatch,
+  // so branching on payloadKind (not tasks.workflow) is correct here.
   if (
-    cloudJob.type === CloudTaskType.SnapshotResume &&
-    cloudJob.sourceCloudJobId
+    cloudJob.payloadKind === TaskPayloadKind.SnapshotResume &&
+    cloudJob.sourceRunId
   ) {
-    const sourceJob = await db.query.cloudJobs.findFirst({
-      where: eq(cloudJobs.id, cloudJob.sourceCloudJobId),
+    const sourceJob = await db.query.taskRuns.findFirst({
+      where: eq(taskRuns.id, cloudJob.sourceRunId),
       columns: { payload: true },
     });
 
@@ -445,12 +469,9 @@ export async function getSandboxSessionByTaskIdCommand(
     );
   }
 
-  const actingUser =
-    cloudJob.actingUserId && cloudJob.actingUserId !== cloudJob.userId
-      ? await db.query.users.findFirst({
-          where: eq(users.id, cloudJob.actingUserId),
-        })
-      : cloudJob.user;
+  // Runs no longer carry a separate owner userId; the acting user (already
+  // resolved onto the detail shape) is the only human associated with a run.
+  const actingUser = cloudJob.actingUser ?? cloudJob.user;
 
   const task = taskById;
 
@@ -471,14 +492,14 @@ export async function getSandboxSessionByTaskIdCommand(
   const [bootFailureMessage, firstHarnessMessage] = await Promise.all([
     shouldCheckBootFailureMessages
       ? db.query.taskMessages.findFirst({
-          where: eq(taskMessages.cloudJobId, cloudJob.id),
+          where: eq(taskMessages.runId, cloudJob.id),
           columns: { id: true },
         })
       : Promise.resolve(null),
     shouldCheckHarnessMessages
       ? db.query.taskMessages.findFirst({
           where: and(
-            eq(taskMessages.cloudJobId, cloudJob.id),
+            eq(taskMessages.runId, cloudJob.id),
             isNotNull(taskMessages.role),
             not(eq(taskMessages.role, 'user')),
           ),

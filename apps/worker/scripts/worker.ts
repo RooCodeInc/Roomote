@@ -20,7 +20,7 @@ import { Command } from 'commander';
 
 import {
   type ServiceName,
-  CloudTaskType,
+  TaskPayloadKind,
   serviceNames,
   PRODUCT_NAME,
 } from '@roomote/types';
@@ -243,7 +243,7 @@ program
             branch: options.branch,
           },
           envVars: {},
-          cloudJobType: CloudTaskType.LinearAgentSession,
+          cloudJobType: TaskPayloadKind.LinearAgentSession,
           preserveGitState: options.preserveGit,
         },
         logger: createStartupLogger(),

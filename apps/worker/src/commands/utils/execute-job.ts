@@ -3,6 +3,7 @@ import * as path from 'node:path';
 import {
   CloudTaskStatus,
   type SourceControlTokenMetadata,
+  type TaskPayloadKind,
   WORKER_HEARTBEAT_INTERVAL_MS,
   buildRoomoteDeployMarker,
   formatRoomoteDeployMarker,
@@ -171,7 +172,7 @@ function buildRepositoryPreparationEventInput(params: {
       reason: 'workspace_repository_prepare_failed',
       failureMode: outcome.mode,
       workspaceType: outcome.workspaceType,
-      cloudTaskType: cloudJob.type,
+      cloudTaskType: cloudJob.payloadKind,
       totalRepositories: outcome.totalRepositories,
       preparedRepositoryCount,
       failedRepositoryCount: skippedOrFailedCount,
@@ -333,7 +334,7 @@ export async function executeJob<TPrepared extends PreparedJobBase>({
     const { envVars } = jobContext;
     cloudJob = jobContext.cloudJob;
     const cloudJobIdForEvents = cloudJob.id;
-    callbacks = callbackMap[cloudJob.type];
+    callbacks = callbackMap[cloudJob.payloadKind as TaskPayloadKind];
 
     workerEnv = WorkerEnv.fromProcessEnv(process.env);
     startupLogger = createStartupLogger();
@@ -383,7 +384,7 @@ export async function executeJob<TPrepared extends PreparedJobBase>({
 
     setWorkerRuntimeContext({
       cloudJobId: cloudJob.id,
-      cloudJobType: cloudJob.type,
+      cloudJobType: cloudJob.payloadKind,
       environmentId,
       taskId: cloudJob.taskId,
     });
@@ -476,7 +477,7 @@ export async function executeJob<TPrepared extends PreparedJobBase>({
       label: 'resolveWorkspaceConfig',
       recordWorkerRuntimeEvent,
       details: {
-        cloudTaskType: cloudJob.type,
+        cloudTaskType: cloudJob.payloadKind,
         setupMode,
       },
       fn: async () => await workspaceConfigFn(jobContext),
@@ -509,7 +510,7 @@ export async function executeJob<TPrepared extends PreparedJobBase>({
       label: 'setupWorkspace',
       recordWorkerRuntimeEvent,
       details: {
-        cloudTaskType: cloudJob.type,
+        cloudTaskType: cloudJob.payloadKind,
         setupMode,
         workspaceType: workspace.type,
         backgroundOrganizationEnvironmentSetup: runEnvironmentSetupInBackground,
@@ -522,7 +523,7 @@ export async function executeJob<TPrepared extends PreparedJobBase>({
             envVars,
             userEnvVars,
             harness: currentCloudJob.harness,
-            cloudJobType: currentCloudJob.type,
+            cloudJobType: currentCloudJob.payloadKind,
             preserveGitState,
             serviceContext,
             sourceControlProvider: resolveSourceControlProviderFromPayload(

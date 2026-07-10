@@ -1,13 +1,17 @@
-import { type CloudJob, cloudJobs, db, eq } from '@roomote/db/server';
+import {
+  type CloudJob,
+  db,
+  desc,
+  eq,
+  taskRuns,
+  tasks,
+} from '@roomote/db/server';
 import {
   getSlackChannelFromTaskPayload,
   getSlackThreadTsFromTaskPayload,
 } from '@roomote/types';
 
-type SlackJobRoutingRecord = Pick<
-  CloudJob,
-  'id' | 'payload' | 'slackThreadTs' | 'sourceCloudJobId'
->;
+type SlackJobRoutingRecord = Pick<CloudJob, 'id' | 'taskId' | 'payload'>;
 
 type SlackJobRoute =
   | {
@@ -47,6 +51,12 @@ function classifySlackJobRoute(webPath: string | null): SlackJobRoute {
   };
 }
 
+/**
+ * Resolve Slack routing for a run. Channel bindings are canonical on the
+ * tasks row (slackChannelId/slackThreadTs); payloads are only a fallback for
+ * the setup webPath and legacy payload-only routing. Instead of walking a
+ * sourceCloudJobId chain, this scans the sibling runs of the same task.
+ */
 export async function resolveSlackJobRouting(
   job: SlackJobRoutingRecord,
 ): Promise<{
@@ -54,42 +64,43 @@ export async function resolveSlackJobRouting(
   threadTs: string | null;
   route: SlackJobRoute;
 }> {
-  let channel = getSlackChannelFromTaskPayload(job.payload);
-  let threadTs =
-    getSlackThreadTsFromTaskPayload(job.payload) ?? job.slackThreadTs ?? null;
+  const task = await db.query.tasks.findFirst({
+    columns: {
+      slackChannelId: true,
+      slackThreadTs: true,
+    },
+    where: eq(tasks.id, job.taskId),
+  });
+
+  let channel: string | null =
+    task?.slackChannelId ?? getSlackChannelFromTaskPayload(job.payload);
+  let threadTs: string | null =
+    task?.slackThreadTs ?? getSlackThreadTsFromTaskPayload(job.payload);
   let webPath = getSlackWebPathFromPayload(job.payload);
 
-  const visitedJobIds = new Set<number>([job.id]);
-  let sourceCloudJobId = job.sourceCloudJobId;
-
-  while (sourceCloudJobId && (!channel || !threadTs || !webPath)) {
-    if (visitedJobIds.has(sourceCloudJobId)) {
-      break;
-    }
-
-    visitedJobIds.add(sourceCloudJobId);
-
-    const sourceJob = await db.query.cloudJobs.findFirst({
+  if (!channel || !threadTs || !webPath) {
+    const siblingRuns = await db.query.taskRuns.findMany({
       columns: {
         id: true,
         payload: true,
-        slackThreadTs: true,
-        sourceCloudJobId: true,
       },
-      where: eq(cloudJobs.id, sourceCloudJobId),
+      where: eq(taskRuns.taskId, job.taskId),
+      orderBy: [desc(taskRuns.id)],
     });
 
-    if (!sourceJob) {
-      break;
-    }
+    for (const run of siblingRuns) {
+      if (run.id === job.id) {
+        continue;
+      }
 
-    channel ||= getSlackChannelFromTaskPayload(sourceJob.payload);
-    threadTs ||=
-      getSlackThreadTsFromTaskPayload(sourceJob.payload) ??
-      sourceJob.slackThreadTs ??
-      null;
-    webPath ||= getSlackWebPathFromPayload(sourceJob.payload);
-    sourceCloudJobId = sourceJob.sourceCloudJobId;
+      channel ||= getSlackChannelFromTaskPayload(run.payload);
+      threadTs ||= getSlackThreadTsFromTaskPayload(run.payload);
+      webPath ||= getSlackWebPathFromPayload(run.payload);
+
+      if (channel && threadTs && webPath) {
+        break;
+      }
+    }
   }
 
   return { channel, threadTs, route: classifySlackJobRoute(webPath) };

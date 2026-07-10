@@ -6,12 +6,16 @@ import {
   wrapSlackTurnPolicy,
 } from '@roomote/cloud-agents';
 import { enqueueCloudTask } from '@roomote/cloud-agents/server';
-import { cloudJobs, db, eq, sql } from '@roomote/db/server';
+import { db, eq, sql, taskRuns } from '@roomote/db/server';
 import {
-  type CloudTask,
-  CloudTaskType,
-  getSlackConversationUrlFromTaskPayload,
   type ReasoningEffort,
+  type SlackAppMentionTask,
+  type TaskInitiator,
+  type TaskTrigger,
+  type TaskVisibility,
+  type TaskWorkflow,
+  TaskPayloadKind,
+  getSlackConversationUrlFromTaskPayload,
   resolveEvalHarnessSelection,
 } from '@roomote/types';
 
@@ -43,6 +47,20 @@ function getTurnPolicyFromPrompt(
   return {
     reactionsAllowed: match[1] === 'true',
   };
+}
+
+/**
+ * Resolves the linked Roomote user id carried by an initiator, if any.
+ * Automation initiators and unmatched external senders have none.
+ */
+function getLinkedInitiatorUserId(
+  initiator: TaskInitiator,
+): string | undefined {
+  if (initiator.kind !== 'user') {
+    return undefined;
+  }
+
+  return 'userId' in initiator ? initiator.userId : initiator.matchedUserId;
 }
 
 function buildActiveSlackFollowUpPrompt(input: {
@@ -96,7 +114,16 @@ function buildActiveSlackFollowUpPrompt(input: {
 }
 
 export async function startSlackAppMentionTask(input: {
-  userId: string;
+  /**
+   * Who initiated the launch. Stamped immutably onto the task row; the
+   * initiator union carries identity, so no separate userId is required.
+   */
+  initiator: TaskInitiator;
+  /** What caused the launch ('message' for mentions, 'manual' for buttons). */
+  trigger: TaskTrigger;
+  /** Defaults to 'standard'; the Slack `!eval` launcher passes 'eval'. */
+  workflow?: Extract<TaskWorkflow, 'standard' | 'eval'>;
+  visibility?: TaskVisibility;
   channel: string;
   teamId?: string;
   teamDomain?: string;
@@ -123,6 +150,11 @@ export async function startSlackAppMentionTask(input: {
   webPath?: string;
   slackConversationUrl?: string;
   skipInitialActingUser?: boolean;
+  /**
+   * Started-message metadata callers persist themselves via
+   * setSlackStartedMessageTs after the launch. Accepted here so call sites
+   * can keep one launch-shaped object; the wrapper does not consume it.
+   */
   queuedStartedMessage?: SlackStartedMessageData;
 }): Promise<{
   id: number | null;
@@ -130,6 +162,7 @@ export async function startSlackAppMentionTask(input: {
   reusedExistingJob: boolean;
 }> {
   const activeJob = await findActiveSlackJob(input.threadTs);
+  const linkedInitiatorUserId = getLinkedInitiatorUserId(input.initiator);
   const promptRelevantThreadMessages = input.threadMessages?.length
     ? input.threadMessages.filter(
         (message) => !isSlackStartedTaskMessage(message),
@@ -178,14 +211,14 @@ export async function startSlackAppMentionTask(input: {
         // Merge in the database rather than writing back the in-memory
         // payload snapshot, so concurrent payload updates are not lost.
         await db
-          .update(cloudJobs)
+          .update(taskRuns)
           .set({
-            payload: sql`${cloudJobs.payload} || ${JSON.stringify({ slackConversationUrl })}::jsonb`,
+            payload: sql`${taskRuns.payload} || ${JSON.stringify({ slackConversationUrl })}::jsonb`,
           })
-          .where(eq(cloudJobs.id, activeJob.id));
+          .where(eq(taskRuns.id, activeJob.id));
       } catch (error) {
         console.warn(
-          `Failed to persist slackConversationUrl for cloud job ${activeJob.id}: ${error instanceof Error ? error.message : String(error)}`,
+          `Failed to persist slackConversationUrl for run ${activeJob.id}: ${error instanceof Error ? error.message : String(error)}`,
         );
       }
     }
@@ -193,7 +226,7 @@ export async function startSlackAppMentionTask(input: {
     await queueSlackMessage(activeJob.id, {
       text: input.text,
       user: input.slackUserId,
-      userId: input.userId,
+      userId: linkedInitiatorUserId,
       ts: input.ts,
       images: input.images?.length ? input.images : undefined,
       formattedPrompt,
@@ -232,10 +265,8 @@ export async function startSlackAppMentionTask(input: {
     : undefined;
 
   const task = {
-    userId: input.userId,
-    slackThreadTs: input.threadTs,
     ...(evalHarness ? { harness: evalHarness } : {}),
-    type: CloudTaskType.SlackAppMention,
+    type: TaskPayloadKind.SlackAppMention,
     payload: {
       channel: input.channel,
       ...(input.teamId ? { teamId: input.teamId } : {}),
@@ -280,33 +311,23 @@ export async function startSlackAppMentionTask(input: {
         ? { slackConversationUrl: input.slackConversationUrl.trim() }
         : {}),
     },
-  } satisfies Extract<CloudTask, { type: CloudTaskType.SlackAppMention }>;
+  } satisfies SlackAppMentionTask;
 
-  const launchOptions = {
-    ...(input.skipInitialActingUser ? { skipInitialActingUser: true } : {}),
-    ...(input.queuedStartedMessage
-      ? {
-          sourceMetadata: {
-            slackStartedMessage: input.queuedStartedMessage,
-          },
-        }
-      : {}),
-  };
-  const launchResult =
-    Object.keys(launchOptions).length > 0
-      ? await enqueueCloudTask(task, launchOptions)
-      : await enqueueCloudTask(task);
-
-  try {
-    await db
-      .update(cloudJobs)
-      .set({ slackThreadTs: input.threadTs })
-      .where(eq(cloudJobs.id, launchResult.id));
-  } catch (error) {
-    console.warn(
-      `Failed to persist slackThreadTs for cloud job ${launchResult.id}: ${error instanceof Error ? error.message : String(error)}`,
-    );
-  }
+  const launchResult = await enqueueCloudTask(
+    {
+      task,
+      initiator: input.initiator,
+      workflow: input.workflow ?? 'standard',
+      surface: 'slack',
+      trigger: input.trigger,
+      ...(input.visibility ? { visibility: input.visibility } : {}),
+      channels: {
+        slackChannelId: input.channel,
+        slackThreadTs: input.threadTs,
+      },
+    },
+    input.skipInitialActingUser ? { skipInitialActingUser: true } : {},
+  );
 
   return {
     id: launchResult.id,

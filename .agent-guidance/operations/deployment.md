@@ -677,12 +677,14 @@ built from the same (or newer) commit.
 The Vercel Sandbox compute provider has been removed. Deployments upgrading
 across that removal should know:
 
-- Historical `cloud_jobs` rows with `vendor = 'sandbox'` are inert history:
+- Historical `task_runs` rows with `vendor = 'sandbox'` are inert history:
   Roomote can no longer stream logs from or tear down those machines because
   the provider credentials and client were removed. Any remote Vercel
   sandboxes still running must be cleaned up in the Vercel dashboard.
-- Migration `0021_bumpy_the_santerians.sql` rebuilds the three cloud_jobs
-  sleep-check partial indexes without the `sandbox` vendor predicate.
+- The single baseline migration `0000_amusing_magma.sql` defines the
+  `task_runs` sleep-check partial indexes (`task_runs_sleep_check_due_idx`,
+  `task_runs_sleep_check_stale_worker_idx`, and
+  `task_runs_sleep_check_active_idx`); they carry no `sandbox` vendor predicate.
 - `VERCEL_SANDBOX_ACCESS_TOKEN` and `VERCEL_SANDBOX_BASE_IMAGE_SNAPSHOT_ID`
   are no longer read and can be dropped from env files.
 

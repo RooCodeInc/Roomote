@@ -81,7 +81,7 @@ if (url.protocol === 'rediss:') {
 
 ## CloudJobQueue
 
-The CloudJobQueue manages `cloud_jobs` launches with scope-based deduplication and BLPOP-based blocking dequeue. Normal producers go through `enqueueCloudTask()`, which creates the `cloud_jobs`/`tasks` rows and pushes `{ id, scope }` to Redis for the controller.
+The CloudJobQueue manages `task_runs` launches with scope-based deduplication and BLPOP-based blocking dequeue. Normal producers go through `enqueueCloudTask()`, which creates the `task_runs`/`tasks` rows and pushes `{ id, scope }` to Redis for the controller.
 
 **File:** `packages/cloud-agents/src/server/cloud-job-queue.ts`
 
@@ -102,7 +102,7 @@ The CloudJobQueue manages `cloud_jobs` launches with scope-based deduplication a
 
 ```typescript
 export interface CloudJobQueueEntry {
-  id: number; // cloudJobs.id
+  id: number; // taskRuns.id
   scope: string; // Unique key for deduplication (e.g., "owner/repo:prNumber")
 }
 ```
@@ -160,8 +160,8 @@ while (this.isRunning) {
   const id = await dequeueCloudTask();
 
   if (id) {
-    const cloudJob = await db.query.cloudJobs.findFirst({
-      where: eq(cloudJobs.id, id),
+    const cloudJob = await db.query.taskRuns.findFirst({
+      where: eq(taskRuns.id, id),
     });
     if (cloudJob) {
       this.spawnWorkerInBackground(cloudJob);
@@ -263,7 +263,7 @@ await queue.upsertJobScheduler(
 **Job Processors:**
 
 - `heartbeatJob` — Updates Redis with scheduler health timestamp
-- `sleepCheckJob` — Claims due runtime sleep actions once `cloud_jobs.sleepAt` is reached, snapshotting resumable jobs and destroying non-resumable provider instances
+- `sleepCheckJob` — Claims due runtime sleep actions once `task_runs.sleepAt` is reached, snapshotting resumable jobs and destroying non-resumable provider instances
 - `refreshSnapshotsJob` — Creates daily `SnapshotEnvironment` refresh jobs for ready environment snapshots, skips environments that already have an active refresh job, and leaves the current snapshot in place until the replacement succeeds
 - `coachJob` — Runs the background coaching analysis on its scheduled cadence, combining review feedback, task transcripts, and repo guidance (`AGENTS.md` plus `.agent-guidance/README.md` when present) so recommendations prefer reusable code/tests or the nearest maintained doc before top-level `AGENTS.md` changes
 - `conflictScanJob` — Scans repositories for merge conflicts on idle, labeled PR branches
@@ -288,16 +288,16 @@ pnpm --filter @roomote/bullmq exec tsx scripts/cleanup-legacy-scheduled-jobs.ts
 pnpm --filter @roomote/bullmq exec tsx scripts/cleanup-legacy-scheduled-jobs.ts --apply
 ```
 
-`sleepCheckJob` is the single BullMQ owner for due sleep transitions on snapshot-capable compute providers. The worker persists the authoritative `sleepAt` deadline, refreshes it every 45 seconds while a turn is actively running, and uses at least a 60-second active-task lease even when the task's idle keepalive is zero so live turns are not claimed as due sleep immediately. Once the task goes idle, the deadline stops moving and falls back to the normal keepalive window. BullMQ claims the due action by setting `cloud_jobs.sleepRequestedAt`, and then it either requests a snapshot for resumable task types or destroys the provider instance directly for non-resumable ones.
+`sleepCheckJob` is the single BullMQ owner for due sleep transitions on snapshot-capable compute providers. The worker persists the authoritative `sleepAt` deadline, refreshes it every 45 seconds while a turn is actively running, and uses at least a 60-second active-task lease even when the task's idle keepalive is zero so live turns are not claimed as due sleep immediately. Once the task goes idle, the deadline stops moving and falls back to the normal keepalive window. BullMQ claims the due action by setting `task_runs.sleepRequestedAt`, and then it either requests a snapshot for resumable task types or destroys the provider instance directly for non-resumable ones.
 
 The sleep check must keep candidate reads bounded because it runs every minute
-against the hot `cloud_jobs` table. It selects only the columns needed for
+against the hot `task_runs` table. It selects only the columns needed for
 provider status checks, event recording, and snapshot/shutdown decisions, caps
 each due-sleep, stale-worker, and provider-timeout candidate scan to one batch,
 orders bounded due and stale batches by `sleepAt` and `workerHeartbeatAt` so
 the oldest actionable rows drain first, and relies on the
-`cloud_jobs_sleep_check_due_idx`, `cloud_jobs_sleep_check_stale_worker_idx`, and
-`cloud_jobs_sleep_check_active_idx` partial indexes for the shared active-job
+`task_runs_sleep_check_due_idx`, `task_runs_sleep_check_stale_worker_idx`, and
+`task_runs_sleep_check_active_idx` partial indexes for the shared active-job
 predicate.
 
 ### Sandbox OIDC Refresh Queue
@@ -334,7 +334,7 @@ Handles asynchronous snapshot creation for provider machines (Modal and E2B toda
 2. **Validate Instance Status:** Check if the provider instance is running via `createComputeProviderClient()`
 3. **Create Snapshot:** Call `client.createSnapshot({ instanceId })`
 4. **Update Database:**
-   - Set `cloudJobs.snapshotId`, `snapshotCreatedAt`, `status = Completed`
+   - Set `taskRuns.snapshotId`, `snapshotCreatedAt`, `status = Completed`
    - If job type is `SnapshotEnvironment`, attach the ready snapshot to the pending `environment_snapshots` row via `attachEnvironmentSnapshot()` (the legacy `environments` snapshot columns are no longer written)
 5. **Drain Pending Messages:** Call `drainLinearMessagesToResumeJob()` and `drainSlackMessagesToResumeJob()` to prevent message loss during manual snapshots
 

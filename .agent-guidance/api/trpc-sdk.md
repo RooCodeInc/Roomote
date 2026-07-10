@@ -1,7 +1,7 @@
 ---
 title: SDK tRPC Router (Backend-to-Backend)
 status: active
-last_reviewed: 2026-07-03
+last_reviewed: 2026-07-09
 owner: engineering
 summary: Technical documentation of the SDK tRPC router covering sub-router inventory, auth middleware, cloud job operations, and client configuration.
 ---
@@ -136,9 +136,12 @@ findMany: nonJobProcedure.query(({ ctx }) => { ... })
 
 ### jobScoped(schema, extractJobId)
 
-Enforces cloud-job resource isolation. Job tokens must present their own
-`cloudJobId`, while auth tokens can only access jobs that belong to their own
-organization.
+Enforces run resource isolation. Job tokens must present their own
+`cloudJobId` and must still match the persisted run row
+(`findCloudJobByJobTokenClaims`: `(run.actingUserId ?? null) === token.userId`,
+where a null/null match is the valid deployment-service-principal case). Auth
+tokens are deployment-scoped: Roomote is single-deployment, so any valid auth
+token may target any existing run — the guard only rejects unknown run ids.
 
 **Signature:**
 
@@ -191,15 +194,27 @@ findFirstById: jobScoped(
       });
     }
 
+    // Bind the token back to the persisted run row:
+    // (run.actingUserId ?? null) === token.userId.
+    const scopedJob = await findCloudJobByJobTokenClaims(ctx.auth);
+
+    if (!scopedJob) {
+      throw new TRPCError({
+        code: 'FORBIDDEN',
+        message: 'Cannot access resources from a different job',
+      });
+    }
+
     return next({ ctx: { ...ctx, cloudJobId: ctx.auth.cloudJobId } });
   }
 
-  const scopedJob = await findCloudJobForAccess(targetId, ctx.auth);
+  // Auth tokens are deployment-scoped; only unknown runs are rejected.
+  const scopedJob = await findCloudJobForAccess(targetId);
 
   if (!scopedJob) {
     throw new TRPCError({
       code: 'FORBIDDEN',
-      message: 'Cannot access resources from another user's job',
+      message: 'Cannot access resources for an unknown job',
     });
   }
 
@@ -228,33 +243,39 @@ The `cloudJobs` router (`packages/sdk/src/server/routers/cloud-jobs.ts`) is the 
 
 #### dequeue
 
-Claim a job from the queue and prepare workspace.
+Claim a run from the queue and prepare workspace. The response carries the run
+plus a `DequeuedTaskContext` — task-level launch context (task id, title,
+initial prompt, `harnessInstructions`, `requestedWorkKind`, Slack/Linear
+channel bindings) joined from the `tasks` row.
 
 ```typescript
-dequeue: jobScoped(z.object({ cloudJobId: z.number() }), 'cloudJobId').mutation(
-  ({ ctx, input }) => dequeueCloudJob(ctx.auth, input),
-);
+dequeue: jobScoped(
+  z.object({ cloudJobId: z.number() }).merge(workerReleaseMetadataSchema),
+  'cloudJobId',
+).mutation(({ ctx, input }) => dequeueCloudJob(ctx.auth, input));
 ```
 
-**Auth**: Job tokens must match `cloudJobId`; auth tokens must target a job in
-their own organization
+**Auth**: Job tokens must match `cloudJobId` and bind to the persisted run;
+auth tokens are deployment-scoped
 
 #### resume
 
-Claim a job for resumption from a snapshot.
+Claim a run for resumption from a snapshot. Returns the same
+`DequeuedTaskContext` shape as `dequeue`; nothing is copied between run rows.
 
 ```typescript
-resume: jobScoped(z.object({ cloudJobId: z.number() }), 'cloudJobId').mutation(
-  ({ ctx, input }) => dequeueResumeCloudJob(ctx.auth, input),
-);
+resume: jobScoped(
+  z.object({ cloudJobId: z.number() }).merge(workerReleaseMetadataSchema),
+  'cloudJobId',
+).mutation(({ ctx, input }) => dequeueResumeCloudJob(ctx.auth, input));
 ```
 
-**Auth**: Job tokens must match `cloudJobId`; auth tokens must target a job in
-their own organization
+**Auth**: Job tokens must match `cloudJobId` and bind to the persisted run;
+auth tokens are deployment-scoped
 
 #### update
 
-Update job status, phase, or result.
+Update run status, phase, acting user, or result.
 
 ```typescript
 update: jobScoped(
@@ -262,6 +283,7 @@ update: jobScoped(
     id: z.number(),
     status: z.nativeEnum(CloudTaskStatus).optional(),
     taskPhase: z.string().nullish(),
+    sleepAt: z.date().nullish(),
     taskId: z.string().optional(),
     actingUserId: z.string().optional(),
     result: z.record(z.unknown()).optional(),
@@ -270,12 +292,14 @@ update: jobScoped(
 ).mutation(({ input: { id, ...values } }) => updateCloudJob(id, values));
 ```
 
-**Auth**: Job tokens must match `id`; auth tokens must target a job in their
-own organization
+**Auth**: Job tokens must match `id` and bind to the persisted run; auth
+tokens are deployment-scoped
 
 #### done
 
-Mark job as complete or failed.
+Mark run as complete or failed. Terminal `completed`/`failed`/`canceled`
+statuses also set `tasks.state` (the only writer); `idle` leaves the task
+`active`.
 
 ```typescript
 done: jobScoped(
@@ -288,8 +312,8 @@ done: jobScoped(
 ).mutation(({ input }) => finishCloudJob(input));
 ```
 
-**Auth**: Job tokens must match `id`; auth tokens must target a job in their
-own organization
+**Auth**: Job tokens must match `id` and bind to the persisted run; auth
+tokens are deployment-scoped
 **Status values**: `'completed'`, `'failed'`, `'canceled'`, `'idle'`
 
 ### Logging & Observability
@@ -498,22 +522,25 @@ enqueueSlackPrInactivityCheck: jobScoped(
 
 #### enqueue
 
-Create new work from an auth-token backend caller.
+Create new work from an auth-token backend caller. The input mirrors the
+`enqueueCloudTask()` launch union:
+
+- **Fresh launch**: `{ task, initiator, workflow, surface, trigger, visibility?, channels?, prLinkage? }`. `task` is any `cloudTaskSchema` payload except `SnapshotResume`; `initiator` is the `TaskInitiator` union (`{ kind: 'user', userId }` \| `{ kind: 'user', externalId, displayName?, matchedUserId? }` \| `{ kind: 'automation', key, actor? }`). There is no raw userId/attribution passthrough — the task's initiator stamp derives from this union only.
+- **Resume**: `{ task: snapshotResumeSchema, actingUserId? }`. Never creates a task and never re-attributes; the resumer becomes the new run's `actingUserId`.
 
 ```typescript
 enqueue: nonJobProcedure
-  .input(cloudTaskSchema)
+  .input(enqueueCloudTaskInputSchema) // union of fresh + resume shapes
   .mutation(async ({ ctx, input }) => {
     const launchResult = await enqueueCloudTask(input);
     return { id: launchResult.id, taskId: launchResult.taskId };
   });
 ```
 
-**Auth**: `nonJobProcedure` — job tokens cannot create new jobs
-**Schema**: `cloudTaskSchema` from `@roomote/types`
-**Scope**: auth-token callers enqueue work into the single deployment as their user
-**Compute provider overrides**: explicit `computeProvider` values are passed through to the cloud job; omitted providers fall through to `DEFAULT_COMPUTE_PROVIDER`
-**Launch behavior**: SDK callers use the direct cloud-job enqueue path and receive the immediate response shape `{ id, taskId }`.
+**Auth**: `nonJobProcedure` — job tokens cannot create new work
+**Scope**: auth-token callers enqueue work into the single deployment; the persisted initiator is whatever the input union declares
+**Compute provider overrides**: explicit `computeProvider` values are passed through to the run; omitted providers fall through to `DEFAULT_COMPUTE_PROVIDER`
+**Launch behavior**: SDK callers use the direct enqueue path and receive the immediate response shape `{ id, taskId }`.
 
 ## Client Configuration
 
@@ -750,19 +777,19 @@ const job = await sdk.cloudJobs.dequeue({ cloudJobId: 123 });
 
 ## Authorization Summary
 
-| Procedure Type             | Job Tokens | Auth Tokens | Scope Enforcement                                                                                                                                                                                   |
-| -------------------------- | ---------- | ----------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `authenticatedProcedure`   | ✅ Allowed | ✅ Allowed  | None                                                                                                                                                                                                |
-| `nonJobProcedure`          | ❌ Blocked | ✅ Allowed  | N/A                                                                                                                                                                                                 |
-| `jobScoped(schema, field)` | ✅ Allowed | ✅ Allowed  | Job tokens: extracted input ID must match token `cloudJobId` and the token's `userId` claim must match the persisted `cloud_jobs` row<br>Auth tokens: target job must be readable by the token user |
+| Procedure Type             | Job Tokens | Auth Tokens | Scope Enforcement                                                                                                                                                                                                                                                |
+| -------------------------- | ---------- | ----------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `authenticatedProcedure`   | ✅ Allowed | ✅ Allowed  | None                                                                                                                                                                                                                                                             |
+| `nonJobProcedure`          | ❌ Blocked | ✅ Allowed  | N/A                                                                                                                                                                                                                                                              |
+| `jobScoped(schema, field)` | ✅ Allowed | ✅ Allowed  | Job tokens: extracted input ID must match token `cloudJobId` and the token's `userId` claim must match the persisted `task_runs.actingUserId` (null == null is the valid deployment-principal case)<br>Auth tokens: deployment-scoped; the target run must exist |
 
 **Token Types:**
 
-- **Job Token** (`t: 'cj'`): Scoped to a single `cloudJobId`, used by worker processes
-- **Auth Token** (`t: 'auth'`): User/org session token, used by API consumers
+- **Job Token** (`t: 'cj'`): Scoped to a single run (`cloudJobId`), used by worker processes. The user claim is sourced from `task_runs.actingUserId`; when absent the token authenticates as the deployment service principal (see [Authentication & Authorization](../architecture/auth.md))
+- **Auth Token** (`t: 'auth'`): User session token, used by API consumers
 
 All tokens signed with ES256 using `JOB_AUTH_PRIVATE_KEY`. SDK routes must not
-trust signed job-token claims by themselves for cloud-job ownership. Any route
+trust signed job-token claims by themselves for run ownership. Any route
 using `jobScoped()` or a job-token-only guard must bind the token back to the
-persisted job row before returning metadata, environment variables, GitHub
+persisted run row before returning metadata, environment variables, GitHub
 tokens, runtime env, Slack/Linear message queues, or any other job-scoped data.

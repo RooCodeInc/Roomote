@@ -1,7 +1,7 @@
 import {
   type EnvironmentConfig,
   type ServiceInfo,
-  CloudTaskType,
+  TaskPayloadKind,
   isServicesEnabledCloudTaskType,
 } from '@roomote/types';
 
@@ -102,7 +102,7 @@ async function startSystemServices({
 }: {
   workspaceRoot: string;
   envVars: Record<string, string | undefined>;
-  cloudJobType: CloudTaskType;
+  cloudJobType: TaskPayloadKind;
   environmentConfig?: EnvironmentConfig;
   logger: StartupLogger;
 }): Promise<ServiceInfo[]> {

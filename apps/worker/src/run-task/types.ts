@@ -5,6 +5,7 @@ import type {
   CloudTaskStatus,
   CommunicationProvider,
   EnvironmentConfig,
+  RequestedWorkKind,
 } from '@roomote/types';
 import type { CloudJob, DequeuedCloudJob } from '@roomote/sdk/client';
 
@@ -18,6 +19,17 @@ import type { HarnessLogger } from '../logging';
 import type { RepoLocalSkill } from '../workspace/repo-local-skills';
 
 export type RunTaskContext = Record<string, unknown>;
+
+/**
+ * Task-level channel bindings from the SDK dequeue/resume response's `task`
+ * object. These live on the tasks row and are the preferred source for
+ * Slack/Linear routing decisions; payload-derived extraction remains the
+ * fallback for payloads that predate the task columns.
+ */
+type TaskChannelBindings = Pick<
+  DequeuedCloudJob['task'],
+  'slackChannelId' | 'slackThreadTs' | 'linearSessionId'
+>;
 
 type Todo = {
   id: string;
@@ -124,6 +136,19 @@ export type RunTaskOptions = {
    */
   harnessInstructions?: string;
   /**
+   * Requested work kind stamped on the task at enqueue. Lives on the tasks
+   * row and is supplied by the SDK dequeue/resume response
+   * (`requestedWorkKind` top-level convenience field, mirrored on `task`).
+   * Used only to pick the initial workflow phase.
+   */
+  requestedWorkKind?: RequestedWorkKind | null;
+  /**
+   * Task-level channel bindings from the SDK dequeue/resume response.
+   * Preferred over payload-derived extraction for Slack/Linear polling and
+   * drain gates; payload extraction remains the fallback.
+   */
+  task?: TaskChannelBindings;
+  /**
    * Deployment-wide agent behavior instructions configured in admin
    * settings. When provided, these are merged into the startup
    * environment-instructions block before environment-specific guidance.
@@ -198,6 +223,12 @@ export type RunTaskState = TaskState &
 
 export interface ListenerOptions {
   cloudJob: DequeuedCloudJob['cloudJob'];
+  /**
+   * Task-level channel bindings from the SDK dequeue/resume response.
+   * Preferred over payload-derived extraction when deciding which polling
+   * intervals to start; payload extraction remains the fallback.
+   */
+  task?: TaskChannelBindings;
   state: RunTaskState;
   logger: HarnessLogger;
   workingDirectory: string;

@@ -4,7 +4,7 @@ import {
   type CloudTaskPayload,
   DEFAULT_PR_REVIEWER_SETTINGS,
   type PrReviewerSettings,
-  CloudTaskType,
+  TaskPayloadKind,
   CloudAgentType,
 } from '@roomote/types';
 import {
@@ -30,15 +30,18 @@ function getMergeRequestHeadSha(payload: GitLabMergeRequestWebhook): string {
 
 function getReviewTaskType(
   payload: GitLabMergeRequestWebhook,
-): CloudTaskType.GithubPrReview | CloudTaskType.GithubPrReviewSync | null {
+):
+  | typeof TaskPayloadKind.GithubPrReview
+  | typeof TaskPayloadKind.GithubPrReviewSync
+  | null {
   const action = payload.object_attributes.action;
 
   if (action === 'open' || action === 'reopen') {
-    return CloudTaskType.GithubPrReview;
+    return TaskPayloadKind.GithubPrReview;
   }
 
   if (action === 'update' && payload.object_attributes.oldrev) {
-    return CloudTaskType.GithubPrReviewSync;
+    return TaskPayloadKind.GithubPrReviewSync;
   }
 
   return null;
@@ -168,7 +171,7 @@ export async function handleGitLabMergeRequest(
 
   const headSha = getMergeRequestHeadSha(payload);
 
-  if (taskType === CloudTaskType.GithubPrReviewSync && headSha) {
+  if (taskType === TaskPayloadKind.GithubPrReviewSync && headSha) {
     const activeReview = await findActiveGitHubPrReviewTask({
       repoFullName,
       prNumber: mergeRequest.iid,
@@ -188,29 +191,54 @@ export async function handleGitLabMergeRequest(
     }
   }
 
-  const enqueued = await pMap(targets, async (target) =>
+  const mrAuthorId =
+    payload.user?.id != null ? String(payload.user.id) : payload.user?.username;
+  const mrAuthorName = payload.user?.name ?? payload.user?.username;
+
+  const enqueued = await pMap(targets, async (_target) =>
     enqueueCloudTask(
       {
-        userId: target.userId,
-        attributionOverride: {
-          kind: 'automatic',
-          sourceKind: 'gitlab',
+        task: {
+          type: taskType,
+          payload: {
+            repo: repoFullName,
+            sourceControlProvider: 'gitlab',
+            prNumber: mergeRequest.iid,
+            prTitle: mergeRequest.title,
+            prUrl: mergeRequest.url,
+            headSha,
+            branchName: mergeRequest.source_branch,
+            ...(mergeRequest.source_branch
+              ? { branch: mergeRequest.source_branch }
+              : {}),
+            ...(headSha ? { sha: headSha } : {}),
+            targetBranch: mergeRequest.target_branch,
+          } satisfies CloudTaskPayload<typeof taskType>,
         },
-        type: taskType,
-        payload: {
-          repo: repoFullName,
-          sourceControlProvider: 'gitlab',
-          prNumber: mergeRequest.iid,
-          prTitle: mergeRequest.title,
-          prUrl: mergeRequest.url,
-          headSha,
-          branchName: mergeRequest.source_branch,
-          ...(mergeRequest.source_branch
-            ? { branch: mergeRequest.source_branch }
+        initiator: {
+          kind: 'automation',
+          key: 'review_code',
+          ...(mrAuthorId
+            ? {
+                actor: {
+                  externalId: mrAuthorId,
+                  displayName: mrAuthorName,
+                },
+              }
             : {}),
-          ...(headSha ? { sha: headSha } : {}),
-          targetBranch: mergeRequest.target_branch,
-        } satisfies CloudTaskPayload<typeof taskType>,
+        },
+        workflow: 'pr_review',
+        surface: 'gitlab',
+        trigger: 'webhook',
+        prLinkage: {
+          provider: 'gitlab',
+          repository: repoFullName,
+          prNumber: mergeRequest.iid,
+          prUrl: mergeRequest.url,
+          prTitle: mergeRequest.title,
+          prSha: headSha || null,
+          prBaseRef: mergeRequest.target_branch ?? null,
+        },
       },
       {
         launchClass: 'automation',

@@ -1,14 +1,13 @@
 import { Hono } from 'hono';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { WebStandardStreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/webStandardStreamableHttp.js';
-import { resolveUserIdForCloudJob } from '@roomote/cloud-agents/server';
 import {
   and,
-  cloudJobs,
   db,
   eq,
   isNull,
   mcpConnections,
+  taskRuns,
 } from '@roomote/db/server';
 import { isMcpConnectionAsanaConfig } from '@roomote/types';
 
@@ -43,27 +42,24 @@ async function resolveAsanaMcpAuth(
   }
 
   if (isJobTokenContext(authContext)) {
-    const cloudJob = await db.query.cloudJobs.findFirst({
-      columns: { id: true, userId: true },
-      where: eq(cloudJobs.id, authContext.cloudJobId),
+    const cloudJob = await db.query.taskRuns.findFirst({
+      columns: { id: true, actingUserId: true },
+      where: eq(taskRuns.id, authContext.cloudJobId),
     });
 
     if (!cloudJob) {
       throw new McpProxyError(404, 'Cloud job not found for this MCP token');
     }
 
-    const resolvedUserId = await resolveUserIdForCloudJob(cloudJob);
-    if (!resolvedUserId) {
+    // The token principal must match the run's acting user: a user token must
+    // carry the run's acting user, and a deployment-service-principal token is
+    // only valid for a run with no acting user (null === null). Asana
+    // credentials come from a deployment-scoped connection, so
+    // deployment-principal jobs are fully supported.
+    if ((cloudJob.actingUserId ?? null) !== authContext.userId) {
       throw new McpProxyError(
         403,
-        'MCP proxy requires a cloud job associated with a real user',
-      );
-    }
-
-    if (resolvedUserId !== authContext.userId) {
-      throw new McpProxyError(
-        403,
-        'MCP token user does not match cloud job user',
+        'MCP token principal does not match cloud job',
       );
     }
 

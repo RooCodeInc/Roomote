@@ -4,6 +4,7 @@ import {
   type ComputeProvider,
   computeProviders,
 } from './compute-providers/compute-provider';
+import type { BackgroundAutomationKey } from './background-agents';
 import {
   communicationProviderSchema,
   isCommunicationProvider,
@@ -16,90 +17,127 @@ import { ALL_REPOSITORIES } from './constants';
 import { sourceControlProviderSchema } from './source-control';
 
 /**
- * CloudTaskType
+ * Task classification vocabulary.
  *
- * This is currently a hybrid of task types and trigger types. For example,
- * We should cleanly separate these concepts, and represent a cloud job as an
- * <agent, trigger> tuple. The agent determines which workflow will be executed
- * and what settings are used to execute the workflow, while the trigger determines
- * how progress and the final result are communicated.
+ * A task is classified at creation on four independent axes:
+ * - `workflow`: what kind of work the task performs.
+ * - `surface`: which product surface the task was launched from.
+ * - `trigger`: what caused the launch.
+ * - `visibility`: whether the task shows up in user-facing task lists.
+ *
+ * The runtime payload dispatch lives on runs as `payloadKind`
+ * (see {@link TaskPayloadKind}). Queries must never branch on payloadKind;
+ * they use workflow/surface/visibility.
  */
 
-export enum CloudTaskType {
-  StandardTask = 'standard.task',
-  SuggestedTasks = 'suggested.tasks',
-  McpRecommendations = 'mcp.recommendations',
-  /**
-   * Historical task type kept so old cloud job rows still parse and render.
-   * New launches should use `SuggestedTasks`.
-   */
-  LegacyOnboardingSuggestions = 'onboarding.task.suggestions',
-
-  GithubIssueFix = 'github.issue.fix',
-  GithubIssueCommentRespond = 'github.issue.comment.respond',
-
-  GithubPrReview = 'github.pr.review',
-  GithubPrReviewSync = 'github.pr.review.sync',
-  GithubPrReviewFollowUp = 'github.pr.review.followup',
-  GithubPrConflictResolve = 'github.pr.conflict.resolve',
-
-  SlackAppMention = 'slack.app.mention',
-
-  LinearAgentSession = 'linear.agent.session',
-
-  SnapshotEnvironment = 'snapshot.environment',
-  SnapshotResume = 'snapshot.resume',
-}
-
-export const TASK_ATTRIBUTION_KINDS = [
-  'matched_user',
-  'unlinked_user',
-  'automatic',
+export const TASK_WORKFLOWS = [
+  'standard',
+  'pr_review',
+  'pr_conflict_resolve',
+  'scan',
+  'mcp_recommendations',
+  'setup_onboarding',
+  'env_snapshot',
+  'eval',
 ] as const;
 
-export type TaskAttributionKind = (typeof TASK_ATTRIBUTION_KINDS)[number];
+export type TaskWorkflow = (typeof TASK_WORKFLOWS)[number];
 
-export const TASK_ATTRIBUTION_SOURCE_KINDS = [
+export const TASK_SURFACES = [
+  'web',
+  'api',
   'slack',
   'teams',
   'telegram',
+  'linear',
   'github',
   'gitlab',
   'gitea',
   'ado',
-  'linear',
-  'web',
   'system',
-  'automation',
 ] as const;
 
-export type TaskAttributionSourceKind =
-  (typeof TASK_ATTRIBUTION_SOURCE_KINDS)[number];
+export type TaskSurface = (typeof TASK_SURFACES)[number];
 
-export const EFFECTIVE_AUTHOR_KINDS = ['roomote', 'human'] as const;
-
-export type EffectiveAuthorKind = (typeof EFFECTIVE_AUTHOR_KINDS)[number];
-
-export const EFFECTIVE_PR_OWNER_KINDS = [
-  'inherit_author',
-  'specific_user',
-  'none',
+export const TASK_TRIGGERS = [
+  'message',
+  'webhook',
+  'schedule',
+  'manual',
 ] as const;
 
-export type EffectivePrOwnerKind = (typeof EFFECTIVE_PR_OWNER_KINDS)[number];
+export type TaskTrigger = (typeof TASK_TRIGGERS)[number];
 
-export type EffectiveAuthorReason =
-  | 'default_roomote'
-  | 'human_created'
-  | 'rule_roomote'
-  | 'rule_matched_human'
-  | 'rule_specific_user';
+export const TASK_VISIBILITIES = ['visible', 'hidden'] as const;
 
-export type EffectivePrOwnerReason =
-  | 'inherit_author'
-  | 'rule_none'
-  | 'rule_matched_human'
-  | 'rule_specific_user';
+export type TaskVisibility = (typeof TASK_VISIBILITIES)[number];
+
+export const TASK_STATES = [
+  'active',
+  'completed',
+  'failed',
+  'canceled',
+] as const;
+
+export type TaskState = (typeof TASK_STATES)[number];
+
+export const RUN_KINDS = ['fresh', 'resume'] as const;
+
+export type RunKind = (typeof RUN_KINDS)[number];
+
+export const TASK_INITIATOR_KINDS = ['user', 'automation'] as const;
+
+export type TaskInitiatorKind = (typeof TASK_INITIATOR_KINDS)[number];
+
+export const COMMIT_AUTHOR_KINDS = ['roomote', 'user', 'external'] as const;
+
+export type CommitAuthorKind = (typeof COMMIT_AUTHOR_KINDS)[number];
+
+/**
+ * TaskInitiator
+ *
+ * Launch-time initiator input. Stamped immutably onto the task row at
+ * creation (initiatorKind/initiatorUserId/initiatorAutomation/
+ * actorExternalId/actorDisplayName). Resumes never re-attribute.
+ */
+export type TaskInitiator =
+  | { kind: 'user'; userId: string }
+  | {
+      kind: 'user';
+      externalId: string;
+      displayName?: string;
+      matchedUserId?: string;
+    }
+  | {
+      kind: 'automation';
+      key: BackgroundAutomationKey;
+      actor?: { externalId: string; displayName?: string };
+    };
+
+/**
+ * TaskPayloadKind
+ *
+ * Runtime payload dispatch key for runs (formerly `CloudTaskType`). This only
+ * selects which payload shape and worker/controller dispatch path a run uses.
+ * Query-load-bearing classification lives on tasks as
+ * workflow/surface/trigger/visibility.
+ */
+export const TaskPayloadKind = {
+  StandardTask: 'standard',
+  Scan: 'scan',
+  McpRecommendations: 'mcp_recommendations',
+  SlackAppMention: 'slack_app_mention',
+  LinearAgentSession: 'linear_agent_session',
+  GithubPrReview: 'github_pr_review',
+  GithubPrReviewSync: 'github_pr_review_sync',
+  GithubPrReviewFollowUp: 'github_pr_review_follow_up',
+  GithubPrConflictResolve: 'github_pr_conflict_resolve',
+  SnapshotEnvironment: 'snapshot_environment',
+  SnapshotResume: 'snapshot_resume',
+} as const;
+
+export type TaskPayloadKind =
+  (typeof TaskPayloadKind)[keyof typeof TaskPayloadKind];
 
 export type AuthorshipRuleActor = {
   userId: string | null;
@@ -109,10 +147,10 @@ export type AuthorshipRuleActor = {
 };
 
 export type AuthorshipRuleConditions = {
-  sourceKinds: TaskAttributionSourceKind[];
-  taskTypes: CloudTaskType[];
+  surfaces: TaskSurface[];
+  workflows: TaskWorkflow[];
   repositoryFullNames: string[];
-  humanCreated: boolean | null;
+  initiatorKinds: TaskInitiatorKind[];
 };
 
 export type AuthorshipRuleAuthorDecision =
@@ -178,7 +216,6 @@ export type SuggestionCategory =
   | 'improvement';
 
 export type SuggestionPriority = 'P0' | 'P1' | 'P2' | 'P3';
-export type TaskSuggestionStatus = 'open' | 'started' | 'dismissed';
 export const TASK_SUGGESTION_SOURCES = [
   'suggest_ideas',
   'sentry_triage',
@@ -191,17 +228,52 @@ export type TaskSuggestionSource = (typeof TASK_SUGGESTION_SOURCES)[number];
 export const AUTOMATION_WORK_ITEM_DISPOSITIONS = ['suggest', 'act'] as const;
 export type AutomationWorkItemDisposition =
   (typeof AUTOMATION_WORK_ITEM_DISPOSITIONS)[number];
-export const AUTOMATION_WORK_ITEM_STATUSES = [
+
+/**
+ * work_items (Stage 4): one table merges the old task_suggestions,
+ * automation_work_items, and setup_new_queued_tasks. `kind` selects the flavor
+ * and every launchable surface records its launched task via launchedTaskId.
+ */
+export const WORK_ITEM_KINDS = [
+  'suggestion',
+  'auto_fix',
+  'onboarding',
+  'mcp_recommendation',
+] as const;
+export type WorkItemKind = (typeof WORK_ITEM_KINDS)[number];
+
+/** One launch state machine shared by every work-item kind. */
+export const WORK_ITEM_STATUSES = [
   'open',
-  'acting',
-  'started',
+  'launching',
+  'launched',
   'failed',
   'dismissed',
 ] as const;
-export type AutomationWorkItemStatus =
-  (typeof AUTOMATION_WORK_ITEM_STATUSES)[number];
-export const ACTIVE_AUTOMATION_WORK_ITEM_STATUSES: readonly AutomationWorkItemStatus[] =
-  ['open', 'acting', 'started'] as const;
+export type WorkItemStatus = (typeof WORK_ITEM_STATUSES)[number];
+
+/** Statuses that count as live for fingerprint dedup and launch claims. */
+export const WORK_ITEM_ACTIVE_STATUSES: readonly WorkItemStatus[] = [
+  'open',
+  'launching',
+  'launched',
+] as const;
+
+/**
+ * tracked_messages (Stage 4): the registry of chat messages Roomote posted for
+ * a work item or automation. Pure registry — launch state lives on work_items.
+ */
+export const TRACKED_MESSAGE_SURFACES = ['slack', 'teams', 'telegram'] as const;
+export type TrackedMessageSurface = (typeof TRACKED_MESSAGE_SURFACES)[number];
+
+export const TRACKED_MESSAGE_KINDS = [
+  'suggestion_card',
+  'automation_thread',
+  'mcp_setup_nudge',
+  'announcement',
+  'stats_post',
+] as const;
+export type TrackedMessageKind = (typeof TRACKED_MESSAGE_KINDS)[number];
 
 /**
  * Launch classes used to choose runtime policy for cloud tasks.
@@ -249,15 +321,6 @@ export const SUGGESTION_PRIORITIES: readonly SuggestionPriority[] = [
   'P3',
 ] as const;
 
-export const TASK_SUGGESTION_STATUSES: readonly TaskSuggestionStatus[] = [
-  'open',
-  'started',
-  'dismissed',
-] as const;
-
-export const ACTIVE_TASK_SUGGESTION_STATUSES: readonly TaskSuggestionStatus[] =
-  ['open', 'started'] as const;
-
 export const SUGGESTION_CATEGORY_EMOJIS: Record<SuggestionCategory, string> = {
   bug: '🐛',
   security: '🔒',
@@ -291,44 +354,29 @@ export const SUGGESTION_PRIORITY_LABELS: Record<SuggestionPriority, string> = {
 };
 
 export const suggestionPrioritySet = new Set<string>(SUGGESTION_PRIORITIES);
-export const taskSuggestionStatusSet = new Set<string>(
-  TASK_SUGGESTION_STATUSES,
-);
 
-export const cloudTaskTypes = Object.values(CloudTaskType) as CloudTaskType[];
+export const taskPayloadKinds = Object.values(
+  TaskPayloadKind,
+) as TaskPayloadKind[];
 
-export function isCloudTaskType(value: string): value is CloudTaskType {
-  return cloudTaskTypes.includes(value as CloudTaskType);
+export function isTaskPayloadKind(value: string): value is TaskPayloadKind {
+  return taskPayloadKinds.includes(value as TaskPayloadKind);
 }
 
-export const HIDDEN_CLOUD_TASK_TYPES: ReadonlySet<CloudTaskType> = new Set([
-  CloudTaskType.SuggestedTasks,
-  CloudTaskType.McpRecommendations,
-  CloudTaskType.LegacyOnboardingSuggestions,
-  CloudTaskType.SnapshotEnvironment,
-]);
-
-export function isHiddenCloudTaskType(type: CloudTaskType): boolean {
-  return HIDDEN_CLOUD_TASK_TYPES.has(type);
-}
-
-export const DEFAULT_VISIBLE_CLOUD_TASK_TYPES = cloudTaskTypes.filter(
-  (type) => !isHiddenCloudTaskType(type),
+const IMPLICIT_GENERALIST_PAYLOAD_KINDS: ReadonlySet<TaskPayloadKind> = new Set(
+  [
+    TaskPayloadKind.StandardTask,
+    TaskPayloadKind.Scan,
+    TaskPayloadKind.McpRecommendations,
+    TaskPayloadKind.GithubPrReviewFollowUp,
+    TaskPayloadKind.SlackAppMention,
+    TaskPayloadKind.LinearAgentSession,
+    TaskPayloadKind.SnapshotResume,
+  ],
 );
 
-const IMPLICIT_GENERALIST_TASK_TYPES: ReadonlySet<CloudTaskType> = new Set([
-  CloudTaskType.StandardTask,
-  CloudTaskType.SuggestedTasks,
-  CloudTaskType.McpRecommendations,
-  CloudTaskType.LegacyOnboardingSuggestions,
-  CloudTaskType.GithubPrReviewFollowUp,
-  CloudTaskType.SlackAppMention,
-  CloudTaskType.LinearAgentSession,
-  CloudTaskType.SnapshotResume,
-]);
-
-export function isImplicitGeneralistTaskType(type: CloudTaskType): boolean {
-  return IMPLICIT_GENERALIST_TASK_TYPES.has(type);
+export function isImplicitGeneralistTaskType(type: TaskPayloadKind): boolean {
+  return IMPLICIT_GENERALIST_PAYLOAD_KINDS.has(type);
 }
 
 /**
@@ -336,28 +384,27 @@ export function isImplicitGeneralistTaskType(type: CloudTaskType): boolean {
  * Uses a deny list approach - services are enabled for all types except those
  * that explicitly don't need them.
  */
-export function isServicesEnabledCloudTaskType(_type: CloudTaskType): boolean {
+export function isServicesEnabledCloudTaskType(
+  _type: TaskPayloadKind,
+): boolean {
   return true;
 }
 
-const RESUMABLE_CLOUD_TASK_TYPES: ReadonlySet<CloudTaskType> = new Set([
-  CloudTaskType.StandardTask,
-  CloudTaskType.SuggestedTasks,
-  CloudTaskType.LegacyOnboardingSuggestions,
-  CloudTaskType.GithubIssueFix,
-  CloudTaskType.GithubIssueCommentRespond,
-  CloudTaskType.GithubPrReviewFollowUp,
-  CloudTaskType.SlackAppMention,
-  CloudTaskType.LinearAgentSession,
-  CloudTaskType.SnapshotResume,
+const RESUMABLE_PAYLOAD_KINDS: ReadonlySet<TaskPayloadKind> = new Set([
+  TaskPayloadKind.StandardTask,
+  TaskPayloadKind.Scan,
+  TaskPayloadKind.GithubPrReviewFollowUp,
+  TaskPayloadKind.SlackAppMention,
+  TaskPayloadKind.LinearAgentSession,
+  TaskPayloadKind.SnapshotResume,
 ]);
 
 /**
  * Returns true when a task type should be auto-snapshotted at `sleepAt` and
  * therefore supports resuming from that automatic sleep transition.
  */
-export function isResumableCloudTaskType(type: CloudTaskType): boolean {
-  return RESUMABLE_CLOUD_TASK_TYPES.has(type);
+export function isResumableCloudTaskType(type: TaskPayloadKind): boolean {
+  return RESUMABLE_PAYLOAD_KINDS.has(type);
 }
 
 export const EXPIRED_SNAPSHOT_RESUME_ERROR =
@@ -429,12 +476,12 @@ export function withoutCompleteTaskOnSnapshot(
  * Without this, linking a GitHub account causes these agents to
  * masquerade as the user.
  */
-export function shouldUseAppTokenOnly(type: CloudTaskType): boolean {
-  const appTokenOnlyTypes: CloudTaskType[] = [
-    CloudTaskType.GithubPrReview,
-    CloudTaskType.GithubPrReviewSync,
-    CloudTaskType.GithubPrReviewFollowUp,
-    CloudTaskType.GithubPrConflictResolve,
+export function shouldUseAppTokenOnly(type: TaskPayloadKind): boolean {
+  const appTokenOnlyTypes: TaskPayloadKind[] = [
+    TaskPayloadKind.GithubPrReview,
+    TaskPayloadKind.GithubPrReviewSync,
+    TaskPayloadKind.GithubPrReviewFollowUp,
+    TaskPayloadKind.GithubPrConflictResolve,
   ];
 
   return appTokenOnlyTypes.includes(type);
@@ -726,12 +773,6 @@ const sharedTaskSchema = z.object({
   harness: z.enum(codingHarnesses).optional(),
   computeProvider: z.enum(computeProviders).optional(),
   requestedWorkKindDecision: requestedWorkKindDecisionSchema.optional(),
-  attributionOverride: z
-    .object({
-      kind: z.literal('automatic'),
-      sourceKind: z.enum(TASK_ATTRIBUTION_SOURCE_KINDS).optional(),
-    })
-    .optional(),
   /**
    * Optional top-level Slack thread linkage for atomic persistence on the
    * initial cloud_jobs insert. Slack-specific callers still keep any payload
@@ -968,32 +1009,6 @@ const queuedSnapshotResumeCommunicationMessageSchema =
     provider: communicationProviderSchema,
   });
 
-export const githubIssueFixSchema = sharedTaskSchema.extend({
-  type: z.literal(CloudTaskType.GithubIssueFix),
-  payload: sharedTaskPayloadSchema.extend({
-    issue: z.number(),
-    title: z.string(),
-    body: z.string(),
-    instructions: z.string().optional(),
-  }),
-});
-
-export type GithubIssueFixTask = z.infer<typeof githubIssueFixSchema>;
-
-export const githubIssueCommentSchema = sharedTaskSchema.extend({
-  type: z.literal(CloudTaskType.GithubIssueCommentRespond),
-  payload: sharedTaskPayloadSchema.extend({
-    issueNumber: z.number(),
-    issueTitle: z.string(),
-    issueBody: z.string(),
-    commentId: z.number(),
-    commentBody: z.string(),
-    commentAuthor: z.string(),
-  }),
-});
-
-export type GithubIssueCommentTask = z.infer<typeof githubIssueCommentSchema>;
-
 const githubPullRequestReviewFollowUpSourceSchema = z
   .enum(['explicit_fix', 'github_mention'])
   .transform(() => 'github_mention' as const);
@@ -1008,7 +1023,7 @@ const githubPullRequestReviewFollowUpPayloadSchema =
   });
 
 const snapshotResumePromptFallbackTaskSchema = z.object({
-  type: z.literal(CloudTaskType.GithubPrReviewFollowUp),
+  type: z.literal(TaskPayloadKind.GithubPrReviewFollowUp),
   userId: z.string().optional(),
   githubLogin: z.string().optional(),
   githubUserId: z.number().optional(),
@@ -1016,7 +1031,7 @@ const snapshotResumePromptFallbackTaskSchema = z.object({
 });
 
 export const githubPullRequestReviewFollowUpSchema = sharedTaskSchema.extend({
-  type: z.literal(CloudTaskType.GithubPrReviewFollowUp),
+  type: z.literal(TaskPayloadKind.GithubPrReviewFollowUp),
   payload: githubPullRequestReviewFollowUpPayloadSchema,
 });
 
@@ -1025,7 +1040,7 @@ export type GithubPullRequestReviewFollowUpTask = z.infer<
 >;
 
 export const githubPullRequestReviewOpenSchema = sharedTaskSchema.extend({
-  type: z.literal(CloudTaskType.GithubPrReview),
+  type: z.literal(TaskPayloadKind.GithubPrReview),
   payload: sharedTaskPayloadSchema.extend({
     prNumber: z.number(),
     prTitle: z.string(),
@@ -1044,7 +1059,7 @@ export type GithubPullRequestReviewOpenTask = z.infer<
 >;
 
 export const githubPullRequestReviewSyncSchema = sharedTaskSchema.extend({
-  type: z.literal(CloudTaskType.GithubPrReviewSync),
+  type: z.literal(TaskPayloadKind.GithubPrReviewSync),
   payload: sharedTaskPayloadSchema.extend({
     prNumber: z.number(),
     prTitle: z.string(),
@@ -1063,7 +1078,7 @@ export type GithubPullRequestReviewSyncTask = z.infer<
 >;
 
 export const githubPrConflictResolveSchema = sharedTaskSchema.extend({
-  type: z.literal(CloudTaskType.GithubPrConflictResolve),
+  type: z.literal(TaskPayloadKind.GithubPrConflictResolve),
   payload: sharedTaskPayloadSchema.extend({
     prNumber: z.number(),
     prTitle: z.string(),
@@ -1085,7 +1100,7 @@ export const workspaceReadinessSchema = z.enum([
 export type WorkspaceReadiness = z.infer<typeof workspaceReadinessSchema>;
 
 export const slackAppMentionSchema = sharedTaskSchema.extend({
-  type: z.literal(CloudTaskType.SlackAppMention),
+  type: z.literal(TaskPayloadKind.SlackAppMention),
   payload: sharedTaskPayloadSchema.extend({
     channel: z.string(),
     teamId: z.string().optional(),
@@ -1129,7 +1144,7 @@ export type SlackAppMentionTask = z.infer<typeof slackAppMentionSchema>;
 export const linearAgentSessionSchema = sharedTaskSchema
   .omit({ githubLogin: true, githubUserId: true })
   .extend({
-    type: z.literal(CloudTaskType.LinearAgentSession),
+    type: z.literal(TaskPayloadKind.LinearAgentSession),
     linearSessionId: z.string(),
     linearIssueId: z.string().optional(),
     linearOrganizationId: z.string(),
@@ -1192,7 +1207,7 @@ const delegatedTaskPayloadSchema = sharedTaskPayloadSchema.extend({
 });
 
 export const standardTaskSchema = sharedTaskSchema.extend({
-  type: z.literal(CloudTaskType.StandardTask),
+  type: z.literal(TaskPayloadKind.StandardTask),
   payload: delegatedTaskPayloadSchema,
 });
 
@@ -1212,7 +1227,7 @@ const suggestedTasksPayloadSchema = delegatedTaskPayloadSchema.extend({
 });
 
 export const suggestedTasksTaskSchema = sharedTaskSchema.extend({
-  type: z.literal(CloudTaskType.SuggestedTasks),
+  type: z.literal(TaskPayloadKind.Scan),
   payload: suggestedTasksPayloadSchema,
 });
 
@@ -1232,18 +1247,13 @@ const mcpRecommendationsPayloadSchema = delegatedTaskPayloadSchema.extend({
 });
 
 export const mcpRecommendationsTaskSchema = sharedTaskSchema.extend({
-  type: z.literal(CloudTaskType.McpRecommendations),
+  type: z.literal(TaskPayloadKind.McpRecommendations),
   payload: mcpRecommendationsPayloadSchema,
 });
 
 export type McpRecommendationsTask = z.infer<
   typeof mcpRecommendationsTaskSchema
 >;
-
-const legacyOnboardingSuggestionsTaskSchema = sharedTaskSchema.extend({
-  type: z.literal(CloudTaskType.LegacyOnboardingSuggestions),
-  payload: suggestedTasksPayloadSchema,
-});
 
 export const snapshotEnvironmentAttachmentSchema = z.preprocess(
   (value) => {
@@ -1306,7 +1316,7 @@ export type SnapshotEnvironmentAttachment = z.infer<
  * subsequent cloud jobs using this environment.
  */
 export const snapshotEnvironmentSchema = sharedTaskSchema.extend({
-  type: z.literal(CloudTaskType.SnapshotEnvironment),
+  type: z.literal(TaskPayloadKind.SnapshotEnvironment),
   payload: sharedTaskPayloadSchema.omit({ environmentId: true }).extend({
     /**
      * The environment ID to create a snapshot for.
@@ -1329,7 +1339,7 @@ export type SnapshotEnvironmentTask = z.infer<typeof snapshotEnvironmentSchema>;
  * or to use a pre-configured environment snapshot for faster startup.
  */
 export const snapshotResumeSchema = sharedTaskSchema.extend({
-  type: z.literal(CloudTaskType.SnapshotResume),
+  type: z.literal(TaskPayloadKind.SnapshotResume),
   // Optional Linear metadata for snapshot resumes triggered by Linear follow-ups.
   linearSessionId: z.string().optional(),
   linearIssueId: z.string().optional(),
@@ -1741,8 +1751,6 @@ export function populateSnapshotResumeCommunicationMetadata(
  * Use this schema for runtime validation of cloud task payloads.
  */
 export const cloudTaskSchema = z.discriminatedUnion('type', [
-  githubIssueFixSchema,
-  githubIssueCommentSchema,
   githubPullRequestReviewFollowUpSchema,
   githubPullRequestReviewOpenSchema,
   githubPullRequestReviewSyncSchema,
@@ -1752,7 +1760,6 @@ export const cloudTaskSchema = z.discriminatedUnion('type', [
   standardTaskSchema,
   suggestedTasksTaskSchema,
   mcpRecommendationsTaskSchema,
-  legacyOnboardingSuggestionsTaskSchema,
   snapshotEnvironmentSchema,
   snapshotResumeSchema,
 ]);
@@ -1763,10 +1770,8 @@ export type CloudTask = z.infer<typeof cloudTaskSchema>;
  * CloudTaskPayload
  */
 
-export type CloudTaskPayload<T extends CloudTaskType = CloudTaskType> = Extract<
-  CloudTask,
-  { type: T }
->['payload'];
+export type CloudTaskPayload<T extends TaskPayloadKind = TaskPayloadKind> =
+  Extract<CloudTask, { type: T }>['payload'];
 
 type CloudTaskWorkspacePayload = {
   repo?: string;
@@ -1856,14 +1861,14 @@ export function resolveCloudTaskWorkspace(
  */
 
 export function isPrReviewJob(
-  type: CloudTaskType,
+  type: TaskPayloadKind,
   _payload: CloudTaskPayload,
 ): _payload is
-  | CloudTaskPayload<CloudTaskType.GithubPrReview>
-  | CloudTaskPayload<CloudTaskType.GithubPrReviewSync> {
+  | CloudTaskPayload<typeof TaskPayloadKind.GithubPrReview>
+  | CloudTaskPayload<typeof TaskPayloadKind.GithubPrReviewSync> {
   return (
-    type === CloudTaskType.GithubPrReview ||
-    type === CloudTaskType.GithubPrReviewSync
+    type === TaskPayloadKind.GithubPrReview ||
+    type === TaskPayloadKind.GithubPrReviewSync
   );
 }
 

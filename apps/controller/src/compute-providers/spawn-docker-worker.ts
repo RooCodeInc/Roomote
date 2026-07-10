@@ -4,7 +4,7 @@ import { promisify } from 'node:util';
 
 import {
   buildPreviewProxyUrl,
-  CloudTaskType,
+  TaskPayloadKind,
   NonRetryableSpawnError,
   getPrimaryPortFromConfig,
   portNameToSlug,
@@ -13,7 +13,7 @@ import {
 } from '@roomote/types';
 import { Env, resolveAppEnv } from '@roomote/env';
 import {
-  cloudJobs,
+  taskRuns,
   db,
   eq,
   resolveEffectivePreviewRuntimeConfig,
@@ -56,11 +56,11 @@ export async function spawnDockerWorker(
   },
 ): Promise<{ containerId: string }> {
   if (
-    cloudJob.type === CloudTaskType.SnapshotEnvironment ||
-    cloudJob.type === CloudTaskType.SnapshotResume
+    cloudJob.payloadKind === TaskPayloadKind.SnapshotEnvironment ||
+    cloudJob.payloadKind === TaskPayloadKind.SnapshotResume
   ) {
     throw new NonRetryableSpawnError(
-      `Docker provider does not support ${cloudJob.type} jobs`,
+      `Docker provider does not support ${cloudJob.payloadKind} jobs`,
     );
   }
 
@@ -345,8 +345,8 @@ async function assertDetachedWorkerStarted(
 }
 
 async function hasCloudJobStarted(cloudJobId: number): Promise<boolean> {
-  const cloudJob = await db.query.cloudJobs.findFirst({
-    where: eq(cloudJobs.id, cloudJobId),
+  const cloudJob = await db.query.taskRuns.findFirst({
+    where: eq(taskRuns.id, cloudJobId),
     columns: {
       startedAt: true,
     },

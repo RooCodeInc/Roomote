@@ -648,8 +648,8 @@ describe('roomote MCP tool descriptions', () => {
       'utf8',
     );
 
-    expect(source).toContain('CloudTaskType.StandardTask');
-    expect(source).toContain('CloudTaskType.SlackAppMention');
+    expect(source).toContain('TaskPayloadKind.StandardTask');
+    expect(source).toContain('TaskPayloadKind.SlackAppMention');
     expect(source).toContain(
       'const WEB_TASK_TYPES_WITH_SECURE_ENV_REQUESTS = new Set<string>([',
     );

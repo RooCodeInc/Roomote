@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { CloudTaskStatus, CloudTaskType } from '@roomote/types';
+import { CloudTaskStatus, TaskPayloadKind } from '@roomote/types';
 import type { CloudJob } from '@roomote/db/server';
 
 const {
@@ -90,9 +90,10 @@ function makeCloudJob(payload: CloudJob['payload']): CloudJob {
   return {
     id: 123,
     status: CloudTaskStatus.Dequeued,
-    type: CloudTaskType.StandardTask,
+    kind: 'fresh',
+    payloadKind: TaskPayloadKind.StandardTask,
     taskId: 'task-123',
-    userId: 'user-123',
+    actingUserId: 'user-123',
     payload,
     result: null,
     artifacts: null,

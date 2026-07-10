@@ -1,7 +1,7 @@
 ---
 title: Linear Integration
 status: active
-last_reviewed: 2026-06-26
+last_reviewed: 2026-07-09
 owner: engineering
 summary: Current Linear Agent Sessions, OAuth, MCP, webhook, and follow-up guidance for Roomote's single-deployment model.
 ---
@@ -45,7 +45,7 @@ When a routing decision needs user input, Linear uses its elicitation/fallback p
 
 - Linear outbound activity uses the Linear Agent Sessions API.
 - Worker callbacks emit thoughts, actions, plan updates, request-user-input prompts, closeouts, and terminal failure information.
-- Active follow-ups update `cloud_jobs.actingUserId` when the Linear user maps to a Roomote user, so user-scoped MCP credentials can refresh before the next turn.
+- Active follow-ups update `task_runs.actingUserId` when the Linear user maps to a Roomote user, so user-scoped MCP credentials can refresh before the next turn.
 - Deployment-scoped MCP connections, such as Linear itself, use `mcp_connections.userId = null`.
 
 ## Data Model
@@ -57,7 +57,7 @@ Current Linear-facing state is deployment-wide unless it explicitly references a
 - `linear_pending_selections`
 - `mcp_connections`
 - `deployment_mcp_enablements`
-- `cloud_jobs`
+- `task_runs`
 - `tasks`
 - Redis follow-up queues for active workers
 

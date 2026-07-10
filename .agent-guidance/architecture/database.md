@@ -1,9 +1,9 @@
 ---
 title: Database Architecture
 status: active
-last_reviewed: 2026-07-06
+last_reviewed: 2026-07-09
 owner: engineering
-summary: Technical documentation of the database architecture covering PostgreSQL schema, ClickHouse analytics, Drizzle ORM patterns, encrypted columns, migrations, and test factories.
+summary: Technical documentation of the database architecture covering PostgreSQL schema, the tasks/task_runs work-execution spine, ClickHouse analytics, Drizzle ORM patterns, encrypted columns, migrations, and test factories.
 ---
 
 # Database Architecture
@@ -69,15 +69,23 @@ This pattern keeps related definitions together and makes the schema easier to n
 - Singleton deployment row keyed by `id`
 - Stores deployment-wide setup state, setup task linkage, initial admin user, and onboarding timestamps
 - `licenseKey` holds the deployment's signed Roomote license key (nullable; verified at read time — see [Licensing & Seat Limits](../features/licensing.md))
+- Also owns the deployment-wide Roomote agent settings folded in from the former `background_agent_settings` table: `managerSlackChannelId`, `globalAgentInstructions`, `authorshipInstructions` / compiled-authorship columns (`compiledAuthorshipRules`, `compiledAuthorshipIssues`, `compiledAuthorshipAt`), `styleGuidance`, and the Slack summon/ack/completion emoji columns. `getBackgroundAgentSettingsForDeployment()` reads these and layers a per-automation projection (built from `automations`) on top; there is no separate settings table or row-bootstrap path
 - Owns deployment state directly; Roomote is a single-deployment app and every active user belongs to that deployment
 
 **tasks**
 
+The durable unit of work. One task = one conversation/piece of work; execution attempts live on `task_runs` (1:N, fresh launch plus snapshot resumes).
+
 - Primary key: `id` (text, generated via `generateTaskId()`)
-- Links to the creating/effective user; deployment ownership is implicit because the database is single-deployment
-- Stores harness type, model, completion status, task-level token counters, and links to durable per-message inference usage events
-- OpenCode per-message inference accounting is stored in `taskInferenceUsageEvents`; aggregate task cost should be computed from those raw events until a read path needs a dedicated cache
-- Indexes on userId, harnessSessionId, timestamp, completed, and createdAt
+- **Classification** (stamped at creation, query-load-bearing): `workflow` (`standard` | `pr_review` | `pr_conflict_resolve` | `scan` | `mcp_recommendations` | `setup_onboarding` | `env_snapshot` | `eval`), `surface` (`web` | `api` | `slack` | `teams` | `telegram` | `linear` | `github` | `gitlab` | `gitea` | `ado` | `system`), `trigger` (`message` | `webhook` | `schedule` | `manual`), and `visibility` (`visible` | `hidden`, default `visible`). Hidden launches (scans, env snapshots, MCP recommendations) pass `visibility: 'hidden'`; user-facing queries filter with `isVisibleTask()` (`eq(tasks.visibility, 'visible')`)
+- **Terminal state**: `state` (`active` | `completed` | `failed` | `canceled`, default `active`) replaces the old `completed` boolean. Only the `finishCloudJob()` terminal path writes it; live runtime phase stays on runs
+- **Initiator stamp** (immutable, written once at creation): `initiatorKind` (`user` | `automation`), `initiatorUserId` (FK → `users`), `initiatorAutomation` (FK → `automations.key`; rows for every key are seeded by `ensureAutomationRows`), `actorExternalId` (raw external actor id such as a Slack user id or GitHub login, populated for either kind), and `actorDisplayName`. A CHECK constraint (`tasks_initiator_shape_check`) enforces the shape: a `user` initiator has no automation key and at least one of `initiatorUserId` / `actorExternalId`; an `automation` initiator has an automation key and no user FK
+- **Commit-author block** (evaluated unconditionally at enqueue by `evaluateCommitAuthor()`): `commitAuthorKind` (`roomote` | `user` | `external`), `commitAuthorUserId`, `commitAuthorLogin`, `commitAuthorExternalId` (GitHub numeric id as text for `{id}+{login}@users.noreply.github.com` noreply emails), and `prAssigneeLogin`. The `external` kind preserves commit identity for unlinked humans with a GitHub identity (e.g. PR authors on conflict-resolution tasks)
+- **Channel bindings** (nullable, deliberately NOT unique — one thread can host many tasks): `slackChannelId`, `slackThreadTs`, `linearSessionId`, `linearIssueId`, `linearOrganizationId`
+- **Conversation cargo**: `title`, `prompt` (the initial task prompt; per-attempt/resume prompts live on runs), `draftPrompt`, `requestedWorkKind`/`requestedWorkKindSource`/`requestedWorkKindConfidence`, and `harnessInstructions`
+- Stores harness type, model, and `computeDurationMs`; OpenCode per-message inference accounting is stored in `taskInferenceUsageEvents` and aggregate cost is computed from those raw events until a read path needs a dedicated cache
+- **Soft delete** via `deletedAt`; queries filter `isNull(tasks.deletedAt)`. There is no tombstone table — S3 artifact cleanup reads soft-deleted rows directly
+- Indexes on initiatorUserId, initiatorAutomation, workflow, `(visibility, activityAt)`, harnessSessionId, timestamp, activityAt, and createdAt
 
 **taskPins**
 
@@ -85,45 +93,52 @@ This pattern keeps related definitions together and makes the schema easier to n
 - Unique constraint on `(userId, taskId)`
 - Composite index on `(userId, updatedAt)` for efficient recent pins queries
 
-**taskSuggestions**
+**workItems** (`work_items`)
 
-- Deployment-wide persisted Suggested Tasks batches for the Home-page onboarding rail and scheduled automation runs
-- Stores the suggestion title, prompt-ready brief, selected repository IDs, sort order, and optional `dismissedAt` timestamp
-- Unique index on `(sourceTaskId, sortOrder)` preserves ordering within a single source task's generated batch
-- `sourceTaskId` is nullable, so the database does not enforce deployment-wide uniqueness on `sortOrder` for rows that are not tied to a source task
+- Unified launchable-work table that replaced `taskSuggestions`, `automationWorkItems`, and `setupNewQueuedTasks`: one row shape with a `kind` discriminator (suggested task, auto-fix, onboarding-queued task, MCP recommendation, etc.)
+- Content columns: `title`, `brief`, `executionPrompt`, `investigationContext`, `category`, `priority`, `actionKind` (auto_fix only), plus `repositoryIds`, `targetRepositoryFullName`, `targetEnvironmentId`, and workspace-readiness fields
+- `automationKey` (nullable FK → `automations.key`; onboarding/manual launches have none), `sourceTaskId` (the scan/onboarding task that produced the item), `selectedByUserId` and `sourceWorkItemId` (onboarding provenance)
+- `fingerprint` is the dedup key (the old `task_suggestions.contentHash` folded in here)
+- **One launch state machine** for every launchable surface: `status` (`open` | `launching` | `launched` | `failed` | `dismissed`), `launchClaimedAt` (stale-claim recovery), `launchedTaskId` (FK → `tasks`, recorded by every surface that launches), `launchedAt`, `failedAt`, `launchError`, `dismissedAt`. MCP recommendations get real `work_items` rows too. The claim/finalize/release CAS with fencing tokens and stale-`launching` recovery lives in one shared module (`packages/db/src/lib/work-item-claims.ts`), and every surface drives launches through it — including the setup-new onboarding queue, whose batch launcher claims each queued item individually and mirrors the launched state back onto the source suggestion through the same guarded CAS
+- Unique index on `(sourceTaskId, sortOrder)` preserves ordering within a source task's generated batch
 
-**backgroundAgentSettings**
+**Deployment-wide agent settings** (columns on `deployment_settings`)
 
-- Singleton deployment-wide configuration for background automation
-- Includes shared `globalAgentInstructions` injected into all tasks, optional `styleGuidance` layered onto the default user-facing tone guidance, plus optional `suggesterInstructions` used only when generating Suggested Tasks
-- Stores the shared `managerSlackChannelId` used by manager-facing Slack delivery, plus legacy per-feature channel columns that still backfill or fall back until the shared manager channel is explicitly saved
-- Also stores the optional `platformIssueSlackChannelId` legacy row used for admin-visible Slack alerts when running tasks report admin-fixable platform blockers
-- Persists cadence and last-run state for scheduled automations so BullMQ can due-gate the deployment independently of the global hourly scheduler
+- The former standalone `background_agent_settings` table was folded into `deployment_settings`; the genuinely global survivors after the rebuild now live as columns on the deployment singleton: `managerSlackChannelId`, `globalAgentInstructions`, `authorshipInstructions` / compiled-authorship columns, `styleGuidance`, and the Slack summon/ack/completion emoji columns
+- Deleted in the rebuild: the ~20 persona columns, the ~1250-line normalize/merge layer, the manager-channel triple fallback, per-feature Slack channel columns, `platformIssueSlackChannelId`, `suggesterInstructions`, and all per-automation cadence/last-run state (those now live on `automations`)
+- Channel resolution is now two levels only: the automation target, then the manager channel
 
-**backgroundAutomations / backgroundAutomationTargets**
+**automations** (`automations`)
 
-- Stores deployment-wide durable automation rows keyed by automation key, with optional JSON `schedule`, JSON `settings`, and destination/scope rows in `backgroundAutomationTargets`
-- `review_code` owns the Review Code automation config: enabled state, automatic review behavior (`reviewOnCommit`, `reviewDraftPrs`), whether automatic review includes PRs from authors outside Roomote (`reviewAllPullRequestAuthors`), comment-only approval policy, linked-task relay toggle, and `relayEligibleCreatorIds`
-- GitHub PR-review webhook handlers read the `review_code` row through `getReviewCodeAutomationSettings()` instead of reading any cloud-agent table
-- Slack-posting and scheduled automations store their per-automation destinations or repository/service scopes in `backgroundAutomationTargets` when the setting is target-shaped rather than a scalar JSON setting
+- Single deployment-wide automation table (key `text` primary key = the canonical snake_case automation key) that replaced `backgroundAutomations` + `backgroundAutomationTargets`. Targets are a JSONB `targets` array on the row rather than a separate join table
+- Rows for every known key are seeded idempotently by `ensureAutomationRows`, so `tasks.initiatorAutomation` and `work_items.automationKey` FKs always hold. `internal = true` rows launch tasks but are hidden from the settings UI
+- Columns: `enabled`, `internal`, JSONB `schedule` / `settings` / `targets`, `instructions`, `scanCursor`, and the run-history columns `lastRunAt`, `lastSucceededAt`, `lastFailedAt`, `lastError`
+- **Run history lives here, not in a runs table.** There is no `backgroundAutomationRuns` table: history for task-launching automations is `tasks WHERE initiator_automation = <key>`; announcer and manager-stats history come from the row's `last*` columns; dispatch failures land in `lastError`
+- `review_code` owns the Review Code automation config in its `settings` JSON (enabled state, `reviewOnCommit`, `reviewDraftPrs`, `reviewAllPullRequestAuthors`, comment-only approval policy, linked-task relay toggle, relay eligibility). GitHub PR-review webhook handlers read it through `getReviewCodeAutomationSettings()`
+
+**trackedMessages** (`tracked_messages`)
+
+- Pure outbound-message registry that replaced `agentSuggestionMessages` + `backgroundAutomationSlackThreads` + `mcpSetupManagerNotifications`
+- Stores chat coordinates only (`surface`, `kind`, `channelId`, `messageTs`, `threadTs`, `automationKey`, `createdByUserId`, `summaryText`, `metadata`) with `UNIQUE(kind, dedupeKey)` enforcing per-kind idempotency
+- Launch state is NOT here — it lives on `work_items`; the reaction-launch claim CAS runs against `work_items` via the nullable `workItemId` FK
+
+**slackQuickAnswers** (`slack_quick_answers`)
+
+- Renamed from `fastAgentSessions`; deliberately outside the task/run spine. Stores the fast Slack quick-answer conversation buffer (`userId`, `slackChannel`, `slackThreadTs`, `messages` JSON) with a unique `(slackChannel, slackThreadTs)` index
 
 **taskPlatformIssueReports**
 
 - Stores admin-fixable platform/configuration/access blockers explicitly reported by running tasks through the `report_platform_issue` MCP tool
-- Links each report to the task, cloud job, and optionally the persisted `task_messages` row that carried the tool result
+- Links each report to the task, run, and optionally the persisted `task_messages` row that carried the tool result
 - Persists the raw `{ title, summary }` report payload plus `slackPostedAt` so Slack delivery stays one-alert-per-report when a deployment-level alert channel is configured
 
-**setupNewQueuedTasks**
-
-- Stores the prompts selected during `/setup` while the onboarding environment build is still running
-- Associates each queued prompt with the active setup onboarding task, the selecting user, and later the created environment plus launched task
-- Uses `(setupOnboardingTaskId, sortOrder)` as the ordered queue key for one launch queue per setup task
+(The prompts selected during `/setup` while the onboarding environment build is still running are now `work_items` rows of the onboarding-queued kind — there is no separate `setupNewQueuedTasks` table.)
 
 **taskArtifacts**
 
 - Stores file metadata for task outputs (S3 paths)
 - Versioned artifacts with unique constraint on `(taskId, path, version)`
-- Links to cloudJob that created the artifact
+- Links to the run (`runId`) that created the artifact
 - `uploaded` boolean tracks S3 upload status
 
 **taskShares**
@@ -134,50 +149,43 @@ This pattern keeps related definitions together and makes the schema easier to n
 
 **taskPullRequests**
 
-- Tracks PRs/MRs detected/created during task execution across all source-control providers
+- The only PR home: tracks PRs/MRs linked to a task across all source-control providers
+- **Write-order inversion for PR-triggered work**: `pr_review` and `pr_conflict_resolve` launches INSERT their `task_pull_requests` row at enqueue, inside the task-creation transaction, from the `prLinkage` the caller passes to `enqueueCloudTask()`. Execution-time extraction only appends additional PRs the agent created
+- Execution-time extraction prefers the structured PR-delivery tool result emitted by successful create/refresh PR flows, then falls back to parsing trusted `gh pr create`, `gh pr checkout`, and branch-scoped `gh pr list` command output from task messages
 - `sourceControlProvider` (`github`/`gitlab`/`gitea`/`ado`, defaults to `github`) + `host` + optional `repositoryId` FK→`repositories` disambiguate a PR across providers and self-managed hosts; backfilled from `prUrl` for historical rows
-- Prefers the structured PR-delivery tool result emitted by successful create/refresh PR flows, then falls back to parsing trusted `gh pr create`, `gh pr checkout`, and branch-scoped `gh pr list` command output from task messages
-- Stores PR URL, number, title, repository, status
+- Stores PR URL, number, title, repository, status, plus review-flow state that used to live on cloud jobs: `prSha` (last observed head SHA, keyed by review dedup), `prBaseRef`, `prBaseSha`, and the GitHub-native `githubReactionId`, `githubCheckRunId`, `githubReviewCommentId`
+- PR-review dedup queries (e.g. skip-already-reviewed-head, has-active-resolution-task) are `tasks JOIN task_pull_requests` reads, plus the latest run status where needed
 - Unique constraint prevents duplicate PR URLs per task; webhook-facing readers scope lookups by `(sourceControlProvider, repository, prNumber)` to avoid cross-provider collisions
 
-**deletedTasks**
+There is no `deletedTasks` tombstone table anymore; task deletion is a soft delete (`tasks.deletedAt`) and S3 artifact cleanup reads the soft-deleted rows.
 
-- Tombstone records for deleted tasks (no foreign keys)
-- Preserves taskId and userId for audit trail
-- Used to clean up S3 artifacts after task deletion
+### Task Runs & Execution
 
-### Cloud Jobs & Execution
+**taskRuns** (`task_runs`; the DB table was renamed from `cloud_jobs`. Note: internal runtime code still uses "CloudJob" vocabulary on purpose — e.g. the Redis queue class `CloudJobQueue` / `cloud-job-queue.ts` and identifiers like `cloudJobId`. That naming is intentional and current, not stale; only the Postgres table was renamed)
 
-**cloudJobs**
+One row per sandbox execution attempt of a task. A task has 1:N runs: one `fresh` run plus any number of `resume` runs. Resume creates a new run row on the same task — there is no cross-run field copying and no chain-walking; "runs of task X" is the whole story.
 
 - Primary key: `id` (integer, auto-increment identity)
-- Stores all metadata for a job execution
-- Links to user and task; deployment ownership is implicit
-- Status lifecycle uses `CloudTaskStatus` values (`pending`, `dequeued`, `processing`, `preparing`, `spawning`, `connecting`, `running`, `completed`, `failed`, `canceled`, `idle`)
-- **Compute provider routing**: `vendor` identifies the worker backend. Historical rows can still be null before routing is persisted (or carry the retired `sandbox` value), but current launches record one of `docker`, `modal`, `daytona`, or `e2b`.
-- Snapshot resumes inherit the source job's provider; fresh launches otherwise fall back to the requested `computeProvider` or `DEFAULT_COMPUTE_PROVIDER`
-- **Preview infrastructure**:
-  - `machineDomain`: Primary preview URL
-  - `machineDomains`: Named port domains (e.g., `{ "WEB": "https://...", "API": "https://..." }`)
-  - `initialPaths`: Legacy per-port initial paths retained for older jobs
-  - `primaryPortName`: Computed primary port from environment config
-  - `proxyPorts`: Ephemeral proxy port mappings for auth-proxy feature
-  - `authBypassValue`, `authBypassHeaderName`: Custom header bypass for preview auth
-- **Snapshots**:
-  - `snapshotId`: Snapshot created from this job
-  - `sourceSnapshotId`: Snapshot this job resumed from
-  - `sourceCloudJobId`: Parent job when resuming
-  - Timestamps: `snapshotRequestedAt`, `snapshotCreatedAt`, `snapshotFailedAt`, `sleepAt`, `sleepRequestedAt`
-- **Integration metadata**:
-  - Source-control PR (provider-neutral, populated by GitHub/GitLab/Gitea/ADO webhook and mutation paths): `prSourceControlProvider`, `prRepo`, `prNumber`, `prSha`, `prBaseRef`, `prBaseSha`
-  - GitHub-native (no provider-neutral equivalent): `githubPrReactionId`, `githubPrCheckRunId`, `githubPrReviewCommentId`
-  - `prRepo` / `prNumber` mirror the latest task-linked pull request so task surfaces can render PR badges and downstream follow-up flows can resolve the canonical PR without reparsing transcript text
-  - Slack: `slackThreadTs`
-  - Linear: `linearSessionId`, `linearIssueId`, `linearOrganizationId` (external Linear workspace identity)
-- **Git tracking**: `baseShas` stores HEAD SHA for each repo at task start
-- **Draft state**: `draftPrompt` saves in-progress prompt text before sleep
-- **Legacy delegated rollout**: historical `explain.code`, `code.task`, and `plan.task` rows may remain in place as completed records. New delegated launches use `standard.task`.
-- Lifecycle timestamps: `createdAt`, `dequeuedAt`, `startedAt`, `completedAt`, `canceledAt`
+- `taskId`: real FK → `tasks(id)` with `ON DELETE CASCADE`
+- `kind`: `fresh` | `resume` (replaces the old `SnapshotResume` task type as a classification signal); `sourceRunId` (FK → `task_runs.id`) is the parent run when resuming
+- `actingUserId` (nullable FK → `users`): **the only user column on runs**. The launching or most recently acting human; null for automation runs. Set at enqueue, updated by follow-up senders/resumers. Job tokens and MCP OAuth key off it, falling back to the deployment service principal when null (see [Authentication & Authorization](./auth.md))
+- `payloadKind`: runtime payload dispatch key (renamed from `type`; snake_case `TaskPayloadKind` values such as `standard`, `scan`, `github_pr_review`, `snapshot_resume`). No query outside runtime dispatch may branch on it — queries use `tasks.workflow`/`surface`/`visibility`
+- `prompt`: the per-attempt prompt (including the deferred resume prompt); the initial task prompt lives on `tasks.prompt`
+- Status lifecycle uses `CloudTaskStatus` values (`pending`, `dequeued`, `processing`, `preparing`, `spawning`, `connecting`, `running`, `completed`, `failed`, `canceled`, `idle`); `taskPhase` tracks live harness phase
+- **Compute provider routing**: `vendor` identifies the worker backend (`docker`, `modal`, `daytona`, or `e2b`). Resumes inherit the source run's provider; fresh launches otherwise fall back to the requested `computeProvider` or the deployment default
+- **Preview infrastructure**: `machineDomain`, `machineDomains`, `initialPaths`, `primaryPortName`, `proxyPorts`, `authBypassValue`, `authBypassHeaderName`
+- **Snapshots/sleep**: `snapshotId`, `sourceSnapshotId`, `snapshotRequestedAt`, `snapshotCreatedAt`, `snapshotFailedAt`, `keepaliveMs`, `sleepAt`, `sleepRequestedAt`
+- **Worker identity/liveness**: `workerReleaseTag`, `workerVersion`, `workerCommit`, `workerHeartbeatAt`
+- **Git tracking**: `baseShas` stores HEAD SHA for each repo at run start
+- Milestone timestamps (unchanged): `createdAt`, `dequeuedAt`, `provisionStartedAt`, `provisionReadyAt`, `startedAt`, `setupCompletedAt`, `harnessStartedAt`, `runtimeTaskStartedAt`, `firstAssistantOutputAt`, `completedAt`, `canceledAt`, segmented by `launchMode`
+
+Deleted from runs (now on `tasks` or gone entirely): `userId`, all attribution/effective-author columns, `title`, `draftPrompt`, `requestedWorkKind*`, `harnessInstructions`, Slack/Linear channel bindings, the `pr*`/`githubPr*` columns (moved to `task_pull_requests`), and `type` (split into `tasks.workflow`×`surface`×`trigger`×`visibility` plus `runs.payloadKind`).
+
+**taskRunEvents** (`task_run_events`; renamed from `cloud_job_events`)
+
+- Append-only audit history for run lifecycle decisions and provider operations
+- `runId` is a real FK → `task_runs(id)` CASCADE; `taskId` is a real FK → `tasks(id)` CASCADE
+- See [Cloud Job Execution](./cloud-job-execution.md) for the event-source taxonomy
 
 **taskMessages**
 
@@ -198,7 +206,7 @@ This pattern keeps related definitions together and makes the schema easier to n
 - Unique on `(harnessSessionId, messageId)` so replayed or retried persistence updates the same usage row instead of double-counting
 - Captures provider/model IDs, input/output/reasoning/cache token counts, context tokens, cost in micro-USD, cost source, and OpenCode message timestamps
 - `agent` stamps which harness agent produced the message: the main agent (`build`) for main-session turns and the subagent name (for example `explore` or `visual`) for child-session turns. The worker records child-session (subagent) assistant messages as their own usage rows, so per-agent cost grouping covers subagent spend too.
-- Links to task, cloud job, and user; task deletion cascades usage events while deleted jobs/users are retained as nullable historical references
+- Links to task (`taskId`, cascade) and run (`runId`, nullable, set-null). There is no private `userId` copy on usage satellites — per-user cost is a join through `tasks.initiatorUserId`
 - No inference-usage rollup table exists today. Add one only when a concrete task-list, dashboard, or reporting read path needs cached aggregates.
 
 ### Integration Tables
@@ -482,7 +490,7 @@ import {
 **All schema tables:**
 
 ```typescript
-import { users, deploymentSettings, tasks, cloudJobs, repositories, ... } from '@roomote/db/server';
+import { users, deploymentSettings, tasks, taskRuns, repositories, ... } from '@roomote/db/server';
 ```
 
 **Encryption helpers:**
@@ -534,11 +542,10 @@ pnpm --filter @roomote/db db:push
 
 **Location:** `packages/db/drizzle/`
 
-Currently 22 migrations (0000-0021):
-
 - Named with pattern: `NNNN_adjective_character.sql`
 - Generated by Drizzle Kit based on schema changes
 - Tracked in `drizzle/meta/` snapshot files
+- The data-model rebuild collapsed the previous 22+ migrations into a **single baseline migration** (`0000_amusing_magma.sql`). That baseline is the entire migration history and provisions all 56 tables; new migrations append after it as usual
 
 **Running migrations in scripts:**
 
@@ -572,8 +579,8 @@ Built with **fishery** + **@faker-js/faker** for generating realistic test data.
 **Available factories:**
 
 - `userFactory` - Creates users with local-compatible IDs
-- `taskFactory` - Creates tasks
-- `cloudJobFactory` - Creates cloud jobs
+- `taskFactory` - Creates tasks; defaults to a `standard`/`web`/`manual`/`visible` classification with a `user` initiator, generating a fake `actorExternalId` when no `initiatorUserId` is supplied so the initiator CHECK holds
+- `runFactory` - Creates task runs (renamed from `cloudJobFactory`); auto-creates a backing task when `taskId` is omitted because `task_runs.task_id` is a real FK
 - `githubInstallationFactory` - Creates GitHub installations
 - `repositoryFactory` - Creates GitHub repositories
 - `slackInstallationFactory` - Creates Slack installations
@@ -585,12 +592,16 @@ Built with **fishery** + **@faker-js/faker** for generating realistic test data.
 ### Usage in Tests
 
 ```typescript
-import { db, userFactory, taskFactory } from '@roomote/db/server';
+import { db, userFactory, taskFactory, runFactory } from '@roomote/db/server';
 
 // Create related records
 const user = await userFactory.create();
 const task = await taskFactory.create({
-  userId: user.id,
+  initiatorUserId: user.id,
+});
+const run = await runFactory.create({
+  taskId: task.id,
+  actingUserId: user.id,
 });
 
 // Query the database
@@ -645,7 +656,7 @@ At the monorepo level, `pnpm test` runs `pnpm --filter @roomote/db db:push:test`
 
 ### Migrations
 
-- `packages/db/drizzle/` - Migration SQL files (0000-0021)
+- `packages/db/drizzle/` - Migration SQL files
 - `packages/db/drizzle/meta/` - Drizzle Kit snapshot metadata
 
 ## Best Practices
@@ -686,7 +697,7 @@ At the monorepo level, `pnpm test` runs `pnpm --filter @roomote/db db:push:test`
    await db
      .select()
      .from(tasks)
-     .where(and(eq(tasks.userId, userId), isNull(tasks.deletedAt)));
+     .where(and(eq(tasks.initiatorUserId, userId), isNull(tasks.deletedAt)));
    ```
 
 ### Package Imports

@@ -100,6 +100,7 @@ async function startSandboxServer(
 const validJobTokenContext = {
   cloudJobId: 1,
   userId: 'user-1',
+  principal: 'user',
   tokenType: 'cj',
   version: 1,
 } satisfies JobTokenContext;

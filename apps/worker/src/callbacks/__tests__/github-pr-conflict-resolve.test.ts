@@ -7,7 +7,7 @@ vi.mock('@roomote/sdk/client', () => ({
 }));
 
 import {
-  CloudTaskType,
+  TaskPayloadKind,
   CONFLICT_RESOLUTION_SUMMARY_RESULT_KEY,
 } from '@roomote/types';
 import { type CloudJob, sdk } from '@roomote/sdk/client';
@@ -17,7 +17,7 @@ import { githubPrConflictResolveCallbacks } from '../github-pr-conflict-resolve'
 function createCloudJob(): CloudJob {
   return {
     id: 123,
-    type: CloudTaskType.GithubPrConflictResolve,
+    payloadKind: TaskPayloadKind.GithubPrConflictResolve,
     payload: {
       repo: 'owner/repo',
       prNumber: 42,
