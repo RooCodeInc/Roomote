@@ -1,7 +1,7 @@
 export { type PhaseRecorder, formatDurationMs, timedStep } from './logging';
 export { setupSystem } from './system';
 export { installMise } from './mise';
-export { installAgentClis, installZeroCli } from './agent-clis';
+export { installAgentClis } from './agent-clis';
 export { installNodePty } from './node-pty';
 export { installEmojiFont } from './emoji-fonts';
 export {
