@@ -156,6 +156,13 @@ describe('handleTelegramCallbackQuery suggestion launch lifecycle', () => {
     expect(apiLoggerMock.warn).toHaveBeenCalledWith(
       expect.stringContaining('orphaned run canceled'),
     );
+    // The earlier "Starting: ..." answer and started post point at the
+    // canceled orphan, so the user gets a corrective reply.
+    expect(postTelegramMessageBestEffortMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        text: expect.stringContaining('was already started elsewhere'),
+      }),
+    );
     expect(releaseWorkItemClaimMock).not.toHaveBeenCalled();
   });
 
@@ -180,7 +187,7 @@ describe('handleTelegramCallbackQuery suggestion launch lifecycle', () => {
     );
   });
 
-  it('does not cancel anything when finalize succeeds', async () => {
+  it('does not cancel or post a corrective reply when finalize succeeds', async () => {
     startNewTelegramTaskMock.mockResolvedValue({
       status: 'started',
       launchResult: { id: 7, taskId: 'task-1' },
@@ -189,6 +196,11 @@ describe('handleTelegramCallbackQuery suggestion launch lifecycle', () => {
     await handleTelegramCallbackQuery(buildSuggestionQuery());
 
     expect(cancelOrphanedWorkItemRunBestEffortMock).not.toHaveBeenCalled();
+    expect(postTelegramMessageBestEffortMock).not.toHaveBeenCalledWith(
+      expect.objectContaining({
+        text: expect.stringContaining('was already started elsewhere'),
+      }),
+    );
   });
 
   it('releases the claim with the token when routing replies inline (no task launched)', async () => {

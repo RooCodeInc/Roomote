@@ -508,7 +508,15 @@ async function launchTaskSuggestionTaskFromReaction({
       apiLogger.warn(
         `${logPrefix} finalize lost the fencing guard for work item ${workItemId}; task ${cloudJob.taskId ?? 'null'} (run ${cloudJob.id ?? 'null'}) was orphaned — ${cancelNote}`,
       );
-      return false;
+
+      // Mirror the claim-lose path: this duplicate must leave no user-visible
+      // trace. Never post the started message for the canceled orphan, and
+      // remove the seeded root message so no dangling thread points at it;
+      // the winning launcher owns the visible lifecycle.
+      await slack
+        .deleteMessage({ channel: channelId, ts: seededThreadTs })
+        .catch(() => {});
+      return true;
     }
 
     await postTaskSuggestionStartedMessage({
@@ -561,6 +569,18 @@ async function launchTaskSuggestionTaskFromReaction({
         apiLogger.warn(
           `${logPrefix} finalize lost the fencing guard during post-enqueue recovery for work item ${workItemId}; task ${cloudJob.taskId ?? 'null'} (run ${cloudJob.id ?? 'null'}) was orphaned — ${cancelNote}`,
         );
+
+        // Mirror the claim-lose path: never post the started message for the
+        // canceled orphan, and remove the seeded root message so no dangling
+        // thread points at it; the winning launcher owns the visible
+        // lifecycle.
+        if (seededThreadTs) {
+          await slack
+            .deleteMessage({ channel: channelId, ts: seededThreadTs })
+            .catch(() => {});
+        }
+
+        return true;
       }
 
       apiLogger.debug(

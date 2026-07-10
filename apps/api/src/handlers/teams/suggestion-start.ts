@@ -213,6 +213,12 @@ type TeamsSuggestionLaunchOutcome =
 type LaunchClaimedTeamsSuggestionResult =
   | { result: 'started'; cloudJobId: number }
   | { result: 'replied_inline' }
+  /**
+   * The fenced finalize lost to a reclaim after the task was enqueued: the
+   * orphaned run was best-effort canceled and the user got a corrective
+   * reply. Matches the claim-CAS-lose outcome — never reported as started.
+   */
+  | { result: 'already_started' }
   | { result: 'launch_failed' };
 
 /**
@@ -262,6 +268,15 @@ export async function launchClaimedTeamsSuggestion(params: {
         apiLogger.warn(
           `[teams] finalize lost the fencing guard for work item ${suggestion.id}; task ${launch.launchResult.taskId} (run ${launch.launchResult.id}) was orphaned — ${cancelNote}`,
         );
+
+        // startNewTeamsTask already posted its started acknowledgement before
+        // the finalize, so correct it: the user must not follow the canceled
+        // orphan. Surface the claim-lose outcome instead of a started one.
+        await params.postMessage(
+          `"${suggestion.title}" was already started elsewhere — this duplicate launch was canceled.`,
+        );
+
+        return { result: 'already_started' };
       }
 
       return { result: 'started', cloudJobId: launch.launchResult.id };

@@ -156,6 +156,12 @@ export async function implementTaskSuggestionCommand(
       console.warn(
         `[implementTaskSuggestion] finalize lost the fencing guard for work item ${input.suggestionId}; task ${launchResult.taskId} (run ${launchResult.id}) was orphaned — ${cancelNote}.`,
       );
+
+      // Never report the canceled orphan as a successful launch. Surface the
+      // same outcome as the claim-lose path (the winning launcher owns the
+      // real task); the catch-block release is fenced on our stale token, so
+      // it cannot touch the winner's claim.
+      throw new Error('This suggestion has already been implemented.');
     }
 
     return {

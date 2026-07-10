@@ -243,6 +243,18 @@ async function handleSuggestionLaunchCallback(params: {
         apiLogger.warn(
           `[telegram] finalize lost the fencing guard for work item ${params.suggestionId}; task ${started.launchResult.taskId} (run ${started.launchResult.id}) was orphaned — ${cancelNote}`,
         );
+
+        // The callback was already answered "Starting: ..." and the launch
+        // path already posted a started message pointing at the orphan, so
+        // post a corrective reply: the user must follow the winning launch,
+        // not the canceled duplicate. (Deferring the started post until after
+        // finalize would change startNewTelegramTask's contract for its other
+        // callers, so correct instead.)
+        await postTelegramMessageBestEffort({
+          chatId,
+          replyToMessageId: messageId,
+          text: `"${suggestion.title}" was already started elsewhere — this duplicate task was canceled.`,
+        });
       }
     } else {
       // No task was launched: routing answered inline (`replied_inline`), or —

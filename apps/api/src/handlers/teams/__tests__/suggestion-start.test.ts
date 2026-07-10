@@ -134,20 +134,22 @@ describe('launchClaimedTeamsSuggestion', () => {
     expect(releaseWorkItemClaimMock).not.toHaveBeenCalled();
   });
 
-  it('best-effort cancels the orphaned run and logs loudly when finalize loses the fencing guard', async () => {
+  it('cancels the orphaned run, replies correctively, and returns already_started when finalize loses the fencing guard', async () => {
     finalizeWorkItemLaunchedMock.mockResolvedValue(false);
     const launchTask = vi.fn().mockResolvedValue({
       status: 'started',
       launchResult: { id: 7, taskId: 'task-1' },
     });
+    const postMessage = vi.fn();
 
     const outcome = await launchClaimedTeamsSuggestion({
       suggestion: buildClaimedSuggestion(),
       launchTask,
-      postMessage: vi.fn(),
+      postMessage,
     });
 
-    expect(outcome).toEqual({ result: 'started', cloudJobId: 7 });
+    // Never reported as started: the caller surfaces the claim-lose outcome.
+    expect(outcome).toEqual({ result: 'already_started' });
     expect(cancelOrphanedWorkItemRunBestEffortMock).toHaveBeenCalledWith(7);
     expect(apiLoggerMock.warn).toHaveBeenCalledWith(
       expect.stringContaining('work-item-1'),
@@ -157,6 +159,11 @@ describe('launchClaimedTeamsSuggestion', () => {
     );
     expect(apiLoggerMock.warn).toHaveBeenCalledWith(
       expect.stringContaining('orphaned run canceled'),
+    );
+    // The launch path already posted a started acknowledgement before the
+    // finalize, so the user gets a corrective follow-up.
+    expect(postMessage).toHaveBeenCalledWith(
+      expect.stringContaining('was already started elsewhere'),
     );
     expect(releaseWorkItemClaimMock).not.toHaveBeenCalled();
   });
@@ -186,19 +193,21 @@ describe('launchClaimedTeamsSuggestion', () => {
     );
   });
 
-  it('does not cancel anything when finalize succeeds', async () => {
+  it('does not cancel or post a corrective reply when finalize succeeds', async () => {
     const launchTask = vi.fn().mockResolvedValue({
       status: 'started',
       launchResult: { id: 7, taskId: 'task-1' },
     });
+    const postMessage = vi.fn();
 
     await launchClaimedTeamsSuggestion({
       suggestion: buildClaimedSuggestion(),
       launchTask,
-      postMessage: vi.fn(),
+      postMessage,
     });
 
     expect(cancelOrphanedWorkItemRunBestEffortMock).not.toHaveBeenCalled();
+    expect(postMessage).not.toHaveBeenCalled();
   });
 
   it('releases the claim with the token when routing replies inline (no task launched)', async () => {
