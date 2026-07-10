@@ -126,6 +126,7 @@ describe('buildPrReviewActivityNotificationInput', () => {
       repository: 'owner/repo',
       prNumber: 42,
       prUrl: 'https://github.com/owner/repo/pull/42',
+      sourceControlProvider: 'github',
       event: {
         kind: 'review',
         authorLogin: 'alice',
@@ -176,6 +177,7 @@ describe('buildPrReviewActivityNotificationInput', () => {
       repository: 'owner/repo',
       prNumber: 42,
       prUrl: 'https://github.com/owner/repo/pull/42',
+      sourceControlProvider: 'github',
       event: {
         kind: 'review_comment',
         authorLogin: 'bob',
@@ -240,6 +242,7 @@ describe('queuePrReviewActivityNotification', () => {
       repository: 'owner/repo',
       prNumber: 42,
       prUrl: 'https://github.com/owner/repo/pull/42',
+      sourceControlProvider: 'github',
       event: {
         kind: 'review',
         authorLogin: 'alice',
@@ -324,6 +327,7 @@ describe('buildPrReviewSummaryNotification', () => {
       repository: 'owner/repo',
       prNumber: 42,
       prUrl: 'https://github.com/owner/repo/pull/42',
+      sourceControlProvider: 'github',
       event: {
         kind: 'review_summary',
         authorLogin: 'roomote[bot]',

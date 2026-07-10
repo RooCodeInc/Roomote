@@ -12,8 +12,11 @@ import type { TaskRun } from '@roomote/db/server';
 import { setLatestSlackBotReply, trackSlackBotReply } from '@roomote/slack';
 import {
   ACP_ENVELOPE_EVENT_TYPES,
+  getSourceControlProviderLabel,
+  normalizeSourceControlProvider,
   PR_REVIEW_NOTIFICATION_TASK_MESSAGE_SOURCE,
   ROOMOTE_RUNTIME_TASK_MESSAGE_PROTOCOL,
+  type SourceControlProvider,
 } from '@roomote/types';
 import { z } from 'zod';
 
@@ -52,8 +55,9 @@ export type PreparedPrReviewNotification =
   | { post: false; reason: 'no_conversation_route' | 'not_worth_notifying' };
 
 const PR_REVIEW_TRIAGE_SYSTEM_PROMPT = `
-You triage GitHub pull-request review activity for a chat message sent to the
-PR author's conversation thread. The message is written in the voice of the
+You triage pull-request review activity from a source-control platform
+(GitHub, GitLab, Gitea, or Azure DevOps) for a chat message sent to the PR
+author's conversation thread. The message is written in the voice of the
 coding agent that owns that conversation. You receive a raw list of review
 events, optionally followed by the current state of the pull request, and
 must decide whether the activity is worth notifying the user about, and if
@@ -107,9 +111,12 @@ any feedback. Rules:
 - only link URLs provided in the input, never invent URLs, and do not paste
   bare URLs
 - events marked "(this is your own review)" are feedback you wrote yourself:
-  state it in the first person, for example "I reviewed the changes and
-  flagged two issues"; never describe your own feedback in the third person
-  or by the bot's login
+  state it in the first person and name the source-control platform from the
+  input so people can tell where the review happened, for example "I reviewed
+  [owner/repo#42](pull request URL) on GitHub and flagged two issues" or "I
+  reviewed [owner/repo#42](pull request URL) on GitLab and found no code
+  issues"; never describe your own feedback in the third person or by the
+  bot's login, and do not omit the platform name on these self-review messages
 - never use the phrase "review summary"; state the actual feedback instead
 - apart from inline links, plain text only: no bold, no bullet points, no
   headers
@@ -287,6 +294,7 @@ export async function triagePrReviewActivity({
   prUrl,
   events,
   context,
+  sourceControlProvider,
 }: {
   taskId: string;
   repository: string;
@@ -294,11 +302,16 @@ export async function triagePrReviewActivity({
   prUrl: string;
   events: PrReviewActivityEvent[];
   context?: PrReviewTriageContext;
+  sourceControlProvider?: SourceControlProvider;
 }): Promise<PrReviewTriageDecision> {
   const containsSelfReviewResult = events.some(
     (event) => event.kind === 'review_summary',
   );
+  const providerLabel = getSourceControlProviderLabel(
+    normalizeSourceControlProvider(sourceControlProvider),
+  );
   const prompt = [
+    `Source control provider: ${providerLabel}`,
     `Repository: ${repository}`,
     `Pull request: #${prNumber}`,
     `Pull request URL: ${prUrl}`,
@@ -361,6 +374,7 @@ export async function preparePrReviewNotificationDelivery({
     prUrl: request.prUrl,
     events,
     context,
+    sourceControlProvider: request.sourceControlProvider,
   });
 
   if (!triage.post) {

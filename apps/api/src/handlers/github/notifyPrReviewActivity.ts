@@ -54,6 +54,7 @@ export function buildPrReviewActivityNotificationInput(
     repository: eventPayload.repository.full_name,
     prNumber: eventPayload.pull_request.number,
     prUrl: eventPayload.pull_request.html_url,
+    sourceControlProvider: 'github' as const,
   };
 
   if ('review' in eventPayload) {
@@ -206,6 +207,7 @@ export function buildPrReviewSummaryNotification(
       prNumber: eventPayload.issue.number,
       prUrl:
         eventPayload.issue.pull_request.html_url ?? eventPayload.issue.html_url,
+      sourceControlProvider: 'github',
       event: {
         kind: 'review_summary',
         authorLogin,
