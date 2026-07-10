@@ -3,7 +3,6 @@ import crypto from 'node:crypto';
 import { Hono } from 'hono';
 
 import {
-  AGENT_DISPLAY_NAME,
   type TaskPayload,
   TaskPayloadKind,
   formatErrorForLog,
@@ -173,7 +172,6 @@ function getLinearTaskDescription(payload: AgentSessionEventPayload): string {
 
 function postLinearFinalRouterDebug({
   payload,
-  selectedAgent,
   selectedWorkspace,
   reasoning,
   routingDebug,
@@ -181,7 +179,6 @@ function postLinearFinalRouterDebug({
   userRoute,
 }: {
   payload: AgentSessionEventPayload;
-  selectedAgent: { name: string; type: string };
   selectedWorkspace: { name: string; type: string };
   reasoning?: string;
   routingDebug?: RoutingDebugInfo;
@@ -191,7 +188,6 @@ function postLinearFinalRouterDebug({
   void postRouterDebugMessage({
     source: formatLinearRouterDebugSource(payload),
     taskDescription: getLinearTaskDescription(payload),
-    selectedAgent,
     selectedWorkspace,
     reasoning: reasoning ?? '',
     routingDebug,
@@ -201,8 +197,6 @@ function postLinearFinalRouterDebug({
 }
 
 interface RoutedLinearTask {
-  agentName: string;
-  agentType: string;
   workspaceSelection: WorkspaceSelection;
   workspaceDisplayName: string;
   workspaceType: 'environment' | 'all_repositories';
@@ -256,10 +250,6 @@ async function startLinearTask({
 
   postLinearFinalRouterDebug({
     payload,
-    selectedAgent: {
-      name: routedTask.agentName,
-      type: routedTask.agentType,
-    },
     selectedWorkspace: {
       name: routedTask.workspaceDisplayName,
       type: routedTask.workspaceType,
@@ -676,8 +666,7 @@ async function handleAgentSessionEvent(
           originalPayload.agentSession,
         );
 
-        // Create the task run with the delegated Generalist path and the
-        // selected workspace.
+        // Create the standard task run with the selected workspace.
         const elicitationWorkspace = mapElicitationWorkspaceToSelection(
           elicitationResult.workspaceType,
           elicitationResult.repo,
@@ -967,12 +956,10 @@ async function handleAgentSessionEvent(
 
       console.log(
         `[LinearWebhook] LLM routing decision: ` +
-          `agentType=${result.agentType}, ` +
           `workspace=${result.workspace.type}${result.workspace.type === 'environment' ? `(${result.workspace.name})` : ''}, ` +
           `reasoning="${result.reasoning}"`,
       );
 
-      const agentName = AGENT_DISPLAY_NAME;
       const ws = mapWorkspaceToSelection(result.workspace);
 
       const wsDesc =
@@ -988,8 +975,6 @@ async function handleAgentSessionEvent(
         payload,
         userId,
         routedTask: {
-          agentName,
-          agentType: agentName,
           workspaceSelection: ws,
           workspaceDisplayName: wsDesc,
           workspaceType: deriveWorkspaceType(ws),

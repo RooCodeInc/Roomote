@@ -85,7 +85,7 @@ export function buildContextPrompt(
     const prev = context.previousSuggestion;
     const workspaceDesc =
       prev.workspaceDisplayName || prev.workspaceValue || 'previous workspace';
-    prompt += `**Previous Suggestion**: ${prev.agentType} working on ${workspaceDesc}\n`;
+    prompt += `**Previous Workspace Suggestion**: ${workspaceDesc}\n`;
     prompt += '_The user is correcting the workspace suggestion._\n\n';
   }
 
@@ -95,13 +95,6 @@ export function buildContextPrompt(
 Prefer a specific environment when one is a plausible home for the work.
 
 `;
-
-  if (context.availableAgents.length > 0) {
-    prompt += `**Available Agents**:\n`;
-    for (const agent of context.availableAgents) {
-      prompt += `- ${agent.type} [id: ${agent.id}]\n`;
-    }
-  }
 
   prompt += `\n**Available Environments**:\n`;
   for (const env of context.availableEnvironments) {

@@ -105,7 +105,7 @@ export async function generatePrompt({
   const prAction = await getDeploymentPrAction().catch(() => undefined);
 
   switch (taskSpec.type) {
-    // <Agent: PR Reviewer, Trigger: GitHub>
+    // <Workflow: PR review, Trigger: GitHub>
     case TaskPayloadKind.GithubPrReview:
       return githubPrReview({
         taskSpec,
@@ -126,7 +126,7 @@ export async function generatePrompt({
         backgroundProofCaptureEnabled,
       });
 
-    // <Agent: PR Reviewer follow-up, Trigger: GitHub>
+    // <Workflow: PR review follow-up, Trigger: GitHub>
     case TaskPayloadKind.GithubPrReviewFollowUp:
       return githubPrReviewFollowUp({
         taskSpec,
@@ -137,7 +137,7 @@ export async function generatePrompt({
         backgroundProofCaptureEnabled,
       });
 
-    // <Agent: Fixer, Trigger: GitHub (conflict resolution)>
+    // <Workflow: PR conflict resolution, Trigger: GitHub>
     case TaskPayloadKind.GithubPrConflictResolve:
       return githubPrConflictResolve({
         taskSpec,
@@ -147,7 +147,7 @@ export async function generatePrompt({
         backgroundProofCaptureEnabled,
       });
 
-    // <Agent: Generalist, Trigger: Slack>
+    // <Workflow: standard, Trigger: Slack>
     case TaskPayloadKind.SlackAppMention: {
       return slackAppMention({
         taskSpec,
@@ -161,7 +161,7 @@ export async function generatePrompt({
       });
     }
 
-    // <Agent: Generalist, Trigger: Linear>
+    // <Workflow: standard, Trigger: Linear>
     case TaskPayloadKind.LinearAgentSession:
       return linearAgentSession({
         taskSpec,
@@ -174,7 +174,7 @@ export async function generatePrompt({
         prAction,
       });
 
-    // <Agent: Generalist, Trigger: Manual>
+    // <Workflow: standard, Trigger: Manual>
     case TaskPayloadKind.StandardTask:
     case TaskPayloadKind.Scan:
     case TaskPayloadKind.McpRecommendations: {

@@ -1,7 +1,7 @@
 import { Hono } from 'hono';
 import { createHmac } from 'node:crypto';
 
-import { ALL_REPOSITORIES, CloudAgentType } from '@roomote/types';
+import { ALL_REPOSITORIES } from '@roomote/types';
 
 const {
   redisMock,
@@ -264,7 +264,6 @@ describe('linear routed task startup', () => {
         issueIdentifier: 'ENG-123',
         issueTitle: 'Review this PR',
       },
-      availableAgents: [],
       availableEnvironments: [],
     } as never);
   });
@@ -273,7 +272,6 @@ describe('linear routed task startup', () => {
     vi.mocked(routeTask).mockResolvedValue({
       status: 'routed',
       result: {
-        agentType: CloudAgentType.PrReviewer,
         workspace: { type: 'all_repositories' },
         reasoning: 'Best fit for review work',
       },

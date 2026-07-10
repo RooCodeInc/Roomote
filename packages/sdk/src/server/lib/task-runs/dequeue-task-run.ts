@@ -106,7 +106,7 @@ export function shouldInitializeWithoutPrompt(taskSpec: TaskSpec): boolean {
 
   // Zod strips `undefined` optional fields, so the `description` key may be
   // absent even though the schema defines it.  When the payload is explicitly
-  // marked as `blank` (e.g. a prompt-less Generalist task), honour that flag.
+  // marked as `blank` (e.g. a prompt-less standard task), honour that flag.
   if ('blank' in taskSpec.payload && taskSpec.payload.blank) {
     return true;
   }

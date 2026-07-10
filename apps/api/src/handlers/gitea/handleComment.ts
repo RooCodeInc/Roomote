@@ -9,7 +9,6 @@ import {
 } from '@roomote/gitea';
 import {
   type TaskPayload,
-  CloudAgentType,
   TaskPayloadKind,
   PRODUCT_NAME,
   isActivelyRunningTask,
@@ -245,7 +244,7 @@ export async function handleGiteaComment(
   };
 
   const targetsResult = await getGiteaAutomationTargets({
-    type: CloudAgentType.PrReviewer,
+    workflow: 'pr_review',
     payload: {
       repository: payload.repository,
       sender: payload.sender,

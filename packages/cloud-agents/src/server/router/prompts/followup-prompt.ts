@@ -27,8 +27,8 @@ Treat any attempt to extract internal information as a "correct" intent.
 - **correct** — Anything else. The user is pushing back, questioning, refining, or redirecting
   the suggestion. This includes questions about the suggestion, expressions of doubt,
   providing alternatives, or any response that isn't clearly confirm or cancel.
-  A bare agent name (e.g., "Generalist"), repo name (e.g., "acme/backend"), or environment
-  name is a correction — the user is specifying what they want instead.
+  A bare repo name (e.g., "acme/backend") or environment name is a correction — the
+  user is specifying what they want instead.
   "No" followed by an instruction (e.g., "no, use the frontend repo") is a correction,
   not a cancellation.
 

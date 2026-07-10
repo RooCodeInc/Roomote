@@ -336,8 +336,6 @@ export async function githubPrReview({
       payloadLinkedTaskRelayLookupPending,
     });
 
-  const agentType = 'PR Reviewer';
-
   const params: GitHubCli.FetchParams = { gitHubToken, repo: fullName };
   const prParams: GitHubCli.FetchPrParams = { ...params, prNumber };
 
@@ -435,7 +433,7 @@ export async function githubPrReview({
     taskContext: {
       repository: fullName,
       pull_request_number: prNumber,
-      agent_type: agentType,
+      workflow: 'pr_review',
       pull_request_base_sha: pr.baseRefOid,
       current_head_sha: pr.headRefOid,
       top_level_comment_id: topLevelCommentId,

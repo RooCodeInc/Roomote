@@ -18,7 +18,6 @@ export interface RouterDebugParams {
   source: string;
   sourceLink?: string;
   taskDescription: string;
-  selectedAgent: { name: string; type: string };
   selectedWorkspace: { name: string; type: string };
   reasoning: string;
   routingDurationMs?: number;

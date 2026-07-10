@@ -1,6 +1,6 @@
 import {
-  DEFAULT_PR_REVIEWER_SETTINGS,
-  type PrReviewerSettings,
+  DEFAULT_PR_REVIEW_SETTINGS,
+  type PrReviewSettings,
 } from '@roomote/types';
 import { getReviewCodeAutomationSettings } from '@roomote/db/server';
 
@@ -31,7 +31,7 @@ export async function getReviewTaskRelayPayload({
   prNumber: number;
   branchName: string;
   prBody?: string | null;
-  reviewerSettings?: PrReviewerSettings | null;
+  reviewerSettings?: PrReviewSettings | null;
 }): Promise<{
   relayReviewResultsToTask?: boolean;
   linkedTaskId?: string;
@@ -41,7 +41,7 @@ export async function getReviewTaskRelayPayload({
     reviewerSettings ?? (await getReviewCodeAutomationSettings());
   const relayRequested =
     settings.relayReviewResultsToTask ??
-    DEFAULT_PR_REVIEWER_SETTINGS.relayReviewResultsToTask;
+    DEFAULT_PR_REVIEW_SETTINGS.relayReviewResultsToTask;
 
   if (!relayRequested) {
     return { relayReviewResultsToTask: false };

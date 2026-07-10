@@ -13,7 +13,6 @@ import { getInstallationOctokit } from '@roomote/github';
 import { ensureSnapshotResumeGitHubFollowUpFallback } from '@roomote/sdk/server';
 import {
   type TaskPayload,
-  CloudAgentType,
   RunStatus,
   TaskPayloadKind,
   EXPIRED_SNAPSHOT_RESUME_ERROR,
@@ -1163,7 +1162,7 @@ export async function handlePrComment(
   }
 
   const reviewerGate = await getGitHubAutomationTargets({
-    type: CloudAgentType.PrReviewer,
+    workflow: 'pr_review',
     installation,
     repository,
     sender,
@@ -1219,7 +1218,6 @@ export async function handlePrComment(
     issueOrPrTitle: pr.title,
     issueOrPrBody: pr.body ?? undefined,
     commentBody: mention.body ?? '',
-    availableAgents: [],
   });
 
   const routingDecision = await routeGitHubTask(routingContext);

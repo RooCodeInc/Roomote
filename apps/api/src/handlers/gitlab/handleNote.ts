@@ -9,7 +9,6 @@ import {
 } from '@roomote/gitlab';
 import {
   type TaskPayload,
-  CloudAgentType,
   TaskPayloadKind,
   PRODUCT_NAME,
   isActivelyRunningTask,
@@ -243,7 +242,7 @@ export async function handleGitLabNote(
   };
 
   const targetsResult = await getGitLabAutomationTargets({
-    type: CloudAgentType.PrReviewer,
+    workflow: 'pr_review',
     payload,
     ignoreAuthorPolicy: true,
     requireLinkedSenderAccount: true,

@@ -434,7 +434,7 @@ export async function conflictScanJob(
 
 /**
  * Post a notification comment on a PR indicating merge conflicts were detected.
- * Used as a fallback when no Fixer agent is available or enqueue fails.
+ * Used as a fallback when conflict-resolution work cannot be enqueued.
  */
 async function postNotificationComment(
   octokit: Awaited<ReturnType<typeof getInstallationOctokit>>,

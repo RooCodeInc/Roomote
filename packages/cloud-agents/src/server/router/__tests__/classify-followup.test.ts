@@ -16,7 +16,6 @@ import { classifyFollowUp } from '../router-service';
 
 describe('classifyFollowUp', () => {
   const baseParams = {
-    suggestedAgentName: 'Agent',
     suggestedWorkspace: 'acme/frontend',
   };
 
@@ -30,7 +29,6 @@ describe('classifyFollowUp', () => {
     } as never);
 
     await classifyFollowUp({
-      suggestedAgentName: 'Agent',
       suggestedWorkspace: 'all repos',
       userResponse: 'yes',
     });
@@ -42,7 +40,7 @@ describe('classifyFollowUp', () => {
     };
     expect(call.surface).toBe('router_followup_classification');
     expect(call.system).toContain('routing assistant');
-    expect(call.prompt).toContain('Agent');
+    expect(call.prompt).toContain('Workspace Suggestion');
     expect(call.prompt).toContain('all repos');
     expect(call.prompt).toContain('yes');
   });

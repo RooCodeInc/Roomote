@@ -57,7 +57,7 @@ vi.mock('@/components/sandbox', () => ({
 import { StartupSequence } from './StartupMessage';
 
 describe('StartupSequence', () => {
-  it('uses generic spawning startup copy for Generalist', () => {
+  it('uses generic spawning startup copy', () => {
     render(
       <StartupSequence
         steps={[{ status: RunStatus.Spawning, completed: false }]}
