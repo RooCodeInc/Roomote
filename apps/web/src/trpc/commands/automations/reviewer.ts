@@ -8,7 +8,7 @@ import {
   db,
   getReviewCodeAutomationSettings,
   isNull,
-  upsertBackgroundAutomation,
+  upsertAutomation,
   users,
 } from '@roomote/db/server';
 
@@ -158,8 +158,8 @@ export async function clearReviewerRelayStateForDeployment(): Promise<void> {
   const currentSettings = await getReviewCodeAutomationSettings();
 
   await db.transaction(async (tx) => {
-    await upsertBackgroundAutomation(tx, {
-      automationKey: 'review_code',
+    await upsertAutomation(tx, {
+      key: 'review_code',
       enabled: currentSettings.enabled ?? DEFAULT_PR_REVIEWER_SETTINGS.enabled,
       settings: {
         ...currentSettings,
@@ -175,8 +175,8 @@ export async function ensureManagedReviewerEnabledByDefaultInTx(
   auth: UserAuthSuccess,
 ): Promise<void> {
   assertAdmin(auth);
-  await upsertBackgroundAutomation(tx, {
-    automationKey: 'review_code',
+  await upsertAutomation(tx, {
+    key: 'review_code',
     enabled: true,
     settings: {
       ...DEFAULT_PR_REVIEWER_SETTINGS,

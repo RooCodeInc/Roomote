@@ -1,7 +1,7 @@
 'use client';
 
 import { useMemo } from 'react';
-import type { CloudJob } from '@roomote/db';
+import type { Run } from '@roomote/db';
 
 import { AppWindow } from '@/components/system';
 import { useRegisterCommands } from '@/components/layout';
@@ -11,7 +11,7 @@ import { usePreviewPane } from './hooks/use-preview-pane';
 import { resolvePreviewTarget, usePreviewUrls } from './hooks/use-preview-urls';
 
 interface PreviewCommandProps {
-  cloudJob: CloudJob | null;
+  cloudJob: Run | null;
   asleep: boolean;
 }
 

@@ -1,10 +1,10 @@
 import {
-  cloudJobs,
   db,
   environments,
   eq,
   resolveEffectivePreviewRuntimeConfig,
   taskPullRequests,
+  taskRuns,
 } from '@roomote/db/server';
 import { Env } from '@roomote/env';
 import type { PullRequestStatus } from '@roomote/types';
@@ -104,12 +104,12 @@ export async function resolveThreadReplyLivePreviewUrl(
     return null;
   }
 
-  const cloudJob = await db.query.cloudJobs.findFirst({
+  const cloudJob = await db.query.taskRuns.findFirst({
     columns: {
       payload: true,
       primaryPortName: true,
     },
-    where: eq(cloudJobs.taskId, taskId),
+    where: eq(taskRuns.taskId, taskId),
     orderBy: (table, { desc }) => [desc(table.createdAt)],
   });
 

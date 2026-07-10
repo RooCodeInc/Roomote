@@ -57,7 +57,7 @@ vi.mock('@roomote/db/server', () => ({
     select: selectMock,
   },
   sql: sqlTagMock,
-  cloudJobs: {
+  taskRuns: {
     id: 'id',
     createdAt: 'createdAt',
     dequeuedAt: 'dequeuedAt',

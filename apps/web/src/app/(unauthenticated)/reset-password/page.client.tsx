@@ -11,12 +11,6 @@ import {
   AlertDescription,
   ArrowRight,
   Button,
-  Card,
-  CardContent,
-  CardDescription,
-  CardFooter,
-  CardHeader,
-  CardTitle,
   Input,
   Label,
   Spinner,
@@ -86,25 +80,34 @@ export function ResetPasswordPageClient() {
   };
 
   return (
-    <main className="flex w-full items-center justify-center">
-      <Card className="w-full max-w-md">
-        <CardHeader className="text-center">
-          <CardTitle>Reset password</CardTitle>
-          <CardDescription>
-            Choose a new password for your Roomote account.
-          </CardDescription>
-        </CardHeader>
-        <CardContent>
+    <main className="flex w-full">
+      <div className="relative w-full max-w-2xl space-y-6 py-2 text-left md:py-0">
+        <h1 className="relative text-3xl font-bold tracking-tighter">
+          <span className="relative flex items-center gap-3">
+            Reset password
+          </span>
+        </h1>
+        <div className="max-w-xl space-y-4">
+          <p>Choose a new password for your Roomote account.</p>
+
           {isInvalidToken ? (
-            <Alert variant="destructive">
-              <AlertCircle />
-              <AlertDescription>
-                This reset link is invalid or expired. Ask an admin to create a
-                new password reset link.
-              </AlertDescription>
-            </Alert>
+            <div className="max-w-sm space-y-3">
+              <Alert variant="destructive">
+                <AlertCircle />
+                <AlertDescription>
+                  This reset link is invalid or expired. Ask an admin to create
+                  a new password reset link.
+                </AlertDescription>
+              </Alert>
+              <Button asChild variant="outline" className="w-full">
+                <Link href="/sign-in">Back to sign in</Link>
+              </Button>
+            </div>
           ) : (
-            <form className="space-y-3 mx-auto w-80" onSubmit={handleSubmit}>
+            <form
+              className="max-w-sm space-y-3 text-left"
+              onSubmit={handleSubmit}
+            >
               {errorMessage ? (
                 <Alert variant="destructive">
                   <AlertCircle />
@@ -149,15 +152,8 @@ export function ResetPasswordPageClient() {
               </Button>
             </form>
           )}
-        </CardContent>
-        {isInvalidToken ? (
-          <CardFooter align="center">
-            <Button asChild variant="outline">
-              <Link href="/sign-in">Back to sign in</Link>
-            </Button>
-          </CardFooter>
-        ) : null}
-      </Card>
+        </div>
+      </div>
     </main>
   );
 }

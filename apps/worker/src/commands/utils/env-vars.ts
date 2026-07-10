@@ -10,7 +10,7 @@ import {
   PRODUCT_NAME,
   type SourceControlTokenMetadata,
 } from '@roomote/types';
-import { type CloudJob } from '@roomote/sdk/client';
+import { type Run } from '@roomote/sdk/client';
 
 import {
   applySourceControlTokenMetadata,
@@ -147,7 +147,7 @@ interface PreviewIdentity {
   proxyPorts: Record<string, number>;
 }
 
-function resolvePreviewIdentity(cloudJob?: CloudJob): PreviewIdentity | null {
+function resolvePreviewIdentity(cloudJob?: Run): PreviewIdentity | null {
   if (cloudJob?.taskId && cloudJob.machineDomains) {
     return {
       taskId: cloudJob.taskId,
@@ -180,7 +180,7 @@ function resolvePreviewIdentity(cloudJob?: CloudJob): PreviewIdentity | null {
  */
 export async function injectEnvVars(
   envVars: Record<string, string>,
-  cloudJob?: CloudJob,
+  cloudJob?: Run,
   options?: {
     previewProxyBaseUrl?: string;
     previewProxySubdomainSuffix?: string;

@@ -37,7 +37,12 @@ export const userApiKeysRouter = router({
 
   /**
    * Returns the decrypted API key for the given provider and current user.
-   * Accessible from worker via job token (userId is embedded in the token).
+   * Accessible from worker via a run-scoped job token; the effective user is
+   * the run's live acting user (falling back to the token's mint-time user).
+   *
+   * The run's acting user is server-controlled: `cloudJobs.update` refuses to
+   * let a job token reassign `task_runs.actingUserId`, so a compromised
+   * sandbox cannot pivot this lookup to another user's key.
    */
   getDecryptedKey: authenticatedProcedure
     .input(z.object({ provider: z.string() }))

@@ -43,7 +43,7 @@ export async function buildThreadReplyImages(params: {
     columns: {
       id: true,
       taskId: true,
-      cloudJobId: true,
+      runId: true,
       contentType: true,
       uploaded: true,
       path: true,
@@ -68,10 +68,7 @@ export async function buildThreadReplyImages(params: {
       );
     }
 
-    if (
-      artifact.cloudJobId !== null &&
-      artifact.cloudJobId !== params.cloudJob.id
-    ) {
+    if (artifact.runId !== null && artifact.runId !== params.cloudJob.id) {
       throw new Error(
         `Artifact ${artifactId} does not belong to the current cloud job`,
       );

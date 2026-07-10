@@ -1,47 +1,76 @@
 import { Queue, QueueEvents, Worker, Job } from 'bullmq';
 
+import {
+  announcerJob,
+  codeQualityAuditorJob,
+  conflictScanJob,
+  dependabotTriageJob,
+  managerStatsJob,
+  securityAuditorJob,
+  sentryTriageJob,
+  suggesterJob,
+  type AutomationJobResult,
+  type AutomationRunOpts,
+} from '@roomote/sdk/server';
+
 import { getRedis } from './redis';
-import { ScheduledJobName } from './types';
+import {
+  ScheduledJobName,
+  type ScheduledAutomationJobName,
+  type SchedulerJobName,
+} from './types';
 import {
   heartbeatJob,
   sleepCheckJob,
   refreshSnapshotsJob,
-  conflictScanJob,
-  announcerJob,
-  suggesterJob,
-  managerStatsJob,
-  sentryTriageJob,
-  dependabotTriageJob,
-  securityAuditorJob,
-  codeQualityAuditorJob,
-  ciFailureTriageJob,
   pullRequestAnalyticsSyncJob,
   instancePingJob,
 } from './scheduled-jobs';
 
 const QUEUE_NAME = 'scheduled-jobs';
-const LEGACY_SNAPSHOT_CHECK_JOB_NAME = 'SnapshotCheck' as const;
-const LEGACY_QUEUE_CONSUMER_JOB_NAME = 'QueueConsumer' as const;
 
-interface ScheduledJobData {
-  manualTrigger?: boolean;
-  bullmqJobId?: string;
+// Scheduler names retired by the Stage 3 automations consolidation: legacy
+// CamelCase automation jobs (now named by automation key), the deleted Coach
+// automation, and pre-rename infra aliases. Removed once at startup.
+const RETIRED_JOB_SCHEDULER_NAMES = [
+  'SnapshotCheck',
+  'QueueConsumer',
+  'Coach',
+  'ConflictScan',
+  'Announcer',
+  'Suggester',
+  'ManagerStats',
+  'SentryTriage',
+  'DependabotTriage',
+  'SecurityAuditor',
+  'CodeQualityAuditor',
+  'CiFailureTriage',
+] as const;
+
+type ScheduledJob = Job<unknown, void, string>;
+
+const AUTOMATION_JOBS: Record<
+  ScheduledAutomationJobName,
+  (opts?: AutomationRunOpts) => Promise<AutomationJobResult>
+> = {
+  conflict_resolver: conflictScanJob,
+  suggester: suggesterJob,
+  announcer: announcerJob,
+  manager_stats: managerStatsJob,
+  sentry_triage: sentryTriageJob,
+  dependabot_triage: dependabotTriageJob,
+  security_auditor: securityAuditorJob,
+  code_quality_auditor: codeQualityAuditorJob,
+};
+
+function isAutomationJobName(name: string): name is ScheduledAutomationJobName {
+  return name in AUTOMATION_JOBS;
 }
 
-type ScheduledJobNameOrLegacy =
-  | ScheduledJobName
-  | typeof LEGACY_SNAPSHOT_CHECK_JOB_NAME
-  | typeof LEGACY_QUEUE_CONSUMER_JOB_NAME;
-
-type ScheduledJob = Job<
-  ScheduledJobData | undefined,
-  void,
-  ScheduledJobNameOrLegacy
->;
-
 async function createJobs(queue: Queue): Promise<void> {
-  await queue.removeJobScheduler(ScheduledJobName.Coach);
-  await queue.removeJobScheduler(LEGACY_QUEUE_CONSUMER_JOB_NAME);
+  for (const retiredName of RETIRED_JOB_SCHEDULER_NAMES) {
+    await queue.removeJobScheduler(retiredName);
+  }
 
   await queue.upsertJobScheduler(
     ScheduledJobName.Heartbeat,
@@ -58,43 +87,45 @@ async function createJobs(queue: Queue): Promise<void> {
     { every: 24 * 60 * 60 * 1000 }, // Every 24 hours.
   );
 
+  // Automation jobs tick hourly (manager_stats hourly on its posting days)
+  // and due-gate themselves against automations.enabled/schedule/lastRunAt.
   await queue.upsertJobScheduler(
-    ScheduledJobName.ConflictScan,
+    'conflict_resolver' satisfies ScheduledAutomationJobName,
     { every: 60 * 60 * 1000 }, // Every 60 minutes.
   );
 
   await queue.upsertJobScheduler(
-    ScheduledJobName.Announcer,
+    'announcer' satisfies ScheduledAutomationJobName,
     { every: 60 * 60 * 1000 }, // Every 60 minutes.
   );
 
   await queue.upsertJobScheduler(
-    ScheduledJobName.Suggester,
+    'suggester' satisfies ScheduledAutomationJobName,
     { every: 60 * 60 * 1000 }, // Every 60 minutes.
   );
 
   await queue.upsertJobScheduler(
-    ScheduledJobName.ManagerStats,
+    'manager_stats' satisfies ScheduledAutomationJobName,
     { pattern: '0 * * * 5,6' }, // Hourly on UTC Friday/Saturday.
   );
 
   await queue.upsertJobScheduler(
-    ScheduledJobName.SentryTriage,
+    'sentry_triage' satisfies ScheduledAutomationJobName,
     { every: 60 * 60 * 1000 }, // Every 60 minutes.
   );
 
   await queue.upsertJobScheduler(
-    ScheduledJobName.DependabotTriage,
+    'dependabot_triage' satisfies ScheduledAutomationJobName,
     { every: 60 * 60 * 1000 }, // Every 60 minutes.
   );
 
   await queue.upsertJobScheduler(
-    ScheduledJobName.SecurityAuditor,
+    'security_auditor' satisfies ScheduledAutomationJobName,
     { every: 60 * 60 * 1000 }, // Every 60 minutes.
   );
 
   await queue.upsertJobScheduler(
-    ScheduledJobName.CodeQualityAuditor,
+    'code_quality_auditor' satisfies ScheduledAutomationJobName,
     { every: 60 * 60 * 1000 }, // Every 60 minutes.
   );
 
@@ -115,55 +146,22 @@ async function createJobs(queue: Queue): Promise<void> {
 const runJobs = async (job: ScheduledJob): Promise<void> => {
   console.log(`[runJobs] processing job ${job.id} of type ${job.name}`);
 
-  const opts = job.data ?? {};
-  const jobOpts = {
-    ...opts,
-    bullmqJobId: job.id != null ? String(job.id) : undefined,
-  };
+  if (isAutomationJobName(job.name)) {
+    await AUTOMATION_JOBS[job.name]();
+    return;
+  }
 
   switch (job.name) {
     case ScheduledJobName.Heartbeat:
       return heartbeatJob();
     case ScheduledJobName.SleepCheck:
       return sleepCheckJob();
-    case LEGACY_SNAPSHOT_CHECK_JOB_NAME:
-      return sleepCheckJob();
     case ScheduledJobName.RefreshSnapshots:
       return refreshSnapshotsJob();
-    case ScheduledJobName.Coach:
-      console.log(
-        '[runJobs] skipping Coach job because the automation is disabled',
-      );
-      return;
-    case ScheduledJobName.ConflictScan:
-      return conflictScanJob(jobOpts);
-    case ScheduledJobName.Announcer:
-      return announcerJob(jobOpts);
-    case ScheduledJobName.Suggester:
-      return suggesterJob(jobOpts);
-    case ScheduledJobName.ManagerStats:
-      return managerStatsJob(jobOpts);
-    case ScheduledJobName.SentryTriage:
-      return sentryTriageJob(jobOpts);
-    case ScheduledJobName.DependabotTriage:
-      return dependabotTriageJob(jobOpts);
-    case ScheduledJobName.SecurityAuditor:
-      return securityAuditorJob(jobOpts);
-    case ScheduledJobName.CodeQualityAuditor:
-      return codeQualityAuditorJob(jobOpts);
-    case ScheduledJobName.CiFailureTriage:
-      // Webhook-driven automation: never registered with a scheduler, this
-      // job only serves manual Run-now triggers from the Automations page.
-      return ciFailureTriageJob(jobOpts);
     case ScheduledJobName.PullRequestAnalyticsSync:
-      return pullRequestAnalyticsSyncJob(opts);
+      return pullRequestAnalyticsSyncJob(job.data ?? {});
     case ScheduledJobName.InstancePing:
       return instancePingJob();
-    case LEGACY_QUEUE_CONSUMER_JOB_NAME:
-      console.log(
-        '[runJobs] skipping legacy QueueConsumer job because it has been removed',
-      );
-      return;
     default:
       throw new Error(`Unknown job type: ${job.name}`);
   }
@@ -172,27 +170,20 @@ const runJobs = async (job: ScheduledJob): Promise<void> => {
 export function startScheduler() {
   const connection = getRedis();
 
-  const queue = new Queue<ScheduledJobData | undefined, void, ScheduledJobName>(
-    QUEUE_NAME,
-    {
-      connection,
-      defaultJobOptions: {
-        attempts: 3,
-        backoff: { type: 'exponential', delay: 2000 },
-        // Keep completed jobs for 1 hour.
-        // Keep max 100 completed jobs.
-        removeOnComplete: { age: 3600, count: 100 },
-        // Keep failed jobs for 24 hours.
-        removeOnFail: { age: 24 * 3600 },
-      },
+  const queue = new Queue<unknown, void, SchedulerJobName>(QUEUE_NAME, {
+    connection,
+    defaultJobOptions: {
+      attempts: 3,
+      backoff: { type: 'exponential', delay: 2000 },
+      // Keep completed jobs for 1 hour.
+      // Keep max 100 completed jobs.
+      removeOnComplete: { age: 3600, count: 100 },
+      // Keep failed jobs for 24 hours.
+      removeOnFail: { age: 24 * 3600 },
     },
-  );
+  });
 
-  const worker = new Worker<
-    ScheduledJobData | undefined,
-    void,
-    ScheduledJobNameOrLegacy
-  >(QUEUE_NAME, runJobs, {
+  const worker = new Worker<unknown, void, string>(QUEUE_NAME, runJobs, {
     connection,
     concurrency: 5,
     autorun: true,

@@ -14,18 +14,18 @@ vi.mock('@roomote/sdk/client', () => ({
   },
 }));
 
-import { CloudTaskType } from '@roomote/types';
-import { type CloudJob, sdk } from '@roomote/sdk/client';
+import { TaskPayloadKind } from '@roomote/types';
+import { type Run, sdk } from '@roomote/sdk/client';
 
 import { linearAgentCallbacks } from '../linear-agent';
 
-function createCloudJob(): CloudJob {
+function createCloudJob(): Run {
   return {
     id: 123,
     taskId: 'task_123',
-    type: CloudTaskType.LinearAgentSession,
+    payloadKind: TaskPayloadKind.LinearAgentSession,
     payload: { sessionId: 'session_123' },
-  } as unknown as CloudJob;
+  } as unknown as Run;
 }
 
 describe('linearAgentCallbacks', () => {

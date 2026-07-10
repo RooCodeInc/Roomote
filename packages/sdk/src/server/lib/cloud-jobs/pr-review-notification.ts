@@ -1,16 +1,16 @@
 import { Queue } from 'bullmq';
 import { z } from 'zod';
 
-import type { CloudJob } from '@roomote/db/server';
+import type { Run } from '@roomote/db/server';
 import {
   and,
-  cloudJobs,
   db,
   eq,
   inArray,
   taskPullRequests,
+  taskRuns,
+  tasks,
 } from '@roomote/db/server';
-import { FeatureFlag } from '@roomote/feature-flags/server';
 import { getRedis } from '@roomote/redis';
 import {
   type CommunicationProvider,
@@ -21,7 +21,6 @@ import {
   sourceControlProviderSchema,
 } from '@roomote/types';
 
-import { resolveFeatureFlagForUser } from './resolve-feature-flag-for-user';
 import { resolveSlackJobRouting } from './slack-job-routing';
 
 export const PR_REVIEW_NOTIFICATION_QUEUE_NAME = 'pr-review-notification-jobs';
@@ -102,10 +101,7 @@ type EnqueuePrReviewNotificationResult = {
   reason?: string;
 };
 
-type PrReviewNotificationRoutingJob = Pick<
-  CloudJob,
-  'id' | 'payload' | 'slackThreadTs' | 'sourceCloudJobId'
->;
+type PrReviewNotificationRoutingJob = Pick<Run, 'id' | 'taskId' | 'payload'>;
 
 export type PrReviewNotificationRoute =
   | { provider: 'slack'; channelId: string; threadId: string }
@@ -169,12 +165,14 @@ function buildScheduledMarkerKey(target: {
 }
 
 /**
- * Returns whether the given cloud job carries originating-conversation
- * context for any supported communication provider.
+ * Returns whether the given run carries originating-conversation context for
+ * any supported communication provider. The Slack thread binding lives on the
+ * tasks row; callers pass it alongside the run payload.
  */
-export function hasPrReviewNotificationThreadContext(
-  job: Pick<CloudJob, 'payload' | 'slackThreadTs'>,
-): boolean {
+export function hasPrReviewNotificationThreadContext(job: {
+  payload: unknown;
+  slackThreadTs: string | null;
+}): boolean {
   if (job.slackThreadTs) {
     return true;
   }
@@ -371,32 +369,16 @@ export async function requeuePendingPrReviewActivity({
 }
 
 /**
- * Returns whether the experimental PR review-feedback notification flow is
- * enabled for this deployment.
- */
-export async function isPrReviewNotificationEnabled(
-  tag: string,
-): Promise<boolean> {
-  return resolveFeatureFlagForUser(FeatureFlag.PrReviewNotifications, tag);
-}
-
-/**
  * Records PR review activity (submitted reviews and review comments) for the
  * conversation-backed tasks that own the pull request, and schedules a
  * debounced notification job per task. The notification is informational
  * only: it tells the user about the review feedback once the task is idle.
  * No agent turn is started.
- *
- * Gated behind the experimental `PrReviewNotifications` feature flag.
  */
 export async function enqueuePrReviewNotification(
   input: EnqueuePrReviewNotificationInput,
 ): Promise<EnqueuePrReviewNotificationResult> {
   const parsedInput = enqueuePrReviewNotificationInputSchema.parse(input);
-
-  if (!(await isPrReviewNotificationEnabled('[enqueuePrReviewNotification]'))) {
-    return { notifiedTaskCount: 0, reason: 'feature_flag_disabled' };
-  }
 
   const prTaskLinks = await db.query.taskPullRequests.findMany({
     where: and(
@@ -416,10 +398,15 @@ export async function enqueuePrReviewNotification(
     return { notifiedTaskCount: 0, reason: 'no_linked_tasks' };
   }
 
-  const linkedJobs = await db.query.cloudJobs.findMany({
-    where: inArray(cloudJobs.taskId, taskIds),
-    columns: { taskId: true, payload: true, slackThreadTs: true },
-  });
+  const linkedJobs = await db
+    .select({
+      taskId: taskRuns.taskId,
+      payload: taskRuns.payload,
+      slackThreadTs: tasks.slackThreadTs,
+    })
+    .from(taskRuns)
+    .innerJoin(tasks, eq(tasks.id, taskRuns.taskId))
+    .where(inArray(taskRuns.taskId, taskIds));
 
   const conversationTaskIds = Array.from(
     new Set(

@@ -1,10 +1,17 @@
 import {
+  USER_FACING_AUTOMATION_KEYS,
   type BackgroundAutomationKey,
   type PrReviewerSettings,
+  type TaskTrigger,
+  type TaskState,
 } from '@roomote/types';
 import {
+  db,
+  desc,
   getBackgroundAgentSettingsForDeployment,
-  listRecentBackgroundAutomationRuns,
+  inArray,
+  listAutomations,
+  tasks,
 } from '@roomote/db/server';
 import { SlackNotifier } from '@roomote/slack';
 
@@ -31,30 +38,115 @@ import {
 } from './slack-channels';
 import type { SlackChannelDisplayNames } from './types';
 
-type BackgroundAutomationRunSummary = Awaited<
-  ReturnType<typeof listRecentBackgroundAutomationRuns>
->[number];
+/**
+ * Automation run history is the tasks the automation launched
+ * (tasks.initiator_automation = key). Announcer / manager stats launch no
+ * tasks; their history surfaces from the automations row status instead.
+ */
+type AutomationTaskRunSummary = {
+  taskId: string;
+  title: string | null;
+  trigger: TaskTrigger;
+  state: TaskState;
+  createdAt: Date;
+};
 
-function groupRecentRunsByAutomation(
-  runs: BackgroundAutomationRunSummary[],
-  limitPerAutomation = 5,
-): Partial<Record<BackgroundAutomationKey, BackgroundAutomationRunSummary[]>> {
+type AutomationStatusSummary = {
+  enabled: boolean;
+  lastRunAt: Date | null;
+  lastSucceededAt: Date | null;
+  lastFailedAt: Date | null;
+  lastError: string | null;
+};
+
+const RUN_HISTORY_KEYS: BackgroundAutomationKey[] = [
+  'conflict_resolver',
+  'suggester',
+  'announcer',
+  'manager_stats',
+  'sentry_triage',
+  'dependabot_triage',
+  'security_auditor',
+  'code_quality_auditor',
+  'ci_failure_triage',
+];
+
+const RUN_HISTORY_LIMIT_PER_AUTOMATION = 5;
+
+async function listRecentAutomationTasks(): Promise<
+  Partial<Record<BackgroundAutomationKey, AutomationTaskRunSummary[]>>
+> {
+  const rows = await db
+    .select({
+      taskId: tasks.id,
+      title: tasks.title,
+      trigger: tasks.trigger,
+      state: tasks.state,
+      createdAt: tasks.createdAt,
+      initiatorAutomation: tasks.initiatorAutomation,
+    })
+    .from(tasks)
+    .where(inArray(tasks.initiatorAutomation, RUN_HISTORY_KEYS))
+    .orderBy(desc(tasks.createdAt))
+    .limit(RUN_HISTORY_KEYS.length * RUN_HISTORY_LIMIT_PER_AUTOMATION * 2);
+
   const grouped: Partial<
-    Record<BackgroundAutomationKey, BackgroundAutomationRunSummary[]>
+    Record<BackgroundAutomationKey, AutomationTaskRunSummary[]>
   > = {};
 
-  for (const run of runs) {
-    const existing = grouped[run.automationKey] ?? [];
+  for (const row of rows) {
+    const key = row.initiatorAutomation as BackgroundAutomationKey | null;
 
-    if (existing.length >= limitPerAutomation) {
+    if (!key) {
       continue;
     }
 
-    existing.push(run);
-    grouped[run.automationKey] = existing;
+    const existing = grouped[key] ?? [];
+
+    if (existing.length >= RUN_HISTORY_LIMIT_PER_AUTOMATION) {
+      continue;
+    }
+
+    existing.push({
+      taskId: row.taskId,
+      title: row.title,
+      trigger: row.trigger,
+      state: row.state,
+      createdAt: row.createdAt,
+    });
+    grouped[key] = existing;
   }
 
   return grouped;
+}
+
+async function buildAutomationStatus(): Promise<
+  Partial<Record<BackgroundAutomationKey, AutomationStatusSummary>>
+> {
+  const automationRows = await listAutomations();
+  const status: Partial<
+    Record<BackgroundAutomationKey, AutomationStatusSummary>
+  > = {};
+
+  for (const automation of automationRows) {
+    if (
+      !(USER_FACING_AUTOMATION_KEYS as readonly string[]).includes(
+        automation.key,
+      )
+    ) {
+      continue;
+    }
+
+    status[automation.key] = {
+      enabled: automation.enabled,
+      lastRunAt: automation.lastRunAt,
+      lastSucceededAt: automation.lastSucceededAt,
+      lastFailedAt: automation.lastFailedAt,
+      lastError: automation.lastError,
+    };
+  }
+
+  return status;
 }
 
 export async function getBackgroundAgentSettingsCommand(
@@ -87,7 +179,6 @@ export async function getBackgroundAgentSettingsCommand(
   slackChannelAccessWarnings: {
     channelAutoStartSlackChannels: string[];
     managerStatsSlackChannel: string | null;
-    coachSlackChannel: string | null;
     suggesterSlackChannel: string | null;
     announcerSlackChannel: string | null;
     platformIssueSlackChannel: string | null;
@@ -99,30 +190,21 @@ export async function getBackgroundAgentSettingsCommand(
   };
   slackChannelDisplayNames: SlackChannelDisplayNames;
   recentRuns: Partial<
-    Record<BackgroundAutomationKey, BackgroundAutomationRunSummary[]>
+    Record<BackgroundAutomationKey, AutomationTaskRunSummary[]>
+  >;
+  automationStatus: Partial<
+    Record<BackgroundAutomationKey, AutomationStatusSummary>
   >;
 }> {
   assertAdmin(auth);
 
-  const [settings, slackInstallation, sentryConnected, recentRuns] =
+  const [settings, slackInstallation, sentryConnected, recentRuns, status] =
     await Promise.all([
       getBackgroundAgentSettingsForDeployment(),
       findActiveSlackInstallationForOrg(),
       hasActiveSentryIntegration(),
-      listRecentBackgroundAutomationRuns({
-        automationKeys: [
-          'conflict_resolver',
-          'coach',
-          'suggester',
-          'announcer',
-          'manager_stats',
-          'sentry_triage',
-          'dependabot_triage',
-          'security_auditor',
-          'code_quality_auditor',
-        ],
-        limit: 40,
-      }),
+      listRecentAutomationTasks(),
+      buildAutomationStatus(),
     ]);
   const relayUsers = await listReviewerRelayUserRecords(
     auth,
@@ -150,7 +232,6 @@ export async function getBackgroundAgentSettingsCommand(
         ({ channelId }) => channelId,
       ),
     managerStatsSlackChannelId: visibleSettings.managerStatsSlackChannelId,
-    coachSlackChannelId: visibleSettings.coachSlackChannelId,
     suggesterSlackChannelId: visibleSettings.suggesterSlackChannelId,
     announcerSlackChannelId: visibleSettings.announcerSlackChannelId,
     platformIssueSlackChannelId: visibleSettings.platformIssueSlackChannelId,
@@ -171,7 +252,6 @@ export async function getBackgroundAgentSettingsCommand(
         ({ channelId }) => channelId,
       ),
     managerStatsSlackChannelId: visibleSettings.managerStatsSlackChannelId,
-    coachSlackChannelId: visibleSettings.coachSlackChannelId,
     suggesterSlackChannelId: visibleSettings.suggesterSlackChannelId,
     announcerSlackChannelId: visibleSettings.announcerSlackChannelId,
     platformIssueSlackChannelId: visibleSettings.platformIssueSlackChannelId,
@@ -206,6 +286,7 @@ export async function getBackgroundAgentSettingsCommand(
     },
     slackChannelAccessWarnings,
     slackChannelDisplayNames,
-    recentRuns: groupRecentRunsByAutomation(recentRuns),
+    recentRuns,
+    automationStatus: status,
   };
 }

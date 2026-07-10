@@ -20,6 +20,29 @@ describe('Slack app manifest builder', () => {
     });
   });
 
+  it('marks the bot user as always online', () => {
+    const manifest = buildSlackAppManifest({
+      publicOrigin: 'https://roomote.example.com',
+    });
+
+    expect(manifest.features.bot_user).toEqual({
+      display_name: 'Roomote',
+      always_online: true,
+    });
+  });
+
+  it('disables the App Home tab and keeps Messages writable', () => {
+    const manifest = buildSlackAppManifest({
+      publicOrigin: 'https://roomote.example.com',
+    });
+
+    expect(manifest.features.app_home).toEqual({
+      home_tab_enabled: false,
+      messages_tab_enabled: true,
+      messages_tab_read_only_enabled: false,
+    });
+  });
+
   it('includes Slack OAuth callback URLs from the deployment origin', () => {
     const manifest = buildSlackAppManifest({
       publicOrigin: 'https://roomote.example.com/',

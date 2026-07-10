@@ -23,14 +23,14 @@ Compose paths in [SELF_HOSTING.md](../../SELF_HOSTING.md) instead.
 - **No Caddy edge.** Railway terminates HTTPS and gives every service its own
   public domain. The web app and the API run on separate origins, so
   `TRPC_URL` points at the api service's public domain with no
-  `/_roomote-api` path prefix. GitHub webhooks and hosted-compute workers
+  `/_roomote-api` path prefix. GitHub webhooks and hosted-sandbox workers
   call that API origin directly, and Slack webhooks arrive at the web origin
   and are proxied to the API internally.
-- **No Docker socket.** The `docker` compute provider cannot run on Railway.
-  Task execution must use a hosted compute provider: Modal (template
+- **No Docker socket.** The `docker` sandbox provider cannot run on Railway.
+  Task execution must use a hosted sandbox provider: Modal (template
   default), E2B, or Daytona. Those only need outbound HTTPS plus API
   credentials. The template sets `EXCLUDED_COMPUTE_PROVIDERS=docker` so the
-  unusable provider never appears in setup or compute selection.
+  unusable provider never appears in setup or sandbox selection.
 - **No openssl provisioning step.** The template sets
   `ROOMOTE_AUTO_GENERATE_KEYS=true`, so Roomote generates the `JOB_AUTH_*` /
   `PREVIEW_AUTH_*` P-256 keypairs at first boot and persists them encrypted
@@ -59,7 +59,7 @@ Compose paths in [SELF_HOSTING.md](../../SELF_HOSTING.md) instead.
 ## What you need
 
 - A Railway account.
-- A hosted compute account: [Modal](https://modal.com) (default),
+- A hosted sandbox account: [Modal](https://modal.com) (default),
   [E2B](https://e2b.dev), or [Daytona](https://daytona.io).
 - A model provider API key, for example OpenRouter (entered in the setup
   wizard, not at deploy time).
@@ -68,7 +68,7 @@ Compose paths in [SELF_HOSTING.md](../../SELF_HOSTING.md) instead.
 
 Both published images (`ghcr.io/roocodeinc/roomote-app` and
 `ghcr.io/roocodeinc/roomote-worker`) are public. Railway pulls the app image
-anonymously, and hosted compute providers (Modal's remote builder,
+anonymously, and hosted sandbox providers (Modal's remote builder,
 E2B/Daytona worker builds) pull the worker image anonymously; no registry
 credentials or `MODAL_REGISTRY_USERNAME`/`MODAL_REGISTRY_PASSWORD` are
 needed.
@@ -203,7 +203,7 @@ DOCKER_WORKER_RELEASE_PATH=/roomote/releases/worker-current.tar.gz
 ```
 
 The worker release archive is baked into the app image, and the controller
-uploads it into hosted-compute sandboxes at spawn time — no shared volume is
+uploads it into hosted sandboxes at spawn time — no shared volume is
 needed. The version-less `worker-current.tar.gz` name works because the
 controller reads the release version from the `VERSION` file inside the
 archive. Do not leave `DOCKER_WORKER_RELEASE_PATH` unset: without it the
@@ -234,7 +234,7 @@ Notes:
   encodes — the exact multi-place version bump this template design removes.
 - `MODAL_TOKEN_ID`, `MODAL_TOKEN_SECRET`, and model provider keys such as
   `OPENROUTER_API_KEY` are **not** template variables. Enter them in the
-  `/setup` wizard (or Settings → Compute / Models) after first boot; they are
+  `/setup` wizard (or Settings → Sandboxes / Models) after first boot; they are
   stored encrypted in Postgres. Setting them as env vars still works and
   takes precedence, but is unnecessary.
 - `SETUP_TOKEN` gates the pre-auth `/setup` wizard and is **required**: the
@@ -281,7 +281,7 @@ tab in the deployed project.
 Alternatively, skip bundled MinIO entirely and point the S3 values at an
 external S3-compatible store (AWS S3 or Cloudflare R2, with `S3_REGION=auto`
 for R2). Roomote uses path-style addressing, and `S3_PRESIGN_ENDPOINT` must
-be reachable from hosted-compute workers. On an external store, either
+be reachable from hosted-sandbox workers. On an external store, either
 pre-create the bucket and remove `S3_AUTO_CREATE_BUCKET`, or keep the flag
 if the configured credentials are allowed to create buckets (the api only
 logs a warning when creation fails).
@@ -304,9 +304,9 @@ logs a warning when creation fails).
 4. Connect GitHub with **Create GitHub App** — the manifest flow derives the
    callback and webhook URLs from `ROOMOTE_APP_URL` and `TRPC_URL`, so no
    manual URL entry is needed.
-5. Enter the compute provider credentials (Modal token pair for the default)
+5. Enter the sandbox provider credentials (Modal token pair for the default)
    and the model provider key when the wizard asks. When swapping to E2B or
-   Daytona instead, the wizard and **Settings → Compute** can build the E2B
+   Daytona instead, the wizard and **Settings → Sandboxes** can build the E2B
    template or Daytona snapshot in your provider account after credentials
    are saved.
 6. Pick repositories, create an environment, and run a small task end to end
@@ -356,7 +356,7 @@ GitHub App created by the wizard) keep the callback URLs they were created
 with, so reconnect or update those in their provider settings if you change
 the domain after onboarding.
 
-Leave `TRPC_URL` on the api service's own domain — hosted-compute workers
+Leave `TRPC_URL` on the api service's own domain — hosted-sandbox workers
 and webhooks call it directly, and it never needs to match the domain users
 browse. (A custom domain on the api or MinIO services works the same way if
 you want one: they are separate values on api, `TRPC_URL` and
@@ -393,63 +393,33 @@ domain, which requires a domain you control:
   pin, bump the tag in the four image fields first. The api service's
   `db-migrate` pre-deploy applies any schema changes, and the
   auto-generated keypairs persist in Postgres, so sessions, job tokens, and
-  preview tokens survive redeploys. Develop-channel deployments can make
-  this happen automatically on every develop build — see
+  preview tokens survive redeploys. These redeploys can be automated against
+  Railway's GraphQL API — see
   [Auto-deploying every develop build](#auto-deploying-every-develop-build-optional).
 - **Back up** the Railway Postgres database (Railway backups or `pg_dump`)
   and the MinIO volume or external bucket. Everything else is reproducible
   from config.
 - **Costs** split three ways: Railway hosts the control plane (web, api,
   controller, bullmq, Postgres, Redis, MinIO), while task execution bills
-  through your compute provider (Modal/E2B/Daytona) and model usage bills
+  through your sandbox provider (Modal/E2B/Daytona) and model usage bills
   through your model provider.
 
 ## Auto-deploying every develop build (optional)
 
-Railway never redeploys on its own when a mutable tag like `:develop` or
+Railway never redeploys on its own when a mutable alias like `:develop` or
 `:main` moves, so a deployment tracking a channel alias only picks up new
-builds when someone redeploys the app services. The `Publish GHCR Images`
-workflow has an optional `deploy-railway` job that closes that gap for the
-**develop channel**: after each develop build's images publish, it calls
-Railway's public GraphQL API directly, finds every service in the
-environment running the `roomote-app` image, points it at the new immutable
-`develop-<short-sha>` tag, and redeploys it. Nothing extra runs inside the
-Railway project. The job only fires on develop pushes today; main-channel
-deployments upgrade by redeploying the app services after a main build.
+builds when the app services are redeployed.
 
-Setup, once:
-
-1. In the Railway project, create a **project token** for the target
-   environment (Project Settings → Tokens). Project tokens are scoped to
-   that one environment and can be revoked there at any time.
-2. On the GitHub repository, create a `railway` environment restricted to
-   the `develop` branch, with a single secret:
-   `ROOMOTE_RAILWAY_PROJECT_TOKEN`.
-3. Set the repository variable `ROOMOTE_RAILWAY_AUTODEPLOY=true`. The job is
-   skipped entirely while the variable is unset, so forks and deployments
-   that do not want auto-deploy need no other configuration.
-
-No project or environment IDs need to be configured: the job resolves the
-environment from the token itself (`query { projectToken { environmentId } }`).
-
-Each run matches services whose image starts with
-`ghcr.io/<owner>/roomote-app` — api, web, controller, bullmq, and
-preview-proxy when present — then issues `serviceInstanceUpdate` with the
-pinned tag and `serviceInstanceDeploy` for each. The api service's
-`db-migrate` pre-deploy runs as usual. MinIO, Postgres, and Redis never
-match the prefix and are untouched. The first run permanently moves the
-matched services from the `:develop` alias to immutable
-`develop-<short-sha>` pins — intentional, since the pins make the deployed
-version visible in the Railway UI and make rollback a tag switch: edit the
-image field back to an older tag (or re-run the job from an older commit)
-to roll back.
-
-Security notes: the only credential is the project token, which can touch a
-single Railway environment and nothing else in the workspace. It lives in a
-GitHub environment secret, is never printed by the job, and GitHub does not
-expose environment secrets to fork pull requests, so open-sourcing the
-repository does not widen access. Rotate or revoke the token from the
-Railway project's token settings.
+Those redeploys can be automated from any CI system against Railway's public
+GraphQL API using a **project token** (scoped to a single environment).
+Resolve the environment from the token itself
+(`query { projectToken { environmentId } }`), find the services whose image
+starts with `ghcr.io/<owner>/roomote-app`, then for each issue
+`serviceInstanceUpdate` pointing at an immutable tag (e.g.
+`develop-<short-sha>` or `v1.2.3`) followed by `serviceInstanceDeploy`. Both
+mutations are idempotent, so a retried or partially failed run is safe to
+re-run, and pinning immutable tags makes rollback a tag switch — point the
+image field back at an older tag and deploy.
 
 ## Maintaining the marketplace template
 

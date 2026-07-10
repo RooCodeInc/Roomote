@@ -197,6 +197,8 @@ describe('startAutoRoutedSlackTask', () => {
     const result = await startAutoRoutedSlackTask({
       slackInstallation: { orgId: 'org_1', botUserId: 'BROOMOTE' } as never,
       slack: slack as never,
+      initiator: { kind: 'user' as const, userId: 'user_installer' },
+      trigger: 'message' as const,
       launchUserId: 'user_installer',
       slackUserId: 'UINSTALLER',
       initiatingSlackUserId: 'UINSTALLER',
@@ -230,7 +232,8 @@ describe('startAutoRoutedSlackTask', () => {
     );
     expect(startSlackAppMentionTaskMock).toHaveBeenCalledWith(
       expect.objectContaining({
-        userId: 'user_installer',
+        initiator: { kind: 'user', userId: 'user_installer' },
+        trigger: 'message',
         slackUserId: 'UINSTALLER',
         channel: 'C123',
         ts: '123.456',
@@ -314,6 +317,8 @@ describe('startAutoRoutedSlackTask', () => {
     await startAutoRoutedSlackTask({
       slackInstallation: { orgId: 'org_1', botUserId: 'BROOMOTE' } as never,
       slack: slack as never,
+      initiator: { kind: 'user' as const, userId: 'user_installer' },
+      trigger: 'message' as const,
       launchUserId: 'user_installer',
       slackUserId: 'UINSTALLER',
       initiatingSlackUserId: 'UINSTALLER',
@@ -349,6 +354,8 @@ describe('startAutoRoutedSlackTask', () => {
     await startAutoRoutedSlackTask({
       slackInstallation: { orgId: 'org_1', botUserId: 'BROOMOTE' } as never,
       slack: slack as never,
+      initiator: { kind: 'user' as const, userId: 'user_installer' },
+      trigger: 'message' as const,
       launchUserId: 'user_installer',
       slackUserId: 'UINSTALLER',
       initiatingSlackUserId: 'UINSTALLER',
@@ -380,6 +387,8 @@ describe('startAutoRoutedSlackTask', () => {
     await startAutoRoutedSlackTask({
       slackInstallation: { orgId: 'org_1' } as never,
       slack: slack as never,
+      initiator: { kind: 'user' as const, userId: 'user_installer' },
+      trigger: 'message' as const,
       launchUserId: 'user_installer',
       slackUserId: 'UINSTALLER',
       initiatingSlackUserId: 'UINSTALLER',
@@ -454,6 +463,8 @@ describe('startAutoRoutedSlackTask', () => {
     await startAutoRoutedSlackTask({
       slackInstallation: { orgId: 'org_1', botUserId: 'BROOMOTE' } as never,
       slack: slack as never,
+      initiator: { kind: 'user' as const, userId: 'user_installer' },
+      trigger: 'message' as const,
       launchUserId: 'user_installer',
       slackUserId: 'UINSTALLER',
       channel: 'C123',
@@ -576,6 +587,8 @@ describe('startAutoRoutedSlackTask', () => {
     await startAutoRoutedSlackTask({
       slackInstallation: { orgId: 'org_1' } as never,
       slack: slack as never,
+      initiator: { kind: 'user' as const, userId: 'user_installer' },
+      trigger: 'message' as const,
       launchUserId: 'user_installer',
       slackUserId: 'UINSTALLER',
       channel: 'C123',
@@ -650,6 +663,8 @@ describe('startAutoRoutedSlackTask', () => {
     await startAutoRoutedSlackTask({
       slackInstallation: { orgId: 'org_1' } as never,
       slack: slack as never,
+      initiator: { kind: 'user' as const, userId: 'user_installer' },
+      trigger: 'message' as const,
       launchUserId: 'user_installer',
       slackUserId: 'UINSTALLER',
       channel: 'C123',
@@ -703,6 +718,8 @@ describe('startAutoRoutedSlackTask', () => {
     await startAutoRoutedSlackTask({
       slackInstallation: { orgId: 'org_1' } as never,
       slack: slack as never,
+      initiator: { kind: 'user' as const, userId: 'user_installer' },
+      trigger: 'message' as const,
       launchUserId: 'user_installer',
       slackUserId: 'UINSTALLER',
       channel: 'C123',
@@ -748,6 +765,8 @@ describe('startAutoRoutedSlackTask', () => {
     await startAutoRoutedSlackTask({
       slackInstallation: { orgId: 'org_1' } as never,
       slack: slack as never,
+      initiator: { kind: 'user' as const, userId: 'user_installer' },
+      trigger: 'message' as const,
       launchUserId: 'user_installer',
       slackUserId: 'UINSTALLER',
       channel: 'C123',
@@ -782,6 +801,8 @@ describe('startAutoRoutedSlackTask', () => {
     const result = await startAutoRoutedSlackTask({
       slackInstallation: { orgId: 'org_1' } as never,
       slack: slack as never,
+      initiator: { kind: 'user' as const, userId: 'user_installer' },
+      trigger: 'message' as const,
       launchUserId: 'user_installer',
       slackUserId: 'UINSTALLER',
       initiatingSlackUserId: 'UINSTALLER',
@@ -795,7 +816,8 @@ describe('startAutoRoutedSlackTask', () => {
     });
     expect(startSlackAppMentionTaskMock).toHaveBeenCalledWith(
       expect.objectContaining({
-        userId: 'user_installer',
+        initiator: { kind: 'user', userId: 'user_installer' },
+        trigger: 'message',
         slackUserId: 'UINSTALLER',
         channel: 'C123',
         ts: '555.000',
@@ -873,6 +895,8 @@ describe('startAutoRoutedSlackTask', () => {
         teamId: 'T123',
       } as never,
       slack: slack as never,
+      initiator: { kind: 'user' as const, userId: 'user_installer' },
+      trigger: 'message' as const,
       launchUserId: 'user_installer',
       slackUserId: 'UINSTALLER',
       channel: 'C123',
@@ -927,6 +951,8 @@ describe('startAutoRoutedSlackTask', () => {
     const result = await startAutoRoutedSlackTask({
       slackInstallation: { orgId: 'org_1' } as never,
       slack: slack as never,
+      initiator: { kind: 'user' as const, userId: 'user_installer' },
+      trigger: 'message' as const,
       launchUserId: 'user_installer',
       slackUserId: 'UINSTALLER',
       initiatingSlackUserId: 'UINSTALLER',
@@ -964,6 +990,8 @@ describe('startAutoRoutedSlackTask', () => {
       const result = await startAutoRoutedSlackTask({
         slackInstallation: { orgId: 'org_1', botUserId: 'BROOMOTE' } as never,
         slack: slack as never,
+        initiator: { kind: 'user' as const, userId: 'user_installer' },
+        trigger: 'message' as const,
         launchUserId: 'user_installer',
         slackUserId: 'UINSTALLER',
         channel: 'C123',
@@ -1004,6 +1032,8 @@ describe('startAutoRoutedSlackTask', () => {
     const result = await startAutoRoutedSlackTask({
       slackInstallation: { orgId: 'org_1' } as never,
       slack: slack as never,
+      initiator: { kind: 'user' as const, userId: 'user_installer' },
+      trigger: 'message' as const,
       launchUserId: 'user_installer',
       slackUserId: 'UINSTALLER',
       channel: 'C123',
@@ -1037,6 +1067,8 @@ describe('startAutoRoutedSlackTask', () => {
     await startAutoRoutedSlackTask({
       slackInstallation: { orgId: 'org_1' } as never,
       slack: slack as never,
+      initiator: { kind: 'user' as const, userId: 'user_installer' },
+      trigger: 'message' as const,
       launchUserId: 'user_installer',
       slackUserId: 'U_BOT',
       channel: 'C123',
@@ -1063,6 +1095,8 @@ describe('startAutoRoutedSlackTask', () => {
     await startAutoRoutedSlackTask({
       slackInstallation: { orgId: 'org_1', botUserId: 'U_BOT' } as never,
       slack: slack as never,
+      initiator: { kind: 'user' as const, userId: 'user_installer' },
+      trigger: 'message' as const,
       launchUserId: 'user_installer',
       slackUserId: 'UINSTALLER',
       persistedSlackUserId: null,
@@ -1074,7 +1108,8 @@ describe('startAutoRoutedSlackTask', () => {
 
     expect(startSlackAppMentionTaskMock).toHaveBeenCalledWith(
       expect.objectContaining({
-        userId: 'user_installer',
+        initiator: { kind: 'user', userId: 'user_installer' },
+        trigger: 'message',
         slackUserId: 'UINSTALLER',
         persistedSlackUserId: null,
       }),
@@ -1102,6 +1137,8 @@ describe('startAutoRoutedSlackTask', () => {
     const result = await startAutoRoutedSlackTask({
       slackInstallation: { orgId: 'org_1' } as never,
       slack: slack as never,
+      initiator: { kind: 'user' as const, userId: 'user_installer' },
+      trigger: 'message' as const,
       launchUserId: 'user_installer',
       slackUserId: 'UINSTALLER',
       channel: 'C123',

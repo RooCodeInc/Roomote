@@ -68,13 +68,6 @@ export const FEATURE_FLAG_CONFIG: FeatureFlagConfigMap = {
     description:
       'Enable background subagents so the Task tool can launch subagents asynchronously via its background flag, and standard-task delivery ships the PR before visual proof instead of blocking on it. Off by default: proof runs foreground, before delivery.',
   },
-
-  [FeatureFlag.PrReviewNotifications]: {
-    defaultValue: false,
-    metadataKey: 'pr_review_notifications',
-    description:
-      'Notify the originating conversation thread (Slack, Teams, or Telegram) of the task that owns a pull request when non-mention review feedback arrives, once the task is idle, asking whether the user wants follow-up action (notification-only: no agent turn is started)',
-  },
 };
 
 /**

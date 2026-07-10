@@ -9,10 +9,8 @@ export const listRepositories = (
   auth: AuthTokenContext | JobTokenContext,
   input?: { sourceControlProvider?: SourceControlProvider },
 ) => {
-  if (!auth.userId) {
-    throw new Error('Invalid authorization token.');
-  }
-
+  // Repositories are deployment-scoped: any authenticated principal may
+  // read them, including deployment-service-principal job tokens.
   return db.query.repositories.findMany({
     where: input?.sourceControlProvider
       ? and(

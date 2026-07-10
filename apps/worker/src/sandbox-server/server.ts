@@ -13,6 +13,10 @@ import type {
 
 import type { HarnessLogger } from '../logging';
 import type { WorkerEnv } from '../env';
+import type {
+  ActorMismatchPolicy,
+  PrepareActorScopedTurnResult,
+} from '../run-task/prepare-actor-scoped-turn';
 import type { Harness } from './lib/harness';
 import type { HarnessManager } from './lib/harness-manager';
 import { TerminalManager } from './lib/terminal-manager';
@@ -132,8 +136,9 @@ export function createServer({
     options?: {
       allowMcpReconnect?: boolean;
       deferReconnectUntilTurnBoundary?: boolean;
+      onMismatch?: ActorMismatchPolicy;
     },
-  ) => Promise<boolean>;
+  ) => Promise<PrepareActorScopedTurnResult>;
   /**
    * Token validator.
    * For tRPC: reads `Authorization: Bearer <token>` header.

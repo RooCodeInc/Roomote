@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { CloudTaskStatus, CloudTaskType } from '@roomote/types';
-import type { CloudJob } from '@roomote/db/server';
+import { RunStatus, TaskPayloadKind } from '@roomote/types';
+import type { Run } from '@roomote/db/server';
 
 const {
   mockCreateGitHubToken,
@@ -86,17 +86,18 @@ import {
   writeSourceControlPullRequestForCloudJob,
 } from '../source-control-pull-request-writes';
 
-function makeCloudJob(payload: CloudJob['payload']): CloudJob {
+function makeCloudJob(payload: Run['payload']): Run {
   return {
     id: 123,
-    status: CloudTaskStatus.Dequeued,
-    type: CloudTaskType.StandardTask,
+    status: RunStatus.Dequeued,
+    kind: 'fresh',
+    payloadKind: TaskPayloadKind.StandardTask,
     taskId: 'task-123',
-    userId: 'user-123',
+    actingUserId: 'user-123',
     payload,
     result: null,
     artifacts: null,
-  } as CloudJob;
+  } as Run;
 }
 
 function jsonResponse(body: unknown, status = 200): Response {

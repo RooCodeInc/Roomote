@@ -1,19 +1,21 @@
 import {
-  type CloudTask,
+  type TaskSpec,
   type AuthTokenContext,
   type JobTokenContext,
-  type CloudTaskPayload,
-  CloudTaskStatus,
-  CloudTaskType,
-  cloudTaskSchema,
+  type RequestedWorkKind,
+  RunStatus,
+  taskSpecSchema,
   resolveSourceControlProviderFromPayload,
 } from '@roomote/types';
 import {
-  type CloudJob,
-  type UpdateCloudJob,
+  type Run,
+  type Task,
   db,
-  cloudJobs,
+  taskRuns,
+  taskPullRequests,
+  tasks,
   recordJobLifecycleEvent,
+  and,
   eq,
 } from '@roomote/db/server';
 import { releaseCloudTask, generatePrompt } from '@roomote/cloud-agents/server';
@@ -32,14 +34,50 @@ import {
 } from './dequeue-helpers';
 import { resolveSlackJobRouting } from './slack-job-routing';
 
+/**
+ * Task-level launch context returned alongside the run. The worker previously
+ * read these fields off the cloud job row; they now live on the tasks row and
+ * are joined into the dequeue/resume responses explicitly.
+ */
+export type DequeuedTaskContext = {
+  id: string;
+  title: string;
+  /** The initial task prompt (tasks.prompt); per-attempt prompt is top-level. */
+  prompt: string | null;
+  harnessInstructions: string | null;
+  requestedWorkKind: RequestedWorkKind;
+  slackChannelId: string | null;
+  slackThreadTs: string | null;
+  linearSessionId: string | null;
+  linearIssueId: string | null;
+  linearOrganizationId: string | null;
+};
+
+export function buildDequeuedTaskContext(task: Task): DequeuedTaskContext {
+  return {
+    id: task.id,
+    title: task.title,
+    prompt: task.prompt ?? null,
+    harnessInstructions: task.harnessInstructions ?? null,
+    requestedWorkKind: task.requestedWorkKind,
+    slackChannelId: task.slackChannelId ?? null,
+    slackThreadTs: task.slackThreadTs ?? null,
+    linearSessionId: task.linearSessionId ?? null,
+    linearIssueId: task.linearIssueId ?? null,
+    linearOrganizationId: task.linearOrganizationId ?? null,
+  };
+}
+
 type DequeueResult =
   | {
       error: true;
-      cloudJob?: CloudJob;
+      cloudJob?: Run;
     }
   | {
       error: false;
-      cloudJob: CloudJob;
+      cloudJob: Run;
+      task: DequeuedTaskContext;
+      requestedWorkKind: RequestedWorkKind;
       gitHubToken: string;
       sourceControlToken: SourceControlRuntimeToken;
       envVars: Record<string, string>;
@@ -52,7 +90,7 @@ type DequeueResult =
       artifacts: Record<string, unknown>;
     };
 
-export function shouldInitializeWithoutPrompt(cloudTask: CloudTask): boolean {
+export function shouldInitializeWithoutPrompt(cloudTask: TaskSpec): boolean {
   if (
     'description' in cloudTask.payload &&
     typeof cloudTask.payload.description === 'string' &&
@@ -76,6 +114,21 @@ export function shouldInitializeWithoutPrompt(cloudTask: CloudTask): boolean {
   return false;
 }
 
+/**
+ * Builds the TaskSpec candidate for schema validation from a run row. The
+ * discriminated union re-keys on `type`, which is stored as
+ * `task_runs.payload_kind`.
+ */
+function buildCloudTaskCandidate(run: Run): Record<string, unknown> {
+  return {
+    type: run.payloadKind,
+    harness: run.harness,
+    payload: run.payload,
+    sourceSnapshotId: run.sourceSnapshotId,
+    sourceCloudJobId: run.sourceRunId,
+  };
+}
+
 async function recordJobLifecycleEventSafe(input: {
   cloudJobId: number;
   taskId?: string;
@@ -90,7 +143,8 @@ async function recordJobLifecycleEventSafe(input: {
   details?: Record<string, unknown>;
 }) {
   try {
-    await recordJobLifecycleEvent(db, input);
+    const { cloudJobId, ...rest } = input;
+    await recordJobLifecycleEvent(db, { runId: cloudJobId, ...rest });
   } catch (error) {
     console.warn(
       `[dequeueCloudJob] Failed to persist lifecycle event for cloud job ${input.cloudJobId}: ${
@@ -157,6 +211,40 @@ async function recordBootstrapPhase<T>(input: {
   }
 }
 
+/**
+ * The PR review summary comment id is a GitHub-native identifier of the PR
+ * linkage, so it persists on the task's task_pull_requests row (inserted at
+ * enqueue for PR-triggered launches).
+ */
+async function persistGithubPrReviewCommentId(
+  taskId: string,
+  payload: Run['payload'],
+  commentId: number,
+): Promise<void> {
+  const repository =
+    'repo' in payload && typeof payload.repo === 'string' ? payload.repo : null;
+  const prNumber =
+    'prNumber' in payload && typeof payload.prNumber === 'number'
+      ? payload.prNumber
+      : null;
+
+  if (!repository || !prNumber) {
+    return;
+  }
+
+  await db
+    .update(taskPullRequests)
+    .set({ githubReviewCommentId: commentId, updatedAt: new Date() })
+    .where(
+      and(
+        eq(taskPullRequests.taskId, taskId),
+        eq(taskPullRequests.sourceControlProvider, 'github'),
+        eq(taskPullRequests.repository, repository),
+        eq(taskPullRequests.prNumber, prNumber),
+      ),
+    );
+}
+
 export const dequeueCloudJob = async (
   _auth: AuthTokenContext | JobTokenContext,
   input: {
@@ -168,7 +256,7 @@ export const dequeueCloudJob = async (
   {
     onBootstrapFailure,
   }: {
-    onBootstrapFailure?: (error: Error, cloudJob: CloudJob) => void;
+    onBootstrapFailure?: (error: Error, cloudJob: Run) => void;
   } = {},
 ) => {
   try {
@@ -178,32 +266,34 @@ export const dequeueCloudJob = async (
     const tag = '[dequeueCloudJob]';
 
     type TransactionResult =
-      | { error: true; cloudJob?: CloudJob }
+      | { error: true; cloudJob?: Run }
       | {
           error: false;
-          cloudJob: CloudJob;
-          cloudTask: CloudTask;
+          cloudJob: Run;
+          task: Task;
+          cloudTask: TaskSpec;
           envVars: Record<string, string>;
           orgAgentInstructions?: string;
           styleGuidance?: string;
           gitAuthor: GitAuthor;
         };
 
-    // Phase 1: Transaction — claim the job and fetch all data needed for
+    // Phase 1: Transaction — claim the run and fetch all data needed for
     // subsequent steps.  No external API calls happen here, keeping the
     // row lock short-lived.
     const txResult: TransactionResult = await db.transaction(async (tx) => {
-      // Use a single UPDATE query with a subquery to atomically claim exactly one job.
+      // Use a single UPDATE query with a subquery to atomically claim exactly one run.
       // PostgreSQL automatically applies row-level locking during UPDATE:
-      // 1. The subquery finds the first matching job and locks it with FOR UPDATE SKIP LOCKED.
+      // 1. The subquery finds the first matching run and locks it with FOR UPDATE SKIP LOCKED.
       // 2. SKIP LOCKED means if another transaction has already locked a row, skip it.
       // 3. The UPDATE then modifies only that specific locked row.
-      // 4. This ensures only ONE worker can claim each job, even with concurrent requests.
-      const [dequeued] = await tx.execute<Pick<CloudJob, 'id'>>(query);
+      // 4. This ensures only ONE worker can claim each run, even with concurrent requests.
+      const [dequeued] = await tx.execute<Pick<Run, 'id'>>(query);
 
       const cloudJob = dequeued
-        ? await tx.query.cloudJobs.findFirst({
-            where: eq(cloudJobs.id, dequeued.id),
+        ? await tx.query.taskRuns.findFirst({
+            where: eq(taskRuns.id, dequeued.id),
+            with: { task: true },
           })
         : undefined;
 
@@ -214,23 +304,27 @@ export const dequeueCloudJob = async (
         return { error: true, cloudJob };
       }
 
+      const task = cloudJob.task;
+
       const envVars = await fetchEnvVars(tx, {
         sourceControlProvider: resolveSourceControlProviderFromPayload(
           cloudJob.payload,
         ),
       });
-      const settings = await tx.query.backgroundAgentSettings.findFirst({
+      const settings = await tx.query.deploymentSettings.findFirst({
         columns: {
           globalAgentInstructions: true,
           styleGuidance: true,
         },
       });
 
-      const parsed = cloudTaskSchema.safeParse(cloudJob);
+      const parsed = taskSpecSchema.safeParse(
+        buildCloudTaskCandidate(cloudJob),
+      );
 
       if (!parsed.success) {
         console.error(
-          `${tag} cloudTaskSchema.safeParse failed: ${parsed.error.message} -> ${JSON.stringify(cloudJob)}`,
+          `${tag} taskSpecSchema.safeParse failed: ${parsed.error.message} -> ${JSON.stringify(cloudJob)}`,
         );
 
         reportBootstrapFailure({
@@ -249,33 +343,33 @@ export const dequeueCloudJob = async (
 
       const gitAuthor = await resolveGitAuthor(tx, cloudJob);
 
-      // Stamp startedAt as soon as the worker has claimed the dequeued job.
+      // Stamp startedAt as soon as the worker has claimed the dequeued run.
       // Prompt generation and token creation happen afterwards and can take
       // noticeable time, but the worker has already started processing.
       await tx
-        .update(cloudJobs)
+        .update(taskRuns)
         .set({
           startedAt: new Date(),
           ...(workerReleaseTag !== undefined ? { workerReleaseTag } : {}),
           ...(workerVersion !== undefined ? { workerVersion } : {}),
           ...(workerCommit !== undefined ? { workerCommit } : {}),
         })
-        .where(eq(cloudJobs.id, cloudJob.id));
+        .where(eq(taskRuns.id, cloudJob.id));
 
       await recordJobLifecycleEvent(tx, {
-        cloudJobId: cloudJob.id,
+        runId: cloudJob.id,
         taskId: cloudJob.taskId,
         eventType: 'started',
         message:
           'Worker claimed dequeued cloud job and started execution bootstrap.',
         details: {
           stage: 'worker_bootstrap',
-          status: CloudTaskStatus.Processing,
+          status: RunStatus.Processing,
           vendor: cloudJob.vendor ?? null,
           machineId: cloudJob.machineId ?? null,
           sourceSnapshotId: cloudJob.sourceSnapshotId ?? null,
           environmentId: cloudJob.payload.environmentId ?? null,
-          cloudTaskType: cloudJob.type,
+          cloudTaskType: cloudJob.payloadKind,
           workerReleaseTag: workerReleaseTag ?? null,
           workerVersion: workerVersion ?? null,
           workerCommit: workerCommit ?? null,
@@ -285,6 +379,7 @@ export const dequeueCloudJob = async (
       return {
         error: false,
         cloudJob,
+        task,
         cloudTask: parsed.data,
         envVars,
         orgAgentInstructions: settings?.globalAgentInstructions ?? undefined,
@@ -322,7 +417,7 @@ export const dequeueCloudJob = async (
       taskId: txResult.cloudJob.taskId,
       label: 'createSourceControlToken',
       details: {
-        cloudTaskType: txResult.cloudJob.type,
+        cloudTaskType: txResult.cloudJob.payloadKind,
         provider: sourceControlProvider,
       },
       classifyResult: (token) =>
@@ -345,7 +440,7 @@ export const dequeueCloudJob = async (
         message: `Source control token creation failed for cloud job #${txResult.cloudJob.id}.`,
         details: {
           reason: 'source_control_token_creation_failed',
-          cloudTaskType: txResult.cloudJob.type,
+          cloudTaskType: txResult.cloudJob.payloadKind,
           provider: sourceControlProvider,
         },
       });
@@ -376,7 +471,7 @@ export const dequeueCloudJob = async (
         message: `Skipped prompt generation for cloud job #${txResult.cloudJob.id}.`,
         details: {
           reason: 'blank_prompt',
-          cloudTaskType: txResult.cloudJob.type,
+          cloudTaskType: txResult.cloudJob.payloadKind,
         },
       });
     } else {
@@ -386,7 +481,7 @@ export const dequeueCloudJob = async (
           taskId: txResult.cloudJob.taskId,
           label: 'generatePrompt',
           details: {
-            cloudTaskType: txResult.cloudJob.type,
+            cloudTaskType: txResult.cloudJob.payloadKind,
           },
           fn: async () =>
             await generatePrompt({
@@ -403,14 +498,14 @@ export const dequeueCloudJob = async (
           ...promptResult.artifacts,
         };
 
-        // Persist critical artifacts outside the transaction.
+        // Persist critical artifacts outside the transaction. The PR review
+        // summary comment id lives on the task's pull-request row.
         if (typeof artifacts.githubPrReviewCommentId === 'number') {
-          await db
-            .update(cloudJobs)
-            .set({
-              githubPrReviewCommentId: artifacts.githubPrReviewCommentId,
-            })
-            .where(eq(cloudJobs.id, txResult.cloudJob.id));
+          await persistGithubPrReviewCommentId(
+            txResult.cloudJob.taskId,
+            txResult.cloudJob.payload,
+            artifacts.githubPrReviewCommentId,
+          );
         }
       } catch (error) {
         const message = `${tag} Failed to generate prompt for cloud job ${txResult.cloudJob.id}: ${error instanceof Error ? error.message : String(error)}`;
@@ -418,26 +513,6 @@ export const dequeueCloudJob = async (
         await cancelAndReleaseCloudJob(txResult.cloudJob, message, tag);
         return undefined;
       }
-    }
-
-    // Set slackThreadTs for Slack-originated jobs:
-    // - SlackAppMention: from payload.thread_ts
-    // - SnapshotResume: already set at insert time via enqueueCloudTask spread
-    //   (slackThreadTs is a top-level field on snapshotResumeSchema),
-    //   so we only need to handle SlackAppMention here.
-    const slackThreadTs =
-      txResult.cloudJob.type === CloudTaskType.SlackAppMention
-        ? (
-            txResult.cloudJob
-              .payload as CloudTaskPayload<CloudTaskType.SlackAppMention>
-          ).thread_ts
-        : undefined;
-
-    if (slackThreadTs !== undefined) {
-      await db
-        .update(cloudJobs)
-        .set({ slackThreadTs })
-        .where(eq(cloudJobs.id, txResult.cloudJob.id));
     }
 
     let resolvedEnvVars: Record<string, string>;
@@ -448,7 +523,7 @@ export const dequeueCloudJob = async (
         taskId: txResult.cloudJob.taskId,
         label: 'resolveRuntimeEnvVars',
         details: {
-          cloudTaskType: txResult.cloudJob.type,
+          cloudTaskType: txResult.cloudJob.payloadKind,
           deploymentEnvVarCount: Object.keys(txResult.envVars).length,
         },
         fn: async () =>
@@ -470,7 +545,7 @@ export const dequeueCloudJob = async (
       taskId: txResult.cloudJob.taskId,
       label: 'resolveLaunchFlagsAndRouting',
       details: {
-        cloudTaskType: txResult.cloudJob.type,
+        cloudTaskType: txResult.cloudJob.payloadKind,
       },
       fn: async () => await resolveSlackJobRouting(txResult.cloudJob),
     });
@@ -478,6 +553,8 @@ export const dequeueCloudJob = async (
     const result: DequeueResult = {
       error: false,
       cloudJob: txResult.cloudJob,
+      task: buildDequeuedTaskContext(txResult.task),
+      requestedWorkKind: txResult.task.requestedWorkKind,
       gitHubToken,
       sourceControlToken,
       envVars: {
@@ -493,17 +570,26 @@ export const dequeueCloudJob = async (
       artifacts,
     };
 
-    const values: UpdateCloudJob = {
-      prompt: result.prompt,
-      harnessInstructions: result.harnessInstructions,
-      artifacts: result.artifacts,
-    };
-
     try {
+      // Per-attempt prompt and artifacts persist on the run; the generated
+      // harness instructions persist on the task (tasks.harnessInstructions).
       await db
-        .update(cloudJobs)
-        .set(values)
-        .where(eq(cloudJobs.id, result.cloudJob.id));
+        .update(taskRuns)
+        .set({
+          prompt: result.prompt,
+          artifacts: result.artifacts,
+        })
+        .where(eq(taskRuns.id, result.cloudJob.id));
+
+      if (result.harnessInstructions !== undefined) {
+        await db
+          .update(tasks)
+          .set({
+            harnessInstructions: result.harnessInstructions,
+            updatedAt: new Date(),
+          })
+          .where(eq(tasks.id, result.cloudJob.taskId));
+      }
     } catch (error) {
       const message = `${tag} Failed to persist launch metadata for cloud job ${result.cloudJob.id}: ${
         error instanceof Error ? error.message : String(error)

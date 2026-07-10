@@ -90,6 +90,18 @@ export const INSTANCE_SECRET_ENV_VAR_NAMES: ReadonlySet<string> = new Set([
 ]);
 
 /**
+ * Declarative environment provisioning inputs, managed through the deployment
+ * environment. Not secrets per se, but they are control-plane configuration
+ * (the inline YAML may carry per-environment env values) and a task never
+ * needs them, so they are reserved from the generic editor and stripped from
+ * the sandbox.
+ */
+const DECLARATIVE_ENVIRONMENT_ENV_VAR_NAMES: ReadonlySet<string> = new Set([
+  'ROOMOTE_ENVIRONMENTS_DIR',
+  'ROOMOTE_ENVIRONMENTS_YAML',
+]);
+
+/**
  * Canonical set of control-plane / provider / instance env var names that are
  * never generic user task environment. It is the single source of truth for two
  * consumers that must not drift apart:
@@ -111,6 +123,7 @@ export const CONTROL_PLANE_ENV_VAR_NAMES: ReadonlySet<string> = new Set<string>(
     ...INTEGRATION_BOT_SECRET_ENV_VAR_NAMES,
     ...PROVIDER_IDENTIFIER_ENV_VAR_NAMES,
     ...INSTANCE_SECRET_ENV_VAR_NAMES,
+    ...DECLARATIVE_ENVIRONMENT_ENV_VAR_NAMES,
   ],
 );
 

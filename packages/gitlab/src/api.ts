@@ -6,7 +6,7 @@ import {
   type SourceControlProvider,
 } from '@roomote/types';
 import {
-  type CloudJob,
+  type Run,
   db,
   environments,
   repositories,
@@ -881,7 +881,7 @@ function normalizeRepositorySelection(repositoryNames: string[]): string[] {
 }
 
 async function resolveGitLabRepositoryNamesForCloudJob(
-  cloudJob: CloudJob,
+  cloudJob: Run,
 ): Promise<string[]> {
   if (cloudJob.payload.environmentId) {
     const environment = await db.query.environments.findFirst({
@@ -920,7 +920,7 @@ async function resolveGitLabRepositoryNamesForCloudJob(
   );
 }
 
-async function resolveGitLabRepositoryRowsForCloudJob(cloudJob: CloudJob) {
+async function resolveGitLabRepositoryRowsForCloudJob(cloudJob: Run) {
   const repositoryNames =
     await resolveGitLabRepositoryNamesForCloudJob(cloudJob);
 
@@ -1118,7 +1118,7 @@ async function revokeScopedProjectTokenDescriptors(
 }
 
 export async function createCloudJobScopedGitLabTokens(
-  cloudJob: CloudJob,
+  cloudJob: Run,
   options?: {
     apiBaseUrl?: string;
     baseUrl?: string;
@@ -1241,7 +1241,7 @@ export async function createCloudJobScopedGitLabTokens(
 }
 
 export async function revokeCloudJobScopedGitLabTokens(
-  cloudJob: Pick<CloudJob, 'artifacts'>,
+  cloudJob: Pick<Run, 'artifacts'>,
   options?: {
     apiBaseUrl?: string;
     baseUrl?: string;

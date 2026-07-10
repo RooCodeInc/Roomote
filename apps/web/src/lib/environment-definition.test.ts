@@ -2,7 +2,7 @@ import {
   appendEnvironmentDefinitionGuidance,
   buildEnvironmentDefinitionWorkspacePayload,
   buildCreateEnvironmentDefinitionPrompt,
-  CloudTaskStatus,
+  RunStatus,
   getEnvironmentDefinitionIdFromPayload,
   type EnvironmentConfig,
 } from '@roomote/types';
@@ -208,11 +208,11 @@ describe('environment definition helpers', () => {
   });
 
   it.each([
-    [CloudTaskStatus.Completed, null, true],
-    [CloudTaskStatus.Idle, 'waiting_for_prompt', true],
-    [CloudTaskStatus.Idle, 'running', false],
-    [CloudTaskStatus.Running, null, false],
-    [CloudTaskStatus.Failed, null, false],
+    [RunStatus.Completed, null, true],
+    [RunStatus.Idle, 'waiting_for_prompt', true],
+    [RunStatus.Idle, 'running', false],
+    [RunStatus.Running, null, false],
+    [RunStatus.Failed, null, false],
   ] as const)(
     'treats %s with phase %s as a terminal success status: %s',
     (status, taskPhase, expected) => {
@@ -223,11 +223,11 @@ describe('environment definition helpers', () => {
   );
 
   it.each([
-    [CloudTaskStatus.Completed, null, true],
-    [CloudTaskStatus.Idle, 'waiting_for_prompt', true],
-    [CloudTaskStatus.Idle, 'running', false],
-    [CloudTaskStatus.Running, null, false],
-    [CloudTaskStatus.Failed, null, false],
+    [RunStatus.Completed, null, true],
+    [RunStatus.Idle, 'waiting_for_prompt', true],
+    [RunStatus.Idle, 'running', false],
+    [RunStatus.Running, null, false],
+    [RunStatus.Failed, null, false],
   ] as const)(
     'treats %s with phase %s as a success status: %s',
     (status, taskPhase, expected) => {

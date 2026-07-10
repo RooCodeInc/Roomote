@@ -1,8 +1,8 @@
 import {
-  CloudTaskStatus,
-  CloudTaskType,
-  isBootingCloudTaskStatus,
-  isExitedCloudTaskStatus,
+  RunStatus,
+  TaskPayloadKind,
+  isBootingRunStatus,
+  isExitedRunStatus,
 } from '@roomote/types';
 
 import type { CloudJobDetail } from '@/lib/server';
@@ -39,18 +39,19 @@ export function getSessionState(
   // before setup finishes.
   if (
     !hasMessages &&
-    (cloudJobStatus === CloudTaskStatus.Failed ||
-      (cloudJobStatus === CloudTaskStatus.Canceled && !!cloudJobError))
+    (cloudJobStatus === RunStatus.Failed ||
+      (cloudJobStatus === RunStatus.Canceled && !!cloudJobError))
   ) {
     return 'boot-failed';
   }
 
-  if (isExitedCloudTaskStatus(cloudJobStatus)) {
+  if (isExitedRunStatus(cloudJobStatus)) {
     return 'historical';
   }
 
-  if (isBootingCloudTaskStatus(cloudJobStatus)) {
-    if (cloudJob.type === CloudTaskType.SnapshotResume) {
+  if (isBootingRunStatus(cloudJobStatus)) {
+    // Runtime dispatch: payloadKind is the run-level resume signal.
+    if (cloudJob.payloadKind === TaskPayloadKind.SnapshotResume) {
       return 'resuming';
     }
     return 'booting';
@@ -71,7 +72,7 @@ export function getSessionState(
       now - cloudJob.startedAt.getTime() >= HARNESS_MESSAGE_TIMEOUT_MS;
 
     if (!timedOut) {
-      if (cloudJob.type === CloudTaskType.SnapshotResume) {
+      if (cloudJob.payloadKind === TaskPayloadKind.SnapshotResume) {
         return 'resuming';
       }
 
@@ -102,11 +103,11 @@ export function shouldPollForFirstHarnessMessage({
   hasInitialPrompt,
 }: {
   sessionState: SessionState;
-  cloudJobStatus: CloudTaskStatus;
+  cloudJobStatus: RunStatus;
   hasHarnessMessages: boolean;
   hasInitialPrompt: boolean;
 }): boolean {
-  if (hasHarnessMessages || isExitedCloudTaskStatus(cloudJobStatus)) {
+  if (hasHarnessMessages || isExitedRunStatus(cloudJobStatus)) {
     return false;
   }
 

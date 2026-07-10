@@ -2,9 +2,9 @@ import { useState } from 'react';
 import Link from 'next/link';
 
 import {
-  isActivelyRunningCloudTask,
-  isBootingCloudTaskStatus,
-  type CloudTaskStatus,
+  isActivelyRunningTask,
+  isBootingRunStatus,
+  type RunStatus,
 } from '@roomote/types';
 
 import {
@@ -27,7 +27,7 @@ type SideNavQuickAccessTask = {
   id: string;
   title: string | null;
   cloudJob: {
-    status: CloudTaskStatus;
+    status: RunStatus;
     taskPhase: string | null;
     prRepo?: string | null;
     prNumber?: number | null;
@@ -74,14 +74,14 @@ export const SideNavTaskItem = ({
   const hasLiveStatus =
     liveStatus?.phase != null || Boolean(liveStatus?.lastErrorMessage);
   const isTaskStartingUp =
-    !hasLiveStatus && isBootingCloudTaskStatus(task.cloudJob.status);
+    !hasLiveStatus && isBootingRunStatus(task.cloudJob.status);
   const taskPhase = hasLiveStatus
     ? (liveStatus?.phase ?? null)
     : task.cloudJob.taskPhase;
   const taskStatus = hasLiveStatus ? undefined : task.cloudJob.status;
   const showsExpandedSpinner = hasLiveStatus
     ? taskPhase === 'running'
-    : isActivelyRunningCloudTask(task.cloudJob.status, taskPhase);
+    : isActivelyRunningTask(task.cloudJob.status, taskPhase);
 
   if (expanded) {
     return (

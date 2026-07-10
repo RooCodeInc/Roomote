@@ -30,8 +30,10 @@ import {
   stripLeadingRawSlackMention,
   stripLeadingSlackProductMention,
 } from '@roomote/cloud-agents';
+import { setTrustedRunActingUserOnSuccess } from '@roomote/db/server';
 
 import { apiLogger } from '../../../logging.js';
+import { syncActingUserForInboundMessage } from '../../tasks/acting-user-sync.js';
 import {
   buildResolvedCurrentMessageText,
   processSlackAttachments,
@@ -40,12 +42,10 @@ import { getIsSlackDiverged } from '../helpers/thread-sync.js';
 
 type ActiveSlackJob = {
   id: number;
-  userId: string | null;
+  actingUserId: string | null;
   result: unknown;
   taskId: string | null;
   payload?: unknown;
-  prRepo?: string | null;
-  prNumber?: number | null;
 };
 
 const REQUEST_USER_INPUT_ALREADY_RECEIVED_TEXT =
@@ -143,16 +143,21 @@ async function handlePendingRequestUserInputReply(params: {
     }
 
     if (parsedCurrentQuestionReply.resolution === 'cancelled') {
-      const submitted = await submitPendingSlackRequestUserInputAnswer(
-        threadId,
-        pendingRequest,
-        {
-          answers: {},
-          user: event.user,
-          userId,
-          ts: event.ts,
-        },
-      );
+      const submitted = await setTrustedRunActingUserOnSuccess({
+        runId: activeJob.id,
+        userId,
+        operation: async () =>
+          await submitPendingSlackRequestUserInputAnswer(
+            threadId,
+            pendingRequest,
+            {
+              answers: {},
+              user: event.user,
+              userId,
+              ts: event.ts,
+            },
+          ),
+      });
 
       if (!submitted) {
         await postRequestUserInputAlreadyReceivedMessage({
@@ -198,16 +203,21 @@ async function handlePendingRequestUserInputReply(params: {
     const nextQuestionIndex = (currentQuestion.questionIndex ?? 0) + 1;
 
     if (nextQuestionIndex >= pendingRequest.questions.length) {
-      const submitted = await submitPendingSlackRequestUserInputAnswer(
-        threadId,
-        pendingRequest,
-        {
-          answers: nextAnswers,
-          user: event.user,
-          userId,
-          ts: event.ts,
-        },
-      );
+      const submitted = await setTrustedRunActingUserOnSuccess({
+        runId: activeJob.id,
+        userId,
+        operation: async () =>
+          await submitPendingSlackRequestUserInputAnswer(
+            threadId,
+            pendingRequest,
+            {
+              answers: nextAnswers,
+              user: event.user,
+              userId,
+              ts: event.ts,
+            },
+          ),
+      });
 
       if (!submitted) {
         await postRequestUserInputAlreadyReceivedMessage({
@@ -282,8 +292,8 @@ async function handlePendingRequestUserInputReply(params: {
         footerText: await getSlackThreadFooterText({
           taskUrl: buildSlackRequestUserInputTaskUrl(activeJob),
           taskId: activeJob.taskId,
-          prRepo: activeJob.prRepo ?? null,
-          prNumber: activeJob.prNumber ?? null,
+          prRepo: null,
+          prNumber: null,
           channelId: event.channel,
           threadTs: threadId,
         }),
@@ -311,16 +321,17 @@ async function handlePendingRequestUserInputReply(params: {
     ? parsedReply.answers[currentQuestion.question.id]?.answers[0]
     : undefined;
 
-  const submitted = await submitPendingSlackRequestUserInputAnswer(
-    threadId,
-    pendingRequest,
-    {
-      answers: parsedReply.resolution === 'cancelled' ? {} : mergedAnswers,
-      user: event.user,
-      userId,
-      ts: event.ts,
-    },
-  );
+  const submitted = await setTrustedRunActingUserOnSuccess({
+    runId: activeJob.id,
+    userId,
+    operation: async () =>
+      await submitPendingSlackRequestUserInputAnswer(threadId, pendingRequest, {
+        answers: parsedReply.resolution === 'cancelled' ? {} : mergedAnswers,
+        user: event.user,
+        userId,
+        ts: event.ts,
+      }),
+  });
 
   if (!submitted) {
     await postRequestUserInputAlreadyReceivedMessage({
@@ -441,7 +452,7 @@ export async function processActiveJobMessage(
     const attachments = await processSlackAttachments({
       slack,
       files: currentMessageFiles,
-      userId: activeJob.userId ?? undefined,
+      userId: activeJob.actingUserId ?? undefined,
       userTextContext: stripLeadingSlackProductMention(
         stripLeadingRawSlackMention(event.text),
       ),
@@ -475,7 +486,7 @@ export async function processActiveJobMessage(
           claimedMessages,
           excludeFileIds,
           logContext: `active job ${activeJob.id} in ${event.channel}:${threadId}`,
-          userId: activeJob.userId ?? undefined,
+          userId: activeJob.actingUserId ?? undefined,
           messageText,
           currentAttachmentTexts: attachments.attachmentTexts,
           currentVideoDescriptions: attachments.videoDescriptions,
@@ -496,6 +507,14 @@ export async function processActiveJobMessage(
     const allImages = [...attachments.images, ...claimedImageUris];
 
     try {
+      // Trusted pre-queue actor switch: the worker only runs this message's
+      // turn as `userId` if the server-side acting user already points at
+      // them (job tokens can no longer write actingUserId themselves).
+      await syncActingUserForInboundMessage({
+        logContext: 'slack.processActiveJobMessage',
+        jobId: activeJob.id,
+        senderUserId: userId,
+      });
       await queueSlackMessage(activeJob.id, {
         text: messageTextWithVideoDescriptions,
         user: event.user,

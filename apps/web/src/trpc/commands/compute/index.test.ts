@@ -9,6 +9,7 @@ const {
   mockDbDelete,
   mockUpsertDeploymentEnvironmentVariables,
   mockGetPersistedEnvironmentVariableNames,
+  mockGetPersistedEnvironmentVariableValues,
   mockResolveSavedWorkerImage,
   mockRunComputeProvisioning,
 } = vi.hoisted(() => ({
@@ -20,6 +21,7 @@ const {
   })),
   mockUpsertDeploymentEnvironmentVariables: vi.fn(),
   mockGetPersistedEnvironmentVariableNames: vi.fn().mockResolvedValue([]),
+  mockGetPersistedEnvironmentVariableValues: vi.fn().mockResolvedValue({}),
   mockResolveSavedWorkerImage: vi.fn().mockResolvedValue(null),
   mockRunComputeProvisioning: vi.fn().mockResolvedValue(undefined),
 }));
@@ -52,6 +54,7 @@ vi.mock('@roomote/db/server', () => ({
   })),
   isNull: vi.fn((field: unknown) => ({ op: 'isNull', field })),
   resolveSavedWorkerImage: mockResolveSavedWorkerImage,
+  purgeSavedDeploymentWorkerImage: vi.fn(async () => undefined),
 }));
 
 vi.mock('../environment-variables', () => ({
@@ -62,16 +65,16 @@ vi.mock('../environment-variables', () => ({
   },
   getPersistedEnvironmentVariableNames:
     mockGetPersistedEnvironmentVariableNames,
+  getPersistedEnvironmentVariableValues:
+    mockGetPersistedEnvironmentVariableValues,
   upsertDeploymentEnvironmentVariables:
     mockUpsertDeploymentEnvironmentVariables,
 }));
 
 import {
   clearComputeConfigCommand,
-  clearComputeWorkerImageCommand,
   getComputeStatusCommand,
   saveComputeConfigCommand,
-  saveComputeWorkerImageCommand,
   setDefaultComputeProviderCommand,
 } from './index';
 
@@ -125,6 +128,7 @@ describe('compute commands', () => {
     'MODAL_TOKEN_ID',
     'MODAL_TOKEN_SECRET',
     'MODAL_BASE_IMAGE_REF',
+    'MODAL_REGIONS',
     'E2B_API_KEY',
     'E2B_TEMPLATE_ID',
     'E2B_DOMAIN',
@@ -212,7 +216,7 @@ describe('compute commands', () => {
       delete process.env.DAYTONA_SNAPSHOT_NAME;
     });
 
-    it('persists submitted credential and infrastructure values together', async () => {
+    it('persists credentials and ignores submitted auto-provisioned artifacts', async () => {
       await saveComputeConfigCommand(buildMockAuth(), {
         provider: 'e2b',
         values: {
@@ -221,21 +225,19 @@ describe('compute commands', () => {
         },
       });
 
-      expect(mockUpsertDeploymentEnvironmentVariables).toHaveBeenCalledWith(
-        expect.anything(),
-        expect.objectContaining({
-          userId: 'compute-test-user',
-          values: [
-            { name: 'E2B_API_KEY', value: 'e2b-key' },
-            { name: 'E2B_TEMPLATE_ID', value: 'manual-template' },
-          ],
-        }),
+      const values = mockUpsertDeploymentEnvironmentVariables.mock.calls[0]?.[1]
+        ?.values as Array<{ name: string; value: string }>;
+      expect(values).toEqual(
+        expect.arrayContaining([{ name: 'E2B_API_KEY', value: 'e2b-key' }]),
       );
-      // A manual artifact value skips auto-provisioning.
-      expect(mockRunComputeProvisioning).not.toHaveBeenCalled();
+      expect(values.map((entry) => entry.name)).not.toContain(
+        'E2B_TEMPLATE_ID',
+      );
+      // Manual form template/snapshot overrides are ignored; provisioning still
+      // runs when a registry-qualified worker image is available.
     });
 
-    it('persists a submitted shared worker image', async () => {
+    it('uses a submitted worker image to derive Modal base image without sticky persist', async () => {
       await saveComputeConfigCommand(buildMockAuth(), {
         provider: 'modal',
         values: {
@@ -245,20 +247,18 @@ describe('compute commands', () => {
         },
       });
 
-      expect(mockUpsertDeploymentEnvironmentVariables).toHaveBeenCalledWith(
-        expect.anything(),
-        expect.objectContaining({
-          values: expect.arrayContaining([
-            {
-              name: 'DOCKER_WORKER_IMAGE',
-              value: 'registry.example.com/worker:tag',
-            },
-            {
-              name: 'MODAL_BASE_IMAGE_REF',
-              value: 'registry.example.com/worker:tag',
-            },
-          ]),
-        }),
+      const values = mockUpsertDeploymentEnvironmentVariables.mock.calls[0]?.[1]
+        ?.values as Array<{ name: string; value: string }>;
+      expect(values).toEqual(
+        expect.arrayContaining([
+          {
+            name: 'MODAL_BASE_IMAGE_REF',
+            value: 'registry.example.com/worker:tag',
+          },
+        ]),
+      );
+      expect(values.map((entry) => entry.name)).not.toContain(
+        'DOCKER_WORKER_IMAGE',
       );
     });
 
@@ -288,6 +288,63 @@ describe('compute commands', () => {
       } finally {
         delete process.env.MODAL_TOKEN_ID;
       }
+    });
+
+    it('clears a saved optional non-secret field when the operator empties it', async () => {
+      // Saved-only path: runtime MODAL_REGIONS would lock the field and
+      // skip delete. MANAGED_COMPUTE_ENV_VARS already clears it per-test.
+      delete process.env.MODAL_REGIONS;
+      mockGetPersistedEnvironmentVariableNames.mockResolvedValue([
+        'MODAL_TOKEN_ID',
+        'MODAL_TOKEN_SECRET',
+        'MODAL_REGIONS',
+      ]);
+      const txWhere = vi.fn(async () => undefined);
+      const txDelete = vi.fn(() => ({ where: txWhere }));
+      const {
+        and: txAnd,
+        inArray: txInArray,
+        isNull: txIsNull,
+      } = await import('@roomote/db/server');
+
+      mockDbTransaction.mockImplementation(async (callback) => {
+        return callback({
+          select: createSelectChain(),
+          insert: createInsertChain(),
+          delete: txDelete,
+        } as never);
+      });
+
+      await saveComputeConfigCommand(buildMockAuth(), {
+        provider: 'modal',
+        values: {
+          MODAL_REGIONS: '',
+        },
+      });
+
+      expect(mockUpsertDeploymentEnvironmentVariables).not.toHaveBeenCalled();
+      expect(txDelete).toHaveBeenCalled();
+      expect(txIsNull).toHaveBeenCalledWith('env.user_id');
+      expect(txInArray).toHaveBeenCalledWith('env.name', ['MODAL_REGIONS']);
+      expect(txAnd).toHaveBeenCalledWith(
+        { op: 'isNull', field: 'env.user_id' },
+        {
+          op: 'inArray',
+          field: 'env.name',
+          values: ['MODAL_REGIONS'],
+        },
+      );
+      expect(txWhere).toHaveBeenCalledWith({
+        op: 'and',
+        conditions: [
+          { op: 'isNull', field: 'env.user_id' },
+          {
+            op: 'inArray',
+            field: 'env.name',
+            values: ['MODAL_REGIONS'],
+          },
+        ],
+      });
     });
 
     it('does not block credential saves on missing env-only infrastructure', async () => {
@@ -352,14 +409,13 @@ describe('compute commands', () => {
       });
     });
 
-    it('starts the E2B template build from a saved worker image', async () => {
-      mockResolveSavedWorkerImage.mockResolvedValue(
-        'registry.example.com/worker:tag',
-      );
-
+    it('starts the E2B template build from a submitted worker image', async () => {
       await saveComputeConfigCommand(buildMockAuth(), {
         provider: 'e2b',
-        values: { E2B_API_KEY: 'e2b-key' },
+        values: {
+          E2B_API_KEY: 'e2b-key',
+          DOCKER_WORKER_IMAGE: 'registry.example.com/worker:tag',
+        },
       });
 
       expect(mockRunComputeProvisioning).toHaveBeenCalledWith({
@@ -465,6 +521,7 @@ describe('compute commands', () => {
         'MODAL_TOKEN_ID',
         'MODAL_TOKEN_SECRET',
         'MODAL_BASE_IMAGE_REF',
+        'MODAL_REGIONS',
       ]);
       expect(txIsNull).toHaveBeenCalledWith('env.user_id');
       expect(txAnd).toHaveBeenCalledWith(
@@ -476,6 +533,7 @@ describe('compute commands', () => {
             'MODAL_TOKEN_ID',
             'MODAL_TOKEN_SECRET',
             'MODAL_BASE_IMAGE_REF',
+            'MODAL_REGIONS',
           ],
         },
       );
@@ -490,6 +548,7 @@ describe('compute commands', () => {
               'MODAL_TOKEN_ID',
               'MODAL_TOKEN_SECRET',
               'MODAL_BASE_IMAGE_REF',
+              'MODAL_REGIONS',
             ],
           },
         ],
@@ -500,76 +559,6 @@ describe('compute commands', () => {
       await clearComputeConfigCommand(buildMockAuth(), { provider: 'docker' });
 
       expect(mockDbTransaction).not.toHaveBeenCalled();
-    });
-  });
-
-  describe('saveComputeWorkerImageCommand', () => {
-    beforeEach(() => {
-      mockDbTransaction.mockImplementation(async (callback) => {
-        return callback({
-          insert: createInsertChain(),
-        } as never);
-      });
-      delete process.env.DOCKER_WORKER_IMAGE;
-    });
-
-    afterEach(() => {
-      delete process.env.DOCKER_WORKER_IMAGE;
-    });
-
-    it('saves the shared worker image as a deployment env var', async () => {
-      await saveComputeWorkerImageCommand(buildMockAuth(), {
-        value: '  registry.example.com/worker:tag  ',
-      });
-
-      expect(mockUpsertDeploymentEnvironmentVariables).toHaveBeenCalledWith(
-        expect.anything(),
-        expect.objectContaining({
-          userId: 'compute-test-user',
-          values: [
-            {
-              name: 'DOCKER_WORKER_IMAGE',
-              value: 'registry.example.com/worker:tag',
-            },
-          ],
-        }),
-      );
-    });
-
-    it('rejects a blank worker image', async () => {
-      await expect(
-        saveComputeWorkerImageCommand(buildMockAuth(), { value: '   ' }),
-      ).rejects.toThrow('Enter a worker image reference to save.');
-    });
-
-    it('refuses to override an env-provided worker image', async () => {
-      process.env.DOCKER_WORKER_IMAGE = 'registry.example.com/env:tag';
-
-      await expect(
-        saveComputeWorkerImageCommand(buildMockAuth(), {
-          value: 'registry.example.com/worker:tag',
-        }),
-      ).rejects.toThrow(
-        'The worker image is set via an environment variable and cannot be overridden here.',
-      );
-    });
-  });
-
-  describe('clearComputeWorkerImageCommand', () => {
-    it('deletes the shared worker image deployment env var', async () => {
-      const txWhere = vi.fn(async () => undefined);
-      const txDelete = vi.fn(() => ({ where: txWhere }));
-      const { inArray: txInArray } = await import('@roomote/db/server');
-
-      mockDbTransaction.mockImplementation(async (callback) => {
-        return callback({ delete: txDelete } as never);
-      });
-
-      await clearComputeWorkerImageCommand(buildMockAuth());
-
-      expect(txInArray).toHaveBeenCalledWith('env.name', [
-        'DOCKER_WORKER_IMAGE',
-      ]);
     });
   });
 
@@ -587,7 +576,7 @@ describe('compute commands', () => {
           provider: 'modal',
         }),
       ).rejects.toThrow(
-        'Configure Modal before making it the default compute provider.',
+        'Configure Modal before making it the default sandbox provider.',
       );
     });
 

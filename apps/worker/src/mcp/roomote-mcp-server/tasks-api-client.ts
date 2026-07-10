@@ -1,4 +1,8 @@
-import { buildApiHeaders, parseApiError } from './api-client.js';
+import {
+  buildApiHeaders,
+  fetchWithTimeout,
+  parseApiError,
+} from './api-client.js';
 import type {
   AutomationWorkItemDisposition,
   SourceControlProvider,
@@ -37,12 +41,16 @@ async function apiFetch<T>(
   options: RequestInit = {},
   errorPrefix: string,
 ): Promise<T> {
-  const response = await fetch(`${config.platformApiUrl}${path}`, {
-    ...options,
-    headers: buildApiHeaders(config, {
-      ...(options.headers as Record<string, string> | undefined),
-    }),
-  });
+  const response = await fetchWithTimeout(
+    `${config.platformApiUrl}${path}`,
+    {
+      ...options,
+      headers: buildApiHeaders(config, {
+        ...(options.headers as Record<string, string> | undefined),
+      }),
+    },
+    { label: errorPrefix },
+  );
 
   if (!response.ok) {
     const error = await parseApiError(response);

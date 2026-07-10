@@ -23,7 +23,6 @@ import {
 
 import { Section } from './Section';
 import { ComputeProviderSection } from './ComputeProviderSection';
-import { ComputeWorkerImageSection } from './ComputeWorkerImageSection';
 
 type ComputeProviderStatus = SetupComputeStatus['providers'][number];
 
@@ -70,34 +69,10 @@ export function ComputeProviders() {
     trpc.compute.saveConfig.mutationOptions({
       onSuccess: async () => {
         await invalidateComputeQueries();
-        toast.success('Compute provider credentials saved.');
+        toast.success('Sandbox provider credentials saved.');
       },
       onError: (error) => {
         toast.error(error.message || 'Failed to save credentials.');
-      },
-    }),
-  );
-
-  const saveWorkerImage = useMutation(
-    trpc.compute.saveWorkerImage.mutationOptions({
-      onSuccess: async () => {
-        await invalidateComputeQueries();
-        toast.success('Worker image saved.');
-      },
-      onError: (error) => {
-        toast.error(error.message || 'Failed to save the worker image.');
-      },
-    }),
-  );
-
-  const clearWorkerImage = useMutation(
-    trpc.compute.clearWorkerImage.mutationOptions({
-      onSuccess: async () => {
-        await invalidateComputeQueries();
-        toast.success('Worker image cleared.');
-      },
-      onError: (error) => {
-        toast.error(error.message || 'Failed to clear the worker image.');
       },
     }),
   );
@@ -106,7 +81,7 @@ export function ComputeProviders() {
     trpc.compute.clearConfig.mutationOptions({
       onSuccess: async () => {
         await invalidateComputeQueries();
-        toast.success('Compute provider credentials cleared.');
+        toast.success('Sandbox provider credentials cleared.');
       },
       onError: (error) => {
         toast.error(error.message || 'Failed to clear credentials.');
@@ -118,7 +93,7 @@ export function ComputeProviders() {
     trpc.compute.setDefaultProvider.mutationOptions({
       onSuccess: async () => {
         await queryClient.invalidateQueries({ queryKey: statusQueryKey });
-        toast.success('Default compute provider updated.');
+        toast.success('Default sandbox provider updated.');
       },
       onError: (error) => {
         toast.error(error.message || 'Failed to update the default provider.');
@@ -159,7 +134,7 @@ export function ComputeProviders() {
   if (status.isError) {
     return (
       <p className="text-sm text-destructive">
-        Failed to load compute provider status.
+        Failed to load sandbox provider status.
       </p>
     );
   }
@@ -167,17 +142,17 @@ export function ComputeProviders() {
   if (providers.length === 0) {
     return (
       <p className="text-sm text-muted-foreground">
-        No compute providers are available.
+        No sandbox providers are available.
       </p>
     );
   }
 
   return (
     <div className="space-y-4">
-      <Section icon={Cpu} title="Default compute provider">
+      <Section icon={Cpu} title="Default sandbox provider">
         <div className="max-w-xl space-y-3">
           <p className="text-sm text-muted-foreground">
-            Roomote runs each task on an isolated machine. New tasks run on this
+            Roomote runs each task on an isolated sandbox. New tasks run on this
             provider unless a task explicitly overrides it.
           </p>
           <Select
@@ -188,7 +163,7 @@ export function ComputeProviders() {
             disabled={setDefaultProvider.isPending}
           >
             <SelectTrigger className="w-full sm:w-72">
-              <SelectValue placeholder="Select a compute provider" />
+              <SelectValue placeholder="Select a sandbox provider" />
             </SelectTrigger>
             <SelectContent>
               {providers.map((provider) => (
@@ -207,7 +182,7 @@ export function ComputeProviders() {
             <Alert variant="notice">
               <Info className="size-4" />
               <p>
-                {defaultProviderStatus.label} is the default compute provider
+                {defaultProviderStatus.label} is the default sandbox provider
                 but is missing configuration. Tasks may fail to start until it
                 is configured or another default is selected.
               </p>
@@ -215,15 +190,6 @@ export function ComputeProviders() {
           )}
         </div>
       </Section>
-      {status.data ? (
-        <ComputeWorkerImageSection
-          workerImage={status.data.workerImage}
-          onSave={(value) => saveWorkerImage.mutate({ value })}
-          onClear={() => clearWorkerImage.mutate()}
-          savePending={saveWorkerImage.isPending}
-          clearPending={clearWorkerImage.isPending}
-        />
-      ) : null}
       {providers.map((provider) => (
         <ComputeProviderSection
           key={provider.provider}

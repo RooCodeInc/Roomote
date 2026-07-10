@@ -1,10 +1,10 @@
 import type { Context } from 'hono';
 import { z } from 'zod';
 
-import { CloudTaskType, type CloudTaskPayload } from '@roomote/types';
+import { TaskPayloadKind, type TaskPayload } from '@roomote/types';
 import { normalizeSetupNewState } from '@roomote/types';
 import { Env } from '@roomote/env';
-import { cloudJobs, db, eq } from '@roomote/db/server';
+import { db, eq, taskRuns, tasks } from '@roomote/db/server';
 import {
   hydrateSetupMcpRecommendations,
   isSetupMcpRecommendationId,
@@ -44,14 +44,15 @@ const submitMcpRecommendationsBodySchema = z.object({
     .max(20),
 });
 
-const ACTIVE_SETUP_TASK_TYPES = new Set([
-  CloudTaskType.StandardTask,
-  CloudTaskType.McpRecommendations,
-  CloudTaskType.SnapshotResume,
+const ACTIVE_SETUP_TASK_TYPES = new Set<TaskPayloadKind>([
+  TaskPayloadKind.StandardTask,
+  TaskPayloadKind.McpRecommendations,
+  TaskPayloadKind.SnapshotResume,
 ]);
 
-type McpRecommendationsPayload =
-  CloudTaskPayload<CloudTaskType.McpRecommendations>;
+type McpRecommendationsPayload = TaskPayload<
+  typeof TaskPayloadKind.McpRecommendations
+>;
 
 /**
  * POST /api/mcp/tasks/:taskId/mcp_recommendations
@@ -83,15 +84,21 @@ export async function submitMcpRecommendations(
   }
 
   try {
-    const [cloudJob, deploymentSettings] = await Promise.all([
-      db.query.cloudJobs.findFirst({
-        where: eq(cloudJobs.taskId, taskId),
+    const [run, task, deploymentSettings] = await Promise.all([
+      db.query.taskRuns.findFirst({
+        where: eq(taskRuns.taskId, taskId),
         orderBy: (table, { desc }) => desc(table.id),
         columns: {
           id: true,
-          type: true,
-          userId: true,
+          payloadKind: true,
+          actingUserId: true,
           payload: true,
+        },
+      }),
+      db.query.tasks.findFirst({
+        where: eq(tasks.id, taskId),
+        columns: {
+          initiatorUserId: true,
         },
       }),
       db.query.deploymentSettings.findFirst({
@@ -101,18 +108,18 @@ export async function submitMcpRecommendations(
       }),
     ]);
 
-    if (!cloudJob) {
+    if (!run) {
       return c.json({ error: 'Task not found' }, 404);
     }
 
     if (
       !('cloudJobId' in auth.authContext) ||
-      auth.authContext.cloudJobId !== cloudJob.id
+      auth.authContext.cloudJobId !== run.id
     ) {
       return c.json({ error: 'Task access denied' }, 403);
     }
 
-    if (!ACTIVE_SETUP_TASK_TYPES.has(cloudJob.type)) {
+    if (!ACTIVE_SETUP_TASK_TYPES.has(run.payloadKind)) {
       return c.json({ error: 'Task is not a setup task' }, 400);
     }
 
@@ -121,8 +128,8 @@ export async function submitMcpRecommendations(
     );
 
     const sourceTaskId =
-      cloudJob.type === CloudTaskType.McpRecommendations
-        ? (cloudJob.payload as McpRecommendationsPayload).sourceTaskId
+      run.payloadKind === TaskPayloadKind.McpRecommendations
+        ? (run.payload as McpRecommendationsPayload).sourceTaskId
         : taskId;
 
     if (
@@ -150,8 +157,8 @@ export async function submitMcpRecommendations(
         );
 
     const payload =
-      cloudJob.type === CloudTaskType.McpRecommendations
-        ? (cloudJob.payload as McpRecommendationsPayload)
+      run.payloadKind === TaskPayloadKind.McpRecommendations
+        ? (run.payload as McpRecommendationsPayload)
         : null;
 
     const configuredRecommendationIds = new Set(
@@ -177,7 +184,8 @@ export async function submitMcpRecommendations(
       createdByUserId:
         payload?.installerUserId ??
         auth.userId ??
-        cloudJob.userId ??
+        run.actingUserId ??
+        task?.initiatorUserId ??
         setupNewState.lastInteractedByUserId ??
         null,
       recommendations: filteredRecommendations,

@@ -2,10 +2,13 @@ import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import type { ReactNode } from 'react';
 import { toast } from 'sonner';
 
-const { changeEmailMock, changePasswordMock } = vi.hoisted(() => ({
-  changeEmailMock: vi.fn(),
-  changePasswordMock: vi.fn(),
-}));
+const { changeEmailMock, changePasswordMock, updateUserMock } = vi.hoisted(
+  () => ({
+    changeEmailMock: vi.fn(),
+    changePasswordMock: vi.fn(),
+    updateUserMock: vi.fn(),
+  }),
+);
 
 vi.mock('sonner', () => ({
   toast: {
@@ -18,6 +21,7 @@ vi.mock('@/lib/auth-client', () => ({
   authClient: {
     changeEmail: changeEmailMock,
     changePassword: changePasswordMock,
+    updateUser: updateUserMock,
   },
 }));
 
@@ -57,6 +61,10 @@ describe('UserProfileSection', () => {
       error: null,
     });
     changePasswordMock.mockResolvedValue({
+      data: { status: true },
+      error: null,
+    });
+    updateUserMock.mockResolvedValue({
       data: { status: true },
       error: null,
     });
@@ -100,10 +108,11 @@ describe('UserProfileSection', () => {
     );
 
     expect(screen.getByText('Teammate')).toBeInTheDocument();
-    expect(screen.getByRole('img', { name: 'Teammate' })).toHaveAttribute(
-      'src',
-      'https://example.com/avatar.png',
-    );
+    const avatar = screen.getByLabelText('Teammate');
+    const image = avatar.querySelector('img');
+    expect(image).not.toBeNull();
+    expect(image).toHaveAttribute('src', 'https://example.com/avatar.png');
+    expect(image).toHaveAttribute('alt', '');
   });
 
   it('shows credential details and expands the edit form for credential users', () => {
@@ -125,13 +134,14 @@ describe('UserProfileSection', () => {
 
     fireEvent.click(screen.getByRole('button', { name: 'Edit' }));
 
+    expect(screen.getByLabelText('Name')).toHaveValue('Matt User');
     expect(screen.getByLabelText('Email')).toHaveValue('matt@example.com');
     expect(screen.getByLabelText('Current password')).toBeInTheDocument();
     expect(screen.getByLabelText('New password')).toBeInTheDocument();
     expect(screen.getByLabelText('Confirm password')).toBeInTheDocument();
   });
 
-  it('updates email and password from the expanded profile form', async () => {
+  it('updates name, email, and password from the expanded profile form', async () => {
     render(
       <UserProfileSection
         canChangePassword={true}
@@ -144,6 +154,9 @@ describe('UserProfileSection', () => {
     );
 
     fireEvent.click(screen.getByRole('button', { name: 'Edit' }));
+    fireEvent.change(screen.getByLabelText('Name'), {
+      target: { value: 'New Name' },
+    });
     fireEvent.change(screen.getByLabelText('Email'), {
       target: { value: 'new@example.com' },
     });
@@ -159,6 +172,7 @@ describe('UserProfileSection', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Save changes' }));
 
     await waitFor(() => {
+      expect(updateUserMock).toHaveBeenCalledWith({ name: 'New Name' });
       expect(changeEmailMock).toHaveBeenCalledWith({
         newEmail: 'new@example.com',
       });
@@ -169,6 +183,61 @@ describe('UserProfileSection', () => {
       revokeOtherSessions: true,
     });
     expect(toast.success).toHaveBeenCalledWith('Profile updated.');
+    expect(routerRefreshMock).toHaveBeenCalled();
+  });
+
+  it('requires a non-blank name before updating the profile', () => {
+    render(
+      <UserProfileSection
+        canChangePassword={true}
+        profile={{
+          email: 'matt@example.com',
+          imageUrl: '',
+          name: 'Matt User',
+        }}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: 'Edit' }));
+    fireEvent.change(screen.getByLabelText('Name'), {
+      target: { value: '   ' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Save changes' }));
+
+    expect(toast.error).toHaveBeenCalledWith('Enter your name.');
+    expect(updateUserMock).not.toHaveBeenCalled();
+  });
+
+  it('refreshes the profile after a name update when email changes fail', async () => {
+    changeEmailMock.mockResolvedValue({
+      data: null,
+      error: { message: 'Email update failed' },
+    });
+
+    render(
+      <UserProfileSection
+        canChangePassword={true}
+        profile={{
+          email: 'matt@example.com',
+          imageUrl: '',
+          name: 'Matt User',
+        }}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: 'Edit' }));
+    fireEvent.change(screen.getByLabelText('Name'), {
+      target: { value: 'New Name' },
+    });
+    fireEvent.change(screen.getByLabelText('Email'), {
+      target: { value: 'new@example.com' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Save changes' }));
+
+    await waitFor(() => {
+      expect(routerRefreshMock).toHaveBeenCalled();
+    });
+    expect(toast.error).toHaveBeenCalledWith('Email update failed');
   });
 
   it('validates matching passwords before updating credentials', () => {

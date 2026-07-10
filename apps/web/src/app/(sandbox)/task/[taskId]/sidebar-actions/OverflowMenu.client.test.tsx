@@ -145,7 +145,7 @@ import { OverflowMenu } from './OverflowMenu';
 function createCloudJob(overrides: Record<string, unknown> = {}) {
   return {
     id: 123,
-    userId: 'user-1',
+    actingUserId: 'user-1',
     status: 'running',
     machineId: 'machine-1',
     snapshotId: null,

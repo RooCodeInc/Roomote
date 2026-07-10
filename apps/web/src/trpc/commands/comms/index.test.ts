@@ -9,6 +9,7 @@ const {
   mockUpsertDeploymentEnvironmentVariables,
   mockGetPersistedEnvironmentVariableNames,
   mockResolveEffectiveDeploymentEnvVars,
+  mockResolveInvocationIdentities,
 } = vi.hoisted(() => ({
   mockDbDelete: vi.fn(() => ({
     where: vi.fn(async () => undefined),
@@ -18,6 +19,7 @@ const {
   mockUpsertDeploymentEnvironmentVariables: vi.fn(),
   mockGetPersistedEnvironmentVariableNames: vi.fn().mockResolvedValue([]),
   mockResolveEffectiveDeploymentEnvVars: vi.fn().mockResolvedValue({}),
+  mockResolveInvocationIdentities: vi.fn().mockResolvedValue([]),
 }));
 
 vi.mock('@roomote/db/server', () => ({
@@ -32,6 +34,7 @@ vi.mock('@roomote/db/server', () => ({
   inArray: vi.fn(),
   isNull: vi.fn(),
   resolveEffectiveDeploymentEnvVars: mockResolveEffectiveDeploymentEnvVars,
+  resolveInvocationIdentities: mockResolveInvocationIdentities,
   resolveTelegramRuntimeCredentials: vi.fn(async () => ({
     botToken: null,
     webhookSecret: null,

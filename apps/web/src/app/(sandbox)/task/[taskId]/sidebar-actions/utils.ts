@@ -1,18 +1,21 @@
-import { CloudTaskType } from '@roomote/types';
+import { TaskPayloadKind } from '@roomote/types';
 
 import type { CloudJobDetail } from '@/lib/server/cloud-jobs';
 
 import type { ArtifactGroup } from './types';
 
-const TASK_TOOLS_HIDDEN_TYPES: ReadonlySet<string> = new Set<string>([
-  CloudTaskType.GithubPrReview,
-  CloudTaskType.GithubPrReviewSync,
+const TASK_TOOLS_HIDDEN_PAYLOAD_KINDS: ReadonlySet<string> = new Set<string>([
+  TaskPayloadKind.GithubPrReview,
+  TaskPayloadKind.GithubPrReviewSync,
 ]);
 
 export function shouldShowTaskToolsActions(
-  cloudJobType: string | null | undefined,
+  cloudJobPayloadKind: string | null | undefined,
 ): boolean {
-  return !!cloudJobType && !TASK_TOOLS_HIDDEN_TYPES.has(cloudJobType);
+  return (
+    !!cloudJobPayloadKind &&
+    !TASK_TOOLS_HIDDEN_PAYLOAD_KINDS.has(cloudJobPayloadKind)
+  );
 }
 
 /**

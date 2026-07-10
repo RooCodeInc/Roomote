@@ -4,8 +4,8 @@ import { Hono } from 'hono';
 
 import {
   AGENT_DISPLAY_NAME,
-  type CloudTaskPayload,
-  CloudTaskType,
+  type TaskPayload,
+  TaskPayloadKind,
   formatErrorForLog,
   parseAcpRequestUserInputAnswerReply,
   ALL_REPOSITORIES,
@@ -17,12 +17,13 @@ import { Env } from '@roomote/env';
 import {
   type RoutingDebugInfo,
   type RoutingWorkspace,
-  enqueueCloudTask,
+  enqueueTask,
   routeTask,
   buildLinearRoutingContext,
 } from '@roomote/cloud-agents/server';
 import { getRedis } from '@roomote/redis';
 import { postRouterDebugMessage } from '@roomote/slack';
+import { setTrustedRunActingUserOnSuccess } from '@roomote/db/server';
 import {
   createMcpOauthReplay,
   findLinearDeploymentMcpConnectionByIdentity,
@@ -56,6 +57,7 @@ import {
 } from '@roomote/linear';
 
 import type { WebhookResponse } from '../../types';
+import { syncActingUserForInboundMessage } from '../tasks/acting-user-sync.js';
 
 import { recordLinearWebhook } from './recordWebhook';
 
@@ -577,17 +579,29 @@ async function handleAgentSessionEvent(
           );
 
           if (parsedReply) {
-            await queueLinearRequestUserInputAnswer(activeJob.id, {
-              requestId: pendingRequest.requestId,
-              answers: parsedReply.answers,
+            // Question answers return before the normal active-message actor
+            // sync below, so apply the trusted sender before marking the
+            // request submitted. Otherwise the worker drops a different
+            // linked user's answer as a mismatch and it cannot be resent.
+            await setTrustedRunActingUserOnSuccess({
+              runId: activeJob.id,
               userId,
-              timestamp: Date.now(),
-            });
+              operation: async () => {
+                await queueLinearRequestUserInputAnswer(activeJob.id, {
+                  requestId: pendingRequest.requestId,
+                  answers: parsedReply.answers,
+                  userId,
+                  timestamp: Date.now(),
+                });
 
-            await markPendingLinearRequestUserInputSubmitted(
-              sessionId,
-              pendingRequest.requestId,
-            );
+                await markPendingLinearRequestUserInputSubmitted(
+                  sessionId,
+                  pendingRequest.requestId,
+                );
+
+                return true;
+              },
+            });
 
             return { status: 'ok' };
           }
@@ -597,6 +611,13 @@ async function handleAgentSessionEvent(
         }
       }
 
+      // Trusted pre-queue actor switch; see acting-user-sync.ts. The worker
+      // only runs the queued turn as this sender if the server actor matches.
+      await syncActingUserForInboundMessage({
+        logContext: 'linear.activeJobMessage',
+        jobId: activeJob.id,
+        senderUserId: userId,
+      });
       // Queue the message for the running worker to pick up
       await queueLinearMessage(activeJob.id, sessionId, payload, userId);
 
@@ -800,7 +821,9 @@ async function handleAgentSessionEvent(
           typeof completedPayload?.environmentId === 'string'
             ? completedPayload.environmentId
             : undefined;
-        const resumePayload: CloudTaskPayload<CloudTaskType.SnapshotResume> = {
+        const resumePayload: TaskPayload<
+          typeof TaskPayloadKind.SnapshotResume
+        > = {
           repo,
           environmentId,
           port: completedJob.port ?? undefined,
@@ -816,19 +839,17 @@ async function handleAgentSessionEvent(
           completedPayload,
         );
 
-        const resumeLaunch = await enqueueCloudTask(
+        // Resumes never create tasks and never re-attribute; the resuming
+        // human becomes the new run's acting user.
+        const resumeLaunch = await enqueueTask(
           {
-            type: CloudTaskType.SnapshotResume,
-            userId: completedJob.userId,
-            linearSessionId: sessionId,
-            linearIssueId: agentSession.issue.id,
-            linearOrganizationId: organizationId,
-            sourceSnapshotId: completedJob.snapshotId,
-            sourceCloudJobId: completedJob.id,
-            ...(completedJob.slackThreadTs
-              ? { slackThreadTs: completedJob.slackThreadTs }
-              : {}),
-            payload: resumePayload,
+            task: {
+              type: TaskPayloadKind.SnapshotResume,
+              sourceSnapshotId: completedJob.snapshotId,
+              sourceCloudJobId: completedJob.id,
+              payload: resumePayload,
+            },
+            actingUserId: userId ?? completedJob.actingUserId ?? null,
           },
           {},
         );

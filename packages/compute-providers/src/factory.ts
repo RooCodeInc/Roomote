@@ -24,6 +24,24 @@ const MODAL_DEFAULT_MEMORY_LIMIT_MIB = SANDBOX_DEFAULT_MEMORY_MIB * 2;
 
 export { getComputeProviderCapabilities } from '@roomote/types';
 
+/**
+ * Parse a comma-separated Modal regions env/config string into a clean list.
+ * Empty tokens after trim are dropped. Returns undefined when nothing remains.
+ */
+export function parseModalRegions(
+  value: string | string[] | undefined | null,
+): string[] | undefined {
+  if (value == null) {
+    return undefined;
+  }
+
+  const tokens = (Array.isArray(value) ? value : value.split(','))
+    .map((token) => token.trim())
+    .filter((token) => token.length > 0);
+
+  return tokens.length > 0 ? tokens : undefined;
+}
+
 export function createComputeProviderClient(
   options: ComputeProviderFactoryOptions,
 ): ComputeProviderClient {
@@ -65,6 +83,8 @@ export function createComputeProviderClient(
       const modalAppName = envValue('MODAL_APP_NAME');
       const modalEcrOidcRoleArn = envValue('MODAL_ECR_OIDC_ROLE_ARN');
       const modalEcrRegion = envValue('MODAL_ECR_REGION');
+      const modalRegions = parseModalRegions(envValue('MODAL_REGIONS'));
+      const configRegions = parseModalRegions(options.config?.regions);
 
       assertDefined(tokenId, 'Missing MODAL_TOKEN_ID');
       assertDefined(tokenSecret, 'Missing MODAL_TOKEN_SECRET');
@@ -98,6 +118,13 @@ export function createComputeProviderClient(
         ...(options.config?.ecrRegion === undefined && modalEcrRegion
           ? { ecrRegion: modalEcrRegion }
           : {}),
+        ...(options.config?.regions === undefined && modalRegions
+          ? { regions: modalRegions }
+          : configRegions
+            ? { regions: configRegions }
+            : options.config?.regions !== undefined
+              ? { regions: undefined }
+              : {}),
         ...(configuredResources.configuredCpuCores !== null
           ? { cpu: configuredResources.configuredCpuCores }
           : {}),

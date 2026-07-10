@@ -17,7 +17,7 @@ import type {
   GithubPullRequestReviewOpenTask,
   GithubPullRequestReviewSyncTask,
 } from '@roomote/types';
-import { CloudTaskType } from '@roomote/types';
+import { TaskPayloadKind } from '@roomote/types';
 
 import { githubPrReview } from '../githubPrReview';
 import { githubPrReviewSync } from '../githubPrReviewSync';
@@ -55,7 +55,7 @@ describe('GitLab MR review workflows', () => {
   it('builds initial GitLab MR review prompts without fetching GitHub PR details', async () => {
     const result = await githubPrReview({
       cloudTask: {
-        type: CloudTaskType.GithubPrReview,
+        type: TaskPayloadKind.GithubPrReview,
         payload: basePayload,
       } as GithubPullRequestReviewOpenTask,
       gitHubToken: 'unused',
@@ -74,7 +74,7 @@ describe('GitLab MR review workflows', () => {
   it('builds GitLab MR sync review prompts without fetching GitHub PR details', async () => {
     const result = await githubPrReviewSync({
       cloudTask: {
-        type: CloudTaskType.GithubPrReviewSync,
+        type: TaskPayloadKind.GithubPrReviewSync,
         payload: basePayload,
       } as GithubPullRequestReviewSyncTask,
       gitHubToken: 'unused',
@@ -91,7 +91,7 @@ describe('GitLab MR review workflows', () => {
   it('builds initial Gitea PR review prompts without fetching GitHub PR details', async () => {
     const result = await githubPrReview({
       cloudTask: {
-        type: CloudTaskType.GithubPrReview,
+        type: TaskPayloadKind.GithubPrReview,
         payload: giteaPayload,
       } as GithubPullRequestReviewOpenTask,
       gitHubToken: 'unused',
@@ -108,7 +108,7 @@ describe('GitLab MR review workflows', () => {
   it('builds Gitea PR sync review prompts without fetching GitHub PR details', async () => {
     const result = await githubPrReviewSync({
       cloudTask: {
-        type: CloudTaskType.GithubPrReviewSync,
+        type: TaskPayloadKind.GithubPrReviewSync,
         payload: giteaPayload,
       } as GithubPullRequestReviewSyncTask,
       gitHubToken: 'unused',
@@ -125,7 +125,7 @@ describe('GitLab MR review workflows', () => {
   it('builds initial Azure DevOps PR review prompts without fetching GitHub PR details', async () => {
     const result = await githubPrReview({
       cloudTask: {
-        type: CloudTaskType.GithubPrReview,
+        type: TaskPayloadKind.GithubPrReview,
         payload: adoPayload,
       } as GithubPullRequestReviewOpenTask,
       gitHubToken: 'unused',
@@ -144,7 +144,7 @@ describe('GitLab MR review workflows', () => {
   it('builds Azure DevOps PR sync review prompts without fetching GitHub PR details', async () => {
     const result = await githubPrReviewSync({
       cloudTask: {
-        type: CloudTaskType.GithubPrReviewSync,
+        type: TaskPayloadKind.GithubPrReviewSync,
         payload: adoPayload,
       } as GithubPullRequestReviewSyncTask,
       gitHubToken: 'unused',

@@ -29,6 +29,13 @@ const {
   createMcpOauthReplayMock: vi.fn(),
 }));
 
+const { setTrustedRunActingUserOnSuccessMock } = vi.hoisted(() => ({
+  setTrustedRunActingUserOnSuccessMock: vi.fn(
+    async ({ operation }: { operation: () => Promise<boolean> }) =>
+      await operation(),
+  ),
+}));
+
 vi.mock('@roomote/env', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@roomote/env')>();
 
@@ -43,7 +50,7 @@ vi.mock('@roomote/env', async (importOriginal) => {
 });
 
 vi.mock('@roomote/cloud-agents/server', () => ({
-  enqueueCloudTask: vi.fn(),
+  enqueueTask: vi.fn(),
   routeTask: vi.fn(),
   buildLinearRoutingContext: vi.fn(),
   AGENT_TYPE_TO_PROMPT_NAME: {},
@@ -158,6 +165,7 @@ vi.mock('@roomote/db/server', async (importOriginal) => {
     },
     linearAuthTokens: {},
     webhooks: { id: 'id', deliveryId: 'deliveryId' },
+    setTrustedRunActingUserOnSuccess: setTrustedRunActingUserOnSuccessMock,
     eq: vi.fn(),
     and: vi.fn(),
   };
@@ -386,6 +394,18 @@ describe('CLO-1133: active job takes priority over routing confirmation and elic
           },
         },
       }),
+    );
+    expect(setTrustedRunActingUserOnSuccessMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        runId: 42,
+        userId: 'user-1',
+        operation: expect.any(Function),
+      }),
+    );
+    expect(
+      setTrustedRunActingUserOnSuccessMock.mock.invocationCallOrder[0]!,
+    ).toBeLessThan(
+      vi.mocked(queueLinearRequestUserInputAnswer).mock.invocationCallOrder[0]!,
     );
     expect(markPendingLinearRequestUserInputSubmitted).toHaveBeenCalledWith(
       'session-1',

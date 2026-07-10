@@ -45,7 +45,7 @@ const baseSession: CloudSession = {
     id: 1,
     status: 'dequeued' as const,
     taskPhase: null,
-    type: 'standard.task' as const,
+    payloadKind: 'standard' as const,
   } as CloudSession['cloudJob'],
   draftPrompt: null,
   harness: 'opencode-server',

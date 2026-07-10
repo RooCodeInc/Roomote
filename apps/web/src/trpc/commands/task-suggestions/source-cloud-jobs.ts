@@ -1,9 +1,7 @@
-import { cloudJobs, db, desc, inArray } from '@roomote/db/server';
+import { and, asc, db, eq, inArray, taskRuns } from '@roomote/db/server';
 import {
-  CloudTaskType,
   TASK_SUGGESTION_SOURCES,
   getScheduledSuggestionBackgroundAutomationDescriptor,
-  type CloudTaskPayload,
   type TaskSuggestionSource,
 } from '@roomote/types';
 
@@ -34,12 +32,7 @@ const suggestionHistoryAutomationLabelByValue = new Map<
 const suggestionTaskSourceSet = new Set<string>(TASK_SUGGESTION_SOURCES);
 
 export function getSuggestionHistoryAutomation(
-  cloudJob:
-    | {
-        type: CloudTaskType;
-        payload: CloudTaskPayload;
-      }
-    | undefined,
+  cloudJob: SuggestionSourceCloudJob | undefined,
 ): SuggestionHistoryAutomation {
   if (!cloudJob) {
     return 'suggest_ideas';
@@ -55,10 +48,7 @@ export function getSuggestionHistoryAutomation(
       ? payload.suggestionSource
       : undefined;
 
-  if (
-    trigger === 'onboarding' ||
-    cloudJob.type === CloudTaskType.LegacyOnboardingSuggestions
-  ) {
+  if (trigger === 'onboarding') {
     return 'onboarding';
   }
 
@@ -76,80 +66,38 @@ export function getSuggestionHistoryAutomationLabel(
   );
 }
 
-function resolveSuggestionSourceCloudJob(
-  latestJob: SuggestionSourceCloudJob,
-  jobsById: Map<number, SuggestionSourceCloudJob>,
-): SuggestionSourceCloudJob {
-  const visitedIds = new Set<number>();
-  let currentJob = latestJob;
-
-  while (
-    currentJob.sourceCloudJobId &&
-    !visitedIds.has(currentJob.sourceCloudJobId)
-  ) {
-    visitedIds.add(currentJob.id);
-
-    const sourceJob = jobsById.get(currentJob.sourceCloudJobId);
-
-    if (!sourceJob) {
-      break;
-    }
-
-    currentJob = sourceJob;
-  }
-
-  return currentJob;
-}
-
+/**
+ * Returns the fresh (initial) run for each task. Suggestion history reads the
+ * launch payload of the run that originally created the task; resumes attach
+ * later runs to the same task, so the fresh run is the lowest-id 'fresh' row.
+ */
 export async function getResolvedSuggestionSourceCloudJobsByTaskId(
   taskIds: string[],
-): Promise<
-  Record<
-    string,
-    {
-      type: CloudTaskType;
-      payload: CloudTaskPayload;
-    }
-  >
-> {
+): Promise<Record<string, SuggestionSourceCloudJob>> {
   if (taskIds.length === 0) {
     return {};
   }
 
   const rows = await db
     .select({
-      id: cloudJobs.id,
-      taskId: cloudJobs.taskId,
-      type: cloudJobs.type,
-      payload: cloudJobs.payload,
-      sourceCloudJobId: cloudJobs.sourceCloudJobId,
+      taskId: taskRuns.taskId,
+      payloadKind: taskRuns.payloadKind,
+      payload: taskRuns.payload,
     })
-    .from(cloudJobs)
-    .where(inArray(cloudJobs.taskId, taskIds))
-    .orderBy(cloudJobs.taskId, desc(cloudJobs.id));
+    .from(taskRuns)
+    .where(and(eq(taskRuns.kind, 'fresh'), inArray(taskRuns.taskId, taskIds)))
+    .orderBy(taskRuns.taskId, asc(taskRuns.id));
 
-  const jobsById = new Map<number, SuggestionSourceCloudJob>();
-  const latestJobsByTaskId = new Map<string, SuggestionSourceCloudJob>();
+  const freshRunByTaskId: Record<string, SuggestionSourceCloudJob> = {};
 
   for (const row of rows) {
-    jobsById.set(row.id, row);
-
-    if (!latestJobsByTaskId.has(row.taskId)) {
-      latestJobsByTaskId.set(row.taskId, row);
+    if (!(row.taskId in freshRunByTaskId)) {
+      freshRunByTaskId[row.taskId] = {
+        payloadKind: row.payloadKind,
+        payload: row.payload,
+      };
     }
   }
 
-  return Object.fromEntries(
-    Array.from(latestJobsByTaskId.entries()).map(([taskId, latestJob]) => {
-      const resolvedJob = resolveSuggestionSourceCloudJob(latestJob, jobsById);
-
-      return [
-        taskId,
-        {
-          type: resolvedJob.type,
-          payload: resolvedJob.payload,
-        },
-      ];
-    }),
-  );
+  return freshRunByTaskId;
 }

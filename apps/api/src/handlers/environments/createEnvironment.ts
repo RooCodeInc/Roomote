@@ -2,7 +2,6 @@ import type { Context } from 'hono';
 
 import {
   and,
-  cloudJobs,
   createEnvironmentConfigVersionSnapshot,
   db,
   environmentRepositoryMappings,
@@ -10,9 +9,10 @@ import {
   eq,
   inArray,
   repositories,
+  taskRuns,
 } from '@roomote/db/server';
 import {
-  type CloudTaskPayload,
+  type TaskPayload,
   environmentConfigSchema,
   getEnvironmentRepositoryInstallationError,
 } from '@roomote/types';
@@ -88,8 +88,8 @@ export async function attachEnvironmentIdToCloudJob(
     return;
   }
 
-  const cloudJob = await db.query.cloudJobs.findFirst({
-    where: eq(cloudJobs.id, cloudJobId),
+  const cloudJob = await db.query.taskRuns.findFirst({
+    where: eq(taskRuns.id, cloudJobId),
     columns: {
       id: true,
       payload: true,
@@ -115,14 +115,14 @@ export async function attachEnvironmentIdToCloudJob(
   }
 
   await db
-    .update(cloudJobs)
+    .update(taskRuns)
     .set({
       payload: {
         ...payload,
         environmentDefinitionId: environmentId,
-      } as unknown as CloudTaskPayload,
+      } as unknown as TaskPayload,
     })
-    .where(eq(cloudJobs.id, cloudJob.id));
+    .where(eq(taskRuns.id, cloudJob.id));
 }
 
 /**

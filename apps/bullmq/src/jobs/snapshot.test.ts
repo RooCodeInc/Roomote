@@ -2,13 +2,14 @@ import { UnrecoverableError } from 'bullmq';
 import type { Mock } from 'vitest';
 
 import {
-  CloudTaskStatus,
-  CloudTaskType,
+  RunStatus,
+  TaskPayloadKind,
   withCompleteTaskOnSnapshot,
 } from '@roomote/types';
 
 const {
   mockFindFirst,
+  mockTaskFindFirst,
   mockGetInstanceStatus,
   mockCreateSnapshot,
   mockFindSnapshotBySourceInstance,
@@ -22,6 +23,7 @@ const {
   mockDrainSlackMessagesToResumeJob,
   mockRecordComputeProviderUsage,
   mockMarkTaskStartParallelCountEndedAt,
+  mockSyncTaskStateFromRuns,
   transactionFn,
   andFn,
   eqFn,
@@ -42,6 +44,7 @@ const {
 
   return {
     mockFindFirst: vi.fn() as AnyMock,
+    mockTaskFindFirst: vi.fn() as AnyMock,
     mockGetInstanceStatus: vi.fn() as AnyMock,
     mockCreateSnapshot: vi.fn() as AnyMock,
     mockFindSnapshotBySourceInstance: vi.fn() as AnyMock,
@@ -55,6 +58,7 @@ const {
     mockDrainSlackMessagesToResumeJob: vi.fn() as AnyMock,
     mockRecordComputeProviderUsage: vi.fn() as AnyMock,
     mockMarkTaskStartParallelCountEndedAt: vi.fn() as AnyMock,
+    mockSyncTaskStateFromRuns: vi.fn() as AnyMock,
     transactionFn: vi.fn() as AnyMock,
     andFn,
     eqFn,
@@ -68,14 +72,17 @@ const {
 vi.mock('@roomote/db/server', () => ({
   db: {
     query: {
-      cloudJobs: {
+      taskRuns: {
         findFirst: mockFindFirst,
+      },
+      tasks: {
+        findFirst: mockTaskFindFirst,
       },
     },
     transaction: transactionFn,
     update: updateFn,
   },
-  cloudJobs: {
+  taskRuns: {
     id: 'id',
     snapshotId: 'snapshotId',
   },
@@ -88,6 +95,7 @@ vi.mock('@roomote/db/server', () => ({
   createComputeProviderMutationEventRecorder:
     mockCreateComputeProviderMutationEventRecorder,
   markTaskStartParallelCountEndedAt: mockMarkTaskStartParallelCountEndedAt,
+  syncTaskStateFromRuns: mockSyncTaskStateFromRuns,
   recordCloudJobEvent: mockRecordCloudJobEvent,
   resolveComputeProviderEnvValues: vi.fn().mockResolvedValue({}),
   updatePendingEnvironmentSnapshot: mockUpdatePendingEnvironmentSnapshot,
@@ -149,13 +157,13 @@ const baseCloudJob = {
   id: 123,
   taskId: 'task_snapshot_events',
   vendor: 'modal',
-  status: CloudTaskStatus.Idle,
+  status: RunStatus.Idle,
   taskPhase: 'waiting_for_prompt',
   sleepAt: new Date('2026-04-02T21:34:02.798Z'),
   payload: { environmentId: 'env-1' },
-  type: CloudTaskType.SnapshotEnvironment,
-  linearSessionId: null,
-  slackThreadTs: null,
+  payloadKind: TaskPayloadKind.SnapshotEnvironment,
+  actingUserId: null,
+  port: null,
   createdAt: new Date('2026-04-24T06:35:00.000Z'),
 };
 
@@ -174,9 +182,16 @@ describe('snapshotJob', () => {
     setFn.mockReturnValue({ where: updateWhereFn });
     updateWhereFn.mockResolvedValue([]);
     mockMarkTaskStartParallelCountEndedAt.mockResolvedValue(undefined);
+    mockSyncTaskStateFromRuns.mockResolvedValue(undefined);
     mockUpdatePendingEnvironmentSnapshot.mockResolvedValue(true);
     mockAttachEnvironmentSnapshot.mockResolvedValue(true);
     mockFindFirst.mockResolvedValue(baseCloudJob);
+    mockTaskFindFirst.mockResolvedValue({
+      slackThreadTs: null,
+      linearSessionId: null,
+      linearIssueId: null,
+      linearOrganizationId: null,
+    });
     mockFindSnapshotBySourceInstance.mockResolvedValue(null);
     mockDrainLinearMessagesToResumeJob.mockResolvedValue({ resumed: false });
     mockDrainSlackMessagesToResumeJob.mockResolvedValue({ resumed: false });
@@ -203,7 +218,7 @@ describe('snapshotJob', () => {
       1,
       expect.anything(),
       expect.objectContaining({
-        cloudJobId: 123,
+        runId: 123,
         source: 'snapshot_queue',
         eventType: 'started',
       }),
@@ -212,7 +227,7 @@ describe('snapshotJob', () => {
       2,
       expect.anything(),
       expect.objectContaining({
-        cloudJobId: 123,
+        runId: 123,
         source: 'snapshot_queue',
         eventType: 'decision',
         details: expect.objectContaining({
@@ -225,7 +240,7 @@ describe('snapshotJob', () => {
       3,
       expect.anything(),
       expect.objectContaining({
-        cloudJobId: 123,
+        runId: 123,
         source: 'snapshot_queue',
         eventType: 'completed',
         details: expect.objectContaining({ snapshotId: 'snap_success_1' }),
@@ -243,7 +258,7 @@ describe('snapshotJob', () => {
     expect(mockCreateComputeProviderMutationEventRecorder).toHaveBeenCalledWith(
       expect.anything(),
       expect.objectContaining({
-        cloudJobId: 123,
+        runId: 123,
         taskId: 'task_snapshot_events',
       }),
       expect.anything(),
@@ -270,7 +285,7 @@ describe('snapshotJob', () => {
       expect.objectContaining({
         snapshotId: 'snap_success_1',
         snapshotFailedAt: null,
-        status: CloudTaskStatus.Completed,
+        status: RunStatus.Completed,
       }),
     );
     expect(mockRecordComputeProviderUsage).toHaveBeenCalledWith({
@@ -291,7 +306,7 @@ describe('snapshotJob', () => {
   it('marks the linked task completed when requested by completion-on-snapshot metadata', async () => {
     mockFindFirst.mockResolvedValue({
       ...baseCloudJob,
-      type: CloudTaskType.StandardTask,
+      payloadKind: TaskPayloadKind.StandardTask,
       payload: withCompleteTaskOnSnapshot({
         repo: 'acme/task-repo',
         description: 'Queue-driven task',
@@ -306,12 +321,11 @@ describe('snapshotJob', () => {
       data: { cloudJobId: 123, sandboxId: 'sb-mark-done' },
     } as never);
 
-    expect(updateFn).toHaveBeenCalledWith({ id: 'task-id' });
-    expect(setFn).toHaveBeenCalledWith(
-      expect.objectContaining({
-        completed: true,
-        updatedAt: expect.any(Date),
-      }),
+    // The task state is now derived by the shared helper (inside the same
+    // transaction) rather than stamped directly here.
+    expect(mockSyncTaskStateFromRuns).toHaveBeenCalledWith(
+      expect.anything(),
+      'task_snapshot_events',
     );
   });
 
@@ -336,7 +350,7 @@ describe('snapshotJob', () => {
     expect(mockRecordCloudJobEvent).toHaveBeenCalledWith(
       expect.anything(),
       expect.objectContaining({
-        cloudJobId: 123,
+        runId: 123,
         source: 'snapshot_queue',
         eventType: 'decision',
         details: expect.objectContaining({
@@ -351,7 +365,7 @@ describe('snapshotJob', () => {
       expect.objectContaining({
         snapshotId: 'snap_stale_after_edit',
         snapshotFailedAt: null,
-        status: CloudTaskStatus.Completed,
+        status: RunStatus.Completed,
       }),
     );
   });
@@ -402,7 +416,7 @@ describe('snapshotJob', () => {
       1,
       expect.anything(),
       expect.objectContaining({
-        cloudJobId: 123,
+        runId: 123,
         source: 'snapshot_queue',
         eventType: 'started',
       }),
@@ -411,7 +425,7 @@ describe('snapshotJob', () => {
       2,
       expect.anything(),
       expect.objectContaining({
-        cloudJobId: 123,
+        runId: 123,
         source: 'snapshot_queue',
         eventType: 'decision',
         details: expect.objectContaining({
@@ -424,7 +438,7 @@ describe('snapshotJob', () => {
       3,
       expect.anything(),
       expect.objectContaining({
-        cloudJobId: 123,
+        runId: 123,
         source: 'snapshot_queue',
         eventType: 'failed',
         details: expect.objectContaining({ instanceStatus: 'stopped' }),
@@ -531,7 +545,7 @@ describe('snapshotJob', () => {
       4,
       expect.anything(),
       expect.objectContaining({
-        cloudJobId: 123,
+        runId: 123,
         source: 'snapshot_queue',
         eventType: 'failed',
         details: expect.objectContaining({
@@ -598,7 +612,7 @@ describe('snapshotJob', () => {
     expect(mockRecordCloudJobEvent).toHaveBeenCalledWith(
       expect.anything(),
       expect.objectContaining({
-        cloudJobId: 123,
+        runId: 123,
         source: 'snapshot_queue',
         eventType: 'decision',
         details: expect.objectContaining({
@@ -626,13 +640,13 @@ describe('snapshotJob', () => {
       expect.objectContaining({
         snapshotId: 'snap_retry_success',
         snapshotFailedAt: null,
-        status: CloudTaskStatus.Completed,
+        status: RunStatus.Completed,
       }),
     );
     expect(mockRecordCloudJobEvent).toHaveBeenCalledWith(
       expect.anything(),
       expect.objectContaining({
-        cloudJobId: 123,
+        runId: 123,
         source: 'snapshot_queue',
         eventType: 'completed',
         details: expect.objectContaining({
@@ -735,7 +749,7 @@ describe('snapshotJob', () => {
     expect(mockRecordCloudJobEvent).toHaveBeenCalledWith(
       expect.anything(),
       expect.objectContaining({
-        cloudJobId: 123,
+        runId: 123,
         source: 'snapshot_queue',
         eventType: 'decision',
         details: expect.objectContaining({
@@ -933,7 +947,7 @@ describe('snapshotJob', () => {
       expect.objectContaining({
         snapshotId: 'snap_recovered_after_retry',
         snapshotFailedAt: null,
-        status: CloudTaskStatus.Completed,
+        status: RunStatus.Completed,
       }),
     );
     expect(mockUpdatePendingEnvironmentSnapshot).not.toHaveBeenCalled();
@@ -941,7 +955,7 @@ describe('snapshotJob', () => {
     expect(mockRecordCloudJobEvent).toHaveBeenCalledWith(
       expect.anything(),
       expect.objectContaining({
-        cloudJobId: 123,
+        runId: 123,
         source: 'snapshot_queue',
         eventType: 'decision',
         details: expect.objectContaining({
@@ -1077,14 +1091,14 @@ describe('snapshotJob', () => {
       expect.objectContaining({
         snapshotId: 'snap_recovered',
         snapshotFailedAt: null,
-        status: CloudTaskStatus.Completed,
+        status: RunStatus.Completed,
       }),
     );
     expect(mockUpdatePendingEnvironmentSnapshot).not.toHaveBeenCalled();
     expect(mockRecordCloudJobEvent).toHaveBeenCalledWith(
       expect.anything(),
       expect.objectContaining({
-        cloudJobId: 123,
+        runId: 123,
         source: 'snapshot_queue',
         eventType: 'decision',
         details: expect.objectContaining({
@@ -1100,7 +1114,7 @@ describe('snapshotJob', () => {
     expect(mockRecordCloudJobEvent).toHaveBeenCalledWith(
       expect.anything(),
       expect.objectContaining({
-        cloudJobId: 123,
+        runId: 123,
         source: 'snapshot_queue',
         eventType: 'decision',
         details: expect.objectContaining({
@@ -1115,7 +1129,7 @@ describe('snapshotJob', () => {
     expect(mockRecordCloudJobEvent).toHaveBeenCalledWith(
       expect.anything(),
       expect.objectContaining({
-        cloudJobId: 123,
+        runId: 123,
         source: 'snapshot_queue',
         eventType: 'completed',
         details: expect.objectContaining({

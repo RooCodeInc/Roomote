@@ -30,6 +30,17 @@ vi.mock('@tanstack/react-query', async () => {
       },
       isPending: false,
     }),
+    useQuery: () => ({
+      data: {
+        invocationIdentities: [
+          {
+            provider: 'github',
+            mentionText: '@roomote',
+            examplePrompt: '@roomote address the PR feedback above',
+          },
+        ],
+      },
+    }),
     useQueryClient: () => ({
       setQueryData: setQueryDataMock,
       invalidateQueries: invalidateQueriesMock,
@@ -51,6 +62,11 @@ vi.mock('@/trpc/client', () => ({
     onboarding: {
       status: {
         queryKey: () => queryKeys.onboardingStatus,
+      },
+    },
+    comms: {
+      status: {
+        queryOptions: () => ({ queryKey: ['comms.status'] }),
       },
     },
     github: {
@@ -92,6 +108,21 @@ vi.mock('@/components/system', () => ({
   AppWindow: () => <span>AppWindow</span>,
   BrandIcon: ({ name }: { name: string }) => (
     <span aria-label={name} data-testid="brand-icon" />
+  ),
+  Checkbox: ({
+    checked,
+    onCheckedChange,
+    ...props
+  }: {
+    checked?: boolean;
+    onCheckedChange?: (checked: boolean) => void;
+  } & Record<string, unknown>) => (
+    <input
+      type="checkbox"
+      checked={checked}
+      onChange={(event) => onCheckedChange?.(event.target.checked)}
+      aria-label={String(props['aria-label'] ?? 'checkbox')}
+    />
   ),
   Loader2: () => <span>Loader2</span>,
   LinearLogo: () => <span>LinearLogo</span>,

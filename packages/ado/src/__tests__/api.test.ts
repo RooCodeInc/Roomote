@@ -1,7 +1,7 @@
 import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest';
 
-import { CloudTaskStatus, CloudTaskType } from '@roomote/types';
-import type { CloudJob } from '@roomote/db/server';
+import { RunStatus, TaskPayloadKind } from '@roomote/types';
+import type { Run } from '@roomote/db/server';
 
 const {
   mockEnvironmentVariablesFindMany,
@@ -71,21 +71,23 @@ import {
   removeAdoServiceHooksForRepositories,
   getAdoDeploymentUser,
   listAdoRepositories,
+  normalizeAdoLinkedAccountKey,
   validateAdoToken,
   type AdoRepository,
 } from '../api';
 
-function makeCloudJob(payload: CloudJob['payload']): CloudJob {
+function makeCloudJob(payload: Run['payload']): Run {
   return {
     id: 123,
-    status: CloudTaskStatus.Dequeued,
-    type: CloudTaskType.StandardTask,
+    status: RunStatus.Dequeued,
+    kind: 'fresh' as const,
+    payloadKind: TaskPayloadKind.StandardTask,
     taskId: 'task-123',
-    userId: 'user-123',
+    actingUserId: 'user-123',
     payload,
     result: null,
     artifacts: null,
-  } as CloudJob;
+  } as Run;
 }
 
 describe('Azure DevOps API helpers', () => {
@@ -220,6 +222,33 @@ describe('Azure DevOps API helpers', () => {
       }),
     ).rejects.toThrow(
       'ADO_ORGANIZATION is required to sync Azure DevOps repositories.',
+    );
+  });
+
+  it('strips the organization userinfo Azure DevOps embeds in remote URLs', () => {
+    const repository = {
+      id: 'repo-1',
+      name: 'Test ADO',
+      project: {
+        id: 'project-1',
+        name: 'Test ADO',
+        description: null,
+        state: 'wellFormed',
+        visibility: 'private',
+      },
+      defaultBranch: 'refs/heads/main',
+      remoteUrl: 'https://acme@dev.azure.com/acme/Test%20ADO/_git/Test%20ADO',
+      webUrl: 'https://dev.azure.com/acme/Test%20ADO/_git/Test%20ADO',
+    } satisfies AdoRepository;
+
+    const values = buildAdoRepositoryValues({
+      repository,
+      linkedByUserId: 'user-1',
+      organization: 'acme',
+    });
+
+    expect(values.cloneUrl).toBe(
+      'https://dev.azure.com/acme/Test%20ADO/_git/Test%20ADO',
     );
   });
 
@@ -733,5 +762,23 @@ describe('Azure DevOps API helpers', () => {
           body.eventType === 'ms.vss-code.git-pullrequest-comment-event',
       ),
     ).toBe(true);
+  });
+});
+
+describe('normalizeAdoLinkedAccountKey', () => {
+  it('lowercases and trims so the link and webhook sides agree', () => {
+    expect(normalizeAdoLinkedAccountKey('  Dan@Roomote.OnMicrosoft.com ')).toBe(
+      'dan@roomote.onmicrosoft.com',
+    );
+    expect(normalizeAdoLinkedAccountKey('dan@roomote.onmicrosoft.com')).toBe(
+      'dan@roomote.onmicrosoft.com',
+    );
+  });
+
+  it('returns null for empty or missing values', () => {
+    expect(normalizeAdoLinkedAccountKey('')).toBeNull();
+    expect(normalizeAdoLinkedAccountKey('   ')).toBeNull();
+    expect(normalizeAdoLinkedAccountKey(null)).toBeNull();
+    expect(normalizeAdoLinkedAccountKey(undefined)).toBeNull();
   });
 });

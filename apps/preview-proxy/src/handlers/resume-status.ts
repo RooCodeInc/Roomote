@@ -1,5 +1,5 @@
 import type { IncomingMessage, ServerResponse } from 'http';
-import { cloudJobs, eq, and } from '@roomote/db/server';
+import { taskRuns, eq, and } from '@roomote/db/server';
 import { validatePreviewToken } from '@roomote/auth';
 
 import { config } from '../config';
@@ -76,10 +76,10 @@ export async function handleResumeStatusRequest(
     return;
   }
 
-  const cloudJob = await db.query.cloudJobs.findFirst({
+  const cloudJob = await db.query.taskRuns.findFirst({
     where: and(
-      eq(cloudJobs.id, cloudJobId),
-      eq(cloudJobs.userId, token.userId),
+      eq(taskRuns.id, cloudJobId),
+      eq(taskRuns.actingUserId, token.userId),
     ),
     columns: {
       id: true,

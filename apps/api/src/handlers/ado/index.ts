@@ -11,6 +11,7 @@ import {
   handleAdoPullRequest,
 } from './handlePullRequest';
 import { handleAdoComment } from './handleComment';
+import { normalizeAdoCommentWebhookPayload } from './normalizeCommentWebhook';
 import {
   adoPullRequestCommentWebhookSchema,
   adoPullRequestWebhookSchema,
@@ -96,7 +97,9 @@ ado.post('/', async (c) => {
     const deliveryId = getAdoDeliveryId({ body, payload: parsedJson });
 
     if (eventName === ADO_PULL_REQUEST_COMMENT_EVENT) {
-      const payload = adoPullRequestCommentWebhookSchema.parse(parsedJson);
+      const payload = adoPullRequestCommentWebhookSchema.parse(
+        await normalizeAdoCommentWebhookPayload(parsedJson),
+      );
 
       await recordWebhook(
         deliveryId,

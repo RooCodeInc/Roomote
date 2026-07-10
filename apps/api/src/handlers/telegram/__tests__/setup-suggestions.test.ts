@@ -29,26 +29,31 @@ vi.mock('@roomote/sdk/server', () => ({
 vi.mock('@roomote/env', () => ({ Env: envMock }));
 
 vi.mock('@roomote/db/server', () => ({
-  agentSuggestionMessages: {
+  trackedMessages: {
     id: 'id',
-    agentType: 'agentType',
+    kind: 'kind',
+    dedupeKey: 'dedupeKey',
     channelId: 'channelId',
     messageTs: 'messageTs',
-    suggestionKey: 'suggestionKey',
-    launchClaimedAt: 'launchClaimedAt',
+    workItemId: 'workItemId',
+    metadata: 'metadata',
   },
-  taskSuggestions: {
-    id: 'suggestionId',
+  workItems: {
+    id: 'id',
+    status: 'status',
     title: 'title',
     brief: 'brief',
     investigationContext: 'investigationContext',
     targetRepositoryFullName: 'targetRepositoryFullName',
+    launchClaimedAt: 'launchClaimedAt',
   },
   and: vi.fn((...conditions: unknown[]) => ({ and: conditions })),
   eq: vi.fn((left: unknown, right: unknown) => ({ eq: [left, right] })),
   isNull: vi.fn((column: unknown) => ({ isNull: column })),
-  like: vi.fn((column: unknown, pattern: unknown) => ({
-    like: [column, pattern],
+  lt: vi.fn((column: unknown, value: unknown) => ({ lt: [column, value] })),
+  or: vi.fn((...conditions: unknown[]) => ({ or: conditions })),
+  sql: vi.fn((strings: TemplateStringsArray, ...values: unknown[]) => ({
+    sql: [Array.from(strings), values],
   })),
   resolveTelegramRuntimeCredentials: vi.fn(async () => ({
     botToken: envMock.TELEGRAM_BOT_TOKEN ?? null,
@@ -63,6 +68,7 @@ vi.mock('@roomote/db/server', () => ({
       })),
     })),
     update: vi.fn(),
+    query: { trackedMessages: { findFirst: vi.fn() } },
   },
 }));
 
@@ -127,23 +133,32 @@ describe('postSetupTaskSuggestionsToTelegram', () => {
     });
 
     const rows = insertValuesMock.mock.calls[0]![0] as Array<{
+      surface: string;
+      kind: string;
+      dedupeKey: string;
       channelId: string;
       messageTs: string;
-      suggestionKey: string;
+      workItemId: string;
+      metadata: { suggestionType: string; suggestionKey: string };
     }>;
 
     expect(rows).toHaveLength(3);
-    // (channelId, messageTs) is a unique index; identical values would make
+    // (kind, dedupeKey) is a unique index; identical values would make
     // onConflictDoNothing silently drop all rows after the first.
-    const pairKeys = new Set(
-      rows.map((row) => `${row.channelId}:${row.messageTs}`),
-    );
-    expect(pairKeys.size).toBe(3);
-    expect(rows.map((row) => row.suggestionKey)).toEqual([
+    const dedupeKeys = new Set(rows.map((row) => row.dedupeKey));
+    expect(dedupeKeys.size).toBe(3);
+    expect(rows.every((row) => row.kind === 'suggestion_card')).toBe(true);
+    expect(rows.every((row) => row.surface === 'telegram')).toBe(true);
+    // The backing work item id is the suggestion id (not the shared messageTs).
+    expect(rows.map((row) => row.workItemId)).toEqual(['aaa', 'bbb', 'ccc']);
+    expect(rows.map((row) => row.metadata.suggestionKey)).toEqual([
       'task-1:aaa',
       'task-1:bbb',
       'task-1:ccc',
     ]);
+    expect(
+      rows.every((row) => row.metadata.suggestionType === 'setup_onboarding'),
+    ).toBe(true);
   });
 
   it('schedules the 24h suggested-tasks follow-up after posting', async () => {

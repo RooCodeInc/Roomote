@@ -29,7 +29,7 @@ type GitLabAutomationTarget = {
   settings: PrReviewerSettings | null;
   repo: Repository;
   repositoryIds: string[];
-  userId: string;
+  userId: string | null;
 };
 
 export function isRoomoteGitLabUsername(username: string): boolean {
@@ -167,7 +167,7 @@ export async function getGitLabAutomationTargets({
         settings: reviewerSettings,
         repo,
         repositoryIds: [repo.id],
-        userId: linkedSenderUserId ?? repo.linkedByUserId,
+        userId: linkedSenderUserId,
       },
     ],
   };

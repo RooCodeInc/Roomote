@@ -39,6 +39,7 @@ import {
 import {
   type ChannelAutoStartLaunchMode,
   DEFAULT_CHANNEL_AUTO_START_LAUNCH_MODE,
+  type TaskInitiator,
 } from '@roomote/types';
 import {
   stripLeadingRawSlackMention,
@@ -932,10 +933,29 @@ async function processSlackChannelAutoStartTask(params: {
           ),
         });
 
+      // Bot-authored auto-starts are automation-initiated with no installer
+      // owner; a human posting in a configured auto-start channel is the
+      // initiating user.
+      const initiator: TaskInitiator = isBotAuthored
+        ? {
+            kind: 'automation',
+            key: 'slack_channel_auto_start',
+            ...(typeof event.user === 'string'
+              ? { actor: { externalId: event.user } }
+              : {}),
+          }
+        : {
+            kind: 'user',
+            externalId: launchIdentity.slackUserId,
+            matchedUserId: launchIdentity.launchUserId,
+          };
+
       const result = await startAutoRoutedSlackTask({
         slackInstallation,
         slack,
-        launchUserId: launchIdentity.launchUserId,
+        initiator,
+        trigger: 'message',
+        launchUserId: isBotAuthored ? null : launchIdentity.launchUserId,
         slackUserId: launchIdentity.slackUserId,
         persistedSlackUserId: isBotAuthored ? null : launchIdentity.slackUserId,
         initiatingSlackUserId:
@@ -1351,12 +1371,13 @@ async function processAutomatedAppMentionTask(params: {
       const { ackEmoji, completionEmoji } = await resolveSlackReactionNames();
 
       try {
+        // Automation-driven resume: no acting human on the new run.
         const handled = await processSnapshotResume(
           threadEvent,
           slack,
           completedJob,
           threadId,
-          launchIdentity.launchUserId,
+          null,
           ackEmoji,
           completionEmoji,
           slackInstallation.botUserId,
@@ -1391,10 +1412,19 @@ async function processAutomatedAppMentionTask(params: {
           ),
         });
 
+      // Automated (bot/relay-authored) @mention: automation initiator with
+      // the relay message author as the external actor when available.
       const result = await startAutoRoutedSlackTask({
         slackInstallation,
         slack,
-        launchUserId: launchIdentity.launchUserId,
+        initiator: {
+          kind: 'automation',
+          key: 'slack_channel_auto_start',
+          ...(typeof event.user === 'string'
+            ? { actor: { externalId: event.user } }
+            : {}),
+        },
+        trigger: 'message',
         slackUserId: launchIdentity.slackUserId,
         initiatingSlackUserId:
           launchIdentity.slackUserId === slackInstallation.botUserId

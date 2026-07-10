@@ -1,18 +1,12 @@
 import {
-  CloudTaskStatus,
+  RunStatus,
   environmentConfigSchema,
   type EnvironmentConfig,
   LEGACY_SANDBOX_GUI_NAMED_PORT_NAME,
   SANDBOX_SNAPSHOT_EXPIRY_MS,
   slugToPortKey,
 } from '@roomote/types';
-import {
-  type CloudJob,
-  cloudJobs,
-  desc,
-  environments,
-  eq,
-} from '@roomote/db/server';
+import { type Run, taskRuns, desc, environments, eq } from '@roomote/db/server';
 
 import { db } from '../lib/db';
 import { logger, escapeForLog } from '../lib/logger';
@@ -39,7 +33,7 @@ export interface ResolvedRequest {
    * Used with 'redirect_to_direct' status after auth validation.
    */
   directUrl?: string;
-  cloudJob: CloudJob | null;
+  cloudJob: Run | null;
   requiresAuth: boolean;
   /**
    * Whether this specific port has an auth-proxy instance in front of it.
@@ -143,9 +137,9 @@ export async function resolveRequest(
   }
 
   try {
-    const cloudJob = await db.query.cloudJobs.findFirst({
-      where: eq(cloudJobs.taskId, identifier.taskId),
-      orderBy: desc(cloudJobs.createdAt),
+    const cloudJob = await db.query.taskRuns.findFirst({
+      where: eq(taskRuns.taskId, identifier.taskId),
+      orderBy: desc(taskRuns.createdAt),
     });
 
     const identifierLog = { taskId: escapeForLog(identifier.taskId) };
@@ -171,8 +165,8 @@ export async function resolveRequest(
     if (!portConfig.isProxied) {
       // Only redirect if sandbox is active
       if (
-        cloudJob.status === CloudTaskStatus.Running ||
-        cloudJob.status === CloudTaskStatus.Idle
+        cloudJob.status === RunStatus.Running ||
+        cloudJob.status === RunStatus.Idle
       ) {
         const directUrl = getSandboxUrl(cloudJob, portName);
 
@@ -239,8 +233,8 @@ export async function resolveRequest(
 
     // If job is active, return the sandbox URL with auth context
     if (
-      cloudJob.status === CloudTaskStatus.Running ||
-      cloudJob.status === CloudTaskStatus.Idle
+      cloudJob.status === RunStatus.Running ||
+      cloudJob.status === RunStatus.Idle
     ) {
       const sandboxUrl = getSandboxUrl(cloudJob, portName);
 
@@ -291,8 +285,8 @@ export async function resolveRequest(
 
     // Job is completed/canceled - handle redirect logic
     if (
-      cloudJob.status === CloudTaskStatus.Completed ||
-      cloudJob.status === CloudTaskStatus.Canceled
+      cloudJob.status === RunStatus.Completed ||
+      cloudJob.status === RunStatus.Canceled
     ) {
       logger.info(
         { ...identifierLog, status: cloudJob.status },
@@ -389,7 +383,7 @@ function uniqueNonEmptyPaths(paths: Array<string | undefined>): string[] {
  * Also returns whether the port is proxied (for cookie forwarding decision).
  */
 async function checkPortConfig(
-  cloudJob: CloudJob,
+  cloudJob: Run,
   portName: string,
 ): Promise<PortAuthResult> {
   const portKey = slugToPortKey(portName);

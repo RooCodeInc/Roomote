@@ -142,7 +142,7 @@ export function initControllerSentry(): boolean {
     serverName: 'controller',
     debug: false,
     maxValueLength: 8_192,
-    sendDefaultPii: true,
+    sendDefaultPii: false,
     initialScope: {
       tags: {
         'roomote.service': 'controller',

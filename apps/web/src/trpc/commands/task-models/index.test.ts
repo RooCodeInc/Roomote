@@ -245,11 +245,11 @@ describe('lookupTaskModelCommand', () => {
 
     await expect(
       lookupTaskModelCommand(buildMockAuth(), {
-        modelId: 'openrouter/openai/gpt-5.4',
+        modelId: 'openrouter/openai/gpt-5.6-terra',
       }),
     ).resolves.toEqual({
-      modelId: 'openrouter/openai/gpt-5.4',
-      displayName: 'GPT 5.4',
+      modelId: 'openrouter/openai/gpt-5.6-terra',
+      displayName: 'GPT 5.6 Terra',
       family: 'GPT',
       metadata: null,
     });
@@ -1353,9 +1353,11 @@ describe('task model provider commands', () => {
 
     // The default catalog's OpenRouter models stay (that provider is
     // connected via runtime env) and keep the effective default model.
-    expect(modelIds).toContain('openrouter/openai/gpt-5.4');
+    expect(modelIds).toContain('openrouter/openai/gpt-5.6-terra');
     expect(modelIds).toContain('anthropic/claude-sonnet-5');
-    expect(seededSettings?.defaultModelId).toBe('openrouter/openai/gpt-5.4');
+    expect(seededSettings?.defaultModelId).toBe(
+      'openrouter/openai/gpt-5.6-terra',
+    );
     expect(result.addedRecommendedModelCount).toBe(4);
   });
 
@@ -1558,21 +1560,21 @@ describe('task model provider commands', () => {
             family: 'Claude',
           },
           {
-            id: 'openrouter/openai/gpt-5.4',
+            id: 'openrouter/openai/gpt-5.6-terra',
             displayName: 'GPT 5.4',
             family: 'GPT',
           },
         ],
         allowedModelIds: [
           'anthropic/claude-sonnet-4',
-          'openrouter/openai/gpt-5.4',
+          'openrouter/openai/gpt-5.6-terra',
         ],
         defaultModelId: 'anthropic/claude-sonnet-4',
       },
       runtimeModelConfig: {
         roomoteModel: 'anthropic/claude-sonnet-4',
         roomoteSmallModel: 'anthropic/claude-sonnet-4',
-        roomoteVisionModel: 'openrouter/openai/gpt-5.4',
+        roomoteVisionModel: 'openrouter/openai/gpt-5.6-terra',
         roomoteCodeReviewModel: null,
         roomoteExploreModel: null,
         roomotePlanningModel: null,
@@ -1613,18 +1615,18 @@ describe('task model provider commands', () => {
 
     const updateSet = txOnConflictDoUpdate.mock.calls[0]?.[0]?.set;
     expect(updateSet.taskModelSettings.models).toEqual([
-      expect.objectContaining({ id: 'openrouter/openai/gpt-5.4' }),
+      expect.objectContaining({ id: 'openrouter/openai/gpt-5.6-terra' }),
     ]);
     expect(updateSet.taskModelSettings.allowedModelIds).toEqual([
-      'openrouter/openai/gpt-5.4',
+      'openrouter/openai/gpt-5.6-terra',
     ]);
     expect(updateSet.taskModelSettings.defaultModelId).toBe(
-      'openrouter/openai/gpt-5.4',
+      'openrouter/openai/gpt-5.6-terra',
     );
     expect(updateSet.runtimeModelConfig.roomoteModel).toBeNull();
     expect(updateSet.runtimeModelConfig.roomoteSmallModel).toBeNull();
     expect(updateSet.runtimeModelConfig.roomoteVisionModel).toBe(
-      'openrouter/openai/gpt-5.4',
+      'openrouter/openai/gpt-5.6-terra',
     );
     expect(updateSet.setupNewState.modelProvider).toBeNull();
   });

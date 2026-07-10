@@ -905,7 +905,7 @@ describe('preview-proxy integration', () => {
       const { validateAuthCookieForCloudJob } =
         await import('../services/auth');
 
-      const cloudJob = createMockCloudJob({ id: 42, orgId: 'org-42' });
+      const cloudJob = createMockCloudJob({ id: 42 });
       vi.mocked(resolveRequest).mockResolvedValue(
         createMockResolvedRequest({
           status: 'active',

@@ -4,7 +4,7 @@ import {
   environments,
   eq,
   repositories,
-  type CloudJob,
+  type Run,
 } from '@roomote/db/server';
 import {
   ALL_REPOSITORIES,
@@ -69,7 +69,7 @@ export async function resolveRepositoryRow({
 }
 
 export async function assertRepositoryInCloudJobScope(
-  cloudJob: CloudJob,
+  cloudJob: Run,
   repositoryFullName: string,
 ): Promise<void> {
   const scopedRepositories = await resolveCloudJobRepositoryScope(cloudJob);
@@ -86,7 +86,7 @@ export async function assertRepositoryInCloudJobScope(
 }
 
 async function resolveCloudJobRepositoryScope(
-  cloudJob: CloudJob,
+  cloudJob: Run,
 ): Promise<string[] | null> {
   const payload = getPayloadRecord(cloudJob.payload);
   const environmentId =

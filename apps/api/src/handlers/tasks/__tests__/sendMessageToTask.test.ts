@@ -1,23 +1,35 @@
 const {
   mockCreateJobToken,
   mockCreateTRPCProxyClient,
-  mockEnqueueCloudTask,
+  mockEnqueueTask,
+  mockGetTaskChannelBindings,
   mockFindLatestCloudJob,
   mockHttpBatchLink,
   mockSendPromptMutate,
   mockSteerTaskMutate,
   mockTrackLatestUserMessageForSlackQuote,
+  mockRestoreActingUserIdAfterFailedDelivery,
+  mockUpdateActingUserIdIfNeeded,
   mockUserFindFirst,
 } = vi.hoisted(() => ({
   mockCreateJobToken: vi.fn(),
   mockCreateTRPCProxyClient: vi.fn(),
-  mockEnqueueCloudTask: vi.fn(),
+  mockEnqueueTask: vi.fn(),
+  mockGetTaskChannelBindings: vi.fn(),
   mockFindLatestCloudJob: vi.fn(),
   mockHttpBatchLink: vi.fn((options) => options),
   mockSendPromptMutate: vi.fn(),
   mockSteerTaskMutate: vi.fn(),
   mockTrackLatestUserMessageForSlackQuote: vi.fn(),
+  mockRestoreActingUserIdAfterFailedDelivery: vi.fn(),
+  mockUpdateActingUserIdIfNeeded: vi.fn(),
   mockUserFindFirst: vi.fn(),
+}));
+
+vi.mock('../acting-user-sync', () => ({
+  restoreActingUserIdAfterFailedDelivery:
+    mockRestoreActingUserIdAfterFailedDelivery,
+  updateActingUserIdIfNeeded: mockUpdateActingUserIdIfNeeded,
 }));
 
 vi.mock('@roomote/auth', async (importOriginal) => {
@@ -38,7 +50,7 @@ vi.mock('@trpc/client', () => ({
 }));
 
 vi.mock('@roomote/cloud-agents/server', () => ({
-  enqueueCloudTask: mockEnqueueCloudTask,
+  enqueueTask: mockEnqueueTask,
 }));
 
 vi.mock('@roomote/slack', () => ({
@@ -66,6 +78,7 @@ vi.mock('@roomote/slack', () => ({
 
 vi.mock('../helpers', () => ({
   findLatestCloudJob: mockFindLatestCloudJob,
+  getTaskChannelBindings: mockGetTaskChannelBindings,
 }));
 
 vi.mock('../../utils', () => ({
@@ -108,7 +121,7 @@ function createActiveJob(
     actingUserId: string | null;
     snapshotId: string | null;
     snapshotCreatedAt: Date | null;
-    sourceCloudJobId: number | null;
+    sourceRunId: number | null;
     payload: Record<string, unknown> | null;
     port: number | null;
     slackThreadTs: string | null;
@@ -125,7 +138,7 @@ function createActiveJob(
     actingUserId: 'user-1',
     snapshotId: null,
     snapshotCreatedAt: overrides.snapshotId ? new Date() : null,
-    sourceCloudJobId: null,
+    sourceRunId: null,
     payload: {
       channel: 'C123',
       thread_ts: '111.222',
@@ -156,11 +169,153 @@ describe('sendMessageToTask', () => {
     mockHttpBatchLink.mockImplementation((options) => options);
     mockSendPromptMutate.mockResolvedValue({ ok: true });
     mockSteerTaskMutate.mockResolvedValue({ ok: true });
-    mockEnqueueCloudTask.mockResolvedValue({ id: 77, taskId: 'task-1' });
+    mockEnqueueTask.mockResolvedValue({ id: 77, taskId: 'task-1' });
+    mockGetTaskChannelBindings.mockResolvedValue({
+      slackChannelId: 'C123',
+      slackThreadTs: '111.222',
+      linearSessionId: null,
+      linearIssueId: null,
+      linearOrganizationId: null,
+    });
     mockTrackLatestUserMessageForSlackQuote.mockResolvedValue(undefined);
+    mockRestoreActingUserIdAfterFailedDelivery.mockResolvedValue(undefined);
+    mockUpdateActingUserIdIfNeeded.mockImplementation(
+      async ({ currentActingUserId, nextActingUserId, preserveActor }) =>
+        !preserveActor && currentActingUserId !== nextActingUserId,
+    );
     mockUserFindFirst.mockResolvedValue({
       name: 'Alice',
       email: 'alice@example.com',
+    });
+  });
+
+  it('writes the acting user BEFORE delivering the prompt to the sandbox', async () => {
+    // Ordering is the security property: the run's actingUserId selects
+    // whose credentials actor-scoped routes resolve, so the trusted switch
+    // must land before the new sender's prompt can run.
+    mockFindLatestCloudJob.mockResolvedValue(
+      createActiveJob({ actingUserId: 'user-1' }),
+    );
+
+    const result = await sendMessageToTask({
+      taskId: 'task-1',
+      userId: 'user-2',
+      message: 'Continue as the new sender.',
+    });
+
+    expect(result).toEqual({ success: true, result: { ok: true } });
+    expect(mockUpdateActingUserIdIfNeeded).toHaveBeenCalledWith({
+      jobId: 42,
+      currentActingUserId: 'user-1',
+      nextActingUserId: 'user-2',
+      preserveActor: false,
+    });
+    expect(
+      mockUpdateActingUserIdIfNeeded.mock.invocationCallOrder[0]!,
+    ).toBeLessThan(mockSendPromptMutate.mock.invocationCallOrder[0]!);
+    expect(mockSendPromptMutate).toHaveBeenCalledWith({
+      prompt: 'Continue as the new sender.',
+      autoSteerWhenQueued: true,
+    });
+  });
+
+  it('does not deliver the prompt when the pre-delivery acting-user write fails', async () => {
+    mockFindLatestCloudJob.mockResolvedValue(
+      createActiveJob({ actingUserId: 'user-1' }),
+    );
+    mockUpdateActingUserIdIfNeeded.mockRejectedValueOnce(
+      new Error('db unavailable'),
+    );
+
+    const result = await sendMessageToTask({
+      taskId: 'task-1',
+      userId: 'user-2',
+      message: 'Continue as the new sender.',
+    });
+
+    expect(result).toEqual({
+      success: false,
+      error: 'db unavailable',
+      status: 500,
+    });
+    expect(mockSendPromptMutate).not.toHaveBeenCalled();
+    expect(mockRestoreActingUserIdAfterFailedDelivery).not.toHaveBeenCalled();
+  });
+
+  it('rolls back the actor when prompt delivery fails after the switch', async () => {
+    mockFindLatestCloudJob.mockResolvedValue(
+      createActiveJob({ actingUserId: 'user-1' }),
+    );
+    mockSendPromptMutate.mockRejectedValueOnce(
+      new Error('sandbox delivery failed'),
+    );
+
+    const result = await sendMessageToTask({
+      taskId: 'task-1',
+      userId: 'user-2',
+      message: 'Continue as the new sender.',
+    });
+
+    expect(result).toEqual({
+      success: false,
+      error: 'sandbox delivery failed',
+      status: 500,
+    });
+    expect(mockRestoreActingUserIdAfterFailedDelivery).toHaveBeenCalledWith({
+      handlerName: 'sendMessageToTask',
+      jobId: 42,
+      previousActingUserId: 'user-1',
+      attemptedActingUserId: 'user-2',
+    });
+  });
+
+  it('writes the acting user BEFORE delivering steering prompts to the sandbox', async () => {
+    mockFindLatestCloudJob.mockResolvedValue(
+      createActiveJob({ actingUserId: 'user-1' }),
+    );
+
+    const result = await steerMessageToTask({
+      taskId: 'task-1',
+      userId: 'user-2',
+      message: 'Steer as the new sender.',
+    });
+
+    expect(result).toEqual({ success: true, result: { ok: true } });
+    expect(mockUpdateActingUserIdIfNeeded).toHaveBeenCalledWith({
+      jobId: 42,
+      currentActingUserId: 'user-1',
+      nextActingUserId: 'user-2',
+      preserveActor: false,
+    });
+    expect(
+      mockUpdateActingUserIdIfNeeded.mock.invocationCallOrder[0]!,
+    ).toBeLessThan(mockSteerTaskMutate.mock.invocationCallOrder[0]!);
+  });
+
+  it('rolls back the actor when steering delivery fails after the switch', async () => {
+    mockFindLatestCloudJob.mockResolvedValue(
+      createActiveJob({ actingUserId: 'user-1' }),
+    );
+    mockSteerTaskMutate.mockRejectedValueOnce(
+      new Error('sandbox delivery failed'),
+    );
+
+    const result = await steerMessageToTask({
+      taskId: 'task-1',
+      userId: 'user-2',
+      message: 'Steer as the new sender.',
+    });
+
+    expect(result).toEqual({
+      success: false,
+      error: 'sandbox delivery failed',
+      status: 500,
+    });
+    expect(mockRestoreActingUserIdAfterFailedDelivery).toHaveBeenCalledWith({
+      handlerName: 'steerMessageToTask',
+      jobId: 42,
+      previousActingUserId: 'user-1',
+      attemptedActingUserId: 'user-2',
     });
   });
 
@@ -209,9 +364,15 @@ describe('sendMessageToTask', () => {
     mockFindLatestCloudJob.mockResolvedValue(
       createActiveJob({
         payload: { repo: 'acme/app' },
-        slackThreadTs: null,
       }),
     );
+    mockGetTaskChannelBindings.mockResolvedValue({
+      slackChannelId: null,
+      slackThreadTs: null,
+      linearSessionId: null,
+      linearIssueId: null,
+      linearOrganizationId: null,
+    });
 
     const result = await sendMessageToTask({
       taskId: 'task-1',
@@ -235,7 +396,7 @@ describe('sendMessageToTask', () => {
         status: 'completed',
         sandboxServerUrl: null,
         snapshotId: 'snap-1',
-        sourceCloudJobId: null,
+        sourceRunId: null,
         payload: {
           repo: 'acme/app',
           slackChannel: 'C123',
@@ -264,13 +425,17 @@ describe('sendMessageToTask', () => {
       userName: 'Alice',
       onError: expect.any(Function),
     });
-    expect(mockEnqueueCloudTask).toHaveBeenCalledWith(
+    expect(mockEnqueueTask).toHaveBeenCalledWith(
       expect.objectContaining({
-        payload: expect.objectContaining({
-          resumePrompt: 'Resume and use the same thread.',
-          resumePromptSource: 'web',
-          resumePromptClientMessageId: 'client-2',
+        task: expect.objectContaining({
+          payload: expect.objectContaining({
+            resumePrompt: 'Resume and use the same thread.',
+            resumePromptSource: 'web',
+            resumePromptClientMessageId: 'client-2',
+          }),
         }),
+        // The follow-up sender becomes the resume run's acting user.
+        actingUserId: 'user-1',
       }),
       expect.any(Object),
     );
@@ -283,7 +448,7 @@ describe('sendMessageToTask', () => {
         sandboxServerUrl: null,
         snapshotId: 'snap-expired',
         snapshotCreatedAt: new Date(Date.now() - 8 * 24 * 60 * 60 * 1000),
-        sourceCloudJobId: null,
+        sourceRunId: null,
         payload: {
           repo: 'acme/app',
           slackChannel: 'C123',
@@ -302,7 +467,7 @@ describe('sendMessageToTask', () => {
       error: EXPIRED_SNAPSHOT_RESUME_ERROR,
       status: 409,
     });
-    expect(mockEnqueueCloudTask).not.toHaveBeenCalled();
+    expect(mockEnqueueTask).not.toHaveBeenCalled();
     expect(mockTrackLatestUserMessageForSlackQuote).not.toHaveBeenCalled();
   });
 
@@ -454,7 +619,7 @@ describe('sendMessageToTask', () => {
         status: 'completed',
         sandboxServerUrl: null,
         snapshotId: 'snap-1',
-        sourceCloudJobId: null,
+        sourceRunId: null,
         payload: {
           repo: 'acme/app',
           slackChannel: 'C123',

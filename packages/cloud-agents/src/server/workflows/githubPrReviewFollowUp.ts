@@ -1,5 +1,5 @@
 import { type GithubPullRequestReviewFollowUpTask } from '@roomote/types';
-import type { ResolvedTaskAttributionDisplay } from '@roomote/db/server';
+import type { ResolvedTaskCommitAuthor } from '../commit-author';
 import { Env } from '@roomote/env';
 import { buildGitHubMentionFollowUpRequest } from '../github-pr-follow-up-context';
 import { buildGitHubMentionFollowUpHarnessInstructions } from '../github-message-instructions';
@@ -31,7 +31,7 @@ export async function githubPrReviewFollowUp({
   cloudTask: GithubPullRequestReviewFollowUpTask;
   gitHubToken: string;
   cloudJobUrl: string;
-  attribution?: ResolvedTaskAttributionDisplay;
+  attribution?: ResolvedTaskCommitAuthor;
   visualProofAutoScreencastEnabled?: boolean;
   backgroundProofCaptureEnabled?: boolean;
 }): Promise<{

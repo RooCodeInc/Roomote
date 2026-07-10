@@ -34,6 +34,47 @@ type CloudActionResult =
   | { success: true; redirectUrl: string }
   | { success: false; error: string };
 
+const GITHUB_APP_DEFAULT_EVENTS = [
+  'check_run',
+  'check_suite',
+  'commit_comment',
+  'create',
+  'delete',
+  'dependabot_alert',
+  'deploy_key',
+  'deployment',
+  'deployment_protection_rule',
+  'deployment_review',
+  'deployment_status',
+  'fork',
+  'gollum',
+  'installation_target',
+  'issue_comment',
+  'issue_dependencies',
+  'issues',
+  'label',
+  'merge_group',
+  'meta',
+  'milestone',
+  'public',
+  'pull_request',
+  'pull_request_review',
+  'pull_request_review_comment',
+  'pull_request_review_thread',
+  'push',
+  'release',
+  'repository',
+  'repository_dispatch',
+  'security_advisory',
+  'star',
+  'status',
+  'sub_issues',
+  'watch',
+  'workflow_dispatch',
+  'workflow_job',
+  'workflow_run',
+] as const;
+
 type GitHubAppManifest = {
   name: string;
   url: string;
@@ -46,19 +87,18 @@ type GitHubAppManifest = {
   setup_url: string;
   public: boolean;
   default_permissions: {
+    actions: 'write';
+    checks: 'write';
     contents: 'write';
+    deployments: 'read';
     issues: 'write';
     metadata: 'read';
     pull_requests: 'write';
+    statuses: 'read';
+    vulnerability_alerts: 'read';
     workflows: 'write';
   };
-  default_events: [
-    'issue_comment',
-    'pull_request',
-    'pull_request_review_comment',
-    'push',
-    'workflow_run',
-  ];
+  default_events: (typeof GITHUB_APP_DEFAULT_EVENTS)[number][];
   request_oauth_on_install: boolean;
   setup_on_update: boolean;
 };
@@ -79,9 +119,16 @@ function getUnauthorizedResult() {
   };
 }
 
-const DEFAULT_GITHUB_APP_SLUG = 'roomote';
 const GITHUB_APP_MANIFEST_TARGET = 'https://github.com/settings/apps/new';
 const GITHUB_API_VERSION = '2022-11-28';
+const GITHUB_APP_REQUIRED_CREDENTIAL_GROUPS = [
+  ['NEXT_PUBLIC_GITHUB_APP_SLUG', 'GITHUB_APP_SLUG'],
+  ['GITHUB_APP_ID'],
+  ['GITHUB_APP_PRIVATE_KEY'],
+  ['GITHUB_CLIENT_ID'],
+  ['GITHUB_CLIENT_SECRET'],
+  ['GITHUB_WEBHOOK_SECRET'],
+] as const;
 
 // GitHub logins are 1-39 characters of alphanumerics and hyphens, without
 // leading, trailing, or consecutive hyphens.
@@ -111,19 +158,33 @@ function resolveGitHubAppManifestTarget(
   };
 }
 
-async function resolveGitHubAppSlug(): Promise<string> {
+async function resolveGitHubAppSlug(): Promise<string | null> {
   const [publicSlug, privateSlug] = await Promise.all([
     resolveDeploymentEnvVar('NEXT_PUBLIC_GITHUB_APP_SLUG'),
     resolveDeploymentEnvVar('GITHUB_APP_SLUG'),
   ]);
 
-  return (
-    publicSlug?.trim() ||
-    privateSlug?.trim() ||
-    Env.NEXT_PUBLIC_GITHUB_APP_SLUG ||
-    DEFAULT_GITHUB_APP_SLUG
-  );
+  // Do not fall back to the hosted product slug (`roomote`). Unconfigured
+  // deployments must create or enter their own app credentials first.
+  return publicSlug?.trim() || privateSlug?.trim() || null;
 }
+
+async function isGitHubAppConfigured(): Promise<boolean> {
+  for (const aliases of GITHUB_APP_REQUIRED_CREDENTIAL_GROUPS) {
+    const values = await Promise.all(
+      aliases.map((name) => resolveDeploymentEnvVar(name)),
+    );
+
+    if (!values.some((value) => value?.trim())) {
+      return false;
+    }
+  }
+
+  return true;
+}
+
+const GITHUB_APP_NOT_CONFIGURED_ERROR =
+  'Configure a GitHub App for this deployment before installing. Create one or enter its credentials first.';
 
 function getGitHubCallbackUrl() {
   return new URL('/github/callback', Env.ROOMOTE_APP_URL).toString();
@@ -172,19 +233,18 @@ function buildGitHubAppManifest(): GitHubAppManifest {
       active: true,
     },
     default_permissions: {
+      actions: 'write',
+      checks: 'write',
       contents: 'write',
+      deployments: 'read',
       issues: 'write',
       metadata: 'read',
       pull_requests: 'write',
+      statuses: 'read',
+      vulnerability_alerts: 'read',
       workflows: 'write',
     },
-    default_events: [
-      'issue_comment',
-      'pull_request',
-      'pull_request_review_comment',
-      'push',
-      'workflow_run',
-    ],
+    default_events: [...GITHUB_APP_DEFAULT_EVENTS],
     request_oauth_on_install: true,
     setup_on_update: true,
     public: false,
@@ -412,6 +472,22 @@ export async function startCreateGitHubInstallationCommand(
     return getUnauthorizedResult();
   }
 
+  if (!(await isGitHubAppConfigured())) {
+    return {
+      success: false,
+      error: GITHUB_APP_NOT_CONFIGURED_ERROR,
+    };
+  }
+
+  const appSlug = await resolveGitHubAppSlug();
+
+  if (!appSlug) {
+    return {
+      success: false,
+      error: GITHUB_APP_NOT_CONFIGURED_ERROR,
+    };
+  }
+
   const baseUrl = Env.ROOMOTE_APP_URL;
   const params = new URLSearchParams();
 
@@ -434,8 +510,6 @@ export async function startCreateGitHubInstallationCommand(
   }
 
   const query = params.toString();
-
-  const appSlug = await resolveGitHubAppSlug();
 
   return {
     success: true,
@@ -484,7 +558,7 @@ export async function startCreateGitHubAppManifestCommand(
 
 export async function finishCreateGitHubAppManifestCommand(
   auth: UserAuthSuccess,
-  input: { code: string },
+  input: { code: string; redirect?: string },
 ): Promise<
   { success: true; installUrl: string } | { success: false; error: string }
 > {
@@ -512,9 +586,12 @@ export async function finishCreateGitHubAppManifestCommand(
       });
     });
 
+    const redirect =
+      input.redirect?.trim() || '/setup?step=source-control-connect';
+
     const installResult = await startCreateGitHubInstallationCommand(auth, {
       mode: 'github-app-install',
-      redirect: '/setup?step=source-control-connect',
+      redirect,
     });
 
     if (!installResult.success) {

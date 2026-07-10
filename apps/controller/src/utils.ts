@@ -11,10 +11,10 @@ import {
   normalizeMetadataRecord,
 } from '@roomote/feature-flags';
 import {
-  type CloudJob,
+  type Run,
   type DatabaseOrTransaction,
   db,
-  cloudJobs,
+  taskRuns,
   environments,
   eq,
   getEnvironmentSnapshot,
@@ -109,7 +109,7 @@ export function shouldEnableAuthBypassForCloudJob({
  * non-expired snapshot.
  */
 export async function getNamedPortsForCloudJob(
-  cloudJob: CloudJob,
+  cloudJob: Run,
 ): Promise<NamedPortsResult> {
   let namedPorts = getNamedPortsForEnvironment({});
   let environmentSnapshotId: string | undefined;
@@ -160,7 +160,7 @@ export async function getNamedPortsForCloudJob(
 }
 
 type UpdateCloudJobMachineInfoParams = {
-  cloudJob: CloudJob;
+  cloudJob: Run;
   vendor?: ComputeProvider;
   machineId: string;
   proxyPorts?: Record<string, number>;
@@ -232,7 +232,7 @@ export async function updateCloudJobMachine(
   const database = options.db ?? db;
 
   await database
-    .update(cloudJobs)
+    .update(taskRuns)
     .set({
       ...(vendor ? { vendor } : {}),
       machineId,
@@ -256,5 +256,5 @@ export async function updateCloudJobMachine(
       ...(configuredCpuCores !== undefined ? { configuredCpuCores } : {}),
       ...(configuredMemoryMiB !== undefined ? { configuredMemoryMiB } : {}),
     })
-    .where(eq(cloudJobs.id, cloudJob.id));
+    .where(eq(taskRuns.id, cloudJob.id));
 }

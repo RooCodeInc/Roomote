@@ -7,27 +7,47 @@
 // sides to the bare channel form so the follow-up still associates with the
 // active job.
 
-const { findFirstMock } = vi.hoisted(() => ({
-  findFirstMock: vi.fn(),
+const { selectWhereMock, selectRowsMock } = vi.hoisted(() => ({
+  // Captures the where clause of each db.select() run lookup.
+  selectWhereMock: vi.fn(),
+  selectRowsMock: vi.fn(() => [] as unknown[]),
 }));
 
 vi.mock('@roomote/db/server', () => ({
   and: vi.fn((...conditions: unknown[]) => ({ and: conditions })),
-  cloudJobs: {
+  taskRuns: {
     payload: 'payload',
     status: 'status',
     canceledAt: 'canceledAt',
     createdAt: 'createdAt',
     snapshotId: 'snapshotId',
     snapshotCreatedAt: 'snapshotCreatedAt',
+    id: 'id',
+    taskId: 'taskId',
+    actingUserId: 'actingUserId',
+    port: 'port',
+    result: 'result',
+  },
+  tasks: {
+    id: 'tasks.id',
+    initiatorUserId: 'tasks.initiatorUserId',
   },
   db: {
-    query: {
-      cloudJobs: {
-        findFirst: findFirstMock,
-      },
+    select: () => {
+      const chain = {
+        from: () => chain,
+        innerJoin: () => chain,
+        where: (condition: unknown) => {
+          selectWhereMock(condition);
+          return chain;
+        },
+        orderBy: () => chain,
+        limit: () => Promise.resolve(selectRowsMock()),
+      };
+      return chain;
     },
   },
+  eq: vi.fn((left: unknown, right: unknown) => ({ eq: [left, right] })),
   desc: vi.fn((value: unknown) => ({ desc: value })),
   inArray: vi.fn((left: unknown, right: unknown[]) => ({
     inArray: [left, right],
@@ -40,7 +60,7 @@ vi.mock('@roomote/db/server', () => ({
   })),
 }));
 
-import { activeCloudTaskStatuses } from '@roomote/types';
+import { activeRunStatuses } from '@roomote/types';
 
 import {
   buildTeamsJobMatchConditions,
@@ -147,8 +167,9 @@ describe('buildTeamsJobMatchConditions', () => {
 
 describe('findActiveTeamsJob', () => {
   beforeEach(() => {
-    findFirstMock.mockReset();
-    findFirstMock.mockResolvedValue(null);
+    selectWhereMock.mockReset();
+    selectRowsMock.mockReset();
+    selectRowsMock.mockReturnValue([]);
   });
 
   it('queries with the normalized bare conversation id so a thread reply matches a bare-id launch job', async () => {
@@ -157,12 +178,13 @@ describe('findActiveTeamsJob', () => {
       threadId: 'root-1',
     });
 
-    expect(findFirstMock).toHaveBeenCalledTimes(1);
-    const where = findFirstMock.mock.calls[0]?.[0]?.where as {
+    expect(selectWhereMock).toHaveBeenCalledTimes(1);
+    const where = selectWhereMock.mock.calls[0]?.[0] as {
       and: unknown[];
     };
-    // The where clause includes the conversation match (or-group), the thread
-    // match, the active-status filter, and the not-canceled filter.
+    // The where clause includes the Teams provider match, the conversation
+    // match (or-group), the thread match, the active-status filter, and the
+    // not-canceled filter.
     expect(where.and).toHaveLength(5);
 
     const conversationMatch = where.and.find(
@@ -179,14 +201,6 @@ describe('findActiveTeamsJob', () => {
     for (const condition of conversationMatch!.or) {
       expect(condition.values).toContain('19:conv@thread.tacv2');
     }
-    expect(findFirstMock.mock.calls[0]?.[0]?.orderBy).toEqual({
-      desc: 'createdAt',
-    });
-    expect(findFirstMock.mock.calls[0]?.[0]?.columns).toMatchObject({
-      id: true,
-      payload: true,
-      status: true,
-    });
-    expect([...activeCloudTaskStatuses]).toContain('running');
+    expect([...activeRunStatuses]).toContain('running');
   });
 });

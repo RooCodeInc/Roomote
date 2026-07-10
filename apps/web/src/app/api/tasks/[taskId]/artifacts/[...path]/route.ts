@@ -56,7 +56,7 @@ export async function GET(
   return NextResponse.json({
     id: artifact.id,
     taskId: artifact.taskId,
-    cloudJobId: artifact.cloudJobId,
+    runId: artifact.runId,
     path: artifact.path,
     version: artifact.version,
     contentType: artifact.contentType,

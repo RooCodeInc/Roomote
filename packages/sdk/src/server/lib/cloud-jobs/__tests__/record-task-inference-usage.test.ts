@@ -1,13 +1,13 @@
 import {
   asc,
-  cloudJobFactory,
+  runFactory,
   db,
   eq,
   taskFactory,
   taskInferenceUsageEvents,
   userFactory,
 } from '@roomote/db/server';
-import { CloudTaskType } from '@roomote/types';
+import { TaskPayloadKind } from '@roomote/types';
 
 import { recordTaskInferenceUsage } from '../record-task-inference-usage';
 
@@ -15,12 +15,12 @@ describe('recordTaskInferenceUsage', () => {
   it('inserts an OpenCode message usage event', async () => {
     const user = await userFactory.create();
     const task = await taskFactory.create({
-      userId: user.id,
+      initiatorUserId: user.id,
       harnessSessionId: 'ses-inference-1',
     });
-    const cloudJob = await cloudJobFactory.create({
-      type: CloudTaskType.StandardTask,
-      userId: user.id,
+    const cloudJob = await runFactory.create({
+      payloadKind: TaskPayloadKind.StandardTask,
+      actingUserId: user.id,
       taskId: task.id,
     });
 
@@ -55,8 +55,7 @@ describe('recordTaskInferenceUsage', () => {
     expect(eventRows[0]).toMatchObject({
       source: 'opencode',
       taskId: task.id,
-      cloudJobId: cloudJob.id,
-      userId: user.id,
+      runId: cloudJob.id,
       harnessSessionId: 'ses-inference-1',
       messageId: 'msg-inference-1',
       providerId: 'openrouter',
@@ -79,12 +78,12 @@ describe('recordTaskInferenceUsage', () => {
   it('upserts duplicate message usage by session and message id', async () => {
     const user = await userFactory.create();
     const task = await taskFactory.create({
-      userId: user.id,
+      initiatorUserId: user.id,
       harnessSessionId: 'ses-inference-2',
     });
-    const cloudJob = await cloudJobFactory.create({
-      type: CloudTaskType.StandardTask,
-      userId: user.id,
+    const cloudJob = await runFactory.create({
+      payloadKind: TaskPayloadKind.StandardTask,
+      actingUserId: user.id,
       taskId: task.id,
     });
 
@@ -135,12 +134,12 @@ describe('recordTaskInferenceUsage', () => {
   it('stores multiple OpenCode messages and derives omitted totals per event', async () => {
     const user = await userFactory.create();
     const task = await taskFactory.create({
-      userId: user.id,
+      initiatorUserId: user.id,
       harnessSessionId: 'ses-inference-3',
     });
-    const cloudJob = await cloudJobFactory.create({
-      type: CloudTaskType.StandardTask,
-      userId: user.id,
+    const cloudJob = await runFactory.create({
+      payloadKind: TaskPayloadKind.StandardTask,
+      actingUserId: user.id,
       taskId: task.id,
     });
 

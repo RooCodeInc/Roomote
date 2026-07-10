@@ -36,7 +36,7 @@ type GiteaAutomationTarget = {
   settings: PrReviewerSettings | null;
   repo: Repository;
   repositoryIds: string[];
-  userId: string;
+  userId: string | null;
 };
 
 export function getGiteaUsername(
@@ -185,7 +185,7 @@ export async function getGiteaAutomationTargets({
         settings: reviewerSettings,
         repo,
         repositoryIds: [repo.id],
-        userId: linkedSenderUserId ?? repo.linkedByUserId,
+        userId: linkedSenderUserId,
       },
     ],
   };

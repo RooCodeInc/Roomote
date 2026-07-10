@@ -1,4 +1,4 @@
-import { CloudTaskStatus } from '@roomote/types';
+import { RunStatus } from '@roomote/types';
 
 const {
   mockDequeue,
@@ -52,30 +52,67 @@ describe('syncActingUserId', () => {
 
     await expect(
       syncActingUserId({ cloudJobId: 42, newUserId: 'user-2' }),
-    ).resolves.toBe('not-found');
+    ).resolves.toEqual({ result: 'not-found' });
     expect(mockUpdate).not.toHaveBeenCalled();
   });
 
-  it('returns unchanged when actingUserId already matches', async () => {
+  it('returns unchanged when the server, sender, and local state agree', async () => {
+    mockFindFirstById.mockResolvedValueOnce({ actingUserId: 'user-2' });
+
+    await expect(
+      syncActingUserId({
+        cloudJobId: 42,
+        newUserId: 'user-2',
+        lastKnownUserId: 'user-2',
+      }),
+    ).resolves.toEqual({ result: 'unchanged', actingUserId: 'user-2' });
+    expect(mockUpdate).not.toHaveBeenCalled();
+  });
+
+  it('returns updated when the server actor matches the sender but local state lags', async () => {
+    // A trusted server-side writer switched the run to this sender; the
+    // worker must refresh its integrations and git author from the server.
+    mockFindFirstById.mockResolvedValueOnce({ actingUserId: 'user-2' });
+
+    await expect(
+      syncActingUserId({
+        cloudJobId: 42,
+        newUserId: 'user-2',
+        lastKnownUserId: 'user-1',
+      }),
+    ).resolves.toEqual({ result: 'updated', actingUserId: 'user-2' });
+    expect(mockUpdate).not.toHaveBeenCalled();
+  });
+
+  it('returns updated on a match when the local state is unknown', async () => {
     mockFindFirstById.mockResolvedValueOnce({ actingUserId: 'user-2' });
 
     await expect(
       syncActingUserId({ cloudJobId: 42, newUserId: 'user-2' }),
-    ).resolves.toBe('unchanged');
+    ).resolves.toEqual({ result: 'updated', actingUserId: 'user-2' });
     expect(mockUpdate).not.toHaveBeenCalled();
   });
 
-  it('updates the cloud job when actingUserId differs', async () => {
+  it('never reassigns actingUserId via the job token and reports a mismatch', async () => {
+    // Security: job tokens (held by the sandbox) must not be able to steer
+    // the run's acting user, or a compromised sandbox could pivot to another
+    // user's actor-scoped credentials. The worker only observes the value.
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
     mockFindFirstById.mockResolvedValueOnce({ actingUserId: 'user-1' });
-    mockUpdate.mockResolvedValueOnce(undefined);
 
     await expect(
-      syncActingUserId({ cloudJobId: 42, newUserId: 'user-2' }),
-    ).resolves.toBe('updated');
-    expect(mockUpdate).toHaveBeenCalledWith({
-      id: 42,
-      actingUserId: 'user-2',
-    });
+      syncActingUserId({
+        cloudJobId: 42,
+        newUserId: 'user-2',
+        lastKnownUserId: 'user-1',
+      }),
+    ).resolves.toEqual({ result: 'mismatch', actingUserId: 'user-1' });
+    expect(mockUpdate).not.toHaveBeenCalled();
+    expect(warnSpy).toHaveBeenCalledWith(
+      expect.stringContaining('cannot reassign the acting user'),
+    );
+
+    warnSpy.mockRestore();
   });
 });
 
@@ -88,7 +125,7 @@ describe('dequeue', () => {
     const onBootstrapFailure = vi.fn();
     const cloudJob = {
       id: 42,
-      status: CloudTaskStatus.Canceled,
+      status: RunStatus.Canceled,
       startedAt: null,
       error: 'Cloud job is not valid.',
       type: 'GithubPrReview',
@@ -124,7 +161,7 @@ describe('dequeue', () => {
     mockDequeue.mockResolvedValueOnce(undefined);
     mockFindFirstById.mockResolvedValueOnce({
       id: 42,
-      status: CloudTaskStatus.Canceled,
+      status: RunStatus.Canceled,
       startedAt: new Date('2026-04-21T00:00:00.000Z'),
       error: 'Failed to create GitHub token.',
       type: 'GithubPrReview',
@@ -151,7 +188,7 @@ describe('dequeue', () => {
     mockDequeue.mockResolvedValueOnce(undefined);
     mockFindFirstById.mockResolvedValueOnce({
       id: 42,
-      status: CloudTaskStatus.Canceled,
+      status: RunStatus.Canceled,
       startedAt: null,
       error: 'Superseded by a newer cloud job.',
       type: 'StandardTask',
@@ -204,7 +241,7 @@ describe('resume', () => {
     const onBootstrapFailure = vi.fn();
     const cloudJob = {
       id: 84,
-      status: CloudTaskStatus.Canceled,
+      status: RunStatus.Canceled,
       startedAt: null,
       error: 'SnapshotResume job 84 has no sourceCloudJobId',
       type: 'SnapshotResume',

@@ -1,11 +1,11 @@
 import {
   ALL_REPOSITORIES,
-  type CloudTaskPayload,
-  CloudTaskType,
+  type TaskPayload,
+  TaskPayloadKind,
   populateSnapshotResumeSlackMetadata,
   restoreSnapshotResumeVisiblePromptFields,
 } from '@roomote/types';
-import { enqueueCloudTask } from '@roomote/cloud-agents/server';
+import { enqueueTask } from '@roomote/cloud-agents/server';
 import { getRedis } from '@roomote/redis';
 
 import { getSlackMessages, prependSlackMessages } from './slack-messages';
@@ -21,7 +21,7 @@ const RESUME_LOCK_TTL_SECONDS = 30;
  */
 export interface SlackDrainSourceJob {
   id: number;
-  userId: string | null;
+  /** Slack thread binding from the run's task row (tasks.slackThreadTs). */
   slackThreadTs: string | null;
   snapshotId: string | null;
   payload: Record<string, unknown>;
@@ -125,7 +125,7 @@ export async function drainSlackMessagesToResumeJob(
   // Drain before creating the resume job so its payload is self-contained.
   // Restore the drained messages on failure.
   let messages: Awaited<ReturnType<typeof getSlackMessages>> = [];
-  let resumeLaunch: Awaited<ReturnType<typeof enqueueCloudTask>>;
+  let resumeLaunch: Awaited<ReturnType<typeof enqueueTask>>;
 
   try {
     messages = await getSlackMessages(sourceJob.id);
@@ -135,7 +135,7 @@ export async function drainSlackMessagesToResumeJob(
       return { resumed: false, reason: 'no_pending_messages' };
     }
 
-    const payload: CloudTaskPayload<CloudTaskType.SnapshotResume> = {
+    const payload: TaskPayload<typeof TaskPayloadKind.SnapshotResume> = {
       repo,
       environmentId,
       selectedRepositories: scopedSelectedRepositories,
@@ -149,13 +149,21 @@ export async function drainSlackMessagesToResumeJob(
       threadTs: sourceJob.slackThreadTs,
     });
     restoreSnapshotResumeVisiblePromptFields(payload, sourceJob.payload);
-    resumeLaunch = await enqueueCloudTask({
-      type: CloudTaskType.SnapshotResume,
-      userId: sourceJob.userId,
-      slackThreadTs: sourceJob.slackThreadTs,
-      sourceSnapshotId: snapshotId,
-      sourceCloudJobId: sourceJob.id,
-      payload,
+
+    // The resumer becomes the new run's acting user: the most recent drained
+    // follow-up sender we could resolve to a Roomote user. Resumes never
+    // create tasks and never re-attribute the task initiator.
+    const resumeActingUserId =
+      [...messages].reverse().find((message) => message.userId)?.userId ?? null;
+
+    resumeLaunch = await enqueueTask({
+      task: {
+        type: TaskPayloadKind.SnapshotResume,
+        sourceSnapshotId: snapshotId,
+        sourceCloudJobId: sourceJob.id,
+        payload,
+      },
+      actingUserId: resumeActingUserId,
     });
   } catch (error) {
     // Restore drained messages and release the lock so a retry can proceed.

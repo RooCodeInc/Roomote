@@ -6,7 +6,7 @@ async function getLatestCloudJobTaskMessage(
   cloudJobId: number,
 ): Promise<{ ts: number } | null> {
   const latestMessage = await db.query.taskMessages.findFirst({
-    where: (taskMessages, { eq }) => eq(taskMessages.cloudJobId, cloudJobId),
+    where: (taskMessages, { eq }) => eq(taskMessages.runId, cloudJobId),
     orderBy: (taskMessages, { desc }) => [
       desc(taskMessages.ts),
       desc(taskMessages.createdAt),

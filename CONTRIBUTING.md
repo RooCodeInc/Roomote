@@ -14,8 +14,6 @@ easy to review.
   reproduction may be closed so maintainers can keep triage high-signal.
 - Keep pull requests small and scoped.
 - Include tests or a clear manual validation note when changing behavior.
-- Update `.agent-guidance/` when changing architecture, workflows, APIs,
-  operations, or durable product behavior.
 
 ## Developer Setup
 

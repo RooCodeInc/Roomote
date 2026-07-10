@@ -52,16 +52,16 @@ vi.mock('@roomote/db/server', () => ({
   db: {
     select: mockSelect,
     query: {
-      cloudJobs: {
+      taskRuns: {
         findMany: mockFindMany,
       },
     },
   },
   tasks: { id: 'tasks.id', orgId: 'tasks.orgId' },
-  cloudJobs: {
-    id: 'cloudJobs.id',
-    taskId: 'cloudJobs.taskId',
-    createdAt: 'cloudJobs.createdAt',
+  taskRuns: {
+    id: 'taskRuns.id',
+    taskId: 'taskRuns.taskId',
+    createdAt: 'taskRuns.createdAt',
   },
   eq: eqMock,
   and: andMock,

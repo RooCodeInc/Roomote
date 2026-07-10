@@ -122,15 +122,17 @@ const serverSchema = {
   // When adding an integration/instance secret below, also add it to
   // CONTROL_PLANE_ENV_VAR_NAMES (packages/types/src/control-plane-env-vars.ts)
   // unless it is already a `secret` field in a setup catalog, or it leaks into
-  // task sandboxes. See .agent-guidance/architecture/runtime-env.md.
+  // task sandboxes.
   TEAMS_BOT_APP_ID: z.string().min(1).optional(),
   TEAMS_BOT_APP_PASSWORD: z.string().min(1).optional(),
   TEAMS_BOT_TENANT_ID: z.string().min(1).optional(),
+  TEAMS_BOT_NAME: z.string().min(1).optional(),
   TEAMS_BOT_TOKEN_ENDPOINT: z.string().url().optional(),
   TEAMS_BOT_OAUTH_SCOPE: z.string().min(1).optional(),
   TELEGRAM_BOT_TOKEN: z.string().min(1).optional(),
   TELEGRAM_WEBHOOK_SECRET: z.string().min(1).optional(),
   TELEGRAM_BOT_USERNAME: z.string().min(1).optional(),
+  TELEGRAM_API_BASE_URL: z.string().url().default('https://api.telegram.org'),
   ROOMOTE_AUTH_SLACK_CLIENT_ID: z.string().min(1).optional(),
   ROOMOTE_AUTH_SLACK_CLIENT_SECRET: z.string().min(1).optional(),
   ROOMOTE_AUTH_MICROSOFT_CLIENT_ID: z.string().min(1).optional(),
@@ -169,6 +171,7 @@ const serverSchema = {
   MODAL_REGISTRY_PASSWORD: z.string().optional(),
   MODAL_ECR_OIDC_ROLE_ARN: z.string().optional(),
   MODAL_ECR_REGION: z.string().optional(),
+  MODAL_REGIONS: z.string().optional(),
   DAYTONA_API_KEY: z.string().optional(),
   DAYTONA_API_URL: z.string().url().optional(),
   DAYTONA_TARGET: z.string().optional(),
@@ -234,6 +237,7 @@ const OPTIONAL_NON_EMPTY_KEYS = new Set([
   'TEAMS_BOT_APP_ID',
   'TEAMS_BOT_APP_PASSWORD',
   'TEAMS_BOT_TENANT_ID',
+  'TEAMS_BOT_NAME',
   'TEAMS_BOT_TOKEN_ENDPOINT',
   'TEAMS_BOT_OAUTH_SCOPE',
   'TELEGRAM_BOT_TOKEN',
@@ -269,6 +273,7 @@ const OPTIONAL_NON_EMPTY_KEYS = new Set([
   'MODAL_REGISTRY_PASSWORD',
   'MODAL_ECR_OIDC_ROLE_ARN',
   'MODAL_ECR_REGION',
+  'MODAL_REGIONS',
   'DAYTONA_API_KEY',
   'DAYTONA_API_URL',
   'DAYTONA_TARGET',
@@ -534,6 +539,13 @@ function buildRoomoteRuntimeEnv(
     env.S3_ACCESS_KEY_ID ??= LOCAL_S3_ACCESS_KEY_ID;
     env.S3_SECRET_ACCESS_KEY ??= LOCAL_S3_SECRET_ACCESS_KEY;
     env.S3_BUCKET_ARTIFACTS ??= LOCAL_S3_BUCKET_ARTIFACTS;
+  }
+
+  // Slack rejects the whole account-linking DM (invalid_blocks) when the
+  // "Link accounts" button URL is not absolute, so an unset SLACK_AUTH_URI
+  // must fall back to the web app's linking route rather than empty string.
+  if (!env.SLACK_AUTH_URI && env.ROOMOTE_APP_URL) {
+    env.SLACK_AUTH_URI = `${env.ROOMOTE_APP_URL.replace(/\/+$/, '')}/api/slack/auth`;
   }
 
   return env;

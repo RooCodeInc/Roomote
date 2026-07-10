@@ -1,6 +1,6 @@
 const {
   dbUpdateSetMock,
-  enqueueCloudTaskMock,
+  enqueueTaskMock,
   dbUpdateWhereMock,
   consoleWarnMock,
   findActiveSlackJobMock,
@@ -8,7 +8,7 @@ const {
   resolveSlackReactionNamesMock,
 } = vi.hoisted(() => ({
   dbUpdateSetMock: vi.fn(),
-  enqueueCloudTaskMock: vi.fn(),
+  enqueueTaskMock: vi.fn(),
   dbUpdateWhereMock: vi.fn(),
   consoleWarnMock: vi.fn(),
   findActiveSlackJobMock: vi.fn(),
@@ -30,11 +30,11 @@ vi.mock('@roomote/cloud-agents', () => ({
 }));
 
 vi.mock('@roomote/cloud-agents/server', () => ({
-  enqueueCloudTask: enqueueCloudTaskMock,
+  enqueueTask: enqueueTaskMock,
 }));
 
 vi.mock('@roomote/db/server', () => ({
-  cloudJobs: { id: 'id', payload: 'payload' },
+  taskRuns: { id: 'id', payload: 'payload' },
   db: {
     update: vi.fn(() => ({
       set: dbUpdateSetMock.mockImplementation(() => ({
@@ -65,7 +65,7 @@ describe('startSlackAppMentionTask', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     vi.spyOn(console, 'warn').mockImplementation(consoleWarnMock);
-    enqueueCloudTaskMock.mockResolvedValue({ id: 42, taskId: 'task_123' });
+    enqueueTaskMock.mockResolvedValue({ id: 42, taskId: 'task_123' });
     dbUpdateSetMock.mockClear();
     dbUpdateWhereMock.mockResolvedValue(undefined);
     findActiveSlackJobMock.mockResolvedValue(null);
@@ -85,7 +85,8 @@ describe('startSlackAppMentionTask', () => {
       await import('../start-slack-app-mention');
 
     await startSlackAppMentionTask({
-      userId: 'user_123',
+      initiator: { kind: 'user', userId: 'user_123' },
+      trigger: 'message',
       channel: 'C123',
       slackUserId: 'U123',
       text: 'hello',
@@ -96,13 +97,24 @@ describe('startSlackAppMentionTask', () => {
         ' https://acme-team.slack.com/archives/C123/p111000?thread_ts=111.000&cid=C123 ',
     });
 
-    expect(enqueueCloudTaskMock).toHaveBeenCalledWith(
+    expect(enqueueTaskMock).toHaveBeenCalledWith(
       expect.objectContaining({
-        payload: expect.objectContaining({
-          slackConversationUrl:
-            'https://acme-team.slack.com/archives/C123/p111000?thread_ts=111.000&cid=C123',
+        initiator: { kind: 'user', userId: 'user_123' },
+        workflow: 'standard',
+        surface: 'slack',
+        trigger: 'message',
+        channels: {
+          slackChannelId: 'C123',
+          slackThreadTs: '111.000',
+        },
+        task: expect.objectContaining({
+          payload: expect.objectContaining({
+            slackConversationUrl:
+              'https://acme-team.slack.com/archives/C123/p111000?thread_ts=111.000&cid=C123',
+          }),
         }),
       }),
+      {},
     );
   });
 
@@ -120,7 +132,8 @@ describe('startSlackAppMentionTask', () => {
       await import('../start-slack-app-mention');
 
     await startSlackAppMentionTask({
-      userId: 'user_123',
+      initiator: { kind: 'user', userId: 'user_123' },
+      trigger: 'message',
       channel: 'C123',
       slackUserId: 'U123',
       text: 'hello again',
@@ -166,7 +179,8 @@ describe('startSlackAppMentionTask', () => {
       await import('../start-slack-app-mention');
 
     await startSlackAppMentionTask({
-      userId: 'user_123',
+      initiator: { kind: 'user', userId: 'user_123' },
+      trigger: 'message',
       channel: 'C123',
       slackUserId: 'U123',
       text: 'hello again',

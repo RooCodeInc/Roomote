@@ -34,15 +34,17 @@ function renderEditor(rows: ChannelAutoStartFormRow[]) {
 }
 
 describe('ChannelAutoStartEditor', () => {
-  it('updates launch criteria within the edited row', () => {
+  it('updates launch criteria within the edited row while keeping every persisted channel id', () => {
     const { onRowsChange } = renderEditor([
       {
+        channelId: 'C0BUGS',
         slackChannel: '#bugs',
         instructions: 'Treat each message as a bug report.',
         launchMode: DEFAULT_CHANNEL_AUTO_START_LAUNCH_MODE,
         launchCriteria: '',
       },
       {
+        channelId: 'C0OPS',
         slackChannel: '#ops',
         instructions: 'Treat each message as an incident.',
         launchMode: DEFAULT_CHANNEL_AUTO_START_LAUNCH_MODE,
@@ -57,18 +59,50 @@ describe('ChannelAutoStartEditor', () => {
       },
     );
 
+    // Editing a non-channel field must preserve the persisted channel ids so
+    // the server keeps resolving those rows by id rather than by name.
     expect(onRowsChange).toHaveBeenCalledWith([
       {
+        channelId: 'C0BUGS',
         slackChannel: '#bugs',
         instructions: 'Treat each message as a bug report.',
         launchMode: DEFAULT_CHANNEL_AUTO_START_LAUNCH_MODE,
         launchCriteria: 'Only launch on new production incidents.',
       },
       {
+        channelId: 'C0OPS',
         slackChannel: '#ops',
         instructions: 'Treat each message as an incident.',
         launchMode: DEFAULT_CHANNEL_AUTO_START_LAUNCH_MODE,
         launchCriteria: 'Only launch on new incidents.',
+      },
+    ]);
+  });
+
+  it('clears the persisted channel id when the channel field is edited', () => {
+    const { onRowsChange } = renderEditor([
+      {
+        channelId: 'C0BUGS',
+        slackChannel: '#bugs',
+        instructions: 'Treat each message as a bug report.',
+        launchMode: DEFAULT_CHANNEL_AUTO_START_LAUNCH_MODE,
+        launchCriteria: '',
+      },
+    ]);
+
+    fireEvent.change(screen.getByLabelText('Monitor this Slack channel'), {
+      target: { value: '#bugs-triage' },
+    });
+
+    // A changed channel invalidates the persisted id, so it must be dropped and
+    // re-resolved from the new name on save.
+    expect(onRowsChange).toHaveBeenCalledWith([
+      {
+        channelId: null,
+        slackChannel: '#bugs-triage',
+        instructions: 'Treat each message as a bug report.',
+        launchMode: DEFAULT_CHANNEL_AUTO_START_LAUNCH_MODE,
+        launchCriteria: '',
       },
     ]);
   });
@@ -80,6 +114,7 @@ describe('ChannelAutoStartEditor', () => {
 
     expect(onRowsChange).toHaveBeenCalledWith([
       {
+        channelId: null,
         slackChannel: '',
         instructions: '',
         launchMode: DEFAULT_CHANNEL_AUTO_START_LAUNCH_MODE,

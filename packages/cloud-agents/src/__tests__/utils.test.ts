@@ -1,6 +1,6 @@
 // pnpm --filter @roomote/cloud-agents test src/__tests__/utils.test.ts
 
-import { type CloudTaskPayload, CloudTaskType } from '@roomote/types';
+import { type TaskPayload, TaskPayloadKind } from '@roomote/types';
 
 import {
   buildSlackThreadPromptBlocks,
@@ -373,7 +373,7 @@ describe('generateCloudJobTitle', () => {
   describe('github.pr.review', () => {
     it('should generate title for initial PR review', () => {
       const title = generateCloudJobTitle({
-        type: CloudTaskType.GithubPrReview,
+        type: TaskPayloadKind.GithubPrReview,
         payload: {
           repo: 'owner/repo',
           prNumber: 123,
@@ -388,7 +388,7 @@ describe('generateCloudJobTitle', () => {
 
     it('should generate title for initial PR review with headSha (optional)', () => {
       const title = generateCloudJobTitle({
-        type: CloudTaskType.GithubPrReview,
+        type: TaskPayloadKind.GithubPrReview,
         payload: {
           repo: 'owner/repo',
           prNumber: 123,
@@ -405,7 +405,7 @@ describe('generateCloudJobTitle', () => {
   describe('github.pr.review.sync', () => {
     it('should generate title for re-review with short SHA', () => {
       const title = generateCloudJobTitle({
-        type: CloudTaskType.GithubPrReviewSync,
+        type: TaskPayloadKind.GithubPrReviewSync,
         payload: {
           repo: 'owner/repo',
           prNumber: 456,
@@ -420,7 +420,7 @@ describe('generateCloudJobTitle', () => {
 
     it('should handle missing headSha defensively', () => {
       const title = generateCloudJobTitle({
-        type: CloudTaskType.GithubPrReviewSync,
+        type: TaskPayloadKind.GithubPrReviewSync,
         payload: {
           repo: 'owner/repo',
           prNumber: 789,
@@ -436,7 +436,7 @@ describe('generateCloudJobTitle', () => {
 
     it('should truncate headSha to 7 characters', () => {
       const title = generateCloudJobTitle({
-        type: CloudTaskType.GithubPrReviewSync,
+        type: TaskPayloadKind.GithubPrReviewSync,
         payload: {
           repo: 'owner/repo',
           prNumber: 100,
@@ -453,7 +453,7 @@ describe('generateCloudJobTitle', () => {
   describe('other task types', () => {
     it('should generate title for PR review follow-up', () => {
       const title = generateCloudJobTitle({
-        type: CloudTaskType.GithubPrReviewFollowUp,
+        type: TaskPayloadKind.GithubPrReviewFollowUp,
         payload: {
           repo: 'owner/repo',
           prNumber: 123,
@@ -466,40 +466,9 @@ describe('generateCloudJobTitle', () => {
       expect(title).toBe('Follow up on PR review #123: Feature PR');
     });
 
-    it('should generate title for opened issue', () => {
-      const title = generateCloudJobTitle({
-        type: CloudTaskType.GithubIssueFix,
-        payload: {
-          repo: 'owner/repo',
-          issue: 42,
-          title: 'Bug in authentication',
-          body: 'Description of bug',
-        },
-      });
-
-      expect(title).toBe('Fix issue #42: Bug in authentication');
-    });
-
-    it('should generate title for issue comment', () => {
-      const title = generateCloudJobTitle({
-        type: CloudTaskType.GithubIssueCommentRespond,
-        payload: {
-          repo: 'owner/repo',
-          issueNumber: 42,
-          issueTitle: 'Bug report',
-          issueBody: 'Description',
-          commentId: 1,
-          commentBody: 'Can you help?',
-          commentAuthor: 'user',
-        },
-      });
-
-      expect(title).toBe('Respond to comment on issue #42: Bug report');
-    });
-
     it('should generate title for Slack mention', () => {
       const title = generateCloudJobTitle({
-        type: CloudTaskType.SlackAppMention,
+        type: TaskPayloadKind.SlackAppMention,
         payload: {
           repo: 'owner/repo',
           channel: 'C123',
@@ -518,7 +487,7 @@ describe('generateCloudJobTitle', () => {
       const longText = 'a'.repeat(100);
       const title = generateCloudJobTitle(
         {
-          type: CloudTaskType.SlackAppMention,
+          type: TaskPayloadKind.SlackAppMention,
           payload: {
             repo: 'owner/repo',
             channel: 'C123',
@@ -536,7 +505,7 @@ describe('generateCloudJobTitle', () => {
     it('should not truncate long Slack messages with default limit', () => {
       const longText = 'a'.repeat(100);
       const title = generateCloudJobTitle({
-        type: CloudTaskType.SlackAppMention,
+        type: TaskPayloadKind.SlackAppMention,
         payload: {
           repo: 'owner/repo',
           channel: 'C123',
@@ -551,7 +520,7 @@ describe('generateCloudJobTitle', () => {
 
     it('should generate title for a delegated task', () => {
       const title = generateCloudJobTitle({
-        type: CloudTaskType.StandardTask,
+        type: TaskPayloadKind.StandardTask,
         payload: {
           repo: 'owner/repo',
           description: 'Explain the authentication flow',
@@ -563,7 +532,7 @@ describe('generateCloudJobTitle', () => {
 
     it('should generate title for a delegated task', () => {
       const title = generateCloudJobTitle({
-        type: CloudTaskType.StandardTask,
+        type: TaskPayloadKind.StandardTask,
         payload: {
           repo: 'owner/repo',
           description: 'Implement user login',
@@ -575,7 +544,7 @@ describe('generateCloudJobTitle', () => {
 
     it('should generate title for a delegated task', () => {
       const title = generateCloudJobTitle({
-        type: CloudTaskType.StandardTask,
+        type: TaskPayloadKind.StandardTask,
         payload: {
           repo: 'owner/repo',
           description: 'Plan the refactoring strategy',
@@ -587,7 +556,7 @@ describe('generateCloudJobTitle', () => {
 
     it('should generate title for Linear agent session', () => {
       const title = generateCloudJobTitle({
-        type: CloudTaskType.LinearAgentSession,
+        type: TaskPayloadKind.LinearAgentSession,
         payload: {
           repo: 'owner/repo',
           sessionId: 'session-123',
@@ -606,7 +575,7 @@ describe('generateCloudJobTitle', () => {
 
     it('should generate title for GithubPrConflictResolve', () => {
       const title = generateCloudJobTitle({
-        type: CloudTaskType.GithubPrConflictResolve,
+        type: TaskPayloadKind.GithubPrConflictResolve,
         payload: {
           repo: 'owner/repo',
           prNumber: 42,
@@ -614,7 +583,7 @@ describe('generateCloudJobTitle', () => {
           prUrl: 'https://github.com/owner/repo/pull/42',
           headRef: 'feature/new-thing',
           baseRef: 'main',
-        } as CloudTaskPayload<CloudTaskType.GithubPrConflictResolve>,
+        } as TaskPayload<typeof TaskPayloadKind.GithubPrConflictResolve>,
       });
 
       expect(title).toBe('Fix merge conflicts on PR #42');
@@ -622,8 +591,8 @@ describe('generateCloudJobTitle', () => {
 
     it('should return default title for unknown task type', () => {
       const title = generateCloudJobTitle({
-        type: 'unknown.type' as CloudTaskType,
-        payload: { repo: 'owner/repo' } as CloudTaskPayload,
+        type: 'unknown.type' as TaskPayloadKind,
+        payload: { repo: 'owner/repo' } as TaskPayload,
       });
 
       expect(title).toBe('Untitled task');
@@ -634,12 +603,10 @@ describe('generateCloudJobTitle', () => {
 describe('hasDeterministicCloudJobTitle', () => {
   it('locks payload-derived titles for PR review and GitHub automation tasks', () => {
     for (const type of [
-      CloudTaskType.GithubPrReview,
-      CloudTaskType.GithubPrReviewSync,
-      CloudTaskType.GithubPrReviewFollowUp,
-      CloudTaskType.GithubPrConflictResolve,
-      CloudTaskType.GithubIssueFix,
-      CloudTaskType.GithubIssueCommentRespond,
+      TaskPayloadKind.GithubPrReview,
+      TaskPayloadKind.GithubPrReviewSync,
+      TaskPayloadKind.GithubPrReviewFollowUp,
+      TaskPayloadKind.GithubPrConflictResolve,
     ]) {
       expect(hasDeterministicCloudJobTitle(type)).toBe(true);
     }
@@ -647,10 +614,10 @@ describe('hasDeterministicCloudJobTitle', () => {
 
   it('keeps conversational and prompt-driven task types LLM-titleable', () => {
     for (const type of [
-      CloudTaskType.StandardTask,
-      CloudTaskType.SuggestedTasks,
-      CloudTaskType.SlackAppMention,
-      CloudTaskType.LinearAgentSession,
+      TaskPayloadKind.StandardTask,
+      TaskPayloadKind.Scan,
+      TaskPayloadKind.SlackAppMention,
+      TaskPayloadKind.LinearAgentSession,
     ]) {
       expect(hasDeterministicCloudJobTitle(type)).toBe(false);
     }

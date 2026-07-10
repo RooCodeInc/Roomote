@@ -1,17 +1,13 @@
-import { Queue } from 'bullmq';
 import {
-  getTriggerableBackgroundAutomationDescriptor,
-  hasTriggerableBackgroundAutomationManagerChannelKind,
-  isTriggerableBackgroundAutomationAgentId,
-  type TriggerableBackgroundAutomationAgentId,
+  getTriggerableBackgroundAutomationDescriptorByKey,
+  isTriggerableBackgroundAutomationKey,
+  type TriggerableBackgroundAutomationKey,
 } from '@roomote/types';
+import { getAutomationRuntime } from '@roomote/db/server';
 import {
-  createQueuedBackgroundAutomationRun,
-  db,
-  getBackgroundAgentSettingsForDeployment,
-  resolveManagerSlackChannelId,
-} from '@roomote/db/server';
-import { getRedis } from '@roomote/redis';
+  runAutomationNow,
+  type AutomationRunNowResult,
+} from '@roomote/sdk/server';
 
 import type { UserAuthSuccess } from '@/types';
 
@@ -23,38 +19,31 @@ import {
 } from './automation-requirements';
 import { assertAdmin } from './feature-gates';
 
-const SCHEDULED_JOBS_QUEUE_NAME = 'scheduled-jobs';
-
-type TriggerableAgentType = TriggerableBackgroundAutomationAgentId;
-
 async function assertManualTriggerIsRunnable(
-  auth: UserAuthSuccess,
-  agentType: TriggerableAgentType,
+  automationKey: TriggerableBackgroundAutomationKey,
 ) {
-  const descriptor = getTriggerableBackgroundAutomationDescriptor(agentType);
+  const descriptor =
+    getTriggerableBackgroundAutomationDescriptorByKey(automationKey);
 
   if (!descriptor) {
-    throw new Error(`Unsupported agent type: ${String(agentType)}`);
+    throw new Error(`Unsupported automation: ${String(automationKey)}`);
   }
 
-  const settings = await getBackgroundAgentSettingsForDeployment();
+  const runtime = await getAutomationRuntime(automationKey);
 
-  if (settings[descriptor.schedule.field] === 'off') {
+  if (!runtime.enabled) {
     throw new Error(
       `${descriptor.label} is disabled in saved settings. Save the automation settings before running it.`,
     );
   }
 
-  if (
-    hasTriggerableBackgroundAutomationManagerChannelKind(descriptor) &&
-    !resolveManagerSlackChannelId(settings, descriptor.managerChannelKind)
-  ) {
+  if (descriptor.usesManagerChannel && !runtime.slackChannelId) {
     throw new Error(
       `Set a Manager Channel before running ${descriptor.label}.`,
     );
   }
 
-  for (const requirement of descriptor.manualTrigger.requirements) {
+  for (const requirement of descriptor.manualTriggerRequirements) {
     switch (requirement) {
       case 'slack':
         if (!(await hasActiveSlackInstallation())) {
@@ -84,68 +73,22 @@ async function assertManualTriggerIsRunnable(
   }
 }
 
-export async function triggerAgentCommand(
+/**
+ * Synchronous manual "Run now": invokes the automation's runner inline (the
+ * same code the scheduler runs) and returns the outcome, including the
+ * launched task id when the automation launches a task.
+ */
+export async function triggerAutomationCommand(
   auth: UserAuthSuccess,
-  input: { agentType: TriggerableAgentType },
-) {
+  input: { automationKey: TriggerableBackgroundAutomationKey },
+): Promise<AutomationRunNowResult> {
   assertAdmin(auth);
-  if (!isTriggerableBackgroundAutomationAgentId(input.agentType)) {
-    throw new Error(`Unsupported agent type: ${String(input.agentType)}`);
-  }
-  await assertManualTriggerIsRunnable(auth, input.agentType);
-  const descriptor = getTriggerableBackgroundAutomationDescriptor(
-    input.agentType,
-  );
 
-  if (!descriptor) {
-    throw new Error(`Unsupported agent type: ${String(input.agentType)}`);
+  if (!isTriggerableBackgroundAutomationKey(input.automationKey)) {
+    throw new Error(`Unsupported automation: ${String(input.automationKey)}`);
   }
 
-  const jobName = descriptor.manualTrigger.jobName;
-  const automationKey = descriptor.automationKey;
+  await assertManualTriggerIsRunnable(input.automationKey);
 
-  const queue = new Queue(SCHEDULED_JOBS_QUEUE_NAME, {
-    connection: getRedis(),
-  });
-
-  let bullmqJobId: string | null = null;
-
-  try {
-    const job = await queue.add(
-      jobName,
-      {
-        manualTrigger: true,
-      },
-      {
-        attempts: 3,
-        backoff: { type: 'exponential', delay: 2000 },
-        removeOnComplete: { age: 3600, count: 100 },
-        removeOnFail: { age: 24 * 3600 },
-      },
-    );
-
-    if (job?.id != null) {
-      bullmqJobId = String(job.id);
-
-      try {
-        await createQueuedBackgroundAutomationRun(db, {
-          automationKey,
-          bullmqJobId,
-          triggerKind: 'manual',
-          queuedAt: new Date(),
-          metadata: {
-            jobName,
-          },
-        });
-      } catch (error) {
-        console.warn(
-          `[triggerAgentCommand] Failed to record queued automation run for ${automationKey} job ${bullmqJobId}: ${error instanceof Error ? error.message : String(error)}`,
-        );
-      }
-    }
-  } finally {
-    await queue.close();
-  }
-
-  return { triggered: true, jobName, jobId: bullmqJobId };
+  return runAutomationNow(input.automationKey);
 }

@@ -3,12 +3,12 @@ import { Job } from 'bullmq';
 import { TelegramCommunicationProvider } from '@roomote/communication/telegram-provider';
 import {
   and,
-  cloudJobs,
   db,
   desc,
   eq,
   slackInstallations,
   taskPullRequests,
+  taskRuns,
 } from '@roomote/db/server';
 import { Env } from '@roomote/env';
 import {
@@ -18,7 +18,6 @@ import {
   type PrReviewNotificationRequest,
   type PrReviewNotificationRoute,
   consumePendingPrReviewActivity,
-  isPrReviewNotificationEnabled,
   preparePrReviewNotificationDelivery,
   prReviewNotificationRequestSchema,
   recordPrReviewNotificationDeliveryBestEffort,
@@ -26,7 +25,7 @@ import {
   schedulePrReviewNotificationJob,
 } from '@roomote/sdk/server';
 import { SlackNotifier } from '@roomote/slack';
-import { isCloudTaskExecutingTurn } from '@roomote/types';
+import { isTaskExecutingTurn } from '@roomote/types';
 
 type PrReviewNotificationJob = Job<PrReviewNotificationRequest, void, string>;
 
@@ -156,24 +155,14 @@ export const prReviewNotificationJob = async (
     prNumber: data.prNumber,
   };
 
-  // Re-check the experimental flag at delivery time so pending notifications
-  // drain silently if the flag is turned off after events were queued.
-  if (!(await isPrReviewNotificationEnabled('[PrReviewNotification]'))) {
-    console.log(
-      `[PrReviewNotification] Feature flag disabled, dropping pending review activity for task ${data.taskId} on ${data.repository}#${data.prNumber}`,
-    );
-    await consumePendingPrReviewActivity(target);
-    return;
-  }
-
-  const latestJob = await db.query.cloudJobs.findFirst({
-    where: eq(cloudJobs.taskId, data.taskId),
-    orderBy: [desc(cloudJobs.createdAt)],
+  const latestJob = await db.query.taskRuns.findFirst({
+    where: eq(taskRuns.taskId, data.taskId),
+    orderBy: [desc(taskRuns.createdAt)],
   });
 
   if (!latestJob) {
     console.warn(
-      `[PrReviewNotification] No cloud job found for task ${data.taskId}, skipping`,
+      `[PrReviewNotification] No run found for task ${data.taskId}, skipping`,
     );
     await consumePendingPrReviewActivity(target);
     return;
@@ -183,7 +172,7 @@ export const prReviewNotificationJob = async (
   // the task is actively working, and once the deferral cap is reached (the
   // task has effectively been running for the whole pending-events window),
   // drop the pending feedback instead of posting mid-run.
-  if (isCloudTaskExecutingTurn(latestJob.status, latestJob.taskPhase)) {
+  if (isTaskExecutingTurn(latestJob.status, latestJob.taskPhase)) {
     if (data.deferrals < PR_REVIEW_NOTIFICATION_MAX_DEFERRALS) {
       await schedulePrReviewNotificationJob({
         request: { ...data, deferrals: data.deferrals + 1 },

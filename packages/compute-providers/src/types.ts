@@ -206,6 +206,12 @@ export interface ModalConfig {
   ecrOidcRoleArn?: string;
   /** AWS region for ECR pulls in OIDC mode. */
   ecrRegion?: string;
+  /**
+   * Optional Modal container placement region(s) for new sandboxes
+   * (`MODAL_REGIONS`). When unset, Modal chooses placement automatically.
+   * Tokens match Modal's broad/narrow region list (e.g. `us`, `us-west`).
+   */
+  regions?: string[];
   /** Maximum sandbox lifetime in milliseconds. Modal defaults to 5 minutes if unset. */
   timeoutMs?: number;
   /** CPU core reservation (can be fractional, e.g. 8). */

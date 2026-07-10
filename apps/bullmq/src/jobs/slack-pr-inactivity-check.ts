@@ -1,6 +1,6 @@
 import { Job } from 'bullmq';
 
-import { cloudJobs, db, eq, slackInstallations } from '@roomote/db/server';
+import { db, eq, slackInstallations, taskRuns } from '@roomote/db/server';
 import {
   fetchPullRequestSnapshotForCloudJob,
   hasPullRequestMoved,
@@ -51,13 +51,13 @@ export const slackPrInactivityCheckJob = async (
 
   const data = parsed.data;
 
-  const cloudJob = await db.query.cloudJobs.findFirst({
-    where: eq(cloudJobs.id, data.cloudJobId),
+  const cloudJob = await db.query.taskRuns.findFirst({
+    where: eq(taskRuns.id, data.cloudJobId),
   });
 
   if (!cloudJob) {
     console.warn(
-      `[SlackPrInactivityCheck] Source cloud job ${data.cloudJobId} not found, skipping`,
+      `[SlackPrInactivityCheck] Source run ${data.cloudJobId} not found, skipping`,
     );
     return;
   }

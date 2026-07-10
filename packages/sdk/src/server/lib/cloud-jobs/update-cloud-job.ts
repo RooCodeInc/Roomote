@@ -1,11 +1,11 @@
-import { type UpdateCloudJob, db, cloudJobs, eq } from '@roomote/db/server';
+import { type UpdateRun, db, taskRuns, eq } from '@roomote/db/server';
 
 export async function updateCloudJob(
   cloudJobId: number,
-  values: UpdateCloudJob,
+  values: UpdateRun,
 ): Promise<void> {
   try {
-    await db.update(cloudJobs).set(values).where(eq(cloudJobs.id, cloudJobId));
+    await db.update(taskRuns).set(values).where(eq(taskRuns.id, cloudJobId));
   } catch (error) {
     console.error(
       `[updateCloudJob] Failed to update cloud job ${cloudJobId}: ${error instanceof Error ? error.message : String(error)}`,

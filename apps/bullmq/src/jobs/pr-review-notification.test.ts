@@ -7,7 +7,6 @@ const {
   mockConsumePending,
   mockRequeuePending,
   mockSchedule,
-  mockIsEnabled,
   mockPrepareDelivery,
   mockRecordDelivery,
   mockPostMessage,
@@ -21,7 +20,6 @@ const {
   mockConsumePending: vi.fn(),
   mockRequeuePending: vi.fn(),
   mockSchedule: vi.fn(),
-  mockIsEnabled: vi.fn(),
   mockPrepareDelivery: vi.fn(),
   mockRecordDelivery: vi.fn(),
   mockPostMessage: vi.fn(),
@@ -33,7 +31,7 @@ const {
 vi.mock('@roomote/db/server', () => ({
   db: {
     query: {
-      cloudJobs: {
+      taskRuns: {
         findFirst: (...args: unknown[]) => mockFindFirstCloudJob(...args),
       },
       taskPullRequests: {
@@ -49,7 +47,7 @@ vi.mock('@roomote/db/server', () => ({
   and: vi.fn(() => 'and-condition'),
   eq: vi.fn(() => 'eq-condition'),
   desc: vi.fn(() => 'desc-order'),
-  cloudJobs: { taskId: 'taskId', createdAt: 'createdAt' },
+  taskRuns: { taskId: 'taskId', createdAt: 'createdAt' },
   taskPullRequests: {
     taskId: 'taskId',
     repository: 'repository',
@@ -79,7 +77,6 @@ vi.mock('@roomote/sdk/server', () => ({
   consumePendingPrReviewActivity: mockConsumePending,
   requeuePendingPrReviewActivity: mockRequeuePending,
   schedulePrReviewNotificationJob: mockSchedule,
-  isPrReviewNotificationEnabled: mockIsEnabled,
   createTeamsCommunicationProviderFromRuntimeCredentials:
     mockCreateTeamsProvider,
   preparePrReviewNotificationDelivery: mockPrepareDelivery,
@@ -100,7 +97,7 @@ vi.mock('@roomote/communication/telegram-provider', () => ({
 
 import type { Job } from 'bullmq';
 
-import { CloudTaskStatus } from '@roomote/types';
+import { RunStatus } from '@roomote/types';
 
 import { prReviewNotificationJob } from './pr-review-notification';
 
@@ -128,14 +125,13 @@ describe('prReviewNotificationJob', () => {
       payload: { channel: 'C123' },
       slackThreadTs: '111.222',
       sourceCloudJobId: null,
-      status: CloudTaskStatus.Idle,
+      status: RunStatus.Idle,
       taskPhase: 'waiting_for_prompt',
     });
     mockFindFirstTaskPullRequest.mockResolvedValue({ status: 'open' });
     mockFindFirstSlackInstallation.mockResolvedValue({
       botAccessToken: 'xoxb-token',
     });
-    mockIsEnabled.mockResolvedValue(true);
     mockConsumePending.mockResolvedValue(events);
     mockPrepareDelivery.mockResolvedValue({
       post: true,
@@ -247,24 +243,13 @@ describe('prReviewNotificationJob', () => {
     expect(mockPostMessage).not.toHaveBeenCalled();
   });
 
-  it('drops pending activity without posting when the feature flag is off', async () => {
-    mockIsEnabled.mockResolvedValue(false);
-
-    await prReviewNotificationJob(makeJob() as never);
-
-    expect(mockConsumePending).toHaveBeenCalled();
-    expect(mockPostMessage).not.toHaveBeenCalled();
-    expect(mockSchedule).not.toHaveBeenCalled();
-    expect(mockPrepareDelivery).not.toHaveBeenCalled();
-  });
-
   it('defers while the task is actively running', async () => {
     mockFindFirstCloudJob.mockResolvedValue({
       id: 1,
       payload: {},
       slackThreadTs: '111.222',
       sourceCloudJobId: null,
-      status: CloudTaskStatus.Running,
+      status: RunStatus.Running,
       taskPhase: 'running',
     });
 
@@ -284,7 +269,7 @@ describe('prReviewNotificationJob', () => {
       payload: {},
       slackThreadTs: '111.222',
       sourceCloudJobId: null,
-      status: CloudTaskStatus.Idle,
+      status: RunStatus.Idle,
       taskPhase: 'running',
     });
 
@@ -304,7 +289,7 @@ describe('prReviewNotificationJob', () => {
       payload: {},
       slackThreadTs: '111.222',
       sourceCloudJobId: null,
-      status: CloudTaskStatus.Running,
+      status: RunStatus.Running,
       taskPhase: 'running',
     });
 

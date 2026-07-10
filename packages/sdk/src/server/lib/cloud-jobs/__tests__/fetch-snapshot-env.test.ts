@@ -17,15 +17,14 @@ const {
 vi.mock('@roomote/db/server', () => ({
   db: {
     query: {
-      cloudJobs: {
+      taskRuns: {
         findFirst: mockFindFirst,
       },
     },
     transaction: mockTransaction,
   },
-  cloudJobs: {
-    id: 'cloudJobs.id',
-    userId: 'cloudJobs.userId',
+  taskRuns: {
+    id: 'taskRuns.id',
   },
   and: (...args: unknown[]) => ({ _and: args }),
   eq: (col: unknown, val: unknown) => ({ _eq: [col, val] }),
@@ -38,7 +37,7 @@ vi.mock('../dequeue-helpers', () => ({
 
 import { fetchSnapshotEnv } from '../fetch-snapshot-env';
 
-// A minimal CloudJob-like object for test fixtures.
+// A minimal Run-like object for test fixtures.
 function makeCloudJob(overrides: Record<string, unknown> = {}) {
   return {
     id: 42,
@@ -119,6 +118,7 @@ describe('fetchSnapshotEnv', () => {
     const auth: JobTokenContext = {
       cloudJobId: 42,
       userId: 'user_789',
+      principal: 'user',
       tokenType: 'cj',
       version: 1,
     };

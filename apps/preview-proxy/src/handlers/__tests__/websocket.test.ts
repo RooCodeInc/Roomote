@@ -280,7 +280,7 @@ describe('handleWebSocketUpgrade', () => {
   });
 
   it('accepts inline preview tokens for auth-protected websocket upgrades from the app shell', async () => {
-    const cloudJob = createMockCloudJob({ userId: 'user-1' });
+    const cloudJob = createMockCloudJob({ actingUserId: 'user-1' });
 
     vi.mocked(parseHostForConfig).mockReturnValue({
       isValid: true,

@@ -1,40 +1,61 @@
 import {
   and,
-  cloudJobs,
   db,
   desc,
+  eq,
   inArray,
   isNull,
   or,
   sql,
+  taskRuns,
+  tasks,
 } from '@roomote/db/server';
 import {
-  CloudTaskStatus,
-  activeCloudTaskStatuses,
+  RunStatus,
+  activeRunStatuses,
   isSnapshotResumable,
 } from '@roomote/types';
 
-const ACTIVE_TEAMS_JOB_COLUMNS = {
-  id: true,
-  userId: true,
-  type: true,
-  status: true,
-  machineId: true,
-  taskId: true,
-  payload: true,
-} as const;
+const ACTIVE_TEAMS_JOB_SELECTION = {
+  id: taskRuns.id,
+  initiatorUserId: tasks.initiatorUserId,
+  actingUserId: taskRuns.actingUserId,
+  payloadKind: taskRuns.payloadKind,
+  status: taskRuns.status,
+  machineId: taskRuns.machineId,
+  taskId: taskRuns.taskId,
+  payload: taskRuns.payload,
+};
 
-const SNAPSHOT_RESUME_TEAMS_JOB_COLUMNS = {
-  id: true,
-  userId: true,
-  type: true,
-  status: true,
-  taskId: true,
-  payload: true,
-  port: true,
-  snapshotId: true,
-  snapshotCreatedAt: true,
-} as const;
+const SNAPSHOT_RESUME_TEAMS_JOB_SELECTION = {
+  id: taskRuns.id,
+  initiatorUserId: tasks.initiatorUserId,
+  actingUserId: taskRuns.actingUserId,
+  payloadKind: taskRuns.payloadKind,
+  status: taskRuns.status,
+  taskId: taskRuns.taskId,
+  payload: taskRuns.payload,
+  port: taskRuns.port,
+  snapshotId: taskRuns.snapshotId,
+  snapshotCreatedAt: taskRuns.snapshotCreatedAt,
+};
+
+/**
+ * Collapses the split initiator/acting user columns back into the single
+ * `userId` shape Teams callers key off: the task initiator when known,
+ * otherwise the run's acting user.
+ */
+function withResolvedUserId<
+  T extends { initiatorUserId: string | null; actingUserId: string | null },
+>(
+  row: T,
+): Omit<T, 'initiatorUserId' | 'actingUserId'> & {
+  userId: string | null;
+} {
+  const { initiatorUserId, actingUserId, ...rest } = row;
+
+  return { ...rest, userId: initiatorUserId ?? actingUserId };
+}
 
 /**
  * Strips the Bot Framework channel-thread `;messageid=<root>` suffix from a
@@ -69,24 +90,24 @@ export function buildTeamsJobMatchConditions(input: {
 }) {
   const conversationBase = stripTeamsMessageIdSuffix(input.conversationId);
   const conversationMatch = or(
-    sql`split_part(${cloudJobs.payload}->>'communicationChannelId', ';messageid=', 1) = ${conversationBase}`,
-    sql`split_part(${cloudJobs.payload}->>'teamsConversationId', ';messageid=', 1) = ${conversationBase}`,
-    sql`${cloudJobs.payload}->>'teamsChannelId' = ${conversationBase}`,
+    sql`split_part(${taskRuns.payload}->>'communicationChannelId', ';messageid=', 1) = ${conversationBase}`,
+    sql`split_part(${taskRuns.payload}->>'teamsConversationId', ';messageid=', 1) = ${conversationBase}`,
+    sql`${taskRuns.payload}->>'teamsChannelId' = ${conversationBase}`,
   );
   const threadMatch = input.threadId
     ? or(
-        sql`${cloudJobs.payload}->>'communicationThreadId' = ${input.threadId}`,
-        sql`${cloudJobs.payload}->>'communicationMessageId' = ${input.threadId}`,
-        sql`${cloudJobs.payload}->>'teamsThreadId' = ${input.threadId}`,
-        sql`${cloudJobs.payload}->>'teamsMessageId' = ${input.threadId}`,
+        sql`${taskRuns.payload}->>'communicationThreadId' = ${input.threadId}`,
+        sql`${taskRuns.payload}->>'communicationMessageId' = ${input.threadId}`,
+        sql`${taskRuns.payload}->>'teamsThreadId' = ${input.threadId}`,
+        sql`${taskRuns.payload}->>'teamsMessageId' = ${input.threadId}`,
       )
     : undefined;
   const teamsProviderMatch = or(
-    sql`${cloudJobs.payload}->>'communicationProvider' = 'teams'`,
-    sql`${cloudJobs.payload}->>'teamsConversationId' IS NOT NULL`,
-    sql`${cloudJobs.payload}->>'teamsChannelId' IS NOT NULL`,
-    sql`${cloudJobs.payload}->>'teamsThreadId' IS NOT NULL`,
-    sql`${cloudJobs.payload}->>'teamsMessageId' IS NOT NULL`,
+    sql`${taskRuns.payload}->>'communicationProvider' = 'teams'`,
+    sql`${taskRuns.payload}->>'teamsConversationId' IS NOT NULL`,
+    sql`${taskRuns.payload}->>'teamsChannelId' IS NOT NULL`,
+    sql`${taskRuns.payload}->>'teamsThreadId' IS NOT NULL`,
+    sql`${taskRuns.payload}->>'teamsMessageId' IS NOT NULL`,
   );
 
   return { teamsProviderMatch, conversationMatch, threadMatch };
@@ -99,17 +120,23 @@ export async function findActiveTeamsJob(input: {
   const { teamsProviderMatch, conversationMatch, threadMatch } =
     buildTeamsJobMatchConditions(input);
 
-  return db.query.cloudJobs.findFirst({
-    where: and(
-      teamsProviderMatch,
-      conversationMatch,
-      threadMatch,
-      inArray(cloudJobs.status, [...activeCloudTaskStatuses]),
-      isNull(cloudJobs.canceledAt),
-    ),
-    orderBy: desc(cloudJobs.createdAt),
-    columns: ACTIVE_TEAMS_JOB_COLUMNS,
-  });
+  const [row] = await db
+    .select(ACTIVE_TEAMS_JOB_SELECTION)
+    .from(taskRuns)
+    .innerJoin(tasks, eq(taskRuns.taskId, tasks.id))
+    .where(
+      and(
+        teamsProviderMatch,
+        conversationMatch,
+        threadMatch,
+        inArray(taskRuns.status, [...activeRunStatuses]),
+        isNull(taskRuns.canceledAt),
+      ),
+    )
+    .orderBy(desc(taskRuns.createdAt))
+    .limit(1);
+
+  return row ? withResolvedUserId(row) : undefined;
 }
 
 export async function findCompletedTeamsJobWithSnapshot(input: {
@@ -118,25 +145,29 @@ export async function findCompletedTeamsJobWithSnapshot(input: {
 }) {
   const { teamsProviderMatch, conversationMatch, threadMatch } =
     buildTeamsJobMatchConditions(input);
-  const job = await db.query.cloudJobs.findFirst({
-    where: and(
-      teamsProviderMatch,
-      conversationMatch,
-      threadMatch,
-      inArray(cloudJobs.status, [CloudTaskStatus.Completed]),
-      isNull(cloudJobs.canceledAt),
-      sql`${cloudJobs.snapshotId} IS NOT NULL`,
-      sql`${cloudJobs.snapshotCreatedAt} IS NOT NULL`,
-    ),
-    orderBy: desc(cloudJobs.createdAt),
-    columns: SNAPSHOT_RESUME_TEAMS_JOB_COLUMNS,
-  });
+  const [row] = await db
+    .select(SNAPSHOT_RESUME_TEAMS_JOB_SELECTION)
+    .from(taskRuns)
+    .innerJoin(tasks, eq(taskRuns.taskId, tasks.id))
+    .where(
+      and(
+        teamsProviderMatch,
+        conversationMatch,
+        threadMatch,
+        inArray(taskRuns.status, [RunStatus.Completed]),
+        isNull(taskRuns.canceledAt),
+        sql`${taskRuns.snapshotId} IS NOT NULL`,
+        sql`${taskRuns.snapshotCreatedAt} IS NOT NULL`,
+      ),
+    )
+    .orderBy(desc(taskRuns.createdAt))
+    .limit(1);
 
-  if (!job?.snapshotId || !isSnapshotResumable(job.snapshotCreatedAt)) {
+  if (!row?.snapshotId || !isSnapshotResumable(row.snapshotCreatedAt)) {
     return null;
   }
 
-  return job;
+  return withResolvedUserId(row);
 }
 
 /**
@@ -153,9 +184,17 @@ export async function findLatestTeamsThreadJob(input: {
   const { teamsProviderMatch, conversationMatch, threadMatch } =
     buildTeamsJobMatchConditions(input);
 
-  return db.query.cloudJobs.findFirst({
-    where: and(teamsProviderMatch, conversationMatch, threadMatch),
-    orderBy: desc(cloudJobs.createdAt),
-    columns: { id: true, userId: true },
-  });
+  const [row] = await db
+    .select({
+      id: taskRuns.id,
+      initiatorUserId: tasks.initiatorUserId,
+      actingUserId: taskRuns.actingUserId,
+    })
+    .from(taskRuns)
+    .innerJoin(tasks, eq(taskRuns.taskId, tasks.id))
+    .where(and(teamsProviderMatch, conversationMatch, threadMatch))
+    .orderBy(desc(taskRuns.createdAt))
+    .limit(1);
+
+  return row ? withResolvedUserId(row) : undefined;
 }

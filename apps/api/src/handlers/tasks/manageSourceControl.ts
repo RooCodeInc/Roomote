@@ -18,7 +18,7 @@ import {
 import type { Variables } from '../../types';
 import type { McpAuth } from '../mcp/middleware';
 import {
-  assertCloudJobTokenMatchesCloudJobUser,
+  assertCloudJobTokenJobExists,
   isJobTokenContext,
   McpProxyError,
 } from '../mcp/proxy-utils';
@@ -49,7 +49,7 @@ export async function manageSourceControl(
   }
 
   try {
-    await assertCloudJobTokenMatchesCloudJobUser(auth.authContext);
+    await assertCloudJobTokenJobExists(auth.authContext);
 
     const input = z
       .union([

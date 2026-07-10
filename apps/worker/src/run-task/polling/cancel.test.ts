@@ -65,7 +65,10 @@ function createListenerOptions(overrides?: {
       answerUserInputRequest: vi.fn<ListenerOptions['answerUserInputRequest']>(
         () => true,
       ),
-      prepareActorScopedTurn: vi.fn(async () => true),
+      prepareActorScopedTurn: vi.fn(
+        async (targetUserId?: string) =>
+          ({ effectiveUserId: targetUserId ?? null }) as const,
+      ),
     },
   };
 }

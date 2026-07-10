@@ -1,4 +1,4 @@
-import { CloudTaskStatus } from '@roomote/types';
+import { RunStatus } from '@roomote/types';
 
 const mockFindFirstCloudJob = vi.fn();
 const mockDbUpdateWhere = vi.fn().mockResolvedValue(undefined);
@@ -19,7 +19,7 @@ vi.mock('@roomote/db/server', async () => {
     ...actual,
     db: {
       query: {
-        cloudJobs: {
+        taskRuns: {
           findFirst: (...args: unknown[]) => mockFindFirstCloudJob(...args),
         },
       },
@@ -37,7 +37,7 @@ describe('updateCloudJobRuntimeState', () => {
 
   it('applies newer runtime-state deadlines', async () => {
     mockFindFirstCloudJob.mockResolvedValue({
-      status: CloudTaskStatus.Running,
+      status: RunStatus.Running,
       taskPhase: 'running',
       sleepAt: new Date('2026-03-20T06:14:38.766Z'),
     });
@@ -59,7 +59,7 @@ describe('updateCloudJobRuntimeState', () => {
 
   it('returns updated false when an older runtime-state write is ignored', async () => {
     mockFindFirstCloudJob.mockResolvedValue({
-      status: CloudTaskStatus.Running,
+      status: RunStatus.Running,
       taskPhase: 'running',
       sleepAt: new Date('2026-03-20T06:18:08.000Z'),
     });
@@ -74,7 +74,7 @@ describe('updateCloudJobRuntimeState', () => {
 
   it('applies phase transitions even when the next deadline is shorter', async () => {
     mockFindFirstCloudJob.mockResolvedValue({
-      status: CloudTaskStatus.Idle,
+      status: RunStatus.Idle,
       taskPhase: 'waiting_for_prompt',
       sleepAt: new Date('2026-03-20T06:18:08.000Z'),
     });
@@ -96,7 +96,7 @@ describe('updateCloudJobRuntimeState', () => {
 
   it('still applies immediate shutdown transitions even though they shorten the deadline', async () => {
     mockFindFirstCloudJob.mockResolvedValue({
-      status: CloudTaskStatus.Running,
+      status: RunStatus.Running,
       taskPhase: 'waiting_for_prompt',
       sleepAt: new Date('2026-03-20T06:18:08.000Z'),
     });

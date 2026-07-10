@@ -1,10 +1,14 @@
 import { z } from 'zod';
 
-import { ACP_ENVELOPE_EVENT_TYPES, CloudTaskType } from '@roomote/types';
+import {
+  ACP_ENVELOPE_EVENT_TYPES,
+  RunStatus,
+  TaskPayloadKind,
+} from '@roomote/types';
 import type { AuthTokenContext, JobTokenContext } from '@roomote/types';
 
 const {
-  mockEnqueueCloudTask,
+  mockEnqueueTask,
   mockEvaluateFeatureFlag,
   mockFindCloudJob,
   mockFindCloudJobForAccess,
@@ -17,8 +21,9 @@ const {
   mockQueueLinearMessage,
   mockRecordTaskMessageEnvelope,
   mockRecordTaskInferenceUsage,
+  mockUpdateCloudJob,
 } = vi.hoisted(() => ({
-  mockEnqueueCloudTask: vi.fn(),
+  mockEnqueueTask: vi.fn(),
   mockEvaluateFeatureFlag: vi.fn(),
   mockFindCloudJob: vi.fn(),
   mockFindCloudJobForAccess: vi.fn(),
@@ -31,10 +36,11 @@ const {
   mockQueueLinearMessage: vi.fn(),
   mockRecordTaskMessageEnvelope: vi.fn(),
   mockRecordTaskInferenceUsage: vi.fn(),
+  mockUpdateCloudJob: vi.fn(),
 }));
 
 vi.mock('@roomote/cloud-agents/server', () => ({
-  enqueueCloudTask: mockEnqueueCloudTask,
+  enqueueTask: mockEnqueueTask,
 }));
 
 vi.mock('@roomote/feature-flags/server', () => ({
@@ -90,7 +96,7 @@ vi.mock('../lib/cloud-jobs', () => ({
   findCloudJob: mockFindCloudJob,
   findCloudJobByIdAndOrgId: mockFindCloudJobByIdAndOrgId,
   findCloudJobByJobTokenClaims: mockFindCloudJobByJobTokenClaims,
-  finishCloudJob: vi.fn(),
+  finishRun: vi.fn(),
   getMessageSources: vi.fn(),
   getResolvedGitAuthor: vi.fn(),
   getResolvedRuntimeEnvVars: vi.fn(),
@@ -102,7 +108,7 @@ vi.mock('../lib/cloud-jobs', () => ({
   setTaskHarnessSessionId: vi.fn(),
   stampCloudJobMilestone: vi.fn(),
   touchCloudJobHeartbeat: vi.fn(),
-  updateCloudJob: vi.fn(),
+  updateCloudJob: mockUpdateCloudJob,
   updateCloudJobRuntimeState: vi.fn(),
 }));
 
@@ -148,6 +154,7 @@ function createJobCaller() {
   const auth: JobTokenContext = {
     cloudJobId: 42,
     userId: 'user-1',
+    principal: 'user',
     tokenType: 'cj',
     version: 1,
   };
@@ -158,7 +165,7 @@ function createJobCaller() {
 describe('cloudJobsRouter queue message guards', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    mockEnqueueCloudTask.mockResolvedValue({ id: 99, taskId: 'task-99' });
+    mockEnqueueTask.mockResolvedValue({ id: 99, taskId: 'task-99' });
     mockEvaluateFeatureFlag.mockResolvedValue(false);
     mockFindCloudJob.mockResolvedValue({ id: 42 });
     mockFindCloudJobForAccess.mockResolvedValue({ id: 42 });
@@ -173,6 +180,56 @@ describe('cloudJobsRouter queue message guards', () => {
     mockQueueLinearMessage.mockResolvedValue(undefined);
     mockRecordTaskMessageEnvelope.mockResolvedValue(undefined);
     mockRecordTaskInferenceUsage.mockResolvedValue({ recorded: true });
+    mockUpdateCloudJob.mockResolvedValue(undefined);
+  });
+
+  it('strips actingUserId from job-token update input (confused-deputy guard)', async () => {
+    // A job token is held by the sandbox runtime. Allowing it to write
+    // actingUserId would let a compromised sandbox reassign the run's acting
+    // user and read another user's actor-scoped credentials. The schema must
+    // drop the field so it never reaches the persistence layer.
+    await createJobCaller().update({
+      id: 42,
+      status: RunStatus.Running,
+      actingUserId: 'victim-user',
+    } as never);
+
+    expect(mockUpdateCloudJob).toHaveBeenCalledTimes(1);
+    const [persistedId, persistedValues] = mockUpdateCloudJob.mock.calls[0]!;
+    expect(persistedId).toBe(42);
+    expect(persistedValues).not.toHaveProperty('actingUserId');
+    expect(persistedValues).toEqual({ status: RunStatus.Running });
+  });
+
+  it('strips taskId from job-token update input (run->task binding guard)', async () => {
+    // A job token is held by the sandbox runtime. Allowing it to write taskId
+    // would let a compromised sandbox re-point its run at a different task,
+    // corrupting attribution, visibility, and PR linkage. The schema must drop
+    // the field so it never reaches the persistence layer.
+    await createJobCaller().update({
+      id: 42,
+      status: RunStatus.Running,
+      taskId: 'attacker-task',
+    } as never);
+
+    expect(mockUpdateCloudJob).toHaveBeenCalledTimes(1);
+    const [persistedId2, persistedValues2] = mockUpdateCloudJob.mock.calls[0]!;
+    expect(persistedId2).toBe(42);
+    expect(persistedValues2).not.toHaveProperty('taskId');
+    expect(persistedValues2).toEqual({ status: RunStatus.Running });
+  });
+
+  it('still persists legitimate non-stripped update fields for the job token', async () => {
+    await createJobCaller().update({
+      id: 42,
+      status: RunStatus.Running,
+      result: { ok: true },
+    });
+
+    expect(mockUpdateCloudJob).toHaveBeenCalledWith(42, {
+      status: RunStatus.Running,
+      result: { ok: true },
+    });
   });
 
   it('rejects queueSlackMessage for auth-token callers', async () => {
@@ -247,6 +304,7 @@ describe('cloudJobsRouter queue message guards', () => {
     expect(mockFindCloudJobByJobTokenClaims).toHaveBeenCalledWith({
       cloudJobId: 42,
       userId: 'user-1',
+      principal: 'user',
       tokenType: 'cj',
       version: 1,
     });
@@ -279,6 +337,7 @@ describe('cloudJobsRouter queue message guards', () => {
     expect(mockFindCloudJobByJobTokenClaims).toHaveBeenCalledWith({
       cloudJobId: 42,
       userId: 'user-1',
+      principal: 'user',
       tokenType: 'cj',
       version: 1,
     });
@@ -302,6 +361,7 @@ describe('cloudJobsRouter queue message guards', () => {
     expect(mockFindCloudJobByJobTokenClaims).toHaveBeenCalledWith({
       cloudJobId: 42,
       userId: 'user-1',
+      principal: 'user',
       tokenType: 'cj',
       version: 1,
     });
@@ -495,43 +555,104 @@ describe('cloudJobsRouter queue message guards', () => {
   it('allows explicit compute provider overrides for auth-token callers', async () => {
     await expect(
       createAuthCaller().enqueue({
-        type: CloudTaskType.StandardTask,
-        userId: 'user-1',
-        computeProvider: 'modal',
-        payload: {
-          repo: 'acme/api',
-          description: 'Ship it',
+        task: {
+          type: TaskPayloadKind.StandardTask,
+          computeProvider: 'modal',
+          payload: {
+            repo: 'acme/api',
+            description: 'Ship it',
+          },
         },
+        initiator: { kind: 'user', userId: 'user-1' },
+        workflow: 'standard',
+        surface: 'api',
+        trigger: 'manual',
       }),
     ).resolves.toEqual({ id: 99, taskId: 'task-99' });
 
-    expect(mockEnqueueCloudTask).toHaveBeenCalledWith(
+    expect(mockEnqueueTask).toHaveBeenCalledWith(
       expect.objectContaining({
-        computeProvider: 'modal',
+        task: expect.objectContaining({
+          computeProvider: 'modal',
+        }),
       }),
     );
   });
 
-  it('allows omitted compute provider values without consulting the feature flag', async () => {
+  it('validates the initiator union and passes the classified launch through', async () => {
     await expect(
       createAuthCaller().enqueue({
-        type: CloudTaskType.StandardTask,
-        userId: 'user-1',
-        payload: {
-          repo: 'acme/api',
-          description: 'Ship it',
+        task: {
+          type: TaskPayloadKind.StandardTask,
+          payload: {
+            repo: 'acme/api',
+            description: 'Ship it',
+          },
         },
+        initiator: { kind: 'user', userId: 'user-1' },
+        workflow: 'standard',
+        surface: 'api',
+        trigger: 'manual',
       }),
     ).resolves.toEqual({ id: 99, taskId: 'task-99' });
 
     expect(mockEvaluateFeatureFlag).not.toHaveBeenCalled();
-    expect(mockEnqueueCloudTask).toHaveBeenCalledWith({
-      payload: {
-        repo: 'acme/api',
-        description: 'Ship it',
+    expect(mockEnqueueTask).toHaveBeenCalledWith({
+      task: {
+        type: TaskPayloadKind.StandardTask,
+        payload: {
+          repo: 'acme/api',
+          description: 'Ship it',
+        },
       },
-      type: CloudTaskType.StandardTask,
-      userId: 'user-1',
+      initiator: { kind: 'user', userId: 'user-1' },
+      workflow: 'standard',
+      surface: 'api',
+      trigger: 'manual',
     });
+  });
+
+  it('rejects launches without an initiator', async () => {
+    await expect(
+      createAuthCaller().enqueue({
+        task: {
+          type: TaskPayloadKind.StandardTask,
+          payload: {
+            repo: 'acme/api',
+            description: 'Ship it',
+          },
+        },
+        workflow: 'standard',
+        surface: 'api',
+        trigger: 'manual',
+      } as never),
+    ).rejects.toThrow();
+
+    expect(mockEnqueueTask).not.toHaveBeenCalled();
+  });
+
+  it('accepts snapshot resumes through the resume input shape', async () => {
+    await expect(
+      createAuthCaller().enqueue({
+        task: {
+          type: TaskPayloadKind.SnapshotResume,
+          payload: {
+            repo: 'acme/api',
+            sourceSnapshotId: 'snap-1',
+            sourceCloudJobId: 42,
+          },
+        },
+        actingUserId: 'user-2',
+      }),
+    ).resolves.toEqual({ id: 99, taskId: 'task-99' });
+
+    expect(mockEnqueueTask).toHaveBeenCalledWith(
+      expect.objectContaining({
+        actingUserId: 'user-2',
+        task: expect.objectContaining({
+          type: TaskPayloadKind.SnapshotResume,
+        }),
+      }),
+    );
   });
 });

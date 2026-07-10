@@ -1,9 +1,6 @@
 import { type ComputeProvider } from '@roomote/types';
 import { Env } from '@roomote/env';
-import {
-  type CloudJob,
-  resolveComputeProviderEnvValues,
-} from '@roomote/db/server';
+import { type Run, resolveComputeProviderEnvValues } from '@roomote/db/server';
 
 import { BaseController } from './BaseController';
 import {
@@ -55,7 +52,7 @@ export class RoomoteController extends BaseController {
   }
 
   protected async spawnFreshWorker(
-    cloudJob: CloudJob,
+    cloudJob: Run,
     authToken: string,
     deploymentSlug: string,
     timeoutMs: number,
@@ -99,6 +96,7 @@ export class RoomoteController extends BaseController {
           modalRegistryPassword: Env.MODAL_REGISTRY_PASSWORD,
           modalEcrOidcRoleArn: Env.MODAL_ECR_OIDC_ROLE_ARN,
           modalEcrRegion: Env.MODAL_ECR_REGION,
+          modalRegions: resolvedEnv.MODAL_REGIONS,
           modalTimeoutMs: timeoutMs,
           localTarballPath: this.localWorkerReleasePath,
         });

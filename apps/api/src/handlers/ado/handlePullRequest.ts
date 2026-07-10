@@ -1,26 +1,26 @@
 import pMap from 'p-map';
 
 import {
-  type CloudTaskPayload,
+  type TaskPayload,
   DEFAULT_PR_REVIEWER_SETTINGS,
   type PrReviewerSettings,
-  CloudTaskType,
+  TaskPayloadKind,
   CloudAgentType,
-  CloudTaskStatus,
+  RunStatus,
 } from '@roomote/types';
 import {
   db,
   repositories,
-  cloudJobs,
+  taskPullRequests,
+  taskRuns,
+  tasks,
   and,
   eq,
-  inArray,
   isNotNull,
   isNull,
-  desc,
   sql,
 } from '@roomote/db/server';
-import { enqueueCloudTask } from '@roomote/cloud-agents/server';
+import { enqueueTask } from '@roomote/cloud-agents/server';
 import { updateTaskPrStatus } from '@roomote/sdk/server';
 
 import type { WebhookResponse } from '../../types';
@@ -47,21 +47,19 @@ type AdoPullRequestWebhookContext = {
   updatedNotificationType?: AdoUpdatedNotificationType;
 };
 
-const ADO_PR_REVIEW_TASK_TYPES = [
-  CloudTaskType.GithubPrReview,
-  CloudTaskType.GithubPrReviewSync,
-] as const;
-
 function getReviewTaskType(
   payload: AdoPullRequestWebhook,
   context: AdoPullRequestWebhookContext,
-): CloudTaskType.GithubPrReview | CloudTaskType.GithubPrReviewSync | null {
+):
+  | typeof TaskPayloadKind.GithubPrReview
+  | typeof TaskPayloadKind.GithubPrReviewSync
+  | null {
   if (payload.resource.status && payload.resource.status !== 'active') {
     return null;
   }
 
   if (payload.eventType === 'git.pullrequest.created') {
-    return CloudTaskType.GithubPrReview;
+    return TaskPayloadKind.GithubPrReview;
   }
 
   if (payload.eventType === 'git.pullrequest.updated') {
@@ -69,7 +67,7 @@ function getReviewTaskType(
       return null;
     }
 
-    return CloudTaskType.GithubPrReviewSync;
+    return TaskPayloadKind.GithubPrReviewSync;
   }
 
   return null;
@@ -150,21 +148,28 @@ async function getAdoSyncReviewDecision({
     return { shouldEnqueue: true };
   }
 
-  const currentHeadReviewJob = await db.query.cloudJobs.findFirst({
-    where: and(
-      inArray(cloudJobs.type, [...ADO_PR_REVIEW_TASK_TYPES]),
-      eq(cloudJobs.prRepo, repoFullName),
-      eq(cloudJobs.prNumber, prNumber),
-      eq(cloudJobs.prSha, headSha),
-      sql`${cloudJobs.status} != ${CloudTaskStatus.Failed}`,
-      isNotNull(cloudJobs.prSha),
-      isNull(cloudJobs.canceledAt),
-    ),
-    columns: { id: true, prSha: true },
-    orderBy: [desc(cloudJobs.createdAt)],
-  });
+  // PR association lives on task_pull_requests (inserted at enqueue for
+  // pr_review launches): head-SHA dedup is tasks JOIN task_pull_requests
+  // (+ task_runs for run status).
+  const [currentHeadReviewRun] = await db
+    .select({ id: taskRuns.id })
+    .from(tasks)
+    .innerJoin(taskPullRequests, eq(taskPullRequests.taskId, tasks.id))
+    .innerJoin(taskRuns, eq(taskRuns.taskId, tasks.id))
+    .where(
+      and(
+        eq(tasks.workflow, 'pr_review'),
+        eq(taskPullRequests.sourceControlProvider, 'ado'),
+        eq(taskPullRequests.repository, repoFullName),
+        eq(taskPullRequests.prNumber, prNumber),
+        eq(taskPullRequests.prSha, headSha),
+        sql`${taskRuns.status} != ${RunStatus.Failed}`,
+        isNull(taskRuns.canceledAt),
+      ),
+    )
+    .limit(1);
 
-  if (currentHeadReviewJob) {
+  if (currentHeadReviewRun) {
     return {
       shouldEnqueue: false,
       message: 'Azure DevOps PR head SHA already has a review job.',
@@ -175,21 +180,26 @@ async function getAdoSyncReviewDecision({
     return { shouldEnqueue: true };
   }
 
-  const priorReviewJob = await db.query.cloudJobs.findFirst({
-    where: and(
-      inArray(cloudJobs.type, [...ADO_PR_REVIEW_TASK_TYPES]),
-      eq(cloudJobs.prRepo, repoFullName),
-      eq(cloudJobs.prNumber, prNumber),
-      sql`${cloudJobs.status} != ${CloudTaskStatus.Failed}`,
-      sql`${cloudJobs.prSha} != ${headSha}`,
-      isNotNull(cloudJobs.prSha),
-      isNull(cloudJobs.canceledAt),
-    ),
-    columns: { id: true, prSha: true },
-    orderBy: [desc(cloudJobs.createdAt)],
-  });
+  const [priorReviewRun] = await db
+    .select({ id: taskRuns.id })
+    .from(tasks)
+    .innerJoin(taskPullRequests, eq(taskPullRequests.taskId, tasks.id))
+    .innerJoin(taskRuns, eq(taskRuns.taskId, tasks.id))
+    .where(
+      and(
+        eq(tasks.workflow, 'pr_review'),
+        eq(taskPullRequests.sourceControlProvider, 'ado'),
+        eq(taskPullRequests.repository, repoFullName),
+        eq(taskPullRequests.prNumber, prNumber),
+        sql`${taskRuns.status} != ${RunStatus.Failed}`,
+        sql`${taskPullRequests.prSha} != ${headSha}`,
+        isNotNull(taskPullRequests.prSha),
+        isNull(taskRuns.canceledAt),
+      ),
+    )
+    .limit(1);
 
-  if (!priorReviewJob?.prSha) {
+  if (!priorReviewRun) {
     return {
       shouldEnqueue: false,
       message: 'No prior Azure DevOps PR review found for sync event.',
@@ -287,7 +297,7 @@ export async function handleAdoPullRequest(
     };
   }
 
-  if (taskType === CloudTaskType.GithubPrReviewSync) {
+  if (taskType === TaskPayloadKind.GithubPrReviewSync) {
     const syncReviewDecision = await getAdoSyncReviewDecision({
       repoFullName,
       prNumber: pullRequest.pullRequestId,
@@ -306,31 +316,56 @@ export async function handleAdoPullRequest(
   const branchName = stripAdoGitRefPrefix(pullRequest.sourceRefName);
   const targetBranch = stripAdoGitRefPrefix(pullRequest.targetRefName);
 
-  const enqueued = await pMap(targets, async (target) =>
-    enqueueCloudTask(
+  const prUrl = getAdoPullRequestUrl({
+    resourceContainers: payload.resourceContainers,
+    pullRequest,
+    repositoryFullName: repoFullName,
+  });
+  const prAuthorName = getAdoIdentityName(pullRequest.createdBy);
+  const prAuthorId = pullRequest.createdBy?.id?.trim() || prAuthorName;
+
+  const enqueued = await pMap(targets, async (_target) =>
+    enqueueTask(
       {
-        userId: target.userId,
-        attributionOverride: {
-          kind: 'automatic',
-          sourceKind: 'ado',
+        task: {
+          type: taskType,
+          payload: {
+            repo: repoFullName,
+            sourceControlProvider: 'ado',
+            prNumber: pullRequest.pullRequestId,
+            prTitle: pullRequest.title,
+            prUrl,
+            headSha,
+            branchName,
+            ...(branchName ? { branch: branchName } : {}),
+            ...(headSha ? { sha: headSha } : {}),
+            targetBranch,
+          } satisfies TaskPayload<typeof taskType>,
         },
-        type: taskType,
-        payload: {
-          repo: repoFullName,
-          sourceControlProvider: 'ado',
+        initiator: {
+          kind: 'automation',
+          key: 'review_code',
+          ...(prAuthorId
+            ? {
+                actor: {
+                  externalId: prAuthorId,
+                  displayName: prAuthorName,
+                },
+              }
+            : {}),
+        },
+        workflow: 'pr_review',
+        surface: 'ado',
+        trigger: 'webhook',
+        prLinkage: {
+          provider: 'ado',
+          repository: repoFullName,
           prNumber: pullRequest.pullRequestId,
+          prUrl,
           prTitle: pullRequest.title,
-          prUrl: getAdoPullRequestUrl({
-            resourceContainers: payload.resourceContainers,
-            pullRequest,
-            repositoryFullName: repoFullName,
-          }),
-          headSha,
-          branchName,
-          ...(branchName ? { branch: branchName } : {}),
-          ...(headSha ? { sha: headSha } : {}),
-          targetBranch,
-        } satisfies CloudTaskPayload<typeof taskType>,
+          prSha: headSha || null,
+          prBaseRef: targetBranch ?? null,
+        },
       },
       {
         launchClass: 'automation',

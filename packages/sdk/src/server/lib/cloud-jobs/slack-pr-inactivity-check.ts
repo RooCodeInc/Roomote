@@ -1,19 +1,19 @@
 import { Queue } from 'bullmq';
 import { z } from 'zod';
 
-import type { CloudJob } from '@roomote/db/server';
+import type { Run } from '@roomote/db/server';
 import {
   and,
-  cloudJobs,
   db,
   desc,
   eq,
   isNotNull,
   taskPullRequests,
+  taskRuns,
 } from '@roomote/db/server';
 import { createCloudJobGitHubToken, getOctokit } from '@roomote/github';
 import { getRedis } from '@roomote/redis';
-import { CloudTaskType } from '@roomote/types';
+import { TaskPayloadKind } from '@roomote/types';
 
 import { parsePRsFromText } from './extract-pull-requests';
 
@@ -109,16 +109,9 @@ async function resolvePullRequestTarget({
   cloudJob,
   completionText,
 }: {
-  cloudJob: CloudJob;
+  cloudJob: Run;
   completionText?: string;
 }): Promise<{ repository: string; prNumber: number } | null> {
-  if (cloudJob.prRepo && cloudJob.prNumber) {
-    return {
-      repository: cloudJob.prRepo,
-      prNumber: cloudJob.prNumber,
-    };
-  }
-
   const latestTaskPullRequest = await db.query.taskPullRequests.findFirst({
     where: and(
       eq(taskPullRequests.taskId, cloudJob.taskId),
@@ -159,7 +152,7 @@ export async function fetchPullRequestSnapshotForCloudJob({
   repository,
   prNumber,
 }: {
-  cloudJob: CloudJob;
+  cloudJob: Run;
   repository: string;
   prNumber: number;
 }): Promise<PullRequestActivitySnapshot | null> {
@@ -259,8 +252,9 @@ export async function enqueueSlackPrInactivityCheck(
 ): Promise<EnqueueSlackPrInactivityCheckResult> {
   const parsedInput = enqueueSlackPrInactivityCheckInputSchema.parse(input);
 
-  const cloudJob = await db.query.cloudJobs.findFirst({
-    where: eq(cloudJobs.id, parsedInput.cloudJobId),
+  const cloudJob = await db.query.taskRuns.findFirst({
+    where: eq(taskRuns.id, parsedInput.cloudJobId),
+    with: { task: true },
   });
 
   if (!cloudJob) {
@@ -268,17 +262,21 @@ export async function enqueueSlackPrInactivityCheck(
   }
 
   if (
-    cloudJob.type !== CloudTaskType.SlackAppMention &&
-    cloudJob.type !== CloudTaskType.SnapshotResume
+    cloudJob.payloadKind !== TaskPayloadKind.SlackAppMention &&
+    cloudJob.payloadKind !== TaskPayloadKind.SnapshotResume
   ) {
     return { enqueued: false, reason: 'not_slack_originated' };
   }
 
-  if (!cloudJob.slackThreadTs) {
+  const slackThreadTs = cloudJob.task.slackThreadTs;
+
+  if (!slackThreadTs) {
     return { enqueued: false, reason: 'missing_slack_thread' };
   }
 
-  const channel = getSlackChannelFromPayload(cloudJob.payload);
+  const channel =
+    cloudJob.task.slackChannelId ??
+    getSlackChannelFromPayload(cloudJob.payload);
 
   if (!channel) {
     return { enqueued: false, reason: 'missing_slack_channel' };
@@ -337,7 +335,7 @@ export async function enqueueSlackPrInactivityCheck(
       {
         cloudJobId: cloudJob.id,
         channel,
-        threadTs: cloudJob.slackThreadTs,
+        threadTs: slackThreadTs,
         repository: target.repository,
         prNumber: target.prNumber,
         baseline,

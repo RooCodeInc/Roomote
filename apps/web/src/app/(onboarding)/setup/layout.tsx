@@ -7,6 +7,7 @@ import { useSetupBootstrapOpen, useUser } from '@/hooks/useUser';
 import {
   FramedSurface,
   OriginMismatchAlert,
+  RoomoteWordmark,
   UserMenu,
 } from '@/components/layout';
 import { Spinner } from '@/components/system';
@@ -40,13 +41,16 @@ export default function Layout({ children }: { children: React.ReactNode }) {
       <div ref={setUserMenuPortalContainer} className="light text-foreground" />
       <FramedSurface
         variant="bold"
-        frameClassName="h-[calc(var(--effective-viewport-height)-0.25rem)] w-[calc(100svw-0.25rem)] scroll-minimal overflow-hidden md:m-4 md:h-[calc(var(--effective-viewport-height)-2rem)] md:w-[calc(100vw-2rem)]"
+        frameClassName="h-[calc(var(--effective-viewport-height)-0.25rem)] w-[calc(100svw-0.25rem)] scroll-minimal overflow-hidden"
         surfaceClassName="flex flex-col !overflow-y-auto !overflow-x-hidden md:items-center"
       >
         {isSignedIn ? (
-          <div className="z-50 flex w-full justify-end px-4 pt-4 md:fixed md:right-9 md:top-9 md:w-auto md:px-0 md:pt-0 ">
-            <UserMenu portalContainer={userMenuPortalContainer} />
-          </div>
+          <>
+            <RoomoteWordmark className="absolute right-9 bottom-7 h-8 hidden md:block" />
+            <div className="z-50 flex w-full justify-end px-4 pt-4 md:fixed md:right-9 md:top-9 md:w-auto md:px-0 md:pt-0 ">
+              <UserMenu portalContainer={userMenuPortalContainer} />
+            </div>
+          </>
         ) : null}
 
         <div className="relative flex w-full max-w-3xl flex-col md:min-h-full">

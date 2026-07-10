@@ -420,6 +420,58 @@ describe('Env', () => {
     }
   });
 
+  it('derives SLACK_AUTH_URI from ROOMOTE_APP_URL when unset or empty', () => {
+    const previousSkipEnvValidation = process.env.SKIP_ENV_VALIDATION;
+
+    const unsetEnv = { ...productionCoreEnv };
+    delete unsetEnv.SKIP_ENV_VALIDATION;
+    delete unsetEnv.SLACK_AUTH_URI;
+
+    const emptyEnv: NodeJS.ProcessEnv = {
+      ...unsetEnv,
+      SLACK_AUTH_URI: '',
+      ROOMOTE_APP_URL: 'https://roomote.example.com/',
+    };
+
+    try {
+      expect(createRoomoteEnv(unsetEnv).SLACK_AUTH_URI).toBe(
+        'https://roomote.example.com/api/slack/auth',
+      );
+      // Trailing slashes on ROOMOTE_APP_URL must not produce a double slash.
+      expect(createRoomoteEnv(emptyEnv).SLACK_AUTH_URI).toBe(
+        'https://roomote.example.com/api/slack/auth',
+      );
+    } finally {
+      if (previousSkipEnvValidation === undefined) {
+        delete process.env.SKIP_ENV_VALIDATION;
+      } else {
+        process.env.SKIP_ENV_VALIDATION = previousSkipEnvValidation;
+      }
+    }
+  });
+
+  it('prefers an explicit SLACK_AUTH_URI over the derived value', () => {
+    const previousSkipEnvValidation = process.env.SKIP_ENV_VALIDATION;
+    const runtimeEnv: NodeJS.ProcessEnv = {
+      ...productionCoreEnv,
+      SLACK_AUTH_URI: 'https://auth.example.com/slack',
+    };
+
+    delete runtimeEnv.SKIP_ENV_VALIDATION;
+
+    try {
+      const env = createRoomoteEnv(runtimeEnv);
+
+      expect(env.SLACK_AUTH_URI).toBe('https://auth.example.com/slack');
+    } finally {
+      if (previousSkipEnvValidation === undefined) {
+        delete process.env.SKIP_ENV_VALIDATION;
+      } else {
+        process.env.SKIP_ENV_VALIDATION = previousSkipEnvValidation;
+      }
+    }
+  });
+
   it('treats empty optional non-empty env vars as unset', () => {
     const previousSkipEnvValidation = process.env.SKIP_ENV_VALIDATION;
     const runtimeEnv: Record<string, string | undefined> = {
@@ -428,6 +480,7 @@ describe('Env', () => {
       TEAMS_BOT_APP_ID: '',
       TEAMS_BOT_APP_PASSWORD: '',
       TEAMS_BOT_TENANT_ID: '',
+      TEAMS_BOT_NAME: '',
       TEAMS_BOT_TOKEN_ENDPOINT: '',
       TEAMS_BOT_OAUTH_SCOPE: '',
       TELEGRAM_BOT_TOKEN: '',
@@ -451,6 +504,7 @@ describe('Env', () => {
 
       expect(env.ROOMOTE_PUBLIC_URL).toBeUndefined();
       expect(env.TEAMS_BOT_APP_ID).toBeUndefined();
+      expect(env.TEAMS_BOT_NAME).toBeUndefined();
       expect(env.TELEGRAM_BOT_TOKEN).toBeUndefined();
       expect(env.TELEGRAM_WEBHOOK_SECRET).toBeUndefined();
       expect(env.TELEGRAM_BOT_USERNAME).toBeUndefined();

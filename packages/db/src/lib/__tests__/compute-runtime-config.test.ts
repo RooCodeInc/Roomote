@@ -101,11 +101,12 @@ describe('resolveComputeProviderEnvValues', () => {
     );
   });
 
-  it('derives the Modal base image from a saved shared worker image', async () => {
+  it('ignores a saved shared worker image so release derivation can take effect', async () => {
     const values = await resolveComputeProviderEnvValues('modal', {
       runtimeEnv: {
         MODAL_TOKEN_ID: 'id',
         MODAL_TOKEN_SECRET: 'secret',
+        RELEASE_VERSION: 'v1.2.3',
       },
       executor: makeExecutor([
         {
@@ -116,7 +117,7 @@ describe('resolveComputeProviderEnvValues', () => {
     });
 
     expect(values.MODAL_BASE_IMAGE_REF).toBe(
-      'ghcr.io/roocodeinc/roomote-worker:v9.9.9',
+      'ghcr.io/roocodeinc/roomote-worker:v1.2.3',
     );
   });
 

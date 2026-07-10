@@ -1,4 +1,4 @@
-import { CloudTaskStatus } from '@roomote/types';
+import { RunStatus } from '@roomote/types';
 
 import {
   type AppRouterInput,
@@ -8,9 +8,7 @@ import {
 } from './client';
 import { hasBootstrapFailureSignal } from './bootstrap-failure-signal';
 
-export type CloudJob = NonNullable<
-  AppRouterOutput['cloudJobs']['findFirstById']
->;
+export type Run = NonNullable<AppRouterOutput['cloudJobs']['findFirstById']>;
 
 export type DequeuedCloudJob = NonNullable<
   AppRouterOutput['cloudJobs']['dequeue']
@@ -22,13 +20,33 @@ export type DequeuedResumeCloudJob = NonNullable<
 
 export interface SyncActingUserIdOptions {
   cloudJobId: AppRouterInput['cloudJobs']['findFirstById'];
+  /** The sender the caller wants the upcoming turn to run as. */
   newUserId: string;
+  /**
+   * The actor the worker last prepared locally (git author, mounted
+   * integrations). Omit when unknown; a match then reports `updated` so the
+   * worker refreshes its local state from the server value.
+   */
+  lastKnownUserId?: string | null;
 }
 
-export type SyncActingUserIdResult = 'updated' | 'unchanged' | 'not-found';
+export type SyncActingUserIdResult =
+  | 'updated'
+  | 'unchanged'
+  | 'not-found'
+  | 'mismatch';
+
+export interface SyncActingUserIdOutcome {
+  result: SyncActingUserIdResult;
+  /**
+   * The server-authoritative acting user for the run. Undefined only for
+   * `not-found`.
+   */
+  actingUserId?: string | null;
+}
 
 export interface CloudJobBootstrapOptions {
-  onBootstrapFailure?: (error: Error, cloudJob: CloudJob) => void;
+  onBootstrapFailure?: (error: Error, cloudJob: Run) => void;
 }
 
 export interface CloudJobRequestOptions {
@@ -36,10 +54,10 @@ export interface CloudJobRequestOptions {
 }
 
 function isImmediateBootstrapFailure(
-  cloudJob: CloudJob,
-): cloudJob is CloudJob & { error: string } {
+  cloudJob: Run,
+): cloudJob is Run & { error: string } {
   return (
-    cloudJob.status === CloudTaskStatus.Canceled &&
+    cloudJob.status === RunStatus.Canceled &&
     cloudJob.startedAt == null &&
     typeof cloudJob.error === 'string' &&
     cloudJob.error.length > 0 &&
@@ -49,7 +67,7 @@ function isImmediateBootstrapFailure(
 
 async function notifyOnBootstrapFailure(
   cloudJobId: number,
-  onBootstrapFailure?: (error: Error, cloudJob: CloudJob) => void,
+  onBootstrapFailure?: (error: Error, cloudJob: Run) => void,
 ): Promise<void> {
   if (!onBootstrapFailure) {
     return;
@@ -100,30 +118,55 @@ export const stampMilestone = (
 ) => client.cloudJobs.stampMilestone.mutate(options);
 
 /**
- * Keep the cloud job's acting user aligned with the latest prompt sender.
+ * Reconcile the worker's local actor state against the server-authoritative
+ * `task_runs.actingUserId` before delivering a turn.
  *
- * This is separate from `cloudJob.userId`, which identifies the job owner used
- * for job-token scoping. Integration MCP proxies read `actingUserId` when
- * choosing whose OAuth credentials to use for a running task, so callers
- * update it before prompt delivery instead of inferring it later from
- * asynchronously persisted `task_messages`.
+ * `actingUserId` feeds actor-scoped credential resolution, so it is writable
+ * ONLY by trusted server-side actors (web steer, pre-delivery follow-up sync,
+ * pre-queue webhook sync). Run-scoped job tokens can no longer reassign it: a
+ * compromised sandbox previously pointed `actingUserId` at an arbitrary user
+ * via `cloudJobs.update` and then read that user's decrypted credentials
+ * through actor-scoped routes (a confused deputy). This function therefore
+ * never writes — it reads the server value and tells the caller how the
+ * upcoming turn relates to it:
+ *
+ * - `not-found`: the run row is gone; delivery must stop.
+ * - `mismatch`: the server actor differs from the requested sender — no
+ *   trusted writer switched the run to them. The caller must NOT run the
+ *   sender's turn under the current credentials; it either blocks the turn
+ *   or delivers it as the server actor (`actingUserId`), keeping credential
+ *   resolution and attribution on the same identity.
+ * - `updated`: the server actor matches the sender but differs from the
+ *   worker's last-prepared actor — the caller must refresh actor-scoped
+ *   integrations and the runtime git author from the server value.
+ * - `unchanged`: server actor, sender, and local state all agree.
  */
 export async function syncActingUserId(
   options: SyncActingUserIdOptions,
-): Promise<SyncActingUserIdResult> {
-  const { cloudJobId, newUserId } = options;
+): Promise<SyncActingUserIdOutcome> {
+  const { cloudJobId, newUserId, lastKnownUserId } = options;
   const cloudJob = await findFirstById(cloudJobId);
 
   if (!cloudJob) {
-    return 'not-found';
+    return { result: 'not-found' };
   }
 
-  if ((cloudJob.actingUserId ?? null) === newUserId) {
-    return 'unchanged';
+  const serverUserId = cloudJob.actingUserId ?? null;
+
+  if (serverUserId !== newUserId) {
+    console.warn(
+      `[syncActingUserId] Cloud job ${cloudJobId} acting user ` +
+        `${serverUserId ?? 'none'} differs from requested ${newUserId}; ` +
+        'not overriding (job tokens cannot reassign the acting user).',
+    );
+    return { result: 'mismatch', actingUserId: serverUserId };
   }
 
-  await update({ id: cloudJobId, actingUserId: newUserId });
-  return 'updated';
+  if (lastKnownUserId !== undefined && serverUserId === lastKnownUserId) {
+    return { result: 'unchanged', actingUserId: serverUserId };
+  }
+
+  return { result: 'updated', actingUserId: serverUserId };
 }
 
 export const enqueue = (options: AppRouterInput['cloudJobs']['enqueue']) =>

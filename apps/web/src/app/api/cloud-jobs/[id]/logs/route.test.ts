@@ -24,12 +24,12 @@ vi.mock('better-sse', () => ({
 vi.mock('@roomote/db/server', () => ({
   db: {
     query: {
-      cloudJobs: {
+      taskRuns: {
         findFirst: (...args: unknown[]) => findFirstMock(...args),
       },
     },
   },
-  cloudJobs: { id: 'id', orgId: 'orgId' },
+  taskRuns: { id: 'id' },
   eq: vi.fn(),
   and: vi.fn(),
 }));
@@ -188,7 +188,7 @@ describe('GET /api/cloud-jobs/[id]/logs', () => {
     expect(streamCommandOutputMock).not.toHaveBeenCalled();
     expect(errorEvents).toHaveLength(1);
     expect(errorEvents[0]?.[0]).toEqual({
-      error: 'Live log streaming is unavailable for this compute provider.',
+      error: 'Live log streaming is unavailable for this sandbox provider.',
     });
     expect(disconnectEvents).toHaveLength(1);
   });

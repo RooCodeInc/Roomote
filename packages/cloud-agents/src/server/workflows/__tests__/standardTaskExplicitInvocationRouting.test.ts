@@ -195,12 +195,12 @@ describe('Standard Task explicit invocation routing', () => {
   it('keeps repo-local skill invocations inside the request wrapper', () => {
     const { prompt, harnessInstructions } = standardTask({
       description:
-        '$agent-guidance-maintenance\n\n<task_context><target>agent-guidance</target></task_context>',
+        '$roomote-testing-validation\n\n<task_context><target>validation</target></task_context>',
       repo: 'Roomote/example-app',
       requestFormat: 'structured',
     });
 
-    expect(prompt.startsWith('<request>$agent-guidance-maintenance')).toBe(
+    expect(prompt.startsWith('<request>$roomote-testing-validation')).toBe(
       true,
     );
     expect(harnessInstructions).toContain(

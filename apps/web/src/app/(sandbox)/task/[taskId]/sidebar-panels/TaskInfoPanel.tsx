@@ -9,7 +9,6 @@ import {
   type CodingHarness,
   type SourceControlProvider,
   HARNESS_LABELS,
-  CloudTaskType,
   PRODUCT_NAME,
   getModelProviderLabel,
   getReasoningEffortLabel,
@@ -19,10 +18,7 @@ import {
   resolveSourceControlProviderFromPayload,
 } from '@roomote/types';
 
-import type { TaskWithAssociations } from '@/types';
-
 import { useShowDebugUI } from '@/hooks/useShowDebugUI';
-import type { CloudJobDetail } from '@/lib/server';
 import { getCloudJobDisplayError } from '@/lib/cloud-job-errors';
 import { formatInferenceCost } from '@/lib/formatters';
 import { getUserDisplayName } from '@/lib/user-display-name';
@@ -47,15 +43,20 @@ import {
 import { PullRequestBadge, WorkspaceBadge } from '@/components/sandbox';
 import { streamdownCodeMermaidCjkPlugins } from '@/components/ai-elements/streamdown-plugins';
 
-import { useSandboxMessages, useTaskSummary } from '../hooks';
+import {
+  type SessionCloudJob,
+  type SessionTask,
+  useSandboxMessages,
+  useTaskSummary,
+} from '../hooks';
 
 import { SidePanelHeader } from './SidePanelHeader';
 import { getTaskParticipants } from './task-participants';
 
 interface TaskInfoPanelProps {
   active: boolean;
-  task: TaskWithAssociations;
-  cloudJob: CloudJobDetail;
+  task: SessionTask;
+  cloudJob: SessionCloudJob;
   harness: CodingHarness;
   onClose: () => void;
 }
@@ -109,32 +110,37 @@ const SOURCE_CONTROL_BRAND_ICONS: Record<
   ado: 'ado',
 };
 
-function getStartedFrom(cloudJob: CloudJobDetail): {
+const SOURCE_CONTROL_SURFACES: ReadonlySet<string> = new Set([
+  'github',
+  'gitlab',
+  'gitea',
+  'ado',
+]);
+
+function getStartedFrom(
+  task: SessionTask,
+  cloudJob: SessionCloudJob,
+): {
   label: string;
   brandIcon?: StartedFromBrandIcon;
 } {
   const communicationProvider = cloudJob.payload?.communicationProvider;
 
   if (
-    cloudJob.slackThreadTs ||
-    cloudJob.type === CloudTaskType.SlackAppMention ||
+    task.surface === 'slack' ||
+    task.slackThreadTs ||
     communicationProvider === 'slack'
   ) {
     return { label: 'Slack', brandIcon: 'slack' };
   }
 
-  if (
-    cloudJob.linearSessionId ||
-    cloudJob.linearIssueId ||
-    cloudJob.type === CloudTaskType.LinearAgentSession
-  ) {
+  if (task.surface === 'linear' || task.linearSessionId || task.linearIssueId) {
     return { label: 'Linear', brandIcon: 'linear' };
   }
 
   if (
-    cloudJob.prRepo ||
-    cloudJob.prNumber ||
-    cloudJob.type.startsWith('github.')
+    (task.surface && SOURCE_CONTROL_SURFACES.has(task.surface)) ||
+    cloudJob.payloadKind.startsWith('github_')
   ) {
     const provider = resolveSourceControlProviderFromPayload(cloudJob.payload);
     return {
@@ -143,11 +149,11 @@ function getStartedFrom(cloudJob: CloudJobDetail): {
     };
   }
 
-  if (communicationProvider === 'telegram') {
+  if (task.surface === 'telegram' || communicationProvider === 'telegram') {
     return { label: 'Telegram', brandIcon: 'telegram' };
   }
 
-  if (communicationProvider === 'teams') {
+  if (task.surface === 'teams' || communicationProvider === 'teams') {
     return { label: 'Teams', brandIcon: 'teams' };
   }
 
@@ -172,7 +178,7 @@ export function TaskInfoPanel({
   } = useTaskSummary(task.id, { enabled: active });
 
   const cloudJobError = getCloudJobDisplayError(cloudJob);
-  const startedFrom = getStartedFrom(cloudJob);
+  const startedFrom = getStartedFrom(task, cloudJob);
   const effectiveHarness = cloudJob.harness ?? harness;
   const HarnessIcon = HARNESS_ICONS[effectiveHarness];
   const SandboxProviderIcon = cloudJob.vendor
@@ -210,7 +216,7 @@ export function TaskInfoPanel({
     () =>
       getTaskParticipants(
         messages,
-        task.attributionKind === 'matched_user'
+        task.attributionKind === 'user'
           ? {
               id: task.user?.id ?? null,
               name: task.user?.name ?? null,
@@ -237,7 +243,7 @@ export function TaskInfoPanel({
                   Creator
                 </td>
                 <td className="py-1">
-                  {task.user && task.attributionKind === 'matched_user' ? (
+                  {task.user && task.attributionKind === 'user' ? (
                     <>
                       {task.user.imageUrl ? (
                         <Image
@@ -273,15 +279,9 @@ export function TaskInfoPanel({
                             name={participant.name}
                             email={participant.email}
                             size="sm"
-                            alt={
-                              participant.name ?? participant.email ?? 'User'
-                            }
+                            alt={participant.displayName}
                           />
-                          <span>
-                            {participant.name ??
-                              participant.email ??
-                              'Unknown user'}
-                          </span>
+                          <span>{participant.displayName}</span>
                         </span>
                       ))}
                     </div>

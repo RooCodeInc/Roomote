@@ -3,30 +3,23 @@ import type { AuthTokenContext, JobTokenContext } from '@roomote/types';
 
 import type { Variables } from '../../../types';
 
-const {
-  mockFindCloudJob,
-  mockFindConnection,
-  mockResolveUserIdForCloudJob,
-  mockEq,
-  mockAnd,
-  mockIsNull,
-} = vi.hoisted(() => ({
-  mockFindCloudJob: vi.fn(),
-  mockFindConnection: vi.fn(),
-  mockResolveUserIdForCloudJob: vi.fn(),
-  mockEq: vi.fn((column: unknown, value: unknown) => ({ column, value })),
-  mockAnd: vi.fn((...clauses: unknown[]) => clauses),
-  mockIsNull: vi.fn((column: unknown) => ({ type: 'isNull', column })),
-}));
+const { mockFindCloudJob, mockFindConnection, mockEq, mockAnd, mockIsNull } =
+  vi.hoisted(() => ({
+    mockFindCloudJob: vi.fn(),
+    mockFindConnection: vi.fn(),
+    mockEq: vi.fn((column: unknown, value: unknown) => ({ column, value })),
+    mockAnd: vi.fn((...clauses: unknown[]) => clauses),
+    mockIsNull: vi.fn((column: unknown) => ({ type: 'isNull', column })),
+  }));
 
 vi.mock('@roomote/db/server', () => ({
   db: {
     query: {
-      cloudJobs: { findFirst: mockFindCloudJob },
+      taskRuns: { findFirst: mockFindCloudJob },
       mcpConnections: { findFirst: mockFindConnection },
     },
   },
-  cloudJobs: { id: 'id' },
+  taskRuns: { id: 'id' },
   mcpConnections: {
     mcpId: 'mcpId',
     enabled: 'enabled',
@@ -42,10 +35,6 @@ vi.mock('@roomote/db/encryption', () => ({
   decrypt: vi.fn((value: string) =>
     value.startsWith('enc:') ? value.slice(4) : value,
   ),
-}));
-
-vi.mock('@roomote/cloud-agents/server', () => ({
-  resolveUserIdForCloudJob: mockResolveUserIdForCloudJob,
 }));
 
 import { db } from '@roomote/db/server';
@@ -114,6 +103,7 @@ function createJobToken(overrides?: Partial<JobTokenContext>): JobTokenContext {
   return {
     cloudJobId: 42,
     userId: 'user-1',
+    principal: 'user',
     tokenType: 'cj',
     version: 1,
     ...(overrides ?? {}),
@@ -125,18 +115,7 @@ describe('vercel MCP auth and tool handling', () => {
     vi.clearAllMocks();
     mockFindCloudJob.mockResolvedValue({
       id: 42,
-      userId: 'user-1',
-    });
-    mockResolveUserIdForCloudJob.mockImplementation(async (cloudJob) => {
-      if (!cloudJob || typeof cloudJob !== 'object') {
-        return null;
-      }
-
-      return 'userId' in cloudJob &&
-        typeof cloudJob.userId === 'string' &&
-        cloudJob.userId.length > 0
-        ? cloudJob.userId
-        : null;
+      actingUserId: 'user-1',
     });
     mockFindConnection.mockResolvedValue(mockConnectionRow());
   });
@@ -179,6 +158,54 @@ describe('vercel MCP auth and tool handling', () => {
     await expect(response.json()).resolves.toMatchObject({
       result: {
         protocolVersion: '2025-06-18',
+        serverInfo: { name: 'roomote-vercel-mcp', version: '1.0.0' },
+      },
+    });
+  });
+
+  it('accepts a token minted for user A after the acting user switched to user B', async () => {
+    // Web steer / follow-up delivery mutate task_runs.actingUserId mid-run;
+    // the run-scoped token stays authorized (the token's userId is mint-time
+    // attribution and is never compared against the mutable acting user).
+    mockFindCloudJob.mockResolvedValue({
+      id: 42,
+      actingUserId: 'user-2',
+    });
+
+    const response = await postMcp(
+      createApp(createJobToken()),
+      createInitializeRequest(1),
+    );
+
+    expect(response.status).toBe(200);
+  });
+
+  it('accepts a deployment-principal token after a human became the acting user', async () => {
+    // A human replying in the thread of an automation run switches the acting
+    // user from null to that human; the run-scoped null-principal token must
+    // keep working (default mock: actingUserId 'user-1').
+    const response = await postMcp(
+      createApp(createJobToken({ userId: null, principal: 'deployment' })),
+      createInitializeRequest(1),
+    );
+
+    expect(response.status).toBe(200);
+  });
+
+  it('allows deployment-principal tokens for deployment-principal cloud jobs', async () => {
+    mockFindCloudJob.mockResolvedValue({
+      id: 42,
+      actingUserId: null,
+    });
+
+    const response = await postMcp(
+      createApp(createJobToken({ userId: null, principal: 'deployment' })),
+      createInitializeRequest(1),
+    );
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toMatchObject({
+      result: {
         serverInfo: { name: 'roomote-vercel-mcp', version: '1.0.0' },
       },
     });

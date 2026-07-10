@@ -6,7 +6,7 @@ const {
   authAccountsFindManyMock,
   authUsersFindFirstMock,
   buildTeamsRoutingContextMock,
-  enqueueCloudTaskMock,
+  enqueueTaskMock,
   envMock,
   fetchMessageImageDataUrlsMock,
   findFirstMock,
@@ -24,7 +24,6 @@ const {
   redisGetMock,
   queueCommunicationMessageMock,
   redisSetMock,
-  resolveUserIdForCloudJobMock,
   routeTaskMock,
   shouldRouteUnmentionedReplyMock,
   teamsInstallationsTable,
@@ -38,7 +37,7 @@ const {
   authAccountsFindManyMock: vi.fn(),
   authUsersFindFirstMock: vi.fn(),
   buildTeamsRoutingContextMock: vi.fn(),
-  enqueueCloudTaskMock: vi.fn(),
+  enqueueTaskMock: vi.fn(),
   envMock: {
     TEAMS_BOT_APP_ID: 'bot-app-id' as string | undefined,
     TEAMS_BOT_APP_PASSWORD: 'bot-secret' as string | undefined,
@@ -76,7 +75,6 @@ const {
   redisGetMock: vi.fn(),
   queueCommunicationMessageMock: vi.fn(),
   redisSetMock: vi.fn(),
-  resolveUserIdForCloudJobMock: vi.fn(),
   routeTaskMock: vi.fn(),
   shouldRouteUnmentionedReplyMock: vi.fn(),
   teamsInstallationsTable: {
@@ -119,16 +117,55 @@ vi.mock('@roomote/db/server', () => ({
         ? 'teams_bot'
         : null,
   })),
-  cloudJobs: {
+  taskRuns: {
     payload: 'payload',
     status: 'status',
     canceledAt: 'canceledAt',
     createdAt: 'createdAt',
     snapshotId: 'snapshotId',
     snapshotCreatedAt: 'snapshotCreatedAt',
+    id: 'id',
+    taskId: 'taskId',
+    actingUserId: 'actingUserId',
+    port: 'port',
+    result: 'result',
+  },
+  tasks: {
+    id: 'tasks.id',
+    initiatorUserId: 'tasks.initiatorUserId',
   },
   db: {
     insert: insertMock,
+    // The Teams job lookups moved from db.query.cloudJobs.findFirst to
+    // db.select(...).from(taskRuns).innerJoin(tasks). Adapt the select chain
+    // onto the same sequential findFirstMock queue so existing per-test row
+    // sequences keep working; legacy `userId` keys map to run actingUserId.
+    select: () => {
+      const chain = {
+        from: () => chain,
+        innerJoin: () => chain,
+        where: () => chain,
+        orderBy: () => chain,
+        limit: async () => {
+          const row = (await findFirstMock()) as Record<string, unknown> | null;
+
+          if (!row) {
+            return [];
+          }
+
+          const { userId, ...rest } = row;
+
+          return [
+            {
+              actingUserId: userId ?? null,
+              initiatorUserId: userId ?? null,
+              ...rest,
+            },
+          ];
+        },
+      };
+      return chain;
+    },
     query: {
       authAccounts: {
         findFirst: authAccountsFindFirstMock,
@@ -137,9 +174,7 @@ vi.mock('@roomote/db/server', () => ({
       authUsers: {
         findFirst: authUsersFindFirstMock,
       },
-      cloudJobs: {
-        findFirst: findFirstMock,
-      },
+
       environments: {
         findFirst: vi.fn(),
       },
@@ -209,9 +244,8 @@ vi.mock('@roomote/sdk/server', () => ({
 
 vi.mock('@roomote/cloud-agents/server', () => ({
   buildTeamsRoutingContext: buildTeamsRoutingContextMock,
-  enqueueCloudTask: enqueueCloudTaskMock,
+  enqueueTask: enqueueTaskMock,
   getTaskUrl: getTaskUrlMock,
-  resolveUserIdForCloudJob: resolveUserIdForCloudJobMock,
   routeTask: routeTaskMock,
 }));
 
@@ -301,7 +335,7 @@ describe('Teams webhook handler', () => {
         reasoning: 'all repos',
       },
     });
-    enqueueCloudTaskMock.mockResolvedValue({
+    enqueueTaskMock.mockResolvedValue({
       id: 88,
       taskId: 'task-new',
     });
@@ -311,7 +345,6 @@ describe('Teams webhook handler', () => {
     processImageAttachmentsMock.mockResolvedValue([
       'data:image/png;base64,abc123',
     ]);
-    resolveUserIdForCloudJobMock.mockResolvedValue('user-1');
     redisEvalMock.mockResolvedValue(null);
     redisGetMock.mockResolvedValue(null);
     redisSetMock.mockResolvedValue('OK');
@@ -445,7 +478,7 @@ describe('Teams webhook handler', () => {
       queued: true,
       cloudJobId: 77,
     });
-    expect(enqueueCloudTaskMock).not.toHaveBeenCalled();
+    expect(enqueueTaskMock).not.toHaveBeenCalled();
     expect(queueCommunicationMessageMock).toHaveBeenCalledWith('teams', 77, {
       provider: 'teams',
       text: 'keep going',
@@ -495,7 +528,7 @@ describe('Teams webhook handler', () => {
     expect(redisSetMock).not.toHaveBeenCalled();
     expect(findFirstMock).not.toHaveBeenCalled();
     expect(queueCommunicationMessageMock).not.toHaveBeenCalled();
-    expect(enqueueCloudTaskMock).not.toHaveBeenCalled();
+    expect(enqueueTaskMock).not.toHaveBeenCalled();
     expect(postMessageMock).not.toHaveBeenCalled();
   });
 
@@ -832,25 +865,29 @@ describe('Teams webhook handler', () => {
       cloudJobId: 88,
     });
     expect(response.status).toBe(200);
-    expect(resolveUserIdForCloudJobMock).not.toHaveBeenCalled();
     expect(buildTeamsRoutingContextMock).toHaveBeenCalledWith(
       expect.objectContaining({
         userId: 'mapped-user-1',
         taskDescription: 'continue',
       }),
     );
-    expect(enqueueCloudTaskMock).toHaveBeenCalledWith(
+    expect(enqueueTaskMock).toHaveBeenCalledWith(
       expect.objectContaining({
-        type: 'standard.task',
-        userId: 'mapped-user-1',
-        payload: expect.objectContaining({
-          repo: '__all_repositories__',
-          description: 'continue',
-          communicationProvider: 'teams',
-          communicationChannelId: '19:conversation@thread.v2',
-          communicationThreadId: 'activity-root',
-          communicationServiceUrl: 'https://smba.trafficmanager.net/amer/',
+        task: expect.objectContaining({
+          type: 'standard',
+          payload: expect.objectContaining({
+            repo: '__all_repositories__',
+            description: 'continue',
+            communicationProvider: 'teams',
+            communicationChannelId: '19:conversation@thread.v2',
+            communicationThreadId: 'activity-root',
+            communicationServiceUrl: 'https://smba.trafficmanager.net/amer/',
+          }),
         }),
+        initiator: { kind: 'user', userId: 'mapped-user-1' },
+        workflow: 'standard',
+        surface: 'teams',
+        trigger: 'message',
       }),
       expect.objectContaining({
         launchClass: 'human',
@@ -909,15 +946,20 @@ describe('Teams webhook handler', () => {
         images: ['data:image/png;base64,abc123'],
       }),
     );
-    expect(enqueueCloudTaskMock).toHaveBeenCalledWith(
+    expect(enqueueTaskMock).toHaveBeenCalledWith(
       expect.objectContaining({
-        type: 'standard.task',
-        userId: 'mapped-user-1',
-        payload: expect.objectContaining({
-          description: 'continue',
-          images: ['data:image/png;base64,abc123'],
-          communicationProvider: 'teams',
+        task: expect.objectContaining({
+          type: 'standard',
+          payload: expect.objectContaining({
+            description: 'continue',
+            images: ['data:image/png;base64,abc123'],
+            communicationProvider: 'teams',
+          }),
         }),
+        initiator: { kind: 'user', userId: 'mapped-user-1' },
+        workflow: 'standard',
+        surface: 'teams',
+        trigger: 'message',
       }),
       expect.objectContaining({
         launchClass: 'human',
@@ -955,15 +997,20 @@ describe('Teams webhook handler', () => {
       started: true,
       cloudJobId: 88,
     });
-    expect(enqueueCloudTaskMock).toHaveBeenCalledWith(
+    expect(enqueueTaskMock).toHaveBeenCalledWith(
       expect.objectContaining({
-        type: 'standard.task',
-        userId: 'mapped-user-1',
-        payload: expect.objectContaining({
-          description: 'Image attachment',
-          images: ['data:image/png;base64,abc123'],
-          communicationProvider: 'teams',
+        task: expect.objectContaining({
+          type: 'standard',
+          payload: expect.objectContaining({
+            description: 'Image attachment',
+            images: ['data:image/png;base64,abc123'],
+            communicationProvider: 'teams',
+          }),
         }),
+        initiator: { kind: 'user', userId: 'mapped-user-1' },
+        workflow: 'standard',
+        surface: 'teams',
+        trigger: 'message',
       }),
       expect.objectContaining({
         launchClass: 'human',
@@ -988,10 +1035,9 @@ describe('Teams webhook handler', () => {
       reason: 'account_link_required',
     });
     expect(response.status).toBe(200);
-    expect(resolveUserIdForCloudJobMock).not.toHaveBeenCalled();
     expect(buildTeamsRoutingContextMock).not.toHaveBeenCalled();
     expect(routeTaskMock).not.toHaveBeenCalled();
-    expect(enqueueCloudTaskMock).not.toHaveBeenCalled();
+    expect(enqueueTaskMock).not.toHaveBeenCalled();
     expect(queueCommunicationMessageMock).not.toHaveBeenCalled();
     expect(findFirstMock).toHaveBeenCalledTimes(1);
     expect(redisSetMock).toHaveBeenCalledWith(
@@ -1116,17 +1162,22 @@ describe('Teams webhook handler', () => {
       1,
       'teams:auth:teams-auth-token-1',
     );
-    expect(enqueueCloudTaskMock).toHaveBeenCalledWith(
+    expect(enqueueTaskMock).toHaveBeenCalledWith(
       expect.objectContaining({
-        type: 'standard.task',
-        userId: 'mapped-user-1',
-        payload: expect.objectContaining({
-          description: 'run the tests',
-          images: ['data:image/png;base64,abc123'],
-          communicationProvider: 'teams',
-          communicationChannelId: '19:conversation@thread.v2',
-          communicationThreadId: 'activity-root',
+        task: expect.objectContaining({
+          type: 'standard',
+          payload: expect.objectContaining({
+            description: 'run the tests',
+            images: ['data:image/png;base64,abc123'],
+            communicationProvider: 'teams',
+            communicationChannelId: '19:conversation@thread.v2',
+            communicationThreadId: 'activity-root',
+          }),
         }),
+        initiator: { kind: 'user', userId: 'mapped-user-1' },
+        workflow: 'standard',
+        surface: 'teams',
+        trigger: 'message',
       }),
       expect.objectContaining({
         launchClass: 'human',
@@ -1164,7 +1215,7 @@ describe('Teams webhook handler', () => {
     });
     expect(response.status).toBe(409);
     expect(redisEvalMock).not.toHaveBeenCalled();
-    expect(enqueueCloudTaskMock).not.toHaveBeenCalled();
+    expect(enqueueTaskMock).not.toHaveBeenCalled();
     expect(queueCommunicationMessageMock).not.toHaveBeenCalled();
   });
 
@@ -1199,8 +1250,8 @@ describe('Teams webhook handler', () => {
       started: true,
       cloudJobId: 88,
     });
-    const task = enqueueCloudTaskMock.mock.calls[0]?.[0] as {
-      payload: Record<string, unknown>;
+    const { task } = enqueueTaskMock.mock.calls[0]?.[0] as {
+      task: { payload: Record<string, unknown> };
     };
     expect(task.payload).toMatchObject({
       communicationProvider: 'teams',
@@ -1244,7 +1295,7 @@ describe('Teams webhook handler', () => {
         botAppId: 'bot-app-id',
       }),
     );
-    expect(enqueueCloudTaskMock).not.toHaveBeenCalled();
+    expect(enqueueTaskMock).not.toHaveBeenCalled();
   });
 
   it('starts a task for an unmentioned thread reply when the unmentioned-reply gate routes it', async () => {
@@ -1284,14 +1335,19 @@ describe('Teams webhook handler', () => {
         }),
       }),
     );
-    expect(enqueueCloudTaskMock).toHaveBeenCalledWith(
+    expect(enqueueTaskMock).toHaveBeenCalledWith(
       expect.objectContaining({
-        type: 'standard.task',
-        userId: 'mapped-user-1',
-        payload: expect.objectContaining({
-          description: 'sounds good, keep going',
-          communicationProvider: 'teams',
+        task: expect.objectContaining({
+          type: 'standard',
+          payload: expect.objectContaining({
+            description: 'sounds good, keep going',
+            communicationProvider: 'teams',
+          }),
         }),
+        initiator: { kind: 'user', userId: 'mapped-user-1' },
+        workflow: 'standard',
+        surface: 'teams',
+        trigger: 'message',
       }),
       expect.objectContaining({ launchClass: 'human' }),
     );
@@ -1333,12 +1389,14 @@ describe('Teams webhook handler', () => {
       cloudJobId: 88,
     });
     expect(response.status).toBe(200);
-    expect(enqueueCloudTaskMock).toHaveBeenCalledWith(
+    expect(enqueueTaskMock).toHaveBeenCalledWith(
       expect.objectContaining({
-        type: 'snapshot.resume',
-        sourceSnapshotId: 'snap-1',
-        sourceCloudJobId: 77,
-        userId: 'mapped-user-1',
+        task: expect.objectContaining({
+          type: 'snapshot_resume',
+          sourceSnapshotId: 'snap-1',
+          sourceCloudJobId: 77,
+        }),
+        actingUserId: 'mapped-user-1',
       }),
       expect.objectContaining({ launchClass: 'human' }),
     );
@@ -1378,12 +1436,14 @@ describe('Teams webhook handler', () => {
       'teams:resume-lock:19:conversation@thread.v2:activity-root',
       expect.objectContaining({ ttlSeconds: 30 }),
     );
-    expect(enqueueCloudTaskMock).toHaveBeenCalledWith(
+    expect(enqueueTaskMock).toHaveBeenCalledWith(
       expect.objectContaining({
-        type: 'snapshot.resume',
-        sourceSnapshotId: 'snap-1',
-        sourceCloudJobId: 77,
-        userId: 'mapped-user-1',
+        task: expect.objectContaining({
+          type: 'snapshot_resume',
+          sourceSnapshotId: 'snap-1',
+          sourceCloudJobId: 77,
+        }),
+        actingUserId: 'mapped-user-1',
       }),
       expect.objectContaining({ launchClass: 'human' }),
     );
@@ -1441,7 +1501,7 @@ describe('Teams webhook handler', () => {
       cloudJobId: 99,
     });
     expect(response.status).toBe(200);
-    expect(enqueueCloudTaskMock).not.toHaveBeenCalled();
+    expect(enqueueTaskMock).not.toHaveBeenCalled();
     expect(postMessageMock).not.toHaveBeenCalled();
     expect(queueCommunicationMessageMock).toHaveBeenCalledWith(
       'teams',

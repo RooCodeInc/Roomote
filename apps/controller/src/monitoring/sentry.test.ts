@@ -74,7 +74,7 @@ describe('controller sentry monitoring', () => {
       },
       maxValueLength: 8_192,
       release: 'abc123',
-      sendDefaultPii: true,
+      sendDefaultPii: false,
       serverName: 'controller',
     });
   });

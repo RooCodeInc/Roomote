@@ -1,9 +1,11 @@
 'use client';
 
-import { Fragment, useEffect, useState } from 'react';
+import { Fragment, useEffect, useMemo, useState } from 'react';
 import {
+  isAutoProvisionedComputeArtifactField,
   isComputeCredentialField,
   isComputeInfrastructureField,
+  isComputeOperatorEditableField,
   type ComputeProvider,
   type SetupComputeStatus,
   type SetupNewComputeProvisioningState,
@@ -39,24 +41,39 @@ const BRAND_ICON_BY_PROVIDER: Record<ComputeProvider, string> = {
 
 type ComputeProviderStatus = SetupComputeStatus['providers'][number];
 
+function isSecretComputeField(
+  field: Pick<ComputeProviderStatus['fields'][number], 'secret'>,
+) {
+  return field.secret === true;
+}
+
+function getNonSecretFieldInitialValues(
+  fields: ComputeProviderStatus['fields'],
+): Record<string, string> {
+  const next: Record<string, string> = {};
+
+  for (const field of fields) {
+    if (
+      isSecretComputeField(field) ||
+      field.runtimeSatisfied ||
+      !isComputeOperatorEditableField(field)
+    ) {
+      continue;
+    }
+
+    const savedValue = field.savedValue?.trim();
+    if (savedValue) {
+      next[field.envVarName] = savedValue;
+    }
+  }
+
+  return next;
+}
+
 function ComputeProviderIcon({ provider }: { provider: ComputeProvider }) {
   const brandIconId = BRAND_ICON_BY_PROVIDER[provider];
 
   return <BrandIcon icon={brandIconId} name="" className="size-4 shrink-0" />;
-}
-
-function getAdvancedInfrastructureDescription({
-  provider,
-  hasMissingDefaultBlockingInfra,
-}: {
-  provider: ComputeProviderStatus;
-  hasMissingDefaultBlockingInfra: boolean;
-}) {
-  if (hasMissingDefaultBlockingInfra) {
-    return `${provider.label} needs this provider artifact unless the shared worker image above is registry-qualified and can be used automatically.`;
-  }
-
-  return 'Optional overrides. Leave blank to derive or provision these automatically from the shared worker image.';
 }
 
 function getCreateAccountHeading(provider: ComputeProviderStatus) {
@@ -86,15 +103,21 @@ export function ComputeProviderSection({
   clearPending,
 }: ComputeProviderSectionProps) {
   const inputFields = provider.fields.filter(isComputeCredentialField);
-  // Provider-specific infrastructure values (base image ref, template id,
-  // snapshot name, domain/region) offered as advanced overrides. Runtime-env
-  // values are locked and hidden from the editable list.
-  const advancedInfraFields = provider.fields.filter(
-    (field) => isComputeInfrastructureField(field) && !field.runtimeSatisfied,
-  );
-  const missingDefaultBlockingInfraFields = advancedInfraFields.filter(
+  // Optional operator-editable infrastructure (domain/region). Managed Modal
+  // base image and E2B/Daytona artifacts are never form inputs.
+  const optionalInfraFields = provider.fields.filter(
     (field) =>
+      isComputeInfrastructureField(field) &&
+      isComputeOperatorEditableField(field) &&
+      !field.runtimeSatisfied,
+  );
+  // Keep the old name for the rest of this component without a big rename.
+  const advancedInfraFields = optionalInfraFields;
+  const missingDefaultBlockingInfraFields = provider.fields.filter(
+    (field) =>
+      isComputeInfrastructureField(field) &&
       field.required !== false &&
+      !field.runtimeSatisfied &&
       !field.savedSatisfied &&
       !field.defaultSatisfied &&
       !field.setupProvisionable,
@@ -110,19 +133,38 @@ export function ComputeProviderSection({
   const [expanded, setExpanded] = useState(
     () => hasNoInputFields || hasConfiguredValues,
   );
-  const [values, setValues] = useState<Record<string, string>>({});
+  // Key off field content, not array identity — query/refetch creates a new
+  // fields array each time and must not wipe in-progress edits (including
+  // clearing a saved optional non-secret value, which enables Save).
+  const nonSecretInitialValuesKey = provider.fields
+    .filter((field) => !isSecretComputeField(field))
+    .map(
+      (field) =>
+        `${field.envVarName}:${field.savedValue ?? ''}:${field.savedSatisfied}:${field.runtimeSatisfied}`,
+    )
+    .join('|');
+  const nonSecretInitialValues = useMemo(
+    () => getNonSecretFieldInitialValues(provider.fields),
+    // provider.fields is intentionally omitted; content key drives updates.
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- content-keyed
+    [nonSecretInitialValuesKey],
+  );
+  const [values, setValues] = useState<Record<string, string>>(
+    () => nonSecretInitialValues,
+  );
   const [editingSavedValues, setEditingSavedValues] = useState<
     Record<string, boolean>
   >({});
   const [removeDialogOpen, setRemoveDialogOpen] = useState(false);
 
   useEffect(() => {
-    setValues({});
+    setValues(nonSecretInitialValues);
     setEditingSavedValues({});
     setRemoveDialogOpen(false);
     setExpanded(hasNoInputFields || hasConfiguredValues);
   }, [
     provider.provider,
+    nonSecretInitialValues,
     hasNoInputFields,
     hasConfiguredValues,
     hasSavedValues,
@@ -134,42 +176,53 @@ export function ComputeProviderSection({
   // saved (the E2B worker template build, the Daytona snapshot registration).
   const provisionableEnvOnlyFields = provider.fields.filter(
     (field) =>
-      isComputeInfrastructureField(field) &&
+      isAutoProvisionedComputeArtifactField(field) &&
       field.setupProvisionable &&
       !field.runtimeSatisfied &&
       !field.savedSatisfied,
   );
   const provisioningRunning = provisioning?.status === 'building';
-  // Provisionable artifact fields (E2B_TEMPLATE_ID / DAYTONA_SNAPSHOT_NAME)
-  // are editable advanced overrides that also auto-provision when left blank,
-  // so their status is rendered inline with the advanced input rather than as
-  // a separate row.
-  const isProvisionableArtifactField = (
-    field: ComputeProviderStatus['fields'][number],
-  ) =>
-    isComputeInfrastructureField(field) &&
-    field.setupProvisionable &&
-    !field.runtimeSatisfied &&
-    !field.savedSatisfied;
+  // Credentials are already satisfied when a save can still start or retry
+  // auto-provisioning without retyping values (existing installs that later
+  // gain a registry-qualified worker image).
+  const credentialsSatisfiedForProvisioning = inputFields.every((field) => {
+    const nextValue = values[field.envVarName]?.trim() ?? '';
+    return (
+      field.required === false ||
+      field.runtimeSatisfied ||
+      field.savedSatisfied ||
+      nextValue.length > 0
+    );
+  });
   // A failed run is retried by saving again — even with no new values, as
   // long as the required credentials are already satisfied.
   const canRetryProvisioning =
     provisioning?.status === 'failed' &&
     provisionableEnvOnlyFields.length > 0 &&
-    inputFields.every((field) => {
-      const nextValue = values[field.envVarName]?.trim() ?? '';
-      return (
-        field.required === false ||
-        field.runtimeSatisfied ||
-        field.savedSatisfied ||
-        nextValue.length > 0
-      );
-    });
+    credentialsSatisfiedForProvisioning;
+  // First-time (or re-)provisioning with already-saved credentials and no
+  // field edits must still be actionable from Settings.
+  const canStartProvisioning =
+    provisionableEnvOnlyFields.length > 0 &&
+    credentialsSatisfiedForProvisioning &&
+    !provisioningRunning;
 
   const hasPendingValueChanges = [...inputFields, ...advancedInfraFields].some(
     (field) => {
+      if (field.runtimeSatisfied) {
+        return false;
+      }
+
       const nextValue = values[field.envVarName]?.trim() ?? '';
-      return !field.runtimeSatisfied && nextValue.length > 0;
+
+      // Non-secret fields are prefilled from savedValue, so both edits and
+      // clears of a previously saved value count as pending changes.
+      if (!isSecretComputeField(field)) {
+        return nextValue !== (field.savedValue?.trim() ?? '');
+      }
+
+      // Secrets are never prefilled; any non-empty entry is a pending update.
+      return nextValue.length > 0;
     },
   );
 
@@ -186,7 +239,7 @@ export function ComputeProviderSection({
   const isActionDisabled =
     provisioningRunning ||
     hasMissingRequiredValue ||
-    (!hasPendingValueChanges && !canRetryProvisioning);
+    (!hasPendingValueChanges && !canRetryProvisioning && !canStartProvisioning);
 
   const hasEditableFields =
     inputFields.some((field) => !field.runtimeSatisfied) ||
@@ -205,7 +258,9 @@ export function ComputeProviderSection({
 
   const renderFieldInput = (field: ComputeProviderStatus['fields'][number]) => {
     const value = values[field.envVarName] ?? '';
+    const isSecretField = isSecretComputeField(field);
     const shouldShowSavedValueMask =
+      isSecretField &&
       !field.runtimeSatisfied &&
       field.savedSatisfied &&
       value.length === 0 &&
@@ -222,14 +277,17 @@ export function ComputeProviderSection({
         </div>
         <div className="flex items-center gap-2">
           <Input
-            secret={field.secret && !field.runtimeSatisfied}
+            secret={isSecretField && !field.runtimeSatisfied}
+            type={isSecretField ? undefined : 'text'}
             className="font-mono"
             value={
-              field.runtimeSatisfied
+              isSecretField && field.runtimeSatisfied
                 ? MASKED_VALUE
                 : shouldShowSavedValueMask
                   ? MASKED_VALUE
-                  : value
+                  : field.runtimeSatisfied && !isSecretField
+                    ? (field.savedValue ?? value)
+                    : value
             }
             onFocus={() => {
               if (shouldShowSavedValueMask) {
@@ -240,7 +298,7 @@ export function ComputeProviderSection({
               }
             }}
             onBlur={() => {
-              if (field.savedSatisfied && value.length === 0) {
+              if (isSecretField && field.savedSatisfied && value.length === 0) {
                 setEditingSavedValues((current) => ({
                   ...current,
                   [field.envVarName]: false,
@@ -332,73 +390,25 @@ export function ComputeProviderSection({
               </div>
             )}
 
-            {inputFields.length > 0 && (
+            {(inputFields.length > 0 || advancedInfraFields.length > 0) && (
               <div>
                 <p className="font-semibold text-sm">
                   {hasConfiguredValues
                     ? 'Configuration values'
                     : 'Enter the values below:'}
                 </p>
+                {hasMissingDefaultBlockingInfra ? (
+                  <p className="max-w-xl text-sm text-muted-foreground mt-1">
+                    Configure a registry-qualified worker image via{' '}
+                    <code className="font-mono text-xs">
+                      DOCKER_WORKER_IMAGE
+                    </code>{' '}
+                    before selecting {provider.label} as the default.
+                  </p>
+                ) : null}
                 <div className="space-y-2 mt-2">
                   {inputFields.map((field) => renderFieldInput(field))}
-                </div>
-              </div>
-            )}
-
-            {advancedInfraFields.length > 0 && (
-              <div>
-                <p className="font-semibold text-sm">Provider infrastructure</p>
-                <p className="max-w-xl text-sm text-muted-foreground mt-1">
-                  {getAdvancedInfrastructureDescription({
-                    provider,
-                    hasMissingDefaultBlockingInfra,
-                  })}
-                </p>
-                {hasMissingDefaultBlockingInfra && (
-                  <p className="max-w-xl text-sm text-muted-foreground mt-1">
-                    Add a registry-qualified hosted worker image above, or enter
-                    the required provider artifact here before selecting{' '}
-                    {provider.label} as the default.
-                  </p>
-                )}
-                <div className="space-y-2 mt-3">
-                  {advancedInfraFields.map((field) => {
-                    const manualValue = values[field.envVarName]?.trim() ?? '';
-                    const showProvisioningNote =
-                      isProvisionableArtifactField(field) &&
-                      manualValue.length === 0;
-
-                    return (
-                      <Fragment key={field.envVarName}>
-                        {renderFieldInput(field)}
-                        {showProvisioningNote && (
-                          <div className="md:pl-[228px]">
-                            {provisioningRunning ? (
-                              <span className="flex items-center gap-2 text-xs text-muted-foreground">
-                                <Spinner className="size-4 shrink-0" />
-                                Provisioning the worker base image in your{' '}
-                                {provider.label} account — this takes a couple
-                                of minutes.
-                              </span>
-                            ) : provisioning?.status === 'failed' ? (
-                              <span className="text-xs text-destructive">
-                                Provisioning failed
-                                {provisioning.error
-                                  ? `: ${provisioning.error}`
-                                  : '.'}{' '}
-                                Save again to retry.
-                              </span>
-                            ) : (
-                              <span className="text-xs text-muted-foreground">
-                                Leave blank to provision automatically in your{' '}
-                                {provider.label} account when saved.
-                              </span>
-                            )}
-                          </div>
-                        )}
-                      </Fragment>
-                    );
-                  })}
+                  {advancedInfraFields.map((field) => renderFieldInput(field))}
                 </div>
               </div>
             )}
@@ -407,8 +417,14 @@ export function ComputeProviderSection({
               <EnvVarsInfoNote runtimeConfigured={runtimeConfigured} />
             )}
 
-            {(hasSavedValues || hasEditableFields || canRetryProvisioning) &&
-              (inputFields.length > 0 || advancedInfraFields.length > 0) && (
+            {(hasSavedValues ||
+              hasEditableFields ||
+              canRetryProvisioning ||
+              canStartProvisioning) &&
+              (inputFields.length > 0 ||
+                advancedInfraFields.length > 0 ||
+                canRetryProvisioning ||
+                canStartProvisioning) && (
                 <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
                   {hasSavedValues && (
                     <Button
@@ -422,7 +438,9 @@ export function ComputeProviderSection({
                       {clearPending ? <Spinner /> : null}
                     </Button>
                   )}
-                  {(hasEditableFields || canRetryProvisioning) && (
+                  {(hasEditableFields ||
+                    canRetryProvisioning ||
+                    canStartProvisioning) && (
                     <Button
                       type="button"
                       onClick={handleSave}
@@ -432,9 +450,9 @@ export function ComputeProviderSection({
                       {savePending
                         ? 'Saving...'
                         : provisioningRunning
-                          ? 'Provisioning...'
+                          ? 'Saving...'
                           : canRetryProvisioning && !hasPendingValueChanges
-                            ? 'Retry provisioning'
+                            ? 'Save'
                             : 'Save'}
                       {savePending || provisioningRunning ? <Spinner /> : null}
                     </Button>

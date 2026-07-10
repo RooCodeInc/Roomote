@@ -225,6 +225,15 @@ export async function processEvalCommandMessage(params: {
     const result = await startAutoRoutedSlackTask({
       slackInstallation: params.slackInstallation,
       slack: params.slack,
+      // A human ran `!eval`; the eval workflow keeps these launches out of
+      // standard task classification.
+      initiator: {
+        kind: 'user',
+        externalId: params.event.user ?? '',
+        matchedUserId: params.userId,
+      },
+      trigger: 'manual',
+      workflow: 'eval',
       launchUserId: params.userId,
       slackUserId: params.event.user ?? '',
       persistedSlackUserId: params.event.user ?? '',

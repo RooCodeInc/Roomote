@@ -9,11 +9,11 @@ import {
 } from '@roomote/types';
 import {
   type SQL,
-  cloudJobs,
   computeProviderUsage,
   db,
   eq,
   sql,
+  taskRuns,
   tasks,
 } from '@roomote/db/server';
 
@@ -39,7 +39,6 @@ interface RecordComputeProviderUsageInput {
 
 interface ComputeProviderUsageCloudJob {
   id: number;
-  userId: string | null;
   taskId: string | null;
   machineId: string | null;
   launchMode: ComputeProviderLaunchMode | null;
@@ -192,7 +191,6 @@ async function recordComputeProviderUsageSampleIfPresent(input: {
   await recordComputeProviderUsageSample({
     provider,
     providerUsageId: context.providerUsageId,
-    userId: context.cloudJob.userId,
     cloudJobId: context.cloudJob.id,
     taskId: context.cloudJob.taskId,
     instanceId: context.cloudJob.machineId,
@@ -340,14 +338,9 @@ const usageMergeFieldConfigs = {
     excludedColumnName: 'auth_kind',
     mergeMode: 'replace',
   },
-  userId: {
-    current: computeProviderUsage.userId,
-    excludedColumnName: 'user_id',
-    mergeMode: 'replaceIfPresent',
-  },
-  cloudJobId: {
-    current: computeProviderUsage.cloudJobId,
-    excludedColumnName: 'cloud_job_id',
+  runId: {
+    current: computeProviderUsage.runId,
+    excludedColumnName: 'run_id',
     mergeMode: 'replaceIfPresent',
   },
   taskId: {
@@ -572,11 +565,10 @@ async function recomputeTaskComputeUsageRollup(taskId: string): Promise<void> {
 async function loadComputeProviderUsageContext(
   input: RecordComputeProviderUsageInput,
 ): Promise<LoadedComputeProviderUsageContext> {
-  const cloudJob = await db.query.cloudJobs.findFirst({
-    where: eq(cloudJobs.id, input.cloudJobId),
+  const cloudJob = await db.query.taskRuns.findFirst({
+    where: eq(taskRuns.id, input.cloudJobId),
     columns: {
       id: true,
-      userId: true,
       taskId: true,
       vendor: true,
       machineId: true,
@@ -661,8 +653,7 @@ function buildComputeProviderUsageRow(input: {
     provider: context.provider,
     providerUsageId: context.providerUsageId,
     authKind: 'job',
-    userId: context.cloudJob.userId ?? null,
-    cloudJobId: context.cloudJob.id,
+    runId: context.cloudJob.id,
     taskId: context.cloudJob.taskId ?? null,
     instanceId: context.cloudJob.machineId ?? null,
     launchMode: context.cloudJob.launchMode ?? null,

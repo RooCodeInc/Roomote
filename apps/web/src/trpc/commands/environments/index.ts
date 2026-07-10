@@ -1,11 +1,12 @@
-import { enqueueCloudTask } from '@roomote/cloud-agents/server';
+import { enqueueTask } from '@roomote/cloud-agents/server';
 import {
   createEnvironmentConfigVersionSnapshot,
   db,
   environmentConfigVersions,
   environments,
   environmentRepositoryMappings,
-  cloudJobs,
+  taskRuns,
+  tasks,
   and,
   desc,
   eq,
@@ -21,9 +22,9 @@ import {
   type EnvironmentConfigVersionSource,
 } from '@roomote/db/server';
 import {
-  activeCloudTaskStatuses,
-  CloudTaskStatus,
-  CloudTaskType,
+  activeRunStatuses,
+  RunStatus,
+  TaskPayloadKind,
   appendEnvironmentDefinitionGuidance,
   buildCreateEnvironmentDefinitionPrompt,
   buildEnvironmentDefinitionWorkspacePayload,
@@ -31,7 +32,7 @@ import {
   type EnvironmentConfig,
   environmentConfigSchema,
   getEnvironmentRepositoryInstallationError,
-  isExitedCloudTaskStatus,
+  isExitedRunStatus,
   normalizeRepositorySelection,
 } from '@roomote/types';
 import * as GitHub from '@roomote/github';
@@ -58,6 +59,13 @@ export interface EnvironmentWithMeta {
   config: EnvironmentConfig;
   repositoryMappings: Array<{ repositoryId: string }>;
   repositoryCount: number;
+  /**
+   * Set when the environment is provisioned declaratively at deployment
+   * startup (file basename or inline-env-var document reference). Such
+   * environments stay editable, but the declarative definition wins again on
+   * the next restart.
+   */
+  declarativeSource: string | null;
   createdAt: Date;
   updatedAt: Date;
   snapshots: Partial<Record<ComputeProvider, EnvironmentSnapshotWithMeta>>;
@@ -199,6 +207,7 @@ function toEnvironmentWithMeta(
     repositoryMappings,
     repositoryCount:
       (env.config as EnvironmentConfig).repositories?.length ?? 0,
+    declarativeSource: env.declarativeSource,
     createdAt: env.createdAt,
     updatedAt: env.updatedAt,
     snapshots,
@@ -639,17 +648,18 @@ export async function getActiveEnvironmentDefinitionTaskCommand(
 
   const [job] = await db
     .select({
-      taskId: cloudJobs.taskId,
+      taskId: taskRuns.taskId,
     })
-    .from(cloudJobs)
+    .from(taskRuns)
+    .innerJoin(tasks, eq(tasks.id, taskRuns.taskId))
     .where(
       and(
-        eq(cloudJobs.type, CloudTaskType.StandardTask),
-        inArray(cloudJobs.status, [...activeCloudTaskStatuses]),
-        sql`${cloudJobs.payload} ->> 'environmentDefinitionId' = ${input.environmentId}`,
+        eq(tasks.workflow, 'standard'),
+        inArray(taskRuns.status, [...activeRunStatuses]),
+        sql`${taskRuns.payload} ->> 'environmentDefinitionId' = ${input.environmentId}`,
       ),
     )
-    .orderBy(desc(cloudJobs.createdAt), desc(cloudJobs.id))
+    .orderBy(desc(taskRuns.createdAt), desc(taskRuns.id))
     .limit(1);
 
   return job ?? null;
@@ -720,10 +730,9 @@ export async function startEnvironmentDefinitionTaskCommand(
   );
 
   const startedAt = new Date().toISOString();
-  const launchResult = await enqueueCloudTask(
-    {
-      userId,
-      type: CloudTaskType.StandardTask,
+  const launchResult = await enqueueTask({
+    task: {
+      type: TaskPayloadKind.StandardTask,
       payload: {
         ...workspacePayload,
         ...(input.environmentId
@@ -733,10 +742,11 @@ export async function startEnvironmentDefinitionTaskCommand(
         visibleInTranscript: false,
       },
     },
-    {
-      launchClass: 'human',
-    },
-  );
+    initiator: { kind: 'user', userId },
+    workflow: 'standard',
+    surface: 'web',
+    trigger: 'manual',
+  });
 
   return {
     taskId: launchResult.taskId,
@@ -753,14 +763,14 @@ export async function cancelEnvironmentDefinitionTaskCommand(
 
   const jobs = await db
     .select({
-      id: cloudJobs.id,
-      status: cloudJobs.status,
+      id: taskRuns.id,
+      status: taskRuns.status,
     })
-    .from(cloudJobs)
-    .where(eq(cloudJobs.taskId, input.taskId));
+    .from(taskRuns)
+    .where(eq(taskRuns.taskId, input.taskId));
 
   const activeJobIds = jobs
-    .filter((job) => !isExitedCloudTaskStatus(job.status))
+    .filter((job) => !isExitedRunStatus(job.status))
     .map((job) => job.id);
 
   if (activeJobIds.length === 0) {
@@ -771,17 +781,17 @@ export async function cancelEnvironmentDefinitionTaskCommand(
 
   await db.transaction(async (tx) => {
     await tx
-      .update(cloudJobs)
+      .update(taskRuns)
       .set({
-        status: CloudTaskStatus.Canceled,
+        status: RunStatus.Canceled,
         canceledAt: endedAt,
       })
-      .where(inArray(cloudJobs.id, activeJobIds));
+      .where(inArray(taskRuns.id, activeJobIds));
 
     await Promise.all(
-      activeJobIds.map((cloudJobId) =>
+      activeJobIds.map((runId) =>
         markTaskStartParallelCountEndedAt(tx, {
-          cloudJobId,
+          runId,
           endedAt,
         }),
       ),

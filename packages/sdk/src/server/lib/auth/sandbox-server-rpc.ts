@@ -19,7 +19,9 @@ type SandboxServerRpcFetch = (
 
 interface WithSandboxServerRpcClientOptions<TResult> {
   cloudJobId: number;
-  userId: string;
+  // Null mints a deployment-service-principal job token (Auth.createJobToken
+  // accepts null) so automation-driven RPCs with no human user still run.
+  userId: string | null;
   sandboxServerUrl: string;
   call: (client: SandboxServerRpcClient) => Promise<TResult>;
   fetch?: SandboxServerRpcFetch;

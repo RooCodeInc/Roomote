@@ -18,7 +18,7 @@ vi.mock('@roomote/db/server', () => ({
       taskPullRequests: {
         findFirst: findFirstMock,
       },
-      cloudJobs: {
+      taskRuns: {
         findFirst: cloudJobFindFirstMock,
       },
       environments: {
@@ -30,7 +30,7 @@ vi.mock('@roomote/db/server', () => ({
   taskPullRequests: {
     taskId: 'taskId',
   },
-  cloudJobs: {
+  taskRuns: {
     taskId: 'taskId',
   },
   environments: {

@@ -1,9 +1,9 @@
-import { type CloudTaskPayload, CloudTaskType } from '@roomote/types';
+import { type TaskPayload, TaskPayloadKind } from '@roomote/types';
 import type {
   AgentSessionPlanStep,
   AgentSessionPlanStepStatus,
 } from '@roomote/linear/client';
-import { type CloudJob, sdk } from '@roomote/sdk/client';
+import { type Run, sdk } from '@roomote/sdk/client';
 
 import type {
   CallbackEvent,
@@ -11,6 +11,8 @@ import type {
   RunTaskContext,
 } from '../run-task';
 import { captureWorkerException } from '../monitoring/sentry';
+
+import { getLinearSessionIdFromResumePayload } from '../run-task/linear-resume-payload';
 
 import { getCallbackEventKey } from './utils';
 import {
@@ -102,11 +104,12 @@ function convertTodosToAgentPlan(todos: TodoItem[]): AgentSessionPlanStep[] {
   return result.steps;
 }
 
-function getLinearSessionId(cloudJob: CloudJob): string {
+function getLinearSessionId(cloudJob: Run): string {
   // For LinearAgentSession jobs, sessionId is in the payload
-  if (cloudJob.type === CloudTaskType.LinearAgentSession) {
-    const { sessionId } =
-      cloudJob.payload as CloudTaskPayload<CloudTaskType.LinearAgentSession>;
+  if (cloudJob.payloadKind === TaskPayloadKind.LinearAgentSession) {
+    const { sessionId } = cloudJob.payload as TaskPayload<
+      typeof TaskPayloadKind.LinearAgentSession
+    >;
 
     if (!sessionId) {
       throw new Error('Session ID not found in payload.');
@@ -115,20 +118,19 @@ function getLinearSessionId(cloudJob: CloudJob): string {
     return sessionId;
   }
 
-  // For SnapshotResume jobs with Linear metadata, sessionId is on the job row
-  if (cloudJob.linearSessionId) {
-    return cloudJob.linearSessionId;
+  // For SnapshotResume jobs with Linear metadata, the session id rides along
+  // with the queued Linear follow-up messages in the payload.
+  const resumeSessionId = getLinearSessionIdFromResumePayload(cloudJob.payload);
+
+  if (resumeSessionId) {
+    return resumeSessionId;
   }
 
   throw new Error('Cloud job has no Linear session ID');
 }
 
 export const linearAgentCallbacks: RunTaskCallbacks = {
-  onStart: async (
-    cloudJob: CloudJob,
-    taskId: string,
-    context: RunTaskContext,
-  ) => {
+  onStart: async (cloudJob: Run, taskId: string, context: RunTaskContext) => {
     if (context.sessionId) {
       return;
     }
@@ -136,7 +138,7 @@ export const linearAgentCallbacks: RunTaskCallbacks = {
     context.sessionId = taskId;
   },
   onMessage: async (
-    cloudJob: CloudJob,
+    cloudJob: Run,
     _taskId: string,
     event: CallbackEvent,
     context: RunTaskContext,
@@ -395,7 +397,7 @@ export const linearAgentCallbacks: RunTaskCallbacks = {
       }
     }
   },
-  onExit: async (cloudJob: CloudJob) => {
+  onExit: async (cloudJob: Run) => {
     try {
       await sdk.cloudJobs.clearPendingLinearRequestUserInput({
         cloudJobId: cloudJob.id,

@@ -1,7 +1,7 @@
 import { z } from 'zod';
 
-import { CloudTaskType } from '@roomote/types';
-import { db, cloudJobs, eq } from '@roomote/db/server';
+import { TaskPayloadKind } from '@roomote/types';
+import { db, taskRuns, eq } from '@roomote/db/server';
 import {
   createLinearClient,
   drainLinearMessagesToResumeJob,
@@ -156,8 +156,9 @@ export const linearSessionsRouter = router({
     z.object({ cloudJobId: z.number() }),
     'cloudJobId',
   ).mutation(async ({ input }) => {
-    const cloudJob = await db.query.cloudJobs.findFirst({
-      where: eq(cloudJobs.id, input.cloudJobId),
+    const cloudJob = await db.query.taskRuns.findFirst({
+      where: eq(taskRuns.id, input.cloudJobId),
+      with: { task: true },
     });
 
     if (!cloudJob) {
@@ -165,15 +166,24 @@ export const linearSessionsRouter = router({
     }
 
     if (
-      cloudJob.type !== CloudTaskType.LinearAgentSession &&
-      cloudJob.type !== CloudTaskType.SnapshotResume
+      cloudJob.payloadKind !== TaskPayloadKind.LinearAgentSession &&
+      cloudJob.payloadKind !== TaskPayloadKind.SnapshotResume
     ) {
       return { resumed: false, reason: 'not_linear_job' } as const;
     }
 
-    const result = await drainLinearMessagesToResumeJob(
-      cloudJob as Parameters<typeof drainLinearMessagesToResumeJob>[0],
-    );
+    const task = cloudJob.task;
+
+    const result = await drainLinearMessagesToResumeJob({
+      id: cloudJob.id,
+      linearSessionId: task.linearSessionId,
+      linearIssueId: task.linearIssueId,
+      linearOrganizationId: task.linearOrganizationId,
+      slackThreadTs: task.slackThreadTs,
+      snapshotId: cloudJob.snapshotId,
+      payload: cloudJob.payload as Record<string, unknown>,
+      port: cloudJob.port,
+    });
 
     if (result.resumed) {
       return result;
