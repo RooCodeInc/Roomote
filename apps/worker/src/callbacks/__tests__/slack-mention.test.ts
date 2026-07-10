@@ -68,7 +68,7 @@ const {
 
 vi.mock('@roomote/sdk/client', () => ({
   sdk: {
-    cloudJobs: {
+    taskRuns: {
       enqueueSlackPrInactivityCheck: mockEnqueueSlackPrInactivityCheck,
       getSlackThreadFooterText: mockGetSlackThreadFooterText,
       getSlackStartedMessageData: mockGetSlackStartedMessageData,
@@ -110,11 +110,11 @@ vi.mock('../request-user-input', () => ({
 }));
 
 import { RunStatus, TaskPayloadKind } from '@roomote/types';
-import { type Run, sdk } from '@roomote/sdk/client';
+import { type TaskRun, sdk } from '@roomote/sdk/client';
 
 import { slackMentionCallbacks } from '../slack-mention';
 
-function createCloudJob(): Run {
+function createTaskRun(): TaskRun {
   return {
     id: 123,
     taskId: 'task_row_123',
@@ -127,10 +127,10 @@ function createCloudJob(): Run {
       ts: '1710000000.100',
       thread_ts: '1710000000.123',
     },
-  } as unknown as Run;
+  } as unknown as TaskRun;
 }
 
-function createSnapshotResumeCloudJob(): Run {
+function createSnapshotResumeTaskRun(): TaskRun {
   return {
     id: 123,
     taskId: 'task_row_123',
@@ -140,7 +140,7 @@ function createSnapshotResumeCloudJob(): Run {
       thread_ts: '1710000000.123',
       slackOriginMessageTs: '1710000000.100',
     },
-  } as unknown as Run;
+  } as unknown as TaskRun;
 }
 
 describe('slackMentionCallbacks', () => {
@@ -195,24 +195,24 @@ describe('slackMentionCallbacks', () => {
     }
   });
 
-  it('loads started-message metadata through sdk.cloudJobs on start', async () => {
-    const cloudJob = createCloudJob();
+  it('loads started-message metadata through sdk.taskRuns on start', async () => {
+    const taskRun = createTaskRun();
     const context = {};
 
-    await slackMentionCallbacks.onStart?.(cloudJob, 'task_123', context);
+    await slackMentionCallbacks.onStart?.(taskRun, 'task_123', context);
 
     expect(mockRemoveReaction).toHaveBeenCalledWith({
       channel: 'C123',
       timestamp: '1710000000.100',
       name: 'eyes',
     });
-    expect(sdk.cloudJobs.getSlackStartedMessageData).toHaveBeenCalledWith({
-      cloudJobId: 123,
+    expect(sdk.taskRuns.getSlackStartedMessageData).toHaveBeenCalledWith({
+      runId: 123,
     });
     expect(mockBuildStartedBlocks).toHaveBeenCalledWith(
       expect.objectContaining({
         workspaceDisplayName: 'App',
-        cloudJobId: 123,
+        runId: 123,
         initiatingSlackUserId: 'U123',
         otherRunningTasksCount: 2,
         taskUrl: expect.stringContaining(
@@ -224,7 +224,7 @@ describe('slackMentionCallbacks', () => {
   });
 
   it('falls back to the Slack app mention payload user when older started-message metadata has no initiating Slack user', async () => {
-    const cloudJob = createCloudJob();
+    const taskRun = createTaskRun();
     const context = {};
     mockGetSlackStartedMessageData.mockResolvedValueOnce({
       ts: 'started-ts',
@@ -233,12 +233,12 @@ describe('slackMentionCallbacks', () => {
       workspaceOnly: false,
     });
 
-    await slackMentionCallbacks.onStart?.(cloudJob, 'task_123', context);
+    await slackMentionCallbacks.onStart?.(taskRun, 'task_123', context);
 
     expect(mockBuildStartedBlocks).toHaveBeenCalledWith(
       expect.objectContaining({
         workspaceDisplayName: 'App',
-        cloudJobId: 123,
+        runId: 123,
         initiatingSlackUserId: 'U123',
         taskUrl: expect.stringContaining(
           '/task/task_row_123?utm_source=slack&utm_medium=link&utm_campaign=slack.app.mention',
@@ -247,11 +247,11 @@ describe('slackMentionCallbacks', () => {
     );
   });
 
-  it('removes eyes reactions for SnapshotResume jobs when the triggering message ts is available', async () => {
-    const cloudJob = createSnapshotResumeCloudJob();
+  it('removes eyes reactions for SnapshotResume runs when the triggering message ts is available', async () => {
+    const taskRun = createSnapshotResumeTaskRun();
     const context = {};
 
-    await slackMentionCallbacks.onStart?.(cloudJob, 'task_123', context);
+    await slackMentionCallbacks.onStart?.(taskRun, 'task_123', context);
 
     expect(mockRemoveReaction).toHaveBeenCalledWith({
       channel: 'C123',
@@ -262,10 +262,10 @@ describe('slackMentionCallbacks', () => {
   });
 
   it('still removes the ack reaction when resume state pre-seeds sessionId', async () => {
-    const cloudJob = createSnapshotResumeCloudJob();
+    const taskRun = createSnapshotResumeTaskRun();
     const context = { sessionId: 'existing-session' };
 
-    await slackMentionCallbacks.onStart?.(cloudJob, 'task_123', context);
+    await slackMentionCallbacks.onStart?.(taskRun, 'task_123', context);
 
     expect(mockRemoveReaction).toHaveBeenCalledWith({
       channel: 'C123',
@@ -276,19 +276,19 @@ describe('slackMentionCallbacks', () => {
   });
 
   it('still refreshes the started message when reaction cleanup fails', async () => {
-    const cloudJob = createCloudJob();
+    const taskRun = createTaskRun();
     const context = {};
     const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
     mockRemoveReaction.mockRejectedValueOnce(new Error('reaction failed'));
 
     try {
-      await slackMentionCallbacks.onStart?.(cloudJob, 'task_123', context);
+      await slackMentionCallbacks.onStart?.(taskRun, 'task_123', context);
 
       expect(errorSpy).toHaveBeenCalledWith(
-        '[slackMentionCallbacks#onStart] Failed Slack reaction cleanup for cloud job 123: reaction failed',
+        '[slackMentionCallbacks#onStart] Failed Slack reaction cleanup for task run 123: reaction failed',
       );
-      expect(sdk.cloudJobs.getSlackStartedMessageData).toHaveBeenCalledWith({
-        cloudJobId: 123,
+      expect(sdk.taskRuns.getSlackStartedMessageData).toHaveBeenCalledWith({
+        runId: 123,
       });
       expect(mockUpdateMessage).toHaveBeenCalledTimes(1);
     } finally {
@@ -297,13 +297,13 @@ describe('slackMentionCallbacks', () => {
   });
 
   it('retries and warns when Slack reaction cleanup returns false', async () => {
-    const cloudJob = createCloudJob();
+    const taskRun = createTaskRun();
     const context = {};
     const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
     mockRemoveReaction.mockResolvedValueOnce(false).mockResolvedValueOnce(true);
 
     try {
-      await slackMentionCallbacks.onStart?.(cloudJob, 'task_123', context);
+      await slackMentionCallbacks.onStart?.(taskRun, 'task_123', context);
 
       expect(mockRemoveReaction).toHaveBeenNthCalledWith(1, {
         channel: 'C123',
@@ -316,7 +316,7 @@ describe('slackMentionCallbacks', () => {
         name: 'eyes',
       });
       expect(warnSpy).toHaveBeenCalledWith(
-        '[slackMentionCallbacks#onStart] Slack reaction cleanup failed for cloud job 123; retrying once (emoji=eyes, channel=C123, timestamp=1710000000.100)',
+        '[slackMentionCallbacks#onStart] Slack reaction cleanup failed for task run 123; retrying once (emoji=eyes, channel=C123, timestamp=1710000000.100)',
       );
       expect(mockUpdateMessage).toHaveBeenCalledTimes(1);
     } finally {
@@ -325,11 +325,11 @@ describe('slackMentionCallbacks', () => {
   });
 
   it('does not automatically mirror completion output into Slack', async () => {
-    const cloudJob = createCloudJob();
+    const taskRun = createTaskRun();
     const context = {};
 
     await slackMentionCallbacks.onMessage?.(
-      cloudJob,
+      taskRun,
       'task_123',
       {
         type: 'completion',
@@ -339,8 +339,8 @@ describe('slackMentionCallbacks', () => {
       context,
     );
 
-    expect(sdk.cloudJobs.enqueueSlackPrInactivityCheck).toHaveBeenCalledWith({
-      cloudJobId: 123,
+    expect(sdk.taskRuns.enqueueSlackPrInactivityCheck).toHaveBeenCalledWith({
+      runId: 123,
       completionText: 'Task finished',
     });
     expect(mockPostMessage).not.toHaveBeenCalled();
@@ -348,16 +348,16 @@ describe('slackMentionCallbacks', () => {
   });
 
   it('uses the captured acknowledgement emoji when cleaning up Slack reactions on start', async () => {
-    const cloudJob = {
-      ...createCloudJob(),
+    const taskRun = {
+      ...createTaskRun(),
       payload: {
-        ...createCloudJob().payload,
+        ...createTaskRun().payload,
         ackEmoji: 'hourglass',
       },
-    } as Run;
+    } as TaskRun;
     const context = {};
 
-    await slackMentionCallbacks.onStart?.(cloudJob, 'task_123', context);
+    await slackMentionCallbacks.onStart?.(taskRun, 'task_123', context);
 
     expect(mockRemoveReaction).toHaveBeenCalledWith({
       channel: 'C123',
@@ -367,17 +367,17 @@ describe('slackMentionCallbacks', () => {
   });
 
   it('does not add completion emoji reactions for repeated completion callbacks', async () => {
-    const cloudJob = {
-      ...createCloudJob(),
+    const taskRun = {
+      ...createTaskRun(),
       payload: {
-        ...createCloudJob().payload,
+        ...createTaskRun().payload,
         completionEmoji: 'rocket',
       },
-    } as Run;
+    } as TaskRun;
     const context = {};
 
     await slackMentionCallbacks.onMessage?.(
-      cloudJob,
+      taskRun,
       'task_123',
       {
         type: 'completion',
@@ -387,7 +387,7 @@ describe('slackMentionCallbacks', () => {
       context,
     );
     await slackMentionCallbacks.onMessage?.(
-      cloudJob,
+      taskRun,
       'task_123',
       {
         type: 'completion',
@@ -401,11 +401,11 @@ describe('slackMentionCallbacks', () => {
   });
 
   it('posts native Slack request_user_input blocks and stores pending state for non-secret prompts', async () => {
-    const cloudJob = createCloudJob();
+    const taskRun = createTaskRun();
     const context = {};
 
     await slackMentionCallbacks.onMessage?.(
-      cloudJob,
+      taskRun,
       'task_123',
       {
         type: 'request_user_input',
@@ -456,16 +456,16 @@ describe('slackMentionCallbacks', () => {
           '_Reply or use the <http://localhost:13000/task/task_row_123?utm_source=slack|web app>._',
       }),
     );
-    expect(sdk.cloudJobs.getSlackThreadFooterText).toHaveBeenCalledWith({
-      cloudJobId: 123,
+    expect(sdk.taskRuns.getSlackThreadFooterText).toHaveBeenCalledWith({
+      runId: 123,
       slackChannelId: 'C123',
       threadTs: '1710000000.123',
       taskUrl: 'http://localhost:13000/task/task_row_123?utm_source=slack',
     });
     expect(
-      sdk.cloudJobs.setPendingSlackRequestUserInput,
+      sdk.taskRuns.setPendingSlackRequestUserInput,
     ).toHaveBeenNthCalledWith(1, {
-      cloudJobId: 123,
+      runId: 123,
       threadId: '1710000000.123',
       requestId: 'rui:session:turn:call',
       taskId: 'task_row_123',
@@ -490,9 +490,9 @@ describe('slackMentionCallbacks', () => {
       ],
     });
     expect(
-      sdk.cloudJobs.setPendingSlackRequestUserInput,
+      sdk.taskRuns.setPendingSlackRequestUserInput,
     ).toHaveBeenNthCalledWith(2, {
-      cloudJobId: 123,
+      runId: 123,
       threadId: '1710000000.123',
       requestId: 'rui:session:turn:call',
       taskId: 'task_row_123',
@@ -523,7 +523,7 @@ describe('slackMentionCallbacks', () => {
   });
 
   it('updates native Slack request_user_input blocks when the same request id receives richer questions', async () => {
-    const cloudJob = createCloudJob();
+    const taskRun = createTaskRun();
     const context = {};
     const requestId = 'rui:session:turn:call';
     mockUpdateMessage.mockResolvedValueOnce(true);
@@ -553,7 +553,7 @@ describe('slackMentionCallbacks', () => {
     };
 
     await slackMentionCallbacks.onMessage?.(
-      cloudJob,
+      taskRun,
       'task_123',
       {
         type: 'request_user_input',
@@ -571,7 +571,7 @@ describe('slackMentionCallbacks', () => {
     );
 
     await slackMentionCallbacks.onMessage?.(
-      cloudJob,
+      taskRun,
       'task_123',
       {
         type: 'request_user_input',
@@ -609,9 +609,9 @@ describe('slackMentionCallbacks', () => {
       }),
     );
     expect(
-      sdk.cloudJobs.setPendingSlackRequestUserInput,
+      sdk.taskRuns.setPendingSlackRequestUserInput,
     ).toHaveBeenLastCalledWith({
-      cloudJobId: 123,
+      runId: 123,
       threadId: '1710000000.123',
       requestId,
       taskId: 'task_row_123',
@@ -621,12 +621,12 @@ describe('slackMentionCallbacks', () => {
   });
 
   it('falls back to Roomote for secret request_user_input prompts', async () => {
-    const cloudJob = createCloudJob();
+    const taskRun = createTaskRun();
     const context = {};
     mockSupportsIntegrationRequestUserInput.mockReturnValueOnce(false);
 
     await slackMentionCallbacks.onMessage?.(
-      cloudJob,
+      taskRun,
       'task_123',
       {
         type: 'request_user_input',
@@ -661,13 +661,11 @@ describe('slackMentionCallbacks', () => {
         },
       ],
     });
-    expect(
-      sdk.cloudJobs.setPendingSlackRequestUserInput,
-    ).not.toHaveBeenCalled();
+    expect(sdk.taskRuns.setPendingSlackRequestUserInput).not.toHaveBeenCalled();
   });
 
   it('uses an Open setup link label when secret fallback points to /setup', async () => {
-    const cloudJob = createCloudJob();
+    const taskRun = createTaskRun();
     const context = {};
     mockSupportsIntegrationRequestUserInput.mockReturnValueOnce(false);
     mockBuildRequestUserInputTaskUrl.mockReturnValueOnce(
@@ -675,7 +673,7 @@ describe('slackMentionCallbacks', () => {
     );
 
     await slackMentionCallbacks.onMessage?.(
-      cloudJob,
+      taskRun,
       'task_123',
       {
         type: 'request_user_input',
@@ -713,12 +711,12 @@ describe('slackMentionCallbacks', () => {
   });
 
   it('clears pending Slack request_user_input state when the interactive prompt fails to post', async () => {
-    const cloudJob = createCloudJob();
+    const taskRun = createTaskRun();
     const context = {};
     mockPostMessage.mockResolvedValueOnce(undefined);
 
     await slackMentionCallbacks.onMessage?.(
-      cloudJob,
+      taskRun,
       'task_123',
       {
         type: 'request_user_input',
@@ -749,20 +747,20 @@ describe('slackMentionCallbacks', () => {
       context,
     );
 
-    expect(sdk.cloudJobs.setPendingSlackRequestUserInput).toHaveBeenCalledTimes(
+    expect(sdk.taskRuns.setPendingSlackRequestUserInput).toHaveBeenCalledTimes(
       1,
     );
-    expect(
-      sdk.cloudJobs.clearPendingSlackRequestUserInput,
-    ).toHaveBeenCalledWith({
-      cloudJobId: 123,
-      threadId: '1710000000.123',
-      requestId: 'rui:session:turn:call',
-    });
+    expect(sdk.taskRuns.clearPendingSlackRequestUserInput).toHaveBeenCalledWith(
+      {
+        runId: 123,
+        threadId: '1710000000.123',
+        requestId: 'rui:session:turn:call',
+      },
+    );
   });
 
   it('does not clear pending Slack request_user_input state when only the prompt metadata update fails', async () => {
-    const cloudJob = createCloudJob();
+    const taskRun = createTaskRun();
     const context = {};
     const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
 
@@ -772,7 +770,7 @@ describe('slackMentionCallbacks', () => {
 
     try {
       await slackMentionCallbacks.onMessage?.(
-        cloudJob,
+        taskRun,
         'task_123',
         {
           type: 'request_user_input',
@@ -804,7 +802,7 @@ describe('slackMentionCallbacks', () => {
       );
 
       expect(
-        sdk.cloudJobs.clearPendingSlackRequestUserInput,
+        sdk.taskRuns.clearPendingSlackRequestUserInput,
       ).not.toHaveBeenCalled();
       expect(errorSpy).toHaveBeenCalledWith(
         'Failed to post request_user_input fallback to Slack: prompt metadata failed',
@@ -815,11 +813,11 @@ describe('slackMentionCallbacks', () => {
   });
 
   it('posts follow-up questions to Slack', async () => {
-    const cloudJob = createCloudJob();
+    const taskRun = createTaskRun();
     const context = {};
 
     await slackMentionCallbacks.onMessage?.(
-      cloudJob,
+      taskRun,
       'task_123',
       {
         type: 'followup',
@@ -873,11 +871,11 @@ describe('slackMentionCallbacks', () => {
   });
 
   it('does not mirror todo updates into Slack threads', async () => {
-    const cloudJob = createCloudJob();
+    const taskRun = createTaskRun();
     const context = {};
 
     await slackMentionCallbacks.onMessage?.(
-      cloudJob,
+      taskRun,
       'task_123',
       {
         type: 'todo_update',
@@ -899,10 +897,10 @@ describe('slackMentionCallbacks', () => {
   });
 
   it('clears pending request_user_input state on response events', async () => {
-    const cloudJob = createCloudJob();
+    const taskRun = createTaskRun();
 
     await slackMentionCallbacks.onMessage?.(
-      cloudJob,
+      taskRun,
       'task_123',
       {
         type: 'request_user_input_response',
@@ -923,17 +921,17 @@ describe('slackMentionCallbacks', () => {
       {},
     );
 
-    expect(
-      sdk.cloudJobs.clearPendingSlackRequestUserInput,
-    ).toHaveBeenCalledWith({
-      cloudJobId: 123,
-      threadId: '1710000000.123',
-      requestId: 'rui:session:turn:call',
-    });
+    expect(sdk.taskRuns.clearPendingSlackRequestUserInput).toHaveBeenCalledWith(
+      {
+        runId: 123,
+        threadId: '1710000000.123',
+        requestId: 'rui:session:turn:call',
+      },
+    );
   });
 
   it('swallows onExit cleanup failures', async () => {
-    const cloudJob = createCloudJob();
+    const taskRun = createTaskRun();
     const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
     mockClearPendingSlackRequestUserInput.mockRejectedValueOnce(
       new Error('cleanup failed'),
@@ -941,7 +939,7 @@ describe('slackMentionCallbacks', () => {
 
     try {
       await expect(
-        slackMentionCallbacks.onExit?.(cloudJob, RunStatus.Completed, {}),
+        slackMentionCallbacks.onExit?.(taskRun, RunStatus.Completed, {}),
       ).resolves.toBe(undefined);
       expect(errorSpy).toHaveBeenCalledWith(
         '[slackMentionCallbacks#onExit] Failed to clear pending request_user_input state: cleanup failed',

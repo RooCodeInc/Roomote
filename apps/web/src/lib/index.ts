@@ -1,5 +1,5 @@
 export * from './clipboard';
-export * from './cloud-job-visible-prompt';
+export * from './task-run-visible-prompt';
 export * from './formatters';
 export * from './image-utils';
 export * from './metadata';

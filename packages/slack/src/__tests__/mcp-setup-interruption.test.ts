@@ -96,7 +96,7 @@ vi.mock('@roomote/db/server', () => ({
   repositories: { orgId: 'orgId', isActive: 'isActive' },
   slackInstallations: { teamId: 'teamId' },
   slackUserMappings: { slackUserId: 'slackUserId', slackTeamId: 'slackTeamId' },
-  cloudJobs: { id: 'id' },
+  taskRuns: { id: 'id' },
 }));
 
 vi.mock('@roomote/redis', () => ({

@@ -34,11 +34,11 @@ import {
 import { standardTask } from './standardTask';
 
 function buildGitLabMergeRequestReviewPrompt({
-  cloudTask,
-  cloudJobUrl,
+  taskSpec,
+  taskRunUrl,
 }: {
-  cloudTask: GithubPullRequestReviewOpenTask;
-  cloudJobUrl: string;
+  taskSpec: GithubPullRequestReviewOpenTask;
+  taskRunUrl: string;
 }): string {
   const {
     payload: {
@@ -50,8 +50,8 @@ function buildGitLabMergeRequestReviewPrompt({
       branchName,
       targetBranch,
     },
-  } = cloudTask;
-  const delimiter = getSkillCommandDelimiter(cloudTask.harness);
+  } = taskSpec;
+  const delimiter = getSkillCommandDelimiter(taskSpec.harness);
 
   return buildStructuredTaskRequest({
     command: `${delimiter}review-code`,
@@ -64,7 +64,7 @@ function buildGitLabMergeRequestReviewPrompt({
       source_branch: branchName,
       target_branch: targetBranch,
       current_head_sha: headSha || 'unknown',
-      task_link_see: `[See task](${cloudJobUrl})`,
+      task_link_see: `[See task](${taskRunUrl})`,
       review_scope:
         'Review only the GitLab merge request changes. Use the prepared local repository, source branch, target branch, and commit SHA to inspect the diff with git commands. Do not use GitHub-only CLI commands such as `gh pr`.',
       suggested_diff_commands: [
@@ -80,42 +80,42 @@ function buildGitLabMergeRequestReviewPrompt({
 }
 
 function gitLabMergeRequestReview({
-  cloudTask,
-  cloudJobUrl,
+  taskSpec,
+  taskRunUrl,
   attribution,
   visualProofAutoScreencastEnabled,
   backgroundProofCaptureEnabled,
 }: {
-  cloudTask: GithubPullRequestReviewOpenTask;
-  cloudJobUrl: string;
+  taskSpec: GithubPullRequestReviewOpenTask;
+  taskRunUrl: string;
   attribution?: ResolvedTaskCommitAuthor;
   visualProofAutoScreencastEnabled?: boolean;
   backgroundProofCaptureEnabled?: boolean;
 }) {
   const prompt = buildGitLabMergeRequestReviewPrompt({
-    cloudTask,
-    cloudJobUrl,
+    taskSpec,
+    taskRunUrl,
   });
 
   return standardTask({
     description: prompt,
-    repo: cloudTask.payload.repo,
+    repo: taskSpec.payload.repo,
     taskSurface: 'gitlab',
-    cloudJobUrl,
+    taskRunUrl,
     attribution,
     requestFormat: 'structured',
-    linkedWorkItems: cloudTask.payload.linkedWorkItems,
+    linkedWorkItems: taskSpec.payload.linkedWorkItems,
     visualProofAutoScreencastEnabled,
     backgroundProofCaptureEnabled,
   });
 }
 
 function buildGiteaPullRequestReviewPrompt({
-  cloudTask,
-  cloudJobUrl,
+  taskSpec,
+  taskRunUrl,
 }: {
-  cloudTask: GithubPullRequestReviewOpenTask;
-  cloudJobUrl: string;
+  taskSpec: GithubPullRequestReviewOpenTask;
+  taskRunUrl: string;
 }): string {
   const {
     payload: {
@@ -127,8 +127,8 @@ function buildGiteaPullRequestReviewPrompt({
       branchName,
       targetBranch,
     },
-  } = cloudTask;
-  const delimiter = getSkillCommandDelimiter(cloudTask.harness);
+  } = taskSpec;
+  const delimiter = getSkillCommandDelimiter(taskSpec.harness);
 
   return buildStructuredTaskRequest({
     command: `${delimiter}review-code`,
@@ -141,7 +141,7 @@ function buildGiteaPullRequestReviewPrompt({
       source_branch: branchName,
       target_branch: targetBranch,
       current_head_sha: headSha || 'unknown',
-      task_link_see: `[See task](${cloudJobUrl})`,
+      task_link_see: `[See task](${taskRunUrl})`,
       review_scope:
         'Review only the Gitea pull request changes. Use the prepared local repository, source branch, target branch, and commit SHA to inspect the diff with git commands. Do not use GitHub-only CLI commands such as `gh pr`.',
       suggested_diff_commands: [
@@ -157,42 +157,42 @@ function buildGiteaPullRequestReviewPrompt({
 }
 
 function giteaPullRequestReview({
-  cloudTask,
-  cloudJobUrl,
+  taskSpec,
+  taskRunUrl,
   attribution,
   visualProofAutoScreencastEnabled,
   backgroundProofCaptureEnabled,
 }: {
-  cloudTask: GithubPullRequestReviewOpenTask;
-  cloudJobUrl: string;
+  taskSpec: GithubPullRequestReviewOpenTask;
+  taskRunUrl: string;
   attribution?: ResolvedTaskCommitAuthor;
   visualProofAutoScreencastEnabled?: boolean;
   backgroundProofCaptureEnabled?: boolean;
 }) {
   const prompt = buildGiteaPullRequestReviewPrompt({
-    cloudTask,
-    cloudJobUrl,
+    taskSpec,
+    taskRunUrl,
   });
 
   return standardTask({
     description: prompt,
-    repo: cloudTask.payload.repo,
+    repo: taskSpec.payload.repo,
     taskSurface: 'gitea',
-    cloudJobUrl,
+    taskRunUrl,
     attribution,
     requestFormat: 'structured',
-    linkedWorkItems: cloudTask.payload.linkedWorkItems,
+    linkedWorkItems: taskSpec.payload.linkedWorkItems,
     visualProofAutoScreencastEnabled,
     backgroundProofCaptureEnabled,
   });
 }
 
 function buildAdoPullRequestReviewPrompt({
-  cloudTask,
-  cloudJobUrl,
+  taskSpec,
+  taskRunUrl,
 }: {
-  cloudTask: GithubPullRequestReviewOpenTask;
-  cloudJobUrl: string;
+  taskSpec: GithubPullRequestReviewOpenTask;
+  taskRunUrl: string;
 }): string {
   const {
     payload: {
@@ -204,8 +204,8 @@ function buildAdoPullRequestReviewPrompt({
       branchName,
       targetBranch,
     },
-  } = cloudTask;
-  const delimiter = getSkillCommandDelimiter(cloudTask.harness);
+  } = taskSpec;
+  const delimiter = getSkillCommandDelimiter(taskSpec.harness);
 
   return buildStructuredTaskRequest({
     command: `${delimiter}review-code`,
@@ -218,7 +218,7 @@ function buildAdoPullRequestReviewPrompt({
       source_branch: branchName,
       target_branch: targetBranch,
       current_head_sha: headSha || 'unknown',
-      task_link_see: `[See task](${cloudJobUrl})`,
+      task_link_see: `[See task](${taskRunUrl})`,
       review_scope:
         'Review only the Azure DevOps pull request changes. Use the prepared local repository, source branch, target branch, and commit SHA to inspect the diff with git commands. Do not use GitHub-only CLI commands such as `gh pr`.',
       suggested_diff_commands: [
@@ -234,47 +234,47 @@ function buildAdoPullRequestReviewPrompt({
 }
 
 function adoPullRequestReview({
-  cloudTask,
-  cloudJobUrl,
+  taskSpec,
+  taskRunUrl,
   attribution,
   visualProofAutoScreencastEnabled,
   backgroundProofCaptureEnabled,
 }: {
-  cloudTask: GithubPullRequestReviewOpenTask;
-  cloudJobUrl: string;
+  taskSpec: GithubPullRequestReviewOpenTask;
+  taskRunUrl: string;
   attribution?: ResolvedTaskCommitAuthor;
   visualProofAutoScreencastEnabled?: boolean;
   backgroundProofCaptureEnabled?: boolean;
 }) {
   const prompt = buildAdoPullRequestReviewPrompt({
-    cloudTask,
-    cloudJobUrl,
+    taskSpec,
+    taskRunUrl,
   });
 
   return standardTask({
     description: prompt,
-    repo: cloudTask.payload.repo,
+    repo: taskSpec.payload.repo,
     taskSurface: 'ado',
-    cloudJobUrl,
+    taskRunUrl,
     attribution,
     requestFormat: 'structured',
-    linkedWorkItems: cloudTask.payload.linkedWorkItems,
+    linkedWorkItems: taskSpec.payload.linkedWorkItems,
     visualProofAutoScreencastEnabled,
     backgroundProofCaptureEnabled,
   });
 }
 
 export async function githubPrReview({
-  cloudTask,
+  taskSpec,
   gitHubToken,
-  cloudJobUrl,
+  taskRunUrl,
   attribution,
   visualProofAutoScreencastEnabled,
   backgroundProofCaptureEnabled,
 }: {
-  cloudTask: GithubPullRequestReviewOpenTask;
+  taskSpec: GithubPullRequestReviewOpenTask;
   gitHubToken: string;
-  cloudJobUrl: string;
+  taskRunUrl: string;
   attribution?: ResolvedTaskCommitAuthor;
   visualProofAutoScreencastEnabled?: boolean;
   backgroundProofCaptureEnabled?: boolean;
@@ -283,27 +283,27 @@ export async function githubPrReview({
   harnessInstructions?: string;
   artifacts: Record<string, unknown>;
 }> {
-  switch (resolveSourceControlProviderFromPayload(cloudTask.payload)) {
+  switch (resolveSourceControlProviderFromPayload(taskSpec.payload)) {
     case 'gitlab':
       return gitLabMergeRequestReview({
-        cloudTask,
-        cloudJobUrl,
+        taskSpec,
+        taskRunUrl,
         attribution,
         visualProofAutoScreencastEnabled,
         backgroundProofCaptureEnabled,
       });
     case 'gitea':
       return giteaPullRequestReview({
-        cloudTask,
-        cloudJobUrl,
+        taskSpec,
+        taskRunUrl,
         attribution,
         visualProofAutoScreencastEnabled,
         backgroundProofCaptureEnabled,
       });
     case 'ado':
       return adoPullRequestReview({
-        cloudTask,
-        cloudJobUrl,
+        taskSpec,
+        taskRunUrl,
         attribution,
         visualProofAutoScreencastEnabled,
         backgroundProofCaptureEnabled,
@@ -322,7 +322,7 @@ export async function githubPrReview({
       linkedTaskId: payloadLinkedTaskId,
       linkedTaskRelayLookupPending: payloadLinkedTaskRelayLookupPending,
     },
-  } = cloudTask;
+  } = taskSpec;
 
   const shouldApprovePr = false;
   const { relayReviewResultsToTask, linkedTaskId } =
@@ -369,7 +369,7 @@ export async function githubPrReview({
   const existingReviewSummaryComment =
     findReusableReviewSummaryComment(issueComments);
   const followLink = buildGithubCommentActionLink({
-    href: cloudJobUrl,
+    href: taskRunUrl,
     label: 'Follow',
   });
   const reviewStatus = GitHubSchemas.isRoomoteGitHubLogin(pr.author.login)
@@ -423,7 +423,7 @@ export async function githubPrReview({
     }
   }
 
-  const delimiter = getSkillCommandDelimiter(cloudTask.harness);
+  const delimiter = getSkillCommandDelimiter(taskSpec.harness);
   const activeSkillPath = shouldApprovePr
     ? 'review-github-pr-with-approval'
     : 'review-github-pr';
@@ -442,7 +442,7 @@ export async function githubPrReview({
       comment_header_starting: '',
       comment_header_completed: '',
       task_link_follow: followLink,
-      task_link_see: `[See task](${cloudJobUrl})`,
+      task_link_see: `[See task](${taskRunUrl})`,
       linked_implementation_task_handoff_enabled: relayReviewResultsToTask,
       linked_implementation_task_id: linkedTaskId,
       pull_request_details: getPrDetails({ fullName, pr }),
@@ -464,7 +464,7 @@ export async function githubPrReview({
     description: prompt,
     repo: fullName,
     taskSurface: 'github',
-    cloudJobUrl,
+    taskRunUrl,
     attribution,
     requestFormat: 'structured',
     linkedWorkItems,

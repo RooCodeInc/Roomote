@@ -48,7 +48,7 @@ describe('buildWorkspacePortMappings', () => {
 });
 
 describe('buildServiceContextForPreviewProxy', () => {
-  it('includes the cloud job ID and environment app ports for preview auth', () => {
+  it('includes the task run ID and environment app ports for preview auth', () => {
     const workspace = {
       type: 'environment',
       environmentConfig: {
@@ -58,10 +58,10 @@ describe('buildServiceContextForPreviewProxy', () => {
       },
     };
 
-    const cloudJob = {
+    const taskRun = {
       id: 123,
       taskId: 'task_123',
-      authBypassValue: 'cloud-job-bypass',
+      authBypassValue: 'task-run-bypass',
     };
 
     const workerEnv = {
@@ -73,15 +73,15 @@ describe('buildServiceContextForPreviewProxy', () => {
 
     expect(
       buildServiceContextForPreviewProxy(
-        cloudJob as never,
+        taskRun as never,
         workspace as never,
         workerEnv as never,
       ),
     ).toEqual(
       expect.objectContaining({
-        cloudJobId: 123,
+        runId: 123,
         taskId: 'task_123',
-        authBypassHeaderValue: 'cloud-job-bypass',
+        authBypassHeaderValue: 'task-run-bypass',
         appPorts: {},
       }),
     );

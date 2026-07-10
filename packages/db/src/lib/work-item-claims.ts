@@ -107,7 +107,7 @@ export async function claimWorkItem(
 
 /**
  * Release an in-flight claim back to `open` after a launch failed before the
- * cloud task started, clearing the claim so a later trigger can retry.
+ * task started, clearing the claim so a later trigger can retry.
  *
  * Guarded on `status = 'launching'` AND `launch_claimed_at = claimedAt` (the
  * fencing token returned by `claimWorkItem`): it never reverts a `launched` item

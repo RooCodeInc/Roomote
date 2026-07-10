@@ -18,9 +18,9 @@ import type { UserAuthSuccess } from '@/types';
 import { resolveSuggestionLaunchWorkspace } from './launch-resolution';
 import { assertSuggestionHistoryEnabled } from './shared';
 import {
-  getResolvedSuggestionSourceCloudJobsByTaskId,
+  getResolvedSuggestionSourceTaskRunsByTaskId,
   getSuggestionHistoryAutomation,
-} from './source-cloud-jobs';
+} from './source-task-runs';
 
 export async function implementTaskSuggestionCommand(
   auth: UserAuthSuccess,
@@ -74,14 +74,14 @@ export async function implementTaskSuggestionCommand(
   }
 
   try {
-    const sourceCloudJobByTaskId = suggestion.sourceTaskId
-      ? await getResolvedSuggestionSourceCloudJobsByTaskId([
+    const sourceTaskRunByTaskId = suggestion.sourceTaskId
+      ? await getResolvedSuggestionSourceTaskRunsByTaskId([
           suggestion.sourceTaskId,
         ])
       : {};
     const automation = getSuggestionHistoryAutomation(
       suggestion.sourceTaskId
-        ? sourceCloudJobByTaskId[suggestion.sourceTaskId]
+        ? sourceTaskRunByTaskId[suggestion.sourceTaskId]
         : undefined,
     );
     const resolution = await resolveSuggestionLaunchWorkspace({
@@ -167,7 +167,7 @@ export async function implementTaskSuggestionCommand(
     return {
       success: true as const,
       taskId: launchResult.taskId,
-      cloudJobId: launchResult.id,
+      runId: launchResult.id,
     };
   } catch (error) {
     // Release the claim back to `open` (never reverts a `launched` item; the

@@ -54,7 +54,7 @@ vi.mock('@roomote/db/server', () => ({
 
 vi.mock('../../../logging.js', () => ({ apiLogger: apiLoggerMock }));
 
-vi.mock('../../tasks/task-stop.js', () => ({ stopTaskJob: vi.fn() }));
+vi.mock('../../tasks/task-stop.js', () => ({ stopTaskRun: vi.fn() }));
 
 vi.mock('../../tasks/orphaned-work-item-run.js', () => ({
   cancelOrphanedWorkItemRunBestEffort: cancelOrphanedWorkItemRunBestEffortMock,

@@ -1,5 +1,5 @@
-const { mockCreateJobToken, mockSendPromptMutate } = vi.hoisted(() => ({
-  mockCreateJobToken: vi.fn(),
+const { mockCreateRunToken, mockSendPromptMutate } = vi.hoisted(() => ({
+  mockCreateRunToken: vi.fn(),
   mockSendPromptMutate: vi.fn(),
 }));
 
@@ -9,7 +9,7 @@ vi.mock('@roomote/auth', async () => {
 
   return {
     ...actual,
-    createJobToken: mockCreateJobToken,
+    createRunToken: mockCreateRunToken,
   };
 });
 
@@ -78,7 +78,7 @@ describe('sendSandboxPromptCommand', () => {
         headers: { 'content-type': 'application/json' },
       }),
     );
-    mockCreateJobToken.mockResolvedValue('job-token');
+    mockCreateRunToken.mockResolvedValue('run-token');
     mockSendPromptMutate.mockResolvedValue({ success: true });
   });
 
@@ -245,7 +245,7 @@ describe('sendSandboxPromptCommand', () => {
         'The task is no longer connected to a live sandbox. Refresh the page or start a new task.',
     });
 
-    expect(mockCreateJobToken).not.toHaveBeenCalled();
+    expect(mockCreateRunToken).not.toHaveBeenCalled();
     expect(mockSendPromptMutate).not.toHaveBeenCalled();
   });
 });

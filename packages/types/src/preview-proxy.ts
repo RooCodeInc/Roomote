@@ -60,7 +60,7 @@ export function getPreviewProxyBaseUrl(baseUrlRaw: string | undefined): string {
  * Constructs a preview proxy URL for a given task and port.
  * Parses the base URL and prepends the subdomain while preserving protocol and port.
  *
- * @param taskId - The cloud job's taskId (13-char base36)
+ * @param taskId - The task run's taskId (13-char base36)
  * @param portName - The port name (e.g., 'web', 'api')
  * @param baseUrl - The base URL (e.g., 'https://preview.example.com' or 'http://roomotepreview.localhost:18081')
  * @returns The full preview proxy URL

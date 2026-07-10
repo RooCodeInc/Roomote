@@ -28,11 +28,11 @@ import {
 import { TASK_TOOL_CATALOG } from '../task-tools';
 
 import { type SidebarActionBaseProps } from './types';
-import { isCloudJobAsleep } from './utils';
+import { isTaskRunAsleep } from './utils';
 
 function TaskToolsButtonBase({
-  cloudJob,
-}: Pick<SidebarActionBaseProps, 'cloudJob'>) {
+  taskRun,
+}: Pick<SidebarActionBaseProps, 'taskRun'>) {
   const client = useSandboxClient();
   const trpcClient = useTRPCClient();
   const connected = useSandboxConnected();
@@ -41,11 +41,11 @@ function TaskToolsButtonBase({
   const userImageUrl =
     currentUserInfo?.userImageUrl ?? user?.resource.imageUrl ?? undefined;
 
-  if (!cloudJob || !client || !connected) {
+  if (!taskRun || !client || !connected) {
     return null;
   }
 
-  const asleep = isCloudJobAsleep(cloudJob);
+  const asleep = isTaskRunAsleep(taskRun);
 
   if (asleep) {
     return null;
@@ -63,7 +63,7 @@ function TaskToolsButtonBase({
 
               try {
                 await trpcClient.sandboxSession.sendPrompt.mutate({
-                  taskId: cloudJob.taskId,
+                  taskId: taskRun.taskId,
                   taskTool: { actionId },
                   source: 'web',
                   clientMessageId,

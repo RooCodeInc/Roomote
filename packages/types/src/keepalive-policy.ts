@@ -1,4 +1,4 @@
-import { TaskPayloadKind, type RunLaunchClass } from './cloud-jobs';
+import { TaskPayloadKind, type RunLaunchClass } from './task-runs';
 import {
   DEFAULT_AUTOMATION_KEEPALIVE_MS,
   DEFAULT_MAINTENANCE_KEEPALIVE_MS,
@@ -24,7 +24,7 @@ export function inferLaunchClassForTaskType(
   }
 }
 
-export function resolveCloudTaskRuntimePolicy(options: {
+export function resolveTaskRuntimePolicy(options: {
   taskType: TaskPayloadKind;
   launchClass?: RunLaunchClass | null;
   appEnv?: 'development' | 'preview' | 'production' | 'test' | null;

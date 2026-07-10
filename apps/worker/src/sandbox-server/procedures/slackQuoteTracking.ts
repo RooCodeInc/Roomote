@@ -35,14 +35,14 @@ function normalizeSlackQuoteText(text: string): string {
 }
 
 async function getSlackQuoteTrackingConfig(params: {
-  cloudJobId: number;
+  runId: number;
   logPrefix: string;
   action: 'sync' | 'clear';
   warn?: (message: string) => void;
 }) {
-  const { cloudJobId, logPrefix, action, warn } = params;
+  const { runId, logPrefix, action, warn } = params;
 
-  const job = await sdk.cloudJobs.findFirstById(cloudJobId);
+  const job = await sdk.taskRuns.findFirstById(runId);
 
   if (
     !job ||
@@ -59,7 +59,7 @@ async function getSlackQuoteTrackingConfig(params: {
   const roomoteConfig = getRoomoteConfig();
   if (!roomoteConfig) {
     warn?.(
-      `[${logPrefix}] Non-fatal latest user message ${action} failure for cloud job ${cloudJobId}: ROOMOTE_CLOUD_TOKEN/AUTH_TOKEN environment variable not set`,
+      `[${logPrefix}] Non-fatal latest user message ${action} failure for task run ${runId}: ROOMOTE_CLOUD_TOKEN/AUTH_TOKEN environment variable not set`,
     );
     return null;
   }
@@ -68,21 +68,21 @@ async function getSlackQuoteTrackingConfig(params: {
 }
 
 export async function trackLatestUserMessageForSlackThreadQuote(params: {
-  cloudJobId: number | undefined;
+  runId: number | undefined;
   text: string;
   userName: string | undefined;
   logPrefix: string;
   warn?: (message: string) => void;
 }): Promise<boolean> {
-  const { cloudJobId, text, userName, logPrefix, warn } = params;
+  const { runId, text, userName, logPrefix, warn } = params;
 
-  if (text.trim().length === 0 || typeof cloudJobId !== 'number') {
+  if (text.trim().length === 0 || typeof runId !== 'number') {
     return false;
   }
 
   try {
     const roomoteConfig = await getSlackQuoteTrackingConfig({
-      cloudJobId,
+      runId,
       logPrefix,
       action: 'sync',
       warn,
@@ -92,14 +92,14 @@ export async function trackLatestUserMessageForSlackThreadQuote(params: {
     }
 
     await trackSlackReplyQuote(roomoteConfig, {
-      cloudJobId,
+      runId,
       text: normalizeSlackQuoteText(text),
       userName: userName?.trim() || 'Someone',
     });
     return true;
   } catch (error) {
     warn?.(
-      `[${logPrefix}] Non-fatal latest user message sync failure for cloud job ${cloudJobId}: ${
+      `[${logPrefix}] Non-fatal latest user message sync failure for task run ${runId}: ${
         error instanceof Error ? error.message : String(error)
       }`,
     );
@@ -108,19 +108,19 @@ export async function trackLatestUserMessageForSlackThreadQuote(params: {
 }
 
 export async function clearLatestUserMessageForSlackThreadQuote(params: {
-  cloudJobId: number | undefined;
+  runId: number | undefined;
   logPrefix: string;
   warn?: (message: string) => void;
 }): Promise<void> {
-  const { cloudJobId, logPrefix, warn } = params;
+  const { runId, logPrefix, warn } = params;
 
-  if (typeof cloudJobId !== 'number') {
+  if (typeof runId !== 'number') {
     return;
   }
 
   try {
     const roomoteConfig = await getSlackQuoteTrackingConfig({
-      cloudJobId,
+      runId,
       logPrefix,
       action: 'clear',
       warn,
@@ -130,11 +130,11 @@ export async function clearLatestUserMessageForSlackThreadQuote(params: {
     }
 
     await clearSlackReplyQuote(roomoteConfig, {
-      cloudJobId,
+      runId,
     });
   } catch (error) {
     warn?.(
-      `[${logPrefix}] Non-fatal latest user message clear failure for cloud job ${cloudJobId}: ${
+      `[${logPrefix}] Non-fatal latest user message clear failure for task run ${runId}: ${
         error instanceof Error ? error.message : String(error)
       }`,
     );

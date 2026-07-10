@@ -6,15 +6,15 @@ import { useQueryClient } from '@tanstack/react-query';
 import { AlertCircle, RefreshCw, Button } from '@/components/system';
 import { useTRPC } from '@/trpc/client';
 
-import { type CloudSession, useSandboxConnectionStatus } from './hooks';
-import { isCloudJobSnapshotting } from './sidebar-actions/utils';
+import { type TaskSession, useSandboxConnectionStatus } from './hooks';
+import { isTaskRunSnapshotting } from './sidebar-actions/utils';
 
 function getInitialConnectionMessage({
   showReconnectState,
   connectionFailureCategory,
 }: {
   showReconnectState: boolean;
-  connectionFailureCategory: CloudSession['transportErrorCategory'];
+  connectionFailureCategory: TaskSession['transportErrorCategory'];
 }) {
   if (showReconnectState) {
     return 'Connecting to the live task...';
@@ -39,7 +39,7 @@ function getErrorMessage({
 }: {
   hasConnectedOnce: boolean;
   connectionError: boolean;
-  connectionFailureCategory: CloudSession['transportErrorCategory'];
+  connectionFailureCategory: TaskSession['transportErrorCategory'];
 }) {
   switch (connectionFailureCategory) {
     case 'auth_error':
@@ -61,7 +61,7 @@ function getErrorMessage({
   }
 }
 
-export function ConnectionStatusBanner({ session }: { session: CloudSession }) {
+export function ConnectionStatusBanner({ session }: { session: TaskSession }) {
   const trpc = useTRPC();
   const queryClient = useQueryClient();
 
@@ -120,10 +120,7 @@ export function ConnectionStatusBanner({ session }: { session: CloudSession }) {
   // failure. Suppress only while the transcript renders its "Going to sleep"
   // row (snapshot in progress or already taken) so the page never goes
   // statusless: `sleepRequestedAt`-only teardowns keep the banner.
-  if (
-    isCloudJobSnapshotting(session.cloudJob) ||
-    session.cloudJob?.snapshotId
-  ) {
+  if (isTaskRunSnapshotting(session.taskRun) || session.taskRun?.snapshotId) {
     return null;
   }
 

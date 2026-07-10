@@ -144,7 +144,7 @@ function createTask(overrides?: Partial<TaskCardTask>): TaskCardTask {
       email: 'matt@roomote.test',
       imageUrl: 'https://example.com/avatar.png',
     },
-    cloudJob: {
+    taskRun: {
       status: RunStatus.Completed,
       taskPhase: null,
       payload: {
@@ -361,8 +361,8 @@ describe('TaskCard', () => {
         task={createTask({
           model: 'openrouter/openai/gpt-5.5',
           modelDisplayName: 'GPT 5.5',
-          cloudJob: {
-            ...baseTask.cloudJob,
+          taskRun: {
+            ...baseTask.taskRun,
             prRepo: 'RooCodeInc/Roomote',
             prNumber: 163,
           },

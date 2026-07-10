@@ -411,7 +411,7 @@ async function revertPrCommit(
       headers: () => ({ Authorization: `Bearer ${authToken}` }),
     });
 
-    return await client.cloudJobs.revertPrCommit.mutate(input);
+    return await client.taskRuns.revertPrCommit.mutate(input);
   } catch (error) {
     console.error('[revertPrCommit]', error);
 

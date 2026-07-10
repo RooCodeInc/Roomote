@@ -305,7 +305,7 @@ const OPTIONAL_NON_EMPTY_KEYS = new Set([
 
 /**
  * The base64-encoded P-256 keypair env keys that every deployment needs for
- * job-token and preview-token signing/verification.
+ * run-token and preview-token signing/verification.
  */
 export const AUTH_KEYPAIR_ENV_KEYS = [
   'JOB_AUTH_PRIVATE_KEY',

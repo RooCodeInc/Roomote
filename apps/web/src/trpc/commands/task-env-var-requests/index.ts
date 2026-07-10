@@ -115,7 +115,7 @@ export async function fulfillTaskEnvVarRequestCommand(
       values: valuesToPersist,
     });
 
-    const activeCloudJob = await tx.query.taskRuns.findFirst({
+    const activeTaskRun = await tx.query.taskRuns.findFirst({
       where: eq(taskRuns.taskId, taskId),
       orderBy: desc(taskRuns.createdAt),
       columns: {
@@ -128,16 +128,16 @@ export async function fulfillTaskEnvVarRequestCommand(
     return {
       names: requestedNames,
       canReload:
-        !!activeCloudJob &&
-        !isExitedRunStatus(activeCloudJob.status) &&
-        !!activeCloudJob.sandboxServerUrl,
-      cloudJobId: activeCloudJob?.id ?? null,
+        !!activeTaskRun &&
+        !isExitedRunStatus(activeTaskRun.status) &&
+        !!activeTaskRun.sandboxServerUrl,
+      runId: activeTaskRun?.id ?? null,
     };
   });
 
-  if (result.cloudJobId !== null && !result.canReload) {
+  if (result.runId !== null && !result.canReload) {
     await recordTaskMessageEnvelope({
-      cloudJobId: result.cloudJobId,
+      runId: result.runId,
       taskId,
       userId: auth.userId,
       envelope: {

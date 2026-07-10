@@ -29,7 +29,7 @@ export interface LatestUserMessage {
 }
 
 type TrackLatestUserMessageForSlackQuoteParams = {
-  cloudJobId: number;
+  runId: number;
   text: string;
   userName: string;
   onError?: (error: unknown) => void;
@@ -58,54 +58,54 @@ export type QueuedSlackMessage = Omit<
 >;
 
 /**
- * Queue a Slack message for delivery to an active cloud job.
+ * Queue a Slack message for delivery to an active task run.
  * Messages are stored in Redis and retrieved by the worker.
  */
 export async function queueSlackMessage(
-  cloudJobId: number,
+  runId: number,
   message: QueuedSlackMessage,
 ) {
   slackDebug(
-    `[queueSlackMessage] Queuing message for cloud job ${cloudJobId}: ${message.text.substring(0, 100)}`,
+    `[queueSlackMessage] Queuing message for task run ${runId}: ${message.text.substring(0, 100)}`,
   );
 
-  await queueCommunicationMessage('slack', cloudJobId, message);
+  await queueCommunicationMessage('slack', runId, message);
 
   slackDebug(`[queueSlackMessage] Message queued successfully`);
 }
 
 export async function prependSlackMessages(
-  cloudJobId: number,
+  runId: number,
   messages: QueuedSlackMessage[],
 ): Promise<void> {
   if (messages.length === 0) {
     return;
   }
 
-  await prependCommunicationMessages('slack', cloudJobId, messages);
+  await prependCommunicationMessages('slack', runId, messages);
 
   slackDebug(
-    `[prependSlackMessages] Requeued ${messages.length} message(s) for cloud job ${cloudJobId}`,
+    `[prependSlackMessages] Requeued ${messages.length} message(s) for task run ${runId}`,
   );
 }
 
 /**
- * Check if there are pending messages for a cloud job without consuming them.
+ * Check if there are pending messages for a task run without consuming them.
  */
-export async function hasQueuedMessages(cloudJobId: number): Promise<boolean> {
-  return hasQueuedCommunicationMessages('slack', cloudJobId);
+export async function hasQueuedMessages(runId: number): Promise<boolean> {
+  return hasQueuedCommunicationMessages('slack', runId);
 }
 
 /**
- * Retrieve all queued Slack messages for a cloud job.
+ * Retrieve all queued Slack messages for a task run.
  * Messages are cleared after retrieval using an atomic transaction.
  */
 export async function getSlackMessages(
-  cloudJobId: number,
+  runId: number,
 ): Promise<QueuedSlackMessage[]> {
-  const messages = await getCommunicationMessages('slack', cloudJobId);
+  const messages = await getCommunicationMessages('slack', runId);
   slackDebug(
-    `[getSlackMessages] Retrieved ${messages.length} message(s) for cloud job ${cloudJobId}`,
+    `[getSlackMessages] Retrieved ${messages.length} message(s) for task run ${runId}`,
   );
 
   return messages;
@@ -126,11 +126,11 @@ export interface SlackStartedMessageData {
 }
 
 /**
- * Store the Slack started-message data for a cloud job in Redis.
+ * Store the Slack started-message data for a task run in Redis.
  * Uses a 24-hour TTL.
  */
 export async function setSlackStartedMessageTs(
-  cloudJobId: number,
+  runId: number,
   ts: string,
   metadata?: {
     agentName: string;
@@ -142,7 +142,7 @@ export async function setSlackStartedMessageTs(
   },
 ) {
   const redis = getRedis();
-  const key = `slack:started_message_ts:${cloudJobId}`;
+  const key = `slack:started_message_ts:${runId}`;
   if (metadata) {
     const data: SlackStartedMessageData = { ts, ...metadata };
     await redis.set(key, JSON.stringify(data), 'EX', 86400);
@@ -153,13 +153,13 @@ export async function setSlackStartedMessageTs(
 }
 
 /**
- * Retrieve the Slack started-message timestamp for a cloud job from Redis.
+ * Retrieve the Slack started-message timestamp for a task run from Redis.
  */
 export async function getSlackStartedMessageTs(
-  cloudJobId: number,
+  runId: number,
 ): Promise<string | null> {
   const redis = getRedis();
-  const key = `slack:started_message_ts:${cloudJobId}`;
+  const key = `slack:started_message_ts:${runId}`;
   const raw = await redis.get(key);
   if (!raw) return null;
   // Handle both old (plain TS string) and new (JSON) formats
@@ -172,13 +172,13 @@ export async function getSlackStartedMessageTs(
 }
 
 /**
- * Retrieve the full started-message data (TS + metadata) for a cloud job.
+ * Retrieve the full started-message data (TS + metadata) for a task run.
  */
 export async function getSlackStartedMessageData(
-  cloudJobId: number,
+  runId: number,
 ): Promise<SlackStartedMessageData | null> {
   const redis = getRedis();
-  const key = `slack:started_message_ts:${cloudJobId}`;
+  const key = `slack:started_message_ts:${runId}`;
   const raw = await redis.get(key);
   if (!raw) return null;
   try {
@@ -283,8 +283,8 @@ function getLatestSlackBotReplyKey(channel: string, threadTs: string): string {
   return `slack:thread_latest_bot_reply:${channel}:${threadTs}`;
 }
 
-function getLatestUserMessageKey(cloudJobId: number): string {
-  return `slack:latest_user_message:${cloudJobId}`;
+function getLatestUserMessageKey(runId: number): string {
+  return `slack:latest_user_message:${runId}`;
 }
 
 export async function setLatestSlackBotReply(
@@ -363,11 +363,11 @@ function parseLatestUserMessage(raw: string | null): LatestUserMessage | null {
 }
 
 export async function setLatestUserMessage(
-  cloudJobId: number,
+  runId: number,
   message: LatestUserMessage,
 ): Promise<void> {
   const redis = getRedis();
-  const key = getLatestUserMessageKey(cloudJobId);
+  const key = getLatestUserMessageKey(runId);
 
   await redis.set(
     key,
@@ -378,13 +378,13 @@ export async function setLatestUserMessage(
 }
 
 export async function trackLatestUserMessageForSlackQuote({
-  cloudJobId,
+  runId,
   text,
   userName,
   onError,
 }: TrackLatestUserMessageForSlackQuoteParams): Promise<void> {
   try {
-    await setLatestUserMessage(cloudJobId, {
+    await setLatestUserMessage(runId, {
       text,
       userName,
     });
@@ -395,7 +395,7 @@ export async function trackLatestUserMessageForSlackQuote({
     }
 
     console.warn(
-      `[trackLatestUserMessageForSlackQuote] Failed to persist latest user message for cloud job ${cloudJobId}: ${
+      `[trackLatestUserMessageForSlackQuote] Failed to persist latest user message for task run ${runId}: ${
         error instanceof Error ? error.message : String(error)
       }`,
     );
@@ -403,22 +403,20 @@ export async function trackLatestUserMessageForSlackQuote({
 }
 
 export async function getLatestUserMessage(
-  cloudJobId: number,
+  runId: number,
 ): Promise<LatestUserMessage | null> {
   const redis = getRedis();
-  const raw = await redis.get(getLatestUserMessageKey(cloudJobId));
+  const raw = await redis.get(getLatestUserMessageKey(runId));
   return parseLatestUserMessage(raw);
 }
 
-export async function clearLatestUserMessage(
-  cloudJobId: number,
-): Promise<void> {
+export async function clearLatestUserMessage(runId: number): Promise<void> {
   try {
     const redis = getRedis();
-    await redis.del(getLatestUserMessageKey(cloudJobId));
+    await redis.del(getLatestUserMessageKey(runId));
   } catch (error) {
     console.error(
-      `[clearLatestUserMessage] Failed to clear latest user message for cloud job ${cloudJobId}: ${
+      `[clearLatestUserMessage] Failed to clear latest user message for task run ${runId}: ${
         error instanceof Error ? error.message : String(error)
       }`,
     );

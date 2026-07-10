@@ -9,10 +9,10 @@ import { useTaskSidePanel } from '../hooks';
 
 import type { SidebarActionBaseProps } from './types';
 
-function TerminalButtonBase({ cloudJob }: SidebarActionBaseProps) {
+function TerminalButtonBase({ taskRun }: SidebarActionBaseProps) {
   const { openTerminalView, closeSidePanel, isViewActive } = useTaskSidePanel();
 
-  if (!cloudJob) {
+  if (!taskRun) {
     return null;
   }
 

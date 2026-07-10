@@ -7,7 +7,7 @@ import { runPollingSdkCall } from './poll-error-context';
 const CANCEL_CHECK_INTERVAL_MS = 10_000;
 
 export function createCancelInterval({
-  cloudJob,
+  taskRun,
   state,
   logger,
   cancelTask,
@@ -17,22 +17,22 @@ export function createCancelInterval({
       return;
     }
 
-    const latestJob = await runPollingSdkCall({
-      execute: () => sdk.cloudJobs.findRuntimeStateById(cloudJob.id),
+    const latestRun = await runPollingSdkCall({
+      execute: () => sdk.taskRuns.findRuntimeStateById(taskRun.id),
       stage: 'listenForCancel',
-      cloudJobId: cloudJob.id,
+      runId: taskRun.id,
       sessionId: state.sessionId,
-      sdkMethod: 'cloudJobs.findRuntimeStateById',
+      sdkMethod: 'taskRuns.findRuntimeStateById',
       logger,
       level: 'warn',
-      message: `[listenForCancel] unable to check cancellation status for job ${cloudJob.id}`,
+      message: `[listenForCancel] unable to check cancellation status for job ${taskRun.id}`,
     });
 
-    if (!latestJob) {
+    if (!latestRun) {
       return;
     }
 
-    if (latestJob?.canceledAt) {
+    if (latestRun?.canceledAt) {
       logger.info(
         `[listenForCancel] cancelling parent task: ${state.sessionId}`,
       );

@@ -40,7 +40,7 @@ vi.mock('@roomote/db/server', () => ({
 
 vi.mock('../../../logging.js', () => ({ apiLogger: apiLoggerMock }));
 
-vi.mock('../find-active-teams-job.js', () => ({
+vi.mock('../find-active-teams-run.js', () => ({
   stripTeamsMessageIdSuffix: (conversationId: string) =>
     conversationId.split(';messageid=')[0],
 }));
@@ -119,7 +119,7 @@ describe('launchClaimedTeamsSuggestion', () => {
       postMessage,
     });
 
-    expect(outcome).toEqual({ result: 'started', cloudJobId: 7 });
+    expect(outcome).toEqual({ result: 'started', runId: 7 });
     expect(launchTask).toHaveBeenCalledWith(
       expect.stringContaining('Start this suggested task: Fix the flaky test'),
     );

@@ -21,16 +21,16 @@ import {
 import { standardTask } from './standardTask';
 
 export async function githubPrReviewFollowUp({
-  cloudTask,
+  taskSpec,
   gitHubToken,
-  cloudJobUrl,
+  taskRunUrl,
   attribution,
   visualProofAutoScreencastEnabled,
   backgroundProofCaptureEnabled,
 }: {
-  cloudTask: GithubPullRequestReviewFollowUpTask;
+  taskSpec: GithubPullRequestReviewFollowUpTask;
   gitHubToken: string;
-  cloudJobUrl: string;
+  taskRunUrl: string;
   attribution?: ResolvedTaskCommitAuthor;
   visualProofAutoScreencastEnabled?: boolean;
   backgroundProofCaptureEnabled?: boolean;
@@ -47,7 +47,7 @@ export async function githubPrReviewFollowUp({
       commentBody,
       linkedWorkItems: payloadLinkedWorkItems,
     },
-  } = cloudTask;
+  } = taskSpec;
 
   const agentType = 'Standard Task';
 
@@ -100,8 +100,8 @@ export async function githubPrReviewFollowUp({
     revert_commit_base_url: revertCommitBaseUrl,
     comment_header_starting: '',
     comment_header_completed: '',
-    task_link_follow: `[Follow](${cloudJobUrl})`,
-    task_link_see: `[See task](${cloudJobUrl})`,
+    task_link_follow: `[Follow](${taskRunUrl})`,
+    task_link_see: `[See task](${taskRunUrl})`,
     pull_request_details: getPrDetails({ fullName, pr }),
     ...(commentId ? { triggering_comment_id: commentId } : {}),
     triggering_comment: getTriggeringComment(triggeringComment),
@@ -134,7 +134,7 @@ export async function githubPrReviewFollowUp({
     description: prompt,
     repo: fullName,
     taskSurface: 'github',
-    cloudJobUrl,
+    taskRunUrl,
     attribution,
     requestFormat: 'structured',
     linkedWorkItems,

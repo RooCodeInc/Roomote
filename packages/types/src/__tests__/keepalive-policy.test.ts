@@ -1,13 +1,13 @@
 import { describe, expect, it } from 'vitest';
 
-import { TaskPayloadKind } from '../cloud-jobs';
+import { TaskPayloadKind } from '../task-runs';
 import {
   DEFAULT_AUTOMATION_KEEPALIVE_MS,
   DEFAULT_MAINTENANCE_KEEPALIVE_MS,
 } from '../constants';
 import {
   inferLaunchClassForTaskType,
-  resolveCloudTaskRuntimePolicy,
+  resolveTaskRuntimePolicy,
   resolveKeepaliveMs,
 } from '../keepalive-policy';
 
@@ -25,14 +25,14 @@ describe('inferLaunchClassForTaskType', () => {
   });
 });
 
-describe('resolveCloudTaskRuntimePolicy', () => {
+describe('resolveTaskRuntimePolicy', () => {
   const defaultKeepaliveMs = 30 * 60 * 1000;
   const delegatedKeepaliveMs = 30 * 60 * 1000;
   const sandboxTimeoutMs = 5 * 60 * 60 * 1000;
 
   it('resolves launch class and keepalive together for review jobs', () => {
     expect(
-      resolveCloudTaskRuntimePolicy({
+      resolveTaskRuntimePolicy({
         taskType: TaskPayloadKind.GithubPrReview,
         appEnv: 'production',
         defaultKeepaliveMs,
@@ -47,7 +47,7 @@ describe('resolveCloudTaskRuntimePolicy', () => {
 
   it('keeps explicit launch-class overrides when resolving policy', () => {
     expect(
-      resolveCloudTaskRuntimePolicy({
+      resolveTaskRuntimePolicy({
         taskType: TaskPayloadKind.GithubPrReviewFollowUp,
         launchClass: 'automation',
         appEnv: 'production',

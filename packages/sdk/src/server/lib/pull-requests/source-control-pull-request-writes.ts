@@ -15,7 +15,7 @@ import {
   resolveGitLabBaseUrl,
   resolveGitLabToken,
 } from '@roomote/gitlab';
-import { type Run } from '@roomote/db/server';
+import { type TaskRun } from '@roomote/db/server';
 import {
   getSourceControlProviderLabel,
   resolveSourceControlProviderFromPayload,
@@ -24,7 +24,7 @@ import {
 } from '@roomote/types';
 import { z } from 'zod';
 import {
-  assertRepositoryInCloudJobScope,
+  assertRepositoryInTaskRunScope,
   buildAdoBasicAuthHeader,
   buildApiUrl,
   formatResponseBody,
@@ -207,12 +207,12 @@ const adoReviewerVoteSchema = z
   .object({ vote: z.number().optional() })
   .passthrough();
 
-export async function writeSourceControlPullRequestForCloudJob({
-  cloudJob,
+export async function writeSourceControlPullRequestForTaskRun({
+  taskRun,
   input: rawInput,
   fetchImpl = fetch,
 }: {
-  cloudJob: Run;
+  taskRun: TaskRun;
   input: SourceControlPullRequestWriteInput;
   fetchImpl?: FetchImpl;
 }): Promise<SourceControlPullRequestWriteResult> {
@@ -222,7 +222,7 @@ export async function writeSourceControlPullRequestForCloudJob({
   assertWriteInputFields(input);
 
   const payloadProvider = resolveSourceControlProviderFromPayload(
-    getPayloadRecord(cloudJob.payload),
+    getPayloadRecord(taskRun.payload),
   );
   const provider = input.sourceControlProvider ?? payloadProvider;
 
@@ -234,7 +234,7 @@ export async function writeSourceControlPullRequestForCloudJob({
     );
   }
 
-  await assertRepositoryInCloudJobScope(cloudJob, input.repositoryFullName);
+  await assertRepositoryInTaskRunScope(taskRun, input.repositoryFullName);
 
   const repository = await resolveRepositoryRow({
     provider,

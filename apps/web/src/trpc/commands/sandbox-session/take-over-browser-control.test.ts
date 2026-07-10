@@ -41,21 +41,21 @@ function buildMockAuth(
 }
 
 describe('takeOverBrowserControlCommand', () => {
-  it("updates actingUserId on the task's current cloud job", async () => {
+  it("updates actingUserId on the task's current task run", async () => {
     const owner = await userFactory.create();
     const viewer = await userFactory.create();
     const task = await taskFactory.create({
       initiatorUserId: owner.id,
     });
-    const staleCloudJob = await runFactory.create({
+    const staleTaskRun = await runFactory.create({
       taskId: task.id,
       actingUserId: owner.id,
       status: RunStatus.Completed,
       snapshotId: 'snapshot-1',
     });
-    const activeCloudJob = await runFactory.create({
+    const activeTaskRun = await runFactory.create({
       taskId: task.id,
-      sourceRunId: staleCloudJob.id,
+      sourceRunId: staleTaskRun.id,
       kind: 'resume',
       payloadKind: TaskPayloadKind.SnapshotResume,
       actingUserId: owner.id,
@@ -71,13 +71,13 @@ describe('takeOverBrowserControlCommand', () => {
 
     expect(result).toEqual({
       success: true,
-      cloudJob: {
-        id: activeCloudJob.id,
+      taskRun: {
+        id: activeTaskRun.id,
         actingUserId: viewer.id,
       },
     });
 
-    const updatedCloudJobs = await db
+    const updatedTaskRuns = await db
       .select({
         id: taskRuns.id,
         actingUserId: taskRuns.actingUserId,
@@ -85,10 +85,10 @@ describe('takeOverBrowserControlCommand', () => {
       .from(taskRuns)
       .where(eq(taskRuns.taskId, task.id));
 
-    expect(updatedCloudJobs).toEqual(
+    expect(updatedTaskRuns).toEqual(
       expect.arrayContaining([
-        { id: staleCloudJob.id, actingUserId: owner.id },
-        { id: activeCloudJob.id, actingUserId: viewer.id },
+        { id: staleTaskRun.id, actingUserId: owner.id },
+        { id: activeTaskRun.id, actingUserId: viewer.id },
       ]),
     );
   });

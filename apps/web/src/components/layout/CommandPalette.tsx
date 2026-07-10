@@ -233,8 +233,8 @@ function AuthorizedCommandPalette() {
                     </span>
                     <span className="flex shrink-0 items-center gap-1.5 text-xs text-muted-foreground group-data-[selected=true]:text-foreground transition-colors opacity-70">
                       <WorkspaceBadge
-                        environmentId={task.cloudJob?.payload?.environmentId}
-                        repo={task.cloudJob?.payload?.repo ?? undefined}
+                        environmentId={task.taskRun?.payload?.environmentId}
+                        repo={task.taskRun?.payload?.repo ?? undefined}
                         iconClassName="size-3.5!"
                       />
                       <span> · </span>

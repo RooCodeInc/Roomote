@@ -42,7 +42,7 @@ export type PrepareActorScopedTurnResult =
   | { skippedMismatch?: false; effectiveUserId: string | null };
 
 interface PrepareActorScopedTurnOptions {
-  cloudJobId?: number;
+  runId?: number;
   targetUserId?: string;
   workingDirectory: string;
   logPrefix: string;
@@ -69,7 +69,7 @@ interface PrepareActorScopedTurnOptions {
 }
 
 interface SyncActorScopedTurnStateOptions {
-  cloudJobId?: number;
+  runId?: number;
   targetUserId?: string;
   workingDirectory: string;
   logPrefix: string;
@@ -95,7 +95,7 @@ type SyncActorScopedTurnStateResult =
  * Reconcile the worker's local actor state (git author, tracked actor) with
  * the server-authoritative `task_runs.actingUserId` ahead of a turn.
  *
- * The worker never writes the acting user — job tokens cannot reassign it
+ * The worker never writes the acting user — run tokens cannot reassign it
  * (see `syncActingUserId` in @roomote/sdk). This observes the server value
  * and follows it: when the server actor changed relative to the worker's
  * last-prepared one, the runtime git author is refreshed FROM the server
@@ -108,7 +108,7 @@ type SyncActorScopedTurnStateResult =
  * credential resolution, no matter how the turn would be attributed.
  */
 export async function syncActorScopedTurnState({
-  cloudJobId,
+  runId,
   targetUserId,
   workingDirectory,
   logPrefix,
@@ -120,22 +120,22 @@ export async function syncActorScopedTurnState({
   notifyMismatchSkipped,
   logger,
 }: SyncActorScopedTurnStateOptions): Promise<SyncActorScopedTurnStateResult> {
-  if (!cloudJobId || !targetUserId) {
+  if (!runId || !targetUserId) {
     return { ok: false };
   }
 
   const lastKnownUserId = getLastKnownActorUserId?.();
-  let outcome: Awaited<ReturnType<typeof sdk.cloudJobs.syncActingUserId>>;
+  let outcome: Awaited<ReturnType<typeof sdk.taskRuns.syncActingUserId>>;
 
   try {
-    outcome = await sdk.cloudJobs.syncActingUserId({
-      cloudJobId,
+    outcome = await sdk.taskRuns.syncActingUserId({
+      runId,
       newUserId: targetUserId,
       lastKnownUserId,
     });
   } catch (error) {
     logger.error(
-      `${logPrefix} Failed to reconcile actingUserId for cloud job ${cloudJobId}: ${
+      `${logPrefix} Failed to reconcile actingUserId for task run ${runId}: ${
         error instanceof Error ? error.message : String(error)
       }`,
     );
@@ -144,7 +144,7 @@ export async function syncActorScopedTurnState({
 
   if (outcome.result === 'not-found') {
     logger.error(
-      `${logPrefix} Cloud job ${cloudJobId} was not found while reconciling actingUserId; skipping actor-scoped MCP refresh`,
+      `${logPrefix} Task run ${runId} was not found while reconciling actingUserId; skipping actor-scoped MCP refresh`,
     );
     return { ok: false };
   }
@@ -154,7 +154,7 @@ export async function syncActorScopedTurnState({
 
     if (onMismatch === 'block') {
       logger.error(
-        `${logPrefix} Blocking turn for cloud job ${cloudJobId}: sender ${targetUserId} is not the server-side acting user (${serverActorUserId ?? 'none'}) and no trusted writer switched the run to them`,
+        `${logPrefix} Blocking turn for task run ${runId}: sender ${targetUserId} is not the server-side acting user (${serverActorUserId ?? 'none'}) and no trusted writer switched the run to them`,
       );
       return { ok: false };
     }
@@ -164,7 +164,7 @@ export async function syncActorScopedTurnState({
     // who authored the instructions. Drop the content and tell the sender
     // to resend (a resend re-enters the trusted pre-queue actor sync).
     (logger.warn ?? logger.error)(
-      `${logPrefix} Skipping message content for cloud job ${cloudJobId}: sender ${targetUserId} is not the server-side acting user (${serverActorUserId ?? 'none'}); asking the sender to resend`,
+      `${logPrefix} Skipping message content for task run ${runId}: sender ${targetUserId} is not the server-side acting user (${serverActorUserId ?? 'none'}); asking the sender to resend`,
     );
     await notifyMismatchSkipped?.({
       senderUserId: targetUserId,
@@ -181,7 +181,7 @@ export async function syncActorScopedTurnState({
   if (outcome.result === 'updated' || hasPendingGitAuthorSync?.()) {
     try {
       await syncRuntimeGitAuthor({
-        cloudJobId,
+        runId,
         workingDirectory,
       });
       // Advance the last-prepared marker and clear any independent retry
@@ -193,7 +193,7 @@ export async function syncActorScopedTurnState({
     } catch (error) {
       onGitAuthorSyncFailed?.();
       logger.error(
-        `${logPrefix} Failed to update git author for cloud job ${cloudJobId} (will retry on the next turn): ${
+        `${logPrefix} Failed to update git author for task run ${runId} (will retry on the next turn): ${
           error instanceof Error ? error.message : String(error)
         }`,
       );
@@ -204,7 +204,7 @@ export async function syncActorScopedTurnState({
 }
 
 export async function prepareActorScopedTurn({
-  cloudJobId,
+  runId,
   targetUserId,
   workingDirectory,
   logPrefix,
@@ -219,16 +219,16 @@ export async function prepareActorScopedTurn({
   logger,
   refreshActorScopedIntegrations,
 }: PrepareActorScopedTurnOptions): Promise<PrepareActorScopedTurnResult> {
-  if (!cloudJobId || !targetUserId) {
+  if (!runId || !targetUserId) {
     return { effectiveUserId: targetUserId ?? null };
   }
 
   logger.info?.(
-    `${logPrefix} Preparing actor-scoped turn for cloud job ${cloudJobId}: targetUserId=${targetUserId} allowMcpReconnect=${allowMcpReconnect}`,
+    `${logPrefix} Preparing actor-scoped turn for task run ${runId}: targetUserId=${targetUserId} allowMcpReconnect=${allowMcpReconnect}`,
   );
 
   const syncResult = await syncActorScopedTurnState({
-    cloudJobId,
+    runId,
     targetUserId,
     workingDirectory,
     logPrefix,
@@ -243,7 +243,7 @@ export async function prepareActorScopedTurn({
 
   if (!syncResult.ok) {
     logger.info?.(
-      `${logPrefix} Skipping actor-scoped MCP refresh because actor reconciliation blocked the turn for cloud job ${cloudJobId}`,
+      `${logPrefix} Skipping actor-scoped MCP refresh because actor reconciliation blocked the turn for task run ${runId}`,
     );
     return false;
   }
@@ -258,7 +258,7 @@ export async function prepareActorScopedTurn({
 
   if (!allowMcpReconnect) {
     logger.info?.(
-      `${logPrefix} Deferring actor-scoped MCP refresh until the queued turn boundary for cloud job ${cloudJobId}`,
+      `${logPrefix} Deferring actor-scoped MCP refresh until the queued turn boundary for task run ${runId}`,
     );
     return { effectiveUserId };
   }
@@ -274,19 +274,19 @@ export async function prepareActorScopedTurn({
     if (refreshResult?.didFail) {
       if (!refreshResult.actorChanged) {
         logger.info?.(
-          `${logPrefix} Actor-scoped MCP refresh failed for cloud job ${cloudJobId}, but the mounted actor is unchanged; continuing with existing MCP state`,
+          `${logPrefix} Actor-scoped MCP refresh failed for task run ${runId}, but the mounted actor is unchanged; continuing with existing MCP state`,
         );
         return { effectiveUserId };
       }
 
       logger.info?.(
-        `${logPrefix} Blocking actor-scoped turn delivery because MCP refresh failed for cloud job ${cloudJobId}`,
+        `${logPrefix} Blocking actor-scoped turn delivery because MCP refresh failed for task run ${runId}`,
       );
       return false;
     }
   } catch (error) {
     logger.error(
-      `${logPrefix} Failed to refresh actor-scoped MCP config for cloud job ${cloudJobId}: ${
+      `${logPrefix} Failed to refresh actor-scoped MCP config for task run ${runId}: ${
         error instanceof Error ? error.message : String(error)
       }`,
     );

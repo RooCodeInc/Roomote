@@ -2,7 +2,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { RunStatus, TaskPayloadKind } from '@roomote/types';
-import type { Run } from '@roomote/db/server';
+import type { TaskRun } from '@roomote/db/server';
 
 // ── Mocks ────────────────────────────────────────────────────────────────────
 
@@ -10,22 +10,22 @@ const {
   mockFinishRun,
   mockCaptureControllerException,
   mockCaptureControllerMessage,
-  mockCloudJobsFindFirst,
+  mockTaskRunsFindFirst,
   mockOrgsFindFirst,
-  mockDequeueCloudTask,
-  mockGetOrphanedJob,
-  mockRecordJobLifecycleEvent,
+  mockDequeueTaskRun,
+  mockGetOrphanedTaskRun,
+  mockRecordTaskRunLifecycleEvent,
   mockRedisSet,
   mockUpdateWhere,
 } = vi.hoisted(() => ({
   mockFinishRun: vi.fn().mockResolvedValue(undefined),
   mockCaptureControllerException: vi.fn(),
   mockCaptureControllerMessage: vi.fn(),
-  mockCloudJobsFindFirst: vi.fn(),
+  mockTaskRunsFindFirst: vi.fn(),
   mockOrgsFindFirst: vi.fn(),
-  mockDequeueCloudTask: vi.fn().mockResolvedValue(null),
-  mockGetOrphanedJob: vi.fn().mockResolvedValue(null),
-  mockRecordJobLifecycleEvent: vi.fn().mockResolvedValue(undefined),
+  mockDequeueTaskRun: vi.fn().mockResolvedValue(null),
+  mockGetOrphanedTaskRun: vi.fn().mockResolvedValue(null),
+  mockRecordTaskRunLifecycleEvent: vi.fn().mockResolvedValue(undefined),
   mockRedisSet: vi.fn().mockResolvedValue('OK'),
   mockUpdateWhere: vi.fn().mockReturnValue({
     returning: vi.fn().mockResolvedValue([{}]),
@@ -58,7 +58,7 @@ vi.mock('@roomote/db/server', async () => {
     db: {
       query: {
         taskRuns: {
-          findFirst: (...args: unknown[]) => mockCloudJobsFindFirst(...args),
+          findFirst: (...args: unknown[]) => mockTaskRunsFindFirst(...args),
         },
         orgs: { findFirst: (...args: unknown[]) => mockOrgsFindFirst(...args) },
       },
@@ -67,15 +67,15 @@ vi.mock('@roomote/db/server', async () => {
       update: (...args: unknown[]) => mockDbUpdate(...args),
       execute: (...args: unknown[]) => mockDbExecute(...args),
     },
-    recordJobLifecycleEvent: (...args: unknown[]) =>
-      mockRecordJobLifecycleEvent(...args),
+    recordTaskRunLifecycleEvent: (...args: unknown[]) =>
+      mockRecordTaskRunLifecycleEvent(...args),
     updatePendingEnvironmentSnapshot: (...args: unknown[]) =>
       mockUpdatePendingEnvironmentSnapshot(...args),
   };
 });
 
 vi.mock('@roomote/auth', () => ({
-  createJobToken: vi.fn().mockResolvedValue('test-token'),
+  createRunToken: vi.fn().mockResolvedValue('test-token'),
 }));
 
 vi.mock('@roomote/redis', () => ({
@@ -86,11 +86,11 @@ vi.mock('@roomote/redis', () => ({
 }));
 
 vi.mock('@roomote/cloud-agents/server', () => ({
-  dequeueCloudTask: (...args: unknown[]) => mockDequeueCloudTask(...args),
+  dequeueTaskRun: (...args: unknown[]) => mockDequeueTaskRun(...args),
 }));
 
-vi.mock('../orphaned-cloud-jobs', () => ({
-  getOrphanedJob: (...args: unknown[]) => mockGetOrphanedJob(...args),
+vi.mock('../orphaned-task-runs', () => ({
+  getOrphanedTaskRun: (...args: unknown[]) => mockGetOrphanedTaskRun(...args),
 }));
 
 vi.mock('../monitoring/sentry', () => ({
@@ -111,7 +111,7 @@ class TestController extends BaseController {
   }
 
   protected async spawnFreshWorker(
-    _cloudJob: Run,
+    _taskRun: TaskRun,
     _authToken: string,
     _deploymentSlug: string,
     _sandboxTimeoutMs: number,
@@ -119,12 +119,12 @@ class TestController extends BaseController {
     // no-op for testing
   }
 
-  // Expose handleSpawnJobError for direct testing.
-  public async testHandleSpawnJobError(
-    cloudJob: Run,
+  // Expose handleSpawnTaskRunError for direct testing.
+  public async testHandleSpawnTaskRunError(
+    taskRun: TaskRun,
     error: unknown,
   ): Promise<void> {
-    return this.handleSpawnJobError(cloudJob, error);
+    return this.handleSpawnTaskRunError(taskRun, error);
   }
 
   public getLocalReleasePaths() {
@@ -133,8 +133,8 @@ class TestController extends BaseController {
     };
   }
 
-  public async testDequeueCloudJob(cloudJob: Run) {
-    return this.dequeueCloudJob(cloudJob);
+  public async testDequeueTaskRun(taskRun: TaskRun) {
+    return this.dequeueTaskRun(taskRun);
   }
 }
 
@@ -144,7 +144,7 @@ class SaturatedTestController extends TestController {
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
-function makeCloudJob(overrides: Partial<Run> = {}): Run {
+function makeTaskRun(overrides: Partial<TaskRun> = {}): TaskRun {
   return {
     id: 42,
     payloadKind: TaskPayloadKind.StandardTask,
@@ -166,14 +166,14 @@ function makeCloudJob(overrides: Partial<Run> = {}): Run {
     canceledAt: null,
     completedAt: null,
     ...overrides,
-  } as Run;
+  } as TaskRun;
 }
 
 function resetControllerMocks() {
-  mockCloudJobsFindFirst.mockResolvedValue(null);
-  mockDequeueCloudTask.mockResolvedValue(null);
-  mockGetOrphanedJob.mockResolvedValue(null);
-  mockRecordJobLifecycleEvent.mockResolvedValue(undefined);
+  mockTaskRunsFindFirst.mockResolvedValue(null);
+  mockDequeueTaskRun.mockResolvedValue(null);
+  mockGetOrphanedTaskRun.mockResolvedValue(null);
+  mockRecordTaskRunLifecycleEvent.mockResolvedValue(undefined);
   mockRedisSet.mockResolvedValue('OK');
   mockUpdatePendingEnvironmentSnapshot.mockResolvedValue(true);
   mockUpdateWhere.mockReturnValue({
@@ -183,15 +183,15 @@ function resetControllerMocks() {
 
 // ── Tests ────────────────────────────────────────────────────────────────────
 
-describe('BaseController.handleSpawnJobError', () => {
+describe('BaseController.handleSpawnTaskRunError', () => {
   let controller: TestController;
   const originalCwd = process.cwd();
 
   beforeEach(() => {
     vi.clearAllMocks();
     resetControllerMocks();
-    mockDequeueCloudTask.mockResolvedValue(null);
-    mockGetOrphanedJob.mockResolvedValue(null);
+    mockDequeueTaskRun.mockResolvedValue(null);
+    mockGetOrphanedTaskRun.mockResolvedValue(null);
     mockOrgsFindFirst.mockResolvedValue({
       id: 'org-1',
       deletedAt: null,
@@ -211,11 +211,11 @@ describe('BaseController.handleSpawnJobError', () => {
   });
 
   it('calls finishRun with Failed status and error message', async () => {
-    const job = makeCloudJob({ id: 42 });
+    const job = makeTaskRun({ id: 42 });
     const error = new Error('Machine unavailable');
 
     await expect(
-      controller.testHandleSpawnJobError(job, error),
+      controller.testHandleSpawnTaskRunError(job, error),
     ).rejects.toThrow('Machine unavailable');
 
     expect(mockFinishRun).toHaveBeenCalledWith({
@@ -231,7 +231,7 @@ describe('BaseController.handleSpawnJobError', () => {
       environmentSnapshotId: '80e3ceee-7d21-491a-96d8-7b0c72b90b4e',
       claimedAt: '2026-05-29T00:00:00.000Z',
     };
-    const job = makeCloudJob({
+    const job = makeTaskRun({
       id: 99,
       payloadKind: TaskPayloadKind.SnapshotEnvironment,
       vendor: 'modal',
@@ -244,7 +244,7 @@ describe('BaseController.handleSpawnJobError', () => {
     const error = new Error('Snapshot failed');
 
     await expect(
-      controller.testHandleSpawnJobError(job, error),
+      controller.testHandleSpawnTaskRunError(job, error),
     ).rejects.toThrow('Snapshot failed');
 
     expect(mockFinishRun).toHaveBeenCalledWith({
@@ -269,19 +269,19 @@ describe('BaseController.handleSpawnJobError', () => {
   });
 
   it('re-throws the original error after calling finishRun', async () => {
-    const job = makeCloudJob();
+    const job = makeTaskRun();
     const originalError = new Error('original');
 
     await expect(
-      controller.testHandleSpawnJobError(job, originalError),
+      controller.testHandleSpawnTaskRunError(job, originalError),
     ).rejects.toThrow('original');
   });
 
   it('handles non-Error objects as error messages', async () => {
-    const job = makeCloudJob({ id: 7 });
+    const job = makeTaskRun({ id: 7 });
 
     await expect(
-      controller.testHandleSpawnJobError(job, 'string error'),
+      controller.testHandleSpawnTaskRunError(job, 'string error'),
     ).rejects.toBe('string error');
 
     expect(mockFinishRun).toHaveBeenCalledWith({
@@ -310,13 +310,13 @@ describe('BaseController.handleSpawnJobError', () => {
   });
 
   it('captures a Sentry issue when the controller starts a job from database fallback', async () => {
-    const job = makeCloudJob({
+    const job = makeTaskRun({
       id: 108,
       status: RunStatus.Pending,
       vendor: 'modal',
     });
 
-    mockGetOrphanedJob.mockResolvedValueOnce(job);
+    mockGetOrphanedTaskRun.mockResolvedValueOnce(job);
 
     const startPromise = controller.start();
 
@@ -324,13 +324,13 @@ describe('BaseController.handleSpawnJobError', () => {
       expect(mockCaptureControllerMessage).toHaveBeenCalledWith(
         'Controller started task using database fallback logic',
         expect.objectContaining({
-          jobId: 108,
-          jobStatus: RunStatus.Pending,
-          jobType: TaskPayloadKind.StandardTask,
+          runId: 108,
+          runStatus: RunStatus.Pending,
+          payloadKind: TaskPayloadKind.StandardTask,
           phase: 'database_fallback',
           provider: 'modal',
           repo: 'owner/repo',
-          source: 'orphaned_job_scan',
+          source: 'orphaned_task_run_scan',
         }),
         expect.objectContaining({
           component: 'dequeue-loop',
@@ -345,13 +345,13 @@ describe('BaseController.handleSpawnJobError', () => {
 
   it('does not scan fallback jobs while saturated', async () => {
     const saturatedController = new SaturatedTestController();
-    const job = makeCloudJob({
+    const job = makeTaskRun({
       id: 109,
       status: RunStatus.Pending,
       vendor: 'modal',
     });
 
-    mockGetOrphanedJob.mockResolvedValueOnce(job);
+    mockGetOrphanedTaskRun.mockResolvedValueOnce(job);
 
     const startPromise = saturatedController.start();
 
@@ -360,12 +360,12 @@ describe('BaseController.handleSpawnJobError', () => {
     await saturatedController.stop();
     await startPromise;
 
-    expect(mockGetOrphanedJob).not.toHaveBeenCalled();
+    expect(mockGetOrphanedTaskRun).not.toHaveBeenCalled();
     expect(mockCaptureControllerMessage).not.toHaveBeenCalled();
   });
 });
 
-describe('BaseController.dequeueCloudJob', () => {
+describe('BaseController.dequeueTaskRun', () => {
   let controller: TestController;
 
   beforeEach(() => {
@@ -389,7 +389,7 @@ describe('BaseController.dequeueCloudJob', () => {
   });
 
   it('records a controller_dequeue lifecycle event', async () => {
-    const job = makeCloudJob({
+    const job = makeTaskRun({
       id: 77,
       status: RunStatus.Pending,
       vendor: 'modal',
@@ -399,11 +399,11 @@ describe('BaseController.dequeueCloudJob', () => {
       },
     });
 
-    const result = await controller.testDequeueCloudJob(job);
+    const result = await controller.testDequeueTaskRun(job);
 
     expect(result).not.toBeNull();
     expect(result?.authToken).toBe('test-token');
-    expect(mockRecordJobLifecycleEvent).toHaveBeenCalledWith(
+    expect(mockRecordTaskRunLifecycleEvent).toHaveBeenCalledWith(
       expect.anything(),
       expect.objectContaining({
         runId: 77,
@@ -421,7 +421,7 @@ describe('BaseController.dequeueCloudJob', () => {
   });
 
   it('does not revive a job canceled during the dequeue window', async () => {
-    const job = makeCloudJob({
+    const job = makeTaskRun({
       id: 78,
       status: RunStatus.Pending,
     });
@@ -429,28 +429,28 @@ describe('BaseController.dequeueCloudJob', () => {
     mockUpdateWhere.mockReturnValueOnce({
       returning: vi.fn().mockResolvedValue([]),
     });
-    mockCloudJobsFindFirst.mockResolvedValueOnce({
+    mockTaskRunsFindFirst.mockResolvedValueOnce({
       status: RunStatus.Canceled,
       canceledAt: new Date(),
     });
 
-    const result = await controller.testDequeueCloudJob(job);
+    const result = await controller.testDequeueTaskRun(job);
 
     expect(result).toBeNull();
-    expect(mockRecordJobLifecycleEvent).not.toHaveBeenCalled();
+    expect(mockRecordTaskRunLifecycleEvent).not.toHaveBeenCalled();
   });
 
   it('treats preparing jobs as recoverable before controller dequeue', async () => {
-    const job = makeCloudJob({
+    const job = makeTaskRun({
       id: 80,
       status: RunStatus.Preparing,
     });
 
-    const result = await controller.testDequeueCloudJob(job);
+    const result = await controller.testDequeueTaskRun(job);
 
     expect(result).not.toBeNull();
     expect(result?.authToken).toBe('test-token');
-    expect(mockRecordJobLifecycleEvent).toHaveBeenCalledWith(
+    expect(mockRecordTaskRunLifecycleEvent).toHaveBeenCalledWith(
       expect.anything(),
       expect.objectContaining({
         runId: 80,
@@ -463,7 +463,7 @@ describe('BaseController.dequeueCloudJob', () => {
   });
 
   it('treats an already-advanced dequeue race as a no-op', async () => {
-    const job = makeCloudJob({
+    const job = makeTaskRun({
       id: 79,
       status: RunStatus.Pending,
     });
@@ -471,14 +471,14 @@ describe('BaseController.dequeueCloudJob', () => {
     mockUpdateWhere.mockReturnValueOnce({
       returning: vi.fn().mockResolvedValue([]),
     });
-    mockCloudJobsFindFirst.mockResolvedValueOnce({
+    mockTaskRunsFindFirst.mockResolvedValueOnce({
       status: RunStatus.Dequeued,
       canceledAt: null,
     });
 
-    const result = await controller.testDequeueCloudJob(job);
+    const result = await controller.testDequeueTaskRun(job);
 
     expect(result).toBeNull();
-    expect(mockRecordJobLifecycleEvent).not.toHaveBeenCalled();
+    expect(mockRecordTaskRunLifecycleEvent).not.toHaveBeenCalled();
   });
 });

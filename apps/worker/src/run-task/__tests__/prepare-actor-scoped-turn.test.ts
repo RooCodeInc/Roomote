@@ -5,7 +5,7 @@ const { mockSyncActingUserId, mockSyncRuntimeGitAuthor } = vi.hoisted(() => ({
 
 vi.mock('@roomote/sdk/client', () => ({
   sdk: {
-    cloudJobs: {
+    taskRuns: {
       syncActingUserId: mockSyncActingUserId,
     },
   },
@@ -39,7 +39,7 @@ describe('prepareActorScopedTurn', () => {
 
     await expect(
       prepareActorScopedTurn({
-        cloudJobId: 42,
+        runId: 42,
         targetUserId: 'user-2',
         workingDirectory: '/tmp/workspace',
         logPrefix: '[test]',
@@ -51,17 +51,17 @@ describe('prepareActorScopedTurn', () => {
     ).resolves.toEqual({ effectiveUserId: 'user-2' });
 
     expect(mockSyncActingUserId).toHaveBeenCalledWith({
-      cloudJobId: 42,
+      runId: 42,
       newUserId: 'user-2',
       lastKnownUserId: 'user-1',
     });
     expect(mockSyncRuntimeGitAuthor).toHaveBeenCalledWith({
-      cloudJobId: 42,
+      runId: 42,
       workingDirectory: '/tmp/workspace',
     });
     expect(refreshActorScopedIntegrations).not.toHaveBeenCalled();
     expect(logger.info).toHaveBeenCalledWith(
-      '[test] Deferring actor-scoped MCP refresh until the queued turn boundary for cloud job 42',
+      '[test] Deferring actor-scoped MCP refresh until the queued turn boundary for task run 42',
     );
   });
 
@@ -76,7 +76,7 @@ describe('prepareActorScopedTurn', () => {
 
     await expect(
       prepareActorScopedTurn({
-        cloudJobId: 42,
+        runId: 42,
         targetUserId: 'user-2',
         workingDirectory: '/tmp/workspace',
         logPrefix: '[test]',
@@ -104,7 +104,7 @@ describe('prepareActorScopedTurn', () => {
 
     await expect(
       prepareActorScopedTurn({
-        cloudJobId: 42,
+        runId: 42,
         targetUserId: 'user-2',
         workingDirectory: '/tmp/workspace',
         logPrefix: '[test]',
@@ -135,7 +135,7 @@ describe('prepareActorScopedTurn', () => {
 
     await expect(
       prepareActorScopedTurn({
-        cloudJobId: 42,
+        runId: 42,
         targetUserId: 'user-2',
         workingDirectory: '/tmp/workspace',
         logPrefix: '[test]',
@@ -145,7 +145,7 @@ describe('prepareActorScopedTurn', () => {
     ).resolves.toBe(false);
 
     expect(logger.info).toHaveBeenCalledWith(
-      '[test] Blocking actor-scoped turn delivery because MCP refresh failed for cloud job 42',
+      '[test] Blocking actor-scoped turn delivery because MCP refresh failed for task run 42',
     );
   });
 
@@ -163,7 +163,7 @@ describe('prepareActorScopedTurn', () => {
 
     await expect(
       prepareActorScopedTurn({
-        cloudJobId: 42,
+        runId: 42,
         targetUserId: 'user-2',
         workingDirectory: '/tmp/workspace',
         logPrefix: '[test]',
@@ -173,7 +173,7 @@ describe('prepareActorScopedTurn', () => {
     ).resolves.toEqual({ effectiveUserId: 'user-2' });
 
     expect(logger.info).toHaveBeenCalledWith(
-      '[test] Actor-scoped MCP refresh failed for cloud job 42, but the mounted actor is unchanged; continuing with existing MCP state',
+      '[test] Actor-scoped MCP refresh failed for task run 42, but the mounted actor is unchanged; continuing with existing MCP state',
     );
   });
 
@@ -188,7 +188,7 @@ describe('prepareActorScopedTurn', () => {
 
     await expect(
       prepareActorScopedTurn({
-        cloudJobId: 42,
+        runId: 42,
         targetUserId: 'user-2',
         workingDirectory: '/tmp/workspace',
         logPrefix: '[test]',
@@ -200,10 +200,10 @@ describe('prepareActorScopedTurn', () => {
     expect(refreshActorScopedIntegrations).not.toHaveBeenCalled();
     expect(mockSyncRuntimeGitAuthor).not.toHaveBeenCalled();
     expect(logger.error).toHaveBeenCalledWith(
-      '[test] Failed to reconcile actingUserId for cloud job 42: sync failed',
+      '[test] Failed to reconcile actingUserId for task run 42: sync failed',
     );
     expect(logger.info).toHaveBeenCalledWith(
-      '[test] Skipping actor-scoped MCP refresh because actor reconciliation blocked the turn for cloud job 42',
+      '[test] Skipping actor-scoped MCP refresh because actor reconciliation blocked the turn for task run 42',
     );
   });
 
@@ -224,7 +224,7 @@ describe('prepareActorScopedTurn', () => {
 
     await expect(
       prepareActorScopedTurn({
-        cloudJobId: 42,
+        runId: 42,
         targetUserId: 'user-2',
         workingDirectory: '/tmp/workspace',
         logPrefix: '[test]',
@@ -263,7 +263,7 @@ describe('prepareActorScopedTurn', () => {
 
     await expect(
       prepareActorScopedTurn({
-        cloudJobId: 42,
+        runId: 42,
         targetUserId: 'user-2',
         workingDirectory: '/tmp/workspace',
         logPrefix: '[test]',
@@ -286,7 +286,7 @@ describe('prepareActorScopedTurn', () => {
       serverActorUserId: 'user-1',
     });
     expect(logger.warn).toHaveBeenCalledWith(
-      expect.stringContaining('Skipping message content for cloud job 42'),
+      expect.stringContaining('Skipping message content for task run 42'),
     );
   });
 });
@@ -310,7 +310,7 @@ describe('syncActorScopedTurnState', () => {
 
     await expect(
       syncActorScopedTurnState({
-        cloudJobId: 42,
+        runId: 42,
         targetUserId: 'user-2',
         workingDirectory: '/tmp/workspace',
         logPrefix: '[test]',
@@ -321,12 +321,12 @@ describe('syncActorScopedTurnState', () => {
     ).resolves.toEqual({ ok: true, effectiveUserId: 'user-2' });
 
     expect(mockSyncActingUserId).toHaveBeenCalledWith({
-      cloudJobId: 42,
+      runId: 42,
       newUserId: 'user-2',
       lastKnownUserId: 'user-1',
     });
     expect(mockSyncRuntimeGitAuthor).toHaveBeenCalledWith({
-      cloudJobId: 42,
+      runId: 42,
       workingDirectory: '/tmp/workspace',
     });
     expect(onActorSynced).toHaveBeenCalledWith('user-2');
@@ -343,7 +343,7 @@ describe('syncActorScopedTurnState', () => {
 
     await expect(
       syncActorScopedTurnState({
-        cloudJobId: 42,
+        runId: 42,
         targetUserId: 'user-2',
         workingDirectory: '/tmp/workspace',
         logPrefix: '[test]',
@@ -357,14 +357,14 @@ describe('syncActorScopedTurnState', () => {
     expect(onActorSynced).not.toHaveBeenCalled();
   });
 
-  it('stops delivery when the cloud job is gone', async () => {
+  it('stops delivery when the task run is gone', async () => {
     const logger = { error: vi.fn() };
 
     mockSyncActingUserId.mockResolvedValueOnce({ result: 'not-found' });
 
     await expect(
       syncActorScopedTurnState({
-        cloudJobId: 42,
+        runId: 42,
         targetUserId: 'user-2',
         workingDirectory: '/tmp/workspace',
         logPrefix: '[test]',
@@ -392,7 +392,7 @@ describe('syncActorScopedTurnState', () => {
     // First turn: author sync fails, turn still delivers, marker untouched.
     await expect(
       syncActorScopedTurnState({
-        cloudJobId: 42,
+        runId: 42,
         targetUserId: 'user-2',
         workingDirectory: '/tmp/workspace',
         logPrefix: '[test]',
@@ -417,7 +417,7 @@ describe('syncActorScopedTurnState', () => {
 
     await expect(
       syncActorScopedTurnState({
-        cloudJobId: 42,
+        runId: 42,
         targetUserId: 'user-2',
         workingDirectory: '/tmp/workspace',
         logPrefix: '[test]',
@@ -431,7 +431,7 @@ describe('syncActorScopedTurnState', () => {
     ).resolves.toEqual({ ok: true, effectiveUserId: 'user-2' });
 
     expect(mockSyncActingUserId).toHaveBeenLastCalledWith({
-      cloudJobId: 42,
+      runId: 42,
       newUserId: 'user-2',
       lastKnownUserId: 'user-1',
     });
@@ -475,7 +475,7 @@ describe('syncActorScopedTurnState', () => {
 
     await expect(
       syncActorScopedTurnState({
-        cloudJobId: 42,
+        runId: 42,
         targetUserId: 'user-2',
         workingDirectory: '/tmp/workspace',
         logPrefix: '[test]',
@@ -489,7 +489,7 @@ describe('syncActorScopedTurnState', () => {
 
     await expect(
       syncActorScopedTurnState({
-        cloudJobId: 42,
+        runId: 42,
         targetUserId: 'user-1',
         workingDirectory: '/tmp/workspace',
         logPrefix: '[test]',
@@ -499,7 +499,7 @@ describe('syncActorScopedTurnState', () => {
     ).resolves.toEqual({ ok: true, effectiveUserId: 'user-1' });
 
     expect(mockSyncActingUserId).toHaveBeenLastCalledWith({
-      cloudJobId: 42,
+      runId: 42,
       newUserId: 'user-1',
       lastKnownUserId: 'user-1',
     });

@@ -234,8 +234,8 @@ export function SetupOnboardingAgentWidget({
           <div className="space-y-4 px-4 pt-2">
             <div className="flex gap-2 items-start ml-1">
               <TaskStatusIndicator
-                status={session.cloudJob?.status}
-                phase={session.cloudJob?.taskPhase}
+                status={session.taskRun?.status}
+                phase={session.taskRun?.taskPhase}
                 compact={true}
                 className="relative top-1.5"
               />

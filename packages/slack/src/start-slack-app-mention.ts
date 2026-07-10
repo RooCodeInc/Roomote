@@ -19,7 +19,7 @@ import {
   resolveEvalHarnessSelection,
 } from '@roomote/types';
 
-import { findActiveSlackJob } from './find-active-slack-job';
+import { findActiveSlackTaskRun } from './find-active-slack-task-run';
 import { resolveSlackReactionNames } from './emoji-preferences';
 import {
   type SlackStartedMessageData,
@@ -159,9 +159,9 @@ export async function startSlackAppMentionTask(input: {
 }): Promise<{
   id: number | null;
   taskId: string | null;
-  reusedExistingJob: boolean;
+  reusedExistingRun: boolean;
 }> {
-  const activeJob = await findActiveSlackJob(input.threadTs);
+  const activeRun = await findActiveSlackTaskRun(input.threadTs);
   const linkedInitiatorUserId = getLinkedInitiatorUserId(input.initiator);
   const promptRelevantThreadMessages = input.threadMessages?.length
     ? input.threadMessages.filter(
@@ -183,7 +183,7 @@ export async function startSlackAppMentionTask(input: {
     })
       ? latestOwnBotReplyInput
       : undefined;
-  if (activeJob) {
+  if (activeRun) {
     const agentPromptText = input.agentPromptText?.trim();
     const builtPrompt = !agentPromptText
       ? buildActiveSlackFollowUpPrompt({
@@ -204,7 +204,7 @@ export async function startSlackAppMentionTask(input: {
 
     if (
       slackConversationUrl &&
-      getSlackConversationUrlFromTaskPayload(activeJob.payload) !==
+      getSlackConversationUrlFromTaskPayload(activeRun.payload) !==
         slackConversationUrl
     ) {
       try {
@@ -215,15 +215,15 @@ export async function startSlackAppMentionTask(input: {
           .set({
             payload: sql`${taskRuns.payload} || ${JSON.stringify({ slackConversationUrl })}::jsonb`,
           })
-          .where(eq(taskRuns.id, activeJob.id));
+          .where(eq(taskRuns.id, activeRun.id));
       } catch (error) {
         console.warn(
-          `Failed to persist slackConversationUrl for run ${activeJob.id}: ${error instanceof Error ? error.message : String(error)}`,
+          `Failed to persist slackConversationUrl for run ${activeRun.id}: ${error instanceof Error ? error.message : String(error)}`,
         );
       }
     }
 
-    await queueSlackMessage(activeJob.id, {
+    await queueSlackMessage(activeRun.id, {
       text: input.text,
       user: input.slackUserId,
       userId: linkedInitiatorUserId,
@@ -234,9 +234,9 @@ export async function startSlackAppMentionTask(input: {
     });
 
     return {
-      id: activeJob.id,
-      taskId: activeJob.taskId,
-      reusedExistingJob: true,
+      id: activeRun.id,
+      taskId: activeRun.taskId,
+      reusedExistingRun: true,
     };
   }
 
@@ -332,6 +332,6 @@ export async function startSlackAppMentionTask(input: {
   return {
     id: launchResult.id,
     taskId: launchResult.taskId,
-    reusedExistingJob: false,
+    reusedExistingRun: false,
   };
 }

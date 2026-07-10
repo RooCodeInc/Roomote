@@ -1,12 +1,12 @@
-const { mockCreateJobToken, mockCreateTRPCProxyClient, mockHttpBatchLink } =
+const { mockCreateRunToken, mockCreateTRPCProxyClient, mockHttpBatchLink } =
   vi.hoisted(() => ({
-    mockCreateJobToken: vi.fn(),
+    mockCreateRunToken: vi.fn(),
     mockCreateTRPCProxyClient: vi.fn(),
     mockHttpBatchLink: vi.fn((options) => options),
   }));
 
 vi.mock('@roomote/auth', () => ({
-  createJobToken: mockCreateJobToken,
+  createRunToken: mockCreateRunToken,
 }));
 
 vi.mock('@trpc/client', () => ({
@@ -15,7 +15,7 @@ vi.mock('@trpc/client', () => ({
 }));
 
 import {
-  SANDBOX_SERVER_JOB_TOKEN_TIMEOUT_MS,
+  SANDBOX_SERVER_RUN_TOKEN_TIMEOUT_MS,
   SANDBOX_SERVER_RPC_TIMEOUT_MS,
   withSandboxServerRpcClient,
 } from './sandbox-server-rpc';
@@ -24,14 +24,14 @@ describe('withSandboxServerRpcClient', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     vi.useRealTimers();
-    mockCreateJobToken.mockResolvedValue('job-token');
+    mockCreateRunToken.mockResolvedValue('run-token');
   });
 
   afterEach(() => {
     vi.useRealTimers();
   });
 
-  it('builds the sandbox client with job-token auth', async () => {
+  it('builds the sandbox client with run-token auth', async () => {
     const query = vi.fn().mockResolvedValue({ currentWorkflowPhase: 'review' });
 
     mockCreateTRPCProxyClient.mockReturnValue({
@@ -43,7 +43,7 @@ describe('withSandboxServerRpcClient', () => {
     });
 
     const result = await withSandboxServerRpcClient({
-      cloudJobId: 42,
+      runId: 42,
       userId: 'user-1',
       sandboxServerUrl: 'https://sandbox.example.com',
       call: async (client) => {
@@ -53,10 +53,10 @@ describe('withSandboxServerRpcClient', () => {
     });
 
     expect(result).toEqual({ currentWorkflowPhase: 'review' });
-    expect(mockCreateJobToken).toHaveBeenCalledWith({
-      cloudJobId: 42,
+    expect(mockCreateRunToken).toHaveBeenCalledWith({
+      runId: 42,
       userId: 'user-1',
-      timeoutMs: SANDBOX_SERVER_JOB_TOKEN_TIMEOUT_MS,
+      timeoutMs: SANDBOX_SERVER_RUN_TOKEN_TIMEOUT_MS,
     });
     expect(mockHttpBatchLink).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -64,7 +64,7 @@ describe('withSandboxServerRpcClient', () => {
       }),
     );
     expect(mockHttpBatchLink.mock.calls[0]?.[0].headers()).toEqual({
-      Authorization: 'Bearer job-token',
+      Authorization: 'Bearer run-token',
     });
   });
 
@@ -113,7 +113,7 @@ describe('withSandboxServerRpcClient', () => {
     );
 
     const promise = withSandboxServerRpcClient({
-      cloudJobId: 42,
+      runId: 42,
       userId: 'user-1',
       sandboxServerUrl: 'https://sandbox.example.com',
       fetch: sandboxFetch,

@@ -8,7 +8,7 @@ const {
   emitThought,
   emitElicitation,
   updateSessionExternalUrls,
-  createLinearAgentJob,
+  createLinearAgentRun,
   findLinearDeploymentMcpConnectionByIdentityMock,
   findLinearUserMcpConnectionByIdentityMock,
   getValidAccessTokenMock,
@@ -24,9 +24,9 @@ const {
   emitThought: vi.fn().mockResolvedValue({ success: true }),
   emitElicitation: vi.fn().mockResolvedValue({ success: true }),
   updateSessionExternalUrls: vi.fn().mockResolvedValue({ success: true }),
-  createLinearAgentJob: vi
+  createLinearAgentRun: vi
     .fn()
-    .mockResolvedValue({ status: 'ok', jobId: 101, taskId: 'task-101' }),
+    .mockResolvedValue({ status: 'ok', runId: 101, taskId: 'task-101' }),
   findLinearDeploymentMcpConnectionByIdentityMock: vi.fn(),
   findLinearUserMcpConnectionByIdentityMock: vi.fn(),
   getValidAccessTokenMock: vi.fn(),
@@ -100,12 +100,12 @@ vi.mock('@roomote/linear', async (importOriginal) => {
       updateSessionExternalUrl: vi.fn().mockResolvedValue(undefined),
       updateSessionExternalUrls,
     }),
-    findActiveLinearJob: vi.fn().mockResolvedValue(null),
-    findCompletedLinearJobWithSnapshot: vi.fn().mockResolvedValue(null),
+    findActiveLinearTaskRun: vi.fn().mockResolvedValue(null),
+    findCompletedLinearTaskRunWithSnapshot: vi.fn().mockResolvedValue(null),
     queueLinearMessage: vi.fn(),
-    cancelLinearJob: vi.fn(),
+    cancelLinearTaskRun: vi.fn(),
     getValidLinearAccessToken: vi.fn().mockResolvedValue('valid-token'),
-    createLinearAgentJob,
+    createLinearAgentRun,
     startElicitationFallback: vi.fn().mockResolvedValue({
       status: 'ok',
       pendingSelection: { step: 'awaiting_workspace' },
@@ -301,7 +301,7 @@ describe('linear routed task startup', () => {
       'Getting started on your task in `all repos`',
       true,
     );
-    expect(createLinearAgentJob).toHaveBeenCalledWith(
+    expect(createLinearAgentRun).toHaveBeenCalledWith(
       expect.objectContaining({
         userId: 'user-1',
         repo: ALL_REPOSITORIES,

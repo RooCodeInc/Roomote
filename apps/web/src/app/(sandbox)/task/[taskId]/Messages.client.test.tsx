@@ -149,7 +149,7 @@ describe('Messages', () => {
               text: '$environment-setup',
               visibleInTranscript: true,
             },
-            cloudJob: null,
+            taskRun: null,
           } as never
         }
         renderSessionPrompt={false}
@@ -174,7 +174,7 @@ describe('Messages', () => {
           {
             taskId: 'task-1',
             prompt: null,
-            cloudJob: { id: 1 },
+            taskRun: { id: 1 },
           } as never
         }
       />,
@@ -197,7 +197,7 @@ describe('Messages', () => {
           {
             taskId: 'task-1',
             prompt: null,
-            cloudJob: null,
+            taskRun: null,
           } as never
         }
       />,
@@ -221,7 +221,7 @@ describe('Messages', () => {
           {
             taskId: 'task-1',
             prompt: null,
-            cloudJob: null,
+            taskRun: null,
           } as never
         }
       />,
@@ -258,7 +258,7 @@ describe('Messages', () => {
           {
             taskId: 'task-1',
             prompt: null,
-            cloudJob: null,
+            taskRun: null,
           } as never
         }
       />,
@@ -284,7 +284,7 @@ describe('Messages', () => {
               role: 'user',
               visibleInTranscript: true,
             },
-            cloudJob: null,
+            taskRun: null,
           } as never
         }
       />,
@@ -306,7 +306,7 @@ describe('Messages', () => {
           {
             taskId: 'task-1',
             prompt: null,
-            cloudJob: null,
+            taskRun: null,
           } as never
         }
       />,
@@ -341,7 +341,7 @@ describe('Messages', () => {
           {
             taskId: 'task-1',
             prompt: null,
-            cloudJob: null,
+            taskRun: null,
           } as never
         }
       />,
@@ -384,7 +384,7 @@ describe('Messages', () => {
           {
             taskId: 'task-1',
             prompt: null,
-            cloudJob: null,
+            taskRun: null,
           } as never
         }
       />,
@@ -407,7 +407,7 @@ describe('Messages', () => {
           {
             taskId: 'task-1',
             prompt: null,
-            cloudJob: null,
+            taskRun: null,
           } as never
         }
         messageUiOptions={{ displayMode: 'narration' }}
@@ -437,7 +437,7 @@ describe('Messages', () => {
               text: '$review-code',
               visibleInTranscript: false,
             },
-            cloudJob: { id: 1 },
+            taskRun: { id: 1 },
           } as never
         }
       />,
@@ -464,7 +464,7 @@ describe('Messages', () => {
               images: ['pirate-map.png'],
               visibleInTranscript: true,
             },
-            cloudJob: null,
+            taskRun: null,
           } as never
         }
       />,

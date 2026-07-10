@@ -4,13 +4,13 @@ const {
   activateSkillsFolderMock,
   awaitSubprocessMock,
   buildSandboxInstructionMock,
-  cloudJobsDoneMock,
-  cloudJobsRecordEventMock,
-  cloudJobsStampMilestoneMock,
-  cloudJobsSyncActingUserIdMock,
-  cloudJobsSetHarnessSessionIdMock,
-  cloudJobsUpdateRuntimeStateMock,
-  cloudJobsUpdateMock,
+  taskRunsDoneMock,
+  taskRunsRecordEventMock,
+  taskRunsStampMilestoneMock,
+  taskRunsSyncActingUserIdMock,
+  taskRunsSetHarnessSessionIdMock,
+  taskRunsUpdateRuntimeStateMock,
+  taskRunsUpdateMock,
   createHarnessMock,
   createInitialTaskStateMock,
   createServerMock,
@@ -36,18 +36,18 @@ const {
   activateSkillsFolderMock: vi.fn(() => false),
   awaitSubprocessMock: vi.fn().mockResolvedValue(undefined),
   buildSandboxInstructionMock: vi.fn(() => undefined),
-  cloudJobsDoneMock: vi.fn().mockResolvedValue(undefined),
-  cloudJobsRecordEventMock: vi.fn().mockResolvedValue(undefined),
-  cloudJobsStampMilestoneMock: vi.fn().mockResolvedValue(undefined),
-  cloudJobsSyncActingUserIdMock: vi
+  taskRunsDoneMock: vi.fn().mockResolvedValue(undefined),
+  taskRunsRecordEventMock: vi.fn().mockResolvedValue(undefined),
+  taskRunsStampMilestoneMock: vi.fn().mockResolvedValue(undefined),
+  taskRunsSyncActingUserIdMock: vi
     .fn()
     .mockImplementation(async ({ newUserId }: { newUserId: string }) => ({
       result: 'unchanged',
       actingUserId: newUserId,
     })),
-  cloudJobsSetHarnessSessionIdMock: vi.fn().mockResolvedValue(undefined),
-  cloudJobsUpdateRuntimeStateMock: vi.fn().mockResolvedValue({ updated: true }),
-  cloudJobsUpdateMock: vi.fn().mockResolvedValue(undefined),
+  taskRunsSetHarnessSessionIdMock: vi.fn().mockResolvedValue(undefined),
+  taskRunsUpdateRuntimeStateMock: vi.fn().mockResolvedValue({ updated: true }),
+  taskRunsUpdateMock: vi.fn().mockResolvedValue(undefined),
   createHarnessMock: vi.fn().mockResolvedValue({
     harness: {},
     getSubprocess: vi.fn(() => ({})),
@@ -132,14 +132,14 @@ vi.mock('@roomote/cloud-agents', () => ({
 
 vi.mock('@roomote/sdk/client', () => ({
   sdk: {
-    cloudJobs: {
-      done: cloudJobsDoneMock,
-      recordEvent: cloudJobsRecordEventMock,
-      stampMilestone: cloudJobsStampMilestoneMock,
-      setHarnessSessionId: cloudJobsSetHarnessSessionIdMock,
-      syncActingUserId: cloudJobsSyncActingUserIdMock,
-      update: cloudJobsUpdateMock,
-      updateRuntimeState: cloudJobsUpdateRuntimeStateMock,
+    taskRuns: {
+      done: taskRunsDoneMock,
+      recordEvent: taskRunsRecordEventMock,
+      stampMilestone: taskRunsStampMilestoneMock,
+      setHarnessSessionId: taskRunsSetHarnessSessionIdMock,
+      syncActingUserId: taskRunsSyncActingUserIdMock,
+      update: taskRunsUpdateMock,
+      updateRuntimeState: taskRunsUpdateRuntimeStateMock,
     },
     linearInstallations: {
       drainLinearMessages: vi.fn(),
@@ -305,10 +305,10 @@ describe('runTask', () => {
       resumed: false,
       reason: 'no_pending_messages',
     });
-    cloudJobsStampMilestoneMock.mockReset();
-    cloudJobsStampMilestoneMock.mockResolvedValue(undefined);
-    cloudJobsSyncActingUserIdMock.mockReset();
-    cloudJobsSyncActingUserIdMock.mockImplementation(
+    taskRunsStampMilestoneMock.mockReset();
+    taskRunsStampMilestoneMock.mockResolvedValue(undefined);
+    taskRunsSyncActingUserIdMock.mockReset();
+    taskRunsSyncActingUserIdMock.mockImplementation(
       async ({ newUserId }: { newUserId: string }) => ({
         result: 'unchanged',
         actingUserId: newUserId,
@@ -322,7 +322,7 @@ describe('runTask', () => {
 
   it('does not pass a system prompt into the OpenCode harness', async () => {
     await runTask({
-      cloudJob: {
+      taskRun: {
         id: 150,
         taskId: 'task-150',
         payloadKind: TaskPayloadKind.StandardTask,
@@ -367,7 +367,7 @@ describe('runTask', () => {
 
   it('drops untrusted harness home overrides from the OpenCode runtime environment', async () => {
     await runTask({
-      cloudJob: {
+      taskRun: {
         id: 151,
         taskId: 'task-151',
         payloadKind: TaskPayloadKind.StandardTask,
@@ -417,7 +417,7 @@ describe('runTask', () => {
 
   it('passes the built-in Roomote MCP task env into harness startup', async () => {
     await runTask({
-      cloudJob: {
+      taskRun: {
         id: 152,
         taskId: 'task-152',
         payloadKind: TaskPayloadKind.StandardTask,
@@ -469,7 +469,7 @@ describe('runTask', () => {
     const onStart = vi.fn().mockResolvedValue(undefined);
 
     await runTask({
-      cloudJob: {
+      taskRun: {
         id: 105,
         taskId: 'task-105',
         payloadKind: TaskPayloadKind.StandardTask,
@@ -507,12 +507,12 @@ describe('runTask', () => {
 
     await manager.callbacks?.onStart?.('session-105');
 
-    expect(cloudJobsSetHarnessSessionIdMock).toHaveBeenCalledWith({
-      cloudJobId: 105,
+    expect(taskRunsSetHarnessSessionIdMock).toHaveBeenCalledWith({
+      runId: 105,
       harnessSessionId: 'session-105',
     });
-    expect(cloudJobsStampMilestoneMock).toHaveBeenCalledWith({
-      cloudJobId: 105,
+    expect(taskRunsStampMilestoneMock).toHaveBeenCalledWith({
+      runId: 105,
       field: 'runtimeTaskStartedAt',
     });
     expect(onStart).toHaveBeenCalledWith(
@@ -528,7 +528,7 @@ describe('runTask', () => {
     });
 
     await runTask({
-      cloudJob: {
+      taskRun: {
         id: 103,
         taskId: 'task-103',
         payloadKind: TaskPayloadKind.StandardTask,
@@ -578,7 +578,7 @@ describe('runTask', () => {
     });
 
     await runTask({
-      cloudJob: {
+      taskRun: {
         id: 106,
         taskId: 'task-106',
         payloadKind: TaskPayloadKind.StandardTask,
@@ -626,7 +626,7 @@ describe('runTask', () => {
     mockEvaluateFeatureFlag.mockResolvedValue(false);
 
     await runTask({
-      cloudJob: {
+      taskRun: {
         id: 107,
         taskId: 'task-107',
         payloadKind: TaskPayloadKind.StandardTask,
@@ -673,7 +673,7 @@ describe('runTask', () => {
     mockEvaluateFeatureFlag.mockResolvedValue(false);
 
     await runTask({
-      cloudJob: {
+      taskRun: {
         id: 104,
         taskId: 'task-104',
         payloadKind: TaskPayloadKind.StandardTask,
@@ -718,7 +718,7 @@ describe('runTask', () => {
 
   it('always enables the terminal runtime env and sandbox server', async () => {
     await runTask({
-      cloudJob: {
+      taskRun: {
         id: 110,
         taskId: 'task-110',
         payloadKind: TaskPayloadKind.StandardTask,
@@ -770,7 +770,7 @@ describe('runTask', () => {
     mockEvaluateFeatureFlag.mockImplementation(async () => false);
 
     await runTask({
-      cloudJob: {
+      taskRun: {
         id: 104,
         taskId: 'task-104',
         payloadKind: TaskPayloadKind.StandardTask,
@@ -827,7 +827,7 @@ describe('runTask', () => {
 
   it('always passes Slack reply satisfaction state into the MCP task env for Slack tasks', async () => {
     await runTask({
-      cloudJob: {
+      taskRun: {
         id: 1061,
         taskId: 'task-1061',
         payloadKind: TaskPayloadKind.SlackAppMention,
@@ -879,7 +879,7 @@ describe('runTask', () => {
 
   it('passes Slack thread context into the runtime env for proof uploads', async () => {
     await runTask({
-      cloudJob: {
+      taskRun: {
         id: 107,
         taskId: 'task-107',
         payloadKind: TaskPayloadKind.SlackAppMention,
@@ -935,7 +935,7 @@ describe('runTask', () => {
 
   it('passes Slack thread context into the runtime env for coerced legacy proof uploads', async () => {
     await runTask({
-      cloudJob: {
+      taskRun: {
         id: 108,
         taskId: 'task-108',
         payloadKind: TaskPayloadKind.SlackAppMention,
@@ -994,7 +994,7 @@ describe('runTask', () => {
 
     try {
       await runTask({
-        cloudJob: {
+        taskRun: {
           id: 105,
           taskId: 'task-105',
           payloadKind: TaskPayloadKind.SlackAppMention,
@@ -1072,7 +1072,7 @@ describe('runTask', () => {
 
     try {
       await runTask({
-        cloudJob: {
+        taskRun: {
           id: 106,
           taskId: 'task-106',
           payloadKind: TaskPayloadKind.SnapshotResume,
@@ -1134,7 +1134,7 @@ describe('runTask', () => {
 
     try {
       await runTask({
-        cloudJob: {
+        taskRun: {
           id: 107,
           taskId: 'task-107',
           payloadKind: TaskPayloadKind.StandardTask,
@@ -1198,7 +1198,7 @@ describe('runTask', () => {
 
     try {
       await runTask({
-        cloudJob: {
+        taskRun: {
           id: 108,
           taskId: 'task-108',
           payloadKind: TaskPayloadKind.StandardTask,
@@ -1262,7 +1262,7 @@ describe('runTask', () => {
 
     try {
       await runTask({
-        cloudJob: {
+        taskRun: {
           id: 107,
           taskId: 'task-107',
           payloadKind: TaskPayloadKind.StandardTask,
@@ -1322,7 +1322,7 @@ describe('runTask', () => {
     });
 
     await runTask({
-      cloudJob: {
+      taskRun: {
         id: 109,
         taskId: 'task-109',
         payloadKind: TaskPayloadKind.Scan,
@@ -1359,13 +1359,13 @@ describe('runTask', () => {
     });
 
     expect(drainSlackMessagesMock).toHaveBeenCalledWith({
-      cloudJobId: 109,
+      runId: 109,
     });
   });
 
   it('passes task type into the keepalive fallback when keepaliveMs is missing', async () => {
     await runTask({
-      cloudJob: {
+      taskRun: {
         id: 1091,
         taskId: 'task-1091',
         payloadKind: TaskPayloadKind.GithubPrReview,
@@ -1409,7 +1409,7 @@ describe('runTask', () => {
 
   it('passes a task-scoped agent-browser session into the runtime env', async () => {
     await runTask({
-      cloudJob: {
+      taskRun: {
         id: 101,
         taskId: 'task-101',
         payloadKind: TaskPayloadKind.StandardTask,
@@ -1459,7 +1459,7 @@ describe('runTask', () => {
     );
   });
 
-  it('fetches org-scoped MCP servers even when the cloud job has no user id', async () => {
+  it('fetches org-scoped MCP servers even when the task run has no user id', async () => {
     getMcpServerConfigsMock.mockResolvedValueOnce({
       servers: {
         snowflake: {
@@ -1469,7 +1469,7 @@ describe('runTask', () => {
     });
 
     await runTask({
-      cloudJob: {
+      taskRun: {
         id: 106,
         taskId: 'task-106',
         payloadKind: TaskPayloadKind.StandardTask,
@@ -1519,7 +1519,7 @@ describe('runTask', () => {
 
   it('passes the proof browser target to the harness when the environment exposes a browser surface', async () => {
     await runTask({
-      cloudJob: {
+      taskRun: {
         id: 152,
         taskId: 'task-152',
         payloadKind: TaskPayloadKind.StandardTask,
@@ -1580,7 +1580,7 @@ describe('runTask', () => {
 
   it('does not expose removed proof runner flags when requested', async () => {
     await runTask({
-      cloudJob: {
+      taskRun: {
         id: 153,
         taskId: 'task-153',
         payloadKind: TaskPayloadKind.StandardTask,
@@ -1628,7 +1628,7 @@ describe('runTask', () => {
 
   it('does not expose removed proof runner flags for coerced legacy jobs', async () => {
     await runTask({
-      cloudJob: {
+      taskRun: {
         id: 154,
         taskId: 'task-154',
         payloadKind: TaskPayloadKind.StandardTask,
@@ -1676,7 +1676,7 @@ describe('runTask', () => {
 
   it('does not pass a proof browser target when the environment lacks a browser surface', async () => {
     await runTask({
-      cloudJob: {
+      taskRun: {
         id: 155,
         taskId: 'task-155',
         payloadKind: TaskPayloadKind.StandardTask,
@@ -1722,7 +1722,7 @@ describe('runTask', () => {
   });
 
   it('queues a deferred resume prompt from SnapshotResume payloads', async () => {
-    cloudJobsSyncActingUserIdMock.mockImplementation(
+    taskRunsSyncActingUserIdMock.mockImplementation(
       async ({ newUserId }: { newUserId: string }) => ({
         result: 'updated',
         actingUserId: newUserId,
@@ -1746,7 +1746,7 @@ describe('runTask', () => {
     });
 
     await runTask({
-      cloudJob: {
+      taskRun: {
         id: 303,
         taskId: 'task-303',
         payloadKind: TaskPayloadKind.SnapshotResume,
@@ -1755,7 +1755,7 @@ describe('runTask', () => {
           channel: 'C123',
           thread_ts: '111.222',
           sourceSnapshotId: 'snap-303',
-          sourceCloudJobId: 302,
+          sourceRunId: 302,
           slackOriginMessageTs: '111.222',
           resumePrompt: 'Tell me what this PR is about.',
           resumePromptSource: 'web',
@@ -1795,8 +1795,8 @@ describe('runTask', () => {
     const manager = harnessManagerInstances[0]!;
 
     expect(manager.resumeTask).toHaveBeenCalledWith('resume-session-303');
-    expect(cloudJobsStampMilestoneMock).toHaveBeenCalledWith({
-      cloudJobId: 303,
+    expect(taskRunsStampMilestoneMock).toHaveBeenCalledWith({
+      runId: 303,
       field: 'runtimeTaskStartedAt',
     });
     expect(onStart).toHaveBeenCalledWith(
@@ -1804,13 +1804,13 @@ describe('runTask', () => {
       'resume-session-303',
       {},
     );
-    expect(cloudJobsSyncActingUserIdMock).toHaveBeenCalledWith({
-      cloudJobId: 303,
+    expect(taskRunsSyncActingUserIdMock).toHaveBeenCalledWith({
+      runId: 303,
       newUserId: 'user-2',
       lastKnownUserId: null,
     });
     expect(syncRuntimeGitAuthorMock).toHaveBeenCalledWith({
-      cloudJobId: 303,
+      runId: 303,
       workingDirectory: '/tmp/workspace',
     });
     expect(getMcpServerConfigsMock).toHaveBeenCalledTimes(2);
@@ -1826,7 +1826,7 @@ describe('runTask', () => {
         }),
       }),
     );
-    expect(cloudJobsUpdateMock).toHaveBeenCalledWith({
+    expect(taskRunsUpdateMock).toHaveBeenCalledWith({
       id: 303,
       result: expect.objectContaining({
         runtimeTaskId: 'resume-session-303',
@@ -1855,7 +1855,7 @@ describe('runTask', () => {
     const onStart = vi.fn();
 
     const runTaskPromise = runTask({
-      cloudJob: {
+      taskRun: {
         id: 304,
         taskId: 'task-304',
         payloadKind: TaskPayloadKind.SnapshotResume,
@@ -1908,7 +1908,7 @@ describe('runTask', () => {
   });
 
   it('passes explicit workflow phases through deferred resume prompts', async () => {
-    cloudJobsSyncActingUserIdMock.mockImplementation(
+    taskRunsSyncActingUserIdMock.mockImplementation(
       async ({ newUserId }: { newUserId: string }) => ({
         result: 'updated',
         actingUserId: newUserId,
@@ -1925,14 +1925,14 @@ describe('runTask', () => {
     getMcpServerConfigsMock.mockResolvedValueOnce({ servers: {} });
 
     await runTask({
-      cloudJob: {
+      taskRun: {
         id: 304,
         taskId: 'task-304',
         payloadKind: TaskPayloadKind.SnapshotResume,
         harness: 'opencode-server',
         payload: {
           sourceSnapshotId: 'snap-304',
-          sourceCloudJobId: 303,
+          sourceRunId: 303,
           resumePrompt: '$review-code\nTell me what this PR is about.',
           resumePromptSource: 'web',
           resumePromptUserId: 'user-2',
@@ -1977,12 +1977,12 @@ describe('runTask', () => {
   });
 
   it('does not compare queued actor-scoped MCP state when actingUserId sync fails', async () => {
-    cloudJobsSyncActingUserIdMock.mockRejectedValueOnce(
+    taskRunsSyncActingUserIdMock.mockRejectedValueOnce(
       new Error('sync failed'),
     );
 
     await runTask({
-      cloudJob: {
+      taskRun: {
         id: 404,
         taskId: 'task-404',
         payloadKind: TaskPayloadKind.StandardTask,
@@ -2036,7 +2036,7 @@ describe('runTask', () => {
     // under A's credential resolution, so the prompt is skipped (not
     // blocked-and-retried, which would stall the queue forever).
     await runTask({
-      cloudJob: {
+      taskRun: {
         id: 407,
         taskId: 'task-407',
         payloadKind: TaskPayloadKind.StandardTask,
@@ -2074,7 +2074,7 @@ describe('runTask', () => {
 
     expect(prepareQueuedPromptActorScope).toBeTypeOf('function');
 
-    cloudJobsSyncActingUserIdMock.mockResolvedValueOnce({
+    taskRunsSyncActingUserIdMock.mockResolvedValueOnce({
       result: 'mismatch',
       actingUserId: 'user-1',
     });
@@ -2108,7 +2108,7 @@ describe('runTask', () => {
       .mockRejectedValueOnce(new Error('temporary failure'));
 
     await runTask({
-      cloudJob: {
+      taskRun: {
         id: 405,
         taskId: 'task-405',
         payloadKind: TaskPayloadKind.StandardTask,
@@ -2181,7 +2181,7 @@ describe('runTask', () => {
     const requestReconnect = vi.fn().mockResolvedValue(undefined);
 
     waitForShutdownMock.mockReturnValueOnce(waitForShutdownPromise);
-    cloudJobsSyncActingUserIdMock.mockImplementation(
+    taskRunsSyncActingUserIdMock.mockImplementation(
       async ({ newUserId }: { newUserId: string }) => ({
         result: 'updated',
         actingUserId: newUserId,
@@ -2214,7 +2214,7 @@ describe('runTask', () => {
     });
 
     const runTaskPromise = runTask({
-      cloudJob: {
+      taskRun: {
         id: 406,
         taskId: 'task-406',
         payloadKind: TaskPayloadKind.SnapshotResume,
@@ -2257,7 +2257,7 @@ describe('runTask', () => {
       const harnessManager = await harnessCreatedPromise;
 
       expect(harnessManager.sendFollowUpPrompt).not.toHaveBeenCalled();
-      expect(cloudJobsUpdateMock).not.toHaveBeenCalledWith(
+      expect(taskRunsUpdateMock).not.toHaveBeenCalledWith(
         expect.objectContaining({
           id: 406,
           result: expect.objectContaining({
@@ -2278,7 +2278,7 @@ describe('runTask', () => {
         source: 'github',
         userId: 'user-2',
       });
-      expect(cloudJobsUpdateMock).toHaveBeenCalledWith({
+      expect(taskRunsUpdateMock).toHaveBeenCalledWith({
         id: 406,
         result: expect.objectContaining({
           deferredResumePromptAccepted: true,
@@ -2302,7 +2302,7 @@ describe('runTask', () => {
 
   it('routes legacy jobs without a persisted harness through opencode-server', async () => {
     await runTask({
-      cloudJob: {
+      taskRun: {
         id: 203,
         taskId: 'task-203',
         payloadKind: TaskPayloadKind.StandardTask,
@@ -2343,7 +2343,7 @@ describe('runTask', () => {
 
   it('starts the OpenCode harness in the worker runtime', async () => {
     await runTask({
-      cloudJob: {
+      taskRun: {
         id: 204,
         taskId: 'task-204',
         payloadKind: TaskPayloadKind.StandardTask,
@@ -2389,7 +2389,7 @@ describe('runTask', () => {
 
   it('coerces an explicit legacy direct harness into the sandbox server', async () => {
     await runTask({
-      cloudJob: {
+      taskRun: {
         id: 204,
         taskId: 'task-204',
         payloadKind: TaskPayloadKind.StandardTask,
@@ -2430,7 +2430,7 @@ describe('runTask', () => {
 
   it('drops headed browser override env vars from the sanitized runtime env', async () => {
     await runTask({
-      cloudJob: {
+      taskRun: {
         id: 102,
         taskId: 'task-102',
         payloadKind: TaskPayloadKind.StandardTask,
@@ -2489,7 +2489,7 @@ describe('runTask', () => {
     buildSandboxInstructionMock.mockReturnValue('Sandbox details' as never);
 
     await runTask({
-      cloudJob: {
+      taskRun: {
         id: 150,
         taskId: 'task-150',
         payloadKind: TaskPayloadKind.StandardTask,
@@ -2547,7 +2547,7 @@ describe('runTask', () => {
     buildSandboxInstructionMock.mockReturnValue('Sandbox details' as never);
 
     await runTask({
-      cloudJob: {
+      taskRun: {
         id: 151,
         taskId: 'task-151',
         payloadKind: TaskPayloadKind.StandardTask,
@@ -2615,7 +2615,7 @@ describe('runTask', () => {
     };
 
     const runTaskPromise = runTask({
-      cloudJob: {
+      taskRun: {
         id: 151,
         taskId: 'task-151',
         payloadKind: TaskPayloadKind.StandardTask,
@@ -2686,7 +2686,7 @@ describe('runTask', () => {
     });
 
     const runTaskPromise = runTask({
-      cloudJob: {
+      taskRun: {
         id: 153,
         taskId: 'task-153',
         payloadKind: TaskPayloadKind.StandardTask,
@@ -2735,7 +2735,7 @@ describe('runTask', () => {
     buildSandboxInstructionMock.mockReturnValue('Sandbox details' as never);
 
     await runTask({
-      cloudJob: {
+      taskRun: {
         id: 152,
         taskId: 'task-152',
         payloadKind: TaskPayloadKind.StandardTask,
@@ -2782,7 +2782,7 @@ describe('runTask', () => {
     buildSandboxInstructionMock.mockReturnValue('Sandbox details' as never);
 
     await runTask({
-      cloudJob: {
+      taskRun: {
         id: 1515,
         taskId: 'task-1515',
         payloadKind: TaskPayloadKind.StandardTask,
@@ -2844,7 +2844,7 @@ describe('runTask', () => {
     buildSandboxInstructionMock.mockReturnValue('Sandbox details' as never);
 
     await runTask({
-      cloudJob: {
+      taskRun: {
         id: 152,
         taskId: 'task-152',
         payloadKind: TaskPayloadKind.StandardTask,
@@ -2904,7 +2904,7 @@ describe('runTask', () => {
     buildSandboxInstructionMock.mockReturnValue('Sandbox details' as never);
 
     await runTask({
-      cloudJob: {
+      taskRun: {
         id: 1521,
         taskId: 'task-1521',
         payloadKind: TaskPayloadKind.StandardTask,
@@ -2970,7 +2970,7 @@ describe('runTask', () => {
     buildSandboxInstructionMock.mockReturnValue('Sandbox details' as never);
 
     await runTask({
-      cloudJob: {
+      taskRun: {
         id: 1522,
         taskId: 'task-1522',
         payloadKind: TaskPayloadKind.StandardTask,
@@ -3046,7 +3046,7 @@ describe('runTask', () => {
 
   it('promotes wrapped explicit repo-local skill invocations based on the discovered workspace catalog', async () => {
     await runTask({
-      cloudJob: {
+      taskRun: {
         id: 1526,
         taskId: 'task-1526',
         payloadKind: TaskPayloadKind.StandardTask,
@@ -3101,7 +3101,7 @@ describe('runTask', () => {
 
   it('promotes wrapped plain-text repo-local skill invocations when the first line matches the discovered catalog', async () => {
     await runTask({
-      cloudJob: {
+      taskRun: {
         id: 1527,
         taskId: 'task-1527',
         payloadKind: TaskPayloadKind.StandardTask,
@@ -3156,7 +3156,7 @@ describe('runTask', () => {
 
   it('keeps bare repo-local skill promotion when mirrored roots exist only inside one repo', async () => {
     await runTask({
-      cloudJob: {
+      taskRun: {
         id: 1527,
         taskId: 'task-1527',
         payloadKind: TaskPayloadKind.StandardTask,
@@ -3221,7 +3221,7 @@ describe('runTask', () => {
 
   it('does not promote an ambiguous bare repo-local skill name when multiple repos expose it', async () => {
     await runTask({
-      cloudJob: {
+      taskRun: {
         id: 1528,
         taskId: 'task-1528',
         payloadKind: TaskPayloadKind.StandardTask,
@@ -3286,7 +3286,7 @@ describe('runTask', () => {
 
   it('promotes a repo-qualified repo-local skill invocation when the bare name is ambiguous', async () => {
     await runTask({
-      cloudJob: {
+      taskRun: {
         id: 1529,
         taskId: 'task-1529',
         payloadKind: TaskPayloadKind.StandardTask,
@@ -3352,7 +3352,7 @@ describe('runTask', () => {
     buildSandboxInstructionMock.mockReturnValue(undefined as never);
 
     await runTask({
-      cloudJob: {
+      taskRun: {
         id: 153,
         taskId: 'task-153',
         payloadKind: TaskPayloadKind.StandardTask,
@@ -3406,7 +3406,7 @@ describe('runTask', () => {
     buildSandboxInstructionMock.mockReturnValue(undefined as never);
 
     await runTask({
-      cloudJob: {
+      taskRun: {
         id: 155,
         taskId: 'task-155',
         payloadKind: TaskPayloadKind.StandardTask,
@@ -3471,7 +3471,7 @@ describe('runTask', () => {
     buildSandboxInstructionMock.mockReturnValue(undefined as never);
 
     await runTask({
-      cloudJob: {
+      taskRun: {
         id: 156,
         taskId: 'task-156',
         payloadKind: TaskPayloadKind.StandardTask,
@@ -3523,7 +3523,7 @@ describe('runTask', () => {
     buildSandboxInstructionMock.mockReturnValue(undefined as never);
 
     await runTask({
-      cloudJob: {
+      taskRun: {
         id: 154,
         taskId: 'task-154',
         payloadKind: TaskPayloadKind.StandardTask,
@@ -3570,7 +3570,7 @@ describe('runTask', () => {
     const subprocessDeferred = new Promise<void>(() => {});
 
     awaitSubprocessMock.mockReturnValue(subprocessDeferred);
-    cloudJobsUpdateRuntimeStateMock.mockImplementation(
+    taskRunsUpdateRuntimeStateMock.mockImplementation(
       (values: { taskPhase?: string }) => {
         if (!values.taskPhase) {
           return Promise.resolve({ updated: false });
@@ -3585,7 +3585,7 @@ describe('runTask', () => {
     );
 
     void runTask({
-      cloudJob: {
+      taskRun: {
         id: 103,
         taskId: 'task-103',
         payloadKind: TaskPayloadKind.StandardTask,
@@ -3644,7 +3644,7 @@ describe('runTask', () => {
 
     await new Promise((resolve) => setImmediate(resolve));
 
-    let runtimePhaseCalls = cloudJobsUpdateRuntimeStateMock.mock.calls
+    let runtimePhaseCalls = taskRunsUpdateRuntimeStateMock.mock.calls
       .map(([arg]) => arg as { taskPhase?: string })
       .filter((arg) => arg.taskPhase);
 
@@ -3656,7 +3656,7 @@ describe('runTask', () => {
 
     await new Promise((resolve) => setImmediate(resolve));
 
-    runtimePhaseCalls = cloudJobsUpdateRuntimeStateMock.mock.calls
+    runtimePhaseCalls = taskRunsUpdateRuntimeStateMock.mock.calls
       .map(([arg]) => arg as { taskPhase?: string })
       .filter((arg) => arg.taskPhase);
 
@@ -3677,7 +3677,7 @@ describe('runTask', () => {
     const subprocessDeferred = new Promise<void>(() => {});
 
     awaitSubprocessMock.mockReturnValue(subprocessDeferred);
-    cloudJobsUpdateRuntimeStateMock.mockImplementation(
+    taskRunsUpdateRuntimeStateMock.mockImplementation(
       (values: { taskPhase?: string }) => {
         if (!values.taskPhase) {
           return Promise.resolve({ updated: false });
@@ -3690,9 +3690,9 @@ describe('runTask', () => {
         return Promise.resolve({ updated: true });
       },
     );
-    cloudJobsRecordEventMock.mockImplementation(
+    taskRunsRecordEventMock.mockImplementation(
       (values: { message?: string }) => {
-        if (values.message === 'Persisted runtime state for cloud job #105.') {
+        if (values.message === 'Persisted runtime state for task run #105.') {
           persistedStateEventCount += 1;
 
           if (persistedStateEventCount === 1) {
@@ -3705,7 +3705,7 @@ describe('runTask', () => {
     );
 
     void runTask({
-      cloudJob: {
+      taskRun: {
         id: 105,
         taskId: 'task-105',
         payloadKind: TaskPayloadKind.StandardTask,
@@ -3764,7 +3764,7 @@ describe('runTask', () => {
 
     await new Promise((resolve) => setImmediate(resolve));
 
-    let runtimePhaseCalls = cloudJobsUpdateRuntimeStateMock.mock.calls
+    let runtimePhaseCalls = taskRunsUpdateRuntimeStateMock.mock.calls
       .map(([arg]) => arg as { taskPhase?: string })
       .filter((arg) => arg.taskPhase);
 
@@ -3776,7 +3776,7 @@ describe('runTask', () => {
 
     await new Promise((resolve) => setImmediate(resolve));
 
-    runtimePhaseCalls = cloudJobsUpdateRuntimeStateMock.mock.calls
+    runtimePhaseCalls = taskRunsUpdateRuntimeStateMock.mock.calls
       .map(([arg]) => arg as { taskPhase?: string })
       .filter((arg) => arg.taskPhase);
 
@@ -3798,7 +3798,7 @@ describe('runTask', () => {
     const subprocessDeferred = new Promise<void>(() => {});
 
     awaitSubprocessMock.mockReturnValue(subprocessDeferred);
-    cloudJobsUpdateRuntimeStateMock.mockImplementation(
+    taskRunsUpdateRuntimeStateMock.mockImplementation(
       (values: { taskPhase?: string }) => {
         if (values.taskPhase === 'waiting_for_prompt') {
           return pendingRuntimeUpdate;
@@ -3809,7 +3809,7 @@ describe('runTask', () => {
     );
 
     void runTask({
-      cloudJob: {
+      taskRun: {
         id: 104,
         taskId: 'task-104',
         payloadKind: TaskPayloadKind.StandardTask,
@@ -3863,13 +3863,13 @@ describe('runTask', () => {
 
     await new Promise((resolve) => setImmediate(resolve));
 
-    expect(cloudJobsDoneMock).not.toHaveBeenCalled();
+    expect(taskRunsDoneMock).not.toHaveBeenCalled();
 
     expect(resolveRuntimeUpdate).toBeTypeOf('function');
     resolveRuntimeUpdate!();
     await onExitPromise;
 
-    expect(cloudJobsDoneMock).toHaveBeenCalledWith({
+    expect(taskRunsDoneMock).toHaveBeenCalledWith({
       id: 104,
       status: RunStatus.Idle,
     });
@@ -3878,7 +3878,7 @@ describe('runTask', () => {
   describe('worker crash handlers', () => {
     const buildCrashTestOptions = (id: number) =>
       ({
-        cloudJob: {
+        taskRun: {
           id,
           taskId: `task-${id}`,
           payloadKind: TaskPayloadKind.StandardTask,
@@ -3936,7 +3936,7 @@ describe('runTask', () => {
 
       // The module-level handlers register at most once per process, so the
       // count must not grow with each run (regression for finding F: leaked,
-      // stacking listeners across executeJob retries).
+      // stacking listeners across executeTaskRun retries).
       expect(uncaughtAfterSecond).toBe(uncaughtAfterFirst);
       expect(unhandledAfterSecond).toBe(unhandledAfterFirst);
       expect(uncaughtAfterFirst).toBeLessThanOrEqual(uncaughtBefore + 1);
@@ -3949,7 +3949,7 @@ describe('runTask', () => {
       // A normal completed run never persists a workerCrash result, and the
       // try/finally clears the active context so no later crash can be
       // attributed to this finished job.
-      const crashWrites = cloudJobsUpdateMock.mock.calls.filter(
+      const crashWrites = taskRunsUpdateMock.mock.calls.filter(
         (call) =>
           call[0] &&
           typeof call[0] === 'object' &&

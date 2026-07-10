@@ -704,9 +704,9 @@ function getUniqueRepositoryFullNames(
 }
 
 export async function getWorkspaceRepositoryFullNames(
-  cloudTask: TaskSpec,
+  taskSpec: TaskSpec,
 ): Promise<string[] | undefined> {
-  const workspace = resolveTaskWorkspace(cloudTask.payload);
+  const workspace = resolveTaskWorkspace(taskSpec.payload);
 
   if (workspace.type === 'repository') {
     return undefined;
@@ -750,11 +750,11 @@ export async function getWorkspaceRepositoryFullNames(
 }
 
 export async function getPrSha({
-  currentCloudJobId,
+  currentRunId,
   repo,
   prNumber,
 }: {
-  currentCloudJobId?: number;
+  currentRunId?: number;
   repo: string;
   prNumber: number;
 }) {
@@ -767,8 +767,8 @@ export async function getPrSha({
     isNull(taskRuns.canceledAt),
   ];
 
-  if (typeof currentCloudJobId === 'number') {
-    conditions.push(ne(taskRuns.id, currentCloudJobId));
+  if (typeof currentRunId === 'number') {
+    conditions.push(ne(taskRuns.id, currentRunId));
   }
 
   const [result] = await db

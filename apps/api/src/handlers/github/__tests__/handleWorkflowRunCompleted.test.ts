@@ -188,7 +188,7 @@ describe('handleWorkflowRunCompleted', () => {
     mockRecordAutomationRunOutcome.mockResolvedValue(undefined);
     mockEnqueueTask.mockResolvedValue({
       success: true,
-      cloudJobId: 7,
+      runId: 7,
       taskId: 'task-scan-1',
     });
   });

@@ -18,7 +18,7 @@ const mockedUseTaskSidePanel = vi.mocked(useTaskSidePanel);
 function buildPreviewPaneContext(closePreviewPane: () => void) {
   return {
     previewPaneUrl: null,
-    previewPaneCloudJobId: null,
+    previewPaneRunId: null,
     previewPaneServiceName: null,
     openPreviewPane: vi.fn(),
     closePreviewPane,

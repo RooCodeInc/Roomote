@@ -10,7 +10,7 @@ import {
 } from '@roomote/db/server';
 import { type RunStatus, isExitedRunStatus } from '@roomote/types';
 
-interface StopTaskJob {
+interface StopTaskRun {
   id: number;
   status: RunStatus;
   sandboxServerUrl: string | null;
@@ -26,22 +26,22 @@ interface StopTaskAttribution {
   source?: string;
 }
 
-type StopTaskJobResult =
+type StopTaskRunResult =
   | { success: true; mode: 'sandbox_stop' | 'direct_cancel' }
   | { success: false; error: string; statusCode: 403 | 404 | 409 | 502 };
 
-type StopTaskJobResolution =
+type StopTaskRunResolution =
   | { kind: 'not_found' }
   | { kind: 'terminal'; status: RunStatus }
   | { kind: 'no_sandbox' }
-  | { kind: 'sandbox'; job: StopTaskJob & { sandboxServerUrl: string } };
+  | { kind: 'sandbox'; run: StopTaskRun & { sandboxServerUrl: string } };
 
-async function findCurrentStopTaskJob(
-  jobId: number,
-): Promise<StopTaskJob | null> {
+async function findCurrentStopTaskRun(
+  runId: number,
+): Promise<StopTaskRun | null> {
   return (
     (await db.query.taskRuns.findFirst({
-      where: eq(taskRuns.id, jobId),
+      where: eq(taskRuns.id, runId),
       columns: {
         id: true,
         status: true,
@@ -53,26 +53,26 @@ async function findCurrentStopTaskJob(
 }
 
 /**
- * Persist the stop request on the cloud job row before the cancel is carried
+ * Persist the stop request on the task run row before the cancel is carried
  * out. If the sandbox dies before the row reaches a terminal state, recovery
- * sweeps use this to finalize the job as canceled instead of misreporting the
+ * sweeps use this to finalize the run as canceled instead of misreporting the
  * deliberate stop as a runtime failure. Keeps the earliest request time.
  */
-async function markCancelRequested(jobId: number): Promise<void> {
+async function markCancelRequested(runId: number): Promise<void> {
   await db
     .update(taskRuns)
     .set({ cancelRequestedAt: new Date() })
-    .where(and(eq(taskRuns.id, jobId), isNull(taskRuns.cancelRequestedAt)));
+    .where(and(eq(taskRuns.id, runId), isNull(taskRuns.cancelRequestedAt)));
 }
 
-async function cancelTaskJobDirect(jobId: number): Promise<boolean> {
+async function cancelTaskRunBeforeSandbox(runId: number): Promise<boolean> {
   // Shared @roomote/db helper (also used by the work-item launch surfaces to
   // clean up an orphaned run after a lost fenced finalize): guarded
   // pre-sandbox cancel + task-state re-derive + parallel-count close.
-  return cancelTaskRunDirect({ runId: jobId });
+  return cancelTaskRunDirect({ runId });
 }
 
-function createTaskNotFoundResult(): StopTaskJobResult {
+function createTaskNotFoundResult(): StopTaskRunResult {
   return {
     success: false,
     statusCode: 404,
@@ -80,7 +80,7 @@ function createTaskNotFoundResult(): StopTaskJobResult {
   };
 }
 
-function createTaskNotActiveResult(status: RunStatus): StopTaskJobResult {
+function createTaskNotActiveResult(status: RunStatus): StopTaskRunResult {
   return {
     success: false,
     statusCode: 409,
@@ -88,7 +88,7 @@ function createTaskNotActiveResult(status: RunStatus): StopTaskJobResult {
   };
 }
 
-function createNoSandboxResult(): StopTaskJobResult {
+function createNoSandboxResult(): StopTaskRunResult {
   return {
     success: false,
     statusCode: 409,
@@ -96,31 +96,31 @@ function createNoSandboxResult(): StopTaskJobResult {
   };
 }
 
-function resolveStopTaskJob(job: StopTaskJob | null): StopTaskJobResolution {
-  if (!job) {
+function resolveStopTaskRun(run: StopTaskRun | null): StopTaskRunResolution {
+  if (!run) {
     return { kind: 'not_found' };
   }
 
-  if (isExitedRunStatus(job.status)) {
-    return { kind: 'terminal', status: job.status };
+  if (isExitedRunStatus(run.status)) {
+    return { kind: 'terminal', status: run.status };
   }
 
-  if (!job.sandboxServerUrl) {
+  if (!run.sandboxServerUrl) {
     return { kind: 'no_sandbox' };
   }
 
   return {
     kind: 'sandbox',
-    job: {
-      ...job,
-      sandboxServerUrl: job.sandboxServerUrl,
+    run: {
+      ...run,
+      sandboxServerUrl: run.sandboxServerUrl,
     },
   };
 }
 
 function stopTaskResolutionToResult(
-  resolution: Exclude<StopTaskJobResolution, { kind: 'sandbox' }>,
-): StopTaskJobResult {
+  resolution: Exclude<StopTaskRunResolution, { kind: 'sandbox' }>,
+): StopTaskRunResult {
   switch (resolution.kind) {
     case 'not_found':
       return createTaskNotFoundResult();
@@ -132,18 +132,18 @@ function stopTaskResolutionToResult(
 }
 
 async function readCurrentStopTaskResolution(
-  jobId: number,
-): Promise<StopTaskJobResolution> {
-  return resolveStopTaskJob(await findCurrentStopTaskJob(jobId));
+  runId: number,
+): Promise<StopTaskRunResolution> {
+  return resolveStopTaskRun(await findCurrentStopTaskRun(runId));
 }
 
-async function stopTaskSandboxJob(params: {
-  job: StopTaskJob & { sandboxServerUrl: string };
+async function stopTaskSandboxRun(params: {
+  run: StopTaskRun & { sandboxServerUrl: string };
   authUserId?: string | null;
   cancelledBy?: StopTaskAttribution;
-}): Promise<StopTaskJobResult> {
-  const { job, authUserId, cancelledBy } = params;
-  const tokenUserId = authUserId ?? job.actingUserId;
+}): Promise<StopTaskRunResult> {
+  const { run, authUserId, cancelledBy } = params;
+  const tokenUserId = authUserId ?? run.actingUserId;
 
   if (!tokenUserId) {
     return {
@@ -153,13 +153,13 @@ async function stopTaskSandboxJob(params: {
     };
   }
 
-  await markCancelRequested(job.id);
+  await markCancelRequested(run.id);
 
   try {
     await withSandboxServerRpcClient({
-      cloudJobId: job.id,
+      runId: run.id,
       userId: tokenUserId,
-      sandboxServerUrl: job.sandboxServerUrl,
+      sandboxServerUrl: run.sandboxServerUrl,
       call: (client) =>
         client.commands.cancelTask.mutate(
           cancelledBy ? { cancelledBy } : undefined,
@@ -180,24 +180,24 @@ async function stopTaskSandboxJob(params: {
   }
 }
 
-export async function stopTaskJob(params: {
-  job: StopTaskJob;
+export async function stopTaskRun(params: {
+  run: StopTaskRun;
   authUserId?: string | null;
   allowDirectCancelWithoutSandbox?: boolean;
   cancelledBy?: StopTaskAttribution;
-}): Promise<StopTaskJobResult> {
-  const { job, authUserId, allowDirectCancelWithoutSandbox, cancelledBy } =
+}): Promise<StopTaskRunResult> {
+  const { run, authUserId, allowDirectCancelWithoutSandbox, cancelledBy } =
     params;
 
-  const initialResolution = resolveStopTaskJob(job);
+  const initialResolution = resolveStopTaskRun(run);
 
   if (initialResolution.kind === 'terminal') {
     return createTaskNotActiveResult(initialResolution.status);
   }
 
   if (initialResolution.kind === 'sandbox') {
-    return await stopTaskSandboxJob({
-      job: initialResolution.job,
+    return await stopTaskSandboxRun({
+      run: initialResolution.run,
       authUserId,
       cancelledBy,
     });
@@ -207,11 +207,11 @@ export async function stopTaskJob(params: {
     return createNoSandboxResult();
   }
 
-  const refreshedResolution = await readCurrentStopTaskResolution(job.id);
+  const refreshedResolution = await readCurrentStopTaskResolution(run.id);
 
   if (refreshedResolution.kind === 'sandbox') {
-    return await stopTaskSandboxJob({
-      job: refreshedResolution.job,
+    return await stopTaskSandboxRun({
+      run: refreshedResolution.run,
       authUserId,
       cancelledBy,
     });
@@ -221,15 +221,15 @@ export async function stopTaskJob(params: {
     return stopTaskResolutionToResult(refreshedResolution);
   }
 
-  if (await cancelTaskJobDirect(job.id)) {
+  if (await cancelTaskRunBeforeSandbox(run.id)) {
     return { success: true, mode: 'direct_cancel' };
   }
 
-  const racedResolution = await readCurrentStopTaskResolution(job.id);
+  const racedResolution = await readCurrentStopTaskResolution(run.id);
 
   if (racedResolution.kind === 'sandbox') {
-    return await stopTaskSandboxJob({
-      job: racedResolution.job,
+    return await stopTaskSandboxRun({
+      run: racedResolution.run,
       authUserId,
       cancelledBy,
     });

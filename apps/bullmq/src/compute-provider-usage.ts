@@ -12,9 +12,9 @@ export async function tryRecordComputeProviderUsage(input: {
 }): Promise<void> {
   try {
     await recordComputeProviderUsage({
-      // The SDK recorder still keys its input on `cloudJobId`; it persists to
+      // The SDK recorder still keys its input on `runId`; it persists to
       // compute_provider_usage.run_id.
-      cloudJobId: input.runId,
+      runId: input.runId,
       lifecycleAction: input.lifecycleAction,
       completedAt: input.completedAt,
       activeCpuDurationMs: input.usageObservation?.activeCpuDurationMs,

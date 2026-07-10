@@ -1,7 +1,7 @@
 import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest';
 
 import { RunStatus, TaskPayloadKind } from '@roomote/types';
-import type { Run } from '@roomote/db/server';
+import type { TaskRun } from '@roomote/db/server';
 
 const {
   mockEnvironmentVariablesFindMany,
@@ -64,7 +64,7 @@ import {
   buildGitLabApiBaseUrl,
   buildGitLabRepositoryValues,
   clearGitLabDeploymentUserCache,
-  createCloudJobScopedGitLabTokens,
+  createTaskRunScopedGitLabTokens,
   createGitLabMergeRequestNote,
   ensureGitLabWebhooksForProjects,
   removeGitLabWebhooksForProjects,
@@ -76,7 +76,7 @@ import {
   validateGitLabToken,
 } from '../api';
 
-function makeCloudJob(payload: Run['payload']): Run {
+function makeTaskRun(payload: TaskRun['payload']): TaskRun {
   return {
     id: 123,
     status: RunStatus.Dequeued,
@@ -87,7 +87,7 @@ function makeCloudJob(payload: Run['payload']): Run {
     payload,
     result: null,
     artifacts: null,
-  } as Run;
+  } as TaskRun;
 }
 
 describe('resolveGitLabBaseUrl', () => {
@@ -277,7 +277,7 @@ describe('buildGitLabRepositoryValues', () => {
   });
 });
 
-describe('createCloudJobScopedGitLabTokens', () => {
+describe('createTaskRunScopedGitLabTokens', () => {
   const originalGitLabToken = process.env.GITLAB_TOKEN;
   const originalGitLabBaseUrl = process.env.GITLAB_BASE_URL;
 
@@ -321,8 +321,8 @@ describe('createCloudJobScopedGitLabTokens', () => {
       ),
     );
 
-    const result = await createCloudJobScopedGitLabTokens(
-      makeCloudJob({
+    const result = await createTaskRunScopedGitLabTokens(
+      makeTaskRun({
         repo: 'group/project',
         description: 'Work on GitLab',
         sourceControlProvider: 'gitlab',
@@ -377,8 +377,8 @@ describe('createCloudJobScopedGitLabTokens', () => {
       ),
     );
 
-    const result = await createCloudJobScopedGitLabTokens(
-      makeCloudJob({
+    const result = await createTaskRunScopedGitLabTokens(
+      makeTaskRun({
         repo: 'group/project',
         description: 'Work on self-managed GitLab',
         sourceControlProvider: 'gitlab',
@@ -405,9 +405,9 @@ describe('createCloudJobScopedGitLabTokens', () => {
       ),
     );
 
-    const result = await createCloudJobScopedGitLabTokens(
+    const result = await createTaskRunScopedGitLabTokens(
       {
-        ...makeCloudJob({
+        ...makeTaskRun({
           repo: 'group/project',
           description: 'Resume GitLab job',
           sourceControlProvider: 'gitlab',
@@ -449,9 +449,9 @@ describe('createCloudJobScopedGitLabTokens', () => {
         ),
       );
 
-    const result = await createCloudJobScopedGitLabTokens(
+    const result = await createTaskRunScopedGitLabTokens(
       {
-        ...makeCloudJob({
+        ...makeTaskRun({
           repo: 'group/project',
           description: 'Refresh GitLab job',
           sourceControlProvider: 'gitlab',
@@ -518,9 +518,9 @@ describe('createCloudJobScopedGitLabTokens', () => {
       );
 
     await expect(
-      createCloudJobScopedGitLabTokens(
+      createTaskRunScopedGitLabTokens(
         {
-          ...makeCloudJob({
+          ...makeTaskRun({
             repo: 'group/project',
             description: 'Resume GitLab job',
             sourceControlProvider: 'gitlab',
@@ -581,9 +581,9 @@ describe('createCloudJobScopedGitLabTokens', () => {
       .mockResolvedValueOnce(new Response(null, { status: 204 }));
 
     await expect(
-      createCloudJobScopedGitLabTokens(
+      createTaskRunScopedGitLabTokens(
         {
-          ...makeCloudJob({
+          ...makeTaskRun({
             repo: 'group/project',
             description: 'Resume GitLab job',
             sourceControlProvider: 'gitlab',
@@ -620,8 +620,8 @@ describe('createCloudJobScopedGitLabTokens', () => {
       }),
     );
 
-    const result = await createCloudJobScopedGitLabTokens(
-      makeCloudJob({
+    const result = await createTaskRunScopedGitLabTokens(
+      makeTaskRun({
         repo: 'group/project',
         description: 'Work on GitLab',
         sourceControlProvider: 'gitlab',
@@ -677,8 +677,8 @@ describe('createCloudJobScopedGitLabTokens', () => {
       )
       .mockResolvedValueOnce(new Response(null, { status: 204 }));
 
-    const result = await createCloudJobScopedGitLabTokens(
-      makeCloudJob({
+    const result = await createTaskRunScopedGitLabTokens(
+      makeTaskRun({
         repo: 'group/project',
         description: 'Work on GitLab',
         sourceControlProvider: 'gitlab',
@@ -711,8 +711,8 @@ describe('createCloudJobScopedGitLabTokens', () => {
     );
 
     await expect(
-      createCloudJobScopedGitLabTokens(
-        makeCloudJob({
+      createTaskRunScopedGitLabTokens(
+        makeTaskRun({
           repo: 'group/project',
           description: 'Work on GitLab',
           sourceControlProvider: 'gitlab',
@@ -724,15 +724,15 @@ describe('createCloudJobScopedGitLabTokens', () => {
 
   it('rejects true all-repositories GitLab jobs because they are not repo-scoped', async () => {
     await expect(
-      createCloudJobScopedGitLabTokens(
-        makeCloudJob({
+      createTaskRunScopedGitLabTokens(
+        makeTaskRun({
           repo: '__all_repositories__',
           description: 'Unsafe GitLab scope',
           sourceControlProvider: 'gitlab',
         }),
       ),
     ).rejects.toThrow(
-      'GitLab source control jobs require an explicit repository scope for cloud job 123.',
+      'GitLab source control jobs require an explicit repository scope for task run 123.',
     );
   });
 });

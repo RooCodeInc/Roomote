@@ -14,7 +14,7 @@ import type {
   TaskMessageProtocol,
   TaskMessageRole,
 } from '@roomote/types';
-import type { User, Run } from '@roomote/db';
+import type { User, TaskRun } from '@roomote/db';
 
 /** How a task's creator should be displayed, derived from initiator columns. */
 export type TaskCreatorKind = 'user' | 'automation' | 'external';
@@ -80,10 +80,10 @@ export type ArtifactWithContent = {
 };
 
 /**
- * Run row decorated with the task's latest pull-request association
+ * Task run row decorated with the task's latest pull-request association
  * (task_pull_requests is the only PR home; runs carry no PR columns).
  */
-export type CloudJobWithPullRequest = Run & {
+export type TaskRunWithPullRequest = TaskRun & {
   prRepo: string | null;
   prNumber: number | null;
 };
@@ -91,7 +91,7 @@ export type CloudJobWithPullRequest = Run & {
 export type TaskWithAssociations = Task & {
   attributionKind?: TaskCreatorKind | null;
   user: User | null;
-  cloudJob: CloudJobWithPullRequest | null;
+  taskRun: TaskRunWithPullRequest | null;
   artifacts?: TaskArtifact[];
   inferenceUsage?: TaskInferenceUsageSummary;
 };

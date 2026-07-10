@@ -17,7 +17,7 @@ describe('handleLaunchTask', () => {
   it('should return success result with job and task IDs', async () => {
     vi.mocked(tasksApiClient.launchTask).mockResolvedValueOnce({
       success: true,
-      cloudJobId: 99,
+      runId: 99,
       taskId: 'task-new',
     });
 
@@ -32,7 +32,7 @@ describe('handleLaunchTask', () => {
     const text = result.content[0]?.text ?? '';
     const parsed = JSON.parse(text);
     expect(parsed.success).toBe(true);
-    expect(parsed.cloudJobId).toBe(99);
+    expect(parsed.runId).toBe(99);
     expect(parsed.taskId).toBe('task-new');
     expect(vi.mocked(tasksApiClient.launchTask)).toHaveBeenCalledWith(config, {
       prompt: 'Fix the tests',
@@ -46,7 +46,7 @@ describe('handleLaunchTask', () => {
   it('uses the implicit Generalist path for standard launches', async () => {
     vi.mocked(tasksApiClient.launchTask).mockResolvedValueOnce({
       success: true,
-      cloudJobId: 100,
+      runId: 100,
       taskId: 'task-generalist',
     });
 
@@ -111,7 +111,7 @@ describe('handleLaunchTask', () => {
   it('maps the all-repositories sentinel to an org-wide launch', async () => {
     vi.mocked(tasksApiClient.launchTask).mockResolvedValueOnce({
       success: true,
-      cloudJobId: 42,
+      runId: 42,
       taskId: 'task-org-wide',
     });
 

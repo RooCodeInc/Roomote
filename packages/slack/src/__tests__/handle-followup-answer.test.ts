@@ -1,7 +1,7 @@
 const {
   advancePendingSlackRequestUserInputQuestionMock,
   clearPendingSlackRequestUserInputMock,
-  findActiveSlackJobMock,
+  findActiveSlackTaskRunMock,
   fetchThreadMessagesMock,
   getPendingSlackRequestUserInputMock,
   mockDbUpdate,
@@ -21,7 +21,7 @@ const {
 } = vi.hoisted(() => ({
   advancePendingSlackRequestUserInputQuestionMock: vi.fn(),
   clearPendingSlackRequestUserInputMock: vi.fn(),
-  findActiveSlackJobMock: vi.fn(),
+  findActiveSlackTaskRunMock: vi.fn(),
   fetchThreadMessagesMock: vi.fn().mockResolvedValue([
     {
       user: 'U123',
@@ -57,8 +57,8 @@ const {
 
 vi.mock('@roomote/db/server', () => ({
   and: vi.fn((...args: unknown[]) => ({ and: args })),
-  cloudJobs: {
-    id: 'cloud_job_id',
+  taskRuns: {
+    id: 'task_run_id',
     taskId: 'task_id',
     result: 'result',
   },
@@ -83,8 +83,8 @@ vi.mock('@roomote/db/server', () => ({
   setTrustedRunActingUserOnSuccess: setTrustedRunActingUserOnSuccessMock,
 }));
 
-vi.mock('../find-active-slack-job', () => ({
-  findActiveSlackJob: findActiveSlackJobMock,
+vi.mock('../find-active-slack-task-run', () => ({
+  findActiveSlackTaskRun: findActiveSlackTaskRunMock,
 }));
 
 vi.mock('../block-kit', async () => {
@@ -191,7 +191,7 @@ describe('handleFollowupAnswer', () => {
     vi.clearAllMocks();
     vi.stubGlobal('fetch', fetchMock);
 
-    findActiveSlackJobMock.mockResolvedValue({
+    findActiveSlackTaskRunMock.mockResolvedValue({
       id: 42,
       machineId: 'machine-1',
       taskId: 'task-1',
@@ -213,7 +213,7 @@ describe('handleFollowupAnswer', () => {
     );
     getPendingSlackRequestUserInputMock.mockResolvedValue({
       requestId: 'rui:session:turn:call',
-      cloudJobId: 7,
+      runId: 7,
       taskId: 'task-older',
       questions: [],
       currentQuestionIndex: 0,
@@ -339,7 +339,7 @@ describe('handleFollowupAnswer', () => {
   });
 
   it('shows a visible error when a follow-up button targets an inactive task', async () => {
-    findActiveSlackJobMock.mockResolvedValue(null);
+    findActiveSlackTaskRunMock.mockResolvedValue(null);
 
     await handleFollowupAnswer(buildPayload('Ship it'));
 
@@ -363,7 +363,7 @@ describe('handleFollowupAnswer', () => {
       .mockResolvedValueOnce([{ botAccessToken: 'xoxb-test' }]);
     getPendingSlackRequestUserInputMock.mockResolvedValue({
       requestId: 'rui:session:turn:call',
-      cloudJobId: 42,
+      runId: 42,
       taskId: 'task-1',
       promptMessageTs: 'prompt-ts',
       questions: [
@@ -453,7 +453,7 @@ describe('handleFollowupAnswer', () => {
   });
 
   it('queues a plain follow-up answer while the job is still booting', async () => {
-    findActiveSlackJobMock.mockResolvedValue({
+    findActiveSlackTaskRunMock.mockResolvedValue({
       id: 42,
       machineId: null,
       taskId: null,
@@ -494,7 +494,7 @@ describe('handleFollowupAnswer', () => {
   });
 
   it('queues a structured final answer while the job is still booting', async () => {
-    findActiveSlackJobMock.mockResolvedValue({
+    findActiveSlackTaskRunMock.mockResolvedValue({
       id: 42,
       machineId: null,
       taskId: null,
@@ -504,7 +504,7 @@ describe('handleFollowupAnswer', () => {
       .mockResolvedValueOnce([{ botAccessToken: 'xoxb-test' }]);
     getPendingSlackRequestUserInputMock.mockResolvedValue({
       requestId: 'rui:session:turn:call',
-      cloudJobId: 42,
+      runId: 42,
       taskId: 'task-1',
       questions: [
         {
@@ -561,7 +561,7 @@ describe('handleFollowupAnswer', () => {
   });
 
   it('shows already-received copy when a structured final answer loses the atomic claim', async () => {
-    findActiveSlackJobMock.mockResolvedValue({
+    findActiveSlackTaskRunMock.mockResolvedValue({
       id: 42,
       machineId: null,
       taskId: null,
@@ -572,7 +572,7 @@ describe('handleFollowupAnswer', () => {
     submitPendingSlackRequestUserInputAnswerMock.mockResolvedValue(false);
     getPendingSlackRequestUserInputMock.mockResolvedValue({
       requestId: 'rui:session:turn:call',
-      cloudJobId: 42,
+      runId: 42,
       taskId: 'task-1',
       questions: [
         {

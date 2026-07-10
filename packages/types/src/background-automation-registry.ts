@@ -11,7 +11,7 @@ import type {
   SentryTriageFrequency,
   SuggesterFrequency,
 } from './background-agents';
-import type { TaskSuggestionSource } from './cloud-jobs';
+import type { TaskSuggestionSource } from './task-runs';
 
 export const AUTO_RESPOND_CHANNELS_SETTINGS_HASH = 'auto-respond-channels';
 export const MANAGER_CHANNEL_SETTINGS_HASH = 'roomote-managers';

@@ -11,7 +11,7 @@ import {
   desc,
   type User,
   type Task,
-  type Run,
+  type TaskRun,
 } from '@roomote/db/server';
 import { getTaskUrl } from '@roomote/cloud-agents/server';
 
@@ -25,7 +25,7 @@ function toUnixSeconds(date: Date | null | undefined): number {
   return Math.floor(date.getTime() / 1000);
 }
 
-function deriveStatus(task: Task, job: Run | null): string {
+function deriveStatus(task: Task, job: TaskRun | null): string {
   if (job?.status) {
     return job.status;
   }

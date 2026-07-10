@@ -94,7 +94,7 @@ async function updateConfirmToStarted({
 }
 
 export async function finishRoutedStart({
-  cloudJobId,
+  runId,
   taskId,
   taskDescription,
   userId,
@@ -115,7 +115,7 @@ export async function finishRoutedStart({
   existingMessageTs,
   slack,
 }: {
-  cloudJobId: number | null;
+  runId: number | null;
   taskId: string | null;
   taskDescription: string;
   /**
@@ -171,7 +171,7 @@ export async function finishRoutedStart({
   const blocks = buildStartedBlocks({
     workspaceDisplayName,
     modelDisplayName,
-    cloudJobId,
+    runId,
     taskId,
     initiatingSlackUserId,
     taskUrl,
@@ -191,8 +191,8 @@ export async function finishRoutedStart({
         blocks,
       });
 
-  if (startedMessageTs && cloudJobId) {
-    await setSlackStartedMessageTs(cloudJobId, startedMessageTs, {
+  if (startedMessageTs && runId) {
+    await setSlackStartedMessageTs(runId, startedMessageTs, {
       agentName,
       initiatingSlackUserId,
       workspaceDisplayName,

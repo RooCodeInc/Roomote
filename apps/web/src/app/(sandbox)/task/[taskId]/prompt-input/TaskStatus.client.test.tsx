@@ -38,7 +38,7 @@ describe('TaskStatus', () => {
 
     render(
       <TaskStatus
-        cloudJob={
+        taskRun={
           {
             sleepAt: '2026-03-20T07:02:00Z',
             taskPhase: 'waiting_for_prompt',
@@ -58,7 +58,7 @@ describe('TaskStatus', () => {
 
     render(
       <TaskStatus
-        cloudJob={
+        taskRun={
           {
             sleepAt: '2026-03-20T07:02:00Z',
             taskPhase: 'waiting_for_prompt',

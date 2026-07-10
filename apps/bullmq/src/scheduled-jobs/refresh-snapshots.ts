@@ -72,7 +72,7 @@ type SnapshotRefreshLockResult =
   | { kind: 'skipped' }
   | {
       kind: 'enqueued';
-      cloudJobId: number;
+      runId: number;
     };
 
 function logRefreshSnapshots(
@@ -390,9 +390,9 @@ export const refreshSnapshotsJob = async () => {
                   candidate.snapshotExpiresAt?.toISOString() ?? null,
                 snapshotUpdatedAt: candidate.updatedAt?.toISOString() ?? null,
                 snapshotAgeHours,
-                activeCloudJobId: activeRefreshJob.id,
-                activeCloudJobStatus: activeRefreshJob.status,
-                activeCloudJobCreatedAt:
+                activeRunId: activeRefreshJob.id,
+                activeTaskRunStatus: activeRefreshJob.status,
+                activeTaskRunCreatedAt:
                   activeRefreshJob.createdAt.toISOString(),
               },
             );
@@ -451,7 +451,7 @@ export const refreshSnapshotsJob = async () => {
           });
 
           logRefreshSnapshots('Created snapshot refresh job', {
-            cloudJobId: id,
+            runId: id,
             environmentId: candidate.environmentId,
             environmentName: candidate.environmentName,
             provider: candidate.provider,
@@ -523,7 +523,7 @@ export const refreshSnapshotsJob = async () => {
 
             return {
               kind: 'enqueued',
-              cloudJobId: id,
+              runId: id,
             } satisfies SnapshotRefreshLockResult;
           },
         );
@@ -544,9 +544,9 @@ export const refreshSnapshotsJob = async () => {
                 candidate.snapshotExpiresAt?.toISOString() ?? null,
               snapshotUpdatedAt: candidate.updatedAt?.toISOString() ?? null,
               snapshotAgeHours,
-              activeCloudJobId: lockResult.activeRefreshJob.id,
-              activeCloudJobStatus: lockResult.activeRefreshJob.status,
-              activeCloudJobCreatedAt:
+              activeRunId: lockResult.activeRefreshJob.id,
+              activeTaskRunStatus: lockResult.activeRefreshJob.status,
+              activeTaskRunCreatedAt:
                 lockResult.activeRefreshJob.createdAt.toISOString(),
             },
           );
@@ -557,7 +557,7 @@ export const refreshSnapshotsJob = async () => {
           continue;
         }
         logRefreshSnapshots('Created snapshot refresh job', {
-          cloudJobId: lockResult.cloudJobId,
+          runId: lockResult.runId,
           environmentId: candidate.environmentId,
           environmentName: candidate.environmentName,
           provider: candidate.provider,

@@ -3,20 +3,20 @@ import { Hono } from 'hono';
 import {
   type AuthTokenContext,
   TaskPayloadKind,
-  type JobTokenContext,
+  type RunTokenContext,
 } from '@roomote/types';
 
 import type { Variables } from '../../../types';
 import { mcpAuthMiddleware } from '../../mcp/middleware';
 import { submitAutomationWorkItems } from '../submitAutomationWorkItems';
 
-const { mockCloudJobFindFirst, mockTaskFindFirst } = vi.hoisted(() => ({
-  mockCloudJobFindFirst: vi.fn(),
+const { mockTaskRunFindFirst, mockTaskFindFirst } = vi.hoisted(() => ({
+  mockTaskRunFindFirst: vi.fn(),
   mockTaskFindFirst: vi.fn(),
 }));
 
 vi.mock('@roomote/cloud-agents/server', () => ({
-  CloudJobQueueEnqueueError: class CloudJobQueueEnqueueError extends Error {},
+  TaskRunQueueEnqueueError: class TaskRunQueueEnqueueError extends Error {},
   enqueueTask: vi.fn(),
 }));
 
@@ -58,7 +58,7 @@ vi.mock('@roomote/db/server', () => ({
   db: {
     query: {
       taskRuns: {
-        findFirst: (...args: unknown[]) => mockCloudJobFindFirst(...args),
+        findFirst: (...args: unknown[]) => mockTaskRunFindFirst(...args),
       },
       tasks: {
         findFirst: (...args: unknown[]) => mockTaskFindFirst(...args),
@@ -67,7 +67,7 @@ vi.mock('@roomote/db/server', () => ({
   },
 }));
 
-function createApp(authContext?: AuthTokenContext | JobTokenContext) {
+function createApp(authContext?: AuthTokenContext | RunTokenContext) {
   const app = new Hono<{ Variables: Variables }>();
 
   app.use('*', async (c, next) => {
@@ -83,18 +83,18 @@ function createApp(authContext?: AuthTokenContext | JobTokenContext) {
 }
 
 describe('submitAutomationWorkItems', () => {
-  const authContext: JobTokenContext = {
+  const authContext: RunTokenContext = {
     userId: 'user-1',
     principal: 'user',
-    cloudJobId: 1,
-    tokenType: 'cj',
+    runId: 1,
+    tokenType: 'run',
     version: 1,
   };
 
   beforeEach(() => {
-    mockCloudJobFindFirst.mockReset();
+    mockTaskRunFindFirst.mockReset();
     mockTaskFindFirst.mockReset();
-    mockCloudJobFindFirst.mockResolvedValue({
+    mockTaskRunFindFirst.mockResolvedValue({
       payloadKind: TaskPayloadKind.Scan,
       actingUserId: 'user-1',
       payload: {
@@ -134,7 +134,7 @@ describe('submitAutomationWorkItems', () => {
     await expect(response.json()).resolves.toEqual({
       error: 'Act automation work items must include targetRepositoryFullName.',
     });
-    expect(mockCloudJobFindFirst).not.toHaveBeenCalled();
+    expect(mockTaskRunFindFirst).not.toHaveBeenCalled();
   });
 
   it('rejects act work items without an execution prompt', async () => {
@@ -161,7 +161,7 @@ describe('submitAutomationWorkItems', () => {
     await expect(response.json()).resolves.toEqual({
       error: 'Act automation work items must include executionPrompt.',
     });
-    expect(mockCloudJobFindFirst).not.toHaveBeenCalled();
+    expect(mockTaskRunFindFirst).not.toHaveBeenCalled();
   });
 
   it('rejects act work items without a target environment', async () => {
@@ -190,11 +190,11 @@ describe('submitAutomationWorkItems', () => {
     await expect(response.json()).resolves.toEqual({
       error: 'Act automation work items must include targetEnvironmentId.',
     });
-    expect(mockCloudJobFindFirst).not.toHaveBeenCalled();
+    expect(mockTaskRunFindFirst).not.toHaveBeenCalled();
   });
 
   it('rejects Dependabot suggestion work items', async () => {
-    mockCloudJobFindFirst.mockResolvedValueOnce({
+    mockTaskRunFindFirst.mockResolvedValueOnce({
       payloadKind: TaskPayloadKind.Scan,
       actingUserId: 'user-1',
       payload: {
@@ -236,7 +236,7 @@ describe('submitAutomationWorkItems', () => {
 
   it('rejects multiple Dependabot action work items for the same target environment', async () => {
     const environmentId = '11111111-1111-1111-1111-111111111111';
-    mockCloudJobFindFirst.mockResolvedValueOnce({
+    mockTaskRunFindFirst.mockResolvedValueOnce({
       payloadKind: TaskPayloadKind.Scan,
       actingUserId: 'user-1',
       payload: {
@@ -288,7 +288,7 @@ describe('submitAutomationWorkItems', () => {
   });
 
   it('rejects more than three Dependabot action work items', async () => {
-    mockCloudJobFindFirst.mockResolvedValueOnce({
+    mockTaskRunFindFirst.mockResolvedValueOnce({
       payloadKind: TaskPayloadKind.Scan,
       actingUserId: 'user-1',
       payload: {
@@ -425,7 +425,7 @@ describe('submitAutomationWorkItems', () => {
   });
 
   it('rejects Security Auditor suggestion work items', async () => {
-    mockCloudJobFindFirst.mockResolvedValueOnce({
+    mockTaskRunFindFirst.mockResolvedValueOnce({
       payloadKind: TaskPayloadKind.Scan,
       actingUserId: 'user-1',
       payload: {
@@ -467,7 +467,7 @@ describe('submitAutomationWorkItems', () => {
 
   it('rejects automation work items for unsupported task sources', async () => {
     const environmentId = '11111111-1111-1111-1111-111111111111';
-    mockCloudJobFindFirst.mockResolvedValueOnce({
+    mockTaskRunFindFirst.mockResolvedValueOnce({
       payloadKind: TaskPayloadKind.Scan,
       actingUserId: 'user-1',
       payload: {

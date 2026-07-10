@@ -9,22 +9,22 @@ import { standardTask } from './standardTask';
 import { buildStructuredTaskRequest } from './utils';
 
 export function githubPrConflictResolve({
-  cloudTask,
-  cloudJobUrl,
+  taskSpec,
+  taskRunUrl,
   attribution,
   visualProofAutoScreencastEnabled,
   backgroundProofCaptureEnabled,
 }: {
-  cloudTask: GithubPrConflictResolveTask;
-  cloudJobUrl: string;
+  taskSpec: GithubPrConflictResolveTask;
+  taskRunUrl: string;
   attribution?: ResolvedTaskCommitAuthor;
   visualProofAutoScreencastEnabled?: boolean;
   backgroundProofCaptureEnabled?: boolean;
 }) {
   const {
     payload: { repo, prNumber, prTitle, prUrl, headRef, baseRef },
-  } = cloudTask;
-  const delimiter = getSkillCommandDelimiter(cloudTask.harness);
+  } = taskSpec;
+  const delimiter = getSkillCommandDelimiter(taskSpec.harness);
   const description = buildStructuredTaskRequest({
     command: `${delimiter}resolve-github-pr-merge-conflicts`,
     activeAppendixPath: 'resolve-github-pr-merge-conflicts',
@@ -32,8 +32,8 @@ export function githubPrConflictResolve({
       repository: repo,
       pull_request_number: prNumber,
       agent_type: CloudAgentType.Fixer,
-      task_link_follow: `[Follow](${cloudJobUrl})`,
-      task_link_see: `[See task](${cloudJobUrl})`,
+      task_link_follow: `[Follow](${taskRunUrl})`,
+      task_link_see: `[See task](${taskRunUrl})`,
       pull_request_title: prTitle,
       pull_request_url: prUrl,
       head_branch: headRef,
@@ -47,10 +47,10 @@ export function githubPrConflictResolve({
     description,
     repo,
     taskSurface: 'github',
-    cloudJobUrl,
+    taskRunUrl,
     attribution,
     requestFormat: 'structured',
-    linkedWorkItems: cloudTask.payload.linkedWorkItems,
+    linkedWorkItems: taskSpec.payload.linkedWorkItems,
     visualProofAutoScreencastEnabled,
     backgroundProofCaptureEnabled,
   });

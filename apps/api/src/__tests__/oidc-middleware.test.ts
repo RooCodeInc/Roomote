@@ -154,10 +154,10 @@ describe('OIDC middleware composition', () => {
   });
 
   it('continues to run token auth middleware for non-public API routes', async () => {
-    await createApiApp().request('http://localhost/api/cloud-jobs/123/logs');
+    await createApiApp().request('http://localhost/api/task-runs/123/logs');
 
     expect(middlewareState.tokenRequestPaths).toEqual([
-      '/api/cloud-jobs/123/logs',
+      '/api/task-runs/123/logs',
     ]);
   });
 });

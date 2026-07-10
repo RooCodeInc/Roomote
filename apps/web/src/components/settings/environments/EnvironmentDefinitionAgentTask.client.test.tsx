@@ -8,7 +8,7 @@ const {
   sandboxProviderPropsMock,
   showDebugUiState,
   userState,
-  useCloudSessionMock,
+  useTaskSessionMock,
   useEnvironmentMock,
   useSandboxLogsMock,
   useSandboxMessagesMock,
@@ -33,7 +33,7 @@ const {
       },
     },
   },
-  useCloudSessionMock: vi.fn(),
+  useTaskSessionMock: vi.fn(),
   useEnvironmentMock: vi.fn(),
   useSandboxLogsMock: vi.fn(),
   useSandboxMessagesMock: vi.fn(),
@@ -50,7 +50,7 @@ vi.mock('@/app/(sandbox)/task/[taskId]/hooks', () => ({
 
     return <>{props.children}</>;
   },
-  useCloudSession: (...args: unknown[]) => useCloudSessionMock(...args),
+  useTaskSession: (...args: unknown[]) => useTaskSessionMock(...args),
   useTaskMessageEnvelopes: () => ({
     data: [],
     isPending: false,
@@ -196,7 +196,7 @@ describe('EnvironmentDefinitionAgentTaskPanel', () => {
             token: 'token',
             isLoading: false,
             sessionState: 'ready',
-            cloudJob: {
+            taskRun: {
               status: 'running',
               taskPhase: 'running',
               sandboxServerUrl: 'http://localhost:3001',
@@ -230,7 +230,7 @@ describe('EnvironmentDefinitionAgentTaskPanel', () => {
             refreshConnection,
             isLoading: false,
             sessionState: 'ready',
-            cloudJob: {
+            taskRun: {
               status: 'running',
               taskPhase: 'running',
               sandboxServerUrl: 'http://localhost:3001',
@@ -263,7 +263,7 @@ describe('EnvironmentDefinitionAgentTaskPanel', () => {
             token: 'token',
             isLoading: false,
             sessionState: 'ready',
-            cloudJob: {
+            taskRun: {
               status: 'running',
               taskPhase: 'running',
               sandboxServerUrl: 'http://localhost:3001',
@@ -288,7 +288,7 @@ describe('EnvironmentDefinitionAgentTaskPanel', () => {
             token: 'token',
             isLoading: false,
             sessionState: 'ready',
-            cloudJob: {
+            taskRun: {
               status: 'running',
               taskPhase: 'running',
               sandboxServerUrl: 'http://localhost:3001',
@@ -317,7 +317,7 @@ describe('EnvironmentDefinitionAgentTaskPanel', () => {
             token: undefined,
             isLoading: false,
             sessionState: 'historical',
-            cloudJob: {
+            taskRun: {
               status: 'completed',
               taskPhase: 'completed',
               sandboxServerUrl: null,
@@ -347,7 +347,7 @@ describe('EnvironmentDefinitionAgentTaskPanel', () => {
             token: 'token',
             isLoading: false,
             sessionState: 'ready',
-            cloudJob: {
+            taskRun: {
               status: 'running',
               taskPhase: 'running',
               sandboxServerUrl: 'http://localhost:3001',
@@ -382,7 +382,7 @@ describe('EnvironmentDefinitionAgentTaskPanel', () => {
             token: 'token',
             isLoading: false,
             sessionState: 'ready',
-            cloudJob: {
+            taskRun: {
               status: 'running',
               taskPhase: 'running',
               sandboxServerUrl: 'http://localhost:3001',
@@ -432,7 +432,7 @@ describe('EnvironmentDefinitionAgentTaskPanel', () => {
             token: 'token',
             isLoading: false,
             sessionState: 'ready',
-            cloudJob: {
+            taskRun: {
               status: 'running',
               taskPhase: 'running',
               sandboxServerUrl: 'http://localhost:3001',
@@ -478,7 +478,7 @@ describe('EnvironmentDefinitionAgentTaskPanel', () => {
             token: 'token',
             isLoading: false,
             sessionState: 'ready',
-            cloudJob: {
+            taskRun: {
               status: 'running',
               taskPhase: 'running',
               sandboxServerUrl: 'http://localhost:3001',
@@ -516,8 +516,8 @@ describe('EnvironmentDefinitionAgentTaskPanel', () => {
             token: 'token',
             isLoading: false,
             sessionState: 'booting',
-            cloudJob: {
-              id: 'cloud-job-1',
+            taskRun: {
+              id: 'task-run-1',
               status: 'starting',
               taskPhase: 'starting',
               sandboxServerUrl: 'http://localhost:3001',
@@ -553,8 +553,8 @@ describe('EnvironmentDefinitionAgentTaskPanel', () => {
             token: 'token',
             isLoading: false,
             sessionState: 'boot-failed',
-            cloudJob: {
-              id: 'cloud-job-1',
+            taskRun: {
+              id: 'task-run-1',
               status: 'failed',
               taskPhase: 'stopped',
               sandboxServerUrl: 'http://localhost:3001',
@@ -586,8 +586,8 @@ describe('useEnvironmentDefinitionAgentState', () => {
   });
 
   it('marks create mode as succeeded while the setup task is idle once the environment is linked', () => {
-    useCloudSessionMock.mockReturnValue({
-      cloudJob: {
+    useTaskSessionMock.mockReturnValue({
+      taskRun: {
         status: 'idle',
         taskPhase: 'waiting_for_prompt',
         payload: {
@@ -626,8 +626,8 @@ describe('useEnvironmentDefinitionAgentState', () => {
   });
 
   it('does not mark create mode as succeeded when the idle task is still running', () => {
-    useCloudSessionMock.mockReturnValue({
-      cloudJob: {
+    useTaskSessionMock.mockReturnValue({
+      taskRun: {
         status: 'idle',
         taskPhase: 'running',
         payload: {
@@ -662,8 +662,8 @@ describe('useEnvironmentDefinitionAgentState', () => {
   });
 
   it('marks create mode as succeeded once the setup task completes', () => {
-    useCloudSessionMock.mockReturnValue({
-      cloudJob: {
+    useTaskSessionMock.mockReturnValue({
+      taskRun: {
         status: 'completed',
         payload: {
           environmentDefinitionId: 'env-1',

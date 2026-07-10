@@ -21,7 +21,7 @@ import {
   taskRuns,
   getDeploymentPrAction,
   taskPullRequests,
-  type Run,
+  type TaskRun,
 } from '@roomote/db/server';
 import {
   buildPullRequestUrl,
@@ -34,7 +34,7 @@ import {
 } from '@roomote/types';
 import { z } from 'zod';
 import {
-  assertRepositoryInCloudJobScope,
+  assertRepositoryInTaskRunScope,
   buildAdoBasicAuthHeader,
   buildApiUrl,
   formatResponseBody,
@@ -129,17 +129,17 @@ const adoPullRequestListSchema = z.object({
   value: z.array(adoPullRequestSchema),
 });
 
-export async function createOrUpdateSourceControlPullRequestForCloudJob({
-  cloudJob,
+export async function createOrUpdateSourceControlPullRequestForTaskRun({
+  taskRun,
   input,
   fetchImpl = fetch,
 }: {
-  cloudJob: Run;
+  taskRun: TaskRun;
   input: SourceControlPullRequestMutationInput;
   fetchImpl?: FetchImpl;
 }): Promise<SourceControlPullRequestMutationResult> {
   const payloadProvider = resolveSourceControlProviderFromPayload(
-    getPayloadRecord(cloudJob.payload),
+    getPayloadRecord(taskRun.payload),
   );
   const provider = input.sourceControlProvider ?? payloadProvider;
 
@@ -151,14 +151,14 @@ export async function createOrUpdateSourceControlPullRequestForCloudJob({
     );
   }
 
-  await assertRepositoryInCloudJobScope(cloudJob, input.repositoryFullName);
+  await assertRepositoryInTaskRunScope(taskRun, input.repositoryFullName);
 
   const repository = await resolveRepositoryRow({
     provider,
     repositoryFullName: input.repositoryFullName,
   });
 
-  const prAction = await resolveEffectivePrAction(cloudJob);
+  const prAction = await resolveEffectivePrAction(taskRun);
   const createDraft = prAction !== 'create';
 
   const result = await (() => {
@@ -198,7 +198,7 @@ export async function createOrUpdateSourceControlPullRequestForCloudJob({
   })();
 
   await persistSourceControlPullRequestAssociation({
-    cloudJob,
+    taskRun,
     input,
     result,
     repository,
@@ -209,15 +209,15 @@ export async function createOrUpdateSourceControlPullRequestForCloudJob({
 
 /**
  * Draft state is deployment policy, not agent choice. The effective PR
- * delivery action comes from the cloud job payload when a launch stamped one
+ * delivery action comes from the task run payload when a launch stamped one
  * (per-task override), falling back to the deployment-wide Source Control
  * setting. Only `prAction === 'create'` opens ready-for-review pull
  * requests; `draft` and `push` both open drafts when a pull request is
  * created at all. Updates never change an existing pull request's draft
  * state.
  */
-async function resolveEffectivePrAction(cloudJob: Run): Promise<PrAction> {
-  const payloadPrAction = getPayloadRecord(cloudJob.payload).prAction;
+async function resolveEffectivePrAction(taskRun: TaskRun): Promise<PrAction> {
+  const payloadPrAction = getPayloadRecord(taskRun.payload).prAction;
 
   if (prActions.includes(payloadPrAction as PrAction)) {
     return payloadPrAction as PrAction;
@@ -235,17 +235,17 @@ async function resolveEffectivePrAction(cloudJob: Run): Promise<PrAction> {
  * agent already performed.
  */
 async function persistSourceControlPullRequestAssociation({
-  cloudJob,
+  taskRun,
   input,
   result,
   repository,
 }: {
-  cloudJob: Run;
+  taskRun: TaskRun;
   input: SourceControlPullRequestMutationInput;
   result: SourceControlPullRequestMutationResult;
   repository: RepositoryRow;
 }): Promise<void> {
-  if (!cloudJob.taskId) {
+  if (!taskRun.taskId) {
     return;
   }
 
@@ -255,7 +255,7 @@ async function persistSourceControlPullRequestAssociation({
     await db
       .insert(taskPullRequests)
       .values({
-        taskId: cloudJob.taskId,
+        taskId: taskRun.taskId,
         sourceControlProvider: repository.sourceControlProvider,
         host: repository.host,
         repositoryId: repository.id,
@@ -280,7 +280,7 @@ async function persistSourceControlPullRequestAssociation({
       });
   } catch (error) {
     console.warn(
-      `[persistSourceControlPullRequestAssociation] Failed to associate ${result.repositoryFullName}#${result.number} with task ${cloudJob.taskId}: ${
+      `[persistSourceControlPullRequestAssociation] Failed to associate ${result.repositoryFullName}#${result.number} with task ${taskRun.taskId}: ${
         error instanceof Error ? error.message : String(error)
       }`,
     );
@@ -896,30 +896,30 @@ function buildUnsupportedWarnings(
   return warnings;
 }
 
-export async function findCloudJobForSourceControlMutation({
-  cloudJobId,
+export async function findTaskRunForSourceControlMutation({
+  runId,
   taskId,
 }: {
-  cloudJobId: number;
+  runId: number;
   taskId: string;
-}): Promise<Run> {
-  const cloudJob = await db.query.taskRuns.findFirst({
-    where: eq(taskRuns.id, cloudJobId),
+}): Promise<TaskRun> {
+  const taskRun = await db.query.taskRuns.findFirst({
+    where: eq(taskRuns.id, runId),
   });
 
-  if (!cloudJob) {
+  if (!taskRun) {
     throw new SourceControlMutationError(
       404,
-      'Cloud job not found for this MCP token.',
+      'Task run not found for this MCP token.',
     );
   }
 
-  if (cloudJob.taskId !== taskId) {
+  if (taskRun.taskId !== taskId) {
     throw new SourceControlMutationError(
       403,
-      'Cloud job token does not match the requested task.',
+      'Task run token does not match the requested task.',
     );
   }
 
-  return cloudJob;
+  return taskRun;
 }

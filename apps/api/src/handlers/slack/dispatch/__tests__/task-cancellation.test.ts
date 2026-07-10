@@ -10,14 +10,14 @@ const {
   updateReturningMock,
   dbQueryFindFirstMock,
   postSlackInteractiveResponseMock,
-  stopTaskJobMock,
+  stopTaskRunMock,
 } = vi.hoisted(() => ({
   dbUpdateMock: vi.fn(),
   dbUpdateWhereMock: vi.fn(),
   updateReturningMock: vi.fn(),
   dbQueryFindFirstMock: vi.fn(),
   postSlackInteractiveResponseMock: vi.fn(),
-  stopTaskJobMock: vi.fn(),
+  stopTaskRunMock: vi.fn(),
 }));
 
 vi.mock('@roomote/slack', async (importOriginal) => {
@@ -55,7 +55,7 @@ vi.mock('@roomote/db/server', () => ({
 }));
 
 vi.mock('../../../tasks/task-stop.js', () => ({
-  stopTaskJob: stopTaskJobMock,
+  stopTaskRun: stopTaskRunMock,
 }));
 
 import { handleTaskCancellation } from '../task-cancellation.js';
@@ -113,7 +113,7 @@ describe('handleTaskCancellation', () => {
       returning: updateReturningMock,
     });
     postSlackInteractiveResponseMock.mockResolvedValue(undefined);
-    stopTaskJobMock.mockResolvedValue({ success: true, mode: 'sandbox_stop' });
+    stopTaskRunMock.mockResolvedValue({ success: true, mode: 'sandbox_stop' });
   });
 
   it('silently ignores cancel clicks from a different Slack user', async () => {
@@ -127,7 +127,7 @@ describe('handleTaskCancellation', () => {
       ),
     );
 
-    expect(stopTaskJobMock).not.toHaveBeenCalled();
+    expect(stopTaskRunMock).not.toHaveBeenCalled();
     expect(postSlackInteractiveResponseMock).not.toHaveBeenCalled();
   });
 
@@ -140,7 +140,7 @@ describe('handleTaskCancellation', () => {
       userId: 'user-1',
       actingUserId: 'user-1',
     });
-    stopTaskJobMock.mockResolvedValueOnce({
+    stopTaskRunMock.mockResolvedValueOnce({
       success: false,
       error: 'Task is not active',
       statusCode: 409,
@@ -197,7 +197,7 @@ describe('handleTaskCancellation', () => {
   it('rejects plain-number cancel payloads', async () => {
     await handleTaskCancellation(buildCancellationPayload('42', 'U456'));
 
-    expect(stopTaskJobMock).not.toHaveBeenCalled();
+    expect(stopTaskRunMock).not.toHaveBeenCalled();
     expect(postSlackInteractiveResponseMock).not.toHaveBeenCalled();
   });
 });

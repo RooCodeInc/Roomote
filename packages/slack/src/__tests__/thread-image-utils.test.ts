@@ -300,7 +300,7 @@ describe('fetchThreadMessagesSafe', () => {
       fetchThreadMessages: vi.fn().mockResolvedValue(threadMessages),
       channel: 'C123',
       threadTs: '100.000',
-      logContext: 'active job 1 in C123:100.000',
+      logContext: 'active task run 1 in C123:100.000',
     });
 
     expect(result).toEqual(threadMessages);
@@ -315,12 +315,12 @@ describe('fetchThreadMessagesSafe', () => {
       fetchThreadMessages: vi.fn().mockRejectedValue(new Error('fetch failed')),
       channel: 'C123',
       threadTs: '100.000',
-      logContext: 'active job 1 in C123:100.000',
+      logContext: 'active task run 1 in C123:100.000',
     });
 
     expect(result).toEqual([]);
     expect(consoleWarnSpy).toHaveBeenCalledWith(
-      '[thread-image-utils] Failed to fetch thread messages for active job 1 in C123:100.000: fetch failed',
+      '[thread-image-utils] Failed to fetch thread messages for active task run 1 in C123:100.000: fetch failed',
     );
   });
 });

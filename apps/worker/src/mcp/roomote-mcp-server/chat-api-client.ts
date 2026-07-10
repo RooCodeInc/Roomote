@@ -174,7 +174,7 @@ export async function getSlackChannelMessages(
 export async function trackSlackReplyQuote(
   config: RoomoteConfig,
   input: {
-    cloudJobId: number;
+    runId: number;
     text: string;
     userName: string;
   },
@@ -190,7 +190,7 @@ export async function trackSlackReplyQuote(
 export async function clearSlackReplyQuote(
   config: RoomoteConfig,
   input: {
-    cloudJobId: number;
+    runId: number;
   },
 ): Promise<SlackMutationResponse> {
   return postToChatEndpoint<SlackMutationResponse>(

@@ -7,20 +7,20 @@ export const WORKER_HEARTBEAT_RPC_TIMEOUT_MS =
   WORKER_HEARTBEAT_INTERVAL_MS - 5_000;
 
 interface HeartbeatConfig {
-  cloudJobId: number;
+  runId: number;
   taskId?: string | null;
   logger: Pick<Console, 'warn'>;
 }
 
-function createHeartbeatTimeoutError(cloudJobId: number): Error {
+function createHeartbeatTimeoutError(runId: number): Error {
   return new Error(
-    `Heartbeat RPC timed out after ${WORKER_HEARTBEAT_RPC_TIMEOUT_MS}ms for cloud job ${cloudJobId}`,
+    `Heartbeat RPC timed out after ${WORKER_HEARTBEAT_RPC_TIMEOUT_MS}ms for task run ${runId}`,
   );
 }
 
 function getHeartbeatError(
   controller: AbortController,
-  cloudJobId: number,
+  runId: number,
   error: unknown,
 ): unknown {
   if (!controller.signal.aborted) {
@@ -31,11 +31,11 @@ function getHeartbeatError(
     return controller.signal.reason;
   }
 
-  return createHeartbeatTimeoutError(cloudJobId);
+  return createHeartbeatTimeoutError(runId);
 }
 
 async function sendHeartbeat({
-  cloudJobId,
+  runId,
   taskId,
   consecutiveFailureCountRef,
   hasReportedFailureStreakRef,
@@ -46,21 +46,21 @@ async function sendHeartbeat({
 }): Promise<void> {
   const controller = new AbortController();
   const timeout = setTimeout(() => {
-    controller.abort(createHeartbeatTimeoutError(cloudJobId));
+    controller.abort(createHeartbeatTimeoutError(runId));
   }, WORKER_HEARTBEAT_RPC_TIMEOUT_MS);
 
   try {
-    await sdk.cloudJobs.touchCloudJobHeartbeat(
-      { id: cloudJobId },
+    await sdk.taskRuns.touchTaskRunHeartbeat(
+      { id: runId },
       { signal: controller.signal },
     );
     consecutiveFailureCountRef.current = 0;
     hasReportedFailureStreakRef.current = false;
   } catch (error) {
-    const heartbeatError = getHeartbeatError(controller, cloudJobId, error);
+    const heartbeatError = getHeartbeatError(controller, runId, error);
     consecutiveFailureCountRef.current += 1;
     logger.warn(
-      `[workerHeartbeat] Failed to update heartbeat for cloud job ${cloudJobId}: ${
+      `[workerHeartbeat] Failed to update heartbeat for task run ${runId}: ${
         heartbeatError instanceof Error
           ? heartbeatError.message
           : String(heartbeatError)
@@ -75,7 +75,7 @@ async function sendHeartbeat({
       captureWorkerMessage(
         'Worker heartbeat updates are repeatedly failing',
         {
-          cloudJobId,
+          runId,
           taskId,
           stage: 'worker-heartbeat',
           heartbeatIntervalMs: WORKER_HEARTBEAT_INTERVAL_MS,
@@ -98,7 +98,7 @@ async function sendHeartbeat({
 }
 
 export function createWorkerHeartbeatInterval({
-  cloudJobId,
+  runId,
   taskId,
   logger,
 }: HeartbeatConfig): NodeJS.Timeout {
@@ -113,7 +113,7 @@ export function createWorkerHeartbeatInterval({
 
     heartbeatInFlightRef.current = true;
     void sendHeartbeat({
-      cloudJobId,
+      runId,
       taskId,
       consecutiveFailureCountRef,
       hasReportedFailureStreakRef,

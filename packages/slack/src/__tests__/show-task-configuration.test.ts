@@ -2,7 +2,7 @@ const {
   buildSlackRoutingContextMock,
   routeTaskMock,
   enqueueTaskMock,
-  findActiveSlackJobMock,
+  findActiveSlackTaskRunMock,
   classifyFollowUpMock,
   getTaskUrlMock,
   repositoriesFindManyMock,
@@ -32,7 +32,7 @@ const {
   buildSlackRoutingContextMock: vi.fn(),
   routeTaskMock: vi.fn(),
   enqueueTaskMock: vi.fn(),
-  findActiveSlackJobMock: vi.fn(),
+  findActiveSlackTaskRunMock: vi.fn(),
   classifyFollowUpMock: vi.fn(),
   getTaskUrlMock: vi.fn(),
   repositoriesFindManyMock: vi.fn(),
@@ -69,8 +69,8 @@ vi.mock('@roomote/cloud-agents/server', () => ({
   getTaskUrl: getTaskUrlMock,
 }));
 
-vi.mock('../find-active-slack-job', () => ({
-  findActiveSlackJob: findActiveSlackJobMock,
+vi.mock('../find-active-slack-task-run', () => ({
+  findActiveSlackTaskRun: findActiveSlackTaskRunMock,
 }));
 
 vi.mock('@roomote/cloud-agents', () => ({
@@ -104,7 +104,7 @@ vi.mock('@roomote/env', async (importOriginal) => {
 
 vi.mock('@roomote/db/server', () => ({
   and: vi.fn((...args: unknown[]) => ({ and: args })),
-  cloudJobs: { id: 'id' },
+  taskRuns: { id: 'id' },
   db: {
     query: {
       repositories: {
@@ -242,7 +242,7 @@ describe('Slack deleted-mention suppression', () => {
         },
       },
     });
-    findActiveSlackJobMock.mockResolvedValue(null);
+    findActiveSlackTaskRunMock.mockResolvedValue(null);
     enqueueTaskMock.mockResolvedValue({ id: 42, taskId: 'task_123' });
     normalizeIncomingTextMock.mockImplementation(async (text: string) => text);
     getChannelNameMock.mockResolvedValue('eng-routing');

@@ -11,7 +11,7 @@ import {
   screen,
   waitFor,
 } from '@testing-library/react';
-import type { CloudJobDetail } from '@/lib/server/cloud-jobs';
+import type { TaskRunDetail } from '@/lib/server/task-runs';
 
 const {
   autoCompleteDraftSaveRef,
@@ -47,7 +47,7 @@ const {
     current: null as {
       onSuccess?: (
         data: unknown,
-        variables: { cloudJobId: number; draftPrompt: string },
+        variables: { runId: number; draftPrompt: string },
         context: unknown,
       ) => void;
     } | null,
@@ -266,15 +266,15 @@ vi.mock('./TaskStatus', () => ({
 import { PromptInput } from './PromptInput';
 import type { PromptInputHandle } from './PromptInput';
 
-function createCloudJob(
+function createTaskRun(
   id: number,
-  overrides: Partial<CloudJobDetail> = {},
-): CloudJobDetail {
+  overrides: Partial<TaskRunDetail> = {},
+): TaskRunDetail {
   return {
     id,
     taskId: `task-${id}`,
     ...overrides,
-  } as unknown as CloudJobDetail;
+  } as unknown as TaskRunDetail;
 }
 
 describe('PromptInput', () => {
@@ -285,7 +285,7 @@ describe('PromptInput', () => {
 
     latestMutationOptionsRef.current = null;
     const mutationResult = {
-      mutate: (variables: { cloudJobId: number; draftPrompt: string }) => {
+      mutate: (variables: { runId: number; draftPrompt: string }) => {
         mutateMock(variables);
 
         if (autoCompleteDraftSaveRef.current) {
@@ -412,7 +412,7 @@ describe('PromptInput', () => {
 
     render(
       <PromptInput
-        cloudJob={createCloudJob(42)}
+        taskRun={createTaskRun(42)}
         onFileSearchOpen={() => {}}
         onCommandSearchOpen={() => {}}
       />,
@@ -433,7 +433,7 @@ describe('PromptInput', () => {
 
     expect(mutateMock).toHaveBeenCalledTimes(1);
     expect(mutateMock).toHaveBeenCalledWith({
-      cloudJobId: 42,
+      runId: 42,
       draftPrompt: 'hello',
     });
   });
@@ -449,7 +449,7 @@ describe('PromptInput', () => {
 
     const { unmount } = render(
       <PromptInput
-        cloudJob={createCloudJob(7)}
+        taskRun={createTaskRun(7)}
         onFileSearchOpen={() => {}}
         onCommandSearchOpen={() => {}}
       />,
@@ -462,7 +462,7 @@ describe('PromptInput', () => {
 
     expect(mutateMock).toHaveBeenCalledTimes(1);
     expect(mutateMock).toHaveBeenCalledWith({
-      cloudJobId: 7,
+      runId: 7,
       draftPrompt: 'draft in progress',
     });
   });
@@ -479,7 +479,7 @@ describe('PromptInput', () => {
 
     render(
       <PromptInput
-        cloudJob={createCloudJob(9)}
+        taskRun={createTaskRun(9)}
         onFileSearchOpen={() => {}}
         onCommandSearchOpen={() => {}}
       />,
@@ -493,11 +493,11 @@ describe('PromptInput', () => {
 
     expect(mutateMock).toHaveBeenCalledTimes(2);
     expect(mutateMock).toHaveBeenNthCalledWith(1, {
-      cloudJobId: 9,
+      runId: 9,
       draftPrompt: 'retry me',
     });
     expect(mutateMock).toHaveBeenNthCalledWith(2, {
-      cloudJobId: 9,
+      runId: 9,
       draftPrompt: 'retry me',
     });
 
@@ -505,7 +505,7 @@ describe('PromptInput', () => {
       latestMutationOptionsRef.current?.onSuccess?.(
         undefined,
         {
-          cloudJobId: 9,
+          runId: 9,
           draftPrompt: 'retry me',
         },
         undefined,
@@ -531,7 +531,7 @@ describe('PromptInput', () => {
     render(
       <PromptInput
         ref={promptInputRef}
-        cloudJob={createCloudJob(13)}
+        taskRun={createTaskRun(13)}
         onFileSearchOpen={() => {}}
         onCommandSearchOpen={() => {}}
       />,
@@ -544,7 +544,7 @@ describe('PromptInput', () => {
 
     expect(mutateMock).toHaveBeenCalledTimes(1);
     expect(mutateMock).toHaveBeenCalledWith({
-      cloudJobId: 13,
+      runId: 13,
       draftPrompt: '/review ',
     });
   });
@@ -567,7 +567,7 @@ describe('PromptInput', () => {
 
     render(
       <PromptInput
-        cloudJob={createCloudJob(42, { taskId: 'task-web-send' })}
+        taskRun={createTaskRun(42, { taskId: 'task-web-send' })}
         onFileSearchOpen={() => {}}
         onCommandSearchOpen={() => {}}
       />,
@@ -629,7 +629,7 @@ describe('PromptInput', () => {
 
     render(
       <PromptInput
-        cloudJob={createCloudJob(42, { taskId: 'task-web-send' })}
+        taskRun={createTaskRun(42, { taskId: 'task-web-send' })}
         onFileSearchOpen={() => {}}
         onCommandSearchOpen={() => {}}
       />,
@@ -678,7 +678,7 @@ describe('PromptInput', () => {
 
     render(
       <PromptInput
-        cloudJob={createCloudJob(42, { taskId: 'task-running-send' })}
+        taskRun={createTaskRun(42, { taskId: 'task-running-send' })}
         onFileSearchOpen={() => {}}
         onCommandSearchOpen={() => {}}
       />,
@@ -738,7 +738,7 @@ describe('PromptInput', () => {
 
     render(
       <PromptInput
-        cloudJob={createCloudJob(42, { taskId: 'task-running-send' })}
+        taskRun={createTaskRun(42, { taskId: 'task-running-send' })}
         onFileSearchOpen={() => {}}
         onCommandSearchOpen={() => {}}
       />,
@@ -785,7 +785,7 @@ describe('PromptInput', () => {
 
     render(
       <PromptInput
-        cloudJob={createCloudJob(42, { taskId: 'task-running-send' })}
+        taskRun={createTaskRun(42, { taskId: 'task-running-send' })}
         onFileSearchOpen={() => {}}
         onCommandSearchOpen={() => {}}
       />,
@@ -823,7 +823,7 @@ describe('PromptInput', () => {
 
     render(
       <PromptInput
-        cloudJob={createCloudJob(42, { taskId: 'task-web-send' })}
+        taskRun={createTaskRun(42, { taskId: 'task-web-send' })}
         onFileSearchOpen={() => {}}
         onCommandSearchOpen={() => {}}
       />,
@@ -863,7 +863,7 @@ describe('PromptInput', () => {
 
     render(
       <PromptInput
-        cloudJob={createCloudJob(42, { taskId: 'task-running-send' })}
+        taskRun={createTaskRun(42, { taskId: 'task-running-send' })}
         onFileSearchOpen={() => {}}
         onCommandSearchOpen={() => {}}
       />,

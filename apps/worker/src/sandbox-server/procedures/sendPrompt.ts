@@ -71,7 +71,7 @@ export const sendPrompt = publicProcedure
   .input(sendPromptInputSchema)
   .mutation(async ({ input, ctx }) => {
     const userId =
-      // Deployment-principal job tokens have a null userId; treat them as no
+      // Deployment-principal run tokens have a null userId; treat them as no
       // acting user rather than fabricating one.
       ctx.auth && 'userId' in ctx.auth
         ? (ctx.auth.userId ?? undefined)
@@ -113,7 +113,7 @@ export const sendPrompt = publicProcedure
       try {
         if (input.source === 'web') {
           trackedSlackQuote = await trackLatestUserMessageForSlackThreadQuote({
-            cloudJobId: ctx.cloudJobId,
+            runId: ctx.runId,
             text: resolvedPrompt,
             userName: input.userName,
             logPrefix: 'sendPrompt',
@@ -149,7 +149,7 @@ export const sendPrompt = publicProcedure
       } catch (error) {
         if (trackedSlackQuote) {
           await clearLatestUserMessageForSlackThreadQuote({
-            cloudJobId: ctx.cloudJobId,
+            runId: ctx.runId,
             logPrefix: 'sendPrompt',
             warn: (message) => ctx.harnessLogger?.warn(message),
           });
@@ -171,7 +171,7 @@ export const sendPrompt = publicProcedure
     try {
       if (input.source === 'web') {
         trackedSlackQuote = await trackLatestUserMessageForSlackThreadQuote({
-          cloudJobId: ctx.cloudJobId,
+          runId: ctx.runId,
           text: resolvedPrompt,
           userName: input.userName,
           logPrefix: 'sendPrompt',
@@ -215,7 +215,7 @@ export const sendPrompt = publicProcedure
     } catch (error) {
       if (trackedSlackQuote) {
         await clearLatestUserMessageForSlackThreadQuote({
-          cloudJobId: ctx.cloudJobId,
+          runId: ctx.runId,
           logPrefix: 'sendPrompt',
           warn: (message) => ctx.harnessLogger?.warn(message),
         });

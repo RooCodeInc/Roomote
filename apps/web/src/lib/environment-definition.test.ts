@@ -237,7 +237,7 @@ describe('environment definition helpers', () => {
     },
   );
 
-  it('reads the linked environment id from cloud job payload metadata', () => {
+  it('reads the linked environment id from task run payload metadata', () => {
     expect(
       getEnvironmentDefinitionIdFromPayload({
         environmentDefinitionId: 'env-123',

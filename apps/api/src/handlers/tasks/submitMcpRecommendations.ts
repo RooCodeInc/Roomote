@@ -112,10 +112,7 @@ export async function submitMcpRecommendations(
       return c.json({ error: 'Task not found' }, 404);
     }
 
-    if (
-      !('cloudJobId' in auth.authContext) ||
-      auth.authContext.cloudJobId !== run.id
-    ) {
+    if (!('runId' in auth.authContext) || auth.authContext.runId !== run.id) {
       return c.json({ error: 'Task access denied' }, 403);
     }
 

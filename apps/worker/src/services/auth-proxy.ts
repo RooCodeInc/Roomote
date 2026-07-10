@@ -438,7 +438,7 @@ export function startAuthProxy(config: {
   skipAuth?: boolean;
   /**
    * Trusted bypass value forwarded by preview-proxy after it already validated
-   * browser access for this cloud job.
+   * browser access for this task run.
    */
   authBypassHeaderValue?: string;
   /**

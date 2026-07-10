@@ -17,7 +17,7 @@ import { taskRuns, taskPullRequests } from '../schema';
 export const DEFAULT_CONFLICT_RESOLUTION_IDLE_WINDOW_MS = 30 * 60 * 1000;
 
 export interface ActiveGitHubBranchWork {
-  jobId: number;
+  runId: number;
   taskId: string;
   type: TaskPayloadKind;
   status: RunStatus;
@@ -35,7 +35,7 @@ const ACTIVE_WORK_STATUSES = [
 ] as const;
 
 const ACTIVE_WORK_COLUMNS = {
-  jobId: taskRuns.id,
+  runId: taskRuns.id,
   taskId: taskRuns.taskId,
   type: taskRuns.payloadKind,
   status: taskRuns.status,
@@ -83,7 +83,7 @@ type RunReuseMetadata = {
 
 function pickActiveWork(
   rows: Array<{
-    jobId: number;
+    runId: number;
     taskId: string;
     type: TaskPayloadKind;
     status: RunStatus;
@@ -100,7 +100,7 @@ function pickActiveWork(
   }
 
   return {
-    jobId: activeRow.jobId,
+    runId: activeRow.runId,
     taskId: activeRow.taskId,
     type: activeRow.type,
     status: activeRow.status,
@@ -110,8 +110,8 @@ function pickActiveWork(
 }
 
 /**
- * Returns the newest active Roomote job that appears to be working on the same
- * PR or branch. Conflict-resolver jobs themselves are excluded because they are
+ * Returns the newest active Roomote run that appears to be working on the same
+ * PR or branch. Conflict-resolver runs themselves are excluded because they are
  * handled separately by the dedicated dedup guard.
  *
  * PR association lives exclusively on `task_pull_requests` (populated at
@@ -179,7 +179,7 @@ export async function findActiveGitHubBranchWork({
 }
 
 /**
- * Returns the newest active Roomote job that can safely continue follow-up
+ * Returns the newest active Roomote run that can safely continue follow-up
  * work on the same PR branch without introducing a second writer or second
  * PR-scoped thread when an active owner already exists.
  */
@@ -243,9 +243,9 @@ export async function findReusableGitHubPrFollowUpOwner({
 /**
  * Returns the newest active PR review task for the same pull request.
  *
- * `sourceControlProvider` optionally scopes the lookup to review jobs enqueued
+ * `sourceControlProvider` optionally scopes the lookup to review runs enqueued
  * for a specific provider (e.g. `'gitlab'`, `'gitea'`, `'ado'`). Without it the
- * lookup matches review jobs for any provider, which is safe because
+ * lookup matches review runs for any provider, which is safe because
  * `(repo, prNumber, headSha)` is specific enough in practice. Callers that know
  * the provider should pass it so a same-named repo/PR across two providers can
  * never cross-match.
@@ -314,7 +314,7 @@ async function fetchRunReuseMetadata(
 async function isReusableFollowUpOwnerCandidate(
   row: ActiveFollowUpOwnerCandidate,
 ): Promise<boolean> {
-  return isReusableFollowUpOwnerJob({
+  return isReusableFollowUpOwnerRun({
     id: row.id,
     type: row.type,
     payload: row.payload,
@@ -323,7 +323,7 @@ async function isReusableFollowUpOwnerCandidate(
   });
 }
 
-async function fetchLatestReusableFollowUpOwnerJob(
+async function fetchLatestReusableFollowUpOwnerRun(
   taskId: string,
 ): Promise<ActiveFollowUpOwnerCandidate | null> {
   const row = await db.query.taskRuns.findFirst({
@@ -357,17 +357,17 @@ async function fetchLatestReusableFollowUpOwnerJob(
   };
 }
 
-async function isReusableFollowUpOwnerJob(
-  job: RunReuseMetadata,
+async function isReusableFollowUpOwnerRun(
+  run: RunReuseMetadata,
   visitedIds = new Set<number>(),
 ): Promise<boolean> {
-  switch (job.type) {
+  switch (run.type) {
     case TaskPayloadKind.StandardTask:
     case TaskPayloadKind.SlackAppMention:
     case TaskPayloadKind.LinearAgentSession:
       return true;
     case TaskPayloadKind.SnapshotResume: {
-      const sourceRunId = job.sourceRunId;
+      const sourceRunId = run.sourceRunId;
 
       if (!sourceRunId || visitedIds.has(sourceRunId)) {
         return false;
@@ -375,13 +375,13 @@ async function isReusableFollowUpOwnerJob(
 
       visitedIds.add(sourceRunId);
 
-      const sourceJob = await fetchRunReuseMetadata(sourceRunId);
+      const sourceRun = await fetchRunReuseMetadata(sourceRunId);
 
-      if (!sourceJob) {
+      if (!sourceRun) {
         return false;
       }
 
-      return isReusableFollowUpOwnerJob(sourceJob, visitedIds);
+      return isReusableFollowUpOwnerRun(sourceRun, visitedIds);
     }
     default:
       return false;
@@ -401,39 +401,39 @@ async function pickReusableFollowUpOwner(
 
     seenTaskIds.add(row.taskId);
 
-    const latestJob = await fetchLatestReusableFollowUpOwnerJob(row.taskId);
+    const latestRun = await fetchLatestReusableFollowUpOwnerRun(row.taskId);
 
-    if (!latestJob) {
+    if (!latestRun) {
       continue;
     }
 
-    if (!(await isReusableFollowUpOwnerCandidate(latestJob))) {
+    if (!(await isReusableFollowUpOwnerCandidate(latestRun))) {
       continue;
     }
 
-    if (!isExitedRunStatus(latestJob.status)) {
+    if (!isExitedRunStatus(latestRun.status)) {
       return {
-        jobId: latestJob.id,
-        taskId: latestJob.taskId,
-        type: latestJob.type,
-        status: latestJob.status,
-        taskPhase: latestJob.taskPhase,
+        runId: latestRun.id,
+        taskId: latestRun.taskId,
+        type: latestRun.type,
+        status: latestRun.status,
+        taskPhase: latestRun.taskPhase,
         match,
         delivery: 'attach',
       };
     }
 
     if (
-      latestJob.snapshotId &&
-      isResumableTaskPayloadKind(latestJob.type) &&
-      !isActivelyRunningTask(latestJob.status, latestJob.taskPhase)
+      latestRun.snapshotId &&
+      isResumableTaskPayloadKind(latestRun.type) &&
+      !isActivelyRunningTask(latestRun.status, latestRun.taskPhase)
     ) {
       return {
-        jobId: latestJob.id,
-        taskId: latestJob.taskId,
-        type: latestJob.type,
-        status: latestJob.status,
-        taskPhase: latestJob.taskPhase,
+        runId: latestRun.id,
+        taskId: latestRun.taskId,
+        type: latestRun.type,
+        status: latestRun.status,
+        taskPhase: latestRun.taskPhase,
         match,
         delivery: 'resume',
       };

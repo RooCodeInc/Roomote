@@ -14,16 +14,16 @@ function escapeForLog(value: string): string {
 }
 
 /**
- * Queue a Linear session message for processing by an active job.
+ * Queue a Linear session message for processing by an active task run.
  *
  * This is used when a follow-up message arrives for a session that
- * already has an active job running. The job will poll for new messages.
+ * already has an active task run running. The run will poll for new messages.
  *
- * Note: Uses cloudJobId as the key (matching getLinearMessages) to ensure
- * the worker can retrieve messages by job ID.
+ * Note: Uses runId as the key (matching getLinearMessages) to ensure
+ * the worker can retrieve messages by run ID.
  */
 export async function queueLinearMessage(
-  cloudJobId: number,
+  runId: number,
   sessionId: string,
   payload: AgentSessionEventPayload,
   userId?: string,
@@ -38,7 +38,7 @@ export async function queueLinearMessage(
   };
 
   const redis = getRedis();
-  const key = `${LINEAR_MESSAGE_QUEUE_PREFIX}${cloudJobId}`;
+  const key = `${LINEAR_MESSAGE_QUEUE_PREFIX}${runId}`;
 
   // Push the message to the list
   await redis.rpush(key, JSON.stringify(message));
@@ -47,14 +47,14 @@ export async function queueLinearMessage(
   await redis.expire(key, LINEAR_MESSAGE_QUEUE_TTL);
 
   console.log(
-    `[queueLinearMessage] Queued message for cloud job ${cloudJobId} (session ${escapeForLog(sessionId)})`,
+    `[queueLinearMessage] Queued message for task run ${runId} (session ${escapeForLog(sessionId)})`,
   );
 
   return true;
 }
 
 export async function prependLinearMessages(
-  cloudJobId: number,
+  runId: number,
   messages: LinearSessionMessage[],
 ): Promise<void> {
   if (messages.length === 0) {
@@ -62,7 +62,7 @@ export async function prependLinearMessages(
   }
 
   const redis = getRedis();
-  const key = `${LINEAR_MESSAGE_QUEUE_PREFIX}${cloudJobId}`;
+  const key = `${LINEAR_MESSAGE_QUEUE_PREFIX}${runId}`;
   const multi = redis.multi();
 
   for (const message of [...messages].reverse()) {
@@ -73,21 +73,17 @@ export async function prependLinearMessages(
   await multi.exec();
 
   console.log(
-    `[prependLinearMessages] Requeued ${messages.length} message(s) for cloud job ${cloudJobId}`,
+    `[prependLinearMessages] Requeued ${messages.length} message(s) for task run ${runId}`,
   );
 }
 
 /**
- * Clear all queued messages for a Linear cloud job.
- * Used when a job is completed or cancelled.
+ * Clear all queued messages for a Linear task run.
+ * Used when a run is completed or cancelled.
  */
-export async function clearLinearMessageQueue(
-  cloudJobId: number,
-): Promise<void> {
+export async function clearLinearMessageQueue(runId: number): Promise<void> {
   const redis = getRedis();
-  const key = `${LINEAR_MESSAGE_QUEUE_PREFIX}${cloudJobId}`;
+  const key = `${LINEAR_MESSAGE_QUEUE_PREFIX}${runId}`;
   await redis.del(key);
-  console.log(
-    `[clearLinearMessageQueue] Cleared queue for cloud job ${cloudJobId}`,
-  );
+  console.log(`[clearLinearMessageQueue] Cleared queue for task run ${runId}`);
 }

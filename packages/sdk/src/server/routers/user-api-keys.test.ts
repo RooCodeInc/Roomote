@@ -1,13 +1,13 @@
-import type { AuthTokenContext, JobTokenContext } from '@roomote/types';
+import type { AuthTokenContext, RunTokenContext } from '@roomote/types';
 
 const {
-  mockFindCloudJob,
+  mockFindTaskRun,
   mockFindUserApiKey,
   mockDecryptText,
   mockEq,
   mockAnd,
 } = vi.hoisted(() => ({
-  mockFindCloudJob: vi.fn(),
+  mockFindTaskRun: vi.fn(),
   mockFindUserApiKey: vi.fn(),
   mockDecryptText: vi.fn((value: string) => `decrypted-${value}`),
   mockEq: vi.fn((column: unknown, value: unknown) => ({ column, value })),
@@ -17,7 +17,7 @@ const {
 vi.mock('@roomote/db/server', () => ({
   db: {
     query: {
-      taskRuns: { findFirst: mockFindCloudJob },
+      taskRuns: { findFirst: mockFindTaskRun },
       userApiKeys: { findFirst: mockFindUserApiKey },
     },
   },
@@ -49,11 +49,11 @@ function createAuthCaller() {
 }
 
 function createJobCaller() {
-  const auth: JobTokenContext = {
-    cloudJobId: 42,
+  const auth: RunTokenContext = {
+    runId: 42,
     userId: 'owner-user',
     principal: 'user',
-    tokenType: 'cj',
+    tokenType: 'run',
     version: 1,
   };
 
@@ -65,7 +65,7 @@ describe('userApiKeysRouter', () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
-    mockFindCloudJob.mockResolvedValue({
+    mockFindTaskRun.mockResolvedValue({
       userId: 'owner-user',
       actingUserId: null,
     });
@@ -89,8 +89,8 @@ describe('userApiKeysRouter', () => {
     );
   });
 
-  it('uses taskRuns.actingUserId for job-token key lookups', async () => {
-    mockFindCloudJob.mockResolvedValueOnce({
+  it('uses taskRuns.actingUserId for run-token key lookups', async () => {
+    mockFindTaskRun.mockResolvedValueOnce({
       actingUserId: 'actor-user',
     });
     mockFindUserApiKey.mockResolvedValueOnce({ apiKey: 'encrypted-api-key' });
@@ -114,19 +114,19 @@ describe('userApiKeysRouter', () => {
   });
 
   it('cannot read a victim user key after a blocked acting-user reassignment', async () => {
-    // Confused-deputy chain (flagged in PR #80 review): a job token is held by
+    // Confused-deputy chain (flagged in PR #80 review): a run token is held by
     // the sandbox. The exploit was: (1) reassign the run's actingUserId to a
-    // victim via cloudJobs.update, then (2) read the victim's decrypted key
+    // victim via taskRuns.update, then (2) read the victim's decrypted key
     // here, because getDecryptedKey resolves the effective user from
     // task_runs.actingUserId.
     //
-    // Step (1) is now blocked: cloudJobs.update strips actingUserId (asserted
-    // in cloud-jobs.test.ts). So the persisted actingUserId still reflects the
+    // Step (1) is now blocked: taskRuns.update strips actingUserId (asserted
+    // in task-runs.test.ts). So the persisted actingUserId still reflects the
     // legitimate actor the trusted server-side writers set — never the
     // attacker-chosen victim. This test pins the downstream half of the chain:
     // the effective user comes only from the persisted actingUserId, so the
     // key lookup targets the legitimate actor and never the victim.
-    mockFindCloudJob.mockResolvedValueOnce({
+    mockFindTaskRun.mockResolvedValueOnce({
       // The value that survives in the DB is the legitimate actor, because the
       // sandbox's reassignment to 'victim-user' was stripped upstream.
       actingUserId: 'owner-user',

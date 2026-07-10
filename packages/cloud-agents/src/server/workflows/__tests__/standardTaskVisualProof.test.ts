@@ -9,7 +9,7 @@ describe('Standard Task visual-proof delegation', () => {
     const { harnessInstructions } = standardTask({
       description: 'Implement behavior change',
       repo: 'Roomote/example-app',
-      cloudJobUrl: 'https://example.com/task/123',
+      taskRunUrl: 'https://example.com/task/123',
     });
 
     expect(harnessInstructions).toContain(
@@ -39,13 +39,13 @@ describe('Standard Task visual-proof delegation', () => {
     const enabledInstructions = standardTask({
       description: 'Implement behavior change',
       repo: 'Roomote/example-app',
-      cloudJobUrl: 'https://example.com/task/123',
+      taskRunUrl: 'https://example.com/task/123',
       visualProofAutoScreencastEnabled: true,
     }).harnessInstructions;
     const disabledInstructions = standardTask({
       description: 'Implement behavior change',
       repo: 'Roomote/example-app',
-      cloudJobUrl: 'https://example.com/task/123',
+      taskRunUrl: 'https://example.com/task/123',
       visualProofAutoScreencastEnabled: false,
     }).harnessInstructions;
 
@@ -61,7 +61,7 @@ describe('Standard Task visual-proof delegation', () => {
     const baseInput = {
       description: 'Implement behavior change',
       repo: 'Roomote/example-app',
-      cloudJobUrl: 'https://example.com/task/123',
+      taskRunUrl: 'https://example.com/task/123',
     };
 
     const defaultInstructions = standardTask(baseInput).harnessInstructions;
@@ -85,7 +85,7 @@ describe('Standard Task visual-proof delegation', () => {
     const { harnessInstructions } = standardTask({
       description: 'Implement behavior change',
       repo: 'Roomote/example-app',
-      cloudJobUrl: 'https://example.com/task/123',
+      taskRunUrl: 'https://example.com/task/123',
       backgroundProofCaptureEnabled: true,
     });
 
@@ -131,7 +131,7 @@ describe('Standard Task visual-proof delegation', () => {
     const baseInput = {
       description: 'Implement behavior change',
       repo: 'Roomote/example-app',
-      cloudJobUrl: 'https://example.com/task/123',
+      taskRunUrl: 'https://example.com/task/123',
       interactiveMode: true,
     };
 

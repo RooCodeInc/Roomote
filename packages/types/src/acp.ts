@@ -15,7 +15,7 @@ import {
   asString,
   asStringOrNull,
 } from './primitives';
-import { isReasoningEffort } from './cloud-jobs';
+import { isReasoningEffort } from './task-runs';
 import { normalizeProviderUsageWorkflowPhase } from './provider-usage-workflow-phase';
 
 export const ACP_ENVELOPE_EVENT_TYPES = {

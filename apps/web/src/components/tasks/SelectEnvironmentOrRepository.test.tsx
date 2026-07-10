@@ -2,7 +2,7 @@ import { useEffect } from 'react';
 import { FormProvider, useForm, useFormContext } from 'react-hook-form';
 import { render, waitFor } from '@testing-library/react';
 
-import type { CreateCloudTask } from '@/types';
+import type { CreateTaskFormValues } from '@/types';
 
 import { SelectEnvironmentOrRepository } from './SelectEnvironmentOrRepository';
 
@@ -73,7 +73,7 @@ import { useAuthorizedUser } from '@/hooks/useUser';
 import { useWorkspaceStorage } from '@/hooks/useWorkspaceStorage';
 
 const REPOSITORY = 'Roomote/example-app';
-const DEFAULT_VALUES: CreateCloudTask = {
+const DEFAULT_VALUES: CreateTaskFormValues = {
   repository: '',
   branch: '',
   environmentId: undefined,
@@ -83,7 +83,7 @@ const DEFAULT_VALUES: CreateCloudTask = {
 };
 
 type WorkspaceSelectionValues = Pick<
-  CreateCloudTask,
+  CreateTaskFormValues,
   'repository' | 'environmentId' | 'branch'
 >;
 
@@ -92,7 +92,7 @@ const WorkspaceValuesProbe = ({
 }: {
   onChange: (values: WorkspaceSelectionValues) => void;
 }) => {
-  const { watch } = useFormContext<CreateCloudTask>();
+  const { watch } = useFormContext<CreateTaskFormValues>();
   const repository = watch('repository');
   const environmentId = watch('environmentId');
   const branch = watch('branch');
@@ -110,10 +110,10 @@ const SelectEnvironmentOrRepositoryHarness = ({
   onValuesChange,
 }: {
   allowAuto?: boolean;
-  defaultValues: Partial<CreateCloudTask>;
+  defaultValues: Partial<CreateTaskFormValues>;
   onValuesChange: (values: WorkspaceSelectionValues) => void;
 }) => {
-  const form = useForm<CreateCloudTask>({
+  const form = useForm<CreateTaskFormValues>({
     defaultValues: {
       ...DEFAULT_VALUES,
       ...defaultValues,

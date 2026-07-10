@@ -14,7 +14,7 @@ import { isMcpConnectionVercelConfig } from '@roomote/types';
 import type { Variables } from '../../../types';
 
 import {
-  isJobTokenContext,
+  isRunTokenContext,
   McpProxyError,
   type McpAuthContext,
 } from '../proxy-utils';
@@ -41,14 +41,14 @@ async function resolveVercelMcpAuth(
     );
   }
 
-  if (isJobTokenContext(authContext)) {
-    const cloudJob = await db.query.taskRuns.findFirst({
+  if (isRunTokenContext(authContext)) {
+    const taskRun = await db.query.taskRuns.findFirst({
       columns: { id: true },
-      where: eq(taskRuns.id, authContext.cloudJobId),
+      where: eq(taskRuns.id, authContext.runId),
     });
 
-    if (!cloudJob) {
-      throw new McpProxyError(404, 'Cloud job not found for this MCP token');
+    if (!taskRun) {
+      throw new McpProxyError(404, 'Task run not found for this MCP token');
     }
 
     // No principal equality check: the run-scoped token IS the authorization
@@ -61,14 +61,14 @@ async function resolveVercelMcpAuth(
 
     return {
       userId: authContext.userId,
-      tokenType: 'cj',
-      cloudJobId: authContext.cloudJobId,
+      tokenType: 'run',
+      runId: authContext.runId,
     };
   }
 
   throw new McpProxyError(
     403,
-    'Vercel MCP requires a cloud job token for server-side credential access',
+    'Vercel MCP requires a task run token for server-side credential access',
   );
 }
 

@@ -12,7 +12,7 @@ const { mockFindRuntimeStateById, mockCaptureWorkerException } = vi.hoisted(
 
 vi.mock('@roomote/sdk/client', () => ({
   sdk: {
-    cloudJobs: {
+    taskRuns: {
       findRuntimeStateById: mockFindRuntimeStateById,
     },
   },
@@ -24,7 +24,7 @@ vi.mock('../../monitoring/sentry', () => ({
 
 function createLogger(): HarnessLogger {
   return {
-    cloudJobId: 42,
+    runId: 42,
     filePath: '/tmp/harness.log',
     log: vi.fn(),
     info: vi.fn(),
@@ -41,9 +41,9 @@ function createListenerOptions(overrides?: {
   return {
     logger,
     options: {
-      cloudJob: {
+      taskRun: {
         id: 42,
-      } as ListenerOptions['cloudJob'],
+      } as ListenerOptions['taskRun'],
       state: {
         sessionId: overrides?.sessionId ?? 'task-1',
         lastMessageAt: undefined,
@@ -120,9 +120,9 @@ describe('createCancelInterval', () => {
 
       expect(mockCaptureWorkerException).toHaveBeenCalledWith(fetchError, {
         stage: 'listenForCancel',
-        cloudJobId: 42,
+        runId: 42,
         harnessSessionId: 'task-1',
-        sdkMethod: 'cloudJobs.findRuntimeStateById',
+        sdkMethod: 'taskRuns.findRuntimeStateById',
         trpcUrlOrigin: 'http://127.0.0.1:3001',
         trpcHostname: '127.0.0.1',
         isLoopbackTrpcUrl: true,
@@ -134,9 +134,9 @@ describe('createCancelInterval', () => {
         fetchError,
         {
           stage: 'listenForCancel',
-          cloudJobId: 42,
+          runId: 42,
           harnessSessionId: 'task-1',
-          sdkMethod: 'cloudJobs.findRuntimeStateById',
+          sdkMethod: 'taskRuns.findRuntimeStateById',
           trpcUrlOrigin: 'http://127.0.0.1:3001',
           trpcHostname: '127.0.0.1',
           isLoopbackTrpcUrl: true,

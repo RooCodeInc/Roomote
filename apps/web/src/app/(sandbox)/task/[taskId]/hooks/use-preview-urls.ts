@@ -1,7 +1,7 @@
 import { useMemo } from 'react';
 import { appendInitialPath } from '@roomote/types';
 
-import type { Run } from '@roomote/db';
+import type { TaskRun } from '@roomote/db';
 
 import { buildTaskPreviewUrls, getPrimaryPreviewUrlWithPath } from '@/lib';
 
@@ -52,7 +52,7 @@ export function usePreviewUrls({
   previewProxyBaseUrl,
 }: Partial<
   Pick<
-    Run,
+    TaskRun,
     | 'taskId'
     | 'machineDomains'
     | 'machineDomain'

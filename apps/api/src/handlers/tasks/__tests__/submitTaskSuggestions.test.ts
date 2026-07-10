@@ -1,6 +1,6 @@
 import { Hono } from 'hono';
 
-import { type JobTokenContext, TaskPayloadKind } from '@roomote/types';
+import { type RunTokenContext, TaskPayloadKind } from '@roomote/types';
 
 import type { Variables } from '../../../types';
 import { mcpAuthMiddleware } from '../../mcp/middleware';
@@ -206,7 +206,7 @@ vi.mock('@roomote/db/server', () => ({
   },
 }));
 
-function createApp(authContext: JobTokenContext) {
+function createApp(authContext: RunTokenContext) {
   const app = new Hono<{ Variables: Variables }>();
 
   app.use('*', async (c, next) => {
@@ -274,11 +274,11 @@ describe('submitTaskSuggestions', () => {
       initiatorAutomation: 'suggest_ideas',
     });
 
-    const authContext: JobTokenContext = {
-      cloudJobId: 1,
+    const authContext: RunTokenContext = {
+      runId: 1,
       userId: null,
       principal: 'user',
-      tokenType: 'cj',
+      tokenType: 'run',
       version: 1,
     };
     const app = createApp(authContext);
@@ -313,11 +313,11 @@ describe('submitTaskSuggestions', () => {
       initiatorAutomation: null,
     });
 
-    const authContext: JobTokenContext = {
-      cloudJobId: 1,
+    const authContext: RunTokenContext = {
+      runId: 1,
       userId: 'user-1',
       principal: 'user',
-      tokenType: 'cj',
+      tokenType: 'run',
       version: 1,
     };
     const app = createApp(authContext);
@@ -351,11 +351,11 @@ describe('submitTaskSuggestions', () => {
     // Telegram delivers, so Teams must NOT fire.
     vi.mocked(postScheduledSuggestionsToTelegram).mockResolvedValue(true);
 
-    const authContext: JobTokenContext = {
-      cloudJobId: 1,
+    const authContext: RunTokenContext = {
+      runId: 1,
       userId: null,
       principal: 'user',
-      tokenType: 'cj',
+      tokenType: 'run',
       version: 1,
     };
     const app = createApp(authContext);

@@ -9,8 +9,8 @@ export * from '../index';
 export { ROOMOTE_COMPACT_PROMPT } from '../compact-prompt';
 
 export * from './cloud-agent-workflow';
-export * from './cloud-job-id-coder';
-export * from './cloud-job-queue';
+export * from './task-url';
+export * from './task-run-queue';
 export * from './commit-author';
 export * from './repository-environment-coverage';
 export * from './ci-failure-triage-prompt';

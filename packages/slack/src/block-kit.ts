@@ -393,7 +393,7 @@ interface RoutingConfirmActionValue {
 }
 
 interface RetryFailedTaskActionValue {
-  cloudJobId: number;
+  runId: number;
 }
 
 interface PendingSlackMcpSetupInterruptData {
@@ -516,18 +516,18 @@ function parseRetryFailedTaskActionValue(
       !Array.isArray(parsed)
     ) {
       const parsedObject = parsed as Partial<{
-        cloudJobId: number | string;
+        runId: number | string;
       }>;
-      const cloudJobId =
-        typeof parsedObject.cloudJobId === 'number'
-          ? parsedObject.cloudJobId
-          : Number.parseInt(parsedObject.cloudJobId ?? '', 10);
+      const runId =
+        typeof parsedObject.runId === 'number'
+          ? parsedObject.runId
+          : Number.parseInt(parsedObject.runId ?? '', 10);
 
-      if (!Number.isInteger(cloudJobId) || cloudJobId <= 0) {
+      if (!Number.isInteger(runId) || runId <= 0) {
         return null;
       }
 
-      return { cloudJobId };
+      return { runId };
     }
   } catch {
     return null;
@@ -1260,7 +1260,7 @@ export async function showTaskConfiguration({
             routingUsed: true,
           });
 
-          if (startResult.reusedExistingJob) {
+          if (startResult.reusedExistingRun) {
             console.log(
               `[LLM Router] Reused active task for thread ${threadId}: ` +
                 `agent=${agentName}, workspace=${workspace.workspaceDisplayName}`,
@@ -1458,7 +1458,7 @@ export async function showTaskConfiguration({
           reusedExistingStartedImmediately: true,
         });
 
-        if (startResult.reusedExistingJob) {
+        if (startResult.reusedExistingRun) {
           return startResult.response;
         }
 
@@ -1906,8 +1906,8 @@ export async function handleTaskConfiguration(
       videoDescriptions: originalEvent.processedVideoDescriptions,
     });
 
-    // Cloud tasks originating from Slack run against the deployment-wide setup.
-    const cloudJob = await startSlackAppMentionTask({
+    // Tasks originating from Slack run against the deployment-wide setup.
+    const taskRun = await startSlackAppMentionTask({
       initiator: {
         kind: 'user',
         externalId: originalEvent.user,
@@ -1942,7 +1942,7 @@ export async function handleTaskConfiguration(
       },
     });
 
-    if (cloudJob.reusedExistingJob) {
+    if (taskRun.reusedExistingRun) {
       await postSlackInteractiveResponse(payload.response_url, {
         replace_original: true,
         blocks: buildExistingTaskQueuedBlocks(),
@@ -1995,13 +1995,13 @@ export async function handleTaskConfiguration(
     });
 
     const taskUrl = getSlackStartedMessageFollowUrl({
-      taskId: cloudJob.taskId,
+      taskId: taskRun.taskId,
     });
 
     const blocks = buildStartedBlocks({
       workspaceDisplayName,
-      cloudJobId: cloudJob.id,
-      taskId: cloudJob.taskId,
+      runId: taskRun.id,
+      taskId: taskRun.taskId,
       initiatingSlackUserId: payload.user.id,
       taskUrl,
     });
@@ -2012,8 +2012,8 @@ export async function handleTaskConfiguration(
       blocks,
     });
 
-    if (cloudJob.id) {
-      await setSlackStartedMessageTs(cloudJob.id, payload.message.ts, {
+    if (taskRun.id) {
+      await setSlackStartedMessageTs(taskRun.id, payload.message.ts, {
         agentName,
         initiatingSlackUserId: payload.user.id,
         workspaceDisplayName,
@@ -2046,7 +2046,7 @@ export async function handleTaskConfiguration(
 
 /**
  * Shared helper that resolves a workspace value (with prefix) into
- * the repo/environmentId/displayName needed to create a cloud job.
+ * the repo/environmentId/displayName needed to create a task run.
  */
 export async function resolveWorkspace(
   workspaceValueWithPrefix: string,
@@ -2152,7 +2152,7 @@ async function startImmediateSlackTask({
   routingUsed: boolean;
   reusedExistingStartedImmediately?: boolean;
 }): Promise<{
-  reusedExistingJob: boolean;
+  reusedExistingRun: boolean;
   response: ImmediateSlackTaskStartResponse;
 }> {
   const messageText = stripLeadingSlackProductMention(
@@ -2167,7 +2167,7 @@ async function startImmediateSlackTask({
     videoDescriptions: event.processedVideoDescriptions,
   });
 
-  const cloudJob = await startSlackAppMentionTask({
+  const taskRun = await startSlackAppMentionTask({
     initiator: {
       kind: 'user',
       externalId: event.user,
@@ -2210,7 +2210,7 @@ async function startImmediateSlackTask({
   deliveryTracker.track(event.ts);
   deliveryTracker.trackAll(threadMessages?.map((message) => message.ts) ?? []);
 
-  if (cloudJob.reusedExistingJob) {
+  if (taskRun.reusedExistingRun) {
     await postOrReplaceSlackMessage({
       slack,
       channel: event.channel,
@@ -2222,7 +2222,7 @@ async function startImmediateSlackTask({
     });
 
     return {
-      reusedExistingJob: true,
+      reusedExistingRun: true,
       response: {
         routingUsed,
         threadId,
@@ -2234,8 +2234,8 @@ async function startImmediateSlackTask({
   }
 
   await finishRoutedStart({
-    cloudJobId: cloudJob.id,
-    taskId: cloudJob.taskId,
+    runId: taskRun.id,
+    taskId: taskRun.taskId,
     taskDescription: taskText,
     userId: userMapping.userId,
     initiatingSlackUserId: event.user,
@@ -2256,7 +2256,7 @@ async function startImmediateSlackTask({
   });
 
   return {
-    reusedExistingJob: false,
+    reusedExistingRun: false,
     response: {
       routingUsed,
       threadId,
@@ -2286,10 +2286,10 @@ function buildExistingTaskQueuedBlocks(): SlackBlock[] {
 }
 
 /**
- * Creates the cloud job from routing prefill data and the original event.
+ * Creates the task run from routing prefill data and the original event.
  * Shared between OK-button, auto-confirm, and correction-confirm paths.
  */
-async function createJobFromPrefill({
+async function createRunFromPrefill({
   prefill,
   originalEvent,
   threadId,
@@ -2304,10 +2304,10 @@ async function createJobFromPrefill({
   slack: SlackNotifier;
   deliveryTracker: SlackThreadDeliveryTracker;
 }): Promise<{
-  cloudJobId: number | null;
+  runId: number | null;
   taskId: string | null;
   taskDescription: string;
-  reusedExistingJob: boolean;
+  reusedExistingRun: boolean;
 } | null> {
   const workspace = await resolveWorkspace(prefill.workspaceValue);
   if (!workspace) {
@@ -2331,7 +2331,7 @@ async function createJobFromPrefill({
     videoDescriptions: originalEvent.processedVideoDescriptions,
   });
 
-  const cloudJob = await startSlackAppMentionTask({
+  const taskRun = await startSlackAppMentionTask({
     initiator: {
       kind: 'user',
       externalId: originalEvent.user,
@@ -2379,10 +2379,10 @@ async function createJobFromPrefill({
   );
 
   return {
-    cloudJobId: cloudJob.id,
-    taskId: cloudJob.taskId,
+    runId: taskRun.id,
+    taskId: taskRun.taskId,
     taskDescription: taskText,
-    reusedExistingJob: cloudJob.reusedExistingJob,
+    reusedExistingRun: taskRun.reusedExistingRun,
   };
 }
 
@@ -2481,7 +2481,7 @@ export async function autoConfirmRouting(
   );
 
   try {
-    const result = await createJobFromPrefill({
+    const result = await createRunFromPrefill({
       prefill,
       originalEvent,
       threadId,
@@ -2491,11 +2491,11 @@ export async function autoConfirmRouting(
     });
 
     if (!result) {
-      console.error('[AutoConfirm] Failed to create job from prefill');
+      console.error('[AutoConfirm] Failed to create task run from prefill');
       return;
     }
 
-    if (result.reusedExistingJob) {
+    if (result.reusedExistingRun) {
       await postOrReplaceSlackMessage({
         slack,
         channel: prefill.channel,
@@ -2509,7 +2509,7 @@ export async function autoConfirmRouting(
     }
 
     await finishRoutedStart({
-      cloudJobId: result.cloudJobId,
+      runId: result.runId,
       taskId: result.taskId,
       taskDescription: result.taskDescription,
       userId: userMapping.userId,
@@ -2649,7 +2649,7 @@ export async function handleSlackRoutingCorrection({
     }
 
     try {
-      const result = await createJobFromPrefill({
+      const result = await createRunFromPrefill({
         prefill: oldPrefill,
         originalEvent,
         threadId,
@@ -2660,12 +2660,12 @@ export async function handleSlackRoutingCorrection({
 
       if (!result) {
         console.error(
-          '[RoutingCorrection] Failed to create job from prefill on confirm',
+          '[RoutingCorrection] Failed to create task run from prefill on confirm',
         );
         return { handled: true };
       }
 
-      if (result.reusedExistingJob) {
+      if (result.reusedExistingRun) {
         await postOrReplaceSlackMessage({
           slack,
           channel: oldPrefill.channel,
@@ -2679,7 +2679,7 @@ export async function handleSlackRoutingCorrection({
       }
 
       await finishRoutedStart({
-        cloudJobId: result.cloudJobId,
+        runId: result.runId,
         taskId: result.taskId,
         taskDescription: result.taskDescription,
         userId: userMapping.userId,
@@ -3035,7 +3035,7 @@ export async function handleRoutingConfirmOk(payload: SlackInteractivePayload) {
   );
 
   try {
-    const result = await createJobFromPrefill({
+    const result = await createRunFromPrefill({
       prefill,
       originalEvent,
       threadId,
@@ -3045,11 +3045,13 @@ export async function handleRoutingConfirmOk(payload: SlackInteractivePayload) {
     });
 
     if (!result) {
-      console.error('[RoutingConfirmOk] Failed to create job from prefill');
+      console.error(
+        '[RoutingConfirmOk] Failed to create task run from prefill',
+      );
       return;
     }
 
-    if (result.reusedExistingJob) {
+    if (result.reusedExistingRun) {
       await postSlackInteractiveResponse(payload.response_url, {
         replace_original: true,
         blocks: buildExistingTaskQueuedBlocks(),
@@ -3058,7 +3060,7 @@ export async function handleRoutingConfirmOk(payload: SlackInteractivePayload) {
     }
 
     await finishRoutedStart({
-      cloudJobId: result.cloudJobId,
+      runId: result.runId,
       taskId: result.taskId,
       taskDescription: result.taskDescription,
       userId: userMapping.userId,
@@ -3252,11 +3254,11 @@ export async function handleRetryFailedTask(
       : null;
 
   if (!actionValue) {
-    console.error('❌ No cloudJobId found in retry action');
+    console.error('❌ No runId found in retry action');
     return;
   }
 
-  const retryJob = await db.query.taskRuns.findFirst({
+  const retryRun = await db.query.taskRuns.findFirst({
     columns: {
       id: true,
       taskId: true,
@@ -3264,10 +3266,10 @@ export async function handleRetryFailedTask(
       actingUserId: true,
       payload: true,
     },
-    where: eq(taskRuns.id, actionValue.cloudJobId),
+    where: eq(taskRuns.id, actionValue.runId),
   });
 
-  if (!retryJob) {
+  if (!retryRun) {
     await postSlackInteractiveResponse(payload.response_url, {
       replace_original: false,
       text: 'I could not find the failed task to retry.',
@@ -3275,7 +3277,7 @@ export async function handleRetryFailedTask(
     return;
   }
 
-  if (retryJob.payloadKind !== TaskPayloadKind.SlackAppMention) {
+  if (retryRun.payloadKind !== TaskPayloadKind.SlackAppMention) {
     await postSlackInteractiveResponse(payload.response_url, {
       replace_original: false,
       text: 'I could not recover the original Slack task details for that retry.',
@@ -3283,7 +3285,7 @@ export async function handleRetryFailedTask(
     return;
   }
 
-  const originalPayload = retryJob.payload as TaskPayload<
+  const originalPayload = retryRun.payload as TaskPayload<
     typeof TaskPayloadKind.SlackAppMention
   >;
 
@@ -3306,9 +3308,9 @@ export async function handleRetryFailedTask(
   // acting user for launches that resolved the sender only after start.
   const retryTask = await db.query.tasks.findFirst({
     columns: { initiatorUserId: true },
-    where: eq(tasks.id, retryJob.taskId),
+    where: eq(tasks.id, retryRun.taskId),
   });
-  const retryUserId = retryTask?.initiatorUserId ?? retryJob.actingUserId;
+  const retryUserId = retryTask?.initiatorUserId ?? retryRun.actingUserId;
 
   if (typeof retryUserId !== 'string' || retryUserId.length === 0) {
     await postSlackInteractiveResponse(payload.response_url, {
@@ -3373,7 +3375,7 @@ export async function handleRetryFailedTask(
       ? getTaskModelDisplayName(modelId)
       : undefined;
 
-    const cloudJob = await startSlackAppMentionTask({
+    const taskRun = await startSlackAppMentionTask({
       initiator: {
         kind: 'user',
         externalId: originalPayload.user,
@@ -3415,23 +3417,23 @@ export async function handleRetryFailedTask(
     });
 
     const taskUrl = getSlackStartedMessageFollowUrl({
-      taskId: cloudJob.taskId,
+      taskId: taskRun.taskId,
     });
     await postSlackInteractiveResponse(payload.response_url, {
       replace_original: true,
       blocks: buildStartedBlocks({
         workspaceDisplayName,
         modelDisplayName,
-        cloudJobId: cloudJob.id,
-        taskId: cloudJob.taskId,
+        runId: taskRun.id,
+        taskId: taskRun.taskId,
         initiatingSlackUserId: originalPayload.user,
         taskUrl,
         readinessNote: originalPayload.readinessMessage,
       }),
     });
 
-    if (cloudJob.id) {
-      await setSlackStartedMessageTs(cloudJob.id, payload.message.ts, {
+    if (taskRun.id) {
+      await setSlackStartedMessageTs(taskRun.id, payload.message.ts, {
         agentName: AGENT_DISPLAY_NAME,
         initiatingSlackUserId: originalPayload.user,
         workspaceDisplayName,
@@ -3448,7 +3450,7 @@ export async function handleRetryFailedTask(
     );
   } catch (error) {
     console.error(
-      `[handleRetryFailedTask] Failed to retry cloud job ${actionValue.cloudJobId}: ${
+      `[handleRetryFailedTask] Failed to retry task run ${actionValue.runId}: ${
         error instanceof Error ? error.message : String(error)
       }`,
     );

@@ -6,7 +6,7 @@ const {
   answerCallbackQueryMock,
   authUsersFindFirstMock,
   buildTelegramRoutingContextMock,
-  cloudJobsFindFirstMock,
+  taskRunsFindFirstMock,
   consumeLinkCodeMock,
   restoreLinkCodeMock,
   editMessageReplyMarkupMock,
@@ -27,7 +27,7 @@ const {
   redisSetMock,
   routeTaskMock,
   setLatestInboundMessageIdMock,
-  stopTaskJobMock,
+  stopTaskRunMock,
   updateMock,
   updateReturningMock,
   usersFindFirstMock,
@@ -37,7 +37,7 @@ const {
   answerCallbackQueryMock: vi.fn(),
   authUsersFindFirstMock: vi.fn(),
   buildTelegramRoutingContextMock: vi.fn(),
-  cloudJobsFindFirstMock: vi.fn(),
+  taskRunsFindFirstMock: vi.fn(),
   consumeLinkCodeMock: vi.fn(),
   restoreLinkCodeMock: vi.fn(),
   editMessageReplyMarkupMock: vi.fn(),
@@ -64,7 +64,7 @@ const {
   redisSetMock: vi.fn(),
   routeTaskMock: vi.fn(),
   setLatestInboundMessageIdMock: vi.fn(),
-  stopTaskJobMock: vi.fn(),
+  stopTaskRunMock: vi.fn(),
   updateMock: vi.fn(),
   updateReturningMock: vi.fn(),
   usersFindFirstMock: vi.fn(),
@@ -109,7 +109,7 @@ vi.mock('@roomote/db/server', () => ({
   db: {
     insert: insertMock,
     update: updateMock,
-    // The Telegram job lookups moved from db.query.cloudJobs.findFirst to
+    // The Telegram job lookups moved from db.query.taskRuns.findFirst to
     // db.select(...).from(taskRuns).innerJoin(tasks). Adapt the select chain
     // onto the same sequential mock queue so per-test row sequences keep
     // working; legacy `userId` keys map to run actingUserId.
@@ -120,7 +120,7 @@ vi.mock('@roomote/db/server', () => ({
         where: () => chain,
         orderBy: () => chain,
         limit: async () => {
-          const row = (await cloudJobsFindFirstMock()) as Record<
+          const row = (await taskRunsFindFirstMock()) as Record<
             string,
             unknown
           > | null;
@@ -153,7 +153,7 @@ vi.mock('@roomote/db/server', () => ({
         findFirst: environmentsFindFirstMock,
       },
       taskRuns: {
-        findFirst: cloudJobsFindFirstMock,
+        findFirst: taskRunsFindFirstMock,
       },
       users: {
         findFirst: usersFindFirstMock,
@@ -248,7 +248,7 @@ vi.mock('@roomote/communication/telegram-provider', () => ({
 }));
 
 vi.mock('../../tasks/task-stop.js', () => ({
-  stopTaskJob: stopTaskJobMock,
+  stopTaskRun: stopTaskRunMock,
 }));
 
 vi.mock('@roomote/cloud-agents/server', () => ({
@@ -325,7 +325,7 @@ describe('Telegram webhook handler', () => {
     // later tests do not inherit stale values when the whole suite runs.
     authUsersFindFirstMock.mockReset();
     usersFindFirstMock.mockReset();
-    cloudJobsFindFirstMock.mockReset();
+    taskRunsFindFirstMock.mockReset();
     telegramMappingsFindFirstMock.mockReset();
     consumeLinkCodeMock.mockReset();
 
@@ -344,7 +344,7 @@ describe('Telegram webhook handler', () => {
     setLatestInboundMessageIdMock.mockResolvedValue(undefined);
     authUsersFindFirstMock.mockResolvedValue(null);
     usersFindFirstMock.mockResolvedValue(null);
-    cloudJobsFindFirstMock.mockResolvedValue(null);
+    taskRunsFindFirstMock.mockResolvedValue(null);
     telegramMappingsFindFirstMock.mockResolvedValue(null);
     consumeLinkCodeMock.mockResolvedValue(null);
     insertMock.mockReturnValue({ values: insertValuesMock });
@@ -391,7 +391,7 @@ describe('Telegram webhook handler', () => {
       300,
       'NX',
     );
-    expect(cloudJobsFindFirstMock).not.toHaveBeenCalled();
+    expect(taskRunsFindFirstMock).not.toHaveBeenCalled();
     expect(queueCommunicationMessageMock).not.toHaveBeenCalled();
     expect(enqueueTaskMock).not.toHaveBeenCalled();
     expect(postMessageMock).toHaveBeenCalledWith(
@@ -574,9 +574,9 @@ describe('Telegram webhook handler', () => {
     );
   });
 
-  it('queues active-job messages for a linked sender', async () => {
+  it('queues active-run messages for a linked sender', async () => {
     mockTelegramLinkedSender();
-    cloudJobsFindFirstMock.mockResolvedValueOnce({
+    taskRunsFindFirstMock.mockResolvedValueOnce({
       id: 77,
       status: 'running',
       machineId: 'machine-1',
@@ -589,7 +589,7 @@ describe('Telegram webhook handler', () => {
     await expect(response.json()).resolves.toEqual({
       ok: true,
       queued: true,
-      cloudJobId: 77,
+      runId: 77,
     });
     expect(response.status).toBe(200);
     expect(queueCommunicationMessageMock).toHaveBeenCalledWith('telegram', 77, {
@@ -609,7 +609,7 @@ describe('Telegram webhook handler', () => {
 
   it('starts new Telegram tasks as the linked sender', async () => {
     mockTelegramLinkedSender('launch-owner-2');
-    cloudJobsFindFirstMock
+    taskRunsFindFirstMock
       .mockResolvedValueOnce(null)
       .mockResolvedValueOnce(null);
 
@@ -625,7 +625,7 @@ describe('Telegram webhook handler', () => {
     await expect(response.json()).resolves.toEqual({
       ok: true,
       started: true,
-      cloudJobId: 88,
+      runId: 88,
     });
     expect(response.status).toBe(200);
     expect(buildTelegramRoutingContextMock).toHaveBeenCalledWith(
@@ -682,7 +682,7 @@ describe('Telegram webhook handler', () => {
 
   it('replies inline when Telegram routing returns a platform answer', async () => {
     mockTelegramLinkedSender('launch-owner-3');
-    cloudJobsFindFirstMock
+    taskRunsFindFirstMock
       .mockResolvedValueOnce(null)
       .mockResolvedValueOnce(null);
     routeTaskMock.mockResolvedValueOnce({
@@ -719,7 +719,7 @@ describe('Telegram webhook handler', () => {
 
   it('resumes a completed Telegram snapshot before starting a new task', async () => {
     mockTelegramLinkedSender('launch-owner-4');
-    cloudJobsFindFirstMock.mockResolvedValueOnce(null).mockResolvedValueOnce({
+    taskRunsFindFirstMock.mockResolvedValueOnce(null).mockResolvedValueOnce({
       id: 55,
       status: 'completed',
       taskId: 'task-old',
@@ -754,7 +754,7 @@ describe('Telegram webhook handler', () => {
     await expect(response.json()).resolves.toEqual({
       ok: true,
       resumed: true,
-      cloudJobId: 99,
+      runId: 99,
     });
     expect(response.status).toBe(200);
     expect(enqueueTaskMock).toHaveBeenCalledWith(
@@ -763,13 +763,13 @@ describe('Telegram webhook handler', () => {
         task: expect.objectContaining({
           type: 'snapshot_resume',
           sourceSnapshotId: 'snapshot-1',
-          sourceCloudJobId: 55,
+          sourceRunId: 55,
           payload: expect.objectContaining({
             repo: 'RooCodeInc/Roomote',
             environmentId: 'env-1',
             port: 3000,
             sourceSnapshotId: 'snapshot-1',
-            sourceCloudJobId: 55,
+            sourceRunId: 55,
             queuedCommunicationMessages: [
               expect.objectContaining({
                 provider: 'telegram',
@@ -798,9 +798,9 @@ describe('Telegram webhook handler', () => {
 
   it('/new bypasses a resumable snapshot and starts a fresh task', async () => {
     mockTelegramLinkedSender('launch-owner-5');
-    // First findFirst: active-job lookup (none). Second findFirst: completed
+    // First findFirst: active-run lookup (none). Second findFirst: completed
     // snapshot lookup would normally resume, but /new skips it entirely.
-    cloudJobsFindFirstMock.mockResolvedValueOnce(null).mockResolvedValueOnce({
+    taskRunsFindFirstMock.mockResolvedValueOnce(null).mockResolvedValueOnce({
       id: 55,
       status: 'completed',
       taskId: 'task-old',
@@ -825,7 +825,7 @@ describe('Telegram webhook handler', () => {
     await expect(response.json()).resolves.toEqual({
       ok: true,
       started: true,
-      cloudJobId: 88,
+      runId: 88,
     });
     expect(response.status).toBe(200);
     // A fresh StandardTask is enqueued, not a snapshot.resume.
@@ -852,7 +852,7 @@ describe('Telegram webhook handler', () => {
 
   it('/done works as an alias for /new', async () => {
     mockTelegramLinkedSender('launch-owner-6');
-    cloudJobsFindFirstMock.mockResolvedValueOnce(null);
+    taskRunsFindFirstMock.mockResolvedValueOnce(null);
 
     const response = await postTelegramUpdate(
       createTelegramUpdate({
@@ -866,7 +866,7 @@ describe('Telegram webhook handler', () => {
     await expect(response.json()).resolves.toEqual({
       ok: true,
       started: true,
-      cloudJobId: 88,
+      runId: 88,
     });
     expect(enqueueTaskMock).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -911,7 +911,7 @@ describe('Telegram webhook handler', () => {
 
   it('refuses /new while a task is already running in the chat', async () => {
     mockTelegramLinkedSender('launch-owner-8');
-    cloudJobsFindFirstMock.mockResolvedValueOnce({
+    taskRunsFindFirstMock.mockResolvedValueOnce({
       id: 77,
       status: 'running',
       machineId: 'machine-1',
@@ -947,7 +947,7 @@ describe('Telegram webhook handler', () => {
 
   it('names the command sent and echoes the request in the refusal', async () => {
     mockTelegramLinkedSender('launch-owner-8');
-    cloudJobsFindFirstMock.mockResolvedValueOnce({
+    taskRunsFindFirstMock.mockResolvedValueOnce({
       id: 77,
       status: 'running',
       machineId: 'machine-1',
@@ -978,7 +978,7 @@ describe('Telegram webhook handler', () => {
 
   it('queues a mid-sentence /done as an ordinary follow-up to the active task', async () => {
     mockTelegramLinkedSender('launch-owner-9');
-    cloudJobsFindFirstMock.mockResolvedValueOnce({
+    taskRunsFindFirstMock.mockResolvedValueOnce({
       id: 77,
       status: 'running',
       machineId: 'machine-1',
@@ -998,7 +998,7 @@ describe('Telegram webhook handler', () => {
     await expect(response.json()).resolves.toEqual({
       ok: true,
       queued: true,
-      cloudJobId: 77,
+      runId: 77,
     });
     expect(queueCommunicationMessageMock).toHaveBeenCalledWith(
       'telegram',
@@ -1015,7 +1015,7 @@ describe('Telegram webhook handler', () => {
 
   it('starts a fresh task for a mention-prefixed /new in a group', async () => {
     mockTelegramLinkedSender('launch-owner-10');
-    cloudJobsFindFirstMock.mockResolvedValueOnce(null);
+    taskRunsFindFirstMock.mockResolvedValueOnce(null);
 
     const response = await postTelegramUpdate(
       createTelegramUpdate({
@@ -1033,7 +1033,7 @@ describe('Telegram webhook handler', () => {
     await expect(response.json()).resolves.toEqual({
       ok: true,
       started: true,
-      cloudJobId: 88,
+      runId: 88,
     });
     expect(enqueueTaskMock).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -1301,9 +1301,9 @@ describe('Telegram webhook handler', () => {
     );
   });
 
-  it('queues link-code-shaped follow-ups to an active job instead of consuming them', async () => {
+  it('queues link-code-shaped follow-ups to an active task run instead of consuming them', async () => {
     mockTelegramLinkedSender();
-    cloudJobsFindFirstMock.mockResolvedValue({ id: 55 });
+    taskRunsFindFirstMock.mockResolvedValue({ id: 55 });
 
     const response = await postTelegramUpdate(
       createTelegramUpdate({
@@ -1314,7 +1314,7 @@ describe('Telegram webhook handler', () => {
     await expect(response.json()).resolves.toEqual({
       ok: true,
       queued: true,
-      cloudJobId: 55,
+      runId: 55,
     });
     expect(consumeLinkCodeMock).not.toHaveBeenCalled();
     expect(queueCommunicationMessageMock).toHaveBeenCalledWith(
@@ -1332,14 +1332,14 @@ describe('Telegram webhook handler', () => {
       id: 'linked-user-9',
       deletedAt: null,
     });
-    cloudJobsFindFirstMock.mockResolvedValueOnce({ id: 55 });
+    taskRunsFindFirstMock.mockResolvedValueOnce({ id: 55 });
 
     const response = await postTelegramUpdate(createTelegramUpdate());
 
     await expect(response.json()).resolves.toEqual({
       ok: true,
       queued: true,
-      cloudJobId: 55,
+      runId: 55,
     });
     expect(queueCommunicationMessageMock).toHaveBeenCalledWith(
       'telegram',
@@ -1400,8 +1400,8 @@ describe('Telegram webhook handler', () => {
     );
   });
 
-  it('cancels the cloud job when a cancel_task callback button is clicked', async () => {
-    cloudJobsFindFirstMock.mockResolvedValueOnce({
+  it('cancels the task run when a cancel_task callback button is clicked', async () => {
+    taskRunsFindFirstMock.mockResolvedValueOnce({
       id: 42,
       taskId: 'task-42',
       status: 'running',
@@ -1409,7 +1409,7 @@ describe('Telegram webhook handler', () => {
       userId: 'launch-owner-1',
       actingUserId: null,
     });
-    stopTaskJobMock.mockResolvedValueOnce({ success: true });
+    stopTaskRunMock.mockResolvedValueOnce({ success: true });
 
     const response = await postTelegramUpdate({
       update_id: 900,
@@ -1429,9 +1429,9 @@ describe('Telegram webhook handler', () => {
       ok: true,
       callbackHandled: true,
     });
-    expect(stopTaskJobMock).toHaveBeenCalledWith(
+    expect(stopTaskRunMock).toHaveBeenCalledWith(
       expect.objectContaining({
-        job: expect.objectContaining({ id: 42 }),
+        run: expect.objectContaining({ id: 42 }),
         allowDirectCancelWithoutSandbox: true,
       }),
     );
@@ -1454,7 +1454,7 @@ describe('Telegram webhook handler', () => {
   });
 
   it('scopes cancel lookups to the chat the button lives in', async () => {
-    cloudJobsFindFirstMock.mockResolvedValueOnce(undefined);
+    taskRunsFindFirstMock.mockResolvedValueOnce(undefined);
 
     await postTelegramUpdate({
       update_id: 903,
@@ -1469,7 +1469,7 @@ describe('Telegram webhook handler', () => {
       },
     });
 
-    const whereArg = cloudJobsFindFirstMock.mock.calls[0]?.[0]?.where;
+    const whereArg = taskRunsFindFirstMock.mock.calls[0]?.[0]?.where;
     expect(JSON.stringify(whereArg)).toContain('222');
   });
 
@@ -1484,15 +1484,15 @@ describe('Telegram webhook handler', () => {
     });
 
     expect(response.status).toBe(200);
-    expect(cloudJobsFindFirstMock).not.toHaveBeenCalled();
-    expect(stopTaskJobMock).not.toHaveBeenCalled();
+    expect(taskRunsFindFirstMock).not.toHaveBeenCalled();
+    expect(stopTaskRunMock).not.toHaveBeenCalled();
     expect(answerCallbackQueryMock).toHaveBeenCalledWith(
       expect.objectContaining({ callbackQueryId: 'cb-5' }),
     );
   });
 
   it('acknowledges cancel clicks for jobs that are no longer running', async () => {
-    cloudJobsFindFirstMock.mockResolvedValueOnce(undefined);
+    taskRunsFindFirstMock.mockResolvedValueOnce(undefined);
 
     const response = await postTelegramUpdate({
       update_id: 901,
@@ -1508,7 +1508,7 @@ describe('Telegram webhook handler', () => {
     });
 
     expect(response.status).toBe(200);
-    expect(stopTaskJobMock).not.toHaveBeenCalled();
+    expect(stopTaskRunMock).not.toHaveBeenCalled();
     expect(answerCallbackQueryMock).toHaveBeenCalledWith(
       expect.objectContaining({
         callbackQueryId: 'cb-2',
@@ -1531,7 +1531,7 @@ describe('Telegram webhook handler', () => {
     });
 
     expect(response.status).toBe(200);
-    expect(stopTaskJobMock).not.toHaveBeenCalled();
+    expect(stopTaskRunMock).not.toHaveBeenCalled();
     expect(answerCallbackQueryMock).toHaveBeenCalledWith(
       expect.objectContaining({ callbackQueryId: 'cb-3' }),
     );
@@ -1649,7 +1649,7 @@ describe('Telegram webhook handler', () => {
     await expect(response.json()).resolves.toEqual({
       ok: true,
       started: true,
-      cloudJobId: 88,
+      runId: 88,
     });
     expect(enqueueTaskMock).toHaveBeenCalledWith(
       expect.objectContaining({

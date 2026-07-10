@@ -98,7 +98,7 @@ useSandboxClientMock.mockImplementation(() => ({
 
 import { TaskToolsButton } from './TaskToolsButton';
 
-function createCloudJob(overrides: Record<string, unknown> = {}) {
+function createTaskRun(overrides: Record<string, unknown> = {}) {
   return {
     status: 'running',
     taskId: 'task-1',
@@ -134,7 +134,7 @@ describe('TaskToolsButton', () => {
   });
 
   it('sends a structured Task Tool payload with a generated clientMessageId', () => {
-    render(<TaskToolsButton cloudJob={createCloudJob()} />);
+    render(<TaskToolsButton taskRun={createTaskRun()} />);
 
     expect(screen.getByRole('button', { name: /task tools/i })).toBeVisible();
 
@@ -152,7 +152,7 @@ describe('TaskToolsButton', () => {
   });
 
   it('sends the push Task Tool action ID', () => {
-    render(<TaskToolsButton cloudJob={createCloudJob()} />);
+    render(<TaskToolsButton taskRun={createTaskRun()} />);
 
     fireEvent.click(screen.getByRole('button', { name: /commit \+ push/i }));
 
@@ -166,7 +166,7 @@ describe('TaskToolsButton', () => {
   });
 
   it('sends the address PR feedback Task Tool action ID', () => {
-    render(<TaskToolsButton cloudJob={createCloudJob()} />);
+    render(<TaskToolsButton taskRun={createTaskRun()} />);
 
     fireEvent.click(
       screen.getByRole('button', { name: /address pr feedback/i }),
@@ -184,7 +184,7 @@ describe('TaskToolsButton', () => {
   it('stays hidden until the sandbox client exists', () => {
     useSandboxClientMock.mockReturnValue(null);
 
-    render(<TaskToolsButton cloudJob={createCloudJob()} />);
+    render(<TaskToolsButton taskRun={createTaskRun()} />);
 
     expect(
       screen.queryByRole('button', { name: /task tools/i }),
@@ -194,7 +194,7 @@ describe('TaskToolsButton', () => {
   it('stays hidden until the sandbox transport is connected', () => {
     useSandboxConnectedMock.mockReturnValue(false);
 
-    render(<TaskToolsButton cloudJob={createCloudJob()} />);
+    render(<TaskToolsButton taskRun={createTaskRun()} />);
 
     expect(
       screen.queryByRole('button', { name: /task tools/i }),

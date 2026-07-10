@@ -15,7 +15,7 @@ import {
 
 import { apiLogger } from '../../logging.js';
 import { cancelOrphanedWorkItemRunBestEffort } from '../tasks/orphaned-work-item-run.js';
-import { stripTeamsMessageIdSuffix } from './find-active-teams-job.js';
+import { stripTeamsMessageIdSuffix } from './find-active-teams-run.js';
 
 /**
  * Structured "start idea N" hook for the Teams suggestion lists.
@@ -211,7 +211,7 @@ type TeamsSuggestionLaunchOutcome =
   | { status: 'replied_inline' };
 
 type LaunchClaimedTeamsSuggestionResult =
-  | { result: 'started'; cloudJobId: number }
+  | { result: 'started'; runId: number }
   | { result: 'replied_inline' }
   /**
    * The fenced finalize lost to a reclaim after the task was enqueued: the
@@ -279,7 +279,7 @@ export async function launchClaimedTeamsSuggestion(params: {
         return { result: 'already_started' };
       }
 
-      return { result: 'started', cloudJobId: launch.launchResult.id };
+      return { result: 'started', runId: launch.launchResult.id };
     }
 
     // Routing answered inline; no task was launched. Release the claim so the

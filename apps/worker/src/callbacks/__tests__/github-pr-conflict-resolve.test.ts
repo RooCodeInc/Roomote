@@ -1,6 +1,6 @@
 vi.mock('@roomote/sdk/client', () => ({
   sdk: {
-    cloudJobs: {
+    taskRuns: {
       update: vi.fn().mockResolvedValue(undefined),
     },
   },
@@ -10,11 +10,11 @@ import {
   TaskPayloadKind,
   CONFLICT_RESOLUTION_SUMMARY_RESULT_KEY,
 } from '@roomote/types';
-import { type Run, sdk } from '@roomote/sdk/client';
+import { type TaskRun, sdk } from '@roomote/sdk/client';
 
 import { githubPrConflictResolveCallbacks } from '../github-pr-conflict-resolve';
 
-function createCloudJob(): Run {
+function createTaskRun(): TaskRun {
   return {
     id: 123,
     payloadKind: TaskPayloadKind.GithubPrConflictResolve,
@@ -27,22 +27,22 @@ function createCloudJob(): Run {
       baseRef: 'main',
     },
     result: null,
-  } as unknown as Run;
+  } as unknown as TaskRun;
 }
 
 describe('githubPrConflictResolveCallbacks', () => {
-  const updateMock = vi.mocked(sdk.cloudJobs.update);
+  const updateMock = vi.mocked(sdk.taskRuns.update);
 
   beforeEach(() => {
     updateMock.mockClear();
   });
 
-  it('persists a parsed completion summary into cloud job result', async () => {
-    const cloudJob = createCloudJob();
+  it('persists a parsed completion summary into task run result', async () => {
+    const taskRun = createTaskRun();
     const context = {};
 
     await githubPrConflictResolveCallbacks.onMessage?.(
-      cloudJob,
+      taskRun,
       'task_123',
       {
         type: 'completion',
@@ -73,10 +73,10 @@ describe('githubPrConflictResolveCallbacks', () => {
   });
 
   it('ignores unrelated completion text', async () => {
-    const cloudJob = createCloudJob();
+    const taskRun = createTaskRun();
 
     await githubPrConflictResolveCallbacks.onMessage?.(
-      cloudJob,
+      taskRun,
       'task_123',
       {
         type: 'completion',

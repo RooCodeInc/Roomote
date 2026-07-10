@@ -20,7 +20,7 @@ import type {
   WebhookInstallation,
   WebhookRepository,
   WebhookUser,
-  WebhookCloudTaskProperties,
+  WebhookTaskProperties,
 } from './types';
 
 type GitHubAutomationTarget = {
@@ -30,7 +30,7 @@ type GitHubAutomationTarget = {
   repo: Repository;
   collaborators: Array<{ githubLogin: string }>;
   repositoryIds: string[];
-  properties: WebhookCloudTaskProperties;
+  properties: WebhookTaskProperties;
 };
 
 type GetGitHubAutomationTargetsOptions = {

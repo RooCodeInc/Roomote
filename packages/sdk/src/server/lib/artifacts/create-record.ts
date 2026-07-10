@@ -3,7 +3,7 @@ import { and, db, eq, max, sql, taskArtifacts } from '@roomote/db/server';
 
 export async function createTaskArtifactRecord(input: {
   taskId: string;
-  cloudJobId?: number | null;
+  runId?: number | null;
   artifactType: TaskArtifactType;
   contentType: string;
   path: string;
@@ -31,7 +31,7 @@ export async function createTaskArtifactRecord(input: {
       .insert(taskArtifacts)
       .values({
         taskId: input.taskId,
-        runId: input.cloudJobId ?? null,
+        runId: input.runId ?? null,
         artifactType: input.artifactType,
         contentType: input.contentType,
         path: input.path,

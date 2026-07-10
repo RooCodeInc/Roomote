@@ -198,7 +198,7 @@ describe('handleGitLabMergeRequest', () => {
 
   it('skips enqueuing a sync review when an active review already exists for the head SHA', async () => {
     mockFindActiveGitHubPrReviewTask.mockResolvedValue({
-      jobId: 99,
+      runId: 99,
       taskId: 'running-task',
       type: TaskPayloadKind.GithubPrReviewSync,
       status: 'running' as never,

@@ -11,12 +11,12 @@ const GITHUB_TOKEN_REFRESH_RETRY_DELAY_MS = 5 * 60 * 1000;
 const DEFAULT_GITHUB_TOKEN_REFRESH_INTERVAL_MS = 45 * 60 * 1000;
 
 interface GitHubTokenRefreshOptions {
-  cloudJobId: number;
+  runId: number;
   logger: HarnessLogger;
 }
 
 async function refreshGitHubToken({
-  cloudJobId,
+  runId,
   logger,
 }: GitHubTokenRefreshOptions): Promise<
   | {
@@ -28,11 +28,11 @@ async function refreshGitHubToken({
 > {
   try {
     logger.info(
-      `[githubTokenRefresh] Refreshing source control token for cloud job #${cloudJobId}`,
+      `[githubTokenRefresh] Refreshing source control token for task run #${runId}`,
     );
 
-    const result = await sdk.cloudJobs.refreshGitHubTokenWithMetadata({
-      cloudJobId,
+    const result = await sdk.taskRuns.refreshGitHubTokenWithMetadata({
+      runId,
     });
     ensureSourceControlTokenEnvFiles();
     await applySourceControlTokenMetadata(result);
@@ -43,7 +43,7 @@ async function refreshGitHubToken({
       : parsedNextRefreshAtMs;
 
     logger.info(
-      `[githubTokenRefresh] Refreshed ${result.provider} token for cloud job #${cloudJobId} (source=${result.source}, nextRefreshAt=${result.nextRefreshAt}${result.expiresAt ? `, expiresAt=${result.expiresAt}` : ''})`,
+      `[githubTokenRefresh] Refreshed ${result.provider} token for task run #${runId} (source=${result.source}, nextRefreshAt=${result.nextRefreshAt}${result.expiresAt ? `, expiresAt=${result.expiresAt}` : ''})`,
     );
 
     return {
@@ -53,7 +53,7 @@ async function refreshGitHubToken({
     };
   } catch (error) {
     logger.error(
-      `[githubTokenRefresh] Failed to refresh source control token for cloud job #${cloudJobId}: ${
+      `[githubTokenRefresh] Failed to refresh source control token for task run #${runId}: ${
         error instanceof Error ? error.message : String(error)
       }`,
     );

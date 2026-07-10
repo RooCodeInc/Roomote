@@ -1,8 +1,8 @@
-import type { WebhookCloudTaskProperties } from './types';
+import type { WebhookTaskProperties } from './types';
 
 export function getBackgroundGithubTaskProperties(
-  properties: WebhookCloudTaskProperties,
-): Omit<WebhookCloudTaskProperties, 'userId'> {
+  properties: WebhookTaskProperties,
+): Omit<WebhookTaskProperties, 'userId'> {
   const { userId: _linkedUserId, ...backgroundTaskProperties } = properties;
   return backgroundTaskProperties;
 }

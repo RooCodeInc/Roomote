@@ -47,7 +47,7 @@ export const demoSeedTasks = [
     title: 'Fix login redirect loop on expired sessions',
     mode: 'code',
     state: 'completed',
-    cloudJobStatus: RunStatus.Completed,
+    taskRunStatus: RunStatus.Completed,
     repositoryFullName: 'roomote-demo/demo-web',
   },
   {
@@ -55,7 +55,7 @@ export const demoSeedTasks = [
     title: 'Add webhook retries with exponential backoff',
     mode: 'code',
     state: 'completed',
-    cloudJobStatus: RunStatus.Completed,
+    taskRunStatus: RunStatus.Completed,
     repositoryFullName: 'roomote-demo/demo-api',
   },
   {
@@ -63,7 +63,7 @@ export const demoSeedTasks = [
     title: 'Explain how session tokens are validated',
     mode: 'ask',
     state: 'active',
-    cloudJobStatus: RunStatus.Running,
+    taskRunStatus: RunStatus.Running,
     repositoryFullName: 'roomote-demo/demo-api',
   },
 ] as const;
@@ -75,7 +75,7 @@ interface DemoSeedSummary {
 
 /**
  * Inserts a small, stable set of demo data (a demo user, GitHub installation,
- * repositories, an environment, and a few tasks with cloud jobs) so task
+ * repositories, an environment, and a few tasks with task runs) so task
  * sandboxes and preview deployments do not start from an empty dashboard. It
  * also marks setup as complete when the deployment settings row is missing so
  * a freshly seeded app is not gated behind /setup.
@@ -221,15 +221,15 @@ export async function seedDemoData(): Promise<DemoSeedSummary> {
 
     record(`task ${task.id}`, !existingTask);
 
-    const existingCloudJob = await db.query.taskRuns.findFirst({
+    const existingTaskRun = await db.query.taskRuns.findFirst({
       where: eq(taskRuns.taskId, task.id),
     });
 
-    if (!existingCloudJob) {
+    if (!existingTaskRun) {
       await runFactory.create({
         taskId: task.id,
         actingUserId: demoSeedUserId,
-        status: task.cloudJobStatus,
+        status: task.taskRunStatus,
         payload: {
           repo: task.repositoryFullName,
           description: task.title,
@@ -237,7 +237,7 @@ export async function seedDemoData(): Promise<DemoSeedSummary> {
       });
     }
 
-    record(`cloud job for ${task.id}`, !existingCloudJob);
+    record(`task run for ${task.id}`, !existingTaskRun);
   }
 
   return summary;

@@ -1,7 +1,7 @@
 import { z } from 'zod';
 import { stripHtml } from 'string-strip-html';
 
-export const createCloudTaskSchema = z.object({
+export const createTaskFormSchema = z.object({
   repository: z.string().min(1, 'Repository is required.'),
   branch: z.string().optional(),
   environmentId: z.string().uuid().optional(),
@@ -20,4 +20,4 @@ export const createCloudTaskSchema = z.object({
     .optional(),
 });
 
-export type CreateCloudTask = z.infer<typeof createCloudTaskSchema>;
+export type CreateTaskFormValues = z.infer<typeof createTaskFormSchema>;

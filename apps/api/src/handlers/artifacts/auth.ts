@@ -1,4 +1,4 @@
-import type { JobTokenContext } from '@roomote/types';
+import type { RunTokenContext } from '@roomote/types';
 import {
   and,
   db,
@@ -7,21 +7,21 @@ import {
   taskRuns,
   tasks,
 } from '@roomote/db/server';
-import { findCloudJobByJobTokenClaims } from '@roomote/sdk/server';
+import { findTaskRunByRunTokenClaims } from '@roomote/sdk/server';
 
 import type { Variables } from '../../types';
 
 type ArtifactRouteAuthContext = {
   /**
-   * Null for deployment-principal job tokens. Authorization is scoped to the
-   * cloud job itself: `findCloudJobByJobTokenClaims` resolves by `cloudJobId`
+   * Null for deployment-principal run tokens. Authorization is scoped to the
+   * task run itself: `findTaskRunByRunTokenClaims` resolves by `runId`
    * only. The token's userId is mint-time attribution and is never compared
    * against the mutable `task_runs.actingUserId`, which web steer and
    * follow-up delivery legitimately switch mid-run.
    */
   userId: string | null;
-  cloudJobId: number;
-  tokenType: 'cj';
+  runId: number;
+  tokenType: 'run';
 };
 
 type ArtifactRouteAuthResult =
@@ -32,10 +32,10 @@ type ArtifactRouteTaskBindingResult =
   | { ok: true }
   | { ok: false; status: 403; error: string };
 
-function isJobTokenContext(
+function isRunTokenContext(
   auth: Variables['authContext'],
-): auth is JobTokenContext {
-  return Boolean(auth && 'cloudJobId' in auth);
+): auth is RunTokenContext {
+  return Boolean(auth && 'runId' in auth);
 }
 
 export function resolveArtifactRouteAuth(
@@ -49,13 +49,13 @@ export function resolveArtifactRouteAuth(
     };
   }
 
-  if (isJobTokenContext(auth)) {
+  if (isRunTokenContext(auth)) {
     return {
       ok: true,
       auth: {
         userId: auth.userId,
-        cloudJobId: auth.cloudJobId,
-        tokenType: 'cj',
+        runId: auth.runId,
+        tokenType: 'run',
       },
     };
   }
@@ -63,13 +63,13 @@ export function resolveArtifactRouteAuth(
   return {
     ok: false,
     status: 403,
-    error: 'Artifact API is only available for cloud job tokens',
+    error: 'Artifact API is only available for task run tokens',
   };
 }
 
-async function getArtifactRouteCloudJobBinding(auth: ArtifactRouteAuthContext) {
-  const scopedJob = await findCloudJobByJobTokenClaims(auth);
-  if (!scopedJob) {
+async function getArtifactRouteTaskRunBinding(auth: ArtifactRouteAuthContext) {
+  const scopedRun = await findTaskRunByRunTokenClaims(auth);
+  if (!scopedRun) {
     return null;
   }
 
@@ -77,7 +77,7 @@ async function getArtifactRouteCloudJobBinding(auth: ArtifactRouteAuthContext) {
     columns: {
       taskId: true,
     },
-    where: eq(taskRuns.id, scopedJob.id),
+    where: eq(taskRuns.id, scopedRun.id),
   });
 }
 
@@ -85,13 +85,13 @@ export async function verifyArtifactRouteTaskBinding(
   taskId: string,
   auth: ArtifactRouteAuthContext,
 ): Promise<ArtifactRouteTaskBindingResult> {
-  const cloudJob = await getArtifactRouteCloudJobBinding(auth);
+  const taskRun = await getArtifactRouteTaskRunBinding(auth);
 
-  if (!cloudJob || cloudJob.taskId !== taskId) {
+  if (!taskRun || taskRun.taskId !== taskId) {
     return {
       ok: false,
       status: 403,
-      error: 'Cloud job token does not match requested task',
+      error: 'Task run token does not match requested task',
     };
   }
 
@@ -101,14 +101,14 @@ export async function verifyArtifactRouteTaskBinding(
 const TASK_READ_ACCESS_DENIED: ArtifactRouteTaskBindingResult = {
   ok: false,
   status: 403,
-  error: 'Cloud job token does not grant read access to requested task',
+  error: 'Task run token does not grant read access to requested task',
 };
 
 /**
- * Verify that the calling cloud job may read artifacts for the requested
+ * Verify that the calling task run may read artifacts for the requested
  * task. Unlike the strict write-path binding above, reads are also allowed
  * for any other visible task, matching the cross-task read access that the
- * MCP task routes (summary, messages, search) already grant to cloud job
+ * MCP task routes (summary, messages, search) already grant to task run
  * tokens. This lets an agent consume artifacts produced by earlier tasks
  * (for example downloading a plan artifact published by a planning task).
  * Artifact writes stay bound to the job's own task.
@@ -117,13 +117,13 @@ export async function verifyArtifactRouteTaskReadAccess(
   taskId: string,
   auth: ArtifactRouteAuthContext,
 ): Promise<ArtifactRouteTaskBindingResult> {
-  const cloudJob = await getArtifactRouteCloudJobBinding(auth);
+  const taskRun = await getArtifactRouteTaskRunBinding(auth);
 
-  if (!cloudJob) {
+  if (!taskRun) {
     return TASK_READ_ACCESS_DENIED;
   }
 
-  if (cloudJob.taskId === taskId) {
+  if (taskRun.taskId === taskId) {
     return { ok: true };
   }
 

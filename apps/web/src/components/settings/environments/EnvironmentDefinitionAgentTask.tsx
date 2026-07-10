@@ -28,7 +28,7 @@ import { Shimmer } from '@/components/ai-elements';
 import {
   HistoricalSandboxProvider,
   SandboxProvider,
-  useCloudSession,
+  useTaskSession,
   useTaskMessageEnvelopes,
   useSandboxMessages,
   useSandboxTaskStatusDisplay,
@@ -82,11 +82,11 @@ export function useEnvironmentDefinitionAgentState({
   environmentId?: string;
   initialEnvironmentDefinitionFingerprint?: string;
 }) {
-  const session = useCloudSession(taskId, { refetchInterval: 2_000 });
+  const session = useTaskSession(taskId, { refetchInterval: 2_000 });
 
   const linkedEnvironmentId = useMemo(
-    () => getEnvironmentDefinitionIdFromPayload(session.cloudJob?.payload),
-    [session.cloudJob?.payload],
+    () => getEnvironmentDefinitionIdFromPayload(session.taskRun?.payload),
+    [session.taskRun?.payload],
   );
 
   const linkedEnvironment = useEnvironment(
@@ -111,10 +111,10 @@ export function useEnvironmentDefinitionAgentState({
       : null;
 
   const succeeded =
-    !!session.cloudJob &&
+    !!session.taskRun &&
     isEnvironmentDefinitionSuccessStatus(
-      session.cloudJob.status,
-      session.cloudJob.taskPhase,
+      session.taskRun.status,
+      session.taskRun.taskPhase,
     ) &&
     (mode === 'create'
       ? matchingEnvironment !== null
@@ -123,12 +123,12 @@ export function useEnvironmentDefinitionAgentState({
   const createEndedWithoutEnvironment =
     mode === 'create' &&
     isEnvironmentDefinitionTerminalSuccessStatus(
-      session.cloudJob?.status,
-      session.cloudJob?.taskPhase,
+      session.taskRun?.status,
+      session.taskRun?.taskPhase,
     ) &&
     (!linkedEnvironmentId
       ? (() => {
-          const completedAtMs = toTimestamp(session.cloudJob?.completedAt);
+          const completedAtMs = toTimestamp(session.taskRun?.completedAt);
 
           return (
             Number.isFinite(completedAtMs) &&
@@ -138,23 +138,23 @@ export function useEnvironmentDefinitionAgentState({
       : linkedEnvironment.isFetched && matchingEnvironment === null);
 
   const endedWithoutEnvironment =
-    !!session.cloudJob &&
+    !!session.taskRun &&
     isEnvironmentDefinitionTerminalSuccessStatus(
-      session.cloudJob.status,
-      session.cloudJob.taskPhase,
+      session.taskRun.status,
+      session.taskRun.taskPhase,
     ) &&
     (mode === 'create'
       ? createEndedWithoutEnvironment
       : updatedEnvironment === null);
 
   const failed =
-    !!session.cloudJob &&
-    (isEnvironmentDefinitionFailureStatus(session.cloudJob.status) ||
+    !!session.taskRun &&
+    (isEnvironmentDefinitionFailureStatus(session.taskRun.status) ||
       endedWithoutEnvironment) &&
     !succeeded;
 
   const taskIsActive =
-    !!session.cloudJob && !isExitedRunStatus(session.cloudJob.status);
+    !!session.taskRun && !isExitedRunStatus(session.taskRun.status);
 
   useEffect(() => {
     if (succeeded || failed) {
@@ -214,7 +214,7 @@ export function EnvironmentDefinitionAgentTaskPanel({
   showPromptInput = true,
   messageUiOptions,
 }: {
-  session: ReturnType<typeof useCloudSession>;
+  session: ReturnType<typeof useTaskSession>;
   title?: string;
   className?: string;
   showHeader?: boolean;
@@ -244,8 +244,8 @@ export function EnvironmentDefinitionAgentTaskPanel({
           <div className="border-b-2 border-accent-bright-foreground text-sm p-4 flex gap-2 items-baseline justify-between shrink-0">
             <span className="font-semibold shrink-0">{title}</span>
             <TaskStatusIndicator
-              status={session.cloudJob?.status}
-              phase={session.cloudJob?.taskPhase}
+              status={session.taskRun?.status}
+              phase={session.taskRun?.taskPhase}
               className="text-xs"
               compact={true}
             />
@@ -276,7 +276,7 @@ function EnvironmentDefinitionConversationBody({
   showPromptInput,
   messageUiOptions,
 }: {
-  session: ReturnType<typeof useCloudSession>;
+  session: ReturnType<typeof useTaskSession>;
   showPendingEnvVarRequests: boolean;
   showPendingUserInputRequests: boolean;
   showQueuedMessages: boolean;
@@ -287,19 +287,19 @@ function EnvironmentDefinitionConversationBody({
   const historyEnvelopesQuery = useTaskMessageEnvelopes(session.taskId, {
     enabled: true,
   });
-  const cloudJobId = session.cloudJob?.id;
+  const runId = session.taskRun?.id;
   const isBooting =
     session.sessionState === 'booting' || session.sessionState === 'resuming';
   const isBootFailed = session.sessionState === 'boot-failed';
   const showStartupSurface = isBooting || isBootFailed;
-  const showLogs = showStartupSurface && !!cloudJobId;
+  const showLogs = showStartupSurface && !!runId;
 
   const {
     logs: sandboxLogs,
     error: logsError,
     isConnected: logsConnected,
   } = useSandboxLogs({
-    cloudJobId,
+    runId,
     enabled: showLogs,
   });
 
@@ -367,7 +367,7 @@ function EnvironmentDefinitionConversationBody({
   return (
     <SandboxProvider
       taskId={session.taskId}
-      url={session.cloudJob?.sandboxServerUrl}
+      url={session.taskRun?.sandboxServerUrl}
       token={session.token}
       refreshConnection={session.refreshConnection}
       history={historyEnvelopesQuery}
@@ -403,7 +403,7 @@ function EnvironmentDefinitionMessagesPane({
   showPromptInput,
   messageUiOptions,
 }: {
-  session: ReturnType<typeof useCloudSession>;
+  session: ReturnType<typeof useTaskSession>;
   showPendingEnvVarRequests: boolean;
   showPendingUserInputRequests: boolean;
   showQueuedMessages: boolean;
@@ -424,9 +424,9 @@ function EnvironmentDefinitionMessagesPane({
     () =>
       getEnvironmentDefinitionAuthFailureHint({
         lastErrorMessage,
-        cloudJobLog: session.cloudJob?.log,
+        taskRunLog: session.taskRun?.log,
       }),
-    [lastErrorMessage, session.cloudJob?.log],
+    [lastErrorMessage, session.taskRun?.log],
   );
   const hasVisibleConversationContent = useMemo(
     () =>
@@ -460,8 +460,8 @@ function EnvironmentDefinitionMessagesPane({
     showPromptInput;
   const isWaitingForFirstUpdate =
     !hasVisibleConversationContent &&
-    !!session.cloudJob &&
-    !isExitedRunStatus(session.cloudJob.status) &&
+    !!session.taskRun &&
+    !isExitedRunStatus(session.taskRun.status) &&
     !authFailureHint;
 
   return (
@@ -533,7 +533,7 @@ function EnvironmentDefinitionInputStack({
   showTodoList,
   showPromptInput,
 }: {
-  session: ReturnType<typeof useCloudSession>;
+  session: ReturnType<typeof useTaskSession>;
   showPendingEnvVarRequests: boolean;
   showPendingUserInputRequests: boolean;
   showQueuedMessages: boolean;
@@ -556,7 +556,7 @@ function EnvironmentDefinitionInputStack({
           <PromptInput
             onFileSearchOpen={() => {}}
             onCommandSearchOpen={() => {}}
-            cloudJob={session.cloudJob}
+            taskRun={session.taskRun}
             hasTransportError={session.hasTransportError}
             showInputMenu={false}
             showTaskStatus={false}
@@ -571,15 +571,15 @@ function EnvironmentDefinitionInputStack({
 
 function getEnvironmentDefinitionAuthFailureHint({
   lastErrorMessage,
-  cloudJobLog,
+  taskRunLog,
 }: {
   lastErrorMessage?: string;
-  cloudJobLog?: string | null;
+  taskRunLog?: string | null;
 }): string | null {
   const statusError =
     typeof lastErrorMessage === 'string' ? lastErrorMessage : '';
 
-  const recentLog = cloudJobLog ? cloudJobLog.slice(-12_000) : '';
+  const recentLog = taskRunLog ? taskRunLog.slice(-12_000) : '';
 
   const hasAuthFailure =
     INVALID_OPENAI_KEY_RE.test(statusError) ||

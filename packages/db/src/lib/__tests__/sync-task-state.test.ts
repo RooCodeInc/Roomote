@@ -14,7 +14,7 @@ import {
   syncTaskStateFromRuns,
   deriveTaskStateFromRuns,
 } from '../../server';
-import type { CreateRun } from '../../types';
+import type { CreateTaskRun } from '../../types';
 
 const createdTaskIds: string[] = [];
 
@@ -39,7 +39,7 @@ async function insertRun(params: {
       payload: {
         repo: 'test/repo',
         description: 'sync-task-state fixture run',
-      } as CreateRun['payload'],
+      } as CreateTaskRun['payload'],
       status: params.status,
       startedAt: params.startedAt ?? null,
     })

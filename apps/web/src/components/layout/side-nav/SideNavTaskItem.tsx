@@ -26,7 +26,7 @@ import { cn } from '@/lib/utils';
 type SideNavQuickAccessTask = {
   id: string;
   title: string | null;
-  cloudJob: {
+  taskRun: {
     status: RunStatus;
     taskPhase: string | null;
     prRepo?: string | null;
@@ -66,7 +66,7 @@ export const SideNavTaskItem = ({
 }: SideNavTaskItemProps) => {
   const [isExpandedRowActionVisible, setIsExpandedRowActionVisible] =
     useState(false);
-  const environmentId = task.cloudJob?.payload?.environmentId ?? undefined;
+  const environmentId = task.taskRun?.payload?.environmentId ?? undefined;
   const environmentFallbackLabel = environmentId
     ? getMissingEnvironmentLabel(environmentId)
     : undefined;
@@ -74,14 +74,14 @@ export const SideNavTaskItem = ({
   const hasLiveStatus =
     liveStatus?.phase != null || Boolean(liveStatus?.lastErrorMessage);
   const isTaskStartingUp =
-    !hasLiveStatus && isBootingRunStatus(task.cloudJob.status);
+    !hasLiveStatus && isBootingRunStatus(task.taskRun.status);
   const taskPhase = hasLiveStatus
     ? (liveStatus?.phase ?? null)
-    : task.cloudJob.taskPhase;
-  const taskStatus = hasLiveStatus ? undefined : task.cloudJob.status;
+    : task.taskRun.taskPhase;
+  const taskStatus = hasLiveStatus ? undefined : task.taskRun.status;
   const showsExpandedSpinner = hasLiveStatus
     ? taskPhase === 'running'
-    : isActivelyRunningTask(task.cloudJob.status, taskPhase);
+    : isActivelyRunningTask(task.taskRun.status, taskPhase);
 
   if (expanded) {
     return (
@@ -188,10 +188,10 @@ export const SideNavTaskItem = ({
                 />
               ) : null}
 
-              {task.cloudJob?.prRepo && task.cloudJob?.prNumber ? (
+              {task.taskRun?.prRepo && task.taskRun?.prNumber ? (
                 <PullRequestBadge
-                  repo={task.cloudJob.prRepo}
-                  prNumber={task.cloudJob.prNumber}
+                  repo={task.taskRun.prRepo}
+                  prNumber={task.taskRun.prNumber}
                   className="max-w-40"
                   iconClassName="size-3.5 text-muted-foreground"
                 />
@@ -283,11 +283,11 @@ export const SideNavTaskItem = ({
               </div>
             ) : null}
 
-            {task.cloudJob?.prRepo && task.cloudJob?.prNumber ? (
+            {task.taskRun?.prRepo && task.taskRun?.prNumber ? (
               <div className="mt-2 flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
                 <PullRequestBadge
-                  repo={task.cloudJob.prRepo}
-                  prNumber={task.cloudJob.prNumber}
+                  repo={task.taskRun.prRepo}
+                  prNumber={task.taskRun.prNumber}
                   className="text-xs! w-full!"
                   iconClassName="size-3.5 text-muted-foreground"
                 />
