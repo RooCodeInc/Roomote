@@ -42,7 +42,7 @@
     "eval:router:view": "pnpm --filter @roomote/cloud-agents eval:router:view",
     "eval:router:share": "pnpm --filter @roomote/cloud-agents eval:router:share",
     "changeset": "changeset",
-    "version": "node scripts/release/aggregate-changelog.mjs && changeset version && node scripts/release/sync-root-version.mjs && pnpm install --lockfile-only",
+    "version": "node scripts/release/aggregate-changelog.mjs && changeset version && node scripts/release/sync-root-version.mjs && node scripts/release/ensure-package-changelogs.mjs && pnpm install --lockfile-only",
     "test:release-scripts": "node --test scripts/release/__tests__/*.test.mjs"
   },
   "devDependencies": {
