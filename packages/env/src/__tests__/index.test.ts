@@ -291,6 +291,64 @@ describe('Env', () => {
     }
   });
 
+  it('validates only the controller secret contract for controller images', () => {
+    const runtimeEnv: NodeJS.ProcessEnv = {
+      NODE_ENV: 'production',
+      APP_ENV: 'production',
+      ROOMOTE_SERVICE: 'controller',
+      ROOMOTE_APP_URL: 'https://roomote.example.com',
+      TRPC_URL: 'https://api.roomote.example.com',
+      DATABASE_URL: 'postgres://postgres:password@postgres:5432/roomote',
+      REDIS_URL: 'redis://redis:6379',
+      JOB_AUTH_PRIVATE_KEY: 'job-private-key',
+      JOB_AUTH_PUBLIC_KEY: 'job-public-key',
+      ENCRYPTION_KEY: '12345678901234567890123456789012',
+    };
+
+    const env = createRoomoteEnv(runtimeEnv);
+
+    expect(env.DATABASE_URL).toBe(runtimeEnv.DATABASE_URL);
+    expect(env.ENCRYPTION_KEY).toBe('12345678901234567890123456789012');
+    expect(env.S3_SECRET_ACCESS_KEY).toBeUndefined();
+    expect(env.PREVIEW_AUTH_PRIVATE_KEY).toBe('');
+  });
+
+  it('allows the preview proxy to receive public verification keys only', () => {
+    const runtimeEnv: NodeJS.ProcessEnv = {
+      NODE_ENV: 'production',
+      APP_ENV: 'production',
+      ROOMOTE_SERVICE: 'preview-proxy',
+      ROOMOTE_APP_URL: 'https://roomote.example.com',
+      DATABASE_URL: 'postgres://postgres:password@postgres:5432/roomote',
+      REDIS_URL: 'redis://redis:6379',
+      JOB_AUTH_PUBLIC_KEY: 'job-public-key',
+      PREVIEW_AUTH_PUBLIC_KEY: 'preview-public-key',
+    };
+
+    const env = createRoomoteEnv(runtimeEnv);
+
+    expect(env.JOB_AUTH_PUBLIC_KEY).toBe('job-public-key');
+    expect(env.PREVIEW_AUTH_PUBLIC_KEY).toBe('preview-public-key');
+    expect(env.JOB_AUTH_PRIVATE_KEY).toBe('');
+    expect(env.PREVIEW_AUTH_PRIVATE_KEY).toBe('');
+  });
+
+  it('still rejects a missing key required by the selected service', () => {
+    const runtimeEnv: NodeJS.ProcessEnv = {
+      NODE_ENV: 'production',
+      APP_ENV: 'production',
+      ROOMOTE_SERVICE: 'controller',
+      ROOMOTE_APP_URL: 'https://roomote.example.com',
+      TRPC_URL: 'https://api.roomote.example.com',
+      DATABASE_URL: 'postgres://postgres:password@postgres:5432/roomote',
+      REDIS_URL: 'redis://redis:6379',
+      JOB_AUTH_PUBLIC_KEY: 'job-public-key',
+      ENCRYPTION_KEY: '12345678901234567890123456789012',
+    };
+
+    expect(() => createRoomoteEnv(runtimeEnv)).toThrow(/JOB_AUTH_PRIVATE_KEY/);
+  });
+
   it('does not require preview runtime settings for production startup', () => {
     const previousSkipEnvValidation = process.env.SKIP_ENV_VALIDATION;
     const runtimeEnv = { ...productionCoreEnv };

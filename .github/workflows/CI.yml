@@ -184,9 +184,31 @@ jobs:
         include:
           - app: app
             dockerfile: .docker/app/Dockerfile
+            target: runtime-app
+          - app: web
+            dockerfile: .docker/app/Dockerfile
+            target: runtime-web
+          - app: api
+            dockerfile: .docker/app/Dockerfile
+            target: runtime-api
+          - app: controller
+            dockerfile: .docker/app/Dockerfile
+            target: runtime-controller
+          - app: bullmq
+            dockerfile: .docker/app/Dockerfile
+            target: runtime-bullmq
+          - app: preview-proxy
+            dockerfile: .docker/app/Dockerfile
+            target: runtime-preview-proxy
+          - app: migrate
+            dockerfile: .docker/app/Dockerfile
+            target: runtime-migrate
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
+      - name: Validate production Compose security contract
+        if: matrix.app == 'app'
+        run: deploy/scripts/validate-compose-security.sh
       - name: Set up Docker builder
         uses: useblacksmith/setup-docker-builder@v1
       - name: Build ${{ matrix.app }} Dockerfile
@@ -194,5 +216,6 @@ jobs:
         with:
           context: .
           file: ${{ matrix.dockerfile }}
+          target: ${{ matrix.target }}
           push: false
           build-args: APP_ENV=development

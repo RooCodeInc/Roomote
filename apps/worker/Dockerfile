@@ -2,7 +2,7 @@
 # Build context: repository root.
 # This image is the source of truth for Roomote's durable worker OS/tooling layer.
 
-FROM ubuntu:24.04
+FROM ubuntu:24.04 AS runtime
 
 # Connects the GHCR package to this repository and links pulled images back
 # to their source.
