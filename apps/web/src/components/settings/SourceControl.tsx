@@ -1,7 +1,7 @@
 'use client';
 
 import type { ReactNode } from 'react';
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { usePathname, useSearchParams } from 'next/navigation';
 import { toast } from 'sonner';
@@ -25,11 +25,11 @@ import { useAuthorizedUser } from '@/hooks/useUser';
 import { getSourceControlSetupCopy } from '@/app/(onboarding)/setup/sourceControlSetupCopy';
 
 import {
-  useCreateGitHubAppManifest,
   useEnableGitHubApp,
   useGitHubInstallations,
   useSyncGitHubInstallations,
 } from '@/hooks/github';
+import { CreateGitHubAppManifestForm } from '@/components/github/CreateGitHubAppManifestForm';
 import {
   Alert,
   AlertDescription,
@@ -40,8 +40,6 @@ import {
   ChevronUp,
   ExternalLink,
   GitMerge,
-  Input,
-  Label,
   Pencil,
   Plug,
   RefreshCw,
@@ -50,8 +48,6 @@ import {
   SelectItem,
   SelectTrigger,
   SelectValue,
-  Sparkles,
-  Spinner,
 } from '@/components/system';
 import { Section } from '@/components/settings';
 import { SourceControlConfigForm } from './SourceControlConfigForm';
@@ -328,7 +324,24 @@ export function SourceControl() {
         />
       ) : null,
       githubSetup: isAdmin ? (
-        <GitHubAppSettingsSetup redirectTarget={redirectTarget} />
+        <CreateGitHubAppManifestForm
+          redirect={redirectTarget}
+          organizationInputId="settings-github-app-organization"
+          createButtonSize="sm"
+          className="max-w-2xl"
+          title={
+            <p className="text-sm font-semibold">
+              Create a GitHub App for this deployment.
+            </p>
+          }
+          description={
+            <p className="text-sm text-muted-foreground">
+              Self-hosted Roomote needs its own GitHub App. Create one
+              automatically, or enter values manually if you already have an
+              app.
+            </p>
+          }
+        />
       ) : null,
     },
     ...sourceControlTokenBackedProviders.map((provider) =>
@@ -690,103 +703,6 @@ function SourceControlProviderBlock({
         </div>
       )}
     </Section>
-  );
-}
-
-function GitHubAppSettingsSetup({
-  redirectTarget,
-}: {
-  redirectTarget: string;
-}) {
-  const [githubOrganization, setGithubOrganization] = useState('');
-  const [manifestForm, setManifestForm] = useState<{
-    postTarget: string;
-    values: { manifest: string };
-  } | null>(null);
-  const manifestFormRef = useRef<HTMLFormElement | null>(null);
-  const createGitHubAppManifest = useCreateGitHubAppManifest({
-    onSuccess: (result) => {
-      if (result.success) {
-        setManifestForm(result);
-      } else {
-        toast.error(result.error);
-      }
-    },
-    onError: () =>
-      toast.error('Failed to start GitHub App creation. Please try again.'),
-  });
-
-  useEffect(() => {
-    if (manifestForm) {
-      manifestFormRef.current?.submit();
-    }
-  }, [manifestForm]);
-
-  return (
-    <div className="max-w-2xl space-y-4">
-      <div className="space-y-2">
-        <p className="text-sm font-semibold">
-          Create a GitHub App for this deployment.
-        </p>
-        <p className="text-sm text-muted-foreground">
-          Self-hosted Roomote needs its own GitHub App. Create one
-          automatically, or enter values manually if you already have an app.
-        </p>
-      </div>
-      <div className="space-y-1">
-        <Label htmlFor="settings-github-app-organization">
-          GitHub organization (optional)
-        </Label>
-        <Input
-          id="settings-github-app-organization"
-          value={githubOrganization}
-          onChange={(event) => setGithubOrganization(event.target.value)}
-          placeholder="your-organization"
-          disabled={createGitHubAppManifest.isPending || manifestForm !== null}
-          data-1p-ignore
-        />
-        <p className="text-sm text-muted-foreground">
-          The app can only be installed on the account that owns it. Enter an
-          organization name to create the app there, or leave this blank to
-          create it on your personal GitHub account.
-        </p>
-      </div>
-      {manifestForm ? (
-        <form
-          ref={manifestFormRef}
-          action={manifestForm.postTarget}
-          method="post"
-          className="hidden"
-          aria-hidden="true"
-        >
-          <input
-            name="manifest"
-            value={manifestForm.values.manifest}
-            readOnly
-          />
-        </form>
-      ) : null}
-      <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
-        <Button
-          type="button"
-          size="sm"
-          onClick={() =>
-            createGitHubAppManifest.mutate({
-              redirect: redirectTarget,
-              organization: githubOrganization.trim() || null,
-            })
-          }
-          disabled={createGitHubAppManifest.isPending || manifestForm !== null}
-        >
-          {createGitHubAppManifest.isPending || manifestForm ? (
-            <Spinner />
-          ) : (
-            <Sparkles />
-          )}
-          Create GitHub App
-        </Button>
-      </div>
-    </div>
   );
 }
 

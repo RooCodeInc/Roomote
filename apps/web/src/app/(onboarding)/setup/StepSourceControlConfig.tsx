@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import Link from 'next/link';
 import { toast } from 'sonner';
@@ -10,6 +10,7 @@ import type {
 } from '@roomote/types';
 
 import { useTRPC } from '@/trpc/client';
+import { CreateGitHubAppManifestForm } from '@/components/github/CreateGitHubAppManifestForm';
 import {
   ArrowLeft,
   ArrowRight,
@@ -18,24 +19,14 @@ import {
   CopyIconButton,
   ExternalLink,
   Input,
-  Label,
   Pencil,
-  Sparkles,
   Spinner,
 } from '@/components/system';
-import { useCreateGitHubAppManifest } from '@/hooks/github';
 
 import { StepTitle } from './StepTitle';
 import { getSourceControlSetupCopy } from './sourceControlSetupCopy';
 
 const MASKED_VALUE = '••••••••••••••••••••••••••••';
-
-type GitHubAppManifestForm = {
-  postTarget: string;
-  values: {
-    manifest: string;
-  };
-};
 
 export function StepSourceControlConfig({
   sourceControlSetup,
@@ -59,10 +50,6 @@ export function StepSourceControlConfig({
     Record<string, boolean>
   >({});
   const [showManualGitHubValues, setShowManualGitHubValues] = useState(false);
-  const [githubOrganization, setGithubOrganization] = useState('');
-  const [manifestForm, setManifestForm] =
-    useState<GitHubAppManifestForm | null>(null);
-  const manifestFormRef = useRef<HTMLFormElement | null>(null);
   const saveSourceControlConfig = useMutation(
     trpc.setupNew.saveSourceControlConfig.mutationOptions({
       onSuccess: async () => {
@@ -76,31 +63,12 @@ export function StepSourceControlConfig({
       },
     }),
   );
-  const createGitHubAppManifest = useCreateGitHubAppManifest({
-    onSuccess: (result) => {
-      if (result.success) {
-        setManifestForm(result);
-      } else {
-        toast.error(result.error);
-      }
-    },
-    onError: () =>
-      toast.error('Failed to start GitHub App creation. Please try again.'),
-  });
 
   useEffect(() => {
     setValues({});
     setEditingSavedValues({});
     setShowManualGitHubValues(false);
-    setGithubOrganization('');
-    setManifestForm(null);
   }, [effectiveSelectedProviderId]);
-
-  useEffect(() => {
-    if (manifestForm) {
-      manifestFormRef.current?.submit();
-    }
-  }, [manifestForm]);
 
   const selectedProvider = useMemo(
     () =>
@@ -172,98 +140,49 @@ export function StepSourceControlConfig({
       <div className="relative w-full max-w-2xl space-y-4 py-2 md:py-0">
         <StepTitle text="Create GitHub App" />
 
-        <div className="space-y-3 max-w-xl">
-          <p>
-            Because Roomote is self-hosted, we can&apos;t offer you an
-            out-of-the-box GitHub app - you need to create your own.
-          </p>
-          <p>
-            Roomote can create it for you automatically or you can enter values
-            manually if you already have an app or want to do each step
-            yourself.
-          </p>
-        </div>
-
-        <div className="space-y-1 max-w-xl mt-6">
-          <Label htmlFor="github-app-organization">
-            GitHub organization (optional)
-          </Label>
-          <Input
-            id="github-app-organization"
-            value={githubOrganization}
-            onChange={(event) => setGithubOrganization(event.target.value)}
-            placeholder="your-organization"
-            disabled={
-              createGitHubAppManifest.isPending || manifestForm !== null
-            }
-            data-1p-ignore
-          />
-          <p className="text-sm text-muted-foreground">
-            The app can only be installed on the account that owns it. Enter an
-            organization name to create the app there, or leave this blank to
-            create it on your personal GitHub account.
-          </p>
-        </div>
-
-        {manifestForm ? (
-          <form
-            ref={manifestFormRef}
-            action={manifestForm.postTarget}
-            method="post"
-            className="hidden"
-            aria-hidden="true"
-          >
-            <input
-              name="manifest"
-              value={manifestForm.values.manifest}
-              readOnly
-            />
-          </form>
-        ) : null}
-
-        <div className="flex flex-col gap-2 sm:flex-row sm:items-center mt-8">
-          {onBack ? (
+        <CreateGitHubAppManifestForm
+          redirect="/setup?step=source-control-connect"
+          organizationInputId="github-app-organization"
+          organizationFieldClassName="space-y-1 max-w-xl"
+          actionsClassName="flex flex-col gap-2 sm:flex-row sm:items-center mt-4"
+          description={
+            <div className="space-y-3 max-w-xl">
+              <p>
+                Because Roomote is self-hosted, we can&apos;t offer you an
+                out-of-the-box GitHub app - you need to create your own.
+              </p>
+              <p>
+                Roomote can create it for you automatically or you can enter
+                values manually if you already have an app or want to do each
+                step yourself.
+              </p>
+            </div>
+          }
+          leadingActions={({ isBusy }) =>
+            onBack ? (
+              <Button
+                type="button"
+                variant="outline"
+                onClick={onBack}
+                disabled={isBusy}
+              >
+                <ArrowLeft />
+                Back
+              </Button>
+            ) : null
+          }
+          trailingActions={({ isBusy }) => (
             <Button
               type="button"
               variant="outline"
-              onClick={onBack}
-              disabled={createGitHubAppManifest.isPending}
+              onClick={() => setShowManualGitHubValues(true)}
+              disabled={isBusy}
             >
-              <ArrowLeft />
-              Back
+              <Pencil />
+              Enter values manually
             </Button>
-          ) : null}
-          <Button
-            type="button"
-            onClick={() =>
-              createGitHubAppManifest.mutate({
-                redirect: '/setup?step=source-control-connect',
-                organization: githubOrganization.trim() || null,
-              })
-            }
-            disabled={
-              createGitHubAppManifest.isPending || manifestForm !== null
-            }
-          >
-            {createGitHubAppManifest.isPending || manifestForm ? (
-              <Spinner />
-            ) : (
-              <Sparkles />
-            )}
-            Create GitHub App
-          </Button>
-          <Button
-            type="button"
-            variant="outline"
-            onClick={() => setShowManualGitHubValues(true)}
-            disabled={
-              createGitHubAppManifest.isPending || manifestForm !== null
-            }
-          >
-            <Pencil />
-            Enter values manually
-          </Button>
-        </div>
+          )}
+        />
       </div>
     );
   }
