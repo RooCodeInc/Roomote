@@ -390,7 +390,7 @@ const AUTOMATION_DEFINITIONS: Record<AgentType, AutomationDefinition> = {
   ...SCHEDULE_ONLY_AUTOMATION_DEFINITIONS,
   reviewer: {
     id: 'reviewer',
-    label: 'Code Reviewer',
+    label: 'Review Code',
     description: `Review PRs automatically and on-demand.`,
     icon: GitPullRequest,
   },
@@ -3364,7 +3364,7 @@ If unclear, send to manager channel.`}
                             : `pull requests opened by ${PRODUCT_NAME}`}
                           {formState.reviewerReviewOnCommit
                             ? ' as they open or receive new commits.'
-                            : '. Right now, Code Reviewer only runs when someone mentions it on a PR.'}
+                            : '. Right now, Review Code only runs when someone mentions it on a PR.'}
                         </p>
                         {formState.reviewerReviewOnCommit ? (
                           <p>
@@ -3402,7 +3402,7 @@ If unclear, send to manager channel.`}
                           Auto-review on open and new commits
                         </p>
                         <p className="text-xs text-muted-foreground">
-                          Turn this off to keep Code Reviewer background work
+                          Turn this off to keep Review Code background work
                           disabled.
                         </p>
                       </div>
@@ -3451,7 +3451,7 @@ If unclear, send to manager channel.`}
                         <p className="text-sm font-medium">Review draft PRs</p>
                         <p className="text-xs text-muted-foreground">
                           Keep draft pull requests in scope before they are
-                          marked ready for review when Code Reviewer is enabled.
+                          marked ready for review when Review Code is enabled.
                         </p>
                       </div>
                     </div>

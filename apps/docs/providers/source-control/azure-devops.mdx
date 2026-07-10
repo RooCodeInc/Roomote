@@ -6,7 +6,7 @@ description: Configure Azure DevOps repository sync for Roomote.
 
 Azure DevOps support uses a deployment-owned personal access token and
 organization. There is no self-serve OAuth installation flow, service hook
-ingestion, or Code Reviewer automation path yet, so an operator provides Azure
+ingestion, or Review Code automation path yet, so an operator provides Azure
 DevOps credentials and syncs repositories from Settings.
 
 ## Create an Azure DevOps PAT
@@ -53,7 +53,7 @@ credential helper instead of exporting `ADO_TOKEN` into task shells.
 
 ## Current limits
 
-Azure DevOps service hook ingestion and Code Reviewer automation are not
+Azure DevOps service hook ingestion and Review Code automation are not
 implemented yet. Azure DevOps support currently covers repository sync and
 Azure DevOps-backed manual or environment launches.
 

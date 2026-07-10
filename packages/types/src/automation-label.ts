@@ -6,17 +6,7 @@
  */
 const AUTOMATION_LABEL_ACRONYMS = new Set(['pr', 'ci', 'mcp']);
 
-/** Keys whose product name does not match simple title-casing. */
-const AUTOMATION_LABEL_OVERRIDES: Readonly<Record<string, string>> = {
-  review_code: 'Code Reviewer',
-};
-
 export function formatAutomationLabel(key: string): string {
-  const override = AUTOMATION_LABEL_OVERRIDES[key];
-  if (override) {
-    return override;
-  }
-
   return key
     .split(/[_-]+/)
     .filter(Boolean)
@@ -26,4 +16,14 @@ export function formatAutomationLabel(key: string): string {
         : word.charAt(0).toUpperCase() + word.slice(1),
     )
     .join(' ');
+}
+
+/**
+ * Task-owner attribution for automation-created work.
+ * Prefer "{name} Automation" so the owner reads as work done by an automation,
+ * not as a separate agent identity.
+ */
+export function formatAutomationAttributionLabel(key: string): string {
+  const name = formatAutomationLabel(key);
+  return name ? `${name} Automation` : '';
 }
