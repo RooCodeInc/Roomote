@@ -14,16 +14,7 @@ describe('web sentry config', () => {
     expect(isWebSentryEnabled({ NODE_ENV: 'test' })).toBe(true);
   });
 
-  it('uses explicit preview app env when present', () => {
-    expect(
-      resolveWebSentryEnvironment({
-        APP_ENV: 'preview',
-        NODE_ENV: 'production',
-      }),
-    ).toBe('preview');
-  });
-
-  it('uses roomote app env in browser-safe contexts', () => {
+  it('uses canonical app env when present', () => {
     expect(
       resolveWebSentryEnvironment({
         R_APP_ENV: 'preview',

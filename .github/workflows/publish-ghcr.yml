@@ -322,7 +322,7 @@ jobs:
           platforms: linux/${{ matrix.arch }}
           outputs: type=image,name=${{ env.REGISTRY }}/${{ needs.prepare.outputs.owner }}/${{ matrix.image }},push-by-digest=true,name-canonical=true,push=true
           build-args: |
-            APP_ENV=${{ needs.prepare.outputs.app_env }}
+            R_APP_ENV=${{ needs.prepare.outputs.app_env }}
             RELEASE_VERSION=${{ needs.prepare.outputs.version }}
 
       - name: Export digest

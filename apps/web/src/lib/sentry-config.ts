@@ -3,7 +3,6 @@ import { resolveAppEnv } from '@/lib/app-env';
 type WebSentryEnv = Partial<
   Pick<
     NodeJS.ProcessEnv,
-    | 'APP_ENV'
     | 'GITHUB_SHA'
     | 'R_APP_ENV'
     | 'NEXT_PUBLIC_SENTRY_RELEASE'

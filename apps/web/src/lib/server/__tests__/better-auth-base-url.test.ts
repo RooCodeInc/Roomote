@@ -1,14 +1,14 @@
 import { getBetterAuthBaseUrlConfig } from '../better-auth-base-url';
 
 describe('getBetterAuthBaseUrlConfig', () => {
-  const originalAppEnv = process.env.APP_ENV;
+  const originalAppEnv = process.env.R_APP_ENV;
   const originalPreviewDomains = process.env.PREVIEW_DOMAINS;
 
   afterEach(() => {
     if (originalAppEnv === undefined) {
-      delete process.env.APP_ENV;
+      delete process.env.R_APP_ENV;
     } else {
-      process.env.APP_ENV = originalAppEnv;
+      process.env.R_APP_ENV = originalAppEnv;
     }
 
     if (originalPreviewDomains === undefined) {
@@ -19,7 +19,7 @@ describe('getBetterAuthBaseUrlConfig', () => {
   });
 
   it('keeps a fixed canonical base URL in production', () => {
-    process.env.APP_ENV = 'production';
+    process.env.R_APP_ENV = 'production';
 
     expect(
       getBetterAuthBaseUrlConfig({
@@ -29,7 +29,7 @@ describe('getBetterAuthBaseUrlConfig', () => {
   });
 
   it('allows localhost and public preview hosts in development', () => {
-    process.env.APP_ENV = 'development';
+    process.env.R_APP_ENV = 'development';
 
     const result = getBetterAuthBaseUrlConfig({
       previewDomainsRaw: 'preview-john.ngrok.app',
@@ -52,7 +52,7 @@ describe('getBetterAuthBaseUrlConfig', () => {
   });
 
   it('preserves the canonical localhost port in development', () => {
-    process.env.APP_ENV = 'development';
+    process.env.R_APP_ENV = 'development';
 
     const result = getBetterAuthBaseUrlConfig({
       roomoteAppUrl: 'http://localhost:13000',

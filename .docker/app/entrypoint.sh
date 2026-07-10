@@ -25,8 +25,8 @@ case "$service" in
   web) : "${ROOMOTE_WEB_HOST:=${RENDER_EXTERNAL_HOSTNAME:-}}" ;;
   api) : "${ROOMOTE_API_HOST:=${RENDER_EXTERNAL_HOSTNAME:-}}" ;;
 esac
-if [ -z "${ROOMOTE_APP_URL:-}" ] && [ -n "${ROOMOTE_WEB_HOST:-}" ]; then
-  export ROOMOTE_APP_URL="https://${ROOMOTE_WEB_HOST}"
+if [ -z "${R_APP_URL:-}" ] && [ -n "${ROOMOTE_WEB_HOST:-}" ]; then
+  export R_APP_URL="https://${ROOMOTE_WEB_HOST}"
 fi
 if [ -z "${TRPC_URL:-}" ] && [ -n "${ROOMOTE_API_HOST:-}" ]; then
   export TRPC_URL="https://${ROOMOTE_API_HOST}"
