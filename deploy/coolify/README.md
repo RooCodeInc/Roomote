@@ -60,7 +60,8 @@ instead. For a managed PaaS with no server of your own, see
 
 ## Image access
 
-Both published images (`ghcr.io/roocodeinc/roomote-app` and
+The published compatibility, controller, and worker images
+(`ghcr.io/roocodeinc/roomote-app`, `ghcr.io/roocodeinc/roomote-controller`, and
 `ghcr.io/roocodeinc/roomote-worker`) are public and pulled anonymously; no
 registry login is needed.
 
@@ -74,9 +75,9 @@ and the controller reads the worker release version from the `VERSION` file
 inside `worker-current.tar.gz`.
 
 To pin instead (recommended for production deployments): change the
-`x-roomote-app-image` anchor at the top of the compose file to the same
-immutable tag (`v*` or `develop-<sha>`). No other edits are needed — the
-derived values follow the image.
+`x-roomote-app-image` and `x-roomote-controller-image` anchors at the top of
+the compose file to the same immutable tag (`v*` or `develop-<sha>`). No other
+edits are needed — the derived values follow the images.
 
 ## Create the resource
 
@@ -99,14 +100,14 @@ derived values follow the image.
 
 | Service         | Image                  | Public domain              | Healthcheck        |
 | --------------- | ---------------------- | -------------------------- | ------------------ |
-| `postgres`      | `postgres:17.5`        | no                         | `pg_isready`       |
-| `redis`         | `redis:7-alpine`       | no                         | `redis-cli ping`   |
-| `minio`         | `minio/minio` + volume | yes (routed to port 9000)  | `mc ready local`   |
+| `postgres`      | pinned `postgres:17.5` | no                         | `pg_isready`       |
+| `redis`         | pinned `redis:7-alpine` | no                        | `redis-cli ping`   |
+| `minio`         | pinned MinIO + volume  | yes (routed to port 9000)  | `mc ready local`   |
 | `db-migrate`    | `roomote-app:develop`  | no (one-shot)              | excluded           |
 | `web`           | `roomote-app:develop`  | yes (port 3000)            | `/health`          |
 | `api`           | `roomote-app:develop`  | yes (port 3001)            | `/health/liveness` |
-| `controller`    | `roomote-app:develop`  | no                         | —                  |
-| `bullmq`        | `roomote-app:develop`  | no                         | —                  |
+| `controller`    | `roomote-app:develop`  | no                         | `/health/controller` via API |
+| `bullmq`        | `roomote-app:develop`  | no                         | `/admin/health`    |
 | `preview-proxy` | `roomote-app:develop`  | optional (wildcard domain) | `/health`          |
 
 ## Environment variables
@@ -196,9 +197,9 @@ addressing, and `S3_PRESIGN_ENDPOINT` must be reachable from workers.
    callback and webhook URLs from `ROOMOTE_APP_URL` and `TRPC_URL`, so no
    manual URL entry is needed.
 5. Enter the model provider key when the wizard asks. With the default
-    Docker provider there are no sandbox credentials to enter; with hosted
-    sandboxes, enter the provider tokens and let the wizard build the E2B
-    template or Daytona snapshot when applicable.
+   Docker provider there are no sandbox credentials to enter; with hosted
+   sandboxes, enter the provider tokens and let the wizard build the E2B
+   template or Daytona snapshot when applicable.
 6. Pick repositories, create an environment, and run a small task end to end
    (the SELF_HOSTING.md verification checklist applies from step 2 onward).
 
@@ -226,8 +227,8 @@ wildcard-capable TLS setup on the Coolify proxy:
   Coolify pulls the current alias, `db-migrate` applies any schema changes
   before the app services restart, and the auto-generated keypairs persist
   in Postgres, so sessions, job tokens, and preview tokens survive
-  redeploys. On an immutable pin, bump the tag in the `x-roomote-app-image`
-  anchor first.
+  redeploys. On an immutable pin, bump the tags in the `x-roomote-app-image`
+  and `x-roomote-controller-image` anchors first.
 - **Back up** the Postgres volume (or run `pg_dump` against the `postgres`
   container) and the MinIO volume. Everything else is reproducible from
   config plus the generated environment values on the resource.

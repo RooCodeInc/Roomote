@@ -2,10 +2,9 @@ import pMap from 'p-map';
 
 import {
   type TaskPayload,
-  DEFAULT_PR_REVIEWER_SETTINGS,
-  type PrReviewerSettings,
+  DEFAULT_PR_REVIEW_SETTINGS,
+  type PrReviewSettings,
   TaskPayloadKind,
-  CloudAgentType,
 } from '@roomote/types';
 import {
   db,
@@ -143,7 +142,7 @@ export async function handleGitLabMergeRequest(
   }
 
   const result = await getGitLabAutomationTargets({
-    type: CloudAgentType.PrReviewer,
+    workflow: 'pr_review',
     payload,
   });
 
@@ -152,11 +151,11 @@ export async function handleGitLabMergeRequest(
   }
 
   const targets = result.targets.filter((target) => {
-    const settings = target.settings as PrReviewerSettings | null;
+    const settings = target.settings as PrReviewSettings | null;
     const reviewOnCommit =
-      settings?.reviewOnCommit ?? DEFAULT_PR_REVIEWER_SETTINGS.reviewOnCommit;
+      settings?.reviewOnCommit ?? DEFAULT_PR_REVIEW_SETTINGS.reviewOnCommit;
     const reviewDraftPrs =
-      settings?.reviewDraftPrs ?? DEFAULT_PR_REVIEWER_SETTINGS.reviewDraftPrs;
+      settings?.reviewDraftPrs ?? DEFAULT_PR_REVIEW_SETTINGS.reviewDraftPrs;
 
     if (!reviewOnCommit) {
       return false;

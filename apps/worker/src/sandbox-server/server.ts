@@ -8,7 +8,7 @@ import { WebSocketServer } from 'ws';
 import type {
   AuthTokenContext,
   CodingHarness,
-  JobTokenContext,
+  RunTokenContext,
 } from '@roomote/types';
 
 import type { HarnessLogger } from '../logging';
@@ -34,19 +34,15 @@ function getBearerToken(request: Request): string | undefined {
 }
 
 function authorizeSandboxToken(
-  auth: AuthTokenContext | JobTokenContext,
+  auth: AuthTokenContext | RunTokenContext,
   options: {
-    cloudJobId?: number;
+    runId?: number;
   },
-): AuthTokenContext | JobTokenContext {
-  const { cloudJobId } = options;
+): AuthTokenContext | RunTokenContext {
+  const { runId } = options;
 
-  if (
-    'cloudJobId' in auth &&
-    cloudJobId !== undefined &&
-    auth.cloudJobId !== cloudJobId
-  ) {
-    throw new Error('Token cloud job does not match sandbox cloud job');
+  if ('runId' in auth && runId !== undefined && auth.runId !== runId) {
+    throw new Error('Token task run does not match sandbox task run');
   }
 
   return auth;
@@ -55,13 +51,13 @@ function authorizeSandboxToken(
 async function assertValidToken(
   token: string | undefined,
   validateToken:
-    | ((token: string) => Promise<AuthTokenContext | JobTokenContext>)
+    | ((token: string) => Promise<AuthTokenContext | RunTokenContext>)
     | undefined,
   logPrefix: string,
   options: {
-    cloudJobId?: number;
+    runId?: number;
   },
-): Promise<AuthTokenContext | JobTokenContext | null> {
+): Promise<AuthTokenContext | RunTokenContext | null> {
   if (!validateToken) {
     return null;
   }
@@ -100,8 +96,8 @@ export function createServer({
   userEnv,
   workerEnv,
   allowTerminal = false,
-  cloudJobId,
-  cloudJobTaskId,
+  runId,
+  taskRunTaskId,
   slackReplySatisfactionStateFile,
   codingHarness,
   prepareActorScopedTurn,
@@ -122,10 +118,10 @@ export function createServer({
   harness: Harness;
   /** HarnessManager for task lifecycle control. */
   harnessManager: HarnessManager;
-  /** Cloud job ID for the current worker session. */
-  cloudJobId?: number;
-  /** Stable task ID for the current cloud job (tasks.id). */
-  cloudJobTaskId?: string;
+  /** Task run ID for the current worker session. */
+  runId?: number;
+  /** Stable task ID for the current task run (tasks.id). */
+  taskRunTaskId?: string;
   /** Path to the Slack reply satisfaction state file for Slack-originated jobs. */
   slackReplySatisfactionStateFile?: string;
   /** Effective coding harness for the current worker session. */
@@ -144,16 +140,16 @@ export function createServer({
    * For tRPC: reads `Authorization: Bearer <token>` header.
    * For WebSocket: reads `connectionParams.token`.
    */
-  validateToken: (token: string) => Promise<AuthTokenContext | JobTokenContext>;
+  validateToken: (token: string) => Promise<AuthTokenContext | RunTokenContext>;
 }) {
-  const baseContext = (auth: AuthTokenContext | JobTokenContext | null) => ({
+  const baseContext = (auth: AuthTokenContext | RunTokenContext | null) => ({
     workingDirectory,
     harnessLogger,
     harness,
     harnessManager,
     auth,
-    cloudJobId,
-    cloudJobTaskId,
+    runId,
+    taskRunTaskId,
     slackReplySatisfactionStateFile,
     codingHarness,
     workerEnv,
@@ -197,7 +193,7 @@ export function createServer({
           getBearerToken(c.req.raw),
           validateToken,
           '[SandboxServer]',
-          { cloudJobId },
+          { runId },
         );
 
         return baseContext(auth);
@@ -230,7 +226,7 @@ export function createServer({
           : undefined,
         validateToken,
         '[WebSocketServer]',
-        { cloudJobId },
+        { runId },
       );
 
       return baseContext(auth);
@@ -277,7 +273,7 @@ export function createServer({
 
       validateToken(token)
         .then((auth) => {
-          authorizeSandboxToken(auth, { cloudJobId });
+          authorizeSandboxToken(auth, { runId });
           upgradeAndConnect();
         })
         .catch((error) => {

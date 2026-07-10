@@ -282,6 +282,9 @@ export async function startOpenCodeServerHarness({
       stopHookReminderStallTimeoutMs: parseTimeoutMs(
         process.env.ROOMOTE_STOP_HOOK_REMINDER_STALL_TIMEOUT_MS,
       ),
+      subagentSettlementGraceMs: parseTimeoutMs(
+        process.env.ROOMOTE_SUBAGENT_SETTLEMENT_GRACE_MS,
+      ),
       mcpServerNames: Object.keys(mcpServers),
       beforeQueuedPrompt,
     });

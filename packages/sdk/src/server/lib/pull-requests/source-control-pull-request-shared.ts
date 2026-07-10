@@ -4,7 +4,7 @@ import {
   environments,
   eq,
   repositories,
-  type Run,
+  type TaskRun,
 } from '@roomote/db/server';
 import {
   ALL_REPOSITORIES,
@@ -68,11 +68,11 @@ export async function resolveRepositoryRow({
   return repository;
 }
 
-export async function assertRepositoryInCloudJobScope(
-  cloudJob: Run,
+export async function assertRepositoryInTaskRunScope(
+  taskRun: TaskRun,
   repositoryFullName: string,
 ): Promise<void> {
-  const scopedRepositories = await resolveCloudJobRepositoryScope(cloudJob);
+  const scopedRepositories = await resolveTaskRunRepositoryScope(taskRun);
 
   if (scopedRepositories === null) {
     return;
@@ -85,10 +85,10 @@ export async function assertRepositoryInCloudJobScope(
   }
 }
 
-async function resolveCloudJobRepositoryScope(
-  cloudJob: Run,
+async function resolveTaskRunRepositoryScope(
+  taskRun: TaskRun,
 ): Promise<string[] | null> {
-  const payload = getPayloadRecord(cloudJob.payload);
+  const payload = getPayloadRecord(taskRun.payload);
   const environmentId =
     typeof payload.environmentId === 'string'
       ? payload.environmentId.trim()
@@ -102,7 +102,7 @@ async function resolveCloudJobRepositoryScope(
 
     if (!environment) {
       throw new Error(
-        `Environment not found for cloud job ${cloudJob.id}: ${environmentId}`,
+        `Environment not found for task run ${taskRun.id}: ${environmentId}`,
       );
     }
 

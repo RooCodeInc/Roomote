@@ -60,7 +60,7 @@ case "$service" in
     exec /roomote/.docker/run-with-dotenvx.sh node dist/index.js "$@"
     ;;
   preview-proxy)
-    exec /usr/bin/tini -g -- /entrypoint.sh "$@"
+    exec /entrypoint.sh "$@"
     ;;
   db-migrate)
     exec /roomote/.docker/run-with-dotenvx.sh node /roomote/migrate/migrate.mjs "$@"

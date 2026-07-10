@@ -36,7 +36,7 @@ jobs:
       extra_tag: ${{ steps.vars.outputs.extra_tag }}
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
         with:
           fetch-depth: 0
       - name: Classify changed paths
@@ -137,9 +137,55 @@ jobs:
           echo "app_env=$app_env" >> "$GITHUB_OUTPUT"
           echo "extra_tag=$extra_tag" >> "$GITHUB_OUTPUT"
 
+  deployment-acceptance:
+    name: Deployment acceptance (amd64)
+    needs: prepare
+    if: ${{ needs.prepare.outputs.docs_only != 'true' }}
+    runs-on: blacksmith-4vcpu-ubuntu-2404
+    permissions:
+      contents: read
+      packages: read
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - name: Setup environment
+        uses: ./.github/actions/setup-environment
+        with:
+          frozen-lockfile: 'true'
+          node-version: 24.13.1
+          pnpm-version: 10.29.3
+      - name: Set up Docker builder
+        uses: useblacksmith/setup-docker-builder@47a5d0102cc44712a17a633c2599f755008cc40e # v1
+      - name: Resolve previous published channel
+        id: baseline
+        shell: bash
+        env:
+          EXTRA_TAG: ${{ needs.prepare.outputs.extra_tag }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          baseline="$EXTRA_TAG"
+          if [ "$baseline" = 'latest' ]; then
+            baseline="$(gh api "repos/$GITHUB_REPOSITORY/releases/latest" --jq .tag_name 2>/dev/null || true)"
+            # v0.0.1 predates the current migration baseline. Use the prior
+            # main candidate for the first gated release; later releases use
+            # the immediately preceding immutable release tag.
+            if [ -z "$baseline" ] || [ "$baseline" = 'v0.0.1' ]; then
+              baseline='main'
+            fi
+          elif [ -z "$baseline" ]; then
+            baseline='main'
+          fi
+          echo "version=$baseline" >> "$GITHUB_OUTPUT"
+      - name: Exercise deployment lifecycle
+        env:
+          BASELINE_VERSION: ${{ steps.baseline.outputs.version }}
+          CANDIDATE_VERSION: ${{ needs.prepare.outputs.version }}
+        run: pnpm deployment:smoke
+
   build:
     name: Build ${{ matrix.app }} (${{ matrix.arch }})
-    needs: prepare
+    needs: [prepare, deployment-acceptance]
     if: ${{ needs.prepare.outputs.docs_only != 'true' }}
     runs-on: ${{ matrix.runner }}
     permissions:
@@ -154,37 +200,113 @@ jobs:
         include:
           - app: app
             dockerfile: .docker/app/Dockerfile
+            target: runtime-app
             image: roomote-app
             arch: amd64
             runner: blacksmith-4vcpu-ubuntu-2404
           - app: app
             dockerfile: .docker/app/Dockerfile
+            target: runtime-app
             image: roomote-app
+            arch: arm64
+            runner: blacksmith-4vcpu-ubuntu-2404-arm
+          - app: web
+            dockerfile: .docker/app/Dockerfile
+            target: runtime-web
+            image: roomote-web
+            arch: amd64
+            runner: blacksmith-4vcpu-ubuntu-2404
+          - app: web
+            dockerfile: .docker/app/Dockerfile
+            target: runtime-web
+            image: roomote-web
+            arch: arm64
+            runner: blacksmith-4vcpu-ubuntu-2404-arm
+          - app: api
+            dockerfile: .docker/app/Dockerfile
+            target: runtime-api
+            image: roomote-api
+            arch: amd64
+            runner: blacksmith-4vcpu-ubuntu-2404
+          - app: api
+            dockerfile: .docker/app/Dockerfile
+            target: runtime-api
+            image: roomote-api
+            arch: arm64
+            runner: blacksmith-4vcpu-ubuntu-2404-arm
+          - app: controller
+            dockerfile: .docker/app/Dockerfile
+            target: runtime-controller
+            image: roomote-controller
+            arch: amd64
+            runner: blacksmith-4vcpu-ubuntu-2404
+          - app: controller
+            dockerfile: .docker/app/Dockerfile
+            target: runtime-controller
+            image: roomote-controller
+            arch: arm64
+            runner: blacksmith-4vcpu-ubuntu-2404-arm
+          - app: bullmq
+            dockerfile: .docker/app/Dockerfile
+            target: runtime-bullmq
+            image: roomote-bullmq
+            arch: amd64
+            runner: blacksmith-4vcpu-ubuntu-2404
+          - app: bullmq
+            dockerfile: .docker/app/Dockerfile
+            target: runtime-bullmq
+            image: roomote-bullmq
+            arch: arm64
+            runner: blacksmith-4vcpu-ubuntu-2404-arm
+          - app: preview-proxy
+            dockerfile: .docker/app/Dockerfile
+            target: runtime-preview-proxy
+            image: roomote-preview-proxy
+            arch: amd64
+            runner: blacksmith-4vcpu-ubuntu-2404
+          - app: preview-proxy
+            dockerfile: .docker/app/Dockerfile
+            target: runtime-preview-proxy
+            image: roomote-preview-proxy
+            arch: arm64
+            runner: blacksmith-4vcpu-ubuntu-2404-arm
+          - app: migrate
+            dockerfile: .docker/app/Dockerfile
+            target: runtime-migrate
+            image: roomote-migrate
+            arch: amd64
+            runner: blacksmith-4vcpu-ubuntu-2404
+          - app: migrate
+            dockerfile: .docker/app/Dockerfile
+            target: runtime-migrate
+            image: roomote-migrate
             arch: arm64
             runner: blacksmith-4vcpu-ubuntu-2404-arm
           - app: worker
             dockerfile: apps/worker/Dockerfile
+            target: runtime
             image: roomote-worker
             arch: amd64
             runner: blacksmith-4vcpu-ubuntu-2404
           - app: worker
             dockerfile: apps/worker/Dockerfile
+            target: runtime
             image: roomote-worker
             arch: arm64
             runner: blacksmith-4vcpu-ubuntu-2404-arm
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
 
       # Blacksmith's builder mounts a persistent NVMe layer cache into the
       # runner (per repo/Dockerfile/arch). Unlike type=gha caching this has
       # no 10GB repo cap or per-ref scoping, and skips the multi-minute
       # cache export upload at the end of every build.
       - name: Set up Docker builder
-        uses: useblacksmith/setup-docker-builder@v1
+        uses: useblacksmith/setup-docker-builder@47a5d0102cc44712a17a633c2599f755008cc40e # v1
 
       - name: Log in to GHCR
-        uses: docker/login-action@v3
+        uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3
         with:
           registry: ${{ env.REGISTRY }}
           username: ${{ github.actor }}
@@ -192,10 +314,11 @@ jobs:
 
       - name: Build and push ${{ matrix.app }} (${{ matrix.arch }}) by digest
         id: build
-        uses: useblacksmith/build-push-action@v2
+        uses: useblacksmith/build-push-action@fb9e3e6a9299c78462bfadd0d93352c316adc9b8 # v2
         with:
           context: .
           file: ${{ matrix.dockerfile }}
+          target: ${{ matrix.target }}
           platforms: linux/${{ matrix.arch }}
           outputs: type=image,name=${{ env.REGISTRY }}/${{ needs.prepare.outputs.owner }}/${{ matrix.image }},push-by-digest=true,name-canonical=true,push=true
           build-args: |
@@ -211,7 +334,7 @@ jobs:
           touch "/tmp/digests/${digest#sha256:}"
 
       - name: Upload digest
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: digests-${{ matrix.app }}-${{ matrix.arch }}
           path: /tmp/digests/*
@@ -231,21 +354,33 @@ jobs:
         include:
           - app: app
             image: roomote-app
+          - app: web
+            image: roomote-web
+          - app: api
+            image: roomote-api
+          - app: controller
+            image: roomote-controller
+          - app: bullmq
+            image: roomote-bullmq
+          - app: preview-proxy
+            image: roomote-preview-proxy
+          - app: migrate
+            image: roomote-migrate
           - app: worker
             image: roomote-worker
     steps:
       - name: Download digests
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         with:
           pattern: digests-${{ matrix.app }}-*
           path: /tmp/digests
           merge-multiple: true
 
       - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
+        uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
 
       - name: Log in to GHCR
-        uses: docker/login-action@v3
+        uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3
         with:
           registry: ${{ env.REGISTRY }}
           username: ${{ github.actor }}

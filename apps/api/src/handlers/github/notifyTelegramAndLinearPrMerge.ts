@@ -96,7 +96,7 @@ async function resolveLinearClient() {
 
 /**
  * Notifies Telegram chats and Linear sessions associated with a PR that the PR
- * has been merged. Links the merged PR to cloud jobs scoped to the merging
+ * has been merged. Links the merged PR to task runs scoped to the merging
  * source control provider (GitHub, GitLab, Gitea, or Azure DevOps) using the
  * repository name and PR number, then posts the merge message to every Telegram
  * chat (via the best-effort poster) and Linear agent session (via a closing

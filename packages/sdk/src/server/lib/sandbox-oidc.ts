@@ -22,7 +22,7 @@ import {
 import {
   and,
   taskRuns,
-  recordCloudJobEvent,
+  recordTaskRunEvent,
   createRowMapper,
   db,
   environments,
@@ -50,7 +50,7 @@ type PrimeSandboxOidcTargetsInput = {
   environmentConfig: EnvironmentConfig;
   computeProvider: ComputeProvider;
   computeProviderId: string;
-  cloudJobId?: number;
+  runId?: number;
   now?: Date;
 };
 
@@ -58,7 +58,7 @@ type OwnerState = {
   taskId?: string;
   environmentId: string;
   environmentConfig: EnvironmentConfig;
-  cloudJobId?: number;
+  runId?: number;
 } | null;
 
 type RefreshMachineResult =
@@ -157,7 +157,7 @@ function buildTargetRows(params: {
   environmentId: string;
   computeProvider: ComputeProvider;
   computeProviderId: string;
-  cloudJobId?: number;
+  runId?: number;
   targets: ResolvedEnvironmentOidcTarget[];
 }): SandboxOidcTargetInsert[] {
   const expiresAt = new Date(params.now.getTime() + SANDBOX_OIDC_TOKEN_TTL_MS);
@@ -167,7 +167,7 @@ function buildTargetRows(params: {
 
   return params.targets.map((target) => ({
     environmentId: params.environmentId,
-    runId: params.cloudJobId ?? null,
+    runId: params.runId ?? null,
     computeProvider: params.computeProvider,
     computeProviderId: params.computeProviderId,
     targetKind: target.kind,
@@ -451,7 +451,7 @@ async function loadOwnerStateForRefresh(
   }
 
   if (row.runId) {
-    const cloudJob = await db.query.taskRuns.findFirst({
+    const taskRun = await db.query.taskRuns.findFirst({
       where: eq(taskRuns.id, row.runId),
       columns: {
         id: true,
@@ -463,30 +463,30 @@ async function loadOwnerStateForRefresh(
       },
     });
 
-    if (!cloudJob) {
+    if (!taskRun) {
       return null;
     }
 
     if (
-      cloudJob.status === RunStatus.Completed ||
-      cloudJob.status === RunStatus.Failed ||
-      cloudJob.status === RunStatus.Canceled
+      taskRun.status === RunStatus.Completed ||
+      taskRun.status === RunStatus.Failed ||
+      taskRun.status === RunStatus.Canceled
     ) {
       return null;
     }
 
     if (
-      cloudJob.vendor !== row.computeProvider ||
-      cloudJob.machineId !== row.computeProviderId
+      taskRun.vendor !== row.computeProvider ||
+      taskRun.machineId !== row.computeProviderId
     ) {
       return null;
     }
 
     return {
-      taskId: cloudJob.taskId,
+      taskId: taskRun.taskId,
       environmentId: row.environmentId,
       environmentConfig: environment.config,
-      cloudJobId: row.runId,
+      runId: row.runId,
     };
   }
 
@@ -552,19 +552,19 @@ async function getSandboxOidcStatusSnapshot(params: {
 }
 
 async function recordSandboxOidcEventSafe(params: {
-  cloudJobId?: number;
+  runId?: number;
   taskId?: string;
   eventType: 'started' | 'completed' | 'failed';
   message: string;
   details: SandboxOidcStepDetails;
 }): Promise<void> {
-  if (!params.cloudJobId) {
+  if (!params.runId) {
     return;
   }
 
   try {
-    await recordCloudJobEvent(db, {
-      runId: params.cloudJobId,
+    await recordTaskRunEvent(db, {
+      runId: params.runId,
       taskId: params.taskId,
       source: 'machine_oidc',
       eventType: params.eventType,
@@ -573,7 +573,7 @@ async function recordSandboxOidcEventSafe(params: {
     });
   } catch (error) {
     console.warn(
-      `[sandbox-oidc] Failed to record machine_oidc event for cloud job #${params.cloudJobId}: ${
+      `[sandbox-oidc] Failed to record machine_oidc event for task run #${params.runId}: ${
         error instanceof Error ? error.message : String(error)
       }`,
     );
@@ -672,7 +672,7 @@ export async function primeSandboxOidcTargets(
     execute: writeTempFiles,
     onAttemptStart: async ({ attempt, maxAttempts }) => {
       await recordSandboxOidcEventSafe({
-        cloudJobId: input.cloudJobId,
+        runId: input.runId,
         taskId: input.taskId,
         eventType: 'started',
         message: `Starting OIDC token file upload for ${input.computeProvider}:${input.computeProviderId}.`,
@@ -688,7 +688,7 @@ export async function primeSandboxOidcTargets(
     },
     onAttemptSuccess: async ({ attempt, maxAttempts, durationMs }) => {
       await recordSandboxOidcEventSafe({
-        cloudJobId: input.cloudJobId,
+        runId: input.runId,
         taskId: input.taskId,
         eventType: 'completed',
         message: `Completed OIDC token file upload for ${input.computeProvider}:${input.computeProviderId}.`,
@@ -711,7 +711,7 @@ export async function primeSandboxOidcTargets(
       retryable,
     }) => {
       await recordSandboxOidcEventSafe({
-        cloudJobId: input.cloudJobId,
+        runId: input.runId,
         taskId: input.taskId,
         eventType: 'failed',
         message: `OIDC token file upload failed for ${input.computeProvider}:${input.computeProviderId}.`,
@@ -782,7 +782,7 @@ export async function primeSandboxOidcTargets(
     },
     onAttemptStart: async ({ attempt, maxAttempts }) => {
       await recordSandboxOidcEventSafe({
-        cloudJobId: input.cloudJobId,
+        runId: input.runId,
         taskId: input.taskId,
         eventType: 'started',
         message: `Starting OIDC token install command for ${input.computeProvider}:${input.computeProviderId}.`,
@@ -798,7 +798,7 @@ export async function primeSandboxOidcTargets(
     },
     onAttemptSuccess: async ({ attempt, maxAttempts, durationMs }) => {
       await recordSandboxOidcEventSafe({
-        cloudJobId: input.cloudJobId,
+        runId: input.runId,
         taskId: input.taskId,
         eventType: 'completed',
         message: `Completed OIDC token install command for ${input.computeProvider}:${input.computeProviderId}.`,
@@ -821,7 +821,7 @@ export async function primeSandboxOidcTargets(
       retryable,
     }) => {
       await recordSandboxOidcEventSafe({
-        cloudJobId: input.cloudJobId,
+        runId: input.runId,
         taskId: input.taskId,
         eventType: 'failed',
         message: `OIDC token install command failed for ${input.computeProvider}:${input.computeProviderId}.`,
@@ -845,7 +845,7 @@ export async function primeSandboxOidcTargets(
     environmentId: input.environmentId,
     computeProvider: input.computeProvider,
     computeProviderId: input.computeProviderId,
-    cloudJobId: input.cloudJobId,
+    runId: input.runId,
     targets,
   });
 
@@ -861,7 +861,7 @@ export async function primeSandboxOidcTargets(
         ],
         set: {
           environmentId: input.environmentId,
-          runId: input.cloudJobId ?? null,
+          runId: input.runId ?? null,
           targetKind: sql`excluded.target_kind`,
           audience: sql`excluded.audience`,
           awsRoleArn: sql`excluded.aws_role_arn`,
@@ -888,11 +888,11 @@ export async function primeSandboxOidcTargets(
   return { targetCount: targets.length };
 }
 
-export async function cleanupSandboxOidcTargetsForCloudJob(
-  cloudJobId: number,
+export async function cleanupSandboxOidcTargetsForTaskRun(
+  runId: number,
 ): Promise<void> {
   const rows = await db.query.sandboxOidcTargets.findMany({
-    where: eq(sandboxOidcTargets.runId, cloudJobId),
+    where: eq(sandboxOidcTargets.runId, runId),
   });
 
   const groups = groupRowsByInstance(rows);
@@ -939,7 +939,7 @@ async function refreshSandboxOidcRowsForMachine(
       environmentConfig: ownerState.environmentConfig,
       computeProvider: firstRow.computeProvider,
       computeProviderId: firstRow.computeProviderId,
-      cloudJobId: ownerState.cloudJobId,
+      runId: ownerState.runId,
       now: new Date(),
     });
 

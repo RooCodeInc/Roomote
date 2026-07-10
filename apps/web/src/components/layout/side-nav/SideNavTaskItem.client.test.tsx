@@ -102,7 +102,7 @@ describe('SideNavTaskItem', () => {
         task={{
           id: 'task-1',
           title: 'Task title',
-          cloudJob: {
+          taskRun: {
             status: RunStatus.Running,
             taskPhase: 'running',
             prRepo: 'owner/repo',
@@ -158,7 +158,7 @@ describe('SideNavTaskItem', () => {
         task={{
           id: 'task-2',
           title: 'Task two',
-          cloudJob: {
+          taskRun: {
             status: RunStatus.Completed,
             taskPhase: null,
             payload: {
@@ -191,7 +191,7 @@ describe('SideNavTaskItem', () => {
         task={{
           id: 'task-3',
           title: 'Task starting',
-          cloudJob: {
+          taskRun: {
             status: RunStatus.Pending,
             taskPhase: null,
             payload: {
@@ -219,7 +219,7 @@ describe('SideNavTaskItem', () => {
         task={{
           id: 'task-4',
           title: 'Task with live status',
-          cloudJob: {
+          taskRun: {
             status: RunStatus.Pending,
             taskPhase: null,
             payload: {
@@ -259,7 +259,7 @@ describe('SideNavTaskItem', () => {
         task={{
           id: 'task-5',
           title: longTitle,
-          cloudJob: {
+          taskRun: {
             status: RunStatus.Running,
             taskPhase: 'running',
             payload: {
@@ -310,7 +310,7 @@ describe('SideNavTaskItem', () => {
         task={{
           id: 'task-6',
           title: 'Keyboard pin target',
-          cloudJob: {
+          taskRun: {
             status: RunStatus.Running,
             taskPhase: 'running',
             payload: {
@@ -347,7 +347,7 @@ describe('SideNavTaskItem', () => {
         task={{
           id: 'task-7',
           title: 'Expanded booting task',
-          cloudJob: {
+          taskRun: {
             status: RunStatus.Pending,
             taskPhase: null,
             payload: {
@@ -378,7 +378,7 @@ describe('SideNavTaskItem', () => {
         task={{
           id: 'task-8',
           title: 'Expanded live running task',
-          cloudJob: {
+          taskRun: {
             status: RunStatus.Running,
             taskPhase: 'waiting_for_prompt',
             payload: {

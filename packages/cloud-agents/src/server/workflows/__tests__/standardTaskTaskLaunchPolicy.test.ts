@@ -5,7 +5,7 @@ describe('Standard Task task-launch policy', () => {
     const { harnessInstructions } = standardTask({
       description: 'Implement behavior change',
       repo: 'Roomote/example-app',
-      cloudJobUrl: 'https://example.com/task/123',
+      taskRunUrl: 'https://example.com/task/123',
     });
 
     expect(harnessInstructions).toContain(

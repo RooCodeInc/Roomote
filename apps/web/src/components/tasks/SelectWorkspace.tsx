@@ -6,7 +6,7 @@ import { useFormContext } from 'react-hook-form';
 
 import { ALL_REPOSITORIES } from '@roomote/types';
 
-import type { CreateCloudTask } from '@/types';
+import type { CreateTaskFormValues } from '@/types';
 
 import type { EnvironmentWithMeta } from '@/trpc/commands/environments';
 import { SETTINGS_PATHS } from '@/lib/settings';
@@ -40,7 +40,7 @@ export const SelectWorkspace = ({
     name: string;
   } | null>(null);
 
-  const { watch, setValue } = useFormContext<CreateCloudTask>();
+  const { watch, setValue } = useFormContext<CreateTaskFormValues>();
   const environmentId = watch('environmentId');
   const repository = watch('repository');
   const canSelectRepositoryBranch =

@@ -17,7 +17,7 @@ host with clear handler ownership.
 - Extend the existing owning surface (`/trpc`, a webhook family, `/api/mcp/*`,
   or artifacts) instead of creating overlapping endpoints.
 - Keep long-lived worker and MCP paths compatible with the observed-fetch and
-  bearer or job-token auth expectations already used by the runtime.
+  bearer or run-token auth expectations already used by the runtime.
 
 ## Don'ts
 

@@ -3,23 +3,23 @@ import type { ContentfulStatusCode } from 'hono/utils/http-status';
 import { z } from 'zod';
 
 import {
-  createOrUpdateSourceControlPullRequestForCloudJob,
-  findCloudJobForSourceControlMutation,
-  readSourceControlPullRequestForCloudJob,
+  createOrUpdateSourceControlPullRequestForTaskRun,
+  findTaskRunForSourceControlMutation,
+  readSourceControlPullRequestForTaskRun,
   sourceControlPullRequestMutationInputSchema,
   sourceControlPullRequestReadInputSchema,
   sourceControlPullRequestWriteInputSchema,
   SourceControlMutationError,
   SourceControlReadError,
   SourceControlWriteError,
-  writeSourceControlPullRequestForCloudJob,
+  writeSourceControlPullRequestForTaskRun,
 } from '@roomote/sdk/server';
 
 import type { Variables } from '../../types';
 import type { McpAuth } from '../mcp/middleware';
 import {
-  assertCloudJobTokenJobExists,
-  isJobTokenContext,
+  assertTaskRunTokenTargetExists,
+  isRunTokenContext,
   McpProxyError,
 } from '../mcp/proxy-utils';
 import { logHandlerError } from '../utils';
@@ -27,7 +27,7 @@ import { logHandlerError } from '../utils';
 /**
  * POST /api/mcp/tasks/:taskId/source_control
  *
- * Mutate source-control state for the currently authenticated cloud job.
+ * Mutate source-control state for the currently authenticated task run.
  * This keeps provider API tokens server-side while allowing sandboxes to
  * create or refresh provider-neutral PR/MR metadata.
  */
@@ -41,15 +41,15 @@ export async function manageSourceControl(
     return c.json({ error: 'taskId is required' }, 400);
   }
 
-  if (!isJobTokenContext(auth.authContext)) {
+  if (!isRunTokenContext(auth.authContext)) {
     return c.json(
-      { error: 'Source control mutations require a cloud job token' },
+      { error: 'Source control mutations require a task run token' },
       403,
     );
   }
 
   try {
-    await assertCloudJobTokenJobExists(auth.authContext);
+    await assertTaskRunTokenTargetExists(auth.authContext);
 
     const input = z
       .union([
@@ -58,24 +58,24 @@ export async function manageSourceControl(
         sourceControlPullRequestWriteInputSchema,
       ])
       .parse(await c.req.json());
-    const cloudJob = await findCloudJobForSourceControlMutation({
-      cloudJobId: auth.authContext.cloudJobId,
+    const taskRun = await findTaskRunForSourceControlMutation({
+      runId: auth.authContext.runId,
       taskId,
     });
 
     switch (input.action) {
       case 'create_or_update_pull_request':
         return c.json(
-          await createOrUpdateSourceControlPullRequestForCloudJob({
-            cloudJob,
+          await createOrUpdateSourceControlPullRequestForTaskRun({
+            taskRun,
             input,
           }),
         );
       case 'get_pull_request':
       case 'list_pull_request_comments':
         return c.json(
-          await readSourceControlPullRequestForCloudJob({
-            cloudJob,
+          await readSourceControlPullRequestForTaskRun({
+            taskRun,
             input,
           }),
         );
@@ -85,8 +85,8 @@ export async function manageSourceControl(
       case 'submit_pull_request_review':
       case 'update_pull_request_comment':
         return c.json(
-          await writeSourceControlPullRequestForCloudJob({
-            cloudJob,
+          await writeSourceControlPullRequestForTaskRun({
+            taskRun,
             input,
           }),
         );

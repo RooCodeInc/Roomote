@@ -1,7 +1,7 @@
 import { z } from 'zod';
 
 const {
-  mockFindFirstCloudJob,
+  mockFindFirstTaskRun,
   mockFindFirstTaskPullRequest,
   mockFindFirstSlackInstallation,
   mockConsumePending,
@@ -14,7 +14,7 @@ const {
   mockCreateTeamsProvider,
   mockTelegramPostMessage,
 } = vi.hoisted(() => ({
-  mockFindFirstCloudJob: vi.fn(),
+  mockFindFirstTaskRun: vi.fn(),
   mockFindFirstTaskPullRequest: vi.fn(),
   mockFindFirstSlackInstallation: vi.fn(),
   mockConsumePending: vi.fn(),
@@ -32,7 +32,7 @@ vi.mock('@roomote/db/server', () => ({
   db: {
     query: {
       taskRuns: {
-        findFirst: (...args: unknown[]) => mockFindFirstCloudJob(...args),
+        findFirst: (...args: unknown[]) => mockFindFirstTaskRun(...args),
       },
       taskPullRequests: {
         findFirst: (...args: unknown[]) =>
@@ -120,11 +120,11 @@ describe('prReviewNotificationJob', () => {
   beforeEach(() => {
     vi.clearAllMocks();
 
-    mockFindFirstCloudJob.mockResolvedValue({
+    mockFindFirstTaskRun.mockResolvedValue({
       id: 1,
       payload: { channel: 'C123' },
       slackThreadTs: '111.222',
-      sourceCloudJobId: null,
+      sourceRunId: null,
       status: RunStatus.Idle,
       taskPhase: 'waiting_for_prompt',
     });
@@ -155,7 +155,7 @@ describe('prReviewNotificationJob', () => {
     await prReviewNotificationJob(makeJob() as never);
 
     expect(mockPrepareDelivery).toHaveBeenCalledWith({
-      cloudJob: expect.objectContaining({ id: 1 }),
+      taskRun: expect.objectContaining({ id: 1 }),
       request: {
         taskId: 'task-1',
         repository: 'owner/repo',
@@ -173,7 +173,7 @@ describe('prReviewNotificationJob', () => {
       unfurl_media: false,
     });
     expect(mockRecordDelivery).toHaveBeenCalledWith({
-      cloudJobId: 1,
+      runId: 1,
       taskId: 'task-1',
       route: {
         provider: 'slack',
@@ -209,7 +209,7 @@ describe('prReviewNotificationJob', () => {
       textFormat: 'markdown',
     });
     expect(mockRecordDelivery).toHaveBeenCalledWith({
-      cloudJobId: 1,
+      runId: 1,
       taskId: 'task-1',
       route: {
         provider: 'teams',
@@ -244,11 +244,11 @@ describe('prReviewNotificationJob', () => {
   });
 
   it('defers while the task is actively running', async () => {
-    mockFindFirstCloudJob.mockResolvedValue({
+    mockFindFirstTaskRun.mockResolvedValue({
       id: 1,
       payload: {},
       slackThreadTs: '111.222',
-      sourceCloudJobId: null,
+      sourceRunId: null,
       status: RunStatus.Running,
       taskPhase: 'running',
     });
@@ -264,11 +264,11 @@ describe('prReviewNotificationJob', () => {
   });
 
   it('defers during follow-up turns on a live sandbox (Idle status with a running phase)', async () => {
-    mockFindFirstCloudJob.mockResolvedValue({
+    mockFindFirstTaskRun.mockResolvedValue({
       id: 1,
       payload: {},
       slackThreadTs: '111.222',
-      sourceCloudJobId: null,
+      sourceRunId: null,
       status: RunStatus.Idle,
       taskPhase: 'running',
     });
@@ -284,11 +284,11 @@ describe('prReviewNotificationJob', () => {
   });
 
   it('drops pending activity without posting when the deferral cap is reached while still running', async () => {
-    mockFindFirstCloudJob.mockResolvedValue({
+    mockFindFirstTaskRun.mockResolvedValue({
       id: 1,
       payload: {},
       slackThreadTs: '111.222',
-      sourceCloudJobId: null,
+      sourceRunId: null,
       status: RunStatus.Running,
       taskPhase: 'running',
     });

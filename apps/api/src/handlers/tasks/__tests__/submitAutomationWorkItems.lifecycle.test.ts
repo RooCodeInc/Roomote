@@ -3,7 +3,7 @@ import { Hono } from 'hono';
 import {
   type AuthTokenContext,
   TaskPayloadKind,
-  type JobTokenContext,
+  type RunTokenContext,
 } from '@roomote/types';
 
 import type { Variables } from '../../../types';
@@ -11,7 +11,7 @@ import { mcpAuthMiddleware } from '../../mcp/middleware';
 import { submitAutomationWorkItems } from '../submitAutomationWorkItems';
 
 const {
-  mockCloudJobFindFirst,
+  mockTaskRunFindFirst,
   mockLaunchActWorkItems,
   mockPersistAutomationWorkItems,
   mockResolveAutomationSlackTarget,
@@ -19,7 +19,7 @@ const {
   mockResolveRepositoryIdsForSuggestedTask,
   mockTaskFindFirst,
 } = vi.hoisted(() => ({
-  mockCloudJobFindFirst: vi.fn(),
+  mockTaskRunFindFirst: vi.fn(),
   mockLaunchActWorkItems: vi.fn(),
   mockPersistAutomationWorkItems: vi.fn(),
   mockResolveAutomationSlackTarget: vi.fn(),
@@ -54,7 +54,7 @@ vi.mock('@roomote/db/server', () => ({
   db: {
     query: {
       taskRuns: {
-        findFirst: (...args: unknown[]) => mockCloudJobFindFirst(...args),
+        findFirst: (...args: unknown[]) => mockTaskRunFindFirst(...args),
       },
       tasks: {
         findFirst: (...args: unknown[]) => mockTaskFindFirst(...args),
@@ -89,7 +89,7 @@ vi.mock('../automation-work-items/slack.js', () => ({
     mockResolveAutomationSlackTarget(...args),
 }));
 
-function createApp(authContext?: AuthTokenContext | JobTokenContext) {
+function createApp(authContext?: AuthTokenContext | RunTokenContext) {
   const app = new Hono<{ Variables: Variables }>();
 
   app.use('*', async (c, next) => {
@@ -133,24 +133,24 @@ function buildActWorkItem(
 }
 
 describe('submitAutomationWorkItems lifecycle', () => {
-  const authContext: JobTokenContext = {
+  const authContext: RunTokenContext = {
     userId: 'user-1',
     principal: 'user',
-    cloudJobId: 1,
-    tokenType: 'cj',
+    runId: 1,
+    tokenType: 'run',
     version: 1,
   };
 
   beforeEach(() => {
     mockTaskFindFirst.mockReset();
-    mockCloudJobFindFirst.mockReset();
+    mockTaskRunFindFirst.mockReset();
     mockLaunchActWorkItems.mockReset();
     mockPersistAutomationWorkItems.mockReset();
     mockResolveAutomationSlackTarget.mockReset();
     mockResolvePreparedAutomationWorkItems.mockReset();
     mockResolveRepositoryIdsForSuggestedTask.mockReset();
 
-    mockCloudJobFindFirst.mockResolvedValue({
+    mockTaskRunFindFirst.mockResolvedValue({
       payloadKind: TaskPayloadKind.Scan,
       actingUserId: 'user-1',
       payload: {
@@ -373,7 +373,7 @@ describe('submitAutomationWorkItems lifecycle', () => {
       readinessMessage: null,
       category: 'security',
     });
-    mockCloudJobFindFirst.mockResolvedValueOnce({
+    mockTaskRunFindFirst.mockResolvedValueOnce({
       payloadKind: TaskPayloadKind.Scan,
       actingUserId: 'user-1',
       payload: {
@@ -475,7 +475,7 @@ describe('submitAutomationWorkItems lifecycle', () => {
         workspaceReadiness: 'environment_backed',
         readinessMessage: null,
       });
-      mockCloudJobFindFirst.mockResolvedValueOnce({
+      mockTaskRunFindFirst.mockResolvedValueOnce({
         payloadKind: TaskPayloadKind.Scan,
         actingUserId: 'user-1',
         payload: {
@@ -530,7 +530,7 @@ describe('submitAutomationWorkItems lifecycle', () => {
   it('passes the scan task announcement thread through to execution launches', async () => {
     const environmentId = '11111111-1111-1111-1111-111111111111';
     const actWorkItem = buildActWorkItem();
-    mockCloudJobFindFirst.mockResolvedValueOnce({
+    mockTaskRunFindFirst.mockResolvedValueOnce({
       payloadKind: TaskPayloadKind.Scan,
       actingUserId: 'user-1',
       payload: {

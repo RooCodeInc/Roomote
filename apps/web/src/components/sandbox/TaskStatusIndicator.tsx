@@ -4,7 +4,7 @@ import {
   RunStatus,
   isBootingRunStatus,
   TASK_PHASES,
-  type RunStatus as CloudTaskStatusType,
+  type RunStatus as RunStatusType,
   type TaskPhase,
 } from '@roomote/types';
 
@@ -35,7 +35,7 @@ function resolveTaskPhase({
   status,
 }: {
   phase?: string | null;
-  status?: CloudTaskStatusType | null;
+  status?: RunStatusType | null;
 }): TaskPhase | null {
   const phaseStatus = toTaskPhase(phase);
 
@@ -64,7 +64,7 @@ function resolveTaskPhase({
 
 type TaskStatusIndicatorProps = {
   phase?: string | null;
-  status?: CloudTaskStatusType | null;
+  status?: RunStatusType | null;
   lastErrorMessage?: string | null;
   compact?: boolean;
   className?: string;

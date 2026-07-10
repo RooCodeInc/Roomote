@@ -2,7 +2,7 @@ import { initTRPC } from '@trpc/server';
 import superjson from 'superjson';
 import type {
   AuthTokenContext,
-  JobTokenContext,
+  RunTokenContext,
   CodingHarness,
 } from '@roomote/types';
 
@@ -26,13 +26,13 @@ export interface Context {
   harnessLogger?: HarnessLogger;
   harness: Harness;
   harnessManager?: HarnessManager;
-  auth: AuthTokenContext | JobTokenContext | null;
+  auth: AuthTokenContext | RunTokenContext | null;
 
-  /** Cloud job ID for the current worker session. */
-  cloudJobId?: number;
+  /** Task run ID for the current worker session. */
+  runId?: number;
 
-  /** Stable task ID from the cloud job (maps to tasks.id). */
-  cloudJobTaskId?: string;
+  /** Stable task ID from the task run (maps to tasks.id). */
+  taskRunTaskId?: string;
 
   /** Path to the Slack reply satisfaction state file for Slack-originated jobs. */
   slackReplySatisfactionStateFile?: string;

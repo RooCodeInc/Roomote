@@ -5,9 +5,10 @@ import {
   isExitedRunStatus,
   taskToolDispatchPayloadSchema,
 } from '@roomote/types';
-import { createJobToken } from '@roomote/auth';
+import { createRunToken } from '@roomote/auth';
 import {
   and,
+  compareAndSetTrustedRunActingUser,
   db,
   eq,
   isNotNull,
@@ -26,8 +27,8 @@ import { z } from 'zod';
 import type { UserAuthSuccess } from '@/types';
 import { Env } from '@/lib/server';
 
-import { type CloudJobDetail, findActiveSuccessorCloudJob } from '@/lib/server';
-import { getCloudJobVisiblePrompt } from '@/lib';
+import { type TaskRunDetail, findActiveSuccessorTaskRun } from '@/lib/server';
+import { getTaskRunVisiblePrompt } from '@/lib';
 import {
   claimOutOfBandContextForPrompt,
   releaseOutOfBandContext,
@@ -139,18 +140,79 @@ export const answerSandboxUserInputRequestInputSchema = z.object({
 });
 
 /**
+ * Trusted actor switch, applied BEFORE the prompt reaches the sandbox.
+ *
+ * The worker refuses to run a turn whose sender does not match the
+ * server-side `task_runs.actingUserId` (see prepareActorScopedTurn), so runs
+ * that start without an acting user — e.g. automation-started tasks — would
+ * otherwise reject every web prompt with an actor-scoped credentials error.
+ * Mirrors `syncActingUserIdBeforeDelivery` in the API's sendMessageToTask:
+ * the write must land before delivery so credential resolution and turn
+ * attribution agree, and a failed delivery rolls the actor back via
+ * {@link restoreActingUserIdAfterFailedSandboxDelivery}.
+ */
+async function syncActingUserIdBeforeSandboxDelivery({
+  runId,
+  currentActingUserId,
+  nextActingUserId,
+}: {
+  runId: number;
+  currentActingUserId: string | null;
+  nextActingUserId: string;
+}): Promise<boolean> {
+  if (currentActingUserId === nextActingUserId) {
+    return false;
+  }
+
+  return await compareAndSetTrustedRunActingUser({
+    runId,
+    expectedUserId: currentActingUserId,
+    nextUserId: nextActingUserId,
+  });
+}
+
+/**
+ * Best-effort compare-and-set rollback for a trusted actor switch whose
+ * sandbox delivery failed. The CAS avoids overwriting a newer sender that
+ * won the race after this request changed the actor.
+ */
+async function restoreActingUserIdAfterFailedSandboxDelivery({
+  runId,
+  previousActingUserId,
+  attemptedActingUserId,
+}: {
+  runId: number;
+  previousActingUserId: string | null;
+  attemptedActingUserId: string;
+}): Promise<void> {
+  try {
+    await compareAndSetTrustedRunActingUser({
+      runId,
+      expectedUserId: attemptedActingUserId,
+      nextUserId: previousActingUserId,
+    });
+  } catch (error) {
+    console.error(
+      `Failed to roll back actingUserId after sandbox delivery failed for run ${runId} ` +
+        `(attempted=${attemptedActingUserId}, previous=${previousActingUserId ?? 'null'}):`,
+      error,
+    );
+  }
+}
+
+/**
  * Persists the user's in-progress prompt text so it survives sleep/wake cycles.
  * Also acts as an implicit keepalive signal (the caller should throttle on the
  * client side — ~10 s is a reasonable interval).
  */
 export async function saveDraftPromptCommand(
   auth: UserAuthSuccess,
-  input: { cloudJobId: number; draftPrompt: string },
+  input: { runId: number; draftPrompt: string },
 ) {
   // Draft prompts live on the task now (they survive run/resume boundaries);
   // the input stays run-scoped so the tRPC procedure contract is unchanged.
   const run = await db.query.taskRuns.findFirst({
-    where: eq(taskRuns.id, input.cloudJobId),
+    where: eq(taskRuns.id, input.runId),
     columns: { taskId: true },
   });
 
@@ -169,21 +231,21 @@ export async function sendSandboxPromptCommand(
   input: z.input<typeof sendSandboxPromptInputSchema>,
 ) {
   const parsed = sendSandboxPromptInputSchema.parse(input);
-  const { cloudJob } = await getResolvedSandboxCloudJobByTaskId(auth, {
+  const { taskRun } = await getResolvedSandboxTaskRunByTaskId(auth, {
     taskId: parsed.taskId,
   });
 
-  if (!cloudJob.sandboxServerUrl) {
+  if (!taskRun.sandboxServerUrl) {
     throw new TRPCError({
       code: 'CONFLICT',
       message: "The task hasn't started yet. Try again in a few seconds.",
     });
   }
 
-  await assertSandboxRpcEndpointReachable(cloudJob.sandboxServerUrl);
+  await assertSandboxRpcEndpointReachable(taskRun.sandboxServerUrl);
 
-  const authToken = await createJobToken({
-    cloudJobId: cloudJob.id,
+  const authToken = await createRunToken({
+    runId: taskRun.id,
     userId: auth.userId,
     timeoutMs: SANDBOX_PROMPT_TOKEN_TIMEOUT_MS,
   });
@@ -204,11 +266,24 @@ export async function sendSandboxPromptCommand(
     SANDBOX_PROMPT_TIMEOUT_MS,
   );
 
+  const previousActingUserId = taskRun.actingUserId;
+  const requiresActorHandoff = previousActingUserId !== auth.userId;
+  let didSwitchActingUser = false;
+
   try {
+    // The actor switch must land before the prompt reaches the sandbox so the
+    // worker's sender-vs-acting-user guard passes (critical for runs that
+    // start without an acting user, e.g. automation-started tasks).
+    didSwitchActingUser = await syncActingUserIdBeforeSandboxDelivery({
+      runId: taskRun.id,
+      currentActingUserId: previousActingUserId,
+      nextActingUserId: auth.userId,
+    });
+
     const client = createSandboxServerRpcClient({
       links: [
         httpBatchLink({
-          url: `${cloudJob.sandboxServerUrl}/trpc`,
+          url: `${taskRun.sandboxServerUrl}/trpc`,
           transformer: superjson,
           headers: () => ({ Authorization: `Bearer ${authToken}` }),
           fetch: (url, init) =>
@@ -228,10 +303,22 @@ export async function sendSandboxPromptCommand(
       clientMessageId: parsed.clientMessageId,
       userName: getAuthenticatedPromptUserName(auth),
       userImageUrl: parsed.userImageUrl,
-      autoSteerWhenQueued: parsed.autoSteerWhenQueued,
+      // Do not leave the previous actor's turn running after the live
+      // credential identity changes (mirrors the API follow-up path).
+      autoSteerWhenQueued: requiresActorHandoff
+        ? true
+        : parsed.autoSteerWhenQueued,
     });
   } catch (error) {
     await releaseOutOfBandContext(outOfBandContext);
+
+    if (didSwitchActingUser) {
+      await restoreActingUserIdAfterFailedSandboxDelivery({
+        runId: taskRun.id,
+        previousActingUserId,
+        attemptedActingUserId: auth.userId,
+      });
+    }
 
     if (error instanceof TRPCClientError) {
       throw new TRPCError({
@@ -251,21 +338,21 @@ export async function answerSandboxUserInputRequestCommand(
   input: z.input<typeof answerSandboxUserInputRequestInputSchema>,
 ) {
   const parsed = answerSandboxUserInputRequestInputSchema.parse(input);
-  const { cloudJob } = await getResolvedSandboxCloudJobByTaskId(auth, {
+  const { taskRun } = await getResolvedSandboxTaskRunByTaskId(auth, {
     taskId: parsed.taskId,
   });
 
-  if (!cloudJob.sandboxServerUrl) {
+  if (!taskRun.sandboxServerUrl) {
     throw new TRPCError({
       code: 'CONFLICT',
       message: "The task hasn't started yet. Try again in a few seconds.",
     });
   }
 
-  await assertSandboxRpcEndpointReachable(cloudJob.sandboxServerUrl);
+  await assertSandboxRpcEndpointReachable(taskRun.sandboxServerUrl);
 
-  const authToken = await createJobToken({
-    cloudJobId: cloudJob.id,
+  const authToken = await createRunToken({
+    runId: taskRun.id,
     userId: auth.userId,
     timeoutMs: SANDBOX_PROMPT_TOKEN_TIMEOUT_MS,
   });
@@ -275,11 +362,25 @@ export async function answerSandboxUserInputRequestCommand(
     SANDBOX_PROMPT_TIMEOUT_MS,
   );
 
+  const previousActingUserId = taskRun.actingUserId;
+  let didSwitchActingUser = false;
+
   try {
+    // Same trusted pre-delivery actor switch as sendSandboxPromptCommand: the
+    // worker blocks answers whose sender is not the run's acting user. Note
+    // this resolves the actor before delivery rather than through the atomic
+    // winner claim (setTrustedRunActingUserOnSuccess) used for contended chat
+    // answers, so a losing concurrent answerer may briefly hold attribution.
+    didSwitchActingUser = await syncActingUserIdBeforeSandboxDelivery({
+      runId: taskRun.id,
+      currentActingUserId: previousActingUserId,
+      nextActingUserId: auth.userId,
+    });
+
     const client = createSandboxServerRpcClient({
       links: [
         httpBatchLink({
-          url: `${cloudJob.sandboxServerUrl}/trpc`,
+          url: `${taskRun.sandboxServerUrl}/trpc`,
           transformer: superjson,
           headers: () => ({ Authorization: `Bearer ${authToken}` }),
           fetch: (url, init) =>
@@ -294,6 +395,14 @@ export async function answerSandboxUserInputRequestCommand(
       userName: getAuthenticatedPromptUserName(auth),
     });
   } catch (error) {
+    if (didSwitchActingUser) {
+      await restoreActingUserIdAfterFailedSandboxDelivery({
+        runId: taskRun.id,
+        previousActingUserId,
+        attemptedActingUserId: auth.userId,
+      });
+    }
+
     if (error instanceof TRPCClientError) {
       throw new TRPCError({
         code: 'BAD_GATEWAY',
@@ -307,7 +416,7 @@ export async function answerSandboxUserInputRequestCommand(
   }
 }
 
-async function getResolvedSandboxCloudJobByTaskId(
+async function getResolvedSandboxTaskRunByTaskId(
   auth: UserAuthSuccess,
   input: { taskId: string },
 ) {
@@ -317,7 +426,7 @@ async function getResolvedSandboxCloudJobByTaskId(
     throw new Error(`Task ${input.taskId} not found`);
   }
 
-  return getResolvedSandboxCloudJobForTaskAccess(auth, input, taskAccess);
+  return getResolvedSandboxTaskRunForTaskAccess(auth, input, taskAccess);
 }
 
 type ResolvedSandboxTaskAccess = Extract<
@@ -329,41 +438,41 @@ type ResolvedSandboxTaskAccess = Extract<
  * Runs no longer carry PR columns; the session view decorates the run with
  * the task-level pull-request association resolved by tasks/by-id.
  */
-type SandboxCloudJobDetail = CloudJobDetail & {
+type SandboxTaskRunDetail = TaskRunDetail & {
   prRepo: string | null;
   prNumber: number | null;
 };
 
-function applyResolvedTaskPullRequestFallback<T extends CloudJobDetail>(
-  cloudJob: T,
-  taskCloudJob: ResolvedSandboxTaskAccess['task']['cloudJob'],
+function applyResolvedTaskPullRequestFallback<T extends TaskRunDetail>(
+  taskRun: T,
+  taskTaskRun: ResolvedSandboxTaskAccess['task']['taskRun'],
 ): T & { prRepo: string | null; prNumber: number | null } {
   return {
-    ...cloudJob,
-    prRepo: taskCloudJob?.prRepo ?? null,
-    prNumber: taskCloudJob?.prNumber ?? null,
+    ...taskRun,
+    prRepo: taskTaskRun?.prRepo ?? null,
+    prNumber: taskTaskRun?.prNumber ?? null,
   };
 }
 
-async function getResolvedSandboxCloudJobForTaskAccess(
+async function getResolvedSandboxTaskRunForTaskAccess(
   auth: UserAuthSuccess,
   input: { taskId: string },
   taskAccess: ResolvedSandboxTaskAccess,
 ) {
   const { task: taskById } = taskAccess;
 
-  if (!taskById.cloudJob) {
-    throw new Error(`Cloud job for task ${input.taskId} not found`);
+  if (!taskById.taskRun) {
+    throw new Error(`Task run for task ${input.taskId} not found`);
   }
 
   const runRow = await db.query.taskRuns.findFirst({
-    where: eq(taskRuns.id, taskById.cloudJob.id),
+    where: eq(taskRuns.id, taskById.taskRun.id),
     with: { actingUser: true },
   });
 
   if (!runRow) {
     throw new Error(
-      `Cloud job ${taskById.cloudJob.id} for task ${input.taskId} not found`,
+      `Task run ${taskById.taskRun.id} for task ${input.taskId} not found`,
     );
   }
 
@@ -371,37 +480,37 @@ async function getResolvedSandboxCloudJobForTaskAccess(
   // and `actingUser` on the detail shape.
   const { actingUser: runActingUser, ...run } = runRow;
 
-  let cloudJob: SandboxCloudJobDetail = applyResolvedTaskPullRequestFallback(
+  let taskRun: SandboxTaskRunDetail = applyResolvedTaskPullRequestFallback(
     {
       ...run,
       user: runActingUser ?? null,
       actingUser: runActingUser ?? null,
       refetchInterval: undefined,
     },
-    taskById.cloudJob,
+    taskById.taskRun,
   );
 
-  // If the resolved cloud job has exited and has a snapshot, check for an active
-  // successor (e.g. a SnapshotResume job triggered from Linear). This ensures the
+  // If the resolved task run has exited and has a snapshot, check for an active
+  // successor (e.g. a SnapshotResume run triggered from Linear). This ensures the
   // web UI shows the running resumed session instead of the old "Went to sleep" state.
-  if (isExitedRunStatus(cloudJob.status) && cloudJob.snapshotId) {
-    const successor = await findActiveSuccessorCloudJob(
-      cloudJob.id,
+  if (isExitedRunStatus(taskRun.status) && taskRun.snapshotId) {
+    const successor = await findActiveSuccessorTaskRun(
+      taskRun.id,
       auth,
-      cloudJob.taskId,
+      taskRun.taskId,
     );
 
     if (successor) {
-      cloudJob = applyResolvedTaskPullRequestFallback(
+      taskRun = applyResolvedTaskPullRequestFallback(
         successor,
-        taskById.cloudJob,
+        taskById.taskRun,
       );
     }
   }
 
   return {
     task: taskById,
-    cloudJob,
+    taskRun,
   };
 }
 
@@ -409,24 +518,24 @@ export async function takeOverBrowserControlCommand(
   auth: UserAuthSuccess,
   input: { taskId: string },
 ) {
-  const { cloudJob } = await getResolvedSandboxCloudJobByTaskId(auth, input);
+  const { taskRun } = await getResolvedSandboxTaskRunByTaskId(auth, input);
 
-  const [updatedCloudJob] = await db
+  const [updatedTaskRun] = await db
     .update(taskRuns)
     .set({ actingUserId: auth.userId })
-    .where(eq(taskRuns.id, cloudJob.id))
+    .where(eq(taskRuns.id, taskRun.id))
     .returning({
       id: taskRuns.id,
       actingUserId: taskRuns.actingUserId,
     });
 
-  if (!updatedCloudJob) {
+  if (!updatedTaskRun) {
     throw new Error(
-      'Cloud job not found or you do not have permission to control this browser',
+      'Task run not found or you do not have permission to control this browser',
     );
   }
 
-  return { success: true as const, cloudJob: updatedCloudJob };
+  return { success: true as const, taskRun: updatedTaskRun };
 }
 
 export async function getSandboxSessionByTaskIdCommand(
@@ -439,7 +548,7 @@ export async function getSandboxSessionByTaskIdCommand(
     return {
       taskId: input.taskId,
       task: null,
-      cloudJob: null,
+      taskRun: null,
       prompt: null,
       artifacts: [],
       sessionState: 'not-found' as const,
@@ -447,31 +556,31 @@ export async function getSandboxSessionByTaskIdCommand(
     };
   }
 
-  const { cloudJob, task: taskById } =
-    await getResolvedSandboxCloudJobForTaskAccess(auth, input, taskAccess);
+  const { taskRun, task: taskById } =
+    await getResolvedSandboxTaskRunForTaskAccess(auth, input, taskAccess);
 
   // For snapshot-resume runs, the payload doesn't include the original user
   // prompt fields. Resolve them from the source run so the web UI can
   // display the same visible prompt after wake-up. This is runtime dispatch,
   // so branching on payloadKind (not tasks.workflow) is correct here.
   if (
-    cloudJob.payloadKind === TaskPayloadKind.SnapshotResume &&
-    cloudJob.sourceRunId
+    taskRun.payloadKind === TaskPayloadKind.SnapshotResume &&
+    taskRun.sourceRunId
   ) {
-    const sourceJob = await db.query.taskRuns.findFirst({
-      where: eq(taskRuns.id, cloudJob.sourceRunId),
+    const sourceRun = await db.query.taskRuns.findFirst({
+      where: eq(taskRuns.id, taskRun.sourceRunId),
       columns: { payload: true },
     });
 
     restoreSnapshotResumeVisiblePromptFields(
-      cloudJob.payload as Record<string, unknown>,
-      sourceJob?.payload,
+      taskRun.payload as Record<string, unknown>,
+      sourceRun?.payload,
     );
   }
 
   // Runs no longer carry a separate owner userId; the acting user (already
   // resolved onto the detail shape) is the only human associated with a run.
-  const actingUser = cloudJob.actingUser ?? cloudJob.user;
+  const actingUser = taskRun.actingUser ?? taskRun.user;
 
   const task = taskById;
 
@@ -480,25 +589,25 @@ export async function getSandboxSessionByTaskIdCommand(
   }).catch(() => []);
 
   const shouldCheckBootFailureMessages =
-    cloudJob.status === RunStatus.Failed ||
-    cloudJob.status === RunStatus.Canceled;
+    taskRun.status === RunStatus.Failed ||
+    taskRun.status === RunStatus.Canceled;
 
   const shouldCheckHarnessMessages =
-    !isExitedRunStatus(cloudJob.status) && !isBootingRunStatus(cloudJob.status);
+    !isExitedRunStatus(taskRun.status) && !isBootingRunStatus(taskRun.status);
 
   // Check whether the task ever produced messages. Used to distinguish boot
   // failures (no messages) from runtime failures (has conversation history).
   const [bootFailureMessage, firstHarnessMessage] = await Promise.all([
     shouldCheckBootFailureMessages
       ? db.query.taskMessages.findFirst({
-          where: eq(taskMessages.runId, cloudJob.id),
+          where: eq(taskMessages.runId, taskRun.id),
           columns: { id: true },
         })
       : Promise.resolve(null),
     shouldCheckHarnessMessages
       ? db.query.taskMessages.findFirst({
           where: and(
-            eq(taskMessages.runId, cloudJob.id),
+            eq(taskMessages.runId, taskRun.id),
             isNotNull(taskMessages.role),
             not(eq(taskMessages.role, 'user')),
           ),
@@ -509,11 +618,11 @@ export async function getSandboxSessionByTaskIdCommand(
 
   const hasMessages = !!bootFailureMessage;
   const hasHarnessMessages = !!firstHarnessMessage;
-  const prompt = getCloudJobVisiblePrompt(cloudJob);
+  const prompt = getTaskRunVisiblePrompt(taskRun);
   const hasInitialPrompt =
     Boolean(prompt?.text?.trim()) || Boolean(prompt?.images?.length);
 
-  const sessionState = getSessionState(cloudJob, {
+  const sessionState = getSessionState(taskRun, {
     hasMessages,
     hasHarnessMessages,
   });
@@ -532,7 +641,7 @@ export async function getSandboxSessionByTaskIdCommand(
     if (
       shouldPollForFirstHarnessMessage({
         sessionState,
-        cloudJobStatus: cloudJob.status,
+        taskRunStatus: taskRun.status,
         hasHarnessMessages,
         hasInitialPrompt,
       })
@@ -541,21 +650,21 @@ export async function getSandboxSessionByTaskIdCommand(
     }
 
     if (
-      (cloudJob.sleepRequestedAt || cloudJob.snapshotRequestedAt) &&
-      !isExitedRunStatus(cloudJob.status) &&
-      !cloudJob.snapshotCreatedAt &&
-      !cloudJob.snapshotFailedAt
+      (taskRun.sleepRequestedAt || taskRun.snapshotRequestedAt) &&
+      !isExitedRunStatus(taskRun.status) &&
+      !taskRun.snapshotCreatedAt &&
+      !taskRun.snapshotFailedAt
     ) {
       return 2_000;
     }
-    return cloudJob.refetchInterval;
+    return taskRun.refetchInterval;
   })();
 
   return {
     taskId: task.id,
     task,
-    cloudJob: {
-      ...cloudJob,
+    taskRun: {
+      ...taskRun,
       actingUser,
       previewProxyBaseUrl:
         resolvedPreviewRuntimeConfig.effective.previewProxyBaseUrl,

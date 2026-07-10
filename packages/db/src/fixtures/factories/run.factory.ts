@@ -1,16 +1,16 @@
 import { Factory } from 'fishery';
 import { TaskPayloadKind } from '@roomote/types';
 
-import type { Run, CreateRun } from '../../types';
+import type { TaskRun, CreateTaskRun } from '../../types';
 import { taskRuns } from '../../schema';
 import { type DatabaseOrTransaction, db } from '../../db';
 
 import { taskFactory } from './task.factory';
 
 export const runFactory = Factory.define<
-  CreateRun,
+  CreateTaskRun,
   { db?: DatabaseOrTransaction },
-  Run
+  TaskRun
 >(({ params, onCreate, transientParams }) => {
   onCreate(async (values) => {
     const database = transientParams.db || db;
@@ -36,11 +36,11 @@ export const runFactory = Factory.define<
   return {
     payloadKind: params.payloadKind || TaskPayloadKind.StandardTask,
     kind: params.kind || 'fresh',
-    payload: (params.payload as CreateRun['payload']) || {
+    payload: (params.payload as CreateTaskRun['payload']) || {
       repo: 'test/repo',
       description: 'Factory task run',
     },
     actingUserId: params.actingUserId,
     taskId: params.taskId ?? '',
-  } satisfies CreateRun;
+  } satisfies CreateTaskRun;
 });

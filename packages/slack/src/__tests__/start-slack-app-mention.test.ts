@@ -3,7 +3,7 @@ const {
   enqueueTaskMock,
   dbUpdateWhereMock,
   consoleWarnMock,
-  findActiveSlackJobMock,
+  findActiveSlackTaskRunMock,
   queueSlackMessageMock,
   resolveSlackReactionNamesMock,
 } = vi.hoisted(() => ({
@@ -11,7 +11,7 @@ const {
   enqueueTaskMock: vi.fn(),
   dbUpdateWhereMock: vi.fn(),
   consoleWarnMock: vi.fn(),
-  findActiveSlackJobMock: vi.fn(),
+  findActiveSlackTaskRunMock: vi.fn(),
   queueSlackMessageMock: vi.fn(),
   resolveSlackReactionNamesMock: vi.fn(),
 }));
@@ -49,8 +49,8 @@ vi.mock('@roomote/db/server', () => ({
   })),
 }));
 
-vi.mock('../find-active-slack-job', () => ({
-  findActiveSlackJob: findActiveSlackJobMock,
+vi.mock('../find-active-slack-task-run', () => ({
+  findActiveSlackTaskRun: findActiveSlackTaskRunMock,
 }));
 
 vi.mock('../emoji-preferences', () => ({
@@ -68,7 +68,7 @@ describe('startSlackAppMentionTask', () => {
     enqueueTaskMock.mockResolvedValue({ id: 42, taskId: 'task_123' });
     dbUpdateSetMock.mockClear();
     dbUpdateWhereMock.mockResolvedValue(undefined);
-    findActiveSlackJobMock.mockResolvedValue(null);
+    findActiveSlackTaskRunMock.mockResolvedValue(null);
     queueSlackMessageMock.mockResolvedValue(undefined);
     resolveSlackReactionNamesMock.mockResolvedValue({
       ackEmoji: 'eyes',
@@ -118,8 +118,8 @@ describe('startSlackAppMentionTask', () => {
     );
   });
 
-  it('persists an exact Slack conversation permalink onto a reused active job', async () => {
-    findActiveSlackJobMock.mockResolvedValueOnce({
+  it('persists an exact Slack conversation permalink onto a reused active task run', async () => {
+    findActiveSlackTaskRunMock.mockResolvedValueOnce({
       id: 99,
       taskId: 'task_existing',
       payload: {
@@ -164,7 +164,7 @@ describe('startSlackAppMentionTask', () => {
   });
 
   it('does not rewrite the reused job payload when the permalink is unchanged', async () => {
-    findActiveSlackJobMock.mockResolvedValueOnce({
+    findActiveSlackTaskRunMock.mockResolvedValueOnce({
       id: 99,
       taskId: 'task_existing',
       payload: {

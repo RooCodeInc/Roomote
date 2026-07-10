@@ -14,7 +14,7 @@ import {
   LINEAR_USER_CONNECTION_ROLE,
 } from '@roomote/sdk/server';
 import {
-  createLinearAgentJob,
+  createLinearAgentRun,
   createLinearClient,
   enrichSessionComments,
   parseAgentSessionEventPayload,
@@ -97,25 +97,25 @@ async function resumeLinearReplay(input: {
     payload.agentSession,
   );
 
-  const jobResult = await createLinearAgentJob({
+  const runResult = await createLinearAgentRun({
     agentSession: enrichedSession,
     payload,
     userId: input.userId,
   });
 
-  if (jobResult.status === 'error') {
+  if (runResult.status === 'error') {
     await linearClient.emitError(
       sessionId,
-      `Failed to start agent: ${jobResult.message}`,
+      `Failed to start agent: ${runResult.message}`,
     );
     return;
   }
 
-  if ('taskId' in jobResult) {
+  if ('taskId' in runResult) {
     const baseUrl = process.env.ROOMOTE_APP_URL;
     if (baseUrl) {
       await linearClient.updateSessionExternalUrls(sessionId, [
-        { label: 'Open task', url: `${baseUrl}/task/${jobResult.taskId}` },
+        { label: 'Open task', url: `${baseUrl}/task/${runResult.taskId}` },
       ]);
     }
   }

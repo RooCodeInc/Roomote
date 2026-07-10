@@ -1,5 +1,5 @@
-const { mockCreateJobToken, mockSendPromptMutate } = vi.hoisted(() => ({
-  mockCreateJobToken: vi.fn(),
+const { mockCreateRunToken, mockSendPromptMutate } = vi.hoisted(() => ({
+  mockCreateRunToken: vi.fn(),
   mockSendPromptMutate: vi.fn(),
 }));
 
@@ -9,7 +9,7 @@ vi.mock('@roomote/auth', async () => {
 
   return {
     ...actual,
-    createJobToken: mockCreateJobToken,
+    createRunToken: mockCreateRunToken,
   };
 });
 
@@ -29,7 +29,14 @@ vi.mock('@trpc/client', async () => {
   };
 });
 
-import { runFactory, taskFactory, userFactory } from '@roomote/db/server';
+import {
+  db,
+  eq,
+  runFactory,
+  taskFactory,
+  taskRuns,
+  userFactory,
+} from '@roomote/db/server';
 import { RunStatus } from '@roomote/types';
 import type { FeatureFlag } from '@roomote/feature-flags';
 
@@ -78,7 +85,7 @@ describe('sendSandboxPromptCommand', () => {
         headers: { 'content-type': 'application/json' },
       }),
     );
-    mockCreateJobToken.mockResolvedValue('job-token');
+    mockCreateRunToken.mockResolvedValue('run-token');
     mockSendPromptMutate.mockResolvedValue({ success: true });
   });
 
@@ -245,7 +252,117 @@ describe('sendSandboxPromptCommand', () => {
         'The task is no longer connected to a live sandbox. Refresh the page or start a new task.',
     });
 
-    expect(mockCreateJobToken).not.toHaveBeenCalled();
+    expect(mockCreateRunToken).not.toHaveBeenCalled();
     expect(mockSendPromptMutate).not.toHaveBeenCalled();
+  });
+
+  it('switches the acting user before delivery when the run has no acting user (automation-started)', async () => {
+    const user = await userFactory.create({ name: 'DB User' });
+    const task = await taskFactory.create({
+      initiatorUserId: user.id,
+    });
+
+    // Automation-started runs begin with no acting user.
+    const run = await runFactory.create({
+      taskId: task.id,
+      status: RunStatus.Running,
+      sandboxServerUrl: 'http://sandbox.example.test',
+      result: {},
+    });
+
+    await sendSandboxPromptCommand(
+      buildMockAuth({
+        userId: user.id,
+      }),
+      {
+        taskId: task.id,
+        prompt: 'keep going',
+        source: 'web',
+      },
+    );
+
+    const updatedRun = await db.query.taskRuns.findFirst({
+      where: eq(taskRuns.id, run.id),
+      columns: { actingUserId: true },
+    });
+
+    expect(updatedRun?.actingUserId).toBe(user.id);
+    expect(mockSendPromptMutate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        prompt: 'keep going',
+        // Actor handoffs steer so the previous actor's turn does not keep
+        // running after the credential identity changes.
+        autoSteerWhenQueued: true,
+      }),
+    );
+  });
+
+  it('does not force steering when the sender is already the acting user', async () => {
+    const user = await userFactory.create({ name: 'DB User' });
+    const task = await taskFactory.create({
+      initiatorUserId: user.id,
+    });
+
+    await runFactory.create({
+      actingUserId: user.id,
+      taskId: task.id,
+      status: RunStatus.Running,
+      sandboxServerUrl: 'http://sandbox.example.test',
+      result: {},
+    });
+
+    await sendSandboxPromptCommand(
+      buildMockAuth({
+        userId: user.id,
+      }),
+      {
+        taskId: task.id,
+        prompt: 'keep going',
+        source: 'web',
+      },
+    );
+
+    expect(mockSendPromptMutate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        prompt: 'keep going',
+        autoSteerWhenQueued: undefined,
+      }),
+    );
+  });
+
+  it('rolls back the acting-user switch when sandbox delivery fails', async () => {
+    mockSendPromptMutate.mockRejectedValueOnce(new Error('sandbox exploded'));
+
+    const user = await userFactory.create({ name: 'DB User' });
+    const task = await taskFactory.create({
+      initiatorUserId: user.id,
+    });
+
+    const run = await runFactory.create({
+      taskId: task.id,
+      status: RunStatus.Running,
+      sandboxServerUrl: 'http://sandbox.example.test',
+      result: {},
+    });
+
+    await expect(
+      sendSandboxPromptCommand(
+        buildMockAuth({
+          userId: user.id,
+        }),
+        {
+          taskId: task.id,
+          prompt: 'keep going',
+          source: 'web',
+        },
+      ),
+    ).rejects.toThrow('sandbox exploded');
+
+    const updatedRun = await db.query.taskRuns.findFirst({
+      where: eq(taskRuns.id, run.id),
+      columns: { actingUserId: true },
+    });
+
+    expect(updatedRun?.actingUserId).toBeNull();
   });
 });

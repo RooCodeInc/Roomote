@@ -68,8 +68,8 @@ vi.mock('@/hooks/tasks', () => ({
   useTask: () => ({ data: null }),
 }));
 
-vi.mock('@/hooks/cloud-jobs', () => ({
-  useCreateStandardTaskCloudJob: () => ({
+vi.mock('@/hooks/task-runs', () => ({
+  useCreateStandardTaskRun: () => ({
     isPending: false,
     mutate: vi.fn(),
   }),

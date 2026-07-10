@@ -1,5 +1,4 @@
 import type {
-  CloudAgentType,
   RequestedWorkKindDecision,
   TaskModelOption,
   TaskModelSettings,
@@ -39,7 +38,6 @@ export interface RoutingContext {
   taskDescription: string;
   routingModel?: string;
   source: RoutingSource;
-  availableAgents: RoutableAgent[];
   availableEnvironments: RoutableEnvironment[];
   /**
    * Deployment task-model settings. When present, the enabled model catalog is
@@ -56,7 +54,6 @@ export interface RoutingContext {
     apiBaseUrl?: string;
   };
   previousSuggestion?: {
-    agentType: string;
     workspaceValue: string | null;
     workspaceDisplayName: string;
     modelId?: string | null;
@@ -148,13 +145,6 @@ export interface GitHubRoutingSource {
 
 type GitHubFollowUpMode = 'follow_up' | 'review';
 
-export interface RoutableAgent {
-  id: string;
-  name: string;
-  type: CloudAgentType;
-  createdAt: Date;
-}
-
 export interface RoutableEnvironment {
   id: string;
   name: string;
@@ -178,7 +168,6 @@ export interface RoutingDebugInfo {
 }
 
 export interface RoutingResult {
-  agentType: CloudAgentType;
   workspace: RoutingWorkspace;
   model?: RoutingTaskModelSelection;
   reasoning: string;
@@ -203,7 +192,6 @@ export type RoutingDecision =
   | { status: 'fallback'; reason: string; debug?: RoutingDebugInfo };
 
 export interface GitHubRoutingResult {
-  agentType: CloudAgentType;
   reasoning: string;
   followUpMode: GitHubFollowUpMode;
   debug?: RoutingDebugInfo;

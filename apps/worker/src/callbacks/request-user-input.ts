@@ -2,7 +2,7 @@ import type {
   AcpRequestUserInputPayload,
   AcpRequestUserInputQuestion,
 } from '@roomote/types';
-import type { Run } from '@roomote/sdk/client';
+import type { TaskRun } from '@roomote/sdk/client';
 
 function formatQuestionOptions(
   question: AcpRequestUserInputQuestion,
@@ -33,19 +33,19 @@ function formatQuestion(
 }
 
 export function buildRequestUserInputTaskUrl(
-  cloudJob: Run,
+  taskRun: TaskRun,
   source: 'slack' | 'linear',
 ): string {
   const webPath =
-    cloudJob.payload &&
-    typeof cloudJob.payload === 'object' &&
-    'webPath' in cloudJob.payload
-      ? (cloudJob.payload as { webPath?: unknown }).webPath
+    taskRun.payload &&
+    typeof taskRun.payload === 'object' &&
+    'webPath' in taskRun.payload
+      ? (taskRun.payload as { webPath?: unknown }).webPath
       : null;
   const normalizedWebPath =
     typeof webPath === 'string' && webPath.startsWith('/') ? webPath : null;
   const url = new URL(
-    normalizedWebPath ?? `/task/${cloudJob.taskId}`,
+    normalizedWebPath ?? `/task/${taskRun.taskId}`,
     process.env.ROOMOTE_APP_URL,
   );
 

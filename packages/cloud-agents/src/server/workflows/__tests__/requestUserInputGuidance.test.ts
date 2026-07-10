@@ -50,7 +50,7 @@ describe('request_user_input guidance in workflow prompts', () => {
     const { harnessInstructions } = standardTask({
       description: 'Clarify implementation direction when needed',
       repo: 'Roomote/example-app',
-      cloudJobUrl: 'https://example.com/task/123',
+      taskRunUrl: 'https://example.com/task/123',
     });
 
     expect(harnessInstructions).toContain(expectedBlockGuidance);
@@ -68,7 +68,7 @@ describe('request_user_input guidance in workflow prompts', () => {
   });
 
   it('teaches Slack StandardTask runs to keep lightweight clarification in-thread and reserve request_user_input blocks for structured or private input', async () => {
-    const cloudTask: SlackAppMentionTask = {
+    const taskSpec: SlackAppMentionTask = {
       type: TaskPayloadKind.SlackAppMention,
       payload: {
         repo: 'Roomote/example-app',
@@ -80,8 +80,8 @@ describe('request_user_input guidance in workflow prompts', () => {
     };
 
     const result = await slackAppMention({
-      cloudTask,
-      cloudJobUrl: 'https://example.com/task/123',
+      taskSpec,
+      taskRunUrl: 'https://example.com/task/123',
     });
 
     expect(result.harnessInstructions).toContain(
@@ -99,7 +99,7 @@ describe('request_user_input guidance in workflow prompts', () => {
   });
 
   it('attaches the Slack-specific request_user_input guidance to all Slack app mention runs', async () => {
-    const cloudTask: SlackAppMentionTask = {
+    const taskSpec: SlackAppMentionTask = {
       type: TaskPayloadKind.SlackAppMention,
       payload: {
         repo: 'Roomote/example-app',
@@ -111,8 +111,8 @@ describe('request_user_input guidance in workflow prompts', () => {
     };
 
     const result = await slackAppMention({
-      cloudTask,
-      cloudJobUrl: 'https://example.com/task/123',
+      taskSpec,
+      taskRunUrl: 'https://example.com/task/123',
     });
 
     expect(result.harnessInstructions).toContain(
@@ -130,7 +130,7 @@ describe('request_user_input guidance in workflow prompts', () => {
     const { harnessInstructions } = standardTask({
       description: 'Implement a repository change',
       repo: 'Roomote/example-app',
-      cloudJobUrl: 'https://example.com/task/123',
+      taskRunUrl: 'https://example.com/task/123',
       prAction: 'create',
     });
 
@@ -146,7 +146,7 @@ describe('request_user_input guidance in workflow prompts', () => {
     const { harnessInstructions } = standardTask({
       description: 'Implement a repository change',
       repo: 'Roomote/example-app',
-      cloudJobUrl: 'https://example.com/task/123',
+      taskRunUrl: 'https://example.com/task/123',
       prAction: 'push',
     });
 
@@ -162,7 +162,7 @@ describe('request_user_input guidance in workflow prompts', () => {
     const { harnessInstructions } = standardTask({
       description: 'Implement a repository change',
       repo: 'Roomote/example-app',
-      cloudJobUrl: 'https://example.com/task/123',
+      taskRunUrl: 'https://example.com/task/123',
     });
 
     expect(harnessInstructions).toContain(
@@ -174,7 +174,7 @@ describe('request_user_input guidance in workflow prompts', () => {
     const { harnessInstructions } = standardTask({
       description: 'Implement a repository change',
       repo: 'Roomote/example-app',
-      cloudJobUrl: 'https://example.com/task/123',
+      taskRunUrl: 'https://example.com/task/123',
     });
 
     expect(harnessInstructions).toContain(
@@ -213,7 +213,7 @@ describe('request_user_input guidance in workflow prompts', () => {
     const { harnessInstructions } = standardTask({
       description: 'Implement a repository change',
       repo: 'Roomote/example-app',
-      cloudJobUrl: 'https://example.com/task/123',
+      taskRunUrl: 'https://example.com/task/123',
     });
 
     expect(harnessInstructions).not.toContain(
@@ -228,7 +228,7 @@ describe('request_user_input guidance in workflow prompts', () => {
     const { harnessInstructions } = standardTask({
       description: 'Implement a repository change',
       repo: 'Roomote/example-app',
-      cloudJobUrl: 'https://example.com/task/123',
+      taskRunUrl: 'https://example.com/task/123',
       attribution: matchedUserAttribution,
       conflictResolverLabel: 'custom:conflict-label',
     });
@@ -248,7 +248,7 @@ describe('request_user_input guidance in workflow prompts', () => {
     const { harnessInstructions } = standardTask({
       description: 'Implement a repository change',
       repo: 'Roomote/example-app',
-      cloudJobUrl: 'https://example.com/task/123',
+      taskRunUrl: 'https://example.com/task/123',
       attribution: matchedUserAttributionWithAssignee,
     });
 
@@ -261,7 +261,7 @@ describe('request_user_input guidance in workflow prompts', () => {
     const { harnessInstructions } = standardTask({
       description: 'Implement a repository change',
       repo: 'Roomote/example-app',
-      cloudJobUrl: 'https://example.com/task/123',
+      taskRunUrl: 'https://example.com/task/123',
       attribution: matchedUserAttribution,
       taskSurface: 'slack',
       slackChannel: 'C456',
@@ -277,7 +277,7 @@ describe('request_user_input guidance in workflow prompts', () => {
     const { harnessInstructions } = standardTask({
       description: 'Implement a repository change',
       repo: 'Roomote/example-app',
-      cloudJobUrl: 'https://example.com/task/123',
+      taskRunUrl: 'https://example.com/task/123',
       attribution: matchedUserAttribution,
       taskSurface: 'slack',
     });
@@ -291,7 +291,7 @@ describe('request_user_input guidance in workflow prompts', () => {
     const { harnessInstructions } = standardTask({
       description: 'Implement a repository change',
       repo: 'Roomote/example-app',
-      cloudJobUrl: 'https://example.com/task/123',
+      taskRunUrl: 'https://example.com/task/123',
       attribution: matchedUserAttribution,
       taskSurface: 'slack',
       slackChannel: 'C456',
@@ -307,7 +307,7 @@ describe('request_user_input guidance in workflow prompts', () => {
     const { harnessInstructions } = standardTask({
       description: 'Implement a repository change',
       repo: 'Roomote/example-app',
-      cloudJobUrl: 'https://example.com/task/123',
+      taskRunUrl: 'https://example.com/task/123',
       attribution: matchedUserAttribution,
       taskSurface: 'slack',
       slackTeamDomain: 'acme-team',
@@ -324,7 +324,7 @@ describe('request_user_input guidance in workflow prompts', () => {
     const { harnessInstructions } = standardTask({
       description: 'Implement a repository change',
       repo: 'Roomote/example-app',
-      cloudJobUrl: 'https://example.com/task/123',
+      taskRunUrl: 'https://example.com/task/123',
       attribution: matchedUserAttribution,
       taskSurface: 'telegram',
       telegramChatId: '-100456789',
@@ -341,7 +341,7 @@ describe('request_user_input guidance in workflow prompts', () => {
     const { harnessInstructions } = standardTask({
       description: 'Implement a repository change',
       repo: 'Roomote/example-app',
-      cloudJobUrl: 'https://example.com/task/123',
+      taskRunUrl: 'https://example.com/task/123',
       attribution: matchedUserAttribution,
       taskSurface: 'telegram',
       telegramChatId: '9876543',
@@ -358,7 +358,7 @@ describe('request_user_input guidance in workflow prompts', () => {
     const { harnessInstructions } = standardTask({
       description: 'Implement a repository change',
       repo: 'Roomote/example-app',
-      cloudJobUrl: 'https://example.com/task/123',
+      taskRunUrl: 'https://example.com/task/123',
       attribution: matchedUserAttribution,
       taskSurface: 'telegram',
       telegramChatId: '9876543',
@@ -374,7 +374,7 @@ describe('request_user_input guidance in workflow prompts', () => {
     const { harnessInstructions } = standardTask({
       description: 'Implement a repository change',
       repo: 'Roomote/example-app',
-      cloudJobUrl: 'https://example.com/task/123',
+      taskRunUrl: 'https://example.com/task/123',
       attribution: matchedUserAttribution,
       taskSurface: 'teams',
       teamsConversationId: '19:channel@thread.v2',
@@ -391,7 +391,7 @@ describe('request_user_input guidance in workflow prompts', () => {
     const { harnessInstructions } = standardTask({
       description: 'Implement a repository change',
       repo: 'Roomote/example-app',
-      cloudJobUrl: 'https://example.com/task/123',
+      taskRunUrl: 'https://example.com/task/123',
       attribution: matchedUserAttribution,
       taskSurface: 'teams',
       teamsConversationId: 'a:personal-conversation',
@@ -409,7 +409,7 @@ describe('request_user_input guidance in workflow prompts', () => {
     const { harnessInstructions } = standardTask({
       description: 'Implement a repository change',
       repo: 'Roomote/example-app',
-      cloudJobUrl: 'https://example.com/task/123',
+      taskRunUrl: 'https://example.com/task/123',
       attribution: matchedUserAttribution,
       taskSurface: 'teams',
       teamsConversationId: 'a:personal-conversation',
@@ -425,7 +425,7 @@ describe('request_user_input guidance in workflow prompts', () => {
     const { harnessInstructions } = standardTask({
       description: 'Implement a repository change',
       repo: 'Roomote/example-app',
-      cloudJobUrl: 'https://example.com/task/123',
+      taskRunUrl: 'https://example.com/task/123',
       attribution: matchedUserAttribution,
       taskSurface: 'teams',
     });
@@ -465,7 +465,7 @@ describe('request_user_input guidance in workflow prompts', () => {
     const { harnessInstructions } = standardTask({
       description: 'Implement a repository change',
       repo: 'Roomote/example-app',
-      cloudJobUrl: 'https://example.com/task/123',
+      taskRunUrl: 'https://example.com/task/123',
       attribution: matchedUserAttribution,
     });
 
@@ -486,7 +486,7 @@ describe('request_user_input guidance in workflow prompts', () => {
     const { harnessInstructions } = standardTask({
       description: 'Implement a repository change',
       repo: 'Roomote/example-app',
-      cloudJobUrl: 'https://example.com/task/123',
+      taskRunUrl: 'https://example.com/task/123',
     });
 
     expect(harnessInstructions).toContain(

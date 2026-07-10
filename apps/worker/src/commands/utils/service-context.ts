@@ -1,4 +1,4 @@
-import type { Run } from '@roomote/sdk/client';
+import type { TaskRun } from '@roomote/sdk/client';
 import {
   assertNoReservedEnvironmentPorts,
   getPrimaryPortFromConfig,
@@ -89,7 +89,7 @@ export function buildWorkspacePortMappings(
 }
 
 export function buildServiceContextForPreviewProxy(
-  cloudJob: Run,
+  taskRun: TaskRun,
   workspace: WorkspaceConfig,
   workerEnv: WorkerEnv,
 ): ServiceContext | undefined {
@@ -106,15 +106,15 @@ export function buildServiceContextForPreviewProxy(
     authBypassPaths,
   } = buildWorkspacePortMappings(workspace);
 
-  const authBypassHeaderValue = cloudJob.authBypassValue ?? undefined;
+  const authBypassHeaderValue = taskRun.authBypassValue ?? undefined;
 
-  const authBypassHeaderName = cloudJob.authBypassHeaderName ?? undefined;
+  const authBypassHeaderName = taskRun.authBypassHeaderName ?? undefined;
 
   return {
-    cloudJobId: cloudJob.id,
-    taskId: cloudJob.taskId,
+    runId: taskRun.id,
+    taskId: taskRun.taskId,
     publicKey: workerEnv.previewAuthPublicKey,
-    proxyPorts: cloudJob.proxyPorts ?? undefined,
+    proxyPorts: taskRun.proxyPorts ?? undefined,
     appPorts,
     unauthenticatedPorts,
     subdomains,

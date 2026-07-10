@@ -7,9 +7,9 @@ import {
 import { db } from '@roomote/db/server';
 
 import {
-  getNamedPortsForCloudJob,
-  shouldEnableAuthBypassForCloudJob,
-  updateCloudJobMachine,
+  getNamedPortsForTaskRun,
+  shouldEnableAuthBypassForTaskRun,
+  updateTaskRunMachine,
 } from '../utils';
 
 const originalTrpcUrl = process.env.TRPC_URL;
@@ -78,7 +78,7 @@ function mockEnvironmentConfig(
   };
 }
 
-describe('getNamedPortsForCloudJob', () => {
+describe('getNamedPortsForTaskRun', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockDeploymentSettingsFindFirst.mockResolvedValue({
@@ -139,12 +139,12 @@ describe('getNamedPortsForCloudJob', () => {
       ReturnType<typeof db.query.environments.findFirst>
     >);
 
-    const cloudJob = {
+    const taskRun = {
       id: 123,
       payload: { environmentId: 'env-123' },
-    } as Parameters<typeof getNamedPortsForCloudJob>[0];
+    } as Parameters<typeof getNamedPortsForTaskRun>[0];
 
-    const result = await getNamedPortsForCloudJob(cloudJob);
+    const result = await getNamedPortsForTaskRun(taskRun);
 
     expect(result.namedPorts).toContainEqual(SANDBOX_SERVER_NAMED_PORT);
   });
@@ -167,12 +167,12 @@ describe('getNamedPortsForCloudJob', () => {
       ReturnType<typeof db.query.environments.findFirst>
     >);
 
-    const cloudJob = {
+    const taskRun = {
       id: 123,
       payload: { environmentId: 'env-123' },
-    } as Parameters<typeof getNamedPortsForCloudJob>[0];
+    } as Parameters<typeof getNamedPortsForTaskRun>[0];
 
-    const result = await getNamedPortsForCloudJob(cloudJob);
+    const result = await getNamedPortsForTaskRun(taskRun);
 
     expect(result.namedPorts).toEqual([
       SANDBOX_SERVER_NAMED_PORT,
@@ -201,12 +201,12 @@ describe('getNamedPortsForCloudJob', () => {
       ReturnType<typeof db.query.environments.findFirst>
     >);
 
-    const cloudJob = {
+    const taskRun = {
       id: 123,
       payload: { environmentId: 'env-123' },
-    } as Parameters<typeof getNamedPortsForCloudJob>[0];
+    } as Parameters<typeof getNamedPortsForTaskRun>[0];
 
-    const result = await getNamedPortsForCloudJob(cloudJob);
+    const result = await getNamedPortsForTaskRun(taskRun);
 
     expect(result.namedPorts).toEqual([SANDBOX_SERVER_NAMED_PORT]);
     expect(result.environmentConfig?.ports).toEqual([
@@ -228,12 +228,12 @@ describe('getNamedPortsForCloudJob', () => {
       ReturnType<typeof db.query.environments.findFirst>
     >);
 
-    const cloudJob = {
+    const taskRun = {
       id: 123,
       payload: { environmentId: 'env-123' },
-    } as Parameters<typeof getNamedPortsForCloudJob>[0];
+    } as Parameters<typeof getNamedPortsForTaskRun>[0];
 
-    const result = await getNamedPortsForCloudJob(cloudJob);
+    const result = await getNamedPortsForTaskRun(taskRun);
 
     expect(result.namedPorts).toEqual([SANDBOX_SERVER_NAMED_PORT]);
     expect(result.environmentConfig?.ports).toEqual([
@@ -255,12 +255,12 @@ describe('getNamedPortsForCloudJob', () => {
       ReturnType<typeof db.query.environments.findFirst>
     >);
 
-    const cloudJob = {
+    const taskRun = {
       id: 123,
       payload: { environmentId: 'env-123' },
-    } as Parameters<typeof getNamedPortsForCloudJob>[0];
+    } as Parameters<typeof getNamedPortsForTaskRun>[0];
 
-    const result = await getNamedPortsForCloudJob(cloudJob);
+    const result = await getNamedPortsForTaskRun(taskRun);
 
     expect(result.namedPorts).toEqual([SANDBOX_SERVER_NAMED_PORT]);
   });
@@ -283,14 +283,14 @@ describe('getNamedPortsForCloudJob', () => {
         snapshotExpiresAt: futureDate,
       });
 
-      const cloudJob = {
+      const taskRun = {
         id: 123,
         payload: {
           environmentId: 'env-123',
         },
-      } as Parameters<typeof getNamedPortsForCloudJob>[0];
+      } as Parameters<typeof getNamedPortsForTaskRun>[0];
 
-      const result = await getNamedPortsForCloudJob(cloudJob);
+      const result = await getNamedPortsForTaskRun(taskRun);
 
       expect(result.environmentSnapshotId).toBe('snapshot-456');
     });
@@ -312,14 +312,14 @@ describe('getNamedPortsForCloudJob', () => {
         snapshotExpiresAt: pastDate,
       });
 
-      const cloudJob = {
+      const taskRun = {
         id: 123,
         payload: {
           environmentId: 'env-123',
         },
-      } as Parameters<typeof getNamedPortsForCloudJob>[0];
+      } as Parameters<typeof getNamedPortsForTaskRun>[0];
 
-      const result = await getNamedPortsForCloudJob(cloudJob);
+      const result = await getNamedPortsForTaskRun(taskRun);
 
       expect(result.environmentSnapshotId).toBeUndefined();
     });
@@ -341,12 +341,12 @@ describe('getNamedPortsForCloudJob', () => {
         snapshotExpiresAt: futureDate,
       });
 
-      const cloudJob = {
+      const taskRun = {
         id: 123,
         payload: { environmentId: 'env-123' },
-      } as Parameters<typeof getNamedPortsForCloudJob>[0];
+      } as Parameters<typeof getNamedPortsForTaskRun>[0];
 
-      const result = await getNamedPortsForCloudJob(cloudJob);
+      const result = await getNamedPortsForTaskRun(taskRun);
 
       expect(result.environmentSnapshotId).toBeUndefined();
     });
@@ -356,14 +356,14 @@ describe('getNamedPortsForCloudJob', () => {
     it('should handle environment not found in database', async () => {
       vi.mocked(db.query.environments.findFirst).mockResolvedValue(undefined);
 
-      const cloudJob = {
+      const taskRun = {
         id: 123,
         payload: {
           environmentId: 'non-existent-env',
         },
-      } as Parameters<typeof getNamedPortsForCloudJob>[0];
+      } as Parameters<typeof getNamedPortsForTaskRun>[0];
 
-      const result = await getNamedPortsForCloudJob(cloudJob);
+      const result = await getNamedPortsForTaskRun(taskRun);
 
       // Should still include base ports even if environment not found
       expect(result.namedPorts).toContainEqual(SANDBOX_SERVER_NAMED_PORT);
@@ -373,10 +373,10 @@ describe('getNamedPortsForCloudJob', () => {
   });
 });
 
-describe('shouldEnableAuthBypassForCloudJob', () => {
+describe('shouldEnableAuthBypassForTaskRun', () => {
   it('does not generate a bypass without an environment config', () => {
     expect(
-      shouldEnableAuthBypassForCloudJob({
+      shouldEnableAuthBypassForTaskRun({
         namedPorts: [SANDBOX_SERVER_NAMED_PORT],
       }),
     ).toBe(false);
@@ -384,7 +384,7 @@ describe('shouldEnableAuthBypassForCloudJob', () => {
 
   it('honors an explicit auth bypass disable', () => {
     expect(
-      shouldEnableAuthBypassForCloudJob({
+      shouldEnableAuthBypassForTaskRun({
         environmentConfig: mockEnvironmentConfig({
           auth_bypass_header: false,
           ports: [{ name: 'WEB', port: 3000 }],
@@ -396,7 +396,7 @@ describe('shouldEnableAuthBypassForCloudJob', () => {
 
   it('does not generate a bypass for the sandbox server alone', () => {
     expect(
-      shouldEnableAuthBypassForCloudJob({
+      shouldEnableAuthBypassForTaskRun({
         environmentConfig: mockEnvironmentConfig(),
         namedPorts: [SANDBOX_SERVER_NAMED_PORT],
       }),
@@ -405,7 +405,7 @@ describe('shouldEnableAuthBypassForCloudJob', () => {
 
   it('does not generate a bypass for configured ports that are not exposed', () => {
     expect(
-      shouldEnableAuthBypassForCloudJob({
+      shouldEnableAuthBypassForTaskRun({
         environmentConfig: mockEnvironmentConfig({
           ports: [{ name: 'WEB', port: 3000 }],
         }),
@@ -416,7 +416,7 @@ describe('shouldEnableAuthBypassForCloudJob', () => {
 
   it('generates a bypass for exposed authenticated proxied preview ports', () => {
     expect(
-      shouldEnableAuthBypassForCloudJob({
+      shouldEnableAuthBypassForTaskRun({
         environmentConfig: mockEnvironmentConfig({
           ports: [{ name: 'WEB', port: 3000 }],
         }),
@@ -427,7 +427,7 @@ describe('shouldEnableAuthBypassForCloudJob', () => {
 
   it('does not generate a bypass for unauthenticated preview ports', () => {
     expect(
-      shouldEnableAuthBypassForCloudJob({
+      shouldEnableAuthBypassForTaskRun({
         environmentConfig: mockEnvironmentConfig({
           ports: [{ name: 'WEB', port: 3000, unauthenticated: true }],
         }),
@@ -441,7 +441,7 @@ describe('shouldEnableAuthBypassForCloudJob', () => {
 
   it('does not generate a bypass for ordinary unproxied preview ports', () => {
     expect(
-      shouldEnableAuthBypassForCloudJob({
+      shouldEnableAuthBypassForTaskRun({
         environmentConfig: mockEnvironmentConfig({
           ports: [{ name: 'WEB', port: 3000, proxied: false }],
         }),
@@ -454,19 +454,19 @@ describe('shouldEnableAuthBypassForCloudJob', () => {
   });
 });
 
-describe('updateCloudJobMachine', () => {
+describe('updateTaskRunMachine', () => {
   beforeEach(() => {
     vi.clearAllMocks();
   });
 
   it('stores routing info for the explicit primary port', async () => {
-    const cloudJob = {
+    const taskRun = {
       id: 1,
       sourceSnapshotId: null,
-    } as Parameters<typeof updateCloudJobMachine>[0]['cloudJob'];
+    } as Parameters<typeof updateTaskRunMachine>[0]['taskRun'];
 
-    await updateCloudJobMachine({
-      cloudJob,
+    await updateTaskRunMachine({
+      taskRun,
       machineId: 'machine-1',
       machineDomains: {
         SANDBOX_SERVER: 'https://sandbox.localhost',
@@ -484,13 +484,13 @@ describe('updateCloudJobMachine', () => {
   });
 
   it('stores provision-time compute resource snapshots when provided', async () => {
-    const cloudJob = {
+    const taskRun = {
       id: 1,
       sourceSnapshotId: null,
-    } as Parameters<typeof updateCloudJobMachine>[0]['cloudJob'];
+    } as Parameters<typeof updateTaskRunMachine>[0]['taskRun'];
 
-    await updateCloudJobMachine({
-      cloudJob,
+    await updateTaskRunMachine({
+      taskRun,
       machineId: 'machine-1',
       machineDomains: {
         SANDBOX_SERVER: 'https://sandbox.localhost',
@@ -509,13 +509,13 @@ describe('updateCloudJobMachine', () => {
   });
 
   it('clears a stale source snapshot id when the machine booted fresh', async () => {
-    const cloudJob = {
+    const taskRun = {
       id: 1,
       sourceSnapshotId: 'snap_stale_123',
-    } as Parameters<typeof updateCloudJobMachine>[0]['cloudJob'];
+    } as Parameters<typeof updateTaskRunMachine>[0]['taskRun'];
 
-    await updateCloudJobMachine({
-      cloudJob,
+    await updateTaskRunMachine({
+      taskRun,
       machineId: 'machine-1',
       machineDomains: {
         SANDBOX_SERVER: 'https://sandbox.localhost',

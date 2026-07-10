@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { RunStatus, TaskPayloadKind } from '@roomote/types';
-import type { Run } from '@roomote/db/server';
+import type { TaskRun } from '@roomote/db/server';
 
 const {
   mockCreateGitHubToken,
@@ -83,10 +83,10 @@ vi.mock('@roomote/db/server', () => ({
 
 import {
   sourceControlPullRequestWriteInputSchema,
-  writeSourceControlPullRequestForCloudJob,
+  writeSourceControlPullRequestForTaskRun,
 } from '../source-control-pull-request-writes';
 
-function makeCloudJob(payload: Run['payload']): Run {
+function makeTaskRun(payload: TaskRun['payload']): TaskRun {
   return {
     id: 123,
     status: RunStatus.Dequeued,
@@ -97,7 +97,7 @@ function makeCloudJob(payload: Run['payload']): Run {
     payload,
     result: null,
     artifacts: null,
-  } as Run;
+  } as TaskRun;
 }
 
 function jsonResponse(body: unknown, status = 200): Response {
@@ -107,7 +107,7 @@ function jsonResponse(body: unknown, status = 200): Response {
   });
 }
 
-describe('writeSourceControlPullRequestForCloudJob', () => {
+describe('writeSourceControlPullRequestForTaskRun', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockEnvironmentsFindFirst.mockResolvedValue(null);
@@ -133,8 +133,8 @@ describe('writeSourceControlPullRequestForCloudJob', () => {
       .fn()
       .mockResolvedValueOnce(jsonResponse({ id: 501 }, 201));
 
-    const result = await writeSourceControlPullRequestForCloudJob({
-      cloudJob: makeCloudJob({
+    const result = await writeSourceControlPullRequestForTaskRun({
+      taskRun: makeTaskRun({
         repo: 'acme/backend',
         sourceControlProvider: 'gitlab',
       }),
@@ -181,8 +181,8 @@ describe('writeSourceControlPullRequestForCloudJob', () => {
       .fn()
       .mockResolvedValueOnce(jsonResponse({ id: 'abc123' }));
 
-    const result = await writeSourceControlPullRequestForCloudJob({
-      cloudJob: makeCloudJob({
+    const result = await writeSourceControlPullRequestForTaskRun({
+      taskRun: makeTaskRun({
         repo: 'acme/backend',
         sourceControlProvider: 'gitlab',
       }),
@@ -226,8 +226,8 @@ describe('writeSourceControlPullRequestForCloudJob', () => {
       .fn()
       .mockResolvedValueOnce(jsonResponse({ id: 20, status: 'fixed' }));
 
-    const result = await writeSourceControlPullRequestForCloudJob({
-      cloudJob: makeCloudJob({
+    const result = await writeSourceControlPullRequestForTaskRun({
+      taskRun: makeTaskRun({
         repo: 'acme/Platform/backend',
         sourceControlProvider: 'ado',
       }),
@@ -277,8 +277,8 @@ describe('writeSourceControlPullRequestForCloudJob', () => {
       )
       .mockResolvedValueOnce(jsonResponse({ vote: 10 }));
 
-    const result = await writeSourceControlPullRequestForCloudJob({
-      cloudJob: makeCloudJob({
+    const result = await writeSourceControlPullRequestForTaskRun({
+      taskRun: makeTaskRun({
         repo: 'acme/Platform/backend',
         sourceControlProvider: 'ado',
       }),
@@ -331,8 +331,8 @@ describe('writeSourceControlPullRequestForCloudJob', () => {
     });
     const fetchImpl = vi.fn();
 
-    const result = await writeSourceControlPullRequestForCloudJob({
-      cloudJob: makeCloudJob({
+    const result = await writeSourceControlPullRequestForTaskRun({
+      taskRun: makeTaskRun({
         repo: 'acme/backend',
         sourceControlProvider: 'gitea',
       }),
@@ -378,8 +378,8 @@ describe('writeSourceControlPullRequestForCloudJob', () => {
       rest: { pulls: { createReview } },
     });
 
-    const result = await writeSourceControlPullRequestForCloudJob({
-      cloudJob: makeCloudJob({
+    const result = await writeSourceControlPullRequestForTaskRun({
+      taskRun: makeTaskRun({
         repo: 'acme/backend',
         sourceControlProvider: 'github',
       }),
@@ -424,8 +424,8 @@ describe('writeSourceControlPullRequestForCloudJob', () => {
     });
     const fetchImpl = vi.fn().mockResolvedValueOnce(jsonResponse({ id: 501 }));
 
-    const result = await writeSourceControlPullRequestForCloudJob({
-      cloudJob: makeCloudJob({
+    const result = await writeSourceControlPullRequestForTaskRun({
+      taskRun: makeTaskRun({
         repo: 'acme/backend',
         sourceControlProvider: 'gitlab',
       }),
@@ -470,8 +470,8 @@ describe('writeSourceControlPullRequestForCloudJob', () => {
     const fetchImpl = vi.fn();
 
     await expect(
-      writeSourceControlPullRequestForCloudJob({
-        cloudJob: makeCloudJob({
+      writeSourceControlPullRequestForTaskRun({
+        taskRun: makeTaskRun({
           repo: 'acme/Platform/backend',
           sourceControlProvider: 'ado',
         }),
@@ -513,8 +513,8 @@ describe('writeSourceControlPullRequestForCloudJob', () => {
       },
     });
 
-    const result = await writeSourceControlPullRequestForCloudJob({
-      cloudJob: makeCloudJob({
+    const result = await writeSourceControlPullRequestForTaskRun({
+      taskRun: makeTaskRun({
         repo: 'acme/backend',
         sourceControlProvider: 'github',
       }),
@@ -582,8 +582,8 @@ describe('writeSourceControlPullRequestForCloudJob', () => {
     });
     expect(parsedInput.threadId).toBeUndefined();
 
-    const result = await writeSourceControlPullRequestForCloudJob({
-      cloudJob: makeCloudJob({
+    const result = await writeSourceControlPullRequestForTaskRun({
+      taskRun: makeTaskRun({
         repo: 'acme/backend',
         sourceControlProvider: 'github',
       }),
@@ -631,8 +631,8 @@ describe('writeSourceControlPullRequestForCloudJob', () => {
       },
     });
 
-    const result = await writeSourceControlPullRequestForCloudJob({
-      cloudJob: makeCloudJob({
+    const result = await writeSourceControlPullRequestForTaskRun({
+      taskRun: makeTaskRun({
         repo: 'acme/backend',
         sourceControlProvider: 'github',
       }),
@@ -670,8 +670,8 @@ describe('writeSourceControlPullRequestForCloudJob', () => {
     const fetchImpl = vi.fn();
 
     await expect(
-      writeSourceControlPullRequestForCloudJob({
-        cloudJob: makeCloudJob({
+      writeSourceControlPullRequestForTaskRun({
+        taskRun: makeTaskRun({
           repo: 'acme/backend',
           sourceControlProvider: 'github',
         }),
@@ -693,8 +693,8 @@ describe('writeSourceControlPullRequestForCloudJob', () => {
     const fetchImpl = vi.fn();
 
     await expect(
-      writeSourceControlPullRequestForCloudJob({
-        cloudJob: makeCloudJob({
+      writeSourceControlPullRequestForTaskRun({
+        taskRun: makeTaskRun({
           repo: 'acme/backend',
           sourceControlProvider: 'github',
         }),

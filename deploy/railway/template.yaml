@@ -28,7 +28,7 @@
 #   DOCKER_WORKER_IMAGE and MODAL_BASE_IMAGE_REF from it, and the controller
 #   reads the worker release version from the VERSION file inside
 #   worker-current.tar.gz. Production deployments can pin an immutable tag
-#   (v*, develop-<sha>, or main-<sha>) in the four image fields instead;
+#   (v*, develop-<sha>, or main-<sha>) in the five image fields instead;
 #   nothing else needs editing. Railway does not redeploy when a mutable
 #   alias moves; redeploys can be automated against Railway's GraphQL API
 #   (README.md "Auto-deploying every develop build").
@@ -77,8 +77,14 @@
 #   pings at the openmote ping service (the code default is
 #   https://ping.roomote.dev). Admins can opt out of analytics in the setup
 #   wizard or Settings -> Misc; version checks ignore that setting.
-# - Live previews stay disabled by default. They need a customer-owned
-#   wildcard custom domain; see the preview-proxy section in README.md.
+# - Live previews ship disabled but ready: the preview-proxy service is in
+#   the template and boots healthy with the PREVIEW_* variables empty (it
+#   only hard-requires ROOMOTE_APP_URL, DATABASE_URL, and REDIS_URL, all in
+#   the shared block). Enabling previews needs a customer-owned wildcard
+#   custom domain plus the three PREVIEW_* values on api; see "Enabling
+#   live previews" in README.md. The PREVIEW_* variables on api are empty
+#   and marked OPTIONAL in the Template Composer so the deploy screen does
+#   not demand values for them.
 
 # The ONLY line that differs between the two published templates. Use the
 # alias for the channel being mirrored; deployments can also pin an
@@ -100,7 +106,7 @@ services:
     notes: Provides `${{Redis.REDIS_URL}}`. Prefer the private-network URL.
 
   minio:
-    image: minio/minio:latest
+    image: minio/minio:RELEASE.2025-09-07T16-13-09Z@sha256:14cea493d9a34af32f524e538b8346cf79f3321eff8e708c1e2960462bd8936e
     service_name: minio # rename from the default "minio/minio" — the slash breaks ${{minio.*}} references
     start_command: minio server /data --console-address :9001
     volume: /data
@@ -131,6 +137,14 @@ services:
       S3_REGION: us-east-1
       S3_BUCKET_ARTIFACTS: roomote-artifacts
       S3_AUTO_CREATE_BUCKET: 'true' # api creates the MinIO bucket at boot; no manual mc step
+      # Live-preview knobs, empty until previews are enabled (mark all
+      # three "optional" in the Composer so the deploy screen skips them).
+      # To enable: set to https://previews.<domain> / https://previews.<domain>
+      # / previews.<domain> after attaching the wildcard custom domain to
+      # the preview-proxy service — see "Enabling live previews" in README.md.
+      PREVIEW_PROXY_BASE_URL: ''
+      NEXT_PUBLIC_PREVIEW_PROXY_BASE_URL: ''
+      PREVIEW_DOMAINS: ''
       SETUP_TOKEN: ${{secret(32)}} # gates /setup; required outside local dev (see design notes)
       ROOMOTE_PING_BASE_URL: https://ping.openmote.dev # anonymous-analytics / version-check pings
       DEFAULT_COMPUTE_PROVIDER: modal
@@ -156,9 +170,9 @@ services:
       S3_ENDPOINT: http://${{minio.RAILWAY_PRIVATE_DOMAIN}}:9000
       S3_PRESIGN_ENDPOINT: https://${{minio.RAILWAY_PUBLIC_DOMAIN}}
 
-  # The env block shared by web, controller, and bullmq. In the Template
-  # Composer, paste it into each service (Railway has no per-template YAML
-  # anchors).
+  # The env block shared by web, controller, bullmq, and preview-proxy. In
+  # the Template Composer, paste it into each service (Railway has no
+  # per-template YAML anchors).
   web:
     image: app
     start_command: /roomote/.docker/app/entrypoint.sh web
@@ -177,6 +191,12 @@ services:
       S3_BUCKET_ARTIFACTS: ${{api.S3_BUCKET_ARTIFACTS}}
       SETUP_TOKEN: ${{api.SETUP_TOKEN}}
       ROOMOTE_PING_BASE_URL: ${{api.ROOMOTE_PING_BASE_URL}}
+      # Empty until previews are enabled; the web client builds preview
+      # links from NEXT_PUBLIC_PREVIEW_PROXY_BASE_URL, so the references
+      # live in the shared block rather than only on preview-proxy.
+      PREVIEW_PROXY_BASE_URL: ${{api.PREVIEW_PROXY_BASE_URL}}
+      NEXT_PUBLIC_PREVIEW_PROXY_BASE_URL: ${{api.NEXT_PUBLIC_PREVIEW_PROXY_BASE_URL}}
+      PREVIEW_DOMAINS: ${{api.PREVIEW_DOMAINS}}
       DEFAULT_COMPUTE_PROVIDER: ${{api.DEFAULT_COMPUTE_PROVIDER}}
       EXCLUDED_COMPUTE_PROVIDERS: ${{api.EXCLUDED_COMPUTE_PROVIDERS}}
       DATABASE_URL: ${{Postgres.DATABASE_URL}}
@@ -206,18 +226,14 @@ services:
     public_domain: no
     env: *app_service_env
 
-  # Optional. Only add this service when the deployment enables live
-  # previews with a wildcard custom domain. See README.md. When enabling
-  # previews, set these three variables on the app services too — the web
-  # client builds preview links from NEXT_PUBLIC_PREVIEW_PROXY_BASE_URL, so
-  # the web service must have it.
+  # Boots healthy with the PREVIEW_* variables empty and serves nothing
+  # until previews are enabled: attach `previews.<your-domain>` and the
+  # `*.previews.<your-domain>` wildcard as custom domains here, fill the
+  # three PREVIEW_* values on api, and opt in from Settings -> Live
+  # Previews. See "Enabling live previews" in README.md.
   preview-proxy:
     image: app
     start_command: /roomote/.docker/app/entrypoint.sh preview-proxy
-    public_domain: yes # plus a `*.previews.<your-domain>` wildcard custom domain
+    public_domain: http proxy port 8080 # plus the previews custom domains when enabled
     healthcheck_path: /health
-    env:
-      <<: *app_service_env
-      PREVIEW_PROXY_BASE_URL: https://previews.<your-domain>
-      NEXT_PUBLIC_PREVIEW_PROXY_BASE_URL: https://previews.<your-domain>
-      PREVIEW_DOMAINS: previews.<your-domain>
+    env: *app_service_env

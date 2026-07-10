@@ -12,8 +12,8 @@ import { logHandlerError } from '../utils';
  * (resolveActorScopedUserContext -> userApiKeys / mcpConnections and the MCP
  * proxy's resolveActingUserId), so it must only ever be written by the server
  * from identities it resolved itself (an authenticated web user, or a chat
- * sender mapped to a Roomote user by the webhook handler). Run-scoped job
- * tokens cannot write it — `cloudJobs.update` strips the field — and the
+ * sender mapped to a Roomote user by the webhook handler). Run-scoped run
+ * tokens cannot write it — `taskRuns.update` strips the field — and the
  * worker only observes the value.
  *
  * The write must land BEFORE the message is delivered to (or picked up by)
@@ -22,12 +22,12 @@ import { logHandlerError } from '../utils';
  * replays), so a late write would block or mis-attribute the turn.
  */
 export async function updateActingUserIdIfNeeded({
-  jobId,
+  runId,
   currentActingUserId,
   nextActingUserId,
   preserveActor,
 }: {
-  jobId: number;
+  runId: number;
   currentActingUserId: string | null;
   nextActingUserId: string;
   preserveActor: boolean;
@@ -37,7 +37,7 @@ export async function updateActingUserIdIfNeeded({
   }
 
   return await compareAndSetTrustedRunActingUser({
-    runId: jobId,
+    runId: runId,
     expectedUserId: currentActingUserId,
     nextUserId: nextActingUserId,
   });
@@ -50,25 +50,25 @@ export async function updateActingUserIdIfNeeded({
  */
 export async function restoreActingUserIdAfterFailedDelivery({
   handlerName,
-  jobId,
+  runId,
   previousActingUserId,
   attemptedActingUserId,
 }: {
   handlerName: 'sendMessageToTask' | 'steerMessageToTask';
-  jobId: number;
+  runId: number;
   previousActingUserId: string | null;
   attemptedActingUserId: string;
 }): Promise<void> {
   try {
     await compareAndSetTrustedRunActingUser({
-      runId: jobId,
+      runId: runId,
       expectedUserId: attemptedActingUserId,
       nextUserId: previousActingUserId,
     });
   } catch (error) {
     logHandlerError(
       handlerName,
-      `Failed to roll back actingUserId after sandbox delivery failed for run ${jobId} ` +
+      `Failed to roll back actingUserId after sandbox delivery failed for run ${runId} ` +
         `(attempted=${attemptedActingUserId}, previous=${previousActingUserId ?? 'null'}): ` +
         `${error instanceof Error ? error.message : String(error)}`,
     );
@@ -77,7 +77,7 @@ export async function restoreActingUserIdAfterFailedDelivery({
 
 /**
  * Pre-queue trusted actor sync for inbound chat messages that the worker
- * polls (Slack/Teams/Telegram/Linear active-job queues).
+ * polls (Slack/Teams/Telegram/Linear active-run queues).
  *
  * Called by webhook handlers with the sender they resolved to a Roomote user.
  * Skips unmapped senders (`senderUserId` undefined/null): those messages run
@@ -90,11 +90,11 @@ export async function restoreActingUserIdAfterFailedDelivery({
  */
 export async function syncActingUserForInboundMessage({
   logContext,
-  jobId,
+  runId,
   senderUserId,
 }: {
   logContext: string;
-  jobId: number;
+  runId: number;
   senderUserId: string | null | undefined;
 }): Promise<void> {
   if (!senderUserId) {
@@ -102,11 +102,11 @@ export async function syncActingUserForInboundMessage({
   }
 
   try {
-    await setTrustedRunActingUser({ runId: jobId, userId: senderUserId });
+    await setTrustedRunActingUser({ runId: runId, userId: senderUserId });
   } catch (error) {
     logHandlerError(
       logContext,
-      `Non-fatal actingUserId sync failure for cloud job ${jobId} ` +
+      `Non-fatal actingUserId sync failure for task run ${runId} ` +
         `(next=${senderUserId}): ` +
         `${error instanceof Error ? error.message : String(error)}`,
     );

@@ -73,7 +73,7 @@ function getTeamsPrMergeTarget(payload: unknown): TeamsPrMergeTarget | null {
 /**
  * Notifies Microsoft Teams conversations associated with a PR that the PR has
  * been merged. Mirrors the Slack PR-merge notification path using the
- * provider-neutral Teams communication metadata on cloud job payloads.
+ * provider-neutral Teams communication metadata on task run payloads.
  */
 export async function notifyTeamsPrMerge({
   sourceControlProvider,
@@ -119,14 +119,14 @@ export async function notifyTeamsPrMerge({
       return;
     }
 
-    const linkedJobs = await db.query.taskRuns.findMany({
+    const linkedRuns = await db.query.taskRuns.findMany({
       where: inArray(taskRuns.taskId, taskIds),
       columns: {
         payload: true,
       },
     });
 
-    const targets = linkedJobs
+    const targets = linkedRuns
       .map((job) => getTeamsPrMergeTarget(job.payload))
       .filter((target): target is TeamsPrMergeTarget => target !== null);
 

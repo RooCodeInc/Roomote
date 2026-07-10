@@ -42,11 +42,11 @@ export type UserAuthSuccess = {
   userType: 'user';
 } & AuthorizedUser;
 
-export type JobAuthTokenSuccess = {
+export type RunAuthTokenSuccess = {
   success: true;
-  userType: 'job';
-  cloudJobId: number;
-  /** Null when the job token was minted for the deployment service principal. */
+  userType: 'run';
+  runId: number;
+  /** Null when the run token was minted for the deployment service principal. */
   userId: string | null;
   name: string | null;
   primaryEmail: string | null;

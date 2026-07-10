@@ -18,7 +18,7 @@ import type { Variables } from '../../types';
 import type { McpAuth } from '../mcp/middleware';
 import {
   TASK_SELECT_COLUMNS,
-  getLatestCloudJobsByTaskIds,
+  getLatestTaskRunsByTaskIds,
   visibleTaskHistoryCondition,
 } from './helpers';
 import { logHandlerError } from '../utils';
@@ -215,7 +215,7 @@ export async function searchTasks(
     const taskList = hasMore ? results.slice(0, limit) : results;
 
     const taskIds = taskList.map((task) => task.id);
-    const latestJobs = await getLatestCloudJobsByTaskIds(taskIds);
+    const latestRuns = await getLatestTaskRunsByTaskIds(taskIds);
 
     // Hidden tasks are excluded by visibleTaskHistoryCondition
     // (tasks.visibility = 'visible'); no per-run type filter is needed.
@@ -230,9 +230,9 @@ export async function searchTasks(
         harness: t.harness,
         createdAt: t.timestamp,
         lastMessageAt: t.activityAt,
-        cloudJobStatus: latestJobs[t.id]?.status ?? null,
-        taskPhase: latestJobs[t.id]?.taskPhase ?? null,
-        cloudJobError: latestJobs[t.id]?.error ?? null,
+        taskRunStatus: latestRuns[t.id]?.status ?? null,
+        taskPhase: latestRuns[t.id]?.taskPhase ?? null,
+        taskRunError: latestRuns[t.id]?.error ?? null,
       })),
       hasMore,
       nextCursor,

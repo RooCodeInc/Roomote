@@ -36,7 +36,7 @@ const MODAL_TOP_PROCESS_LIMIT = 5;
 const MODAL_PS_TIMEOUT_MS = 2_000;
 
 interface ComputeProviderUsageConfig {
-  cloudJobId: number;
+  runId: number;
   computeProvider: ComputeProvider;
   logger: Pick<Console, 'warn'>;
   recordDiagnosticEvent?: (
@@ -364,14 +364,14 @@ async function buildModalMemoryDiagnosticSnapshot(input: {
 }
 
 function buildModalMemoryDiagnosticEvent(input: {
-  cloudJobId: number;
+  runId: number;
   updateKind: string;
   memoryDiagnosticSnapshot: ModalMemoryDiagnosticSnapshot;
 }): ModalMemoryDiagnosticEvent {
   const { memoryDiagnosticSnapshot } = input;
 
   return {
-    message: `Captured Modal memory diagnostic snapshot for cloud job #${input.cloudJobId}.`,
+    message: `Captured Modal memory diagnostic snapshot for task run #${input.runId}.`,
     details: {
       reason: 'modal_memory_pressure_diagnostic',
       updateKind: input.updateKind,
@@ -471,7 +471,7 @@ export async function sampleCgroupUsage(
 }
 
 async function recordUsageEstimate({
-  cloudJobId,
+  runId,
   computeProvider,
   logger,
   recordDiagnosticEvent,
@@ -495,7 +495,7 @@ async function recordUsageEstimate({
     ) {
       cgroupSamplingState.hasWarnedAboutMissingCounters = true;
       logger.warn(
-        `[workerComputeUsage] Modal cgroup usage counters unavailable for cloud job ${cloudJobId}; falling back to requested-resource estimates.`,
+        `[workerComputeUsage] Modal cgroup usage counters unavailable for task run ${runId}; falling back to requested-resource estimates.`,
       );
     }
 
@@ -534,7 +534,7 @@ async function recordUsageEstimate({
           });
 
         memoryDiagnosticEvent = buildModalMemoryDiagnosticEvent({
-          cloudJobId,
+          runId,
           updateKind,
           memoryDiagnosticSnapshot,
         });
@@ -546,15 +546,15 @@ async function recordUsageEstimate({
     }
   } catch (error) {
     logger.warn(
-      `[workerComputeUsage] Failed to sample ${computeProvider === 'modal' ? 'Modal' : 'Sandbox'} cgroup usage for cloud job ${cloudJobId}: ${
+      `[workerComputeUsage] Failed to sample ${computeProvider === 'modal' ? 'Modal' : 'Sandbox'} cgroup usage for task run ${runId}: ${
         error instanceof Error ? error.message : String(error)
       }`,
     );
   }
 
   try {
-    await sdk.cloudJobs.recordComputeProviderUsage({
-      cloudJobId,
+    await sdk.taskRuns.recordComputeProviderUsage({
+      runId,
       lifecycleAction: 'running',
       completedAt: new Date(),
       ...(cgroupUsageObservation?.sampledCpuUsageNsTotal !== undefined
@@ -588,7 +588,7 @@ async function recordUsageEstimate({
     });
   } catch (error) {
     logger.warn(
-      `[workerComputeUsage] Failed to update compute usage for cloud job ${cloudJobId}: ${
+      `[workerComputeUsage] Failed to update compute usage for task run ${runId}: ${
         error instanceof Error ? error.message : String(error)
       }`,
     );
@@ -599,7 +599,7 @@ async function recordUsageEstimate({
       await recordDiagnosticEvent(memoryDiagnosticEvent);
     } catch (error) {
       logger.warn(
-        `[workerComputeUsage] Failed to record Modal memory diagnostic event for cloud job ${cloudJobId}: ${
+        `[workerComputeUsage] Failed to record Modal memory diagnostic event for task run ${runId}: ${
           error instanceof Error ? error.message : String(error)
         }`,
       );
@@ -608,7 +608,7 @@ async function recordUsageEstimate({
 }
 
 export function createComputeProviderUsageInterval({
-  cloudJobId,
+  runId,
   computeProvider,
   logger,
   recordDiagnosticEvent,
@@ -620,7 +620,7 @@ export function createComputeProviderUsageInterval({
   };
 
   void recordUsageEstimate({
-    cloudJobId,
+    runId,
     computeProvider,
     logger,
     recordDiagnosticEvent,
@@ -629,7 +629,7 @@ export function createComputeProviderUsageInterval({
 
   const interval = setInterval(() => {
     void recordUsageEstimate({
-      cloudJobId,
+      runId,
       computeProvider,
       logger,
       recordDiagnosticEvent,
@@ -643,7 +643,7 @@ export function createComputeProviderUsageInterval({
     },
     flush: async (options) => {
       await recordUsageEstimate({
-        cloudJobId,
+        runId,
         computeProvider,
         logger,
         recordDiagnosticEvent,

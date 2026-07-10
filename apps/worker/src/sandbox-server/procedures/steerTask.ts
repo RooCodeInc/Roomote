@@ -42,7 +42,7 @@ export const steerTask = publicProcedure
     }
 
     const userId =
-      // Deployment-principal job tokens have a null userId; treat them as no
+      // Deployment-principal run tokens have a null userId; treat them as no
       // acting user rather than fabricating one.
       ctx.auth && 'userId' in ctx.auth
         ? (ctx.auth.userId ?? undefined)
@@ -69,7 +69,7 @@ export const steerTask = publicProcedure
 
       try {
         trackedSlackQuote = await trackLatestUserMessageForSlackThreadQuote({
-          cloudJobId: ctx.cloudJobId,
+          runId: ctx.runId,
           text: input.prompt,
           userName: input.userName,
           logPrefix: 'steerTask',
@@ -98,7 +98,7 @@ export const steerTask = publicProcedure
       } catch (error) {
         if (trackedSlackQuote) {
           await clearLatestUserMessageForSlackThreadQuote({
-            cloudJobId: ctx.cloudJobId,
+            runId: ctx.runId,
             logPrefix: 'steerTask',
             warn: (message) => ctx.harnessLogger?.warn(message),
           });
@@ -125,7 +125,7 @@ export const steerTask = publicProcedure
 
       try {
         trackedSlackQuote = await trackLatestUserMessageForSlackThreadQuote({
-          cloudJobId: ctx.cloudJobId,
+          runId: ctx.runId,
           text: input.prompt,
           userName: input.userName,
           logPrefix: 'steerTask',
@@ -153,7 +153,7 @@ export const steerTask = publicProcedure
       } catch (error) {
         if (trackedSlackQuote) {
           await clearLatestUserMessageForSlackThreadQuote({
-            cloudJobId: ctx.cloudJobId,
+            runId: ctx.runId,
             logPrefix: 'steerTask',
             warn: (message) => ctx.harnessLogger?.warn(message),
           });
@@ -194,7 +194,7 @@ export const steerTask = publicProcedure
 
     try {
       trackedSlackQuote = await trackLatestUserMessageForSlackThreadQuote({
-        cloudJobId: ctx.cloudJobId,
+        runId: ctx.runId,
         text: input.prompt,
         userName: input.userName,
         logPrefix: 'steerTask',
@@ -222,7 +222,7 @@ export const steerTask = publicProcedure
     } catch (error) {
       if (trackedSlackQuote) {
         await clearLatestUserMessageForSlackThreadQuote({
-          cloudJobId: ctx.cloudJobId,
+          runId: ctx.runId,
           logPrefix: 'steerTask',
           warn: (message) => ctx.harnessLogger?.warn(message),
         });

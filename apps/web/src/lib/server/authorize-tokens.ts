@@ -1,13 +1,13 @@
 import { NextRequest } from 'next/server';
 
-import { validateAuthToken, validateJobToken } from '@roomote/auth';
+import { validateAuthToken, validateRunToken } from '@roomote/auth';
 import { isUserToken } from '@roomote/types';
 import { db, eq, users } from '@roomote/db/server';
 
 import type {
   UserAuthSuccess,
   UserAuthTokenSuccess,
-  JobAuthTokenSuccess,
+  RunAuthTokenSuccess,
   AuthError,
 } from '@/types';
 
@@ -70,9 +70,9 @@ export async function authorizeUserToken(
   }
 }
 
-export async function authorizeJobToken(
+export async function authorizeRunToken(
   request: NextRequest,
-): Promise<JobAuthTokenSuccess | UserAuthSuccess | AuthError> {
+): Promise<RunAuthTokenSuccess | UserAuthSuccess | AuthError> {
   const authHeader = request.headers.get('authorization');
 
   if (!authHeader?.startsWith('Bearer ')) {
@@ -89,9 +89,9 @@ export async function authorizeJobToken(
   }
 
   try {
-    const tokenContext = await validateJobToken(token);
+    const tokenContext = await validateRunToken(token);
 
-    // Deployment-principal job tokens carry no user; skip the lookup rather
+    // Deployment-principal run tokens carry no user; skip the lookup rather
     // than resolving an arbitrary user for them.
     const user = tokenContext.userId
       ? await db.query.users.findFirst({
@@ -100,12 +100,12 @@ export async function authorizeJobToken(
       : undefined;
 
     const response: Pick<
-      JobAuthTokenSuccess,
-      'success' | 'userType' | 'cloudJobId' | 'userId' | 'name' | 'primaryEmail'
+      RunAuthTokenSuccess,
+      'success' | 'userType' | 'runId' | 'userId' | 'name' | 'primaryEmail'
     > = {
       success: true,
-      userType: 'job',
-      cloudJobId: tokenContext.cloudJobId,
+      userType: 'run',
+      runId: tokenContext.runId,
       userId: tokenContext.userId,
       name: user?.name ?? 'Unknown',
       primaryEmail: user?.email ?? '',
@@ -113,7 +113,7 @@ export async function authorizeJobToken(
 
     return {
       ...response,
-      isAdmin: false, // Job tokens are never admin.
+      isAdmin: false, // Run tokens are never admin.
     };
   } catch {
     return authorize();

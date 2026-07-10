@@ -432,7 +432,7 @@ async function launchTaskSuggestionTaskFromReaction({
   });
 
   let seededThreadTs: string | undefined;
-  let cloudJob: Awaited<ReturnType<typeof startSlackAppMentionTask>> | null =
+  let taskRun: Awaited<ReturnType<typeof startSlackAppMentionTask>> | null =
     null;
   try {
     seededThreadTs = await slack.postMessage({
@@ -456,7 +456,7 @@ async function launchTaskSuggestionTaskFromReaction({
 
     // The reacting human is the initiator; the old fallback to the
     // suggestion creator's identity is gone.
-    cloudJob = await startSlackAppMentionTask({
+    taskRun = await startSlackAppMentionTask({
       initiator: {
         kind: 'user',
         externalId: reactionEvent.user,
@@ -490,7 +490,7 @@ async function launchTaskSuggestionTaskFromReaction({
     const launched = await markWorkItemLaunched({
       workItemId,
       trackedMessageId: suggestionCard.id,
-      taskId: cloudJob.taskId,
+      taskId: taskRun.taskId,
       claimedAt,
       launchedThreadTs: seededThreadTs,
     });
@@ -501,12 +501,12 @@ async function launchTaskSuggestionTaskFromReaction({
       // run is orphaned from the work item. Best-effort cancel it while it is
       // still pre-sandbox; log loudly either way with the cancel outcome.
       const cancelNote =
-        cloudJob.id !== null
-          ? await cancelOrphanedWorkItemRunBestEffort(cloudJob.id)
+        taskRun.id !== null
+          ? await cancelOrphanedWorkItemRunBestEffort(taskRun.id)
           : 'no run id to cancel (reused an existing job)';
 
       apiLogger.warn(
-        `${logPrefix} finalize lost the fencing guard for work item ${workItemId}; task ${cloudJob.taskId ?? 'null'} (run ${cloudJob.id ?? 'null'}) was orphaned — ${cancelNote}`,
+        `${logPrefix} finalize lost the fencing guard for work item ${workItemId}; task ${taskRun.taskId ?? 'null'} (run ${taskRun.id ?? 'null'}) was orphaned — ${cancelNote}`,
       );
 
       // Mirror the claim-lose path: this duplicate must leave no user-visible
@@ -524,17 +524,17 @@ async function launchTaskSuggestionTaskFromReaction({
       channelId,
       threadTs: seededThreadTs,
       workspaceName: suggestionWorkspace.workspaceDisplayName,
-      cloudJobId: cloudJob.id,
+      runId: taskRun.id,
       initiatingSlackUserId: reactionEvent.user,
-      taskId: cloudJob.taskId,
+      taskId: taskRun.taskId,
     });
 
     apiLogger.debug(
-      `${logPrefix} completed reaction launch lifecycle taskId=${cloudJob.taskId ?? 'null'} launchedThreadTs=${seededThreadTs}`,
+      `${logPrefix} completed reaction launch lifecycle taskId=${taskRun.taskId ?? 'null'} launchedThreadTs=${seededThreadTs}`,
     );
     return true;
   } catch (error) {
-    if (!cloudJob) {
+    if (!taskRun) {
       if (seededThreadTs) {
         await slack
           .deleteMessage({ channel: channelId, ts: seededThreadTs })
@@ -543,7 +543,7 @@ async function launchTaskSuggestionTaskFromReaction({
 
       await releaseWorkItemClaim(db, { id: workItemId, claimedAt });
       apiLogger.debug(
-        `${logPrefix} reaction launch failed before cloud job start; claim released`,
+        `${logPrefix} reaction launch failed before task run start; claim released`,
       );
       throw error;
     }
@@ -552,7 +552,7 @@ async function launchTaskSuggestionTaskFromReaction({
       const recovered = await markWorkItemLaunched({
         workItemId,
         trackedMessageId: suggestionCard.id,
-        taskId: cloudJob.taskId,
+        taskId: taskRun.taskId,
         claimedAt,
         launchedThreadTs: seededThreadTs,
       });
@@ -562,12 +562,12 @@ async function launchTaskSuggestionTaskFromReaction({
         // fencing guard rejected the finalize (claim reclaimed). Best-effort
         // cancel the orphaned run; log loudly either way with the outcome.
         const cancelNote =
-          cloudJob.id !== null
-            ? await cancelOrphanedWorkItemRunBestEffort(cloudJob.id)
+          taskRun.id !== null
+            ? await cancelOrphanedWorkItemRunBestEffort(taskRun.id)
             : 'no run id to cancel (reused an existing job)';
 
         apiLogger.warn(
-          `${logPrefix} finalize lost the fencing guard during post-enqueue recovery for work item ${workItemId}; task ${cloudJob.taskId ?? 'null'} (run ${cloudJob.id ?? 'null'}) was orphaned — ${cancelNote}`,
+          `${logPrefix} finalize lost the fencing guard during post-enqueue recovery for work item ${workItemId}; task ${taskRun.taskId ?? 'null'} (run ${taskRun.id ?? 'null'}) was orphaned — ${cancelNote}`,
         );
 
         // Mirror the claim-lose path: never post the started message for the
@@ -584,7 +584,7 @@ async function launchTaskSuggestionTaskFromReaction({
       }
 
       apiLogger.debug(
-        `${logPrefix} reaction launch recovered after post-enqueue failure taskId=${cloudJob.taskId} launchedThreadTs=${seededThreadTs ?? 'unknown'}`,
+        `${logPrefix} reaction launch recovered after post-enqueue failure taskId=${taskRun.taskId} launchedThreadTs=${seededThreadTs ?? 'unknown'}`,
       );
 
       if (seededThreadTs) {
@@ -593,9 +593,9 @@ async function launchTaskSuggestionTaskFromReaction({
           channelId,
           threadTs: seededThreadTs,
           workspaceName: suggestionWorkspace.workspaceDisplayName,
-          cloudJobId: cloudJob.id,
+          runId: taskRun.id,
           initiatingSlackUserId: reactionEvent.user,
-          taskId: cloudJob.taskId,
+          taskId: taskRun.taskId,
         });
       } else {
         console.warn(
@@ -604,7 +604,7 @@ async function launchTaskSuggestionTaskFromReaction({
       }
 
       apiLogger.debug(
-        `${logPrefix} completed reaction launch lifecycle taskId=${cloudJob.taskId ?? 'null'} launchedThreadTs=${seededThreadTs ?? 'unknown'}`,
+        `${logPrefix} completed reaction launch lifecycle taskId=${taskRun.taskId ?? 'null'} launchedThreadTs=${seededThreadTs ?? 'unknown'}`,
       );
 
       return true;

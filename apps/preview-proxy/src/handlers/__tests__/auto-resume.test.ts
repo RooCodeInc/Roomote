@@ -1,7 +1,7 @@
 import { TaskPayloadKind } from '@roomote/types';
 
 import {
-  createMockCloudJob,
+  createMockTaskRun,
   createMockResolvedRequest,
 } from '../../__tests__/fixtures';
 
@@ -47,8 +47,8 @@ describe('triggerAutoResume', () => {
     const resolution = createMockResolvedRequest({
       status: 'resumable',
       snapshotId: 'snap-preview-1',
-      cloudJob: {
-        ...createMockCloudJob({
+      taskRun: {
+        ...createMockTaskRun({
           id: 42,
           actingUserId: 'source-user',
           payload: {
@@ -74,13 +74,13 @@ describe('triggerAutoResume', () => {
         task: expect.objectContaining({
           type: TaskPayloadKind.SnapshotResume,
           sourceSnapshotId: 'snap-preview-1',
-          sourceCloudJobId: 42,
+          sourceRunId: 42,
           payload: expect.objectContaining({
             repo: 'owner/repo',
             environmentId: 'env-1',
             port: 3000,
             sourceSnapshotId: 'snap-preview-1',
-            sourceCloudJobId: 42,
+            sourceRunId: 42,
             channel: 'C123',
             slackChannel: 'C123',
             thread_ts: 'thread-ts-1',
@@ -94,8 +94,8 @@ describe('triggerAutoResume', () => {
     const resolution = createMockResolvedRequest({
       status: 'resumable',
       snapshotId: 'snap-preview-2',
-      cloudJob: {
-        ...createMockCloudJob({
+      taskRun: {
+        ...createMockTaskRun({
           id: 43,
           actingUserId: null,
           payload: {

@@ -1,7 +1,7 @@
 import { RunStatus } from '@roomote/types';
 
 const {
-  mockCloudJobsUpdate,
+  mockTaskRunsUpdate,
   mockFetchSnapshotEnv,
   mockFindEnvironment,
   mockDone,
@@ -14,7 +14,7 @@ const {
   mockSetWorkerRuntimeContext,
   mockClearWorkerRuntimeContext,
 } = vi.hoisted(() => ({
-  mockCloudJobsUpdate: vi.fn(),
+  mockTaskRunsUpdate: vi.fn(),
   mockFetchSnapshotEnv: vi.fn(),
   mockFindEnvironment: vi.fn(),
   mockDone: vi.fn(),
@@ -30,8 +30,8 @@ const {
 
 vi.mock('@roomote/sdk/client', () => ({
   sdk: {
-    cloudJobs: {
-      update: mockCloudJobsUpdate,
+    taskRuns: {
+      update: mockTaskRunsUpdate,
       fetchSnapshotEnv: mockFetchSnapshotEnv,
       done: mockDone,
     },
@@ -105,7 +105,7 @@ describe('snapshot', () => {
 
   it('treats the failure cleanup status write as a best-effort no-op when it succeeds idempotently', async () => {
     const result = await snapshot({
-      cloudJobId: 42,
+      runId: 42,
       environmentId: 'env-1',
       sandboxId: 'sb-1',
     });
@@ -127,13 +127,13 @@ describe('snapshot', () => {
     expect(injectCallOrder).toBeDefined();
     expect(findEnvironmentCallOrder).toBeDefined();
     expect(mockSetWorkerRuntimeContext).toHaveBeenNthCalledWith(1, {
-      cloudJobId: 42,
-      cloudJobType: 'snapshot_environment',
+      runId: 42,
+      taskRunType: 'snapshot_environment',
       environmentId: 'env-1',
     });
     expect(mockSetWorkerRuntimeContext).toHaveBeenNthCalledWith(2, {
-      cloudJobId: 42,
-      cloudJobType: 'snapshot_environment',
+      runId: 42,
+      taskRunType: 'snapshot_environment',
       environmentId: 'env-1',
       taskId: 'task-42',
     });
@@ -141,7 +141,7 @@ describe('snapshot', () => {
     expect(mockCaptureWorkerException).toHaveBeenCalledWith(
       expect.objectContaining({ message: 'setup failed' }),
       {
-        cloudJobId: 42,
+        runId: 42,
         environmentId: 'env-1',
         stage: 'snapshot',
       },

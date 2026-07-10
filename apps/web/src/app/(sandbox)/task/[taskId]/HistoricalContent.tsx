@@ -8,16 +8,16 @@ import { Message, MessageContent, Shimmer } from '@/components/ai-elements';
 import { FramedSurface } from '@/components/layout';
 
 import {
-  type CloudSession,
+  type TaskSession,
   ArtifactLinkProvider,
   PreviewPaneProvider,
   TaskSidePanelProvider,
   useClosePreviewOnSleep,
 } from './hooks';
-import { getCloudJobDisplayError } from '@/lib/cloud-job-errors';
+import { getTaskRunDisplayError } from '@/lib/task-run-errors';
 
 import { SidebarActions } from './sidebar-actions';
-import { isCloudJobAsleep } from './sidebar-actions/utils';
+import { isTaskRunAsleep } from './sidebar-actions/utils';
 import { DraftPromptBanner } from './DraftPromptBanner';
 import { Header } from './Header';
 import { Messages } from './Messages';
@@ -26,32 +26,32 @@ import { PreviewPaneLayout } from './PreviewPaneLayout';
 import { WakeTaskInput } from './WakeTaskInput';
 
 interface HistoricalContentProps {
-  session: CloudSession;
+  session: TaskSession;
   footer?: ReactNode;
 }
 
 export function HistoricalContent({ session, footer }: HistoricalContentProps) {
   const isResuming = session.sessionState === 'resuming';
   const draftPrompt = session.draftPrompt;
-  const isAsleep = isCloudJobAsleep(session.cloudJob);
-  const cloudJob = session.cloudJob;
-  const shouldShowWakeTaskInput = isAsleep && Boolean(cloudJob?.snapshotId);
+  const isAsleep = isTaskRunAsleep(session.taskRun);
+  const taskRun = session.taskRun;
+  const shouldShowWakeTaskInput = isAsleep && Boolean(taskRun?.snapshotId);
   const [messagesInitialScrollBehavior, setMessagesInitialScrollBehavior] =
     useState<'smooth' | 'instant'>('smooth');
   const taskFailureFooter = useMemo(() => {
-    const displayError = getCloudJobDisplayError(cloudJob);
+    const displayError = getTaskRunDisplayError(taskRun);
 
     if (
-      !cloudJob ||
+      !taskRun ||
       !displayError ||
-      (cloudJob.status !== RunStatus.Failed &&
-        cloudJob.status !== RunStatus.Canceled)
+      (taskRun.status !== RunStatus.Failed &&
+        taskRun.status !== RunStatus.Canceled)
     ) {
       return null;
     }
 
     return <TaskFailureMessage error={displayError} />;
-  }, [cloudJob]);
+  }, [taskRun]);
   const messagesFooter = useMemo(
     () => (
       <>
@@ -78,7 +78,7 @@ export function HistoricalContent({ session, footer }: HistoricalContentProps) {
             <PreviewPaneLayout session={session}>
               <ArtifactLinkProvider session={session}>
                 <PreviewCommand
-                  cloudJob={session.cloudJob ?? null}
+                  taskRun={session.taskRun ?? null}
                   asleep={isAsleep}
                 />
                 <div className="flex h-full min-h-0 min-w-0 flex-1 flex-col rounded-r-3xl bg-background">
@@ -88,9 +88,9 @@ export function HistoricalContent({ session, footer }: HistoricalContentProps) {
                     initialScrollBehavior={messagesInitialScrollBehavior}
                     footer={messagesFooter}
                   />
-                  {shouldShowWakeTaskInput && cloudJob ? (
+                  {shouldShowWakeTaskInput && taskRun ? (
                     <WakeTaskInput
-                      cloudJob={cloudJob}
+                      taskRun={taskRun}
                       initialPrompt={draftPrompt ?? ''}
                     />
                   ) : (

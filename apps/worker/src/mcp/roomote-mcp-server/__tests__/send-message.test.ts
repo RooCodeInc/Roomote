@@ -46,10 +46,10 @@ describe('handleSendMessage', () => {
     expect(tasksApiClient.sendMessageToTask).not.toHaveBeenCalled();
   });
 
-  it('surfaces snapshot resumes with the new cloud job id', async () => {
+  it('surfaces snapshot resumes with the new task run id', async () => {
     vi.mocked(tasksApiClient.steerMessageToTask).mockResolvedValueOnce({
       success: true,
-      result: { resumed: true, cloudJobId: 77, taskId: 'task-1' },
+      result: { resumed: true, runId: 77, taskId: 'task-1' },
     });
 
     const result = await handleSendMessage(
@@ -63,7 +63,7 @@ describe('handleSendMessage', () => {
       success: true,
       message: 'Task task-1 is resuming from snapshot.',
       resumed: true,
-      cloudJobId: 77,
+      runId: 77,
       taskId: 'task-1',
     });
     expect(tasksApiClient.steerMessageToTask).toHaveBeenCalledWith(

@@ -8,7 +8,7 @@ import { searchTasks } from '../searchTasks';
 
 const {
   mockDbSelect,
-  mockGetLatestCloudJobsByTaskIds,
+  mockGetLatestTaskRunsByTaskIds,
   mockLogHandlerError,
   visibleTaskHistoryCondition,
   mockSql,
@@ -18,7 +18,7 @@ const {
   andMock,
 } = vi.hoisted(() => ({
   mockDbSelect: vi.fn(),
-  mockGetLatestCloudJobsByTaskIds: vi.fn(),
+  mockGetLatestTaskRunsByTaskIds: vi.fn(),
   mockLogHandlerError: vi.fn(),
   visibleTaskHistoryCondition: { type: 'visibleTaskHistoryCondition' },
   mockSql: vi.fn((strings: TemplateStringsArray, ...values: unknown[]) => ({
@@ -34,7 +34,7 @@ const {
 
 vi.mock('../helpers', () => ({
   TASK_SELECT_COLUMNS: { id: 'tasks.id', title: 'tasks.title' },
-  getLatestCloudJobsByTaskIds: mockGetLatestCloudJobsByTaskIds,
+  getLatestTaskRunsByTaskIds: mockGetLatestTaskRunsByTaskIds,
   visibleTaskHistoryCondition,
   logHandlerError: mockLogHandlerError,
 }));
@@ -114,7 +114,7 @@ describe('searchTasks', () => {
         where: selectWhereMock,
       })),
     });
-    mockGetLatestCloudJobsByTaskIds.mockResolvedValue({});
+    mockGetLatestTaskRunsByTaskIds.mockResolvedValue({});
   });
 
   it('matches query text against task titles and launch prompts', async () => {
@@ -200,8 +200,8 @@ describe('searchTasks', () => {
     });
   });
 
-  it('includes the latest cloud job error in each task row', async () => {
-    mockGetLatestCloudJobsByTaskIds.mockResolvedValueOnce({
+  it('includes the latest task run error in each task row', async () => {
+    mockGetLatestTaskRunsByTaskIds.mockResolvedValueOnce({
       'task-1': {
         id: 7,
         taskId: 'task-1',
@@ -221,8 +221,8 @@ describe('searchTasks', () => {
       tasks: [
         {
           id: 'task-1',
-          cloudJobStatus: 'failed',
-          cloudJobError: 'Sandbox startup timed out',
+          taskRunStatus: 'failed',
+          taskRunError: 'Sandbox startup timed out',
         },
       ],
     });

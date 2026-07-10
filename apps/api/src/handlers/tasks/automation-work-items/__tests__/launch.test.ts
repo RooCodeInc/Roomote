@@ -1,4 +1,4 @@
-import { CloudJobQueueEnqueueError } from '@roomote/cloud-agents/server';
+import { TaskRunQueueEnqueueError } from '@roomote/cloud-agents/server';
 
 import { launchActWorkItems } from '../launch.js';
 import { postLateBoundWorkItemFailureMessage } from '../slack.js';
@@ -6,26 +6,26 @@ import { postLateBoundWorkItemFailureToTelegram } from '../telegram.js';
 import type { PersistedAutomationWorkItem } from '../types.js';
 
 const {
-  MockCloudJobQueueEnqueueError,
+  MockTaskRunQueueEnqueueError,
   mockClaimedAt,
   mockDbUpdate,
   mockEnqueueTask,
   mockUpdateBackgroundAutomationSlackThreadMetadata,
 } = vi.hoisted(() => ({
   mockClaimedAt: new Date('2026-07-01T12:00:00.000Z'),
-  MockCloudJobQueueEnqueueError: class extends Error {
-    cloudJobId: number;
+  MockTaskRunQueueEnqueueError: class extends Error {
+    runId: number;
     taskId: string;
     originalError: unknown;
 
     constructor(input: {
-      cloudJobId: number;
+      runId: number;
       taskId: string;
       originalError: unknown;
     }) {
-      super('Failed to enqueue cloud job.');
-      this.name = 'CloudJobQueueEnqueueError';
-      this.cloudJobId = input.cloudJobId;
+      super('Failed to enqueue task run.');
+      this.name = 'TaskRunQueueEnqueueError';
+      this.runId = input.runId;
       this.taskId = input.taskId;
       this.originalError = input.originalError;
     }
@@ -36,7 +36,7 @@ const {
 }));
 
 vi.mock('@roomote/cloud-agents/server', () => ({
-  CloudJobQueueEnqueueError: MockCloudJobQueueEnqueueError,
+  TaskRunQueueEnqueueError: MockTaskRunQueueEnqueueError,
   enqueueTask: mockEnqueueTask,
 }));
 
@@ -274,7 +274,7 @@ describe('launchActWorkItems', () => {
     ]);
   });
 
-  it('marks launches started before cloud job enqueue', async () => {
+  it('marks launches started before task run enqueue', async () => {
     const updateSets = setupDbUpdateMock();
     mockSuccessfulTaskEnqueue('task-direct-1');
 
@@ -712,7 +712,7 @@ describe('launchActWorkItems', () => {
     expect(postLateBoundWorkItemFailureMessage).not.toHaveBeenCalled();
   });
 
-  it('marks the work item failed when tracking persistence fails before cloud job enqueue', async () => {
+  it('marks the work item failed when tracking persistence fails before task run enqueue', async () => {
     const updateSets = setupDbUpdateMock({ throwOnWhereCall: 2 });
     mockSuccessfulTaskEnqueue();
 
@@ -739,8 +739,8 @@ describe('launchActWorkItems', () => {
         taskId: 'task-direct-1',
       });
 
-      throw new CloudJobQueueEnqueueError({
-        cloudJobId: 123,
+      throw new TaskRunQueueEnqueueError({
+        runId: 123,
         taskId: 'task-direct-1',
         originalError: new Error('redis unavailable'),
       });
@@ -804,8 +804,8 @@ describe('launchActWorkItems', () => {
         taskId: 'task-direct-1',
       });
 
-      throw new CloudJobQueueEnqueueError({
-        cloudJobId: 123,
+      throw new TaskRunQueueEnqueueError({
+        runId: 123,
         taskId: 'task-direct-1',
         originalError: new Error('redis unavailable'),
       });

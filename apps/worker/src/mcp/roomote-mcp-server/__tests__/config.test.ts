@@ -20,13 +20,13 @@ describe('roomote mcp config helpers', () => {
   });
 
   it('uses the platform API URL for artifact operations', () => {
-    process.env.ROOMOTE_CLOUD_TOKEN = 'job-token';
+    process.env.ROOMOTE_CLOUD_TOKEN = 'run-token';
     process.env.ROOMOTE_PLATFORM_API_URL = 'https://platform.example.com';
     process.env.ROOMOTE_APP_URL = 'https://app.example.com';
     process.env.ROOMOTE_WORKSPACE_PATH = '/workspace';
 
     expect(getArtifactConfig()).toEqual({
-      token: 'job-token',
+      token: 'run-token',
       platformApiUrl: 'https://platform.example.com',
       workspacePath: '/workspace',
       authBypassHeaderName: undefined,
@@ -35,11 +35,11 @@ describe('roomote mcp config helpers', () => {
   });
 
   it('uses the configured platform API URL for roomote requests', () => {
-    process.env.ROOMOTE_CLOUD_TOKEN = 'job-token';
+    process.env.ROOMOTE_CLOUD_TOKEN = 'run-token';
     process.env.TRPC_URL = 'https://trpc.example.com';
 
     expect(getRoomoteConfig()).toEqual({
-      token: 'job-token',
+      token: 'run-token',
       platformApiUrl: 'https://trpc.example.com',
       authBypassHeaderName: undefined,
       authBypassHeaderValue: undefined,
@@ -47,12 +47,12 @@ describe('roomote mcp config helpers', () => {
   });
 
   it('preserves pathful platform API URLs while removing trailing slashes', () => {
-    process.env.ROOMOTE_CLOUD_TOKEN = 'job-token';
+    process.env.ROOMOTE_CLOUD_TOKEN = 'run-token';
     process.env.ROOMOTE_PLATFORM_API_URL =
       'https://app.example.com/_roomote-api/';
 
     expect(getRoomoteConfig()).toEqual({
-      token: 'job-token',
+      token: 'run-token',
       platformApiUrl: 'https://app.example.com/_roomote-api',
       authBypassHeaderName: undefined,
       authBypassHeaderValue: undefined,
@@ -60,10 +60,10 @@ describe('roomote mcp config helpers', () => {
   });
 
   it('falls back to the default platform API origin when no override is set', () => {
-    process.env.ROOMOTE_CLOUD_TOKEN = 'job-token';
+    process.env.ROOMOTE_CLOUD_TOKEN = 'run-token';
 
     expect(getRoomoteConfig()).toEqual({
-      token: 'job-token',
+      token: 'run-token',
       platformApiUrl: 'http://localhost:13001',
       authBypassHeaderName: undefined,
       authBypassHeaderValue: undefined,
@@ -71,12 +71,12 @@ describe('roomote mcp config helpers', () => {
   });
 
   it('falls back to AUTH_TOKEN when ROOMOTE_CLOUD_TOKEN is unavailable', () => {
-    process.env.AUTH_TOKEN = 'worker-job-token';
+    process.env.AUTH_TOKEN = 'worker-run-token';
     process.env.TRPC_URL = 'https://trpc.example.com';
     process.env.ROOMOTE_WORKSPACE_PATH = '/workspace';
 
     expect(getArtifactConfig()).toEqual({
-      token: 'worker-job-token',
+      token: 'worker-run-token',
       platformApiUrl: 'https://trpc.example.com',
       workspacePath: '/workspace',
       authBypassHeaderName: undefined,
@@ -84,7 +84,7 @@ describe('roomote mcp config helpers', () => {
     });
 
     expect(getRoomoteConfig()).toEqual({
-      token: 'worker-job-token',
+      token: 'worker-run-token',
       platformApiUrl: 'https://trpc.example.com',
       authBypassHeaderName: undefined,
       authBypassHeaderValue: undefined,

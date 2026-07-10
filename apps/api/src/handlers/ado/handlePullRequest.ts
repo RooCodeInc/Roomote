@@ -2,10 +2,9 @@ import pMap from 'p-map';
 
 import {
   type TaskPayload,
-  DEFAULT_PR_REVIEWER_SETTINGS,
-  type PrReviewerSettings,
+  DEFAULT_PR_REVIEW_SETTINGS,
+  type PrReviewSettings,
   TaskPayloadKind,
-  CloudAgentType,
   RunStatus,
 } from '@roomote/types';
 import {
@@ -268,7 +267,7 @@ export async function handleAdoPullRequest(
   const headSha = getAdoPullRequestHeadSha(pullRequest);
 
   const result = await getAdoAutomationTargets({
-    type: CloudAgentType.PrReviewer,
+    workflow: 'pr_review',
     payload: { ...payload, repositoryFullName: repoFullName },
   });
 
@@ -277,11 +276,11 @@ export async function handleAdoPullRequest(
   }
 
   const targets = result.targets.filter((target) => {
-    const settings = target.settings as PrReviewerSettings | null;
+    const settings = target.settings as PrReviewSettings | null;
     const reviewOnCommit =
-      settings?.reviewOnCommit ?? DEFAULT_PR_REVIEWER_SETTINGS.reviewOnCommit;
+      settings?.reviewOnCommit ?? DEFAULT_PR_REVIEW_SETTINGS.reviewOnCommit;
     const reviewDraftPrs =
-      settings?.reviewDraftPrs ?? DEFAULT_PR_REVIEWER_SETTINGS.reviewDraftPrs;
+      settings?.reviewDraftPrs ?? DEFAULT_PR_REVIEW_SETTINGS.reviewDraftPrs;
 
     if (!reviewOnCommit) {
       return false;

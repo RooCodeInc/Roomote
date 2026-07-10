@@ -1,4 +1,4 @@
-import { findEnvironmentForRepo } from './cloud-job-queue';
+import { findEnvironmentForRepo } from './task-run-queue';
 
 export type RepositoryCoverage = {
   repositoryFullName: string;

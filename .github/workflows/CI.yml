@@ -19,7 +19,7 @@ jobs:
       docs_only: ${{ steps.changed-paths.outputs.docs_only }}
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
         with:
           fetch-depth: 0
       - name: Classify changed paths
@@ -76,7 +76,7 @@ jobs:
     runs-on: blacksmith-4vcpu-ubuntu-2404
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
       - name: Setup environment
         uses: ./.github/actions/setup-environment
         with:
@@ -95,7 +95,7 @@ jobs:
     runs-on: blacksmith-4vcpu-ubuntu-2404
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
       - name: Setup environment
         uses: ./.github/actions/setup-environment
         with:
@@ -112,7 +112,7 @@ jobs:
     runs-on: blacksmith-4vcpu-ubuntu-2404
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
       - name: Setup environment
         uses: ./.github/actions/setup-environment
         with:
@@ -131,7 +131,7 @@ jobs:
     runs-on: blacksmith-4vcpu-ubuntu-2404
     services:
       postgres:
-        image: postgres:17.5
+        image: postgres:17.5@sha256:aadf2c0696f5ef357aa7a68da995137f0cf17bad0bf6e1f17de06ae5c769b302
         env:
           POSTGRES_USER: postgres
           POSTGRES_PASSWORD: password
@@ -144,7 +144,7 @@ jobs:
           --health-timeout 5s
           --health-retries 5
       redis:
-        image: redis:7
+        image: redis:7@sha256:b2b95679e3b46fb51864949ed25ea976fc3a6bcc00a40a1bc00d568cb2822e50
         ports:
           - 6379:6379
         options: >-
@@ -154,7 +154,7 @@ jobs:
           --health-retries 5
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
       - name: Setup environment
         uses: ./.github/actions/setup-environment
         with:
@@ -195,15 +195,58 @@ jobs:
         include:
           - app: app
             dockerfile: .docker/app/Dockerfile
+            target: runtime-app
+          - app: web
+            dockerfile: .docker/app/Dockerfile
+            target: runtime-web
+          - app: api
+            dockerfile: .docker/app/Dockerfile
+            target: runtime-api
+          - app: controller
+            dockerfile: .docker/app/Dockerfile
+            target: runtime-controller
+          - app: bullmq
+            dockerfile: .docker/app/Dockerfile
+            target: runtime-bullmq
+          - app: preview-proxy
+            dockerfile: .docker/app/Dockerfile
+            target: runtime-preview-proxy
+          - app: migrate
+            dockerfile: .docker/app/Dockerfile
+            target: runtime-migrate
+          - app: worker
+            dockerfile: apps/worker/Dockerfile
+            target: runtime
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - name: Validate production Compose security contract
+        if: matrix.app == 'app'
+        run: deploy/scripts/validate-compose-security.sh
       - name: Set up Docker builder
-        uses: useblacksmith/setup-docker-builder@v1
+        uses: useblacksmith/setup-docker-builder@47a5d0102cc44712a17a633c2599f755008cc40e # v1
       - name: Build ${{ matrix.app }} Dockerfile
-        uses: useblacksmith/build-push-action@v2
+        uses: useblacksmith/build-push-action@fb9e3e6a9299c78462bfadd0d93352c316adc9b8 # v2
         with:
           context: .
           file: ${{ matrix.dockerfile }}
+          target: ${{ matrix.target }}
           push: false
           build-args: APP_ENV=development
+
+  deployment-config:
+    name: Deployment artifacts
+    needs: changes
+    if: ${{ needs.changes.outputs.docs_only != 'true' }}
+    runs-on: blacksmith-4vcpu-ubuntu-2404
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - name: Setup environment
+        uses: ./.github/actions/setup-environment
+        with:
+          frozen-lockfile: 'true'
+          node-version: ${{ env.NODE_VERSION }}
+          pnpm-version: ${{ env.PNPM_VERSION }}
+      - name: Validate Compose, installers, and platform templates
+        run: pnpm deployment:validate

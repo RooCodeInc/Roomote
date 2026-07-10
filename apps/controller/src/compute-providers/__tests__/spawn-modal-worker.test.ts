@@ -1,4 +1,4 @@
-import type { Run } from '@roomote/db/server';
+import type { TaskRun } from '@roomote/db/server';
 import { TaskPayloadKind } from '@roomote/types';
 
 const mockCreateModalMachine = vi.fn();
@@ -14,21 +14,23 @@ const mockCreateComputeProviderMutationEventRecorder = vi.fn(
 const mockUpdateWhere = vi.fn().mockResolvedValue(undefined);
 const mockUpdateSet = vi.fn(() => ({ where: mockUpdateWhere }));
 const mockDbUpdate = vi.fn(() => ({ set: mockUpdateSet }));
-const mockUpdateCloudJobMachine = vi.fn();
-const mockGetNamedPortsForCloudJob = vi.fn();
-const mockShouldEnableAuthBypassForCloudJob = vi.fn(
+const mockUpdateTaskRunMachine = vi.fn();
+const mockGetNamedPortsForTaskRun = vi.fn();
+const mockShouldEnableAuthBypassForTaskRun = vi.fn(
   (..._args: unknown[]) => true,
 );
 const mockPrimeEnvironmentOidcForMachine = vi.fn();
 
-function mockCloudJob(overrides: Partial<Run> & Pick<Run, 'payloadKind'>): Run {
+function mockTaskRun(
+  overrides: Partial<TaskRun> & Pick<TaskRun, 'payloadKind'>,
+): TaskRun {
   return {
     id: 123,
     vendor: 'modal',
     sourceSnapshotId: null,
     payload: { repo: 'test/repo' },
     ...overrides,
-  } as unknown as Run;
+  } as unknown as TaskRun;
 }
 
 vi.mock('@roomote/db/server', async (importOriginal) => {
@@ -66,12 +68,12 @@ vi.mock('@roomote/compute-providers', async (importOriginal) => {
 });
 
 vi.mock('../../utils', () => ({
-  getNamedPortsForCloudJob: (...args: unknown[]) =>
-    mockGetNamedPortsForCloudJob(...args),
-  shouldEnableAuthBypassForCloudJob: (...args: unknown[]) =>
-    mockShouldEnableAuthBypassForCloudJob(...args),
-  updateCloudJobMachine: (...args: unknown[]) =>
-    mockUpdateCloudJobMachine(...args),
+  getNamedPortsForTaskRun: (...args: unknown[]) =>
+    mockGetNamedPortsForTaskRun(...args),
+  shouldEnableAuthBypassForTaskRun: (...args: unknown[]) =>
+    mockShouldEnableAuthBypassForTaskRun(...args),
+  updateTaskRunMachine: (...args: unknown[]) =>
+    mockUpdateTaskRunMachine(...args),
 }));
 
 vi.mock('../../sandbox-oidc', () => ({
@@ -84,7 +86,7 @@ const { spawnModalWorker } = await import('../spawn-modal-worker');
 describe('spawnModalWorker', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    mockShouldEnableAuthBypassForCloudJob.mockReturnValue(true);
+    mockShouldEnableAuthBypassForTaskRun.mockReturnValue(true);
     delete process.env.PREVIEW_PROXY_BASE_URL;
 
     mockCreateModalMachine.mockResolvedValue({
@@ -96,7 +98,7 @@ describe('spawnModalWorker', () => {
       exitCode: null,
       commandId: 'cmd_123',
     });
-    mockGetNamedPortsForCloudJob.mockResolvedValue({
+    mockGetNamedPortsForTaskRun.mockResolvedValue({
       namedPorts: [{ name: 'SANDBOX_SERVER', port: 7777 }],
       environmentSnapshotId: undefined,
       environmentConfig: undefined,
@@ -106,7 +108,7 @@ describe('spawnModalWorker', () => {
 
   it('forwards Modal regions into the compute client config', async () => {
     await spawnModalWorker(
-      mockCloudJob({
+      mockTaskRun({
         payloadKind: TaskPayloadKind.StandardTask,
         payload: { repo: 'test/repo', environmentId: 'env_123' },
       }),
@@ -132,7 +134,7 @@ describe('spawnModalWorker', () => {
   });
 
   it('primes environment OIDC before launching a fresh Modal worker when the environment defines OIDC targets', async () => {
-    mockGetNamedPortsForCloudJob.mockResolvedValue({
+    mockGetNamedPortsForTaskRun.mockResolvedValue({
       namedPorts: [{ name: 'SANDBOX_SERVER', port: 7777 }],
       environmentSnapshotId: undefined,
       environmentConfig: {
@@ -146,7 +148,7 @@ describe('spawnModalWorker', () => {
     });
 
     await spawnModalWorker(
-      mockCloudJob({
+      mockTaskRun({
         payloadKind: TaskPayloadKind.StandardTask,
         payload: { repo: 'test/repo', environmentId: 'env_123' },
       }),
@@ -172,7 +174,7 @@ describe('spawnModalWorker', () => {
       },
       computeProvider: 'modal',
       computeProviderId: 'modal-machine-123',
-      cloudJobId: 123,
+      runId: 123,
       context: 'Fresh Modal launch',
     });
   });
@@ -187,7 +189,7 @@ describe('spawnModalWorker', () => {
 
     await expect(
       spawnModalWorker(
-        mockCloudJob({
+        mockTaskRun({
           payloadKind: TaskPayloadKind.StandardTask,
           payload: { repo: 'test/repo', environmentId: 'env_1' },
         }),
@@ -236,7 +238,7 @@ describe('spawnModalWorker', () => {
   });
 
   it('does not resolve or persist a bypass when no exposed surface needs one', async () => {
-    mockShouldEnableAuthBypassForCloudJob.mockReturnValue(false);
+    mockShouldEnableAuthBypassForTaskRun.mockReturnValue(false);
 
     const {
       buildModalWorkerEnv,
@@ -247,7 +249,7 @@ describe('spawnModalWorker', () => {
     vi.mocked(resolveAuthBypassHeaderName).mockReturnValue('x-env-bypass');
 
     await spawnModalWorker(
-      mockCloudJob({
+      mockTaskRun({
         payloadKind: TaskPayloadKind.StandardTask,
         taskId: 'innertask12345',
         payload: { repo: 'test/repo', environmentId: 'env_1' },
@@ -269,7 +271,7 @@ describe('spawnModalWorker', () => {
       vi.mocked(buildModalWorkerEnv).mock.calls[0]?.[0]?.extraEnv;
     expect(extraEnv).not.toHaveProperty('ROOMOTE_AUTH_BYPASS_VALUE');
     expect(extraEnv).not.toHaveProperty('ROOMOTE_AUTH_BYPASS_HEADER_NAME');
-    expect(mockUpdateCloudJobMachine).toHaveBeenCalledWith(
+    expect(mockUpdateTaskRunMachine).toHaveBeenCalledWith(
       expect.objectContaining({
         authBypassValue: undefined,
         authBypassHeaderName: undefined,
@@ -277,9 +279,9 @@ describe('spawnModalWorker', () => {
     );
   });
 
-  it('uses task_snapshot launch mode for snapshot resume jobs', async () => {
+  it('uses task_snapshot launch mode for snapshot resume task runs', async () => {
     await spawnModalWorker(
-      mockCloudJob({
+      mockTaskRun({
         payloadKind: TaskPayloadKind.SnapshotResume,
         sourceSnapshotId: 'snap-task-123',
         payload: { repo: 'test/repo', environmentId: 'env_1' },
@@ -303,14 +305,14 @@ describe('spawnModalWorker', () => {
   });
 
   it('forces fresh launches for snapshot environment jobs even when an environment snapshot exists', async () => {
-    mockGetNamedPortsForCloudJob.mockResolvedValue({
+    mockGetNamedPortsForTaskRun.mockResolvedValue({
       namedPorts: [{ name: 'SANDBOX_SERVER', port: 7777 }],
       environmentSnapshotId: 'snap_env_123',
       environmentConfig: undefined,
     });
 
     await spawnModalWorker(
-      mockCloudJob({
+      mockTaskRun({
         payloadKind: TaskPayloadKind.SnapshotEnvironment,
         sourceSnapshotId: 'snap_job_ignored_123',
         payload: { repo: 'test/repo', environmentId: 'env_1' },
@@ -333,17 +335,17 @@ describe('spawnModalWorker', () => {
 
     const createMachineOptions = mockCreateModalMachine.mock.calls[0]?.[0];
     expect(createMachineOptions).not.toHaveProperty('sourceSnapshotId');
-    expect(mockUpdateCloudJobMachine).toHaveBeenCalledWith(
+    expect(mockUpdateTaskRunMachine).toHaveBeenCalledWith(
       expect.objectContaining({
         sourceSnapshotId: null,
       }),
     );
   });
 
-  it('fails fast when a snapshot resume job is missing sourceSnapshotId', async () => {
+  it('fails fast when a snapshot resume task run is missing sourceSnapshotId', async () => {
     await expect(
       spawnModalWorker(
-        mockCloudJob({
+        mockTaskRun({
           payloadKind: TaskPayloadKind.SnapshotResume,
           sourceSnapshotId: null,
           payload: { repo: 'test/repo', environmentId: 'env_1' },

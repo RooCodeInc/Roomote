@@ -581,7 +581,8 @@ roomoteMcpServer.registerTool(
     title: 'Manage Source Control',
     description:
       'Provider-neutral pull request/merge request operations for the current task. ' +
-      'Use action "create_or_update_pull_request" after committing and pushing a branch. ' +
+      'Use action "create_or_update_pull_request" after committing and pushing a branch; ' +
+      'when an open PR/MR already exists for sourceBranch, targetBranch may be omitted and defaults to its current base. ' +
       'Use action "get_pull_request" to read PR/MR details (state, branches, head/base SHAs) and ' +
       '"list_pull_request_comments" to read review threads (with resolution state) and issue comments. ' +
       'Use "reply_to_pull_request_comment" to answer a review thread, "create_pull_request_comment" for a top-level comment, ' +
@@ -651,7 +652,7 @@ roomoteMcpServer.registerTool(
         .string()
         .optional()
         .describe(
-          'Required for create_or_update_pull_request. The base branch the PR/MR should target.',
+          'The base branch the PR/MR should target. Required only when create_or_update_pull_request creates a new PR/MR; omit it when an open PR/MR already exists for sourceBranch to keep its current base.',
         ),
       title: z
         .string()

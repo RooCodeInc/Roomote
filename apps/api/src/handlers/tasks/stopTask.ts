@@ -3,8 +3,8 @@ import { isExitedRunStatus } from '@roomote/types';
 
 import type { Variables } from '../../types';
 import type { McpAuth } from '../mcp/middleware';
-import { findLatestCloudJob } from './helpers';
-import { stopTaskJob } from './task-stop';
+import { findLatestTaskRun } from './helpers';
+import { stopTaskRun } from './task-stop';
 import { logHandlerError } from '../utils';
 
 /**
@@ -25,7 +25,7 @@ export async function stopTask(
   }
 
   try {
-    const job = await findLatestCloudJob(taskId, {
+    const job = await findLatestTaskRun(taskId, {
       id: true,
       status: true,
       sandboxServerUrl: true,
@@ -47,8 +47,8 @@ export async function stopTask(
       );
     }
 
-    const result = await stopTaskJob({
-      job,
+    const result = await stopTaskRun({
+      run: job,
       authUserId: auth.userId,
       cancelledBy: { source: 'api' },
     });

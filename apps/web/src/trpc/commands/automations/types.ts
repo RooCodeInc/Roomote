@@ -5,7 +5,7 @@ import type {
   ConflictResolverFrequency,
   DependabotTriageFrequency,
   ManagerStatsFrequency,
-  PrReviewerSettings,
+  PrReviewSettings,
   ScheduleOnlyBackgroundAutomationFrequency,
   ScheduleOnlyBackgroundAutomationFrequencyField,
   ScheduleOnlyBackgroundAutomationId,
@@ -127,9 +127,9 @@ export interface UpdateBackgroundAgentSettingsInput extends ScheduleOnlyAutomati
     | 'announcer'
     | 'platformIssueAlerts';
   reviewerEnabled: boolean;
-  reviewerEnvironmentScope: NonNullable<PrReviewerSettings['environmentScope']>;
+  reviewerEnvironmentScope: NonNullable<PrReviewSettings['environmentScope']>;
   reviewerEnvironmentIds: string[];
-  reviewerAuthorReviewMode: NonNullable<PrReviewerSettings['authorReviewMode']>;
+  reviewerAuthorReviewMode: NonNullable<PrReviewSettings['authorReviewMode']>;
   reviewerCollaborators: string[];
   reviewerExcludedAuthors: string | null;
   reviewerReviewAllPullRequestAuthors: boolean;

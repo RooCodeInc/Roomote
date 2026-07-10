@@ -131,7 +131,7 @@ export interface CommunicationProviderAdapter {
 export interface CommunicationInboundProvider {
   readonly provider: CommunicationProvider;
   queueMessage(input: {
-    cloudJobId: number;
+    runId: number;
     message: QueuedCommunicationMessage;
   }): Promise<void>;
 }

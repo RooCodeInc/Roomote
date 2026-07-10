@@ -6,7 +6,7 @@ export * from './automation-label';
 export * from './background-agents';
 export * from './background-automation-registry';
 export * from './cloud-agents';
-export * from './cloud-jobs';
+export * from './task-runs';
 export * from './chatgpt-subscription';
 export * from './communication';
 export * from './identity-display-name';

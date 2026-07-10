@@ -1,7 +1,7 @@
 import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest';
 
 import { RunStatus, TaskPayloadKind } from '@roomote/types';
-import type { Run } from '@roomote/db/server';
+import type { TaskRun } from '@roomote/db/server';
 
 const {
   mockEnvironmentVariablesFindMany,
@@ -66,7 +66,7 @@ import {
   buildAdoRepositoryValues,
   clearAdoDeploymentUserCache,
   createAdoPullRequestComment,
-  createCloudJobAdoCredentials,
+  createTaskRunAdoCredentials,
   ensureAdoServiceHooksForRepositories,
   removeAdoServiceHooksForRepositories,
   getAdoDeploymentUser,
@@ -76,7 +76,7 @@ import {
   type AdoRepository,
 } from '../api';
 
-function makeCloudJob(payload: Run['payload']): Run {
+function makeTaskRun(payload: TaskRun['payload']): TaskRun {
   return {
     id: 123,
     status: RunStatus.Dequeued,
@@ -87,7 +87,7 @@ function makeCloudJob(payload: Run['payload']): Run {
     payload,
     result: null,
     artifacts: null,
-  } as Run;
+  } as TaskRun;
 }
 
 describe('Azure DevOps API helpers', () => {
@@ -484,8 +484,8 @@ describe('Azure DevOps API helpers', () => {
   });
 
   it('creates proxy-backed git credentials for selected Azure DevOps repositories', async () => {
-    const result = await createCloudJobAdoCredentials(
-      makeCloudJob({
+    const result = await createTaskRunAdoCredentials(
+      makeTaskRun({
         repo: 'acme/Platform/backend',
         description: 'Work on Azure DevOps',
         sourceControlProvider: 'ado',
@@ -518,8 +518,8 @@ describe('Azure DevOps API helpers', () => {
       },
     ]);
 
-    const result = await createCloudJobAdoCredentials(
-      makeCloudJob({
+    const result = await createTaskRunAdoCredentials(
+      makeTaskRun({
         repo: 'acme/Platform/backend',
         description: 'Work on Azure DevOps Server',
         sourceControlProvider: 'ado',

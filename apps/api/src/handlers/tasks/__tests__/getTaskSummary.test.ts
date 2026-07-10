@@ -9,7 +9,7 @@ const {
   andMock,
   eqMock,
   mockEnvironmentFindFirst,
-  mockGetLatestCloudJobsByTaskIds,
+  mockGetLatestTaskRunsByTaskIds,
   mockSelect,
   selectFromMock,
   selectLimitMock,
@@ -19,7 +19,7 @@ const {
   andMock: vi.fn((...args) => ({ type: 'and', args })),
   eqMock: vi.fn((...args) => ({ type: 'eq', args })),
   mockEnvironmentFindFirst: vi.fn(),
-  mockGetLatestCloudJobsByTaskIds: vi.fn(),
+  mockGetLatestTaskRunsByTaskIds: vi.fn(),
   mockSelect: vi.fn(),
   selectFromMock: vi.fn(),
   selectLimitMock: vi.fn(),
@@ -38,7 +38,7 @@ vi.mock('../helpers', () => ({
     activityAt: 'tasks.activityAt',
     repositoryName: 'tasks.repository_name',
   },
-  getLatestCloudJobsByTaskIds: mockGetLatestCloudJobsByTaskIds,
+  getLatestTaskRunsByTaskIds: mockGetLatestTaskRunsByTaskIds,
   visibleTaskHistoryCondition,
 }));
 
@@ -107,7 +107,7 @@ describe('getTaskSummary', () => {
     mockSelect.mockReturnValue({
       from: selectFromMock,
     });
-    mockGetLatestCloudJobsByTaskIds.mockResolvedValue({
+    mockGetLatestTaskRunsByTaskIds.mockResolvedValue({
       'task-1': {
         id: 101,
         taskId: 'task-1',
@@ -125,7 +125,7 @@ describe('getTaskSummary', () => {
     });
   });
 
-  it('returns the latest cloud job error in the summary payload', async () => {
+  it('returns the latest task run error in the summary payload', async () => {
     const response = await createApp(authContext).request(
       'http://localhost/tasks/task-1/summary',
     );
@@ -133,8 +133,8 @@ describe('getTaskSummary', () => {
     expect(response.status).toBe(200);
     await expect(response.json()).resolves.toMatchObject({
       id: 'task-1',
-      cloudJobStatus: 'failed',
-      cloudJobError: 'Sandbox startup timed out',
+      taskRunStatus: 'failed',
+      taskRunError: 'Sandbox startup timed out',
     });
   });
 
@@ -159,7 +159,7 @@ describe('getTaskSummary', () => {
     await expect(response.json()).resolves.toEqual({ error: 'Task not found' });
   });
 
-  it('includes the linked environment id and name from the latest cloud job payload', async () => {
+  it('includes the linked environment id and name from the latest task run payload', async () => {
     const response = await createApp(authContext).request(
       'http://localhost/tasks/task-1/summary',
     );
@@ -173,7 +173,7 @@ describe('getTaskSummary', () => {
   });
 
   it('returns null linked environment fields when the latest job has no linked environment', async () => {
-    mockGetLatestCloudJobsByTaskIds.mockResolvedValueOnce({
+    mockGetLatestTaskRunsByTaskIds.mockResolvedValueOnce({
       'task-1': {
         id: 101,
         taskId: 'task-1',

@@ -1,6 +1,6 @@
 import { TaskPayloadKind } from '@roomote/types';
 
-import type { CloudJobDetail } from '@/lib/server/cloud-jobs';
+import type { TaskRunDetail } from '@/lib/server/task-runs';
 
 import type { ArtifactGroup } from './types';
 
@@ -10,46 +10,46 @@ const TASK_TOOLS_HIDDEN_PAYLOAD_KINDS: ReadonlySet<string> = new Set<string>([
 ]);
 
 export function shouldShowTaskToolsActions(
-  cloudJobPayloadKind: string | null | undefined,
+  taskRunPayloadKind: string | null | undefined,
 ): boolean {
   return (
-    !!cloudJobPayloadKind &&
-    !TASK_TOOLS_HIDDEN_PAYLOAD_KINDS.has(cloudJobPayloadKind)
+    !!taskRunPayloadKind &&
+    !TASK_TOOLS_HIDDEN_PAYLOAD_KINDS.has(taskRunPayloadKind)
   );
 }
 
 /**
- * A cloud job is "asleep" when BullMQ has claimed its due sleep transition,
+ * A task run is "asleep" when BullMQ has claimed its due sleep transition,
  * when a manual snapshot is in progress, or when it already has a created
  * snapshot. In any of those states the container is unavailable, so
  * interactive features like Preview and Editor should be disabled.
  */
-export function isCloudJobAsleep(
-  cloudJob: CloudJobDetail | null | undefined,
+export function isTaskRunAsleep(
+  taskRun: TaskRunDetail | null | undefined,
 ): boolean {
-  if (!cloudJob) return false;
+  if (!taskRun) return false;
 
   const isGoingToSleep =
-    (!!cloudJob.sleepRequestedAt || !!cloudJob.snapshotRequestedAt) &&
-    !cloudJob.snapshotCreatedAt &&
-    !cloudJob.snapshotFailedAt;
+    (!!taskRun.sleepRequestedAt || !!taskRun.snapshotRequestedAt) &&
+    !taskRun.snapshotCreatedAt &&
+    !taskRun.snapshotFailedAt;
 
-  return isGoingToSleep || !!cloudJob.snapshotId;
+  return isGoingToSleep || !!taskRun.snapshotId;
 }
 
 /**
- * A snapshot is actively being taken for the cloud job. Unlike
- * `isCloudJobAsleep`, this excludes the `sleepRequestedAt`-only window so it
+ * A snapshot is actively being taken for the task run. Unlike
+ * `isTaskRunAsleep`, this excludes the `sleepRequestedAt`-only window so it
  * stays aligned with the transcript's "Going to sleep" row: non-resumable
  * teardowns set `sleepRequestedAt` without ever snapshotting.
  */
-export function isCloudJobSnapshotting(
-  cloudJob: CloudJobDetail | null | undefined,
+export function isTaskRunSnapshotting(
+  taskRun: TaskRunDetail | null | undefined,
 ): boolean {
   return (
-    !!cloudJob?.snapshotRequestedAt &&
-    !cloudJob.snapshotCreatedAt &&
-    !cloudJob.snapshotFailedAt
+    !!taskRun?.snapshotRequestedAt &&
+    !taskRun.snapshotCreatedAt &&
+    !taskRun.snapshotFailedAt
   );
 }
 

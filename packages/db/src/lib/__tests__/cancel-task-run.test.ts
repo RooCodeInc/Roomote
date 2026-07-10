@@ -13,7 +13,7 @@ import {
   taskFactory,
   cancelTaskRunDirect,
 } from '../../server';
-import type { CreateRun } from '../../types';
+import type { CreateTaskRun } from '../../types';
 
 const createdTaskIds: string[] = [];
 
@@ -37,7 +37,7 @@ async function insertRun(params: {
       payload: {
         repo: 'test/repo',
         description: 'cancel-task-run fixture run',
-      } as CreateRun['payload'],
+      } as CreateTaskRun['payload'],
       status: params.status,
       sandboxServerUrl: params.sandboxServerUrl ?? null,
     })

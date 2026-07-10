@@ -24,7 +24,7 @@ import {
   normalizeSetupNewState,
 } from '@roomote/types';
 
-import { getLatestCloudJobsByTaskId } from '@/lib/server';
+import { getLatestTaskRunsByTaskId } from '@/lib/server';
 import { resolveSingleSourceControlProvider } from '@/lib/server/source-control-provider';
 import type { UserAuthSuccess } from '@/types';
 import { assertAdmin } from '../setup/shared';
@@ -114,8 +114,8 @@ async function getSuggestionTaskStatus(taskId: string | null) {
     return null;
   }
 
-  const latestCloudJobs = await getLatestCloudJobsByTaskId([taskId]);
-  return latestCloudJobs[taskId]?.status ?? null;
+  const latestTaskRuns = await getLatestTaskRunsByTaskId([taskId]);
+  return latestTaskRuns[taskId]?.status ?? null;
 }
 
 async function launchSuggestedTasksTask(input: {

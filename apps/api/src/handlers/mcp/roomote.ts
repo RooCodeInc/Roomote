@@ -28,11 +28,11 @@ import { z } from 'zod';
 import type { Variables } from '../../types';
 
 import {
-  assertCloudJobTokenJobExists,
+  assertTaskRunTokenTargetExists,
   McpProxyError,
   resolveActingUserIdOrNull,
   type McpAuthContext,
-  isJobTokenContext,
+  isRunTokenContext,
   toMcpToolResult,
 } from './proxy-utils';
 import {
@@ -90,13 +90,13 @@ async function resolveRoomoteMcpAuth(
     );
   }
 
-  if (isJobTokenContext(authContext)) {
-    await assertCloudJobTokenJobExists(authContext);
+  if (isRunTokenContext(authContext)) {
+    await assertTaskRunTokenTargetExists(authContext);
 
     return {
       userId: authContext.userId,
-      tokenType: 'cj',
-      cloudJobId: authContext.cloudJobId,
+      tokenType: 'run',
+      runId: authContext.runId,
     };
   }
 
@@ -109,7 +109,7 @@ async function resolveRoomoteMcpAuth(
 
   throw new McpProxyError(
     403,
-    `${PRODUCT_NAME} MCP requires a user-scoped auth token or cloud job token`,
+    `${PRODUCT_NAME} MCP requires a user-scoped auth token or task run token`,
   );
 }
 
@@ -268,13 +268,13 @@ type SlackLookupRunContext = {
 };
 
 /**
- * Load the Slack routing context for a job-token request: the run's acting
+ * Load the Slack routing context for a run-token request: the run's acting
  * user and payload plus the owning task's Slack channel bindings (channel
  * bindings moved from runs to tasks in the Stage 2 data-model
  * simplification).
  */
 async function loadSlackLookupRunContext(
-  cloudJobId: number,
+  runId: number,
 ): Promise<SlackLookupRunContext> {
   const run = await db.query.taskRuns.findFirst({
     columns: {
@@ -282,11 +282,11 @@ async function loadSlackLookupRunContext(
       taskId: true,
       payload: true,
     },
-    where: eq(taskRuns.id, cloudJobId),
+    where: eq(taskRuns.id, runId),
   });
 
   if (!run) {
-    throw new McpProxyError(404, 'Cloud job not found for this MCP token');
+    throw new McpProxyError(404, 'Task run not found for this MCP token');
   }
 
   const bindings = await getTaskChannelBindings(run.taskId);
@@ -305,17 +305,17 @@ async function buildSlackThreadPayload(options: {
   channel?: string;
   messageTs: string;
 }) {
-  let cloudJob: SlackLookupRunContext | undefined;
+  let taskRun: SlackLookupRunContext | undefined;
 
-  if (options.auth.tokenType === 'cj') {
-    if (!options.auth.cloudJobId) {
+  if (options.auth.tokenType === 'run') {
+    if (!options.auth.runId) {
       throw new McpProxyError(
         403,
-        'MCP proxy requires a cloud job token with a cloud job id',
+        'MCP proxy requires a task run token with a task run id',
       );
     }
 
-    cloudJob = await loadSlackLookupRunContext(options.auth.cloudJobId);
+    taskRun = await loadSlackLookupRunContext(options.auth.runId);
   }
 
   return lookupSlackThread({
@@ -323,7 +323,7 @@ async function buildSlackThreadPayload(options: {
     ...(typeof options.channel === 'string' && options.channel.length > 0
       ? { channel: options.channel }
       : {}),
-    ...(cloudJob ? { cloudJob } : {}),
+    ...(taskRun ? { taskRun } : {}),
     ...(options.auth.tokenType === 'auth'
       ? { actingSlackMembershipUserId: options.actingUserId }
       : {}),
@@ -337,17 +337,17 @@ async function buildSlackChannelMessagesPayload(options: {
   oldest?: string;
   latest?: string;
 }) {
-  let cloudJob: SlackLookupRunContext | undefined;
+  let taskRun: SlackLookupRunContext | undefined;
 
-  if (options.auth.tokenType === 'cj') {
-    if (!options.auth.cloudJobId) {
+  if (options.auth.tokenType === 'run') {
+    if (!options.auth.runId) {
       throw new McpProxyError(
         403,
-        'MCP proxy requires a cloud job token with a cloud job id',
+        'MCP proxy requires a task run token with a task run id',
       );
     }
 
-    cloudJob = await loadSlackLookupRunContext(options.auth.cloudJobId);
+    taskRun = await loadSlackLookupRunContext(options.auth.runId);
   }
 
   return lookupSlackChannelMessages({
@@ -360,7 +360,7 @@ async function buildSlackChannelMessagesPayload(options: {
     ...(typeof options.latest === 'string' && options.latest.length > 0
       ? { latest: options.latest }
       : {}),
-    ...(cloudJob ? { cloudJob } : {}),
+    ...(taskRun ? { taskRun } : {}),
     ...(options.auth.tokenType === 'auth'
       ? { actingSlackMembershipUserId: options.actingUserId }
       : {}),

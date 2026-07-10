@@ -13,7 +13,7 @@ import {
 
 const TEST_USER_ID = 'user_test_out_of_band_messages';
 const TEST_TASK_ID = 'task_test_out_of_band_msgs';
-let testCloudJobId: number;
+let testRunId: number;
 
 async function cleanup() {
   await db
@@ -22,7 +22,7 @@ async function cleanup() {
     .catch(() => {});
   await db
     .delete(taskRuns)
-    .where(eq(taskRuns.id, testCloudJobId ?? -1))
+    .where(eq(taskRuns.id, testRunId ?? -1))
     .catch(() => {});
   await db
     .delete(tasks)
@@ -36,7 +36,7 @@ async function insertTaskMessage(input: {
   metadata?: Record<string, unknown>;
 }) {
   await db.insert(taskMessages).values({
-    runId: testCloudJobId,
+    runId: testRunId,
     taskId: TEST_TASK_ID,
     ts: input.ts,
     eventType: 'roomote_runtime.assistant_message',
@@ -51,17 +51,17 @@ async function insertTaskMessage(input: {
 describe('out-of-band task message claims', () => {
   beforeEach(async () => {
     await cleanup();
-    testCloudJobId = -1;
+    testRunId = -1;
     await userFactory.create({ id: TEST_USER_ID }).catch(() => {});
     await taskFactory.create({
       id: TEST_TASK_ID,
       initiatorUserId: TEST_USER_ID,
     });
-    const cloudJob = await runFactory.create({
+    const taskRun = await runFactory.create({
       actingUserId: TEST_USER_ID,
       taskId: TEST_TASK_ID,
     });
-    testCloudJobId = cloudJob.id;
+    testRunId = taskRun.id;
   });
 
   afterEach(async () => {

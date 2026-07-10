@@ -53,7 +53,7 @@ import {
   buildWorkerRuntimeStateDetails,
   buildWorkerTaskEventDetails,
   createWorkerRuntimeEventRecorder,
-} from './cloud-job-events';
+} from './task-run-events';
 import { TaskCancellationController } from './task-cancellation-controller';
 import {
   activateSkillsFolder,
@@ -124,15 +124,15 @@ function formatWorkspaceReadinessWarnings(
   ].join('\n');
 }
 
-function getInitialSlackTurnMessageTs(cloudJob: {
+function getInitialSlackTurnMessageTs(taskRun: {
   payloadKind: string;
   payload: unknown;
 }): string | null {
-  if (!cloudJob.payload || typeof cloudJob.payload !== 'object') {
+  if (!taskRun.payload || typeof taskRun.payload !== 'object') {
     return null;
   }
 
-  const payload = cloudJob.payload as {
+  const payload = taskRun.payload as {
     slackOriginMessageTs?: unknown;
     thread_ts?: unknown;
     ts?: unknown;
@@ -152,8 +152,8 @@ function getInitialSlackTurnMessageTs(cloudJob: {
   }
 
   if (
-    cloudJob.payloadKind !== TaskPayloadKind.SlackAppMention &&
-    cloudJob.payloadKind !== TaskPayloadKind.SnapshotResume
+    taskRun.payloadKind !== TaskPayloadKind.SlackAppMention &&
+    taskRun.payloadKind !== TaskPayloadKind.SnapshotResume
   ) {
     return null;
   }
@@ -182,25 +182,25 @@ function isCommunicationLaunchPayload(payload: unknown): boolean {
   return provider === 'telegram' || provider === 'teams';
 }
 
-function shouldAllowEmojiReactionOnInitialTurn(cloudJob: {
+function shouldAllowEmojiReactionOnInitialTurn(taskRun: {
   payloadKind: string;
   payload: unknown;
 }): boolean {
   // Chat-launched tasks must answer their first turn with a real reply, not
   // just an emoji reaction.
-  if (cloudJob.payloadKind === TaskPayloadKind.SlackAppMention) {
+  if (taskRun.payloadKind === TaskPayloadKind.SlackAppMention) {
     return false;
   }
 
-  return !isCommunicationLaunchPayload(cloudJob.payload);
+  return !isCommunicationLaunchPayload(taskRun.payload);
 }
 
-function hasAutomationWorkItemId(cloudJob: { payload: unknown }): boolean {
-  if (!cloudJob.payload || typeof cloudJob.payload !== 'object') {
+function hasAutomationWorkItemId(taskRun: { payload: unknown }): boolean {
+  if (!taskRun.payload || typeof taskRun.payload !== 'object') {
     return false;
   }
 
-  const payload = cloudJob.payload as {
+  const payload = taskRun.payload as {
     automationWorkItemId?: unknown;
   };
 
@@ -210,10 +210,10 @@ function hasAutomationWorkItemId(cloudJob: { payload: unknown }): boolean {
   );
 }
 
-function shouldRequireInitialAckOnInitialTurn(cloudJob: {
+function shouldRequireInitialAckOnInitialTurn(taskRun: {
   payload: unknown;
 }): boolean {
-  return !hasAutomationWorkItemId(cloudJob);
+  return !hasAutomationWorkItemId(taskRun);
 }
 
 function unwrapRequestTag(prompt: string): string | undefined {
@@ -331,13 +331,13 @@ function combineAgentInstructions({
  * `uncaughtException`/`unhandledRejection` listeners are registered at most
  * once per process (see {@link ensureWorkerCrashHandlersRegistered}) and read
  * this mutable slot at crash time, so per-run handler registration can never
- * leak listeners across `executeJob` retries: each `runTask` overwrites the
+ * leak listeners across `executeTaskRun` retries: each `runTask` overwrites the
  * context on entry and clears it on its controlled exits.
  */
 interface WorkerCrashContext {
-  cloudJobId: number;
+  runId: number;
   logger: { error: (message: string) => void };
-  /** Reads the latest cloud job result so unrelated fields are preserved. */
+  /** Reads the latest task run result so unrelated fields are preserved. */
   getResult: () => unknown;
 }
 
@@ -345,7 +345,7 @@ let activeWorkerCrashContext: WorkerCrashContext | null = null;
 let workerCrashHandlersRegistered = false;
 
 /**
- * Persist fatal process errors to the cloud job result before dying. The
+ * Persist fatal process errors to the task run result before dying. The
  * worker runs in a remote sandbox whose stdout is unreachable post-mortem;
  * an intermittent turn-end crash was only diagnosable through heartbeat
  * archaeology. Best-effort persist, then preserve crash semantics by
@@ -376,9 +376,9 @@ function handleWorkerCrash(kind: string, reason: unknown): void {
       ? (result as Record<string, unknown>)
       : {};
 
-  void sdk.cloudJobs
+  void sdk.taskRuns
     .update({
-      id: context.cloudJobId,
+      id: context.runId,
       result: {
         ...existingResult,
         workerCrash: {
@@ -397,7 +397,7 @@ function handleWorkerCrash(kind: string, reason: unknown): void {
  * Register the process-level crash listeners exactly once per process. The
  * listeners themselves are permanent; per-run state lives entirely in
  * {@link activeWorkerCrashContext}, so repeated `runTask` invocations (e.g.
- * `executeJob` retries) never accumulate listeners.
+ * `executeTaskRun` retries) never accumulate listeners.
  */
 function ensureWorkerCrashHandlersRegistered(): void {
   if (workerCrashHandlersRegistered) {
@@ -490,7 +490,7 @@ const SLACK_PROOF_AUTO_POST_FLAG = FeatureFlag.SlackProofAutoPost;
 const BACKGROUND_SUBAGENTS_FLAG = FeatureFlag.BackgroundSubagents;
 
 export const runTask = async ({
-  cloudJob,
+  taskRun,
   envVars,
   workspacePath,
   usesSharedWorkspaceRoot,
@@ -513,26 +513,26 @@ export const runTask = async ({
   skipExternalSleepAction = false,
   keepaliveMsOverride,
 }: RunTaskOptions) => {
-  await sdk.cloudJobs.update({
-    id: cloudJob.id,
+  await sdk.taskRuns.update({
+    id: taskRun.id,
     status: RunStatus.Spawning,
   });
 
   // Register the process-level crash listeners (at most once per process) and
   // point them at this run via the module-level context slot. The `finally` at
   // the end of `runTask` clears the context unconditionally, so the listeners
-  // can never attribute a later crash to a stale cloud job even if `runTask`
+  // can never attribute a later crash to a stale task run even if `runTask`
   // throws between here and a controlled exit — no per-run listeners are
-  // installed, so nothing leaks across `executeJob` retries.
+  // installed, so nothing leaks across `executeTaskRun` retries.
   ensureWorkerCrashHandlersRegistered();
   activeWorkerCrashContext = {
-    cloudJobId: cloudJob.id,
+    runId: taskRun.id,
     logger,
-    getResult: () => cloudJob.result,
+    getResult: () => taskRun.result,
   };
 
   try {
-    const harnessType = resolveWorkerCodingHarness(cloudJob.harness);
+    const harnessType = resolveWorkerCodingHarness(taskRun.harness);
 
     // Polling interval state — kept in the worker since it depends on SDK.
     const pollingState: RunTaskState = {
@@ -575,9 +575,9 @@ export const runTask = async ({
       ROOMOTE_PLATFORM_API_URL: workerEnv.trpcUrl,
       ROOMOTE_WORKSPACE_PATH: workspacePath,
       ROOMOTE_CLOUD_TOKEN: workerEnv.authToken,
-      ROOMOTE_TASK_ID: cloudJob.taskId,
-      AGENT_BROWSER_SESSION: cloudJob.taskId,
-      ROOMOTE_TASK_TYPE: cloudJob.payloadKind,
+      ROOMOTE_TASK_ID: taskRun.taskId,
+      AGENT_BROWSER_SESSION: taskRun.taskId,
+      ROOMOTE_TASK_TYPE: taskRun.payloadKind,
       ...(unsanitizedEnv.ROOMOTE_AUTH_BYPASS_VALUE && {
         ROOMOTE_AUTH_BYPASS_VALUE: unsanitizedEnv.ROOMOTE_AUTH_BYPASS_VALUE,
       }),
@@ -617,8 +617,8 @@ export const runTask = async ({
     });
     const hasInitialPrompt = initialPrompt.trim().length > 0;
     const images =
-      'images' in cloudJob.payload && cloudJob.payload.images
-        ? cloudJob.payload.images
+      'images' in taskRun.payload && taskRun.payload.images
+        ? taskRun.payload.images
         : undefined;
     const hasInitialImages = Boolean(images?.length);
 
@@ -693,8 +693,8 @@ export const runTask = async ({
       );
     }
 
-    const slackReplyContext = getSlackReplyContext(cloudJob);
-    const communicationReplyContext = getCommunicationReplyContext(cloudJob);
+    const slackReplyContext = getSlackReplyContext(taskRun);
+    const communicationReplyContext = getCommunicationReplyContext(taskRun);
     if (slackReplyContext?.threadTs) {
       // Slack proof auto-post resolves its thread destination from these env
       // vars when visual-proof artifacts are uploaded through the Roomote MCP
@@ -718,25 +718,25 @@ export const runTask = async ({
         },
       );
       const startedAtMs = Date.now();
-      const initialTurnMessageTs = getInitialSlackTurnMessageTs(cloudJob);
+      const initialTurnMessageTs = getInitialSlackTurnMessageTs(taskRun);
       writeFileSync(
         mcpTaskEnv.ROOMOTE_SLACK_REPLY_SATISFACTION_STATE_FILE,
         JSON.stringify({
           startedAtMs,
           currentTurnRequiresInitialAck:
-            shouldRequireInitialAckOnInitialTurn(cloudJob),
+            shouldRequireInitialAckOnInitialTurn(taskRun),
           ...(initialTurnMessageTs
             ? {
                 currentTurnMessageTs: initialTurnMessageTs,
                 currentTurnStartedAtMs: startedAtMs,
                 currentTurnReactionsAllowed:
-                  shouldAllowEmojiReactionOnInitialTurn(cloudJob),
+                  shouldAllowEmojiReactionOnInitialTurn(taskRun),
               }
             : {}),
           // Late-bound automation execution tasks have no inbound Slack turn,
           // but must still end with one agent-written closeout; the Stop hook
           // blocks silent completion when this flag is set.
-          ...(!initialTurnMessageTs && hasAutomationWorkItemId(cloudJob)
+          ...(!initialTurnMessageTs && hasAutomationWorkItemId(taskRun)
             ? { requiresTerminalCloseoutWithoutTurn: true }
             : {}),
         }),
@@ -776,24 +776,24 @@ export const runTask = async ({
     });
 
     const taskCancellation = new TaskCancellationController({
-      cloudJobId: cloudJob.id,
+      runId: taskRun.id,
       logger,
       externalCancelSignal,
     });
     const cancelSignal = taskCancellation.signal;
     let harnessManager: HarnessManager | undefined = undefined;
 
-    await sdk.cloudJobs.update({
-      id: cloudJob.id,
+    await sdk.taskRuns.update({
+      id: taskRun.id,
       status: RunStatus.Connecting,
     });
 
     const recordWorkerRuntimeEvent = createWorkerRuntimeEventRecorder({
-      cloudJobId: cloudJob.id,
+      runId: taskRun.id,
       logger,
     });
     const persistRuntimeState = createRuntimeStatePersister(
-      cloudJob.id,
+      taskRun.id,
       recordWorkerRuntimeEvent,
     );
     const requestHarnessReconnect = async (options: {
@@ -801,7 +801,7 @@ export const runTask = async ({
       afterCurrentTurn?: boolean;
     }) => await harness.requestReconnect?.(options);
     const refreshActorScopedIntegrations = createActorScopedMcpRefresher({
-      cloudJob,
+      taskRun,
       integrations,
       requestReconnect: async (options) =>
         await requestHarnessReconnect?.(options),
@@ -812,7 +812,7 @@ export const runTask = async ({
     // mounts refreshed). Server-authoritative `task_runs.actingUserId` is
     // the source of truth; this only tracks what this worker last applied so
     // reconciliation knows when to refresh.
-    let lastPreparedActorUserId: string | null = cloudJob.actingUserId ?? null;
+    let lastPreparedActorUserId: string | null = taskRun.actingUserId ?? null;
     let gitAuthorSyncPending = false;
     const getLastKnownActorUserId = () => lastPreparedActorUserId;
     const hasPendingGitAuthorSync = () => gitAuthorSyncPending;
@@ -824,7 +824,7 @@ export const runTask = async ({
       gitAuthorSyncPending = true;
     };
     const notifyMismatchSkipped = createActorMismatchSkipNotifier({
-      cloudJobId: cloudJob.id,
+      runId: taskRun.id,
       logger,
     });
 
@@ -837,7 +837,7 @@ export const runTask = async ({
       },
     ) =>
       await prepareActorScopedTurnHelper({
-        cloudJobId: cloudJob.id,
+        runId: taskRun.id,
         targetUserId,
         workingDirectory: workspacePath,
         logPrefix: '[runTask]',
@@ -862,7 +862,7 @@ export const runTask = async ({
       }
 
       const syncResult = await syncActorScopedTurnState({
-        cloudJobId: cloudJob.id,
+        runId: taskRun.id,
         targetUserId,
         workingDirectory: workspacePath,
         logPrefix: '[runTask]',
@@ -944,7 +944,7 @@ export const runTask = async ({
       integrations,
       mcpTaskEnv,
       environmentMcpServers: environmentConfig?.mcpServers,
-      cloudJob,
+      taskRun,
       developerInstructionsContent: harnessDeveloperInstructions,
       callbacks,
       context,
@@ -965,9 +965,9 @@ export const runTask = async ({
 
     const keepaliveMs =
       keepaliveMsOverride ??
-      cloudJob.keepaliveMs ??
+      taskRun.keepaliveMs ??
       getDefaultKeepaliveMs({
-        taskType: cloudJob.payloadKind,
+        taskType: taskRun.payloadKind,
         appEnv:
           (workerEnv.appEnv as
             | 'development'
@@ -987,29 +987,29 @@ export const runTask = async ({
       sandboxExpiresAtMs: Number.isFinite(sandboxExpiresAtMs)
         ? sandboxExpiresAtMs
         : undefined,
-      cloudJobId: cloudJob.id,
-      taskId: cloudJob.taskId,
+      runId: taskRun.id,
+      taskId: taskRun.taskId,
       logger,
       callbacks: {
         onStart: async (taskId: string) => {
           try {
-            await sdk.cloudJobs.setHarnessSessionId({
-              cloudJobId: cloudJob.id,
+            await sdk.taskRuns.setHarnessSessionId({
+              runId: taskRun.id,
               harnessSessionId: taskId,
             });
           } catch (error) {
             logger.warn(
-              `[runTask] Failed to persist harness session ID for cloud job ${cloudJob.id}: ${error instanceof Error ? error.message : String(error)}`,
+              `[runTask] Failed to persist harness session ID for task run ${taskRun.id}: ${error instanceof Error ? error.message : String(error)}`,
             );
           }
 
           await stampRuntimeTaskStartedAt();
 
           const existingResult =
-            cloudJob.result &&
-            typeof cloudJob.result === 'object' &&
-            !Array.isArray(cloudJob.result)
-              ? (cloudJob.result as Record<string, unknown>)
+            taskRun.result &&
+            typeof taskRun.result === 'object' &&
+            !Array.isArray(taskRun.result)
+              ? (taskRun.result as Record<string, unknown>)
               : {};
 
           const existingRuntimeTaskId =
@@ -1018,16 +1018,16 @@ export const runTask = async ({
               : null;
 
           // Keep runtimeTaskId synchronized with the actual started harness
-          // session so SnapshotResume jobs do not reuse stale IDs.
+          // session so SnapshotResume runs do not reuse stale IDs.
           if (existingRuntimeTaskId !== taskId) {
             const nextResult = { ...existingResult, runtimeTaskId: taskId };
-            await sdk.cloudJobs.update({ id: cloudJob.id, result: nextResult });
-            cloudJob.result = nextResult;
+            await sdk.taskRuns.update({ id: taskRun.id, result: nextResult });
+            taskRun.result = nextResult;
           }
 
           await recordWorkerRuntimeEvent({
             eventType: 'started',
-            message: `Registered runtime task ${taskId} for cloud job #${cloudJob.id}.`,
+            message: `Registered runtime task ${taskId} for task run #${taskRun.id}.`,
             details: {
               runtimeTaskId: taskId,
               harness: harnessType,
@@ -1035,12 +1035,12 @@ export const runTask = async ({
             },
           });
 
-          await callbacks.onStart?.(cloudJob, taskId, context);
+          await callbacks.onStart?.(taskRun, taskId, context);
         },
         onExit: async () => {
           await recordWorkerRuntimeEvent({
             eventType: 'decision',
-            message: `Worker onExit started for cloud job #${cloudJob.id}.`,
+            message: `Worker onExit started for task run #${taskRun.id}.`,
             details: {
               runtimeTaskId: harnessManager?.getStatus().sessionId ?? null,
             },
@@ -1048,10 +1048,10 @@ export const runTask = async ({
           await persistRuntimeState.flush();
           await recordWorkerRuntimeEvent({
             eventType: 'decision',
-            message: `Worker onExit finished runtime-state flush for cloud job #${cloudJob.id}.`,
+            message: `Worker onExit finished runtime-state flush for task run #${taskRun.id}.`,
           });
-          await sdk.cloudJobs.done({
-            id: cloudJob.id,
+          await sdk.taskRuns.done({
+            id: taskRun.id,
             status: RunStatus.Idle,
           });
         },
@@ -1063,7 +1063,7 @@ export const runTask = async ({
     harnessManager.on('taskStateEvent', (eventName) => {
       void recordWorkerRuntimeEvent({
         eventType: 'decision',
-        message: `Observed harness task state event ${eventName} for cloud job #${cloudJob.id}.`,
+        message: `Observed harness task state event ${eventName} for task run #${taskRun.id}.`,
         details: buildWorkerTaskEventDetails({
           eventName,
           taskPhase: harnessManager.getStatus().phase ?? null,
@@ -1077,7 +1077,7 @@ export const runTask = async ({
 
       void recordWorkerRuntimeEvent({
         eventType: 'decision',
-        message: `Harness manager signaled shutdown for cloud job #${cloudJob.id}.`,
+        message: `Harness manager signaled shutdown for task run #${taskRun.id}.`,
         details: buildWorkerRuntimeStateDetails({
           reason: 'harness_shutdown',
           taskPhase: harnessManager.getStatus().phase ?? null,
@@ -1103,13 +1103,13 @@ export const runTask = async ({
 
     const stampRuntimeTaskStartedAt = async () => {
       try {
-        await sdk.cloudJobs.stampMilestone({
-          cloudJobId: cloudJob.id,
+        await sdk.taskRuns.stampMilestone({
+          runId: taskRun.id,
           field: 'runtimeTaskStartedAt',
         });
       } catch (error) {
         logger.warn(
-          `[runTask] Failed to stamp runtimeTaskStartedAt for cloud job ${cloudJob.id}: ${error instanceof Error ? error.message : String(error)}`,
+          `[runTask] Failed to stamp runtimeTaskStartedAt for task run ${taskRun.id}: ${error instanceof Error ? error.message : String(error)}`,
         );
       }
     };
@@ -1127,10 +1127,10 @@ export const runTask = async ({
       accepted: boolean;
     }) => {
       const latestResult =
-        cloudJob.result &&
-        typeof cloudJob.result === 'object' &&
-        !Array.isArray(cloudJob.result)
-          ? (cloudJob.result as Record<string, unknown>)
+        taskRun.result &&
+        typeof taskRun.result === 'object' &&
+        !Array.isArray(taskRun.result)
+          ? (taskRun.result as Record<string, unknown>)
           : {};
 
       const nextResult = {
@@ -1147,8 +1147,8 @@ export const runTask = async ({
         delete nextResult.deferredResumePromptAcceptedAt;
       }
 
-      await sdk.cloudJobs.update({ id: cloudJob.id, result: nextResult });
-      cloudJob.result = nextResult;
+      await sdk.taskRuns.update({ id: taskRun.id, result: nextResult });
+      taskRun.result = nextResult;
     };
 
     const scheduleDeferredResumePromptRetry = (options: {
@@ -1164,7 +1164,7 @@ export const runTask = async ({
       }
 
       logger.info(
-        `[runTask] Retrying blocked deferred resume prompt for cloud job ${cloudJob.id} in ${DEFERRED_RESUME_PROMPT_RETRY_MS}ms`,
+        `[runTask] Retrying blocked deferred resume prompt for task run ${taskRun.id} in ${DEFERRED_RESUME_PROMPT_RETRY_MS}ms`,
       );
 
       deferredResumePromptRetryTimer = setTimeout(() => {
@@ -1188,7 +1188,7 @@ export const runTask = async ({
 
       if (deferredPromptPrep === false) {
         logger.info(
-          `[runTask] Deferred resume prompt blocked for cloud job ${cloudJob.id}; keeping it queued for retry`,
+          `[runTask] Deferred resume prompt blocked for task run ${taskRun.id}; keeping it queued for retry`,
         );
         scheduleDeferredResumePromptRetry(options);
         return false;
@@ -1202,7 +1202,7 @@ export const runTask = async ({
         clearDeferredResumePromptRetryTimer();
         await updateDeferredResumePromptResult({ accepted: false });
         logger.warn(
-          `[runTask] Deferred resume prompt skipped for cloud job ${cloudJob.id}: sender is not the server-side acting user`,
+          `[runTask] Deferred resume prompt skipped for task run ${taskRun.id}: sender is not the server-side acting user`,
         );
         return false;
       }
@@ -1230,14 +1230,14 @@ export const runTask = async ({
         });
         await updateDeferredResumePromptResult({ accepted: true });
         logger.info(
-          `[runTask] Deferred resume prompt accepted for cloud job ${cloudJob.id}`,
+          `[runTask] Deferred resume prompt accepted for task run ${taskRun.id}`,
         );
         return true;
       }
 
       await updateDeferredResumePromptResult({ accepted: false });
       logger.info(
-        `[runTask] Deferred resume prompt rejected for cloud job ${cloudJob.id}`,
+        `[runTask] Deferred resume prompt rejected for task run ${taskRun.id}`,
       );
       return false;
     };
@@ -1289,9 +1289,9 @@ export const runTask = async ({
 
         if (turnPrep === false) {
           const remainingQueueOrder = [...deliveryOrder.slice(index)].reverse();
-          await prependSlackMessages(cloudJob.id, remainingQueueOrder);
+          await prependSlackMessages(taskRun.id, remainingQueueOrder);
           logger.warn(
-            `[runTask] Requeued ${remainingQueueOrder.length} embedded Slack resume message(s) for cloud job ${cloudJob.id} because actor-scoped turn preparation is blocked`,
+            `[runTask] Requeued ${remainingQueueOrder.length} embedded Slack resume message(s) for task run ${taskRun.id} because actor-scoped turn preparation is blocked`,
           );
           return;
         }
@@ -1317,9 +1317,9 @@ export const runTask = async ({
 
         if (!sent) {
           const remainingQueueOrder = [...deliveryOrder.slice(index)].reverse();
-          await prependSlackMessages(cloudJob.id, remainingQueueOrder);
+          await prependSlackMessages(taskRun.id, remainingQueueOrder);
           logger.warn(
-            `[runTask] Requeued ${remainingQueueOrder.length} embedded Slack resume message(s) for cloud job ${cloudJob.id} after follow-up delivery failed`,
+            `[runTask] Requeued ${remainingQueueOrder.length} embedded Slack resume message(s) for task run ${taskRun.id} after follow-up delivery failed`,
           );
           return;
         }
@@ -1335,7 +1335,7 @@ export const runTask = async ({
       }
 
       logger.info(
-        `[runTask] Delivered ${deliveryOrder.length} embedded Slack resume message(s) for cloud job ${cloudJob.id}`,
+        `[runTask] Delivered ${deliveryOrder.length} embedded Slack resume message(s) for task run ${taskRun.id}`,
       );
     };
 
@@ -1355,7 +1355,7 @@ export const runTask = async ({
 
       await Promise.all(
         Array.from(messagesByProvider.entries()).map(([provider, messages]) =>
-          prependCommunicationMessages(provider, cloudJob.id, messages),
+          prependCommunicationMessages(provider, taskRun.id, messages),
         ),
       );
     };
@@ -1389,7 +1389,7 @@ export const runTask = async ({
             remainingQueueOrder,
           );
           logger.warn(
-            `[runTask] Requeued ${remainingQueueOrder.length} embedded communication resume message(s) for cloud job ${cloudJob.id} because actor-scoped turn preparation is blocked`,
+            `[runTask] Requeued ${remainingQueueOrder.length} embedded communication resume message(s) for task run ${taskRun.id} because actor-scoped turn preparation is blocked`,
           );
           return;
         }
@@ -1422,7 +1422,7 @@ export const runTask = async ({
             remainingQueueOrder,
           );
           logger.warn(
-            `[runTask] Requeued ${remainingQueueOrder.length} embedded communication resume message(s) for cloud job ${cloudJob.id} after follow-up delivery failed`,
+            `[runTask] Requeued ${remainingQueueOrder.length} embedded communication resume message(s) for task run ${taskRun.id} after follow-up delivery failed`,
           );
           return;
         }
@@ -1445,7 +1445,7 @@ export const runTask = async ({
       }
 
       logger.info(
-        `[runTask] Delivered ${deliveryOrder.length} embedded communication resume message(s) for cloud job ${cloudJob.id}`,
+        `[runTask] Delivered ${deliveryOrder.length} embedded communication resume message(s) for task run ${taskRun.id}`,
       );
     };
 
@@ -1476,9 +1476,9 @@ export const runTask = async ({
 
         if (turnPrep === false) {
           const remainingMessages = messages.slice(index);
-          await prependLinearMessages(cloudJob.id, remainingMessages);
+          await prependLinearMessages(taskRun.id, remainingMessages);
           logger.warn(
-            `[runTask] Requeued ${remainingMessages.length} embedded Linear resume message(s) for cloud job ${cloudJob.id} because actor-scoped turn preparation is blocked`,
+            `[runTask] Requeued ${remainingMessages.length} embedded Linear resume message(s) for task run ${taskRun.id} because actor-scoped turn preparation is blocked`,
           );
           return;
         }
@@ -1496,16 +1496,16 @@ export const runTask = async ({
 
         if (!sent) {
           const remainingMessages = messages.slice(index);
-          await prependLinearMessages(cloudJob.id, remainingMessages);
+          await prependLinearMessages(taskRun.id, remainingMessages);
           logger.warn(
-            `[runTask] Requeued ${remainingMessages.length} embedded Linear resume message(s) for cloud job ${cloudJob.id} after follow-up delivery failed`,
+            `[runTask] Requeued ${remainingMessages.length} embedded Linear resume message(s) for task run ${taskRun.id} after follow-up delivery failed`,
           );
           return;
         }
       }
 
       logger.info(
-        `[runTask] Delivered ${messages.length} embedded Linear resume message(s) for cloud job ${cloudJob.id}`,
+        `[runTask] Delivered ${messages.length} embedded Linear resume message(s) for task run ${taskRun.id}`,
       );
     };
 
@@ -1522,8 +1522,8 @@ export const runTask = async ({
       userEnv: () => workerEnv.buildUserFacingEnv(),
       harness,
       harnessManager,
-      cloudJobId: cloudJob.id,
-      cloudJobTaskId: cloudJob.taskId,
+      runId: taskRun.id,
+      taskRunTaskId: taskRun.taskId,
       slackReplySatisfactionStateFile:
         mcpTaskEnv.ROOMOTE_SLACK_REPLY_SATISFACTION_STATE_FILE,
       codingHarness: harnessType,
@@ -1537,8 +1537,8 @@ export const runTask = async ({
       `[runTask] Sandbox server started on port ${SANDBOX_SERVER_PORT}`,
     );
 
-    await sdk.cloudJobs.update({
-      id: cloudJob.id,
+    await sdk.taskRuns.update({
+      id: taskRun.id,
       status: RunStatus.Running,
     });
 
@@ -1552,7 +1552,7 @@ export const runTask = async ({
 
     if (taskCancellation.signal.aborted) {
       logger.info(
-        `[runTask] Skipping initial task start for cloud job ${cloudJob.id} because cancellation was requested during startup`,
+        `[runTask] Skipping initial task start for task run ${taskRun.id} because cancellation was requested during startup`,
       );
       const subprocess = getSubprocess();
       clearDeferredResumePromptRetryTimer();
@@ -1578,38 +1578,38 @@ export const runTask = async ({
       };
     } else if (harnessSessionId) {
       const existingResult =
-        cloudJob.result &&
-        typeof cloudJob.result === 'object' &&
-        !Array.isArray(cloudJob.result)
-          ? (cloudJob.result as Record<string, unknown>)
+        taskRun.result &&
+        typeof taskRun.result === 'object' &&
+        !Array.isArray(taskRun.result)
+          ? (taskRun.result as Record<string, unknown>)
           : {};
 
       const nextResult = {
         ...existingResult,
         runtimeTaskId: harnessSessionId,
       };
-      await sdk.cloudJobs.update({ id: cloudJob.id, result: nextResult });
-      cloudJob.result = nextResult;
+      await sdk.taskRuns.update({ id: taskRun.id, result: nextResult });
+      taskRun.result = nextResult;
       harnessManager.resumeTask(harnessSessionId);
       await stampRuntimeTaskStartedAt();
       pollingState.sessionId = harnessSessionId;
       pollingState.phase = 'waiting_for_prompt';
 
       try {
-        await callbacks.onStart?.(cloudJob, harnessSessionId, context);
+        await callbacks.onStart?.(taskRun, harnessSessionId, context);
       } catch (error) {
         logger.warn(
-          `[runTask] Resume onStart callback failed for cloud job ${cloudJob.id}: ${
+          `[runTask] Resume onStart callback failed for task run ${taskRun.id}: ${
             error instanceof Error ? error.message : String(error)
           }`,
         );
       }
 
       const resumePayload =
-        cloudJob.payloadKind === TaskPayloadKind.SnapshotResume &&
-        cloudJob.payload &&
-        typeof cloudJob.payload === 'object'
-          ? (cloudJob.payload as Record<string, unknown>)
+        taskRun.payloadKind === TaskPayloadKind.SnapshotResume &&
+        taskRun.payload &&
+        typeof taskRun.payload === 'object'
+          ? (taskRun.payload as Record<string, unknown>)
           : null;
       const deferredResumePrompt =
         typeof resumePayload?.resumePrompt === 'string'
@@ -1674,7 +1674,7 @@ export const runTask = async ({
     // Polling uses the worker's RunTaskState for interval tracking.
     // (syncPollingState was already called above, before task start/resume.)
     startPolling({
-      cloudJob,
+      taskRun,
       task,
       state: pollingState,
       logger,
@@ -1721,7 +1721,7 @@ export const runTask = async ({
     const { claimed: sleepActionTriggered } = skipExternalSleepAction
       ? { claimed: false }
       : await waitForExternalSleepAction({
-          cloudJob,
+          taskRun,
           logger,
         });
 
@@ -1732,30 +1732,30 @@ export const runTask = async ({
     // is in the BullMQ snapshot handler.
     if (
       sleepActionTriggered &&
-      (cloudJob.payloadKind === TaskPayloadKind.LinearAgentSession ||
-        (cloudJob.payloadKind === TaskPayloadKind.SnapshotResume &&
+      (taskRun.payloadKind === TaskPayloadKind.LinearAgentSession ||
+        (taskRun.payloadKind === TaskPayloadKind.SnapshotResume &&
           !!(
             task?.linearSessionId ??
-            getLinearSessionIdFromResumePayload(cloudJob.payload)
+            getLinearSessionIdFromResumePayload(taskRun.payload)
           )))
     ) {
       try {
         const result = await sdk.linearSessions.drainLinearMessages({
-          cloudJobId: cloudJob.id,
+          runId: taskRun.id,
         });
 
         if (result.resumed) {
           logger.info(
-            `[runTask] Created resume cloud job ${result.cloudJobId} for ${result.messageCount} pending Linear message(s) drained from job ${cloudJob.id}`,
+            `[runTask] Created resume task run ${result.runId} for ${result.messageCount} pending Linear message(s) drained from job ${taskRun.id}`,
           );
         } else {
           logger.info(
-            `[runTask] Linear drain check: ${result.reason} (job ${cloudJob.id})`,
+            `[runTask] Linear drain check: ${result.reason} (job ${taskRun.id})`,
           );
         }
       } catch (error) {
         logger.warn(
-          `[runTask] Failed to drain Linear messages for job ${cloudJob.id}: ${
+          `[runTask] Failed to drain Linear messages for job ${taskRun.id}: ${
             error instanceof Error ? error.message : String(error)
           }`,
         );
@@ -1769,26 +1769,26 @@ export const runTask = async ({
       sleepActionTriggered &&
       (task?.slackThreadTs ||
         task?.slackChannelId ||
-        getSlackThreadTsFromTaskPayload(cloudJob.payload) ||
-        getSlackChannelFromTaskPayload(cloudJob.payload))
+        getSlackThreadTsFromTaskPayload(taskRun.payload) ||
+        getSlackChannelFromTaskPayload(taskRun.payload))
     ) {
       try {
         const result = await sdk.slackInstallations.drainSlackMessages({
-          cloudJobId: cloudJob.id,
+          runId: taskRun.id,
         });
 
         if (result.resumed) {
           logger.info(
-            `[runTask] Created resume cloud job ${result.cloudJobId} for ${result.messageCount} pending Slack message(s) drained from job ${cloudJob.id}`,
+            `[runTask] Created resume task run ${result.runId} for ${result.messageCount} pending Slack message(s) drained from job ${taskRun.id}`,
           );
         } else {
           logger.info(
-            `[runTask] Slack drain check: ${result.reason} (job ${cloudJob.id})`,
+            `[runTask] Slack drain check: ${result.reason} (job ${taskRun.id})`,
           );
         }
       } catch (error) {
         logger.warn(
-          `[runTask] Failed to drain Slack messages for job ${cloudJob.id}: ${
+          `[runTask] Failed to drain Slack messages for job ${taskRun.id}: ${
             error instanceof Error ? error.message : String(error)
           }`,
         );
@@ -1910,7 +1910,7 @@ type RuntimeStatePersister = ((values: {
 };
 
 function createRuntimeStatePersister(
-  cloudJobId: number,
+  runId: number,
   recordWorkerRuntimeEvent: ReturnType<typeof createWorkerRuntimeEventRecorder>,
 ): RuntimeStatePersister {
   let pendingWrite = Promise.resolve();
@@ -1939,8 +1939,8 @@ function createRuntimeStatePersister(
     lastErrorMessage?: string;
   }) => {
     const runWrite = async () => {
-      const result = await sdk.cloudJobs.updateRuntimeState({
-        id: cloudJobId,
+      const result = await sdk.taskRuns.updateRuntimeState({
+        id: runId,
         taskPhase: values.taskPhase,
         sleepAt: values.sleepAt == null ? null : new Date(values.sleepAt),
       });
@@ -1951,7 +1951,7 @@ function createRuntimeStatePersister(
 
       void enqueueEvent({
         eventType: 'decision',
-        message: `Persisted runtime state for cloud job #${cloudJobId}.`,
+        message: `Persisted runtime state for task run #${runId}.`,
         details: buildWorkerRuntimeStateDetails(values),
       });
     };
@@ -1976,7 +1976,7 @@ function createRuntimeStatePersister(
   }) => {
     await enqueueEvent({
       eventType: 'decision',
-      message: `Harness ${values.connectionState} for cloud job #${cloudJobId}.`,
+      message: `Harness ${values.connectionState} for task run #${runId}.`,
       details: buildWorkerRuntimeStateDetails({
         reason: `harness_${values.connectionState}`,
         taskPhase: values.phase,

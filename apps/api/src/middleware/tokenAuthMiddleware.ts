@@ -1,7 +1,7 @@
 import type { Context, Next } from 'hono';
 import { createMiddleware } from 'hono/factory';
 
-import { validateJobToken, validateAuthToken } from '@roomote/auth';
+import { validateRunToken, validateAuthToken } from '@roomote/auth';
 import { db, deploymentSettings, eq } from '@roomote/db/server';
 
 import type { Variables } from '../types';
@@ -33,20 +33,20 @@ export const tokenAuthMiddleware = () =>
     if (authHeader?.startsWith('Bearer ')) {
       const token = authHeader.substring(7);
 
-      // Try job token first (has more specific claims)
-      let isJobToken = false;
+      // Try run token first (has more specific claims)
+      let isRunToken = false;
 
       try {
-        const jobContext = await validateJobToken(token);
+        const jobContext = await validateRunToken(token);
         if (await deploymentAllowsTokenAuth()) {
           c.set('authContext', jobContext);
-          isJobToken = true;
+          isRunToken = true;
         }
       } catch {
-        // Not a job token, try auth token below
+        // Not a run token, try auth token below
       }
 
-      if (isJobToken) {
+      if (isRunToken) {
         await next();
         return;
       }

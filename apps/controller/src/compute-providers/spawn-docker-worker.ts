@@ -17,9 +17,9 @@ import {
   db,
   eq,
   resolveEffectivePreviewRuntimeConfig,
-  type Run,
+  type TaskRun,
 } from '@roomote/db/server';
-import { stampCloudJobMilestone } from '@roomote/sdk/server';
+import { stampTaskRunMilestone } from '@roomote/sdk/server';
 import {
   buildDockerWorkerEnv,
   resolveAuthBypassHeaderName,
@@ -27,9 +27,9 @@ import {
 } from '@roomote/compute-providers';
 
 import {
-  getNamedPortsForCloudJob,
-  shouldEnableAuthBypassForCloudJob,
-  updateCloudJobMachine,
+  getNamedPortsForTaskRun,
+  shouldEnableAuthBypassForTaskRun,
+  updateTaskRunMachine,
 } from '../utils';
 import { resolveFromWorkspaceRoot } from '../repo-paths';
 
@@ -44,7 +44,7 @@ const DOCKER_WORKER_START_TIMEOUT_MS = 15_000;
 const DOCKER_WORKER_START_POLL_MS = 500;
 
 export async function spawnDockerWorker(
-  cloudJob: Run,
+  taskRun: TaskRun,
   authToken: string,
   config: {
     image: string;
@@ -56,17 +56,17 @@ export async function spawnDockerWorker(
   },
 ): Promise<{ containerId: string }> {
   if (
-    cloudJob.payloadKind === TaskPayloadKind.SnapshotEnvironment ||
-    cloudJob.payloadKind === TaskPayloadKind.SnapshotResume
+    taskRun.payloadKind === TaskPayloadKind.SnapshotEnvironment ||
+    taskRun.payloadKind === TaskPayloadKind.SnapshotResume
   ) {
     throw new NonRetryableSpawnError(
-      `Docker provider does not support ${cloudJob.payloadKind} jobs`,
+      `Docker provider does not support ${taskRun.payloadKind} task run kinds`,
     );
   }
 
   if (!config.localWorkerReleasePath) {
     throw new Error(
-      'Docker provider requires a local worker release archive. Run pnpm dev without --use-release.',
+      'Docker provider requires a local worker release archive. TaskRun pnpm dev without --use-release.',
     );
   }
 
@@ -77,9 +77,9 @@ export async function spawnDockerWorker(
   }
 
   const { namedPorts, environmentConfig } =
-    await getNamedPortsForCloudJob(cloudJob);
+    await getNamedPortsForTaskRun(taskRun);
 
-  const shouldEnableAuthBypass = shouldEnableAuthBypassForCloudJob({
+  const shouldEnableAuthBypass = shouldEnableAuthBypassForTaskRun({
     environmentConfig,
     namedPorts,
   });
@@ -99,7 +99,7 @@ export async function spawnDockerWorker(
       defaultPreviewDomains: Env.PREVIEW_DOMAINS,
     });
 
-  const containerName = `roomote-worker-${cloudJob.id}`;
+  const containerName = `roomote-worker-${taskRun.id}`;
   const dockerNetwork = config.network?.trim();
   const networkArgs = dockerNetwork
     ? ['--network', dockerNetwork, '--network-alias', containerName]
@@ -118,7 +118,7 @@ export async function spawnDockerWorker(
   );
 
   console.log(
-    `[spawnDockerWorker] Starting Docker worker container for job #${cloudJob.id} ${JSON.stringify(
+    `[spawnDockerWorker] Starting Docker worker container for task run #${taskRun.id} ${JSON.stringify(
       {
         image: config.image,
         platform: config.platform,
@@ -179,13 +179,13 @@ export async function spawnDockerWorker(
       : await getPublishedPorts(containerName, namedPorts);
     const sandboxServerUrl = buildDockerSandboxServerUrl({
       network: dockerNetwork,
-      taskId: cloudJob.taskId,
+      taskId: taskRun.taskId,
       previewProxyBaseUrl:
         resolvedPreviewRuntimeConfig.effective.previewProxyBaseUrl ?? undefined,
     });
 
-    await updateCloudJobMachine({
-      cloudJob,
+    await updateTaskRunMachine({
+      taskRun,
       vendor: 'docker',
       machineId: containerName,
       namedPorts,
@@ -202,8 +202,8 @@ export async function spawnDockerWorker(
       authBypassHeaderName,
     });
 
-    await stampCloudJobMilestone({
-      cloudJobId: cloudJob.id,
+    await stampTaskRunMilestone({
+      runId: taskRun.id,
       field: 'provisionReadyAt',
     });
 
@@ -211,7 +211,7 @@ export async function spawnDockerWorker(
       authToken,
       sandboxExpiresAtMs: Date.now() + config.dockerTimeoutMs,
       deploymentSlug: config.deploymentSlug,
-      environmentId: cloudJob.payload.environmentId,
+      environmentId: taskRun.payload.environmentId,
       image: config.image,
       extraEnv: {
         SANDBOX_TIMEOUT_MS: String(config.dockerTimeoutMs),
@@ -252,17 +252,17 @@ export async function spawnDockerWorker(
       'bash',
       '-lc',
       [
-        `worker run ${cloudJob.id} > /proc/1/fd/1 2> /proc/1/fd/2`,
+        `worker run ${taskRun.id} > /proc/1/fd/1 2> /proc/1/fd/2`,
         'status=$?',
         'kill 1',
         'exit "$status"',
       ].join('; '),
     ]);
 
-    await assertDetachedWorkerStarted(containerName, cloudJob.id);
+    await assertDetachedWorkerStarted(containerName, taskRun.id);
 
     console.log(
-      `[spawnDockerWorker] Docker worker launched for job #${cloudJob.id} ${JSON.stringify(
+      `[spawnDockerWorker] Docker worker launched for task run #${taskRun.id} ${JSON.stringify(
         { containerName, containerId },
       )}`,
     );
@@ -282,7 +282,7 @@ export async function spawnDockerWorker(
 
 async function assertDetachedWorkerStarted(
   containerName: string,
-  cloudJobId: number,
+  runId: number,
 ): Promise<void> {
   const deadline = Date.now() + DOCKER_WORKER_START_TIMEOUT_MS;
   let processList = '';
@@ -302,7 +302,7 @@ async function assertDetachedWorkerStarted(
 
       throw new Error(
         [
-          `Docker worker container exited before job #${cloudJobId} started.`,
+          `Docker worker container exited before task run #${runId} started.`,
           logs.trim() ? `Recent Docker logs:\n${logs.trim()}` : undefined,
         ]
           .filter(Boolean)
@@ -314,11 +314,11 @@ async function assertDetachedWorkerStarted(
       allowFailure: true,
     });
 
-    if (processListIncludesDockerWorkerRun(processList, cloudJobId)) {
+    if (processListIncludesDockerWorkerRun(processList, runId)) {
       return;
     }
 
-    if (await hasCloudJobStarted(cloudJobId)) {
+    if (await hasTaskRunStarted(runId)) {
       return;
     }
 
@@ -333,7 +333,7 @@ async function assertDetachedWorkerStarted(
 
   throw new Error(
     [
-      `Docker worker command for job #${cloudJobId} was not observed during startup.`,
+      `Docker worker command for task run #${runId} was not observed during startup.`,
       processList.trim()
         ? `Docker process list:\n${processList.trim()}`
         : 'Docker process list was empty.',
@@ -344,33 +344,30 @@ async function assertDetachedWorkerStarted(
   );
 }
 
-async function hasCloudJobStarted(cloudJobId: number): Promise<boolean> {
-  const cloudJob = await db.query.taskRuns.findFirst({
-    where: eq(taskRuns.id, cloudJobId),
+async function hasTaskRunStarted(runId: number): Promise<boolean> {
+  const taskRun = await db.query.taskRuns.findFirst({
+    where: eq(taskRuns.id, runId),
     columns: {
       startedAt: true,
     },
   });
 
-  return Boolean(cloudJob?.startedAt);
+  return Boolean(taskRun?.startedAt);
 }
 
 export function processListIncludesDockerWorkerRun(
   processList: string,
-  cloudJobId: number,
+  runId: number,
 ): boolean {
-  const escapedCloudJobId = String(cloudJobId).replace(
-    /[.*+?^${}()|[\]\\]/g,
-    '\\$&',
-  );
+  const escapedRunId = String(runId).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 
   return processList
     .split('\n')
     .some((line) =>
       [
-        new RegExp(`(?:^|\\s)worker\\s+run\\s+${escapedCloudJobId}(?:\\s|$)`),
+        new RegExp(`(?:^|\\s)worker\\s+run\\s+${escapedRunId}(?:\\s|$)`),
         new RegExp(
-          `(?:^|[\\s/])worker\\.js\\s+run\\s+${escapedCloudJobId}(?:\\s|$)`,
+          `(?:^|[\\s/])worker\\.js\\s+run\\s+${escapedRunId}(?:\\s|$)`,
         ),
       ].some((pattern) => pattern.test(line)),
     );

@@ -17,7 +17,7 @@ import {
   routeTask,
 } from '@roomote/cloud-agents/server';
 
-import type { CompletedTelegramJob } from './job-lookup.js';
+import type { CompletedTelegramTaskRun } from './task-run-lookup.js';
 import { maybeRequestTelegramRoutingConfirmation } from './routing-confirmation.js';
 import { postTelegramMessageBestEffort } from './replies.js';
 import { launchTelegramTask, resolveTelegramWorkspace } from './task-launch.js';
@@ -33,17 +33,17 @@ function cleanOptionalString(value: string | undefined): string | undefined {
 }
 
 export async function resumeTelegramTaskFromSnapshot(input: {
-  completedJob: CompletedTelegramJob;
+  completedRun: CompletedTelegramTaskRun;
   queuedMessage: QueuedTelegramCommunicationMessage;
   metadata: TelegramUpdateCommunicationMetadata;
 }) {
-  const sourceSnapshotId = input.completedJob.snapshotId;
+  const sourceSnapshotId = input.completedRun.snapshotId;
 
   if (!sourceSnapshotId) {
     throw new Error('Telegram snapshot resume requires a source snapshot.');
   }
 
-  const completedPayload = input.completedJob.payload as Record<
+  const completedPayload = input.completedRun.payload as Record<
     string,
     unknown
   >;
@@ -58,9 +58,9 @@ export async function resumeTelegramTaskFromSnapshot(input: {
   const resumePayload: TaskPayload<typeof TaskPayloadKind.SnapshotResume> = {
     repo,
     ...(environmentId ? { environmentId } : {}),
-    ...(input.completedJob.port ? { port: input.completedJob.port } : {}),
+    ...(input.completedRun.port ? { port: input.completedRun.port } : {}),
     sourceSnapshotId,
-    sourceCloudJobId: input.completedJob.id,
+    sourceRunId: input.completedRun.id,
     queuedCommunicationMessages: [input.queuedMessage],
   };
 
@@ -80,7 +80,7 @@ export async function resumeTelegramTaskFromSnapshot(input: {
       task: {
         type: TaskPayloadKind.SnapshotResume,
         sourceSnapshotId,
-        sourceCloudJobId: input.completedJob.id,
+        sourceRunId: input.completedRun.id,
         payload: resumePayload,
       },
       actingUserId: input.queuedMessage.userId ?? null,

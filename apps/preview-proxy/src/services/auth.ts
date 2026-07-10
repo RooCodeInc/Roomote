@@ -2,7 +2,7 @@ import * as redis from '../lib/redis';
 import { logger } from '../lib/logger';
 import { validatePreviewToken } from '@roomote/auth';
 import type { PreviewTokenContext } from '@roomote/types';
-import type { Run } from '@roomote/db';
+import type { TaskRun } from '@roomote/db';
 
 // Backward compatibility wrapper for validateToken
 export async function validateToken(
@@ -19,11 +19,11 @@ export async function validateToken(
 export async function storeState(
   state: string,
   redirectUri: string,
-  cloudJobId: number,
+  runId: number,
 ): Promise<void> {
   const data = JSON.stringify({
     redirectUri,
-    cloudJobId,
+    runId,
     createdAt: Date.now(),
   });
   await redis.setWithExpiry(`preview:state:${state}`, data, 600);
@@ -31,7 +31,7 @@ export async function storeState(
 
 export async function validateState(
   state: string,
-): Promise<{ redirectUri: string; cloudJobId: number } | null> {
+): Promise<{ redirectUri: string; runId: number } | null> {
   const data = await redis.get(`preview:state:${state}`);
 
   if (!data) {
@@ -42,7 +42,7 @@ export async function validateState(
 
   try {
     const parsed = JSON.parse(data);
-    return { redirectUri: parsed.redirectUri, cloudJobId: parsed.cloudJobId };
+    return { redirectUri: parsed.redirectUri, runId: parsed.runId };
   } catch {
     return null;
   }
@@ -56,14 +56,14 @@ interface AuthValidationResult {
 }
 
 /**
- * Validate an auth cookie against a known Run.
- * This avoids repeating DB lookups when the caller already has the job.
+ * Validate an auth cookie against a known TaskRun.
+ * This avoids repeating DB lookups when the caller already has the run.
  */
-export async function validateAuthCookieForCloudJob(
+export async function validateAuthCookieForTaskRun(
   authCookie: string | undefined,
-  cloudJob: Run,
+  taskRun: TaskRun,
 ): Promise<AuthValidationResult> {
-  const taskId = cloudJob.taskId ?? undefined;
+  const taskId = taskRun.taskId ?? undefined;
 
   if (!authCookie) {
     return { valid: false, reason: 'missing', taskId };

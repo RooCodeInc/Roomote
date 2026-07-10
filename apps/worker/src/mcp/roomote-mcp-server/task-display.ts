@@ -19,7 +19,7 @@ function getPhaseLabel(taskPhase: string | null): string | null {
   }
 }
 
-function getCloudJobStatusLabel(status: string): string {
+function getTaskRunStatusLabel(status: string): string {
   switch (status) {
     case RunStatus.Pending:
       return 'Pending';
@@ -50,24 +50,24 @@ function getCloudJobStatusLabel(status: string): string {
 
 export function getTaskStatusLabel(input: {
   completed: boolean;
-  cloudJobStatus: string | null;
+  taskRunStatus: string | null;
   taskPhase: string | null;
 }): string {
-  const { completed, cloudJobStatus, taskPhase } = input;
+  const { completed, taskRunStatus, taskPhase } = input;
 
-  if (!cloudJobStatus) {
+  if (!taskRunStatus) {
     return completed ? 'Completed' : 'Active';
   }
 
-  if (cloudJobStatus === RunStatus.Running) {
+  if (taskRunStatus === RunStatus.Running) {
     return getPhaseLabel(taskPhase) ?? 'Running';
   }
 
-  if (cloudJobStatus === RunStatus.Idle) {
+  if (taskRunStatus === RunStatus.Idle) {
     return getPhaseLabel(taskPhase) ?? 'Idle';
   }
 
-  return getCloudJobStatusLabel(cloudJobStatus);
+  return getTaskRunStatusLabel(taskRunStatus);
 }
 
 export function getHarnessLabel(harness: string | null): string | null {

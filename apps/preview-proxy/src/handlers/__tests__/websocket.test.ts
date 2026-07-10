@@ -5,7 +5,7 @@ import type httpProxy from 'http-proxy';
 import {
   TEST_TASK_ID,
   createMockAuthResult,
-  createMockCloudJob,
+  createMockTaskRun,
   createMockResolvedRequest,
   mockConfig,
 } from '../../__tests__/fixtures';
@@ -29,7 +29,7 @@ vi.mock('../../services/resolver', () => ({
 }));
 
 vi.mock('../../services/auth', () => ({
-  validateAuthCookieForCloudJob: vi.fn(),
+  validateAuthCookieForTaskRun: vi.fn(),
 }));
 
 vi.mock('../../lib/nested-routing', () => ({
@@ -50,7 +50,7 @@ vi.mock('../../lib/access-log', () => ({
 }));
 
 import { resolveRequest } from '../../services/resolver';
-import { validateAuthCookieForCloudJob } from '../../services/auth';
+import { validateAuthCookieForTaskRun } from '../../services/auth';
 import { parseHostForConfig, stripSuffixFromHost } from '../../lib/url-parser';
 import { proxyWebSocket } from '../../lib/proxy';
 import {
@@ -280,7 +280,7 @@ describe('handleWebSocketUpgrade', () => {
   });
 
   it('accepts inline preview tokens for auth-protected websocket upgrades from the app shell', async () => {
-    const cloudJob = createMockCloudJob({ actingUserId: 'user-1' });
+    const taskRun = createMockTaskRun({ actingUserId: 'user-1' });
 
     vi.mocked(parseHostForConfig).mockReturnValue({
       isValid: true,
@@ -290,7 +290,7 @@ describe('handleWebSocketUpgrade', () => {
 
     vi.mocked(resolveRequest).mockResolvedValue(
       createMockResolvedRequest({
-        cloudJob,
+        taskRun,
         hasAuthProxy: true,
         requestedPortKey: 'EDITOR',
         requiresAuth: true,
@@ -298,7 +298,7 @@ describe('handleWebSocketUpgrade', () => {
         status: 'active',
       }),
     );
-    vi.mocked(validateAuthCookieForCloudJob).mockResolvedValue(
+    vi.mocked(validateAuthCookieForTaskRun).mockResolvedValue(
       createMockAuthResult({
         token: {
           userId: 'user-1',
@@ -327,9 +327,9 @@ describe('handleWebSocketUpgrade', () => {
       {} as unknown as httpProxy,
     );
 
-    expect(validateAuthCookieForCloudJob).toHaveBeenCalledWith(
+    expect(validateAuthCookieForTaskRun).toHaveBeenCalledWith(
       'inline-token',
-      cloudJob,
+      taskRun,
     );
     expect(req.url).toBe('/websockify?keep=1');
     expect(req.headers.cookie).toContain('other=value');
@@ -338,18 +338,18 @@ describe('handleWebSocketUpgrade', () => {
   });
 
   it('rejects invalid inline preview tokens when no auth cookie exists', async () => {
-    const cloudJob = createMockCloudJob();
+    const taskRun = createMockTaskRun();
 
     vi.mocked(resolveRequest).mockResolvedValue(
       createMockResolvedRequest({
-        cloudJob,
+        taskRun,
         hasAuthProxy: true,
         requiresAuth: true,
         sandboxUrl: 'https://sb-test.vercel.run',
         status: 'active',
       }),
     );
-    vi.mocked(validateAuthCookieForCloudJob).mockResolvedValue(
+    vi.mocked(validateAuthCookieForTaskRun).mockResolvedValue(
       createMockAuthResult({ valid: false }),
     );
 

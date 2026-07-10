@@ -2,13 +2,13 @@ import { PassThrough } from 'node:stream';
 import EventEmitter from 'node:events';
 
 const {
-  cloudJobsStampMilestoneMock,
+  taskRunsStampMilestoneMock,
   getHarnessModelOverrideMock,
   resolveBuiltInMcpServersMock,
   subscribeHarnessCallbacksMock,
   startOpenCodeServerHarnessMock,
 } = vi.hoisted(() => ({
-  cloudJobsStampMilestoneMock: vi.fn().mockResolvedValue(undefined),
+  taskRunsStampMilestoneMock: vi.fn().mockResolvedValue(undefined),
   getHarnessModelOverrideMock: vi.fn(),
   resolveBuiltInMcpServersMock: vi.fn(() => []),
   subscribeHarnessCallbacksMock: vi.fn(() => async () => {}),
@@ -30,8 +30,8 @@ vi.mock('@roomote/types', async (importOriginal) => {
 
 vi.mock('@roomote/sdk/client', () => ({
   sdk: {
-    cloudJobs: {
-      stampMilestone: cloudJobsStampMilestoneMock,
+    taskRuns: {
+      stampMilestone: taskRunsStampMilestoneMock,
     },
   },
 }));
@@ -59,7 +59,7 @@ function createPendingSubprocess(stdout = new PassThrough()) {
 
 function createLogger() {
   return {
-    cloudJobId: 1,
+    runId: 1,
     filePath: '/tmp/test.log',
     info: vi.fn(),
     warn: vi.fn(),
@@ -112,8 +112,8 @@ function createConnectedHarness() {
 
 describe('createHarness', () => {
   beforeEach(() => {
-    cloudJobsStampMilestoneMock.mockReset();
-    cloudJobsStampMilestoneMock.mockResolvedValue(undefined);
+    taskRunsStampMilestoneMock.mockReset();
+    taskRunsStampMilestoneMock.mockResolvedValue(undefined);
     getHarnessModelOverrideMock.mockClear();
     resolveBuiltInMcpServersMock.mockReset();
     resolveBuiltInMcpServersMock.mockReturnValue([]);
@@ -144,7 +144,7 @@ describe('createHarness', () => {
       cancelSignal: new AbortController().signal,
       integrations: {} as never,
       mcpTaskEnv: {},
-      cloudJob: { id: 1, taskId: 'task-1' } as never,
+      taskRun: { id: 1, taskId: 'task-1' } as never,
       callbacks: {} as never,
       context: {} as never,
       logger: createLogger(),
@@ -178,7 +178,7 @@ describe('createHarness', () => {
       cancelSignal: new AbortController().signal,
       integrations: {} as never,
       mcpTaskEnv: {},
-      cloudJob: { id: 1, taskId: 'task-1' } as never,
+      taskRun: { id: 1, taskId: 'task-1' } as never,
       callbacks: {} as never,
       context: {} as never,
       logger: createLogger(),
@@ -209,7 +209,7 @@ describe('createHarness', () => {
       cancelSignal: new AbortController().signal,
       integrations: {} as never,
       mcpTaskEnv: {},
-      cloudJob: {
+      taskRun: {
         id: 4,
         taskId: 'task-4',
         payload: {
@@ -250,7 +250,7 @@ describe('createHarness', () => {
       cancelSignal: new AbortController().signal,
       integrations: {} as never,
       mcpTaskEnv: {},
-      cloudJob: {
+      taskRun: {
         id: 6,
         taskId: 'task-6',
         payload: {
@@ -303,7 +303,7 @@ describe('createHarness', () => {
       cancelSignal: new AbortController().signal,
       integrations: {} as never,
       mcpTaskEnv: {},
-      cloudJob: { id: 5, taskId: 'task-5' } as never,
+      taskRun: { id: 5, taskId: 'task-5' } as never,
       callbacks: {} as never,
       context: {} as never,
       logger: createLogger(),
@@ -341,14 +341,14 @@ describe('createHarness', () => {
       cancelSignal: new AbortController().signal,
       integrations: {} as never,
       mcpTaskEnv: {},
-      cloudJob: { id: 77, taskId: 'task-77' } as never,
+      taskRun: { id: 77, taskId: 'task-77' } as never,
       callbacks: {} as never,
       context: {} as never,
       logger: createLogger(),
     });
 
-    expect(cloudJobsStampMilestoneMock).toHaveBeenCalledWith({
-      cloudJobId: 77,
+    expect(taskRunsStampMilestoneMock).toHaveBeenCalledWith({
+      runId: 77,
       field: 'harnessStartedAt',
     });
   });
@@ -392,7 +392,7 @@ describe('createHarness', () => {
       cancelSignal: new AbortController().signal,
       integrations: integrations as never,
       mcpTaskEnv: {},
-      cloudJob: { id: 1, taskId: 'task-1' } as never,
+      taskRun: { id: 1, taskId: 'task-1' } as never,
       callbacks: {} as never,
       context: {} as never,
       logger: createLogger(),
@@ -418,14 +418,14 @@ describe('createHarness', () => {
     );
     expect(getHarnessModelOverrideMock).not.toHaveBeenCalled();
     expect(result.harness.requestReconnect).toBeTypeOf('function');
-    expect(cloudJobsStampMilestoneMock).toHaveBeenCalledWith({
-      cloudJobId: 1,
+    expect(taskRunsStampMilestoneMock).toHaveBeenCalledWith({
+      runId: 1,
       field: 'harnessStartedAt',
     });
     expect(subscribeHarnessCallbacksMock).toHaveBeenCalledWith(
       expect.objectContaining({
         harness: result.harness,
-        cloudJob: { id: 1, taskId: 'task-1' },
+        taskRun: { id: 1, taskId: 'task-1' },
       }),
     );
     expect(result.getSubprocess()).toBe(initialSubprocess);

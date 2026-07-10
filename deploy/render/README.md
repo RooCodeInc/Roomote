@@ -133,8 +133,8 @@ production deployments): put the same immutable tag (`v*` or
 are needed — the derived values follow the image.
 
 MinIO is the exception: the Blueprint pins it to an immutable `RELEASE.*`
-tag because the service owns the artifact disk, and a mutable `latest` tag
-could pull an unreviewed breaking change on redeploy. Bump the pin
+tag and manifest digest because the service owns the artifact disk, and a
+mutable `latest` tag could pull an unreviewed breaking change on redeploy. Bump the pin
 deliberately, ideally right after a disk backup.
 
 ## Service topology

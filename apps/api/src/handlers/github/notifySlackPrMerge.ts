@@ -34,7 +34,7 @@ interface NotifySlackPrMergeParams {
 
 /**
  * Notifies Slack threads associated with a PR that the PR has been merged.
- * Queries for cloud jobs that reference the PR and have a Slack thread,
+ * Queries for task runs that reference the PR and have a Slack thread,
  * filtering by GitHub installation to ensure only the tracked deployment
  * receives notifications.
  */

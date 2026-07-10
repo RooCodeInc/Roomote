@@ -1,4 +1,4 @@
-import { findActiveSlackJob } from './find-active-slack-job';
+import { findActiveSlackTaskRun } from './find-active-slack-task-run';
 import { getSlackStartedMessageTs } from './slack-messages';
 import { splitThreadMessages } from './slack-thread-message-utils';
 import type { SlackNotifier } from './slack-notifier';
@@ -14,7 +14,7 @@ export async function getPromptReadyThreadMessages({
   channel,
   threadTs,
   botUserId,
-  startedMessageJobId,
+  startedMessageRunId,
   logContext,
   prefetchedMessages,
 }: {
@@ -22,7 +22,7 @@ export async function getPromptReadyThreadMessages({
   channel: string;
   threadTs: string;
   botUserId?: string;
-  startedMessageJobId?: number | null;
+  startedMessageRunId?: number | null;
   logContext?: string;
   prefetchedMessages?: SlackThreadMessage[];
 }): Promise<PromptReadySlackThreadResult> {
@@ -40,10 +40,10 @@ export async function getPromptReadyThreadMessages({
             channel,
             threadTs,
           }),
-    startedMessageJobId != null
-      ? getSlackStartedMessageTs(startedMessageJobId)
-      : findActiveSlackJob(threadTs).then((activeJob) =>
-          activeJob ? getSlackStartedMessageTs(activeJob.id) : null,
+    startedMessageRunId != null
+      ? getSlackStartedMessageTs(startedMessageRunId)
+      : findActiveSlackTaskRun(threadTs).then((activeRun) =>
+          activeRun ? getSlackStartedMessageTs(activeRun.id) : null,
         ),
   ]);
 

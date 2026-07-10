@@ -231,20 +231,20 @@ function formatWorkspaceReadinessContext({
  * plus Slack-specific wrapping instructions.
  */
 export async function slackAppMention({
-  cloudTask,
+  taskSpec,
   repoFullNames,
   conflictResolverLabel,
-  cloudJobUrl,
+  taskRunUrl,
   attribution = undefined,
   username: _legacyUsername,
   visualProofAutoScreencastEnabled,
   backgroundProofCaptureEnabled,
   prAction,
 }: {
-  cloudTask: SlackAppMentionTask;
+  taskSpec: SlackAppMentionTask;
   repoFullNames?: string[];
   conflictResolverLabel?: string;
-  cloudJobUrl: string;
+  taskRunUrl: string;
   attribution?: ResolvedTaskCommitAuthor;
   username?: string;
   visualProofAutoScreencastEnabled?: boolean;
@@ -265,7 +265,7 @@ export async function slackAppMention({
     ts,
     workspaceReadiness,
     readinessMessage,
-  } = cloudTask.payload;
+  } = taskSpec.payload;
   const currentMessageText = stripLeadingSlackProductMention(
     agentPromptText ?? text,
   );
@@ -307,16 +307,16 @@ export async function slackAppMention({
     repoFullNames,
     taskSurface: 'slack',
     conflictResolverLabel,
-    cloudJobUrl,
+    taskRunUrl,
     attribution,
     slackTeamDomain:
-      getSlackTeamDomainFromTaskPayload(cloudTask.payload) ?? undefined,
-    slackTeamId: getSlackTeamIdFromTaskPayload(cloudTask.payload) ?? undefined,
+      getSlackTeamDomainFromTaskPayload(taskSpec.payload) ?? undefined,
+    slackTeamId: getSlackTeamIdFromTaskPayload(taskSpec.payload) ?? undefined,
     slackConversationUrl:
-      getSlackConversationUrlFromTaskPayload(cloudTask.payload) ?? undefined,
-    slackChannel: cloudTask.payload.channel,
-    slackThreadTs: cloudTask.payload.thread_ts ?? cloudTask.payload.ts,
-    linkedWorkItems: cloudTask.payload.linkedWorkItems,
+      getSlackConversationUrlFromTaskPayload(taskSpec.payload) ?? undefined,
+    slackChannel: taskSpec.payload.channel,
+    slackThreadTs: taskSpec.payload.thread_ts ?? taskSpec.payload.ts,
+    linkedWorkItems: taskSpec.payload.linkedWorkItems,
     visualProofAutoScreencastEnabled,
     backgroundProofCaptureEnabled,
     prAction,

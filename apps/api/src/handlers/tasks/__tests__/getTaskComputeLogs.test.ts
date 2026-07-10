@@ -141,7 +141,7 @@ describe('getTaskComputeLogs', () => {
 
   afterEach(() => {});
 
-  it('returns task cloud jobs with output, skipped reasons, and per-job errors', async () => {
+  it('returns task task runs with output, skipped reasons, and per-job errors', async () => {
     mockFindMany.mockResolvedValue([
       {
         id: 101,
@@ -191,7 +191,7 @@ describe('getTaskComputeLogs', () => {
     await expect(response.json()).resolves.toEqual({
       taskId: 'task-1',
       returned: 5,
-      cloudJobs: [
+      taskRuns: [
         {
           id: 101,
           status: 'failed',

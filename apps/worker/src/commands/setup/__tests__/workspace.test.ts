@@ -107,7 +107,7 @@ describe('initializeRepositories', () => {
         repositories: ['acme/api', 'acme/web'],
       },
       envVars: {},
-      cloudJobType: TaskPayloadKind.StandardTask,
+      taskRunType: TaskPayloadKind.StandardTask,
     });
 
     expect(configureSpy).toHaveBeenCalledTimes(1);
@@ -171,7 +171,7 @@ describe('initializeRepositories', () => {
         repositories: ['acme/api', 'acme/web'],
       },
       envVars: {},
-      cloudJobType: TaskPayloadKind.StandardTask,
+      taskRunType: TaskPayloadKind.StandardTask,
     });
 
     expect(mockListRepositories).not.toHaveBeenCalled();
@@ -221,7 +221,7 @@ describe('initializeRepositories', () => {
         type: 'all_repositories',
       },
       envVars: {},
-      cloudJobType: TaskPayloadKind.StandardTask,
+      taskRunType: TaskPayloadKind.StandardTask,
     });
 
     expect(mockListRepositories).toHaveBeenCalledTimes(1);
@@ -261,7 +261,7 @@ describe('initializeRepositories', () => {
           type: 'all_repositories',
         },
         envVars: {},
-        cloudJobType: TaskPayloadKind.StandardTask,
+        taskRunType: TaskPayloadKind.StandardTask,
       }),
     ).rejects.toThrow(
       'Failed to prepare 1 workspace repository:\n- acme/api: Repository not found: acme/api',
@@ -283,7 +283,7 @@ describe('initializeRepositories', () => {
           repositories: ['acme/api'],
         },
         envVars: {},
-        cloudJobType: TaskPayloadKind.StandardTask,
+        taskRunType: TaskPayloadKind.StandardTask,
       }),
     ).rejects.toThrow(
       'Failed to prepare 1 workspace repository:\n- acme/api: Repository not found: acme/api',
@@ -321,7 +321,7 @@ describe('initializeRepositories', () => {
           repository: 'acme/api',
         },
         envVars: {},
-        cloudJobType: TaskPayloadKind.StandardTask,
+        taskRunType: TaskPayloadKind.StandardTask,
       }),
     ).rejects.toMatchObject({
       failure: {
@@ -375,7 +375,7 @@ describe('initializeRepositories', () => {
         },
       } as WorkspaceConfig,
       envVars: {},
-      cloudJobType: TaskPayloadKind.StandardTask,
+      taskRunType: TaskPayloadKind.StandardTask,
     });
 
     expect(installWorkspaceToolVersionsSpy).toHaveBeenCalledWith({
@@ -410,7 +410,7 @@ describe('initializeRepositories', () => {
         },
       } as WorkspaceConfig,
       envVars: {},
-      cloudJobType: TaskPayloadKind.SnapshotEnvironment,
+      taskRunType: TaskPayloadKind.SnapshotEnvironment,
       cleanupLegacyPaths: true,
     });
 
@@ -468,7 +468,7 @@ describe('initializeSystemServices', () => {
     const result = await initializeSystemServices(createLogger(), {
       workspace,
       envVars,
-      cloudJobType: TaskPayloadKind.StandardTask,
+      taskRunType: TaskPayloadKind.StandardTask,
     });
 
     expect(mockStartServices).toHaveBeenCalledTimes(1);
@@ -502,7 +502,7 @@ describe('initializeSystemServices', () => {
     await initializeSystemServices(createLogger(), {
       workspace,
       envVars,
-      cloudJobType: TaskPayloadKind.StandardTask,
+      taskRunType: TaskPayloadKind.StandardTask,
     });
 
     expect(envVars.AWS_WEB_IDENTITY_TOKEN_FILE).toBe(
@@ -535,7 +535,7 @@ describe('initializeEnvironmentServices', () => {
     await initializeEnvironmentServices(createLogger(), {
       workspace,
       envVars: {},
-      cloudJobType: TaskPayloadKind.StandardTask,
+      taskRunType: TaskPayloadKind.StandardTask,
       serviceContext: {
         taskId: 'task_123',
         publicKey: 'base64-public-key',

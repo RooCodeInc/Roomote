@@ -1,4 +1,4 @@
-import { createPublicAuthToken, createJobToken } from '@roomote/auth';
+import { createPublicAuthToken, createRunToken } from '@roomote/auth';
 import { db, eq, taskRuns } from '@roomote/db/server';
 
 import type { UserAuthSuccess } from '@/types';
@@ -17,14 +17,14 @@ export async function getAuthTokenCommand(
 
 export async function getSandboxAuthTokenCommand(
   auth: UserAuthSuccess,
-  input: { cloudJobId: number; timeoutMs?: number },
+  input: { runId: number; timeoutMs?: number },
 ): Promise<string | undefined> {
   const { userId } = auth;
 
   // Run access is deployment-scoped: any signed-in member may mint a sandbox
   // token for any run; the token is stamped with the requesting user.
   const job = await db.query.taskRuns.findFirst({
-    where: eq(taskRuns.id, input.cloudJobId),
+    where: eq(taskRuns.id, input.runId),
     columns: { id: true },
   });
 
@@ -32,8 +32,8 @@ export async function getSandboxAuthTokenCommand(
     return undefined;
   }
 
-  return createJobToken({
-    cloudJobId: input.cloudJobId,
+  return createRunToken({
+    runId: input.runId,
     userId,
     timeoutMs: input.timeoutMs ?? 6 * 60 * 60 * 1000,
   });

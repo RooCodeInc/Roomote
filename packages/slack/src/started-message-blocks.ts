@@ -9,7 +9,7 @@ import {
 interface BuildStartedBlocksOptions {
   workspaceDisplayName: string;
   modelDisplayName?: string;
-  cloudJobId?: number | null;
+  runId?: number | null;
   otherRunningTasksCount?: number;
   taskId?: string | null;
   initiatingSlackUserId?: string;
@@ -18,7 +18,7 @@ interface BuildStartedBlocksOptions {
 }
 
 interface BuildTaskFailedBlocksOptions {
-  cloudJobId: number;
+  runId: number;
   messageText?: string;
 }
 
@@ -41,7 +41,7 @@ export function buildStartedBlocks(
   const {
     workspaceDisplayName,
     modelDisplayName,
-    cloudJobId,
+    runId,
     otherRunningTasksCount,
     taskId,
     initiatingSlackUserId,
@@ -59,13 +59,13 @@ export function buildStartedBlocks(
     });
   }
 
-  if (taskId || cloudJobId) {
+  if (taskId || runId) {
     actionElements.push({
       type: 'button',
       text: { type: 'plain_text', text: 'Cancel', emoji: false },
       action_id: 'cancel_task',
       value: JSON.stringify({
-        ...(taskId ? { taskId } : { cloudJobId }),
+        ...(taskId ? { taskId } : { runId }),
         ...(initiatingSlackUserId
           ? { slackUserId: initiatingSlackUserId }
           : {}),
@@ -139,7 +139,7 @@ export function buildTaskFailedMessage(options: BuildTaskFailedBlocksOptions): {
             type: 'button',
             text: { type: 'plain_text', text: 'Try again', emoji: false },
             action_id: 'retry_failed_task',
-            value: JSON.stringify({ cloudJobId: options.cloudJobId }),
+            value: JSON.stringify({ runId: options.runId }),
           },
         ],
       },

@@ -224,7 +224,7 @@ export const prReviewNotificationJob = async (
 
   try {
     const delivery = await preparePrReviewNotificationDelivery({
-      cloudJob: latestJob,
+      taskRun: latestJob,
       request: data,
       events,
     });
@@ -248,7 +248,7 @@ export const prReviewNotificationJob = async (
       text: delivery.text,
     });
     await recordPrReviewNotificationDeliveryBestEffort({
-      cloudJobId: latestJob.id,
+      runId: latestJob.id,
       taskId: data.taskId,
       route: delivery.route,
       text: delivery.text,

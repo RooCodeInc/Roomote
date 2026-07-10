@@ -11,8 +11,9 @@ overrides:
   '@vercel/routing-utils>ajv': 6.14.0
   '@vercel/routing-utils>path-to-regexp': 6.3.0
   unicorn-magic: 0.2.0
-  dompurify: 3.4.9
+  dompurify: 3.4.11
   esbuild: ^0.28.1
+  linkify-it: 5.0.2
   engine.io>ws: 8.21.0
   eslint>ajv: 6.14.0
   form-data: 4.0.6
@@ -86,6 +87,9 @@ importers:
       rimraf:
         specifier: ^6.1.2
         version: 6.1.2
+      smol-toml:
+        specifier: 1.6.1
+        version: 1.6.1
       tsx:
         specifier: 4.20.4
         version: 4.20.4
@@ -95,6 +99,9 @@ importers:
       typescript:
         specifier: ^5.9.3
         version: 5.9.3
+      yaml:
+        specifier: ^2.9.0
+        version: 2.9.0
 
   apps/api:
     dependencies:
@@ -6697,8 +6704,8 @@ packages:
   dom-accessibility-api@0.6.3:
     resolution: {integrity: sha512-7ZgogeTnjuHbo+ct10G9Ffp0mif17idi0IyWNVA/wcwcm7NPOD/WEHVP3n7n3MhXqxoIYm8d6MuZohYWIZ4T3w==}
 
-  dompurify@3.4.9:
-    resolution: {integrity: sha512-4dPSRMRDqHvs0V4YDFCsaIZo4if5u0xM+llyxiM2fwuZFdKArUBAF3VtI2+n8NKg9P870WMdYk0UhqQNoWXbfQ==}
+  dompurify@3.4.11:
+    resolution: {integrity: sha512-zhlUV12GsaRzMsf9q5M254YhA4+VuF0fG+QFqu6aYpoGlKtz+w8//jBcGVYBgQkR5GHjUomejY84AV+/uPbWdw==}
 
   dotenv@16.0.3:
     resolution: {integrity: sha512-7GO6HghkA5fYG9TYnNxi14/7K9f5occMlp3zXAuSxn7CKCxt9xbNWG7yF8hTCSUchlfWSe3uLmlPfigevRItzQ==}
@@ -8053,8 +8060,8 @@ packages:
   lines-and-columns@1.2.4:
     resolution: {integrity: sha512-7ylylesZQ/PV29jhEDl3Ufjo6ZX7gCqJr5F7PKrqc93v7fzSymt1BpwEU8nAUXs8qzzvqhbjhK5QZg6Mt/HkBg==}
 
-  linkify-it@3.0.3:
-    resolution: {integrity: sha512-ynTsyrFSdE5oZ/O9GEf00kPngmOfVwazR5GKDq6EYfhlpFug3J2zybX56a2PRRpc9P+FuSoGNAwjlbDs9jJBPQ==}
+  linkify-it@5.0.2:
+    resolution: {integrity: sha512-ONTm2jCMAVZjgQa/Fy1kScXsuOoF5NPTsoFBdE1KVIZ2vAh/r9+Bqo+0jINCBYnavTPQZz38QzFTme79ENoN3Q==}
 
   lint-staged@16.2.7:
     resolution: {integrity: sha512-lDIj4RnYmK7/kXMya+qJsmkRFkGolciXjrsZ6PC25GdTfWOAWetR0ZbsNXRAj1EHHImRSalc+whZFg56F5DVow==}
@@ -10116,8 +10123,8 @@ packages:
     engines: {node: '>=14.17'}
     hasBin: true
 
-  uc.micro@1.0.6:
-    resolution: {integrity: sha512-8Y75pvTYkLJW2hWQHXxoqRgV7qb9B+9vFEtidML+7koHUFapnVJAZ6cKs+Qjz5Aw3aZWHMC6u0wJE3At+nSGwA==}
+  uc.micro@2.1.0:
+    resolution: {integrity: sha512-ARDJmphmdvUk6Glw7y9DQ2bFkKBHwQHLi2lsaH6PPmz/Ka9sFOBsBluozhDltWmnv9u/cF6Rt87znRTPV+yp/A==}
 
   ufo@1.6.3:
     resolution: {integrity: sha512-yDJTmhydvl5lJzBmy/hyOAA0d+aqCBuwl818haVdYCRrWV84o7YyeVm4QlVHStqNrrJSTb6jKuFAVqAFsr+K3Q==}
@@ -15357,7 +15364,7 @@ snapshots:
     dependencies:
       anser: 2.3.5
       escape-carriage: 1.3.1
-      linkify-it: 3.0.3
+      linkify-it: 5.0.2
       react: 19.2.4
       react-dom: 19.2.4(react@19.2.4)
 
@@ -16253,7 +16260,7 @@ snapshots:
 
   dom-accessibility-api@0.6.3: {}
 
-  dompurify@3.4.9:
+  dompurify@3.4.11:
     optionalDependencies:
       '@types/trusted-types': 2.0.7
 
@@ -17753,9 +17760,9 @@ snapshots:
 
   lines-and-columns@1.2.4: {}
 
-  linkify-it@3.0.3:
+  linkify-it@5.0.2:
     dependencies:
-      uc.micro: 1.0.6
+      uc.micro: 2.1.0
 
   lint-staged@16.2.7:
     dependencies:
@@ -18091,7 +18098,7 @@ snapshots:
       d3-sankey: 0.12.3
       dagre-d3-es: 7.0.14
       dayjs: 1.11.20
-      dompurify: 3.4.9
+      dompurify: 3.4.11
       es-toolkit: 1.47.0
       katex: 0.16.28
       khroma: 2.1.0
@@ -20333,7 +20340,7 @@ snapshots:
 
   typescript@5.9.3: {}
 
-  uc.micro@1.0.6: {}
+  uc.micro@2.1.0: {}
 
   ufo@1.6.3: {}
 

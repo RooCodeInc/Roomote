@@ -10,7 +10,7 @@ import {
 } from 'react';
 
 import { appendInitialPath, getPrimaryPortName } from '@roomote/types';
-import type { Run } from '@roomote/db';
+import type { TaskRun } from '@roomote/db';
 
 import {
   ArrowLeft,
@@ -116,10 +116,10 @@ function formatElementContext(context: {
 }
 
 export function PreviewSidePanel({
-  cloudJob,
+  taskRun,
   onClose,
 }: {
-  cloudJob?: Run;
+  taskRun?: TaskRun;
   onClose: () => void;
 }) {
   const {
@@ -130,13 +130,13 @@ export function PreviewSidePanel({
   } = useTaskSidePanel();
   const {
     previewPaneUrl,
-    previewPaneCloudJobId,
+    previewPaneRunId,
     previewPaneServiceName,
     openPreviewPane,
     closePreviewPane,
   } = usePreviewPane();
   const { previewUrls, initialPaths, primaryPortName } = usePreviewUrls(
-    cloudJob ?? {},
+    taskRun ?? {},
   );
   const client = useSandboxClient();
   const iframeRef = useRef<HTMLIFrameElement>(null);
@@ -170,11 +170,11 @@ export function PreviewSidePanel({
     () =>
       primaryPortName ??
       getPrimaryPortName(
-        cloudJob?.machineDomain,
-        cloudJob?.machineDomains,
+        taskRun?.machineDomain,
+        taskRun?.machineDomains,
         undefined,
       ),
-    [cloudJob?.machineDomain, cloudJob?.machineDomains, primaryPortName],
+    [taskRun?.machineDomain, taskRun?.machineDomains, primaryPortName],
   );
 
   const serviceEntries = useMemo<PreviewEntry[]>(() => {
@@ -246,19 +246,19 @@ export function PreviewSidePanel({
   ]);
 
   const effectivePreviewUrl = previewPaneUrl ?? activeEntry?.url ?? null;
-  const effectiveCloudJobId = previewPaneCloudJobId ?? cloudJob?.id ?? null;
+  const effectiveRunId = previewPaneRunId ?? taskRun?.id ?? null;
   const iframeSrc =
-    effectivePreviewUrl && effectiveCloudJobId
-      ? buildPreviewIframeUrl(effectivePreviewUrl, effectiveCloudJobId)
+    effectivePreviewUrl && effectiveRunId
+      ? buildPreviewIframeUrl(effectivePreviewUrl, effectiveRunId)
       : null;
 
   useEffect(() => {
-    if (!cloudJob || !activeEntry) {
+    if (!taskRun || !activeEntry) {
       return;
     }
 
     const hasMatchingPreviewSelection =
-      previewPaneCloudJobId === cloudJob.id &&
+      previewPaneRunId === taskRun.id &&
       (previewPaneServiceName
         ? previewPaneServiceName === activeEntry.name
         : previewPaneUrl === activeEntry.url);
@@ -285,13 +285,13 @@ export function PreviewSidePanel({
       return;
     }
 
-    openPreviewPane(activeEntry.url, cloudJob.id, activeEntry.name);
+    openPreviewPane(activeEntry.url, taskRun.id, activeEntry.name);
   }, [
     activeEntry,
-    cloudJob,
+    taskRun,
     currentUrl,
     openPreviewPane,
-    previewPaneCloudJobId,
+    previewPaneRunId,
     previewPaneServiceName,
     previewPaneUrl,
   ]);
@@ -401,7 +401,7 @@ export function PreviewSidePanel({
       clearTimeout(retryTimeoutRef.current);
       retryTimeoutRef.current = null;
     }
-  }, [effectiveCloudJobId, effectivePreviewUrl]);
+  }, [effectiveRunId, effectivePreviewUrl]);
 
   const handleClose = () => {
     closePreviewPane();
@@ -409,12 +409,12 @@ export function PreviewSidePanel({
   };
 
   const handleSelectEntry = (entry: PreviewEntry) => {
-    if (!cloudJob) {
+    if (!taskRun) {
       return;
     }
 
-    openPreviewPane(entry.url, cloudJob.id, entry.name);
-    openPreviewView(entry.url, cloudJob.id, entry.name);
+    openPreviewPane(entry.url, taskRun.id, entry.name);
+    openPreviewView(entry.url, taskRun.id, entry.name);
   };
 
   const postPreviewNavigation = useCallback(

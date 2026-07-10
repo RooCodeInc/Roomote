@@ -539,7 +539,7 @@ function AgentRunSubview({
       mode: 'create',
     });
   useTaskCompletionNotification(
-    toNotifiableTaskPhase(session.cloudJob?.taskPhase),
+    toNotifiableTaskPhase(session.taskRun?.taskPhase),
   );
 
   const handleFinish = async () => {

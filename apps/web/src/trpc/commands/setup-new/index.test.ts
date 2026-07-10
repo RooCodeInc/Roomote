@@ -110,7 +110,7 @@ vi.mock('@roomote/db/server', () => ({
 }));
 
 vi.mock('@/lib/server', () => ({
-  getLatestCloudJobsByTaskId: vi.fn(),
+  getLatestTaskRunsByTaskId: vi.fn(),
   getRepositories: vi.fn(),
   getRequestInviteToken: vi.fn(
     async () => mockSetupTokenState.inviteCookieToken,
@@ -991,7 +991,7 @@ describe('setup-new onboarding task start command', () => {
     ).mockResolvedValue(null);
     vi.mocked(enqueueTask).mockResolvedValue({
       taskId: 'task-onboarding-1',
-      id: 'cloud-job-1',
+      id: 'task-run-1',
     } as unknown as Awaited<ReturnType<typeof enqueueTask>>);
   });
 

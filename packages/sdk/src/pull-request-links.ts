@@ -412,12 +412,12 @@ export function parsePRsFromText(text: string): ParsedPR[] {
  * Interprets a single tool-result envelope into the pull request(s) it links,
  * sequencing the leaf parsers above in one place so every caller agrees on what
  * counts as a PR link and in what order. Both the server (which persists the
- * link onto the cloud-job row) and the worker (which caches it) call this, so
+ * link onto the task-run row) and the worker (which caches it) call this, so
  * the dispatch logic and the authoritative-result set never drift apart.
  *
  * The only environment-specific input is the fallback repository for a bare
  * `gh pr checkout <number>` with no `--repo` flag: the server reads it from the
- * cloud-job row (async), the worker passes its payload repo. The resolver is
+ * task-run row (async), the worker passes its payload repo. The resolver is
  * invoked only when that exact case is reached, so callers pay nothing for it
  * on every other envelope.
  */

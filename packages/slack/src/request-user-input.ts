@@ -17,7 +17,7 @@ const ANSWER_QUEUE_TTL_SECONDS = 60 * 60;
 
 export interface PendingSlackRequestUserInput {
   requestId: string;
-  cloudJobId: number;
+  runId: number;
   taskId: string;
   questions: AcpRequestUserInputQuestion[];
   promptMessageTs?: string;
@@ -61,7 +61,7 @@ if pendingRequest['requestId'] ~= ARGV[1] then
   return 0
 end
 
-if tostring(pendingRequest['cloudJobId']) ~= ARGV[2] then
+if tostring(pendingRequest['runId']) ~= ARGV[2] then
   return 0
 end
 
@@ -116,8 +116,8 @@ function getPendingRequestKey(threadId: string): string {
   return `${SLACK_PENDING_REQUEST_USER_INPUT_PREFIX}${threadId}`;
 }
 
-function getAnswerQueueKey(cloudJobId: number): string {
-  return `${SLACK_REQUEST_USER_INPUT_ANSWER_QUEUE_PREFIX}${cloudJobId}`;
+function getAnswerQueueKey(runId: number): string {
+  return `${SLACK_REQUEST_USER_INPUT_ANSWER_QUEUE_PREFIX}${runId}`;
 }
 
 function buildPendingSlackRequestUserInputPayload(
@@ -148,9 +148,9 @@ async function claimPendingSlackRequestUserInputUpdate({
     CLAIM_PENDING_REQUEST_USER_INPUT_SCRIPT,
     2,
     getPendingRequestKey(threadId),
-    getAnswerQueueKey(request.cloudJobId),
+    getAnswerQueueKey(request.runId),
     request.requestId,
-    String(request.cloudJobId),
+    String(request.runId),
     String(expectedQuestionIndex),
     JSON.stringify(request),
     answer ? JSON.stringify(answer) : '',
@@ -190,14 +190,13 @@ export async function getPendingSlackRequestUserInput(
     const parsed = JSON.parse(rawValue) as Record<string, unknown>;
     const requestId =
       typeof parsed.requestId === 'string' ? parsed.requestId : null;
-    const cloudJobId =
-      typeof parsed.cloudJobId === 'number' ? parsed.cloudJobId : null;
+    const runId = typeof parsed.runId === 'number' ? parsed.runId : null;
     const taskId = typeof parsed.taskId === 'string' ? parsed.taskId : null;
     const questions = Array.isArray(parsed.questions)
       ? (parsed.questions as AcpRequestUserInputQuestion[])
       : null;
 
-    if (!requestId || cloudJobId === null || !taskId || !questions) {
+    if (!requestId || runId === null || !taskId || !questions) {
       return null;
     }
 
@@ -215,7 +214,7 @@ export async function getPendingSlackRequestUserInput(
 
     return {
       requestId,
-      cloudJobId,
+      runId,
       taskId,
       questions,
       promptMessageTs:
@@ -334,18 +333,18 @@ export async function submitPendingSlackRequestUserInputAnswer(
 }
 
 export async function queueSlackRequestUserInputAnswer(
-  cloudJobId: number,
+  runId: number,
   answer: QueuedSlackRequestUserInputAnswer,
 ): Promise<void> {
   const redis = getRedis();
-  const key = getAnswerQueueKey(cloudJobId);
+  const key = getAnswerQueueKey(runId);
 
   await redis.rpush(key, JSON.stringify(answer));
   await redis.expire(key, ANSWER_QUEUE_TTL_SECONDS);
 }
 
 export async function prependSlackRequestUserInputAnswers(
-  cloudJobId: number,
+  runId: number,
   answers: QueuedSlackRequestUserInputAnswer[],
 ): Promise<void> {
   if (answers.length === 0) {
@@ -353,7 +352,7 @@ export async function prependSlackRequestUserInputAnswers(
   }
 
   const redis = getRedis();
-  const key = getAnswerQueueKey(cloudJobId);
+  const key = getAnswerQueueKey(runId);
   const multi = redis.multi();
 
   for (const answer of [...answers].reverse()) {
@@ -365,10 +364,10 @@ export async function prependSlackRequestUserInputAnswers(
 }
 
 export async function getSlackRequestUserInputAnswers(
-  cloudJobId: number,
+  runId: number,
 ): Promise<QueuedSlackRequestUserInputAnswer[]> {
   const redis = getRedis();
-  const key = getAnswerQueueKey(cloudJobId);
+  const key = getAnswerQueueKey(runId);
   const results = await redis.multi().lrange(key, 0, -1).del(key).exec();
 
   if (!results || results.length === 0) {
@@ -379,7 +378,7 @@ export async function getSlackRequestUserInputAnswers(
 
   if (lrangeError) {
     console.error(
-      `[getSlackRequestUserInputAnswers] Redis lrange failed for cloud job ${cloudJobId}: ${
+      `[getSlackRequestUserInputAnswers] Redis lrange failed for task run ${runId}: ${
         lrangeError instanceof Error ? lrangeError.message : String(lrangeError)
       }`,
     );
@@ -390,7 +389,7 @@ export async function getSlackRequestUserInputAnswers(
 
   if (delError) {
     console.error(
-      `[getSlackRequestUserInputAnswers] Redis del failed for cloud job ${cloudJobId}: ${
+      `[getSlackRequestUserInputAnswers] Redis del failed for task run ${runId}: ${
         delError instanceof Error ? delError.message : String(delError)
       }`,
     );
@@ -408,7 +407,7 @@ export async function getSlackRequestUserInputAnswers(
         items.push(JSON.parse(rawAnswer) as QueuedSlackRequestUserInputAnswer);
       } catch (error) {
         console.error(
-          `[getSlackRequestUserInputAnswers] Failed to parse answer for cloud job ${cloudJobId}: ${
+          `[getSlackRequestUserInputAnswers] Failed to parse answer for task run ${runId}: ${
             error instanceof Error ? error.message : String(error)
           }`,
         );

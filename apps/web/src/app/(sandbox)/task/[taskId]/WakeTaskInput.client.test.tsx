@@ -45,7 +45,7 @@ vi.mock('@/lib/prompt-attachments', () => ({
 }));
 
 vi.mock('@/hooks/snapshots', () => ({
-  useRestoreCloudJobSnapshot: () => ({
+  useRestoreTaskRunSnapshot: () => ({
     mutateAsync: restoreMutateAsyncMock,
     isPending: false,
   }),
@@ -146,7 +146,7 @@ describe('WakeTaskInput', () => {
     });
     restoreMutateAsyncMock.mockResolvedValue({
       success: true,
-      cloudJobId: 84,
+      runId: 84,
       taskId: 'task-42',
     });
     useSandboxCurrentUserInfoMock.mockReturnValue(null);
@@ -162,7 +162,7 @@ describe('WakeTaskInput', () => {
 
     renderWithQueryClient(
       <WakeTaskInput
-        cloudJob={{ id: 42, snapshotId: 'snap-42', taskId: 'task-42' }}
+        taskRun={{ id: 42, snapshotId: 'snap-42', taskId: 'task-42' }}
         initialPrompt="Old draft"
       />,
       queryClient,
@@ -185,7 +185,7 @@ describe('WakeTaskInput', () => {
 
     expect(restoreMutateAsyncMock).toHaveBeenCalledWith({
       sourceSnapshotId: 'snap-42',
-      sourceCloudJobId: 42,
+      sourceRunId: 42,
       clientMessageId: expect.any(String),
       resumePrompt: 'Wake up and keep going',
     });
@@ -223,7 +223,7 @@ describe('WakeTaskInput', () => {
 
     renderWithQueryClient(
       <WakeTaskInput
-        cloudJob={{ id: 42, snapshotId: 'snap-42', taskId: 'task-42' }}
+        taskRun={{ id: 42, snapshotId: 'snap-42', taskId: 'task-42' }}
       />,
       queryClient,
     );
@@ -233,7 +233,7 @@ describe('WakeTaskInput', () => {
     await waitFor(() => {
       expect(restoreMutateAsyncMock).toHaveBeenCalledWith({
         sourceSnapshotId: 'snap-42',
-        sourceCloudJobId: 42,
+        sourceRunId: 42,
         resumePrompt: '',
       });
     });
@@ -260,7 +260,7 @@ describe('WakeTaskInput', () => {
 
     renderWithQueryClient(
       <WakeTaskInput
-        cloudJob={{ id: 42, snapshotId: 'snap-42', taskId: 'task-42' }}
+        taskRun={{ id: 42, snapshotId: 'snap-42', taskId: 'task-42' }}
         initialPrompt="Old draft"
       />,
       queryClient,
@@ -285,7 +285,7 @@ describe('WakeTaskInput', () => {
     await waitFor(() => {
       expect(restoreMutateAsyncMock).toHaveBeenCalledWith({
         sourceSnapshotId: 'snap-42',
-        sourceCloudJobId: 42,
+        sourceRunId: 42,
         clientMessageId: expect.any(String),
         resumePrompt: 'Wake up and keep going',
       });
@@ -313,7 +313,7 @@ describe('WakeTaskInput', () => {
 
     renderWithQueryClient(
       <WakeTaskInput
-        cloudJob={{ id: 42, snapshotId: 'snap-42', taskId: 'task-42' }}
+        taskRun={{ id: 42, snapshotId: 'snap-42', taskId: 'task-42' }}
       />,
       queryClient,
     );
@@ -326,7 +326,7 @@ describe('WakeTaskInput', () => {
     await waitFor(() => {
       expect(restoreMutateAsyncMock).toHaveBeenCalledWith({
         sourceSnapshotId: 'snap-42',
-        sourceCloudJobId: 42,
+        sourceRunId: 42,
         clientMessageId: expect.any(String),
         resumePrompt: 'Wake up and inspect this',
         resumePromptImages: ['data:image/png;base64,image-1'],
@@ -366,7 +366,7 @@ describe('WakeTaskInput', () => {
 
     renderWithQueryClient(
       <WakeTaskInput
-        cloudJob={{ id: 42, snapshotId: 'snap-42', taskId: 'task-42' }}
+        taskRun={{ id: 42, snapshotId: 'snap-42', taskId: 'task-42' }}
       />,
       queryClient,
     );

@@ -22,12 +22,12 @@ function getCookie(req: IncomingMessage, name: string): string | undefined {
 }
 
 /**
- * Handle a request to get the status of a resume job.
+ * Handle a request to get the status of a resume task run.
  * Used by the resuming progress page to poll for completion.
  *
  * GET /api/resume-status/:resumeStatusId
  *
- * Requires a valid preview auth cookie that matches the job's org/user.
+ * Requires a valid preview auth cookie that matches the run's org/user.
  */
 export async function handleResumeStatusRequest(
   req: IncomingMessage,
@@ -67,20 +67,17 @@ export async function handleResumeStatusRequest(
     return;
   }
 
-  const cloudJobId: number | null = Number.isInteger(Number(resumeStatusId))
+  const runId: number | null = Number.isInteger(Number(resumeStatusId))
     ? Number(resumeStatusId)
     : null;
 
-  if (!cloudJobId) {
+  if (!runId) {
     sendJson(404, { error: 'Resume item not found' });
     return;
   }
 
-  const cloudJob = await db.query.taskRuns.findFirst({
-    where: and(
-      eq(taskRuns.id, cloudJobId),
-      eq(taskRuns.actingUserId, token.userId),
-    ),
+  const taskRun = await db.query.taskRuns.findFirst({
+    where: and(eq(taskRuns.id, runId), eq(taskRuns.actingUserId, token.userId)),
     columns: {
       id: true,
       status: true,
@@ -89,26 +86,23 @@ export async function handleResumeStatusRequest(
     },
   });
 
-  if (!cloudJob) {
+  if (!taskRun) {
     logger.info(
       {
-        cloudJobId,
+        runId,
         userId: escapeForLog(token.userId),
       },
-      'Resume status: job not found or unauthorized',
+      'Resume status: run not found or unauthorized',
     );
-    sendJson(404, { error: 'Job not found' });
+    sendJson(404, { error: 'Run not found' });
     return;
   }
 
-  logger.debug(
-    { cloudJobId, status: cloudJob.status },
-    'Resume status request',
-  );
+  logger.debug({ runId, status: taskRun.status }, 'Resume status request');
 
   sendJson(200, {
-    status: cloudJob.status,
-    error: cloudJob.error ?? null,
-    ready: cloudJob.machineId != null,
+    status: taskRun.status,
+    error: taskRun.error ?? null,
+    ready: taskRun.machineId != null,
   });
 }
