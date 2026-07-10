@@ -127,7 +127,7 @@ describe('Analytics', () => {
 
     render(<Analytics />);
 
-    expect(screen.getByTestId('active-item')).toHaveTextContent('pullRequests');
-    expect(screen.getByRole('heading', { name: 'PRs' })).toBeInTheDocument();
+    expect(screen.getByTestId('active-item')).toHaveTextContent('tasks');
+    expect(screen.getByRole('heading', { name: 'Tasks' })).toBeInTheDocument();
   });
 });

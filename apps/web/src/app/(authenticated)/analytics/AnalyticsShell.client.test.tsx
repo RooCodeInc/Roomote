@@ -46,10 +46,10 @@ vi.mock('@/components/system', () => ({
   ),
 }));
 
-import { AnalyticsShell } from './AnalyticsShell';
+import { AnalyticsShell, getAnalyticsHref } from './AnalyticsShell';
 
 describe('AnalyticsShell', () => {
-  it('renders the PRs and Tasks navigation items', () => {
+  it('renders Tasks before PRs in the navigation', () => {
     render(
       <AnalyticsShell
         activeItemId="pullRequests"
@@ -61,9 +61,16 @@ describe('AnalyticsShell', () => {
     );
 
     const nav = screen.getByRole('navigation');
+    const navItems = within(nav).getAllByText(/^(Tasks|PRs)$/);
 
     expect(screen.getByRole('heading', { name: 'PRs' })).toBeInTheDocument();
-    expect(within(nav).getByText('PRs')).toBeInTheDocument();
-    expect(within(nav).getByText('Tasks')).toBeInTheDocument();
+    expect(navItems.map((item) => item.textContent)).toEqual(['Tasks', 'PRs']);
+  });
+
+  it('uses Tasks as the default analytics URL and keeps PRs addressable', () => {
+    expect(getAnalyticsHref('tasks')).toBe('/analytics');
+    expect(getAnalyticsHref('pullRequests')).toBe(
+      '/analytics?object=pullRequests',
+    );
   });
 });
