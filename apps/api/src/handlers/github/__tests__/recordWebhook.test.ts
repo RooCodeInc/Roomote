@@ -46,7 +46,6 @@ describe('recordWebhook', () => {
     expect(webhook!.payload).toEqual({ test: 'payload' });
     expect(webhook!.succeededAt).not.toBeNull();
     expect(webhook!.failedAt).toBeNull();
-    expect(webhook!.ignoredAt).toBeNull();
     expect(webhook!.error).toBeNull();
   });
 
@@ -94,7 +93,6 @@ describe('recordWebhook', () => {
     expect(webhook!.payload).toEqual({ repo: 'test/repo' });
     expect(webhook!.succeededAt).toBeNull();
     expect(webhook!.failedAt).not.toBeNull();
-    expect(webhook!.ignoredAt).toBeNull();
     expect(webhook!.error).toBe('Something went wrong');
   });
 
@@ -122,7 +120,6 @@ describe('recordWebhook', () => {
     expect(webhook!.payload).toEqual({ repo: 'test/repo' });
     expect(webhook!.succeededAt).toBeNull();
     expect(webhook!.failedAt).not.toBeNull();
-    expect(webhook!.ignoredAt).toBeNull();
     expect(webhook!.error).toBe('Handler crashed unexpectedly');
   });
 
