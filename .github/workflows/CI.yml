@@ -173,6 +173,17 @@ jobs:
           DATABASE_URL: postgres://postgres:password@localhost:5432/test
           REDIS_URL: redis://localhost:6379
 
+  backup-restore:
+    name: Fresh-host Backup Restore
+    needs: changes
+    if: ${{ needs.changes.outputs.docs_only != 'true' }}
+    runs-on: blacksmith-4vcpu-ubuntu-2404
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - name: Restore an encrypted bundle onto empty volumes
+        run: bash deploy/host/tests/backup-restore.integration.sh
+
   docker-build:
     name: Docker Build (${{ matrix.app }})
     needs: changes

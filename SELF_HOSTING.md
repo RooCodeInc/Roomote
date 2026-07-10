@@ -81,9 +81,40 @@ roomote status              # service health
 roomote logs [service...]   # follow logs
 roomote setup-url           # re-print the tokenized /setup link
 roomote upgrade [version]   # upgrade or roll back by image tag
-roomote backup              # pg_dump into /opt/roomote/backups
-roomote restore <f> --yes   # restore a dump (overwrites the database)
+roomote backup              # encrypted recovery bundle in /opt/roomote/backups
+roomote restore <f> --yes   # restore configuration and data onto this host
 ```
+
+The backup command prompts twice for a passphrase. It creates a versioned,
+encrypted `.roomote` bundle containing the PostgreSQL dump, `/opt/roomote/.env`
+(including encryption and signing keys), the Compose and Caddy configuration,
+local MinIO artifacts, schema metadata, and exact container image digests.
+Keep the passphrase outside the host in a secret manager. For unattended use,
+pass a root-readable file with `--passphrase-file`; do not put the passphrase
+on the command line.
+
+Add `--include-redis` when queued tasks, BullMQ schedules, sessions, and
+transient integration state must survive host loss. Without it, restore clears
+Redis so old transient state cannot conflict with the restored database.
+
+Backup establishes an application-quiesced consistency point: it stops web,
+API, controller, BullMQ, preview proxy, and active Docker task workers before
+dumping PostgreSQL and snapshotting local MinIO and optional Redis. Schedule it
+during a maintenance window. The Compose services restart when backup
+finishes; interrupted Docker tasks may be recovered by the normal orphaned-task
+flow.
+
+For external S3-compatible storage, the bundle records the endpoint and bucket
+but does not copy objects. Back up and restore that bucket using the storage
+provider before starting Roomote on the replacement host.
+
+To recover a completely new server, run the one-command installer first, copy
+the bundle onto the host, then run `roomote restore <bundle> --yes`. Restore
+decrypts and verifies every bundled file before stopping the new installation,
+restores the original `.env`, repopulates empty data volumes, pins the recorded
+image digests, restores PostgreSQL, and starts the recorded release. A wrong
+passphrase, checksum failure, missing local-MinIO data, or unavailable image
+identity fails before restored services are started.
 
 `roomote upgrade` prunes old Roomote images after a successful upgrade. It
 keeps the current release plus the newest local Roomote image tags for a total
@@ -118,7 +149,9 @@ For production-style use, also prepare:
 - An app domain, for example `roomote.example.com`.
 - A preview domain plus wildcard DNS, for example
   `preview.roomote.example.com` and `*.preview.roomote.example.com`.
-- A backup plan for Postgres, Redis, and MinIO volumes.
+- A tested encrypted `roomote backup` schedule and an off-host copy of both the
+  bundle and its separately stored passphrase.
+- A provider-level object backup when using external S3-compatible storage.
 
 ## Environment Files
 

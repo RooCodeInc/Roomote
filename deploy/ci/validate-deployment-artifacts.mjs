@@ -205,12 +205,12 @@ assert(
 );
 
 const imageLocations = {
+  // List only files that directly declare or run each image. The remote
+  // backup/restore scripts delegate datastore operations to deploy/host/roomote.
   postgres: [
     'docker-compose.yml',
     'deploy/compose/docker-compose.prod.yml',
     'deploy/coolify/docker-compose.yaml',
-    'deploy/scripts/backup.sh',
-    'deploy/scripts/restore.sh',
     'deploy/host/roomote',
   ],
   redis: [

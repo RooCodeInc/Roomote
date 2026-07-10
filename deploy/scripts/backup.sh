@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+# shellcheck source=lib.sh
+# shellcheck disable=SC2154 # ssh_args and scp_args are initialized by configure_ssh_args.
 source "$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)/lib.sh"
 
 usage() {
@@ -12,6 +14,10 @@ Options:
   --ssh-user <user>         SSH user (default: root)
   --ssh-private-key <path>  Private key for SSH
   --output-dir <dir>        Local backup directory (default: deploy/state/<customer>/backups)
+  --passphrase-file <path>  File containing the bundle encryption passphrase
+  --include-redis           Preserve queues, schedules, and transient state
+
+ROOMOTE_BACKUP_PASSPHRASE may be used instead of --passphrase-file.
 EOF
 }
 
@@ -20,6 +26,9 @@ host=''
 ssh_user='root'
 ssh_private_key=''
 output_dir=''
+passphrase_file=''
+include_redis='false'
+generated_passphrase='false'
 
 while [ "$#" -gt 0 ]; do
   case "$1" in
@@ -43,6 +52,14 @@ while [ "$#" -gt 0 ]; do
       output_dir="$(abs_path "${2:-}")"
       shift 2
       ;;
+    --passphrase-file)
+      passphrase_file="$(abs_path "${2:-}")"
+      shift 2
+      ;;
+    --include-redis)
+      include_redis='true'
+      shift
+      ;;
     --help | -h)
       usage
       exit 0
@@ -58,6 +75,23 @@ done
 validate_slug "$customer"
 require_cmd ssh
 require_cmd scp
+[ -z "$passphrase_file" ] || [ -s "$passphrase_file" ] || die "passphrase file not found or empty: $passphrase_file"
+
+if [ -z "$passphrase_file" ]; then
+  [ -n "${ROOMOTE_BACKUP_PASSPHRASE:-}" ] || die "--passphrase-file or ROOMOTE_BACKUP_PASSPHRASE is required"
+  [ ${#ROOMOTE_BACKUP_PASSPHRASE} -ge 12 ] || die "ROOMOTE_BACKUP_PASSPHRASE must be at least 12 characters"
+  passphrase_file="$(mktemp)"
+  chmod 600 "$passphrase_file"
+  printf '%s' "$ROOMOTE_BACKUP_PASSPHRASE" >"$passphrase_file"
+  generated_passphrase='true'
+fi
+
+cleanup() {
+  if [ "$generated_passphrase" = 'true' ]; then
+    rm -f "$passphrase_file"
+  fi
+}
+trap cleanup EXIT
 
 host="$(resolve_host "$customer" "$host")"
 target="$ssh_user@$host"
@@ -68,18 +102,22 @@ if [ -z "$output_dir" ]; then
 fi
 mkdir -p "$output_dir"
 
-printf 'Creating Postgres backup on %s\n' "$target"
-remote_backup="$(
-  ssh "${ssh_args[@]}" "$target" <<'REMOTE'
-set -euo pipefail
-cd /opt/roomote
-mkdir -p backups
-backup="backups/backup-$(date +%F-%H%M%S).sql"
-docker run --rm --network roomote_default --env-file /opt/roomote/.env postgres:17.5@sha256:aadf2c0696f5ef357aa7a68da995137f0cf17bad0bf6e1f17de06ae5c769b302 sh -c 'pg_dump --clean --if-exists --no-owner --no-privileges "$DATABASE_URL"' > "$backup"
-chmod 600 "$backup"
-printf '/opt/roomote/%s\n' "$backup"
-REMOTE
-)"
+timestamp="$(date -u +%Y%m%dT%H%M%SZ)"
+remote_backup="/opt/roomote/backups/backup-$timestamp.roomote"
+remote_passphrase="/opt/roomote/backups/.backup-passphrase-$timestamp"
+remote_redis_arg=''
+[ "$include_redis" = 'false' ] || remote_redis_arg=' --include-redis'
+
+printf 'Copying the encryption passphrase to %s for this operation\n' "$target"
+ssh "${ssh_args[@]}" "$target" 'install -d -m 0700 /opt/roomote/backups'
+scp "${scp_args[@]}" "$passphrase_file" "$target:$remote_passphrase"
+ssh "${ssh_args[@]}" "$target" "chmod 600 $(shell_quote "$remote_passphrase")"
+
+printf 'Creating encrypted deployment backup on %s\n' "$target"
+if ! ssh "${ssh_args[@]}" "$target" \
+  "trap \"rm -f $remote_passphrase\" EXIT; roomote backup --passphrase-file $(shell_quote "$remote_passphrase") --output $(shell_quote "$remote_backup")$remote_redis_arg"; then
+  die "remote backup failed"
+fi
 
 scp "${scp_args[@]}" "$target:$remote_backup" "$output_dir/"
 printf 'Backup complete: %s/%s\n' "$output_dir" "$(basename "$remote_backup")"
