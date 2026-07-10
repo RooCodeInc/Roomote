@@ -58,7 +58,7 @@ describe('buildAutoAddedTaskModelSettings', () => {
 
     // OpenRouter defaults survive; unusable direct-OpenAI defaults do not.
     expect(modelIds).toContain(DEFAULT_TASK_MODEL_ID);
-    expect(modelIds).not.toContain('openai/gpt-5.4');
+    expect(modelIds).not.toContain('openai/gpt-5.6-terra');
     expect(modelIds).toEqual(
       expect.arrayContaining(
         ANTHROPIC.suggestedTaskModels.map((suggestion) => suggestion.id),

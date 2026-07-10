@@ -204,7 +204,7 @@ delegate screenshot, diagram, chart, rendered-document, and other visual
 inspection through it:
 
 ```sh
-ROOMOTE_VISION_MODEL=openrouter/openai/gpt-5.5
+ROOMOTE_VISION_MODEL=openrouter/openai/gpt-5.6-sol
 ```
 
 Set `ROOMOTE_CODE_REVIEW_MODEL` when pull request and merge request review
@@ -213,7 +213,7 @@ should use a different model from the active coding model. When unset, those
 review flows fall back to the default coding model:
 
 ```sh
-ROOMOTE_CODE_REVIEW_MODEL=openrouter/openai/gpt-5.5
+ROOMOTE_CODE_REVIEW_MODEL=openrouter/openai/gpt-5.6-sol
 ```
 
 Set `ROOMOTE_EXPLORE_MODEL` when read-only codebase exploration through the
@@ -221,7 +221,7 @@ OpenCode `explore` subagent should use a different model from the active coding
 model. When unset, exploration falls back to the task's active coding model:
 
 ```sh
-ROOMOTE_EXPLORE_MODEL=openrouter/openai/gpt-5.4-mini
+ROOMOTE_EXPLORE_MODEL=openrouter/openai/gpt-5.6-luna
 ```
 
 The provider is the first segment of the model id. Roomote forwards these
