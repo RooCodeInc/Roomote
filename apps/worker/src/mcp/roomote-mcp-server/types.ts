@@ -24,9 +24,9 @@ export interface TaskSearchResult {
   harness: string | null;
   createdAt: number | null;
   lastMessageAt: number | null;
-  cloudJobStatus: string | null;
+  taskRunStatus: string | null;
   taskPhase: string | null;
-  cloudJobError: string | null;
+  taskRunError: string | null;
 }
 
 export interface TaskSearchResponse {
@@ -43,9 +43,9 @@ export interface TaskSummaryResponse {
   repositoryName: string | null;
   harness: string | null;
   createdAt: number | null;
-  cloudJobStatus: string | null;
+  taskRunStatus: string | null;
   taskPhase: string | null;
-  cloudJobError: string | null;
+  taskRunError: string | null;
   linkedEnvironmentId: string | null;
   linkedEnvironmentName: string | null;
 }
@@ -64,7 +64,7 @@ export interface TaskComputeLog {
 export interface TaskComputeLogsResponse {
   taskId: string;
   returned: number;
-  cloudJobs: TaskComputeLog[];
+  taskRuns: TaskComputeLog[];
 }
 
 export interface SourceControlPullRequestResponse {
@@ -75,6 +75,7 @@ export interface SourceControlPullRequestResponse {
   number: number;
   url: string;
   title: string;
+  targetBranch: string;
   draft: boolean;
   warnings: string[];
 }
@@ -90,7 +91,7 @@ export interface SourceControlPullRequestReadResponse {
 
 export interface LaunchTaskResponse {
   success: boolean;
-  cloudJobId?: number;
+  runId?: number;
   taskId?: string;
   error?: string;
 }

@@ -1,4 +1,4 @@
-import type { JobTokenContext } from '@roomote/types';
+import type { RunTokenContext } from '@roomote/types';
 
 import { WorkerEnv } from '../../../env';
 import { appRouter } from '../../routers';
@@ -13,7 +13,7 @@ const { mockGetResolvedRuntimeEnvVars, mockFindFirstById, mockInjectEnvVars } =
 
 vi.mock('@roomote/sdk/client', () => ({
   sdk: {
-    cloudJobs: {
+    taskRuns: {
       getResolvedRuntimeEnvVars: mockGetResolvedRuntimeEnvVars,
       findFirstById: mockFindFirstById,
     },
@@ -37,7 +37,7 @@ function createWorkerEnv() {
       trpcUrl: 'https://trpc.internal.example.com',
       previewProxyBaseUrl: 'https://preview.roomote.run',
       previewProxySubdomainSuffix: 'preview.roomote.run',
-      openRoomoteAppUrl: 'https://app.roomote.example',
+      roomoteAppUrl: 'https://app.roomote.example',
       appEnv: 'development',
     },
   });
@@ -56,7 +56,7 @@ function createWorkerEnv() {
   return workerEnv;
 }
 
-function createCaller(workerEnv?: WorkerEnv, cloudJobId = 1) {
+function createCaller(workerEnv?: WorkerEnv, runId = 1) {
   const commandEnv = {
     HOME: '/home/testuser',
     PATH: '/usr/bin:/usr/local/bin',
@@ -64,7 +64,7 @@ function createCaller(workerEnv?: WorkerEnv, cloudJobId = 1) {
     GH_TOKEN: 'gh-token',
     LEGACY_VALUE: 'old-value',
     ROOMOTE_TASK_ID: 'task-123',
-    ROOMOTE_TASK_TYPE: 'standard.task',
+    ROOMOTE_TASK_TYPE: 'standard',
     CLAUDE_APPEND_SYSTEM_PROMPT: 'follow the system instructions',
   };
   const setCommandEnv = vi.fn();
@@ -85,12 +85,13 @@ function createCaller(workerEnv?: WorkerEnv, cloudJobId = 1) {
       }),
     },
     auth: {
-      cloudJobId,
+      runId,
       userId: 'user-1',
-      tokenType: 'cj',
+      principal: 'user',
+      tokenType: 'run',
       version: 1,
-    } satisfies JobTokenContext,
-    cloudJobId,
+    } satisfies RunTokenContext,
+    runId,
     workerEnv,
   } as unknown as Context;
 
@@ -124,7 +125,7 @@ describe('reloadDeploymentEnvVars procedure', () => {
     );
     expect(result.names).toHaveLength(2);
     expect(mockGetResolvedRuntimeEnvVars).toHaveBeenCalledWith({
-      cloudJobId: 1,
+      runId: 1,
     });
     expect(mockFindFirstById).toHaveBeenCalledWith(1);
     expect(mockInjectEnvVars).toHaveBeenCalledTimes(1);
@@ -160,7 +161,7 @@ describe('reloadDeploymentEnvVars procedure', () => {
       ANTHROPIC_API_KEY: 'new-anthropic-key',
       BASH_ENV: '/tmp/roomote/env.sh',
       ROOMOTE_TASK_ID: 'task-123',
-      ROOMOTE_TASK_TYPE: 'standard.task',
+      ROOMOTE_TASK_TYPE: 'standard',
       CLAUDE_APPEND_SYSTEM_PROMPT: 'follow the system instructions',
     });
   });

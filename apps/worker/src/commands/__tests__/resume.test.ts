@@ -1,12 +1,12 @@
-const { executeJobMock, resumeMock, runTaskMock } = vi.hoisted(() => ({
-  executeJobMock: vi.fn(),
+const { executeTaskRunMock, resumeMock, runTaskMock } = vi.hoisted(() => ({
+  executeTaskRunMock: vi.fn(),
   resumeMock: vi.fn(),
   runTaskMock: vi.fn(),
 }));
 
 vi.mock('@roomote/sdk/client', () => ({
   sdk: {
-    cloudJobs: {
+    taskRuns: {
       resume: resumeMock,
     },
   },
@@ -26,10 +26,10 @@ vi.mock('../callbacks/slack-mention', () => ({
 
 vi.mock('../utils', () => ({
   buildWorkspaceConfig: vi.fn(),
-  executeJob: executeJobMock,
+  executeTaskRun: executeTaskRunMock,
 }));
 
-import { CloudTaskType } from '@roomote/types';
+import { TaskPayloadKind } from '@roomote/types';
 
 import { resume } from '../resume';
 
@@ -40,12 +40,12 @@ describe('resume', () => {
   });
 
   it('forwards native proof capture into runTask', async () => {
-    executeJobMock.mockImplementation(async ({ runFn }) => {
+    executeTaskRunMock.mockImplementation(async ({ runFn }) => {
       await runFn({
         jobContext: {
-          cloudJob: {
+          taskRun: {
             id: 42,
-            type: CloudTaskType.StandardTask,
+            payloadKind: TaskPayloadKind.StandardTask,
             taskId: 'task-42',
           },
           envVars: {},
@@ -80,12 +80,12 @@ describe('resume', () => {
   });
 
   it('forwards workspace readiness warnings into runTask', async () => {
-    executeJobMock.mockImplementation(async ({ runFn }) => {
+    executeTaskRunMock.mockImplementation(async ({ runFn }) => {
       await runFn({
         jobContext: {
-          cloudJob: {
+          taskRun: {
             id: 43,
-            type: CloudTaskType.StandardTask,
+            payloadKind: TaskPayloadKind.StandardTask,
             taskId: 'task-43',
           },
           envVars: {},

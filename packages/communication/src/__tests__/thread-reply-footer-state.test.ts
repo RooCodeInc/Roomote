@@ -61,6 +61,36 @@ describe('thread reply footer state', () => {
     );
   });
 
+  it('reads back footer images used to re-attach content on footer clear', async () => {
+    getMock.mockResolvedValue(
+      JSON.stringify({
+        messageId: 'activity-2',
+        textWithoutFooter: 'the bare reply text',
+        images: [
+          {
+            url: 'https://app.example.com/api/artifacts/art-1/raw?sig=signed',
+            altText: 'screenshot.png',
+            contentType: 'image/png',
+          },
+        ],
+      }),
+    );
+
+    await expect(
+      getThreadReplyFooterRecord('teams', '19:conversation', 'thread-1'),
+    ).resolves.toEqual({
+      messageId: 'activity-2',
+      textWithoutFooter: 'the bare reply text',
+      images: [
+        {
+          url: 'https://app.example.com/api/artifacts/art-1/raw?sig=signed',
+          altText: 'screenshot.png',
+          contentType: 'image/png',
+        },
+      ],
+    });
+  });
+
   it('returns null for missing or malformed records', async () => {
     await expect(
       getThreadReplyFooterRecord('teams', '19:conversation', 'thread-1'),

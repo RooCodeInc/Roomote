@@ -12,11 +12,12 @@ function withTypedArtifactType<T extends { artifactType: string }>(
 
 /**
  * Auth context for artifact access checks.
- * This is the common subset of JobAuthTokenSuccess, UserAuthTokenSuccess, and UserAuthSuccess.
+ * This is the common subset of RunAuthTokenSuccess, UserAuthTokenSuccess, and UserAuthSuccess.
  * All these types include userId and isAdmin.
  */
 type ArtifactAuth = {
-  userId: string;
+  /** Null for deployment-principal run tokens (no human user). */
+  userId: string | null;
   isAdmin: boolean;
 };
 

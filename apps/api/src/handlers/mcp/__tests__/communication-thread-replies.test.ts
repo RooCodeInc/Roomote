@@ -1,17 +1,20 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { createTeamsCommunicationProviderFromRuntimeCredentials } from '@roomote/sdk/server';
 
 const {
-  buildThreadReplyImageBlocksMock,
+  buildThreadReplyImagesMock,
   envMock,
   getLatestInboundMessageIdMock,
   postMessageMock,
+  sendChatActionMock,
   resolveTelegramRuntimeCredentialsMock,
   withThreadReplyFooterLockMock,
 } = vi.hoisted(() => ({
-  buildThreadReplyImageBlocksMock: vi.fn(),
+  buildThreadReplyImagesMock: vi.fn(),
   envMock: { ROOMOTE_APP_URL: 'https://app.example.com' },
   getLatestInboundMessageIdMock: vi.fn(),
   postMessageMock: vi.fn(),
+  sendChatActionMock: vi.fn(),
   resolveTelegramRuntimeCredentialsMock: vi.fn(),
   withThreadReplyFooterLockMock: vi.fn(),
 }));
@@ -23,12 +26,20 @@ vi.mock('@roomote/db/server', () => ({
 }));
 
 vi.mock('@roomote/communication', () => ({
+  buildThreadReplyFooterText: vi.fn().mockReturnValue(null),
+  formatMarkdownLink: vi.fn(),
+  getThreadReplyFooterRecord: vi.fn(),
   TelegramCommunicationProvider: vi.fn().mockImplementation(function () {
-    return { postMessage: postMessageMock };
+    return { postMessage: postMessageMock, sendChatAction: sendChatActionMock };
   }),
   TeamsCommunicationProvider: vi.fn(),
   UnsupportedCommunicationOperationError: class UnsupportedCommunicationOperationError extends Error {},
   getLatestInboundMessageId: getLatestInboundMessageIdMock,
+  resolveThreadReplyFooterContext: vi.fn().mockResolvedValue({
+    linkedPr: null,
+    livePreviewUrl: null,
+  }),
+  setThreadReplyFooterRecord: vi.fn(),
 }));
 
 vi.mock('@roomote/communication/chat-messages', () => ({
@@ -51,15 +62,20 @@ vi.mock('@roomote/slack', () => ({
 }));
 
 vi.mock('../chat-reply-helpers.js', () => ({
-  buildThreadReplyImageBlocks: buildThreadReplyImageBlocksMock,
+  buildThreadReplyImages: buildThreadReplyImagesMock,
   errorResponseForThreadReplyImageError: vi.fn(),
   THREAD_REPLY_FOOTER_LOCK_TIMEOUT_MESSAGE: 'busy',
   withThreadReplyFooterLock: withThreadReplyFooterLockMock,
 }));
 
+import {
+  buildThreadReplyFooterText,
+  getThreadReplyFooterRecord,
+  setThreadReplyFooterRecord,
+} from '@roomote/communication';
 import { maybeSendCommunicationThreadReply } from '../communication-thread-replies';
 
-const telegramCloudJob = {
+const telegramTaskRun = {
   id: 42,
   taskId: 'task-1',
   prRepo: null,
@@ -71,13 +87,149 @@ const telegramCloudJob = {
   },
 };
 
+const teamsTaskRun = {
+  id: 43,
+  taskId: 'task-2',
+  prRepo: null,
+  prNumber: null,
+  payload: {
+    communicationProvider: 'teams',
+    communicationChannelId: '19:conversation@thread.v2',
+    communicationServiceUrl: 'https://smba.trafficmanager.net/amer/',
+    communicationThreadId: 'activity-root',
+    communicationMessageId: 'activity-root',
+  },
+};
+
+describe('maybeSendCommunicationThreadReply (Teams)', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    buildThreadReplyImagesMock.mockResolvedValue([
+      {
+        url: 'https://app.example.com/api/artifacts/art-1/raw?sig=signed',
+        altText: 'screenshot.png',
+        contentType: 'image/png',
+      },
+    ]);
+    postMessageMock.mockResolvedValue({ messageId: 'activity-reply' });
+    // Tests force no managed-footer path unless they override this.
+    vi.mocked(buildThreadReplyFooterText).mockReturnValue(null as never);
+    vi.mocked(getThreadReplyFooterRecord).mockResolvedValue(null);
+    withThreadReplyFooterLockMock.mockImplementation(
+      async ({ fn }: { fn: () => Promise<unknown> }) => fn(),
+    );
+    vi.mocked(
+      createTeamsCommunicationProviderFromRuntimeCredentials,
+    ).mockResolvedValue({
+      postMessage: postMessageMock,
+      updateMessage: vi.fn(),
+    } as never);
+  });
+
+  it('sends image artifacts as Teams images instead of markdown links', async () => {
+    const response = await maybeSendCommunicationThreadReply({
+      taskRun: teamsTaskRun,
+      parsedBody: { text: 'done', images: [{ artifactId: 'art-1' }] },
+    });
+
+    expect(response).not.toBeNull();
+    expect(buildThreadReplyImagesMock).toHaveBeenCalledWith({
+      artifactIds: ['art-1'],
+      taskRun: { id: 43, taskId: 'task-2' },
+    });
+    expect(postMessageMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        channelId: '19:conversation@thread.v2',
+        serviceUrl: 'https://smba.trafficmanager.net/amer/',
+        text: 'done',
+        images: [
+          {
+            url: 'https://app.example.com/api/artifacts/art-1/raw?sig=signed',
+            altText: 'screenshot.png',
+            contentType: 'image/png',
+          },
+        ],
+      }),
+    );
+    expect(postMessageMock.mock.calls[0]?.[0]?.text).not.toContain(
+      'Attachments:',
+    );
+  });
+
+  it('re-sends previous reply images when clearing a managed footer', async () => {
+    const updateMessageMock = vi.fn().mockResolvedValue(undefined);
+    const footerImages = [
+      {
+        url: 'https://app.example.com/api/artifacts/art-1/raw?sig=signed',
+        altText: 'screenshot.png',
+        contentType: 'image/png',
+      },
+    ];
+
+    withThreadReplyFooterLockMock.mockImplementation(
+      async ({ fn }: { fn: () => Promise<unknown> }) => fn(),
+    );
+    vi.mocked(buildThreadReplyFooterText).mockReturnValue(
+      '[View task](https://app.example.com/task/task-2)',
+    );
+    vi.mocked(getThreadReplyFooterRecord).mockResolvedValue({
+      messageId: 'previous-reply',
+      textWithoutFooter: 'earlier reply with image',
+      images: footerImages,
+    });
+    vi.mocked(setThreadReplyFooterRecord).mockResolvedValue(undefined);
+    postMessageMock.mockResolvedValue({ messageId: 'new-reply' });
+    vi.mocked(
+      createTeamsCommunicationProviderFromRuntimeCredentials,
+    ).mockResolvedValue({
+      postMessage: postMessageMock,
+      updateMessage: updateMessageMock,
+    } as never);
+
+    const response = await maybeSendCommunicationThreadReply({
+      taskRun: teamsTaskRun,
+      parsedBody: {
+        text: 'later update',
+        images: [{ artifactId: 'art-1' }],
+      },
+    });
+
+    expect(response).not.toBeNull();
+    expect(postMessageMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        text: expect.stringContaining('later update'),
+        images: footerImages,
+      }),
+    );
+    expect(updateMessageMock).toHaveBeenCalledWith({
+      channelId: '19:conversation@thread.v2',
+      serviceUrl: 'https://smba.trafficmanager.net/amer/',
+      messageId: 'previous-reply',
+      text: 'earlier reply with image',
+      textFormat: 'markdown',
+      images: footerImages,
+    });
+    expect(setThreadReplyFooterRecord).toHaveBeenCalledWith(
+      'teams',
+      '19:conversation@thread.v2',
+      'activity-root',
+      {
+        messageId: 'new-reply',
+        textWithoutFooter: 'later update',
+        images: footerImages,
+      },
+    );
+  });
+});
+
 describe('maybeSendCommunicationThreadReply (Telegram)', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     resolveTelegramRuntimeCredentialsMock.mockResolvedValue({ botToken: 't' });
-    buildThreadReplyImageBlocksMock.mockResolvedValue([]);
+    buildThreadReplyImagesMock.mockResolvedValue([]);
     getLatestInboundMessageIdMock.mockResolvedValue(null);
     postMessageMock.mockResolvedValue({ messageId: '999' });
+    sendChatActionMock.mockResolvedValue(undefined);
     // Skip the footer path by returning null footer (resolveSlackThreadLinkedPr mocked)
   });
 
@@ -85,7 +237,7 @@ describe('maybeSendCommunicationThreadReply (Telegram)', () => {
     getLatestInboundMessageIdMock.mockResolvedValue('200');
 
     const response = await maybeSendCommunicationThreadReply({
-      cloudJob: telegramCloudJob,
+      taskRun: telegramTaskRun,
       parsedBody: { text: 'done', images: [] },
     });
 
@@ -102,7 +254,7 @@ describe('maybeSendCommunicationThreadReply (Telegram)', () => {
     getLatestInboundMessageIdMock.mockResolvedValue(null);
 
     await maybeSendCommunicationThreadReply({
-      cloudJob: telegramCloudJob,
+      taskRun: telegramTaskRun,
       parsedBody: { text: 'done', images: [] },
     });
 
@@ -118,7 +270,7 @@ describe('maybeSendCommunicationThreadReply (Telegram)', () => {
     getLatestInboundMessageIdMock.mockRejectedValue(new Error('redis down'));
 
     await maybeSendCommunicationThreadReply({
-      cloudJob: telegramCloudJob,
+      taskRun: telegramTaskRun,
       parsedBody: { text: 'done', images: [] },
     });
 
@@ -127,6 +279,31 @@ describe('maybeSendCommunicationThreadReply (Telegram)', () => {
         channelId: '222',
         replyToMessageId: '100',
       }),
+    );
+  });
+
+  it('shows a typing action for the chat while delivering the reply', async () => {
+    await maybeSendCommunicationThreadReply({
+      taskRun: telegramTaskRun,
+      parsedBody: { text: 'done', images: [] },
+    });
+
+    expect(sendChatActionMock).toHaveBeenCalledWith(
+      expect.objectContaining({ channelId: '222' }),
+    );
+  });
+
+  it('delivers the reply even if the typing action fails', async () => {
+    sendChatActionMock.mockRejectedValue(new Error('typing failed'));
+
+    const response = await maybeSendCommunicationThreadReply({
+      taskRun: telegramTaskRun,
+      parsedBody: { text: 'done', images: [] },
+    });
+
+    expect(response).not.toBeNull();
+    expect(postMessageMock).toHaveBeenCalledWith(
+      expect.objectContaining({ channelId: '222', text: 'done' }),
     );
   });
 });

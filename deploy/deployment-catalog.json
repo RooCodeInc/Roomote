@@ -1,0 +1,79 @@
+{
+  "criticalImages": {
+    "postgres": "postgres:17.5@sha256:aadf2c0696f5ef357aa7a68da995137f0cf17bad0bf6e1f17de06ae5c769b302",
+    "redis": "redis:7-alpine@sha256:6ab0b6e7381779332f97b8ca76193e45b0756f38d4c0dcda72dbb3c32061ab99",
+    "minio": "minio/minio:RELEASE.2025-09-07T16-13-09Z@sha256:14cea493d9a34af32f524e538b8346cf79f3321eff8e708c1e2960462bd8936e",
+    "minioClient": "minio/mc:RELEASE.2025-08-13T08-35-41Z@sha256:a7fe349ef4bd8521fb8497f55c6042871b2ae640607cf99d9bede5e9bdf11727",
+    "caddy": "caddy:2.10-alpine@sha256:4c6e91c6ed0e2fa03efd5b44747b625fec79bc9cd06ac5235a779726618e530d"
+  },
+  "composeShapes": [
+    {
+      "name": "development",
+      "files": ["docker-compose.yml"]
+    },
+    {
+      "name": "self-host",
+      "files": ["docker-compose.yml", "docker-compose.self-host.yml"]
+    },
+    {
+      "name": "self-host-production",
+      "files": [
+        "docker-compose.yml",
+        "docker-compose.self-host.yml",
+        "docker-compose.production.yml"
+      ],
+      "requiresExecutionHealth": true
+    },
+    {
+      "name": "self-host-docker-compute",
+      "files": [
+        "docker-compose.yml",
+        "docker-compose.self-host.yml",
+        "docker-compose.compute-docker.yml"
+      ]
+    },
+    {
+      "name": "installer-production",
+      "files": ["deploy/compose/docker-compose.prod.yml"],
+      "requiresExecutionHealth": true
+    },
+    {
+      "name": "coolify",
+      "files": ["deploy/coolify/docker-compose.yaml"],
+      "coolify": true,
+      "requiresExecutionHealth": true
+    }
+  ],
+  "runtimeServices": {
+    "api": {
+      "command": "api",
+      "healthPath": "/health/liveness"
+    },
+    "web": {
+      "command": "web",
+      "healthPath": "/health"
+    },
+    "controller": {
+      "command": "controller",
+      "healthPath": "/health/controller"
+    },
+    "bullmq": {
+      "command": "bullmq",
+      "healthPath": "/admin/health"
+    }
+  },
+  "sharedPlatformEnvironment": [
+    "APP_ENV",
+    "ROOMOTE_DOCKER_LOAD_ENV_FILE",
+    "ROOMOTE_AUTO_GENERATE_KEYS",
+    "ENCRYPTION_KEY",
+    "ARTIFACT_SIGNING_KEY",
+    "DASHBOARD_PASSWORD",
+    "SETUP_TOKEN",
+    "DATABASE_URL",
+    "REDIS_URL",
+    "S3_ENDPOINT",
+    "S3_PRESIGN_ENDPOINT",
+    "DEFAULT_COMPUTE_PROVIDER"
+  ]
+}

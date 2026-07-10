@@ -267,7 +267,7 @@ set_env_value "$tmp_env" DOCKER_WORKER_RELEASE_PATH "$worker_release_path"
 set_env_value "$tmp_env" ROOMOTE_DATABASE_MODE "$database_mode"
 
 # Keep the deployer-managed Modal base image ref in sync with the worker
-# image. The wizard stores the selected compute provider in the database, not
+# image. The wizard stores the selected sandbox provider in the database, not
 # in the env file, so this must not gate on DEFAULT_COMPUTE_PROVIDER. A
 # different non-empty value is an operator override and is left untouched.
 modal_base_image_ref="$(read_env_value "$tmp_env" MODAL_BASE_IMAGE_REF)"

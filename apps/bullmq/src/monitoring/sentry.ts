@@ -5,8 +5,8 @@ const BULLMQ_SENTRY_DSN_KEYS = ['BULLMQ_SENTRY_DSN', 'SENTRY_DSN'] as const;
 
 interface BullMqSentryContext {
   [key: string]: unknown;
-  cloudJobId?: number | string;
-  cloudJobStatus?: string | null;
+  runId?: number | string;
+  taskRunStatus?: string | null;
   computeProvider?: string;
   error?: string;
   errorName?: string | null;
@@ -37,7 +37,7 @@ interface BullMqMessageOptions {
 type BullMqSentryScope = Pick<Scope, 'setContext' | 'setLevel' | 'setTag'>;
 
 const BULLMQ_CONTEXT_TAGS = {
-  cloudJobId: 'roomote.cloud_job_id',
+  runId: 'roomote.task_run_id',
   computeProvider: 'roomote.compute_provider',
   providerErrorCode: 'roomote.provider_error_code',
   providerRequestId: 'roomote.provider_request_id',

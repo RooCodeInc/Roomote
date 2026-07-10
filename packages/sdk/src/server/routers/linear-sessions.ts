@@ -1,10 +1,10 @@
 import { z } from 'zod';
 
-import { CloudTaskType } from '@roomote/types';
-import { db, cloudJobs, eq } from '@roomote/db/server';
+import { TaskPayloadKind } from '@roomote/types';
+import { db, taskRuns, eq } from '@roomote/db/server';
 import {
   createLinearClient,
-  drainLinearMessagesToResumeJob,
+  drainLinearMessagesToResumeRun,
   type AgentSessionPlanStep,
 } from '@roomote/linear';
 
@@ -15,8 +15,8 @@ import {
 } from '../lib/mcp/linear-connections';
 import {
   authenticatedProcedure,
-  jobScoped,
-  nonJobProcedure,
+  runScoped,
+  userOnlyProcedure,
   router,
 } from '../trpc';
 
@@ -43,7 +43,7 @@ async function getLinearClient() {
 }
 
 export const linearSessionsRouter = router({
-  findFirst: nonJobProcedure.query(async () => {
+  findFirst: userOnlyProcedure.query(async () => {
     const connection = await findActiveConnection();
     if (!connection) {
       return null;
@@ -152,28 +152,38 @@ export const linearSessionsRouter = router({
       );
     }),
 
-  drainLinearMessages: jobScoped(
-    z.object({ cloudJobId: z.number() }),
-    'cloudJobId',
+  drainLinearMessages: runScoped(
+    z.object({ runId: z.number() }),
+    'runId',
   ).mutation(async ({ input }) => {
-    const cloudJob = await db.query.cloudJobs.findFirst({
-      where: eq(cloudJobs.id, input.cloudJobId),
+    const taskRun = await db.query.taskRuns.findFirst({
+      where: eq(taskRuns.id, input.runId),
+      with: { task: true },
     });
 
-    if (!cloudJob) {
+    if (!taskRun) {
       return { resumed: false, reason: 'job_not_found' } as const;
     }
 
     if (
-      cloudJob.type !== CloudTaskType.LinearAgentSession &&
-      cloudJob.type !== CloudTaskType.SnapshotResume
+      taskRun.payloadKind !== TaskPayloadKind.LinearAgentSession &&
+      taskRun.payloadKind !== TaskPayloadKind.SnapshotResume
     ) {
-      return { resumed: false, reason: 'not_linear_job' } as const;
+      return { resumed: false, reason: 'not_linear_run' } as const;
     }
 
-    const result = await drainLinearMessagesToResumeJob(
-      cloudJob as Parameters<typeof drainLinearMessagesToResumeJob>[0],
-    );
+    const task = taskRun.task;
+
+    const result = await drainLinearMessagesToResumeRun({
+      id: taskRun.id,
+      linearSessionId: task.linearSessionId,
+      linearIssueId: task.linearIssueId,
+      linearOrganizationId: task.linearOrganizationId,
+      slackThreadTs: task.slackThreadTs,
+      snapshotId: taskRun.snapshotId,
+      payload: taskRun.payload as Record<string, unknown>,
+      port: taskRun.port,
+    });
 
     if (result.resumed) {
       return result;

@@ -5,19 +5,19 @@ import { toast } from 'sonner';
 
 import type { PromptInputMessage } from '@/components/ai-elements';
 import { TaskPromptInput } from '@/components/tasks';
-import { useRestoreCloudJobSnapshot } from '@/hooks/snapshots';
+import { useRestoreTaskRunSnapshot } from '@/hooks/snapshots';
 import { preparePromptAttachments } from '@/lib/prompt-attachments';
-import type { CloudJobDetail } from '@/lib/server';
+import type { TaskRunDetail } from '@/lib/server';
 
 import { useOptimisticPromptSubmission } from './prompt-input/useOptimisticPromptSubmission';
 
 interface WakeTaskInputProps {
-  cloudJob: Pick<CloudJobDetail, 'id' | 'snapshotId' | 'taskId'>;
+  taskRun: Pick<TaskRunDetail, 'id' | 'snapshotId' | 'taskId'>;
   initialPrompt?: string;
 }
 
 export function WakeTaskInput({
-  cloudJob,
+  taskRun,
   initialPrompt = '',
 }: WakeTaskInputProps) {
   const {
@@ -27,17 +27,17 @@ export function WakeTaskInput({
   const [promptText, setPromptText] = useState(initialPrompt);
   const [sending, setSending] = useState(false);
 
-  const restore = useRestoreCloudJobSnapshot({
+  const restore = useRestoreTaskRunSnapshot({
     onSuccess: () => setPromptText(''),
   });
   const isBusy = sending || restore.isPending;
 
   useEffect(() => {
     setPromptText(initialPrompt);
-  }, [cloudJob.id, initialPrompt]);
+  }, [taskRun.id, initialPrompt]);
 
   const handleSubmit = async (message: PromptInputMessage) => {
-    if (!cloudJob.snapshotId || isBusy) {
+    if (!taskRun.snapshotId || isBusy) {
       return;
     }
 
@@ -49,8 +49,8 @@ export function WakeTaskInput({
 
       if (rawPrompt.length === 0 && (message.files?.length ?? 0) === 0) {
         await restore.mutateAsync({
-          sourceSnapshotId: cloudJob.snapshotId,
-          sourceCloudJobId: cloudJob.id,
+          sourceSnapshotId: taskRun.snapshotId,
+          sourceRunId: taskRun.id,
           resumePrompt: '',
         });
 
@@ -72,7 +72,7 @@ export function WakeTaskInput({
       }
 
       const { clientMessageId } = startOptimisticPromptSubmission({
-        taskId: cloudJob.taskId,
+        taskId: taskRun.taskId,
         prompt: resumePrompt,
         images: preparedPrompt.images,
         location: 'transcript',
@@ -80,8 +80,8 @@ export function WakeTaskInput({
       optimisticClientMessageId = clientMessageId;
 
       const result = await restore.mutateAsync({
-        sourceSnapshotId: cloudJob.snapshotId,
-        sourceCloudJobId: cloudJob.id,
+        sourceSnapshotId: taskRun.snapshotId,
+        sourceRunId: taskRun.id,
         resumePrompt,
         clientMessageId,
         ...(preparedPrompt.images?.length
@@ -91,7 +91,7 @@ export function WakeTaskInput({
 
       if (!result.success) {
         rollbackOptimisticPromptSubmission({
-          taskId: cloudJob.taskId,
+          taskId: taskRun.taskId,
           clientMessageId,
           location: 'transcript',
         });
@@ -99,7 +99,7 @@ export function WakeTaskInput({
     } catch (error) {
       if (optimisticClientMessageId) {
         rollbackOptimisticPromptSubmission({
-          taskId: cloudJob.taskId,
+          taskId: taskRun.taskId,
           clientMessageId: optimisticClientMessageId,
           location: 'transcript',
         });

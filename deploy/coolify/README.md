@@ -17,12 +17,12 @@ instead. For a managed PaaS with no server of your own, see
   `/_roomote-api` path routing. The web app, the API, and MinIO each get
   their own public domain through `SERVICE_FQDN_*` declarations in the
   compose file, so `TRPC_URL` points at the api service's domain directly.
-  GitHub webhooks and compute workers call that API origin, and Slack
+  GitHub webhooks and sandbox workers call that API origin, and Slack
   webhooks arrive at the web origin and are proxied to the API internally.
 - **The Docker socket is available.** Unlike Railway, the Coolify host runs
-  Docker, so the `docker` compute provider works and is the template
+  Docker, so the `docker` sandbox provider works and is the template
   default: the controller mounts `/var/run/docker.sock` and runs task
-  workers on the same server. Hosted compute (Modal, E2B, or Daytona) is a
+  workers on the same server. Hosted sandboxes (Modal, E2B, or Daytona) are a
   config-only swap; see [Task execution](#task-execution).
 - **No openssl provisioning step.** The template sets
   `ROOMOTE_AUTO_GENERATE_KEYS=true`, so Roomote generates the `JOB_AUTH_*` /
@@ -46,21 +46,21 @@ instead. For a managed PaaS with no server of your own, see
 ## What you need
 
 - A server running Coolify with enough headroom for the stack. With the
-  default `docker` compute provider, task workers run on the same host —
-  plan for 8 GB+ RAM. With hosted compute, 4 GB+ is enough for the control
+  default `docker` sandbox provider, task workers run on the same host —
+  plan for 8 GB+ RAM. With hosted sandboxes, 4 GB+ is enough for the control
   plane.
 - DNS you control for the web, api, and minio domains, or Coolify's
   generated domains for a quick trial. Set all three to `https://` — GitHub
   App creation and webhooks require HTTPS origins, and Coolify's proxy
   issues Let's Encrypt certificates for `https://` domains automatically.
 - A model provider API key, for example OpenRouter (entered in the setup
-  wizard, not at deploy time). When using hosted compute instead of the
+  wizard, not at deploy time). When using hosted sandboxes instead of the
   Docker socket, also a [Modal](https://modal.com), [E2B](https://e2b.dev),
   or [Daytona](https://daytona.io) account.
 
 ## Image access
 
-Both published images (`ghcr.io/roocodeinc/roomote-app` and
+The published app and worker images (`ghcr.io/roocodeinc/roomote-app` and
 `ghcr.io/roocodeinc/roomote-worker`) are public and pulled anonymously; no
 registry login is needed.
 
@@ -74,9 +74,9 @@ and the controller reads the worker release version from the `VERSION` file
 inside `worker-current.tar.gz`.
 
 To pin instead (recommended for production deployments): change the
-`x-roomote-app-image` anchor at the top of the compose file to the same
-immutable tag (`v*` or `develop-<sha>`). No other edits are needed — the
-derived values follow the image.
+`x-roomote-app-image` anchor at the top of the compose file to an immutable
+tag (`v*` or `develop-<sha>`). No other edits are needed — the derived values
+follow the image.
 
 ## Create the resource
 
@@ -97,17 +97,17 @@ derived values follow the image.
 
 ## Service topology
 
-| Service         | Image                  | Public domain              | Healthcheck        |
-| --------------- | ---------------------- | -------------------------- | ------------------ |
-| `postgres`      | `postgres:17.5`        | no                         | `pg_isready`       |
-| `redis`         | `redis:7-alpine`       | no                         | `redis-cli ping`   |
-| `minio`         | `minio/minio` + volume | yes (routed to port 9000)  | `mc ready local`   |
-| `db-migrate`    | `roomote-app:develop`  | no (one-shot)              | excluded           |
-| `web`           | `roomote-app:develop`  | yes (port 3000)            | `/health`          |
-| `api`           | `roomote-app:develop`  | yes (port 3001)            | `/health/liveness` |
-| `controller`    | `roomote-app:develop`  | no                         | —                  |
-| `bullmq`        | `roomote-app:develop`  | no                         | —                  |
-| `preview-proxy` | `roomote-app:develop`  | optional (wildcard domain) | `/health`          |
+| Service         | Image                   | Public domain              | Healthcheck                  |
+| --------------- | ----------------------- | -------------------------- | ---------------------------- |
+| `postgres`      | pinned `postgres:17.5`  | no                         | `pg_isready`                 |
+| `redis`         | pinned `redis:7-alpine` | no                         | `redis-cli ping`             |
+| `minio`         | pinned MinIO + volume   | yes (routed to port 9000)  | `mc ready local`             |
+| `db-migrate`    | `roomote-app:develop`   | no (one-shot)              | excluded                     |
+| `web`           | `roomote-app:develop`   | yes (port 3000)            | `/health`                    |
+| `api`           | `roomote-app:develop`   | yes (port 3001)            | `/health/liveness`           |
+| `controller`    | `roomote-app:develop`   | no                         | `/health/controller` via API |
+| `bullmq`        | `roomote-app:develop`   | no                         | `/admin/health`              |
+| `preview-proxy` | `roomote-app:develop`   | optional (wildcard domain) | `/health`                    |
 
 ## Environment variables
 
@@ -122,9 +122,9 @@ Notes:
   `RELEASE_VERSION` baked into the running image, so it always matches the
   deployed build. Setting it explicitly silently pins the worker to whatever
   version the value encodes.
-- Compute provider credentials (Modal token pair when using Modal) and
+- Sandbox provider credentials (Modal token pair when using Modal) and
   model provider keys such as `OPENROUTER_API_KEY` are **not** template
-  variables. Enter them in the `/setup` wizard (or Settings → Compute /
+  variables. Enter them in the `/setup` wizard (or Settings → Sandboxes /
   Models) after first boot; they are stored encrypted in Postgres.
 - Leave `JOB_AUTH_*` and `PREVIEW_AUTH_*` unset —
   `ROOMOTE_AUTO_GENERATE_KEYS=true` manages them. If you later provide
@@ -139,27 +139,26 @@ The template defaults to `DEFAULT_COMPUTE_PROVIDER=docker`: the controller
 mounts the host Docker socket and starts one worker container per task on
 the same server. Two things matter in this mode:
 
-- **Worker network.** The controller attaches spawned workers to the
-  network named by `DOCKER_WORKER_NETWORK` (`roomote_default`, declared at
-  the bottom of the compose file). If worker containers fail to start after
-  a deploy, confirm the network exists with `docker network ls` on the
-  Coolify server and adjust the variable if your Coolify version renames
-  compose networks.
+- **Worker network.** The controller uses the network named by
+  `DOCKER_WORKER_NETWORK` (`roomote_default`, declared at the bottom of the
+  compose file) to discover the labeled API and optional preview-proxy
+  containers. It creates a separate bridge network for each task and attaches
+  only the API plus the preview proxy when enabled, so workers do not join
+  `roomote_default`, see sibling tasks, or reach Postgres, Redis, and MinIO. If
+  worker containers fail to start after a deploy, confirm the configured
+  discovery network exists with `docker network ls` and that Coolify preserved
+  the standard Compose service labels.
 
-  Unlike the installer and deployer stacks, this path does **not** yet
-  isolate workers on a dedicated network: workers share `roomote_default`
-  with Postgres, Redis, and MinIO, so a task sandbox can reach the
-  datastores over the network. Coolify rewrites compose network definitions
-  during deploys, so the dedicated `roomote_worker` network used elsewhere
-  is not wired up here until it can be verified against a live Coolify
-  deployment. Treat Coolify deployments accordingly (trusted, single-tenant
-  use).
+  Docker task writable layers fail closed when the host storage driver cannot
+  enforce `DOCKER_WORKER_DISK_LIMIT`. Keep
+  `DOCKER_WORKER_ALLOW_UNBOUNDED_DISK=false` unless the host already enforces an
+  equivalent quota outside Docker.
 
 - **Trust boundary.** Mounting the Docker socket gives the controller
   control of the host Docker daemon. This matches the single-host
   production shape and is intended for a trusted, single-tenant server.
 
-To use hosted compute instead (no socket access, task execution bills
+To use hosted sandboxes instead (no socket access, task execution bills
 through the provider):
 
 1. Set `DEFAULT_COMPUTE_PROVIDER=modal` (or `e2b` / `daytona`) and add
@@ -196,8 +195,8 @@ addressing, and `S3_PRESIGN_ENDPOINT` must be reachable from workers.
    callback and webhook URLs from `ROOMOTE_APP_URL` and `TRPC_URL`, so no
    manual URL entry is needed.
 5. Enter the model provider key when the wizard asks. With the default
-   Docker provider there are no compute credentials to enter; with hosted
-   compute, enter the provider tokens and let the wizard build the E2B
+   Docker provider there are no sandbox credentials to enter; with hosted
+   sandboxes, enter the provider tokens and let the wizard build the E2B
    template or Daytona snapshot when applicable.
 6. Pick repositories, create an environment, and run a small task end to end
    (the SELF_HOSTING.md verification checklist applies from step 2 onward).
@@ -233,7 +232,7 @@ wildcard-capable TLS setup on the Coolify proxy:
   config plus the generated environment values on the resource.
 - **Costs** are your server. With the default Docker provider everything —
   control plane and task execution — runs on the Coolify host. With hosted
-  compute, task execution bills through the provider and model usage bills
+  sandboxes, task execution bills through the provider and model usage bills
   through your model provider.
 
 ## Maintaining the template

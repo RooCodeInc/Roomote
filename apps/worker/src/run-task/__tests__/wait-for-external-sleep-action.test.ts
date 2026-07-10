@@ -4,15 +4,15 @@ const { findRuntimeStateByIdMock } = vi.hoisted(() => ({
 
 vi.mock('@roomote/sdk/client', () => ({
   sdk: {
-    cloudJobs: {
+    taskRuns: {
       findRuntimeStateById: findRuntimeStateByIdMock,
     },
   },
 }));
 
-import { CloudTaskType } from '@roomote/types';
+import { TaskPayloadKind } from '@roomote/types';
 
-import { CloudTaskStatus } from '@roomote/types';
+import { RunStatus } from '@roomote/types';
 import { waitForExternalSleepAction } from '../wait-for-external-sleep-action';
 
 describe('waitForExternalSleepAction', () => {
@@ -28,7 +28,7 @@ describe('waitForExternalSleepAction', () => {
         snapshotCreatedAt: null,
         snapshotFailedAt: null,
         error: null,
-        status: CloudTaskStatus.Running,
+        status: RunStatus.Running,
       })
       .mockResolvedValueOnce({
         sleepRequestedAt: new Date(),
@@ -36,11 +36,11 @@ describe('waitForExternalSleepAction', () => {
         snapshotCreatedAt: new Date(),
         snapshotFailedAt: null,
         error: null,
-        status: CloudTaskStatus.Completed,
+        status: RunStatus.Completed,
       });
 
     const logger = {
-      cloudJobId: 123,
+      runId: 123,
       filePath: '/tmp/test.log',
       log: vi.fn(),
       info: vi.fn(),
@@ -49,9 +49,9 @@ describe('waitForExternalSleepAction', () => {
     };
 
     const result = await waitForExternalSleepAction({
-      cloudJob: {
+      taskRun: {
         id: 123,
-        type: CloudTaskType.GithubIssueCommentRespond,
+        payloadKind: TaskPayloadKind.StandardTask,
         vendor: 'modal',
         machineId: 'sb_test_123',
       } as never,
@@ -70,7 +70,7 @@ describe('waitForExternalSleepAction', () => {
         snapshotCreatedAt: null,
         snapshotFailedAt: null,
         error: null,
-        status: CloudTaskStatus.Idle,
+        status: RunStatus.Idle,
       })
       .mockResolvedValueOnce({
         sleepRequestedAt: new Date(),
@@ -78,11 +78,11 @@ describe('waitForExternalSleepAction', () => {
         snapshotCreatedAt: null,
         snapshotFailedAt: null,
         error: null,
-        status: CloudTaskStatus.Completed,
+        status: RunStatus.Completed,
       });
 
     const logger = {
-      cloudJobId: 456,
+      runId: 456,
       filePath: '/tmp/test.log',
       log: vi.fn(),
       info: vi.fn(),
@@ -91,9 +91,9 @@ describe('waitForExternalSleepAction', () => {
     };
 
     const result = await waitForExternalSleepAction({
-      cloudJob: {
+      taskRun: {
         id: 456,
-        type: CloudTaskType.GithubPrReview,
+        payloadKind: TaskPayloadKind.GithubPrReview,
         vendor: 'modal',
         machineId: 'sb_test_456',
       } as never,
@@ -112,7 +112,7 @@ describe('waitForExternalSleepAction', () => {
         snapshotCreatedAt: null,
         snapshotFailedAt: null,
         error: null,
-        status: CloudTaskStatus.Running,
+        status: RunStatus.Running,
       })
       .mockResolvedValueOnce({
         sleepRequestedAt: new Date(),
@@ -120,11 +120,11 @@ describe('waitForExternalSleepAction', () => {
         snapshotCreatedAt: new Date(),
         snapshotFailedAt: null,
         error: null,
-        status: CloudTaskStatus.Completed,
+        status: RunStatus.Completed,
       });
 
     const logger = {
-      cloudJobId: 789,
+      runId: 789,
       filePath: '/tmp/test.log',
       log: vi.fn(),
       info: vi.fn(),
@@ -133,9 +133,9 @@ describe('waitForExternalSleepAction', () => {
     };
 
     const result = await waitForExternalSleepAction({
-      cloudJob: {
+      taskRun: {
         id: 789,
-        type: CloudTaskType.SlackAppMention,
+        payloadKind: TaskPayloadKind.SlackAppMention,
         vendor: 'modal',
         machineId: 'mo_test_789',
       } as never,
@@ -148,7 +148,7 @@ describe('waitForExternalSleepAction', () => {
 
   it('skips jobs on non-snapshot-capable providers', async () => {
     const logger = {
-      cloudJobId: 123,
+      runId: 123,
       filePath: '/tmp/test.log',
       log: vi.fn(),
       info: vi.fn(),
@@ -157,9 +157,9 @@ describe('waitForExternalSleepAction', () => {
     };
 
     const result = await waitForExternalSleepAction({
-      cloudJob: {
+      taskRun: {
         id: 123,
-        type: CloudTaskType.GithubPrReviewFollowUp,
+        payloadKind: TaskPayloadKind.GithubPrReviewFollowUp,
         vendor: 'docker',
         machineId: 'worker-123',
       } as never,

@@ -160,13 +160,13 @@ export function buildSnapshotResumeAcknowledgementText({
   formatLink?: LinkFormatter;
 }): string {
   if (taskUrl) {
-    return `Reconnected this ${surfaceName} to ${formatLink(
+    return `I found the previous task for this ${surfaceName} and reconnected it here: ${formatLink(
       taskLinkLabel,
       taskUrl,
     )}.`;
   }
 
-  return `Reconnecting this ${surfaceName} to the previous task snapshot...`;
+  return `I found the previous task for this ${surfaceName} and I'm reconnecting it here...`;
 }
 
 export type ThreadReplyLinkedPr = {

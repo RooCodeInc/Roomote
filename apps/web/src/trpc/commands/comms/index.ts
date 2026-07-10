@@ -3,6 +3,7 @@ import {
   invalidateTelegramRuntimeCredentialsCache,
   invalidateTeamsBotRuntimeCredentialsCache,
   invalidateSlackSigningSecretCache,
+  resolveInvocationIdentities,
   db,
   environmentVariables,
   and,
@@ -19,6 +20,7 @@ import {
   SETUP_AUTH_PROVIDER_IDS,
   type SetupAuthProviderId,
   type SetupAuthStatus,
+  type InvocationIdentity,
 } from '@roomote/types';
 
 import type { UserAuthSuccess } from '@/types';
@@ -49,6 +51,7 @@ export type CommsProviderStatus = Omit<
 
 export type CommsStatus = Omit<SetupAuthStatus, 'providers'> & {
   providers: CommsProviderStatus[];
+  invocationIdentities: InvocationIdentity[];
 };
 
 type TelegramWebhookStatus = {
@@ -180,9 +183,11 @@ function withTelegramProvider(
   options: {
     persistedEnvVarNames: string[];
     telegramWebhook: TelegramWebhookStatus | null;
+    invocationIdentities: InvocationIdentity[];
   },
 ): CommsStatus {
-  const { persistedEnvVarNames, telegramWebhook } = options;
+  const { persistedEnvVarNames, telegramWebhook, invocationIdentities } =
+    options;
   const isSaved = (name: string) => persistedEnvVarNames.includes(name);
   const isRuntime = (name: string) => Boolean(process.env[name]?.trim());
   const isSatisfied = (name: string) => isRuntime(name) || isSaved(name);
@@ -206,6 +211,7 @@ function withTelegramProvider(
 
   return {
     ...status,
+    invocationIdentities,
     providers: [
       ...status.providers,
       {
@@ -247,10 +253,12 @@ export async function getCommsStatusCommand(
 ): Promise<CommsStatus> {
   assertAdmin(auth);
 
-  const [persistedEnvVarNames, telegramWebhook] = await Promise.all([
-    getPersistedEnvironmentVariableNames(),
-    getTelegramWebhookStatus(),
-  ]);
+  const [persistedEnvVarNames, telegramWebhook, invocationIdentities] =
+    await Promise.all([
+      getPersistedEnvironmentVariableNames(),
+      getTelegramWebhookStatus(),
+      resolveInvocationIdentities(),
+    ]);
 
   return withTelegramProvider(
     buildSetupAuthStatus({
@@ -260,6 +268,7 @@ export async function getCommsStatusCommand(
     {
       persistedEnvVarNames,
       telegramWebhook,
+      invocationIdentities,
     },
   );
 }

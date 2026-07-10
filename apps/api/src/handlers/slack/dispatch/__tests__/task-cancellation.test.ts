@@ -2,7 +2,7 @@ import {
   buildStartedBlocks,
   type SlackInteractivePayload,
 } from '@roomote/slack';
-import { CloudTaskStatus } from '@roomote/types';
+import { RunStatus } from '@roomote/types';
 
 const {
   dbUpdateMock,
@@ -10,14 +10,14 @@ const {
   updateReturningMock,
   dbQueryFindFirstMock,
   postSlackInteractiveResponseMock,
-  stopTaskJobMock,
+  stopTaskRunMock,
 } = vi.hoisted(() => ({
   dbUpdateMock: vi.fn(),
   dbUpdateWhereMock: vi.fn(),
   updateReturningMock: vi.fn(),
   dbQueryFindFirstMock: vi.fn(),
   postSlackInteractiveResponseMock: vi.fn(),
-  stopTaskJobMock: vi.fn(),
+  stopTaskRunMock: vi.fn(),
 }));
 
 vi.mock('@roomote/slack', async (importOriginal) => {
@@ -31,12 +31,11 @@ vi.mock('@roomote/slack', async (importOriginal) => {
 
 vi.mock('@roomote/db/server', () => ({
   and: vi.fn((...args: unknown[]) => ({ and: args })),
-  cloudJobs: {
+  taskRuns: {
     id: 'id',
     status: 'status',
     taskId: 'taskId',
     sandboxServerUrl: 'sandboxServerUrl',
-    userId: 'userId',
     actingUserId: 'actingUserId',
     createdAt: 'createdAt',
     canceledAt: 'canceledAt',
@@ -44,7 +43,7 @@ vi.mock('@roomote/db/server', () => ({
   db: {
     update: dbUpdateMock,
     query: {
-      cloudJobs: {
+      taskRuns: {
         findFirst: dbQueryFindFirstMock,
       },
     },
@@ -56,7 +55,7 @@ vi.mock('@roomote/db/server', () => ({
 }));
 
 vi.mock('../../../tasks/task-stop.js', () => ({
-  stopTaskJob: stopTaskJobMock,
+  stopTaskRun: stopTaskRunMock,
 }));
 
 import { handleTaskCancellation } from '../task-cancellation.js';
@@ -114,7 +113,7 @@ describe('handleTaskCancellation', () => {
       returning: updateReturningMock,
     });
     postSlackInteractiveResponseMock.mockResolvedValue(undefined);
-    stopTaskJobMock.mockResolvedValue({ success: true, mode: 'sandbox_stop' });
+    stopTaskRunMock.mockResolvedValue({ success: true, mode: 'sandbox_stop' });
   });
 
   it('silently ignores cancel clicks from a different Slack user', async () => {
@@ -128,7 +127,7 @@ describe('handleTaskCancellation', () => {
       ),
     );
 
-    expect(stopTaskJobMock).not.toHaveBeenCalled();
+    expect(stopTaskRunMock).not.toHaveBeenCalled();
     expect(postSlackInteractiveResponseMock).not.toHaveBeenCalled();
   });
 
@@ -136,12 +135,12 @@ describe('handleTaskCancellation', () => {
     dbQueryFindFirstMock.mockResolvedValueOnce({
       id: 42,
       taskId: 'task-1',
-      status: CloudTaskStatus.Running,
+      status: RunStatus.Running,
       sandboxServerUrl: 'http://sandbox.example.com',
       userId: 'user-1',
       actingUserId: 'user-1',
     });
-    stopTaskJobMock.mockResolvedValueOnce({
+    stopTaskRunMock.mockResolvedValueOnce({
       success: false,
       error: 'Task is not active',
       statusCode: 409,
@@ -198,7 +197,7 @@ describe('handleTaskCancellation', () => {
   it('rejects plain-number cancel payloads', async () => {
     await handleTaskCancellation(buildCancellationPayload('42', 'U456'));
 
-    expect(stopTaskJobMock).not.toHaveBeenCalled();
+    expect(stopTaskRunMock).not.toHaveBeenCalled();
     expect(postSlackInteractiveResponseMock).not.toHaveBeenCalled();
   });
 });

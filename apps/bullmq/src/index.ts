@@ -6,7 +6,10 @@ import { createBullBoard } from '@bull-board/api';
 import { BullMQAdapter } from '@bull-board/api/bullMQAdapter';
 import { HonoAdapter } from '@bull-board/hono';
 
-import { bootstrapGeneratedAuthKeypairs } from '@roomote/db/server';
+import {
+  bootstrapGeneratedAuthKeypairs,
+  ensureAutomationRows,
+} from '@roomote/db/server';
 import {
   SLACK_SUGGESTED_TASKS_ONBOARDING_FOLLOWUP_QUEUE_NAME,
   TEAMS_SUGGESTED_TASKS_ONBOARDING_FOLLOWUP_QUEUE_NAME,
@@ -46,6 +49,15 @@ try {
   assertSecureBootBinding();
 } catch (error) {
   console.error('Failed to bootstrap generated auth keypairs', error);
+  process.exit(1);
+}
+
+// Seed one automations row per known key so due-gating reads and the
+// tasks.initiator_automation FK always have rows to reference.
+try {
+  await ensureAutomationRows();
+} catch (error) {
+  console.error('Failed to seed automations rows', error);
   process.exit(1);
 }
 

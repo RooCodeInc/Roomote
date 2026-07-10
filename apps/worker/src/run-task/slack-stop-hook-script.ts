@@ -212,6 +212,16 @@ function isCurrentTurnSatisfied(state) {
   return trimString(state && state.satisfiedTurnMessageTs) === currentTurnMessageTs;
 }
 
+// Closeout ends the turn with an outcome; clarification ends it waiting on
+// the user's answer. Both are visible handoffs, so neither is "silence" —
+// blocking on a fresh clarification only forces a redundant "I'm waiting on
+// your answer" echo message.
+function isTerminalReplyPurpose(replyPurpose) {
+  return (
+    !replyPurpose || replyPurpose === 'closeout' || replyPurpose === 'clarification'
+  );
+}
+
 function getLegacyTerminalSatisfaction(state, currentTurnMessageTs) {
   const tool = trimString(state && state.tool);
   if (tool !== 'send_chat_reply') {
@@ -219,7 +229,7 @@ function getLegacyTerminalSatisfaction(state, currentTurnMessageTs) {
   }
 
   const replyPurpose = trimString(state && state.replyPurpose);
-  if (replyPurpose && replyPurpose !== 'closeout') {
+  if (!isTerminalReplyPurpose(replyPurpose)) {
     return null;
   }
 
@@ -248,7 +258,7 @@ function getCurrentTurnTerminalSatisfaction(state) {
     }
 
     const replyPurpose = trimString(state && state.replyPurpose);
-    if (replyPurpose && replyPurpose !== 'closeout') {
+    if (!isTerminalReplyPurpose(replyPurpose)) {
       return null;
     }
 
@@ -337,7 +347,7 @@ function getTerminalCurrentTurnFailureReason(state) {
   }
 
   const replyPurpose = trimString(state && state.replyPurpose);
-  if (replyPurpose && replyPurpose !== 'closeout') {
+  if (!isTerminalReplyPurpose(replyPurpose)) {
     return 'current_turn_nonterminal_reply';
   }
 

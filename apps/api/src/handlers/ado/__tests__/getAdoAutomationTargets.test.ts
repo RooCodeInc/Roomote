@@ -56,9 +56,10 @@ vi.mock('@roomote/db/server', () => ({
   or: (...args: unknown[]) => mockOr(...args),
 }));
 
-import { CloudAgentType } from '@roomote/types';
-
-import { getAdoAutomationTargets } from '../getAdoAutomationTargets';
+import {
+  getAdoAutomationTargets,
+  isRoomoteAdoIdentity,
+} from '../getAdoAutomationTargets';
 
 const payload = {
   repositoryFullName: 'acme/Platform/backend',
@@ -93,7 +94,7 @@ describe('getAdoAutomationTargets', () => {
 
   it('returns reviewer targets for active synced Azure DevOps repositories', async () => {
     const result = await getAdoAutomationTargets({
-      type: CloudAgentType.PrReviewer,
+      workflow: 'pr_review',
       payload,
     });
 
@@ -101,8 +102,10 @@ describe('getAdoAutomationTargets', () => {
       status: 'ok',
       targets: [
         {
-          id: 'ado:PR Reviewer:repo-1',
-          userId: 'repo-owner-1',
+          id: 'ado:pr_review:repo-1',
+          // The repo-linker fallback owner is gone: webhook launches carry an
+          // automation initiator instead of a forged owner.
+          userId: null,
         },
       ],
     });
@@ -112,7 +115,7 @@ describe('getAdoAutomationTargets', () => {
     mockSelectWhere.mockResolvedValue([]);
 
     const result = await getAdoAutomationTargets({
-      type: CloudAgentType.PrReviewer,
+      workflow: 'pr_review',
       payload,
     });
 
@@ -134,7 +137,7 @@ describe('getAdoAutomationTargets', () => {
 
     await expect(
       getAdoAutomationTargets({
-        type: CloudAgentType.PrReviewer,
+        workflow: 'pr_review',
         payload: humanPayload,
       }),
     ).resolves.toEqual({
@@ -144,23 +147,26 @@ describe('getAdoAutomationTargets', () => {
 
     await expect(
       getAdoAutomationTargets({
-        type: CloudAgentType.PrReviewer,
+        workflow: 'pr_review',
         payload: humanPayload,
         ignoreAuthorPolicy: true,
       }),
     ).resolves.toMatchObject({ status: 'ok' });
   });
 
-  it('uses the linked Azure DevOps commenter account for comment-triggered work', async () => {
+  it('matches the linked account on the commenter uniqueName, not the id', async () => {
     mockAuthAccountsFindFirst.mockResolvedValue({ userId: 'commenter-user-1' });
 
     const result = await getAdoAutomationTargets({
-      type: CloudAgentType.PrReviewer,
+      workflow: 'pr_review',
       payload: {
         ...payload,
         commentAuthor: {
-          id: 'ado-user-1',
-          uniqueName: 'alice@acme.example',
+          // The webhook author id is a different Azure DevOps id namespace
+          // than the linked account, so matching must ignore it and use the
+          // normalized uniqueName instead.
+          id: 'org-identity-id-that-never-matches',
+          uniqueName: 'Alice@Acme.Example',
         },
       },
       ignoreAuthorPolicy: true,
@@ -179,15 +185,39 @@ describe('getAdoAutomationTargets', () => {
       expect.objectContaining({
         where: expect.arrayContaining([
           expect.objectContaining({ left: 'authAccounts.providerId' }),
-          expect.objectContaining({ left: 'authAccounts.accountId' }),
+          expect.objectContaining({
+            left: 'authAccounts.accountId',
+            right: 'alice@acme.example',
+          }),
         ]),
       }),
     );
   });
 
+  it('requires a link when the commenter has no uniqueName to match', async () => {
+    const result = await getAdoAutomationTargets({
+      workflow: 'pr_review',
+      payload: {
+        ...payload,
+        commentAuthor: {
+          id: 'org-identity-id',
+          displayName: 'Alice',
+        },
+      },
+      ignoreAuthorPolicy: true,
+      requireLinkedSenderAccount: true,
+    });
+
+    expect(result).toMatchObject({
+      status: 'error',
+      code: 'account_link_required',
+    });
+    expect(mockAuthAccountsFindFirst).not.toHaveBeenCalled();
+  });
+
   it('requires an Azure DevOps linked account when comment attribution is required', async () => {
     const result = await getAdoAutomationTargets({
-      type: CloudAgentType.PrReviewer,
+      workflow: 'pr_review',
       payload: {
         ...payload,
         commentAuthor: {
@@ -205,5 +235,23 @@ describe('getAdoAutomationTargets', () => {
       message:
         'Azure DevOps user alice@acme.example is not linked to a Roomote user',
     });
+  });
+});
+
+describe('isRoomoteAdoIdentity', () => {
+  it('matches Roomote bot identities by name or handle', () => {
+    expect(isRoomoteAdoIdentity('roomote')).toBe(true);
+    expect(isRoomoteAdoIdentity('Roomote Bot')).toBe(true);
+    expect(isRoomoteAdoIdentity('roomote-bot@acme.example')).toBe(true);
+    expect(isRoomoteAdoIdentity('@roomote')).toBe(true);
+  });
+
+  it('does not match humans whose email domain contains roomote', () => {
+    // Regression: a bare `@roomote` substring check treated every user in a
+    // `roomote.*` Entra tenant as Roomote's own bot and dropped their
+    // mentions.
+    expect(isRoomoteAdoIdentity('dan@roomote.onmicrosoft.com')).toBe(false);
+    expect(isRoomoteAdoIdentity('alice@roomote.dev')).toBe(false);
+    expect(isRoomoteAdoIdentity('Dan Riccio')).toBe(false);
   });
 });

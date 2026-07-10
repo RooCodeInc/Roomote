@@ -1,8 +1,8 @@
 import { Job, UnrecoverableError } from 'bullmq';
 
 import {
-  CloudTaskStatus,
-  CloudTaskType,
+  RunStatus,
+  TaskPayloadKind,
   extractErrorDetails,
   isObservedTimeoutError,
   resolveComputeProviderTarget,
@@ -11,19 +11,20 @@ import {
   withoutCompleteTaskOnSnapshot,
 } from '@roomote/types';
 import {
-  type CloudJob,
+  type TaskRun,
   and,
-  buildPendingEnvironmentSnapshotMatchForCloudJob,
+  buildPendingEnvironmentSnapshotMatchForTaskRun,
   createComputeProviderMutationEventRecorder,
   db,
-  cloudJobs,
+  taskRuns,
   eq,
   isNull,
   markTaskStartParallelCountEndedAt,
-  recordCloudJobEvent,
+  recordTaskRunEvent,
   attachEnvironmentSnapshot,
-  getEnvironmentSnapshotAttachmentSourceForCloudJob,
+  getEnvironmentSnapshotAttachmentSourceForTaskRun,
   resolveComputeProviderEnvValues,
+  syncTaskStateFromRuns,
   tasks,
   updatePendingEnvironmentSnapshot,
 } from '@roomote/db/server';
@@ -33,15 +34,15 @@ import {
   type CreateSnapshotResult,
   type SourceInstanceSnapshot,
 } from '@roomote/compute-providers';
-import { drainLinearMessagesToResumeJob } from '@roomote/linear';
-import { drainSlackMessagesToResumeJob } from '@roomote/slack';
+import { drainLinearMessagesToResumeRun } from '@roomote/linear';
+import { drainSlackMessagesToResumeRun } from '@roomote/slack';
 import { z } from 'zod';
 
 import { tryRecordComputeProviderUsage } from '../compute-provider-usage';
 import { captureBullMqMessage } from '../monitoring/sentry';
 
 export interface SnapshotJobData {
-  cloudJobId: number;
+  runId: number;
   sandboxId: string;
   snapshotIntentId?: string;
   triggerPath?: string;
@@ -133,9 +134,9 @@ const snapshotFailureMetadataSchema = z
 
 export const snapshotJob = async (job: SnapshotJob): Promise<void> => {
   const {
-    cloudJobId,
+    runId,
     sandboxId: instanceId,
-    snapshotIntentId = `snapshot-${cloudJobId}`,
+    snapshotIntentId = `snapshot-${runId}`,
     triggerPath = null,
   } = job.data;
   const queueJobId = job.id ?? null;
@@ -144,18 +145,18 @@ export const snapshotJob = async (job: SnapshotJob): Promise<void> => {
   const attemptsRemaining = Math.max(queueMaxAttempts - queueAttempt, 0);
   const isFinalAttempt = queueAttempt >= queueMaxAttempts;
 
-  const cloudJob = await db.query.cloudJobs.findFirst({
-    where: eq(cloudJobs.id, cloudJobId),
+  const taskRun = await db.query.taskRuns.findFirst({
+    where: eq(taskRuns.id, runId),
   });
 
-  if (!cloudJob) {
-    throw new Error(`Cloud job #${cloudJobId} not found`);
+  if (!taskRun) {
+    throw new Error(`Task run #${runId} not found`);
   }
 
   console.log(
-    `[SnapshotQueue] 📸 Processing snapshot request for job #${cloudJobId}`,
+    `[SnapshotQueue] 📸 Processing snapshot request for task run #${runId}`,
   );
-  await recordSnapshotQueueEvent(cloudJob, {
+  await recordSnapshotQueueEvent(taskRun, {
     eventType: 'started',
     message: `Started processing snapshot request for sandbox ${instanceId}.`,
     details: {
@@ -164,20 +165,20 @@ export const snapshotJob = async (job: SnapshotJob): Promise<void> => {
       snapshotIntentId,
       triggerPath,
       sandboxId: instanceId,
-      cloudJobStatus: cloudJob.status,
-      taskPhase: cloudJob.taskPhase ?? null,
-      sleepAt: cloudJob.sleepAt?.toISOString() ?? null,
-      sleepRequestedAt: cloudJob.sleepRequestedAt?.toISOString() ?? null,
-      snapshotRequestedAt: cloudJob.snapshotRequestedAt?.toISOString() ?? null,
-      completedAt: cloudJob.completedAt?.toISOString() ?? null,
-      workerHeartbeatAt: cloudJob.workerHeartbeatAt?.toISOString() ?? null,
-      workerHeartbeatAgeMs: cloudJob.workerHeartbeatAt
-        ? Date.now() - cloudJob.workerHeartbeatAt.getTime()
+      taskRunStatus: taskRun.status,
+      taskPhase: taskRun.taskPhase ?? null,
+      sleepAt: taskRun.sleepAt?.toISOString() ?? null,
+      sleepRequestedAt: taskRun.sleepRequestedAt?.toISOString() ?? null,
+      snapshotRequestedAt: taskRun.snapshotRequestedAt?.toISOString() ?? null,
+      completedAt: taskRun.completedAt?.toISOString() ?? null,
+      workerHeartbeatAt: taskRun.workerHeartbeatAt?.toISOString() ?? null,
+      workerHeartbeatAgeMs: taskRun.workerHeartbeatAt
+        ? Date.now() - taskRun.workerHeartbeatAt.getTime()
         : null,
     },
   });
 
-  const provider = resolveComputeProviderTarget(cloudJob.vendor);
+  const provider = resolveComputeProviderTarget(taskRun.vendor);
   const client = createComputeProviderClient({
     provider,
     envFallback: await resolveComputeProviderEnvValues(provider),
@@ -185,8 +186,8 @@ export const snapshotJob = async (job: SnapshotJob): Promise<void> => {
   const recordMutation = createComputeProviderMutationEventRecorder(
     db,
     {
-      cloudJobId,
-      taskId: cloudJob.taskId,
+      runId: runId,
+      taskId: taskRun.taskId,
     },
     { logPrefix: 'snapshotJob', logger: console },
   );
@@ -194,12 +195,12 @@ export const snapshotJob = async (job: SnapshotJob): Promise<void> => {
   const snapshotAttemptStartedAt = new Date();
   let snapshotResult: CreateSnapshotResult | null = null;
   let reconciledSnapshot: SourceInstanceSnapshot | null = null;
-  const shouldCompleteTask = shouldCompleteTaskOnSnapshot(cloudJob.payload);
+  const shouldCompleteTask = shouldCompleteTaskOnSnapshot(taskRun.payload);
   const clearedCompletionPayload = withoutCompleteTaskOnSnapshot(
-    cloudJob.payload,
-  ) as CloudJob['payload'];
+    taskRun.payload,
+  ) as TaskRun['payload'];
 
-  await recordSnapshotQueueEvent(cloudJob, {
+  await recordSnapshotQueueEvent(taskRun, {
     eventType: 'decision',
     message: `Observed sandbox ${instanceId} in status ${status} before snapshot attempt.`,
     details: {
@@ -210,17 +211,17 @@ export const snapshotJob = async (job: SnapshotJob): Promise<void> => {
       decision: 'pre_snapshot_instance_status_observed',
       sandboxId: instanceId,
       instanceStatus: status,
-      cloudJobStatus: cloudJob.status,
-      taskPhase: cloudJob.taskPhase ?? null,
-      sleepAt: cloudJob.sleepAt?.toISOString() ?? null,
-      sleepRequestedAt: cloudJob.sleepRequestedAt?.toISOString() ?? null,
-      snapshotRequestedAt: cloudJob.snapshotRequestedAt?.toISOString() ?? null,
+      taskRunStatus: taskRun.status,
+      taskPhase: taskRun.taskPhase ?? null,
+      sleepAt: taskRun.sleepAt?.toISOString() ?? null,
+      sleepRequestedAt: taskRun.sleepRequestedAt?.toISOString() ?? null,
+      snapshotRequestedAt: taskRun.snapshotRequestedAt?.toISOString() ?? null,
     },
   });
 
   if (status !== 'running') {
     reconciledSnapshot = await reconcileSnapshotAfterRetryStatusChange({
-      cloudJob,
+      taskRun,
       client,
       instanceId,
       instanceStatus: status,
@@ -234,7 +235,7 @@ export const snapshotJob = async (job: SnapshotJob): Promise<void> => {
     if (reconciledSnapshot) {
       snapshotResult = { snapshotId: reconciledSnapshot.snapshotId };
     } else if (!isFinalAttempt) {
-      await recordSnapshotQueueEvent(cloudJob, {
+      await recordSnapshotQueueEvent(taskRun, {
         eventType: 'decision',
         message: `Snapshot request will retry because sandbox ${instanceId} is ${status}.`,
         details: {
@@ -253,7 +254,7 @@ export const snapshotJob = async (job: SnapshotJob): Promise<void> => {
 
       throw new Error(`Instance is not running (status: ${status})`);
     } else {
-      await recordSnapshotQueueEvent(cloudJob, {
+      await recordSnapshotQueueEvent(taskRun, {
         eventType: 'failed',
         message: `Snapshot request stopped because sandbox ${instanceId} is ${status}.`,
         details: {
@@ -271,7 +272,7 @@ export const snapshotJob = async (job: SnapshotJob): Promise<void> => {
       });
       // Clear the request flag and record the error.
       await db
-        .update(cloudJobs)
+        .update(taskRuns)
         .set({
           payload: clearedCompletionPayload,
           snapshotRequestedAt: null,
@@ -279,14 +280,14 @@ export const snapshotJob = async (job: SnapshotJob): Promise<void> => {
           snapshotFailedAt: new Date(),
           error: `Cannot create snapshot: instance is ${status}`,
         })
-        .where(and(eq(cloudJobs.id, cloudJobId), isNull(cloudJobs.snapshotId)));
+        .where(and(eq(taskRuns.id, runId), isNull(taskRuns.snapshotId)));
 
-      if (cloudJob.type === CloudTaskType.SnapshotEnvironment) {
-        const environmentId = cloudJob.payload.environmentId;
+      if (taskRun.payloadKind === TaskPayloadKind.SnapshotEnvironment) {
+        const environmentId = taskRun.payload.environmentId;
 
         if (environmentId) {
           const pendingSnapshotMatch =
-            buildPendingEnvironmentSnapshotMatchForCloudJob(cloudJob);
+            buildPendingEnvironmentSnapshotMatchForTaskRun(taskRun);
           await updatePendingEnvironmentSnapshot(db, {
             environmentId,
             provider,
@@ -316,12 +317,12 @@ export const snapshotJob = async (job: SnapshotJob): Promise<void> => {
           queueAttempt,
           snapshotIntentId,
           triggerPath,
-          cloudJobStatus: cloudJob.status,
-          taskPhase: cloudJob.taskPhase ?? null,
-          sleepAt: cloudJob.sleepAt?.toISOString() ?? null,
-          sleepRequestedAt: cloudJob.sleepRequestedAt?.toISOString() ?? null,
+          taskRunStatus: taskRun.status,
+          taskPhase: taskRun.taskPhase ?? null,
+          sleepAt: taskRun.sleepAt?.toISOString() ?? null,
+          sleepRequestedAt: taskRun.sleepRequestedAt?.toISOString() ?? null,
           snapshotRequestedAt:
-            cloudJob.snapshotRequestedAt?.toISOString() ?? null,
+            taskRun.snapshotRequestedAt?.toISOString() ?? null,
           preSnapshotInstanceStatus: status,
         },
       });
@@ -366,7 +367,7 @@ export const snapshotJob = async (job: SnapshotJob): Promise<void> => {
       }
 
       console.error(
-        `[SnapshotQueue] ❌ Failed to create snapshot for job #${cloudJobId}: ${errorMessage}`,
+        `[SnapshotQueue] ❌ Failed to create snapshot for task run #${runId}: ${errorMessage}`,
       );
 
       await recordMutation({
@@ -389,7 +390,7 @@ export const snapshotJob = async (job: SnapshotJob): Promise<void> => {
       });
 
       reconciledSnapshot = await reconcileSnapshottingFailure({
-        cloudJob,
+        taskRun,
         client,
         errorDetails,
         instanceId,
@@ -411,7 +412,7 @@ export const snapshotJob = async (job: SnapshotJob): Promise<void> => {
             errorMessage,
           })
         ) {
-          await recordSnapshotQueueEvent(cloudJob, {
+          await recordSnapshotQueueEvent(taskRun, {
             eventType: 'decision',
             message: `Snapshot creation attempt ${queueAttempt} failed for sandbox ${instanceId}; BullMQ will retry.`,
             details: {
@@ -436,7 +437,7 @@ export const snapshotJob = async (job: SnapshotJob): Promise<void> => {
         }
 
         await db
-          .update(cloudJobs)
+          .update(taskRuns)
           .set({
             payload: clearedCompletionPayload,
             snapshotRequestedAt: null,
@@ -444,11 +445,9 @@ export const snapshotJob = async (job: SnapshotJob): Promise<void> => {
             snapshotFailedAt: new Date(),
             error: `Snapshot failed: ${errorMessage}`,
           })
-          .where(
-            and(eq(cloudJobs.id, cloudJobId), isNull(cloudJobs.snapshotId)),
-          );
+          .where(and(eq(taskRuns.id, runId), isNull(taskRuns.snapshotId)));
 
-        await recordSnapshotQueueEvent(cloudJob, {
+        await recordSnapshotQueueEvent(taskRun, {
           eventType: 'decision',
           message: `Cleared snapshot request state for failed snapshot of sandbox ${instanceId}.`,
           details: {
@@ -468,12 +467,12 @@ export const snapshotJob = async (job: SnapshotJob): Promise<void> => {
         });
 
         // Mark the environment snapshot as failed so the UI stops showing "Snapshotting..."
-        if (cloudJob.type === CloudTaskType.SnapshotEnvironment) {
-          const environmentId = cloudJob.payload.environmentId;
+        if (taskRun.payloadKind === TaskPayloadKind.SnapshotEnvironment) {
+          const environmentId = taskRun.payload.environmentId;
 
           if (environmentId) {
             const pendingSnapshotMatch =
-              buildPendingEnvironmentSnapshotMatchForCloudJob(cloudJob);
+              buildPendingEnvironmentSnapshotMatchForTaskRun(taskRun);
             await updatePendingEnvironmentSnapshot(db, {
               environmentId,
               provider,
@@ -486,7 +485,7 @@ export const snapshotJob = async (job: SnapshotJob): Promise<void> => {
           }
         }
 
-        await recordSnapshotQueueEvent(cloudJob, {
+        await recordSnapshotQueueEvent(taskRun, {
           eventType: 'failed',
           message: `Snapshot creation failed for sandbox ${instanceId}.`,
           details: {
@@ -506,8 +505,8 @@ export const snapshotJob = async (job: SnapshotJob): Promise<void> => {
         captureBullMqMessage(
           'Snapshot creation failed',
           {
-            cloudJobId,
-            taskId: cloudJob.taskId,
+            runId,
+            taskId: taskRun.taskId,
             computeProvider: provider,
             sandboxId: instanceId,
             queueJobId,
@@ -515,8 +514,8 @@ export const snapshotJob = async (job: SnapshotJob): Promise<void> => {
             queueMaxAttempts,
             snapshotIntentId,
             triggerPath,
-            cloudJobStatus: cloudJob.status,
-            taskPhase: cloudJob.taskPhase ?? null,
+            taskRunStatus: taskRun.status,
+            taskPhase: taskRun.taskPhase ?? null,
             ...failureDetails,
             preSnapshotInstanceStatus: status,
             postFailureInstanceStatus,
@@ -548,7 +547,7 @@ export const snapshotJob = async (job: SnapshotJob): Promise<void> => {
 
   await db.transaction(async (tx) => {
     await tx
-      .update(cloudJobs)
+      .update(taskRuns)
       .set({
         payload: clearedCompletionPayload,
         snapshotId,
@@ -556,29 +555,25 @@ export const snapshotJob = async (job: SnapshotJob): Promise<void> => {
         snapshotFailedAt: null,
         sleepAt: null,
         taskPhase: null,
-        status: CloudTaskStatus.Completed,
+        status: RunStatus.Completed,
         completedAt: now,
       })
-      .where(eq(cloudJobs.id, cloudJobId));
+      .where(eq(taskRuns.id, runId));
 
-    if (shouldCompleteTask && cloudJob.taskId) {
-      await tx
-        .update(tasks)
-        .set({
-          completed: true,
-          updatedAt: now,
-        })
-        .where(eq(tasks.id, cloudJob.taskId));
+    if (shouldCompleteTask && taskRun.taskId) {
+      // Derive the task state from all its runs now that this run is completed;
+      // the shared helper keeps a non-terminal sibling from being overwritten.
+      await syncTaskStateFromRuns(tx, taskRun.taskId);
     }
 
     await markTaskStartParallelCountEndedAt(tx, {
-      cloudJobId,
+      runId: runId,
       endedAt: now,
     });
   });
 
   await tryRecordComputeProviderUsage({
-    cloudJobId,
+    runId: runId,
     lifecycleAction: 'snapshot',
     completedAt: now,
     usageObservation,
@@ -590,11 +585,14 @@ export const snapshotJob = async (job: SnapshotJob): Promise<void> => {
     logPrefix: 'SnapshotQueue',
   });
 
-  const environmentId = cloudJob.payload.environmentId;
+  const environmentId = taskRun.payload.environmentId;
 
-  if (cloudJob.type === CloudTaskType.SnapshotEnvironment && environmentId) {
+  if (
+    taskRun.payloadKind === TaskPayloadKind.SnapshotEnvironment &&
+    environmentId
+  ) {
     const attachmentSource =
-      getEnvironmentSnapshotAttachmentSourceForCloudJob(cloudJob);
+      getEnvironmentSnapshotAttachmentSourceForTaskRun(taskRun);
     const attached = await attachEnvironmentSnapshot(db, {
       environmentId,
       provider,
@@ -603,11 +601,11 @@ export const snapshotJob = async (job: SnapshotJob): Promise<void> => {
       snapshotCreatedAt: now,
       snapshotExpiresAt,
       attachmentSource,
-      maxPendingUpdatedAt: attachmentSource ? null : cloudJob.createdAt,
+      maxPendingUpdatedAt: attachmentSource ? null : taskRun.createdAt,
     });
 
     if (!attached) {
-      await recordSnapshotQueueEvent(cloudJob, {
+      await recordSnapshotQueueEvent(taskRun, {
         eventType: 'decision',
         message: `Skipped attaching stale snapshot ${snapshotId} to environment ${environmentId}.`,
         details: {
@@ -638,7 +636,7 @@ export const snapshotJob = async (job: SnapshotJob): Promise<void> => {
     }
   }
 
-  await recordSnapshotQueueEvent(cloudJob, {
+  await recordSnapshotQueueEvent(taskRun, {
     eventType: 'completed',
     message: `Created snapshot ${snapshotId} for sandbox ${instanceId}.`,
     details: {
@@ -657,58 +655,85 @@ export const snapshotJob = async (job: SnapshotJob): Promise<void> => {
     },
   });
   console.log(
-    `[SnapshotQueue] ✅ Created snapshot ${snapshotId} for job #${cloudJobId}`,
+    `[SnapshotQueue] ✅ Created snapshot ${snapshotId} for task run #${runId}`,
   );
+
+  // Channel bindings live on the task row now; the drain helpers need them
+  // to decide whether a resume run must be created for pending messages.
+  const taskChannelBindings = await db.query.tasks.findFirst({
+    where: eq(tasks.id, taskRun.taskId),
+    columns: {
+      slackThreadTs: true,
+      linearSessionId: true,
+      linearIssueId: true,
+      linearOrganizationId: true,
+    },
+  });
 
   // Drain pending Linear messages to prevent loss during manual snapshots.
   // When a snapshot is triggered via the UI, the worker never calls
   // drainLinearMessages before the container is killed. Any messages queued
-  // to the old job's Redis list during the ~30s snapshot window would be
-  // orphaned. We check here and create a SnapshotResume job to pick them up.
-  if (cloudJob.linearSessionId) {
+  // to the old run's Redis list during the ~30s snapshot window would be
+  // orphaned. We check here and create a SnapshotResume run to pick them up.
+  if (taskChannelBindings?.linearSessionId) {
     try {
-      const drainResult = await drainLinearMessagesToResumeJob(
-        cloudJob as Parameters<typeof drainLinearMessagesToResumeJob>[0],
+      const drainResult = await drainLinearMessagesToResumeRun(
+        {
+          id: taskRun.id,
+          linearSessionId: taskChannelBindings.linearSessionId,
+          linearIssueId: taskChannelBindings.linearIssueId,
+          linearOrganizationId: taskChannelBindings.linearOrganizationId,
+          slackThreadTs: taskChannelBindings.slackThreadTs,
+          snapshotId,
+          payload: taskRun.payload as Record<string, unknown>,
+          port: taskRun.port,
+        },
         snapshotId,
       );
 
       if (drainResult.resumed) {
         console.log(
-          `[SnapshotQueue] Routed ${drainResult.messageCount} Linear message(s) to SnapshotResume cloud job ${drainResult.cloudJobId}`,
+          `[SnapshotQueue] Routed ${drainResult.messageCount} Linear message(s) to SnapshotResume run ${drainResult.runId}`,
         );
       }
     } catch (drainError) {
       // Log but don't fail the snapshot -- the snapshot itself succeeded.
       console.error(
-        `[SnapshotQueue] Failed to drain Linear messages for job #${cloudJobId}: ${drainError instanceof Error ? drainError.message : String(drainError)}`,
+        `[SnapshotQueue] Failed to drain Linear messages for run #${runId}: ${drainError instanceof Error ? drainError.message : String(drainError)}`,
       );
     }
   }
 
   // Drain pending Slack messages using the same pattern as Linear.
-  if (cloudJob.slackThreadTs) {
+  if (taskChannelBindings?.slackThreadTs) {
     try {
-      const drainResult = await drainSlackMessagesToResumeJob(
-        cloudJob as Parameters<typeof drainSlackMessagesToResumeJob>[0],
+      const drainResult = await drainSlackMessagesToResumeRun(
+        {
+          id: taskRun.id,
+          slackThreadTs: taskChannelBindings.slackThreadTs,
+          snapshotId,
+          payload: taskRun.payload as Record<string, unknown>,
+          port: taskRun.port,
+        },
         snapshotId,
       );
 
       if (drainResult.resumed) {
         console.log(
-          `[SnapshotQueue] Routed ${drainResult.messageCount} Slack message(s) to SnapshotResume cloud job ${drainResult.cloudJobId}`,
+          `[SnapshotQueue] Routed ${drainResult.messageCount} Slack message(s) to SnapshotResume run ${drainResult.runId}`,
         );
       }
     } catch (drainError) {
       // Log but don't fail the snapshot -- the snapshot itself succeeded.
       console.error(
-        `[SnapshotQueue] Failed to drain Slack messages for job #${cloudJobId}: ${drainError instanceof Error ? drainError.message : String(drainError)}`,
+        `[SnapshotQueue] Failed to drain Slack messages for run #${runId}: ${drainError instanceof Error ? drainError.message : String(drainError)}`,
       );
     }
   }
 };
 
 async function recordSnapshotQueueEvent(
-  cloudJob: CloudJob,
+  taskRun: TaskRun,
   input: {
     eventType: 'started' | 'decision' | 'completed' | 'failed';
     message: string;
@@ -716,9 +741,9 @@ async function recordSnapshotQueueEvent(
   },
 ): Promise<void> {
   try {
-    await recordCloudJobEvent(db, {
-      cloudJobId: cloudJob.id,
-      taskId: cloudJob.taskId,
+    await recordTaskRunEvent(db, {
+      runId: taskRun.id,
+      taskId: taskRun.taskId,
       source: 'snapshot_queue',
       eventType: input.eventType,
       message: input.message,
@@ -726,7 +751,7 @@ async function recordSnapshotQueueEvent(
     });
   } catch (error) {
     console.warn(
-      `[SnapshotQueue] Failed to persist cloud job event for #${cloudJob.id}: ${
+      `[SnapshotQueue] Failed to persist task run event for #${taskRun.id}: ${
         error instanceof Error ? error.message : String(error)
       }`,
     );
@@ -738,7 +763,7 @@ function getQueueMaxAttempts(job: SnapshotJob): number {
 }
 
 async function reconcileSnapshottingFailure(input: {
-  cloudJob: CloudJob;
+  taskRun: TaskRun;
   client: ComputeProviderClient;
   errorDetails: Record<string, unknown>;
   instanceId: string;
@@ -759,13 +784,13 @@ async function reconcileSnapshottingFailure(input: {
 
   return findSnapshotBySourceInstanceWithReconcile(input, {
     lookupAnchor:
-      input.cloudJob.snapshotRequestedAt ?? input.snapshotAttemptStartedAt,
+      input.taskRun.snapshotRequestedAt ?? input.snapshotAttemptStartedAt,
     reconcileReason: 'snapshot_create_failed',
   });
 }
 
 async function reconcileSnapshotAfterRetryStatusChange(input: {
-  cloudJob: CloudJob;
+  taskRun: TaskRun;
   client: ComputeProviderClient;
   instanceId: string;
   instanceStatus: string;
@@ -781,7 +806,7 @@ async function reconcileSnapshotAfterRetryStatusChange(input: {
 
   return findSnapshotBySourceInstanceWithReconcile(
     {
-      cloudJob: input.cloudJob,
+      taskRun: input.taskRun,
       client: input.client,
       instanceId: input.instanceId,
       postFailureInstanceStatus: input.instanceStatus,
@@ -794,7 +819,7 @@ async function reconcileSnapshotAfterRetryStatusChange(input: {
     },
     {
       lookupAnchor:
-        input.cloudJob.snapshotRequestedAt ?? input.snapshotAttemptStartedAt,
+        input.taskRun.snapshotRequestedAt ?? input.snapshotAttemptStartedAt,
       reconcileReason: 'instance_not_running_after_retry',
     },
   );
@@ -802,7 +827,7 @@ async function reconcileSnapshotAfterRetryStatusChange(input: {
 
 async function findSnapshotBySourceInstanceWithReconcile(
   input: {
-    cloudJob: CloudJob;
+    taskRun: TaskRun;
     client: ComputeProviderClient;
     instanceId: string;
     postFailureInstanceStatus: string | null;
@@ -821,7 +846,7 @@ async function findSnapshotBySourceInstanceWithReconcile(
   },
 ): Promise<SourceInstanceSnapshot | null> {
   if (!input.client.findSnapshotBySourceInstance) {
-    await recordSnapshotQueueEvent(input.cloudJob, {
+    await recordSnapshotQueueEvent(input.taskRun, {
       eventType: 'decision',
       message: `Snapshot reconciliation unavailable for sandbox ${input.instanceId}.`,
       details: {
@@ -843,7 +868,7 @@ async function findSnapshotBySourceInstanceWithReconcile(
   );
   const startedAt = new Date();
 
-  await recordSnapshotQueueEvent(input.cloudJob, {
+  await recordSnapshotQueueEvent(input.taskRun, {
     eventType: 'decision',
     message:
       options.reconcileReason === 'snapshot_create_failed'
@@ -882,7 +907,7 @@ async function findSnapshotBySourceInstanceWithReconcile(
       });
 
       if (snapshot) {
-        await recordSnapshotQueueEvent(input.cloudJob, {
+        await recordSnapshotQueueEvent(input.taskRun, {
           eventType: 'decision',
           message: `Recovered snapshot ${snapshot.snapshotId} for sandbox ${input.instanceId}.`,
           details: {
@@ -915,7 +940,7 @@ async function findSnapshotBySourceInstanceWithReconcile(
     await sleep(Math.min(SNAPSHOT_RECONCILE_INTERVAL_MS, remainingMs));
   }
 
-  await recordSnapshotQueueEvent(input.cloudJob, {
+  await recordSnapshotQueueEvent(input.taskRun, {
     eventType: 'decision',
     message: `Could not recover snapshot for sandbox ${input.instanceId}.`,
     details: {

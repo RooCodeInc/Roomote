@@ -77,7 +77,7 @@ describe('createHarnessLogger', () => {
     expect(captureWorkerErrorLogMock).toHaveBeenCalledWith(
       ['background process failed'],
       {
-        cloudJobId: 321,
+        runId: 321,
         component: 'harnessLogger',
         filePath: harnessLogPath,
       },
@@ -102,7 +102,7 @@ describe('createHarnessLogger', () => {
         logger: 'harness',
         level: 'warn',
         message: 'background process warning',
-        cloudJobId: 321,
+        runId: 321,
         filePath: harnessLogPath,
       }),
     );

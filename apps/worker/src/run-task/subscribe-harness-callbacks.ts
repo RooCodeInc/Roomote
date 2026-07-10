@@ -8,7 +8,7 @@ import {
   deepStripCitations,
   stripLlmCitationArtifacts,
 } from '@roomote/types';
-import { type DequeuedCloudJob, sdk } from '@roomote/sdk/client';
+import { type DequeuedTaskRun, sdk } from '@roomote/sdk/client';
 
 import type { Harness } from '../sandbox-server';
 import type { HarnessInferenceUsageEvent } from '../sandbox-server/lib/harness';
@@ -31,18 +31,18 @@ interface PendingCompletionEvents {
  */
 export function subscribeHarnessCallbacks({
   harness,
-  cloudJob,
+  taskRun,
   callbacks,
   context,
   logger,
 }: {
   harness: Harness;
-  cloudJob: DequeuedCloudJob['cloudJob'];
+  taskRun: DequeuedTaskRun['taskRun'];
   callbacks: RunTaskCallbacks;
   context: RunTaskContext;
   logger: HarnessLogger;
 }): () => Promise<void> {
-  const persistedTaskId = cloudJob.taskId;
+  const persistedTaskId = taskRun.taskId;
   const pendingCompletionEventsByCallbackId = new Map<
     string,
     PendingCompletionEvents
@@ -78,9 +78,9 @@ export function subscribeHarnessCallbacks({
       return;
     }
 
-    assistantOutputStampInFlight = sdk.cloudJobs
+    assistantOutputStampInFlight = sdk.taskRuns
       .stampMilestone({
-        cloudJobId: cloudJob.id,
+        runId: taskRun.id,
         field: 'firstAssistantOutputAt',
       })
       .then(() => {
@@ -95,15 +95,15 @@ export function subscribeHarnessCallbacks({
   const persistRuntimeEnvelope = (envelope: AcpPersistedEnvelope) => {
     if (persistedTaskId.length === 0) {
       logger.warn(
-        `[subscribeHarnessCallbacks] Skipping envelope persistence for cloud job ${cloudJob.id}: missing task id`,
+        `[subscribeHarnessCallbacks] Skipping envelope persistence for task run ${taskRun.id}: missing task id`,
       );
       return;
     }
 
     void trackPendingPersistenceWrite(
-      sdk.cloudJobs
+      sdk.taskRuns
         .recordMessageEnvelope({
-          cloudJobId: cloudJob.id,
+          runId: taskRun.id,
           taskId: persistedTaskId,
           envelope,
         })
@@ -119,12 +119,12 @@ export function subscribeHarnessCallbacks({
             null;
 
           logger.warn(
-            `[subscribeHarnessCallbacks] Failed to persist envelope for cloud job ${cloudJob.id}: ${
+            `[subscribeHarnessCallbacks] Failed to persist envelope for task run ${taskRun.id}: ${
               error instanceof Error ? error.message : String(error)
             }`,
           );
           captureWorkerException(error, {
-            cloudJobId: cloudJob.id,
+            runId: taskRun.id,
             taskId: persistedTaskId,
             component: 'subscribeHarnessCallbacks',
             stage: 'recordMessageEnvelope',
@@ -141,15 +141,15 @@ export function subscribeHarnessCallbacks({
   const persistInferenceUsage = (event: HarnessInferenceUsageEvent) => {
     if (persistedTaskId.length === 0) {
       logger.warn(
-        `[subscribeHarnessCallbacks] Skipping inference usage persistence for cloud job ${cloudJob.id}: missing task id`,
+        `[subscribeHarnessCallbacks] Skipping inference usage persistence for task run ${taskRun.id}: missing task id`,
       );
       return;
     }
 
     void trackPendingPersistenceWrite(
-      sdk.cloudJobs
+      sdk.taskRuns
         .recordInferenceUsage({
-          cloudJobId: cloudJob.id,
+          runId: taskRun.id,
           harnessSessionId: event.sessionId,
           messageId: event.messageId,
           providerId: event.providerId ?? null,
@@ -174,12 +174,12 @@ export function subscribeHarnessCallbacks({
           consecutivePersistenceFailures += 1;
 
           logger.warn(
-            `[subscribeHarnessCallbacks] Failed to persist inference usage for cloud job ${cloudJob.id}: ${
+            `[subscribeHarnessCallbacks] Failed to persist inference usage for task run ${taskRun.id}: ${
               error instanceof Error ? error.message : String(error)
             }`,
           );
           captureWorkerException(error, {
-            cloudJobId: cloudJob.id,
+            runId: taskRun.id,
             taskId: persistedTaskId,
             component: 'subscribeHarnessCallbacks',
             stage: 'recordInferenceUsage',
@@ -198,15 +198,15 @@ export function subscribeHarnessCallbacks({
   ) => {
     if (event.type === 'completion') {
       logger.info(
-        `[subscribeHarnessCallbacks] Forwarding completion callback for cloud job ${cloudJob.id}: taskId=${callbackTaskId} ts=${event.ts} textChars=${event.text.length}`,
+        `[subscribeHarnessCallbacks] Forwarding completion callback for task run ${taskRun.id}: taskId=${callbackTaskId} ts=${event.ts} textChars=${event.text.length}`,
       );
     }
 
     void callbacks
-      .onMessage?.(cloudJob, callbackTaskId, event, context)
+      .onMessage?.(taskRun, callbackTaskId, event, context)
       .catch((error) => {
         logger.warn(
-          `[subscribeHarnessCallbacks] Failed callback onMessage for cloud job ${cloudJob.id}: ${
+          `[subscribeHarnessCallbacks] Failed callback onMessage for task run ${taskRun.id}: ${
             error instanceof Error ? error.message : String(error)
           }`,
         );
@@ -294,7 +294,7 @@ export function subscribeHarnessCallbacks({
           .join('\n').length;
 
         logger.info(
-          `[subscribeHarnessCallbacks] Received envelope ${envelope.eventType} for cloud job ${cloudJob.id}: ts=${envelope.ts} textChars=${textChars} mappedEvents=${events.length}`,
+          `[subscribeHarnessCallbacks] Received envelope ${envelope.eventType} for task run ${taskRun.id}: ts=${envelope.ts} textChars=${textChars} mappedEvents=${events.length}`,
         );
       }
 

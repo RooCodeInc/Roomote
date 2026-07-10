@@ -1,7 +1,7 @@
 'use client';
 
 import type { ReactNode } from 'react';
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
 import { usePathname, useSearchParams } from 'next/navigation';
 import { toast } from 'sonner';
@@ -15,11 +15,6 @@ import {
 } from '@roomote/types';
 
 import {
-  useEnableGitHubApp,
-  useGitHubInstallations,
-  useSyncGitHubInstallations,
-} from '@/hooks/github';
-import {
   usePrAction,
   useRepositories,
   useSetPrAction,
@@ -30,6 +25,12 @@ import { useAuthorizedUser } from '@/hooks/useUser';
 import { getSourceControlSetupCopy } from '@/app/(onboarding)/setup/sourceControlSetupCopy';
 
 import {
+  useCreateGitHubAppManifest,
+  useEnableGitHubApp,
+  useGitHubInstallations,
+  useSyncGitHubInstallations,
+} from '@/hooks/github';
+import {
   Alert,
   AlertDescription,
   BrandIcon,
@@ -39,6 +40,8 @@ import {
   ChevronUp,
   ExternalLink,
   GitMerge,
+  Input,
+  Label,
   Pencil,
   Plug,
   RefreshCw,
@@ -47,6 +50,8 @@ import {
   SelectItem,
   SelectTrigger,
   SelectValue,
+  Sparkles,
+  Spinner,
 } from '@/components/system';
 import { Section } from '@/components/settings';
 import { SourceControlConfigForm } from './SourceControlConfigForm';
@@ -72,7 +77,7 @@ type SourceControlProviderBlockProps = {
   repositoryTarget: string;
   adminHelp?: ReactNode;
   configForm?: ReactNode;
-  onSetupClick?: () => void;
+  githubSetup?: ReactNode;
 };
 
 const TOKEN_PROVIDER_UI = {
@@ -178,8 +183,14 @@ export function SourceControl() {
   });
 
   const gitHubIsPending =
-    gitHubInstallations.isPending || gitHubRepositories.isPending;
+    gitHubInstallations.isPending ||
+    gitHubRepositories.isPending ||
+    sourceControlConfigStatus.isPending;
   const gitHubIsConnected = (gitHubInstallations.data?.length ?? 0) > 0;
+  const gitHubIsConfigured = isProviderConfigured(
+    sourceControlConfigStatus.data,
+    'github',
+  );
   const gitLabIsPending = gitLabRepositories.isPending;
   const gitLabIsConnected = (gitLabRepositories.data?.length ?? 0) > 0;
   const giteaIsPending = giteaRepositories.isPending;
@@ -219,20 +230,17 @@ export function SourceControl() {
     },
   } satisfies Record<SourceControlTokenBackedProvider, TokenProviderState>;
 
-  const [configuringProvider, setConfiguringProvider] =
-    useState<SourceControlTokenBackedProvider | null>(null);
-
   const providerBlocks: SourceControlProviderBlockProps[] = [
     {
       provider: 'github',
       title: sourceControlProviderDescriptors.github.label,
       isConnected: gitHubIsConnected,
-      isConfigured: gitHubIsConnected,
+      isConfigured: gitHubIsConfigured,
       isPending: gitHubIsPending,
       repositories: gitHubRepositories.data,
       repositoryTarget: '_github',
       action:
-        !gitHubIsPending && isAdmin ? (
+        !gitHubIsPending && isAdmin && gitHubIsConfigured ? (
           <div className="flex flex-wrap items-center gap-2">
             <Button
               type="button"
@@ -298,32 +306,44 @@ export function SourceControl() {
           more repositories.
         </>
       ),
-      notConnectedDescription: (
+      notConnectedDescription: gitHubIsConfigured ? (
         <>
-          Connect the Roomote GitHub app to make repositories available to this
-          deployment.
+          Install the GitHub App configured for this deployment to make
+          repositories available.
+        </>
+      ) : (
+        <>
+          Create a GitHub App for this deployment, or enter an existing
+          app&apos;s credentials, then connect it to select repositories.
         </>
       ),
       adminHelp: isAdmin
         ? 'Missing a repo here? Update GitHub, then refresh to make it available here.'
         : undefined,
+      configForm: isAdmin ? (
+        <SourceControlConfigForm
+          provider="github"
+          configStatus={sourceControlConfigStatus.data}
+          saveSuccessMessage="GitHub App credentials saved."
+        />
+      ) : null,
+      githubSetup: isAdmin ? (
+        <GitHubAppSettingsSetup redirectTarget={redirectTarget} />
+      ) : null,
     },
     ...sourceControlTokenBackedProviders.map((provider) =>
       buildTokenProviderBlock({
         provider,
         isAdmin,
         state: tokenProviderState[provider],
-        onConfigure: () => setConfiguringProvider(provider),
-        configForm:
-          tokenProviderState[provider].isConfigured ||
-          configuringProvider === provider ? (
-            <SourceControlConfigForm
-              provider={provider}
-              configStatus={sourceControlConfigStatus.data}
-              saveSuccessMessage={`${sourceControlProviderDescriptors[provider].label} credentials saved.`}
-              onSaved={() => tokenProviderState[provider].sync.mutate()}
-            />
-          ) : null,
+        configForm: (
+          <SourceControlConfigForm
+            provider={provider}
+            configStatus={sourceControlConfigStatus.data}
+            saveSuccessMessage={`${sourceControlProviderDescriptors[provider].label} credentials saved.`}
+            onSaved={() => tokenProviderState[provider].sync.mutate()}
+          />
+        ),
       }),
     ),
   ];
@@ -359,7 +379,7 @@ const PR_ACTION_LABELS: Record<PrAction, string> = {
 
 /**
  * Deployment-wide default for how repository-changing tasks deliver their
- * work, mirroring the upstream Coder agent `prAction` setting.
+ * work, mirroring the task-run `prAction` setting.
  */
 function PrActionSetting() {
   const prActionQuery = usePrAction();
@@ -405,13 +425,11 @@ function buildTokenProviderBlock({
   provider,
   isAdmin,
   state,
-  onConfigure,
   configForm,
 }: {
   provider: SourceControlTokenBackedProvider;
   isAdmin: boolean;
   state: TokenProviderState;
-  onConfigure: () => void;
   configForm?: ReactNode;
 }): SourceControlProviderBlockProps {
   const { label } = sourceControlProviderDescriptors[provider];
@@ -456,7 +474,6 @@ function buildTokenProviderBlock({
       </>
     ),
     configForm,
-    onSetupClick: onConfigure,
     adminHelp: isAdmin
       ? `Missing a repo here? Confirm the ${label} ${ui.credentialName} can access it, then refresh ${label}.`
       : undefined,
@@ -566,16 +583,22 @@ function SourceControlProviderBlock({
   repositoryTarget,
   adminHelp,
   configForm,
-  onSetupClick,
+  githubSetup,
 }: SourceControlProviderBlockProps) {
   const [isRepositoryListOpen, setIsRepositoryListOpen] = useState(false);
   const [isExpanded, setIsExpanded] = useState(isConfigured);
+  const [showManualGitHubValues, setShowManualGitHubValues] = useState(false);
   const repositoryCount = repositories?.length ?? 0;
   const shouldShowSetup = !isPending && !isConfigured && !isExpanded;
+  const isGitHubUnconfigured =
+    provider === 'github' && !isConfigured && Boolean(githubSetup);
+  const shouldShowGitHubManualForm =
+    !isGitHubUnconfigured || showManualGitHubValues;
 
   useEffect(() => {
     if (isConfigured) {
       setIsExpanded(true);
+      setShowManualGitHubValues(false);
     }
   }, [isConfigured]);
 
@@ -602,10 +625,7 @@ function SourceControlProviderBlock({
           <button
             type="button"
             className="cursor-pointer underline underline-offset-4 hover:text-accent-foreground"
-            onClick={() => {
-              setIsExpanded(true);
-              onSetupClick?.();
-            }}
+            onClick={() => setIsExpanded(true)}
           >
             Set it up
           </button>
@@ -613,9 +633,18 @@ function SourceControlProviderBlock({
       ) : (
         <div className="space-y-8">
           {!isConfigured ? (
-            <ProviderSetupInstructions provider={provider} title={title} />
+            isGitHubUnconfigured ? (
+              <GitHubAppSettingsSetupPanel
+                setup={githubSetup}
+                showManualValues={showManualGitHubValues}
+                onShowManualValues={() => setShowManualGitHubValues(true)}
+                onHideManualValues={() => setShowManualGitHubValues(false)}
+              />
+            ) : (
+              <ProviderSetupInstructions provider={provider} title={title} />
+            )
           ) : null}
-          {configForm}
+          {shouldShowGitHubManualForm ? configForm : null}
           {isPending ? null : repositoryCount > 0 && repositories ? (
             <div>
               <RepositoryLinks
@@ -664,6 +693,161 @@ function SourceControlProviderBlock({
   );
 }
 
+function GitHubAppSettingsSetup({
+  redirectTarget,
+}: {
+  redirectTarget: string;
+}) {
+  const [githubOrganization, setGithubOrganization] = useState('');
+  const [manifestForm, setManifestForm] = useState<{
+    postTarget: string;
+    values: { manifest: string };
+  } | null>(null);
+  const manifestFormRef = useRef<HTMLFormElement | null>(null);
+  const createGitHubAppManifest = useCreateGitHubAppManifest({
+    onSuccess: (result) => {
+      if (result.success) {
+        setManifestForm(result);
+      } else {
+        toast.error(result.error);
+      }
+    },
+    onError: () =>
+      toast.error('Failed to start GitHub App creation. Please try again.'),
+  });
+
+  useEffect(() => {
+    if (manifestForm) {
+      manifestFormRef.current?.submit();
+    }
+  }, [manifestForm]);
+
+  return (
+    <div className="max-w-2xl space-y-4">
+      <div className="space-y-2">
+        <p className="text-sm font-semibold">
+          Create a GitHub App for this deployment.
+        </p>
+        <p className="text-sm text-muted-foreground">
+          Self-hosted Roomote needs its own GitHub App. Create one
+          automatically, or enter values manually if you already have an app.
+        </p>
+      </div>
+      <div className="space-y-1">
+        <Label htmlFor="settings-github-app-organization">
+          GitHub organization (optional)
+        </Label>
+        <Input
+          id="settings-github-app-organization"
+          value={githubOrganization}
+          onChange={(event) => setGithubOrganization(event.target.value)}
+          placeholder="your-organization"
+          disabled={createGitHubAppManifest.isPending || manifestForm !== null}
+          data-1p-ignore
+        />
+        <p className="text-sm text-muted-foreground">
+          The app can only be installed on the account that owns it. Enter an
+          organization name to create the app there, or leave this blank to
+          create it on your personal GitHub account.
+        </p>
+      </div>
+      {manifestForm ? (
+        <form
+          ref={manifestFormRef}
+          action={manifestForm.postTarget}
+          method="post"
+          className="hidden"
+          aria-hidden="true"
+        >
+          <input
+            name="manifest"
+            value={manifestForm.values.manifest}
+            readOnly
+          />
+        </form>
+      ) : null}
+      <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+        <Button
+          type="button"
+          size="sm"
+          onClick={() =>
+            createGitHubAppManifest.mutate({
+              redirect: redirectTarget,
+              organization: githubOrganization.trim() || null,
+            })
+          }
+          disabled={createGitHubAppManifest.isPending || manifestForm !== null}
+        >
+          {createGitHubAppManifest.isPending || manifestForm ? (
+            <Spinner />
+          ) : (
+            <Sparkles />
+          )}
+          Create GitHub App
+        </Button>
+      </div>
+    </div>
+  );
+}
+
+function GitHubAppSettingsSetupPanel({
+  setup,
+  showManualValues,
+  onShowManualValues,
+  onHideManualValues,
+}: {
+  setup: ReactNode;
+  showManualValues: boolean;
+  onShowManualValues: () => void;
+  onHideManualValues: () => void;
+}) {
+  return (
+    <div className="space-y-4">
+      {!showManualValues ? setup : null}
+      <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+        {!showManualValues ? (
+          <Button
+            type="button"
+            size="sm"
+            variant="outline"
+            onClick={onShowManualValues}
+          >
+            <Pencil />
+            Enter values manually
+          </Button>
+        ) : (
+          <Button
+            type="button"
+            size="sm"
+            variant="outline"
+            onClick={onHideManualValues}
+          >
+            Create GitHub App instead
+          </Button>
+        )}
+      </div>
+      {showManualValues ? (
+        <div className="space-y-1">
+          <p className="text-sm font-semibold">Enter GitHub App credentials.</p>
+          <p className="text-sm text-muted-foreground">
+            Paste the app slug, App ID, private key, OAuth client credentials,
+            and webhook secret from your existing GitHub App, then install it
+            with Connect GitHub.
+          </p>
+        </div>
+      ) : (
+        <div className="space-y-1">
+          <p className="text-sm font-semibold">Then install the app.</p>
+          <p className="text-sm text-muted-foreground">
+            After credentials are saved, Connect GitHub installs the app for the
+            repositories Roomote should work with.
+          </p>
+        </div>
+      )}
+    </div>
+  );
+}
+
 function ProviderSetupInstructions({
   provider,
   title,
@@ -672,16 +856,12 @@ function ProviderSetupInstructions({
   title: string;
 }) {
   const setupCopy = getSourceControlSetupCopy(provider);
-  const credentialStep =
-    provider === 'github'
-      ? 'Install the app for the repositories Roomote should work with. Roomote uses the installation to sync repositories and receive pull request events.'
-      : 'Copy the generated credential, then paste it below. Roomote stores deployment credentials securely and uses them to sync repositories and configure pull request webhooks.';
 
   return (
     <div className="max-w-2xl space-y-4">
       <div className="space-y-2">
         <p className="text-sm font-semibold">
-          Create a{' '}
+          Create {setupCopy.setupLabelArticle ?? 'a'}{' '}
           <a
             href={setupCopy.creationHref}
             target="_blank"
@@ -695,14 +875,18 @@ function ProviderSetupInstructions({
         </p>
         <p className="text-sm text-muted-foreground">
           {setupCopy.creationHint ??
-            'Roomote will guide you through GitHub app creation and installation, then bring the selected repositories back here.'}
+            'Roomote will guide you through app creation and installation.'}
         </p>
       </div>
       <div className="space-y-1">
         <p className="text-sm font-semibold">
           Copy credentials and finish setup.
         </p>
-        <p className="text-sm text-muted-foreground">{credentialStep}</p>
+        <p className="text-sm text-muted-foreground">
+          Copy the generated credential, then paste it below. Roomote stores
+          deployment credentials securely and uses them to sync repositories and
+          configure pull request webhooks.
+        </p>
       </div>
     </div>
   );
@@ -710,17 +894,17 @@ function ProviderSetupInstructions({
 
 function isProviderConfigured(
   configStatus: ReturnType<typeof useSourceControlConfigStatus>['data'],
-  provider: SourceControlTokenBackedProvider,
+  provider: SourceControlProvider,
 ) {
   const providerStatus = configStatus?.providers.find(
     (candidate) => candidate.provider === provider,
   );
 
-  return (
-    providerStatus?.fields.some(
-      (field) => field.runtimeSatisfied || field.savedSatisfied,
-    ) ?? false
-  );
+  // configSatisfied covers required fields only: optional fields can be
+  // satisfied by unrelated deployment config (for example ADO_TENANT_ID
+  // falling back to ROOMOTE_AUTH_MICROSOFT_TENANT_ID), which must not hide
+  // the provider's setup instructions.
+  return providerStatus?.configSatisfied ?? false;
 }
 
 function RepositoryLinks({

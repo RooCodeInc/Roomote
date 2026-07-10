@@ -1,4 +1,8 @@
-import { buildApiHeaders, parseApiError } from './api-client.js';
+import {
+  buildApiHeaders,
+  fetchWithTimeout,
+  parseApiError,
+} from './api-client.js';
 import type {
   AutomationWorkItemDisposition,
   SourceControlProvider,
@@ -37,12 +41,16 @@ async function apiFetch<T>(
   options: RequestInit = {},
   errorPrefix: string,
 ): Promise<T> {
-  const response = await fetch(`${config.platformApiUrl}${path}`, {
-    ...options,
-    headers: buildApiHeaders(config, {
-      ...(options.headers as Record<string, string> | undefined),
-    }),
-  });
+  const response = await fetchWithTimeout(
+    `${config.platformApiUrl}${path}`,
+    {
+      ...options,
+      headers: buildApiHeaders(config, {
+        ...(options.headers as Record<string, string> | undefined),
+      }),
+    },
+    { label: errorPrefix },
+  );
 
   if (!response.ok) {
     const error = await parseApiError(response);
@@ -237,7 +245,9 @@ export async function manageSourceControl(
     action: 'create_or_update_pull_request';
     repositoryFullName: string;
     sourceBranch: string;
-    targetBranch: string;
+    // Omitted when updating an existing open PR; the platform defaults to
+    // that PR's current base and only requires it for creation.
+    targetBranch?: string;
     title: string;
     body: string;
     labels?: string[];

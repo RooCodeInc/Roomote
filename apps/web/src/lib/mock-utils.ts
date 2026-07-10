@@ -11,7 +11,6 @@ export const mockFeatureFlags: Record<FeatureFlag, boolean> = {
   [FeatureFlag.VisualProofAutoScreencast]: false,
   [FeatureFlag.AuthorshipRules]: false,
   [FeatureFlag.BackgroundSubagents]: false,
-  [FeatureFlag.PrReviewNotifications]: false,
 };
 
 export const mockUserResource: UserResource = {

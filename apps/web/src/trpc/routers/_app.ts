@@ -10,6 +10,7 @@ import {
   ENVIRONMENT_DEFINITION_SETUP_GUIDANCE_MAX_LENGTH,
   namedPortSchema,
   REASONING_EFFORT_VALUES,
+  isTriggerableBackgroundAutomationKey,
   SCHEDULE_ONLY_BACKGROUND_AUTOMATION_IDS,
   SCHEDULE_ONLY_BACKGROUND_AUTOMATION_FREQUENCIES,
   SCHEDULE_ONLY_BACKGROUND_AUTOMATION_LIST,
@@ -45,6 +46,7 @@ import {
   getTasksCommand,
   generateTaskSummaryCommand,
   getTaskMessageEnvelopesCommand,
+  getTaskRunEventsCommand,
   getTaskByIdCommand,
   getRecentPullRequestsCommand,
   deleteTasksCommand,
@@ -87,9 +89,9 @@ import {
 } from '../commands/source-control';
 import {
   routeHomeTaskCommand,
-  createStandardTaskCloudJobCommand,
-  cancelCloudJobCommand,
-} from '../commands/cloud-jobs';
+  createStandardTaskRunCommand,
+  cancelTaskRunCommand,
+} from '../commands/task-runs';
 import {
   exchangeSlackOAuthCodeCommand,
   connectSlackAppCommand,
@@ -152,8 +154,8 @@ import {
 import {
   createEnvironmentSnapshotCommand,
   clearEnvironmentSnapshotCommand,
-  createCloudJobSnapshotCommand,
-  restoreCloudJobSnapshotCommand,
+  createTaskRunSnapshotCommand,
+  restoreTaskRunSnapshotCommand,
 } from '../commands/snapshots';
 import {
   answerSandboxUserInputRequestCommand,
@@ -238,8 +240,6 @@ import {
 import {
   getComputeStatusCommand,
   saveComputeConfigCommand,
-  saveComputeWorkerImageCommand,
-  clearComputeWorkerImageCommand,
   clearComputeConfigCommand,
   setDefaultComputeProviderCommand,
 } from '../commands/compute';
@@ -255,7 +255,7 @@ import {
   getBackgroundAgentSettingsCommand,
   listSlackChannelsCommand,
   updateBackgroundAgentSettingsCommand,
-  triggerAgentCommand,
+  triggerAutomationCommand,
 } from '../commands/automations';
 import {
   getAgentBehaviorSettingsCommand,
@@ -332,23 +332,12 @@ const UPDATE_SETTINGS_SAVING_AGENT_VALUES = [
   'managerStats',
   'reviewer',
   'conflictResolver',
-  'coach',
   'suggester',
   'sentryTriage',
   'dependabotTriage',
   ...SCHEDULE_ONLY_BACKGROUND_AUTOMATION_IDS,
   'announcer',
   'platformIssueAlerts',
-] as const;
-
-const TRIGGER_AGENT_VALUES = [
-  'conflictResolver',
-  'suggester',
-  'announcer',
-  'managerStats',
-  'sentryTriage',
-  'dependabotTriage',
-  ...SCHEDULE_ONLY_BACKGROUND_AUTOMATION_IDS,
 ] as const;
 
 const SCHEDULE_ONLY_FREQUENCY_FIELD_SHAPE = Object.fromEntries(
@@ -414,6 +403,7 @@ const automationsRouter = createRouter({
         channelAutoStartSlackChannels: z
           .array(
             z.object({
+              channelId: z.string().trim().max(64).nullable().default(null),
               slackChannel: z.string().trim().max(160).nullable().default(null),
               instructions: z.string().max(8_000).nullable().default(null),
               launchMode: z.enum(['always_start']).default('always_start'),
@@ -435,9 +425,6 @@ const automationsRouter = createRouter({
           .max(160)
           .nullable(),
         ...SCHEDULE_ONLY_FREQUENCY_FIELD_SHAPE,
-        coachFrequency: z.enum(['off', 'daily', 'weekly', 'biweekly']),
-        coachSlackChannel: z.string().trim().min(1).max(160).nullable(),
-        coachInstructions: z.string().max(8_000).nullable(),
         suggesterFrequency: z.enum(['off', 'daily', 'weekly']),
         suggesterSlackChannel: z.string().trim().min(1).max(160).nullable(),
         suggesterInstructions: z.string().max(10_000).nullable(),
@@ -471,13 +458,17 @@ const automationsRouter = createRouter({
       updateBackgroundAgentSettingsCommand(auth, input),
     ),
 
-  triggerAgent: protectedProcedure
+  triggerAutomation: protectedProcedure
     .input(
       z.object({
-        agentType: createStringEnumSchema(TRIGGER_AGENT_VALUES),
+        automationKey: z.string().refine(isTriggerableBackgroundAutomationKey, {
+          message: 'Unsupported automation key.',
+        }),
       }),
     )
-    .mutation(({ ctx: { auth }, input }) => triggerAgentCommand(auth, input)),
+    .mutation(({ ctx: { auth }, input }) =>
+      triggerAutomationCommand(auth, input),
+    ),
 });
 
 export const appRouter = createRouter({
@@ -534,9 +525,11 @@ export const appRouter = createRouter({
 
     messageEnvelopes: protectedProcedure
       .input(z.object({ taskId: z.string() }))
-      .query(({ ctx: { auth }, input }) =>
-        getTaskMessageEnvelopesCommand(auth, input),
-      ),
+      .query(({ input }) => getTaskMessageEnvelopesCommand(input)),
+
+    runEvents: protectedProcedure
+      .input(z.object({ taskId: z.string() }))
+      .query(({ input }) => getTaskRunEventsCommand(input)),
 
     generateSummary: protectedProcedure
       .input(z.object({ taskId: z.string() }))
@@ -615,7 +608,7 @@ export const appRouter = createRouter({
       ),
   }),
 
-  cloudJobs: createRouter({
+  taskRuns: createRouter({
     routeHomeTask: protectedProcedure
       .input(
         z.object({
@@ -641,18 +634,18 @@ export const appRouter = createRouter({
         }),
       )
       .mutation(({ ctx: { auth }, input }) =>
-        createStandardTaskCloudJobCommand(auth, input),
+        createStandardTaskRunCommand(auth, input),
       ),
 
     cancel: protectedProcedure
       .input(
         z.object({
           taskId: z.string(),
-          cloudJobId: z.number().int().optional(),
+          runId: z.number().int().optional(),
         }),
       )
       .mutation(({ ctx: { auth }, input }) =>
-        cancelCloudJobCommand(auth, input),
+        cancelTaskRunCommand(auth, input),
       ),
   }),
 
@@ -713,7 +706,12 @@ export const appRouter = createRouter({
       ),
 
     finishCreateAppManifest: protectedProcedure
-      .input(z.object({ code: z.string().min(1) }))
+      .input(
+        z.object({
+          code: z.string().min(1),
+          redirect: z.string().optional(),
+        }),
+      )
       .mutation(({ ctx: { auth }, input }) =>
         finishCreateGitHubAppManifestCommand(auth, input),
       ),
@@ -1123,17 +1121,17 @@ export const appRouter = createRouter({
         clearEnvironmentSnapshotCommand(auth, input),
       ),
 
-    createCloudJob: protectedProcedure
-      .input(z.object({ cloudJobId: z.number() }))
+    createTaskRun: protectedProcedure
+      .input(z.object({ runId: z.number() }))
       .mutation(({ ctx: { auth }, input }) =>
-        createCloudJobSnapshotCommand(auth, input),
+        createTaskRunSnapshotCommand(auth, input),
       ),
 
-    restoreCloudJob: protectedProcedure
+    restoreTaskRun: protectedProcedure
       .input(
         z.object({
           sourceSnapshotId: z.string(),
-          sourceCloudJobId: z.number(),
+          sourceRunId: z.number(),
           description: z.string().optional(),
           clientMessageId: z.string().optional(),
           resumePrompt: z.string().max(50_000).optional(),
@@ -1141,7 +1139,7 @@ export const appRouter = createRouter({
         }),
       )
       .mutation(({ ctx: { auth }, input }) =>
-        restoreCloudJobSnapshotCommand(auth, input),
+        restoreTaskRunSnapshotCommand(auth, input),
       ),
   }),
 
@@ -1250,7 +1248,7 @@ export const appRouter = createRouter({
     sandboxToken: protectedProcedure
       .input(
         z.object({
-          cloudJobId: z.number(),
+          runId: z.number(),
           timeoutMs: z.number().optional(),
         }),
       )
@@ -1331,16 +1329,6 @@ export const appRouter = createRouter({
         clearComputeConfigCommand(auth, input),
       ),
 
-    saveWorkerImage: protectedProcedure
-      .input(z.object({ value: z.string().trim() }))
-      .mutation(({ ctx: { auth }, input }) =>
-        saveComputeWorkerImageCommand(auth, input),
-      ),
-
-    clearWorkerImage: protectedProcedure.mutation(({ ctx: { auth } }) =>
-      clearComputeWorkerImageCommand(auth),
-    ),
-
     setDefaultProvider: protectedProcedure
       .input(z.object({ provider: z.enum(computeProviders) }))
       .mutation(({ ctx: { auth }, input }) =>
@@ -1366,7 +1354,7 @@ export const appRouter = createRouter({
     saveDraftPrompt: protectedProcedure
       .input(
         z.object({
-          cloudJobId: z.number(),
+          runId: z.number(),
           draftPrompt: z.string().max(50_000),
         }),
       )

@@ -1,12 +1,14 @@
-import { agentSuggestionMessages, and, db, eq, like } from '@roomote/db/server';
+import type { TrackedMessageSurface } from '@roomote/types';
+import { and, db, eq, sql, trackedMessages } from '@roomote/db/server';
 
 import { apiLogger } from '../../logging';
 
 /**
  * Shared lifecycle helpers for the setup-onboarding starter-suggestion
  * posts. Every chat surface (Slack, Telegram, Teams) uses the same tracked
- * rows in `agent_suggestion_messages` for dedup and launch claims; only the
- * message shape differs per surface.
+ * rows in `tracked_messages` (kind `suggestion_card`) for dedup and launch
+ * claims; only the message shape differs per surface. The launch state
+ * machine lives on the backing `work_items` row referenced by `workItemId`.
  */
 export const SETUP_ONBOARDING_SUGGESTION_AGENT_TYPE =
   'setup_onboarding' as const;
@@ -21,21 +23,21 @@ export type SetupSuggestionSummary = {
 
 /**
  * One post per source task across every surface: when any surface already
- * tracked messages for this task, the fan-out is done.
+ * tracked messages for this task, the fan-out is done. Setup-onboarding
+ * suggestion cards carry `metadata.suggestionType = 'setup_onboarding'` and
+ * `metadata.suggestionKey = '<sourceTaskId>:<suggestionId>'`.
  */
 export async function hasTrackedSetupSuggestionMessages(
   sourceTaskId: string,
 ): Promise<boolean> {
   const [existingTaskMessage] = await db
-    .select({ id: agentSuggestionMessages.id })
-    .from(agentSuggestionMessages)
+    .select({ id: trackedMessages.id })
+    .from(trackedMessages)
     .where(
       and(
-        eq(
-          agentSuggestionMessages.agentType,
-          SETUP_ONBOARDING_SUGGESTION_AGENT_TYPE,
-        ),
-        like(agentSuggestionMessages.suggestionKey, `${sourceTaskId}:%`),
+        eq(trackedMessages.kind, 'suggestion_card'),
+        sql`${trackedMessages.metadata} ->> 'suggestionType' = ${SETUP_ONBOARDING_SUGGESTION_AGENT_TYPE}`,
+        sql`${trackedMessages.metadata} ->> 'suggestionKey' LIKE ${`${sourceTaskId}:%`}`,
       ),
     )
     .limit(1);
@@ -44,8 +46,10 @@ export async function hasTrackedSetupSuggestionMessages(
 }
 
 type SetupSuggestionMessageRow = {
+  surface: TrackedMessageSurface;
   messageTs: string;
   channelId: string;
+  workItemId: string;
   suggestionKey: string;
   createdByUserId: string;
 };
@@ -58,35 +62,43 @@ export async function insertSetupSuggestionMessageRows(
   }
 
   await db
-    .insert(agentSuggestionMessages)
+    .insert(trackedMessages)
     .values(
       rows.map((row) => ({
-        agentType: SETUP_ONBOARDING_SUGGESTION_AGENT_TYPE,
-        ...row,
+        surface: row.surface,
+        kind: 'suggestion_card' as const,
+        dedupeKey: `${row.channelId}:${row.messageTs}`,
+        channelId: row.channelId,
+        messageTs: row.messageTs,
+        workItemId: row.workItemId,
+        createdByUserId: row.createdByUserId,
+        metadata: {
+          suggestionType: SETUP_ONBOARDING_SUGGESTION_AGENT_TYPE,
+          suggestionKey: row.suggestionKey,
+        },
       })),
     )
     .onConflictDoNothing({
-      target: [
-        agentSuggestionMessages.channelId,
-        agentSuggestionMessages.messageTs,
-      ],
+      target: [trackedMessages.kind, trackedMessages.dedupeKey],
     });
 }
 
 /**
  * Tracked rows for surfaces that deliver all ideas inside one message
- * (Telegram, Teams). All suggestions share one message, but (channelId,
- * messageTs) is unique — the suggestion id suffix keeps every tracked row
- * alive through the batch insert. Nothing reads these rows back by
- * messageTs; claims match on channelId + suggestionKey.
+ * (Telegram, Teams). All suggestions share one message, but the suggestion id
+ * suffix on `messageTs` keeps `(kind, dedupeKey)` unique so every tracked row
+ * survives the batch insert. `workItemId` is the suggestion's backing
+ * `work_items` row; reaction/button launches CAS its status.
  */
 export function buildSharedMessageSuggestionRows({
+  surface,
   messageId,
   channelId,
   sourceTaskId,
   createdByUserId,
   suggestions,
 }: {
+  surface: TrackedMessageSurface;
   messageId: string;
   channelId: string;
   sourceTaskId: string;
@@ -94,8 +106,10 @@ export function buildSharedMessageSuggestionRows({
   suggestions: SetupSuggestionSummary[];
 }): SetupSuggestionMessageRow[] {
   return suggestions.map((suggestion) => ({
+    surface,
     messageTs: `${messageId}:${suggestion.id}`,
     channelId,
+    workItemId: suggestion.id,
     suggestionKey: `${sourceTaskId}:${suggestion.id}`,
     createdByUserId,
   }));

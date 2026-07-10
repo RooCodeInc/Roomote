@@ -9,7 +9,6 @@ import {
   type CodingHarness,
   type SourceControlProvider,
   HARNESS_LABELS,
-  CloudTaskType,
   PRODUCT_NAME,
   getModelProviderLabel,
   getReasoningEffortLabel,
@@ -19,11 +18,8 @@ import {
   resolveSourceControlProviderFromPayload,
 } from '@roomote/types';
 
-import type { TaskWithAssociations } from '@/types';
-
 import { useShowDebugUI } from '@/hooks/useShowDebugUI';
-import type { CloudJobDetail } from '@/lib/server';
-import { getCloudJobDisplayError } from '@/lib/cloud-job-errors';
+import { getTaskRunDisplayError } from '@/lib/task-run-errors';
 import { formatInferenceCost } from '@/lib/formatters';
 import { getUserDisplayName } from '@/lib/user-display-name';
 import { cn } from '@/lib/utils';
@@ -47,15 +43,20 @@ import {
 import { PullRequestBadge, WorkspaceBadge } from '@/components/sandbox';
 import { streamdownCodeMermaidCjkPlugins } from '@/components/ai-elements/streamdown-plugins';
 
-import { useSandboxMessages, useTaskSummary } from '../hooks';
+import {
+  type SessionTaskRun,
+  type SessionTask,
+  useSandboxMessages,
+  useTaskSummary,
+} from '../hooks';
 
 import { SidePanelHeader } from './SidePanelHeader';
 import { getTaskParticipants } from './task-participants';
 
 interface TaskInfoPanelProps {
   active: boolean;
-  task: TaskWithAssociations;
-  cloudJob: CloudJobDetail;
+  task: SessionTask;
+  taskRun: SessionTaskRun;
   harness: CodingHarness;
   onClose: () => void;
 }
@@ -109,45 +110,50 @@ const SOURCE_CONTROL_BRAND_ICONS: Record<
   ado: 'ado',
 };
 
-function getStartedFrom(cloudJob: CloudJobDetail): {
+const SOURCE_CONTROL_SURFACES: ReadonlySet<string> = new Set([
+  'github',
+  'gitlab',
+  'gitea',
+  'ado',
+]);
+
+function getStartedFrom(
+  task: SessionTask,
+  taskRun: SessionTaskRun,
+): {
   label: string;
   brandIcon?: StartedFromBrandIcon;
 } {
-  const communicationProvider = cloudJob.payload?.communicationProvider;
+  const communicationProvider = taskRun.payload?.communicationProvider;
 
   if (
-    cloudJob.slackThreadTs ||
-    cloudJob.type === CloudTaskType.SlackAppMention ||
+    task.surface === 'slack' ||
+    task.slackThreadTs ||
     communicationProvider === 'slack'
   ) {
     return { label: 'Slack', brandIcon: 'slack' };
   }
 
-  if (
-    cloudJob.linearSessionId ||
-    cloudJob.linearIssueId ||
-    cloudJob.type === CloudTaskType.LinearAgentSession
-  ) {
+  if (task.surface === 'linear' || task.linearSessionId || task.linearIssueId) {
     return { label: 'Linear', brandIcon: 'linear' };
   }
 
   if (
-    cloudJob.prRepo ||
-    cloudJob.prNumber ||
-    cloudJob.type.startsWith('github.')
+    (task.surface && SOURCE_CONTROL_SURFACES.has(task.surface)) ||
+    taskRun.payloadKind.startsWith('github_')
   ) {
-    const provider = resolveSourceControlProviderFromPayload(cloudJob.payload);
+    const provider = resolveSourceControlProviderFromPayload(taskRun.payload);
     return {
       label: getSourceControlProviderLabel(provider),
       brandIcon: SOURCE_CONTROL_BRAND_ICONS[provider],
     };
   }
 
-  if (communicationProvider === 'telegram') {
+  if (task.surface === 'telegram' || communicationProvider === 'telegram') {
     return { label: 'Telegram', brandIcon: 'telegram' };
   }
 
-  if (communicationProvider === 'teams') {
+  if (task.surface === 'teams' || communicationProvider === 'teams') {
     return { label: 'Teams', brandIcon: 'teams' };
   }
 
@@ -157,7 +163,7 @@ function getStartedFrom(cloudJob: CloudJobDetail): {
 export function TaskInfoPanel({
   active,
   task,
-  cloudJob,
+  taskRun,
   harness,
   onClose,
 }: TaskInfoPanelProps) {
@@ -171,17 +177,17 @@ export function TaskInfoPanel({
     regenerateSummary,
   } = useTaskSummary(task.id, { enabled: active });
 
-  const cloudJobError = getCloudJobDisplayError(cloudJob);
-  const startedFrom = getStartedFrom(cloudJob);
-  const effectiveHarness = cloudJob.harness ?? harness;
+  const taskRunError = getTaskRunDisplayError(taskRun);
+  const startedFrom = getStartedFrom(task, taskRun);
+  const effectiveHarness = taskRun.harness ?? harness;
   const HarnessIcon = HARNESS_ICONS[effectiveHarness];
-  const SandboxProviderIcon = cloudJob.vendor
-    ? SANDBOX_PROVIDER_ICONS[cloudJob.vendor]
+  const SandboxProviderIcon = taskRun.vendor
+    ? SANDBOX_PROVIDER_ICONS[taskRun.vendor]
     : CloudIcon;
-  const sandboxProviderLabel = cloudJob.vendor
-    ? SANDBOX_PROVIDER_LABELS[cloudJob.vendor]
+  const sandboxProviderLabel = taskRun.vendor
+    ? SANDBOX_PROVIDER_LABELS[taskRun.vendor]
     : 'Unknown';
-  const taskModelReasoningEffort = cloudJob.payload?.reasoningEffort;
+  const taskModelReasoningEffort = taskRun.payload?.reasoningEffort;
   const inferenceProviderId = task.model
     ? getTaskModelProviderId(task.model)
     : null;
@@ -210,7 +216,7 @@ export function TaskInfoPanel({
     () =>
       getTaskParticipants(
         messages,
-        task.attributionKind === 'matched_user'
+        task.attributionKind === 'user'
           ? {
               id: task.user?.id ?? null,
               name: task.user?.name ?? null,
@@ -237,7 +243,7 @@ export function TaskInfoPanel({
                   Creator
                 </td>
                 <td className="py-1">
-                  {task.user && task.attributionKind === 'matched_user' ? (
+                  {task.user && task.attributionKind === 'user' ? (
                     <>
                       {task.user.imageUrl ? (
                         <Image
@@ -273,15 +279,9 @@ export function TaskInfoPanel({
                             name={participant.name}
                             email={participant.email}
                             size="sm"
-                            alt={
-                              participant.name ?? participant.email ?? 'User'
-                            }
+                            alt={participant.displayName}
                           />
-                          <span>
-                            {participant.name ??
-                              participant.email ??
-                              'Unknown user'}
-                          </span>
+                          <span>{participant.displayName}</span>
                         </span>
                       ))}
                     </div>
@@ -289,15 +289,15 @@ export function TaskInfoPanel({
                 </tr>
               )}
 
-              {(cloudJob.payload?.environmentId || cloudJob.payload?.repo) && (
+              {(taskRun.payload?.environmentId || taskRun.payload?.repo) && (
                 <tr>
                   <td className="pr-4 py-1 align-top whitespace-nowrap">
                     Workspace
                   </td>
                   <td className="py-1">
                     <WorkspaceBadge
-                      environmentId={cloudJob.payload.environmentId}
-                      repo={cloudJob.payload.repo}
+                      environmentId={taskRun.payload.environmentId}
+                      repo={taskRun.payload.repo}
                       iconClassName="text-muted-foreground"
                     />
                   </td>
@@ -358,15 +358,15 @@ export function TaskInfoPanel({
                 </tr>
               )}
 
-              {cloudJob.prRepo && cloudJob.prNumber && (
+              {taskRun.prRepo && taskRun.prNumber && (
                 <tr>
                   <td className="pr-4 py-1 align-top whitespace-nowrap">
                     Pull Request
                   </td>
                   <td className="py-1">
                     <PullRequestBadge
-                      repo={cloudJob.prRepo}
-                      prNumber={cloudJob.prNumber}
+                      repo={taskRun.prRepo}
+                      prNumber={taskRun.prNumber}
                       iconClassName="text-muted-foreground"
                     />
                   </td>
@@ -381,7 +381,7 @@ export function TaskInfoPanel({
                   <span className="inline-flex items-center gap-1.5">
                     <Calendar className="size-3.5 shrink-0 text-muted-foreground" />
                     <span className="truncate">
-                      {formatStartedAt(cloudJob.startedAt)}
+                      {formatStartedAt(taskRun.startedAt)}
                     </span>
                   </span>
                 </td>
@@ -413,14 +413,14 @@ export function TaskInfoPanel({
             </tbody>
           </table>
 
-          {cloudJobError && (
+          {taskRunError && (
             <div>
               <div className="flex items-center gap-2 mb-1">
                 <h3 className="text-sm font-medium">Last Error</h3>
-                <CopyIconButton content={cloudJobError} />
+                <CopyIconButton content={taskRunError} />
               </div>
               <p className="text-sm text-destructive whitespace-pre-wrap wrap-break-word">
-                {cloudJobError}
+                {taskRunError}
               </p>
             </div>
           )}

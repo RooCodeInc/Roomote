@@ -191,8 +191,8 @@ describe('buildSuggestedTasksPrompt', () => {
       suggesterInstructions: null,
       previousSuggestions: [
         {
-          title: 'Scope legacy job tokens to their own task',
-          brief: 'Legacy job tokens can still reach unrelated task APIs.',
+          title: 'Scope legacy run tokens to their own task',
+          brief: 'Legacy run tokens can still reach unrelated task APIs.',
           status: 'open',
         },
         {
@@ -205,10 +205,10 @@ describe('buildSuggestedTasksPrompt', () => {
     });
 
     expect(prompt).toContain(
-      'Previously suggested ideas (status shows whether each suggestion is still open, already started, or was dismissed; do NOT re-suggest open or started ideas, and avoid repeating dismissed ones):',
+      'Previously suggested ideas (status shows whether each suggestion is still open, was already launched, or was dismissed; do NOT re-suggest open or launched ideas, and avoid repeating dismissed ones):',
     );
     expect(prompt).toContain(
-      '[open] Scope legacy job tokens to their own task',
+      '[open] Scope legacy run tokens to their own task',
     );
     expect(prompt).toContain(
       '[dismissed] Sign Slack OAuth state to the initiating org',
@@ -278,13 +278,13 @@ describe('buildSuggestedTasksPrompt', () => {
         {
           title: 'Repeated idea',
           brief: longBrief,
-          status: 'started',
+          status: 'launched',
         },
       ],
     });
 
-    expect(prompt).toContain(`[started] Repeated idea: ${'a'.repeat(200)}...`);
-    expect(prompt).not.toContain(`[started] Repeated idea: ${longBrief}`);
+    expect(prompt).toContain(`[launched] Repeated idea: ${'a'.repeat(200)}...`);
+    expect(prompt).not.toContain(`[launched] Repeated idea: ${longBrief}`);
   });
 
   it('includes category diversity and expanded suggestion sources', () => {

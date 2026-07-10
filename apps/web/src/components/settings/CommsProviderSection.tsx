@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
@@ -14,6 +14,12 @@ import {
 } from '@/hooks/slack';
 import { useTeamsIntegrationStatus } from '@/hooks/teams';
 import { SETTINGS_PATHS } from '@/lib/settings';
+import {
+  getSetupEffectiveFieldValue,
+  getSetupSubmitValues,
+  getSetupVisibleFields,
+  ProviderSetupExperience,
+} from '@/app/(onboarding)/setup/ProviderSetupExperience';
 
 type CommsProviderId = SetupAuthProviderStatus['id'] | 'telegram';
 type TelegramWebhookStatus = {
@@ -53,12 +59,6 @@ const TELEGRAM_WEBHOOK_STATUS_COPY: Record<
   },
 };
 
-import { buildSlackManifestPrefillUrl } from '@/lib/slack-app-manifest';
-import {
-  SLACK_APP_INSTALL_CALLBACK_PATH,
-  SLACK_SIGN_IN_CALLBACK_PATH,
-} from '@/lib/slack-callback-paths';
-import { getProviderSetupCopy } from '@/app/(onboarding)/setup/providerSetupCopy';
 import {
   ArrowLeft,
   BrandIcon,
@@ -70,19 +70,14 @@ import {
   DialogFooter,
   DialogHeader,
   DialogTitle,
-  Download,
-  EnvVarsInfoNote,
   ExternalLink,
   Info,
-  Input,
-  Pencil,
   Plug,
   RefreshCw,
   Select,
   SelectContent,
   SelectItem,
   SelectTrigger,
-  Sparkles,
   Spinner,
   Trash2,
   TriangleAlert,
@@ -90,7 +85,8 @@ import {
 import { Section } from './Section';
 import { TelegramLinkAccountStep } from './TelegramLinkAccountStep';
 
-const MASKED_VALUE = '••••••••••••••••••••••••••••';
+const MICROSOFT_APP_ID_PATTERN =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 function getProviderIconId(providerId: CommsProviderId): string {
   return providerId === 'microsoft' ? 'teams' : providerId;
@@ -407,6 +403,9 @@ function TeamsBotStatus() {
   const teamsStatus = teamsIntegrationStatus.data;
   const teamsBotConfigured = Boolean(teamsStatus?.botConfigured);
   const teamsOpenInTeamsUrl = teamsStatus?.openInTeamsUrl ?? null;
+  const teamsPrimaryConversationReady = Boolean(
+    teamsStatus?.primaryConversationReady,
+  );
 
   const statusCopy = teamsBotConfigured ? (
     teamsStatus?.microsoftAuthConfigured ? (
@@ -444,6 +443,16 @@ function TeamsBotStatus() {
         )}
         <p className="text-sm text-muted-foreground">{statusCopy}</p>
       </div>
+      {teamsBotConfigured && !teamsPrimaryConversationReady ? (
+        <div className="flex items-start gap-2">
+          <TriangleAlert className="size-4 mt-0.5 shrink-0 text-amber-600" />
+          <p className="text-sm text-muted-foreground">
+            Roomote has not captured a Teams conversation yet, so setup and
+            automation messages cannot reach Teams. Install or open the Roomote
+            app in Teams and send the bot one message to finish connecting.
+          </p>
+        </div>
+      ) : null}
       {teamsOpenInTeamsUrl ? (
         <div>
           <Button asChild variant="outline" size="sm">
@@ -495,12 +504,16 @@ export function CommsProviderSection({
   const [editingSavedValues, setEditingSavedValues] = useState<
     Record<string, boolean>
   >({});
+  const [clearedSavedValues, setClearedSavedValues] = useState<
+    Record<string, boolean>
+  >({});
   const [showManualSlackValues, setShowManualSlackValues] = useState(false);
   const [removeDialogOpen, setRemoveDialogOpen] = useState(false);
 
   useEffect(() => {
     setValues({});
     setEditingSavedValues({});
+    setClearedSavedValues({});
     setShowManualSlackValues(false);
     setRemoveDialogOpen(false);
   }, [provider.id, provider.runtimeSatisfied, provider.savedSatisfied]);
@@ -518,48 +531,30 @@ export function CommsProviderSection({
     teamsBotConfigured,
   ]);
 
-  const providerSetupCopy = getProviderSetupCopy(provider.id);
-  const providerSetupLabel =
-    providerSetupCopy?.setupLabel ?? `${provider.label}`;
   const publicOrigin =
     typeof window === 'undefined'
       ? 'https://your-deployment-url'
       : window.location.origin;
-  const slackManifestPrefillUrl =
-    provider.id === 'slack'
-      ? buildSlackManifestPrefillUrl({ publicOrigin })
-      : null;
+  const visibleFields = getSetupVisibleFields(provider);
 
-  const providerSetupNotes = useMemo(() => {
-    if (provider.id === 'slack') {
-      return [
-        `Register these as authorized redirect URLs (under OAuth & Permissions):`,
-        `${publicOrigin}${SLACK_SIGN_IN_CALLBACK_PATH}`,
-        `${publicOrigin}${SLACK_APP_INSTALL_CALLBACK_PATH}`,
-      ];
-    }
-    if (provider.id === 'microsoft') {
-      return [
-        'These values are for the Microsoft Entra app Roomote uses for Teams — both user sign-in and the bot. Under Authentication, add a Web redirect URI:',
-        `${publicOrigin}/api/auth/oauth2/callback/microsoft-entra-id`,
-        'Create a client secret, then enter the Application (client) ID, the secret value, and the Directory (tenant) ID below.',
-        `Create a bot for the same app in the Teams Developer Portal (Tools → Bot management) with the messaging endpoint ${publicOrigin}/api/webhooks/teams, then download the app package below and upload it in Teams. Dedicated TEAMS_BOT_* env vars override these values for the bot.`,
-      ];
-    }
-    return providerSetupCopy?.notes ?? [];
-  }, [providerSetupCopy?.notes, publicOrigin, provider.id]);
-
-  const hasPendingValueChanges = provider.fields.some((field) => {
+  const hasPendingValueChanges = visibleFields.some((field) => {
     const nextValue = values[field.envVarName]?.trim() ?? '';
-    return !field.runtimeSatisfied && nextValue.length > 0;
+    return (
+      !field.runtimeSatisfied &&
+      (nextValue.length > 0 || Boolean(clearedSavedValues[field.envVarName]))
+    );
   });
 
-  const hasMissingRequiredValue = provider.fields.some((field) => {
-    const nextValue = values[field.envVarName]?.trim() ?? '';
+  const hasMissingRequiredValue = visibleFields.some((field) => {
+    const nextValue = getSetupEffectiveFieldValue({
+      provider,
+      field,
+      values,
+    }).trim();
     return (
       field.required !== false &&
       !field.runtimeSatisfied &&
-      !field.savedSatisfied &&
+      (!field.savedSatisfied || clearedSavedValues[field.envVarName]) &&
       nextValue.length === 0
     );
   });
@@ -568,15 +563,60 @@ export function CommsProviderSection({
 
   const hasConfiguredValues =
     provider.runtimeSatisfied || provider.savedSatisfied;
-  const hasEditableFields = provider.fields.some(
+  const hasEditableFields = visibleFields.some(
     (field) => !field.runtimeSatisfied,
   );
-
-  const isSlackCreateAppStep =
+  const providerOwnsActions =
     provider.id === 'slack' && !showManualSlackValues && !hasConfiguredValues;
 
+  const teamsBotAppIdField = provider.fields.find(
+    (field) => field.envVarName === 'TEAMS_BOT_APP_ID',
+  );
+  const teamsBotNameField = provider.fields.find(
+    (field) => field.envVarName === 'TEAMS_BOT_NAME',
+  );
+  const enteredTeamsBotAppId =
+    isMicrosoftProvider && teamsBotAppIdField
+      ? getSetupEffectiveFieldValue({
+          provider,
+          field: teamsBotAppIdField,
+          values,
+        }).trim()
+      : '';
+  const typedTeamsBotAppId = MICROSOFT_APP_ID_PATTERN.test(enteredTeamsBotAppId)
+    ? enteredTeamsBotAppId
+    : '';
+  const typedTeamsBotName =
+    isMicrosoftProvider && teamsBotNameField
+      ? getSetupEffectiveFieldValue({
+          provider,
+          field: teamsBotNameField,
+          values,
+        }).trim()
+      : '';
+  const teamsBotAppIdStored = isMicrosoftProvider
+    ? provider.fields.some(
+        (field) =>
+          (field.envVarName === 'TEAMS_BOT_APP_ID' ||
+            field.envVarName === 'ROOMOTE_AUTH_MICROSOFT_CLIENT_ID') &&
+          (field.runtimeSatisfied || field.savedSatisfied),
+      )
+    : false;
+  const teamsSetupPackageParams = new URLSearchParams();
+  if (typedTeamsBotAppId) {
+    teamsSetupPackageParams.set('botAppId', typedTeamsBotAppId);
+  }
+  if (typedTeamsBotName) {
+    teamsSetupPackageParams.set('botName', typedTeamsBotName);
+  }
+  const teamsAppPackageHref = typedTeamsBotAppId
+    ? `/api/setup/teams-app-package?${teamsSetupPackageParams.toString()}`
+    : teamsBotAppIdStored || teamsBotConfigured
+      ? '/api/teams/app-package'
+      : null;
+
   const handleSave = () => {
-    onSave(provider.id, values);
+    onSave(provider.id, getSetupSubmitValues({ provider, values }));
   };
 
   const handleRemove = () => {
@@ -611,253 +651,111 @@ export function CommsProviderSection({
               Set it up
             </button>
           </p>
-        ) : isSlackCreateAppStep ? (
-          <div className="space-y-3 max-w-xl py-2">
-            <p className="text-sm">
-              Create a Slack app from Roomote&apos;s manifest, then enter the
-              generated configuration values here.
-            </p>
-            <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
-              <Button asChild>
-                <a
-                  href={slackManifestPrefillUrl ?? 'https://api.slack.com/apps'}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  onClick={() => setShowManualSlackValues(true)}
-                >
-                  <Sparkles />
-                  Create Slack app
-                </a>
-              </Button>
-              <Button
-                type="button"
-                variant="outline"
-                onClick={() => setShowManualSlackValues(true)}
-              >
-                <Pencil />
-                Enter values manually
-              </Button>
-            </div>
-          </div>
         ) : (
           <div className="space-y-8">
-            {!hasConfiguredValues && (
-              <div>
-                <p className="font-semibold text-sm">
-                  {providerSetupCopy ? (
-                    <>
-                      Create a new{' '}
-                      <a
-                        href={providerSetupCopy.creationHref}
-                        target="_blank"
-                        rel="noopener noreferrer underline"
-                      >
-                        {providerSetupCopy.setupLabel}.
-                        <ExternalLink className="inline size-4 -mt-1 ml-1" />
-                      </a>
-                    </>
+            <ProviderSetupExperience
+              provider={provider}
+              values={values}
+              publicOrigin={publicOrigin}
+              disabled={savePending}
+              editingSavedValues={editingSavedValues}
+              clearedSavedValues={clearedSavedValues}
+              teamsAppPackageHref={teamsAppPackageHref}
+              showManualSlackValues={showManualSlackValues}
+              surface="settings"
+              envVarsInfoNote={
+                !provider.runtimeSatisfied && provider.id === 'telegram'
+                  ? 'Roomote will generate the webhook secret if you leave it blank, register the webhook automatically when you save, and default Telegram task launches to the admin who saves this configuration.'
+                  : undefined
+              }
+              onShowManualSlackValues={() => setShowManualSlackValues(true)}
+              onValueChange={(envVarName, value) =>
+                setValues((current) => ({ ...current, [envVarName]: value }))
+              }
+              onEditingSavedValueChange={(envVarName, editing) =>
+                setEditingSavedValues((current) => ({
+                  ...current,
+                  [envVarName]: editing,
+                }))
+              }
+              onClearedSavedValueChange={(envVarName, cleared) =>
+                setClearedSavedValues((current) => ({
+                  ...current,
+                  [envVarName]: cleared,
+                }))
+              }
+            />
+
+            <div className="space-y-2 text-sm text-muted-foreground">
+              {provider.id === 'telegram' && provider.telegramWebhook && (
+                <div className="flex items-start gap-2 mt-4">
+                  {TELEGRAM_WEBHOOK_STATUS_COPY[provider.telegramWebhook.status]
+                    .tone === 'ok' ? (
+                    <Check className="inline size-4 mt-0.5 shrink-0 text-green-600" />
                   ) : (
-                    <>create a new {providerSetupLabel}.</>
+                    <Info className="inline size-4 mt-0.5 shrink-0 text-amber-600" />
                   )}
-                </p>
-                <p className="text-sm text-muted-foreground mt-1">
-                  If you need our logo,{' '}
-                  <Link
-                    className="underline underline-offset-4 hover:text-foreground"
-                    href="/api/setup/roomote-logo"
-                  >
-                    download here
-                  </Link>
-                  .
-                </p>
-              </div>
-            )}
-
-            {providerSetupNotes.length > 0 && (
-              <p className="font-semibold text-sm">
-                {providerSetupNotes.map((note) => (
-                  <span className="block" key={note}>
-                    {note}
-                  </span>
-                ))}
-              </p>
-            )}
-
-            <div className="flex gap-2 items-start">
-              <div>
-                <p className="font-semibold text-sm">
-                  {hasConfiguredValues
-                    ? 'Configuration values'
-                    : 'Enter the values below:'}
-                </p>
-                <div className="space-y-2 mt-2">
-                  {provider.fields.map((field) => {
-                    const value = values[field.envVarName] ?? '';
-                    const shouldShowSavedValueMask =
-                      !field.runtimeSatisfied &&
-                      field.savedSatisfied &&
-                      value.length === 0 &&
-                      !editingSavedValues[field.envVarName];
-
-                    return (
-                      <div
-                        key={field.envVarName}
-                        className="grid gap-2 md:grid-cols-[180px_minmax(0,1fr)] md:items-center max-w-xl"
-                      >
-                        <div className="space-y-1">
-                          <div className="text-sm font-medium">
-                            {field.label}
-                            {field.required === false ? ' (optional)' : ''}
-                          </div>
-                        </div>
-                        <div>
-                          <div className="flex items-center gap-2">
-                            <Input
-                              secret={field.secret && !field.runtimeSatisfied}
-                              className="font-mono"
-                              value={
-                                field.runtimeSatisfied
-                                  ? MASKED_VALUE
-                                  : shouldShowSavedValueMask
-                                    ? MASKED_VALUE
-                                    : value
-                              }
-                              onFocus={() => {
-                                if (shouldShowSavedValueMask) {
-                                  setEditingSavedValues((current) => ({
-                                    ...current,
-                                    [field.envVarName]: true,
-                                  }));
-                                }
-                              }}
-                              onBlur={() => {
-                                if (
-                                  field.savedSatisfied &&
-                                  value.length === 0
-                                ) {
-                                  setEditingSavedValues((current) => ({
-                                    ...current,
-                                    [field.envVarName]: false,
-                                  }));
-                                }
-                              }}
-                              onChange={(event) => {
-                                const nextValue = event.target.value;
-                                setValues((current) => ({
-                                  ...current,
-                                  [field.envVarName]: nextValue,
-                                }));
-                              }}
-                              placeholder={
-                                field.runtimeSatisfied ? '' : field.label
-                              }
-                              disabled={savePending || field.runtimeSatisfied}
-                              data-1p-ignore
-                            />
-                            {(field.runtimeSatisfied ||
-                              field.savedSatisfied) && <Check />}
-                          </div>
-                        </div>
-                      </div>
-                    );
-                  })}
-
-                  <div className="space-y-2 text-sm text-muted-foreground">
-                    {provider.id === 'telegram' && provider.telegramWebhook && (
-                      <div className="flex items-start gap-2 mt-4">
-                        {TELEGRAM_WEBHOOK_STATUS_COPY[
-                          provider.telegramWebhook.status
-                        ].tone === 'ok' ? (
-                          <Check className="inline size-4 mt-0.5 shrink-0 text-green-600" />
-                        ) : (
-                          <Info className="inline size-4 mt-0.5 shrink-0 text-amber-600" />
-                        )}
-                        <p className="text-sm">
-                          {
-                            TELEGRAM_WEBHOOK_STATUS_COPY[
-                              provider.telegramWebhook.status
-                            ].label
-                          }
-                          {provider.telegramWebhook.lastErrorMessage
-                            ? ` Last delivery error: ${provider.telegramWebhook.lastErrorMessage}`
-                            : ''}
-                        </p>
-                      </div>
-                    )}
-                    {provider.id === 'telegram' && hasConfiguredValues && (
-                      <TelegramLinkAccountStep />
-                    )}
-                    {provider.id === 'microsoft' &&
-                      (hasConfiguredValues || teamsBotConfigured) && (
-                        <div className="space-y-2 mt-4">
-                          <p className="text-sm">
-                            Download the Teams app package (manifest + icons)
-                            and upload it in Teams under Apps → Manage your apps
-                            → Upload an app, or import it in the Developer
-                            Portal.
-                          </p>
-                          <Button asChild variant="outline" size="sm">
-                            <a href="/api/teams/app-package" download>
-                              <Download />
-                              Download Teams app package
-                            </a>
-                          </Button>
-                        </div>
-                      )}
-                    {provider.id === 'microsoft' &&
-                      (hasConfiguredValues || teamsBotConfigured) && (
-                        <TeamsBotStatus />
-                      )}
-                    {provider.id === 'slack' && hasConfiguredValues && (
-                      <SlackDiagnosticsChannel />
-                    )}
-                    <EnvVarsInfoNote
-                      runtimeConfigured={provider.runtimeSatisfied}
-                    >
-                      {!provider.runtimeSatisfied && provider.id === 'telegram'
-                        ? 'Roomote will generate the webhook secret if you leave it blank, register the webhook automatically when you save, and default Telegram task launches to the admin who saves this configuration.'
-                        : undefined}
-                    </EnvVarsInfoNote>
-                  </div>
+                  <p className="text-sm">
+                    {
+                      TELEGRAM_WEBHOOK_STATUS_COPY[
+                        provider.telegramWebhook.status
+                      ].label
+                    }
+                    {provider.telegramWebhook.lastErrorMessage
+                      ? ` Last delivery error: ${provider.telegramWebhook.lastErrorMessage}`
+                      : ''}
+                  </p>
                 </div>
-              </div>
+              )}
+              {provider.id === 'telegram' && hasConfiguredValues && (
+                <TelegramLinkAccountStep />
+              )}
+              {provider.id === 'microsoft' &&
+                (hasConfiguredValues || teamsBotConfigured) && (
+                  <TeamsBotStatus />
+                )}
+              {provider.id === 'slack' && hasConfiguredValues && (
+                <SlackDiagnosticsChannel />
+              )}
             </div>
 
-            <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
-              {provider.id === 'slack' && !hasConfiguredValues && (
-                <Button
-                  type="button"
-                  variant="outline"
-                  onClick={() => setShowManualSlackValues(false)}
-                >
-                  <ArrowLeft />
-                  Back
-                </Button>
-              )}
-              {provider.savedSatisfied && (
-                <Button
-                  type="button"
-                  variant="outline"
-                  onClick={() => setRemoveDialogOpen(true)}
-                  disabled={clearPending}
-                >
-                  <Trash2 />
-                  {clearPending ? 'Removing...' : 'Remove'}
-                  {clearPending ? <Spinner /> : null}
-                </Button>
-              )}
-              {hasEditableFields && (
-                <Button
-                  type="button"
-                  onClick={handleSave}
-                  disabled={isActionDisabled || savePending}
-                >
-                  <Check />
-                  {savePending ? 'Saving...' : 'Save'}
-                  {savePending ? <Spinner /> : null}
-                </Button>
-              )}
-            </div>
+            {providerOwnsActions ? null : (
+              <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+                {provider.id === 'slack' && !hasConfiguredValues && (
+                  <Button
+                    type="button"
+                    variant="outline"
+                    onClick={() => setShowManualSlackValues(false)}
+                  >
+                    <ArrowLeft />
+                    Back
+                  </Button>
+                )}
+                {provider.savedSatisfied && (
+                  <Button
+                    type="button"
+                    variant="outline"
+                    onClick={() => setRemoveDialogOpen(true)}
+                    disabled={clearPending}
+                  >
+                    <Trash2 />
+                    {clearPending ? 'Removing...' : 'Remove'}
+                    {clearPending ? <Spinner /> : null}
+                  </Button>
+                )}
+                {hasEditableFields && (
+                  <Button
+                    type="button"
+                    onClick={handleSave}
+                    disabled={isActionDisabled || savePending}
+                  >
+                    <Check />
+                    {savePending ? 'Saving...' : 'Save'}
+                    {savePending ? <Spinner /> : null}
+                  </Button>
+                )}
+              </div>
+            )}
           </div>
         )}
       </Section>

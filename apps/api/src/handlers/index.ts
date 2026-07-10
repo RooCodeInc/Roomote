@@ -20,8 +20,8 @@ export { trpc } from './trpc';
 export { mcp } from './mcp';
 export { mcpRouting } from './mcp/routing';
 
-// cloud jobs
-export { cloudJobsRouter } from './cloud-jobs';
+// task runs
+export { taskRunsRouter } from './task-runs';
 
 // artifacts
 export { artifactsRouter, taskArtifactsRouter } from './artifacts';

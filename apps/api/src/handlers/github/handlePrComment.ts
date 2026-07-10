@@ -1,10 +1,9 @@
 import {
   buildGitHubExistingTaskFollowUpMessage,
   buildGitHubRoutingContext,
-  enqueueCloudTask,
+  enqueueTask,
   getTaskUrl,
   routeGitHubTask,
-  resolveUserIdForCloudJob,
 } from '@roomote/cloud-agents/server';
 import {
   findActiveGitHubPrReviewTask,
@@ -13,22 +12,21 @@ import {
 import { getInstallationOctokit } from '@roomote/github';
 import { ensureSnapshotResumeGitHubFollowUpFallback } from '@roomote/sdk/server';
 import {
-  type CloudTaskPayload,
-  CloudAgentType,
-  CloudTaskStatus,
-  CloudTaskType,
+  type TaskPayload,
+  RunStatus,
+  TaskPayloadKind,
   EXPIRED_SNAPSHOT_RESUME_ERROR,
   PRODUCT_NAME,
   type SnapshotResumePromptFallbackTask,
-  isActivelyRunningCloudTask,
-  isExitedCloudTaskStatus,
+  isActivelyRunningTask,
+  isExitedRunStatus,
   populateSnapshotResumeSlackMetadata,
   isSnapshotResumable,
   restoreSnapshotResumeVisiblePromptFields,
 } from '@roomote/types';
 
 import type { WebhookResponse } from '../../types';
-import { findLatestCloudJob } from '../tasks/helpers';
+import { findLatestTaskRun, getTaskChannelBindings } from '../tasks/helpers';
 import {
   getTrackedUserDisplayName,
   sendMessageToTask,
@@ -582,33 +580,6 @@ function getSlackOriginMessageTs(
   return asString(value.slackOriginMessageTs) ?? asString(value.ts);
 }
 
-function buildSnapshotResumeIntegrationMetadata(sourceJob: {
-  slackThreadTs?: string | null;
-  linearSessionId?: string | null;
-  linearIssueId?: string | null;
-  linearOrganizationId?: string | null;
-}): Record<string, string> {
-  const metadata: Record<string, string> = {};
-
-  if (sourceJob.slackThreadTs) {
-    metadata.slackThreadTs = sourceJob.slackThreadTs;
-  }
-
-  if (sourceJob.linearSessionId) {
-    metadata.linearSessionId = sourceJob.linearSessionId;
-
-    if (sourceJob.linearIssueId) {
-      metadata.linearIssueId = sourceJob.linearIssueId;
-    }
-
-    if (sourceJob.linearOrganizationId) {
-      metadata.linearOrganizationId = sourceJob.linearOrganizationId;
-    }
-  }
-
-  return metadata;
-}
-
 async function listGitHubRoutingHistoryPages<T>(
   fetchPage: (page: number) => Promise<T[]>,
 ): Promise<T[]> {
@@ -720,19 +691,19 @@ async function waitForTaskToAcceptMessages({
   const deadline = Date.now() + timeoutMs;
 
   while (Date.now() < deadline) {
-    const latestJob = await findLatestCloudJob(taskId, {
+    const latestRun = await findLatestTaskRun(taskId, {
       id: true,
       status: true,
       taskPhase: true,
       sandboxServerUrl: true,
     });
 
-    if (!latestJob || isExitedCloudTaskStatus(latestJob.status)) {
+    if (!latestRun || isExitedRunStatus(latestRun.status)) {
       return null;
     }
 
-    if (latestJob.sandboxServerUrl) {
-      return latestJob;
+    if (latestRun.sandboxServerUrl) {
+      return latestRun;
     }
 
     await new Promise((resolve) =>
@@ -754,44 +725,44 @@ function getDeferredResumePromptAccepted(result: unknown): boolean | null {
   return typeof accepted === 'boolean' ? accepted : null;
 }
 
-async function waitForResumeJobToAcceptDeferredPrompt({
+async function waitForResumeRunToAcceptDeferredPrompt({
   taskId,
-  resumeJobId,
+  resumeRunId,
   timeoutMs = EXISTING_TASK_WAIT_TIMEOUT_MS,
 }: {
   taskId: string;
-  resumeJobId: number;
+  resumeRunId: number;
   timeoutMs?: number;
 }) {
   const deadline = Date.now() + timeoutMs;
-  let latestJob:
+  let latestRun:
     | {
         id: number;
-        status: CloudTaskStatus;
+        status: RunStatus;
         result: unknown;
       }
     | null
     | undefined = null;
 
   while (Date.now() < deadline) {
-    latestJob = await findLatestCloudJob(taskId, {
+    latestRun = await findLatestTaskRun(taskId, {
       id: true,
       status: true,
       result: true,
     });
 
-    if (!latestJob) {
+    if (!latestRun) {
       return false;
     }
 
-    if (latestJob.id === resumeJobId) {
-      const accepted = getDeferredResumePromptAccepted(latestJob.result);
+    if (latestRun.id === resumeRunId) {
+      const accepted = getDeferredResumePromptAccepted(latestRun.result);
 
       if (accepted === true) {
         return true;
       }
 
-      if (accepted === false || isExitedCloudTaskStatus(latestJob.status)) {
+      if (accepted === false || isExitedRunStatus(latestRun.status)) {
         return false;
       }
     }
@@ -801,17 +772,17 @@ async function waitForResumeJobToAcceptDeferredPrompt({
     );
   }
 
-  if (!latestJob || latestJob.id !== resumeJobId) {
+  if (!latestRun || latestRun.id !== resumeRunId) {
     return false;
   }
 
-  const accepted = getDeferredResumePromptAccepted(latestJob.result);
+  const accepted = getDeferredResumePromptAccepted(latestRun.result);
 
   if (accepted === true) {
     return true;
   }
 
-  if (accepted === false || isExitedCloudTaskStatus(latestJob.status)) {
+  if (accepted === false || isExitedRunStatus(latestRun.status)) {
     return false;
   }
 
@@ -829,23 +800,18 @@ async function resolveReusableTaskSenderUserId({
     return preferredUserId;
   }
 
-  const latestJob = await findLatestCloudJob(taskId, {
+  const latestRun = await findLatestTaskRun(taskId, {
     id: true,
-    userId: true,
     actingUserId: true,
   });
 
-  if (!latestJob) {
+  if (!latestRun) {
     return null;
   }
 
-  return (
-    latestJob.actingUserId ??
-    (await resolveUserIdForCloudJob({
-      id: latestJob.id,
-      userId: latestJob.userId,
-    }))
-  );
+  // No forged fallback: when the run has no acting human, the follow-up has
+  // no deliverable human and callers handle null.
+  return latestRun.actingUserId ?? null;
 }
 
 /**
@@ -885,7 +851,7 @@ async function deliverFollowUpToExistingTask({
   taskId: string;
   userId?: string | null;
   message: string;
-  status: CloudTaskStatus;
+  status: RunStatus;
   taskPhase: string | null;
   commenterDisplayName?: string;
 }) {
@@ -906,10 +872,10 @@ async function deliverFollowUpToExistingTask({
     status,
     taskPhase,
   }: {
-    status: CloudTaskStatus;
+    status: RunStatus;
     taskPhase: string | null;
   }) =>
-    isActivelyRunningCloudTask(status, taskPhase)
+    isActivelyRunningTask(status, taskPhase)
       ? steerMessageToTask({
           taskId,
           userId: senderUserId,
@@ -939,53 +905,47 @@ async function deliverFollowUpToExistingTask({
     return initialAttempt;
   }
 
-  const readyJob = await waitForTaskToAcceptMessages({ taskId });
+  const readyRun = await waitForTaskToAcceptMessages({ taskId });
 
-  if (!readyJob) {
+  if (!readyRun) {
     return initialAttempt;
   }
 
   return deliver({
-    status: readyJob.status,
-    taskPhase: readyJob.taskPhase,
+    status: readyRun.status,
+    taskPhase: readyRun.taskPhase,
   });
 }
 
 async function resumeExistingTaskAndDeliverFollowUp({
   taskId,
   userId,
-  sourceJobId,
+  sourceRunId,
   message,
   resumePromptFallbackTask,
 }: {
   taskId: string;
   userId?: string | null;
-  sourceJobId: number;
+  sourceRunId: number;
   message: string;
   resumePromptFallbackTask: SnapshotResumePromptFallbackTask;
 }) {
-  const sourceJob = await findLatestCloudJob(taskId, {
+  const sourceRun = await findLatestTaskRun(taskId, {
     id: true,
-    type: true,
     status: true,
     taskPhase: true,
     snapshotId: true,
     snapshotCreatedAt: true,
     payload: true,
     port: true,
-    userId: true,
     actingUserId: true,
-    slackThreadTs: true,
-    linearSessionId: true,
-    linearIssueId: true,
-    linearOrganizationId: true,
   });
 
-  if (!sourceJob) {
+  if (!sourceRun) {
     return { success: false as const, error: 'Task not found', status: 404 };
   }
 
-  if (sourceJob.id !== sourceJobId) {
+  if (sourceRun.id !== sourceRunId) {
     return {
       success: false as const,
       error: 'Reusable PR owner changed before follow-up delivery',
@@ -993,7 +953,7 @@ async function resumeExistingTaskAndDeliverFollowUp({
     };
   }
 
-  if (!sourceJob.snapshotId) {
+  if (!sourceRun.snapshotId) {
     return {
       success: false as const,
       error: 'Reusable PR owner has no snapshot to resume',
@@ -1001,7 +961,7 @@ async function resumeExistingTaskAndDeliverFollowUp({
     };
   }
 
-  if (!isSnapshotResumable(sourceJob.snapshotCreatedAt)) {
+  if (!isSnapshotResumable(sourceRun.snapshotCreatedAt)) {
     return {
       success: false as const,
       error: EXPIRED_SNAPSHOT_RESUME_ERROR,
@@ -1009,17 +969,17 @@ async function resumeExistingTaskAndDeliverFollowUp({
     };
   }
 
-  if (!isExitedCloudTaskStatus(sourceJob.status)) {
+  if (!isExitedRunStatus(sourceRun.status)) {
     return deliverFollowUpToExistingTask({
       taskId,
       userId,
       message,
-      status: sourceJob.status,
-      taskPhase: sourceJob.taskPhase,
+      status: sourceRun.status,
+      taskPhase: sourceRun.taskPhase,
     });
   }
 
-  if (!sourceJob.snapshotId) {
+  if (!sourceRun.snapshotId) {
     return {
       success: false as const,
       error: 'Reusable PR owner has no snapshot to resume',
@@ -1027,13 +987,10 @@ async function resumeExistingTaskAndDeliverFollowUp({
     };
   }
 
-  const senderUserId =
-    userId ??
-    sourceJob.actingUserId ??
-    (await resolveUserIdForCloudJob({
-      id: sourceJob.id,
-      userId: sourceJob.userId,
-    }));
+  // Prefer the linked commenter, then the run's acting user. No forged
+  // fallback: a run without an acting human and an unlinked commenter has no
+  // delivery user and is rejected below.
+  const senderUserId = userId ?? sourceRun.actingUserId;
 
   if (!senderUserId) {
     return {
@@ -1043,60 +1000,64 @@ async function resumeExistingTaskAndDeliverFollowUp({
     };
   }
 
-  const sourcePayload = (sourceJob.payload ?? {}) as Record<string, unknown>;
+  const sourcePayload = (sourceRun.payload ?? {}) as Record<string, unknown>;
   const selectedRepositories = getSelectedRepositories(
     sourcePayload.selectedRepositories,
   );
   const slackOriginMessageTs = getSlackOriginMessageTs(sourcePayload);
+  const channelBindings = await getTaskChannelBindings(taskId);
 
   const resumePayload = {
     repo: asString(sourcePayload.repo) ?? '',
     environmentId: asString(sourcePayload.environmentId),
-    port: sourceJob.port ?? undefined,
-    sourceSnapshotId: sourceJob.snapshotId,
-    sourceCloudJobId: sourceJob.id,
+    port: sourceRun.port ?? undefined,
+    sourceSnapshotId: sourceRun.snapshotId,
+    sourceRunId: sourceRun.id,
     ...(selectedRepositories ? { selectedRepositories } : {}),
     ...(slackOriginMessageTs ? { slackOriginMessageTs } : {}),
-    // Carry the follow-up on the resume job itself so the resumed worker can
+    // Carry the follow-up on the resume run itself so the resumed worker can
     // send it after the harness session is actually ready.
     resumePrompt: message,
     resumePromptSource: 'github',
-    resumePromptUserId: senderUserId,
     resumePromptFallbackTask,
-  } satisfies CloudTaskPayload<CloudTaskType.SnapshotResume>;
+  } satisfies TaskPayload<typeof TaskPayloadKind.SnapshotResume>;
   populateSnapshotResumeSlackMetadata(resumePayload, {
     sourcePayload,
-    threadTs: sourceJob.slackThreadTs,
+    channel: channelBindings?.slackChannelId,
+    threadTs: channelBindings?.slackThreadTs,
   });
   restoreSnapshotResumeVisiblePromptFields(resumePayload, sourcePayload);
 
-  const resumeLaunch = await enqueueCloudTask(
+  // Resumes never create tasks and never re-attribute; the resuming human
+  // becomes the new run's acting user.
+  const resumeLaunch = await enqueueTask(
     {
-      userId: sourceJob.userId ?? senderUserId,
-      type: CloudTaskType.SnapshotResume,
-      sourceSnapshotId: sourceJob.snapshotId,
-      sourceCloudJobId: sourceJob.id,
-      ...buildSnapshotResumeIntegrationMetadata(sourceJob),
-      payload: resumePayload,
+      task: {
+        type: TaskPayloadKind.SnapshotResume,
+        sourceSnapshotId: sourceRun.snapshotId,
+        sourceRunId: sourceRun.id,
+        payload: resumePayload,
+      },
+      actingUserId: senderUserId,
     },
     {},
   );
 
-  const accepted = await waitForResumeJobToAcceptDeferredPrompt({
+  const accepted = await waitForResumeRunToAcceptDeferredPrompt({
     taskId,
-    resumeJobId: resumeLaunch.id,
+    resumeRunId: resumeLaunch.id,
   });
 
   if (accepted === false) {
-    const fallbackCloudJob = await ensureSnapshotResumeGitHubFollowUpFallback({
-      resumeJobId: resumeLaunch.id,
+    const fallbackTaskRun = await ensureSnapshotResumeGitHubFollowUpFallback({
+      resumeRunId: resumeLaunch.id,
     });
 
     return {
       success: false as const,
       error: 'Resumed PR owner did not accept the deferred follow-up prompt',
       status: 409,
-      fallbackCloudJob,
+      fallbackTaskRun,
     };
   }
 
@@ -1104,7 +1065,7 @@ async function resumeExistingTaskAndDeliverFollowUp({
     success: true as const,
     result: {
       accepted: true,
-      queuedToResumeJobId: resumeLaunch.id,
+      queuedToResumeRunId: resumeLaunch.id,
       ...(accepted === null ? { pendingResumePromptAcceptance: true } : {}),
     },
   };
@@ -1201,7 +1162,7 @@ export async function handlePrComment(
   }
 
   const reviewerGate = await getGitHubAutomationTargets({
-    type: CloudAgentType.PrReviewer,
+    workflow: 'pr_review',
     installation,
     repository,
     sender,
@@ -1257,7 +1218,6 @@ export async function handlePrComment(
     issueOrPrTitle: pr.title,
     issueOrPrBody: pr.body ?? undefined,
     commentBody: mention.body ?? '',
-    availableAgents: [],
   });
 
   const routingDecision = await routeGitHubTask(routingContext);
@@ -1331,8 +1291,7 @@ export async function handlePrComment(
       branchName,
     };
 
-    const reviewLaunches: Array<Awaited<ReturnType<typeof enqueueCloudTask>>> =
-      [];
+    const reviewLaunches: Array<Awaited<ReturnType<typeof enqueueTask>>> = [];
     const failedReviewerIds: string[] = [];
 
     for (const reviewer of reviewers) {
@@ -1346,13 +1305,35 @@ export async function handlePrComment(
       const reviewPayload = {
         ...reviewPayloadBase,
         ...relayPayload,
-      } satisfies CloudTaskPayload<CloudTaskType.GithubPrReview>;
+      } satisfies TaskPayload<typeof TaskPayloadKind.GithubPrReview>;
 
       try {
-        const reviewLaunch = await enqueueCloudTask({
-          type: CloudTaskType.GithubPrReview,
-          payload: reviewPayload,
-          ...reviewer.properties,
+        if (!reviewer.properties.userId) {
+          throw new Error(
+            'PR mention review requires a linked commenter account.',
+          );
+        }
+
+        const reviewLaunch = await enqueueTask({
+          task: {
+            type: TaskPayloadKind.GithubPrReview,
+            githubLogin: reviewer.properties.githubLogin,
+            githubUserId: reviewer.properties.githubUserId,
+            payload: reviewPayload,
+          },
+          // A human @roomote mention started this review.
+          initiator: { kind: 'user', userId: reviewer.properties.userId },
+          workflow: 'pr_review',
+          surface: 'github',
+          trigger: 'message',
+          prLinkage: {
+            provider: 'github',
+            repository: repository.full_name,
+            prNumber: pr.number,
+            prUrl,
+            prTitle: pr.title,
+            prSha: headSha,
+          },
         });
         reviewLaunches.push(reviewLaunch);
       } catch (error) {
@@ -1477,7 +1458,7 @@ export async function handlePrComment(
       reviewComments: routingHistory.reviewComments,
     });
     const resumePromptFallbackTask = {
-      type: CloudTaskType.GithubPrReviewFollowUp,
+      type: TaskPayloadKind.GithubPrReviewFollowUp,
       userId: reviewer.properties.userId ?? undefined,
       githubLogin: reviewer.properties.githubLogin ?? undefined,
       githubUserId: reviewer.properties.githubUserId ?? undefined,
@@ -1499,7 +1480,7 @@ export async function handlePrComment(
         ? await resumeExistingTaskAndDeliverFollowUp({
             taskId: activePrOwner.taskId,
             userId: reviewer.properties.userId,
-            sourceJobId: activePrOwner.jobId,
+            sourceRunId: activePrOwner.runId,
             message: followUpMessage,
             resumePromptFallbackTask,
           })
@@ -1539,18 +1520,18 @@ export async function handlePrComment(
       `[handlePrComment] failed to deliver routed PR mention to reusable task ${activePrOwner.taskId}: ${followUpResult.error}`,
     );
 
-    const fallbackCloudJob =
-      'fallbackCloudJob' in followUpResult
-        ? followUpResult.fallbackCloudJob
+    const fallbackTaskRun =
+      'fallbackTaskRun' in followUpResult
+        ? followUpResult.fallbackTaskRun
         : null;
 
-    if (fallbackCloudJob) {
+    if (fallbackTaskRun) {
       const taskCommentBody = formatGitHubPrMentionReply(
         { kind: 'dedicated_follow_up' },
-        fallbackCloudJob.taskId
+        fallbackTaskRun.taskId
           ? tryBuildGitHubPrMentionReplyLink({
               kind: 'task',
-              taskId: fallbackCloudJob.taskId,
+              taskId: fallbackTaskRun.taskId,
               utm: {
                 source: 'github-comment',
                 campaign: 'github.pr.mention',
@@ -1566,7 +1547,7 @@ export async function handlePrComment(
         body: taskCommentBody,
       });
 
-      return { status: 'ok', metadata: { ids: [fallbackCloudJob.id] } };
+      return { status: 'ok', metadata: { ids: [fallbackTaskRun.id] } };
     }
   }
 
@@ -1590,13 +1571,37 @@ export async function handlePrComment(
     ...(!isSubmittedReview ? { commentId: rest.comment.id } : {}),
     commentBody: mention.body ?? '',
     followUpSource: 'github_mention',
-  } satisfies CloudTaskPayload<CloudTaskType.GithubPrReviewFollowUp>;
+  } satisfies TaskPayload<typeof TaskPayloadKind.GithubPrReviewFollowUp>;
 
   try {
-    const followUpLaunch = await enqueueCloudTask({
-      type: CloudTaskType.GithubPrReviewFollowUp,
-      payload,
-      ...reviewer.properties,
+    if (!reviewer.properties.userId) {
+      throw new Error(
+        'PR mention follow-up requires a linked commenter account.',
+      );
+    }
+
+    const followUpLaunch = await enqueueTask({
+      task: {
+        type: TaskPayloadKind.GithubPrReviewFollowUp,
+        githubLogin: reviewer.properties.githubLogin,
+        githubUserId: reviewer.properties.githubUserId,
+        payload,
+      },
+      // A human @roomote mention started this follow-up.
+      initiator: { kind: 'user', userId: reviewer.properties.userId },
+      workflow: 'pr_review',
+      surface: 'github',
+      trigger: 'message',
+      prLinkage: {
+        provider: 'github',
+        repository: repository.full_name,
+        prNumber: pr.number,
+        prUrl:
+          routingDetails.prUrl ||
+          `https://github.com/${repository.full_name}/pull/${pr.number}`,
+        prTitle: pr.title,
+        ...(routingDetails.headSha ? { prSha: routingDetails.headSha } : {}),
+      },
     });
 
     const taskCommentBody = formatGitHubPrMentionReply(

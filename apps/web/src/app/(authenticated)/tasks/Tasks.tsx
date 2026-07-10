@@ -5,10 +5,7 @@ import Link from 'next/link';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { toast } from 'sonner';
 
-import {
-  ALL_REPOSITORIES,
-  DEFAULT_VISIBLE_CLOUD_TASK_TYPES,
-} from '@roomote/types';
+import { ALL_REPOSITORIES } from '@roomote/types';
 
 import {
   type Filter,
@@ -17,8 +14,7 @@ import {
   parseTimePeriodParam,
 } from '@/types';
 
-import { getTaskCategoryById } from '@/lib';
-import type { Task } from '@/lib/server';
+import { DEFAULT_VISIBLE_TASK_WORKFLOWS, getTaskCategoryById } from '@/lib';
 import { cn } from '@/lib/utils';
 
 import { useAuthorizedUser } from '@/hooks/useUser';
@@ -63,7 +59,7 @@ import {
 } from '@/components/tasks/taskTypeFilter';
 
 export const Tasks = () => {
-  const { userId, isAdmin } = useAuthorizedUser();
+  const { userId } = useAuthorizedUser();
   const { isDebugUIVisible } = useShowDebugUI();
   const showTaskTypeFilter = isDebugUIVisible;
 
@@ -102,10 +98,10 @@ export const Tasks = () => {
       showTaskTypeFilter
         ? hasTaskTypesParam
           ? (parseTaskTypeFilterParam(taskTypesParam ?? '') ?? [
-              ...DEFAULT_VISIBLE_CLOUD_TASK_TYPES,
+              ...DEFAULT_VISIBLE_TASK_WORKFLOWS,
             ])
-          : [...DEFAULT_VISIBLE_CLOUD_TASK_TYPES]
-        : [...DEFAULT_VISIBLE_CLOUD_TASK_TYPES],
+          : [...DEFAULT_VISIBLE_TASK_WORKFLOWS]
+        : [...DEFAULT_VISIBLE_TASK_WORKFLOWS],
     [hasTaskTypesParam, showTaskTypeFilter, taskTypesParam],
   );
 
@@ -369,8 +365,6 @@ export const Tasks = () => {
   const [isSelectionMode, setIsSelectionMode] = useState(false);
   const [showDeleteDialog, setShowDeleteDialog] = useState(false);
 
-  const canDeleteTask = (task: Task) => isAdmin || task.userId === userId;
-
   const deleteTasksMutation = useDeleteTasks({
     onSuccess: (result) => {
       toast.success(
@@ -403,9 +397,8 @@ export const Tasks = () => {
     // We only handle boolean values, not indeterminate state.
     if (typeof checked === 'boolean') {
       if (checked) {
-        // Only select tasks the user can delete.
-        const deletableTasks = tasks.filter((task) => canDeleteTask(task));
-        setSelectedTasks(new Set(deletableTasks.map((t) => t.id)));
+        // Deletion is deployment-wide: any member can delete any task.
+        setSelectedTasks(new Set(tasks.map((t) => t.id)));
       } else {
         setSelectedTasks(new Set());
       }
@@ -522,17 +515,9 @@ export const Tasks = () => {
                 <div className="flex items-center gap-2">
                   <Checkbox
                     id="select-all-tasks"
-                    checked={(() => {
-                      // Count tasks user can delete.
-                      const deletableCount = tasks.filter((task) =>
-                        canDeleteTask(task),
-                      ).length;
-
-                      return (
-                        selectedTasks.size === deletableCount &&
-                        deletableCount > 0
-                      );
-                    })()}
+                    checked={
+                      selectedTasks.size === tasks.length && tasks.length > 0
+                    }
                     onCheckedChange={handleSelectAll}
                     className="cursor-pointer"
                     aria-label="Select all tasks"
@@ -657,7 +642,6 @@ export const Tasks = () => {
                   onSelectionChange={
                     isSelectionMode ? handleSelectionChange : undefined
                   }
-                  canDelete={canDeleteTask(task)}
                 />
               ))}
 

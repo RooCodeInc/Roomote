@@ -48,23 +48,24 @@ _We're interested in PRs for tested support for other PaaS providers._
 
 ### Railway
 
-Railway uses managed Postgres/Redis and hosted compute such as Modal, E2B, or
-Daytona. Docker compute is not available there; see
+Railway uses managed Postgres/Redis and hosted sandboxes such as Modal, E2B, or
+Daytona. Docker sandboxes are not available there. The template below tracks the
+stable `main` channel; a develop-channel template also exists — see
 [deploy/railway/README.md](deploy/railway/README.md).
 
-[![Deploy with the template](https://railway.com/button.svg)](https://railway.com/deploy/bP3Lsu)
+[![Deploy with the template](https://railway.com/button.svg)](https://railway.com/deploy/Rj2cFo)
 
 ### Coolify
 
 Deploy the stack as a Docker Compose resource from the maintained
-template. Coolify runs on your own server and defaults to Docker compute on
+template. Coolify runs on your own server and defaults to Docker sandboxes on
 that host; see [deploy/coolify/README.md](deploy/coolify/README.md).
 
 ### Render
 
 Render deploys the maintained Blueprint ([render.yaml](render.yaml)) with
-managed Postgres and Key Value (Redis) plus hosted compute such as Modal,
-E2B, or Daytona. Docker compute is not available there; see
+managed Postgres and Key Value (Redis) plus hosted sandboxes such as Modal,
+E2B, or Daytona. Docker sandboxes are not available there; see
 [deploy/render/README.md](deploy/render/README.md).
 
 [![Deploy to Render](https://render.com/images/deploy-to-render-button.svg)](https://render.com/deploy?repo=https://github.com/RooCodeInc/Roomote)
@@ -73,8 +74,8 @@ E2B, or Daytona. Docker compute is not available there; see
 
 Run the stack as a single Fly app (one Machine per service) with Fly Managed
 Postgres, Upstash Redis, and Tigris object storage from the maintained
-`fly.toml`. Docker compute is not available there, so task execution uses
-hosted compute such as Modal, E2B, or Daytona. Fly has no one-click template
+`fly.toml`. Docker sandboxes are not available there, so task execution uses
+hosted sandboxes such as Modal, E2B, or Daytona. Fly has no one-click template
 marketplace, so deploys are a short copy-paste `flyctl` sequence; see
 [deploy/fly/README.md](deploy/fly/README.md).
 

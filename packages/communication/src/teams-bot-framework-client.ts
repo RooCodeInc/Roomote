@@ -29,6 +29,7 @@ export type TeamsUpdateActivityInput = {
   activityId: string;
   text: string;
   textFormat?: 'plain' | 'markdown' | 'xml';
+  attachments?: unknown[];
 };
 
 export type TeamsCreateDirectConversationInput = {
@@ -321,6 +322,7 @@ export class TeamsBotFrameworkClient {
         type: 'message',
         text: input.text,
         ...(input.textFormat ? { textFormat: input.textFormat } : {}),
+        ...(input.attachments ? { attachments: input.attachments } : {}),
       }),
     });
 

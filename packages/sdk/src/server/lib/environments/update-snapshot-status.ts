@@ -1,13 +1,13 @@
 import {
-  type JobTokenContext,
-  CloudTaskType,
+  type RunTokenContext,
+  TaskPayloadKind,
   resolveComputeProviderTarget,
 } from '@roomote/types';
 import {
   db,
-  cloudJobs,
+  taskRuns,
   environments,
-  buildPendingEnvironmentSnapshotMatchForCloudJob,
+  buildPendingEnvironmentSnapshotMatchForTaskRun,
   getEnvironmentSnapshot,
   updatePendingEnvironmentSnapshot,
   eq,
@@ -19,28 +19,28 @@ interface UpdateSnapshotStatusInput {
 }
 
 export async function updateSnapshotStatus(
-  auth: JobTokenContext,
+  auth: RunTokenContext,
   input: UpdateSnapshotStatusInput,
 ): Promise<void> {
-  const cloudJob = await db.query.cloudJobs.findFirst({
-    where: eq(cloudJobs.id, auth.cloudJobId),
+  const taskRun = await db.query.taskRuns.findFirst({
+    where: eq(taskRuns.id, auth.runId),
   });
 
-  const jobEnvironmentId = cloudJob?.payload.environmentId;
-  const isValidSnapshotJob =
-    cloudJob?.type === CloudTaskType.SnapshotEnvironment &&
+  const jobEnvironmentId = taskRun?.payload.environmentId;
+  const isValidSnapshotRun =
+    taskRun?.payloadKind === TaskPayloadKind.SnapshotEnvironment &&
     typeof jobEnvironmentId === 'string' &&
     jobEnvironmentId === input.environmentId;
 
-  if (!isValidSnapshotJob) {
+  if (!isValidSnapshotRun) {
     throw new Error(
-      '[updateSnapshotStatus] Job token does not own this snapshot environment',
+      '[updateSnapshotStatus] Run token does not own this snapshot environment',
     );
   }
 
-  const provider = resolveComputeProviderTarget(cloudJob.vendor);
+  const provider = resolveComputeProviderTarget(taskRun.vendor);
   const pendingSnapshotMatch =
-    buildPendingEnvironmentSnapshotMatchForCloudJob(cloudJob);
+    buildPendingEnvironmentSnapshotMatchForTaskRun(taskRun);
   const updated = await updatePendingEnvironmentSnapshot(db, {
     environmentId: input.environmentId,
     provider,

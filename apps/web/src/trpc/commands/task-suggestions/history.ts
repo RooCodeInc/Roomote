@@ -8,17 +8,17 @@ import {
   or,
   repositories,
   sql,
-  taskSuggestions,
+  workItems,
 } from '@roomote/db/server';
 
 import type { UserAuthSuccess } from '@/types';
 import { assertSuggestionHistoryEnabled } from './shared';
 import {
-  getResolvedSuggestionSourceCloudJobsByTaskId,
+  getResolvedSuggestionSourceTaskRunsByTaskId,
   getSuggestionHistoryAutomation,
   getSuggestionHistoryAutomationLabel,
   suggestionHistoryAutomationValues,
-} from './source-cloud-jobs';
+} from './source-task-runs';
 import type {
   SuggestionHistoryAutomation,
   SuggestionHistoryItem,
@@ -31,11 +31,11 @@ function getStatusesForHistoryFilter(
 ): VisibleTaskSuggestionStatus[] {
   switch (status) {
     case 'accepted':
-      return ['started'];
+      return ['launched'];
     case 'ignored':
       return ['dismissed'];
     case 'all':
-      return ['open', 'started', 'dismissed'];
+      return ['open', 'launched', 'dismissed'];
     case 'proposed':
     case undefined:
       return ['open'];
@@ -113,7 +113,10 @@ export async function listTaskSuggestionHistoryCommand(
   const parsedCursor = parseSuggestionHistoryCursor(input.cursor);
   const statuses = getStatusesForHistoryFilter(input.status);
 
-  const conditions = [inArray(taskSuggestions.status, statuses)];
+  const conditions = [
+    eq(workItems.kind, 'suggestion'),
+    inArray(workItems.status, statuses),
+  ];
 
   if (input.repository) {
     const [selectedRepository] = await db
@@ -125,38 +128,34 @@ export async function listTaskSuggestionHistoryCommand(
     if (selectedRepository) {
       conditions.push(
         sql`(
-          ${taskSuggestions.targetRepositoryFullName} = ${input.repository}
+          ${workItems.targetRepositoryFullName} = ${input.repository}
           OR (
-            ${taskSuggestions.targetRepositoryFullName} IS NULL
-            AND ${taskSuggestions.repositoryIds} @> ${JSON.stringify([selectedRepository.id])}::jsonb
+            ${workItems.targetRepositoryFullName} IS NULL
+            AND ${workItems.repositoryIds} @> ${JSON.stringify([selectedRepository.id])}::jsonb
           )
         )`,
       );
     } else {
-      conditions.push(
-        eq(taskSuggestions.targetRepositoryFullName, input.repository),
-      );
+      conditions.push(eq(workItems.targetRepositoryFullName, input.repository));
     }
   }
 
   if (input.automation) {
     const candidateSourceTaskRows = await db
-      .selectDistinct({ sourceTaskId: taskSuggestions.sourceTaskId })
-      .from(taskSuggestions)
-      .where(and(...conditions, isNotNull(taskSuggestions.sourceTaskId)));
+      .selectDistinct({ sourceTaskId: workItems.sourceTaskId })
+      .from(workItems)
+      .where(and(...conditions, isNotNull(workItems.sourceTaskId)));
 
     const candidateSourceTaskIds = candidateSourceTaskRows
       .map((row) => row.sourceTaskId)
       .filter((taskId): taskId is string => Boolean(taskId));
 
-    const resolvedSourceJobsByTaskId =
-      await getResolvedSuggestionSourceCloudJobsByTaskId(
-        candidateSourceTaskIds,
-      );
+    const resolvedSourceRunsByTaskId =
+      await getResolvedSuggestionSourceTaskRunsByTaskId(candidateSourceTaskIds);
 
     const matchingSourceTaskIds = candidateSourceTaskIds.filter(
       (taskId) =>
-        getSuggestionHistoryAutomation(resolvedSourceJobsByTaskId[taskId]) ===
+        getSuggestionHistoryAutomation(resolvedSourceRunsByTaskId[taskId]) ===
         input.automation,
     );
 
@@ -172,16 +171,14 @@ export async function listTaskSuggestionHistoryCommand(
     if (matchingSourceTaskIds.length > 0 && nullSourceMatches) {
       conditions.push(
         or(
-          inArray(taskSuggestions.sourceTaskId, matchingSourceTaskIds),
-          sql`${taskSuggestions.sourceTaskId} IS NULL`,
+          inArray(workItems.sourceTaskId, matchingSourceTaskIds),
+          sql`${workItems.sourceTaskId} IS NULL`,
         )!,
       );
     } else if (matchingSourceTaskIds.length > 0) {
-      conditions.push(
-        inArray(taskSuggestions.sourceTaskId, matchingSourceTaskIds),
-      );
+      conditions.push(inArray(workItems.sourceTaskId, matchingSourceTaskIds));
     } else {
-      conditions.push(sql`${taskSuggestions.sourceTaskId} IS NULL`);
+      conditions.push(sql`${workItems.sourceTaskId} IS NULL`);
     }
   }
 
@@ -190,10 +187,10 @@ export async function listTaskSuggestionHistoryCommand(
 
     conditions.push(
       sql`(
-        ${taskSuggestions.createdAt} < ${cursorCreatedAtIso}
+        ${workItems.createdAt} < ${cursorCreatedAtIso}
         OR (
-          ${taskSuggestions.createdAt} = ${cursorCreatedAtIso}
-          AND ${taskSuggestions.id} < ${parsedCursor.id}
+          ${workItems.createdAt} = ${cursorCreatedAtIso}
+          AND ${workItems.id} < ${parsedCursor.id}
         )
       )`,
     );
@@ -201,22 +198,22 @@ export async function listTaskSuggestionHistoryCommand(
 
   const rows = await db
     .select({
-      id: taskSuggestions.id,
-      title: taskSuggestions.title,
-      brief: taskSuggestions.brief,
-      category: taskSuggestions.category,
-      priority: taskSuggestions.priority,
-      investigationContext: taskSuggestions.investigationContext,
-      readinessMessage: taskSuggestions.readinessMessage,
-      repositoryIds: taskSuggestions.repositoryIds,
-      targetRepositoryFullName: taskSuggestions.targetRepositoryFullName,
-      status: taskSuggestions.status,
-      createdAt: taskSuggestions.createdAt,
-      sourceTaskId: taskSuggestions.sourceTaskId,
+      id: workItems.id,
+      title: workItems.title,
+      brief: workItems.brief,
+      category: workItems.category,
+      priority: workItems.priority,
+      investigationContext: workItems.investigationContext,
+      readinessMessage: workItems.readinessMessage,
+      repositoryIds: workItems.repositoryIds,
+      targetRepositoryFullName: workItems.targetRepositoryFullName,
+      status: workItems.status,
+      createdAt: workItems.createdAt,
+      sourceTaskId: workItems.sourceTaskId,
     })
-    .from(taskSuggestions)
+    .from(workItems)
     .where(and(...conditions))
-    .orderBy(desc(taskSuggestions.createdAt), desc(taskSuggestions.id))
+    .orderBy(desc(workItems.createdAt), desc(workItems.id))
     .limit(input.limit + 1);
 
   const hasMore = rows.length > input.limit;
@@ -233,8 +230,8 @@ export async function listTaskSuggestionHistoryCommand(
     new Set(pageRows.flatMap((suggestion) => suggestion.repositoryIds)),
   );
 
-  const [resolvedSourceJobsByTaskId, repositoryRows] = await Promise.all([
-    getResolvedSuggestionSourceCloudJobsByTaskId(sourceTaskIds),
+  const [resolvedSourceRunsByTaskId, repositoryRows] = await Promise.all([
+    getResolvedSuggestionSourceTaskRunsByTaskId(sourceTaskIds),
     repositoryIds.length === 0
       ? Promise.resolve([])
       : db
@@ -253,20 +250,20 @@ export async function listTaskSuggestionHistoryCommand(
   const suggestions = pageRows.map((suggestion) => {
     const automation = getSuggestionHistoryAutomation(
       suggestion.sourceTaskId
-        ? resolvedSourceJobsByTaskId[suggestion.sourceTaskId]
+        ? resolvedSourceRunsByTaskId[suggestion.sourceTaskId]
         : undefined,
     );
     const status: VisibleTaskSuggestionStatus =
       suggestion.status === 'dismissed'
         ? 'dismissed'
-        : suggestion.status === 'started'
-          ? 'started'
+        : suggestion.status === 'launched'
+          ? 'launched'
           : 'open';
 
     return {
       id: suggestion.id,
       title: suggestion.title,
-      brief: suggestion.brief,
+      brief: suggestion.brief ?? '',
       status,
       createdAt: suggestion.createdAt,
       automation,
@@ -303,11 +300,16 @@ export async function getTaskSuggestionFilterOptionsCommand(
 
   const suggestionRows = await db
     .select({
-      targetRepositoryFullName: taskSuggestions.targetRepositoryFullName,
-      repositoryIds: taskSuggestions.repositoryIds,
+      targetRepositoryFullName: workItems.targetRepositoryFullName,
+      repositoryIds: workItems.repositoryIds,
     })
-    .from(taskSuggestions)
-    .where(inArray(taskSuggestions.status, visibleStatuses));
+    .from(workItems)
+    .where(
+      and(
+        eq(workItems.kind, 'suggestion'),
+        inArray(workItems.status, visibleStatuses),
+      ),
+    );
 
   const repositoryIds = Array.from(
     new Set(suggestionRows.flatMap((suggestion) => suggestion.repositoryIds)),

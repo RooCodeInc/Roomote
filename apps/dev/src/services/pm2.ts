@@ -167,6 +167,52 @@ export class PM2Service {
     } else {
       validateServices.succeed();
     }
+
+    await this.validatePublicEdge(options);
+  }
+
+  /**
+   * Docker workers call back into the API through the public URL (ngrok →
+   * Caddy edge), which can lag behind the local services after a (re)start.
+   * Poll the API health route through the edge so jobs launched right after
+   * startup don't race a proxy that isn't serving yet.
+   */
+  private static async validatePublicEdge(
+    options: ScriptOptions,
+  ): Promise<void> {
+    if (!options.publicUrl) {
+      return;
+    }
+
+    const healthUrl = `${options.publicUrl.replace(/\/+$/, '')}/_roomote-api/`;
+    const checkEdge = ora(`Checking public edge at ${healthUrl}`).start();
+    const deadline = Date.now() + 45_000;
+    let lastFailure = 'no response';
+
+    while (Date.now() < deadline) {
+      try {
+        const response = await fetch(healthUrl, {
+          signal: AbortSignal.timeout(5_000),
+        });
+        const contentType = response.headers.get('content-type') ?? '';
+
+        if (response.ok && contentType.includes('application/json')) {
+          checkEdge.succeed();
+          return;
+        }
+
+        lastFailure = `status ${response.status}, content-type ${contentType || 'missing'}`;
+      } catch (error) {
+        lastFailure = error instanceof Error ? error.message : String(error);
+      }
+
+      await new Promise((resolve) => setTimeout(resolve, 2_000));
+    }
+
+    checkEdge.warn();
+    console.warn(
+      `  ⚠️  Public edge did not serve the API health check within 45s (last: ${lastFailure}). Worker callbacks may fail until it settles.`,
+    );
   }
 
   private static getExpectedServices(options: ScriptOptions): string[] {

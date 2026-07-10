@@ -1,6 +1,6 @@
 import { appRouter } from '../../routers';
 import type { Context } from '../../trpc';
-import type { JobTokenContext } from '@roomote/types';
+import type { RunTokenContext } from '@roomote/types';
 
 const { mockPrepareActorScopedTurn } = vi.hoisted(() => ({
   mockPrepareActorScopedTurn: vi.fn(),
@@ -20,7 +20,7 @@ const {
 
 vi.mock('@roomote/sdk/client', () => ({
   sdk: {
-    cloudJobs: {
+    taskRuns: {
       findFirstById: mockFindFirstById,
     },
   },
@@ -113,12 +113,13 @@ function createCaller(options?: {
     },
     harnessManager,
     auth: {
-      cloudJobId: 1,
+      runId: 1,
       userId: 'sender-user-1',
-      tokenType: 'cj',
+      principal: 'user',
+      tokenType: 'run',
       version: 1,
-    } satisfies JobTokenContext,
-    cloudJobId: 1,
+    } satisfies RunTokenContext,
+    runId: 1,
     prepareActorScopedTurn: mockPrepareActorScopedTurn,
   } as unknown as Context;
 
@@ -142,7 +143,7 @@ describe('steerTask procedure', () => {
       slackThreadTs: '111.222',
     });
     mockGetRoomoteConfig.mockReturnValue({
-      token: 'job-token',
+      token: 'run-token',
       platformApiUrl: 'https://platform.example.com',
     });
     mockTrackSlackReplyQuote.mockResolvedValue({ success: true });
@@ -173,11 +174,11 @@ describe('steerTask procedure', () => {
     expect(mockFindFirstById).toHaveBeenCalledWith(1);
     expect(mockTrackSlackReplyQuote).toHaveBeenCalledWith(
       {
-        token: 'job-token',
+        token: 'run-token',
         platformApiUrl: 'https://platform.example.com',
       },
       {
-        cloudJobId: 1,
+        runId: 1,
         text: 'Switch to fixing tests first',
         userName: 'Someone',
       },
@@ -342,11 +343,11 @@ describe('steerTask procedure', () => {
     });
     expect(mockClearSlackReplyQuote).toHaveBeenCalledWith(
       {
-        token: 'job-token',
+        token: 'run-token',
         platformApiUrl: 'https://platform.example.com',
       },
       {
-        cloudJobId: 1,
+        runId: 1,
       },
     );
   });

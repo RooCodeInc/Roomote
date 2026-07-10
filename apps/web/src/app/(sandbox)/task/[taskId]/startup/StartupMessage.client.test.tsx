@@ -1,7 +1,7 @@
 import React from 'react';
 import { fireEvent, render, screen } from '@testing-library/react';
 
-import { CloudTaskStatus } from '@roomote/types';
+import { RunStatus } from '@roomote/types';
 
 vi.mock('@/components/ai-elements', () => ({
   Message: ({
@@ -57,10 +57,10 @@ vi.mock('@/components/sandbox', () => ({
 import { StartupSequence } from './StartupMessage';
 
 describe('StartupSequence', () => {
-  it('uses generic spawning startup copy for Generalist', () => {
+  it('uses generic spawning startup copy', () => {
     render(
       <StartupSequence
-        steps={[{ status: CloudTaskStatus.Spawning, completed: false }]}
+        steps={[{ status: RunStatus.Spawning, completed: false }]}
       />,
     );
 
@@ -71,7 +71,7 @@ describe('StartupSequence', () => {
   it('uses generic spawning startup copy for named agents', () => {
     render(
       <StartupSequence
-        steps={[{ status: CloudTaskStatus.Spawning, completed: false }]}
+        steps={[{ status: RunStatus.Spawning, completed: false }]}
       />,
     );
 
@@ -82,7 +82,7 @@ describe('StartupSequence', () => {
   it('uses generic connecting startup copy', () => {
     render(
       <StartupSequence
-        steps={[{ status: CloudTaskStatus.Connecting, completed: false }]}
+        steps={[{ status: RunStatus.Connecting, completed: false }]}
       />,
     );
 
@@ -93,7 +93,7 @@ describe('StartupSequence', () => {
   it('renders a readable model provider credential error for canceled boot failures', () => {
     render(
       <StartupSequence
-        steps={[{ status: CloudTaskStatus.Canceled, completed: true }]}
+        steps={[{ status: RunStatus.Canceled, completed: true }]}
         error={`OpenAI admin request failed (401): {
   "error": {
     "message": "Incorrect API key provided: sk-admin*fake. You can find your API key at https://platform.openai.com/account/api-keys.",
@@ -121,7 +121,7 @@ describe('StartupSequence', () => {
   it('renders the GPU warmup copy while waiting in running startup state', () => {
     render(
       <StartupSequence
-        steps={[{ status: CloudTaskStatus.Running, completed: false }]}
+        steps={[{ status: RunStatus.Running, completed: false }]}
       />,
     );
 
@@ -133,7 +133,7 @@ describe('StartupSequence', () => {
 
     render(
       <StartupSequence
-        steps={[{ status: CloudTaskStatus.Failed, completed: true }]}
+        steps={[{ status: RunStatus.Failed, completed: true }]}
         error="resume failed"
         retryAction={{ onClick }}
       />,
@@ -150,11 +150,11 @@ describe('StartupSequence', () => {
     const { container } = render(
       <StartupSequence
         steps={[
-          { status: CloudTaskStatus.Pending, completed: true },
-          { status: CloudTaskStatus.Dequeued, completed: true },
-          { status: CloudTaskStatus.Processing, completed: true },
-          { status: CloudTaskStatus.Preparing, completed: true },
-          { status: CloudTaskStatus.Spawning, completed: false },
+          { status: RunStatus.Pending, completed: true },
+          { status: RunStatus.Dequeued, completed: true },
+          { status: RunStatus.Processing, completed: true },
+          { status: RunStatus.Preparing, completed: true },
+          { status: RunStatus.Spawning, completed: false },
         ]}
         error="Boot output overflow"
       />,

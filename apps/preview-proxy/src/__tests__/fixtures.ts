@@ -1,4 +1,4 @@
-import type { CloudJob } from '@roomote/db';
+import type { TaskRun } from '@roomote/db';
 import type { PreviewTokenContext } from '@roomote/types';
 
 import type { ResolvedRequest } from '../services/resolver';
@@ -35,23 +35,22 @@ export const mockConfig: MockConfig = {
 };
 
 /**
- * Create a mock cloud job object for tests.
+ * Create a mock task run object for tests.
  */
-export function createMockCloudJob(
+export function createMockTaskRun(
   overrides: {
     id?: number;
     taskId?: string | null;
-    orgId?: string | null;
-    userId?: string | null;
+    actingUserId?: string | null;
     payload?: Record<string, unknown> | null;
   } = {},
-): CloudJob {
+): TaskRun {
   return {
     id: overrides.id ?? 1,
     taskId: 'taskId' in overrides ? overrides.taskId : TEST_TASK_ID,
-    userId: overrides.userId ?? null,
+    actingUserId: overrides.actingUserId ?? null,
     payload: overrides.payload ?? null,
-  } as CloudJob;
+  } as unknown as TaskRun;
 }
 
 /**
@@ -62,8 +61,8 @@ export function createMockResolvedRequest(
   overrides: Partial<ResolvedRequest> = {},
 ): ResolvedRequest {
   const status = overrides.status ?? 'active';
-  const cloudJob =
-    'cloudJob' in overrides ? overrides.cloudJob : createMockCloudJob();
+  const taskRun =
+    'taskRun' in overrides ? overrides.taskRun : createMockTaskRun();
 
   return {
     status,
@@ -76,13 +75,13 @@ export function createMockResolvedRequest(
       status === 'redirect_to_direct'
         ? (overrides.directUrl ?? 'https://direct-sandbox.example.com:3000')
         : undefined,
-    cloudJob: cloudJob ?? null,
+    taskRun: taskRun ?? null,
     requiresAuth: overrides.requiresAuth ?? true,
     hasAuthProxy: overrides.hasAuthProxy ?? false,
     taskId:
       'taskId' in overrides
         ? overrides.taskId
-        : cloudJob
+        : taskRun
           ? TEST_TASK_ID
           : undefined,
     error: overrides.error,

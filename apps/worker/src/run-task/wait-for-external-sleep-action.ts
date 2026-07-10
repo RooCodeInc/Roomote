@@ -1,12 +1,12 @@
 import pWaitFor from 'p-wait-for';
 
 import {
-  isExitedCloudTaskStatus,
+  isExitedRunStatus,
   isSleepCheckManagedComputeProvider,
   isSnapshotCapableComputeProvider,
-  isResumableCloudTaskType,
+  isResumableTaskPayloadKind,
 } from '@roomote/types';
-import { type DequeuedCloudJob, sdk } from '@roomote/sdk/client';
+import { type DequeuedTaskRun, sdk } from '@roomote/sdk/client';
 
 import type { HarnessLogger } from '../logging';
 import {
@@ -21,7 +21,7 @@ import {
 const EXTERNAL_SLEEP_ACTION_REQUEST_GRACE_MS = 60 * 1_000;
 
 interface WaitForExternalSleepActionOptions {
-  cloudJob: DequeuedCloudJob['cloudJob'];
+  taskRun: DequeuedTaskRun['taskRun'];
   logger: HarnessLogger;
 }
 
@@ -41,16 +41,16 @@ interface SleepActionResult {
  * deadline and either request a snapshot or destroy the sandbox.
  */
 export async function waitForExternalSleepAction({
-  cloudJob,
+  taskRun,
   logger,
 }: WaitForExternalSleepActionOptions): Promise<SleepActionResult> {
-  if (!isSleepCheckManagedComputeProvider(cloudJob.vendor)) {
+  if (!isSleepCheckManagedComputeProvider(taskRun.vendor)) {
     return { claimed: false, completed: false };
   }
 
-  if (!cloudJob.machineId) {
+  if (!taskRun.machineId) {
     logger.warn(
-      `[waitForExternalSleepAction] No machineId for job ${cloudJob.id}, skipping sleep handoff`,
+      `[waitForExternalSleepAction] No machineId for job ${taskRun.id}, skipping sleep handoff`,
     );
 
     return { claimed: false, completed: false };
@@ -58,36 +58,34 @@ export async function waitForExternalSleepAction({
 
   // Non-snapshot providers (Daytona) exit via destroy, never via snapshot.
   const isResumable =
-    isResumableCloudTaskType(cloudJob.type) &&
-    isSnapshotCapableComputeProvider(cloudJob.vendor);
+    isResumableTaskPayloadKind(taskRun.payloadKind) &&
+    isSnapshotCapableComputeProvider(taskRun.vendor);
   let sleepRequested = false;
 
   try {
     logger.info(
-      `[waitForExternalSleepAction] Waiting for BullMQ to claim sleep action for job ${cloudJob.id} (grace ${EXTERNAL_SLEEP_ACTION_REQUEST_GRACE_MS / 1000}s)`,
+      `[waitForExternalSleepAction] Waiting for BullMQ to claim sleep action for job ${taskRun.id} (grace ${EXTERNAL_SLEEP_ACTION_REQUEST_GRACE_MS / 1000}s)`,
     );
 
     await pWaitFor(
       async () => {
-        const updatedJob = await sdk.cloudJobs.findRuntimeStateById(
-          cloudJob.id,
-        );
+        const updatedRun = await sdk.taskRuns.findRuntimeStateById(taskRun.id);
 
-        if (!updatedJob) {
+        if (!updatedRun) {
           return false;
         }
 
-        if (updatedJob.snapshotFailedAt) {
+        if (updatedRun.snapshotFailedAt) {
           throw new Error(
-            updatedJob.error ??
-              `Snapshot failed for job ${cloudJob.id} before completion`,
+            updatedRun.error ??
+              `Snapshot failed for job ${taskRun.id} before completion`,
           );
         }
 
         sleepRequested =
           sleepRequested ||
-          Boolean(updatedJob.sleepRequestedAt) ||
-          Boolean(updatedJob.snapshotCreatedAt);
+          Boolean(updatedRun.sleepRequestedAt) ||
+          Boolean(updatedRun.snapshotCreatedAt);
 
         return sleepRequested;
       },
@@ -98,7 +96,7 @@ export async function waitForExternalSleepAction({
     );
   } catch (error) {
     logger.warn(
-      `[waitForExternalSleepAction] Sleep handoff failed for job ${cloudJob.id}: ${
+      `[waitForExternalSleepAction] Sleep handoff failed for job ${taskRun.id}: ${
         error instanceof Error ? error.message : String(error)
       }`,
     );
@@ -107,32 +105,30 @@ export async function waitForExternalSleepAction({
   }
 
   logger.info(
-    `[waitForExternalSleepAction] Sleep action observed for job ${cloudJob.id}; waiting for BullMQ to finish`,
+    `[waitForExternalSleepAction] Sleep action observed for job ${taskRun.id}; waiting for BullMQ to finish`,
   );
 
   try {
     await pWaitFor(
       async () => {
-        const updatedJob = await sdk.cloudJobs.findRuntimeStateById(
-          cloudJob.id,
-        );
+        const updatedRun = await sdk.taskRuns.findRuntimeStateById(taskRun.id);
 
-        if (!updatedJob) {
+        if (!updatedRun) {
           return false;
         }
 
-        if (updatedJob.snapshotFailedAt) {
+        if (updatedRun.snapshotFailedAt) {
           throw new Error(
-            updatedJob.error ??
-              `Snapshot failed for job ${cloudJob.id} before completion`,
+            updatedRun.error ??
+              `Snapshot failed for job ${taskRun.id} before completion`,
           );
         }
 
         if (isResumable) {
-          return Boolean(updatedJob.snapshotCreatedAt);
+          return Boolean(updatedRun.snapshotCreatedAt);
         }
 
-        return isExitedCloudTaskStatus(updatedJob.status);
+        return isExitedRunStatus(updatedRun.status);
       },
       {
         interval: SNAPSHOT_POLL_INTERVAL_MS,
@@ -141,13 +137,13 @@ export async function waitForExternalSleepAction({
     );
 
     logger.info(
-      `[waitForExternalSleepAction] Sleep action completed for job ${cloudJob.id}`,
+      `[waitForExternalSleepAction] Sleep action completed for job ${taskRun.id}`,
     );
 
     return { claimed: true, completed: true };
   } catch (error) {
     logger.warn(
-      `[waitForExternalSleepAction] Sleep action failed or timed out for job ${cloudJob.id}: ${
+      `[waitForExternalSleepAction] Sleep action failed or timed out for job ${taskRun.id}: ${
         error instanceof Error ? error.message : String(error)
       }`,
     );

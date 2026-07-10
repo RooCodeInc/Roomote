@@ -5,7 +5,7 @@ import jwt from 'jsonwebtoken';
 import {
   configureAuthClientEnv,
   validateAuthToken,
-  validateJobToken,
+  validateRunToken,
 } from '@roomote/auth/client';
 
 import { WorkerEnv } from '../worker-env';
@@ -28,7 +28,7 @@ describe('WorkerEnv', () => {
         jobAuthPublicKey: 'job-public-key-data',
         previewProxyBaseUrl: 'https://preview.roomote.run',
         previewAuthPublicKey: 'public-key-data',
-        openRoomoteAppUrl: 'https://app.roomote.example',
+        roomoteAppUrl: 'https://app.roomote.example',
         appEnv: 'development',
       },
     });
@@ -265,7 +265,7 @@ describe('WorkerEnv', () => {
       expect(workerEnv.jobAuthPublicKey).toBe('job-public-key-data');
       expect(workerEnv.previewProxyBaseUrl).toBe('https://preview.roomote.run');
       expect(workerEnv.previewAuthPublicKey).toBe('public-key-data');
-      expect(workerEnv.openRoomoteAppUrl).toBe('https://app.roomote.example');
+      expect(workerEnv.roomoteAppUrl).toBe('https://app.roomote.example');
       expect(workerEnv.authToken).toBe('secret-auth-token');
       expect(workerEnv.appEnv).toBe('development');
     });
@@ -291,7 +291,7 @@ describe('WorkerEnv', () => {
       expect(env.authToken).toBe('my-auth-token');
       expect(env.jobAuthPublicKey).toBe('job-pk-data');
       expect(env.previewProxyBaseUrl).toBe('https://preview.example.com');
-      expect(env.openRoomoteAppUrl).toBe('https://api.example.com');
+      expect(env.roomoteAppUrl).toBe('https://api.example.com');
 
       // But NOT present in any child process env
       const userEnv = env.buildUserFacingEnv();
@@ -355,17 +355,18 @@ describe('WorkerEnv', () => {
           r: {
             u: 'user-123',
             o: 'org-456',
-            t: 'cj',
+            t: 'run',
           },
         },
         privateKey,
         { algorithm: 'ES256' },
       );
 
-      await expect(validateJobToken(token)).resolves.toEqual({
-        cloudJobId: 123,
+      await expect(validateRunToken(token)).resolves.toEqual({
+        runId: 123,
         userId: 'user-123',
-        tokenType: 'cj',
+        principal: 'user',
+        tokenType: 'run',
         version: 1,
       });
 
@@ -534,7 +535,7 @@ describe('WorkerEnv', () => {
       expect(userEnv.TRPC_URL).toBe('https://my-project-trpc.example.com');
 
       // Worker's internal URL is only available via accessor
-      expect(env.openRoomoteAppUrl).toBe('https://internal-api.example.com');
+      expect(env.roomoteAppUrl).toBe('https://internal-api.example.com');
     });
   });
 });

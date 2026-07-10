@@ -14,21 +14,21 @@ describe('buildWorkerHeaders', () => {
   it('includes only authorization when no bypass env is set', () => {
     expect(
       buildWorkerHeaders({
-        AUTH_TOKEN: 'job-token',
+        AUTH_TOKEN: 'run-token',
       } as NodeJS.ProcessEnv),
     ).toEqual({
-      Authorization: 'Bearer job-token',
+      Authorization: 'Bearer run-token',
     });
   });
 
   it('adds the default bypass header when a bypass value is present', () => {
     expect(
       buildWorkerHeaders({
-        AUTH_TOKEN: 'job-token',
+        AUTH_TOKEN: 'run-token',
         ROOMOTE_AUTH_BYPASS_VALUE: 'bypass-token',
       } as NodeJS.ProcessEnv),
     ).toEqual({
-      Authorization: 'Bearer job-token',
+      Authorization: 'Bearer run-token',
       'x-bypass-roomote-auth': 'bypass-token',
     });
   });
@@ -36,12 +36,12 @@ describe('buildWorkerHeaders', () => {
   it('uses a custom bypass header name when configured', () => {
     expect(
       buildWorkerHeaders({
-        AUTH_TOKEN: 'job-token',
+        AUTH_TOKEN: 'run-token',
         ROOMOTE_AUTH_BYPASS_VALUE: 'bypass-token',
         ROOMOTE_AUTH_BYPASS_HEADER_NAME: 'x-custom-bypass',
       } as NodeJS.ProcessEnv),
     ).toEqual({
-      Authorization: 'Bearer job-token',
+      Authorization: 'Bearer run-token',
       'x-custom-bypass': 'bypass-token',
     });
   });
@@ -269,10 +269,10 @@ describe('createWorkerFetchWithRetry', () => {
     });
 
     const response = await workerFetch(
-      'https://api.newmote.dev/trpc/cloudJobs.recordMessageEnvelope?batch=1',
+      'https://api.newmote.dev/trpc/taskRuns.recordMessageEnvelope?batch=1',
       {
         method: 'POST',
-        body: '{"0":{"json":{"cloudJobId":42}}}',
+        body: '{"0":{"json":{"runId":42}}}',
       },
     );
 
@@ -305,14 +305,117 @@ describe('createWorkerFetchWithRetry', () => {
     });
 
     const response = await workerFetch(
-      'https://api.newmote.dev/trpc/cloudJobs.recordMessageEnvelope?batch=1',
+      'https://api.newmote.dev/trpc/taskRuns.recordMessageEnvelope?batch=1',
       {
         method: 'POST',
-        body: '{"0":{"json":{"cloudJobId":42}}}',
+        body: '{"0":{"json":{"runId":42}}}',
       },
     );
 
     expect(response.status).toBe(200);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it('retries the dequeue claim when the public edge answers without a JSON content-type', async () => {
+    const fetchMock = vi
+      .fn<typeof fetch>()
+      .mockResolvedValueOnce(new Response(null, { status: 502 }))
+      .mockResolvedValueOnce(
+        new Response('[]', {
+          status: 200,
+          headers: { 'content-type': 'application/json' },
+        }),
+      );
+
+    const workerFetch = createWorkerFetchWithRetry(fetchMock, {
+      baseDelayMs: 0,
+    });
+
+    const response = await workerFetch(
+      'https://web-dan.ngrok.dev/_roomote-api/trpc/taskRuns.dequeue?batch=1',
+      {
+        method: 'POST',
+        body: '{"0":{"json":{"runId":68}}}',
+      },
+    );
+
+    expect(response.status).toBe(200);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it('gives the dequeue claim a longer default retry budget than other callbacks', async () => {
+    const fetchMock = vi
+      .fn<typeof fetch>()
+      .mockRejectedValueOnce(new TypeError('fetch failed'))
+      .mockRejectedValueOnce(new TypeError('fetch failed'))
+      .mockRejectedValueOnce(new TypeError('fetch failed'))
+      .mockRejectedValueOnce(new TypeError('fetch failed'))
+      .mockRejectedValueOnce(new TypeError('fetch failed'))
+      .mockResolvedValueOnce(
+        new Response('[]', {
+          status: 200,
+          headers: { 'content-type': 'application/json' },
+        }),
+      );
+
+    const workerFetch = createWorkerFetchWithRetry(fetchMock, {
+      baseDelayMs: 0,
+    });
+
+    const response = await workerFetch(
+      'https://api.roomote.dev/trpc/taskRuns.dequeue?batch=1',
+      {
+        method: 'POST',
+        body: '{"0":{"json":{"runId":68}}}',
+      },
+    );
+
+    expect(response.status).toBe(200);
+    expect(fetchMock).toHaveBeenCalledTimes(6);
+  });
+
+  it('retries the resume claim on transport failure', async () => {
+    const fetchMock = vi
+      .fn<typeof fetch>()
+      .mockRejectedValueOnce(new TypeError('fetch failed'))
+      .mockResolvedValueOnce(
+        new Response('[]', {
+          status: 200,
+          headers: { 'content-type': 'application/json' },
+        }),
+      );
+
+    const workerFetch = createWorkerFetchWithRetry(fetchMock, {
+      baseDelayMs: 0,
+    });
+
+    const response = await workerFetch(
+      'https://api.roomote.dev/trpc/taskRuns.resume?batch=1',
+      {
+        method: 'POST',
+        body: '{"0":{"json":{"runId":68}}}',
+      },
+    );
+
+    expect(response.status).toBe(200);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it('lets explicit wrapper options pin the dequeue retry budget', async () => {
+    const fetchError = new TypeError('fetch failed');
+    const fetchMock = vi.fn<typeof fetch>().mockRejectedValue(fetchError);
+
+    const workerFetch = createWorkerFetchWithRetry(fetchMock, {
+      maxAttempts: 2,
+      baseDelayMs: 0,
+    });
+
+    await expect(
+      workerFetch('https://api.roomote.dev/trpc/taskRuns.dequeue?batch=1', {
+        method: 'POST',
+        body: '{"0":{"json":{"runId":68}}}',
+      }),
+    ).rejects.toBe(fetchError);
     expect(fetchMock).toHaveBeenCalledTimes(2);
   });
 
@@ -326,7 +429,7 @@ describe('createWorkerFetchWithRetry', () => {
     });
 
     await expect(
-      workerFetch('https://api.roomote.dev/trpc/cloudJobs.done?batch=1', {
+      workerFetch('https://api.roomote.dev/trpc/taskRuns.done?batch=1', {
         method: 'POST',
         body: '{"0":{"json":{"id":42,"status":"completed"}}}',
       }),

@@ -37,6 +37,9 @@ SLACK_SIGNING_SECRET=...
 
 `SLACK_APP_ID` is optional for manual preconfiguration. Roomote saves Slack's
 `app_id` from the OAuth installation response after workspace install.
+During OAuth install, Roomote also records the installed bot display name when
+Slack exposes it, so setup and automation guidance can show the actual Slack
+app users should mention instead of assuming `@Roomote`.
 
 ## Redirect URLs
 

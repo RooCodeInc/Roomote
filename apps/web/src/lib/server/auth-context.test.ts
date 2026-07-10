@@ -176,13 +176,11 @@ describe('authorize', () => {
   });
 
   it('admits a bootstrap sign-in as admin even when another user already exists', async () => {
-    // Saving bootstrap auth config creates the system `setup-bootstrap-user`
-    // audit row (and an aborted earlier attempt can leave a real account
-    // behind), so the setup-token holder must still come back in as an
-    // operator, not a member.
+    // An aborted earlier attempt can leave a real account behind, so the
+    // setup-token holder must still come back in as an operator, not a member.
     mockAccessDecision.current = { allowed: true, via: 'bootstrap' };
     mockUsersFindFirst.mockResolvedValue(null);
-    mockTxState.anyUser = { id: 'setup-bootstrap-user' };
+    mockTxState.anyUser = { id: 'aborted-setup-user' };
 
     const result = await authorize();
 
@@ -195,6 +193,30 @@ describe('authorize', () => {
     expect(mockTxState.insertedValues).toEqual([
       expect.objectContaining({ id: 'user-1', role: 'admin' }),
     ]);
+  });
+
+  it('promotes an existing member admitted by the setup token while setup is open', async () => {
+    mockAccessDecision.current = { allowed: true, via: 'bootstrap' };
+    mockUsersFindFirst.mockResolvedValue({
+      id: 'user-1',
+      role: 'member',
+      createdAt: new Date('2025-01-01T00:00:00.000Z'),
+      imageUrl: 'https://example.com/avatar.png',
+      onboardingCompletedAt: new Date('2025-01-01T00:00:00.000Z'),
+      deletedAt: null,
+    });
+
+    const result = await authorize();
+
+    expect(result.success).toBe(true);
+    if (!result.success) {
+      return;
+    }
+
+    expect(result.isAdmin).toBe(true);
+    expect(mockUpdateSet).toHaveBeenCalledWith(
+      expect.objectContaining({ role: 'admin' }),
+    );
   });
 
   it('admits non-bootstrap newcomers as members when users already exist', async () => {

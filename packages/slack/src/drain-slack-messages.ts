@@ -1,11 +1,11 @@
 import {
   ALL_REPOSITORIES,
-  type CloudTaskPayload,
-  CloudTaskType,
+  type TaskPayload,
+  TaskPayloadKind,
   populateSnapshotResumeSlackMetadata,
   restoreSnapshotResumeVisiblePromptFields,
 } from '@roomote/types';
-import { enqueueCloudTask } from '@roomote/cloud-agents/server';
+import { enqueueTask } from '@roomote/cloud-agents/server';
 import { getRedis } from '@roomote/redis';
 
 import { getSlackMessages, prependSlackMessages } from './slack-messages';
@@ -15,13 +15,13 @@ const RESUME_LOCK_PREFIX = 'slack:resume-lock:';
 const RESUME_LOCK_TTL_SECONDS = 30;
 
 /**
- * Minimum shape of the source cloud job required by the drain helper.
+ * Minimum shape of the source task run required by the drain helper.
  * Kept narrow so that both the SDK router (full DB row) and BullMQ
  * handler (partial query result) can call this without type gymnastics.
  */
-export interface SlackDrainSourceJob {
+export interface SlackDrainSourceRun {
   id: number;
-  userId: string | null;
+  /** Slack thread binding from the run's task row (tasks.slackThreadTs). */
   slackThreadTs: string | null;
   snapshotId: string | null;
   payload: Record<string, unknown>;
@@ -31,67 +31,65 @@ export interface SlackDrainSourceJob {
 export type SlackDrainResult =
   | {
       resumed: true;
-      cloudJobId: number;
+      runId: number;
       taskId: string;
       messageCount: number;
     }
   | { resumed: false; reason: string };
 
 /**
- * Non-destructive check of pending Slack message count for a cloud job.
+ * Non-destructive check of pending Slack message count for a task run.
  */
-export async function peekSlackMessageCount(
-  cloudJobId: number,
-): Promise<number> {
+export async function peekSlackMessageCount(runId: number): Promise<number> {
   const redis = getRedis();
-  const key = `${SLACK_MESSAGE_QUEUE_PREFIX}${cloudJobId}`;
+  const key = `${SLACK_MESSAGE_QUEUE_PREFIX}${runId}`;
   return redis.llen(key);
 }
 
 /**
- * Peek for pending Slack messages on a completed job, and if any exist,
- * create a SnapshotResume job and transfer the messages to it.
+ * Peek for pending Slack messages on a completed task run, and if any exist,
+ * create a SnapshotResume run and transfer the messages to it.
  *
  * Uses a safe peek-create-transfer order:
  *   1. Peek non-destructively (LLEN) to check for pending messages
  *   2. Acquire a distributed lock (shared with the webhook handler) to
- *      prevent duplicate resume jobs for the same Slack thread
+ *      prevent duplicate resume task runs for the same Slack thread
  *   3. Drain the pending messages
- *   4. Create a durable SnapshotResume cloud job that embeds the drained
+ *   4. Create a durable SnapshotResume task run that embeds the drained
  *      messages for worker replay
  *
- * If resume job creation fails, messages are restored to the original Redis
+ * If resume task run creation fails, messages are restored to the original Redis
  * queue.
  *
- * @param sourceJob - The completed/snapshotted cloud job to drain from
- * @param snapshotIdOverride - Use this snapshot ID instead of sourceJob.snapshotId
+ * @param sourceRun - The completed/snapshotted task run to drain from
+ * @param snapshotIdOverride - Use this snapshot ID instead of sourceRun.snapshotId
  *   (the BullMQ handler knows the freshly-created snapshot ID before the DB row
  *   is fully updated)
  */
-export async function drainSlackMessagesToResumeJob(
-  sourceJob: SlackDrainSourceJob,
+export async function drainSlackMessagesToResumeRun(
+  sourceRun: SlackDrainSourceRun,
   snapshotIdOverride?: string,
 ): Promise<SlackDrainResult> {
-  if (!sourceJob.slackThreadTs) {
+  if (!sourceRun.slackThreadTs) {
     return { resumed: false, reason: 'no_slack_thread' };
   }
 
-  const snapshotId = snapshotIdOverride ?? sourceJob.snapshotId;
+  const snapshotId = snapshotIdOverride ?? sourceRun.snapshotId;
 
   if (!snapshotId) {
     return { resumed: false, reason: 'no_snapshot' };
   }
 
-  const messageCount = await peekSlackMessageCount(sourceJob.id);
+  const messageCount = await peekSlackMessageCount(sourceRun.id);
 
   if (messageCount === 0) {
     return { resumed: false, reason: 'no_pending_messages' };
   }
 
   // Acquire the same distributed lock used by the webhook handler to prevent
-  // both code paths from creating duplicate resume jobs for the same thread.
+  // both code paths from creating duplicate resume task runs for the same thread.
   const redis = getRedis();
-  const threadTs = sourceJob.slackThreadTs;
+  const threadTs = sourceRun.slackThreadTs;
   const lockKey = `${RESUME_LOCK_PREFIX}${threadTs}`;
   const acquired = await redis.set(
     lockKey,
@@ -105,7 +103,7 @@ export async function drainSlackMessagesToResumeJob(
     return { resumed: false, reason: 'resume_lock_held' };
   }
 
-  const payload = sourceJob.payload;
+  const payload = sourceRun.payload;
   const repo =
     typeof payload?.repo === 'string' ? payload.repo : ALL_REPOSITORIES;
   const environmentId =
@@ -122,46 +120,54 @@ export async function drainSlackMessagesToResumeJob(
       ? selectedRepositories
       : undefined;
 
-  // Drain before creating the resume job so its payload is self-contained.
+  // Drain before creating the resume task run so its payload is self-contained.
   // Restore the drained messages on failure.
   let messages: Awaited<ReturnType<typeof getSlackMessages>> = [];
-  let resumeLaunch: Awaited<ReturnType<typeof enqueueCloudTask>>;
+  let resumeLaunch: Awaited<ReturnType<typeof enqueueTask>>;
 
   try {
-    messages = await getSlackMessages(sourceJob.id);
+    messages = await getSlackMessages(sourceRun.id);
 
     if (messages.length === 0) {
       await redis.del(lockKey);
       return { resumed: false, reason: 'no_pending_messages' };
     }
 
-    const payload: CloudTaskPayload<CloudTaskType.SnapshotResume> = {
+    const payload: TaskPayload<typeof TaskPayloadKind.SnapshotResume> = {
       repo,
       environmentId,
       selectedRepositories: scopedSelectedRepositories,
-      port: sourceJob.port ?? undefined,
+      port: sourceRun.port ?? undefined,
       sourceSnapshotId: snapshotId,
-      sourceCloudJobId: sourceJob.id,
+      sourceRunId: sourceRun.id,
       queuedSlackMessages: messages,
     };
     populateSnapshotResumeSlackMetadata(payload, {
-      sourcePayload: sourceJob.payload,
-      threadTs: sourceJob.slackThreadTs,
+      sourcePayload: sourceRun.payload,
+      threadTs: sourceRun.slackThreadTs,
     });
-    restoreSnapshotResumeVisiblePromptFields(payload, sourceJob.payload);
-    resumeLaunch = await enqueueCloudTask({
-      type: CloudTaskType.SnapshotResume,
-      userId: sourceJob.userId,
-      slackThreadTs: sourceJob.slackThreadTs,
-      sourceSnapshotId: snapshotId,
-      sourceCloudJobId: sourceJob.id,
-      payload,
+    restoreSnapshotResumeVisiblePromptFields(payload, sourceRun.payload);
+
+    // The resumer becomes the new run's acting user: the most recent drained
+    // follow-up sender we could resolve to a Roomote user. Resumes never
+    // create tasks and never re-attribute the task initiator.
+    const resumeActingUserId =
+      [...messages].reverse().find((message) => message.userId)?.userId ?? null;
+
+    resumeLaunch = await enqueueTask({
+      task: {
+        type: TaskPayloadKind.SnapshotResume,
+        sourceSnapshotId: snapshotId,
+        sourceRunId: sourceRun.id,
+        payload,
+      },
+      actingUserId: resumeActingUserId,
     });
   } catch (error) {
     // Restore drained messages and release the lock so a retry can proceed.
     try {
       if (messages.length > 0) {
-        await prependSlackMessages(sourceJob.id, messages);
+        await prependSlackMessages(sourceRun.id, messages);
       }
       await redis.del(lockKey);
     } catch {
@@ -171,12 +177,12 @@ export async function drainSlackMessagesToResumeJob(
   }
 
   console.log(
-    `[drainSlackMessagesToResumeJob] Created resume cloud job ${resumeLaunch.id} with ${messages.length} Slack message(s)`,
+    `[drainSlackMessagesToResumeRun] Created resume task run ${resumeLaunch.id} with ${messages.length} Slack message(s)`,
   );
 
   return {
     resumed: true,
-    cloudJobId: resumeLaunch.id,
+    runId: resumeLaunch.id,
     taskId: resumeLaunch.taskId,
     messageCount: messages.length,
   };

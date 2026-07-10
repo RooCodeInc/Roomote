@@ -1,4 +1,4 @@
-import { resolveKeepaliveMs, type CloudTaskType } from '@roomote/types';
+import { resolveKeepaliveMs, type TaskPayloadKind } from '@roomote/types';
 
 /**
  * Worker-side wrapper over the shared keepalive policy resolver.
@@ -6,7 +6,7 @@ import { resolveKeepaliveMs, type CloudTaskType } from '@roomote/types';
  * path.
  */
 export function getDefaultKeepaliveMs(options: {
-  taskType?: CloudTaskType | null;
+  taskType?: TaskPayloadKind | null;
   appEnv?: 'development' | 'preview' | 'production' | 'test' | null;
   defaultKeepaliveMs: number;
   delegatedKeepaliveMs: number;

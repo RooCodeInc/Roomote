@@ -1,7 +1,7 @@
 /**
  * Server-side anonymous analytics capture and Ping service client.
  *
- * Design rules (see .agent-guidance/features/anonymous-analytics.md):
+ * Design rules:
  * - Telemetry must never throw into product code paths and never block them.
  * - Events are droppable: no persistence, no retries, short timeouts.
  * - Nothing leaves the process unless the environment gate allows it, and

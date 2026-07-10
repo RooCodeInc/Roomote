@@ -23,17 +23,19 @@ const {
 }));
 
 vi.mock('@roomote/db/server', () => ({
-  agentSuggestionMessages: {
+  trackedMessages: {
     id: 'id',
-    agentType: 'agentType',
+    kind: 'kind',
+    dedupeKey: 'dedupeKey',
     channelId: 'channelId',
     messageTs: 'messageTs',
-    suggestionKey: 'suggestionKey',
+    workItemId: 'workItemId',
+    metadata: 'metadata',
   },
   and: vi.fn((...conditions: unknown[]) => ({ and: conditions })),
   eq: vi.fn((left: unknown, right: unknown) => ({ eq: [left, right] })),
-  like: vi.fn((column: unknown, pattern: unknown) => ({
-    like: [column, pattern],
+  sql: vi.fn((strings: TemplateStringsArray, ...values: unknown[]) => ({
+    sql: [Array.from(strings), values],
   })),
   resolveTelegramRuntimeCredentials: telegramCredentialsMock,
   db: {
@@ -102,12 +104,19 @@ describe('postSetupTaskSuggestionsToTeams', () => {
     expect(posted.text).toContain('starter tasks');
 
     const rows = insertValuesMock.mock.calls[0]![0] as Array<{
-      agentType: string;
+      kind: string;
+      surface: string;
+      dedupeKey: string;
       messageTs: string;
+      workItemId: string;
+      metadata: { suggestionType: string; suggestionKey: string };
     }>;
     expect(rows).toHaveLength(2);
-    expect(rows[0]!.agentType).toBe('setup_onboarding');
-    expect(new Set(rows.map((row) => row.messageTs)).size).toBe(2);
+    expect(rows[0]!.kind).toBe('suggestion_card');
+    expect(rows[0]!.surface).toBe('teams');
+    expect(rows[0]!.metadata.suggestionType).toBe('setup_onboarding');
+    expect(rows.map((row) => row.workItemId)).toEqual(['aaa', 'bbb']);
+    expect(new Set(rows.map((row) => row.dedupeKey)).size).toBe(2);
 
     expect(enqueueFollowupMock).toHaveBeenCalledWith({
       conversationId: '19:channel@thread.tacv2',

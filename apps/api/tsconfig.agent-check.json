@@ -1,0 +1,21 @@
+{
+  "extends": "@roomote/config-typescript/base.json",
+  "compilerOptions": {
+    "types": ["node", "vitest/globals"],
+    "noEmit": true
+  },
+  "files": [
+    "src/handlers/tasks/submitTaskSuggestions.ts",
+    "src/handlers/tasks/submitMcpRecommendations.ts",
+    "src/handlers/tasks/submitAutomationWorkItems.ts",
+    "src/handlers/tasks/searchTasks.ts",
+    "src/handlers/tasks/task-stop.ts",
+    "src/handlers/tasks/cancelTask.ts",
+    "src/handlers/tasks/getTaskComputeLogs.ts",
+    "src/handlers/tasks/automation-work-items/types.ts",
+    "src/handlers/tasks/automation-work-items/slack.ts",
+    "src/handlers/tasks/__tests__/searchTasks.test.ts",
+    "src/handlers/tasks/__tests__/submitAutomationWorkItems.test.ts",
+    "src/handlers/tasks/__tests__/submitAutomationWorkItems.lifecycle.test.ts"
+  ]
+}

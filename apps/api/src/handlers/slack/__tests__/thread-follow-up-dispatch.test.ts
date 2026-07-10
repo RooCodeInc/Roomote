@@ -3,53 +3,56 @@ import {
   resolveSlackThreadFollowUpRoute,
 } from '../events/thread-follow-up-dispatch';
 
-const { findActiveSlackJobMock, findCompletedSlackJobWithSnapshotMock } =
-  vi.hoisted(() => ({
-    findActiveSlackJobMock: vi.fn(),
-    findCompletedSlackJobWithSnapshotMock: vi.fn(),
-  }));
+const {
+  findActiveSlackTaskRunMock,
+  findCompletedSlackTaskRunWithSnapshotMock,
+} = vi.hoisted(() => ({
+  findActiveSlackTaskRunMock: vi.fn(),
+  findCompletedSlackTaskRunWithSnapshotMock: vi.fn(),
+}));
 
 vi.mock('@roomote/slack', () => ({
-  findActiveSlackJob: findActiveSlackJobMock,
-  findCompletedSlackJobWithSnapshot: findCompletedSlackJobWithSnapshotMock,
+  findActiveSlackTaskRun: findActiveSlackTaskRunMock,
+  findCompletedSlackTaskRunWithSnapshot:
+    findCompletedSlackTaskRunWithSnapshotMock,
 }));
 
 describe('Slack thread follow-up dispatch', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    findActiveSlackJobMock.mockResolvedValue(null);
-    findCompletedSlackJobWithSnapshotMock.mockResolvedValue(null);
+    findActiveSlackTaskRunMock.mockResolvedValue(null);
+    findCompletedSlackTaskRunWithSnapshotMock.mockResolvedValue(null);
   });
 
-  it('keeps route resolution side-effect free and returns the active job when one is already running', async () => {
-    const activeJob = {
+  it('keeps route resolution side-effect free and returns the active task run when one is already running', async () => {
+    const activeRun = {
       id: 42,
       taskId: 'task-42',
       result: null,
     } as NonNullable<
       Parameters<
         typeof resolveSlackThreadFollowUpRoute
-      >[0]['prefetchedActiveJob']
+      >[0]['prefetchedActiveRun']
     >;
 
     const route = await resolveSlackThreadFollowUpRoute({
       threadId: '111.000',
-      prefetchedActiveJob: activeJob,
+      prefetchedActiveRun: activeRun,
       allowCompletedResume: false,
     });
 
-    expect(route).toEqual({ kind: 'active', activeJob });
-    expect(findActiveSlackJobMock).not.toHaveBeenCalled();
-    expect(findCompletedSlackJobWithSnapshotMock).not.toHaveBeenCalled();
+    expect(route).toEqual({ kind: 'active', activeRun });
+    expect(findActiveSlackTaskRunMock).not.toHaveBeenCalled();
+    expect(findCompletedSlackTaskRunWithSnapshotMock).not.toHaveBeenCalled();
   });
 
-  it('falls back to a fresh launch when resume handling declines the completed job', async () => {
+  it('falls back to a fresh launch when resume handling declines the completed task run', async () => {
     const onFresh = vi.fn().mockResolvedValue('started-fresh');
 
     const outcome = await dispatchSlackThreadFollowUp({
       route: {
         kind: 'resume',
-        completedJob: {
+        completedRun: {
           id: 100,
           taskId: 'task-100',
           snapshotId: 'snap-100',

@@ -14,7 +14,7 @@ import {
 interface WorkerConfig {
   authToken: string;
   trpcUrl: string;
-  openRoomoteAppUrl: string;
+  roomoteAppUrl: string;
   jobAuthPublicKey?: string;
   previewProxyBaseUrl?: string;
   previewProxySubdomainSuffix?: string;
@@ -214,7 +214,7 @@ export class WorkerEnv {
       previewProxySubdomainSuffix: processEnv.PREVIEW_PROXY_SUBDOMAIN_SUFFIX,
       previewAuthPublicKey: processEnv.PREVIEW_AUTH_PUBLIC_KEY,
       previewAuthCookieName: processEnv.PREVIEW_AUTH_COOKIE_NAME,
-      openRoomoteAppUrl: processEnv.ROOMOTE_APP_URL!,
+      roomoteAppUrl: processEnv.ROOMOTE_APP_URL!,
       appEnv: processEnv.ROOMOTE_APP_ENV ?? processEnv.APP_ENV,
     };
 
@@ -381,8 +381,8 @@ export class WorkerEnv {
     return this.workerConfig.previewAuthCookieName;
   }
 
-  get openRoomoteAppUrl(): string {
-    return this.workerConfig.openRoomoteAppUrl;
+  get roomoteAppUrl(): string {
+    return this.workerConfig.roomoteAppUrl;
   }
 
   get trpcUrl(): string {

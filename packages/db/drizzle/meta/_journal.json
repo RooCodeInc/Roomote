@@ -5,8 +5,43 @@
     {
       "idx": 0,
       "version": "7",
-      "when": 1783526937997,
-      "tag": "0000_stiff_lorna_dane",
+      "when": 1783649825042,
+      "tag": "0000_dapper_smasher",
+      "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "7",
+      "when": 1783650000000,
+      "tag": "0001_slack_invocation_identity",
+      "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1783702173746,
+      "tag": "0002_remove_task_shares",
+      "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1783703067901,
+      "tag": "0003_clean_unused_schema",
+      "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1783703543449,
+      "tag": "0004_task_run_queue_scope",
+      "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1783712152138,
+      "tag": "0005_powerful_doctor_octopus",
       "breakpoints": true
     }
   ]

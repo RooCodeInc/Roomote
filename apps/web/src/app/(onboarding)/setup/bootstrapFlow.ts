@@ -24,6 +24,12 @@ export function getBootstrapAuthProvider(
   );
 }
 
+export function getBootstrapStepFromSetupStepParam(
+  step: string | null,
+): BootstrapStep | null {
+  return step === 'auth-provider' || step === 'auth-env-vars' ? step : null;
+}
+
 export function getNextBootstrapStep(
   authSetup: SetupAuthStatus | null | undefined,
   pendingAuthProvider?: SetupAuthProviderId | null,

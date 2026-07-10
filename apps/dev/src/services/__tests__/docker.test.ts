@@ -137,9 +137,9 @@ describe('DockerService.checkContainers', () => {
       .fn()
       .mockResolvedValueOnce([
         {
-          Names: ['/openroomote-postgres'],
+          Names: ['/roomote-legacy-postgres'],
           Labels: {
-            'com.docker.compose.project': 'openroomote',
+            'com.docker.compose.project': 'roomote-legacy',
             'com.docker.compose.project.working_dir': rootDir,
             'com.docker.compose.service': 'postgres',
           },
@@ -154,9 +154,9 @@ describe('DockerService.checkContainers', () => {
           },
         },
         {
-          Names: ['/openroomote-minio'],
+          Names: ['/roomote-legacy-minio'],
           Labels: {
-            'com.docker.compose.project': 'openroomote',
+            'com.docker.compose.project': 'roomote-legacy',
             'com.docker.compose.project.working_dir': rootDir,
             'com.docker.compose.service': 'minio',
           },
@@ -192,7 +192,7 @@ describe('DockerService.checkContainers', () => {
     expect(execa).toHaveBeenCalledWith('docker', [
       'rm',
       '-f',
-      'openroomote-postgres',
+      'roomote-legacy-postgres',
     ]);
     expect(execa).not.toHaveBeenCalledWith('docker', [
       'rm',
@@ -202,7 +202,7 @@ describe('DockerService.checkContainers', () => {
     expect(execa).toHaveBeenCalledWith('docker', [
       'rm',
       '-f',
-      'openroomote-minio',
+      'roomote-legacy-minio',
     ]);
     expect(execa).not.toHaveBeenCalledWith('docker', [
       'rm',
@@ -276,9 +276,9 @@ describe('DockerService.stopSelfHostAppContainers', () => {
         },
       },
       {
-        Names: ['/openroomote-controller'],
+        Names: ['/roomote-legacy-controller'],
         Labels: {
-          'com.docker.compose.project': 'openroomote',
+          'com.docker.compose.project': 'roomote-legacy',
           'com.docker.compose.project.working_dir': rootDir,
           'com.docker.compose.service': 'controller',
         },
@@ -317,7 +317,7 @@ describe('DockerService.stopSelfHostAppContainers', () => {
     expect(execa).toHaveBeenCalledWith('docker', [
       'rm',
       '-f',
-      'openroomote-controller',
+      'roomote-legacy-controller',
     ]);
     expect(execa).not.toHaveBeenCalledWith('docker', [
       'rm',

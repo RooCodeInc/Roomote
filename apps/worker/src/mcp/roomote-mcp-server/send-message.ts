@@ -1,12 +1,12 @@
-import { CloudTaskType, isLinkedReviewResultsMessage } from '@roomote/types';
+import { TaskPayloadKind, isLinkedReviewResultsMessage } from '@roomote/types';
 
 import { sendMessageToTask, steerMessageToTask } from './tasks-api-client.js';
 import { errorResult, successResult, catchError } from './tool-result.js';
 import type { RoomoteConfig, ToolResult } from './types.js';
 
 const REVIEW_HANDOFF_TASK_TYPES = new Set<string>([
-  CloudTaskType.GithubPrReview,
-  CloudTaskType.GithubPrReviewSync,
+  TaskPayloadKind.GithubPrReview,
+  TaskPayloadKind.GithubPrReviewSync,
 ]);
 
 function isSkippedLinkedReviewHandoffResult(
@@ -22,7 +22,7 @@ function isSkippedLinkedReviewHandoffResult(
 
 function isResumedTaskResult(
   result: unknown,
-): result is { resumed: true; cloudJobId?: number; taskId?: string } {
+): result is { resumed: true; runId?: number; taskId?: string } {
   return (
     typeof result === 'object' &&
     result !== null &&

@@ -26,7 +26,7 @@ import {
   PRODUCT_NAME,
 } from '@roomote/types';
 
-import { authenticatedProcedure, nonJobProcedure, router } from '../trpc';
+import { authenticatedProcedure, userOnlyProcedure, router } from '../trpc';
 import { resolveActorScopedUserContext } from '../lib/auth';
 
 const INTEGRATION_PROXY_MCP_IDS = new Set(
@@ -63,11 +63,9 @@ export const mcpConnectionsRouter = router({
         mcpId: z.string(),
       }),
     )
-    .query(async ({ ctx, input }) => {
-      if (!ctx.auth.userId) {
-        return false;
-      }
-
+    .query(async ({ input }) => {
+      // Deployment-scoped enablement: valid for any authenticated
+      // principal, including deployment-service-principal run tokens.
       const enablement = await db.query.deploymentMcpEnablements.findFirst({
         where: and(
           eq(deploymentMcpEnablements.mcpId, input.mcpId),
@@ -84,7 +82,7 @@ export const mcpConnectionsRouter = router({
   /**
    * Check if a connection has valid OAuth tokens
    */
-  hasValidTokens: nonJobProcedure
+  hasValidTokens: userOnlyProcedure
     .input(
       z.object({
         id: z.string().uuid(),

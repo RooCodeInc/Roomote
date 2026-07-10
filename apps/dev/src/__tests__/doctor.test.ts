@@ -485,32 +485,6 @@ describe('runDoctor', () => {
     expect(fetchedUrls).not.toContain('http://localhost:13000/sign-in');
   });
 
-  it('accepts legacy OpenRoomote service port env names', async () => {
-    mockExeca({
-      extraWebEnv: {
-        OPENROOMOTE_WEB_PORT: '13100',
-        OPENROOMOTE_API_PORT: '13101',
-        OPENROOMOTE_BULLMQ_PORT: '13102',
-        OPENROOMOTE_PREVIEW_PROXY_PORT: '18181',
-      },
-    });
-
-    await runDoctor();
-
-    const fetchedUrls = vi
-      .mocked(global.fetch)
-      .mock.calls.map(([url]) => String(url));
-
-    expect(fetchedUrls).toEqual(
-      expect.arrayContaining([
-        'http://localhost:13100/sign-in',
-        'http://localhost:13101/health/liveness',
-        'http://localhost:18181/health',
-        'http://localhost:13102/admin/health',
-      ]),
-    );
-  });
-
   it('fails when a required Docker container is missing', async () => {
     mockExeca({ containers: ['roomote-postgres'] });
 

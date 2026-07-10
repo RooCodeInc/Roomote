@@ -101,10 +101,21 @@ nav a[href='https://roomote.dev'] svg,
   margin: 0 !important;
 }
 
-.dark img.integration-logo[src^='https://api.iconify.design/simple-icons:'] {
+/*
+ * Invert monochrome dark integration/provider icons in dark mode so they stay
+ * legible against the dark sidebar and page backgrounds. This covers both the
+ * sidebar navigation icons (rendered as plain <img> with class `size-4`) and
+ * the inline `IntegrationName` logos (class `integration-logo`).
+ *
+ * Iconify Simple Icons frontmatter icons are forced to `#111827` by Mintlify,
+ * and the local `/logo/integrations/*.svg` files use `fill="#111827"`. In
+ * production Mintlify rehosts the local logos under its S3 bucket, so match
+ * with `*=` instead of `^=` to cover both dev and production URLs.
+ */
+.dark img[src^='https://api.iconify.design/simple-icons:'] {
   filter: invert(1);
 }
 
-.dark img.integration-logo[src^='/logo/integrations/'] {
+.dark img[src*='/logo/integrations/'] {
   filter: invert(1);
 }

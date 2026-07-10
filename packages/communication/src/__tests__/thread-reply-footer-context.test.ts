@@ -2,12 +2,12 @@ import { describe, expect, it, beforeEach, vi } from 'vitest';
 
 const {
   findFirstMock,
-  cloudJobFindFirstMock,
+  taskRunFindFirstMock,
   environmentFindFirstMock,
   resolveEffectivePreviewRuntimeConfigMock,
 } = vi.hoisted(() => ({
   findFirstMock: vi.fn(),
-  cloudJobFindFirstMock: vi.fn(),
+  taskRunFindFirstMock: vi.fn(),
   environmentFindFirstMock: vi.fn(),
   resolveEffectivePreviewRuntimeConfigMock: vi.fn(),
 }));
@@ -18,8 +18,8 @@ vi.mock('@roomote/db/server', () => ({
       taskPullRequests: {
         findFirst: findFirstMock,
       },
-      cloudJobs: {
-        findFirst: cloudJobFindFirstMock,
+      taskRuns: {
+        findFirst: taskRunFindFirstMock,
       },
       environments: {
         findFirst: environmentFindFirstMock,
@@ -30,7 +30,7 @@ vi.mock('@roomote/db/server', () => ({
   taskPullRequests: {
     taskId: 'taskId',
   },
-  cloudJobs: {
+  taskRuns: {
     taskId: 'taskId',
   },
   environments: {
@@ -53,10 +53,10 @@ import {
   resolveThreadReplyLinkedPr,
 } from '../thread-reply-footer-context';
 
-function mockEnvironmentBackedCloudJob(params?: {
+function mockEnvironmentBackedTaskRun(params?: {
   primaryPortName?: string | null;
 }): void {
-  cloudJobFindFirstMock.mockResolvedValue({
+  taskRunFindFirstMock.mockResolvedValue({
     payload: { environmentId: 'env-1' },
     primaryPortName: params?.primaryPortName ?? null,
   });
@@ -66,7 +66,7 @@ describe('thread reply footer context', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     findFirstMock.mockResolvedValue(null);
-    cloudJobFindFirstMock.mockResolvedValue(null);
+    taskRunFindFirstMock.mockResolvedValue(null);
     environmentFindFirstMock.mockResolvedValue(null);
     resolveEffectivePreviewRuntimeConfigMock.mockResolvedValue({
       effective: {
@@ -114,8 +114,8 @@ describe('thread reply footer context', () => {
     ).resolves.toBeNull();
   });
 
-  it('falls back to the cloud-job PR and live preview context', async () => {
-    mockEnvironmentBackedCloudJob({ primaryPortName: 'WEB' });
+  it('falls back to the task-run PR and live preview context', async () => {
+    mockEnvironmentBackedTaskRun({ primaryPortName: 'WEB' });
     environmentFindFirstMock.mockResolvedValue({
       config: {
         ports: [{ name: 'WEB', port: 3000, initial_path: '/auth/dev-login' }],
@@ -138,7 +138,7 @@ describe('thread reply footer context', () => {
   });
 
   it('omits live preview when no preview proxy base URL is available', async () => {
-    mockEnvironmentBackedCloudJob({ primaryPortName: 'WEB' });
+    mockEnvironmentBackedTaskRun({ primaryPortName: 'WEB' });
     environmentFindFirstMock.mockResolvedValue({
       config: {
         ports: [{ name: 'WEB', port: 3000 }],

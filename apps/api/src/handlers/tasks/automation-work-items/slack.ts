@@ -2,18 +2,17 @@ import { SlackNotifier } from '@roomote/slack';
 import {
   and,
   asc,
-  automationWorkItems,
-  cloudJobs,
   db,
   eq,
-  getBackgroundAgentSettingsForDeployment,
+  getAutomationRuntime,
   isNull,
-  resolveManagerSlackChannelId,
   slackInstallationChannels,
   slackInstallations,
   sql,
-  updateBackgroundAutomationRunArtifactsByTaskId,
+  taskRuns,
+  tasks,
   upsertBackgroundAutomationSlackThread,
+  workItems,
 } from '@roomote/db/server';
 
 import { buildSuggestionBadgePrefix } from '../../slack/helpers/suggestion-workspace.js';
@@ -39,11 +38,10 @@ export async function resolveAutomationSlackTarget(params: {
     return null;
   }
 
-  const settings = await getBackgroundAgentSettingsForDeployment();
-  const configuredChannelId = resolveManagerSlackChannelId(
-    settings,
-    params.slackConfig.managerChannelKind,
-  );
+  // Two-level fallback: the automation's own slack_channel target, then the
+  // shared manager channel (getAutomationRuntime resolves both levels).
+  const runtime = await getAutomationRuntime(params.slackConfig.automationKey);
+  const configuredChannelId = runtime.slackChannelId;
 
   const [channel] = configuredChannelId
     ? [{ channelId: configuredChannelId }]
@@ -84,24 +82,30 @@ export async function bindLateSlackThreadToTask(params: {
   });
 
   await db.transaction(async (tx) => {
-    const boundJobs = await tx
-      .update(cloudJobs)
+    // Channel bindings live on the tasks row now; only bind when no thread
+    // has been bound yet (first writer wins).
+    const boundTasks = await tx
+      .update(tasks)
       .set({
+        slackChannelId: params.channelId,
         slackThreadTs: params.threadTs,
-        payload: sql`coalesce(${cloudJobs.payload}, '{}'::jsonb) || ${slackThreadPayloadPatch}::jsonb`,
       })
-      .where(
-        and(
-          eq(cloudJobs.taskId, params.taskId),
-          isNull(cloudJobs.slackThreadTs),
-        ),
-      )
-      .returning({ id: cloudJobs.id });
+      .where(and(eq(tasks.id, params.taskId), isNull(tasks.slackThreadTs)))
+      .returning({ id: tasks.id });
 
     // Another reply already bound a thread for this task; keep its metadata.
-    if (boundJobs.length === 0) {
+    if (boundTasks.length === 0) {
       return;
     }
+
+    // Keep run payloads in sync for consumers that read Slack routing
+    // metadata from the payload (prompt assembly, callbacks).
+    await tx
+      .update(taskRuns)
+      .set({
+        payload: sql`coalesce(${taskRuns.payload}, '{}'::jsonb) || ${slackThreadPayloadPatch}::jsonb`,
+      })
+      .where(eq(taskRuns.taskId, params.taskId));
 
     if (!params.automationWorkItemId) {
       return;
@@ -109,22 +113,24 @@ export async function bindLateSlackThreadToTask(params: {
 
     const [automationWorkItem] = await tx
       .select({
-        automationKey: automationWorkItems.automationKey,
-        sourceTaskId: automationWorkItems.sourceTaskId,
+        automationKey: workItems.automationKey,
+        sourceTaskId: workItems.sourceTaskId,
       })
-      .from(automationWorkItems)
-      .where(and(eq(automationWorkItems.id, params.automationWorkItemId)))
+      .from(workItems)
+      .where(
+        and(
+          eq(workItems.kind, 'auto_fix'),
+          eq(workItems.id, params.automationWorkItemId),
+        ),
+      )
       .limit(1);
 
-    if (!automationWorkItem?.sourceTaskId) {
+    if (
+      !automationWorkItem?.sourceTaskId ||
+      !automationWorkItem.automationKey
+    ) {
       return;
     }
-
-    await updateBackgroundAutomationRunArtifactsByTaskId(tx, {
-      taskId: automationWorkItem.sourceTaskId,
-      slackChannelId: params.channelId,
-      threadTs: params.threadTs,
-    });
 
     await upsertBackgroundAutomationSlackThread(tx, {
       automationKey: automationWorkItem.automationKey,

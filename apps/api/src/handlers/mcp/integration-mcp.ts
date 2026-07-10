@@ -85,7 +85,7 @@ export function createIntegrationMcpProxy(
     allowAuthTokens: options?.allowAuthTokens,
     allowedToolNames: options?.allowedToolNames,
     // Integration OAuth MCPs resolve acting-user credentials directly.
-    validateCloudJobToken: async () => null,
+    validateTaskRunToken: async () => null,
     resolveCredentials: async (auth) => {
       const actingUserId = await resolveActingUserId(auth);
 

@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { CloudTaskStatus, CloudTaskType } from '@roomote/types';
-import type { CloudJob } from '@roomote/db/server';
+import { RunStatus, TaskPayloadKind } from '@roomote/types';
+import type { TaskRun } from '@roomote/db/server';
 
 const {
   mockCreateGitHubToken,
@@ -81,19 +81,23 @@ vi.mock('@roomote/db/server', () => ({
   eq: vi.fn((left: unknown, right: unknown) => ({ type: 'eq', left, right })),
 }));
 
-import { writeSourceControlPullRequestForCloudJob } from '../source-control-pull-request-writes';
+import {
+  sourceControlPullRequestWriteInputSchema,
+  writeSourceControlPullRequestForTaskRun,
+} from '../source-control-pull-request-writes';
 
-function makeCloudJob(payload: CloudJob['payload']): CloudJob {
+function makeTaskRun(payload: TaskRun['payload']): TaskRun {
   return {
     id: 123,
-    status: CloudTaskStatus.Dequeued,
-    type: CloudTaskType.StandardTask,
+    status: RunStatus.Dequeued,
+    kind: 'fresh',
+    payloadKind: TaskPayloadKind.StandardTask,
     taskId: 'task-123',
-    userId: 'user-123',
+    actingUserId: 'user-123',
     payload,
     result: null,
     artifacts: null,
-  } as CloudJob;
+  } as TaskRun;
 }
 
 function jsonResponse(body: unknown, status = 200): Response {
@@ -103,7 +107,7 @@ function jsonResponse(body: unknown, status = 200): Response {
   });
 }
 
-describe('writeSourceControlPullRequestForCloudJob', () => {
+describe('writeSourceControlPullRequestForTaskRun', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockEnvironmentsFindFirst.mockResolvedValue(null);
@@ -129,8 +133,8 @@ describe('writeSourceControlPullRequestForCloudJob', () => {
       .fn()
       .mockResolvedValueOnce(jsonResponse({ id: 501 }, 201));
 
-    const result = await writeSourceControlPullRequestForCloudJob({
-      cloudJob: makeCloudJob({
+    const result = await writeSourceControlPullRequestForTaskRun({
+      taskRun: makeTaskRun({
         repo: 'acme/backend',
         sourceControlProvider: 'gitlab',
       }),
@@ -177,8 +181,8 @@ describe('writeSourceControlPullRequestForCloudJob', () => {
       .fn()
       .mockResolvedValueOnce(jsonResponse({ id: 'abc123' }));
 
-    const result = await writeSourceControlPullRequestForCloudJob({
-      cloudJob: makeCloudJob({
+    const result = await writeSourceControlPullRequestForTaskRun({
+      taskRun: makeTaskRun({
         repo: 'acme/backend',
         sourceControlProvider: 'gitlab',
       }),
@@ -222,8 +226,8 @@ describe('writeSourceControlPullRequestForCloudJob', () => {
       .fn()
       .mockResolvedValueOnce(jsonResponse({ id: 20, status: 'fixed' }));
 
-    const result = await writeSourceControlPullRequestForCloudJob({
-      cloudJob: makeCloudJob({
+    const result = await writeSourceControlPullRequestForTaskRun({
+      taskRun: makeTaskRun({
         repo: 'acme/Platform/backend',
         sourceControlProvider: 'ado',
       }),
@@ -273,8 +277,8 @@ describe('writeSourceControlPullRequestForCloudJob', () => {
       )
       .mockResolvedValueOnce(jsonResponse({ vote: 10 }));
 
-    const result = await writeSourceControlPullRequestForCloudJob({
-      cloudJob: makeCloudJob({
+    const result = await writeSourceControlPullRequestForTaskRun({
+      taskRun: makeTaskRun({
         repo: 'acme/Platform/backend',
         sourceControlProvider: 'ado',
       }),
@@ -327,8 +331,8 @@ describe('writeSourceControlPullRequestForCloudJob', () => {
     });
     const fetchImpl = vi.fn();
 
-    const result = await writeSourceControlPullRequestForCloudJob({
-      cloudJob: makeCloudJob({
+    const result = await writeSourceControlPullRequestForTaskRun({
+      taskRun: makeTaskRun({
         repo: 'acme/backend',
         sourceControlProvider: 'gitea',
       }),
@@ -374,8 +378,8 @@ describe('writeSourceControlPullRequestForCloudJob', () => {
       rest: { pulls: { createReview } },
     });
 
-    const result = await writeSourceControlPullRequestForCloudJob({
-      cloudJob: makeCloudJob({
+    const result = await writeSourceControlPullRequestForTaskRun({
+      taskRun: makeTaskRun({
         repo: 'acme/backend',
         sourceControlProvider: 'github',
       }),
@@ -420,8 +424,8 @@ describe('writeSourceControlPullRequestForCloudJob', () => {
     });
     const fetchImpl = vi.fn().mockResolvedValueOnce(jsonResponse({ id: 501 }));
 
-    const result = await writeSourceControlPullRequestForCloudJob({
-      cloudJob: makeCloudJob({
+    const result = await writeSourceControlPullRequestForTaskRun({
+      taskRun: makeTaskRun({
         repo: 'acme/backend',
         sourceControlProvider: 'gitlab',
       }),
@@ -466,8 +470,8 @@ describe('writeSourceControlPullRequestForCloudJob', () => {
     const fetchImpl = vi.fn();
 
     await expect(
-      writeSourceControlPullRequestForCloudJob({
-        cloudJob: makeCloudJob({
+      writeSourceControlPullRequestForTaskRun({
+        taskRun: makeTaskRun({
           repo: 'acme/Platform/backend',
           sourceControlProvider: 'ado',
         }),
@@ -509,8 +513,8 @@ describe('writeSourceControlPullRequestForCloudJob', () => {
       },
     });
 
-    const result = await writeSourceControlPullRequestForCloudJob({
-      cloudJob: makeCloudJob({
+    const result = await writeSourceControlPullRequestForTaskRun({
+      taskRun: makeTaskRun({
         repo: 'acme/backend',
         sourceControlProvider: 'github',
       }),
@@ -544,12 +548,130 @@ describe('writeSourceControlPullRequestForCloudJob', () => {
     });
   });
 
+  it('treats blank threadId as omitted and updates a GitHub issue comment', async () => {
+    mockRepositoriesFindFirst.mockResolvedValue({
+      installationId: 'installation-1',
+      externalRepoId: null,
+      fullName: 'acme/backend',
+      htmlUrl: 'https://github.com/acme/backend',
+    });
+    mockCreateGitHubToken.mockResolvedValue('github-token');
+    const updateComment = vi.fn().mockResolvedValue({
+      data: {
+        id: 4921152017,
+        html_url:
+          'https://github.com/acme/backend/pull/16#issuecomment-4921152017',
+      },
+    });
+    const updateReviewComment = vi.fn();
+    mockGetOctokit.mockReturnValue({
+      rest: {
+        issues: { updateComment },
+        pulls: { updateReviewComment },
+      },
+    });
+
+    const parsedInput = sourceControlPullRequestWriteInputSchema.parse({
+      action: 'update_pull_request_comment',
+      repositoryFullName: 'acme/backend',
+      prNumber: 16,
+      commentId: '4921152017',
+      threadId: '   ',
+      body: 'Updated top-level summary.',
+      sourceControlProvider: 'github',
+    });
+    expect(parsedInput.threadId).toBeUndefined();
+
+    const result = await writeSourceControlPullRequestForTaskRun({
+      taskRun: makeTaskRun({
+        repo: 'acme/backend',
+        sourceControlProvider: 'github',
+      }),
+      input: parsedInput,
+    });
+
+    expect(updateComment).toHaveBeenCalledWith({
+      owner: 'acme',
+      repo: 'backend',
+      comment_id: 4921152017,
+      body: 'Updated top-level summary.',
+    });
+    expect(updateReviewComment).not.toHaveBeenCalled();
+    expect(result).toMatchObject({
+      success: true,
+      action: 'update_pull_request_comment',
+      provider: 'github',
+      number: 16,
+      threadId: null,
+      commentId: '4921152017',
+      applied: true,
+      warnings: [],
+    });
+  });
+
+  it('updates a GitHub review comment when a real threadId is provided', async () => {
+    mockRepositoriesFindFirst.mockResolvedValue({
+      installationId: 'installation-1',
+      externalRepoId: null,
+      fullName: 'acme/backend',
+      htmlUrl: 'https://github.com/acme/backend',
+    });
+    mockCreateGitHubToken.mockResolvedValue('github-token');
+    const updateComment = vi.fn();
+    const updateReviewComment = vi.fn().mockResolvedValue({
+      data: {
+        id: 888,
+        html_url: 'https://github.com/acme/backend/pull/55#discussion_r888',
+      },
+    });
+    mockGetOctokit.mockReturnValue({
+      rest: {
+        issues: { updateComment },
+        pulls: { updateReviewComment },
+      },
+    });
+
+    const result = await writeSourceControlPullRequestForTaskRun({
+      taskRun: makeTaskRun({
+        repo: 'acme/backend',
+        sourceControlProvider: 'github',
+      }),
+      input: {
+        action: 'update_pull_request_comment',
+        repositoryFullName: 'acme/backend',
+        prNumber: 55,
+        commentId: '888',
+        threadId: 'PRRT_kwDOrealThread',
+        body: 'Updated review thread reply.',
+        sourceControlProvider: 'github',
+      },
+    });
+
+    expect(updateReviewComment).toHaveBeenCalledWith({
+      owner: 'acme',
+      repo: 'backend',
+      comment_id: 888,
+      body: 'Updated review thread reply.',
+    });
+    expect(updateComment).not.toHaveBeenCalled();
+    expect(result).toMatchObject({
+      success: true,
+      action: 'update_pull_request_comment',
+      provider: 'github',
+      number: 55,
+      threadId: 'PRRT_kwDOrealThread',
+      commentId: '888',
+      applied: true,
+      warnings: [],
+    });
+  });
+
   it('rejects update requests without a commentId before touching the database', async () => {
     const fetchImpl = vi.fn();
 
     await expect(
-      writeSourceControlPullRequestForCloudJob({
-        cloudJob: makeCloudJob({
+      writeSourceControlPullRequestForTaskRun({
+        taskRun: makeTaskRun({
           repo: 'acme/backend',
           sourceControlProvider: 'github',
         }),
@@ -571,8 +693,8 @@ describe('writeSourceControlPullRequestForCloudJob', () => {
     const fetchImpl = vi.fn();
 
     await expect(
-      writeSourceControlPullRequestForCloudJob({
-        cloudJob: makeCloudJob({
+      writeSourceControlPullRequestForTaskRun({
+        taskRun: makeTaskRun({
           repo: 'acme/backend',
           sourceControlProvider: 'github',
         }),

@@ -2,11 +2,11 @@ import { Job } from 'bullmq';
 
 import {
   and,
-  cloudJobs,
   db,
   eq,
   slackInstallations,
   slackUserMappings,
+  tasks,
 } from '@roomote/db/server';
 import {
   type SlackAccountLinkEducationRequest,
@@ -87,10 +87,10 @@ export const slackAccountLinkEducationJob = async (
     return;
   }
 
-  const hasQuestionTask = await db.query.cloudJobs.findFirst({
+  const hasQuestionTask = await db.query.tasks.findFirst({
     where: and(
-      eq(cloudJobs.userId, data.userId),
-      eq(cloudJobs.requestedWorkKind, 'question'),
+      eq(tasks.initiatorUserId, data.userId),
+      eq(tasks.requestedWorkKind, 'question'),
     ),
     columns: { id: true },
   });

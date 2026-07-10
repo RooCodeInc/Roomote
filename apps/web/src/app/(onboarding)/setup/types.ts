@@ -40,11 +40,11 @@ const SETUP_STEP_DEFINITIONS = [
   },
   {
     id: 'compute-provider',
-    title: 'Sandbox compute provider',
+    title: 'Sandbox provider',
   },
   {
     id: 'compute-config',
-    title: 'Configure sandbox compute',
+    title: 'Configure sandboxes',
   },
   {
     id: 'slack',

@@ -15,7 +15,7 @@ import {
   resolveGitLabBaseUrl,
   resolveGitLabToken,
 } from '@roomote/gitlab';
-import { type CloudJob } from '@roomote/db/server';
+import { type TaskRun } from '@roomote/db/server';
 import {
   getSourceControlProviderLabel,
   resolveSourceControlProviderFromPayload,
@@ -24,7 +24,7 @@ import {
 } from '@roomote/types';
 import { z } from 'zod';
 import {
-  assertRepositoryInCloudJobScope,
+  assertRepositoryInTaskRunScope,
   buildAdoBasicAuthHeader,
   buildApiUrl,
   formatResponseBody,
@@ -37,6 +37,23 @@ import {
 } from './source-control-pull-request-shared';
 
 const ADO_API_VERSION = '7.1';
+
+/**
+ * Optional id fields from LLM/tool clients often arrive as `""` or whitespace
+ * when the model "omits" them. Coerce blank values to undefined so they do not
+ * fail min-length validation or get mistreated as present (e.g. GitHub update
+ * routes review-thread vs top-level issue comments based on threadId).
+ */
+const optionalTrimmedNonEmptyStringSchema = z.preprocess((value) => {
+  if (value === null || value === undefined) {
+    return undefined;
+  }
+  if (typeof value !== 'string') {
+    return value;
+  }
+  const trimmed = value.trim();
+  return trimmed.length === 0 ? undefined : trimmed;
+}, z.string().min(1).optional());
 
 export const sourceControlPullRequestWriteInputSchema = z.object({
   action: z.enum([
@@ -53,13 +70,17 @@ export const sourceControlPullRequestWriteInputSchema = z.object({
    * schema). Thread ids match what the read surface returns per provider:
    * GitHub review thread GraphQL node ids, GitLab discussion ids, ADO
    * String(thread.id), Gitea String(review.id).
+   *
+   * For update_pull_request_comment on GitHub: omit (or leave blank) for
+   * top-level issue comments; pass the review thread id only for
+   * review-thread comments.
    */
-  threadId: z.string().trim().min(1).optional(),
+  threadId: optionalTrimmedNonEmptyStringSchema,
   /**
    * Required for update_pull_request_comment: the comment id from
    * list_pull_request_comments or a prior write result.
    */
-  commentId: z.string().trim().min(1).optional(),
+  commentId: optionalTrimmedNonEmptyStringSchema,
   /** Required for reply, create_comment, and update_comment; optional for review. */
   body: z.string().optional(),
   /** Required for resolve_pull_request_thread: true resolves, false reopens. */
@@ -186,19 +207,22 @@ const adoReviewerVoteSchema = z
   .object({ vote: z.number().optional() })
   .passthrough();
 
-export async function writeSourceControlPullRequestForCloudJob({
-  cloudJob,
-  input,
+export async function writeSourceControlPullRequestForTaskRun({
+  taskRun,
+  input: rawInput,
   fetchImpl = fetch,
 }: {
-  cloudJob: CloudJob;
+  taskRun: TaskRun;
   input: SourceControlPullRequestWriteInput;
   fetchImpl?: FetchImpl;
 }): Promise<SourceControlPullRequestWriteResult> {
+  // Defense in depth: blank/whitespace optional ids must never look "present"
+  // even if a caller skips sourceControlPullRequestWriteInputSchema.
+  const input = normalizeOptionalWriteIds(rawInput);
   assertWriteInputFields(input);
 
   const payloadProvider = resolveSourceControlProviderFromPayload(
-    getPayloadRecord(cloudJob.payload),
+    getPayloadRecord(taskRun.payload),
   );
   const provider = input.sourceControlProvider ?? payloadProvider;
 
@@ -210,7 +234,7 @@ export async function writeSourceControlPullRequestForCloudJob({
     );
   }
 
-  await assertRepositoryInCloudJobScope(cloudJob, input.repositoryFullName);
+  await assertRepositoryInTaskRunScope(taskRun, input.repositoryFullName);
 
   const repository = await resolveRepositoryRow({
     provider,
@@ -232,6 +256,25 @@ export async function writeSourceControlPullRequestForCloudJob({
     case 'ado':
       return writeAdoPullRequest({ input, repository, provider, fetchImpl });
   }
+}
+
+function normalizeOptionalWriteIds(
+  input: SourceControlPullRequestWriteInput,
+): SourceControlPullRequestWriteInput {
+  return {
+    ...input,
+    threadId: blankToUndefined(input.threadId),
+    commentId: blankToUndefined(input.commentId),
+  };
+}
+
+function blankToUndefined(value: string | undefined): string | undefined {
+  if (value === undefined) {
+    return undefined;
+  }
+
+  const trimmed = value.trim();
+  return trimmed.length === 0 ? undefined : trimmed;
 }
 
 function assertWriteInputFields(

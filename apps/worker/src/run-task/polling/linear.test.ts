@@ -25,7 +25,7 @@ const {
 
 vi.mock('@roomote/sdk/client', () => ({
   sdk: {
-    cloudJobs: {
+    taskRuns: {
       getLinearMessages: mockGetLinearMessages,
       getLinearRequestUserInputAnswers: mockGetLinearRequestUserInputAnswers,
       queueLinearMessage: mockQueueLinearMessage,
@@ -46,7 +46,7 @@ vi.mock('../../monitoring/sentry', () => ({
 
 function createLogger(): HarnessLogger {
   return {
-    cloudJobId: 42,
+    runId: 42,
     filePath: '/tmp/harness.log',
     log: vi.fn(),
     info: vi.fn(),
@@ -109,9 +109,9 @@ function createListenerOptions(overrides?: {
     answerUserInputRequest,
     prepareActorScopedTurn,
     options: {
-      cloudJob: {
+      taskRun: {
         id: 42,
-      } as ListenerOptions['cloudJob'],
+      } as ListenerOptions['taskRun'],
       state,
       logger: createLogger(),
       workingDirectory: '/tmp/workspace',
@@ -135,7 +135,11 @@ describe('createLinearMessageInterval', () => {
     mockGetLinearRequestUserInputAnswers.mockResolvedValue([]);
     mockQueueLinearRequestUserInputAnswer.mockResolvedValue(undefined);
     mockQueueLinearMessage.mockResolvedValue(undefined);
-    mockPrepareActorScopedTurn.mockResolvedValue(undefined);
+    mockPrepareActorScopedTurn.mockImplementation(
+      async (targetUserId?: string) => ({
+        effectiveUserId: targetUserId ?? null,
+      }),
+    );
     mockPrependLinearMessages.mockResolvedValue(undefined);
     mockPrependLinearRequestUserInputAnswers.mockResolvedValue(undefined);
     process.env.TRPC_URL = 'http://127.0.0.1:3001';
@@ -241,6 +245,7 @@ describe('createLinearMessageInterval', () => {
       expect(prepareActorScopedTurn).toHaveBeenNthCalledWith(1, 'user-2');
       expect(prepareActorScopedTurn).toHaveBeenNthCalledWith(2, 'user-2', {
         allowMcpReconnect: false,
+        onMismatch: 'skip',
       });
       expect(answerUserInputRequest.mock.invocationCallOrder[0]).toBeLessThan(
         sendPrompt.mock.invocationCallOrder[0]!,
@@ -252,7 +257,7 @@ describe('createLinearMessageInterval', () => {
         userId: 'user-2',
       });
       expect(mockGetLinearMessages).toHaveBeenCalledWith({
-        cloudJobId: 42,
+        runId: 42,
       });
     } finally {
       clearInterval(interval);
@@ -271,9 +276,9 @@ describe('createLinearMessageInterval', () => {
 
       expect(mockCaptureWorkerException).toHaveBeenCalledWith(fetchError, {
         stage: 'listenForLinearEvents',
-        cloudJobId: 42,
+        runId: 42,
         harnessSessionId: 'task-1',
-        sdkMethod: 'cloudJobs.getLinearMessages',
+        sdkMethod: 'taskRuns.getLinearMessages',
         failurePoint: 'queuedLinearMessages',
         trpcUrlOrigin: 'http://127.0.0.1:3001',
         trpcHostname: '127.0.0.1',
@@ -286,9 +291,9 @@ describe('createLinearMessageInterval', () => {
         fetchError,
         {
           stage: 'listenForLinearEvents',
-          cloudJobId: 42,
+          runId: 42,
           harnessSessionId: 'task-1',
-          sdkMethod: 'cloudJobs.getLinearMessages',
+          sdkMethod: 'taskRuns.getLinearMessages',
           failurePoint: 'queuedLinearMessages',
           trpcUrlOrigin: 'http://127.0.0.1:3001',
           trpcHostname: '127.0.0.1',
@@ -610,6 +615,7 @@ describe('createLinearMessageInterval', () => {
 
       expect(prepareActorScopedTurn).toHaveBeenCalledWith('user-2', {
         allowMcpReconnect: true,
+        onMismatch: 'skip',
       });
     } finally {
       clearInterval(interval);
@@ -667,6 +673,7 @@ describe('createLinearMessageInterval', () => {
 
       expect(prepareActorScopedTurn).toHaveBeenCalledWith('user-2', {
         allowMcpReconnect: true,
+        onMismatch: 'skip',
       });
     } finally {
       clearInterval(interval);

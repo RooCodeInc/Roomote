@@ -23,6 +23,7 @@ interface StartOpenCodeServerHarnessOptions {
   beforeQueuedPrompt?: (input: { userId?: string }) => Promise<void | {
     shouldReconnect: boolean;
     shouldBlockPrompt?: boolean;
+    shouldSkipPrompt?: boolean;
     reason?: string;
   }>;
 }
@@ -278,11 +279,11 @@ export async function startOpenCodeServerHarness({
       commandEnv,
       initialSessionId,
       model,
-      subagentTaskTimeoutMs: parseTimeoutMs(
-        process.env.ROOMOTE_SUBAGENT_TASK_TIMEOUT_MS,
+      stopHookReminderStallTimeoutMs: parseTimeoutMs(
+        process.env.ROOMOTE_STOP_HOOK_REMINDER_STALL_TIMEOUT_MS,
       ),
-      subagentTaskInactivityTimeoutMs: parseTimeoutMs(
-        process.env.ROOMOTE_SUBAGENT_TASK_INACTIVITY_TIMEOUT_MS,
+      subagentSettlementGraceMs: parseTimeoutMs(
+        process.env.ROOMOTE_SUBAGENT_SETTLEMENT_GRACE_MS,
       ),
       mcpServerNames: Object.keys(mcpServers),
       beforeQueuedPrompt,

@@ -133,7 +133,6 @@ export async function getSlackChannelAccessWarnings({
   notifier,
   channelAutoStartSlackChannelIds,
   managerStatsSlackChannelId,
-  coachSlackChannelId,
   suggesterSlackChannelId,
   announcerSlackChannelId,
   platformIssueSlackChannelId,
@@ -146,7 +145,6 @@ export async function getSlackChannelAccessWarnings({
   notifier: SlackNotifier | null;
   channelAutoStartSlackChannelIds: string[];
   managerStatsSlackChannelId: string | null;
-  coachSlackChannelId: string | null;
   suggesterSlackChannelId: string | null;
   announcerSlackChannelId: string | null;
   platformIssueSlackChannelId: string | null;
@@ -161,7 +159,6 @@ export async function getSlackChannelAccessWarnings({
       channelAutoStartSlackChannels: [],
       managerSlackChannel: null,
       managerStatsSlackChannel: null,
-      coachSlackChannel: null,
       suggesterSlackChannel: null,
       announcerSlackChannel: null,
       platformIssueSlackChannel: null,
@@ -176,7 +173,6 @@ export async function getSlackChannelAccessWarnings({
   const channelIds = [
     ...channelAutoStartSlackChannelIds,
     managerStatsSlackChannelId,
-    coachSlackChannelId,
     suggesterSlackChannelId,
     announcerSlackChannelId,
     platformIssueSlackChannelId,
@@ -207,11 +203,6 @@ export async function getSlackChannelAccessWarnings({
       managerStatsSlackChannelId &&
       membershipByChannelId.get(managerStatsSlackChannelId) !== true
         ? managerStatsSlackChannelId
-        : null,
-    coachSlackChannel:
-      coachSlackChannelId &&
-      membershipByChannelId.get(coachSlackChannelId) !== true
-        ? coachSlackChannelId
         : null,
     suggesterSlackChannel:
       suggesterSlackChannelId &&
@@ -259,8 +250,8 @@ export async function getSlackChannelAccessWarnings({
 export async function getSlackChannelDisplayNames({
   notifier,
   channelAutoStartSlackChannelIds,
+  managerSlackChannelId,
   managerStatsSlackChannelId,
-  coachSlackChannelId,
   suggesterSlackChannelId,
   announcerSlackChannelId,
   platformIssueSlackChannelId,
@@ -272,8 +263,8 @@ export async function getSlackChannelDisplayNames({
 }: {
   notifier: SlackNotifier | null;
   channelAutoStartSlackChannelIds: string[];
+  managerSlackChannelId: string | null;
   managerStatsSlackChannelId: string | null;
-  coachSlackChannelId: string | null;
   suggesterSlackChannelId: string | null;
   announcerSlackChannelId: string | null;
   platformIssueSlackChannelId: string | null;
@@ -288,7 +279,6 @@ export async function getSlackChannelDisplayNames({
       channelAutoStartSlackChannels: {},
       managerSlackChannel: null,
       managerStatsSlackChannel: null,
-      coachSlackChannel: null,
       suggesterSlackChannel: null,
       announcerSlackChannel: null,
       platformIssueSlackChannel: null,
@@ -303,8 +293,8 @@ export async function getSlackChannelDisplayNames({
   const uniqueChannelIds = [...new Set(channelAutoStartSlackChannelIds)];
   const [
     channelAutoStartChannelNames,
+    managerSlackChannel,
     managerStatsSlackChannel,
-    coachSlackChannel,
     suggesterSlackChannel,
     announcerSlackChannel,
     platformIssueSlackChannel,
@@ -320,11 +310,11 @@ export async function getSlackChannelDisplayNames({
         await notifier.getChannelName(channelId),
       ]),
     ),
+    managerSlackChannelId
+      ? notifier.getChannelName(managerSlackChannelId)
+      : Promise.resolve(null),
     managerStatsSlackChannelId
       ? notifier.getChannelName(managerStatsSlackChannelId)
-      : Promise.resolve(null),
-    coachSlackChannelId
-      ? notifier.getChannelName(coachSlackChannelId)
       : Promise.resolve(null),
     suggesterSlackChannelId
       ? notifier.getChannelName(suggesterSlackChannelId)
@@ -359,11 +349,10 @@ export async function getSlackChannelDisplayNames({
         channelName ? `#${channelName}` : null,
       ]),
     ),
-    managerSlackChannel: null,
+    managerSlackChannel: managerSlackChannel ? `#${managerSlackChannel}` : null,
     managerStatsSlackChannel: managerStatsSlackChannel
       ? `#${managerStatsSlackChannel}`
       : null,
-    coachSlackChannel: coachSlackChannel ? `#${coachSlackChannel}` : null,
     suggesterSlackChannel: suggesterSlackChannel
       ? `#${suggesterSlackChannel}`
       : null,

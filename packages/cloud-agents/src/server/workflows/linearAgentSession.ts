@@ -1,5 +1,5 @@
 import { type LinearAgentSessionTask, type PrAction } from '@roomote/types';
-import type { ResolvedTaskAttributionDisplay } from '@roomote/db/server';
+import type { ResolvedTaskCommitAuthor } from '../commit-author';
 
 import { standardTask } from './standardTask';
 
@@ -55,20 +55,20 @@ function formatLinearIssueContext({
  * workflow with Linear-specific issue context prepended to the request.
  */
 export async function linearAgentSession({
-  cloudTask,
+  taskSpec,
   repoFullNames,
   conflictResolverLabel,
-  cloudJobUrl,
+  taskRunUrl,
   attribution = undefined,
   visualProofAutoScreencastEnabled,
   backgroundProofCaptureEnabled,
   prAction,
 }: {
-  cloudTask: LinearAgentSessionTask;
+  taskSpec: LinearAgentSessionTask;
   repoFullNames?: string[];
   conflictResolverLabel?: string;
-  cloudJobUrl: string;
-  attribution?: ResolvedTaskAttributionDisplay;
+  taskRunUrl: string;
+  attribution?: ResolvedTaskCommitAuthor;
   visualProofAutoScreencastEnabled?: boolean;
   backgroundProofCaptureEnabled?: boolean;
   prAction?: PrAction;
@@ -86,7 +86,7 @@ export async function linearAgentSession({
     previousComments,
     guidance,
     repo,
-  } = cloudTask.payload;
+  } = taskSpec.payload;
 
   // Build task description from issue title and additional context
   const issueContext = formatLinearIssueContext({
@@ -112,9 +112,9 @@ export async function linearAgentSession({
     repoFullNames,
     taskSurface: 'linear',
     conflictResolverLabel,
-    cloudJobUrl,
+    taskRunUrl,
     attribution,
-    linkedWorkItems: cloudTask.payload.linkedWorkItems,
+    linkedWorkItems: taskSpec.payload.linkedWorkItems,
     visualProofAutoScreencastEnabled,
     backgroundProofCaptureEnabled,
     prAction,

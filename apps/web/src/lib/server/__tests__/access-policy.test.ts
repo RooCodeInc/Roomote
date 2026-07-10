@@ -44,6 +44,8 @@ vi.mock('@roomote/db/server', () => ({
   },
   eq: vi.fn(),
   isNull: vi.fn(),
+  ne: vi.fn(),
+  not: vi.fn(),
   slackInstallations: { teamId: 'team_id', isActive: 'is_active' },
   users: { id: 'users.id' },
 }));
@@ -158,6 +160,7 @@ describe('evaluateSignInAccess', () => {
   });
 
   it('admits existing members', async () => {
+    queueWhereLimitSelect([{ id: 'other-user' }]); // hasAnyOtherRealAppUser
     queueWhereLimitSelect([{ id: 'user-1' }]); // hasExistingAppUser
 
     await expect(
@@ -166,6 +169,7 @@ describe('evaluateSignInAccess', () => {
   });
 
   it('admits slack users from the anchored workspace', async () => {
+    queueWhereLimitSelect([{ id: 'founding-user' }]); // hasAnyOtherRealAppUser
     queueWhereLimitSelect([]); // hasExistingAppUser -> none
     queueWhereSelect([
       {
@@ -181,6 +185,7 @@ describe('evaluateSignInAccess', () => {
   });
 
   it('admits microsoft users because the tenant is enforced at OAuth', async () => {
+    queueWhereLimitSelect([{ id: 'founding-user' }]); // hasAnyOtherRealAppUser
     queueWhereLimitSelect([]); // hasExistingAppUser
     queueWhereSelect([
       { providerId: 'microsoft-entra-id', idToken: fakeJwt({ tid: 't' }) },
@@ -192,12 +197,23 @@ describe('evaluateSignInAccess', () => {
     ).resolves.toEqual({ allowed: true, via: 'org_membership' });
   });
 
+  it('treats a setup-token Microsoft sign-in as bootstrap before org membership', async () => {
+    mockEnvState.SETUP_TOKEN = 'setup-secret';
+    mockInviteState.requestToken = 'setup-secret';
+    mockSetupBootstrapState.open = true;
+
+    await expect(
+      evaluateSignInAccess({ userId: 'user-2', email: 'admin@example.com' }),
+    ).resolves.toEqual({ allowed: true, via: 'bootstrap' });
+    expect(mockDbSelect).not.toHaveBeenCalled();
+  });
+
   it('admits invite holders and reports the invite id', async () => {
     mockInviteState.requestToken = 'invite-token';
     mockInviteState.usableInvite = { id: 'invite-1' };
 
+    queueWhereLimitSelect([{ id: 'founding-user' }]); // hasAnyOtherRealAppUser
     queueWhereLimitSelect([]); // hasExistingAppUser
-    queueWhereSelect([]); // accounts (none)
 
     await expect(
       evaluateSignInAccess({ userId: 'user-3', email: 'new@example.com' }),
@@ -258,12 +274,21 @@ describe('evaluateSignInAccess', () => {
 
   it('admits the first sign-in in local development when no setup token is configured', async () => {
     vi.stubEnv('APP_ENV', 'development');
-    queueWhereLimitSelect([]); // hasExistingAppUser
-    queueWhereSelect([]); // accounts
+    queueWhereLimitSelect([]); // hasAnyOtherRealAppUser
 
     await expect(
       evaluateSignInAccess({ userId: 'user-1', email: 'dev@example.com' }),
     ).resolves.toEqual({ allowed: true, via: 'bootstrap' });
+  });
+
+  it('treats local tokenless Microsoft setup as bootstrap before org membership', async () => {
+    vi.stubEnv('APP_ENV', 'development');
+    queueWhereLimitSelect([]); // hasAnyOtherRealAppUser
+
+    await expect(
+      evaluateSignInAccess({ userId: 'user-2', email: 'admin@example.com' }),
+    ).resolves.toEqual({ allowed: true, via: 'bootstrap' });
+    expect(mockDbSelect).toHaveBeenCalledTimes(1);
   });
 
   it('denies the first sign-in on a non-local deployment when no setup token is configured', async () => {

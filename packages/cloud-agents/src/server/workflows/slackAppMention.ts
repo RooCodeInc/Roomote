@@ -1,13 +1,11 @@
 import {
   type SlackAppMentionTask,
-  getGitHubAppMention,
   getSlackConversationUrlFromTaskPayload,
   getSlackTeamDomainFromTaskPayload,
   getSlackTeamIdFromTaskPayload,
   type PrAction,
 } from '@roomote/types';
-import type { ResolvedTaskAttributionDisplay } from '@roomote/db/server';
-import { Env } from '@roomote/env';
+import type { ResolvedTaskCommitAuthor } from '../commit-author';
 import {
   stripLeadingSlackProductMention,
   wrapSlackMessage,
@@ -17,10 +15,6 @@ import {
 import { formatSlackThreadContext } from './utils';
 
 import { standardTask } from './standardTask';
-
-const slackAppMentionHandle = getGitHubAppMention(
-  Env.NEXT_PUBLIC_GITHUB_APP_SLUG || 'roomote',
-);
 
 export function buildSlackMessageInstructions({
   includeRequestUserInputGuidance = false,
@@ -40,7 +34,7 @@ export function buildSlackMessageInstructions({
     <rule>When present, the \`<replying_to>\` block highlights the most recent earlier Slack reply that the user is responding to, often the bot's latest Slack message. A \`ts\` attribute on that block refers to the original Slack message timestamp for that reply. Treat it as the immediate message the latest user turn is answering.</rule>
     <rule>When present, the \`<slack_turn_policy ...>...</slack_turn_policy>\` block is the source of truth for whether emoji reactions are allowed on the current Slack message and whether a lightweight acknowledgement should prefer an emoji reaction.</rule>
     <rule>The \`<slack_message>\` block contains the user's current message. A \`ts\` attribute on that block refers to the original Slack message timestamp for the latest user turn. This is what they're asking you to do.</rule>
-    <rule>Slack messages may start with \`${slackAppMentionHandle}\` or a similar bot mention used only to invoke the task. Treat that mention as invocation noise, not part of the user's request.</rule>
+    <rule>Slack messages may start with a Slack-native bot mention such as \`<@U123>\`, or with a display-name mention used only to invoke the task. Treat that mention as invocation noise, not part of the user's request.</rule>
   </slack_input_format>
 
   <slack_thread_activity>
@@ -237,21 +231,21 @@ function formatWorkspaceReadinessContext({
  * plus Slack-specific wrapping instructions.
  */
 export async function slackAppMention({
-  cloudTask,
+  taskSpec,
   repoFullNames,
   conflictResolverLabel,
-  cloudJobUrl,
+  taskRunUrl,
   attribution = undefined,
   username: _legacyUsername,
   visualProofAutoScreencastEnabled,
   backgroundProofCaptureEnabled,
   prAction,
 }: {
-  cloudTask: SlackAppMentionTask;
+  taskSpec: SlackAppMentionTask;
   repoFullNames?: string[];
   conflictResolverLabel?: string;
-  cloudJobUrl: string;
-  attribution?: ResolvedTaskAttributionDisplay;
+  taskRunUrl: string;
+  attribution?: ResolvedTaskCommitAuthor;
   username?: string;
   visualProofAutoScreencastEnabled?: boolean;
   backgroundProofCaptureEnabled?: boolean;
@@ -271,7 +265,7 @@ export async function slackAppMention({
     ts,
     workspaceReadiness,
     readinessMessage,
-  } = cloudTask.payload;
+  } = taskSpec.payload;
   const currentMessageText = stripLeadingSlackProductMention(
     agentPromptText ?? text,
   );
@@ -313,16 +307,16 @@ export async function slackAppMention({
     repoFullNames,
     taskSurface: 'slack',
     conflictResolverLabel,
-    cloudJobUrl,
+    taskRunUrl,
     attribution,
     slackTeamDomain:
-      getSlackTeamDomainFromTaskPayload(cloudTask.payload) ?? undefined,
-    slackTeamId: getSlackTeamIdFromTaskPayload(cloudTask.payload) ?? undefined,
+      getSlackTeamDomainFromTaskPayload(taskSpec.payload) ?? undefined,
+    slackTeamId: getSlackTeamIdFromTaskPayload(taskSpec.payload) ?? undefined,
     slackConversationUrl:
-      getSlackConversationUrlFromTaskPayload(cloudTask.payload) ?? undefined,
-    slackChannel: cloudTask.payload.channel,
-    slackThreadTs: cloudTask.payload.thread_ts ?? cloudTask.payload.ts,
-    linkedWorkItems: cloudTask.payload.linkedWorkItems,
+      getSlackConversationUrlFromTaskPayload(taskSpec.payload) ?? undefined,
+    slackChannel: taskSpec.payload.channel,
+    slackThreadTs: taskSpec.payload.thread_ts ?? taskSpec.payload.ts,
+    linkedWorkItems: taskSpec.payload.linkedWorkItems,
     visualProofAutoScreencastEnabled,
     backgroundProofCaptureEnabled,
     prAction,

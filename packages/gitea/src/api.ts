@@ -6,7 +6,7 @@ import {
   type SourceControlProvider,
 } from '@roomote/types';
 import {
-  type CloudJob,
+  type TaskRun,
   db,
   environments,
   repositories,
@@ -469,17 +469,17 @@ function normalizeRepositorySelection(repositoryNames: string[]): string[] {
   return [...new Set(repositoryNames.filter(Boolean))];
 }
 
-async function resolveGiteaRepositoryNamesForCloudJob(
-  cloudJob: CloudJob,
+async function resolveGiteaRepositoryNamesForTaskRun(
+  taskRun: TaskRun,
 ): Promise<string[] | null> {
-  if (cloudJob.payload.environmentId) {
+  if (taskRun.payload.environmentId) {
     const environment = await db.query.environments.findFirst({
-      where: eq(environments.id, cloudJob.payload.environmentId),
+      where: eq(environments.id, taskRun.payload.environmentId),
     });
 
     if (!environment) {
       throw new Error(
-        `Environment not found for cloud job ${cloudJob.id}: ${cloudJob.payload.environmentId}`,
+        `Environment not found for task run ${taskRun.id}: ${taskRun.payload.environmentId}`,
       );
     }
 
@@ -490,9 +490,9 @@ async function resolveGiteaRepositoryNamesForCloudJob(
     );
   }
 
-  if (Array.isArray(cloudJob.payload.selectedRepositories)) {
+  if (Array.isArray(taskRun.payload.selectedRepositories)) {
     const selectedRepositories = normalizeRepositorySelection(
-      cloudJob.payload.selectedRepositories,
+      taskRun.payload.selectedRepositories,
     );
 
     if (selectedRepositories.length > 0) {
@@ -500,16 +500,15 @@ async function resolveGiteaRepositoryNamesForCloudJob(
     }
   }
 
-  if (cloudJob.payload.repo && cloudJob.payload.repo !== ALL_REPOSITORIES) {
-    return [cloudJob.payload.repo];
+  if (taskRun.payload.repo && taskRun.payload.repo !== ALL_REPOSITORIES) {
+    return [taskRun.payload.repo];
   }
 
   return null;
 }
 
-async function resolveGiteaRepositoryRowsForCloudJob(cloudJob: CloudJob) {
-  const repositoryNames =
-    await resolveGiteaRepositoryNamesForCloudJob(cloudJob);
+async function resolveGiteaRepositoryRowsForTaskRun(taskRun: TaskRun) {
+  const repositoryNames = await resolveGiteaRepositoryNamesForTaskRun(taskRun);
   const queryConditions = [
     eq(repositories.sourceControlProvider, GITEA_PROVIDER),
     eq(repositories.isActive, true),
@@ -529,7 +528,7 @@ async function resolveGiteaRepositoryRowsForCloudJob(cloudJob: CloudJob) {
   if (repositoryNames === null) {
     if (repositoryRows.length === 0) {
       throw new Error(
-        `No synced Gitea repositories found for cloud job ${cloudJob.id}.`,
+        `No synced Gitea repositories found for task run ${taskRun.id}.`,
       );
     }
 
@@ -545,7 +544,7 @@ async function resolveGiteaRepositoryRowsForCloudJob(cloudJob: CloudJob) {
 
   if (missingRepositories.length > 0) {
     throw new Error(
-      `Selected Gitea repositories not found for cloud job ${cloudJob.id}: ${missingRepositories.join(', ')}`,
+      `Selected Gitea repositories not found for task run ${taskRun.id}: ${missingRepositories.join(', ')}`,
     );
   }
 
@@ -1035,8 +1034,8 @@ export async function removeGiteaWebhooksForRepositories({
   return results;
 }
 
-export async function createCloudJobGiteaCredentials(
-  cloudJob: CloudJob,
+export async function createTaskRunGiteaCredentials(
+  taskRun: TaskRun,
   options?: {
     fetchImpl?: typeof fetch;
     token?: string;
@@ -1071,8 +1070,7 @@ export async function createCloudJobGiteaCredentials(
       })
     ).login;
   const host = hostFromBaseUrl(baseUrl);
-  const repositoriesList =
-    await resolveGiteaRepositoryRowsForCloudJob(cloudJob);
+  const repositoriesList = await resolveGiteaRepositoryRowsForTaskRun(taskRun);
 
   return {
     credentials: repositoriesList.map((repository) => ({

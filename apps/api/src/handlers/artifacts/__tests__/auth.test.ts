@@ -7,25 +7,25 @@ const {
   andMock,
   eqMock,
   isVisibleTaskMock,
-  mockCloudJobFindFirst,
-  mockFindCloudJobByJobTokenClaims,
+  mockTaskRunFindFirst,
+  mockFindTaskRunByRunTokenClaims,
   mockTaskFindFirst,
 } = vi.hoisted(() => ({
   andMock: vi.fn((...args) => ({ type: 'and', args })),
   eqMock: vi.fn((...args) => ({ type: 'eq', args })),
   isVisibleTaskMock: vi.fn((column) => ({ type: 'isVisibleTask', column })),
-  mockCloudJobFindFirst: vi.fn(),
-  mockFindCloudJobByJobTokenClaims: vi.fn(),
+  mockTaskRunFindFirst: vi.fn(),
+  mockFindTaskRunByRunTokenClaims: vi.fn(),
   mockTaskFindFirst: vi.fn(),
 }));
 
 vi.mock('@roomote/db/server', () => ({
   and: andMock,
-  cloudJobs: { id: 'cloudJobs.id' },
+  taskRuns: { id: 'taskRuns.id' },
   db: {
     query: {
-      cloudJobs: {
-        findFirst: mockCloudJobFindFirst,
+      taskRuns: {
+        findFirst: mockTaskRunFindFirst,
       },
       tasks: {
         findFirst: mockTaskFindFirst,
@@ -38,23 +38,23 @@ vi.mock('@roomote/db/server', () => ({
 }));
 
 vi.mock('@roomote/sdk/server', () => ({
-  findCloudJobByJobTokenClaims: mockFindCloudJobByJobTokenClaims,
+  findTaskRunByRunTokenClaims: mockFindTaskRunByRunTokenClaims,
 }));
 
 const auth = {
   userId: 'user-1',
-  cloudJobId: 42,
-  tokenType: 'cj' as const,
+  runId: 42,
+  tokenType: 'run' as const,
 };
 
 beforeEach(() => {
   vi.clearAllMocks();
-  mockFindCloudJobByJobTokenClaims.mockResolvedValue({ id: 42 });
-  mockCloudJobFindFirst.mockResolvedValue({ taskId: 'task-own' });
+  mockFindTaskRunByRunTokenClaims.mockResolvedValue({ id: 42 });
+  mockTaskRunFindFirst.mockResolvedValue({ taskId: 'task-own' });
 });
 
 describe('verifyArtifactRouteTaskBinding', () => {
-  it('allows the task that owns the calling cloud job', async () => {
+  it('allows the task that owns the calling task run', async () => {
     const result = await verifyArtifactRouteTaskBinding('task-own', auth);
 
     expect(result).toEqual({ ok: true });
@@ -66,25 +66,25 @@ describe('verifyArtifactRouteTaskBinding', () => {
     expect(result).toEqual({
       ok: false,
       status: 403,
-      error: 'Cloud job token does not match requested task',
+      error: 'Task run token does not match requested task',
     });
   });
 
-  it('rejects when the cloud job binding cannot be resolved', async () => {
-    mockFindCloudJobByJobTokenClaims.mockResolvedValue(null);
+  it('rejects when the task run binding cannot be resolved', async () => {
+    mockFindTaskRunByRunTokenClaims.mockResolvedValue(null);
 
     const result = await verifyArtifactRouteTaskBinding('task-own', auth);
 
     expect(result).toEqual({
       ok: false,
       status: 403,
-      error: 'Cloud job token does not match requested task',
+      error: 'Task run token does not match requested task',
     });
   });
 });
 
 describe('verifyArtifactRouteTaskReadAccess', () => {
-  it('allows the task that owns the calling cloud job without a task lookup', async () => {
+  it('allows the task that owns the calling task run without a task lookup', async () => {
     const result = await verifyArtifactRouteTaskReadAccess('task-own', auth);
 
     expect(result).toEqual({ ok: true });
@@ -97,7 +97,8 @@ describe('verifyArtifactRouteTaskReadAccess', () => {
     const result = await verifyArtifactRouteTaskReadAccess('task-other', auth);
 
     expect(result).toEqual({ ok: true });
-    expect(isVisibleTaskMock).toHaveBeenCalledWith('tasks.id');
+    // isVisibleTask is now a zero-arg visibility predicate on tasks.
+    expect(isVisibleTaskMock).toHaveBeenCalledWith();
   });
 
   it('rejects cross-task reads when the requested task is missing or hidden', async () => {
@@ -108,19 +109,19 @@ describe('verifyArtifactRouteTaskReadAccess', () => {
     expect(result).toEqual({
       ok: false,
       status: 403,
-      error: 'Cloud job token does not grant read access to requested task',
+      error: 'Task run token does not grant read access to requested task',
     });
   });
 
-  it('rejects when the cloud job binding cannot be resolved', async () => {
-    mockFindCloudJobByJobTokenClaims.mockResolvedValue(null);
+  it('rejects when the task run binding cannot be resolved', async () => {
+    mockFindTaskRunByRunTokenClaims.mockResolvedValue(null);
 
     const result = await verifyArtifactRouteTaskReadAccess('task-other', auth);
 
     expect(result).toEqual({
       ok: false,
       status: 403,
-      error: 'Cloud job token does not grant read access to requested task',
+      error: 'Task run token does not grant read access to requested task',
     });
     expect(mockTaskFindFirst).not.toHaveBeenCalled();
   });

@@ -120,7 +120,7 @@ vi.mock('./EnvironmentDefinitionAgentTask', () => ({
     succeeded: false,
     failed: false,
     session: {
-      cloudJob: {
+      taskRun: {
         taskPhase: 'running',
       },
     },

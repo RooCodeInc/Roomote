@@ -16,9 +16,9 @@ Public, user-facing documentation:
 
 ## What does NOT belong here
 
-Internal architecture, implementation notes, runbooks, and other
-contributor-facing guidance stay in [`.agent-guidance/`](../../.agent-guidance/).
-Do not duplicate internal guidance into the public docs.
+Internal architecture, implementation notes, and other contributor-only
+runbooks do not belong here. Keep public docs focused on operator and user
+workflows.
 
 ## Voice and positioning
 
@@ -28,7 +28,7 @@ Do not duplicate internal guidance into the public docs.
   running and make agent work useful for their team.
 - Prefer practical workflow guidance: what to do, what happens next, how to
   verify it worked, and what to check when setup fails.
-- Keep repository setup, communications providers, inference providers, compute
+-   Keep repository setup, communications providers, inference providers, sandbox
   providers, environments, and source-control flows prominent.
 - Be direct about prerequisites, tradeoffs, permissions, callback URLs,
   credentials, Docker or Compose issues, tunnels, sandbox limits, and restart or
@@ -40,7 +40,7 @@ Do not duplicate internal guidance into the public docs.
 
 Use these terms consistently: `Roomote`, `Roomote agent`, `Roomote task`,
 `environment`, `deployment`, `self-hosted`, `communications provider`,
-`source-control provider`, `inference provider`, `compute provider`,
+`source-control provider`, `inference provider`, `sandbox provider`,
 `integration`, and `MCP server`.
 
 ## Keeping docs in sync
@@ -57,7 +57,7 @@ same change:
 - the matching `integrations/<id>.mdx` page
 - `docs.json` navigation, keeping pages alphabetized after the overview
 
-Do not add communications, inference, compute, or source-control providers to
+Do not add communications, inference, sandbox, or source-control providers to
 this Integrations section. Those provider categories have their own docs pages
 or setup paths. For integration names in overview tables, use
 `IntegrationName` from `snippets/integration-name.jsx`; prefer Iconify Simple
@@ -79,5 +79,3 @@ Iconify does not provide the logo.
   are caught. `check-links` alone is not enough for changed pages.
 - Quote frontmatter strings that contain YAML-significant characters such as
   `:` to avoid parser errors.
-- Fuller internal guidance for this workspace lives in
-  [`.agent-guidance/features/public-docs-site.md`](../../.agent-guidance/features/public-docs-site.md).

@@ -57,7 +57,7 @@ type SelectedAnalyticsSegment = {
   seriesLabel: string;
 };
 
-const GENERIC_ANALYTICS_OBJECTS: AnalyticsObject[] = ['pullRequests', 'tasks'];
+const GENERIC_ANALYTICS_OBJECTS: AnalyticsObject[] = ['tasks', 'pullRequests'];
 
 function parseAnalyticsObject(
   value: string | null,
@@ -212,7 +212,7 @@ export function Analytics({
 
     resetSelection();
     updateParams((params) => {
-      if (nextObject === 'pullRequests') {
+      if (nextObject === 'tasks') {
         params.delete('object');
       } else {
         params.set('object', nextObject);

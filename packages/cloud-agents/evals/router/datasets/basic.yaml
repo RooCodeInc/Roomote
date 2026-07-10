@@ -302,7 +302,7 @@
   vars:
     context: |
       **Task Description**:
-      Did we change something recently that made it so you don't see any progress for starting cloud jobs from the new task page (we used to have a modal that showed task start progress, and we still seem to in dev, but it's not here now...)
+      Did we change something recently that made it so you don't see any progress for starting task runs from the new task page (we used to have a modal that showed task start progress, and we still seem to in dev, but it's not here now...)
 
       **Source**: Slack
       **Channel**: #product-support

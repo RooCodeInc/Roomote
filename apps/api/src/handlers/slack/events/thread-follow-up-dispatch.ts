@@ -1,19 +1,19 @@
 import {
-  findActiveSlackJob,
-  findCompletedSlackJobWithSnapshot,
+  findActiveSlackTaskRun,
+  findCompletedSlackTaskRunWithSnapshot,
   type SlackNotifier,
 } from '@roomote/slack';
 
-type ActiveSlackThreadJob = NonNullable<
-  Awaited<ReturnType<typeof findActiveSlackJob>>
+type ActiveSlackThreadTaskRun = NonNullable<
+  Awaited<ReturnType<typeof findActiveSlackTaskRun>>
 >;
-type CompletedSlackThreadJob = NonNullable<
-  Awaited<ReturnType<typeof findCompletedSlackJobWithSnapshot>>
+type CompletedSlackThreadTaskRun = NonNullable<
+  Awaited<ReturnType<typeof findCompletedSlackTaskRunWithSnapshot>>
 >;
 
 type SlackThreadFollowUpRoute =
-  | { kind: 'active'; activeJob: ActiveSlackThreadJob }
-  | { kind: 'resume'; completedJob: CompletedSlackThreadJob }
+  | { kind: 'active'; activeRun: ActiveSlackThreadTaskRun }
+  | { kind: 'resume'; completedRun: CompletedSlackThreadTaskRun }
   | { kind: 'fresh' };
 
 type SlackThreadFollowUpResumeHandlerResult<T> =
@@ -22,27 +22,27 @@ type SlackThreadFollowUpResumeHandlerResult<T> =
 
 export async function resolveSlackThreadFollowUpRoute(params: {
   threadId: string;
-  prefetchedActiveJob?: ActiveSlackThreadJob | null;
+  prefetchedActiveRun?: ActiveSlackThreadTaskRun | null;
   allowCompletedResume?: boolean;
 }): Promise<SlackThreadFollowUpRoute> {
-  const { threadId, prefetchedActiveJob, allowCompletedResume = true } = params;
-  const activeJob =
-    prefetchedActiveJob === undefined
-      ? await findActiveSlackJob(threadId)
-      : prefetchedActiveJob;
+  const { threadId, prefetchedActiveRun, allowCompletedResume = true } = params;
+  const activeRun =
+    prefetchedActiveRun === undefined
+      ? await findActiveSlackTaskRun(threadId)
+      : prefetchedActiveRun;
 
-  if (activeJob) {
-    return { kind: 'active', activeJob };
+  if (activeRun) {
+    return { kind: 'active', activeRun };
   }
 
   if (!allowCompletedResume) {
     return { kind: 'fresh' };
   }
 
-  const completedJob = await findCompletedSlackJobWithSnapshot(threadId);
+  const completedRun = await findCompletedSlackTaskRunWithSnapshot(threadId);
 
-  if (completedJob?.snapshotId) {
-    return { kind: 'resume', completedJob };
+  if (completedRun?.snapshotId) {
+    return { kind: 'resume', completedRun };
   }
 
   return { kind: 'fresh' };
@@ -53,9 +53,9 @@ export async function dispatchSlackThreadFollowUp<T>(params: {
   slack: SlackNotifier;
   channel: string;
   threadId: string;
-  onActive?: (activeJob: ActiveSlackThreadJob) => Promise<T>;
+  onActive?: (activeRun: ActiveSlackThreadTaskRun) => Promise<T>;
   onResume?: (
-    completedJob: CompletedSlackThreadJob,
+    completedRun: CompletedSlackThreadTaskRun,
   ) => Promise<SlackThreadFollowUpResumeHandlerResult<T>>;
   onFresh?: () => Promise<T>;
 }): Promise<
@@ -72,7 +72,7 @@ export async function dispatchSlackThreadFollowUp<T>(params: {
 
     return {
       kind: 'active',
-      value: await onActive(route.activeJob),
+      value: await onActive(route.activeRun),
     };
   }
 
@@ -81,7 +81,7 @@ export async function dispatchSlackThreadFollowUp<T>(params: {
       return { kind: 'resume' };
     }
 
-    const resumeResult = await onResume(route.completedJob);
+    const resumeResult = await onResume(route.completedRun);
 
     if (resumeResult.handled) {
       return {

@@ -16,7 +16,6 @@ function postSlackFinalRouterDebug({
   source,
   sourceLink,
   taskDescription,
-  selectedAgent,
   selectedWorkspace,
   reasoning,
   routingDebug,
@@ -26,7 +25,6 @@ function postSlackFinalRouterDebug({
   source: string;
   sourceLink?: string;
   taskDescription: string;
-  selectedAgent: { name: string; type: string };
   selectedWorkspace: { name: string; type: string };
   reasoning?: string;
   routingDebug?: RoutingDebugInfo;
@@ -37,7 +35,6 @@ function postSlackFinalRouterDebug({
     source,
     sourceLink,
     taskDescription,
-    selectedAgent,
     selectedWorkspace,
     reasoning: reasoning ?? '',
     routingDebug,
@@ -94,7 +91,7 @@ async function updateConfirmToStarted({
 }
 
 export async function finishRoutedStart({
-  cloudJobId,
+  runId,
   taskId,
   taskDescription,
   userId,
@@ -115,10 +112,15 @@ export async function finishRoutedStart({
   existingMessageTs,
   slack,
 }: {
-  cloudJobId: number | null;
+  runId: number | null;
   taskId: string | null;
   taskDescription: string;
-  userId: string;
+  /**
+   * Linked launching user, when one exists. Automation-initiated launches
+   * (for example bot-authored channel auto-start) have none and skip the
+   * per-user last-workspace memory.
+   */
+  userId?: string | null;
   initiatingSlackUserId?: string;
   agentName: string;
   workspaceDisplayName: string;
@@ -145,10 +147,6 @@ export async function finishRoutedStart({
         threadTs: threadId,
       }) ?? undefined,
     taskDescription,
-    selectedAgent: {
-      name: agentName,
-      type: agentName,
-    },
     selectedWorkspace: {
       name: workspaceDisplayName,
       type: workspaceType,
@@ -166,7 +164,7 @@ export async function finishRoutedStart({
   const blocks = buildStartedBlocks({
     workspaceDisplayName,
     modelDisplayName,
-    cloudJobId,
+    runId,
     taskId,
     initiatingSlackUserId,
     taskUrl,
@@ -186,8 +184,8 @@ export async function finishRoutedStart({
         blocks,
       });
 
-  if (startedMessageTs && cloudJobId) {
-    await setSlackStartedMessageTs(cloudJobId, startedMessageTs, {
+  if (startedMessageTs && runId) {
+    await setSlackStartedMessageTs(runId, startedMessageTs, {
       agentName,
       initiatingSlackUserId,
       workspaceDisplayName,
@@ -196,11 +194,13 @@ export async function finishRoutedStart({
     });
   }
 
-  const lastWorkspaceKey = `last_workspace:${userId}`;
-  await getRedis().set(
-    lastWorkspaceKey,
-    workspaceValue,
-    'EX',
-    30 * 24 * 60 * 60,
-  );
+  if (userId) {
+    const lastWorkspaceKey = `last_workspace:${userId}`;
+    await getRedis().set(
+      lastWorkspaceKey,
+      workspaceValue,
+      'EX',
+      30 * 24 * 60 * 60,
+    );
+  }
 }

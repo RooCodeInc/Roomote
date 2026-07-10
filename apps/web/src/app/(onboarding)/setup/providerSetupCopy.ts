@@ -5,7 +5,6 @@ type ProviderSetupCopyId = SetupAuthProviderId | 'telegram';
 type ProviderSetupCopy = {
   creationHref: string;
   setupLabel: string;
-  notes?: readonly string[];
 };
 
 const PROVIDER_SETUP_COPY: Record<ProviderSetupCopyId, ProviderSetupCopy> = {
@@ -21,11 +20,6 @@ const PROVIDER_SETUP_COPY: Record<ProviderSetupCopyId, ProviderSetupCopy> = {
   telegram: {
     creationHref: 'https://t.me/BotFather',
     setupLabel: 'Telegram bot',
-    notes: [
-      'In the BotFather chat, send /newbot, pick a display name, then a username ending in "bot".',
-      'Copy the bot token BotFather replies with into the field below.',
-      'Roomote registers the webhook automatically when you save.',
-    ],
   },
 };
 

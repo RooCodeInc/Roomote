@@ -1,14 +1,16 @@
 import {
-  backgroundAgentSettings,
   db,
+  deploymentSettings,
   eq,
-  findLatestGithubIdentityForUser,
   getBackgroundAgentSettingsForDeployment,
   isNull,
   repositories,
   users,
 } from '@roomote/db/server';
-import { compileAuthorshipRules } from '@roomote/cloud-agents/server';
+import {
+  compileAuthorshipRules,
+  findLatestGithubIdentityForUser,
+} from '@roomote/cloud-agents/server';
 import type {
   AuthorshipRuleActor,
   AuthorshipRuleIssue,
@@ -239,7 +241,7 @@ export async function updateAgentBehaviorSettingsCommand(
   }
 
   await db
-    .insert(backgroundAgentSettings)
+    .insert(deploymentSettings)
     .values({
       id: 'default',
       globalAgentInstructions,
@@ -254,7 +256,7 @@ export async function updateAgentBehaviorSettingsCommand(
       updatedAt: now,
     })
     .onConflictDoUpdate({
-      target: backgroundAgentSettings.id,
+      target: deploymentSettings.id,
       set: {
         globalAgentInstructions,
         ...(authorshipInstructionsProvided

@@ -52,7 +52,7 @@ export async function getArtifactMetadataByPath(
   return c.json({
     id: artifact.id,
     taskId: artifact.taskId,
-    cloudJobId: artifact.cloudJobId,
+    runId: artifact.runId,
     path: artifact.path,
     version: artifact.version,
     artifactType: artifact.artifactType,

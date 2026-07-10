@@ -21,28 +21,26 @@ export function isSubagentToolMessage(
   );
 }
 
-export function hasSubagentLiveActivity(msg: AcpUiMessage): boolean {
-  const value = (msg.data as unknown as Record<string, unknown>)
-    .subagentActivity;
-
-  return (
-    isSubagentToolMessage(msg) && value !== null && typeof value === 'object'
-  );
-}
-
-export function shouldHidePendingSubagentMessage(
+/**
+ * Spawn rows from the harness task tool. Their visibility must key on this
+ * stable payload shape, not on the live-only `subagentActivity` field: that
+ * field is streamed but never persisted, so any rule that depends on it
+ * hides the row again after a transcript rebuild (page refresh) until the
+ * next live update arrives. Subagent messages bound to receiver threads are
+ * excluded — those surface through the active-subtasks list instead of an
+ * inline row.
+ */
+export function isSubagentSpawnRowMessage(
   msg: AcpUiMessage,
 ): msg is AcpToolCallUiMessage | AcpToolResultUiMessage {
-  // Spawns that carry live activity from the worker render as inline tool
-  // rows; only activity-less pending spawns (old workers) stay hidden.
-  if (hasSubagentLiveActivity(msg)) {
+  if (
+    (msg.kind !== 'tool_call' && msg.kind !== 'tool_result') ||
+    msg.data.kind !== 'subagent'
+  ) {
     return false;
   }
 
-  return (
-    isSubagentToolMessage(msg) &&
-    (msg.kind === 'tool_call' ||
-      msg.partial === true ||
-      msg.data.status === 'in_progress')
-  );
+  const receiverThreadIds = msg.data.receiverThreadIds;
+
+  return !Array.isArray(receiverThreadIds) || receiverThreadIds.length === 0;
 }

@@ -5,7 +5,7 @@ import {
   TEST_TASK_ID,
   mockConfig,
   createMockAuthResult,
-  createMockCloudJob,
+  createMockTaskRun,
   createMockParseHostResult,
   createMockResolvedRequest,
 } from './fixtures';
@@ -55,7 +55,7 @@ vi.mock('../lib/redis', () => {
 
 vi.mock('../services/auth', () => ({
   resolveRequestContext: vi.fn(),
-  validateAuthCookieForCloudJob: vi.fn(),
+  validateAuthCookieForTaskRun: vi.fn(),
   storeState: vi.fn().mockResolvedValue(undefined),
   validateState: vi.fn(),
   validateToken: vi.fn(),
@@ -273,7 +273,7 @@ describe('preview-proxy integration', () => {
 
   it('returns 401 JSON + CORS headers for unauthenticated non-navigation requests', async () => {
     const { resolveRequest } = await import('../services/resolver');
-    const { validateAuthCookieForCloudJob } = await import('../services/auth');
+    const { validateAuthCookieForTaskRun } = await import('../services/auth');
 
     vi.mocked(resolveRequest).mockResolvedValue(
       createMockResolvedRequest({
@@ -281,7 +281,7 @@ describe('preview-proxy integration', () => {
         requiresAuth: true,
       }),
     );
-    vi.mocked(validateAuthCookieForCloudJob).mockResolvedValue(
+    vi.mocked(validateAuthCookieForTaskRun).mockResolvedValue(
       createMockAuthResult(),
     );
 
@@ -302,7 +302,7 @@ describe('preview-proxy integration', () => {
 
   it('redirect uses x-forwarded-proto when navigating', async () => {
     const { resolveRequest } = await import('../services/resolver');
-    const { validateAuthCookieForCloudJob } = await import('../services/auth');
+    const { validateAuthCookieForTaskRun } = await import('../services/auth');
 
     vi.mocked(resolveRequest).mockResolvedValue(
       createMockResolvedRequest({
@@ -310,7 +310,7 @@ describe('preview-proxy integration', () => {
         requiresAuth: true,
       }),
     );
-    vi.mocked(validateAuthCookieForCloudJob).mockResolvedValue(
+    vi.mocked(validateAuthCookieForTaskRun).mockResolvedValue(
       createMockAuthResult(),
     );
 
@@ -445,8 +445,7 @@ describe('preview-proxy integration', () => {
   describe('redirect_to_direct (unproxied ports)', () => {
     it('redirects to auth for unauthenticated navigation requests', async () => {
       const { resolveRequest } = await import('../services/resolver');
-      const { validateAuthCookieForCloudJob } =
-        await import('../services/auth');
+      const { validateAuthCookieForTaskRun } = await import('../services/auth');
 
       vi.mocked(resolveRequest).mockResolvedValue(
         createMockResolvedRequest({
@@ -455,7 +454,7 @@ describe('preview-proxy integration', () => {
           requiresAuth: true,
         }),
       );
-      vi.mocked(validateAuthCookieForCloudJob).mockResolvedValue(
+      vi.mocked(validateAuthCookieForTaskRun).mockResolvedValue(
         createMockAuthResult({ valid: false, reason: 'missing' }),
       );
 
@@ -472,8 +471,7 @@ describe('preview-proxy integration', () => {
 
     it('redirects to direct URL after auth validation', async () => {
       const { resolveRequest } = await import('../services/resolver');
-      const { validateAuthCookieForCloudJob } =
-        await import('../services/auth');
+      const { validateAuthCookieForTaskRun } = await import('../services/auth');
 
       vi.mocked(resolveRequest).mockResolvedValue(
         createMockResolvedRequest({
@@ -482,7 +480,7 @@ describe('preview-proxy integration', () => {
           requiresAuth: true,
         }),
       );
-      vi.mocked(validateAuthCookieForCloudJob).mockResolvedValue(
+      vi.mocked(validateAuthCookieForTaskRun).mockResolvedValue(
         createMockAuthResult({ valid: true }),
       );
 
@@ -499,8 +497,7 @@ describe('preview-proxy integration', () => {
 
     it('returns 401 JSON for unauthenticated non-navigation requests', async () => {
       const { resolveRequest } = await import('../services/resolver');
-      const { validateAuthCookieForCloudJob } =
-        await import('../services/auth');
+      const { validateAuthCookieForTaskRun } = await import('../services/auth');
 
       vi.mocked(resolveRequest).mockResolvedValue(
         createMockResolvedRequest({
@@ -509,7 +506,7 @@ describe('preview-proxy integration', () => {
           requiresAuth: true,
         }),
       );
-      vi.mocked(validateAuthCookieForCloudJob).mockResolvedValue(
+      vi.mocked(validateAuthCookieForTaskRun).mockResolvedValue(
         createMockAuthResult({ valid: false, reason: 'missing' }),
       );
 
@@ -551,8 +548,7 @@ describe('preview-proxy integration', () => {
   describe('resumable status (auto-resume)', () => {
     it('redirects to auth for unauthenticated navigation requests', async () => {
       const { resolveRequest } = await import('../services/resolver');
-      const { validateAuthCookieForCloudJob } =
-        await import('../services/auth');
+      const { validateAuthCookieForTaskRun } = await import('../services/auth');
 
       vi.mocked(resolveRequest).mockResolvedValue(
         createMockResolvedRequest({
@@ -561,7 +557,7 @@ describe('preview-proxy integration', () => {
           snapshotCreatedAt: new Date(),
         }),
       );
-      vi.mocked(validateAuthCookieForCloudJob).mockResolvedValue(
+      vi.mocked(validateAuthCookieForTaskRun).mockResolvedValue(
         createMockAuthResult({ valid: false, reason: 'missing' }),
       );
 
@@ -577,8 +573,7 @@ describe('preview-proxy integration', () => {
 
     it('returns 401 JSON for unauthenticated non-navigation requests', async () => {
       const { resolveRequest } = await import('../services/resolver');
-      const { validateAuthCookieForCloudJob } =
-        await import('../services/auth');
+      const { validateAuthCookieForTaskRun } = await import('../services/auth');
 
       vi.mocked(resolveRequest).mockResolvedValue(
         createMockResolvedRequest({
@@ -587,7 +582,7 @@ describe('preview-proxy integration', () => {
           snapshotCreatedAt: new Date(),
         }),
       );
-      vi.mocked(validateAuthCookieForCloudJob).mockResolvedValue(
+      vi.mocked(validateAuthCookieForTaskRun).mockResolvedValue(
         createMockAuthResult({ valid: false, reason: 'missing' }),
       );
 
@@ -603,12 +598,11 @@ describe('preview-proxy integration', () => {
   });
 
   describe('auth redirect without taskId (blank sessions)', () => {
-    it('returns 500 for active jobs without taskId', async () => {
+    it('returns 500 for active task runs without taskId', async () => {
       const { resolveRequest } = await import('../services/resolver');
-      const { validateAuthCookieForCloudJob } =
-        await import('../services/auth');
+      const { validateAuthCookieForTaskRun } = await import('../services/auth');
 
-      const cloudJobWithoutTask = createMockCloudJob({
+      const taskRunWithoutTask = createMockTaskRun({
         id: 42,
         taskId: null,
       });
@@ -617,11 +611,11 @@ describe('preview-proxy integration', () => {
         createMockResolvedRequest({
           status: 'active',
           requiresAuth: true,
-          cloudJob: cloudJobWithoutTask,
+          taskRun: taskRunWithoutTask,
           taskId: undefined,
         }),
       );
-      vi.mocked(validateAuthCookieForCloudJob).mockResolvedValue(
+      vi.mocked(validateAuthCookieForTaskRun).mockResolvedValue(
         createMockAuthResult({ valid: false, reason: 'missing' }),
       );
 
@@ -630,14 +624,13 @@ describe('preview-proxy integration', () => {
         .set('Host', TEST_HOST)
         .set('sec-fetch-mode', 'navigate');
 
-      // Without taskId, the server returns 500 (cloud_job_id fallback removed)
+      // Without taskId, the server returns 500 (task_run_id fallback removed)
       expect(res.status).toBe(500);
     });
 
     it('uses task_id when taskId is available', async () => {
       const { resolveRequest } = await import('../services/resolver');
-      const { validateAuthCookieForCloudJob } =
-        await import('../services/auth');
+      const { validateAuthCookieForTaskRun } = await import('../services/auth');
 
       vi.mocked(resolveRequest).mockResolvedValue(
         createMockResolvedRequest({
@@ -645,7 +638,7 @@ describe('preview-proxy integration', () => {
           requiresAuth: true,
         }),
       );
-      vi.mocked(validateAuthCookieForCloudJob).mockResolvedValue(
+      vi.mocked(validateAuthCookieForTaskRun).mockResolvedValue(
         createMockAuthResult({ valid: false, reason: 'missing' }),
       );
 
@@ -657,15 +650,14 @@ describe('preview-proxy integration', () => {
       expect(res.status).toBe(302);
       expect(res.headers.location).toContain('/api/auth/preview');
       expect(res.headers.location).toContain('task_id=' + TEST_TASK_ID);
-      expect(res.headers.location).not.toContain('cloud_job_id');
+      expect(res.headers.location).not.toContain('task_run_id');
     });
 
     it('returns 500 for redirect_to_direct without taskId', async () => {
       const { resolveRequest } = await import('../services/resolver');
-      const { validateAuthCookieForCloudJob } =
-        await import('../services/auth');
+      const { validateAuthCookieForTaskRun } = await import('../services/auth');
 
-      const cloudJobWithoutTask = createMockCloudJob({
+      const taskRunWithoutTask = createMockTaskRun({
         id: 99,
         taskId: null,
       });
@@ -675,11 +667,11 @@ describe('preview-proxy integration', () => {
           status: 'redirect_to_direct',
           directUrl: 'https://direct-sandbox.example.com:3000',
           requiresAuth: true,
-          cloudJob: cloudJobWithoutTask,
+          taskRun: taskRunWithoutTask,
           taskId: undefined,
         }),
       );
-      vi.mocked(validateAuthCookieForCloudJob).mockResolvedValue(
+      vi.mocked(validateAuthCookieForTaskRun).mockResolvedValue(
         createMockAuthResult({ valid: false, reason: 'missing' }),
       );
 
@@ -688,16 +680,15 @@ describe('preview-proxy integration', () => {
         .set('Host', TEST_HOST)
         .set('sec-fetch-mode', 'navigate');
 
-      // Without taskId, the server returns 500 (cloud_job_id fallback removed)
+      // Without taskId, the server returns 500 (task_run_id fallback removed)
       expect(res.status).toBe(500);
     });
 
     it('returns 500 for resumable without taskId', async () => {
       const { resolveRequest } = await import('../services/resolver');
-      const { validateAuthCookieForCloudJob } =
-        await import('../services/auth');
+      const { validateAuthCookieForTaskRun } = await import('../services/auth');
 
-      const cloudJobWithoutTask = createMockCloudJob({
+      const taskRunWithoutTask = createMockTaskRun({
         id: 77,
         taskId: null,
       });
@@ -707,11 +698,11 @@ describe('preview-proxy integration', () => {
           status: 'resumable',
           snapshotId: 'snap_test123',
           snapshotCreatedAt: new Date(),
-          cloudJob: cloudJobWithoutTask,
+          taskRun: taskRunWithoutTask,
           taskId: undefined,
         }),
       );
-      vi.mocked(validateAuthCookieForCloudJob).mockResolvedValue(
+      vi.mocked(validateAuthCookieForTaskRun).mockResolvedValue(
         createMockAuthResult({ valid: false, reason: 'missing' }),
       );
 
@@ -720,7 +711,7 @@ describe('preview-proxy integration', () => {
         .set('Host', TEST_HOST)
         .set('sec-fetch-mode', 'navigate');
 
-      // Without taskId, the server returns 500 (cloud_job_id fallback removed)
+      // Without taskId, the server returns 500 (task_run_id fallback removed)
       expect(res.status).toBe(500);
     });
   });
@@ -773,8 +764,7 @@ describe('preview-proxy integration', () => {
   describe('inline __preview_token (iframe trampoline)', () => {
     it('redirects with preview_auth Set-Cookie when token is valid', async () => {
       const { resolveRequest } = await import('../services/resolver');
-      const { validateAuthCookieForCloudJob } =
-        await import('../services/auth');
+      const { validateAuthCookieForTaskRun } = await import('../services/auth');
 
       vi.mocked(resolveRequest).mockResolvedValue(
         createMockResolvedRequest({
@@ -782,7 +772,7 @@ describe('preview-proxy integration', () => {
           requiresAuth: true,
         }),
       );
-      vi.mocked(validateAuthCookieForCloudJob).mockResolvedValue(
+      vi.mocked(validateAuthCookieForTaskRun).mockResolvedValue(
         createMockAuthResult({
           valid: true,
           token: {
@@ -823,8 +813,7 @@ describe('preview-proxy integration', () => {
 
     it('shows the cookie-blocked fallback page when the redirect returns without the auth cookie', async () => {
       const { resolveRequest } = await import('../services/resolver');
-      const { validateAuthCookieForCloudJob } =
-        await import('../services/auth');
+      const { validateAuthCookieForTaskRun } = await import('../services/auth');
 
       vi.mocked(resolveRequest).mockResolvedValue(
         createMockResolvedRequest({
@@ -832,7 +821,7 @@ describe('preview-proxy integration', () => {
           requiresAuth: true,
         }),
       );
-      vi.mocked(validateAuthCookieForCloudJob).mockResolvedValue(
+      vi.mocked(validateAuthCookieForTaskRun).mockResolvedValue(
         createMockAuthResult({
           valid: true,
           token: {
@@ -873,8 +862,7 @@ describe('preview-proxy integration', () => {
 
     it('strips invalid token and falls through to auth redirect', async () => {
       const { resolveRequest } = await import('../services/resolver');
-      const { validateAuthCookieForCloudJob } =
-        await import('../services/auth');
+      const { validateAuthCookieForTaskRun } = await import('../services/auth');
 
       vi.mocked(resolveRequest).mockResolvedValue(
         createMockResolvedRequest({
@@ -884,7 +872,7 @@ describe('preview-proxy integration', () => {
       );
       // First call: inline token validation (fails)
       // Second call: cookie validation (also fails)
-      vi.mocked(validateAuthCookieForCloudJob).mockResolvedValue(
+      vi.mocked(validateAuthCookieForTaskRun).mockResolvedValue(
         createMockAuthResult({ valid: false, reason: 'invalid' }),
       );
 
@@ -900,20 +888,19 @@ describe('preview-proxy integration', () => {
       expect(res.headers.location).not.toContain('__preview_token');
     });
 
-    it('validates token against the resolved cloud job', async () => {
+    it('validates token against the resolved task run', async () => {
       const { resolveRequest } = await import('../services/resolver');
-      const { validateAuthCookieForCloudJob } =
-        await import('../services/auth');
+      const { validateAuthCookieForTaskRun } = await import('../services/auth');
 
-      const cloudJob = createMockCloudJob({ id: 42, orgId: 'org-42' });
+      const taskRun = createMockTaskRun({ id: 42 });
       vi.mocked(resolveRequest).mockResolvedValue(
         createMockResolvedRequest({
           status: 'active',
           requiresAuth: true,
-          cloudJob,
+          taskRun,
         }),
       );
-      vi.mocked(validateAuthCookieForCloudJob).mockResolvedValue(
+      vi.mocked(validateAuthCookieForTaskRun).mockResolvedValue(
         createMockAuthResult({
           valid: true,
           token: {
@@ -932,10 +919,10 @@ describe('preview-proxy integration', () => {
 
       expect(res.status).toBe(302);
 
-      // Verify validateAuthCookieForCloudJob was called with the inline token
-      expect(validateAuthCookieForCloudJob).toHaveBeenCalledWith(
+      // Verify validateAuthCookieForTaskRun was called with the inline token
+      expect(validateAuthCookieForTaskRun).toHaveBeenCalledWith(
         'valid-token',
-        cloudJob,
+        taskRun,
       );
     });
   });

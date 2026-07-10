@@ -7,7 +7,7 @@ import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js'
 import { z } from 'zod';
 import {
   ALL_REPOSITORIES,
-  CloudTaskType,
+  TaskPayloadKind,
   createTaskEnvVarRequestBaseSchema,
   PRODUCT_NAME,
   sourceControlProviderSchema,
@@ -312,8 +312,8 @@ roomoteMcpServer.registerTool(
 );
 
 const WEB_TASK_TYPES_WITH_SECURE_ENV_REQUESTS = new Set<string>([
-  CloudTaskType.StandardTask,
-  CloudTaskType.SlackAppMention,
+  TaskPayloadKind.StandardTask,
+  TaskPayloadKind.SlackAppMention,
 ]);
 
 function shouldRegisterEnvVarRequestTool(): boolean {
@@ -374,16 +374,7 @@ function shouldRegisterPlatformIssueTool(): boolean {
 }
 
 function shouldRegisterTaskSuggestionsTool(): boolean {
-  return (
-    process.env.ROOMOTE_TASK_TYPE === CloudTaskType.SuggestedTasks ||
-    process.env.ROOMOTE_TASK_TYPE === CloudTaskType.LegacyOnboardingSuggestions
-  );
-}
-
-function shouldRegisterLegacyTaskSuggestionsToolAlias(): boolean {
-  return (
-    process.env.ROOMOTE_TASK_TYPE === CloudTaskType.LegacyOnboardingSuggestions
-  );
+  return process.env.ROOMOTE_TASK_TYPE === TaskPayloadKind.Scan;
 }
 
 const ENVIRONMENT_ID_PATTERN =
@@ -590,7 +581,8 @@ roomoteMcpServer.registerTool(
     title: 'Manage Source Control',
     description:
       'Provider-neutral pull request/merge request operations for the current task. ' +
-      'Use action "create_or_update_pull_request" after committing and pushing a branch. ' +
+      'Use action "create_or_update_pull_request" after committing and pushing a branch; ' +
+      'when an open PR/MR already exists for sourceBranch, targetBranch may be omitted and defaults to its current base. ' +
       'Use action "get_pull_request" to read PR/MR details (state, branches, head/base SHAs) and ' +
       '"list_pull_request_comments" to read review threads (with resolution state) and issue comments. ' +
       'Use "reply_to_pull_request_comment" to answer a review thread, "create_pull_request_comment" for a top-level comment, ' +
@@ -660,7 +652,7 @@ roomoteMcpServer.registerTool(
         .string()
         .optional()
         .describe(
-          'Required for create_or_update_pull_request. The base branch the PR/MR should target.',
+          'The base branch the PR/MR should target. Required only when create_or_update_pull_request creates a new PR/MR; omit it when an open PR/MR already exists for sourceBranch to keep its current base.',
         ),
       title: z
         .string()
@@ -741,9 +733,9 @@ roomoteMcpServer.registerTool(
         .enum(['create', 'update'])
         .describe('The environment action to perform'),
       definition: z
-        .union([z.string(), z.record(z.unknown())])
+        .string()
         .describe(
-          'Environment definition as a YAML/JSON string or object. Must satisfy EnvironmentConfig (e.g., include name and repositories).',
+          'Environment definition as a YAML or JSON string. Must satisfy EnvironmentConfig (e.g., include name and repositories).',
         ),
       environmentId: z
         .string()
@@ -980,10 +972,6 @@ if (shouldRegisterTaskSuggestionsTool()) {
   });
 }
 
-if (shouldRegisterLegacyTaskSuggestionsToolAlias()) {
-  registerTaskSuggestionsTool('submit_onboarding_suggestions');
-}
-
 roomoteMcpServer.registerTool(
   'get_slack_channel_messages',
   {
@@ -1103,7 +1091,7 @@ if (shouldRegisterSlackThreadReplyTool()) {
       description:
         `${chatReplySurfaceLabel}-visible: posts a lifecycle reply in the originating ${chatReplySurfaceLabel} thread. ` +
         `Choose the current ${chatReplySurfaceLabel} turn purpose before writing: ack, progress, closeout, or clarification. ` +
-        `Use ack for the first visible response when work will continue; use progress only when the message adds new decision-useful state or prevents a 10-minute silence gap; use closeout for the answer, result, blocker, or handoff; use clarification for lightweight non-secret questions. Only closeout is terminal for final task completion; ack, progress, and clarification keep the ${chatReplySurfaceLabel} turn open. ` +
+        `Use ack for the first visible response when work will continue; use progress only when the message adds new decision-useful state or prevents a 10-minute silence gap; use closeout for the answer, result, blocker, or handoff; use clarification for lightweight non-secret questions. Use closeout to finish a turn with an outcome; a clarification also ends the turn when the next step depends on the user's answer — do not follow it with a separate "waiting on your answer" message. Ack and progress keep the ${chatReplySurfaceLabel} turn open. ` +
         `Use it again on later ${chatReplySurfaceLabel} turns when they need another direct reply; an earlier thread reply does not count as the reply for the current turn. ` +
         "For routine successful closeouts, focus on the shipped change and any blocker or delivery outcome that changes the user's next step; do not include exact validation commands, passed-check ledgers, or proof-applicability narration unless the user asked or that detail materially changes what they should do next. " +
         chatReplyMarkdownGuidance +
@@ -1415,9 +1403,7 @@ if (shouldRegisterSlackChannelPostTool()) {
 
       if (
         hasSubmittedAutomationSlackSummary &&
-        (process.env.ROOMOTE_TASK_TYPE === CloudTaskType.SuggestedTasks ||
-          process.env.ROOMOTE_TASK_TYPE ===
-            CloudTaskType.LegacyOnboardingSuggestions)
+        process.env.ROOMOTE_TASK_TYPE === TaskPayloadKind.Scan
       ) {
         return errorResult(
           'Automation suggestions were already submitted and posted to Slack. Do not call post_to_slack_channel for a duplicate summary.',

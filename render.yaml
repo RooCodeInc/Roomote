@@ -37,12 +37,12 @@
 #   the generated `MINIO_ROOT_PASSWORD` and the app services mirror it into
 #   `S3_SECRET_ACCESS_KEY` with a `fromService` reference.
 # - Render has no Docker socket, so task execution must use a hosted
-#   compute provider (modal by default; e2b and daytona also work).
+#   sandbox provider (modal by default; e2b and daytona also work).
 #   EXCLUDED_COMPUTE_PROVIDERS=docker hides the unusable provider.
 # - Zero deploy-time inputs. Modal tokens and model provider keys are
 #   entered in the /setup wizard after first boot and stored encrypted in
 #   Postgres. Auth keypairs come from ROOMOTE_AUTO_GENERATE_KEYS=true.
-# - The api service must be publicly reachable: hosted compute workers and
+# - The api service must be publicly reachable: hosted-sandbox workers and
 #   GitHub webhooks call `TRPC_URL` directly. MinIO is public too because
 #   presigned artifact URLs (`S3_PRESIGN_ENDPOINT`) must be reachable from
 #   workers and browsers; Render routes its HTTPS domain to port 9000.
@@ -85,7 +85,7 @@ services:
       # Pinned to an immutable MinIO release: this service owns a persistent
       # disk, so a mutable `latest` tag could pull an unreviewed breaking
       # change on redeploy. Bump deliberately alongside a disk backup.
-      url: docker.io/minio/minio:RELEASE.2025-09-07T16-13-09Z
+      url: docker.io/minio/minio:RELEASE.2025-09-07T16-13-09Z@sha256:14cea493d9a34af32f524e538b8346cf79f3321eff8e708c1e2960462bd8936e
     plan: starter
     dockerCommand: minio server /data --address :9000 --console-address :9001
     healthCheckPath: /minio/health/live
@@ -174,7 +174,7 @@ services:
     image:
       url: ghcr.io/roocodeinc/roomote-app:develop
     plan: starter
-    # The controller may be inside a hosted-compute worker spawn when a
+    # The controller may be inside a hosted-sandbox worker spawn when a
     # deploy replaces the container; 300 is Render's maximum grace period.
     maxShutdownDelaySeconds: 300
     dockerCommand: /roomote/.docker/app/entrypoint.sh controller

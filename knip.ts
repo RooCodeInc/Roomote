@@ -5,6 +5,9 @@ const config: KnipConfig = {
     // ── Root ──────────────────────────────────────────────
     '.': {
       project: ['scripts/**/*.ts'],
+      // Used from package.json `changeset` / `version` scripts, not imported.
+      ignoreDependencies: ['@changesets/cli'],
+      ignoreBinaries: ['changeset'],
     },
 
     // ── Apps ──────────────────────────────────────────────
@@ -84,6 +87,9 @@ const config: KnipConfig = {
         'evals/router/promptfooconfig.ts',
         'evals/router/promptfooconfig.followup.ts',
       ],
+    },
+    'packages/communication': {
+      project: ['src/**/*.ts'],
     },
     'packages/compute-providers': {
       project: ['src/**/*.ts'],

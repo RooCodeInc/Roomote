@@ -3,7 +3,7 @@
 import { type ReactNode, useEffect, useRef } from 'react';
 
 import {
-  type CloudTaskStatus,
+  type RunStatus,
   type CodingHarness,
   ROOMOTE_RUNTIME_TASK_MESSAGE_PROTOCOL,
   type TaskPhase,
@@ -51,7 +51,7 @@ interface HistoricalSandboxProviderProps {
    * Persisted runtime state used to infer whether a trailing assistant
    * transcript segment represents a completed turn.
    */
-  taskStatus?: CloudTaskStatus | null;
+  taskStatus?: RunStatus | null;
   taskPhase?: TaskPhase | null;
 
   /**

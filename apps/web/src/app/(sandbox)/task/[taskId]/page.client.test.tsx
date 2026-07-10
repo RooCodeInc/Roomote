@@ -2,13 +2,13 @@ import type { ReactNode } from 'react';
 import { render, screen } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 
-import { CloudTaskStatus, CloudTaskType } from '@roomote/types';
+import { RunStatus, TaskPayloadKind } from '@roomote/types';
 
 const {
   replaceMock,
   recordVisitMock,
   setSidebarVisibleMock,
-  useCloudSessionMock,
+  useTaskSessionMock,
   usePathnameMock,
   usePageTitleMock,
   useParamsMock,
@@ -21,7 +21,7 @@ const {
   replaceMock: vi.fn(),
   recordVisitMock: vi.fn(),
   setSidebarVisibleMock: vi.fn(),
-  useCloudSessionMock: vi.fn(),
+  useTaskSessionMock: vi.fn(),
   usePathnameMock: vi.fn(() => '/task/route-task'),
   usePageTitleMock: vi.fn(),
   useParamsMock: vi.fn(() => ({ taskId: 'route-task' })),
@@ -77,7 +77,7 @@ vi.mock('./hooks', () => ({
   SandboxProvider: ({ children }: { children: ReactNode }) => (
     <div data-testid="sandbox-provider">{children}</div>
   ),
-  useCloudSession: useCloudSessionMock,
+  useTaskSession: useTaskSessionMock,
   useTaskCompletionNotification: useTaskCompletionNotificationMock,
   useTaskMessageEnvelopes: useTaskMessageEnvelopesMock,
 }));
@@ -133,7 +133,7 @@ function renderPage() {
 const baseSession = {
   artifacts: [],
   blank: false,
-  cloudJob: {
+  taskRun: {
     id: 1,
     sandboxServerUrl: 'http://sandbox.test',
     status: 'running',
@@ -172,7 +172,7 @@ describe('SandboxPage', () => {
   });
 
   it('warms task history immediately and renders the transcript while booting once history exists', () => {
-    useCloudSessionMock.mockReturnValue(baseSession);
+    useTaskSessionMock.mockReturnValue(baseSession);
     useTaskMessageEnvelopesMock.mockReturnValue({
       data: [{ id: 'msg-1' }],
     });
@@ -188,7 +188,7 @@ describe('SandboxPage', () => {
   });
 
   it('keeps the startup surface for booting tasks with no transcript content yet', () => {
-    useCloudSessionMock.mockReturnValue(baseSession);
+    useTaskSessionMock.mockReturnValue(baseSession);
     useTaskMessageEnvelopesMock.mockReturnValue({
       data: [],
     });
@@ -200,7 +200,7 @@ describe('SandboxPage', () => {
   });
 
   it('renders the transcript while booting when the initial prompt is visible even before messages exist', () => {
-    useCloudSessionMock.mockReturnValue({
+    useTaskSessionMock.mockReturnValue({
       ...baseSession,
       prompt: {
         id: 'prompt-1',
@@ -219,13 +219,13 @@ describe('SandboxPage', () => {
   });
 
   it('keeps historical task content visible for boot failures when transcript history already exists', () => {
-    useCloudSessionMock.mockReturnValue({
+    useTaskSessionMock.mockReturnValue({
       ...baseSession,
-      cloudJob: {
-        ...baseSession.cloudJob,
-        status: CloudTaskStatus.Failed,
-        type: CloudTaskType.SnapshotResume,
-        sourceCloudJobId: 42,
+      taskRun: {
+        ...baseSession.taskRun,
+        status: RunStatus.Failed,
+        payloadKind: TaskPayloadKind.SnapshotResume,
+        sourceRunId: 42,
         sourceSnapshotId: 'snapshot-123',
       },
       sessionState: 'boot-failed',
@@ -246,12 +246,12 @@ describe('SandboxPage', () => {
   });
 
   it('keeps the startup surface for first-run boot failures even when the launch prompt is visible', () => {
-    useCloudSessionMock.mockReturnValue({
+    useTaskSessionMock.mockReturnValue({
       ...baseSession,
-      cloudJob: {
-        ...baseSession.cloudJob,
-        status: CloudTaskStatus.Failed,
-        type: CloudTaskType.StandardTask,
+      taskRun: {
+        ...baseSession.taskRun,
+        status: RunStatus.Failed,
+        payloadKind: TaskPayloadKind.StandardTask,
       },
       prompt: {
         id: 'prompt-1',

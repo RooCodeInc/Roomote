@@ -1,4 +1,4 @@
-import type { CloudJob } from '@roomote/db/server';
+import type { TaskRun } from '@roomote/db/server';
 
 const {
   mockEnv,
@@ -19,11 +19,20 @@ const {
     MODAL_REGISTRY_PASSWORD: undefined,
     MODAL_ECR_OIDC_ROLE_ARN: undefined,
     MODAL_ECR_REGION: undefined,
+    MODAL_REGIONS: undefined,
     TRPC_URL: 'http://localhost:13001',
     DOCKER_WORKER_IMAGE: 'roomote-worker:local',
     DOCKER_WORKER_PLATFORM: 'linux/amd64',
     DOCKER_WORKER_NETWORK: undefined,
     DOCKER_WORKER_RELEASE_PATH: undefined,
+    DOCKER_WORKER_CPU_LIMIT: 2,
+    DOCKER_WORKER_MEMORY_LIMIT: '4g',
+    DOCKER_WORKER_PIDS_LIMIT: 512,
+    DOCKER_WORKER_DISK_LIMIT: '20g',
+    DOCKER_WORKER_ALLOW_UNBOUNDED_DISK: false,
+    DOCKER_WORKER_LOG_MAX_SIZE: '10m',
+    DOCKER_WORKER_LOG_MAX_FILES: 3,
+    DOCKER_WORKER_EGRESS_POLICY: 'internet',
     DAYTONA_API_KEY: 'daytona-key',
     DAYTONA_API_URL: undefined,
     DAYTONA_TARGET: undefined,
@@ -32,7 +41,7 @@ const {
     E2B_DOMAIN: undefined,
     E2B_TEMPLATE_ID: 'roomote-worker-template',
     E2B_MAX_SANDBOX_TIMEOUT_MS: 3_600_000,
-  } as Record<string, string | number | undefined>,
+  } as Record<string, string | number | boolean | undefined>,
   mockFindOrg: vi.fn(),
   mockSpawnDaytonaWorker: vi.fn(),
   mockSpawnDockerWorker: vi.fn(),
@@ -40,8 +49,8 @@ const {
   mockSpawnModalWorker: vi.fn(),
 }));
 
-const { mockFinishCloudJob } = vi.hoisted(() => ({
-  mockFinishCloudJob: vi.fn().mockResolvedValue(undefined),
+const { mockFinishRun } = vi.hoisted(() => ({
+  mockFinishRun: vi.fn().mockResolvedValue(undefined),
 }));
 
 vi.mock('@roomote/env', async (importOriginal) => {
@@ -73,10 +82,11 @@ vi.mock('@roomote/db/server', async () => {
 });
 
 vi.mock('@roomote/sdk/server', () => ({
-  finishCloudJob: (...args: unknown[]) => mockFinishCloudJob(...args),
+  finishRun: (...args: unknown[]) => mockFinishRun(...args),
 }));
 
 vi.mock('../compute-providers', () => ({
+  cleanupStaleDockerSandboxes: vi.fn().mockResolvedValue(undefined),
   spawnDaytonaWorker: (...args: unknown[]) => mockSpawnDaytonaWorker(...args),
   spawnDockerWorker: (...args: unknown[]) => mockSpawnDockerWorker(...args),
   spawnE2bWorker: (...args: unknown[]) => mockSpawnE2bWorker(...args),
@@ -96,11 +106,20 @@ describe('RoomoteController', () => {
     mockEnv.MODAL_REGISTRY_PASSWORD = undefined;
     mockEnv.MODAL_ECR_OIDC_ROLE_ARN = undefined;
     mockEnv.MODAL_ECR_REGION = undefined;
+    mockEnv.MODAL_REGIONS = undefined;
     mockEnv.TRPC_URL = 'http://localhost:13001';
     mockEnv.DOCKER_WORKER_IMAGE = 'roomote-worker:local';
     mockEnv.DOCKER_WORKER_PLATFORM = 'linux/amd64';
     mockEnv.DOCKER_WORKER_NETWORK = undefined;
     mockEnv.DOCKER_WORKER_RELEASE_PATH = undefined;
+    mockEnv.DOCKER_WORKER_CPU_LIMIT = 2;
+    mockEnv.DOCKER_WORKER_MEMORY_LIMIT = '4g';
+    mockEnv.DOCKER_WORKER_PIDS_LIMIT = 512;
+    mockEnv.DOCKER_WORKER_DISK_LIMIT = '20g';
+    mockEnv.DOCKER_WORKER_ALLOW_UNBOUNDED_DISK = false;
+    mockEnv.DOCKER_WORKER_LOG_MAX_SIZE = '10m';
+    mockEnv.DOCKER_WORKER_LOG_MAX_FILES = 3;
+    mockEnv.DOCKER_WORKER_EGRESS_POLICY = 'internet';
     mockEnv.DAYTONA_API_KEY = 'daytona-key';
     mockEnv.DAYTONA_API_URL = undefined;
     mockEnv.DAYTONA_TARGET = undefined;
@@ -125,7 +144,7 @@ describe('RoomoteController', () => {
     await (
       controller as unknown as {
         spawnFreshWorker: (
-          cloudJob: CloudJob,
+          taskRun: TaskRun,
           authToken: string,
           deploymentSlug: string,
           timeoutMs: number,
@@ -136,7 +155,7 @@ describe('RoomoteController', () => {
       {
         id: 48,
         payload: { environmentId: 'env_123' },
-      } as CloudJob,
+      } as TaskRun,
       'auth-token',
       'roomote',
       60_000,
@@ -151,6 +170,14 @@ describe('RoomoteController', () => {
         platform: 'linux/amd64',
         network: 'roomote_default',
         dockerTimeoutMs: 60_000,
+        cpuLimit: 2,
+        memoryLimit: '4g',
+        pidsLimit: 512,
+        diskLimit: '20g',
+        allowUnboundedDisk: false,
+        logMaxSize: '10m',
+        logMaxFiles: 3,
+        egressPolicy: 'internet',
       }),
     );
   });
@@ -163,7 +190,7 @@ describe('RoomoteController', () => {
       (
         controller as unknown as {
           spawnFreshWorker: (
-            cloudJob: CloudJob,
+            taskRun: TaskRun,
             authToken: string,
             deploymentSlug: string,
             timeoutMs: number,
@@ -174,7 +201,7 @@ describe('RoomoteController', () => {
         {
           id: 46,
           payload: { environmentId: 'env_123' },
-        } as CloudJob,
+        } as TaskRun,
         'auth-token',
         'roomote',
         60_000,
@@ -191,7 +218,7 @@ describe('RoomoteController', () => {
     await (
       controller as unknown as {
         spawnFreshWorker: (
-          cloudJob: CloudJob,
+          taskRun: TaskRun,
           authToken: string,
           deploymentSlug: string,
           timeoutMs: number,
@@ -202,7 +229,7 @@ describe('RoomoteController', () => {
       {
         id: 49,
         payload: { environmentId: 'env_123' },
-      } as CloudJob,
+      } as TaskRun,
       'auth-token',
       'roomote',
       60_000,
@@ -232,7 +259,7 @@ describe('RoomoteController', () => {
       (
         controller as unknown as {
           spawnFreshWorker: (
-            cloudJob: CloudJob,
+            taskRun: TaskRun,
             authToken: string,
             deploymentSlug: string,
             timeoutMs: number,
@@ -243,7 +270,7 @@ describe('RoomoteController', () => {
         {
           id: 50,
           payload: { environmentId: 'env_123' },
-        } as CloudJob,
+        } as TaskRun,
         'auth-token',
         'roomote',
         60_000,
@@ -260,7 +287,7 @@ describe('RoomoteController', () => {
     await (
       controller as unknown as {
         spawnFreshWorker: (
-          cloudJob: CloudJob,
+          taskRun: TaskRun,
           authToken: string,
           deploymentSlug: string,
           timeoutMs: number,
@@ -271,7 +298,7 @@ describe('RoomoteController', () => {
       {
         id: 51,
         payload: { environmentId: 'env_123' },
-      } as CloudJob,
+      } as TaskRun,
       'auth-token',
       'roomote',
       60_000,
@@ -299,7 +326,7 @@ describe('RoomoteController', () => {
     await (
       controller as unknown as {
         spawnFreshWorker: (
-          cloudJob: CloudJob,
+          taskRun: TaskRun,
           authToken: string,
           deploymentSlug: string,
           timeoutMs: number,
@@ -310,7 +337,7 @@ describe('RoomoteController', () => {
       {
         id: 53,
         payload: { environmentId: 'env_123' },
-      } as CloudJob,
+      } as TaskRun,
       'auth-token',
       'roomote',
       5 * 60 * 60 * 1_000,
@@ -334,7 +361,7 @@ describe('RoomoteController', () => {
       (
         controller as unknown as {
           spawnFreshWorker: (
-            cloudJob: CloudJob,
+            taskRun: TaskRun,
             authToken: string,
             deploymentSlug: string,
             timeoutMs: number,
@@ -345,7 +372,7 @@ describe('RoomoteController', () => {
         {
           id: 52,
           payload: { environmentId: 'env_123' },
-        } as CloudJob,
+        } as TaskRun,
         'auth-token',
         'roomote',
         60_000,
@@ -368,12 +395,13 @@ describe('RoomoteController', () => {
   it('adds deployment tags when spawning a modal worker', async () => {
     mockEnv.MODAL_REGISTRY_USERNAME = 'ghcr-user';
     mockEnv.MODAL_REGISTRY_PASSWORD = 'ghcr-token';
+    mockEnv.MODAL_REGIONS = 'us,us-west';
     const controller = new RoomoteController('preview');
 
     await (
       controller as unknown as {
         spawnFreshWorker: (
-          cloudJob: CloudJob,
+          taskRun: TaskRun,
           authToken: string,
           deploymentSlug: string,
           timeoutMs: number,
@@ -384,7 +412,7 @@ describe('RoomoteController', () => {
       {
         id: 44,
         payload: { environmentId: 'env_123' },
-      } as CloudJob,
+      } as TaskRun,
       'auth-token',
       'roomote',
       60_000,
@@ -404,6 +432,7 @@ describe('RoomoteController', () => {
         modalBaseImageRef: 'ghcr.io/roomote/modal-worker:test',
         modalRegistryUsername: 'ghcr-user',
         modalRegistryPassword: 'ghcr-token',
+        modalRegions: 'us,us-west',
       }),
     );
   });

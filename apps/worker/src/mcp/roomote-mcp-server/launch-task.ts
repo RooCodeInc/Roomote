@@ -29,9 +29,9 @@ export async function handleLaunchTask(
     }
 
     return successResult({
-      cloudJobId: result.cloudJobId,
+      runId: result.runId,
       taskId: result.taskId,
-      message: `Task launched successfully. Cloud Job ID: ${result.cloudJobId}, Task ID: ${result.taskId}`,
+      message: `Task launched successfully. Task Run ID: ${result.runId}, Task ID: ${result.taskId}`,
     });
   } catch (error) {
     return catchError(error);

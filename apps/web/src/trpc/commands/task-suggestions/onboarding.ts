@@ -1,27 +1,31 @@
 import {
   buildSuggestedTasksPrompt,
-  enqueueCloudTask,
+  enqueueTask,
   findEnvironmentForRepo,
 } from '@roomote/cloud-agents/server';
 import {
+  and,
   asc,
   db,
   deploymentSettings,
   eq,
   getBackgroundAgentSettingsForDeployment,
+  inArray,
+  repositories,
   resolveRepositorySelectionByIds,
-  taskSuggestions,
+  workItems,
 } from '@roomote/db/server';
 import {
-  CloudTaskStatus,
-  CloudTaskType,
+  RunStatus,
+  TaskPayloadKind,
   buildEnvironmentDefinitionWorkspacePayload,
   createEmptySetupNewState,
-  isExitedCloudTaskStatus,
+  isExitedRunStatus,
   normalizeSetupNewState,
 } from '@roomote/types';
 
-import { getLatestCloudJobsByTaskId } from '@/lib/server';
+import { getLatestTaskRunsByTaskId } from '@/lib/server';
+import { resolveSingleSourceControlProvider } from '@/lib/server/source-control-provider';
 import type { UserAuthSuccess } from '@/types';
 import { assertAdmin } from '../setup/shared';
 import { decorateSuggestionsWithEnvironmentIds } from './launch-resolution';
@@ -81,21 +85,28 @@ async function getPersistedTaskSuggestions(
     return [];
   }
 
-  return db
+  const rows = await db
     .select({
-      id: taskSuggestions.id,
-      title: taskSuggestions.title,
-      brief: taskSuggestions.brief,
-      repositoryIds: taskSuggestions.repositoryIds,
-      sortOrder: taskSuggestions.sortOrder,
-      dismissedAt: taskSuggestions.dismissedAt,
-      targetRepositoryFullName: taskSuggestions.targetRepositoryFullName,
-      targetEnvironmentId: taskSuggestions.targetEnvironmentId,
-      readinessMessage: taskSuggestions.readinessMessage,
+      id: workItems.id,
+      title: workItems.title,
+      brief: workItems.brief,
+      repositoryIds: workItems.repositoryIds,
+      sortOrder: workItems.sortOrder,
+      dismissedAt: workItems.dismissedAt,
+      targetRepositoryFullName: workItems.targetRepositoryFullName,
+      targetEnvironmentId: workItems.targetEnvironmentId,
+      readinessMessage: workItems.readinessMessage,
     })
-    .from(taskSuggestions)
-    .where(eq(taskSuggestions.sourceTaskId, sourceTaskId))
-    .orderBy(asc(taskSuggestions.sortOrder));
+    .from(workItems)
+    .where(
+      and(
+        eq(workItems.sourceTaskId, sourceTaskId),
+        eq(workItems.kind, 'suggestion'),
+      ),
+    )
+    .orderBy(asc(workItems.sortOrder));
+
+  return rows.map((row) => ({ ...row, brief: row.brief ?? '' }));
 }
 
 async function getSuggestionTaskStatus(taskId: string | null) {
@@ -103,8 +114,8 @@ async function getSuggestionTaskStatus(taskId: string | null) {
     return null;
   }
 
-  const latestCloudJobs = await getLatestCloudJobsByTaskId([taskId]);
-  return latestCloudJobs[taskId]?.status ?? null;
+  const latestTaskRuns = await getLatestTaskRunsByTaskId([taskId]);
+  return latestTaskRuns[taskId]?.status ?? null;
 }
 
 async function launchSuggestedTasksTask(input: {
@@ -124,36 +135,56 @@ async function launchSuggestedTasksTask(input: {
   const workspacePayload = buildEnvironmentDefinitionWorkspacePayload(
     input.repositoryFullNames,
   );
-  const launchResult = await enqueueCloudTask(
+  // Stamp the provider explicitly: dequeue defaults to GitHub when the
+  // payload omits it, which breaks non-GitHub deployments.
+  const scanRepositoryRows = await db
+    .select({ sourceControlProvider: repositories.sourceControlProvider })
+    .from(repositories)
+    .where(inArray(repositories.fullName, input.repositoryFullNames));
+  const scanSourceControlProvider = resolveSingleSourceControlProvider(
+    scanRepositoryRows.map((row) => row.sourceControlProvider),
+  );
+  const launchResult = await enqueueTask(
     {
-      userId: input.userId,
-      type: CloudTaskType.SuggestedTasks,
-      payload: {
-        ...workspacePayload,
-        ...(input.repositoryIds?.length
-          ? { selectedRepositoryIds: input.repositoryIds }
-          : {}),
-        ...(input.currentState.slackTeamId
-          ? { teamId: input.currentState.slackTeamId }
-          : {}),
-        ...(input.currentState.slackChannel
-          ? { slackChannel: input.currentState.slackChannel }
-          : {}),
-        ...(input.currentState.slackThreadTs
-          ? { slackThreadTs: input.currentState.slackThreadTs }
-          : {}),
-        description: buildSuggestedTasksPrompt({
-          repositoryFullNames: input.repositoryFullNames,
-          repositoryCoverage,
-          setupGuidance: input.setupGuidance,
-          suggesterInstructions: settings?.suggesterInstructions ?? null,
-        }),
-        trigger: input.trigger,
-        notifySlack: input.notifySlack,
-        visibleInTranscript: false,
+      task: {
+        type: TaskPayloadKind.Scan,
+        payload: {
+          ...workspacePayload,
+          ...(scanSourceControlProvider
+            ? { sourceControlProvider: scanSourceControlProvider }
+            : {}),
+          ...(input.repositoryIds?.length
+            ? { selectedRepositoryIds: input.repositoryIds }
+            : {}),
+          ...(input.currentState.slackTeamId
+            ? { teamId: input.currentState.slackTeamId }
+            : {}),
+          ...(input.currentState.slackChannel
+            ? { slackChannel: input.currentState.slackChannel }
+            : {}),
+          ...(input.currentState.slackThreadTs
+            ? { slackThreadTs: input.currentState.slackThreadTs }
+            : {}),
+          description: buildSuggestedTasksPrompt({
+            repositoryFullNames: input.repositoryFullNames,
+            repositoryCoverage,
+            setupGuidance: input.setupGuidance,
+            suggesterInstructions: settings?.suggesterInstructions ?? null,
+          }),
+          trigger: input.trigger,
+          notifySlack: input.notifySlack,
+          visibleInTranscript: false,
+        },
       },
+      initiator: { kind: 'user', userId: input.userId },
+      workflow: 'scan',
+      surface: 'web',
+      trigger: 'manual',
+      visibility: 'hidden',
     },
     {
+      // Keepalive parity: scans keep the automation runtime policy they had
+      // before the initiator model existed.
       launchClass: 'automation',
     },
   );
@@ -256,17 +287,14 @@ async function ensureTaskSuggestions(auth: UserAuthSuccess): Promise<{
   let launchState = setupNewState;
 
   if (setupNewState.suggestionTaskId) {
-    if (
-      suggestionTaskStatus &&
-      !isExitedCloudTaskStatus(suggestionTaskStatus)
-    ) {
+    if (suggestionTaskStatus && !isExitedRunStatus(suggestionTaskStatus)) {
       return {
         generationStatus: 'pending',
         suggestions: [],
       };
     }
 
-    if (suggestionTaskStatus === CloudTaskStatus.Completed) {
+    if (suggestionTaskStatus === RunStatus.Completed) {
       return {
         generationStatus: 'empty',
         suggestions: [],
@@ -275,7 +303,7 @@ async function ensureTaskSuggestions(auth: UserAuthSuccess): Promise<{
 
     if (
       suggestionTaskStatus === null ||
-      (suggestionTaskStatus && isExitedCloudTaskStatus(suggestionTaskStatus))
+      (suggestionTaskStatus && isExitedRunStatus(suggestionTaskStatus))
     ) {
       launchState = await clearPersistedSuggestionTask({
         currentState: setupNewState,
@@ -328,11 +356,16 @@ export async function dismissTaskSuggestionCommand(
 ) {
   const [suggestion] = await db
     .select({
-      id: taskSuggestions.id,
-      dismissedAt: taskSuggestions.dismissedAt,
+      id: workItems.id,
+      dismissedAt: workItems.dismissedAt,
     })
-    .from(taskSuggestions)
-    .where(eq(taskSuggestions.id, input.suggestionId))
+    .from(workItems)
+    .where(
+      and(
+        eq(workItems.id, input.suggestionId),
+        eq(workItems.kind, 'suggestion'),
+      ),
+    )
     .limit(1);
 
   if (!suggestion) {
@@ -343,13 +376,13 @@ export async function dismissTaskSuggestionCommand(
     const dismissedAt = new Date();
 
     await db
-      .update(taskSuggestions)
+      .update(workItems)
       .set({
         dismissedAt,
         status: 'dismissed',
         updatedAt: dismissedAt,
       })
-      .where(eq(taskSuggestions.id, input.suggestionId));
+      .where(eq(workItems.id, input.suggestionId));
   }
 
   return { success: true as const };

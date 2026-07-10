@@ -10,7 +10,7 @@ import {
   PRODUCT_NAME,
   type SourceControlTokenMetadata,
 } from '@roomote/types';
-import { type CloudJob } from '@roomote/sdk/client';
+import { type TaskRun } from '@roomote/sdk/client';
 
 import {
   applySourceControlTokenMetadata,
@@ -147,20 +147,20 @@ interface PreviewIdentity {
   proxyPorts: Record<string, number>;
 }
 
-function resolvePreviewIdentity(cloudJob?: CloudJob): PreviewIdentity | null {
-  if (cloudJob?.taskId && cloudJob.machineDomains) {
+function resolvePreviewIdentity(taskRun?: TaskRun): PreviewIdentity | null {
+  if (taskRun?.taskId && taskRun.machineDomains) {
     return {
-      taskId: cloudJob.taskId,
-      machineDomains: cloudJob.machineDomains,
-      proxyPorts: cloudJob.proxyPorts ?? {},
+      taskId: taskRun.taskId,
+      machineDomains: taskRun.machineDomains,
+      proxyPorts: taskRun.proxyPorts ?? {},
     };
   }
 
-  if (cloudJob?.machineDomains) {
+  if (taskRun?.machineDomains) {
     return {
       taskId: '',
-      machineDomains: cloudJob.machineDomains,
-      proxyPorts: cloudJob.proxyPorts ?? {},
+      machineDomains: taskRun.machineDomains,
+      proxyPorts: taskRun.proxyPorts ?? {},
     };
   }
 
@@ -180,7 +180,7 @@ function resolvePreviewIdentity(cloudJob?: CloudJob): PreviewIdentity | null {
  */
 export async function injectEnvVars(
   envVars: Record<string, string>,
-  cloudJob?: CloudJob,
+  taskRun?: TaskRun,
   options?: {
     previewProxyBaseUrl?: string;
     previewProxySubdomainSuffix?: string;
@@ -188,7 +188,7 @@ export async function injectEnvVars(
     syncSourceControlTokenFiles?: boolean;
   },
 ): Promise<void> {
-  const identity = resolvePreviewIdentity(cloudJob);
+  const identity = resolvePreviewIdentity(taskRun);
   const previewProxyBaseUrl =
     options?.previewProxyBaseUrl ?? process.env.PREVIEW_PROXY_BASE_URL;
   const previewProxySubdomainSuffix =
@@ -235,14 +235,14 @@ export async function injectEnvVars(
   }
 
   const authBypassValue =
-    process.env.ROOMOTE_AUTH_BYPASS_VALUE ?? cloudJob?.authBypassValue;
+    process.env.ROOMOTE_AUTH_BYPASS_VALUE ?? taskRun?.authBypassValue;
   if (authBypassValue) {
     envVars.ROOMOTE_AUTH_BYPASS_VALUE = authBypassValue;
   }
 
   const authBypassHeaderName =
     process.env.ROOMOTE_AUTH_BYPASS_HEADER_NAME ??
-    cloudJob?.authBypassHeaderName;
+    taskRun?.authBypassHeaderName;
   if (authBypassHeaderName) {
     envVars.ROOMOTE_AUTH_BYPASS_HEADER_NAME = authBypassHeaderName;
   }

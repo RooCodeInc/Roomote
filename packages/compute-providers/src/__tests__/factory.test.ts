@@ -235,6 +235,58 @@ describe('createComputeProviderClient', () => {
     }
   });
 
+  it('resolves Modal regions from env as a comma-separated list', () => {
+    process.env.MODAL_TOKEN_ID = 'token-id';
+    process.env.MODAL_TOKEN_SECRET = 'token-secret';
+    process.env.MODAL_BASE_IMAGE_REF = 'ghcr.io/roomote/worker:test';
+    process.env.MODAL_REGIONS = ' us-west , us ';
+
+    try {
+      createComputeProviderClient({ provider: 'modal' });
+
+      expect(modalClientMock).toHaveBeenCalledWith(
+        expect.objectContaining({
+          regions: ['us-west', 'us'],
+        }),
+      );
+    } finally {
+      delete process.env.MODAL_TOKEN_ID;
+      delete process.env.MODAL_TOKEN_SECRET;
+      delete process.env.MODAL_BASE_IMAGE_REF;
+      delete process.env.MODAL_REGIONS;
+    }
+  });
+
+  it('prefers explicit Modal regions config over MODAL_REGIONS env', () => {
+    process.env.MODAL_TOKEN_ID = 'token-id';
+    process.env.MODAL_TOKEN_SECRET = 'token-secret';
+    process.env.MODAL_BASE_IMAGE_REF = 'ghcr.io/roomote/worker:test';
+    process.env.MODAL_REGIONS = 'eu';
+
+    try {
+      createComputeProviderClient({
+        provider: 'modal',
+        config: {
+          tokenId: 'token-id',
+          tokenSecret: 'token-secret',
+          baseImageRef: 'ghcr.io/roomote/worker:test',
+          regions: ['us'],
+        },
+      });
+
+      expect(modalClientMock).toHaveBeenCalledWith(
+        expect.objectContaining({
+          regions: ['us'],
+        }),
+      );
+    } finally {
+      delete process.env.MODAL_TOKEN_ID;
+      delete process.env.MODAL_TOKEN_SECRET;
+      delete process.env.MODAL_BASE_IMAGE_REF;
+      delete process.env.MODAL_REGIONS;
+    }
+  });
+
   it('requires the Daytona API key and snapshot name', () => {
     delete process.env.DAYTONA_API_KEY;
     delete process.env.DAYTONA_SNAPSHOT_NAME;

@@ -6,6 +6,7 @@ import {
   normalizeSourceControlProvider,
   parsePullRequestUrl,
   resolveSourceControlProviderFromPayload,
+  stripCloneUrlUserInfo,
 } from '../source-control';
 
 describe('source control provider helpers', () => {
@@ -128,6 +129,24 @@ describe('source control provider helpers', () => {
         repositoryFullName: 'acme/Platform/backend',
       }),
     ).toBe('https://dev.azure.com/acme/Platform/_git/backend');
+  });
+
+  it('strips userinfo from clone URLs', () => {
+    expect(
+      stripCloneUrlUserInfo(
+        'https://acme@dev.azure.com/acme/Test%20ADO/_git/Test%20ADO',
+      ),
+    ).toBe('https://dev.azure.com/acme/Test%20ADO/_git/Test%20ADO');
+
+    expect(
+      stripCloneUrlUserInfo('https://user:secret@git.example.com/team/repo'),
+    ).toBe('https://git.example.com/team/repo');
+
+    expect(stripCloneUrlUserInfo('https://github.com/owner/repo.git')).toBe(
+      'https://github.com/owner/repo.git',
+    );
+
+    expect(stripCloneUrlUserInfo('not a url')).toBe('not a url');
   });
 
   it('parses GitHub, GitLab, Gitea, and Azure DevOps pull request URLs', () => {

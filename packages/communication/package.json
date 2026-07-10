@@ -1,5 +1,6 @@
 {
   "name": "@roomote/communication",
+  "version": "0.0.2",
   "private": true,
   "type": "module",
   "exports": {
@@ -21,8 +22,10 @@
     "lint": "eslint src --ext=ts --max-warnings=0",
     "check-types": "tsc --noEmit",
     "check-types:fast": "tsgo --noEmit",
+    "mock:telegram": "dotenvx run -f ../../.env.local -- tsx scripts/run-mock-telegram.ts",
     "test": "dotenvx run -f ../../.env.test -- vitest",
-    "clean": "rimraf .turbo"
+    "clean": "rimraf .turbo",
+    "eval:telegram-scenario": "dotenvx run -f ../../.env.local -- tsx evals/run-telegram-scenario.ts"
   },
   "dependencies": {
     "@roomote/db": "workspace:^",

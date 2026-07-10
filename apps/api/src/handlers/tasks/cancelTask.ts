@@ -1,16 +1,17 @@
 import type { Context } from 'hono';
 
 import {
-  cloudJobs,
   db,
   eq,
   markTaskStartParallelCountEndedAt,
+  syncTaskStateFromRuns,
+  taskRuns,
 } from '@roomote/db/server';
-import { CloudTaskStatus, isExitedCloudTaskStatus } from '@roomote/types';
+import { RunStatus, isExitedRunStatus } from '@roomote/types';
 
 import type { Variables } from '../../types';
 import type { McpAuth } from '../mcp/middleware';
-import { findLatestCloudJob } from './helpers';
+import { findLatestTaskRun } from './helpers';
 import { logHandlerError } from '../utils';
 
 /**
@@ -28,13 +29,13 @@ export async function cancelTask(
   }
 
   try {
-    const job = await findLatestCloudJob(taskId);
+    const job = await findLatestTaskRun(taskId);
 
     if (!job) {
       return c.json({ success: false, error: 'Task not found' }, 404);
     }
 
-    if (isExitedCloudTaskStatus(job.status)) {
+    if (isExitedRunStatus(job.status)) {
       return c.json(
         {
           success: false,
@@ -48,15 +49,20 @@ export async function cancelTask(
 
     await db.transaction(async (tx) => {
       await tx
-        .update(cloudJobs)
+        .update(taskRuns)
         .set({
-          status: CloudTaskStatus.Canceled,
+          status: RunStatus.Canceled,
+          cancelRequestedAt: endedAt,
           canceledAt: endedAt,
         })
-        .where(eq(cloudJobs.id, job.id));
+        .where(eq(taskRuns.id, job.id));
+
+      // Derive the durable task state from all its runs after canceling this
+      // run, so a still-running or already-completed sibling is respected.
+      await syncTaskStateFromRuns(tx, taskId);
 
       await markTaskStartParallelCountEndedAt(tx, {
-        cloudJobId: job.id,
+        runId: job.id,
         endedAt,
       });
     });

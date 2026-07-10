@@ -2,7 +2,7 @@
 
 import { Moon } from '@/components/system';
 
-import type { CloudJobDetail } from '@/lib/server';
+import type { TaskRunDetail } from '@/lib/server';
 import {
   Message,
   MessageContent,
@@ -10,19 +10,19 @@ import {
   ToolHeader,
 } from '@/components/ai-elements';
 
-import { isCloudJobSnapshotting } from '../sidebar-actions/utils';
+import { isTaskRunSnapshotting } from '../sidebar-actions/utils';
 
 interface SleepWakeMessagesProps {
-  cloudJob: CloudJobDetail;
+  taskRun: TaskRunDetail;
 }
 
-export const SleepWakeMessages = ({ cloudJob }: SleepWakeMessagesProps) => {
+export const SleepWakeMessages = ({ taskRun }: SleepWakeMessagesProps) => {
   // ConnectionStatusBanner suppresses its disconnect states exactly while
   // this row is visible, so keep the two conditions in sync via the shared
   // predicate.
-  const isSnapshotting = isCloudJobSnapshotting(cloudJob);
+  const isSnapshotting = isTaskRunSnapshotting(taskRun);
 
-  const hasSnapshot = !!cloudJob.snapshotId;
+  const hasSnapshot = !!taskRun.snapshotId;
 
   if (!isSnapshotting && !hasSnapshot) {
     return null;

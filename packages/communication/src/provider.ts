@@ -36,7 +36,7 @@ export type CommunicationPostMessageInput = {
   threadId?: string;
   text?: string;
   blocks?: unknown[];
-  images?: Array<{ url: string; altText: string }>;
+  images?: Array<{ url: string; altText: string; contentType?: string }>;
   serviceUrl?: string;
   textFormat?: 'plain' | 'markdown' | 'xml';
   replyToMessageId?: string;
@@ -131,7 +131,7 @@ export interface CommunicationProviderAdapter {
 export interface CommunicationInboundProvider {
   readonly provider: CommunicationProvider;
   queueMessage(input: {
-    cloudJobId: number;
+    runId: number;
     message: QueuedCommunicationMessage;
   }): Promise<void>;
 }

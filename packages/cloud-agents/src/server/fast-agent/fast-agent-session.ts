@@ -3,12 +3,12 @@ import {
   and,
   db,
   eq,
-  fastAgentSessions,
+  slackQuickAnswers,
   sql,
-  type FastAgentSession,
+  type SlackQuickAnswer,
 } from '@roomote/db/server';
 
-type FastAgentSessionRecord = Pick<FastAgentSession, 'id'> & {
+type FastAgentSessionRecord = Pick<SlackQuickAnswer, 'id'> & {
   messages: ModelMessage[];
 };
 
@@ -20,8 +20,8 @@ function buildFastAgentSessionWhere({
   slackThreadTs: string;
 }) {
   return and(
-    eq(fastAgentSessions.slackChannel, slackChannel),
-    eq(fastAgentSessions.slackThreadTs, slackThreadTs),
+    eq(slackQuickAnswers.slackChannel, slackChannel),
+    eq(slackQuickAnswers.slackThreadTs, slackThreadTs),
   );
 }
 
@@ -39,7 +39,7 @@ export async function getOrCreateFastAgentSession({
     slackThreadTs,
   });
 
-  const existingSession = await db.query.fastAgentSessions.findFirst({
+  const existingSession = await db.query.slackQuickAnswers.findFirst({
     where,
     columns: {
       id: true,
@@ -55,7 +55,7 @@ export async function getOrCreateFastAgentSession({
   }
 
   const [createdSession] = await db
-    .insert(fastAgentSessions)
+    .insert(slackQuickAnswers)
     .values({
       userId,
       slackChannel,
@@ -63,11 +63,11 @@ export async function getOrCreateFastAgentSession({
       messages: [],
     })
     .onConflictDoNothing({
-      target: [fastAgentSessions.slackChannel, fastAgentSessions.slackThreadTs],
+      target: [slackQuickAnswers.slackChannel, slackQuickAnswers.slackThreadTs],
     })
     .returning({
-      id: fastAgentSessions.id,
-      messages: fastAgentSessions.messages,
+      id: slackQuickAnswers.id,
+      messages: slackQuickAnswers.messages,
     });
 
   if (createdSession) {
@@ -77,7 +77,7 @@ export async function getOrCreateFastAgentSession({
     };
   }
 
-  const concurrentSession = await db.query.fastAgentSessions.findFirst({
+  const concurrentSession = await db.query.slackQuickAnswers.findFirst({
     where,
     columns: {
       id: true,
@@ -107,10 +107,10 @@ export async function appendFastAgentSessionMessages({
   }
 
   await db
-    .update(fastAgentSessions)
+    .update(slackQuickAnswers)
     .set({
-      messages: sql`${fastAgentSessions.messages} || ${JSON.stringify(messages)}::jsonb`,
+      messages: sql`${slackQuickAnswers.messages} || ${JSON.stringify(messages)}::jsonb`,
       updatedAt: sql`now()`,
     })
-    .where(eq(fastAgentSessions.id, sessionId));
+    .where(eq(slackQuickAnswers.id, sessionId));
 }

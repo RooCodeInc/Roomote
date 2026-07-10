@@ -1,7 +1,7 @@
 import type { HarnessLogger } from '../logging';
 
 interface TaskCancellationControllerOptions {
-  cloudJobId: number;
+  runId: number;
   logger: Pick<HarnessLogger, 'warn'>;
   externalCancelSignal?: AbortSignal;
 }
@@ -11,7 +11,7 @@ export class TaskCancellationController {
   private cancelTask?: () => void;
 
   constructor({
-    cloudJobId,
+    runId,
     logger,
     externalCancelSignal,
   }: TaskCancellationControllerOptions) {
@@ -21,7 +21,7 @@ export class TaskCancellationController {
 
     const handleExternalCancellation = () => {
       logger.warn(
-        `[runTask] External cancellation requested for cloud job ${cloudJobId}`,
+        `[runTask] External cancellation requested for task run ${runId}`,
       );
       this.abort(externalCancelSignal.reason);
     };

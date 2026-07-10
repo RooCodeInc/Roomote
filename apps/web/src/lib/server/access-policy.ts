@@ -5,6 +5,7 @@ import {
   deploymentSettings,
   eq,
   isNull,
+  not,
   slackInstallations,
   users,
 } from '@roomote/db/server';
@@ -95,6 +96,16 @@ async function hasExistingAppUser(userId: string): Promise<boolean> {
   return existingUser != null;
 }
 
+async function hasAnyOtherAppUser(userId: string): Promise<boolean> {
+  const [existingUser] = await db
+    .select({ id: users.id })
+    .from(users)
+    .where(not(eq(users.id, userId)))
+    .limit(1);
+
+  return existingUser != null;
+}
+
 async function isUserInProviderOrg(userId: string): Promise<boolean> {
   const accounts = await getAuthAccountsForUser(userId);
 
@@ -166,22 +177,10 @@ export async function evaluateSignInAccess({
     return { allowed: false };
   }
 
-  if (await hasExistingAppUser(userId)) {
-    return { allowed: true, via: 'existing_user' };
-  }
-
-  if (await isUserInProviderOrg(userId)) {
-    return { allowed: true, via: 'org_membership' };
-  }
-
   const inviteToken = await getRequestInviteToken();
-  const invite = await findUsableInviteByToken(inviteToken);
+  const setupBootstrapOpen = await isSetupBootstrapOpen();
 
-  if (invite) {
-    return { allowed: true, via: 'invite', inviteId: invite.id };
-  }
-
-  if (await isSetupBootstrapOpen()) {
+  if (setupBootstrapOpen && Env.SETUP_TOKEN && inviteToken) {
     // The system invite: while initial setup is still open, a valid
     // SETUP_TOKEN admits the deployment operator, even when an earlier
     // aborted setup attempt already left an account behind. Only local
@@ -191,6 +190,29 @@ export async function evaluateSignInAccess({
     if (isSetupTokenValid(inviteToken ?? undefined)) {
       return { allowed: true, via: 'bootstrap' };
     }
+  }
+
+  if (
+    setupBootstrapOpen &&
+    !Env.SETUP_TOKEN &&
+    isSetupTokenValid(undefined) &&
+    !(await hasAnyOtherAppUser(userId))
+  ) {
+    return { allowed: true, via: 'bootstrap' };
+  }
+
+  if (await hasExistingAppUser(userId)) {
+    return { allowed: true, via: 'existing_user' };
+  }
+
+  const invite = await findUsableInviteByToken(inviteToken);
+
+  if (invite) {
+    return { allowed: true, via: 'invite', inviteId: invite.id };
+  }
+
+  if (await isUserInProviderOrg(userId)) {
+    return { allowed: true, via: 'org_membership' };
   }
 
   return { allowed: false };

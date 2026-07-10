@@ -28,7 +28,7 @@ const {
 }));
 
 let previewPaneUrlState = 'https://web.preview.test/dashboard';
-let previewPaneCloudJobIdState = 123;
+let previewPaneRunIdState = 123;
 let previewPaneServiceNameState = 'WEB';
 let previewPathState = '/dashboard';
 
@@ -133,7 +133,7 @@ describe('PreviewSidePanel', () => {
     vi.useRealTimers();
 
     previewPaneUrlState = 'https://web.preview.test/dashboard';
-    previewPaneCloudJobIdState = 123;
+    previewPaneRunIdState = 123;
     previewPaneServiceNameState = 'WEB';
     previewPathState = '/dashboard';
 
@@ -149,7 +149,7 @@ describe('PreviewSidePanel', () => {
 
     usePreviewPaneMock.mockImplementation(() => ({
       previewPaneUrl: previewPaneUrlState,
-      previewPaneCloudJobId: previewPaneCloudJobIdState,
+      previewPaneRunId: previewPaneRunIdState,
       previewPaneServiceName: previewPaneServiceNameState,
       openPreviewPane: openPreviewPaneMock,
       closePreviewPane: closePreviewPaneMock,
@@ -174,7 +174,7 @@ describe('PreviewSidePanel', () => {
   it('renders browser navigation controls for Live Preview', () => {
     render(
       <PreviewSidePanel
-        cloudJob={{ id: 123, taskId: 'task-1' } as never}
+        taskRun={{ id: 123, taskId: 'task-1' } as never}
         onClose={vi.fn()}
       />,
     );
@@ -196,7 +196,7 @@ describe('PreviewSidePanel', () => {
   it('renders the external action as an icon-only link and keeps the toolbar and iframe bordered', () => {
     render(
       <PreviewSidePanel
-        cloudJob={{ id: 123, taskId: 'task-1' } as never}
+        taskRun={{ id: 123, taskId: 'task-1' } as never}
         onClose={vi.fn()}
       />,
     );
@@ -233,7 +233,7 @@ describe('PreviewSidePanel', () => {
 
     render(
       <PreviewSidePanel
-        cloudJob={{ id: 123, taskId: 'task-1' } as never}
+        taskRun={{ id: 123, taskId: 'task-1' } as never}
         onClose={vi.fn()}
       />,
     );
@@ -253,7 +253,7 @@ describe('PreviewSidePanel', () => {
   it('posts iframe navigation messages for back, forward, reload, and manual path entry', () => {
     render(
       <PreviewSidePanel
-        cloudJob={{ id: 123, taskId: 'task-1' } as never}
+        taskRun={{ id: 123, taskId: 'task-1' } as never}
         onClose={vi.fn()}
       />,
     );
@@ -312,7 +312,7 @@ describe('PreviewSidePanel', () => {
 
     render(
       <PreviewSidePanel
-        cloudJob={{ id: 123, taskId: 'task-1' } as never}
+        taskRun={{ id: 123, taskId: 'task-1' } as never}
         onClose={vi.fn()}
       />,
     );
@@ -331,7 +331,7 @@ describe('PreviewSidePanel', () => {
   it('syncs the preview path from iframe navigation events', () => {
     render(
       <PreviewSidePanel
-        cloudJob={{ id: 123, taskId: 'task-1' } as never}
+        taskRun={{ id: 123, taskId: 'task-1' } as never}
         onClose={vi.fn()}
       />,
     );
@@ -356,7 +356,7 @@ describe('PreviewSidePanel', () => {
   it('does not reopen the iframe when the iframe already navigated to the synced path', () => {
     const { rerender } = render(
       <PreviewSidePanel
-        cloudJob={{ id: 123, taskId: 'task-1' } as never}
+        taskRun={{ id: 123, taskId: 'task-1' } as never}
         onClose={vi.fn()}
       />,
     );
@@ -378,7 +378,7 @@ describe('PreviewSidePanel', () => {
 
     rerender(
       <PreviewSidePanel
-        cloudJob={{ id: 123, taskId: 'task-1' } as never}
+        taskRun={{ id: 123, taskId: 'task-1' } as never}
         onClose={vi.fn()}
       />,
     );
@@ -389,7 +389,7 @@ describe('PreviewSidePanel', () => {
   it('reopens the iframe when the task route changes to a different preview path', () => {
     const { rerender } = render(
       <PreviewSidePanel
-        cloudJob={{ id: 123, taskId: 'task-1' } as never}
+        taskRun={{ id: 123, taskId: 'task-1' } as never}
         onClose={vi.fn()}
       />,
     );
@@ -398,7 +398,7 @@ describe('PreviewSidePanel', () => {
 
     rerender(
       <PreviewSidePanel
-        cloudJob={{ id: 123, taskId: 'task-1' } as never}
+        taskRun={{ id: 123, taskId: 'task-1' } as never}
         onClose={vi.fn()}
       />,
     );
@@ -413,7 +413,7 @@ describe('PreviewSidePanel', () => {
   it('toggles the mobile preview viewport controls', () => {
     render(
       <PreviewSidePanel
-        cloudJob={{ id: 123, taskId: 'task-1' } as never}
+        taskRun={{ id: 123, taskId: 'task-1' } as never}
         onClose={vi.fn()}
       />,
     );
@@ -433,7 +433,7 @@ describe('PreviewSidePanel', () => {
 
     render(
       <PreviewSidePanel
-        cloudJob={{ id: 123, taskId: 'task-1' } as never}
+        taskRun={{ id: 123, taskId: 'task-1' } as never}
         onClose={vi.fn()}
       />,
     );
@@ -467,7 +467,7 @@ describe('PreviewSidePanel', () => {
   it('relays picked preview elements back onto the window', () => {
     render(
       <PreviewSidePanel
-        cloudJob={{ id: 123, taskId: 'task-1' } as never}
+        taskRun={{ id: 123, taskId: 'task-1' } as never}
         onClose={vi.fn()}
       />,
     );
@@ -513,7 +513,7 @@ describe('PreviewSidePanel', () => {
   it('allows restoring the preview widget after it is hidden', () => {
     render(
       <PreviewSidePanel
-        cloudJob={{ id: 123, taskId: 'task-1' } as never}
+        taskRun={{ id: 123, taskId: 'task-1' } as never}
         onClose={vi.fn()}
       />,
     );

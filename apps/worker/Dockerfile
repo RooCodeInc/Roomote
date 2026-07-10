@@ -2,7 +2,11 @@
 # Build context: repository root.
 # This image is the source of truth for Roomote's durable worker OS/tooling layer.
 
-FROM ubuntu:24.04
+FROM ubuntu:24.04 AS runtime
+
+# Connects the GHCR package to this repository and links pulled images back
+# to their source.
+LABEL org.opencontainers.image.source=https://github.com/RooCodeInc/Roomote
 
 ARG AGENT_BROWSER_VERSION=0.27.0
 ARG OPENCODE_CLI_VERSION=1.17.8
@@ -233,5 +237,13 @@ RUN sudo chmod +x /usr/local/bin/opencode \
   && sudo cp /usr/local/bin/opencode "$HOME/.local/bin/opencode" \
   && sudo chown roomote:roomote "$HOME/.local/bin/opencode" \
   && chmod +x "$HOME/.local/bin/opencode"
+
+# The controller uses this image as a short-lived, NET_ADMIN-only helper to
+# install metadata blackhole routes in each worker's network namespace. Keep
+# iproute2 in the final layer so updating this policy does not invalidate the
+# expensive language-toolchain layers above.
+RUN sudo apt-get update \
+  && sudo DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends iproute2 \
+  && sudo rm -rf /var/lib/apt/lists/*
 
 WORKDIR /sandbox

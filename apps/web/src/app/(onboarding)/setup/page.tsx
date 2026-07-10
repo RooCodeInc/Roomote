@@ -16,7 +16,10 @@ import {
   INVITE_COOKIE_NAME,
   readInviteTokenFromDocumentCookie,
 } from '@/lib/invite-cookie';
-import { getSetupRedirectPath } from '@/lib/setup-status';
+import {
+  DEFAULT_SETUP_REDIRECT_PATH,
+  getSetupRedirectPath,
+} from '@/lib/setup-status';
 import { useTRPC } from '@/trpc/client';
 import { Button, Spinner } from '@/components/system';
 
@@ -41,6 +44,7 @@ import { StepOnboardingAgent } from './StepOnboardingAgent';
 import { getSetupStepPath } from './types';
 import {
   getBootstrapAuthProvider,
+  getBootstrapStepFromSetupStepParam,
   getBootstrapStepAfterWelcome,
   getNextBootstrapStep,
   type BootstrapStep,
@@ -72,6 +76,18 @@ function getSetupRetryReason(status: {
   return 'task-failed';
 }
 
+function getInitialBootstrapStep(): BootstrapStep {
+  if (typeof window === 'undefined') {
+    return 'welcome';
+  }
+
+  return (
+    getBootstrapStepFromSetupStepParam(
+      new URLSearchParams(window.location.search).get('step'),
+    ) ?? 'welcome'
+  );
+}
+
 export default function SetupPage() {
   const router = useRouter();
   const setupBootstrapOpen = useSetupBootstrapOpen();
@@ -81,7 +97,9 @@ export default function SetupPage() {
     authStatus === 'signed-out' && !setupBootstrapOpen;
   const trpc = useTRPC();
   const queryClient = useQueryClient();
-  const [bootstrapStep, setBootstrapStep] = useState<BootstrapStep>('welcome');
+  const [bootstrapStep, setBootstrapStep] = useState<BootstrapStep>(
+    getInitialBootstrapStep,
+  );
   const [pendingAuthProvider, setPendingAuthProvider] =
     useState<SetupAuthProviderId | null>(null);
   const [pendingSourceControlProvider, setPendingSourceControlProvider] =
@@ -199,7 +217,10 @@ export default function SetupPage() {
     }
 
     if (!isSetupStatusLoading && !isSetupStatusError && setupStatus != null) {
-      if (setupRedirectPath && setupRedirectPath !== '/setup') {
+      if (
+        setupRedirectPath &&
+        setupRedirectPath !== DEFAULT_SETUP_REDIRECT_PATH
+      ) {
         router.replace(setupRedirectPath);
         return;
       }

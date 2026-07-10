@@ -1,5 +1,6 @@
 {
   "name": "@roomote/db",
+  "version": "0.0.2",
   "private": true,
   "type": "module",
   "main": "./src/index.ts",
@@ -43,7 +44,8 @@
     "@roomote/types": "workspace:^",
     "drizzle-orm": "^0.45.2",
     "nanoid": "^5.1.16",
-    "postgres": "^3.4.8"
+    "postgres": "^3.4.8",
+    "yaml": "^2.9.0"
   },
   "devDependencies": {
     "@faker-js/faker": "^8.4.1",

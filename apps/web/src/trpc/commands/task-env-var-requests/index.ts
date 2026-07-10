@@ -1,18 +1,18 @@
 import { z } from 'zod';
 
 import {
-  cloudJobs,
   db,
   desc,
   environmentVariables,
   eq,
   inArray,
+  taskRuns,
 } from '@roomote/db/server';
 import {
   ACP_ENVELOPE_EVENT_TYPES,
   ROOMOTE_RUNTIME_TASK_MESSAGE_PROTOCOL,
   isEnvVarRequestFulfillmentClientMessageId,
-  isExitedCloudTaskStatus,
+  isExitedRunStatus,
   deploymentEnvVarNameSchema,
 } from '@roomote/types';
 import { recordTaskMessageEnvelope } from '@roomote/sdk/server';
@@ -115,9 +115,9 @@ export async function fulfillTaskEnvVarRequestCommand(
       values: valuesToPersist,
     });
 
-    const activeCloudJob = await tx.query.cloudJobs.findFirst({
-      where: eq(cloudJobs.taskId, taskId),
-      orderBy: desc(cloudJobs.createdAt),
+    const activeTaskRun = await tx.query.taskRuns.findFirst({
+      where: eq(taskRuns.taskId, taskId),
+      orderBy: desc(taskRuns.createdAt),
       columns: {
         id: true,
         status: true,
@@ -128,16 +128,16 @@ export async function fulfillTaskEnvVarRequestCommand(
     return {
       names: requestedNames,
       canReload:
-        !!activeCloudJob &&
-        !isExitedCloudTaskStatus(activeCloudJob.status) &&
-        !!activeCloudJob.sandboxServerUrl,
-      cloudJobId: activeCloudJob?.id ?? null,
+        !!activeTaskRun &&
+        !isExitedRunStatus(activeTaskRun.status) &&
+        !!activeTaskRun.sandboxServerUrl,
+      runId: activeTaskRun?.id ?? null,
     };
   });
 
-  if (result.cloudJobId !== null && !result.canReload) {
+  if (result.runId !== null && !result.canReload) {
     await recordTaskMessageEnvelope({
-      cloudJobId: result.cloudJobId,
+      runId: result.runId,
       taskId,
       userId: auth.userId,
       envelope: {

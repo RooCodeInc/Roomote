@@ -24,19 +24,19 @@ Four PaaS-shaped paths run the same published images with
 `ROOMOTE_AUTO_GENERATE_KEYS=true` instead of installer-generated keypairs:
 
 - [`railway/`](railway/README.md) — managed Railway deployment with managed
-  Postgres/Redis and hosted compute (Modal/E2B/Daytona) instead of the
+  Postgres/Redis and hosted sandboxes (Modal/E2B/Daytona) instead of the
   Docker socket.
 - [`render/`](render/README.md) — managed Render deployment from the
   Blueprint at the repository root ([`render.yaml`](../render.yaml)), with
-  managed Postgres/Key Value and hosted compute instead of the Docker
+  managed Postgres/Key Value and hosted sandboxes instead of the Docker
   socket.
 - [`coolify/`](coolify/README.md) — a Docker Compose resource for a
   Coolify-managed server; the Docker socket is available there, so the
-  `docker` compute provider is the default.
+  `docker` sandbox provider is the default.
 - [`fly/`](fly/README.md) — a maintained `fly.toml` that runs the stack as
   one Fly.io app (a process group per service) with Fly Managed Postgres,
   Upstash Redis, and Tigris object storage; like Railway, there is no
-  Docker socket, so hosted compute is required.
+  Docker socket, so hosted sandboxes is required.
 
 V1 is intentionally single-tenant. Do not use this flow to put multiple
 customers on the same VM or database.
@@ -62,39 +62,18 @@ ghcr.io/roocodeinc/roomote-app:<version>
 ghcr.io/roocodeinc/roomote-worker:<version>
 ```
 
-`roomote-app` is one shared application image that ships web, api, controller,
-bullmq, preview-proxy, and the db-migrate one-shot; each Compose service
-selects its process through the image's entrypoint dispatcher.
+Every control-plane service (web, API, controller, BullMQ, preview proxy, and
+migrations) runs from the shared non-root `roomote-app` image; the container
+command and `ROOMOTE_SERVICE` select the service and its environment contract.
+Privilege separation lives in the Compose files: read-only filesystems,
+dropped capabilities, per-service env contracts, and a Docker socket proxy
+reachable only from the controller service.
 
 Do not deploy `latest`. Pushes to `develop` automatically publish
 `develop-<short-sha>` image tags built with `APP_ENV=preview` for preview soak
 deployments. Production releases use immutable `v*` tags; pushing a `v*` tag or
 manually dispatching the GHCR workflow publishes that explicit version. Use the
 same tag for create and upgrade commands.
-
-## Automatic Preview Deployments
-
-The GHCR publish workflow deploys preview automatically after all `develop`
-images publish successfully. The deploy job runs in the GitHub `preview`
-environment and upgrades the configured droplet to `develop-<short-sha>`.
-
-Required `preview` environment secret:
-
-- `ROOMOTE_PREVIEW_SSH_PRIVATE_KEY` - dedicated private SSH key for the preview
-  droplet
-
-Required `preview` environment variables:
-
-- `ROOMOTE_PREVIEW_HOST` - preview droplet host or IP
-- `ROOMOTE_PREVIEW_CUSTOMER` - deployer customer slug, for example `openmote`
-- `ROOMOTE_PREVIEW_SSH_USER` - SSH user, normally `root` for V1
-- `ROOMOTE_PREVIEW_KNOWN_HOSTS` - pinned `ssh-keyscan -H <host>` output
-- `ROOMOTE_IMAGE_RETENTION_RELEASES` - optional number of Roomote release tags
-  to keep on the droplet after each deploy; defaults to `3`
-
-Restrict the GitHub `preview` environment to the `develop` branch. The workflow
-also serializes preview deployments with the `preview-deploy` concurrency group
-so rapid merges do not run overlapping upgrades on the same droplet.
 
 ## Environment File
 
@@ -108,8 +87,8 @@ metadata from the CLI arguments, and sets:
 chmod 600 /opt/roomote/.env
 ```
 
-Deployment-owned image metadata includes the app image tag, worker image, and
-the controller-local `DOCKER_WORKER_RELEASE_PATH`. The release path is
+Deployment-owned image metadata includes the control-plane image tag, worker
+image, and the controller-local `DOCKER_WORKER_RELEASE_PATH`. The release path is
 versioned as `/roomote/releases/worker-v<version>.tar.gz` so hosted providers
 such as Modal can derive worker release metadata from the archive filename.
 The installer and deployer also keep `MODAL_BASE_IMAGE_REF` aligned with
@@ -300,9 +279,11 @@ docker compose --env-file .env -f docker-compose.prod.yml pull
 docker compose --env-file .env -f docker-compose.prod.yml up -d --wait --wait-timeout 600
 ```
 
-The Compose file defines container healthchecks for `web`, `api`, and
-`preview-proxy`, and `up --wait` holds the deploy command until those services
-are healthy. The deployer stops the controller before deployment metadata
+The Compose file defines container healthchecks for `web`, `api`, `controller`,
+`bullmq`, and `preview-proxy`. The controller probe uses the API's Redis
+heartbeat and stuck-task checks; the BullMQ probe queries its queues. `up
+--wait` holds the deploy command until the complete execution plane is healthy.
+The deployer stops the controller before deployment metadata
 changes and image pulls so new tasks remain queued during rollout instead of
 being claimed by the old controller. The wait timeout is intentionally longer
 than the controller stop grace so any already-active hosted-provider spawn can
@@ -322,59 +303,82 @@ to adjust rollback depth for a deployment. Retention is best-effort after a
 healthy rollout; a Docker cleanup failure prints a warning instead of failing
 the completed deploy or upgrade.
 
-## Back Up Data
+## Back Up a Deployment
 
-For local Postgres and managed Postgres, use the backup command:
+Create a passphrase file in your secret manager or a temporary root-readable
+file. The passphrase must be stored separately from the bundle:
 
 ```bash
-deploy/scripts/roomote-deploy backup --customer matt-test
+umask 077
+openssl rand -base64 32 > /secure/path/roomote-backup-passphrase
 ```
 
-It creates a remote dump in `/opt/roomote/backups/` and copies it to:
+Then create the backup:
+
+```bash
+deploy/scripts/roomote-deploy backup \
+  --customer matt-test \
+  --passphrase-file /secure/path/roomote-backup-passphrase \
+  --include-redis
+```
+
+It creates an encrypted, versioned `.roomote` bundle in
+`/opt/roomote/backups/` and copies it to:
 
 ```text
 deploy/state/matt-test/backups/
 ```
 
-Equivalent remote command:
+The bundle contains:
+
+- a PostgreSQL dump;
+- `/opt/roomote/.env`, including the original `ENCRYPTION_KEY` and signing
+  keys, plus the Compose and Caddy configuration;
+- the local MinIO data volume, or a manifest identifying an external bucket;
+- Redis when `--include-redis` is present;
+- the Roomote release, schema version, checksums, and exact image digests.
+
+The backup stops application writers and Docker task workers before capturing
+the stores. This gives PostgreSQL, local MinIO, and optional Redis an
+application-quiesced consistency point, but creates a maintenance window. With
+external object storage, bucket objects are not copied; use provider-level
+bucket backups as well.
+
+Equivalent on-host command:
 
 ```bash
-cd /opt/roomote
-mkdir -p backups
-docker run --rm --network roomote_default --env-file /opt/roomote/.env \
-  postgres:17.5 sh -c 'pg_dump --clean --if-exists --no-owner --no-privileges "$DATABASE_URL"' \
-  > "backups/backup-$(date +%F-%H%M%S).sql"
+roomote backup \
+  --passphrase-file /secure/path/roomote-backup-passphrase \
+  --include-redis
 ```
 
-## Restore Data
+## Restore a Deployment
 
-Restores are intentionally explicit because they overwrite database state:
+Install Roomote on the replacement host first so Docker and the host CLI are
+present. Restores are intentionally explicit because they replace
+configuration, keys, database records, artifacts, and optional Redis state:
 
 ```bash
 deploy/scripts/roomote-deploy restore \
   --customer matt-test \
-  --backup deploy/state/matt-test/backups/backup-2026-06-29-120000.sql \
+  --backup deploy/state/matt-test/backups/backup-20260710T120000Z.roomote \
+  --passphrase-file /secure/path/roomote-backup-passphrase \
   --yes
 ```
 
-The restore stops the app services (web, API, controller, BullMQ, preview
-proxy) before dropping the schema so live connections are not killed
-mid-restore and nothing writes while the dump loads, then brings the stack
-back up with `--wait` afterward.
+Restore decrypts and verifies the full bundle before changing the target host.
+It then stops the new installation, restores the original `.env` and release
+files, repins the recorded image digests, repopulates empty local MinIO and
+Redis volumes, restores PostgreSQL, and brings the recorded stack up with
+`--wait`. If Redis was omitted, its target volume is cleared. External object
+storage must already contain the objects referenced by the restored database.
 
-Equivalent remote command after copying a dump to `/opt/roomote/backups`:
+Equivalent command after copying a bundle to the new host:
 
 ```bash
-cd /opt/roomote
-docker compose --env-file .env -f docker-compose.prod.yml \
-  stop web api controller bullmq preview-proxy
-docker run --rm --network roomote_default --env-file /opt/roomote/.env \
-  postgres:17.5 sh -c 'psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -c "DROP SCHEMA IF EXISTS public CASCADE; CREATE SCHEMA public;"'
-docker run --rm --network roomote_default --env-file /opt/roomote/.env -i \
-  postgres:17.5 sh -c 'psql "$DATABASE_URL" -v ON_ERROR_STOP=1' \
-  < /opt/roomote/backups/backup.sql
-docker compose --env-file .env -f docker-compose.prod.yml \
-  up -d --wait --wait-timeout 600
+roomote restore /opt/roomote/backups/backup.roomote \
+  --passphrase-file /secure/path/roomote-backup-passphrase \
+  --yes
 ```
 
 ## Destroy

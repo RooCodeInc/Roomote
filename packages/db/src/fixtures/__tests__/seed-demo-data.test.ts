@@ -1,7 +1,7 @@
 import { and, eq, inArray } from 'drizzle-orm';
 
 import {
-  cloudJobs,
+  taskRuns,
   deploymentSettings,
   environments,
   githubInstallations,
@@ -30,7 +30,7 @@ function withoutSettings(labels: string[]) {
 }
 
 async function cleanup() {
-  await db.delete(cloudJobs).where(inArray(cloudJobs.taskId, demoTaskIds));
+  await db.delete(taskRuns).where(inArray(taskRuns.taskId, demoTaskIds));
   await db.delete(tasks).where(inArray(tasks.id, demoTaskIds));
   await db
     .delete(environments)
@@ -77,7 +77,7 @@ describe('seedDemoData', () => {
 
     expect(withoutSettings(summary.skipped)).toEqual([]);
     expect(withoutSettings(summary.created)).toHaveLength(
-      // user + installation + environment + repositories + tasks + cloud jobs
+      // user + installation + environment + repositories + tasks + task runs
       3 + demoSeedRepositories.length + demoSeedTasks.length * 2,
     );
 
@@ -124,15 +124,15 @@ describe('seedDemoData', () => {
         where: eq(tasks.id, seedTask.id),
       });
       expect(task).toBeDefined();
-      expect(task?.userId).toBe(demoSeedUserId);
-      expect(task?.attributedUserId).toBe(demoSeedUserId);
+      expect(task?.initiatorKind).toBe('user');
+      expect(task?.initiatorUserId).toBe(demoSeedUserId);
       expect(task?.title).toBe(seedTask.title);
 
-      const cloudJob = await db.query.cloudJobs.findFirst({
-        where: eq(cloudJobs.taskId, seedTask.id),
+      const taskRun = await db.query.taskRuns.findFirst({
+        where: eq(taskRuns.taskId, seedTask.id),
       });
-      expect(cloudJob).toBeDefined();
-      expect(cloudJob?.status).toBe(seedTask.cloudJobStatus);
+      expect(taskRun).toBeDefined();
+      expect(taskRun?.status).toBe(seedTask.taskRunStatus);
     }
   });
 
@@ -160,9 +160,9 @@ describe('seedDemoData', () => {
     });
     expect(seededTasks).toHaveLength(demoSeedTasks.length);
 
-    const seededCloudJobs = await db.query.cloudJobs.findMany({
-      where: inArray(cloudJobs.taskId, demoTaskIds),
+    const seededTaskRuns = await db.query.taskRuns.findMany({
+      where: inArray(taskRuns.taskId, demoTaskIds),
     });
-    expect(seededCloudJobs).toHaveLength(demoSeedTasks.length);
+    expect(seededTaskRuns).toHaveLength(demoSeedTasks.length);
   });
 });

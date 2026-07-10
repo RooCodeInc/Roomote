@@ -1,5 +1,5 @@
 import { Hono } from 'hono';
-import type { AuthTokenContext, JobTokenContext } from '@roomote/types';
+import type { AuthTokenContext, RunTokenContext } from '@roomote/types';
 
 import type { Variables } from '../../../types';
 
@@ -22,14 +22,16 @@ const {
 vi.mock('@roomote/db/server', () => ({
   db: {
     query: {
-      cloudJobs: { findFirst: vi.fn() },
+      taskRuns: { findFirst: vi.fn() },
+      tasks: { findFirst: vi.fn() },
       slackInstallations: { findFirst: vi.fn() },
       slackUserMappings: { findFirst: vi.fn() },
       taskArtifacts: { findMany: vi.fn() },
       taskPullRequests: { findFirst: vi.fn() },
     },
   },
-  cloudJobs: { id: 'id' },
+  taskRuns: { id: 'id' },
+  tasks: { id: 'id' },
   slackInstallations: { orgId: 'orgId', isActive: 'isActive' },
   slackUserMappings: {
     userId: 'userId',
@@ -39,6 +41,8 @@ vi.mock('@roomote/db/server', () => ({
   taskPullRequests: { taskId: 'taskId' },
   and: vi.fn(),
   eq: vi.fn(),
+  desc: vi.fn(),
+  isVisibleTask: vi.fn(() => ({})),
   inArray: vi.fn(),
 }));
 
@@ -132,11 +136,10 @@ async function postThreadLookup(
   });
 }
 
-function mockSlackCloudJob(
+function mockSlackTaskRun(
   overrides: Partial<{
     id: number;
     orgId: string;
-    userId: string | null;
     actingUserId: string | null;
     type: string;
     slackThreadTs: string | null;
@@ -145,7 +148,6 @@ function mockSlackCloudJob(
 ) {
   return {
     id: 42,
-    userId: 'user-1',
     actingUserId: 'user-1',
     type: 'slack.app.mention',
     slackThreadTs: '111.000',
@@ -159,17 +161,18 @@ function mockSlackCloudJob(
 }
 
 describe('slack thread lookup MCP endpoint', () => {
-  const jobToken: JobTokenContext = {
-    cloudJobId: 42,
+  const runToken: RunTokenContext = {
+    runId: 42,
     userId: 'user-1',
-    tokenType: 'cj',
+    principal: 'user',
+    tokenType: 'run',
     version: 1,
   };
 
   beforeEach(() => {
     vi.clearAllMocks();
-    vi.mocked(db.query.cloudJobs.findFirst).mockResolvedValue(
-      mockSlackCloudJob() as never,
+    vi.mocked(db.query.taskRuns.findFirst).mockResolvedValue(
+      mockSlackTaskRun() as never,
     );
     vi.mocked(db.query.slackInstallations.findFirst).mockResolvedValue({
       botAccessToken: 'xoxb-test',
@@ -184,7 +187,7 @@ describe('slack thread lookup MCP endpoint', () => {
     isPublicChannelMock.mockResolvedValue(true);
   });
 
-  it('rejects non-job tokens', async () => {
+  it('rejects non-run tokens', async () => {
     const authToken: AuthTokenContext = {
       userId: 'user-1',
       tokenType: 'auth',
@@ -198,7 +201,7 @@ describe('slack thread lookup MCP endpoint', () => {
 
     expect(response.status).toBe(403);
     expect(body.error).toBe(
-      'Slack thread lookup MCP is only available for cloud job tokens',
+      'Slack thread lookup MCP is only available for task run tokens',
     );
   });
 
@@ -236,7 +239,7 @@ describe('slack thread lookup MCP endpoint', () => {
       },
     ]);
 
-    const response = await postThreadLookup(jobToken, {
+    const response = await postThreadLookup(runToken, {
       messageTs: '111.222',
     });
     const body = (await response.json()) as JsonBody;
@@ -289,8 +292,8 @@ describe('slack thread lookup MCP endpoint', () => {
   });
 
   it('uses Slack-linked suggested task metadata as the implicit thread target', async () => {
-    vi.mocked(db.query.cloudJobs.findFirst).mockResolvedValue(
-      mockSlackCloudJob({
+    vi.mocked(db.query.taskRuns.findFirst).mockResolvedValue(
+      mockSlackTaskRun({
         type: 'suggested.tasks',
         slackThreadTs: '111.000',
         payload: {
@@ -322,7 +325,7 @@ describe('slack thread lookup MCP endpoint', () => {
       },
     ]);
 
-    const response = await postThreadLookup(jobToken, {
+    const response = await postThreadLookup(runToken, {
       messageTs: '111.222',
     });
     const body = (await response.json()) as JsonBody;
@@ -338,8 +341,8 @@ describe('slack thread lookup MCP endpoint', () => {
   });
 
   it('looks up an explicit channel for non-Slack jobs', async () => {
-    vi.mocked(db.query.cloudJobs.findFirst).mockResolvedValue(
-      mockSlackCloudJob({
+    vi.mocked(db.query.taskRuns.findFirst).mockResolvedValue(
+      mockSlackTaskRun({
         type: 'standard',
         slackThreadTs: null,
         payload: {},
@@ -369,7 +372,7 @@ describe('slack thread lookup MCP endpoint', () => {
       },
     ]);
 
-    const response = await postThreadLookup(jobToken, {
+    const response = await postThreadLookup(runToken, {
       channel: 'eng',
       messageTs: '111.222',
     });
@@ -395,15 +398,15 @@ describe('slack thread lookup MCP endpoint', () => {
   });
 
   it('requires a channel when the job has no Slack thread context', async () => {
-    vi.mocked(db.query.cloudJobs.findFirst).mockResolvedValue(
-      mockSlackCloudJob({
+    vi.mocked(db.query.taskRuns.findFirst).mockResolvedValue(
+      mockSlackTaskRun({
         type: 'standard',
         slackThreadTs: null,
         payload: {},
       }) as never,
     );
 
-    const response = await postThreadLookup(jobToken, {
+    const response = await postThreadLookup(runToken, {
       messageTs: '111.222',
     });
     const body = (await response.json()) as JsonBody;
@@ -415,8 +418,8 @@ describe('slack thread lookup MCP endpoint', () => {
   });
 
   it('rejects explicit channel lookup when the acting user has no linked Slack account', async () => {
-    vi.mocked(db.query.cloudJobs.findFirst).mockResolvedValue(
-      mockSlackCloudJob({
+    vi.mocked(db.query.taskRuns.findFirst).mockResolvedValue(
+      mockSlackTaskRun({
         type: 'standard',
         slackThreadTs: null,
         payload: {},
@@ -426,7 +429,7 @@ describe('slack thread lookup MCP endpoint', () => {
       null as never,
     );
 
-    const response = await postThreadLookup(jobToken, {
+    const response = await postThreadLookup(runToken, {
       channel: 'eng',
       messageTs: '111.222',
     });
@@ -441,8 +444,8 @@ describe('slack thread lookup MCP endpoint', () => {
   });
 
   it('rejects explicit channel lookup when the acting Slack user is not in the channel', async () => {
-    vi.mocked(db.query.cloudJobs.findFirst).mockResolvedValue(
-      mockSlackCloudJob({
+    vi.mocked(db.query.taskRuns.findFirst).mockResolvedValue(
+      mockSlackTaskRun({
         type: 'standard',
         slackThreadTs: null,
         payload: {},
@@ -450,7 +453,7 @@ describe('slack thread lookup MCP endpoint', () => {
     );
     isUserInChannelMock.mockResolvedValue(false);
 
-    const response = await postThreadLookup(jobToken, {
+    const response = await postThreadLookup(runToken, {
       channel: 'eng',
       messageTs: '111.222',
     });
@@ -464,8 +467,17 @@ describe('slack thread lookup MCP endpoint', () => {
   });
 
   it('allows bot-context explicit channel lookup only in public channels', async () => {
-    vi.mocked(db.query.cloudJobs.findFirst).mockResolvedValue(
-      mockSlackCloudJob({
+    // A run with no acting user is a deployment-principal run; its run token
+    // carries a null user.
+    const deploymentToken: RunTokenContext = {
+      runId: 42,
+      userId: null,
+      principal: 'deployment',
+      tokenType: 'run',
+      version: 1,
+    };
+    vi.mocked(db.query.taskRuns.findFirst).mockResolvedValue(
+      mockSlackTaskRun({
         actingUserId: null,
         payload: {
           channel: 'C123',
@@ -498,7 +510,7 @@ describe('slack thread lookup MCP endpoint', () => {
       },
     ]);
 
-    const response = await postThreadLookup(jobToken, {
+    const response = await postThreadLookup(deploymentToken, {
       channel: 'eng',
       messageTs: '111.222',
     });
@@ -511,8 +523,15 @@ describe('slack thread lookup MCP endpoint', () => {
   });
 
   it('rejects bot-context explicit channel lookup for private channels', async () => {
-    vi.mocked(db.query.cloudJobs.findFirst).mockResolvedValue(
-      mockSlackCloudJob({
+    const deploymentToken: RunTokenContext = {
+      runId: 42,
+      userId: null,
+      principal: 'deployment',
+      tokenType: 'run',
+      version: 1,
+    };
+    vi.mocked(db.query.taskRuns.findFirst).mockResolvedValue(
+      mockSlackTaskRun({
         actingUserId: null,
         payload: {
           channel: 'C123',
@@ -523,7 +542,7 @@ describe('slack thread lookup MCP endpoint', () => {
     );
     isPublicChannelMock.mockResolvedValue(false);
 
-    const response = await postThreadLookup(jobToken, {
+    const response = await postThreadLookup(deploymentToken, {
       channel: 'eng',
       messageTs: '111.222',
     });
@@ -537,7 +556,7 @@ describe('slack thread lookup MCP endpoint', () => {
   });
 
   it('rejects direct-message channel targets', async () => {
-    const response = await postThreadLookup(jobToken, {
+    const response = await postThreadLookup(runToken, {
       channel: 'D123ABC456',
       messageTs: '111.222',
     });
@@ -558,7 +577,7 @@ describe('slack thread lookup MCP endpoint', () => {
     });
     fetchThreadMessagesMock.mockResolvedValue([]);
 
-    const response = await postThreadLookup(jobToken, {
+    const response = await postThreadLookup(runToken, {
       messageTs: '222.333',
     });
     const body = (await response.json()) as JsonBody;
@@ -572,7 +591,7 @@ describe('slack thread lookup MCP endpoint', () => {
   it('returns 404 when the message cannot be found', async () => {
     getMessageMock.mockResolvedValue(null);
 
-    const response = await postThreadLookup(jobToken, {
+    const response = await postThreadLookup(runToken, {
       messageTs: '999.999',
     });
     const body = (await response.json()) as JsonBody;
@@ -584,7 +603,7 @@ describe('slack thread lookup MCP endpoint', () => {
   });
 
   it('rejects missing message timestamps', async () => {
-    const response = await postThreadLookup(jobToken, {});
+    const response = await postThreadLookup(runToken, {});
     const body = (await response.json()) as JsonBody;
 
     expect(response.status).toBe(400);

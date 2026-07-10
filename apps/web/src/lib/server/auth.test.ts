@@ -147,7 +147,7 @@ describe('getAuth', () => {
     expect(options?.session?.freshAge).toBe(0);
   });
 
-  it('uses global Azure DevOps connection data for Entra linked-account identity', async () => {
+  it('keys the Entra linked-account identity on the normalized uniqueName', async () => {
     const fetchMock = vi.fn(async (url: string | URL | Request) => {
       const href = String(url);
 
@@ -156,7 +156,7 @@ describe('getAuth', () => {
           authenticatedUser: {
             id: 'connection-user-guid',
             providerDisplayName: 'Matt Rubens',
-            uniqueName: 'matt@roomote.onmicrosoft.com',
+            uniqueName: 'Matt@Roomote.OnMicrosoft.com',
           },
         });
       }
@@ -200,10 +200,13 @@ describe('getAuth', () => {
         },
       },
     );
+    // The account id is the normalized uniqueName (UPN/email), not the vssps
+    // connectionData id — that id namespace never matches the org identity id
+    // Azure DevOps delivers as the comment author on PR webhooks.
     expect(profile).toEqual({
       email: 'matt@roomote.onmicrosoft.com',
       emailVerified: false,
-      id: 'connection-user-guid',
+      id: 'matt@roomote.onmicrosoft.com',
       name: 'Matt Rubens',
     });
   });

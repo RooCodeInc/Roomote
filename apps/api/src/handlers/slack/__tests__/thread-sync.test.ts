@@ -23,7 +23,7 @@ describe('getIsSlackDiverged', () => {
 
   it('returns true when there is no tracked bot reply', async () => {
     await expect(
-      getIsSlackDiverged({ cloudJobId: 1, trackedBotReply: null }),
+      getIsSlackDiverged({ runId: 1, trackedBotReply: null }),
     ).resolves.toBe(true);
     expect(mockFindFirstTaskMessage).not.toHaveBeenCalled();
   });
@@ -31,7 +31,7 @@ describe('getIsSlackDiverged', () => {
   it('returns true for out-of-band bot replies without consulting the transcript', async () => {
     await expect(
       getIsSlackDiverged({
-        cloudJobId: 1,
+        runId: 1,
         trackedBotReply: {
           ts: '2000.000',
           text: 'background notification',
@@ -49,7 +49,7 @@ describe('getIsSlackDiverged', () => {
 
     await expect(
       getIsSlackDiverged({
-        cloudJobId: 1,
+        runId: 1,
         trackedBotReply: { ts: '2000.000', text: 'closeout reply' },
       }),
     ).resolves.toBe(false);
@@ -62,7 +62,7 @@ describe('getIsSlackDiverged', () => {
 
     await expect(
       getIsSlackDiverged({
-        cloudJobId: 1,
+        runId: 1,
         trackedBotReply: { ts: '2000.000', text: 'older reply' },
       }),
     ).resolves.toBe(true);

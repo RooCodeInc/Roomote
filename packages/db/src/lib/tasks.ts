@@ -1,25 +1,19 @@
-import { and, eq, inArray, notExists, type SQL } from 'drizzle-orm';
+import { and, eq, isNull, type SQL } from 'drizzle-orm';
 
-import { HIDDEN_CLOUD_TASK_TYPES } from '@roomote/types';
-
-import { db, type DatabaseOrTransaction } from '../db';
-import { cloudJobs, tasks } from '../schema';
+import { type DatabaseOrTransaction, db } from '../db';
+import { tasks } from '../schema';
 import type { CreateTask, Task } from '../types';
 
 import { generateTaskId } from './task-id';
 
-export function isVisibleTask(taskIdColumn: typeof tasks.id): SQL {
-  return notExists(
-    db
-      .select({ hiddenCloudJobId: cloudJobs.id })
-      .from(cloudJobs)
-      .where(
-        and(
-          eq(cloudJobs.taskId, taskIdColumn),
-          inArray(cloudJobs.type, [...HIDDEN_CLOUD_TASK_TYPES]),
-        ),
-      ),
-  );
+/**
+ * Predicate for task rows a user is allowed to read. A task is visible only
+ * when it is marked `visibility = 'visible'` AND has not been soft-deleted
+ * (`deletedAt IS NULL`). Soft-deleted rows are retained for satellites and
+ * artifact cleanup, so this predicate must exclude them from API reads.
+ */
+export function isVisibleTask(): SQL {
+  return and(eq(tasks.visibility, 'visible'), isNull(tasks.deletedAt)) as SQL;
 }
 
 const UNIQUE_VIOLATION_CODE = '23505';

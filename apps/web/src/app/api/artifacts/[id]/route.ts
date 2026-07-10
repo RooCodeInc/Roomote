@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 
 import {
-  authorizeJobToken,
+  authorizeRunToken,
   getArtifactById,
   generateDownloadUrl,
 } from '@/lib/server';
@@ -12,7 +12,7 @@ export async function GET(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> },
 ) {
-  const authResult = await authorizeJobToken(request);
+  const authResult = await authorizeRunToken(request);
 
   if (!authResult.success) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
@@ -55,7 +55,7 @@ export async function GET(
   const response: {
     id: string;
     taskId: string;
-    cloudJobId: number | null;
+    runId: number | null;
     path: string;
     version: number;
     contentType: string;
@@ -67,7 +67,7 @@ export async function GET(
   } = {
     id: artifact.id,
     taskId: artifact.taskId,
-    cloudJobId: artifact.cloudJobId,
+    runId: artifact.runId,
     path: artifact.path,
     version: artifact.version,
     contentType: artifact.contentType,

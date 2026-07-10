@@ -9,12 +9,13 @@ import {
 import { Env } from '@roomote/env';
 
 import {
-  buildThreadReplyImageBlocks,
+  buildThreadReplyImages,
   errorResponseForThreadReplyImageError,
+  type ThreadReplyImage,
   withThreadReplyFooterLock,
 } from './chat-reply-helpers';
 
-export type CommunicationReplyCloudJob = {
+export type CommunicationReplyTaskRun = {
   id: number;
   taskId: string;
   prRepo?: string | null;
@@ -29,14 +30,9 @@ export type ParsedThreadReplyBody = {
 
 type CommunicationThreadReplyProvider = 'telegram' | 'teams';
 
-type ThreadReplyImageBlock = {
-  type: 'image';
-  image_url: string;
-  alt_text: string;
-};
-
 type PostedFooterRecord<T extends { messageId: string }> = T & {
   textWithoutFooter: string;
+  images?: ThreadReplyFooterRecord['images'];
 };
 
 function getThreadReplyWebPath(payload: unknown): string | null {
@@ -57,26 +53,6 @@ function isSetupThreadReplyPayload(payload: unknown): boolean {
   return getThreadReplyWebPath(payload) === '/setup';
 }
 
-export function buildCommunicationReplyText(params: {
-  text?: string;
-  images: ThreadReplyImageBlock[];
-}): string {
-  const textParts = params.text?.trim() ? [params.text.trim()] : [];
-
-  if (params.images.length > 0) {
-    textParts.push(
-      [
-        'Attachments:',
-        ...params.images.map(
-          (image) => `- [${image.alt_text}](${image.image_url})`,
-        ),
-      ].join('\n'),
-    );
-  }
-
-  return textParts.join('\n\n');
-}
-
 function buildThreadReplyTaskUrl(
   provider: CommunicationThreadReplyProvider,
   taskId: string,
@@ -92,20 +68,20 @@ function buildThreadReplyTaskUrl(
 
 async function buildCommunicationThreadReplyFooterText(params: {
   provider: CommunicationThreadReplyProvider;
-  cloudJob: CommunicationReplyCloudJob;
+  taskRun: CommunicationReplyTaskRun;
 }): Promise<string | null> {
-  if (isSetupThreadReplyPayload(params.cloudJob.payload)) {
+  if (isSetupThreadReplyPayload(params.taskRun.payload)) {
     return null;
   }
 
   const context = await resolveThreadReplyFooterContext({
-    taskId: params.cloudJob.taskId,
-    prRepo: params.cloudJob.prRepo ?? null,
-    prNumber: params.cloudJob.prNumber ?? null,
+    taskId: params.taskRun.taskId,
+    prRepo: params.taskRun.prRepo ?? null,
+    prNumber: params.taskRun.prNumber ?? null,
   });
 
   return buildThreadReplyFooterText({
-    taskUrl: buildThreadReplyTaskUrl(params.provider, params.cloudJob.taskId),
+    taskUrl: buildThreadReplyTaskUrl(params.provider, params.taskRun.taskId),
     ...context,
     formatLink: formatMarkdownLink,
   });
@@ -114,14 +90,14 @@ async function buildCommunicationThreadReplyFooterText(params: {
 export async function buildCommunicationThreadReplyFooterTextBestEffort(params: {
   provider: CommunicationThreadReplyProvider;
   providerLabel: string;
-  cloudJob: CommunicationReplyCloudJob;
+  taskRun: CommunicationReplyTaskRun;
   logContext: string;
 }): Promise<string | null> {
   try {
     return await buildCommunicationThreadReplyFooterText(params);
   } catch (error) {
     console.error(
-      `[${params.logContext}] Failed to build ${params.providerLabel} reply footer for cloud job ${params.cloudJob.id}: ${
+      `[${params.logContext}] Failed to build ${params.providerLabel} reply footer for task run ${params.taskRun.id}: ${
         error instanceof Error ? error.message : String(error)
       }`,
     );
@@ -129,11 +105,11 @@ export async function buildCommunicationThreadReplyFooterTextBestEffort(params: 
   }
 }
 
-export async function getCommunicationReplyImageBlocks(params: {
-  cloudJob: Pick<CommunicationReplyCloudJob, 'id' | 'taskId'>;
+export async function getCommunicationReplyImages(params: {
+  taskRun: Pick<CommunicationReplyTaskRun, 'id' | 'taskId'>;
   parsedBody: ParsedThreadReplyBody;
 }): Promise<{
-  imageBlocks: ThreadReplyImageBlock[];
+  images: ThreadReplyImage[];
   errorResponse: Response | null;
 }> {
   const artifactIds = [
@@ -142,9 +118,9 @@ export async function getCommunicationReplyImageBlocks(params: {
 
   try {
     return {
-      imageBlocks: await buildThreadReplyImageBlocks({
+      images: await buildThreadReplyImages({
         artifactIds,
-        cloudJob: params.cloudJob,
+        taskRun: params.taskRun,
       }),
       errorResponse: null,
     };
@@ -154,7 +130,7 @@ export async function getCommunicationReplyImageBlocks(params: {
 
     if (errorResponse) {
       return {
-        imageBlocks: [],
+        images: [],
         errorResponse,
       };
     }
@@ -171,7 +147,7 @@ export async function deliverManagedThreadReplyFooter<
   channelId: string;
   footerStateThreadId: string;
   lockKey: string;
-  cloudJobId: number;
+  runId: number;
   logContext: string;
   postReplyWithFooter: () => Promise<PostedFooterRecord<TReply>>;
   clearPreviousFooter: (
@@ -190,7 +166,7 @@ export async function deliverManagedThreadReplyFooter<
         );
       } catch (error) {
         console.error(
-          `[${params.logContext}] Failed to read previous ${params.providerLabel} footer record for cloud job ${params.cloudJobId}: ${
+          `[${params.logContext}] Failed to read previous ${params.providerLabel} footer record for task run ${params.runId}: ${
             error instanceof Error ? error.message : String(error)
           }`,
         );
@@ -221,6 +197,9 @@ export async function deliverManagedThreadReplyFooter<
           {
             messageId: posted.messageId,
             textWithoutFooter: posted.textWithoutFooter,
+            ...(posted.images && posted.images.length > 0
+              ? { images: posted.images }
+              : {}),
           },
         );
       } catch (error) {

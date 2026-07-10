@@ -1,5 +1,6 @@
 {
   "name": "@roomote/compute-providers",
+  "version": "0.0.2",
   "private": true,
   "type": "module",
   "main": "./src/index.ts",

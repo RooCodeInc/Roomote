@@ -9,6 +9,8 @@ vi.mock('@roomote/env', async (importOriginal) => {
   };
 });
 
+import { setConfiguredGitHubAppSlugCache } from '@roomote/github';
+
 import { buildGitHubRoutingPrompt } from '../prompts/github-routing-prompt';
 
 describe('buildGitHubRoutingPrompt', () => {
@@ -22,7 +24,7 @@ describe('buildGitHubRoutingPrompt', () => {
     expect(prompt).toContain(
       'asking @newmote for review or follow-up work on the current pull request',
     );
-    expect(prompt).toContain('review: run or reuse PR Reviewer review work');
+    expect(prompt).toContain('review: run or reuse the PR review workflow');
     expect(prompt).toContain(
       'follow_up: any other actionable PR follow-up on the current pull request',
     );
@@ -40,5 +42,25 @@ describe('buildGitHubRoutingPrompt', () => {
       'Route the mention as `follow_up` unless it is clearly asking for a PR review',
     );
     expect(prompt).toContain('"followUpMode": "review" | "follow_up"');
+  });
+
+  describe('with a database-configured app slug', () => {
+    beforeEach(() => {
+      setConfiguredGitHubAppSlugCache({
+        value: 'openmote',
+        expiresAt: Date.now() + 60_000,
+      });
+    });
+
+    afterEach(() => {
+      setConfiguredGitHubAppSlugCache(null);
+    });
+
+    it('addresses the configured bot handle instead of the process-env slug', () => {
+      const prompt = buildGitHubRoutingPrompt();
+
+      expect(prompt).toContain('mentions @openmote');
+      expect(prompt).not.toContain('@newmote');
+    });
   });
 });

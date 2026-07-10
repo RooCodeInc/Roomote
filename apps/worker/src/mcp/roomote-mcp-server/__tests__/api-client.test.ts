@@ -4,8 +4,10 @@ import {
   confirmUpload,
   uploadArtifact,
   fetchArtifactMetadata,
+  fetchWithTimeout,
   getDownloadUrl,
   parseApiError,
+  resolvePlatformApiTimeoutMs,
 } from '../api-client.js';
 import type { ArtifactConfig } from '../types.js';
 
@@ -13,6 +15,126 @@ const config: ArtifactConfig = {
   token: 'test-token',
   platformApiUrl: 'https://test-api.example.com',
 };
+
+// Mirrors undici: a pending request rejects with the signal's reason when the
+// signal aborts, and never settles otherwise.
+function neverRespondingFetch() {
+  return vi.fn((_url: unknown, options?: RequestInit) => {
+    return new Promise<Response>((_resolve, reject) => {
+      options?.signal?.addEventListener('abort', () =>
+        reject(
+          (options.signal as AbortSignal).reason ??
+            new DOMException('Aborted', 'AbortError'),
+        ),
+      );
+    });
+  });
+}
+
+describe('fetchWithTimeout', () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+    delete process.env.ROOMOTE_MCP_PLATFORM_API_TIMEOUT_MS;
+  });
+
+  it('rejects with a retryable error when the API never responds', async () => {
+    process.env.ROOMOTE_MCP_PLATFORM_API_TIMEOUT_MS = '25';
+    global.fetch = neverRespondingFetch() as unknown as typeof fetch;
+
+    await expect(
+      fetchWithTimeout(
+        'https://test-api.example.com/api/mcp/tasks/t1/source_control',
+        { method: 'POST' },
+        { label: 'Failed to manage source control' },
+      ),
+    ).rejects.toThrow(
+      'Failed to manage source control: no response from the Roomote API within 25ms; the request was aborted and is safe to retry.',
+    );
+  });
+
+  it('honors an explicit timeoutMs over the environment default', async () => {
+    process.env.ROOMOTE_MCP_PLATFORM_API_TIMEOUT_MS = '60000';
+    global.fetch = neverRespondingFetch() as unknown as typeof fetch;
+
+    await expect(
+      fetchWithTimeout(
+        'https://s3.example.com/upload',
+        { method: 'PUT' },
+        { label: 'Failed to upload to S3', timeoutMs: 25 },
+      ),
+    ).rejects.toThrow('no response from the Roomote API within 25ms');
+  });
+
+  it('passes through non-timeout failures unchanged', async () => {
+    global.fetch = vi
+      .fn()
+      .mockRejectedValueOnce(
+        new TypeError('fetch failed'),
+      ) as unknown as typeof fetch;
+
+    await expect(
+      fetchWithTimeout(
+        'https://test-api.example.com/api/mcp/tasks',
+        {},
+        { label: 'Failed to search tasks' },
+      ),
+    ).rejects.toThrow('fetch failed');
+  });
+
+  it('preserves a caller-provided abort as an abort, not a timeout', async () => {
+    global.fetch = neverRespondingFetch() as unknown as typeof fetch;
+    const controller = new AbortController();
+    const pending = fetchWithTimeout(
+      'https://test-api.example.com/api/mcp/tasks',
+      { signal: controller.signal },
+      { label: 'Failed to search tasks' },
+    );
+
+    controller.abort();
+
+    await expect(pending).rejects.toSatisfy(
+      (error: unknown) =>
+        error instanceof DOMException && error.name === 'AbortError',
+    );
+  });
+
+  it('returns the response when the API answers within the deadline', async () => {
+    const response = { ok: true } as Response;
+    global.fetch = vi
+      .fn()
+      .mockResolvedValueOnce(response) as unknown as typeof fetch;
+
+    await expect(
+      fetchWithTimeout(
+        'https://test-api.example.com/api/mcp/tasks',
+        {},
+        { label: 'Failed to search tasks' },
+      ),
+    ).resolves.toBe(response);
+  });
+});
+
+describe('resolvePlatformApiTimeoutMs', () => {
+  afterEach(() => {
+    delete process.env.ROOMOTE_MCP_PLATFORM_API_TIMEOUT_MS;
+  });
+
+  it('defaults to two minutes', () => {
+    expect(resolvePlatformApiTimeoutMs()).toBe(120_000);
+  });
+
+  it('reads a positive integer override from the environment', () => {
+    process.env.ROOMOTE_MCP_PLATFORM_API_TIMEOUT_MS = '45000';
+    expect(resolvePlatformApiTimeoutMs()).toBe(45_000);
+  });
+
+  it('ignores non-positive or malformed overrides', () => {
+    process.env.ROOMOTE_MCP_PLATFORM_API_TIMEOUT_MS = '-5';
+    expect(resolvePlatformApiTimeoutMs()).toBe(120_000);
+    process.env.ROOMOTE_MCP_PLATFORM_API_TIMEOUT_MS = 'soon';
+    expect(resolvePlatformApiTimeoutMs()).toBe(120_000);
+  });
+});
 
 describe('parseApiError', () => {
   it('should extract error field from JSON response', async () => {

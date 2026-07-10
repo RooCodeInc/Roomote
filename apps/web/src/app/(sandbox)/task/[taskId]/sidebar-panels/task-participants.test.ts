@@ -57,6 +57,7 @@ describe('getTaskParticipants', () => {
       {
         key: 'participant-1',
         userId: 'participant-1',
+        displayName: 'Robin Reviewer',
         name: 'Robin Reviewer',
         email: 'robin@example.com',
         imageUrl: 'https://example.com/robin.png',
@@ -64,6 +65,7 @@ describe('getTaskParticipants', () => {
       {
         key: 'participant-2',
         userId: 'participant-2',
+        displayName: 'Sam Support',
         name: 'Sam Support',
         email: 'sam@example.com',
         imageUrl: null,
@@ -89,6 +91,7 @@ describe('getTaskParticipants', () => {
       {
         key: 'teammate@example.com',
         userId: null,
+        displayName: 'Teammate',
         name: 'Teammate',
         email: 'teammate@example.com',
         imageUrl: null,
@@ -96,10 +99,23 @@ describe('getTaskParticipants', () => {
       {
         key: 'Anonymous Pair',
         userId: null,
+        displayName: 'Anonymous Pair',
         name: 'Anonymous Pair',
         email: null,
         imageUrl: null,
       },
     ]);
+  });
+
+  it('ignores participants without a displayable identity', () => {
+    const participants = getTaskParticipants(
+      [
+        createUserMessage('automatic-review-prompt'),
+        createUserMessage('user-id-only', { userId: 'unresolved-user' }),
+      ],
+      null,
+    );
+
+    expect(participants).toEqual([]);
   });
 });

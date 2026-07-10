@@ -1,4 +1,4 @@
-import { enqueueCloudTask, getTaskUrl } from '@roomote/cloud-agents/server';
+import { enqueueTask, getTaskUrl } from '@roomote/cloud-agents/server';
 import {
   findActiveGitHubPrReviewTask,
   findReusableGitHubPrFollowUpOwner,
@@ -8,11 +8,10 @@ import {
   getGiteaDeploymentUser,
 } from '@roomote/gitea';
 import {
-  type CloudTaskPayload,
-  CloudAgentType,
-  CloudTaskType,
+  type TaskPayload,
+  TaskPayloadKind,
   PRODUCT_NAME,
-  isActivelyRunningCloudTask,
+  isActivelyRunningTask,
 } from '@roomote/types';
 
 import type { WebhookResponse } from '../../types';
@@ -245,7 +244,7 @@ export async function handleGiteaComment(
   };
 
   const targetsResult = await getGiteaAutomationTargets({
-    type: CloudAgentType.PrReviewer,
+    workflow: 'pr_review',
     payload: {
       repository: payload.repository,
       sender: payload.sender,
@@ -258,7 +257,8 @@ export async function handleGiteaComment(
   const target =
     targetsResult.status === 'ok' ? targetsResult.targets[0] : undefined;
 
-  if (!target) {
+  // requireLinkedSenderAccount guarantees a linked commenter here.
+  if (!target || !target.userId) {
     await postMentionResponseComment({
       ...mentionResponseTarget,
       body:
@@ -294,7 +294,7 @@ export async function handleGiteaComment(
       commenter,
       commentBody: payload.comment.body,
     });
-    const delivery = isActivelyRunningCloudTask(
+    const delivery = isActivelyRunningTask(
       activeOwner.status,
       activeOwner.taskPhase,
     )
@@ -371,23 +371,31 @@ export async function handleGiteaComment(
     ...(pullRequest.head?.ref ? { branch: pullRequest.head.ref } : {}),
     ...(headSha ? { sha: headSha } : {}),
     targetBranch: pullRequest.base?.ref,
-  } satisfies CloudTaskPayload<CloudTaskType.GithubPrReview>;
+  } satisfies TaskPayload<typeof TaskPayloadKind.GithubPrReview>;
 
   try {
-    const launch = await enqueueCloudTask(
-      {
-        userId: target.userId,
-        attributionOverride: {
-          kind: 'automatic',
-          sourceKind: 'gitea',
-        },
-        type: CloudTaskType.GithubPrReview,
+    // A human @roomote mention started this review: the commenter is the
+    // initiator (the old automatic/gitea attribution override is gone).
+    const launch = await enqueueTask({
+      task: {
+        type: TaskPayloadKind.GithubPrReview,
         payload: reviewPayload,
       },
-      {
-        launchClass: 'automation',
+      initiator: { kind: 'user', userId: target.userId },
+      workflow: 'pr_review',
+      surface: 'gitea',
+      trigger: 'message',
+      prLinkage: {
+        provider: 'gitea',
+        repository: repoFullName,
+        prNumber: pullRequest.number,
+        prUrl,
+        prTitle: pullRequest.title,
+        prSha: headSha || null,
+        prBaseRef: pullRequest.base?.ref ?? null,
+        prBaseSha: pullRequest.base?.sha ?? null,
       },
-    );
+    });
 
     await postMentionResponseComment({
       ...mentionResponseTarget,

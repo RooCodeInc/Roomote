@@ -1,21 +1,25 @@
-import { getSetupRedirectPath, requiresSetup } from './setup-status';
+import {
+  DEFAULT_SETUP_REDIRECT_PATH,
+  getSetupRedirectPath,
+  requiresSetup,
+} from './setup-status';
 
 describe('setup-status', () => {
-  it('routes orgs without GitHub to the setup flow', () => {
+  it('lets completed deployments through regardless of provider (GitLab-only has no GitHub installation)', () => {
     expect(
       getSetupRedirectPath({
         hasGitHub: false,
         hasEnvironments: false,
         setupCompletedAt: '2026-01-01T00:00:00.000Z',
       }),
-    ).toBe('/setup');
+    ).toBeNull();
     expect(
       requiresSetup({
         hasGitHub: false,
         hasEnvironments: false,
         setupCompletedAt: '2026-01-01T00:00:00.000Z',
       }),
-    ).toBe(true);
+    ).toBe(false);
   });
 
   it('routes orgs missing environments back to setup while initial setup is still incomplete', () => {
@@ -25,7 +29,7 @@ describe('setup-status', () => {
         hasEnvironments: false,
         setupCompletedAt: null,
       }),
-    ).toBe('/setup');
+    ).toBe(DEFAULT_SETUP_REDIRECT_PATH);
   });
 
   it('allows previously completed orgs with no environments to continue through the app', () => {
@@ -69,29 +73,12 @@ describe('setup-status', () => {
         hasEnvironments: true,
         setupCompletedAt: null,
       }),
-    ).toBe('/setup');
+    ).toBe(DEFAULT_SETUP_REDIRECT_PATH);
     expect(
       requiresSetup({
         hasGitHub: true,
         hasEnvironments: true,
         setupCompletedAt: null,
-      }),
-    ).toBe(true);
-  });
-
-  it('requires setup when environments already exist without GitHub', () => {
-    expect(
-      getSetupRedirectPath({
-        hasGitHub: false,
-        hasEnvironments: true,
-        setupCompletedAt: '2026-01-01T00:00:00.000Z',
-      }),
-    ).toBe('/setup');
-    expect(
-      requiresSetup({
-        hasGitHub: false,
-        hasEnvironments: true,
-        setupCompletedAt: '2026-01-01T00:00:00.000Z',
       }),
     ).toBe(true);
   });

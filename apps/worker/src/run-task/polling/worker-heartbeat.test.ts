@@ -10,8 +10,8 @@ const { captureWorkerMessageMock } = vi.hoisted(() => ({
 
 vi.mock('@roomote/sdk/client', () => ({
   sdk: {
-    cloudJobs: {
-      touchCloudJobHeartbeat: mockTouchWorkerHeartbeat,
+    taskRuns: {
+      touchTaskRunHeartbeat: mockTouchWorkerHeartbeat,
     },
   },
 }));
@@ -54,7 +54,7 @@ describe('createWorkerHeartbeatInterval', () => {
 
   it('touches worker heartbeat immediately and on each interval', async () => {
     const interval = createWorkerHeartbeatInterval({
-      cloudJobId: 42,
+      runId: 42,
       logger: {
         warn: vi.fn(),
       } as never,
@@ -83,14 +83,14 @@ describe('createWorkerHeartbeatInterval', () => {
     mockTouchWorkerHeartbeat.mockResolvedValue(undefined);
 
     const interval = createWorkerHeartbeatInterval({
-      cloudJobId: 84,
+      runId: 84,
       logger: { warn } as never,
     });
 
     try {
       await vi.advanceTimersByTimeAsync(0);
       expect(warn).toHaveBeenCalledWith(
-        '[workerHeartbeat] Failed to update heartbeat for cloud job 84: network blip',
+        '[workerHeartbeat] Failed to update heartbeat for task run 84: network blip',
       );
 
       await vi.advanceTimersByTimeAsync(WORKER_HEARTBEAT_INTERVAL_MS);
@@ -110,7 +110,7 @@ describe('createWorkerHeartbeatInterval', () => {
     mockTouchWorkerHeartbeat.mockRejectedValue(new Error('db timeout'));
 
     const interval = createWorkerHeartbeatInterval({
-      cloudJobId: 108,
+      runId: 108,
       taskId: 'task-108',
       logger: { warn } as never,
     });
@@ -126,7 +126,7 @@ describe('createWorkerHeartbeatInterval', () => {
       expect(captureWorkerMessageMock).toHaveBeenCalledWith(
         'Worker heartbeat updates are repeatedly failing',
         expect.objectContaining({
-          cloudJobId: 108,
+          runId: 108,
           taskId: 'task-108',
           consecutiveFailureCount: 3,
         }),
@@ -153,7 +153,7 @@ describe('createWorkerHeartbeatInterval', () => {
       .mockRejectedValueOnce(new Error('db timeout'));
 
     const interval = createWorkerHeartbeatInterval({
-      cloudJobId: 109,
+      runId: 109,
       taskId: 'task-109',
       logger: { warn } as never,
     });
@@ -169,7 +169,7 @@ describe('createWorkerHeartbeatInterval', () => {
         1,
         'Worker heartbeat updates are repeatedly failing',
         expect.objectContaining({
-          cloudJobId: 109,
+          runId: 109,
           taskId: 'task-109',
           consecutiveFailureCount: 3,
         }),
@@ -182,7 +182,7 @@ describe('createWorkerHeartbeatInterval', () => {
         2,
         'Worker heartbeat updates are repeatedly failing',
         expect.objectContaining({
-          cloudJobId: 109,
+          runId: 109,
           taskId: 'task-109',
           consecutiveFailureCount: 3,
         }),
@@ -203,7 +203,7 @@ describe('createWorkerHeartbeatInterval', () => {
       .mockResolvedValue(undefined);
 
     const interval = createWorkerHeartbeatInterval({
-      cloudJobId: 144,
+      runId: 144,
       taskId: 'task-144',
       logger: { warn: vi.fn() } as never,
     });
@@ -249,7 +249,7 @@ describe('createWorkerHeartbeatInterval', () => {
       .mockResolvedValue(undefined);
 
     const interval = createWorkerHeartbeatInterval({
-      cloudJobId: 145,
+      runId: 145,
       taskId: 'task-145',
       logger: { warn } as never,
     });
@@ -261,7 +261,7 @@ describe('createWorkerHeartbeatInterval', () => {
       await vi.advanceTimersByTimeAsync(WORKER_HEARTBEAT_RPC_TIMEOUT_MS);
 
       expect(warn).toHaveBeenCalledWith(
-        `[workerHeartbeat] Failed to update heartbeat for cloud job 145: Heartbeat RPC timed out after ${WORKER_HEARTBEAT_RPC_TIMEOUT_MS}ms for cloud job 145`,
+        `[workerHeartbeat] Failed to update heartbeat for task run 145: Heartbeat RPC timed out after ${WORKER_HEARTBEAT_RPC_TIMEOUT_MS}ms for task run 145`,
       );
       expect(mockTouchWorkerHeartbeat).toHaveBeenNthCalledWith(
         1,

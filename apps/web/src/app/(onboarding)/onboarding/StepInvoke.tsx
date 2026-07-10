@@ -1,7 +1,7 @@
 'use client';
 
 import { useRouter } from 'next/navigation';
-import { useMutation, useQueryClient } from '@tanstack/react-query';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { PRODUCT_NAME } from '@roomote/types';
 import type {
   SetupAuthProviderId,
@@ -29,10 +29,12 @@ export function StepInvoke({
   const trpc = useTRPC();
   const queryClient = useQueryClient();
   const environments = useEnvironments();
+  const commsStatus = useQuery(trpc.comms.status.queryOptions());
   const methods = buildInvokeMethods({
     communicationProviders,
     sourceControlProviders,
     includeLinear,
+    invocationIdentities: commsStatus.data?.invocationIdentities,
   });
 
   const completeOnboarding = useMutation(

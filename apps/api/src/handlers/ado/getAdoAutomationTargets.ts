@@ -1,7 +1,8 @@
+import { normalizeAdoLinkedAccountKey } from '@roomote/ado';
 import {
-  CloudAgentType,
-  DEFAULT_PR_REVIEWER_SETTINGS,
-  type PrReviewerSettings,
+  DEFAULT_PR_REVIEW_SETTINGS,
+  type PrReviewSettings,
+  type SourceControlAutomationWorkflow,
 } from '@roomote/types';
 import {
   type Repository,
@@ -25,11 +26,16 @@ type AdoAutomationWebhookContext = Pick<AdoPullRequestWebhook, 'resource'> & {
 
 type AdoAutomationTarget = {
   id: string;
-  type: CloudAgentType;
-  settings: PrReviewerSettings | null;
+  workflow: SourceControlAutomationWorkflow;
+  settings: PrReviewSettings | null;
   repo: Repository;
   repositoryIds: string[];
-  userId: string;
+  /**
+   * The Roomote user linked to the triggering sender, when one exists. The
+   * old repo-linker fallback owner is gone: automation-triggered launches
+   * carry an automation initiator instead of a forged owner.
+   */
+  userId: string | null;
 };
 
 export function getAdoIdentityName(
@@ -38,24 +44,26 @@ export function getAdoIdentityName(
   return identity?.uniqueName ?? identity?.displayName;
 }
 
-function getAdoIdentityId(identity: AdoIdentity | undefined): string | null {
-  const id = identity?.id?.trim();
-
-  return id && id.length > 0 ? id : null;
-}
-
 export function isRoomoteAdoIdentity(identityName: string): boolean {
-  const normalized = identityName.toLowerCase();
-  return normalized.startsWith('roomote') || normalized.includes('@roomote');
+  const normalized = identityName.toLowerCase().trim();
+
+  // Match Roomote's own bot by its identity name/handle only. A bare
+  // `@roomote` substring check also matched every human whose Azure DevOps
+  // uniqueName is an email in a `roomote.*` tenant (e.g.
+  // `dan@roomote.onmicrosoft.com`), which silently dropped their `@roomote`
+  // PR comment mentions. The comment path additionally guards against
+  // Roomote's own posts with `isDeploymentTokenAuthor`, which resolves the
+  // exact deployment identity rather than guessing from the name.
+  return normalized.startsWith('roomote') || normalized.startsWith('@roomote');
 }
 
 export async function getAdoAutomationTargets({
-  type,
+  workflow,
   payload,
   ignoreAuthorPolicy = false,
   requireLinkedSenderAccount = false,
 }: {
-  type: CloudAgentType;
+  workflow: SourceControlAutomationWorkflow;
   payload: AdoAutomationWebhookContext;
   ignoreAuthorPolicy?: boolean;
   requireLinkedSenderAccount?: boolean;
@@ -73,7 +81,12 @@ export async function getAdoAutomationTargets({
   const repositoryId = payload.resource.repository.id;
   const fullName = payload.repositoryFullName;
   const authorName = getAdoIdentityName(payload.resource.createdBy);
-  const senderAdoUserId = getAdoIdentityId(payload.commentAuthor);
+  // Linked accounts are keyed on the commenter's normalized uniqueName
+  // (UPN/email); the comment author's raw `id` is a different Azure DevOps id
+  // namespace than the one stored at link time and never matches.
+  const senderLinkedAccountKey = normalizeAdoLinkedAccountKey(
+    payload.commentAuthor?.uniqueName,
+  );
   const senderName = getAdoIdentityName(payload.commentAuthor);
 
   const repo = await db.query.repositories.findFirst({
@@ -99,11 +112,11 @@ export async function getAdoAutomationTargets({
   let linkedSenderUserId: string | null = null;
 
   if (requireLinkedSenderAccount) {
-    const linkedAccount = senderAdoUserId
+    const linkedAccount = senderLinkedAccountKey
       ? await db.query.authAccounts.findFirst({
           where: and(
             eq(authAccounts.providerId, 'ado'),
-            eq(authAccounts.accountId, senderAdoUserId),
+            eq(authAccounts.accountId, senderLinkedAccountKey),
           ),
           orderBy: [desc(authAccounts.updatedAt)],
           columns: {
@@ -118,20 +131,17 @@ export async function getAdoAutomationTargets({
       return {
         status: 'error',
         code: 'account_link_required',
-        message: `Azure DevOps user ${senderName ?? senderAdoUserId ?? 'unknown'} is not linked to a Roomote user`,
+        message: `Azure DevOps user ${senderName ?? senderLinkedAccountKey ?? 'unknown'} is not linked to a Roomote user`,
       };
     }
   }
 
   const reviewerSettings =
-    type === CloudAgentType.PrReviewer
-      ? await getReviewCodeAutomationSettings()
-      : null;
+    workflow === 'pr_review' ? await getReviewCodeAutomationSettings() : null;
 
   if (
-    type === CloudAgentType.PrReviewer &&
-    (reviewerSettings?.enabled ?? DEFAULT_PR_REVIEWER_SETTINGS.enabled) ===
-      false
+    workflow === 'pr_review' &&
+    (reviewerSettings?.enabled ?? DEFAULT_PR_REVIEW_SETTINGS.enabled) === false
   ) {
     return { status: 'ok', targets: [] };
   }
@@ -143,10 +153,7 @@ export async function getAdoAutomationTargets({
     .from(environmentRepositoryMappings)
     .where(eq(environmentRepositoryMappings.repositoryId, repo.id));
 
-  if (
-    type === CloudAgentType.PrReviewer &&
-    repositoryEnvironmentIds.length === 0
-  ) {
+  if (workflow === 'pr_review' && repositoryEnvironmentIds.length === 0) {
     return {
       status: 'error',
       message: `no environment mapping associated with [ado:${repositoryId}, ${repo.fullName}]`,
@@ -155,10 +162,10 @@ export async function getAdoAutomationTargets({
 
   const reviewerReviewsAllPrs =
     reviewerSettings?.reviewAllPullRequestAuthors ??
-    DEFAULT_PR_REVIEWER_SETTINGS.reviewAllPullRequestAuthors;
+    DEFAULT_PR_REVIEW_SETTINGS.reviewAllPullRequestAuthors;
 
   if (
-    type === CloudAgentType.PrReviewer &&
+    workflow === 'pr_review' &&
     !ignoreAuthorPolicy &&
     authorName &&
     !isRoomoteAdoIdentity(authorName) &&
@@ -174,12 +181,12 @@ export async function getAdoAutomationTargets({
     status: 'ok',
     targets: [
       {
-        id: `ado:${type}:${repo.id}`,
-        type,
+        id: `ado:${workflow}:${repo.id}`,
+        workflow,
         settings: reviewerSettings,
         repo,
         repositoryIds: [repo.id],
-        userId: linkedSenderUserId ?? repo.linkedByUserId,
+        userId: linkedSenderUserId,
       },
     ],
   };

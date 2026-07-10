@@ -136,8 +136,22 @@ export interface AnswerUserInputRequestCommand {
   };
 }
 
+/**
+ * Attribution for a user-initiated cancel. Presence of this data is what
+ * marks the cancel as an explicit user stop (and produces a visible
+ * `task_cancelled` transcript marker); internal cancels (steer replay,
+ * env-var resumable stop, task replacement) omit it.
+ */
+export interface CancelTaskAttribution {
+  name?: string;
+  source?: string;
+}
+
 export interface CancelTaskCommand {
   commandName: typeof TaskCommandName.CancelTask;
+  data?: {
+    cancelledBy?: CancelTaskAttribution;
+  };
 }
 
 export interface CloseTaskCommand {

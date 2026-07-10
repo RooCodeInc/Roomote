@@ -9,6 +9,7 @@ const {
   mockUpsertDeploymentEnvironmentVariables,
   mockGetPersistedEnvironmentVariableNames,
   mockResolveEffectiveDeploymentEnvVars,
+  mockResolveInvocationIdentities,
 } = vi.hoisted(() => ({
   mockDbDelete: vi.fn(() => ({
     where: vi.fn(async () => undefined),
@@ -18,6 +19,7 @@ const {
   mockUpsertDeploymentEnvironmentVariables: vi.fn(),
   mockGetPersistedEnvironmentVariableNames: vi.fn().mockResolvedValue([]),
   mockResolveEffectiveDeploymentEnvVars: vi.fn().mockResolvedValue({}),
+  mockResolveInvocationIdentities: vi.fn().mockResolvedValue([]),
 }));
 
 vi.mock('@roomote/db/server', () => ({
@@ -32,6 +34,7 @@ vi.mock('@roomote/db/server', () => ({
   inArray: vi.fn(),
   isNull: vi.fn(),
   resolveEffectiveDeploymentEnvVars: mockResolveEffectiveDeploymentEnvVars,
+  resolveInvocationIdentities: mockResolveInvocationIdentities,
   resolveTelegramRuntimeCredentials: vi.fn(async () => ({
     botToken: null,
     webhookSecret: null,
@@ -315,6 +318,7 @@ describe('comms commands', () => {
             ROOMOTE_AUTH_MICROSOFT_TENANT_ID: 'ms-tenant-id',
             TEAMS_BOT_APP_ID: 'bot-app-id',
             TEAMS_BOT_APP_PASSWORD: 'bot-secret',
+            TEAMS_BOT_TENANT_ID: 'bot-tenant-id',
           },
         }),
       ).resolves.toEqual({ telegramWebhook: null });
@@ -332,6 +336,7 @@ describe('comms commands', () => {
             }),
             expect.objectContaining({ name: 'TEAMS_BOT_APP_ID' }),
             expect.objectContaining({ name: 'TEAMS_BOT_APP_PASSWORD' }),
+            expect.objectContaining({ name: 'TEAMS_BOT_TENANT_ID' }),
           ]),
         }),
       );

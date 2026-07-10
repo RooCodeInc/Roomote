@@ -198,9 +198,10 @@ if [ "$PUBLISH" = true ]; then
     git push origin ":refs/tags/$TAG" 2>/dev/null || true
   }
   
-  # Create release (preview channel is always a GitHub prerelease)
-  PRERELEASE_FLAG=""
-  [[ "$RELEASE_CHANNEL" == "preview" || "$VERSION" == *"-"* ]] && PRERELEASE_FLAG="--prerelease"
+  # Always prerelease worker archive tags. Product `v*` GitHub Releases own
+  # `releases/latest` for the self-host installer; a non-prerelease worker tag
+  # would steal that pointer.
+  PRERELEASE_FLAG="--prerelease"
 
   RELEASE_TITLE="Worker $VERSION"
   [[ "$RELEASE_CHANNEL" == "preview" ]] && RELEASE_TITLE="Worker Preview $VERSION"

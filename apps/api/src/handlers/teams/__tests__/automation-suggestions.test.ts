@@ -29,12 +29,14 @@ vi.mock('@roomote/env', () => ({
 }));
 
 vi.mock('@roomote/db/server', () => ({
-  agentSuggestionMessages: {
+  trackedMessages: {
     id: 'id',
-    agentType: 'agentType',
+    kind: 'kind',
+    dedupeKey: 'dedupeKey',
     channelId: 'channelId',
     messageTs: 'messageTs',
-    suggestionKey: 'suggestionKey',
+    workItemId: 'workItemId',
+    metadata: 'metadata',
   },
   environments: { id: 'id', name: 'name' },
   slackInstallations: { id: 'id', isActive: 'isActive' },
@@ -43,8 +45,8 @@ vi.mock('@roomote/db/server', () => ({
   inArray: vi.fn((column: unknown, values: unknown) => ({
     inArray: [column, values],
   })),
-  like: vi.fn((column: unknown, pattern: unknown) => ({
-    like: [column, pattern],
+  sql: vi.fn((strings: TemplateStringsArray, ...values: unknown[]) => ({
+    sql: [Array.from(strings), values],
   })),
   resolveTelegramRuntimeCredentials: telegramCredentialsMock,
   db: {
@@ -97,7 +99,8 @@ function buildSuggestion(id: string, title: string) {
 describe('postScheduledSuggestionsToTeams', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    // First select: active Slack installation lookup (none). Second: dedup.
+    // The only `.limit()` lookup is now the dedup query (Slack/Telegram
+    // self-suppression was removed; precedence is owned by the caller).
     selectLimitMock.mockResolvedValue([]);
     telegramCredentialsMock.mockResolvedValue({
       botToken: null,
@@ -148,50 +151,25 @@ describe('postScheduledSuggestionsToTeams', () => {
     expect(posted.text).toContain('_Triage Sentry Issues_');
 
     const rows = insertValuesMock.mock.calls[0]![0] as Array<{
+      kind: string;
+      surface: string;
       channelId: string;
+      dedupeKey: string;
       messageTs: string;
+      workItemId: string;
+      metadata: { suggestionType: string; suggestionKey: string };
     }>;
     expect(rows).toHaveLength(2);
-    expect(new Set(rows.map((row) => row.messageTs)).size).toBe(2);
+    expect(rows.every((row) => row.kind === 'suggestion_card')).toBe(true);
+    expect(rows.every((row) => row.surface === 'teams')).toBe(true);
+    expect(new Set(rows.map((row) => row.dedupeKey)).size).toBe(2);
+    expect(rows.map((row) => row.workItemId)).toEqual(['aaa', 'bbb']);
     expect(rows[0]!.channelId).toBe('19:channel@thread.tacv2');
   });
 
-  it('skips when an active Slack installation exists', async () => {
-    selectLimitMock.mockResolvedValueOnce([{ id: 'install-1' }]);
-
-    await postScheduledSuggestionsToTeams({
-      sourceTaskId: 'task-1',
-      createdByUserId: 'user-1',
-      suggestionSource: 'sentry_triage',
-      suggestions: [buildSuggestion('aaa', 'Fix crash')],
-    });
-
-    expect(postMessageMock).not.toHaveBeenCalled();
-  });
-
-  it('skips when a Telegram automation destination exists', async () => {
-    telegramCredentialsMock.mockResolvedValueOnce({
-      botToken: 'bot-token',
-      webhookSecret: null,
-      botUsername: null,
-    });
-    findTelegramPrimaryChatIdMock.mockResolvedValueOnce('8846357662');
-
-    await postScheduledSuggestionsToTeams({
-      sourceTaskId: 'task-1',
-      createdByUserId: 'user-1',
-      suggestionSource: 'sentry_triage',
-      suggestions: [buildSuggestion('aaa', 'Fix crash')],
-    });
-
-    expect(postMessageMock).not.toHaveBeenCalled();
-  });
-
   it('skips when tracked messages already exist for the source task', async () => {
-    // Slack gate (empty), then the dedup lookup finds a tracked row.
-    selectLimitMock
-      .mockResolvedValueOnce([])
-      .mockResolvedValueOnce([{ id: 'existing' }]);
+    // The dedup lookup finds a tracked row (surface self-suppression removed).
+    selectLimitMock.mockResolvedValueOnce([{ id: 'existing' }]);
 
     await postScheduledSuggestionsToTeams({
       sourceTaskId: 'task-1',
@@ -221,7 +199,7 @@ describe('postScheduledSuggestionsToTeams', () => {
   });
 
   it('renders "Automation in Environment" when a suggestion has a target environment', async () => {
-    selectWhereRowsMock.mockReturnValue([{ id: 'env-1', name: 'OpenRoomote' }]);
+    selectWhereRowsMock.mockReturnValue([{ id: 'env-1', name: 'Roomote' }]);
 
     await postScheduledSuggestionsToTeams({
       sourceTaskId: 'task-1',
@@ -240,6 +218,6 @@ describe('postScheduledSuggestionsToTeams', () => {
     });
 
     const posted = postMessageMock.mock.calls[0]![0] as { text: string };
-    expect(posted.text).toContain('_Suggest Ideas in OpenRoomote_');
+    expect(posted.text).toContain('_Suggest Ideas in Roomote_');
   });
 });

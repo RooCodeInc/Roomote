@@ -1,0 +1,71 @@
+{
+  "name": "slack-duplicate-delivery",
+  "description": "Slack redelivers the same app_mention event (identical event_id) a few seconds later. Roomote must reply exactly once — the duplicate must be absorbed silently.",
+  "criteria": [
+    "The bot posts exactly one reply message in the mention's thread, even though the identical event (same event_id) was delivered twice",
+    "The reply is a threaded reply whose thread_ts equals the ts of the mention",
+    "The bot posts no error messages, no apologies about duplicates, and no channel-level messages"
+  ],
+  "state": {
+    "team": {
+      "id": "TROOMOTE",
+      "domain": "roomote-mock",
+      "timezone": "America/Los_Angeles"
+    },
+    "acceptedBotTokens": [],
+    "botUserId": "BROOMOTE",
+    "channels": [
+      {
+        "id": "C123ABC456",
+        "name": "product-debug",
+        "type": "public_channel",
+        "isMember": true,
+        "members": ["UDAN", "BROOMOTE"]
+      }
+    ],
+    "users": [
+      { "id": "BROOMOTE", "name": "roomote", "displayName": "Roomote" },
+      {
+        "id": "UDAN",
+        "name": "dan",
+        "displayName": "Dan Riccio",
+        "email": "local@roomote.dev"
+      }
+    ],
+    "messages": []
+  },
+  "events": [
+    {
+      "delayMs": 0,
+      "envelope": {
+        "kind": "event_callback",
+        "eventId": "$E1",
+        "event": {
+          "type": "app_mention",
+          "channel": "C123ABC456",
+          "user": "UDAN",
+          "text": "<@BROOMOTE> !fast In one short paragraph: what is idempotency in API design?",
+          "ts": "$TS1",
+          "channel_type": "channel"
+        }
+      }
+    },
+    {
+      "delayMs": 6000,
+      "envelope": {
+        "kind": "event_callback",
+        "eventId": "$E1",
+        "event": {
+          "type": "app_mention",
+          "channel": "C123ABC456",
+          "user": "UDAN",
+          "text": "<@BROOMOTE> !fast In one short paragraph: what is idempotency in API design?",
+          "ts": "$TS1",
+          "channel_type": "channel"
+        }
+      }
+    }
+  ],
+  "settleMs": 25000,
+  "timeoutMs": 180000
+}

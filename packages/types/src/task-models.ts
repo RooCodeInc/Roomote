@@ -27,6 +27,7 @@ export const DIRECT_TASK_MODEL_PROVIDER_IDS = [
   'amazon-bedrock',
   'google-vertex',
   'google',
+  'xai',
 ] as const;
 
 const DIRECT_TASK_MODEL_PROVIDER_ID_SET = new Set<string>(
@@ -35,7 +36,7 @@ const DIRECT_TASK_MODEL_PROVIDER_ID_SET = new Set<string>(
 
 /**
  * Gateway providers route models from many labs under a single provider
- * prefix (e.g. `openrouter/z-ai/glm-5.2`, `vercel/openai/gpt-5.4`,
+ * prefix (e.g. `openrouter/z-ai/glm-5.2`, `vercel/openai/gpt-5.6-terra`,
  * `requesty/anthropic/claude-sonnet-5`). This is the canonical set:
  * models.dev slug resolution and gateway pricing lookups derive from it.
  * `vercel` and `requesty` also appear in `DIRECT_TASK_MODEL_PROVIDER_IDS`
@@ -109,7 +110,7 @@ function sortTaskModelOptionsById<T extends { id: string }>(models: T[]): T[] {
 export const TASK_MODEL_CATALOG: readonly TaskModelOption[] =
   mapRecommendedTaskModels(OPENROUTER_RECOMMENDED_TASK_MODEL_SLUGS);
 
-export const DEFAULT_TASK_MODEL_ID = 'openrouter/openai/gpt-5.4';
+export const DEFAULT_TASK_MODEL_ID = 'openrouter/openai/gpt-5.6-terra';
 const LEGACY_DEFAULT_TASK_MODEL_ID = 'roomote-model-default';
 
 const TASK_MODEL_CATALOG_BY_ID = new Map<string, TaskModelOption>(
@@ -129,6 +130,7 @@ const TASK_MODEL_FAMILY_ALIASES = {
   Kimi: ['kimi'],
   DeepSeek: ['deepseek'],
   Qwen: ['qwen'],
+  Grok: ['grok'],
 } as const satisfies Record<string, readonly string[]>;
 
 export const taskModelSettingsSchema = z.object({

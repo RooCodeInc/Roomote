@@ -1,5 +1,5 @@
 export type HarnessLogger = Pick<Console, 'log' | 'info' | 'warn' | 'error'> & {
-  cloudJobId: number;
+  runId: number;
   filePath: string;
   flush?: () => Promise<void>;
 };
@@ -14,7 +14,7 @@ export interface WorkerLogEntry {
   level: WorkerLogLevel;
   message: string;
   channel?: 'user' | 'debug';
-  cloudJobId?: number;
+  runId?: number;
   filePath?: string;
 }
 

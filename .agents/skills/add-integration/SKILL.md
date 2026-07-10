@@ -11,7 +11,6 @@ Use this skill when the task is to add a new curated MCP integration to Roomote'
 
 Read the current built-in integration surfaces before editing:
 
-- `.agent-guidance/features/mcp-servers.md`
 - `packages/types/src/mcp-oauth.ts`
 - `packages/types/src/mcp-service-detection.ts`
 - `packages/cloud-agents/src/server/mcp-self-setup/catalog.ts`
@@ -180,31 +179,23 @@ Read each target file before editing it. Follow the existing service entries rat
 8. `packages/slack/src/mcp-recommendations.ts`
    - Add `SLACK_ENABLE_DESCRIPTIONS[serviceId]`
 
-9. `.agent-guidance/features/mcp-servers.md`
-   - Update the curated integration catalog section
-   - Add a short paragraph explaining:
-     - access model
-     - connection scope
-     - read-only policy or lack of one
-
-10. `apps/marketing/src/pages/index.astro`
+9. `apps/marketing/src/pages/index.astro`
    - When the new service is a customer-facing supported integration that should appear in marketing, add it to the homepage integrations list in the same change
    - Keep the marketing list aligned with what Roomote actively supports, not internal-only dependencies
    - Write the marketing integration description around the benefit to users, not as a CTA to install or connect the service
    - Use the existing descriptions in `apps/marketing/src/data/integrations.ts` as the reference for tone, length, and structure
 
-11. `apps/docs`
+10. `apps/docs`
    - When the new service should appear in the public docs integration list, add or update its page under `apps/docs/integrations/`, add it to `apps/docs/docs.json`, and update `apps/docs/integrations/index.mdx`
    - For integration logos in the overview list, use `apps/docs/snippets/integration-name.jsx`
    - Prefer an Iconify Simple Icons slug in `<IntegrationName icon="..." />` when Iconify ships the logo
    - If Iconify Simple Icons does not ship the logo yet, add a manual monochrome fallback to `manualIconFallbacks` inside `IntegrationName` in `apps/docs/snippets/integration-name.jsx` and document the key in the MDX usage
    - For sidebar/page icons, use an Iconify Simple Icons URL in page frontmatter when available, such as `icon: 'https://api.iconify.design/simple-icons:asana.svg?color=%23111827'`; otherwise keep a Lucide fallback like `plug` until a source-backed icon is available. If the user provides a manual source asset, vectorize and recolor it under `apps/docs/logo/integrations/` and point frontmatter at that file.
 
-12. Shared PR-linked work-item rendering
+11. Shared PR-linked work-item rendering
    - If the new integration can originate or resolve issue/task references that should appear in pull request metadata, update the canonical task-context mapping for those work items instead of inventing an integration-specific PR-body field
    - Add or update the provider adapter in the shared PR metadata renderer under `packages/cloud-agents/src/server/workflows/`
    - Add formatter and task-context tests for the new provider behavior
-   - Update the relevant internal guidance in the same change so future integration work keeps the renderer in sync
 
 ## Native Integration Branch
 
@@ -229,7 +220,6 @@ Add or update tests that cover the new integration's metadata, setup copy, Slack
 - `pnpm exec dotenvx run -f .env.test -- pnpm --filter @roomote/web exec vitest run src/components/settings/Integrations.test.tsx src/components/settings/LinkedAccounts.test.tsx 'src/app/(authenticated)/home/OnboardingCard.client.test.tsx'`
 - `pnpm exec dotenvx run -f .env.test -- pnpm --filter @roomote/api exec vitest run src/handlers/mcp/__tests__/integration-mcp-auth.test.ts`
 - `pnpm check-types`
-- `node .agents/skills/agent-guidance-maintenance/scripts/knowledge-check.mjs`
 
 Run the API auth test only when you added or changed a read-only tool policy.
 
@@ -240,11 +230,10 @@ Run the API auth test only when you added or changed a read-only tool policy.
 - Do not assume an OAuth app that works in your own workspace will automatically work for customers in other organizations. Check the provider's app distribution and review requirements.
 - Do not use marketing or docs domains in Slack URL detection.
 - Do not add a read-only policy until you have enumerated real tool names.
-- Do not skip `.agent-guidance/features/mcp-servers.md` when the built-in catalog changes.
 - Do not skip the homepage integrations list in `apps/marketing/src/pages/index.astro` when the new integration is customer-facing and belongs in the marketed support set.
 - Do not default to organization scope without explicit shared-data reasoning.
 - Do not continue past a waitlist or restricted-access upstream without user direction.
-- Do not add an integration that can produce PR-linkable work items without also updating the canonical task-context mapping, shared PR renderer adapter, targeted tests, and internal guidance in the same change.
+- Do not add an integration that can produce PR-linkable work items without also updating the canonical task-context mapping, shared PR renderer adapter, and targeted tests in the same change.
 
 ## Output Standard
 

@@ -74,7 +74,7 @@ describe('controller sentry monitoring', () => {
       },
       maxValueLength: 8_192,
       release: 'abc123',
-      sendDefaultPii: true,
+      sendDefaultPii: false,
       serverName: 'controller',
     });
   });
@@ -128,7 +128,7 @@ describe('controller sentry monitoring', () => {
     const { captureControllerException } = await loadSentryModule();
 
     captureControllerException(new Error('boom'), {
-      jobId: 42,
+      runId: 42,
       phase: 'startup',
     });
 
@@ -140,7 +140,7 @@ describe('controller sentry monitoring', () => {
     );
     expect(scopeSetTagMock).toHaveBeenCalledWith('roomote.phase', 'startup');
     expect(scopeSetContextMock).toHaveBeenCalledWith('controller', {
-      jobId: 42,
+      runId: 42,
       phase: 'startup',
     });
     expect(scopeSetFingerprintMock).not.toHaveBeenCalled();
@@ -167,7 +167,7 @@ describe('controller sentry monitoring', () => {
         },
       ),
       {
-        jobId: 42,
+        runId: 42,
         phase: 'spawn_worker',
         provider: 'modal',
       },
@@ -224,7 +224,7 @@ describe('controller sentry monitoring', () => {
         },
       ),
       {
-        jobId: 42,
+        runId: 42,
         phase: 'spawn_worker',
         provider: 'modal',
       },
@@ -254,7 +254,7 @@ describe('controller sentry monitoring', () => {
     captureControllerMessage(
       'Controller started task using database fallback logic',
       {
-        jobId: 42,
+        runId: 42,
         phase: 'database_fallback',
       },
       {
@@ -279,7 +279,7 @@ describe('controller sentry monitoring', () => {
       'database_fallback',
     );
     expect(scopeSetContextMock).toHaveBeenCalledWith('controller', {
-      jobId: 42,
+      runId: 42,
       phase: 'database_fallback',
     });
     expect(captureMessageMock).toHaveBeenCalledWith(

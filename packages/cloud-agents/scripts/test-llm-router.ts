@@ -29,13 +29,11 @@
 
 import { createInterface } from 'readline';
 import { z } from 'zod';
-import { CloudAgentType } from '@roomote/types';
 import {
   MAX_TASK_DESCRIPTION_LENGTH,
   MAX_THREAD_MESSAGES,
   type RoutingContext,
   type RoutingSource,
-  type RoutableAgent,
   type RoutableEnvironment,
   type RoutingWorkspace,
   type RoutingResult,
@@ -60,21 +58,6 @@ const LLMRoutingResponseSchema = z.object({
 // ─────────────────────────────────────────────────────────────────────────────
 // Mock Data
 // ─────────────────────────────────────────────────────────────────────────────
-
-const MOCK_AGENTS: RoutableAgent[] = [
-  {
-    id: 'agent-generalist',
-    name: 'Generalist',
-    type: CloudAgentType.StandardTask,
-    createdAt: new Date('2024-01-01'),
-  },
-  {
-    id: 'agent-generalist-2',
-    name: 'Generalist',
-    type: CloudAgentType.StandardTask,
-    createdAt: new Date('2024-02-01'),
-  },
-];
 
 const MOCK_ENVIRONMENTS: RoutableEnvironment[] = [
   {
@@ -157,11 +140,6 @@ function buildContextPrompt(context: RoutingContext): string {
 
   prompt += buildSourceContext(context.source);
 
-  prompt += `**Available Agents**:\n`;
-  for (const agent of context.availableAgents) {
-    prompt += `- ${agent.type} [id: ${agent.id}]\n`;
-  }
-
   if (context.availableEnvironments.length > 0) {
     prompt += `\n**Available Environments**:\n`;
     for (const env of context.availableEnvironments) {
@@ -228,7 +206,6 @@ function parseRoutingResponse(
   }
 
   return {
-    agentType: CloudAgentType.StandardTask,
     workspace,
     reasoning: response.reasoning,
     workspaceOnly: true,
@@ -427,7 +404,6 @@ function buildContext(options: CLIOptions, task: string): RoutingContext {
   return {
     taskDescription: task,
     source: buildSource(options, task),
-    availableAgents: MOCK_AGENTS,
     availableEnvironments: MOCK_ENVIRONMENTS,
   };
 }
@@ -529,9 +505,7 @@ ${colors.cyan}│${colors.reset} ${colors.dim}Source:${colors.reset} ${sourceLab
     console.log(
       `${colors.cyan}│${colors.reset} ${colors.bold}${colors.green}Result: ROUTED${colors.reset}                                                             ${colors.cyan}│${colors.reset}
 ${colors.cyan}│${colors.reset}                                                                               ${colors.cyan}│${colors.reset}
-${colors.cyan}│${colors.reset}   ${colors.dim}Agent Type:${colors.reset} ${colors.bold}${result.agentType}${colors.reset}`.padEnd(
-        100,
-      ) + `${colors.cyan}│${colors.reset}`,
+${colors.cyan}│${colors.reset}`,
     );
     console.log(
       `${colors.cyan}│${colors.reset}   ${colors.dim}Workspace:${colors.reset} ${formatWorkspace(result.workspace)}`.padEnd(

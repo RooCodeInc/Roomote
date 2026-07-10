@@ -2,7 +2,7 @@ import {
   CONFLICT_RESOLUTION_SUMMARY_RESULT_KEY,
   parseConflictResolutionSummary,
 } from '@roomote/types';
-import { type CloudJob, sdk } from '@roomote/sdk/client';
+import { type TaskRun, sdk } from '@roomote/sdk/client';
 
 import type {
   CallbackEvent,
@@ -10,21 +10,21 @@ import type {
   RunTaskContext,
 } from '../run-task';
 
-function getExistingResult(cloudJob: CloudJob): Record<string, unknown> {
+function getExistingResult(taskRun: TaskRun): Record<string, unknown> {
   if (
-    !cloudJob.result ||
-    typeof cloudJob.result !== 'object' ||
-    Array.isArray(cloudJob.result)
+    !taskRun.result ||
+    typeof taskRun.result !== 'object' ||
+    Array.isArray(taskRun.result)
   ) {
     return {};
   }
 
-  return cloudJob.result as Record<string, unknown>;
+  return taskRun.result as Record<string, unknown>;
 }
 
 export const githubPrConflictResolveCallbacks: RunTaskCallbacks = {
   onMessage: async (
-    cloudJob: CloudJob,
+    taskRun: TaskRun,
     _taskId: string,
     event: CallbackEvent,
     context: RunTaskContext,
@@ -48,15 +48,15 @@ export const githubPrConflictResolveCallbacks: RunTaskCallbacks = {
     context.conflictResolutionSummary = summary;
 
     const nextResult = {
-      ...getExistingResult(cloudJob),
+      ...getExistingResult(taskRun),
       [CONFLICT_RESOLUTION_SUMMARY_RESULT_KEY]: summary,
     };
 
-    await sdk.cloudJobs.update({
-      id: cloudJob.id,
+    await sdk.taskRuns.update({
+      id: taskRun.id,
       result: nextResult,
     });
 
-    cloudJob.result = nextResult;
+    taskRun.result = nextResult;
   },
 };

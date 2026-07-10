@@ -25,10 +25,8 @@ import { getUserDisplayName } from '@/lib/user-display-name';
 
 export async function getTaskMessageEnvelopes({
   taskId,
-  userId,
 }: {
   taskId: string;
-  userId: string;
 }): Promise<TaskMessageEnvelope[]> {
   const whereConditions = [
     eq(taskMessages.taskId, taskId),
@@ -74,7 +72,7 @@ export async function getTaskMessageEnvelopes({
 
     return {
       id: row.id,
-      userId: row.userId ?? userId,
+      userId: row.userId ?? null,
       userName:
         getUserDisplayName({ name: row.userName, email: row.userEmail }) ??
         null,

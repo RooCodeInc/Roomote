@@ -1,13 +1,12 @@
 import pMap from 'p-map';
 
 import {
-  type CloudTaskPayload,
-  DEFAULT_PR_REVIEWER_SETTINGS,
-  type PrReviewerSettings,
-  CloudTaskType,
-  CloudAgentType,
+  type TaskPayload,
+  DEFAULT_PR_REVIEW_SETTINGS,
+  type PrReviewSettings,
+  TaskPayloadKind,
 } from '@roomote/types';
-import { enqueueCloudTask } from '@roomote/cloud-agents/server';
+import { enqueueTask } from '@roomote/cloud-agents/server';
 
 import type { WebhookResponse } from '../../types';
 
@@ -37,7 +36,7 @@ export async function handlePrOpen(
   }
 
   const result = await getGitHubAutomationTargets({
-    type: CloudAgentType.PrReviewer,
+    workflow: 'pr_review',
     installation,
     repository,
     sender,
@@ -51,11 +50,11 @@ export async function handlePrOpen(
   const { targets: allTargets } = result;
 
   const targets = allTargets.filter((target) => {
-    const settings = target.settings as PrReviewerSettings | null;
+    const settings = target.settings as PrReviewSettings | null;
     const reviewOnCommit =
-      settings?.reviewOnCommit ?? DEFAULT_PR_REVIEWER_SETTINGS.reviewOnCommit;
+      settings?.reviewOnCommit ?? DEFAULT_PR_REVIEW_SETTINGS.reviewOnCommit;
     const reviewDraftPrs =
-      settings?.reviewDraftPrs ?? DEFAULT_PR_REVIEWER_SETTINGS.reviewDraftPrs;
+      settings?.reviewDraftPrs ?? DEFAULT_PR_REVIEW_SETTINGS.reviewDraftPrs;
 
     if (!reviewOnCommit) {
       return false;
@@ -73,7 +72,7 @@ export async function handlePrOpen(
   }
 
   console.log(
-    `[handlePrOpen] ${repository.full_name}#${pr.number} -> enqueueCloudTask (background_review_task: true)`,
+    `[handlePrOpen] ${repository.full_name}#${pr.number} -> enqueueTask (background_review_task: true)`,
   );
 
   const enqueued = await pMap(targets, async (target) => {
@@ -85,18 +84,38 @@ export async function handlePrOpen(
       reviewerSettings: target.settings,
     });
 
-    return enqueueCloudTask({
-      type: CloudTaskType.GithubPrReview,
-      payload: {
-        repo: repository.full_name,
+    return enqueueTask({
+      task: {
+        type: TaskPayloadKind.GithubPrReview,
+        ...getBackgroundGithubTaskProperties(target.properties),
+        payload: {
+          repo: repository.full_name,
+          prNumber: pr.number,
+          prTitle: pr.title,
+          prUrl: pr.html_url,
+          headSha: pr.head.sha,
+          branchName: pr.head.ref,
+          ...relayPayload,
+        } satisfies TaskPayload<typeof TaskPayloadKind.GithubPrReview>,
+      },
+      initiator: {
+        kind: 'automation',
+        key: 'review_code',
+        actor: { externalId: String(sender.id), displayName: sender.login },
+      },
+      workflow: 'pr_review',
+      surface: 'github',
+      trigger: 'webhook',
+      prLinkage: {
+        provider: 'github',
+        repository: repository.full_name,
         prNumber: pr.number,
-        prTitle: pr.title,
         prUrl: pr.html_url,
-        headSha: pr.head.sha,
-        branchName: pr.head.ref,
-        ...relayPayload,
-      } satisfies CloudTaskPayload<CloudTaskType.GithubPrReview>,
-      ...getBackgroundGithubTaskProperties(target.properties),
+        prTitle: pr.title,
+        prSha: pr.head.sha,
+        prBaseRef: pr.base?.ref ?? null,
+        prBaseSha: pr.base?.sha ?? null,
+      },
     });
   });
 

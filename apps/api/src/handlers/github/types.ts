@@ -103,10 +103,10 @@ export type WebhookPullRequestReviewSubmitted =
   Schemas['webhook-pull-request-review-submitted'];
 
 /**
- * WebhookCloudTaskProperties
+ * WebhookTaskProperties
  */
 
-export type WebhookCloudTaskProperties = {
+export type WebhookTaskProperties = {
   userId: string | null | undefined;
   githubLogin: string | null | undefined;
   githubUserId: number | null | undefined;

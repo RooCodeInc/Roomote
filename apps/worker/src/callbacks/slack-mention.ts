@@ -1,9 +1,11 @@
 import {
-  type CloudTaskPayload,
+  type TaskPayload,
   type SlackBlock,
-  CloudTaskType,
+  TaskPayloadKind,
   DEFAULT_SLACK_ACK_EMOJI,
   PRODUCT_NAME,
+  getSlackChannelFromTaskPayload,
+  getSlackThreadTsFromTaskPayload,
 } from '@roomote/types';
 import {
   SlackNotifier,
@@ -11,7 +13,7 @@ import {
   buildStartedBlocks,
   convertMarkdownToSlack,
 } from '@roomote/slack/client';
-import { type CloudJob, sdk } from '@roomote/sdk/client';
+import { type TaskRun, sdk } from '@roomote/sdk/client';
 
 import type {
   CallbackEvent,
@@ -28,10 +30,10 @@ import {
 function reportSlackCallbackError(
   error: unknown,
   stage: string,
-  cloudJobId: number,
+  runId: number,
 ): void {
   captureWorkerException(error, {
-    cloudJobId,
+    runId,
     stage,
   });
 }
@@ -73,7 +75,7 @@ function getSlackRequestUserInputPromptMessageTs(
 }
 
 function getInitiatingSlackUserIdForStartedMessage(
-  cloudJob: CloudJob,
+  taskRun: TaskRun,
   startedData: {
     initiatingSlackUserId?: string;
   },
@@ -82,10 +84,10 @@ function getInitiatingSlackUserIdForStartedMessage(
     return startedData.initiatingSlackUserId;
   }
 
-  const payload = cloudJob.payload;
+  const payload = taskRun.payload;
 
   if (
-    cloudJob.type === CloudTaskType.SlackAppMention &&
+    taskRun.payloadKind === TaskPayloadKind.SlackAppMention &&
     payload &&
     typeof payload === 'object' &&
     'user' in payload &&
@@ -97,8 +99,8 @@ function getInitiatingSlackUserIdForStartedMessage(
   return undefined;
 }
 
-async function recordOutboundSlackMessageForCloudJob(params: {
-  cloudJob: CloudJob;
+async function recordOutboundSlackMessageForTaskRun(params: {
+  taskRun: TaskRun;
   messageTs: string | null | undefined;
   text: string;
   source: string;
@@ -108,12 +110,10 @@ async function recordOutboundSlackMessageForCloudJob(params: {
     return;
   }
 
-  const { channel, thread_ts: threadTs } = getSlackConversation(
-    params.cloudJob,
-  );
+  const { channel, thread_ts: threadTs } = getSlackConversation(params.taskRun);
 
-  await sdk.cloudJobs.recordOutboundSlackConversationMessage({
-    cloudJobId: params.cloudJob.id,
+  await sdk.taskRuns.recordOutboundSlackConversationMessage({
+    runId: params.taskRun.id,
     slackChannelId: channel,
     conversationKind: 'thread',
     threadTs,
@@ -126,7 +126,7 @@ async function recordOutboundSlackMessageForCloudJob(params: {
 
 export const slackMentionCallbacks: RunTaskCallbacks = {
   onStart: async (
-    cloudJob: CloudJob,
+    taskRun: TaskRun,
     taskId: string,
     context: RunTaskContext,
   ) => {
@@ -136,15 +136,15 @@ export const slackMentionCallbacks: RunTaskCallbacks = {
     const slack = await getSlackNotifier();
 
     try {
-      await removeSlackAckReaction(cloudJob, slack);
+      await removeSlackAckReaction(taskRun, slack);
     } catch (error) {
       reportSlackCallbackError(
         error,
         'slackMentionCallbacks.onStart.removeReaction',
-        cloudJob.id,
+        taskRun.id,
       );
       console.error(
-        `[slackMentionCallbacks#onStart] Failed Slack reaction cleanup for cloud job ${cloudJob.id}: ${
+        `[slackMentionCallbacks#onStart] Failed Slack reaction cleanup for task run ${taskRun.id}: ${
           error instanceof Error ? error.message : String(error)
         }`,
       );
@@ -153,7 +153,7 @@ export const slackMentionCallbacks: RunTaskCallbacks = {
     try {
       // Build a single task URL that includes preview params for the primary service.
       const taskUrlObj = new URL(
-        `/task/${cloudJob.taskId}`,
+        `/task/${taskRun.taskId}`,
         process.env.ROOMOTE_APP_URL,
       );
       taskUrlObj.searchParams.set('utm_source', 'slack');
@@ -161,13 +161,13 @@ export const slackMentionCallbacks: RunTaskCallbacks = {
       taskUrlObj.searchParams.set('utm_campaign', 'slack.app.mention');
 
       // Retrieve the started message metadata so we can rebuild the blocks.
-      const startedData = await sdk.cloudJobs.getSlackStartedMessageData({
-        cloudJobId: cloudJob.id,
+      const startedData = await sdk.taskRuns.getSlackStartedMessageData({
+        runId: taskRun.id,
       });
 
       if (!startedData) {
         console.log(
-          `[slackMentionCallbacks#onStart] No started message data for job ${cloudJob.id}, skipping Follow button`,
+          `[slackMentionCallbacks#onStart] No started message data for job ${taskRun.id}, skipping Follow button`,
         );
 
         return;
@@ -175,7 +175,7 @@ export const slackMentionCallbacks: RunTaskCallbacks = {
 
       const taskUrl = taskUrlObj.toString();
       const initiatingSlackUserId = getInitiatingSlackUserIdForStartedMessage(
-        cloudJob,
+        taskRun,
         startedData,
       );
 
@@ -183,14 +183,14 @@ export const slackMentionCallbacks: RunTaskCallbacks = {
       const blocks = buildStartedBlocks({
         workspaceDisplayName: startedData.workspaceDisplayName,
         modelDisplayName: startedData.modelDisplayName,
-        cloudJobId: cloudJob.id,
+        runId: taskRun.id,
         otherRunningTasksCount: startedData.otherRunningTasksCount,
-        taskId: cloudJob.taskId,
+        taskId: taskRun.taskId,
         initiatingSlackUserId,
         taskUrl,
       });
 
-      const { channel, thread_ts: threadTs } = getSlackConversation(cloudJob);
+      const { channel, thread_ts: threadTs } = getSlackConversation(taskRun);
 
       if (threadTs) {
         await slack.updateMessage({
@@ -203,49 +203,49 @@ export const slackMentionCallbacks: RunTaskCallbacks = {
       reportSlackCallbackError(
         error,
         'slackMentionCallbacks.onStart.refreshStartedMessage',
-        cloudJob.id,
+        taskRun.id,
       );
       console.error(
-        `[slackMentionCallbacks#onStart] Failed Slack started-message refresh for cloud job ${cloudJob.id}: ${
+        `[slackMentionCallbacks#onStart] Failed Slack started-message refresh for task run ${taskRun.id}: ${
           error instanceof Error ? error.message : String(error)
         }`,
       );
     }
   },
   onMessage: async (
-    cloudJob: CloudJob,
+    taskRun: TaskRun,
     _taskId: string,
     event: CallbackEvent,
     context: RunTaskContext,
   ) => {
     if (event.type === 'completion') {
-      await handleCompletion(cloudJob, event, context);
+      await handleCompletion(taskRun, event, context);
     }
 
     if (event.type === 'request_user_input') {
-      await handleRequestUserInput(cloudJob, event, context);
+      await handleRequestUserInput(taskRun, event, context);
     }
 
     if (event.type === 'request_user_input_response') {
-      await handleRequestUserInputResponse(cloudJob, event);
+      await handleRequestUserInputResponse(taskRun, event);
     }
 
     if (event.type === 'followup') {
-      await handleFollowup(cloudJob, event, context);
+      await handleFollowup(taskRun, event, context);
     }
   },
-  onExit: async (cloudJob: CloudJob) => {
+  onExit: async (taskRun: TaskRun) => {
     try {
-      const { thread_ts: threadTs } = getSlackConversation(cloudJob);
-      await sdk.cloudJobs.clearPendingSlackRequestUserInput({
-        cloudJobId: cloudJob.id,
+      const { thread_ts: threadTs } = getSlackConversation(taskRun);
+      await sdk.taskRuns.clearPendingSlackRequestUserInput({
+        runId: taskRun.id,
         threadId: threadTs,
       });
     } catch (error) {
       reportSlackCallbackError(
         error,
         'slackMentionCallbacks.onExit.clearPendingRequestUserInput',
-        cloudJob.id,
+        taskRun.id,
       );
       console.error(
         `[slackMentionCallbacks#onExit] Failed to clear pending request_user_input state: ${
@@ -257,7 +257,7 @@ export const slackMentionCallbacks: RunTaskCallbacks = {
 };
 
 async function handleCompletion(
-  cloudJob: CloudJob,
+  taskRun: TaskRun,
   event: CallbackEvent & { type: 'completion' },
   context: RunTaskContext,
 ) {
@@ -269,15 +269,15 @@ async function handleCompletion(
   context.isCompleted = true;
 
   try {
-    await sdk.cloudJobs.enqueueSlackPrInactivityCheck({
-      cloudJobId: cloudJob.id,
+    await sdk.taskRuns.enqueueSlackPrInactivityCheck({
+      runId: taskRun.id,
       completionText: event.text,
     });
   } catch (error) {
     reportSlackCallbackError(
       error,
       'slackMentionCallbacks.handleCompletion.enqueueSlackPrInactivityCheck',
-      cloudJob.id,
+      taskRun.id,
     );
     console.error(
       `[RunTaskCallbacks#onMessage -> completion, ts=${event.ts}] Failed to enqueue Slack PR inactivity check: ${
@@ -288,7 +288,7 @@ async function handleCompletion(
 }
 
 async function handleRequestUserInput(
-  cloudJob: CloudJob,
+  taskRun: TaskRun,
   event: CallbackEvent & { type: 'request_user_input' },
   context: RunTaskContext,
 ) {
@@ -303,23 +303,23 @@ async function handleRequestUserInput(
 
   try {
     const slack = await getSlackNotifier();
-    const { channel, thread_ts: threadTs } = getSlackConversation(cloudJob);
-    const taskUrl = buildRequestUserInputTaskUrl(cloudJob, 'slack');
+    const { channel, thread_ts: threadTs } = getSlackConversation(taskRun);
+    const taskUrl = buildRequestUserInputTaskUrl(taskRun, 'slack');
     const supportsSlackRequestUserInput = supportsIntegrationRequestUserInput(
       event.request,
     );
     const pendingRequest = {
-      cloudJobId: cloudJob.id,
+      runId: taskRun.id,
       threadId: threadTs,
       requestId: event.request.requestId,
-      taskId: cloudJob.taskId,
+      taskId: taskRun.taskId,
       questions: event.request.questions,
     };
 
     if (supportsSlackRequestUserInput) {
-      await sdk.cloudJobs.setPendingSlackRequestUserInput(pendingRequest);
-      const footerText = await sdk.cloudJobs.getSlackThreadFooterText({
-        cloudJobId: cloudJob.id,
+      await sdk.taskRuns.setPendingSlackRequestUserInput(pendingRequest);
+      const footerText = await sdk.taskRuns.getSlackThreadFooterText({
+        runId: taskRun.id,
         slackChannelId: channel,
         threadTs,
         taskUrl,
@@ -349,15 +349,15 @@ async function handleRequestUserInput(
           });
 
       if (!promptMessageTs) {
-        await sdk.cloudJobs.clearPendingSlackRequestUserInput({
-          cloudJobId: cloudJob.id,
+        await sdk.taskRuns.clearPendingSlackRequestUserInput({
+          runId: taskRun.id,
           threadId: threadTs,
           requestId: event.request.requestId,
         });
         return;
       }
 
-      await sdk.cloudJobs.setPendingSlackRequestUserInput({
+      await sdk.taskRuns.setPendingSlackRequestUserInput({
         ...pendingRequest,
         promptMessageTs,
       });
@@ -366,8 +366,8 @@ async function handleRequestUserInput(
       postedSignatures.set(event.request.requestId, promptSignature);
 
       if (!didUpdatePrompt) {
-        await recordOutboundSlackMessageForCloudJob({
-          cloudJob,
+        await recordOutboundSlackMessageForTaskRun({
+          taskRun,
           messageTs: promptMessageTs,
           text: 'Posted structured request_user_input prompt in Slack.',
           source: 'request_user_input',
@@ -389,8 +389,8 @@ async function handleRequestUserInput(
     if (handoffMessageTs) {
       postedSignatures.set(event.request.requestId, promptSignature);
     }
-    await recordOutboundSlackMessageForCloudJob({
-      cloudJob,
+    await recordOutboundSlackMessageForTaskRun({
+      taskRun,
       messageTs: handoffMessageTs,
       text: `I need a private answer before I can continue. Please answer in ${PRODUCT_NAME}: ${taskUrl}`,
       source: 'request_user_input_handoff',
@@ -399,7 +399,7 @@ async function handleRequestUserInput(
     reportSlackCallbackError(
       error,
       'slackMentionCallbacks.handleRequestUserInput.postPrompt',
-      cloudJob.id,
+      taskRun.id,
     );
     console.error(
       `Failed to post request_user_input fallback to Slack: ${error instanceof Error ? error.message : String(error)}`,
@@ -408,14 +408,14 @@ async function handleRequestUserInput(
 }
 
 async function handleRequestUserInputResponse(
-  cloudJob: CloudJob,
+  taskRun: TaskRun,
   event: CallbackEvent & { type: 'request_user_input_response' },
 ) {
   try {
-    const { thread_ts: threadTs } = getSlackConversation(cloudJob);
+    const { thread_ts: threadTs } = getSlackConversation(taskRun);
 
-    await sdk.cloudJobs.clearPendingSlackRequestUserInput({
-      cloudJobId: cloudJob.id,
+    await sdk.taskRuns.clearPendingSlackRequestUserInput({
+      runId: taskRun.id,
       threadId: threadTs,
       requestId: event.response.requestId,
     });
@@ -423,7 +423,7 @@ async function handleRequestUserInputResponse(
     reportSlackCallbackError(
       error,
       'slackMentionCallbacks.handleRequestUserInputResponse.clearPendingState',
-      cloudJob.id,
+      taskRun.id,
     );
     console.error(
       `Failed to clear Slack request_user_input state: ${error instanceof Error ? error.message : String(error)}`,
@@ -432,7 +432,7 @@ async function handleRequestUserInputResponse(
 }
 
 async function handleFollowup(
-  cloudJob: CloudJob,
+  taskRun: TaskRun,
   event: CallbackEvent & { type: 'followup' },
   context: RunTaskContext,
 ) {
@@ -503,10 +503,10 @@ async function handleFollowup(
 
     const followupMessageTs = await slack.postMessage({
       blocks,
-      ...getSlackConversation(cloudJob),
+      ...getSlackConversation(taskRun),
     });
-    await recordOutboundSlackMessageForCloudJob({
-      cloudJob,
+    await recordOutboundSlackMessageForTaskRun({
+      taskRun,
       messageTs: followupMessageTs,
       text: event.question,
       source: 'followup_question',
@@ -519,7 +519,7 @@ async function handleFollowup(
     reportSlackCallbackError(
       error,
       'slackMentionCallbacks.handleFollowup.postMessage',
-      cloudJob.id,
+      taskRun.id,
     );
     console.error(
       `Failed to post followup question to Slack: ${error instanceof Error ? error.message : String(error)}`,
@@ -544,17 +544,17 @@ async function getSlackNotifier() {
 }
 
 async function removeSlackAckReaction(
-  cloudJob: CloudJob,
+  taskRun: TaskRun,
   slack: SlackNotifier,
 ): Promise<void> {
-  const originMessageTs = getSlackOriginMessageTs(cloudJob);
+  const originMessageTs = getSlackOriginMessageTs(taskRun);
 
   if (!originMessageTs) {
     return;
   }
 
-  const { channel } = getSlackConversation(cloudJob);
-  const ackEmoji = getStoredSlackAckEmoji(cloudJob);
+  const { channel } = getSlackConversation(taskRun);
+  const ackEmoji = getStoredSlackAckEmoji(taskRun);
 
   const reaction = {
     channel,
@@ -569,23 +569,24 @@ async function removeSlackAckReaction(
   }
 
   console.warn(
-    `[slackMentionCallbacks#onStart] Slack reaction cleanup failed for cloud job ${cloudJob.id}; retrying once (emoji=${ackEmoji}, channel=${channel}, timestamp=${originMessageTs})`,
+    `[slackMentionCallbacks#onStart] Slack reaction cleanup failed for task run ${taskRun.id}; retrying once (emoji=${ackEmoji}, channel=${channel}, timestamp=${originMessageTs})`,
   );
 
   removed = await slack.removeReaction(reaction);
 
   if (!removed) {
     console.warn(
-      `[slackMentionCallbacks#onStart] Slack reaction cleanup failed after retry for cloud job ${cloudJob.id} (emoji=${ackEmoji}, channel=${channel}, timestamp=${originMessageTs})`,
+      `[slackMentionCallbacks#onStart] Slack reaction cleanup failed after retry for task run ${taskRun.id} (emoji=${ackEmoji}, channel=${channel}, timestamp=${originMessageTs})`,
     );
   }
 }
 
-function getSlackConversation(cloudJob: CloudJob) {
+function getSlackConversation(taskRun: TaskRun) {
   // For SlackAppMention jobs, channel and thread_ts are in the payload.
-  if (cloudJob.type === CloudTaskType.SlackAppMention) {
-    const { channel, thread_ts } =
-      cloudJob.payload as CloudTaskPayload<CloudTaskType.SlackAppMention>;
+  if (taskRun.payloadKind === TaskPayloadKind.SlackAppMention) {
+    const { channel, thread_ts } = taskRun.payload as TaskPayload<
+      typeof TaskPayloadKind.SlackAppMention
+    >;
 
     if (!thread_ts) {
       throw new Error('Thread TS not found.');
@@ -594,20 +595,25 @@ function getSlackConversation(cloudJob: CloudJob) {
     return { channel, thread_ts };
   }
 
-  // For SnapshotResume jobs with Slack metadata, read channel from payload
-  // and thread_ts from the top-level slackThreadTs field.
+  // For SnapshotResume runs with Slack metadata, channel and thread_ts are
+  // copied onto the resume payload when the resume is enqueued.
+  const resumeThreadTs =
+    taskRun.payloadKind === TaskPayloadKind.SnapshotResume
+      ? getSlackThreadTsFromTaskPayload(taskRun.payload)
+      : null;
+
   if (
-    cloudJob.type === CloudTaskType.SnapshotResume &&
-    cloudJob.slackThreadTs
+    taskRun.payloadKind === TaskPayloadKind.SnapshotResume &&
+    resumeThreadTs
   ) {
-    const payload = cloudJob.payload as Record<string, unknown>;
-    const channel = payload.slackChannel as string | undefined;
-    const thread_ts = cloudJob.slackThreadTs;
+    const channel =
+      getSlackChannelFromTaskPayload(taskRun.payload) ?? undefined;
+    const thread_ts = resumeThreadTs;
 
     if (!channel) {
       throw new Error(
         'Slack channel not found in SnapshotResume payload. ' +
-          'The source job may not have included slackChannel in the resume payload.',
+          'The source task run may not have included slackChannel in the resume payload.',
       );
     }
 
@@ -615,20 +621,21 @@ function getSlackConversation(cloudJob: CloudJob) {
   }
 
   throw new Error(
-    `Cloud job ${cloudJob.id} (type=${cloudJob.type}) is not a Slack-originated job`,
+    `Task run ${taskRun.id} (payloadKind=${taskRun.payloadKind}) is not a Slack-originated job`,
   );
 }
 
-function getSlackOriginMessageTs(cloudJob: CloudJob): string | null {
-  if (cloudJob.type === CloudTaskType.SlackAppMention) {
-    const { ts } =
-      cloudJob.payload as CloudTaskPayload<CloudTaskType.SlackAppMention>;
+function getSlackOriginMessageTs(taskRun: TaskRun): string | null {
+  if (taskRun.payloadKind === TaskPayloadKind.SlackAppMention) {
+    const { ts } = taskRun.payload as TaskPayload<
+      typeof TaskPayloadKind.SlackAppMention
+    >;
 
     return ts;
   }
 
-  if (cloudJob.type === CloudTaskType.SnapshotResume) {
-    const payload = cloudJob.payload as { slackOriginMessageTs?: unknown };
+  if (taskRun.payloadKind === TaskPayloadKind.SnapshotResume) {
+    const payload = taskRun.payload as { slackOriginMessageTs?: unknown };
 
     return typeof payload.slackOriginMessageTs === 'string'
       ? payload.slackOriginMessageTs
@@ -638,17 +645,17 @@ function getSlackOriginMessageTs(cloudJob: CloudJob): string | null {
   return null;
 }
 
-function getStoredSlackAckEmoji(cloudJob: CloudJob): string {
-  return getSlackPayloadEmoji(cloudJob, 'ackEmoji') ?? DEFAULT_SLACK_ACK_EMOJI;
+function getStoredSlackAckEmoji(taskRun: TaskRun): string {
+  return getSlackPayloadEmoji(taskRun, 'ackEmoji') ?? DEFAULT_SLACK_ACK_EMOJI;
 }
 
 function getSlackPayloadEmoji(
-  cloudJob: CloudJob,
+  taskRun: TaskRun,
   key: 'ackEmoji',
 ): string | null {
   const payload =
-    cloudJob.payload && typeof cloudJob.payload === 'object'
-      ? (cloudJob.payload as Record<string, unknown>)
+    taskRun.payload && typeof taskRun.payload === 'object'
+      ? (taskRun.payload as Record<string, unknown>)
       : null;
   const emoji = payload?.[key];
 

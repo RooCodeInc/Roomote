@@ -16,7 +16,7 @@ vi.mock('@roomote/redis', () => ({
 }));
 
 import { FeatureFlag } from '@roomote/feature-flags';
-import type { AuthTokenContext, JobTokenContext } from '@roomote/types';
+import type { AuthTokenContext, RunTokenContext } from '@roomote/types';
 
 import { featureFlagsRouter } from './feature-flags';
 
@@ -31,10 +31,11 @@ function createAuthCaller() {
 }
 
 function createJobCaller() {
-  const auth: JobTokenContext = {
-    cloudJobId: 42,
+  const auth: RunTokenContext = {
+    runId: 42,
     userId: 'user-1',
-    tokenType: 'cj',
+    principal: 'user',
+    tokenType: 'run',
     version: 1,
   };
 
@@ -61,7 +62,7 @@ describe('featureFlagsRouter.evaluate', () => {
     });
   });
 
-  it('evaluates deployment flags for job-token callers', async () => {
+  it('evaluates deployment flags for run-token callers', async () => {
     await expect(
       createJobCaller().evaluate({
         flag: FeatureFlag.SlackProofAutoPost,

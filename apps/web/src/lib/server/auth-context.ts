@@ -201,7 +201,11 @@ async function ensureDeploymentIdentity({
     // exists (e.g. a manual database edit) and access policy re-admits them,
     // restore the row as a member rather than leaving it in limbo.
     const isRestoring = existingUser.deletedAt != null;
-    role = isRestoring ? 'member' : existingUser.role;
+    role = admittedViaBootstrap
+      ? 'admin'
+      : isRestoring
+        ? 'member'
+        : existingUser.role;
 
     const profileUpdate = {
       name,
@@ -210,6 +214,9 @@ async function ensureDeploymentIdentity({
       entity: userEntity,
       onboardingCompletedAt: existingUser.onboardingCompletedAt ?? now,
       updatedAt: now,
+      ...(admittedViaBootstrap && existingUser.role !== 'admin'
+        ? { role }
+        : {}),
     };
 
     if (isRestoring) {

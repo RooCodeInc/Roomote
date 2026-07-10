@@ -244,7 +244,7 @@ describe('reply quote helpers', () => {
     });
 
     const result = await trackSlackReplyQuote(config, {
-      cloudJobId: 42,
+      runId: 42,
       text: 'Follow up from web',
       userName: 'Casey',
     });
@@ -258,7 +258,7 @@ describe('reply quote helpers', () => {
           Authorization: 'Bearer test-token',
         }),
         body: JSON.stringify({
-          cloudJobId: 42,
+          runId: 42,
           text: 'Follow up from web',
           userName: 'Casey',
         }),
@@ -273,7 +273,7 @@ describe('reply quote helpers', () => {
     });
 
     const result = await clearSlackReplyQuote(config, {
-      cloudJobId: 42,
+      runId: 42,
     });
 
     expect(result).toEqual({ success: true });
@@ -285,7 +285,7 @@ describe('reply quote helpers', () => {
           Authorization: 'Bearer test-token',
         }),
         body: JSON.stringify({
-          cloudJobId: 42,
+          runId: 42,
         }),
       }),
     );

@@ -61,9 +61,6 @@ const baseFormState: FormState = {
   codeQualityAuditorSlackChannel: '',
   ciFailureTriageFrequency: 'off' as const,
   ciFailureTriageSlackChannel: '',
-  coachFrequency: 'off' as const,
-  coachSlackChannel: '',
-  coachInstructions: '',
   suggesterFrequency: 'off',
   suggesterSlackChannel: '',
   suggesterInstructions: '',
@@ -174,15 +171,15 @@ describe('Automations selection helpers', () => {
   it('builds a save state that only applies the selected agent changes', () => {
     const currentFormState: FormState = {
       ...baseFormState,
-      coachFrequency: 'daily',
-      coachInstructions: 'Unsaved coach edit',
+      announcerFrequency: 'daily',
+      announcerInstructions: 'Unsaved announcer edit',
       suggesterInstructions: 'Only save this',
     };
 
     const currentSavedState: FormState = {
       ...baseFormState,
-      coachFrequency: 'off',
-      coachInstructions: '',
+      announcerFrequency: 'off',
+      announcerInstructions: '',
       suggesterInstructions: '',
     };
 
@@ -193,14 +190,14 @@ describe('Automations selection helpers', () => {
     );
 
     expect(saveState.suggesterInstructions).toBe('Only save this');
-    expect(saveState.coachFrequency).toBe('off');
-    expect(saveState.coachInstructions).toBe('');
+    expect(saveState.announcerFrequency).toBe('off');
+    expect(saveState.announcerInstructions).toBe('');
   });
 
   it('builds a save state that keeps grouped suggester routing fields isolated to the suggester card', () => {
     const currentFormState: FormState = {
       ...baseFormState,
-      coachFrequency: 'daily',
+      announcerFrequency: 'daily',
       suggesterRoutingMode: 'group_by_instructions',
       suggesterRoutingInstructions:
         'Incidents, alerts, and reliability ideas -> #eng-infra',
@@ -208,7 +205,7 @@ describe('Automations selection helpers', () => {
 
     const currentSavedState: FormState = {
       ...baseFormState,
-      coachFrequency: 'off',
+      announcerFrequency: 'off',
     };
 
     const saveState = buildSaveStateForAgent(
@@ -221,7 +218,7 @@ describe('Automations selection helpers', () => {
     expect(saveState.suggesterRoutingInstructions).toBe(
       'Incidents, alerts, and reliability ideas -> #eng-infra',
     );
-    expect(saveState.coachFrequency).toBe('off');
+    expect(saveState.announcerFrequency).toBe('off');
   });
 
   it('builds a save state that only applies the channel auto-start changes', () => {
@@ -229,6 +226,7 @@ describe('Automations selection helpers', () => {
       ...baseFormState,
       channelAutoStartSlackChannels: [
         {
+          channelId: null,
           slackChannel: '#bugs',
           instructions: 'Treat each message as a bug report.',
           launchMode: DEFAULT_CHANNEL_AUTO_START_LAUNCH_MODE,
@@ -251,6 +249,7 @@ describe('Automations selection helpers', () => {
 
     expect(saveState.channelAutoStartSlackChannels).toEqual([
       {
+        channelId: null,
         slackChannel: '#bugs',
         instructions: 'Treat each message as a bug report.',
         launchMode: DEFAULT_CHANNEL_AUTO_START_LAUNCH_MODE,
@@ -260,12 +259,45 @@ describe('Automations selection helpers', () => {
     expect(saveState.managerSlackChannel).toBe('#managers');
   });
 
+  it('sends the persisted channel id for an untouched channel auto-start row so the server resolves it by id instead of by name', () => {
+    const currentFormState: FormState = {
+      ...baseFormState,
+      channelAutoStartSlackChannels: [
+        // Hydrated from the server: a channel the user is not editing. Its name
+        // may no longer resolve (archived/renamed), but its id still does.
+        {
+          channelId: 'C0DEEP',
+          slackChannel: '#deepstrike-roo',
+          instructions: 'Handle deep strike reports.',
+          launchMode: DEFAULT_CHANNEL_AUTO_START_LAUNCH_MODE,
+          launchCriteria: '',
+        },
+      ],
+    };
+
+    const saveInput = buildAutomationSettingsSaveInput(
+      currentFormState,
+      baseFormState,
+      'channelAutoStart',
+    );
+
+    expect(saveInput.channelAutoStartSlackChannels).toEqual([
+      {
+        channelId: 'C0DEEP',
+        slackChannel: '#deepstrike-roo',
+        instructions: 'Handle deep strike reports.',
+        launchMode: DEFAULT_CHANNEL_AUTO_START_LAUNCH_MODE,
+        launchCriteria: null,
+      },
+    ]);
+  });
+
   it('builds an API save input from the merged agent save state', () => {
     const currentFormState: FormState = {
       ...baseFormState,
-      coachFrequency: 'daily',
-      coachSlackChannel: '  #coach  ',
-      coachInstructions: '  Help the team improve discovery.  ',
+      announcerFrequency: 'daily',
+      announcerSlackChannel: '  #announcements  ',
+      announcerInstructions: '  Keep the summary short.  ',
       managerSlackChannel: '  #managers  ',
       securityAuditorFrequency: 'daily',
       securityAuditorSlackChannel: '  #security  ',
@@ -283,15 +315,15 @@ describe('Automations selection helpers', () => {
     const saveInput = buildAutomationSettingsSaveInput(
       currentFormState,
       currentSavedState,
-      'coach',
+      'announcer',
     );
 
     expect(saveInput).toEqual(
       expect.objectContaining({
-        savingAgent: 'coach',
-        coachFrequency: 'daily',
-        coachSlackChannel: '#coach',
-        coachInstructions: 'Help the team improve discovery.',
+        savingAgent: 'announcer',
+        announcerFrequency: 'daily',
+        announcerSlackChannel: '#announcements',
+        announcerInstructions: 'Keep the summary short.',
         managerSlackChannel: '#saved-managers',
         securityAuditorFrequency: 'off',
         securityAuditorSlackChannel: null,
@@ -320,6 +352,7 @@ describe('Automations selection helpers', () => {
         instructions: 'Treat each message as a bug report.',
       }),
     ).toEqual({
+      channelId: null,
       slackChannel: '#bugs',
       instructions: 'Treat each message as a bug report.',
       launchMode: DEFAULT_CHANNEL_AUTO_START_LAUNCH_MODE,
@@ -331,6 +364,7 @@ describe('Automations selection helpers', () => {
     expect(
       getAvailableAutoRespondChannelTemplates([
         {
+          channelId: null,
           slackChannel: '#bugs',
           instructions: 'Treat each message as a bug report.',
           launchMode: DEFAULT_CHANNEL_AUTO_START_LAUNCH_MODE,
@@ -344,24 +378,28 @@ describe('Automations selection helpers', () => {
     expect(
       getAvailableAutoRespondChannelTemplates([
         {
+          channelId: null,
           slackChannel: '#bugs',
           instructions: 'Treat each message as a bug report.',
           launchMode: DEFAULT_CHANNEL_AUTO_START_LAUNCH_MODE,
           launchCriteria: '',
         },
         {
+          channelId: null,
           slackChannel: '#support-inbound',
           instructions: 'Treat each message as a support request.',
           launchMode: DEFAULT_CHANNEL_AUTO_START_LAUNCH_MODE,
           launchCriteria: '',
         },
         {
+          channelId: null,
           slackChannel: '#ask-engineering',
           instructions: 'Treat each message as a technical question.',
           launchMode: DEFAULT_CHANNEL_AUTO_START_LAUNCH_MODE,
           launchCriteria: '',
         },
         {
+          channelId: null,
           slackChannel: '#ops-requests',
           instructions: 'Treat each message as an operational request.',
           launchMode: DEFAULT_CHANNEL_AUTO_START_LAUNCH_MODE,
@@ -376,6 +414,7 @@ describe('Automations selection helpers', () => {
       ...baseFormState,
       channelAutoStartSlackChannels: [
         {
+          channelId: 'C0BUGS',
           slackChannel: '#bugs',
           instructions: '',
           launchMode: DEFAULT_CHANNEL_AUTO_START_LAUNCH_MODE,
@@ -388,6 +427,7 @@ describe('Automations selection helpers', () => {
       ...baseFormState,
       channelAutoStartSlackChannels: [
         {
+          channelId: 'C0BUGS',
           slackChannel: '#bugs',
           instructions: 'Treat each message as a bug report.',
           launchMode: DEFAULT_CHANNEL_AUTO_START_LAUNCH_MODE,
@@ -404,6 +444,7 @@ describe('Automations selection helpers', () => {
 
     expect(saveState.channelAutoStartSlackChannels).toEqual([
       {
+        channelId: 'C0BUGS',
         slackChannel: '#bugs',
         instructions: '',
         launchMode: DEFAULT_CHANNEL_AUTO_START_LAUNCH_MODE,
@@ -422,12 +463,12 @@ describe('Automations selection helpers', () => {
       const currentFormState: FormState = {
         ...baseFormState,
         [automation.frequencyField]: 'daily',
-        coachFrequency: 'weekly',
+        announcerFrequency: 'weekly',
       };
 
       const currentSavedState: FormState = {
         ...baseFormState,
-        coachFrequency: 'off',
+        announcerFrequency: 'off',
       };
 
       const saveState = buildSaveStateForAgent(
@@ -446,7 +487,7 @@ describe('Automations selection helpers', () => {
         expect(saveState[otherAutomation.frequencyField]).toBe('off');
       }
 
-      expect(saveState.coachFrequency).toBe('off');
+      expect(saveState.announcerFrequency).toBe('off');
     },
   );
 

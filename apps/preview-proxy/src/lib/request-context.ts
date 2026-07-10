@@ -7,7 +7,7 @@ export interface RequestContext {
   method?: string;
   path?: string;
   taskId?: string;
-  cloudJobId?: number;
+  runId?: number;
   upstreamTarget?: string;
   outcome?: string;
 }

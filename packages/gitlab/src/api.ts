@@ -6,7 +6,7 @@ import {
   type SourceControlProvider,
 } from '@roomote/types';
 import {
-  type CloudJob,
+  type TaskRun,
   db,
   environments,
   repositories,
@@ -868,29 +868,26 @@ function getScopedTokenExpiryDate(): string {
   return expiresAt.toISOString().slice(0, 10);
 }
 
-function buildScopedTokenName(cloudJobId: number, repositoryFullName: string) {
+function buildScopedTokenName(runId: number, repositoryFullName: string) {
   const repositorySlug = repositoryFullName.replace(/[^a-zA-Z0-9_-]+/g, '-');
-  return `roomote-job-${cloudJobId}-${repositorySlug}-${Date.now()}`.slice(
-    0,
-    255,
-  );
+  return `roomote-job-${runId}-${repositorySlug}-${Date.now()}`.slice(0, 255);
 }
 
 function normalizeRepositorySelection(repositoryNames: string[]): string[] {
   return [...new Set(repositoryNames.filter(Boolean))];
 }
 
-async function resolveGitLabRepositoryNamesForCloudJob(
-  cloudJob: CloudJob,
+async function resolveGitLabRepositoryNamesForTaskRun(
+  taskRun: TaskRun,
 ): Promise<string[]> {
-  if (cloudJob.payload.environmentId) {
+  if (taskRun.payload.environmentId) {
     const environment = await db.query.environments.findFirst({
-      where: eq(environments.id, cloudJob.payload.environmentId),
+      where: eq(environments.id, taskRun.payload.environmentId),
     });
 
     if (!environment) {
       throw new Error(
-        `Environment not found for cloud job ${cloudJob.id}: ${cloudJob.payload.environmentId}`,
+        `Environment not found for task run ${taskRun.id}: ${taskRun.payload.environmentId}`,
       );
     }
 
@@ -901,9 +898,9 @@ async function resolveGitLabRepositoryNamesForCloudJob(
     );
   }
 
-  if (Array.isArray(cloudJob.payload.selectedRepositories)) {
+  if (Array.isArray(taskRun.payload.selectedRepositories)) {
     const selectedRepositories = normalizeRepositorySelection(
-      cloudJob.payload.selectedRepositories,
+      taskRun.payload.selectedRepositories,
     );
 
     if (selectedRepositories.length > 0) {
@@ -911,18 +908,17 @@ async function resolveGitLabRepositoryNamesForCloudJob(
     }
   }
 
-  if (cloudJob.payload.repo && cloudJob.payload.repo !== ALL_REPOSITORIES) {
-    return [cloudJob.payload.repo];
+  if (taskRun.payload.repo && taskRun.payload.repo !== ALL_REPOSITORIES) {
+    return [taskRun.payload.repo];
   }
 
   throw new Error(
-    `GitLab source control jobs require an explicit repository scope for cloud job ${cloudJob.id}.`,
+    `GitLab source control jobs require an explicit repository scope for task run ${taskRun.id}.`,
   );
 }
 
-async function resolveGitLabRepositoryRowsForCloudJob(cloudJob: CloudJob) {
-  const repositoryNames =
-    await resolveGitLabRepositoryNamesForCloudJob(cloudJob);
+async function resolveGitLabRepositoryRowsForTaskRun(taskRun: TaskRun) {
+  const repositoryNames = await resolveGitLabRepositoryNamesForTaskRun(taskRun);
 
   const repositoryRows = await db.query.repositories.findMany({
     where: and(
@@ -945,7 +941,7 @@ async function resolveGitLabRepositoryRowsForCloudJob(cloudJob: CloudJob) {
 
   if (missingRepositories.length > 0) {
     throw new Error(
-      `Selected GitLab repositories not found for cloud job ${cloudJob.id}: ${missingRepositories.join(', ')}`,
+      `Selected GitLab repositories not found for task run ${taskRun.id}: ${missingRepositories.join(', ')}`,
     );
   }
 
@@ -987,7 +983,7 @@ async function createScopedProjectToken(params: {
   host: string;
   projectId: string;
   repositoryFullName: string;
-  cloudJobId: number;
+  runId: number;
   token: string;
 }): Promise<{
   credential: GitLabScopedProjectTokenCredential;
@@ -1001,7 +997,7 @@ async function createScopedProjectToken(params: {
     params: {},
     token: params.token,
     body: {
-      name: buildScopedTokenName(params.cloudJobId, params.repositoryFullName),
+      name: buildScopedTokenName(params.runId, params.repositoryFullName),
       access_level: GITLAB_SCOPED_PROJECT_TOKEN_ACCESS_LEVEL_DEVELOPER,
       scopes: [...GITLAB_SCOPED_PROJECT_TOKEN_SCOPES],
       expires_at: getScopedTokenExpiryDate(),
@@ -1117,8 +1113,8 @@ async function revokeScopedProjectTokenDescriptors(
   }
 }
 
-export async function createCloudJobScopedGitLabTokens(
-  cloudJob: CloudJob,
+export async function createTaskRunScopedGitLabTokens(
+  taskRun: TaskRun,
   options?: {
     apiBaseUrl?: string;
     baseUrl?: string;
@@ -1138,10 +1134,9 @@ export async function createCloudJobScopedGitLabTokens(
   const baseUrl = options?.baseUrl ?? (await resolveGitLabBaseUrl());
   const apiBaseUrl = options?.apiBaseUrl ?? buildGitLabApiBaseUrl(baseUrl);
   const host = hostFromBaseUrl(baseUrl);
-  const repositoriesList =
-    await resolveGitLabRepositoryRowsForCloudJob(cloudJob);
+  const repositoriesList = await resolveGitLabRepositoryRowsForTaskRun(taskRun);
   const persistedDescriptors = new Map(
-    readScopedProjectTokenDescriptors(cloudJob.artifacts).map((descriptor) => [
+    readScopedProjectTokenDescriptors(taskRun.artifacts).map((descriptor) => [
       descriptor.repositoryFullName,
       descriptor,
     ]),
@@ -1182,7 +1177,7 @@ export async function createCloudJobScopedGitLabTokens(
                 host,
                 projectId: repository.projectId,
                 repositoryFullName: repository.repositoryFullName,
-                cloudJobId: cloudJob.id,
+                runId: taskRun.id,
                 token: deploymentToken,
               }),
           )
@@ -1192,7 +1187,7 @@ export async function createCloudJobScopedGitLabTokens(
             host,
             projectId: repository.projectId,
             repositoryFullName: repository.repositoryFullName,
-            cloudJobId: cloudJob.id,
+            runId: taskRun.id,
             token: deploymentToken,
           });
 
@@ -1240,8 +1235,8 @@ export async function createCloudJobScopedGitLabTokens(
   };
 }
 
-export async function revokeCloudJobScopedGitLabTokens(
-  cloudJob: Pick<CloudJob, 'artifacts'>,
+export async function revokeTaskRunScopedGitLabTokens(
+  taskRun: Pick<TaskRun, 'artifacts'>,
   options?: {
     apiBaseUrl?: string;
     baseUrl?: string;
@@ -1249,7 +1244,7 @@ export async function revokeCloudJobScopedGitLabTokens(
     token?: string | null;
   },
 ): Promise<void> {
-  const descriptors = readScopedProjectTokenDescriptors(cloudJob.artifacts);
+  const descriptors = readScopedProjectTokenDescriptors(taskRun.artifacts);
 
   if (descriptors.length === 0) {
     return;

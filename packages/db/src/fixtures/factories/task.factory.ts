@@ -16,17 +16,34 @@ export const taskFactory = Factory.define<
     return createTaskWithRetry(values, { db: database });
   });
 
-  const { id, harnessSessionId, userId, timestamp, activityAt, ...rest } =
-    params;
+  const {
+    id,
+    harnessSessionId,
+    initiatorUserId,
+    actorExternalId,
+    timestamp,
+    activityAt,
+    ...rest
+  } = params;
   const resolvedTimestamp = timestamp ?? Math.floor(Date.now() / 1000);
 
   return {
     id,
     harnessSessionId: harnessSessionId || faker.string.uuid(),
-    userId: userId || faker.string.uuid(),
+    workflow: 'standard',
+    surface: 'web',
+    trigger: 'manual',
+    visibility: 'visible',
+    state: 'active',
+    initiatorKind: 'user',
+    initiatorUserId: initiatorUserId ?? null,
+    // The initiator CHECK requires a user FK or a raw external actor id for
+    // user-initiated tasks; fall back to a fake external actor when the test
+    // did not supply a real user row.
+    actorExternalId:
+      actorExternalId ?? (initiatorUserId ? null : faker.string.uuid()),
     provider: 'openai',
     model: 'gpt-4',
-    completed: false,
     timestamp: resolvedTimestamp,
     activityAt: activityAt ?? resolvedTimestamp,
     title: faker.lorem.sentence(),

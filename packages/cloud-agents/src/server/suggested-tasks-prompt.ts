@@ -1,12 +1,13 @@
-import {
-  ACTIVE_TASK_SUGGESTION_STATUSES,
-  type TaskSuggestionStatus,
-} from '@roomote/types';
+import { type WorkItemStatus } from '@roomote/types';
+
+// A suggestion that is still open or was already launched into a task is
+// "already handled" for de-dup guidance and should not be re-suggested.
+const ACTIVE_SUGGESTION_STATUS_LABELS: WorkItemStatus[] = ['open', 'launched'];
 
 export interface PreviousSuggestion {
   title: string;
   brief: string;
-  status: TaskSuggestionStatus;
+  status: WorkItemStatus;
 }
 
 type SuggestedTaskRouteContext = {
@@ -24,7 +25,7 @@ function buildPreviousSuggestionsSection(
     return '';
   }
 
-  const activeStatusLabels = ACTIVE_TASK_SUGGESTION_STATUSES.join(' or ');
+  const activeStatusLabels = ACTIVE_SUGGESTION_STATUS_LABELS.join(' or ');
 
   const previousSuggestionLines = previousSuggestions
     .slice(0, 20)
@@ -38,7 +39,7 @@ function buildPreviousSuggestionsSection(
     })
     .join('\n');
 
-  return `\n\nPreviously suggested ideas (status shows whether each suggestion is still open, already started, or was dismissed; do NOT re-suggest ${activeStatusLabels} ideas, and avoid repeating dismissed ones):\n${previousSuggestionLines}`;
+  return `\n\nPreviously suggested ideas (status shows whether each suggestion is still open, was already launched, or was dismissed; do NOT re-suggest ${activeStatusLabels} ideas, and avoid repeating dismissed ones):\n${previousSuggestionLines}`;
 }
 
 function buildRecentThreadFeedbackSection(

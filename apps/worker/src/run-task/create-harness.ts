@@ -1,6 +1,6 @@
 import type { ResultPromise } from 'execa';
 
-import { type DequeuedCloudJob, sdk } from '@roomote/sdk/client';
+import { type DequeuedTaskRun, sdk } from '@roomote/sdk/client';
 import {
   getHarnessModelOverride,
   type EnvironmentMcpServers,
@@ -28,7 +28,7 @@ interface CreateHarnessOptions {
   integrations: IntegrationMcpOptions;
   mcpTaskEnv: Record<string, string>;
   environmentMcpServers?: EnvironmentMcpServers;
-  cloudJob: DequeuedCloudJob['cloudJob'];
+  taskRun: DequeuedTaskRun['taskRun'];
   developerInstructionsContent?: string;
   callbacks: RunTaskCallbacks;
   context: RunTaskContext;
@@ -36,6 +36,7 @@ interface CreateHarnessOptions {
   prepareQueuedPromptActorScope?: (targetUserId?: string) => Promise<{
     shouldReconnect: boolean;
     shouldBlockPrompt?: boolean;
+    shouldSkipPrompt?: boolean;
     reason?: string;
   }>;
 }
@@ -56,7 +57,7 @@ export async function createHarness({
   integrations,
   mcpTaskEnv,
   environmentMcpServers,
-  cloudJob,
+  taskRun,
   developerInstructionsContent,
   callbacks,
   context,
@@ -66,9 +67,9 @@ export async function createHarness({
   const harnessCommandEnv = buildHarnessCommandEnv(runtimeEnv);
   const stampHarnessStarted = () => {
     // Best-effort: do not derail task startup on telemetry failures.
-    void sdk.cloudJobs
+    void sdk.taskRuns
       .stampMilestone({
-        cloudJobId: cloudJob.id,
+        runId: taskRun.id,
         field: 'harnessStartedAt',
       })
       .catch(() => {});
@@ -82,9 +83,9 @@ export async function createHarness({
       integrations,
       environmentMcpServers,
     );
-    const modelOverride = cloudJob.payload?.harnessModelOverrides
+    const modelOverride = taskRun.payload?.harnessModelOverrides
       ? getHarnessModelOverride(
-          cloudJob.payload.harnessModelOverrides,
+          taskRun.payload.harnessModelOverrides,
           harnessType,
         )
       : undefined;
@@ -118,7 +119,7 @@ export async function createHarness({
 
   const unsubscribe = subscribeHarnessCallbacks({
     harness: reconnectableHarness,
-    cloudJob,
+    taskRun,
     callbacks,
     context,
     logger,

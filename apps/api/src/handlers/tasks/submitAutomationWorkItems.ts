@@ -1,12 +1,7 @@
 import type { Context } from 'hono';
 
-import { CloudTaskType } from '@roomote/types';
-import {
-  backgroundAutomationRuns,
-  cloudJobs,
-  db,
-  eq,
-} from '@roomote/db/server';
+import { TaskPayloadKind } from '@roomote/types';
+import { db, eq, taskRuns, tasks } from '@roomote/db/server';
 
 import type { Variables } from '../../types';
 import type { McpAuth } from '../mcp/middleware';
@@ -48,38 +43,40 @@ export async function submitAutomationWorkItems(
   }
 
   try {
-    const [cloudJob, automationRun] = await Promise.all([
-      db.query.cloudJobs.findFirst({
-        where: eq(cloudJobs.taskId, taskId),
+    const [run, task] = await Promise.all([
+      db.query.taskRuns.findFirst({
+        where: eq(taskRuns.taskId, taskId),
         columns: {
-          type: true,
-          userId: true,
+          payloadKind: true,
+          actingUserId: true,
           payload: true,
         },
       }),
-      db.query.backgroundAutomationRuns.findFirst({
-        where: eq(backgroundAutomationRuns.taskId, taskId),
+      db.query.tasks.findFirst({
+        where: eq(tasks.id, taskId),
         columns: {
-          id: true,
-          automationKey: true,
+          initiatorUserId: true,
+          initiatorAutomation: true,
         },
       }),
     ]);
 
-    if (!cloudJob) {
+    if (!run) {
       return c.json({ error: 'Task not found' }, 404);
     }
 
-    if (cloudJob.type !== CloudTaskType.SuggestedTasks) {
+    if (run.payloadKind !== TaskPayloadKind.Scan) {
       return c.json({ error: 'Task is not an automation scan task' }, 400);
     }
 
-    const payload = cloudJob.payload as SuggestedTasksPayload;
+    const payload = run.payload as SuggestedTasksPayload;
     const automationSource = payload.suggestionSource;
 
+    // The task's immutable initiator stamp is the source of truth for which
+    // automation launched this scan; the payload source must match it.
     if (
       !isAutomationWorkItemSource(automationSource) ||
-      automationSource !== automationRun?.automationKey
+      automationSource !== task?.initiatorAutomation
     ) {
       return c.json(
         {
@@ -92,9 +89,9 @@ export async function submitAutomationWorkItems(
     try {
       return c.json(
         await submitAutoActWorkItems({
-          userId: auth.userId ?? cloudJob.userId ?? null,
+          userId:
+            auth.userId ?? run.actingUserId ?? task?.initiatorUserId ?? null,
           taskId,
-          automationRunId: automationRun.id,
           automationKey: automationSource,
           payload,
           workItems: parsedBody.data.workItems,

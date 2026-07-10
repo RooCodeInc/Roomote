@@ -20,7 +20,7 @@ export type {
   LinearViewer,
   LinearOrganization,
   LinearSessionMessage,
-  ActiveLinearJobResult,
+  ActiveLinearTaskRunResult,
   AgentSessionPlanStepStatus,
   AgentSessionPlanStep,
   AgentSessionUpdateResult,
@@ -41,14 +41,14 @@ export {
   isWebhookTimestampValid,
 } from './verify-webhook';
 
-// Active job lookup
+// Active task run lookup
 export {
-  findActiveLinearJob,
-  findActiveLinearJobByOrganization,
-} from './find-active-linear-job';
+  findActiveLinearTaskRun,
+  findActiveLinearTaskRunByOrganization,
+} from './find-active-linear-run';
 
-// Completed job with snapshot lookup (for snapshot resume)
-export { findCompletedLinearJobWithSnapshot } from './find-completed-linear-job-with-snapshot';
+// Completed task run with snapshot lookup (for snapshot resume)
+export { findCompletedLinearTaskRunWithSnapshot } from './find-completed-linear-run-with-snapshot';
 
 // Message queue
 export {
@@ -76,13 +76,13 @@ export { getLinearMessages } from './get-linear-messages';
 // Non-destructive peek at message count (used by snapshot drain)
 export { peekLinearMessageCount } from './peek-linear-messages';
 
-// Drain pending Linear messages and create a SnapshotResume job
-export type { DrainSourceJob, DrainResult } from './drain-linear-messages';
-export { drainLinearMessagesToResumeJob } from './drain-linear-messages';
+// Drain pending Linear messages and create a SnapshotResume run
+export type { DrainSourceRun, DrainResult } from './drain-linear-messages';
+export { drainLinearMessagesToResumeRun } from './drain-linear-messages';
 
-// Cancel job (used when user sends stop signal)
-export type { CancelLinearJobResult } from './cancel-linear-job';
-export { cancelLinearJob } from './cancel-linear-job';
+// Cancel task run (used when user sends stop signal)
+export type { CancelLinearTaskRunResult } from './cancel-linear-run';
+export { cancelLinearTaskRun } from './cancel-linear-run';
 
 // Cloud agent lookup by ID (for LLM router integration)
 export {
@@ -91,12 +91,12 @@ export {
   getValidLinearAccessToken,
 } from './refresh-token';
 
-// Job creation (for creating cloud jobs from Linear sessions)
+// Run creation (for creating task runs from Linear sessions)
 export type {
-  CreateLinearAgentJobOptions,
-  CreateLinearAgentJobResult,
-} from './create-linear-agent-job';
-export { createLinearAgentJob } from './create-linear-agent-job';
+  CreateLinearAgentRunOptions,
+  CreateLinearAgentRunResult,
+} from './create-linear-agent-run';
+export { createLinearAgentRun } from './create-linear-agent-run';
 
 // Elicitation fallback (for agent/workspace selection when LLM router is unavailable)
 export type {

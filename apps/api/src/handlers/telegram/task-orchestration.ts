@@ -5,28 +5,25 @@ import type {
 import { Env } from '@roomote/env';
 import {
   ALL_REPOSITORIES,
-  CloudTaskType,
-  type CloudTask,
-  type CloudTaskPayload,
+  TaskPayloadKind,
+  type TaskPayload,
   populateSnapshotResumeCommunicationMetadata,
   restoreSnapshotResumeVisiblePromptFields,
 } from '@roomote/types';
-import { db, environments, eq } from '@roomote/db/server';
 import {
   buildTelegramRoutingContext,
-  enqueueCloudTask,
+  enqueueTask,
   getTaskUrl,
   routeTask,
-  type RoutingWorkspace,
 } from '@roomote/cloud-agents/server';
 
-import type { CompletedTelegramJob } from './job-lookup.js';
-import { buildTelegramCancelTaskCallbackData } from './callback-actions.js';
+import type { CompletedTelegramTaskRun } from './task-run-lookup.js';
+import { maybeRequestTelegramRoutingConfirmation } from './routing-confirmation.js';
 import { postTelegramMessageBestEffort } from './replies.js';
+import { launchTelegramTask, resolveTelegramWorkspace } from './task-launch.js';
 import type {
   QueuedTelegramCommunicationMessage,
   TelegramConversationRef,
-  TelegramWorkspaceSelection,
 } from './types.js';
 
 function cleanOptionalString(value: string | undefined): string | undefined {
@@ -35,53 +32,18 @@ function cleanOptionalString(value: string | undefined): string | undefined {
   return trimmed ? trimmed : undefined;
 }
 
-async function resolveTelegramWorkspace(
-  workspace: RoutingWorkspace,
-): Promise<TelegramWorkspaceSelection | null> {
-  if (workspace.type === 'all_repositories') {
-    return {
-      repoForPayload: ALL_REPOSITORIES,
-      workspaceDisplayName: 'all repos',
-    };
-  }
-
-  const environment = await db.query.environments.findFirst({
-    where: eq(environments.id, workspace.id),
-    columns: { id: true, name: true, config: true },
-  });
-
-  if (!environment) {
-    return null;
-  }
-
-  const config = environment.config as {
-    repositories?: Array<{ repository: string }>;
-  };
-  const firstRepo = config.repositories?.[0]?.repository;
-
-  if (!firstRepo) {
-    return null;
-  }
-
-  return {
-    environmentId: environment.id,
-    repoForPayload: firstRepo,
-    workspaceDisplayName: environment.name,
-  };
-}
-
 export async function resumeTelegramTaskFromSnapshot(input: {
-  completedJob: CompletedTelegramJob;
+  completedRun: CompletedTelegramTaskRun;
   queuedMessage: QueuedTelegramCommunicationMessage;
   metadata: TelegramUpdateCommunicationMetadata;
 }) {
-  const sourceSnapshotId = input.completedJob.snapshotId;
+  const sourceSnapshotId = input.completedRun.snapshotId;
 
   if (!sourceSnapshotId) {
     throw new Error('Telegram snapshot resume requires a source snapshot.');
   }
 
-  const completedPayload = input.completedJob.payload as Record<
+  const completedPayload = input.completedRun.payload as Record<
     string,
     unknown
   >;
@@ -93,12 +55,12 @@ export async function resumeTelegramTaskFromSnapshot(input: {
     typeof completedPayload.environmentId === 'string'
       ? completedPayload.environmentId
       : undefined;
-  const resumePayload: CloudTaskPayload<CloudTaskType.SnapshotResume> = {
+  const resumePayload: TaskPayload<typeof TaskPayloadKind.SnapshotResume> = {
     repo,
     ...(environmentId ? { environmentId } : {}),
-    ...(input.completedJob.port ? { port: input.completedJob.port } : {}),
+    ...(input.completedRun.port ? { port: input.completedRun.port } : {}),
     sourceSnapshotId,
-    sourceCloudJobId: input.completedJob.id,
+    sourceRunId: input.completedRun.id,
     queuedCommunicationMessages: [input.queuedMessage],
   };
 
@@ -111,13 +73,17 @@ export async function resumeTelegramTaskFromSnapshot(input: {
   });
   restoreSnapshotResumeVisiblePromptFields(resumePayload, completedPayload);
 
-  return enqueueCloudTask(
+  // Resumes never create tasks and never re-attribute; the resuming human
+  // becomes the new run's acting user.
+  return enqueueTask(
     {
-      type: CloudTaskType.SnapshotResume,
-      userId: input.queuedMessage.userId,
-      sourceSnapshotId,
-      sourceCloudJobId: input.completedJob.id,
-      payload: resumePayload,
+      task: {
+        type: TaskPayloadKind.SnapshotResume,
+        sourceSnapshotId,
+        sourceRunId: input.completedRun.id,
+        payload: resumePayload,
+      },
+      actingUserId: input.queuedMessage.userId ?? null,
     },
     {
       launchClass: 'human',
@@ -148,6 +114,11 @@ export async function startNewTelegramTask(input: {
   launchOwnerUserId: string;
   queuedMessage: QueuedTelegramCommunicationMessage;
   metadata: TelegramUpdateCommunicationMetadata;
+  /**
+   * Launch without the routing-confirmation card. Used when the user already
+   * expressed explicit intent (for example a suggestion button click).
+   */
+  skipRoutingConfirmation?: boolean;
 }) {
   const routingContext = await buildTelegramRoutingContext({
     userId: input.launchOwnerUserId,
@@ -181,6 +152,23 @@ export async function startNewTelegramTask(input: {
     };
   }
 
+  if (!input.skipRoutingConfirmation) {
+    const confirmation = await maybeRequestTelegramRoutingConfirmation({
+      routingDecision,
+      launchOwnerUserId: input.launchOwnerUserId,
+      queuedMessage: input.queuedMessage,
+      metadata: input.metadata,
+    });
+
+    if (confirmation) {
+      return {
+        status: 'confirmation_pending' as const,
+        routingDecision,
+        pendingRouteId: confirmation.pendingRouteId,
+      };
+    }
+  }
+
   const workspace =
     routingDecision.status === 'routed'
       ? await resolveTelegramWorkspace(routingDecision.result.workspace)
@@ -193,43 +181,11 @@ export async function startNewTelegramTask(input: {
     throw new Error('Telegram task routing selected an unavailable workspace.');
   }
 
-  const task: Extract<CloudTask, { type: CloudTaskType.StandardTask }> = {
-    type: CloudTaskType.StandardTask,
-    userId: input.launchOwnerUserId,
-    payload: {
-      repo: workspace.repoForPayload,
-      ...(workspace.environmentId
-        ? { environmentId: workspace.environmentId }
-        : {}),
-      description: input.queuedMessage.text,
-      ...input.metadata,
-    },
-  };
-  const launchResult = await enqueueCloudTask(task, {
-    launchClass: 'human',
-  });
-
-  const taskUrl = getTaskUrl({
-    taskId: launchResult.taskId,
-    utm: { source: 'telegram', campaign: 'telegram.thread_start' },
-  });
-
-  await postTelegramMessageBestEffort({
-    chatId: input.metadata.communicationChannelId,
-    threadId: input.metadata.communicationThreadId,
-    replyToMessageId: input.metadata.communicationMessageId,
-    text: taskUrl
-      ? `Started a task in ${workspace.workspaceDisplayName}.`
-      : `Queued a task in ${workspace.workspaceDisplayName}.`,
-    buttons: [
-      ...(taskUrl ? [[{ text: 'Follow Task', url: taskUrl }]] : []),
-      [
-        {
-          text: '✖️ Cancel task',
-          callbackData: buildTelegramCancelTaskCallbackData(launchResult.id),
-        },
-      ],
-    ],
+  const launchResult = await launchTelegramTask({
+    launchOwnerUserId: input.launchOwnerUserId,
+    queuedMessage: input.queuedMessage,
+    metadata: input.metadata,
+    workspace,
   });
 
   return {

@@ -1,5 +1,6 @@
 {
   "name": "@roomote/config-eslint",
+  "version": "0.0.2",
   "private": true,
   "type": "module",
   "exports": {

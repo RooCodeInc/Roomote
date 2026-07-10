@@ -45,18 +45,16 @@ export async function handleManageSourceControl(
 
     if (params.action === 'create_or_update_pull_request') {
       const sourceBranch = params.sourceBranch?.trim();
-      const targetBranch = params.targetBranch?.trim();
+      // targetBranch is only required when the platform has to create a new
+      // pull request; when an open one exists for sourceBranch, the platform
+      // defaults to its current base. Blank values (models emit them for
+      // unused optional fields) must not be forwarded as present-but-empty.
+      const targetBranch = params.targetBranch?.trim() || undefined;
       const title = params.title?.trim();
 
       if (!sourceBranch) {
         return errorResult(
           'sourceBranch is required for create_or_update_pull_request',
-        );
-      }
-
-      if (!targetBranch) {
-        return errorResult(
-          'targetBranch is required for create_or_update_pull_request',
         );
       }
 
@@ -157,13 +155,19 @@ export async function handleManageSourceControl(
       );
     }
 
+    // Models often emit empty strings for unused optional fields. blank values
+    // must not be forwarded as present ids (GitHub routes issue vs review
+    // comment updates using the presence of threadId).
+    const threadId = params.threadId?.trim() || undefined;
+    const commentId = params.commentId?.trim() || undefined;
+
     return jsonResult(
       await writeSourceControl(config, taskId, {
         action: params.action,
         repositoryFullName: params.repositoryFullName,
         prNumber: params.prNumber,
-        threadId: params.threadId,
-        commentId: params.commentId,
+        threadId,
+        commentId,
         body: params.body,
         resolved: params.resolved,
         reviewEvent: params.reviewEvent,

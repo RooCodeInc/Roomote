@@ -1,12 +1,11 @@
 import type { CommunicationMessageButton } from '@roomote/communication';
 import {
-  agentSuggestionMessages,
   and,
   db,
   eq,
-  like,
   resolveTelegramRuntimeCredentials,
-  slackInstallations,
+  sql,
+  trackedMessages,
 } from '@roomote/db/server';
 
 import { apiLogger } from '../../logging.js';
@@ -25,23 +24,17 @@ type TelegramAutomationSuggestion = {
   targetRepositoryFullName: string | null;
 };
 
-async function hasActiveSlackInstallation(): Promise<boolean> {
-  const [installation] = await db
-    .select({ id: slackInstallations.id })
-    .from(slackInstallations)
-    .where(eq(slackInstallations.isActive, true))
-    .limit(1);
-
-  return Boolean(installation);
-}
-
 /**
  * Telegram counterpart of the scheduled-automation Slack summaries
  * (suggester, Sentry triage, Dependabot triage, security/code-quality
- * auditors, CI failure triage). Runs only when the deployment has no active
- * Slack installation, and posts one message to the captured primary chat:
- * the automation's summary plus a start button per suggestion — the same
+ * auditors, CI failure triage). Posts one message to the captured primary
+ * chat: the automation's summary plus a start button per suggestion — the same
  * single-notification shape as the onboarding suggestions intro.
+ *
+ * Returns whether the summary was DELIVERED (posted now, or already present
+ * from a prior run). Surface precedence (Slack > Telegram > Teams) is owned by
+ * the caller in submitTaskSuggestions, which only invokes this when Slack did
+ * not deliver — this function no longer self-suppresses on Slack existence.
  */
 export async function postScheduledSuggestionsToTelegram(params: {
   sourceTaskId: string;
@@ -50,21 +43,20 @@ export async function postScheduledSuggestionsToTelegram(params: {
     typeof resolveScheduledSuggestionSlackConfig
   >[0];
   suggestions: TelegramAutomationSuggestion[];
-}): Promise<void> {
+}): Promise<boolean> {
   const { sourceTaskId, createdByUserId, suggestions } = params;
 
-  if (!createdByUserId || suggestions.length === 0 || !sourceTaskId.trim()) {
-    return;
-  }
-
-  if (await hasActiveSlackInstallation()) {
-    return;
+  // Automation-initiated scans have no user, so createdByUserId is null. That
+  // must not suppress the fallback post; the tracked_messages column is
+  // nullable and no user attribution is rendered here.
+  if (suggestions.length === 0 || !sourceTaskId.trim()) {
+    return false;
   }
 
   const { botToken } = await resolveTelegramRuntimeCredentials();
 
   if (!botToken) {
-    return;
+    return false;
   }
 
   const chatId = await findTelegramPrimaryChatId();
@@ -73,7 +65,7 @@ export async function postScheduledSuggestionsToTelegram(params: {
     apiLogger.debug(
       `[AutomationSuggestionLifecycle] Skip Telegram automation summary because no primary chat is captured for sourceTaskId=${sourceTaskId}`,
     );
-    return;
+    return false;
   }
 
   const slackConfig = resolveScheduledSuggestionSlackConfig(
@@ -81,12 +73,13 @@ export async function postScheduledSuggestionsToTelegram(params: {
   );
 
   const [existingSummaryMessage] = await db
-    .select({ id: agentSuggestionMessages.id })
-    .from(agentSuggestionMessages)
+    .select({ id: trackedMessages.id })
+    .from(trackedMessages)
     .where(
       and(
-        eq(agentSuggestionMessages.agentType, slackConfig.agentType),
-        like(agentSuggestionMessages.suggestionKey, `${sourceTaskId}:%`),
+        eq(trackedMessages.kind, 'suggestion_card'),
+        sql`${trackedMessages.metadata} ->> 'suggestionType' = ${slackConfig.agentType}`,
+        sql`${trackedMessages.metadata} ->> 'suggestionKey' LIKE ${`${sourceTaskId}:%`}`,
       ),
     )
     .limit(1);
@@ -95,7 +88,8 @@ export async function postScheduledSuggestionsToTelegram(params: {
     apiLogger.debug(
       `[AutomationSuggestionLifecycle] Skip Telegram automation summary because tracked messages already exist for sourceTaskId=${sourceTaskId}`,
     );
-    return;
+    // Already delivered on a prior run; suppress the Teams fallback.
+    return true;
   }
 
   const rootMessage = await buildScheduledSuggestionRootMessage({
@@ -136,25 +130,38 @@ export async function postScheduledSuggestionsToTelegram(params: {
   });
 
   if (!posted) {
-    return;
+    return false;
   }
 
   await db
-    .insert(agentSuggestionMessages)
+    .insert(trackedMessages)
     .values(
-      limitedSuggestions.map((suggestion) => ({
-        agentType: slackConfig.agentType,
-        // (channelId, messageTs) is unique; suffix the suggestion id so
-        // every tracked row survives the batch insert for a single message.
-        messageTs: `${posted.messageId}:${suggestion.id}`,
-        channelId: chatId,
-        suggestionKey: `${sourceTaskId}:${suggestion.id}`,
-        createdByUserId,
-      })),
+      limitedSuggestions.map((suggestion) => {
+        // (kind, dedupeKey) is unique; suffix the suggestion id on messageTs
+        // so every tracked row survives the batch insert for a single message.
+        const messageTs = `${posted.messageId}:${suggestion.id}`;
+        return {
+          surface: 'telegram' as const,
+          kind: 'suggestion_card' as const,
+          dedupeKey: `${chatId}:${messageTs}`,
+          channelId: chatId,
+          messageTs,
+          workItemId: suggestion.id,
+          createdByUserId,
+          metadata: {
+            suggestionType: slackConfig.agentType,
+            suggestionKey: `${sourceTaskId}:${suggestion.id}`,
+          },
+        };
+      }),
     )
-    .onConflictDoNothing();
+    .onConflictDoNothing({
+      target: [trackedMessages.kind, trackedMessages.dedupeKey],
+    });
 
   apiLogger.debug(
     `[AutomationSuggestionLifecycle] Published ${limitedSuggestions.length} ${slackConfig.automationKey} suggestions to Telegram chat ${chatId} for sourceTaskId=${sourceTaskId}`,
   );
+
+  return true;
 }

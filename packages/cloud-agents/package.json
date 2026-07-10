@@ -1,5 +1,6 @@
 {
   "name": "@roomote/cloud-agents",
+  "version": "0.0.2",
   "private": true,
   "type": "module",
   "main": "./src/index.ts",
@@ -55,6 +56,7 @@
     "check-types:fast": "tsgo --noEmit",
     "test": "dotenvx run -f ../../.env.test -- vitest",
     "test:router": "dotenvx run -f ../../.env.local -- tsx scripts/test-llm-router.ts",
+    "deployment:launch-docker-task": "tsx src/server/deployment-ci-launch-task.ts",
     "clean": "rimraf .turbo",
     "eval:authorship": "dotenvx run -f ../../.env.local -- npx promptfoo@0.115.0 eval -c evals/authorship/promptfooconfig.ts --no-cache --table-cell-max-length 200",
     "eval:router": "dotenvx run -f ../../.env.local -- npx promptfoo@0.115.0 eval -c evals/router/promptfooconfig.ts --no-cache --table-cell-max-length 200",

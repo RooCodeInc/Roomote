@@ -8,23 +8,22 @@ import { toast } from 'sonner';
 import { FeatureFlag } from '@roomote/feature-flags';
 import {
   type BackgroundAutomationKey,
-  buildSlackThreadPermalink,
   CONFLICT_RESOLUTION_MAX_PR_AGE_DAYS_OPTIONS,
   DEFAULT_CHANNEL_AUTO_START_LAUNCH_MODE,
   DEFAULT_CONFLICT_RESOLUTION_MAX_PR_AGE_DAYS,
   DEFAULT_SUGGESTER_ROUTING_MODE,
-  getTriggerableBackgroundAutomationDescriptor,
-  getGitHubAppMention,
+  getTriggerableBackgroundAutomationDescriptorByKey,
   type ChannelAutoStartLaunchMode,
   type ConflictResolverMaxPrAgeDays,
   PRODUCT_NAME,
-  type BackgroundAutomationRunStatus,
-  type BackgroundAutomationRunTriggerKind,
   SCHEDULE_ONLY_BACKGROUND_AUTOMATION_LIST,
   type ScheduleOnlyBackgroundAutomationFrequency,
   type ScheduleOnlyBackgroundAutomationFrequencyField,
   type ScheduleOnlyBackgroundAutomationId,
   type SuggesterRoutingMode,
+  type TaskState,
+  type TaskTrigger,
+  type TriggerableBackgroundAutomationKey,
 } from '@roomote/types';
 
 import { useConnectSlack } from '@/hooks/slack';
@@ -40,7 +39,6 @@ import {
   type AnnouncerFrequency,
   buildAutomationSettingsSaveInput,
   type ChannelAutoStartFormRow,
-  type CoachFrequency,
   type ConflictResolverFrequency,
   type DependabotTriageFrequency,
   type FormState,
@@ -84,7 +82,6 @@ import {
   Collapsible,
   CollapsibleContent,
   CollapsibleTrigger,
-  Dumbbell,
   GitMergeConflict,
   GitPullRequest,
   Info,
@@ -112,18 +109,6 @@ import {
   Users,
 } from '@/components/system';
 
-const slackAppMention = (() => {
-  const handle = (
-    process.env.NEXT_PUBLIC_SLACK_APP_HANDLE || PRODUCT_NAME
-  ).trim();
-
-  return handle.startsWith('@') ? handle : `@${handle}`;
-})();
-
-const githubAppMention = getGitHubAppMention(
-  process.env.NEXT_PUBLIC_GITHUB_APP_SLUG || 'roomote',
-);
-
 type FieldErrors = Partial<
   Record<
     | 'general'
@@ -137,7 +122,6 @@ type FieldErrors = Partial<
     | 'channelAutoStartInstructions'
     | 'managerSlackChannel'
     | 'managerStatsSlackChannel'
-    | 'coachSlackChannel'
     | 'suggesterSlackChannel'
     | 'announcerSlackChannel'
     | 'platformIssueSlackChannel'
@@ -147,7 +131,6 @@ type FieldErrors = Partial<
     | 'codeQualityAuditorSlackChannel'
     | 'ciFailureTriageSlackChannel'
     | 'sentryTriageProjectSlugs'
-    | 'coachInstructions'
     | 'suggesterInstructions'
     | 'suggesterRoutingInstructions'
     | 'announcerInstructions',
@@ -165,7 +148,6 @@ type SlackChannelAccessWarnings = {
   channelAutoStartSlackChannels: string[];
   managerSlackChannel: string | null;
   managerStatsSlackChannel: string | null;
-  coachSlackChannel: string | null;
   suggesterSlackChannel: string | null;
   announcerSlackChannel: string | null;
   platformIssueSlackChannel: string | null;
@@ -200,19 +182,28 @@ type AutomationDefinition = {
   availability?: 'stable' | 'beta';
 };
 
+/**
+ * A launched-task entry in an automation's run history
+ * (tasks.initiator_automation = key).
+ */
 type AutomationRunSummary = {
-  id: string;
-  automationKey: BackgroundAutomationKey;
-  bullmqJobId: string;
-  triggerKind: BackgroundAutomationRunTriggerKind;
-  status: BackgroundAutomationRunStatus;
-  taskId: string | null;
-  slackChannelId: string | null;
-  threadTs: string | null;
-  startedAt: Date | string | null;
-  finishedAt: Date | string | null;
-  error: string | null;
+  taskId: string;
+  title: string | null;
+  trigger: TaskTrigger;
+  state: TaskState;
   createdAt: Date | string;
+};
+
+/**
+ * lastRunAt/lastError status from the automations row, shown for automations
+ * that post directly to Slack instead of launching tasks.
+ */
+type AutomationStatusSummary = {
+  enabled: boolean;
+  lastRunAt: Date | string | null;
+  lastSucceededAt: Date | string | null;
+  lastFailedAt: Date | string | null;
+  lastError: string | null;
 };
 
 const CUSTOM_MANAGER_CHANNEL_SELECT_VALUE = '__custom_manager_channel__';
@@ -222,7 +213,6 @@ const EMPTY_SLACK_CHANNEL_ACCESS_WARNINGS: SlackChannelAccessWarnings = {
   channelAutoStartSlackChannels: [],
   managerSlackChannel: null,
   managerStatsSlackChannel: null,
-  coachSlackChannel: null,
   suggesterSlackChannel: null,
   announcerSlackChannel: null,
   platformIssueSlackChannel: null,
@@ -249,16 +239,16 @@ const CHANNEL_AUTO_START_LAUNCH_MODE_OPTIONS: ChannelAutoStartLaunchModeOption[]
   ];
 
 const TRIGGERABLE_AUTOMATION_DESCRIPTIONS = {
-  conflictResolver: 'Fix merge conflicts in open PRs.',
+  conflict_resolver: 'Fix merge conflicts in open PRs.',
   suggester: 'Suggest valuable coding work to do.',
   announcer: 'Post a recurring digest of recently merged PRs to Slack.',
-  managerStats: "Summary of Roomote's activity during the week",
-  sentryTriage: 'Scan Sentry issues and post a prioritized triage report.',
-  dependabotTriage:
+  manager_stats: "Summary of Roomote's activity during the week",
+  sentry_triage: 'Scan Sentry issues and post a prioritized triage report.',
+  dependabot_triage:
     'Scan open Dependabot alerts and suggest the safest updates.',
-  securityAuditor:
+  security_auditor:
     'Review recently merged PRs for concrete security issues and secure-by-default gaps.',
-  codeQualityAuditor:
+  code_quality_auditor:
     'Review recently merged PRs for maintainability, design, and readability issues worth follow-up work.',
 } as const;
 
@@ -271,27 +261,21 @@ const TRIGGERABLE_AUTOMATION_SCHEDULE_LABELS = {
 } as const;
 
 function getAutomationDefinition(
-  agentId:
-    | 'conflictResolver'
-    | 'suggester'
-    | 'announcer'
-    | 'managerStats'
-    | 'sentryTriage'
-    | 'dependabotTriage'
-    | 'securityAuditor'
-    | 'codeQualityAuditor',
+  agentId: AgentType,
+  automationKey: keyof typeof TRIGGERABLE_AUTOMATION_DESCRIPTIONS,
   icon: ComponentType<{ className?: string }>,
 ): AutomationDefinition {
-  const descriptor = getTriggerableBackgroundAutomationDescriptor(agentId);
+  const descriptor =
+    getTriggerableBackgroundAutomationDescriptorByKey(automationKey);
 
   if (!descriptor) {
-    throw new Error(`Missing automation descriptor for ${agentId}.`);
+    throw new Error(`Missing automation descriptor for ${automationKey}.`);
   }
 
   return {
     id: agentId,
     label: descriptor.label,
-    description: TRIGGERABLE_AUTOMATION_DESCRIPTIONS[agentId],
+    description: TRIGGERABLE_AUTOMATION_DESCRIPTIONS[automationKey],
     icon,
     availability: descriptor.availability,
   };
@@ -308,23 +292,16 @@ function SentryIcon({ className }: { className?: string }) {
 }
 
 function getScheduleOptions<TFrequency extends string>(
-  agentId:
-    | 'conflictResolver'
-    | 'suggester'
-    | 'announcer'
-    | 'managerStats'
-    | 'sentryTriage'
-    | 'dependabotTriage'
-    | 'securityAuditor'
-    | 'codeQualityAuditor',
+  automationKey: TriggerableBackgroundAutomationKey,
 ) {
-  const descriptor = getTriggerableBackgroundAutomationDescriptor(agentId);
+  const descriptor =
+    getTriggerableBackgroundAutomationDescriptorByKey(automationKey);
 
   if (!descriptor) {
-    throw new Error(`Missing automation descriptor for ${agentId}.`);
+    throw new Error(`Missing automation descriptor for ${automationKey}.`);
   }
 
-  return descriptor.schedule.modes.map((value) => ({
+  return descriptor.scheduleModes.map((value) => ({
     value: value as TFrequency,
     label:
       TRIGGERABLE_AUTOMATION_SCHEDULE_LABELS[
@@ -334,7 +311,7 @@ function getScheduleOptions<TFrequency extends string>(
 }
 
 const CONFLICT_RESOLVER_FREQUENCY_OPTIONS =
-  getScheduleOptions<ConflictResolverFrequency>('conflictResolver');
+  getScheduleOptions<ConflictResolverFrequency>('conflict_resolver');
 const CONFLICT_RESOLVER_MAX_PR_AGE_OPTIONS =
   CONFLICT_RESOLUTION_MAX_PR_AGE_DAYS_OPTIONS.map((value) => ({
     value,
@@ -345,10 +322,10 @@ const SUGGESTER_FREQUENCY_OPTIONS =
 const ANNOUNCER_FREQUENCY_OPTIONS =
   getScheduleOptions<AnnouncerFrequency>('announcer');
 const SENTRY_TRIAGE_FREQUENCY_OPTIONS =
-  getScheduleOptions<SentryTriageFrequency>('sentryTriage');
+  getScheduleOptions<SentryTriageFrequency>('sentry_triage');
 const SCHEDULE_ONLY_AUTOMATION_FREQUENCY_OPTIONS =
   getScheduleOptions<ScheduleOnlyBackgroundAutomationFrequency>(
-    'securityAuditor',
+    'security_auditor',
   );
 
 const SCHEDULE_ONLY_AUTOMATION_DEFINITIONS = Object.fromEntries(
@@ -394,13 +371,21 @@ const AUTOMATION_DEFINITIONS: Record<AgentType, AutomationDefinition> = {
     icon: Users,
   },
   managerStats: {
-    ...getAutomationDefinition('managerStats', ChartColumnIncreasing),
+    ...getAutomationDefinition(
+      'managerStats',
+      'manager_stats',
+      ChartColumnIncreasing,
+    ),
   },
   sentryTriage: {
-    ...getAutomationDefinition('sentryTriage', SentryIcon),
+    ...getAutomationDefinition('sentryTriage', 'sentry_triage', SentryIcon),
   },
   dependabotTriage: {
-    ...getAutomationDefinition('dependabotTriage', DependabotIcon),
+    ...getAutomationDefinition(
+      'dependabotTriage',
+      'dependabot_triage',
+      DependabotIcon,
+    ),
   },
   ...SCHEDULE_ONLY_AUTOMATION_DEFINITIONS,
   reviewer: {
@@ -410,19 +395,17 @@ const AUTOMATION_DEFINITIONS: Record<AgentType, AutomationDefinition> = {
     icon: GitPullRequest,
   },
   conflictResolver: {
-    ...getAutomationDefinition('conflictResolver', GitMergeConflict),
-  },
-  coach: {
-    id: 'coach',
-    label: 'Suggest Self-improvements',
-    description: 'Suggest process improvements from PR feedback.',
-    icon: Dumbbell,
+    ...getAutomationDefinition(
+      'conflictResolver',
+      'conflict_resolver',
+      GitMergeConflict,
+    ),
   },
   suggester: {
-    ...getAutomationDefinition('suggester', Lightbulb),
+    ...getAutomationDefinition('suggester', 'suggester', Lightbulb),
   },
   announcer: {
-    ...getAutomationDefinition('announcer', Megaphone),
+    ...getAutomationDefinition('announcer', 'announcer', Megaphone),
   },
   platformIssueAlerts: {
     id: 'platformIssueAlerts',
@@ -471,7 +454,6 @@ const AUTOMATION_RUN_KEYS_BY_AGENT: Partial<
   Record<AgentType, BackgroundAutomationKey>
 > = {
   conflictResolver: 'conflict_resolver',
-  coach: 'coach',
   suggester: 'suggester',
   announcer: 'announcer',
   managerStats: 'manager_stats',
@@ -535,52 +517,15 @@ function asDate(value: Date | string | null | undefined): Date | null {
   return value instanceof Date ? value : new Date(value);
 }
 
-function getAutomationRunLink(params: {
-  run: AutomationRunSummary;
-  slackWorkspaceDomain: string | null;
-}) {
-  if (params.run.taskId) {
-    return {
-      href: `/task/${params.run.taskId}`,
-      label: 'Open task',
-      external: false,
-    };
-  }
-
-  const slackUrl = buildSlackThreadPermalink({
-    slackWorkspaceDomain: params.slackWorkspaceDomain,
-    slackChannelId: params.run.slackChannelId,
-    threadTs: params.run.threadTs,
-  });
-
-  if (!slackUrl) {
-    return null;
-  }
-
-  return {
-    href: slackUrl,
-    label: 'Open Slack',
-    external: true,
-  };
-}
-
-function getAutomationRunTimestamp(run: AutomationRunSummary): Date | null {
-  return (
-    asDate(run.finishedAt) ?? asDate(run.startedAt) ?? asDate(run.createdAt)
-  );
-}
-
-function getAutomationRunStatusClasses(status: BackgroundAutomationRunStatus) {
-  switch (status) {
+function getAutomationRunStatusClasses(state: TaskState) {
+  switch (state) {
     case 'failed':
       return 'border-destructive/30 bg-destructive/10 text-destructive';
-    case 'succeeded':
+    case 'completed':
       return 'border-emerald-500/30 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300';
-    case 'running':
+    case 'active':
       return 'border-blue-500/30 bg-blue-500/10 text-blue-700 dark:text-blue-300';
-    case 'queued':
-      return 'border-amber-500/30 bg-amber-500/10 text-amber-700 dark:text-amber-300';
-    case 'skipped':
+    case 'canceled':
       return 'border-border bg-muted text-muted-foreground';
   }
 }
@@ -626,10 +571,6 @@ function mapSettingsToFormState(
     dependabotTriageFrequency: DependabotTriageFrequency;
     dependabotTriageSlackChannelId: string | null;
     dependabotTriageSlackChannelName?: string | null;
-    coachFrequency: CoachFrequency;
-    coachSlackChannelId: string | null;
-    coachSlackChannelName?: string | null;
-    coachInstructions: string | null;
     suggesterFrequency: SuggesterFrequency;
     suggesterSlackChannelId: string | null;
     suggesterSlackChannelName?: string | null;
@@ -674,6 +615,7 @@ function mapSettingsToFormState(
     conflictResolverInstructions: settings.conflictResolverInstructions ?? '',
     channelAutoStartSlackChannels: settings.channelAutoStartSlackChannels.map(
       ({ channelId, instructions, launchMode, launchCriteria }) => ({
+        channelId,
         slackChannel:
           settings.channelAutoStartSlackChannelNames?.[channelId] ??
           channelId ??
@@ -702,10 +644,6 @@ function mapSettingsToFormState(
       settings.dependabotTriageSlackChannelId ??
       '',
     ...mapScheduleOnlyAutomationFormState(settings),
-    coachFrequency: settings.coachFrequency,
-    coachSlackChannel:
-      settings.coachSlackChannelName ?? settings.coachSlackChannelId ?? '',
-    coachInstructions: settings.coachInstructions ?? '',
     suggesterFrequency: settings.suggesterFrequency,
     suggesterSlackChannel:
       settings.suggesterSlackChannelName ??
@@ -1064,7 +1002,11 @@ function AutomationFooter({
   );
 }
 
-function SlackChannelAccessWarning() {
+function SlackChannelAccessWarning({
+  slackAppMention,
+}: {
+  slackAppMention: string;
+}) {
   return (
     <span className="inline-flex items-center gap-1 text-xs text-muted-foreground">
       <TriangleAlert className="size-3.5 shrink-0" />
@@ -1081,6 +1023,7 @@ function AutomationSlackDestinationInput({
   options,
   disabled,
   showWarning,
+  slackAppMention,
   error,
   onChange,
 }: {
@@ -1091,6 +1034,7 @@ function AutomationSlackDestinationInput({
   options: SlackChannelOption[];
   disabled: boolean;
   showWarning: boolean;
+  slackAppMention: string;
   error?: string;
   onChange: (value: string | null) => void;
 }) {
@@ -1115,7 +1059,9 @@ function AutomationSlackDestinationInput({
           {helperText}
         </p>
       ) : null}
-      {showWarning ? <SlackChannelAccessWarning /> : null}
+      {showWarning ? (
+        <SlackChannelAccessWarning slackAppMention={slackAppMention} />
+      ) : null}
       {error ? <p className="text-xs text-destructive">{error}</p> : null}
     </div>
   );
@@ -1123,28 +1069,46 @@ function AutomationSlackDestinationInput({
 
 function AutomationRunsDebugPanel({
   runs,
-  slackWorkspaceDomain,
+  status,
 }: {
   runs: AutomationRunSummary[];
-  slackWorkspaceDomain: string | null;
+  status: AutomationStatusSummary | null;
 }) {
+  const lastRunAt = asDate(status?.lastRunAt);
+
   return (
     <div className="space-y-2 rounded-md border border-dashed border-border/70 px-3 py-3">
       <div className="flex items-center gap-2 text-xs text-muted-foreground">
         <Info className="size-3.5 shrink-0" />
         Recent runs
       </div>
+      {status ? (
+        <div className="text-xs text-muted-foreground">
+          {lastRunAt ? (
+            <span title={lastRunAt.toLocaleString()}>
+              Last ran{' '}
+              {formatDistanceToNowCompact(lastRunAt, { addSuffix: true })}
+            </span>
+          ) : (
+            'Never ran yet.'
+          )}
+        </div>
+      ) : null}
+      {status?.lastError ? (
+        <p className="max-w-xl text-xs text-destructive">{status.lastError}</p>
+      ) : null}
       {runs.length === 0 ? (
-        <p className="text-xs text-muted-foreground">No runs recorded yet.</p>
+        <p className="text-xs text-muted-foreground">
+          No launched tasks recorded yet.
+        </p>
       ) : (
         <div className="space-y-2">
           {runs.map((run) => {
-            const timestamp = getAutomationRunTimestamp(run);
-            const link = getAutomationRunLink({ run, slackWorkspaceDomain });
+            const timestamp = asDate(run.createdAt);
 
             return (
               <div
-                key={run.id}
+                key={run.taskId}
                 className="flex flex-wrap items-start justify-between gap-3 rounded-sm border border-border/60 px-3 py-2"
               >
                 <div className="min-w-0 space-y-1">
@@ -1152,17 +1116,19 @@ function AutomationRunsDebugPanel({
                     <span
                       className={cn(
                         'inline-flex items-center rounded-full border px-2 py-0.5 text-[11px] font-medium uppercase tracking-wide',
-                        getAutomationRunStatusClasses(run.status),
+                        getAutomationRunStatusClasses(run.state),
                       )}
                     >
-                      {run.status}
+                      {run.state}
                     </span>
                     <span className="text-xs text-muted-foreground">
-                      {run.triggerKind}
+                      {run.trigger}
                     </span>
-                    <span className="text-xs text-muted-foreground">
-                      Job {run.bullmqJobId}
-                    </span>
+                    {run.title ? (
+                      <span className="max-w-96 truncate text-xs text-muted-foreground">
+                        {run.title}
+                      </span>
+                    ) : null}
                   </div>
                   <div className="text-xs text-muted-foreground">
                     {timestamp ? (
@@ -1175,23 +1141,10 @@ function AutomationRunsDebugPanel({
                       'No timestamp'
                     )}
                   </div>
-                  {run.error ? (
-                    <p className="max-w-xl text-xs text-destructive">
-                      {run.error}
-                    </p>
-                  ) : null}
                 </div>
-                {link ? (
-                  <Button asChild variant="outline" size="sm">
-                    {link.external ? (
-                      <a href={link.href} target="_blank" rel="noreferrer">
-                        {link.label}
-                      </a>
-                    ) : (
-                      <Link href={link.href}>{link.label}</Link>
-                    )}
-                  </Button>
-                ) : null}
+                <Button asChild variant="outline" size="sm">
+                  <Link href={`/task/${run.taskId}`}>Open task</Link>
+                </Button>
               </div>
             );
           })}
@@ -1511,6 +1464,7 @@ export function AutomationsSettings() {
   });
 
   const settingsQuery = useQuery(trpc.automations.getSettings.queryOptions());
+  const commsStatus = useQuery(trpc.comms.status.queryOptions());
   const slackChannelsQuery = useQuery(
     trpc.automations.listSlackChannels.queryOptions(undefined, {
       enabled: settingsQuery.data?.capabilities.slackConnected ?? false,
@@ -1532,7 +1486,8 @@ export function AutomationsSettings() {
       channelAutoStartSlackChannelNames:
         settingsQuery.data.slackChannelDisplayNames
           .channelAutoStartSlackChannels,
-      managerSlackChannelName: null,
+      managerSlackChannelName:
+        settingsQuery.data.slackChannelDisplayNames.managerSlackChannel,
       managerStatsSlackChannelName:
         settingsQuery.data.slackChannelDisplayNames.managerStatsSlackChannel,
       sentryTriageSlackChannelName:
@@ -1540,8 +1495,6 @@ export function AutomationsSettings() {
       dependabotTriageSlackChannelName:
         settingsQuery.data.slackChannelDisplayNames
           .dependabotTriageSlackChannel,
-      coachSlackChannelName:
-        settingsQuery.data.slackChannelDisplayNames.coachSlackChannel,
       suggesterSlackChannelName:
         settingsQuery.data.slackChannelDisplayNames.suggesterSlackChannel,
       announcerSlackChannelName:
@@ -1651,15 +1604,14 @@ export function AutomationsSettings() {
           ...result.settings,
           channelAutoStartSlackChannelNames:
             result.slackChannelDisplayNames.channelAutoStartSlackChannels,
-          managerSlackChannelName: null,
+          managerSlackChannelName:
+            result.slackChannelDisplayNames.managerSlackChannel,
           managerStatsSlackChannelName:
             result.slackChannelDisplayNames.managerStatsSlackChannel,
           sentryTriageSlackChannelName:
             result.slackChannelDisplayNames.sentryTriageSlackChannel,
           dependabotTriageSlackChannelName:
             result.slackChannelDisplayNames.dependabotTriageSlackChannel,
-          coachSlackChannelName:
-            result.slackChannelDisplayNames.coachSlackChannel,
           suggesterSlackChannelName:
             result.slackChannelDisplayNames.suggesterSlackChannel,
           announcerSlackChannelName:
@@ -1715,19 +1667,42 @@ export function AutomationsSettings() {
   );
 
   const triggerMutation = useMutation(
-    trpc.automations.triggerAgent.mutationOptions({
-      onSuccess: (_data, variables) => {
+    trpc.automations.triggerAutomation.mutationOptions({
+      onSuccess: (data, variables) => {
         const automationLabel =
-          AUTOMATION_DEFINITIONS[variables.agentType].label;
+          getTriggerableBackgroundAutomationDescriptorByKey(
+            variables.automationKey as TriggerableBackgroundAutomationKey,
+          )?.label ?? variables.automationKey;
         void queryClient.invalidateQueries({
           queryKey: trpc.automations.getSettings.queryKey(),
         });
-        toast.success(`${automationLabel} triggered. It will run in a bit.`);
+
+        switch (data.outcome) {
+          case 'launched':
+            toast.success(`${automationLabel} started a task.`, {
+              action: {
+                label: 'Open task',
+                onClick: () => window.open(`/task/${data.taskId}`, '_blank'),
+              },
+            });
+            break;
+          case 'completed':
+            toast.success(`${automationLabel} ran successfully.`);
+            break;
+          case 'skipped':
+            toast.info(`${automationLabel} had nothing to do: ${data.reason}`);
+            break;
+          case 'failed':
+            toast.error(`${automationLabel} failed: ${data.error}`);
+            break;
+        }
       },
       onError: (error, variables) => {
         const automationLabel =
-          AUTOMATION_DEFINITIONS[variables.agentType].label;
-        toast.error(`Failed to trigger ${automationLabel}: ${error.message}`);
+          getTriggerableBackgroundAutomationDescriptorByKey(
+            variables.automationKey as TriggerableBackgroundAutomationKey,
+          )?.label ?? variables.automationKey;
+        toast.error(`Failed to run ${automationLabel}: ${error.message}`);
       },
     }),
   );
@@ -1749,7 +1724,6 @@ export function AutomationsSettings() {
         ...scheduleOnlyAutomationDirtyState,
         reviewer: false,
         conflictResolver: false,
-        coach: false,
         suggester: false,
         announcer: false,
         platformIssueAlerts: false,
@@ -1765,7 +1739,6 @@ export function AutomationsSettings() {
       ...scheduleOnlyAutomationDirtyState,
       reviewer: isAgentDirty(formState, savedState, 'reviewer'),
       conflictResolver: isAgentDirty(formState, savedState, 'conflictResolver'),
-      coach: isAgentDirty(formState, savedState, 'coach'),
       suggester: isAgentDirty(formState, savedState, 'suggester'),
       announcer: isAgentDirty(formState, savedState, 'announcer'),
       platformIssueAlerts: isAgentDirty(
@@ -1778,8 +1751,7 @@ export function AutomationsSettings() {
 
   const recentRunsByAutomation = settingsQuery.data?.recentRuns;
 
-  const slackWorkspaceDomain =
-    settingsQuery.data?.capabilities.slackWorkspaceDomain ?? null;
+  const automationStatusByKey = settingsQuery.data?.automationStatus;
 
   const renderDebugRunsSection = useCallback(
     (agent: AgentType) => {
@@ -1796,11 +1768,11 @@ export function AutomationsSettings() {
       return (
         <AutomationRunsDebugPanel
           runs={recentRunsByAutomation?.[automationKey] ?? []}
-          slackWorkspaceDomain={slackWorkspaceDomain}
+          status={automationStatusByKey?.[automationKey] ?? null}
         />
       );
     },
-    [recentRunsByAutomation, showAutomationDebugRuns, slackWorkspaceDomain],
+    [automationStatusByKey, recentRunsByAutomation, showAutomationDebugRuns],
   );
 
   const saveAgent = useCallback(
@@ -1918,6 +1890,20 @@ export function AutomationsSettings() {
   }, [openHashTarget]);
 
   const capabilities = settingsQuery.data?.capabilities;
+  const slackInvocationIdentity =
+    commsStatus.data?.invocationIdentities.find(
+      (identity) => identity.provider === 'slack',
+    ) ?? null;
+  const githubInvocationIdentity =
+    commsStatus.data?.invocationIdentities.find(
+      (identity) => identity.provider === 'github',
+    ) ?? null;
+  const slackAppMention =
+    slackInvocationIdentity?.mentionText ??
+    slackInvocationIdentity?.nativeMention ??
+    'the Slack app';
+  const githubAppMention =
+    githubInvocationIdentity?.mentionText ?? 'the GitHub app';
   const channelAutoStartLaunchModeOptions =
     CHANNEL_AUTO_START_LAUNCH_MODE_OPTIONS;
   const showChannelAutoStartLaunchModePicker = false;
@@ -1984,7 +1970,6 @@ export function AutomationsSettings() {
     sentryConnected: sentryConnected,
     frequency: formState?.sentryTriageFrequency ?? 'off',
   });
-  const coachIsEnabled = formState?.coachFrequency !== 'off';
   const suggesterIsEnabled = formState?.suggesterFrequency !== 'off';
   const announcerIsEnabled = formState?.announcerFrequency !== 'off';
   const showManagerSlackChannelWarning = shouldShowManagerSlackChannelWarning({
@@ -2060,6 +2045,7 @@ export function AutomationsSettings() {
           value={value || null}
           options={buildSlackDestinationOptions(value)}
           disabled={getSlackDestinationSelectionDisabled(value, savedChannelId)}
+          slackAppMention={slackAppMention}
           showWarning={shouldShowManagerSlackChannelWarning({
             formValue: value,
             savedChannelId,
@@ -2099,6 +2085,7 @@ export function AutomationsSettings() {
       formState,
       getSlackDestinationSelectionDisabled,
       isDirty,
+      slackAppMention,
     ],
   );
 
@@ -2111,7 +2098,6 @@ export function AutomationsSettings() {
     ...scheduleOnlyAutomationEnabledState,
     reviewer: reviewerIsEnabled,
     conflictResolver: conflictResolverIsEnabled,
-    coach: coachIsEnabled,
     suggester: suggesterIsEnabled,
     announcer: announcerIsEnabled,
     platformIssueAlerts: isPlatformIssueAlertsEnabled(formState),
@@ -2156,6 +2142,13 @@ export function AutomationsSettings() {
     ]),
   ) as Record<ScheduleOnlyBackgroundAutomationId, string | null>;
   const savedManagerChannelLabel = (() => {
+    const channelFromList = slackChannelChoices.find(
+      (channel) => channel.id === managerSlackChannelId,
+    );
+    if (channelFromList) {
+      return `#${channelFromList.name}`;
+    }
+
     const value = formatSlackChannelValue(savedState?.managerSlackChannel);
     if (!value) {
       return '#channel';
@@ -2268,7 +2261,9 @@ export function AutomationsSettings() {
                 isEnabled={channelAutoStartIsEnabled}
                 warning={
                   showChannelAutoStartSlackChannelWarning ? (
-                    <SlackChannelAccessWarning />
+                    <SlackChannelAccessWarning
+                      slackAppMention={slackAppMention}
+                    />
                   ) : undefined
                 }
                 channelFieldError={fieldErrors.channelAutoStartSlackChannels}
@@ -2450,7 +2445,9 @@ export function AutomationsSettings() {
                     ID.
                   </p>
                   {showManagerSlackChannelWarning ? (
-                    <SlackChannelAccessWarning />
+                    <SlackChannelAccessWarning
+                      slackAppMention={slackAppMention}
+                    />
                   ) : null}
                   {fieldErrors.managerSlackChannel ? (
                     <p className="text-xs text-destructive">
@@ -2526,7 +2523,7 @@ export function AutomationsSettings() {
                   variant="ghost"
                   size="icon"
                   onClick={() =>
-                    triggerMutation.mutate({ agentType: 'managerStats' })
+                    triggerMutation.mutate({ automationKey: 'manager_stats' })
                   }
                   disabled={isRunDisabled(
                     'managerStats',
@@ -2611,7 +2608,7 @@ export function AutomationsSettings() {
                     variant="ghost"
                     size="icon"
                     onClick={() =>
-                      triggerMutation.mutate({ agentType: 'sentryTriage' })
+                      triggerMutation.mutate({ automationKey: 'sentry_triage' })
                     }
                     disabled={isRunDisabled(
                       'sentryTriage',
@@ -2782,7 +2779,7 @@ export function AutomationsSettings() {
                 dependabotTriageBlockedReason != null,
               )}
               onRun={() =>
-                triggerMutation.mutate({ agentType: 'dependabotTriage' })
+                triggerMutation.mutate({ automationKey: 'dependabot_triage' })
               }
               isDirty={isDirty.dependabotTriage}
               isPending={
@@ -2864,7 +2861,9 @@ export function AutomationsSettings() {
                         variant="ghost"
                         size="icon"
                         onClick={() =>
-                          triggerMutation.mutate({ agentType: automation.id })
+                          triggerMutation.mutate({
+                            automationKey: automation.automationKey,
+                          })
                         }
                         disabled={isRunDisabled(
                           automation.id,
@@ -2961,7 +2960,7 @@ export function AutomationsSettings() {
                   variant="ghost"
                   size="icon"
                   onClick={() =>
-                    triggerMutation.mutate({ agentType: 'suggester' })
+                    triggerMutation.mutate({ automationKey: 'suggester' })
                   }
                   disabled={isRunDisabled('suggester', suggesterIsEnabled)}
                 >
@@ -3238,7 +3237,7 @@ If unclear, send to manager channel.`}
                   variant="ghost"
                   size="icon"
                   onClick={() =>
-                    triggerMutation.mutate({ agentType: 'announcer' })
+                    triggerMutation.mutate({ automationKey: 'announcer' })
                   }
                   disabled={isRunDisabled('announcer', announcerIsEnabled)}
                 >
@@ -3488,7 +3487,9 @@ If unclear, send to manager channel.`}
                   variant="ghost"
                   size="icon"
                   onClick={() =>
-                    triggerMutation.mutate({ agentType: 'conflictResolver' })
+                    triggerMutation.mutate({
+                      automationKey: 'conflict_resolver',
+                    })
                   }
                   disabled={isRunDisabled(
                     'conflictResolver',
@@ -3671,7 +3672,7 @@ If unclear, send to manager channel.`}
                     </a>
                     , finishing with{' '}
                     <span className="font-medium text-foreground">
-                      @roomote
+                      {slackAppMention}
                     </span>{' '}
                     mentions, to get it working on whatever you want. Some
                     ideas:

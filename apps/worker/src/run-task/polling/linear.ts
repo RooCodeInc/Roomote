@@ -14,28 +14,28 @@ import {
 const LINEAR_MESSAGE_CHECK_INTERVAL_MS = 5_000;
 
 async function requeueLinearRequestUserInputAnswers(
-  cloudJobId: number,
+  runId: number,
   queuedAnswers: Awaited<
-    ReturnType<typeof sdk.cloudJobs.getLinearRequestUserInputAnswers>
+    ReturnType<typeof sdk.taskRuns.getLinearRequestUserInputAnswers>
   >,
   startIndex: number,
 ): Promise<void> {
   await prependLinearRequestUserInputAnswers(
-    cloudJobId,
+    runId,
     queuedAnswers.slice(startIndex),
   );
 }
 
 async function requeueLinearMessages(
-  cloudJobId: number,
-  linearMessages: Awaited<ReturnType<typeof sdk.cloudJobs.getLinearMessages>>,
+  runId: number,
+  linearMessages: Awaited<ReturnType<typeof sdk.taskRuns.getLinearMessages>>,
   startIndex: number,
 ): Promise<void> {
-  await prependLinearMessages(cloudJobId, linearMessages.slice(startIndex));
+  await prependLinearMessages(runId, linearMessages.slice(startIndex));
 }
 
 export function createLinearMessageInterval({
-  cloudJob,
+  taskRun,
   sendPrompt,
   answerUserInputRequest,
   state,
@@ -50,16 +50,16 @@ export function createLinearMessageInterval({
     try {
       const queuedAnswers = await runPollingSdkCall({
         execute: () =>
-          sdk.cloudJobs.getLinearRequestUserInputAnswers({
-            cloudJobId: cloudJob.id,
+          sdk.taskRuns.getLinearRequestUserInputAnswers({
+            runId: taskRun.id,
           }),
         stage: 'listenForLinearEvents',
-        cloudJobId: cloudJob.id,
+        runId: taskRun.id,
         sessionId: state.sessionId,
-        sdkMethod: 'cloudJobs.getLinearRequestUserInputAnswers',
+        sdkMethod: 'taskRuns.getLinearRequestUserInputAnswers',
         failurePoint: 'queuedLinearRequestUserInputAnswers',
         logger,
-        message: `[listenForLinearEvents] Failed to check for queued Linear request_user_input answers for job ${cloudJob.id}`,
+        message: `[listenForLinearEvents] Failed to check for queued Linear request_user_input answers for job ${taskRun.id}`,
       });
 
       if (!queuedAnswers) {
@@ -68,27 +68,30 @@ export function createLinearMessageInterval({
 
       if (queuedAnswers.length > 0) {
         logger.log(
-          `[listenForLinearEvents] Found ${queuedAnswers.length} queued Linear request_user_input answer(s) for job ${cloudJob.id}`,
+          `[listenForLinearEvents] Found ${queuedAnswers.length} queued Linear request_user_input answer(s) for job ${taskRun.id}`,
         );
 
         for (const [index, answer] of queuedAnswers.entries()) {
-          const canDeliver =
-            (await prepareActorScopedTurn(answer.userId)) !== false;
+          // The API couples answer queueing to its trusted actor write. If the
+          // worker drains Redis just before that DB transaction commits,
+          // block and requeue instead of dropping an answer that is already
+          // marked submitted and cannot be resent.
+          const answerPrep = await prepareActorScopedTurn(answer.userId);
 
-          if (!canDeliver) {
+          if (answerPrep === false || answerPrep.skippedMismatch) {
             logger.warn(
               `[listenForLinearEvents] Delaying request_user_input answer for task ${state.sessionId} until actor-scoped turn preparation succeeds (requestId=${answer.requestId})`,
             );
 
             try {
               await requeueLinearRequestUserInputAnswers(
-                cloudJob.id,
+                taskRun.id,
                 queuedAnswers,
                 index,
               );
             } catch (error) {
               logger.error(
-                `[listenForLinearEvents] Failed to requeue delayed request_user_input answer for cloud job ${cloudJob.id}: ${
+                `[listenForLinearEvents] Failed to requeue delayed request_user_input answer for task run ${taskRun.id}: ${
                   error instanceof Error ? error.message : String(error)
                 }`,
               );
@@ -100,7 +103,8 @@ export function createLinearMessageInterval({
           const sent = answerUserInputRequest({
             requestId: answer.requestId,
             answers: answer.answers,
-            userId: answer.userId,
+            // The delivered sender always equals the server-side acting user.
+            userId: answerPrep.effectiveUserId ?? undefined,
           });
 
           if (!sent) {
@@ -110,13 +114,13 @@ export function createLinearMessageInterval({
 
             try {
               await requeueLinearRequestUserInputAnswers(
-                cloudJob.id,
+                taskRun.id,
                 queuedAnswers,
                 index,
               );
             } catch (error) {
               logger.error(
-                `[listenForLinearEvents] Failed to requeue request_user_input answer for cloud job ${cloudJob.id}: ${
+                `[listenForLinearEvents] Failed to requeue request_user_input answer for task run ${taskRun.id}: ${
                   error instanceof Error ? error.message : String(error)
                 }`,
               );
@@ -133,16 +137,16 @@ export function createLinearMessageInterval({
 
       const linearMessages = await runPollingSdkCall({
         execute: () =>
-          sdk.cloudJobs.getLinearMessages({
-            cloudJobId: cloudJob.id,
+          sdk.taskRuns.getLinearMessages({
+            runId: taskRun.id,
           }),
         stage: 'listenForLinearEvents',
-        cloudJobId: cloudJob.id,
+        runId: taskRun.id,
         sessionId: state.sessionId,
-        sdkMethod: 'cloudJobs.getLinearMessages',
+        sdkMethod: 'taskRuns.getLinearMessages',
         failurePoint: 'queuedLinearMessages',
         logger,
-        message: `[listenForLinearEvents] Failed to check for queued Linear messages for job ${cloudJob.id}`,
+        message: `[listenForLinearEvents] Failed to check for queued Linear messages for job ${taskRun.id}`,
       });
 
       if (!linearMessages) {
@@ -151,7 +155,7 @@ export function createLinearMessageInterval({
 
       if (linearMessages.length > 0) {
         logger.log(
-          `[listenForLinearEvents] Found ${linearMessages.length} queued Linear message(s) for job ${cloudJob.id}`,
+          `[listenForLinearEvents] Found ${linearMessages.length} queued Linear message(s) for job ${taskRun.id}`,
         );
 
         for (const [index, msg] of linearMessages.entries()) {
@@ -170,27 +174,38 @@ export function createLinearMessageInterval({
             !isActiveTaskPhase(state.phase) ||
             state.isConnected === false;
 
-          const canDeliver =
-            (await prepareActorScopedTurn(msg.userId, {
-              allowMcpReconnect,
-            })) !== false;
+          // The API performs a trusted pre-queue actor sync for these
+          // messages; a residual mismatch skips that message's content (with
+          // a resend notice) rather than running it under the server actor
+          // or stalling the queue.
+          const msgPrep = await prepareActorScopedTurn(msg.userId, {
+            allowMcpReconnect,
+            onMismatch: 'skip',
+          });
 
-          if (!canDeliver) {
+          if (msgPrep === false) {
             logger.warn(
               `[listenForLinearEvents] Delaying Linear follow-up for task ${state.sessionId} until actor-scoped turn preparation succeeds`,
             );
 
             try {
-              await requeueLinearMessages(cloudJob.id, linearMessages, index);
+              await requeueLinearMessages(taskRun.id, linearMessages, index);
             } catch (error) {
               logger.error(
-                `[listenForLinearEvents] Failed to requeue delayed Linear message for cloud job ${cloudJob.id}: ${
+                `[listenForLinearEvents] Failed to requeue delayed Linear message for task run ${taskRun.id}: ${
                   error instanceof Error ? error.message : String(error)
                 }`,
               );
             }
 
             break;
+          }
+
+          if (msgPrep.skippedMismatch) {
+            logger.warn(
+              `[listenForLinearEvents] Skipped Linear follow-up for task ${state.sessionId}: sender is not the server-side acting user`,
+            );
+            continue;
           }
 
           const sent = sendPrompt({
@@ -200,7 +215,8 @@ export function createLinearMessageInterval({
             // the loop can pick them up, abort-and-replay when the turn is
             // blocked on a pending question tool call.
             autoSteerWhenQueued: true,
-            userId: msg.userId,
+            // The delivered sender always equals the server-side acting user.
+            userId: msgPrep.effectiveUserId ?? undefined,
           });
 
           if (!sent) {
@@ -217,13 +233,13 @@ export function createLinearMessageInterval({
     } catch (error) {
       logPollingTransportError({
         stage: 'listenForLinearEvents',
-        cloudJobId: cloudJob.id,
+        runId: taskRun.id,
         sessionId: state.sessionId,
         sdkMethod: 'listenForLinearEvents.delivery',
         failurePoint: 'queuedLinearDelivery',
         logger,
         error,
-        message: `[listenForLinearEvents] Unexpected error while delivering queued Linear events for job ${cloudJob.id}`,
+        message: `[listenForLinearEvents] Unexpected error while delivering queued Linear events for job ${taskRun.id}`,
       });
     }
   }, LINEAR_MESSAGE_CHECK_INTERVAL_MS);

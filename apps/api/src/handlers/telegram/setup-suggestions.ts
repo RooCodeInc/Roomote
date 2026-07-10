@@ -4,14 +4,12 @@ import {
   SETUP_SUGGESTIONS_TELEGRAM_START_INSTRUCTION,
 } from '@roomote/communication/chat-messages';
 import {
-  agentSuggestionMessages,
   and,
+  claimWorkItem,
   db,
   eq,
-  isNull,
-  like,
   resolveTelegramRuntimeCredentials,
-  taskSuggestions,
+  trackedMessages,
 } from '@roomote/db/server';
 import { enqueueTelegramSuggestedTasksOnboardingFollowup } from '@roomote/sdk/server';
 
@@ -115,6 +113,7 @@ export async function postSetupTaskSuggestionsToTelegram(params: {
 
   await insertSetupSuggestionMessageRows(
     buildSharedMessageSuggestionRows({
+      surface: 'telegram',
       messageId: posted.messageId,
       channelId: chatId,
       sourceTaskId,
@@ -141,8 +140,17 @@ export async function postSetupTaskSuggestionsToTelegram(params: {
 
 /**
  * Atomically claim a suggestion button click so a double tap cannot launch
- * two tasks. Returns the suggestion to launch, or null when it was already
- * claimed or does not exist.
+ * two tasks. Returns the work item to launch, or null when it was already
+ * claimed/launched or does not exist. The suggestion id from the `idea:<id>`
+ * callback is the backing `work_items` row id; the chat id scopes the claim to
+ * a suggestion card actually posted in this Telegram chat.
+ *
+ * The claim CAS (including its 10-minute stale-claim recovery) lives in the
+ * shared `claimWorkItem` helper so every launch surface behaves identically.
+ * The returned `launchClaimedAt` is this launcher's fencing token — the caller
+ * must thread it through `finalizeWorkItemLaunched`/`releaseWorkItemClaim` so a
+ * slow launcher whose claim was reclaimed cannot stomp the new claimant's
+ * state.
  */
 export async function claimTelegramSuggestionLaunch(input: {
   suggestionId: string;
@@ -150,40 +158,39 @@ export async function claimTelegramSuggestionLaunch(input: {
 }): Promise<{
   id: string;
   title: string;
-  brief: string;
+  brief: string | null;
   investigationContext: string | null;
   targetRepositoryFullName: string | null;
+  launchClaimedAt: Date;
 } | null> {
-  // The chat id scopes the claim; suggestion buttons from any Telegram
-  // suggestion surface (setup onboarding, scheduled automations) share the
-  // idea:<id> callback and this launch path.
-  const [claimed] = await db
-    .update(agentSuggestionMessages)
-    .set({ launchClaimedAt: new Date() })
-    .where(
-      and(
-        eq(agentSuggestionMessages.channelId, input.chatId),
-        like(agentSuggestionMessages.suggestionKey, `%:${input.suggestionId}`),
-        isNull(agentSuggestionMessages.launchClaimedAt),
-      ),
-    )
-    .returning({ id: agentSuggestionMessages.id });
+  // Scope: a suggestion card for this work item must have been posted in this
+  // chat. Suggestion buttons from any Telegram suggestion surface (setup
+  // onboarding, scheduled automations) share the idea:<id> callback and path.
+  const trackedCard = await db.query.trackedMessages.findFirst({
+    where: and(
+      eq(trackedMessages.kind, 'suggestion_card'),
+      eq(trackedMessages.channelId, input.chatId),
+      eq(trackedMessages.workItemId, input.suggestionId),
+    ),
+    columns: { id: true },
+  });
+
+  if (!trackedCard) {
+    return null;
+  }
+
+  const claimed = await claimWorkItem(db, { id: input.suggestionId });
 
   if (!claimed) {
     return null;
   }
 
-  const [suggestion] = await db
-    .select({
-      id: taskSuggestions.id,
-      title: taskSuggestions.title,
-      brief: taskSuggestions.brief,
-      investigationContext: taskSuggestions.investigationContext,
-      targetRepositoryFullName: taskSuggestions.targetRepositoryFullName,
-    })
-    .from(taskSuggestions)
-    .where(eq(taskSuggestions.id, input.suggestionId))
-    .limit(1);
-
-  return suggestion ?? null;
+  return {
+    id: claimed.id,
+    title: claimed.title,
+    brief: claimed.brief,
+    investigationContext: claimed.investigationContext,
+    targetRepositoryFullName: claimed.targetRepositoryFullName,
+    launchClaimedAt: claimed.launchClaimedAt,
+  };
 }

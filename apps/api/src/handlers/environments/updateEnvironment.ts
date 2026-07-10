@@ -17,7 +17,7 @@ import { logHandlerError } from '../utils';
 import {
   DUPLICATE_ENVIRONMENT_NAME_ERROR,
   EVAL_ENVIRONMENT_WRITE_ERROR,
-  attachEnvironmentIdToCloudJob,
+  attachEnvironmentIdToTaskRun,
   getEnvironmentRepositoryConfigError,
   isEnvironmentNameUniqueViolation,
 } from './createEnvironment';
@@ -167,7 +167,7 @@ export async function updateEnvironment(
       });
     });
 
-    await attachEnvironmentIdToCloudJob(auth, id);
+    await attachEnvironmentIdToTaskRun(auth, id);
 
     return c.json({
       success: true,

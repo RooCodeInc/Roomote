@@ -19,35 +19,31 @@ const RELEASE_LOCK_SCRIPT =
 export const THREAD_REPLY_FOOTER_LOCK_TIMEOUT_MESSAGE =
   'Timed out acquiring thread reply footer lock';
 
-export async function buildThreadReplyImageBlocks(params: {
+export type ThreadReplyImage = {
+  url: string;
+  altText: string;
+  contentType: string;
+};
+
+export async function buildThreadReplyImages(params: {
   artifactIds: string[];
-  cloudJob: {
+  taskRun: {
     id: number;
     taskId: string;
   };
-}): Promise<
-  Array<{
-    type: 'image';
-    image_url: string;
-    alt_text: string;
-  }>
-> {
+}): Promise<ThreadReplyImage[]> {
   const ts = currentEpochSeconds();
-  const imageBlocks: Array<{
-    type: 'image';
-    image_url: string;
-    alt_text: string;
-  }> = [];
+  const images: ThreadReplyImage[] = [];
 
   if (params.artifactIds.length === 0) {
-    return imageBlocks;
+    return images;
   }
 
   const artifacts = await db.query.taskArtifacts.findMany({
     columns: {
       id: true,
       taskId: true,
-      cloudJobId: true,
+      runId: true,
       contentType: true,
       uploaded: true,
       path: true,
@@ -66,18 +62,15 @@ export async function buildThreadReplyImageBlocks(params: {
       throw new Error(`Unknown artifact id: ${artifactId}`);
     }
 
-    if (artifact.taskId !== params.cloudJob.taskId) {
+    if (artifact.taskId !== params.taskRun.taskId) {
       throw new Error(
         `Artifact ${artifactId} does not belong to the current task`,
       );
     }
 
-    if (
-      artifact.cloudJobId !== null &&
-      artifact.cloudJobId !== params.cloudJob.id
-    ) {
+    if (artifact.runId !== null && artifact.runId !== params.taskRun.id) {
       throw new Error(
-        `Artifact ${artifactId} does not belong to the current cloud job`,
+        `Artifact ${artifactId} does not belong to the current task run`,
       );
     }
 
@@ -89,17 +82,41 @@ export async function buildThreadReplyImageBlocks(params: {
       throw new Error(`Artifact ${artifactId} is not an image attachment`);
     }
 
-    imageBlocks.push({
-      type: 'image',
-      image_url: buildSignedArtifactRawUrl({
+    images.push({
+      url: buildSignedArtifactRawUrl({
         artifactId: artifact.id,
         ts,
         apiBaseUrl: Env.ROOMOTE_APP_URL,
         signingKey: getArtifactSigningKey(),
       }),
-      alt_text: basename(artifact.path) || 'attachment',
+      altText: basename(artifact.path) || 'attachment',
+      contentType: artifact.contentType,
     });
   }
+
+  return images;
+}
+
+export async function buildThreadReplyImageBlocks(params: {
+  artifactIds: string[];
+  taskRun: {
+    id: number;
+    taskId: string;
+  };
+}): Promise<
+  Array<{
+    type: 'image';
+    image_url: string;
+    alt_text: string;
+  }>
+> {
+  const images = await buildThreadReplyImages(params);
+
+  const imageBlocks = images.map((image) => ({
+    type: 'image' as const,
+    image_url: image.url,
+    alt_text: image.altText,
+  }));
 
   return imageBlocks;
 }
@@ -113,7 +130,7 @@ export function errorResponseForThreadReplyImageError(
 
   if (
     message.includes('does not belong to the current task') ||
-    message.includes('does not belong to the current cloud job')
+    message.includes('does not belong to the current task run')
   ) {
     return new Response(JSON.stringify({ error: message }), { status: 403 });
   }

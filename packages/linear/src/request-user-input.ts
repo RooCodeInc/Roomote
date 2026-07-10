@@ -16,7 +16,7 @@ const ANSWER_QUEUE_TTL_SECONDS = 60 * 60;
 
 export interface PendingLinearRequestUserInput {
   requestId: string;
-  cloudJobId: number;
+  runId: number;
   taskId: string;
   sessionId: string;
   questions: AcpRequestUserInputQuestion[];
@@ -35,8 +35,8 @@ function getPendingRequestKey(sessionId: string): string {
   return `${LINEAR_PENDING_REQUEST_USER_INPUT_PREFIX}${sessionId}`;
 }
 
-function getAnswerQueueKey(cloudJobId: number): string {
-  return `${LINEAR_REQUEST_USER_INPUT_ANSWER_QUEUE_PREFIX}${cloudJobId}`;
+function getAnswerQueueKey(runId: number): string {
+  return `${LINEAR_REQUEST_USER_INPUT_ANSWER_QUEUE_PREFIX}${runId}`;
 }
 
 export async function setPendingLinearRequestUserInput(
@@ -120,18 +120,18 @@ export async function markPendingLinearRequestUserInputSubmitted(
 }
 
 export async function queueLinearRequestUserInputAnswer(
-  cloudJobId: number,
+  runId: number,
   answer: QueuedLinearRequestUserInputAnswer,
 ): Promise<void> {
   const redis = getRedis();
-  const key = getAnswerQueueKey(cloudJobId);
+  const key = getAnswerQueueKey(runId);
 
   await redis.rpush(key, JSON.stringify(answer));
   await redis.expire(key, ANSWER_QUEUE_TTL_SECONDS);
 }
 
 export async function prependLinearRequestUserInputAnswers(
-  cloudJobId: number,
+  runId: number,
   answers: QueuedLinearRequestUserInputAnswer[],
 ): Promise<void> {
   if (answers.length === 0) {
@@ -139,7 +139,7 @@ export async function prependLinearRequestUserInputAnswers(
   }
 
   const redis = getRedis();
-  const key = getAnswerQueueKey(cloudJobId);
+  const key = getAnswerQueueKey(runId);
   const multi = redis.multi();
 
   for (const answer of [...answers].reverse()) {
@@ -151,10 +151,10 @@ export async function prependLinearRequestUserInputAnswers(
 }
 
 export async function getLinearRequestUserInputAnswers(
-  cloudJobId: number,
+  runId: number,
 ): Promise<QueuedLinearRequestUserInputAnswer[]> {
   const redis = getRedis();
-  const key = getAnswerQueueKey(cloudJobId);
+  const key = getAnswerQueueKey(runId);
   const results = await redis.multi().lrange(key, 0, -1).del(key).exec();
 
   if (!results || results.length === 0) {
@@ -165,7 +165,7 @@ export async function getLinearRequestUserInputAnswers(
 
   if (lrangeError) {
     console.error(
-      `[getLinearRequestUserInputAnswers] Redis lrange failed for cloud job ${cloudJobId}: ${
+      `[getLinearRequestUserInputAnswers] Redis lrange failed for task run ${runId}: ${
         lrangeError instanceof Error ? lrangeError.message : String(lrangeError)
       }`,
     );
@@ -176,7 +176,7 @@ export async function getLinearRequestUserInputAnswers(
 
   if (delError) {
     console.error(
-      `[getLinearRequestUserInputAnswers] Redis del failed for cloud job ${cloudJobId}: ${
+      `[getLinearRequestUserInputAnswers] Redis del failed for task run ${runId}: ${
         delError instanceof Error ? delError.message : String(delError)
       }`,
     );
@@ -194,7 +194,7 @@ export async function getLinearRequestUserInputAnswers(
         items.push(JSON.parse(rawAnswer) as QueuedLinearRequestUserInputAnswer);
       } catch (error) {
         console.error(
-          `[getLinearRequestUserInputAnswers] Failed to parse answer for cloud job ${cloudJobId}: ${
+          `[getLinearRequestUserInputAnswers] Failed to parse answer for task run ${runId}: ${
             error instanceof Error ? error.message : String(error)
           }`,
         );

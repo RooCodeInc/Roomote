@@ -349,6 +349,42 @@ export class OpenCodeRuntimeEventEmitter extends RuntimeEnvelopeBuilder {
     );
   }
 
+  taskCancelled(options: {
+    sessionId: string;
+    cancelledByName?: string;
+    source?: string;
+  }): void {
+    const ts = this.nextTs();
+    const text = options.cancelledByName
+      ? `Stopped by ${options.cancelledByName}`
+      : 'Stopped';
+
+    this.outputAndPersist(
+      this.withLogicalEventId(
+        {
+          ts,
+          eventType: ACP_ENVELOPE_EVENT_TYPES.TaskCancelled,
+          role: 'system',
+          contentBlocks: [{ type: 'text', text }],
+          metadata: {
+            sessionId: options.sessionId,
+          },
+          payload: {
+            sessionId: options.sessionId,
+            ...(options.cancelledByName
+              ? { cancelledByName: options.cancelledByName }
+              : {}),
+            ...(options.source ? { source: options.source } : {}),
+          },
+        },
+        // Each marker is its own logical transcript item; keying by the
+        // envelope's own ts keeps repeated cancels in one session distinct
+        // while the live emit and the persisted envelope still reconcile.
+        { sessionId: options.sessionId, messageId: `cancel-${ts}` },
+      ),
+    );
+  }
+
   plan(options: {
     sessionId: string;
     messageId?: string;

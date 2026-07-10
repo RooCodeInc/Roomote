@@ -610,7 +610,7 @@ describe('createOpenCodeSdkFetch', () => {
 });
 
 describe('non-task OpenCode image packaging', () => {
-  it('keeps the shared app image able to run the same OpenCode CLI as workers', () => {
+  it('pins the same OpenCode version in the worker and control-plane inference images', () => {
     const appDockerfile = fs.readFileSync(
       new URL('../../../../../.docker/app/Dockerfile', import.meta.url),
       'utf8',
@@ -620,21 +620,28 @@ describe('non-task OpenCode image packaging', () => {
       'utf8',
     );
 
+    expect(getOpenCodeCliVersionArg(workerDockerfile)).toBe(
+      DEFAULT_OPENCODE_CLI_VERSION,
+    );
+    expect(workerDockerfile).toContain('"opencode-ai@${OPENCODE_CLI_VERSION}"');
+
+    // Non-task inference (routing, summaries, automation planning) starts a
+    // managed OpenCode SDK server in-process, so control-plane services that
+    // execute those workflows carry the CLI too — at the same pinned version
+    // the SDK expects — but only via the shared inference base stage.
     expect(getOpenCodeCliVersionArg(appDockerfile)).toBe(
       DEFAULT_OPENCODE_CLI_VERSION,
     );
-    expect(getOpenCodeCliVersionArg(appDockerfile)).toBe(
-      getOpenCodeCliVersionArg(workerDockerfile),
+
+    const inferenceBaseStage = appDockerfile
+      .split(/^FROM /mu)
+      .find((stage) =>
+        stage.startsWith('runtime-base AS runtime-inference-base'),
+      );
+
+    expect(inferenceBaseStage).toContain(
+      '"opencode-ai@${OPENCODE_CLI_VERSION}"',
     );
-    expect(appDockerfile).toContain(
-      'npm install --prefix /opt/opencode-cli --no-save --no-package-lock \\',
-    );
-    expect(appDockerfile).toContain('"opencode-ai@${OPENCODE_CLI_VERSION}"');
-    expect(appDockerfile).toContain(
-      'test "$(/opt/opencode-cli/node_modules/.bin/opencode --version)" = "${OPENCODE_CLI_VERSION}"',
-    );
-    expect(appDockerfile).toContain(
-      'ln -sf /opt/opencode-cli/node_modules/.bin/opencode /usr/local/bin/opencode',
-    );
+    expect(appDockerfile.match(/opencode-ai@/gu)).toHaveLength(1);
   });
 });
