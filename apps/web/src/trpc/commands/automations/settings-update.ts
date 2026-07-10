@@ -932,6 +932,7 @@ export async function updateBackgroundAgentSettingsCommand(
   const slackChannelDisplayNames = await getSlackChannelDisplayNames({
     notifier: postSaveNotifier,
     channelAutoStartSlackChannelIds: updatedChannelAutoStartSlackChannelIds,
+    managerSlackChannelId: updatedSettings.managerSlackChannelId,
     managerStatsSlackChannelId: updatedSettings.managerStatsSlackChannelId,
     suggesterSlackChannelId: updatedSettings.suggesterSlackChannelId,
     announcerSlackChannelId: updatedSettings.announcerSlackChannelId,
@@ -953,6 +954,13 @@ export async function updateBackgroundAgentSettingsCommand(
       slackChannelDisplayNames.channelAutoStartSlackChannels[row.channelId] =
         row.channelName;
     }
+  }
+  if (
+    !slackChannelDisplayNames.managerSlackChannel &&
+    managerChannelResult.channelName
+  ) {
+    slackChannelDisplayNames.managerSlackChannel =
+      managerChannelResult.channelName;
   }
   if (
     !slackChannelDisplayNames.managerStatsSlackChannel &&
