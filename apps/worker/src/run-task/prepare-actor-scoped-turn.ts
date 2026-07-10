@@ -2,34 +2,44 @@ import { sdk } from '@roomote/sdk/client';
 
 import { syncRuntimeGitAuthor } from '../lib/sync-runtime-git-author';
 import type { RefreshActorScopedMcpResult } from './actor-scoped-mcp-refresh';
+import type { ActorMismatchSkipNotifier } from './actor-mismatch-notice';
 
 /**
  * How to treat a turn whose sender does not match the server-authoritative
  * acting user (no trusted server-side writer switched the run to them):
  *
- * - `block`: refuse the turn. Used by sandbox RPC surfaces (sendPrompt,
- *   steerTask, answerUserInputRequest) where the API performs a trusted
- *   pre-delivery actor sync — a mismatch there means that sync did not
- *   happen, and the caller gets a retryable error.
- * - `follow-server`: run the turn as the server actor instead of the
- *   sender. Used for queued/polled deliveries (Slack/Teams/Telegram/Linear
- *   polls, snapshot-resume replays) where requeueing cannot converge — the
- *   server value only moves via trusted writes, so a blocked queue would
- *   stall until the message TTL expires. Credential resolution is always
- *   server-side, so this keeps the turn's attribution aligned with the
- *   credentials that actor-scoped routes will actually resolve.
+ * - `block`: refuse the turn and keep it pending. Used by sandbox RPC
+ *   surfaces (sendPrompt, steerTask, answerUserInputRequest) where the API
+ *   performs a trusted pre-delivery actor sync — a mismatch there means that
+ *   sync did not happen, and the caller gets a retryable error.
+ * - `skip`: drop that message's CONTENT and post a best-effort notice to the
+ *   task's chat thread asking the sender to resend. Used for queued/polled
+ *   deliveries (Slack/Teams/Telegram/Linear polls, snapshot-resume replays,
+ *   harness queued prompts) where blocking cannot converge: the server actor
+ *   only moves via trusted writes, so a blocked queue would stall until the
+ *   message TTL expires. Content is never executed under another identity's
+ *   credential resolution — relabeling the turn's attribution would not
+ *   change who authored the instructions, so a mismatched message must not
+ *   run at all. A resend re-enters the webhook's trusted pre-queue actor
+ *   sync for that sender and then delivers normally.
  */
-export type ActorMismatchPolicy = 'block' | 'follow-server';
+export type ActorMismatchPolicy = 'block' | 'skip';
 
 /**
- * Result of actor-scoped turn preparation. `false` means the turn must not
- * be delivered. Otherwise `effectiveUserId` is the identity the turn runs
- * as — always the server-authoritative acting user (which equals the
- * requested sender except under a `follow-server` mismatch).
+ * Result of actor-scoped turn preparation:
+ *
+ * - `false`: the turn must not be delivered now (kept pending / retried).
+ * - `{ skippedMismatch: true }`: the message's sender is not the server-side
+ *   acting user under the `skip` policy — the caller must DROP this
+ *   message's content (no requeue) and move on to the next one.
+ * - `{ effectiveUserId }`: deliver. The identity the turn runs as; for
+ *   non-empty senders this always equals both the requested sender and the
+ *   server-authoritative acting user (mismatches never deliver).
  */
 export type PrepareActorScopedTurnResult =
   | false
-  | { effectiveUserId: string | null };
+  | { skippedMismatch: true }
+  | { skippedMismatch?: false; effectiveUserId: string | null };
 
 interface PrepareActorScopedTurnOptions {
   cloudJobId?: number;
@@ -41,6 +51,8 @@ interface PrepareActorScopedTurnOptions {
   onMismatch?: ActorMismatchPolicy;
   getLastKnownActorUserId?: () => string | null;
   onActorSynced?: (userId: string | null) => void;
+  /** Best-effort user-facing notice when a mismatched message is skipped. */
+  notifyMismatchSkipped?: ActorMismatchSkipNotifier;
   logger: {
     info?: (...args: unknown[]) => void;
     warn?: (...args: unknown[]) => void;
@@ -62,6 +74,8 @@ interface SyncActorScopedTurnStateOptions {
   onMismatch?: ActorMismatchPolicy;
   getLastKnownActorUserId?: () => string | null;
   onActorSynced?: (userId: string | null) => void;
+  /** Best-effort user-facing notice when a mismatched message is skipped. */
+  notifyMismatchSkipped?: ActorMismatchSkipNotifier;
   logger: {
     warn?: (...args: unknown[]) => void;
     error: (...args: unknown[]) => void;
@@ -70,7 +84,8 @@ interface SyncActorScopedTurnStateOptions {
 
 type SyncActorScopedTurnStateResult =
   | { ok: false }
-  | { ok: true; effectiveUserId: string | null };
+  | { ok: true; skippedMismatch: true }
+  | { ok: true; skippedMismatch?: false; effectiveUserId: string | null };
 
 /**
  * Reconcile the worker's local actor state (git author, tracked actor) with
@@ -81,6 +96,12 @@ type SyncActorScopedTurnStateResult =
  * and follows it: when the server actor changed relative to the worker's
  * last-prepared one, the runtime git author is refreshed FROM the server
  * value, so commits after a trusted actor switch carry the new identity.
+ *
+ * Invariant enforced here: a message's content only ever runs when its
+ * sender IS the server-side acting user. A mismatch either blocks the turn
+ * (`block`) or drops that message's content with a user-facing notice
+ * (`skip`) — it never delivers one user's instructions under another user's
+ * credential resolution, no matter how the turn would be attributed.
  */
 export async function syncActorScopedTurnState({
   cloudJobId,
@@ -90,6 +111,7 @@ export async function syncActorScopedTurnState({
   onMismatch = 'block',
   getLastKnownActorUserId,
   onActorSynced,
+  notifyMismatchSkipped,
   logger,
 }: SyncActorScopedTurnStateOptions): Promise<SyncActorScopedTurnStateResult> {
   if (!cloudJobId || !targetUserId) {
@@ -121,42 +143,54 @@ export async function syncActorScopedTurnState({
     return { ok: false };
   }
 
-  if (outcome.result === 'mismatch' && onMismatch === 'block') {
-    logger.error(
-      `${logPrefix} Blocking turn for cloud job ${cloudJobId}: sender ${targetUserId} is not the server-side acting user (${outcome.actingUserId ?? 'none'}) and no trusted writer switched the run to them`,
+  if (outcome.result === 'mismatch') {
+    const serverActorUserId = outcome.actingUserId ?? null;
+
+    if (onMismatch === 'block') {
+      logger.error(
+        `${logPrefix} Blocking turn for cloud job ${cloudJobId}: sender ${targetUserId} is not the server-side acting user (${serverActorUserId ?? 'none'}) and no trusted writer switched the run to them`,
+      );
+      return { ok: false };
+    }
+
+    // `skip`: the sender's content must not run under the current actor's
+    // credentials, and attributing it to the server actor would not change
+    // who authored the instructions. Drop the content and tell the sender
+    // to resend (a resend re-enters the trusted pre-queue actor sync).
+    (logger.warn ?? logger.error)(
+      `${logPrefix} Skipping message content for cloud job ${cloudJobId}: sender ${targetUserId} is not the server-side acting user (${serverActorUserId ?? 'none'}); asking the sender to resend`,
     );
-    return { ok: false };
+    await notifyMismatchSkipped?.({
+      senderUserId: targetUserId,
+      serverActorUserId,
+    });
+
+    return { ok: true, skippedMismatch: true };
   }
 
-  // Server-authoritative identity the turn will run as. Under a
-  // follow-server mismatch this is the server actor, not the sender.
+  // `updated`/`unchanged` both mean the server actor IS the sender; the
+  // turn runs as that single identity.
   const effectiveUserId = outcome.actingUserId ?? null;
 
-  if (outcome.result === 'mismatch') {
-    (logger.warn ?? logger.error)(
-      `${logPrefix} Delivering turn for cloud job ${cloudJobId} as server actor ${effectiveUserId ?? 'none'} instead of sender ${targetUserId}: no trusted writer switched the run to the sender`,
-    );
-  }
-
-  const actorChanged =
-    outcome.result === 'updated' ||
-    (outcome.result === 'mismatch' && effectiveUserId !== lastKnownUserId);
-
-  if (actorChanged) {
+  if (outcome.result === 'updated') {
     try {
       await syncRuntimeGitAuthor({
         cloudJobId,
         workingDirectory,
       });
+      // Advance the last-prepared marker only once the author sync landed:
+      // on failure the next turn still reports the stale marker, gets
+      // `updated` again, and retries the sync. Until it succeeds, commits
+      // keep the previous actor's git identity and each turn logs one
+      // error — bounded, self-healing noise.
+      onActorSynced?.(effectiveUserId);
     } catch (error) {
       logger.error(
-        `${logPrefix} Failed to update git author for cloud job ${cloudJobId}: ${
+        `${logPrefix} Failed to update git author for cloud job ${cloudJobId} (will retry on the next turn): ${
           error instanceof Error ? error.message : String(error)
         }`,
       );
     }
-
-    onActorSynced?.(effectiveUserId);
   }
 
   return { ok: true, effectiveUserId };
@@ -172,6 +206,7 @@ export async function prepareActorScopedTurn({
   onMismatch = 'block',
   getLastKnownActorUserId,
   onActorSynced,
+  notifyMismatchSkipped,
   logger,
   refreshActorScopedIntegrations,
 }: PrepareActorScopedTurnOptions): Promise<PrepareActorScopedTurnResult> {
@@ -191,6 +226,7 @@ export async function prepareActorScopedTurn({
     onMismatch,
     getLastKnownActorUserId,
     onActorSynced,
+    notifyMismatchSkipped,
     logger,
   });
 
@@ -199,6 +235,12 @@ export async function prepareActorScopedTurn({
       `${logPrefix} Skipping actor-scoped MCP refresh because actor reconciliation blocked the turn for cloud job ${cloudJobId}`,
     );
     return false;
+  }
+
+  if (syncResult.skippedMismatch) {
+    // No turn will run for this message; leave local actor state and MCP
+    // mounts untouched.
+    return { skippedMismatch: true };
   }
 
   const { effectiveUserId } = syncResult;

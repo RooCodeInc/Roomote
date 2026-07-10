@@ -62,6 +62,7 @@ import {
 
 import { createHarness } from './create-harness';
 import { createActorScopedMcpRefresher } from './actor-scoped-mcp-refresh';
+import { createActorMismatchSkipNotifier } from './actor-mismatch-notice';
 import { buildSandboxInstruction } from './sandbox-instruction';
 import {
   buildMcpTaskEnv,
@@ -816,6 +817,10 @@ export const runTask = async ({
     const onActorSynced = (userId: string | null) => {
       lastPreparedActorUserId = userId;
     };
+    const notifyMismatchSkipped = createActorMismatchSkipNotifier({
+      cloudJobId: cloudJob.id,
+      logger,
+    });
 
     const prepareActorScopedTurn = async (
       targetUserId?: string,
@@ -836,6 +841,7 @@ export const runTask = async ({
         onMismatch: options?.onMismatch,
         getLastKnownActorUserId,
         onActorSynced,
+        notifyMismatchSkipped,
         logger,
         refreshActorScopedIntegrations,
       });
@@ -853,11 +859,13 @@ export const runTask = async ({
         workingDirectory: workspacePath,
         logPrefix: '[runTask]',
         // Queued prompts were accepted through a trusted surface earlier;
-        // if another sender has since taken over the run, deliver under the
-        // server actor rather than stalling the queue forever.
-        onMismatch: 'follow-server',
+        // if another sender has since taken over the run, this prompt's
+        // content must not run under the new actor's credentials. Skip it
+        // (with a resend notice) rather than stalling the queue forever.
+        onMismatch: 'skip',
         getLastKnownActorUserId,
         onActorSynced,
+        notifyMismatchSkipped,
         logger,
       });
 
@@ -867,6 +875,15 @@ export const runTask = async ({
           shouldBlockPrompt: true,
           reason:
             'actor-scoped turn delivery is blocked until actingUserId can be synchronized',
+        };
+      }
+
+      if (syncResult.skippedMismatch) {
+        return {
+          shouldReconnect: false,
+          shouldSkipPrompt: true,
+          reason:
+            'queued prompt sender is not the server-side acting user; the prompt was skipped',
         };
       }
 
@@ -1156,7 +1173,7 @@ export const runTask = async ({
       userId?: string;
     }) => {
       const deferredPromptPrep = await prepareActorScopedTurn(options.userId, {
-        onMismatch: 'follow-server',
+        onMismatch: 'skip',
       });
 
       if (deferredPromptPrep === false) {
@@ -1164,6 +1181,19 @@ export const runTask = async ({
           `[runTask] Deferred resume prompt blocked for cloud job ${cloudJob.id}; keeping it queued for retry`,
         );
         scheduleDeferredResumePromptRetry(options);
+        return false;
+      }
+
+      if (deferredPromptPrep.skippedMismatch) {
+        // The resume prompt's sender is no longer the run's acting user (a
+        // trusted write switched the actor after the resume was enqueued).
+        // Retrying cannot converge, so drop the prompt; the sender was asked
+        // to resend via the mismatch notice.
+        clearDeferredResumePromptRetryTimer();
+        await updateDeferredResumePromptResult({ accepted: false });
+        logger.warn(
+          `[runTask] Deferred resume prompt skipped for cloud job ${cloudJob.id}: sender is not the server-side acting user`,
+        );
         return false;
       }
 
@@ -1242,8 +1272,9 @@ export const runTask = async ({
             pollingState.isConnected === false ||
             pollingState.phase === 'waiting_for_prompt',
           // Replayed queue entries have no trusted per-message actor write;
-          // deliver under the server actor rather than stalling the replay.
-          onMismatch: 'follow-server',
+          // a mismatched sender's content is skipped (with a resend notice)
+          // rather than run under the server actor or stalling the replay.
+          onMismatch: 'skip',
         });
 
         if (turnPrep === false) {
@@ -1253,6 +1284,11 @@ export const runTask = async ({
             `[runTask] Requeued ${remainingQueueOrder.length} embedded Slack resume message(s) for cloud job ${cloudJob.id} because actor-scoped turn preparation is blocked`,
           );
           return;
+        }
+
+        if (turnPrep.skippedMismatch) {
+          index += 1;
+          continue;
         }
 
         const prompt =
@@ -1332,8 +1368,9 @@ export const runTask = async ({
             pollingState.isConnected === false ||
             pollingState.phase === 'waiting_for_prompt',
           // Replayed queue entries have no trusted per-message actor write;
-          // deliver under the server actor rather than stalling the replay.
-          onMismatch: 'follow-server',
+          // a mismatched sender's content is skipped (with a resend notice)
+          // rather than run under the server actor or stalling the replay.
+          onMismatch: 'skip',
         });
 
         if (turnPrep === false) {
@@ -1345,6 +1382,11 @@ export const runTask = async ({
             `[runTask] Requeued ${remainingQueueOrder.length} embedded communication resume message(s) for cloud job ${cloudJob.id} because actor-scoped turn preparation is blocked`,
           );
           return;
+        }
+
+        if (turnPrep.skippedMismatch) {
+          index += 1;
+          continue;
         }
 
         const prompt =
@@ -1417,8 +1459,9 @@ export const runTask = async ({
             pollingState.isConnected === false ||
             pollingState.phase === 'waiting_for_prompt',
           // Replayed queue entries have no trusted per-message actor write;
-          // deliver under the server actor rather than stalling the replay.
-          onMismatch: 'follow-server',
+          // a mismatched sender's content is skipped (with a resend notice)
+          // rather than run under the server actor or stalling the replay.
+          onMismatch: 'skip',
         });
 
         if (turnPrep === false) {
@@ -1428,6 +1471,10 @@ export const runTask = async ({
             `[runTask] Requeued ${remainingMessages.length} embedded Linear resume message(s) for cloud job ${cloudJob.id} because actor-scoped turn preparation is blocked`,
           );
           return;
+        }
+
+        if (turnPrep.skippedMismatch) {
+          continue;
         }
 
         const sent = sendPrompt({

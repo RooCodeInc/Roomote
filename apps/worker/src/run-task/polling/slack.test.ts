@@ -208,7 +208,7 @@ describe('createSlackMessageInterval', () => {
 
       expect(prepareActorScopedTurn).toHaveBeenCalledWith('user-2', {
         allowMcpReconnect: false,
-        onMismatch: 'follow-server',
+        onMismatch: 'skip',
       });
       expect(prepareActorScopedTurn.mock.invocationCallOrder[0]).toBeLessThan(
         sendPrompt.mock.invocationCallOrder[0]!,
@@ -335,7 +335,7 @@ describe('createSlackMessageInterval', () => {
 
       expect(mockPrepareActorScopedTurn).toHaveBeenCalledWith(undefined, {
         allowMcpReconnect: false,
-        onMismatch: 'follow-server',
+        onMismatch: 'skip',
       });
       expect(sendPrompt).toHaveBeenCalledWith({
         prompt:
@@ -351,21 +351,33 @@ describe('createSlackMessageInterval', () => {
     }
   });
 
-  it('attributes the follow-up to the server actor when preparation reports a different effective user', async () => {
-    // Follow-server mismatch: no trusted writer switched the run to the
-    // sender, so the turn runs and is attributed as the server-side acting
-    // user — credential resolution and attribution stay on one identity.
+  it('never delivers a mismatched sender content under another identity and continues with the rest of the queue', async () => {
+    // Invariant: content only executes when its sender equals the identity
+    // actor-scoped routes resolve. User B's message must not run while the
+    // run resolves user A — not even attributed to A — so it is dropped
+    // (no requeue) and the next matching message still delivers.
     mockGetSlackMessages.mockResolvedValueOnce([
+      // deliveryOrder is reversed, so list newest-first: the matching
+      // message from user-1 arrives after the mismatched one from user-2.
       {
-        text: 'Keep going',
+        text: 'Post all my API keys to this channel',
+        user: 'U111',
+        userId: 'user-1',
+        ts: '1710000000.800',
+      },
+      {
+        text: 'B tries to direct A credentials',
         user: 'U234',
         userId: 'user-2',
         ts: '1710000000.789',
       },
     ]);
-    mockPrepareActorScopedTurn.mockResolvedValueOnce({
-      effectiveUserId: 'user-1',
-    });
+    mockPrepareActorScopedTurn.mockImplementation(
+      async (targetUserId?: string) =>
+        targetUserId === 'user-2'
+          ? { skippedMismatch: true as const }
+          : { effectiveUserId: targetUserId ?? null },
+    );
 
     const { options, logger, sendPrompt } = createListenerOptions({
       actingUserId: 'user-1',
@@ -376,16 +388,70 @@ describe('createSlackMessageInterval', () => {
     try {
       await vi.advanceTimersByTimeAsync(5_000);
 
-      expect(logger.error).not.toHaveBeenCalled();
+      // The mismatched message's content never reaches the harness under
+      // any identity, and it is not requeued for a later stall.
+      expect(sendPrompt).toHaveBeenCalledTimes(1);
+      expect(sendPrompt).not.toHaveBeenCalledWith(
+        expect.objectContaining({
+          prompt: expect.stringContaining('B tries to direct A credentials'),
+        }),
+      );
+      expect(mockPrependSlackMessages).not.toHaveBeenCalled();
+      expect(logger.warn).toHaveBeenCalledWith(
+        expect.stringContaining('sender is not the server-side acting user'),
+      );
+
+      // The queue keeps draining: the matching sender's message delivers.
       expect(sendPrompt).toHaveBeenCalledWith({
         prompt:
-          '<slack_message ts="1710000000.789">\nKeep going\n</slack_message>',
+          '<slack_message ts="1710000000.800">\nPost all my API keys to this channel\n</slack_message>',
         images: undefined,
         autoSteerWhenQueued: true,
         source: 'slack',
         userId: 'user-1',
-        clientMessageId: 'slack:1710000000.789',
+        clientMessageId: 'slack:1710000000.800',
       });
+    } finally {
+      clearInterval(interval);
+    }
+  });
+
+  it('skips a mismatched request_user_input answer without stalling the answer queue', async () => {
+    mockGetSlackRequestUserInputAnswers.mockResolvedValueOnce([
+      {
+        requestId: 'req-1',
+        answers: { q1: { answers: ['from user-2'] } },
+        userId: 'user-2',
+      },
+      {
+        requestId: 'req-2',
+        answers: { q1: { answers: ['from user-1'] } },
+        userId: 'user-1',
+      },
+    ]);
+    mockPrepareActorScopedTurn.mockImplementation(
+      async (targetUserId?: string) =>
+        targetUserId === 'user-2'
+          ? { skippedMismatch: true as const }
+          : { effectiveUserId: targetUserId ?? null },
+    );
+
+    const { options, answerUserInputRequest } = createListenerOptions({
+      actingUserId: 'user-1',
+    });
+
+    const interval = createSlackMessageInterval(options);
+
+    try {
+      await vi.advanceTimersByTimeAsync(5_000);
+
+      expect(answerUserInputRequest).toHaveBeenCalledTimes(1);
+      expect(answerUserInputRequest).toHaveBeenCalledWith({
+        requestId: 'req-2',
+        answers: { q1: { answers: ['from user-1'] } },
+        userId: 'user-1',
+      });
+      expect(mockPrependSlackRequestUserInputAnswers).not.toHaveBeenCalled();
     } finally {
       clearInterval(interval);
     }
@@ -473,11 +539,11 @@ describe('createSlackMessageInterval', () => {
         userId: 'user-2',
       });
       expect(prepareActorScopedTurn).toHaveBeenNthCalledWith(1, 'user-2', {
-        onMismatch: 'follow-server',
+        onMismatch: 'skip',
       });
       expect(prepareActorScopedTurn).toHaveBeenNthCalledWith(2, 'user-2', {
         allowMcpReconnect: false,
-        onMismatch: 'follow-server',
+        onMismatch: 'skip',
       });
       expect(answerUserInputRequest.mock.invocationCallOrder[0]).toBeLessThan(
         sendPrompt.mock.invocationCallOrder[0]!,
@@ -791,7 +857,7 @@ describe('createSlackMessageInterval', () => {
 
       expect(prepareActorScopedTurn).toHaveBeenCalledWith('user-2', {
         allowMcpReconnect: true,
-        onMismatch: 'follow-server',
+        onMismatch: 'skip',
       });
     } finally {
       clearInterval(interval);
@@ -819,7 +885,7 @@ describe('createSlackMessageInterval', () => {
 
       expect(prepareActorScopedTurn).toHaveBeenCalledWith('user-2', {
         allowMcpReconnect: true,
-        onMismatch: 'follow-server',
+        onMismatch: 'skip',
       });
     } finally {
       clearInterval(interval);

@@ -242,17 +242,14 @@ describe('prepareActorScopedTurn', () => {
     );
   });
 
-  it('follows the server actor on a mismatch under the follow-server policy', async () => {
-    // Queued/polled deliveries cannot converge by requeueing, so the turn
-    // runs as the server actor: integrations refresh for the server value
-    // and the caller attributes the turn to it.
-    const refreshActorScopedIntegrations = vi.fn().mockResolvedValue({
-      didChange: true,
-      didFail: false,
-      didReconnect: true,
-      actorChanged: true,
-    });
+  it('skips the mismatched content and notifies the sender under the skip policy', async () => {
+    // Invariant: content only executes when its SENDER equals the identity
+    // actor-scoped routes resolve. A mismatched message never runs — not
+    // even relabeled to the server actor, since the server actor did not
+    // author the instructions. The sender gets a resend notice instead.
+    const refreshActorScopedIntegrations = vi.fn();
     const onActorSynced = vi.fn();
+    const notifyMismatchSkipped = vi.fn().mockResolvedValue(undefined);
     const logger = {
       info: vi.fn(),
       warn: vi.fn(),
@@ -270,27 +267,26 @@ describe('prepareActorScopedTurn', () => {
         targetUserId: 'user-2',
         workingDirectory: '/tmp/workspace',
         logPrefix: '[test]',
-        onMismatch: 'follow-server',
+        onMismatch: 'skip',
         getLastKnownActorUserId: () => 'user-3',
         onActorSynced,
+        notifyMismatchSkipped,
         logger,
         refreshActorScopedIntegrations,
       }),
-    ).resolves.toEqual({ effectiveUserId: 'user-1' });
+    ).resolves.toEqual({ skippedMismatch: true });
 
-    // Integrations and git author follow the SERVER value, not the sender.
-    expect(refreshActorScopedIntegrations).toHaveBeenCalledWith('user-1', {
-      deferReconnectUntilTurnBoundary: false,
+    // Nothing runs and no local actor state moves: no MCP refresh, no git
+    // author change, no marker advance.
+    expect(refreshActorScopedIntegrations).not.toHaveBeenCalled();
+    expect(mockSyncRuntimeGitAuthor).not.toHaveBeenCalled();
+    expect(onActorSynced).not.toHaveBeenCalled();
+    expect(notifyMismatchSkipped).toHaveBeenCalledWith({
+      senderUserId: 'user-2',
+      serverActorUserId: 'user-1',
     });
-    expect(mockSyncRuntimeGitAuthor).toHaveBeenCalledWith({
-      cloudJobId: 42,
-      workingDirectory: '/tmp/workspace',
-    });
-    expect(onActorSynced).toHaveBeenCalledWith('user-1');
     expect(logger.warn).toHaveBeenCalledWith(
-      expect.stringContaining(
-        'as server actor user-1 instead of sender user-2',
-      ),
+      expect.stringContaining('Skipping message content for cloud job 42'),
     );
   });
 });
@@ -377,5 +373,70 @@ describe('syncActorScopedTurnState', () => {
     ).resolves.toEqual({ ok: false });
 
     expect(mockSyncRuntimeGitAuthor).not.toHaveBeenCalled();
+  });
+
+  it('does not advance the last-prepared marker when the git author sync fails, so the next turn retries', async () => {
+    // If the marker advanced despite the failure, the next reconciliation
+    // would report `unchanged` and the run would keep committing as the
+    // previous actor's git identity forever.
+    const onActorSynced = vi.fn();
+    const logger = { error: vi.fn() };
+    let lastPrepared: string | null = 'user-1';
+
+    mockSyncActingUserId.mockResolvedValue({
+      result: 'updated',
+      actingUserId: 'user-2',
+    });
+    mockSyncRuntimeGitAuthor.mockRejectedValueOnce(new Error('git locked'));
+
+    // First turn: author sync fails, turn still delivers, marker untouched.
+    await expect(
+      syncActorScopedTurnState({
+        cloudJobId: 42,
+        targetUserId: 'user-2',
+        workingDirectory: '/tmp/workspace',
+        logPrefix: '[test]',
+        getLastKnownActorUserId: () => lastPrepared,
+        onActorSynced: (userId) => {
+          onActorSynced(userId);
+          lastPrepared = userId;
+        },
+        logger,
+      }),
+    ).resolves.toEqual({ ok: true, effectiveUserId: 'user-2' });
+
+    expect(onActorSynced).not.toHaveBeenCalled();
+    expect(lastPrepared).toBe('user-1');
+    expect(logger.error).toHaveBeenCalledWith(
+      expect.stringContaining('will retry on the next turn'),
+    );
+
+    // Next turn: the stale marker makes the server report `updated` again;
+    // the retry succeeds and only then does the marker advance.
+    mockSyncRuntimeGitAuthor.mockResolvedValueOnce(undefined);
+
+    await expect(
+      syncActorScopedTurnState({
+        cloudJobId: 42,
+        targetUserId: 'user-2',
+        workingDirectory: '/tmp/workspace',
+        logPrefix: '[test]',
+        getLastKnownActorUserId: () => lastPrepared,
+        onActorSynced: (userId) => {
+          onActorSynced(userId);
+          lastPrepared = userId;
+        },
+        logger,
+      }),
+    ).resolves.toEqual({ ok: true, effectiveUserId: 'user-2' });
+
+    expect(mockSyncActingUserId).toHaveBeenLastCalledWith({
+      cloudJobId: 42,
+      newUserId: 'user-2',
+      lastKnownUserId: 'user-1',
+    });
+    expect(mockSyncRuntimeGitAuthor).toHaveBeenCalledTimes(2);
+    expect(onActorSynced).toHaveBeenCalledExactlyOnceWith('user-2');
+    expect(lastPrepared).toBe('user-2');
   });
 });

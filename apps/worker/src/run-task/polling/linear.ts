@@ -72,10 +72,11 @@ export function createLinearMessageInterval({
         );
 
         for (const [index, answer] of queuedAnswers.entries()) {
-          // Polled answers have no trusted per-message actor write; deliver
-          // under the server actor rather than stalling the queue.
+          // Polled answers have no trusted per-message actor write; a
+          // mismatched sender's answer is skipped (with a resend notice)
+          // rather than run under the server actor or stalling the queue.
           const answerPrep = await prepareActorScopedTurn(answer.userId, {
-            onMismatch: 'follow-server',
+            onMismatch: 'skip',
           });
 
           if (answerPrep === false) {
@@ -100,10 +101,17 @@ export function createLinearMessageInterval({
             return;
           }
 
+          if (answerPrep.skippedMismatch) {
+            logger.warn(
+              `[listenForLinearEvents] Skipped request_user_input answer for task ${state.sessionId}: sender is not the server-side acting user (requestId=${answer.requestId})`,
+            );
+            continue;
+          }
+
           const sent = answerUserInputRequest({
             requestId: answer.requestId,
             answers: answer.answers,
-            // Attribute the turn to the identity actor-scoped routes resolve.
+            // The delivered sender always equals the server-side acting user.
             userId: answerPrep.effectiveUserId ?? undefined,
           });
 
@@ -175,11 +183,12 @@ export function createLinearMessageInterval({
             state.isConnected === false;
 
           // The API performs a trusted pre-queue actor sync for these
-          // messages; a residual mismatch delivers under the server actor
-          // rather than stalling the queue.
+          // messages; a residual mismatch skips that message's content (with
+          // a resend notice) rather than running it under the server actor
+          // or stalling the queue.
           const msgPrep = await prepareActorScopedTurn(msg.userId, {
             allowMcpReconnect,
-            onMismatch: 'follow-server',
+            onMismatch: 'skip',
           });
 
           if (msgPrep === false) {
@@ -200,6 +209,13 @@ export function createLinearMessageInterval({
             break;
           }
 
+          if (msgPrep.skippedMismatch) {
+            logger.warn(
+              `[listenForLinearEvents] Skipped Linear follow-up for task ${state.sessionId}: sender is not the server-side acting user`,
+            );
+            continue;
+          }
+
           const sent = sendPrompt({
             prompt: text,
             source: 'linear',
@@ -207,7 +223,7 @@ export function createLinearMessageInterval({
             // the loop can pick them up, abort-and-replay when the turn is
             // blocked on a pending question tool call.
             autoSteerWhenQueued: true,
-            // Attribute the turn to the identity actor-scoped routes resolve.
+            // The delivered sender always equals the server-side acting user.
             userId: msgPrep.effectiveUserId ?? undefined,
           });
 

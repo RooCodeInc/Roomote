@@ -243,11 +243,11 @@ describe('createLinearMessageInterval', () => {
         userId: 'user-2',
       });
       expect(prepareActorScopedTurn).toHaveBeenNthCalledWith(1, 'user-2', {
-        onMismatch: 'follow-server',
+        onMismatch: 'skip',
       });
       expect(prepareActorScopedTurn).toHaveBeenNthCalledWith(2, 'user-2', {
         allowMcpReconnect: false,
-        onMismatch: 'follow-server',
+        onMismatch: 'skip',
       });
       expect(answerUserInputRequest.mock.invocationCallOrder[0]).toBeLessThan(
         sendPrompt.mock.invocationCallOrder[0]!,
@@ -357,7 +357,7 @@ describe('createLinearMessageInterval', () => {
         ],
       );
       expect(mockPrepareActorScopedTurn).toHaveBeenCalledWith('user-2', {
-        onMismatch: 'follow-server',
+        onMismatch: 'skip',
       });
       expect(mockGetLinearMessages).not.toHaveBeenCalled();
     } finally {
@@ -616,7 +616,7 @@ describe('createLinearMessageInterval', () => {
 
       expect(prepareActorScopedTurn).toHaveBeenCalledWith('user-2', {
         allowMcpReconnect: true,
-        onMismatch: 'follow-server',
+        onMismatch: 'skip',
       });
     } finally {
       clearInterval(interval);
@@ -674,7 +674,7 @@ describe('createLinearMessageInterval', () => {
 
       expect(prepareActorScopedTurn).toHaveBeenCalledWith('user-2', {
         allowMcpReconnect: true,
-        onMismatch: 'follow-server',
+        onMismatch: 'skip',
       });
     } finally {
       clearInterval(interval);

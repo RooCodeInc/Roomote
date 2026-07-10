@@ -89,6 +89,7 @@ interface OpenCodeServerHarnessOptions {
   beforeQueuedPrompt?: (input: { userId?: string }) => Promise<void | {
     shouldReconnect: boolean;
     shouldBlockPrompt?: boolean;
+    shouldSkipPrompt?: boolean;
     reason?: string;
   }>;
 }
@@ -3897,6 +3898,19 @@ export class OpenCodeServerHarness
 
     if (!result) {
       return true;
+    }
+
+    if (result.shouldSkipPrompt) {
+      // The prompt's sender is not the run's server-side acting user, so its
+      // content must not run. Drop it (no restore) and keep draining the
+      // rest of the queue; the sender was asked to resend.
+      this.logger.warn(
+        `OpenCode queued prompt skipped before delivery reason=${
+          result.reason ?? 'unknown'
+        }`,
+      );
+      this.scheduleQueuedPromptRetry();
+      return false;
     }
 
     if (result.shouldBlockPrompt) {
