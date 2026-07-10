@@ -135,7 +135,7 @@ describe('bootstrapGeneratedAuthKeypairs', () => {
   afterAll(cleanup);
 
   it('is a no-op in production without ROOMOTE_AUTO_GENERATE_KEYS', async () => {
-    const processEnv: NodeJS.ProcessEnv = { APP_ENV: 'production' };
+    const processEnv: NodeJS.ProcessEnv = { R_APP_ENV: 'production' };
 
     await expect(bootstrapGeneratedAuthKeypairs({ processEnv })).resolves.toBe(
       false,
@@ -150,7 +150,7 @@ describe('bootstrapGeneratedAuthKeypairs', () => {
   });
 
   it('auto-generates in development without the explicit flag', async () => {
-    const processEnv: NodeJS.ProcessEnv = { APP_ENV: 'development' };
+    const processEnv: NodeJS.ProcessEnv = { R_APP_ENV: 'development' };
 
     await expect(bootstrapGeneratedAuthKeypairs({ processEnv })).resolves.toBe(
       true,
