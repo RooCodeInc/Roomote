@@ -69,7 +69,7 @@ x-roomote-shared-env: &roomote-shared-env
 
 services:
   postgres:
-    image: postgres:17.5
+    image: postgres:17.5@sha256:aadf2c0696f5ef357aa7a68da995137f0cf17bad0bf6e1f17de06ae5c769b302
     restart: unless-stopped
     volumes:
       - pg_data:/var/lib/postgresql/data
@@ -85,7 +85,7 @@ services:
       start_period: 30s
 
   redis:
-    image: redis:7-alpine
+    image: redis:7-alpine@sha256:6ab0b6e7381779332f97b8ca76193e45b0756f38d4c0dcda72dbb3c32061ab99
     restart: unless-stopped
     volumes:
       - redis_data:/data
@@ -97,7 +97,7 @@ services:
       retries: 12
 
   minio:
-    image: minio/minio:latest
+    image: minio/minio:RELEASE.2025-09-07T16-13-09Z@sha256:14cea493d9a34af32f524e538b8346cf79f3321eff8e708c1e2960462bd8936e
     restart: unless-stopped
     command: server /data --console-address ':9001'
     volumes:
@@ -238,6 +238,16 @@ services:
       # roomote_worker network is not wired up here until that is verified
       # against a live Coolify deployment.
       DOCKER_WORKER_NETWORK: roomote_default
+    healthcheck:
+      test:
+        [
+          'CMD-SHELL',
+          'curl -fsS --max-time 5 http://api:3001/health/controller >/dev/null',
+        ]
+      interval: 5s
+      timeout: 6s
+      retries: 12
+      start_period: 20s
 
   bullmq:
     image: *roomote-app-image
@@ -251,6 +261,16 @@ services:
     environment:
       <<: *roomote-shared-env
       PORT: 3002
+    healthcheck:
+      test:
+        [
+          'CMD-SHELL',
+          'curl -fsS --max-time 5 http://127.0.0.1:3002/admin/health >/dev/null',
+        ]
+      interval: 5s
+      timeout: 6s
+      retries: 12
+      start_period: 20s
 
   # Optional. Uncomment only when enabling live previews with a wildcard
   # domain routed to this service; everything else works without it. See

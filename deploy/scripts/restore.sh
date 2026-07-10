@@ -89,8 +89,8 @@ cd /opt/roomote
 # Quiesce the app services so live connections are not killed mid-restore and
 # nothing writes to the database while the dump loads.
 docker compose --env-file .env -f docker-compose.prod.yml stop web api controller bullmq preview-proxy
-docker run --rm --network roomote_default --env-file /opt/roomote/.env postgres:17.5 sh -c 'psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -c "DROP SCHEMA IF EXISTS public CASCADE; CREATE SCHEMA public;"'
-docker run --rm --network roomote_default --env-file /opt/roomote/.env -i postgres:17.5 sh -c 'psql "$DATABASE_URL" -v ON_ERROR_STOP=1' < "$ROOMOTE_RESTORE_BACKUP"
+docker run --rm --network roomote_default --env-file /opt/roomote/.env postgres:17.5@sha256:aadf2c0696f5ef357aa7a68da995137f0cf17bad0bf6e1f17de06ae5c769b302 sh -c 'psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -c "DROP SCHEMA IF EXISTS public CASCADE; CREATE SCHEMA public;"'
+docker run --rm --network roomote_default --env-file /opt/roomote/.env -i postgres:17.5@sha256:aadf2c0696f5ef357aa7a68da995137f0cf17bad0bf6e1f17de06ae5c769b302 sh -c 'psql "$DATABASE_URL" -v ON_ERROR_STOP=1' < "$ROOMOTE_RESTORE_BACKUP"
 docker compose --env-file .env -f docker-compose.prod.yml up -d --wait --wait-timeout 600
 REMOTE
 
