@@ -1,0 +1,46 @@
+---
+title: Zero
+description: Discover and pay for external capabilities with the user's Zero wallet.
+icon: plug
+---
+
+Connect Zero when agents need capabilities outside their native tools — image
+generation, transcription, real-world data lookups, and other paid APIs — using
+each user's own Zero wallet (Path C).
+
+## When to use it
+
+- give agents a free capability search path when they hit something they cannot
+  do natively
+- let users pay for external capabilities from their own Zero wallet
+- keep wallet custody and funding on the Zero side instead of Roomote billing
+
+## How setup works
+
+1. An admin enables Zero from **Settings > Integrations**.
+2. Each user connects their own Zero account via OAuth from the same page or from
+   [Personal Settings](/personal-settings).
+
+Roomote's agent runtime also preinstalls the `zero` CLI. After a user links
+Zero, agents can authenticate through the MCP connector and run the
+capability loop with shell commands.
+
+## What to expect
+
+- **Search is free.** Agents can discover services without spending.
+- **Paid fetches use the user wallet.** Roomote does not front a shared
+  platform wallet for Zero Path C.
+- **CLI-first loop.** Preferred commands are `zero search`, `zero get`,
+  `zero fetch`, and `zero review`. Treat `--max-pay` as required for unfamiliar
+  paid calls.
+- **Auth and funding helpers.** The Zero MCP connection is for authentication
+  and funding; the CLI owns discovery and paid calls.
+
+## Practical tips
+
+- Connect Zero on a personal account used for agent work, then fund the wallet
+  from the Zero profile page when a call needs balance.
+- Ask Roomote to search Zero for a concrete capability before expecting a paid
+  fetch.
+- Review spend and balances in Zero's own product surfaces; Roomote does not
+  meter Zero spend into product billing.

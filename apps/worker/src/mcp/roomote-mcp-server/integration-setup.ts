@@ -127,6 +127,14 @@ Supermemory uses OAuth:
 
 Once connected, I can save shared memories and recall relevant context from earlier tasks using the workspace's connected Supermemory account. Memories are stored in that Supermemory account, so anything I save is visible to everyone in the workspace.
 
+# Zero
+
+Zero uses Path C (CLI in the runtime, users connect their own Zero wallets):
+1. A deployment operator enables Zero from Settings > Integrations.
+2. Each user connects their own Zero account via OAuth.
+
+The zero CLI is preinstalled in the agent runtime so I can search, inspect, call, and review capabilities with shell commands. The Zero MCP connection is for authentication and funding. Capability spend comes from the user's Zero wallet, not a Roomote-managed wallet.
+
 # Unsupported Built-in Integrations And Feature Requests
 
 If a user asks about a service that is not a built-in Roomote integration today (for example Datadog), say that it is not supported as a built-in right now.

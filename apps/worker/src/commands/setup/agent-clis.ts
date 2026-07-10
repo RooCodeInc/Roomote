@@ -12,12 +12,17 @@ import { resolveNpmInstallCommand } from './npm-install-command';
 import {
   getSharedSandboxRuntimePackageSpecs,
   resolveExpectedOpenCodeCliVersion,
+  resolveExpectedZeroCliVersion,
   usesSharedSandboxRuntimePackages,
+  ZERO_CLI_PACKAGE_NAME,
 } from './shared-runtime-packages';
 export {
   DEFAULT_OPENCODE_CLI_VERSION,
+  DEFAULT_ZERO_CLI_VERSION,
   ROOMOTE_BAKED_OPENCODE_CLI_VERSION_ENV,
+  ROOMOTE_BAKED_ZERO_CLI_VERSION_ENV,
   ROOMOTE_OPENCODE_CLI_VERSION_ENV,
+  ROOMOTE_ZERO_CLI_VERSION_ENV,
 } from './shared-runtime-packages';
 
 type Installer = {
@@ -36,6 +41,13 @@ function getInstallers(env: NodeJS.ProcessEnv = process.env): Installer[] {
       label: 'OpenCode CLI',
       installMethod: 'npm',
       packageName: 'opencode-ai',
+    },
+    {
+      command: 'zero',
+      expectedVersion: resolveExpectedZeroCliVersion(env),
+      label: 'Zero CLI',
+      installMethod: 'npm',
+      packageName: ZERO_CLI_PACKAGE_NAME,
     },
   ];
 }

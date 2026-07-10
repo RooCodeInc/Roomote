@@ -1,4 +1,7 @@
-import { DEFAULT_OPENCODE_CLI_VERSION } from '../agent-clis';
+import {
+  DEFAULT_OPENCODE_CLI_VERSION,
+  DEFAULT_ZERO_CLI_VERSION,
+} from '../agent-clis';
 import {
   getNodePtyInstallPackageSpecs,
   resolveNodePtyInstallRoot,
@@ -41,7 +44,11 @@ describe('resolveNodePtyInstallRoot', () => {
         workspaceReposDir: '/sandbox/repos',
         vscodeUserDataDir: '/sandbox/.vscode',
       }),
-    ).toEqual([`opencode-ai@${DEFAULT_OPENCODE_CLI_VERSION}`, 'node-pty']);
+    ).toEqual([
+      `opencode-ai@${DEFAULT_OPENCODE_CLI_VERSION}`,
+      'node-pty',
+      `@zeroxyz/cli@${DEFAULT_ZERO_CLI_VERSION}`,
+    ]);
   });
 
   it('installs only node-pty in local runtime', () => {

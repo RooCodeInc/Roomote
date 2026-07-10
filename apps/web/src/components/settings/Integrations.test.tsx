@@ -458,6 +458,7 @@ describe('Integrations settings', () => {
       'Supabase',
       'Supermemory',
       'Vercel',
+      'Zero',
     ]);
     expect(
       screen.getAllByText('First-class integration').length,

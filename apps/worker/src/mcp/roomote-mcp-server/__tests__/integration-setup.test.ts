@@ -63,4 +63,14 @@ describe('integration setup guide', () => {
       'anything I save is visible to everyone in the workspace.',
     );
   });
+
+  it('documents the user-scoped Zero Path C setup flow', () => {
+    expect(INTEGRATION_SETUP_CONTENT).toContain('# Zero');
+    expect(INTEGRATION_SETUP_CONTENT).toContain(
+      'Each user connects their own Zero account via OAuth.',
+    );
+    expect(INTEGRATION_SETUP_CONTENT).toContain(
+      'The zero CLI is preinstalled in the agent runtime',
+    );
+  });
 });
