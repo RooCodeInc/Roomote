@@ -1,7 +1,7 @@
 ---
 title: Cloud Job Execution Architecture
 status: active
-last_reviewed: 2026-07-03
+last_reviewed: 2026-07-09
 owner: engineering
 summary: Cloud job execution system covering direct cloud-job submission, controller dispatch, worker runtime, sandbox OIDC refresh, snapshots, and completion.
 ---
@@ -383,7 +383,7 @@ Harnesses:
   are persisted as Roomote runtime subagent-start tool calls. The harness arms
   a per-spawn subagent watchdog (keyed to the child session id from the task
   tool part metadata, `sessionId` or `jobId`) with two deadlines: a total run
-  timeout (default 12 minutes, `ROOMOTE_SUBAGENT_TASK_TIMEOUT_MS`) and a
+  timeout (default 30 minutes, `ROOMOTE_SUBAGENT_TASK_TIMEOUT_MS`) and a
   sliding inactivity deadline (default 3 minutes,
   `ROOMOTE_SUBAGENT_TASK_INACTIVITY_TIMEOUT_MS`) refreshed by every
   child-session event (streamed text, tool state, message completion). The
@@ -398,7 +398,13 @@ Harnesses:
   child that goes silent between tools past the inactivity window — or any
   spawn that exceeds the total timeout — has its child sessions aborted so the
   parent turn continues with the aborted task result instead of hanging; a
-  terminal tool status normally disarms the watchdog. Background launches
+  terminal tool status, or a child `session.error` (the abort surfaces as a
+  MessageAbortedError attributed to the child), disarms the watchdog. Expiry
+  aborts the watchdog's own captured child session; when the child session id
+  was never captured it falls back to listing the parent's children, but skips
+  any child still owned by another live watchdog so a stale watchdog cannot
+  take down a healthy concurrent sibling (all subagents of one turn share the
+  parent session). Background launches
   (`background: true` in the task tool input or background metadata) complete
   the parent tool part instantly while the child session keeps working, so a
   completed background part keeps the watchdog armed; the watchdog disarms
@@ -451,7 +457,13 @@ Persistence model:
   tasks, the harness evaluates the generated stop hook before completion; when
   a terminal Slack-visible closeout is missing, it sends the hook reminder back
   as a hidden queued prompt and withholds `TaskCompleted` until the closeout is
-  satisfied or the guard reaches its retry cap.
+  satisfied or the guard reaches its retry cap. Because that reminder awaits a
+  fresh turn to re-evaluate, a fail-safe deadline (default 10 minutes,
+  `ROOMOTE_STOP_HOOK_REMINDER_STALL_TIMEOUT_MS`) guards against a session that
+  wedges and never produces the follow-up turn: on expiry it force-completes
+  the turn (emits `TaskCompleted`) so the job reaches a terminal state instead
+  of hanging `running` while the sandbox keeps heart-beating. Any normal turn
+  re-entry or teardown disarms it first, so it only fires on genuine silence.
 - Worker startup log UIs rely on provider-side command output streaming when the compute provider supports it. The worker no longer mirrors harness logs into `cloud_jobs.log`.
 
 ### Harness Transport Boundary
