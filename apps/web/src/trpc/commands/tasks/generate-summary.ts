@@ -293,7 +293,6 @@ export async function generateTaskSummaryCommand(
   try {
     const messages = await getTaskMessageEnvelopes({
       taskId: input.taskId,
-      userId: auth.userId,
     });
 
     const messagesToSummarize = getSummarizableMessages(messages);
