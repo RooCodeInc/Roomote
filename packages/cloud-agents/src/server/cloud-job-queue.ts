@@ -157,6 +157,10 @@ end
 return 0
 `;
 
+// BLPOP cannot atomically combine queue removal with the scope-lock claim in
+// ATOMIC_DEQUEUE_SCRIPT. Polling trades four idle EVAL calls per controller
+// per second for a bounded 250ms wake-up delay; a future dedicated wake-up
+// connection can remove that tradeoff without weakening claim atomicity.
 const DEQUEUE_POLL_INTERVAL_MS = 250;
 
 const cloudJobQueueEntrySchema = z.object({

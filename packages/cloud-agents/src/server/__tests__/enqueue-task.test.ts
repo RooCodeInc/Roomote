@@ -608,5 +608,5 @@ describe('pr_review queue scope dedup', () => {
     const queued = await CloudJobQueue.getInstance().dequeue(false);
     expect(queued).toEqual({ id: newer.id, scope });
     await CloudJobQueue.getInstance().releaseLock(scope, newer.id);
-  });
+  }, 15_000);
 });
