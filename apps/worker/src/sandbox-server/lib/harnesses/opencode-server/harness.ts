@@ -81,7 +81,7 @@ interface OpenCodeServerHarnessOptions {
   eventStreamReadyTimeoutMs?: number;
   executeToolProgressInitialDelayMs?: number;
   executeToolProgressIntervalMs?: number;
-  subagentTaskTimeoutMs?: number;
+  subagentTaskUnobservedTimeoutMs?: number;
   subagentTaskInactivityTimeoutMs?: number;
   stopHookReminderStallTimeoutMs?: number;
   queuedPromptRetryDelayMs?: number;
@@ -202,10 +202,9 @@ interface ActiveOpenCodeSubagentWatchdog {
   // flight the inactivity deadline is suspended: a silently running tool is
   // indistinguishable from a hung one by event flow alone. OpenCode's shell
   // tool bounds that state itself (default 2-minute timeout that kills the
-  // command and emits a terminal tool event); other tool kinds (MCP calls,
-  // webfetch, nested task spawns) are not self-bounding, so a hang inside
-  // one falls back to the total timeout — a deliberate trade-off, since a
-  // wrong kill of legitimate slow work is worse than a slow abort.
+  // command and emits a terminal tool event). Other tool kinds can run for as
+  // long as they need; once their terminal event arrives, the inactivity
+  // deadline resumes.
   activeChildToolCallIds: Set<string>;
   timer: ReturnType<typeof setTimeout>;
   updatePayload: Record<string, unknown>;
@@ -231,18 +230,17 @@ const OPENCODE_STOP_HOOK_REMINDER_STALL_TIMEOUT_MS = 10 * 60_000;
 const EXPECTED_REPLAY_ABORT_SUPPRESSION_MS = 10_000;
 const DEFAULT_EXECUTE_TOOL_PROGRESS_INITIAL_DELAY_MS = 15_000;
 const DEFAULT_EXECUTE_TOOL_PROGRESS_INTERVAL_MS = 30_000;
-// Kill switch for runaway subagent runs: a subagent that produces no terminal
-// signal within this window is presumed dead and its child sessions are
-// aborted so the parent turn can continue instead of hanging silently. Sized
-// for large review/audit subagents that legitimately read hundreds of files;
-// 12 minutes was too tight and killed in-progress work (the sliding inactivity
-// deadline below is the primary wedge detector, so this only backstops a child
-// that stays superficially active but never terminates).
-const DEFAULT_SUBAGENT_TASK_TIMEOUT_MS = 30 * 60_000;
+// Backstop for an unobservable subagent launch: if OpenCode never exposes a
+// child session id, Roomote has no child event stream with which to assess
+// liveness. Parent task-part updates slide this deadline while the launch is
+// making observable progress. Once a child session id is known, this fallback
+// no longer applies; working subagents have no wall-clock timeout.
+const DEFAULT_SUBAGENT_TASK_UNOBSERVED_TIMEOUT_MS = 30 * 60_000;
 // Sliding inactivity deadline for subagent runs: once the child session is
 // known, every event it emits (streamed text, tool state, message completion)
 // counts as liveness. A child that goes silent for this window is presumed
-// wedged and aborted without waiting for the total timeout above. Only
+// wedged and aborted without waiting for the unobservable-launch fallback
+// above. Only
 // enforced when it is a strong signal: the child session id must be known
 // (otherwise there is no activity feed to judge by) and no child tool call
 // may be in flight (a legitimately silent long-running tool is
@@ -1445,7 +1443,7 @@ export class OpenCodeServerHarness
   private readonly eventStreamReadyTimeoutMs: number;
   private readonly executeToolProgressInitialDelayMs: number;
   private readonly executeToolProgressIntervalMs: number;
-  private readonly subagentTaskTimeoutMs: number;
+  private readonly subagentTaskUnobservedTimeoutMs: number;
   private readonly subagentTaskInactivityTimeoutMs: number;
   private readonly stopHookReminderStallTimeoutMs: number;
   private readonly queuedPromptRetryDelayMs: number;
@@ -1536,8 +1534,9 @@ export class OpenCodeServerHarness
     this.executeToolProgressIntervalMs =
       options.executeToolProgressIntervalMs ??
       DEFAULT_EXECUTE_TOOL_PROGRESS_INTERVAL_MS;
-    this.subagentTaskTimeoutMs =
-      options.subagentTaskTimeoutMs ?? DEFAULT_SUBAGENT_TASK_TIMEOUT_MS;
+    this.subagentTaskUnobservedTimeoutMs =
+      options.subagentTaskUnobservedTimeoutMs ??
+      DEFAULT_SUBAGENT_TASK_UNOBSERVED_TIMEOUT_MS;
     this.subagentTaskInactivityTimeoutMs =
       options.subagentTaskInactivityTimeoutMs ??
       DEFAULT_SUBAGENT_TASK_INACTIVITY_TIMEOUT_MS;
@@ -2263,7 +2262,7 @@ export class OpenCodeServerHarness
         eventKey,
         Math.min(
           this.subagentTaskInactivityTimeoutMs,
-          this.subagentTaskTimeoutMs,
+          this.subagentTaskUnobservedTimeoutMs,
         ),
       ),
       updatePayload: input.updatePayload,
@@ -2276,7 +2275,7 @@ export class OpenCodeServerHarness
       this.childSessionWatchdogKeys.set(input.childSessionId, eventKey);
     }
     this.logger.info(
-      `Armed OpenCode subagent watchdog timeoutMs=${this.subagentTaskTimeoutMs} inactivityTimeoutMs=${this.subagentTaskInactivityTimeoutMs} toolCallId=${input.toolCallId} agentType=${
+      `Armed OpenCode subagent watchdog unobservedTimeoutMs=${this.subagentTaskUnobservedTimeoutMs} inactivityTimeoutMs=${this.subagentTaskInactivityTimeoutMs} toolCallId=${input.toolCallId} agentType=${
         input.agentType ?? 'unknown'
       } childSessionId=${input.childSessionId ?? 'pending'}`,
     );
@@ -2302,7 +2301,8 @@ export class OpenCodeServerHarness
    * tool call is in flight (see `activeChildToolCallIds`). While it is not
    * enforceable, the timer keeps waking at the inactivity interval so a tool
    * completion followed by silence is still caught one idle window after the
-   * completion event, and the total timeout always applies.
+   * completion event. The longer fallback deadline applies only before a child
+   * session id is known; observable child sessions have no wall-clock cap.
    */
   private async handleSubagentWatchdogDeadline(
     eventKey: string,
@@ -2317,18 +2317,22 @@ export class OpenCodeServerHarness
     const elapsedMs = nowMs - watchdog.startedAtMs;
     const idleMs = nowMs - watchdog.lastActivityAtMs;
 
-    if (elapsedMs >= this.subagentTaskTimeoutMs) {
+    const childSessionObservable = watchdog.childSessionId !== null;
+
+    if (
+      !childSessionObservable &&
+      idleMs >= this.subagentTaskUnobservedTimeoutMs
+    ) {
       await this.expireSubagentWatchdog(
         eventKey,
         watchdog,
-        `exceeded the ${this.subagentTaskTimeoutMs}ms watchdog timeout (elapsed=${elapsedMs}ms)`,
+        `remained unobservable for ${idleMs}ms without a child session id (limit ${this.subagentTaskUnobservedTimeoutMs}ms, elapsed=${elapsedMs}ms)`,
       );
       return;
     }
 
     const idleEnforceable =
-      watchdog.childSessionId !== null &&
-      watchdog.activeChildToolCallIds.size === 0;
+      childSessionObservable && watchdog.activeChildToolCallIds.size === 0;
 
     if (idleEnforceable && idleMs >= this.subagentTaskInactivityTimeoutMs) {
       await this.expireSubagentWatchdog(
@@ -2339,14 +2343,16 @@ export class OpenCodeServerHarness
       return;
     }
 
-    const remainingTotalMs = this.subagentTaskTimeoutMs - elapsedMs;
     const remainingIdleMs = idleEnforceable
       ? this.subagentTaskInactivityTimeoutMs - idleMs
       : this.subagentTaskInactivityTimeoutMs;
+    const remainingUnobservedMs = childSessionObservable
+      ? this.subagentTaskInactivityTimeoutMs
+      : this.subagentTaskUnobservedTimeoutMs - idleMs;
 
     watchdog.timer = this.armSubagentWatchdogTimer(
       eventKey,
-      Math.min(remainingTotalMs, remainingIdleMs),
+      Math.min(remainingUnobservedMs, remainingIdleMs),
     );
   }
 

@@ -278,8 +278,12 @@ export async function startOpenCodeServerHarness({
       commandEnv,
       initialSessionId,
       model,
-      subagentTaskTimeoutMs: parseTimeoutMs(
-        process.env.ROOMOTE_SUBAGENT_TASK_TIMEOUT_MS,
+      // Keep the old variable as a compatibility alias, but it now bounds
+      // only launches that never expose a child session id. Observable
+      // subagents are governed solely by the sliding inactivity deadline.
+      subagentTaskUnobservedTimeoutMs: parseTimeoutMs(
+        process.env.ROOMOTE_SUBAGENT_TASK_UNOBSERVED_TIMEOUT_MS ??
+          process.env.ROOMOTE_SUBAGENT_TASK_TIMEOUT_MS,
       ),
       subagentTaskInactivityTimeoutMs: parseTimeoutMs(
         process.env.ROOMOTE_SUBAGENT_TASK_INACTIVITY_TIMEOUT_MS,
