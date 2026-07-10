@@ -1,6 +1,4 @@
-import { execFile } from 'node:child_process';
 import { existsSync } from 'node:fs';
-import { promisify } from 'node:util';
 
 import {
   buildPreviewProxyUrl,
@@ -32,8 +30,17 @@ import {
   updateCloudJobMachine,
 } from '../utils';
 import { resolveFromWorkspaceRoot } from '../repo-paths';
-
-const execFileAsync = promisify(execFile);
+import {
+  attachDockerEgressPolicy,
+  buildDockerWorkerLabels,
+  buildDockerWorkerResourceArgs,
+  docker,
+  getDockerTaskNetworkName,
+  getDockerWorkerContainerName,
+  prepareDockerTaskNetwork,
+  removeDockerSandboxResources,
+  type DockerWorkerEgressPolicy,
+} from './docker-sandbox-security';
 
 const DOCKER_CONTAINER_READY_COMMAND = 'sleep';
 const DOCKER_CONTAINER_READY_ARGS = ['infinity'];
@@ -51,6 +58,13 @@ export async function spawnDockerWorker(
     platform: string;
     network?: string;
     dockerTimeoutMs: number;
+    cpuLimit: number;
+    memoryLimit: string;
+    pidsLimit: number;
+    diskLimit: string;
+    logMaxSize: string;
+    logMaxFiles: number;
+    egressPolicy: DockerWorkerEgressPolicy;
     localWorkerReleasePath?: string;
     deploymentSlug?: string;
   },
@@ -99,16 +113,11 @@ export async function spawnDockerWorker(
       defaultPreviewDomains: Env.PREVIEW_DOMAINS,
     });
 
-  const containerName = `roomote-worker-${cloudJob.id}`;
-  const dockerNetwork = config.network?.trim();
-  const networkArgs = dockerNetwork
-    ? ['--network', dockerNetwork, '--network-alias', containerName]
-    : [];
-  const portArgs = dockerNetwork
+  const containerName = getDockerWorkerContainerName(cloudJob.id);
+  const controlNetwork = config.network?.trim();
+  const portArgs = controlNetwork
     ? []
     : namedPorts.flatMap(({ port }) => ['-p', `127.0.0.1::${port}`]);
-
-  await docker(['rm', '-f', containerName], { allowFailure: true });
 
   // Auto-remove the container when its worker process exits so the cloned repo
   // and the worker's short-lived token files do not linger in a stopped
@@ -116,38 +125,64 @@ export async function spawnDockerWorker(
   const autoRemoveContainer = shouldAutoRemoveDockerWorkerContainer(
     resolveAppEnv(process.env),
   );
+  const dockerNetwork = await prepareDockerTaskNetwork({
+    taskRunId: cloudJob.id,
+    controlNetwork,
+    egressPolicy: config.egressPolicy,
+    autoRemove: autoRemoveContainer,
+  });
 
   console.log(
     `[spawnDockerWorker] Starting Docker worker container for job #${cloudJob.id} ${JSON.stringify(
       {
         image: config.image,
         platform: config.platform,
-        network: dockerNetwork,
+        controlNetwork,
+        taskNetwork: dockerNetwork,
+        egressPolicy: config.egressPolicy,
         ports: namedPorts.map((port) => `${port.name}:${port.port}`),
       },
     )}`,
   );
 
-  const containerId = (
-    await docker([
-      'run',
-      '-d',
-      ...(autoRemoveContainer ? ['--rm'] : []),
-      '--name',
-      containerName,
-      '--platform',
-      config.platform,
-      '--add-host',
-      'host.docker.internal:host-gateway',
-      ...networkArgs,
-      ...portArgs,
-      config.image,
-      DOCKER_CONTAINER_READY_COMMAND,
-      ...DOCKER_CONTAINER_READY_ARGS,
-    ])
-  ).trim();
+  let containerId = '';
 
   try {
+    containerId = (
+      await docker([
+        'run',
+        '-d',
+        ...(autoRemoveContainer ? ['--rm'] : []),
+        '--name',
+        containerName,
+        '--platform',
+        config.platform,
+        '--network',
+        dockerNetwork,
+        '--network-alias',
+        containerName,
+        ...buildDockerWorkerResourceArgs(config),
+        ...buildDockerWorkerLabels({
+          taskRunId: cloudJob.id,
+          autoRemove: autoRemoveContainer,
+        }),
+        ...(!controlNetwork
+          ? ['--add-host', 'host.docker.internal:host-gateway']
+          : []),
+        ...portArgs,
+        config.image,
+        DOCKER_CONTAINER_READY_COMMAND,
+        ...DOCKER_CONTAINER_READY_ARGS,
+      ])
+    ).trim();
+
+    await attachDockerEgressPolicy({
+      containerName,
+      egressPolicy: config.egressPolicy,
+      image: config.image,
+      platform: config.platform,
+      blockDockerGateway: Boolean(controlNetwork),
+    });
     await docker([
       'cp',
       `${resolveFromWorkspaceRoot('.docker/sandbox')}/.`,
@@ -174,11 +209,11 @@ export async function spawnDockerWorker(
     ]);
     await docker(['exec', containerName, 'bash', DOCKER_INSTALL_WORKER_SCRIPT]);
 
-    const portMap = dockerNetwork
+    const portMap = controlNetwork
       ? new Map<number, string>()
       : await getPublishedPorts(containerName, namedPorts);
     const sandboxServerUrl = buildDockerSandboxServerUrl({
-      network: dockerNetwork,
+      network: controlNetwork ? dockerNetwork : undefined,
       taskId: cloudJob.taskId,
       previewProxyBaseUrl:
         resolvedPreviewRuntimeConfig.effective.previewProxyBaseUrl ?? undefined,
@@ -190,7 +225,7 @@ export async function spawnDockerWorker(
       machineId: containerName,
       namedPorts,
       domainFn: (port) =>
-        dockerNetwork
+        controlNetwork
           ? `http://${containerName}:${port}`
           : `http://127.0.0.1:${portMap.get(port) ?? String(port)}`,
       explicitPrimaryPortName: getPrimaryPortFromConfig(
@@ -269,12 +304,15 @@ export async function spawnDockerWorker(
 
     return { containerId: containerName };
   } catch (error) {
-    if (resolveAppEnv(process.env) === 'development') {
+    if (resolveAppEnv(process.env) === 'development' && containerId) {
       console.error(
         `[spawnDockerWorker] Preserving failed Docker worker container ${containerName} for local debugging`,
       );
     } else {
-      await docker(['rm', '-f', containerName], { allowFailure: true });
+      await removeDockerSandboxResources({
+        containerName,
+        taskNetwork: getDockerTaskNetworkName(cloudJob.id),
+      });
     }
     throw error;
   }
@@ -410,26 +448,6 @@ async function getPublishedPorts(
   }
 
   return ports;
-}
-
-async function docker(
-  args: string[],
-  options: { allowFailure?: boolean } = {},
-): Promise<string> {
-  try {
-    const { stdout } = await execFileAsync('docker', args, {
-      cwd: resolveFromWorkspaceRoot('.'),
-      maxBuffer: 10 * 1024 * 1024,
-    });
-
-    return stdout;
-  } catch (error) {
-    if (options.allowFailure) {
-      return '';
-    }
-
-    throw error;
-  }
 }
 
 async function resolveDockerWorkerOwnershipTarget(

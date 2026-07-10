@@ -238,4 +238,12 @@ RUN sudo chmod +x /usr/local/bin/opencode \
   && sudo chown roomote:roomote "$HOME/.local/bin/opencode" \
   && chmod +x "$HOME/.local/bin/opencode"
 
+# The controller uses this image as a short-lived, NET_ADMIN-only helper to
+# install metadata blackhole routes in each worker's network namespace. Keep
+# iproute2 in the final layer so updating this policy does not invalidate the
+# expensive language-toolchain layers above.
+RUN sudo apt-get update \
+  && sudo DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends iproute2 \
+  && sudo rm -rf /var/lib/apt/lists/*
+
 WORKDIR /sandbox

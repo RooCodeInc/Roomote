@@ -207,12 +207,9 @@ services:
       # bottom of this file) so spawned worker containers can reach the
       # stack. Verify with `docker network ls` on the Coolify server.
       #
-      # NOTE: unlike the installer/deployer compose stacks, this path does
-      # not yet isolate workers on a dedicated network: workers share
-      # roomote_default with Postgres, Redis, and MinIO. Coolify rewrites
-      # compose network definitions during deploys, so the dedicated
-      # roomote_worker network is not wired up here until that is verified
-      # against a live Coolify deployment.
+      # The controller uses this network only to discover the labeled API and
+      # preview-proxy services. Spawned workers receive per-task networks, so
+      # they do not join roomote_default or gain access to its datastores.
       DOCKER_WORKER_NETWORK: roomote_default
 
   bullmq:
