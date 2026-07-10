@@ -106,7 +106,7 @@ const DEEP_LINK_ENABLE_DESCRIPTIONS: Record<string, string> = {
     'Roomote will be able to save shared memories and recall context from earlier tasks.',
   vercel:
     'Roomote will be able to inspect Vercel teams, projects, deployments, logs, and domain availability.',
-  zero: 'Roomote will be able to authenticate your Zero wallet so agents can discover and pay for external capabilities.',
+  zero: 'Roomote will be able to authenticate the workspace Zero connection so agents can discover and pay for external capabilities.',
 };
 
 type IntegrationItem = {

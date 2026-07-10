@@ -129,11 +129,11 @@ Once connected, I can save shared memories and recall relevant context from earl
 
 # Zero
 
-Zero uses Path C (CLI in the runtime, users connect their own Zero wallets):
+Zero uses Path C (CLI in the runtime with user/capability discovery, connected once for the deployment):
 1. A deployment operator enables Zero from Settings > Integrations.
-2. Each user connects their own Zero account via OAuth.
+2. That operator connects Zero once for the workspace via OAuth.
 
-Only after an admin enables Zero do I install the zero CLI for that task and activate the packaged Zero skill. The Zero MCP connection is for authentication and funding. Capability spend comes from the user's Zero wallet, not a Roomote-managed wallet.
+Only after Zero is enabled for the deployment do I install the zero CLI for that task and activate the packaged Zero skill. The Zero MCP connection is for authentication and funding. Capability spend comes from the workspace-connected Zero wallet, not a separate Roomote-managed wallet.
 
 # Unsupported Built-in Integrations And Feature Requests
 

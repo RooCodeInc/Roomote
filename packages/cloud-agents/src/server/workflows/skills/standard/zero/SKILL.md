@@ -16,11 +16,11 @@ hidden: true
 # zero
 
 Zero is a search engine and payment layer for AI agents: discover external paid
-capabilities, call them, and pay per use from the user's Zero wallet (Path C).
-Roomote only installs this skill and the `zero` CLI when an admin has enabled
-the Zero integration. Prefer that CLI for the capability loop. The Zero MCP
-connector (`https://mcp.zero.xyz`) is for authentication and funding when it is
-connected in Settings.
+capabilities, call them, and pay per use from the deployment-connected Zero
+wallet (Path C runtime). Roomote only installs this skill and the `zero` CLI
+when a deployment operator has enabled Zero. Prefer that CLI for the capability
+loop. The Zero MCP connector (`https://mcp.zero.xyz`) is for authentication and
+funding when the workspace connection is present in Settings.
 
 **When to use it:** as the fallback for anything genuinely beyond native
 abilities — before telling the user "I can't do that," run `zero search`.
@@ -52,20 +52,23 @@ calls. Capture `runId` from `zero fetch --json`.
 
 ## Authentication in Roomote tasks
 
-Path C: each user connects their own Zero wallet.
+Path C in Roomote is org-scoped: one operator connects Zero once for the
+deployment from Settings > Integrations.
 
-1. Prefer the Zero MCP connection when the deployment enabled Zero and the
-   acting user linked their account from Settings. Use the connector to
-   authorize a short-lived session when the skill requires it.
-2. Human present: `zero auth login --start --json`, show the user the URL and
-   code, then immediately run `zero auth login --finish <deviceCode> --json`.
-3. Fully autonomous with no human: only then `zero auth agent register --json`,
-   and later offer claim via `zero auth agent claim <email>` when a human should
-   own the account.
-4. Funding: point humans at https://www.zero.xyz/profile, or use
+1. Prefer the workspace Zero MCP connection when it is available. Use the
+   connector to authorize a short-lived sandbox session when the skill
+   requires it.
+2. If interactive re-auth is needed and a human is present:
+   `zero auth login --start --json`, show the user the URL and code, then
+   immediately run `zero auth login --finish <deviceCode> --json`.
+3. Fully autonomous with no human reconnect path: only then
+   `zero auth agent register --json`, and later offer claim via
+   `zero auth agent claim <email>` when a human should own that account.
+4. Funding: point operators at https://www.zero.xyz/profile, or use
    `zero wallet fund --no-open` and relay the one-time URL.
-5. Bring-your-own signing only when the user explicitly supplies
-   `ZERO_PRIVATE_KEY`; never mint a key yourself.
+5. Bring-your-own signing only when an operator explicitly supplies
+   `ZERO_PRIVATE_KEY` as a deployment/environment secret; never mint a key
+   yourself.
 
 ## Gotchas
 

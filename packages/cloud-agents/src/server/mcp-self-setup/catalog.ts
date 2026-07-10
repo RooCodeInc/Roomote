@@ -154,7 +154,7 @@ export const MCP_SETUP_INTEGRATION_METADATA: Record<
   zero: {
     capabilities: [
       'Search free external capability catalog when native tools fall short',
-      'Call paid APIs through the zero CLI using the connected user wallet',
+      'Call paid APIs through the zero CLI using the workspace Zero wallet',
       'Authenticate and fund Zero through the MCP connector when needed',
     ],
   },

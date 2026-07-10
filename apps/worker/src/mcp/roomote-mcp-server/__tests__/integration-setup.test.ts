@@ -64,13 +64,13 @@ describe('integration setup guide', () => {
     );
   });
 
-  it('documents the user-scoped Zero Path C setup flow', () => {
+  it('documents the deployment-scoped Zero Path C setup flow', () => {
     expect(INTEGRATION_SETUP_CONTENT).toContain('# Zero');
     expect(INTEGRATION_SETUP_CONTENT).toContain(
-      'Each user connects their own Zero account via OAuth.',
+      'That operator connects Zero once for the workspace via OAuth.',
     );
     expect(INTEGRATION_SETUP_CONTENT).toContain(
-      'Only after an admin enables Zero do I install the zero CLI',
+      'Only after Zero is enabled for the deployment do I install the zero CLI',
     );
   });
 });
