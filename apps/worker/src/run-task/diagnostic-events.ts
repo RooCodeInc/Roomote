@@ -98,7 +98,7 @@ function sanitizeDetailValue(value: unknown, depth: number): unknown {
   return String(value);
 }
 
-interface DiagnosticEventRecorder {
+export interface DiagnosticEventRecorder {
   record(input: {
     kind: string;
     message: string;

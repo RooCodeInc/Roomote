@@ -16,6 +16,7 @@ import {
 
 import type { Harness } from '../sandbox-server';
 import { markExpectedSubprocessExitIfAlive } from '../sandbox-server/lib/harnesses/opencode-server/expected-exit';
+import type { DiagnosticEventRecorder } from './diagnostic-events';
 import type {
   HarnessEvents,
   HarnessInferenceUsageEvent,
@@ -44,6 +45,8 @@ interface ReconnectableHarnessConfig {
     initialSessionId?: string;
   }) => Promise<SpawnHarnessResult>;
   maxReconnectAttempts?: number;
+  /** Durable breadcrumbs for harness lifecycle transitions; observer-only. */
+  diagnosticEvents?: DiagnosticEventRecorder;
 }
 
 interface BoundHarnessListeners {
@@ -109,6 +112,7 @@ export class ReconnectableHarness
   private readonly logger: HarnessLogger;
   private readonly spawnHarness: ReconnectableHarnessConfig['spawnHarness'];
   private readonly maxReconnectAttempts: number;
+  private readonly diagnosticEvents: DiagnosticEventRecorder | undefined;
 
   private currentHarness: Harness | null = null;
   private currentSubprocess: ResultPromise | null = null;
@@ -130,6 +134,7 @@ export class ReconnectableHarness
     this.spawnHarness = config.spawnHarness;
     this.maxReconnectAttempts =
       config.maxReconnectAttempts ?? DEFAULT_MAX_RECONNECT_ATTEMPTS;
+    this.diagnosticEvents = config.diagnosticEvents;
   }
 
   async start(options?: { initialSessionId?: string }): Promise<void> {
@@ -270,6 +275,16 @@ export class ReconnectableHarness
     this.logger.info(
       `[ReconnectableHarness] External reconnect requested: ${options.reason} (sessionId=${this.latestSessionId ?? 'none'}, afterCurrentTurn=${options.afterCurrentTurn === true})`,
     );
+    this.diagnosticEvents?.record({
+      kind: 'harness_restart_requested',
+      message: `External reconnect requested: ${options.reason}`,
+      details: {
+        source: 'external',
+        reason: options.reason,
+        sessionId: this.latestSessionId ?? null,
+        afterCurrentTurn: options.afterCurrentTurn === true,
+      },
+    });
 
     if (!this.currentHarness) {
       if (options.replayCommands?.length) {
@@ -329,6 +344,11 @@ export class ReconnectableHarness
         this.logger.warn(
           `[ReconnectableHarness] Underlying harness disconnected; attempting reconnect (sessionId=${this.latestSessionId ?? 'none'})`,
         );
+        this.diagnosticEvents?.record({
+          kind: 'harness_disconnected',
+          message: 'Underlying harness disconnected; attempting reconnect',
+          details: { sessionId: this.latestSessionId ?? null },
+        });
 
         this.captureReconnectQueuedMessages(harness);
         const subprocess = this.currentSubprocess;
@@ -344,6 +364,15 @@ export class ReconnectableHarness
         this.logger.warn(
           `[ReconnectableHarness] Underlying harness requested restart: ${request.reason} (sessionId=${request.sessionId ?? this.latestSessionId ?? 'none'})`,
         );
+        this.diagnosticEvents?.record({
+          kind: 'harness_restart_requested',
+          message: `Harness requested restart: ${request.reason}`,
+          details: {
+            source: 'harness',
+            reason: request.reason,
+            sessionId: request.sessionId ?? this.latestSessionId ?? null,
+          },
+        });
 
         void this.restartCurrentHarness(request);
       },
@@ -513,6 +542,15 @@ export class ReconnectableHarness
         this.logger.info(
           `[ReconnectableHarness] Reconnected harness on attempt ${attempt}/${this.maxReconnectAttempts} (sessionId=${this.latestSessionId ?? 'none'})`,
         );
+        this.diagnosticEvents?.record({
+          kind: 'harness_reconnected',
+          message: `Reconnected harness on attempt ${attempt}/${this.maxReconnectAttempts}`,
+          details: {
+            attempt,
+            maxAttempts: this.maxReconnectAttempts,
+            sessionId: this.latestSessionId ?? null,
+          },
+        });
         this.attachHarness(spawned);
         return;
       } catch (error) {
@@ -535,6 +573,14 @@ export class ReconnectableHarness
     }
 
     if (!this.disposed) {
+      this.diagnosticEvents?.record({
+        kind: 'harness_reconnect_exhausted',
+        message: `Gave up reconnecting after ${this.maxReconnectAttempts} attempts`,
+        details: {
+          maxAttempts: this.maxReconnectAttempts,
+          sessionId: this.latestSessionId ?? null,
+        },
+      });
       this.emit('disconnected');
     }
   }
