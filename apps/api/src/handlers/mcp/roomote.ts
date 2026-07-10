@@ -28,7 +28,7 @@ import { z } from 'zod';
 import type { Variables } from '../../types';
 
 import {
-  assertCloudJobTokenMatchesCloudJobUser,
+  assertCloudJobTokenJobExists,
   McpProxyError,
   resolveActingUserIdOrNull,
   type McpAuthContext,
@@ -91,7 +91,7 @@ async function resolveRoomoteMcpAuth(
   }
 
   if (isJobTokenContext(authContext)) {
-    await assertCloudJobTokenMatchesCloudJobUser(authContext);
+    await assertCloudJobTokenJobExists(authContext);
 
     return {
       userId: authContext.userId,

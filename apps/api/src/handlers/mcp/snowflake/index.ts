@@ -43,7 +43,7 @@ async function resolveSnowflakeMcpAuth(
 
   if (isJobTokenContext(authContext)) {
     const cloudJob = await db.query.taskRuns.findFirst({
-      columns: { id: true, actingUserId: true },
+      columns: { id: true },
       where: eq(taskRuns.id, authContext.cloudJobId),
     });
 
@@ -51,17 +51,13 @@ async function resolveSnowflakeMcpAuth(
       throw new McpProxyError(404, 'Cloud job not found for this MCP token');
     }
 
-    // The token principal must match the run's acting user: a user token must
-    // carry the run's acting user, and a deployment-service-principal token is
-    // only valid for a run with no acting user (null === null). Snowflake
-    // credentials come from a deployment-scoped connection, so
-    // deployment-principal jobs are fully supported.
-    if ((cloudJob.actingUserId ?? null) !== authContext.userId) {
-      throw new McpProxyError(
-        403,
-        'MCP token principal does not match cloud job',
-      );
-    }
+    // No principal equality check: the run-scoped token IS the authorization
+    // (only this run's sandbox holds it), and Snowflake credentials come from a
+    // deployment-scoped connection, so the token's userId plays no role in
+    // credential selection. The token's userId is mint-time attribution while
+    // task_runs.actingUserId is current-steering attribution — they
+    // legitimately diverge once a web steer or follow-up switches the acting
+    // user mid-run.
 
     return {
       userId: authContext.userId,

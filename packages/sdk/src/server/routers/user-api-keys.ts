@@ -37,7 +37,8 @@ export const userApiKeysRouter = router({
 
   /**
    * Returns the decrypted API key for the given provider and current user.
-   * Accessible from worker via job token (userId is embedded in the token).
+   * Accessible from worker via a run-scoped job token; the effective user is
+   * the run's live acting user (falling back to the token's mint-time user).
    */
   getDecryptedKey: authenticatedProcedure
     .input(z.object({ provider: z.string() }))

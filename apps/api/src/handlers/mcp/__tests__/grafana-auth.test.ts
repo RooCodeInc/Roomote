@@ -163,7 +163,10 @@ describe('grafana MCP auth and tool handling', () => {
     });
   });
 
-  it('rejects tokens whose principal does not match the cloud job user', async () => {
+  it('accepts a token minted for user A after the acting user switched to user B', async () => {
+    // Web steer / follow-up delivery mutate task_runs.actingUserId mid-run;
+    // the run-scoped token stays authorized (the token's userId is mint-time
+    // attribution and is never compared against the mutable acting user).
     mockFindCloudJob.mockResolvedValue({
       id: 42,
       actingUserId: 'user-2',
@@ -173,12 +176,25 @@ describe('grafana MCP auth and tool handling', () => {
       createApp(createJobToken()),
       createInitializeRequest(1),
     );
-    const body = (await response.json()) as JsonRpcErrorBody;
 
-    expect(response.status).toBe(403);
-    expect(body.error.message).toContain(
-      'MCP token principal does not match cloud job',
+    expect(response.status).toBe(200);
+  });
+
+  it('accepts a deployment-principal token after a human became the acting user', async () => {
+    // A human replying in the thread of an automation run switches the acting
+    // user from null to that human; the run-scoped null-principal token must
+    // keep working.
+    mockFindCloudJob.mockResolvedValue({
+      id: 42,
+      actingUserId: 'user-2',
+    });
+
+    const response = await postMcp(
+      createApp(createJobToken({ userId: null, principal: 'deployment' })),
+      createInitializeRequest(1),
     );
+
+    expect(response.status).toBe(200);
   });
 
   it('allows deployment-principal tokens for deployment-principal cloud jobs', async () => {
