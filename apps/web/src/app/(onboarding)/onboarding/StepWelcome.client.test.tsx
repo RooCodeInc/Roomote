@@ -12,10 +12,6 @@ vi.mock('../setup/StepTitle', () => ({
   StepTitle: ({ text }: { text: string }) => <div>{text}</div>,
 }));
 
-vi.mock('../OnboardingWordmark', () => ({
-  OnboardingWordmark: () => <div>Wordmark</div>,
-}));
-
 import { StepWelcome } from './StepWelcome';
 
 describe('Onboarding StepWelcome', () => {
