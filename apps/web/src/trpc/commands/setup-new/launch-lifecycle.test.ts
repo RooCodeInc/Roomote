@@ -10,8 +10,9 @@
 // finalize/release, mirror all run against Postgres) and mocks only the cloud
 // task enqueue and the source-control provider resolution.
 
-const { mockEnqueueCloudTask } = vi.hoisted(() => ({
+const { mockEnqueueCloudTask, mockCancelTaskRunDirect } = vi.hoisted(() => ({
   mockEnqueueCloudTask: vi.fn(),
+  mockCancelTaskRunDirect: vi.fn(),
 }));
 
 vi.mock('@roomote/github', () => ({
@@ -26,6 +27,17 @@ vi.mock('@roomote/gitea', () => ({
 vi.mock('@roomote/cloud-agents/server', () => ({
   enqueueCloudTask: mockEnqueueCloudTask,
 }));
+
+// Keep the real database (and all shared launch helpers) while overriding only
+// the orphan-cancel writer so the lost-finalize path can be observed without
+// seeding real task_runs rows.
+vi.mock('@roomote/db/server', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@roomote/db/server')>();
+  return {
+    ...actual,
+    cancelTaskRunDirect: mockCancelTaskRunDirect,
+  };
+});
 
 vi.mock('@roomote/slack', () => ({
   SlackNotifier: vi.fn(),
@@ -372,11 +384,12 @@ describe('launchQueuedSetupTasksIfReady (fenced onboarding-queue launch)', () =>
     expect(suggestion?.dismissedAt).toBeNull();
   });
 
-  it('does not stomp state when its claim token was superseded before finalize (fencing)', async () => {
+  it('does not stomp state when its claim token was superseded before finalize (fencing), and cancels the orphaned run', async () => {
     const onboardingId = await seedOnboardingItem({ sortOrder: 0 });
     const supersededClaimAt = new Date(Date.now() + 5_000);
     const launchedTaskId = await seedLaunchTargetTaskId();
 
+    mockCancelTaskRunDirect.mockResolvedValue(true);
     const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
 
     // Simulate another launcher reclaiming this row while our enqueue is in
@@ -386,7 +399,7 @@ describe('launchQueuedSetupTasksIfReady (fenced onboarding-queue launch)', () =>
         .update(workItems)
         .set({ launchClaimedAt: supersededClaimAt })
         .where(eq(workItems.id, onboardingId));
-      return { taskId: launchedTaskId, id: 'cloud-job-1' };
+      return { taskId: launchedTaskId, id: 909 };
     });
 
     try {
@@ -399,8 +412,13 @@ describe('launchQueuedSetupTasksIfReady (fenced onboarding-queue launch)', () =>
       expect(row?.launchedTaskId).toBeNull();
       expect(row?.targetEnvironmentId).toBeNull();
       expect(row?.launchClaimedAt?.getTime()).toBe(supersededClaimAt.getTime());
+
+      // The orphaned run is best-effort canceled while still pre-sandbox.
+      expect(mockCancelTaskRunDirect).toHaveBeenCalledWith(
+        expect.objectContaining({ runId: 909 }),
+      );
       expect(warnSpy).toHaveBeenCalledWith(
-        expect.stringContaining('orphaned task'),
+        expect.stringContaining('orphaned run canceled'),
       );
     } finally {
       warnSpy.mockRestore();
@@ -449,17 +467,26 @@ describe('launchQueuedSetupTasksIfReady (fenced onboarding-queue launch)', () =>
     }
   });
 
-  it('releases the claim back to open when the enqueue fails', async () => {
+  it('releases the claim back to open when the enqueue fails and logs the failure', async () => {
     const onboardingId = await seedOnboardingItem({ sortOrder: 0 });
 
     mockEnqueueCloudTask.mockRejectedValue(new Error('enqueue failed'));
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
 
-    await launch();
+    try {
+      await launch();
 
-    const row = await readRow(onboardingId);
-    expect(row?.status).toBe('open');
-    expect(row?.launchClaimedAt).toBeNull();
-    expect(row?.launchedTaskId).toBeNull();
-    expect(row?.targetEnvironmentId).toBeNull();
+      const row = await readRow(onboardingId);
+      expect(row?.status).toBe('open');
+      expect(row?.launchClaimedAt).toBeNull();
+      expect(row?.launchedTaskId).toBeNull();
+      expect(row?.targetEnvironmentId).toBeNull();
+
+      expect(warnSpy).toHaveBeenCalledWith(
+        expect.stringContaining('enqueue failed'),
+      );
+    } finally {
+      warnSpy.mockRestore();
+    }
   });
 });

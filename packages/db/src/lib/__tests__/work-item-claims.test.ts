@@ -7,7 +7,18 @@
 // stale-`launching` claims are recoverable, a `launched` item is never
 // reclaimed or reverted, and `failed` stays terminal.
 
-import { db, eq, inArray, tasks, taskFactory, workItems } from '../../server';
+import {
+  db,
+  eq,
+  inArray,
+  tasks,
+  taskFactory,
+  users,
+  environments,
+  environmentFactory,
+  userFactory,
+  workItems,
+} from '../../server';
 import {
   claimWorkItem,
   finalizeWorkItemLaunched,
@@ -18,6 +29,18 @@ import {
 describe('work_items launch claim helpers', () => {
   const workItemIds: string[] = [];
   const taskIds: string[] = [];
+  const environmentIds: string[] = [];
+  const userIds: string[] = [];
+
+  async function seedEnvironmentId(): Promise<string> {
+    const user = await userFactory.create({});
+    userIds.push(user.id);
+    const environment = await environmentFactory.create({
+      createdByUserId: user.id,
+    });
+    environmentIds.push(environment.id);
+    return environment.id;
+  }
 
   async function seedWorkItem(overrides?: {
     kind?: 'suggestion' | 'onboarding' | 'auto_fix';
@@ -64,6 +87,15 @@ describe('work_items launch claim helpers', () => {
     return row;
   }
 
+  async function readEnvironmentColumn(id: string) {
+    const [row] = await db
+      .select({ targetEnvironmentId: workItems.targetEnvironmentId })
+      .from(workItems)
+      .where(eq(workItems.id, id))
+      .limit(1);
+    return row;
+  }
+
   afterEach(async () => {
     if (workItemIds.length > 0) {
       await db.delete(workItems).where(inArray(workItems.id, workItemIds));
@@ -72,6 +104,17 @@ describe('work_items launch claim helpers', () => {
     if (taskIds.length > 0) {
       await db.delete(tasks).where(inArray(tasks.id, taskIds));
       taskIds.length = 0;
+    }
+    // Environments FK the user that created them, so delete them first.
+    if (environmentIds.length > 0) {
+      await db
+        .delete(environments)
+        .where(inArray(environments.id, environmentIds));
+      environmentIds.length = 0;
+    }
+    if (userIds.length > 0) {
+      await db.delete(users).where(inArray(users.id, userIds));
+      userIds.length = 0;
     }
   });
 
@@ -240,6 +283,46 @@ describe('work_items launch claim helpers', () => {
     const row = await readStatus(id);
     expect(row?.status).toBe('launched');
     expect(row?.launchedTaskId).toBe(launchedTaskId);
+  });
+
+  it('stamps targetEnvironmentId in the finalize write when provided', async () => {
+    const launchedTaskId = await seedLaunchedTaskId();
+    const environmentId = await seedEnvironmentId();
+    const claimedAt = new Date();
+    const id = await seedWorkItem({
+      status: 'launching',
+      launchClaimedAt: claimedAt,
+    });
+
+    const finalized = await finalizeWorkItemLaunched(db, {
+      id,
+      taskId: launchedTaskId,
+      claimedAt,
+      targetEnvironmentId: environmentId,
+    });
+
+    expect(finalized).toBe(true);
+    expect((await readEnvironmentColumn(id))?.targetEnvironmentId).toBe(
+      environmentId,
+    );
+  });
+
+  it('leaves targetEnvironmentId null when omitted', async () => {
+    const launchedTaskId = await seedLaunchedTaskId();
+    const claimedAt = new Date();
+    const id = await seedWorkItem({
+      status: 'launching',
+      launchClaimedAt: claimedAt,
+    });
+
+    const finalized = await finalizeWorkItemLaunched(db, {
+      id,
+      taskId: launchedTaskId,
+      claimedAt,
+    });
+
+    expect(finalized).toBe(true);
+    expect((await readEnvironmentColumn(id))?.targetEnvironmentId).toBeNull();
   });
 
   it('finalize with a stale token fails after a reclaim (fencing)', async () => {

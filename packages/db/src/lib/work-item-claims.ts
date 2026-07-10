@@ -160,7 +160,10 @@ export async function releaseWorkItemClaim(
  * this returns false after the caller already enqueued a task, that task is
  * orphaned (unlinked from the work item) and the caller must handle it (log
  * loudly and best-effort cancel). Surface-specific side effects (e.g. stamping a
- * Slack thread) stay with the caller.
+ * Slack thread) stay with the caller. `targetEnvironmentId` is stamped in the
+ * same fenced write only when provided (the setup-new onboarding queue records
+ * the matched environment at finalize time; other surfaces resolve it earlier
+ * and omit it).
  */
 export async function finalizeWorkItemLaunched(
   tx: DatabaseOrTransaction,
@@ -173,6 +176,8 @@ export async function finalizeWorkItemLaunched(
     clearLaunchError?: boolean;
     /** Clear `dismissed_at` (web relaunch of a dismissed suggestion). */
     clearDismissedAt?: boolean;
+    /** Stamp the matched environment (setup-new onboarding queue). */
+    targetEnvironmentId?: string;
   },
 ): Promise<boolean> {
   const now = new Date();
@@ -185,6 +190,9 @@ export async function finalizeWorkItemLaunched(
       launchClaimedAt: null,
       ...(params.clearLaunchError ? { launchError: null } : {}),
       ...(params.clearDismissedAt ? { dismissedAt: null } : {}),
+      ...(params.targetEnvironmentId
+        ? { targetEnvironmentId: params.targetEnvironmentId }
+        : {}),
       updatedAt: now,
     })
     .where(

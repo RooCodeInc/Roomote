@@ -24,6 +24,7 @@ import {
   inArray,
   isNull,
   sql,
+  cancelTaskRunDirect,
   claimWorkItem,
   finalizeWorkItemLaunched,
   releaseWorkItemClaim,
@@ -988,44 +989,21 @@ export async function launchQueuedSetupTasksIfReady({
             : {}),
         });
 
-        await db.transaction(async (tx) => {
+        const finalized = await db.transaction(async (tx) => {
           // Fenced finalize: `launching` -> `launched` only when our claim
-          // token still matches. If it returns false our claim was reclaimed
-          // by another launcher between claim and enqueue.
-          const finalized = await finalizeWorkItemLaunched(tx, {
+          // token still matches, stamping `targetEnvironmentId` in the same
+          // guarded write. If it returns false our claim was reclaimed by
+          // another launcher between claim and enqueue.
+          const didFinalize = await finalizeWorkItemLaunched(tx, {
             id: queuedTask.id,
             taskId: launchResult.taskId,
             claimedAt: queuedTask.claimedAt,
+            targetEnvironmentId: matchingEnvironmentId,
           });
 
-          if (!finalized) {
-            // The task is already enqueued but the fencing guard rejected the
-            // finalize, so it now runs unlinked from this work item. No
-            // enqueue-level cancel helper is exposed to this surface, so log
-            // loudly for triage and leave the new claimant's state untouched
-            // (matches the implement.ts / launchActWorkItems orphan handling).
-            console.warn(
-              `[setup-new] finalize lost the fencing guard for onboarding work item ${queuedTask.id}; orphaned task ${launchResult.taskId} runs unlinked (claim reclaimed by another launcher).`,
-            );
-            return;
+          if (!didFinalize) {
+            return false;
           }
-
-          // `finalizeWorkItemLaunched` does not stamp `targetEnvironmentId`, so
-          // set it separately in the same transaction. Guarded on the freshly
-          // written `launchedTaskId` so a superseded launcher can never stamp
-          // onto the new claimant's row.
-          await tx
-            .update(workItems)
-            .set({
-              targetEnvironmentId: matchingEnvironmentId,
-              updatedAt: new Date(),
-            })
-            .where(
-              and(
-                eq(workItems.id, queuedTask.id),
-                eq(workItems.launchedTaskId, launchResult.taskId),
-              ),
-            );
 
           if (queuedTask.suggestionId) {
             await markSuggestionWorkItemLaunched(
@@ -1036,8 +1014,40 @@ export async function launchQueuedSetupTasksIfReady({
               tx,
             );
           }
+
+          return true;
         });
-      } catch {
+
+        if (!finalized) {
+          // The task is already enqueued but the fencing guard rejected the
+          // finalize (our claim was reclaimed by another launcher), so the run
+          // is orphaned from this work item. Best-effort cancel it while it is
+          // still pre-sandbox, and log loudly either way with the cancel
+          // outcome (matches the implement.ts orphan handling).
+          let cancelNote = 'orphaned run left running';
+
+          try {
+            const canceled = await cancelTaskRunDirect({
+              runId: launchResult.id,
+              error:
+                'Canceled: setup-new queued task launch finalize lost the claim fencing guard',
+            });
+            cancelNote = canceled
+              ? 'orphaned run canceled'
+              : 'orphaned run cancel did not apply (already started or terminal)';
+          } catch (cancelError) {
+            cancelNote = `orphaned run cancel failed: ${
+              cancelError instanceof Error
+                ? cancelError.message
+                : String(cancelError)
+            }`;
+          }
+
+          console.warn(
+            `[setup-new] finalize lost the fencing guard for onboarding work item ${queuedTask.id}; orphaned task ${launchResult.taskId} (run ${launchResult.id}) runs unlinked — ${cancelNote}.`,
+          );
+        }
+      } catch (error) {
         // Release our claim back to `open` so a later trigger can retry. The
         // fenced release never reverts a `launched` item and never reverts a
         // claim that was already reclaimed by another launcher.
@@ -1046,6 +1056,12 @@ export async function launchQueuedSetupTasksIfReady({
           claimedAt: queuedTask.claimedAt,
           extraConditions: [eq(workItems.kind, 'onboarding')],
         });
+
+        console.warn(
+          `[setup-new] enqueue/finalize failed for onboarding work item ${queuedTask.id}; released its claim back to open — ${
+            error instanceof Error ? error.message : String(error)
+          }.`,
+        );
       }
     }),
   );
