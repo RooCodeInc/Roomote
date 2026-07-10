@@ -5,6 +5,8 @@ import { TASK_TIMEOUT_MS } from '@roomote/types';
 
 import { CloudJobQueue, type CloudJobQueueEntry } from '../cloud-job-queue';
 
+const QUEUE_KEY = 'queue:cloud-jobs:v2';
+
 function createMockRedis() {
   return new Redis();
 }
@@ -177,7 +179,7 @@ describe('CloudJobQueue - Scope-Based Locking', () => {
       expect(first?.id).toBe(2);
 
       // Queue should be empty now
-      const queueLength = await redis.llen('queue:cloud-jobs');
+      const queueLength = await redis.llen(QUEUE_KEY);
       expect(queueLength).toBe(0);
 
       // Attempt to dequeue from empty queue
@@ -202,7 +204,7 @@ describe('CloudJobQueue - Scope-Based Locking', () => {
       expect(second).toBeNull();
 
       // Release lock
-      await queue.releaseLock(scope);
+      await queue.releaseLock(scope, 1);
 
       // Now third dequeue should get the re-enqueued entry
       const third = await queue.dequeue(false);
@@ -225,7 +227,7 @@ describe('CloudJobQueue - Scope-Based Locking', () => {
       expect(second).toBeNull();
 
       // Release lock
-      await queue.releaseLock(scope);
+      await queue.releaseLock(scope, 3);
 
       // Enqueue new entry
       await queue.enqueue(createTestEntry(4, scope));
@@ -297,13 +299,23 @@ describe('CloudJobQueue - Lock Management', () => {
       await queue.enqueue(entry);
       await queue.dequeue(false); // Acquires lock
 
-      const released = await queue.releaseLock(scope);
+      const released = await queue.releaseLock(scope, entry.id);
       expect(released).toBe(true);
     });
 
     it('should return false for non-existent lock', async () => {
-      const released = await queue.releaseLock('non-existent-scope');
+      const released = await queue.releaseLock('non-existent-scope', 1);
       expect(released).toBe(false);
+    });
+
+    it('should not release a lock owned by another run', async () => {
+      const scope = 'owned-scope';
+
+      await queue.enqueue(createTestEntry(1, scope));
+      await queue.dequeue(false);
+
+      expect(await queue.releaseLock(scope, 2)).toBe(false);
+      expect(await redis.get(scope)).toBe('1');
     });
 
     it('should allow re-acquisition after release', async () => {
@@ -315,7 +327,7 @@ describe('CloudJobQueue - Lock Management', () => {
       expect(first?.id).toBe(1);
 
       // Release
-      await queue.releaseLock(scope);
+      await queue.releaseLock(scope, 1);
 
       // Second acquisition should work
       await queue.enqueue(createTestEntry(2, scope));
@@ -357,11 +369,8 @@ describe('CloudJobQueue - Edge Cases', () => {
   describe('invalid data handling', () => {
     it('should handle invalid JSON gracefully', async () => {
       // Manually push invalid JSON to Redis
-      await redis.rpush('queue:cloud-jobs', 'invalid-json{');
-      await redis.rpush(
-        'queue:cloud-jobs',
-        JSON.stringify(createTestEntry(1, 'valid')),
-      );
+      await redis.rpush(QUEUE_KEY, 'invalid-json{');
+      await queue.enqueue(createTestEntry(1, 'valid'));
 
       // Should skip invalid and return valid
       const result = await queue.dequeue(false);
@@ -369,25 +378,16 @@ describe('CloudJobQueue - Edge Cases', () => {
     });
 
     it('should skip entries with missing id', async () => {
-      await redis.rpush(
-        'queue:cloud-jobs',
-        JSON.stringify({ scope: 'missing-id' }),
-      );
-      await redis.rpush(
-        'queue:cloud-jobs',
-        JSON.stringify(createTestEntry(1, 'valid')),
-      );
+      await redis.rpush(QUEUE_KEY, JSON.stringify({ scope: 'missing-id' }));
+      await queue.enqueue(createTestEntry(1, 'valid'));
 
       const result = await queue.dequeue(false);
       expect(result?.id).toBe(1);
     });
 
     it('should skip entries with missing scope', async () => {
-      await redis.rpush('queue:cloud-jobs', JSON.stringify({ id: 999 }));
-      await redis.rpush(
-        'queue:cloud-jobs',
-        JSON.stringify(createTestEntry(1, 'valid')),
-      );
+      await redis.rpush(QUEUE_KEY, JSON.stringify({ id: 999 }));
+      await queue.enqueue(createTestEntry(1, 'valid'));
 
       const result = await queue.dequeue(false);
       expect(result?.id).toBe(1);
@@ -401,7 +401,7 @@ describe('CloudJobQueue - Edge Cases', () => {
         anotherExtra: 123,
       };
 
-      await redis.rpush('queue:cloud-jobs', JSON.stringify(entryWithExtra));
+      await queue.enqueue(entryWithExtra);
 
       const result = await queue.dequeue(false);
       expect(result?.id).toBe(1);
@@ -412,11 +412,9 @@ describe('CloudJobQueue - Edge Cases', () => {
   describe('retry behavior', () => {
     it('should detect and skip duplicate entries', async () => {
       const entry = createTestEntry(1, 'scope-1');
-      const entryJson = JSON.stringify(entry);
-
-      // Manually push duplicate entries
-      await redis.rpush('queue:cloud-jobs', entryJson);
-      await redis.rpush('queue:cloud-jobs', entryJson);
+      await queue.enqueue(entry);
+      // Duplicate the queue pointer while retaining the canonical hashes.
+      await redis.rpush(QUEUE_KEY, entry.id.toString());
 
       // First dequeue should get the entry and acquire lock
       const first = await queue.dequeue(false);
@@ -524,11 +522,11 @@ describe('CloudJobQueue - Re-enqueue Behavior', () => {
     expect(second).toBeNull();
 
     // Verify entry is still in queue
-    const queueLength = await redis.llen('queue:cloud-jobs');
+    const queueLength = await redis.llen(QUEUE_KEY);
     expect(queueLength).toBe(1);
 
     // Release lock and verify we can get the re-enqueued entry
-    await queue.releaseLock(scope);
+    await queue.releaseLock(scope, 1);
     const third = await queue.dequeue(false);
     expect(third?.id).toBe(2);
   });
@@ -556,7 +554,9 @@ describe('CloudJobQueue - Scope Deduplication', () => {
       await queue.enqueue(createTestEntry(1, scope));
 
       // Enqueue second entry with same scope
-      await queue.enqueue(createTestEntry(2, scope));
+      const evicted = await queue.enqueue(createTestEntry(2, scope));
+
+      expect(evicted).toEqual([createTestEntry(1, scope)]);
 
       // Should only get the latest entry (id: 2)
       const result = await queue.dequeue(false);
@@ -577,12 +577,26 @@ describe('CloudJobQueue - Scope Deduplication', () => {
       await queue.enqueue(createTestEntry(3, scope));
 
       // Should only have one entry (the latest one)
-      const queueLength = await redis.llen('queue:cloud-jobs');
+      const queueLength = await redis.llen(QUEUE_KEY);
       expect(queueLength).toBe(1);
 
       // Should get the latest entry
       const result = await queue.dequeue(false);
       expect(result?.id).toBe(3);
+    });
+
+    it('atomically keeps one winner across concurrent producers', async () => {
+      const scope = 'concurrent-scope';
+
+      await Promise.all(
+        Array.from({ length: 25 }, (_, index) =>
+          queue.enqueue(createTestEntry(index + 1, scope)),
+        ),
+      );
+
+      expect(await redis.llen(QUEUE_KEY)).toBe(1);
+      expect((await queue.dequeue(false))?.scope).toBe(scope);
+      expect(await queue.dequeue(false)).toBeNull();
     });
 
     it('should preserve entries with different scopes', async () => {
@@ -592,7 +606,7 @@ describe('CloudJobQueue - Scope Deduplication', () => {
       await queue.enqueue(createTestEntry(3, 'scope-C'));
 
       // All three should be preserved
-      const queueLength = await redis.llen('queue:cloud-jobs');
+      const queueLength = await redis.llen(QUEUE_KEY);
       expect(queueLength).toBe(3);
 
       // Should dequeue in FIFO order
@@ -615,7 +629,7 @@ describe('CloudJobQueue - Scope Deduplication', () => {
       await queue.enqueue(createTestEntry(5, 'scope-B')); // Replaces id: 2
 
       // Should have 3 entries (scope-A: 3, scope-C: 4, scope-B: 5)
-      const queueLength = await redis.llen('queue:cloud-jobs');
+      const queueLength = await redis.llen(QUEUE_KEY);
       expect(queueLength).toBe(3);
 
       // Dequeue all and verify we get the latest for each scope
@@ -665,11 +679,11 @@ describe('CloudJobQueue - Scope Deduplication', () => {
       await queue.enqueue(createTestEntry(2, scope));
 
       // Verify only one entry in queue
-      const queueLength = await redis.llen('queue:cloud-jobs');
+      const queueLength = await redis.llen(QUEUE_KEY);
       expect(queueLength).toBe(1);
 
       // Release lock
-      await queue.releaseLock(scope);
+      await queue.releaseLock(scope, 1);
 
       // Should get the new entry
       const result = await queue.dequeue(false);
@@ -695,7 +709,7 @@ describe('CloudJobQueue - Scope Deduplication', () => {
       await queue.enqueue(createTestEntry(3, scope)); // Should replace re-enqueued entry
 
       // Release lock
-      await queue.releaseLock(scope);
+      await queue.releaseLock(scope, 2);
 
       // Should get the newest entry (id: 3)
       const third = await queue.dequeue(false);
@@ -708,7 +722,7 @@ describe('CloudJobQueue - Scope Deduplication', () => {
       const scope = 'valid-scope';
 
       // Add invalid entry
-      await redis.rpush('queue:cloud-jobs', 'invalid-json');
+      await redis.rpush(QUEUE_KEY, 'invalid-json');
 
       // Add valid entry
       await queue.enqueue(createTestEntry(1, scope));
@@ -717,7 +731,7 @@ describe('CloudJobQueue - Scope Deduplication', () => {
       await queue.enqueue(createTestEntry(2, scope));
 
       // Invalid entry should be preserved, only id:2 should remain for the scope
-      const queueLength = await redis.llen('queue:cloud-jobs');
+      const queueLength = await redis.llen(QUEUE_KEY);
       expect(queueLength).toBe(2);
 
       // Dequeue should skip invalid and get valid entry
@@ -729,7 +743,7 @@ describe('CloudJobQueue - Scope Deduplication', () => {
       // Enqueue into empty queue
       await queue.enqueue(createTestEntry(1, 'scope-1'));
 
-      const queueLength = await redis.llen('queue:cloud-jobs');
+      const queueLength = await redis.llen(QUEUE_KEY);
       expect(queueLength).toBe(1);
 
       const result = await queue.dequeue(false);
