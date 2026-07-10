@@ -8,7 +8,7 @@ Gitea support uses a deployment-owned token and instance URL. There is no
 self-serve OAuth or Gitea App installation flow yet, so an operator provides
 the Gitea instance details and syncs repositories from Settings.
 
-Repository sync can also create pull request webhooks, allowing Review Code
+Repository sync can also create pull request webhooks, allowing Code Reviewer
 automation and `@roomote` pull request comments to work for synced Gitea
 repositories.
 
@@ -66,9 +66,9 @@ generates and persists one as an encrypted deployment environment variable.
 
 ## Enable review automation
 
-Gitea pull request reviews use the same Review Code automation targeting model
+Gitea pull request reviews use the same Code Reviewer automation targeting model
 as GitHub and GitLab. After syncing repositories, associate the Gitea repository
-with the intended environment and enable Review Code automation for that target.
+with the intended environment and enable Code Reviewer automation for that target.
 
 Open or reopened PR events enqueue initial review tasks. PR sync events enqueue
 delta reviews. `@roomote` comments on Gitea pull requests route into the

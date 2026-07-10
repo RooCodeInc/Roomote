@@ -332,7 +332,7 @@ describe('Automations selection helpers', () => {
     );
   });
 
-  it('includes the reviewer all-author setting when saving Review Code', () => {
+  it('includes the reviewer all-author setting when saving Code Reviewer', () => {
     const saveInput = buildAutomationSettingsSaveInput(
       {
         ...baseFormState,

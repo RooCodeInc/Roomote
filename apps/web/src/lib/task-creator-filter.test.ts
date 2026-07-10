@@ -110,4 +110,8 @@ describe('formatAutomationLabel', () => {
     );
     expect(formatAutomationLabel('ci-fixer')).toBe('CI Fixer');
   });
+
+  it('uses product names for keys that do not title-case cleanly', () => {
+    expect(formatAutomationLabel('review_code')).toBe('Code Reviewer');
+  });
 });

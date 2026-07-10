@@ -302,7 +302,7 @@ async function openSuggesterCard() {
 
 async function openReviewerCard() {
   fireEvent.click(
-    await screen.findByRole('button', { name: 'Expand Review Code' }),
+    await screen.findByRole('button', { name: 'Expand Code Reviewer' }),
   );
 }
 
