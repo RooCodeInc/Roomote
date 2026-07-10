@@ -60,9 +60,32 @@ The installer also sets up the `roomote` host CLI for common operations:
 
 ```sh
 roomote upgrade   # pull and roll out newer images
-roomote backup    # back up the database and configuration
+roomote backup    # create an encrypted deployment recovery bundle
 roomote logs      # tail service logs
 ```
+
+`roomote backup` prompts for a passphrase and writes a versioned `.roomote`
+bundle under `/opt/roomote/backups`. The bundle contains PostgreSQL, the
+deployment configuration and encryption/signing keys, local MinIO artifacts,
+schema metadata, and the exact deployed image identities. Store the passphrase
+separately in your secret manager; the backup cannot be restored without it.
+
+Use `roomote backup --include-redis` when queued work, BullMQ schedules,
+sessions, and other transient Redis state must survive. Backups briefly stop
+application writers (and active Docker task workers) so the included stores
+share a documented consistency point. If object storage is external, the
+bundle records its endpoint and bucket but does not copy its objects; keep a
+provider-level backup of that bucket.
+
+Restore only after installing Roomote on the replacement host:
+
+```sh
+roomote restore /path/to/backup.roomote --yes
+```
+
+Restore verifies the encrypted bundle and checksums before replacing any
+state, restores the original `.env` (including `ENCRYPTION_KEY`), repopulates
+empty PostgreSQL/MinIO/Redis volumes, and starts the recorded Roomote release.
 
 ## Deployment modes
 

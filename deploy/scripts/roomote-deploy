@@ -11,8 +11,8 @@ Commands:
   create    Provision a VM and start the Roomote stack
   upgrade   Pull and run a new immutable image tag
   destroy   Destroy the Terraform-managed deployment
-  backup    Dump Postgres data from a deployment
-  restore   Restore a SQL dump into a deployment
+  backup    Create an encrypted deployment recovery bundle
+  restore   Restore an encrypted deployment recovery bundle
 EOF
 }
 

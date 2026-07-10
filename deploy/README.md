@@ -298,59 +298,82 @@ to adjust rollback depth for a deployment. Retention is best-effort after a
 healthy rollout; a Docker cleanup failure prints a warning instead of failing
 the completed deploy or upgrade.
 
-## Back Up Data
+## Back Up a Deployment
 
-For local Postgres and managed Postgres, use the backup command:
+Create a passphrase file in your secret manager or a temporary root-readable
+file. The passphrase must be stored separately from the bundle:
 
 ```bash
-deploy/scripts/roomote-deploy backup --customer matt-test
+umask 077
+openssl rand -base64 32 > /secure/path/roomote-backup-passphrase
 ```
 
-It creates a remote dump in `/opt/roomote/backups/` and copies it to:
+Then create the backup:
+
+```bash
+deploy/scripts/roomote-deploy backup \
+  --customer matt-test \
+  --passphrase-file /secure/path/roomote-backup-passphrase \
+  --include-redis
+```
+
+It creates an encrypted, versioned `.roomote` bundle in
+`/opt/roomote/backups/` and copies it to:
 
 ```text
 deploy/state/matt-test/backups/
 ```
 
-Equivalent remote command:
+The bundle contains:
+
+- a PostgreSQL dump;
+- `/opt/roomote/.env`, including the original `ENCRYPTION_KEY` and signing
+  keys, plus the Compose and Caddy configuration;
+- the local MinIO data volume, or a manifest identifying an external bucket;
+- Redis when `--include-redis` is present;
+- the Roomote release, schema version, checksums, and exact image digests.
+
+The backup stops application writers and Docker task workers before capturing
+the stores. This gives PostgreSQL, local MinIO, and optional Redis an
+application-quiesced consistency point, but creates a maintenance window. With
+external object storage, bucket objects are not copied; use provider-level
+bucket backups as well.
+
+Equivalent on-host command:
 
 ```bash
-cd /opt/roomote
-mkdir -p backups
-docker run --rm --network roomote_default --env-file /opt/roomote/.env \
-  postgres:17.5 sh -c 'pg_dump --clean --if-exists --no-owner --no-privileges "$DATABASE_URL"' \
-  > "backups/backup-$(date +%F-%H%M%S).sql"
+roomote backup \
+  --passphrase-file /secure/path/roomote-backup-passphrase \
+  --include-redis
 ```
 
-## Restore Data
+## Restore a Deployment
 
-Restores are intentionally explicit because they overwrite database state:
+Install Roomote on the replacement host first so Docker and the host CLI are
+present. Restores are intentionally explicit because they replace
+configuration, keys, database records, artifacts, and optional Redis state:
 
 ```bash
 deploy/scripts/roomote-deploy restore \
   --customer matt-test \
-  --backup deploy/state/matt-test/backups/backup-2026-06-29-120000.sql \
+  --backup deploy/state/matt-test/backups/backup-20260710T120000Z.roomote \
+  --passphrase-file /secure/path/roomote-backup-passphrase \
   --yes
 ```
 
-The restore stops the app services (web, API, controller, BullMQ, preview
-proxy) before dropping the schema so live connections are not killed
-mid-restore and nothing writes while the dump loads, then brings the stack
-back up with `--wait` afterward.
+Restore decrypts and verifies the full bundle before changing the target host.
+It then stops the new installation, restores the original `.env` and release
+files, repins the recorded image digests, repopulates empty local MinIO and
+Redis volumes, restores PostgreSQL, and brings the recorded stack up with
+`--wait`. If Redis was omitted, its target volume is cleared. External object
+storage must already contain the objects referenced by the restored database.
 
-Equivalent remote command after copying a dump to `/opt/roomote/backups`:
+Equivalent command after copying a bundle to the new host:
 
 ```bash
-cd /opt/roomote
-docker compose --env-file .env -f docker-compose.prod.yml \
-  stop web api controller bullmq preview-proxy
-docker run --rm --network roomote_default --env-file /opt/roomote/.env \
-  postgres:17.5 sh -c 'psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -c "DROP SCHEMA IF EXISTS public CASCADE; CREATE SCHEMA public;"'
-docker run --rm --network roomote_default --env-file /opt/roomote/.env -i \
-  postgres:17.5 sh -c 'psql "$DATABASE_URL" -v ON_ERROR_STOP=1' \
-  < /opt/roomote/backups/backup.sql
-docker compose --env-file .env -f docker-compose.prod.yml \
-  up -d --wait --wait-timeout 600
+roomote restore /opt/roomote/backups/backup.roomote \
+  --passphrase-file /secure/path/roomote-backup-passphrase \
+  --yes
 ```
 
 ## Destroy
