@@ -50,7 +50,9 @@ interface PrepareActorScopedTurnOptions {
   deferReconnectUntilTurnBoundary?: boolean;
   onMismatch?: ActorMismatchPolicy;
   getLastKnownActorUserId?: () => string | null;
+  hasPendingGitAuthorSync?: () => boolean;
   onActorSynced?: (userId: string | null) => void;
+  onGitAuthorSyncFailed?: () => void;
   /** Best-effort user-facing notice when a mismatched message is skipped. */
   notifyMismatchSkipped?: ActorMismatchSkipNotifier;
   logger: {
@@ -73,7 +75,9 @@ interface SyncActorScopedTurnStateOptions {
   logPrefix: string;
   onMismatch?: ActorMismatchPolicy;
   getLastKnownActorUserId?: () => string | null;
+  hasPendingGitAuthorSync?: () => boolean;
   onActorSynced?: (userId: string | null) => void;
+  onGitAuthorSyncFailed?: () => void;
   /** Best-effort user-facing notice when a mismatched message is skipped. */
   notifyMismatchSkipped?: ActorMismatchSkipNotifier;
   logger: {
@@ -110,7 +114,9 @@ export async function syncActorScopedTurnState({
   logPrefix,
   onMismatch = 'block',
   getLastKnownActorUserId,
+  hasPendingGitAuthorSync,
   onActorSynced,
+  onGitAuthorSyncFailed,
   notifyMismatchSkipped,
   logger,
 }: SyncActorScopedTurnStateOptions): Promise<SyncActorScopedTurnStateResult> {
@@ -172,19 +178,20 @@ export async function syncActorScopedTurnState({
   // turn runs as that single identity.
   const effectiveUserId = outcome.actingUserId ?? null;
 
-  if (outcome.result === 'updated') {
+  if (outcome.result === 'updated' || hasPendingGitAuthorSync?.()) {
     try {
       await syncRuntimeGitAuthor({
         cloudJobId,
         workingDirectory,
       });
-      // Advance the last-prepared marker only once the author sync landed:
-      // on failure the next turn still reports the stale marker, gets
-      // `updated` again, and retries the sync. Until it succeeds, commits
-      // keep the previous actor's git identity and each turn logs one
-      // error — bounded, self-healing noise.
+      // Advance the last-prepared marker and clear any independent retry
+      // state only after both git config writes land. The independent dirty
+      // bit matters when a partial write fails during A -> B and the server
+      // switches back to A before retry: actor equality alone would otherwise
+      // suppress the repair and leave a mixed name/email configuration.
       onActorSynced?.(effectiveUserId);
     } catch (error) {
+      onGitAuthorSyncFailed?.();
       logger.error(
         `${logPrefix} Failed to update git author for cloud job ${cloudJobId} (will retry on the next turn): ${
           error instanceof Error ? error.message : String(error)
@@ -205,7 +212,9 @@ export async function prepareActorScopedTurn({
   deferReconnectUntilTurnBoundary = false,
   onMismatch = 'block',
   getLastKnownActorUserId,
+  hasPendingGitAuthorSync,
   onActorSynced,
+  onGitAuthorSyncFailed,
   notifyMismatchSkipped,
   logger,
   refreshActorScopedIntegrations,
@@ -225,7 +234,9 @@ export async function prepareActorScopedTurn({
     logPrefix,
     onMismatch,
     getLastKnownActorUserId,
+    hasPendingGitAuthorSync,
     onActorSynced,
+    onGitAuthorSyncFailed,
     notifyMismatchSkipped,
     logger,
   });

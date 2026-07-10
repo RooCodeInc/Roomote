@@ -439,4 +439,72 @@ describe('syncActorScopedTurnState', () => {
     expect(onActorSynced).toHaveBeenCalledExactlyOnceWith('user-2');
     expect(lastPrepared).toBe('user-2');
   });
+
+  it('repairs a partial git identity when the actor switches back before retry', async () => {
+    // The first command in syncRuntimeGitAuthor may update user.email before
+    // the user.name command fails. If B then switches back to A, actor
+    // equality alone reports `unchanged`; the independent dirty bit must
+    // still force both fields to be written again for A.
+    const logger = { error: vi.fn() };
+    let lastPrepared: string | null = 'user-1';
+    let gitAuthorSyncPending = false;
+    const stateCallbacks = {
+      getLastKnownActorUserId: () => lastPrepared,
+      hasPendingGitAuthorSync: () => gitAuthorSyncPending,
+      onActorSynced: (userId: string | null) => {
+        lastPrepared = userId;
+        gitAuthorSyncPending = false;
+      },
+      onGitAuthorSyncFailed: () => {
+        gitAuthorSyncPending = true;
+      },
+    };
+
+    mockSyncActingUserId
+      .mockResolvedValueOnce({
+        result: 'updated',
+        actingUserId: 'user-2',
+      })
+      .mockResolvedValueOnce({
+        result: 'unchanged',
+        actingUserId: 'user-1',
+      });
+    mockSyncRuntimeGitAuthor
+      .mockRejectedValueOnce(new Error('name write failed'))
+      .mockResolvedValueOnce(undefined);
+
+    await expect(
+      syncActorScopedTurnState({
+        cloudJobId: 42,
+        targetUserId: 'user-2',
+        workingDirectory: '/tmp/workspace',
+        logPrefix: '[test]',
+        ...stateCallbacks,
+        logger,
+      }),
+    ).resolves.toEqual({ ok: true, effectiveUserId: 'user-2' });
+
+    expect(lastPrepared).toBe('user-1');
+    expect(gitAuthorSyncPending).toBe(true);
+
+    await expect(
+      syncActorScopedTurnState({
+        cloudJobId: 42,
+        targetUserId: 'user-1',
+        workingDirectory: '/tmp/workspace',
+        logPrefix: '[test]',
+        ...stateCallbacks,
+        logger,
+      }),
+    ).resolves.toEqual({ ok: true, effectiveUserId: 'user-1' });
+
+    expect(mockSyncActingUserId).toHaveBeenLastCalledWith({
+      cloudJobId: 42,
+      newUserId: 'user-1',
+      lastKnownUserId: 'user-1',
+    });
+    expect(mockSyncRuntimeGitAuthor).toHaveBeenCalledTimes(2);
+    expect(lastPrepared).toBe('user-1');
+    expect(gitAuthorSyncPending).toBe(false);
+  });
 });

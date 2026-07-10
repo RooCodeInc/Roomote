@@ -813,9 +813,15 @@ export const runTask = async ({
     // the source of truth; this only tracks what this worker last applied so
     // reconciliation knows when to refresh.
     let lastPreparedActorUserId: string | null = cloudJob.actingUserId ?? null;
+    let gitAuthorSyncPending = false;
     const getLastKnownActorUserId = () => lastPreparedActorUserId;
+    const hasPendingGitAuthorSync = () => gitAuthorSyncPending;
     const onActorSynced = (userId: string | null) => {
       lastPreparedActorUserId = userId;
+      gitAuthorSyncPending = false;
+    };
+    const onGitAuthorSyncFailed = () => {
+      gitAuthorSyncPending = true;
     };
     const notifyMismatchSkipped = createActorMismatchSkipNotifier({
       cloudJobId: cloudJob.id,
@@ -840,7 +846,9 @@ export const runTask = async ({
           options?.deferReconnectUntilTurnBoundary,
         onMismatch: options?.onMismatch,
         getLastKnownActorUserId,
+        hasPendingGitAuthorSync,
         onActorSynced,
+        onGitAuthorSyncFailed,
         notifyMismatchSkipped,
         logger,
         refreshActorScopedIntegrations,
@@ -864,7 +872,9 @@ export const runTask = async ({
         // (with a resend notice) rather than stalling the queue forever.
         onMismatch: 'skip',
         getLastKnownActorUserId,
+        hasPendingGitAuthorSync,
         onActorSynced,
+        onGitAuthorSyncFailed,
         notifyMismatchSkipped,
         logger,
       });
