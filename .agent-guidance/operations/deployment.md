@@ -1,7 +1,7 @@
 ---
 title: Deployment & Release
 status: active
-last_reviewed: 2026-07-08
+last_reviewed: 2026-07-10
 owner: engineering
 summary: Local-first deployment and release guidance for the Roomote split, covering Docker Compose infrastructure, PM2 development services, the public self-host operator guide, the single-host Caddy production overlay, the one-command host installer and roomote host CLI, the V1 GHCR and DigitalOcean deployment flow, preview image publishing, CI, and current managed-host exclusions.
 ---
@@ -550,14 +550,9 @@ workflow. Production can omit `APP_ENV` or set `APP_ENV=production` and should
 deploy immutable `v*` image tags. Both environments still use
 `NODE_ENV=production` because the deployed containers are production builds.
 
-The `Publish GHCR Images` workflow auto-deploys the preview droplet after all
-`develop-<short-sha>` images publish successfully. That deploy job runs in the
-GitHub `preview` environment, uses the environment-scoped
-`ROOMOTE_PREVIEW_SSH_PRIVATE_KEY`, pinned `ROOMOTE_PREVIEW_KNOWN_HOSTS`, and
-preview host/customer variables, then calls `roomote-deploy upgrade` with the
-same immutable `develop-<short-sha>` tag. Keep the `preview` environment
-restricted to the `develop` branch and keep the deployment serialized through
-the workflow's `preview-deploy` concurrency group.
+Preview soak hosts are upgraded manually with `roomote-deploy upgrade` after the
+GHCR workflow publishes the matching `develop-<short-sha>` image tag. The
+publish workflow no longer auto-deploys a DigitalOcean preview droplet.
 
 The same workflow has an optional `deploy-railway` job that keeps a Railway
 deployment current with every develop build. It is gated on the repository

@@ -278,64 +278,6 @@ jobs:
           docker buildx imagetools create "${tag_args[@]}" "${digest_refs[@]}"
           docker buildx imagetools inspect "$IMAGE:$VERSION"
 
-  deploy-preview:
-    name: Deploy preview
-    runs-on: blacksmith-4vcpu-ubuntu-2404
-    needs: publish
-    if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/develop' }}
-    environment: preview
-    concurrency:
-      group: preview-deploy
-      cancel-in-progress: false
-    permissions:
-      contents: read
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-
-      - name: Resolve preview version
-        id: vars
-        shell: bash
-        run: |
-          set -euo pipefail
-          echo "version=develop-${GITHUB_SHA:0:8}" >> "$GITHUB_OUTPUT"
-
-      - name: Configure SSH
-        shell: bash
-        env:
-          SSH_PRIVATE_KEY: ${{ secrets.ROOMOTE_PREVIEW_SSH_PRIVATE_KEY }}
-          KNOWN_HOSTS: ${{ vars.ROOMOTE_PREVIEW_KNOWN_HOSTS }}
-        run: |
-          set -euo pipefail
-          : "${SSH_PRIVATE_KEY:?ROOMOTE_PREVIEW_SSH_PRIVATE_KEY is required}"
-          : "${KNOWN_HOSTS:?ROOMOTE_PREVIEW_KNOWN_HOSTS is required}"
-
-          install -d -m 700 ~/.ssh
-          printf '%s\n' "$SSH_PRIVATE_KEY" > ~/.ssh/roomote-preview-deploy
-          printf '%s\n' "$KNOWN_HOSTS" > ~/.ssh/known_hosts
-          chmod 600 ~/.ssh/roomote-preview-deploy ~/.ssh/known_hosts
-
-      - name: Upgrade preview deployment
-        shell: bash
-        env:
-          ROOMOTE_PREVIEW_CUSTOMER: ${{ vars.ROOMOTE_PREVIEW_CUSTOMER }}
-          ROOMOTE_PREVIEW_HOST: ${{ vars.ROOMOTE_PREVIEW_HOST }}
-          ROOMOTE_PREVIEW_SSH_USER: ${{ vars.ROOMOTE_PREVIEW_SSH_USER }}
-          ROOMOTE_IMAGE_RETENTION_RELEASES: ${{ vars.ROOMOTE_IMAGE_RETENTION_RELEASES || '3' }}
-          VERSION: ${{ steps.vars.outputs.version }}
-        run: |
-          set -euo pipefail
-          : "${ROOMOTE_PREVIEW_CUSTOMER:?ROOMOTE_PREVIEW_CUSTOMER is required}"
-          : "${ROOMOTE_PREVIEW_HOST:?ROOMOTE_PREVIEW_HOST is required}"
-          : "${VERSION:?version is required}"
-
-          deploy/scripts/roomote-deploy upgrade \
-            --customer "$ROOMOTE_PREVIEW_CUSTOMER" \
-            --host "$ROOMOTE_PREVIEW_HOST" \
-            --ssh-user "${ROOMOTE_PREVIEW_SSH_USER:-root}" \
-            --ssh-private-key "$HOME/.ssh/roomote-preview-deploy" \
-            --version "$VERSION"
-
   # Optional: keep a Railway deployment pinned to every develop build. The
   # job talks to Railway's public GraphQL API with an environment-scoped
   # project token: it finds every service in that environment running the
