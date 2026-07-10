@@ -230,6 +230,16 @@ chmod 600 .env
 docker compose --env-file .env -f docker-compose.prod.yml config >/dev/null
 docker pull "$worker_image"
 docker compose --env-file .env -f docker-compose.prod.yml pull
+# Migrations run before any running service is replaced. Drizzle applies all
+# pending migrations in a single transaction, so a failure here rolls the
+# schema back while the previous release keeps serving.
+echo "Applying database migrations before replacing running services"
+if ! docker compose --env-file .env -f docker-compose.prod.yml run --rm db-migrate; then
+  echo "Database migrations failed and were rolled back; the previous release keeps serving." >&2
+  echo "Restarting the previous controller. Re-run roomote-deploy upgrade with the previous tag to restore deployment metadata, or fix the migration and retry." >&2
+  docker compose --env-file .env -f docker-compose.prod.yml start controller || true
+  exit 1
+fi
 docker compose --env-file .env -f docker-compose.prod.yml up -d --wait --wait-timeout 600
 systemctl enable roomote-compose.service
 REMOTE

@@ -276,8 +276,17 @@ docker compose --env-file .env -f docker-compose.prod.yml stop controller || tru
 DOCKER_WORKER_IMAGE="$(awk -F= '/^(export[[:space:]]+)?DOCKER_WORKER_IMAGE=/ { sub(/^[^=]*=/, ""); print; exit }' .env)"
 docker pull "$DOCKER_WORKER_IMAGE"
 docker compose --env-file .env -f docker-compose.prod.yml pull
+docker compose --env-file .env -f docker-compose.prod.yml run --rm db-migrate
 docker compose --env-file .env -f docker-compose.prod.yml up -d --wait --wait-timeout 600
 ```
+
+Database migrations run as a dedicated one-shot step after images are pulled
+and before any running service is replaced. If the migration step fails, the
+deployer restarts the previous controller and exits with the previous release
+still serving; see the compatibility policy below for why that is always safe.
+The on-host `roomote upgrade` additionally creates an encrypted pre-upgrade
+backup and restores the previous deployment configuration files when the
+migration step fails.
 
 The Compose file defines container healthchecks for `web`, `api`, `controller`,
 `bullmq`, and `preview-proxy`. The controller probe uses the API's Redis
@@ -302,6 +311,116 @@ to remove any image used by a running or stopped container. Use
 to adjust rollback depth for a deployment. Retention is best-effort after a
 healthy rollout; a Docker cleanup failure prints a warning instead of failing
 the completed deploy or upgrade.
+
+## Upgrade And Migration Compatibility Policy
+
+This is the contract between releases, migrations, and the upgrade tooling.
+Schema changes that cannot satisfy it must be split across releases.
+
+### Expand/contract migrations
+
+Every migration must keep the previous release working against the new
+schema. Ship schema changes in two phases:
+
+- **Expand** (safe in any release): add tables, add nullable columns, add
+  columns with database-side defaults, add indexes, widen types, add enum
+  values. New code reads and writes the new shape; old code keeps working
+  because nothing it uses changed.
+- **Contract** (only after no supported version references the old shape):
+  drop or rename tables and columns, add `NOT NULL` to existing columns,
+  narrow types, remove enum values. A rename is an expand (add the new
+  column, dual-write, backfill) followed by a contract (drop the old column)
+  at least one release later.
+
+Long-running backfills do not belong in migrations. Run them as idempotent
+application code after the rollout so the migration step stays fast enough
+for the rollout timeout below.
+
+### Minimum rollback-compatible version
+
+The schema produced by release N must support the application code of the
+release immediately before it (N-1). The supported rollback target is
+therefore always the previously deployed release, without undoing
+migrations: roll the application back and leave the schema at N. Rolling
+back more than one release is not guaranteed by this policy; use the
+pre-upgrade backup bundle for that instead.
+
+### Pre-upgrade backup
+
+`roomote upgrade` creates an encrypted backup bundle (the same format as
+`roomote backup`) before it changes any deployment file or container. The
+passphrase comes from `--backup-passphrase-file`, then
+`ROOMOTE_BACKUP_PASSPHRASE`; with neither, the command generates one and
+stores it next to the bundle under `/opt/roomote/backups/`, in the same
+trust domain as `/opt/roomote/.env`. Move both off-host if the bundle
+should double as a disaster-recovery copy. `--skip-backup` opts out, and
+`roomote rollback` skips it by design so an unhealthy stack cannot block
+the rollback. The operator-run deployer does not back up implicitly; run
+`roomote-deploy backup` before production upgrades.
+
+### Migration lock and timeout behavior
+
+Migrations run as the one-shot `db-migrate` service from the release being
+deployed. Drizzle applies all pending migrations inside a single
+transaction, so a failed migration rolls the schema back to its previous
+state. There is no advisory lock and no statement timeout on the migration
+step itself; single-writer behavior comes from running one `db-migrate`
+container per deployment, so never run two upgrades against the same
+database concurrently. Every application service in the Compose stack waits
+on `db-migrate` completing successfully before it starts, and the rollout as
+a whole is bounded by `up --wait --wait-timeout 600`.
+
+### Failure behavior
+
+The upgrade sequence pulls images first, then runs migrations, and only then
+replaces running services. A migration failure aborts the upgrade with the
+previous release still serving: `roomote upgrade` restores the previous
+Compose, Caddy, and `.env` files and restarts the controller; the deployer
+restarts the controller and asks the operator to re-run with the previous
+tag. A failure after migrations succeeded (for example `up --wait` timing
+out) leaves the schema at the candidate version, which the previous release
+supports by the rule above, so `roomote rollback` or an upgrade to the
+previous tag recovers without touching the database.
+
+### Rollback path
+
+- `roomote rollback` re-deploys the release recorded in
+  `ROOMOTE_PREVIOUS_VERSION` by the last upgrade.
+- `roomote upgrade <previous-tag>` (or `roomote-deploy upgrade --version
+<previous-tag>`) is the explicit equivalent and works for any retained tag.
+- `roomote restore <bundle> --yes` with the pre-upgrade bundle is the
+  last-resort path and also rewinds the database and artifacts.
+
+Image retention keeps the current release plus the newest tags (default 3
+total), so the rollback image is normally still on the host. The restore
+path is exercised in CI on every non-docs change (the backup-restore job),
+and the rollback path is exercised against real images by the publish gate
+below.
+
+### Version visibility
+
+Settings -> Deployment -> Diagnostics surfaces the running application
+version (`Roomote version`, from the `RELEASE_VERSION` baked into the image)
+and the schema version (`Current migration`, the latest applied Drizzle
+migration hash). The same pair is recorded in every backup manifest as
+`roomoteVersion` and `schemaVersion`, and `/opt/roomote/.env` records
+`ROOMOTE_VERSION` plus the `ROOMOTE_PREVIOUS_VERSION` rollback target.
+
+### CI enforcement
+
+- **Upgrade Compatibility** (`.github/workflows/CI.yml`, every non-docs PR):
+  boots the previous published release from GHCR, applies the candidate
+  branch's migrations to its database, and requires the previous release to
+  stay healthy, including a cold restart, on the candidate schema
+  ([`deploy/ci/upgrade-compatibility.sh`](ci/upgrade-compatibility.sh)).
+- **Fresh-host Backup Restore** (every non-docs PR): restores an encrypted
+  bundle onto empty volumes
+  ([`deploy/host/tests/backup-restore.integration.sh`](host/tests/backup-restore.integration.sh)).
+- **Deployment acceptance** (`publish-ghcr.yml`, gates every image publish):
+  builds candidate images, upgrades the previous published release to the
+  candidate, rolls back, re-upgrades, launches a real Docker task, and
+  restores a backup onto fresh volumes
+  ([`deploy/ci/deployment-smoke.sh`](ci/deployment-smoke.sh)).
 
 ## Back Up a Deployment
 
