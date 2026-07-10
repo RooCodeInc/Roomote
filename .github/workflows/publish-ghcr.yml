@@ -154,21 +154,97 @@ jobs:
         include:
           - app: app
             dockerfile: .docker/app/Dockerfile
+            target: runtime-app
             image: roomote-app
             arch: amd64
             runner: blacksmith-4vcpu-ubuntu-2404
           - app: app
             dockerfile: .docker/app/Dockerfile
+            target: runtime-app
             image: roomote-app
+            arch: arm64
+            runner: blacksmith-4vcpu-ubuntu-2404-arm
+          - app: web
+            dockerfile: .docker/app/Dockerfile
+            target: runtime-web
+            image: roomote-web
+            arch: amd64
+            runner: blacksmith-4vcpu-ubuntu-2404
+          - app: web
+            dockerfile: .docker/app/Dockerfile
+            target: runtime-web
+            image: roomote-web
+            arch: arm64
+            runner: blacksmith-4vcpu-ubuntu-2404-arm
+          - app: api
+            dockerfile: .docker/app/Dockerfile
+            target: runtime-api
+            image: roomote-api
+            arch: amd64
+            runner: blacksmith-4vcpu-ubuntu-2404
+          - app: api
+            dockerfile: .docker/app/Dockerfile
+            target: runtime-api
+            image: roomote-api
+            arch: arm64
+            runner: blacksmith-4vcpu-ubuntu-2404-arm
+          - app: controller
+            dockerfile: .docker/app/Dockerfile
+            target: runtime-controller
+            image: roomote-controller
+            arch: amd64
+            runner: blacksmith-4vcpu-ubuntu-2404
+          - app: controller
+            dockerfile: .docker/app/Dockerfile
+            target: runtime-controller
+            image: roomote-controller
+            arch: arm64
+            runner: blacksmith-4vcpu-ubuntu-2404-arm
+          - app: bullmq
+            dockerfile: .docker/app/Dockerfile
+            target: runtime-bullmq
+            image: roomote-bullmq
+            arch: amd64
+            runner: blacksmith-4vcpu-ubuntu-2404
+          - app: bullmq
+            dockerfile: .docker/app/Dockerfile
+            target: runtime-bullmq
+            image: roomote-bullmq
+            arch: arm64
+            runner: blacksmith-4vcpu-ubuntu-2404-arm
+          - app: preview-proxy
+            dockerfile: .docker/app/Dockerfile
+            target: runtime-preview-proxy
+            image: roomote-preview-proxy
+            arch: amd64
+            runner: blacksmith-4vcpu-ubuntu-2404
+          - app: preview-proxy
+            dockerfile: .docker/app/Dockerfile
+            target: runtime-preview-proxy
+            image: roomote-preview-proxy
+            arch: arm64
+            runner: blacksmith-4vcpu-ubuntu-2404-arm
+          - app: migrate
+            dockerfile: .docker/app/Dockerfile
+            target: runtime-migrate
+            image: roomote-migrate
+            arch: amd64
+            runner: blacksmith-4vcpu-ubuntu-2404
+          - app: migrate
+            dockerfile: .docker/app/Dockerfile
+            target: runtime-migrate
+            image: roomote-migrate
             arch: arm64
             runner: blacksmith-4vcpu-ubuntu-2404-arm
           - app: worker
             dockerfile: apps/worker/Dockerfile
+            target: runtime
             image: roomote-worker
             arch: amd64
             runner: blacksmith-4vcpu-ubuntu-2404
           - app: worker
             dockerfile: apps/worker/Dockerfile
+            target: runtime
             image: roomote-worker
             arch: arm64
             runner: blacksmith-4vcpu-ubuntu-2404-arm
@@ -196,6 +272,7 @@ jobs:
         with:
           context: .
           file: ${{ matrix.dockerfile }}
+          target: ${{ matrix.target }}
           platforms: linux/${{ matrix.arch }}
           outputs: type=image,name=${{ env.REGISTRY }}/${{ needs.prepare.outputs.owner }}/${{ matrix.image }},push-by-digest=true,name-canonical=true,push=true
           build-args: |
@@ -231,6 +308,18 @@ jobs:
         include:
           - app: app
             image: roomote-app
+          - app: web
+            image: roomote-web
+          - app: api
+            image: roomote-api
+          - app: controller
+            image: roomote-controller
+          - app: bullmq
+            image: roomote-bullmq
+          - app: preview-proxy
+            image: roomote-preview-proxy
+          - app: migrate
+            image: roomote-migrate
           - app: worker
             image: roomote-worker
     steps:

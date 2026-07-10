@@ -1,19 +1,26 @@
 name: roomote
 
-x-roomote-env-file: &roomote-env-file
-  env_file:
-    - .env
+# Compose's --env-file supplies interpolation values only. Application
+# services intentionally do not use `env_file`: doing so would inject every
+# deployment secret into every process before the explicit contracts below.
+x-roomote-web-image: &roomote-web-image ${IMAGE_REGISTRY:-ghcr.io}/${IMAGE_NAMESPACE:-roocodeinc}/roomote-web:${ROOMOTE_VERSION:?ROOMOTE_VERSION is required}
+x-roomote-api-image: &roomote-api-image ${IMAGE_REGISTRY:-ghcr.io}/${IMAGE_NAMESPACE:-roocodeinc}/roomote-api:${ROOMOTE_VERSION:?ROOMOTE_VERSION is required}
+x-roomote-controller-image: &roomote-controller-image ${IMAGE_REGISTRY:-ghcr.io}/${IMAGE_NAMESPACE:-roocodeinc}/roomote-controller:${ROOMOTE_VERSION:?ROOMOTE_VERSION is required}
+x-roomote-bullmq-image: &roomote-bullmq-image ${IMAGE_REGISTRY:-ghcr.io}/${IMAGE_NAMESPACE:-roocodeinc}/roomote-bullmq:${ROOMOTE_VERSION:?ROOMOTE_VERSION is required}
+x-roomote-preview-proxy-image: &roomote-preview-proxy-image ${IMAGE_REGISTRY:-ghcr.io}/${IMAGE_NAMESPACE:-roocodeinc}/roomote-preview-proxy:${ROOMOTE_VERSION:?ROOMOTE_VERSION is required}
+x-roomote-migrate-image: &roomote-migrate-image ${IMAGE_REGISTRY:-ghcr.io}/${IMAGE_NAMESPACE:-roocodeinc}/roomote-migrate:${ROOMOTE_VERSION:?ROOMOTE_VERSION is required}
 
-# One shared application image ships web, api, controller, bullmq,
-# preview-proxy, and the db-migrate one-shot. Each service selects its process
-# through the image's entrypoint dispatcher (see .docker/app/entrypoint.sh).
-x-roomote-app-image: &roomote-app-image ${IMAGE_REGISTRY:-ghcr.io}/${IMAGE_NAMESPACE:-roocodeinc}/roomote-app:${ROOMOTE_VERSION:?ROOMOTE_VERSION is required}
-
-x-roomote-production-env: &roomote-production-env
+x-roomote-base-env: &roomote-base-env
   NODE_ENV: production
   APP_ENV: ${APP_ENV:-production}
   ROOMOTE_DOCKER_LOAD_ENV_FILE: 'false'
   HOST: 0.0.0.0
+  ROOMOTE_APP_URL: https://${ROOMOTE_APP_DOMAIN:?ROOMOTE_APP_DOMAIN is required}
+  ROOMOTE_PUBLIC_URL: https://${ROOMOTE_APP_DOMAIN:?ROOMOTE_APP_DOMAIN is required}
+  TRPC_URL: ${TRPC_URL:-https://${ROOMOTE_APP_DOMAIN:?ROOMOTE_APP_DOMAIN is required}/_roomote-api}
+
+x-roomote-web-env: &roomote-web-env
+  <<: *roomote-base-env
   DATABASE_URL: ${DATABASE_URL:-postgres://postgres:roomote-postgres-password@postgres:5432/roomote}
   REDIS_URL: ${REDIS_URL:-redis://redis:6379}
   S3_ENDPOINT: ${S3_ENDPOINT:-http://minio:9000}
@@ -30,9 +37,6 @@ x-roomote-production-env: &roomote-production-env
   ARTIFACT_SIGNING_KEY: ${ARTIFACT_SIGNING_KEY:?ARTIFACT_SIGNING_KEY is required}
   ARTIFACT_SIGNING_KEY_PREVIOUS: ${ARTIFACT_SIGNING_KEY_PREVIOUS:-}
   DASHBOARD_PASSWORD: ${DASHBOARD_PASSWORD:?DASHBOARD_PASSWORD is required}
-  ROOMOTE_APP_URL: https://${ROOMOTE_APP_DOMAIN:?ROOMOTE_APP_DOMAIN is required}
-  ROOMOTE_PUBLIC_URL: https://${ROOMOTE_APP_DOMAIN:?ROOMOTE_APP_DOMAIN is required}
-  TRPC_URL: ${TRPC_URL:-https://${ROOMOTE_APP_DOMAIN:?ROOMOTE_APP_DOMAIN is required}/_roomote-api}
   PREVIEW_PROXY_BASE_URL: https://${ROOMOTE_PREVIEW_DOMAIN:?ROOMOTE_PREVIEW_DOMAIN is required}
   NEXT_PUBLIC_PREVIEW_PROXY_BASE_URL: https://${ROOMOTE_PREVIEW_DOMAIN:?ROOMOTE_PREVIEW_DOMAIN is required}
   PREVIEW_DOMAINS: ${ROOMOTE_PREVIEW_DOMAIN:?ROOMOTE_PREVIEW_DOMAIN is required}
@@ -104,11 +108,113 @@ x-roomote-production-env: &roomote-production-env
   MODAL_ECR_REGION: ${MODAL_ECR_REGION:-}
   MODAL_REGIONS: ${MODAL_REGIONS:-}
 
+x-roomote-api-env: &roomote-api-env
+  <<: *roomote-base-env
+  DATABASE_URL: ${DATABASE_URL:-postgres://postgres:roomote-postgres-password@postgres:5432/roomote}
+  REDIS_URL: ${REDIS_URL:-redis://redis:6379}
+  S3_ENDPOINT: ${S3_ENDPOINT:-http://minio:9000}
+  S3_PRESIGN_ENDPOINT: ${S3_PRESIGN_ENDPOINT:-https://${ROOMOTE_APP_DOMAIN:?ROOMOTE_APP_DOMAIN is required}}
+  S3_REGION: ${S3_REGION:-us-east-1}
+  S3_ACCESS_KEY_ID: ${S3_ACCESS_KEY_ID:-roomote}
+  S3_SECRET_ACCESS_KEY: ${S3_SECRET_ACCESS_KEY:?S3_SECRET_ACCESS_KEY is required}
+  S3_BUCKET_ARTIFACTS: ${S3_BUCKET_ARTIFACTS:-roomote-artifacts}
+  JOB_AUTH_PRIVATE_KEY: ${JOB_AUTH_PRIVATE_KEY:?JOB_AUTH_PRIVATE_KEY is required}
+  JOB_AUTH_PUBLIC_KEY: ${JOB_AUTH_PUBLIC_KEY:?JOB_AUTH_PUBLIC_KEY is required}
+  ENCRYPTION_KEY: ${ENCRYPTION_KEY:?ENCRYPTION_KEY is required}
+  ARTIFACT_SIGNING_KEY: ${ARTIFACT_SIGNING_KEY:?ARTIFACT_SIGNING_KEY is required}
+  ARTIFACT_SIGNING_KEY_PREVIOUS: ${ARTIFACT_SIGNING_KEY_PREVIOUS:-}
+  DASHBOARD_PASSWORD: ${DASHBOARD_PASSWORD:?DASHBOARD_PASSWORD is required}
+  PREVIEW_PROXY_BASE_URL: https://${ROOMOTE_PREVIEW_DOMAIN:?ROOMOTE_PREVIEW_DOMAIN is required}
+  PREVIEW_DOMAINS: ${ROOMOTE_PREVIEW_DOMAIN:?ROOMOTE_PREVIEW_DOMAIN is required}
+  NEXT_PUBLIC_GITHUB_APP_SLUG: ${NEXT_PUBLIC_GITHUB_APP_SLUG:-}
+  GITHUB_APP_ID: ${GITHUB_APP_ID:-}
+  GITHUB_APP_PRIVATE_KEY: ${GITHUB_APP_PRIVATE_KEY:-}
+  GITHUB_CLIENT_ID: ${GITHUB_CLIENT_ID:-}
+  GITHUB_CLIENT_SECRET: ${GITHUB_CLIENT_SECRET:-}
+  GITHUB_WEBHOOK_SECRET: ${GITHUB_WEBHOOK_SECRET:-}
+  GITLAB_TOKEN: ${GITLAB_TOKEN:-}
+  GITLAB_WEBHOOK_SECRET: ${GITLAB_WEBHOOK_SECRET:-}
+  GITLAB_WEBHOOK_SIGNING_TOKEN: ${GITLAB_WEBHOOK_SIGNING_TOKEN:-}
+  SLACK_APP_ID: ${SLACK_APP_ID:-}
+  SLACK_CLIENT_ID: ${SLACK_CLIENT_ID:-}
+  SLACK_CLIENT_SECRET: ${SLACK_CLIENT_SECRET:-}
+  SLACK_SIGNING_SECRET: ${SLACK_SIGNING_SECRET:-}
+  TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN:-}
+  TELEGRAM_WEBHOOK_SECRET: ${TELEGRAM_WEBHOOK_SECRET:-}
+  TELEGRAM_BOT_USERNAME: ${TELEGRAM_BOT_USERNAME:-}
+  LINEAR_CLIENT_ID: ${LINEAR_CLIENT_ID:-}
+  LINEAR_CLIENT_SECRET: ${LINEAR_CLIENT_SECRET:-}
+  LINEAR_WEBHOOK_SECRET: ${LINEAR_WEBHOOK_SECRET:-}
+  ROOMOTE_AUTH_MICROSOFT_CLIENT_ID: ${ROOMOTE_AUTH_MICROSOFT_CLIENT_ID:-}
+  ROOMOTE_AUTH_MICROSOFT_CLIENT_SECRET: ${ROOMOTE_AUTH_MICROSOFT_CLIENT_SECRET:-}
+  ROOMOTE_AUTH_MICROSOFT_TENANT_ID: ${ROOMOTE_AUTH_MICROSOFT_TENANT_ID:-}
+
+x-roomote-controller-env: &roomote-controller-env
+  <<: *roomote-base-env
+  DATABASE_URL: ${DATABASE_URL:-postgres://postgres:roomote-postgres-password@postgres:5432/roomote}
+  REDIS_URL: ${REDIS_URL:-redis://redis:6379}
+  JOB_AUTH_PRIVATE_KEY: ${JOB_AUTH_PRIVATE_KEY:?JOB_AUTH_PRIVATE_KEY is required}
+  JOB_AUTH_PUBLIC_KEY: ${JOB_AUTH_PUBLIC_KEY:?JOB_AUTH_PUBLIC_KEY is required}
+  ENCRYPTION_KEY: ${ENCRYPTION_KEY:?ENCRYPTION_KEY is required}
+  PREVIEW_PROXY_BASE_URL: https://${ROOMOTE_PREVIEW_DOMAIN:?ROOMOTE_PREVIEW_DOMAIN is required}
+  PREVIEW_DOMAINS: ${ROOMOTE_PREVIEW_DOMAIN:?ROOMOTE_PREVIEW_DOMAIN is required}
+  DEFAULT_COMPUTE_PROVIDER: ${DEFAULT_COMPUTE_PROVIDER:-docker}
+  DOCKER_HOST: tcp://docker-proxy:2375
+  DOCKER_WORKER_IMAGE: ${DOCKER_WORKER_IMAGE:-}
+  ROOMOTE_WORKER_IMAGE_REPO: ${ROOMOTE_WORKER_IMAGE_REPO:-${IMAGE_REGISTRY:-ghcr.io}/${IMAGE_NAMESPACE:-roocodeinc}/roomote-worker}
+  DOCKER_WORKER_PLATFORM: ${DOCKER_WORKER_PLATFORM:-linux/amd64}
+  DOCKER_WORKER_NETWORK: ${DOCKER_WORKER_NETWORK:-roomote_worker}
+  DOCKER_WORKER_RELEASE_PATH: ${DOCKER_WORKER_RELEASE_PATH:-/roomote/releases/worker-current.tar.gz}
+  MODAL_TOKEN_ID: ${MODAL_TOKEN_ID:-}
+  MODAL_TOKEN_SECRET: ${MODAL_TOKEN_SECRET:-}
+  MODAL_ENDPOINT: ${MODAL_ENDPOINT:-}
+  MODAL_ENVIRONMENT: ${MODAL_ENVIRONMENT:-}
+  MODAL_APP_NAME: ${MODAL_APP_NAME:-}
+  MODAL_BASE_IMAGE_REF: ${MODAL_BASE_IMAGE_REF:-}
+  MODAL_REGISTRY_USERNAME: ${MODAL_REGISTRY_USERNAME:-}
+  MODAL_REGISTRY_PASSWORD: ${MODAL_REGISTRY_PASSWORD:-}
+  MODAL_ECR_OIDC_ROLE_ARN: ${MODAL_ECR_OIDC_ROLE_ARN:-}
+  MODAL_ECR_REGION: ${MODAL_ECR_REGION:-}
+  MODAL_REGIONS: ${MODAL_REGIONS:-}
+
+x-roomote-bullmq-env: &roomote-bullmq-env
+  <<: *roomote-base-env
+  DATABASE_URL: ${DATABASE_URL:-postgres://postgres:roomote-postgres-password@postgres:5432/roomote}
+  REDIS_URL: ${REDIS_URL:-redis://redis:6379}
+  DASHBOARD_PASSWORD: ${DASHBOARD_PASSWORD:?DASHBOARD_PASSWORD is required}
+  ENCRYPTION_KEY: ${ENCRYPTION_KEY:?ENCRYPTION_KEY is required}
+  DEFAULT_COMPUTE_PROVIDER: ${DEFAULT_COMPUTE_PROVIDER:-docker}
+  TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN:-}
+  MODAL_TOKEN_ID: ${MODAL_TOKEN_ID:-}
+  MODAL_TOKEN_SECRET: ${MODAL_TOKEN_SECRET:-}
+  MODAL_ENDPOINT: ${MODAL_ENDPOINT:-}
+  MODAL_ENVIRONMENT: ${MODAL_ENVIRONMENT:-}
+  MODAL_APP_NAME: ${MODAL_APP_NAME:-}
+  MODAL_BASE_IMAGE_REF: ${MODAL_BASE_IMAGE_REF:-}
+  MODAL_REGISTRY_USERNAME: ${MODAL_REGISTRY_USERNAME:-}
+  MODAL_REGISTRY_PASSWORD: ${MODAL_REGISTRY_PASSWORD:-}
+  MODAL_ECR_OIDC_ROLE_ARN: ${MODAL_ECR_OIDC_ROLE_ARN:-}
+  MODAL_ECR_REGION: ${MODAL_ECR_REGION:-}
+  MODAL_REGIONS: ${MODAL_REGIONS:-}
+
+x-roomote-preview-proxy-env: &roomote-preview-proxy-env
+  <<: *roomote-base-env
+  DATABASE_URL: ${DATABASE_URL:-postgres://postgres:roomote-postgres-password@postgres:5432/roomote}
+  REDIS_URL: ${REDIS_URL:-redis://redis:6379}
+  JOB_AUTH_PUBLIC_KEY: ${JOB_AUTH_PUBLIC_KEY:?JOB_AUTH_PUBLIC_KEY is required}
+  PREVIEW_AUTH_PUBLIC_KEY: ${PREVIEW_AUTH_PUBLIC_KEY:?PREVIEW_AUTH_PUBLIC_KEY is required}
+  PREVIEW_PROXY_BASE_URL: https://${ROOMOTE_PREVIEW_DOMAIN:?ROOMOTE_PREVIEW_DOMAIN is required}
+  PREVIEW_DOMAINS: ${ROOMOTE_PREVIEW_DOMAIN:?ROOMOTE_PREVIEW_DOMAIN is required}
+
 x-roomote-service: &roomote-service
-  <<: *roomote-env-file
   restart: unless-stopped
-  environment:
-    <<: *roomote-production-env
+  read_only: true
+  tmpfs:
+    - /tmp:rw,noexec,nosuid,nodev,size=64m,mode=1777
+  cap_drop:
+    - ALL
+  security_opt:
+    - no-new-privileges:true
 
 services:
   postgres:
@@ -164,26 +270,60 @@ services:
         done
         mc mb --ignore-existing "roomote/$$S3_BUCKET_ARTIFACTS"
 
+  # The only service with the host Docker socket. Its API is reachable solely
+  # from the controller over an internal network, and all unrelated Docker API
+  # sections remain denied by the proxy defaults.
+  docker-proxy:
+    image: ghcr.io/tecnativa/docker-socket-proxy:v0.4.2@sha256:1f3a6f303320723d199d2316a3e82b2e2685d86c275d5e3deeaf182573b47476
+    restart: unless-stopped
+    read_only: true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,nodev,size=16m,mode=1777
+      - /run:rw,noexec,nosuid,nodev,size=4m,mode=755
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    environment:
+      CONTAINERS: '1'
+      ALLOW_START: '1'
+      EXEC: '1'
+      IMAGES: '1'
+      NETWORKS: '1'
+      POST: '1'
+      EVENTS: '0'
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    networks: [docker-api]
+
   db-migrate:
     <<: *roomote-service
-    image: *roomote-app-image
+    image: *roomote-migrate-image
     restart: 'no'
     depends_on:
       postgres:
         condition: service_healthy
         required: false
     command: ['db-migrate']
+    environment:
+      NODE_ENV: production
+      APP_ENV: ${APP_ENV:-production}
+      ROOMOTE_DOCKER_LOAD_ENV_FILE: 'false'
+      DATABASE_URL: ${DATABASE_URL:-postgres://postgres:roomote-postgres-password@postgres:5432/roomote}
 
   web:
     <<: *roomote-service
-    image: *roomote-app-image
+    image: *roomote-web-image
     command: ['web']
     depends_on:
       api:
         condition: service_started
     environment:
-      <<: *roomote-production-env
+      <<: *roomote-web-env
       PORT: 3000
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,nodev,size=64m,mode=1777
+      - /roomote/apps/web/.next/cache:rw,noexec,nosuid,nodev,size=128m,uid=10001,gid=10001,mode=700
     healthcheck:
       test:
         [
@@ -197,7 +337,7 @@ services:
 
   api:
     <<: *roomote-service
-    image: *roomote-app-image
+    image: *roomote-api-image
     command: ['api']
     # Reachable from task worker containers (worker -> API over TRPC_URL).
     networks: [default, worker]
@@ -209,7 +349,7 @@ services:
       db-migrate:
         condition: service_completed_successfully
     environment:
-      <<: *roomote-production-env
+      <<: *roomote-api-env
       PORT: 3001
     healthcheck:
       test:
@@ -224,10 +364,10 @@ services:
 
   controller:
     <<: *roomote-service
-    image: *roomote-app-image
+    image: *roomote-controller-image
     command: ['controller']
     # Spawns and reaches task worker containers on the worker network.
-    networks: [default, worker]
+    networks: [default, worker, docker-api]
     stop_grace_period: 7m
     depends_on:
       redis:
@@ -238,12 +378,14 @@ services:
         condition: service_completed_successfully
       api:
         condition: service_started
-    volumes:
-      - /var/run/docker.sock:/var/run/docker.sock
+      docker-proxy:
+        condition: service_started
+    environment:
+      <<: *roomote-controller-env
 
   bullmq:
     <<: *roomote-service
-    image: *roomote-app-image
+    image: *roomote-bullmq-image
     command: ['bullmq']
     depends_on:
       redis:
@@ -251,12 +393,12 @@ services:
       db-migrate:
         condition: service_completed_successfully
     environment:
-      <<: *roomote-production-env
+      <<: *roomote-bullmq-env
       PORT: 3002
 
   preview-proxy:
     <<: *roomote-service
-    image: *roomote-app-image
+    image: *roomote-preview-proxy-image
     command: ['preview-proxy']
     # Proxies preview traffic into task worker containers.
     networks: [default, worker]
@@ -264,7 +406,7 @@ services:
       db-migrate:
         condition: service_completed_successfully
     environment:
-      <<: *roomote-production-env
+      <<: *roomote-preview-proxy-env
       PORT: 8081
     healthcheck:
       test:
@@ -317,3 +459,9 @@ networks:
   worker:
     name: roomote_worker
     driver: bridge
+  # No published ports and no route to application/datastore networks. Only
+  # the controller and the socket proxy join this network.
+  docker-api:
+    name: roomote_docker_api
+    driver: bridge
+    internal: true
