@@ -45,18 +45,16 @@ export async function handleManageSourceControl(
 
     if (params.action === 'create_or_update_pull_request') {
       const sourceBranch = params.sourceBranch?.trim();
-      const targetBranch = params.targetBranch?.trim();
+      // targetBranch is only required when the platform has to create a new
+      // pull request; when an open one exists for sourceBranch, the platform
+      // defaults to its current base. Blank values (models emit them for
+      // unused optional fields) must not be forwarded as present-but-empty.
+      const targetBranch = params.targetBranch?.trim() || undefined;
       const title = params.title?.trim();
 
       if (!sourceBranch) {
         return errorResult(
           'sourceBranch is required for create_or_update_pull_request',
-        );
-      }
-
-      if (!targetBranch) {
-        return errorResult(
-          'targetBranch is required for create_or_update_pull_request',
         );
       }
 

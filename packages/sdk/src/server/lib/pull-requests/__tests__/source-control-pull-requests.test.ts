@@ -567,3 +567,369 @@ describe('platform-managed draft state', () => {
     expect(result.draft).toBe(true);
   });
 });
+
+describe('optional targetBranch', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockGetDeploymentPrAction.mockResolvedValue('draft');
+    mockEnvironmentsFindFirst.mockResolvedValue(null);
+    mockResolveGitLabToken.mockResolvedValue('gitlab-token');
+    mockResolveGiteaToken.mockResolvedValue('gitea-token');
+    mockResolveGiteaBaseUrl.mockResolvedValue('https://git.example.com');
+    mockBuildGiteaApiBaseUrl.mockReturnValue('https://git.example.com/api/v1');
+    mockResolveAdoToken.mockResolvedValue('ado-token');
+    mockResolveAdoBaseUrl.mockResolvedValue('https://dev.azure.com');
+    mockBuildAdoOrganizationApiBaseUrl.mockReturnValue(
+      'https://dev.azure.com/acme',
+    );
+  });
+
+  const baseInput = {
+    action: 'create_or_update_pull_request' as const,
+    repositoryFullName: 'acme/web',
+    sourceBranch: 'feature/x',
+    title: '[Feature] X',
+    body: 'Body',
+    labels: [],
+    assignees: [],
+    sourceControlProvider: 'github' as const,
+  };
+
+  function makeOctokit({
+    list = [],
+    created,
+    updated,
+  }: {
+    list?: Array<Record<string, unknown>>;
+    created?: Record<string, unknown>;
+    updated?: Record<string, unknown>;
+  }) {
+    const octokit = {
+      rest: {
+        pulls: {
+          list: vi.fn().mockResolvedValue({ data: list }),
+          create: vi.fn().mockResolvedValue({ data: created }),
+          update: vi.fn().mockResolvedValue({ data: updated ?? list[0] }),
+        },
+        issues: {
+          addLabels: vi.fn().mockResolvedValue({}),
+          addAssignees: vi.fn().mockResolvedValue({}),
+        },
+      },
+      graphql: vi.fn().mockResolvedValue({}),
+    };
+    mockGetOctokit.mockReturnValue(octokit);
+    mockCreateGitHubToken.mockResolvedValue('github-token');
+    mockRepositoriesFindFirst.mockResolvedValue({
+      installationId: 555,
+      externalRepoId: null,
+      fullName: 'acme/web',
+      htmlUrl: 'https://github.com/acme/web',
+    });
+    return octokit;
+  }
+
+  it('updates the existing GitHub pull request and keeps its base when targetBranch is omitted', async () => {
+    const existing = {
+      number: 11,
+      node_id: 'node-11',
+      html_url: 'https://github.com/acme/web/pull/11',
+      title: 'Old title',
+      draft: false,
+      base: { ref: 'develop' },
+    };
+    const octokit = makeOctokit({
+      list: [existing],
+      updated: { ...existing, title: '[Feature] X' },
+    });
+
+    const result = await createOrUpdateSourceControlPullRequestForCloudJob({
+      cloudJob: makeCloudJob({ repo: 'acme/web' }),
+      input: { ...baseInput },
+    });
+
+    expect(octokit.rest.pulls.list).toHaveBeenCalledWith(
+      expect.objectContaining({ head: 'acme:feature/x' }),
+    );
+    expect(octokit.rest.pulls.list.mock.calls[0]?.[0]).not.toHaveProperty(
+      'base',
+    );
+    expect(octokit.rest.pulls.update).toHaveBeenCalledTimes(1);
+    expect(octokit.rest.pulls.update.mock.calls[0]?.[0]).not.toHaveProperty(
+      'base',
+    );
+    expect(octokit.rest.pulls.create).not.toHaveBeenCalled();
+    expect(result).toMatchObject({
+      action: 'updated',
+      number: 11,
+      targetBranch: 'develop',
+    });
+    expect(mockTaskPullRequestUpsert).toHaveBeenCalledWith(
+      expect.objectContaining({ prBaseRef: 'develop' }),
+    );
+  });
+
+  it('still retargets a GitHub pull request when targetBranch is explicit', async () => {
+    const existing = {
+      number: 11,
+      node_id: 'node-11',
+      html_url: 'https://github.com/acme/web/pull/11',
+      title: 'Old title',
+      draft: false,
+      base: { ref: 'main' },
+    };
+    const octokit = makeOctokit({
+      list: [existing],
+      updated: { ...existing, title: '[Feature] X', base: { ref: 'develop' } },
+    });
+
+    const result = await createOrUpdateSourceControlPullRequestForCloudJob({
+      cloudJob: makeCloudJob({ repo: 'acme/web' }),
+      input: { ...baseInput, targetBranch: 'develop' },
+    });
+
+    expect(octokit.rest.pulls.list).toHaveBeenCalledWith(
+      expect.objectContaining({ base: 'develop' }),
+    );
+    expect(octokit.rest.pulls.update).toHaveBeenCalledWith(
+      expect.objectContaining({ base: 'develop' }),
+    );
+    expect(result.targetBranch).toBe('develop');
+  });
+
+  it('rejects creating a GitHub pull request without targetBranch with actionable guidance', async () => {
+    const octokit = makeOctokit({ list: [] });
+
+    const promise = createOrUpdateSourceControlPullRequestForCloudJob({
+      cloudJob: makeCloudJob({ repo: 'acme/web' }),
+      input: { ...baseInput },
+    });
+
+    await expect(promise).rejects.toThrow(
+      'targetBranch is required to create a pull request: no open pull request was found for source branch "feature/x" in acme/web',
+    );
+    await expect(promise).rejects.toMatchObject({ httpStatus: 400 });
+    expect(octokit.rest.pulls.create).not.toHaveBeenCalled();
+    expect(mockTaskPullRequestUpsert).not.toHaveBeenCalled();
+  });
+
+  it('refuses to guess between multiple open GitHub pull requests for the source branch', async () => {
+    const octokit = makeOctokit({
+      list: [
+        {
+          number: 11,
+          node_id: 'node-11',
+          html_url: 'https://github.com/acme/web/pull/11',
+          title: 'To main',
+          base: { ref: 'main' },
+        },
+        {
+          number: 12,
+          node_id: 'node-12',
+          html_url: 'https://github.com/acme/web/pull/12',
+          title: 'To develop',
+          base: { ref: 'develop' },
+        },
+      ],
+    });
+
+    const promise = createOrUpdateSourceControlPullRequestForCloudJob({
+      cloudJob: makeCloudJob({ repo: 'acme/web' }),
+      input: { ...baseInput },
+    });
+
+    await expect(promise).rejects.toThrow(
+      'Multiple open pull requests exist for source branch "feature/x" in acme/web (target branches: main, develop)',
+    );
+    await expect(promise).rejects.toMatchObject({ httpStatus: 409 });
+    expect(octokit.rest.pulls.update).not.toHaveBeenCalled();
+    expect(octokit.rest.pulls.create).not.toHaveBeenCalled();
+  });
+
+  it('updates the existing GitLab merge request and inherits its target when targetBranch is omitted', async () => {
+    mockRepositoriesFindFirst.mockResolvedValue({
+      installationId: null,
+      externalRepoId: '101',
+      fullName: 'acme/backend',
+      htmlUrl: 'https://gitlab.com/acme/backend',
+    });
+    const fetchImpl = vi
+      .fn()
+      .mockResolvedValueOnce(
+        jsonResponse([
+          {
+            iid: 42,
+            title: 'Old title',
+            web_url: 'https://gitlab.com/acme/backend/-/merge_requests/42',
+            target_branch: 'develop',
+            draft: false,
+          },
+        ]),
+      )
+      .mockResolvedValueOnce(
+        jsonResponse({
+          iid: 42,
+          title: '[Feature] X',
+          web_url: 'https://gitlab.com/acme/backend/-/merge_requests/42',
+          target_branch: 'develop',
+          draft: false,
+        }),
+      );
+
+    const result = await createOrUpdateSourceControlPullRequestForCloudJob({
+      cloudJob: makeCloudJob({
+        repo: 'acme/backend',
+        sourceControlProvider: 'gitlab',
+      }),
+      input: {
+        ...baseInput,
+        repositoryFullName: 'acme/backend',
+        sourceControlProvider: 'gitlab' as const,
+      },
+      fetchImpl,
+    });
+
+    const listUrl = String(fetchImpl.mock.calls[0]?.[0]);
+    expect(listUrl).toContain('source_branch=feature%2Fx');
+    expect(listUrl).not.toContain('target_branch');
+    expect(fetchImpl.mock.calls[1]?.[1]).toMatchObject({ method: 'PUT' });
+    expect(result).toMatchObject({
+      action: 'updated',
+      targetBranch: 'develop',
+    });
+    expect(mockTaskPullRequestUpsert).toHaveBeenCalledWith(
+      expect.objectContaining({ prBaseRef: 'develop' }),
+    );
+  });
+
+  it('rejects creating a GitLab merge request without targetBranch', async () => {
+    mockRepositoriesFindFirst.mockResolvedValue({
+      installationId: null,
+      externalRepoId: '101',
+      fullName: 'acme/backend',
+      htmlUrl: 'https://gitlab.com/acme/backend',
+    });
+    const fetchImpl = vi.fn().mockResolvedValueOnce(jsonResponse([]));
+
+    await expect(
+      createOrUpdateSourceControlPullRequestForCloudJob({
+        cloudJob: makeCloudJob({
+          repo: 'acme/backend',
+          sourceControlProvider: 'gitlab',
+        }),
+        input: {
+          ...baseInput,
+          repositoryFullName: 'acme/backend',
+          sourceControlProvider: 'gitlab' as const,
+        },
+        fetchImpl,
+      }),
+    ).rejects.toThrow('targetBranch is required to create a pull request');
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
+  });
+
+  it('updates the existing Gitea pull request and inherits its base when targetBranch is omitted', async () => {
+    mockRepositoriesFindFirst.mockResolvedValue({
+      installationId: null,
+      externalRepoId: '7',
+      fullName: 'acme/tools',
+      htmlUrl: 'https://git.example.com/acme/tools',
+    });
+    const fetchImpl = vi
+      .fn()
+      .mockResolvedValueOnce(
+        jsonResponse([
+          {
+            number: 3,
+            title: 'Old title',
+            html_url: 'https://git.example.com/acme/tools/pulls/3',
+            draft: false,
+            head: { ref: 'feature/x' },
+            base: { ref: 'develop' },
+          },
+        ]),
+      )
+      .mockResolvedValueOnce(
+        jsonResponse({
+          number: 3,
+          title: '[Feature] X',
+          html_url: 'https://git.example.com/acme/tools/pulls/3',
+          draft: false,
+        }),
+      );
+
+    const result = await createOrUpdateSourceControlPullRequestForCloudJob({
+      cloudJob: makeCloudJob({
+        repo: 'acme/tools',
+        sourceControlProvider: 'gitea',
+      }),
+      input: {
+        ...baseInput,
+        repositoryFullName: 'acme/tools',
+        sourceControlProvider: 'gitea' as const,
+      },
+      fetchImpl,
+    });
+
+    expect(fetchImpl.mock.calls[1]?.[1]).toMatchObject({ method: 'PATCH' });
+    expect(result).toMatchObject({
+      action: 'updated',
+      targetBranch: 'develop',
+    });
+  });
+
+  it('updates the existing Azure DevOps pull request and inherits its target when targetBranch is omitted', async () => {
+    mockRepositoriesFindFirst.mockResolvedValue({
+      installationId: null,
+      externalRepoId: 'repo-uuid',
+      fullName: 'acme/Platform/backend',
+      htmlUrl: 'https://dev.azure.com/acme/Platform/_git/backend',
+    });
+    const fetchImpl = vi
+      .fn()
+      .mockResolvedValueOnce(
+        jsonResponse({
+          value: [
+            {
+              pullRequestId: 7,
+              title: 'Old title',
+              isDraft: true,
+              targetRefName: 'refs/heads/develop',
+            },
+          ],
+        }),
+      )
+      .mockResolvedValueOnce(
+        jsonResponse({
+          pullRequestId: 7,
+          title: '[Feature] X',
+          isDraft: true,
+        }),
+      );
+
+    const result = await createOrUpdateSourceControlPullRequestForCloudJob({
+      cloudJob: makeCloudJob({
+        repo: 'acme/Platform/backend',
+        sourceControlProvider: 'ado',
+      }),
+      input: {
+        ...baseInput,
+        repositoryFullName: 'acme/Platform/backend',
+        sourceControlProvider: 'ado' as const,
+      },
+      fetchImpl,
+    });
+
+    const listUrl = String(fetchImpl.mock.calls[0]?.[0]);
+    expect(listUrl).toContain('searchCriteria.sourceRefName');
+    expect(listUrl).not.toContain('targetRefName');
+    expect(fetchImpl.mock.calls[1]?.[1]).toMatchObject({ method: 'PATCH' });
+    expect(result).toMatchObject({
+      action: 'updated',
+      targetBranch: 'develop',
+    });
+    expect(mockTaskPullRequestUpsert).toHaveBeenCalledWith(
+      expect.objectContaining({ prBaseRef: 'develop' }),
+    );
+  });
+});
