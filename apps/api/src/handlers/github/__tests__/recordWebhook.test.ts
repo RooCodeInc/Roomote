@@ -49,6 +49,35 @@ describe('recordWebhook', () => {
     expect(webhook!.error).toBeNull();
   });
 
+  it('stores the payload with sensitive fields redacted, untouched for the handler', async () => {
+    const deliveryId = `test-delivery-${Date.now()}-redaction`;
+    testDeliveryIds.push(deliveryId);
+
+    const payload = {
+      action: 'created',
+      hook: { config: { url: 'https://example.com', secret: 'hunter2' } },
+    };
+    let handlerPayloadSecret: string | undefined;
+
+    await recordWebhook(deliveryId, 'meta.created', payload, async () => {
+      // Handlers close over the original payload; redaction must only
+      // affect the stored copy.
+      handlerPayloadSecret = payload.hook.config.secret;
+      return { status: 'ok' };
+    });
+
+    const [webhook] = await db
+      .select()
+      .from(webhooks)
+      .where(eq(webhooks.deliveryId, deliveryId));
+
+    expect(handlerPayloadSecret).toBe('hunter2');
+    expect(webhook!.payload).toEqual({
+      action: 'created',
+      hook: { config: { url: 'https://example.com', secret: '[REDACTED]' } },
+    });
+  });
+
   it('records a non-GitHub provider when supplied', async () => {
     const deliveryId = `test-delivery-${Date.now()}-gitlab`;
     testDeliveryIds.push(deliveryId);

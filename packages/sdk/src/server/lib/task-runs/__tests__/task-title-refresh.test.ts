@@ -38,7 +38,7 @@ async function seedTaskWithPrompt({
 }) {
   await taskFactory.create({
     id: taskId,
-    provider: 'roomote',
+    modelProvider: 'roomote',
     model: 'test-model',
     title,
     llmTitleCheckpoint,

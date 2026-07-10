@@ -42,7 +42,7 @@ export const taskFactory = Factory.define<
     // did not supply a real user row.
     actorExternalId:
       actorExternalId ?? (initiatorUserId ? null : faker.string.uuid()),
-    provider: 'openai',
+    modelProvider: 'openai',
     model: 'gpt-4',
     timestamp: resolvedTimestamp,
     activityAt: activityAt ?? resolvedTimestamp,

@@ -73,6 +73,7 @@ export * from './lib/repositories';
 export * from './lib/telemetry-ids';
 export * from './lib/instance-report';
 export * from './lib/invocation-identities';
+export * from './lib/webhook-retention';
 
 export {
   users,
