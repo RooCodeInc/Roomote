@@ -1,10 +1,10 @@
 'use client';
 
 import {
-  CloudTaskStatus,
-  isBootingCloudTaskStatus,
+  RunStatus,
+  isBootingRunStatus,
   TASK_PHASES,
-  type CloudTaskStatus as CloudTaskStatusType,
+  type RunStatus as CloudTaskStatusType,
   type TaskPhase,
 } from '@roomote/types';
 
@@ -47,18 +47,15 @@ function resolveTaskPhase({
     return null;
   }
 
-  if (
-    status === CloudTaskStatus.Failed ||
-    status === CloudTaskStatus.Canceled
-  ) {
+  if (status === RunStatus.Failed || status === RunStatus.Canceled) {
     return 'shutting_down';
   }
 
-  if (isBootingCloudTaskStatus(status) || status === CloudTaskStatus.Running) {
+  if (isBootingRunStatus(status) || status === RunStatus.Running) {
     return 'running';
   }
 
-  if (status === CloudTaskStatus.Idle) {
+  if (status === RunStatus.Idle) {
     return 'idle';
   }
 

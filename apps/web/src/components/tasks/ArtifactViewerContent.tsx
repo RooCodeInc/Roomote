@@ -7,7 +7,7 @@ import remarkBreaks from 'remark-breaks';
 import type { BundledLanguage } from 'shiki';
 import { toast } from 'sonner';
 
-import { ALL_REPOSITORIES, type CloudTaskPayload } from '@roomote/types';
+import { ALL_REPOSITORIES, type TaskPayload } from '@roomote/types';
 
 import type { ArtifactWithContent } from '@/types';
 
@@ -220,7 +220,7 @@ export function ArtifactViewerContent({
     (isMarkdown && artifact.content) ||
     ((isImage || isVideo || isPDF) && artifact.downloadUrl);
 
-  const taskPayload = task?.cloudJob?.payload as CloudTaskPayload | undefined;
+  const taskPayload = task?.cloudJob?.payload as TaskPayload | undefined;
   // Build requires the fetched plan content so the new task's prompt isn't
   // silently empty. Content is only fetched for text artifacts within the
   // preview byte cap (see getArtifactByPathCommand), so a plan larger than

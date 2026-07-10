@@ -1,8 +1,4 @@
-import {
-  CloudTaskStatus,
-  HARNESS_LABELS,
-  isCodingHarness,
-} from '@roomote/types';
+import { RunStatus, HARNESS_LABELS, isCodingHarness } from '@roomote/types';
 
 function getPhaseLabel(taskPhase: string | null): string | null {
   switch (taskPhase) {
@@ -25,27 +21,27 @@ function getPhaseLabel(taskPhase: string | null): string | null {
 
 function getCloudJobStatusLabel(status: string): string {
   switch (status) {
-    case CloudTaskStatus.Pending:
+    case RunStatus.Pending:
       return 'Pending';
-    case CloudTaskStatus.Dequeued:
+    case RunStatus.Dequeued:
       return 'Dequeued';
-    case CloudTaskStatus.Processing:
+    case RunStatus.Processing:
       return 'Processing';
-    case CloudTaskStatus.Preparing:
+    case RunStatus.Preparing:
       return 'Preparing';
-    case CloudTaskStatus.Spawning:
+    case RunStatus.Spawning:
       return 'Spawning';
-    case CloudTaskStatus.Connecting:
+    case RunStatus.Connecting:
       return 'Connecting';
-    case CloudTaskStatus.Running:
+    case RunStatus.Running:
       return 'Running';
-    case CloudTaskStatus.Idle:
+    case RunStatus.Idle:
       return 'Idle';
-    case CloudTaskStatus.Completed:
+    case RunStatus.Completed:
       return 'Completed';
-    case CloudTaskStatus.Failed:
+    case RunStatus.Failed:
       return 'Failed';
-    case CloudTaskStatus.Canceled:
+    case RunStatus.Canceled:
       return 'Canceled';
     default:
       return status;
@@ -63,11 +59,11 @@ export function getTaskStatusLabel(input: {
     return completed ? 'Completed' : 'Active';
   }
 
-  if (cloudJobStatus === CloudTaskStatus.Running) {
+  if (cloudJobStatus === RunStatus.Running) {
     return getPhaseLabel(taskPhase) ?? 'Running';
   }
 
-  if (cloudJobStatus === CloudTaskStatus.Idle) {
+  if (cloudJobStatus === RunStatus.Idle) {
     return getPhaseLabel(taskPhase) ?? 'Idle';
   }
 

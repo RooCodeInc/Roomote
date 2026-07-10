@@ -10,19 +10,19 @@ import {
 } from '@roomote/db/server';
 
 import {
-  CloudTaskStatus,
+  RunStatus,
   TASK_SURFACES,
   TASK_TRIGGERS,
   TASK_VISIBILITIES,
   TASK_WORKFLOWS,
   TaskPayloadKind,
-  cloudJobEventSources,
-  cloudJobEventTypes,
-  cloudTaskSchema,
+  runEventSources,
+  runEventTypes,
+  taskSpecSchema,
   communicationProviderSchema,
   computeProviderLaunchModes,
   computeProviderUsageLifecycleActions,
-  doneCloudTaskStatuses,
+  doneRunStatuses,
   queuedCommunicationMessageSchema,
   snapshotResumeSchema,
   sourceControlProviderSchema,
@@ -34,8 +34,8 @@ import {
   queueCommunicationMessage,
 } from '@roomote/communication/messages';
 import {
-  enqueueCloudTask,
-  type EnqueueCloudTaskInput,
+  enqueueTask,
+  type EnqueueTaskInput,
 } from '@roomote/cloud-agents/server';
 import {
   clearPendingSlackRequestUserInput,
@@ -73,7 +73,7 @@ import {
   touchCloudJobHeartbeat,
   dequeueCloudJob,
   dequeueResumeCloudJob,
-  finishCloudJob,
+  finishRun,
   revertPrCommit,
   createSnapshot,
   refreshGitHubTokenWithMetadata,
@@ -193,7 +193,7 @@ const taskPrLinkageSchema = z.object({
  * bindings, optional PR linkage) plus its first run.
  */
 const freshEnqueueInputSchema = z.object({
-  task: cloudTaskSchema.refine(
+  task: taskSpecSchema.refine(
     (task) => task.type !== TaskPayloadKind.SnapshotResume,
     { message: 'Snapshot resumes must use the resume input shape.' },
   ),
@@ -215,7 +215,7 @@ const resumeEnqueueInputSchema = z.object({
   actingUserId: z.string().nullish(),
 });
 
-const enqueueCloudTaskInputSchema = z.union([
+const enqueueTaskInputSchema = z.union([
   freshEnqueueInputSchema,
   resumeEnqueueInputSchema,
 ]);
@@ -277,7 +277,7 @@ export const cloudJobsRouter = router({
   update: jobScoped(
     z.object({
       id: z.number(),
-      status: z.nativeEnum(CloudTaskStatus).optional(),
+      status: z.nativeEnum(RunStatus).optional(),
       taskPhase: z.string().nullish(),
       sleepAt: z.date().nullish(),
       taskId: z.string().optional(),
@@ -325,11 +325,9 @@ export const cloudJobsRouter = router({
     }),
   ),
   enqueue: nonJobProcedure
-    .input(enqueueCloudTaskInputSchema)
+    .input(enqueueTaskInputSchema)
     .mutation(async ({ input }) => {
-      const launchResult = await enqueueCloudTask(
-        input as EnqueueCloudTaskInput,
-      );
+      const launchResult = await enqueueTask(input as EnqueueTaskInput);
 
       return {
         id: launchResult.id,
@@ -347,16 +345,16 @@ export const cloudJobsRouter = router({
   done: jobScoped(
     z.object({
       id: z.number(),
-      status: z.enum(doneCloudTaskStatuses),
+      status: z.enum(doneRunStatuses),
       error: z.string().optional(),
     }),
     'id',
-  ).mutation(({ input }) => finishCloudJob(input)),
+  ).mutation(({ input }) => finishRun(input)),
   recordEvent: jobScoped(
     z.object({
       cloudJobId: z.number(),
-      source: z.enum(cloudJobEventSources),
-      eventType: z.enum(cloudJobEventTypes),
+      source: z.enum(runEventSources),
+      eventType: z.enum(runEventTypes),
       message: z.string().optional(),
       details: z.record(z.unknown()).optional(),
     }),

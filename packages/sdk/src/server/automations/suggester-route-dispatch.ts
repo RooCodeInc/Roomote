@@ -1,6 +1,6 @@
 import {
   buildSuggestedTasksPrompt,
-  enqueueCloudTask,
+  enqueueTask,
 } from '@roomote/cloud-agents/server';
 import { db, recordAutomationRunOutcome } from '@roomote/db/server';
 import { ALL_REPOSITORIES, TaskPayloadKind } from '@roomote/types';
@@ -34,7 +34,7 @@ async function enqueueSuggestionRoute(params: {
 }): Promise<{ error?: string; success: boolean; taskId?: string }> {
   try {
     // Suggestion scans run as the deployment service principal.
-    const launchResult = await enqueueCloudTask({
+    const launchResult = await enqueueTask({
       task: {
         type: TaskPayloadKind.Scan,
         payload: {

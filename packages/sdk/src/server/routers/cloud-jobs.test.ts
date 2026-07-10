@@ -4,7 +4,7 @@ import { ACP_ENVELOPE_EVENT_TYPES, TaskPayloadKind } from '@roomote/types';
 import type { AuthTokenContext, JobTokenContext } from '@roomote/types';
 
 const {
-  mockEnqueueCloudTask,
+  mockEnqueueTask,
   mockEvaluateFeatureFlag,
   mockFindCloudJob,
   mockFindCloudJobForAccess,
@@ -18,7 +18,7 @@ const {
   mockRecordTaskMessageEnvelope,
   mockRecordTaskInferenceUsage,
 } = vi.hoisted(() => ({
-  mockEnqueueCloudTask: vi.fn(),
+  mockEnqueueTask: vi.fn(),
   mockEvaluateFeatureFlag: vi.fn(),
   mockFindCloudJob: vi.fn(),
   mockFindCloudJobForAccess: vi.fn(),
@@ -34,7 +34,7 @@ const {
 }));
 
 vi.mock('@roomote/cloud-agents/server', () => ({
-  enqueueCloudTask: mockEnqueueCloudTask,
+  enqueueTask: mockEnqueueTask,
 }));
 
 vi.mock('@roomote/feature-flags/server', () => ({
@@ -90,7 +90,7 @@ vi.mock('../lib/cloud-jobs', () => ({
   findCloudJob: mockFindCloudJob,
   findCloudJobByIdAndOrgId: mockFindCloudJobByIdAndOrgId,
   findCloudJobByJobTokenClaims: mockFindCloudJobByJobTokenClaims,
-  finishCloudJob: vi.fn(),
+  finishRun: vi.fn(),
   getMessageSources: vi.fn(),
   getResolvedGitAuthor: vi.fn(),
   getResolvedRuntimeEnvVars: vi.fn(),
@@ -159,7 +159,7 @@ function createJobCaller() {
 describe('cloudJobsRouter queue message guards', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    mockEnqueueCloudTask.mockResolvedValue({ id: 99, taskId: 'task-99' });
+    mockEnqueueTask.mockResolvedValue({ id: 99, taskId: 'task-99' });
     mockEvaluateFeatureFlag.mockResolvedValue(false);
     mockFindCloudJob.mockResolvedValue({ id: 42 });
     mockFindCloudJobForAccess.mockResolvedValue({ id: 42 });
@@ -514,7 +514,7 @@ describe('cloudJobsRouter queue message guards', () => {
       }),
     ).resolves.toEqual({ id: 99, taskId: 'task-99' });
 
-    expect(mockEnqueueCloudTask).toHaveBeenCalledWith(
+    expect(mockEnqueueTask).toHaveBeenCalledWith(
       expect.objectContaining({
         task: expect.objectContaining({
           computeProvider: 'modal',
@@ -541,7 +541,7 @@ describe('cloudJobsRouter queue message guards', () => {
     ).resolves.toEqual({ id: 99, taskId: 'task-99' });
 
     expect(mockEvaluateFeatureFlag).not.toHaveBeenCalled();
-    expect(mockEnqueueCloudTask).toHaveBeenCalledWith({
+    expect(mockEnqueueTask).toHaveBeenCalledWith({
       task: {
         type: TaskPayloadKind.StandardTask,
         payload: {
@@ -572,7 +572,7 @@ describe('cloudJobsRouter queue message guards', () => {
       } as never),
     ).rejects.toThrow();
 
-    expect(mockEnqueueCloudTask).not.toHaveBeenCalled();
+    expect(mockEnqueueTask).not.toHaveBeenCalled();
   });
 
   it('accepts snapshot resumes through the resume input shape', async () => {
@@ -590,7 +590,7 @@ describe('cloudJobsRouter queue message guards', () => {
       }),
     ).resolves.toEqual({ id: 99, taskId: 'task-99' });
 
-    expect(mockEnqueueCloudTask).toHaveBeenCalledWith(
+    expect(mockEnqueueTask).toHaveBeenCalledWith(
       expect.objectContaining({
         actingUserId: 'user-2',
         task: expect.objectContaining({

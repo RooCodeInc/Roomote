@@ -1,4 +1,4 @@
-import { enqueueCloudTask } from '@roomote/cloud-agents/server';
+import { enqueueTask } from '@roomote/cloud-agents/server';
 import {
   createEnvironmentConfigVersionSnapshot,
   db,
@@ -22,8 +22,8 @@ import {
   type EnvironmentConfigVersionSource,
 } from '@roomote/db/server';
 import {
-  activeCloudTaskStatuses,
-  CloudTaskStatus,
+  activeRunStatuses,
+  RunStatus,
   TaskPayloadKind,
   appendEnvironmentDefinitionGuidance,
   buildCreateEnvironmentDefinitionPrompt,
@@ -32,7 +32,7 @@ import {
   type EnvironmentConfig,
   environmentConfigSchema,
   getEnvironmentRepositoryInstallationError,
-  isExitedCloudTaskStatus,
+  isExitedRunStatus,
   normalizeRepositorySelection,
 } from '@roomote/types';
 import * as GitHub from '@roomote/github';
@@ -655,7 +655,7 @@ export async function getActiveEnvironmentDefinitionTaskCommand(
     .where(
       and(
         eq(tasks.workflow, 'standard'),
-        inArray(taskRuns.status, [...activeCloudTaskStatuses]),
+        inArray(taskRuns.status, [...activeRunStatuses]),
         sql`${taskRuns.payload} ->> 'environmentDefinitionId' = ${input.environmentId}`,
       ),
     )
@@ -730,7 +730,7 @@ export async function startEnvironmentDefinitionTaskCommand(
   );
 
   const startedAt = new Date().toISOString();
-  const launchResult = await enqueueCloudTask({
+  const launchResult = await enqueueTask({
     task: {
       type: TaskPayloadKind.StandardTask,
       payload: {
@@ -770,7 +770,7 @@ export async function cancelEnvironmentDefinitionTaskCommand(
     .where(eq(taskRuns.taskId, input.taskId));
 
   const activeJobIds = jobs
-    .filter((job) => !isExitedCloudTaskStatus(job.status))
+    .filter((job) => !isExitedRunStatus(job.status))
     .map((job) => job.id);
 
   if (activeJobIds.length === 0) {
@@ -783,7 +783,7 @@ export async function cancelEnvironmentDefinitionTaskCommand(
     await tx
       .update(taskRuns)
       .set({
-        status: CloudTaskStatus.Canceled,
+        status: RunStatus.Canceled,
         canceledAt: endedAt,
       })
       .where(inArray(taskRuns.id, activeJobIds));

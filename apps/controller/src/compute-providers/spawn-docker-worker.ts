@@ -17,7 +17,7 @@ import {
   db,
   eq,
   resolveEffectivePreviewRuntimeConfig,
-  type CloudJob,
+  type Run,
 } from '@roomote/db/server';
 import { stampCloudJobMilestone } from '@roomote/sdk/server';
 import {
@@ -44,7 +44,7 @@ const DOCKER_WORKER_START_TIMEOUT_MS = 15_000;
 const DOCKER_WORKER_START_POLL_MS = 500;
 
 export async function spawnDockerWorker(
-  cloudJob: CloudJob,
+  cloudJob: Run,
   authToken: string,
   config: {
     image: string;

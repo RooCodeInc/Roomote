@@ -1,5 +1,5 @@
 const {
-  mockEnqueueCloudTask,
+  mockEnqueueTask,
   mockGetGitLabAutomationTargets,
   mockUpdateTaskPrStatus,
   mockRepositoriesFindFirst,
@@ -8,7 +8,7 @@ const {
   mockNotifyTelegramAndLinearPrMerge,
   mockFindActiveGitHubPrReviewTask,
 } = vi.hoisted(() => ({
-  mockEnqueueCloudTask: vi.fn(),
+  mockEnqueueTask: vi.fn(),
   mockGetGitLabAutomationTargets: vi.fn(),
   mockUpdateTaskPrStatus: vi.fn(),
   mockRepositoriesFindFirst: vi.fn(),
@@ -19,7 +19,7 @@ const {
 }));
 
 vi.mock('@roomote/cloud-agents/server', () => ({
-  enqueueCloudTask: mockEnqueueCloudTask,
+  enqueueTask: mockEnqueueTask,
 }));
 
 vi.mock('@roomote/sdk/server', () => ({
@@ -94,7 +94,7 @@ function makePayload(
 
 describe('handleGitLabMergeRequest', () => {
   beforeEach(() => {
-    mockEnqueueCloudTask.mockReset();
+    mockEnqueueTask.mockReset();
     mockGetGitLabAutomationTargets.mockReset();
     mockUpdateTaskPrStatus.mockReset();
     mockRepositoriesFindFirst.mockReset();
@@ -119,7 +119,7 @@ describe('handleGitLabMergeRequest', () => {
         },
       ],
     });
-    mockEnqueueCloudTask.mockResolvedValue({
+    mockEnqueueTask.mockResolvedValue({
       id: 1234,
       taskId: 'task-1',
     });
@@ -135,7 +135,7 @@ describe('handleGitLabMergeRequest', () => {
         ids: [1234],
       },
     });
-    expect(mockEnqueueCloudTask).toHaveBeenCalledWith(
+    expect(mockEnqueueTask).toHaveBeenCalledWith(
       expect.objectContaining({
         task: expect.objectContaining({
           type: TaskPayloadKind.GithubPrReview,
@@ -178,11 +178,11 @@ describe('handleGitLabMergeRequest', () => {
       status: 'ok',
       message: 'unsupported_merge_request_action:update',
     });
-    expect(mockEnqueueCloudTask).not.toHaveBeenCalled();
+    expect(mockEnqueueTask).not.toHaveBeenCalled();
 
     await handleGitLabMergeRequest(makePayload('update', { oldrev: 'oldsha' }));
 
-    expect(mockEnqueueCloudTask).toHaveBeenCalledWith(
+    expect(mockEnqueueTask).toHaveBeenCalledWith(
       expect.objectContaining({
         task: expect.objectContaining({
           type: TaskPayloadKind.GithubPrReviewSync,
@@ -220,14 +220,14 @@ describe('handleGitLabMergeRequest', () => {
       headSha: 'abc123',
       sourceControlProvider: 'gitlab',
     });
-    expect(mockEnqueueCloudTask).not.toHaveBeenCalled();
+    expect(mockEnqueueTask).not.toHaveBeenCalled();
   });
 
   it('does not run head-SHA dedup for open merge requests', async () => {
     await handleGitLabMergeRequest(makePayload('open'));
 
     expect(mockFindActiveGitHubPrReviewTask).not.toHaveBeenCalled();
-    expect(mockEnqueueCloudTask).toHaveBeenCalled();
+    expect(mockEnqueueTask).toHaveBeenCalled();
   });
 
   it('updates tracked task PR status for merged merge requests', async () => {
@@ -241,7 +241,7 @@ describe('handleGitLabMergeRequest', () => {
       42,
       'merged',
     );
-    expect(mockEnqueueCloudTask).not.toHaveBeenCalled();
+    expect(mockEnqueueTask).not.toHaveBeenCalled();
   });
 
   it('notifies Slack, Teams, and Telegram/Linear threads for merged merge requests on active synced repositories', async () => {

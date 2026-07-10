@@ -1,4 +1,4 @@
-import type { CloudJob } from '@roomote/db/server';
+import type { Run } from '@roomote/db/server';
 
 const {
   mockEnv,
@@ -41,8 +41,8 @@ const {
   mockSpawnModalWorker: vi.fn(),
 }));
 
-const { mockFinishCloudJob } = vi.hoisted(() => ({
-  mockFinishCloudJob: vi.fn().mockResolvedValue(undefined),
+const { mockFinishRun } = vi.hoisted(() => ({
+  mockFinishRun: vi.fn().mockResolvedValue(undefined),
 }));
 
 vi.mock('@roomote/env', async (importOriginal) => {
@@ -74,7 +74,7 @@ vi.mock('@roomote/db/server', async () => {
 });
 
 vi.mock('@roomote/sdk/server', () => ({
-  finishCloudJob: (...args: unknown[]) => mockFinishCloudJob(...args),
+  finishRun: (...args: unknown[]) => mockFinishRun(...args),
 }));
 
 vi.mock('../compute-providers', () => ({
@@ -127,7 +127,7 @@ describe('RoomoteController', () => {
     await (
       controller as unknown as {
         spawnFreshWorker: (
-          cloudJob: CloudJob,
+          cloudJob: Run,
           authToken: string,
           deploymentSlug: string,
           timeoutMs: number,
@@ -138,7 +138,7 @@ describe('RoomoteController', () => {
       {
         id: 48,
         payload: { environmentId: 'env_123' },
-      } as CloudJob,
+      } as Run,
       'auth-token',
       'roomote',
       60_000,
@@ -165,7 +165,7 @@ describe('RoomoteController', () => {
       (
         controller as unknown as {
           spawnFreshWorker: (
-            cloudJob: CloudJob,
+            cloudJob: Run,
             authToken: string,
             deploymentSlug: string,
             timeoutMs: number,
@@ -176,7 +176,7 @@ describe('RoomoteController', () => {
         {
           id: 46,
           payload: { environmentId: 'env_123' },
-        } as CloudJob,
+        } as Run,
         'auth-token',
         'roomote',
         60_000,
@@ -193,7 +193,7 @@ describe('RoomoteController', () => {
     await (
       controller as unknown as {
         spawnFreshWorker: (
-          cloudJob: CloudJob,
+          cloudJob: Run,
           authToken: string,
           deploymentSlug: string,
           timeoutMs: number,
@@ -204,7 +204,7 @@ describe('RoomoteController', () => {
       {
         id: 49,
         payload: { environmentId: 'env_123' },
-      } as CloudJob,
+      } as Run,
       'auth-token',
       'roomote',
       60_000,
@@ -234,7 +234,7 @@ describe('RoomoteController', () => {
       (
         controller as unknown as {
           spawnFreshWorker: (
-            cloudJob: CloudJob,
+            cloudJob: Run,
             authToken: string,
             deploymentSlug: string,
             timeoutMs: number,
@@ -245,7 +245,7 @@ describe('RoomoteController', () => {
         {
           id: 50,
           payload: { environmentId: 'env_123' },
-        } as CloudJob,
+        } as Run,
         'auth-token',
         'roomote',
         60_000,
@@ -262,7 +262,7 @@ describe('RoomoteController', () => {
     await (
       controller as unknown as {
         spawnFreshWorker: (
-          cloudJob: CloudJob,
+          cloudJob: Run,
           authToken: string,
           deploymentSlug: string,
           timeoutMs: number,
@@ -273,7 +273,7 @@ describe('RoomoteController', () => {
       {
         id: 51,
         payload: { environmentId: 'env_123' },
-      } as CloudJob,
+      } as Run,
       'auth-token',
       'roomote',
       60_000,
@@ -301,7 +301,7 @@ describe('RoomoteController', () => {
     await (
       controller as unknown as {
         spawnFreshWorker: (
-          cloudJob: CloudJob,
+          cloudJob: Run,
           authToken: string,
           deploymentSlug: string,
           timeoutMs: number,
@@ -312,7 +312,7 @@ describe('RoomoteController', () => {
       {
         id: 53,
         payload: { environmentId: 'env_123' },
-      } as CloudJob,
+      } as Run,
       'auth-token',
       'roomote',
       5 * 60 * 60 * 1_000,
@@ -336,7 +336,7 @@ describe('RoomoteController', () => {
       (
         controller as unknown as {
           spawnFreshWorker: (
-            cloudJob: CloudJob,
+            cloudJob: Run,
             authToken: string,
             deploymentSlug: string,
             timeoutMs: number,
@@ -347,7 +347,7 @@ describe('RoomoteController', () => {
         {
           id: 52,
           payload: { environmentId: 'env_123' },
-        } as CloudJob,
+        } as Run,
         'auth-token',
         'roomote',
         60_000,
@@ -376,7 +376,7 @@ describe('RoomoteController', () => {
     await (
       controller as unknown as {
         spawnFreshWorker: (
-          cloudJob: CloudJob,
+          cloudJob: Run,
           authToken: string,
           deploymentSlug: string,
           timeoutMs: number,
@@ -387,7 +387,7 @@ describe('RoomoteController', () => {
       {
         id: 44,
         payload: { environmentId: 'env_123' },
-      } as CloudJob,
+      } as Run,
       'auth-token',
       'roomote',
       60_000,

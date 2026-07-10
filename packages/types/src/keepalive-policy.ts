@@ -1,4 +1,4 @@
-import { TaskPayloadKind, type CloudTaskLaunchClass } from './cloud-jobs';
+import { TaskPayloadKind, type RunLaunchClass } from './cloud-jobs';
 import {
   DEFAULT_AUTOMATION_KEEPALIVE_MS,
   DEFAULT_MAINTENANCE_KEEPALIVE_MS,
@@ -10,7 +10,7 @@ const TASK_TYPE_KEEPALIVE_MS_OVERRIDES = new Map<TaskPayloadKind, number>([
 
 export function inferLaunchClassForTaskType(
   taskType: TaskPayloadKind,
-): CloudTaskLaunchClass {
+): RunLaunchClass {
   switch (taskType) {
     case TaskPayloadKind.GithubPrReview:
     case TaskPayloadKind.GithubPrReviewSync:
@@ -26,13 +26,13 @@ export function inferLaunchClassForTaskType(
 
 export function resolveCloudTaskRuntimePolicy(options: {
   taskType: TaskPayloadKind;
-  launchClass?: CloudTaskLaunchClass | null;
+  launchClass?: RunLaunchClass | null;
   appEnv?: 'development' | 'preview' | 'production' | 'test' | null;
   defaultKeepaliveMs: number;
   delegatedKeepaliveMs: number;
   sandboxTimeoutMs: number;
 }): {
-  launchClass: CloudTaskLaunchClass;
+  launchClass: RunLaunchClass;
   keepaliveMs: number;
 } {
   const launchClass =
@@ -69,7 +69,7 @@ function resolveHumanKeepaliveMs(options: {
 
 function resolveKeepaliveMsForResolvedLaunchClass(options: {
   taskType?: TaskPayloadKind | null;
-  launchClass?: CloudTaskLaunchClass | null;
+  launchClass?: RunLaunchClass | null;
   appEnv?: 'development' | 'preview' | 'production' | 'test' | null;
   defaultKeepaliveMs: number;
   delegatedKeepaliveMs: number;
@@ -116,7 +116,7 @@ function resolveKeepaliveMsForResolvedLaunchClass(options: {
 
 export function resolveKeepaliveMs(options: {
   taskType?: TaskPayloadKind | null;
-  launchClass?: CloudTaskLaunchClass | null;
+  launchClass?: RunLaunchClass | null;
   appEnv?: 'development' | 'preview' | 'production' | 'test' | null;
   defaultKeepaliveMs: number;
   delegatedKeepaliveMs: number;

@@ -1,9 +1,7 @@
-const { mockEnqueueCloudTask, mockRecordAutomationRunOutcome } = vi.hoisted(
-  () => ({
-    mockEnqueueCloudTask: vi.fn(),
-    mockRecordAutomationRunOutcome: vi.fn(),
-  }),
-);
+const { mockEnqueueTask, mockRecordAutomationRunOutcome } = vi.hoisted(() => ({
+  mockEnqueueTask: vi.fn(),
+  mockRecordAutomationRunOutcome: vi.fn(),
+}));
 
 vi.mock('@roomote/cloud-agents/server', async (importOriginal) => {
   const actual =
@@ -11,7 +9,7 @@ vi.mock('@roomote/cloud-agents/server', async (importOriginal) => {
 
   return {
     ...actual,
-    enqueueCloudTask: mockEnqueueCloudTask,
+    enqueueTask: mockEnqueueTask,
   };
 });
 
@@ -73,7 +71,7 @@ describe('dispatchSuggestionRoutes', () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date('2026-04-09T03:00:00.000Z'));
 
-    mockEnqueueCloudTask.mockResolvedValue({ id: 1, taskId: 'task-1' });
+    mockEnqueueTask.mockResolvedValue({ id: 1, taskId: 'task-1' });
     mockRecordAutomationRunOutcome.mockResolvedValue(undefined);
   });
 
@@ -94,7 +92,7 @@ describe('dispatchSuggestionRoutes', () => {
     expect(
       params.routePlan.loadRecentThreadFeedbackForChannel,
     ).toHaveBeenCalledWith('C123SUGGEST');
-    expect(mockEnqueueCloudTask).toHaveBeenCalledWith({
+    expect(mockEnqueueTask).toHaveBeenCalledWith({
       task: {
         type: TaskPayloadKind.Scan,
         payload: {
@@ -185,7 +183,7 @@ describe('dispatchSuggestionRoutes', () => {
         loadRecentThreadFeedbackForChannel,
       },
     };
-    mockEnqueueCloudTask
+    mockEnqueueTask
       .mockRejectedValueOnce(new Error('queue failed'))
       .mockResolvedValueOnce({ taskId: 'task-2' });
 
@@ -222,7 +220,7 @@ describe('dispatchSuggestionRoutes', () => {
   it('records a failed pass when every route fails', async () => {
     const consoleSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
     const params = buildParams();
-    mockEnqueueCloudTask.mockRejectedValue(new Error('queue failed'));
+    mockEnqueueTask.mockRejectedValue(new Error('queue failed'));
 
     const result = await dispatchSuggestionRoutes(params);
 

@@ -2,7 +2,7 @@ import {
   buildStartedBlocks,
   type SlackInteractivePayload,
 } from '@roomote/slack';
-import { CloudTaskStatus } from '@roomote/types';
+import { RunStatus } from '@roomote/types';
 
 const {
   dbUpdateMock,
@@ -135,7 +135,7 @@ describe('handleTaskCancellation', () => {
     dbQueryFindFirstMock.mockResolvedValueOnce({
       id: 42,
       taskId: 'task-1',
-      status: CloudTaskStatus.Running,
+      status: RunStatus.Running,
       sandboxServerUrl: 'http://sandbox.example.com',
       userId: 'user-1',
       actingUserId: 'user-1',

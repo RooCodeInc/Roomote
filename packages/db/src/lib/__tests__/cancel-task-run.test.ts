@@ -3,7 +3,7 @@
 // orphaned-run cleanup, so its guards (no sandbox attached, not already
 // terminal) and its task-state re-derivation are load-bearing.
 
-import { CloudTaskStatus, TaskPayloadKind } from '@roomote/types';
+import { RunStatus, TaskPayloadKind } from '@roomote/types';
 
 import {
   db,
@@ -25,7 +25,7 @@ async function makeTask() {
 
 async function insertRun(params: {
   taskId: string;
-  status: CloudTaskStatus;
+  status: RunStatus;
   sandboxServerUrl?: string | null;
 }) {
   const [run] = await db
@@ -92,7 +92,7 @@ describe('cancelTaskRunDirect', () => {
     const task = await makeTask();
     const run = await insertRun({
       taskId: task.id,
-      status: CloudTaskStatus.Pending,
+      status: RunStatus.Pending,
     });
 
     const canceled = await cancelTaskRunDirect({
@@ -102,7 +102,7 @@ describe('cancelTaskRunDirect', () => {
 
     expect(canceled).toBe(true);
     const row = await readRun(run.id);
-    expect(row.status).toBe(CloudTaskStatus.Canceled);
+    expect(row.status).toBe(RunStatus.Canceled);
     expect(row.canceledAt).toBeInstanceOf(Date);
     expect(row.error).toBe(
       'Canceled: work-item launch finalize lost the claim fencing guard',
@@ -116,14 +116,14 @@ describe('cancelTaskRunDirect', () => {
     const task = await makeTask();
     const run = await insertRun({
       taskId: task.id,
-      status: CloudTaskStatus.Running,
+      status: RunStatus.Running,
       sandboxServerUrl: 'http://sandbox.test',
     });
 
     const canceled = await cancelTaskRunDirect({ runId: run.id });
 
     expect(canceled).toBe(false);
-    expect((await readRun(run.id)).status).toBe(CloudTaskStatus.Running);
+    expect((await readRun(run.id)).status).toBe(RunStatus.Running);
     expect(await readTaskState(task.id)).toBe('active');
   });
 
@@ -131,12 +131,12 @@ describe('cancelTaskRunDirect', () => {
     const task = await makeTask();
     const run = await insertRun({
       taskId: task.id,
-      status: CloudTaskStatus.Completed,
+      status: RunStatus.Completed,
     });
 
     const canceled = await cancelTaskRunDirect({ runId: run.id });
 
     expect(canceled).toBe(false);
-    expect((await readRun(run.id)).status).toBe(CloudTaskStatus.Completed);
+    expect((await readRun(run.id)).status).toBe(RunStatus.Completed);
   });
 });

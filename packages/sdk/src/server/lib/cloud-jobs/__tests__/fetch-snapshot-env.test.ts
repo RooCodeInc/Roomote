@@ -37,7 +37,7 @@ vi.mock('../dequeue-helpers', () => ({
 
 import { fetchSnapshotEnv } from '../fetch-snapshot-env';
 
-// A minimal CloudJob-like object for test fixtures.
+// A minimal Run-like object for test fixtures.
 function makeCloudJob(overrides: Record<string, unknown> = {}) {
   return {
     id: 42,

@@ -6,13 +6,13 @@ import { Env } from '@roomote/env';
 import {
   ALL_REPOSITORIES,
   TaskPayloadKind,
-  type CloudTaskPayload,
+  type TaskPayload,
   populateSnapshotResumeCommunicationMetadata,
   restoreSnapshotResumeVisiblePromptFields,
 } from '@roomote/types';
 import {
   buildTelegramRoutingContext,
-  enqueueCloudTask,
+  enqueueTask,
   getTaskUrl,
   routeTask,
 } from '@roomote/cloud-agents/server';
@@ -55,15 +55,14 @@ export async function resumeTelegramTaskFromSnapshot(input: {
     typeof completedPayload.environmentId === 'string'
       ? completedPayload.environmentId
       : undefined;
-  const resumePayload: CloudTaskPayload<typeof TaskPayloadKind.SnapshotResume> =
-    {
-      repo,
-      ...(environmentId ? { environmentId } : {}),
-      ...(input.completedJob.port ? { port: input.completedJob.port } : {}),
-      sourceSnapshotId,
-      sourceCloudJobId: input.completedJob.id,
-      queuedCommunicationMessages: [input.queuedMessage],
-    };
+  const resumePayload: TaskPayload<typeof TaskPayloadKind.SnapshotResume> = {
+    repo,
+    ...(environmentId ? { environmentId } : {}),
+    ...(input.completedJob.port ? { port: input.completedJob.port } : {}),
+    sourceSnapshotId,
+    sourceCloudJobId: input.completedJob.id,
+    queuedCommunicationMessages: [input.queuedMessage],
+  };
 
   populateSnapshotResumeCommunicationMetadata(resumePayload, {
     provider: 'telegram',
@@ -76,7 +75,7 @@ export async function resumeTelegramTaskFromSnapshot(input: {
 
   // Resumes never create tasks and never re-attribute; the resuming human
   // becomes the new run's acting user.
-  return enqueueCloudTask(
+  return enqueueTask(
     {
       task: {
         type: TaskPayloadKind.SnapshotResume,

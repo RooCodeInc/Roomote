@@ -6,7 +6,7 @@ import {
   TASK_CANCELED_RESPONSE_TEXT,
   type SlackInteractivePayload,
 } from '@roomote/slack';
-import { activeCloudTaskStatuses } from '@roomote/types';
+import { activeRunStatuses } from '@roomote/types';
 import {
   and,
   db,
@@ -29,7 +29,7 @@ async function findLatestActiveCloudJobForTask(
   const activeJob = await db.query.taskRuns.findFirst({
     where: and(
       eq(taskRuns.taskId, taskId),
-      inArray(taskRuns.status, [...activeCloudTaskStatuses]),
+      inArray(taskRuns.status, [...activeRunStatuses]),
       isNull(taskRuns.canceledAt),
     ),
     orderBy: desc(taskRuns.createdAt),
@@ -65,8 +65,8 @@ async function resolveCancelableCloudJob(
   }
 
   if (!sourceJob.taskId) {
-    return activeCloudTaskStatuses.includes(
-      sourceJob.status as (typeof activeCloudTaskStatuses)[number],
+    return activeRunStatuses.includes(
+      sourceJob.status as (typeof activeRunStatuses)[number],
     ) && sourceJob.canceledAt === null
       ? {
           id: sourceJob.id,

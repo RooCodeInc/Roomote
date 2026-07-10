@@ -1,6 +1,6 @@
 // pnpm --filter @roomote/cloud-agents test src/__tests__/utils.test.ts
 
-import { type CloudTaskPayload, TaskPayloadKind } from '@roomote/types';
+import { type TaskPayload, TaskPayloadKind } from '@roomote/types';
 
 import {
   buildSlackThreadPromptBlocks,
@@ -583,7 +583,7 @@ describe('generateCloudJobTitle', () => {
           prUrl: 'https://github.com/owner/repo/pull/42',
           headRef: 'feature/new-thing',
           baseRef: 'main',
-        } as CloudTaskPayload<typeof TaskPayloadKind.GithubPrConflictResolve>,
+        } as TaskPayload<typeof TaskPayloadKind.GithubPrConflictResolve>,
       });
 
       expect(title).toBe('Fix merge conflicts on PR #42');
@@ -592,7 +592,7 @@ describe('generateCloudJobTitle', () => {
     it('should return default title for unknown task type', () => {
       const title = generateCloudJobTitle({
         type: 'unknown.type' as TaskPayloadKind,
-        payload: { repo: 'owner/repo' } as CloudTaskPayload,
+        payload: { repo: 'owner/repo' } as TaskPayload,
       });
 
       expect(title).toBe('Untitled task');

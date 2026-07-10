@@ -1,5 +1,5 @@
 import { TRPCClientError } from '@trpc/client';
-import { CloudTaskStatus } from '@roomote/types';
+import { RunStatus } from '@roomote/types';
 
 const {
   mockWithSandboxServerRpcClient,
@@ -91,7 +91,7 @@ describe('stopTaskJob', () => {
   it('persists cancel intent on the job row before the sandbox stop RPC', async () => {
     const job = {
       id: 7,
-      status: CloudTaskStatus.Running,
+      status: RunStatus.Running,
       sandboxServerUrl: 'https://sandbox.example',
       actingUserId: null,
     };
@@ -112,7 +112,7 @@ describe('stopTaskJob', () => {
   it('persists cancel intent even when the sandbox stop RPC fails', async () => {
     const job = {
       id: 7,
-      status: CloudTaskStatus.Running,
+      status: RunStatus.Running,
       sandboxServerUrl: 'https://sandbox.example',
       actingUserId: null,
     };
@@ -135,7 +135,7 @@ describe('stopTaskJob', () => {
   it('stamps cancelRequestedAt when direct-canceling a job without a sandbox', async () => {
     const job = {
       id: 7,
-      status: CloudTaskStatus.Processing,
+      status: RunStatus.Processing,
       sandboxServerUrl: null,
       actingUserId: null,
     };

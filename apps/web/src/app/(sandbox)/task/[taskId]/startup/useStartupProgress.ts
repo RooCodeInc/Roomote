@@ -4,12 +4,12 @@ import { useEffect, useRef, useState } from 'react';
 import { useSSE } from 'react-hooks-sse';
 
 import {
-  CloudTaskStatus,
+  RunStatus,
   getComputeProviderCapabilities,
-  isExitedCloudTaskStatus,
+  isExitedRunStatus,
   resolveComputeProviderTarget,
 } from '@roomote/types';
-import type { CloudJob } from '@roomote/db';
+import type { Run } from '@roomote/db';
 
 import { getBootStatus, useSandboxLogs } from '@/components/sandbox';
 import { getCloudJobError } from '@/lib/cloud-job-errors';
@@ -18,8 +18,8 @@ import type { StartupStep } from './StartupMessage';
 
 interface UseStartupProgressOptions {
   cloudJobId: number;
-  initialCloudJob?: CloudJob;
-  onStatusChange?: (status: CloudTaskStatus) => void;
+  initialCloudJob?: Run;
+  onStatusChange?: (status: RunStatus) => void;
 }
 
 export function useStartupProgress({
@@ -27,16 +27,16 @@ export function useStartupProgress({
   initialCloudJob,
   onStatusChange,
 }: UseStartupProgressOptions) {
-  const initialStatus = initialCloudJob?.status ?? CloudTaskStatus.Pending;
+  const initialStatus = initialCloudJob?.status ?? RunStatus.Pending;
 
   const [steps, setSteps] = useState<StartupStep[]>([
     {
       status: initialStatus,
-      completed: isExitedCloudTaskStatus(initialStatus),
+      completed: isExitedRunStatus(initialStatus),
     },
   ]);
 
-  const streamedCloudJob = useSSE<CloudJob | undefined>('message', undefined);
+  const streamedCloudJob = useSSE<Run | undefined>('message', undefined);
 
   const cloudJob = streamedCloudJob ?? initialCloudJob;
   const status = cloudJob?.status ?? initialStatus;
@@ -62,7 +62,7 @@ export function useStartupProgress({
     }
 
     const displayMessage = getBootStatus(status);
-    const isCompleted = isExitedCloudTaskStatus(status);
+    const isCompleted = isExitedRunStatus(status);
 
     setSteps((prev) => {
       // Check if a step already maps to this display message.
@@ -93,7 +93,7 @@ export function useStartupProgress({
   }, [status, onStatusChange]);
 
   const lastStep = steps[steps.length - 1];
-  const lastStatus = lastStep?.status ?? CloudTaskStatus.Pending;
+  const lastStatus = lastStep?.status ?? RunStatus.Pending;
 
   return {
     steps,

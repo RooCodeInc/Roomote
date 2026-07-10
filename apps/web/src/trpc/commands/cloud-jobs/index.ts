@@ -1,19 +1,19 @@
 import {
   ALL_REPOSITORIES,
-  activeCloudTaskStatuses,
-  type CloudTaskPayload,
+  activeRunStatuses,
+  type TaskPayload,
   type ComputeProvider,
   type LaunchCodingHarness,
   type StandardTask,
-  CloudTaskStatus,
+  RunStatus,
   TaskPayloadKind,
-  isExitedCloudTaskStatus,
+  isExitedRunStatus,
   resolveEvalHarnessSelection,
 } from '@roomote/types';
 import {
   type RoutingDecision,
   buildSlackRoutingContext,
-  enqueueCloudTask,
+  enqueueTask,
   getTaskUrl,
   routeTask,
 } from '@roomote/cloud-agents/server';
@@ -50,11 +50,11 @@ type CreateStandardTaskCloudJobInput = {
   sourceArtifactId?: string;
   sourceArtifactPath?: string;
   sourceArtifactVersion?: number;
-  payload: CloudTaskPayload<typeof TaskPayloadKind.StandardTask>;
+  payload: TaskPayload<typeof TaskPayloadKind.StandardTask>;
 };
 
 function getManualTaskRepositoryFullNames(
-  payload: CloudTaskPayload<typeof TaskPayloadKind.StandardTask>,
+  payload: TaskPayload<typeof TaskPayloadKind.StandardTask>,
 ) {
   if (payload.selectedRepositories?.length) {
     return [...new Set(payload.selectedRepositories.filter(Boolean))].sort(
@@ -387,7 +387,7 @@ export async function createStandardTaskCloudJobCommand(
       },
     };
 
-    const launchResult = await enqueueCloudTask({
+    const launchResult = await enqueueTask({
       task,
       initiator: { kind: 'user', userId: auth.userId },
       workflow: 'standard',
@@ -440,7 +440,7 @@ export async function cancelCloudJobCommand(
       (await db.query.taskRuns.findFirst({
         where: and(
           taskFilter,
-          inArray(taskRuns.status, [...activeCloudTaskStatuses]),
+          inArray(taskRuns.status, [...activeRunStatuses]),
         ),
         orderBy: [desc(taskRuns.createdAt), desc(taskRuns.id)],
       })) ??
@@ -459,13 +459,13 @@ export async function cancelCloudJobCommand(
       return { success: false, error: 'Cloud job not found' };
     }
 
-    if (!isExitedCloudTaskStatus(job.status)) {
+    if (!isExitedRunStatus(job.status)) {
       const endedAt = new Date();
 
       await db.transaction(async (tx) => {
         await tx
           .update(taskRuns)
-          .set({ status: CloudTaskStatus.Canceled, canceledAt: endedAt })
+          .set({ status: RunStatus.Canceled, canceledAt: endedAt })
           .where(eq(taskRuns.id, job.id));
 
         await markTaskStartParallelCountEndedAt(tx, {

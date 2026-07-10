@@ -1,4 +1,4 @@
-import type { CloudTaskStatus } from '@roomote/types';
+import type { RunStatus } from '@roomote/types';
 import { db, taskRuns, eq } from '@roomote/db/server';
 
 type UpdateCloudJobRuntimeState = {
@@ -10,7 +10,7 @@ function shouldApplyRuntimeStateUpdate(
   current: {
     taskPhase: string | null;
     sleepAt: Date | null;
-    status: CloudTaskStatus;
+    status: RunStatus;
   },
   next: UpdateCloudJobRuntimeState,
 ): boolean {

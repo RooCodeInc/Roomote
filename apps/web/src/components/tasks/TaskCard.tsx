@@ -2,7 +2,7 @@ import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { formatDistanceToNow } from 'date-fns';
 
-import { isActivelyRunningCloudTask, PRODUCT_NAME } from '@roomote/types';
+import { isActivelyRunningTask, PRODUCT_NAME } from '@roomote/types';
 
 import { type Task } from '@/lib/server';
 import {
@@ -144,7 +144,7 @@ export const TaskCard = ({
               <span>started a task</span>
             </span>
             <span>
-              {isActivelyRunningCloudTask(
+              {isActivelyRunningTask(
                 task.cloudJob.status,
                 task.cloudJob.taskPhase,
               ) && <Spinner className="size-3 animate-spin" />}

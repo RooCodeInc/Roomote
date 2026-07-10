@@ -1,7 +1,7 @@
 import { Queue } from 'bullmq';
 import { z } from 'zod';
 
-import type { CloudJob } from '@roomote/db/server';
+import type { Run } from '@roomote/db/server';
 import {
   and,
   db,
@@ -101,10 +101,7 @@ type EnqueuePrReviewNotificationResult = {
   reason?: string;
 };
 
-type PrReviewNotificationRoutingJob = Pick<
-  CloudJob,
-  'id' | 'taskId' | 'payload'
->;
+type PrReviewNotificationRoutingJob = Pick<Run, 'id' | 'taskId' | 'payload'>;
 
 export type PrReviewNotificationRoute =
   | { provider: 'slack'; channelId: string; threadId: string }

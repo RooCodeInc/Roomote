@@ -21,7 +21,7 @@ import {
   taskRuns,
   getDeploymentPrAction,
   taskPullRequests,
-  type CloudJob,
+  type Run,
 } from '@roomote/db/server';
 import {
   buildPullRequestUrl,
@@ -134,7 +134,7 @@ export async function createOrUpdateSourceControlPullRequestForCloudJob({
   input,
   fetchImpl = fetch,
 }: {
-  cloudJob: CloudJob;
+  cloudJob: Run;
   input: SourceControlPullRequestMutationInput;
   fetchImpl?: FetchImpl;
 }): Promise<SourceControlPullRequestMutationResult> {
@@ -216,7 +216,7 @@ export async function createOrUpdateSourceControlPullRequestForCloudJob({
  * created at all. Updates never change an existing pull request's draft
  * state.
  */
-async function resolveEffectivePrAction(cloudJob: CloudJob): Promise<PrAction> {
+async function resolveEffectivePrAction(cloudJob: Run): Promise<PrAction> {
   const payloadPrAction = getPayloadRecord(cloudJob.payload).prAction;
 
   if (prActions.includes(payloadPrAction as PrAction)) {
@@ -240,7 +240,7 @@ async function persistSourceControlPullRequestAssociation({
   result,
   repository,
 }: {
-  cloudJob: CloudJob;
+  cloudJob: Run;
   input: SourceControlPullRequestMutationInput;
   result: SourceControlPullRequestMutationResult;
   repository: RepositoryRow;
@@ -902,7 +902,7 @@ export async function findCloudJobForSourceControlMutation({
 }: {
   cloudJobId: number;
   taskId: string;
-}): Promise<CloudJob> {
+}): Promise<Run> {
   const cloudJob = await db.query.taskRuns.findFirst({
     where: eq(taskRuns.id, cloudJobId),
   });

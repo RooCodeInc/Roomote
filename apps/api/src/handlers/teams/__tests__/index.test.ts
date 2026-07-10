@@ -6,7 +6,7 @@ const {
   authAccountsFindManyMock,
   authUsersFindFirstMock,
   buildTeamsRoutingContextMock,
-  enqueueCloudTaskMock,
+  enqueueTaskMock,
   envMock,
   fetchMessageImageDataUrlsMock,
   findFirstMock,
@@ -37,7 +37,7 @@ const {
   authAccountsFindManyMock: vi.fn(),
   authUsersFindFirstMock: vi.fn(),
   buildTeamsRoutingContextMock: vi.fn(),
-  enqueueCloudTaskMock: vi.fn(),
+  enqueueTaskMock: vi.fn(),
   envMock: {
     TEAMS_BOT_APP_ID: 'bot-app-id' as string | undefined,
     TEAMS_BOT_APP_PASSWORD: 'bot-secret' as string | undefined,
@@ -244,7 +244,7 @@ vi.mock('@roomote/sdk/server', () => ({
 
 vi.mock('@roomote/cloud-agents/server', () => ({
   buildTeamsRoutingContext: buildTeamsRoutingContextMock,
-  enqueueCloudTask: enqueueCloudTaskMock,
+  enqueueTask: enqueueTaskMock,
   getTaskUrl: getTaskUrlMock,
   routeTask: routeTaskMock,
 }));
@@ -335,7 +335,7 @@ describe('Teams webhook handler', () => {
         reasoning: 'all repos',
       },
     });
-    enqueueCloudTaskMock.mockResolvedValue({
+    enqueueTaskMock.mockResolvedValue({
       id: 88,
       taskId: 'task-new',
     });
@@ -478,7 +478,7 @@ describe('Teams webhook handler', () => {
       queued: true,
       cloudJobId: 77,
     });
-    expect(enqueueCloudTaskMock).not.toHaveBeenCalled();
+    expect(enqueueTaskMock).not.toHaveBeenCalled();
     expect(queueCommunicationMessageMock).toHaveBeenCalledWith('teams', 77, {
       provider: 'teams',
       text: 'keep going',
@@ -528,7 +528,7 @@ describe('Teams webhook handler', () => {
     expect(redisSetMock).not.toHaveBeenCalled();
     expect(findFirstMock).not.toHaveBeenCalled();
     expect(queueCommunicationMessageMock).not.toHaveBeenCalled();
-    expect(enqueueCloudTaskMock).not.toHaveBeenCalled();
+    expect(enqueueTaskMock).not.toHaveBeenCalled();
     expect(postMessageMock).not.toHaveBeenCalled();
   });
 
@@ -871,7 +871,7 @@ describe('Teams webhook handler', () => {
         taskDescription: 'continue',
       }),
     );
-    expect(enqueueCloudTaskMock).toHaveBeenCalledWith(
+    expect(enqueueTaskMock).toHaveBeenCalledWith(
       expect.objectContaining({
         task: expect.objectContaining({
           type: 'standard',
@@ -946,7 +946,7 @@ describe('Teams webhook handler', () => {
         images: ['data:image/png;base64,abc123'],
       }),
     );
-    expect(enqueueCloudTaskMock).toHaveBeenCalledWith(
+    expect(enqueueTaskMock).toHaveBeenCalledWith(
       expect.objectContaining({
         task: expect.objectContaining({
           type: 'standard',
@@ -997,7 +997,7 @@ describe('Teams webhook handler', () => {
       started: true,
       cloudJobId: 88,
     });
-    expect(enqueueCloudTaskMock).toHaveBeenCalledWith(
+    expect(enqueueTaskMock).toHaveBeenCalledWith(
       expect.objectContaining({
         task: expect.objectContaining({
           type: 'standard',
@@ -1037,7 +1037,7 @@ describe('Teams webhook handler', () => {
     expect(response.status).toBe(200);
     expect(buildTeamsRoutingContextMock).not.toHaveBeenCalled();
     expect(routeTaskMock).not.toHaveBeenCalled();
-    expect(enqueueCloudTaskMock).not.toHaveBeenCalled();
+    expect(enqueueTaskMock).not.toHaveBeenCalled();
     expect(queueCommunicationMessageMock).not.toHaveBeenCalled();
     expect(findFirstMock).toHaveBeenCalledTimes(1);
     expect(redisSetMock).toHaveBeenCalledWith(
@@ -1162,7 +1162,7 @@ describe('Teams webhook handler', () => {
       1,
       'teams:auth:teams-auth-token-1',
     );
-    expect(enqueueCloudTaskMock).toHaveBeenCalledWith(
+    expect(enqueueTaskMock).toHaveBeenCalledWith(
       expect.objectContaining({
         task: expect.objectContaining({
           type: 'standard',
@@ -1215,7 +1215,7 @@ describe('Teams webhook handler', () => {
     });
     expect(response.status).toBe(409);
     expect(redisEvalMock).not.toHaveBeenCalled();
-    expect(enqueueCloudTaskMock).not.toHaveBeenCalled();
+    expect(enqueueTaskMock).not.toHaveBeenCalled();
     expect(queueCommunicationMessageMock).not.toHaveBeenCalled();
   });
 
@@ -1250,7 +1250,7 @@ describe('Teams webhook handler', () => {
       started: true,
       cloudJobId: 88,
     });
-    const { task } = enqueueCloudTaskMock.mock.calls[0]?.[0] as {
+    const { task } = enqueueTaskMock.mock.calls[0]?.[0] as {
       task: { payload: Record<string, unknown> };
     };
     expect(task.payload).toMatchObject({
@@ -1295,7 +1295,7 @@ describe('Teams webhook handler', () => {
         botAppId: 'bot-app-id',
       }),
     );
-    expect(enqueueCloudTaskMock).not.toHaveBeenCalled();
+    expect(enqueueTaskMock).not.toHaveBeenCalled();
   });
 
   it('starts a task for an unmentioned thread reply when the unmentioned-reply gate routes it', async () => {
@@ -1335,7 +1335,7 @@ describe('Teams webhook handler', () => {
         }),
       }),
     );
-    expect(enqueueCloudTaskMock).toHaveBeenCalledWith(
+    expect(enqueueTaskMock).toHaveBeenCalledWith(
       expect.objectContaining({
         task: expect.objectContaining({
           type: 'standard',
@@ -1389,7 +1389,7 @@ describe('Teams webhook handler', () => {
       cloudJobId: 88,
     });
     expect(response.status).toBe(200);
-    expect(enqueueCloudTaskMock).toHaveBeenCalledWith(
+    expect(enqueueTaskMock).toHaveBeenCalledWith(
       expect.objectContaining({
         task: expect.objectContaining({
           type: 'snapshot_resume',
@@ -1436,7 +1436,7 @@ describe('Teams webhook handler', () => {
       'teams:resume-lock:19:conversation@thread.v2:activity-root',
       expect.objectContaining({ ttlSeconds: 30 }),
     );
-    expect(enqueueCloudTaskMock).toHaveBeenCalledWith(
+    expect(enqueueTaskMock).toHaveBeenCalledWith(
       expect.objectContaining({
         task: expect.objectContaining({
           type: 'snapshot_resume',
@@ -1501,7 +1501,7 @@ describe('Teams webhook handler', () => {
       cloudJobId: 99,
     });
     expect(response.status).toBe(200);
-    expect(enqueueCloudTaskMock).not.toHaveBeenCalled();
+    expect(enqueueTaskMock).not.toHaveBeenCalled();
     expect(postMessageMock).not.toHaveBeenCalled();
     expect(queueCommunicationMessageMock).toHaveBeenCalledWith(
       'teams',

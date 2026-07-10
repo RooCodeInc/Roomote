@@ -1,7 +1,7 @@
 import { Queue } from 'bullmq';
 import { z } from 'zod';
 
-import type { CloudJob } from '@roomote/db/server';
+import type { Run } from '@roomote/db/server';
 import {
   and,
   db,
@@ -109,7 +109,7 @@ async function resolvePullRequestTarget({
   cloudJob,
   completionText,
 }: {
-  cloudJob: CloudJob;
+  cloudJob: Run;
   completionText?: string;
 }): Promise<{ repository: string; prNumber: number } | null> {
   const latestTaskPullRequest = await db.query.taskPullRequests.findFirst({
@@ -152,7 +152,7 @@ export async function fetchPullRequestSnapshotForCloudJob({
   repository,
   prNumber,
 }: {
-  cloudJob: CloudJob;
+  cloudJob: Run;
   repository: string;
   prNumber: number;
 }): Promise<PullRequestActivitySnapshot | null> {

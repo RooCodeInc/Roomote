@@ -6,7 +6,7 @@ import { toast } from 'sonner';
 import { MoreVertical, Trash2 } from '@/components/system';
 import { SideNavItem } from '@/components/layout/side-nav/SideNavItem';
 
-import { isExitedCloudTaskStatus } from '@roomote/types';
+import { isExitedRunStatus } from '@roomote/types';
 
 import { useUser } from '@/hooks/useUser';
 import { useDeleteTasks } from '@/hooks/tasks';
@@ -39,7 +39,7 @@ function OverflowMenuBase({
   const [showDeleteDialog, setShowDeleteDialog] = useState(false);
 
   // Task deletion is deployment-wide: any member can delete any task.
-  const canShutdown = !!cloudJob && !isExitedCloudTaskStatus(cloudJob.status);
+  const canShutdown = !!cloudJob && !isExitedRunStatus(cloudJob.status);
 
   const deleteTasks = useDeleteTasks({
     onSuccess: () => {

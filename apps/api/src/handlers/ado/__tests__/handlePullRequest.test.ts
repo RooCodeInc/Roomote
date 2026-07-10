@@ -1,5 +1,5 @@
 const {
-  mockEnqueueCloudTask,
+  mockEnqueueTask,
   mockGetAdoAutomationTargets,
   mockUpdateTaskPrStatus,
   mockRepositoriesFindFirst,
@@ -8,7 +8,7 @@ const {
   mockNotifyTeamsPrMerge,
   mockNotifyTelegramAndLinearPrMerge,
 } = vi.hoisted(() => ({
-  mockEnqueueCloudTask: vi.fn(),
+  mockEnqueueTask: vi.fn(),
   mockGetAdoAutomationTargets: vi.fn(),
   mockUpdateTaskPrStatus: vi.fn(),
   mockRepositoriesFindFirst: vi.fn(),
@@ -21,7 +21,7 @@ const {
 }));
 
 vi.mock('@roomote/cloud-agents/server', () => ({
-  enqueueCloudTask: mockEnqueueCloudTask,
+  enqueueTask: mockEnqueueTask,
 }));
 
 vi.mock('@roomote/sdk/server', () => ({
@@ -163,7 +163,7 @@ function makePayload(
 
 describe('handleAdoPullRequest', () => {
   beforeEach(() => {
-    mockEnqueueCloudTask.mockReset();
+    mockEnqueueTask.mockReset();
     mockGetAdoAutomationTargets.mockReset();
     mockUpdateTaskPrStatus.mockReset();
     mockRepositoriesFindFirst.mockReset();
@@ -189,7 +189,7 @@ describe('handleAdoPullRequest', () => {
         },
       ],
     });
-    mockEnqueueCloudTask.mockResolvedValue({
+    mockEnqueueTask.mockResolvedValue({
       id: 1234,
       taskId: 'task-1',
     });
@@ -206,7 +206,7 @@ describe('handleAdoPullRequest', () => {
         ids: [1234],
       },
     });
-    expect(mockEnqueueCloudTask).toHaveBeenCalledWith(
+    expect(mockEnqueueTask).toHaveBeenCalledWith(
       expect.objectContaining({
         task: expect.objectContaining({
           type: TaskPayloadKind.GithubPrReview,
@@ -271,7 +271,7 @@ describe('handleAdoPullRequest', () => {
         }),
       }),
     );
-    expect(mockEnqueueCloudTask).toHaveBeenCalledWith(
+    expect(mockEnqueueTask).toHaveBeenCalledWith(
       expect.objectContaining({
         task: expect.objectContaining({
           payload: expect.objectContaining({
@@ -288,7 +288,7 @@ describe('handleAdoPullRequest', () => {
       updatedNotificationType: 'PushNotification',
     });
 
-    expect(mockEnqueueCloudTask).toHaveBeenCalledWith(
+    expect(mockEnqueueTask).toHaveBeenCalledWith(
       expect.objectContaining({
         task: expect.objectContaining({
           type: TaskPayloadKind.GithubPrReviewSync,
@@ -314,7 +314,7 @@ describe('handleAdoPullRequest', () => {
 
     expect(mockGetAdoAutomationTargets).not.toHaveBeenCalled();
     expect(mockDedupSelect).not.toHaveBeenCalled();
-    expect(mockEnqueueCloudTask).not.toHaveBeenCalled();
+    expect(mockEnqueueTask).not.toHaveBeenCalled();
   });
 
   it('skips updated pull requests when the head SHA already has a review job', async () => {
@@ -329,7 +329,7 @@ describe('handleAdoPullRequest', () => {
       message: 'Azure DevOps PR head SHA already has a review job.',
     });
 
-    expect(mockEnqueueCloudTask).not.toHaveBeenCalled();
+    expect(mockEnqueueTask).not.toHaveBeenCalled();
   });
 
   it('skips legacy updated pull request events without prior review state', async () => {
@@ -341,7 +341,7 @@ describe('handleAdoPullRequest', () => {
     });
 
     expect(mockDedupSelect).toHaveBeenCalledTimes(2);
-    expect(mockEnqueueCloudTask).not.toHaveBeenCalled();
+    expect(mockEnqueueTask).not.toHaveBeenCalled();
   });
 
   it('enqueues legacy updated pull request events when the head SHA changed', async () => {
@@ -349,7 +349,7 @@ describe('handleAdoPullRequest', () => {
 
     await handleAdoPullRequest(makePayload('git.pullrequest.updated'));
 
-    expect(mockEnqueueCloudTask).toHaveBeenCalledWith(
+    expect(mockEnqueueTask).toHaveBeenCalledWith(
       expect.objectContaining({
         task: expect.objectContaining({
           type: TaskPayloadKind.GithubPrReviewSync,
@@ -401,7 +401,7 @@ describe('handleAdoPullRequest', () => {
       mergedBy: 'roomote-bot@acme.example',
       sourceControlProvider: 'ado',
     });
-    expect(mockEnqueueCloudTask).not.toHaveBeenCalled();
+    expect(mockEnqueueTask).not.toHaveBeenCalled();
   });
 
   it('does not process stale merge-attempted events as completion updates', async () => {
@@ -418,7 +418,7 @@ describe('handleAdoPullRequest', () => {
     expect(mockNotifySlackPrMerge).not.toHaveBeenCalled();
     expect(mockNotifyTeamsPrMerge).not.toHaveBeenCalled();
     expect(mockNotifyTelegramAndLinearPrMerge).not.toHaveBeenCalled();
-    expect(mockEnqueueCloudTask).not.toHaveBeenCalled();
+    expect(mockEnqueueTask).not.toHaveBeenCalled();
   });
 
   it('updates tracked task PR status for abandoned pull requests', async () => {

@@ -1,11 +1,11 @@
 import {
-  type CloudTask,
+  type TaskSpec,
   PRODUCT_NAME,
   buildSlackThreadPermalink,
   buildTeamsMessagePermalink,
   buildTelegramMessagePermalink,
   getGitHubAppMention,
-  resolveCloudTaskWorkspace,
+  resolveTaskWorkspace,
 } from '@roomote/types';
 import {
   db,
@@ -704,9 +704,9 @@ function getUniqueRepositoryFullNames(
 }
 
 export async function getWorkspaceRepositoryFullNames(
-  cloudTask: CloudTask,
+  cloudTask: TaskSpec,
 ): Promise<string[] | undefined> {
-  const workspace = resolveCloudTaskWorkspace(cloudTask.payload);
+  const workspace = resolveTaskWorkspace(cloudTask.payload);
 
   if (workspace.type === 'repository') {
     return undefined;

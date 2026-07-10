@@ -1,7 +1,7 @@
 import type {
-  CloudJobEventDetails,
-  CloudJobEventSource,
-  CloudJobEventType,
+  RunEventDetails,
+  RunEventSource,
+  RunEventType,
 } from '@roomote/types';
 import {
   db,
@@ -10,10 +10,10 @@ import {
 
 export async function recordCloudJobEvent(input: {
   cloudJobId: number;
-  source: CloudJobEventSource;
-  eventType: CloudJobEventType;
+  source: RunEventSource;
+  eventType: RunEventType;
   message?: string;
-  details?: CloudJobEventDetails;
+  details?: RunEventDetails;
 }): Promise<void> {
   const { cloudJobId, ...rest } = input;
   await persistCloudJobEvent(db, { runId: cloudJobId, ...rest });

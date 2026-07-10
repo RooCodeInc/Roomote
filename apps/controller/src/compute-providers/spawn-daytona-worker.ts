@@ -4,7 +4,7 @@ import {
   getPrimaryPortFromConfig,
 } from '@roomote/types';
 import {
-  type CloudJob,
+  type Run,
   createComputeProviderMutationEventRecorder,
   db,
   taskRuns,
@@ -74,7 +74,7 @@ function buildDetachedWorkerExitError(result: {
 }
 
 export async function spawnDaytonaWorker(
-  cloudJob: CloudJob,
+  cloudJob: Run,
   authToken: string,
   config: {
     daytonaApiKey: string;

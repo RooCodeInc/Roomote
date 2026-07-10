@@ -1,7 +1,4 @@
-import {
-  type EnvironmentConfig,
-  resolveCloudTaskWorkspace,
-} from '@roomote/types';
+import { type EnvironmentConfig, resolveTaskWorkspace } from '@roomote/types';
 import { sdk } from '@roomote/sdk/client';
 
 import type {
@@ -33,7 +30,7 @@ export async function buildWorkspaceConfig({
   sha?: string;
   selectedRepositories?: string[];
 }): Promise<WorkspaceConfig> {
-  const workspace = resolveCloudTaskWorkspace({
+  const workspace = resolveTaskWorkspace({
     repo,
     branch,
     sha,

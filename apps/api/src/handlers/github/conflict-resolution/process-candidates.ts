@@ -1,5 +1,5 @@
 import { TaskPayloadKind, CloudAgentType, PRODUCT_NAME } from '@roomote/types';
-import { enqueueCloudTask, getTaskUrl } from '@roomote/cloud-agents/server';
+import { enqueueTask, getTaskUrl } from '@roomote/cloud-agents/server';
 import {
   DEFAULT_CONFLICT_RESOLUTION_IDLE_WINDOW_MS,
   findActiveGitHubBranchWork,
@@ -205,7 +205,7 @@ async function tryEnqueueResolution(
     const { owner, repo } = candidate;
 
     for (const target of targetResult.targets) {
-      const launchResult = await enqueueCloudTask({
+      const launchResult = await enqueueTask({
         task: {
           type: TaskPayloadKind.GithubPrConflictResolve,
           ...getBackgroundGithubTaskProperties(target.properties),

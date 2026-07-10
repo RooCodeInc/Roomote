@@ -30,7 +30,7 @@ vi.mock('@trpc/client', async () => {
 });
 
 import { runFactory, taskFactory, userFactory } from '@roomote/db/server';
-import { CloudTaskStatus } from '@roomote/types';
+import { RunStatus } from '@roomote/types';
 import type { FeatureFlag } from '@roomote/feature-flags';
 
 import type { UserAuthSuccess } from '@/types';
@@ -110,7 +110,7 @@ describe('sendSandboxPromptCommand', () => {
     await runFactory.create({
       actingUserId: user.id,
       taskId: task.id,
-      status: CloudTaskStatus.Running,
+      status: RunStatus.Running,
       sandboxServerUrl: 'http://sandbox.example.test',
       result: {},
     });
@@ -145,7 +145,7 @@ describe('sendSandboxPromptCommand', () => {
     await runFactory.create({
       actingUserId: user.id,
       taskId: task.id,
-      status: CloudTaskStatus.Running,
+      status: RunStatus.Running,
       sandboxServerUrl: 'http://sandbox.example.test',
       result: {},
     });
@@ -182,7 +182,7 @@ describe('sendSandboxPromptCommand', () => {
     await runFactory.create({
       actingUserId: user.id,
       taskId: task.id,
-      status: CloudTaskStatus.Running,
+      status: RunStatus.Running,
       sandboxServerUrl: 'http://sandbox.example.test',
       result: {},
     });
@@ -223,7 +223,7 @@ describe('sendSandboxPromptCommand', () => {
     await runFactory.create({
       actingUserId: user.id,
       taskId: task.id,
-      status: CloudTaskStatus.Running,
+      status: RunStatus.Running,
       sandboxServerUrl: 'http://sandbox.example.test',
       result: {},
     });

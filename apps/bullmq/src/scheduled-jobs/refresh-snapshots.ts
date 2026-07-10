@@ -1,7 +1,7 @@
 import {
   type ComputeProvider,
   type SnapshotEnvironmentAttachment,
-  activeCloudTaskStatuses,
+  activeRunStatuses,
   TaskPayloadKind,
   resolveComputeProviderTarget,
 } from '@roomote/types';
@@ -22,7 +22,7 @@ import {
   isNull,
   sql,
 } from '@roomote/db/server';
-import { enqueueCloudTask } from '@roomote/cloud-agents/server';
+import { enqueueTask } from '@roomote/cloud-agents/server';
 
 const SNAPSHOT_REFRESH_INTERVAL_MS = 24 * 60 * 60 * 1000;
 const PENDING_SNAPSHOT_RECOVERY_GRACE_MS = 5 * 60 * 1000;
@@ -288,7 +288,7 @@ async function findActiveSnapshotRefreshJob(
       and(
         eq(tasks.workflow, 'env_snapshot'),
         eq(taskRuns.vendor, candidate.provider),
-        inArray(taskRuns.status, [...activeCloudTaskStatuses]),
+        inArray(taskRuns.status, [...activeRunStatuses]),
         sql`${taskRuns.payload}->>'environmentId' = ${candidate.environmentId}`,
       ),
     )
@@ -432,7 +432,7 @@ export const refreshSnapshotsJob = async () => {
             snapshotAgeHours,
           });
 
-          const { id } = await enqueueCloudTask({
+          const { id } = await enqueueTask({
             task: {
               type: TaskPayloadKind.SnapshotEnvironment,
               computeProvider: candidate.provider,
@@ -503,7 +503,7 @@ export const refreshSnapshotsJob = async () => {
               snapshotAgeHours,
             });
 
-            const { id } = await enqueueCloudTask({
+            const { id } = await enqueueTask({
               task: {
                 type: TaskPayloadKind.SnapshotEnvironment,
                 computeProvider: candidate.provider,

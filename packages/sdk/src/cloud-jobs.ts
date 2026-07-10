@@ -1,4 +1,4 @@
-import { CloudTaskStatus } from '@roomote/types';
+import { RunStatus } from '@roomote/types';
 
 import {
   type AppRouterInput,
@@ -8,9 +8,7 @@ import {
 } from './client';
 import { hasBootstrapFailureSignal } from './bootstrap-failure-signal';
 
-export type CloudJob = NonNullable<
-  AppRouterOutput['cloudJobs']['findFirstById']
->;
+export type Run = NonNullable<AppRouterOutput['cloudJobs']['findFirstById']>;
 
 export type DequeuedCloudJob = NonNullable<
   AppRouterOutput['cloudJobs']['dequeue']
@@ -28,7 +26,7 @@ export interface SyncActingUserIdOptions {
 export type SyncActingUserIdResult = 'updated' | 'unchanged' | 'not-found';
 
 export interface CloudJobBootstrapOptions {
-  onBootstrapFailure?: (error: Error, cloudJob: CloudJob) => void;
+  onBootstrapFailure?: (error: Error, cloudJob: Run) => void;
 }
 
 export interface CloudJobRequestOptions {
@@ -36,10 +34,10 @@ export interface CloudJobRequestOptions {
 }
 
 function isImmediateBootstrapFailure(
-  cloudJob: CloudJob,
-): cloudJob is CloudJob & { error: string } {
+  cloudJob: Run,
+): cloudJob is Run & { error: string } {
   return (
-    cloudJob.status === CloudTaskStatus.Canceled &&
+    cloudJob.status === RunStatus.Canceled &&
     cloudJob.startedAt == null &&
     typeof cloudJob.error === 'string' &&
     cloudJob.error.length > 0 &&
@@ -49,7 +47,7 @@ function isImmediateBootstrapFailure(
 
 async function notifyOnBootstrapFailure(
   cloudJobId: number,
-  onBootstrapFailure?: (error: Error, cloudJob: CloudJob) => void,
+  onBootstrapFailure?: (error: Error, cloudJob: Run) => void,
 ): Promise<void> {
   if (!onBootstrapFailure) {
     return;

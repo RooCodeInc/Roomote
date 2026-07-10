@@ -2,7 +2,7 @@ import { UnrecoverableError } from 'bullmq';
 import type { Mock } from 'vitest';
 
 import {
-  CloudTaskStatus,
+  RunStatus,
   TaskPayloadKind,
   withCompleteTaskOnSnapshot,
 } from '@roomote/types';
@@ -157,7 +157,7 @@ const baseCloudJob = {
   id: 123,
   taskId: 'task_snapshot_events',
   vendor: 'modal',
-  status: CloudTaskStatus.Idle,
+  status: RunStatus.Idle,
   taskPhase: 'waiting_for_prompt',
   sleepAt: new Date('2026-04-02T21:34:02.798Z'),
   payload: { environmentId: 'env-1' },
@@ -285,7 +285,7 @@ describe('snapshotJob', () => {
       expect.objectContaining({
         snapshotId: 'snap_success_1',
         snapshotFailedAt: null,
-        status: CloudTaskStatus.Completed,
+        status: RunStatus.Completed,
       }),
     );
     expect(mockRecordComputeProviderUsage).toHaveBeenCalledWith({
@@ -365,7 +365,7 @@ describe('snapshotJob', () => {
       expect.objectContaining({
         snapshotId: 'snap_stale_after_edit',
         snapshotFailedAt: null,
-        status: CloudTaskStatus.Completed,
+        status: RunStatus.Completed,
       }),
     );
   });
@@ -640,7 +640,7 @@ describe('snapshotJob', () => {
       expect.objectContaining({
         snapshotId: 'snap_retry_success',
         snapshotFailedAt: null,
-        status: CloudTaskStatus.Completed,
+        status: RunStatus.Completed,
       }),
     );
     expect(mockRecordCloudJobEvent).toHaveBeenCalledWith(
@@ -947,7 +947,7 @@ describe('snapshotJob', () => {
       expect.objectContaining({
         snapshotId: 'snap_recovered_after_retry',
         snapshotFailedAt: null,
-        status: CloudTaskStatus.Completed,
+        status: RunStatus.Completed,
       }),
     );
     expect(mockUpdatePendingEnvironmentSnapshot).not.toHaveBeenCalled();
@@ -1091,7 +1091,7 @@ describe('snapshotJob', () => {
       expect.objectContaining({
         snapshotId: 'snap_recovered',
         snapshotFailedAt: null,
-        status: CloudTaskStatus.Completed,
+        status: RunStatus.Completed,
       }),
     );
     expect(mockUpdatePendingEnvironmentSnapshot).not.toHaveBeenCalled();

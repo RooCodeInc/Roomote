@@ -23,7 +23,7 @@ vi.mock('../../monitoring/sentry', () => ({
   captureWorkerException: captureWorkerExceptionMock,
 }));
 
-import { CloudTaskStatus } from '@roomote/types';
+import { RunStatus } from '@roomote/types';
 
 import { ExecutionError } from '../../command-executor';
 import { finalizeJob, handleJobError } from './job-lifecycle';
@@ -49,14 +49,14 @@ describe('job-lifecycle', () => {
 
     expect(sdkCloudJobsDoneMock).toHaveBeenCalledWith({
       id: 42,
-      status: CloudTaskStatus.Failed,
+      status: RunStatus.Failed,
       error: 'Environment not found',
     });
     expect(captureWorkerExceptionMock).toHaveBeenCalledWith(expect.any(Error), {
       cloudJobId: 42,
       stage: 'handleJobError',
     });
-    expect(onExit).toHaveBeenCalledWith({ id: 42 }, CloudTaskStatus.Failed, {});
+    expect(onExit).toHaveBeenCalledWith({ id: 42 }, RunStatus.Failed, {});
   });
 
   it('persists execution diagnostics for command failures', async () => {
@@ -89,7 +89,7 @@ describe('job-lifecycle', () => {
 
     expect(sdkCloudJobsDoneMock).toHaveBeenCalledWith({
       id: 20637,
-      status: CloudTaskStatus.Failed,
+      status: RunStatus.Failed,
       error: expect.stringContaining('pnpm --filter @currents/core-api build'),
     });
     expect(sdkCloudJobsDoneMock).toHaveBeenCalledWith(
@@ -170,7 +170,7 @@ describe('job-lifecycle', () => {
 
     await expect(
       finalizeJob({
-        result: { status: CloudTaskStatus.Completed },
+        result: { status: RunStatus.Completed },
         cloudJob: { id: 84, result: null } as never,
         logger: undefined as never,
         callbacks: {},

@@ -6,7 +6,7 @@ import {
   eq,
   repositories,
 } from '@roomote/db/server';
-import type { CloudJob } from '@roomote/db/server';
+import type { Run } from '@roomote/db/server';
 import { createCloudJobGitHubToken, getOctokit } from '@roomote/github';
 import type { PullRequestStatus } from '@roomote/types';
 import type { ParsedPR } from '../../../pull-request-links';
@@ -28,7 +28,7 @@ export {
  * association as cloud-job PR metadata.
  */
 async function fetchPrDetails(
-  cloudJob: CloudJob,
+  cloudJob: Run,
   owner: string,
   repo: string,
   prNumber: number,

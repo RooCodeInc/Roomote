@@ -1,5 +1,5 @@
 import { and, eq, inArray } from 'drizzle-orm';
-import type { CloudTaskWorkspace, SourceControlProvider } from '@roomote/types';
+import type { TaskWorkspace, SourceControlProvider } from '@roomote/types';
 
 import type { DatabaseOrTransaction } from '../db';
 import { environmentRepositoryMappings, repositories } from '../schema';
@@ -78,7 +78,7 @@ async function resolveAllRepositoriesProvider(
  */
 export async function resolveWorkspaceSourceControlProvider(
   dbOrTx: DatabaseOrTransaction,
-  workspace: CloudTaskWorkspace,
+  workspace: TaskWorkspace,
 ): Promise<SourceControlProvider | undefined> {
   switch (workspace.type) {
     case 'repository':

@@ -1,17 +1,10 @@
-import {
-  type CloudJob,
-  db,
-  desc,
-  eq,
-  taskRuns,
-  tasks,
-} from '@roomote/db/server';
+import { type Run, db, desc, eq, taskRuns, tasks } from '@roomote/db/server';
 import {
   getSlackChannelFromTaskPayload,
   getSlackThreadTsFromTaskPayload,
 } from '@roomote/types';
 
-type SlackJobRoutingRecord = Pick<CloudJob, 'id' | 'taskId' | 'payload'>;
+type SlackJobRoutingRecord = Pick<Run, 'id' | 'taskId' | 'payload'>;
 
 type SlackJobRoute =
   | {

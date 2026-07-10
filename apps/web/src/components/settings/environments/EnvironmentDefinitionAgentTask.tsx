@@ -4,7 +4,7 @@ import { useEffect, useMemo, useRef } from 'react';
 
 import {
   getEnvironmentDefinitionIdFromPayload,
-  isExitedCloudTaskStatus,
+  isExitedRunStatus,
 } from '@roomote/types';
 
 import {
@@ -154,7 +154,7 @@ export function useEnvironmentDefinitionAgentState({
     !succeeded;
 
   const taskIsActive =
-    !!session.cloudJob && !isExitedCloudTaskStatus(session.cloudJob.status);
+    !!session.cloudJob && !isExitedRunStatus(session.cloudJob.status);
 
   useEffect(() => {
     if (succeeded || failed) {
@@ -461,7 +461,7 @@ function EnvironmentDefinitionMessagesPane({
   const isWaitingForFirstUpdate =
     !hasVisibleConversationContent &&
     !!session.cloudJob &&
-    !isExitedCloudTaskStatus(session.cloudJob.status) &&
+    !isExitedRunStatus(session.cloudJob.status) &&
     !authFailureHint;
 
   return (

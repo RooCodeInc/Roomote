@@ -1,4 +1,4 @@
-import { CloudTaskStatus } from '@roomote/types';
+import { RunStatus } from '@roomote/types';
 
 const {
   mockCloudJobsUpdate,
@@ -113,7 +113,7 @@ describe('snapshot', () => {
     expect(result).toBe(false);
     expect(mockDone).toHaveBeenCalledWith({
       id: 42,
-      status: CloudTaskStatus.Failed,
+      status: RunStatus.Failed,
       error: 'setup failed',
     });
     expect(mockUpdateSnapshotStatus).toHaveBeenCalledWith({

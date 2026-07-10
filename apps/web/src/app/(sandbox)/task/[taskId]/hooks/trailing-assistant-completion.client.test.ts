@@ -1,4 +1,4 @@
-import { CloudTaskStatus } from '@roomote/types';
+import { RunStatus } from '@roomote/types';
 
 import { shouldMarkTrailingAssistantCompletion } from './trailing-assistant-completion';
 
@@ -6,7 +6,7 @@ describe('shouldMarkTrailingAssistantCompletion', () => {
   it('does not treat an unknown running phase as a completed turn', () => {
     expect(
       shouldMarkTrailingAssistantCompletion({
-        taskStatus: CloudTaskStatus.Running,
+        taskStatus: RunStatus.Running,
         taskPhase: null,
       }),
     ).toBe(false);
@@ -15,14 +15,14 @@ describe('shouldMarkTrailingAssistantCompletion', () => {
   it('marks waiting phases as completed turns', () => {
     expect(
       shouldMarkTrailingAssistantCompletion({
-        taskStatus: CloudTaskStatus.Running,
+        taskStatus: RunStatus.Running,
         taskPhase: 'waiting_for_prompt',
       }),
     ).toBe(true);
 
     expect(
       shouldMarkTrailingAssistantCompletion({
-        taskStatus: CloudTaskStatus.Running,
+        taskStatus: RunStatus.Running,
         taskPhase: 'waiting_for_user_input',
       }),
     ).toBe(true);
@@ -31,14 +31,14 @@ describe('shouldMarkTrailingAssistantCompletion', () => {
   it('marks successful legacy exits with no task phase as completed turns', () => {
     expect(
       shouldMarkTrailingAssistantCompletion({
-        taskStatus: CloudTaskStatus.Completed,
+        taskStatus: RunStatus.Completed,
         taskPhase: null,
       }),
     ).toBe(true);
 
     expect(
       shouldMarkTrailingAssistantCompletion({
-        taskStatus: CloudTaskStatus.Idle,
+        taskStatus: RunStatus.Idle,
         taskPhase: null,
       }),
     ).toBe(true);
@@ -47,14 +47,14 @@ describe('shouldMarkTrailingAssistantCompletion', () => {
   it('does not mark failed or canceled transcripts as completed turns', () => {
     expect(
       shouldMarkTrailingAssistantCompletion({
-        taskStatus: CloudTaskStatus.Failed,
+        taskStatus: RunStatus.Failed,
         taskPhase: 'waiting_for_prompt',
       }),
     ).toBe(false);
 
     expect(
       shouldMarkTrailingAssistantCompletion({
-        taskStatus: CloudTaskStatus.Canceled,
+        taskStatus: RunStatus.Canceled,
         taskPhase: null,
       }),
     ).toBe(false);

@@ -14,7 +14,7 @@ import { CircleSlash } from '@/components/system';
 import {
   TaskPayloadKind,
   DEFAULT_CODING_HARNESS,
-  isExitedCloudTaskStatus,
+  isExitedRunStatus,
   type TaskPhase,
 } from '@roomote/types';
 
@@ -137,7 +137,7 @@ export default function SandboxPage() {
       !activeCloudJobId ||
       !activeCloudJobStatus ||
       sessionState !== 'interactive' ||
-      isExitedCloudTaskStatus(activeCloudJobStatus)
+      isExitedRunStatus(activeCloudJobStatus)
     ) {
       return;
     }

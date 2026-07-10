@@ -1,5 +1,5 @@
 import type {
-  CloudTaskPayload,
+  TaskPayload,
   SuggestionCategory,
   SuggestionPriority,
   TaskPayloadKind,
@@ -57,5 +57,5 @@ export type SuggestionHistoryItem = {
 
 export type SuggestionSourceCloudJob = {
   payloadKind: TaskPayloadKind;
-  payload: CloudTaskPayload;
+  payload: TaskPayload;
 };

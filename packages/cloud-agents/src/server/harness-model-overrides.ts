@@ -1,5 +1,5 @@
 import {
-  type CloudTask,
+  type TaskSpec,
   type CodingHarness,
   type HarnessModelOverrides,
   type TaskModelSettings,
@@ -18,7 +18,7 @@ function isConfiguredModelId(
   return typeof value === 'string' && value.trim().length > 0;
 }
 
-function isCodeReviewTaskType(task: CloudTask): boolean {
+function isCodeReviewTaskType(task: TaskSpec): boolean {
   return (
     task.type === TaskPayloadKind.GithubPrReview ||
     task.type === TaskPayloadKind.GithubPrReviewSync
@@ -39,7 +39,7 @@ function resolveTaskModelForHarness(
   );
 }
 
-function applyHarnessModelOverrides<T extends CloudTask>(
+function applyHarnessModelOverrides<T extends TaskSpec>(
   task: T,
   harnessModelOverrides?: HarnessModelOverrides,
 ): T {
@@ -64,9 +64,7 @@ function applyHarnessModelOverrides<T extends CloudTask>(
   };
 }
 
-export function resolveEffectiveHarnessModelState<
-  T extends CloudTask,
->(options: {
+export function resolveEffectiveHarnessModelState<T extends TaskSpec>(options: {
   task: T;
   targetHarness: CodingHarness;
   isSnapshotResume: boolean;

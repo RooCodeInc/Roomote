@@ -1,4 +1,4 @@
-import { enqueueCloudTask, getTaskUrl } from '@roomote/cloud-agents/server';
+import { enqueueTask, getTaskUrl } from '@roomote/cloud-agents/server';
 import {
   findActiveGitHubPrReviewTask,
   findReusableGitHubPrFollowUpOwner,
@@ -9,11 +9,11 @@ import {
   type AdoCurrentUser,
 } from '@roomote/ado';
 import {
-  type CloudTaskPayload,
+  type TaskPayload,
   CloudAgentType,
   TaskPayloadKind,
   PRODUCT_NAME,
-  isActivelyRunningCloudTask,
+  isActivelyRunningTask,
 } from '@roomote/types';
 
 import type { WebhookResponse } from '../../types';
@@ -332,7 +332,7 @@ export async function handleAdoComment(
       commenter,
       commentBody: comment.content ?? '',
     });
-    const delivery = isActivelyRunningCloudTask(
+    const delivery = isActivelyRunningTask(
       activeOwner.status,
       activeOwner.taskPhase,
     )
@@ -409,12 +409,12 @@ export async function handleAdoComment(
     ...(branchName ? { branch: branchName } : {}),
     ...(headSha ? { sha: headSha } : {}),
     targetBranch: stripAdoGitRefPrefix(pullRequest.targetRefName),
-  } satisfies CloudTaskPayload<typeof TaskPayloadKind.GithubPrReview>;
+  } satisfies TaskPayload<typeof TaskPayloadKind.GithubPrReview>;
 
   try {
     // A human @roomote mention started this review: the commenter is the
     // initiator (the old automatic/ado attribution override is gone).
-    const launch = await enqueueCloudTask({
+    const launch = await enqueueTask({
       task: {
         type: TaskPayloadKind.GithubPrReview,
         payload: reviewPayload,

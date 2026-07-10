@@ -1,5 +1,5 @@
-import { CloudTaskStatus, TaskPayloadKind } from '@roomote/types';
-import type { CloudJob } from '@roomote/db/server';
+import { RunStatus, TaskPayloadKind } from '@roomote/types';
+import type { Run } from '@roomote/db/server';
 
 const mockFindFirstCloudJob = vi.fn();
 const mockFindFirstTaskPullRequest = vi.fn();
@@ -66,7 +66,7 @@ import {
   SLACK_PR_INACTIVITY_DELAY_MS,
 } from '../slack-pr-inactivity-check';
 
-type RunWithTask = CloudJob & { task: Record<string, unknown> };
+type RunWithTask = Run & { task: Record<string, unknown> };
 
 function makeCloudJob(overrides: Partial<RunWithTask> = {}): RunWithTask {
   return {
@@ -75,7 +75,7 @@ function makeCloudJob(overrides: Partial<RunWithTask> = {}): RunWithTask {
     payloadKind: TaskPayloadKind.SlackAppMention,
     actingUserId: 'user-1',
     harness: 'opencode-server',
-    status: CloudTaskStatus.Completed,
+    status: RunStatus.Completed,
     payload: {
       channel: 'C123',
       repo: 'owner/repo',

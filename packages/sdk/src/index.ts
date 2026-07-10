@@ -45,7 +45,7 @@ export type { LinearSessionConnection } from './linear-sessions';
 export type { LinearInstallation } from './linear-installations';
 export type { Repository } from './repositories';
 export type {
-  CloudJob,
+  Run,
   DequeuedCloudJob,
   DequeuedResumeCloudJob,
 } from './cloud-jobs';

@@ -12,7 +12,7 @@ import {
   type EnvironmentConfig,
   type ComputeProvider,
   type ResolvedEnvironmentOidcTarget,
-  CloudTaskStatus,
+  RunStatus,
   extractErrorDetails,
   getEnvironmentOidcTargets,
   isObservedTimeoutError,
@@ -468,9 +468,9 @@ async function loadOwnerStateForRefresh(
     }
 
     if (
-      cloudJob.status === CloudTaskStatus.Completed ||
-      cloudJob.status === CloudTaskStatus.Failed ||
-      cloudJob.status === CloudTaskStatus.Canceled
+      cloudJob.status === RunStatus.Completed ||
+      cloudJob.status === RunStatus.Failed ||
+      cloudJob.status === RunStatus.Canceled
     ) {
       return null;
     }

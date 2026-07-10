@@ -12,7 +12,7 @@ export {
   optionalAuthProcedure,
 } from './trpc';
 
-export { finishCloudJob } from './lib/cloud-jobs/finish-cloud-job';
+export { finishRun } from './lib/cloud-jobs/finish-run';
 export { findCloudJobByJobTokenClaims } from './lib/cloud-jobs/find-cloud-job';
 export { createSnapshot } from './lib/cloud-jobs/enqueue-snapshot';
 export { recordComputeProviderUsage } from './lib/cloud-jobs/record-compute-provider-usage';

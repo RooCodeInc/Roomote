@@ -10,11 +10,11 @@ import {
   TaskPayloadKind,
   CONFLICT_RESOLUTION_SUMMARY_RESULT_KEY,
 } from '@roomote/types';
-import { type CloudJob, sdk } from '@roomote/sdk/client';
+import { type Run, sdk } from '@roomote/sdk/client';
 
 import { githubPrConflictResolveCallbacks } from '../github-pr-conflict-resolve';
 
-function createCloudJob(): CloudJob {
+function createCloudJob(): Run {
   return {
     id: 123,
     payloadKind: TaskPayloadKind.GithubPrConflictResolve,
@@ -27,7 +27,7 @@ function createCloudJob(): CloudJob {
       baseRef: 'main',
     },
     result: null,
-  } as unknown as CloudJob;
+  } as unknown as Run;
 }
 
 describe('githubPrConflictResolveCallbacks', () => {

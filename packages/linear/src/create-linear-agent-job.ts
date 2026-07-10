@@ -1,4 +1,4 @@
-import { enqueueCloudTask } from '@roomote/cloud-agents/server';
+import { enqueueTask } from '@roomote/cloud-agents/server';
 import {
   ALL_REPOSITORIES,
   TaskPayloadKind,
@@ -67,7 +67,7 @@ export async function createLinearAgentJob({
       };
 
   try {
-    const launchResult = await enqueueCloudTask({
+    const launchResult = await enqueueTask({
       task: {
         type: TaskPayloadKind.LinearAgentSession,
         linearSessionId: sessionId,

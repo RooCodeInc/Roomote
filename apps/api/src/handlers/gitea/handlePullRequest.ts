@@ -1,7 +1,7 @@
 import pMap from 'p-map';
 
 import {
-  type CloudTaskPayload,
+  type TaskPayload,
   DEFAULT_PR_REVIEWER_SETTINGS,
   type PrReviewerSettings,
   TaskPayloadKind,
@@ -14,7 +14,7 @@ import {
   eq,
   findActiveGitHubPrReviewTask,
 } from '@roomote/db/server';
-import { enqueueCloudTask } from '@roomote/cloud-agents/server';
+import { enqueueTask } from '@roomote/cloud-agents/server';
 import { updateTaskPrStatus } from '@roomote/sdk/server';
 
 import type { WebhookResponse } from '../../types';
@@ -197,7 +197,7 @@ export async function handleGiteaPullRequest(
     pullRequest.user?.id != null ? String(pullRequest.user.id) : prAuthorName;
 
   const enqueued = await pMap(targets, async (_target) =>
-    enqueueCloudTask(
+    enqueueTask(
       {
         task: {
           type: taskType,
@@ -212,7 +212,7 @@ export async function handleGiteaPullRequest(
             ...(pullRequest.head?.ref ? { branch: pullRequest.head.ref } : {}),
             ...(headSha ? { sha: headSha } : {}),
             targetBranch: pullRequest.base?.ref,
-          } satisfies CloudTaskPayload<typeof taskType>,
+          } satisfies TaskPayload<typeof taskType>,
         },
         initiator: {
           kind: 'automation',

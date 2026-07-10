@@ -5,9 +5,9 @@ import {
   createMockResolvedRequest,
 } from '../../__tests__/fixtures';
 
-const { mockFindExistingResume, mockEnqueueCloudTask } = vi.hoisted(() => ({
+const { mockFindExistingResume, mockEnqueueTask } = vi.hoisted(() => ({
   mockFindExistingResume: vi.fn(),
-  mockEnqueueCloudTask: vi.fn(),
+  mockEnqueueTask: vi.fn(),
 }));
 
 vi.mock('../../lib/db', () => ({
@@ -21,7 +21,7 @@ vi.mock('../../lib/db', () => ({
 }));
 
 vi.mock('@roomote/cloud-agents/server', () => ({
-  enqueueCloudTask: mockEnqueueCloudTask,
+  enqueueTask: mockEnqueueTask,
 }));
 
 vi.mock('../../lib/logger', () => ({
@@ -40,7 +40,7 @@ describe('triggerAutoResume', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockFindExistingResume.mockResolvedValue(null);
-    mockEnqueueCloudTask.mockResolvedValue({ id: 99 });
+    mockEnqueueTask.mockResolvedValue({ id: 99 });
   });
 
   it('preserves the source run acting user when creating a snapshot resume run', async () => {
@@ -68,7 +68,7 @@ describe('triggerAutoResume', () => {
       version: 1,
     });
 
-    expect(mockEnqueueCloudTask).toHaveBeenCalledWith(
+    expect(mockEnqueueTask).toHaveBeenCalledWith(
       expect.objectContaining({
         actingUserId: 'source-user',
         task: expect.objectContaining({
@@ -112,7 +112,7 @@ describe('triggerAutoResume', () => {
       version: 1,
     });
 
-    expect(mockEnqueueCloudTask).toHaveBeenCalledWith(
+    expect(mockEnqueueTask).toHaveBeenCalledWith(
       expect.objectContaining({
         actingUserId: 'viewer-user',
       }),

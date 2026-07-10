@@ -9,7 +9,7 @@ import {
   sum,
 } from 'drizzle-orm';
 
-import { CloudTaskStatus, getMcpIntegration } from '@roomote/types';
+import { RunStatus, getMcpIntegration } from '@roomote/types';
 
 import { db } from '../db';
 import {
@@ -159,7 +159,7 @@ export async function collectInstanceReportStats(
       .from(taskRuns)
       .where(
         and(
-          eq(taskRuns.status, CloudTaskStatus.Completed),
+          eq(taskRuns.status, RunStatus.Completed),
           gte(taskRuns.completedAt, since),
         ),
       ),

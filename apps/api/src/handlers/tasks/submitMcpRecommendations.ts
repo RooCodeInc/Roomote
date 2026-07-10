@@ -1,7 +1,7 @@
 import type { Context } from 'hono';
 import { z } from 'zod';
 
-import { TaskPayloadKind, type CloudTaskPayload } from '@roomote/types';
+import { TaskPayloadKind, type TaskPayload } from '@roomote/types';
 import { normalizeSetupNewState } from '@roomote/types';
 import { Env } from '@roomote/env';
 import { db, eq, taskRuns, tasks } from '@roomote/db/server';
@@ -50,7 +50,7 @@ const ACTIVE_SETUP_TASK_TYPES = new Set<TaskPayloadKind>([
   TaskPayloadKind.SnapshotResume,
 ]);
 
-type McpRecommendationsPayload = CloudTaskPayload<
+type McpRecommendationsPayload = TaskPayload<
   typeof TaskPayloadKind.McpRecommendations
 >;
 

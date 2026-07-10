@@ -41,7 +41,7 @@ vi.mock('@roomote/db/server', () => {
   };
 });
 
-import { activeCloudTaskStatuses } from '@roomote/types';
+import { activeRunStatuses } from '@roomote/types';
 
 import { findActiveSlackJob } from '../find-active-slack-job';
 
@@ -58,7 +58,7 @@ describe('findActiveSlackJob', () => {
     expect(whereMock).toHaveBeenNthCalledWith(1, {
       and: [
         { eq: ['tasks.slackThreadTs', '111.000'] },
-        { inArray: ['taskRuns.status', [...activeCloudTaskStatuses]] },
+        { inArray: ['taskRuns.status', [...activeRunStatuses]] },
         { isNull: 'taskRuns.canceledAt' },
       ],
     });

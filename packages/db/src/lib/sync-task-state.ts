@@ -1,5 +1,5 @@
 import { and, eq, ne } from 'drizzle-orm';
-import { CloudTaskStatus, type TaskState } from '@roomote/types';
+import { RunStatus, type TaskState } from '@roomote/types';
 
 import { type DatabaseOrTransaction } from '../db';
 import { taskRuns, tasks } from '../schema';
@@ -9,15 +9,15 @@ import { taskRuns, tasks } from '../schema';
  * could still become) alive. Idle counts as non-terminal because the machine
  * stays up waiting for interaction.
  */
-const NON_TERMINAL_RUN_STATUSES = new Set<CloudTaskStatus>([
-  CloudTaskStatus.Pending,
-  CloudTaskStatus.Dequeued,
-  CloudTaskStatus.Processing,
-  CloudTaskStatus.Preparing,
-  CloudTaskStatus.Spawning,
-  CloudTaskStatus.Connecting,
-  CloudTaskStatus.Running,
-  CloudTaskStatus.Idle,
+const NON_TERMINAL_RUN_STATUSES = new Set<RunStatus>([
+  RunStatus.Pending,
+  RunStatus.Dequeued,
+  RunStatus.Processing,
+  RunStatus.Preparing,
+  RunStatus.Spawning,
+  RunStatus.Connecting,
+  RunStatus.Running,
+  RunStatus.Idle,
 ]);
 
 /**
@@ -27,15 +27,15 @@ const NON_TERMINAL_RUN_STATUSES = new Set<CloudTaskStatus>([
  */
 export type TaskStateRunInput = {
   id: number;
-  status: CloudTaskStatus;
+  status: RunStatus;
   startedAt: Date | null;
 };
 
-function terminalRunStatusToTaskState(status: CloudTaskStatus): TaskState {
+function terminalRunStatusToTaskState(status: RunStatus): TaskState {
   switch (status) {
-    case CloudTaskStatus.Failed:
+    case RunStatus.Failed:
       return 'failed';
-    case CloudTaskStatus.Canceled:
+    case RunStatus.Canceled:
       return 'canceled';
     default:
       // Only terminal statuses (completed/failed/canceled) reach here; the
@@ -69,7 +69,7 @@ export function deriveTaskStateFromRuns(
   }
 
   const madeProgress = (run: TaskStateRunInput): boolean =>
-    run.startedAt !== null || run.status === CloudTaskStatus.Completed;
+    run.startedAt !== null || run.status === RunStatus.Completed;
 
   const progressRuns = runs.filter(madeProgress);
   const candidates = progressRuns.length > 0 ? progressRuns : runs;
