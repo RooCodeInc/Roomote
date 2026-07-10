@@ -32,6 +32,7 @@ const {
   mkdirSyncMock,
   recordSandboxPromptSlackTurnStartMock,
   writeFileSyncMock,
+  installZeroCliMock,
 } = vi.hoisted(() => ({
   activateSkillsFolderMock: vi.fn(() => false),
   awaitSubprocessMock: vi.fn().mockResolvedValue(undefined),
@@ -80,6 +81,7 @@ const {
   mkdirSyncMock: vi.fn(),
   recordSandboxPromptSlackTurnStartMock: vi.fn(),
   writeFileSyncMock: vi.fn(),
+  installZeroCliMock: vi.fn().mockResolvedValue(undefined),
 }));
 
 vi.mock('node:fs', () => ({
@@ -218,6 +220,10 @@ vi.mock('../resolve-status', () => ({
 
 vi.mock('../completion', () => ({
   getDefaultKeepaliveMs: vi.fn(() => 60_000),
+}));
+
+vi.mock('../../commands/setup/agent-clis', () => ({
+  installZeroCli: installZeroCliMock,
 }));
 
 vi.mock('../agent-home', () => ({
@@ -3409,10 +3415,13 @@ describe('runTask', () => {
       } as never,
     });
 
+    expect(isOrgEnabledMock).toHaveBeenCalledWith('zero');
+    expect(installZeroCliMock).not.toHaveBeenCalled();
     expect(activateSkillsFolderMock).toHaveBeenCalledWith(
       expect.objectContaining({
         homeDir: '/tmp/workspace/.roomote-runtime-home',
         sourceHomeDir: '/tmp/home',
+        excludeSkillNames: ['zero'],
       }),
     );
     expect(createHarnessMock).toHaveBeenCalledWith(
@@ -3420,6 +3429,53 @@ describe('runTask', () => {
         runtimeEnv: expect.objectContaining({
           HOME: '/tmp/workspace/.roomote-runtime-home',
         }),
+      }),
+    );
+  });
+
+  it('installs the Zero CLI and activates the zero skill only when the integration is org-enabled', async () => {
+    buildSandboxInstructionMock.mockReturnValue(undefined as never);
+    isOrgEnabledMock.mockResolvedValueOnce(true);
+
+    await runTask({
+      cloudJob: {
+        id: 157,
+        taskId: 'task-157',
+        type: CloudTaskType.StandardTask,
+        harness: 'opencode-server',
+        payload: {},
+        result: null,
+      } as never,
+      envVars: {},
+      workspacePath: '/tmp/workspace',
+      prompt: '',
+      harnessInstructions: undefined,
+      environmentConfig: {} as never,
+      callbacks: {},
+      context: {},
+      logger: {
+        info: vi.fn(),
+        warn: vi.fn(),
+        error: vi.fn(),
+        log: vi.fn(),
+      } as never,
+      harnessSessionId: undefined,
+      workerEnv: {
+        authToken: 'cloud-token',
+        roomoteAppUrl: 'https://api.example.test',
+        trpcUrl: 'https://web.example.test',
+        buildUserFacingEnv: vi.fn(() => ({
+          HOME: '/tmp/home',
+          PATH: '/usr/bin',
+        })),
+      } as never,
+    });
+
+    expect(isOrgEnabledMock).toHaveBeenCalledWith('zero');
+    expect(installZeroCliMock).toHaveBeenCalledTimes(1);
+    expect(activateSkillsFolderMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        excludeSkillNames: undefined,
       }),
     );
   });

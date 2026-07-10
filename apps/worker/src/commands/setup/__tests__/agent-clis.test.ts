@@ -48,6 +48,7 @@ import {
   ROOMOTE_OPENCODE_CLI_VERSION_ENV,
   ROOMOTE_ZERO_CLI_VERSION_ENV,
   installAgentClis,
+  installZeroCli,
 } from '../agent-clis';
 import type { StartupLogger } from '../../../logging';
 
@@ -94,15 +95,14 @@ describe('installAgentClis', () => {
     process.env = originalEnv;
   });
 
-  it('skips reinstall when opencode and zero already match the expected versions', async () => {
+  it('skips reinstall when opencode already matches the expected version', async () => {
     mockExeca
       .mockResolvedValueOnce(versionResult(MISE_NPM_PATH))
-      .mockResolvedValueOnce(versionResult(DEFAULT_OPENCODE_CLI_VERSION))
-      .mockResolvedValueOnce(versionResult(DEFAULT_ZERO_CLI_VERSION));
+      .mockResolvedValueOnce(versionResult(DEFAULT_OPENCODE_CLI_VERSION));
 
     await installAgentClis(logger);
 
-    expect(mockExeca).toHaveBeenCalledTimes(3);
+    expect(mockExeca).toHaveBeenCalledTimes(2);
     expect(mockExeca).toHaveBeenNthCalledWith(
       1,
       'bash',
@@ -116,21 +116,16 @@ describe('installAgentClis', () => {
       reject: false,
       stdin: 'ignore',
     });
-    expect(mockExeca).toHaveBeenNthCalledWith(3, 'zero', ['--version'], {
-      reject: false,
-      stdin: 'ignore',
-    });
     expect(mockWriteFileSync).not.toHaveBeenCalled();
   });
 
-  it('reinstalls opencode and zero into the sandbox root and refreshes launchers when an older image is missing them', async () => {
+  it('reinstalls opencode into the sandbox root and refreshes the launcher when an older image is missing it', async () => {
     mockExeca
       .mockResolvedValueOnce(versionResult(MISE_NPM_PATH))
       .mockRejectedValueOnce(new Error('spawn opencode ENOENT'))
       .mockResolvedValueOnce(installResult())
       .mockResolvedValueOnce(versionResult(DEFAULT_OPENCODE_CLI_VERSION))
-      .mockResolvedValueOnce(versionResult(DEFAULT_OPENCODE_CLI_VERSION))
-      .mockResolvedValueOnce(versionResult(DEFAULT_ZERO_CLI_VERSION));
+      .mockResolvedValueOnce(versionResult(DEFAULT_OPENCODE_CLI_VERSION));
 
     await installAgentClis(logger);
 
@@ -145,7 +140,6 @@ describe('installAgentClis', () => {
         '--no-package-lock',
         `opencode-ai@${DEFAULT_OPENCODE_CLI_VERSION}`,
         'node-pty',
-        `@zeroxyz/cli@${DEFAULT_ZERO_CLI_VERSION}`,
       ],
       {
         stdin: 'ignore',
@@ -156,24 +150,17 @@ describe('installAgentClis', () => {
       '#!/bin/bash\nexec "/sandbox/node_modules/.bin/opencode" "$@"\n',
       'utf8',
     );
-    expect(mockWriteFileSync).toHaveBeenCalledWith(
-      path.join(os.homedir(), '.local', 'bin', 'zero'),
-      '#!/bin/bash\nexec "/sandbox/node_modules/.bin/zero" "$@"\n',
-      'utf8',
-    );
   });
 
-  it('prefers the baked opencode and zero versions when available', async () => {
+  it('prefers the baked opencode version when available', async () => {
     process.env[ROOMOTE_BAKED_OPENCODE_CLI_VERSION_ENV] = '1.18.0';
-    process.env[ROOMOTE_BAKED_ZERO_CLI_VERSION_ENV] = '1.22.0';
 
     mockExeca
       .mockResolvedValueOnce(versionResult(MISE_NPM_PATH))
       .mockRejectedValueOnce(new Error('spawn opencode ENOENT'))
       .mockResolvedValueOnce(installResult())
       .mockResolvedValueOnce(versionResult('1.18.0'))
-      .mockResolvedValueOnce(versionResult('1.18.0'))
-      .mockResolvedValueOnce(versionResult('1.22.0'));
+      .mockResolvedValueOnce(versionResult('1.18.0'));
 
     await installAgentClis(logger);
 
@@ -188,11 +175,76 @@ describe('installAgentClis', () => {
         '--no-package-lock',
         'opencode-ai@1.18.0',
         'node-pty',
-        '@zeroxyz/cli@1.22.0',
       ],
       {
         stdin: 'ignore',
       },
+    );
+  });
+});
+
+describe('installZeroCli', () => {
+  const originalEnv = { ...process.env };
+  const logger = {
+    userLog: { log: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn() },
+    debug: { log: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn() },
+    setFilePath: vi.fn(),
+  } as unknown as StartupLogger;
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    process.env = { ...originalEnv };
+    delete process.env[ROOMOTE_ZERO_CLI_VERSION_ENV];
+    delete process.env[ROOMOTE_BAKED_ZERO_CLI_VERSION_ENV];
+    mockExistsSync.mockImplementation((targetPath: PathLike) => {
+      return targetPath === '/sandbox';
+    });
+  });
+
+  afterAll(() => {
+    process.env = originalEnv;
+  });
+
+  it('skips reinstall when zero already matches the expected version', async () => {
+    mockExeca
+      .mockResolvedValueOnce(versionResult(MISE_NPM_PATH))
+      .mockResolvedValueOnce(versionResult(DEFAULT_ZERO_CLI_VERSION));
+
+    await installZeroCli(logger);
+
+    expect(mockExeca).toHaveBeenCalledTimes(2);
+    expect(mockWriteFileSync).not.toHaveBeenCalled();
+  });
+
+  it('installs only the zero package when missing', async () => {
+    mockExeca
+      .mockResolvedValueOnce(versionResult(MISE_NPM_PATH))
+      .mockRejectedValueOnce(new Error('spawn zero ENOENT'))
+      .mockResolvedValueOnce(installResult())
+      .mockResolvedValueOnce(versionResult(DEFAULT_ZERO_CLI_VERSION))
+      .mockResolvedValueOnce(versionResult(DEFAULT_ZERO_CLI_VERSION));
+
+    await installZeroCli(logger);
+
+    expect(mockExeca).toHaveBeenNthCalledWith(
+      3,
+      MISE_NPM_PATH,
+      [
+        'install',
+        '--prefix',
+        '/sandbox',
+        '--no-save',
+        '--no-package-lock',
+        `@zeroxyz/cli@${DEFAULT_ZERO_CLI_VERSION}`,
+      ],
+      {
+        stdin: 'ignore',
+      },
+    );
+    expect(mockWriteFileSync).toHaveBeenCalledWith(
+      path.join(os.homedir(), '.local', 'bin', 'zero'),
+      '#!/bin/bash\nexec "/sandbox/node_modules/.bin/zero" "$@"\n',
+      'utf8',
     );
   });
 });

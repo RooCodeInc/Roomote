@@ -70,7 +70,7 @@ describe('integration setup guide', () => {
       'Each user connects their own Zero account via OAuth.',
     );
     expect(INTEGRATION_SETUP_CONTENT).toContain(
-      'The zero CLI is preinstalled in the agent runtime',
+      'Only after an admin enables Zero do I install the zero CLI',
     );
   });
 });

@@ -133,7 +133,7 @@ Zero uses Path C (CLI in the runtime, users connect their own Zero wallets):
 1. A deployment operator enables Zero from Settings > Integrations.
 2. Each user connects their own Zero account via OAuth.
 
-The zero CLI is preinstalled in the agent runtime so I can search, inspect, call, and review capabilities with shell commands. The Zero MCP connection is for authentication and funding. Capability spend comes from the user's Zero wallet, not a Roomote-managed wallet.
+Only after an admin enables Zero do I install the zero CLI for that task and activate the packaged Zero skill. The Zero MCP connection is for authentication and funding. Capability spend comes from the user's Zero wallet, not a Roomote-managed wallet.
 
 # Unsupported Built-in Integrations And Feature Requests
 

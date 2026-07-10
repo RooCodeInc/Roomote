@@ -17,9 +17,10 @@ hidden: true
 
 Zero is a search engine and payment layer for AI agents: discover external paid
 capabilities, call them, and pay per use from the user's Zero wallet (Path C).
-Roomote preinstalls the `zero` CLI in the agent runtime. Prefer that CLI for the
-capability loop. The Zero MCP connector (`https://mcp.zero.xyz`) is for
-authentication and funding when it is connected in Settings.
+Roomote only installs this skill and the `zero` CLI when an admin has enabled
+the Zero integration. Prefer that CLI for the capability loop. The Zero MCP
+connector (`https://mcp.zero.xyz`) is for authentication and funding when it is
+connected in Settings.
 
 **When to use it:** as the fallback for anything genuinely beyond native
 abilities — before telling the user "I can't do that," run `zero search`.

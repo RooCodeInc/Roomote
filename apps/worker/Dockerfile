@@ -17,7 +17,6 @@ ARG FFPROBE_INSTALLER_VERSION=2.1.2
 ARG GH_VERSION=2.81.0
 ARG NODE_PTY_VERSION=1.1.0
 ARG PM2_VERSION=7.0.1
-ARG ZERO_CLI_VERSION=1.21.0
 
 RUN apt-get update \
   && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
@@ -125,7 +124,6 @@ ENV AGENT_BROWSER_EXECUTABLE_PATH="/opt/agent-browser/chrome"
 ENV FFMPEG_EXECUTABLE_PATH="/opt/ffmpeg/bin/ffmpeg"
 ENV FFPROBE_EXECUTABLE_PATH="/opt/ffmpeg/bin/ffprobe"
 ENV ROOMOTE_BAKED_OPENCODE_CLI_VERSION=${OPENCODE_CLI_VERSION}
-ENV ROOMOTE_BAKED_ZERO_CLI_VERSION=${ZERO_CLI_VERSION}
 
 COPY .docker/sandbox/install-browser-agent.sh /tmp/install-browser-agent.sh
 
@@ -226,27 +224,18 @@ RUN sudo mkdir -p /opt/ffmpeg/bin \
 RUN npm install --prefix /sandbox --no-save --no-package-lock \
     "node-pty@${NODE_PTY_VERSION}" \
     "opencode-ai@${OPENCODE_CLI_VERSION}" \
-    "@zeroxyz/cli@${ZERO_CLI_VERSION}" \
   && test -x /sandbox/node_modules/.bin/opencode \
-  && test "$(/sandbox/node_modules/.bin/opencode --version)" = "${OPENCODE_CLI_VERSION}" \
-  && test -x /sandbox/node_modules/.bin/zero \
-  && test "$(/sandbox/node_modules/.bin/zero --version)" = "${ZERO_CLI_VERSION}"
+  && test "$(/sandbox/node_modules/.bin/opencode --version)" = "${OPENCODE_CLI_VERSION}"
 
 RUN cat <<'EOF' | sudo tee /usr/local/bin/opencode > /dev/null
 #!/bin/bash
 exec /sandbox/node_modules/.bin/opencode "$@"
 EOF
 
-RUN cat <<'EOF' | sudo tee /usr/local/bin/zero > /dev/null
-#!/bin/bash
-exec /sandbox/node_modules/.bin/zero "$@"
-EOF
-
-RUN sudo chmod +x /usr/local/bin/opencode /usr/local/bin/zero \
+RUN sudo chmod +x /usr/local/bin/opencode \
   && mkdir -p "$HOME/.local/bin" \
   && sudo cp /usr/local/bin/opencode "$HOME/.local/bin/opencode" \
-  && sudo cp /usr/local/bin/zero "$HOME/.local/bin/zero" \
-  && sudo chown roomote:roomote "$HOME/.local/bin/opencode" "$HOME/.local/bin/zero" \
-  && chmod +x "$HOME/.local/bin/opencode" "$HOME/.local/bin/zero"
+  && sudo chown roomote:roomote "$HOME/.local/bin/opencode" \
+  && chmod +x "$HOME/.local/bin/opencode"
 
 WORKDIR /sandbox

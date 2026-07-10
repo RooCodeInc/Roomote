@@ -41,6 +41,11 @@ export function getSharedSandboxRuntimePackageSpecs(
   return [
     `opencode-ai@${resolveExpectedOpenCodeCliVersion(env)}`,
     NODE_PTY_PACKAGE_SPEC,
-    `${ZERO_CLI_PACKAGE_NAME}@${resolveExpectedZeroCliVersion(env)}`,
   ];
+}
+
+export function getZeroCliPackageSpec(
+  env: NodeJS.ProcessEnv = process.env,
+): string {
+  return `${ZERO_CLI_PACKAGE_NAME}@${resolveExpectedZeroCliVersion(env)}`;
 }
