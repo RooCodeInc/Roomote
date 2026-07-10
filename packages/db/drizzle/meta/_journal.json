@@ -15,6 +15,13 @@
       "when": 1783591302715,
       "tag": "0001_lazy_rhino",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1783640808968,
+      "tag": "0002_lame_tinkerer",
+      "breakpoints": true
     }
   ]
 }
