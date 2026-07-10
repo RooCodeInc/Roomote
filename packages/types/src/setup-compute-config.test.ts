@@ -132,9 +132,17 @@ describe('buildSetupComputeStatus', () => {
     const modalBaseImage = status.providers
       .find((provider) => provider.provider === 'modal')
       ?.fields.find((field) => field.envVarName === 'MODAL_BASE_IMAGE_REF');
-    expect(modalBaseImage?.advanced).toBe(true);
+    expect(modalBaseImage?.advanced).toBeUndefined();
     expect(modalBaseImage?.category).toBe('infrastructure');
-    expect(isComputeOperatorEditableField(modalBaseImage!)).toBe(true);
+    expect(isComputeOperatorEditableField(modalBaseImage!)).toBe(false);
+
+    const modalRegions = status.providers
+      .find((provider) => provider.provider === 'modal')
+      ?.fields.find((field) => field.envVarName === 'MODAL_REGIONS');
+    expect(modalRegions?.advanced).toBe(true);
+    expect(isComputeOperatorEditableField(modalRegions!)).toBe(true);
+    expect(modalRegions?.secret).toBe(false);
+    expect(modalRegions?.required).toBe(false);
 
     const e2bTemplate = status.providers
       .find((provider) => provider.provider === 'e2b')
@@ -149,12 +157,6 @@ describe('buildSetupComputeStatus', () => {
     expect(daytonaSnapshot?.advanced).toBeUndefined();
     expect(isAutoProvisionedComputeArtifactField(daytonaSnapshot!)).toBe(true);
     expect(isComputeOperatorEditableField(daytonaSnapshot!)).toBe(false);
-
-    const modalRegions = status.providers
-      .find((provider) => provider.provider === 'modal')
-      ?.fields.find((field) => field.envVarName === 'MODAL_REGIONS');
-    expect(modalRegions?.secret).toBe(false);
-    expect(modalRegions?.required).toBe(false);
 
     const modalToken = status.providers
       .find((provider) => provider.provider === 'modal')

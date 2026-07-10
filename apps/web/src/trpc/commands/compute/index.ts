@@ -195,7 +195,7 @@ export async function saveComputeConfigCommand(
       const baseImageField = providerStatus.fields.find(
         (field) => field.envVarName === 'MODAL_BASE_IMAGE_REF',
       );
-      const submittedBaseImage = input.values?.MODAL_BASE_IMAGE_REF?.trim();
+      // Never accept a form-submitted MODAL_BASE_IMAGE_REF — derived only.
       const derivedBaseImageRef = resolveDerivedModalBaseImageRef({
         ...process.env,
         DOCKER_WORKER_IMAGE: resolveEffectiveWorkerImageForSave(
@@ -207,16 +207,15 @@ export async function saveComputeConfigCommand(
         baseImageField &&
         !baseImageField.runtimeSatisfied &&
         !baseImageField.savedSatisfied &&
-        !submittedBaseImage &&
         derivedBaseImageRef
       ) {
         derivedInfraDefaults.set('MODAL_BASE_IMAGE_REF', derivedBaseImageRef);
       }
     }
 
-    // Credentials and submitted/derived infrastructure values are persisted as
-    // encrypted deployment env vars. DOCKER_WORKER_IMAGE is never persisted —
-    // it is process-env / release-derived only.
+    // Credentials and operator-editable infrastructure values are persisted as
+    // encrypted deployment env vars. DOCKER_WORKER_IMAGE and managed artifacts
+    // (Modal base image, E2B/Daytona) are not form-sticky from the UI.
     const valuesToSave: Array<{ name: string; value: string }> = [];
     const envVarsToClear: string[] = [];
 
@@ -231,7 +230,11 @@ export async function saveComputeConfigCommand(
         continue;
       }
 
-      const submitted = input.values?.[field.envVarName]?.trim() ?? '';
+      // Modal base image is derived server-side; form submissions are ignored.
+      const submitted =
+        field.envVarName === 'MODAL_BASE_IMAGE_REF'
+          ? ''
+          : (input.values?.[field.envVarName]?.trim() ?? '');
       const nextValue =
         submitted ||
         (isComputeInfrastructureField(field)

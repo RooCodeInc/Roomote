@@ -10,9 +10,10 @@ import {
  *   directly for the provider.
  * - `infrastructure`: a deployment worker-image artifact (base image ref,
  *   template id, snapshot name, domain/region). Some infrastructure values are
- *   UI-editable advanced overrides; auto-provisioned worker artifacts
- *   (`E2B_TEMPLATE_ID`, `DAYTONA_SNAPSHOT_NAME`) are not operator-edited in
- *   the UI — process env or detached provisioning owns them.
+ *   UI-editable advanced overrides; managed worker artifacts
+ *   (`MODAL_BASE_IMAGE_REF`, `E2B_TEMPLATE_ID`, `DAYTONA_SNAPSHOT_NAME`) are
+ *   not operator-edited in the UI — process env, derivation, or detached
+ *   provisioning owns them.
  */
 export type SetupComputeFieldCategory = 'credential' | 'infrastructure';
 
@@ -28,10 +29,8 @@ export type SetupComputeFieldDescriptor = {
    */
   category: SetupComputeFieldCategory;
   /**
-   * Provider-specific infrastructure fields shown behind an "Advanced
-   * infrastructure" area in the UI when they are operator-editable. Auto-
-   * provisioned worker artifacts are never rendered here; optional
-   * domain/region and Modal base-image override fields still use this flag.
+   * Optional operator-editable infrastructure fields (domain/region) shown with
+   * credentials. Managed worker artifacts are never form inputs.
    */
   advanced?: boolean;
 };
@@ -213,10 +212,11 @@ export const SETUP_COMPUTE_PROVIDER_CATALOG = [
         category: 'credential',
       },
       {
+        // Derived from the worker image (or process env); not a Settings/setup
+        // form input — matches E2B template / Daytona snapshot treatment.
         envVarName: 'MODAL_BASE_IMAGE_REF',
         label: 'Base Image Reference',
         category: 'infrastructure',
-        advanced: true,
       },
       {
         envVarName: 'MODAL_REGIONS',
@@ -356,13 +356,28 @@ export function isAutoProvisionedComputeArtifactField(
 }
 
 /**
+ * True for managed Modal / E2B / Daytona worker-image artifact env vars that
+ * Settings and setup never collect as form inputs. Process env, derivation
+ * from DOCKER_WORKER_IMAGE / RELEASE_VERSION, or detached provisioning owns
+ * them.
+ */
+export function isManagedComputeArtifactField(
+  field: Pick<SetupComputeFieldDescriptor, 'envVarName'>,
+): boolean {
+  return (
+    isAutoProvisionedComputeArtifactField(field) ||
+    field.envVarName === 'MODAL_BASE_IMAGE_REF'
+  );
+}
+
+/**
  * True for fields the sandboxes UI and setup wizard may collect from an
- * operator. Auto-provisioned template/snapshot IDs are excluded.
+ * operator. Managed worker artifacts are excluded.
  */
 export function isComputeOperatorEditableField(
   field: Pick<SetupComputeFieldDescriptor, 'envVarName'>,
 ): boolean {
-  return !isAutoProvisionedComputeArtifactField(field);
+  return !isManagedComputeArtifactField(field);
 }
 
 const SETUP_COMPUTE_PROVIDER_BY_ID = new Map<

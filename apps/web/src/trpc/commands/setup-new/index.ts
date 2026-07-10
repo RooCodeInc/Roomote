@@ -1347,16 +1347,15 @@ export async function saveSetupNewComputeConfigCommand(
         throw new Error('Selected sandbox provider is unavailable.');
       }
 
-      // When the Modal base image is not entered, not env-provided, and not
-      // already saved, derive it from the effective worker image and persist
-      // it. The published worker image doubles as the Modal base image.
+      // Derive MODAL_BASE_IMAGE_REF when not env-provided or already saved.
+      // Form submissions are ignored (deployment-managed like E2B/Daytona
+      // artifacts).
       const derivedInfraDefaults = new Map<string, string>();
 
       if (input.provider === 'modal') {
         const baseImageField = providerStatus.fields.find(
           (field) => field.envVarName === 'MODAL_BASE_IMAGE_REF',
         );
-        const submittedBaseImage = input.values?.MODAL_BASE_IMAGE_REF?.trim();
         const derivedBaseImageRef = resolveDerivedModalBaseImageRef({
           ...process.env,
           DOCKER_WORKER_IMAGE: effectiveWorkerImage,
@@ -1366,7 +1365,6 @@ export async function saveSetupNewComputeConfigCommand(
           baseImageField &&
           !baseImageField.runtimeSatisfied &&
           !baseImageField.savedSatisfied &&
-          !submittedBaseImage &&
           derivedBaseImageRef
         ) {
           derivedInfraDefaults.set('MODAL_BASE_IMAGE_REF', derivedBaseImageRef);
@@ -1422,10 +1420,9 @@ export async function saveSetupNewComputeConfigCommand(
         }
       }
 
-      // Credentials and submitted/derived infrastructure values are persisted
-      // as encrypted deployment env vars. DOCKER_WORKER_IMAGE is never sticky-
-      // saved — runtime is process-env / release-derived only. Auto-provisioned
-      // template/snapshot IDs are only written by the provisioning runner.
+      // Credentials and operator-editable infrastructure are persisted as
+      // encrypted deployment env vars. Managed artifacts are process-env /
+      // derived / provisioning only.
       const valuesToSave: Array<{ name: string; value: string }> = [];
       const envVarsToClear: string[] = [];
 
@@ -1438,7 +1435,10 @@ export async function saveSetupNewComputeConfigCommand(
           continue;
         }
 
-        const submitted = input.values?.[field.envVarName]?.trim() ?? '';
+        const submitted =
+          field.envVarName === 'MODAL_BASE_IMAGE_REF'
+            ? ''
+            : (input.values?.[field.envVarName]?.trim() ?? '');
         const nextValue =
           submitted ||
           (isComputeInfrastructureField(field)

@@ -103,15 +103,16 @@ export function ComputeProviderSection({
   clearPending,
 }: ComputeProviderSectionProps) {
   const inputFields = provider.fields.filter(isComputeCredentialField);
-  // Operator-editable infrastructure (Modal base image, domain/region). Auto-
-  // provisioned E2B template / Daytona snapshot IDs are never form inputs —
-  // process env or detached provisioning owns them.
-  const advancedInfraFields = provider.fields.filter(
+  // Optional operator-editable infrastructure (domain/region). Managed Modal
+  // base image and E2B/Daytona artifacts are never form inputs.
+  const optionalInfraFields = provider.fields.filter(
     (field) =>
       isComputeInfrastructureField(field) &&
       isComputeOperatorEditableField(field) &&
       !field.runtimeSatisfied,
   );
+  // Keep the old name for the rest of this component without a big rename.
+  const advancedInfraFields = optionalInfraFields;
   const missingDefaultBlockingInfraFields = provider.fields.filter(
     (field) =>
       isComputeInfrastructureField(field) &&
@@ -389,23 +390,15 @@ export function ComputeProviderSection({
               </div>
             )}
 
-            {inputFields.length > 0 && (
+            {(inputFields.length > 0 || advancedInfraFields.length > 0) && (
               <div>
                 <p className="font-semibold text-sm">
                   {hasConfiguredValues
                     ? 'Configuration values'
                     : 'Enter the values below:'}
                 </p>
-                <div className="space-y-2 mt-2">
-                  {inputFields.map((field) => renderFieldInput(field))}
-                </div>
-              </div>
-            )}
-
-            {advancedInfraFields.length > 0 && (
-              <div className="space-y-2">
                 {hasMissingDefaultBlockingInfra ? (
-                  <p className="max-w-xl text-sm text-muted-foreground">
+                  <p className="max-w-xl text-sm text-muted-foreground mt-1">
                     Configure a registry-qualified worker image via{' '}
                     <code className="font-mono text-xs">
                       DOCKER_WORKER_IMAGE
@@ -413,7 +406,10 @@ export function ComputeProviderSection({
                     before selecting {provider.label} as the default.
                   </p>
                 ) : null}
-                {advancedInfraFields.map((field) => renderFieldInput(field))}
+                <div className="space-y-2 mt-2">
+                  {inputFields.map((field) => renderFieldInput(field))}
+                  {advancedInfraFields.map((field) => renderFieldInput(field))}
+                </div>
               </div>
             )}
 
