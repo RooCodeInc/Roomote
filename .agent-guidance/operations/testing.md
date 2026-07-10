@@ -1,7 +1,7 @@
 ---
 title: Testing Strategy
 status: active
-last_reviewed: 2026-07-06
+last_reviewed: 2026-07-10
 owner: engineering
 summary: Prioritize high-signal tests, choose the right validation layer, and run Roomote's Vitest, Promptfoo, and browser verification without wasting coverage on low-value cases.
 ---
@@ -260,7 +260,7 @@ Choose the command set that proves the change, but say clearly what you ran and 
 
 The main CI workflow detects docs-only changes before starting package validation jobs. Changes are treated as docs-only when every changed path is under `apps/docs/` or `.agent-guidance/`, or the changed file ends in `.md` or `.mdx`. In that case CI skips lint, Knip, typecheck, tests, and the Docker build because those jobs validate runtime code and package wiring rather than documentation content.
 
-The GHCR publish workflow also skips docs-only pushes to `develop`, so documentation edits do not build images or redeploy the preview runtime. Manual `workflow_dispatch` runs and `v*` release tag pushes still execute normally.
+The GHCR publish workflow also skips docs-only pushes to `develop`, so documentation edits do not build or publish images. Manual `workflow_dispatch` runs and `v*` release tag pushes still execute normally.
 
 ## Change Review Checks
 
