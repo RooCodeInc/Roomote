@@ -5,6 +5,8 @@ const { mockFetchPr } = vi.hoisted(() => ({
 vi.mock('@roomote/github', () => ({
   createIssueComment: vi.fn(),
   updateIssueComment: vi.fn(),
+  getEffectiveGitHubAppSlug: vi.fn(() => 'roomote'),
+  resolveConfiguredGitHubAppSlug: vi.fn(async () => 'roomote'),
   Cli: {
     fetchPr: mockFetchPr,
   },
