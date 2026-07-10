@@ -176,7 +176,8 @@ export function StepComputeConfig({
     } else if (templateBuild?.status === 'failed') {
       setAwaitingTemplateBuild(false);
       toast.error(
-        templateBuild.error ?? 'Provisioning the worker base image failed.',
+        templateBuild.error ??
+          'Failed to prepare the sandbox provider setup. Try saving again.',
       );
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -228,17 +229,6 @@ export function StepComputeConfig({
     ? getComputeCredentialsHint(selectedProvider.provider)
     : null;
 
-  const provisionableProvider =
-    selectedProvider &&
-    isSetupProvisionableComputeProvider(selectedProvider.provider)
-      ? selectedProvider.provider
-      : null;
-  const artifactEnvVar =
-    provisionableProvider === 'e2b'
-      ? 'E2B_TEMPLATE_ID'
-      : provisionableProvider === 'daytona'
-        ? 'DAYTONA_SNAPSHOT_NAME'
-        : null;
   const manualModalBaseImage =
     selectedProvider?.provider === 'modal'
       ? (values.MODAL_BASE_IMAGE_REF?.trim() ?? '')
@@ -282,17 +272,6 @@ export function StepComputeConfig({
         .some((field) => field.savedSatisfied) ??
         false));
 
-  // Provisionable worker images build automatically once credentials + a
-  // worker image are available (template/snapshot are not UI inputs).
-  const showProvisioningNotice =
-    !!provisionableProvider &&
-    (workerImageAvailable || awaitingTemplateBuild) &&
-    !selectedProvider?.fields.find(
-      (field) => field.envVarName === artifactEnvVar,
-    )?.savedSatisfied &&
-    !selectedProvider?.fields.find(
-      (field) => field.envVarName === artifactEnvVar,
-    )?.runtimeSatisfied;
   const shouldRenderAdvancedSettings =
     isHostedProvider && (missingHostedWorkerImage || advancedExpanded);
 
@@ -512,30 +491,6 @@ export function StepComputeConfig({
                         ? workerImage.hostedImageRef
                         : 'Configured'}
                     </span>
-                  </div>
-                </div>
-              ) : null}
-
-              {showProvisioningNotice ? (
-                <div className="mt-6 grid gap-2 md:grid-cols-[220px_minmax(0,1fr)] md:items-center max-w-xl">
-                  <div className="text-sm font-medium">Worker base image</div>
-                  <div className="flex items-center gap-2 text-sm">
-                    {awaitingTemplateBuild ? (
-                      <>
-                        <Spinner className="size-4 shrink-0" />
-                        <span className="text-xs text-muted-foreground">
-                          Provisioning the worker base image in your{' '}
-                          {selectedProvider?.label ?? 'provider'} account — this
-                          takes a couple of minutes.
-                        </span>
-                      </>
-                    ) : (
-                      <span className="text-xs text-muted-foreground">
-                        Added automatically to your{' '}
-                        {selectedProvider?.label ?? 'provider'} account when you
-                        save.
-                      </span>
-                    )}
                   </div>
                 </div>
               ) : null}

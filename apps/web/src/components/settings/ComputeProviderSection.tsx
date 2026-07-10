@@ -195,7 +195,6 @@ export function ComputeProviderSection({
       !field.savedSatisfied,
   );
   const provisioningRunning = provisioning?.status === 'building';
-  const showProvisioningNotice = provisionableEnvOnlyFields.length > 0;
   // Credentials are already satisfied when a save can still start or retry
   // auto-provisioning without retyping values (existing installs that later
   // gain a registry-qualified worker image).
@@ -417,74 +416,31 @@ export function ComputeProviderSection({
               </div>
             )}
 
-            {(advancedInfraFields.length > 0 || showProvisioningNotice) && (
+            {advancedInfraFields.length > 0 && (
               <div>
-                {advancedInfraFields.length > 0 ? (
-                  <>
-                    <p className="font-semibold text-sm">
-                      Provider infrastructure
-                    </p>
-                    <p className="max-w-xl text-sm text-muted-foreground mt-1">
-                      {getAdvancedInfrastructureDescription({
-                        provider,
-                        hasMissingDefaultBlockingInfra,
-                      })}
-                    </p>
-                    {hasMissingDefaultBlockingInfra && (
-                      <p className="max-w-xl text-sm text-muted-foreground mt-1">
-                        Configure a registry-qualified worker image via{' '}
-                        <code className="font-mono text-xs">
-                          DOCKER_WORKER_IMAGE
-                        </code>{' '}
-                        before selecting {provider.label} as the default.
-                      </p>
-                    )}
-                    <div className="space-y-2 mt-3">
-                      {advancedInfraFields.map((field) =>
-                        renderFieldInput(field),
-                      )}
-                    </div>
-                  </>
-                ) : null}
-                {showProvisioningNotice ? (
-                  <div
-                    className={
-                      advancedInfraFields.length > 0 ? 'mt-3' : undefined
-                    }
-                  >
-                    <p className="font-semibold text-sm">Worker base image</p>
-                    <div className="mt-2 text-xs text-muted-foreground">
-                      {provisioningRunning ? (
-                        <span className="flex items-center gap-2">
-                          <Spinner className="size-4 shrink-0" />
-                          Provisioning the worker base image in your{' '}
-                          {provider.label} account — this takes a couple of
-                          minutes.
-                        </span>
-                      ) : provisioning?.status === 'failed' ? (
-                        <span className="text-destructive">
-                          Provisioning failed
-                          {provisioning.error
-                            ? `: ${provisioning.error}`
-                            : '.'}{' '}
-                          Save again to retry.
-                        </span>
-                      ) : (
-                        <span>
-                          Provisioned automatically in your {provider.label}{' '}
-                          account when credentials are saved and a
-                          registry-qualified worker image is available.
-                        </span>
-                      )}
-                    </div>
-                  </div>
-                ) : null}
+                <p className="font-semibold text-sm">Provider infrastructure</p>
+                <p className="max-w-xl text-sm text-muted-foreground mt-1">
+                  {getAdvancedInfrastructureDescription({
+                    provider,
+                    hasMissingDefaultBlockingInfra,
+                  })}
+                </p>
+                {hasMissingDefaultBlockingInfra && (
+                  <p className="max-w-xl text-sm text-muted-foreground mt-1">
+                    Configure a registry-qualified worker image via{' '}
+                    <code className="font-mono text-xs">
+                      DOCKER_WORKER_IMAGE
+                    </code>{' '}
+                    before selecting {provider.label} as the default.
+                  </p>
+                )}
+                <div className="space-y-2 mt-3">
+                  {advancedInfraFields.map((field) => renderFieldInput(field))}
+                </div>
               </div>
             )}
 
-            {(inputFields.length > 0 ||
-              advancedInfraFields.length > 0 ||
-              showProvisioningNotice) && (
+            {(inputFields.length > 0 || advancedInfraFields.length > 0) && (
               <EnvVarsInfoNote runtimeConfigured={runtimeConfigured} />
             )}
 
@@ -521,12 +477,10 @@ export function ComputeProviderSection({
                       {savePending
                         ? 'Saving...'
                         : provisioningRunning
-                          ? 'Provisioning...'
+                          ? 'Saving...'
                           : canRetryProvisioning && !hasPendingValueChanges
-                            ? 'Retry provisioning'
-                            : canStartProvisioning && !hasPendingValueChanges
-                              ? 'Provision worker base image'
-                              : 'Save'}
+                            ? 'Save'
+                            : 'Save'}
                       {savePending || provisioningRunning ? <Spinner /> : null}
                     </Button>
                   )}
