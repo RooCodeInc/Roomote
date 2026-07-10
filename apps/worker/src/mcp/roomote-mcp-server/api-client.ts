@@ -9,6 +9,63 @@ import type {
   ListArtifactsResponse,
 } from './types.js';
 
+// Ceiling on any single platform-API request from the sandbox. These calls run
+// inside an MCP tool invocation, which nothing else bounds: OpenCode waits on
+// the tool indefinitely, so a request that never gets a response (API instance
+// stall, half-open connection through a restart) wedges the whole task in a
+// silently "running" turn until a human intervenes. A bounded failure surfaces
+// as a normal tool error the agent can retry; the ceiling is deliberately
+// generous so slow-but-alive operations (PR creation against a provider API)
+// are never killed.
+const DEFAULT_PLATFORM_API_TIMEOUT_MS = 120_000;
+// Artifact/S3 transfers move real payloads (screenshots, videos), so give them
+// a wider window than control-plane calls before declaring the transfer dead.
+export const ARTIFACT_TRANSFER_TIMEOUT_MS = 600_000;
+
+export function resolvePlatformApiTimeoutMs(): number {
+  const raw = process.env.ROOMOTE_MCP_PLATFORM_API_TIMEOUT_MS?.trim();
+
+  if (!raw) {
+    return DEFAULT_PLATFORM_API_TIMEOUT_MS;
+  }
+
+  const parsed = Number.parseInt(raw, 10);
+
+  return Number.isFinite(parsed) && parsed > 0
+    ? parsed
+    : DEFAULT_PLATFORM_API_TIMEOUT_MS;
+}
+
+/**
+ * `fetch` with a hard deadline. Composes with any caller-provided signal, and
+ * translates the deadline expiry into a retryable error message instead of a
+ * bare AbortError. The timeout signal also bounds body reads started within
+ * the window (undici ties the response stream to the request signal).
+ */
+export async function fetchWithTimeout(
+  url: string,
+  options: RequestInit,
+  context: { label: string; timeoutMs?: number },
+): Promise<Response> {
+  const timeoutMs = context.timeoutMs ?? resolvePlatformApiTimeoutMs();
+  const timeoutSignal = AbortSignal.timeout(timeoutMs);
+  const signal = options.signal
+    ? AbortSignal.any([options.signal, timeoutSignal])
+    : timeoutSignal;
+
+  try {
+    return await fetch(url, { ...options, signal });
+  } catch (error) {
+    if (timeoutSignal.aborted) {
+      throw new Error(
+        `${context.label}: no response from the Roomote API within ${timeoutMs}ms; the request was aborted and is safe to retry.`,
+      );
+    }
+
+    throw error;
+  }
+}
+
 export function buildApiHeaders(
   config: Pick<
     ArtifactConfig,
@@ -63,13 +120,17 @@ export async function createArtifactRecord(
       : artifactType === 'visual-proof'
         ? '/api/artifacts/visual-proof'
         : '/api/artifacts';
-  const response = await fetch(`${config.platformApiUrl}${createPath}`, {
-    method: 'POST',
-    headers: buildApiHeaders(config, {
-      'Content-Type': 'application/json',
-    }),
-    body: JSON.stringify(params),
-  });
+  const response = await fetchWithTimeout(
+    `${config.platformApiUrl}${createPath}`,
+    {
+      method: 'POST',
+      headers: buildApiHeaders(config, {
+        'Content-Type': 'application/json',
+      }),
+      body: JSON.stringify(params),
+    },
+    { label: 'Failed to create artifact' },
+  );
 
   if (!response.ok) {
     const error = await parseApiError(response);
@@ -87,14 +148,21 @@ export async function uploadToPresignedUrl(
   content: Buffer,
   contentType: string,
 ): Promise<void> {
-  const response = await fetch(uploadUrl, {
-    method: 'PUT',
-    headers: {
-      'Content-Type': contentType,
-      'Content-Length': content.length.toString(),
+  const response = await fetchWithTimeout(
+    uploadUrl,
+    {
+      method: 'PUT',
+      headers: {
+        'Content-Type': contentType,
+        'Content-Length': content.length.toString(),
+      },
+      body: new Uint8Array(content),
     },
-    body: new Uint8Array(content),
-  });
+    {
+      label: 'Failed to upload to S3',
+      timeoutMs: ARTIFACT_TRANSFER_TIMEOUT_MS,
+    },
+  );
 
   if (!response.ok) {
     throw new Error(
@@ -111,12 +179,13 @@ export async function confirmUpload(
   artifactId: string,
   taskId: string,
 ): Promise<void> {
-  const response = await fetch(
+  const response = await fetchWithTimeout(
     `${config.platformApiUrl}/api/artifacts/${encodeURIComponent(artifactId)}/upload_complete?taskId=${encodeURIComponent(taskId)}`,
     {
       method: 'POST',
       headers: buildApiHeaders(config),
     },
+    { label: 'Failed to confirm upload' },
   );
 
   if (!response.ok) {
@@ -183,12 +252,13 @@ export async function fetchArtifactMetadata(
   const versionQuery =
     params.version !== undefined ? `?v=${params.version}` : '';
 
-  const response = await fetch(
+  const response = await fetchWithTimeout(
     `${config.platformApiUrl}/api/tasks/${encodeURIComponent(params.taskId)}/artifacts/${encodedPath}${versionQuery}`,
     {
       method: 'GET',
       headers: buildApiHeaders(config),
     },
+    { label: 'Failed to fetch artifact metadata' },
   );
 
   if (!response.ok) {
@@ -213,12 +283,13 @@ export async function listArtifacts(
     ? `?artifactType=${encodeURIComponent(params.artifactType)}`
     : '';
 
-  const response = await fetch(
+  const response = await fetchWithTimeout(
     `${config.platformApiUrl}/api/tasks/${encodeURIComponent(params.taskId)}/artifacts${typeQuery}`,
     {
       method: 'GET',
       headers: buildApiHeaders(config),
     },
+    { label: 'Failed to list artifacts' },
   );
 
   if (!response.ok) {
@@ -237,12 +308,13 @@ export async function getDownloadUrl(
   artifactId: string,
   taskId: string,
 ): Promise<DownloadUrlResponse> {
-  const response = await fetch(
+  const response = await fetchWithTimeout(
     `${config.platformApiUrl}/api/artifacts/${encodeURIComponent(artifactId)}/url?taskId=${encodeURIComponent(taskId)}`,
     {
       method: 'GET',
       headers: buildApiHeaders(config),
     },
+    { label: 'Failed to get download URL' },
   );
 
   if (!response.ok) {
