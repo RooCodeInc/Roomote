@@ -174,17 +174,32 @@ jobs:
         run: |
           set -euo pipefail
           baseline="$EXTRA_TAG"
-          if [ "$baseline" = 'latest' ]; then
-            baseline="$(gh api "repos/$GITHUB_REPOSITORY/releases/latest" --jq .tag_name 2>/dev/null || true)"
-            # v0.0.1 predates the current migration baseline. Use the prior
-            # main candidate for the first gated release; later releases use
-            # the immediately preceding immutable release tag.
-            if [ -z "$baseline" ] || [ "$baseline" = 'v0.0.1' ]; then
-              baseline='main'
+          if [ "$baseline" != 'develop' ]; then
+            # Release-channel runs (tag, main, manual dispatch) validate the
+            # upgrade path from the previous published release. gh prints the
+            # 404 error body to stdout, so only trust the output when the call
+            # succeeds; capturing it with `|| true` is how a JSON blob once
+            # became a docker tag.
+            if ! baseline="$(gh api "repos/$GITHUB_REPOSITORY/releases/latest" --jq .tag_name 2>/dev/null)"; then
+              baseline=''
             fi
-          elif [ -z "$baseline" ]; then
-            baseline='main'
+            # v0.0.1 predates the release pipeline and has no images. With no
+            # usable previous release, skip upgrade validation entirely: the
+            # smoke test still verifies a fresh install of the candidate.
+            if [ "$baseline" = 'v0.0.1' ]; then
+              echo "Latest release is legacy v0.0.1 (no images); skipping upgrade validation." >&2
+              baseline=''
+            fi
           fi
+          # Never let anything that is not a known channel or v* release tag
+          # reach `docker pull`.
+          case "$baseline" in
+            '' | develop | v[0-9]*) ;;
+            *)
+              echo "Ignoring unexpected baseline '$baseline'; skipping upgrade validation." >&2
+              baseline=''
+              ;;
+          esac
           echo "version=$baseline" >> "$GITHUB_OUTPUT"
       - name: Exercise deployment lifecycle
         env:
