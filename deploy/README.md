@@ -72,30 +72,6 @@ deployments. Production releases use immutable `v*` tags; pushing a `v*` tag or
 manually dispatching the GHCR workflow publishes that explicit version. Use the
 same tag for create and upgrade commands.
 
-## Automatic Preview Deployments
-
-The GHCR publish workflow deploys preview automatically after all `develop`
-images publish successfully. The deploy job runs in the GitHub `preview`
-environment and upgrades the configured droplet to `develop-<short-sha>`.
-
-Required `preview` environment secret:
-
-- `ROOMOTE_PREVIEW_SSH_PRIVATE_KEY` - dedicated private SSH key for the preview
-  droplet
-
-Required `preview` environment variables:
-
-- `ROOMOTE_PREVIEW_HOST` - preview droplet host or IP
-- `ROOMOTE_PREVIEW_CUSTOMER` - deployer customer slug, for example `openmote`
-- `ROOMOTE_PREVIEW_SSH_USER` - SSH user, normally `root` for V1
-- `ROOMOTE_PREVIEW_KNOWN_HOSTS` - pinned `ssh-keyscan -H <host>` output
-- `ROOMOTE_IMAGE_RETENTION_RELEASES` - optional number of Roomote release tags
-  to keep on the droplet after each deploy; defaults to `3`
-
-Restrict the GitHub `preview` environment to the `develop` branch. The workflow
-also serializes preview deployments with the `preview-deploy` concurrency group
-so rapid merges do not run overlapping upgrades on the same droplet.
-
 ## Environment File
 
 Start from `.env.production.example`, keep the real file outside git, and pass
