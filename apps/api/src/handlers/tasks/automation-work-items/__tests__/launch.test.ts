@@ -7,10 +7,12 @@ import type { PersistedAutomationWorkItem } from '../types.js';
 
 const {
   MockCloudJobQueueEnqueueError,
+  mockClaimedAt,
   mockDbUpdate,
   mockEnqueueCloudTask,
   mockUpdateBackgroundAutomationSlackThreadMetadata,
 } = vi.hoisted(() => ({
+  mockClaimedAt: new Date('2026-07-01T12:00:00.000Z'),
   MockCloudJobQueueEnqueueError: class extends Error {
     cloudJobId: number;
     taskId: string;
@@ -72,12 +74,14 @@ vi.mock('@roomote/db/server', () => {
         .update(workItems)
         .set({
           status: 'launching',
-          launchClaimedAt: new Date(),
+          launchClaimedAt: mockClaimedAt,
           updatedAt: new Date(),
         })
         .where({})
         .returning();
-      return row ?? null;
+      // The claimed row carries the fencing token the surface threads through
+      // finalize and the fenced failure writes.
+      return row ? { ...row, launchClaimedAt: mockClaimedAt } : null;
     },
   );
   const finalizeWorkItemLaunched = vi.fn(
@@ -172,17 +176,23 @@ const slackTarget = {
   channelId: 'C456',
 };
 
+// Where-predicates captured by setupDbUpdateMock, in db.update call order
+// (built from the mocked and/eq helpers, so the fenced guards are assertable).
+let updateWheres: unknown[] = [];
+
 function setupDbUpdateMock(options: { throwOnWhereCall?: number } = {}) {
   const updateSets: Record<string, unknown>[] = [];
   let whereCall = 0;
+  updateWheres = [];
 
   mockDbUpdate.mockImplementation(() => ({
     set: (values: Record<string, unknown>) => {
       updateSets.push(values);
 
       return {
-        where: () => {
+        where: (predicate: unknown) => {
           whereCall += 1;
+          updateWheres.push(predicate);
 
           if (options.throwOnWhereCall === whereCall) {
             throw new Error('tracking update failed');
@@ -759,5 +769,65 @@ describe('launchActWorkItems', () => {
     ]);
     // Retryable failures stay quiet; a later resubmission relaunches them.
     expect(postLateBoundWorkItemFailureMessage).not.toHaveBeenCalled();
+  });
+
+  it('fences the terminal failure write on the launching status and the claim token', async () => {
+    setupDbUpdateMock();
+    mockEnqueueCloudTask.mockRejectedValueOnce(new Error('enqueue failed'));
+
+    await launchActWorkItems({
+      automationKey: 'sentry_triage',
+      workItems: [workItem],
+      executionTaskBootstrap: '$implement-changes',
+      chatTarget: null,
+    });
+
+    // updateWheres[0] is the claim CAS; [1] is the failed-stamp write. The
+    // WHERE must carry status='launching' AND our claim token, so a stale
+    // launcher whose claim was reclaimed can never fail the fresh claimant's
+    // row (the fenced write becomes a no-op instead).
+    expect(updateWheres[1]).toEqual({
+      type: 'and',
+      args: [
+        { type: 'eq', args: ['workItems.id', workItem.id] },
+        { type: 'eq', args: ['workItems.status', 'launching'] },
+        { type: 'eq', args: ['workItems.launchClaimedAt', mockClaimedAt] },
+      ],
+    });
+  });
+
+  it('fences the retry reopen write on our launched row and task link', async () => {
+    setupDbUpdateMock();
+    mockEnqueueCloudTask.mockImplementationOnce(async (_task, options) => {
+      await options.beforeEnqueue?.({
+        id: 123,
+        taskId: 'task-direct-1',
+      });
+
+      throw new CloudJobQueueEnqueueError({
+        cloudJobId: 123,
+        taskId: 'task-direct-1',
+        originalError: new Error('redis unavailable'),
+      });
+    });
+
+    await launchActWorkItems({
+      automationKey: 'sentry_triage',
+      workItems: [workItem],
+      executionTaskBootstrap: '$implement-changes',
+      chatTarget: slackTarget,
+    });
+
+    // updateWheres[0] claim, [1] finalize, [2] retry reopen. The reopen only
+    // applies to OUR finalized row (status='launched' with the task we just
+    // linked); anything else means the state moved on and must not be reset.
+    expect(updateWheres[2]).toEqual({
+      type: 'and',
+      args: [
+        { type: 'eq', args: ['workItems.id', workItem.id] },
+        { type: 'eq', args: ['workItems.status', 'launched'] },
+        { type: 'eq', args: ['workItems.launchedTaskId', 'task-direct-1'] },
+      ],
+    });
   });
 });

@@ -12,6 +12,7 @@ import type { TelegramCallbackQuery } from '@roomote/communication/telegram-upda
 const {
   answerCallbackMock,
   apiLoggerMock,
+  cancelOrphanedWorkItemRunBestEffortMock,
   claimTelegramSuggestionLaunchMock,
   finalizeWorkItemLaunchedMock,
   postTelegramMessageBestEffortMock,
@@ -21,6 +22,7 @@ const {
 } = vi.hoisted(() => ({
   answerCallbackMock: vi.fn(),
   apiLoggerMock: { debug: vi.fn(), warn: vi.fn(), error: vi.fn() },
+  cancelOrphanedWorkItemRunBestEffortMock: vi.fn(),
   claimTelegramSuggestionLaunchMock: vi.fn(),
   finalizeWorkItemLaunchedMock: vi.fn(),
   postTelegramMessageBestEffortMock: vi.fn(),
@@ -53,6 +55,10 @@ vi.mock('@roomote/db/server', () => ({
 vi.mock('../../../logging.js', () => ({ apiLogger: apiLoggerMock }));
 
 vi.mock('../../tasks/task-stop.js', () => ({ stopTaskJob: vi.fn() }));
+
+vi.mock('../../tasks/orphaned-work-item-run.js', () => ({
+  cancelOrphanedWorkItemRunBestEffort: cancelOrphanedWorkItemRunBestEffortMock,
+}));
 
 vi.mock('../linked-user.js', () => ({
   resolveTelegramSenderUserId: resolveTelegramSenderUserIdMock,
@@ -109,6 +115,9 @@ beforeEach(() => {
   });
   finalizeWorkItemLaunchedMock.mockResolvedValue(true);
   releaseWorkItemClaimMock.mockResolvedValue(true);
+  cancelOrphanedWorkItemRunBestEffortMock.mockResolvedValue(
+    'orphaned run canceled',
+  );
 });
 
 describe('handleTelegramCallbackQuery suggestion launch lifecycle', () => {
@@ -128,7 +137,7 @@ describe('handleTelegramCallbackQuery suggestion launch lifecycle', () => {
     expect(releaseWorkItemClaimMock).not.toHaveBeenCalled();
   });
 
-  it('logs loudly with work item and task ids when finalize loses the fencing guard', async () => {
+  it('best-effort cancels the orphaned run and logs loudly when finalize loses the fencing guard', async () => {
     startNewTelegramTaskMock.mockResolvedValue({
       status: 'started',
       launchResult: { id: 7, taskId: 'task-1' },
@@ -137,13 +146,49 @@ describe('handleTelegramCallbackQuery suggestion launch lifecycle', () => {
 
     await handleTelegramCallbackQuery(buildSuggestionQuery());
 
+    expect(cancelOrphanedWorkItemRunBestEffortMock).toHaveBeenCalledWith(7);
     expect(apiLoggerMock.warn).toHaveBeenCalledWith(
       expect.stringContaining(WORK_ITEM_ID),
     );
     expect(apiLoggerMock.warn).toHaveBeenCalledWith(
       expect.stringContaining('task-1'),
     );
+    expect(apiLoggerMock.warn).toHaveBeenCalledWith(
+      expect.stringContaining('orphaned run canceled'),
+    );
     expect(releaseWorkItemClaimMock).not.toHaveBeenCalled();
+  });
+
+  it('still logs the loud warn when the orphaned-run cancel reports a failure', async () => {
+    startNewTelegramTaskMock.mockResolvedValue({
+      status: 'started',
+      launchResult: { id: 7, taskId: 'task-1' },
+    });
+    finalizeWorkItemLaunchedMock.mockResolvedValue(false);
+    // The helper never throws; a failed cancel comes back as a note.
+    cancelOrphanedWorkItemRunBestEffortMock.mockResolvedValue(
+      'orphaned run cancel failed: db unavailable',
+    );
+
+    await handleTelegramCallbackQuery(buildSuggestionQuery());
+
+    expect(apiLoggerMock.warn).toHaveBeenCalledWith(
+      expect.stringContaining(WORK_ITEM_ID),
+    );
+    expect(apiLoggerMock.warn).toHaveBeenCalledWith(
+      expect.stringContaining('orphaned run cancel failed: db unavailable'),
+    );
+  });
+
+  it('does not cancel anything when finalize succeeds', async () => {
+    startNewTelegramTaskMock.mockResolvedValue({
+      status: 'started',
+      launchResult: { id: 7, taskId: 'task-1' },
+    });
+
+    await handleTelegramCallbackQuery(buildSuggestionQuery());
+
+    expect(cancelOrphanedWorkItemRunBestEffortMock).not.toHaveBeenCalled();
   });
 
   it('releases the claim with the token when routing replies inline (no task launched)', async () => {

@@ -13,6 +13,7 @@ import {
 } from '@roomote/db/server';
 
 import { apiLogger } from '../../logging.js';
+import { cancelOrphanedWorkItemRunBestEffort } from '../tasks/orphaned-work-item-run.js';
 import { stopTaskJob } from '../tasks/task-stop.js';
 import {
   parseCancelTaskCallbackData,
@@ -222,12 +223,15 @@ async function handleSuggestionLaunchCallback(params: {
 
       if (!finalized) {
         // The task is already enqueued but the fencing guard rejected the
-        // finalize (our stale claim was reclaimed by another launcher). The
-        // task now runs unlinked from the work item. No cleanly callable
-        // enqueue-level cancel helper is exposed to this surface, so log
-        // loudly with both ids for triage.
+        // finalize (our stale claim was reclaimed by another launcher), so
+        // the run is orphaned from the work item. Best-effort cancel it while
+        // it is still pre-sandbox; log loudly either way with the outcome.
+        const cancelNote = await cancelOrphanedWorkItemRunBestEffort(
+          started.launchResult.id,
+        );
+
         apiLogger.warn(
-          `[telegram] finalize lost the fencing guard for work item ${params.suggestionId}; orphaned task ${started.launchResult.taskId} runs unlinked (claim reclaimed by another launcher)`,
+          `[telegram] finalize lost the fencing guard for work item ${params.suggestionId}; task ${started.launchResult.taskId} (run ${started.launchResult.id}) was orphaned — ${cancelNote}`,
         );
       }
     } else {

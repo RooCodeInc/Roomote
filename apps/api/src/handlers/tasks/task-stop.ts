@@ -1,21 +1,7 @@
 import { TRPCClientError } from '@trpc/client';
 import { withSandboxServerRpcClient } from '@roomote/sdk/server';
-import {
-  and,
-  db,
-  eq,
-  inArray,
-  isNull,
-  markTaskStartParallelCountEndedAt,
-  not,
-  syncTaskStateFromRuns,
-  taskRuns,
-} from '@roomote/db/server';
-import {
-  CloudTaskStatus,
-  exitedCloudTaskStatuses,
-  isExitedCloudTaskStatus,
-} from '@roomote/types';
+import { cancelTaskRunDirect, db, eq, taskRuns } from '@roomote/db/server';
+import { type CloudTaskStatus, isExitedCloudTaskStatus } from '@roomote/types';
 
 interface StopTaskJob {
   id: number;
@@ -51,46 +37,10 @@ async function findCurrentStopTaskJob(
 }
 
 async function cancelTaskJobDirect(jobId: number): Promise<boolean> {
-  const endedAt = new Date();
-
-  const [updatedJob] = await db.transaction(async (tx) => {
-    const [job] = await tx
-      .update(taskRuns)
-      .set({
-        status: CloudTaskStatus.Canceled,
-        canceledAt: endedAt,
-      })
-      .where(
-        and(
-          eq(taskRuns.id, jobId),
-          isNull(taskRuns.sandboxServerUrl),
-          not(
-            inArray(
-              taskRuns.status,
-              exitedCloudTaskStatuses as unknown as CloudTaskStatus[],
-            ),
-          ),
-        ),
-      )
-      .returning({ id: taskRuns.id, taskId: taskRuns.taskId });
-
-    if (!job) {
-      return [];
-    }
-
-    // Derive the durable task state from all its runs after this direct cancel,
-    // so a still-running or already-completed sibling is respected.
-    await syncTaskStateFromRuns(tx, job.taskId);
-
-    await markTaskStartParallelCountEndedAt(tx, {
-      runId: jobId,
-      endedAt,
-    });
-
-    return [true];
-  });
-
-  return Boolean(updatedJob);
+  // Shared @roomote/db helper (also used by the work-item launch surfaces to
+  // clean up an orphaned run after a lost fenced finalize): guarded
+  // pre-sandbox cancel + task-state re-derive + parallel-count close.
+  return cancelTaskRunDirect({ runId: jobId });
 }
 
 function createTaskNotFoundResult(): StopTaskJobResult {

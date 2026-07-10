@@ -9,10 +9,12 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const {
   apiLoggerMock,
+  cancelOrphanedWorkItemRunBestEffortMock,
   finalizeWorkItemLaunchedMock,
   releaseWorkItemClaimMock,
 } = vi.hoisted(() => ({
   apiLoggerMock: { debug: vi.fn(), warn: vi.fn(), error: vi.fn() },
+  cancelOrphanedWorkItemRunBestEffortMock: vi.fn(),
   finalizeWorkItemLaunchedMock: vi.fn(),
   releaseWorkItemClaimMock: vi.fn(),
 }));
@@ -41,6 +43,10 @@ vi.mock('../../../logging.js', () => ({ apiLogger: apiLoggerMock }));
 vi.mock('../find-active-teams-job.js', () => ({
   stripTeamsMessageIdSuffix: (conversationId: string) =>
     conversationId.split(';messageid=')[0],
+}));
+
+vi.mock('../../tasks/orphaned-work-item-run.js', () => ({
+  cancelOrphanedWorkItemRunBestEffort: cancelOrphanedWorkItemRunBestEffortMock,
 }));
 
 import {
@@ -94,6 +100,9 @@ beforeEach(() => {
   vi.clearAllMocks();
   finalizeWorkItemLaunchedMock.mockResolvedValue(true);
   releaseWorkItemClaimMock.mockResolvedValue(true);
+  cancelOrphanedWorkItemRunBestEffortMock.mockResolvedValue(
+    'orphaned run canceled',
+  );
 });
 
 describe('launchClaimedTeamsSuggestion', () => {
@@ -125,7 +134,7 @@ describe('launchClaimedTeamsSuggestion', () => {
     expect(releaseWorkItemClaimMock).not.toHaveBeenCalled();
   });
 
-  it('logs loudly with work item and task ids when finalize loses the fencing guard', async () => {
+  it('best-effort cancels the orphaned run and logs loudly when finalize loses the fencing guard', async () => {
     finalizeWorkItemLaunchedMock.mockResolvedValue(false);
     const launchTask = vi.fn().mockResolvedValue({
       status: 'started',
@@ -139,13 +148,57 @@ describe('launchClaimedTeamsSuggestion', () => {
     });
 
     expect(outcome).toEqual({ result: 'started', cloudJobId: 7 });
+    expect(cancelOrphanedWorkItemRunBestEffortMock).toHaveBeenCalledWith(7);
     expect(apiLoggerMock.warn).toHaveBeenCalledWith(
       expect.stringContaining('work-item-1'),
     );
     expect(apiLoggerMock.warn).toHaveBeenCalledWith(
       expect.stringContaining('task-1'),
     );
+    expect(apiLoggerMock.warn).toHaveBeenCalledWith(
+      expect.stringContaining('orphaned run canceled'),
+    );
     expect(releaseWorkItemClaimMock).not.toHaveBeenCalled();
+  });
+
+  it('still logs the loud warn when the orphaned-run cancel reports a failure', async () => {
+    finalizeWorkItemLaunchedMock.mockResolvedValue(false);
+    // The helper never throws; a failed cancel comes back as a note.
+    cancelOrphanedWorkItemRunBestEffortMock.mockResolvedValue(
+      'orphaned run cancel failed: db unavailable',
+    );
+    const launchTask = vi.fn().mockResolvedValue({
+      status: 'started',
+      launchResult: { id: 7, taskId: 'task-1' },
+    });
+
+    await launchClaimedTeamsSuggestion({
+      suggestion: buildClaimedSuggestion(),
+      launchTask,
+      postMessage: vi.fn(),
+    });
+
+    expect(apiLoggerMock.warn).toHaveBeenCalledWith(
+      expect.stringContaining('work-item-1'),
+    );
+    expect(apiLoggerMock.warn).toHaveBeenCalledWith(
+      expect.stringContaining('orphaned run cancel failed: db unavailable'),
+    );
+  });
+
+  it('does not cancel anything when finalize succeeds', async () => {
+    const launchTask = vi.fn().mockResolvedValue({
+      status: 'started',
+      launchResult: { id: 7, taskId: 'task-1' },
+    });
+
+    await launchClaimedTeamsSuggestion({
+      suggestion: buildClaimedSuggestion(),
+      launchTask,
+      postMessage: vi.fn(),
+    });
+
+    expect(cancelOrphanedWorkItemRunBestEffortMock).not.toHaveBeenCalled();
   });
 
   it('releases the claim with the token when routing replies inline (no task launched)', async () => {

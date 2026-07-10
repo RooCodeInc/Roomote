@@ -4,6 +4,7 @@ import {
 } from '@roomote/cloud-agents/server';
 import {
   and,
+  cancelTaskRunDirect,
   claimWorkItem,
   db,
   eq,
@@ -130,11 +131,30 @@ export async function implementTaskSuggestionCommand(
 
     if (!finalized) {
       // The task is already enqueued but the fencing guard rejected the
-      // finalize (our stale claim was reclaimed by another launcher). The task
-      // now runs unlinked from the work item. No cleanly callable enqueue-level
-      // cancel helper is exposed to this surface, so log loudly for triage.
+      // finalize (our stale claim was reclaimed by another launcher), so the
+      // run is orphaned from the work item. Best-effort cancel it while it is
+      // still pre-sandbox, and log loudly either way with the cancel outcome.
+      let cancelNote = 'orphaned run left running';
+
+      try {
+        const canceled = await cancelTaskRunDirect({
+          runId: launchResult.id,
+          error:
+            'Canceled: work-item launch finalize lost the claim fencing guard',
+        });
+        cancelNote = canceled
+          ? 'orphaned run canceled'
+          : 'orphaned run cancel did not apply (already started or terminal)';
+      } catch (cancelError) {
+        cancelNote = `orphaned run cancel failed: ${
+          cancelError instanceof Error
+            ? cancelError.message
+            : String(cancelError)
+        }`;
+      }
+
       console.warn(
-        `[implementTaskSuggestion] finalize lost the fencing guard for work item ${input.suggestionId}; orphaned task ${launchResult.taskId} runs unlinked (claim reclaimed by another launcher).`,
+        `[implementTaskSuggestion] finalize lost the fencing guard for work item ${input.suggestionId}; task ${launchResult.taskId} (run ${launchResult.id}) was orphaned — ${cancelNote}.`,
       );
     }
 

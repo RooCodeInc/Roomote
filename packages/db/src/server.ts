@@ -47,6 +47,7 @@ export * from './lib/task-start-parallel-counts';
 export * from './lib/tasks';
 export * from './lib/source-control-provider';
 export * from './lib/sync-task-state';
+export * from './lib/cancel-task-run';
 export * from './lib/automations';
 export * from './lib/background-automation-slack-threads';
 export * from './lib/cloud-job-events';

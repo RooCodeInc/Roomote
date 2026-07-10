@@ -4,6 +4,7 @@ import {
 } from '@roomote/cloud-agents/server';
 import { TaskPayloadKind, type BackgroundAutomationKey } from '@roomote/types';
 import {
+  and,
   claimWorkItem,
   db,
   eq,
@@ -289,31 +290,59 @@ export async function launchActWorkItems(params: {
         error instanceof Error
           ? error.message
           : 'Failed to auto-start work item';
-      const shouldRetry =
-        error instanceof CloudJobQueueEnqueueError && linkedTaskId !== null;
+      const retryLaunchedTaskId =
+        error instanceof CloudJobQueueEnqueueError ? linkedTaskId : null;
+      const shouldRetry = retryLaunchedTaskId !== null;
 
-      await db
-        .update(workItems)
-        .set(
-          shouldRetry
-            ? {
-                status: 'open',
-                launchedTaskId: null,
-                launchedAt: null,
-                failedAt: null,
-                launchClaimedAt: null,
-                launchError: message,
-                updatedAt: new Date(),
-              }
-            : {
-                status: 'failed',
-                failedAt: new Date(),
-                launchClaimedAt: null,
-                launchError: message,
-                updatedAt: new Date(),
-              },
-        )
-        .where(eq(workItems.id, workItem.id));
+      // Both failure writes are fenced so a stale launcher whose claim was
+      // reclaimed can never fail or clear the fresh claimant's row:
+      // - retry (finalize succeeded, queue publish failed): the row is OUR
+      //   `launched` row, so guard on status='launched' + our task link.
+      // - terminal failure: the row must still be `launching` under OUR claim
+      //   token (`launch_claimed_at`); after a reclaim this is a no-op.
+      const [failureWriteApplied] = shouldRetry
+        ? await db
+            .update(workItems)
+            .set({
+              status: 'open',
+              launchedTaskId: null,
+              launchedAt: null,
+              failedAt: null,
+              launchClaimedAt: null,
+              launchError: message,
+              updatedAt: new Date(),
+            })
+            .where(
+              and(
+                eq(workItems.id, workItem.id),
+                eq(workItems.status, 'launched'),
+                eq(workItems.launchedTaskId, retryLaunchedTaskId),
+              ),
+            )
+            .returning({ id: workItems.id })
+        : await db
+            .update(workItems)
+            .set({
+              status: 'failed',
+              failedAt: new Date(),
+              launchClaimedAt: null,
+              launchError: message,
+              updatedAt: new Date(),
+            })
+            .where(
+              and(
+                eq(workItems.id, workItem.id),
+                eq(workItems.status, 'launching'),
+                eq(workItems.launchClaimedAt, claimedWorkItem.launchClaimedAt),
+              ),
+            )
+            .returning({ id: workItems.id });
+
+      if (!failureWriteApplied) {
+        apiLogger.warn(
+          `[submitAutomationWorkItems] fenced failure write for work item ${workItem.id} did not apply (claim reclaimed or state moved on); leaving the current claimant's row untouched`,
+        );
+      }
 
       if (params.chatTarget && !shouldRetry) {
         // Late-bound launches have no execution task to report through, so a

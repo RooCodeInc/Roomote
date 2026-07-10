@@ -33,6 +33,7 @@ import {
 } from '@roomote/db/server';
 
 import { apiLogger } from '../../../logging.js';
+import { cancelOrphanedWorkItemRunBestEffort } from '../../tasks/orphaned-work-item-run.js';
 import {
   SLACK_SETUP_SUGGESTION_LOCK_PREFIX,
   TASK_SUGGESTION_AGENT_TYPES,
@@ -497,11 +498,15 @@ async function launchTaskSuggestionTaskFromReaction({
     if (!launched) {
       // The task was already enqueued but the fencing guard rejected the
       // finalize (our stale claim was reclaimed by another launcher), so this
-      // task now runs unlinked from the work item. No cleanly callable
-      // enqueue-level cancel helper is exposed to this surface, so log loudly
-      // with both ids for triage.
+      // run is orphaned from the work item. Best-effort cancel it while it is
+      // still pre-sandbox; log loudly either way with the cancel outcome.
+      const cancelNote =
+        cloudJob.id !== null
+          ? await cancelOrphanedWorkItemRunBestEffort(cloudJob.id)
+          : 'no run id to cancel (reused an existing job)';
+
       apiLogger.warn(
-        `${logPrefix} finalize lost the fencing guard for work item ${workItemId}; orphaned task ${cloudJob.taskId ?? 'null'} runs unlinked (claim reclaimed by another launcher)`,
+        `${logPrefix} finalize lost the fencing guard for work item ${workItemId}; task ${cloudJob.taskId ?? 'null'} (run ${cloudJob.id ?? 'null'}) was orphaned — ${cancelNote}`,
       );
       return false;
     }
@@ -546,10 +551,15 @@ async function launchTaskSuggestionTaskFromReaction({
 
       if (!recovered) {
         // Same orphan case as the happy path: the task is enqueued but the
-        // fencing guard rejected the finalize (claim reclaimed). Log loudly
-        // with both ids for triage; no clean enqueue-level cancel is available.
+        // fencing guard rejected the finalize (claim reclaimed). Best-effort
+        // cancel the orphaned run; log loudly either way with the outcome.
+        const cancelNote =
+          cloudJob.id !== null
+            ? await cancelOrphanedWorkItemRunBestEffort(cloudJob.id)
+            : 'no run id to cancel (reused an existing job)';
+
         apiLogger.warn(
-          `${logPrefix} finalize lost the fencing guard during post-enqueue recovery for work item ${workItemId}; orphaned task ${cloudJob.taskId ?? 'null'} runs unlinked (claim reclaimed by another launcher)`,
+          `${logPrefix} finalize lost the fencing guard during post-enqueue recovery for work item ${workItemId}; task ${cloudJob.taskId ?? 'null'} (run ${cloudJob.id ?? 'null'}) was orphaned — ${cancelNote}`,
         );
       }
 
