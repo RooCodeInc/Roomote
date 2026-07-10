@@ -14,6 +14,7 @@ import {
   COMMS_PROVIDER_ENV_VAR_NAMES,
   COMPUTE_PROVIDER_ENV_VAR_NAMES,
   CONTROL_PLANE_ENV_VAR_NAMES,
+  isAutoProvisionedComputeArtifactField,
   ROOMOTE_MANAGED_ENV_VAR_NAMES,
   SOURCE_CONTROL_SECRET_ENV_VAR_NAMES,
   normalizePemEnvValue,
@@ -204,6 +205,12 @@ export async function createEnvVarCommand(
   }
 
   if (COMPUTE_PROVIDER_ENV_VAR_NAMES.has(name)) {
+    if (isAutoProvisionedComputeArtifactField({ envVarName: name })) {
+      throw new Error(
+        `"${name}" is a reserved sandbox provider variable. Set it in the deployment environment, or let Roomote provision it automatically after saving provider credentials under Settings → Sandboxes.`,
+      );
+    }
+
     throw new Error(
       `"${name}" is a reserved sandbox provider variable. Configure it under Settings → Sandboxes.`,
     );

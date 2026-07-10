@@ -6,8 +6,10 @@ import {
   deriveModalBaseImageRefDefault,
   deriveWorkerImageFromReleaseVersion,
   getDefaultAvailableComputeProvider,
+  isAutoProvisionedComputeArtifactField,
   isComputeCredentialField,
   isComputeInfrastructureField,
+  isComputeOperatorEditableField,
   normalizeDeploymentComputeConfig,
   parseExcludedComputeProviders,
   resolveDerivedModalBaseImageRef,
@@ -132,6 +134,21 @@ describe('buildSetupComputeStatus', () => {
       ?.fields.find((field) => field.envVarName === 'MODAL_BASE_IMAGE_REF');
     expect(modalBaseImage?.advanced).toBe(true);
     expect(modalBaseImage?.category).toBe('infrastructure');
+    expect(isComputeOperatorEditableField(modalBaseImage!)).toBe(true);
+
+    const e2bTemplate = status.providers
+      .find((provider) => provider.provider === 'e2b')
+      ?.fields.find((field) => field.envVarName === 'E2B_TEMPLATE_ID');
+    expect(e2bTemplate?.advanced).toBeUndefined();
+    expect(isAutoProvisionedComputeArtifactField(e2bTemplate!)).toBe(true);
+    expect(isComputeOperatorEditableField(e2bTemplate!)).toBe(false);
+
+    const daytonaSnapshot = status.providers
+      .find((provider) => provider.provider === 'daytona')
+      ?.fields.find((field) => field.envVarName === 'DAYTONA_SNAPSHOT_NAME');
+    expect(daytonaSnapshot?.advanced).toBeUndefined();
+    expect(isAutoProvisionedComputeArtifactField(daytonaSnapshot!)).toBe(true);
+    expect(isComputeOperatorEditableField(daytonaSnapshot!)).toBe(false);
 
     const modalRegions = status.providers
       .find((provider) => provider.provider === 'modal')

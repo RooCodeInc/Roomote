@@ -7,6 +7,7 @@ import {
   getSetupNewComputeProvisioningState,
   isComputeCredentialField,
   isComputeInfrastructureField,
+  isComputeOperatorEditableField,
   isSetupProvisionableComputeProvider,
   type ComputeProvider,
   type SetupComputeStatus,
@@ -41,7 +42,11 @@ function getNonSecretFieldInitialValues(
   const next: Record<string, string> = {};
 
   for (const field of fields) {
-    if (isSecretComputeField(field) || field.runtimeSatisfied) {
+    if (
+      isSecretComputeField(field) ||
+      field.runtimeSatisfied ||
+      !isComputeOperatorEditableField(field)
+    ) {
       continue;
     }
 
@@ -187,9 +192,14 @@ export function StepComputeConfig({
 
   const credentialFields =
     selectedProvider?.fields.filter(isComputeCredentialField) ?? [];
+  // Operator-editable infrastructure only (Modal base image, domain/region).
+  // Auto-provisioned E2B template / Daytona snapshot IDs are not form inputs.
   const advancedInfraFields =
     selectedProvider?.fields.filter(
-      (field) => isComputeInfrastructureField(field) && !field.runtimeSatisfied,
+      (field) =>
+        isComputeInfrastructureField(field) &&
+        isComputeOperatorEditableField(field) &&
+        !field.runtimeSatisfied,
     ) ?? [];
   // Hosted providers derive/provision their worker base image from the shared
   // worker image. Missing or editable worker image values live in the advanced
@@ -229,20 +239,16 @@ export function StepComputeConfig({
       : provisionableProvider === 'daytona'
         ? 'DAYTONA_SNAPSHOT_NAME'
         : null;
-  const manualArtifactValue = artifactEnvVar
-    ? (values[artifactEnvVar]?.trim() ?? '')
-    : '';
   const manualModalBaseImage =
     selectedProvider?.provider === 'modal'
       ? (values.MODAL_BASE_IMAGE_REF?.trim() ?? '')
       : '';
 
   // A hosted provider needs a worker image to derive/provision its base image,
-  // unless the operator supplies a manual provider artifact directly.
+  // unless the operator supplies a manual Modal base-image override.
   const hostedRequirementMet =
     !isHostedProvider ||
     workerImageAvailable ||
-    manualArtifactValue.length > 0 ||
     manualModalBaseImage.length > 0;
 
   const credentialsMet = credentialFields.every(
@@ -268,16 +274,18 @@ export function StepComputeConfig({
       workerImage.hostedReady ||
       (selectedProvider?.fields
         .filter(
-          (field) => isComputeInfrastructureField(field) && field.advanced,
+          (field) =>
+            isComputeInfrastructureField(field) &&
+            isComputeOperatorEditableField(field) &&
+            field.advanced,
         )
         .some((field) => field.savedSatisfied) ??
         false));
 
   // Provisionable worker images build automatically once credentials + a
-  // worker image are saved and no manual artifact was supplied.
+  // worker image are available (template/snapshot are not UI inputs).
   const showProvisioningNotice =
     !!provisionableProvider &&
-    manualArtifactValue.length === 0 &&
     (workerImageAvailable || awaitingTemplateBuild) &&
     !selectedProvider?.fields.find(
       (field) => field.envVarName === artifactEnvVar,

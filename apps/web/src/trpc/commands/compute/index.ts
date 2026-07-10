@@ -13,6 +13,7 @@ import {
   buildSetupComputeStatus,
   deriveWorkerImageFromReleaseVersion,
   getSetupComputeProvider,
+  isAutoProvisionedComputeArtifactField,
   isComputeCredentialField,
   isComputeInfrastructureField,
   isRequiredComputeField,
@@ -224,6 +225,12 @@ export async function saveComputeConfigCommand(
         continue;
       }
 
+      // E2B template / Daytona snapshot are process-env or auto-provisioned
+      // only — never sticky-saved from Settings form submissions.
+      if (isAutoProvisionedComputeArtifactField(field)) {
+        continue;
+      }
+
       const submitted = input.values?.[field.envVarName]?.trim() ?? '';
       const nextValue =
         submitted ||
@@ -231,7 +238,7 @@ export async function saveComputeConfigCommand(
           ? (derivedInfraDefaults.get(field.envVarName) ?? '')
           : '');
 
-      if (!nextValue) {
+      if (!(nextValue.length > 0)) {
         // Empty secret inputs mean "leave unchanged". Empty optional
         // non-secret inputs clear a previously saved deployment value.
         if (
@@ -290,16 +297,13 @@ export async function saveComputeConfigCommand(
 
     // Provisionable providers' base images (E2B worker template, Daytona
     // worker snapshot) are artifacts inside the operator's provider account.
-    // When the operator did not enter a manual artifact value and the saved
-    // credentials + a registry-qualified worker image make provisioning
-    // possible, record it as pending and kick it off after commit.
+    // When credentials + a registry-qualified worker image make provisioning
+    // possible and no process-env/saved artifact already satisfies the field,
+    // record it as pending and kick it off after commit. Manual form overrides
+    // are intentionally not accepted (same treatment as the removed shared
+    // worker-image Settings control).
     if (isSetupProvisionableComputeProvider(input.provider)) {
       const provisionableProvider = input.provider;
-      const artifactEnvVar =
-        provisionableProvider === 'e2b'
-          ? 'E2B_TEMPLATE_ID'
-          : 'DAYTONA_SNAPSHOT_NAME';
-      const manualArtifact = input.values?.[artifactEnvVar]?.trim();
       const credentialsAvailable = providerStatus.fields
         .filter(
           (field) =>
@@ -312,7 +316,7 @@ export async function saveComputeConfigCommand(
             (input.values?.[field.envVarName]?.trim() ?? '').length > 0,
         );
 
-      if (!manualArtifact && credentialsAvailable) {
+      if (credentialsAvailable) {
         const existingState = await getPersistedComputeProvisioning(
           provisionableProvider,
           tx,
@@ -355,9 +359,7 @@ export async function clearComputeConfigCommand(
 
   const provider = getSetupComputeProvider(input.provider);
   // Clears this provider's saved credentials and its provider-specific
-  // infrastructure values (base image ref, template id, snapshot name). The
-  // shared worker image (DOCKER_WORKER_IMAGE) is not a provider field, so it
-  // is left in place and is cleared from its own shared section instead.
+  // infrastructure values (base image ref, template id, snapshot name).
   const providerEnvVarNames = provider.fields.map((field) => field.envVarName);
 
   if (providerEnvVarNames.length === 0) {

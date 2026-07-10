@@ -842,7 +842,7 @@ describe('setup-new compute config commands', () => {
     });
   });
 
-  it('persists a manually entered E2B template and skips provisioning', async () => {
+  it('ignores manual E2B template submissions and auto-provisions instead', async () => {
     vi.stubEnv('DOCKER_WORKER_IMAGE', 'registry.example.com/worker:tag');
 
     const result = await saveSetupNewComputeConfigCommand(buildMockAuth(), {
@@ -854,16 +854,15 @@ describe('setup-new compute config commands', () => {
     });
 
     expect(result.runtimeComputeConfig.defaultProvider).toBe('e2b');
-    expect(mockUpsertDeploymentEnvironmentVariables).toHaveBeenCalledWith(
-      expect.anything(),
-      expect.objectContaining({
-        values: expect.arrayContaining([
-          { name: 'E2B_API_KEY', value: 'e2b-key' },
-          { name: 'E2B_TEMPLATE_ID', value: 'manual-template' },
-        ]),
-      }),
+    const values = mockUpsertDeploymentEnvironmentVariables.mock.calls[0]?.[1]
+      ?.values as Array<{ name: string; value: string }>;
+    expect(values).toEqual(
+      expect.arrayContaining([{ name: 'E2B_API_KEY', value: 'e2b-key' }]),
     );
-    expect(mockRunComputeProvisioning).not.toHaveBeenCalled();
+    expect(values.map((entry) => entry.name)).not.toContain('E2B_TEMPLATE_ID');
+    expect(result.setupNewState.e2bTemplateBuild).toMatchObject({
+      status: 'building',
+    });
   });
 
   it('uses a submitted worker image without sticky DOCKER_WORKER_IMAGE persist', async () => {
