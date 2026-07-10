@@ -113,6 +113,10 @@ DOCKER_WORKER_IMAGE=localhost/roomote/roomote-worker:$version
 DOCKER_WORKER_NETWORK=$worker_network
 DOCKER_WORKER_PLATFORM=$platform
 DOCKER_WORKER_RELEASE_PATH=/roomote/releases/worker-current.tar.gz
+# GitHub/Blacksmith acceptance hosts use storage drivers that cannot enforce
+# --storage-opt size. Keep production fail-closed; only opt CI into the
+# explicit unbounded-disk escape hatch so launch-docker-task can spawn workers.
+DOCKER_WORKER_ALLOW_UNBOUNDED_DISK=true
 ENCRYPTION_KEY=$encryption_key
 IMAGE_NAMESPACE=roomote
 IMAGE_REGISTRY=localhost

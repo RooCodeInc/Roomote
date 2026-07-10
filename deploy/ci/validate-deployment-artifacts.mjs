@@ -259,6 +259,16 @@ for (const script of [
   execFileSync('bash', ['-n', join(root, script)], { stdio: 'pipe' });
 }
 
+// Acceptance runners cannot enforce writable-layer quotas; the smoke env must
+// explicitly opt into DOCKER_WORKER_ALLOW_UNBOUNDED_DISK so launch-docker-task
+// can spawn workers without relaxing production defaults.
+assert(
+  /^DOCKER_WORKER_ALLOW_UNBOUNDED_DISK=true$/m.test(
+    read('deploy/ci/deployment-smoke.sh'),
+  ),
+  'deploy/ci/deployment-smoke.sh must set DOCKER_WORKER_ALLOW_UNBOUNDED_DISK=true for CI acceptance hosts',
+);
+
 for (const directory of ['.github/workflows', '.github/actions']) {
   for (const entry of readdirSync(join(root, directory), { recursive: true })) {
     if (!/\.ya?ml$/.test(entry)) continue;
