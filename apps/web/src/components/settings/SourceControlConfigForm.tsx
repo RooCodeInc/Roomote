@@ -36,6 +36,22 @@ function getNonSecretFieldInitialValues(
   return next;
 }
 
+/** Drop secret entries so plaintext does not linger after a successful save. */
+function withoutSecretFieldValues(
+  fields: readonly SourceControlField[],
+  current: Record<string, string>,
+): Record<string, string> {
+  const next = { ...current };
+
+  for (const field of fields) {
+    if (isSecretSourceControlField(field)) {
+      delete next[field.envVarName];
+    }
+  }
+
+  return next;
+}
+
 export function SourceControlConfigForm({
   provider,
   configStatus,
@@ -89,6 +105,11 @@ export function SourceControlConfigForm({
         await queryClient.invalidateQueries({
           queryKey: trpc.sourceControl.repositories.queryKey(),
         });
+        // Secret-only saves leave non-secret content keys unchanged, so the
+        // content-keyed reset effect will not run — clear secrets explicitly.
+        setValues((current) =>
+          withoutSecretFieldValues(providerStatus?.fields ?? [], current),
+        );
         setEditingSavedValues({});
         toast.success(
           saveSuccessMessage ?? 'Source-control configuration saved.',

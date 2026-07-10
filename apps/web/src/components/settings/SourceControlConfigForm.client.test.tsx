@@ -1,13 +1,35 @@
-import { render, screen } from '@testing-library/react';
+import {
+  act,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+} from '@testing-library/react';
 import type { SetupSourceControlStatus } from '@roomote/types';
 
-vi.mock('@tanstack/react-query', () => ({
-  useMutation: () => ({
-    mutate: vi.fn(),
-    isPending: false,
+const { mutateMock, mutationOptionsRef, invalidateQueriesMock } = vi.hoisted(
+  () => ({
+    mutateMock: vi.fn(),
+    mutationOptionsRef: {
+      current: null as {
+        onSuccess?: () => Promise<void> | void;
+        onError?: (error: Error) => void;
+      } | null,
+    },
+    invalidateQueriesMock: vi.fn(async () => undefined),
   }),
+);
+
+vi.mock('@tanstack/react-query', () => ({
+  useMutation: (options: typeof mutationOptionsRef.current) => {
+    mutationOptionsRef.current = options;
+    return {
+      mutate: mutateMock,
+      isPending: false,
+    };
+  },
   useQueryClient: () => ({
-    invalidateQueries: vi.fn(),
+    invalidateQueries: invalidateQueriesMock,
   }),
 }));
 
@@ -32,6 +54,7 @@ vi.mock('@/trpc/client', () => ({
 }));
 
 import { SourceControlConfigForm } from './SourceControlConfigForm';
+
 const MASKED_VALUE = '••••••••••••••••••••••••••••';
 
 function buildConfigStatus(
@@ -40,21 +63,21 @@ function buildConfigStatus(
   return {
     selectedProvider: 'github',
     preselectedProvider: 'github',
-    runtimeConfiguredProvider: 'github',
-    runtimeConfiguredProviders: ['github'],
-    lockReason: 'runtime_env',
+    runtimeConfiguredProvider: null,
+    runtimeConfiguredProviders: [],
+    lockReason: null,
     connectedProvider: 'github',
     setupSatisfied: true,
-    setupSatisfiedByRuntimeEnv: true,
+    setupSatisfiedByRuntimeEnv: false,
     providers: [
       {
         provider: 'github',
         label: 'GitHub',
         connectionMode: 'app',
-        runtimeConfigSatisfied: true,
-        savedConfigSatisfied: false,
+        runtimeConfigSatisfied: false,
+        savedConfigSatisfied: true,
         configSatisfied: true,
-        configSatisfiedByRuntimeEnv: true,
+        configSatisfiedByRuntimeEnv: false,
         connected: true,
         repositoryCount: 2,
         fields,
@@ -64,6 +87,12 @@ function buildConfigStatus(
 }
 
 describe('SourceControlConfigForm', () => {
+  beforeEach(() => {
+    mutateMock.mockReset();
+    invalidateQueriesMock.mockClear();
+    mutationOptionsRef.current = null;
+  });
+
   it('shows plain values for non-secrets and a mask for secrets when runtime-configured', () => {
     render(
       <SourceControlConfigForm
@@ -142,5 +171,54 @@ describe('SourceControlConfigForm', () => {
 
     expect(screen.getByDisplayValue('saved-slug')).not.toBeDisabled();
     expect(screen.getByDisplayValue(MASKED_VALUE)).not.toBeDisabled();
+  });
+
+  it('clears plaintext secrets after a successful secret-only save', async () => {
+    const fields = [
+      {
+        envVarName: 'NEXT_PUBLIC_GITHUB_APP_SLUG',
+        acceptedEnvVarNames: ['NEXT_PUBLIC_GITHUB_APP_SLUG', 'GITHUB_APP_SLUG'],
+        label: 'GitHub App Slug',
+        runtimeSatisfied: false,
+        savedSatisfied: true,
+        savedValue: 'saved-slug',
+        satisfiedByEnvVarName: 'NEXT_PUBLIC_GITHUB_APP_SLUG',
+      },
+      {
+        envVarName: 'GITHUB_CLIENT_SECRET',
+        acceptedEnvVarNames: ['GITHUB_CLIENT_SECRET'],
+        label: 'GitHub OAuth Client Secret',
+        secret: true as const,
+        runtimeSatisfied: false,
+        savedSatisfied: true,
+        savedValue: null,
+        satisfiedByEnvVarName: 'GITHUB_CLIENT_SECRET',
+      },
+    ];
+
+    render(
+      <SourceControlConfigForm
+        provider="github"
+        configStatus={buildConfigStatus(fields)}
+      />,
+    );
+
+    const secretInput = screen.getByDisplayValue(MASKED_VALUE);
+    fireEvent.focus(secretInput);
+    fireEvent.change(secretInput, {
+      target: { value: 'new-secret-value' },
+    });
+    expect(screen.getByDisplayValue('new-secret-value')).toBeInTheDocument();
+    expect(screen.getByDisplayValue('saved-slug')).toBeInTheDocument();
+
+    await act(async () => {
+      await mutationOptionsRef.current?.onSuccess?.();
+    });
+
+    await waitFor(() => {
+      expect(screen.queryByDisplayValue('new-secret-value')).toBeNull();
+      expect(screen.getByDisplayValue(MASKED_VALUE)).toBeInTheDocument();
+      expect(screen.getByDisplayValue('saved-slug')).toBeInTheDocument();
+    });
   });
 });
