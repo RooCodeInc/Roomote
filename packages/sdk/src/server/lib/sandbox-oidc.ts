@@ -973,6 +973,63 @@ async function refreshSandboxOidcRowsForMachine(
   }
 }
 
+/**
+ * Claim the next batch of due OIDC targets (grouped per machine) by pushing
+ * their `refresh_at` forward, so concurrent sweeps skip them. Raw SQL because
+ * of the grouped SKIP LOCKED claim; exported for the real-database test that
+ * keeps these identifiers honest against the schema (a renamed column here is
+ * invisible to TypeScript and to fully mocked tests).
+ */
+export async function claimDueSandboxOidcTargets(params: {
+  now: Date;
+  claimUntil: Date;
+  limit: number;
+}): Promise<SandboxOidcTargetRow[]> {
+  const nowIso = params.now.toISOString();
+  const claimUntilIso = params.claimUntil.toISOString();
+  const limit = params.limit;
+
+  const claimedRaw = await db.execute(sql`
+    WITH due_machines AS (
+      SELECT
+        compute_provider,
+        compute_provider_id,
+        COALESCE(run_id::text, 'none') AS run_key,
+        environment_id,
+        MIN(refresh_at) AS next_refresh_at
+      FROM sandbox_oidc_targets
+      WHERE refresh_at <= ${nowIso}
+      GROUP BY
+        compute_provider,
+        compute_provider_id,
+        COALESCE(run_id::text, 'none'),
+        environment_id
+      ORDER BY next_refresh_at ASC
+      LIMIT ${limit}
+    ), due AS (
+      SELECT targets.id
+      FROM sandbox_oidc_targets AS targets
+      INNER JOIN due_machines ON
+        targets.compute_provider = due_machines.compute_provider AND
+        targets.compute_provider_id = due_machines.compute_provider_id AND
+        COALESCE(targets.run_id::text, 'none') = due_machines.run_key AND
+        targets.environment_id = due_machines.environment_id
+      WHERE targets.refresh_at <= ${nowIso}
+      FOR UPDATE OF targets SKIP LOCKED
+    )
+    UPDATE sandbox_oidc_targets AS targets
+    SET refresh_at = ${claimUntilIso},
+        updated_at = ${nowIso}
+    FROM due
+    WHERE targets.id = due.id
+    RETURNING targets.*;
+  `);
+
+  return claimedRaw.map((row) =>
+    sandboxOidcTargetRowMapper(row as Record<string, unknown>),
+  );
+}
+
 export async function refreshDueSandboxOidcTargets(options?: {
   limit?: number;
   now?: Date;
@@ -986,48 +1043,12 @@ export async function refreshDueSandboxOidcTargets(options?: {
     now.getTime() + SANDBOX_OIDC_REFRESH_CLAIM_DELAY_MS,
   );
   const limit = options?.limit ?? SANDBOX_OIDC_REFRESH_MACHINE_BATCH_SIZE;
-  const nowIso = now.toISOString();
-  const claimUntilIso = claimUntil.toISOString();
 
-  const claimedRaw = await db.execute(sql`
-    WITH due_machines AS (
-      SELECT
-        compute_provider,
-        compute_provider_id,
-        COALESCE(cloud_job_id::text, 'none') AS cloud_job_key,
-        environment_id,
-        MIN(refresh_at) AS next_refresh_at
-      FROM sandbox_oidc_targets
-      WHERE refresh_at <= ${nowIso}
-      GROUP BY
-        compute_provider,
-        compute_provider_id,
-        COALESCE(cloud_job_id::text, 'none'),
-        environment_id
-      ORDER BY next_refresh_at ASC
-      LIMIT ${limit}
-    ), due AS (
-      SELECT targets.id
-      FROM sandbox_oidc_targets AS targets
-      INNER JOIN due_machines ON
-        targets.compute_provider = due_machines.compute_provider AND
-        targets.compute_provider_id = due_machines.compute_provider_id AND
-        COALESCE(targets.cloud_job_id::text, 'none') = due_machines.cloud_job_key AND
-        targets.environment_id = due_machines.environment_id
-      WHERE targets.refresh_at <= ${nowIso}
-      FOR UPDATE OF targets SKIP LOCKED
-    )
-    UPDATE sandbox_oidc_targets AS targets
-    SET refresh_at = ${claimUntilIso},
-        updated_at = ${nowIso}
-    FROM due
-    WHERE targets.id = due.id
-    RETURNING targets.*;
-  `);
-
-  const claimedRows = claimedRaw.map((row) =>
-    sandboxOidcTargetRowMapper(row as Record<string, unknown>),
-  );
+  const claimedRows = await claimDueSandboxOidcTargets({
+    now,
+    claimUntil,
+    limit,
+  });
 
   if (claimedRows.length === 0) {
     return { refreshedMachines: 0, cleanedMachines: 0, failedMachines: 0 };
