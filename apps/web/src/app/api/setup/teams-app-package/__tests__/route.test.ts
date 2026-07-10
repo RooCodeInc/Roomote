@@ -58,4 +58,15 @@ describe('GET /api/setup/teams-app-package', () => {
       error: 'invalid_bot_app_id',
     });
   });
+
+  it('rejects a bot name that exceeds the Teams manifest short-name limit', async () => {
+    const response = await GET(
+      buildRequest(`?botAppId=${BOT_APP_ID}&botName=${'a'.repeat(31)}`),
+    );
+
+    expect(response.status).toBe(400);
+    await expect(response.json()).resolves.toEqual({
+      error: 'invalid_bot_name',
+    });
+  });
 });

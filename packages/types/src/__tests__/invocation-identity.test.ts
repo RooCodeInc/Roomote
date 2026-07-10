@@ -34,6 +34,8 @@ describe('invocation identity formatting', () => {
       displayName: 'Acme Bot',
       mentionText: '@Acme Bot',
       nativeMention: '<@U123>',
+      guidanceName: '@Acme Bot',
+      examplePrompt: '@Acme Bot Add support for a reset password flow.',
     });
 
     expect(
@@ -44,6 +46,8 @@ describe('invocation identity formatting', () => {
       displayName: null,
       mentionText: null,
       nativeMention: '<@U123>',
+      guidanceName: 'Slack app',
+      examplePrompt: null,
     });
   });
 
@@ -56,6 +60,7 @@ describe('invocation identity formatting', () => {
     ).toMatchObject({
       displayName: 'Contoso Bot',
       mentionText: '@Contoso Bot',
+      examplePrompt: '@Contoso Bot Add support for a reset password flow.',
       configured: true,
     });
 
@@ -68,6 +73,14 @@ describe('invocation identity formatting', () => {
       displayName: 'Roomote',
       mentionText: '@Roomote',
       configured: false,
+    });
+  });
+
+  it('builds Teams examples from the normalized mention text', () => {
+    expect(buildTeamsInvocationIdentity('@Contoso')).toMatchObject({
+      displayName: '@Contoso',
+      mentionText: '@Contoso',
+      examplePrompt: '@Contoso Add support for a reset password flow.',
     });
   });
 });
