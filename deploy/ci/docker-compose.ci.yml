@@ -1,0 +1,45 @@
+services:
+  db-migrate:
+    env_file: !reset []
+
+  web:
+    env_file: !reset []
+
+  api:
+    env_file: !reset []
+
+  controller:
+    env_file: !reset []
+
+  bullmq:
+    env_file: !reset []
+
+  preview-proxy:
+    env_file: !reset []
+
+  postgres:
+    ports:
+      - '127.0.0.1:${DEPLOYMENT_CI_POSTGRES_PORT:-55432}:5432'
+
+  redis:
+    ports:
+      - '127.0.0.1:${DEPLOYMENT_CI_REDIS_PORT:-56379}:6379'
+    healthcheck:
+      test: ['CMD', 'redis-cli', 'ping']
+      interval: 2s
+      timeout: 2s
+      retries: 30
+
+  minio:
+    healthcheck:
+      test: ['CMD', 'mc', 'ready', 'local']
+      interval: 2s
+      timeout: 3s
+      retries: 30
+      start_period: 5s
+
+networks:
+  default:
+    name: ${ROOMOTE_DEFAULT_NETWORK:-roomote_ci_default}
+  worker:
+    name: ${DOCKER_WORKER_NETWORK:-roomote_ci_worker}

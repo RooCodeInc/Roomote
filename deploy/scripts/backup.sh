@@ -75,7 +75,7 @@ set -euo pipefail
 cd /opt/roomote
 mkdir -p backups
 backup="backups/backup-$(date +%F-%H%M%S).sql"
-docker run --rm --network roomote_default --env-file /opt/roomote/.env postgres:17.5 sh -c 'pg_dump --clean --if-exists --no-owner --no-privileges "$DATABASE_URL"' > "$backup"
+docker run --rm --network roomote_default --env-file /opt/roomote/.env postgres:17.5@sha256:aadf2c0696f5ef357aa7a68da995137f0cf17bad0bf6e1f17de06ae5c769b302 sh -c 'pg_dump --clean --if-exists --no-owner --no-privileges "$DATABASE_URL"' > "$backup"
 chmod 600 "$backup"
 printf '/opt/roomote/%s\n' "$backup"
 REMOTE

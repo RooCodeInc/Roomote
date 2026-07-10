@@ -85,7 +85,7 @@ services:
       # Pinned to an immutable MinIO release: this service owns a persistent
       # disk, so a mutable `latest` tag could pull an unreviewed breaking
       # change on redeploy. Bump deliberately alongside a disk backup.
-      url: docker.io/minio/minio:RELEASE.2025-09-07T16-13-09Z
+      url: docker.io/minio/minio:RELEASE.2025-09-07T16-13-09Z@sha256:14cea493d9a34af32f524e538b8346cf79f3321eff8e708c1e2960462bd8936e
     plan: starter
     dockerCommand: minio server /data --address :9000 --console-address :9001
     healthCheckPath: /minio/health/live
