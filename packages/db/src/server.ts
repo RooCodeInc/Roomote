@@ -95,8 +95,6 @@ export {
   taskPinsRelations,
   taskArtifacts,
   taskArtifactsRelations,
-  taskShares,
-  taskSharesRelations,
   taskPullRequests,
   taskPullRequestsRelations,
   taskRuns,

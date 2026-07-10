@@ -1038,7 +1038,7 @@ describe('buildAcpRenderBlocks', () => {
     expect(entries[1].msg.data.kind).toBe('subagent');
   });
 
-  it('hides the in-progress subagent spawn row and keeps the completed row', () => {
+  it('keeps in-progress spawn rows and completed rows visible in narration mode', () => {
     const entries = buildAcpRenderBlocks(
       [
         textMessage('assistant-1', 1),
@@ -1057,23 +1057,33 @@ describe('buildAcpRenderBlocks', () => {
       { displayMode: 'narration' },
     );
 
-    expect(entries).toHaveLength(3);
+    expect(entries).toHaveLength(4);
     expect(entries.map((entry) => entry.kind)).toEqual([
+      'message',
       'message',
       'message',
       'message',
     ]);
 
-    if (entries[1]?.kind !== 'message') {
-      throw new Error('Expected completed subagent tool entry');
+    if (entries[1]?.kind !== 'message' || entries[2]?.kind !== 'message') {
+      throw new Error('Expected pending and completed subagent tool entries');
     }
 
-    expect(entries[1].msg.kind).toBe('tool_result');
-    if (entries[1].msg.kind !== 'tool_result') {
+    expect(entries[1].msg.kind).toBe('tool_call');
+    if (entries[1].msg.kind !== 'tool_call') {
+      throw new Error('Expected tool_call entry');
+    }
+
+    // A spawn row rebuilt from persisted envelopes (no live activity) stays
+    // visible: a row that vanishes on refresh reads as a lost subagent.
+    expect(entries[1].msg.data.title).toBe('Spawning subagent');
+
+    expect(entries[2].msg.kind).toBe('tool_result');
+    if (entries[2].msg.kind !== 'tool_result') {
       throw new Error('Expected tool_result entry');
     }
 
-    expect(entries[1].msg.data.title).toBe('Spawned subagent');
+    expect(entries[2].msg.data.title).toBe('Spawned subagent');
   });
 
   it('keeps internal subagent rows visible in narration mode when debug UI is enabled', () => {
@@ -1347,7 +1357,7 @@ describe('buildAcpRenderBlocks', () => {
     expect(entries[2].msg.data.title).toBe('Spawned subagent');
   });
 
-  it('hides subagent rows when internal transcript rows are disabled', () => {
+  it('keeps spawn rows but hides thread-bound subagent rows when internal transcript rows are disabled', () => {
     const entries = buildAcpRenderBlocks(
       [
         textMessage('assistant-1', 1),
@@ -1366,8 +1376,18 @@ describe('buildAcpRenderBlocks', () => {
       { showInternalMessages: false },
     );
 
-    expect(entries).toHaveLength(2);
-    expect(entries.map((entry) => entry.kind)).toEqual(['message', 'message']);
+    expect(entries).toHaveLength(3);
+    expect(entries.map((entry) => entry.kind)).toEqual([
+      'message',
+      'message',
+      'message',
+    ]);
+
+    if (entries[1]?.kind !== 'message') {
+      throw new Error('Expected pending spawn row entry');
+    }
+
+    expect(entries[1].msg.id).toBe('tool-subagent-pending');
   });
 
   it('hides Roomote Slack reply tool rows when internal transcript rows are disabled', () => {
