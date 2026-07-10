@@ -617,4 +617,59 @@ describe('launchQueuedSetupTasksIfReady (fenced onboarding-queue launch)', () =>
       warnSpy.mockRestore();
     }
   });
+
+  it('rolls back the suggestion claim when the mirror finalize throws', async () => {
+    const suggestionId = await seedSuggestionItem({ status: 'open' });
+    const onboardingId = await seedOnboardingItem({
+      sortOrder: 0,
+      sourceWorkItemId: suggestionId,
+    });
+
+    const launchedTaskId = await seedLaunchTargetTaskId();
+    mockEnqueueCloudTask.mockResolvedValue({
+      taskId: launchedTaskId,
+      id: 'cloud-job-mirror-finalize-throw',
+    });
+
+    // The onboarding finalize passes through to the real CAS; only the
+    // suggestion mirror's finalize throws. The mirror finalize is the sole call
+    // that passes `clearDismissedAt` without a `targetEnvironmentId`, so key the
+    // failure strictly off those params to avoid breaking the onboarding call.
+    mockFinalizeWorkItemLaunched.mockImplementation((tx, params) => {
+      if (params.clearDismissedAt && !params.targetEnvironmentId) {
+        throw new Error('suggestion mirror finalize failure');
+      }
+      return actualDbServer.current!.finalizeWorkItemLaunched(tx, params);
+    });
+
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+
+    try {
+      await launch();
+
+      // The onboarding launch finalizes and stays finalized: the mirror finalize
+      // throw rolls back only its own transaction, never the committed launch.
+      const onboarding = await readRow(onboardingId);
+      expect(onboarding?.status).toBe('launched');
+      expect(onboarding?.launchedTaskId).toBe(launchedTaskId);
+      expect(onboarding?.targetEnvironmentId).toBe(environmentId);
+      expect(onboarding?.launchClaimedAt).toBeNull();
+
+      // The suggestion is fully untouched: the claim+finalize transaction rolled
+      // back, so the row never lingers in `launching` with a live claim. Without
+      // the transaction it would be `launching` with a stranded claim token.
+      const suggestion = await readRow(suggestionId);
+      expect(suggestion?.status).toBe('open');
+      expect(suggestion?.launchClaimedAt).toBeNull();
+      expect(suggestion?.launchedTaskId).toBeNull();
+
+      // The mirror failure is best-effort: logged, no orphan cancel.
+      expect(mockCancelTaskRunDirect).not.toHaveBeenCalled();
+      expect(warnSpy).toHaveBeenCalledWith(
+        expect.stringContaining('failed to mirror launched state'),
+      );
+    } finally {
+      warnSpy.mockRestore();
+    }
+  });
 });

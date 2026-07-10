@@ -657,6 +657,10 @@ async function getMutableQueuedSetupTasks(
  * when its onboarding copy launches. That is the least-surprising state: the
  * work genuinely launched, so the suggestions UI should reflect it rather than
  * showing the row as merely dismissed.
+ *
+ * The claim and finalize run in one transaction so a finalize failure rolls the
+ * claim back rather than stranding the suggestion in `launching` with a live
+ * claim until the 10-minute stale-claim recovery.
  */
 async function markSuggestionWorkItemLaunched(
   input: {
@@ -665,35 +669,37 @@ async function markSuggestionWorkItemLaunched(
   },
   executor: DatabaseOrTransaction = db,
 ) {
-  const claimedSuggestion = await claimWorkItem(executor, {
-    id: input.suggestionId,
-    additionalClaimableStatuses: ['dismissed'],
-    extraConditions: [eq(workItems.kind, 'suggestion')],
+  await executor.transaction(async (tx) => {
+    const claimedSuggestion = await claimWorkItem(tx, {
+      id: input.suggestionId,
+      additionalClaimableStatuses: ['dismissed'],
+      extraConditions: [eq(workItems.kind, 'suggestion')],
+    });
+
+    if (!claimedSuggestion) {
+      // Another surface holds a fresh claim, the suggestion already launched, or
+      // it is terminally failed. Skip the mirror rather than overwrite it.
+      console.warn(
+        `[setup-new] Skipped mirroring launched state onto suggestion ${input.suggestionId}: it is already launched or another surface holds a fresh claim.`,
+      );
+      return;
+    }
+
+    const finalized = await finalizeWorkItemLaunched(tx, {
+      id: input.suggestionId,
+      taskId: input.launchedTaskId,
+      claimedAt: claimedSuggestion.launchClaimedAt,
+      clearDismissedAt: true,
+    });
+
+    if (!finalized) {
+      // Our claim token was superseded between claim and finalize; leave the new
+      // claimant's state untouched.
+      console.warn(
+        `[setup-new] Suggestion ${input.suggestionId} mirror lost the fencing guard after claiming; another surface reclaimed it. Leaving its state untouched.`,
+      );
+    }
   });
-
-  if (!claimedSuggestion) {
-    // Another surface holds a fresh claim, the suggestion already launched, or
-    // it is terminally failed. Skip the mirror rather than overwrite it.
-    console.warn(
-      `[setup-new] Skipped mirroring launched state onto suggestion ${input.suggestionId}: it is already launched or another surface holds a fresh claim.`,
-    );
-    return;
-  }
-
-  const finalized = await finalizeWorkItemLaunched(executor, {
-    id: input.suggestionId,
-    taskId: input.launchedTaskId,
-    claimedAt: claimedSuggestion.launchClaimedAt,
-    clearDismissedAt: true,
-  });
-
-  if (!finalized) {
-    // Our claim token was superseded between claim and finalize; leave the new
-    // claimant's state untouched.
-    console.warn(
-      `[setup-new] Suggestion ${input.suggestionId} mirror lost the fencing guard after claiming; another surface reclaimed it. Leaving its state untouched.`,
-    );
-  }
 }
 
 function stripMutableQueuedSetupTask(
