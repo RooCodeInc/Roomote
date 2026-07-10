@@ -522,7 +522,10 @@ describe('StepAuthEnvVars', () => {
     expect(
       screen.getByPlaceholderText('Microsoft Client ID'),
     ).toBeInTheDocument();
-    expectHeadingInNumberedStep('Enter the Microsoft app generated values.', 2);
+    expectHeadingInNumberedStep(
+      'Enter the Microsoft Entra app generated values.',
+      2,
+    );
     expectHeadingInNumberedStep('Upload Roomote to Microsoft Teams.', 3);
     expectHeadingInNumberedStep('Add the Teams bot capability to that app.', 4);
   });
@@ -559,8 +562,8 @@ describe('StepAuthEnvVars', () => {
       screen.getByRole('button', { name: /download teams app package/i }),
     ).toBeDisabled();
     expect(
-      screen.getAllByRole('button', { name: /^go/i }).at(1),
-    ).toBeDisabled();
+      screen.getByRole('link', { name: /teams developer portal/i }),
+    ).toHaveAttribute('href', 'https://dev.teams.microsoft.com/home');
 
     fireEvent.change(screen.getByPlaceholderText('Microsoft Client ID'), {
       target: { value: '11111111-2222-3333-4444-555555555555' },
@@ -581,11 +584,7 @@ describe('StepAuthEnvVars', () => {
       screen.getByRole('link', { name: /download teams app package/i }),
     ).toHaveAttribute(
       'href',
-      '/api/setup/teams-app-package?botAppId=11111111-2222-3333-4444-555555555555',
-    );
-    expect(screen.getAllByRole('link', { name: /^go/i }).at(1)).toHaveAttribute(
-      'href',
-      'https://dev.teams.microsoft.com/home',
+      '/api/setup/teams-app-package?botAppId=11111111-2222-3333-4444-555555555555&botName=Roomote',
     );
   });
 
@@ -674,6 +673,7 @@ describe('StepAuthEnvVars', () => {
           R_MICROSOFT_CLIENT_ID: '11111111-2222-3333-4444-555555555555',
           R_MICROSOFT_CLIENT_SECRET: 'client-secret',
           R_MICROSOFT_TENANT_ID: '22222222-3333-4444-5555-666666666666',
+          R_TEAMS_BOT_NAME: 'Roomote',
         },
       });
     });
