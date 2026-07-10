@@ -39,7 +39,12 @@ const {
   cloudJobsDoneMock: vi.fn().mockResolvedValue(undefined),
   cloudJobsRecordEventMock: vi.fn().mockResolvedValue(undefined),
   cloudJobsStampMilestoneMock: vi.fn().mockResolvedValue(undefined),
-  cloudJobsSyncActingUserIdMock: vi.fn().mockResolvedValue('unchanged'),
+  cloudJobsSyncActingUserIdMock: vi
+    .fn()
+    .mockImplementation(async ({ newUserId }: { newUserId: string }) => ({
+      result: 'unchanged',
+      actingUserId: newUserId,
+    })),
   cloudJobsSetHarnessSessionIdMock: vi.fn().mockResolvedValue(undefined),
   cloudJobsUpdateRuntimeStateMock: vi.fn().mockResolvedValue({ updated: true }),
   cloudJobsUpdateMock: vi.fn().mockResolvedValue(undefined),
@@ -295,7 +300,12 @@ describe('runTask', () => {
     cloudJobsStampMilestoneMock.mockReset();
     cloudJobsStampMilestoneMock.mockResolvedValue(undefined);
     cloudJobsSyncActingUserIdMock.mockReset();
-    cloudJobsSyncActingUserIdMock.mockResolvedValue('unchanged');
+    cloudJobsSyncActingUserIdMock.mockImplementation(
+      async ({ newUserId }: { newUserId: string }) => ({
+        result: 'unchanged',
+        actingUserId: newUserId,
+      }),
+    );
     mkdirSyncMock.mockReset();
     writeFileSyncMock.mockReset();
     syncRuntimeGitAuthorMock.mockReset();
@@ -1704,7 +1714,12 @@ describe('runTask', () => {
   });
 
   it('queues a deferred resume prompt from SnapshotResume payloads', async () => {
-    cloudJobsSyncActingUserIdMock.mockResolvedValue('updated');
+    cloudJobsSyncActingUserIdMock.mockImplementation(
+      async ({ newUserId }: { newUserId: string }) => ({
+        result: 'updated',
+        actingUserId: newUserId,
+      }),
+    );
     const onStart = vi.fn().mockResolvedValue(undefined);
     const requestReconnect = vi.fn().mockResolvedValue(undefined);
     createHarnessMock.mockResolvedValueOnce({
@@ -1784,6 +1799,7 @@ describe('runTask', () => {
     expect(cloudJobsSyncActingUserIdMock).toHaveBeenCalledWith({
       cloudJobId: 303,
       newUserId: 'user-2',
+      lastKnownUserId: null,
     });
     expect(syncRuntimeGitAuthorMock).toHaveBeenCalledWith({
       cloudJobId: 303,
@@ -1884,7 +1900,12 @@ describe('runTask', () => {
   });
 
   it('passes explicit workflow phases through deferred resume prompts', async () => {
-    cloudJobsSyncActingUserIdMock.mockResolvedValue('updated');
+    cloudJobsSyncActingUserIdMock.mockImplementation(
+      async ({ newUserId }: { newUserId: string }) => ({
+        result: 'updated',
+        actingUserId: newUserId,
+      }),
+    );
     const onStart = vi.fn().mockResolvedValue(undefined);
     createHarnessMock.mockResolvedValueOnce({
       harness: {
@@ -2086,7 +2107,12 @@ describe('runTask', () => {
     const requestReconnect = vi.fn().mockResolvedValue(undefined);
 
     waitForShutdownMock.mockReturnValueOnce(waitForShutdownPromise);
-    cloudJobsSyncActingUserIdMock.mockResolvedValue('updated');
+    cloudJobsSyncActingUserIdMock.mockImplementation(
+      async ({ newUserId }: { newUserId: string }) => ({
+        result: 'updated',
+        actingUserId: newUserId,
+      }),
+    );
     getMcpServerConfigsMock
       .mockRejectedValueOnce(new Error('temporary failure'))
       .mockResolvedValueOnce({

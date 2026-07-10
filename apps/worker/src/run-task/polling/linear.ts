@@ -72,10 +72,13 @@ export function createLinearMessageInterval({
         );
 
         for (const [index, answer] of queuedAnswers.entries()) {
-          const canDeliver =
-            (await prepareActorScopedTurn(answer.userId)) !== false;
+          // Polled answers have no trusted per-message actor write; deliver
+          // under the server actor rather than stalling the queue.
+          const answerPrep = await prepareActorScopedTurn(answer.userId, {
+            onMismatch: 'follow-server',
+          });
 
-          if (!canDeliver) {
+          if (answerPrep === false) {
             logger.warn(
               `[listenForLinearEvents] Delaying request_user_input answer for task ${state.sessionId} until actor-scoped turn preparation succeeds (requestId=${answer.requestId})`,
             );
@@ -100,7 +103,8 @@ export function createLinearMessageInterval({
           const sent = answerUserInputRequest({
             requestId: answer.requestId,
             answers: answer.answers,
-            userId: answer.userId,
+            // Attribute the turn to the identity actor-scoped routes resolve.
+            userId: answerPrep.effectiveUserId ?? undefined,
           });
 
           if (!sent) {
@@ -170,12 +174,15 @@ export function createLinearMessageInterval({
             !isActiveTaskPhase(state.phase) ||
             state.isConnected === false;
 
-          const canDeliver =
-            (await prepareActorScopedTurn(msg.userId, {
-              allowMcpReconnect,
-            })) !== false;
+          // The API performs a trusted pre-queue actor sync for these
+          // messages; a residual mismatch delivers under the server actor
+          // rather than stalling the queue.
+          const msgPrep = await prepareActorScopedTurn(msg.userId, {
+            allowMcpReconnect,
+            onMismatch: 'follow-server',
+          });
 
-          if (!canDeliver) {
+          if (msgPrep === false) {
             logger.warn(
               `[listenForLinearEvents] Delaying Linear follow-up for task ${state.sessionId} until actor-scoped turn preparation succeeds`,
             );
@@ -200,7 +207,8 @@ export function createLinearMessageInterval({
             // the loop can pick them up, abort-and-replay when the turn is
             // blocked on a pending question tool call.
             autoSteerWhenQueued: true,
-            userId: msg.userId,
+            // Attribute the turn to the identity actor-scoped routes resolve.
+            userId: msgPrep.effectiveUserId ?? undefined,
           });
 
           if (!sent) {

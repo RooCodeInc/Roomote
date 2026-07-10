@@ -32,6 +32,7 @@ import {
 } from '@roomote/cloud-agents';
 
 import { apiLogger } from '../../../logging.js';
+import { syncActingUserForInboundMessage } from '../../tasks/acting-user-sync.js';
 import {
   buildResolvedCurrentMessageText,
   processSlackAttachments,
@@ -494,6 +495,14 @@ export async function processActiveJobMessage(
     const allImages = [...attachments.images, ...claimedImageUris];
 
     try {
+      // Trusted pre-queue actor switch: the worker only runs this message's
+      // turn as `userId` if the server-side acting user already points at
+      // them (job tokens can no longer write actingUserId themselves).
+      await syncActingUserForInboundMessage({
+        logContext: 'slack.processActiveJobMessage',
+        jobId: activeJob.id,
+        senderUserId: userId,
+      });
       await queueSlackMessage(activeJob.id, {
         text: messageTextWithVideoDescriptions,
         user: event.user,

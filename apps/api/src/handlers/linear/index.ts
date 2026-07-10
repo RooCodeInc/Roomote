@@ -56,6 +56,7 @@ import {
 } from '@roomote/linear';
 
 import type { WebhookResponse } from '../../types';
+import { syncActingUserForInboundMessage } from '../tasks/acting-user-sync.js';
 
 import { recordLinearWebhook } from './recordWebhook';
 
@@ -597,6 +598,13 @@ async function handleAgentSessionEvent(
         }
       }
 
+      // Trusted pre-queue actor switch; see acting-user-sync.ts. The worker
+      // only runs the queued turn as this sender if the server actor matches.
+      await syncActingUserForInboundMessage({
+        logContext: 'linear.activeJobMessage',
+        jobId: activeJob.id,
+        senderUserId: userId,
+      });
       // Queue the message for the running worker to pick up
       await queueLinearMessage(activeJob.id, sessionId, payload, userId);
 

@@ -8,6 +8,7 @@ const {
   mockSendPromptMutate,
   mockSteerTaskMutate,
   mockTrackLatestUserMessageForSlackQuote,
+  mockUpdateActingUserIdIfNeeded,
   mockUserFindFirst,
 } = vi.hoisted(() => ({
   mockCreateJobToken: vi.fn(),
@@ -19,7 +20,12 @@ const {
   mockSendPromptMutate: vi.fn(),
   mockSteerTaskMutate: vi.fn(),
   mockTrackLatestUserMessageForSlackQuote: vi.fn(),
+  mockUpdateActingUserIdIfNeeded: vi.fn(),
   mockUserFindFirst: vi.fn(),
+}));
+
+vi.mock('../acting-user-sync', () => ({
+  updateActingUserIdIfNeeded: mockUpdateActingUserIdIfNeeded,
 }));
 
 vi.mock('@roomote/auth', async (importOriginal) => {
@@ -168,10 +174,82 @@ describe('sendMessageToTask', () => {
       linearOrganizationId: null,
     });
     mockTrackLatestUserMessageForSlackQuote.mockResolvedValue(undefined);
+    mockUpdateActingUserIdIfNeeded.mockResolvedValue(undefined);
     mockUserFindFirst.mockResolvedValue({
       name: 'Alice',
       email: 'alice@example.com',
     });
+  });
+
+  it('writes the acting user BEFORE delivering the prompt to the sandbox', async () => {
+    // Ordering is the security property: the run's actingUserId selects
+    // whose credentials actor-scoped routes resolve, so the trusted switch
+    // must land before the new sender's prompt can run.
+    mockFindLatestCloudJob.mockResolvedValue(
+      createActiveJob({ actingUserId: 'user-1' }),
+    );
+
+    const result = await sendMessageToTask({
+      taskId: 'task-1',
+      userId: 'user-2',
+      message: 'Continue as the new sender.',
+    });
+
+    expect(result).toEqual({ success: true, result: { ok: true } });
+    expect(mockUpdateActingUserIdIfNeeded).toHaveBeenCalledWith({
+      jobId: 42,
+      currentActingUserId: 'user-1',
+      nextActingUserId: 'user-2',
+      preserveActor: false,
+    });
+    expect(
+      mockUpdateActingUserIdIfNeeded.mock.invocationCallOrder[0]!,
+    ).toBeLessThan(mockSendPromptMutate.mock.invocationCallOrder[0]!);
+  });
+
+  it('does not deliver the prompt when the pre-delivery acting-user write fails', async () => {
+    mockFindLatestCloudJob.mockResolvedValue(
+      createActiveJob({ actingUserId: 'user-1' }),
+    );
+    mockUpdateActingUserIdIfNeeded.mockRejectedValueOnce(
+      new Error('db unavailable'),
+    );
+
+    const result = await sendMessageToTask({
+      taskId: 'task-1',
+      userId: 'user-2',
+      message: 'Continue as the new sender.',
+    });
+
+    expect(result).toEqual({
+      success: false,
+      error: 'db unavailable',
+      status: 500,
+    });
+    expect(mockSendPromptMutate).not.toHaveBeenCalled();
+  });
+
+  it('writes the acting user BEFORE delivering steering prompts to the sandbox', async () => {
+    mockFindLatestCloudJob.mockResolvedValue(
+      createActiveJob({ actingUserId: 'user-1' }),
+    );
+
+    const result = await steerMessageToTask({
+      taskId: 'task-1',
+      userId: 'user-2',
+      message: 'Steer as the new sender.',
+    });
+
+    expect(result).toEqual({ success: true, result: { ok: true } });
+    expect(mockUpdateActingUserIdIfNeeded).toHaveBeenCalledWith({
+      jobId: 42,
+      currentActingUserId: 'user-1',
+      nextActingUserId: 'user-2',
+      preserveActor: false,
+    });
+    expect(
+      mockUpdateActingUserIdIfNeeded.mock.invocationCallOrder[0]!,
+    ).toBeLessThan(mockSteerTaskMutate.mock.invocationCallOrder[0]!);
   });
 
   it('stores the latest user message for active Slack-thread tasks', async () => {

@@ -33,6 +33,7 @@ import {
 } from '@roomote/slack';
 
 import { findLatestCloudJob, getTaskChannelBindings } from './helpers';
+import { updateActingUserIdIfNeeded } from './acting-user-sync';
 import { logHandlerError } from '../utils';
 
 const LINKED_REVIEW_HANDOFF_SOURCE = 'linked_review_handoff';
@@ -327,7 +328,23 @@ async function maybeCreateSlackReplyQuoteContext(params: {
   await createSlackReplyQuoteContext(params);
 }
 
-async function updateActingUserIdIfNeeded({
+/**
+ * Trusted actor switch, applied BEFORE the prompt reaches the sandbox.
+ *
+ * Ordering is load-bearing: the run's `actingUserId` selects whose
+ * credentials actor-scoped routes resolve, and the worker refuses to run a
+ * turn whose sender does not match the server-side acting user. Writing
+ * after delivery (the previous design) opened a window where the new
+ * sender's prompt ran while credential routes still resolved the previous
+ * actor. Writing before delivery closes that window; if delivery then
+ * fails, the run merely attributes to the latest human who attempted to
+ * engage — no prompt of theirs ran, and the write is idempotent, so the
+ * next successful send (from any sender) re-syncs it.
+ *
+ * Errors propagate: proceeding with delivery after a failed required switch
+ * would only bounce off the worker's mismatch guard with a less clear error.
+ */
+async function syncActingUserIdBeforeDelivery({
   jobId,
   currentActingUserId,
   nextActingUserId,
@@ -338,44 +355,12 @@ async function updateActingUserIdIfNeeded({
   nextActingUserId: string;
   preserveActor: boolean;
 }): Promise<void> {
-  if (preserveActor || currentActingUserId === nextActingUserId) {
-    return;
-  }
-
-  await db
-    .update(taskRuns)
-    .set({ actingUserId: nextActingUserId })
-    .where(eq(taskRuns.id, jobId));
-}
-
-async function syncActingUserIdAfterDelivery({
-  handlerName,
-  jobId,
-  currentActingUserId,
-  nextActingUserId,
-  preserveActor,
-}: {
-  handlerName: 'sendMessageToTask' | 'steerMessageToTask';
-  jobId: number;
-  currentActingUserId: string | null;
-  nextActingUserId: string;
-  preserveActor: boolean;
-}): Promise<void> {
-  try {
-    await updateActingUserIdIfNeeded({
-      jobId,
-      currentActingUserId,
-      nextActingUserId,
-      preserveActor,
-    });
-  } catch (error) {
-    logHandlerError(
-      handlerName,
-      `Non-fatal actingUserId sync failure for cloud job ${jobId} ` +
-        `(current=${currentActingUserId ?? 'null'}, next=${nextActingUserId}): ` +
-        `${error instanceof Error ? error.message : String(error)}`,
-    );
-  }
+  await updateActingUserIdIfNeeded({
+    jobId,
+    currentActingUserId,
+    nextActingUserId,
+    preserveActor,
+  });
 }
 
 async function inheritSnapshotResumeVisiblePromptFields(
@@ -785,6 +770,17 @@ export async function sendMessageToTask({
       const resolvedQuoteUserName =
         workerQuoteUserName ??
         (await resolveWorkerQuoteUserName(senderMode, senderUserId));
+
+      // The actor switch must land before the prompt reaches the sandbox so
+      // credential resolution and turn attribution agree. See
+      // syncActingUserIdBeforeDelivery for the ordering rationale.
+      await syncActingUserIdBeforeDelivery({
+        jobId: job.id,
+        currentActingUserId: job.actingUserId,
+        nextActingUserId: senderUserId,
+        preserveActor: shouldPreserveActor,
+      });
+
       const result = await withSandboxServerRpcClient({
         cloudJobId: job.id,
         userId: senderUserId,
@@ -802,14 +798,6 @@ export async function sendMessageToTask({
               : {}),
             ...(images?.length ? { images } : {}),
           }),
-      });
-
-      await syncActingUserIdAfterDelivery({
-        handlerName: 'sendMessageToTask',
-        jobId: job.id,
-        currentActingUserId: job.actingUserId,
-        nextActingUserId: senderUserId,
-        preserveActor: shouldPreserveActor,
       });
 
       return { success: true, result };
@@ -932,6 +920,17 @@ export async function steerMessageToTask({
       const resolvedQuoteUserName =
         workerQuoteUserName ??
         (await resolveWorkerQuoteUserName(senderMode, userId));
+
+      // The actor switch must land before the steer reaches the sandbox so
+      // credential resolution and turn attribution agree. See
+      // syncActingUserIdBeforeDelivery for the ordering rationale.
+      await syncActingUserIdBeforeDelivery({
+        jobId: job.id,
+        currentActingUserId: job.actingUserId,
+        nextActingUserId: userId,
+        preserveActor: false,
+      });
+
       const result = await withSandboxServerRpcClient({
         cloudJobId: job.id,
         userId,
@@ -945,14 +944,6 @@ export async function steerMessageToTask({
               : {}),
             ...(images?.length ? { images } : {}),
           }),
-      });
-
-      await syncActingUserIdAfterDelivery({
-        handlerName: 'steerMessageToTask',
-        jobId: job.id,
-        currentActingUserId: job.actingUserId,
-        nextActingUserId: userId,
-        preserveActor: false,
       });
 
       return { success: true, result };

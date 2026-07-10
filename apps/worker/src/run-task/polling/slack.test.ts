@@ -149,7 +149,11 @@ describe('createSlackMessageInterval', () => {
     vi.resetAllMocks();
     mockGetSlackMessages.mockResolvedValue([]);
     mockGetSlackRequestUserInputAnswers.mockResolvedValue([]);
-    mockPrepareActorScopedTurn.mockResolvedValue(undefined);
+    mockPrepareActorScopedTurn.mockImplementation(
+      async (targetUserId?: string) => ({
+        effectiveUserId: targetUserId ?? null,
+      }),
+    );
     mockPrependSlackMessages.mockResolvedValue(undefined);
     mockPrependSlackRequestUserInputAnswers.mockResolvedValue(undefined);
     process.env.TRPC_URL = 'http://127.0.0.1:3001';
@@ -204,6 +208,7 @@ describe('createSlackMessageInterval', () => {
 
       expect(prepareActorScopedTurn).toHaveBeenCalledWith('user-2', {
         allowMcpReconnect: false,
+        onMismatch: 'follow-server',
       });
       expect(prepareActorScopedTurn.mock.invocationCallOrder[0]).toBeLessThan(
         sendPrompt.mock.invocationCallOrder[0]!,
@@ -330,6 +335,7 @@ describe('createSlackMessageInterval', () => {
 
       expect(mockPrepareActorScopedTurn).toHaveBeenCalledWith(undefined, {
         allowMcpReconnect: false,
+        onMismatch: 'follow-server',
       });
       expect(sendPrompt).toHaveBeenCalledWith({
         prompt:
@@ -345,7 +351,10 @@ describe('createSlackMessageInterval', () => {
     }
   });
 
-  it('still sends the follow-up when actor preparation logs its own failure', async () => {
+  it('attributes the follow-up to the server actor when preparation reports a different effective user', async () => {
+    // Follow-server mismatch: no trusted writer switched the run to the
+    // sender, so the turn runs and is attributed as the server-side acting
+    // user — credential resolution and attribution stay on one identity.
     mockGetSlackMessages.mockResolvedValueOnce([
       {
         text: 'Keep going',
@@ -354,7 +363,9 @@ describe('createSlackMessageInterval', () => {
         ts: '1710000000.789',
       },
     ]);
-    mockPrepareActorScopedTurn.mockResolvedValueOnce(undefined);
+    mockPrepareActorScopedTurn.mockResolvedValueOnce({
+      effectiveUserId: 'user-1',
+    });
 
     const { options, logger, sendPrompt } = createListenerOptions({
       actingUserId: 'user-1',
@@ -372,7 +383,7 @@ describe('createSlackMessageInterval', () => {
         images: undefined,
         autoSteerWhenQueued: true,
         source: 'slack',
-        userId: 'user-2',
+        userId: 'user-1',
         clientMessageId: 'slack:1710000000.789',
       });
     } finally {
@@ -461,9 +472,12 @@ describe('createSlackMessageInterval', () => {
         },
         userId: 'user-2',
       });
-      expect(prepareActorScopedTurn).toHaveBeenNthCalledWith(1, 'user-2');
+      expect(prepareActorScopedTurn).toHaveBeenNthCalledWith(1, 'user-2', {
+        onMismatch: 'follow-server',
+      });
       expect(prepareActorScopedTurn).toHaveBeenNthCalledWith(2, 'user-2', {
         allowMcpReconnect: false,
+        onMismatch: 'follow-server',
       });
       expect(answerUserInputRequest.mock.invocationCallOrder[0]).toBeLessThan(
         sendPrompt.mock.invocationCallOrder[0]!,
@@ -777,6 +791,7 @@ describe('createSlackMessageInterval', () => {
 
       expect(prepareActorScopedTurn).toHaveBeenCalledWith('user-2', {
         allowMcpReconnect: true,
+        onMismatch: 'follow-server',
       });
     } finally {
       clearInterval(interval);
@@ -804,6 +819,7 @@ describe('createSlackMessageInterval', () => {
 
       expect(prepareActorScopedTurn).toHaveBeenCalledWith('user-2', {
         allowMcpReconnect: true,
+        onMismatch: 'follow-server',
       });
     } finally {
       clearInterval(interval);

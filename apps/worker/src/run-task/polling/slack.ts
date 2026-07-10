@@ -102,10 +102,13 @@ export function createSlackMessageInterval({
         );
 
         for (const [index, answer] of queuedAnswers.entries()) {
-          const canDeliver =
-            (await prepareActorScopedTurn(answer.userId)) !== false;
+          // Polled answers have no trusted per-message actor write; deliver
+          // under the server actor rather than stalling the queue.
+          const answerPrep = await prepareActorScopedTurn(answer.userId, {
+            onMismatch: 'follow-server',
+          });
 
-          if (!canDeliver) {
+          if (answerPrep === false) {
             logger.warn(
               `[listenForSlackEvents] Delaying request_user_input answer for task ${state.sessionId} until actor-scoped turn preparation succeeds (requestId=${answer.requestId})`,
             );
@@ -130,7 +133,8 @@ export function createSlackMessageInterval({
           const sent = answerUserInputRequest({
             requestId: answer.requestId,
             answers: answer.answers,
-            userId: answer.userId,
+            // Attribute the turn to the identity actor-scoped routes resolve.
+            userId: answerPrep.effectiveUserId ?? undefined,
           });
 
           logger.log(
@@ -199,12 +203,15 @@ export function createSlackMessageInterval({
             !isActiveTaskPhase(state.phase) ||
             state.isConnected === false;
 
-          const canDeliver =
-            (await prepareActorScopedTurn(msg.userId, {
-              allowMcpReconnect,
-            })) !== false;
+          // The API performs a trusted pre-queue actor sync for these
+          // messages; a residual mismatch (e.g. two senders racing the poll)
+          // delivers under the server actor rather than stalling the queue.
+          const msgPrep = await prepareActorScopedTurn(msg.userId, {
+            allowMcpReconnect,
+            onMismatch: 'follow-server',
+          });
 
-          if (!canDeliver) {
+          if (msgPrep === false) {
             logger.warn(
               `[listenForSlackEvents] Delaying Slack follow-up for task ${state.sessionId} until actor-scoped turn preparation succeeds`,
             );
@@ -232,7 +239,8 @@ export function createSlackMessageInterval({
             images: msg.images,
             autoSteerWhenQueued: true,
             source: 'slack',
-            userId: msg.userId,
+            // Attribute the turn to the identity actor-scoped routes resolve.
+            userId: msgPrep.effectiveUserId ?? undefined,
             clientMessageId: getSlackClientMessageId(msg),
           });
 

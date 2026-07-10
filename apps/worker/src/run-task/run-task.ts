@@ -69,6 +69,7 @@ import {
   getSlackReplyContext,
 } from './mcp-task-env';
 import {
+  type ActorMismatchPolicy,
   prepareActorScopedTurn as prepareActorScopedTurnHelper,
   syncActorScopedTurnState,
 } from './prepare-actor-scoped-turn';
@@ -806,11 +807,22 @@ export const runTask = async ({
       logger,
     });
 
+    // The actor most recently prepared locally (git author synced, MCP
+    // mounts refreshed). Server-authoritative `task_runs.actingUserId` is
+    // the source of truth; this only tracks what this worker last applied so
+    // reconciliation knows when to refresh.
+    let lastPreparedActorUserId: string | null = cloudJob.actingUserId ?? null;
+    const getLastKnownActorUserId = () => lastPreparedActorUserId;
+    const onActorSynced = (userId: string | null) => {
+      lastPreparedActorUserId = userId;
+    };
+
     const prepareActorScopedTurn = async (
       targetUserId?: string,
       options?: {
         allowMcpReconnect?: boolean;
         deferReconnectUntilTurnBoundary?: boolean;
+        onMismatch?: ActorMismatchPolicy;
       },
     ) =>
       await prepareActorScopedTurnHelper({
@@ -821,6 +833,9 @@ export const runTask = async ({
         allowMcpReconnect: options?.allowMcpReconnect,
         deferReconnectUntilTurnBoundary:
           options?.deferReconnectUntilTurnBoundary,
+        onMismatch: options?.onMismatch,
+        getLastKnownActorUserId,
+        onActorSynced,
         logger,
         refreshActorScopedIntegrations,
       });
@@ -832,15 +847,21 @@ export const runTask = async ({
         };
       }
 
-      const didSyncActor = await syncActorScopedTurnState({
+      const syncResult = await syncActorScopedTurnState({
         cloudJobId: cloudJob.id,
         targetUserId,
         workingDirectory: workspacePath,
         logPrefix: '[runTask]',
+        // Queued prompts were accepted through a trusted surface earlier;
+        // if another sender has since taken over the run, deliver under the
+        // server actor rather than stalling the queue forever.
+        onMismatch: 'follow-server',
+        getLastKnownActorUserId,
+        onActorSynced,
         logger,
       });
 
-      if (!didSyncActor) {
+      if (!syncResult.ok) {
         return {
           shouldReconnect: false,
           shouldBlockPrompt: true,
@@ -849,9 +870,12 @@ export const runTask = async ({
         };
       }
 
-      const refreshResult = await refreshActorScopedIntegrations(targetUserId, {
-        skipReconnect: true,
-      });
+      const refreshResult = await refreshActorScopedIntegrations(
+        syncResult.effectiveUserId ?? undefined,
+        {
+          skipReconnect: true,
+        },
+      );
 
       if (refreshResult.didFail) {
         if (!refreshResult.actorChanged) {
@@ -1131,11 +1155,11 @@ export const runTask = async ({
       clientMessageId?: string;
       userId?: string;
     }) => {
-      const canDeliverDeferredResumePrompt = await prepareActorScopedTurn(
-        options.userId,
-      );
+      const deferredPromptPrep = await prepareActorScopedTurn(options.userId, {
+        onMismatch: 'follow-server',
+      });
 
-      if (!canDeliverDeferredResumePrompt) {
+      if (deferredPromptPrep === false) {
         logger.info(
           `[runTask] Deferred resume prompt blocked for cloud job ${cloudJob.id}; keeping it queued for retry`,
         );
@@ -1154,7 +1178,8 @@ export const runTask = async ({
         autoSteerWhenQueued: true,
         source: options.source,
         clientMessageId: options.clientMessageId,
-        userId: options.userId,
+        // Attribute the turn to the identity actor-scoped routes resolve.
+        userId: deferredPromptPrep.effectiveUserId ?? undefined,
       });
 
       if (queued) {
@@ -1211,15 +1236,17 @@ export const runTask = async ({
 
       while (index < deliveryOrder.length) {
         const message = deliveryOrder[index]!;
-        const canDeliver =
-          (await prepareActorScopedTurn(message.userId, {
-            allowMcpReconnect:
-              !pollingState.phase ||
-              pollingState.isConnected === false ||
-              pollingState.phase === 'waiting_for_prompt',
-          })) !== false;
+        const turnPrep = await prepareActorScopedTurn(message.userId, {
+          allowMcpReconnect:
+            !pollingState.phase ||
+            pollingState.isConnected === false ||
+            pollingState.phase === 'waiting_for_prompt',
+          // Replayed queue entries have no trusted per-message actor write;
+          // deliver under the server actor rather than stalling the replay.
+          onMismatch: 'follow-server',
+        });
 
-        if (!canDeliver) {
+        if (turnPrep === false) {
           const remainingQueueOrder = [...deliveryOrder.slice(index)].reverse();
           await prependSlackMessages(cloudJob.id, remainingQueueOrder);
           logger.warn(
@@ -1238,7 +1265,8 @@ export const runTask = async ({
           images: message.images,
           autoSteerWhenQueued: true,
           source: 'slack',
-          userId: message.userId,
+          // Attribute the turn to the identity actor-scoped routes resolve.
+          userId: turnPrep.effectiveUserId ?? undefined,
         });
 
         if (!sent) {
@@ -1298,15 +1326,17 @@ export const runTask = async ({
 
       while (index < deliveryOrder.length) {
         const message = deliveryOrder[index]!;
-        const canDeliver =
-          (await prepareActorScopedTurn(message.userId, {
-            allowMcpReconnect:
-              !pollingState.phase ||
-              pollingState.isConnected === false ||
-              pollingState.phase === 'waiting_for_prompt',
-          })) !== false;
+        const turnPrep = await prepareActorScopedTurn(message.userId, {
+          allowMcpReconnect:
+            !pollingState.phase ||
+            pollingState.isConnected === false ||
+            pollingState.phase === 'waiting_for_prompt',
+          // Replayed queue entries have no trusted per-message actor write;
+          // deliver under the server actor rather than stalling the replay.
+          onMismatch: 'follow-server',
+        });
 
-        if (!canDeliver) {
+        if (turnPrep === false) {
           const remainingQueueOrder = [...deliveryOrder.slice(index)].reverse();
           await requeueQueuedSnapshotResumeCommunicationMessages(
             remainingQueueOrder,
@@ -1329,7 +1359,8 @@ export const runTask = async ({
           images: message.images,
           autoSteerWhenQueued: true,
           source: message.provider,
-          userId: message.userId,
+          // Attribute the turn to the identity actor-scoped routes resolve.
+          userId: turnPrep.effectiveUserId ?? undefined,
           clientMessageId: `${message.provider}:${message.ts}`,
         });
 
@@ -1380,15 +1411,17 @@ export const runTask = async ({
             ? message.payload.agentActivity.content.body
             : message.payload.agentSession.issue.description || '';
 
-        const canDeliver =
-          (await prepareActorScopedTurn(message.userId, {
-            allowMcpReconnect:
-              !pollingState.phase ||
-              pollingState.isConnected === false ||
-              pollingState.phase === 'waiting_for_prompt',
-          })) !== false;
+        const turnPrep = await prepareActorScopedTurn(message.userId, {
+          allowMcpReconnect:
+            !pollingState.phase ||
+            pollingState.isConnected === false ||
+            pollingState.phase === 'waiting_for_prompt',
+          // Replayed queue entries have no trusted per-message actor write;
+          // deliver under the server actor rather than stalling the replay.
+          onMismatch: 'follow-server',
+        });
 
-        if (!canDeliver) {
+        if (turnPrep === false) {
           const remainingMessages = messages.slice(index);
           await prependLinearMessages(cloudJob.id, remainingMessages);
           logger.warn(
@@ -1400,7 +1433,8 @@ export const runTask = async ({
         const sent = sendPrompt({
           prompt: text,
           source: 'linear',
-          userId: message.userId,
+          // Attribute the turn to the identity actor-scoped routes resolve.
+          userId: turnPrep.effectiveUserId ?? undefined,
         });
 
         if (!sent) {

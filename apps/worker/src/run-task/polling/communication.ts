@@ -90,12 +90,15 @@ export function createCommunicationMessageInterval({
           !isActiveTaskPhase(state.phase) ||
           state.isConnected === false;
 
-        const canDeliver =
-          (await prepareActorScopedTurn(message.userId, {
-            allowMcpReconnect,
-          })) !== false;
+        // The API performs a trusted pre-queue actor sync for these
+        // messages; a residual mismatch delivers under the server actor
+        // rather than stalling the queue.
+        const msgPrep = await prepareActorScopedTurn(message.userId, {
+          allowMcpReconnect,
+          onMismatch: 'follow-server',
+        });
 
-        if (!canDeliver) {
+        if (msgPrep === false) {
           logger.warn(
             `[listenFor${provider}Events] Delaying ${provider} follow-up for task ${state.sessionId} until actor-scoped turn preparation succeeds`,
           );
@@ -126,7 +129,8 @@ export function createCommunicationMessageInterval({
           images: message.images,
           autoSteerWhenQueued: true,
           source: provider,
-          userId: message.userId,
+          // Attribute the turn to the identity actor-scoped routes resolve.
+          userId: msgPrep.effectiveUserId ?? undefined,
           clientMessageId: getCommunicationClientMessageId(provider, message),
         });
 

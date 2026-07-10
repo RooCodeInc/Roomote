@@ -63,6 +63,7 @@ import {
 } from '@roomote/cloud-agents/server';
 
 import { apiLogger } from '../../logging.js';
+import { syncActingUserForInboundMessage } from '../tasks/acting-user-sync.js';
 import { verifyBotFrameworkJwt } from './bot-framework-auth.js';
 import {
   findActiveTeamsJob,
@@ -1396,6 +1397,12 @@ async function resumePendingTeamsAuthToken(
   });
 
   if (activeJob) {
+    // Trusted pre-queue actor switch; see acting-user-sync.ts.
+    await syncActingUserForInboundMessage({
+      logContext: 'teams.pendingAuthActivity',
+      jobId: activeJob.id,
+      senderUserId: mappedUserId,
+    });
     await queueCommunicationMessage(
       'teams',
       activeJob.id,
@@ -1817,6 +1824,13 @@ teams.post('/', async (c) => {
     { ...(mappedUserId ? { userId: mappedUserId } : {}) },
   );
 
+  // Trusted pre-queue actor switch; see acting-user-sync.ts. The worker only
+  // runs the queued turn as this sender if the server actor already matches.
+  await syncActingUserForInboundMessage({
+    logContext: 'teams.activeJobMessage',
+    jobId: activeJob.id,
+    senderUserId: mappedUserId,
+  });
   await queueCommunicationMessage('teams', activeJob.id, queuedMessage);
 
   apiLogger.debug(

@@ -135,7 +135,11 @@ describe('createLinearMessageInterval', () => {
     mockGetLinearRequestUserInputAnswers.mockResolvedValue([]);
     mockQueueLinearRequestUserInputAnswer.mockResolvedValue(undefined);
     mockQueueLinearMessage.mockResolvedValue(undefined);
-    mockPrepareActorScopedTurn.mockResolvedValue(undefined);
+    mockPrepareActorScopedTurn.mockImplementation(
+      async (targetUserId?: string) => ({
+        effectiveUserId: targetUserId ?? null,
+      }),
+    );
     mockPrependLinearMessages.mockResolvedValue(undefined);
     mockPrependLinearRequestUserInputAnswers.mockResolvedValue(undefined);
     process.env.TRPC_URL = 'http://127.0.0.1:3001';
@@ -238,9 +242,12 @@ describe('createLinearMessageInterval', () => {
         },
         userId: 'user-2',
       });
-      expect(prepareActorScopedTurn).toHaveBeenNthCalledWith(1, 'user-2');
+      expect(prepareActorScopedTurn).toHaveBeenNthCalledWith(1, 'user-2', {
+        onMismatch: 'follow-server',
+      });
       expect(prepareActorScopedTurn).toHaveBeenNthCalledWith(2, 'user-2', {
         allowMcpReconnect: false,
+        onMismatch: 'follow-server',
       });
       expect(answerUserInputRequest.mock.invocationCallOrder[0]).toBeLessThan(
         sendPrompt.mock.invocationCallOrder[0]!,
@@ -349,10 +356,9 @@ describe('createLinearMessageInterval', () => {
           },
         ],
       );
-      expect(mockPrepareActorScopedTurn).toHaveBeenCalledWith(
-        'user-2',
-        undefined,
-      );
+      expect(mockPrepareActorScopedTurn).toHaveBeenCalledWith('user-2', {
+        onMismatch: 'follow-server',
+      });
       expect(mockGetLinearMessages).not.toHaveBeenCalled();
     } finally {
       clearInterval(interval);
@@ -610,6 +616,7 @@ describe('createLinearMessageInterval', () => {
 
       expect(prepareActorScopedTurn).toHaveBeenCalledWith('user-2', {
         allowMcpReconnect: true,
+        onMismatch: 'follow-server',
       });
     } finally {
       clearInterval(interval);
@@ -667,6 +674,7 @@ describe('createLinearMessageInterval', () => {
 
       expect(prepareActorScopedTurn).toHaveBeenCalledWith('user-2', {
         allowMcpReconnect: true,
+        onMismatch: 'follow-server',
       });
     } finally {
       clearInterval(interval);

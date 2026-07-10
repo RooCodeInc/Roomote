@@ -12,6 +12,10 @@ import '@trpc/client';
 
 import type { HarnessLogger } from '../logging';
 import type { WorkerEnv } from '../env';
+import type {
+  ActorMismatchPolicy,
+  PrepareActorScopedTurnResult,
+} from '../run-task/prepare-actor-scoped-turn';
 import type { Harness } from './lib/harness';
 import type { HarnessManager } from './lib/harness-manager';
 
@@ -39,14 +43,20 @@ export interface Context {
   /** Mutable worker environment state for live reloads. */
   workerEnv?: WorkerEnv;
 
-  /** Refresh actor-scoped integrations before delivering the next turn. */
+  /**
+   * Refresh actor-scoped integrations before delivering the next turn.
+   * Returns `false` when the turn must not be delivered (default `block`
+   * mismatch policy: the API's trusted pre-delivery actor sync did not put
+   * the server actor on this sender).
+   */
   prepareActorScopedTurn?: (
     targetUserId?: string,
     options?: {
       allowMcpReconnect?: boolean;
       deferReconnectUntilTurnBoundary?: boolean;
+      onMismatch?: ActorMismatchPolicy;
     },
-  ) => Promise<boolean>;
+  ) => Promise<PrepareActorScopedTurnResult>;
 }
 
 const t = initTRPC.context<Context>().create({ transformer: superjson });
