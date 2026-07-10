@@ -8,7 +8,7 @@ x-roomote-app-image: &roomote-app-image roomote-app:self-host
 
 x-roomote-env: &roomote-env
   NODE_ENV: development
-  APP_ENV: development
+  R_APP_ENV: development
   ROOMOTE_DOCKER_LOAD_ENV_FILE: 'false'
   HOST: 0.0.0.0
   DATABASE_URL: postgres://postgres:password@postgres:5432/roomote_development
@@ -25,8 +25,6 @@ x-roomote-env: &roomote-env
   PREVIEW_DOMAINS: ${PREVIEW_DOMAINS:-localhost,127.0.0.1,roomotepreview.localhost}
   R_PUBLIC_URL: ${R_PUBLIC_URL:-}
   R_ALLOWED_EMAILS: ${R_ALLOWED_EMAILS:-}
-  R_SLACK_CLIENT_ID: ${R_SLACK_CLIENT_ID:-}
-  R_SLACK_CLIENT_SECRET: ${R_SLACK_CLIENT_SECRET:-}
   R_MODEL: ${R_MODEL:-}
   R_SMALL_MODEL: ${R_SMALL_MODEL:-}
   R_CODE_REVIEW_MODEL: ${R_CODE_REVIEW_MODEL:-}

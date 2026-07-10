@@ -10,17 +10,17 @@ import { Button, Github, Spinner } from '@/components/system';
 import { StepCompletedBadge } from '../setup/StepCompletedBadge';
 import { StepTitle } from '../setup/StepTitle';
 
-const githubAppMention = getGitHubAppMention(
-  process.env.R_GITHUB_APP_SLUG || 'roomote',
-);
-
 export function StepGitHub({
+  githubAppSlug,
   onContinue,
   previousStepCompleted,
 }: {
+  githubAppSlug: string;
   onContinue: () => void;
   previousStepCompleted?: string;
 }) {
+  const githubAppMention = getGitHubAppMention(githubAppSlug);
+
   const authenticateGitHubAccount = useAuthenticateGitHubAccount({
     onSuccess: (result) => {
       if (result.success) {

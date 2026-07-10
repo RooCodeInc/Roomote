@@ -46,7 +46,7 @@ x-roomote-controller-image: &roomote-controller-image ghcr.io/roocodeinc/roomote
 # Shared by every app service. Coolify resolves the same magic variable to
 # the same generated value in each service of this resource.
 x-roomote-shared-env: &roomote-shared-env
-  APP_ENV: production
+  R_APP_ENV: production
   ROOMOTE_DOCKER_LOAD_ENV_FILE: 'false'
   ROOMOTE_AUTO_GENERATE_KEYS: 'true'
   ENCRYPTION_KEY: ${SERVICE_BASE64_64_ENCRYPTIONKEY}

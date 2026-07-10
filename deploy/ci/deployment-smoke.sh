@@ -149,7 +149,7 @@ build_candidate_images() {
   printf 'Building candidate app image (%s)\n' "$platform"
   docker buildx build --load \
     --platform "$platform" \
-    --build-arg APP_ENV=production \
+    --build-arg R_APP_ENV=production \
     --build-arg "RELEASE_VERSION=$candidate_version" \
     --tag "localhost/roomote/roomote-app:$candidate_version" \
     --file "$repo_root/.docker/app/Dockerfile" \

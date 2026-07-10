@@ -2,7 +2,7 @@ name: roomote
 
 x-roomote-production-env: &roomote-production-env
   NODE_ENV: production
-  APP_ENV: production
+  R_APP_ENV: production
   DATABASE_URL: ${DATABASE_URL:?DATABASE_URL is required}
   REDIS_URL: ${REDIS_URL:?REDIS_URL is required}
   S3_ENDPOINT: ${S3_ENDPOINT:-http://minio:9000}
@@ -26,8 +26,6 @@ x-roomote-production-env: &roomote-production-env
   NEXT_PUBLIC_PREVIEW_PROXY_BASE_URL: https://${ROOMOTE_PREVIEW_DOMAIN:?ROOMOTE_PREVIEW_DOMAIN is required}
   PREVIEW_DOMAINS: ${ROOMOTE_PREVIEW_DOMAIN:?ROOMOTE_PREVIEW_DOMAIN is required}
   R_ALLOWED_EMAILS: ${R_ALLOWED_EMAILS:-}
-  R_SLACK_CLIENT_ID: ${R_SLACK_CLIENT_ID:-}
-  R_SLACK_CLIENT_SECRET: ${R_SLACK_CLIENT_SECRET:-}
   R_MODEL: ${R_MODEL:-}
   R_SMALL_MODEL: ${R_SMALL_MODEL:-}
   R_VISION_MODEL: ${R_VISION_MODEL:-}
@@ -80,7 +78,7 @@ x-roomote-production-env: &roomote-production-env
   MODAL_REGIONS: ${MODAL_REGIONS:-}
 
 x-roomote-production-build-args: &roomote-production-build-args
-  APP_ENV: production
+  R_APP_ENV: production
   RELEASE_VERSION: ${RELEASE_VERSION:-self-host-production}
 
 services:

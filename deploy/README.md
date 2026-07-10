@@ -162,8 +162,8 @@ main    -> ~/.config/roomote-deploy/roomote-production.env
 Both files can start from `.env.production.example`; the distinction is the
 deployment target and secret set, not a different Compose schema.
 
-Set `APP_ENV=preview` in the develop env file. Production can omit `APP_ENV` or
-set `APP_ENV=production`; both run with `NODE_ENV=production` because the
+Set `R_APP_ENV=preview` in the develop env file. Production can omit `R_APP_ENV` or
+set `R_APP_ENV=production`; both run with `NODE_ENV=production` because the
 containers are production-built images.
 
 The signing keys come from the operator, not from DigitalOcean. Generate two

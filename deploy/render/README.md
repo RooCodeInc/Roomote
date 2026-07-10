@@ -177,7 +177,7 @@ under Environment Groups in the Render dashboard, where you can read
 `SETUP_TOKEN` and `DASHBOARD_PASSWORD` after the first deploy):
 
 ```sh
-APP_ENV=production
+R_APP_ENV=production
 ROOMOTE_DOCKER_LOAD_ENV_FILE=false
 ROOMOTE_AUTO_GENERATE_KEYS=true
 ENCRYPTION_KEY=<generateValue>

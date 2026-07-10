@@ -63,7 +63,7 @@
     }
   },
   "sharedPlatformEnvironment": [
-    "APP_ENV",
+    "R_APP_ENV",
     "ROOMOTE_DOCKER_LOAD_ENV_FILE",
     "ROOMOTE_AUTO_GENERATE_KEYS",
     "ENCRYPTION_KEY",
