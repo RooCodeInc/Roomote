@@ -282,11 +282,19 @@ FROM runtime-base AS runtime-inference-base
 
 ARG OPENCODE_CLI_VERSION=1.17.8
 
+# The install and version check run as root with the image's HOME=/tmp, which
+# bakes root-owned /tmp/.npm and /tmp/.local (OpenCode's data dir) into the
+# layer. The runtime user shares that HOME and must be able to create those
+# paths itself — on hosts that run the raw image without a tmpfs over /tmp
+# (e.g. Railway), leftover root-owned dirs make OpenCode's log open fail with
+# PermissionDenied and the SDK server exits before ready. Strip them in the
+# same layer.
 RUN npm install --prefix /opt/opencode-cli --no-save --no-package-lock \
     "opencode-ai@${OPENCODE_CLI_VERSION}" \
   && test -x /opt/opencode-cli/node_modules/.bin/opencode \
   && test "$(/opt/opencode-cli/node_modules/.bin/opencode --version)" = "${OPENCODE_CLI_VERSION}" \
-  && ln -sf /opt/opencode-cli/node_modules/.bin/opencode /usr/local/bin/opencode
+  && ln -sf /opt/opencode-cli/node_modules/.bin/opencode /usr/local/bin/opencode \
+  && rm -rf /tmp/.npm /tmp/.local /tmp/.cache
 
 # GitHub PR prompt generation still uses the gh CLI in the API process. Keep
 # the installer isolated so only API-bearing runtime targets receive it.
