@@ -266,7 +266,7 @@ export async function sendSandboxPromptCommand(
     SANDBOX_PROMPT_TIMEOUT_MS,
   );
 
-  const previousActingUserId = cloudJob.actingUserId;
+  const previousActingUserId = taskRun.actingUserId;
   const requiresActorHandoff = previousActingUserId !== auth.userId;
   let didSwitchActingUser = false;
 
@@ -275,7 +275,7 @@ export async function sendSandboxPromptCommand(
     // worker's sender-vs-acting-user guard passes (critical for runs that
     // start without an acting user, e.g. automation-started tasks).
     didSwitchActingUser = await syncActingUserIdBeforeSandboxDelivery({
-      runId: cloudJob.id,
+      runId: taskRun.id,
       currentActingUserId: previousActingUserId,
       nextActingUserId: auth.userId,
     });
@@ -314,7 +314,7 @@ export async function sendSandboxPromptCommand(
 
     if (didSwitchActingUser) {
       await restoreActingUserIdAfterFailedSandboxDelivery({
-        runId: cloudJob.id,
+        runId: taskRun.id,
         previousActingUserId,
         attemptedActingUserId: auth.userId,
       });
@@ -362,7 +362,7 @@ export async function answerSandboxUserInputRequestCommand(
     SANDBOX_PROMPT_TIMEOUT_MS,
   );
 
-  const previousActingUserId = cloudJob.actingUserId;
+  const previousActingUserId = taskRun.actingUserId;
   let didSwitchActingUser = false;
 
   try {
@@ -372,7 +372,7 @@ export async function answerSandboxUserInputRequestCommand(
     // winner claim (setTrustedRunActingUserOnSuccess) used for contended chat
     // answers, so a losing concurrent answerer may briefly hold attribution.
     didSwitchActingUser = await syncActingUserIdBeforeSandboxDelivery({
-      runId: cloudJob.id,
+      runId: taskRun.id,
       currentActingUserId: previousActingUserId,
       nextActingUserId: auth.userId,
     });
@@ -397,7 +397,7 @@ export async function answerSandboxUserInputRequestCommand(
   } catch (error) {
     if (didSwitchActingUser) {
       await restoreActingUserIdAfterFailedSandboxDelivery({
-        runId: cloudJob.id,
+        runId: taskRun.id,
         previousActingUserId,
         attemptedActingUserId: auth.userId,
       });

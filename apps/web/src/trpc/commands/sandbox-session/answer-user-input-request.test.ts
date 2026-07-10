@@ -1,6 +1,6 @@
-const { mockCreateJobToken, mockAnswerUserInputRequestMutate } = vi.hoisted(
+const { mockCreateRunToken, mockAnswerUserInputRequestMutate } = vi.hoisted(
   () => ({
-    mockCreateJobToken: vi.fn(),
+    mockCreateRunToken: vi.fn(),
     mockAnswerUserInputRequestMutate: vi.fn(),
   }),
 );
@@ -11,7 +11,7 @@ vi.mock('@roomote/auth', async () => {
 
   return {
     ...actual,
-    createJobToken: mockCreateJobToken,
+    createRunToken: mockCreateRunToken,
   };
 });
 
@@ -84,7 +84,7 @@ describe('answerSandboxUserInputRequestCommand', () => {
         headers: { 'content-type': 'application/json' },
       }),
     );
-    mockCreateJobToken.mockResolvedValue('job-token');
+    mockCreateRunToken.mockResolvedValue('run-token');
     mockAnswerUserInputRequestMutate.mockResolvedValue({ success: true });
   });
 
