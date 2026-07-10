@@ -150,7 +150,7 @@ import {
   WORK_ITEM_LAUNCH_STALE_CLAIM_MS,
 } from '@roomote/db/server';
 
-import { launchQueuedSetupTasksIfReady } from './index';
+import { launchQueuedSetupTasksIfReady } from './queued-tasks';
 
 const STALE_CLAIM_AT = new Date(
   Date.now() - WORK_ITEM_LAUNCH_STALE_CLAIM_MS - 60_000,
