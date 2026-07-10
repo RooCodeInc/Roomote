@@ -4,6 +4,7 @@ export { generateTaskSummaryCommand } from './generate-summary';
 export { getTasksCommand } from './list';
 export { getTaskMessageEnvelopesCommand } from './message-envelopes';
 export { getRecentPullRequestsCommand } from './recent-pull-requests';
+export { getTaskRunEventsCommand } from './run-events';
 export { searchTasksCommand } from './search';
 export { updateTaskTitleCommand } from './update-title';
 export { listPinnedTaskIdsCommand, setTaskPinnedCommand } from './pins';

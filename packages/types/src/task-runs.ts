@@ -715,6 +715,7 @@ export const runEventTypes = [
   'completed',
   'failed',
   'phase',
+  'diagnostic',
 ] as const;
 
 export type RunEventType = (typeof runEventTypes)[number];
