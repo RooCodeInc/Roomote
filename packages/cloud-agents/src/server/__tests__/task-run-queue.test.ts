@@ -74,6 +74,35 @@ describe('TaskRunQueue - Basic Operations', () => {
   });
 
   describe('dequeue', () => {
+    it('drains entries left on the pre-migration queue key', async () => {
+      const entry = createTestEntry(1, 'legacy-scope');
+      await redis.rpush('queue:cloud-jobs', JSON.stringify(entry));
+
+      await expect(queue.dequeue()).resolves.toEqual(entry);
+      await expect(redis.llen('queue:cloud-jobs')).resolves.toBe(0);
+    });
+
+    it('drains pre-migration entries before current queue entries', async () => {
+      const legacyEntry = createTestEntry(1, 'legacy-scope');
+      const currentEntry = createTestEntry(2, 'current-scope');
+      await redis.rpush('queue:cloud-jobs', JSON.stringify(legacyEntry));
+      await redis.rpush('queue:task-runs', JSON.stringify(currentEntry));
+
+      await expect(queue.dequeue(false)).resolves.toEqual(legacyEntry);
+      await expect(queue.dequeue(false)).resolves.toEqual(currentEntry);
+    });
+
+    it('removes superseded scopes from the pre-migration queue', async () => {
+      const legacyEntry = createTestEntry(1, 'shared-scope');
+      const replacementEntry = createTestEntry(2, 'shared-scope');
+      await redis.rpush('queue:cloud-jobs', JSON.stringify(legacyEntry));
+
+      await queue.enqueue(replacementEntry);
+
+      await expect(redis.llen('queue:cloud-jobs')).resolves.toBe(0);
+      await expect(queue.dequeue(false)).resolves.toEqual(replacementEntry);
+    });
+
     it('should dequeue entry in FIFO order', async () => {
       await queue.enqueue(createTestEntry(1, 'scope-1'));
       await queue.enqueue(createTestEntry(2, 'scope-2'));

@@ -15,6 +15,15 @@ import {
 
 const ISSUER = 'rcc';
 
+// Private rolling-deploy parser for signed tokens minted by the previous
+// release. The exported payload contract and every newly minted token remain
+// strictly run-based; pre-deploy tokens naturally age out after their TTL.
+const compatibleRunTokenPayloadSchema = runTokenPayloadSchema.extend({
+  r: runTokenPayloadSchema.shape.r.extend({
+    t: z.union([z.literal('run'), z.literal('cj')]),
+  }),
+});
+
 export const createRunTokenOptionsSchema = z.object({
   runId: z.number(),
   // Null mints a deployment-service-principal token for runs with no human
@@ -74,7 +83,7 @@ export async function validateRunToken(
     issuer: ISSUER,
   });
 
-  const parseResult = runTokenPayloadSchema.safeParse(rawPayload);
+  const parseResult = compatibleRunTokenPayloadSchema.safeParse(rawPayload);
 
   if (!parseResult.success) {
     const validationErrors = parseResult.error.errors
@@ -90,7 +99,9 @@ export async function validateRunToken(
     runId: Number(payload.sub),
     userId: payload.r.u ?? null,
     principal: payload.r.u ? 'user' : 'deployment',
-    tokenType: payload.r.t,
+    // Normalize pre-migration signed tokens at the validation boundary so
+    // downstream authorization remains exclusively run-based.
+    tokenType: 'run',
     version: payload.v,
   };
 }

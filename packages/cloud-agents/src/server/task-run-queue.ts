@@ -74,7 +74,15 @@ import { resolveRequestedWorkKindDecision } from './router/requested-work-kind';
 
 enum TaskRunQueueKeys {
   Queue = 'queue:task-runs',
+  // Rolling-deploy drain path only. New entries are never written here, so
+  // this key disappears naturally after pre-migration work is dequeued.
+  LegacyQueue = 'queue:cloud-jobs',
 }
+
+const taskRunQueueReadKeys = [
+  TaskRunQueueKeys.LegacyQueue,
+  TaskRunQueueKeys.Queue,
+] as const;
 
 const taskRunQueueEntrySchema = z.object({
   id: z.number(),
@@ -269,78 +277,80 @@ export class TaskRunQueue {
   }
 
   public async enqueue(entry: TaskRunQueueEntry): Promise<void> {
-    const entries = await this.redis.lrange(TaskRunQueueKeys.Queue, 0, -1);
+    // Discard entries with the same scope from both the current queue and the
+    // rolling-deploy drain queue. Otherwise an older queued run could execute
+    // after its replacement once the current queue becomes empty.
+    for (const queueKey of taskRunQueueReadKeys) {
+      const entries = await this.redis.lrange(queueKey, 0, -1);
 
-    // Discard entries with the same scope.
-    for (const rawValue of entries) {
-      try {
-        const otherEntry = taskRunQueueEntrySchema.parse(JSON.parse(rawValue));
-
-        if (otherEntry.scope === entry.scope) {
-          const removed = await this.redis.lrem(
-            TaskRunQueueKeys.Queue,
-            0,
-            rawValue,
+      for (const rawValue of entries) {
+        try {
+          const otherEntry = taskRunQueueEntrySchema.parse(
+            JSON.parse(rawValue),
           );
 
-          // If lrem removed nothing the entry was already claimed off the
-          // queue by a worker; that worker owns the run's terminal state, so
-          // skip the DB cancel + sync entirely to avoid racing it.
-          if (removed === 0) {
-            continue;
-          }
+          if (otherEntry.scope === entry.scope) {
+            const removed = await this.redis.lrem(queueKey, 0, rawValue);
 
-          // Best-effort cancel in DB; do not block queue behavior during dedup.
-          void db
-            .transaction(async (tx) => {
-              const endedAt = new Date();
+            // If lrem removed nothing the entry was already claimed off the
+            // queue by a worker; that worker owns the run's terminal state, so
+            // skip the DB cancel + sync entirely to avoid racing it.
+            if (removed === 0) {
+              continue;
+            }
 
-              // Only cancel a run still waiting in the queue (pending/dequeued).
-              // If it already advanced past dequeue it is claimed, so leave it
-              // and its task state to the owning worker.
-              const [canceledRun] = await tx
-                .update(taskRuns)
-                .set({
-                  status: RunStatus.Canceled,
-                  canceledAt: endedAt,
-                  error: 'Superseded by a newer task run.',
-                })
-                .where(
-                  and(
-                    eq(taskRuns.id, otherEntry.id),
-                    inArray(taskRuns.status, [
-                      RunStatus.Pending,
-                      RunStatus.Dequeued,
-                    ]),
-                  ),
-                )
-                .returning({ taskId: taskRuns.taskId });
+            // Best-effort cancel in DB; do not block queue behavior during
+            // deduplication.
+            void db
+              .transaction(async (tx) => {
+                const endedAt = new Date();
 
-              // The run was already claimed/terminal; nothing to sync.
-              if (!canceledRun) {
-                return;
-              }
+                // Only cancel a run still waiting in the queue
+                // (pending/dequeued). If it already advanced past dequeue it
+                // is claimed, so leave it and its task state to the owner.
+                const [canceledRun] = await tx
+                  .update(taskRuns)
+                  .set({
+                    status: RunStatus.Canceled,
+                    canceledAt: endedAt,
+                    error: 'Superseded by a newer task run.',
+                  })
+                  .where(
+                    and(
+                      eq(taskRuns.id, otherEntry.id),
+                      inArray(taskRuns.status, [
+                        RunStatus.Pending,
+                        RunStatus.Dequeued,
+                      ]),
+                    ),
+                  )
+                  .returning({ taskId: taskRuns.taskId });
 
-              // Derive the task state from all its runs so the superseded run's
-              // task does not stay 'active' forever, while an already-completed
-              // sibling still wins.
-              await syncTaskStateFromRuns(tx, canceledRun.taskId);
+                // The run was already claimed/terminal; nothing to sync.
+                if (!canceledRun) {
+                  return;
+                }
 
-              await markTaskStartParallelCountEndedAt(tx, {
-                runId: otherEntry.id,
-                endedAt,
+                // Derive the task state from all its runs so the superseded
+                // run's task does not stay active forever.
+                await syncTaskStateFromRuns(tx, canceledRun.taskId);
+
+                await markTaskStartParallelCountEndedAt(tx, {
+                  runId: otherEntry.id,
+                  endedAt,
+                });
+              })
+              .catch(() => {
+                // Ignore DB errors; deduplication should proceed regardless.
               });
-            })
-            .catch(() => {
-              // Ignore DB errors here; deduplication should proceed regardless.
-            });
 
-          console.log(
-            `[TaskRunQueue] evicted ${otherEntry.id} (${otherEntry.scope})`,
-          );
+            console.log(
+              `[TaskRunQueue] evicted ${otherEntry.id} (${otherEntry.scope})`,
+            );
+          }
+        } catch {
+          // Ignore invalid entries.
         }
-      } catch {
-        // Ignore invalid entries.
       }
     }
 
@@ -351,9 +361,15 @@ export class TaskRunQueue {
     const seen = new Set<number>();
 
     while (true) {
-      const rawValue = blocking
-        ? (await this.redis.blpop(TaskRunQueueKeys.Queue, this.timeout))?.[1]
-        : await this.redis.lpop(TaskRunQueueKeys.Queue);
+      // Check the drain queue on every cycle, then preserve the established
+      // blocking behavior on the current queue. A rolling old producer that
+      // races this check is picked up on the next dequeue cycle.
+      const legacyValue = await this.redis.lpop(TaskRunQueueKeys.LegacyQueue);
+      const rawValue =
+        legacyValue ??
+        (blocking
+          ? (await this.redis.blpop(TaskRunQueueKeys.Queue, this.timeout))?.[1]
+          : await this.redis.lpop(TaskRunQueueKeys.Queue));
 
       if (!rawValue) {
         return null;
