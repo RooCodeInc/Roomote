@@ -1,6 +1,6 @@
-import { type Run } from '@roomote/sdk/client';
+import { type TaskRun } from '@roomote/sdk/client';
 
-import { createWorkerRuntimeEventRecorder } from '../../run-task/cloud-job-events';
+import { createWorkerRuntimeEventRecorder } from '../../run-task/task-run-events';
 import type { EnvironmentSetupWarning } from '../setup/workspace/types';
 
 interface BackgroundEnvironmentSetupOutcome {
@@ -21,7 +21,7 @@ type SettledBackgroundEnvironmentSetup =
     };
 
 interface BackgroundEnvironmentSetupControllerOptions {
-  cloudJob?: Run;
+  taskRun?: TaskRun;
   backgroundSetupPromise?: Promise<EnvironmentSetupWarning[]>;
   recordWorkerRuntimeEvent: ReturnType<typeof createWorkerRuntimeEventRecorder>;
 }
@@ -29,7 +29,7 @@ interface BackgroundEnvironmentSetupControllerOptions {
 export class BackgroundEnvironmentSetupController {
   private readonly taskAbortController = new AbortController();
   private readonly backgroundSetupPromise?: Promise<EnvironmentSetupWarning[]>;
-  private readonly cloudJob?: Run;
+  private readonly taskRun?: TaskRun;
   private readonly recordWorkerRuntimeEvent: ReturnType<
     typeof createWorkerRuntimeEventRecorder
   >;
@@ -41,11 +41,11 @@ export class BackgroundEnvironmentSetupController {
     | undefined;
 
   constructor({
-    cloudJob,
+    taskRun,
     backgroundSetupPromise,
     recordWorkerRuntimeEvent,
   }: BackgroundEnvironmentSetupControllerOptions) {
-    this.cloudJob = cloudJob;
+    this.taskRun = taskRun;
     this.recordWorkerRuntimeEvent = recordWorkerRuntimeEvent;
     this.backgroundSetupPromise = backgroundSetupPromise?.then(
       (warnings) => {
@@ -108,13 +108,13 @@ export class BackgroundEnvironmentSetupController {
       const warnings = await backgroundSetupPromise;
       const warningMessages = warnings.map((warning) => warning.message);
 
-      if (!this.cloudJob || warningMessages.length === 0) {
+      if (!this.taskRun || warningMessages.length === 0) {
         return { warnings };
       }
 
       await this.recordWorkerRuntimeEvent({
         eventType: 'decision',
-        message: `Background environment setup finished for cloud job #${this.cloudJob.id} with readiness warnings.`,
+        message: `Background environment setup finished for task run #${this.taskRun.id} with readiness warnings.`,
         details: {
           reason: 'background_environment_setup_warning',
           warnings: warningMessages,

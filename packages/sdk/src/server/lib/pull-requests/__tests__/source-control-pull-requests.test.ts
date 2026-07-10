@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { RunStatus, TaskPayloadKind } from '@roomote/types';
-import type { Run } from '@roomote/db/server';
+import type { TaskRun } from '@roomote/db/server';
 
 const {
   mockCreateGitHubToken,
@@ -60,10 +60,10 @@ vi.mock('@roomote/ado', () => ({
     mockBuildAdoOrganizationApiBaseUrl(...args),
 }));
 
-const { mockTaskPullRequestUpsert, mockCloudJobAssociationUpdate } = vi.hoisted(
+const { mockTaskPullRequestUpsert, mockTaskRunAssociationUpdate } = vi.hoisted(
   () => ({
     mockTaskPullRequestUpsert: vi.fn(),
-    mockCloudJobAssociationUpdate: vi.fn(),
+    mockTaskRunAssociationUpdate: vi.fn(),
   }),
 );
 
@@ -87,7 +87,7 @@ vi.mock('@roomote/db/server', () => ({
     }),
     update: () => ({
       set: (values: unknown) => ({
-        where: () => Promise.resolve(mockCloudJobAssociationUpdate(values)),
+        where: () => Promise.resolve(mockTaskRunAssociationUpdate(values)),
       }),
     }),
   },
@@ -119,9 +119,9 @@ vi.mock('@roomote/db/server', () => ({
   eq: vi.fn((left: unknown, right: unknown) => ({ type: 'eq', left, right })),
 }));
 
-import { createOrUpdateSourceControlPullRequestForCloudJob } from '../source-control-pull-requests';
+import { createOrUpdateSourceControlPullRequestForTaskRun } from '../source-control-pull-requests';
 
-function makeCloudJob(payload: Run['payload']): Run {
+function makeTaskRun(payload: TaskRun['payload']): TaskRun {
   return {
     id: 123,
     status: RunStatus.Dequeued,
@@ -132,7 +132,7 @@ function makeCloudJob(payload: Run['payload']): Run {
     payload,
     result: null,
     artifacts: null,
-  } as Run;
+  } as TaskRun;
 }
 
 function jsonResponse(body: unknown, status = 200): Response {
@@ -142,7 +142,7 @@ function jsonResponse(body: unknown, status = 200): Response {
   });
 }
 
-describe('createOrUpdateSourceControlPullRequestForCloudJob', () => {
+describe('createOrUpdateSourceControlPullRequestForTaskRun', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockGetDeploymentPrAction.mockResolvedValue('draft');
@@ -178,8 +178,8 @@ describe('createOrUpdateSourceControlPullRequestForCloudJob', () => {
         }),
       );
 
-    const result = await createOrUpdateSourceControlPullRequestForCloudJob({
-      cloudJob: makeCloudJob({
+    const result = await createOrUpdateSourceControlPullRequestForTaskRun({
+      taskRun: makeTaskRun({
         repo: 'acme/backend',
         sourceControlProvider: 'gitlab',
       }),
@@ -216,7 +216,7 @@ describe('createOrUpdateSourceControlPullRequestForCloudJob', () => {
         prBaseRef: 'develop',
       }),
     );
-    expect(mockCloudJobAssociationUpdate).not.toHaveBeenCalled();
+    expect(mockTaskRunAssociationUpdate).not.toHaveBeenCalled();
     expect(fetchImpl).toHaveBeenLastCalledWith(
       'https://gitlab.com/api/v4/projects/101/merge_requests',
       expect.objectContaining({
@@ -258,8 +258,8 @@ describe('createOrUpdateSourceControlPullRequestForCloudJob', () => {
         }),
       );
 
-    const result = await createOrUpdateSourceControlPullRequestForCloudJob({
-      cloudJob: makeCloudJob({
+    const result = await createOrUpdateSourceControlPullRequestForTaskRun({
+      taskRun: makeTaskRun({
         repo: 'acme/Platform/backend',
         sourceControlProvider: 'ado',
       }),
@@ -371,8 +371,8 @@ describe('platform-managed draft state', () => {
       },
     });
 
-    const result = await createOrUpdateSourceControlPullRequestForCloudJob({
-      cloudJob: makeCloudJob({ repo: 'acme/web' }),
+    const result = await createOrUpdateSourceControlPullRequestForTaskRun({
+      taskRun: makeTaskRun({ repo: 'acme/web' }),
       input: { ...githubInput },
     });
 
@@ -384,7 +384,7 @@ describe('platform-managed draft state', () => {
     expect(result.warnings).toEqual([]);
   });
 
-  it('honors a per-launch prAction override from the cloud job payload', async () => {
+  it('honors a per-launch prAction override from the task run payload', async () => {
     const octokit = makeOctokit({
       created: {
         number: 10,
@@ -395,8 +395,8 @@ describe('platform-managed draft state', () => {
       },
     });
 
-    const result = await createOrUpdateSourceControlPullRequestForCloudJob({
-      cloudJob: makeCloudJob({ repo: 'acme/web', prAction: 'create' }),
+    const result = await createOrUpdateSourceControlPullRequestForTaskRun({
+      taskRun: makeTaskRun({ repo: 'acme/web', prAction: 'create' }),
       input: { ...githubInput },
     });
 
@@ -421,8 +421,8 @@ describe('platform-managed draft state', () => {
       updated: { ...existing, title: '[Feature] X' },
     });
 
-    const result = await createOrUpdateSourceControlPullRequestForCloudJob({
-      cloudJob: makeCloudJob({ repo: 'acme/web' }),
+    const result = await createOrUpdateSourceControlPullRequestForTaskRun({
+      taskRun: makeTaskRun({ repo: 'acme/web' }),
       input: { ...githubInput },
     });
 
@@ -460,8 +460,8 @@ describe('platform-managed draft state', () => {
         }),
       );
 
-    const result = await createOrUpdateSourceControlPullRequestForCloudJob({
-      cloudJob: makeCloudJob({
+    const result = await createOrUpdateSourceControlPullRequestForTaskRun({
+      taskRun: makeTaskRun({
         repo: 'acme/backend',
         sourceControlProvider: 'gitlab',
       }),
@@ -508,8 +508,8 @@ describe('platform-managed draft state', () => {
         }),
       );
 
-    await createOrUpdateSourceControlPullRequestForCloudJob({
-      cloudJob: makeCloudJob({
+    await createOrUpdateSourceControlPullRequestForTaskRun({
+      taskRun: makeTaskRun({
         repo: 'acme/backend',
         sourceControlProvider: 'gitlab',
       }),
@@ -547,8 +547,8 @@ describe('platform-managed draft state', () => {
         }),
       );
 
-    const result = await createOrUpdateSourceControlPullRequestForCloudJob({
-      cloudJob: makeCloudJob({
+    const result = await createOrUpdateSourceControlPullRequestForTaskRun({
+      taskRun: makeTaskRun({
         repo: 'acme/tools',
         sourceControlProvider: 'gitea',
       }),
@@ -643,8 +643,8 @@ describe('optional targetBranch', () => {
       updated: { ...existing, title: '[Feature] X' },
     });
 
-    const result = await createOrUpdateSourceControlPullRequestForCloudJob({
-      cloudJob: makeCloudJob({ repo: 'acme/web' }),
+    const result = await createOrUpdateSourceControlPullRequestForTaskRun({
+      taskRun: makeTaskRun({ repo: 'acme/web' }),
       input: { ...baseInput },
     });
 
@@ -685,8 +685,8 @@ describe('optional targetBranch', () => {
       updated: { ...existing, title: '[Feature] X' },
     });
 
-    const result = await createOrUpdateSourceControlPullRequestForCloudJob({
-      cloudJob: makeCloudJob({ repo: 'acme/web' }),
+    const result = await createOrUpdateSourceControlPullRequestForTaskRun({
+      taskRun: makeTaskRun({ repo: 'acme/web' }),
       input: { ...baseInput, targetBranch: 'develop' },
     });
 
@@ -720,8 +720,8 @@ describe('optional targetBranch', () => {
       },
     });
 
-    const result = await createOrUpdateSourceControlPullRequestForCloudJob({
-      cloudJob: makeCloudJob({ repo: 'acme/web' }),
+    const result = await createOrUpdateSourceControlPullRequestForTaskRun({
+      taskRun: makeTaskRun({ repo: 'acme/web' }),
       input: { ...baseInput, targetBranch: 'develop' },
     });
 
@@ -742,8 +742,8 @@ describe('optional targetBranch', () => {
   it('rejects creating a GitHub pull request without targetBranch with actionable guidance', async () => {
     const octokit = makeOctokit({ list: [] });
 
-    const promise = createOrUpdateSourceControlPullRequestForCloudJob({
-      cloudJob: makeCloudJob({ repo: 'acme/web' }),
+    const promise = createOrUpdateSourceControlPullRequestForTaskRun({
+      taskRun: makeTaskRun({ repo: 'acme/web' }),
       input: { ...baseInput },
     });
 
@@ -775,8 +775,8 @@ describe('optional targetBranch', () => {
       ],
     });
 
-    const promise = createOrUpdateSourceControlPullRequestForCloudJob({
-      cloudJob: makeCloudJob({ repo: 'acme/web' }),
+    const promise = createOrUpdateSourceControlPullRequestForTaskRun({
+      taskRun: makeTaskRun({ repo: 'acme/web' }),
       input: { ...baseInput },
     });
 
@@ -818,8 +818,8 @@ describe('optional targetBranch', () => {
         }),
       );
 
-    const result = await createOrUpdateSourceControlPullRequestForCloudJob({
-      cloudJob: makeCloudJob({
+    const result = await createOrUpdateSourceControlPullRequestForTaskRun({
+      taskRun: makeTaskRun({
         repo: 'acme/backend',
         sourceControlProvider: 'gitlab',
       }),
@@ -854,8 +854,8 @@ describe('optional targetBranch', () => {
     const fetchImpl = vi.fn().mockResolvedValueOnce(jsonResponse([]));
 
     await expect(
-      createOrUpdateSourceControlPullRequestForCloudJob({
-        cloudJob: makeCloudJob({
+      createOrUpdateSourceControlPullRequestForTaskRun({
+        taskRun: makeTaskRun({
           repo: 'acme/backend',
           sourceControlProvider: 'gitlab',
         }),
@@ -900,8 +900,8 @@ describe('optional targetBranch', () => {
         }),
       );
 
-    const result = await createOrUpdateSourceControlPullRequestForCloudJob({
-      cloudJob: makeCloudJob({
+    const result = await createOrUpdateSourceControlPullRequestForTaskRun({
+      taskRun: makeTaskRun({
         repo: 'acme/tools',
         sourceControlProvider: 'gitea',
       }),
@@ -962,8 +962,8 @@ describe('optional targetBranch', () => {
         }),
       );
 
-    const result = await createOrUpdateSourceControlPullRequestForCloudJob({
-      cloudJob: makeCloudJob({
+    const result = await createOrUpdateSourceControlPullRequestForTaskRun({
+      taskRun: makeTaskRun({
         repo: 'acme/tools',
         sourceControlProvider: 'gitea',
       }),
@@ -1008,8 +1008,8 @@ describe('optional targetBranch', () => {
         }),
       );
 
-    const result = await createOrUpdateSourceControlPullRequestForCloudJob({
-      cloudJob: makeCloudJob({
+    const result = await createOrUpdateSourceControlPullRequestForTaskRun({
+      taskRun: makeTaskRun({
         repo: 'acme/tools',
         sourceControlProvider: 'gitea',
       }),
@@ -1060,8 +1060,8 @@ describe('optional targetBranch', () => {
         }),
       );
 
-    const result = await createOrUpdateSourceControlPullRequestForCloudJob({
-      cloudJob: makeCloudJob({
+    const result = await createOrUpdateSourceControlPullRequestForTaskRun({
+      taskRun: makeTaskRun({
         repo: 'acme/Platform/backend',
         sourceControlProvider: 'ado',
       }),

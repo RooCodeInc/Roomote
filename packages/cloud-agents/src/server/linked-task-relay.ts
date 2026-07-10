@@ -5,7 +5,7 @@ import {
   getReviewCodeAutomationSettings,
   tasks,
 } from '@roomote/db/server';
-import { type PrReviewerSettings } from '@roomote/types';
+import { type PrReviewSettings } from '@roomote/types';
 
 export type LinkedTaskRelayState = {
   linkedTaskId: string | null;
@@ -14,7 +14,7 @@ export type LinkedTaskRelayState = {
 };
 
 function getRelayEligibleCreatorIds(
-  settings: PrReviewerSettings | null | undefined,
+  settings: PrReviewSettings | null | undefined,
 ): Set<string> {
   if (!Array.isArray(settings?.relayEligibleCreatorIds)) {
     return new Set();
@@ -37,7 +37,7 @@ export async function getLinkedTaskRelayState({
   repository: string;
   prNumber: number;
   branchName: string;
-  reviewerSettings?: PrReviewerSettings | null;
+  reviewerSettings?: PrReviewSettings | null;
   ownerLookupPendingOnMiss?: boolean;
 }): Promise<LinkedTaskRelayState> {
   const settings =
@@ -103,7 +103,7 @@ export async function isLinkedTaskCreatorRelayEnabled({
   repository: string;
   prNumber: number;
   branchName: string;
-  reviewerSettings?: PrReviewerSettings | null;
+  reviewerSettings?: PrReviewSettings | null;
 }): Promise<boolean> {
   return (
     await getLinkedTaskRelayState({

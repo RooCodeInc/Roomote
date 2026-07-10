@@ -11,7 +11,7 @@ export async function handleGetTaskComputeLogs(
     return successResult({
       taskId: result.taskId,
       returned: result.returned,
-      cloudJobs: result.cloudJobs,
+      taskRuns: result.taskRuns,
     });
   } catch (error) {
     return catchError(error);

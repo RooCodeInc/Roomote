@@ -6,11 +6,9 @@ import {
   deploymentSettings,
   eq,
 } from '@roomote/db/server';
-import { AGENT_DISPLAY_NAME, CloudAgentType } from '@roomote/types';
 
 import type {
   RoutingContext,
-  RoutableAgent,
   RoutableEnvironment,
   SlackRoutingSource,
   TeamsRoutingSource,
@@ -31,20 +29,6 @@ async function fetchDeploymentTaskModelSettings() {
 
   return deployment?.taskModelSettings ?? null;
 }
-
-/**
- * Agent types that are exclusive to GitHub and should NOT appear
- * in non-GitHub routing contexts (Slack, Linear, etc.).
- */
-export const GITHUB_ONLY_AGENT_TYPES = new Set<CloudAgentType>([
-  CloudAgentType.Fixer,
-  CloudAgentType.PrReviewer,
-]);
-
-/**
- * Agent types that should never be routed to by the LLM router.
- */
-export const NON_ROUTABLE_AGENT_TYPES = new Set<CloudAgentType>();
 
 /**
  * Parameters for building a Slack routing context.
@@ -115,7 +99,6 @@ export interface GitHubContextParams {
   issueOrPrTitle?: string;
   issueOrPrBody?: string;
   commentBody?: string;
-  availableAgents: RoutableAgent[];
 }
 
 /**
@@ -124,8 +107,7 @@ export interface GitHubContextParams {
 export async function buildSlackRoutingContext(
   params: SlackContextParams,
 ): Promise<RoutingContext> {
-  const [agents, envs, taskModelSettings] = await Promise.all([
-    getAvailableAgents(),
+  const [envs, taskModelSettings] = await Promise.all([
     getAvailableEnvironments(),
     fetchDeploymentTaskModelSettings(),
   ]);
@@ -138,15 +120,10 @@ export async function buildSlackRoutingContext(
     videoDescriptions: params.videoDescriptions,
   };
 
-  const filteredAgents = agents.filter(
-    (a) => !GITHUB_ONLY_AGENT_TYPES.has(a.type),
-  );
-
   return {
     routingModel: params.routingModel,
     taskDescription: params.taskDescription,
     source,
-    availableAgents: filteredAgents,
     availableEnvironments: envs,
     taskModelSettings,
     ...(params.userId
@@ -166,8 +143,7 @@ export async function buildSlackRoutingContext(
 export async function buildTeamsRoutingContext(
   params: TeamsContextParams,
 ): Promise<RoutingContext> {
-  const [agents, envs, taskModelSettings] = await Promise.all([
-    getAvailableAgents(),
+  const [envs, taskModelSettings] = await Promise.all([
     getAvailableEnvironments(),
     fetchDeploymentTaskModelSettings(),
   ]);
@@ -180,15 +156,10 @@ export async function buildTeamsRoutingContext(
     images: params.images,
   };
 
-  const filteredAgents = agents.filter(
-    (a) => !GITHUB_ONLY_AGENT_TYPES.has(a.type),
-  );
-
   return {
     routingModel: params.routingModel,
     taskDescription: params.taskDescription,
     source,
-    availableAgents: filteredAgents,
     availableEnvironments: envs,
     taskModelSettings,
     ...(params.userId
@@ -208,8 +179,7 @@ export async function buildTeamsRoutingContext(
 export async function buildTelegramRoutingContext(
   params: TelegramContextParams,
 ): Promise<RoutingContext> {
-  const [agents, envs, taskModelSettings] = await Promise.all([
-    getAvailableAgents(),
+  const [envs, taskModelSettings] = await Promise.all([
     getAvailableEnvironments(),
     fetchDeploymentTaskModelSettings(),
   ]);
@@ -221,15 +191,10 @@ export async function buildTelegramRoutingContext(
     images: params.images,
   };
 
-  const filteredAgents = agents.filter(
-    (a) => !GITHUB_ONLY_AGENT_TYPES.has(a.type),
-  );
-
   return {
     routingModel: params.routingModel,
     taskDescription: params.taskDescription,
     source,
-    availableAgents: filteredAgents,
     availableEnvironments: envs,
     taskModelSettings,
     ...(params.userId
@@ -249,8 +214,7 @@ export async function buildTelegramRoutingContext(
 export async function buildLinearRoutingContext(
   params: LinearContextParams,
 ): Promise<RoutingContext> {
-  const [agents, envs, taskModelSettings] = await Promise.all([
-    getAvailableAgents(),
+  const [envs, taskModelSettings] = await Promise.all([
     getAvailableEnvironments(),
     fetchDeploymentTaskModelSettings(),
   ]);
@@ -266,15 +230,10 @@ export async function buildLinearRoutingContext(
     previousComments: params.previousComments,
   };
 
-  const filteredAgents = agents.filter(
-    (a) => !GITHUB_ONLY_AGENT_TYPES.has(a.type),
-  );
-
   return {
     routingModel: params.routingModel,
     taskDescription: params.taskDescription,
     source,
-    availableAgents: filteredAgents,
     availableEnvironments: envs,
     taskModelSettings,
     ...(params.userId
@@ -308,23 +267,8 @@ export function buildGitHubRoutingContext(
   return {
     taskDescription: params.taskDescription,
     source,
-    availableAgents: params.availableAgents,
     availableEnvironments: [],
   };
-}
-
-/**
- * Gets all active cloud agents for this deployment.
- */
-async function getAvailableAgents(): Promise<RoutableAgent[]> {
-  return [
-    {
-      id: 'generalist',
-      name: AGENT_DISPLAY_NAME,
-      type: CloudAgentType.StandardTask,
-      createdAt: new Date(0),
-    },
-  ];
 }
 
 /**

@@ -21,10 +21,10 @@ function omitKeys(
 
 export const reloadDeploymentEnvVars = publicProcedure.mutation(
   async ({ ctx }) => {
-    if (!ctx.cloudJobId) {
+    if (!ctx.runId) {
       throw new TRPCError({
         code: 'PRECONDITION_FAILED',
-        message: 'Cloud job context is required',
+        message: 'Task run context is required',
       });
     }
 
@@ -35,22 +35,22 @@ export const reloadDeploymentEnvVars = publicProcedure.mutation(
       });
     }
 
-    const [freshEnvVars, cloudJob] = await Promise.all([
-      sdk.cloudJobs.getResolvedRuntimeEnvVars({ cloudJobId: ctx.cloudJobId }),
-      sdk.cloudJobs.findFirstById(ctx.cloudJobId),
+    const [freshEnvVars, taskRun] = await Promise.all([
+      sdk.taskRuns.getResolvedRuntimeEnvVars({ runId: ctx.runId }),
+      sdk.taskRuns.findFirstById(ctx.runId),
     ]);
 
-    if (!cloudJob) {
+    if (!taskRun) {
       throw new TRPCError({
         code: 'NOT_FOUND',
-        message: 'Cloud job not found',
+        message: 'Task run not found',
       });
     }
 
     const currentRuntimeEnv = ctx.workerEnv.getRuntimeEnv();
     const nextRuntimeEnv: Record<string, string> = { ...freshEnvVars };
 
-    await injectEnvVars(nextRuntimeEnv, cloudJob, {
+    await injectEnvVars(nextRuntimeEnv, taskRun, {
       previewProxyBaseUrl: ctx.workerEnv.previewProxyBaseUrl,
       previewProxySubdomainSuffix: ctx.workerEnv.previewProxySubdomainSuffix,
       syncSourceControlTokenFiles: false,

@@ -1,7 +1,7 @@
-import type { AuthTokenContext, JobTokenContext } from '@roomote/types';
+import type { AuthTokenContext, RunTokenContext } from '@roomote/types';
 
 const {
-  mockFindCloudJob,
+  mockFindTaskRun,
   mockFindEnablements,
   mockFindConnections,
   mockSelect,
@@ -32,7 +32,7 @@ const {
   }));
 
   return {
-    mockFindCloudJob: vi.fn(),
+    mockFindTaskRun: vi.fn(),
     mockFindEnablements: vi.fn(),
     mockFindConnections: vi.fn(),
     mockSelect,
@@ -61,7 +61,7 @@ vi.mock('@roomote/db/server', () => ({
   db: {
     select: mockSelect,
     query: {
-      taskRuns: { findFirst: mockFindCloudJob },
+      taskRuns: { findFirst: mockFindTaskRun },
       deploymentMcpEnablements: {
         findFirst: vi.fn(),
         findMany: mockFindEnablements,
@@ -126,11 +126,11 @@ function createCaller(requestUrl?: string) {
 }
 
 function createJobCaller(requestUrl?: string) {
-  const auth: JobTokenContext = {
-    cloudJobId: 42,
+  const auth: RunTokenContext = {
+    runId: 42,
     userId: 'owner-user',
     principal: 'user',
-    tokenType: 'cj',
+    tokenType: 'run',
     version: 1,
   };
 
@@ -178,7 +178,7 @@ function buildEnabledOnlyRow(mcpId: string) {
 describe('mcpConnectionsRouter.getMcpServerConfigs', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    mockFindCloudJob.mockResolvedValue({
+    mockFindTaskRun.mockResolvedValue({
       actingUserId: null,
     });
     mockFindEnablements.mockResolvedValue([]);
@@ -586,8 +586,8 @@ describe('mcpConnectionsRouter.getMcpServerConfigs', () => {
     );
   });
 
-  it('uses taskRuns.actingUserId for job-token actor-scoped lookups', async () => {
-    mockFindCloudJob.mockResolvedValueOnce({
+  it('uses taskRuns.actingUserId for run-token actor-scoped lookups', async () => {
+    mockFindTaskRun.mockResolvedValueOnce({
       actingUserId: 'actor-user',
     });
     mockGetValidAccessToken.mockResolvedValue('notion-raw-access-token');

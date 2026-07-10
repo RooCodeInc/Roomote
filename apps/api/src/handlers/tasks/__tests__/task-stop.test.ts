@@ -6,7 +6,7 @@ const {
   mockDbUpdate,
   mockDbUpdateSet,
   mockDbUpdateWhere,
-  mockFindFirstCloudJob,
+  mockFindFirstTaskRun,
   mockDbTransaction,
   mockTxUpdate,
   mockTxUpdateSet,
@@ -28,7 +28,7 @@ const {
     mockDbUpdate,
     mockDbUpdateSet,
     mockDbUpdateWhere,
-    mockFindFirstCloudJob: vi.fn(),
+    mockFindFirstTaskRun: vi.fn(),
     mockDbTransaction: vi.fn(),
     mockTxUpdate,
     mockTxUpdateSet,
@@ -62,15 +62,15 @@ vi.mock('@roomote/db/server', () => ({
     transaction: mockDbTransaction,
     query: {
       taskRuns: {
-        findFirst: mockFindFirstCloudJob,
+        findFirst: mockFindFirstTaskRun,
       },
     },
   },
 }));
 
-import { stopTaskJob } from '../task-stop';
+import { stopTaskRun } from '../task-stop';
 
-describe('stopTaskJob', () => {
+describe('stopTaskRun', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockDbUpdate.mockReturnValue({ set: mockDbUpdateSet });
@@ -88,15 +88,15 @@ describe('stopTaskJob', () => {
     mockWithSandboxServerRpcClient.mockResolvedValue(undefined);
   });
 
-  it('persists cancel intent on the job row before the sandbox stop RPC', async () => {
-    const job = {
+  it('persists cancel intent on the run row before the sandbox stop RPC', async () => {
+    const run = {
       id: 7,
       status: RunStatus.Running,
       sandboxServerUrl: 'https://sandbox.example',
       actingUserId: null,
     };
 
-    const result = await stopTaskJob({ job, authUserId: 'user-1' });
+    const result = await stopTaskRun({ run, authUserId: 'user-1' });
 
     expect(result).toEqual({ success: true, mode: 'sandbox_stop' });
     expect(mockDbUpdateSet).toHaveBeenCalledWith({
@@ -110,7 +110,7 @@ describe('stopTaskJob', () => {
   });
 
   it('persists cancel intent even when the sandbox stop RPC fails', async () => {
-    const job = {
+    const run = {
       id: 7,
       status: RunStatus.Running,
       sandboxServerUrl: 'https://sandbox.example',
@@ -120,7 +120,7 @@ describe('stopTaskJob', () => {
       new TRPCClientError('sandbox unreachable'),
     );
 
-    const result = await stopTaskJob({ job, authUserId: 'user-1' });
+    const result = await stopTaskRun({ run, authUserId: 'user-1' });
 
     expect(result).toEqual({
       success: false,
@@ -132,18 +132,18 @@ describe('stopTaskJob', () => {
     });
   });
 
-  it('stamps cancelRequestedAt when direct-canceling a job without a sandbox', async () => {
-    const job = {
+  it('stamps cancelRequestedAt when direct-canceling a run without a sandbox', async () => {
+    const run = {
       id: 7,
       status: RunStatus.Processing,
       sandboxServerUrl: null,
       actingUserId: null,
     };
-    mockFindFirstCloudJob.mockResolvedValue(job);
+    mockFindFirstTaskRun.mockResolvedValue(run);
     mockCancelTaskRunDirect.mockResolvedValue(true);
 
-    const result = await stopTaskJob({
-      job,
+    const result = await stopTaskRun({
+      run,
       authUserId: 'user-1',
       allowDirectCancelWithoutSandbox: true,
     });

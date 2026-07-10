@@ -69,7 +69,7 @@ async function getTaskByIdForCurrentOrg(
   const [[result], taskPullRequestsByTaskId, inferenceUsage] =
     await Promise.all([
       db
-        .select({ task: tasks, user: users, cloudJob: taskRuns })
+        .select({ task: tasks, user: users, taskRun: taskRuns })
         .from(tasks)
         .leftJoin(users, eq(tasks.initiatorUserId, users.id))
         .leftJoin(taskRuns, eq(taskRuns.taskId, tasks.id))
@@ -84,7 +84,7 @@ async function getTaskByIdForCurrentOrg(
     return null;
   }
 
-  const { task, user, cloudJob } = result;
+  const { task, user, taskRun } = result;
   const creator = resolveTaskCreatorDisplay(task, user);
   const latestPullRequest = taskPullRequestsByTaskId[taskId];
 
@@ -93,9 +93,9 @@ async function getTaskByIdForCurrentOrg(
     user: user ?? null,
     attributionLabel: creator.label,
     attributionKind: creator.kind,
-    cloudJob: cloudJob
+    taskRun: taskRun
       ? {
-          ...cloudJob,
+          ...taskRun,
           prRepo: latestPullRequest?.repository ?? null,
           prNumber: latestPullRequest?.prNumber ?? null,
         }

@@ -52,7 +52,7 @@ describe('conflict-resolution-comments', () => {
     expect(parseConflictResolutionSummary('Opened a draft PR.')).toBeNull();
   });
 
-  it('reads a stored summary from cloud job result', () => {
+  it('reads a stored summary from task run result', () => {
     expect(
       readConflictResolutionSummary({
         [CONFLICT_RESOLUTION_SUMMARY_RESULT_KEY]: {

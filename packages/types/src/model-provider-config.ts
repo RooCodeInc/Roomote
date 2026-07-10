@@ -2,7 +2,7 @@ import {
   isReasoningEffort,
   REASONING_EFFORT_VALUES,
   type ReasoningEffort,
-} from './cloud-jobs';
+} from './task-runs';
 import {
   OPENROUTER_RECOMMENDED_TASK_MODEL_SLUGS,
   mapRecommendedTaskModels,

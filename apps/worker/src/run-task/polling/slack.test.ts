@@ -25,7 +25,7 @@ const {
 
 vi.mock('@roomote/sdk/client', () => ({
   sdk: {
-    cloudJobs: {
+    taskRuns: {
       getSlackMessages: mockGetSlackMessages,
       getSlackRequestUserInputAnswers: mockGetSlackRequestUserInputAnswers,
     },
@@ -43,7 +43,7 @@ vi.mock('../../monitoring/sentry', () => ({
 
 function createLogger(): HarnessLogger {
   return {
-    cloudJobId: 42,
+    runId: 42,
     filePath: '/tmp/harness.log',
     log: vi.fn(),
     info: vi.fn(),
@@ -62,17 +62,17 @@ function createListenerOptions(overrides?: {
   sendPrompt?: ListenerOptions['sendPrompt'];
   answerUserInputRequest?: ListenerOptions['answerUserInputRequest'];
 }): {
-  cloudJob: ListenerOptions['cloudJob'];
+  taskRun: ListenerOptions['taskRun'];
   logger: HarnessLogger;
   sendPrompt: ReturnType<typeof vi.fn>;
   answerUserInputRequest: ReturnType<typeof vi.fn>;
   prepareActorScopedTurn: ReturnType<typeof vi.fn>;
   options: ListenerOptions;
 } {
-  const cloudJob = {
+  const taskRun = {
     id: 42,
     actingUserId: overrides?.actingUserId ?? 'user-1',
-  } as ListenerOptions['cloudJob'];
+  } as ListenerOptions['taskRun'];
   const hasPhaseOverride = Object.prototype.hasOwnProperty.call(
     overrides ?? {},
     'phase',
@@ -117,13 +117,13 @@ function createListenerOptions(overrides?: {
   );
 
   return {
-    cloudJob,
+    taskRun,
     logger,
     sendPrompt,
     answerUserInputRequest,
     prepareActorScopedTurn,
     options: {
-      cloudJob,
+      taskRun,
       state,
       logger,
       workingDirectory: '/tmp/workspace',
@@ -515,7 +515,7 @@ describe('createSlackMessageInterval', () => {
         clientMessageId: 'slack:1710000000.901',
       });
       expect(mockGetSlackMessages).toHaveBeenCalledWith({
-        cloudJobId: 42,
+        runId: 42,
       });
     } finally {
       clearInterval(interval);
@@ -904,9 +904,9 @@ describe('createSlackMessageInterval', () => {
 
       expect(mockCaptureWorkerException).toHaveBeenCalledWith(fetchError, {
         stage: 'listenForSlackEvents',
-        cloudJobId: 42,
+        runId: 42,
         harnessSessionId: 'task-1',
-        sdkMethod: 'cloudJobs.getSlackRequestUserInputAnswers',
+        sdkMethod: 'taskRuns.getSlackRequestUserInputAnswers',
         failurePoint: 'queuedSlackRequestUserInputAnswers',
         trpcUrlOrigin: 'http://127.0.0.1:3001',
         trpcHostname: '127.0.0.1',
@@ -919,9 +919,9 @@ describe('createSlackMessageInterval', () => {
         fetchError,
         {
           stage: 'listenForSlackEvents',
-          cloudJobId: 42,
+          runId: 42,
           harnessSessionId: 'task-1',
-          sdkMethod: 'cloudJobs.getSlackRequestUserInputAnswers',
+          sdkMethod: 'taskRuns.getSlackRequestUserInputAnswers',
           failurePoint: 'queuedSlackRequestUserInputAnswers',
           trpcUrlOrigin: 'http://127.0.0.1:3001',
           trpcHostname: '127.0.0.1',
@@ -948,9 +948,9 @@ describe('createSlackMessageInterval', () => {
 
       expect(mockCaptureWorkerException).toHaveBeenCalledWith(fetchError, {
         stage: 'listenForSlackEvents',
-        cloudJobId: 42,
+        runId: 42,
         harnessSessionId: 'task-1',
-        sdkMethod: 'cloudJobs.getSlackMessages',
+        sdkMethod: 'taskRuns.getSlackMessages',
         failurePoint: 'queuedSlackMessages',
         trpcUrlOrigin: 'http://127.0.0.1:3001',
         trpcHostname: '127.0.0.1',
@@ -963,9 +963,9 @@ describe('createSlackMessageInterval', () => {
         fetchError,
         {
           stage: 'listenForSlackEvents',
-          cloudJobId: 42,
+          runId: 42,
           harnessSessionId: 'task-1',
-          sdkMethod: 'cloudJobs.getSlackMessages',
+          sdkMethod: 'taskRuns.getSlackMessages',
           failurePoint: 'queuedSlackMessages',
           trpcUrlOrigin: 'http://127.0.0.1:3001',
           trpcHostname: '127.0.0.1',

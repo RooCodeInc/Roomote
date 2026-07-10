@@ -610,7 +610,7 @@ describe('createOpenCodeSdkFetch', () => {
 });
 
 describe('non-task OpenCode image packaging', () => {
-  it('keeps the shared app image able to run the same OpenCode CLI as workers', () => {
+  it('keeps OpenCode in the worker image and out of control-plane images', () => {
     const appDockerfile = fs.readFileSync(
       new URL('../../../../../.docker/app/Dockerfile', import.meta.url),
       'utf8',
@@ -620,21 +620,11 @@ describe('non-task OpenCode image packaging', () => {
       'utf8',
     );
 
-    expect(getOpenCodeCliVersionArg(appDockerfile)).toBe(
+    expect(getOpenCodeCliVersionArg(workerDockerfile)).toBe(
       DEFAULT_OPENCODE_CLI_VERSION,
     );
-    expect(getOpenCodeCliVersionArg(appDockerfile)).toBe(
-      getOpenCodeCliVersionArg(workerDockerfile),
-    );
-    expect(appDockerfile).toContain(
-      'npm install --prefix /opt/opencode-cli --no-save --no-package-lock \\',
-    );
-    expect(appDockerfile).toContain('"opencode-ai@${OPENCODE_CLI_VERSION}"');
-    expect(appDockerfile).toContain(
-      'test "$(/opt/opencode-cli/node_modules/.bin/opencode --version)" = "${OPENCODE_CLI_VERSION}"',
-    );
-    expect(appDockerfile).toContain(
-      'ln -sf /opt/opencode-cli/node_modules/.bin/opencode /usr/local/bin/opencode',
-    );
+    expect(workerDockerfile).toContain('"opencode-ai@${OPENCODE_CLI_VERSION}"');
+    expect(getOpenCodeCliVersionArg(appDockerfile)).toBeUndefined();
+    expect(appDockerfile).not.toContain('opencode-ai@');
   });
 });

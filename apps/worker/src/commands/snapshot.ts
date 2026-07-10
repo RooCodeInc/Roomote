@@ -32,25 +32,25 @@ export const EXPLICIT_SNAPSHOT_TIMEOUT_MS = 10 * 60 * 1_000;
 export const SNAPSHOT_POLL_INTERVAL_MS = 2_000;
 
 interface SnapshotOptions {
-  cloudJobId: number;
+  runId: number;
   environmentId: string;
   sandboxId: string;
 }
 
 export async function snapshot({
-  cloudJobId,
+  runId,
   environmentId,
   sandboxId,
 }: SnapshotOptions): Promise<boolean> {
   setWorkerRuntimeContext({
-    cloudJobId,
-    cloudJobType: TaskPayloadKind.SnapshotEnvironment,
+    runId,
+    taskRunType: TaskPayloadKind.SnapshotEnvironment,
     environmentId,
   });
 
   try {
-    await sdk.cloudJobs.update({
-      id: cloudJobId,
+    await sdk.taskRuns.update({
+      id: runId,
       status: RunStatus.Preparing,
     });
 
@@ -59,7 +59,7 @@ export async function snapshot({
       gitHubToken: GH_TOKEN,
       sourceControlToken,
       taskId,
-    } = await sdk.cloudJobs.fetchSnapshotEnv({ cloudJobId });
+    } = await sdk.taskRuns.fetchSnapshotEnv({ runId });
 
     const envVars: Record<string, string> = {
       ...fetchedEnvVars,
@@ -67,8 +67,8 @@ export async function snapshot({
     };
 
     setWorkerRuntimeContext({
-      cloudJobId,
-      cloudJobType: TaskPayloadKind.SnapshotEnvironment,
+      runId,
+      taskRunType: TaskPayloadKind.SnapshotEnvironment,
       environmentId,
       taskId,
     });
@@ -95,7 +95,7 @@ export async function snapshot({
           environmentConfig,
         },
         envVars,
-        cloudJobType: TaskPayloadKind.SnapshotEnvironment,
+        taskRunType: TaskPayloadKind.SnapshotEnvironment,
         sourceControlProvider:
           sourceControlToken?.provider ?? DEFAULT_SOURCE_CONTROL_PROVIDER,
       },
@@ -103,14 +103,14 @@ export async function snapshot({
       workerEnv,
     });
 
-    await sdk.cloudJobs.update({
-      id: cloudJobId,
+    await sdk.taskRuns.update({
+      id: runId,
       status: RunStatus.Running,
     });
 
     // Enqueue snapshot request via SDK.
-    const { enqueued } = await sdk.cloudJobs.createSnapshot({
-      cloudJobId,
+    const { enqueued } = await sdk.taskRuns.createSnapshot({
+      runId,
       sandboxId,
     });
 
@@ -120,11 +120,11 @@ export async function snapshot({
 
     await pWaitFor(
       async () => {
-        const updatedJob = await sdk.cloudJobs.findRuntimeStateById(cloudJobId);
+        const updatedRun = await sdk.taskRuns.findRuntimeStateById(runId);
 
         // Explicitly check for undefined (job not found) vs null (snapshot not yet created).
         return (
-          updatedJob !== undefined && updatedJob.snapshotCreatedAt !== null
+          updatedRun !== undefined && updatedRun.snapshotCreatedAt !== null
         );
       },
       {
@@ -135,14 +135,14 @@ export async function snapshot({
 
     console.info('Workspace snapshot completed');
 
-    // Note that we call `sdk.cloudJobs.done()` in the error case, but in the
+    // Note that we call `sdk.taskRuns.done()` in the error case, but in the
     // success case the BullMQ job does this for us.
     return true;
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
 
-    await sdk.cloudJobs.done({
-      id: cloudJobId,
+    await sdk.taskRuns.done({
+      id: runId,
       status: RunStatus.Failed,
       error: message,
     });
@@ -155,7 +155,7 @@ export async function snapshot({
       });
     } catch (envError) {
       captureWorkerException(envError, {
-        cloudJobId,
+        runId,
         environmentId,
         stage: 'snapshot.updateSnapshotStatus',
       });
@@ -166,7 +166,7 @@ export async function snapshot({
     }
 
     captureWorkerException(error, {
-      cloudJobId,
+      runId,
       environmentId,
       stage: 'snapshot',
     });

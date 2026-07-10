@@ -17,7 +17,7 @@ import {
 import { RunStatus } from '@roomote/types';
 import type { SandboxLogEntry } from '@roomote/types';
 
-import { getCloudJobErrorDisplayMessage } from '@/lib/cloud-job-errors';
+import { getTaskRunErrorDisplayMessage } from '@/lib/task-run-errors';
 
 import { Message, MessageContent, Shimmer } from '@/components/ai-elements';
 
@@ -135,7 +135,7 @@ export const StartupFailureMessage = ({
 }: StartupErrorMessageProps) => {
   const isFailed = status === RunStatus.Failed;
   const isCanceled = status === RunStatus.Canceled;
-  const displayError = getCloudJobErrorDisplayMessage(error);
+  const displayError = getTaskRunErrorDisplayMessage(error);
 
   if ((isFailed || (isCanceled && displayError)) && displayError) {
     return (

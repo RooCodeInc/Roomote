@@ -1,7 +1,7 @@
 import { appRouter } from '../../routers';
 import type { HarnessPendingUserInputRequest } from '../../lib/harness';
 import type { Context } from '../../trpc';
-import type { JobTokenContext } from '@roomote/types';
+import type { RunTokenContext } from '@roomote/types';
 
 const { mockPrepareActorScopedTurn } = vi.hoisted(() => ({
   mockPrepareActorScopedTurn: vi.fn(),
@@ -21,7 +21,7 @@ const {
 
 vi.mock('@roomote/sdk/client', () => ({
   sdk: {
-    cloudJobs: {
+    taskRuns: {
       findFirstById: mockFindFirstById,
     },
   },
@@ -78,13 +78,13 @@ function createCaller(options?: {
     harness,
     harnessManager: undefined,
     auth: {
-      cloudJobId: 1,
+      runId: 1,
       userId: 'sender-user-1',
       principal: 'user',
-      tokenType: 'cj',
+      tokenType: 'run',
       version: 1,
-    } satisfies JobTokenContext,
-    cloudJobId: 1,
+    } satisfies RunTokenContext,
+    runId: 1,
     prepareActorScopedTurn: mockPrepareActorScopedTurn,
   } as unknown as Context;
 
@@ -134,7 +134,7 @@ describe('answerUserInputRequest procedure', () => {
       slackThreadTs: '111.222',
     });
     mockGetRoomoteConfig.mockReturnValue({
-      token: 'job-token',
+      token: 'run-token',
       platformApiUrl: 'https://platform.example.com',
     });
     mockTrackSlackReplyQuote.mockResolvedValue({ success: true });
@@ -194,11 +194,11 @@ describe('answerUserInputRequest procedure', () => {
     expect(mockFindFirstById).toHaveBeenCalledWith(1);
     expect(mockTrackSlackReplyQuote).toHaveBeenCalledWith(
       {
-        token: 'job-token',
+        token: 'run-token',
         platformApiUrl: 'https://platform.example.com',
       },
       {
-        cloudJobId: 1,
+        runId: 1,
         text: 'Blue',
         userName: 'Casey',
       },
@@ -229,11 +229,11 @@ describe('answerUserInputRequest procedure', () => {
     expect(mockFindFirstById).toHaveBeenCalledWith(1);
     expect(mockTrackSlackReplyQuote).toHaveBeenCalledWith(
       {
-        token: 'job-token',
+        token: 'run-token',
         platformApiUrl: 'https://platform.example.com',
       },
       {
-        cloudJobId: 1,
+        runId: 1,
         text: 'Cancelled input request',
         userName: 'Casey',
       },
@@ -280,11 +280,11 @@ describe('answerUserInputRequest procedure', () => {
     expect(result).toEqual({ success: true });
     expect(mockTrackSlackReplyQuote).toHaveBeenCalledWith(
       {
-        token: 'job-token',
+        token: 'run-token',
         platformApiUrl: 'https://platform.example.com',
       },
       {
-        cloudJobId: 1,
+        runId: 1,
         text: 'Blue',
         userName: 'Casey',
       },
@@ -331,11 +331,11 @@ describe('answerUserInputRequest procedure', () => {
     );
     expect(mockClearSlackReplyQuote).toHaveBeenCalledWith(
       {
-        token: 'job-token',
+        token: 'run-token',
         platformApiUrl: 'https://platform.example.com',
       },
       {
-        cloudJobId: 1,
+        runId: 1,
       },
     );
   });

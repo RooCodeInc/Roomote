@@ -1,7 +1,7 @@
 // Real-database guard for the raw SQL in claimDueSandboxOidcTargets. The
 // query is hand-written (grouped SKIP LOCKED claim), so a schema rename slips
 // past TypeScript and past the fully mocked sandbox-oidc tests — this is how
-// `cloud_job_id` -> `run_id` broke the refresh sweep in dev without any gate
+// `task_run_id` -> `run_id` broke the refresh sweep in dev without any gate
 // noticing. Running the statement against the real test database makes
 // Postgres parse every identifier.
 //

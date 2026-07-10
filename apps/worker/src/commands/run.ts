@@ -1,42 +1,42 @@
-import { type DequeuedCloudJob, sdk } from '@roomote/sdk/client';
+import { type DequeuedTaskRun, sdk } from '@roomote/sdk/client';
 
 import { captureWorkerException } from '../monitoring/sentry';
 import { runTask } from '../run-task';
 
 import type { SetupMode } from './setup';
-import { buildWorkspaceConfig, executeJob } from './utils';
+import { buildWorkspaceConfig, executeTaskRun } from './utils';
 
 export async function run({
-  cloudJobId,
+  runId,
   setupMode,
   preserveGitState,
   keepaliveMsOverride,
 }: {
-  cloudJobId: number;
+  runId: number;
   setupMode: SetupMode;
   preserveGitState?: boolean;
   keepaliveMsOverride?: number;
 }): Promise<boolean> {
-  return executeJob<DequeuedCloudJob>({
-    cloudJobId,
+  return executeTaskRun<DequeuedTaskRun>({
+    runId,
     setupMode,
     preserveGitState,
     fetchFn: async (id, workerReleaseMetadata) =>
-      sdk.cloudJobs.dequeue(
-        { cloudJobId: id, ...workerReleaseMetadata },
+      sdk.taskRuns.dequeue(
+        { runId: id, ...workerReleaseMetadata },
         {
-          onBootstrapFailure: (error, cloudJob) => {
+          onBootstrapFailure: (error, taskRun) => {
             captureWorkerException(error, {
-              cloudJobId: cloudJob.id,
-              stage: 'run.dequeueCloudJob.bootstrapFailure',
-              taskId: cloudJob.taskId,
-              taskType: cloudJob.payloadKind,
+              runId: taskRun.id,
+              stage: 'run.dequeueTaskRun.bootstrapFailure',
+              taskId: taskRun.taskId,
+              taskType: taskRun.payloadKind,
             });
           },
         },
       ),
     workspaceConfigFn: async ({
-      cloudJob: {
+      taskRun: {
         payload: { environmentId, repo, branch, sha, selectedRepositories },
       },
     }) =>

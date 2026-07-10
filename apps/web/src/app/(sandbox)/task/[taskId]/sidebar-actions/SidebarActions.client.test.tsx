@@ -70,7 +70,7 @@ import { SidebarActions } from './SidebarActions';
 
 const baseSession = {
   artifacts: [],
-  cloudJob: {
+  taskRun: {
     id: 1,
     status: 'running',
   },

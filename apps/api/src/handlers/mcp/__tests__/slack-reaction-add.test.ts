@@ -1,5 +1,5 @@
 import { Hono } from 'hono';
-import type { AuthTokenContext, JobTokenContext } from '@roomote/types';
+import type { AuthTokenContext, RunTokenContext } from '@roomote/types';
 
 import type { Variables } from '../../../types';
 
@@ -154,7 +154,7 @@ async function addReaction(
   });
 }
 
-function mockCloudJob(
+function mockTaskRun(
   overrides: Partial<{
     id: number;
     orgId: string;
@@ -169,11 +169,11 @@ function mockCloudJob(
 }
 
 describe('slack reaction add MCP endpoint', () => {
-  const jobToken: JobTokenContext = {
-    cloudJobId: 42,
+  const runToken: RunTokenContext = {
+    runId: 42,
     userId: 'user-1',
     principal: 'user',
-    tokenType: 'cj',
+    tokenType: 'run',
     version: 1,
   };
 
@@ -189,7 +189,7 @@ describe('slack reaction add MCP endpoint', () => {
     } as never);
   });
 
-  it('rejects non-job tokens', async () => {
+  it('rejects non-run tokens', async () => {
     const authToken: AuthTokenContext = {
       userId: 'user-1',
       tokenType: 'auth',
@@ -205,16 +205,16 @@ describe('slack reaction add MCP endpoint', () => {
 
     expect(response.status).toBe(403);
     expect(body.error).toBe(
-      'Slack reaction add MCP is only available for cloud job tokens',
+      'Slack reaction add MCP is only available for task run tokens',
     );
   });
 
   it('rejects invalid reaction names', async () => {
     vi.mocked(db.query.taskRuns.findFirst).mockResolvedValue(
-      mockCloudJob() as never,
+      mockTaskRun() as never,
     );
 
-    const response = await addReaction(jobToken, {
+    const response = await addReaction(runToken, {
       channel: '#eng',
       messageTs: '111.222',
       name: 'white check mark',
@@ -229,7 +229,7 @@ describe('slack reaction add MCP endpoint', () => {
 
   it('adds a reaction to a resolved channel', async () => {
     vi.mocked(db.query.taskRuns.findFirst).mockResolvedValue(
-      mockCloudJob() as never,
+      mockTaskRun() as never,
     );
     vi.mocked(db.query.slackInstallations.findFirst).mockResolvedValue({
       botAccessToken: 'xoxb-test',
@@ -237,7 +237,7 @@ describe('slack reaction add MCP endpoint', () => {
     } as never);
     resolveChannelIdMock.mockResolvedValueOnce('C123ABC456');
 
-    const response = await addReaction(jobToken, {
+    const response = await addReaction(runToken, {
       channel: '<#c123abc456|eng>',
       messageTs: '111.222',
       name: ':white_check_mark:',
@@ -265,7 +265,7 @@ describe('slack reaction add MCP endpoint', () => {
 
   it('rejects channels the Slack app is not a member of', async () => {
     vi.mocked(db.query.taskRuns.findFirst).mockResolvedValue(
-      mockCloudJob() as never,
+      mockTaskRun() as never,
     );
     vi.mocked(db.query.slackInstallations.findFirst).mockResolvedValue({
       botAccessToken: 'xoxb-test',
@@ -273,7 +273,7 @@ describe('slack reaction add MCP endpoint', () => {
     } as never);
     isAppInChannelMock.mockResolvedValue(false);
 
-    const response = await addReaction(jobToken, {
+    const response = await addReaction(runToken, {
       channel: '#eng',
       messageTs: '111.222',
       name: 'eyes',
@@ -286,7 +286,7 @@ describe('slack reaction add MCP endpoint', () => {
 
   it('rejects explicit reaction adds when the acting user has no linked Slack account', async () => {
     vi.mocked(db.query.taskRuns.findFirst).mockResolvedValue(
-      mockCloudJob() as never,
+      mockTaskRun() as never,
     );
     vi.mocked(db.query.slackInstallations.findFirst).mockResolvedValue({
       botAccessToken: 'xoxb-test',
@@ -296,7 +296,7 @@ describe('slack reaction add MCP endpoint', () => {
       null as never,
     );
 
-    const response = await addReaction(jobToken, {
+    const response = await addReaction(runToken, {
       channel: '#eng',
       messageTs: '111.222',
       name: 'eyes',
@@ -312,7 +312,7 @@ describe('slack reaction add MCP endpoint', () => {
 
   it('rejects explicit reaction adds when the acting Slack user is not in the channel', async () => {
     vi.mocked(db.query.taskRuns.findFirst).mockResolvedValue(
-      mockCloudJob() as never,
+      mockTaskRun() as never,
     );
     vi.mocked(db.query.slackInstallations.findFirst).mockResolvedValue({
       botAccessToken: 'xoxb-test',
@@ -320,7 +320,7 @@ describe('slack reaction add MCP endpoint', () => {
     } as never);
     isUserInChannelMock.mockResolvedValue(false);
 
-    const response = await addReaction(jobToken, {
+    const response = await addReaction(runToken, {
       channel: '#eng',
       messageTs: '111.222',
       name: 'eyes',
@@ -335,17 +335,17 @@ describe('slack reaction add MCP endpoint', () => {
   });
 
   it('rejects bot-context explicit reaction adds for private channels', async () => {
-    // A run with no acting user is a deployment-principal run; its job token
+    // A run with no acting user is a deployment-principal run; its run token
     // carries a null user.
-    const deploymentToken: JobTokenContext = {
-      cloudJobId: 42,
+    const deploymentToken: RunTokenContext = {
+      runId: 42,
       userId: null,
       principal: 'deployment',
-      tokenType: 'cj',
+      tokenType: 'run',
       version: 1,
     };
     vi.mocked(db.query.taskRuns.findFirst).mockResolvedValue(
-      mockCloudJob({ actingUserId: null }) as never,
+      mockTaskRun({ actingUserId: null }) as never,
     );
     vi.mocked(db.query.slackInstallations.findFirst).mockResolvedValue({
       botAccessToken: 'xoxb-test',
@@ -369,7 +369,7 @@ describe('slack reaction add MCP endpoint', () => {
 
   it('returns 502 when Slack rejects the reaction add', async () => {
     vi.mocked(db.query.taskRuns.findFirst).mockResolvedValue(
-      mockCloudJob() as never,
+      mockTaskRun() as never,
     );
     vi.mocked(db.query.slackInstallations.findFirst).mockResolvedValue({
       botAccessToken: 'xoxb-test',
@@ -377,7 +377,7 @@ describe('slack reaction add MCP endpoint', () => {
     } as never);
     addReactionMock.mockResolvedValue(false);
 
-    const response = await addReaction(jobToken, {
+    const response = await addReaction(runToken, {
       channel: 'C123',
       messageTs: '111.222',
       name: 'eyes',
@@ -392,7 +392,7 @@ describe('slack reaction add MCP endpoint', () => {
 
   it('dispatches Telegram-context reactions through the Telegram provider', async () => {
     vi.mocked(db.query.taskRuns.findFirst).mockResolvedValue({
-      ...mockCloudJob(),
+      ...mockTaskRun(),
       payload: {
         communicationProvider: 'telegram',
         communicationChannelId: '8846357662',
@@ -405,7 +405,7 @@ describe('slack reaction add MCP endpoint', () => {
       name: 'eyes',
     });
 
-    const response = await addReaction(jobToken, {
+    const response = await addReaction(runToken, {
       channel: '8846357662',
       messageTs: '77',
       name: 'eyes',
@@ -428,14 +428,14 @@ describe('slack reaction add MCP endpoint', () => {
 
   it('rejects Telegram reactions targeting a different chat', async () => {
     vi.mocked(db.query.taskRuns.findFirst).mockResolvedValue({
-      ...mockCloudJob(),
+      ...mockTaskRun(),
       payload: {
         communicationProvider: 'telegram',
         communicationChannelId: '8846357662',
       },
     } as never);
 
-    const response = await addReaction(jobToken, {
+    const response = await addReaction(runToken, {
       channel: '999999',
       messageTs: '77',
       name: 'eyes',
@@ -447,7 +447,7 @@ describe('slack reaction add MCP endpoint', () => {
 
   it('dispatches Teams-context reactions as emoji-only Teams messages', async () => {
     vi.mocked(db.query.taskRuns.findFirst).mockResolvedValue({
-      ...mockCloudJob(),
+      ...mockTaskRun(),
       payload: {
         communicationProvider: 'teams',
         communicationChannelId: '19:conversation@thread.v2',
@@ -462,7 +462,7 @@ describe('slack reaction add MCP endpoint', () => {
       name: 'eyes',
     });
 
-    const response = await addReaction(jobToken, {
+    const response = await addReaction(runToken, {
       channel: '19:conversation@thread.v2',
       messageTs: 'activity-followup',
       name: 'eyes',
@@ -488,14 +488,14 @@ describe('slack reaction add MCP endpoint', () => {
 
   it('rejects Teams reactions targeting a different conversation', async () => {
     vi.mocked(db.query.taskRuns.findFirst).mockResolvedValue({
-      ...mockCloudJob(),
+      ...mockTaskRun(),
       payload: {
         communicationProvider: 'teams',
         communicationChannelId: '19:conversation@thread.v2',
       },
     } as never);
 
-    const response = await addReaction(jobToken, {
+    const response = await addReaction(runToken, {
       channel: '19:other@thread.v2',
       messageTs: 'activity-followup',
       name: 'eyes',

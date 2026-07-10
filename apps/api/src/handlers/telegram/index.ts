@@ -20,9 +20,9 @@ import {
 import { apiLogger } from '../../logging.js';
 import { syncActingUserForInboundMessage } from '../tasks/acting-user-sync.js';
 import {
-  findActiveTelegramJob,
-  findCompletedTelegramJobWithSnapshot,
-} from './job-lookup.js';
+  findActiveTelegramTaskRun,
+  findCompletedTelegramTaskRunWithSnapshot,
+} from './task-run-lookup.js';
 import {
   consumeTelegramLinkCode,
   isTelegramLinkCode,
@@ -141,15 +141,15 @@ telegram.post('/', async (c) => {
 
   if (isTelegramPrivateChat(message) && isTelegramLinkCode(linkCodeCandidate)) {
     // A follow-up to a running task could theoretically match the code
-    // pattern; when the chat has an active job, let the normal queue path
+    // pattern; when the chat has an active task run, let the normal queue path
     // handle the message instead of intercepting it.
     const linkMetadata = getTelegramUpdateCommunicationMetadata(update);
-    const activeJobForLinkChat = await findActiveTelegramJob({
+    const activeRunForLinkChat = await findActiveTelegramTaskRun({
       chatId: linkMetadata.communicationChannelId,
       threadId: linkMetadata.communicationThreadId,
     });
 
-    if (!activeJobForLinkChat) {
+    if (!activeRunForLinkChat) {
       const linkedUserId = await consumeTelegramLinkCode(linkCodeCandidate);
       const chatId = String(message.chat.id);
 
@@ -339,9 +339,9 @@ telegram.post('/', async (c) => {
     return c.json({ ok: true, ignored: 'unsupported_update' });
   }
 
-  const activeJob = await findActiveTelegramJob(conversation);
+  const activeRun = await findActiveTelegramTaskRun(conversation);
 
-  if (activeJob && newTaskCommand) {
+  if (activeRun && newTaskCommand) {
     const commandLabel = `/${newTaskCommand.command}`;
 
     await postTelegramMessageBestEffort({
@@ -356,7 +356,7 @@ telegram.post('/', async (c) => {
     return c.json({ ok: true, queued: false, repliedInline: true });
   }
 
-  if (activeJob) {
+  if (activeRun) {
     if (!queuedMessage) {
       return c.json({ ok: true, ignored: 'unsupported_update' });
     }
@@ -364,20 +364,20 @@ telegram.post('/', async (c) => {
     // Trusted pre-queue actor switch; see acting-user-sync.ts. The worker
     // only runs the queued turn as this sender if the server actor matches.
     await syncActingUserForInboundMessage({
-      logContext: 'telegram.activeJobMessage',
-      jobId: activeJob.id,
+      logContext: 'telegram.activeRunMessage',
+      runId: activeRun.id,
       senderUserId: queuedMessage.userId,
     });
-    await queueCommunicationMessage('telegram', activeJob.id, queuedMessage);
+    await queueCommunicationMessage('telegram', activeRun.id, queuedMessage);
     // Track the latest inbound user message id so later outbound replies quote
     // the most recent user message instead of the original launch message.
     await setLatestInboundMessageId(
       'telegram',
-      activeJob.id,
+      activeRun.id,
       metadata.communicationMessageId ?? queuedMessage.ts,
     ).catch((error) => {
       apiLogger.warn(
-        `[telegram] Failed to track latest inbound message id for cloud job ${activeJob.id}: ${
+        `[telegram] Failed to track latest inbound message id for task run ${activeRun.id}: ${
           error instanceof Error ? error.message : String(error)
         }`,
       );
@@ -388,10 +388,10 @@ telegram.post('/', async (c) => {
     });
 
     apiLogger.debug(
-      `[telegram] Queued Telegram message ${queuedMessage.ts} for cloud job ${activeJob.id}`,
+      `[telegram] Queued Telegram message ${queuedMessage.ts} for task run ${activeRun.id}`,
     );
 
-    return c.json({ ok: true, queued: true, cloudJobId: activeJob.id });
+    return c.json({ ok: true, queued: true, runId: activeRun.id });
   }
 
   if (newTaskCommand && !newTaskCommand.text) {
@@ -417,7 +417,7 @@ telegram.post('/', async (c) => {
     })
   ) {
     apiLogger.debug(
-      `[telegram] Ignoring Telegram message without active job or task entry signal for chat ${metadata.communicationChannelId} thread ${metadata.communicationThreadId ?? 'unknown'}`,
+      `[telegram] Ignoring Telegram message without active task run or task entry signal for chat ${metadata.communicationChannelId} thread ${metadata.communicationThreadId ?? 'unknown'}`,
     );
 
     return c.json({ ok: true, queued: false, reason: 'not_task_entry' });
@@ -437,14 +437,14 @@ telegram.post('/', async (c) => {
 
   // `/new` and `/done` exist to skip snapshot resume; only plain messages
   // reconnect to a completed task's snapshot.
-  const completedJob = newTaskCommand
+  const completedRun = newTaskCommand
     ? null
-    : await findCompletedTelegramJobWithSnapshot(conversation);
+    : await findCompletedTelegramTaskRunWithSnapshot(conversation);
 
-  if (completedJob) {
+  if (completedRun) {
     try {
       const resumeLaunch = await resumeTelegramTaskFromSnapshot({
-        completedJob,
+        completedRun,
         queuedMessage,
         metadata,
       });
@@ -460,7 +460,7 @@ telegram.post('/', async (c) => {
       return c.json({
         ok: true,
         resumed: true,
-        cloudJobId: resumeLaunch.id,
+        runId: resumeLaunch.id,
       });
     } catch (error) {
       apiLogger.warn(
@@ -497,6 +497,6 @@ telegram.post('/', async (c) => {
   return c.json({
     ok: true,
     started: true,
-    cloudJobId: launch.launchResult.id,
+    runId: launch.launchResult.id,
   });
 });

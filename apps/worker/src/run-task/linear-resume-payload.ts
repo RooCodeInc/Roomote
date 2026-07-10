@@ -5,7 +5,7 @@
  * snapshot resumes also carry the drained follow-up messages in the payload,
  * and every queued Linear message includes its session id, so this fallback
  * covers payloads that predate the task columns (and callback paths that
- * only receive the cloud job).
+ * only receive the task run).
  */
 export function getLinearSessionIdFromResumePayload(
   payload: unknown,

@@ -34,7 +34,7 @@ import {
 } from '@/lib/task-creator-filter';
 
 import { type SimpleUser, getUsersById } from './users';
-import { type SimpleCloudJob, getLatestCloudJobsByTaskId } from './cloud-jobs';
+import { type SimpleTaskRun, getLatestTaskRunsByTaskId } from './task-runs';
 import { getTaskModelDisplayNameMap } from './task-models';
 
 /**
@@ -250,7 +250,7 @@ export type Task = SimpleTask & {
   attributionKind: TaskCreatorKind;
   modelDisplayName?: string | null;
   user: SimpleUser | null;
-  cloudJob: SimpleCloudJob;
+  taskRun: SimpleTaskRun;
   inferenceUsage?: TaskInferenceUsageSummary;
 };
 
@@ -383,12 +383,12 @@ export const getTasks = async ({
 
   const [
     usersById,
-    cloudJobsByTaskId,
+    taskRunsByTaskId,
     inferenceUsageByTaskId,
     modelDisplayNames,
   ] = await Promise.all([
     getUsersById(userIds),
-    getLatestCloudJobsByTaskId(taskIds),
+    getLatestTaskRunsByTaskId(taskIds),
     getTaskInferenceUsageByTaskIds(taskIds),
     getTaskModelDisplayNameMap(taskResults.map((task) => task.model)),
   ]);
@@ -398,9 +398,9 @@ export const getTasks = async ({
       const user = task.initiatorUserId
         ? (usersById[task.initiatorUserId] ?? null)
         : null;
-      const cloudJob = cloudJobsByTaskId[task.id];
+      const taskRun = taskRunsByTaskId[task.id];
 
-      if (!cloudJob) {
+      if (!taskRun) {
         return null;
       }
 
@@ -412,7 +412,7 @@ export const getTasks = async ({
         attributionLabel: creator.label,
         attributionKind: creator.kind,
         modelDisplayName: task.model ? modelDisplayNames.get(task.model) : null,
-        cloudJob,
+        taskRun,
         inferenceUsage: inferenceUsageByTaskId[task.id],
       };
     })
@@ -447,7 +447,7 @@ type SearchTaskResult = {
   title: string | null;
   timestamp: number;
   lastMessageAt: number;
-  cloudJob: SimpleCloudJob;
+  taskRun: SimpleTaskRun;
 };
 
 export const searchTasks = async ({
@@ -511,18 +511,18 @@ export const searchTasks = async ({
   const results = [...searchResults, ...pinnedResults];
   const taskIds = results.map((t) => t.id);
 
-  const cloudJobsByTaskId = await getLatestCloudJobsByTaskId(taskIds);
+  const taskRunsByTaskId = await getLatestTaskRunsByTaskId(taskIds);
 
   return results
     .map((task) => {
-      const cloudJob = cloudJobsByTaskId[task.id];
+      const taskRun = taskRunsByTaskId[task.id];
 
-      if (!cloudJob) {
+      if (!taskRun) {
         return null;
       }
 
       const { activityAt, ...restTask } = task;
-      return { ...restTask, lastMessageAt: activityAt, cloudJob };
+      return { ...restTask, lastMessageAt: activityAt, taskRun };
     })
     .filter((task): task is NonNullable<typeof task> => task !== null);
 };

@@ -1,10 +1,10 @@
 const mockRunCommand = vi.fn();
 const mockWriteFiles = vi.fn();
 const mockGetInstanceStatus = vi.fn();
-const mockRecordCloudJobEvent = vi.fn();
+const mockRecordTaskRunEvent = vi.fn();
 const mockFindManySandboxOidcTargets = vi.fn();
 const mockEnvironmentFindFirst = vi.fn();
-const mockCloudJobFindFirst = vi.fn();
+const mockTaskRunFindFirst = vi.fn();
 const mockDbExecute = vi.fn();
 const mockInsertValues = vi.fn();
 const mockOnConflictDoUpdate = vi.fn().mockResolvedValue(undefined);
@@ -63,7 +63,7 @@ vi.mock('@roomote/db/server', () => ({
         findFirst: (...args: unknown[]) => mockEnvironmentFindFirst(...args),
       },
       taskRuns: {
-        findFirst: (...args: unknown[]) => mockCloudJobFindFirst(...args),
+        findFirst: (...args: unknown[]) => mockTaskRunFindFirst(...args),
       },
     },
     delete: (...args: unknown[]) => mockDelete(...args),
@@ -73,7 +73,7 @@ vi.mock('@roomote/db/server', () => ({
   environments: {},
   eq: vi.fn((...args: unknown[]) => ({ kind: 'eq', args })),
   inArray: vi.fn((...args: unknown[]) => ({ kind: 'inArray', args })),
-  recordCloudJobEvent: (...args: unknown[]) => mockRecordCloudJobEvent(...args),
+  recordTaskRunEvent: (...args: unknown[]) => mockRecordTaskRunEvent(...args),
   sandboxOidcTargets: {
     awsRegion: 'awsRegion',
     awsRoleArn: 'awsRoleArn',
@@ -99,7 +99,7 @@ vi.mock('@roomote/db/server', () => ({
 
 import {
   primeSandboxOidcTargets,
-  cleanupSandboxOidcTargetsForCloudJob,
+  cleanupSandboxOidcTargetsForTaskRun,
   refreshDueSandboxOidcTargets,
 } from '../sandbox-oidc';
 
@@ -136,7 +136,7 @@ beforeEach(() => {
     timeoutRemainingMs: 60_000,
   });
   mockFindManySandboxOidcTargets.mockResolvedValue([]);
-  mockRecordCloudJobEvent.mockResolvedValue(undefined);
+  mockRecordTaskRunEvent.mockResolvedValue(undefined);
   mockOnConflictDoUpdate.mockResolvedValue(undefined);
 });
 
@@ -153,19 +153,19 @@ describe('primeSandboxOidcTargets', () => {
     ]);
   });
 
-  it('records provider-neutral OIDC events and forwards task context for cloud jobs', async () => {
+  it('records provider-neutral OIDC events and forwards task context for task runs', async () => {
     await primeSandboxOidcTargets({
       taskId: 'task_1',
       environmentId: 'env_1',
       environmentConfig: { oidc: { custom: [] } } as never,
       computeProvider: 'modal',
       computeProviderId: 'modal_1',
-      cloudJobId: 42,
+      runId: 42,
     });
 
     expect(mockGetInstanceStatus).toHaveBeenCalledTimes(2);
-    expect(mockRecordCloudJobEvent).toHaveBeenCalledTimes(4);
-    expect(mockRecordCloudJobEvent).toHaveBeenNthCalledWith(
+    expect(mockRecordTaskRunEvent).toHaveBeenCalledTimes(4);
+    expect(mockRecordTaskRunEvent).toHaveBeenNthCalledWith(
       1,
       expect.anything(),
       expect.objectContaining({
@@ -188,13 +188,13 @@ describe('primeSandboxOidcTargets', () => {
         }),
       }),
     );
-    expect(mockRecordCloudJobEvent).not.toHaveBeenCalledWith(
+    expect(mockRecordTaskRunEvent).not.toHaveBeenCalledWith(
       expect.anything(),
       expect.objectContaining({
         message: expect.stringContaining('Sandbox OIDC'),
       }),
     );
-    expect(mockRecordCloudJobEvent).toHaveBeenNthCalledWith(
+    expect(mockRecordTaskRunEvent).toHaveBeenNthCalledWith(
       4,
       expect.anything(),
       expect.objectContaining({
@@ -218,13 +218,13 @@ describe('primeSandboxOidcTargets', () => {
         environmentConfig: { oidc: { custom: [] } } as never,
         computeProvider: 'modal',
         computeProviderId: 'sb_1',
-        cloudJobId: 42,
+        runId: 42,
       }),
     ).rejects.toThrow('write failed');
 
     expect(mockRunCommand).not.toHaveBeenCalled();
-    expect(mockRecordCloudJobEvent).toHaveBeenCalledTimes(2);
-    expect(mockRecordCloudJobEvent).toHaveBeenLastCalledWith(
+    expect(mockRecordTaskRunEvent).toHaveBeenCalledTimes(2);
+    expect(mockRecordTaskRunEvent).toHaveBeenLastCalledWith(
       expect.anything(),
       expect.objectContaining({
         taskId: 'task_1',
@@ -257,7 +257,7 @@ describe('primeSandboxOidcTargets', () => {
         environmentConfig: { oidc: { custom: [] } } as never,
         computeProvider: 'modal',
         computeProviderId: 'sb_1',
-        cloudJobId: 42,
+        runId: 42,
       });
 
       await vi.advanceTimersByTimeAsync(1_000);
@@ -265,7 +265,7 @@ describe('primeSandboxOidcTargets', () => {
       await expect(primePromise).resolves.toEqual({ targetCount: 1 });
       expect(mockWriteFiles).toHaveBeenCalledTimes(2);
       expect(mockRunCommand).toHaveBeenCalledTimes(1);
-      expect(mockRecordCloudJobEvent).toHaveBeenCalledWith(
+      expect(mockRecordTaskRunEvent).toHaveBeenCalledWith(
         expect.anything(),
         expect.objectContaining({
           source: 'machine_oidc',
@@ -292,7 +292,7 @@ describe('primeSandboxOidcTargets', () => {
         environmentConfig: { oidc: { custom: [] } } as never,
         computeProvider: 'modal',
         computeProviderId: 'sb_1',
-        cloudJobId: 42,
+        runId: 42,
       }),
     ).rejects.toThrow('permission denied');
 
@@ -316,7 +316,7 @@ describe('primeSandboxOidcTargets', () => {
         environmentConfig: { oidc: { custom: [] } } as never,
         computeProvider: 'modal',
         computeProviderId: 'sb_1',
-        cloudJobId: 42,
+        runId: 42,
       });
 
       await vi.advanceTimersByTimeAsync(1_000);
@@ -324,7 +324,7 @@ describe('primeSandboxOidcTargets', () => {
       await expect(primePromise).resolves.toEqual({ targetCount: 1 });
       expect(mockWriteFiles).toHaveBeenCalledTimes(2);
       expect(mockRunCommand).toHaveBeenCalledTimes(2);
-      expect(mockRecordCloudJobEvent).toHaveBeenCalledWith(
+      expect(mockRecordTaskRunEvent).toHaveBeenCalledWith(
         expect.anything(),
         expect.objectContaining({
           source: 'machine_oidc',
@@ -354,11 +354,11 @@ describe('primeSandboxOidcTargets', () => {
         environmentConfig: { oidc: { custom: [] } } as never,
         computeProvider: 'modal',
         computeProviderId: 'sb_1',
-        cloudJobId: 42,
+        runId: 42,
       }),
     ).rejects.toThrow('install failed');
 
-    expect(mockRecordCloudJobEvent).toHaveBeenCalledWith(
+    expect(mockRecordTaskRunEvent).toHaveBeenCalledWith(
       expect.anything(),
       expect.objectContaining({
         source: 'machine_oidc',
@@ -376,7 +376,7 @@ describe('primeSandboxOidcTargets', () => {
         }),
       }),
     );
-    expect(mockRecordCloudJobEvent).not.toHaveBeenCalledWith(
+    expect(mockRecordTaskRunEvent).not.toHaveBeenCalledWith(
       expect.anything(),
       expect.objectContaining({
         source: 'machine_oidc',
@@ -424,7 +424,7 @@ describe('primeSandboxOidcTargets', () => {
         environmentConfig: { oidc: { custom: [] } } as never,
         computeProvider: 'modal',
         computeProviderId: 'sb_1',
-        cloudJobId: 42,
+        runId: 42,
       });
 
       await vi.advanceTimersByTimeAsync(1_000);
@@ -448,7 +448,7 @@ describe('primeSandboxOidcTargets', () => {
   });
 });
 
-describe('cleanupSandboxOidcTargetsForCloudJob', () => {
+describe('cleanupSandboxOidcTargetsForTaskRun', () => {
   beforeEach(() => {
     mockFindManySandboxOidcTargets.mockResolvedValue([makeRow()]);
   });
@@ -463,7 +463,7 @@ describe('cleanupSandboxOidcTargetsForCloudJob', () => {
       timeoutRemainingMs: 60_000,
     });
 
-    await expect(cleanupSandboxOidcTargetsForCloudJob(42)).rejects.toThrow(
+    await expect(cleanupSandboxOidcTargetsForTaskRun(42)).rejects.toThrow(
       'Failed to remove sandbox OIDC files',
     );
 
@@ -480,7 +480,7 @@ describe('cleanupSandboxOidcTargetsForCloudJob', () => {
       timeoutRemainingMs: 0,
     });
 
-    await expect(cleanupSandboxOidcTargetsForCloudJob(42)).resolves.toEqual(
+    await expect(cleanupSandboxOidcTargetsForTaskRun(42)).resolves.toEqual(
       undefined,
     );
 
@@ -498,7 +498,7 @@ describe('cleanupSandboxOidcTargetsForCloudJob', () => {
       message: 'Sandbox sb_1 was not found.',
     });
 
-    await expect(cleanupSandboxOidcTargetsForCloudJob(42)).resolves.toEqual(
+    await expect(cleanupSandboxOidcTargetsForTaskRun(42)).resolves.toEqual(
       undefined,
     );
 
@@ -552,7 +552,7 @@ describe('refreshDueSandboxOidcTargets', () => {
         },
       },
     });
-    mockCloudJobFindFirst.mockImplementation(({ where: _where }) => {
+    mockTaskRunFindFirst.mockImplementation(({ where: _where }) => {
       return Promise.resolve({
         id: 42,
         vendor: 'modal',
@@ -640,14 +640,14 @@ describe('refreshDueSandboxOidcTargets', () => {
       makeRow({ id: 'row-1', computeProviderId: 'sb_1', runId: 42 }),
       makeRow({ id: 'row-2', computeProviderId: 'sb_2', runId: 43 }),
     ]);
-    mockCloudJobFindFirst.mockResolvedValueOnce({
+    mockTaskRunFindFirst.mockResolvedValueOnce({
       id: 42,
       vendor: 'modal',
       machineId: 'sb_1',
       payload: {},
       status: 'running',
     });
-    mockCloudJobFindFirst.mockResolvedValueOnce({
+    mockTaskRunFindFirst.mockResolvedValueOnce({
       id: 43,
       vendor: 'modal',
       machineId: 'sb_2',

@@ -154,7 +154,7 @@ describe('generateTaskSummaryCommand', () => {
         ts: 1,
         eventType: ACP_ENVELOPE_EVENT_TYPES.UserPrompt,
         role: 'user',
-        text: 'Please help me implement cloud job message persistence.',
+        text: 'Please help me implement task run message persistence.',
       }),
       envelope({
         id: 'message-2',
@@ -187,7 +187,7 @@ describe('generateTaskSummaryCommand', () => {
     const prompt = mockGenerateTrackedNonTaskObject.mock.calls[0]?.[0]
       ?.prompt as string;
     expect(prompt).toContain(
-      'Bruno Bergher (task starter): Please help me implement cloud job message persistence.',
+      'Bruno Bergher (task starter): Please help me implement task run message persistence.',
     );
     expect(prompt).toContain(
       'Roomote: Implemented Postgres persistence and wired historical hydration.',

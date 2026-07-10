@@ -14,7 +14,7 @@ import {
 
 import { apiLogger } from '../../logging.js';
 import { cancelOrphanedWorkItemRunBestEffort } from '../tasks/orphaned-work-item-run.js';
-import { stopTaskJob } from '../tasks/task-stop.js';
+import { stopTaskRun } from '../tasks/task-stop.js';
 import {
   parseCancelTaskCallbackData,
   parseTelegramRouteCallbackData,
@@ -33,11 +33,11 @@ import {
 import { startNewTelegramTask } from './task-orchestration.js';
 import type { QueuedTelegramCommunicationMessage } from './types.js';
 
-async function findCancelableCloudJob(cloudJobId: number, chatId: string) {
+async function findCancelableTaskRun(runId: number, chatId: string) {
   return db.query.taskRuns.findFirst({
     where: and(
-      eq(taskRuns.id, cloudJobId),
-      // Only cancel jobs launched from the chat the button lives in — the
+      eq(taskRuns.id, runId),
+      // Only cancel task runs launched from the chat the button lives in — the
       // inbound message path is chat-scoped the same way.
       sql`${taskRuns.payload}->>'communicationProvider' = 'telegram'`,
       sql`${taskRuns.payload}->>'communicationChannelId' = ${chatId}`,
@@ -56,7 +56,7 @@ async function findCancelableCloudJob(cloudJobId: number, chatId: string) {
 
 async function handleCancelTaskCallback(params: {
   query: TelegramCallbackQuery;
-  cloudJobId: number;
+  runId: number;
 }): Promise<void> {
   const message = params.query.message;
   const chatId = message ? String(message.chat.id) : null;
@@ -69,9 +69,9 @@ async function handleCancelTaskCallback(params: {
     return;
   }
 
-  const cancelableJob = await findCancelableCloudJob(params.cloudJobId, chatId);
+  const cancelableRun = await findCancelableTaskRun(params.runId, chatId);
 
-  if (!cancelableJob) {
+  if (!cancelableRun) {
     await answerTelegramCallbackQueryBestEffort({
       callbackQueryId: params.query.id,
       text: 'That task is no longer running.',
@@ -93,8 +93,8 @@ async function handleCancelTaskCallback(params: {
       .join(' ')
       .trim() || params.query.from.username;
 
-  const stopResult = await stopTaskJob({
-    job: cancelableJob,
+  const stopResult = await stopTaskRun({
+    run: cancelableRun,
     allowDirectCancelWithoutSandbox: true,
     cancelledBy: {
       ...(cancelledByName ? { name: cancelledByName } : {}),
@@ -110,7 +110,7 @@ async function handleCancelTaskCallback(params: {
 
   if (!canceled) {
     apiLogger.warn(
-      `[telegram] Failed to cancel cloud job ${params.cloudJobId} from callback: ${JSON.stringify(stopResult)}`,
+      `[telegram] Failed to cancel task run ${params.runId} from callback: ${JSON.stringify(stopResult)}`,
     );
   }
 
@@ -302,10 +302,10 @@ export async function handleTelegramCallbackQuery(
   query: TelegramCallbackQuery,
 ): Promise<void> {
   const data = query.data?.trim() ?? '';
-  const cancelCloudJobId = parseCancelTaskCallbackData(data);
+  const cancelRunId = parseCancelTaskCallbackData(data);
 
-  if (cancelCloudJobId !== null) {
-    await handleCancelTaskCallback({ query, cloudJobId: cancelCloudJobId });
+  if (cancelRunId !== null) {
+    await handleCancelTaskCallback({ query, runId: cancelRunId });
     return;
   }
 

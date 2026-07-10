@@ -29,11 +29,11 @@ import {
 } from '@roomote/db/server';
 
 import {
-  CloudJobQueue,
+  TaskRunQueue,
   enqueueTask,
   resolveQueueScope,
-  type FreshCloudTaskLaunch,
-} from '../cloud-job-queue';
+  type FreshTaskLaunch,
+} from '../task-run-queue';
 
 const createdTaskIds: string[] = [];
 const createdUserIds: string[] = [];
@@ -65,15 +65,15 @@ async function createUser(): Promise<string> {
 }
 
 async function launchFresh(
-  input: Omit<FreshCloudTaskLaunch, 'task'> & {
-    task?: FreshCloudTaskLaunch['task'];
+  input: Omit<FreshTaskLaunch, 'task'> & {
+    task?: FreshTaskLaunch['task'];
   },
 ) {
   const run = await enqueueTask(
     {
       task: standardTaskInput(),
       ...input,
-    } as FreshCloudTaskLaunch,
+    } as FreshTaskLaunch,
     { enqueue: false, skipEarlyTitleGeneration: true },
   );
   createdTaskIds.push(run.taskId);
@@ -249,7 +249,7 @@ describe('enqueueTask snapshot resume', () => {
       payload: {
         repo: 'acme/widgets',
         sourceSnapshotId: 'snap-123',
-        sourceCloudJobId: freshRun.id,
+        sourceRunId: freshRun.id,
       },
     } as SnapshotResumeTask;
 
@@ -379,7 +379,7 @@ describe('enqueueTask PR linkage', () => {
 describe('enqueue-failure cancel task state', () => {
   // A run canceled before it is queued must leave the owning task in a
   // terminal state. finishRun never runs for these runs, so
-  // cancelCloudJobBeforeQueue is responsible for the tasks.state write.
+  // cancelTaskRunBeforeQueue is responsible for the tasks.state write.
   // Regression guard for tasks stranded in 'active' with a canceled run.
   it('marks the task canceled when the run is canceled before it is queued', async () => {
     const userId = await createUser();
@@ -398,10 +398,10 @@ describe('enqueue-failure cancel task state', () => {
         {
           skipEarlyTitleGeneration: true,
           // Throwing before the queue push exercises the enqueue-failure
-          // cancel path (cancelCloudJobBeforeQueue) after the task and its
+          // cancel path (cancelTaskRunBeforeQueue) after the task and its
           // first run have been persisted.
-          beforeEnqueue: async (cloudJob) => {
-            capturedTaskId = cloudJob.taskId;
+          beforeEnqueue: async (taskRun) => {
+            capturedTaskId = taskRun.taskId;
             throw new Error('boom before enqueue');
           },
         },
@@ -492,17 +492,17 @@ describe('enqueueTask source-control provider stamping', () => {
 });
 
 describe('pr_review queue scope dedup', () => {
-  let previousQueue: CloudJobQueue | null;
+  let previousQueue: TaskRunQueue | null;
   let queueRedis: InstanceType<typeof Redis>;
 
   beforeEach(() => {
-    previousQueue = CloudJobQueue.queue;
+    previousQueue = TaskRunQueue.queue;
     queueRedis = new Redis();
-    CloudJobQueue.queue = new CloudJobQueue({ redis: queueRedis, timeout: 1 });
+    TaskRunQueue.queue = new TaskRunQueue({ redis: queueRedis, timeout: 1 });
   });
 
   afterEach(async () => {
-    CloudJobQueue.queue = previousQueue;
+    TaskRunQueue.queue = previousQueue;
     await queueRedis.flushall();
     queueRedis.disconnect();
   });
@@ -551,7 +551,7 @@ describe('pr_review queue scope dedup', () => {
 
   it('supersedes an older queued entry with the same pr_review scope', async () => {
     const redis = new Redis();
-    const queue = new CloudJobQueue({ redis, timeout: 1 });
+    const queue = new TaskRunQueue({ redis, timeout: 1 });
     const scope = resolveQueueScope({
       workflow: 'pr_review',
       payloadKind: TaskPayloadKind.GithubPrReview,
@@ -579,7 +579,7 @@ describe('pr_review queue scope dedup', () => {
       prNumber: uniquePrNumber,
       prUrl: `https://github.com/acme/queue-atomic/pull/${uniquePrNumber}`,
     };
-    const makeInput = (headSha: string): FreshCloudTaskLaunch => ({
+    const makeInput = (headSha: string): FreshTaskLaunch => ({
       task: {
         type: TaskPayloadKind.GithubPrReview,
         requestedWorkKindDecision: explicitWorkKind,
@@ -620,8 +620,8 @@ describe('pr_review queue scope dedup', () => {
     expect(persistedNewer?.queueScope).toBe(scope);
     expect(persistedNewer?.status).toBe(RunStatus.Pending);
 
-    const queued = await CloudJobQueue.getInstance().dequeue(false);
+    const queued = await TaskRunQueue.getInstance().dequeue(false);
     expect(queued).toEqual({ id: newer.id, scope });
-    await CloudJobQueue.getInstance().releaseLock(scope, newer.id);
+    await TaskRunQueue.getInstance().releaseLock(scope, newer.id);
   });
 });

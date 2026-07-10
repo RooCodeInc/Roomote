@@ -363,8 +363,8 @@ describe('buildAcpRenderBlocks', () => {
       readFileToolMessage({
         id: 'tool-3',
         ts: 3,
-        title: 'Read cloud-jobs.ts',
-        text: 'cloud jobs content',
+        title: 'Read task-runs.ts',
+        text: 'task runs content',
       }),
     ]);
 
@@ -385,7 +385,7 @@ describe('buildAcpRenderBlocks', () => {
     expect(entries[0].items.map((item) => item.objectLabel)).toEqual([
       'server.ts',
       'evaluator.ts',
-      'cloud-jobs.ts',
+      'task-runs.ts',
     ]);
     expect(entries[0].items.map((item) => item.stepKind)).toEqual([
       'read',

@@ -12,11 +12,11 @@ const config: RoomoteConfig = {
 describe('handleGetTaskComputeLogs', () => {
   afterEach(() => vi.restoreAllMocks());
 
-  it('returns structured cloud job log data on success', async () => {
+  it('returns structured task run log data on success', async () => {
     vi.mocked(tasksApiClient.getTaskComputeLogs).mockResolvedValueOnce({
       taskId: 'task-1',
       returned: 2,
-      cloudJobs: [
+      taskRuns: [
         {
           id: 101,
           status: 'failed',
@@ -46,13 +46,13 @@ describe('handleGetTaskComputeLogs', () => {
       success: boolean;
       taskId: string;
       returned: number;
-      cloudJobs: Array<{ id: number; output: string | null }>;
+      taskRuns: Array<{ id: number; output: string | null }>;
     };
 
     expect(payload.success).toBe(true);
     expect(payload.taskId).toBe('task-1');
     expect(payload.returned).toBe(2);
-    expect(payload.cloudJobs[0]?.output).toBe('boot output');
+    expect(payload.taskRuns[0]?.output).toBe('boot output');
   });
 
   it('returns an error payload on failure', async () => {

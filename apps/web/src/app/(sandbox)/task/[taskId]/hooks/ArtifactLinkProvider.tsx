@@ -2,7 +2,7 @@
 
 import { type ReactNode, createContext, useCallback, useContext } from 'react';
 
-import type { CloudSession } from './use-cloud-session';
+import type { TaskSession } from './use-task-session';
 
 import { useTaskSidePanel } from './use-task-side-panel';
 
@@ -17,7 +17,7 @@ export function useArtifactLink() {
 }
 
 interface ArtifactLinkProviderProps {
-  session: CloudSession;
+  session: TaskSession;
   children: ReactNode;
 }
 

@@ -4,7 +4,7 @@ import {
   type ReasoningEffort,
   isLaunchCodingHarness,
   launchCodingHarnesses,
-} from './cloud-jobs';
+} from './task-runs';
 
 const OPENCODE_MODEL_PATTERN = /^[^/\s]+\/.+$/u;
 

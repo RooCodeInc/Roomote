@@ -1,6 +1,6 @@
 import { Hono } from 'hono';
 
-import { type AuthTokenContext, type JobTokenContext } from '@roomote/types';
+import { type AuthTokenContext, type RunTokenContext } from '@roomote/types';
 
 import type { Variables } from '../../../types';
 import { mcpAuthMiddleware } from '../../mcp/middleware';
@@ -56,7 +56,7 @@ vi.mock('../membership', () => ({
   getMembershipRole: (...args: unknown[]) => mockGetMembershipRole(...args),
 }));
 
-function createApp(authContext?: AuthTokenContext | JobTokenContext) {
+function createApp(authContext?: AuthTokenContext | RunTokenContext) {
   const app = new Hono<{ Variables: Variables }>();
 
   app.use('*', async (c, next) => {
@@ -91,7 +91,7 @@ describe('launchTask', () => {
 
   it('returns the LaunchTaskResponse success envelope shape, not the raw Run row', async () => {
     // enqueueTask resolves with the Run DB row, which has `id` +
-    // `taskId` but no `success`/`cloudJobId`/`error` envelope fields. The
+    // `taskId` but no `success`/`runId`/`error` envelope fields. The
     // handler must map this to the contract the worker MCP client expects.
     mockEnqueueTask.mockResolvedValue({ id: 99, taskId: 'task-new' });
 
@@ -106,7 +106,7 @@ describe('launchTask', () => {
 
     expect(response.status).toBe(200);
     const json = (await response.json()) as Record<string, unknown>;
-    expect(json).toEqual({ success: true, cloudJobId: 99, taskId: 'task-new' });
+    expect(json).toEqual({ success: true, runId: 99, taskId: 'task-new' });
     // Guard against the regression: the raw row fields must not leak through.
     expect(json.id).toBeUndefined();
     expect(json.error).toBeUndefined();

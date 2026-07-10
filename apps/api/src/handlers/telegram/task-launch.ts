@@ -54,7 +54,7 @@ export async function resolveTelegramWorkspace(
 }
 
 /**
- * Enqueue a standard cloud task for a Telegram request and post the
+ * Enqueue a standard task for a Telegram request and post the
  * task-started message (with follow/cancel buttons) back to the chat. Shared
  * by the immediate launch path, the routing-confirmation buttons, and the
  * confirmation auto-start timer.

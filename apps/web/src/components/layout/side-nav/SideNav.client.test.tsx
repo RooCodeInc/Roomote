@@ -25,7 +25,7 @@ const {
         title: string;
         timestamp: number;
         lastMessageAt: number;
-        cloudJob: {
+        taskRun: {
           payload: { environmentId: string; repo: string };
         };
       }>
@@ -37,42 +37,42 @@ const {
         title: 'Task 1',
         timestamp: 6,
         lastMessageAt: 6,
-        cloudJob: { payload: { environmentId: 'env-1', repo: 'org/repo-1' } },
+        taskRun: { payload: { environmentId: 'env-1', repo: 'org/repo-1' } },
       },
       {
         id: 'task-2',
         title: 'Task 2',
         timestamp: 5,
         lastMessageAt: 5,
-        cloudJob: { payload: { environmentId: 'env-2', repo: 'org/repo-2' } },
+        taskRun: { payload: { environmentId: 'env-2', repo: 'org/repo-2' } },
       },
       {
         id: 'task-3',
         title: 'Task 3',
         timestamp: 4,
         lastMessageAt: 4,
-        cloudJob: { payload: { environmentId: 'env-3', repo: 'org/repo-3' } },
+        taskRun: { payload: { environmentId: 'env-3', repo: 'org/repo-3' } },
       },
       {
         id: 'task-4',
         title: 'Task 4',
         timestamp: 3,
         lastMessageAt: 3,
-        cloudJob: { payload: { environmentId: 'env-4', repo: 'org/repo-4' } },
+        taskRun: { payload: { environmentId: 'env-4', repo: 'org/repo-4' } },
       },
       {
         id: 'task-5',
         title: 'Task 5',
         timestamp: 2,
         lastMessageAt: 2,
-        cloudJob: { payload: { environmentId: 'env-5', repo: 'org/repo-5' } },
+        taskRun: { payload: { environmentId: 'env-5', repo: 'org/repo-5' } },
       },
       {
         id: 'task-6',
         title: 'Task 6',
         timestamp: 1,
         lastMessageAt: 1,
-        cloudJob: { payload: { environmentId: 'env-6', repo: 'org/repo-6' } },
+        taskRun: { payload: { environmentId: 'env-6', repo: 'org/repo-6' } },
       },
     ].map((task) => ({ ...task, ...(overrides[task.id] ?? {}) }));
 
@@ -421,14 +421,14 @@ describe('SideNav quick access tasks', () => {
         title: 'Task 7',
         timestamp: 0,
         lastMessageAt: 0,
-        cloudJob: { payload: { environmentId: 'env-7', repo: 'org/repo-7' } },
+        taskRun: { payload: { environmentId: 'env-7', repo: 'org/repo-7' } },
       },
       {
         id: 'task-8',
         title: 'Task 8',
         timestamp: -1,
         lastMessageAt: -1,
-        cloudJob: { payload: { environmentId: 'env-8', repo: 'org/repo-8' } },
+        taskRun: { payload: { environmentId: 'env-8', repo: 'org/repo-8' } },
       },
     ];
 
@@ -566,32 +566,32 @@ describe('SideNav quick access tasks', () => {
       'task-1': {
         timestamp: 6,
         lastMessageAt: 6,
-        cloudJob: { payload: { environmentId: 'env-1', repo: 'org/repo-1' } },
+        taskRun: { payload: { environmentId: 'env-1', repo: 'org/repo-1' } },
       },
       'task-2': {
         timestamp: 5,
         lastMessageAt: 5,
-        cloudJob: { payload: { environmentId: 'env-1', repo: 'org/repo-2' } },
+        taskRun: { payload: { environmentId: 'env-1', repo: 'org/repo-2' } },
       },
       'task-4': {
         timestamp: 4,
         lastMessageAt: 4,
-        cloudJob: { payload: { environmentId: 'env-2', repo: 'org/repo-4' } },
+        taskRun: { payload: { environmentId: 'env-2', repo: 'org/repo-4' } },
       },
       'task-5': {
         timestamp: 3,
         lastMessageAt: 3,
-        cloudJob: { payload: { environmentId: 'env-2', repo: 'org/repo-5' } },
+        taskRun: { payload: { environmentId: 'env-2', repo: 'org/repo-5' } },
       },
       'task-3': {
         timestamp: 2,
         lastMessageAt: 2,
-        cloudJob: { payload: { environmentId: 'env-3', repo: 'org/repo-3' } },
+        taskRun: { payload: { environmentId: 'env-3', repo: 'org/repo-3' } },
       },
       'task-6': {
         timestamp: 1,
         lastMessageAt: 1,
-        cloudJob: { payload: { environmentId: 'env-3', repo: 'org/repo-6' } },
+        taskRun: { payload: { environmentId: 'env-3', repo: 'org/repo-6' } },
       },
     });
     state.environments = [
@@ -633,16 +633,16 @@ describe('SideNav quick access tasks', () => {
     state.pinnedTaskIds = [];
     state.searchTasks = makeSearchTasks({
       'task-1': {
-        cloudJob: { payload: { environmentId: 'env-1', repo: 'org/repo-1' } },
+        taskRun: { payload: { environmentId: 'env-1', repo: 'org/repo-1' } },
       },
       'task-2': {
-        cloudJob: { payload: { environmentId: 'env-1', repo: 'org/repo-2' } },
+        taskRun: { payload: { environmentId: 'env-1', repo: 'org/repo-2' } },
       },
       'task-3': {
-        cloudJob: { payload: { environmentId: 'env-2', repo: 'org/repo-3' } },
+        taskRun: { payload: { environmentId: 'env-2', repo: 'org/repo-3' } },
       },
       'task-4': {
-        cloudJob: { payload: { environmentId: 'env-3', repo: 'org/repo-4' } },
+        taskRun: { payload: { environmentId: 'env-3', repo: 'org/repo-4' } },
       },
     });
     state.environments = [];
@@ -667,16 +667,16 @@ describe('SideNav quick access tasks', () => {
     state.pinnedTaskIds = [];
     state.searchTasks = makeSearchTasks({
       'task-1': {
-        cloudJob: { payload: { environmentId: 'env-1', repo: 'org/repo-1' } },
+        taskRun: { payload: { environmentId: 'env-1', repo: 'org/repo-1' } },
       },
       'task-2': {
-        cloudJob: { payload: { environmentId: 'env-1', repo: 'org/repo-2' } },
+        taskRun: { payload: { environmentId: 'env-1', repo: 'org/repo-2' } },
       },
       'task-3': {
-        cloudJob: { payload: { environmentId: 'env-2', repo: 'org/repo-3' } },
+        taskRun: { payload: { environmentId: 'env-2', repo: 'org/repo-3' } },
       },
       'task-4': {
-        cloudJob: { payload: { environmentId: 'env-2', repo: 'org/repo-4' } },
+        taskRun: { payload: { environmentId: 'env-2', repo: 'org/repo-4' } },
       },
     });
     state.environments = [

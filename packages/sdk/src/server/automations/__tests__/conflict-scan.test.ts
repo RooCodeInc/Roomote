@@ -64,9 +64,6 @@ vi.mock('@roomote/types', async (importOriginal) => {
       Pending: 'pending',
       Running: 'running',
     },
-    CloudAgentType: {
-      Fixer: 'fixer',
-    },
   };
 });
 
@@ -253,7 +250,7 @@ describe('conflictScanJob', () => {
   it('skips conflicting PRs when another Roomote task is active on the branch', async () => {
     mockIsRepoSkipped.mockReturnValue(false);
     mockFindActiveGitHubBranchWork.mockResolvedValueOnce({
-      jobId: 77,
+      runId: 77,
       taskId: 'task-77',
       type: 'standard.task',
       status: 'running',

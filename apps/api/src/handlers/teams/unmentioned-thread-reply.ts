@@ -11,7 +11,7 @@ import type {
   TeamsGraphMessageMention,
 } from '@roomote/communication/teams-graph-client';
 
-import { findLatestTeamsThreadJob } from './find-active-teams-job.js';
+import { findLatestTeamsThreadTaskRun } from './find-active-teams-run.js';
 
 /**
  * Normalizes bot/application identifiers so Bot Framework ids (`28:<appId>`)
@@ -112,12 +112,12 @@ export async function shouldRouteUnmentionedTeamsThreadReplyToAgent(params: {
     return false;
   }
 
-  const ownedThreadJob = await findLatestTeamsThreadJob({
+  const ownedThreadRun = await findLatestTeamsThreadTaskRun({
     conversationId: metadata.communicationChannelId,
     threadId,
   });
 
-  if (!ownedThreadJob) {
+  if (!ownedThreadRun) {
     return false;
   }
 
@@ -144,8 +144,8 @@ export async function shouldRouteUnmentionedTeamsThreadReplyToAgent(params: {
   // or someone who @-mentioned the bot earlier in the thread. Drive-by
   // replies from anyone else still require an explicit mention.
   const isThreadTaskOwner =
-    Boolean(ownedThreadJob.userId) &&
-    ownedThreadJob.userId === params.mappedUserId;
+    Boolean(ownedThreadRun.userId) &&
+    ownedThreadRun.userId === params.mappedUserId;
   const isThreadRootAuthor = threadMessages.some(
     (message) =>
       message.id === threadId &&

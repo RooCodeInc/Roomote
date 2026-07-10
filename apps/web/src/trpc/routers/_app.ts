@@ -88,9 +88,9 @@ import {
 } from '../commands/source-control';
 import {
   routeHomeTaskCommand,
-  createStandardTaskCloudJobCommand,
-  cancelCloudJobCommand,
-} from '../commands/cloud-jobs';
+  createStandardTaskRunCommand,
+  cancelTaskRunCommand,
+} from '../commands/task-runs';
 import {
   exchangeSlackOAuthCodeCommand,
   connectSlackAppCommand,
@@ -153,8 +153,8 @@ import {
 import {
   createEnvironmentSnapshotCommand,
   clearEnvironmentSnapshotCommand,
-  createCloudJobSnapshotCommand,
-  restoreCloudJobSnapshotCommand,
+  createTaskRunSnapshotCommand,
+  restoreTaskRunSnapshotCommand,
 } from '../commands/snapshots';
 import {
   answerSandboxUserInputRequestCommand,
@@ -603,7 +603,7 @@ export const appRouter = createRouter({
       ),
   }),
 
-  cloudJobs: createRouter({
+  taskRuns: createRouter({
     routeHomeTask: protectedProcedure
       .input(
         z.object({
@@ -629,18 +629,18 @@ export const appRouter = createRouter({
         }),
       )
       .mutation(({ ctx: { auth }, input }) =>
-        createStandardTaskCloudJobCommand(auth, input),
+        createStandardTaskRunCommand(auth, input),
       ),
 
     cancel: protectedProcedure
       .input(
         z.object({
           taskId: z.string(),
-          cloudJobId: z.number().int().optional(),
+          runId: z.number().int().optional(),
         }),
       )
       .mutation(({ ctx: { auth }, input }) =>
-        cancelCloudJobCommand(auth, input),
+        cancelTaskRunCommand(auth, input),
       ),
   }),
 
@@ -1116,17 +1116,17 @@ export const appRouter = createRouter({
         clearEnvironmentSnapshotCommand(auth, input),
       ),
 
-    createCloudJob: protectedProcedure
-      .input(z.object({ cloudJobId: z.number() }))
+    createTaskRun: protectedProcedure
+      .input(z.object({ runId: z.number() }))
       .mutation(({ ctx: { auth }, input }) =>
-        createCloudJobSnapshotCommand(auth, input),
+        createTaskRunSnapshotCommand(auth, input),
       ),
 
-    restoreCloudJob: protectedProcedure
+    restoreTaskRun: protectedProcedure
       .input(
         z.object({
           sourceSnapshotId: z.string(),
-          sourceCloudJobId: z.number(),
+          sourceRunId: z.number(),
           description: z.string().optional(),
           clientMessageId: z.string().optional(),
           resumePrompt: z.string().max(50_000).optional(),
@@ -1134,7 +1134,7 @@ export const appRouter = createRouter({
         }),
       )
       .mutation(({ ctx: { auth }, input }) =>
-        restoreCloudJobSnapshotCommand(auth, input),
+        restoreTaskRunSnapshotCommand(auth, input),
       ),
   }),
 
@@ -1243,7 +1243,7 @@ export const appRouter = createRouter({
     sandboxToken: protectedProcedure
       .input(
         z.object({
-          cloudJobId: z.number(),
+          runId: z.number(),
           timeoutMs: z.number().optional(),
         }),
       )
@@ -1349,7 +1349,7 @@ export const appRouter = createRouter({
     saveDraftPrompt: protectedProcedure
       .input(
         z.object({
-          cloudJobId: z.number(),
+          runId: z.number(),
           draftPrompt: z.string().max(50_000),
         }),
       )

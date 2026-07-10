@@ -10,25 +10,25 @@ import {
   SANDBOX_ORPHAN_SCAN_INTERVAL_MS,
   SANDBOX_TIMEOUT_MS,
 } from '@roomote/types';
-import { createJobToken } from '@roomote/auth';
+import { createRunToken } from '@roomote/auth';
 import { Env } from '@roomote/env';
 import { getRedis, REDIS_KEYS } from '@roomote/redis';
 import {
-  type Run,
+  type TaskRun,
   db,
   taskRuns,
-  buildPendingEnvironmentSnapshotMatchForCloudJob,
-  recordJobLifecycleEvent,
+  buildPendingEnvironmentSnapshotMatchForTaskRun,
+  recordTaskRunLifecycleEvent,
   resolveDefaultComputeProvider,
   updatePendingEnvironmentSnapshot,
   eq,
   and,
   isNull,
 } from '@roomote/db/server';
-import { dequeueCloudTask } from '@roomote/cloud-agents/server';
+import { dequeueTaskRun } from '@roomote/cloud-agents/server';
 import { finishRun } from '@roomote/sdk/server';
 
-import { getOrphanedJob } from './orphaned-cloud-jobs';
+import { getOrphanedTaskRun } from './orphaned-task-runs';
 import {
   captureControllerException,
   captureControllerMessage,
@@ -60,7 +60,7 @@ export abstract class BaseController {
   private isProcessingIteration = false;
   private iterationCompleteResolver: (() => void) | null = null;
 
-  /** Track in-flight spawn operations by job ID. */
+  /** Track in-flight spawn operations by run ID. */
   private inFlightSpawns = new Map<number, Promise<void>>();
 
   /** Watches local release artifacts for changes (local dev only). */
@@ -107,7 +107,7 @@ export abstract class BaseController {
     let lastOrphanCheckAt = 0;
     const orphanCheckInterval = SANDBOX_ORPHAN_SCAN_INTERVAL_MS;
 
-    console.log('Looping for jobs...');
+    console.log('Looping for task runs...');
 
     while (this.isRunning) {
       this.isProcessingIteration = true;
@@ -125,23 +125,23 @@ export abstract class BaseController {
           continue;
         }
 
-        const id = await dequeueCloudTask();
+        const id = await dequeueTaskRun();
 
         if (id) {
-          const cloudJob = await db.query.taskRuns.findFirst({
+          const taskRun = await db.query.taskRuns.findFirst({
             where: eq(taskRuns.id, id),
           });
 
-          if (cloudJob) {
+          if (taskRun) {
             // Spawn worker in background to avoid blocking the main loop.
             // The spawnWorkerInBackground method handles errors and cleanup.
-            if (this.spawnWorkerInBackground(cloudJob)) {
+            if (this.spawnWorkerInBackground(taskRun)) {
               console.log(
-                `🎯 New job from redis: job #${cloudJob.id} of type ${cloudJob.payloadKind} in ${cloudJob.payload.repo} (in-flight: ${this.inFlightSpawns.size})`,
+                `🎯 New task run from Redis: run #${taskRun.id} of kind ${taskRun.payloadKind} in ${taskRun.payload.repo} (in-flight: ${this.inFlightSpawns.size})`,
               );
             }
           } else {
-            console.error(`❌ No cloud job record found for id ${id}`);
+            console.error(`❌ No task run record found for id ${id}`);
           }
         } else {
           const now = Date.now();
@@ -151,19 +151,19 @@ export abstract class BaseController {
 
           if (isOrphanCheckDue) {
             lastOrphanCheckAt = now;
-            const cloudJob = await getOrphanedJob();
+            const taskRun = await getOrphanedTaskRun();
 
-            if (cloudJob && this.spawnWorkerInBackground(cloudJob)) {
+            if (taskRun && this.spawnWorkerInBackground(taskRun)) {
               captureControllerMessage(
                 'Controller started task using database fallback logic',
                 {
-                  jobId: cloudJob.id,
-                  jobStatus: cloudJob.status,
-                  jobType: cloudJob.payloadKind,
-                  provider: cloudJob.vendor,
-                  repo: cloudJob.payload.repo,
+                  runId: taskRun.id,
+                  runStatus: taskRun.status,
+                  payloadKind: taskRun.payloadKind,
+                  provider: taskRun.vendor,
+                  repo: taskRun.payload.repo,
                   phase: 'database_fallback',
-                  source: 'orphaned_job_scan',
+                  source: 'orphaned_task_run_scan',
                 },
                 {
                   component: 'dequeue-loop',
@@ -172,7 +172,7 @@ export abstract class BaseController {
               );
 
               console.log(
-                `🎯 New job from database: job #${cloudJob.id} of type ${cloudJob.payloadKind} in ${cloudJob.payload.repo} (in-flight: ${this.inFlightSpawns.size})`,
+                `🎯 New task run from database: run #${taskRun.id} of kind ${taskRun.payloadKind} in ${taskRun.payload.repo} (in-flight: ${this.inFlightSpawns.size})`,
               );
             }
           } else {
@@ -184,7 +184,7 @@ export abstract class BaseController {
           phase: 'dequeue_loop',
         });
         console.error(
-          `🚨 Caught error in dequeueCloudTask / spawnWorker loop: ${error instanceof Error ? error.message : String(error)}`,
+          `🚨 Caught error in dequeueTaskRun / spawnWorker loop: ${error instanceof Error ? error.message : String(error)}`,
         );
       } finally {
         this.isProcessingIteration = false;
@@ -307,48 +307,48 @@ export abstract class BaseController {
   }
 
   protected abstract spawnFreshWorker(
-    cloudJob: Run,
+    taskRun: TaskRun,
     authToken: string,
     deploymentSlug: string,
     sandboxTimeoutMs: number,
     provider: ComputeProvider,
   ): Promise<void>;
 
-  protected async spawnWorker(cloudJob: Run): Promise<void> {
+  protected async spawnWorker(taskRun: TaskRun): Promise<void> {
     try {
-      const dequeuedJob = await this.dequeueCloudJob(cloudJob);
+      const dequeuedRun = await this.dequeueTaskRun(taskRun);
 
-      if (!dequeuedJob) {
+      if (!dequeuedRun) {
         console.log(
-          `[BaseController] Skipping spawn for job #${cloudJob.id} because it left the dequeueable state before dispatch`,
+          `[BaseController] Skipping spawn for task run #${taskRun.id} because it left the dequeueable state before dispatch`,
         );
 
         return;
       }
 
-      const { authToken } = dequeuedJob;
+      const { authToken } = dequeuedRun;
       const provider = resolveComputeProviderTarget(
-        cloudJob.vendor,
+        taskRun.vendor,
         await resolveDefaultComputeProvider(),
       );
       const sandboxTimeoutMs = SANDBOX_TIMEOUT_MS;
 
       await this.spawnFreshWorker(
-        cloudJob,
+        taskRun,
         authToken,
         'deployment',
         sandboxTimeoutMs,
         provider,
       );
     } catch (error) {
-      await this.handleSpawnJobError(cloudJob, error);
+      await this.handleSpawnTaskRunError(taskRun, error);
     }
   }
 
-  private spawnWorkerInBackground(cloudJob: Run): boolean {
-    if (this.inFlightSpawns.has(cloudJob.id)) {
+  private spawnWorkerInBackground(taskRun: TaskRun): boolean {
+    if (this.inFlightSpawns.has(taskRun.id)) {
       console.warn(
-        `[BaseController] Job #${cloudJob.id} is already being spawned, skipping`,
+        `[BaseController] Task run #${taskRun.id} is already being spawned, skipping`,
       );
 
       return false;
@@ -356,7 +356,7 @@ export abstract class BaseController {
 
     if (this.inFlightSpawns.size >= this.MAX_CONCURRENT_SPAWNS) {
       console.warn(
-        `[BaseController] Max concurrent spawns (${this.MAX_CONCURRENT_SPAWNS}) reached, skipping job #${cloudJob.id}`,
+        `[BaseController] Max concurrent spawns (${this.MAX_CONCURRENT_SPAWNS}) reached, skipping task run #${taskRun.id}`,
       );
 
       return false;
@@ -366,28 +366,28 @@ export abstract class BaseController {
 
     const progressLogInterval = setInterval(() => {
       console.warn(
-        `[BaseController] Worker spawn still in progress for job #${cloudJob.id} after ${Date.now() - spawnStartedAt}ms`,
+        `[BaseController] Worker spawn still in progress for task run #${taskRun.id} after ${Date.now() - spawnStartedAt}ms`,
       );
     }, this.LOG_INTERVAL_MS);
 
-    const spawnPromise = this.spawnWorker(cloudJob)
+    const spawnPromise = this.spawnWorker(taskRun)
       .then(() => {
         console.log(
-          `[BaseController] ✅ Worker spawned successfully for job #${cloudJob.id} in ${Date.now() - spawnStartedAt}ms`,
+          `[BaseController] ✅ Worker spawned successfully for task run #${taskRun.id} in ${Date.now() - spawnStartedAt}ms`,
         );
       })
       .catch((error) => {
-        // Error is already handled in handleSpawnJobError, just log here.
+        // Error is already handled in handleSpawnTaskRunError, just log here.
         console.error(
-          `[BaseController] ❌ Worker spawn failed for job #${cloudJob.id}: ${error instanceof Error ? error.message : String(error)}`,
+          `[BaseController] ❌ Worker spawn failed for task run #${taskRun.id}: ${error instanceof Error ? error.message : String(error)}`,
         );
       })
       .finally(() => {
         clearInterval(progressLogInterval);
-        this.inFlightSpawns.delete(cloudJob.id);
+        this.inFlightSpawns.delete(taskRun.id);
       });
 
-    this.inFlightSpawns.set(cloudJob.id, spawnPromise);
+    this.inFlightSpawns.set(taskRun.id, spawnPromise);
 
     return true;
   }
@@ -405,111 +405,113 @@ export abstract class BaseController {
     await Promise.allSettled(this.inFlightSpawns.values());
   }
 
-  protected async dequeueCloudJob(
-    cloudJob: Run,
-  ): Promise<{ cloudJob: Run; authToken: string } | null> {
+  protected async dequeueTaskRun(
+    taskRun: TaskRun,
+  ): Promise<{ taskRun: TaskRun; authToken: string } | null> {
     const sandboxTimeoutMs = SANDBOX_TIMEOUT_MS;
 
-    // Jobs without a human driver run as the deployment service principal;
+    // Task runs without a human driver use the deployment service principal;
     // the token carries no user claim rather than borrowing an arbitrary
     // user's identity.
-    const authToken = await createJobToken({
-      cloudJobId: cloudJob.id,
-      userId: cloudJob.actingUserId ?? null,
+    const authToken = await createRunToken({
+      runId: taskRun.id,
+      userId: taskRun.actingUserId ?? null,
       timeoutMs: sandboxTimeoutMs,
     });
 
     if (!authToken) {
-      throw new Error(`Failed to create job token for job ${cloudJob.id}`);
+      throw new Error(
+        `Failed to create runtime token for task run ${taskRun.id}`,
+      );
     }
 
     let dequeueSkipped = false;
     const fallbackComputeProvider = await resolveDefaultComputeProvider();
 
     await db.transaction(async (tx) => {
-      const updatedJobs = await tx
+      const updatedRuns = await tx
         .update(taskRuns)
         .set({ status: RunStatus.Dequeued, dequeuedAt: new Date() })
         .where(
           and(
-            eq(taskRuns.id, cloudJob.id),
-            eq(taskRuns.status, cloudJob.status),
+            eq(taskRuns.id, taskRun.id),
+            eq(taskRuns.status, taskRun.status),
             isNull(taskRuns.canceledAt),
           ),
         )
         .returning();
 
-      if (updatedJobs.length === 0) {
+      if (updatedRuns.length === 0) {
         dequeueSkipped = true;
         return;
       }
 
-      await recordJobLifecycleEvent(tx, {
-        runId: cloudJob.id,
-        taskId: cloudJob.taskId,
+      await recordTaskRunLifecycleEvent(tx, {
+        runId: taskRun.id,
+        taskId: taskRun.taskId,
         eventType: 'decision',
         message:
-          'Controller dequeued cloud job and handed it to provider dispatch.',
+          'Controller dequeued task run and handed it to provider dispatch.',
         details: {
           stage: 'controller_dequeue',
           status: RunStatus.Dequeued,
           provider: resolveComputeProviderTarget(
-            cloudJob.vendor,
+            taskRun.vendor,
             fallbackComputeProvider,
           ),
-          environmentId: cloudJob.payload.environmentId ?? null,
-          machineId: cloudJob.machineId ?? null,
+          environmentId: taskRun.payload.environmentId ?? null,
+          machineId: taskRun.machineId ?? null,
         },
       });
     });
 
     if (dequeueSkipped) {
-      const latestJob = await db.query.taskRuns.findFirst({
-        where: eq(taskRuns.id, cloudJob.id),
+      const latestRun = await db.query.taskRuns.findFirst({
+        where: eq(taskRuns.id, taskRun.id),
         columns: {
           status: true,
           canceledAt: true,
         },
       });
 
-      if (latestJob?.canceledAt || latestJob?.status === RunStatus.Canceled) {
+      if (latestRun?.canceledAt || latestRun?.status === RunStatus.Canceled) {
         return null;
       }
 
-      if (!latestJob || latestJob.status !== cloudJob.status) {
+      if (!latestRun || latestRun.status !== taskRun.status) {
         return null;
       }
 
       throw new Error(
-        `Job ${cloudJob.id}: failed to transition from ${cloudJob.status} to ${RunStatus.Dequeued}`,
+        `Task run ${taskRun.id}: failed to transition from ${taskRun.status} to ${RunStatus.Dequeued}`,
       );
     }
 
-    return { cloudJob, authToken };
+    return { taskRun, authToken };
   }
 
-  protected async handleSpawnJobError(
-    cloudJob: Run,
+  protected async handleSpawnTaskRunError(
+    taskRun: TaskRun,
     error: unknown,
   ): Promise<void> {
     const errorMessage = error instanceof Error ? error.message : String(error);
 
     captureControllerException(error, {
-      jobId: cloudJob.id,
-      jobType: cloudJob.payloadKind,
-      provider: cloudJob.vendor,
-      repo: cloudJob.payload.repo,
+      runId: taskRun.id,
+      payloadKind: taskRun.payloadKind,
+      provider: taskRun.vendor,
+      repo: taskRun.payload.repo,
       phase: 'spawn_worker',
     });
 
     console.error(
-      `[BaseController] ❌ Error spawning ${cloudJob.payloadKind} worker for job #${cloudJob.id}: ${errorMessage}`,
+      `[BaseController] ❌ Error spawning ${taskRun.payloadKind} worker for task run #${taskRun.id}: ${errorMessage}`,
     );
 
     // Use the centralized termination path so all side-effects (email, Slack,
     // Linear notifications, lock release, etc.) are applied consistently.
     await finishRun({
-      id: cloudJob.id,
+      id: taskRun.id,
       status: RunStatus.Failed,
       error: errorMessage,
     });
@@ -517,16 +519,16 @@ export abstract class BaseController {
     // Snapshot-specific: only fail snapshots that are currently pending.
     // Scheduled refreshes keep the last ready snapshot in place while the
     // replacement is being created, so spawn failures must not overwrite it.
-    if (cloudJob.payloadKind === TaskPayloadKind.SnapshotEnvironment) {
-      const environmentId = cloudJob.payload.environmentId;
+    if (taskRun.payloadKind === TaskPayloadKind.SnapshotEnvironment) {
+      const environmentId = taskRun.payload.environmentId;
 
       if (environmentId) {
         const provider = resolveComputeProviderTarget(
-          cloudJob.vendor,
+          taskRun.vendor,
           await resolveDefaultComputeProvider(),
         );
         const pendingSnapshotMatch =
-          buildPendingEnvironmentSnapshotMatchForCloudJob(cloudJob);
+          buildPendingEnvironmentSnapshotMatchForTaskRun(taskRun);
         await updatePendingEnvironmentSnapshot(db, {
           environmentId,
           provider,

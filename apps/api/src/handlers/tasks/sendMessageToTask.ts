@@ -13,7 +13,7 @@ import {
 import type {
   AuthTokenContext,
   TaskPayload,
-  JobTokenContext,
+  RunTokenContext,
   PullRequestStatus,
 } from '@roomote/types';
 import {
@@ -32,7 +32,7 @@ import {
   trackLatestUserMessageForSlackQuote,
 } from '@roomote/slack';
 
-import { findLatestCloudJob, getTaskChannelBindings } from './helpers';
+import { findLatestTaskRun, getTaskChannelBindings } from './helpers';
 import {
   restoreActingUserIdAfterFailedDelivery,
   updateActingUserIdIfNeeded,
@@ -97,7 +97,7 @@ type SendMessageToTaskResult =
   | { success: true; result: unknown }
   | { success: false; error: string; status: SendMessageErrorStatus };
 
-type LatestTaskCloudJob = {
+type LatestTaskRun = {
   id: number;
   status: string;
   sandboxServerUrl: string | null;
@@ -209,7 +209,7 @@ async function resolveWorkerQuoteUserName(
 }
 
 async function createSlackReplyQuoteContext(params: {
-  cloudJobId: number;
+  runId: number;
   payload: Record<string, unknown> | null;
   slackThreadTs: string | null;
   userId: string;
@@ -230,13 +230,13 @@ async function createSlackReplyQuoteContext(params: {
       params.userName ?? (await getTrackedUserDisplayName(params.userId));
 
     await trackLatestUserMessageForSlackQuote({
-      cloudJobId: params.cloudJobId,
+      runId: params.runId,
       text,
       userName,
       onError: (error) => {
         logHandlerError(
           'sendMessageToTask',
-          `Non-fatal latest user message sync failure for cloud job ${params.cloudJobId}: ${
+          `Non-fatal latest user message sync failure for task run ${params.runId}: ${
             error instanceof Error ? error.message : String(error)
           }`,
         );
@@ -245,7 +245,7 @@ async function createSlackReplyQuoteContext(params: {
   } catch (error) {
     logHandlerError(
       'sendMessageToTask',
-      `Non-fatal latest user message sync failure for cloud job ${params.cloudJobId}: ${
+      `Non-fatal latest user message sync failure for task run ${params.runId}: ${
         error instanceof Error ? error.message : String(error)
       }`,
     );
@@ -290,7 +290,7 @@ function getLinkedReviewHandoffQuoteText(message: string): string | null {
 }
 
 async function createLinkedReviewHandoffQuoteContext(params: {
-  cloudJobId: number;
+  runId: number;
   payload: Record<string, unknown> | null;
   slackThreadTs: string | null;
   message: string;
@@ -302,7 +302,7 @@ async function createLinkedReviewHandoffQuoteContext(params: {
   }
 
   await createSlackReplyQuoteContext({
-    cloudJobId: params.cloudJobId,
+    runId: params.runId,
     payload: params.payload,
     slackThreadTs: params.slackThreadTs,
     userId: 'linked-review-handoff',
@@ -312,7 +312,7 @@ async function createLinkedReviewHandoffQuoteContext(params: {
 }
 
 async function maybeCreateSlackReplyQuoteContext(params: {
-  cloudJobId: number;
+  runId: number;
   payload: Record<string, unknown> | null;
   slackThreadTs: string | null;
   userId: string;
@@ -347,18 +347,18 @@ async function maybeCreateSlackReplyQuoteContext(params: {
  * would only bounce off the worker's mismatch guard with a less clear error.
  */
 async function syncActingUserIdBeforeDelivery({
-  jobId,
+  runId,
   currentActingUserId,
   nextActingUserId,
   preserveActor,
 }: {
-  jobId: number;
+  runId: number;
   currentActingUserId: string | null;
   nextActingUserId: string;
   preserveActor: boolean;
 }): Promise<boolean> {
   return await updateActingUserIdIfNeeded({
-    jobId,
+    runId,
     currentActingUserId,
     nextActingUserId,
     preserveActor,
@@ -402,7 +402,7 @@ async function resumeTaskFromSnapshot({
   images,
   source,
   clientMessageId,
-  sourceJob,
+  sourceRun,
   channelBindings,
   senderMode,
 }: {
@@ -412,15 +412,15 @@ async function resumeTaskFromSnapshot({
   images?: string[];
   source?: string;
   clientMessageId?: string;
-  sourceJob: LatestTaskCloudJob;
+  sourceRun: LatestTaskRun;
   channelBindings: TaskChannelBindingsRow | null;
   senderMode?: SendMessageSenderMode;
 }): Promise<SendMessageToTaskResult | null> {
-  if (!sourceJob.snapshotId) {
+  if (!sourceRun.snapshotId) {
     return null;
   }
 
-  if (!isSnapshotResumable(sourceJob.snapshotCreatedAt)) {
+  if (!isSnapshotResumable(sourceRun.snapshotCreatedAt)) {
     return {
       success: false,
       error: EXPIRED_SNAPSHOT_RESUME_ERROR,
@@ -428,7 +428,7 @@ async function resumeTaskFromSnapshot({
     };
   }
 
-  const sourcePayload = sourceJob.payload ?? {};
+  const sourcePayload = sourceRun.payload ?? {};
   const repo =
     typeof sourcePayload.repo === 'string' ? sourcePayload.repo : undefined;
   const environmentId =
@@ -457,9 +457,9 @@ async function resumeTaskFromSnapshot({
   const payload: TaskPayload<typeof TaskPayloadKind.SnapshotResume> = {
     repo: repo ?? '',
     environmentId,
-    port: sourceJob.port ?? undefined,
-    sourceSnapshotId: sourceJob.snapshotId,
-    sourceCloudJobId: sourceJob.id,
+    port: sourceRun.port ?? undefined,
+    sourceSnapshotId: sourceRun.snapshotId,
+    sourceRunId: sourceRun.id,
     ...(selectedRepositories ? { selectedRepositories } : {}),
     ...(slackOriginMessageTs ? { slackOriginMessageTs } : {}),
     resumePrompt: message,
@@ -477,8 +477,8 @@ async function resumeTaskFromSnapshot({
 
   await inheritSnapshotResumeVisiblePromptFields(
     payload,
-    sourceJob.payload,
-    sourceJob.sourceRunId,
+    sourceRun.payload,
+    sourceRun.sourceRunId,
   );
 
   // Resumes never create tasks and never re-attribute; the follow-up sender
@@ -487,8 +487,8 @@ async function resumeTaskFromSnapshot({
     {
       task: {
         type: TaskPayloadKind.SnapshotResume,
-        sourceSnapshotId: sourceJob.snapshotId,
-        sourceCloudJobId: sourceJob.id,
+        sourceSnapshotId: sourceRun.snapshotId,
+        sourceRunId: sourceRun.id,
         payload,
       },
       actingUserId: userId,
@@ -497,7 +497,7 @@ async function resumeTaskFromSnapshot({
   );
 
   await maybeCreateSlackReplyQuoteContext({
-    cloudJobId: resumeLaunch.id,
+    runId: resumeLaunch.id,
     payload,
     slackThreadTs: channelBindings?.slackThreadTs ?? null,
     userId,
@@ -509,7 +509,7 @@ async function resumeTaskFromSnapshot({
     success: true,
     result: {
       resumed: true,
-      cloudJobId: resumeLaunch.id,
+      runId: resumeLaunch.id,
       taskId,
     },
   };
@@ -522,31 +522,31 @@ function shouldSkipLinkedReviewHandoffForPrStatus(
 }
 
 async function getLinkedReviewHandoffTarget({
-  sourceJob,
+  sourceRun,
   targetTaskId,
 }: {
-  sourceJob: {
+  sourceRun: {
     type: TaskPayloadKind | string | null;
     payload: Record<string, unknown>;
   };
   targetTaskId: string;
 }): Promise<{ status: PullRequestStatus | null }> {
   const repo =
-    typeof sourceJob.payload.repo === 'string' ? sourceJob.payload.repo : null;
+    typeof sourceRun.payload.repo === 'string' ? sourceRun.payload.repo : null;
   const prNumber =
-    typeof sourceJob.payload.prNumber === 'number'
-      ? sourceJob.payload.prNumber
-      : typeof sourceJob.payload.githubPrNumber === 'number'
-        ? sourceJob.payload.githubPrNumber
+    typeof sourceRun.payload.prNumber === 'number'
+      ? sourceRun.payload.prNumber
+      : typeof sourceRun.payload.githubPrNumber === 'number'
+        ? sourceRun.payload.githubPrNumber
         : null;
   const branchName =
-    typeof sourceJob.payload.branchName === 'string'
-      ? sourceJob.payload.branchName
+    typeof sourceRun.payload.branchName === 'string'
+      ? sourceRun.payload.branchName
       : '';
 
   if (!repo || !prNumber) {
     throw new Error(
-      'Linked review handoff requires PR metadata on the review job.',
+      'Linked review handoff requires PR metadata on the review run.',
     );
   }
 
@@ -555,7 +555,7 @@ async function getLinkedReviewHandoffTarget({
     prNumber,
     branchName,
     sourceControlProvider: resolveSourceControlProviderFromPayload(
-      sourceJob.payload,
+      sourceRun.payload,
     ),
   });
 
@@ -589,14 +589,14 @@ async function resolveLinkedReviewHandoff({
   authContext,
   senderMode,
   message,
-  job,
+  run,
   targetTaskId,
   fallbackUserId,
 }: {
-  authContext?: AuthTokenContext | JobTokenContext;
+  authContext?: AuthTokenContext | RunTokenContext;
   senderMode?: SendMessageSenderMode;
   message: string;
-  job: {
+  run: {
     actingUserId: string | null;
   };
   targetTaskId: string;
@@ -610,27 +610,27 @@ async function resolveLinkedReviewHandoff({
 
   if (
     !authContext ||
-    authContext.tokenType !== 'cj' ||
+    authContext.tokenType !== 'run' ||
     !isLinkedReviewResultsMessage(message)
   ) {
-    throw new Error('Linked review handoff requires a PR review job token.');
+    throw new Error('Linked review handoff requires a PR review run token.');
   }
 
-  const sourceJob = await db.query.taskRuns.findFirst({
-    where: eq(taskRuns.id, authContext.cloudJobId),
+  const sourceRun = await db.query.taskRuns.findFirst({
+    where: eq(taskRuns.id, authContext.runId),
   });
 
   if (
-    !sourceJob ||
-    !REVIEW_HANDOFF_TASK_TYPES.has(sourceJob.payloadKind as TaskPayloadKind)
+    !sourceRun ||
+    !REVIEW_HANDOFF_TASK_TYPES.has(sourceRun.payloadKind as TaskPayloadKind)
   ) {
-    throw new Error('Linked review handoff requires an active PR review job.');
+    throw new Error('Linked review handoff requires an active PR review run.');
   }
 
   const handoffTarget = await getLinkedReviewHandoffTarget({
-    sourceJob: {
-      type: sourceJob.payloadKind,
-      payload: (sourceJob.payload as Record<string, unknown> | null) ?? {},
+    sourceRun: {
+      type: sourceRun.payloadKind,
+      payload: (sourceRun.payload as Record<string, unknown> | null) ?? {},
     },
     targetTaskId,
   });
@@ -645,7 +645,7 @@ async function resolveLinkedReviewHandoff({
 
   return {
     kind: 'send',
-    senderUserId: job.actingUserId ?? fallbackUserId,
+    senderUserId: run.actingUserId ?? fallbackUserId,
   };
 }
 
@@ -662,7 +662,7 @@ export async function sendMessageToTask({
 }: {
   taskId: string;
   userId: string;
-  authContext?: AuthTokenContext | JobTokenContext;
+  authContext?: AuthTokenContext | RunTokenContext;
   message: string;
   images?: string[];
   source?: string;
@@ -678,7 +678,7 @@ export async function sendMessageToTask({
   workerQuoteUserName?: string;
 }): Promise<SendMessageToTaskResult> {
   try {
-    const job = await findLatestCloudJob(taskId, {
+    const run = await findLatestTaskRun(taskId, {
       id: true,
       status: true,
       sandboxServerUrl: true,
@@ -691,7 +691,7 @@ export async function sendMessageToTask({
       result: true,
     });
 
-    if (!job) {
+    if (!run) {
       return { success: false, error: 'Task not found', status: 404 };
     }
 
@@ -701,7 +701,7 @@ export async function sendMessageToTask({
       authContext,
       senderMode,
       message,
-      job,
+      run,
       targetTaskId: taskId,
       fallbackUserId: userId,
     });
@@ -716,7 +716,7 @@ export async function sendMessageToTask({
       };
     }
 
-    if (isExitedRunStatus(job.status)) {
+    if (isExitedRunStatus(run.status)) {
       const resumeResult = await resumeTaskFromSnapshot({
         taskId,
         userId: linkedReviewHandoff.senderUserId,
@@ -724,7 +724,7 @@ export async function sendMessageToTask({
         images,
         source,
         clientMessageId,
-        sourceJob: job as LatestTaskCloudJob,
+        sourceRun: run as LatestTaskRun,
         channelBindings,
         senderMode,
       });
@@ -735,12 +735,12 @@ export async function sendMessageToTask({
 
       return {
         success: false,
-        error: `Task is not active (status: ${job.status})`,
+        error: `Task is not active (status: ${run.status})`,
         status: 409,
       };
     }
 
-    if (!job.sandboxServerUrl) {
+    if (!run.sandboxServerUrl) {
       return {
         success: false,
         error: 'Task has no active sandbox. The worker may still be booting.',
@@ -753,14 +753,14 @@ export async function sendMessageToTask({
     const shouldPreserveActor =
       !!senderMode && ACTOR_PRESERVING_MODES.has(senderMode);
     const requiresActorHandoff =
-      !shouldPreserveActor && job.actingUserId !== senderUserId;
+      !shouldPreserveActor && run.actingUserId !== senderUserId;
 
     let didSwitchActingUser = false;
 
     try {
       await maybeCreateSlackReplyQuoteContext({
-        cloudJobId: job.id,
-        payload: job.payload as Record<string, unknown> | null,
+        runId: run.id,
+        payload: run.payload as Record<string, unknown> | null,
         slackThreadTs: channelBindings?.slackThreadTs ?? null,
         userId: senderUserId,
         message,
@@ -781,16 +781,16 @@ export async function sendMessageToTask({
       // credential resolution and turn attribution agree. See
       // syncActingUserIdBeforeDelivery for the ordering rationale.
       didSwitchActingUser = await syncActingUserIdBeforeDelivery({
-        jobId: job.id,
-        currentActingUserId: job.actingUserId,
+        runId: run.id,
+        currentActingUserId: run.actingUserId,
         nextActingUserId: senderUserId,
         preserveActor: shouldPreserveActor,
       });
 
       const result = await withSandboxServerRpcClient({
-        cloudJobId: job.id,
+        runId: run.id,
         userId: senderUserId,
-        sandboxServerUrl: job.sandboxServerUrl,
+        sandboxServerUrl: run.sandboxServerUrl,
         fetch: fetchSandboxRpcResponseOrThrowIfNotReady,
         call: (client) =>
           client.commands.sendPrompt.mutate({
@@ -815,8 +815,8 @@ export async function sendMessageToTask({
       if (didSwitchActingUser) {
         await restoreActingUserIdAfterFailedDelivery({
           handlerName: 'sendMessageToTask',
-          jobId: job.id,
-          previousActingUserId: job.actingUserId,
+          runId: run.id,
+          previousActingUserId: run.actingUserId,
           attemptedActingUserId: senderUserId,
         });
       }
@@ -877,7 +877,7 @@ export async function steerMessageToTask({
   workerQuoteUserName?: string;
 }): Promise<SendMessageToTaskResult> {
   try {
-    const job = await findLatestCloudJob(taskId, {
+    const run = await findLatestTaskRun(taskId, {
       id: true,
       status: true,
       sandboxServerUrl: true,
@@ -890,19 +890,19 @@ export async function steerMessageToTask({
       result: true,
     });
 
-    if (!job) {
+    if (!run) {
       return { success: false, error: 'Task not found', status: 404 };
     }
 
     const channelBindings = (await getTaskChannelBindings(taskId)) ?? null;
 
-    if (isExitedRunStatus(job.status)) {
+    if (isExitedRunStatus(run.status)) {
       const resumeResult = await resumeTaskFromSnapshot({
         taskId,
         userId,
         message,
         images,
-        sourceJob: job as LatestTaskCloudJob,
+        sourceRun: run as LatestTaskRun,
         channelBindings,
         senderMode,
       });
@@ -913,12 +913,12 @@ export async function steerMessageToTask({
 
       return {
         success: false,
-        error: `Task is not active (status: ${job.status})`,
+        error: `Task is not active (status: ${run.status})`,
         status: 409,
       };
     }
 
-    if (!job.sandboxServerUrl) {
+    if (!run.sandboxServerUrl) {
       return {
         success: false,
         error: 'Task has no active sandbox. The worker may still be booting.',
@@ -930,8 +930,8 @@ export async function steerMessageToTask({
 
     try {
       await maybeCreateSlackReplyQuoteContext({
-        cloudJobId: job.id,
-        payload: job.payload as Record<string, unknown> | null,
+        runId: run.id,
+        payload: run.payload as Record<string, unknown> | null,
         slackThreadTs: channelBindings?.slackThreadTs ?? null,
         userId,
         message,
@@ -946,16 +946,16 @@ export async function steerMessageToTask({
       // credential resolution and turn attribution agree. See
       // syncActingUserIdBeforeDelivery for the ordering rationale.
       didSwitchActingUser = await syncActingUserIdBeforeDelivery({
-        jobId: job.id,
-        currentActingUserId: job.actingUserId,
+        runId: run.id,
+        currentActingUserId: run.actingUserId,
         nextActingUserId: userId,
         preserveActor: false,
       });
 
       const result = await withSandboxServerRpcClient({
-        cloudJobId: job.id,
+        runId: run.id,
         userId,
-        sandboxServerUrl: job.sandboxServerUrl,
+        sandboxServerUrl: run.sandboxServerUrl,
         fetch: fetchSandboxRpcResponseOrThrowIfNotReady,
         call: (client) =>
           client.commands.steerTask.mutate({
@@ -972,8 +972,8 @@ export async function steerMessageToTask({
       if (didSwitchActingUser) {
         await restoreActingUserIdAfterFailedDelivery({
           handlerName: 'steerMessageToTask',
-          jobId: job.id,
-          previousActingUserId: job.actingUserId,
+          runId: run.id,
+          previousActingUserId: run.actingUserId,
           attemptedActingUserId: userId,
         });
       }

@@ -32,7 +32,7 @@ import { cn } from '@/lib/utils';
 import {
   useSandboxMessages,
   useSandboxTaskPhase,
-  type CloudSession,
+  type TaskSession,
 } from './hooks';
 import { useInternalTranscriptRowsVisible } from './useInternalTranscriptRowsVisible';
 
@@ -56,7 +56,7 @@ export interface MessagesHandle {
 }
 
 interface MessagesProps {
-  session: CloudSession;
+  session: TaskSession;
   scrollRef?: MutableRefObject<MessagesHandle | null>;
   initialScrollBehavior?: 'smooth' | 'instant';
   /** Optional content rendered at the end of the conversation (e.g. inline startup progress). */
@@ -334,9 +334,7 @@ const MessagesBase = ({
             <AcpTextMessage msg={sessionPrompt} />
           )}
           {renderBlocks.map((block) => renderRenderBlock(block, false))}
-          {session.cloudJob && (
-            <SleepWakeMessages cloudJob={session.cloudJob} />
-          )}
+          {session.taskRun && <SleepWakeMessages taskRun={session.taskRun} />}
           {shouldShowNarrationWorkingReasoning && (
             <NarrationWorkingReasoningMessage />
           )}

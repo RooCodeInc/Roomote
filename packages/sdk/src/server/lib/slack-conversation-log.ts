@@ -29,7 +29,7 @@ export type SlackConversationLogInput = SlackConversationSubject & {
   text?: string | null;
   metadata?: Record<string, unknown>;
   taskId?: string | null;
-  cloudJobId?: number | null;
+  runId?: number | null;
   slackQuickAnswerId?: string | null;
 };
 
@@ -92,7 +92,7 @@ export async function recordSlackConversationMessage(
       text: input.text?.trim() ?? '',
       metadata: input.metadata ?? {},
       taskId: input.taskId ?? null,
-      runId: input.cloudJobId ?? null,
+      runId: input.runId ?? null,
       slackQuickAnswerId: input.slackQuickAnswerId ?? null,
     })
     .onConflictDoNothing();

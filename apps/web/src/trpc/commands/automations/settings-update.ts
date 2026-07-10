@@ -1,13 +1,13 @@
 import {
   DEFAULT_CONFLICT_RESOLUTION_MAX_PR_AGE_DAYS,
   DEFAULT_CHANNEL_AUTO_START_LAUNCH_MODE,
-  DEFAULT_PR_REVIEWER_SETTINGS,
+  DEFAULT_PR_REVIEW_SETTINGS,
   DEFAULT_SUGGESTER_ROUTING_MODE,
   getTriggerableBackgroundAutomationDescriptorByKey,
   isConflictResolverMaxPrAgeDays,
   type AutomationTarget,
   type SuggesterRoutingMode,
-  type PrReviewerSettings,
+  type PrReviewSettings,
   type TriggerableBackgroundAutomationKey,
 } from '@roomote/types';
 import {
@@ -133,9 +133,9 @@ export async function updateBackgroundAgentSettingsCommand(
       reviewer: {
         id: string;
         enabled: boolean;
-        environmentScope: NonNullable<PrReviewerSettings['environmentScope']>;
+        environmentScope: NonNullable<PrReviewSettings['environmentScope']>;
         environmentIds: string[];
-        authorReviewMode: NonNullable<PrReviewerSettings['authorReviewMode']>;
+        authorReviewMode: NonNullable<PrReviewSettings['authorReviewMode']>;
         collaboratorLogins: string[];
         excludedAuthors: string | null;
         reviewAllPullRequestAuthors: boolean;
@@ -714,7 +714,7 @@ export async function updateBackgroundAgentSettingsCommand(
 
   const now = new Date();
   const reviewerSettings = {
-    ...DEFAULT_PR_REVIEWER_SETTINGS,
+    ...DEFAULT_PR_REVIEW_SETTINGS,
     backgroundAgentManaged: true,
     enabled: input.reviewerEnabled,
     environmentScope: 'all',
@@ -726,7 +726,7 @@ export async function updateBackgroundAgentSettingsCommand(
     relayReviewResultsToTask: false,
     relayEligibleCreatorIds: [],
     approvePr: false,
-  } satisfies PrReviewerSettings;
+  } satisfies PrReviewSettings;
 
   await db.transaction(async (tx) => {
     await tx

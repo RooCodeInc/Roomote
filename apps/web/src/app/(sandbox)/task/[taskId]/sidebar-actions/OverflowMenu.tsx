@@ -10,7 +10,7 @@ import { isExitedRunStatus } from '@roomote/types';
 
 import { useUser } from '@/hooks/useUser';
 import { useDeleteTasks } from '@/hooks/tasks';
-import { useCancelCloudJob } from '@/hooks/cloud-jobs';
+import { useCancelTaskRun } from '@/hooks/task-runs';
 
 import {
   Button,
@@ -29,7 +29,7 @@ import type { OverflowMenuProps } from './types';
 
 function OverflowMenuBase({
   taskId,
-  cloudJob,
+  taskRun,
   disabled = false,
   onDeleteSuccess,
 }: OverflowMenuProps) {
@@ -39,7 +39,7 @@ function OverflowMenuBase({
   const [showDeleteDialog, setShowDeleteDialog] = useState(false);
 
   // Task deletion is deployment-wide: any member can delete any task.
-  const canShutdown = !!cloudJob && !isExitedRunStatus(cloudJob.status);
+  const canShutdown = !!taskRun && !isExitedRunStatus(taskRun.status);
 
   const deleteTasks = useDeleteTasks({
     onSuccess: () => {
@@ -50,7 +50,7 @@ function OverflowMenuBase({
     onError: () => toast.error('Failed to delete task.'),
   });
 
-  const cancelCloudJob = useCancelCloudJob({
+  const cancelTaskRun = useCancelTaskRun({
     onSuccess: (data) => {
       if (data.success) {
         toast.success('Task shut down request sent.');
@@ -75,9 +75,9 @@ function OverflowMenuBase({
 
   const handleDeleteConfirm = async () => {
     if (canShutdown) {
-      const shutdownResult = await cancelCloudJob.mutateAsync({
+      const shutdownResult = await cancelTaskRun.mutateAsync({
         taskId,
-        cloudJobId: cloudJob.id,
+        runId: taskRun.id,
       });
 
       if (!shutdownResult.success) {
@@ -128,9 +128,9 @@ function OverflowMenuBase({
             <Button
               variant="destructive"
               onClick={handleDeleteConfirm}
-              disabled={deleteTasks.isPending || cancelCloudJob.isPending}
+              disabled={deleteTasks.isPending || cancelTaskRun.isPending}
             >
-              {cancelCloudJob.isPending
+              {cancelTaskRun.isPending
                 ? 'Shutting down...'
                 : deleteTasks.isPending
                   ? 'Deleting...'

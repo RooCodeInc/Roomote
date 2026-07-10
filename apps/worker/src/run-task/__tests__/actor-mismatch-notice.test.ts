@@ -20,7 +20,7 @@ describe('createActorMismatchSkipNotifier', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockGetRoomoteConfig.mockReturnValue({
-      token: 'job-token',
+      token: 'run-token',
       platformApiUrl: 'https://api.example.test',
     });
     mockReplyToChatThread.mockResolvedValue({ ok: true });
@@ -28,7 +28,7 @@ describe('createActorMismatchSkipNotifier', () => {
 
   it('posts the resend notice to the task chat thread once per sender', async () => {
     const notify = createActorMismatchSkipNotifier({
-      cloudJobId: 42,
+      runId: 42,
       logger: { warn: vi.fn(), error: vi.fn() },
     });
 
@@ -40,7 +40,7 @@ describe('createActorMismatchSkipNotifier', () => {
     // produces a single notice.
     expect(mockReplyToChatThread).toHaveBeenCalledTimes(2);
     expect(mockReplyToChatThread).toHaveBeenCalledWith(
-      expect.objectContaining({ token: 'job-token' }),
+      expect.objectContaining({ token: 'run-token' }),
       { text: ACTOR_MISMATCH_SKIP_NOTICE_TEXT },
     );
   });
@@ -51,7 +51,7 @@ describe('createActorMismatchSkipNotifier', () => {
       new Error('no Slack channel context'),
     );
 
-    const notify = createActorMismatchSkipNotifier({ cloudJobId: 42, logger });
+    const notify = createActorMismatchSkipNotifier({ runId: 42, logger });
 
     await expect(
       notify({ senderUserId: 'user-2', serverActorUserId: 'user-1' }),
@@ -66,7 +66,7 @@ describe('createActorMismatchSkipNotifier', () => {
     const logger = { warn: vi.fn(), error: vi.fn() };
     mockGetRoomoteConfig.mockReturnValueOnce(null);
 
-    const notify = createActorMismatchSkipNotifier({ cloudJobId: 42, logger });
+    const notify = createActorMismatchSkipNotifier({ runId: 42, logger });
 
     await expect(
       notify({ senderUserId: 'user-2', serverActorUserId: 'user-1' }),

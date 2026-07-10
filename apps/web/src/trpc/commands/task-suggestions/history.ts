@@ -14,11 +14,11 @@ import {
 import type { UserAuthSuccess } from '@/types';
 import { assertSuggestionHistoryEnabled } from './shared';
 import {
-  getResolvedSuggestionSourceCloudJobsByTaskId,
+  getResolvedSuggestionSourceTaskRunsByTaskId,
   getSuggestionHistoryAutomation,
   getSuggestionHistoryAutomationLabel,
   suggestionHistoryAutomationValues,
-} from './source-cloud-jobs';
+} from './source-task-runs';
 import type {
   SuggestionHistoryAutomation,
   SuggestionHistoryItem,
@@ -150,14 +150,12 @@ export async function listTaskSuggestionHistoryCommand(
       .map((row) => row.sourceTaskId)
       .filter((taskId): taskId is string => Boolean(taskId));
 
-    const resolvedSourceJobsByTaskId =
-      await getResolvedSuggestionSourceCloudJobsByTaskId(
-        candidateSourceTaskIds,
-      );
+    const resolvedSourceRunsByTaskId =
+      await getResolvedSuggestionSourceTaskRunsByTaskId(candidateSourceTaskIds);
 
     const matchingSourceTaskIds = candidateSourceTaskIds.filter(
       (taskId) =>
-        getSuggestionHistoryAutomation(resolvedSourceJobsByTaskId[taskId]) ===
+        getSuggestionHistoryAutomation(resolvedSourceRunsByTaskId[taskId]) ===
         input.automation,
     );
 
@@ -232,8 +230,8 @@ export async function listTaskSuggestionHistoryCommand(
     new Set(pageRows.flatMap((suggestion) => suggestion.repositoryIds)),
   );
 
-  const [resolvedSourceJobsByTaskId, repositoryRows] = await Promise.all([
-    getResolvedSuggestionSourceCloudJobsByTaskId(sourceTaskIds),
+  const [resolvedSourceRunsByTaskId, repositoryRows] = await Promise.all([
+    getResolvedSuggestionSourceTaskRunsByTaskId(sourceTaskIds),
     repositoryIds.length === 0
       ? Promise.resolve([])
       : db
@@ -252,7 +250,7 @@ export async function listTaskSuggestionHistoryCommand(
   const suggestions = pageRows.map((suggestion) => {
     const automation = getSuggestionHistoryAutomation(
       suggestion.sourceTaskId
-        ? resolvedSourceJobsByTaskId[suggestion.sourceTaskId]
+        ? resolvedSourceRunsByTaskId[suggestion.sourceTaskId]
         : undefined,
     );
     const status: VisibleTaskSuggestionStatus =

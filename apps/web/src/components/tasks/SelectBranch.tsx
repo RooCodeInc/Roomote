@@ -10,7 +10,7 @@ import {
 
 import { ALL_REPOSITORIES } from '@roomote/types';
 
-import type { CreateCloudTask } from '@/types';
+import type { CreateTaskFormValues } from '@/types';
 
 import { cn } from '@/lib/utils';
 
@@ -42,7 +42,7 @@ export const SelectBranch = ({
   const deferredSearch = useDeferredValue(search);
   const searchInputRef = useRef<HTMLInputElement>(null);
 
-  const { control, watch, setValue } = useFormContext<CreateCloudTask>();
+  const { control, watch, setValue } = useFormContext<CreateTaskFormValues>();
 
   const formRepository = watch('repository');
   const branch = watch('branch');

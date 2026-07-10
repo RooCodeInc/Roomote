@@ -11,7 +11,7 @@ import {
   normalizeMetadataRecord,
 } from '@roomote/feature-flags';
 import {
-  type Run,
+  type TaskRun,
   type DatabaseOrTransaction,
   db,
   taskRuns,
@@ -37,7 +37,7 @@ interface DeploymentRuntimeFlags {
   livePreviewsEnabled: boolean;
 }
 
-type ShouldEnableAuthBypassForCloudJobParams = {
+type ShouldEnableAuthBypassForTaskRunParams = {
   environmentConfig?: EnvironmentConfig;
   namedPorts: NamedPort[];
 };
@@ -77,10 +77,10 @@ async function resolveDeploymentRuntimeFlags(): Promise<DeploymentRuntimeFlags> 
   };
 }
 
-export function shouldEnableAuthBypassForCloudJob({
+export function shouldEnableAuthBypassForTaskRun({
   environmentConfig,
   namedPorts,
-}: ShouldEnableAuthBypassForCloudJobParams): boolean {
+}: ShouldEnableAuthBypassForTaskRunParams): boolean {
   if (!environmentConfig || environmentConfig.auth_bypass_header === false) {
     return false;
   }
@@ -103,21 +103,21 @@ export function shouldEnableAuthBypassForCloudJob({
 }
 
 /**
- * Builds the Roomote-managed surface list for a cloud job.
- * Always includes SANDBOX_SERVER for environment-backed jobs.
+ * Builds the Roomote-managed surface list for a task run.
+ * Always includes SANDBOX_SERVER for environment-backed task runs.
  * Also returns `environmentSnapshotId` when the environment has a valid,
  * non-expired snapshot.
  */
-export async function getNamedPortsForCloudJob(
-  cloudJob: Run,
+export async function getNamedPortsForTaskRun(
+  taskRun: TaskRun,
 ): Promise<NamedPortsResult> {
   let namedPorts = getNamedPortsForEnvironment({});
   let environmentSnapshotId: string | undefined;
   let environmentConfig: EnvironmentConfig | undefined;
 
-  if (cloudJob.payload.environmentId) {
+  if (taskRun.payload.environmentId) {
     const environment = await db.query.environments.findFirst({
-      where: eq(environments.id, cloudJob.payload.environmentId),
+      where: eq(environments.id, taskRun.payload.environmentId),
     });
 
     if (environment) {
@@ -133,7 +133,7 @@ export async function getNamedPortsForCloudJob(
       });
 
       // Check if environment has a ready snapshot we can use.
-      const provider = resolveComputeProviderTarget(cloudJob.vendor);
+      const provider = resolveComputeProviderTarget(taskRun.vendor);
       const snapshot = await getEnvironmentSnapshot({
         environmentId: environment.id,
         provider,
@@ -159,8 +159,8 @@ export async function getNamedPortsForCloudJob(
   return { namedPorts, environmentSnapshotId, environmentConfig };
 }
 
-type UpdateCloudJobMachineInfoParams = {
-  cloudJob: Run;
+type UpdateTaskRunMachineInfoParams = {
+  taskRun: TaskRun;
   vendor?: ComputeProvider;
   machineId: string;
   proxyPorts?: Record<string, number>;
@@ -185,23 +185,23 @@ type UpdateCloudJobMachineInfoParams = {
       }
   );
 
-type UpdateCloudJobMachineOptions = {
+type UpdateTaskRunMachineOptions = {
   db?: DatabaseOrTransaction;
 };
 
 /**
- * Updates the cloud job record with machine ID, domain information, proxy
+ * Updates the task run record with machine ID, domain information, proxy
  * ports, and source snapshot.
  *
  * Accepts either a pre-built `machineDomains` map, or `namedPorts` + `domainFn`
  * to compute it.
  */
-export async function updateCloudJobMachine(
-  params: UpdateCloudJobMachineInfoParams,
-  options: UpdateCloudJobMachineOptions = {},
+export async function updateTaskRunMachine(
+  params: UpdateTaskRunMachineInfoParams,
+  options: UpdateTaskRunMachineOptions = {},
 ): Promise<void> {
   const {
-    cloudJob,
+    taskRun,
     vendor,
     machineId,
     proxyPorts,
@@ -247,7 +247,7 @@ export async function updateCloudJobMachine(
       ...(sourceSnapshotId === null
         ? { sourceSnapshotId: null }
         : // Only set sourceSnapshotId if not already set (preserve explicit resume source).
-          sourceSnapshotId && !cloudJob.sourceSnapshotId
+          sourceSnapshotId && !taskRun.sourceSnapshotId
           ? { sourceSnapshotId }
           : {}),
       ...(authBypassValue ? { authBypassValue } : {}),
@@ -256,5 +256,5 @@ export async function updateCloudJobMachine(
       ...(configuredCpuCores !== undefined ? { configuredCpuCores } : {}),
       ...(configuredMemoryMiB !== undefined ? { configuredMemoryMiB } : {}),
     })
-    .where(eq(taskRuns.id, cloudJob.id));
+    .where(eq(taskRuns.id, taskRun.id));
 }

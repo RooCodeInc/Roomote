@@ -11,7 +11,7 @@ import { RunStatus, isExitedRunStatus } from '@roomote/types';
 
 import type { Variables } from '../../types';
 import type { McpAuth } from '../mcp/middleware';
-import { findLatestCloudJob } from './helpers';
+import { findLatestTaskRun } from './helpers';
 import { logHandlerError } from '../utils';
 
 /**
@@ -29,7 +29,7 @@ export async function cancelTask(
   }
 
   try {
-    const job = await findLatestCloudJob(taskId);
+    const job = await findLatestTaskRun(taskId);
 
     if (!job) {
       return c.json({ success: false, error: 'Task not found' }, 404);

@@ -6,7 +6,7 @@ import { and, eq, inArray, isNull, lte, sql } from 'drizzle-orm';
 
 import { db, type DatabaseOrTransaction } from '../db';
 import { environmentSnapshots, environments } from '../schema';
-import type { Run } from '../types';
+import type { TaskRun } from '../types';
 import { runInTransactionIfAvailable } from './transaction-utils';
 
 export type EnvironmentSnapshotStatus =
@@ -82,19 +82,19 @@ function getPendingSnapshotAttachmentSource(
     : null;
 }
 
-export function getEnvironmentSnapshotAttachmentSourceForCloudJob(
-  cloudJob: Pick<Run, 'payload'>,
+export function getEnvironmentSnapshotAttachmentSourceForTaskRun(
+  taskRun: Pick<TaskRun, 'payload'>,
 ): EnvironmentSnapshotAttachmentSource | null {
-  return 'environmentSnapshotAttachment' in cloudJob.payload
-    ? (cloudJob.payload.environmentSnapshotAttachment ?? null)
+  return 'environmentSnapshotAttachment' in taskRun.payload
+    ? (taskRun.payload.environmentSnapshotAttachment ?? null)
     : null;
 }
 
-export function buildPendingEnvironmentSnapshotMatchForCloudJob(
-  cloudJob: Pick<Run, 'payload' | 'createdAt'>,
+export function buildPendingEnvironmentSnapshotMatchForTaskRun(
+  taskRun: Pick<TaskRun, 'payload' | 'createdAt'>,
 ): PendingEnvironmentSnapshotMatch {
   const attachmentSource =
-    getEnvironmentSnapshotAttachmentSourceForCloudJob(cloudJob);
+    getEnvironmentSnapshotAttachmentSourceForTaskRun(taskRun);
 
   if (attachmentSource?.source === 'pending_snapshot_row') {
     return { attachmentSource, maxPendingUpdatedAt: null };
@@ -102,7 +102,7 @@ export function buildPendingEnvironmentSnapshotMatchForCloudJob(
 
   return {
     attachmentSource: null,
-    maxPendingUpdatedAt: cloudJob.createdAt ?? null,
+    maxPendingUpdatedAt: taskRun.createdAt ?? null,
   };
 }
 

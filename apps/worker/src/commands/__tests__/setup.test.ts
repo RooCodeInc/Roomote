@@ -124,7 +124,7 @@ const workspaceOptions = {
     branch: 'main',
   },
   envVars: { FOO: 'bar' },
-  cloudJobType: TaskPayloadKind.StandardTask,
+  taskRunType: TaskPayloadKind.StandardTask,
 };
 
 const environmentWorkspaceOptions = {
@@ -137,7 +137,7 @@ const environmentWorkspaceOptions = {
     },
   },
   envVars: { FOO: 'bar' },
-  cloudJobType: TaskPayloadKind.StandardTask,
+  taskRunType: TaskPayloadKind.StandardTask,
 };
 
 describe('setup mode behavior', () => {
@@ -309,7 +309,7 @@ describe('setup mode behavior', () => {
       mode: 'full',
       workspace: {
         ...environmentWorkspaceOptions,
-        cloudJobType: TaskPayloadKind.SnapshotEnvironment,
+        taskRunType: TaskPayloadKind.SnapshotEnvironment,
       },
       logger,
       workerEnv: mockWorkerEnv,
@@ -318,7 +318,7 @@ describe('setup mode behavior', () => {
     expect(mockInitializeWorkspaceRepositories).toHaveBeenCalledWith(logger, {
       ...environmentWorkspaceOptions,
       cleanupLegacyPaths: true,
-      cloudJobType: TaskPayloadKind.SnapshotEnvironment,
+      taskRunType: TaskPayloadKind.SnapshotEnvironment,
       envVars: { BASE: 'base', FOO: 'bar' },
     });
     expect(mockSetupOrganizationEnvironment).toHaveBeenCalledWith(logger, {
@@ -431,7 +431,7 @@ describe('setup mode behavior', () => {
         mode: 'full',
         workspace: {
           ...environmentWorkspaceOptions,
-          cloudJobType: TaskPayloadKind.SnapshotEnvironment,
+          taskRunType: TaskPayloadKind.SnapshotEnvironment,
         },
         logger,
         workerEnv: mockWorkerEnv,

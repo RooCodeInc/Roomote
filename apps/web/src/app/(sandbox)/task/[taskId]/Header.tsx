@@ -18,25 +18,23 @@ import { PullRequestBadge, WorkspaceBadge } from '@/components/sandbox';
 import { useTRPC } from '@/trpc/client';
 import { useSandboxLayout } from '../../use-sandbox-layout';
 
-import { type CloudSession } from './hooks';
+import { type TaskSession } from './hooks';
 
 interface HeaderProps {
-  session: CloudSession;
+  session: TaskSession;
 }
 
-export const Header = ({
-  session: { cloudJob, task, taskId },
-}: HeaderProps) => {
+export const Header = ({ session: { taskRun, task, taskId } }: HeaderProps) => {
   const { isSidebarVisible, toggleSidebar } = useSandboxLayout();
   const trpc = useTRPC();
   const queryClient = useQueryClient();
   const [isRenameDialogOpen, setIsRenameDialogOpen] = useState(false);
   const [titleDraft, setTitleDraft] = useState(task?.title ?? '');
 
-  const environmentId = cloudJob?.payload?.environmentId;
-  const repo = cloudJob?.payload?.repo;
-  const prRepo = cloudJob?.prRepo;
-  const prNumber = cloudJob?.prNumber;
+  const environmentId = taskRun?.payload?.environmentId;
+  const repo = taskRun?.payload?.repo;
+  const prRepo = taskRun?.prRepo;
+  const prNumber = taskRun?.prNumber;
 
   const badges = [
     (environmentId || repo) && (

@@ -855,7 +855,7 @@ export const taskRuns = pgTable(
     /**
      * The launching or most recently acting human for this run; null for
      * automation runs. THE ONLY user column on runs. Set at enqueue, updated
-     * by follow-up senders/resumers. Job tokens and MCP OAuth key off it,
+     * by follow-up senders/resumers. Run tokens and MCP OAuth key off it,
      * falling back to the deployment service principal when null.
      */
     actingUserId: text('acting_user_id').references(() => users.id),
@@ -906,7 +906,7 @@ export const taskRuns = pgTable(
     /**
      * Proxy port mappings for proxied ports.
      * Maps port names (uppercase) to ephemeral ports that auth-proxy listens on.
-     * Only populated for new jobs that use the sandbox auth-proxy feature.
+     * Only populated for new task runs that use the sandbox auth-proxy feature.
      * @example { "WEB": 49152, "API": 49153 }
      */
     proxyPorts: jsonb('proxy_ports').$type<Record<string, number>>(),
@@ -959,7 +959,7 @@ export const taskRuns = pgTable(
     createdAt: timestamp('created_at').notNull().defaultNow(),
     dequeuedAt: timestamp('dequeued_at'),
     // Timing diagnostics: stamp once on the first transition through each
-    // milestone (see stampCloudJobMilestone). Used by per-deployment latency analytics.
+    // milestone (see stampTaskRunMilestone). Used by per-deployment latency analytics.
     provisionStartedAt: timestamp('provision_started_at'),
     provisionReadyAt: timestamp('provision_ready_at'),
     startedAt: timestamp('started_at'),
@@ -1046,7 +1046,7 @@ export const taskRunEvents = pgTable(
  *
  * Per-run snapshots of how many tasks in the deployment were considered
  * active when a task run started. A resumed task gets a new row because it
- * maps to a new cloud job.
+ * maps to a new task run.
  */
 
 export const taskStartParallelCounts = pgTable(
@@ -2267,7 +2267,7 @@ export const slackQuickAnswersRelations = relations(
  *
  * Stores pending workspace selection state during the Linear elicitation flow.
  * When LLM routing is unavailable, we ask the user to select a workspace for
- * the delegated Generalist path. This table tracks which step we're at and
+ * the standard delegated-task path. This table tracks which step we're at and
  * stores the workspace choices shown to the user.
  */
 
@@ -2736,7 +2736,7 @@ export const environmentRepositoryMappingsRelations = relations(
  * sandbox_oidc_targets
  *
  * Tracks externally refreshed OIDC token files written into active sandboxes.
- * Rows are keyed by compute provider instance and token path so cloud-job-owned
+ * Rows are keyed by compute provider instance and token path so task-run-owned
  * sandboxes can keep the sandbox-local file contract stable across refreshes.
  */
 

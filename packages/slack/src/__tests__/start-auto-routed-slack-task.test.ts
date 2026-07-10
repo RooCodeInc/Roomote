@@ -10,7 +10,7 @@ const {
   trackMock,
   trackAllMock,
   commitMock,
-  findActiveSlackJobMock,
+  findActiveSlackTaskRunMock,
   trackSlackBotReplyMock,
   getSlackStartedMessageTsMock,
   setLatestSlackBotReplyMock,
@@ -26,7 +26,7 @@ const {
   trackMock: vi.fn(),
   trackAllMock: vi.fn(),
   commitMock: vi.fn(),
-  findActiveSlackJobMock: vi.fn(),
+  findActiveSlackTaskRunMock: vi.fn(),
   trackSlackBotReplyMock: vi.fn(),
   getSlackStartedMessageTsMock: vi.fn(),
   setLatestSlackBotReplyMock: vi.fn(),
@@ -108,8 +108,8 @@ vi.mock('../slack-thread-delivery-tracker', () => ({
   }),
 }));
 
-vi.mock('../find-active-slack-job', () => ({
-  findActiveSlackJob: findActiveSlackJobMock,
+vi.mock('../find-active-slack-task-run', () => ({
+  findActiveSlackTaskRun: findActiveSlackTaskRunMock,
 }));
 
 vi.mock('../slack-messages', () => ({
@@ -126,13 +126,11 @@ describe('startAutoRoutedSlackTask', () => {
     vi.clearAllMocks();
     detectSlackMcpSetupRequirementMock.mockResolvedValue(null);
     buildSlackRoutingContextMock.mockResolvedValue({
-      availableAgents: [{}],
       availableEnvironments: [{}],
     });
     routeTaskMock.mockResolvedValue({
       status: 'routed',
       result: {
-        agentType: 'standard_task',
         workspace: { type: 'environment', id: 'env_1' },
         workspaceOnly: true,
         reasoning: 'Use App.',
@@ -154,12 +152,12 @@ describe('startAutoRoutedSlackTask', () => {
     startSlackAppMentionTaskMock.mockResolvedValue({
       id: 77,
       taskId: 'task_77',
-      reusedExistingJob: false,
+      reusedExistingRun: false,
     });
     finishRoutedStartMock.mockResolvedValue(undefined);
     getTaskUrlMock.mockReturnValue('https://app.example.com/task/task_77');
     commitMock.mockResolvedValue(undefined);
-    findActiveSlackJobMock.mockResolvedValue(null);
+    findActiveSlackTaskRunMock.mockResolvedValue(null);
     getSlackStartedMessageTsMock.mockResolvedValue(null);
     trackSlackBotReplyMock.mockResolvedValue(undefined);
     setLatestSlackBotReplyMock.mockResolvedValue(undefined);
@@ -263,7 +261,7 @@ describe('startAutoRoutedSlackTask', () => {
     );
     expect(finishRoutedStartMock).toHaveBeenCalledWith(
       expect.objectContaining({
-        cloudJobId: 77,
+        runId: 77,
         taskId: 'task_77',
         userId: 'user_installer',
         initiatingSlackUserId: 'UINSTALLER',
@@ -280,7 +278,7 @@ describe('startAutoRoutedSlackTask', () => {
     expect(result).toEqual({
       status: 'started',
       threadId: '120.000',
-      cloudJobId: 77,
+      runId: 77,
       taskId: 'task_77',
       taskUrl: 'https://app.example.com/task/task_77',
     });
@@ -421,7 +419,7 @@ describe('startAutoRoutedSlackTask', () => {
   });
 
   it('filters the active started message out of payload context using its tracked timestamp', async () => {
-    findActiveSlackJobMock.mockResolvedValue({ id: 77 });
+    findActiveSlackTaskRunMock.mockResolvedValue({ id: 77 });
     getSlackStartedMessageTsMock.mockResolvedValue('120.250');
     const slack = {
       hasMessageInThread: vi.fn().mockResolvedValue(true),
@@ -835,7 +833,7 @@ describe('startAutoRoutedSlackTask', () => {
     expect(result).toEqual({
       status: 'started',
       threadId: '555.000',
-      cloudJobId: 77,
+      runId: 77,
       taskId: 'task_77',
       taskUrl: 'https://app.example.com/task/task_77',
     });
@@ -844,7 +842,6 @@ describe('startAutoRoutedSlackTask', () => {
 
   it('constrains routing by repository and forwards launch overrides', async () => {
     buildSlackRoutingContextMock.mockResolvedValueOnce({
-      availableAgents: [{}],
       availableEnvironments: [
         {
           id: 'env_1',
@@ -861,7 +858,6 @@ describe('startAutoRoutedSlackTask', () => {
     routeTaskMock.mockResolvedValueOnce({
       status: 'routed',
       result: {
-        agentType: 'standard_task',
         workspace: { type: 'environment', id: 'env_2' },
         workspaceOnly: true,
         reasoning: 'Use Worker.',
@@ -931,7 +927,7 @@ describe('startAutoRoutedSlackTask', () => {
     );
   });
 
-  it('does not post a fresh started state when the helper reuses an active job', async () => {
+  it('does not post a fresh started state when the helper reuses an active task run', async () => {
     const slack = {
       hasMessageInThread: vi.fn().mockResolvedValue(true),
       normalizeIncomingText: vi
@@ -942,7 +938,7 @@ describe('startAutoRoutedSlackTask', () => {
     startSlackAppMentionTaskMock.mockResolvedValueOnce({
       id: 88,
       taskId: 'task_existing',
-      reusedExistingJob: true,
+      reusedExistingRun: true,
     });
     getTaskUrlMock.mockReturnValueOnce(
       'https://app.example.com/task/task_existing',
@@ -965,7 +961,7 @@ describe('startAutoRoutedSlackTask', () => {
     expect(result).toEqual({
       status: 'started',
       threadId: '120.000',
-      cloudJobId: 88,
+      runId: 88,
       taskId: 'task_existing',
       taskUrl: 'https://app.example.com/task/task_existing',
     });
@@ -1002,7 +998,7 @@ describe('startAutoRoutedSlackTask', () => {
       expect(result).toEqual({
         status: 'started',
         threadId: '123.456',
-        cloudJobId: 77,
+        runId: 77,
         taskId: 'task_77',
         taskUrl: 'https://app.example.com/task/task_77',
       });
@@ -1153,7 +1149,7 @@ describe('startAutoRoutedSlackTask', () => {
     expect(result).toEqual({
       status: 'started',
       threadId: '120.000',
-      cloudJobId: 77,
+      runId: 77,
       taskId: 'task_77',
       taskUrl: 'https://app.example.com/task/task_77',
     });

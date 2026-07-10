@@ -157,10 +157,10 @@ function resolveWorkerExceptionFingerprint(
     return ['roomote-worker-exception', 'taskId', taskId];
   }
 
-  const cloudJobId = readWorkerContextString(context, 'cloudJobId');
+  const runId = readWorkerContextString(context, 'runId');
 
-  if (cloudJobId) {
-    return ['roomote-worker-exception', 'cloudJobId', cloudJobId];
+  if (runId) {
+    return ['roomote-worker-exception', 'runId', runId];
   }
 
   const environmentId = readWorkerContextString(context, 'environmentId');
@@ -253,10 +253,10 @@ function applyWorkerContextToScope(
     scope.setTag('roomote.task_id', String(taskId));
   }
 
-  const cloudJobId = mergedContext.cloudJobId;
+  const runId = mergedContext.runId;
 
-  if (typeof cloudJobId === 'number' || typeof cloudJobId === 'string') {
-    scope.setTag('roomote.cloud_job_id', String(cloudJobId));
+  if (typeof runId === 'number' || typeof runId === 'string') {
+    scope.setTag('roomote.task_run_id', String(runId));
   }
 
   const environmentId = mergedContext.environmentId;

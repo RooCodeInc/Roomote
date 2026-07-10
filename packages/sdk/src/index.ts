@@ -4,7 +4,7 @@ import * as slackInstallations from './slack-installations';
 import * as linearInstallations from './linear-installations';
 import * as linearSessions from './linear-sessions';
 import * as repositories from './repositories';
-import * as cloudJobs from './cloud-jobs';
+import * as taskRuns from './task-runs';
 import * as environments from './environments';
 import * as featureFlags from './feature-flags';
 import * as mcpConnections from './mcp-connections';
@@ -17,7 +17,7 @@ const sdk = {
   linearInstallations,
   linearSessions,
   repositories,
-  cloudJobs,
+  taskRuns,
   environments,
   featureFlags,
   mcpConnections,
@@ -45,8 +45,8 @@ export type { LinearSessionConnection } from './linear-sessions';
 export type { LinearInstallation } from './linear-installations';
 export type { Repository } from './repositories';
 export type {
-  Run,
-  DequeuedCloudJob,
-  DequeuedResumeCloudJob,
-} from './cloud-jobs';
+  TaskRun,
+  DequeuedTaskRun,
+  DequeuedResumeTaskRun,
+} from './task-runs';
 export type { Environment, EnvironmentListItem } from './environments';

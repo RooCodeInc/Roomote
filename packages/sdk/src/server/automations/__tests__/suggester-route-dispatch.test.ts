@@ -31,8 +31,8 @@ function buildParams() {
     },
     previousSuggestions: [
       {
-        title: 'Scope legacy job tokens to their own task',
-        brief: 'Legacy job tokens can still reach unrelated task APIs.',
+        title: 'Scope legacy run tokens to their own task',
+        brief: 'Legacy run tokens can still reach unrelated task APIs.',
         status: 'open' as const,
       },
     ],
@@ -112,8 +112,8 @@ describe('dispatchSuggestionRoutes', () => {
             suggesterInstructions: 'Prioritize auth and data-loss failures.',
             previousSuggestions: [
               {
-                title: 'Scope legacy job tokens to their own task',
-                brief: 'Legacy job tokens can still reach unrelated task APIs.',
+                title: 'Scope legacy run tokens to their own task',
+                brief: 'Legacy run tokens can still reach unrelated task APIs.',
                 status: 'open',
               },
             ],

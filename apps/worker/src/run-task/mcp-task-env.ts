@@ -30,12 +30,12 @@ const RESERVED_COMMUNICATION_MCP_ENV_KEYS = [
   'ROOMOTE_COMMUNICATION_THREAD_ID',
 ] as const;
 
-export function getSlackReplyContext(cloudJob: {
+export function getSlackReplyContext(taskRun: {
   payload: unknown;
 }): SlackReplyContext | null {
-  const channel = getSlackChannelFromTaskPayload(cloudJob.payload);
+  const channel = getSlackChannelFromTaskPayload(taskRun.payload);
   const threadTs =
-    getSlackThreadTsFromTaskPayload(cloudJob.payload) ?? undefined;
+    getSlackThreadTsFromTaskPayload(taskRun.payload) ?? undefined;
 
   if (channel) {
     return { channel, ...(threadTs ? { threadTs } : {}) };
@@ -44,12 +44,12 @@ export function getSlackReplyContext(cloudJob: {
   return null;
 }
 
-export function getCommunicationReplyContext(cloudJob: {
+export function getCommunicationReplyContext(taskRun: {
   payload: unknown;
 }): CommunicationReplyContext | null {
-  const provider = getCommunicationProviderFromTaskPayload(cloudJob.payload);
-  const channelId = getCommunicationChannelFromTaskPayload(cloudJob.payload);
-  const threadId = getCommunicationThreadIdFromTaskPayload(cloudJob.payload);
+  const provider = getCommunicationProviderFromTaskPayload(taskRun.payload);
+  const channelId = getCommunicationChannelFromTaskPayload(taskRun.payload);
+  const threadId = getCommunicationThreadIdFromTaskPayload(taskRun.payload);
 
   if (!provider || !channelId) {
     return null;

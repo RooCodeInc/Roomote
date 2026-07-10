@@ -1,9 +1,9 @@
 export {
-  type CreateJobTokenOptions,
-  createJobTokenOptionsSchema,
-  createJobToken,
-  validateJobToken,
-} from './job-token';
+  type CreateRunTokenOptions,
+  createRunTokenOptionsSchema,
+  createRunToken,
+  validateRunToken,
+} from './run-token';
 
 export { decodeTokenPayload, getDecodedTokenType } from './decode-token';
 

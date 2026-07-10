@@ -22,7 +22,7 @@ const artifactConfig: ArtifactConfig = {
 };
 
 const roomoteConfig: RoomoteConfig = {
-  token: 'job-token',
+  token: 'run-token',
   platformApiUrl: 'https://platform.example.com',
 };
 

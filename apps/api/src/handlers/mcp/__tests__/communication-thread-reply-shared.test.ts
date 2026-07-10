@@ -57,7 +57,7 @@ describe('deliverManagedThreadReplyFooter', () => {
       channelId: 'channel-1',
       footerStateThreadId: 'thread-1',
       lockKey: 'lock-1',
-      cloudJobId: 42,
+      runId: 42,
       logContext: 'testContext',
       postReplyWithFooter: async () => ({
         messageId: 'new-message',
@@ -135,7 +135,7 @@ describe('deliverManagedThreadReplyFooter', () => {
       channelId: 'channel-1',
       footerStateThreadId: 'thread-1',
       lockKey: 'lock-1',
-      cloudJobId: 42,
+      runId: 42,
       logContext: 'testContext',
       postReplyWithFooter: async () => ({
         messageId: 'same-message',

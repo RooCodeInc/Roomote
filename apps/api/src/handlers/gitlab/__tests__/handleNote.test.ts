@@ -175,7 +175,7 @@ describe('handleGitLabNote', () => {
   it('links to an active MR review instead of enqueuing a duplicate', async () => {
     mockFindActiveGitHubPrReviewTask.mockResolvedValue({
       taskId: 'review-task',
-      jobId: 9,
+      runId: 9,
       type: TaskPayloadKind.GithubPrReview,
       status: RunStatus.Running,
       taskPhase: 'running',
@@ -213,7 +213,7 @@ describe('handleGitLabNote', () => {
   it('steers the note into an actively running reusable owner task', async () => {
     mockFindReusableGitHubPrFollowUpOwner.mockResolvedValue({
       taskId: 'owner-task',
-      jobId: 5,
+      runId: 5,
       type: TaskPayloadKind.StandardTask,
       status: RunStatus.Running,
       taskPhase: 'running',
@@ -243,7 +243,7 @@ describe('handleGitLabNote', () => {
   it('sends (resumes) the note when the reusable owner is idle', async () => {
     mockFindReusableGitHubPrFollowUpOwner.mockResolvedValue({
       taskId: 'owner-task',
-      jobId: 5,
+      runId: 5,
       type: TaskPayloadKind.StandardTask,
       status: RunStatus.Completed,
       taskPhase: null,
@@ -267,7 +267,7 @@ describe('handleGitLabNote', () => {
   it('falls back to a new review task when owner delivery fails', async () => {
     mockFindReusableGitHubPrFollowUpOwner.mockResolvedValue({
       taskId: 'owner-task',
-      jobId: 5,
+      runId: 5,
       type: TaskPayloadKind.StandardTask,
       status: RunStatus.Running,
       taskPhase: 'running',

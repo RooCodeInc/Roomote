@@ -17,7 +17,7 @@ import {
 } from './polling/index';
 
 export const startPolling = (options: ListenerOptions) => {
-  const { cloudJob, task, state, logger } = options;
+  const { taskRun, task, state, logger } = options;
   state.cancelInterval = createCancelInterval(options);
 
   // Prefer the task channel bindings from the dequeue/resume response; fall
@@ -25,14 +25,14 @@ export const startPolling = (options: ListenerOptions) => {
   if (
     task?.slackThreadTs ||
     task?.slackChannelId ||
-    getSlackThreadTsFromTaskPayload(cloudJob.payload) ||
-    getSlackChannelFromTaskPayload(cloudJob.payload)
+    getSlackThreadTsFromTaskPayload(taskRun.payload) ||
+    getSlackChannelFromTaskPayload(taskRun.payload)
   ) {
     state.slackMessageInterval = createSlackMessageInterval(options);
   }
 
   const communicationProvider = getCommunicationProviderFromTaskPayload(
-    cloudJob.payload,
+    taskRun.payload,
   );
   if (communicationProvider && communicationProvider !== 'slack') {
     state.communicationMessageIntervals ??= {};
@@ -44,18 +44,18 @@ export const startPolling = (options: ListenerOptions) => {
   }
 
   if (
-    cloudJob.payloadKind === TaskPayloadKind.LinearAgentSession ||
-    (cloudJob.payloadKind === TaskPayloadKind.SnapshotResume &&
+    taskRun.payloadKind === TaskPayloadKind.LinearAgentSession ||
+    (taskRun.payloadKind === TaskPayloadKind.SnapshotResume &&
       !!(
         task?.linearSessionId ??
-        getLinearSessionIdFromResumePayload(cloudJob.payload)
+        getLinearSessionIdFromResumePayload(taskRun.payload)
       ))
   ) {
     state.linearMessageInterval = createLinearMessageInterval(options);
   }
 
   state.githubTokenRefreshInterval = createGitHubTokenRefreshInterval({
-    cloudJobId: cloudJob.id,
+    runId: taskRun.id,
     logger,
   });
 };

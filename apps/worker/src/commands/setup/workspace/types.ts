@@ -62,7 +62,7 @@ export interface PrepareWorkspaceOptions {
   /** User-specified environment variables stored (encrypted) in the database. */
   userEnvVars?: Record<string, string>;
   harness?: CodingHarness | null;
-  cloudJobType: TaskPayloadKind;
+  taskRunType: TaskPayloadKind;
   preserveGitState?: boolean;
   cleanupLegacyPaths?: boolean;
   sourceControlProvider?: SourceControlProvider;

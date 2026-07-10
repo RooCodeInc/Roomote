@@ -1,4 +1,4 @@
-import { createJobToken } from '@roomote/auth';
+import { createRunToken } from '@roomote/auth';
 import { httpBatchLink } from '@trpc/client';
 import superjson from 'superjson';
 import {
@@ -9,7 +9,7 @@ import {
 export type { SandboxServerRpcClient } from '../../../sandbox-router';
 
 export const SANDBOX_SERVER_RPC_TIMEOUT_MS = 30_000;
-export const SANDBOX_SERVER_JOB_TOKEN_TIMEOUT_MS = 15 * 60 * 1000;
+export const SANDBOX_SERVER_RUN_TOKEN_TIMEOUT_MS = 15 * 60 * 1000;
 
 type SandboxServerRpcFetch = (
   input: RequestInfo | URL,
@@ -18,30 +18,30 @@ type SandboxServerRpcFetch = (
 ) => Promise<Response>;
 
 interface WithSandboxServerRpcClientOptions<TResult> {
-  cloudJobId: number;
-  // Null mints a deployment-service-principal job token (Auth.createJobToken
+  runId: number;
+  // Null mints a deployment-service-principal run token (Auth.createRunToken
   // accepts null) so automation-driven RPCs with no human user still run.
   userId: string | null;
   sandboxServerUrl: string;
   call: (client: SandboxServerRpcClient) => Promise<TResult>;
   fetch?: SandboxServerRpcFetch;
   timeoutMs?: number;
-  jobTokenTimeoutMs?: number;
+  runTokenTimeoutMs?: number;
 }
 
 export async function withSandboxServerRpcClient<TResult>({
-  cloudJobId,
+  runId,
   userId,
   sandboxServerUrl,
   call,
   fetch: sandboxFetch,
   timeoutMs = SANDBOX_SERVER_RPC_TIMEOUT_MS,
-  jobTokenTimeoutMs = SANDBOX_SERVER_JOB_TOKEN_TIMEOUT_MS,
+  runTokenTimeoutMs = SANDBOX_SERVER_RUN_TOKEN_TIMEOUT_MS,
 }: WithSandboxServerRpcClientOptions<TResult>): Promise<TResult> {
-  const jobToken = await createJobToken({
-    cloudJobId,
+  const runToken = await createRunToken({
+    runId,
     userId,
-    timeoutMs: jobTokenTimeoutMs,
+    timeoutMs: runTokenTimeoutMs,
   });
 
   const controller = new AbortController();
@@ -62,7 +62,7 @@ export async function withSandboxServerRpcClient<TResult>({
           url: `${sandboxServerUrl}/trpc`,
           transformer: superjson,
           headers: () => ({
-            Authorization: `Bearer ${jobToken}`,
+            Authorization: `Bearer ${runToken}`,
           }),
           fetch: linkFetch,
         } as never),

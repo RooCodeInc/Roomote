@@ -1,7 +1,7 @@
 import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest';
 
 import { RunStatus, TaskPayloadKind } from '@roomote/types';
-import type { Run } from '@roomote/db/server';
+import type { TaskRun } from '@roomote/db/server';
 
 const {
   mockEnvironmentVariablesFindMany,
@@ -63,7 +63,7 @@ vi.mock('@roomote/db/encryption', () => ({
 import {
   buildGiteaApiBaseUrl,
   buildGiteaRepositoryValues,
-  createCloudJobGiteaCredentials,
+  createTaskRunGiteaCredentials,
   createGiteaPullRequestComment,
   ensureGiteaWebhooksForRepositories,
   removeGiteaWebhooksForRepositories,
@@ -73,7 +73,7 @@ import {
   type GiteaRepository,
 } from '../api';
 
-function makeCloudJob(payload: Run['payload']): Run {
+function makeTaskRun(payload: TaskRun['payload']): TaskRun {
   return {
     id: 123,
     status: RunStatus.Dequeued,
@@ -84,7 +84,7 @@ function makeCloudJob(payload: Run['payload']): Run {
     payload,
     result: null,
     artifacts: null,
-  } as Run;
+  } as TaskRun;
 }
 
 describe('Gitea API helpers', () => {
@@ -472,8 +472,8 @@ describe('Gitea API helpers', () => {
   });
 
   it('creates proxy-backed git credentials for selected Gitea repositories', async () => {
-    const result = await createCloudJobGiteaCredentials(
-      makeCloudJob({
+    const result = await createTaskRunGiteaCredentials(
+      makeTaskRun({
         repo: 'acme/backend',
         description: 'Work on Gitea',
         sourceControlProvider: 'gitea',

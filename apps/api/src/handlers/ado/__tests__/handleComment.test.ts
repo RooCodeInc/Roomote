@@ -279,7 +279,7 @@ describe('handleAdoComment', () => {
   it('links to an active PR review instead of enqueuing a duplicate', async () => {
     mockFindActiveGitHubPrReviewTask.mockResolvedValue({
       taskId: 'review-task',
-      jobId: 9,
+      runId: 9,
       type: TaskPayloadKind.GithubPrReview,
       status: RunStatus.Running,
       taskPhase: 'running',

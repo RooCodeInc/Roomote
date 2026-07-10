@@ -25,12 +25,12 @@ function getCommunicationClientMessageId(
 
 async function requeueCommunicationMessages(
   provider: CommunicationProvider,
-  cloudJobId: number,
+  runId: number,
   deliveryOrder: QueuedCommunicationMessage[],
   startIndex: number,
 ): Promise<void> {
   const remainingQueueOrder = [...deliveryOrder.slice(startIndex)].reverse();
-  await prependCommunicationMessages(provider, cloudJobId, remainingQueueOrder);
+  await prependCommunicationMessages(provider, runId, remainingQueueOrder);
 }
 
 export function createCommunicationMessageInterval({
@@ -40,7 +40,7 @@ export function createCommunicationMessageInterval({
   provider: Exclude<CommunicationProvider, 'slack'>;
   options: ListenerOptions;
 }): NodeJS.Timeout {
-  const { cloudJob, sendPrompt, state, logger, prepareActorScopedTurn } =
+  const { taskRun, sendPrompt, state, logger, prepareActorScopedTurn } =
     options;
   let stopping = false;
   let activePoll = Promise.resolve();
@@ -59,17 +59,17 @@ export function createCommunicationMessageInterval({
     try {
       const messages = await runPollingSdkCall({
         execute: () =>
-          sdk.cloudJobs.getCommunicationMessages({
-            cloudJobId: cloudJob.id,
+          sdk.taskRuns.getCommunicationMessages({
+            runId: taskRun.id,
             provider,
           }),
         stage: `listenFor${provider}Events`,
-        cloudJobId: cloudJob.id,
+        runId: taskRun.id,
         sessionId: state.sessionId,
-        sdkMethod: 'cloudJobs.getCommunicationMessages',
+        sdkMethod: 'taskRuns.getCommunicationMessages',
         failurePoint: 'queuedCommunicationMessages',
         logger,
-        message: `[listenFor${provider}Events] Failed to check for queued ${provider} messages for job ${cloudJob.id}`,
+        message: `[listenFor${provider}Events] Failed to check for queued ${provider} messages for job ${taskRun.id}`,
       });
 
       if (!messages?.length) {
@@ -77,7 +77,7 @@ export function createCommunicationMessageInterval({
       }
 
       logger.log(
-        `[listenFor${provider}Events] Found ${messages.length} queued ${provider} message(s) for job ${cloudJob.id}`,
+        `[listenFor${provider}Events] Found ${messages.length} queued ${provider} message(s) for job ${taskRun.id}`,
       );
 
       const deliveryOrder = [...messages].reverse();
@@ -107,13 +107,13 @@ export function createCommunicationMessageInterval({
           try {
             await requeueCommunicationMessages(
               provider,
-              cloudJob.id,
+              taskRun.id,
               deliveryOrder,
               index,
             );
           } catch (error) {
             logger.error(
-              `[listenFor${provider}Events] Failed to requeue delayed ${provider} message for cloud job ${cloudJob.id}: ${
+              `[listenFor${provider}Events] Failed to requeue delayed ${provider} message for task run ${taskRun.id}: ${
                 error instanceof Error ? error.message : String(error)
               }`,
             );
@@ -151,13 +151,13 @@ export function createCommunicationMessageInterval({
           try {
             await requeueCommunicationMessages(
               provider,
-              cloudJob.id,
+              taskRun.id,
               deliveryOrder,
               index,
             );
           } catch (error) {
             logger.error(
-              `[listenFor${provider}Events] Failed to requeue ${provider} follow-up for cloud job ${cloudJob.id}: ${
+              `[listenFor${provider}Events] Failed to requeue ${provider} follow-up for task run ${taskRun.id}: ${
                 error instanceof Error ? error.message : String(error)
               }`,
             );
@@ -182,13 +182,13 @@ export function createCommunicationMessageInterval({
     } catch (error) {
       logPollingTransportError({
         stage: `listenFor${provider}Events`,
-        cloudJobId: cloudJob.id,
+        runId: taskRun.id,
         sessionId: state.sessionId,
         sdkMethod: 'listenForCommunicationEvents.delivery',
         failurePoint: 'queuedCommunicationDelivery',
         logger,
         error,
-        message: `[listenFor${provider}Events] Unexpected error while delivering queued ${provider} events for job ${cloudJob.id}`,
+        message: `[listenFor${provider}Events] Unexpected error while delivering queued ${provider} events for job ${taskRun.id}`,
       });
     }
   };

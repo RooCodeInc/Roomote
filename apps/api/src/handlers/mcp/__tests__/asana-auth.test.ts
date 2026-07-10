@@ -1,11 +1,11 @@
 import { Hono } from 'hono';
-import type { AuthTokenContext, JobTokenContext } from '@roomote/types';
+import type { AuthTokenContext, RunTokenContext } from '@roomote/types';
 
 import type { Variables } from '../../../types';
 
-const { mockFindCloudJob, mockFindConnection, mockEq, mockAnd, mockIsNull } =
+const { mockFindTaskRun, mockFindConnection, mockEq, mockAnd, mockIsNull } =
   vi.hoisted(() => ({
-    mockFindCloudJob: vi.fn(),
+    mockFindTaskRun: vi.fn(),
     mockFindConnection: vi.fn(),
     mockEq: vi.fn((column: unknown, value: unknown) => ({ column, value })),
     mockAnd: vi.fn((...clauses: unknown[]) => clauses),
@@ -15,7 +15,7 @@ const { mockFindCloudJob, mockFindConnection, mockEq, mockAnd, mockIsNull } =
 vi.mock('@roomote/db/server', () => ({
   db: {
     query: {
-      taskRuns: { findFirst: mockFindCloudJob },
+      taskRuns: { findFirst: mockFindTaskRun },
       mcpConnections: { findFirst: mockFindConnection },
     },
   },
@@ -98,12 +98,12 @@ function mockConnectionRow(overrides?: Record<string, unknown>) {
   } as Awaited<ReturnType<typeof db.query.mcpConnections.findFirst>>;
 }
 
-function createJobToken(overrides?: Partial<JobTokenContext>): JobTokenContext {
+function createRunToken(overrides?: Partial<RunTokenContext>): RunTokenContext {
   return {
-    cloudJobId: 42,
+    runId: 42,
     userId: 'user-1',
     principal: 'user',
-    tokenType: 'cj',
+    tokenType: 'run',
     version: 1,
     ...(overrides ?? {}),
   };
@@ -112,7 +112,7 @@ function createJobToken(overrides?: Partial<JobTokenContext>): JobTokenContext {
 describe('asana MCP auth and tool handling', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    mockFindCloudJob.mockResolvedValue({
+    mockFindTaskRun.mockResolvedValue({
       id: 42,
       actingUserId: 'user-1',
     });
@@ -144,10 +144,10 @@ describe('asana MCP auth and tool handling', () => {
     const body = (await response.json()) as JsonRpcErrorBody;
 
     expect(response.status).toBe(403);
-    expect(body.error.message).toContain('requires a cloud job token');
+    expect(body.error.message).toContain('requires a task run token');
   });
 
-  it('initializes successfully for cloud job tokens', async () => {
+  it('initializes successfully for task run tokens', async () => {
     vi.stubGlobal(
       'fetch',
       vi.fn().mockResolvedValue(
@@ -159,7 +159,7 @@ describe('asana MCP auth and tool handling', () => {
     );
 
     const response = await postMcp(
-      createApp(createJobToken()),
+      createApp(createRunToken()),
       createInitializeRequest(1),
     );
 
@@ -181,13 +181,13 @@ describe('asana MCP auth and tool handling', () => {
     // Web steer / follow-up delivery mutate task_runs.actingUserId mid-run;
     // the run-scoped token stays authorized (the token's userId is mint-time
     // attribution and is never compared against the mutable acting user).
-    mockFindCloudJob.mockResolvedValue({
+    mockFindTaskRun.mockResolvedValue({
       id: 42,
       actingUserId: 'user-2',
     });
 
     const response = await postMcp(
-      createApp(createJobToken()),
+      createApp(createRunToken()),
       createInitializeRequest(1),
     );
 
@@ -198,27 +198,27 @@ describe('asana MCP auth and tool handling', () => {
     // A human replying in the thread of an automation run switches the acting
     // user from null to that human; the run-scoped null-principal token must
     // keep working.
-    mockFindCloudJob.mockResolvedValue({
+    mockFindTaskRun.mockResolvedValue({
       id: 42,
       actingUserId: 'user-2',
     });
 
     const response = await postMcp(
-      createApp(createJobToken({ userId: null, principal: 'deployment' })),
+      createApp(createRunToken({ userId: null, principal: 'deployment' })),
       createInitializeRequest(1),
     );
 
     expect(response.status).toBe(200);
   });
 
-  it('allows deployment-principal tokens for deployment-principal cloud jobs', async () => {
-    mockFindCloudJob.mockResolvedValue({
+  it('allows deployment-principal tokens for deployment-principal task runs', async () => {
+    mockFindTaskRun.mockResolvedValue({
       id: 42,
       actingUserId: null,
     });
 
     const response = await postMcp(
-      createApp(createJobToken({ userId: null, principal: 'deployment' })),
+      createApp(createRunToken({ userId: null, principal: 'deployment' })),
       createInitializeRequest(1),
     );
 
@@ -231,7 +231,7 @@ describe('asana MCP auth and tool handling', () => {
   });
 
   it('lists the Asana tools', async () => {
-    const response = await postMcp(createApp(createJobToken()), {
+    const response = await postMcp(createApp(createRunToken()), {
       jsonrpc: '2.0',
       id: 1,
       method: 'tools/list',
@@ -270,7 +270,7 @@ describe('asana MCP auth and tool handling', () => {
     );
     vi.stubGlobal('fetch', fetchMock);
 
-    const response = await postMcp(createApp(createJobToken()), {
+    const response = await postMcp(createApp(createRunToken()), {
       jsonrpc: '2.0',
       id: 7,
       method: 'tools/call',
@@ -317,7 +317,7 @@ describe('asana MCP auth and tool handling', () => {
     );
     vi.stubGlobal('fetch', fetchMock);
 
-    const response = await postMcp(createApp(createJobToken()), {
+    const response = await postMcp(createApp(createRunToken()), {
       jsonrpc: '2.0',
       id: 9,
       method: 'tools/call',
@@ -369,7 +369,7 @@ describe('asana MCP auth and tool handling', () => {
       ),
     );
 
-    const response = await postMcp(createApp(createJobToken()), {
+    const response = await postMcp(createApp(createRunToken()), {
       jsonrpc: '2.0',
       id: 11,
       method: 'tools/call',
@@ -398,7 +398,7 @@ describe('asana MCP auth and tool handling', () => {
     mockFindConnection.mockResolvedValue(undefined);
 
     const response = await postMcp(
-      createApp(createJobToken()),
+      createApp(createRunToken()),
       createInitializeRequest(1),
     );
     const body = (await response.json()) as JsonRpcErrorBody;

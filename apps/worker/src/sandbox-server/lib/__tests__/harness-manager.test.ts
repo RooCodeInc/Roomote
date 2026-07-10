@@ -111,7 +111,7 @@ function createManager(
     sandboxTimeoutMs?: number;
     sandboxExpiresAtMs?: number;
     nativeTurnSteering?: boolean;
-    cloudJobId?: number;
+    runId?: number;
     taskId?: string | null;
   } & HarnessManagerCallbacks = {},
 ) {
@@ -127,7 +127,7 @@ function createManager(
     sandboxTimeoutMs,
     sandboxExpiresAtMs,
     nativeTurnSteering,
-    cloudJobId,
+    runId,
     taskId,
     ...callbacks
   } = options;
@@ -141,7 +141,7 @@ function createManager(
     keepaliveMs,
     sandboxTimeoutMs,
     sandboxExpiresAtMs,
-    cloudJobId,
+    runId,
     taskId,
     logger,
     callbacks,
@@ -2580,7 +2580,7 @@ describe('HarnessManager touchKeepalive', () => {
 describe('HarnessManager error status', () => {
   it('shuts down when the harness disconnects during an active task', async () => {
     const { harness, manager } = createManager({
-      cloudJobId: 51,
+      runId: 51,
       taskId: 'task-harness-disconnect',
     });
     const onStateChange = vi.fn();
@@ -2615,7 +2615,7 @@ describe('HarnessManager error status', () => {
       expect(captureWorkerMessageMock).toHaveBeenCalledWith(
         'Harness exhausted reconnect attempts and is shutting down the sandbox runtime',
         expect.objectContaining({
-          cloudJobId: 51,
+          runId: 51,
           taskId: 'task-harness-disconnect',
           runtimeTaskId: 'task-disconnect',
           taskPhase: 'running',

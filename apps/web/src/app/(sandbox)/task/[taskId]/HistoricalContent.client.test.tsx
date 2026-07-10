@@ -1,8 +1,8 @@
 import type { ReactNode } from 'react';
 import { render, screen } from '@testing-library/react';
 
-const { isCloudJobAsleepMock } = vi.hoisted(() => ({
-  isCloudJobAsleepMock: vi.fn(() => false),
+const { isTaskRunAsleepMock } = vi.hoisted(() => ({
+  isTaskRunAsleepMock: vi.fn(() => false),
 }));
 
 vi.mock('@/components/system', () => ({
@@ -41,7 +41,7 @@ vi.mock('./sidebar-actions', () => ({
 }));
 
 vi.mock('./sidebar-actions/utils', () => ({
-  isCloudJobAsleep: isCloudJobAsleepMock,
+  isTaskRunAsleep: isTaskRunAsleepMock,
 }));
 
 vi.mock('./DraftPromptBanner', () => ({
@@ -78,7 +78,7 @@ import { HistoricalContent } from './HistoricalContent';
 describe('HistoricalContent', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    isCloudJobAsleepMock.mockReturnValue(false);
+    isTaskRunAsleepMock.mockReturnValue(false);
   });
 
   it('shows an in-thread waking up message while the task is resuming', () => {
@@ -88,7 +88,7 @@ describe('HistoricalContent', () => {
           {
             sessionState: 'resuming',
             draftPrompt: null,
-            cloudJob: {
+            taskRun: {
               id: 123,
               snapshotId: 'snap-123',
               createdAt: new Date('2026-05-22T20:57:00.000Z'),
@@ -111,7 +111,7 @@ describe('HistoricalContent', () => {
           {
             sessionState: 'historical',
             draftPrompt: null,
-            cloudJob: {
+            taskRun: {
               id: 123,
               snapshotId: 'snap-123',
               createdAt: new Date('2026-05-22T20:57:00.000Z'),
@@ -134,7 +134,7 @@ describe('HistoricalContent', () => {
           {
             sessionState: 'historical',
             draftPrompt: null,
-            cloudJob: {
+            taskRun: {
               id: 123,
               status: 'failed',
               error: null,
@@ -170,7 +170,7 @@ describe('HistoricalContent', () => {
           {
             sessionState: 'historical',
             draftPrompt: null,
-            cloudJob: {
+            taskRun: {
               id: 123,
               status: 'failed',
               error: null,

@@ -5,7 +5,7 @@ import {
 } from '../mcp-task-env';
 
 describe('getSlackReplyContext', () => {
-  it('returns null when a snapshot resume job has no Slack metadata', () => {
+  it('returns null when a snapshot resume task run has no Slack metadata', () => {
     expect(
       getSlackReplyContext({
         payload: {},

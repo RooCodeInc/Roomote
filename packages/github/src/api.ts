@@ -12,7 +12,7 @@ import {
 import {
   type GitHubInstallation,
   type Repository,
-  type Run,
+  type TaskRun,
   db,
   githubPendingInstallations,
   githubInstallations,
@@ -32,12 +32,12 @@ const ANALYTICS_PULL_REQUESTS_PER_PAGE = 100;
 const ANALYTICS_MAX_ALL_TIME_PULL_REQUEST_PAGES = 50;
 
 async function createTokenForRepositoryNames({
-  cloudJob,
+  taskRun,
   repositoryNames,
   missingMessagePrefix,
   spanningMessagePrefix,
 }: {
-  cloudJob: Run;
+  taskRun: TaskRun;
   repositoryNames: string[];
   missingMessagePrefix: string;
   spanningMessagePrefix: string;
@@ -61,7 +61,7 @@ async function createTokenForRepositoryNames({
 
   if (missingRepositories.length > 0) {
     throw new Error(
-      `${missingMessagePrefix} for cloud job ${cloudJob.id}: ${missingRepositories.join(', ')}`,
+      `${missingMessagePrefix} for task run ${taskRun.id}: ${missingRepositories.join(', ')}`,
     );
   }
 
@@ -85,7 +85,7 @@ async function createTokenForRepositoryNames({
     // every repo in the org would defeat the scoping this path guarantees.
     if (repositoryIds.length === 0) {
       throw new Error(
-        `${spanningMessagePrefix} for cloud job ${cloudJob.id} resolved no GitHub repository ids for selected repositories: ${uniqueRepositoryNames.join(', ')}`,
+        `${spanningMessagePrefix} for task run ${taskRun.id} resolved no GitHub repository ids for selected repositories: ${uniqueRepositoryNames.join(', ')}`,
       );
     }
 
@@ -97,7 +97,7 @@ async function createTokenForRepositoryNames({
   }
 
   throw new Error(
-    `${spanningMessagePrefix} for cloud job ${cloudJob.id} span multiple GitHub installations: ${uniqueRepositoryNames.join(', ')}`,
+    `${spanningMessagePrefix} for task run ${taskRun.id} span multiple GitHub installations: ${uniqueRepositoryNames.join(', ')}`,
   );
 }
 
@@ -160,17 +160,17 @@ type Checks = RestEndpointMethodTypes['checks'];
  * Authentication
  */
 
-export const createCloudJobGitHubToken = async (
-  cloudJob: Run,
+export const createTaskRunGitHubToken = async (
+  taskRun: TaskRun,
 ): Promise<string> => {
-  if (cloudJob.payload.environmentId) {
+  if (taskRun.payload.environmentId) {
     const environment = await db.query.environments.findFirst({
-      where: eq(environments.id, cloudJob.payload.environmentId),
+      where: eq(environments.id, taskRun.payload.environmentId),
     });
 
     if (!environment) {
       throw new Error(
-        `Environment not found for cloud job ${cloudJob.id}: ${cloudJob.payload.environmentId}`,
+        `Environment not found for task run ${taskRun.id}: ${taskRun.payload.environmentId}`,
       );
     }
 
@@ -180,7 +180,7 @@ export const createCloudJobGitHubToken = async (
 
     if (environmentRepositories.length > 0) {
       return createTokenForRepositoryNames({
-        cloudJob,
+        taskRun,
         repositoryNames: environmentRepositories,
         missingMessagePrefix: 'Environment repositories not found',
         spanningMessagePrefix: 'Environment repositories',
@@ -189,14 +189,14 @@ export const createCloudJobGitHubToken = async (
   }
 
   const selectedRepositories = Array.isArray(
-    cloudJob.payload.selectedRepositories,
+    taskRun.payload.selectedRepositories,
   )
-    ? [...new Set(cloudJob.payload.selectedRepositories.filter(Boolean))]
+    ? [...new Set(taskRun.payload.selectedRepositories.filter(Boolean))]
     : [];
 
   if (selectedRepositories.length > 0) {
     return createTokenForRepositoryNames({
-      cloudJob,
+      taskRun,
       repositoryNames: selectedRepositories,
       missingMessagePrefix: 'Selected repositories not found',
       spanningMessagePrefix: 'Selected repositories',
@@ -204,14 +204,14 @@ export const createCloudJobGitHubToken = async (
   }
 
   const repo =
-    cloudJob.payload.repo && cloudJob.payload.repo !== ALL_REPOSITORIES
+    taskRun.payload.repo && taskRun.payload.repo !== ALL_REPOSITORIES
       ? await db.query.repositories.findFirst({
           where: and(
             eq(
               repositories.sourceControlProvider,
               DEFAULT_SOURCE_CONTROL_PROVIDER,
             ),
-            eq(repositories.fullName, cloudJob.payload.repo),
+            eq(repositories.fullName, taskRun.payload.repo),
             eq(repositories.isActive, true),
           ),
         })
@@ -226,7 +226,7 @@ export const createCloudJobGitHubToken = async (
   return gitHubToken;
 };
 
-export type CloudJobWorkerGitHubToken = {
+export type TaskRunWorkerGitHubToken = {
   token: string;
   source: 'user' | 'app';
   expiresAt: Date | null;
@@ -244,20 +244,20 @@ export type CloudJobWorkerGitHubToken = {
  * but the token used for git operations is always the App installation
  * token with its constrained permission set.
  */
-export async function createCloudJobWorkerGitHubTokenWithMetadata(
-  cloudJob: Run,
-): Promise<CloudJobWorkerGitHubToken> {
+export async function createTaskRunWorkerGitHubTokenWithMetadata(
+  taskRun: TaskRun,
+): Promise<TaskRunWorkerGitHubToken> {
   return {
-    token: await createCloudJobGitHubToken(cloudJob),
+    token: await createTaskRunGitHubToken(taskRun),
     source: 'app',
     expiresAt: null,
   };
 }
 
-export async function createCloudJobWorkerGitHubToken(
-  cloudJob: Run,
+export async function createTaskRunWorkerGitHubToken(
+  taskRun: TaskRun,
 ): Promise<string> {
-  const result = await createCloudJobWorkerGitHubTokenWithMetadata(cloudJob);
+  const result = await createTaskRunWorkerGitHubTokenWithMetadata(taskRun);
   return result.token;
 }
 

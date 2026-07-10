@@ -191,7 +191,7 @@ describe('slack-messages', () => {
     );
   });
 
-  it('stores the latest user message for a cloud job', async () => {
+  it('stores the latest user message for a task run', async () => {
     await setLatestUserMessage(42, {
       text: 'Need a follow-up',
       userName: 'Brock',
@@ -210,7 +210,7 @@ describe('slack-messages', () => {
 
   it('tracks the latest user message for Slack quotes', async () => {
     await trackLatestUserMessageForSlackQuote({
-      cloudJobId: 42,
+      runId: 42,
       text: 'Need a follow-up',
       userName: 'Brock',
     });
@@ -233,7 +233,7 @@ describe('slack-messages', () => {
 
     await expect(
       trackLatestUserMessageForSlackQuote({
-        cloudJobId: 42,
+        runId: 42,
         text: 'Need a follow-up',
         userName: 'Brock',
         onError,
@@ -243,7 +243,7 @@ describe('slack-messages', () => {
     expect(onError).toHaveBeenCalledWith(error);
   });
 
-  it('retrieves the latest user message for a cloud job', async () => {
+  it('retrieves the latest user message for a task run', async () => {
     getMock.mockResolvedValueOnce(
       JSON.stringify({ text: 'Need a follow-up', userName: 'Brock' }),
     );
@@ -254,7 +254,7 @@ describe('slack-messages', () => {
     });
   });
 
-  it('clears the latest user message for a cloud job', async () => {
+  it('clears the latest user message for a task run', async () => {
     await clearLatestUserMessage(42);
 
     expect(delMock).toHaveBeenCalledWith('slack:latest_user_message:42');
@@ -266,7 +266,7 @@ describe('slack-messages', () => {
     await expect(clearLatestUserMessage(42)).resolves.toBeUndefined();
 
     expect(consoleErrorMock).toHaveBeenCalledWith(
-      '[clearLatestUserMessage] Failed to clear latest user message for cloud job 42: redis failed',
+      '[clearLatestUserMessage] Failed to clear latest user message for task run 42: redis failed',
     );
   });
 
@@ -379,7 +379,7 @@ describe('slack-messages', () => {
     await expect(getSlackMessages(42)).resolves.toEqual([]);
 
     expect(consoleErrorMock).toHaveBeenCalledWith(
-      '[getCommunicationMessages] Redis multi exec failed for slack cloud job 42: Connection is closed.',
+      '[getCommunicationMessages] Redis multi exec failed for slack task run 42: Connection is closed.',
     );
     expect(lrangeMock).toHaveBeenCalledWith('slack:messages:42', 0, -1);
     expect(multiDelMock).toHaveBeenCalledWith('slack:messages:42');

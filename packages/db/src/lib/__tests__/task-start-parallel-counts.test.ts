@@ -14,16 +14,16 @@ import {
 
 const TEST_USER_ID = 'user_test_task_start_parallel_counts';
 const TEST_TASK_ID = 'task_test_task_start_parallel_counts';
-let testCloudJobId: number;
+let testRunId: number;
 
 async function cleanup() {
   await db
     .delete(taskStartParallelCounts)
-    .where(eq(taskStartParallelCounts.runId, testCloudJobId ?? -1))
+    .where(eq(taskStartParallelCounts.runId, testRunId ?? -1))
     .catch(() => {});
   await db
     .delete(taskRuns)
-    .where(eq(taskRuns.id, testCloudJobId ?? -1))
+    .where(eq(taskRuns.id, testRunId ?? -1))
     .catch(() => {});
   await db
     .delete(tasks)
@@ -34,7 +34,7 @@ async function cleanup() {
 describe('task start parallel count helpers', () => {
   beforeEach(async () => {
     await cleanup();
-    testCloudJobId = -1;
+    testRunId = -1;
     await userFactory.create({ id: TEST_USER_ID }).catch(() => {});
     await taskFactory.create({
       id: TEST_TASK_ID,
@@ -42,11 +42,11 @@ describe('task start parallel count helpers', () => {
       timestamp: 1_700_000_000,
       activityAt: 1_700_000_000,
     });
-    const cloudJob = await runFactory.create({
+    const taskRun = await runFactory.create({
       actingUserId: TEST_USER_ID,
       taskId: TEST_TASK_ID,
     });
-    testCloudJobId = cloudJob.id;
+    testRunId = taskRun.id;
   });
 
   afterEach(async () => {
@@ -59,14 +59,14 @@ describe('task start parallel count helpers', () => {
 
     await db.transaction(async (tx) => {
       await recordTaskStartParallelCount(tx, {
-        runId: testCloudJobId,
+        runId: testRunId,
         payloadKind: TaskPayloadKind.StandardTask,
         taskId: TEST_TASK_ID,
         startedAt,
       });
 
       await markTaskStartParallelCountEndedAt(tx, {
-        runId: testCloudJobId,
+        runId: testRunId,
         endedAt,
       });
     });
@@ -79,7 +79,7 @@ describe('task start parallel count helpers', () => {
         parallelCount: taskStartParallelCounts.parallelCount,
       })
       .from(taskStartParallelCounts)
-      .where(eq(taskStartParallelCounts.runId, testCloudJobId));
+      .where(eq(taskStartParallelCounts.runId, testRunId));
 
     expect(log).toEqual({
       startedAt,
@@ -96,19 +96,19 @@ describe('task start parallel count helpers', () => {
 
     await db.transaction(async (tx) => {
       await recordTaskStartParallelCount(tx, {
-        runId: testCloudJobId,
+        runId: testRunId,
         payloadKind: TaskPayloadKind.StandardTask,
         taskId: TEST_TASK_ID,
         startedAt,
       });
 
       await markTaskStartParallelCountEndedAt(tx, {
-        runId: testCloudJobId,
+        runId: testRunId,
         endedAt: firstEndedAt,
       });
 
       await markTaskStartParallelCountEndedAt(tx, {
-        runId: testCloudJobId,
+        runId: testRunId,
         endedAt: secondEndedAt,
       });
     });
@@ -118,7 +118,7 @@ describe('task start parallel count helpers', () => {
         endedAt: taskStartParallelCounts.endedAt,
       })
       .from(taskStartParallelCounts)
-      .where(eq(taskStartParallelCounts.runId, testCloudJobId));
+      .where(eq(taskStartParallelCounts.runId, testRunId));
 
     expect(log?.endedAt).toEqual(firstEndedAt);
   });
@@ -128,7 +128,7 @@ describe('task start parallel count helpers', () => {
 
     await db.transaction(async (tx) => {
       await recordTaskStartParallelCount(tx, {
-        runId: testCloudJobId,
+        runId: testRunId,
         payloadKind: TaskPayloadKind.StandardTask,
         taskId: TEST_TASK_ID,
         startedAt,
@@ -150,11 +150,11 @@ describe('task start parallel count helpers', () => {
         startedAt: taskStartParallelCounts.startedAt,
       })
       .from(taskStartParallelCounts)
-      .where(eq(taskStartParallelCounts.runId, testCloudJobId));
+      .where(eq(taskStartParallelCounts.runId, testRunId));
 
     expect(log).toEqual({
       taskId: TEST_TASK_ID,
-      runId: testCloudJobId,
+      runId: testRunId,
       payloadKind: TaskPayloadKind.StandardTask,
       startedAt,
     });

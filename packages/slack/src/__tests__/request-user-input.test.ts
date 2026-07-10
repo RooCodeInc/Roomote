@@ -29,7 +29,7 @@ const { redisLists, redisMock, redisStrings } = vi.hoisted(() => {
           pendingKey,
           answerQueueKey,
           requestId,
-          cloudJobId,
+          runId,
           expectedQuestionIndex,
           serializedRequest,
           serializedAnswer,
@@ -47,7 +47,7 @@ const { redisLists, redisMock, redisStrings } = vi.hoisted(() => {
 
         if (
           pendingRequest.requestId !== requestId ||
-          String(pendingRequest.cloudJobId) !== cloudJobId ||
+          String(pendingRequest.runId) !== runId ||
           (pendingRequest.status ?? 'pending') !== 'pending' ||
           String(pendingRequest.currentQuestionIndex ?? 0) !==
             expectedQuestionIndex
@@ -129,7 +129,7 @@ describe('request_user_input Redis helpers', () => {
   it('atomically claims a final Slack prompt answer so concurrent structured replies enqueue once', async () => {
     await setPendingSlackRequestUserInput('thread-1', {
       requestId: 'rui:session:turn:call',
-      cloudJobId: 42,
+      runId: 42,
       taskId: 'task-1',
       questions: [
         {

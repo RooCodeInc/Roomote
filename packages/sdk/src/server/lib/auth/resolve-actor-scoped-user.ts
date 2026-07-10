@@ -6,7 +6,7 @@ interface ActorScopedAuthContext {
    * such contexts resolve to "no acting user".
    */
   userId?: string | null;
-  cloudJobId?: number;
+  runId?: number;
 }
 
 export interface ActorScopedUserContext {
@@ -16,7 +16,7 @@ export interface ActorScopedUserContext {
 /**
  * Resolve the effective human for actor-scoped integration lookups.
  *
- * Job tokens are authorized by their run-scoped `cloudJobId` binding; the
+ * Run tokens are authorized by their run-scoped `runId` binding; the
  * token's userId is only mint-time attribution. Live-task steers and
  * follow-ups switch `task_runs.actingUserId` to the latest human who is
  * speaking to the task, so actor-scoped integration lookups follow that
@@ -24,9 +24,9 @@ export interface ActorScopedUserContext {
  *
  * Because this PREFERS the live `actingUserId`, that column is a credential-
  * resolution input and must only ever be written by trusted server-side
- * actors (web steer, follow-up delivery). Run-scoped job tokens — which the
- * sandbox holds — cannot write it: `cloudJobs.update` strips `actingUserId`
- * from job-token input, closing the confused-deputy path where a compromised
+ * actors (web steer, follow-up delivery). Run-scoped run tokens — which the
+ * sandbox holds — cannot write it: `taskRuns.update` strips `actingUserId`
+ * from run-token input, closing the confused-deputy path where a compromised
  * sandbox reassigns the run to a victim and reads that victim's credentials.
  */
 export async function resolveActorScopedUserContext(
@@ -40,22 +40,22 @@ export async function resolveActorScopedUserContext(
     userId: auth.userId ?? undefined,
   };
 
-  if (!auth.cloudJobId) {
+  if (!auth.runId) {
     return fallback;
   }
 
-  const cloudJob = await db.query.taskRuns.findFirst({
+  const taskRun = await db.query.taskRuns.findFirst({
     columns: {
       actingUserId: true,
     },
-    where: eq(taskRuns.id, auth.cloudJobId),
+    where: eq(taskRuns.id, auth.runId),
   });
 
-  if (!cloudJob) {
+  if (!taskRun) {
     return fallback;
   }
 
   return {
-    userId: cloudJob.actingUserId ?? auth.userId ?? undefined,
+    userId: taskRun.actingUserId ?? auth.userId ?? undefined,
   };
 }

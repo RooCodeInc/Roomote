@@ -19,7 +19,7 @@ import {
 } from '@roomote/types';
 
 import { useShowDebugUI } from '@/hooks/useShowDebugUI';
-import { getCloudJobDisplayError } from '@/lib/cloud-job-errors';
+import { getTaskRunDisplayError } from '@/lib/task-run-errors';
 import { formatInferenceCost } from '@/lib/formatters';
 import { getUserDisplayName } from '@/lib/user-display-name';
 import { cn } from '@/lib/utils';
@@ -44,7 +44,7 @@ import { PullRequestBadge, WorkspaceBadge } from '@/components/sandbox';
 import { streamdownCodeMermaidCjkPlugins } from '@/components/ai-elements/streamdown-plugins';
 
 import {
-  type SessionCloudJob,
+  type SessionTaskRun,
   type SessionTask,
   useSandboxMessages,
   useTaskSummary,
@@ -56,7 +56,7 @@ import { getTaskParticipants } from './task-participants';
 interface TaskInfoPanelProps {
   active: boolean;
   task: SessionTask;
-  cloudJob: SessionCloudJob;
+  taskRun: SessionTaskRun;
   harness: CodingHarness;
   onClose: () => void;
 }
@@ -119,12 +119,12 @@ const SOURCE_CONTROL_SURFACES: ReadonlySet<string> = new Set([
 
 function getStartedFrom(
   task: SessionTask,
-  cloudJob: SessionCloudJob,
+  taskRun: SessionTaskRun,
 ): {
   label: string;
   brandIcon?: StartedFromBrandIcon;
 } {
-  const communicationProvider = cloudJob.payload?.communicationProvider;
+  const communicationProvider = taskRun.payload?.communicationProvider;
 
   if (
     task.surface === 'slack' ||
@@ -140,9 +140,9 @@ function getStartedFrom(
 
   if (
     (task.surface && SOURCE_CONTROL_SURFACES.has(task.surface)) ||
-    cloudJob.payloadKind.startsWith('github_')
+    taskRun.payloadKind.startsWith('github_')
   ) {
-    const provider = resolveSourceControlProviderFromPayload(cloudJob.payload);
+    const provider = resolveSourceControlProviderFromPayload(taskRun.payload);
     return {
       label: getSourceControlProviderLabel(provider),
       brandIcon: SOURCE_CONTROL_BRAND_ICONS[provider],
@@ -163,7 +163,7 @@ function getStartedFrom(
 export function TaskInfoPanel({
   active,
   task,
-  cloudJob,
+  taskRun,
   harness,
   onClose,
 }: TaskInfoPanelProps) {
@@ -177,17 +177,17 @@ export function TaskInfoPanel({
     regenerateSummary,
   } = useTaskSummary(task.id, { enabled: active });
 
-  const cloudJobError = getCloudJobDisplayError(cloudJob);
-  const startedFrom = getStartedFrom(task, cloudJob);
-  const effectiveHarness = cloudJob.harness ?? harness;
+  const taskRunError = getTaskRunDisplayError(taskRun);
+  const startedFrom = getStartedFrom(task, taskRun);
+  const effectiveHarness = taskRun.harness ?? harness;
   const HarnessIcon = HARNESS_ICONS[effectiveHarness];
-  const SandboxProviderIcon = cloudJob.vendor
-    ? SANDBOX_PROVIDER_ICONS[cloudJob.vendor]
+  const SandboxProviderIcon = taskRun.vendor
+    ? SANDBOX_PROVIDER_ICONS[taskRun.vendor]
     : CloudIcon;
-  const sandboxProviderLabel = cloudJob.vendor
-    ? SANDBOX_PROVIDER_LABELS[cloudJob.vendor]
+  const sandboxProviderLabel = taskRun.vendor
+    ? SANDBOX_PROVIDER_LABELS[taskRun.vendor]
     : 'Unknown';
-  const taskModelReasoningEffort = cloudJob.payload?.reasoningEffort;
+  const taskModelReasoningEffort = taskRun.payload?.reasoningEffort;
   const inferenceProviderId = task.model
     ? getTaskModelProviderId(task.model)
     : null;
@@ -289,15 +289,15 @@ export function TaskInfoPanel({
                 </tr>
               )}
 
-              {(cloudJob.payload?.environmentId || cloudJob.payload?.repo) && (
+              {(taskRun.payload?.environmentId || taskRun.payload?.repo) && (
                 <tr>
                   <td className="pr-4 py-1 align-top whitespace-nowrap">
                     Workspace
                   </td>
                   <td className="py-1">
                     <WorkspaceBadge
-                      environmentId={cloudJob.payload.environmentId}
-                      repo={cloudJob.payload.repo}
+                      environmentId={taskRun.payload.environmentId}
+                      repo={taskRun.payload.repo}
                       iconClassName="text-muted-foreground"
                     />
                   </td>
@@ -358,15 +358,15 @@ export function TaskInfoPanel({
                 </tr>
               )}
 
-              {cloudJob.prRepo && cloudJob.prNumber && (
+              {taskRun.prRepo && taskRun.prNumber && (
                 <tr>
                   <td className="pr-4 py-1 align-top whitespace-nowrap">
                     Pull Request
                   </td>
                   <td className="py-1">
                     <PullRequestBadge
-                      repo={cloudJob.prRepo}
-                      prNumber={cloudJob.prNumber}
+                      repo={taskRun.prRepo}
+                      prNumber={taskRun.prNumber}
                       iconClassName="text-muted-foreground"
                     />
                   </td>
@@ -381,7 +381,7 @@ export function TaskInfoPanel({
                   <span className="inline-flex items-center gap-1.5">
                     <Calendar className="size-3.5 shrink-0 text-muted-foreground" />
                     <span className="truncate">
-                      {formatStartedAt(cloudJob.startedAt)}
+                      {formatStartedAt(taskRun.startedAt)}
                     </span>
                   </span>
                 </td>
@@ -413,14 +413,14 @@ export function TaskInfoPanel({
             </tbody>
           </table>
 
-          {cloudJobError && (
+          {taskRunError && (
             <div>
               <div className="flex items-center gap-2 mb-1">
                 <h3 className="text-sm font-medium">Last Error</h3>
-                <CopyIconButton content={cloudJobError} />
+                <CopyIconButton content={taskRunError} />
               </div>
               <p className="text-sm text-destructive whitespace-pre-wrap wrap-break-word">
-                {cloudJobError}
+                {taskRunError}
               </p>
             </div>
           )}

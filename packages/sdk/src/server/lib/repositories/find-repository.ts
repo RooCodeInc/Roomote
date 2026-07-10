@@ -1,17 +1,17 @@
 import type {
   AuthTokenContext,
-  JobTokenContext,
+  RunTokenContext,
   SourceControlProvider,
 } from '@roomote/types';
 import { db, repositories, eq, and } from '@roomote/db/server';
 
 export const findRepository = (
-  auth: AuthTokenContext | JobTokenContext,
+  auth: AuthTokenContext | RunTokenContext,
   fullName: string,
   input?: { sourceControlProvider?: SourceControlProvider },
 ) => {
   // Repositories are deployment-scoped: any authenticated principal may
-  // read them, including deployment-service-principal job tokens minted for
+  // read them, including deployment-service-principal run tokens minted for
   // automation runs (which carry no user claim).
   return db.query.repositories.findFirst({
     where: and(

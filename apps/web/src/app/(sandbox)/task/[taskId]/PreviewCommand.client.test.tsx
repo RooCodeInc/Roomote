@@ -96,7 +96,7 @@ describe('PreviewCommand', () => {
   });
 
   it('registers the Live Preview command when a preview URL is available', () => {
-    render(<PreviewCommand cloudJob={{ id: 123 } as never} asleep={false} />);
+    render(<PreviewCommand taskRun={{ id: 123 } as never} asleep={false} />);
 
     expect(useRegisterCommandsMock).toHaveBeenCalledWith(
       expect.arrayContaining([
@@ -115,7 +115,7 @@ describe('PreviewCommand', () => {
       previewServiceName: 'API',
     });
 
-    render(<PreviewCommand cloudJob={{ id: 123 } as never} asleep={false} />);
+    render(<PreviewCommand taskRun={{ id: 123 } as never} asleep={false} />);
 
     const livePreviewCommand = useRegisterCommandsMock.mock.calls[0]?.[0]?.find(
       (command: { id: string }) => command.id === 'task-live-preview',

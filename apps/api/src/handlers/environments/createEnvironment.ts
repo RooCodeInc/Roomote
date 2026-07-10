@@ -69,42 +69,42 @@ export function getEnvironmentRepositoryConfigError(
   return getEnvironmentRepositoryInstallationError(repositoryRows);
 }
 
-function extractCloudJobId(auth: McpAuth): number | null {
-  return 'cloudJobId' in auth.authContext ? auth.authContext.cloudJobId : null;
+function extractRunId(auth: McpAuth): number | null {
+  return 'runId' in auth.authContext ? auth.authContext.runId : null;
 }
 
 /**
- * When environment creation/update is triggered by a running cloud job, persist
+ * When environment creation/update is triggered by a running task run, persist
  * the resulting environment id on that job payload so the UI can resolve
  * completion against the exact task instance instead of timestamp heuristics.
  */
-export async function attachEnvironmentIdToCloudJob(
+export async function attachEnvironmentIdToTaskRun(
   auth: McpAuth,
   environmentId: string,
 ): Promise<void> {
-  const cloudJobId = extractCloudJobId(auth);
+  const runId = extractRunId(auth);
 
-  if (!cloudJobId) {
+  if (!runId) {
     return;
   }
 
-  const cloudJob = await db.query.taskRuns.findFirst({
-    where: eq(taskRuns.id, cloudJobId),
+  const taskRun = await db.query.taskRuns.findFirst({
+    where: eq(taskRuns.id, runId),
     columns: {
       id: true,
       payload: true,
     },
   });
 
-  if (!cloudJob) {
+  if (!taskRun) {
     return;
   }
 
   const payload =
-    cloudJob.payload &&
-    typeof cloudJob.payload === 'object' &&
-    !Array.isArray(cloudJob.payload)
-      ? (cloudJob.payload as Record<string, unknown>)
+    taskRun.payload &&
+    typeof taskRun.payload === 'object' &&
+    !Array.isArray(taskRun.payload)
+      ? (taskRun.payload as Record<string, unknown>)
       : {};
 
   const existingEnvironmentDefinitionId =
@@ -122,7 +122,7 @@ export async function attachEnvironmentIdToCloudJob(
         environmentDefinitionId: environmentId,
       } as unknown as TaskPayload,
     })
-    .where(eq(taskRuns.id, cloudJob.id));
+    .where(eq(taskRuns.id, taskRun.id));
 }
 
 /**
@@ -255,7 +255,7 @@ export async function createEnvironment(
       return environment;
     });
 
-    await attachEnvironmentIdToCloudJob(auth, created.id);
+    await attachEnvironmentIdToTaskRun(auth, created.id);
 
     return c.json({
       success: true,

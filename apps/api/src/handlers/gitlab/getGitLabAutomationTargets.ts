@@ -1,7 +1,7 @@
 import {
-  CloudAgentType,
-  DEFAULT_PR_REVIEWER_SETTINGS,
-  type PrReviewerSettings,
+  DEFAULT_PR_REVIEW_SETTINGS,
+  type PrReviewSettings,
+  type SourceControlAutomationWorkflow,
 } from '@roomote/types';
 import {
   type Repository,
@@ -25,8 +25,8 @@ type GitLabAutomationWebhookContext = Pick<
 
 type GitLabAutomationTarget = {
   id: string;
-  type: CloudAgentType;
-  settings: PrReviewerSettings | null;
+  workflow: SourceControlAutomationWorkflow;
+  settings: PrReviewSettings | null;
   repo: Repository;
   repositoryIds: string[];
   userId: string | null;
@@ -37,12 +37,12 @@ export function isRoomoteGitLabUsername(username: string): boolean {
 }
 
 export async function getGitLabAutomationTargets({
-  type,
+  workflow,
   payload,
   ignoreAuthorPolicy = false,
   requireLinkedSenderAccount = false,
 }: {
-  type: CloudAgentType;
+  workflow: SourceControlAutomationWorkflow;
   payload: GitLabAutomationWebhookContext;
   ignoreAuthorPolicy?: boolean;
   requireLinkedSenderAccount?: boolean;
@@ -112,14 +112,11 @@ export async function getGitLabAutomationTargets({
   }
 
   const reviewerSettings =
-    type === CloudAgentType.PrReviewer
-      ? await getReviewCodeAutomationSettings()
-      : null;
+    workflow === 'pr_review' ? await getReviewCodeAutomationSettings() : null;
 
   if (
-    type === CloudAgentType.PrReviewer &&
-    (reviewerSettings?.enabled ?? DEFAULT_PR_REVIEWER_SETTINGS.enabled) ===
-      false
+    workflow === 'pr_review' &&
+    (reviewerSettings?.enabled ?? DEFAULT_PR_REVIEW_SETTINGS.enabled) === false
   ) {
     return { status: 'ok', targets: [] };
   }
@@ -131,10 +128,7 @@ export async function getGitLabAutomationTargets({
     .from(environmentRepositoryMappings)
     .where(eq(environmentRepositoryMappings.repositoryId, repo.id));
 
-  if (
-    type === CloudAgentType.PrReviewer &&
-    repositoryEnvironmentIds.length === 0
-  ) {
+  if (workflow === 'pr_review' && repositoryEnvironmentIds.length === 0) {
     return {
       status: 'error',
       message: `no environment mapping associated with [gitlab:${projectId}, ${repo.fullName}]`,
@@ -143,10 +137,10 @@ export async function getGitLabAutomationTargets({
 
   const reviewerReviewsAllPrs =
     reviewerSettings?.reviewAllPullRequestAuthors ??
-    DEFAULT_PR_REVIEWER_SETTINGS.reviewAllPullRequestAuthors;
+    DEFAULT_PR_REVIEW_SETTINGS.reviewAllPullRequestAuthors;
 
   if (
-    type === CloudAgentType.PrReviewer &&
+    workflow === 'pr_review' &&
     !ignoreAuthorPolicy &&
     authorUsername &&
     !isRoomoteGitLabUsername(authorUsername) &&
@@ -162,8 +156,8 @@ export async function getGitLabAutomationTargets({
     status: 'ok',
     targets: [
       {
-        id: `gitlab:${type}:${repo.id}`,
-        type,
+        id: `gitlab:${workflow}:${repo.id}`,
+        workflow,
         settings: reviewerSettings,
         repo,
         repositoryIds: [repo.id],

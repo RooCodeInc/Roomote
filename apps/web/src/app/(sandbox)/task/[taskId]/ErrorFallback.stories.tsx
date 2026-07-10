@@ -7,7 +7,7 @@ import { TRPCReactProvider } from '@/trpc/client';
 
 import { SandboxStoreContext } from './hooks/SandboxProvider';
 import type { SandboxConnectionFailureCategory } from './hooks/services/sandbox-live-connection-diagnostics';
-import type { CloudSession } from './hooks/use-cloud-session';
+import type { TaskSession } from './hooks/use-task-session';
 import { createSandboxStore } from './hooks/use-sandbox-store';
 import { ConnectionStatusBanner } from './ErrorFallback';
 
@@ -25,10 +25,10 @@ type ConnectionBannerStoryHarnessProps = ComponentProps<
   sandbox?: ConnectionBannerSandboxState;
 };
 
-const baseSession: CloudSession = {
+const baseSession: TaskSession = {
   artifacts: [],
   blank: false,
-  cloudJob: null,
+  taskRun: null,
   draftPrompt: null,
   harness: 'opencode-server',
   hasTransportError: false,

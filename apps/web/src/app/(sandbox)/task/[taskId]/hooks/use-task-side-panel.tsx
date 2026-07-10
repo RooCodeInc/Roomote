@@ -35,11 +35,7 @@ interface TaskSidePanelContextType {
   previewServiceName: string | null;
   /** The iframe path currently shown in the preview panel (from URL or last opened). */
   previewPath: string | null;
-  openPreviewView: (
-    url: string,
-    cloudJobId: number,
-    serviceName?: string,
-  ) => void;
+  openPreviewView: (url: string, runId: number, serviceName?: string) => void;
   openArtifactsBrowser: () => void;
   openDiffView: () => void;
   openArtifactDetail: (path: string, version?: number) => void;
@@ -276,7 +272,7 @@ export function TaskSidePanelProvider({
   // Open preview view
   // -------------------------------------------------------------------
   const openPreviewView = useCallback(
-    (url: string, _cloudJobId: number, serviceName?: string) => {
+    (url: string, _runId: number, serviceName?: string) => {
       setActiveView('preview');
 
       const service = serviceName ?? previewServiceName;

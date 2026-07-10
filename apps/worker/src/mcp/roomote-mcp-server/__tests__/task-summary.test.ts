@@ -21,9 +21,9 @@ describe('handleGetTaskSummary', () => {
       repositoryName: 'owner/repo',
       harness: 'opencode-server',
       createdAt: 1700000000,
-      cloudJobStatus: 'running',
+      taskRunStatus: 'running',
       taskPhase: 'waiting_for_prompt',
-      cloudJobError: null,
+      taskRunError: null,
       linkedEnvironmentId: null,
       linkedEnvironmentName: null,
     });
@@ -37,8 +37,8 @@ describe('handleGetTaskSummary', () => {
     expect(text).toContain('Mode: code');
     expect(text).toContain('Harness: OpenCode');
     expect(text).toContain('Repository: owner/repo');
-    expect(text).not.toContain('Cloud Job Status:');
-    expect(text).not.toContain('Cloud Job ID:');
+    expect(text).not.toContain('Task Run Status:');
+    expect(text).not.toContain('Task Run ID:');
     expect(text).not.toContain('Model:');
     expect(text).not.toContain('Cost:');
     expect(text).not.toContain('Tokens:');
@@ -54,9 +54,9 @@ describe('handleGetTaskSummary', () => {
       repositoryName: 'owner/repo',
       harness: 'opencode-server',
       createdAt: 1700000000,
-      cloudJobStatus: 'running',
+      taskRunStatus: 'running',
       taskPhase: 'executing',
-      cloudJobError: null,
+      taskRunError: null,
       linkedEnvironmentId: 'env-123',
       linkedEnvironmentName: 'Onboarding Sandbox',
     });
@@ -69,7 +69,7 @@ describe('handleGetTaskSummary', () => {
     expect(result.content[0]?.text).toContain('Linked Environment ID: env-123');
   });
 
-  it('falls back to completed/active when no cloud job data is present', async () => {
+  it('falls back to completed/active when no task run data is present', async () => {
     vi.mocked(tasksApiClient.getTaskSummary).mockResolvedValueOnce({
       id: 'task-2',
       title: 'Done task',
@@ -78,9 +78,9 @@ describe('handleGetTaskSummary', () => {
       repositoryName: null,
       harness: 'opencode-server',
       createdAt: null,
-      cloudJobStatus: null,
+      taskRunStatus: null,
       taskPhase: null,
-      cloudJobError: null,
+      taskRunError: null,
       linkedEnvironmentId: null,
       linkedEnvironmentName: null,
     });
@@ -90,7 +90,7 @@ describe('handleGetTaskSummary', () => {
     expect(result.content[0]?.text).toContain('Status: Completed');
   });
 
-  it('includes the latest cloud job error when present', async () => {
+  it('includes the latest task run error when present', async () => {
     vi.mocked(tasksApiClient.getTaskSummary).mockResolvedValueOnce({
       id: 'task-3',
       title: 'Broken startup',
@@ -99,9 +99,9 @@ describe('handleGetTaskSummary', () => {
       repositoryName: 'owner/repo',
       harness: 'opencode-server',
       createdAt: 1700000000,
-      cloudJobStatus: 'failed',
+      taskRunStatus: 'failed',
       taskPhase: null,
-      cloudJobError: 'Sandbox failed to boot worker process',
+      taskRunError: 'Sandbox failed to boot worker process',
       linkedEnvironmentId: null,
       linkedEnvironmentName: null,
     });

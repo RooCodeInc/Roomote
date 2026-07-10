@@ -28,7 +28,7 @@ vi.mock('./polling/index', () => ({
 
 function createLogger(): HarnessLogger {
   return {
-    cloudJobId: 42,
+    runId: 42,
     filePath: '/tmp/harness.log',
     log: vi.fn(),
     info: vi.fn(),
@@ -56,16 +56,16 @@ function createState(): RunTaskState {
 }
 
 function createListenerOptions(
-  cloudJob: Partial<ListenerOptions['cloudJob']>,
+  taskRun: Partial<ListenerOptions['taskRun']>,
   task?: ListenerOptions['task'],
 ): ListenerOptions {
   return {
-    cloudJob: {
+    taskRun: {
       id: 42,
       payloadKind: TaskPayloadKind.StandardTask,
       payload: {},
-      ...cloudJob,
-    } as ListenerOptions['cloudJob'],
+      ...taskRun,
+    } as ListenerOptions['taskRun'],
     task,
     state: createState(),
     logger: createLogger(),
@@ -108,7 +108,7 @@ describe('startPolling', () => {
     vi.useRealTimers();
   });
 
-  it('starts Slack message polling for any Slack-linked cloud job', () => {
+  it('starts Slack message polling for any Slack-linked task run', () => {
     const options = createListenerOptions({
       payloadKind: TaskPayloadKind.Scan,
       payload: {
@@ -221,7 +221,7 @@ describe('startPolling', () => {
     expect(options.state.linearMessageInterval).toBeDefined();
   });
 
-  it('starts generic communication polling for Teams-linked cloud jobs', () => {
+  it('starts generic communication polling for Teams-linked task runs', () => {
     const options = createListenerOptions({
       payloadKind: TaskPayloadKind.StandardTask,
       payload: {
@@ -243,7 +243,7 @@ describe('startPolling', () => {
     expect(options.state.communicationMessageIntervals?.teams).toBeDefined();
   });
 
-  it('starts generic communication polling for Telegram-linked cloud jobs', () => {
+  it('starts generic communication polling for Telegram-linked task runs', () => {
     const options = createListenerOptions({
       payloadKind: TaskPayloadKind.StandardTask,
       payload: {

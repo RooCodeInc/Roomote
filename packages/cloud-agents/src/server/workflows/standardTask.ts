@@ -45,7 +45,7 @@ export function standardTask({
   repoFullNames,
   taskSurface = 'web',
   conflictResolverLabel,
-  cloudJobUrl: _cloudJobUrl,
+  taskRunUrl: _taskRunUrl,
   attribution = DEFAULT_ATTRIBUTION,
   username: _legacyUsername,
   githubLogin: _legacyGithubLogin,
@@ -84,7 +84,7 @@ export function standardTask({
     | 'gitea'
     | 'ado';
   conflictResolverLabel?: string;
-  cloudJobUrl?: string;
+  taskRunUrl?: string;
   attribution?: ResolvedTaskCommitAuthor;
   username?: string;
   githubLogin?: string;
@@ -115,7 +115,7 @@ export function standardTask({
     isAllRepositoriesSelection || (repoFullNames?.length ?? 0) > 0;
   const prBodyAttributionLine = getPrBodyAttributionLine({
     attribution,
-    taskUrl: _cloudJobUrl,
+    taskUrl: _taskRunUrl,
     taskSurface,
     slackTeamDomain,
     slackTeamId,

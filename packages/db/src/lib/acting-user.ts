@@ -6,7 +6,7 @@ import { taskRuns } from '../schema';
 /**
  * Sets the live actor from a trusted server-side sender resolution.
  *
- * This must not be exposed through a run-scoped job-token mutation:
+ * This must not be exposed through a run-scoped run-token mutation:
  * `task_runs.actingUserId` selects actor-scoped credentials for the sandbox.
  */
 export async function setTrustedRunActingUser(params: {
