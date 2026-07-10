@@ -705,6 +705,26 @@ describe('setup-new compute config commands', () => {
     expect(mockUpsertDeploymentEnvironmentVariables).not.toHaveBeenCalled();
   });
 
+  it('ignores a form-submitted MODAL_BASE_IMAGE_REF when no derivable image exists', async () => {
+    vi.stubEnv('DOCKER_WORKER_IMAGE', 'roomote-worker:local');
+    vi.stubEnv('MODAL_BASE_IMAGE_REF', '');
+
+    await expect(
+      saveSetupNewComputeConfigCommand(buildMockAuth(), {
+        provider: 'modal',
+        values: {
+          MODAL_TOKEN_ID: 'token-id',
+          MODAL_TOKEN_SECRET: 'token-secret',
+          MODAL_BASE_IMAGE_REF: 'registry.example.com/fake-manual:tag',
+        },
+      }),
+    ).rejects.toThrow(
+      'Enter the required Modal configuration values to continue.',
+    );
+
+    expect(mockUpsertDeploymentEnvironmentVariables).not.toHaveBeenCalled();
+  });
+
   it('does not override a runtime-configured base image ref', async () => {
     vi.stubEnv(
       'DOCKER_WORKER_IMAGE',

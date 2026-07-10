@@ -1464,7 +1464,12 @@ export async function saveSetupNewComputeConfigCommand(
           return false;
         }
 
-        const submitted = input.values?.[field.envVarName]?.trim() ?? '';
+        // Modal base image is not form-collected; only runtime / saved / derived
+        // values count toward satisfaction (same as the save loop above).
+        const submitted =
+          field.envVarName === 'MODAL_BASE_IMAGE_REF'
+            ? ''
+            : (input.values?.[field.envVarName]?.trim() ?? '');
         const nextValue =
           submitted ||
           (isComputeInfrastructureField(field)
