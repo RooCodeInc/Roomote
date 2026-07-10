@@ -17,7 +17,7 @@ type ScheduledSuggestionSummaryPromptConfig = {
 };
 
 type ScheduledSuggestionSurfaceConfig = {
-  agentType:
+  suggestionType:
     | 'suggested_tasks'
     | 'sentry_triage'
     | 'dependabot_triage'
@@ -36,7 +36,7 @@ type ScheduledSuggestionSurfaceConfig = {
 };
 
 export type ScheduledSuggestionSlackConfig = {
-  agentType: ScheduledSuggestionSurfaceConfig['agentType'];
+  suggestionType: ScheduledSuggestionSurfaceConfig['suggestionType'];
   automationSettingsHash: string;
   actionFooterText: string;
   summaryKind: ScheduledSuggestionSurfaceConfig['summaryKind'];
@@ -60,7 +60,7 @@ const SCHEDULED_SUGGESTION_SURFACE_CONFIG: Record<
   ScheduledSuggestionSurfaceConfig
 > = {
   suggester: {
-    agentType: 'suggested_tasks',
+    suggestionType: 'suggested_tasks',
     summaryKind: 'suggested_tasks',
     actionFooterText:
       "I pulled the most useful follow-up ideas into the thread for review.\nReact with a :thumbsup: on any idea and I'll start it.",
@@ -80,7 +80,7 @@ const SCHEDULED_SUGGESTION_SURFACE_CONFIG: Record<
     },
   },
   sentry_triage: {
-    agentType: 'sentry_triage',
+    suggestionType: 'sentry_triage',
     summaryKind: 'sentry_triage',
     actionFooterText:
       'I pulled the most useful Sentry follow-ups into the thread for review.',
@@ -100,7 +100,7 @@ const SCHEDULED_SUGGESTION_SURFACE_CONFIG: Record<
     },
   },
   dependabot_triage: {
-    agentType: 'dependabot_triage',
+    suggestionType: 'dependabot_triage',
     summaryKind: 'dependabot_triage',
     actionFooterText:
       'I pulled the strongest update candidates into the thread for review.',
@@ -120,7 +120,7 @@ const SCHEDULED_SUGGESTION_SURFACE_CONFIG: Record<
     },
   },
   security_auditor: {
-    agentType: 'security_auditor',
+    suggestionType: 'security_auditor',
     summaryKind: 'security_auditor',
     actionFooterText:
       'I pulled the highest-value security follow-ups into the thread for review.',
@@ -140,7 +140,7 @@ const SCHEDULED_SUGGESTION_SURFACE_CONFIG: Record<
     },
   },
   code_quality_auditor: {
-    agentType: 'code_quality_auditor',
+    suggestionType: 'code_quality_auditor',
     summaryKind: 'code_quality_auditor',
     actionFooterText:
       'I pulled the highest-leverage code quality follow-ups into the thread for review.',
@@ -161,7 +161,7 @@ const SCHEDULED_SUGGESTION_SURFACE_CONFIG: Record<
     },
   },
   ci_failure_triage: {
-    agentType: 'ci_failure_triage',
+    suggestionType: 'ci_failure_triage',
     summaryKind: 'ci_failure_triage',
     actionFooterText:
       'Each fix runs as its own task and reports back here when it finishes.',
@@ -233,7 +233,7 @@ export function resolveScheduledSuggestionSlackConfig(
   }
 
   return {
-    agentType: surfaceConfig.agentType,
+    suggestionType: surfaceConfig.suggestionType,
     automationSettingsHash,
     actionFooterText: surfaceConfig.actionFooterText,
     summaryKind: surfaceConfig.summaryKind,

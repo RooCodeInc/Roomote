@@ -234,10 +234,10 @@ export function parseSelection(
 }
 
 /**
- * Start the elicitation fallback flow for agent/workspace selection
+ * Start the elicitation fallback flow for workspace selection
  *
  * This is called when LLM routing is unavailable and we need to ask the user
- * to select a workspace for the default Generalist path.
+ * to select a workspace for the standard delegated-task path.
  */
 export async function startElicitationFallback({
   sessionId,
@@ -278,7 +278,7 @@ export async function startElicitationFallback({
 }
 
 /**
- * Start the workspace selection step for the delegated Generalist fallback path.
+ * Start the workspace selection step for the standard delegated-task fallback path.
  */
 async function startWorkspaceSelection({
   sessionId,

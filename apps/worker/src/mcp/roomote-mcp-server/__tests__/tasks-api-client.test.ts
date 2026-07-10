@@ -415,11 +415,11 @@ describe('launchTask', () => {
     expect(body.type).toBe('standard');
   });
 
-  it('sends a minimal standard launch payload for implicit Generalist tasks', async () => {
+  it('sends a minimal standard launch payload for implicit standard-workflow tasks', async () => {
     const mockResponse = {
       success: true,
       runId: 100,
-      taskId: 'task-generalist',
+      taskId: 'task-standard',
     };
 
     global.fetch = vi.fn().mockResolvedValueOnce({

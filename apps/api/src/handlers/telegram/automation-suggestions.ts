@@ -78,7 +78,7 @@ export async function postScheduledSuggestionsToTelegram(params: {
     .where(
       and(
         eq(trackedMessages.kind, 'suggestion_card'),
-        sql`${trackedMessages.metadata} ->> 'suggestionType' = ${slackConfig.agentType}`,
+        sql`${trackedMessages.metadata} ->> 'suggestionType' = ${slackConfig.suggestionType}`,
         sql`${trackedMessages.metadata} ->> 'suggestionKey' LIKE ${`${sourceTaskId}:%`}`,
       ),
     )
@@ -149,7 +149,7 @@ export async function postScheduledSuggestionsToTelegram(params: {
           workItemId: suggestion.id,
           createdByUserId,
           metadata: {
-            suggestionType: slackConfig.agentType,
+            suggestionType: slackConfig.suggestionType,
             suggestionKey: `${sourceTaskId}:${suggestion.id}`,
           },
         };

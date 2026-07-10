@@ -6,13 +6,13 @@ import {
   trackedMessages,
   workItems,
 } from '@roomote/db/server';
-import type { BackgroundAgentSuggestionType } from '@roomote/db/server';
+import type { SuggestionType } from '@roomote/db/server';
 import type { McpRecommendation } from '@roomote/cloud-agents/server';
 import type { SlackBlock } from '@roomote/types';
 
 import { SlackNotifier } from './slack-notifier';
 
-export const SETUP_MCP_RECOMMENDATION_AGENT_TYPE: BackgroundAgentSuggestionType =
+export const SETUP_MCP_RECOMMENDATION_SUGGESTION_TYPE: SuggestionType =
   'setup_mcp_recommendation';
 export const SETUP_MCP_RECOMMENDATION_PARENT_TEXT =
   "I scanned your codebase and found some integrations that could make me more helpful. Here's what I'd recommend:";
@@ -400,7 +400,7 @@ export async function postSetupMcpRecommendationsToSlack(params: {
         createdByUserId: row.createdByUserId,
         summaryText: row.title,
         metadata: {
-          suggestionType: SETUP_MCP_RECOMMENDATION_AGENT_TYPE,
+          suggestionType: SETUP_MCP_RECOMMENDATION_SUGGESTION_TYPE,
           suggestionKey: buildTrackedRecommendationKey({
             sourceTaskId: row.sourceTaskId,
             recommendationId: row.recommendationId,

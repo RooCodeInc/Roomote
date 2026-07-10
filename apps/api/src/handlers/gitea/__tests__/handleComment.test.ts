@@ -120,7 +120,7 @@ describe('handleGiteaComment', () => {
       status: 'ok',
       targets: [
         {
-          id: 'gitea:pr_reviewer:repo-1',
+          id: 'gitea:pr_review:repo-1',
           settings: null,
           repositoryIds: ['repo-1'],
           userId: 'user-1',

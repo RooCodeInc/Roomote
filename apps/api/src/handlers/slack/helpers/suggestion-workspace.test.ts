@@ -12,7 +12,7 @@ import {
 describe('buildSuggestionTaskPromptText', () => {
   it('keeps ordinary suggestion prompts generic', () => {
     const prompt = buildSuggestionTaskPromptText({
-      agentType: 'suggested_tasks',
+      suggestionType: 'suggested_tasks',
       title: 'Fix cron retries',
       brief: 'Fix cron retries',
       category: 'bug',
@@ -29,7 +29,7 @@ describe('buildSuggestionTaskPromptText', () => {
 
   it('keeps sentry triage suggestions on the sentry-triage workflow with safety guardrails', () => {
     const prompt = buildSuggestionTaskPromptText({
-      agentType: 'sentry_triage',
+      suggestionType: 'sentry_triage',
       title: 'Merge duplicate API errors',
       brief: 'Merge the duplicate API-42 and API-77 issue groups.',
       readinessMessage: 'Sentry MCP is available.',
@@ -49,7 +49,7 @@ describe('buildSuggestionTaskPromptText', () => {
 
   it('keeps dependabot triage suggestions on the update-dependencies workflow with alert re-verification guidance', () => {
     const prompt = buildSuggestionTaskPromptText({
-      agentType: 'dependabot_triage',
+      suggestionType: 'dependabot_triage',
       title: 'Update braces in apps/api',
       brief: 'Patch the vulnerable braces version in the API workspace.',
       investigationContext: 'Alert: GHSA-123. Manifest: apps/api/package.json.',
@@ -65,7 +65,7 @@ describe('buildSuggestionTaskPromptText', () => {
 
   it('includes workspace readiness when the suggestion falls back to bare repo mode', () => {
     const prompt = buildSuggestionTaskPromptText({
-      agentType: 'suggested_tasks',
+      suggestionType: 'suggested_tasks',
       title: 'Investigate worker queue lag',
       brief: 'Check why the preview worker falls behind.',
       readinessMessage: 'Worker validation is limited without setup.',

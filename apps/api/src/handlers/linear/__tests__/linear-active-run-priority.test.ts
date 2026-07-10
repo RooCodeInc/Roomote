@@ -52,7 +52,6 @@ vi.mock('@roomote/cloud-agents/server', () => ({
   enqueueTask: vi.fn(),
   routeTask: vi.fn(),
   buildLinearRoutingContext: vi.fn(),
-  AGENT_TYPE_TO_PROMPT_NAME: {},
 }));
 
 vi.mock('@roomote/sdk/server', async (importOriginal) => {
@@ -285,7 +284,9 @@ describe('CLO-1133: active task run takes priority over routing confirmation and
   it('delivers free-text reply to active task run even when routing confirmation key exists in Redis', async () => {
     setupDbMocks();
 
-    // Simulate a stale routing confirmation key in Redis
+    // Simulate a stale routing confirmation key in Redis. The legacy
+    // agentName/agentType fields are intentional: payloads written before the
+    // agent-identity removal can still be present and must stay tolerated.
     redisMock.eval.mockResolvedValue(
       JSON.stringify({
         agentName: 'Agent',
