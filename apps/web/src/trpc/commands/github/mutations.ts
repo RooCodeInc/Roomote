@@ -46,10 +46,15 @@ type GitHubAppManifest = {
   setup_url: string;
   public: boolean;
   default_permissions: {
+    actions: 'write';
+    checks: 'write';
     contents: 'write';
+    deployments: 'read';
     issues: 'write';
     metadata: 'read';
     pull_requests: 'write';
+    statuses: 'read';
+    vulnerability_alerts: 'read';
     workflows: 'write';
   };
   default_events: [
@@ -193,10 +198,15 @@ function buildGitHubAppManifest(): GitHubAppManifest {
       active: true,
     },
     default_permissions: {
+      actions: 'write',
+      checks: 'write',
       contents: 'write',
+      deployments: 'read',
       issues: 'write',
       metadata: 'read',
       pull_requests: 'write',
+      statuses: 'read',
+      vulnerability_alerts: 'read',
       workflows: 'write',
     },
     default_events: [
