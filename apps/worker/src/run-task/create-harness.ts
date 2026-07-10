@@ -14,8 +14,11 @@ import {
 } from '../commands/setup/setup-mcps';
 import type { HarnessLogger } from '../logging';
 
+import { captureWorkerException } from '../monitoring/sentry';
+
 import type { RunTaskCallbacks, RunTaskContext } from './types';
 import { buildHarnessCommandEnv } from './harnesses';
+import { createDiagnosticEventRecorder } from './diagnostic-events';
 import { ReconnectableHarness } from './reconnectable-harness';
 import { subscribeHarnessCallbacks } from './subscribe-harness-callbacks';
 
@@ -75,6 +78,11 @@ export async function createHarness({
       .catch(() => {});
   };
 
+  const diagnosticEvents = createDiagnosticEventRecorder({
+    runId: taskRun.id,
+    logger,
+  });
+
   const spawnHarness = async (options?: {
     initialSessionId?: string;
   }): Promise<{ harness: Harness; subprocess: ResultPromise }> => {
@@ -107,6 +115,34 @@ export async function createHarness({
     return await startOpenCodeServerHarness({
       ...commonOptions,
       developerInstructionsContent,
+      onUnexpectedExit: (certificate) => {
+        const summary = `OpenCode server exited unexpectedly (code=${
+          certificate.exitCode ?? 'none'
+        }, signal=${certificate.signal ?? 'none'}) after ${Math.round(
+          certificate.uptimeMs / 1000,
+        )}s`;
+
+        diagnosticEvents.record({
+          kind: 'opencode_unexpected_exit',
+          message: summary,
+          details: {
+            exitCode: certificate.exitCode,
+            signal: certificate.signal,
+            uptimeMs: certificate.uptimeMs,
+            memory: certificate.memory,
+            outputTail: certificate.outputTail,
+          },
+        });
+        captureWorkerException(new Error(summary), {
+          runId: taskRun.id,
+          taskId: taskRun.taskId ?? undefined,
+          component: 'createHarness',
+          stage: 'opencode_unexpected_exit',
+          exitCode: certificate.exitCode,
+          signal: certificate.signal,
+          uptimeMs: certificate.uptimeMs,
+        });
+      },
     });
   };
 
