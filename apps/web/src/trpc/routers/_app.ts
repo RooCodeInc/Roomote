@@ -46,6 +46,7 @@ import {
   getTasksCommand,
   generateTaskSummaryCommand,
   getTaskMessageEnvelopesCommand,
+  getTaskRunEventsCommand,
   getTaskByIdCommand,
   getRecentPullRequestsCommand,
   deleteTasksCommand,
@@ -525,6 +526,10 @@ export const appRouter = createRouter({
     messageEnvelopes: protectedProcedure
       .input(z.object({ taskId: z.string() }))
       .query(({ input }) => getTaskMessageEnvelopesCommand(input)),
+
+    runEvents: protectedProcedure
+      .input(z.object({ taskId: z.string() }))
+      .query(({ input }) => getTaskRunEventsCommand(input)),
 
     generateSummary: protectedProcedure
       .input(z.object({ taskId: z.string() }))
