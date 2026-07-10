@@ -492,6 +492,21 @@ describe('enqueueTask source-control provider stamping', () => {
 });
 
 describe('pr_review queue scope dedup', () => {
+  let previousQueue: CloudJobQueue | null;
+  let queueRedis: InstanceType<typeof Redis>;
+
+  beforeEach(() => {
+    previousQueue = CloudJobQueue.queue;
+    queueRedis = new Redis();
+    CloudJobQueue.queue = new CloudJobQueue({ redis: queueRedis, timeout: 1 });
+  });
+
+  afterEach(async () => {
+    CloudJobQueue.queue = previousQueue;
+    await queueRedis.flushall();
+    queueRedis.disconnect();
+  });
+
   const prLinkage = {
     provider: 'github' as const,
     repository: 'acme/widgets',
@@ -608,5 +623,5 @@ describe('pr_review queue scope dedup', () => {
     const queued = await CloudJobQueue.getInstance().dequeue(false);
     expect(queued).toEqual({ id: newer.id, scope });
     await CloudJobQueue.getInstance().releaseLock(scope, newer.id);
-  }, 15_000);
+  });
 });
