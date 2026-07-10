@@ -18,6 +18,7 @@ export const dynamic = 'force-dynamic';
  */
 const GUID_PATTERN =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const TEAMS_MANIFEST_SHORT_NAME_MAX_LENGTH = 30;
 
 /**
  * Unauthenticated setup-flow variant of `GET /api/teams/app-package`.
@@ -37,6 +38,13 @@ export async function GET(request: Request) {
 
   if (!botAppId || !GUID_PATTERN.test(botAppId)) {
     return new Response(JSON.stringify({ error: 'invalid_bot_app_id' }), {
+      status: 400,
+      headers: { 'content-type': 'application/json' },
+    });
+  }
+
+  if (botName && botName.length > TEAMS_MANIFEST_SHORT_NAME_MAX_LENGTH) {
+    return new Response(JSON.stringify({ error: 'invalid_bot_name' }), {
       status: 400,
       headers: { 'content-type': 'application/json' },
     });

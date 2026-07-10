@@ -115,12 +115,10 @@ export function buildSlackInvocationIdentity(input: {
     mentionText,
     nativeMention,
     deepLinkUrl: null,
-    guidanceName: mentionText ?? nativeMention ?? 'Slack app',
+    guidanceName: mentionText ?? 'Slack app',
     examplePrompt: mentionText
       ? `${mentionText} Add support for a reset password flow.`
-      : nativeMention
-        ? `${nativeMention} Add support for a reset password flow.`
-        : null,
+      : null,
   };
 }
 
@@ -140,18 +138,21 @@ export function buildTeamsInvocationIdentity(
       ? input.configured === true
       : Boolean(displayName?.trim());
   const normalizedName = displayName?.trim() || null;
+  const mentionText = normalizedName
+    ? normalizeMentionHandle(normalizedName)
+    : null;
 
   return {
     provider: 'microsoft',
     label: 'Microsoft Teams',
     configured,
     displayName: normalizedName,
-    mentionText: normalizedName ? normalizeMentionHandle(normalizedName) : null,
+    mentionText,
     nativeMention: null,
     deepLinkUrl: null,
     guidanceName: normalizedName ?? 'Teams bot',
-    examplePrompt: normalizedName
-      ? `@${normalizedName} Add support for a reset password flow.`
+    examplePrompt: mentionText
+      ? `${mentionText} Add support for a reset password flow.`
       : null,
   };
 }
