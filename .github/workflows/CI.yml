@@ -180,7 +180,7 @@ jobs:
     runs-on: blacksmith-4vcpu-ubuntu-2404
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
       - name: Restore an encrypted bundle onto empty volumes
         run: bash deploy/host/tests/backup-restore.integration.sh
 
