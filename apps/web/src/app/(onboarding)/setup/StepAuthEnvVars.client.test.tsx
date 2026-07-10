@@ -275,6 +275,16 @@ function buildAuthSetup(
             satisfiedByEnvVarName: null,
           },
           {
+            envVarName: 'R_TEAMS_BOT_NAME',
+            acceptedEnvVarNames: ['R_TEAMS_BOT_NAME'],
+            label: 'Bot display name',
+            defaultValue: 'Roomote',
+            required: false,
+            runtimeSatisfied: false,
+            savedSatisfied: false,
+            satisfiedByEnvVarName: null,
+          },
+          {
             envVarName: 'R_TEAMS_BOT_TOKEN_ENDPOINT',
             acceptedEnvVarNames: ['R_TEAMS_BOT_TOKEN_ENDPOINT'],
             label: 'Teams Bot Token Endpoint',
@@ -672,6 +682,48 @@ describe('StepAuthEnvVars', () => {
     expect(submittedValues).not.toHaveProperty('R_TEAMS_BOT_APP_ID');
     expect(submittedValues).not.toHaveProperty('R_TEAMS_BOT_APP_PASSWORD');
     expect(submittedValues).not.toHaveProperty('R_TEAMS_BOT_TENANT_ID');
+  });
+
+  it('defaults the Teams bot display name unless it is runtime configured', () => {
+    const authSetup = buildAuthSetup('microsoft');
+
+    const { rerender } = render(
+      <StepAuthEnvVars
+        authSetup={authSetup}
+        selectedProviderId="microsoft"
+        onContinue={vi.fn()}
+      />,
+    );
+
+    const botNameInput = screen.getByPlaceholderText('Bot display name');
+    expect(botNameInput).toHaveValue('Roomote');
+
+    const runtimeConfiguredBotName: SetupAuthStatus = {
+      ...authSetup,
+      providers: authSetup.providers.map((provider) => ({
+        ...provider,
+        fields: provider.fields.map((field) =>
+          field.envVarName === 'R_TEAMS_BOT_NAME'
+            ? {
+                ...field,
+                runtimeSatisfied: true,
+                satisfiedByEnvVarName: 'R_TEAMS_BOT_NAME',
+              }
+            : field,
+        ),
+      })),
+    };
+
+    rerender(
+      <StepAuthEnvVars
+        authSetup={runtimeConfiguredBotName}
+        selectedProviderId="microsoft"
+        onContinue={vi.fn()}
+      />,
+    );
+
+    expect(botNameInput).toBeDisabled();
+    expect(botNameInput).not.toHaveValue('Roomote');
   });
 
   it('links saved Microsoft credentials to the stored app package download', () => {

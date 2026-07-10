@@ -80,10 +80,13 @@ export function getSetupEffectiveFieldValue({
   field: ProviderFieldStatus;
   values: Record<string, string>;
 }) {
-  const ownValue = values[field.envVarName] ?? '';
+  const ownValue = values[field.envVarName];
 
-  if (ownValue.length > 0) {
-    return ownValue;
+  if (
+    (ownValue?.length ?? 0) > 0 ||
+    (ownValue !== undefined && field.defaultValue !== undefined)
+  ) {
+    return ownValue ?? '';
   }
 
   if (field.secret !== true && field.savedValue?.trim()) {
@@ -103,7 +106,9 @@ export function getSetupEffectiveFieldValue({
       field.envVarName as keyof typeof MICROSOFT_SINGLE_APP_TEAMS_BOT_FIELD_SOURCES
     ];
 
-  return sourceEnvVarName ? (values[sourceEnvVarName] ?? '') : '';
+  return sourceEnvVarName
+    ? (values[sourceEnvVarName] ?? field.defaultValue ?? '')
+    : (field.defaultValue ?? '');
 }
 
 export function getSetupSubmitValues({
@@ -179,11 +184,9 @@ function InstructionUrlContent({
       <p className="font-semibold text-foreground text-sm w-45 shrink-0">
         {heading}
       </p>
-      <div className="flex items-center gap-2 rounded-md border border-black px-2 py-1.5 overflow-hidden justify-end">
+      <div className="flex items-center gap-2 rounded-md border border-black px-2 py-1 overflow-hidden justify-end">
         <BasicTooltip content={url}>
-          <span className="font-mono text-xs text-foreground truncate">
-            {url}
-          </span>
+          <span className="text-[0.8em] text-foreground truncate">{url}</span>
         </BasicTooltip>
         <CopyIconButton
           aria-label={`Copy ${heading}`}
@@ -428,33 +431,39 @@ function MicrosoftSetupExperience(props: ProviderSetupExperienceProps) {
         text="Configure Microsoft Teams app"
       />
 
+      <p className="max-w-xl">
+        First, let&apos;s take a deep breath together – MS doesn't make this
+        easy. Second, you may need to ask an admin to do some of this for you.
+      </p>
+
       <NumberedStep number={1} className="mt-6">
         <p className="font-semibold">Create a Microsoft Entra app.</p>
         <div className="space-y-3 max-w-xl">
           <p className="text-sm text-muted-foreground">
-            In Azure App registrations, click New registration → give it a name
-            and the URI below → Register. Register one single-tenant app for
-            both Microsoft sign-in and the Teams bot. Add this Web redirect URI
-            under Authentication, then create a client secret.
-          </p>
-          <InstructionUrl heading="Web redirect URI" url={webRedirectUri} />
-        </div>
-        <div className="mt-2">
-          <Button variant="outline" size="sm">
+            In{' '}
             <a
               href={providerSetupCopy.creationHref}
               target="_blank"
+              className="text-foreground underline font-semibold"
               rel="noopener noreferrer"
             >
-              Go <ExternalLink className="inline size-3 -mt-1 ml-1" />
-            </a>
-          </Button>
+              Azure App registrations{' '}
+              <ExternalLink className="inline size-3 -mt-1 ml-1" />
+            </a>{' '}
+            click New registration → give it a name and the URI below →
+            Register.
+          </p>
+          <InstructionUrl heading="Web redirect URI" url={webRedirectUri} />
         </div>
       </NumberedStep>
 
       <NumberedStep number={2}>
         <p className="font-semibold">
-          Enter the Microsoft app generated values.
+          Enter the Microsoft Entra app generated values.
+        </p>
+        <p className="text-sm text-muted-foreground">
+          Paste the values below. For the secret, you need to create a client
+          secret first.
         </p>
         <ProviderFields fields={fields} {...props} />
         {props.surface === 'settings' ? (
@@ -469,7 +478,17 @@ function MicrosoftSetupExperience(props: ProviderSetupExperienceProps) {
           <p className="font-semibold">Upload Roomote to Microsoft Teams.</p>
           <p className="text-sm text-muted-foreground">
             Download your pre-filled Teams app package (manifest + icons), go to
-            the Teams Developer Portal → Import App.
+            the{' '}
+            <a
+              href="https://dev.teams.microsoft.com/home"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="text-foreground underline font-semibold"
+            >
+              Teams Developer Portal{' '}
+              <ExternalLink className="inline size-3 -mt-1 ml-1" />
+            </a>{' '}
+            → Import App (you may need to ask your admin to do that).
           </p>
           {teamsAppPackageAvailable && props.teamsAppPackageHref ? (
             <div className="flex items-center gap-2">
@@ -479,24 +498,12 @@ function MicrosoftSetupExperience(props: ProviderSetupExperienceProps) {
                   Download Teams app package
                 </a>
               </Button>
-              <Button variant="outline" size="sm">
-                <a
-                  href="https://dev.teams.microsoft.com/home"
-                  target="_blank"
-                  rel="noopener noreferrer"
-                >
-                  Go <ExternalLink className="inline size-3 -mt-1 ml-1" />
-                </a>
-              </Button>
             </div>
           ) : (
             <div className="flex items-center gap-2">
               <Button variant="outline" size="sm" disabled>
                 <Download />
                 Download Teams app package
-              </Button>
-              <Button variant="outline" size="sm" disabled>
-                Go <ExternalLink className="inline size-3 -mt-1 ml-1" />
               </Button>
             </div>
           )}

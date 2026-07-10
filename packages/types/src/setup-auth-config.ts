@@ -11,6 +11,7 @@ export type SetupAuthProviderFieldDescriptor = {
   envVarName: string;
   acceptedEnvVarNames: readonly string[];
   label: string;
+  defaultValue?: string;
   required?: boolean;
   secret?: boolean;
 };
@@ -124,7 +125,8 @@ export const SETUP_AUTH_PROVIDER_CATALOG = [
       {
         envVarName: 'R_TEAMS_BOT_NAME',
         acceptedEnvVarNames: ['R_TEAMS_BOT_NAME'],
-        label: 'Teams Bot Display Name',
+        label: 'Bot display name',
+        defaultValue: 'Roomote',
         required: false,
       },
       {
