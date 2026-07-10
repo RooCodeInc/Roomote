@@ -5,11 +5,12 @@ on:
     branches:
       - develop
 
-# One release automation lane on develop: refresh the Version PR and the
-# develop→main promote PR without cancelling in-flight work.
+# One release automation lane on develop. Cancel superseded runs: every run
+# re-derives state from the live develop tip, so the newest push always redoes
+# the work and a stale queued run can never resurrect an outdated Version PR.
 concurrency:
   group: release-develop
-  cancel-in-progress: false
+  cancel-in-progress: true
 
 permissions:
   contents: write
@@ -28,6 +29,10 @@ jobs:
           # (first-time bootstrap still opens the PR; CI may need a re-run).
           token: ${{ secrets.RELEASE_BOT_TOKEN || secrets.GITHUB_TOKEN }}
           fetch-depth: 0
+          # Work on the live develop tip, not the push SHA that triggered
+          # this run: a queued run that starts after more merges must not
+          # recreate a Version PR from an outdated snapshot.
+          ref: develop
 
       - name: Setup environment
         uses: ./.github/actions/setup-environment
@@ -55,8 +60,9 @@ jobs:
         with:
           token: ${{ secrets.RELEASE_BOT_TOKEN || secrets.GITHUB_TOKEN }}
           fetch-depth: 0
+          ref: develop
 
-      - name: Open develop → main promote PR when version is releaseable
+      - name: Cut frozen release branch and open promote PR
         env:
           GH_TOKEN: ${{ secrets.RELEASE_BOT_TOKEN || secrets.GITHUB_TOKEN }}
         shell: bash
@@ -72,22 +78,30 @@ jobs:
             exit 0
           fi
 
-          pending="$(find .changeset -maxdepth 1 -type f -name '*.md' ! -iname 'README.md' 2>/dev/null | wc -l | tr -d ' ')"
-          if [ "${pending:-0}" -gt 0 ]; then
-            echo "Pending changesets remain; wait for the Version Packages PR to merge."
-            exit 0
-          fi
-
-          git fetch origin main develop --quiet
+          git fetch origin main --quiet
 
           if ! git show-ref --verify --quiet refs/remotes/origin/main; then
             echo "origin/main is missing; create main before promoting."
             exit 1
           fi
 
-          if [ "$(git rev-parse origin/main)" = "$(git rev-parse origin/develop)" ]; then
-            echo "main already matches develop tip."
+          # Freeze the release at the commit that introduced this version
+          # (the Version PR merge), not at the moving develop tip. Commits
+          # merged to develop after that point wait for the next cut instead
+          # of silently riding into this release.
+          bump_sha="$(node scripts/release/find-version-commit.mjs "$version" HEAD)"
+
+          if git merge-base --is-ancestor "$bump_sha" origin/main; then
+            echo "main already contains ${bump_sha}; nothing to promote."
             exit 0
+          fi
+
+          release_branch="release/${tag}"
+          if git ls-remote --exit-code --heads origin "$release_branch" >/dev/null 2>&1; then
+            echo "Release branch ${release_branch} already exists; leaving it frozen."
+          else
+            git push origin "${bump_sha}:refs/heads/${release_branch}"
+            echo "Cut ${release_branch} at ${bump_sha}"
           fi
 
           notes="$(node scripts/release/extract-changelog-section.mjs "$version" || true)"
@@ -95,10 +109,12 @@ jobs:
           {
             echo "## Promote ${tag}"
             echo
-            echo "develop is ahead of main and product version \`${version}\` is not tagged yet."
+            echo "Frozen at \`${bump_sha}\` — the commit where \`${version}\` was versioned. Commits merged to \`develop\` after that point ship in the next release."
             echo
             echo "- Merge this PR with a **merge commit** (do not squash or rebase)."
+            echo "- If multiple promote PRs are open, merge them in version order (oldest first)."
             echo "- Merging publishes a GitHub Release for \`${tag}\` and triggers the existing GHCR \`v*\` image publish (\`latest\` channel)."
+            echo "- The \`${release_branch}\` branch can be deleted after this PR merges."
             echo
             echo "### Changelog"
             echo
@@ -109,7 +125,7 @@ jobs:
             fi
           } > "$body_file"
 
-          existing="$(gh pr list --base main --head develop --state open --json number,url --jq '.[0].url // empty')"
+          existing="$(gh pr list --base main --head "$release_branch" --state open --json number,url --jq '.[0].url // empty')"
           if [ -n "$existing" ]; then
             echo "Promote PR already open: $existing"
             gh pr edit "$existing" --title "Promote ${tag} to production" --body-file "$body_file"
@@ -119,7 +135,7 @@ jobs:
 
           gh pr create \
             --base main \
-            --head develop \
+            --head "$release_branch" \
             --title "Promote ${tag} to production" \
             --body-file "$body_file"
           rm -f "$body_file"
