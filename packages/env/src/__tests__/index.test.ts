@@ -79,6 +79,7 @@ describe('Env', () => {
     delete runtimeEnv.ARTIFACT_SIGNING_KEY_PREVIOUS;
     delete runtimeEnv.SANDBOX_OIDC_PUBLIC_KEY_SECONDARY;
     delete runtimeEnv.PREVIEW_TOKEN_TTL_SECONDS;
+    delete runtimeEnv.API_HEALTH_RATE_LIMIT_PER_MINUTE;
     delete runtimeEnv.SKIP_ENV_VALIDATION;
 
     try {
@@ -114,6 +115,7 @@ describe('Env', () => {
       expect(env.S3_SECRET_ACCESS_KEY).toBe('roomote-local-artifacts-password');
       expect(env.S3_BUCKET_ARTIFACTS).toBe('roomote-artifacts');
       expect(env.PREVIEW_TOKEN_TTL_SECONDS).toBe(3600);
+      expect(env.API_HEALTH_RATE_LIMIT_PER_MINUTE).toBe(60);
     } finally {
       if (previousSkipEnvValidation === undefined) {
         delete process.env.SKIP_ENV_VALIDATION;

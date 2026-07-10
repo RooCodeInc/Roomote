@@ -6,6 +6,7 @@ vi.mock('@roomote/env', async (importOriginal) => {
     Env: {
       ...actual.Env,
       API_SLOW_REQUEST_THRESHOLD_MS: 0,
+      API_HEALTH_RATE_LIMIT_PER_MINUTE: 2,
     },
   };
 });
@@ -46,6 +47,38 @@ describe('api live server integration', () => {
   afterEach(() => {
     resetRequestEndpointMetricsForTests();
     vi.restoreAllMocks();
+  });
+
+  it('serves the /health alias with a public payload and rate limits only that path', async () => {
+    const baseUrl = requireApi().baseUrl;
+
+    for (let i = 0; i < 2; i += 1) {
+      const response = await fetch(`${baseUrl}/health`);
+
+      expect([200, 503]).toContain(response.status);
+
+      const payload = (await response.json()) as Record<string, unknown>;
+
+      // Unauthenticated callers get only the redacted public fields.
+      expect(Object.keys(payload).sort()).toEqual([
+        'ok',
+        'server',
+        'timestamp',
+      ]);
+      expect(payload.server).toBe('api');
+    }
+
+    const limited = await fetch(`${baseUrl}/health`);
+
+    expect(limited.status).toBe(429);
+    expect(limited.headers.get('retry-after')).toMatch(/^\d+$/);
+    await expect(limited.json()).resolves.toEqual({
+      error: 'Too many requests',
+    });
+
+    const unlimitedSibling = await fetch(`${baseUrl}/health/liveness`);
+
+    expect(unlimitedSibling.status).toBe(200);
   });
 
   it('rejects unauthenticated cloud job log requests over HTTP', async () => {

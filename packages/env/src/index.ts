@@ -208,6 +208,13 @@ const serverSchema = {
     .int()
     .positive()
     .default(2_000),
+  // Per-client-IP request budget for the API's `/health` alias (requests per
+  // minute, in-memory per process). 0 disables the limiter.
+  API_HEALTH_RATE_LIMIT_PER_MINUTE: z.coerce
+    .number()
+    .int()
+    .nonnegative()
+    .default(60),
 };
 
 const clientSchema = {

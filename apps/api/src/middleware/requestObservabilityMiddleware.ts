@@ -7,6 +7,7 @@ import { recordRequestEndpointMetric } from '../monitoring/request-endpoint-metr
 
 const EXCLUDED_REQUEST_METRICS_PATHS = new Set([
   '/',
+  '/health',
   '/health/api',
   '/health/liveness',
   '/health/controller',

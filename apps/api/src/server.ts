@@ -27,6 +27,7 @@ import { resolveApiCorsOrigin } from './cors';
 import { createSingleLineWarnLogger } from './logging';
 import { captureApiException } from './monitoring/sentry';
 import {
+  healthRateLimitMiddleware,
   requestObservabilityMiddleware,
   tokenAuthMiddleware,
 } from './middleware';
@@ -139,6 +140,12 @@ export function createApiApp(): ApiApp {
 
   app.use('*', requestObservabilityMiddleware);
 
+  // Basic per-client-IP budget for the `/health` alias only. Runs before the
+  // auth stack so limited requests skip token validation. The `/`,
+  // `/health/api`, and `/health/liveness` mounts stay unlimited for external
+  // monitors and deployment healthchecks.
+  app.use('/health', healthRateLimitMiddleware());
+
   const corsOptions = {
     origin: resolveApiCorsOrigin,
     credentials: true,
@@ -168,6 +175,7 @@ export function createApiApp(): ApiApp {
    */
 
   app.route('/', apiHealth);
+  app.route('/health', apiHealth);
   app.route('/health/api', apiHealth);
   app.route('/health/liveness', apiLiveness);
   app.route('/health/controller', controllerHealth);

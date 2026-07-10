@@ -15,6 +15,7 @@ import {
   toHealthCheckLogEntry,
 } from './diagnostics';
 import { buildHealthResponse } from './response';
+import { resolveAppVersion } from './version';
 
 export const apiHealth = new Hono<{ Variables: Variables }>();
 
@@ -22,74 +23,40 @@ apiHealth.get('/', async (c) => {
   const requestStartedAt = Date.now();
   const slowThresholdMs = Env.API_SLOW_REQUEST_THRESHOLD_MS;
 
-  const dbCheck = await runTimedHealthCheck('db', async () => {
-    try {
-      await db.execute('SELECT 1');
-      return {
-        ok: true,
-        error: undefined as string | undefined,
-        responseError: undefined as string | undefined,
-      };
-    } catch (error) {
-      return {
-        ok: false,
-        error: getHealthCheckErrorMessage(error),
-        responseError: getHealthCheckResponseErrorMessage(error),
-      };
-    }
-  });
-
-  if (!dbCheck.value.ok) {
-    logHealthCheckDiagnostics({
-      route: c.req.path,
-      totalDurationMs: Date.now() - requestStartedAt,
-      slowThresholdMs,
-      checks: [
-        toHealthCheckLogEntry({
-          check: dbCheck,
-          ok: dbCheck.value.ok,
-          error: dbCheck.value.error,
-        }),
-      ],
-    });
-
-    return c.json(
-      buildHealthResponse(
-        c,
-        {
-          server: 'api',
+  const [dbCheck, redisCheck] = await Promise.all([
+    runTimedHealthCheck('db', async () => {
+      try {
+        await db.execute('SELECT 1');
+        return {
+          ok: true,
+          error: undefined as string | undefined,
+          responseError: undefined as string | undefined,
+        };
+      } catch (error) {
+        return {
           ok: false,
-          timestamp: new Date().toISOString(),
-        },
-        {
-          environment: { NODE_ENV: Env.NODE_ENV, APP_ENV: Env.APP_ENV },
-          monitoring: {
-            longLivedProxyStreams: getLongLivedProxyStreamHealthSnapshot(),
-            requestEndpointMetrics: getRequestEndpointMetricsSnapshot(),
-          },
-          error: dbCheck.value.responseError,
-        },
-      ),
-      { status: 503 },
-    );
-  }
-
-  const redisCheck = await runTimedHealthCheck('redis', async () => {
-    try {
-      await getRedis().ping();
-      return {
-        ok: true,
-        error: undefined as string | undefined,
-        responseError: undefined as string | undefined,
-      };
-    } catch (error) {
-      return {
-        ok: false,
-        error: getHealthCheckErrorMessage(error),
-        responseError: getHealthCheckResponseErrorMessage(error),
-      };
-    }
-  });
+          error: getHealthCheckErrorMessage(error),
+          responseError: getHealthCheckResponseErrorMessage(error),
+        };
+      }
+    }),
+    runTimedHealthCheck('redis', async () => {
+      try {
+        await getRedis().ping();
+        return {
+          ok: true,
+          error: undefined as string | undefined,
+          responseError: undefined as string | undefined,
+        };
+      } catch (error) {
+        return {
+          ok: false,
+          error: getHealthCheckErrorMessage(error),
+          responseError: getHealthCheckResponseErrorMessage(error),
+        };
+      }
+    }),
+  ]);
 
   const ok = dbCheck.value.ok && redisCheck.value.ok;
   const error = dbCheck.value.responseError ?? redisCheck.value.responseError;
@@ -121,6 +88,7 @@ apiHealth.get('/', async (c) => {
         timestamp: new Date().toISOString(),
       },
       {
+        version: resolveAppVersion(),
         environment: { NODE_ENV: Env.NODE_ENV, APP_ENV: Env.APP_ENV },
         monitoring: {
           longLivedProxyStreams: getLongLivedProxyStreamHealthSnapshot(),
