@@ -20,6 +20,17 @@ describe('Slack app manifest builder', () => {
     });
   });
 
+  it('marks the bot user as always online', () => {
+    const manifest = buildSlackAppManifest({
+      publicOrigin: 'https://roomote.example.com',
+    });
+
+    expect(manifest.features.bot_user).toEqual({
+      display_name: 'Roomote',
+      always_online: true,
+    });
+  });
+
   it('includes Slack OAuth callback URLs from the deployment origin', () => {
     const manifest = buildSlackAppManifest({
       publicOrigin: 'https://roomote.example.com/',
