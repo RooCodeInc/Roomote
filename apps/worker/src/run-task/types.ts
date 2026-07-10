@@ -2,11 +2,12 @@ import type {
   AcpRequestUserInputAnswers,
   AcpRequestUserInputPayload,
   AcpRequestUserInputResponsePayload,
-  CloudTaskStatus,
+  RunStatus,
   CommunicationProvider,
   EnvironmentConfig,
+  RequestedWorkKind,
 } from '@roomote/types';
-import type { CloudJob, DequeuedCloudJob } from '@roomote/sdk/client';
+import type { Run, DequeuedCloudJob } from '@roomote/sdk/client';
 
 import type {
   TaskPhase,
@@ -18,6 +19,17 @@ import type { HarnessLogger } from '../logging';
 import type { RepoLocalSkill } from '../workspace/repo-local-skills';
 
 export type RunTaskContext = Record<string, unknown>;
+
+/**
+ * Task-level channel bindings from the SDK dequeue/resume response's `task`
+ * object. These live on the tasks row and are the preferred source for
+ * Slack/Linear routing decisions; payload-derived extraction remains the
+ * fallback for payloads that predate the task columns.
+ */
+type TaskChannelBindings = Pick<
+  DequeuedCloudJob['task'],
+  'slackChannelId' | 'slackThreadTs' | 'linearSessionId'
+>;
 
 type Todo = {
   id: string;
@@ -87,19 +99,19 @@ export type CallbackEvent =
 
 export type RunTaskCallbacks = {
   onStart?: (
-    cloudJob: CloudJob,
+    cloudJob: Run,
     taskId: string,
     context: RunTaskContext,
   ) => Promise<void>;
   onMessage?: (
-    cloudJob: CloudJob,
+    cloudJob: Run,
     taskId: string,
     event: CallbackEvent,
     context: RunTaskContext,
   ) => Promise<void>;
   onExit?: (
-    cloudJob: CloudJob,
-    status: CloudTaskStatus,
+    cloudJob: Run,
+    status: RunStatus,
     context: RunTaskContext,
   ) => Promise<void>;
 };
@@ -123,6 +135,19 @@ export type RunTaskOptions = {
    * task-scoped environment guidance.
    */
   harnessInstructions?: string;
+  /**
+   * Requested work kind stamped on the task at enqueue. Lives on the tasks
+   * row and is supplied by the SDK dequeue/resume response
+   * (`requestedWorkKind` top-level convenience field, mirrored on `task`).
+   * Used only to pick the initial workflow phase.
+   */
+  requestedWorkKind?: RequestedWorkKind | null;
+  /**
+   * Task-level channel bindings from the SDK dequeue/resume response.
+   * Preferred over payload-derived extraction for Slack/Linear polling and
+   * drain gates; payload extraction remains the fallback.
+   */
+  task?: TaskChannelBindings;
   /**
    * Deployment-wide agent behavior instructions configured in admin
    * settings. When provided, these are merged into the startup
@@ -198,6 +223,12 @@ export type RunTaskState = TaskState &
 
 export interface ListenerOptions {
   cloudJob: DequeuedCloudJob['cloudJob'];
+  /**
+   * Task-level channel bindings from the SDK dequeue/resume response.
+   * Preferred over payload-derived extraction when deciding which polling
+   * intervals to start; payload extraction remains the fallback.
+   */
+  task?: TaskChannelBindings;
   state: RunTaskState;
   logger: HarnessLogger;
   workingDirectory: string;

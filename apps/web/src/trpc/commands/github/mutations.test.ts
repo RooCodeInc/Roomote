@@ -286,9 +286,20 @@ describe('GitHub App manifest commands', () => {
   });
 
   it('uses the GITHUB_APP_SLUG alias when building the install URL', async () => {
-    mockResolveDeploymentEnvVar.mockImplementation(async (name: string) =>
-      name === 'GITHUB_APP_SLUG' ? 'aliased-roomote-app' : null,
-    );
+    mockResolveDeploymentEnvVar.mockImplementation(async (name: string) => {
+      switch (name) {
+        case 'GITHUB_APP_SLUG':
+          return 'aliased-roomote-app';
+        case 'GITHUB_APP_ID':
+        case 'GITHUB_APP_PRIVATE_KEY':
+        case 'GITHUB_CLIENT_ID':
+        case 'GITHUB_CLIENT_SECRET':
+        case 'GITHUB_WEBHOOK_SECRET':
+          return 'configured-value';
+        default:
+          return null;
+      }
+    });
 
     const result = await startCreateGitHubInstallationCommand(buildMockAuth(), {
       redirect: '/setup?step=source-control-connect',
@@ -307,6 +318,67 @@ describe('GitHub App manifest commands', () => {
       'NEXT_PUBLIC_GITHUB_APP_SLUG',
     );
     expect(mockResolveDeploymentEnvVar).toHaveBeenCalledWith('GITHUB_APP_SLUG');
+  });
+
+  it('refuses to start installation when GitHub App credentials are not configured', async () => {
+    mockResolveDeploymentEnvVar.mockResolvedValue(null);
+
+    const result = await startCreateGitHubInstallationCommand(buildMockAuth(), {
+      redirect: '/settings?tab=source-control',
+    });
+
+    expect(result).toEqual({
+      success: false,
+      error:
+        'Configure a GitHub App for this deployment before installing. Create one or enter its credentials first.',
+    });
+  });
+
+  it('preserves the caller redirect after finishing app manifest creation', async () => {
+    mockFetch.mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          id: 12345,
+          slug: 'created-roomote-app',
+          client_id: 'client-id-value',
+          client_secret: 'client-secret-value',
+          webhook_secret: 'webhook-secret-value',
+          pem: '-----BEGIN RSA PRIVATE KEY-----\ntest\n-----END RSA PRIVATE KEY-----',
+        }),
+        { status: 201 },
+      ),
+    );
+    mockResolveDeploymentEnvVar.mockImplementation(async (name: string) => {
+      switch (name) {
+        case 'NEXT_PUBLIC_GITHUB_APP_SLUG':
+          return 'created-roomote-app';
+        case 'GITHUB_APP_ID':
+        case 'GITHUB_APP_PRIVATE_KEY':
+        case 'GITHUB_CLIENT_ID':
+        case 'GITHUB_CLIENT_SECRET':
+        case 'GITHUB_WEBHOOK_SECRET':
+          return 'configured-value';
+        default:
+          return null;
+      }
+    });
+
+    const result = await finishCreateGitHubAppManifestCommand(buildMockAuth(), {
+      code: 'manifest-code',
+      redirect: '/settings?tab=source-control',
+    });
+
+    expect(result.success).toBe(true);
+
+    if (!result.success) {
+      return;
+    }
+
+    const installUrl = new URL(result.installUrl);
+    expect(decodeRecord(installUrl.searchParams.get('state') ?? '')).toEqual({
+      mode: 'github-app-install',
+      redirect: '/settings?tab=source-control',
+    });
   });
 
   it('returns a user-facing error and does not save env vars when conversion fails', async () => {

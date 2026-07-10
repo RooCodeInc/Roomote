@@ -12,10 +12,10 @@ below.
 | One-command install        | `curl get.roomote.dev \| bash`     | Fresh server, guided browser setup, published images (start here)                                          |
 | Local development          | `pnpm dev`                         | Fast source edits with PM2-managed local services                                                          |
 | Single-host production     | `docker compose ... up -d --build` | Put web, API, controller, queues, preview proxy, and Caddy on one host                                     |
-| Railway (PaaS)             | Railway template                   | Managed platform deploy with hosted compute; see [deploy/railway](deploy/railway/README.md)                |
-| Render (PaaS)              | Render Blueprint                   | Managed platform deploy with hosted compute; see [deploy/render](deploy/render/README.md)                  |
+| Railway (PaaS)             | Railway template                   | Managed platform deploy with hosted sandboxes; see [deploy/railway](deploy/railway/README.md)                |
+| Render (PaaS)              | Render Blueprint                   | Managed platform deploy with hosted sandboxes; see [deploy/render](deploy/render/README.md)                  |
 | Coolify (self-hosted PaaS) | Docker Compose resource            | Run the published images on a Coolify-managed server; see [deploy/coolify](deploy/coolify/README.md)       |
-| Fly.io (PaaS)              | `flyctl` + maintained `fly.toml`   | One Fly app with managed Postgres/Redis/storage and hosted compute; see [deploy/fly](deploy/fly/README.md) |
+| Fly.io (PaaS)              | `flyctl` + maintained `fly.toml`   | One Fly app with managed Postgres/Redis/storage and hosted sandboxes; see [deploy/fly](deploy/fly/README.md) |
 
 The application stack is web, API, controller, BullMQ, preview proxy,
 Postgres, Redis, and MinIO artifact storage. The production overlay adds Caddy
@@ -108,8 +108,8 @@ your sign-in provider's redirect URLs.
 - A model provider account and API key.
 - A GitHub App installed on the repositories Roomote should use.
 - At least one sign-in provider: Slack or Microsoft Teams.
-- Docker socket access for the default single-host Docker compute provider, or
-  a hosted compute provider such as Vercel Sandbox or Modal.
+- Docker socket access for the default single-host Docker sandbox provider, or
+  a hosted sandbox provider such as Vercel Sandbox or Modal.
 - Optional Slack and Linear apps if you want those integrations.
 
 For production-style use, also prepare:
@@ -204,7 +204,7 @@ delegate screenshot, diagram, chart, rendered-document, and other visual
 inspection through it:
 
 ```sh
-ROOMOTE_VISION_MODEL=openrouter/openai/gpt-5.5
+ROOMOTE_VISION_MODEL=openrouter/openai/gpt-5.6-sol
 ```
 
 Set `ROOMOTE_CODE_REVIEW_MODEL` when pull request and merge request review
@@ -213,7 +213,7 @@ should use a different model from the active coding model. When unset, those
 review flows fall back to the default coding model:
 
 ```sh
-ROOMOTE_CODE_REVIEW_MODEL=openrouter/openai/gpt-5.5
+ROOMOTE_CODE_REVIEW_MODEL=openrouter/openai/gpt-5.6-sol
 ```
 
 Set `ROOMOTE_EXPLORE_MODEL` when read-only codebase exploration through the
@@ -221,7 +221,7 @@ OpenCode `explore` subagent should use a different model from the active coding
 model. When unset, exploration falls back to the task's active coding model:
 
 ```sh
-ROOMOTE_EXPLORE_MODEL=openrouter/openai/gpt-5.4-mini
+ROOMOTE_EXPLORE_MODEL=openrouter/openai/gpt-5.6-luna
 ```
 
 The provider is the first segment of the model id. Roomote forwards these
@@ -505,7 +505,7 @@ docker compose --env-file .env.production \
 
 `DEFAULT_COMPUTE_PROVIDER=docker` runs task workers as sibling Docker
 containers on the same host. Include `docker-compose.compute-docker.yml` when
-using Docker compute. That overlay:
+using Docker sandboxes. That overlay:
 
 - builds the `DOCKER_WORKER_IMAGE` from `apps/worker/Dockerfile`;
 - mounts `/var/run/docker.sock` into the controller;
@@ -515,7 +515,7 @@ using Docker compute. That overlay:
 - points `DOCKER_WORKER_RELEASE_PATH` at the controller image's packaged worker
   release archive.
 
-Docker compute is the simplest single-host deployment path:
+Docker sandboxes are the simplest single-host deployment path:
 
 ```sh
 DEFAULT_COMPUTE_PROVIDER=docker
@@ -548,7 +548,7 @@ DAYTONA_SNAPSHOT_NAME=...
 
 `E2B_TEMPLATE_ID` and `DAYTONA_SNAPSHOT_NAME` can also be provisioned
 automatically during setup when a registry-qualified `DOCKER_WORKER_IMAGE`
-is configured — the setup wizard and the Settings → Compute page build the
+is configured — the setup wizard and the Settings → Sandboxes page build the
 worker base artifact in your provider account after credentials are saved.
 
 For quick-install and V1 deployer-managed hosts, leave `MODAL_BASE_IMAGE_REF`
@@ -574,7 +574,74 @@ MODAL_ENVIRONMENT=...
 MODAL_APP_NAME=...
 MODAL_ECR_OIDC_ROLE_ARN=...
 MODAL_ECR_REGION=...
+# Optional sandbox placement regions (comma-separated Modal tokens)
+MODAL_REGIONS=us
 ```
+
+## Declarative Environments
+
+Environments are normally created through the `/setup` wizard or
+Settings → Environments. Deployments that are managed as infrastructure as
+code can instead provision environments from declarative definitions at
+startup, without any human intervention:
+
+- `ROOMOTE_ENVIRONMENTS_DIR` — a directory of environment definition files
+  (`*.yaml`, `*.yml`, or `*.json`), one environment per file. Mount it into
+  the api container:
+
+  ```yaml
+  # docker-compose override for the api service
+  volumes:
+    - ./environments:/roomote/environments:ro
+  ```
+
+  ```sh
+  ROOMOTE_ENVIRONMENTS_DIR=/roomote/environments
+  ```
+
+- `ROOMOTE_ENVIRONMENTS_YAML` — one or more inline YAML documents (separated
+  by `---`) in a single env var, for platforms where mounting files is
+  awkward (Railway, Render, Fly, and similar).
+
+Each definition uses exactly the same YAML format as the environment editor's
+YAML view (`name`, `repositories`, `services`, `ports`, commands, and so on),
+so definitions copy/paste between the UI and the files. See
+[`.roomote/environments/roomote.yaml`](.roomote/environments/roomote.yaml) in
+this repository — Roomote's own environment definition — for a complete
+working example.
+
+Semantics:
+
+- The definition set is applied on every API startup. The environment name is
+  the identity key: missing environments are created, existing ones are
+  updated. Identical re-applies are no-ops.
+- **The declarative definition wins.** Environments provisioned this way stay
+  editable in the UI (they show a "Managed from file" badge), but edits are
+  overwritten the next time the deployment restarts and re-applies the file.
+  Every overwrite is recorded in the environment's config version history.
+- **Nothing is ever deleted.** Removing a definition returns its environment
+  to normal manual management; it keeps all data and loses only the badge.
+- Renaming `name` inside a definition creates a new environment under the new
+  name and orphans the old one.
+- Definitions may reference repositories that are not linked to the
+  deployment yet (for example before the GitHub App is installed). The
+  environment is created anyway and repository mappings backfill on the next
+  startup after the repositories are linked.
+- Invalid definitions are skipped with a logged error; they never prevent the
+  API from starting or other definitions from applying. A missing or
+  unreadable definitions directory is skipped the same way, so inline
+  `ROOMOTE_ENVIRONMENTS_YAML` definitions still apply. While any definition
+  fails to read or validate, the "removed definition" reconciliation above is
+  deferred, so a temporarily broken file never strips its environment's
+  managed marker.
+- Keep secrets out of definition files: the per-environment `env` map is
+  stored in plaintext. Use deployment environment variables or
+  Settings → Environment Variables for secret values.
+
+If you keep the definitions in a git repository, have your deploy pipeline
+check it out and mount the directory (or inject the content into
+`ROOMOTE_ENVIRONMENTS_YAML`). Roomote deliberately does not fetch remote
+config itself.
 
 ## Verification Checklist
 
@@ -657,7 +724,7 @@ license key functionality may not be disabled or circumvented.
 ## Current Limits
 
 - The first supported production shape is one self-managed host.
-- Docker compute is supported for that single-host shape. It is not a
+- Docker sandboxes are supported for that single-host shape. It is not a
   multi-host scheduler and it relies on trusted controller access to the host
   Docker socket.
 - Production monitoring, backup automation, and secret rotation are operator

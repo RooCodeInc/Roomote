@@ -1,28 +1,28 @@
-import { CloudTaskStatus } from '@roomote/types';
+import { RunStatus } from '@roomote/types';
 
-export const getBootStatus = (status: CloudTaskStatus): string => {
+export const getBootStatus = (status: RunStatus): string => {
   switch (status) {
-    case CloudTaskStatus.Pending:
+    case RunStatus.Pending:
       return 'Pending';
-    case CloudTaskStatus.Dequeued:
+    case RunStatus.Dequeued:
       return 'Dequeued';
-    case CloudTaskStatus.Processing:
+    case RunStatus.Processing:
       return 'Processing';
-    case CloudTaskStatus.Preparing:
+    case RunStatus.Preparing:
       return 'Preparing';
-    case CloudTaskStatus.Spawning:
+    case RunStatus.Spawning:
       return 'Spawning';
-    case CloudTaskStatus.Connecting:
+    case RunStatus.Connecting:
       return 'Connecting';
-    case CloudTaskStatus.Running:
+    case RunStatus.Running:
       return 'Running';
-    case CloudTaskStatus.Idle:
+    case RunStatus.Idle:
       return 'Idle';
-    case CloudTaskStatus.Completed:
+    case RunStatus.Completed:
       return 'Completed';
-    case CloudTaskStatus.Failed:
+    case RunStatus.Failed:
       return 'Failed';
-    case CloudTaskStatus.Canceled:
+    case RunStatus.Canceled:
       return 'Canceled';
     default:
       return `Unknown (${status})`;

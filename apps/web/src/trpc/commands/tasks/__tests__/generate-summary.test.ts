@@ -43,7 +43,7 @@ vi.mock('next/cache', () => ({
 
 vi.mock('@roomote/db/server', () => ({
   db: { select: mockDbSelect.select },
-  tasks: { id: 'id', userId: 'userId', orgId: 'orgId' },
+  tasks: { id: 'id', initiatorUserId: 'initiatorUserId' },
   users: { id: 'id', name: 'name' },
   eq: vi.fn((...args: unknown[]) => args),
   and: vi.fn((...args: unknown[]) => args),

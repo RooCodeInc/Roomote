@@ -1,8 +1,8 @@
 import {
-  backgroundAgentSettings,
   db,
   DEFAULT_SLACK_ACK_EMOJI,
   DEFAULT_SLACK_COMPLETION_EMOJI,
+  deploymentSettings,
   getBackgroundAgentSettingsForDeployment,
   normalizeOptionalSlackEmojiName,
 } from '@roomote/db/server';
@@ -156,14 +156,14 @@ export async function updateVibesSettingsCommand(
   }
 
   await db
-    .insert(backgroundAgentSettings)
+    .insert(deploymentSettings)
     .values({
       id: 'default',
       ...updates,
       updatedAt: now,
     })
     .onConflictDoUpdate({
-      target: backgroundAgentSettings.id,
+      target: deploymentSettings.id,
       set: {
         ...updates,
         updatedAt: now,

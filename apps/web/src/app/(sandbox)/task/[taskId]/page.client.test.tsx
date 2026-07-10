@@ -2,7 +2,7 @@ import type { ReactNode } from 'react';
 import { render, screen } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 
-import { CloudTaskStatus, CloudTaskType } from '@roomote/types';
+import { RunStatus, TaskPayloadKind } from '@roomote/types';
 
 const {
   replaceMock,
@@ -223,9 +223,9 @@ describe('SandboxPage', () => {
       ...baseSession,
       cloudJob: {
         ...baseSession.cloudJob,
-        status: CloudTaskStatus.Failed,
-        type: CloudTaskType.SnapshotResume,
-        sourceCloudJobId: 42,
+        status: RunStatus.Failed,
+        payloadKind: TaskPayloadKind.SnapshotResume,
+        sourceRunId: 42,
         sourceSnapshotId: 'snapshot-123',
       },
       sessionState: 'boot-failed',
@@ -250,8 +250,8 @@ describe('SandboxPage', () => {
       ...baseSession,
       cloudJob: {
         ...baseSession.cloudJob,
-        status: CloudTaskStatus.Failed,
-        type: CloudTaskType.StandardTask,
+        status: RunStatus.Failed,
+        payloadKind: TaskPayloadKind.StandardTask,
       },
       prompt: {
         id: 'prompt-1',

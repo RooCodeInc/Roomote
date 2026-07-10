@@ -1,4 +1,4 @@
-import type { CloudJob } from '@roomote/sdk/client';
+import type { Run } from '@roomote/sdk/client';
 import {
   assertNoReservedEnvironmentPorts,
   getPrimaryPortFromConfig,
@@ -89,7 +89,7 @@ export function buildWorkspacePortMappings(
 }
 
 export function buildServiceContextForPreviewProxy(
-  cloudJob: CloudJob,
+  cloudJob: Run,
   workspace: WorkspaceConfig,
   workerEnv: WorkerEnv,
 ): ServiceContext | undefined {

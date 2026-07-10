@@ -39,24 +39,17 @@ const state = vi.hoisted(() => ({
   ],
   searchParams: '',
   configProviders: [
-    {
-      provider: 'gitlab',
-      fields: [{ runtimeSatisfied: false, savedSatisfied: true }],
-    },
-    {
-      provider: 'gitea',
-      fields: [{ runtimeSatisfied: false, savedSatisfied: true }],
-    },
-    {
-      provider: 'ado',
-      fields: [{ runtimeSatisfied: false, savedSatisfied: true }],
-    },
+    { provider: 'github', configSatisfied: true },
+    { provider: 'gitlab', configSatisfied: true },
+    { provider: 'gitea', configSatisfied: true },
+    { provider: 'ado', configSatisfied: true },
   ],
 }));
 
 const mutations = vi.hoisted(() => ({
   enableGitHub: vi.fn(),
   syncGitHub: vi.fn(),
+  createGitHubAppManifest: vi.fn(),
   syncGitLab: vi.fn(),
   syncGitea: vi.fn(),
   syncAdo: vi.fn(),
@@ -98,6 +91,10 @@ vi.mock('@/hooks/github', () => ({
   useSyncGitHubInstallations: () => ({
     isPending: false,
     mutate: mutations.syncGitHub,
+  }),
+  useCreateGitHubAppManifest: () => ({
+    isPending: false,
+    mutate: mutations.createGitHubAppManifest,
   }),
 }));
 
@@ -207,6 +204,15 @@ vi.mock('@/components/system', () => ({
   Github: (props: SVGProps<SVGSVGElement>) => (
     <svg aria-hidden="true" data-testid="github-icon" {...props} />
   ),
+  Input: (props: React.InputHTMLAttributes<HTMLInputElement>) => (
+    <input {...props} />
+  ),
+  Label: ({
+    children,
+    ...props
+  }: React.LabelHTMLAttributes<HTMLLabelElement>) => (
+    <label {...props}>{children}</label>
+  ),
   Pencil: (props: SVGProps<SVGSVGElement>) => (
     <svg aria-hidden="true" {...props} />
   ),
@@ -214,6 +220,12 @@ vi.mock('@/components/system', () => ({
     <svg aria-hidden="true" {...props} />
   ),
   RefreshCw: (props: SVGProps<SVGSVGElement>) => (
+    <svg aria-hidden="true" {...props} />
+  ),
+  Sparkles: (props: SVGProps<SVGSVGElement>) => (
+    <svg aria-hidden="true" {...props} />
+  ),
+  Spinner: (props: SVGProps<SVGSVGElement>) => (
     <svg aria-hidden="true" {...props} />
   ),
   Select: ({
@@ -286,6 +298,7 @@ describe('SourceControl settings', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     state.searchParams = '';
+    state.gitHubInstallations = [{ id: 'gh-1' }];
     state.gitHubRepositories = [
       {
         id: 'repo-1',
@@ -315,18 +328,10 @@ describe('SourceControl settings', () => {
       },
     ];
     state.configProviders = [
-      {
-        provider: 'gitlab',
-        fields: [{ runtimeSatisfied: false, savedSatisfied: true }],
-      },
-      {
-        provider: 'gitea',
-        fields: [{ runtimeSatisfied: false, savedSatisfied: true }],
-      },
-      {
-        provider: 'ado',
-        fields: [{ runtimeSatisfied: false, savedSatisfied: true }],
-      },
+      { provider: 'github', configSatisfied: true },
+      { provider: 'gitlab', configSatisfied: true },
+      { provider: 'gitea', configSatisfied: true },
+      { provider: 'ado', configSatisfied: true },
     ];
   });
 
@@ -374,6 +379,9 @@ describe('SourceControl settings', () => {
     ).toBeInTheDocument();
     expect(screen.getByTestId('github-icon')).toHaveClass('shrink-0');
     expect(
+      screen.getByTestId('source-control-config-github'),
+    ).toBeInTheDocument();
+    expect(
       screen.getByTestId('source-control-config-gitlab'),
     ).toBeInTheDocument();
     expect(
@@ -382,6 +390,45 @@ describe('SourceControl settings', () => {
     expect(
       screen.queryByRole('button', { name: 'Disable GitHub' }),
     ).not.toBeInTheDocument();
+  });
+
+  it('shows create and manual GitHub App paths when GitHub is not configured', () => {
+    state.gitHubInstallations = [];
+    state.gitHubRepositories = [];
+    state.configProviders = [
+      { provider: 'github', configSatisfied: false },
+      { provider: 'gitlab', configSatisfied: true },
+      { provider: 'gitea', configSatisfied: true },
+      { provider: 'ado', configSatisfied: true },
+    ];
+
+    render(<SourceControl />);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Set it up' }));
+
+    expect(
+      screen.getByRole('button', { name: 'Create GitHub App' }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole('button', { name: 'Enter values manually' }),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByRole('button', { name: 'Connect GitHub' }),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByTestId('source-control-config-github'),
+    ).not.toBeInTheDocument();
+
+    fireEvent.click(
+      screen.getByRole('button', { name: 'Enter values manually' }),
+    );
+
+    expect(
+      screen.getByTestId('source-control-config-github'),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText(/Paste the app slug, App ID, private key/i),
+    ).toBeInTheDocument();
   });
 
   it('shows the recommendation highlight copy when targeted from a setup link', () => {
@@ -456,18 +503,10 @@ describe('SourceControl settings', () => {
   it('shows setup links instead of sync for disconnected token providers', () => {
     state.gitLabRepositories = [];
     state.configProviders = [
-      {
-        provider: 'gitlab',
-        fields: [{ runtimeSatisfied: false, savedSatisfied: false }],
-      },
-      {
-        provider: 'gitea',
-        fields: [{ runtimeSatisfied: false, savedSatisfied: true }],
-      },
-      {
-        provider: 'ado',
-        fields: [{ runtimeSatisfied: false, savedSatisfied: true }],
-      },
+      { provider: 'github', configSatisfied: true },
+      { provider: 'gitlab', configSatisfied: false },
+      { provider: 'gitea', configSatisfied: true },
+      { provider: 'ado', configSatisfied: true },
     ];
 
     render(<SourceControl />);
@@ -493,6 +532,53 @@ describe('SourceControl settings', () => {
     expect(
       screen.queryByRole('button', { name: 'Hide config' }),
     ).not.toBeInTheDocument();
+  });
+
+  it('shows ADO setup instructions when required config is not satisfied', () => {
+    state.adoRepositories = [];
+    state.configProviders = [
+      { provider: 'github', configSatisfied: true },
+      { provider: 'gitlab', configSatisfied: true },
+      { provider: 'gitea', configSatisfied: true },
+      // configSatisfied covers required fields only, so ADO stays
+      // unconfigured even when the optional ADO_TENANT_ID is satisfied via
+      // the ROOMOTE_AUTH_MICROSOFT_TENANT_ID fallback.
+      { provider: 'ado', configSatisfied: false },
+    ];
+
+    render(<SourceControl />);
+
+    expect(
+      screen.queryByRole('button', { name: 'Refresh Azure DevOps' }),
+    ).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Set it up' }));
+
+    expect(
+      screen.getByRole('link', { name: /Azure DevOps personal access token/ }),
+    ).toHaveAttribute('href', 'https://dev.azure.com/_usersSettings/tokens');
+    expect(screen.getByTestId('source-control-config-ado')).toBeInTheDocument();
+  });
+
+  it('keeps every expanded provider form visible when setting up multiple providers', () => {
+    state.giteaRepositories = [];
+    state.adoRepositories = [];
+    state.configProviders = [
+      { provider: 'github', configSatisfied: true },
+      { provider: 'gitlab', configSatisfied: true },
+      { provider: 'gitea', configSatisfied: false },
+      { provider: 'ado', configSatisfied: false },
+    ];
+
+    render(<SourceControl />);
+
+    fireEvent.click(screen.getAllByRole('button', { name: 'Set it up' })[0]!);
+    fireEvent.click(screen.getByRole('button', { name: 'Set it up' }));
+
+    expect(
+      screen.getByTestId('source-control-config-gitea'),
+    ).toBeInTheDocument();
+    expect(screen.getByTestId('source-control-config-ado')).toBeInTheDocument();
   });
 
   it('shows a success toast when pull request delivery is saved', () => {

@@ -18,7 +18,7 @@ vi.mock('../utils', () => ({
   executeJob: executeJobMock,
 }));
 
-import { CloudTaskType } from '@roomote/types';
+import { TaskPayloadKind } from '@roomote/types';
 
 import { run } from '../run';
 
@@ -63,7 +63,7 @@ describe('run', () => {
         jobContext: {
           cloudJob: {
             id: 99,
-            type: CloudTaskType.StandardTask,
+            payloadKind: TaskPayloadKind.StandardTask,
           },
           envVars: {},
           prompt: 'keep this local task open',
@@ -107,7 +107,7 @@ describe('run', () => {
         jobContext: {
           cloudJob: {
             id: 99,
-            type: CloudTaskType.StandardTask,
+            payloadKind: TaskPayloadKind.StandardTask,
           },
           envVars: {},
           prompt: 'proof me',
@@ -140,13 +140,65 @@ describe('run', () => {
     );
   });
 
+  it('forwards the dequeue response requestedWorkKind and task bindings into runTask', async () => {
+    executeJobMock.mockImplementation(async ({ runFn }) => {
+      await runFn({
+        jobContext: {
+          cloudJob: {
+            id: 101,
+            payloadKind: TaskPayloadKind.StandardTask,
+            taskId: 'task-101',
+          },
+          envVars: {},
+          prompt: 'fix the bug',
+          harnessInstructions: undefined,
+          orgAgentInstructions: undefined,
+          styleGuidance: undefined,
+          requestedWorkKind: 'unknown',
+          task: {
+            id: 'task-101',
+            slackChannelId: 'C123',
+            slackThreadTs: '111.222',
+            linearSessionId: null,
+          },
+        },
+        workspace: {
+          environmentConfig: {
+            agentInstructions: undefined,
+          },
+        },
+        workspacePath: '/tmp/workspace',
+        usesSharedWorkspaceRoot: false,
+        callbacks: {},
+        context: {},
+        logger: {} as never,
+        workerEnv: {} as never,
+      });
+
+      return true;
+    });
+
+    await run({ cloudJobId: 101, setupMode: 'full' });
+
+    expect(runTaskMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        requestedWorkKind: 'unknown',
+        task: expect.objectContaining({
+          slackChannelId: 'C123',
+          slackThreadTs: '111.222',
+          linearSessionId: null,
+        }),
+      }),
+    );
+  });
+
   it('forwards workspace readiness warnings into runTask', async () => {
     executeJobMock.mockImplementation(async ({ runFn }) => {
       await runFn({
         jobContext: {
           cloudJob: {
             id: 100,
-            type: CloudTaskType.StandardTask,
+            payloadKind: TaskPayloadKind.StandardTask,
             taskId: 'task-100',
           },
           envVars: {},

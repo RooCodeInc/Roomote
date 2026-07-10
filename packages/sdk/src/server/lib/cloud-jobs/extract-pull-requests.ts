@@ -1,13 +1,12 @@
 import {
   db,
-  cloudJobs,
   taskPullRequests,
+  taskRuns,
   and,
   eq,
-  sql,
   repositories,
 } from '@roomote/db/server';
-import type { CloudJob } from '@roomote/db/server';
+import type { Run } from '@roomote/db/server';
 import { createCloudJobGitHubToken, getOctokit } from '@roomote/github';
 import type { PullRequestStatus } from '@roomote/types';
 import type { ParsedPR } from '../../../pull-request-links';
@@ -29,7 +28,7 @@ export {
  * association as cloud-job PR metadata.
  */
 async function fetchPrDetails(
-  cloudJob: CloudJob,
+  cloudJob: Run,
   owner: string,
   repo: string,
   prNumber: number,
@@ -84,8 +83,8 @@ async function fetchPrDetails(
  * 1. Fetches the PR title from the GitHub API.
  * 2. Inserts into `task_pull_requests` (upsert via onConflictDoNothing
  *    so the same PR URL for a given task is never duplicated).
- * 3. Updates the `cloudJobs` row with `prRepo`, `prNumber`, and the
- *    PR base ref so the association is visible in the dashboard.
+ * 3. Persists the PR base ref/sha on the `task_pull_requests` row itself —
+ *    task_pull_requests is the only PR home; runs carry no PR columns.
  */
 export async function persistDetectedPullRequest({
   taskId,
@@ -96,9 +95,9 @@ export async function persistDetectedPullRequest({
   cloudJobId: number;
   pr: ParsedPR;
 }): Promise<void> {
-  // Load the full cloud job to get installation context for GitHub API.
-  const cloudJob = await db.query.cloudJobs.findFirst({
-    where: eq(cloudJobs.id, cloudJobId),
+  // Load the full run to get installation context for GitHub API.
+  const cloudJob = await db.query.taskRuns.findFirst({
+    where: eq(taskRuns.id, cloudJobId),
   });
 
   const [owner, repoName] = pr.repository.split('/');
@@ -144,6 +143,8 @@ export async function persistDetectedPullRequest({
       prTitle,
       repository: pr.repository,
       status,
+      prBaseRef: baseRef,
+      prBaseSha: baseSha,
     })
     .onConflictDoUpdate({
       target: [taskPullRequests.taskId, taskPullRequests.prUrl],
@@ -153,33 +154,8 @@ export async function persistDetectedPullRequest({
         ...(linkedRepository && { repositoryId: linkedRepository.id }),
         ...(prTitle !== null && { prTitle }),
         ...(status !== null && { status }),
+        ...(fetchedPrDetails && { prBaseRef: baseRef, prBaseSha: baseSha }),
         updatedAt: new Date(),
       },
     });
-
-  // The persisted base must always belong to the PR recorded alongside it. A
-  // job can have more than one PR detected over its life, and envelopes can be
-  // processed concurrently:
-  //  - fetch succeeded → write the fresh base.
-  //  - fetch failed → keep the base only if the row STILL points at this PR,
-  //    else clear it. The same-PR check is done against the live row inside the
-  //    UPDATE (not the snapshot read before the async fetch), so a concurrent
-  //    update that flipped the row to a different PR can't leave that PR's base
-  //    stranded under this PR's repo/number.
-  const rowStillPointsAtThisPr = sql`${cloudJobs.prRepo} = ${pr.repository} AND ${cloudJobs.prNumber} = ${pr.number}`;
-
-  await db
-    .update(cloudJobs)
-    .set({
-      prSourceControlProvider: 'github',
-      prRepo: pr.repository,
-      prNumber: pr.number,
-      prBaseRef: fetchedPrDetails
-        ? baseRef
-        : sql`CASE WHEN ${rowStillPointsAtThisPr} THEN ${cloudJobs.prBaseRef} ELSE NULL END`,
-      prBaseSha: fetchedPrDetails
-        ? baseSha
-        : sql`CASE WHEN ${rowStillPointsAtThisPr} THEN ${cloudJobs.prBaseSha} ELSE NULL END`,
-    })
-    .where(eq(cloudJobs.id, cloudJobId));
 }

@@ -1,4 +1,8 @@
-import { buildApiHeaders, parseApiError } from './api-client.js';
+import {
+  buildApiHeaders,
+  fetchWithTimeout,
+  parseApiError,
+} from './api-client.js';
 import type {
   RoomoteConfig,
   SlackChannelMessagesResponse,
@@ -26,7 +30,7 @@ async function postToChatEndpoint<
   errorPrefix: string,
 ): Promise<TResponse> {
   for (let attempt = 0; ; attempt += 1) {
-    const response = await fetch(
+    const response = await fetchWithTimeout(
       `${config.platformApiUrl}/api/mcp/slack/${path}`,
       {
         method: 'POST',
@@ -35,6 +39,7 @@ async function postToChatEndpoint<
         }),
         body: JSON.stringify(input),
       },
+      { label: errorPrefix },
     );
 
     if (response.ok) {

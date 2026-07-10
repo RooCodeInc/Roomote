@@ -29,8 +29,8 @@ vi.mock('@trpc/client', async () => {
   };
 });
 
-import { cloudJobFactory, taskFactory, userFactory } from '@roomote/db/server';
-import { CloudTaskStatus } from '@roomote/types';
+import { runFactory, taskFactory, userFactory } from '@roomote/db/server';
+import { RunStatus } from '@roomote/types';
 import type { FeatureFlag } from '@roomote/feature-flags';
 
 import type { UserAuthSuccess } from '@/types';
@@ -104,13 +104,13 @@ describe('sendSandboxPromptCommand', () => {
   it('uses the trimmed authenticated display name instead of trusting the browser payload', async () => {
     const user = await userFactory.create({ name: 'DB User' });
     const task = await taskFactory.create({
-      userId: user.id,
+      initiatorUserId: user.id,
     });
 
-    await cloudJobFactory.create({
-      userId: user.id,
+    await runFactory.create({
+      actingUserId: user.id,
       taskId: task.id,
-      status: CloudTaskStatus.Running,
+      status: RunStatus.Running,
       sandboxServerUrl: 'http://sandbox.example.test',
       result: {},
     });
@@ -136,19 +136,53 @@ describe('sendSandboxPromptCommand', () => {
     );
   });
 
+  it('forwards autoSteerWhenQueued to the sandbox sendPrompt command', async () => {
+    const user = await userFactory.create({ name: 'DB User' });
+    const task = await taskFactory.create({
+      initiatorUserId: user.id,
+    });
+
+    await runFactory.create({
+      actingUserId: user.id,
+      taskId: task.id,
+      status: RunStatus.Running,
+      sandboxServerUrl: 'http://sandbox.example.test',
+      result: {},
+    });
+
+    await sendSandboxPromptCommand(
+      buildMockAuth({
+        userId: user.id,
+      }),
+      {
+        taskId: task.id,
+        prompt: 'change direction',
+        source: 'web',
+        autoSteerWhenQueued: true,
+      },
+    );
+
+    expect(mockSendPromptMutate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        prompt: 'change direction',
+        autoSteerWhenQueued: true,
+      }),
+    );
+  });
+
   it('falls back to the authenticated email when the user name is blank', async () => {
     const user = await userFactory.create({
       name: 'Casey Example',
       email: 'casey@example.com',
     });
     const task = await taskFactory.create({
-      userId: user.id,
+      initiatorUserId: user.id,
     });
 
-    await cloudJobFactory.create({
-      userId: user.id,
+    await runFactory.create({
+      actingUserId: user.id,
       taskId: task.id,
-      status: CloudTaskStatus.Running,
+      status: RunStatus.Running,
       sandboxServerUrl: 'http://sandbox.example.test',
       result: {},
     });
@@ -183,13 +217,13 @@ describe('sendSandboxPromptCommand', () => {
     );
     const user = await userFactory.create({ name: 'DB User' });
     const task = await taskFactory.create({
-      userId: user.id,
+      initiatorUserId: user.id,
     });
 
-    await cloudJobFactory.create({
-      userId: user.id,
+    await runFactory.create({
+      actingUserId: user.id,
       taskId: task.id,
-      status: CloudTaskStatus.Running,
+      status: RunStatus.Running,
       sandboxServerUrl: 'http://sandbox.example.test',
       result: {},
     });

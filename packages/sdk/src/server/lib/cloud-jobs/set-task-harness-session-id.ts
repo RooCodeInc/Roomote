@@ -1,4 +1,4 @@
-import { cloudJobs, db, eq, tasks } from '@roomote/db/server';
+import { db, eq, taskRuns, tasks } from '@roomote/db/server';
 
 interface SetTaskHarnessSessionIdInput {
   cloudJobId: number;
@@ -8,8 +8,8 @@ interface SetTaskHarnessSessionIdInput {
 export async function setTaskHarnessSessionId(
   input: SetTaskHarnessSessionIdInput,
 ): Promise<void> {
-  const cloudJob = await db.query.cloudJobs.findFirst({
-    where: eq(cloudJobs.id, input.cloudJobId),
+  const cloudJob = await db.query.taskRuns.findFirst({
+    where: eq(taskRuns.id, input.cloudJobId),
     columns: { taskId: true },
   });
 

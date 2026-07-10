@@ -11,7 +11,6 @@ export enum FeatureFlag {
   VisualProofAutoScreencast = 'VisualProofAutoScreencast',
   AuthorshipRules = 'AuthorshipRules',
   BackgroundSubagents = 'BackgroundSubagents',
-  PrReviewNotifications = 'PrReviewNotifications',
 }
 
 export type FeatureFlagValue =

@@ -1,4 +1,4 @@
-import type { CloudJob } from '@roomote/sdk/client';
+import type { Run } from '@roomote/sdk/client';
 
 import {
   buildRequestUserInputTaskUrl,
@@ -184,11 +184,11 @@ describe('buildRequestUserInputTaskUrl', () => {
     }
   });
 
-  function makeCloudJob(payload: unknown): CloudJob {
+  function makeCloudJob(payload: unknown): Run {
     return {
       taskId: 'task-123',
       payload,
-    } as CloudJob;
+    } as Run;
   }
 
   it('builds a task URL when no webPath override exists', () => {

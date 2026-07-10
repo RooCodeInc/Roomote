@@ -8,7 +8,7 @@ import {
   generateTrackedNonTaskObject,
   NON_TASK_INFERENCE_SURFACES,
 } from '@roomote/cloud-agents/server/non-task-provider-usage';
-import type { CloudJob } from '@roomote/db/server';
+import type { Run } from '@roomote/db/server';
 import { setLatestSlackBotReply, trackSlackBotReply } from '@roomote/slack';
 import {
   ACP_ENVELOPE_EVENT_TYPES,
@@ -165,7 +165,7 @@ async function fetchPrDiscussionSignals({
   repository,
   prNumber,
 }: {
-  cloudJob: CloudJob;
+  cloudJob: Run;
   repository: string;
   prNumber: number;
 }): Promise<PrReviewTriageContext> {
@@ -225,7 +225,7 @@ export async function gatherPrReviewTriageContext({
   repository,
   prNumber,
 }: {
-  cloudJob: CloudJob;
+  cloudJob: Run;
   repository: string;
   prNumber: number;
 }): Promise<PrReviewTriageContext> {
@@ -339,7 +339,7 @@ export async function preparePrReviewNotificationDelivery({
   request,
   events,
 }: {
-  cloudJob: CloudJob;
+  cloudJob: Run;
   request: PrReviewNotificationRequest;
   events: PrReviewActivityEvent[];
 }): Promise<PreparedPrReviewNotification> {

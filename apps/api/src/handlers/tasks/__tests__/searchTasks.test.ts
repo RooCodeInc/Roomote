@@ -1,5 +1,5 @@
 import { Hono } from 'hono';
-import { CloudTaskType, HAS_PULL_REQUEST_FILTER_VALUE } from '@roomote/types';
+import { TaskPayloadKind, HAS_PULL_REQUEST_FILTER_VALUE } from '@roomote/types';
 import type { AuthTokenContext } from '@roomote/types';
 
 import type { Variables } from '../../../types';
@@ -45,15 +45,13 @@ vi.mock('@roomote/db/server', () => ({
   },
   tasks: {
     id: 'tasks.id',
-    completed: 'tasks.completed',
+    state: 'tasks.state',
     activityAt: 'tasks.activityAt',
     title: 'tasks.title',
   },
-  cloudJobs: {
-    taskId: 'cloudJobs.taskId',
-    prRepo: 'cloudJobs.prRepo',
-    prNumber: 'cloudJobs.prNumber',
-    payload: 'cloudJobs.payload',
+  taskRuns: {
+    taskId: 'taskRuns.taskId',
+    payload: 'taskRuns.payload',
   },
   taskPullRequests: {
     taskId: 'taskPullRequests.taskId',
@@ -64,6 +62,7 @@ vi.mock('@roomote/db/server', () => ({
   and: andMock,
   desc: vi.fn((arg) => ({ type: 'desc', arg })),
   lt: vi.fn((...args) => ({ type: 'lt', args })),
+  ne: vi.fn((...args) => ({ type: 'ne', args })),
   sql: mockSql,
 }));
 
@@ -103,7 +102,7 @@ describe('searchTasks', () => {
         id: 'task-1',
         title: 'Generated title',
         mode: 'standard',
-        completed: false,
+        state: 'active',
         repositoryName: '__all_repositories__',
         harness: 'opencode-server',
         timestamp: 1,
@@ -206,7 +205,7 @@ describe('searchTasks', () => {
       'task-1': {
         id: 7,
         taskId: 'task-1',
-        type: CloudTaskType.StandardTask,
+        type: TaskPayloadKind.StandardTask,
         status: 'failed',
         taskPhase: null,
         error: 'Sandbox startup timed out',
@@ -229,47 +228,29 @@ describe('searchTasks', () => {
     });
   });
 
-  it('keeps the hidden latest-job safety filter in the MCP task response', async () => {
+  it('derives the completed flag from the task state', async () => {
     selectLimitMock.mockResolvedValueOnce([
       {
-        id: 'task-hidden',
-        title: 'Hidden task',
+        id: 'task-done',
+        title: 'Done task',
         mode: 'standard',
-        completed: false,
-        repositoryName: 'hidden/repo',
+        state: 'completed',
+        repositoryName: 'acme/app',
         harness: 'opencode-server',
         timestamp: 1,
         activityAt: 3,
       },
       {
-        id: 'task-visible',
-        title: 'Visible task',
+        id: 'task-live',
+        title: 'Live task',
         mode: 'standard',
-        completed: false,
-        repositoryName: 'visible/repo',
+        state: 'active',
+        repositoryName: 'acme/app',
         harness: 'opencode-server',
         timestamp: 1,
         activityAt: 2,
       },
     ]);
-    mockGetLatestCloudJobsByTaskIds.mockResolvedValueOnce({
-      'task-hidden': {
-        id: 8,
-        taskId: 'task-hidden',
-        type: CloudTaskType.SuggestedTasks,
-        status: 'completed',
-        taskPhase: null,
-        error: null,
-      },
-      'task-visible': {
-        id: 9,
-        taskId: 'task-visible',
-        type: CloudTaskType.StandardTask,
-        status: 'completed',
-        taskPhase: null,
-        error: null,
-      },
-    });
 
     const response = await createApp(authContext).request(
       'http://localhost/tasks',
@@ -278,9 +259,8 @@ describe('searchTasks', () => {
     expect(response.status).toBe(200);
     await expect(response.json()).resolves.toMatchObject({
       tasks: [
-        {
-          id: 'task-visible',
-        },
+        { id: 'task-done', completed: true, state: 'completed' },
+        { id: 'task-live', completed: false, state: 'active' },
       ],
     });
   });

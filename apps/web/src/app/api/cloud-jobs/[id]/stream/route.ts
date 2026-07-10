@@ -2,8 +2,8 @@ import { NextRequest, NextResponse } from 'next/server';
 import { createResponse } from 'better-sse';
 import { z } from 'zod';
 
-import { CloudTaskStatus, isExitedCloudTaskStatus } from '@roomote/types';
-import { cloudJobs, db, eq } from '@roomote/db/server';
+import { RunStatus, isExitedRunStatus } from '@roomote/types';
+import { db, eq, taskRuns } from '@roomote/db/server';
 
 import { authorizeUserToken } from '@/lib/server';
 
@@ -26,8 +26,8 @@ export async function GET(
   const cloudJobId = z.coerce.number().parse(id);
 
   const findCloudJob = () =>
-    db.query.cloudJobs.findFirst({
-      where: eq(cloudJobs.id, cloudJobId),
+    db.query.taskRuns.findFirst({
+      where: eq(taskRuns.id, cloudJobId),
     });
 
   const cloudJob = await findCloudJob();
@@ -56,12 +56,11 @@ export async function GET(
         break;
       }
 
-      if (isExitedCloudTaskStatus(cloudJob.status)) {
+      if (isExitedRunStatus(cloudJob.status)) {
         break;
       }
 
-      const timeout =
-        cloudJob.status === CloudTaskStatus.Running ? 10_000 : 1_000;
+      const timeout = cloudJob.status === RunStatus.Running ? 10_000 : 1_000;
 
       await new Promise((resolve) => setTimeout(resolve, timeout));
     }

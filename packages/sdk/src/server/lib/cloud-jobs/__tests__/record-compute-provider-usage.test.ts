@@ -1,5 +1,5 @@
 import {
-  cloudJobFactory,
+  runFactory,
   computeProviderUsage,
   computeProviderUsageSamples,
   db,
@@ -8,7 +8,7 @@ import {
   tasks,
   userFactory,
 } from '@roomote/db/server';
-import { CloudTaskType } from '@roomote/types';
+import { TaskPayloadKind } from '@roomote/types';
 
 import { recordComputeProviderUsage } from '../record-compute-provider-usage';
 
@@ -16,11 +16,11 @@ describe('recordComputeProviderUsage', () => {
   it('inserts a compute_provider_usage row for a hosted cloud job and syncs task compute rollups', async () => {
     const user = await userFactory.create();
     const task = await taskFactory.create({
-      userId: user.id,
+      initiatorUserId: user.id,
     });
-    const cloudJob = await cloudJobFactory.create({
-      type: CloudTaskType.StandardTask,
-      userId: user.id,
+    const cloudJob = await runFactory.create({
+      payloadKind: TaskPayloadKind.StandardTask,
+      actingUserId: user.id,
       taskId: task.id,
       vendor: 'modal',
       machineId: 'sb-usage-1',
@@ -40,15 +40,14 @@ describe('recordComputeProviderUsage', () => {
     const rows = await db
       .select()
       .from(computeProviderUsage)
-      .where(eq(computeProviderUsage.cloudJobId, cloudJob.id));
+      .where(eq(computeProviderUsage.runId, cloudJob.id));
 
     expect(rows).toHaveLength(1);
     expect(rows[0]).toMatchObject({
       provider: 'modal',
       providerUsageId: `roomote:compute:modal:${cloudJob.id}:sb-usage-1`,
       authKind: 'job',
-      userId: user.id,
-      cloudJobId: cloudJob.id,
+      runId: cloudJob.id,
       taskId: task.id,
       instanceId: 'sb-usage-1',
       launchMode: 'fresh',
@@ -80,11 +79,11 @@ describe('recordComputeProviderUsage', () => {
   it('upserts duplicate compute usage rows instead of double-counting the task rollups', async () => {
     const user = await userFactory.create();
     const task = await taskFactory.create({
-      userId: user.id,
+      initiatorUserId: user.id,
     });
-    const cloudJob = await cloudJobFactory.create({
-      type: CloudTaskType.StandardTask,
-      userId: user.id,
+    const cloudJob = await runFactory.create({
+      payloadKind: TaskPayloadKind.StandardTask,
+      actingUserId: user.id,
       taskId: task.id,
       vendor: 'modal',
       machineId: 'sb-usage-2',
@@ -111,7 +110,7 @@ describe('recordComputeProviderUsage', () => {
     const rows = await db
       .select()
       .from(computeProviderUsage)
-      .where(eq(computeProviderUsage.cloudJobId, cloudJob.id));
+      .where(eq(computeProviderUsage.runId, cloudJob.id));
 
     expect(rows).toHaveLength(1);
     expect(rows[0]).toMatchObject({
@@ -137,11 +136,11 @@ describe('recordComputeProviderUsage', () => {
   it('lets a final teardown update replace an earlier running estimate for the same usage row', async () => {
     const user = await userFactory.create();
     const task = await taskFactory.create({
-      userId: user.id,
+      initiatorUserId: user.id,
     });
-    const cloudJob = await cloudJobFactory.create({
-      type: CloudTaskType.StandardTask,
-      userId: user.id,
+    const cloudJob = await runFactory.create({
+      payloadKind: TaskPayloadKind.StandardTask,
+      actingUserId: user.id,
       taskId: task.id,
       vendor: 'modal',
       machineId: 'sb-usage-3',
@@ -165,7 +164,7 @@ describe('recordComputeProviderUsage', () => {
     const rows = await db
       .select()
       .from(computeProviderUsage)
-      .where(eq(computeProviderUsage.cloudJobId, cloudJob.id));
+      .where(eq(computeProviderUsage.runId, cloudJob.id));
 
     expect(rows).toHaveLength(1);
     expect(rows[0]).toMatchObject({
@@ -179,11 +178,11 @@ describe('recordComputeProviderUsage', () => {
   it('does not recompute task rollups for provisional running updates', async () => {
     const user = await userFactory.create();
     const task = await taskFactory.create({
-      userId: user.id,
+      initiatorUserId: user.id,
     });
-    const cloudJob = await cloudJobFactory.create({
-      type: CloudTaskType.StandardTask,
-      userId: user.id,
+    const cloudJob = await runFactory.create({
+      payloadKind: TaskPayloadKind.StandardTask,
+      actingUserId: user.id,
       taskId: task.id,
       vendor: 'modal',
       machineId: 'sb-usage-rollup-running',
@@ -212,11 +211,11 @@ describe('recordComputeProviderUsage', () => {
   it('does not let a later running estimate overwrite a final teardown update', async () => {
     const user = await userFactory.create();
     const task = await taskFactory.create({
-      userId: user.id,
+      initiatorUserId: user.id,
     });
-    const cloudJob = await cloudJobFactory.create({
-      type: CloudTaskType.StandardTask,
-      userId: user.id,
+    const cloudJob = await runFactory.create({
+      payloadKind: TaskPayloadKind.StandardTask,
+      actingUserId: user.id,
       taskId: task.id,
       vendor: 'modal',
       machineId: 'sb-usage-4',
@@ -240,7 +239,7 @@ describe('recordComputeProviderUsage', () => {
     const rows = await db
       .select()
       .from(computeProviderUsage)
-      .where(eq(computeProviderUsage.cloudJobId, cloudJob.id));
+      .where(eq(computeProviderUsage.runId, cloudJob.id));
 
     expect(rows).toHaveLength(1);
     expect(rows[0]).toMatchObject({
@@ -255,11 +254,11 @@ describe('recordComputeProviderUsage', () => {
   it('lets a final teardown update replace a later running estimate for the same usage row', async () => {
     const user = await userFactory.create();
     const task = await taskFactory.create({
-      userId: user.id,
+      initiatorUserId: user.id,
     });
-    const cloudJob = await cloudJobFactory.create({
-      type: CloudTaskType.StandardTask,
-      userId: user.id,
+    const cloudJob = await runFactory.create({
+      payloadKind: TaskPayloadKind.StandardTask,
+      actingUserId: user.id,
       taskId: task.id,
       vendor: 'modal',
       machineId: 'sb-usage-4b',
@@ -283,7 +282,7 @@ describe('recordComputeProviderUsage', () => {
     const rows = await db
       .select()
       .from(computeProviderUsage)
-      .where(eq(computeProviderUsage.cloudJobId, cloudJob.id));
+      .where(eq(computeProviderUsage.runId, cloudJob.id));
 
     expect(rows).toHaveLength(1);
     expect(rows[0]).toMatchObject({
@@ -309,11 +308,11 @@ describe('recordComputeProviderUsage', () => {
   it('persists cgroup samples on running updates without summarizing them yet', async () => {
     const user = await userFactory.create();
     const task = await taskFactory.create({
-      userId: user.id,
+      initiatorUserId: user.id,
     });
-    const cloudJob = await cloudJobFactory.create({
-      type: CloudTaskType.StandardTask,
-      userId: user.id,
+    const cloudJob = await runFactory.create({
+      payloadKind: TaskPayloadKind.StandardTask,
+      actingUserId: user.id,
       taskId: task.id,
       vendor: 'modal',
       machineId: 'sb-usage-running-sample-1',
@@ -336,7 +335,7 @@ describe('recordComputeProviderUsage', () => {
     const usageRows = await db
       .select()
       .from(computeProviderUsage)
-      .where(eq(computeProviderUsage.cloudJobId, cloudJob.id));
+      .where(eq(computeProviderUsage.runId, cloudJob.id));
 
     expect(usageRows).toHaveLength(1);
     expect(usageRows[0]).toMatchObject({
@@ -353,7 +352,7 @@ describe('recordComputeProviderUsage', () => {
     const sampleRows = await db
       .select()
       .from(computeProviderUsageSamples)
-      .where(eq(computeProviderUsageSamples.cloudJobId, cloudJob.id));
+      .where(eq(computeProviderUsageSamples.runId, cloudJob.id));
 
     expect(sampleRows).toHaveLength(1);
     expect(sampleRows[0]?.details).toMatchObject({
@@ -365,11 +364,11 @@ describe('recordComputeProviderUsage', () => {
   it('aggregates cgroup samples into observed memory on final updates', async () => {
     const user = await userFactory.create();
     const task = await taskFactory.create({
-      userId: user.id,
+      initiatorUserId: user.id,
     });
-    const cloudJob = await cloudJobFactory.create({
-      type: CloudTaskType.StandardTask,
-      userId: user.id,
+    const cloudJob = await runFactory.create({
+      payloadKind: TaskPayloadKind.StandardTask,
+      actingUserId: user.id,
       taskId: task.id,
       vendor: 'modal',
       machineId: 'sb-usage-cgroup-1',
@@ -407,7 +406,7 @@ describe('recordComputeProviderUsage', () => {
     const usageRows = await db
       .select()
       .from(computeProviderUsage)
-      .where(eq(computeProviderUsage.cloudJobId, cloudJob.id));
+      .where(eq(computeProviderUsage.runId, cloudJob.id));
 
     expect(usageRows).toHaveLength(1);
     expect(usageRows[0]).toMatchObject({
@@ -425,7 +424,7 @@ describe('recordComputeProviderUsage', () => {
     const sampleRows = await db
       .select()
       .from(computeProviderUsageSamples)
-      .where(eq(computeProviderUsageSamples.cloudJobId, cloudJob.id));
+      .where(eq(computeProviderUsageSamples.runId, cloudJob.id));
 
     expect(sampleRows).toHaveLength(2);
     expect(sampleRows).toEqual(
@@ -444,11 +443,11 @@ describe('recordComputeProviderUsage', () => {
   it('records modal compute usage from the provision-time requested resources snapshot', async () => {
     const user = await userFactory.create();
     const task = await taskFactory.create({
-      userId: user.id,
+      initiatorUserId: user.id,
     });
-    const cloudJob = await cloudJobFactory.create({
-      type: CloudTaskType.StandardTask,
-      userId: user.id,
+    const cloudJob = await runFactory.create({
+      payloadKind: TaskPayloadKind.StandardTask,
+      actingUserId: user.id,
       taskId: task.id,
       vendor: 'modal',
       machineId: 'mo-usage-1',
@@ -467,7 +466,7 @@ describe('recordComputeProviderUsage', () => {
     const rows = await db
       .select()
       .from(computeProviderUsage)
-      .where(eq(computeProviderUsage.cloudJobId, cloudJob.id));
+      .where(eq(computeProviderUsage.runId, cloudJob.id));
 
     expect(rows).toHaveLength(1);
     expect(rows[0]).toMatchObject({
@@ -496,11 +495,11 @@ describe('recordComputeProviderUsage', () => {
   it('aggregates Modal cgroup samples into the final compute usage row', async () => {
     const user = await userFactory.create();
     const task = await taskFactory.create({
-      userId: user.id,
+      initiatorUserId: user.id,
     });
-    const cloudJob = await cloudJobFactory.create({
-      type: CloudTaskType.StandardTask,
-      userId: user.id,
+    const cloudJob = await runFactory.create({
+      payloadKind: TaskPayloadKind.StandardTask,
+      actingUserId: user.id,
       taskId: task.id,
       vendor: 'modal',
       machineId: 'mo-usage-cgroup-1',
@@ -544,7 +543,7 @@ describe('recordComputeProviderUsage', () => {
     const usageRows = await db
       .select()
       .from(computeProviderUsage)
-      .where(eq(computeProviderUsage.cloudJobId, cloudJob.id));
+      .where(eq(computeProviderUsage.runId, cloudJob.id));
 
     expect(usageRows).toHaveLength(1);
     expect(usageRows[0]).toMatchObject({
@@ -562,7 +561,7 @@ describe('recordComputeProviderUsage', () => {
     const sampleRows = await db
       .select()
       .from(computeProviderUsageSamples)
-      .where(eq(computeProviderUsageSamples.cloudJobId, cloudJob.id));
+      .where(eq(computeProviderUsageSamples.runId, cloudJob.id));
 
     expect(sampleRows).toHaveLength(2);
     expect(sampleRows[0]?.details).toMatchObject({
@@ -589,21 +588,21 @@ describe('recordComputeProviderUsage', () => {
   it('keeps rows distinct when two jobs both have null machine ids', async () => {
     const user = await userFactory.create();
     const task = await taskFactory.create({
-      userId: user.id,
+      initiatorUserId: user.id,
     });
     const [cloudJobA, cloudJobB] = await Promise.all([
-      cloudJobFactory.create({
-        type: CloudTaskType.StandardTask,
-        userId: user.id,
+      runFactory.create({
+        payloadKind: TaskPayloadKind.StandardTask,
+        actingUserId: user.id,
         taskId: task.id,
         vendor: 'modal',
         machineId: null,
         launchMode: 'fresh',
         provisionStartedAt: new Date('2026-04-16T16:00:00.000Z'),
       }),
-      cloudJobFactory.create({
-        type: CloudTaskType.StandardTask,
-        userId: user.id,
+      runFactory.create({
+        payloadKind: TaskPayloadKind.StandardTask,
+        actingUserId: user.id,
         taskId: task.id,
         vendor: 'modal',
         machineId: null,
@@ -626,7 +625,7 @@ describe('recordComputeProviderUsage', () => {
     const rows = await db
       .select({
         providerUsageId: computeProviderUsage.providerUsageId,
-        cloudJobId: computeProviderUsage.cloudJobId,
+        cloudJobId: computeProviderUsage.runId,
       })
       .from(computeProviderUsage)
       .where(eq(computeProviderUsage.taskId, task.id));

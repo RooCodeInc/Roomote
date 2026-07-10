@@ -1,9 +1,9 @@
 import {
-  CloudTaskStatus,
+  RunStatus,
   ORPHANED_AFTER_DEQUEUE_THRESHOLD_MS,
   ORPHANED_PENDING_THRESHOLD_MS,
 } from '@roomote/types';
-import { db, cloudJobs, eq, and, gt, lt, asc } from '@roomote/db/server';
+import { db, taskRuns, eq, and, gt, lt, asc } from '@roomote/db/server';
 import { releaseCloudTask } from '@roomote/cloud-agents/server';
 
 const SECOND = 1000;
@@ -17,28 +17,28 @@ const ORPHANED_AFTER_DEQUEUE_THRESHOLD_MINUTES = Math.ceil(
 const orphanMap = new Map<number, number>();
 
 const getOrphanedBeforeDequeueJobs = () =>
-  db.query.cloudJobs.findMany({
+  db.query.taskRuns.findMany({
     where: and(
-      eq(cloudJobs.status, CloudTaskStatus.Pending),
+      eq(taskRuns.status, RunStatus.Pending),
       lt(
-        cloudJobs.createdAt,
+        taskRuns.createdAt,
         new Date(Date.now() - ORPHANED_PENDING_THRESHOLD_MS),
       ),
-      gt(cloudJobs.createdAt, new Date(Date.now() - 24 * HOUR)),
+      gt(taskRuns.createdAt, new Date(Date.now() - 24 * HOUR)),
     ),
-    orderBy: [asc(cloudJobs.createdAt)],
+    orderBy: [asc(taskRuns.createdAt)],
   });
 
 const getOrphanedAfterDequeueJobs = () =>
-  db.query.cloudJobs.findMany({
+  db.query.taskRuns.findMany({
     where: and(
-      eq(cloudJobs.status, CloudTaskStatus.Dequeued),
+      eq(taskRuns.status, RunStatus.Dequeued),
       lt(
-        cloudJobs.dequeuedAt,
+        taskRuns.dequeuedAt,
         new Date(Date.now() - ORPHANED_AFTER_DEQUEUE_THRESHOLD_MS),
       ),
     ),
-    orderBy: [asc(cloudJobs.createdAt)],
+    orderBy: [asc(taskRuns.createdAt)],
   });
 
 export const getOrphanedJob = async () => {
@@ -63,7 +63,7 @@ export const getOrphanedJob = async () => {
     const ageLabel = job.dequeuedAt ? 'dequeuedAt' : 'createdAt';
 
     console.log(
-      `[getOrphanedJob] id=${job.id}, type=${job.type}, repo=${job.payload.repo}, ${ageLabel}=${ageMinutes}m ago`,
+      `[getOrphanedJob] id=${job.id}, payloadKind=${job.payloadKind}, repo=${job.payload.repo}, ${ageLabel}=${ageMinutes}m ago`,
     );
   }
 
@@ -81,7 +81,7 @@ export const getOrphanedJob = async () => {
     orphanMap.set(cloudJob.id, now);
 
     console.warn(`[getOrphanedJob] Recovering orphaned job #${cloudJob.id}`, {
-      type: cloudJob.type,
+      payloadKind: cloudJob.payloadKind,
       repo: cloudJob.payload.repo,
       status: cloudJob.status,
       reason: cloudJob.dequeuedAt
@@ -93,9 +93,9 @@ export const getOrphanedJob = async () => {
     await releaseCloudTask(cloudJob);
 
     await db
-      .update(cloudJobs)
+      .update(taskRuns)
       .set({ dequeuedAt: null })
-      .where(eq(cloudJobs.id, cloudJob.id));
+      .where(eq(taskRuns.id, cloudJob.id));
   }
 
   return cloudJob;

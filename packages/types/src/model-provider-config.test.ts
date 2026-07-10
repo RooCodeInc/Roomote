@@ -207,6 +207,7 @@ describe('SETUP_MODEL_PROVIDER_CATALOG', () => {
         'amazon-bedrock',
         'google-vertex',
         'google',
+        'xai',
         'chatgpt',
       ],
     );
@@ -294,7 +295,7 @@ describe('SETUP_MODEL_PROVIDER_CATALOG', () => {
     expect(vercelProvider).toMatchObject({
       label: 'Vercel AI Gateway',
       envVarName: 'AI_GATEWAY_API_KEY',
-      defaultRoomoteModel: 'vercel/openai/gpt-5.4',
+      defaultRoomoteModel: 'vercel/openai/gpt-5.6-terra',
     });
   });
 
@@ -307,7 +308,7 @@ describe('SETUP_MODEL_PROVIDER_CATALOG', () => {
       id: 'chatgpt',
       label: 'ChatGPT (subscription)',
       authKind: 'oauth',
-      defaultRoomoteModel: 'openai/gpt-5.4',
+      defaultRoomoteModel: 'openai/gpt-5.6-terra',
     });
     expect(chatgptProvider?.envVarName).toBeUndefined();
   });
@@ -320,7 +321,7 @@ describe('SETUP_MODEL_PROVIDER_CATALOG', () => {
     expect(requestyProvider).toMatchObject({
       label: 'Requesty',
       envVarName: 'REQUESTY_API_KEY',
-      defaultRoomoteModel: 'requesty/openai/gpt-5.4',
+      defaultRoomoteModel: 'requesty/anthropic/claude-haiku-4-5',
     });
   });
 

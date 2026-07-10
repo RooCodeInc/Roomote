@@ -1,5 +1,5 @@
 import { render, screen } from '@testing-library/react';
-import { ACP_ENVELOPE_EVENT_TYPES, CloudTaskStatus } from '@roomote/types';
+import { ACP_ENVELOPE_EVENT_TYPES, RunStatus } from '@roomote/types';
 
 import { HistoricalSandboxProvider } from '../HistoricalSandboxProvider';
 import { useSandboxMessages, useSandboxTaskPhase } from '../SandboxProvider';
@@ -48,7 +48,7 @@ describe('HistoricalSandboxProvider', () => {
         taskId="task-123"
         history={history}
         harness="opencode-server"
-        taskStatus={CloudTaskStatus.Completed}
+        taskStatus={RunStatus.Completed}
         taskPhase="idle"
       >
         <PhaseProbe />
@@ -64,7 +64,7 @@ describe('HistoricalSandboxProvider', () => {
         taskId="task-123"
         history={history}
         harness="opencode-server"
-        taskStatus={CloudTaskStatus.Running}
+        taskStatus={RunStatus.Running}
         taskPhase={null}
       >
         <PhaseProbe />
@@ -78,7 +78,7 @@ describe('HistoricalSandboxProvider', () => {
         taskId="task-123"
         history={history}
         harness="opencode-server"
-        taskStatus={CloudTaskStatus.Completed}
+        taskStatus={RunStatus.Completed}
         taskPhase="waiting_for_prompt"
       >
         <PhaseProbe />
@@ -191,7 +191,7 @@ describe('HistoricalSandboxProvider', () => {
         taskId="task-123"
         history={history}
         harness="opencode-server"
-        taskStatus={CloudTaskStatus.Completed}
+        taskStatus={RunStatus.Completed}
         taskPhase="idle"
       >
         <MessageKindsProbe />

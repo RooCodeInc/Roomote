@@ -1,28 +1,28 @@
-import { and, desc, eq, inArray, isNull, sql } from 'drizzle-orm';
+import { and, desc, eq, inArray, isNull, ne, sql } from 'drizzle-orm';
 
 import {
-  type CloudTaskPayload,
-  bootingCloudTaskStatuses,
-  CloudTaskStatus,
-  CloudTaskType,
-  isActivelyRunningCloudTask,
-  isExitedCloudTaskStatus,
-  isResumableCloudTaskType,
+  type TaskPayload,
+  bootingRunStatuses,
+  RunStatus,
+  TaskPayloadKind,
+  isActivelyRunningTask,
+  isExitedRunStatus,
+  isResumableTaskPayloadKind,
   type SourceControlProvider,
 } from '@roomote/types';
 
 import { db } from '../db';
-import { cloudJobs, taskPullRequests } from '../schema';
+import { taskRuns, taskPullRequests } from '../schema';
 
 export const DEFAULT_CONFLICT_RESOLUTION_IDLE_WINDOW_MS = 30 * 60 * 1000;
 
 export interface ActiveGitHubBranchWork {
   jobId: number;
   taskId: string;
-  type: CloudTaskType;
-  status: CloudTaskStatus;
+  type: TaskPayloadKind;
+  status: RunStatus;
   taskPhase: string | null;
-  match: 'github_pr' | 'task_pull_request' | 'branch';
+  match: 'task_pull_request' | 'branch';
 }
 
 export interface ReusableGitHubPrFollowUpOwner extends ActiveGitHubBranchWork {
@@ -30,69 +30,69 @@ export interface ReusableGitHubPrFollowUpOwner extends ActiveGitHubBranchWork {
 }
 
 const ACTIVE_WORK_STATUSES = [
-  ...bootingCloudTaskStatuses,
-  CloudTaskStatus.Running,
+  ...bootingRunStatuses,
+  RunStatus.Running,
 ] as const;
 
 const ACTIVE_WORK_COLUMNS = {
-  jobId: cloudJobs.id,
-  taskId: cloudJobs.taskId,
-  type: cloudJobs.type,
-  status: cloudJobs.status,
-  taskPhase: cloudJobs.taskPhase,
+  jobId: taskRuns.id,
+  taskId: taskRuns.taskId,
+  type: taskRuns.payloadKind,
+  status: taskRuns.status,
+  taskPhase: taskRuns.taskPhase,
 } as const;
 
 const REUSABLE_FOLLOW_UP_OWNER_COLUMNS = {
-  id: cloudJobs.id,
+  id: taskRuns.id,
   ...ACTIVE_WORK_COLUMNS,
-  payload: cloudJobs.payload,
-  snapshotId: cloudJobs.snapshotId,
-  sourceCloudJobId: cloudJobs.sourceCloudJobId,
+  payload: taskRuns.payload,
+  snapshotId: taskRuns.snapshotId,
+  sourceRunId: taskRuns.sourceRunId,
 } as const;
 
 const REUSABLE_FOLLOW_UP_OWNER_TYPES = [
-  CloudTaskType.StandardTask,
-  CloudTaskType.SlackAppMention,
-  CloudTaskType.LinearAgentSession,
-  CloudTaskType.SnapshotResume,
+  TaskPayloadKind.StandardTask,
+  TaskPayloadKind.SlackAppMention,
+  TaskPayloadKind.LinearAgentSession,
+  TaskPayloadKind.SnapshotResume,
 ] as const;
 
 const ACTIVE_PR_REVIEW_TYPES = [
-  CloudTaskType.GithubPrReview,
-  CloudTaskType.GithubPrReviewSync,
+  TaskPayloadKind.GithubPrReview,
+  TaskPayloadKind.GithubPrReviewSync,
 ] as const;
 
 type ActiveFollowUpOwnerCandidate = {
   id: number;
   taskId: string;
-  type: CloudTaskType;
-  status: CloudTaskStatus;
+  type: TaskPayloadKind;
+  status: RunStatus;
   taskPhase: string | null;
-  payload: CloudTaskPayload;
+  payload: TaskPayload;
   snapshotId: string | null;
-  sourceCloudJobId: number | null;
+  sourceRunId: number | null;
 };
 
-type CloudJobReuseMetadata = {
+type RunReuseMetadata = {
   id: number;
-  type: CloudTaskType;
-  payload: CloudTaskPayload;
+  type: TaskPayloadKind;
+  payload: TaskPayload;
   snapshotId: string | null;
-  sourceCloudJobId: number | null;
+  sourceRunId: number | null;
 };
 
 function pickActiveWork(
   rows: Array<{
     jobId: number;
     taskId: string;
-    type: CloudTaskType;
-    status: CloudTaskStatus;
+    type: TaskPayloadKind;
+    status: RunStatus;
     taskPhase: string | null;
   }>,
   match: ActiveGitHubBranchWork['match'],
 ): ActiveGitHubBranchWork | null {
   const activeRow = rows.find((row) =>
-    isActivelyRunningCloudTask(row.status, row.taskPhase),
+    isActivelyRunningTask(row.status, row.taskPhase),
   );
 
   if (!activeRow) {
@@ -113,6 +113,10 @@ function pickActiveWork(
  * Returns the newest active Roomote job that appears to be working on the same
  * PR or branch. Conflict-resolver jobs themselves are excluded because they are
  * handled separately by the dedicated dedup guard.
+ *
+ * PR association lives exclusively on `task_pull_requests` (populated at
+ * enqueue for PR-triggered launches and at extraction time for agent-created
+ * PRs), so PR matches are a `task_runs JOIN task_pull_requests` lookup.
  */
 export async function findActiveGitHubBranchWork({
   repoFullName,
@@ -126,34 +130,15 @@ export async function findActiveGitHubBranchWork({
   sourceControlProvider?: SourceControlProvider;
 }): Promise<ActiveGitHubBranchWork | null> {
   const baseConditions = [
-    inArray(cloudJobs.status, [...ACTIVE_WORK_STATUSES]),
-    isNull(cloudJobs.canceledAt),
-    sql`${cloudJobs.type} != ${CloudTaskType.GithubPrConflictResolve}`,
+    inArray(taskRuns.status, [...ACTIVE_WORK_STATUSES]),
+    isNull(taskRuns.canceledAt),
+    ne(taskRuns.payloadKind, TaskPayloadKind.GithubPrConflictResolve),
   ] as const;
-
-  const githubPrRows = await db
-    .select(ACTIVE_WORK_COLUMNS)
-    .from(cloudJobs)
-    .where(
-      and(
-        ...baseConditions,
-        eq(cloudJobs.prRepo, repoFullName),
-        eq(cloudJobs.prNumber, prNumber),
-      ),
-    )
-    .orderBy(desc(cloudJobs.createdAt))
-    .limit(10);
-
-  const githubPrMatch = pickActiveWork(githubPrRows, 'github_pr');
-
-  if (githubPrMatch) {
-    return githubPrMatch;
-  }
 
   const taskPullRequestRows = await db
     .select(ACTIVE_WORK_COLUMNS)
-    .from(cloudJobs)
-    .innerJoin(taskPullRequests, eq(taskPullRequests.taskId, cloudJobs.taskId))
+    .from(taskRuns)
+    .innerJoin(taskPullRequests, eq(taskPullRequests.taskId, taskRuns.taskId))
     .where(
       and(
         ...baseConditions,
@@ -162,7 +147,7 @@ export async function findActiveGitHubBranchWork({
         eq(taskPullRequests.prNumber, prNumber),
       ),
     )
-    .orderBy(desc(cloudJobs.createdAt))
+    .orderBy(desc(taskRuns.createdAt))
     .limit(10);
 
   const taskPullRequestMatch = pickActiveWork(
@@ -176,18 +161,18 @@ export async function findActiveGitHubBranchWork({
 
   const branchRows = await db
     .select(ACTIVE_WORK_COLUMNS)
-    .from(cloudJobs)
+    .from(taskRuns)
     .where(
       and(
         ...baseConditions,
-        sql`${cloudJobs.payload}->>'repo' = ${repoFullName}`,
+        sql`${taskRuns.payload}->>'repo' = ${repoFullName}`,
         sql`(
-          ${cloudJobs.payload}->>'branch' = ${branchName}
-          OR ${cloudJobs.payload}->>'headRef' = ${branchName}
+          ${taskRuns.payload}->>'branch' = ${branchName}
+          OR ${taskRuns.payload}->>'headRef' = ${branchName}
         )`,
       ),
     )
-    .orderBy(desc(cloudJobs.createdAt))
+    .orderBy(desc(taskRuns.createdAt))
     .limit(10);
 
   return pickActiveWork(branchRows, 'branch');
@@ -210,36 +195,14 @@ export async function findReusableGitHubPrFollowUpOwner({
   sourceControlProvider?: SourceControlProvider;
 }): Promise<ReusableGitHubPrFollowUpOwner | null> {
   const baseConditions = [
-    isNull(cloudJobs.canceledAt),
-    sql`${cloudJobs.type} != ${CloudTaskType.GithubPrConflictResolve}`,
-    inArray(cloudJobs.type, [...REUSABLE_FOLLOW_UP_OWNER_TYPES]),
+    isNull(taskRuns.canceledAt),
+    inArray(taskRuns.payloadKind, [...REUSABLE_FOLLOW_UP_OWNER_TYPES]),
   ];
-
-  const githubPrRows = await db
-    .select(REUSABLE_FOLLOW_UP_OWNER_COLUMNS)
-    .from(cloudJobs)
-    .where(
-      and(
-        ...baseConditions,
-        eq(cloudJobs.prRepo, repoFullName),
-        eq(cloudJobs.prNumber, prNumber),
-      ),
-    )
-    .orderBy(desc(cloudJobs.createdAt));
-
-  const githubPrMatch = await pickReusableFollowUpOwner(
-    githubPrRows,
-    'github_pr',
-  );
-
-  if (githubPrMatch) {
-    return githubPrMatch;
-  }
 
   const taskPullRequestRows = await db
     .select(REUSABLE_FOLLOW_UP_OWNER_COLUMNS)
-    .from(cloudJobs)
-    .innerJoin(taskPullRequests, eq(taskPullRequests.taskId, cloudJobs.taskId))
+    .from(taskRuns)
+    .innerJoin(taskPullRequests, eq(taskPullRequests.taskId, taskRuns.taskId))
     .where(
       and(
         ...baseConditions,
@@ -248,7 +211,7 @@ export async function findReusableGitHubPrFollowUpOwner({
         eq(taskPullRequests.prNumber, prNumber),
       ),
     )
-    .orderBy(desc(cloudJobs.createdAt));
+    .orderBy(desc(taskRuns.createdAt));
 
   const taskPullRequestMatch = await pickReusableFollowUpOwner(
     taskPullRequestRows,
@@ -261,18 +224,18 @@ export async function findReusableGitHubPrFollowUpOwner({
 
   const branchRows = await db
     .select(REUSABLE_FOLLOW_UP_OWNER_COLUMNS)
-    .from(cloudJobs)
+    .from(taskRuns)
     .where(
       and(
         ...baseConditions,
-        sql`${cloudJobs.payload}->>'repo' = ${repoFullName}`,
+        sql`${taskRuns.payload}->>'repo' = ${repoFullName}`,
         sql`(
-          ${cloudJobs.payload}->>'branch' = ${branchName}
-          OR ${cloudJobs.payload}->>'headRef' = ${branchName}
+          ${taskRuns.payload}->>'branch' = ${branchName}
+          OR ${taskRuns.payload}->>'headRef' = ${branchName}
         )`,
       ),
     )
-    .orderBy(desc(cloudJobs.createdAt));
+    .orderBy(desc(taskRuns.createdAt));
 
   return pickReusableFollowUpOwner(branchRows, 'branch');
 }
@@ -300,41 +263,52 @@ export async function findActiveGitHubPrReviewTask({
 }): Promise<ActiveGitHubBranchWork | null> {
   const reviewRows = await db
     .select(ACTIVE_WORK_COLUMNS)
-    .from(cloudJobs)
+    .from(taskRuns)
+    .innerJoin(taskPullRequests, eq(taskPullRequests.taskId, taskRuns.taskId))
     .where(
       and(
-        inArray(cloudJobs.status, [...ACTIVE_WORK_STATUSES]),
-        isNull(cloudJobs.canceledAt),
-        inArray(cloudJobs.type, [...ACTIVE_PR_REVIEW_TYPES]),
-        eq(cloudJobs.prRepo, repoFullName),
-        eq(cloudJobs.prNumber, prNumber),
-        eq(cloudJobs.prSha, headSha),
+        inArray(taskRuns.status, [...ACTIVE_WORK_STATUSES]),
+        isNull(taskRuns.canceledAt),
+        inArray(taskRuns.payloadKind, [...ACTIVE_PR_REVIEW_TYPES]),
+        eq(taskPullRequests.repository, repoFullName),
+        eq(taskPullRequests.prNumber, prNumber),
+        eq(taskPullRequests.prSha, headSha),
         ...(sourceControlProvider
-          ? [eq(cloudJobs.prSourceControlProvider, sourceControlProvider)]
+          ? [eq(taskPullRequests.sourceControlProvider, sourceControlProvider)]
           : []),
       ),
     )
-    .orderBy(desc(cloudJobs.createdAt))
+    .orderBy(desc(taskRuns.createdAt))
     .limit(10);
 
-  return pickActiveWork(reviewRows, 'github_pr');
+  return pickActiveWork(reviewRows, 'task_pull_request');
 }
 
-async function fetchCloudJobReuseMetadata(
-  cloudJobId: number,
-): Promise<CloudJobReuseMetadata | null> {
-  return (
-    (await db.query.cloudJobs.findFirst({
-      where: eq(cloudJobs.id, cloudJobId),
-      columns: {
-        id: true,
-        type: true,
-        payload: true,
-        snapshotId: true,
-        sourceCloudJobId: true,
-      },
-    })) ?? null
-  );
+async function fetchRunReuseMetadata(
+  runId: number,
+): Promise<RunReuseMetadata | null> {
+  const row = await db.query.taskRuns.findFirst({
+    where: eq(taskRuns.id, runId),
+    columns: {
+      id: true,
+      payloadKind: true,
+      payload: true,
+      snapshotId: true,
+      sourceRunId: true,
+    },
+  });
+
+  if (!row) {
+    return null;
+  }
+
+  return {
+    id: row.id,
+    type: row.payloadKind,
+    payload: row.payload,
+    snapshotId: row.snapshotId,
+    sourceRunId: row.sourceRunId,
+  };
 }
 
 async function isReusableFollowUpOwnerCandidate(
@@ -345,50 +319,63 @@ async function isReusableFollowUpOwnerCandidate(
     type: row.type,
     payload: row.payload,
     snapshotId: row.snapshotId,
-    sourceCloudJobId: row.sourceCloudJobId,
+    sourceRunId: row.sourceRunId,
   });
 }
 
 async function fetchLatestReusableFollowUpOwnerJob(
   taskId: string,
 ): Promise<ActiveFollowUpOwnerCandidate | null> {
-  return (
-    (await db.query.cloudJobs.findFirst({
-      where: eq(cloudJobs.taskId, taskId),
-      orderBy: desc(cloudJobs.createdAt),
-      columns: {
-        id: true,
-        taskId: true,
-        type: true,
-        status: true,
-        taskPhase: true,
-        payload: true,
-        snapshotId: true,
-        sourceCloudJobId: true,
-      },
-    })) ?? null
-  );
+  const row = await db.query.taskRuns.findFirst({
+    where: eq(taskRuns.taskId, taskId),
+    orderBy: desc(taskRuns.createdAt),
+    columns: {
+      id: true,
+      taskId: true,
+      payloadKind: true,
+      status: true,
+      taskPhase: true,
+      payload: true,
+      snapshotId: true,
+      sourceRunId: true,
+    },
+  });
+
+  if (!row) {
+    return null;
+  }
+
+  return {
+    id: row.id,
+    taskId: row.taskId,
+    type: row.payloadKind,
+    status: row.status,
+    taskPhase: row.taskPhase,
+    payload: row.payload,
+    snapshotId: row.snapshotId,
+    sourceRunId: row.sourceRunId,
+  };
 }
 
 async function isReusableFollowUpOwnerJob(
-  job: CloudJobReuseMetadata,
+  job: RunReuseMetadata,
   visitedIds = new Set<number>(),
 ): Promise<boolean> {
   switch (job.type) {
-    case CloudTaskType.StandardTask:
-    case CloudTaskType.SlackAppMention:
-    case CloudTaskType.LinearAgentSession:
+    case TaskPayloadKind.StandardTask:
+    case TaskPayloadKind.SlackAppMention:
+    case TaskPayloadKind.LinearAgentSession:
       return true;
-    case CloudTaskType.SnapshotResume: {
-      const sourceCloudJobId = job.sourceCloudJobId;
+    case TaskPayloadKind.SnapshotResume: {
+      const sourceRunId = job.sourceRunId;
 
-      if (!sourceCloudJobId || visitedIds.has(sourceCloudJobId)) {
+      if (!sourceRunId || visitedIds.has(sourceRunId)) {
         return false;
       }
 
-      visitedIds.add(sourceCloudJobId);
+      visitedIds.add(sourceRunId);
 
-      const sourceJob = await fetchCloudJobReuseMetadata(sourceCloudJobId);
+      const sourceJob = await fetchRunReuseMetadata(sourceRunId);
 
       if (!sourceJob) {
         return false;
@@ -424,7 +411,7 @@ async function pickReusableFollowUpOwner(
       continue;
     }
 
-    if (!isExitedCloudTaskStatus(latestJob.status)) {
+    if (!isExitedRunStatus(latestJob.status)) {
       return {
         jobId: latestJob.id,
         taskId: latestJob.taskId,
@@ -438,8 +425,8 @@ async function pickReusableFollowUpOwner(
 
     if (
       latestJob.snapshotId &&
-      isResumableCloudTaskType(latestJob.type) &&
-      !isActivelyRunningCloudTask(latestJob.status, latestJob.taskPhase)
+      isResumableTaskPayloadKind(latestJob.type) &&
+      !isActivelyRunningTask(latestJob.status, latestJob.taskPhase)
     ) {
       return {
         jobId: latestJob.id,

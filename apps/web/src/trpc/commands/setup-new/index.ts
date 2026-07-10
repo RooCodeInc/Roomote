@@ -1,6 +1,11 @@
 import * as GitHub from '@roomote/github';
-import { enqueueCloudTask } from '@roomote/cloud-agents/server';
+import { enqueueTask } from '@roomote/cloud-agents/server';
+import {
+  resolveEnvironmentSourceControlProvider,
+  resolveSingleSourceControlProvider,
+} from '@/lib/server/source-control-provider';
 import { buildSetupKickoffText } from '@roomote/communication/chat-messages';
+import type { TeamsCommunicationProvider } from '@roomote/communication/teams-provider';
 import { TelegramCommunicationProvider } from '@roomote/communication/telegram-provider';
 import { SlackNotifier } from '@roomote/slack';
 import {
@@ -9,9 +14,8 @@ import {
   environments,
   environmentVariables,
   users,
-  cloudJobs,
-  taskSuggestions,
-  setupNewQueuedTasks,
+  taskRuns,
+  workItems,
   slackInstallations,
   slackUserMappings,
   asc,
@@ -20,9 +24,14 @@ import {
   inArray,
   isNull,
   sql,
+  cancelTaskRunDirect,
+  claimWorkItem,
+  finalizeWorkItemLaunched,
+  releaseWorkItemClaim,
+  WORK_ITEM_LAUNCH_STALE_CLAIM_MS,
   markTaskStartParallelCountEndedAt,
   resolveDeploymentEnvVar,
-  resolveSavedWorkerImage,
+  purgeSavedDeploymentWorkerImage,
   resolveTelegramRuntimeCredentials,
   syncSetupQualificationBlock,
   isChatGptSubscriptionConnected,
@@ -41,8 +50,8 @@ import {
   buildSetupSourceControlStatus,
   collectSetupModelProviderCredentialValues,
   createEmptySetupNewState,
-  CloudTaskStatus,
-  CloudTaskType,
+  RunStatus,
+  TaskPayloadKind,
   resolveEvalHarnessSelection,
   type ComputeProvider,
   type DeploymentModelConfig,
@@ -50,10 +59,13 @@ import {
   getSetupAuthProvider,
   getSetupComputeProvider,
   getSetupModelProvider,
+  isAutoProvisionedComputeArtifactField,
   isComputeInfrastructureField,
   isConfiguredEnvValue,
-  isExitedCloudTaskStatus,
+  isExitedRunStatus,
   isRequiredComputeField,
+  NON_SECRET_COMPUTE_ENV_VAR_NAMES,
+  NON_SECRET_SOURCE_CONTROL_ENV_VAR_NAMES,
   normalizeDeploymentComputeConfig,
   normalizeDeploymentModelConfig,
   getSetupNewComputeProvisioningState,
@@ -102,6 +114,7 @@ import {
 } from '../setup/shared';
 import {
   getPersistedEnvironmentVariableNames,
+  getPersistedEnvironmentVariableValues,
   upsertDeploymentEnvironmentVariables,
 } from '../environment-variables';
 import {
@@ -130,6 +143,7 @@ type PersistedRuntimeModelConfig = DeploymentModelConfig;
 type SelectedRepositorySummary = {
   id: string;
   fullName: string;
+  sourceControlProvider: SourceControlProvider;
 };
 
 type PersistedQueuedSetupTask = QueuedOnboardingTask;
@@ -304,6 +318,7 @@ async function resolveSelectedRepositories(repositoryIds: string[]): Promise<{
     selectedRepositories.push({
       id: repository.id,
       fullName: repository.fullName,
+      sourceControlProvider: repository.sourceControlProvider,
     });
   }
 
@@ -343,12 +358,17 @@ async function clearTaskSuggestions(
   }
 
   await executor
-    .delete(taskSuggestions)
-    .where(eq(taskSuggestions.sourceTaskId, sourceTaskId));
+    .delete(workItems)
+    .where(
+      and(
+        eq(workItems.sourceTaskId, sourceTaskId),
+        eq(workItems.kind, 'suggestion'),
+      ),
+    );
 }
 
 async function clearQueuedSetupTasks(executor: DatabaseOrTransaction = db) {
-  await executor.delete(setupNewQueuedTasks);
+  await executor.delete(workItems).where(eq(workItems.kind, 'onboarding'));
 }
 
 async function getActiveSlackInstallation(
@@ -456,13 +476,20 @@ async function resolveSetupSlackHandoffTarget(
 
 type SetupChatFallbackHandoffTarget =
   | { provider: 'telegram'; chatId: string; botToken: string }
-  | { provider: 'teams'; conversationId: string; serviceUrl: string };
+  | {
+      provider: 'teams';
+      conversationId: string;
+      serviceUrl: string;
+      teams: TeamsCommunicationProvider;
+    };
 
 /**
  * Resolves the non-Slack chat destination for the setup onboarding kickoff,
  * matching the proactive-messaging fallback ordering (Slack > Telegram >
  * Teams). Returns null when no chat surface is available, so setup falls
- * back to a web-only onboarding task.
+ * back to a web-only onboarding task. Teams is only selected when both a
+ * captured primary conversation and resolvable bot credentials exist, so a
+ * half-configured Teams deployment never blocks onboarding.
  */
 async function resolveSetupChatFallbackHandoffTarget(): Promise<SetupChatFallbackHandoffTarget | null> {
   const { botToken } = await resolveTelegramRuntimeCredentials();
@@ -478,11 +505,21 @@ async function resolveSetupChatFallbackHandoffTarget(): Promise<SetupChatFallbac
   const conversation = await findTeamsPrimaryConversation();
 
   if (conversation) {
-    return {
-      provider: 'teams',
-      conversationId: conversation.conversationId,
-      serviceUrl: conversation.serviceUrl,
-    };
+    const teams =
+      await createTeamsCommunicationProviderFromRuntimeCredentials();
+
+    if (teams) {
+      return {
+        provider: 'teams',
+        conversationId: conversation.conversationId,
+        serviceUrl: conversation.serviceUrl,
+        teams,
+      };
+    }
+
+    console.warn(
+      '[setup-new] Skipping the Teams setup kickoff because Teams bot credentials could not be resolved; onboarding continues as a web-only task.',
+    );
   }
 
   return null;
@@ -532,16 +569,21 @@ async function getPersistedTaskSuggestionRows(suggestionIds?: string[]) {
 
   return db
     .select({
-      id: taskSuggestions.id,
-      title: taskSuggestions.title,
-      brief: taskSuggestions.brief,
-      sortOrder: taskSuggestions.sortOrder,
+      id: workItems.id,
+      title: workItems.title,
+      brief: workItems.brief,
+      sortOrder: workItems.sortOrder,
     })
-    .from(taskSuggestions)
+    .from(workItems)
     .where(
-      suggestionIds ? inArray(taskSuggestions.id, suggestionIds) : undefined,
+      suggestionIds
+        ? and(
+            eq(workItems.kind, 'suggestion'),
+            inArray(workItems.id, suggestionIds),
+          )
+        : eq(workItems.kind, 'suggestion'),
     )
-    .orderBy(asc(taskSuggestions.sortOrder));
+    .orderBy(asc(workItems.sortOrder));
 }
 
 async function getPersistedQueuedSetupTasks(
@@ -554,18 +596,23 @@ async function getPersistedQueuedSetupTasks(
 
   return executor
     .select({
-      id: setupNewQueuedTasks.id,
-      suggestionId: setupNewQueuedTasks.suggestionId,
-      title: setupNewQueuedTasks.title,
-      prompt: setupNewQueuedTasks.prompt,
-      sortOrder: setupNewQueuedTasks.sortOrder,
-      launchedTaskId: setupNewQueuedTasks.launchedTaskId,
-      launchedAt: setupNewQueuedTasks.launchedAt,
-      environmentId: setupNewQueuedTasks.environmentId,
+      id: workItems.id,
+      suggestionId: workItems.sourceWorkItemId,
+      title: workItems.title,
+      prompt: workItems.executionPrompt,
+      sortOrder: workItems.sortOrder,
+      launchedTaskId: workItems.launchedTaskId,
+      launchedAt: workItems.launchedAt,
+      environmentId: workItems.targetEnvironmentId,
     })
-    .from(setupNewQueuedTasks)
-    .where(eq(setupNewQueuedTasks.setupOnboardingTaskId, setupOnboardingTaskId))
-    .orderBy(asc(setupNewQueuedTasks.sortOrder));
+    .from(workItems)
+    .where(
+      and(
+        eq(workItems.sourceTaskId, setupOnboardingTaskId),
+        eq(workItems.kind, 'onboarding'),
+      ),
+    )
+    .orderBy(asc(workItems.sortOrder));
 }
 
 async function getMutableQueuedSetupTasks(
@@ -574,35 +621,87 @@ async function getMutableQueuedSetupTasks(
 ): Promise<MutableQueuedSetupTask[]> {
   return executor
     .select({
-      id: setupNewQueuedTasks.id,
-      suggestionId: setupNewQueuedTasks.suggestionId,
-      title: setupNewQueuedTasks.title,
-      prompt: setupNewQueuedTasks.prompt,
-      sortOrder: setupNewQueuedTasks.sortOrder,
-      launchedTaskId: setupNewQueuedTasks.launchedTaskId,
-      launchedAt: setupNewQueuedTasks.launchedAt,
-      environmentId: setupNewQueuedTasks.environmentId,
-      launchClaimedAt: setupNewQueuedTasks.launchClaimedAt,
+      id: workItems.id,
+      suggestionId: workItems.sourceWorkItemId,
+      title: workItems.title,
+      prompt: workItems.executionPrompt,
+      sortOrder: workItems.sortOrder,
+      launchedTaskId: workItems.launchedTaskId,
+      launchedAt: workItems.launchedAt,
+      environmentId: workItems.targetEnvironmentId,
+      launchClaimedAt: workItems.launchClaimedAt,
     })
-    .from(setupNewQueuedTasks)
-    .where(eq(setupNewQueuedTasks.setupOnboardingTaskId, setupOnboardingTaskId))
-    .orderBy(asc(setupNewQueuedTasks.sortOrder));
+    .from(workItems)
+    .where(
+      and(
+        eq(workItems.sourceTaskId, setupOnboardingTaskId),
+        eq(workItems.kind, 'onboarding'),
+      ),
+    )
+    .orderBy(asc(workItems.sortOrder));
 }
 
-async function markTaskSuggestionStarted(
+/**
+ * Mirrors a launched onboarding copy back onto its source suggestion so the
+ * suggestions UI shows the suggestion as launched once its queued onboarding
+ * copy launches. This is a status *mirror*, not a launch of its own, so it must
+ * never stomp a live claim held by another surface.
+ *
+ * It goes through the shared fenced CAS: `claimWorkItem` the suggestion, and
+ * only `finalizeWorkItemLaunched` when the claim succeeded. When another surface
+ * (e.g. web-implement) already holds a fresh claim, or the suggestion is already
+ * `launched`, the claim returns null and the mirror is skipped — never
+ * overwriting that surface's status/token.
+ *
+ * `dismissed` is opted into the claimable set (matching the web-implement
+ * surface in task-suggestions/implement.ts) with `clearDismissedAt`, so a
+ * suggestion that was dismissed after being queued still flips to `launched`
+ * when its onboarding copy launches. That is the least-surprising state: the
+ * work genuinely launched, so the suggestions UI should reflect it rather than
+ * showing the row as merely dismissed.
+ *
+ * The claim and finalize run in one transaction so a finalize failure rolls the
+ * claim back rather than stranding the suggestion in `launching` with a live
+ * claim until the 10-minute stale-claim recovery.
+ */
+async function markSuggestionWorkItemLaunched(
   input: {
     suggestionId: string;
-    updatedAt: Date;
+    launchedTaskId: string;
   },
   executor: DatabaseOrTransaction = db,
 ) {
-  await executor
-    .update(taskSuggestions)
-    .set({
-      status: 'started',
-      updatedAt: input.updatedAt,
-    })
-    .where(eq(taskSuggestions.id, input.suggestionId));
+  await executor.transaction(async (tx) => {
+    const claimedSuggestion = await claimWorkItem(tx, {
+      id: input.suggestionId,
+      additionalClaimableStatuses: ['dismissed'],
+      extraConditions: [eq(workItems.kind, 'suggestion')],
+    });
+
+    if (!claimedSuggestion) {
+      // Another surface holds a fresh claim, the suggestion already launched, or
+      // it is terminally failed. Skip the mirror rather than overwrite it.
+      console.warn(
+        `[setup-new] Skipped mirroring launched state onto suggestion ${input.suggestionId}: it is already launched or another surface holds a fresh claim.`,
+      );
+      return;
+    }
+
+    const finalized = await finalizeWorkItemLaunched(tx, {
+      id: input.suggestionId,
+      taskId: input.launchedTaskId,
+      claimedAt: claimedSuggestion.launchClaimedAt,
+      clearDismissedAt: true,
+    });
+
+    if (!finalized) {
+      // Our claim token was superseded between claim and finalize; leave the new
+      // claimant's state untouched.
+      console.warn(
+        `[setup-new] Suggestion ${input.suggestionId} mirror lost the fencing guard after claiming; another surface reclaimed it. Leaving its state untouched.`,
+      );
+    }
+  });
 }
 
 function stripMutableQueuedSetupTask(
@@ -658,44 +757,62 @@ async function replaceQueuedSetupTasks({
       tx,
     );
 
+    // Refuse to replace the queue while a launch is genuinely in flight or an
+    // item already launched. A *stale* `launchClaimedAt` (older than the shared
+    // stale-claim window) is left by a crash between claim and finalize; with
+    // per-item stale-claim recovery now in place that row is recoverable, so it
+    // must not block re-queuing forever. Only a launched row or a fresh claim
+    // blocks replacement.
+    const staleClaimThreshold = new Date(
+      Date.now() - WORK_ITEM_LAUNCH_STALE_CLAIM_MS,
+    );
+
     if (
       existingRows.some(
         (queuedTask) =>
-          queuedTask.launchClaimedAt !== null || queuedTask.launchedAt !== null,
+          queuedTask.launchedAt !== null ||
+          (queuedTask.launchClaimedAt !== null &&
+            queuedTask.launchClaimedAt > staleClaimThreshold),
       )
     ) {
       return existingRows.map(stripMutableQueuedSetupTask);
     }
 
     await tx
-      .delete(setupNewQueuedTasks)
+      .delete(workItems)
       .where(
-        eq(setupNewQueuedTasks.setupOnboardingTaskId, setupOnboardingTaskId),
+        and(
+          eq(workItems.sourceTaskId, setupOnboardingTaskId),
+          eq(workItems.kind, 'onboarding'),
+        ),
       );
 
     const nextRows: Array<{
-      setupOnboardingTaskId: string;
+      kind: 'onboarding';
+      sourceTaskId: string;
       selectedByUserId: string;
-      suggestionId: string | null;
+      sourceWorkItemId: string | null;
       title: string;
-      prompt: string;
+      executionPrompt: string;
       sortOrder: number;
     }> = suggestionRows.map((suggestion, index) => ({
-      setupOnboardingTaskId,
+      kind: 'onboarding',
+      sourceTaskId: setupOnboardingTaskId,
       selectedByUserId,
-      suggestionId: suggestion.id,
+      sourceWorkItemId: suggestion.id,
       title: suggestion.title,
-      prompt: suggestion.brief,
+      executionPrompt: suggestion.brief ?? '',
       sortOrder: index,
     }));
 
     if (customTaskPrompt) {
       nextRows.push({
-        setupOnboardingTaskId,
+        kind: 'onboarding',
+        sourceTaskId: setupOnboardingTaskId,
         selectedByUserId,
-        suggestionId: null,
+        sourceWorkItemId: null,
         title: buildCustomQueuedTaskTitle(customTaskPrompt),
-        prompt: customTaskPrompt,
+        executionPrompt: customTaskPrompt,
         sortOrder: nextRows.length,
       });
     }
@@ -704,46 +821,86 @@ async function replaceQueuedSetupTasks({
       return [];
     }
 
-    return tx.insert(setupNewQueuedTasks).values(nextRows).returning({
-      id: setupNewQueuedTasks.id,
-      suggestionId: setupNewQueuedTasks.suggestionId,
-      title: setupNewQueuedTasks.title,
-      prompt: setupNewQueuedTasks.prompt,
-      sortOrder: setupNewQueuedTasks.sortOrder,
-      launchedTaskId: setupNewQueuedTasks.launchedTaskId,
-      launchedAt: setupNewQueuedTasks.launchedAt,
-      environmentId: setupNewQueuedTasks.environmentId,
+    return tx.insert(workItems).values(nextRows).returning({
+      id: workItems.id,
+      suggestionId: workItems.sourceWorkItemId,
+      title: workItems.title,
+      prompt: workItems.executionPrompt,
+      sortOrder: workItems.sortOrder,
+      launchedTaskId: workItems.launchedTaskId,
+      launchedAt: workItems.launchedAt,
+      environmentId: workItems.targetEnvironmentId,
     });
   });
 }
 
-async function claimQueuedSetupTasksForLaunch(setupOnboardingTaskId: string) {
-  return db.transaction(async (tx) => {
-    const claimedAt = new Date();
+type ClaimedQueuedSetupTask = {
+  id: string;
+  suggestionId: string | null;
+  selectedByUserId: string | null;
+  prompt: string | null;
+  /** The `launchClaimedAt` fencing token for this claim. */
+  claimedAt: Date;
+};
 
-    return tx
-      .update(setupNewQueuedTasks)
-      .set({
-        launchClaimedAt: claimedAt,
-        updatedAt: claimedAt,
-      })
-      .where(
-        and(
-          eq(setupNewQueuedTasks.setupOnboardingTaskId, setupOnboardingTaskId),
-          isNull(setupNewQueuedTasks.launchedAt),
-          isNull(setupNewQueuedTasks.launchClaimedAt),
-        ),
-      )
-      .returning({
-        id: setupNewQueuedTasks.id,
-        suggestionId: setupNewQueuedTasks.suggestionId,
-        selectedByUserId: setupNewQueuedTasks.selectedByUserId,
-        prompt: setupNewQueuedTasks.prompt,
-      });
-  });
+/**
+ * Claims the queued onboarding items for a setup task through the shared fenced
+ * CAS, preserving the previous batch semantics: fetch the candidate onboarding
+ * rows for the setup task in queue order, attempt to claim each, and return
+ * whichever claims succeeded (each carrying its own fencing token).
+ *
+ * Migrated off the single batch UPDATE gated on `launchedAt IS NULL AND
+ * launchClaimedAt IS NULL`, which had no stale-claim recovery: a crash between
+ * claim and finalize left an item `launching` forever. `claimWorkItem` instead
+ * claims `open` OR a stale `launching` row (older than the shared stale-claim
+ * window) and guards `launched_task_id IS NULL`, so a crashed launch recovers,
+ * a fresh in-flight claim on one item is skipped (only that item), and an
+ * already-launched item is never re-claimed. Onboarding rows are inserted with
+ * the `work_items.status` default of `open`, so the claim predicate matches the
+ * rows produced by `replaceQueuedSetupTasks`. Each claim is its own atomic CAS,
+ * so no wrapping transaction is needed.
+ */
+async function claimQueuedSetupTasksForLaunch(
+  setupOnboardingTaskId: string,
+): Promise<ClaimedQueuedSetupTask[]> {
+  const candidates = await db
+    .select({ id: workItems.id })
+    .from(workItems)
+    .where(
+      and(
+        eq(workItems.sourceTaskId, setupOnboardingTaskId),
+        eq(workItems.kind, 'onboarding'),
+      ),
+    )
+    .orderBy(asc(workItems.sortOrder));
+
+  const claimedTasks: ClaimedQueuedSetupTask[] = [];
+
+  for (const candidate of candidates) {
+    const claimed = await claimWorkItem(db, {
+      id: candidate.id,
+      extraConditions: [eq(workItems.kind, 'onboarding')],
+    });
+
+    if (!claimed) {
+      continue;
+    }
+
+    claimedTasks.push({
+      id: claimed.id,
+      suggestionId: claimed.sourceWorkItemId,
+      selectedByUserId: claimed.selectedByUserId,
+      prompt: claimed.executionPrompt,
+      claimedAt: claimed.launchClaimedAt,
+    });
+  }
+
+  return claimedTasks;
 }
 
-async function launchQueuedSetupTasksIfReady({
+// Exported for the DB-backed launch-lifecycle tests, which exercise the fenced
+// claim/finalize/release flow directly. Not part of the tRPC command surface.
+export async function launchQueuedSetupTasksIfReady({
   setupOnboardingTaskId,
   matchingEnvironmentId,
   slackTeamId,
@@ -801,59 +958,148 @@ async function launchQueuedSetupTasksIfReady({
         }
       : {};
 
+  const queuedSourceControlProvider =
+    await resolveEnvironmentSourceControlProvider(matchingEnvironmentId);
+
   await Promise.allSettled(
     claimedTasks.map(async (queuedTask) => {
+      let launchResult: Awaited<ReturnType<typeof enqueueTask>>;
+
       try {
-        const launchResult = await enqueueCloudTask(
-          {
-            userId: queuedTask.selectedByUserId,
-            type: CloudTaskType.StandardTask,
+        launchResult = await enqueueTask({
+          task: {
+            type: TaskPayloadKind.StandardTask,
             payload: {
               repo: '',
               environmentId: matchingEnvironmentId,
+              ...(queuedSourceControlProvider
+                ? { sourceControlProvider: queuedSourceControlProvider }
+                : {}),
               ...(slackTeamId ? { teamId: slackTeamId } : {}),
               ...(slackChannel ? { slackChannel } : {}),
               ...(slackThreadTs ? { slackThreadTs } : {}),
               ...communicationMetadata,
-              description: queuedTask.prompt,
+              description: queuedTask.prompt ?? '',
             },
           },
-          {
-            launchClass: 'human',
+          initiator: {
+            kind: 'user',
+            userId: queuedTask.selectedByUserId ?? SETUP_BOOTSTRAP_USER_ID,
           },
-        );
-
-        const launchedAt = new Date();
-
-        await db.transaction(async (tx) => {
-          await tx
-            .update(setupNewQueuedTasks)
-            .set({
-              environmentId: matchingEnvironmentId,
-              launchedTaskId: launchResult.taskId,
-              launchedAt,
-              updatedAt: launchedAt,
-            })
-            .where(eq(setupNewQueuedTasks.id, queuedTask.id));
-
-          if (queuedTask.suggestionId) {
-            await markTaskSuggestionStarted(
-              {
-                suggestionId: queuedTask.suggestionId,
-                updatedAt: launchedAt,
-              },
-              tx,
-            );
-          }
+          workflow: 'setup_onboarding',
+          surface: 'web',
+          trigger: 'manual',
+          ...(slackChannel || slackThreadTs
+            ? {
+                channels: {
+                  slackChannelId: slackChannel ?? null,
+                  slackThreadTs: slackThreadTs ?? null,
+                },
+              }
+            : {}),
         });
-      } catch {
-        await db
-          .update(setupNewQueuedTasks)
-          .set({
-            launchClaimedAt: null,
-            updatedAt: new Date(),
-          })
-          .where(eq(setupNewQueuedTasks.id, queuedTask.id));
+      } catch (error) {
+        // The enqueue never succeeded, so no run exists: release our claim back
+        // to `open` so a later trigger can retry promptly. The fenced release
+        // never reverts a `launched` item and never reverts a claim already
+        // reclaimed by another launcher. Only a pre-enqueue failure may release;
+        // see the post-enqueue invariant below.
+        await releaseWorkItemClaim(db, {
+          id: queuedTask.id,
+          claimedAt: queuedTask.claimedAt,
+          extraConditions: [eq(workItems.kind, 'onboarding')],
+        });
+
+        console.warn(
+          `[setup-new] enqueue failed for onboarding work item ${queuedTask.id}; released its claim back to open — ${
+            error instanceof Error ? error.message : String(error)
+          }.`,
+        );
+        return;
+      }
+
+      // Fenced finalize: `launching` -> `launched` only when our claim token
+      // still matches, stamping `targetEnvironmentId` in the same guarded write.
+      // Runs directly against `db` (not a transaction): it is a single fenced
+      // UPDATE, and the suggestion mirror below deliberately no longer shares
+      // its atomicity so a mirror failure can never roll back a healthy launch.
+      //
+      // Invariant: once the task is enqueued, a failure of unknown cause must
+      // never release the claim. Releasing would let the next readiness pass
+      // re-claim and launch a duplicate immediately, while leaving the claim in
+      // place lets stale-claim recovery retry safely only after the shared
+      // window. So a throw here is treated exactly like a lost finalize
+      // (`finalized = false`), which drives the orphan-cancel branch. In the
+      // rare ambiguous case where the finalize committed but its ack was lost,
+      // the cancel may kill a healthy linked run; that trade is intentional — a
+      // visibly canceled task beats a silent duplicate.
+      let finalized: boolean;
+
+      try {
+        finalized = await finalizeWorkItemLaunched(db, {
+          id: queuedTask.id,
+          taskId: launchResult.taskId,
+          claimedAt: queuedTask.claimedAt,
+          targetEnvironmentId: matchingEnvironmentId,
+        });
+      } catch (error) {
+        console.warn(
+          `[setup-new] finalize threw for onboarding work item ${queuedTask.id} after enqueuing task ${launchResult.taskId} (run ${launchResult.id}); treating as a lost finalize and leaving the claim for stale-claim recovery — ${
+            error instanceof Error ? error.message : String(error)
+          }.`,
+        );
+        finalized = false;
+      }
+
+      if (!finalized) {
+        // The task is already enqueued but the finalize did not commit (the
+        // fencing guard rejected it, or it threw), so the run is orphaned from
+        // this work item. Best-effort cancel it while it is still pre-sandbox,
+        // and log loudly either way with the cancel outcome (matches the
+        // implement.ts orphan handling). Return before the mirror: a lost or
+        // failed finalize must never mirror a launch that did not link.
+        let cancelNote = 'orphaned run left running';
+
+        try {
+          const canceled = await cancelTaskRunDirect({
+            runId: launchResult.id,
+            error:
+              'Canceled: setup-new queued task launch finalize lost the claim fencing guard',
+          });
+          cancelNote = canceled
+            ? 'orphaned run canceled'
+            : 'orphaned run cancel did not apply (already started or terminal)';
+        } catch (cancelError) {
+          cancelNote = `orphaned run cancel failed: ${
+            cancelError instanceof Error
+              ? cancelError.message
+              : String(cancelError)
+          }`;
+        }
+
+        console.warn(
+          `[setup-new] finalize lost the fencing guard for onboarding work item ${queuedTask.id}; orphaned task ${launchResult.taskId} (run ${launchResult.id}) runs unlinked — ${cancelNote}.`,
+        );
+        return;
+      }
+
+      // Mirror the launched state onto the source suggestion only after a
+      // committed finalize, outside any transaction and best-effort: the launch
+      // link is already finalized and must stay finalized, so a mirror throw is
+      // logged and swallowed rather than allowed to undo the launch.
+      if (queuedTask.suggestionId) {
+        try {
+          await markSuggestionWorkItemLaunched({
+            suggestionId: queuedTask.suggestionId,
+            launchedTaskId: launchResult.taskId,
+          });
+        } catch (error) {
+          console.warn(
+            `[setup-new] failed to mirror launched state onto suggestion ${queuedTask.suggestionId} for task ${launchResult.taskId}; the onboarding launch stays finalized — ${
+              error instanceof Error ? error.message : String(error)
+            }.`,
+          );
+        }
       }
     }),
   );
@@ -928,13 +1174,16 @@ export async function getSetupNewStatusCommand(auth: UserAuthSuccess) {
   assertAdmin(auth);
 
   const { userId } = auth;
+  await purgeSavedDeploymentWorkerImage();
+
   const [
     baseStatus,
     slackAccessStatus,
     persistedRuntimeModelConfig,
     persistedRuntimeComputeConfig,
     envVarNames,
-    savedWorkerImage,
+    nonSecretComputeEnvValues,
+    nonSecretSourceControlEnvValues,
     chatgptConnected,
   ] = await Promise.all([
     getSetupBaseStatus(auth),
@@ -942,7 +1191,12 @@ export async function getSetupNewStatusCommand(auth: UserAuthSuccess) {
     getPersistedRuntimeModelConfig(),
     getPersistedRuntimeComputeConfig(),
     getPersistedEnvironmentVariableNames(),
-    resolveSavedWorkerImage(),
+    getPersistedEnvironmentVariableValues([
+      ...NON_SECRET_COMPUTE_ENV_VAR_NAMES,
+    ]),
+    getPersistedEnvironmentVariableValues([
+      ...NON_SECRET_SOURCE_CONTROL_ENV_VAR_NAMES,
+    ]),
     isChatGptSubscriptionConnected(),
   ]);
   const activeSetupQualificationBlock =
@@ -1034,11 +1288,9 @@ export async function getSetupNewStatusCommand(auth: UserAuthSuccess) {
   const computeSetup = buildSetupComputeStatus({
     runtimeEnv: process.env,
     persistedEnvVarNames: envVarNames,
+    persistedEnvVarValues: nonSecretComputeEnvValues,
     persistedComputeConfig: persistedRuntimeComputeConfig,
     selectedProvider: setupNewState.computeProvider,
-    savedWorkerImage: process.env[SHARED_WORKER_IMAGE_ENV_VAR]?.trim()
-      ? null
-      : savedWorkerImage,
   });
   // Present stale in-flight provisioning runs as failed so the wizard
   // offers a retry instead of polling forever after a web-process restart.
@@ -1057,6 +1309,7 @@ export async function getSetupNewStatusCommand(auth: UserAuthSuccess) {
   const sourceControlSetup = buildSetupSourceControlStatus({
     runtimeEnv: process.env,
     persistedEnvVarNames: envVarNames,
+    persistedEnvVarValues: nonSecretSourceControlEnvValues,
     selectedProvider: setupNewState.sourceControlProvider,
     connectedProviders: sourceControlConnection.connectedProviders,
     repositoryCounts: sourceControlConnection.repositoryCounts,
@@ -1230,7 +1483,7 @@ export async function saveSetupNewComputeProviderChoiceCommand(
     );
 
     if (!providerStatus) {
-      throw new Error('Selected compute provider is unavailable.');
+      throw new Error('Selected sandbox provider is unavailable.');
     }
 
     const hasCredentialFields = providerStatus.fields.length > 0;
@@ -1287,31 +1540,26 @@ export async function saveSetupNewComputeConfigCommand(
         templateRef: string;
       } | null = null;
 
+      await purgeSavedDeploymentWorkerImage(tx);
+
       const [
         currentState,
         persistedRuntimeComputeConfig,
         persistedEnvVarNames,
-        savedWorkerImage,
       ] = await Promise.all([
         getPersistedSetupNewState(tx),
         getPersistedRuntimeComputeConfig(tx),
         getPersistedEnvironmentVariableNames(tx),
-        resolveSavedWorkerImage(tx),
       ]);
 
-      // The shared worker image (DOCKER_WORKER_IMAGE) may be submitted in the
-      // same request. Process env wins and locks it; otherwise a submitted or
-      // saved deployment value applies, then the RELEASE_VERSION derivation.
-      const workerImageLocked =
-        !!process.env[SHARED_WORKER_IMAGE_ENV_VAR]?.trim();
+      // In-request DOCKER_WORKER_IMAGE is only used for this save/provisioning
+      // pass. It is not persisted as sticky deployment state; process env and
+      // RELEASE_VERSION derivation own runtime configuration.
       const submittedWorkerImage =
         input.values?.[SHARED_WORKER_IMAGE_ENV_VAR]?.trim() || null;
-      const savedOrSubmittedWorkerImage = workerImageLocked
-        ? null
-        : (submittedWorkerImage ?? savedWorkerImage);
       const effectiveWorkerImage =
         process.env[SHARED_WORKER_IMAGE_ENV_VAR]?.trim() ||
-        savedOrSubmittedWorkerImage ||
+        submittedWorkerImage ||
         deriveWorkerImageFromReleaseVersion(process.env) ||
         undefined;
 
@@ -1320,26 +1568,24 @@ export async function saveSetupNewComputeConfigCommand(
         persistedEnvVarNames,
         persistedComputeConfig: persistedRuntimeComputeConfig,
         selectedProvider: input.provider,
-        savedWorkerImage: savedOrSubmittedWorkerImage,
       });
       const providerStatus = computeSetup.providers.find(
         (candidate) => candidate.provider === input.provider,
       );
 
       if (!providerStatus) {
-        throw new Error('Selected compute provider is unavailable.');
+        throw new Error('Selected sandbox provider is unavailable.');
       }
 
-      // When the Modal base image is not entered, not env-provided, and not
-      // already saved, derive it from the effective worker image and persist
-      // it. The published worker image doubles as the Modal base image.
+      // Derive MODAL_BASE_IMAGE_REF when not env-provided or already saved.
+      // Form submissions are ignored (deployment-managed like E2B/Daytona
+      // artifacts).
       const derivedInfraDefaults = new Map<string, string>();
 
       if (input.provider === 'modal') {
         const baseImageField = providerStatus.fields.find(
           (field) => field.envVarName === 'MODAL_BASE_IMAGE_REF',
         );
-        const submittedBaseImage = input.values?.MODAL_BASE_IMAGE_REF?.trim();
         const derivedBaseImageRef = resolveDerivedModalBaseImageRef({
           ...process.env,
           DOCKER_WORKER_IMAGE: effectiveWorkerImage,
@@ -1349,7 +1595,6 @@ export async function saveSetupNewComputeConfigCommand(
           baseImageField &&
           !baseImageField.runtimeSatisfied &&
           !baseImageField.savedSatisfied &&
-          !submittedBaseImage &&
           derivedBaseImageRef
         ) {
           derivedInfraDefaults.set('MODAL_BASE_IMAGE_REF', derivedBaseImageRef);
@@ -1358,11 +1603,11 @@ export async function saveSetupNewComputeConfigCommand(
 
       // Provisionable providers' base images (the E2B worker template, the
       // Daytona worker snapshot) cannot be derived like the Modal base image
-      // — they are artifacts inside the operator's provider account. When the
-      // operator entered a manual artifact value, it is persisted directly and
-      // no provisioning runs. Otherwise, when a registry-qualified worker
-      // image exists, the save records the credentials, marks the run as
-      // pending, and the run executes detached after commit.
+      // — they are artifacts inside the operator's provider account. Manual
+      // form overrides are not accepted; process env or auto-provisioning
+      // owns them. When a registry-qualified worker image exists, the save
+      // records credentials, marks the run as pending, and the run executes
+      // detached after commit.
       const setupProvisioningFieldNames = new Set<string>();
 
       if (isSetupProvisionableComputeProvider(input.provider)) {
@@ -1371,65 +1616,59 @@ export async function saveSetupNewComputeConfigCommand(
           provisionableProvider === 'e2b'
             ? 'E2B_TEMPLATE_ID'
             : 'DAYTONA_SNAPSHOT_NAME';
-        const manualArtifact = input.values?.[artifactEnvVar]?.trim();
+        const provisioning = await prepareComputeProvisioningStart({
+          provider: provisionableProvider,
+          providerStatus,
+          existingState: getSetupNewComputeProvisioningState(
+            currentState,
+            provisionableProvider,
+          ),
+          // Process env, in-request override, or RELEASE_VERSION derivation.
+          dockerWorkerImage: effectiveWorkerImage,
+          runtimeEnv: process.env,
+          markPending: (nextState) => {
+            provisioningToStart = {
+              provider: provisionableProvider,
+              imageRef: nextState.imageRef,
+              templateRef: nextState.templateRef ?? '',
+            };
+          },
+        });
 
-        if (!manualArtifact) {
-          const provisioning = await prepareComputeProvisioningStart({
-            provider: provisionableProvider,
-            providerStatus,
-            existingState: getSetupNewComputeProvisioningState(
-              currentState,
-              provisionableProvider,
-            ),
-            // The effective image includes the ref derived from the baked
-            // RELEASE_VERSION and any worker image saved through the UI, so
-            // provisioning also works on deployments that never set
-            // DOCKER_WORKER_IMAGE explicitly.
-            dockerWorkerImage: effectiveWorkerImage,
-            runtimeEnv: process.env,
-            markPending: (nextState) => {
-              provisioningToStart = {
-                provider: provisionableProvider,
-                imageRef: nextState.imageRef,
-                templateRef: nextState.templateRef ?? '',
-              };
-            },
-          });
-
-          if (provisioning.fieldPending) {
-            if (!provisioning.provisionable) {
-              throw new Error(
-                `${providerStatus.label} needs a worker base image. Add a hosted worker image, or enter the ${artifactEnvVar} manually.`,
-              );
-            }
-
-            setupProvisioningFieldNames.add(artifactEnvVar);
+        if (provisioning.fieldPending) {
+          if (!provisioning.provisionable) {
+            throw new Error(
+              `${providerStatus.label} needs a registry-qualified worker image (for example via DOCKER_WORKER_IMAGE) so Roomote can provision the worker base image automatically.`,
+            );
           }
 
-          if (provisioning.start) {
-            provisioningToStart = provisioning.start;
-          }
+          setupProvisioningFieldNames.add(artifactEnvVar);
+        }
+
+        if (provisioning.start) {
+          provisioningToStart = provisioning.start;
         }
       }
 
-      // Credentials, submitted/derived infrastructure values, and the shared
-      // worker image are persisted as encrypted deployment env vars. Runtime
-      // env values are locked and never overwritten from the UI.
+      // Credentials and operator-editable infrastructure are persisted as
+      // encrypted deployment env vars. Managed artifacts are process-env /
+      // derived / provisioning only.
       const valuesToSave: Array<{ name: string; value: string }> = [];
-
-      if (submittedWorkerImage && !workerImageLocked) {
-        valuesToSave.push({
-          name: SHARED_WORKER_IMAGE_ENV_VAR,
-          value: submittedWorkerImage,
-        });
-      }
+      const envVarsToClear: string[] = [];
 
       for (const field of providerStatus.fields) {
         if (field.runtimeSatisfied) {
           continue;
         }
 
-        const submitted = input.values?.[field.envVarName]?.trim() ?? '';
+        if (isAutoProvisionedComputeArtifactField(field)) {
+          continue;
+        }
+
+        const submitted =
+          field.envVarName === 'MODAL_BASE_IMAGE_REF'
+            ? ''
+            : (input.values?.[field.envVarName]?.trim() ?? '');
         const nextValue =
           submitted ||
           (isComputeInfrastructureField(field)
@@ -1437,6 +1676,13 @@ export async function saveSetupNewComputeConfigCommand(
             : '');
 
         if (!nextValue) {
+          if (
+            field.secret !== true &&
+            !isRequiredComputeField(field) &&
+            field.savedSatisfied
+          ) {
+            envVarsToClear.push(field.envVarName);
+          }
           continue;
         }
 
@@ -1448,7 +1694,12 @@ export async function saveSetupNewComputeConfigCommand(
           return false;
         }
 
-        const submitted = input.values?.[field.envVarName]?.trim() ?? '';
+        // Modal base image is not form-collected; only runtime / saved / derived
+        // values count toward satisfaction (same as the save loop above).
+        const submitted =
+          field.envVarName === 'MODAL_BASE_IMAGE_REF'
+            ? ''
+            : (input.values?.[field.envVarName]?.trim() ?? '');
         const nextValue =
           submitted ||
           (isComputeInfrastructureField(field)
@@ -1474,6 +1725,17 @@ export async function saveSetupNewComputeConfigCommand(
           userId,
           values: valuesToSave,
         });
+      }
+
+      if (envVarsToClear.length > 0) {
+        await tx
+          .delete(environmentVariables)
+          .where(
+            and(
+              isNull(environmentVariables.userId),
+              inArray(environmentVariables.name, envVarsToClear),
+            ),
+          );
       }
 
       const setupNewState = normalizeSetupNewState({
@@ -1912,6 +2174,13 @@ export async function startSetupNewOnboardingTaskCommand(
     const workspacePayload = buildSetupNewWorkspacePayload(
       selectedRepositoryFullNames,
     );
+    // Stamp the provider explicitly: dequeue defaults to GitHub when the
+    // payload omits it, which breaks non-GitHub deployments.
+    const setupSourceControlProvider = resolveSingleSourceControlProvider(
+      selectedRepositories.map(
+        (repository) => repository.sourceControlProvider,
+      ),
+    );
     const prompt = appendEnvironmentDefinitionGuidance(
       buildSetupNewKickoffPrompt(selectedRepositoryFullNames),
       currentState.setupGuidance,
@@ -1941,8 +2210,8 @@ export async function startSetupNewOnboardingTaskCommand(
 
       if (fallbackTarget) {
         const kickoffMessage = buildSetupKickoffText();
-        let kickoffMessageId: string;
-        let kickoffChannelId: string;
+        let kickoffMessageId: string | null = null;
+        let kickoffChannelId: string | null = null;
 
         if (fallbackTarget.provider === 'telegram') {
           const telegram = new TelegramCommunicationProvider({
@@ -1963,106 +2232,114 @@ export async function startSetupNewOnboardingTaskCommand(
           kickoffMessageId = posted.messageId;
           kickoffChannelId = fallbackTarget.chatId;
         } else {
-          const teams =
-            await createTeamsCommunicationProviderFromRuntimeCredentials();
+          // Teams is best-effort: when the kickoff post fails, onboarding
+          // continues as a web-only task instead of failing setup, and the
+          // persisted handoff fields stay null so Teams never looks
+          // connected without a delivered kickoff.
+          try {
+            const posted = await fallbackTarget.teams.postMessage({
+              channelId: fallbackTarget.conversationId,
+              serviceUrl: fallbackTarget.serviceUrl,
+              text: kickoffMessage,
+              textFormat: 'markdown',
+            });
 
-          if (!teams) {
-            throw new Error(
-              'Roomote could not resolve Teams bot credentials for setup.',
+            if (posted.messageId) {
+              kickoffMessageId = posted.messageId;
+              kickoffChannelId = fallbackTarget.conversationId;
+            } else {
+              console.warn(
+                '[setup-new] The Teams setup kickoff post returned no message id; onboarding continues as a web-only task.',
+              );
+            }
+          } catch (error) {
+            console.warn(
+              '[setup-new] Failed to post the Teams setup kickoff; onboarding continues as a web-only task.',
+              error,
             );
           }
-
-          const posted = await teams.postMessage({
-            channelId: fallbackTarget.conversationId,
-            serviceUrl: fallbackTarget.serviceUrl,
-            text: kickoffMessage,
-            textFormat: 'markdown',
-          });
-
-          if (!posted.messageId) {
-            throw new Error('Roomote could not post the Teams setup kickoff.');
-          }
-
-          kickoffMessageId = posted.messageId;
-          kickoffChannelId = fallbackTarget.conversationId;
         }
 
-        const startedAt = new Date().toISOString();
-        const launchResult = await enqueueCloudTask(
-          {
-            userId,
-            ...(modelSelection.harness
-              ? { harness: modelSelection.harness }
-              : {}),
-            attributionOverride: {
-              kind: 'automatic',
-              sourceKind: 'automation',
-            },
-            type: CloudTaskType.StandardTask,
-            payload: {
-              ...workspacePayload,
-              description: prompt,
-              visibleInTranscript: false,
-              communicationProvider: fallbackTarget.provider,
-              communicationChannelId: kickoffChannelId,
-              communicationMessageId: kickoffMessageId,
-              ...(fallbackTarget.provider === 'teams'
-                ? {
-                    communicationThreadId: kickoffMessageId,
-                    communicationServiceUrl: fallbackTarget.serviceUrl,
-                  }
+        if (kickoffMessageId && kickoffChannelId) {
+          const startedAt = new Date().toISOString();
+          const launchResult = await enqueueTask({
+            task: {
+              ...(modelSelection.harness
+                ? { harness: modelSelection.harness }
                 : {}),
-              ...(modelSelection.harnessModelOverrides
-                ? {
-                    harnessModelOverrides: modelSelection.harnessModelOverrides,
-                  }
-                : {}),
+              type: TaskPayloadKind.StandardTask,
+              payload: {
+                ...workspacePayload,
+                ...(setupSourceControlProvider
+                  ? { sourceControlProvider: setupSourceControlProvider }
+                  : {}),
+                description: prompt,
+                visibleInTranscript: false,
+                communicationProvider: fallbackTarget.provider,
+                communicationChannelId: kickoffChannelId,
+                communicationMessageId: kickoffMessageId,
+                ...(fallbackTarget.provider === 'teams'
+                  ? {
+                      communicationThreadId: kickoffMessageId,
+                      communicationServiceUrl: fallbackTarget.serviceUrl,
+                    }
+                  : {}),
+                ...(modelSelection.harnessModelOverrides
+                  ? {
+                      harnessModelOverrides:
+                        modelSelection.harnessModelOverrides,
+                    }
+                  : {}),
+              },
             },
-          },
-          {
-            launchClass: 'human',
-          },
-        );
+            initiator: { kind: 'user', userId },
+            workflow: 'setup_onboarding',
+            surface: 'web',
+            trigger: 'manual',
+          });
 
-        await savePersistedSetupNewState(
-          normalizeSetupNewState({
-            ...currentState,
-            selectedRepositoryIds: normalizedRepositoryIds,
-            setupGuidance: currentState.setupGuidance ?? null,
-            onboardingTaskId: launchResult.taskId,
-            onboardingTaskStartedAt: startedAt,
-            slackTeamId: null,
-            slackChannel: null,
-            slackThreadTs: null,
-            chatHandoffProvider: fallbackTarget.provider,
-            chatHandoffChannelId: kickoffChannelId,
-            chatHandoffThreadId: kickoffMessageId,
-            chatHandoffServiceUrl:
-              fallbackTarget.provider === 'teams'
-                ? fallbackTarget.serviceUrl
-                : null,
-            lastInteractedByUserId: userId,
-          }),
-          tx,
-        );
+          await savePersistedSetupNewState(
+            normalizeSetupNewState({
+              ...currentState,
+              selectedRepositoryIds: normalizedRepositoryIds,
+              setupGuidance: currentState.setupGuidance ?? null,
+              onboardingTaskId: launchResult.taskId,
+              onboardingTaskStartedAt: startedAt,
+              slackTeamId: null,
+              slackChannel: null,
+              slackThreadTs: null,
+              chatHandoffProvider: fallbackTarget.provider,
+              chatHandoffChannelId: kickoffChannelId,
+              chatHandoffThreadId: kickoffMessageId,
+              chatHandoffServiceUrl:
+                fallbackTarget.provider === 'teams'
+                  ? fallbackTarget.serviceUrl
+                  : null,
+              lastInteractedByUserId: userId,
+            }),
+            tx,
+          );
 
-        return {
-          taskId: launchResult.taskId,
-          startedAt,
-          launchedNewOnboardingTask: true as const,
-        };
+          return {
+            taskId: launchResult.taskId,
+            startedAt,
+            launchedNewOnboardingTask: true as const,
+          };
+        }
       }
 
       const startedAt = new Date().toISOString();
-      const launchResult = await enqueueCloudTask(
-        {
-          userId,
+      const launchResult = await enqueueTask({
+        task: {
           ...(modelSelection.harness
             ? { harness: modelSelection.harness }
             : {}),
-          type: CloudTaskType.StandardTask,
+          type: TaskPayloadKind.StandardTask,
           payload: {
             ...workspacePayload,
+            ...(setupSourceControlProvider
+              ? { sourceControlProvider: setupSourceControlProvider }
+              : {}),
             description: prompt,
             visibleInTranscript: false,
             ...(modelSelection.harnessModelOverrides
@@ -2072,10 +2349,11 @@ export async function startSetupNewOnboardingTaskCommand(
               : {}),
           },
         },
-        {
-          launchClass: 'human',
-        },
-      );
+        initiator: { kind: 'user', userId },
+        workflow: 'setup_onboarding',
+        surface: 'web',
+        trigger: 'manual',
+      });
 
       await savePersistedSetupNewState(
         normalizeSetupNewState({
@@ -2125,22 +2403,20 @@ export async function startSetupNewOnboardingTaskCommand(
     }
 
     const startedAt = new Date().toISOString();
-    let launchResult: Awaited<ReturnType<typeof enqueueCloudTask>>;
+    let launchResult: Awaited<ReturnType<typeof enqueueTask>>;
 
     try {
-      launchResult = await enqueueCloudTask(
-        {
-          userId,
+      launchResult = await enqueueTask({
+        task: {
           ...(modelSelection.harness
             ? { harness: modelSelection.harness }
             : {}),
-          attributionOverride: {
-            kind: 'automatic',
-            sourceKind: 'automation',
-          },
-          type: CloudTaskType.SlackAppMention,
+          type: TaskPayloadKind.SlackAppMention,
           payload: {
             ...workspacePayload,
+            ...(setupSourceControlProvider
+              ? { sourceControlProvider: setupSourceControlProvider }
+              : {}),
             channel: slackChannel,
             user: handoffTarget.slackUserId,
             text: prompt,
@@ -2155,10 +2431,15 @@ export async function startSetupNewOnboardingTaskCommand(
               : {}),
           },
         },
-        {
-          launchClass: 'human',
+        initiator: { kind: 'user', userId },
+        workflow: 'setup_onboarding',
+        surface: 'slack',
+        trigger: 'manual',
+        channels: {
+          slackChannelId: slackChannel,
+          slackThreadTs,
         },
-      );
+      });
     } catch (error) {
       await slack.deleteMessage({ channel: slackChannel, ts: slackThreadTs });
       throw error;
@@ -2235,14 +2516,14 @@ export async function cancelSetupNewOnboardingTaskCommand(
 
   const jobs = await db
     .select({
-      id: cloudJobs.id,
-      status: cloudJobs.status,
+      id: taskRuns.id,
+      status: taskRuns.status,
     })
-    .from(cloudJobs)
-    .where(eq(cloudJobs.taskId, currentState.onboardingTaskId));
+    .from(taskRuns)
+    .where(eq(taskRuns.taskId, currentState.onboardingTaskId));
 
   const activeJobIds = jobs
-    .filter((job) => !isExitedCloudTaskStatus(job.status))
+    .filter((job) => !isExitedRunStatus(job.status))
     .map((job) => job.id);
 
   if (activeJobIds.length > 0) {
@@ -2250,17 +2531,17 @@ export async function cancelSetupNewOnboardingTaskCommand(
 
     await db.transaction(async (tx) => {
       await tx
-        .update(cloudJobs)
+        .update(taskRuns)
         .set({
-          status: CloudTaskStatus.Canceled,
+          status: RunStatus.Canceled,
           canceledAt: endedAt,
         })
-        .where(inArray(cloudJobs.id, activeJobIds));
+        .where(inArray(taskRuns.id, activeJobIds));
 
       await Promise.all(
-        activeJobIds.map((cloudJobId) =>
+        activeJobIds.map((runId) =>
           markTaskStartParallelCountEndedAt(tx, {
-            cloudJobId,
+            runId,
             endedAt,
           }),
         ),

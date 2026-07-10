@@ -1,33 +1,36 @@
 import {
   db,
-  cloudJobs,
+  tasks,
+  taskRuns,
   eq,
   and,
   inArray,
   isNull,
   desc,
 } from '@roomote/db/server';
-import { activeCloudTaskStatuses } from '@roomote/types';
+import { activeRunStatuses } from '@roomote/types';
 
 import type { ActiveLinearJobResult } from './types';
 
 /** Column subset returned by active-job lookups. */
-const ACTIVE_JOB_COLUMNS = {
-  id: true,
-  status: true,
-  machineId: true,
-  taskId: true,
-  linearSessionId: true,
-  linearOrganizationId: true,
-  result: true,
+const ACTIVE_JOB_SELECTION = {
+  id: taskRuns.id,
+  status: taskRuns.status,
+  machineId: taskRuns.machineId,
+  taskId: taskRuns.taskId,
+  linearSessionId: tasks.linearSessionId,
+  linearOrganizationId: tasks.linearOrganizationId,
+  result: taskRuns.result,
 } as const;
 
 /**
- * Find an active cloud job for a given Linear agent session.
+ * Find an active run for a given Linear agent session.
  *
- * Returns the most recent job that is not yet completed, failed, or canceled.
- * This includes jobs in any active state: Pending, Dequeued, Processing,
- * Preparing, Spawning, Connecting, Running, or Idle.
+ * Linear channel bindings live on tasks (tasks.linearSessionId /
+ * tasks.linearIssueId, 1:N by design), so lookups join task_runs to tasks
+ * and return the most recent job that is not yet completed, failed, or
+ * canceled. This includes runs in any active state: Pending, Dequeued,
+ * Processing, Preparing, Spawning, Connecting, Running, or Idle.
  *
  * When `linearIssueId` is provided the function first tries an
  * exact match by `linearSessionId`. If that yields nothing it falls back to
@@ -49,21 +52,25 @@ export async function findActiveLinearJob(
   );
 
   // First: exact match by session ID (current behaviour).
-  const sessionMatch = await db.query.cloudJobs.findFirst({
-    where: and(
-      eq(cloudJobs.linearSessionId, linearSessionId),
-      inArray(cloudJobs.status, [...activeCloudTaskStatuses]),
-      isNull(cloudJobs.canceledAt),
-    ),
-    orderBy: desc(cloudJobs.createdAt),
-    columns: ACTIVE_JOB_COLUMNS,
-  });
+  const [sessionMatch] = await db
+    .select(ACTIVE_JOB_SELECTION)
+    .from(taskRuns)
+    .innerJoin(tasks, eq(tasks.id, taskRuns.taskId))
+    .where(
+      and(
+        eq(tasks.linearSessionId, linearSessionId),
+        inArray(taskRuns.status, [...activeRunStatuses]),
+        isNull(taskRuns.canceledAt),
+      ),
+    )
+    .orderBy(desc(taskRuns.createdAt))
+    .limit(1);
 
   if (sessionMatch) {
     console.log(
       `[findActiveLinearJob] Found active job ${sessionMatch.id} by session (status: ${sessionMatch.status}, machine: ${sessionMatch.machineId ?? 'none'}, task: ${sessionMatch.taskId ?? 'none'})`,
     );
-    return sessionMatch as ActiveLinearJobResult;
+    return sessionMatch;
   }
 
   // Fallback: match by issue so we detect resumed jobs from a
@@ -73,21 +80,25 @@ export async function findActiveLinearJob(
       `[findActiveLinearJob] No session match – falling back to issue ${linearIssueId}`,
     );
 
-    const issueMatch = await db.query.cloudJobs.findFirst({
-      where: and(
-        eq(cloudJobs.linearIssueId, linearIssueId),
-        inArray(cloudJobs.status, [...activeCloudTaskStatuses]),
-        isNull(cloudJobs.canceledAt),
-      ),
-      orderBy: desc(cloudJobs.createdAt),
-      columns: ACTIVE_JOB_COLUMNS,
-    });
+    const [issueMatch] = await db
+      .select(ACTIVE_JOB_SELECTION)
+      .from(taskRuns)
+      .innerJoin(tasks, eq(tasks.id, taskRuns.taskId))
+      .where(
+        and(
+          eq(tasks.linearIssueId, linearIssueId),
+          inArray(taskRuns.status, [...activeRunStatuses]),
+          isNull(taskRuns.canceledAt),
+        ),
+      )
+      .orderBy(desc(taskRuns.createdAt))
+      .limit(1);
 
     if (issueMatch) {
       console.log(
         `[findActiveLinearJob] Found active job ${issueMatch.id} by issue (status: ${issueMatch.status}, machine: ${issueMatch.machineId ?? 'none'}, task: ${issueMatch.taskId ?? 'none'})`,
       );
-      return issueMatch as ActiveLinearJobResult;
+      return issueMatch;
     }
   }
 
@@ -98,7 +109,7 @@ export async function findActiveLinearJob(
 }
 
 /**
- * Find an active cloud job by Linear organization ID.
+ * Find an active run by Linear organization ID.
  * Useful for finding any active job in a Linear workspace.
  */
 export async function findActiveLinearJobByOrganization(
@@ -108,21 +119,25 @@ export async function findActiveLinearJobByOrganization(
     `[findActiveLinearJobByOrganization] Searching for active job in org ${linearOrganizationId}`,
   );
 
-  const activeJob = await db.query.cloudJobs.findFirst({
-    where: and(
-      eq(cloudJobs.linearOrganizationId, linearOrganizationId),
-      inArray(cloudJobs.status, [...activeCloudTaskStatuses]),
-      isNull(cloudJobs.canceledAt),
-    ),
-    orderBy: desc(cloudJobs.createdAt),
-    columns: ACTIVE_JOB_COLUMNS,
-  });
+  const [activeJob] = await db
+    .select(ACTIVE_JOB_SELECTION)
+    .from(taskRuns)
+    .innerJoin(tasks, eq(tasks.id, taskRuns.taskId))
+    .where(
+      and(
+        eq(tasks.linearOrganizationId, linearOrganizationId),
+        inArray(taskRuns.status, [...activeRunStatuses]),
+        isNull(taskRuns.canceledAt),
+      ),
+    )
+    .orderBy(desc(taskRuns.createdAt))
+    .limit(1);
 
   if (activeJob) {
     console.log(
       `[findActiveLinearJobByOrganization] Found active job ${activeJob.id} (status: ${activeJob.status}, machine: ${activeJob.machineId ?? 'none'})`,
     );
-    return activeJob as ActiveLinearJobResult;
+    return activeJob;
   }
 
   console.log(

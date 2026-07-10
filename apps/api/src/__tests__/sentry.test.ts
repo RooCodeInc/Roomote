@@ -72,7 +72,7 @@ describe('API Sentry integration', () => {
     expect(sentryState.init).toHaveBeenCalledWith(
       expect.objectContaining({
         dsn: 'https://api.example/1',
-        sendDefaultPii: true,
+        sendDefaultPii: false,
         serverName: 'api',
       }),
     );

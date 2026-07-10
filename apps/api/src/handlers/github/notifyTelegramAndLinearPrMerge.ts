@@ -1,11 +1,13 @@
 import {
   db,
-  cloudJobs,
   githubInstallations,
   taskPullRequests,
+  taskRuns,
+  tasks,
   eq,
   and,
   inArray,
+  isNotNull,
 } from '@roomote/db/server';
 import {
   buildPullRequestMergedNotificationText,
@@ -150,20 +152,32 @@ export async function notifyTelegramAndLinearPrMerge({
       return;
     }
 
-    const linkedJobs = await db.query.cloudJobs.findMany({
-      where: inArray(cloudJobs.taskId, taskIds),
-      columns: {
-        linearSessionId: true,
-        payload: true,
-      },
-    });
+    // Telegram routing metadata lives on run payloads; Linear session
+    // bindings live on the tasks rows.
+    const [linkedRuns, linkedTasksWithLinearSessions] = await Promise.all([
+      db.query.taskRuns.findMany({
+        where: inArray(taskRuns.taskId, taskIds),
+        columns: {
+          payload: true,
+        },
+      }),
+      db.query.tasks.findMany({
+        where: and(
+          inArray(tasks.id, taskIds),
+          isNotNull(tasks.linearSessionId),
+        ),
+        columns: {
+          linearSessionId: true,
+        },
+      }),
+    ]);
 
-    const telegramTargets = linkedJobs
-      .map((job) => getTelegramPrMergeTarget(job.payload))
+    const telegramTargets = linkedRuns
+      .map((run) => getTelegramPrMergeTarget(run.payload))
       .filter((target): target is TelegramPrMergeTarget => target !== null);
 
-    const linearSessionIds = linkedJobs
-      .map((job) => job.linearSessionId)
+    const linearSessionIds = linkedTasksWithLinearSessions
+      .map((task) => task.linearSessionId)
       .filter((sessionId): sessionId is string => Boolean(sessionId));
 
     if (telegramTargets.length === 0 && linearSessionIds.length === 0) {

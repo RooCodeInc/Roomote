@@ -151,7 +151,7 @@ async function recordSnapshotRequestEvent(input: {
 }): Promise<void> {
   try {
     await recordCloudJobEvent(db, {
-      cloudJobId: input.cloudJobId,
+      runId: input.cloudJobId,
       source: 'snapshot_request',
       eventType: input.eventType,
       message: input.message,

@@ -82,8 +82,8 @@ vi.mock('../../run-task/polling/compute-provider-usage', () => ({
 
 vi.mock('../../callbacks', () => ({
   callbackMap: {
-    'standard.task': {},
-    'slack.app.mention': {},
+    standard: {},
+    slack_app_mention: {},
   },
 }));
 
@@ -107,7 +107,7 @@ vi.mock('./job-lifecycle', () => ({
   handleJobError: handleJobErrorMock,
 }));
 
-import { CloudTaskStatus, CloudTaskType } from '@roomote/types';
+import { RunStatus, TaskPayloadKind } from '@roomote/types';
 
 import { WorkspaceRepositoryPreparationError } from '../setup/workspace/types';
 import * as executeJobModule from './execute-job';
@@ -164,14 +164,14 @@ describe('executeJob', () => {
 
   it('keeps user env separate while routing model traffic through the proxy', async () => {
     const runFn = vi.fn().mockResolvedValue({
-      status: CloudTaskStatus.Idle,
+      status: RunStatus.Idle,
     });
 
     const fetchFn = vi.fn().mockResolvedValue({
       cloudJob: {
         id: 42,
         taskId: 'task-42',
-        type: CloudTaskType.StandardTask,
+        payloadKind: TaskPayloadKind.StandardTask,
         harness: 'opencode-server',
         payload: {
           repo: 'owner/repo',
@@ -240,7 +240,7 @@ describe('executeJob', () => {
 
   it('passes environment setup warnings through to the task runtime', async () => {
     const runFn = vi.fn().mockResolvedValue({
-      status: CloudTaskStatus.Idle,
+      status: RunStatus.Idle,
     });
 
     setupMock.mockResolvedValueOnce({
@@ -263,7 +263,7 @@ describe('executeJob', () => {
         cloudJob: {
           id: 42,
           taskId: 'task-42',
-          type: CloudTaskType.StandardTask,
+          payloadKind: TaskPayloadKind.StandardTask,
           harness: 'opencode-server',
           payload: {
             repo: 'owner/repo',
@@ -299,7 +299,7 @@ describe('executeJob', () => {
       setFilePath: vi.fn(),
     };
     const runFn = vi.fn().mockResolvedValue({
-      status: CloudTaskStatus.Idle,
+      status: RunStatus.Idle,
     });
 
     createStartupLoggerMock.mockReturnValue(startupLogger);
@@ -317,7 +317,7 @@ describe('executeJob', () => {
         cloudJob: {
           id: 42,
           taskId: 'task-42',
-          type: CloudTaskType.StandardTask,
+          payloadKind: TaskPayloadKind.StandardTask,
           harness: 'opencode-server',
           payload: {
             repo: 'owner/repo',
@@ -373,7 +373,7 @@ describe('executeJob', () => {
   it('starts eligible environment-backed tasks before repository commands finish', async () => {
     let releaseBackgroundSetup: (() => void) | undefined;
     const runFn = vi.fn().mockResolvedValue({
-      status: CloudTaskStatus.Idle,
+      status: RunStatus.Idle,
     });
 
     setupMock.mockResolvedValueOnce({
@@ -405,7 +405,7 @@ describe('executeJob', () => {
         cloudJob: {
           id: 42,
           taskId: 'task-42',
-          type: CloudTaskType.StandardTask,
+          payloadKind: TaskPayloadKind.StandardTask,
           harness: 'opencode-server',
           payload: {
             repo: 'owner/repo',
@@ -464,7 +464,7 @@ describe('executeJob', () => {
         cloudJob: {
           id: 42,
           taskId: 'task-42',
-          type: CloudTaskType.SlackAppMention,
+          payloadKind: TaskPayloadKind.SlackAppMention,
           harness: 'opencode-server',
           payload: {
             repo: 'owner/repo',
@@ -492,7 +492,7 @@ describe('executeJob', () => {
         },
       }),
       runFn: vi.fn().mockResolvedValue({
-        status: CloudTaskStatus.Idle,
+        status: RunStatus.Idle,
       }),
     });
 
@@ -511,7 +511,7 @@ describe('executeJob', () => {
         cloudJob: {
           id: 42,
           taskId: 'task-42',
-          type: CloudTaskType.SlackAppMention,
+          payloadKind: TaskPayloadKind.SlackAppMention,
           harness: 'opencode-server',
           payload: {
             repo: 'owner/repo',
@@ -538,7 +538,7 @@ describe('executeJob', () => {
         },
       }),
       runFn: vi.fn().mockResolvedValue({
-        status: CloudTaskStatus.Idle,
+        status: RunStatus.Idle,
       }),
     });
 
@@ -557,7 +557,7 @@ describe('executeJob', () => {
         cloudJob: {
           id: 42,
           taskId: 'task-42',
-          type: CloudTaskType.SnapshotResume,
+          payloadKind: TaskPayloadKind.SnapshotResume,
           harness: 'opencode-server',
           sourceCloudJobId: 41,
           payload: {
@@ -583,7 +583,7 @@ describe('executeJob', () => {
         },
       }),
       runFn: vi.fn().mockResolvedValue({
-        status: CloudTaskStatus.Idle,
+        status: RunStatus.Idle,
       }),
     });
 
@@ -599,7 +599,7 @@ describe('executeJob', () => {
       cloudJob: {
         id: 42,
         taskId: 'task-42',
-        type: CloudTaskType.StandardTask,
+        payloadKind: TaskPayloadKind.StandardTask,
         harness: 'opencode-server',
         payload: {
           repo: 'owner/repo',
@@ -618,7 +618,7 @@ describe('executeJob', () => {
       fetchFn,
       workspaceConfigFn: vi.fn().mockResolvedValue({ env: {} }),
       runFn: vi.fn().mockResolvedValue({
-        status: CloudTaskStatus.Idle,
+        status: RunStatus.Idle,
       }),
     });
 
@@ -662,7 +662,7 @@ describe('executeJob', () => {
         cloudJob: {
           id: 42,
           taskId: 'task-42',
-          type: CloudTaskType.StandardTask,
+          payloadKind: TaskPayloadKind.StandardTask,
           harness: 'opencode-server',
           payload: { repo: 'owner/repo' },
         },
@@ -670,7 +670,7 @@ describe('executeJob', () => {
         gitAuthor: { name: 'Chris', email: 'chris@example.com' },
       }),
       workspaceConfigFn: vi.fn().mockResolvedValue({ env: {} }),
-      runFn: vi.fn().mockResolvedValue({ status: CloudTaskStatus.Idle }),
+      runFn: vi.fn().mockResolvedValue({ status: RunStatus.Idle }),
     });
 
     expect(sdkCloudJobsRecordEventMock).toHaveBeenCalledWith(
@@ -717,7 +717,7 @@ describe('executeJob', () => {
         cloudJob: {
           id: 42,
           taskId: 'task-42',
-          type: CloudTaskType.StandardTask,
+          payloadKind: TaskPayloadKind.StandardTask,
           harness: 'opencode-server',
           payload: { repo: 'owner/repo' },
         },
@@ -725,7 +725,7 @@ describe('executeJob', () => {
         gitAuthor: { name: 'Chris', email: 'chris@example.com' },
       }),
       workspaceConfigFn: vi.fn().mockResolvedValue({ env: {} }),
-      runFn: vi.fn().mockResolvedValue({ status: CloudTaskStatus.Idle }),
+      runFn: vi.fn().mockResolvedValue({ status: RunStatus.Idle }),
     });
 
     expect(sdkCloudJobsRecordEventMock).toHaveBeenCalledWith(
@@ -740,7 +740,7 @@ describe('executeJob', () => {
           reason: 'workspace_repository_prepare_failed',
           failureMode: 'continued',
           workspaceType: 'all_repositories',
-          cloudTaskType: CloudTaskType.StandardTask,
+          cloudTaskType: TaskPayloadKind.StandardTask,
           totalRepositories: 3,
           preparedRepositoryCount: 2,
           failedRepositoryCount: 1,
@@ -784,7 +784,7 @@ describe('executeJob', () => {
         cloudJob: {
           id: 42,
           taskId: 'task-42',
-          type: CloudTaskType.StandardTask,
+          payloadKind: TaskPayloadKind.StandardTask,
           harness: 'opencode-server',
           payload: { repo: 'owner/repo' },
         },
@@ -792,7 +792,7 @@ describe('executeJob', () => {
         gitAuthor: { name: 'Chris', email: 'chris@example.com' },
       }),
       workspaceConfigFn: vi.fn().mockResolvedValue({ env: {} }),
-      runFn: vi.fn().mockResolvedValue({ status: CloudTaskStatus.Idle }),
+      runFn: vi.fn().mockResolvedValue({ status: RunStatus.Idle }),
     });
 
     expect(sdkCloudJobsRecordEventMock).toHaveBeenCalledWith(
@@ -807,7 +807,7 @@ describe('executeJob', () => {
           reason: 'workspace_repository_prepare_failed',
           failureMode: 'continued',
           workspaceType: 'repository_set',
-          cloudTaskType: CloudTaskType.StandardTask,
+          cloudTaskType: TaskPayloadKind.StandardTask,
           totalRepositories: 2,
           preparedRepositoryCount: 1,
           failedRepositoryCount: 1,
@@ -828,7 +828,7 @@ describe('executeJob', () => {
       cloudJob: {
         id: 42,
         taskId: 'task-42',
-        type: CloudTaskType.StandardTask,
+        payloadKind: TaskPayloadKind.StandardTask,
         harness: 'opencode-server',
         payload: {
           repo: 'owner/repo',
@@ -846,7 +846,7 @@ describe('executeJob', () => {
       setupMode: 'full',
       fetchFn,
       workspaceConfigFn: vi.fn().mockResolvedValue({ env: {} }),
-      runFn: vi.fn().mockResolvedValue({ status: CloudTaskStatus.Idle }),
+      runFn: vi.fn().mockResolvedValue({ status: RunStatus.Idle }),
     });
 
     expect(fetchFn).toHaveBeenCalledWith(42, {
@@ -858,14 +858,14 @@ describe('executeJob', () => {
 
   it('preserves operator-provided model provider env vars', async () => {
     const runFn = vi.fn().mockResolvedValue({
-      status: CloudTaskStatus.Idle,
+      status: RunStatus.Idle,
     });
 
     const fetchFn = vi.fn().mockResolvedValue({
       cloudJob: {
         id: 42,
         taskId: 'task-42',
-        type: CloudTaskType.StandardTask,
+        payloadKind: TaskPayloadKind.StandardTask,
         harness: 'opencode-server',
         payload: {
           repo: 'owner/repo',
@@ -933,14 +933,14 @@ describe('executeJob', () => {
     });
 
     const runFn = vi.fn().mockResolvedValue({
-      status: CloudTaskStatus.Idle,
+      status: RunStatus.Idle,
     });
 
     const fetchFn = vi.fn().mockResolvedValue({
       cloudJob: {
         id: 42,
         taskId: 'task-42',
-        type: CloudTaskType.StandardTask,
+        payloadKind: TaskPayloadKind.StandardTask,
         harness: 'opencode-server',
         payload: {
           repo: 'owner/repo',
@@ -972,12 +972,12 @@ describe('executeJob', () => {
 
   it('suppresses non-fatal finalization errors after external snapshot handoff has been claimed', async () => {
     const runFn = vi.fn().mockResolvedValue({
-      status: CloudTaskStatus.Completed,
+      status: RunStatus.Completed,
     });
     finalizeJobMock.mockRejectedValueOnce(new Error('fetch failed'));
     findFirstByIdMock.mockResolvedValue({
       id: 42,
-      status: CloudTaskStatus.Idle,
+      status: RunStatus.Idle,
       sleepRequestedAt: new Date('2026-04-10T10:53:57.130Z'),
       snapshotRequestedAt: new Date('2026-04-10T10:53:57.130Z'),
       snapshotCreatedAt: null,
@@ -988,7 +988,7 @@ describe('executeJob', () => {
       cloudJob: {
         id: 42,
         taskId: 'task-42',
-        type: CloudTaskType.SlackAppMention,
+        payloadKind: TaskPayloadKind.SlackAppMention,
         harness: 'opencode-server',
         payload: {
           repo: 'owner/repo',
@@ -1021,7 +1021,7 @@ describe('executeJob', () => {
     expect(captureWorkerExceptionMock).toHaveBeenCalledWith(expect.any(Error), {
       cloudJobId: 42,
       stage: 'executeJob.suppressedFinalizeError',
-      latestStatus: CloudTaskStatus.Idle,
+      latestStatus: RunStatus.Idle,
       snapshotRequestedAt: '2026-04-10T10:53:57.130Z',
       snapshotCreatedAt: null,
       snapshotFailedAt: null,
@@ -1030,12 +1030,12 @@ describe('executeJob', () => {
 
   it('still reports finalization errors when no durable post-run state exists yet', async () => {
     const runFn = vi.fn().mockResolvedValue({
-      status: CloudTaskStatus.Completed,
+      status: RunStatus.Completed,
     });
     finalizeJobMock.mockRejectedValueOnce(new Error('fetch failed'));
     findFirstByIdMock.mockResolvedValue({
       id: 42,
-      status: CloudTaskStatus.Idle,
+      status: RunStatus.Idle,
       sleepRequestedAt: null,
       snapshotRequestedAt: null,
       snapshotCreatedAt: null,
@@ -1046,7 +1046,7 @@ describe('executeJob', () => {
       cloudJob: {
         id: 42,
         taskId: 'task-42',
-        type: CloudTaskType.StandardTask,
+        payloadKind: TaskPayloadKind.StandardTask,
         harness: 'opencode-server',
         payload: {
           repo: 'owner/repo',
@@ -1107,7 +1107,7 @@ describe('executeJob', () => {
         cloudJob: {
           id: 42,
           taskId: 'task-42',
-          type: CloudTaskType.StandardTask,
+          payloadKind: TaskPayloadKind.StandardTask,
           harness: 'opencode-server',
           payload: { repo: 'owner/repo' },
         },
@@ -1115,7 +1115,7 @@ describe('executeJob', () => {
         gitAuthor: { name: 'Chris', email: 'chris@example.com' },
       }),
       workspaceConfigFn: vi.fn().mockResolvedValue({ env: {} }),
-      runFn: vi.fn().mockResolvedValue({ status: CloudTaskStatus.Idle }),
+      runFn: vi.fn().mockResolvedValue({ status: RunStatus.Idle }),
     });
 
     expect(result).toBe(false);
@@ -1131,7 +1131,7 @@ describe('executeJob', () => {
           reason: 'workspace_repository_prepare_failed',
           failureMode: 'fatal',
           workspaceType: 'repository_set',
-          cloudTaskType: CloudTaskType.StandardTask,
+          cloudTaskType: TaskPayloadKind.StandardTask,
           totalRepositories: 2,
           preparedRepositoryCount: 1,
           failedRepositoryCount: 1,

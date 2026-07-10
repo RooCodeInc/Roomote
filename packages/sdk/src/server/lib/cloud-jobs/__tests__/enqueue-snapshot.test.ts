@@ -84,7 +84,7 @@ describe('createSnapshot', () => {
     expect(mockRecordCloudJobEvent).toHaveBeenCalledWith(
       expect.anything(),
       expect.objectContaining({
-        cloudJobId: 123,
+        runId: 123,
         source: 'snapshot_request',
         eventType: 'enqueued',
         details: expect.objectContaining({

@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { CloudTaskStatus, CloudTaskType } from '@roomote/types';
-import type { CloudJob } from '@roomote/db/server';
+import { RunStatus, TaskPayloadKind } from '@roomote/types';
+import type { Run } from '@roomote/db/server';
 
 const {
   mockCreateGitHubToken,
@@ -81,19 +81,23 @@ vi.mock('@roomote/db/server', () => ({
   eq: vi.fn((left: unknown, right: unknown) => ({ type: 'eq', left, right })),
 }));
 
-import { writeSourceControlPullRequestForCloudJob } from '../source-control-pull-request-writes';
+import {
+  sourceControlPullRequestWriteInputSchema,
+  writeSourceControlPullRequestForCloudJob,
+} from '../source-control-pull-request-writes';
 
-function makeCloudJob(payload: CloudJob['payload']): CloudJob {
+function makeCloudJob(payload: Run['payload']): Run {
   return {
     id: 123,
-    status: CloudTaskStatus.Dequeued,
-    type: CloudTaskType.StandardTask,
+    status: RunStatus.Dequeued,
+    kind: 'fresh',
+    payloadKind: TaskPayloadKind.StandardTask,
     taskId: 'task-123',
-    userId: 'user-123',
+    actingUserId: 'user-123',
     payload,
     result: null,
     artifacts: null,
-  } as CloudJob;
+  } as Run;
 }
 
 function jsonResponse(body: unknown, status = 200): Response {
@@ -539,6 +543,124 @@ describe('writeSourceControlPullRequestForCloudJob', () => {
       threadId: null,
       commentId: '777',
       url: 'https://github.com/acme/backend/pull/55#issuecomment-777',
+      applied: true,
+      warnings: [],
+    });
+  });
+
+  it('treats blank threadId as omitted and updates a GitHub issue comment', async () => {
+    mockRepositoriesFindFirst.mockResolvedValue({
+      installationId: 'installation-1',
+      externalRepoId: null,
+      fullName: 'acme/backend',
+      htmlUrl: 'https://github.com/acme/backend',
+    });
+    mockCreateGitHubToken.mockResolvedValue('github-token');
+    const updateComment = vi.fn().mockResolvedValue({
+      data: {
+        id: 4921152017,
+        html_url:
+          'https://github.com/acme/backend/pull/16#issuecomment-4921152017',
+      },
+    });
+    const updateReviewComment = vi.fn();
+    mockGetOctokit.mockReturnValue({
+      rest: {
+        issues: { updateComment },
+        pulls: { updateReviewComment },
+      },
+    });
+
+    const parsedInput = sourceControlPullRequestWriteInputSchema.parse({
+      action: 'update_pull_request_comment',
+      repositoryFullName: 'acme/backend',
+      prNumber: 16,
+      commentId: '4921152017',
+      threadId: '   ',
+      body: 'Updated top-level summary.',
+      sourceControlProvider: 'github',
+    });
+    expect(parsedInput.threadId).toBeUndefined();
+
+    const result = await writeSourceControlPullRequestForCloudJob({
+      cloudJob: makeCloudJob({
+        repo: 'acme/backend',
+        sourceControlProvider: 'github',
+      }),
+      input: parsedInput,
+    });
+
+    expect(updateComment).toHaveBeenCalledWith({
+      owner: 'acme',
+      repo: 'backend',
+      comment_id: 4921152017,
+      body: 'Updated top-level summary.',
+    });
+    expect(updateReviewComment).not.toHaveBeenCalled();
+    expect(result).toMatchObject({
+      success: true,
+      action: 'update_pull_request_comment',
+      provider: 'github',
+      number: 16,
+      threadId: null,
+      commentId: '4921152017',
+      applied: true,
+      warnings: [],
+    });
+  });
+
+  it('updates a GitHub review comment when a real threadId is provided', async () => {
+    mockRepositoriesFindFirst.mockResolvedValue({
+      installationId: 'installation-1',
+      externalRepoId: null,
+      fullName: 'acme/backend',
+      htmlUrl: 'https://github.com/acme/backend',
+    });
+    mockCreateGitHubToken.mockResolvedValue('github-token');
+    const updateComment = vi.fn();
+    const updateReviewComment = vi.fn().mockResolvedValue({
+      data: {
+        id: 888,
+        html_url: 'https://github.com/acme/backend/pull/55#discussion_r888',
+      },
+    });
+    mockGetOctokit.mockReturnValue({
+      rest: {
+        issues: { updateComment },
+        pulls: { updateReviewComment },
+      },
+    });
+
+    const result = await writeSourceControlPullRequestForCloudJob({
+      cloudJob: makeCloudJob({
+        repo: 'acme/backend',
+        sourceControlProvider: 'github',
+      }),
+      input: {
+        action: 'update_pull_request_comment',
+        repositoryFullName: 'acme/backend',
+        prNumber: 55,
+        commentId: '888',
+        threadId: 'PRRT_kwDOrealThread',
+        body: 'Updated review thread reply.',
+        sourceControlProvider: 'github',
+      },
+    });
+
+    expect(updateReviewComment).toHaveBeenCalledWith({
+      owner: 'acme',
+      repo: 'backend',
+      comment_id: 888,
+      body: 'Updated review thread reply.',
+    });
+    expect(updateComment).not.toHaveBeenCalled();
+    expect(result).toMatchObject({
+      success: true,
+      action: 'update_pull_request_comment',
+      provider: 'github',
+      number: 55,
+      threadId: 'PRRT_kwDOrealThread',
+      commentId: '888',
       applied: true,
       warnings: [],
     });

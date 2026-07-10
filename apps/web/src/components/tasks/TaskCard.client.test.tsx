@@ -1,6 +1,6 @@
 import React from 'react';
 import { fireEvent, render, screen } from '@testing-library/react';
-import { CloudTaskStatus, PRODUCT_NAME } from '@roomote/types';
+import { RunStatus, PRODUCT_NAME } from '@roomote/types';
 
 const { routerPushMock } = vi.hoisted(() => ({
   routerPushMock: vi.fn(),
@@ -136,7 +136,7 @@ function createTask(overrides?: Partial<TaskCardTask>): TaskCardTask {
   return {
     id: 'task-1',
     title: 'Refine task copy',
-    completed: false,
+    state: 'active',
     timestamp: Date.now() / 1000,
     user: {
       id: 'user-1',
@@ -145,7 +145,7 @@ function createTask(overrides?: Partial<TaskCardTask>): TaskCardTask {
       imageUrl: 'https://example.com/avatar.png',
     },
     cloudJob: {
-      status: CloudTaskStatus.Completed,
+      status: RunStatus.Completed,
       taskPhase: null,
       payload: {
         environmentId: 'env-1',
@@ -199,13 +199,13 @@ describe('TaskCard', () => {
     expect(container.querySelectorAll('svg')).toHaveLength(1);
   });
 
-  it('shows the attribution label for unlinked launches', () => {
+  it('shows the attribution label for external actor launches', () => {
     render(
       <TaskCard
         task={createTask({
           user: null,
           attributionLabel: 'Alice Slack',
-          attributionKind: 'unlinked_user',
+          attributionKind: 'external',
         })}
         filterState={{
           hasSpecificUserFilter: false,

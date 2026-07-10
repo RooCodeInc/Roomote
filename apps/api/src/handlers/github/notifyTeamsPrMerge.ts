@@ -1,8 +1,8 @@
 import {
   db,
-  cloudJobs,
   githubInstallations,
   taskPullRequests,
+  taskRuns,
   eq,
   and,
   inArray,
@@ -119,8 +119,8 @@ export async function notifyTeamsPrMerge({
       return;
     }
 
-    const linkedJobs = await db.query.cloudJobs.findMany({
-      where: inArray(cloudJobs.taskId, taskIds),
+    const linkedJobs = await db.query.taskRuns.findMany({
+      where: inArray(taskRuns.taskId, taskIds),
       columns: {
         payload: true,
       },

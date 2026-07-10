@@ -1,7 +1,7 @@
 import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest';
 
-import { CloudTaskStatus, CloudTaskType } from '@roomote/types';
-import type { CloudJob } from '@roomote/db/server';
+import { RunStatus, TaskPayloadKind } from '@roomote/types';
+import type { Run } from '@roomote/db/server';
 
 const {
   mockEnvironmentVariablesFindMany,
@@ -71,20 +71,23 @@ import {
   removeAdoServiceHooksForRepositories,
   getAdoDeploymentUser,
   listAdoRepositories,
+  normalizeAdoLinkedAccountKey,
+  validateAdoToken,
   type AdoRepository,
 } from '../api';
 
-function makeCloudJob(payload: CloudJob['payload']): CloudJob {
+function makeCloudJob(payload: Run['payload']): Run {
   return {
     id: 123,
-    status: CloudTaskStatus.Dequeued,
-    type: CloudTaskType.StandardTask,
+    status: RunStatus.Dequeued,
+    kind: 'fresh' as const,
+    payloadKind: TaskPayloadKind.StandardTask,
     taskId: 'task-123',
-    userId: 'user-123',
+    actingUserId: 'user-123',
     payload,
     result: null,
     artifacts: null,
-  } as CloudJob;
+  } as Run;
 }
 
 describe('Azure DevOps API helpers', () => {
@@ -222,6 +225,33 @@ describe('Azure DevOps API helpers', () => {
     );
   });
 
+  it('strips the organization userinfo Azure DevOps embeds in remote URLs', () => {
+    const repository = {
+      id: 'repo-1',
+      name: 'Test ADO',
+      project: {
+        id: 'project-1',
+        name: 'Test ADO',
+        description: null,
+        state: 'wellFormed',
+        visibility: 'private',
+      },
+      defaultBranch: 'refs/heads/main',
+      remoteUrl: 'https://acme@dev.azure.com/acme/Test%20ADO/_git/Test%20ADO',
+      webUrl: 'https://dev.azure.com/acme/Test%20ADO/_git/Test%20ADO',
+    } satisfies AdoRepository;
+
+    const values = buildAdoRepositoryValues({
+      repository,
+      linkedByUserId: 'user-1',
+      organization: 'acme',
+    });
+
+    expect(values.cloneUrl).toBe(
+      'https://dev.azure.com/acme/Test%20ADO/_git/Test%20ADO',
+    );
+  });
+
   it('maps Azure DevOps repository fields into provider-tagged repository rows', () => {
     const repository = {
       id: 'repo-1',
@@ -265,6 +295,78 @@ describe('Azure DevOps API helpers', () => {
       },
       isActive: true,
       linkedByUserId: 'user-1',
+    });
+  });
+
+  it('validates Azure DevOps tokens against the connection data API', async () => {
+    const fetchMock = vi.fn<typeof fetch>().mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          authenticatedUser: {
+            id: 'user-guid',
+            uniqueName: 'roomote-bot@acme.example',
+            providerDisplayName: 'Roomote Bot',
+          },
+        }),
+        { status: 200 },
+      ),
+    );
+
+    await expect(
+      validateAdoToken({
+        token: 'ado_test',
+        organization: 'acme',
+        baseUrl: 'https://dev.azure.com',
+        fetchImpl: fetchMock,
+      }),
+    ).resolves.toEqual({ status: 'valid', displayName: 'Roomote Bot' });
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      'https://dev.azure.com/acme/_apis/connectionData?api-version=7.1',
+      expect.objectContaining({
+        method: 'GET',
+        headers: expect.objectContaining({
+          Authorization: `Basic ${Buffer.from(':ado_test').toString('base64')}`,
+        }),
+      }),
+    );
+  });
+
+  it('rejects definitively invalid Azure DevOps tokens during validation', async () => {
+    // Azure DevOps answers rejected PATs with a 203 sign-in page.
+    const fetchMock = vi
+      .fn<typeof fetch>()
+      .mockResolvedValue(new Response('<html>Sign in</html>', { status: 203 }));
+
+    await expect(
+      validateAdoToken({
+        token: 'bad_token',
+        organization: 'acme',
+        baseUrl: 'https://dev.azure.com',
+        fetchImpl: fetchMock,
+      }),
+    ).resolves.toEqual({
+      status: 'invalid',
+      error:
+        'Azure DevOps rejected the token. Confirm the PAT is active, belongs to the organization, and has Code read access.',
+    });
+  });
+
+  it('returns unknown when Azure DevOps token validation cannot complete', async () => {
+    const fetchMock = vi
+      .fn<typeof fetch>()
+      .mockRejectedValue(new Error('network unreachable'));
+
+    await expect(
+      validateAdoToken({
+        token: 'ado_test',
+        organization: 'acme',
+        baseUrl: 'https://dev.azure.com',
+        fetchImpl: fetchMock,
+      }),
+    ).resolves.toEqual({
+      status: 'unknown',
+      error: 'Could not verify the Azure DevOps token: network unreachable',
     });
   });
 
@@ -660,5 +762,23 @@ describe('Azure DevOps API helpers', () => {
           body.eventType === 'ms.vss-code.git-pullrequest-comment-event',
       ),
     ).toBe(true);
+  });
+});
+
+describe('normalizeAdoLinkedAccountKey', () => {
+  it('lowercases and trims so the link and webhook sides agree', () => {
+    expect(normalizeAdoLinkedAccountKey('  Dan@Roomote.OnMicrosoft.com ')).toBe(
+      'dan@roomote.onmicrosoft.com',
+    );
+    expect(normalizeAdoLinkedAccountKey('dan@roomote.onmicrosoft.com')).toBe(
+      'dan@roomote.onmicrosoft.com',
+    );
+  });
+
+  it('returns null for empty or missing values', () => {
+    expect(normalizeAdoLinkedAccountKey('')).toBeNull();
+    expect(normalizeAdoLinkedAccountKey('   ')).toBeNull();
+    expect(normalizeAdoLinkedAccountKey(null)).toBeNull();
+    expect(normalizeAdoLinkedAccountKey(undefined)).toBeNull();
   });
 });

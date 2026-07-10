@@ -1,11 +1,12 @@
 import {
-  cloudJobs,
   db,
   desc,
   eq,
-  resolveTaskAttributionDisplay,
+  isNull,
+  and,
   sql,
   taskInferenceUsageEvents,
+  taskRuns,
   tasks,
   users,
 } from '@roomote/db/server';
@@ -16,10 +17,10 @@ import type {
   UserAuthSuccess,
 } from '@/types';
 import {
-  applyTaskPullRequestFallbackToCloudJob,
   getArtifactsForTask,
   getLatestTaskPullRequestsByTaskId,
 } from '@/lib/server';
+import { resolveTaskCreatorDisplay } from '@/lib/server/tasks';
 
 export type TaskByIdAccessResult =
   | {
@@ -68,12 +69,12 @@ async function getTaskByIdForCurrentOrg(
   const [[result], taskPullRequestsByTaskId, inferenceUsage] =
     await Promise.all([
       db
-        .select({ task: tasks, user: users, cloudJob: cloudJobs })
+        .select({ task: tasks, user: users, cloudJob: taskRuns })
         .from(tasks)
-        .leftJoin(users, eq(tasks.attributedUserId, users.id))
-        .leftJoin(cloudJobs, eq(cloudJobs.taskId, tasks.id))
-        .where(eq(tasks.id, taskId))
-        .orderBy(desc(cloudJobs.createdAt))
+        .leftJoin(users, eq(tasks.initiatorUserId, users.id))
+        .leftJoin(taskRuns, eq(taskRuns.taskId, tasks.id))
+        .where(and(eq(tasks.id, taskId), isNull(tasks.deletedAt)))
+        .orderBy(desc(taskRuns.id))
         .limit(1),
       getLatestTaskPullRequestsByTaskId([taskId]),
       getTaskInferenceUsageByTaskId(taskId),
@@ -84,53 +85,21 @@ async function getTaskByIdForCurrentOrg(
   }
 
   const { task, user, cloudJob } = result;
-  const displayUserId =
-    task.effectiveAuthorKind === 'roomote'
-      ? null
-      : (task.effectiveAuthorUserId ?? task.attributedUserId);
-  const displayUser =
-    displayUserId && displayUserId !== user?.id
-      ? await db.query.users.findFirst({
-          where: eq(users.id, displayUserId),
-        })
-      : (user ?? null);
-  const cloudJobWithFallback = applyTaskPullRequestFallbackToCloudJob(
-    cloudJob,
-    taskPullRequestsByTaskId[taskId],
-  );
-  const attribution = resolveTaskAttributionDisplay(
-    {
-      attributionKind: task.attributionKind,
-      attributedUserId: task.attributedUserId,
-      attributionSourceKind: task.attributionSourceKind,
-      attributionSourceDisplayName: task.attributionSourceDisplayName,
-      attributionSourceExternalId: task.attributionSourceExternalId,
-      attributedGithubLogin: task.attributedGithubLogin,
-      effectiveAuthorKind: task.effectiveAuthorKind,
-      effectiveAuthorUserId: task.effectiveAuthorUserId,
-      effectiveAuthorDisplayName: task.effectiveAuthorDisplayName,
-      effectiveAuthorGithubLogin: task.effectiveAuthorGithubLogin,
-      effectiveAuthorGithubUserId: task.effectiveAuthorGithubUserId,
-      effectiveAuthorReason: task.effectiveAuthorReason,
-      effectiveAuthorRuleId: task.effectiveAuthorRuleId,
-      effectivePrOwnerKind: task.effectivePrOwnerKind,
-      effectivePrOwnerUserId: task.effectivePrOwnerUserId,
-      effectivePrOwnerDisplayName: task.effectivePrOwnerDisplayName,
-      effectivePrOwnerGithubLogin: task.effectivePrOwnerGithubLogin,
-      effectivePrOwnerReason: task.effectivePrOwnerReason,
-      effectivePrOwnerRuleId: task.effectivePrOwnerRuleId,
-    },
-    {
-      attributedUser: user,
-    },
-  );
+  const creator = resolveTaskCreatorDisplay(task, user);
+  const latestPullRequest = taskPullRequestsByTaskId[taskId];
 
   const taskData: TaskWithAssociations = {
     ...task,
-    user: displayUser ?? null,
-    attributionLabel: attribution.productDisplay,
-    attributionKind: attribution.kind,
-    cloudJob: cloudJobWithFallback,
+    user: user ?? null,
+    attributionLabel: creator.label,
+    attributionKind: creator.kind,
+    cloudJob: cloudJob
+      ? {
+          ...cloudJob,
+          prRepo: latestPullRequest?.repository ?? null,
+          prNumber: latestPullRequest?.prNumber ?? null,
+        }
+      : null,
     inferenceUsage,
   };
 

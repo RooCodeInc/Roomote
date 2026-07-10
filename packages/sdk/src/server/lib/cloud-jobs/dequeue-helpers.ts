@@ -1,20 +1,23 @@
 import {
   CONTROL_PLANE_ENV_VAR_NAMES,
-  CloudTaskStatus,
+  RunStatus,
   buildSourceControlTokenMetadata,
   getSourceControlProviderLabel,
+  resolveTaskWorkspace,
   resolveSourceControlProviderFromPayload,
   type SourceControlProvider,
   type SourceControlTokenMetadata,
 } from '@roomote/types';
 import {
-  type CloudJob,
+  type Run,
   db,
-  cloudJobs,
+  taskRuns,
+  tasks,
   markTaskStartParallelCountEndedAt,
   resolveEffectiveModelRuntimeEnv,
-  resolveTaskAttribution,
+  resolveWorkspaceSourceControlProvider,
   stringifyDecryptedEnvVarValue,
+  syncTaskStateFromRuns,
   eq,
   sql,
 } from '@roomote/db/server';
@@ -23,7 +26,10 @@ import { createCloudJobWorkerGitHubToken } from '@roomote/github';
 import { createCloudJobScopedGitLabTokens } from '@roomote/gitlab';
 import { createCloudJobGiteaCredentials } from '@roomote/gitea';
 import { createCloudJobAdoCredentials } from '@roomote/ado';
-import { releaseCloudTask } from '@roomote/cloud-agents/server';
+import {
+  releaseCloudTask,
+  resolveTaskCommitAuthor,
+} from '@roomote/cloud-agents/server';
 
 import { withBootstrapFailureSignal } from '../../../bootstrap-failure-signal';
 
@@ -98,13 +104,13 @@ export function redactSourceControlProviderEnvVars(
 }
 
 /**
- * Returns a SQL query to claim a specific cloud job by ID.
+ * Returns a SQL query to claim a specific task run by ID.
  */
 export function claimJobById(cloudJobId: number) {
   return sql`
-    UPDATE cloud_jobs SET status = ${CloudTaskStatus.Processing} WHERE id = (
-      SELECT id FROM cloud_jobs
-      WHERE id = ${cloudJobId} AND status = ${CloudTaskStatus.Dequeued}
+    UPDATE task_runs SET status = ${RunStatus.Processing} WHERE id = (
+      SELECT id FROM task_runs
+      WHERE id = ${cloudJobId} AND status = ${RunStatus.Dequeued}
       FOR UPDATE SKIP LOCKED
     )
     RETURNING id
@@ -198,7 +204,7 @@ async function loadPersistedDeploymentEnvVarsFromDb(): Promise<
  * Cancels a cloud job with an error message and releases its cloud task lock.
  */
 export async function cancelAndReleaseCloudJob(
-  cloudJob: CloudJob,
+  cloudJob: Run,
   errorMessage: string,
   logPrefix: string,
 ): Promise<void> {
@@ -206,16 +212,22 @@ export async function cancelAndReleaseCloudJob(
 
   await db.transaction(async (tx) => {
     await tx
-      .update(cloudJobs)
+      .update(taskRuns)
       .set({
-        status: CloudTaskStatus.Canceled,
+        status: RunStatus.Canceled,
         canceledAt: endedAt,
         error: errorMessage,
       })
-      .where(eq(cloudJobs.id, cloudJob.id));
+      .where(eq(taskRuns.id, cloudJob.id));
+
+    // Derive the owning task's state from all its runs. finishRun never
+    // runs for runs canceled before/at dequeue, so without this sync the task
+    // would stay 'active' forever. The shared helper deprioritizes this
+    // never-started cancel, so an earlier completed sibling still wins.
+    await syncTaskStateFromRuns(tx, cloudJob.taskId);
 
     await markTaskStartParallelCountEndedAt(tx, {
-      cloudJobId: cloudJob.id,
+      runId: cloudJob.id,
       endedAt,
     });
   });
@@ -240,10 +252,47 @@ export type SourceControlRuntimeToken = SourceControlTokenMetadata & {
   artifactsPatch?: Record<string, unknown>;
 };
 
+/**
+ * Resolve the provider for a job's source-control token. Prefers the explicit
+ * payload stamp; when absent, resolves from the synced repositories the
+ * workspace references, so non-GitHub deployments work even when a launch
+ * site forgot to stamp the payload. Falls back to the GitHub default only
+ * when the workspace repositories are unknown or span providers.
+ */
+async function resolveJobSourceControlProvider(
+  cloudJob: Pick<Run, 'payload'>,
+): Promise<SourceControlProvider> {
+  const payload = cloudJob.payload as { sourceControlProvider?: unknown };
+
+  if (
+    payload.sourceControlProvider !== undefined &&
+    payload.sourceControlProvider !== null &&
+    payload.sourceControlProvider !== ''
+  ) {
+    return resolveSourceControlProviderFromPayload(payload);
+  }
+
+  // No explicit stamp: resolve from the workspace's synced repositories via the
+  // shared resolver (covers every workspace shape). It returns undefined when
+  // the provider is ambiguous or unknown, in which case fall back to the
+  // GitHub default that resolveSourceControlProviderFromPayload applies.
+  const workspace = resolveTaskWorkspace(cloudJob.payload);
+  const resolvedProvider = await resolveWorkspaceSourceControlProvider(
+    db,
+    workspace,
+  );
+
+  if (resolvedProvider) {
+    return resolvedProvider;
+  }
+
+  return resolveSourceControlProviderFromPayload(cloudJob.payload);
+}
+
 async function createProviderToken(
-  cloudJob: CloudJob,
+  cloudJob: Run,
 ): Promise<SourceControlRuntimeToken> {
-  const provider = resolveSourceControlProviderFromPayload(cloudJob.payload);
+  const provider = await resolveJobSourceControlProvider(cloudJob);
 
   switch (provider) {
     case 'github': {
@@ -316,14 +365,14 @@ async function createProviderToken(
  * Returns null if all attempts fail (caller should handle the error).
  */
 export async function createSourceControlTokenForJob(
-  cloudJob: CloudJob,
+  cloudJob: Run,
   logPrefix: string,
   {
     maxRetries = SOURCE_CONTROL_TOKEN_MAX_RETRIES,
     baseDelayMs = SOURCE_CONTROL_TOKEN_BASE_DELAY_MS,
   } = {},
 ): Promise<SourceControlRuntimeToken | null> {
-  const provider = resolveSourceControlProviderFromPayload(cloudJob.payload);
+  const provider = await resolveJobSourceControlProvider(cloudJob);
   const label = getSourceControlProviderLabel(provider);
 
   for (let attempt = 1; attempt <= maxRetries; attempt++) {
@@ -358,7 +407,7 @@ export async function cancelCloudJob(
   error: string,
   options?: {
     bootstrapFailureReason?: string;
-    existingArtifacts?: CloudJob['artifacts'];
+    existingArtifacts?: Run['artifacts'];
   },
 ): Promise<void> {
   const artifacts = options?.bootstrapFailureReason
@@ -370,17 +419,30 @@ export async function cancelCloudJob(
   const endedAt = new Date();
 
   await tx
-    .update(cloudJobs)
+    .update(taskRuns)
     .set({
-      status: CloudTaskStatus.Canceled,
+      status: RunStatus.Canceled,
       canceledAt: endedAt,
       error,
       ...(artifacts ? { artifacts } : {}),
     })
-    .where(eq(cloudJobs.id, cloudJobId));
+    .where(eq(taskRuns.id, cloudJobId));
+
+  // Derive the owning task's state from all its runs. This runs on the dequeue
+  // path (invalid job, bootstrap failure) where finishRun never executes,
+  // so the task must be resolved here or it stays 'active' forever. The caller
+  // only has the run id, so resolve the task via the run row, then sync.
+  const [runRow] = await tx
+    .select({ taskId: taskRuns.taskId })
+    .from(taskRuns)
+    .where(eq(taskRuns.id, cloudJobId));
+
+  if (runRow) {
+    await syncTaskStateFromRuns(tx, runRow.taskId);
+  }
 
   await markTaskStartParallelCountEndedAt(tx, {
-    cloudJobId,
+    runId: cloudJobId,
     endedAt,
   });
 }
@@ -395,9 +457,9 @@ export function reportBootstrapFailure({
   cloudJob,
   logPrefix,
 }: {
-  callback?: (error: Error, cloudJob: CloudJob) => void;
+  callback?: (error: Error, cloudJob: Run) => void;
   error: Error;
-  cloudJob: CloudJob;
+  cloudJob: Run;
   logPrefix: string;
 }): void {
   try {
@@ -415,30 +477,27 @@ export function reportBootstrapFailure({
 
 export async function resolveGitAuthor(
   tx: DbTx,
-  cloudJob: CloudJob,
+  cloudJob: Pick<Run, 'id' | 'taskId'>,
 ): Promise<GitAuthor> {
-  const attribution = await resolveTaskAttribution(tx, {
-    attributionKind: cloudJob.attributionKind,
-    attributedUserId: cloudJob.attributedUserId,
-    attributionSourceKind: cloudJob.attributionSourceKind,
-    attributionSourceDisplayName: cloudJob.attributionSourceDisplayName,
-    attributionSourceExternalId: cloudJob.attributionSourceExternalId,
-    attributedGithubLogin: cloudJob.attributedGithubLogin,
-    attributedGithubUserId: cloudJob.attributedGithubUserId,
-    effectiveAuthorKind: cloudJob.effectiveAuthorKind,
-    effectiveAuthorUserId: cloudJob.effectiveAuthorUserId,
-    effectiveAuthorDisplayName: cloudJob.effectiveAuthorDisplayName,
-    effectiveAuthorGithubLogin: cloudJob.effectiveAuthorGithubLogin,
-    effectiveAuthorGithubUserId: cloudJob.effectiveAuthorGithubUserId,
-    effectiveAuthorReason: cloudJob.effectiveAuthorReason,
-    effectiveAuthorRuleId: cloudJob.effectiveAuthorRuleId,
-    effectivePrOwnerKind: cloudJob.effectivePrOwnerKind,
-    effectivePrOwnerUserId: cloudJob.effectivePrOwnerUserId,
-    effectivePrOwnerDisplayName: cloudJob.effectivePrOwnerDisplayName,
-    effectivePrOwnerGithubLogin: cloudJob.effectivePrOwnerGithubLogin,
-    effectivePrOwnerReason: cloudJob.effectivePrOwnerReason,
-    effectivePrOwnerRuleId: cloudJob.effectivePrOwnerRuleId,
+  const task = await tx.query.tasks.findFirst({
+    where: eq(tasks.id, cloudJob.taskId),
+    columns: {
+      commitAuthorKind: true,
+      commitAuthorUserId: true,
+      commitAuthorLogin: true,
+      commitAuthorExternalId: true,
+      prAssigneeLogin: true,
+      actorDisplayName: true,
+    },
   });
 
-  return attribution.gitAuthor;
+  if (!task) {
+    throw new Error(
+      `Task ${cloudJob.taskId} not found while resolving the git author for run ${cloudJob.id}.`,
+    );
+  }
+
+  const commitAuthor = await resolveTaskCommitAuthor(tx, task);
+
+  return commitAuthor.gitAuthor;
 }

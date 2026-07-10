@@ -1,4 +1,4 @@
-import type { CloudTaskType } from '@roomote/types';
+import type { TaskPayloadKind } from '@roomote/types';
 import { and, eq, gte, inArray, isNull, ne, sql } from 'drizzle-orm';
 
 import type { DatabaseOrTransaction, DatabaseTransaction } from '../db';
@@ -7,8 +7,8 @@ import { taskStartParallelCounts, tasks } from '../schema';
 export const DEFAULT_ACTIVE_TASK_WINDOW_SECONDS = 10 * 60;
 
 type RecordTaskStartParallelCountInput = {
-  cloudJobId: number;
-  cloudJobType: CloudTaskType;
+  runId: number;
+  payloadKind: TaskPayloadKind;
   taskId: string;
   startedAt: Date;
   activityWindowSeconds?: number;
@@ -41,8 +41,8 @@ export async function recordTaskStartParallelCount(
   const [createdLog] = await tx
     .insert(taskStartParallelCounts)
     .values({
-      cloudJobId: input.cloudJobId,
-      cloudJobType: input.cloudJobType,
+      runId: input.runId,
+      payloadKind: input.payloadKind,
       taskId: input.taskId,
       parallelCount: (activeTaskCount?.count ?? 0) + 1,
       activityWindowSeconds,
@@ -60,7 +60,7 @@ export async function recordTaskStartParallelCount(
 export async function markTaskStartParallelCountEndedAt(
   dbOrTx: DatabaseOrTransaction,
   input: {
-    cloudJobId: number;
+    runId: number;
     endedAt: Date;
   },
 ) {
@@ -71,7 +71,7 @@ export async function markTaskStartParallelCountEndedAt(
     })
     .where(
       and(
-        eq(taskStartParallelCounts.cloudJobId, input.cloudJobId),
+        eq(taskStartParallelCounts.runId, input.runId),
         isNull(taskStartParallelCounts.endedAt),
       ),
     );

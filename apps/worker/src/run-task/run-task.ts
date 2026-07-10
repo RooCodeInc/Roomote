@@ -1,10 +1,11 @@
 import {
   type CommunicationProvider,
   type AcpRequestUserInputAnswers,
-  CloudTaskStatus,
-  CloudTaskType,
+  RunStatus,
+  TaskPayloadKind,
   type QueuedCommunicationMessage,
   getSlackChannelFromTaskPayload,
+  getSlackThreadTsFromTaskPayload,
   isCommunicationProvider,
   SANDBOX_SERVER_PORT,
   SANDBOX_TIMEOUT_MS,
@@ -43,6 +44,7 @@ import {
 } from './constants';
 import { buildOpenCodeHarnessEnv, sanitizeEnv } from './env';
 import { startPolling, stopPolling } from './polling';
+import { getLinearSessionIdFromResumePayload } from './linear-resume-payload';
 import { awaitSubprocess } from './subprocess';
 import { resolveStatus } from './resolve-status';
 import { getDefaultKeepaliveMs } from './completion';
@@ -121,7 +123,7 @@ function formatWorkspaceReadinessWarnings(
 }
 
 function getInitialSlackTurnMessageTs(cloudJob: {
-  type: string;
+  payloadKind: string;
   payload: unknown;
 }): string | null {
   if (!cloudJob.payload || typeof cloudJob.payload !== 'object') {
@@ -148,8 +150,8 @@ function getInitialSlackTurnMessageTs(cloudJob: {
   }
 
   if (
-    cloudJob.type !== CloudTaskType.SlackAppMention &&
-    cloudJob.type !== CloudTaskType.SnapshotResume
+    cloudJob.payloadKind !== TaskPayloadKind.SlackAppMention &&
+    cloudJob.payloadKind !== TaskPayloadKind.SnapshotResume
   ) {
     return null;
   }
@@ -179,12 +181,12 @@ function isCommunicationLaunchPayload(payload: unknown): boolean {
 }
 
 function shouldAllowEmojiReactionOnInitialTurn(cloudJob: {
-  type: string;
+  payloadKind: string;
   payload: unknown;
 }): boolean {
   // Chat-launched tasks must answer their first turn with a real reply, not
   // just an emoji reaction.
-  if (cloudJob.type === CloudTaskType.SlackAppMention) {
+  if (cloudJob.payloadKind === TaskPayloadKind.SlackAppMention) {
     return false;
   }
 
@@ -495,6 +497,8 @@ export const runTask = async ({
   workspaceReadinessWarnings,
   prompt,
   harnessInstructions,
+  requestedWorkKind,
+  task,
   orgAgentInstructions,
   agentInstructions,
   environmentConfig,
@@ -509,7 +513,7 @@ export const runTask = async ({
 }: RunTaskOptions) => {
   await sdk.cloudJobs.update({
     id: cloudJob.id,
-    status: CloudTaskStatus.Spawning,
+    status: RunStatus.Spawning,
   });
 
   // Register the process-level crash listeners (at most once per process) and
@@ -571,7 +575,7 @@ export const runTask = async ({
       ROOMOTE_CLOUD_TOKEN: workerEnv.authToken,
       ROOMOTE_TASK_ID: cloudJob.taskId,
       AGENT_BROWSER_SESSION: cloudJob.taskId,
-      ROOMOTE_TASK_TYPE: cloudJob.type,
+      ROOMOTE_TASK_TYPE: cloudJob.payloadKind,
       ...(unsanitizedEnv.ROOMOTE_AUTH_BYPASS_VALUE && {
         ROOMOTE_AUTH_BYPASS_VALUE: unsanitizedEnv.ROOMOTE_AUTH_BYPASS_VALUE,
       }),
@@ -607,7 +611,7 @@ export const runTask = async ({
     });
     const initialWorkflowPhase = getInitialWorkflowPhase({
       prompt: initialPrompt,
-      requestedWorkKind: cloudJob.requestedWorkKind,
+      requestedWorkKind: requestedWorkKind ?? null,
     });
     const hasInitialPrompt = initialPrompt.trim().length > 0;
     const images =
@@ -779,7 +783,7 @@ export const runTask = async ({
 
     await sdk.cloudJobs.update({
       id: cloudJob.id,
-      status: CloudTaskStatus.Connecting,
+      status: RunStatus.Connecting,
     });
 
     const recordWorkerRuntimeEvent = createWorkerRuntimeEventRecorder({
@@ -912,7 +916,7 @@ export const runTask = async ({
       keepaliveMsOverride ??
       cloudJob.keepaliveMs ??
       getDefaultKeepaliveMs({
-        taskType: cloudJob.type,
+        taskType: cloudJob.payloadKind,
         appEnv:
           (workerEnv.appEnv as
             | 'development'
@@ -997,7 +1001,7 @@ export const runTask = async ({
           });
           await sdk.cloudJobs.done({
             id: cloudJob.id,
-            status: CloudTaskStatus.Idle,
+            status: RunStatus.Idle,
           });
         },
       },
@@ -1444,7 +1448,7 @@ export const runTask = async ({
 
     await sdk.cloudJobs.update({
       id: cloudJob.id,
-      status: CloudTaskStatus.Running,
+      status: RunStatus.Running,
     });
 
     // Subscribe to HarnessManager state changes BEFORE starting/resuming a task
@@ -1478,7 +1482,7 @@ export const runTask = async ({
       }
 
       return {
-        status: CloudTaskStatus.Canceled,
+        status: RunStatus.Canceled,
         error: 'Task aborted',
       };
     } else if (harnessSessionId) {
@@ -1511,7 +1515,7 @@ export const runTask = async ({
       }
 
       const resumePayload =
-        cloudJob.type === CloudTaskType.SnapshotResume &&
+        cloudJob.payloadKind === TaskPayloadKind.SnapshotResume &&
         cloudJob.payload &&
         typeof cloudJob.payload === 'object'
           ? (cloudJob.payload as Record<string, unknown>)
@@ -1580,6 +1584,7 @@ export const runTask = async ({
     // (syncPollingState was already called above, before task start/resume.)
     startPolling({
       cloudJob,
+      task,
       state: pollingState,
       logger,
       workingDirectory: workspacePath,
@@ -1636,9 +1641,12 @@ export const runTask = async ({
     // is in the BullMQ snapshot handler.
     if (
       sleepActionTriggered &&
-      (cloudJob.type === CloudTaskType.LinearAgentSession ||
-        (cloudJob.type === CloudTaskType.SnapshotResume &&
-          !!cloudJob.linearSessionId))
+      (cloudJob.payloadKind === TaskPayloadKind.LinearAgentSession ||
+        (cloudJob.payloadKind === TaskPayloadKind.SnapshotResume &&
+          !!(
+            task?.linearSessionId ??
+            getLinearSessionIdFromResumePayload(cloudJob.payload)
+          )))
     ) {
       try {
         const result = await sdk.linearSessions.drainLinearMessages({
@@ -1668,7 +1676,9 @@ export const runTask = async ({
     // channel metadata here and let the SDK re-read the authoritative DB row.
     if (
       sleepActionTriggered &&
-      (cloudJob.slackThreadTs ||
+      (task?.slackThreadTs ||
+        task?.slackChannelId ||
+        getSlackThreadTsFromTaskPayload(cloudJob.payload) ||
         getSlackChannelFromTaskPayload(cloudJob.payload))
     ) {
       try {

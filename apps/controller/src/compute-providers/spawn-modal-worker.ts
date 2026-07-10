@@ -1,14 +1,14 @@
 import {
-  CloudTaskType,
+  TaskPayloadKind,
   NonRetryableSpawnError,
   resolveConfiguredComputeProviderResources,
   getPrimaryPortFromConfig,
 } from '@roomote/types';
 import {
-  type CloudJob,
+  type Run,
   createComputeProviderMutationEventRecorder,
   db,
-  cloudJobs,
+  taskRuns,
   eq,
 } from '@roomote/db/server';
 import { stampCloudJobMilestone } from '@roomote/sdk/server';
@@ -18,6 +18,7 @@ import {
   cleanupModalInstance,
   createComputeProviderClient,
   createModalMachine,
+  parseModalRegions,
   resolveAuthBypassHeaderName,
   resolveAuthBypassValue,
 } from '@roomote/compute-providers';
@@ -86,20 +87,18 @@ function buildDetachedWorkerExitError(
   });
 }
 
-function getWorkerLaunchCommand(
-  cloudJob: CloudJob,
-): 'snapshot' | 'resume' | 'run' {
-  return cloudJob.type === CloudTaskType.SnapshotEnvironment
+function getWorkerLaunchCommand(cloudJob: Run): 'snapshot' | 'resume' | 'run' {
+  return cloudJob.payloadKind === TaskPayloadKind.SnapshotEnvironment
     ? 'snapshot'
-    : cloudJob.type === CloudTaskType.SnapshotResume
+    : cloudJob.payloadKind === TaskPayloadKind.SnapshotResume
       ? 'resume'
       : 'run';
 }
 
-function getWorkerLaunchArgs(cloudJob: CloudJob, machineId: string): string[] {
+function getWorkerLaunchArgs(cloudJob: Run, machineId: string): string[] {
   const command = getWorkerLaunchCommand(cloudJob);
 
-  return cloudJob.type === CloudTaskType.SnapshotEnvironment
+  return cloudJob.payloadKind === TaskPayloadKind.SnapshotEnvironment
     ? [
         'snapshot',
         '--cloud-job-id',
@@ -113,7 +112,7 @@ function getWorkerLaunchArgs(cloudJob: CloudJob, machineId: string): string[] {
 }
 
 export async function spawnModalWorker(
-  cloudJob: CloudJob,
+  cloudJob: Run,
   authToken: string,
   config: {
     modalTokenId: string;
@@ -126,6 +125,8 @@ export async function spawnModalWorker(
     modalRegistryPassword?: string;
     modalEcrOidcRoleArn?: string;
     modalEcrRegion?: string;
+    /** Comma-separated Modal placement region tokens (`MODAL_REGIONS`). */
+    modalRegions?: string;
     modalTimeoutMs: number;
     localTarballPath?: string;
     deploymentSlug?: string;
@@ -146,11 +147,13 @@ export async function spawnModalWorker(
     modalRegistryPassword,
     modalEcrOidcRoleArn,
     modalEcrRegion,
+    modalRegions,
     modalTimeoutMs,
     localTarballPath,
     deploymentSlug,
     modalTags,
   } = config;
+  const parsedModalRegions = parseModalRegions(modalRegions);
   const environmentId = cloudJob.payload.environmentId;
 
   const { namedPorts, environmentSnapshotId, environmentConfig } =
@@ -174,7 +177,7 @@ export async function spawnModalWorker(
     | { launchMode: 'environment_snapshot'; sourceSnapshotId: string }
     | { launchMode: 'task_snapshot'; sourceSnapshotId: string };
 
-  if (cloudJob.type === CloudTaskType.SnapshotResume) {
+  if (cloudJob.payloadKind === TaskPayloadKind.SnapshotResume) {
     const snapshotId = cloudJob.sourceSnapshotId;
 
     if (!snapshotId) {
@@ -187,7 +190,7 @@ export async function spawnModalWorker(
       launchMode: 'task_snapshot',
       sourceSnapshotId: snapshotId,
     };
-  } else if (cloudJob.type === CloudTaskType.SnapshotEnvironment) {
+  } else if (cloudJob.payloadKind === TaskPayloadKind.SnapshotEnvironment) {
     // Environment snapshot refreshes must rebuild from the configured base
     // image path instead of inheriting the previous environment snapshot.
     launchOptions = { launchMode: 'fresh' };
@@ -205,7 +208,7 @@ export async function spawnModalWorker(
   }
 
   if (
-    cloudJob.type === CloudTaskType.SnapshotEnvironment &&
+    cloudJob.payloadKind === TaskPayloadKind.SnapshotEnvironment &&
     !cloudJob.payload.environmentId
   ) {
     throw new Error(
@@ -236,7 +239,7 @@ export async function spawnModalWorker(
   const recordMutation = createComputeProviderMutationEventRecorder(
     db,
     {
-      cloudJobId: cloudJob.id,
+      runId: cloudJob.id,
       taskId: cloudJob.taskId,
     },
     { logPrefix: 'spawnModalWorker', logger: console },
@@ -261,6 +264,7 @@ export async function spawnModalWorker(
       : {}),
     ...(modalEcrOidcRoleArn ? { ecrOidcRoleArn: modalEcrOidcRoleArn } : {}),
     ...(modalEcrRegion ? { ecrRegion: modalEcrRegion } : {}),
+    ...(parsedModalRegions ? { regions: parsedModalRegions } : {}),
     ...(configuredResources.configuredCpuCores !== null
       ? { cpu: configuredResources.configuredCpuCores }
       : {}),
@@ -419,9 +423,9 @@ export async function spawnModalWorker(
 
     if (result.commandId) {
       await db
-        .update(cloudJobs)
+        .update(taskRuns)
         .set({ sandboxCmdId: result.commandId })
-        .where(eq(cloudJobs.id, cloudJob.id));
+        .where(eq(taskRuns.id, cloudJob.id));
     }
 
     return {

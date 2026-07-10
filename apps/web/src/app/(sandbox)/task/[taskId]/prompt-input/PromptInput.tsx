@@ -145,10 +145,6 @@ export const PromptInput = forwardRef<PromptInputHandle, PromptInputProps>(
     const canSteerQueuedMessages =
       isSteerablePhase(taskPhase) &&
       (taskPhase !== 'waiting_for_prompt' || connected);
-    const isIdleLikeTaskPhase =
-      taskPhase == null ||
-      taskPhase === 'idle' ||
-      taskPhase === 'waiting_for_prompt';
     const userImageUrl =
       currentUserInfo?.userImageUrl ?? user?.resource.imageUrl ?? undefined;
     const steerableQueuedMessages = queuedMessages.filter(
@@ -351,6 +347,8 @@ export const PromptInput = forwardRef<PromptInputHandle, PromptInputProps>(
       [focusTextarea, insertFile, insertCommand],
     );
 
+    const cancelledByName = currentUserInfo?.userName ?? user?.name ?? null;
+
     const handleCancel = useCallback(async () => {
       if (cancellingRef.current) {
         return;
@@ -359,20 +357,27 @@ export const PromptInput = forwardRef<PromptInputHandle, PromptInputProps>(
       cancellingRef.current = true;
 
       try {
-        await client?.commands.cancelTask.mutate();
+        await client?.commands.cancelTask.mutate({
+          cancelledBy: {
+            ...(cancelledByName ? { name: cancelledByName } : {}),
+            source: 'web',
+          },
+        });
       } catch (err) {
         console.error('[sandbox] cancelTask error:', err);
       } finally {
         cancellingRef.current = false;
       }
-    }, [client]);
+    }, [client, cancelledByName]);
 
     const handleSubmit = useCallback(
       async (message: PromptInputMessage) => {
         const text = message.text.trim();
         const hasAttachments = (message.files?.length ?? 0) > 0;
+        // Keyed off the live pending request rather than the task phase:
+        // the phase can report running while the turn is still blocked on
+        // the question, and a message here must answer it, not steer.
         const shouldAnswerPendingFreeText =
-          taskPhase === 'waiting_for_user_input' &&
           Boolean(pendingUserInputState?.activeFreeTextRequest) &&
           !hasAttachments;
 
@@ -409,7 +414,10 @@ export const PromptInput = forwardRef<PromptInputHandle, PromptInputProps>(
             attachments: message.files,
           });
 
-          optimisticLocation = isIdleLikeTaskPhase ? 'transcript' : 'queue';
+          // Sends steer into an in-flight turn (native injection when the
+          // harness supports it), so the prompt lands in the transcript
+          // rather than sitting in the queue until the turn ends.
+          optimisticLocation = 'transcript';
           const { clientMessageId } = startOptimisticPromptSubmission({
             taskId: cloudJob.taskId,
             prompt: preparedPrompt.text,
@@ -425,6 +433,7 @@ export const PromptInput = forwardRef<PromptInputHandle, PromptInputProps>(
             source: 'web',
             clientMessageId,
             userImageUrl,
+            autoSteerWhenQueued: true,
           });
 
           handleMessageSent();
@@ -453,12 +462,10 @@ export const PromptInput = forwardRef<PromptInputHandle, PromptInputProps>(
         pendingUserInputState,
         sending,
         handlePromptChange,
-        taskPhase,
         scrollToBottom,
         handleMessageSent,
         cloudJob,
         trpcClient,
-        isIdleLikeTaskPhase,
         rollbackOptimisticPromptSubmission,
         startOptimisticPromptSubmission,
         userImageUrl,
@@ -685,7 +692,7 @@ export const PromptInput = forwardRef<PromptInputHandle, PromptInputProps>(
               )}
               {showTaskToolsMenu &&
                 cloudJob &&
-                shouldShowTaskToolsActions(cloudJob.type) && (
+                shouldShowTaskToolsActions(cloudJob.payloadKind) && (
                   <TaskToolsButton cloudJob={cloudJob} />
                 )}
             </PromptInputTools>

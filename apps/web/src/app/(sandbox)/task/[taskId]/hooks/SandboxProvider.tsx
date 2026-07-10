@@ -14,7 +14,7 @@ import { useStore } from 'zustand';
 import { useShallow } from 'zustand/react/shallow';
 
 import {
-  type CloudTaskStatus,
+  type RunStatus,
   type TaskPhase,
   type AcpPlanTodo,
   type TaskStatusEvent,
@@ -59,7 +59,7 @@ interface SandboxProviderProps {
     TaskMessageEnvelopesQueryState,
     'data' | 'isSuccess' | 'isError'
   >;
-  initialTaskStatus?: CloudTaskStatus | null;
+  initialTaskStatus?: RunStatus | null;
   initialTaskPhase?: TaskPhase | null;
   fallback: ReactNode;
   children: ReactNode;

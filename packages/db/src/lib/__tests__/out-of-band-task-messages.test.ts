@@ -1,10 +1,10 @@
 import {
-  cloudJobs,
+  taskRuns,
   db,
   eq,
   taskMessages,
   tasks,
-  cloudJobFactory,
+  runFactory,
   taskFactory,
   userFactory,
   claimPendingOutOfBandTaskMessages,
@@ -21,8 +21,8 @@ async function cleanup() {
     .where(eq(taskMessages.taskId, TEST_TASK_ID))
     .catch(() => {});
   await db
-    .delete(cloudJobs)
-    .where(eq(cloudJobs.id, testCloudJobId ?? -1))
+    .delete(taskRuns)
+    .where(eq(taskRuns.id, testCloudJobId ?? -1))
     .catch(() => {});
   await db
     .delete(tasks)
@@ -36,7 +36,7 @@ async function insertTaskMessage(input: {
   metadata?: Record<string, unknown>;
 }) {
   await db.insert(taskMessages).values({
-    cloudJobId: testCloudJobId,
+    runId: testCloudJobId,
     taskId: TEST_TASK_ID,
     ts: input.ts,
     eventType: 'roomote_runtime.assistant_message',
@@ -53,9 +53,12 @@ describe('out-of-band task message claims', () => {
     await cleanup();
     testCloudJobId = -1;
     await userFactory.create({ id: TEST_USER_ID }).catch(() => {});
-    await taskFactory.create({ id: TEST_TASK_ID, userId: TEST_USER_ID });
-    const cloudJob = await cloudJobFactory.create({
-      userId: TEST_USER_ID,
+    await taskFactory.create({
+      id: TEST_TASK_ID,
+      initiatorUserId: TEST_USER_ID,
+    });
+    const cloudJob = await runFactory.create({
+      actingUserId: TEST_USER_ID,
       taskId: TEST_TASK_ID,
     });
     testCloudJobId = cloudJob.id;

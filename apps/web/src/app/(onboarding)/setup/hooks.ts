@@ -32,7 +32,7 @@ function readOpenRouterOauthStatus(
  * Steps that stay visible when deep-linked even though their saved values
  * already satisfy the flow: the credential config steps, so users can fix
  * saved-but-wrong credentials (e.g. a GitHub App key that fails at connect),
- * and the compute provider picker, so the deployment default can be switched
+ * and the sandbox provider picker, so the deployment default can be switched
  * after setup.
  */
 const REVISITABLE_SETUP_STEPS: readonly SetupStep[] = [

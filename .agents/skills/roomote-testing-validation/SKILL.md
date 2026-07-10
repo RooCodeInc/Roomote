@@ -9,8 +9,7 @@ Use package-scoped validation by default.
 
 ## Start Here
 
-- Read `.agent-guidance/operations/testing.md` for the current testing rules and examples.
-- Read `package.json` for repo-level gates such as `pnpm check`.
+- Read root `AGENTS.md` and `package.json` for repo-level gates such as `pnpm check`.
 - Read the package's own `package.json` and `vitest.config.*` before choosing commands.
 
 ## Command Selection

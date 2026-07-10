@@ -608,7 +608,7 @@ describe('StepRepoSelection', () => {
     ).toBeInTheDocument();
 
     fireEvent.click(
-      screen.getByRole('button', { name: /review your compute provider/i }),
+      screen.getByRole('button', { name: /review your sandbox provider/i }),
     );
     expect(onReviewComputeProvider).toHaveBeenCalled();
   });

@@ -28,6 +28,12 @@ const sendPromptInputSchema = z
     userName: z.string().optional(),
     /** Avatar URL of the sending user (for real-time avatar display). */
     userImageUrl: z.string().optional(),
+    /**
+     * Steer the prompt into an in-flight turn instead of leaving it queued
+     * until the turn ends. Matches the delivery semantics of provider
+     * follow-ups (Slack, Teams, Telegram), which always steer.
+     */
+    autoSteerWhenQueued: z.boolean().optional(),
   })
   .superRefine((data, ctx) => {
     const hasPrompt =
@@ -65,7 +71,11 @@ export const sendPrompt = publicProcedure
   .input(sendPromptInputSchema)
   .mutation(async ({ input, ctx }) => {
     const userId =
-      ctx.auth && 'userId' in ctx.auth ? ctx.auth.userId : undefined;
+      // Deployment-principal job tokens have a null userId; treat them as no
+      // acting user rather than fabricating one.
+      ctx.auth && 'userId' in ctx.auth
+        ? (ctx.auth.userId ?? undefined)
+        : undefined;
     const resolvedPrompt = input.taskTool
       ? getTaskToolInvocation(input.taskTool.actionId, ctx.codingHarness)
       : (input.prompt ?? '');
@@ -173,6 +183,7 @@ export const sendPrompt = publicProcedure
         prompt: resolvedPrompt,
         images: input.images,
         ...(workflowPhase ? { workflowPhase } : {}),
+        autoSteerWhenQueued: input.autoSteerWhenQueued,
         source: input.source,
         userId,
         userName: input.userName,

@@ -360,7 +360,7 @@ export function StepRepoSelection({
                     className="underline underline-offset-4"
                     onClick={onReviewComputeProvider}
                   >
-                    review your compute provider
+                    review your sandbox provider
                   </button>
                   .
                 </>

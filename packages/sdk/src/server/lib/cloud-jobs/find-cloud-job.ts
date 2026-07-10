@@ -1,9 +1,9 @@
 import type { JobTokenContext } from '@roomote/types';
-import { db, cloudJobs, eq } from '@roomote/db/server';
+import { db, taskRuns, eq } from '@roomote/db/server';
 
 export const findCloudJob = async (id: number) =>
-  db.query.cloudJobs.findFirst({
-    where: eq(cloudJobs.id, id),
+  db.query.taskRuns.findFirst({
+    where: eq(taskRuns.id, id),
   });
 
 /**
@@ -13,8 +13,8 @@ export const findCloudJob = async (id: number) =>
  * other large columns turn each poll into an expensive read under load.
  */
 export const findCloudJobRuntimeState = async (id: number) =>
-  db.query.cloudJobs.findFirst({
-    where: eq(cloudJobs.id, id),
+  db.query.taskRuns.findFirst({
+    where: eq(taskRuns.id, id),
     columns: {
       id: true,
       status: true,
@@ -29,27 +29,26 @@ export const findCloudJobRuntimeState = async (id: number) =>
   });
 
 export const findCloudJobForAccess = async (id: number) =>
-  db.query.cloudJobs.findFirst({
-    where: eq(cloudJobs.id, id),
+  db.query.taskRuns.findFirst({
+    where: eq(taskRuns.id, id),
     columns: { id: true },
   });
 
+/**
+ * Resolve the run a job token is bound to. The token's `cloudJobId` binding IS
+ * the authorization: only that run's sandbox holds the token, so no principal
+ * equality against `task_runs.actingUserId` is performed. The token's userId
+ * is mint-time attribution while actingUserId is current-steering attribution
+ * — web steer and follow-up delivery mutate the acting user mid-run, so the
+ * two legitimately diverge and must not be compared for authorization.
+ */
 export const findCloudJobByJobTokenClaims = async ({
   cloudJobId,
-  userId,
-}: Pick<JobTokenContext, 'cloudJobId' | 'userId'>) => {
-  const cloudJob = await db.query.cloudJobs.findFirst({
-    where: eq(cloudJobs.id, cloudJobId),
-    columns: { id: true, userId: true },
+}: Pick<JobTokenContext, 'cloudJobId'>) => {
+  const run = await db.query.taskRuns.findFirst({
+    where: eq(taskRuns.id, cloudJobId),
+    columns: { id: true },
   });
 
-  if (!cloudJob) {
-    return null;
-  }
-
-  if (cloudJob.userId && cloudJob.userId !== userId) {
-    return null;
-  }
-
-  return { id: cloudJob.id };
+  return run ? { id: run.id } : null;
 };

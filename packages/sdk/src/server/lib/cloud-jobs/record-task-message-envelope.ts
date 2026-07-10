@@ -8,7 +8,7 @@ import {
   taskMessages,
   taskPlatformIssueReports,
   tasks,
-  cloudJobs,
+  taskRuns,
   getBackgroundAgentSettings,
   slackInstallations,
   normalizeTaskActivityTimestamp,
@@ -19,7 +19,6 @@ import {
   lt,
   asc,
   sql,
-  resolveManagerSlackChannelId,
 } from '@roomote/db/server';
 import { getRedis } from '@roomote/redis';
 import {
@@ -37,7 +36,7 @@ import {
   extractVisibleAcpPromptText,
   extractAcpMessageText,
   getRequestedDeploymentEnvVarNamesFromToolPayload,
-  isExitedCloudTaskStatus,
+  isExitedRunStatus,
   isSystemInjectedAcpPromptText,
   isVisibleInTranscript,
   normalizeTranscriptUserText,
@@ -101,21 +100,17 @@ async function getCloudJobRepoFallback(input: {
 }): Promise<string | null> {
   const [job] = await db
     .select({
-      prRepo: cloudJobs.prRepo,
-      payload: cloudJobs.payload,
+      payload: taskRuns.payload,
     })
-    .from(cloudJobs)
+    .from(taskRuns)
     .where(
-      and(
-        eq(cloudJobs.id, input.cloudJobId),
-        eq(cloudJobs.taskId, input.taskId),
-      ),
+      and(eq(taskRuns.id, input.cloudJobId), eq(taskRuns.taskId, input.taskId)),
     )
     .limit(1);
 
   const payload = asRecord(job?.payload);
 
-  return job?.prRepo ?? asString(payload?.repo) ?? null;
+  return asString(payload?.repo) ?? null;
 }
 
 function getPlatformIssueReportFromToolPayload(
@@ -191,13 +186,10 @@ async function maybeNotifyPlatformIssueToSlack(params: {
     }),
   ]);
 
-  const channelId = resolveManagerSlackChannelId(
-    {
-      managerSlackChannelId: settings.managerSlackChannelId ?? null,
-      platformIssueSlackChannelId: settings.platformIssueSlackChannelId ?? null,
-    },
-    'platformIssue',
-  );
+  // Two-level fallback: the platform_issue_alerts automation target wins,
+  // otherwise the deployment-wide manager channel.
+  const channelId =
+    settings.platformIssueSlackChannelId ?? settings.managerSlackChannelId;
 
   if (!channelId) {
     return;
@@ -257,7 +249,7 @@ async function maybePersistPlatformIssueReport(params: {
     .insert(taskPlatformIssueReports)
     .values({
       taskId: params.input.taskId,
-      cloudJobId: params.input.cloudJobId,
+      runId: params.input.cloudJobId,
       taskMessageId: params.taskMessageId,
       report,
     })
@@ -265,7 +257,7 @@ async function maybePersistPlatformIssueReport(params: {
       target: taskPlatformIssueReports.taskMessageId,
       set: {
         taskId: params.input.taskId,
-        cloudJobId: params.input.cloudJobId,
+        runId: params.input.cloudJobId,
         report,
       },
     })
@@ -355,17 +347,13 @@ async function maybeNotifySlackAboutEnvVarRequest(params: {
 
   const [job] = await db
     .select({
-      id: cloudJobs.id,
-      payload: cloudJobs.payload,
-      slackThreadTs: cloudJobs.slackThreadTs,
-      sourceCloudJobId: cloudJobs.sourceCloudJobId,
+      id: taskRuns.id,
+      taskId: taskRuns.taskId,
+      payload: taskRuns.payload,
     })
-    .from(cloudJobs)
+    .from(taskRuns)
     .where(
-      and(
-        eq(cloudJobs.id, input.cloudJobId),
-        eq(cloudJobs.taskId, input.taskId),
-      ),
+      and(eq(taskRuns.id, input.cloudJobId), eq(taskRuns.taskId, input.taskId)),
     )
     .limit(1);
 
@@ -478,34 +466,27 @@ async function maybeStopTaskAfterEnvVarRequest(
 
   const [job] = await db
     .select({
-      id: cloudJobs.id,
-      status: cloudJobs.status,
-      sandboxServerUrl: cloudJobs.sandboxServerUrl,
-      userId: cloudJobs.userId,
-      actingUserId: cloudJobs.actingUserId,
+      id: taskRuns.id,
+      status: taskRuns.status,
+      sandboxServerUrl: taskRuns.sandboxServerUrl,
+      actingUserId: taskRuns.actingUserId,
     })
-    .from(cloudJobs)
+    .from(taskRuns)
     .where(
-      and(
-        eq(cloudJobs.id, input.cloudJobId),
-        eq(cloudJobs.taskId, input.taskId),
-      ),
+      and(eq(taskRuns.id, input.cloudJobId), eq(taskRuns.taskId, input.taskId)),
     )
     .limit(1);
 
-  if (!job || isExitedCloudTaskStatus(job.status) || !job.sandboxServerUrl) {
+  if (!job || isExitedRunStatus(job.status) || !job.sandboxServerUrl) {
     return;
   }
 
-  const tokenUserId = input.userId ?? job.actingUserId ?? job.userId;
-
-  if (!tokenUserId) {
-    return;
-  }
-
+  // Automation tasks have no acting user (actingUserId null); they must still
+  // trigger the env-var auto-stop as the deployment service principal, so pass
+  // null through instead of early-returning when no user resolves.
   await withSandboxServerRpcClient({
     cloudJobId: job.id,
-    userId: tokenUserId,
+    userId: input.userId ?? job.actingUserId ?? null,
     sandboxServerUrl: job.sandboxServerUrl,
     call: (client) => client.commands.cancelTask.mutate(),
   });
@@ -712,20 +693,6 @@ async function refreshTaskTitle(input: {
   if (!updatedTask) {
     return;
   }
-
-  if (shouldPersistGeneratedTitle) {
-    await db
-      .update(cloudJobs)
-      .set({
-        title: generatedTitle,
-      })
-      .where(
-        and(
-          eq(cloudJobs.id, input.cloudJobId),
-          eq(cloudJobs.taskId, input.taskId),
-        ),
-      );
-  }
 }
 
 /**
@@ -793,7 +760,7 @@ export async function recordTaskMessageEnvelope(
   const [persistedTaskMessage] = await db
     .insert(taskMessages)
     .values({
-      cloudJobId,
+      runId: cloudJobId,
       taskId,
       userId: persistedUserId,
       ts: envelope.ts,

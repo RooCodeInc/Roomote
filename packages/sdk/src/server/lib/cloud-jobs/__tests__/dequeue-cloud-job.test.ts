@@ -1,5 +1,5 @@
-import { CloudTaskStatus, CloudTaskType } from '@roomote/types';
-import type { CloudJob } from '@roomote/db/server';
+import { RunStatus, TaskPayloadKind } from '@roomote/types';
+import type { Run } from '@roomote/db/server';
 
 const {
   mockDbTransaction,
@@ -56,8 +56,11 @@ vi.mock('@roomote/db/server', () => ({
     transaction: (...args: unknown[]) => mockDbTransaction(...args),
     update: (...args: unknown[]) => mockTxUpdate(...args),
   },
-  backgroundAgentSettings: { orgId: 'backgroundAgentSettings.orgId' },
-  cloudJobs: { id: 'cloudJobs.id' },
+  deploymentSettings: { orgId: 'deploymentSettings.orgId' },
+  taskRuns: { id: 'taskRuns.id', taskId: 'taskRuns.taskId' },
+  tasks: { id: 'tasks.id' },
+  taskPullRequests: { taskId: 'taskPullRequests.taskId' },
+  and: (...args: unknown[]) => args,
   eq: (...args: unknown[]) => mockEq(...args),
   recordJobLifecycleEvent: (...args: unknown[]) =>
     mockRecordJobLifecycleEvent(...args),
@@ -96,31 +99,64 @@ vi.mock('../dequeue-helpers', () => ({
 
 import { dequeueCloudJob } from '../dequeue-cloud-job';
 
-function makeStandardTaskJob(overrides: Partial<CloudJob> = {}): CloudJob {
+type RunWithTask = Run & { task: Record<string, unknown> };
+
+function makeTaskRow(overrides: Record<string, unknown> = {}) {
+  return {
+    id: 'task-101',
+    workflow: 'standard',
+    surface: 'web',
+    trigger: 'manual',
+    title: 'Task 101',
+    prompt: null,
+    harnessInstructions: null,
+    requestedWorkKind: 'unknown',
+    slackChannelId: null,
+    slackThreadTs: null,
+    linearSessionId: null,
+    linearIssueId: null,
+    linearOrganizationId: null,
+    ...overrides,
+  };
+}
+
+function makeStandardTaskJob(
+  overrides: Partial<RunWithTask> = {},
+): RunWithTask {
   return {
     id: 101,
     harness: 'opencode-server',
-    status: CloudTaskStatus.Dequeued,
-    type: CloudTaskType.StandardTask,
+    status: RunStatus.Dequeued,
+    kind: 'fresh',
+    payloadKind: TaskPayloadKind.StandardTask,
     taskId: 'task-101',
-    userId: 'user-1',
+    actingUserId: 'user-1',
+    sourceRunId: null,
+    sourceSnapshotId: null,
     payload: {
       repo: 'owner/repo',
       description: 'Investigate auth flakes',
     },
     result: null,
+    task: makeTaskRow(),
     ...overrides,
-  } as CloudJob;
+  } as RunWithTask;
 }
 
-function makeSlackAppMentionJob(overrides: Partial<CloudJob> = {}): CloudJob {
+function makeSlackAppMentionJob(
+  overrides: Partial<RunWithTask> = {},
+): RunWithTask {
   return {
     id: 202,
     harness: 'opencode-server',
-    status: CloudTaskStatus.Dequeued,
-    type: CloudTaskType.SlackAppMention,
+    status: RunStatus.Dequeued,
+    kind: 'fresh',
+    payloadKind: TaskPayloadKind.SlackAppMention,
     taskId: 'task-202',
-    userId: 'user-1',
+    actingUserId: 'user-1',
+    sourceRunId: null,
+    sourceSnapshotId: null,
+    task: makeTaskRow({ id: 'task-202', surface: 'slack' }),
     payload: {
       repo: 'owner/repo',
       description: 'Reply in Slack',
@@ -131,7 +167,7 @@ function makeSlackAppMentionJob(overrides: Partial<CloudJob> = {}): CloudJob {
     },
     result: null,
     ...overrides,
-  } as CloudJob;
+  } as RunWithTask;
 }
 
 describe('dequeueCloudJob', () => {
@@ -165,9 +201,9 @@ describe('dequeueCloudJob', () => {
         error,
         cloudJob,
       }: {
-        callback?: (error: Error, cloudJob: CloudJob) => void;
+        callback?: (error: Error, cloudJob: Run) => void;
         error: Error;
-        cloudJob: CloudJob;
+        cloudJob: Run;
       }) => callback?.(error, cloudJob),
     );
     mockGeneratePrompt.mockResolvedValue({
@@ -210,11 +246,11 @@ describe('dequeueCloudJob', () => {
       return callback({
         execute: (...args: unknown[]) => mockTxExecute(...args),
         query: {
-          backgroundAgentSettings: {
+          deploymentSettings: {
             findFirst: (...args: unknown[]) =>
               mockTxFindFirstBackgroundAgentSettings(...args),
           },
-          cloudJobs: {
+          taskRuns: {
             findFirst: (...args: unknown[]) =>
               mockTxFindFirstCloudJobs(...args),
           },
@@ -237,18 +273,33 @@ describe('dequeueCloudJob', () => {
       expect.objectContaining({
         cloudJob,
         cloudTask: expect.objectContaining({
-          type: CloudTaskType.StandardTask,
+          type: TaskPayloadKind.StandardTask,
         }),
         gitHubToken: 'gh-token',
       }),
     );
     expect(result?.prompt).toBe('prompt');
     expect(result?.harnessInstructions).toBe('instructions');
+    expect(result?.requestedWorkKind).toBe('unknown');
+    expect(result?.task).toMatchObject({
+      id: 'task-101',
+      title: 'Task 101',
+      slackChannelId: null,
+      slackThreadTs: null,
+      linearSessionId: null,
+    });
+    // Per-attempt prompt/artifacts persist on the run; generated harness
+    // instructions persist on the task.
     expect(mockTxUpdateSet).toHaveBeenCalledWith(
       expect.objectContaining({
         prompt: 'prompt',
-        harnessInstructions: 'instructions',
         artifacts: {},
+      }),
+    );
+    expect(mockTxUpdateSet).toHaveBeenCalledWith(
+      expect.objectContaining({
+        harnessInstructions: 'instructions',
+        updatedAt: expect.any(Date),
       }),
     );
   });
@@ -396,18 +447,18 @@ describe('dequeueCloudJob', () => {
     expect(mockRecordJobLifecycleEvent).toHaveBeenCalledWith(
       expect.anything(),
       expect.objectContaining({
-        cloudJobId: cloudJob.id,
+        runId: cloudJob.id,
         taskId: cloudJob.taskId,
         eventType: 'started',
         message: expect.stringContaining('started execution bootstrap'),
         details: expect.objectContaining({
           stage: 'worker_bootstrap',
-          status: CloudTaskStatus.Processing,
+          status: RunStatus.Processing,
           vendor: 'modal',
           machineId: 'sb_123',
           sourceSnapshotId: 'snap_env_123',
           environmentId: '11111111-1111-4111-8111-111111111111',
-          cloudTaskType: CloudTaskType.StandardTask,
+          cloudTaskType: TaskPayloadKind.StandardTask,
         }),
       }),
     );
@@ -426,7 +477,7 @@ describe('dequeueCloudJob', () => {
     expect(mockRecordJobLifecycleEvent).toHaveBeenCalledWith(
       expect.anything(),
       expect.objectContaining({
-        cloudJobId: cloudJob.id,
+        runId: cloudJob.id,
         taskId: cloudJob.taskId,
         eventType: 'phase',
         message: 'createSourceControlToken',
@@ -434,7 +485,7 @@ describe('dequeueCloudJob', () => {
           phase: 'createSourceControlToken',
           outcome: 'ok',
           durationMs: expect.any(Number),
-          cloudTaskType: CloudTaskType.StandardTask,
+          cloudTaskType: TaskPayloadKind.StandardTask,
           provider: 'github',
         }),
       }),
@@ -492,7 +543,7 @@ describe('dequeueCloudJob', () => {
     expect(mockRecordJobLifecycleEvent).toHaveBeenCalledWith(
       expect.anything(),
       expect.objectContaining({
-        cloudJobId: cloudJob.id,
+        runId: cloudJob.id,
         taskId: cloudJob.taskId,
         eventType: 'phase',
         message: 'createSourceControlToken',
@@ -501,7 +552,7 @@ describe('dequeueCloudJob', () => {
           outcome: 'failed',
           durationMs: expect.any(Number),
           error: expect.stringContaining('returned no token'),
-          cloudTaskType: CloudTaskType.StandardTask,
+          cloudTaskType: TaskPayloadKind.StandardTask,
           provider: 'github',
         }),
       }),
@@ -569,7 +620,7 @@ describe('dequeueCloudJob', () => {
       expect.objectContaining({
         cloudJob,
         cloudTask: expect.objectContaining({
-          type: CloudTaskType.StandardTask,
+          type: TaskPayloadKind.StandardTask,
         }),
       }),
     );
@@ -582,7 +633,7 @@ describe('dequeueCloudJob', () => {
 
   it('invokes the bootstrap failure callback before canceling an invalid job', async () => {
     const cloudJob = makeStandardTaskJob({
-      type: CloudTaskType.GithubPrReview,
+      payloadKind: TaskPayloadKind.GithubPrReview,
       payload: {
         repo: 'owner/repo',
         prNumber: '42' as never,
@@ -623,7 +674,7 @@ describe('dequeueCloudJob', () => {
 
   it('cancels the cloud job when launch metadata persistence fails for PR review jobs', async () => {
     const cloudJob = makeStandardTaskJob({
-      type: CloudTaskType.GithubPrReview,
+      payloadKind: TaskPayloadKind.GithubPrReview,
       payload: {
         repo: 'owner/repo',
         prNumber: 42,

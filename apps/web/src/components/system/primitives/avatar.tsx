@@ -1,3 +1,5 @@
+'use client';
+
 import * as React from 'react';
 
 import { cn } from '@/lib/utils';
@@ -20,14 +22,17 @@ type AvatarProps = {
   alt?: string;
 } & Omit<React.ComponentProps<'div'>, 'className'>;
 
-function getInitials(name?: string | null, email?: string | null) {
+export function getInitials(name?: string | null, email?: string | null) {
   const trimmedName = name?.trim();
   if (trimmedName) {
     const fromName = trimmedName
       .split(/\s+/)
       .filter(Boolean)
       .slice(0, 2)
-      .map((part) => part[0]?.toUpperCase())
+      .map((part) => {
+        const first = [...part][0];
+        return first ? first.toUpperCase() : '';
+      })
       .join('');
 
     if (fromName) {
@@ -37,10 +42,15 @@ function getInitials(name?: string | null, email?: string | null) {
 
   const trimmedEmail = email?.trim();
   if (trimmedEmail) {
-    return trimmedEmail[0]?.toUpperCase() ?? '';
+    const first = [...trimmedEmail][0];
+    return first ? first.toUpperCase() : '';
   }
 
   return '';
+}
+
+function isBrokenImage(img: HTMLImageElement) {
+  return img.complete && img.naturalWidth === 0;
 }
 
 export const Avatar = React.forwardRef<HTMLDivElement, AvatarProps>(
@@ -58,28 +68,53 @@ export const Avatar = React.forwardRef<HTMLDivElement, AvatarProps>(
     ref,
   ) {
     const resolvedImageUrl = imageUrl?.trim() ? imageUrl.trim() : null;
+    const [failedImageUrl, setFailedImageUrl] = React.useState<string | null>(
+      null,
+    );
     const initials = getInitials(name, email);
     const label = alt ?? (name?.trim() || email?.trim() || '');
+    const showImage =
+      resolvedImageUrl !== null && failedImageUrl !== resolvedImageUrl;
+
+    const markImageFailed = React.useCallback((url: string) => {
+      setFailedImageUrl((previous) => (previous === url ? previous : url));
+    }, []);
+
+    const imageRef = React.useCallback(
+      (img: HTMLImageElement | null) => {
+        if (!img || !resolvedImageUrl) {
+          return;
+        }
+
+        if (isBrokenImage(img)) {
+          markImageFailed(resolvedImageUrl);
+        }
+      },
+      [markImageFailed, resolvedImageUrl],
+    );
 
     return (
       <div
         ref={ref}
+        aria-label={label || undefined}
+        aria-hidden={label ? undefined : true}
         className={cn(
           'flex shrink-0 items-center justify-center overflow-hidden rounded-full border border-border bg-muted text-muted-foreground font-medium uppercase',
           AVATAR_SIZES[size],
           className,
         )}
-        aria-hidden={label ? undefined : true}
         {...props}
       >
-        {resolvedImageUrl ? (
+        {showImage ? (
           // eslint-disable-next-line @next/next/no-img-element -- external avatar URLs come from arbitrary OAuth provider hosts
           <img
+            ref={imageRef}
             src={resolvedImageUrl}
-            alt={label}
+            alt=""
             className={cn('size-full object-cover', imgClassName)}
             loading="lazy"
             decoding="async"
+            onError={() => markImageFailed(resolvedImageUrl)}
           />
         ) : (
           <span aria-hidden="true">{initials || '?'}</span>

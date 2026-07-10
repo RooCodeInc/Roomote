@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { CloudTaskType } from '../cloud-jobs';
+import { TaskPayloadKind } from '../cloud-jobs';
 import {
   DEFAULT_AUTOMATION_KEEPALIVE_MS,
   DEFAULT_MAINTENANCE_KEEPALIVE_MS,
@@ -13,14 +13,13 @@ import {
 
 describe('inferLaunchClassForTaskType', () => {
   it.each([
-    [CloudTaskType.GithubPrReview, 'maintenance'],
-    [CloudTaskType.GithubPrReviewSync, 'maintenance'],
-    [CloudTaskType.SuggestedTasks, 'maintenance'],
-    [CloudTaskType.McpRecommendations, 'maintenance'],
-    [CloudTaskType.LegacyOnboardingSuggestions, 'maintenance'],
-    [CloudTaskType.GithubPrConflictResolve, 'maintenance'],
-    [CloudTaskType.GithubPrReviewFollowUp, 'human'],
-    [CloudTaskType.SnapshotEnvironment, 'maintenance'],
+    [TaskPayloadKind.GithubPrReview, 'maintenance'],
+    [TaskPayloadKind.GithubPrReviewSync, 'maintenance'],
+    [TaskPayloadKind.Scan, 'maintenance'],
+    [TaskPayloadKind.McpRecommendations, 'maintenance'],
+    [TaskPayloadKind.GithubPrConflictResolve, 'maintenance'],
+    [TaskPayloadKind.GithubPrReviewFollowUp, 'human'],
+    [TaskPayloadKind.SnapshotEnvironment, 'maintenance'],
   ])('maps %s to the %s launch class', (taskType, launchClass) => {
     expect(inferLaunchClassForTaskType(taskType)).toBe(launchClass);
   });
@@ -34,7 +33,7 @@ describe('resolveCloudTaskRuntimePolicy', () => {
   it('resolves launch class and keepalive together for review jobs', () => {
     expect(
       resolveCloudTaskRuntimePolicy({
-        taskType: CloudTaskType.GithubPrReview,
+        taskType: TaskPayloadKind.GithubPrReview,
         appEnv: 'production',
         defaultKeepaliveMs,
         delegatedKeepaliveMs,
@@ -49,7 +48,7 @@ describe('resolveCloudTaskRuntimePolicy', () => {
   it('keeps explicit launch-class overrides when resolving policy', () => {
     expect(
       resolveCloudTaskRuntimePolicy({
-        taskType: CloudTaskType.GithubPrReviewFollowUp,
+        taskType: TaskPayloadKind.GithubPrReviewFollowUp,
         launchClass: 'automation',
         appEnv: 'production',
         defaultKeepaliveMs,
@@ -65,7 +64,7 @@ describe('resolveCloudTaskRuntimePolicy', () => {
   it('uses the production human default when taskType is present without launch metadata', () => {
     expect(
       resolveKeepaliveMs({
-        taskType: CloudTaskType.StandardTask,
+        taskType: TaskPayloadKind.StandardTask,
         appEnv: 'production',
         defaultKeepaliveMs,
         delegatedKeepaliveMs,
@@ -133,7 +132,7 @@ describe('resolveKeepaliveMs', () => {
     ).toBe(DEFAULT_MAINTENANCE_KEEPALIVE_MS);
   });
 
-  it.each([CloudTaskType.GithubPrReview, CloudTaskType.GithubPrReviewSync])(
+  it.each([TaskPayloadKind.GithubPrReview, TaskPayloadKind.GithubPrReviewSync])(
     'uses the maintenance keepalive for %s jobs',
     (taskType) => {
       expect(
@@ -152,7 +151,7 @@ describe('resolveKeepaliveMs', () => {
   it('keeps an immediate keepalive for PR review follow-up jobs', () => {
     expect(
       resolveKeepaliveMs({
-        taskType: CloudTaskType.GithubPrReviewFollowUp,
+        taskType: TaskPayloadKind.GithubPrReviewFollowUp,
         launchClass: 'human',
         appEnv: 'production',
         defaultKeepaliveMs,

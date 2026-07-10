@@ -23,7 +23,7 @@ export async function getPersistedConflictResolutionCompletion(
       contentBlocks: taskMessages.contentBlocks,
     })
     .from(taskMessages)
-    .where(eq(taskMessages.cloudJobId, cloudJobId))
+    .where(eq(taskMessages.runId, cloudJobId))
     .orderBy(desc(taskMessages.ts), desc(taskMessages.createdAt))
     .limit(20);
 

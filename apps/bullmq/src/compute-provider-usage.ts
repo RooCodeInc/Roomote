@@ -3,7 +3,7 @@ import { recordComputeProviderUsage } from '@roomote/sdk/server';
 import type { ComputeProviderUsageLifecycleAction } from '@roomote/types';
 
 export async function tryRecordComputeProviderUsage(input: {
-  cloudJobId: number;
+  runId: number;
   lifecycleAction: ComputeProviderUsageLifecycleAction;
   completedAt: Date;
   usageObservation?: ComputeUsageObservation;
@@ -12,7 +12,9 @@ export async function tryRecordComputeProviderUsage(input: {
 }): Promise<void> {
   try {
     await recordComputeProviderUsage({
-      cloudJobId: input.cloudJobId,
+      // The SDK recorder still keys its input on `cloudJobId`; it persists to
+      // compute_provider_usage.run_id.
+      cloudJobId: input.runId,
       lifecycleAction: input.lifecycleAction,
       completedAt: input.completedAt,
       activeCpuDurationMs: input.usageObservation?.activeCpuDurationMs,
@@ -22,7 +24,7 @@ export async function tryRecordComputeProviderUsage(input: {
     });
   } catch (error) {
     console.warn(
-      `[${input.logPrefix}] Failed to record compute provider usage for job #${input.cloudJobId}: ${
+      `[${input.logPrefix}] Failed to record compute provider usage for run #${input.runId}: ${
         error instanceof Error ? error.message : String(error)
       }`,
     );

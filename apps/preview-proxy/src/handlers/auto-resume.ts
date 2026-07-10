@@ -1,13 +1,13 @@
 import {
-  type CloudTaskPayload,
-  CloudTaskType,
-  activeCloudTaskStatuses,
+  type TaskPayload,
+  TaskPayloadKind,
+  activeRunStatuses,
   populateSnapshotResumeSlackMetadata,
   restoreSnapshotResumeVisiblePromptFields,
   type PreviewTokenContext,
 } from '@roomote/types';
-import { cloudJobs, and, eq, inArray } from '@roomote/db/server';
-import { enqueueCloudTask } from '@roomote/cloud-agents/server';
+import { taskRuns, and, eq, inArray } from '@roomote/db/server';
+import { enqueueTask } from '@roomote/cloud-agents/server';
 
 import { db } from '../lib/db';
 import { logger, escapeForLog } from '../lib/logger';
@@ -53,10 +53,10 @@ export async function triggerAutoResume(
 
   try {
     // Check if there's already a resume job in progress for this source job
-    const existingResume = await db.query.cloudJobs.findFirst({
+    const existingResume = await db.query.taskRuns.findFirst({
       where: and(
-        eq(cloudJobs.sourceCloudJobId, cloudJob.id),
-        inArray(cloudJobs.status, [...activeCloudTaskStatuses]),
+        eq(taskRuns.sourceRunId, cloudJob.id),
+        inArray(taskRuns.status, [...activeRunStatuses]),
       ),
       columns: { id: true, status: true },
     });
@@ -93,28 +93,31 @@ export async function triggerAutoResume(
       },
       'Creating auto-resume job',
     );
-    const payload: CloudTaskPayload<CloudTaskType.SnapshotResume> = {
+    const payload: TaskPayload<typeof TaskPayloadKind.SnapshotResume> = {
       repo: sourcePayload.repo,
       environmentId: sourcePayload.environmentId,
       port: cloudJob.port ?? undefined,
       sourceSnapshotId: snapshotId,
       sourceCloudJobId: cloudJob.id,
     };
+    // Slack thread metadata rides along on the source run's payload; the
+    // task-level channel bindings stay on the existing task row.
     populateSnapshotResumeSlackMetadata(payload, {
       sourcePayload: cloudJob.payload,
-      threadTs: cloudJob.slackThreadTs,
     });
     restoreSnapshotResumeVisiblePromptFields(payload, sourcePayload);
 
-    const resumeLaunch = await enqueueCloudTask({
-      userId: cloudJob.userId ?? authToken.userId,
-      sourceSnapshotId: snapshotId,
-      sourceCloudJobId: cloudJob.id,
-      type: CloudTaskType.SnapshotResume,
-      ...(cloudJob.slackThreadTs
-        ? { slackThreadTs: cloudJob.slackThreadTs }
-        : {}),
-      payload,
+    // Resumes never create tasks and carry no initiator; the resuming human
+    // (source run's acting user, else the preview token's user) becomes the
+    // new run's acting user.
+    const resumeLaunch = await enqueueTask({
+      task: {
+        type: TaskPayloadKind.SnapshotResume,
+        sourceSnapshotId: snapshotId,
+        sourceCloudJobId: cloudJob.id,
+        payload,
+      },
+      actingUserId: cloudJob.actingUserId ?? authToken.userId ?? null,
     });
 
     logger.info(

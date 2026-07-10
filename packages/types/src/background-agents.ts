@@ -4,8 +4,6 @@ export type ConflictResolverFrequency =
   | 'every_6_hours'
   | 'daily';
 
-export type CoachFrequency = 'off' | 'daily' | 'weekly' | 'biweekly';
-
 export type SuggesterFrequency = 'off' | 'daily' | 'weekly';
 
 export const SUGGESTER_ROUTING_MODES = [
@@ -72,10 +70,14 @@ export type CodeQualityAuditorFrequency =
 // schedule-only settings machinery.
 export type CiFailureTriageFrequency = 'off' | 'daily';
 
-export const BACKGROUND_AUTOMATION_KEYS = [
+/**
+ * User-facing automations shown on the Automations settings page. Each key is
+ * the canonical snake_case identifier used everywhere: the automations table
+ * primary key, tasks.initiator_automation, and BullMQ scheduler job names.
+ */
+export const USER_FACING_AUTOMATION_KEYS = [
   'review_code',
   'conflict_resolver',
-  'coach',
   'suggester',
   'announcer',
   'slack_channel_auto_start',
@@ -88,8 +90,39 @@ export const BACKGROUND_AUTOMATION_KEYS = [
   'ci_failure_triage',
 ] as const;
 
+/**
+ * Internal automations that launch tasks (and therefore need automations rows
+ * for the tasks.initiator_automation FK) but are hidden from the settings UI.
+ */
+export const INTERNAL_AUTOMATION_KEYS = [
+  'snapshot_refresh',
+  'mcp_recommendations',
+  'slack_workflow',
+] as const;
+
+export const BACKGROUND_AUTOMATION_KEYS = [
+  ...USER_FACING_AUTOMATION_KEYS,
+  ...INTERNAL_AUTOMATION_KEYS,
+] as const;
+
 export type BackgroundAutomationKey =
   (typeof BACKGROUND_AUTOMATION_KEYS)[number];
+
+export type InternalAutomationKey = (typeof INTERNAL_AUTOMATION_KEYS)[number];
+
+const INTERNAL_AUTOMATION_KEY_SET = new Set<string>(INTERNAL_AUTOMATION_KEYS);
+
+export function isInternalAutomationKey(
+  key: BackgroundAutomationKey,
+): key is InternalAutomationKey {
+  return INTERNAL_AUTOMATION_KEY_SET.has(key);
+}
+
+export function isBackgroundAutomationKey(
+  value: string,
+): value is BackgroundAutomationKey {
+  return (BACKGROUND_AUTOMATION_KEYS as readonly string[]).includes(value);
+}
 
 export type BackgroundAutomationProvider = 'slack' | 'telegram' | 'sentry';
 
@@ -97,6 +130,25 @@ export type BackgroundAutomationTargetKind =
   | 'slack_channel'
   | 'telegram_chat'
   | 'sentry_project';
+
+/**
+ * A single automation target stored in automations.targets (jsonb array).
+ */
+export type AutomationTarget = {
+  provider: BackgroundAutomationProvider;
+  targetKind: BackgroundAutomationTargetKind;
+  externalRef: string;
+  metadata?: Record<string, unknown>;
+};
+
+/**
+ * Merged-PR scan resume cursor stored in automations.scan_cursor
+ * (security_auditor / code_quality_auditor).
+ */
+export type AutomationScanCursor = {
+  mergedAt: string;
+  externalPullRequestId: number;
+};
 
 export type BackgroundAutomationAvailability = 'stable' | 'beta';
 
@@ -176,26 +228,6 @@ export const SCHEDULE_ONLY_BACKGROUND_AUTOMATION_IDS = Object.keys(
 export const SCHEDULE_ONLY_BACKGROUND_AUTOMATION_LIST = Object.values(
   SCHEDULE_ONLY_BACKGROUND_AUTOMATIONS,
 ) as ScheduleOnlyBackgroundAutomationMetadata[];
-
-export const BACKGROUND_AUTOMATION_RUN_TRIGGER_KINDS = [
-  'manual',
-  'scheduled',
-  'webhook',
-] as const;
-
-export type BackgroundAutomationRunTriggerKind =
-  (typeof BACKGROUND_AUTOMATION_RUN_TRIGGER_KINDS)[number];
-
-export const BACKGROUND_AUTOMATION_RUN_STATUSES = [
-  'queued',
-  'running',
-  'succeeded',
-  'failed',
-  'skipped',
-] as const;
-
-export type BackgroundAutomationRunStatus =
-  (typeof BACKGROUND_AUTOMATION_RUN_STATUSES)[number];
 
 export const BETA_BACKGROUND_AUTOMATION_KEYS = [
   'sentry_triage',

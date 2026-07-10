@@ -79,14 +79,14 @@ describe('task model settings', () => {
   it('repairs an invalid default to the first enabled model', () => {
     const settings = normalizeTaskModelSettings({
       models: DEFAULT_TASK_MODEL_SETTINGS.models,
-      allowedModelIds: ['openrouter/openai/gpt-5.5'],
+      allowedModelIds: ['openrouter/openai/gpt-5.6-terra'],
       defaultModelId: 'openrouter/openai/gpt-chat-latest',
     });
 
     expect(settings).toEqual({
       models: DEFAULT_TASK_MODEL_SETTINGS.models,
-      allowedModelIds: ['openrouter/openai/gpt-5.5'],
-      defaultModelId: 'openrouter/openai/gpt-5.5',
+      allowedModelIds: ['openrouter/openai/gpt-5.6-terra'],
+      defaultModelId: 'openrouter/openai/gpt-5.6-terra',
     });
   });
 
@@ -94,17 +94,19 @@ describe('task model settings', () => {
     const settings = {
       models: DEFAULT_TASK_MODEL_SETTINGS.models,
       allowedModelIds: [
-        'openrouter/openai/gpt-5.5',
+        'openrouter/openai/gpt-5.6-terra',
         'openrouter/anthropic/claude-sonnet-5',
       ],
-      defaultModelId: 'openrouter/openai/gpt-5.5',
+      defaultModelId: 'openrouter/openai/gpt-5.6-terra',
     };
 
     expect(getEnabledTaskModels(settings).map((model) => model.id)).toEqual([
-      'openrouter/openai/gpt-5.5',
+      'openrouter/openai/gpt-5.6-terra',
       'openrouter/anthropic/claude-sonnet-5',
     ]);
-    expect(getDefaultTaskModelId(settings)).toBe('openrouter/openai/gpt-5.5');
+    expect(getDefaultTaskModelId(settings)).toBe(
+      'openrouter/openai/gpt-5.6-terra',
+    );
   });
 
   it('preserves custom models in the available catalog', () => {

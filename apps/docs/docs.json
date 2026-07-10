@@ -67,7 +67,7 @@
             ]
           },
           {
-            "group": "Compute",
+            "group": "Sandboxes",
             "root": "compute",
             "expanded": true,
             "pages": [

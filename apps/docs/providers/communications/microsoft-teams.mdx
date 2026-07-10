@@ -35,6 +35,12 @@ ROOMOTE_AUTH_MICROSOFT_TENANT_ID=...
 
 Roomote enables Microsoft sign-in only when all three values are present.
 
+For a single-purpose Teams deployment, use the same Entra app for Microsoft
+sign-in and the Teams bot. During Roomote setup, Roomote stores hidden Teams bot
+credentials copied from the Microsoft client ID, secret, and tenant values. You
+can override those bot credentials later from **Settings > Comms** if you need a
+separate bot identity.
+
 After Microsoft sign-in, **Settings > Linked Accounts** shows the Microsoft
 Teams account. Users who signed in with another provider can link Microsoft
 from that settings page.
@@ -50,19 +56,20 @@ Set the bot messaging endpoint to:
 <public-url>/api/webhooks/teams
 ```
 
-Enable the Microsoft Teams channel in the bot resource, then save the bot
-values in Roomote setup or env vars:
+Enable the Microsoft Teams channel in the bot resource. Roomote setup stores
+these bot values automatically from the Microsoft app values. If you configure
+with env vars instead, set:
 
 ```sh
 TEAMS_BOT_APP_ID=<microsoft-app-id>
 TEAMS_BOT_APP_PASSWORD=<client-secret>
-```
-
-For a single-tenant bot, also set:
-
-```sh
 TEAMS_BOT_TENANT_ID=<tenant-id>
+TEAMS_BOT_NAME=<bot-display-name>
 ```
+
+`TEAMS_BOT_NAME` is optional, but recommended when your Teams app is not named
+Roomote. Roomote uses it in generated Teams app packages and user-facing
+invocation guidance.
 
 Advanced token overrides are available when your tenant or cloud environment
 requires custom Bot Framework token settings:
@@ -76,28 +83,55 @@ Restart Roomote after changing Teams env vars.
 
 ## Teams app package
 
-Create a Teams app package in the
-[Microsoft Teams Developer Portal](https://dev.teams.microsoft.com/apps). Add a
-bot capability that uses the same Microsoft App ID as `TEAMS_BOT_APP_ID`.
+Roomote generates the Teams app package for you: a zip with the app manifest
+and icons, pre-filled with your bot app ID and deployment URL. Download it:
 
-Enable the scopes you want to support:
+- during setup, from the **Configure Microsoft Teams app** step
+- later, from the Microsoft Teams card in **Settings > Comms**
+
+Upload the package in Teams under **Apps > Manage your apps > Upload an app**,
+or import it in the
+[Microsoft Teams Developer Portal](https://dev.teams.microsoft.com/apps).
+
+The generated manifest uses Teams manifest v1.25, declares channel feature
+readiness, and enables all three messaging scopes:
 
 - **Personal** - direct messages to the bot start tasks
 - **Team** - channel messages that mention the bot start tasks
 - **Group chat** - group-chat messages that mention the bot start tasks
 
-If you edit the manifest directly, the bot entry should include:
+If you prefer to build the app package yourself in the Developer Portal, add a
+bot capability that uses the same Microsoft App ID as `TEAMS_BOT_APP_ID` and
+include the bot entry in the manifest:
 
 ```json
 {
+  "$schema": "https://developer.microsoft.com/en-us/json-schemas/teams/v1.25/MicrosoftTeams.schema.json",
+  "manifestVersion": "1.25",
+  "accentColor": "#d6ee26",
+  "authorization": {
+    "permissions": {
+      "resourceSpecific": [
+        { "name": "Channel.Create.Group", "type": "Application" },
+        { "name": "ChannelMember.Read.Group", "type": "Application" },
+        { "name": "ChannelMessage.Read.Group", "type": "Application" },
+        { "name": "ChannelMessage.Send.Group", "type": "Application" },
+        { "name": "ChannelSettings.Read.Group", "type": "Application" },
+        { "name": "ChatMessage.Read.Chat", "type": "Application" },
+        { "name": "ChatMessage.Send.Chat", "type": "Application" },
+        { "name": "Member.Read.Group", "type": "Application" }
+      ]
+    }
+  },
   "bots": [
     {
       "botId": "<TEAMS_BOT_APP_ID>",
-      "scopes": ["personal", "team", "groupchat"],
-      "supportsFiles": false,
+      "scopes": ["personal", "team", "groupChat"],
+      "supportsFiles": true,
       "isNotificationOnly": false
     }
   ],
+  "supportsChannelFeatures": "tier1",
   "validDomains": ["<public-host-without-scheme>"]
 }
 ```
@@ -112,9 +146,19 @@ personally to test DMs, and add it to a team or group chat to test mentions.
 3. confirm Roomote starts a task and posts a Teams reply with the task link
 4. reply in the same Teams conversation to send a follow-up to the task
 
+The first verified Teams message also captures the conversation Roomote uses
+for proactive output. When Slack and Telegram are not connected, setup
+onboarding messages and automation summaries post to the most recently active
+captured conversation, preferring team channels. Until Roomote captures a
+conversation — typically from that first message, though other verified Teams
+activity such as adding the app to a team can also capture one — the Microsoft
+Teams card in **Settings > Comms** shows a reminder to open the app and send
+the bot one message.
+
 When an inbound Teams activity includes a Microsoft Entra AAD object ID,
 Roomote can map it to an existing Microsoft sign-in account. If no mapping
-exists yet, Teams task launches use the deployment's fallback owner.
+exists yet, Roomote asks the sender to link their Microsoft account before
+starting a task rather than launching it under another owner.
 
 ## Local URL changes
 

@@ -2,7 +2,7 @@ import { z } from 'zod';
 
 import { timePeriodFilterSchema, type TimePeriodFilter } from './time-period';
 
-export const analyticsObjects = ['pullRequests', 'tasks'] as const;
+export const analyticsObjects = ['tasks', 'pullRequests'] as const;
 export const analyticsObjectSchema = z.enum(analyticsObjects);
 export type AnalyticsObject = z.infer<typeof analyticsObjectSchema>;
 

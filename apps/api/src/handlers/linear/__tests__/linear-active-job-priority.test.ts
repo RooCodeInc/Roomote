@@ -43,7 +43,7 @@ vi.mock('@roomote/env', async (importOriginal) => {
 });
 
 vi.mock('@roomote/cloud-agents/server', () => ({
-  enqueueCloudTask: vi.fn(),
+  enqueueTask: vi.fn(),
   routeTask: vi.fn(),
   buildLinearRoutingContext: vi.fn(),
   AGENT_TYPE_TO_PROMPT_NAME: {},

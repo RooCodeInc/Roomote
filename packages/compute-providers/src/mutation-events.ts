@@ -1,5 +1,5 @@
 import type {
-  CloudJobEventDetails,
+  RunEventDetails,
   ComputeProviderLaunchMode,
 } from '@roomote/types';
 
@@ -12,8 +12,8 @@ export interface ComputeProviderMutationLifecycleContext {
 
 export function buildComputeProviderMutationDetails(
   context: ComputeProviderMutationLifecycleContext,
-  details: CloudJobEventDetails = {},
-): CloudJobEventDetails {
+  details: RunEventDetails = {},
+): RunEventDetails {
   return {
     ...(context.attempt != null ? { attempt: context.attempt } : {}),
     ...(context.launchMode ? { launchMode: context.launchMode } : {}),

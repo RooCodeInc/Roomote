@@ -12,7 +12,7 @@ export {
   optionalAuthProcedure,
 } from './trpc';
 
-export { finishCloudJob } from './lib/cloud-jobs/finish-cloud-job';
+export { finishRun } from './lib/cloud-jobs/finish-run';
 export { findCloudJobByJobTokenClaims } from './lib/cloud-jobs/find-cloud-job';
 export { createSnapshot } from './lib/cloud-jobs/enqueue-snapshot';
 export { recordComputeProviderUsage } from './lib/cloud-jobs/record-compute-provider-usage';
@@ -22,6 +22,7 @@ export {
 } from './lib/cloud-jobs/record-task-message-envelope';
 export { ensureSnapshotResumeGitHubFollowUpFallback } from './lib/cloud-jobs/ensure-snapshot-resume-github-follow-up-fallback';
 export * from './lib/manager-slack';
+export * from './automations';
 export * from './lib/manager-stats';
 export {
   cleanupSandboxOidcTargetsForCloudJob,
@@ -115,7 +116,6 @@ export {
   enqueuePrReviewNotificationInputSchema,
   formatPrReviewActivityMessage,
   hasPrReviewNotificationThreadContext,
-  isPrReviewNotificationEnabled,
   prReviewActivityEventSchema,
   prReviewNotificationRequestSchema,
   requeuePendingPrReviewActivity,

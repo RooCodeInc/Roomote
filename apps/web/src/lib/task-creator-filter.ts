@@ -1,49 +1,51 @@
-import {
-  type EffectiveAuthorKind,
-  TASK_ATTRIBUTION_SOURCE_KINDS,
-  type TaskAttributionKind,
-  type TaskAttributionSourceKind,
-} from '@roomote/types';
+/**
+ * Task creator filter encoding.
+ *
+ * Filter values encode the task initiator columns in a flat two-part scheme
+ * (no attribution cascade):
+ *
+ * - `<userId>`                        linked human initiator (initiatorUserId)
+ * - `automation:<key>`                automation initiator (initiatorAutomation)
+ * - `external:<encoded externalId>`   unlinked external human actor
+ *                                     (initiatorKind 'user' + actorExternalId)
+ */
 
-const UNLINKED_CREATOR_FILTER_PREFIX = 'unlinked:';
-export const ROOMOTE_CREATOR_FILTER_VALUE = 'author:roomote';
+const AUTOMATION_CREATOR_FILTER_PREFIX = 'automation:';
+const EXTERNAL_CREATOR_FILTER_PREFIX = 'external:';
 
 type ParsedCreatorFilterValue =
   | {
-      kind: 'roomote';
-    }
-  | {
-      kind: 'matched_user';
+      kind: 'user';
       userId: string;
     }
   | {
-      kind: 'unlinked_user';
-      sourceKind: TaskAttributionSourceKind;
-      sourceExternalId: string;
+      kind: 'automation';
+      key: string;
+    }
+  | {
+      kind: 'external';
+      externalId: string;
     };
 
 export function buildCreatorFilterValue(input: {
-  effectiveAuthorKind?: EffectiveAuthorKind | null | undefined;
-  userId?: string | null | undefined;
-  attributionKind: TaskAttributionKind | null | undefined;
-  attributionSourceKind: TaskAttributionSourceKind | null | undefined;
-  attributionSourceExternalId: string | null | undefined;
+  initiatorKind: 'user' | 'automation' | null | undefined;
+  initiatorUserId: string | null | undefined;
+  initiatorAutomation: string | null | undefined;
+  actorExternalId: string | null | undefined;
 }): string | null {
-  if (input.effectiveAuthorKind === 'roomote') {
-    return ROOMOTE_CREATOR_FILTER_VALUE;
+  if (input.initiatorKind === 'automation') {
+    return input.initiatorAutomation
+      ? `${AUTOMATION_CREATOR_FILTER_PREFIX}${input.initiatorAutomation}`
+      : null;
   }
 
-  if (input.userId) {
-    return input.userId;
+  if (input.initiatorUserId) {
+    return input.initiatorUserId;
   }
 
-  if (
-    input.attributionKind === 'unlinked_user' &&
-    input.attributionSourceKind &&
-    input.attributionSourceExternalId
-  ) {
-    return `${UNLINKED_CREATOR_FILTER_PREFIX}${input.attributionSourceKind}:${encodeURIComponent(
-      input.attributionSourceExternalId,
+  if (input.actorExternalId) {
+    return `${EXTERNAL_CREATOR_FILTER_PREFIX}${encodeURIComponent(
+      input.actorExternalId,
     )}`;
   }
 
@@ -53,60 +55,33 @@ export function buildCreatorFilterValue(input: {
 export function parseCreatorFilterValue(
   value: string,
 ): ParsedCreatorFilterValue {
-  if (value === ROOMOTE_CREATOR_FILTER_VALUE) {
-    return {
-      kind: 'roomote',
-    };
+  if (value.startsWith(AUTOMATION_CREATOR_FILTER_PREFIX)) {
+    const key = value.slice(AUTOMATION_CREATOR_FILTER_PREFIX.length);
+
+    if (key) {
+      return { kind: 'automation', key };
+    }
   }
 
-  if (!value.startsWith(UNLINKED_CREATOR_FILTER_PREFIX)) {
-    return {
-      kind: 'matched_user',
-      userId: value,
-    };
+  if (value.startsWith(EXTERNAL_CREATOR_FILTER_PREFIX)) {
+    const encoded = value.slice(EXTERNAL_CREATOR_FILTER_PREFIX.length);
+
+    let externalId: string | null = null;
+
+    try {
+      externalId = decodeURIComponent(encoded);
+    } catch {
+      externalId = null;
+    }
+
+    if (externalId) {
+      return { kind: 'external', externalId };
+    }
   }
 
-  const encodedValue = value.slice(UNLINKED_CREATOR_FILTER_PREFIX.length);
-  const separatorIndex = encodedValue.indexOf(':');
-
-  if (separatorIndex === -1) {
-    return {
-      kind: 'matched_user',
-      userId: value,
-    };
-  }
-
-  const sourceKind = encodedValue.slice(
-    0,
-    separatorIndex,
-  ) as TaskAttributionSourceKind;
-
-  let sourceExternalId: string;
-
-  try {
-    sourceExternalId = decodeURIComponent(
-      encodedValue.slice(separatorIndex + 1),
-    );
-  } catch {
-    return {
-      kind: 'matched_user',
-      userId: value,
-    };
-  }
-
-  if (
-    !TASK_ATTRIBUTION_SOURCE_KINDS.includes(sourceKind) ||
-    !sourceExternalId
-  ) {
-    return {
-      kind: 'matched_user',
-      userId: value,
-    };
-  }
-
-  return {
-    kind: 'unlinked_user',
-    sourceKind,
-    sourceExternalId,
-  };
+  return { kind: 'user', userId: value };
 }
+
+// `formatAutomationLabel` now lives in `@roomote/types` so web + server-side
+// stats share one implementation. Re-exported here for existing web callers.
+export { formatAutomationLabel } from '@roomote/types';

@@ -24,7 +24,7 @@ export type { LinearInstallation } from '../linear-installations';
 export type { Repository } from '../repositories';
 export type { ParsedPR } from '../pull-request-links';
 export type {
-  CloudJob,
+  Run,
   DequeuedCloudJob,
   DequeuedResumeCloudJob,
 } from '../cloud-jobs';
@@ -70,9 +70,6 @@ export interface CreateClientOptions {
 const WORKER_QUERY_RETRYABLE_STATUS_CODES = new Set([408, 429, 502, 503, 504]);
 const WORKER_QUERY_RETRY_MAX_ATTEMPTS = 4;
 const WORKER_QUERY_RETRY_BASE_DELAY_MS = 250;
-const RETRYABLE_WORKER_TRPC_MUTATION_PATHS = new Set([
-  'cloudJobs.recordMessageEnvelope',
-]);
 
 type FetchLike = typeof fetch;
 
@@ -80,6 +77,28 @@ export interface WorkerQueryRetryOptions {
   maxAttempts?: number;
   baseDelayMs?: number;
 }
+
+// The worker's first callbacks claim its job through the public edge, and a
+// freshly (re)started proxy can briefly answer 5xx or without a JSON
+// content-type before its upstreams settle. Claiming is idempotent server-side
+// (FOR UPDATE SKIP LOCKED returns nothing on a second attempt), so these paths
+// get a longer budget (~31s of backoff) instead of failing the whole job on
+// one bad response.
+const WORKER_STARTUP_MUTATION_RETRY_OPTIONS: WorkerQueryRetryOptions = {
+  maxAttempts: 6,
+  baseDelayMs: 1_000,
+};
+
+// Worker tRPC mutations that are safe to replay at the transport layer, with
+// optional per-path overrides of the default retry budget.
+const RETRYABLE_WORKER_TRPC_MUTATION_PATHS = new Map<
+  string,
+  WorkerQueryRetryOptions
+>([
+  ['cloudJobs.recordMessageEnvelope', {}],
+  ['cloudJobs.dequeue', WORKER_STARTUP_MUTATION_RETRY_OPTIONS],
+  ['cloudJobs.resume', WORKER_STARTUP_MUTATION_RETRY_OPTIONS],
+]);
 
 function isQueryRequest(method?: string): boolean {
   return (method ?? 'GET').toUpperCase() === 'GET';
@@ -171,26 +190,55 @@ function shouldRetryWorkerQueryResponse(status: number): boolean {
   return WORKER_QUERY_RETRYABLE_STATUS_CODES.has(status);
 }
 
-function shouldRetryWorkerTrpcRequest(
+type WorkerTrpcRetryPlan =
+  | { retryable: false }
+  | { retryable: true; maxAttempts: number; baseDelayMs: number };
+
+function resolveWorkerTrpcRetryPlan(
   method: string,
   requestUrl: string,
-): boolean {
+): WorkerTrpcRetryPlan {
   if (isQueryRequest(method)) {
-    return true;
+    return {
+      retryable: true,
+      maxAttempts: WORKER_QUERY_RETRY_MAX_ATTEMPTS,
+      baseDelayMs: WORKER_QUERY_RETRY_BASE_DELAY_MS,
+    };
   }
 
   if (!isPostRequest(method)) {
-    return false;
+    return { retryable: false };
   }
 
   const procedurePaths = getWorkerTrpcProcedurePaths(requestUrl);
 
-  return (
-    procedurePaths.length > 0 &&
-    procedurePaths.every((path) =>
-      RETRYABLE_WORKER_TRPC_MUTATION_PATHS.has(path),
-    )
-  );
+  if (procedurePaths.length === 0) {
+    return { retryable: false };
+  }
+
+  // A batched request is only retryable when every procedure in it is, and the
+  // smallest configured budget wins so batching never extends a path's budget.
+  let maxAttempts = Infinity;
+  let baseDelayMs = Infinity;
+
+  for (const path of procedurePaths) {
+    const overrides = RETRYABLE_WORKER_TRPC_MUTATION_PATHS.get(path);
+
+    if (!overrides) {
+      return { retryable: false };
+    }
+
+    maxAttempts = Math.min(
+      maxAttempts,
+      overrides.maxAttempts ?? WORKER_QUERY_RETRY_MAX_ATTEMPTS,
+    );
+    baseDelayMs = Math.min(
+      baseDelayMs,
+      overrides.baseDelayMs ?? WORKER_QUERY_RETRY_BASE_DELAY_MS,
+    );
+  }
+
+  return { retryable: true, maxAttempts, baseDelayMs };
 }
 
 function getWorkerQueryRetryDelayMs(
@@ -204,18 +252,25 @@ export function createWorkerFetchWithRetry(
   baseFetch: FetchLike = globalThis.fetch.bind(globalThis),
   options: WorkerQueryRetryOptions = {},
 ): FetchLike {
-  const maxAttempts = options.maxAttempts ?? WORKER_QUERY_RETRY_MAX_ATTEMPTS;
-  const baseDelayMs = options.baseDelayMs ?? WORKER_QUERY_RETRY_BASE_DELAY_MS;
-
   return async (input, init) => {
     const requestMethod = getRequestMethod(input, init);
     const requestUrl = getRequestUrl(input);
-    const shouldRetryRequest = shouldRetryWorkerTrpcRequest(
-      requestMethod,
-      requestUrl,
-    );
+    const retryPlan = resolveWorkerTrpcRetryPlan(requestMethod, requestUrl);
 
-    if (!shouldRetryRequest || maxAttempts <= 1) {
+    // Explicit wrapper options take precedence over per-path budgets so
+    // callers (and tests) can pin the retry behavior.
+    const maxAttempts =
+      options.maxAttempts ??
+      (retryPlan.retryable
+        ? retryPlan.maxAttempts
+        : WORKER_QUERY_RETRY_MAX_ATTEMPTS);
+    const baseDelayMs =
+      options.baseDelayMs ??
+      (retryPlan.retryable
+        ? retryPlan.baseDelayMs
+        : WORKER_QUERY_RETRY_BASE_DELAY_MS);
+
+    if (!retryPlan.retryable || maxAttempts <= 1) {
       const response = await baseFetch(input, init);
 
       await assertValidWorkerTrpcResponse(response, requestUrl);

@@ -9,7 +9,7 @@ export const SETTINGS_PATHS = {
   agentGuidance: '/settings/agent-guidance',
   integrations: '/settings/integrations',
   comms: '/settings/comms',
-  compute: '/settings/compute',
+  compute: '/settings/sandboxes',
   models: '/settings/models',
   skills: '/settings/skills',
   vibes: '/settings/vibes',

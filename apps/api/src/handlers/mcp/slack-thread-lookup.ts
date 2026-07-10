@@ -83,8 +83,13 @@ type SlackChannelMessagesPayload = {
   }>;
 };
 
+/**
+ * Slack routing context for a run. Channel bindings live on the tasks row
+ * (`tasks.slackChannelId` / `tasks.slackThreadTs`); the payload keeps its
+ * legacy launch-time channel/thread fields as a fallback.
+ */
 type SlackReplyTargetCloudJob = {
-  type: string;
+  slackChannelId?: string | null;
   slackThreadTs: string | null;
   payload: unknown;
   actingUserId?: string | null;
@@ -168,9 +173,10 @@ function normalizeSlackChannelMessages(messages: SlackThreadMessage[]) {
 export function getSlackReplyTarget(
   cloudJob: SlackReplyTargetCloudJob,
 ): { channel: string; threadTs?: string } | null {
-  const channel = getSlackChannelFromTaskPayload(cloudJob.payload);
+  const channel =
+    cloudJob.slackChannelId ?? getSlackChannelFromTaskPayload(cloudJob.payload);
   const threadTs =
-    getSlackThreadTsFromTaskPayload(cloudJob.payload) ?? cloudJob.slackThreadTs;
+    cloudJob.slackThreadTs ?? getSlackThreadTsFromTaskPayload(cloudJob.payload);
 
   if (channel) {
     return {

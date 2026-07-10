@@ -18,11 +18,10 @@ import {
 import {
   db,
   eq,
-  cloudJobs,
+  taskRuns,
   getDeploymentPrAction,
-  sql,
   taskPullRequests,
-  type CloudJob,
+  type Run,
 } from '@roomote/db/server';
 import {
   buildPullRequestUrl,
@@ -135,7 +134,7 @@ export async function createOrUpdateSourceControlPullRequestForCloudJob({
   input,
   fetchImpl = fetch,
 }: {
-  cloudJob: CloudJob;
+  cloudJob: Run;
   input: SourceControlPullRequestMutationInput;
   fetchImpl?: FetchImpl;
 }): Promise<SourceControlPullRequestMutationResult> {
@@ -217,7 +216,7 @@ export async function createOrUpdateSourceControlPullRequestForCloudJob({
  * created at all. Updates never change an existing pull request's draft
  * state.
  */
-async function resolveEffectivePrAction(cloudJob: CloudJob): Promise<PrAction> {
+async function resolveEffectivePrAction(cloudJob: Run): Promise<PrAction> {
   const payloadPrAction = getPayloadRecord(cloudJob.payload).prAction;
 
   if (prActions.includes(payloadPrAction as PrAction)) {
@@ -241,7 +240,7 @@ async function persistSourceControlPullRequestAssociation({
   result,
   repository,
 }: {
-  cloudJob: CloudJob;
+  cloudJob: Run;
   input: SourceControlPullRequestMutationInput;
   result: SourceControlPullRequestMutationResult;
   repository: RepositoryRow;
@@ -265,6 +264,7 @@ async function persistSourceControlPullRequestAssociation({
         prTitle: result.title,
         repository: result.repositoryFullName,
         status,
+        prBaseRef: input.targetBranch,
       })
       .onConflictDoUpdate({
         target: [taskPullRequests.taskId, taskPullRequests.prUrl],
@@ -274,25 +274,10 @@ async function persistSourceControlPullRequestAssociation({
           repositoryId: repository.id,
           prTitle: result.title,
           status,
+          prBaseRef: input.targetBranch,
           updatedAt: new Date(),
         },
       });
-
-    // Mirror extract-pull-requests: the base SHA is only kept when the row
-    // already pointed at this PR, so a concurrent association with a different
-    // PR cannot leave a stale base stranded under this PR's repo/number.
-    const rowStillPointsAtThisPr = sql`${cloudJobs.prRepo} = ${result.repositoryFullName} AND ${cloudJobs.prNumber} = ${result.number}`;
-
-    await db
-      .update(cloudJobs)
-      .set({
-        prSourceControlProvider: repository.sourceControlProvider,
-        prRepo: result.repositoryFullName,
-        prNumber: result.number,
-        prBaseRef: input.targetBranch,
-        prBaseSha: sql`CASE WHEN ${rowStillPointsAtThisPr} THEN ${cloudJobs.prBaseSha} ELSE NULL END`,
-      })
-      .where(eq(cloudJobs.id, cloudJob.id));
   } catch (error) {
     console.warn(
       `[persistSourceControlPullRequestAssociation] Failed to associate ${result.repositoryFullName}#${result.number} with task ${cloudJob.taskId}: ${
@@ -917,9 +902,9 @@ export async function findCloudJobForSourceControlMutation({
 }: {
   cloudJobId: number;
   taskId: string;
-}): Promise<CloudJob> {
-  const cloudJob = await db.query.cloudJobs.findFirst({
-    where: eq(cloudJobs.id, cloudJobId),
+}): Promise<Run> {
+  const cloudJob = await db.query.taskRuns.findFirst({
+    where: eq(taskRuns.id, cloudJobId),
   });
 
   if (!cloudJob) {

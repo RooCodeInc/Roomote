@@ -1,6 +1,6 @@
 import {
   type EnvironmentConfig,
-  CloudTaskStatus,
+  RunStatus,
   PRODUCT_NAME,
 } from '@roomote/types';
 
@@ -190,26 +190,24 @@ export function wasEnvironmentUpdatedAfter(
 }
 
 export function isEnvironmentDefinitionTerminalSuccessStatus(
-  status: CloudTaskStatus | null | undefined,
+  status: RunStatus | null | undefined,
   taskPhase?: string | null,
 ): boolean {
   return (
-    status === CloudTaskStatus.Completed ||
-    (status === CloudTaskStatus.Idle && taskPhase === 'waiting_for_prompt')
+    status === RunStatus.Completed ||
+    (status === RunStatus.Idle && taskPhase === 'waiting_for_prompt')
   );
 }
 
 export function isEnvironmentDefinitionSuccessStatus(
-  status: CloudTaskStatus | null | undefined,
+  status: RunStatus | null | undefined,
   taskPhase?: string | null,
 ): boolean {
   return isEnvironmentDefinitionTerminalSuccessStatus(status, taskPhase);
 }
 
 export function isEnvironmentDefinitionFailureStatus(
-  status: CloudTaskStatus | null | undefined,
+  status: RunStatus | null | undefined,
 ): boolean {
-  return (
-    status === CloudTaskStatus.Failed || status === CloudTaskStatus.Canceled
-  );
+  return status === RunStatus.Failed || status === RunStatus.Canceled;
 }

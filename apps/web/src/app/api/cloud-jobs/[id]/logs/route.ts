@@ -6,11 +6,11 @@ import {
   getComputeProviderCapabilities,
 } from '@roomote/compute-providers/factory';
 import {
-  isExitedCloudTaskStatus,
+  isExitedRunStatus,
   resolveComputeProviderTarget,
 } from '@roomote/types';
 
-import { cloudJobs, db, eq } from '@roomote/db/server';
+import { db, eq, taskRuns } from '@roomote/db/server';
 
 import { authorizeUserToken } from '@/lib/server';
 
@@ -19,7 +19,7 @@ export const runtime = 'nodejs';
 const LOG_STREAM_READINESS_POLL_INTERVAL_MS = 2_000;
 const LOG_STREAM_READINESS_MAX_WAIT_MS = 15 * 60_000;
 const UNSUPPORTED_LOG_STREAMING_ERROR =
-  'Live log streaming is unavailable for this compute provider.';
+  'Live log streaming is unavailable for this sandbox provider.';
 
 export async function GET(
   request: NextRequest,
@@ -37,8 +37,8 @@ export async function GET(
   const { id } = await props.params;
   const cloudJobId = z.coerce.number().parse(id);
 
-  const cloudJob = await db.query.cloudJobs.findFirst({
-    where: eq(cloudJobs.id, cloudJobId),
+  const cloudJob = await db.query.taskRuns.findFirst({
+    where: eq(taskRuns.id, cloudJobId),
   });
 
   if (!cloudJob) {
@@ -70,7 +70,7 @@ export async function GET(
     });
 
     while (!disconnected && (!machineId || !sandboxCmdId)) {
-      if (isExitedCloudTaskStatus(status)) {
+      if (isExitedRunStatus(status)) {
         break;
       }
 
@@ -81,8 +81,8 @@ export async function GET(
 
       await sleep(LOG_STREAM_READINESS_POLL_INTERVAL_MS);
 
-      const latestCloudJob = await db.query.cloudJobs.findFirst({
-        where: eq(cloudJobs.id, cloudJobId),
+      const latestCloudJob = await db.query.taskRuns.findFirst({
+        where: eq(taskRuns.id, cloudJobId),
         columns: {
           machineId: true,
           sandboxCmdId: true,

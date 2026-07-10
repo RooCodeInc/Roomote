@@ -1,16 +1,17 @@
 import {
-  type CloudTaskStatus,
-  type CloudTaskPayload,
-  CloudTaskType,
-  exitedCloudTaskStatuses,
+  type RunStatus,
+  type TaskPayload,
+  type TaskPayloadKind,
+  exitedRunStatuses,
   type SourceControlProvider,
 } from '@roomote/types';
 import {
-  type CloudJob,
+  type Run,
   type User,
   db,
-  cloudJobs,
+  taskRuns,
   taskPullRequests,
+  users,
   inArray,
   not,
   eq,
@@ -21,14 +22,13 @@ import {
 
 export type SimpleCloudJob = {
   id: number;
-  type: CloudTaskType;
-  payload: CloudTaskPayload;
-  status: CloudTaskStatus;
+  payloadKind: TaskPayloadKind;
+  payload: TaskPayload;
+  status: RunStatus;
   taskPhase: string | null;
   firstAssistantOutputAt: Date | null;
   prRepo: string | null;
   prNumber: number | null;
-  githubLogin: string | null;
 };
 
 type TaskPullRequestLink = {
@@ -37,40 +37,6 @@ type TaskPullRequestLink = {
   prNumber: number;
   sourceControlProvider: SourceControlProvider;
 };
-
-type CloudJobWithPrLink = {
-  prRepo: string | null;
-  prNumber: number | null;
-};
-
-/**
- * task_pull_requests is the durable task-level PR association, but it only
- * stores repository + PR number. Callers that also need prSha still need
- * cloud-job-row propagation for that field.
- */
-export function applyTaskPullRequestFallbackToCloudJob<
-  T extends CloudJobWithPrLink,
->(cloudJob: T, fallbackPr: TaskPullRequestLink | undefined): T;
-export function applyTaskPullRequestFallbackToCloudJob<
-  T extends CloudJobWithPrLink,
->(cloudJob: T | null, fallbackPr: TaskPullRequestLink | undefined): T | null;
-export function applyTaskPullRequestFallbackToCloudJob<
-  T extends CloudJobWithPrLink,
->(cloudJob: T | null, fallbackPr: TaskPullRequestLink | undefined): T | null {
-  if (
-    !cloudJob ||
-    !fallbackPr ||
-    (cloudJob.prRepo !== null && cloudJob.prNumber !== null)
-  ) {
-    return cloudJob;
-  }
-
-  return {
-    ...cloudJob,
-    prRepo: cloudJob.prRepo ?? fallbackPr.repository,
-    prNumber: cloudJob.prNumber ?? fallbackPr.prNumber,
-  };
-}
 
 export const getLatestTaskPullRequestsByTaskId = async (
   taskIds: string[],
@@ -121,7 +87,9 @@ export const getLatestTaskPullRequestsByTaskId = async (
 };
 
 /**
- * Fetches the latest cloud job for each task ID (by highest cloud job ID).
+ * Fetches the latest run for each task ID (by highest run ID). Runs supply
+ * live runtime status/phase/preview fields only; PR badges come from
+ * task_pull_requests.
  */
 export const getLatestCloudJobsByTaskId = async (
   taskIds: string[],
@@ -133,80 +101,88 @@ export const getLatestCloudJobsByTaskId = async (
   const [results, taskPullRequestsByTaskId] = await Promise.all([
     db
       .select({
-        id: cloudJobs.id,
-        taskId: cloudJobs.taskId,
-        type: cloudJobs.type,
-        payload: cloudJobs.payload,
-        status: cloudJobs.status,
-        taskPhase: cloudJobs.taskPhase,
-        firstAssistantOutputAt: cloudJobs.firstAssistantOutputAt,
-        prRepo: cloudJobs.prRepo,
-        prNumber: cloudJobs.prNumber,
-        githubLogin: cloudJobs.githubLogin,
+        id: taskRuns.id,
+        taskId: taskRuns.taskId,
+        payloadKind: taskRuns.payloadKind,
+        payload: taskRuns.payload,
+        status: taskRuns.status,
+        taskPhase: taskRuns.taskPhase,
+        firstAssistantOutputAt: taskRuns.firstAssistantOutputAt,
       })
-      .from(cloudJobs)
-      .where(inArray(cloudJobs.taskId, taskIds))
-      .orderBy(cloudJobs.taskId, desc(cloudJobs.id)),
+      .from(taskRuns)
+      .where(inArray(taskRuns.taskId, taskIds))
+      .orderBy(taskRuns.taskId, desc(taskRuns.id)),
     getLatestTaskPullRequestsByTaskId(taskIds),
   ]);
 
-  // Deduplicate to latest job per task (first seen per taskId wins due to
+  // Deduplicate to latest run per task (first seen per taskId wins due to
   // DESC id ordering).
-  const latestByTask = new Map<string, (typeof results)[number]>();
+  const latestByTask = new Map<string, SimpleCloudJob>();
 
   for (const row of results) {
     if (!latestByTask.has(row.taskId)) {
-      latestByTask.set(
-        row.taskId,
-        applyTaskPullRequestFallbackToCloudJob(
-          row,
-          taskPullRequestsByTaskId[row.taskId],
-        )!,
-      );
+      const fallbackPr = taskPullRequestsByTaskId[row.taskId];
+
+      latestByTask.set(row.taskId, {
+        id: row.id,
+        payloadKind: row.payloadKind,
+        payload: row.payload,
+        status: row.status,
+        taskPhase: row.taskPhase,
+        firstAssistantOutputAt: row.firstAssistantOutputAt,
+        prRepo: fallbackPr?.repository ?? null,
+        prNumber: fallbackPr?.prNumber ?? null,
+      });
     }
   }
 
-  return Object.fromEntries(latestByTask) as Record<string, SimpleCloudJob>;
+  return Object.fromEntries(latestByTask);
 };
 
-export type CloudJobDetail = CloudJob & {
+export type CloudJobDetail = Run & {
   refetchInterval?: number;
   user: User | null;
   actingUser?: User | null;
 };
 
 /**
- * Finds an active (non-exited) successor cloud job that shares the same taskId as
- * the given source cloud job. This handles multi-hop snapshot resume chains
- * (e.g. job A → snapshot → job B → snapshot → job C) by searching all jobs
- * with the same taskId rather than only direct successors.
+ * Finds an active (non-exited) successor run on the same task as the given
+ * source run. Resume chains all share the task, so this is a plain
+ * "active run WHERE taskId = X" lookup.
  */
 export const findActiveSuccessorCloudJob = async (
   sourceCloudJobId: number,
-  auth: { userId: string },
+  _auth: { userId: string },
   taskId?: string | null,
 ): Promise<CloudJobDetail | null> => {
-  const { userId } = auth;
-
-  // If we have a taskId, search for any active job sharing that task (handles
-  // multi-hop chains). Otherwise fall back to direct source_cloud_job_id lookup.
+  // If we have a taskId, search for any active run sharing that task (handles
+  // multi-hop chains). Otherwise fall back to direct source_run_id lookup.
   const jobFilter = taskId
-    ? and(eq(cloudJobs.taskId, taskId), not(eq(cloudJobs.id, sourceCloudJobId)))
-    : eq(cloudJobs.sourceCloudJobId, sourceCloudJobId);
+    ? and(eq(taskRuns.taskId, taskId), not(eq(taskRuns.id, sourceCloudJobId)))
+    : eq(taskRuns.sourceRunId, sourceCloudJobId);
 
-  const successor = await db.query.cloudJobs.findFirst({
+  const successor = await db.query.taskRuns.findFirst({
     where: and(
       jobFilter,
-      not(inArray(cloudJobs.status, [...exitedCloudTaskStatuses])),
-      eq(cloudJobs.userId, userId),
+      not(inArray(taskRuns.status, [...exitedRunStatuses])),
     ),
-    with: { user: true },
-    orderBy: [desc(cloudJobs.id)],
+    orderBy: [desc(taskRuns.id)],
   });
 
   if (!successor) {
     return null;
   }
 
-  return { ...successor, refetchInterval: undefined };
+  const actingUser = successor.actingUserId
+    ? ((await db.query.users.findFirst({
+        where: eq(users.id, successor.actingUserId),
+      })) ?? null)
+    : null;
+
+  return {
+    ...successor,
+    user: actingUser,
+    actingUser,
+    refetchInterval: undefined,
+  };
 };

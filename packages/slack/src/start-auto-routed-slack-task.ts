@@ -5,6 +5,10 @@ import {
   type ChannelAutoStartLaunchMode,
   DEFAULT_CHANNEL_AUTO_START_LAUNCH_MODE,
   type ReasoningEffort,
+  type TaskInitiator,
+  type TaskTrigger,
+  type TaskVisibility,
+  type TaskWorkflow,
 } from '@roomote/types';
 import {
   appendAttachmentTextsToPromptText,
@@ -110,6 +114,10 @@ function buildRoutingFallbackRequiresPickerResult(
 export async function startAutoRoutedSlackTask({
   slackInstallation,
   slack,
+  initiator,
+  trigger,
+  workflow,
+  visibility,
   launchUserId,
   slackUserId,
   persistedSlackUserId,
@@ -143,7 +151,17 @@ export async function startAutoRoutedSlackTask({
     'botUserId' | 'teamId' | 'teamDomain'
   >;
   slack: SlackNotifier;
-  launchUserId: string;
+  /** Forwarded verbatim to startSlackAppMentionTask / enqueueTask. */
+  initiator: TaskInitiator;
+  trigger: TaskTrigger;
+  workflow?: Extract<TaskWorkflow, 'standard' | 'eval'>;
+  visibility?: TaskVisibility;
+  /**
+   * Linked launching user for routing context, MCP-setup detection, and
+   * last-workspace memory. Omit for automation initiators (bot-authored
+   * channel auto-start); identity for attribution lives on `initiator`.
+   */
+  launchUserId?: string | null;
   slackUserId: string;
   persistedSlackUserId?: string | null;
   initiatingSlackUserId?: string;
@@ -214,7 +232,7 @@ export async function startAutoRoutedSlackTask({
       await slack.normalizeIncomingText(stripLeadingRawSlackMention(prompt)),
     );
 
-    if (!skipMcpSetupInterrupt) {
+    if (!skipMcpSetupInterrupt && launchUserId) {
       const setupRequirement = await detectSlackMcpSetupRequirement(
         taskDescription,
         {
@@ -315,7 +333,7 @@ export async function startAutoRoutedSlackTask({
     const channelName = (await slack.getChannelName?.(channel)) ?? undefined;
 
     const routingContext = await buildSlackRoutingContext({
-      userId: launchUserId,
+      userId: launchUserId ?? undefined,
       taskDescription: taskDescriptionWithAttachments,
       channelName,
       threadMessages: threadMessages?.map((message) => ({
@@ -418,7 +436,10 @@ export async function startAutoRoutedSlackTask({
         messageTs: threadId,
       })) ?? null;
     const cloudJob = await startSlackAppMentionTask({
-      userId: launchUserId,
+      initiator,
+      trigger,
+      workflow,
+      visibility,
       channel,
       teamId: slackInstallation.teamId,
       teamDomain: slackInstallation.teamDomain ?? undefined,

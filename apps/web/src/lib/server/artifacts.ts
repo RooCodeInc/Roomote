@@ -16,7 +16,8 @@ function withTypedArtifactType<T extends { artifactType: string }>(
  * All these types include userId and isAdmin.
  */
 type ArtifactAuth = {
-  userId: string;
+  /** Null for deployment-principal job tokens (no human user). */
+  userId: string | null;
   isAdmin: boolean;
 };
 

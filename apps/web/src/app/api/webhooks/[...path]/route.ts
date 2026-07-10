@@ -8,6 +8,10 @@ export const dynamic = 'force-dynamic';
 const HOP_BY_HOP_HEADERS = [
   'connection',
   'content-length',
+  // Azure DevOps service hooks send `Expect: 100-continue`; undici's fetch
+  // rejects the header outright (UND_ERR_NOT_SUPPORTED), and the 100-continue
+  // handshake is meaningless to replay on a proxied request.
+  'expect',
   'keep-alive',
   'proxy-authenticate',
   'proxy-authorization',

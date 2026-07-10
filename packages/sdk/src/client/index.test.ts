@@ -316,6 +316,109 @@ describe('createWorkerFetchWithRetry', () => {
     expect(fetchMock).toHaveBeenCalledTimes(2);
   });
 
+  it('retries the dequeue claim when the public edge answers without a JSON content-type', async () => {
+    const fetchMock = vi
+      .fn<typeof fetch>()
+      .mockResolvedValueOnce(new Response(null, { status: 502 }))
+      .mockResolvedValueOnce(
+        new Response('[]', {
+          status: 200,
+          headers: { 'content-type': 'application/json' },
+        }),
+      );
+
+    const workerFetch = createWorkerFetchWithRetry(fetchMock, {
+      baseDelayMs: 0,
+    });
+
+    const response = await workerFetch(
+      'https://web-dan.ngrok.dev/_roomote-api/trpc/cloudJobs.dequeue?batch=1',
+      {
+        method: 'POST',
+        body: '{"0":{"json":{"cloudJobId":68}}}',
+      },
+    );
+
+    expect(response.status).toBe(200);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it('gives the dequeue claim a longer default retry budget than other callbacks', async () => {
+    const fetchMock = vi
+      .fn<typeof fetch>()
+      .mockRejectedValueOnce(new TypeError('fetch failed'))
+      .mockRejectedValueOnce(new TypeError('fetch failed'))
+      .mockRejectedValueOnce(new TypeError('fetch failed'))
+      .mockRejectedValueOnce(new TypeError('fetch failed'))
+      .mockRejectedValueOnce(new TypeError('fetch failed'))
+      .mockResolvedValueOnce(
+        new Response('[]', {
+          status: 200,
+          headers: { 'content-type': 'application/json' },
+        }),
+      );
+
+    const workerFetch = createWorkerFetchWithRetry(fetchMock, {
+      baseDelayMs: 0,
+    });
+
+    const response = await workerFetch(
+      'https://api.roomote.dev/trpc/cloudJobs.dequeue?batch=1',
+      {
+        method: 'POST',
+        body: '{"0":{"json":{"cloudJobId":68}}}',
+      },
+    );
+
+    expect(response.status).toBe(200);
+    expect(fetchMock).toHaveBeenCalledTimes(6);
+  });
+
+  it('retries the resume claim on transport failure', async () => {
+    const fetchMock = vi
+      .fn<typeof fetch>()
+      .mockRejectedValueOnce(new TypeError('fetch failed'))
+      .mockResolvedValueOnce(
+        new Response('[]', {
+          status: 200,
+          headers: { 'content-type': 'application/json' },
+        }),
+      );
+
+    const workerFetch = createWorkerFetchWithRetry(fetchMock, {
+      baseDelayMs: 0,
+    });
+
+    const response = await workerFetch(
+      'https://api.roomote.dev/trpc/cloudJobs.resume?batch=1',
+      {
+        method: 'POST',
+        body: '{"0":{"json":{"cloudJobId":68}}}',
+      },
+    );
+
+    expect(response.status).toBe(200);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it('lets explicit wrapper options pin the dequeue retry budget', async () => {
+    const fetchError = new TypeError('fetch failed');
+    const fetchMock = vi.fn<typeof fetch>().mockRejectedValue(fetchError);
+
+    const workerFetch = createWorkerFetchWithRetry(fetchMock, {
+      maxAttempts: 2,
+      baseDelayMs: 0,
+    });
+
+    await expect(
+      workerFetch('https://api.roomote.dev/trpc/cloudJobs.dequeue?batch=1', {
+        method: 'POST',
+        body: '{"0":{"json":{"cloudJobId":68}}}',
+      }),
+    ).rejects.toBe(fetchError);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
   it('does not retry non-idempotent worker mutations', async () => {
     const fetchError = new TypeError('fetch failed');
     const fetchMock = vi.fn<typeof fetch>().mockRejectedValue(fetchError);

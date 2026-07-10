@@ -77,6 +77,7 @@ x-roomote-production-env: &roomote-production-env
   MODAL_BASE_IMAGE_REF: ${MODAL_BASE_IMAGE_REF:-}
   MODAL_ECR_OIDC_ROLE_ARN: ${MODAL_ECR_OIDC_ROLE_ARN:-}
   MODAL_ECR_REGION: ${MODAL_ECR_REGION:-}
+  MODAL_REGIONS: ${MODAL_REGIONS:-}
 
 x-roomote-production-build-args: &roomote-production-build-args
   APP_ENV: production

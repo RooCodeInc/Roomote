@@ -176,6 +176,50 @@ retries: 4
 });
 
 describe('environmentRepositoryConfigSchema', () => {
+  describe('repository', () => {
+    it('should accept an owner/repo full name', () => {
+      const result = environmentRepositoryConfigSchema.safeParse({
+        repository: 'myorg/backend',
+      });
+
+      expect(result.success).toBe(true);
+    });
+
+    it('should accept an Azure DevOps organization/project/repo full name with spaces', () => {
+      const result = environmentRepositoryConfigSchema.safeParse({
+        repository: 'roomote/Test ADO/Test ADO',
+      });
+
+      expect(result.success).toBe(true);
+    });
+
+    it('should accept a GitLab subgroup full name with more than three segments', () => {
+      const result = environmentRepositoryConfigSchema.safeParse({
+        repository: 'group/subgroup/team/repo',
+      });
+
+      expect(result.success).toBe(true);
+    });
+
+    it('should reject a name without a slash', () => {
+      const result = environmentRepositoryConfigSchema.safeParse({
+        repository: 'backend',
+      });
+
+      expect(result.success).toBe(false);
+    });
+
+    it('should reject empty segments', () => {
+      for (const repository of ['owner/', '/repo', 'org//repo']) {
+        const result = environmentRepositoryConfigSchema.safeParse({
+          repository,
+        });
+
+        expect(result.success).toBe(false);
+      }
+    });
+  });
+
   describe('tool_versions', () => {
     it('should accept a valid tool_versions record', () => {
       const result = environmentRepositoryConfigSchema.safeParse({

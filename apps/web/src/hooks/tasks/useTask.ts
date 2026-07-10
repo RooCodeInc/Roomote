@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { useQuery } from '@tanstack/react-query';
 
-import { isExitedCloudTaskStatus } from '@roomote/types';
+import { isExitedRunStatus } from '@roomote/types';
 import { useTRPC } from '@/trpc/client';
 
 interface UseTaskOptions {
@@ -35,7 +35,7 @@ export const useTask = (
           query.data?.cloudJob?.sleepRequestedAt ||
           query.data?.cloudJob?.snapshotRequestedAt
         ) &&
-          !isExitedCloudTaskStatus(query.data?.cloudJob?.status) &&
+          !isExitedRunStatus(query.data?.cloudJob?.status) &&
           !query.data?.cloudJob?.snapshotCreatedAt &&
           !query.data?.cloudJob?.snapshotFailedAt,
       ),

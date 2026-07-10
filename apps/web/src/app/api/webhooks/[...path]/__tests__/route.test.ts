@@ -64,4 +64,35 @@ describe('POST /api/webhooks/[...path]', () => {
     expect(response.headers.get('x-api')).toBe('ok');
     expect(response.headers.has('connection')).toBe(false);
   });
+
+  it('drops the Expect header Azure DevOps sends before forwarding', async () => {
+    mockBootstrapWebRuntimeEnv.mockResolvedValue({
+      TRPC_URL: 'https://app.roomote.test/_roomote-api',
+    });
+    const fetchMock = vi
+      .spyOn(globalThis, 'fetch')
+      .mockResolvedValue(new Response('{}', { status: 200 }));
+    const request = new NextRequest(
+      'https://app.roomote.test/api/webhooks/ado',
+      {
+        method: 'POST',
+        headers: {
+          expect: '100-continue',
+          'content-type': 'application/json',
+          'x-roomote-webhook-secret': 'secret',
+        },
+        body: JSON.stringify({ eventType: 'git.pullrequest.created' }),
+      },
+    );
+
+    const response = await POST(request, {
+      params: { path: ['ado'] },
+    });
+
+    const [, init] = fetchMock.mock.calls[0]!;
+    const forwardedHeaders = init?.headers as Headers;
+    expect(forwardedHeaders.has('expect')).toBe(false);
+    expect(forwardedHeaders.get('x-roomote-webhook-secret')).toBe('secret');
+    expect(response.status).toBe(200);
+  });
 });

@@ -428,6 +428,7 @@ describe('Env', () => {
       TEAMS_BOT_APP_ID: '',
       TEAMS_BOT_APP_PASSWORD: '',
       TEAMS_BOT_TENANT_ID: '',
+      TEAMS_BOT_NAME: '',
       TEAMS_BOT_TOKEN_ENDPOINT: '',
       TEAMS_BOT_OAUTH_SCOPE: '',
       TELEGRAM_BOT_TOKEN: '',
@@ -451,6 +452,7 @@ describe('Env', () => {
 
       expect(env.ROOMOTE_PUBLIC_URL).toBeUndefined();
       expect(env.TEAMS_BOT_APP_ID).toBeUndefined();
+      expect(env.TEAMS_BOT_NAME).toBeUndefined();
       expect(env.TELEGRAM_BOT_TOKEN).toBeUndefined();
       expect(env.TELEGRAM_WEBHOOK_SECRET).toBeUndefined();
       expect(env.TELEGRAM_BOT_USERNAME).toBeUndefined();

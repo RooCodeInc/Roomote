@@ -7,10 +7,9 @@ const { mockGetGitHubAutomationTargets, mockGetInstallationOctokit } =
 vi.mock('@roomote/cloud-agents/server', () => ({
   buildGitHubExistingTaskFollowUpMessage: vi.fn(),
   buildGitHubRoutingContext: vi.fn(),
-  enqueueCloudTask: vi.fn(),
+  enqueueTask: vi.fn(),
   getTaskUrl: vi.fn(),
   routeGitHubTask: vi.fn(),
-  resolveUserIdForCloudJob: vi.fn(),
 }));
 
 vi.mock('@roomote/db/server', () => ({

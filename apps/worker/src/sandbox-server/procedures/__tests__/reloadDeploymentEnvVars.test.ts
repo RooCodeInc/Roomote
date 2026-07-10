@@ -64,7 +64,7 @@ function createCaller(workerEnv?: WorkerEnv, cloudJobId = 1) {
     GH_TOKEN: 'gh-token',
     LEGACY_VALUE: 'old-value',
     ROOMOTE_TASK_ID: 'task-123',
-    ROOMOTE_TASK_TYPE: 'standard.task',
+    ROOMOTE_TASK_TYPE: 'standard',
     CLAUDE_APPEND_SYSTEM_PROMPT: 'follow the system instructions',
   };
   const setCommandEnv = vi.fn();
@@ -87,6 +87,7 @@ function createCaller(workerEnv?: WorkerEnv, cloudJobId = 1) {
     auth: {
       cloudJobId,
       userId: 'user-1',
+      principal: 'user',
       tokenType: 'cj',
       version: 1,
     } satisfies JobTokenContext,
@@ -160,7 +161,7 @@ describe('reloadDeploymentEnvVars procedure', () => {
       ANTHROPIC_API_KEY: 'new-anthropic-key',
       BASH_ENV: '/tmp/roomote/env.sh',
       ROOMOTE_TASK_ID: 'task-123',
-      ROOMOTE_TASK_TYPE: 'standard.task',
+      ROOMOTE_TASK_TYPE: 'standard',
       CLAUDE_APPEND_SYSTEM_PROMPT: 'follow the system instructions',
     });
   });

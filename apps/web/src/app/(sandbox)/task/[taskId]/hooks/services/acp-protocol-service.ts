@@ -362,6 +362,14 @@ export function toAcpUiMessage(
       };
     }
 
+    case 'task_cancelled':
+      return {
+        ...base,
+        role: 'system',
+        kind: 'task_cancelled',
+        data: payloadRecord,
+      };
+
     default:
       return {
         ...base,
@@ -1170,8 +1178,14 @@ export class AcpProtocolService {
     }
   }
 
-  setMessages(messages: AcpUiMessage[]): void {
-    this.reset();
+  /**
+   * Re-point the message indexes at a new array without resetting the rest
+   * of the protocol state. Used after a history rebuild plus carry-over:
+   * the pending request/user/tool lookups populated by `loadAcpEnvelopes`
+   * must survive (a live `request_user_input_response` needs the pending
+   * request to mask secret answers), only the id/position indexes change.
+   */
+  rebindMessages(messages: AcpUiMessage[]): void {
     this.rebuildAcpIndex(messages);
   }
 
@@ -1605,10 +1619,14 @@ export class AcpProtocolService {
   ): {
     acpMessages: AcpUiMessage[];
     todos: AcpPlanTodo[];
+    /** True when the envelope history carried any plan/todowrite state, so
+     *  callers can treat `todos` (including an empty list) as authoritative. */
+    hasPlanHistory: boolean;
   } {
     this.reset();
     let acpMessages: AcpUiMessage[] = [];
     let todos: AcpPlanTodo[] = [];
+    let hasPlanHistory = false;
     const pendingCompletionMessageIdBySession = new Map<string, string>();
 
     const getSessionKey = (sessionId: string | null | undefined): string =>
@@ -1655,6 +1673,7 @@ export class AcpProtocolService {
 
         acpMessages = result.acpMessages;
         todos = result.todos ?? todos;
+        hasPlanHistory = true;
 
         continue;
       }
@@ -1671,6 +1690,7 @@ export class AcpProtocolService {
 
           acpMessages = result.acpMessages;
           todos = result.todos ?? todos;
+          hasPlanHistory = true;
 
           const toolCallId = asString(asRecord(envelope.payload)?.toolCallId);
 
@@ -1711,6 +1731,7 @@ export class AcpProtocolService {
 
           if ('todos' in result && result.todos) {
             todos = result.todos;
+            hasPlanHistory = true;
           }
         }
 
@@ -1777,6 +1798,18 @@ export class AcpProtocolService {
         continue;
       }
 
+      if (envelope.eventType === ACP_ENVELOPE_EVENT_TYPES.TaskCancelled) {
+        const message = toAcpUiMessage(envelope);
+
+        // The turn was cut short, not completed — drop any pending completion
+        // so the aborted trailing assistant message is not styled as a
+        // finished turn.
+        clearPendingCompletion(message.sessionId);
+        acpMessages = this.appendPersistedMessage(acpMessages, message);
+
+        continue;
+      }
+
       // Unknown or future event types are silently ignored.
     }
 
@@ -1786,6 +1819,6 @@ export class AcpProtocolService {
       }
     }
 
-    return { acpMessages, todos };
+    return { acpMessages, todos, hasPlanHistory };
   }
 }

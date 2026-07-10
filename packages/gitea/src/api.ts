@@ -6,7 +6,7 @@ import {
   type SourceControlProvider,
 } from '@roomote/types';
 import {
-  type CloudJob,
+  type Run,
   db,
   environments,
   repositories,
@@ -470,7 +470,7 @@ function normalizeRepositorySelection(repositoryNames: string[]): string[] {
 }
 
 async function resolveGiteaRepositoryNamesForCloudJob(
-  cloudJob: CloudJob,
+  cloudJob: Run,
 ): Promise<string[] | null> {
   if (cloudJob.payload.environmentId) {
     const environment = await db.query.environments.findFirst({
@@ -507,7 +507,7 @@ async function resolveGiteaRepositoryNamesForCloudJob(
   return null;
 }
 
-async function resolveGiteaRepositoryRowsForCloudJob(cloudJob: CloudJob) {
+async function resolveGiteaRepositoryRowsForCloudJob(cloudJob: Run) {
   const repositoryNames =
     await resolveGiteaRepositoryNamesForCloudJob(cloudJob);
   const queryConditions = [
@@ -1036,7 +1036,7 @@ export async function removeGiteaWebhooksForRepositories({
 }
 
 export async function createCloudJobGiteaCredentials(
-  cloudJob: CloudJob,
+  cloudJob: Run,
   options?: {
     fetchImpl?: typeof fetch;
     token?: string;

@@ -8,9 +8,9 @@ import {
   db,
   eq,
   getBackgroundAgentSettingsForDeployment,
-  mcpSetupManagerNotifications,
   slackInstallations,
   slackUserMappings,
+  trackedMessages,
   users,
   type ManagerMcpSetupNotificationReason,
 } from '@roomote/db/server';
@@ -116,8 +116,11 @@ async function findManagerChannelSettings(): Promise<{
 async function hasExistingManagerMcpSetupNotification(
   serviceId: string,
 ): Promise<boolean> {
-  const existing = await db.query.mcpSetupManagerNotifications.findFirst({
-    where: eq(mcpSetupManagerNotifications.serviceId, serviceId),
+  const existing = await db.query.trackedMessages.findFirst({
+    where: and(
+      eq(trackedMessages.kind, 'mcp_setup_nudge'),
+      eq(trackedMessages.dedupeKey, serviceId),
+    ),
     columns: { id: true },
   });
 
@@ -205,20 +208,25 @@ export async function maybeNotifyManagerChannelForMcpSetupRequirement(params: {
     }
 
     await db
-      .insert(mcpSetupManagerNotifications)
+      .insert(trackedMessages)
       .values({
         id: notificationId,
-        serviceId: requirement.serviceId,
-        reason: requirement.reason,
-        triggeredByUserId: params.triggeredByUserId,
-        triggeredBySlackUserId: params.triggeredBySlackUserId,
-        messageText,
+        surface: 'slack',
+        kind: 'mcp_setup_nudge',
+        dedupeKey: requirement.serviceId,
         channelId: settings.managerSlackChannelId,
         messageTs,
-        sentAt: new Date(),
+        createdByUserId: params.triggeredByUserId,
+        summaryText: messageText,
+        postedAt: new Date(),
+        metadata: {
+          serviceId: requirement.serviceId,
+          reason: requirement.reason,
+          triggeredBySlackUserId: params.triggeredBySlackUserId,
+        },
       })
       .onConflictDoNothing({
-        target: [mcpSetupManagerNotifications.serviceId],
+        target: [trackedMessages.kind, trackedMessages.dedupeKey],
       });
 
     return { posted: true, notificationId };
@@ -252,13 +260,17 @@ export async function handleManagerMcpSetupNoThanks(
     return;
   }
 
-  const existing = await db.query.mcpSetupManagerNotifications.findFirst({
-    where: eq(mcpSetupManagerNotifications.id, notificationId),
+  const existing = await db.query.trackedMessages.findFirst({
+    where: and(
+      eq(trackedMessages.kind, 'mcp_setup_nudge'),
+      eq(trackedMessages.id, notificationId),
+    ),
     columns: {
       id: true,
-      serviceId: true,
-      messageText: true,
+      dedupeKey: true,
+      summaryText: true,
       dismissedAt: true,
+      metadata: true,
     },
   });
 
@@ -275,32 +287,28 @@ export async function handleManagerMcpSetupNoThanks(
   });
 
   const now = new Date();
-  const updateValues: {
-    dismissedAt: Date;
-    updatedAt: Date;
-    dismissedBySlackUserId?: string;
-    dismissedByUserId?: string | null;
-  } = {
-    dismissedAt: existing.dismissedAt ?? now,
-    updatedAt: now,
-  };
+  const nextMetadata: Record<string, unknown> = { ...existing.metadata };
 
   if (existing.dismissedAt === null) {
-    updateValues.dismissedBySlackUserId = payload.user.id;
-    updateValues.dismissedByUserId = slackUserMapping?.userId ?? null;
+    nextMetadata.dismissedBySlackUserId = payload.user.id;
+    nextMetadata.dismissedByUserId = slackUserMapping?.userId ?? null;
   }
 
   await db
-    .update(mcpSetupManagerNotifications)
-    .set(updateValues)
-    .where(eq(mcpSetupManagerNotifications.id, notificationId));
+    .update(trackedMessages)
+    .set({
+      dismissedAt: existing.dismissedAt ?? now,
+      updatedAt: now,
+      metadata: nextMetadata,
+    })
+    .where(eq(trackedMessages.id, notificationId));
 
-  const configureUrl = buildManagerMcpSetupConfigureUrl(existing.serviceId);
+  const configureUrl = buildManagerMcpSetupConfigureUrl(existing.dedupeKey);
   await postSlackInteractiveResponse(payload.response_url, {
     replace_original: true,
-    text: existing.messageText,
+    text: existing.summaryText,
     blocks: buildManagerMcpSetupNotificationBlocks({
-      messageText: existing.messageText,
+      messageText: existing.summaryText,
       notificationId: existing.id,
       configureUrl,
       includeActions: false,

@@ -1,7 +1,6 @@
 import type {
   AnnouncerFrequency,
   ChannelAutoStartLaunchMode,
-  CoachFrequency,
   ConflictResolverMaxPrAgeDays,
   ConflictResolverFrequency,
   DependabotTriageFrequency,
@@ -28,7 +27,6 @@ export type BackgroundAgentFieldErrorKey =
   | 'channelAutoStartLaunchCriteria'
   | 'managerSlackChannel'
   | 'managerStatsSlackChannel'
-  | 'coachSlackChannel'
   | 'suggesterSlackChannel'
   | 'announcerSlackChannel'
   | 'platformIssueSlackChannel'
@@ -38,7 +36,6 @@ export type BackgroundAgentFieldErrorKey =
   | 'codeQualityAuditorSlackChannel'
   | 'ciFailureTriageSlackChannel'
   | 'sentryTriageProjectSlugs'
-  | 'coachInstructions'
   | 'suggesterInstructions'
   | 'suggesterRoutingInstructions'
   | 'announcerInstructions';
@@ -52,7 +49,6 @@ export type SlackChannelFieldErrorKey = Extract<
   | 'channelAutoStartSlackChannels'
   | 'managerSlackChannel'
   | 'managerStatsSlackChannel'
-  | 'coachSlackChannel'
   | 'suggesterSlackChannel'
   | 'announcerSlackChannel'
   | 'platformIssueSlackChannel'
@@ -67,7 +63,6 @@ export interface SlackChannelAccessWarnings {
   channelAutoStartSlackChannels: string[];
   managerSlackChannel: string | null;
   managerStatsSlackChannel: string | null;
-  coachSlackChannel: string | null;
   suggesterSlackChannel: string | null;
   announcerSlackChannel: string | null;
   platformIssueSlackChannel: string | null;
@@ -82,7 +77,6 @@ export interface SlackChannelDisplayNames {
   channelAutoStartSlackChannels: Record<string, string | null>;
   managerSlackChannel: string | null;
   managerStatsSlackChannel: string | null;
-  coachSlackChannel: string | null;
   suggesterSlackChannel: string | null;
   announcerSlackChannel: string | null;
   platformIssueSlackChannel: string | null;
@@ -94,6 +88,10 @@ export interface SlackChannelDisplayNames {
 }
 
 export interface ChannelAutoStartInputRow {
+  // Canonical Slack channel ID persisted for this row. When present and valid it
+  // is used as the resolution input so an unchanged row never has to be
+  // re-resolved by name on save. Null/absent for new or channel-edited rows.
+  channelId?: string | null;
   slackChannel: string | null;
   instructions: string | null;
   launchMode?: ChannelAutoStartLaunchMode | null;
@@ -122,7 +120,6 @@ export interface UpdateBackgroundAgentSettingsInput extends ScheduleOnlyAutomati
     | 'managerStats'
     | 'reviewer'
     | 'conflictResolver'
-    | 'coach'
     | 'suggester'
     | 'sentryTriage'
     | 'dependabotTriage'
@@ -156,9 +153,6 @@ export interface UpdateBackgroundAgentSettingsInput extends ScheduleOnlyAutomati
   sentryTriageProjectSlugs?: string | null;
   dependabotTriageFrequency?: DependabotTriageFrequency;
   dependabotTriageSlackChannel?: string | null;
-  coachFrequency: CoachFrequency;
-  coachSlackChannel: string | null;
-  coachInstructions: string | null;
   suggesterFrequency: SuggesterFrequency;
   suggesterSlackChannel: string | null;
   suggesterInstructions: string | null;

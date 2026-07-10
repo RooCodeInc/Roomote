@@ -1,0 +1,66 @@
+{
+  "name": "telegram-group-mention-gating",
+  "description": "In a group chat, a message without a bot mention must be ignored while a subsequent @roomote_mock_bot mention becomes task entry. Requires TELEGRAM_BOT_USERNAME=roomote_mock_bot on the API server.",
+  "criteria": [
+    "The bot posted no reply to the first (unmentioned) group message.",
+    "The bot acknowledged or replied to the second message that mentions @roomote_mock_bot in chat -100222000222.",
+    "Any bot replies are in the group chat -100222000222, not in a different chat."
+  ],
+  "state": {
+    "bot": {
+      "id": 7000000001,
+      "username": "roomote_mock_bot",
+      "first_name": "Roomote"
+    },
+    "chats": [
+      { "id": -100222000222, "type": "supergroup", "title": "roomote-dev" }
+    ],
+    "users": [{ "id": 111000111, "first_name": "Dan", "username": "dan_mock" }]
+  },
+  "events": [
+    {
+      "delayMs": 0,
+      "envelope": {
+        "kind": "message",
+        "updateId": "$U1",
+        "message": {
+          "message_id": "$M1",
+          "chat": {
+            "id": -100222000222,
+            "type": "supergroup",
+            "title": "roomote-dev"
+          },
+          "from": {
+            "id": 111000111,
+            "first_name": "Dan",
+            "username": "dan_mock"
+          },
+          "text": "just chatting with the team, nothing for the bot here"
+        }
+      }
+    },
+    {
+      "delayMs": 3000,
+      "envelope": {
+        "kind": "message",
+        "updateId": "$U2",
+        "message": {
+          "message_id": "$M2",
+          "chat": {
+            "id": -100222000222,
+            "type": "supergroup",
+            "title": "roomote-dev"
+          },
+          "from": {
+            "id": 111000111,
+            "first_name": "Dan",
+            "username": "dan_mock"
+          },
+          "text": "@roomote_mock_bot !fast which env var stores the Telegram bot token?"
+        }
+      }
+    }
+  ],
+  "settleMs": 20000,
+  "timeoutMs": 180000
+}

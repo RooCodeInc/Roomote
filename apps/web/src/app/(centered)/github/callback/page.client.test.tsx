@@ -122,7 +122,10 @@ describe('GitHub callback page', () => {
 
     await waitFor(() => {
       expect(mockFinishAppManifestMutate).toHaveBeenCalledWith(
-        'manifest-code',
+        {
+          code: 'manifest-code',
+          redirect: '/setup?step=source-control-connect',
+        },
         expect.any(Object),
       );
     });

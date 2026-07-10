@@ -1,10 +1,10 @@
 import type { JobTokenContext } from '@roomote/types';
 import {
   and,
-  cloudJobs,
   db,
   eq,
   isVisibleTask,
+  taskRuns,
   tasks,
 } from '@roomote/db/server';
 import { findCloudJobByJobTokenClaims } from '@roomote/sdk/server';
@@ -12,7 +12,14 @@ import { findCloudJobByJobTokenClaims } from '@roomote/sdk/server';
 import type { Variables } from '../../types';
 
 type ArtifactRouteAuthContext = {
-  userId: string;
+  /**
+   * Null for deployment-principal job tokens. Authorization is scoped to the
+   * cloud job itself: `findCloudJobByJobTokenClaims` resolves by `cloudJobId`
+   * only. The token's userId is mint-time attribution and is never compared
+   * against the mutable `task_runs.actingUserId`, which web steer and
+   * follow-up delivery legitimately switch mid-run.
+   */
+  userId: string | null;
   cloudJobId: number;
   tokenType: 'cj';
 };
@@ -66,11 +73,11 @@ async function getArtifactRouteCloudJobBinding(auth: ArtifactRouteAuthContext) {
     return null;
   }
 
-  return db.query.cloudJobs.findFirst({
+  return db.query.taskRuns.findFirst({
     columns: {
       taskId: true,
     },
-    where: eq(cloudJobs.id, scopedJob.id),
+    where: eq(taskRuns.id, scopedJob.id),
   });
 }
 
@@ -124,7 +131,7 @@ export async function verifyArtifactRouteTaskReadAccess(
     columns: {
       id: true,
     },
-    where: and(eq(tasks.id, taskId), isVisibleTask(tasks.id)),
+    where: and(eq(tasks.id, taskId), isVisibleTask()),
   });
 
   if (requestedTask) {

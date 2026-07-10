@@ -7,10 +7,12 @@ import type { PersistedAutomationWorkItem } from '../types.js';
 
 const {
   MockCloudJobQueueEnqueueError,
+  mockClaimedAt,
   mockDbUpdate,
-  mockEnqueueCloudTask,
+  mockEnqueueTask,
   mockUpdateBackgroundAutomationSlackThreadMetadata,
 } = vi.hoisted(() => ({
+  mockClaimedAt: new Date('2026-07-01T12:00:00.000Z'),
   MockCloudJobQueueEnqueueError: class extends Error {
     cloudJobId: number;
     taskId: string;
@@ -29,36 +31,107 @@ const {
     }
   },
   mockDbUpdate: vi.fn(),
-  mockEnqueueCloudTask: vi.fn(),
+  mockEnqueueTask: vi.fn(),
   mockUpdateBackgroundAutomationSlackThreadMetadata: vi.fn(),
 }));
 
 vi.mock('@roomote/cloud-agents/server', () => ({
   CloudJobQueueEnqueueError: MockCloudJobQueueEnqueueError,
-  enqueueCloudTask: mockEnqueueCloudTask,
+  enqueueTask: mockEnqueueTask,
 }));
 
-vi.mock('@roomote/db/server', () => ({
-  and: vi.fn((...args) => ({ type: 'and', args })),
-  automationWorkItems: {
-    id: 'automationWorkItems.id',
-    status: 'automationWorkItems.status',
-    executionTaskId: 'automationWorkItems.executionTaskId',
-    launchClaimedAt: 'automationWorkItems.launchClaimedAt',
-    launchError: 'automationWorkItems.launchError',
-    updatedAt: 'automationWorkItems.updatedAt',
-  },
-  db: {
+vi.mock('@roomote/db/server', () => {
+  const workItems = {
+    id: 'workItems.id',
+    status: 'workItems.status',
+    launchedTaskId: 'workItems.launchedTaskId',
+    launchClaimedAt: 'workItems.launchClaimedAt',
+    launchError: 'workItems.launchError',
+    updatedAt: 'workItems.updatedAt',
+  };
+  const db = {
     update: (...args: unknown[]) => mockDbUpdate(...args),
-  },
-  eq: vi.fn((...args) => ({ type: 'eq', args })),
-  inArray: vi.fn((...args) => ({ type: 'inArray', args })),
-  isNull: vi.fn((...args) => ({ type: 'isNull', args })),
-  lte: vi.fn((...args) => ({ type: 'lte', args })),
-  or: vi.fn((...args) => ({ type: 'or', args })),
-  updateBackgroundAutomationSlackThreadMetadata: (...args: unknown[]) =>
-    mockUpdateBackgroundAutomationSlackThreadMetadata(...args),
-}));
+  };
+
+  // The shared claim/finalize helpers are mocked to delegate to the same
+  // db.update chain the surface used inline before, so the updateSets
+  // assertions (claim -> `launching`, finalize -> `launched`) still hold and
+  // the throwOnWhereCall counting is unchanged.
+  const claimWorkItem = vi.fn(
+    async (
+      database: {
+        update: (table: unknown) => {
+          set: (values: unknown) => {
+            where: (predicate: unknown) => {
+              returning: () => Promise<Array<{ id: string }>>;
+            };
+          };
+        };
+      },
+      { id: _id }: { id: string },
+    ) => {
+      const [row] = await database
+        .update(workItems)
+        .set({
+          status: 'launching',
+          launchClaimedAt: mockClaimedAt,
+          updatedAt: new Date(),
+        })
+        .where({})
+        .returning();
+      // The claimed row carries the fencing token the surface threads through
+      // finalize and the fenced failure writes.
+      return row ? { ...row, launchClaimedAt: mockClaimedAt } : null;
+    },
+  );
+  const finalizeWorkItemLaunched = vi.fn(
+    async (
+      database: {
+        update: (table: unknown) => {
+          set: (values: unknown) => {
+            where: (predicate: unknown) => {
+              returning: () => Promise<Array<{ id: string }>>;
+            };
+          };
+        };
+      },
+      {
+        taskId,
+        clearLaunchError,
+      }: { id: string; taskId: string | null; clearLaunchError?: boolean },
+    ) => {
+      const [row] = await database
+        .update(workItems)
+        .set({
+          status: 'launched',
+          launchedTaskId: taskId,
+          launchedAt: new Date(),
+          launchClaimedAt: null,
+          ...(clearLaunchError ? { launchError: null } : {}),
+          updatedAt: new Date(),
+        })
+        .where({})
+        .returning();
+      return Boolean(row);
+    },
+  );
+
+  return {
+    and: vi.fn((...args) => ({ type: 'and', args })),
+    workItems,
+    db,
+    eq: vi.fn((...args) => ({ type: 'eq', args })),
+    inArray: vi.fn((...args) => ({ type: 'inArray', args })),
+    isNull: vi.fn((...args) => ({ type: 'isNull', args })),
+    lte: vi.fn((...args) => ({ type: 'lte', args })),
+    or: vi.fn((...args) => ({ type: 'or', args })),
+    claimWorkItem,
+    finalizeWorkItemLaunched,
+    releaseWorkItemClaim: vi.fn(),
+    updateBackgroundAutomationSlackThreadMetadata: (...args: unknown[]) =>
+      mockUpdateBackgroundAutomationSlackThreadMetadata(...args),
+  };
+});
 
 vi.mock('../telegram.js', () => ({
   resolveAutomationTelegramTarget: vi.fn(),
@@ -93,7 +166,7 @@ const workItem: PersistedAutomationWorkItem = {
   workspaceReadiness: 'bare_repo',
   readinessMessage: 'Bare repo launch.',
   sortOrder: 0,
-  executionTaskId: null,
+  launchedTaskId: null,
   launchError: null,
 };
 
@@ -103,17 +176,23 @@ const slackTarget = {
   channelId: 'C456',
 };
 
+// Where-predicates captured by setupDbUpdateMock, in db.update call order
+// (built from the mocked and/eq helpers, so the fenced guards are assertable).
+let updateWheres: unknown[] = [];
+
 function setupDbUpdateMock(options: { throwOnWhereCall?: number } = {}) {
   const updateSets: Record<string, unknown>[] = [];
   let whereCall = 0;
+  updateWheres = [];
 
   mockDbUpdate.mockImplementation(() => ({
     set: (values: Record<string, unknown>) => {
       updateSets.push(values);
 
       return {
-        where: () => {
+        where: (predicate: unknown) => {
           whereCall += 1;
+          updateWheres.push(predicate);
 
           if (options.throwOnWhereCall === whereCall) {
             throw new Error('tracking update failed');
@@ -131,7 +210,7 @@ function setupDbUpdateMock(options: { throwOnWhereCall?: number } = {}) {
 }
 
 function mockSuccessfulTaskEnqueue(taskId = 'task-1') {
-  mockEnqueueCloudTask.mockImplementationOnce(async (_task, options) => {
+  mockEnqueueTask.mockImplementationOnce(async (_task, options) => {
     await options.beforeEnqueue?.({
       id: 123,
       taskId,
@@ -146,7 +225,7 @@ function mockSuccessfulTaskEnqueue(taskId = 'task-1') {
 
 describe('launchActWorkItems', () => {
   beforeEach(() => {
-    mockEnqueueCloudTask.mockReset();
+    mockEnqueueTask.mockReset();
     mockUpdateBackgroundAutomationSlackThreadMetadata.mockReset();
     mockUpdateBackgroundAutomationSlackThreadMetadata.mockResolvedValue(true);
     vi.mocked(postLateBoundWorkItemFailureMessage).mockReset();
@@ -159,14 +238,14 @@ describe('launchActWorkItems', () => {
     mockSuccessfulTaskEnqueue('task-1');
 
     const result = await launchActWorkItems({
-      userId: 'user-1',
+      automationKey: 'sentry_triage',
       workItems: [workItem],
       executionTaskBootstrap: '$implement-changes',
       chatTarget: null,
     });
 
     expect(result).toEqual({ launchedCount: 1, failedCount: 0 });
-    const enqueuePayload = mockEnqueueCloudTask.mock.calls[0]?.[0]
+    const enqueuePayload = mockEnqueueTask.mock.calls[0]?.[0].task
       .payload as Record<string, unknown>;
     expect(enqueuePayload.description).toEqual(
       expect.stringContaining('keep progress visible in the web task'),
@@ -179,17 +258,17 @@ describe('launchActWorkItems', () => {
     expect(enqueuePayload).not.toHaveProperty('slackChannel');
     expect(enqueuePayload).not.toHaveProperty('thread_ts');
     expect(enqueuePayload).not.toHaveProperty('slackThreadTs');
-    expect(mockEnqueueCloudTask.mock.calls[0]?.[1]).toEqual(
+    expect(mockEnqueueTask.mock.calls[0]?.[1]).toEqual(
       expect.objectContaining({
         beforeEnqueue: expect.any(Function),
         launchClass: 'automation',
       }),
     );
     expect(updateSets).toEqual([
-      expect.objectContaining({ status: 'acting' }),
+      expect.objectContaining({ status: 'launching' }),
       expect.objectContaining({
-        status: 'started',
-        executionTaskId: 'task-1',
+        status: 'launched',
+        launchedTaskId: 'task-1',
         launchError: null,
       }),
     ]);
@@ -200,7 +279,7 @@ describe('launchActWorkItems', () => {
     mockSuccessfulTaskEnqueue('task-direct-1');
 
     const result = await launchActWorkItems({
-      userId: 'user-1',
+      automationKey: 'sentry_triage',
       workItems: [workItem],
       executionTaskBootstrap: '$implement-changes',
       chatTarget: null,
@@ -208,10 +287,10 @@ describe('launchActWorkItems', () => {
 
     expect(result).toEqual({ launchedCount: 1, failedCount: 0 });
     expect(updateSets).toEqual([
-      expect.objectContaining({ status: 'acting' }),
+      expect.objectContaining({ status: 'launching' }),
       expect.objectContaining({
-        status: 'started',
-        executionTaskId: 'task-direct-1',
+        status: 'launched',
+        launchedTaskId: 'task-direct-1',
         launchError: null,
       }),
     ]);
@@ -222,7 +301,7 @@ describe('launchActWorkItems', () => {
     mockSuccessfulTaskEnqueue('task-direct-dependabot');
 
     const result = await launchActWorkItems({
-      userId: 'user-1',
+      automationKey: 'sentry_triage',
       workItems: [
         {
           ...workItem,
@@ -240,7 +319,7 @@ describe('launchActWorkItems', () => {
     });
 
     expect(result).toEqual({ launchedCount: 1, failedCount: 0 });
-    const enqueuePayload = mockEnqueueCloudTask.mock.calls[0]?.[0]
+    const enqueuePayload = mockEnqueueTask.mock.calls[0]?.[0].task
       .payload as Record<string, unknown>;
     expect(enqueuePayload.description).toEqual(
       expect.stringContaining('$update-dependencies'),
@@ -357,10 +436,10 @@ describe('launchActWorkItems', () => {
     expect(enqueuePayload).not.toHaveProperty('thread_ts');
     expect(enqueuePayload).not.toHaveProperty('slackThreadTs');
     expect(updateSets).toEqual([
-      expect.objectContaining({ status: 'acting' }),
+      expect.objectContaining({ status: 'launching' }),
       expect.objectContaining({
-        status: 'started',
-        executionTaskId: 'task-direct-dependabot',
+        status: 'launched',
+        launchedTaskId: 'task-direct-dependabot',
       }),
     ]);
   });
@@ -370,14 +449,14 @@ describe('launchActWorkItems', () => {
     mockSuccessfulTaskEnqueue('task-direct-sentry');
 
     const result = await launchActWorkItems({
-      userId: 'user-1',
+      automationKey: 'sentry_triage',
       workItems: [workItem],
       executionTaskBootstrap: '$implement-changes',
       chatTarget: slackTarget,
     });
 
     expect(result).toEqual({ launchedCount: 1, failedCount: 0 });
-    const enqueuePayload = mockEnqueueCloudTask.mock.calls[0]?.[0]
+    const enqueuePayload = mockEnqueueTask.mock.calls[0]?.[0].task
       .payload as Record<string, unknown>;
     expect(enqueuePayload.description).toEqual(
       expect.stringContaining(
@@ -449,10 +528,10 @@ describe('launchActWorkItems', () => {
     expect(enqueuePayload.channel).toBe('C456');
     expect(enqueuePayload.slackChannel).toBe('C456');
     expect(updateSets).toEqual([
-      expect.objectContaining({ status: 'acting' }),
+      expect.objectContaining({ status: 'launching' }),
       expect.objectContaining({
-        status: 'started',
-        executionTaskId: 'task-direct-sentry',
+        status: 'launched',
+        launchedTaskId: 'task-direct-sentry',
       }),
     ]);
   });
@@ -462,14 +541,14 @@ describe('launchActWorkItems', () => {
     mockSuccessfulTaskEnqueue('task-direct-threaded');
 
     const result = await launchActWorkItems({
-      userId: 'user-1',
+      automationKey: 'sentry_triage',
       workItems: [workItem],
       executionTaskBootstrap: '$implement-changes',
       chatTarget: { ...slackTarget, threadTs: '1781300000.000100' },
     });
 
     expect(result).toEqual({ launchedCount: 1, failedCount: 0 });
-    const enqueuePayload = mockEnqueueCloudTask.mock.calls[0]?.[0]
+    const enqueuePayload = mockEnqueueTask.mock.calls[0]?.[0].task
       .payload as Record<string, unknown>;
     expect(enqueuePayload.thread_ts).toBe('1781300000.000100');
     expect(enqueuePayload.slackThreadTs).toBe('1781300000.000100');
@@ -501,20 +580,20 @@ describe('launchActWorkItems', () => {
       }),
     );
     expect(updateSets).toEqual([
-      expect.objectContaining({ status: 'acting' }),
+      expect.objectContaining({ status: 'launching' }),
       expect.objectContaining({
-        status: 'started',
-        executionTaskId: 'task-direct-threaded',
+        status: 'launched',
+        launchedTaskId: 'task-direct-threaded',
       }),
     ]);
   });
 
   it('posts a channel-level failure message when a late-bound launch fails terminally', async () => {
     setupDbUpdateMock();
-    mockEnqueueCloudTask.mockRejectedValueOnce(new Error('enqueue failed'));
+    mockEnqueueTask.mockRejectedValueOnce(new Error('enqueue failed'));
 
     const result = await launchActWorkItems({
-      userId: 'user-1',
+      automationKey: 'sentry_triage',
       workItems: [
         {
           ...workItem,
@@ -542,10 +621,10 @@ describe('launchActWorkItems', () => {
 
   it('resolves an existing investigation thread when a threaded launch fails terminally', async () => {
     setupDbUpdateMock();
-    mockEnqueueCloudTask.mockRejectedValueOnce(new Error('enqueue failed'));
+    mockEnqueueTask.mockRejectedValueOnce(new Error('enqueue failed'));
 
     const result = await launchActWorkItems({
-      userId: 'user-1',
+      automationKey: 'sentry_triage',
       workItems: [workItem],
       executionTaskBootstrap: '$implement-changes',
       chatTarget: { ...slackTarget, threadTs: '1781300000.000100' },
@@ -563,10 +642,10 @@ describe('launchActWorkItems', () => {
 
   it('posts Telegram failure messages when a Telegram-targeted launch fails terminally', async () => {
     setupDbUpdateMock();
-    mockEnqueueCloudTask.mockRejectedValueOnce(new Error('enqueue failed'));
+    mockEnqueueTask.mockRejectedValueOnce(new Error('enqueue failed'));
 
     const result = await launchActWorkItems({
-      userId: 'user-1',
+      automationKey: 'sentry_triage',
       workItems: [workItem],
       executionTaskBootstrap: '$implement-changes',
       chatTarget: { provider: 'telegram', chatId: '8846357662' },
@@ -587,14 +666,14 @@ describe('launchActWorkItems', () => {
     mockSuccessfulTaskEnqueue('task-tg-1');
 
     const result = await launchActWorkItems({
-      userId: 'user-1',
+      automationKey: 'sentry_triage',
       workItems: [workItem],
       executionTaskBootstrap: '$implement-changes',
       chatTarget: { provider: 'telegram', chatId: '8846357662' },
     });
 
     expect(result).toEqual({ launchedCount: 1, failedCount: 0 });
-    const enqueuePayload = mockEnqueueCloudTask.mock.calls[0]?.[0]
+    const enqueuePayload = mockEnqueueTask.mock.calls[0]?.[0].task
       .payload as Record<string, unknown>;
 
     expect(enqueuePayload.communicationProvider).toBe('telegram');
@@ -616,10 +695,10 @@ describe('launchActWorkItems', () => {
 
   it('stays silent on terminal launch failures when no Slack target resolves', async () => {
     const updateSets = setupDbUpdateMock();
-    mockEnqueueCloudTask.mockRejectedValueOnce(new Error('enqueue failed'));
+    mockEnqueueTask.mockRejectedValueOnce(new Error('enqueue failed'));
 
     const result = await launchActWorkItems({
-      userId: 'user-1',
+      automationKey: 'sentry_triage',
       workItems: [workItem],
       executionTaskBootstrap: '$implement-changes',
       chatTarget: null,
@@ -627,7 +706,7 @@ describe('launchActWorkItems', () => {
 
     expect(result).toEqual({ launchedCount: 0, failedCount: 1 });
     expect(updateSets.map((values) => values.status)).toEqual([
-      'acting',
+      'launching',
       'failed',
     ]);
     expect(postLateBoundWorkItemFailureMessage).not.toHaveBeenCalled();
@@ -638,7 +717,7 @@ describe('launchActWorkItems', () => {
     mockSuccessfulTaskEnqueue();
 
     const result = await launchActWorkItems({
-      userId: 'user-1',
+      automationKey: 'sentry_triage',
       workItems: [workItem],
       executionTaskBootstrap: '$implement-changes',
       chatTarget: null,
@@ -646,15 +725,15 @@ describe('launchActWorkItems', () => {
 
     expect(result).toEqual({ launchedCount: 0, failedCount: 1 });
     expect(updateSets.map((values) => values.status)).toEqual([
-      'acting',
-      'started',
+      'launching',
+      'launched',
       'failed',
     ]);
   });
 
   it('reopens direct launches when Redis enqueue fails after task tracking is linked', async () => {
     const updateSets = setupDbUpdateMock();
-    mockEnqueueCloudTask.mockImplementationOnce(async (_task, options) => {
+    mockEnqueueTask.mockImplementationOnce(async (_task, options) => {
       await options.beforeEnqueue?.({
         id: 123,
         taskId: 'task-direct-1',
@@ -668,7 +747,7 @@ describe('launchActWorkItems', () => {
     });
 
     const result = await launchActWorkItems({
-      userId: 'user-1',
+      automationKey: 'sentry_triage',
       workItems: [workItem],
       executionTaskBootstrap: '$implement-changes',
       chatTarget: slackTarget,
@@ -676,19 +755,79 @@ describe('launchActWorkItems', () => {
 
     expect(result).toEqual({ launchedCount: 0, failedCount: 1 });
     expect(updateSets).toEqual([
-      expect.objectContaining({ status: 'acting' }),
+      expect.objectContaining({ status: 'launching' }),
       expect.objectContaining({
-        status: 'started',
-        executionTaskId: 'task-direct-1',
+        status: 'launched',
+        launchedTaskId: 'task-direct-1',
       }),
       expect.objectContaining({
         status: 'open',
-        executionTaskId: null,
+        launchedTaskId: null,
         launchedAt: null,
         failedAt: null,
       }),
     ]);
     // Retryable failures stay quiet; a later resubmission relaunches them.
     expect(postLateBoundWorkItemFailureMessage).not.toHaveBeenCalled();
+  });
+
+  it('fences the terminal failure write on the launching status and the claim token', async () => {
+    setupDbUpdateMock();
+    mockEnqueueTask.mockRejectedValueOnce(new Error('enqueue failed'));
+
+    await launchActWorkItems({
+      automationKey: 'sentry_triage',
+      workItems: [workItem],
+      executionTaskBootstrap: '$implement-changes',
+      chatTarget: null,
+    });
+
+    // updateWheres[0] is the claim CAS; [1] is the failed-stamp write. The
+    // WHERE must carry status='launching' AND our claim token, so a stale
+    // launcher whose claim was reclaimed can never fail the fresh claimant's
+    // row (the fenced write becomes a no-op instead).
+    expect(updateWheres[1]).toEqual({
+      type: 'and',
+      args: [
+        { type: 'eq', args: ['workItems.id', workItem.id] },
+        { type: 'eq', args: ['workItems.status', 'launching'] },
+        { type: 'eq', args: ['workItems.launchClaimedAt', mockClaimedAt] },
+      ],
+    });
+  });
+
+  it('fences the retry reopen write on our launched row and task link', async () => {
+    setupDbUpdateMock();
+    mockEnqueueTask.mockImplementationOnce(async (_task, options) => {
+      await options.beforeEnqueue?.({
+        id: 123,
+        taskId: 'task-direct-1',
+      });
+
+      throw new CloudJobQueueEnqueueError({
+        cloudJobId: 123,
+        taskId: 'task-direct-1',
+        originalError: new Error('redis unavailable'),
+      });
+    });
+
+    await launchActWorkItems({
+      automationKey: 'sentry_triage',
+      workItems: [workItem],
+      executionTaskBootstrap: '$implement-changes',
+      chatTarget: slackTarget,
+    });
+
+    // updateWheres[0] claim, [1] finalize, [2] retry reopen. The reopen only
+    // applies to OUR finalized row (status='launched' with the task we just
+    // linked); anything else means the state moved on and must not be reset.
+    expect(updateWheres[2]).toEqual({
+      type: 'and',
+      args: [
+        { type: 'eq', args: ['workItems.id', workItem.id] },
+        { type: 'eq', args: ['workItems.status', 'launched'] },
+        { type: 'eq', args: ['workItems.launchedTaskId', 'task-direct-1'] },
+      ],
+    });
   });
 });

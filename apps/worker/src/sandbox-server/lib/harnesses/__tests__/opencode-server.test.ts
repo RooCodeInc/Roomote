@@ -90,6 +90,7 @@ function createHarness(
     executeToolProgressInitialDelayMs?: number;
     executeToolProgressIntervalMs?: number;
     queuedPromptRetryDelayMs?: number;
+    stopHookReminderStallTimeoutMs?: number;
     mcpServerNames?: string[];
     model?: string;
   } = {},
@@ -105,6 +106,7 @@ function createHarness(
       options.executeToolProgressInitialDelayMs,
     executeToolProgressIntervalMs: options.executeToolProgressIntervalMs,
     queuedPromptRetryDelayMs: options.queuedPromptRetryDelayMs,
+    stopHookReminderStallTimeoutMs: options.stopHookReminderStallTimeoutMs,
     mcpServerNames: options.mcpServerNames,
     beforeQueuedPrompt: options.beforeQueuedPrompt,
   });
@@ -1745,6 +1747,149 @@ describe('OpenCodeServerHarness', () => {
     }
   });
 
+  it('force-completes the turn when a stop-hook reminder wedges with no follow-up turn', async () => {
+    const tempDir = fs.mkdtempSync(
+      path.join(os.tmpdir(), 'roomote-opencode-stop-guard-wedge-'),
+    );
+    const stateFilePath = path.join(tempDir, 'slack-state.json');
+    const stopHookPath = path.join(tempDir, 'stop-hook.cjs');
+
+    fs.writeFileSync(
+      stateFilePath,
+      JSON.stringify({
+        currentTurnMessageTs: '111.222',
+        currentTurnStartedAtMs: Date.now() - 1_000,
+      }),
+      'utf8',
+    );
+    fs.writeFileSync(stopHookPath, SLACK_STOP_HOOK_SCRIPT, 'utf8');
+
+    const { client, harness } = createHarness(new FakeOpenCodeServerClient(), {
+      commandEnv: {
+        ROOMOTE_SLACK_REPLY_SATISFACTION_STATE_FILE: stateFilePath,
+        ROOMOTE_OPENCODE_SLACK_STOP_HOOK_SCRIPT: stopHookPath,
+      },
+      stopHookReminderStallTimeoutMs: 50,
+    });
+    const taskEvents: TaskEvent[] = [];
+
+    harness.subscribe((event) => taskEvents.push(event));
+
+    try {
+      await connectHarness(harness, client);
+
+      expect(
+        harness.sendCommand({
+          commandName: TaskCommandName.StartNewTask,
+          data: { text: 'Do work.', visibleInTranscript: true },
+        }),
+      ).toBe(true);
+
+      await vi.waitFor(() => {
+        expect(client.promptAsync).toHaveBeenCalledTimes(1);
+      });
+
+      // The blocked turn-end injects a closeout reminder and then awaits a
+      // fresh turn to re-evaluate.
+      await client.emit({
+        type: 'session.idle',
+        properties: { sessionID: 'ses_1' },
+      });
+      await vi.waitFor(() => {
+        expect(client.promptAsync).toHaveBeenCalledTimes(2);
+      });
+
+      // The session then wedges: no further events ever arrive. The fail-safe
+      // fires and force-completes the turn so the task reaches a terminal
+      // state instead of hanging "running" forever.
+      await vi.waitFor(() => {
+        expect(
+          taskEvents.some(
+            (event) => event.eventName === TaskEventName.TaskCompleted,
+          ),
+        ).toBe(true);
+      });
+      expect(
+        taskEvents.some(
+          (event) => event.eventName === TaskEventName.TaskAborted,
+        ),
+      ).toBe(false);
+      // No extra reminder was injected — the fail-safe completed the turn.
+      expect(client.promptAsync).toHaveBeenCalledTimes(2);
+    } finally {
+      harness.dispose();
+      fs.rmSync(tempDir, { recursive: true, force: true });
+    }
+  });
+
+  it('disarms the stop-hook reminder fail-safe on teardown', async () => {
+    const tempDir = fs.mkdtempSync(
+      path.join(os.tmpdir(), 'roomote-opencode-stop-guard-teardown-'),
+    );
+    const stateFilePath = path.join(tempDir, 'slack-state.json');
+    const stopHookPath = path.join(tempDir, 'stop-hook.cjs');
+
+    fs.writeFileSync(
+      stateFilePath,
+      JSON.stringify({
+        currentTurnMessageTs: '111.222',
+        currentTurnStartedAtMs: Date.now() - 1_000,
+      }),
+      'utf8',
+    );
+    fs.writeFileSync(stopHookPath, SLACK_STOP_HOOK_SCRIPT, 'utf8');
+
+    const { client, harness } = createHarness(new FakeOpenCodeServerClient(), {
+      commandEnv: {
+        ROOMOTE_SLACK_REPLY_SATISFACTION_STATE_FILE: stateFilePath,
+        ROOMOTE_OPENCODE_SLACK_STOP_HOOK_SCRIPT: stopHookPath,
+      },
+      stopHookReminderStallTimeoutMs: 50,
+    });
+    const taskEvents: TaskEvent[] = [];
+
+    harness.subscribe((event) => taskEvents.push(event));
+
+    try {
+      await connectHarness(harness, client);
+
+      expect(
+        harness.sendCommand({
+          commandName: TaskCommandName.StartNewTask,
+          data: { text: 'Do work.', visibleInTranscript: true },
+        }),
+      ).toBe(true);
+
+      await vi.waitFor(() => {
+        expect(client.promptAsync).toHaveBeenCalledTimes(1);
+      });
+
+      // Blocked turn-end injects a reminder and arms the fail-safe.
+      await client.emit({
+        type: 'session.idle',
+        properties: { sessionID: 'ses_1' },
+      });
+      await vi.waitFor(() => {
+        expect(client.promptAsync).toHaveBeenCalledTimes(2);
+      });
+
+      // Teardown must disarm the pending fail-safe. Dispose, then wait well
+      // past the stall window and confirm it never force-completed a disposed
+      // harness.
+      harness.dispose();
+      await new Promise((resolve) => setTimeout(resolve, 120));
+
+      expect(
+        taskEvents.some(
+          (event) => event.eventName === TaskEventName.TaskCompleted,
+        ),
+      ).toBe(false);
+    } finally {
+      harness.dispose();
+      fs.rmSync(tempDir, { recursive: true, force: true });
+    }
+  });
+
   it('injects queued auto-steer into the active turn without aborting it', async () => {
     const { client, harness } = createHarness();
     const taskEvents: TaskEvent[] = [];
@@ -1949,6 +2094,69 @@ describe('OpenCodeServerHarness', () => {
     }
   });
 
+  it('surfaces a readable provider message instead of the raw session error JSON', async () => {
+    const { client, harness } = createHarness();
+    const persistedEnvelopes: AcpPersistedEnvelope[] = [];
+
+    harness.subscribeRuntimePersistedEnvelope((envelope) =>
+      persistedEnvelopes.push(envelope),
+    );
+
+    try {
+      await connectHarness(harness, client);
+
+      expect(
+        harness.sendCommand({
+          commandName: TaskCommandName.StartNewTask,
+          data: {
+            text: 'Start work.',
+            visibleInTranscript: true,
+          },
+        }),
+      ).toBe(true);
+
+      await vi.waitFor(() => {
+        expect(client.promptAsync).toHaveBeenCalledTimes(1);
+      });
+
+      await client.emit({
+        type: 'session.error',
+        properties: {
+          sessionID: 'ses_1',
+          error: {
+            name: 'APIError',
+            data: {
+              message:
+                '[xAI] The model grok-4.5 is not available in your region.',
+              statusCode: 403,
+              isRetryable: false,
+              responseHeaders: { 'cf-ray': 'a184f336b9add2b6-FRA' },
+              responseBody: '{"error":{"message":"Provider returned error"}}',
+            },
+          },
+        },
+      });
+
+      const errorMessage = persistedEnvelopes.find(
+        (envelope) =>
+          envelope.eventType === ACP_ENVELOPE_EVENT_TYPES.AssistantMessage &&
+          String(envelope.payload.text ?? '').includes(
+            'The provider returned an error',
+          ),
+      );
+
+      expect(String(errorMessage?.payload.text)).toBe(
+        'The provider returned an error: [xAI] The model grok-4.5 is not available in your region.',
+      );
+      expect(String(errorMessage?.payload.text)).not.toContain(
+        'responseHeaders',
+      );
+      expect(String(errorMessage?.payload.text)).not.toContain('cf-ray');
+    } finally {
+      harness.dispose();
+    }
+  });
+
   it('records OpenCode question tool requests and delivers answers as a follow-up prompt', async () => {
     const beforeQueuedPrompt = vi.fn(async () => undefined);
     const { client, harness } = createHarness(undefined, {
@@ -2097,6 +2305,133 @@ describe('OpenCodeServerHarness', () => {
             String(envelope.payload.text ?? '').includes(
               'OpenCode session error',
             ),
+        ),
+      ).toBe(false);
+    } finally {
+      harness.dispose();
+    }
+  });
+
+  it('abandons the pending question when a steer aborts and replays the turn', async () => {
+    const { client, harness } = createHarness();
+    const persistedEnvelopes: AcpPersistedEnvelope[] = [];
+
+    harness.subscribeRuntimePersistedEnvelope((envelope) =>
+      persistedEnvelopes.push(envelope),
+    );
+
+    try {
+      await connectHarness(harness, client);
+
+      expect(
+        harness.sendCommand({
+          commandName: TaskCommandName.StartNewTask,
+          data: {
+            text: 'Ask for input.',
+            visibleInTranscript: true,
+          },
+        }),
+      ).toBe(true);
+
+      await vi.waitFor(() => {
+        expect(client.promptAsync).toHaveBeenCalledTimes(1);
+      });
+
+      await client.emit({
+        type: 'message.part.updated',
+        properties: {
+          part: {
+            id: 'question_part_1',
+            sessionID: 'ses_1',
+            messageID: 'msg_question',
+            type: 'tool',
+            callID: 'question_call_1',
+            tool: 'question',
+            state: {
+              status: 'running',
+              input: {
+                questions: [
+                  {
+                    id: 'color',
+                    header: 'Color',
+                    question: 'Which color should I use?',
+                    options: [{ label: 'Blue', description: 'Use blue.' }],
+                  },
+                ],
+              },
+              title: 'Ask user',
+            },
+          },
+        },
+      });
+
+      expect(harness.getPendingUserInputRequests()).toHaveLength(1);
+
+      // A steer sent while the question blocks the turn cannot inject
+      // natively, so it enqueues and triggers abort-and-replay. That
+      // abandons the question — the pending map must be cleared so
+      // downstream phase/UI state does not stay blocked on it.
+      expect(
+        harness.sendCommand({
+          commandName: TaskCommandName.SendMessage,
+          data: {
+            text: 'Actually, change direction.',
+            autoSteerWhenQueued: true,
+            visibleInTranscript: true,
+          },
+        }),
+      ).toBe(true);
+
+      // Wait for the steer to fully abort and replay (its drained prompt is
+      // the second promptAsync call) so the baseline below excludes it.
+      await vi.waitFor(() => {
+        expect(harness.getPendingUserInputRequests()).toEqual([]);
+        expect(client.promptAsync).toHaveBeenCalledTimes(2);
+      });
+
+      // A cancelled response is emitted for the abandoned question so
+      // consumers that clear pending state only on a response (Slack,
+      // Linear, the web store) cannot later accept a stale answer.
+      const cancelledResponse = persistedEnvelopes.find(
+        (envelope) =>
+          envelope.eventType ===
+            ACP_ENVELOPE_EVENT_TYPES.RequestUserInputResponse &&
+          envelope.payload.requestId ===
+            'rui:ses_1:msg_question:question_call_1',
+      );
+      expect(cancelledResponse?.payload).toMatchObject({
+        resolution: 'cancelled',
+      });
+
+      // A late answer to the abandoned question (e.g. a web POST opened
+      // before the steer) must be rejected, not fabricated into the
+      // replayed turn: no submitted response, no extra prompt submission.
+      const promptCallsBeforeStaleAnswer = client.promptAsync.mock.calls.length;
+
+      expect(
+        harness.sendCommand({
+          commandName: TaskCommandName.AnswerUserInputRequest,
+          data: {
+            requestId: 'rui:ses_1:msg_question:question_call_1',
+            answers: { color: { answers: ['Blue'] } },
+            userId: 'stale-user',
+          },
+        }),
+      ).toBe(true);
+
+      await new Promise((resolve) => setTimeout(resolve, 20));
+
+      expect(client.promptAsync.mock.calls.length).toBe(
+        promptCallsBeforeStaleAnswer,
+      );
+      expect(
+        persistedEnvelopes.some(
+          (envelope) =>
+            envelope.eventType ===
+              ACP_ENVELOPE_EVENT_TYPES.RequestUserInputResponse &&
+            envelope.payload.requestId ===
+              'rui:ses_1:msg_question:question_call_1' &&
+            envelope.payload.resolution === 'submitted',
         ),
       ).toBe(false);
     } finally {
@@ -3147,6 +3482,375 @@ describe('OpenCodeServerHarness', () => {
       expect(client.promptAsync.mock.calls[0]?.[0]).toMatchObject({
         sessionId: 'ses_1',
       });
+    } finally {
+      harness.dispose();
+    }
+  });
+});
+
+describe('OpenCodeServerHarness cancel marker', () => {
+  function createPartialAssistantMessage(text: string): OpenCodeSessionMessage {
+    return {
+      info: {
+        id: 'msg_1',
+        sessionID: 'ses_1',
+        role: 'assistant',
+        providerID: 'openrouter',
+        modelID: 'openai/gpt-5.4',
+        mode: 'build',
+        time: {
+          created: 0,
+        },
+        cost: 0,
+        tokens: {
+          input: 5,
+          output: 2,
+          reasoning: 0,
+          cache: {
+            read: 0,
+            write: 0,
+          },
+        },
+      },
+      parts: [
+        {
+          id: 'part_1',
+          sessionID: 'ses_1',
+          messageID: 'msg_1',
+          type: 'text',
+          text,
+        },
+      ],
+    };
+  }
+
+  async function startTurnWithPartialText(
+    harness: OpenCodeServerHarness,
+    client: FakeOpenCodeServerClient,
+  ): Promise<void> {
+    await connectHarness(harness, client);
+
+    harness.sendCommand({
+      commandName: TaskCommandName.StartNewTask,
+      data: { text: 'Start work.', visibleInTranscript: true },
+    });
+    await vi.waitFor(() => {
+      expect(client.promptAsync).toHaveBeenCalledTimes(1);
+    });
+
+    await client.emit({
+      type: 'message.part.updated',
+      properties: {
+        part: {
+          id: 'part_1',
+          sessionID: 'ses_1',
+          messageID: 'msg_1',
+          type: 'text',
+          text: 'Partial answer',
+        },
+        delta: 'Partial answer',
+      },
+    });
+  }
+
+  it('emits a task_cancelled marker after the flushed partial output on an attributed cancel', async () => {
+    const { client, harness } = createHarness();
+    const runtimeOutputEvents: AcpMessage[] = [];
+    const persistedEnvelopes: AcpPersistedEnvelope[] = [];
+    const taskEvents: TaskEvent[] = [];
+
+    harness.subscribeRuntimeOutput((event) => runtimeOutputEvents.push(event));
+    harness.subscribeRuntimePersistedEnvelope((envelope) =>
+      persistedEnvelopes.push(envelope),
+    );
+    harness.subscribe((event) => taskEvents.push(event));
+
+    try {
+      await startTurnWithPartialText(harness, client);
+
+      client.messages.mockResolvedValueOnce([
+        createPartialAssistantMessage('Partial answer'),
+      ]);
+
+      harness.sendCommand({
+        commandName: TaskCommandName.CancelTask,
+        data: { cancelledBy: { name: 'Daniel', source: 'web' } },
+      });
+
+      await vi.waitFor(() => {
+        expect(
+          taskEvents.some(
+            (event) => event.eventName === TaskEventName.TaskAborted,
+          ),
+        ).toBe(true);
+      });
+
+      const assistantIndex = persistedEnvelopes.findIndex(
+        (envelope) =>
+          envelope.eventType === ACP_ENVELOPE_EVENT_TYPES.AssistantMessage &&
+          envelope.payload.text === 'Partial answer',
+      );
+      const markerIndex = persistedEnvelopes.findIndex(
+        (envelope) =>
+          envelope.eventType === ACP_ENVELOPE_EVENT_TYPES.TaskCancelled,
+      );
+
+      // The partial output the user saw is flushed first, then the marker —
+      // the marker is the last transcript entry of the cancelled turn.
+      expect(assistantIndex).toBeGreaterThanOrEqual(0);
+      expect(markerIndex).toBeGreaterThan(assistantIndex);
+      expect(persistedEnvelopes[markerIndex]).toMatchObject({
+        role: 'system',
+        payload: {
+          sessionId: 'ses_1',
+          cancelledByName: 'Daniel',
+          source: 'web',
+        },
+      });
+      expect(
+        runtimeOutputEvents.some(
+          (event) => event.eventType === ACP_ENVELOPE_EVENT_TYPES.TaskCancelled,
+        ),
+      ).toBe(true);
+    } finally {
+      harness.dispose();
+    }
+  });
+
+  it('drops trailing assistant output after a cancel until the next prompt', async () => {
+    const { client, harness } = createHarness();
+    const runtimeOutputEvents: AcpMessage[] = [];
+    const persistedEnvelopes: AcpPersistedEnvelope[] = [];
+    const taskEvents: TaskEvent[] = [];
+
+    harness.subscribeRuntimeOutput((event) => runtimeOutputEvents.push(event));
+    harness.subscribeRuntimePersistedEnvelope((envelope) =>
+      persistedEnvelopes.push(envelope),
+    );
+    harness.subscribe((event) => taskEvents.push(event));
+
+    try {
+      await startTurnWithPartialText(harness, client);
+
+      client.messages.mockResolvedValueOnce([
+        createPartialAssistantMessage('Partial answer'),
+      ]);
+
+      harness.sendCommand({
+        commandName: TaskCommandName.CancelTask,
+        data: { cancelledBy: { name: 'Daniel', source: 'web' } },
+      });
+
+      await vi.waitFor(() => {
+        expect(
+          taskEvents.some(
+            (event) => event.eventName === TaskEventName.TaskAborted,
+          ),
+        ).toBe(true);
+      });
+
+      const chunkCountAtCancel = runtimeOutputEvents.filter(
+        (event) =>
+          event.eventType === ACP_ENVELOPE_EVENT_TYPES.AssistantMessageChunk,
+      ).length;
+      const messageFetchCountAtCancel = client.message.mock.calls.length;
+
+      // Trailing stream content and the post-abort finalize must not land
+      // after the marker.
+      await client.emit({
+        type: 'message.part.updated',
+        properties: {
+          part: {
+            id: 'part_1',
+            sessionID: 'ses_1',
+            messageID: 'msg_1',
+            type: 'text',
+            text: 'Partial answer plus a trailing paragraph',
+          },
+          delta: ' plus a trailing paragraph',
+        },
+      });
+      await client.emit({
+        type: 'message.updated',
+        properties: {
+          info: {
+            id: 'msg_1',
+            sessionID: 'ses_1',
+            role: 'assistant',
+            time: { completed: 1 },
+          },
+        },
+      });
+
+      expect(
+        runtimeOutputEvents.filter(
+          (event) =>
+            event.eventType === ACP_ENVELOPE_EVENT_TYPES.AssistantMessageChunk,
+        ),
+      ).toHaveLength(chunkCountAtCancel);
+      expect(client.message.mock.calls).toHaveLength(messageFetchCountAtCancel);
+      expect(
+        persistedEnvelopes.filter(
+          (envelope) =>
+            envelope.eventType === ACP_ENVELOPE_EVENT_TYPES.AssistantMessage,
+        ),
+      ).toHaveLength(1);
+
+      // The next prompt lifts the suppression: a fresh turn streams normally.
+      harness.sendCommand({
+        commandName: TaskCommandName.SendMessage,
+        data: { text: 'Continue.', visibleInTranscript: true },
+      });
+      await vi.waitFor(() => {
+        expect(client.promptAsync).toHaveBeenCalledTimes(2);
+      });
+
+      await client.emit({
+        type: 'message.part.updated',
+        properties: {
+          part: {
+            id: 'part_2',
+            sessionID: 'ses_1',
+            messageID: 'msg_2',
+            type: 'text',
+            text: 'Fresh turn',
+          },
+          delta: 'Fresh turn',
+        },
+      });
+
+      expect(
+        runtimeOutputEvents.filter(
+          (event) =>
+            event.eventType === ACP_ENVELOPE_EVENT_TYPES.AssistantMessageChunk,
+        ).length,
+      ).toBeGreaterThan(chunkCountAtCancel);
+    } finally {
+      harness.dispose();
+    }
+  });
+
+  it('does not emit a marker for a cancel without attribution', async () => {
+    const { client, harness } = createHarness();
+    const persistedEnvelopes: AcpPersistedEnvelope[] = [];
+    const taskEvents: TaskEvent[] = [];
+
+    harness.subscribeRuntimePersistedEnvelope((envelope) =>
+      persistedEnvelopes.push(envelope),
+    );
+    harness.subscribe((event) => taskEvents.push(event));
+
+    try {
+      await startTurnWithPartialText(harness, client);
+
+      client.messages.mockResolvedValueOnce([
+        createPartialAssistantMessage('Partial answer'),
+      ]);
+
+      harness.sendCommand({ commandName: TaskCommandName.CancelTask });
+
+      await vi.waitFor(() => {
+        expect(
+          taskEvents.some(
+            (event) => event.eventName === TaskEventName.TaskAborted,
+          ),
+        ).toBe(true);
+      });
+
+      expect(
+        persistedEnvelopes.some(
+          (envelope) =>
+            envelope.eventType === ACP_ENVELOPE_EVENT_TYPES.TaskCancelled,
+        ),
+      ).toBe(false);
+    } finally {
+      harness.dispose();
+    }
+  });
+
+  it('cancels pending questions with explicit responses on an attributed cancel', async () => {
+    const { client, harness } = createHarness();
+    const persistedEnvelopes: AcpPersistedEnvelope[] = [];
+    const taskEvents: TaskEvent[] = [];
+
+    harness.subscribeRuntimePersistedEnvelope((envelope) =>
+      persistedEnvelopes.push(envelope),
+    );
+    harness.subscribe((event) => taskEvents.push(event));
+
+    try {
+      await connectHarness(harness, client);
+
+      harness.sendCommand({
+        commandName: TaskCommandName.StartNewTask,
+        data: { text: 'Start work.', visibleInTranscript: true },
+      });
+      await vi.waitFor(() => {
+        expect(client.promptAsync).toHaveBeenCalledTimes(1);
+      });
+
+      await client.emit({
+        type: 'message.part.updated',
+        properties: {
+          part: {
+            id: 'part_q',
+            sessionID: 'ses_1',
+            messageID: 'msg_1',
+            type: 'tool',
+            callID: 'call_q',
+            tool: 'question',
+            state: {
+              status: 'running',
+              input: {
+                questions: [
+                  {
+                    id: 'q1',
+                    header: 'Approach',
+                    question: 'Which approach?',
+                    options: [{ label: 'A', description: 'Approach A.' }],
+                  },
+                ],
+              },
+              title: 'Ask user',
+            },
+          },
+        },
+      });
+
+      await vi.waitFor(() => {
+        expect(harness.getPendingUserInputRequests()).toHaveLength(1);
+      });
+
+      client.messages.mockResolvedValueOnce([]);
+
+      harness.sendCommand({
+        commandName: TaskCommandName.CancelTask,
+        data: { cancelledBy: { name: 'Daniel', source: 'web' } },
+      });
+
+      await vi.waitFor(() => {
+        expect(
+          taskEvents.some(
+            (event) => event.eventName === TaskEventName.TaskAborted,
+          ),
+        ).toBe(true);
+      });
+
+      const cancelledResponse = persistedEnvelopes.find(
+        (envelope) =>
+          envelope.eventType ===
+          ACP_ENVELOPE_EVENT_TYPES.RequestUserInputResponse,
+      );
+      const marker = persistedEnvelopes.find(
+        (envelope) =>
+          envelope.eventType === ACP_ENVELOPE_EVENT_TYPES.TaskCancelled,
+      );
+
+      expect(cancelledResponse?.payload).toMatchObject({
+        resolution: 'cancelled',
+      });
+      expect(marker).toBeDefined();
+      expect(harness.getPendingUserInputRequests()).toHaveLength(0);
     } finally {
       harness.dispose();
     }

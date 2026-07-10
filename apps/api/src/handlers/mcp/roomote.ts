@@ -3,12 +3,14 @@ import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { WebStandardStreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/webStandardStreamableHttp.js';
 import {
   and,
-  cloudJobs,
   db,
   eq,
   environments,
+  isNull,
   mcpConnections,
   deploymentMcpEnablements,
+  resolveInvocationIdentityMap,
+  taskRuns,
 } from '@roomote/db/server';
 import {
   findLinearDeploymentMcpConnection,
@@ -26,9 +28,9 @@ import { z } from 'zod';
 import type { Variables } from '../../types';
 
 import {
-  assertCloudJobTokenMatchesCloudJobUser,
+  assertCloudJobTokenJobExists,
   McpProxyError,
-  resolveActingUserId,
+  resolveActingUserIdOrNull,
   type McpAuthContext,
   isJobTokenContext,
   toMcpToolResult,
@@ -37,6 +39,7 @@ import {
   lookupSlackChannelMessages,
   lookupSlackThread,
 } from './slack-thread-lookup';
+import { getTaskChannelBindings } from '../tasks/helpers';
 
 const ROOMOTE_MCP_SERVER_INFO = {
   name: 'roomote-router-mcp',
@@ -88,7 +91,7 @@ async function resolveRoomoteMcpAuth(
   }
 
   if (isJobTokenContext(authContext)) {
-    await assertCloudJobTokenMatchesCloudJobUser(authContext);
+    await assertCloudJobTokenJobExists(authContext);
 
     return {
       userId: authContext.userId,
@@ -111,44 +114,59 @@ async function resolveRoomoteMcpAuth(
 }
 
 async function buildAboutMePayload(options: {
-  userId: string;
+  /**
+   * The acting human user, or null when the job runs as the deployment
+   * service principal.
+   */
+  userId: string | null;
   operation: 'overview' | 'integrations';
 }) {
-  const [environmentRows, linearRows, enabledDeploymentMcps, userConnections] =
-    await Promise.all([
-      db.query.environments.findMany({
-        where: eq(environments.isEval, false),
-        columns: {
-          id: true,
-          name: true,
-          description: true,
-          config: true,
-        },
-        orderBy: (table, { asc }) => [asc(table.name)],
-      }),
-      Promise.all([findLinearDeploymentMcpConnection()]),
-      db.query.deploymentMcpEnablements.findMany({
-        where: eq(deploymentMcpEnablements.enabled, true),
-        columns: {
-          mcpId: true,
-        },
-        orderBy: (table, { asc }) => [asc(table.mcpId)],
-      }),
-      db.query.mcpConnections.findMany({
-        where: and(
-          eq(mcpConnections.userId, options.userId),
-          eq(mcpConnections.enabled, true),
-        ),
-        columns: {
-          id: true,
-          mcpId: true,
-          authStatus: true,
-          enabled: true,
-          scopes: true,
-        },
-        orderBy: (table, { asc }) => [asc(table.mcpId)],
-      }),
-    ]);
+  const [
+    environmentRows,
+    linearRows,
+    enabledDeploymentMcps,
+    userConnections,
+    invocationIdentities,
+  ] = await Promise.all([
+    db.query.environments.findMany({
+      where: eq(environments.isEval, false),
+      columns: {
+        id: true,
+        name: true,
+        description: true,
+        config: true,
+      },
+      orderBy: (table, { asc }) => [asc(table.name)],
+    }),
+    Promise.all([findLinearDeploymentMcpConnection()]),
+    db.query.deploymentMcpEnablements.findMany({
+      where: eq(deploymentMcpEnablements.enabled, true),
+      columns: {
+        mcpId: true,
+      },
+      orderBy: (table, { asc }) => [asc(table.mcpId)],
+    }),
+    db.query.mcpConnections.findMany({
+      where: and(
+        // Deployment-service-principal jobs have no human actor; their
+        // legitimate connections are the deployment-scoped rows
+        // (userId IS NULL).
+        options.userId === null
+          ? isNull(mcpConnections.userId)
+          : eq(mcpConnections.userId, options.userId),
+        eq(mcpConnections.enabled, true),
+      ),
+      columns: {
+        id: true,
+        mcpId: true,
+        authStatus: true,
+        enabled: true,
+        scopes: true,
+      },
+      orderBy: (table, { asc }) => [asc(table.mcpId)],
+    }),
+    resolveInvocationIdentityMap(),
+  ]);
   const linearInstallations = linearRows.flatMap((connection) => {
     const metadata = getLinearDeploymentMetadata(connection?.authConfig);
     return metadata
@@ -221,32 +239,73 @@ async function buildAboutMePayload(options: {
       'I can pick up where I left off when you follow up in the same thread.',
     ],
     gettingStarted: {
-      slack:
-        "Mention @Roomote in Slack with what you need. I'll figure out the right repo.",
+      slack: invocationIdentities.slack?.examplePrompt
+        ? `Mention ${invocationIdentities.slack.guidanceName} in Slack with what you need. I'll figure out the right repo.`
+        : 'Use the connected Slack app in a DM or channel with what you need.',
+      teams: invocationIdentities.microsoft?.examplePrompt
+        ? `Mention ${invocationIdentities.microsoft.guidanceName} in Teams with what you need.`
+        : 'Use the connected Teams bot in a chat or channel with what you need.',
+      telegram: invocationIdentities.telegram?.deepLinkUrl
+        ? `Message ${invocationIdentities.telegram.guidanceName} on Telegram: ${invocationIdentities.telegram.deepLinkUrl}`
+        : 'Message the connected Telegram bot to start work from Telegram.',
       linear:
         linearRows.length > 0
           ? 'Start a Linear Agent Session or mention Roomote in an issue comment.'
           : 'Connect Linear to start tasks from issues.',
-      github: 'Mention Roomote on a PR for follow-up work or reviews.',
+      github: invocationIdentities.github?.mentionText
+        ? `Mention ${invocationIdentities.github.mentionText} on a PR for follow-up work or reviews.`
+        : 'Mention the GitHub app on a PR for follow-up work or reviews.',
       web: 'Use the web app to start tasks, configure environments, or check on work.',
     },
   };
 }
 
+type SlackLookupRunContext = {
+  actingUserId: string | null;
+  slackChannelId: string | null;
+  slackThreadTs: string | null;
+  payload: unknown;
+};
+
+/**
+ * Load the Slack routing context for a job-token request: the run's acting
+ * user and payload plus the owning task's Slack channel bindings (channel
+ * bindings moved from runs to tasks in the Stage 2 data-model
+ * simplification).
+ */
+async function loadSlackLookupRunContext(
+  cloudJobId: number,
+): Promise<SlackLookupRunContext> {
+  const run = await db.query.taskRuns.findFirst({
+    columns: {
+      actingUserId: true,
+      taskId: true,
+      payload: true,
+    },
+    where: eq(taskRuns.id, cloudJobId),
+  });
+
+  if (!run) {
+    throw new McpProxyError(404, 'Cloud job not found for this MCP token');
+  }
+
+  const bindings = await getTaskChannelBindings(run.taskId);
+
+  return {
+    actingUserId: run.actingUserId,
+    slackChannelId: bindings?.slackChannelId ?? null,
+    slackThreadTs: bindings?.slackThreadTs ?? null,
+    payload: run.payload,
+  };
+}
+
 async function buildSlackThreadPayload(options: {
   auth: McpAuthContext;
-  actingUserId: string;
+  actingUserId: string | null;
   channel?: string;
   messageTs: string;
 }) {
-  let cloudJob:
-    | {
-        actingUserId: string | null;
-        type: string;
-        slackThreadTs: string | null;
-        payload: unknown;
-      }
-    | undefined;
+  let cloudJob: SlackLookupRunContext | undefined;
 
   if (options.auth.tokenType === 'cj') {
     if (!options.auth.cloudJobId) {
@@ -256,19 +315,7 @@ async function buildSlackThreadPayload(options: {
       );
     }
 
-    cloudJob = await db.query.cloudJobs.findFirst({
-      columns: {
-        actingUserId: true,
-        type: true,
-        slackThreadTs: true,
-        payload: true,
-      },
-      where: eq(cloudJobs.id, options.auth.cloudJobId),
-    });
-
-    if (!cloudJob) {
-      throw new McpProxyError(404, 'Cloud job not found for this MCP token');
-    }
+    cloudJob = await loadSlackLookupRunContext(options.auth.cloudJobId);
   }
 
   return lookupSlackThread({
@@ -285,19 +332,12 @@ async function buildSlackThreadPayload(options: {
 
 async function buildSlackChannelMessagesPayload(options: {
   auth: McpAuthContext;
-  actingUserId: string;
+  actingUserId: string | null;
   channel?: string;
   oldest?: string;
   latest?: string;
 }) {
-  let cloudJob:
-    | {
-        actingUserId: string | null;
-        type: string;
-        slackThreadTs: string | null;
-        payload: unknown;
-      }
-    | undefined;
+  let cloudJob: SlackLookupRunContext | undefined;
 
   if (options.auth.tokenType === 'cj') {
     if (!options.auth.cloudJobId) {
@@ -307,19 +347,7 @@ async function buildSlackChannelMessagesPayload(options: {
       );
     }
 
-    cloudJob = await db.query.cloudJobs.findFirst({
-      columns: {
-        actingUserId: true,
-        type: true,
-        slackThreadTs: true,
-        payload: true,
-      },
-      where: eq(cloudJobs.id, options.auth.cloudJobId),
-    });
-
-    if (!cloudJob) {
-      throw new McpProxyError(404, 'Cloud job not found for this MCP token');
-    }
+    cloudJob = await loadSlackLookupRunContext(options.auth.cloudJobId);
   }
 
   return lookupSlackChannelMessages({
@@ -345,7 +373,10 @@ function createRoomoteTransport() {
   });
 }
 
-function createRoomoteMcpServer(auth: McpAuthContext, actingUserId: string) {
+function createRoomoteMcpServer(
+  auth: McpAuthContext,
+  actingUserId: string | null,
+) {
   const server = new McpServer(ROOMOTE_MCP_SERVER_INFO, {
     instructions:
       'Use get_about_me for Roomote platform, integration, and getting-started context. Use get_slack_thread when you need the surrounding Slack thread for a referenced Slack message. Use get_slack_channel_messages when you need history from a public Slack channel the app has already joined.',
@@ -487,7 +518,10 @@ roomoteMcp.on(['POST', 'GET', 'DELETE'], '/', async (c) => {
 
   try {
     const auth = await resolveRoomoteMcpAuth(c.get('authContext'));
-    const actingUserId = await resolveActingUserId(auth);
+    // Null means the job runs as the deployment service principal; the
+    // Roomote MCP tools are informational and operate on deployment-scoped
+    // data, so they support that case.
+    const actingUserId = await resolveActingUserIdOrNull(auth);
     const server = createRoomoteMcpServer(auth, actingUserId);
 
     await server.connect(transport);

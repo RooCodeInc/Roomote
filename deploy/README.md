@@ -24,19 +24,19 @@ Four PaaS-shaped paths run the same published images with
 `ROOMOTE_AUTO_GENERATE_KEYS=true` instead of installer-generated keypairs:
 
 - [`railway/`](railway/README.md) — managed Railway deployment with managed
-  Postgres/Redis and hosted compute (Modal/E2B/Daytona) instead of the
+  Postgres/Redis and hosted sandboxes (Modal/E2B/Daytona) instead of the
   Docker socket.
 - [`render/`](render/README.md) — managed Render deployment from the
   Blueprint at the repository root ([`render.yaml`](../render.yaml)), with
-  managed Postgres/Key Value and hosted compute instead of the Docker
+  managed Postgres/Key Value and hosted sandboxes instead of the Docker
   socket.
 - [`coolify/`](coolify/README.md) — a Docker Compose resource for a
   Coolify-managed server; the Docker socket is available there, so the
-  `docker` compute provider is the default.
+  `docker` sandbox provider is the default.
 - [`fly/`](fly/README.md) — a maintained `fly.toml` that runs the stack as
   one Fly.io app (a process group per service) with Fly Managed Postgres,
   Upstash Redis, and Tigris object storage; like Railway, there is no
-  Docker socket, so hosted compute is required.
+  Docker socket, so hosted sandboxes is required.
 
 V1 is intentionally single-tenant. Do not use this flow to put multiple
 customers on the same VM or database.
@@ -71,30 +71,6 @@ Do not deploy `latest`. Pushes to `develop` automatically publish
 deployments. Production releases use immutable `v*` tags; pushing a `v*` tag or
 manually dispatching the GHCR workflow publishes that explicit version. Use the
 same tag for create and upgrade commands.
-
-## Automatic Preview Deployments
-
-The GHCR publish workflow deploys preview automatically after all `develop`
-images publish successfully. The deploy job runs in the GitHub `preview`
-environment and upgrades the configured droplet to `develop-<short-sha>`.
-
-Required `preview` environment secret:
-
-- `ROOMOTE_PREVIEW_SSH_PRIVATE_KEY` - dedicated private SSH key for the preview
-  droplet
-
-Required `preview` environment variables:
-
-- `ROOMOTE_PREVIEW_HOST` - preview droplet host or IP
-- `ROOMOTE_PREVIEW_CUSTOMER` - deployer customer slug, for example `openmote`
-- `ROOMOTE_PREVIEW_SSH_USER` - SSH user, normally `root` for V1
-- `ROOMOTE_PREVIEW_KNOWN_HOSTS` - pinned `ssh-keyscan -H <host>` output
-- `ROOMOTE_IMAGE_RETENTION_RELEASES` - optional number of Roomote release tags
-  to keep on the droplet after each deploy; defaults to `3`
-
-Restrict the GitHub `preview` environment to the `develop` branch. The workflow
-also serializes preview deployments with the `preview-deploy` concurrency group
-so rapid merges do not run overlapping upgrades on the same droplet.
 
 ## Environment File
 

@@ -1,13 +1,13 @@
 import {
-  CloudTaskType,
+  TaskPayloadKind,
   NonRetryableSpawnError,
   getPrimaryPortFromConfig,
 } from '@roomote/types';
 import {
-  type CloudJob,
+  type Run,
   createComputeProviderMutationEventRecorder,
   db,
-  cloudJobs,
+  taskRuns,
   eq,
 } from '@roomote/db/server';
 import { stampCloudJobMilestone } from '@roomote/sdk/server';
@@ -76,20 +76,18 @@ function buildDetachedWorkerExitError(
   });
 }
 
-function getWorkerLaunchCommand(
-  cloudJob: CloudJob,
-): 'snapshot' | 'resume' | 'run' {
-  return cloudJob.type === CloudTaskType.SnapshotEnvironment
+function getWorkerLaunchCommand(cloudJob: Run): 'snapshot' | 'resume' | 'run' {
+  return cloudJob.payloadKind === TaskPayloadKind.SnapshotEnvironment
     ? 'snapshot'
-    : cloudJob.type === CloudTaskType.SnapshotResume
+    : cloudJob.payloadKind === TaskPayloadKind.SnapshotResume
       ? 'resume'
       : 'run';
 }
 
-function getWorkerLaunchArgs(cloudJob: CloudJob, machineId: string): string[] {
+function getWorkerLaunchArgs(cloudJob: Run, machineId: string): string[] {
   const command = getWorkerLaunchCommand(cloudJob);
 
-  return cloudJob.type === CloudTaskType.SnapshotEnvironment
+  return cloudJob.payloadKind === TaskPayloadKind.SnapshotEnvironment
     ? [
         'snapshot',
         '--cloud-job-id',
@@ -103,7 +101,7 @@ function getWorkerLaunchArgs(cloudJob: CloudJob, machineId: string): string[] {
 }
 
 export async function spawnE2bWorker(
-  cloudJob: CloudJob,
+  cloudJob: Run,
   authToken: string,
   config: {
     e2bApiKey: string;
@@ -151,7 +149,7 @@ export async function spawnE2bWorker(
     | { launchMode: 'environment_snapshot'; sourceSnapshotId: string }
     | { launchMode: 'task_snapshot'; sourceSnapshotId: string };
 
-  if (cloudJob.type === CloudTaskType.SnapshotResume) {
+  if (cloudJob.payloadKind === TaskPayloadKind.SnapshotResume) {
     const snapshotId = cloudJob.sourceSnapshotId;
 
     if (!snapshotId) {
@@ -164,7 +162,7 @@ export async function spawnE2bWorker(
       launchMode: 'task_snapshot',
       sourceSnapshotId: snapshotId,
     };
-  } else if (cloudJob.type === CloudTaskType.SnapshotEnvironment) {
+  } else if (cloudJob.payloadKind === TaskPayloadKind.SnapshotEnvironment) {
     // Environment snapshot refreshes must rebuild from the configured base
     // template instead of inheriting the previous environment snapshot.
     launchOptions = { launchMode: 'fresh' };
@@ -182,7 +180,7 @@ export async function spawnE2bWorker(
   }
 
   if (
-    cloudJob.type === CloudTaskType.SnapshotEnvironment &&
+    cloudJob.payloadKind === TaskPayloadKind.SnapshotEnvironment &&
     !cloudJob.payload.environmentId
   ) {
     throw new Error(
@@ -213,7 +211,7 @@ export async function spawnE2bWorker(
   const recordMutation = createComputeProviderMutationEventRecorder(
     db,
     {
-      cloudJobId: cloudJob.id,
+      runId: cloudJob.id,
       taskId: cloudJob.taskId,
     },
     { logPrefix: 'spawnE2bWorker', logger: console },
@@ -360,9 +358,9 @@ export async function spawnE2bWorker(
 
     if (result.commandId) {
       await db
-        .update(cloudJobs)
+        .update(taskRuns)
         .set({ sandboxCmdId: result.commandId })
-        .where(eq(cloudJobs.id, cloudJob.id));
+        .where(eq(taskRuns.id, cloudJob.id));
     }
 
     return {

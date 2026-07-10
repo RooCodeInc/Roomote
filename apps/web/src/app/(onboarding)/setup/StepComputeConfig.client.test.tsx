@@ -45,7 +45,6 @@ vi.mock('@/components/system', () => ({
   ),
   Check: (props: SVGProps<SVGSVGElement>) => <svg {...props} />,
   ChevronDown: (props: SVGProps<SVGSVGElement>) => <svg {...props} />,
-  EnvVarsInfoNote: () => <p>Env vars note</p>,
   Input: ({
     secret: _secret,
     ...props
@@ -93,10 +92,21 @@ function buildHostedProvider(
         envVarName: 'MODAL_BASE_IMAGE_REF',
         label: 'Base Image Reference',
         category: 'infrastructure',
-        advanced: true,
         runtimeSatisfied: false,
         savedSatisfied: false,
         defaultSatisfied: true,
+        setupProvisionable: false,
+      },
+      {
+        envVarName: 'MODAL_REGIONS',
+        label: 'Modal Regions',
+        required: false,
+        secret: false,
+        category: 'infrastructure',
+        advanced: true,
+        runtimeSatisfied: false,
+        savedSatisfied: false,
+        defaultSatisfied: false,
         setupProvisionable: false,
       },
     ],
@@ -140,10 +150,12 @@ describe('StepComputeConfig', () => {
     );
 
     expect(screen.queryByText(/Base Image Reference/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/Modal Regions/)).not.toBeInTheDocument();
 
     fireEvent.click(screen.getByRole('button', { name: /show advanced/i }));
 
-    expect(screen.getByText(/Base Image Reference/)).toBeInTheDocument();
+    expect(screen.queryByText(/Base Image Reference/)).not.toBeInTheDocument();
+    expect(screen.getByText(/Modal Regions/)).toBeInTheDocument();
     expect(screen.getByText('Roomote worker image')).toBeInTheDocument();
   });
 
@@ -166,9 +178,66 @@ describe('StepComputeConfig', () => {
     );
 
     expect(screen.getByText('Roomote worker image')).toBeInTheDocument();
-    expect(screen.getByText(/Base Image Reference/)).toBeInTheDocument();
+    expect(screen.queryByText(/Base Image Reference/)).not.toBeInTheDocument();
+    expect(screen.getByText(/Modal Regions/)).toBeInTheDocument();
     expect(
       screen.queryByRole('button', { name: /advanced options/i }),
     ).not.toBeInTheDocument();
+  });
+
+  it('disables continue when only a local worker image is configured', () => {
+    render(
+      <StepComputeConfig
+        computeSetup={buildComputeSetup({
+          workerImage: {
+            envVarName: 'DOCKER_WORKER_IMAGE',
+            label: 'Worker Image',
+            runtimeSatisfied: true,
+            savedSatisfied: false,
+            hostedImageRef: null,
+            hostedReady: false,
+          },
+          providers: [
+            {
+              ...buildHostedProvider('e2b'),
+              provider: 'e2b',
+              label: 'E2B',
+              fields: [
+                {
+                  envVarName: 'E2B_API_KEY',
+                  label: 'E2B API Key',
+                  secret: true,
+                  category: 'credential',
+                  runtimeSatisfied: false,
+                  savedSatisfied: true,
+                  defaultSatisfied: false,
+                  setupProvisionable: false,
+                },
+                {
+                  envVarName: 'E2B_DOMAIN',
+                  label: 'E2B Domain',
+                  required: false,
+                  category: 'infrastructure',
+                  advanced: true,
+                  runtimeSatisfied: false,
+                  savedSatisfied: false,
+                  defaultSatisfied: false,
+                  setupProvisionable: false,
+                },
+              ],
+            },
+          ],
+        })}
+        selectedProviderId="e2b"
+        onContinue={vi.fn()}
+      />,
+    );
+
+    expect(
+      screen.getByText(/registry-qualified worker image/i),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole('button', { name: /continue|save and continue/i }),
+    ).toBeDisabled();
   });
 });

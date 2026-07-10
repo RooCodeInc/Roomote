@@ -7,13 +7,13 @@ import { mcpAuthMiddleware } from '../../mcp/middleware';
 import { launchTask } from '../launchTask';
 
 const {
-  mockEnqueueCloudTask,
+  mockEnqueueTask,
   mockEnvironmentsFindFirst,
   mockRepositoriesFindMany,
   mockSelectRows,
   mockGetMembershipRole,
 } = vi.hoisted(() => ({
-  mockEnqueueCloudTask: vi.fn(),
+  mockEnqueueTask: vi.fn(),
   mockEnvironmentsFindFirst: vi.fn(),
   mockRepositoriesFindMany: vi.fn(),
   mockSelectRows: vi.fn(),
@@ -21,7 +21,7 @@ const {
 }));
 
 vi.mock('@roomote/cloud-agents/server', () => ({
-  enqueueCloudTask: (...args: unknown[]) => mockEnqueueCloudTask(...args),
+  enqueueTask: (...args: unknown[]) => mockEnqueueTask(...args),
   resolveRequestedWorkKindDecision: vi.fn().mockResolvedValue(undefined),
 }));
 
@@ -79,7 +79,7 @@ describe('launchTask', () => {
   } as AuthTokenContext;
 
   beforeEach(() => {
-    mockEnqueueCloudTask.mockReset();
+    mockEnqueueTask.mockReset();
     mockEnvironmentsFindFirst.mockReset();
     mockEnvironmentsFindFirst.mockResolvedValue({ id: 'env-1' });
     mockRepositoriesFindMany.mockReset();
@@ -89,11 +89,11 @@ describe('launchTask', () => {
     mockGetMembershipRole.mockResolvedValue('org:admin');
   });
 
-  it('returns the LaunchTaskResponse success envelope shape, not the raw CloudJob row', async () => {
-    // enqueueCloudTask resolves with the CloudJob DB row, which has `id` +
+  it('returns the LaunchTaskResponse success envelope shape, not the raw Run row', async () => {
+    // enqueueTask resolves with the Run DB row, which has `id` +
     // `taskId` but no `success`/`cloudJobId`/`error` envelope fields. The
     // handler must map this to the contract the worker MCP client expects.
-    mockEnqueueCloudTask.mockResolvedValue({ id: 99, taskId: 'task-new' });
+    mockEnqueueTask.mockResolvedValue({ id: 99, taskId: 'task-new' });
 
     const app = createApp(authContext);
     const response = await app.request(
@@ -113,7 +113,7 @@ describe('launchTask', () => {
   });
 
   it('stamps the source-control provider resolved from environment repositories into the payload', async () => {
-    mockEnqueueCloudTask.mockResolvedValue({ id: 100, taskId: 'task-gl' });
+    mockEnqueueTask.mockResolvedValue({ id: 100, taskId: 'task-gl' });
     mockSelectRows.mockReturnValue([{ sourceControlProvider: 'gitlab' }]);
 
     const app = createApp(authContext);
@@ -129,14 +129,14 @@ describe('launchTask', () => {
     );
 
     expect(response.status).toBe(200);
-    const enqueuedTask = mockEnqueueCloudTask.mock.calls[0]?.[0] as {
-      payload: { sourceControlProvider?: string };
+    const enqueuedTask = mockEnqueueTask.mock.calls[0]?.[0] as {
+      task: { payload: { sourceControlProvider?: string } };
     };
-    expect(enqueuedTask.payload.sourceControlProvider).toBe('gitlab');
+    expect(enqueuedTask.task.payload.sourceControlProvider).toBe('gitlab');
   });
 
   it('leaves the provider unset for prompt-only launches with no repository context', async () => {
-    mockEnqueueCloudTask.mockResolvedValue({ id: 101, taskId: 'task-plain' });
+    mockEnqueueTask.mockResolvedValue({ id: 101, taskId: 'task-plain' });
 
     const app = createApp(authContext);
     const response = await app.request(
@@ -148,10 +148,10 @@ describe('launchTask', () => {
     );
 
     expect(response.status).toBe(200);
-    const enqueuedTask = mockEnqueueCloudTask.mock.calls[0]?.[0] as {
-      payload: { sourceControlProvider?: string };
+    const enqueuedTask = mockEnqueueTask.mock.calls[0]?.[0] as {
+      task: { payload: { sourceControlProvider?: string } };
     };
-    expect(enqueuedTask.payload.sourceControlProvider).toBeUndefined();
+    expect(enqueuedTask.task.payload.sourceControlProvider).toBeUndefined();
   });
 
   it('rejects launches whose selected repositories span multiple providers', async () => {
@@ -181,7 +181,7 @@ describe('launchTask', () => {
     expect(json.error).toBe(
       'Selected repositories must belong to a single source control provider.',
     );
-    expect(mockEnqueueCloudTask).not.toHaveBeenCalled();
+    expect(mockEnqueueTask).not.toHaveBeenCalled();
   });
 
   it('rejects admin-required launches for non-admin members', async () => {
@@ -203,12 +203,12 @@ describe('launchTask', () => {
     expect(response.status).toBe(403);
     const json = (await response.json()) as { error: string };
     expect(json.error).toBe('Unauthorized');
-    expect(mockEnqueueCloudTask).not.toHaveBeenCalled();
+    expect(mockEnqueueTask).not.toHaveBeenCalled();
   });
 
   it('allows non-admin members to launch standard tasks', async () => {
     mockGetMembershipRole.mockResolvedValue('org:member');
-    mockEnqueueCloudTask.mockResolvedValue({ id: 102, taskId: 'task-member' });
+    mockEnqueueTask.mockResolvedValue({ id: 102, taskId: 'task-member' });
 
     const app = createApp(authContext);
     const response = await app.request(
@@ -220,6 +220,6 @@ describe('launchTask', () => {
     );
 
     expect(response.status).toBe(200);
-    expect(mockEnqueueCloudTask).toHaveBeenCalledTimes(1);
+    expect(mockEnqueueTask).toHaveBeenCalledTimes(1);
   });
 });

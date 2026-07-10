@@ -31,15 +31,11 @@ const RESERVED_COMMUNICATION_MCP_ENV_KEYS = [
 ] as const;
 
 export function getSlackReplyContext(cloudJob: {
-  type: string;
   payload: unknown;
-  slackThreadTs: string | null;
 }): SlackReplyContext | null {
   const channel = getSlackChannelFromTaskPayload(cloudJob.payload);
   const threadTs =
-    getSlackThreadTsFromTaskPayload(cloudJob.payload) ??
-    cloudJob.slackThreadTs ??
-    undefined;
+    getSlackThreadTsFromTaskPayload(cloudJob.payload) ?? undefined;
 
   if (channel) {
     return { channel, ...(threadTs ? { threadTs } : {}) };

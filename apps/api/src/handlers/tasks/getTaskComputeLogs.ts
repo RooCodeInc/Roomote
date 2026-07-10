@@ -7,10 +7,10 @@ import {
 import {
   and,
   asc,
-  cloudJobs,
   db,
   eq,
   resolveComputeProviderEnvValues,
+  taskRuns,
   tasks,
 } from '@roomote/db/server';
 import { isComputeProvider, type ComputeProvider } from '@roomote/types';
@@ -104,8 +104,8 @@ export async function getTaskComputeLogs(
       return c.json({ error: 'Task not found' }, 404);
     }
 
-    const jobs = await db.query.cloudJobs.findMany({
-      where: eq(cloudJobs.taskId, taskId),
+    const jobs = await db.query.taskRuns.findMany({
+      where: eq(taskRuns.taskId, taskId),
       columns: {
         id: true,
         status: true,
@@ -113,7 +113,7 @@ export async function getTaskComputeLogs(
         machineId: true,
         sandboxCmdId: true,
       },
-      orderBy: [asc(cloudJobs.createdAt), asc(cloudJobs.id)],
+      orderBy: [asc(taskRuns.createdAt), asc(taskRuns.id)],
     });
 
     const clientCache = new Map<

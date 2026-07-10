@@ -146,6 +146,30 @@ async function refreshSlackInstallationMemberSnapshot(params: {
     .where(eq(slackInstallations.teamId, params.teamId));
 }
 
+async function resolveSlackBotDisplayMetadata(params: {
+  botAccessToken: string;
+  botUserId: string;
+}): Promise<{ botName: string | null; appName: string | null }> {
+  try {
+    const slack = new SlackNotifier(params.botAccessToken);
+    const botName = await slack.getUserDisplayName(params.botUserId);
+
+    return {
+      botName,
+      appName: null,
+    };
+  } catch (error) {
+    console.error(
+      '[exchangeSlackOAuthCodeCommand] Failed to resolve Slack bot display metadata:',
+      error,
+    );
+    return {
+      botName: null,
+      appName: null,
+    };
+  }
+}
+
 async function ensureSlackMappingUserExists(userId: string) {
   const existingUser = await db.query.users.findFirst({
     where: eq(users.id, userId),
@@ -431,6 +455,10 @@ export async function exchangeSlackOAuthCodeCommand(
 
     const teamId = data.team.id;
     const botAccessToken = data.access_token;
+    const displayMetadata = await resolveSlackBotDisplayMetadata({
+      botAccessToken,
+      botUserId: data.bot_user_id,
+    });
 
     const installationData = {
       teamName: data.team.name,
@@ -439,6 +467,8 @@ export async function exchangeSlackOAuthCodeCommand(
       enterpriseName: data.enterprise?.name || null,
       appId: data.app_id || slackOAuthConfig.appId,
       botUserId: data.bot_user_id,
+      botName: displayMetadata.botName,
+      appName: displayMetadata.appName,
       botAccessToken: data.access_token,
       userAccessToken: data.authed_user?.access_token || null,
       scopes: {

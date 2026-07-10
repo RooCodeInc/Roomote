@@ -12,9 +12,9 @@ import { useQueryClient } from '@tanstack/react-query';
 import { CircleSlash } from '@/components/system';
 
 import {
-  CloudTaskType,
+  TaskPayloadKind,
   DEFAULT_CODING_HARNESS,
-  isExitedCloudTaskStatus,
+  isExitedRunStatus,
   type TaskPhase,
 } from '@roomote/types';
 
@@ -73,7 +73,7 @@ export default function SandboxPage() {
     sessionState === 'booting' &&
     (hasTranscriptHistory || hasVisibleSessionPrompt);
   const shouldRenderHistoricalBootFailure =
-    cloudJob?.type === CloudTaskType.SnapshotResume &&
+    cloudJob?.payloadKind === TaskPayloadKind.SnapshotResume &&
     sessionState === 'boot-failed' &&
     (hasTranscriptHistory || hasArtifacts || hasVisibleSessionPrompt);
   const handleBootStatusChange = useCallback(() => {
@@ -137,7 +137,7 @@ export default function SandboxPage() {
       !activeCloudJobId ||
       !activeCloudJobStatus ||
       sessionState !== 'interactive' ||
-      isExitedCloudTaskStatus(activeCloudJobStatus)
+      isExitedRunStatus(activeCloudJobStatus)
     ) {
       return;
     }

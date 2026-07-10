@@ -1,8 +1,8 @@
-import { cloudJobs, db, taskMessages, tasks } from '@roomote/db/server';
+import { db, runFactory, taskFactory, taskMessages } from '@roomote/db/server';
 import {
   ACP_ENVELOPE_EVENT_TYPES,
-  CloudTaskType,
   ROOMOTE_RUNTIME_TASK_MESSAGE_PROTOCOL,
+  TaskPayloadKind,
 } from '@roomote/types';
 
 import { getTaskMessageEnvelopes } from './task-messages';
@@ -11,32 +11,18 @@ describe('getTaskMessageEnvelopes', () => {
   it('preserves a missing user identity for automation prompts', async () => {
     const taskId = 'task-message-automatic-review';
 
-    await db.insert(tasks).values({
+    const task = await taskFactory.create({
       id: taskId,
-      provider: 'roomote',
-      model: 'test-model',
       title: 'Review Code',
-      timestamp: Math.floor(Date.now() / 1000),
-      activityAt: Date.now(),
+    });
+    const run = await runFactory.create({
+      payloadKind: TaskPayloadKind.GithubPrReview,
+      taskId: task.id,
     });
 
-    const [cloudJob] = await db
-      .insert(cloudJobs)
-      .values({
-        type: CloudTaskType.GithubPrReview,
-        payload: { repo: 'roomote/example' },
-        taskId,
-        title: 'Review Code',
-      })
-      .returning({ id: cloudJobs.id });
-
-    if (!cloudJob) {
-      throw new Error('Failed to seed cloud job');
-    }
-
     await db.insert(taskMessages).values({
-      cloudJobId: cloudJob.id,
-      taskId,
+      runId: run.id,
+      taskId: task.id,
       userId: null,
       ts: Date.now(),
       eventType: ACP_ENVELOPE_EVENT_TYPES.UserPrompt,

@@ -1,18 +1,18 @@
 import { z } from 'zod';
 
 import {
-  cloudJobs,
   db,
   desc,
   environmentVariables,
   eq,
   inArray,
+  taskRuns,
 } from '@roomote/db/server';
 import {
   ACP_ENVELOPE_EVENT_TYPES,
   ROOMOTE_RUNTIME_TASK_MESSAGE_PROTOCOL,
   isEnvVarRequestFulfillmentClientMessageId,
-  isExitedCloudTaskStatus,
+  isExitedRunStatus,
   deploymentEnvVarNameSchema,
 } from '@roomote/types';
 import { recordTaskMessageEnvelope } from '@roomote/sdk/server';
@@ -115,9 +115,9 @@ export async function fulfillTaskEnvVarRequestCommand(
       values: valuesToPersist,
     });
 
-    const activeCloudJob = await tx.query.cloudJobs.findFirst({
-      where: eq(cloudJobs.taskId, taskId),
-      orderBy: desc(cloudJobs.createdAt),
+    const activeCloudJob = await tx.query.taskRuns.findFirst({
+      where: eq(taskRuns.taskId, taskId),
+      orderBy: desc(taskRuns.createdAt),
       columns: {
         id: true,
         status: true,
@@ -129,7 +129,7 @@ export async function fulfillTaskEnvVarRequestCommand(
       names: requestedNames,
       canReload:
         !!activeCloudJob &&
-        !isExitedCloudTaskStatus(activeCloudJob.status) &&
+        !isExitedRunStatus(activeCloudJob.status) &&
         !!activeCloudJob.sandboxServerUrl,
       cloudJobId: activeCloudJob?.id ?? null,
     };

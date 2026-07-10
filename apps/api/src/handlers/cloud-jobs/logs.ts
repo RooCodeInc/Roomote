@@ -3,13 +3,13 @@ import { streamSSE, type SSEStreamingApi } from 'hono/streaming';
 
 import { createComputeProviderClient } from '@roomote/compute-providers';
 import {
-  cloudJobs,
   db,
   eq,
   resolveComputeProviderEnvValues,
+  taskRuns,
 } from '@roomote/db/server';
 import {
-  isExitedCloudTaskStatus,
+  isExitedRunStatus,
   resolveComputeProviderTarget,
 } from '@roomote/types';
 
@@ -20,7 +20,7 @@ const LOG_STREAM_READINESS_POLL_INTERVAL_MS = 2_000;
 const LOG_STREAM_READINESS_MAX_WAIT_MS = 15 * 60_000;
 
 const UNSUPPORTED_LOG_STREAMING_ERROR =
-  'Live log streaming is unavailable for this compute provider.';
+  'Live log streaming is unavailable for this sandbox provider.';
 
 export async function getCloudJobLogs(c: Context<{ Variables: Variables }>) {
   const authContext = c.get('authContext');
@@ -61,8 +61,8 @@ async function streamCloudJobLogs({
     );
   }
 
-  const cloudJob = await db.query.cloudJobs.findFirst({
-    where: eq(cloudJobs.id, cloudJobId),
+  const cloudJob = await db.query.taskRuns.findFirst({
+    where: eq(taskRuns.id, cloudJobId),
   });
 
   if (!cloudJob) {
@@ -93,7 +93,7 @@ async function streamCloudJobLogs({
     const startedAt = Date.now();
 
     while (!signal.aborted && (!machineId || !sandboxCmdId)) {
-      if (isExitedCloudTaskStatus(status)) {
+      if (isExitedRunStatus(status)) {
         break;
       }
 
@@ -104,8 +104,8 @@ async function streamCloudJobLogs({
 
       await sleep(LOG_STREAM_READINESS_POLL_INTERVAL_MS);
 
-      const latestCloudJob = await db.query.cloudJobs.findFirst({
-        where: eq(cloudJobs.id, cloudJobId),
+      const latestCloudJob = await db.query.taskRuns.findFirst({
+        where: eq(taskRuns.id, cloudJobId),
         columns: { machineId: true, sandboxCmdId: true, status: true },
       });
 

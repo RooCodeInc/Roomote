@@ -2,7 +2,7 @@ import {
   CONFLICT_RESOLUTION_SUMMARY_RESULT_KEY,
   parseConflictResolutionSummary,
 } from '@roomote/types';
-import { type CloudJob, sdk } from '@roomote/sdk/client';
+import { type Run, sdk } from '@roomote/sdk/client';
 
 import type {
   CallbackEvent,
@@ -10,7 +10,7 @@ import type {
   RunTaskContext,
 } from '../run-task';
 
-function getExistingResult(cloudJob: CloudJob): Record<string, unknown> {
+function getExistingResult(cloudJob: Run): Record<string, unknown> {
   if (
     !cloudJob.result ||
     typeof cloudJob.result !== 'object' ||
@@ -24,7 +24,7 @@ function getExistingResult(cloudJob: CloudJob): Record<string, unknown> {
 
 export const githubPrConflictResolveCallbacks: RunTaskCallbacks = {
   onMessage: async (
-    cloudJob: CloudJob,
+    cloudJob: Run,
     _taskId: string,
     event: CallbackEvent,
     context: RunTaskContext,

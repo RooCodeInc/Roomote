@@ -1,7 +1,7 @@
-import { CloudTaskStatus } from '@roomote/types';
+import { RunStatus } from '@roomote/types';
 import {
   db,
-  cloudJobs,
+  taskRuns,
   eq,
   markTaskStartParallelCountEndedAt,
 } from '@roomote/db/server';
@@ -22,11 +22,11 @@ export interface CancelLinearJobResult {
  * Cancel an active Linear job and clear its message queue.
  *
  * This is called when a user sends a "stop" signal from Linear to halt
- * agent work immediately. The job status is set to Canceled and any
+ * agent work immediately. The run status is set to Canceled and any
  * pending messages in the queue are cleared.
  *
  * Note: Lock release is handled by the controller when it detects the
- * job status change. This function only updates the database status.
+ * run status change. This function only updates the database status.
  */
 export async function cancelLinearJob(
   activeJob: ActiveLinearJobResult,
@@ -35,9 +35,9 @@ export async function cancelLinearJob(
   const { id: jobId } = activeJob;
 
   try {
-    // Verify the job exists
-    const job = await db.query.cloudJobs.findFirst({
-      where: eq(cloudJobs.id, jobId),
+    // Verify the run exists
+    const job = await db.query.taskRuns.findFirst({
+      where: eq(taskRuns.id, jobId),
     });
 
     if (!job) {
@@ -48,21 +48,21 @@ export async function cancelLinearJob(
       };
     }
 
-    // Update the job status to Canceled
+    // Update the run status to Canceled
     const endedAt = new Date();
 
     await db.transaction(async (tx) => {
       await tx
-        .update(cloudJobs)
+        .update(taskRuns)
         .set({
-          status: CloudTaskStatus.Canceled,
+          status: RunStatus.Canceled,
           canceledAt: endedAt,
           error: 'Canceled by user via stop signal',
         })
-        .where(eq(cloudJobs.id, jobId));
+        .where(eq(taskRuns.id, jobId));
 
       await markTaskStartParallelCountEndedAt(tx, {
-        cloudJobId: jobId,
+        runId: jobId,
         endedAt,
       });
     });

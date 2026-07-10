@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useMemo, useState, type ReactNode } from 'react';
-import { CloudTaskStatus } from '@roomote/types';
+import { RunStatus } from '@roomote/types';
 import { MessageSquareWarning } from 'lucide-react';
 import { Sun } from '@/components/system';
 import { Message, MessageContent, Shimmer } from '@/components/ai-elements';
@@ -44,8 +44,8 @@ export function HistoricalContent({ session, footer }: HistoricalContentProps) {
     if (
       !cloudJob ||
       !displayError ||
-      (cloudJob.status !== CloudTaskStatus.Failed &&
-        cloudJob.status !== CloudTaskStatus.Canceled)
+      (cloudJob.status !== RunStatus.Failed &&
+        cloudJob.status !== RunStatus.Canceled)
     ) {
       return null;
     }

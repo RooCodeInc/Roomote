@@ -9,10 +9,11 @@ import {
  * - `credential`: an account credential (token, key) the operator enters
  *   directly for the provider.
  * - `infrastructure`: a deployment worker-image artifact (base image ref,
- *   template id, snapshot name). Infrastructure values are UI-editable, but
- *   they are usually derived from the shared worker image or provisioned
- *   automatically, so they are surfaced as advanced overrides rather than
- *   primary inputs.
+ *   template id, snapshot name, domain/region). Some infrastructure values are
+ *   UI-editable advanced overrides; managed worker artifacts
+ *   (`MODAL_BASE_IMAGE_REF`, `E2B_TEMPLATE_ID`, `DAYTONA_SNAPSHOT_NAME`) are
+ *   not operator-edited in the UI — process env, derivation, or detached
+ *   provisioning owns them.
  */
 export type SetupComputeFieldCategory = 'credential' | 'infrastructure';
 
@@ -23,14 +24,13 @@ export type SetupComputeFieldDescriptor = {
   secret?: boolean;
   /**
    * Distinguishes account credentials from deployment-infrastructure values.
-   * Infrastructure fields (base images, template ids, snapshot names) can be
-   * saved from the UI, derived, or provisioned automatically.
+   * Infrastructure fields may be derived, provisioned automatically, or (for
+   * optional overrides such as domain/region) saved from the UI.
    */
   category: SetupComputeFieldCategory;
   /**
-   * Provider-specific infrastructure fields shown behind an "Advanced
-   * infrastructure" area in the UI, because a sensible value is usually
-   * derived from the shared worker image or provisioned automatically.
+   * Optional operator-editable infrastructure fields (domain/region) shown with
+   * credentials. Managed worker artifacts are never form inputs.
    */
   advanced?: boolean;
 };
@@ -61,6 +61,8 @@ export type SetupComputeProviderDescriptor = {
 export type SetupComputeFieldStatus = SetupComputeFieldDescriptor & {
   runtimeSatisfied: boolean;
   savedSatisfied: boolean;
+  /** Plain-text value for non-secret fields; secrets never round-trip here. */
+  savedValue?: string | null;
   /**
    * True when the deployment can derive a working default for this env-only
    * field without operator input (for example the Modal base image ref from
@@ -210,8 +212,17 @@ export const SETUP_COMPUTE_PROVIDER_CATALOG = [
         category: 'credential',
       },
       {
+        // Derived from the worker image (or process env); not a Settings/setup
+        // form input — matches E2B template / Daytona snapshot treatment.
         envVarName: 'MODAL_BASE_IMAGE_REF',
         label: 'Base Image Reference',
+        category: 'infrastructure',
+      },
+      {
+        envVarName: 'MODAL_REGIONS',
+        label: 'Modal Regions',
+        required: false,
+        secret: false,
         category: 'infrastructure',
         advanced: true,
       },
@@ -232,10 +243,10 @@ export const SETUP_COMPUTE_PROVIDER_CATALOG = [
         category: 'credential',
       },
       {
+        // Auto-provisioned (or process-env); not shown as a Settings/setup input.
         envVarName: 'E2B_TEMPLATE_ID',
         label: 'Worker Template ID',
         category: 'infrastructure',
-        advanced: true,
       },
       {
         envVarName: 'E2B_DOMAIN',
@@ -260,10 +271,10 @@ export const SETUP_COMPUTE_PROVIDER_CATALOG = [
         category: 'credential',
       },
       {
+        // Auto-provisioned (or process-env); not shown as a Settings/setup input.
         envVarName: 'DAYTONA_SNAPSHOT_NAME',
         label: 'Worker Snapshot Name',
         category: 'infrastructure',
-        advanced: true,
       },
       {
         envVarName: 'DAYTONA_API_URL',
@@ -293,11 +304,12 @@ export const SETUP_COMPUTE_PROVIDER_CATALOG = [
 ] as const satisfies readonly SetupComputeProviderDescriptor[];
 
 /**
- * Compute-provider env vars managed by the setup flow and the Settings →
- * Compute page: account credentials, provider-specific infrastructure values
+ * Sandbox-provider env vars managed by the setup flow and the Settings →
+ * Sandboxes page: account credentials, provider-specific infrastructure values
  * (base images, template ids, snapshot names), and the shared worker image.
- * They are reserved from the generic environment-variables editor so operators
- * configure them through the compute UI (or the deployment env) instead.
+ * Template IDs / snapshot names are reserved for process env + auto-
+ * provisioning rather than operator form inputs; they are still reserved from
+ * the generic environment-variables editor.
  */
 export const COMPUTE_PROVIDER_ENV_VAR_NAMES: ReadonlySet<string> = new Set([
   SHARED_WORKER_IMAGE_ENV_VAR,
@@ -306,14 +318,67 @@ export const COMPUTE_PROVIDER_ENV_VAR_NAMES: ReadonlySet<string> = new Set([
   ).flatMap((descriptor) => descriptor.fields.map((field) => field.envVarName)),
 ]);
 
+export const NON_SECRET_COMPUTE_ENV_VAR_NAMES: readonly string[] = (
+  SETUP_COMPUTE_PROVIDER_CATALOG as readonly SetupComputeProviderDescriptor[]
+).flatMap((descriptor) =>
+  descriptor.fields
+    .filter((field) => field.secret !== true)
+    .map((field) => field.envVarName),
+);
+
+function isSecretSetupComputeField(
+  field: Pick<SetupComputeFieldDescriptor, 'secret'>,
+): boolean {
+  return field.secret === true;
+}
+
 /**
  * Env-only infrastructure values that the deployment can provision itself
  * during setup (see the compute-provisioning command module in apps/web).
+ * These are not operator form inputs in Settings/setup — process env or
+ * detached provisioning owns them.
  */
 const SETUP_PROVISIONABLE_COMPUTE_ENV_VARS: ReadonlySet<string> = new Set([
   'E2B_TEMPLATE_ID',
   'DAYTONA_SNAPSHOT_NAME',
 ]);
+
+/**
+ * True for provider worker artifacts Roomote builds/registers itself
+ * (`E2B_TEMPLATE_ID`, `DAYTONA_SNAPSHOT_NAME`). These are not Settings/setup
+ * UI inputs: operators satisfy them via process env or auto-provisioning
+ * after credentials + a registry-qualified worker image are available.
+ */
+export function isAutoProvisionedComputeArtifactField(
+  field: Pick<SetupComputeFieldDescriptor, 'envVarName'>,
+): boolean {
+  return SETUP_PROVISIONABLE_COMPUTE_ENV_VARS.has(field.envVarName);
+}
+
+/**
+ * True for managed Modal / E2B / Daytona worker-image artifact env vars that
+ * Settings and setup never collect as form inputs. Process env, derivation
+ * from DOCKER_WORKER_IMAGE / RELEASE_VERSION, or detached provisioning owns
+ * them.
+ */
+export function isManagedComputeArtifactField(
+  field: Pick<SetupComputeFieldDescriptor, 'envVarName'>,
+): boolean {
+  return (
+    isAutoProvisionedComputeArtifactField(field) ||
+    field.envVarName === 'MODAL_BASE_IMAGE_REF'
+  );
+}
+
+/**
+ * True for fields the sandboxes UI and setup wizard may collect from an
+ * operator. Managed worker artifacts are excluded.
+ */
+export function isComputeOperatorEditableField(
+  field: Pick<SetupComputeFieldDescriptor, 'envVarName'>,
+): boolean {
+  return !isManagedComputeArtifactField(field);
+}
 
 const SETUP_COMPUTE_PROVIDER_BY_ID = new Map<
   ComputeProvider,
@@ -489,6 +554,7 @@ export function deriveModalBaseImageRefDefault(
 export function buildSetupComputeStatus(input: {
   runtimeEnv?: Partial<Record<string, string | undefined>> | null;
   persistedEnvVarNames?: Iterable<string>;
+  persistedEnvVarValues?: Partial<Record<string, string>>;
   persistedComputeConfig?: Partial<DeploymentComputeConfig> | null;
   selectedProvider?: ComputeProvider | null;
   /**
@@ -502,6 +568,7 @@ export function buildSetupComputeStatus(input: {
   const persistedEnvVarNameSet = new Set(
     Array.from(input.persistedEnvVarNames ?? []).map((name) => name.trim()),
   );
+  const persistedEnvVarValues = input.persistedEnvVarValues ?? {};
   const persistedComputeConfig = normalizeDeploymentComputeConfig(
     input.persistedComputeConfig,
   );
@@ -517,16 +584,15 @@ export function buildSetupComputeStatus(input: {
       ? runtimeDefaultValue
       : null;
 
-  // Worker image resolution follows the runtime precedence: an explicit
-  // process env value wins, then a saved deployment env var, then the ref
-  // derived from the baked RELEASE_VERSION. Only a registry-qualified ref is
-  // hosted-ready; a bare local tag is not pullable by hosted providers.
+  // Worker image resolution is deploy/runtime-managed only: process env wins,
+  // then the ref derived from the baked RELEASE_VERSION. Legacy saved
+  // deployment DOCKER_WORKER_IMAGE rows (from the removed Settings section)
+  // are ignored so they cannot stick above release-derived images. Only a
+  // registry-qualified ref is hosted-ready; a bare local tag is not pullable
+  // by hosted providers.
   const explicitWorkerImage = runtimeEnv.DOCKER_WORKER_IMAGE?.trim() || null;
-  const savedWorkerImage = input.savedWorkerImage?.trim() || null;
   const effectiveWorkerImage =
-    explicitWorkerImage ??
-    savedWorkerImage ??
-    deriveWorkerImageFromReleaseVersion(runtimeEnv);
+    explicitWorkerImage ?? deriveWorkerImageFromReleaseVersion(runtimeEnv);
   const hostedWorkerImageRef =
     deriveModalBaseImageRefDefault(effectiveWorkerImage) ??
     (isDevelopmentRuntime(runtimeEnv)
@@ -538,17 +604,28 @@ export function buildSetupComputeStatus(input: {
     envVarName: SHARED_WORKER_IMAGE_ENV_VAR,
     label: 'Worker image',
     runtimeSatisfied: isConfiguredEnvValue(runtimeEnv.DOCKER_WORKER_IMAGE),
-    savedSatisfied: persistedEnvVarNameSet.has(SHARED_WORKER_IMAGE_ENV_VAR),
+    // Legacy DB-backed worker images are no longer part of readiness/status.
+    savedSatisfied: false,
     hostedImageRef: hostedWorkerImageRef,
     hostedReady: hostedWorkerImageRef !== null,
   };
 
   const providers = SETUP_COMPUTE_PROVIDER_CATALOG.map((descriptor) => {
-    const fields: SetupComputeFieldStatus[] = descriptor.fields.map(
-      (field) => ({
+    const fields: SetupComputeFieldStatus[] = (
+      descriptor.fields as readonly SetupComputeFieldDescriptor[]
+    ).map((field) => {
+      const runtimeValue = runtimeEnv[field.envVarName]?.trim() || null;
+      const persistedValue =
+        persistedEnvVarValues[field.envVarName]?.trim() || null;
+      const savedValue = isSecretSetupComputeField(field)
+        ? null
+        : (runtimeValue ?? persistedValue);
+
+      return {
         ...field,
         runtimeSatisfied: isConfiguredEnvValue(runtimeEnv[field.envVarName]),
         savedSatisfied: persistedEnvVarNameSet.has(field.envVarName),
+        savedValue,
         defaultSatisfied:
           field.envVarName === 'MODAL_BASE_IMAGE_REF' &&
           derivedModalBaseImageRef !== null,
@@ -559,8 +636,8 @@ export function buildSetupComputeStatus(input: {
         setupProvisionable:
           SETUP_PROVISIONABLE_COMPUTE_ENV_VARS.has(field.envVarName) &&
           derivedModalBaseImageRef !== null,
-      }),
-    );
+      };
+    });
 
     const requiredFields = fields.filter(isRequiredComputeField);
     const runtimeConfigSatisfied = requiredFields.every(

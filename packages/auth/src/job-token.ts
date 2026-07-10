@@ -17,7 +17,9 @@ const ISSUER = 'rcc';
 
 export const createJobTokenOptionsSchema = z.object({
   cloudJobId: z.number(),
-  userId: z.string(),
+  // Null mints a deployment-service-principal token for jobs with no human
+  // driver (automation-initiated work).
+  userId: z.string().nullable(),
   timeoutMs: z.number(),
 });
 
@@ -44,7 +46,7 @@ export async function createJobToken({
     nbf: now - clockSkewGrace,
     v: 1,
     r: {
-      u: userId,
+      ...(userId ? { u: userId } : {}),
       t: 'cj',
     },
   };
@@ -86,7 +88,8 @@ export async function validateJobToken(
 
   return {
     cloudJobId: Number(payload.sub),
-    userId: payload.r.u,
+    userId: payload.r.u ?? null,
+    principal: payload.r.u ? 'user' : 'deployment',
     tokenType: payload.r.t,
     version: payload.v,
   };

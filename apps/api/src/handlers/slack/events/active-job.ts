@@ -40,12 +40,10 @@ import { getIsSlackDiverged } from '../helpers/thread-sync.js';
 
 type ActiveSlackJob = {
   id: number;
-  userId: string | null;
+  actingUserId: string | null;
   result: unknown;
   taskId: string | null;
   payload?: unknown;
-  prRepo?: string | null;
-  prNumber?: number | null;
 };
 
 const REQUEST_USER_INPUT_ALREADY_RECEIVED_TEXT =
@@ -282,8 +280,8 @@ async function handlePendingRequestUserInputReply(params: {
         footerText: await getSlackThreadFooterText({
           taskUrl: buildSlackRequestUserInputTaskUrl(activeJob),
           taskId: activeJob.taskId,
-          prRepo: activeJob.prRepo ?? null,
-          prNumber: activeJob.prNumber ?? null,
+          prRepo: null,
+          prNumber: null,
           channelId: event.channel,
           threadTs: threadId,
         }),
@@ -441,7 +439,7 @@ export async function processActiveJobMessage(
     const attachments = await processSlackAttachments({
       slack,
       files: currentMessageFiles,
-      userId: activeJob.userId ?? undefined,
+      userId: activeJob.actingUserId ?? undefined,
       userTextContext: stripLeadingSlackProductMention(
         stripLeadingRawSlackMention(event.text),
       ),
@@ -475,7 +473,7 @@ export async function processActiveJobMessage(
           claimedMessages,
           excludeFileIds,
           logContext: `active job ${activeJob.id} in ${event.channel}:${threadId}`,
-          userId: activeJob.userId ?? undefined,
+          userId: activeJob.actingUserId ?? undefined,
           messageText,
           currentAttachmentTexts: attachments.attachmentTexts,
           currentVideoDescriptions: attachments.videoDescriptions,

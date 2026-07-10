@@ -1,5 +1,6 @@
 import { getRedis } from '@roomote/redis';
-import { formatErrorForLog } from '@roomote/types';
+import { formatErrorForLog, type TaskInitiator } from '@roomote/types';
+import { and, db, eq, slackUserMappings } from '@roomote/db/server';
 import {
   type SlackFunctionExecutedEvent,
   SlackNotifier,
@@ -225,10 +226,34 @@ export async function processSlackWorkflowFunctionExecuted(params: {
       slackUserId: promptAuthorSlackUserId,
     });
 
+    // When the workflow step carries a human author, that human is the
+    // initiator (matched to a Roomote user when a mapping exists); otherwise
+    // the launch is automation-initiated.
+    const promptAuthorMapping = promptAuthorSlackUserId
+      ? await db.query.slackUserMappings.findFirst({
+          where: and(
+            eq(slackUserMappings.slackUserId, promptAuthorSlackUserId),
+            eq(slackUserMappings.slackTeamId, context.teamId),
+          ),
+          columns: { userId: true },
+        })
+      : null;
+    const initiator: TaskInitiator = promptAuthorSlackUserId
+      ? {
+          kind: 'user',
+          externalId: promptAuthorSlackUserId,
+          ...(promptAuthorMapping?.userId
+            ? { matchedUserId: promptAuthorMapping.userId }
+            : {}),
+        }
+      : { kind: 'automation', key: 'slack_workflow' };
+
     const result = await startAutoRoutedSlackTask({
       slackInstallation: context.slackInstallation,
       slack: context.slack,
-      launchUserId: launchIdentity.launchUserId,
+      initiator,
+      trigger: promptAuthorSlackUserId ? 'manual' : 'webhook',
+      launchUserId: promptAuthorMapping?.userId ?? null,
       slackUserId: launchIdentity.slackUserId,
       initiatingSlackUserId:
         launchIdentity.slackUserId === context.slackInstallation.botUserId

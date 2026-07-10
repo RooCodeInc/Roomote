@@ -1,14 +1,13 @@
 import { Hono } from 'hono';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { WebStandardStreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/webStandardStreamableHttp.js';
-import { resolveUserIdForCloudJob } from '@roomote/cloud-agents/server';
 import {
   and,
-  cloudJobs,
   db,
   eq,
   isNull,
   mcpConnections,
+  taskRuns,
 } from '@roomote/db/server';
 import { isMcpConnectionSnowflakeConfig } from '@roomote/types';
 
@@ -43,29 +42,22 @@ async function resolveSnowflakeMcpAuth(
   }
 
   if (isJobTokenContext(authContext)) {
-    const cloudJob = await db.query.cloudJobs.findFirst({
-      columns: { id: true, userId: true },
-      where: eq(cloudJobs.id, authContext.cloudJobId),
+    const cloudJob = await db.query.taskRuns.findFirst({
+      columns: { id: true },
+      where: eq(taskRuns.id, authContext.cloudJobId),
     });
 
     if (!cloudJob) {
       throw new McpProxyError(404, 'Cloud job not found for this MCP token');
     }
 
-    const resolvedUserId = await resolveUserIdForCloudJob(cloudJob);
-    if (!resolvedUserId) {
-      throw new McpProxyError(
-        403,
-        'MCP proxy requires a cloud job associated with a real user',
-      );
-    }
-
-    if (resolvedUserId !== authContext.userId) {
-      throw new McpProxyError(
-        403,
-        'MCP token user does not match cloud job user',
-      );
-    }
+    // No principal equality check: the run-scoped token IS the authorization
+    // (only this run's sandbox holds it), and Snowflake credentials come from a
+    // deployment-scoped connection, so the token's userId plays no role in
+    // credential selection. The token's userId is mint-time attribution while
+    // task_runs.actingUserId is current-steering attribution — they
+    // legitimately diverge once a web steer or follow-up switches the acting
+    // user mid-run.
 
     return {
       userId: authContext.userId,

@@ -1,12 +1,12 @@
 import {
-  cloudJobFactory,
+  runFactory,
   db,
-  cloudJobs,
   eq,
   taskFactory,
+  taskRuns,
   userFactory,
 } from '@roomote/db/server';
-import { CloudTaskStatus, CloudTaskType } from '@roomote/types';
+import { RunStatus, TaskPayloadKind } from '@roomote/types';
 import type { FeatureFlag } from '@roomote/feature-flags';
 
 import type { UserAuthSuccess } from '@/types';
@@ -45,22 +45,21 @@ describe('takeOverBrowserControlCommand', () => {
     const owner = await userFactory.create();
     const viewer = await userFactory.create();
     const task = await taskFactory.create({
-      userId: owner.id,
+      initiatorUserId: owner.id,
     });
-    const staleCloudJob = await cloudJobFactory.create({
-      userId: owner.id,
+    const staleCloudJob = await runFactory.create({
       taskId: task.id,
       actingUserId: owner.id,
-      status: CloudTaskStatus.Completed,
+      status: RunStatus.Completed,
       snapshotId: 'snapshot-1',
     });
-    const activeCloudJob = await cloudJobFactory.create({
-      userId: owner.id,
+    const activeCloudJob = await runFactory.create({
       taskId: task.id,
-      sourceCloudJobId: staleCloudJob.id,
-      type: CloudTaskType.SnapshotResume,
+      sourceRunId: staleCloudJob.id,
+      kind: 'resume',
+      payloadKind: TaskPayloadKind.SnapshotResume,
       actingUserId: owner.id,
-      status: CloudTaskStatus.Running,
+      status: RunStatus.Running,
     });
 
     const result = await takeOverBrowserControlCommand(
@@ -80,11 +79,11 @@ describe('takeOverBrowserControlCommand', () => {
 
     const updatedCloudJobs = await db
       .select({
-        id: cloudJobs.id,
-        actingUserId: cloudJobs.actingUserId,
+        id: taskRuns.id,
+        actingUserId: taskRuns.actingUserId,
       })
-      .from(cloudJobs)
-      .where(eq(cloudJobs.taskId, task.id));
+      .from(taskRuns)
+      .where(eq(taskRuns.taskId, task.id));
 
     expect(updatedCloudJobs).toEqual(
       expect.arrayContaining([

@@ -215,6 +215,25 @@ export function buildRepositoryCloneUrl({
   return `https://${host}/${repositoryFullName}.git`;
 }
 
+/**
+ * Strips userinfo (username/password) from a clone URL. Azure DevOps
+ * remote URLs embed the organization as the URL username
+ * (https://org@dev.azure.com/...), which breaks git insteadOf prefix
+ * rewrites and must never carry credentials — those come from the
+ * worker credential helper or local proxy instead.
+ */
+export function stripCloneUrlUserInfo(rawUrl: string): string {
+  try {
+    const url = new URL(rawUrl);
+    url.username = '';
+    url.password = '';
+
+    return url.toString();
+  } catch {
+    return rawUrl;
+  }
+}
+
 function encodePathSegment(segment: string | undefined): string {
   return encodeURIComponent(segment ?? '');
 }

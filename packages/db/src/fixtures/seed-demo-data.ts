@@ -1,10 +1,10 @@
 import { and, eq } from 'drizzle-orm';
 
-import { CloudTaskStatus } from '@roomote/types';
+import { RunStatus } from '@roomote/types';
 
 import type { CreateUser } from '../types';
 import {
-  cloudJobs,
+  taskRuns,
   deploymentSettings,
   environments,
   githubInstallations,
@@ -15,7 +15,7 @@ import {
 import { db } from '../db';
 
 import {
-  cloudJobFactory,
+  runFactory,
   environmentFactory,
   githubInstallationFactory,
   repositoryFactory,
@@ -46,24 +46,24 @@ export const demoSeedTasks = [
     id: 'demo-seed-task-fix-login',
     title: 'Fix login redirect loop on expired sessions',
     mode: 'code',
-    completed: true,
-    cloudJobStatus: CloudTaskStatus.Completed,
+    state: 'completed',
+    cloudJobStatus: RunStatus.Completed,
     repositoryFullName: 'roomote-demo/demo-web',
   },
   {
     id: 'demo-seed-task-add-webhooks',
     title: 'Add webhook retries with exponential backoff',
     mode: 'code',
-    completed: true,
-    cloudJobStatus: CloudTaskStatus.Completed,
+    state: 'completed',
+    cloudJobStatus: RunStatus.Completed,
     repositoryFullName: 'roomote-demo/demo-api',
   },
   {
     id: 'demo-seed-task-explain-auth',
     title: 'Explain how session tokens are validated',
     mode: 'ask',
-    completed: false,
-    cloudJobStatus: CloudTaskStatus.Running,
+    state: 'active',
+    cloudJobStatus: RunStatus.Running,
     repositoryFullName: 'roomote-demo/demo-api',
   },
 ] as const;
@@ -198,9 +198,9 @@ export async function seedDemoData(): Promise<DemoSeedSummary> {
   record(`environment ${demoSeedEnvironmentName}`, !existingEnvironment);
 
   // Demo tasks in a few representative states. Each task gets a matching
-  // cloud job because the task-history views only render tasks that have at
-  // least one cloud job, and `attributedUserId` so the tasks show up under
-  // the demo user's creator filter.
+  // task_run because the task-history views only render tasks that have at
+  // least one run, and initiatorUserId so the tasks show up under the demo
+  // user's initiator filter.
   for (const task of demoSeedTasks) {
     const existingTask = await db.query.tasks.findFirst({
       where: eq(tasks.id, task.id),
@@ -209,11 +209,10 @@ export async function seedDemoData(): Promise<DemoSeedSummary> {
     if (!existingTask) {
       await taskFactory.create({
         id: task.id,
-        userId: demoSeedUserId,
-        attributedUserId: demoSeedUserId,
+        initiatorUserId: demoSeedUserId,
         title: task.title,
         mode: task.mode,
-        completed: task.completed,
+        state: task.state,
         repositoryName: task.repositoryFullName,
         repositoryUrl: `https://github.com/${task.repositoryFullName}`,
         defaultBranch: 'main',
@@ -222,14 +221,14 @@ export async function seedDemoData(): Promise<DemoSeedSummary> {
 
     record(`task ${task.id}`, !existingTask);
 
-    const existingCloudJob = await db.query.cloudJobs.findFirst({
-      where: eq(cloudJobs.taskId, task.id),
+    const existingCloudJob = await db.query.taskRuns.findFirst({
+      where: eq(taskRuns.taskId, task.id),
     });
 
     if (!existingCloudJob) {
-      await cloudJobFactory.create({
+      await runFactory.create({
         taskId: task.id,
-        userId: demoSeedUserId,
+        actingUserId: demoSeedUserId,
         status: task.cloudJobStatus,
         payload: {
           repo: task.repositoryFullName,

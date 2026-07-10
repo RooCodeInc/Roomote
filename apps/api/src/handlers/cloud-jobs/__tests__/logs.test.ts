@@ -12,12 +12,12 @@ const mockStreamCommandOutput = vi.hoisted(() => vi.fn());
 vi.mock('@roomote/db/server', () => ({
   and: vi.fn((...args) => ({ type: 'and', args })),
   eq: vi.fn((...args) => ({ type: 'eq', args })),
-  cloudJobs: {
-    id: 'cloudJobs.id',
+  taskRuns: {
+    id: 'taskRuns.id',
   },
   db: {
     query: {
-      cloudJobs: {
+      taskRuns: {
         findFirst: mockFindFirst,
       },
     },
@@ -78,6 +78,7 @@ describe('getCloudJobLogs', () => {
     const jobTokenContext: JobTokenContext = {
       cloudJobId: 999,
       userId: 'user-1',
+      principal: 'user',
       tokenType: 'cj',
       version: 1,
     };
@@ -97,6 +98,7 @@ describe('getCloudJobLogs', () => {
     const jobTokenContext: JobTokenContext = {
       cloudJobId: 101,
       userId: 'user-1',
+      principal: 'user',
       tokenType: 'cj',
       version: 1,
     };

@@ -28,7 +28,6 @@ body:
         - Roomote agents
         - API
         - Contributor guidance
-        - Internal agent guidance
         - Other
     validations:
       required: true
@@ -37,7 +36,7 @@ body:
     attributes:
       label: Page or file
       description: Link to the page or path, if known.
-      placeholder: "Example: apps/docs/... or .agent-guidance/..."
+      placeholder: "Example: apps/docs/..."
     validations:
       required: false
   - type: textarea

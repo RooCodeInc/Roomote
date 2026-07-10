@@ -2,26 +2,28 @@ import { TRPCClientError } from '@trpc/client';
 import { withSandboxServerRpcClient } from '@roomote/sdk/server';
 import {
   and,
-  cloudJobs,
+  cancelTaskRunDirect,
   db,
   eq,
-  inArray,
   isNull,
-  markTaskStartParallelCountEndedAt,
-  not,
+  taskRuns,
 } from '@roomote/db/server';
-import {
-  CloudTaskStatus,
-  exitedCloudTaskStatuses,
-  isExitedCloudTaskStatus,
-} from '@roomote/types';
+import { type RunStatus, isExitedRunStatus } from '@roomote/types';
 
 interface StopTaskJob {
   id: number;
-  status: CloudTaskStatus;
+  status: RunStatus;
   sandboxServerUrl: string | null;
-  userId: string | null;
   actingUserId: string | null;
+}
+
+/**
+ * Attribution for the user stop, forwarded to the sandbox so the transcript
+ * gets a visible `task_cancelled` marker naming who stopped the task.
+ */
+interface StopTaskAttribution {
+  name?: string;
+  source?: string;
 }
 
 type StopTaskJobResult =
@@ -30,7 +32,7 @@ type StopTaskJobResult =
 
 type StopTaskJobResolution =
   | { kind: 'not_found' }
-  | { kind: 'terminal'; status: CloudTaskStatus }
+  | { kind: 'terminal'; status: RunStatus }
   | { kind: 'no_sandbox' }
   | { kind: 'sandbox'; job: StopTaskJob & { sandboxServerUrl: string } };
 
@@ -38,56 +40,36 @@ async function findCurrentStopTaskJob(
   jobId: number,
 ): Promise<StopTaskJob | null> {
   return (
-    (await db.query.cloudJobs.findFirst({
-      where: eq(cloudJobs.id, jobId),
+    (await db.query.taskRuns.findFirst({
+      where: eq(taskRuns.id, jobId),
       columns: {
         id: true,
         status: true,
         sandboxServerUrl: true,
-        userId: true,
         actingUserId: true,
       },
     })) ?? null
   );
 }
 
+/**
+ * Persist the stop request on the cloud job row before the cancel is carried
+ * out. If the sandbox dies before the row reaches a terminal state, recovery
+ * sweeps use this to finalize the job as canceled instead of misreporting the
+ * deliberate stop as a runtime failure. Keeps the earliest request time.
+ */
+async function markCancelRequested(jobId: number): Promise<void> {
+  await db
+    .update(taskRuns)
+    .set({ cancelRequestedAt: new Date() })
+    .where(and(eq(taskRuns.id, jobId), isNull(taskRuns.cancelRequestedAt)));
+}
+
 async function cancelTaskJobDirect(jobId: number): Promise<boolean> {
-  const endedAt = new Date();
-
-  const [updatedJob] = await db.transaction(async (tx) => {
-    const [job] = await tx
-      .update(cloudJobs)
-      .set({
-        status: CloudTaskStatus.Canceled,
-        canceledAt: endedAt,
-      })
-      .where(
-        and(
-          eq(cloudJobs.id, jobId),
-          isNull(cloudJobs.sandboxServerUrl),
-          not(
-            inArray(
-              cloudJobs.status,
-              exitedCloudTaskStatuses as unknown as CloudTaskStatus[],
-            ),
-          ),
-        ),
-      )
-      .returning({ id: cloudJobs.id });
-
-    if (!job) {
-      return [];
-    }
-
-    await markTaskStartParallelCountEndedAt(tx, {
-      cloudJobId: jobId,
-      endedAt,
-    });
-
-    return [true];
-  });
-
-  return Boolean(updatedJob);
+  // Shared @roomote/db helper (also used by the work-item launch surfaces to
+  // clean up an orphaned run after a lost fenced finalize): guarded
+  // pre-sandbox cancel + task-state re-derive + parallel-count close.
+  return cancelTaskRunDirect({ runId: jobId });
 }
 
 function createTaskNotFoundResult(): StopTaskJobResult {
@@ -98,7 +80,7 @@ function createTaskNotFoundResult(): StopTaskJobResult {
   };
 }
 
-function createTaskNotActiveResult(status: CloudTaskStatus): StopTaskJobResult {
+function createTaskNotActiveResult(status: RunStatus): StopTaskJobResult {
   return {
     success: false,
     statusCode: 409,
@@ -119,7 +101,7 @@ function resolveStopTaskJob(job: StopTaskJob | null): StopTaskJobResolution {
     return { kind: 'not_found' };
   }
 
-  if (isExitedCloudTaskStatus(job.status)) {
+  if (isExitedRunStatus(job.status)) {
     return { kind: 'terminal', status: job.status };
   }
 
@@ -158,9 +140,10 @@ async function readCurrentStopTaskResolution(
 async function stopTaskSandboxJob(params: {
   job: StopTaskJob & { sandboxServerUrl: string };
   authUserId?: string | null;
+  cancelledBy?: StopTaskAttribution;
 }): Promise<StopTaskJobResult> {
-  const { job, authUserId } = params;
-  const tokenUserId = authUserId ?? job.actingUserId ?? job.userId;
+  const { job, authUserId, cancelledBy } = params;
+  const tokenUserId = authUserId ?? job.actingUserId;
 
   if (!tokenUserId) {
     return {
@@ -170,12 +153,17 @@ async function stopTaskSandboxJob(params: {
     };
   }
 
+  await markCancelRequested(job.id);
+
   try {
     await withSandboxServerRpcClient({
       cloudJobId: job.id,
       userId: tokenUserId,
       sandboxServerUrl: job.sandboxServerUrl,
-      call: (client) => client.commands.cancelTask.mutate(),
+      call: (client) =>
+        client.commands.cancelTask.mutate(
+          cancelledBy ? { cancelledBy } : undefined,
+        ),
     });
 
     return { success: true, mode: 'sandbox_stop' };
@@ -196,8 +184,10 @@ export async function stopTaskJob(params: {
   job: StopTaskJob;
   authUserId?: string | null;
   allowDirectCancelWithoutSandbox?: boolean;
+  cancelledBy?: StopTaskAttribution;
 }): Promise<StopTaskJobResult> {
-  const { job, authUserId, allowDirectCancelWithoutSandbox } = params;
+  const { job, authUserId, allowDirectCancelWithoutSandbox, cancelledBy } =
+    params;
 
   const initialResolution = resolveStopTaskJob(job);
 
@@ -209,6 +199,7 @@ export async function stopTaskJob(params: {
     return await stopTaskSandboxJob({
       job: initialResolution.job,
       authUserId,
+      cancelledBy,
     });
   }
 
@@ -222,6 +213,7 @@ export async function stopTaskJob(params: {
     return await stopTaskSandboxJob({
       job: refreshedResolution.job,
       authUserId,
+      cancelledBy,
     });
   }
 
@@ -239,6 +231,7 @@ export async function stopTaskJob(params: {
     return await stopTaskSandboxJob({
       job: racedResolution.job,
       authUserId,
+      cancelledBy,
     });
   }
 

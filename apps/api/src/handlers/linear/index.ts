@@ -4,8 +4,8 @@ import { Hono } from 'hono';
 
 import {
   AGENT_DISPLAY_NAME,
-  type CloudTaskPayload,
-  CloudTaskType,
+  type TaskPayload,
+  TaskPayloadKind,
   formatErrorForLog,
   parseAcpRequestUserInputAnswerReply,
   ALL_REPOSITORIES,
@@ -17,7 +17,7 @@ import { Env } from '@roomote/env';
 import {
   type RoutingDebugInfo,
   type RoutingWorkspace,
-  enqueueCloudTask,
+  enqueueTask,
   routeTask,
   buildLinearRoutingContext,
 } from '@roomote/cloud-agents/server';
@@ -800,7 +800,9 @@ async function handleAgentSessionEvent(
           typeof completedPayload?.environmentId === 'string'
             ? completedPayload.environmentId
             : undefined;
-        const resumePayload: CloudTaskPayload<CloudTaskType.SnapshotResume> = {
+        const resumePayload: TaskPayload<
+          typeof TaskPayloadKind.SnapshotResume
+        > = {
           repo,
           environmentId,
           port: completedJob.port ?? undefined,
@@ -816,19 +818,17 @@ async function handleAgentSessionEvent(
           completedPayload,
         );
 
-        const resumeLaunch = await enqueueCloudTask(
+        // Resumes never create tasks and never re-attribute; the resuming
+        // human becomes the new run's acting user.
+        const resumeLaunch = await enqueueTask(
           {
-            type: CloudTaskType.SnapshotResume,
-            userId: completedJob.userId,
-            linearSessionId: sessionId,
-            linearIssueId: agentSession.issue.id,
-            linearOrganizationId: organizationId,
-            sourceSnapshotId: completedJob.snapshotId,
-            sourceCloudJobId: completedJob.id,
-            ...(completedJob.slackThreadTs
-              ? { slackThreadTs: completedJob.slackThreadTs }
-              : {}),
-            payload: resumePayload,
+            task: {
+              type: TaskPayloadKind.SnapshotResume,
+              sourceSnapshotId: completedJob.snapshotId,
+              sourceCloudJobId: completedJob.id,
+              payload: resumePayload,
+            },
+            actingUserId: userId ?? completedJob.actingUserId ?? null,
           },
           {},
         );

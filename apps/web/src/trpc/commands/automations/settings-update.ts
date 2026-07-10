@@ -1,24 +1,22 @@
 import {
-  type BackgroundAutomationManagerChannelKind,
-  type BackgroundAutomationScheduleField,
   DEFAULT_CONFLICT_RESOLUTION_MAX_PR_AGE_DAYS,
   DEFAULT_CHANNEL_AUTO_START_LAUNCH_MODE,
   DEFAULT_PR_REVIEWER_SETTINGS,
   DEFAULT_SUGGESTER_ROUTING_MODE,
-  getTriggerableBackgroundAutomationDescriptor,
-  hasTriggerableBackgroundAutomationManagerChannelKind,
+  getTriggerableBackgroundAutomationDescriptorByKey,
   isConflictResolverMaxPrAgeDays,
+  type AutomationTarget,
   type SuggesterRoutingMode,
   type PrReviewerSettings,
+  type TriggerableBackgroundAutomationKey,
 } from '@roomote/types';
 import {
-  backgroundAgentSettings,
   db,
   DEFAULT_CONFLICT_RESOLVER_LABEL,
+  deploymentSettings,
   getBackgroundAgentSettingsForDeployment,
   MANAGER_CHANNEL_STARTER_AUTOMATION_SETTINGS,
-  resolveManagerSlackChannelId,
-  upsertBackgroundAutomation,
+  upsertAutomation,
 } from '@roomote/db/server';
 import { validateSuggestionRoutingInstructions } from '@roomote/cloud-agents/server';
 import { FeatureFlag } from '@roomote/feature-flags';
@@ -95,12 +93,10 @@ function keepPersistedSlackChannel(
 }
 
 function buildSuggesterAutomationSettings(params: {
-  instructions: string | null;
   routingInstructions: string | null;
   routingMode: SuggesterRoutingMode;
 }): Record<string, string> {
   return {
-    ...(params.instructions ? { instructions: params.instructions } : {}),
     ...(params.routingInstructions
       ? { routingInstructions: params.routingInstructions }
       : {}),
@@ -108,6 +104,20 @@ function buildSuggesterAutomationSettings(params: {
       ? { routingMode: params.routingMode }
       : {}),
   };
+}
+
+function buildSlackChannelTargets(
+  channelId: string | null,
+): AutomationTarget[] {
+  return channelId
+    ? [
+        {
+          provider: 'slack',
+          targetKind: 'slack_channel',
+          externalRef: channelId,
+        },
+      ]
+    : [];
 }
 
 export async function updateBackgroundAgentSettingsCommand(
@@ -139,7 +149,6 @@ export async function updateBackgroundAgentSettingsCommand(
         channelAutoStartSlackChannels: string[];
         managerSlackChannel: string | null;
         managerStatsSlackChannel: string | null;
-        coachSlackChannel: string | null;
         suggesterSlackChannel: string | null;
         announcerSlackChannel: string | null;
         platformIssueSlackChannel: string | null;
@@ -163,7 +172,6 @@ export async function updateBackgroundAgentSettingsCommand(
   const shouldUpdateManagerStats = input.savingAgent === 'managerStats';
   const shouldUpdateSentryTriage = input.savingAgent === 'sentryTriage';
   const shouldUpdateDependabotTriage = input.savingAgent === 'dependabotTriage';
-  const shouldUpdateCoach = input.savingAgent === 'coach';
   const shouldUpdateSuggester = input.savingAgent === 'suggester';
   const shouldUpdateAnnouncer = input.savingAgent === 'announcer';
   const shouldUpdatePlatformIssueAlerts =
@@ -218,10 +226,6 @@ export async function updateBackgroundAgentSettingsCommand(
   ) {
     fieldErrors.channelAutoStartLaunchCriteria =
       'Each auto-respond channel can include up to 4,000 launch criteria characters.';
-  }
-
-  if ((input.coachInstructions?.length ?? 0) > 8_000) {
-    fieldErrors.coachInstructions = 'Coach instructions are too long.';
   }
 
   if ((input.suggesterInstructions?.length ?? 0) > 10_000) {
@@ -281,9 +285,6 @@ export async function updateBackgroundAgentSettingsCommand(
   const dependabotTriageSlackChannel = shouldUpdateDependabotTriage
     ? normalizeOptionalText(input.dependabotTriageSlackChannel)
     : null;
-  const coachSlackChannel = shouldUpdateCoach
-    ? normalizeOptionalText(input.coachSlackChannel)
-    : null;
   const suggesterSlackChannel = shouldUpdateSuggester
     ? normalizeOptionalText(input.suggesterSlackChannel)
     : null;
@@ -309,43 +310,29 @@ export async function updateBackgroundAgentSettingsCommand(
     shouldUpdateChannelAutoStart &&
     channelAutoStartRows.some((row) => Boolean(row.slackChannel));
 
-  const slackInstallation =
+  const requiresSlackInstallation =
     channelAutoStartRequiresSlackInstallation ||
-    managerSlackChannel ||
-    managerStatsSlackChannel ||
-    sentryTriageSlackChannel ||
-    dependabotTriageSlackChannel ||
-    coachSlackChannel ||
-    suggesterSlackChannel ||
-    announcerSlackChannel ||
-    platformIssueSlackChannel ||
-    securityAuditorSlackChannel ||
-    codeQualityAuditorSlackChannel ||
-    ciFailureTriageSlackChannel ||
-    suggesterRoutingRequiresSlackInstallation
-      ? await findActiveSlackInstallationForOrg()
-      : null;
+    Boolean(managerSlackChannel) ||
+    Boolean(managerStatsSlackChannel) ||
+    Boolean(sentryTriageSlackChannel) ||
+    Boolean(dependabotTriageSlackChannel) ||
+    Boolean(suggesterSlackChannel) ||
+    Boolean(announcerSlackChannel) ||
+    Boolean(platformIssueSlackChannel) ||
+    Boolean(securityAuditorSlackChannel) ||
+    Boolean(codeQualityAuditorSlackChannel) ||
+    Boolean(ciFailureTriageSlackChannel) ||
+    suggesterRoutingRequiresSlackInstallation;
+
+  const slackInstallation = requiresSlackInstallation
+    ? await findActiveSlackInstallationForOrg()
+    : null;
 
   const notifier = slackInstallation
     ? new SlackNotifier(slackInstallation.botAccessToken)
     : null;
 
-  if (
-    (channelAutoStartRequiresSlackInstallation ||
-      managerSlackChannel ||
-      managerStatsSlackChannel ||
-      sentryTriageSlackChannel ||
-      dependabotTriageSlackChannel ||
-      coachSlackChannel ||
-      suggesterSlackChannel ||
-      announcerSlackChannel ||
-      platformIssueSlackChannel ||
-      securityAuditorSlackChannel ||
-      codeQualityAuditorSlackChannel ||
-      ciFailureTriageSlackChannel ||
-      suggesterRoutingRequiresSlackInstallation) &&
-    !notifier
-  ) {
+  if (requiresSlackInstallation && !notifier) {
     fieldErrors.general = 'Connect Slack before configuring agent channels.';
   }
 
@@ -355,7 +342,6 @@ export async function updateBackgroundAgentSettingsCommand(
     managerStatsChannelResult,
     sentryTriageChannelResult,
     dependabotTriageChannelResult,
-    coachChannelResult,
     suggesterChannelResult,
     announcerChannelResult,
     platformIssueChannelResult,
@@ -367,7 +353,12 @@ export async function updateBackgroundAgentSettingsCommand(
       channelAutoStartRows.map((row) =>
         resolveChannelId({
           field: 'channelAutoStartSlackChannels',
-          input: row.slackChannel,
+          // Prefer the persisted channel ID for untouched rows: resolving by ID
+          // short-circuits without a Slack lookup, so an archived/renamed/private
+          // channel elsewhere in the list can't block saving an edit to another
+          // row. Fall back to the submitted name for new or channel-edited rows.
+          input:
+            normalizeSlackChannelIdInput(row.channelId) ?? row.slackChannel,
           notifier,
         }),
       ),
@@ -405,13 +396,6 @@ export async function updateBackgroundAgentSettingsCommand(
       : keepPersistedSlackChannel(
           existingSettings?.dependabotTriageSlackChannelId,
         ),
-    shouldUpdateCoach
-      ? resolveChannelId({
-          field: 'coachSlackChannel',
-          input: coachSlackChannel,
-          notifier,
-        })
-      : keepPersistedSlackChannel(existingSettings?.coachSlackChannelId),
     shouldUpdateSuggester
       ? resolveChannelId({
           field: 'suggesterSlackChannel',
@@ -471,35 +455,14 @@ export async function updateBackgroundAgentSettingsCommand(
     }
   }
 
-  if (managerChannelResult.error) {
-    fieldErrors[managerChannelResult.error.field] =
-      managerChannelResult.error.message;
-  }
-
-  if (coachChannelResult.error) {
-    fieldErrors[coachChannelResult.error.field] =
-      coachChannelResult.error.message;
-  }
-
-  if (announcerChannelResult.error) {
-    fieldErrors[announcerChannelResult.error.field] =
-      announcerChannelResult.error.message;
-  }
-
-  if (suggesterChannelResult.error) {
-    fieldErrors[suggesterChannelResult.error.field] =
-      suggesterChannelResult.error.message;
-  }
-
-  if (platformIssueChannelResult.error) {
-    fieldErrors[platformIssueChannelResult.error.field] =
-      platformIssueChannelResult.error.message;
-  }
-
   for (const result of [
+    managerChannelResult,
     managerStatsChannelResult,
     sentryTriageChannelResult,
     dependabotTriageChannelResult,
+    suggesterChannelResult,
+    announcerChannelResult,
+    platformIssueChannelResult,
     securityAuditorChannelResult,
     codeQualityAuditorChannelResult,
     ciFailureTriageChannelResult,
@@ -556,7 +519,7 @@ export async function updateBackgroundAgentSettingsCommand(
 
   if (
     shouldUpdateChannelAutoStart &&
-    channelAutoStartRows.some((row) => !row.slackChannel) &&
+    channelAutoStartRows.some((row) => !row.slackChannel && !row.channelId) &&
     !fieldErrors.channelAutoStartSlackChannels
   ) {
     fieldErrors.channelAutoStartSlackChannels =
@@ -578,19 +541,6 @@ export async function updateBackgroundAgentSettingsCommand(
     }
   }
 
-  const managerRoutingState = {
-    managerSlackChannelId: managerChannelResult.channelId,
-    managerStatsSlackChannelId: managerStatsChannelResult.channelId,
-    sentryTriageSlackChannelId: sentryTriageChannelResult.channelId,
-    dependabotTriageSlackChannelId: dependabotTriageChannelResult.channelId,
-    coachSlackChannelId: coachChannelResult.channelId,
-    suggesterSlackChannelId: suggesterChannelResult.channelId,
-    announcerSlackChannelId: announcerChannelResult.channelId,
-    platformIssueSlackChannelId: platformIssueChannelResult.channelId,
-    securityAuditorSlackChannelId: securityAuditorChannelResult.channelId,
-    codeQualityAuditorSlackChannelId: codeQualityAuditorChannelResult.channelId,
-    ciFailureTriageSlackChannelId: ciFailureTriageChannelResult.channelId,
-  };
   const usingLegacyChannelAutoStartInput =
     input.channelAutoStartSlackChannels === undefined &&
     (input.channelAutoStartEnabled !== undefined ||
@@ -634,11 +584,11 @@ export async function updateBackgroundAgentSettingsCommand(
   const normalizedSuggesterInstructions = normalizeOptionalText(
     input.suggesterInstructions,
   );
+  const effectiveSuggesterInstructions =
+    effectiveSuggesterRoutingMode === 'group_by_instructions'
+      ? existingSettings.suggesterInstructions
+      : normalizedSuggesterInstructions;
   const suggesterAutomationSettings = buildSuggesterAutomationSettings({
-    instructions:
-      effectiveSuggesterRoutingMode === 'group_by_instructions'
-        ? existingSettings.suggesterInstructions
-        : normalizedSuggesterInstructions,
     routingMode: effectiveSuggesterRoutingMode,
     routingInstructions: effectiveSuggesterRoutingInstructions,
   });
@@ -648,77 +598,87 @@ export async function updateBackgroundAgentSettingsCommand(
   const codeQualityAuditorFrequency =
     input.codeQualityAuditorFrequency ?? 'off';
   const ciFailureTriageFrequency = input.ciFailureTriageFrequency ?? 'off';
-  const effectiveAutomationFrequencies = {
-    conflictResolverFrequency: input.conflictResolverFrequency,
-    suggesterFrequency: effectiveSuggesterFrequency,
-    announcerFrequency: effectiveAnnouncerFrequency,
-    managerStatsFrequency: effectiveManagerStatsFrequency,
-    sentryTriageFrequency,
-    dependabotTriageFrequency,
-    securityAuditorFrequency,
-    codeQualityAuditorFrequency,
-    ciFailureTriageFrequency,
-  } as const;
-  const getEffectiveAutomationFrequency = (
-    field: BackgroundAutomationScheduleField,
-  ) => effectiveAutomationFrequencies[field];
-  const managerChannelAutomationDescriptors = [
-    getTriggerableBackgroundAutomationDescriptor('suggester'),
-    getTriggerableBackgroundAutomationDescriptor('announcer'),
-    getTriggerableBackgroundAutomationDescriptor('managerStats'),
-    getTriggerableBackgroundAutomationDescriptor('sentryTriage'),
-    getTriggerableBackgroundAutomationDescriptor('dependabotTriage'),
-    getTriggerableBackgroundAutomationDescriptor('securityAuditor'),
-    getTriggerableBackgroundAutomationDescriptor('codeQualityAuditor'),
-    getTriggerableBackgroundAutomationDescriptor('ciFailureTriage'),
-  ].filter(
-    (
-      descriptor,
-    ): descriptor is NonNullable<
-      ReturnType<typeof getTriggerableBackgroundAutomationDescriptor>
-    > & {
-      managerChannelKind: BackgroundAutomationManagerChannelKind;
-    } =>
-      descriptor != null &&
-      hasTriggerableBackgroundAutomationManagerChannelKind(descriptor),
-  );
 
-  if (input.coachFrequency !== 'off' && !coachChannelResult.channelId) {
-    fieldErrors.coachSlackChannel =
-      fieldErrors.coachSlackChannel ||
-      'Choose a Slack channel before enabling Suggest Self-improvements.';
-  }
+  // Manager-channel automations resolve their Slack destination as
+  // automation target -> shared manager channel. Enabling one requires a
+  // channel at one of those two levels.
+  const sharedManagerChannelId = managerChannelResult.channelId;
+  const managerChannelAutomationValidations: Array<{
+    key: TriggerableBackgroundAutomationKey;
+    frequency: string;
+    channelId: string | null;
+    field:
+      | 'managerStatsSlackChannel'
+      | 'sentryTriageSlackChannel'
+      | 'dependabotTriageSlackChannel'
+      | 'securityAuditorSlackChannel'
+      | 'codeQualityAuditorSlackChannel'
+      | 'ciFailureTriageSlackChannel'
+      | 'suggesterSlackChannel'
+      | 'announcerSlackChannel';
+  }> = [
+    {
+      key: 'suggester',
+      frequency: effectiveSuggesterFrequency,
+      channelId: suggesterChannelResult.channelId,
+      field: 'suggesterSlackChannel',
+    },
+    {
+      key: 'announcer',
+      frequency: effectiveAnnouncerFrequency,
+      channelId: announcerChannelResult.channelId,
+      field: 'announcerSlackChannel',
+    },
+    {
+      key: 'manager_stats',
+      frequency: effectiveManagerStatsFrequency,
+      channelId: managerStatsChannelResult.channelId,
+      field: 'managerStatsSlackChannel',
+    },
+    {
+      key: 'sentry_triage',
+      frequency: sentryTriageFrequency,
+      channelId: sentryTriageChannelResult.channelId,
+      field: 'sentryTriageSlackChannel',
+    },
+    {
+      key: 'dependabot_triage',
+      frequency: dependabotTriageFrequency,
+      channelId: dependabotTriageChannelResult.channelId,
+      field: 'dependabotTriageSlackChannel',
+    },
+    {
+      key: 'security_auditor',
+      frequency: securityAuditorFrequency,
+      channelId: securityAuditorChannelResult.channelId,
+      field: 'securityAuditorSlackChannel',
+    },
+    {
+      key: 'code_quality_auditor',
+      frequency: codeQualityAuditorFrequency,
+      channelId: codeQualityAuditorChannelResult.channelId,
+      field: 'codeQualityAuditorSlackChannel',
+    },
+    {
+      key: 'ci_failure_triage',
+      frequency: ciFailureTriageFrequency,
+      channelId: ciFailureTriageChannelResult.channelId,
+      field: 'ciFailureTriageSlackChannel',
+    },
+  ];
 
-  for (const descriptor of managerChannelAutomationDescriptors) {
-    if (getEffectiveAutomationFrequency(descriptor.schedule.field) === 'off') {
+  for (const validation of managerChannelAutomationValidations) {
+    if (validation.frequency === 'off') {
       continue;
     }
 
-    if (
-      !resolveManagerSlackChannelId(
-        managerRoutingState,
-        descriptor.managerChannelKind,
-      )
-    ) {
-      const field =
-        descriptor.agentId === 'managerStats'
-          ? 'managerStatsSlackChannel'
-          : descriptor.agentId === 'sentryTriage'
-            ? 'sentryTriageSlackChannel'
-            : descriptor.agentId === 'dependabotTriage'
-              ? 'dependabotTriageSlackChannel'
-              : descriptor.agentId === 'securityAuditor'
-                ? 'securityAuditorSlackChannel'
-                : descriptor.agentId === 'codeQualityAuditor'
-                  ? 'codeQualityAuditorSlackChannel'
-                  : descriptor.agentId === 'ciFailureTriage'
-                    ? 'ciFailureTriageSlackChannel'
-                    : descriptor.agentId === 'suggester'
-                      ? 'suggesterSlackChannel'
-                      : 'announcerSlackChannel';
-      fieldErrors[field] =
-        fieldErrors[field] ||
-        `Choose a Slack channel before enabling ${descriptor.label}.`;
+    if (!validation.channelId && !sharedManagerChannelId) {
+      const label =
+        getTriggerableBackgroundAutomationDescriptorByKey(validation.key)
+          ?.label ?? validation.key;
+      fieldErrors[validation.field] =
+        fieldErrors[validation.field] ||
+        `Choose a Slack channel before enabling ${label}.`;
     }
   }
 
@@ -770,60 +730,48 @@ export async function updateBackgroundAgentSettingsCommand(
 
   await db.transaction(async (tx) => {
     await tx
-      .insert(backgroundAgentSettings)
+      .insert(deploymentSettings)
       .values({
         id: 'default',
         managerSlackChannelId: managerChannelResult.channelId,
         updatedAt: now,
       })
       .onConflictDoUpdate({
-        target: backgroundAgentSettings.id,
+        target: deploymentSettings.id,
         set: {
           managerSlackChannelId: managerChannelResult.channelId,
           updatedAt: now,
         },
       });
 
-    await upsertBackgroundAutomation(tx, {
-      automationKey: 'review_code',
+    await upsertAutomation(tx, {
+      key: 'review_code',
       enabled: input.reviewerEnabled,
       settings: reviewerSettings,
       updatedAt: now,
     });
 
-    await upsertBackgroundAutomation(tx, {
-      automationKey: 'conflict_resolver',
+    await upsertAutomation(tx, {
+      key: 'conflict_resolver',
       enabled: input.conflictResolverFrequency !== 'off',
       schedule: {
         mode: input.conflictResolverFrequency,
       },
+      instructions: normalizeOptionalText(input.conflictResolverInstructions),
       settings: {
         label: conflictResolverLabel,
         maxPrAgeDays: conflictResolverMaxPrAgeDays,
-        ...(normalizeOptionalText(input.conflictResolverInstructions)
-          ? {
-              instructions: normalizeOptionalText(
-                input.conflictResolverInstructions,
-              ),
-            }
-          : {}),
       },
       updatedAt: now,
     });
 
-    const primaryChannelAutoStartInstructions =
-      normalizeOptionalText(
-        finalResolvedChannelAutoStartRows[0]?.instructions,
-      ) ?? null;
-
-    await upsertBackgroundAutomation(tx, {
-      automationKey: 'slack_channel_auto_start',
+    await upsertAutomation(tx, {
+      key: 'slack_channel_auto_start',
       enabled: finalResolvedChannelAutoStartRows.length > 0,
-      settings: primaryChannelAutoStartInstructions
-        ? {
-            instructions: primaryChannelAutoStartInstructions,
-          }
-        : {},
+      instructions:
+        normalizeOptionalText(
+          finalResolvedChannelAutoStartRows[0]?.instructions,
+        ) ?? null,
       targets: finalResolvedChannelAutoStartRows.map((row, index) => ({
         provider: 'slack',
         targetKind: 'slack_channel',
@@ -840,182 +788,94 @@ export async function updateBackgroundAgentSettingsCommand(
       updatedAt: now,
     });
 
-    const scheduleDescriptorsToPersist = [
-      getTriggerableBackgroundAutomationDescriptor('managerStats'),
-      getTriggerableBackgroundAutomationDescriptor('sentryTriage'),
-      getTriggerableBackgroundAutomationDescriptor('dependabotTriage'),
-      getTriggerableBackgroundAutomationDescriptor('securityAuditor'),
-      getTriggerableBackgroundAutomationDescriptor('codeQualityAuditor'),
-      getTriggerableBackgroundAutomationDescriptor('ciFailureTriage'),
-    ];
-
-    for (const descriptor of scheduleDescriptorsToPersist) {
-      if (!descriptor) {
-        continue;
-      }
-
-      const frequency = getEffectiveAutomationFrequency(
-        descriptor.schedule.field,
-      );
-
-      await upsertBackgroundAutomation(tx, {
-        automationKey: descriptor.automationKey,
-        enabled: frequency !== 'off',
-        schedule: {
-          mode: frequency,
-        },
-        targets: [
-          ...(descriptor.agentId === 'managerStats' &&
-          managerStatsChannelResult.channelId
-            ? [
-                {
-                  provider: 'slack' as const,
-                  targetKind: 'slack_channel' as const,
-                  externalRef: managerStatsChannelResult.channelId,
-                },
-              ]
-            : []),
-          ...(descriptor.agentId === 'sentryTriage' &&
-          sentryTriageChannelResult.channelId
-            ? [
-                {
-                  provider: 'slack' as const,
-                  targetKind: 'slack_channel' as const,
-                  externalRef: sentryTriageChannelResult.channelId,
-                },
-              ]
-            : []),
-          ...(descriptor.agentId === 'dependabotTriage' &&
-          dependabotTriageChannelResult.channelId
-            ? [
-                {
-                  provider: 'slack' as const,
-                  targetKind: 'slack_channel' as const,
-                  externalRef: dependabotTriageChannelResult.channelId,
-                },
-              ]
-            : []),
-          ...(descriptor.agentId === 'securityAuditor' &&
-          securityAuditorChannelResult.channelId
-            ? [
-                {
-                  provider: 'slack' as const,
-                  targetKind: 'slack_channel' as const,
-                  externalRef: securityAuditorChannelResult.channelId,
-                },
-              ]
-            : []),
-          ...(descriptor.agentId === 'codeQualityAuditor' &&
-          codeQualityAuditorChannelResult.channelId
-            ? [
-                {
-                  provider: 'slack' as const,
-                  targetKind: 'slack_channel' as const,
-                  externalRef: codeQualityAuditorChannelResult.channelId,
-                },
-              ]
-            : []),
-          ...(descriptor.agentId === 'ciFailureTriage' &&
-          ciFailureTriageChannelResult.channelId
-            ? [
-                {
-                  provider: 'slack' as const,
-                  targetKind: 'slack_channel' as const,
-                  externalRef: ciFailureTriageChannelResult.channelId,
-                },
-              ]
-            : []),
-          ...(descriptor.agentId === 'sentryTriage'
-            ? parseSentryProjectSlugs(sentryTriageProjectSlugs).map(
-                (projectSlug) => ({
-                  provider: 'sentry' as const,
-                  targetKind: 'sentry_project' as const,
-                  externalRef: projectSlug,
-                }),
-              )
-            : []),
-        ],
-        updatedAt: now,
-      });
-    }
-
-    await upsertBackgroundAutomation(tx, {
-      automationKey: 'coach',
-      enabled: input.coachFrequency !== 'off',
-      schedule: {
-        mode: input.coachFrequency,
-      },
-      settings: normalizeOptionalText(input.coachInstructions)
-        ? {
-            instructions: normalizeOptionalText(input.coachInstructions),
-          }
-        : {},
-      targets: coachChannelResult.channelId
-        ? [
-            {
-              provider: 'slack',
-              targetKind: 'slack_channel',
-              externalRef: coachChannelResult.channelId,
-            },
-          ]
-        : [],
+    await upsertAutomation(tx, {
+      key: 'manager_stats',
+      enabled: effectiveManagerStatsFrequency !== 'off',
+      schedule: { mode: effectiveManagerStatsFrequency },
+      targets: buildSlackChannelTargets(managerStatsChannelResult.channelId),
       updatedAt: now,
     });
 
-    await upsertBackgroundAutomation(tx, {
-      automationKey: 'suggester',
+    await upsertAutomation(tx, {
+      key: 'sentry_triage',
+      enabled: sentryTriageFrequency !== 'off',
+      schedule: { mode: sentryTriageFrequency },
+      targets: [
+        ...buildSlackChannelTargets(sentryTriageChannelResult.channelId),
+        ...parseSentryProjectSlugs(sentryTriageProjectSlugs).map(
+          (projectSlug): AutomationTarget => ({
+            provider: 'sentry',
+            targetKind: 'sentry_project',
+            externalRef: projectSlug,
+          }),
+        ),
+      ],
+      updatedAt: now,
+    });
+
+    await upsertAutomation(tx, {
+      key: 'dependabot_triage',
+      enabled: dependabotTriageFrequency !== 'off',
+      schedule: { mode: dependabotTriageFrequency },
+      targets: buildSlackChannelTargets(
+        dependabotTriageChannelResult.channelId,
+      ),
+      updatedAt: now,
+    });
+
+    await upsertAutomation(tx, {
+      key: 'security_auditor',
+      enabled: securityAuditorFrequency !== 'off',
+      schedule: { mode: securityAuditorFrequency },
+      targets: buildSlackChannelTargets(securityAuditorChannelResult.channelId),
+      updatedAt: now,
+    });
+
+    await upsertAutomation(tx, {
+      key: 'code_quality_auditor',
+      enabled: codeQualityAuditorFrequency !== 'off',
+      schedule: { mode: codeQualityAuditorFrequency },
+      targets: buildSlackChannelTargets(
+        codeQualityAuditorChannelResult.channelId,
+      ),
+      updatedAt: now,
+    });
+
+    await upsertAutomation(tx, {
+      key: 'ci_failure_triage',
+      enabled: ciFailureTriageFrequency !== 'off',
+      schedule: { mode: ciFailureTriageFrequency },
+      targets: buildSlackChannelTargets(ciFailureTriageChannelResult.channelId),
+      updatedAt: now,
+    });
+
+    await upsertAutomation(tx, {
+      key: 'suggester',
       enabled: effectiveSuggesterFrequency !== 'off',
       schedule: {
         mode: effectiveSuggesterFrequency,
       },
+      instructions: effectiveSuggesterInstructions,
       settings: suggesterAutomationSettings,
-      targets: suggesterChannelResult.channelId
-        ? [
-            {
-              provider: 'slack',
-              targetKind: 'slack_channel',
-              externalRef: suggesterChannelResult.channelId,
-            },
-          ]
-        : [],
+      targets: buildSlackChannelTargets(suggesterChannelResult.channelId),
       updatedAt: now,
     });
 
-    await upsertBackgroundAutomation(tx, {
-      automationKey: 'announcer',
+    await upsertAutomation(tx, {
+      key: 'announcer',
       enabled: effectiveAnnouncerFrequency !== 'off',
       schedule: {
         mode: effectiveAnnouncerFrequency,
       },
-      settings: normalizeOptionalText(input.announcerInstructions)
-        ? {
-            instructions: normalizeOptionalText(input.announcerInstructions),
-          }
-        : {},
-      targets: announcerChannelResult.channelId
-        ? [
-            {
-              provider: 'slack',
-              targetKind: 'slack_channel',
-              externalRef: announcerChannelResult.channelId,
-            },
-          ]
-        : [],
+      instructions: normalizeOptionalText(input.announcerInstructions),
+      targets: buildSlackChannelTargets(announcerChannelResult.channelId),
       updatedAt: now,
     });
 
-    await upsertBackgroundAutomation(tx, {
-      automationKey: 'platform_issue_alerts',
+    await upsertAutomation(tx, {
+      key: 'platform_issue_alerts',
       enabled: platformIssueChannelResult.channelId != null,
-      targets: platformIssueChannelResult.channelId
-        ? [
-            {
-              provider: 'slack',
-              targetKind: 'slack_channel',
-              externalRef: platformIssueChannelResult.channelId,
-            },
-          ]
-        : [],
+      targets: buildSlackChannelTargets(platformIssueChannelResult.channelId),
       updatedAt: now,
     });
   });
@@ -1034,7 +894,6 @@ export async function updateBackgroundAgentSettingsCommand(
   const hasSavedSlackMetadataTargets =
     updatedChannelAutoStartSlackChannelIds.length > 0 ||
     Boolean(updatedSettings.managerStatsSlackChannelId) ||
-    Boolean(updatedSettings.coachSlackChannelId) ||
     Boolean(updatedSettings.suggesterSlackChannelId) ||
     Boolean(updatedSettings.announcerSlackChannelId) ||
     Boolean(updatedSettings.platformIssueSlackChannelId) ||
@@ -1057,7 +916,6 @@ export async function updateBackgroundAgentSettingsCommand(
     notifier: postSaveNotifier,
     channelAutoStartSlackChannelIds: updatedChannelAutoStartSlackChannelIds,
     managerStatsSlackChannelId: updatedSettings.managerStatsSlackChannelId,
-    coachSlackChannelId: updatedSettings.coachSlackChannelId,
     suggesterSlackChannelId: updatedSettings.suggesterSlackChannelId,
     announcerSlackChannelId: updatedSettings.announcerSlackChannelId,
     platformIssueSlackChannelId: updatedSettings.platformIssueSlackChannelId,
@@ -1075,7 +933,6 @@ export async function updateBackgroundAgentSettingsCommand(
     notifier: postSaveNotifier,
     channelAutoStartSlackChannelIds: updatedChannelAutoStartSlackChannelIds,
     managerStatsSlackChannelId: updatedSettings.managerStatsSlackChannelId,
-    coachSlackChannelId: updatedSettings.coachSlackChannelId,
     suggesterSlackChannelId: updatedSettings.suggesterSlackChannelId,
     announcerSlackChannelId: updatedSettings.announcerSlackChannelId,
     platformIssueSlackChannelId: updatedSettings.platformIssueSlackChannelId,

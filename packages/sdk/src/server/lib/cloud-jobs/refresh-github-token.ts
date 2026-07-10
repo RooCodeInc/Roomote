@@ -5,7 +5,7 @@ import type {
   SourceControlTokenEnvVar,
   SourceControlTokenMetadata,
 } from '@roomote/types';
-import { db, cloudJobs, eq } from '@roomote/db/server';
+import { db, taskRuns, eq } from '@roomote/db/server';
 
 import { createSourceControlTokenForJob } from './dequeue-helpers';
 
@@ -31,8 +31,8 @@ export async function refreshGitHubTokenWithMetadata(
   expiresAt: string | null;
   nextRefreshAt: string;
 }> {
-  const cloudJob = await db.query.cloudJobs.findFirst({
-    where: eq(cloudJobs.id, cloudJobId),
+  const cloudJob = await db.query.taskRuns.findFirst({
+    where: eq(taskRuns.id, cloudJobId),
   });
 
   if (!cloudJob) {
@@ -59,14 +59,14 @@ export async function refreshGitHubTokenWithMetadata(
         : {};
 
     await db
-      .update(cloudJobs)
+      .update(taskRuns)
       .set({
         artifacts: {
           ...existingArtifacts,
           ...tokenResult.artifactsPatch,
         },
       })
-      .where(eq(cloudJobs.id, cloudJob.id));
+      .where(eq(taskRuns.id, cloudJob.id));
   }
 
   const now = Date.now();

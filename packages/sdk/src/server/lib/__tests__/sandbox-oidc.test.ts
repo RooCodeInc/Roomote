@@ -39,7 +39,7 @@ vi.mock('@roomote/types', async (importOriginal) => {
 
   return {
     ...actual,
-    CloudTaskStatus: {
+    RunStatus: {
       Completed: 'completed',
       Failed: 'failed',
       Canceled: 'canceled',
@@ -50,8 +50,8 @@ vi.mock('@roomote/types', async (importOriginal) => {
 
 vi.mock('@roomote/db/server', () => ({
   and: vi.fn((...args: unknown[]) => ({ kind: 'and', args })),
-  cloudJobs: {},
-  cloudJobEvents: {},
+  taskRuns: {},
+  taskRunEvents: {},
   createRowMapper: vi.fn(() => (row: unknown) => row),
   db: {
     query: {
@@ -62,7 +62,7 @@ vi.mock('@roomote/db/server', () => ({
       environments: {
         findFirst: (...args: unknown[]) => mockEnvironmentFindFirst(...args),
       },
-      cloudJobs: {
+      taskRuns: {
         findFirst: (...args: unknown[]) => mockCloudJobFindFirst(...args),
       },
     },
@@ -78,7 +78,7 @@ vi.mock('@roomote/db/server', () => ({
     awsRegion: 'awsRegion',
     awsRoleArn: 'awsRoleArn',
     audience: 'audience',
-    cloudJobId: 'cloudJobId',
+    runId: 'runId',
     computeProvider: 'computeProvider',
     computeProviderId: 'computeProviderId',
     environmentId: 'environmentId',
@@ -105,7 +105,7 @@ import {
 
 const baseRow = {
   environmentId: 'env_1',
-  cloudJobId: 42,
+  runId: 42,
   computeProvider: 'modal',
   computeProviderId: 'sb_1',
   targetKind: 'custom',
@@ -169,7 +169,7 @@ describe('primeSandboxOidcTargets', () => {
       1,
       expect.anything(),
       expect.objectContaining({
-        cloudJobId: 42,
+        runId: 42,
         taskId: 'task_1',
         source: 'machine_oidc',
         eventType: 'started',
@@ -565,7 +565,7 @@ describe('refreshDueSandboxOidcTargets', () => {
 
   it('cleans claimed rows when the instance is already stopped before refresh begins', async () => {
     mockDbExecute.mockResolvedValue([
-      makeRow({ id: 'row-1', computeProviderId: 'sb_1', cloudJobId: 42 }),
+      makeRow({ id: 'row-1', computeProviderId: 'sb_1', runId: 42 }),
     ]);
     mockGetInstanceStatus.mockResolvedValue({
       status: 'stopped',
@@ -588,7 +588,7 @@ describe('refreshDueSandboxOidcTargets', () => {
 
   it('cleans claimed rows when the instance has already failed before refresh begins', async () => {
     mockDbExecute.mockResolvedValue([
-      makeRow({ id: 'row-1', computeProviderId: 'sb_1', cloudJobId: 42 }),
+      makeRow({ id: 'row-1', computeProviderId: 'sb_1', runId: 42 }),
     ]);
     mockGetInstanceStatus.mockResolvedValue({
       status: 'failed',
@@ -611,7 +611,7 @@ describe('refreshDueSandboxOidcTargets', () => {
 
   it('cleans claimed rows when refresh discovers the instance is missing', async () => {
     mockDbExecute.mockResolvedValue([
-      makeRow({ id: 'row-1', computeProviderId: 'sb_1', cloudJobId: 42 }),
+      makeRow({ id: 'row-1', computeProviderId: 'sb_1', runId: 42 }),
     ]);
     mockGetInstanceStatus.mockRejectedValue({
       response: { status: 404 },
@@ -637,8 +637,8 @@ describe('refreshDueSandboxOidcTargets', () => {
     const { getEnvironmentOidcTargets } = await import('@roomote/types');
 
     mockDbExecute.mockResolvedValue([
-      makeRow({ id: 'row-1', computeProviderId: 'sb_1', cloudJobId: 42 }),
-      makeRow({ id: 'row-2', computeProviderId: 'sb_2', cloudJobId: 43 }),
+      makeRow({ id: 'row-1', computeProviderId: 'sb_1', runId: 42 }),
+      makeRow({ id: 'row-2', computeProviderId: 'sb_2', runId: 43 }),
     ]);
     mockCloudJobFindFirst.mockResolvedValueOnce({
       id: 42,

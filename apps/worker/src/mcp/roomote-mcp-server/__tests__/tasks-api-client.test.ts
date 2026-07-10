@@ -746,3 +746,40 @@ describe('updateEnvironment', () => {
     );
   });
 });
+
+describe('manageSourceControl timeout', () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+    delete process.env.ROOMOTE_MCP_PLATFORM_API_TIMEOUT_MS;
+  });
+
+  it('fails as a retryable tool error instead of hanging when the API stalls', async () => {
+    // Regression: create_or_update_pull_request calls hung for over an hour
+    // when the API stopped responding mid-request; the bare fetch had no
+    // deadline, so the MCP tool call — and with it the whole task turn —
+    // wedged until a human stopped the task.
+    process.env.ROOMOTE_MCP_PLATFORM_API_TIMEOUT_MS = '25';
+    global.fetch = vi.fn((_url: unknown, options?: RequestInit) => {
+      return new Promise<Response>((_resolve, reject) => {
+        options?.signal?.addEventListener('abort', () =>
+          reject((options.signal as AbortSignal).reason),
+        );
+      });
+    }) as unknown as typeof fetch;
+
+    const { manageSourceControl } = await import('../tasks-api-client.js');
+
+    await expect(
+      manageSourceControl(config, 'task-1', {
+        action: 'create_or_update_pull_request',
+        repositoryFullName: 'owner/repo',
+        sourceBranch: 'feature/x',
+        targetBranch: 'develop',
+        title: 'Test PR',
+        body: 'Body',
+      }),
+    ).rejects.toThrow(
+      'Failed to manage source control: no response from the Roomote API within 25ms; the request was aborted and is safe to retry.',
+    );
+  });
+});

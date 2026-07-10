@@ -66,7 +66,7 @@ export function buildSlackAppManifest({
       },
       bot_user: {
         display_name: appName,
-        always_online: false,
+        always_online: true,
       },
     },
     oauth_config: {

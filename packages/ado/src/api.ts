@@ -3,10 +3,11 @@ import { z } from 'zod';
 import {
   ALL_REPOSITORIES,
   buildRepositoryCloneUrl,
+  stripCloneUrlUserInfo,
   type SourceControlProvider,
 } from '@roomote/types';
 import {
-  type CloudJob,
+  type Run,
   db,
   environments,
   repositories,
@@ -19,6 +20,7 @@ import {
 const ADO_PROVIDER = 'ado' satisfies SourceControlProvider;
 const DEFAULT_ADO_BASE_URL = 'https://dev.azure.com';
 const ADO_API_VERSION = '7.1';
+const ADO_TOKEN_VALIDATION_TIMEOUT_MS = 10_000;
 const DEFAULT_ADO_GIT_USERNAME = 'ado';
 const ADO_SERVICE_HOOK_ENSURE_CONCURRENCY = 5;
 const ADO_SERVICE_HOOK_PUBLISHER_ID = 'tfs';
@@ -373,6 +375,162 @@ export async function getAdoDeploymentUser(options?: {
 
 export function clearAdoDeploymentUserCache(): void {
   cachedAdoDeploymentUser = null;
+}
+
+/**
+ * Normalizes an Azure DevOps identity to the key used for linked-account
+ * matching. Azure DevOps exposes a user's identity under different ids per
+ * surface: the Entra OAuth `connectionData` returns a vssps user id, while
+ * pull request comment webhooks deliver an org identity id — the two never
+ * match, and neither equals the Entra object id. The `uniqueName` (UPN /
+ * email) is the one value present identically on both surfaces, so linked
+ * accounts key off it. Lowercasing and trimming keeps the link side and the
+ * webhook side in agreement.
+ */
+export function normalizeAdoLinkedAccountKey(
+  value: string | null | undefined,
+): string | null {
+  const normalized = value?.trim().toLowerCase();
+
+  return normalized ? normalized : null;
+}
+
+const adoPullRequestDetailsSchema = z
+  .object({ pullRequestId: z.number() })
+  .passthrough();
+
+/**
+ * Fetches a pull request by repository UUID and pull request number.
+ * Returns the raw Azure DevOps pull request resource (repository, refs,
+ * identities, ...), used to rehydrate webhook payloads that only carry
+ * resource links.
+ */
+export async function getAdoPullRequest({
+  repositoryId,
+  pullRequestNumber,
+  token,
+  organization,
+  baseUrl,
+  organizationApiBaseUrl,
+  fetchImpl,
+}: {
+  repositoryId: string;
+  pullRequestNumber: number;
+  token?: string;
+  organization?: string;
+  baseUrl?: string;
+  organizationApiBaseUrl?: string;
+  fetchImpl?: typeof fetch;
+}): Promise<Record<string, unknown>> {
+  const adoToken = token ?? (await resolveAdoToken());
+
+  if (!adoToken?.trim()) {
+    throw new Error(
+      'ADO_TOKEN is required to read Azure DevOps pull requests.',
+    );
+  }
+
+  const resolvedOrganizationApiBaseUrl = await resolveAdoOrganizationApiBaseUrl(
+    { organization, baseUrl, organizationApiBaseUrl },
+  );
+
+  if (!resolvedOrganizationApiBaseUrl) {
+    throw new Error(
+      'ADO_ORGANIZATION is required to read Azure DevOps pull requests.',
+    );
+  }
+
+  const { data } = await requestAdoJson({
+    organizationApiBaseUrl: resolvedOrganizationApiBaseUrl,
+    fetchImpl,
+    path: `/_apis/git/repositories/${encodeURIComponent(
+      repositoryId,
+    )}/pullRequests/${pullRequestNumber}`,
+    params: { 'api-version': ADO_API_VERSION },
+    token: adoToken,
+    schema: adoPullRequestDetailsSchema,
+  });
+
+  return data;
+}
+
+export type AdoTokenValidationResult =
+  | { status: 'valid'; displayName: string }
+  | { status: 'invalid'; error: string }
+  | { status: 'unknown'; error: string };
+
+export async function validateAdoToken({
+  token,
+  organization,
+  baseUrl,
+  fetchImpl = fetch,
+  timeoutMs = ADO_TOKEN_VALIDATION_TIMEOUT_MS,
+}: {
+  token: string;
+  organization: string;
+  baseUrl?: string;
+  fetchImpl?: typeof fetch;
+  timeoutMs?: number;
+}): Promise<AdoTokenValidationResult> {
+  try {
+    const organizationApiBaseUrl = buildAdoOrganizationApiBaseUrl({
+      baseUrl:
+        baseUrl === undefined
+          ? await resolveAdoBaseUrl()
+          : normalizeBaseUrl(baseUrl),
+      organization,
+    });
+    const response = await fetchImpl(
+      buildAdoApiUrl(organizationApiBaseUrl, '/_apis/connectionData', {
+        'api-version': ADO_API_VERSION,
+      }),
+      {
+        method: 'GET',
+        headers: {
+          Accept: 'application/json',
+          Authorization: buildAdoBasicAuthHeader(token),
+        },
+        signal: AbortSignal.timeout(timeoutMs),
+      },
+    );
+
+    // Azure DevOps answers rejected PATs with a 203 sign-in page instead of
+    // a 401, so treat that status as a definitive rejection too.
+    if ([203, 401, 403].includes(response.status)) {
+      return {
+        status: 'invalid',
+        error:
+          'Azure DevOps rejected the token. Confirm the PAT is active, belongs to the organization, and has Code read access.',
+      };
+    }
+
+    if (response.status !== 200) {
+      return {
+        status: 'unknown',
+        error: `Could not verify the Azure DevOps token: ${response.status} ${response.statusText}`,
+      };
+    }
+
+    const { authenticatedUser } = adoConnectionDataSchema.parse(
+      await response.json(),
+    );
+
+    return {
+      status: 'valid',
+      displayName:
+        authenticatedUser.providerDisplayName ??
+        authenticatedUser.displayName ??
+        authenticatedUser.uniqueName ??
+        authenticatedUser.id,
+    };
+  } catch (error) {
+    return {
+      status: 'unknown',
+      error: `Could not verify the Azure DevOps token: ${
+        error instanceof Error ? error.message : String(error)
+      }`,
+    };
+  }
 }
 
 function normalizeAdoParentCommentId(
@@ -1035,13 +1193,17 @@ export function buildAdoRepositoryValues({
 }): AdoRepositoryValues {
   const fullName = buildAdoRepositoryFullName(organization, repository);
   const host = hostFromBaseUrl(baseUrl);
-  const cloneUrl =
+  // Azure DevOps remoteUrl embeds the organization as URL userinfo
+  // (https://org@dev.azure.com/...), which breaks the worker's git
+  // insteadOf proxy rewrite, so store the clone URL without it.
+  const cloneUrl = stripCloneUrlUserInfo(
     repository.remoteUrl ??
-    buildRepositoryCloneUrl({
-      provider: ADO_PROVIDER,
-      host,
-      repositoryFullName: fullName,
-    });
+      buildRepositoryCloneUrl({
+        provider: ADO_PROVIDER,
+        host,
+        repositoryFullName: fullName,
+      }),
+  );
 
   return {
     sourceControlProvider: ADO_PROVIDER,
@@ -1174,7 +1336,7 @@ function normalizeRepositorySelection(repositoryNames: string[]): string[] {
 }
 
 async function resolveAdoRepositoryNamesForCloudJob(
-  cloudJob: CloudJob,
+  cloudJob: Run,
 ): Promise<string[] | null> {
   if (cloudJob.payload.environmentId) {
     const environment = await db.query.environments.findFirst({
@@ -1211,7 +1373,7 @@ async function resolveAdoRepositoryNamesForCloudJob(
   return null;
 }
 
-async function resolveAdoRepositoryRowsForCloudJob(cloudJob: CloudJob) {
+async function resolveAdoRepositoryRowsForCloudJob(cloudJob: Run) {
   const repositoryNames = await resolveAdoRepositoryNamesForCloudJob(cloudJob);
   const queryConditions = [
     eq(repositories.sourceControlProvider, ADO_PROVIDER),
@@ -1329,7 +1491,7 @@ function buildAdoGitCredential({
 }
 
 export async function createCloudJobAdoCredentials(
-  cloudJob: CloudJob,
+  cloudJob: Run,
   options?: {
     token?: string;
     baseUrl?: string;

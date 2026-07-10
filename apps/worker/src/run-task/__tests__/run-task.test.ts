@@ -242,7 +242,7 @@ vi.mock('../../sandbox-server/procedures/slackReplyTurnTracking', () => ({
   recordSandboxPromptSlackTurnStart: recordSandboxPromptSlackTurnStartMock,
 }));
 
-import { CloudTaskStatus, CloudTaskType } from '@roomote/types';
+import { RunStatus, TaskPayloadKind } from '@roomote/types';
 
 import { getDefaultKeepaliveMs } from '../completion';
 import { runTask } from '../run-task';
@@ -270,7 +270,7 @@ describe('runTask', () => {
       taskFinishedAt: undefined,
       taskAbortedAt: undefined,
     });
-    resolveStatusMock.mockReturnValue(CloudTaskStatus.Idle);
+    resolveStatusMock.mockReturnValue(RunStatus.Idle);
     waitForExternalSleepActionMock.mockResolvedValue({
       claimed: false,
       completed: false,
@@ -307,7 +307,7 @@ describe('runTask', () => {
       cloudJob: {
         id: 150,
         taskId: 'task-150',
-        type: CloudTaskType.StandardTask,
+        payloadKind: TaskPayloadKind.StandardTask,
         harness: 'opencode-server',
         payload: {},
         result: null,
@@ -352,7 +352,7 @@ describe('runTask', () => {
       cloudJob: {
         id: 151,
         taskId: 'task-151',
-        type: CloudTaskType.StandardTask,
+        payloadKind: TaskPayloadKind.StandardTask,
         harness: 'opencode-server',
         payload: {},
         result: null,
@@ -402,7 +402,7 @@ describe('runTask', () => {
       cloudJob: {
         id: 152,
         taskId: 'task-152',
-        type: CloudTaskType.StandardTask,
+        payloadKind: TaskPayloadKind.StandardTask,
         harness: 'opencode-server',
         payload: {},
         result: null,
@@ -454,7 +454,7 @@ describe('runTask', () => {
       cloudJob: {
         id: 105,
         taskId: 'task-105',
-        type: CloudTaskType.StandardTask,
+        payloadKind: TaskPayloadKind.StandardTask,
         harness: 'opencode-server',
         payload: {},
         result: null,
@@ -513,7 +513,7 @@ describe('runTask', () => {
       cloudJob: {
         id: 103,
         taskId: 'task-103',
-        type: CloudTaskType.StandardTask,
+        payloadKind: TaskPayloadKind.StandardTask,
         harness: 'opencode-server',
         payload: {},
         result: null,
@@ -563,7 +563,7 @@ describe('runTask', () => {
       cloudJob: {
         id: 106,
         taskId: 'task-106',
-        type: CloudTaskType.StandardTask,
+        payloadKind: TaskPayloadKind.StandardTask,
         harness: 'opencode-server',
         payload: {},
         result: null,
@@ -611,7 +611,7 @@ describe('runTask', () => {
       cloudJob: {
         id: 107,
         taskId: 'task-107',
-        type: CloudTaskType.StandardTask,
+        payloadKind: TaskPayloadKind.StandardTask,
         harness: 'opencode-server',
         payload: {},
         result: null,
@@ -658,7 +658,7 @@ describe('runTask', () => {
       cloudJob: {
         id: 104,
         taskId: 'task-104',
-        type: CloudTaskType.StandardTask,
+        payloadKind: TaskPayloadKind.StandardTask,
         harness: 'opencode-server',
         payload: {},
         result: null,
@@ -703,7 +703,7 @@ describe('runTask', () => {
       cloudJob: {
         id: 110,
         taskId: 'task-110',
-        type: CloudTaskType.StandardTask,
+        payloadKind: TaskPayloadKind.StandardTask,
         harness: 'opencode-server',
         payload: {},
         result: null,
@@ -755,7 +755,7 @@ describe('runTask', () => {
       cloudJob: {
         id: 104,
         taskId: 'task-104',
-        type: CloudTaskType.StandardTask,
+        payloadKind: TaskPayloadKind.StandardTask,
         harness: 'opencode-server',
         payload: {},
         result: null,
@@ -812,7 +812,7 @@ describe('runTask', () => {
       cloudJob: {
         id: 1061,
         taskId: 'task-1061',
-        type: CloudTaskType.SlackAppMention,
+        payloadKind: TaskPayloadKind.SlackAppMention,
         harness: 'opencode-server',
         payload: {
           channel: 'C123',
@@ -864,7 +864,7 @@ describe('runTask', () => {
       cloudJob: {
         id: 107,
         taskId: 'task-107',
-        type: CloudTaskType.SlackAppMention,
+        payloadKind: TaskPayloadKind.SlackAppMention,
         harness: 'opencode-server',
         payload: {
           channel: 'C123',
@@ -920,7 +920,7 @@ describe('runTask', () => {
       cloudJob: {
         id: 108,
         taskId: 'task-108',
-        type: CloudTaskType.SlackAppMention,
+        payloadKind: TaskPayloadKind.SlackAppMention,
         harness: 'opencode-server',
         payload: {
           channel: 'C123',
@@ -979,9 +979,8 @@ describe('runTask', () => {
         cloudJob: {
           id: 105,
           taskId: 'task-105',
-          type: CloudTaskType.SlackAppMention,
+          payloadKind: TaskPayloadKind.SlackAppMention,
           harness: 'opencode-server',
-          slackThreadTs: '111.222',
           payload: {
             channel: 'C123',
             thread_ts: '111.222',
@@ -1058,11 +1057,11 @@ describe('runTask', () => {
         cloudJob: {
           id: 106,
           taskId: 'task-106',
-          type: CloudTaskType.SnapshotResume,
+          payloadKind: TaskPayloadKind.SnapshotResume,
           harness: 'opencode-server',
-          slackThreadTs: '111.000',
           payload: {
             slackChannel: 'C123',
+            thread_ts: '111.000',
             slackOriginMessageTs: '111.333',
             sourceSnapshotId: 'snap-1',
           },
@@ -1120,9 +1119,8 @@ describe('runTask', () => {
         cloudJob: {
           id: 107,
           taskId: 'task-107',
-          type: CloudTaskType.StandardTask,
+          payloadKind: TaskPayloadKind.StandardTask,
           harness: 'opencode-server',
-          slackThreadTs: null,
           payload: {
             repo: 'org/repo',
             description: 'do the thing',
@@ -1185,9 +1183,8 @@ describe('runTask', () => {
         cloudJob: {
           id: 108,
           taskId: 'task-108',
-          type: CloudTaskType.StandardTask,
+          payloadKind: TaskPayloadKind.StandardTask,
           harness: 'opencode-server',
-          slackThreadTs: null,
           payload: {
             repo: 'org/repo',
             description: 'do the thing',
@@ -1250,9 +1247,8 @@ describe('runTask', () => {
         cloudJob: {
           id: 107,
           taskId: 'task-107',
-          type: CloudTaskType.StandardTask,
+          payloadKind: TaskPayloadKind.StandardTask,
           harness: 'opencode-server',
-          slackThreadTs: null,
           payload: {
             repo: 'acme/app',
             slackChannel: 'C123',
@@ -1311,9 +1307,8 @@ describe('runTask', () => {
       cloudJob: {
         id: 109,
         taskId: 'task-109',
-        type: CloudTaskType.SuggestedTasks,
+        payloadKind: TaskPayloadKind.Scan,
         harness: 'opencode-server',
-        slackThreadTs: null,
         payload: {
           slackChannel: 'C123',
         },
@@ -1355,7 +1350,7 @@ describe('runTask', () => {
       cloudJob: {
         id: 1091,
         taskId: 'task-1091',
-        type: CloudTaskType.GithubPrReview,
+        payloadKind: TaskPayloadKind.GithubPrReview,
         harness: 'opencode-server',
         keepaliveMs: null,
         payload: {},
@@ -1389,7 +1384,7 @@ describe('runTask', () => {
 
     expect(getDefaultKeepaliveMs).toHaveBeenCalledWith(
       expect.objectContaining({
-        taskType: CloudTaskType.GithubPrReview,
+        taskType: TaskPayloadKind.GithubPrReview,
       }),
     );
   });
@@ -1399,7 +1394,7 @@ describe('runTask', () => {
       cloudJob: {
         id: 101,
         taskId: 'task-101',
-        type: CloudTaskType.StandardTask,
+        payloadKind: TaskPayloadKind.StandardTask,
         harness: 'opencode-server',
         payload: {},
         result: null,
@@ -1459,7 +1454,7 @@ describe('runTask', () => {
       cloudJob: {
         id: 106,
         taskId: 'task-106',
-        type: CloudTaskType.StandardTask,
+        payloadKind: TaskPayloadKind.StandardTask,
         harness: 'opencode-server',
         payload: {},
         result: null,
@@ -1509,7 +1504,7 @@ describe('runTask', () => {
       cloudJob: {
         id: 152,
         taskId: 'task-152',
-        type: CloudTaskType.StandardTask,
+        payloadKind: TaskPayloadKind.StandardTask,
         harness: 'opencode-server',
         payload: {},
         result: null,
@@ -1570,7 +1565,7 @@ describe('runTask', () => {
       cloudJob: {
         id: 153,
         taskId: 'task-153',
-        type: CloudTaskType.StandardTask,
+        payloadKind: TaskPayloadKind.StandardTask,
         harness: 'opencode-server',
         payload: {},
         result: null,
@@ -1618,7 +1613,7 @@ describe('runTask', () => {
       cloudJob: {
         id: 154,
         taskId: 'task-154',
-        type: CloudTaskType.StandardTask,
+        payloadKind: TaskPayloadKind.StandardTask,
         harness: 'opencode-server',
         payload: {},
         result: null,
@@ -1666,7 +1661,7 @@ describe('runTask', () => {
       cloudJob: {
         id: 155,
         taskId: 'task-155',
-        type: CloudTaskType.StandardTask,
+        payloadKind: TaskPayloadKind.StandardTask,
         harness: 'opencode-server',
         payload: {},
         result: null,
@@ -1731,7 +1726,7 @@ describe('runTask', () => {
       cloudJob: {
         id: 303,
         taskId: 'task-303',
-        type: CloudTaskType.SnapshotResume,
+        payloadKind: TaskPayloadKind.SnapshotResume,
         harness: 'opencode-server',
         payload: {
           channel: 'C123',
@@ -1839,7 +1834,7 @@ describe('runTask', () => {
       cloudJob: {
         id: 304,
         taskId: 'task-304',
-        type: CloudTaskType.SnapshotResume,
+        payloadKind: TaskPayloadKind.SnapshotResume,
         harness: 'opencode-server',
         payload: {},
         result: null,
@@ -1875,7 +1870,7 @@ describe('runTask', () => {
     cancelController.abort(new Error('background environment setup failed'));
 
     await expect(runTaskPromise).resolves.toEqual({
-      status: CloudTaskStatus.Canceled,
+      status: RunStatus.Canceled,
       error: 'Task aborted',
     });
 
@@ -1904,7 +1899,7 @@ describe('runTask', () => {
       cloudJob: {
         id: 304,
         taskId: 'task-304',
-        type: CloudTaskType.SnapshotResume,
+        payloadKind: TaskPayloadKind.SnapshotResume,
         harness: 'opencode-server',
         payload: {
           sourceSnapshotId: 'snap-304',
@@ -1961,7 +1956,7 @@ describe('runTask', () => {
       cloudJob: {
         id: 404,
         taskId: 'task-404',
-        type: CloudTaskType.StandardTask,
+        payloadKind: TaskPayloadKind.StandardTask,
         harness: 'opencode-server',
         payload: {},
         result: null,
@@ -2021,7 +2016,7 @@ describe('runTask', () => {
       cloudJob: {
         id: 405,
         taskId: 'task-405',
-        type: CloudTaskType.StandardTask,
+        payloadKind: TaskPayloadKind.StandardTask,
         harness: 'opencode-server',
         userId: 'user-2',
         actingUserId: 'user-2',
@@ -2122,7 +2117,7 @@ describe('runTask', () => {
       cloudJob: {
         id: 406,
         taskId: 'task-406',
-        type: CloudTaskType.SnapshotResume,
+        payloadKind: TaskPayloadKind.SnapshotResume,
         harness: 'opencode-server',
         userId: 'owner-user',
         actingUserId: 'owner-user',
@@ -2210,7 +2205,7 @@ describe('runTask', () => {
       cloudJob: {
         id: 203,
         taskId: 'task-203',
-        type: CloudTaskType.StandardTask,
+        payloadKind: TaskPayloadKind.StandardTask,
         harness: undefined,
         payload: {},
         result: null,
@@ -2251,7 +2246,7 @@ describe('runTask', () => {
       cloudJob: {
         id: 204,
         taskId: 'task-204',
-        type: CloudTaskType.StandardTask,
+        payloadKind: TaskPayloadKind.StandardTask,
         harness: 'opencode-server',
         payload: {},
         result: null,
@@ -2297,7 +2292,7 @@ describe('runTask', () => {
       cloudJob: {
         id: 204,
         taskId: 'task-204',
-        type: CloudTaskType.StandardTask,
+        payloadKind: TaskPayloadKind.StandardTask,
         harness: 'opencode-server',
         payload: {},
         result: null,
@@ -2338,7 +2333,7 @@ describe('runTask', () => {
       cloudJob: {
         id: 102,
         taskId: 'task-102',
-        type: CloudTaskType.StandardTask,
+        payloadKind: TaskPayloadKind.StandardTask,
         harness: 'opencode-server',
         payload: {},
         result: null,
@@ -2397,7 +2392,7 @@ describe('runTask', () => {
       cloudJob: {
         id: 150,
         taskId: 'task-150',
-        type: CloudTaskType.StandardTask,
+        payloadKind: TaskPayloadKind.StandardTask,
         harness: 'opencode-server',
         payload: {},
         result: null,
@@ -2455,7 +2450,7 @@ describe('runTask', () => {
       cloudJob: {
         id: 151,
         taskId: 'task-151',
-        type: CloudTaskType.StandardTask,
+        payloadKind: TaskPayloadKind.StandardTask,
         harness: 'opencode-server',
         payload: {},
         result: null,
@@ -2523,7 +2518,7 @@ describe('runTask', () => {
       cloudJob: {
         id: 151,
         taskId: 'task-151',
-        type: CloudTaskType.StandardTask,
+        payloadKind: TaskPayloadKind.StandardTask,
         harness: 'opencode-server',
         payload: {},
         result: null,
@@ -2553,7 +2548,7 @@ describe('runTask', () => {
     cancelController.abort(new Error('background environment setup failed'));
 
     await expect(runTaskPromise).resolves.toEqual({
-      status: CloudTaskStatus.Canceled,
+      status: RunStatus.Canceled,
       error: 'Task aborted',
     });
 
@@ -2594,7 +2589,7 @@ describe('runTask', () => {
       cloudJob: {
         id: 153,
         taskId: 'task-153',
-        type: CloudTaskType.StandardTask,
+        payloadKind: TaskPayloadKind.StandardTask,
         harness: 'opencode-server',
         payload: {},
         result: null,
@@ -2624,7 +2619,7 @@ describe('runTask', () => {
     cancelController.abort(new Error('background environment setup failed'));
 
     await expect(runTaskPromise).resolves.toEqual({
-      status: CloudTaskStatus.Canceled,
+      status: RunStatus.Canceled,
       error: 'Task aborted',
     });
 
@@ -2643,15 +2638,15 @@ describe('runTask', () => {
       cloudJob: {
         id: 152,
         taskId: 'task-152',
-        type: CloudTaskType.StandardTask,
+        payloadKind: TaskPayloadKind.StandardTask,
         harness: 'opencode-server',
-        requestedWorkKind: 'implement',
         payload: {},
         result: null,
       } as never,
       envVars: {},
       workspacePath: '/tmp/workspace',
       prompt: 'Fix the failing test',
+      requestedWorkKind: 'implement',
       harnessInstructions: undefined,
       agentInstructions: undefined,
       environmentConfig: undefined,
@@ -2690,7 +2685,7 @@ describe('runTask', () => {
       cloudJob: {
         id: 1515,
         taskId: 'task-1515',
-        type: CloudTaskType.StandardTask,
+        payloadKind: TaskPayloadKind.StandardTask,
         harness: 'opencode-server',
         payload: {},
         result: null,
@@ -2752,7 +2747,7 @@ describe('runTask', () => {
       cloudJob: {
         id: 152,
         taskId: 'task-152',
-        type: CloudTaskType.StandardTask,
+        payloadKind: TaskPayloadKind.StandardTask,
         harness: 'opencode-server',
         payload: {},
         result: null,
@@ -2812,7 +2807,7 @@ describe('runTask', () => {
       cloudJob: {
         id: 1521,
         taskId: 'task-1521',
-        type: CloudTaskType.StandardTask,
+        payloadKind: TaskPayloadKind.StandardTask,
         harness: 'opencode-server',
         payload: {},
         result: null,
@@ -2878,7 +2873,7 @@ describe('runTask', () => {
       cloudJob: {
         id: 1522,
         taskId: 'task-1522',
-        type: CloudTaskType.StandardTask,
+        payloadKind: TaskPayloadKind.StandardTask,
         harness: 'opencode-server',
         payload: {},
         result: null,
@@ -2954,7 +2949,7 @@ describe('runTask', () => {
       cloudJob: {
         id: 1526,
         taskId: 'task-1526',
-        type: CloudTaskType.StandardTask,
+        payloadKind: TaskPayloadKind.StandardTask,
         harness: 'opencode-server',
         payload: {},
         result: null,
@@ -3009,7 +3004,7 @@ describe('runTask', () => {
       cloudJob: {
         id: 1527,
         taskId: 'task-1527',
-        type: CloudTaskType.StandardTask,
+        payloadKind: TaskPayloadKind.StandardTask,
         harness: 'opencode-server',
         payload: {},
         result: null,
@@ -3064,7 +3059,7 @@ describe('runTask', () => {
       cloudJob: {
         id: 1527,
         taskId: 'task-1527',
-        type: CloudTaskType.StandardTask,
+        payloadKind: TaskPayloadKind.StandardTask,
         harness: 'opencode-server',
         payload: {},
         result: null,
@@ -3129,7 +3124,7 @@ describe('runTask', () => {
       cloudJob: {
         id: 1528,
         taskId: 'task-1528',
-        type: CloudTaskType.StandardTask,
+        payloadKind: TaskPayloadKind.StandardTask,
         harness: 'opencode-server',
         payload: {},
         result: null,
@@ -3194,7 +3189,7 @@ describe('runTask', () => {
       cloudJob: {
         id: 1529,
         taskId: 'task-1529',
-        type: CloudTaskType.StandardTask,
+        payloadKind: TaskPayloadKind.StandardTask,
         harness: 'opencode-server',
         payload: {},
         result: null,
@@ -3260,7 +3255,7 @@ describe('runTask', () => {
       cloudJob: {
         id: 153,
         taskId: 'task-153',
-        type: CloudTaskType.StandardTask,
+        payloadKind: TaskPayloadKind.StandardTask,
         harness: 'opencode-server',
         payload: {},
         result: null,
@@ -3314,7 +3309,7 @@ describe('runTask', () => {
       cloudJob: {
         id: 155,
         taskId: 'task-155',
-        type: CloudTaskType.StandardTask,
+        payloadKind: TaskPayloadKind.StandardTask,
         harness: 'opencode-server',
         payload: {},
         result: null,
@@ -3379,7 +3374,7 @@ describe('runTask', () => {
       cloudJob: {
         id: 156,
         taskId: 'task-156',
-        type: CloudTaskType.StandardTask,
+        payloadKind: TaskPayloadKind.StandardTask,
         harness: 'opencode-server',
         payload: {},
         result: null,
@@ -3431,7 +3426,7 @@ describe('runTask', () => {
       cloudJob: {
         id: 154,
         taskId: 'task-154',
-        type: CloudTaskType.StandardTask,
+        payloadKind: TaskPayloadKind.StandardTask,
         harness: 'opencode-server',
         payload: {},
         result: null,
@@ -3493,7 +3488,7 @@ describe('runTask', () => {
       cloudJob: {
         id: 103,
         taskId: 'task-103',
-        type: CloudTaskType.StandardTask,
+        payloadKind: TaskPayloadKind.StandardTask,
         harness: 'opencode-server',
         payload: {},
         result: null,
@@ -3613,7 +3608,7 @@ describe('runTask', () => {
       cloudJob: {
         id: 105,
         taskId: 'task-105',
-        type: CloudTaskType.StandardTask,
+        payloadKind: TaskPayloadKind.StandardTask,
         harness: 'opencode-server',
         payload: {},
         result: null,
@@ -3717,7 +3712,7 @@ describe('runTask', () => {
       cloudJob: {
         id: 104,
         taskId: 'task-104',
-        type: CloudTaskType.StandardTask,
+        payloadKind: TaskPayloadKind.StandardTask,
         harness: 'opencode-server',
         payload: {},
         result: null,
@@ -3776,7 +3771,7 @@ describe('runTask', () => {
 
     expect(cloudJobsDoneMock).toHaveBeenCalledWith({
       id: 104,
-      status: CloudTaskStatus.Idle,
+      status: RunStatus.Idle,
     });
   });
 
@@ -3786,7 +3781,7 @@ describe('runTask', () => {
         cloudJob: {
           id,
           taskId: `task-${id}`,
-          type: CloudTaskType.StandardTask,
+          payloadKind: TaskPayloadKind.StandardTask,
           harness: 'opencode-server',
           payload: {},
           result: null,

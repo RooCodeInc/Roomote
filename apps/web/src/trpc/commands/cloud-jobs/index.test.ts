@@ -1,34 +1,38 @@
 import { FeatureFlag } from '@roomote/feature-flags';
-import { ALL_REPOSITORIES, CloudTaskType } from '@roomote/types';
+import { ALL_REPOSITORIES, TaskPayloadKind } from '@roomote/types';
 
 import type { UserAuthSuccess } from '@/types';
 
-const { mockEnqueueCloudTask, mockGetRepositories, mockDbWhere, mockDbSelect } =
-  vi.hoisted(() => ({
-    mockEnqueueCloudTask: vi.fn(),
-    mockGetRepositories: vi.fn(),
-    mockDbWhere: vi.fn(),
-    mockDbSelect: vi.fn(),
-  }));
+const {
+  mockEnqueueTask,
+  mockGetRepositories,
+  mockDbWhere,
+  mockDbSelect,
+  mockResolveWorkspaceProvider,
+} = vi.hoisted(() => ({
+  mockEnqueueTask: vi.fn(),
+  mockGetRepositories: vi.fn(),
+  mockDbWhere: vi.fn(),
+  mockDbSelect: vi.fn(),
+  mockResolveWorkspaceProvider: vi.fn(),
+}));
 
 vi.mock('@roomote/cloud-agents/server', () => ({
   buildSlackRoutingContext: vi.fn(),
-  enqueueCloudTask: (...args: unknown[]) => mockEnqueueCloudTask(...args),
+  enqueueTask: (...args: unknown[]) => mockEnqueueTask(...args),
   getTaskUrl: vi.fn(() => 'https://roomote.test/tasks/task-123'),
   routeTask: vi.fn(),
 }));
 
 vi.mock('@roomote/db/server', () => ({
   and: vi.fn((...conditions: unknown[]) => ({ type: 'and', conditions })),
-  cloudJobs: {
-    id: 'cloud_jobs.id',
-    taskId: 'cloud_jobs.task_id',
-    slackThreadTs: 'cloud_jobs.slack_thread_ts',
-    status: 'cloud_jobs.status',
-  },
   db: {
     query: {
-      cloudJobs: {
+      tasks: {
+        findFirst: vi.fn(async () => null),
+      },
+      taskRuns: {
+        findFirst: vi.fn(async () => null),
         findMany: vi.fn(async () => []),
       },
       slackInstallations: {
@@ -48,8 +52,9 @@ vi.mock('@roomote/db/server', () => ({
     left,
     right,
   })),
-  isNotNull: vi.fn((value: unknown) => ({ type: 'isNotNull', value })),
   markTaskStartParallelCountEndedAt: vi.fn(),
+  resolveWorkspaceSourceControlProvider: (...args: unknown[]) =>
+    mockResolveWorkspaceProvider(...args),
   repositories: {
     id: 'repositories.id',
     isActive: 'repositories.is_active',
@@ -57,6 +62,18 @@ vi.mock('@roomote/db/server', () => ({
   },
   slackInstallations: {
     isActive: 'slack_installations.is_active',
+  },
+  taskRuns: {
+    id: 'task_runs.id',
+    taskId: 'task_runs.task_id',
+    status: 'task_runs.status',
+    createdAt: 'task_runs.created_at',
+    payload: 'task_runs.payload',
+  },
+  tasks: {
+    id: 'tasks.id',
+    slackChannelId: 'tasks.slack_channel_id',
+    slackThreadTs: 'tasks.slack_thread_ts',
   },
   sql: vi.fn(),
 }));
@@ -106,7 +123,7 @@ const auth = {
 } satisfies UserAuthSuccess;
 
 function mockSuccessfulEnqueue() {
-  mockEnqueueCloudTask.mockResolvedValue({
+  mockEnqueueTask.mockResolvedValue({
     id: 123,
     taskId: 'task-123',
   });
@@ -123,6 +140,8 @@ describe('createStandardTaskCloudJobCommand', () => {
       })),
     });
     mockDbWhere.mockResolvedValue([]);
+    // Shared resolver defaults to unresolved; the environment test overrides it.
+    mockResolveWorkspaceProvider.mockResolvedValue(undefined);
     mockSuccessfulEnqueue();
   });
 
@@ -148,17 +167,20 @@ describe('createStandardTaskCloudJobCommand', () => {
       id: 123,
       taskId: 'task-123',
     });
-    expect(mockEnqueueCloudTask).toHaveBeenCalledWith(
+    expect(mockEnqueueTask).toHaveBeenCalledWith(
       expect.objectContaining({
-        type: CloudTaskType.StandardTask,
-        payload: expect.objectContaining({
-          repo: 'acme/Platform/backend',
-          environmentId: '7bb91386-6282-4c98-9b31-0eb181116822',
-          sourceControlProvider: 'ado',
+        task: expect.objectContaining({
+          type: TaskPayloadKind.StandardTask,
+          payload: expect.objectContaining({
+            repo: 'acme/Platform/backend',
+            environmentId: '7bb91386-6282-4c98-9b31-0eb181116822',
+            sourceControlProvider: 'ado',
+          }),
         }),
-      }),
-      expect.objectContaining({
-        launchClass: 'human',
+        initiator: { kind: 'user', userId: 'user-123' },
+        workflow: 'standard',
+        surface: 'web',
+        trigger: 'manual',
       }),
     );
   });
@@ -184,15 +206,18 @@ describe('createStandardTaskCloudJobCommand', () => {
       id: 123,
       taskId: 'task-123',
     });
-    expect(mockEnqueueCloudTask).toHaveBeenCalledWith(
+    expect(mockEnqueueTask).toHaveBeenCalledWith(
       expect.objectContaining({
-        type: CloudTaskType.StandardTask,
-        payload: expect.not.objectContaining({
-          environmentId: expect.anything(),
+        task: expect.objectContaining({
+          type: TaskPayloadKind.StandardTask,
+          payload: expect.not.objectContaining({
+            environmentId: expect.anything(),
+          }),
         }),
-      }),
-      expect.objectContaining({
-        launchClass: 'human',
+        initiator: { kind: 'user', userId: 'user-123' },
+        workflow: 'standard',
+        surface: 'web',
+        trigger: 'manual',
       }),
     );
   });
@@ -210,15 +235,18 @@ describe('createStandardTaskCloudJobCommand', () => {
       id: 123,
       taskId: 'task-123',
     });
-    expect(mockEnqueueCloudTask).toHaveBeenCalledWith(
+    expect(mockEnqueueTask).toHaveBeenCalledWith(
       expect.objectContaining({
-        type: CloudTaskType.StandardTask,
-        payload: expect.objectContaining({
-          repo: ALL_REPOSITORIES,
+        task: expect.objectContaining({
+          type: TaskPayloadKind.StandardTask,
+          payload: expect.objectContaining({
+            repo: ALL_REPOSITORIES,
+          }),
         }),
-      }),
-      expect.objectContaining({
-        launchClass: 'human',
+        initiator: { kind: 'user', userId: 'user-123' },
+        workflow: 'standard',
+        surface: 'web',
+        trigger: 'manual',
       }),
     );
   });
@@ -235,11 +263,12 @@ describe('createStandardTaskCloudJobCommand', () => {
       success: false,
       error: 'Select an environment before starting a task.',
     });
-    expect(mockEnqueueCloudTask).not.toHaveBeenCalled();
+    expect(mockEnqueueTask).not.toHaveBeenCalled();
   });
 
   it('stamps an environment source-control provider from its repository mappings', async () => {
-    mockDbWhere.mockResolvedValue([{ sourceControlProvider: 'ado' }]);
+    // The environment resolver delegates to the shared @roomote/db resolver.
+    mockResolveWorkspaceProvider.mockResolvedValue('ado');
 
     const result = await createStandardTaskCloudJobCommand(auth, {
       payload: {
@@ -254,16 +283,19 @@ describe('createStandardTaskCloudJobCommand', () => {
       id: 123,
       taskId: 'task-123',
     });
-    expect(mockEnqueueCloudTask).toHaveBeenCalledWith(
+    expect(mockEnqueueTask).toHaveBeenCalledWith(
       expect.objectContaining({
-        type: CloudTaskType.StandardTask,
-        payload: expect.objectContaining({
-          environmentId: '7bb91386-6282-4c98-9b31-0eb181116822',
-          sourceControlProvider: 'ado',
+        task: expect.objectContaining({
+          type: TaskPayloadKind.StandardTask,
+          payload: expect.objectContaining({
+            environmentId: '7bb91386-6282-4c98-9b31-0eb181116822',
+            sourceControlProvider: 'ado',
+          }),
         }),
-      }),
-      expect.objectContaining({
-        launchClass: 'human',
+        initiator: { kind: 'user', userId: 'user-123' },
+        workflow: 'standard',
+        surface: 'web',
+        trigger: 'manual',
       }),
     );
   });

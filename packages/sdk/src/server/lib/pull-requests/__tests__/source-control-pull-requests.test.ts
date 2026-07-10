@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { CloudTaskStatus, CloudTaskType } from '@roomote/types';
-import type { CloudJob } from '@roomote/db/server';
+import { RunStatus, TaskPayloadKind } from '@roomote/types';
+import type { Run } from '@roomote/db/server';
 
 const {
   mockCreateGitHubToken,
@@ -99,11 +99,9 @@ vi.mock('@roomote/db/server', () => ({
   environments: {
     id: 'environments.id',
   },
-  cloudJobs: {
-    id: 'cloudJobs.id',
-    prRepo: 'cloudJobs.prRepo',
-    prNumber: 'cloudJobs.prNumber',
-    prBaseSha: 'cloudJobs.prBaseSha',
+  taskRuns: {
+    id: 'taskRuns.id',
+    taskId: 'taskRuns.taskId',
   },
   taskPullRequests: {
     taskId: 'taskPullRequests.taskId',
@@ -123,17 +121,18 @@ vi.mock('@roomote/db/server', () => ({
 
 import { createOrUpdateSourceControlPullRequestForCloudJob } from '../source-control-pull-requests';
 
-function makeCloudJob(payload: CloudJob['payload']): CloudJob {
+function makeCloudJob(payload: Run['payload']): Run {
   return {
     id: 123,
-    status: CloudTaskStatus.Dequeued,
-    type: CloudTaskType.StandardTask,
+    status: RunStatus.Dequeued,
+    kind: 'fresh',
+    payloadKind: TaskPayloadKind.StandardTask,
     taskId: 'task-123',
-    userId: 'user-123',
+    actingUserId: 'user-123',
     payload,
     result: null,
     artifacts: null,
-  } as CloudJob;
+  } as Run;
 }
 
 function jsonResponse(body: unknown, status = 200): Response {
@@ -205,6 +204,8 @@ describe('createOrUpdateSourceControlPullRequestForCloudJob', () => {
       number: 42,
       url: 'https://gitlab.com/acme/backend/-/merge_requests/42',
     });
+    // The PR base now persists on the task_pull_requests row itself; runs
+    // carry no PR columns.
     expect(mockTaskPullRequestUpsert).toHaveBeenCalledWith(
       expect.objectContaining({
         taskId: 'task-123',
@@ -212,15 +213,10 @@ describe('createOrUpdateSourceControlPullRequestForCloudJob', () => {
         prNumber: 42,
         repository: 'acme/backend',
         status: 'open',
-      }),
-    );
-    expect(mockCloudJobAssociationUpdate).toHaveBeenCalledWith(
-      expect.objectContaining({
-        prRepo: 'acme/backend',
-        prNumber: 42,
         prBaseRef: 'develop',
       }),
     );
+    expect(mockCloudJobAssociationUpdate).not.toHaveBeenCalled();
     expect(fetchImpl).toHaveBeenLastCalledWith(
       'https://gitlab.com/api/v4/projects/101/merge_requests',
       expect.objectContaining({
