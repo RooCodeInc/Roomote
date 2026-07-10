@@ -229,18 +229,10 @@ export function StepComputeConfig({
     ? getComputeCredentialsHint(selectedProvider.provider)
     : null;
 
-  const manualModalBaseImage =
-    selectedProvider?.provider === 'modal'
-      ? (values.MODAL_BASE_IMAGE_REF?.trim() ?? '')
-      : '';
-
-  // Hosted providers need a pullable (registry-qualified) worker image, unless
-  // Modal is given a manual base-image override. A bare process-env local tag
-  // must not enable Save — server provisioning will reject it.
-  const hostedRequirementMet =
-    !isHostedProvider ||
-    hostedWorkerImageReady ||
-    manualModalBaseImage.length > 0;
+  // Hosted providers need a pullable (registry-qualified) worker image. A bare
+  // process-env local tag must not enable Save — Modal/E2B/Daytona derive or
+  // provision from that image server-side, not from form base-image fields.
+  const hostedRequirementMet = !isHostedProvider || hostedWorkerImageReady;
 
   const credentialsMet = credentialFields.every(
     (field) =>
