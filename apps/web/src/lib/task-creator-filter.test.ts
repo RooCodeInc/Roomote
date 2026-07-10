@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 
 import {
   buildCreatorFilterValue,
+  formatAutomationAttributionLabel,
   formatAutomationLabel,
   parseCreatorFilterValue,
 } from './task-creator-filter';
@@ -109,5 +110,16 @@ describe('formatAutomationLabel', () => {
       'MCP Recommendations',
     );
     expect(formatAutomationLabel('ci-fixer')).toBe('CI Fixer');
+  });
+});
+
+describe('formatAutomationAttributionLabel', () => {
+  it('attributes automation keys as "{name} Automation"', () => {
+    expect(formatAutomationAttributionLabel('review_code')).toBe(
+      'Review Code Automation',
+    );
+    expect(formatAutomationAttributionLabel('conflict_resolver')).toBe(
+      'Conflict Resolver Automation',
+    );
   });
 });

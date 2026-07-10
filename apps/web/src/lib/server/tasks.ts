@@ -29,7 +29,7 @@ import {
 } from '@/types';
 import { getTaskCategoryById, isTaskWorkflow } from '@/lib';
 import {
-  formatAutomationLabel,
+  formatAutomationAttributionLabel,
   parseCreatorFilterValue,
 } from '@/lib/task-creator-filter';
 
@@ -226,7 +226,7 @@ export function resolveTaskCreatorDisplay(
     return {
       kind: 'automation',
       label: task.initiatorAutomation
-        ? formatAutomationLabel(task.initiatorAutomation)
+        ? formatAutomationAttributionLabel(task.initiatorAutomation)
         : '',
     };
   }
