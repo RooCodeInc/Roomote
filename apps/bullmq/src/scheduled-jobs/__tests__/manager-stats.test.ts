@@ -79,7 +79,9 @@ describe('formatManagerStatsMessage', () => {
       stats,
     });
 
-    expect(message.text).toContain('https://app.example.com/analytics');
+    expect(message.text).toContain(
+      'https://app.example.com/analytics?object=pullRequests',
+    );
   });
 
   it('formats the compact Roomote PR lines with merged subset stats', () => {
