@@ -30,6 +30,17 @@ vi.mock('@tanstack/react-query', async () => {
       },
       isPending: false,
     }),
+    useQuery: () => ({
+      data: {
+        invocationIdentities: [
+          {
+            provider: 'github',
+            mentionText: '@roomote',
+            examplePrompt: '@roomote address the PR feedback above',
+          },
+        ],
+      },
+    }),
     useQueryClient: () => ({
       setQueryData: setQueryDataMock,
       invalidateQueries: invalidateQueriesMock,
@@ -51,6 +62,11 @@ vi.mock('@/trpc/client', () => ({
     onboarding: {
       status: {
         queryKey: () => queryKeys.onboardingStatus,
+      },
+    },
+    comms: {
+      status: {
+        queryOptions: () => ({ queryKey: ['comms.status'] }),
       },
     },
     github: {

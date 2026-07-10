@@ -572,6 +572,9 @@ export function CommsProviderSection({
   const teamsBotAppIdField = provider.fields.find(
     (field) => field.envVarName === 'TEAMS_BOT_APP_ID',
   );
+  const teamsBotNameField = provider.fields.find(
+    (field) => field.envVarName === 'TEAMS_BOT_NAME',
+  );
   const enteredTeamsBotAppId =
     isMicrosoftProvider && teamsBotAppIdField
       ? getSetupEffectiveFieldValue({
@@ -583,6 +586,14 @@ export function CommsProviderSection({
   const typedTeamsBotAppId = MICROSOFT_APP_ID_PATTERN.test(enteredTeamsBotAppId)
     ? enteredTeamsBotAppId
     : '';
+  const typedTeamsBotName =
+    isMicrosoftProvider && teamsBotNameField
+      ? getSetupEffectiveFieldValue({
+          provider,
+          field: teamsBotNameField,
+          values,
+        }).trim()
+      : '';
   const teamsBotAppIdStored = isMicrosoftProvider
     ? provider.fields.some(
         (field) =>
@@ -591,8 +602,15 @@ export function CommsProviderSection({
           (field.runtimeSatisfied || field.savedSatisfied),
       )
     : false;
+  const teamsSetupPackageParams = new URLSearchParams();
+  if (typedTeamsBotAppId) {
+    teamsSetupPackageParams.set('botAppId', typedTeamsBotAppId);
+  }
+  if (typedTeamsBotName) {
+    teamsSetupPackageParams.set('botName', typedTeamsBotName);
+  }
   const teamsAppPackageHref = typedTeamsBotAppId
-    ? `/api/setup/teams-app-package?botAppId=${encodeURIComponent(typedTeamsBotAppId)}`
+    ? `/api/setup/teams-app-package?${teamsSetupPackageParams.toString()}`
     : teamsBotAppIdStored || teamsBotConfigured
       ? '/api/teams/app-package'
       : null;

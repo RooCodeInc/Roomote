@@ -13,7 +13,6 @@ import {
   DEFAULT_CONFLICT_RESOLUTION_MAX_PR_AGE_DAYS,
   DEFAULT_SUGGESTER_ROUTING_MODE,
   getTriggerableBackgroundAutomationDescriptorByKey,
-  getGitHubAppMention,
   type ChannelAutoStartLaunchMode,
   type ConflictResolverMaxPrAgeDays,
   PRODUCT_NAME,
@@ -109,18 +108,6 @@ import {
   TriangleAlert,
   Users,
 } from '@/components/system';
-
-const slackAppMention = (() => {
-  const handle = (
-    process.env.NEXT_PUBLIC_SLACK_APP_HANDLE || PRODUCT_NAME
-  ).trim();
-
-  return handle.startsWith('@') ? handle : `@${handle}`;
-})();
-
-const githubAppMention = getGitHubAppMention(
-  process.env.NEXT_PUBLIC_GITHUB_APP_SLUG || 'roomote',
-);
 
 type FieldErrors = Partial<
   Record<
@@ -1015,7 +1002,11 @@ function AutomationFooter({
   );
 }
 
-function SlackChannelAccessWarning() {
+function SlackChannelAccessWarning({
+  slackAppMention,
+}: {
+  slackAppMention: string;
+}) {
   return (
     <span className="inline-flex items-center gap-1 text-xs text-muted-foreground">
       <TriangleAlert className="size-3.5 shrink-0" />
@@ -1032,6 +1023,7 @@ function AutomationSlackDestinationInput({
   options,
   disabled,
   showWarning,
+  slackAppMention,
   error,
   onChange,
 }: {
@@ -1042,6 +1034,7 @@ function AutomationSlackDestinationInput({
   options: SlackChannelOption[];
   disabled: boolean;
   showWarning: boolean;
+  slackAppMention: string;
   error?: string;
   onChange: (value: string | null) => void;
 }) {
@@ -1066,7 +1059,9 @@ function AutomationSlackDestinationInput({
           {helperText}
         </p>
       ) : null}
-      {showWarning ? <SlackChannelAccessWarning /> : null}
+      {showWarning ? (
+        <SlackChannelAccessWarning slackAppMention={slackAppMention} />
+      ) : null}
       {error ? <p className="text-xs text-destructive">{error}</p> : null}
     </div>
   );
@@ -1469,6 +1464,7 @@ export function AutomationsSettings() {
   });
 
   const settingsQuery = useQuery(trpc.automations.getSettings.queryOptions());
+  const commsStatus = useQuery(trpc.comms.status.queryOptions());
   const slackChannelsQuery = useQuery(
     trpc.automations.listSlackChannels.queryOptions(undefined, {
       enabled: settingsQuery.data?.capabilities.slackConnected ?? false,
@@ -1892,6 +1888,20 @@ export function AutomationsSettings() {
   }, [openHashTarget]);
 
   const capabilities = settingsQuery.data?.capabilities;
+  const slackInvocationIdentity =
+    commsStatus.data?.invocationIdentities.find(
+      (identity) => identity.provider === 'slack',
+    ) ?? null;
+  const githubInvocationIdentity =
+    commsStatus.data?.invocationIdentities.find(
+      (identity) => identity.provider === 'github',
+    ) ?? null;
+  const slackAppMention =
+    slackInvocationIdentity?.mentionText ??
+    slackInvocationIdentity?.nativeMention ??
+    'the Slack app';
+  const githubAppMention =
+    githubInvocationIdentity?.mentionText ?? 'the GitHub app';
   const channelAutoStartLaunchModeOptions =
     CHANNEL_AUTO_START_LAUNCH_MODE_OPTIONS;
   const showChannelAutoStartLaunchModePicker = false;
@@ -2033,6 +2043,7 @@ export function AutomationsSettings() {
           value={value || null}
           options={buildSlackDestinationOptions(value)}
           disabled={getSlackDestinationSelectionDisabled(value, savedChannelId)}
+          slackAppMention={slackAppMention}
           showWarning={shouldShowManagerSlackChannelWarning({
             formValue: value,
             savedChannelId,
@@ -2072,6 +2083,7 @@ export function AutomationsSettings() {
       formState,
       getSlackDestinationSelectionDisabled,
       isDirty,
+      slackAppMention,
     ],
   );
 
@@ -2240,7 +2252,9 @@ export function AutomationsSettings() {
                 isEnabled={channelAutoStartIsEnabled}
                 warning={
                   showChannelAutoStartSlackChannelWarning ? (
-                    <SlackChannelAccessWarning />
+                    <SlackChannelAccessWarning
+                      slackAppMention={slackAppMention}
+                    />
                   ) : undefined
                 }
                 channelFieldError={fieldErrors.channelAutoStartSlackChannels}
@@ -2422,7 +2436,9 @@ export function AutomationsSettings() {
                     ID.
                   </p>
                   {showManagerSlackChannelWarning ? (
-                    <SlackChannelAccessWarning />
+                    <SlackChannelAccessWarning
+                      slackAppMention={slackAppMention}
+                    />
                   ) : null}
                   {fieldErrors.managerSlackChannel ? (
                     <p className="text-xs text-destructive">
@@ -3647,7 +3663,7 @@ If unclear, send to manager channel.`}
                     </a>
                     , finishing with{' '}
                     <span className="font-medium text-foreground">
-                      @roomote
+                      {slackAppMention}
                     </span>{' '}
                     mentions, to get it working on whatever you want. Some
                     ideas:

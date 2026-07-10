@@ -198,6 +198,24 @@ vi.mock('@tanstack/react-query', () => ({
       return state.slackChannelsQuery;
     }
 
+    if (queryOptions.queryKey?.[0] === 'comms') {
+      return {
+        data: {
+          invocationIdentities: [
+            {
+              provider: 'slack',
+              mentionText: '@roomote',
+              nativeMention: '<@UROOMOTE>',
+            },
+            {
+              provider: 'github',
+              mentionText: '@roomote',
+            },
+          ],
+        },
+      };
+    }
+
     return state.settingsQuery;
   },
   useMutation: (_options?: {
@@ -262,6 +280,13 @@ vi.mock('@/trpc/client', () => ({
 
           return options ?? {};
         },
+      },
+    },
+    comms: {
+      status: {
+        queryOptions: () => ({
+          queryKey: ['comms', 'status'],
+        }),
       },
     },
   }),

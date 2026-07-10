@@ -2,16 +2,13 @@
 
 import type { ComponentType } from 'react';
 import {
-  getGitHubAppMention,
   getSourceControlProviderLabel,
   PRODUCT_NAME,
+  type InvocationIdentity,
+  type InvocationProvider,
   type SourceControlProvider,
 } from '@roomote/types';
 import { AppWindow, BrandIcon, LinearLogo, Zap } from '@/components/system';
-
-const githubAppMention = getGitHubAppMention(
-  process.env.NEXT_PUBLIC_GITHUB_APP_SLUG || 'roomote',
-);
 
 type MethodIcon = ComponentType<{ className?: string }>;
 
@@ -37,19 +34,16 @@ const communicationProviderCopy: Record<
     icon: 'slack',
     title: 'Slack',
     description: `talk to it directly, or mention it in any connected channel.`,
-    example: `@Roomote Add support for a reset password flow.`,
   },
   microsoft: {
     icon: 'teams',
     title: 'Microsoft Teams',
     description: `talk to it directly, or mention it in any connected channel.`,
-    example: `@Roomote Add support for a reset password flow.`,
   },
   telegram: {
     icon: 'telegram',
     title: 'Telegram',
     description: `start work from any connected chats.`,
-    example: `@Roomote Add support for a reset password flow.`,
   },
 };
 
@@ -63,8 +57,7 @@ const sourceControlProviderCopy: Record<
 > = {
   github: {
     icon: 'github',
-    description: `Mention ${githubAppMention} in a comment on any PR.`,
-    example: `${githubAppMention} address the PR feedback above`,
+    description: `Mention the GitHub app in a comment on any PR.`,
   },
   gitlab: {
     icon: 'gitlab',
@@ -92,10 +85,25 @@ function uniqueValues<T>(values: readonly (T | null | undefined)[]): T[] {
   });
 }
 
+const sourceControlInvocationProviderById = {
+  github: 'github',
+  gitlab: 'gitlab',
+  gitea: 'gitea',
+  ado: 'ado',
+} as const satisfies Record<SourceControlProvider, InvocationProvider>;
+
+function getIdentity(
+  identities: readonly InvocationIdentity[] | undefined,
+  provider: InvocationProvider,
+) {
+  return identities?.find((identity) => identity.provider === provider);
+}
+
 export function buildInvokeMethods({
   communicationProviders = [],
   sourceControlProviders = [],
   includeLinear = false,
+  invocationIdentities = [],
 }: {
   communicationProviders?: readonly (
     | CommunicationProviderId
@@ -108,27 +116,36 @@ export function buildInvokeMethods({
     | undefined
   )[];
   includeLinear?: boolean;
+  invocationIdentities?: readonly InvocationIdentity[];
 }): InvokeMethod[] {
   return [
     ...uniqueValues(communicationProviders).map((provider) => {
       const copy = communicationProviderCopy[provider];
+      const identity = getIdentity(invocationIdentities, provider);
 
       return {
         icon: createBrandIcon(copy.icon, copy.title),
         title: copy.title,
         description: copy.description,
-        ...(copy.example ? { example: copy.example } : {}),
+        ...(identity?.examplePrompt ? { example: identity.examplePrompt } : {}),
       };
     }),
     ...uniqueValues(sourceControlProviders).map((provider) => {
       const copy = sourceControlProviderCopy[provider];
       const title = getSourceControlProviderLabel(provider);
+      const identity = getIdentity(
+        invocationIdentities,
+        sourceControlInvocationProviderById[provider],
+      );
+      const description = identity?.mentionText
+        ? `Mention ${identity.mentionText} in a comment on any PR.`
+        : copy.description;
 
       return {
         icon: createBrandIcon(copy.icon, title),
         title,
-        description: copy.description,
-        ...(copy.example ? { example: copy.example } : {}),
+        description,
+        ...(identity?.examplePrompt ? { example: identity.examplePrompt } : {}),
       };
     }),
     ...(includeLinear

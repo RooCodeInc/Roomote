@@ -87,8 +87,8 @@ GITHUB_WEBHOOK_SECRET=<webhook-secret>
 GITHUB_APP_PRIVATE_KEY="-----BEGIN RSA PRIVATE KEY-----\n...\n-----END RSA PRIVATE KEY-----"
 ```
 
-`NEXT_PUBLIC_GITHUB_APP_SLUG` is optional when your GitHub App slug is not
-`roomote`.
+`NEXT_PUBLIC_GITHUB_APP_SLUG` is required when your GitHub App slug is not
+`roomote`; Roomote uses it for GitHub mentions and bot-authored PR detection.
 
 Generate a private key from the app's **Private keys** section. GitHub
 downloads a `.pem` file. Convert it to an escaped single-line value before
