@@ -47,13 +47,9 @@ const prReviewTriageResponseSchema = z.object({
   summary: z.string(),
 });
 
-export type PrReviewCiOverallStatus =
-  | 'success'
-  | 'pending'
-  | 'failure'
-  | 'error';
+type PrReviewCiOverallStatus = 'success' | 'pending' | 'failure' | 'error';
 
-export type PrReviewCiStatus = {
+type PrReviewCiStatus = {
   overall: PrReviewCiOverallStatus;
   failedCheckName: string | null;
 };
@@ -227,7 +223,7 @@ function summarizeCheckRuns(
  * and the classic combined commit status. Non-GitHub providers currently return
  * null; failures to fetch status are treated as unavailable, not as red CI.
  */
-export async function fetchPrReviewCiStatusSentence({
+async function fetchPrReviewCiStatusSentence({
   taskRun,
   repository,
   prNumber,
