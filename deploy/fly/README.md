@@ -260,7 +260,7 @@ preview proxy cannot share it. Run the proxy as a second Fly app instead:
    primary_region = '<region>'
 
    [build]
-     image = 'ghcr.io/roocodeinc/roomote-app:develop'
+      image = 'ghcr.io/roocodeinc/roomote-app:main'
 
    [processes]
      preview-proxy = 'preview-proxy'
@@ -308,13 +308,13 @@ previews.<your-domain>` and `fly certs add -a <app>-previews
 
 ## Upgrades, backups, and costs
 
-- **Upgrade a deployment on `:develop`** by running `fly deploy` again — Fly
+- **Upgrade a deployment on `:main`** by running `fly deploy` again — Fly
   resolves the mutable alias at deploy time, the `db-migrate` release
   command applies any schema changes first, and the auto-generated keypairs
   persist in Postgres, so sessions, job tokens, and preview tokens survive
   redeploys. On an immutable pin, bump the tag in `[build].image` first.
   There is no Railway-style auto-deploy workflow for Fly in this repository;
-  a deployment that wants every develop build can run `fly deploy` from its
+  a deployment that wants every main build can run `fly deploy` from its
   own CI with a [deploy token](https://fly.io/docs/security/tokens/)
   (`fly tokens create deploy`) and the edited `fly.toml`.
 - **Back up** the Managed Postgres cluster (Fly's MPG backups or `pg_dump`
