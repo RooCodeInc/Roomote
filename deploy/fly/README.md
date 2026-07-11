@@ -260,7 +260,7 @@ preview proxy cannot share it. Run the proxy as a second Fly app instead:
    primary_region = '<region>'
 
    [build]
-      image = 'ghcr.io/roocodeinc/roomote-app:main'
+     image = 'ghcr.io/roocodeinc/roomote-app:main'
 
    [processes]
      preview-proxy = 'preview-proxy'
