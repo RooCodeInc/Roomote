@@ -15,8 +15,10 @@ import type {
   AnalyticsChartResponse,
   AnalyticsDimension,
   AnalyticsGranularity,
+  AnalyticsMetric,
 } from '@/types';
 import { cn } from '@/lib/utils';
+import { formatInferenceCost, formatTokens } from '@/lib/formatters';
 import { useIsMobile } from '@/hooks/useIsMobile';
 import {
   Button,
@@ -57,8 +59,28 @@ function formatCompactNumber(value: number) {
   }).format(value);
 }
 
-function formatMetricValue(value: number) {
-  return String(value);
+function formatAxisValue(value: number, metric: AnalyticsMetric) {
+  switch (metric) {
+    case 'tokens':
+      return formatTokens(value);
+    case 'cost':
+      return `$${formatInferenceCost(value * 1_000_000)}`;
+    case 'tasks':
+    default:
+      return formatCompactNumber(value);
+  }
+}
+
+function formatMetricValue(value: number, metric: AnalyticsMetric) {
+  switch (metric) {
+    case 'tokens':
+      return formatTokens(value);
+    case 'cost':
+      return `$${formatInferenceCost(value * 1_000_000)}`;
+    case 'tasks':
+    default:
+      return String(value);
+  }
 }
 
 function getSeriesColor(params: { index: number }) {
@@ -150,12 +172,14 @@ function AnalyticsTooltip({
   payload,
   label,
   viewBy,
+  metric,
 }: {
   active?: boolean;
   hoveredSeriesKey: string | null;
   payload?: Array<{ name: string; value: number; color: string }>;
   label?: string;
   viewBy: AnalyticsDimension;
+  metric: AnalyticsMetric;
 }) {
   if (!active || !payload || payload.length === 0) {
     return null;
@@ -210,7 +234,7 @@ function AnalyticsTooltip({
                     item.name === hoveredSeriesKey && 'font-semibold',
                   )}
                 >
-                  {formatMetricValue(item.value)}
+                  {formatMetricValue(item.value, metric)}
                 </span>
                 <span className="ml-2 text-xs text-muted-foreground/90">
                   {Math.round((item.value / total) * 100)}%
@@ -222,7 +246,7 @@ function AnalyticsTooltip({
         <div className="flex items-center justify-between border-t border-border/60 pt-2 text-sm">
           <span className="text-muted-foreground">Total</span>
           <span className="font-medium text-foreground">
-            {formatMetricValue(total)}
+            {formatMetricValue(total, metric)}
           </span>
         </div>
       </div>
@@ -281,7 +305,8 @@ export function AnalyticsStackedBarChart({
     });
   }, [chart]);
 
-  const yAxisWidth = isMobile ? 36 : 64;
+  const metric = chart?.metric ?? 'tasks';
+  const yAxisWidth = isMobile ? 36 : metric === 'cost' ? 72 : 64;
   const chartMargin = {
     top: 8,
     right: 8,
@@ -371,7 +396,7 @@ export function AnalyticsStackedBarChart({
               axisLine={false}
               width={yAxisWidth}
               tick={{ fill: 'var(--color-muted-foreground)', fontSize: 11 }}
-              tickFormatter={(value) => formatCompactNumber(Number(value))}
+              tickFormatter={(value) => formatAxisValue(Number(value), metric)}
               label={
                 isMobile
                   ? undefined
@@ -393,6 +418,7 @@ export function AnalyticsStackedBarChart({
                 <AnalyticsTooltip
                   hoveredSeriesKey={hoveredSeriesKey}
                   viewBy={chart.viewBy}
+                  metric={metric}
                 />
               }
             />

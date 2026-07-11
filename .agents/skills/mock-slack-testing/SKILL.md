@@ -42,9 +42,9 @@ INSERT INTO slack_installations (organization_id, team_id, team_name, app_id, bo
 VALUES ('<org_id>', 'TROOMOTE', 'roomote-mock', 'AMOCK', 'BROOMOTE', 'xoxb-mock-token', '<user_id>', true)
 ON CONFLICT (team_id) DO NOTHING;
 
--- Seed user mapping for mock user UDAN
+-- Seed user mapping for mock user UGRACE
 INSERT INTO slack_user_mappings (slack_user_id, slack_team_id, user_id, organization_id)
-VALUES ('UDAN', 'TROOMOTE', '<user_id>', '<org_id>')
+VALUES ('UGRACE', 'TROOMOTE', '<user_id>', '<org_id>')
 ON CONFLICT ON CONSTRAINT slack_user_mappings_unique DO NOTHING;
 ```
 
@@ -103,7 +103,7 @@ curl -s -X POST http://127.0.0.1:3012/mock/events \
     "event": {
       "type": "app_mention",
       "channel": "C123ABC456",
-      "user": "UDAN",
+      "user": "UGRACE",
       "text": "<@BROOMOTE> !fast what file handles Slack mentions?",
       "ts": "1710000000.000200",
       "channel_type": "channel"

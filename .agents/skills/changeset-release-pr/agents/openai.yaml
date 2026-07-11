@@ -1,0 +1,4 @@
+interface:
+  display_name: 'Changeset Release PR'
+  short_description: 'Assemble release-note changesets for the next Roomote version'
+  default_prompt: 'Use $changeset-release-pr to review what merged to develop since the last release, confirm the patch/minor/major bump with me if I have not specified it, and open a PR adding concise changeset release notes.'

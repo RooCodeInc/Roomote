@@ -67,6 +67,10 @@ const sourceControlProviderCopy: Record<
     icon: 'gitea',
     description: `Start work from connected Gitea pull requests and repositories.`,
   },
+  bitbucket: {
+    icon: 'bitbucket',
+    description: `Start work from connected Bitbucket pull requests and repositories.`,
+  },
   ado: {
     icon: 'ado',
     description: `Start work from connected Azure DevOps pull requests and repositories.`,
@@ -89,6 +93,7 @@ const sourceControlInvocationProviderById = {
   github: 'github',
   gitlab: 'gitlab',
   gitea: 'gitea',
+  bitbucket: 'bitbucket',
   ado: 'ado',
 } as const satisfies Record<SourceControlProvider, InvocationProvider>;
 

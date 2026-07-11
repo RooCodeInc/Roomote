@@ -91,6 +91,11 @@ const TOKEN_PROVIDER_UI = {
     credentialName: 'deployment token',
     repositoryTarget: '_gitea',
   },
+  bitbucket: {
+    accessibleResource: 'repositories',
+    credentialName: 'API token',
+    repositoryTarget: '_bitbucket',
+  },
   ado: {
     accessibleResource: 'repositories',
     credentialName: 'PAT',
@@ -152,6 +157,9 @@ export function SourceControl() {
   const giteaRepositories = useRepositories({
     sourceControlProvider: 'gitea',
   });
+  const bitbucketRepositories = useRepositories({
+    sourceControlProvider: 'bitbucket',
+  });
   const adoRepositories = useRepositories({
     sourceControlProvider: 'ado',
   });
@@ -172,6 +180,13 @@ export function SourceControl() {
     onError: () =>
       toast.error(
         `Failed to refresh ${sourceControlProviderDescriptors.gitea.label}. Please try again.`,
+      ),
+  });
+  const syncBitbucketRepositories = useSyncRepositories('bitbucket', {
+    onSuccess: (result) => handleTokenProviderSyncSuccess('bitbucket', result),
+    onError: () =>
+      toast.error(
+        `Failed to refresh ${sourceControlProviderDescriptors.bitbucket.label}. Please try again.`,
       ),
   });
   const syncAdoRepositories = useSyncRepositories('ado', {
@@ -195,6 +210,8 @@ export function SourceControl() {
   const gitLabIsConnected = (gitLabRepositories.data?.length ?? 0) > 0;
   const giteaIsPending = giteaRepositories.isPending;
   const giteaIsConnected = (giteaRepositories.data?.length ?? 0) > 0;
+  const bitbucketIsPending = bitbucketRepositories.isPending;
+  const bitbucketIsConnected = (bitbucketRepositories.data?.length ?? 0) > 0;
   const adoIsPending = adoRepositories.isPending;
   const adoIsConnected = (adoRepositories.data?.length ?? 0) > 0;
   const search = searchParams.toString();
@@ -220,6 +237,16 @@ export function SourceControl() {
       ),
       isPending: giteaIsPending,
       sync: syncGiteaRepositories,
+    },
+    bitbucket: {
+      repositories: bitbucketRepositories.data,
+      isConnected: bitbucketIsConnected,
+      isConfigured: isProviderConfigured(
+        sourceControlConfigStatus.data,
+        'bitbucket',
+      ),
+      isPending: bitbucketIsPending,
+      sync: syncBitbucketRepositories,
     },
     ado: {
       repositories: adoRepositories.data,

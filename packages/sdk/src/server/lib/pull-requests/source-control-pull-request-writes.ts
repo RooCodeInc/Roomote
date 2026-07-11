@@ -5,6 +5,12 @@ import {
   resolveAdoToken,
 } from '@roomote/ado';
 import {
+  buildBitbucketApiBaseUrl,
+  resolveBitbucketBaseUrl,
+  resolveBitbucketToken,
+  resolveBitbucketUsername,
+} from '@roomote/bitbucket';
+import {
   buildGiteaApiBaseUrl,
   resolveGiteaBaseUrl,
   resolveGiteaToken,
@@ -185,6 +191,17 @@ const giteaCreatedReviewSchema = z
   })
   .passthrough();
 
+const bitbucketCreatedCommentSchema = z
+  .object({
+    id: z.union([z.number(), z.string()]).optional(),
+    links: z
+      .object({
+        html: z.object({ href: z.string().optional() }).optional(),
+      })
+      .optional(),
+  })
+  .passthrough();
+
 const adoCreatedCommentSchema = z
   .object({ id: z.number().int().optional() })
   .passthrough();
@@ -253,6 +270,13 @@ export async function writeSourceControlPullRequestForTaskRun({
       });
     case 'gitea':
       return writeGiteaPullRequest({ input, repository, provider, fetchImpl });
+    case 'bitbucket':
+      return writeBitbucketPullRequest({
+        input,
+        repository,
+        provider,
+        fetchImpl,
+      });
     case 'ado':
       return writeAdoPullRequest({ input, repository, provider, fetchImpl });
   }
@@ -1006,6 +1030,261 @@ async function resolveGiteaWriteContext(
     owner,
     repo,
     token,
+  };
+}
+
+async function writeBitbucketPullRequest({
+  input,
+  repository,
+  provider,
+  fetchImpl,
+}: {
+  input: SourceControlPullRequestWriteInput;
+  repository: RepositoryRow;
+  provider: 'bitbucket';
+  fetchImpl: FetchImpl;
+}): Promise<SourceControlPullRequestWriteResult> {
+  const { apiBaseUrl, authHeader, workspace, repo } =
+    await resolveBitbucketWriteContext(repository, provider);
+  const tokenHeader = { name: 'Authorization', value: authHeader };
+  const commentsUrl = buildApiUrl(
+    apiBaseUrl,
+    `/repositories/${encodeURIComponent(workspace)}/${encodeURIComponent(
+      repo,
+    )}/pullrequests/${input.prNumber}/comments`,
+    {},
+  );
+
+  switch (input.action) {
+    case 'reply_to_pull_request_comment': {
+      const threadId = requireThreadId(input);
+      const comment = await requestJson({
+        fetchImpl,
+        method: 'POST',
+        url: commentsUrl,
+        tokenHeader,
+        body: {
+          content: {
+            raw: `> Re: review thread ${threadId}\n\n${requireBody(input)}`,
+          },
+          parent: { id: threadId },
+        },
+        schema: bitbucketCreatedCommentSchema,
+      });
+
+      return buildWriteResult({
+        input,
+        provider,
+        repository,
+        threadId,
+        commentId:
+          comment.id === undefined || comment.id === null
+            ? null
+            : String(comment.id),
+        url: comment.links?.html?.href ?? null,
+      });
+    }
+    case 'create_pull_request_comment': {
+      const comment = await requestJson({
+        fetchImpl,
+        method: 'POST',
+        url: commentsUrl,
+        tokenHeader,
+        body: {
+          content: { raw: requireBody(input) },
+        },
+        schema: bitbucketCreatedCommentSchema,
+      });
+
+      return buildWriteResult({
+        input,
+        provider,
+        repository,
+        commentId:
+          comment.id === undefined || comment.id === null
+            ? null
+            : String(comment.id),
+        url: comment.links?.html?.href ?? null,
+      });
+    }
+    case 'update_pull_request_comment': {
+      const commentId = requireCommentId(input);
+      const comment = await requestJson({
+        fetchImpl,
+        method: 'PUT',
+        url: buildApiUrl(
+          apiBaseUrl,
+          `/repositories/${encodeURIComponent(workspace)}/${encodeURIComponent(
+            repo,
+          )}/pullrequests/${input.prNumber}/comments/${encodeURIComponent(
+            commentId,
+          )}`,
+          {},
+        ),
+        tokenHeader,
+        body: {
+          content: { raw: requireBody(input) },
+        },
+        schema: bitbucketCreatedCommentSchema,
+      });
+
+      return buildWriteResult({
+        input,
+        provider,
+        repository,
+        threadId: input.threadId ?? null,
+        commentId:
+          comment.id === undefined || comment.id === null
+            ? String(commentId)
+            : String(comment.id),
+        url: comment.links?.html?.href ?? null,
+      });
+    }
+    case 'resolve_pull_request_thread': {
+      return buildWriteResult({
+        input,
+        provider,
+        repository,
+        threadId: requireThreadId(input),
+        applied: false,
+        warnings: ['Bitbucket does not expose review thread resolution.'],
+      });
+    }
+    case 'submit_pull_request_review': {
+      const reviewEvent = requireReviewEvent(input);
+
+      if (reviewEvent === 'request_changes') {
+        return buildWriteResult({
+          input,
+          provider,
+          repository,
+          applied: false,
+          warnings: [
+            'Bitbucket does not support request_changes reviews through this API surface.',
+          ],
+        });
+      }
+
+      if (reviewEvent === 'comment') {
+        if (!input.body?.trim()) {
+          return buildWriteResult({
+            input,
+            provider,
+            repository,
+            applied: false,
+            warnings: [
+              'Bitbucket comment reviews require a body; nothing was posted.',
+            ],
+          });
+        }
+
+        const comment = await requestJson({
+          fetchImpl,
+          method: 'POST',
+          url: commentsUrl,
+          tokenHeader,
+          body: {
+            content: { raw: requireBody(input) },
+          },
+          schema: bitbucketCreatedCommentSchema,
+        });
+
+        return buildWriteResult({
+          input,
+          provider,
+          repository,
+          commentId:
+            comment.id === undefined || comment.id === null
+              ? null
+              : String(comment.id),
+          url: comment.links?.html?.href ?? null,
+        });
+      }
+
+      const approveResponse = await performRequest({
+        fetchImpl,
+        method: 'POST',
+        url: buildApiUrl(
+          apiBaseUrl,
+          `/repositories/${encodeURIComponent(workspace)}/${encodeURIComponent(
+            repo,
+          )}/pullrequests/${input.prNumber}/approve`,
+          {},
+        ),
+        tokenHeader,
+      });
+
+      if (![200, 201].includes(approveResponse.status)) {
+        throw new Error(await buildRequestFailureMessage(approveResponse));
+      }
+
+      if (input.body?.trim()) {
+        const comment = await requestJson({
+          fetchImpl,
+          method: 'POST',
+          url: commentsUrl,
+          tokenHeader,
+          body: {
+            content: { raw: requireBody(input) },
+          },
+          schema: bitbucketCreatedCommentSchema,
+        });
+
+        return buildWriteResult({
+          input,
+          provider,
+          repository,
+          commentId:
+            comment.id === undefined || comment.id === null
+              ? null
+              : String(comment.id),
+          url: comment.links?.html?.href ?? null,
+        });
+      }
+
+      return buildWriteResult({
+        input,
+        provider,
+        repository,
+      });
+    }
+  }
+}
+
+async function resolveBitbucketWriteContext(
+  repository: RepositoryRow,
+  provider: 'bitbucket',
+): Promise<{
+  apiBaseUrl: string;
+  authHeader: string;
+  workspace: string;
+  repo: string;
+}> {
+  const token = await resolveBitbucketToken();
+  if (!token) {
+    throw new Error(
+      'BITBUCKET_TOKEN is required to write Bitbucket pull requests.',
+    );
+  }
+
+  const username = await resolveBitbucketUsername();
+  if (!username) {
+    throw new Error(
+      'BITBUCKET_USERNAME is required to write Bitbucket pull requests.',
+    );
+  }
+
+  const baseUrl = await resolveBitbucketBaseUrl();
+  const [workspace, repo] = splitRepositoryFullName(
+    repository.fullName,
+    provider,
+  );
+
+  return {
+    apiBaseUrl: buildBitbucketApiBaseUrl(baseUrl),
+    authHeader: `Basic ${Buffer.from(`${username}:${token}`, 'utf8').toString('base64')}`,
+    workspace,
+    repo,
   };
 }
 

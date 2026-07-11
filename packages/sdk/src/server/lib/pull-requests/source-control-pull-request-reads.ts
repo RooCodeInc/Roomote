@@ -5,6 +5,12 @@ import {
   resolveAdoToken,
 } from '@roomote/ado';
 import {
+  buildBitbucketApiBaseUrl,
+  resolveBitbucketBaseUrl,
+  resolveBitbucketToken,
+  resolveBitbucketUsername,
+} from '@roomote/bitbucket';
+import {
   buildGiteaApiBaseUrl,
   resolveGiteaBaseUrl,
   resolveGiteaToken,
@@ -232,6 +238,87 @@ const giteaReviewListSchema = z.array(
   z.object({ id: z.number().int() }).passthrough(),
 );
 
+const bitbucketPullRequestDetailsSchema = z
+  .object({
+    id: z.number().int(),
+    title: z.string().optional(),
+    description: z.string().nullable().optional(),
+    state: z.string().optional(),
+    draft: z.boolean().optional(),
+    links: z
+      .object({
+        html: z.object({ href: z.string().url().optional() }).optional(),
+      })
+      .optional(),
+    author: z
+      .object({
+        nickname: z.string().optional(),
+        display_name: z.string().optional(),
+        username: z.string().optional(),
+      })
+      .nullable()
+      .optional(),
+    source: z
+      .object({
+        branch: z.object({ name: z.string().optional() }).optional(),
+        commit: z.object({ hash: z.string().optional() }).nullable().optional(),
+        repository: z
+          .object({ full_name: z.string().optional() })
+          .nullable()
+          .optional(),
+      })
+      .optional(),
+    destination: z
+      .object({
+        branch: z.object({ name: z.string().optional() }).optional(),
+        commit: z.object({ hash: z.string().optional() }).nullable().optional(),
+        repository: z
+          .object({ full_name: z.string().optional() })
+          .nullable()
+          .optional(),
+      })
+      .optional(),
+  })
+  .passthrough();
+
+const bitbucketCommentSchema = z
+  .object({
+    id: z.union([z.number(), z.string()]),
+    created_on: z.string().optional(),
+    content: z.object({ raw: z.string().optional() }).optional(),
+    user: z
+      .object({
+        nickname: z.string().optional(),
+        display_name: z.string().optional(),
+        username: z.string().optional(),
+      })
+      .nullable()
+      .optional(),
+    links: z
+      .object({
+        html: z.object({ href: z.string().optional() }).optional(),
+      })
+      .optional(),
+    inline: z
+      .object({
+        path: z.string().optional(),
+        to: z.number().nullable().optional(),
+      })
+      .nullable()
+      .optional(),
+    parent: z
+      .object({
+        id: z.union([z.number(), z.string()]).optional(),
+      })
+      .nullable()
+      .optional(),
+  })
+  .passthrough();
+const bitbucketCommentListSchema = z.object({
+  values: z.array(bitbucketCommentSchema),
+  next: z.string().url().optional().nullable(),
+});
+
 const adoPullRequestDetailsSchema = z
   .object({
     pullRequestId: z.number().int(),
@@ -394,6 +481,20 @@ export async function readSourceControlPullRequestForTaskRun({
       return input.action === 'get_pull_request'
         ? getGiteaPullRequestDetails({ input, repository, provider, fetchImpl })
         : listGiteaPullRequestComments({
+            input,
+            repository,
+            provider,
+            fetchImpl,
+          });
+    case 'bitbucket':
+      return input.action === 'get_pull_request'
+        ? getBitbucketPullRequestDetails({
+            input,
+            repository,
+            provider,
+            fetchImpl,
+          })
+        : listBitbucketPullRequestComments({
             input,
             repository,
             provider,
@@ -1014,6 +1115,220 @@ async function resolveGiteaReadContext(
     owner,
     repo,
     token,
+  };
+}
+
+async function getBitbucketPullRequestDetails({
+  input,
+  repository,
+  provider,
+  fetchImpl,
+}: {
+  input: SourceControlPullRequestReadInput;
+  repository: RepositoryRow;
+  provider: 'bitbucket';
+  fetchImpl: FetchImpl;
+}): Promise<SourceControlPullRequestDetailsResult> {
+  const { apiBaseUrl, authHeader, baseUrl, workspace, repo } =
+    await resolveBitbucketReadContext(repository, provider);
+
+  const pullRequest = await requestJson({
+    fetchImpl,
+    url: buildApiUrl(
+      apiBaseUrl,
+      `/repositories/${encodeURIComponent(workspace)}/${encodeURIComponent(
+        repo,
+      )}/pullrequests/${input.prNumber}`,
+      {},
+    ),
+    tokenHeader: { name: 'Authorization', value: authHeader },
+    schema: bitbucketPullRequestDetailsSchema,
+  });
+
+  const number = pullRequest.id;
+  const title = pullRequest.title ?? '';
+  const host = new URL(baseUrl).host;
+  const state = (pullRequest.state ?? '').toUpperCase();
+
+  return {
+    success: true,
+    provider,
+    repositoryFullName: repository.fullName,
+    number,
+    url:
+      pullRequest.links?.html?.href ??
+      buildPullRequestUrl({
+        provider,
+        host,
+        repositoryFullName: repository.fullName,
+        number,
+      }),
+    title,
+    body: pullRequest.description ?? '',
+    state:
+      state === 'MERGED'
+        ? 'merged'
+        : state === 'DECLINED' || state === 'SUPERSEDED'
+          ? 'closed'
+          : 'open',
+    draft: Boolean(pullRequest.draft) || isDraftTitle(title),
+    sourceBranch: pullRequest.source?.branch?.name ?? '',
+    targetBranch: pullRequest.destination?.branch?.name ?? '',
+    headSha: pullRequest.source?.commit?.hash ?? null,
+    baseSha: pullRequest.destination?.commit?.hash ?? null,
+    author:
+      pullRequest.author?.nickname ??
+      pullRequest.author?.display_name ??
+      pullRequest.author?.username ??
+      null,
+    mergeable: null,
+    mergeStateDescription: null,
+    isCrossRepository:
+      pullRequest.source?.repository?.full_name &&
+      pullRequest.destination?.repository?.full_name
+        ? pullRequest.source.repository.full_name !==
+          pullRequest.destination.repository.full_name
+        : null,
+    headRepositoryFullName: pullRequest.source?.repository?.full_name ?? null,
+    warnings: [],
+  };
+}
+
+async function listBitbucketPullRequestComments({
+  input,
+  repository,
+  provider,
+  fetchImpl,
+}: {
+  input: SourceControlPullRequestReadInput;
+  repository: RepositoryRow;
+  provider: 'bitbucket';
+  fetchImpl: FetchImpl;
+}): Promise<SourceControlPullRequestCommentsResult> {
+  const { apiBaseUrl, authHeader, workspace, repo } =
+    await resolveBitbucketReadContext(repository, provider);
+  const tokenHeader = { name: 'Authorization', value: authHeader };
+  const comments: z.infer<typeof bitbucketCommentSchema>[] = [];
+  let nextUrl: string | null = buildApiUrl(
+    apiBaseUrl,
+    `/repositories/${encodeURIComponent(workspace)}/${encodeURIComponent(
+      repo,
+    )}/pullrequests/${input.prNumber}/comments`,
+    { pagelen: 50 },
+  );
+
+  while (nextUrl) {
+    const page: z.infer<typeof bitbucketCommentListSchema> = await requestJson({
+      fetchImpl,
+      url: nextUrl,
+      tokenHeader,
+      schema: bitbucketCommentListSchema,
+    });
+    comments.push(...page.values);
+    nextUrl = page.next ?? null;
+  }
+
+  const issueComments: SourceControlPullRequestComment[] = [];
+  const threadsById = new Map<string, SourceControlPullRequestCommentThread>();
+
+  for (const comment of comments) {
+    const mapped = mapBitbucketComment(comment);
+    const hasInline = Boolean(comment.inline?.path);
+    const parentId =
+      comment.parent?.id === undefined || comment.parent?.id === null
+        ? null
+        : String(comment.parent.id);
+
+    if (!hasInline && !parentId) {
+      issueComments.push(mapped);
+      continue;
+    }
+
+    const threadId = parentId ?? String(comment.id);
+    const existing = threadsById.get(threadId);
+
+    if (existing) {
+      existing.comments.push(mapped);
+      continue;
+    }
+
+    threadsById.set(threadId, {
+      id: threadId,
+      resolved: null,
+      path: comment.inline?.path ?? null,
+      line: comment.inline?.to ?? null,
+      comments: [mapped],
+    });
+  }
+
+  return {
+    success: true,
+    provider,
+    repositoryFullName: repository.fullName,
+    number: input.prNumber,
+    threads: Array.from(threadsById.values()),
+    issueComments,
+    warnings:
+      threadsById.size > 0
+        ? [
+            'Bitbucket does not expose review thread resolution; resolved is reported as null.',
+          ]
+        : [],
+  };
+}
+
+function mapBitbucketComment(
+  comment: z.infer<typeof bitbucketCommentSchema>,
+): SourceControlPullRequestComment {
+  return {
+    id: String(comment.id),
+    author:
+      comment.user?.nickname ??
+      comment.user?.display_name ??
+      comment.user?.username ??
+      null,
+    body: comment.content?.raw ?? '',
+    createdAt: comment.created_on ?? null,
+    url: comment.links?.html?.href ?? null,
+  };
+}
+
+async function resolveBitbucketReadContext(
+  repository: RepositoryRow,
+  provider: 'bitbucket',
+): Promise<{
+  apiBaseUrl: string;
+  authHeader: string;
+  baseUrl: string;
+  workspace: string;
+  repo: string;
+}> {
+  const token = await resolveBitbucketToken();
+  if (!token) {
+    throw new Error(
+      'BITBUCKET_TOKEN is required to read Bitbucket pull requests.',
+    );
+  }
+
+  const username = await resolveBitbucketUsername();
+  if (!username) {
+    throw new Error(
+      'BITBUCKET_USERNAME is required to read Bitbucket pull requests.',
+    );
+  }
+
+  const baseUrl = await resolveBitbucketBaseUrl();
+  const [workspace, repo] = splitRepositoryFullName(
+    repository.fullName,
+    provider,
+  );
+
+  return {
+    apiBaseUrl: buildBitbucketApiBaseUrl(baseUrl),
+    authHeader: `Basic ${Buffer.from(`${username}:${token}`, 'utf8').toString('base64')}`,
+    baseUrl,
+    workspace,
+    repo,
   };
 }
 

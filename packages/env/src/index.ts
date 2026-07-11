@@ -180,6 +180,9 @@ const serverSchema = {
   S3_AUTO_CREATE_BUCKET: z.string().optional(),
   PREVIEW_PROXY_BASE_URL: emptyStringDefault(),
   WEB_DEV_LOGIN_EMAIL: z.string().optional(),
+  // Explicit opt-in for the /auth/dev-login backdoor. Required in addition to
+  // a development app env so implicit-development deployments never expose it.
+  WEB_DEV_LOGIN_ENABLED: z.string().optional(),
   MODAL_TOKEN_ID: z.string().optional(),
   MODAL_TOKEN_SECRET: z.string().optional(),
   MODAL_ENDPOINT: z.string().optional(),
@@ -381,6 +384,7 @@ const OPTIONAL_NON_EMPTY_KEYS = new Set([
   'S3_SECRET_ACCESS_KEY',
   'S3_BUCKET_ARTIFACTS',
   'WEB_DEV_LOGIN_EMAIL',
+  'WEB_DEV_LOGIN_ENABLED',
   'MODAL_TOKEN_ID',
   'MODAL_TOKEN_SECRET',
   'MODAL_ENDPOINT',

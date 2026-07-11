@@ -767,11 +767,11 @@ describe('Azure DevOps API helpers', () => {
 
 describe('normalizeAdoLinkedAccountKey', () => {
   it('lowercases and trims so the link and webhook sides agree', () => {
-    expect(normalizeAdoLinkedAccountKey('  Dan@Roomote.OnMicrosoft.com ')).toBe(
-      'dan@roomote.onmicrosoft.com',
-    );
-    expect(normalizeAdoLinkedAccountKey('dan@roomote.onmicrosoft.com')).toBe(
-      'dan@roomote.onmicrosoft.com',
+    expect(
+      normalizeAdoLinkedAccountKey('  Grace@Roomote.OnMicrosoft.com '),
+    ).toBe('grace@roomote.onmicrosoft.com');
+    expect(normalizeAdoLinkedAccountKey('grace@roomote.onmicrosoft.com')).toBe(
+      'grace@roomote.onmicrosoft.com',
     );
   });
 

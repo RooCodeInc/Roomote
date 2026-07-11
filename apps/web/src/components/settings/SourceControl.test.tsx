@@ -37,12 +37,20 @@ const state = vi.hoisted(() => ({
       htmlUrl: 'https://dev.azure.com/acme/Platform/_git/backend',
     },
   ],
+  bitbucketRepositories: [
+    {
+      id: 'repo-5',
+      fullName: 'acme/bitbucket-app',
+      htmlUrl: 'https://bitbucket.org/acme/bitbucket-app',
+    },
+  ],
   searchParams: '',
   configProviders: [
     { provider: 'github', configSatisfied: true },
     { provider: 'gitlab', configSatisfied: true },
     { provider: 'gitea', configSatisfied: true },
     { provider: 'ado', configSatisfied: true },
+    { provider: 'bitbucket', configSatisfied: true },
   ],
 }));
 
@@ -53,6 +61,7 @@ const mutations = vi.hoisted(() => ({
   syncGitLab: vi.fn(),
   syncGitea: vi.fn(),
   syncAdo: vi.fn(),
+  syncBitbucket: vi.fn(),
   setPrAction: vi.fn(),
 }));
 
@@ -100,7 +109,7 @@ vi.mock('@/hooks/github', () => ({
 
 vi.mock('@/hooks/source-control', () => ({
   useRepositories: (input?: {
-    sourceControlProvider?: 'github' | 'gitlab' | 'gitea' | 'ado';
+    sourceControlProvider?: 'github' | 'gitlab' | 'gitea' | 'ado' | 'bitbucket';
   }) => {
     switch (input?.sourceControlProvider) {
       case 'gitlab':
@@ -118,6 +127,11 @@ vi.mock('@/hooks/source-control', () => ({
           data: state.adoRepositories,
           isPending: false,
         };
+      case 'bitbucket':
+        return {
+          data: state.bitbucketRepositories,
+          isPending: false,
+        };
       case 'github':
       default:
         return {
@@ -126,14 +140,18 @@ vi.mock('@/hooks/source-control', () => ({
         };
     }
   },
-  useSyncRepositories: (provider: 'gitlab' | 'gitea' | 'ado') => ({
+  useSyncRepositories: (
+    provider: 'gitlab' | 'gitea' | 'ado' | 'bitbucket',
+  ) => ({
     isPending: false,
     mutate:
       provider === 'gitlab'
         ? mutations.syncGitLab
         : provider === 'gitea'
           ? mutations.syncGitea
-          : mutations.syncAdo,
+          : provider === 'bitbucket'
+            ? mutations.syncBitbucket
+            : mutations.syncAdo,
   }),
   usePrAction: () => ({
     data: { prAction: 'draft' },
@@ -327,11 +345,19 @@ describe('SourceControl settings', () => {
         htmlUrl: 'https://dev.azure.com/acme/Platform/_git/backend',
       },
     ];
+    state.bitbucketRepositories = [
+      {
+        id: 'repo-5',
+        fullName: 'acme/bitbucket-app',
+        htmlUrl: 'https://bitbucket.org/acme/bitbucket-app',
+      },
+    ];
     state.configProviders = [
       { provider: 'github', configSatisfied: true },
       { provider: 'gitlab', configSatisfied: true },
       { provider: 'gitea', configSatisfied: true },
       { provider: 'ado', configSatisfied: true },
+      { provider: 'bitbucket', configSatisfied: true },
     ];
   });
 
@@ -358,6 +384,10 @@ describe('SourceControl settings', () => {
       'href',
       'https://dev.azure.com/acme/Platform/_git/backend',
     );
+    expect(screen.getAllByText('Bitbucket')).not.toHaveLength(0);
+    expect(
+      screen.getByRole('link', { name: 'acme/bitbucket-app' }),
+    ).toHaveAttribute('href', 'https://bitbucket.org/acme/bitbucket-app');
     expect(
       screen.getByRole('button', { name: 'Update GitHub' }),
     ).toBeInTheDocument();
@@ -376,6 +406,9 @@ describe('SourceControl settings', () => {
     ).toBeInTheDocument();
     expect(
       screen.getByRole('button', { name: 'Refresh Azure DevOps' }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole('button', { name: 'Refresh Bitbucket' }),
     ).toBeInTheDocument();
     expect(screen.getByTestId('github-icon')).toHaveClass('shrink-0');
     expect(
@@ -400,6 +433,7 @@ describe('SourceControl settings', () => {
       { provider: 'gitlab', configSatisfied: true },
       { provider: 'gitea', configSatisfied: true },
       { provider: 'ado', configSatisfied: true },
+      { provider: 'bitbucket', configSatisfied: true },
     ];
 
     render(<SourceControl />);
@@ -483,6 +517,14 @@ describe('SourceControl settings', () => {
     expect(mutations.syncAdo).toHaveBeenCalledOnce();
   });
 
+  it('syncs Bitbucket repositories from the source control section', () => {
+    render(<SourceControl />);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Refresh Bitbucket' }));
+
+    expect(mutations.syncBitbucket).toHaveBeenCalledOnce();
+  });
+
   it('lets admins change the default pull request delivery mode', async () => {
     render(<SourceControl />);
 
@@ -507,6 +549,7 @@ describe('SourceControl settings', () => {
       { provider: 'gitlab', configSatisfied: false },
       { provider: 'gitea', configSatisfied: true },
       { provider: 'ado', configSatisfied: true },
+      { provider: 'bitbucket', configSatisfied: true },
     ];
 
     render(<SourceControl />);
@@ -544,6 +587,7 @@ describe('SourceControl settings', () => {
       // unconfigured even when the optional ADO_TENANT_ID is satisfied via
       // the R_MICROSOFT_TENANT_ID fallback.
       { provider: 'ado', configSatisfied: false },
+      { provider: 'bitbucket', configSatisfied: true },
     ];
 
     render(<SourceControl />);
@@ -568,6 +612,7 @@ describe('SourceControl settings', () => {
       { provider: 'gitlab', configSatisfied: true },
       { provider: 'gitea', configSatisfied: false },
       { provider: 'ado', configSatisfied: false },
+      { provider: 'bitbucket', configSatisfied: true },
     ];
 
     render(<SourceControl />);

@@ -13,7 +13,7 @@
       {
         "id": 111000111,
         "type": "private",
-        "first_name": "Dan"
+        "first_name": "Grace"
       },
       {
         "id": -100222000222,
@@ -24,8 +24,8 @@
     "users": [
       {
         "id": 111000111,
-        "first_name": "Dan",
-        "username": "dan_mock"
+        "first_name": "Grace",
+        "username": "grace_mock"
       }
     ]
   },
@@ -36,12 +36,12 @@
         "chat": {
           "id": 111000111,
           "type": "private",
-          "first_name": "Dan"
+          "first_name": "Grace"
         },
         "from": {
           "id": 111000111,
-          "first_name": "Dan",
-          "username": "dan_mock"
+          "first_name": "Grace",
+          "username": "grace_mock"
         },
         "text": "!fast what file handles Telegram webhooks?"
       }

@@ -82,6 +82,7 @@ export function standardTask({
     | 'github'
     | 'gitlab'
     | 'gitea'
+    | 'bitbucket'
     | 'ado';
   conflictResolverLabel?: string;
   taskRunUrl?: string;
@@ -241,14 +242,21 @@ export function standardTask({
     <rule>If a workflow or packaged skill distinguishes Gitea-started tasks from other surfaces, treat this run as Gitea-started rather than as a generic web dashboard task.</rule>
     <rule>Use Gitea URLs and local git state for pull request context; do not use GitHub-only CLI commands such as \`gh pr\` for this task.</rule>
   </task_surface_context>`
-                  : taskSurface === 'ado'
+                  : taskSurface === 'bitbucket'
                     ? `
+  <task_surface_context>
+    <rule>This run was launched from a Bitbucket pull request surface and also has a Roomote web task view.</rule>
+    <rule>If a workflow or packaged skill distinguishes Bitbucket-started tasks from other surfaces, treat this run as Bitbucket-started rather than as a generic web dashboard task.</rule>
+    <rule>Use Bitbucket URLs and local git state for pull request context; do not use GitHub-only CLI commands such as \`gh pr\` for this task.</rule>
+  </task_surface_context>`
+                    : taskSurface === 'ado'
+                      ? `
   <task_surface_context>
     <rule>This run was launched from an Azure DevOps pull request surface and also has a Roomote web task view.</rule>
     <rule>If a workflow or packaged skill distinguishes Azure DevOps-started tasks from other surfaces, treat this run as Azure DevOps-started rather than as a generic web dashboard task.</rule>
     <rule>Use Azure DevOps URLs and local git state for pull request context; do not use GitHub-only CLI commands such as \`gh pr\` for this task.</rule>
   </task_surface_context>`
-                    : `
+                      : `
   <task_surface_context>
     <rule>This StandardTask run was launched from the Roomote web task UI.</rule>
     <rule>If a workflow or packaged skill distinguishes web dashboard tasks from other surfaces, treat this run as a web dashboard task.</rule>

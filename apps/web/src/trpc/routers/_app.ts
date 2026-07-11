@@ -109,6 +109,7 @@ import { getTeamsIntegrationStatusCommand } from '../commands/teams';
 import {
   getLinkedGitLabAccountCommand,
   getLinkedGiteaAccountCommand,
+  getLinkedBitbucketAccountCommand,
   getLinkedAdoAccountCommand,
   getLinkedGitHubAccountCommand,
   unlinkLinkedGitHubAccountCommand,
@@ -878,6 +879,10 @@ export const appRouter = createRouter({
 
     gitea: protectedProcedure.query(({ ctx: { auth } }) =>
       getLinkedGiteaAccountCommand(auth),
+    ),
+
+    bitbucket: protectedProcedure.query(({ ctx: { auth } }) =>
+      getLinkedBitbucketAccountCommand(auth),
     ),
 
     ado: protectedProcedure.query(({ ctx: { auth } }) =>

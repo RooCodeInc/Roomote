@@ -32,6 +32,7 @@ const CORE_PACKAGED_SKILL_INVOCATIONS = [
   'sentry-triage',
   'simplify',
   'update-dependencies',
+  'zero',
 ] as const;
 
 export const PACKAGED_SKILL_INVOCATIONS = [

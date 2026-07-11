@@ -182,6 +182,83 @@ function giteaPullRequestSyncReview({
   });
 }
 
+function buildBitbucketPullRequestSyncReviewPrompt({
+  taskSpec,
+  taskRunUrl,
+}: {
+  taskSpec: GithubPullRequestReviewSyncTask;
+  taskRunUrl: string;
+}): string {
+  const {
+    payload: {
+      repo: fullName,
+      prNumber,
+      prTitle,
+      prUrl,
+      headSha,
+      branchName,
+      targetBranch,
+    },
+  } = taskSpec;
+  const delimiter = getSkillCommandDelimiter(taskSpec.harness);
+
+  return buildStructuredTaskRequest({
+    command: `${delimiter}review-code`,
+    taskContext: {
+      repository: fullName,
+      source_control_provider: 'bitbucket',
+      pull_request_number: prNumber,
+      pull_request_title: prTitle,
+      pull_request_url: prUrl,
+      source_branch: branchName,
+      target_branch: targetBranch,
+      current_head_sha: headSha || 'unknown',
+      task_link_see: `[See task](${taskRunUrl})`,
+      review_scope:
+        'Review the new Bitbucket pull request changes since the prior review. Use the prepared local repository, source branch, target branch, and commit SHA to inspect the changed range with git commands. Do not use GitHub-only CLI commands such as `gh pr`.',
+      suggested_diff_commands: [
+        targetBranch
+          ? `git fetch origin ${targetBranch} && git diff origin/${targetBranch}...HEAD`
+          : 'git diff origin/HEAD...HEAD',
+        headSha ? `git show --stat ${headSha}` : undefined,
+      ]
+        .filter(Boolean)
+        .join('\n'),
+    },
+  });
+}
+
+function bitbucketPullRequestSyncReview({
+  taskSpec,
+  taskRunUrl,
+  attribution,
+  visualProofAutoScreencastEnabled,
+  backgroundProofCaptureEnabled,
+}: {
+  taskSpec: GithubPullRequestReviewSyncTask;
+  taskRunUrl: string;
+  attribution?: ResolvedTaskCommitAuthor;
+  visualProofAutoScreencastEnabled?: boolean;
+  backgroundProofCaptureEnabled?: boolean;
+}) {
+  const prompt = buildBitbucketPullRequestSyncReviewPrompt({
+    taskSpec,
+    taskRunUrl,
+  });
+
+  return standardTask({
+    description: prompt,
+    repo: taskSpec.payload.repo,
+    taskSurface: 'bitbucket',
+    taskRunUrl,
+    attribution,
+    requestFormat: 'structured',
+    linkedWorkItems: taskSpec.payload.linkedWorkItems,
+    visualProofAutoScreencastEnabled,
+    backgroundProofCaptureEnabled,
+  });
+}
+
 function buildAdoPullRequestSyncReviewPrompt({
   taskSpec,
   taskRunUrl,
@@ -291,6 +368,14 @@ export async function githubPrReviewSync({
       });
     case 'gitea':
       return giteaPullRequestSyncReview({
+        taskSpec,
+        taskRunUrl,
+        attribution,
+        visualProofAutoScreencastEnabled,
+        backgroundProofCaptureEnabled,
+      });
+    case 'bitbucket':
+      return bitbucketPullRequestSyncReview({
         taskSpec,
         taskRunUrl,
         attribution,

@@ -22,7 +22,7 @@ Telegram has no threads: conversation continuity is inferred from **chat id (+ f
 | Example scenario              | `packages/communication/scripts/mock-telegram.example.json` |
 | Webhook secret source         | `Env.R_TELEGRAM_WEBHOOK_SECRET` from dotenvx                |
 | Mock bot identity             | `roomote_mock_bot` (id `7000000001`)                        |
-| Mock linked user              | Telegram user id `111000111` (`dan_mock`)                   |
+| Mock linked user              | Telegram user id `111000111` (`grace_mock`)                   |
 
 ## Step 1: Seed the database
 
@@ -41,7 +41,7 @@ Then seed (adjust user_id from the query above):
 ```sql
 -- Link mock Telegram user 111000111 to a local Roomote user
 INSERT INTO telegram_user_mappings (telegram_user_id, telegram_chat_id, telegram_username, user_id)
-VALUES ('111000111', '111000111', 'dan_mock', '<user_id>')
+VALUES ('111000111', '111000111', 'grace_mock', '<user_id>')
 ON CONFLICT ON CONSTRAINT telegram_user_mappings_unique DO NOTHING;
 ```
 
@@ -92,8 +92,8 @@ curl -s -X POST http://127.0.0.1:3013/mock/events \
   -d '{
     "kind": "message",
     "message": {
-      "chat": { "id": 111000111, "type": "private", "first_name": "Dan" },
-      "from": { "id": 111000111, "first_name": "Dan", "username": "dan_mock" },
+      "chat": { "id": 111000111, "type": "private", "first_name": "Grace" },
+      "from": { "id": 111000111, "first_name": "Grace", "username": "grace_mock" },
       "text": "!fast what file handles Telegram webhooks?"
     }
   }'
@@ -104,8 +104,8 @@ curl -s -X POST http://127.0.0.1:3013/mock/events \
   -d '{
     "kind": "message",
     "message": {
-      "chat": { "id": 111000111, "type": "private", "first_name": "Dan" },
-      "from": { "id": 111000111, "first_name": "Dan", "username": "dan_mock" },
+      "chat": { "id": 111000111, "type": "private", "first_name": "Grace" },
+      "from": { "id": 111000111, "first_name": "Grace", "username": "grace_mock" },
       "text": "also check the retry logic please"
     }
   }'
@@ -117,7 +117,7 @@ curl -s -X POST http://127.0.0.1:3013/mock/events \
     "kind": "callback_query",
     "callbackQuery": {
       "id": "cbq-manual-1",
-      "from": { "id": 111000111, "first_name": "Dan", "username": "dan_mock" },
+      "from": { "id": 111000111, "first_name": "Grace", "username": "grace_mock" },
       "data": "cancel_task:<cloudJobId>",
       "message": { "message_id": 42, "chat": { "id": 111000111, "type": "private" } }
     }

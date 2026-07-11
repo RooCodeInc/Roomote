@@ -20,6 +20,13 @@ describe('buildBaseWorkerEnv', () => {
     delete process.env.R_VISION_MODEL;
     delete process.env.R_CODE_REVIEW_MODEL;
     delete process.env.R_EXPLORE_MODEL;
+    delete process.env.R_PLANNING_MODEL;
+    delete process.env.R_MODEL_REASONING_EFFORT;
+    delete process.env.R_SMALL_MODEL_REASONING_EFFORT;
+    delete process.env.R_VISION_MODEL_REASONING_EFFORT;
+    delete process.env.R_CODE_REVIEW_MODEL_REASONING_EFFORT;
+    delete process.env.R_EXPLORE_MODEL_REASONING_EFFORT;
+    delete process.env.R_PLANNING_MODEL_REASONING_EFFORT;
     delete process.env.R_MODEL_ENV_KEYS;
   });
 
@@ -90,6 +97,13 @@ describe('buildBaseWorkerEnv', () => {
     process.env.R_VISION_MODEL = 'openrouter/openai/gpt-5.5';
     process.env.R_CODE_REVIEW_MODEL = 'openrouter/openai/gpt-5.5';
     process.env.R_EXPLORE_MODEL = 'openrouter/openai/gpt-5.4-mini';
+    process.env.R_PLANNING_MODEL = 'openrouter/anthropic/claude-opus-4.7';
+    process.env.R_MODEL_REASONING_EFFORT = 'high';
+    process.env.R_SMALL_MODEL_REASONING_EFFORT = 'low';
+    process.env.R_VISION_MODEL_REASONING_EFFORT = 'medium';
+    process.env.R_CODE_REVIEW_MODEL_REASONING_EFFORT = 'high';
+    process.env.R_EXPLORE_MODEL_REASONING_EFFORT = 'low';
+    process.env.R_PLANNING_MODEL_REASONING_EFFORT = 'high';
     process.env.R_MODEL_ENV_KEYS = 'CUSTOM_PROVIDER_API_KEY';
     process.env.OPENROUTER_API_KEY = 'openrouter-key';
     process.env.CUSTOM_PROVIDER_API_KEY = 'custom-provider-key';
@@ -104,6 +118,13 @@ describe('buildBaseWorkerEnv', () => {
     expect(env.R_VISION_MODEL).toBe('openrouter/openai/gpt-5.5');
     expect(env.R_CODE_REVIEW_MODEL).toBe('openrouter/openai/gpt-5.5');
     expect(env.R_EXPLORE_MODEL).toBe('openrouter/openai/gpt-5.4-mini');
+    expect(env.R_PLANNING_MODEL).toBe('openrouter/anthropic/claude-opus-4.7');
+    expect(env.R_MODEL_REASONING_EFFORT).toBe('high');
+    expect(env.R_SMALL_MODEL_REASONING_EFFORT).toBe('low');
+    expect(env.R_VISION_MODEL_REASONING_EFFORT).toBe('medium');
+    expect(env.R_CODE_REVIEW_MODEL_REASONING_EFFORT).toBe('high');
+    expect(env.R_EXPLORE_MODEL_REASONING_EFFORT).toBe('low');
+    expect(env.R_PLANNING_MODEL_REASONING_EFFORT).toBe('high');
     expect(env.R_MODEL_ENV_KEYS).toBe('CUSTOM_PROVIDER_API_KEY');
     expect(env.OPENROUTER_API_KEY).toBe('openrouter-key');
     expect(env.CUSTOM_PROVIDER_API_KEY).toBe('custom-provider-key');

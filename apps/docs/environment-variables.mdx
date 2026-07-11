@@ -118,6 +118,7 @@ as per-task auth tokens or workspace paths.
 | `SETUP_TOKEN`         | Required (non-local) | One-time bootstrap token that admits the first admin at `/setup`. Required on every non-local deployment — tokenless bootstrap is allowed only when `NODE_ENV` is not `production` and `R_APP_ENV` is `development`, so anything running with `NODE_ENV=production` needs it. Without it, first-admin bootstrap stays closed so nobody can claim the founding-admin slot by reaching the URL first. Optional only in local development. |
 | `DASHBOARD_PASSWORD`  | Production           | Local fallback/admin password value used by the deployment. Generate a strong secret.                                                                                                                                                                                                                                                                                                                                                   |
 | `WEB_DEV_LOGIN_EMAIL` | Local only           | Convenience email for development login flows. Do not use as production access control.                                                                                                                                                                                                                                                                                                                                                 |
+| `WEB_DEV_LOGIN_ENABLED` | Local only         | Explicit opt-in (`true` or `1`) for the `/auth/dev-login` development login route. Dev login stays disabled without it, even in development app envs. `pnpm dev` sets it automatically for local development.                                                                                                                                                                                                                            |
 | `SKIP_ENV_VALIDATION` | Avoid                | Skips env validation when present. Useful for narrow tooling cases, not normal deployments.                                                                                                                                                                                                                                                                                                                                             |
 
 ### Database, Redis, and artifacts
@@ -160,13 +161,13 @@ as per-task auth tokens or workspace paths.
 | `R_VISION_MODEL`                       | Optional     | Vision-capable model for visual inspection and screenshot/image work.                                                                   |
 | `R_CODE_REVIEW_MODEL`                  | Optional     | Model for initial PR/MR review and review-sync tasks.                                                                                   |
 | `R_EXPLORE_MODEL`                      | Optional     | Exploration/helper model for investigation-oriented subtasks.                                                                           |
-| `R_PLANNING_MODEL`                     | Optional     | Planning model used for longer coding-task planning.                                                                                    |
+| `R_PLANNING_MODEL`                     | Optional     | Advisor model used for planning turns and advisor consultations inside coding tasks.                                                    |
 | `R_MODEL_REASONING_EFFORT`             | Optional     | Reasoning level for the coding model: `low`, `medium`, `high`, or `xhigh`.                                                              |
 | `R_SMALL_MODEL_REASONING_EFFORT`       | Optional     | Reasoning level for the helper model.                                                                                                   |
 | `R_VISION_MODEL_REASONING_EFFORT`      | Optional     | Reasoning level for the vision model.                                                                                                   |
 | `R_CODE_REVIEW_MODEL_REASONING_EFFORT` | Optional     | Reasoning level for the code review model.                                                                                              |
 | `R_EXPLORE_MODEL_REASONING_EFFORT`     | Optional     | Reasoning level for the exploration model.                                                                                              |
-| `R_PLANNING_MODEL_REASONING_EFFORT`    | Optional     | Reasoning level for the planning model.                                                                                                 |
+| `R_PLANNING_MODEL_REASONING_EFFORT`    | Optional     | Reasoning level for the advisor model.                                                                                                  |
 | `R_MODEL_ENV_KEYS`                     | Optional     | Comma- or space-separated list of extra provider key env vars to forward to task workers.                                               |
 | `OPENROUTER_API_KEY`                   | Provider key | OpenRouter API key. Can also be saved from **Settings > Models**.                                                                       |
 | `AI_GATEWAY_API_KEY`                   | Provider key | Vercel AI Gateway API key.                                                                                                              |
@@ -252,6 +253,12 @@ as per-task auth tokens or workspace paths.
 | `GITEA_CLIENT_ID`              | Optional     | Gitea OAuth client ID.                                                                           |
 | `GITEA_CLIENT_SECRET`          | Optional     | Gitea OAuth client secret.                                                                       |
 | `GITEA_WEBHOOK_SECRET`         | Optional     | Gitea webhook secret.                                                                            |
+| `BITBUCKET_TOKEN`              | Bitbucket    | Atlassian API token with Bitbucket scopes.                                                       |
+| `BITBUCKET_USERNAME`           | Bitbucket    | Atlassian account email that owns the API token.                                                 |
+| `BITBUCKET_BASE_URL`           | Optional     | Bitbucket base URL. Defaults to `https://bitbucket.org` (Cloud only).                            |
+| `BITBUCKET_CLIENT_ID`          | Optional     | Bitbucket OAuth client ID for personal account linking.                                          |
+| `BITBUCKET_CLIENT_SECRET`      | Optional     | Bitbucket OAuth client secret for personal account linking.                                      |
+| `BITBUCKET_WEBHOOK_SECRET`     | Optional     | Bitbucket webhook secret.                                                                        |
 | `ADO_ORGANIZATION`             | Azure DevOps | Azure DevOps organization.                                                                       |
 | `ADO_TOKEN`                    | Azure DevOps | Azure DevOps access token.                                                                       |
 | `ADO_BASE_URL`                 | Optional     | Azure DevOps base URL.                                                                           |

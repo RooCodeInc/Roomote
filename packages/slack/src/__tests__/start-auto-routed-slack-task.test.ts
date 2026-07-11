@@ -236,7 +236,7 @@ describe('startAutoRoutedSlackTask', () => {
         channel: 'C123',
         ts: '123.456',
         threadTs: '120.000',
-        skipInitialActingUser: true,
+        skipInitialActingUser: false,
         threadMessages: [
           {
             user: 'U123',
@@ -820,7 +820,7 @@ describe('startAutoRoutedSlackTask', () => {
         channel: 'C123',
         ts: '555.000',
         threadTs: '555.000',
-        skipInitialActingUser: true,
+        skipInitialActingUser: false,
       }),
     );
     expect(finishRoutedStartMock).toHaveBeenCalledWith(
@@ -838,6 +838,102 @@ describe('startAutoRoutedSlackTask', () => {
       taskUrl: 'https://app.example.com/task/task_77',
     });
     expect(commitMock).toHaveBeenCalled();
+  });
+
+  it('seeds the acting user for a mapped human initiator', async () => {
+    const slack = {
+      hasMessageInThread: vi.fn().mockResolvedValue(true),
+      getChannelName: vi.fn().mockResolvedValue('eng-routing'),
+      normalizeIncomingText: vi
+        .fn()
+        .mockImplementation(async (text: string) => text),
+      fetchThreadMessages: vi.fn().mockResolvedValue([]),
+    };
+
+    await startAutoRoutedSlackTask({
+      slackInstallation: { orgId: 'org_1', botUserId: 'BROOMOTE' } as never,
+      slack: slack as never,
+      initiator: {
+        kind: 'user' as const,
+        externalId: 'UHUMAN',
+        matchedUserId: 'user_mapped',
+      },
+      trigger: 'message' as const,
+      launchUserId: 'user_mapped',
+      slackUserId: 'UHUMAN',
+      channel: 'C123',
+      prompt: 'Investigate this',
+      threadTs: '120.000',
+      originMessageTs: '123.456',
+    });
+
+    expect(startSlackAppMentionTaskMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        skipInitialActingUser: false,
+      }),
+    );
+  });
+
+  it('leaves the acting user unset for an unmapped human initiator', async () => {
+    const slack = {
+      hasMessageInThread: vi.fn().mockResolvedValue(true),
+      getChannelName: vi.fn().mockResolvedValue('eng-routing'),
+      normalizeIncomingText: vi
+        .fn()
+        .mockImplementation(async (text: string) => text),
+      fetchThreadMessages: vi.fn().mockResolvedValue([]),
+    };
+
+    await startAutoRoutedSlackTask({
+      slackInstallation: { orgId: 'org_1', botUserId: 'BROOMOTE' } as never,
+      slack: slack as never,
+      initiator: { kind: 'user' as const, externalId: 'UHUMAN' },
+      trigger: 'message' as const,
+      slackUserId: 'UHUMAN',
+      channel: 'C123',
+      prompt: 'Investigate this',
+      threadTs: '120.000',
+      originMessageTs: '123.456',
+    });
+
+    expect(startSlackAppMentionTaskMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        skipInitialActingUser: true,
+      }),
+    );
+  });
+
+  it('leaves the acting user unset for an automation initiator', async () => {
+    const slack = {
+      hasMessageInThread: vi.fn().mockResolvedValue(true),
+      getChannelName: vi.fn().mockResolvedValue('eng-routing'),
+      normalizeIncomingText: vi
+        .fn()
+        .mockImplementation(async (text: string) => text),
+      fetchThreadMessages: vi.fn().mockResolvedValue([]),
+    };
+
+    await startAutoRoutedSlackTask({
+      slackInstallation: { orgId: 'org_1', botUserId: 'BROOMOTE' } as never,
+      slack: slack as never,
+      initiator: {
+        kind: 'automation' as const,
+        key: 'slack_channel_auto_start' as const,
+        actor: { externalId: 'UBOT' },
+      },
+      trigger: 'message' as const,
+      slackUserId: 'UBOT',
+      channel: 'C123',
+      prompt: 'Investigate this',
+      threadTs: '120.000',
+      originMessageTs: '123.456',
+    });
+
+    expect(startSlackAppMentionTaskMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        skipInitialActingUser: true,
+      }),
+    );
   });
 
   it('constrains routing by repository and forwards launch overrides', async () => {

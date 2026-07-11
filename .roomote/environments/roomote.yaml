@@ -45,7 +45,7 @@ repositories:
         timeout: 600
         continue_on_error: true
       - name: Write local env overrides
-        run: printf 'DATABASE_URL=postgresql://postgres@localhost:5432/roomote_development\nREDIS_URL=redis://localhost:16379\nR_APP_ENV=development\n' > .env.local
+        run: printf 'DATABASE_URL=postgresql://postgres@localhost:5432/roomote_development\nREDIS_URL=redis://localhost:16379\nR_APP_ENV=development\nWEB_DEV_LOGIN_ENABLED=true\n' > .env.local
         timeout: 600
         continue_on_error: false
       - name: Create development database
@@ -89,7 +89,7 @@ repositories:
         detached: true
         logfile: /tmp/roomote-api.log
       - name: Start Next.js web dev server
-        run: PORT=3000 R_APP_ENV=development pnpm --filter @roomote/web dev
+        run: PORT=3000 R_APP_ENV=development WEB_DEV_LOGIN_ENABLED=true pnpm --filter @roomote/web dev
         timeout: 600
         continue_on_error: false
         detached: true

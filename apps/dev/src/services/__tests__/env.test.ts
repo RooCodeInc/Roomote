@@ -41,7 +41,7 @@ describe('EnvService.checkEnvVars', () => {
   });
 
   it('creates an empty local env file and allows setup to start without model config', async () => {
-    process.env.R_PUBLIC_URL = 'https://roomote-matt.ngrok.app';
+    process.env.R_PUBLIC_URL = 'https://roomote-example.ngrok.app';
 
     await expect(EnvService.checkEnvVars()).resolves.toBeUndefined();
 
@@ -67,7 +67,7 @@ describe('EnvService.checkEnvVars', () => {
     fs.writeFileSync(
       path.join(tempRoot, '.env.local'),
       [
-        'R_PUBLIC_URL=https://roomote-matt.ngrok.app',
+        'R_PUBLIC_URL=https://roomote-example.ngrok.app',
         'R_MODEL=openrouter/openai/gpt-5.4',
         '',
       ].join('\n'),
@@ -82,7 +82,7 @@ describe('EnvService.checkEnvVars', () => {
     fs.writeFileSync(
       path.join(tempRoot, '.env.local'),
       [
-        'R_PUBLIC_URL=https://roomote-matt.ngrok.app',
+        'R_PUBLIC_URL=https://roomote-example.ngrok.app',
         'R_MODEL=gpt-5.4',
         'OPENAI_API_KEY=openai-key',
         '',
@@ -98,7 +98,7 @@ describe('EnvService.checkEnvVars', () => {
     fs.writeFileSync(
       path.join(tempRoot, '.env.local'),
       [
-        'R_PUBLIC_URL=https://roomote-matt.ngrok.app',
+        'R_PUBLIC_URL=https://roomote-example.ngrok.app',
         'R_MODEL=openrouter/openai/gpt-5.4',
         'OPENROUTER_API_KEY=openrouter-key',
         '',
@@ -112,7 +112,7 @@ describe('EnvService.checkEnvVars', () => {
     fs.writeFileSync(
       path.join(tempRoot, '.env.local'),
       [
-        'R_PUBLIC_URL=https://roomote-matt.ngrok.app',
+        'R_PUBLIC_URL=https://roomote-example.ngrok.app',
         'R_MODEL=vercel/openai/gpt-5.4',
         'AI_GATEWAY_API_KEY=vercel-key',
         '',
@@ -126,7 +126,7 @@ describe('EnvService.checkEnvVars', () => {
     fs.writeFileSync(
       path.join(tempRoot, '.env.local'),
       [
-        'R_PUBLIC_URL=https://roomote-matt.ngrok.app',
+        'R_PUBLIC_URL=https://roomote-example.ngrok.app',
         'R_MODEL=custom-provider/custom-model',
         'R_MODEL_ENV_KEYS=CUSTOM_PROVIDER_API_KEY',
         'CUSTOM_PROVIDER_API_KEY=custom-key',
@@ -140,7 +140,7 @@ describe('EnvService.checkEnvVars', () => {
   it('accepts model config from process env', async () => {
     process.env.R_MODEL = 'openrouter/openai/gpt-5.4';
     process.env.OPENROUTER_API_KEY = 'openrouter-key';
-    process.env.R_PUBLIC_URL = 'https://roomote-matt.ngrok.app';
+    process.env.R_PUBLIC_URL = 'https://roomote-example.ngrok.app';
 
     await expect(EnvService.checkEnvVars()).resolves.toBeUndefined();
   });

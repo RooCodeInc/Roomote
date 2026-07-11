@@ -217,6 +217,14 @@ export const SLACK_MCP_SETUP_SERVICES: SlackMcpSetupServiceDefinition[] = [
     deploymentSettingsPath: '/settings/integrations',
     userSettingsPath: '/settings/personal',
   },
+  {
+    id: 'zero',
+    name: 'Zero',
+    availabilityKind: 'curated_oauth',
+    hostSuffixes: ['zero.xyz', 'withzero.ai'],
+    deploymentSettingsPath: '/settings/integrations',
+    userSettingsPath: '/settings/personal',
+  },
 ];
 
 export function getSlackMcpSetupServiceDefinition(

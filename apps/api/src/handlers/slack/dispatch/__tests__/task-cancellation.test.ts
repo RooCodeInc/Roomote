@@ -11,6 +11,7 @@ const {
   dbQueryFindFirstMock,
   postSlackInteractiveResponseMock,
   stopTaskRunMock,
+  lookupSlackUserMappingMock,
 } = vi.hoisted(() => ({
   dbUpdateMock: vi.fn(),
   dbUpdateWhereMock: vi.fn(),
@@ -18,6 +19,7 @@ const {
   dbQueryFindFirstMock: vi.fn(),
   postSlackInteractiveResponseMock: vi.fn(),
   stopTaskRunMock: vi.fn(),
+  lookupSlackUserMappingMock: vi.fn(),
 }));
 
 vi.mock('@roomote/slack', async (importOriginal) => {
@@ -56,6 +58,10 @@ vi.mock('@roomote/db/server', () => ({
 
 vi.mock('../../../tasks/task-stop.js', () => ({
   stopTaskRun: stopTaskRunMock,
+}));
+
+vi.mock('../../helpers/user-mapping.js', () => ({
+  lookupSlackUserMapping: lookupSlackUserMappingMock,
 }));
 
 import { handleTaskCancellation } from '../task-cancellation.js';
@@ -114,6 +120,10 @@ describe('handleTaskCancellation', () => {
     });
     postSlackInteractiveResponseMock.mockResolvedValue(undefined);
     stopTaskRunMock.mockResolvedValue({ success: true, mode: 'sandbox_stop' });
+    lookupSlackUserMappingMock.mockResolvedValue({
+      activeMapping: null,
+      hasInactiveMapping: false,
+    });
   });
 
   it('silently ignores cancel clicks from a different Slack user', async () => {
@@ -199,5 +209,93 @@ describe('handleTaskCancellation', () => {
 
     expect(stopTaskRunMock).not.toHaveBeenCalled();
     expect(postSlackInteractiveResponseMock).not.toHaveBeenCalled();
+  });
+
+  it('stops the active run with the canceling Slack user when linked', async () => {
+    dbQueryFindFirstMock.mockResolvedValueOnce({
+      id: 42,
+      taskId: 'task-1',
+      status: RunStatus.Running,
+      sandboxServerUrl: 'http://sandbox.example.com',
+      actingUserId: null,
+    });
+    lookupSlackUserMappingMock.mockResolvedValueOnce({
+      activeMapping: {
+        id: 'map-1',
+        slackUserId: 'U123',
+        slackTeamId: 'T123',
+        userId: 'roomote-user-1',
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      },
+      hasInactiveMapping: false,
+    });
+
+    await handleTaskCancellation(
+      buildCancellationPayload(
+        JSON.stringify({
+          taskId: 'task-1',
+          slackUserId: 'U123',
+        }),
+      ),
+    );
+
+    expect(lookupSlackUserMappingMock).toHaveBeenCalledWith({
+      slackUserId: 'U123',
+      teamId: 'T123',
+    });
+    expect(stopTaskRunMock).toHaveBeenCalledWith({
+      run: {
+        id: 42,
+        taskId: 'task-1',
+        status: RunStatus.Running,
+        sandboxServerUrl: 'http://sandbox.example.com',
+        actingUserId: null,
+      },
+      authUserId: 'roomote-user-1',
+      allowDirectCancelWithoutSandbox: true,
+      cancelledBy: {
+        name: 'alice',
+        source: 'slack',
+      },
+    });
+    expect(postSlackInteractiveResponseMock).toHaveBeenCalledWith(
+      'https://slack.test/response',
+      expect.objectContaining({
+        replace_original: true,
+      }),
+    );
+  });
+
+  it('still stops when the canceler has no Roomote mapping and the run has no actor', async () => {
+    dbQueryFindFirstMock.mockResolvedValueOnce({
+      id: 42,
+      taskId: 'task-1',
+      status: RunStatus.Running,
+      sandboxServerUrl: 'http://sandbox.example.com',
+      actingUserId: null,
+    });
+
+    await handleTaskCancellation(
+      buildCancellationPayload(
+        JSON.stringify({
+          taskId: 'task-1',
+          slackUserId: 'U123',
+        }),
+      ),
+    );
+
+    expect(stopTaskRunMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        authUserId: null,
+        allowDirectCancelWithoutSandbox: true,
+      }),
+    );
+    expect(postSlackInteractiveResponseMock).toHaveBeenCalledWith(
+      'https://slack.test/response',
+      expect.objectContaining({
+        replace_original: true,
+      }),
+    );
   });
 });

@@ -96,7 +96,7 @@ describe('generateTaskSummaryCommand', () => {
     mockDbSelect.limit.mockResolvedValue([
       {
         taskUserId: 'user-summary-test',
-        userName: 'Bruno Bergher',
+        userName: 'Alan Turing',
         userEmail: 'bruno@example.com',
       },
     ]);
@@ -187,14 +187,14 @@ describe('generateTaskSummaryCommand', () => {
     const prompt = mockGenerateTrackedNonTaskObject.mock.calls[0]?.[0]
       ?.prompt as string;
     expect(prompt).toContain(
-      'Bruno Bergher (task starter): Please help me implement task run message persistence.',
+      'Alan Turing (task starter): Please help me implement task run message persistence.',
     );
     expect(prompt).toContain(
       'Roomote: Implemented Postgres persistence and wired historical hydration.',
     );
 
     // Verify the prompt uses the task creator's name, not the viewer's
-    expect(prompt).toContain('The task was started by Bruno');
+    expect(prompt).toContain('The task was started by Alan');
     expect(prompt).not.toContain('Alice');
     expect(prompt).not.toContain('User:');
     expect(prompt).not.toContain('Assistant:');
@@ -325,7 +325,7 @@ describe('generateTaskSummaryCommand', () => {
     const prompt = mockGenerateTrackedNonTaskObject.mock.calls[0]?.[0]
       ?.prompt as string;
     expect(prompt).toContain(
-      'Bruno Bergher (task starter): Please summarize the actual conversation only.',
+      'Alan Turing (task starter): Please summarize the actual conversation only.',
     );
     expect(prompt).toContain('Roomote: Assistant message 0');
     expect(prompt).not.toContain(

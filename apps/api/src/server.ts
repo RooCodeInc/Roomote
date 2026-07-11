@@ -38,6 +38,7 @@ import {
   github,
   gitlab,
   gitea,
+  bitbucket,
   ado,
   slack,
   linear,
@@ -182,6 +183,7 @@ export function createApiApp(): ApiApp {
   app.route('/api/webhooks/github', github);
   app.route('/api/webhooks/gitlab', gitlab);
   app.route('/api/webhooks/gitea', gitea);
+  app.route('/api/webhooks/bitbucket', bitbucket);
   app.route('/api/webhooks/ado', ado);
   app.route('/api/webhooks/slack', slack);
   app.route('/api/webhooks/linear', linear);

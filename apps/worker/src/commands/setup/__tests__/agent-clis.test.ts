@@ -42,9 +42,13 @@ vi.mock('@roomote/types', () => ({
 
 import {
   DEFAULT_OPENCODE_CLI_VERSION,
+  DEFAULT_ZERO_CLI_VERSION,
   ROOMOTE_BAKED_OPENCODE_CLI_VERSION_ENV,
+  ROOMOTE_BAKED_ZERO_CLI_VERSION_ENV,
   ROOMOTE_OPENCODE_CLI_VERSION_ENV,
+  ROOMOTE_ZERO_CLI_VERSION_ENV,
   installAgentClis,
+  installZeroCli,
 } from '../agent-clis';
 import type { StartupLogger } from '../../../logging';
 
@@ -79,6 +83,8 @@ describe('installAgentClis', () => {
     process.env = { ...originalEnv };
     delete process.env[ROOMOTE_OPENCODE_CLI_VERSION_ENV];
     delete process.env[ROOMOTE_BAKED_OPENCODE_CLI_VERSION_ENV];
+    delete process.env[ROOMOTE_ZERO_CLI_VERSION_ENV];
+    delete process.env[ROOMOTE_BAKED_ZERO_CLI_VERSION_ENV];
 
     mockExistsSync.mockImplementation((targetPath: PathLike) => {
       return targetPath === '/sandbox';
@@ -173,6 +179,72 @@ describe('installAgentClis', () => {
       {
         stdin: 'ignore',
       },
+    );
+  });
+});
+
+describe('installZeroCli', () => {
+  const originalEnv = { ...process.env };
+  const logger = {
+    userLog: { log: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn() },
+    debug: { log: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn() },
+    setFilePath: vi.fn(),
+  } as unknown as StartupLogger;
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    process.env = { ...originalEnv };
+    delete process.env[ROOMOTE_ZERO_CLI_VERSION_ENV];
+    delete process.env[ROOMOTE_BAKED_ZERO_CLI_VERSION_ENV];
+    mockExistsSync.mockImplementation((targetPath: PathLike) => {
+      return targetPath === '/sandbox';
+    });
+  });
+
+  afterAll(() => {
+    process.env = originalEnv;
+  });
+
+  it('skips reinstall when zero already matches the expected version', async () => {
+    mockExeca
+      .mockResolvedValueOnce(versionResult(MISE_NPM_PATH))
+      .mockResolvedValueOnce(versionResult(DEFAULT_ZERO_CLI_VERSION));
+
+    await installZeroCli(logger);
+
+    expect(mockExeca).toHaveBeenCalledTimes(2);
+    expect(mockWriteFileSync).not.toHaveBeenCalled();
+  });
+
+  it('installs zero into its own prefix so npm cannot prune the shared sandbox packages', async () => {
+    mockExeca
+      .mockResolvedValueOnce(versionResult(MISE_NPM_PATH))
+      .mockRejectedValueOnce(new Error('spawn zero ENOENT'))
+      .mockResolvedValueOnce(installResult())
+      .mockResolvedValueOnce(versionResult(DEFAULT_ZERO_CLI_VERSION))
+      .mockResolvedValueOnce(versionResult(DEFAULT_ZERO_CLI_VERSION));
+
+    await installZeroCli(logger);
+
+    expect(mockExeca).toHaveBeenNthCalledWith(
+      3,
+      MISE_NPM_PATH,
+      [
+        'install',
+        '--prefix',
+        '/sandbox/zero-cli',
+        '--no-save',
+        '--no-package-lock',
+        `@zeroxyz/cli@${DEFAULT_ZERO_CLI_VERSION}`,
+      ],
+      {
+        stdin: 'ignore',
+      },
+    );
+    expect(mockWriteFileSync).toHaveBeenCalledWith(
+      path.join(os.homedir(), '.local', 'bin', 'zero'),
+      '#!/bin/bash\nexec "/sandbox/zero-cli/node_modules/.bin/zero" "$@"\n',
+      'utf8',
     );
   });
 });

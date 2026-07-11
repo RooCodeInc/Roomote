@@ -73,6 +73,17 @@ const state = vi.hoisted(() => ({
     } | null;
   },
   giteaAccountIsPending: false,
+  bitbucketAccount: {
+    configured: false,
+    account: null,
+  } as {
+    configured: boolean;
+    account: {
+      accountId: string;
+      displayName: string | null;
+    } | null;
+  },
+  bitbucketAccountIsPending: false,
   adoAccount: {
     configured: false,
     account: null,
@@ -128,12 +139,14 @@ const mutations = vi.hoisted(() => ({
   authenticateGitHub: vi.fn(),
   authenticateGitLab: vi.fn(),
   authenticateGitea: vi.fn(),
+  authenticateBitbucket: vi.fn(),
   authenticateAdo: vi.fn(),
   authenticateSlack: vi.fn(),
   authenticateLinear: vi.fn(),
   authenticateMicrosoftTeams: vi.fn(),
   unlinkGitLab: vi.fn(),
   unlinkGitea: vi.fn(),
+  unlinkBitbucket: vi.fn(),
   unlinkAdo: vi.fn(),
   unlinkGitHub: vi.fn(),
   unlinkSlack: vi.fn(),
@@ -247,6 +260,34 @@ const authClientLinkedAccountTestCases = [
     authenticateMutation: mutations.authenticateGitea,
     unlinkMutation: mutations.unlinkGitea,
     expectedLinkArgs: '/settings?service=gitea',
+  },
+  {
+    name: 'Bitbucket',
+    searchParams: 'service=bitbucket',
+    linkedAccount: {
+      accountId: 'bb-user-1',
+      displayName: 'Bitbucket user bb-user-1',
+    },
+    setLinkedAccount: (
+      account: {
+        accountId: string;
+        displayName: string | null;
+        tenantId?: string | null;
+      } | null,
+    ) => {
+      state.bitbucketAccount = {
+        configured: true,
+        account: account
+          ? {
+              accountId: account.accountId,
+              displayName: account.displayName,
+            }
+          : null,
+      };
+    },
+    authenticateMutation: mutations.authenticateBitbucket,
+    unlinkMutation: mutations.unlinkBitbucket,
+    expectedLinkArgs: '/settings?service=bitbucket',
   },
   {
     name: 'Microsoft Teams',
@@ -363,6 +404,18 @@ vi.mock('@/hooks/linked-accounts', () => ({
   useGiteaLinkedAccount: () => ({
     data: state.giteaAccount,
     isPending: state.giteaAccountIsPending,
+  }),
+  useAuthenticateBitbucketAccount: () => ({
+    isPending: false,
+    mutate: mutations.authenticateBitbucket,
+  }),
+  useBitbucketLinkedAccount: () => ({
+    data: state.bitbucketAccount,
+    isPending: state.bitbucketAccountIsPending,
+  }),
+  useUnlinkBitbucketLinkedAccount: () => ({
+    isPending: false,
+    mutate: mutations.unlinkBitbucket,
   }),
   useGitHubLinkedAccount: () => ({
     data: state.githubAccount,
@@ -500,9 +553,11 @@ describe('LinkedAccounts settings', () => {
     mutations.authenticateAdo.mockReset();
     mutations.authenticateGitLab.mockReset();
     mutations.authenticateGitea.mockReset();
+    mutations.authenticateBitbucket.mockReset();
     mutations.unlinkAdo.mockReset();
     mutations.unlinkGitLab.mockReset();
     mutations.unlinkGitea.mockReset();
+    mutations.unlinkBitbucket.mockReset();
     state.searchParams = '';
     state.user = {
       isAdmin: true,
@@ -522,6 +577,8 @@ describe('LinkedAccounts settings', () => {
     state.gitlabAccountIsPending = false;
     state.giteaAccount = { configured: false, account: null };
     state.giteaAccountIsPending = false;
+    state.bitbucketAccount = { configured: false, account: null };
+    state.bitbucketAccountIsPending = false;
     state.adoAccount = { configured: false, account: null };
     state.adoAccountIsPending = false;
     state.telegramAccount = null;

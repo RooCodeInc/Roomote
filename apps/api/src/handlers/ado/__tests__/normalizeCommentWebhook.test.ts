@@ -30,7 +30,7 @@ const flatCommentPayload = {
     parentCommentId: 0,
     content: '@roomote please summarize this change',
     commentType: 'text',
-    author: { id: 'user-1', displayName: 'Dan Riccio' },
+    author: { id: 'user-1', displayName: 'Grace Hopper' },
     _links: {
       self: {
         href: 'https://dev.azure.com/roomote/_apis/git/repositories/5c210c4f-f090-4f1c-a860-12ed1a7a307a/pullRequests/2/threads/2/comments/1',

@@ -28,6 +28,12 @@ const SOURCE_CONTROL_SETUP_COPY: Record<
     creationHint:
       'Create the token with repository access on the instance Roomote should use. Prefer a bot or service account that can administer repository webhooks; Roomote syncs repositories and configures pull request webhooks automatically.',
   },
+  bitbucket: {
+    creationHref: 'https://id.atlassian.com/manage-profile/security/api-tokens',
+    setupLabel: 'Bitbucket API token',
+    creationHint:
+      'Create an API token with scopes covering repository, pull request, and webhook read/write, plus workspace read (read:workspace:bitbucket) and user read (read:user:bitbucket) so Roomote can discover workspaces and validate the credentials. Prefer a bot or service account that can administer repository webhooks; Roomote syncs repositories and configures pull request webhooks automatically. The Atlassian account email that owns the API token is required.',
+  },
   ado: {
     creationHref: 'https://dev.azure.com/_usersSettings/tokens',
     setupLabel: 'Azure DevOps personal access token',

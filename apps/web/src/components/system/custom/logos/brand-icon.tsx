@@ -8,6 +8,7 @@ import {
   siDatadog,
   siDocker,
   siGrafana,
+  siBitbucket,
   siGitea,
   siGithub,
   siGitlab,
@@ -41,6 +42,7 @@ const SIMPLE_ICONS: Record<string, SimpleIcon> = {
   datadog: siDatadog,
   docker: siDocker,
   grafana: siGrafana,
+  bitbucket: siBitbucket,
   gitea: siGitea,
   github: siGithub,
   gitlab: siGitlab,
@@ -104,6 +106,30 @@ function SupermemoryIcon({
     >
       <path d="M205.864 66.263h-76.401V0h-24.684v71.897c0 7.636 3.021 14.97 8.391 20.373l62.383 62.777 17.454-17.564-46.076-46.365h58.948v-24.84l-.015-.015Z" />
       <path d="M12.872 30.517l46.075 46.365H0v24.84h76.4v66.264h24.685V96.089c0-7.637-3.021-14.97-8.39-20.374l-62.37-62.762-17.453 17.564Z" />
+    </svg>
+  );
+}
+
+function ZeroIcon({
+  name,
+  className,
+  isDecorative,
+}: {
+  name: string;
+  className?: string;
+  isDecorative: boolean;
+}) {
+  return (
+    <svg
+      viewBox="0 0 32 32"
+      role={isDecorative ? undefined : 'img'}
+      aria-hidden={isDecorative || undefined}
+      aria-label={isDecorative ? undefined : name}
+      focusable="false"
+      fill="currentColor"
+      className={className}
+    >
+      <path d="M16 2.5c7.456 0 13.5 6.044 13.5 13.5S23.456 29.5 16 29.5 2.5 23.456 2.5 16 8.544 2.5 16 2.5Zm0 4c-5.247 0-9.5 4.253-9.5 9.5s4.253 9.5 9.5 9.5 9.5-4.253 9.5-9.5-4.253-9.5-9.5-9.5Zm4.95 4.05-9.9 9.9a1.25 1.25 0 0 0 1.768 1.768l9.9-9.9a1.25 1.25 0 1 0-1.768-1.768Z" />
     </svg>
   );
 }
@@ -358,6 +384,12 @@ export function BrandIcon({ icon, name, className }: BrandIconProps) {
         className={className}
         isDecorative={isDecorative}
       />
+    );
+  }
+
+  if (icon === 'zero') {
+    return (
+      <ZeroIcon name={name} className={className} isDecorative={isDecorative} />
     );
   }
 

@@ -20,15 +20,15 @@
         "name": "product-debug",
         "type": "public_channel",
         "isMember": true,
-        "members": ["UDAN", "BROOMOTE"]
+        "members": ["UGRACE", "BROOMOTE"]
       }
     ],
     "users": [
       { "id": "BROOMOTE", "name": "roomote", "displayName": "Roomote" },
       {
-        "id": "UDAN",
-        "name": "dan",
-        "displayName": "Dan Riccio",
+        "id": "UGRACE",
+        "name": "grace",
+        "displayName": "Grace Hopper",
         "email": "local@roomote.dev"
       }
     ],
@@ -43,7 +43,7 @@
         "event": {
           "type": "app_mention",
           "channel": "C123ABC456",
-          "user": "UDAN",
+          "user": "UGRACE",
           "text": "<@BROOMOTE> !fast In one short paragraph: what is idempotency in API design?",
           "ts": "$TS1",
           "channel_type": "channel"
@@ -58,7 +58,7 @@
         "event": {
           "type": "app_mention",
           "channel": "C123ABC456",
-          "user": "UDAN",
+          "user": "UGRACE",
           "text": "<@BROOMOTE> !fast In one short paragraph: what is idempotency in API design?",
           "ts": "$TS1",
           "channel_type": "channel"

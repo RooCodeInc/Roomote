@@ -63,4 +63,14 @@ describe('integration setup guide', () => {
       'anything I save is visible to everyone in the workspace.',
     );
   });
+
+  it('documents the deployment-scoped Zero setup flow', () => {
+    expect(INTEGRATION_SETUP_CONTENT).toContain('# Zero');
+    expect(INTEGRATION_SETUP_CONTENT).toContain(
+      'That operator connects Zero once for the workspace via OAuth.',
+    );
+    expect(INTEGRATION_SETUP_CONTENT).toContain(
+      'Only after Zero is enabled for the deployment do I install the zero CLI',
+    );
+  });
 });

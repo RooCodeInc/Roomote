@@ -16,6 +16,9 @@ export const TEAMS_BOT_CREDENTIAL_ENV_VAR_NAMES = [
   'R_TEAMS_BOT_NAME',
   'R_TEAMS_BOT_TOKEN_ENDPOINT',
   'R_TEAMS_BOT_OAUTH_SCOPE',
+  'R_MICROSOFT_CLIENT_ID',
+  'R_MICROSOFT_CLIENT_SECRET',
+  'R_MICROSOFT_TENANT_ID',
 ] as const;
 
 export const MICROSOFT_SINGLE_APP_TEAMS_BOT_FIELD_SOURCES = {
@@ -36,6 +39,13 @@ export type TeamsBotCredentialEnvVarResolution = {
 
 function trimmed(value: string | undefined): string | null {
   return value?.trim() || null;
+}
+
+function hasConfiguredValue(
+  env: Partial<Record<string, string | undefined>>,
+  name: string,
+): boolean {
+  return trimmed(env[name]) !== null;
 }
 
 export function resolveTeamsBotCredentialEnvVarNames(input: {
@@ -90,17 +100,29 @@ export function resolveTeamsBotRuntimeCredentialsFromEnv(
 ): TeamsBotRuntimeCredentials {
   const botTokenEndpoint = trimmed(env.R_TEAMS_BOT_TOKEN_ENDPOINT);
   const botOauthScope = trimmed(env.R_TEAMS_BOT_OAUTH_SCOPE);
-  const botAppId = trimmed(env.R_TEAMS_BOT_APP_ID);
-  const botAppPassword = trimmed(env.R_TEAMS_BOT_APP_PASSWORD);
+  const resolution = resolveTeamsBotCredentialEnvVarNames({
+    hasConfiguredEnvVar: (name) => hasConfiguredValue(env, name),
+  });
 
-  if (botAppId && botAppPassword) {
+  if (resolution.source === 'teams_bot') {
     return {
-      botAppId,
-      botAppPassword,
+      botAppId: trimmed(env.R_TEAMS_BOT_APP_ID),
+      botAppPassword: trimmed(env.R_TEAMS_BOT_APP_PASSWORD),
       botTenantId: trimmed(env.R_TEAMS_BOT_TENANT_ID),
       botTokenEndpoint,
       botOauthScope,
       source: 'teams_bot',
+    };
+  }
+
+  if (resolution.source === 'microsoft_auth') {
+    return {
+      botAppId: trimmed(env.R_MICROSOFT_CLIENT_ID),
+      botAppPassword: trimmed(env.R_MICROSOFT_CLIENT_SECRET),
+      botTenantId: trimmed(env.R_MICROSOFT_TENANT_ID),
+      botTokenEndpoint,
+      botOauthScope,
+      source: 'microsoft_auth',
     };
   }
 

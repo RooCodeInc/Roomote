@@ -306,6 +306,46 @@ function buildProviderFields(
           required: false,
         },
       ];
+    case 'bitbucket':
+      return [
+        {
+          envVarName: 'BITBUCKET_TOKEN',
+          acceptedEnvVarNames: ['BITBUCKET_TOKEN'],
+          label: 'Bitbucket API Token',
+          secret: true,
+        },
+        {
+          envVarName: 'BITBUCKET_USERNAME',
+          acceptedEnvVarNames: ['BITBUCKET_USERNAME'],
+          label: 'Atlassian Account Email',
+        },
+        {
+          envVarName: 'BITBUCKET_BASE_URL',
+          acceptedEnvVarNames: ['BITBUCKET_BASE_URL'],
+          label: 'Bitbucket Base URL',
+          required: false,
+        },
+        {
+          envVarName: 'BITBUCKET_CLIENT_ID',
+          acceptedEnvVarNames: ['BITBUCKET_CLIENT_ID'],
+          label: 'Bitbucket OAuth Client ID',
+          required: false,
+        },
+        {
+          envVarName: 'BITBUCKET_CLIENT_SECRET',
+          acceptedEnvVarNames: ['BITBUCKET_CLIENT_SECRET'],
+          label: 'Bitbucket OAuth Client Secret',
+          secret: true,
+          required: false,
+        },
+        {
+          envVarName: 'BITBUCKET_WEBHOOK_SECRET',
+          acceptedEnvVarNames: ['BITBUCKET_WEBHOOK_SECRET'],
+          label: 'Bitbucket Webhook Secret',
+          secret: true,
+          required: false,
+        },
+      ];
   }
 }
 

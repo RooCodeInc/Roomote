@@ -28,7 +28,7 @@ interface StopTaskAttribution {
 
 type StopTaskRunResult =
   | { success: true; mode: 'sandbox_stop' | 'direct_cancel' }
-  | { success: false; error: string; statusCode: 403 | 404 | 409 | 502 };
+  | { success: false; error: string; statusCode: 404 | 409 | 502 };
 
 type StopTaskRunResolution =
   | { kind: 'not_found' }
@@ -143,15 +143,12 @@ async function stopTaskSandboxRun(params: {
   cancelledBy?: StopTaskAttribution;
 }): Promise<StopTaskRunResult> {
   const { run, authUserId, cancelledBy } = params;
-  const tokenUserId = authUserId ?? run.actingUserId;
-
-  if (!tokenUserId) {
-    return {
-      success: false,
-      statusCode: 403,
-      error: 'User context required to stop the active sandbox task',
-    };
-  }
+  // Prefer the caller's auth identity, then the live run actor. Both may be
+  // null for chat-started / automation runs that still only have a deployment
+  // service principal; createRunToken accepts that and mints a principal token
+  // so provider cancel buttons (Slack/Telegram) can stop active sandboxes
+  // without a human user claim on the run row.
+  const tokenUserId = authUserId ?? run.actingUserId ?? null;
 
   await markCancelRequested(run.id);
 

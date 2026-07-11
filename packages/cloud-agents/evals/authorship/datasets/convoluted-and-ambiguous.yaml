@@ -27,7 +27,7 @@
 - description: 'Authorship - Slack human-created backend work assigns Bruno to author and PR owner'
   vars:
     authorshipInstructions: |
-      For human-created Slack tasks in acme/backend, make Bruno Bergher both the author and the PR owner.
+      For human-created Slack tasks in acme/backend, make Alan Turing both the author and the PR owner.
     availableRepositoriesKey: standard
     availableUsersKey: brunoAlice
     expected:
@@ -124,7 +124,7 @@
   vars:
     authorshipInstructions: |
       1. For GitHub-started tasks in acme/frontend, keep Roomote as the author and assign PRs to Alice Nguyen.
-      2. For human-created Slack tasks in acme/backend, keep the matched human as the author and assign PRs to Bruno Bergher.
+      2. For human-created Slack tasks in acme/backend, keep the matched human as the author and assign PRs to Alan Turing.
     availableRepositoriesKey: standard
     availableUsersKey: brunoAlice
     expected:
@@ -254,7 +254,7 @@
 - description: 'Authorship - concrete rule can survive alongside an ambiguous remainder'
   vars:
     authorshipInstructions: |
-      For GitHub-started tasks in Roomote/example-app, make Bruno Bergher the author.
+      For GitHub-started tasks in Roomote/example-app, make Alan Turing the author.
       For anything urgent, use whoever is on call.
     availableRepositoriesKey: standard
     availableUsersKey: brunoAlice
@@ -277,7 +277,7 @@
 - description: 'Authorship - repo-specific exception can coexist with a broader Slack rule'
   vars:
     authorshipInstructions: |
-      For human-created Slack tasks, keep the matched human as the author and assign PRs to Bruno Bergher.
+      For human-created Slack tasks, keep the matched human as the author and assign PRs to Alan Turing.
       But for human-created Slack tasks in acme/frontend, keep Roomote as the author and assign PRs to Alice Nguyen.
     availableRepositoriesKey: standard
     availableUsersKey: brunoAlice

@@ -32,6 +32,7 @@ const {
   mkdirSyncMock,
   recordSandboxPromptSlackTurnStartMock,
   writeFileSyncMock,
+  installZeroCliMock,
 } = vi.hoisted(() => ({
   activateSkillsFolderMock: vi.fn(() => false),
   awaitSubprocessMock: vi.fn().mockResolvedValue(undefined),
@@ -85,6 +86,7 @@ const {
   mkdirSyncMock: vi.fn(),
   recordSandboxPromptSlackTurnStartMock: vi.fn(),
   writeFileSyncMock: vi.fn(),
+  installZeroCliMock: vi.fn().mockResolvedValue(undefined),
 }));
 
 vi.mock('node:fs', () => ({
@@ -223,6 +225,10 @@ vi.mock('../resolve-status', () => ({
 
 vi.mock('../completion', () => ({
   getDefaultKeepaliveMs: vi.fn(() => 60_000),
+}));
+
+vi.mock('../../commands/setup/agent-clis', () => ({
+  installZeroCli: installZeroCliMock,
 }));
 
 vi.mock('../agent-home', () => ({
@@ -567,103 +573,6 @@ describe('runTask', () => {
       expect.objectContaining({
         runtimeEnv: expect.objectContaining({
           OPENCODE_EXPERIMENTAL_BACKGROUND_SUBAGENTS: '1',
-        }),
-      }),
-    );
-  });
-
-  it('passes the plan mode flag into the runtime env when enabled for the org', async () => {
-    mockEvaluateFeatureFlag.mockImplementation(async (flag: string) => {
-      return flag === 'PlanMode';
-    });
-
-    await runTask({
-      taskRun: {
-        id: 106,
-        taskId: 'task-106',
-        payloadKind: TaskPayloadKind.StandardTask,
-        harness: 'opencode-server',
-        payload: {},
-        result: null,
-      } as never,
-      envVars: {},
-      workspacePath: '/tmp/workspace',
-      prompt: '',
-      harnessInstructions: undefined,
-      agentInstructions: undefined,
-      environmentConfig: undefined,
-      callbacks: {},
-      context: {},
-      logger: {
-        info: vi.fn(),
-        warn: vi.fn(),
-        error: vi.fn(),
-        log: vi.fn(),
-      } as never,
-      harnessSessionId: undefined,
-      workerEnv: {
-        authToken: 'cloud-token',
-        roomoteAppUrl: 'https://api.example.test',
-        trpcUrl: 'https://web.example.test',
-        buildUserFacingEnv: vi.fn(() => ({
-          HOME: '/tmp/home',
-          PATH: '/usr/bin',
-        })),
-      } as never,
-    });
-
-    expect(mockEvaluateFeatureFlag).toHaveBeenCalledWith('PlanMode');
-    expect(createHarnessMock).toHaveBeenCalledWith(
-      expect.objectContaining({
-        runtimeEnv: expect.objectContaining({
-          ROOMOTE_PLAN_MODE: 'true',
-        }),
-      }),
-    );
-  });
-
-  it('does not set the plan mode env when the flag is disabled', async () => {
-    mockEvaluateFeatureFlag.mockResolvedValue(false);
-
-    await runTask({
-      taskRun: {
-        id: 107,
-        taskId: 'task-107',
-        payloadKind: TaskPayloadKind.StandardTask,
-        harness: 'opencode-server',
-        payload: {},
-        result: null,
-      } as never,
-      envVars: {},
-      workspacePath: '/tmp/workspace',
-      prompt: '',
-      harnessInstructions: undefined,
-      agentInstructions: undefined,
-      environmentConfig: undefined,
-      callbacks: {},
-      context: {},
-      logger: {
-        info: vi.fn(),
-        warn: vi.fn(),
-        error: vi.fn(),
-        log: vi.fn(),
-      } as never,
-      harnessSessionId: undefined,
-      workerEnv: {
-        authToken: 'cloud-token',
-        roomoteAppUrl: 'https://api.example.test',
-        trpcUrl: 'https://web.example.test',
-        buildUserFacingEnv: vi.fn(() => ({
-          HOME: '/tmp/home',
-          PATH: '/usr/bin',
-        })),
-      } as never,
-    });
-
-    expect(createHarnessMock).toHaveBeenCalledWith(
-      expect.objectContaining({
-        runtimeEnv: expect.not.objectContaining({
-          ROOMOTE_PLAN_MODE: expect.anything(),
         }),
       }),
     );
@@ -3504,10 +3413,13 @@ describe('runTask', () => {
       } as never,
     });
 
+    expect(isOrgEnabledMock).toHaveBeenCalledWith('zero');
+    expect(installZeroCliMock).not.toHaveBeenCalled();
     expect(activateSkillsFolderMock).toHaveBeenCalledWith(
       expect.objectContaining({
         homeDir: '/tmp/workspace/.roomote-runtime-home',
         sourceHomeDir: '/tmp/home',
+        excludeSkillNames: ['zero'],
       }),
     );
     expect(createHarnessMock).toHaveBeenCalledWith(

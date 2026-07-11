@@ -24,9 +24,11 @@ import {
   useAuthenticateAdoAccount,
   useAuthenticateMicrosoftTeamsAccount,
   useAuthenticateGitLabAccount,
+  useAuthenticateBitbucketAccount,
   useAuthenticateGiteaAccount,
   useCreateTelegramLinkCode,
   useGitLabLinkedAccount,
+  useBitbucketLinkedAccount,
   useGiteaLinkedAccount,
   useGitHubLinkedAccount,
   useLinearLinkedAccount,
@@ -35,6 +37,7 @@ import {
   useTelegramLinkedAccount,
   useUnlinkAdoLinkedAccount,
   useUnlinkGitLabLinkedAccount,
+  useUnlinkBitbucketLinkedAccount,
   useUnlinkGiteaLinkedAccount,
   useUnlinkGitHubLinkedAccount,
   useUnlinkLinearLinkedAccount,
@@ -416,6 +419,9 @@ export function LinkedAccounts() {
   const giteaAccount = useGiteaLinkedAccount();
   const authenticateGiteaAccount = useAuthenticateGiteaAccount();
   const unlinkGiteaAccount = useUnlinkGiteaLinkedAccount();
+  const bitbucketAccount = useBitbucketLinkedAccount();
+  const authenticateBitbucketAccount = useAuthenticateBitbucketAccount();
+  const unlinkBitbucketAccount = useUnlinkBitbucketLinkedAccount();
   const adoAccount = useAdoLinkedAccount();
   const authenticateAdoAccount = useAuthenticateAdoAccount();
   const unlinkAdoAccount = useUnlinkAdoLinkedAccount();
@@ -538,6 +544,16 @@ export function LinkedAccounts() {
       authenticateAccount: authenticateGiteaAccount,
       unlinkAccount: unlinkGiteaAccount,
       fallbackDisplayName: (accountId) => `Gitea user ${accountId}`,
+    }),
+    createAuthClientLinkedAccountDescriptor({
+      key: 'bitbucket',
+      name: 'Bitbucket',
+      icon: <BrandIcon icon="bitbucket" name="Bitbucket" className="size-4" />,
+      redirectTarget,
+      state: bitbucketAccount.data,
+      authenticateAccount: authenticateBitbucketAccount,
+      unlinkAccount: unlinkBitbucketAccount,
+      fallbackDisplayName: (accountId) => `Bitbucket user ${accountId}`,
     }),
     createAuthClientLinkedAccountDescriptor({
       key: 'ado',

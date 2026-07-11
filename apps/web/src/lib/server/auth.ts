@@ -109,6 +109,18 @@ type GiteaOAuthProfile = {
   login?: unknown;
 };
 
+type BitbucketOAuthProfile = {
+  account_id?: unknown;
+  display_name?: unknown;
+  links?: {
+    avatar?: {
+      href?: unknown;
+    };
+  };
+  username?: unknown;
+  uuid?: unknown;
+};
+
 type AdoConnectionDataUser = {
   displayName?: unknown;
   id?: unknown;
@@ -281,6 +293,29 @@ function normalizeGitLabBaseUrl(baseUrl: string | null | undefined) {
 
 // Unlike GitLab there is no default Gitea host: Gitea is always
 // instance-specific, so the provider stays disabled without GITEA_BASE_URL.
+function normalizeBitbucketBaseUrl(baseUrl: string | null | undefined) {
+  const trimmed = baseUrl?.trim();
+
+  if (!trimmed) {
+    return 'https://bitbucket.org';
+  }
+
+  try {
+    const url = new URL(
+      trimmed.includes('://') ? trimmed : `https://${trimmed}`,
+    );
+    const host = url.hostname.toLowerCase();
+
+    if (host !== 'bitbucket.org' && host !== 'www.bitbucket.org') {
+      return null;
+    }
+
+    return 'https://bitbucket.org';
+  } catch {
+    return null;
+  }
+}
+
 function normalizeGiteaBaseUrl(baseUrl: string | null | undefined) {
   const trimmed = baseUrl?.trim().replace(/\/+$/, '');
 
@@ -340,6 +375,10 @@ function buildGitLabPlaceholderEmail(username: string, baseUrl: string) {
   return `${username}@${host}.placeholder.local`;
 }
 
+function buildBitbucketPlaceholderEmail(username: string) {
+  return `${username}@users.noreply.bitbucket.org`;
+}
+
 function buildGiteaPlaceholderEmail(username: string, baseUrl: string) {
   const host = (() => {
     try {
@@ -389,6 +428,31 @@ function readGiteaProfileId(profile: GiteaOAuthProfile): string | null {
   return readNonEmptyString(profile.id);
 }
 
+function readBitbucketProfileString(
+  profile: BitbucketOAuthProfile,
+  key: keyof BitbucketOAuthProfile,
+): string | null {
+  return readNonEmptyString(profile[key]);
+}
+
+function normalizeBitbucketAccountId(value: string): string {
+  return value.replace(/^\{|\}$/g, '').trim();
+}
+
+function readBitbucketProfileId(profile: BitbucketOAuthProfile): string | null {
+  const accountId = readBitbucketProfileString(profile, 'account_id');
+  if (accountId) {
+    return normalizeBitbucketAccountId(accountId);
+  }
+
+  const uuid = readBitbucketProfileString(profile, 'uuid');
+  if (uuid) {
+    return normalizeBitbucketAccountId(uuid);
+  }
+
+  return null;
+}
+
 function readAdoProfileString(profile: AdoProfile, key: keyof AdoProfile) {
   return readNonEmptyString(profile[key]);
 }
@@ -432,6 +496,9 @@ async function createAuth(authProviderConfig: ResolvedAuthProviderConfig) {
     giteaClientId,
     giteaClientSecret,
     giteaBaseUrl,
+    bitbucketClientId,
+    bitbucketClientSecret,
+    bitbucketBaseUrl,
     adoClientId,
     adoClientSecret,
     adoTenantId,
@@ -442,6 +509,8 @@ async function createAuth(authProviderConfig: ResolvedAuthProviderConfig) {
     microsoftClientId && microsoftClientSecret && microsoftTenantId;
   const normalizedGitLabBaseUrl = normalizeGitLabBaseUrl(gitlabBaseUrl);
   const normalizedGiteaBaseUrl = normalizeGiteaBaseUrl(giteaBaseUrl);
+  const normalizedBitbucketBaseUrl =
+    normalizeBitbucketBaseUrl(bitbucketBaseUrl);
   const normalizedAdoOrganization = normalizeAdoOrganization(adoOrganization);
   const normalizedAdoBaseUrl = normalizeAdoBaseUrl(adoBaseUrl);
   const normalizedAdoTenantId =
@@ -584,6 +653,60 @@ async function createAuth(authProviderConfig: ResolvedAuthProviderConfig) {
                   readGiteaProfileString(profile, 'avatar_url') ?? undefined,
                 name:
                   readGiteaProfileString(profile, 'full_name') ??
+                  `@${username}`,
+              };
+            },
+          },
+        ]
+      : []),
+    ...(bitbucketClientId && bitbucketClientSecret && normalizedBitbucketBaseUrl
+      ? [
+          {
+            providerId: 'bitbucket',
+            authorizationUrl: 'https://bitbucket.org/site/oauth2/authorize',
+            tokenUrl: 'https://bitbucket.org/site/oauth2/access_token',
+            clientId: bitbucketClientId,
+            clientSecret: bitbucketClientSecret,
+            scopes: ['account', 'repository', 'pullrequest'],
+            disableSignUp: true,
+            getUserInfo: async (tokens: { accessToken?: string }) => {
+              if (!tokens.accessToken) {
+                return null;
+              }
+
+              const response = await fetch(
+                'https://api.bitbucket.org/2.0/user',
+                {
+                  headers: {
+                    Authorization: `Bearer ${tokens.accessToken}`,
+                  },
+                },
+              );
+
+              if (!response.ok) {
+                return null;
+              }
+
+              const profile = (await response.json()) as BitbucketOAuthProfile;
+              const accountId = readBitbucketProfileId(profile);
+              const username = readBitbucketProfileString(profile, 'username');
+
+              if (!accountId || !username) {
+                return null;
+              }
+
+              const avatarHref =
+                typeof profile.links?.avatar?.href === 'string'
+                  ? profile.links.avatar.href
+                  : undefined;
+
+              return {
+                id: accountId,
+                email: buildBitbucketPlaceholderEmail(username),
+                emailVerified: false,
+                image: avatarHref,
+                name:
+                  readBitbucketProfileString(profile, 'display_name') ??
                   `@${username}`,
               };
             },

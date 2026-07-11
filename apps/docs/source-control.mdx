@@ -1,7 +1,7 @@
 ---
 title: Source Control
 icon: git-branch
-description: Connect GitHub, GitLab, Gitea, or Azure DevOps so Roomote can clone repositories and open reviewable changes.
+description: Connect GitHub, GitLab, Gitea, Bitbucket, or Azure DevOps so Roomote can clone repositories and open reviewable changes.
 ---
 
 import { IntegrationName } from '/snippets/integration-name.jsx';
@@ -17,10 +17,11 @@ to review events or comments when the provider supports them.
 
 | Provider | Best for | Setup model |
 | -------- | -------- | ----------- |
-| <IntegrationName href="/providers/source-control/github" icon="github" name="GitHub" /> | GitHub-hosted repositories and pull request review workflows | GitHub App installation. |
-| <IntegrationName href="/providers/source-control/gitlab" icon="gitlab" name="GitLab" /> | GitLab projects and merge request review workflows | Deployment-owned token and optional webhooks. |
-| <IntegrationName href="/providers/source-control/gitea" icon="gitea" name="Gitea" /> | Self-hosted Gitea repositories | Deployment-owned token and repository sync. |
+| <IntegrationName href="/providers/source-control/github" icon="github" name="GitHub" /> | GitHub-hosted repositories and pull request review workflows | GitHub App installation (default provider). |
 | <IntegrationName href="/providers/source-control/azure-devops" icon="azuredevops" name="Azure DevOps" /> | Azure DevOps repositories | Deployment-owned PAT and repository sync. |
+| <IntegrationName href="/providers/source-control/bitbucket" icon="bitbucket" name="Bitbucket" /> | Bitbucket Cloud repositories and pull request workflows | Deployment-owned Atlassian API token and repository sync. |
+| <IntegrationName href="/providers/source-control/gitea" icon="gitea" name="Gitea" /> | Self-hosted Gitea repositories | Deployment-owned token and repository sync. |
+| <IntegrationName href="/providers/source-control/gitlab" icon="gitlab" name="GitLab" /> | GitLab projects and merge request review workflows | Deployment-owned token and optional webhooks. |
 
 ## Setup checklist
 

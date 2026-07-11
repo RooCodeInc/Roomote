@@ -24,7 +24,7 @@ describe('PM2Service.startServices', () => {
     reset: false,
     verbose: false,
     autoNgrok: false,
-    publicUrl: 'https://roomote-matt.ngrok.app',
+    publicUrl: 'https://roomote-example.ngrok.app',
     skipWorkerReleaseBuild: false,
     useRelease: false,
     workerReleaseChannel: 'stable',
@@ -63,8 +63,8 @@ describe('PM2Service.startServices', () => {
     const pm2Env = getPm2Env();
 
     expect(pm2Env).toMatchObject({
-      R_PUBLIC_URL: 'https://roomote-matt.ngrok.app',
-      R_APP_URL: 'https://roomote-matt.ngrok.app',
+      R_PUBLIC_URL: 'https://roomote-example.ngrok.app',
+      R_APP_URL: 'https://roomote-example.ngrok.app',
       USE_WORKER_RELEASE: 'false',
     });
     expect(pm2Env).not.toHaveProperty('WORKER_RELEASE_CHANNEL');

@@ -39,8 +39,10 @@ const SYSTEM_KEYS = [
 ];
 
 // Capture worker-only config from the launcher, then scrub it from process.env
-// so nested application commands do not inherit it accidentally.
-const WORKER_INTERNAL_CONFIG_KEYS = ['R_APP_ENV', 'APP_ENV'];
+// so nested application commands do not inherit it accidentally. This includes
+// the legacy ROOMOTE_APP_ENV alias the controller still injects for pre-rename
+// snapshot workers.
+const WORKER_INTERNAL_CONFIG_KEYS = ['R_APP_ENV', 'APP_ENV', 'ROOMOTE_APP_ENV'];
 const BLOCKED_USER_FACING_ENV_KEYS = new Set([
   'AUTH_TOKEN',
   'TRPC_URL',
@@ -307,14 +309,15 @@ export class WorkerEnv {
 
   /** For user-facing processes (per-repo commands, terminal sessions) */
   buildUserFacingEnv(): Record<string, string> {
+    // Note: the deployment's app env (workerConfig.appEnv) is deliberately NOT
+    // included here. It describes the Roomote deployment's own deploy context
+    // (keepalive defaults, monitoring), not the user project's environment.
+    // Exporting it into task processes broke sandboxed dev servers: the
+    // unconditional `export R_APP_ENV=production` written into
+    // ~/.roomote/env.sh clobbered per-command development overrides, which
+    // disabled dev login in Roomote-on-Roomote sandboxes.
     return {
       ...this.systemBase,
-      ...(this.workerConfig.appEnv
-        ? {
-            APP_ENV: this.workerConfig.appEnv,
-            R_APP_ENV: this.workerConfig.appEnv,
-          }
-        : {}),
       ...this.serviceEnv,
       ...this.runtimeEnv,
       ...this.userEnv,

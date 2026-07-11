@@ -1,0 +1,263 @@
+import pMap from 'p-map';
+
+import {
+  type TaskPayload,
+  DEFAULT_PR_REVIEW_SETTINGS,
+  type PrReviewSettings,
+  TaskPayloadKind,
+} from '@roomote/types';
+import {
+  db,
+  repositories,
+  and,
+  eq,
+  findActiveGitHubPrReviewTask,
+} from '@roomote/db/server';
+import { enqueueTask } from '@roomote/cloud-agents/server';
+import { updateTaskPrStatus } from '@roomote/sdk/server';
+
+import type { WebhookResponse } from '../../types';
+import { notifySlackPrMerge } from '../github/notifySlackPrMerge';
+import { notifyTeamsPrMerge } from '../github/notifyTeamsPrMerge';
+import { notifyTelegramAndLinearPrMerge } from '../github/notifyTelegramAndLinearPrMerge';
+import {
+  getBitbucketAutomationTargets,
+  getBitbucketUsername,
+  getBitbucketUserAccountKey,
+} from './getBitbucketAutomationTargets';
+import {
+  getBitbucketPullRequestBaseRef,
+  getBitbucketPullRequestBaseSha,
+  getBitbucketPullRequestHeadRef,
+  getBitbucketPullRequestHeadSha,
+  getBitbucketPullRequestNumber,
+  getBitbucketPullRequestUrl,
+  isBitbucketPullRequestClosed,
+  isBitbucketPullRequestMerged,
+  type BitbucketPullRequestWebhook,
+} from './types';
+
+function getReviewTaskType(
+  eventName: string,
+):
+  | typeof TaskPayloadKind.GithubPrReview
+  | typeof TaskPayloadKind.GithubPrReviewSync
+  | null {
+  if (eventName === 'pullrequest:created') {
+    return TaskPayloadKind.GithubPrReview;
+  }
+
+  if (eventName === 'pullrequest:updated') {
+    return TaskPayloadKind.GithubPrReviewSync;
+  }
+
+  return null;
+}
+
+async function notifyMergedPullRequestThreads(
+  payload: BitbucketPullRequestWebhook,
+  repoFullName: string,
+): Promise<void> {
+  const repositoryRow = await db.query.repositories.findFirst({
+    where: and(
+      eq(repositories.sourceControlProvider, 'bitbucket'),
+      eq(repositories.fullName, repoFullName),
+      eq(repositories.isActive, true),
+    ),
+    columns: { id: true },
+  });
+
+  if (!repositoryRow) {
+    return;
+  }
+
+  const prNumber = getBitbucketPullRequestNumber(payload.pullrequest);
+  const notificationParams = {
+    sourceControlProvider: 'bitbucket' as const,
+    repository: repoFullName,
+    prNumber,
+    prTitle: payload.pullrequest.title,
+    prUrl: getBitbucketPullRequestUrl(payload),
+    mergedBy: getBitbucketUsername(payload.actor) ?? 'someone on Bitbucket',
+  };
+
+  notifySlackPrMerge(notificationParams).catch((error) => {
+    console.error(
+      `[handleBitbucketPullRequest] Failed to notify Slack for PR #${notificationParams.prNumber}: ${
+        error instanceof Error ? error.message : String(error)
+      }`,
+    );
+  });
+
+  notifyTeamsPrMerge(notificationParams).catch((error) => {
+    console.error(
+      `[handleBitbucketPullRequest] Failed to notify Teams for PR #${notificationParams.prNumber}: ${
+        error instanceof Error ? error.message : String(error)
+      }`,
+    );
+  });
+
+  notifyTelegramAndLinearPrMerge({
+    ...notificationParams,
+    sourceControlProvider: 'bitbucket',
+  }).catch((error) => {
+    console.error(
+      `[handleBitbucketPullRequest] Failed to notify Telegram/Linear for PR #${notificationParams.prNumber}: ${
+        error instanceof Error ? error.message : String(error)
+      }`,
+    );
+  });
+}
+
+export async function handleBitbucketPullRequest(
+  payload: BitbucketPullRequestWebhook,
+  eventName: string,
+): Promise<WebhookResponse> {
+  const repoFullName = payload.repository.full_name;
+  const pullRequest = payload.pullrequest;
+  const prNumber = getBitbucketPullRequestNumber(pullRequest);
+
+  if (
+    eventName === 'pullrequest:fulfilled' ||
+    eventName === 'pullrequest:rejected' ||
+    isBitbucketPullRequestClosed(pullRequest)
+  ) {
+    const merged = isBitbucketPullRequestMerged(pullRequest);
+
+    await updateTaskPrStatus(
+      'bitbucket',
+      repoFullName,
+      prNumber,
+      merged ? 'merged' : 'closed',
+    );
+
+    if (merged) {
+      await notifyMergedPullRequestThreads(payload, repoFullName);
+    }
+
+    return { status: 'ok' };
+  }
+
+  const taskType = getReviewTaskType(eventName);
+
+  if (!taskType) {
+    return {
+      status: 'ok',
+      message: `unsupported_pull_request_event:${eventName}`,
+    };
+  }
+
+  const result = await getBitbucketAutomationTargets({
+    workflow: 'pr_review',
+    payload,
+  });
+
+  if (result.status === 'error') {
+    return result;
+  }
+
+  const targets = result.targets.filter((target) => {
+    const settings = target.settings as PrReviewSettings | null;
+    const reviewOnCommit =
+      settings?.reviewOnCommit ?? DEFAULT_PR_REVIEW_SETTINGS.reviewOnCommit;
+    const reviewDraftPrs =
+      settings?.reviewDraftPrs ?? DEFAULT_PR_REVIEW_SETTINGS.reviewDraftPrs;
+
+    if (!reviewOnCommit) {
+      return false;
+    }
+
+    return !pullRequest.draft || reviewDraftPrs;
+  });
+
+  if (targets.length === 0) {
+    return { status: 'ok', message: 'No Bitbucket PR reviewer targets found.' };
+  }
+
+  const headSha = getBitbucketPullRequestHeadSha(pullRequest);
+  const headRef = getBitbucketPullRequestHeadRef(pullRequest);
+  const baseRef = getBitbucketPullRequestBaseRef(pullRequest);
+  const baseSha = getBitbucketPullRequestBaseSha(pullRequest);
+
+  if (taskType === TaskPayloadKind.GithubPrReviewSync && headSha) {
+    const activeReview = await findActiveGitHubPrReviewTask({
+      repoFullName,
+      prNumber,
+      headSha,
+      sourceControlProvider: 'bitbucket',
+    });
+
+    if (activeReview?.taskId) {
+      console.log(
+        `[handleBitbucketPullRequest] ${repoFullName}#${prNumber} -> skip_already_reviewed_head (task: ${activeReview.taskId})`,
+      );
+
+      return {
+        status: 'ok',
+        message: 'Bitbucket PR head SHA already has an active review job.',
+      };
+    }
+  }
+
+  const prUrl = getBitbucketPullRequestUrl(payload);
+  const prAuthorName = getBitbucketUsername(pullRequest.author);
+  const prAuthorId =
+    getBitbucketUserAccountKey(pullRequest.author) ?? prAuthorName;
+
+  const enqueued = await pMap(targets, async (_target) =>
+    enqueueTask(
+      {
+        task: {
+          type: taskType,
+          payload: {
+            repo: repoFullName,
+            sourceControlProvider: 'bitbucket',
+            prNumber,
+            prTitle: pullRequest.title,
+            prUrl,
+            headSha,
+            branchName: headRef,
+            ...(headRef ? { branch: headRef } : {}),
+            ...(headSha ? { sha: headSha } : {}),
+            targetBranch: baseRef,
+          } satisfies TaskPayload<typeof taskType>,
+        },
+        initiator: {
+          kind: 'automation',
+          key: 'review_code',
+          ...(prAuthorId
+            ? {
+                actor: {
+                  externalId: prAuthorId,
+                  displayName: prAuthorName,
+                },
+              }
+            : {}),
+        },
+        workflow: 'pr_review',
+        surface: 'bitbucket',
+        trigger: 'webhook',
+        prLinkage: {
+          provider: 'bitbucket',
+          repository: repoFullName,
+          prNumber,
+          prUrl,
+          prTitle: pullRequest.title,
+          prSha: headSha || null,
+          prBaseRef: baseRef ?? null,
+          prBaseSha: baseSha ?? null,
+        },
+      },
+      {
+        launchClass: 'automation',
+      },
+    ),
+  );
+
+  return {
+    status: 'ok',
+    metadata: {
+      ids: enqueued.flatMap((item) => (item ? [item.id] : [])),
+    },
+  };
+}

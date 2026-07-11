@@ -19,6 +19,7 @@ import {
 
 import type { Variables } from '../../types';
 import type { McpAuth } from '../mcp/middleware';
+import { McpProxyError, resolveActingUserIdOrNull } from '../mcp/proxy-utils';
 import { logHandlerError } from '../utils';
 
 const UNIQUE_VIOLATION_CODE = '23505';
@@ -71,6 +72,49 @@ export function getEnvironmentRepositoryConfigError(
 
 function extractRunId(auth: McpAuth): number | null {
   return 'runId' in auth.authContext ? auth.authContext.runId : null;
+}
+
+/**
+ * Resolve the human user an environment write should be attributed to.
+ *
+ * Chat-started task runs (for example Slack app mentions) are dequeued before
+ * an acting user is attached, so their run tokens are minted as the
+ * deployment service principal with no mint-time user claim even when a
+ * linked human is driving the task. The live actor lives on
+ * `task_runs.actingUserId` — written only by trusted server-side writers
+ * (web steer, follow-up delivery) — so prefer it the same way the MCP proxy
+ * does and fall back to the token's mint-time claim. Returns null when no
+ * human actor can be resolved; environment writes stay forbidden for pure
+ * deployment-principal automation.
+ *
+ * This live-actor resolution is deliberately scoped to environment writes,
+ * where the resolved user only feeds deployment-scoped attribution
+ * (`createdByUserId`). The task-control handlers (launchTask, sendMessage,
+ * steerMessage, task-stop) act *as* a user and intentionally keep their
+ * stricter mint-time/user gating.
+ */
+export async function resolveEnvironmentWriteUserId(
+  auth: McpAuth,
+): Promise<string | null> {
+  let liveActingUserId: string | null = null;
+
+  try {
+    liveActingUserId = await resolveActingUserIdOrNull({
+      userId: auth.userId ?? null,
+      tokenType: auth.authContext.tokenType,
+      runId: extractRunId(auth) ?? undefined,
+    });
+  } catch (error) {
+    // A malformed run token or a missing task run means there is no
+    // resolvable live actor; fall back to mint-time attribution. Unexpected
+    // lookup failures degrade the same way (matching pre-live-actor
+    // behavior) instead of escaping the handler's structured error path.
+    if (!(error instanceof McpProxyError)) {
+      logHandlerError('resolveEnvironmentWriteUserId', error);
+    }
+  }
+
+  return liveActingUserId ?? auth.userId ?? null;
 }
 
 /**
@@ -135,11 +179,11 @@ export async function createEnvironment(
   c: Context<{ Variables: Variables & { mcpAuth: McpAuth } }>,
 ): Promise<Response> {
   const auth = c.get('mcpAuth');
+  const userId = await resolveEnvironmentWriteUserId(auth);
 
-  if (!auth.userId) {
+  if (!userId) {
     return c.json({ error: 'User context required' }, 403);
   }
-  const userId = auth.userId;
 
   let body: unknown;
 

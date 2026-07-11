@@ -75,6 +75,25 @@ describe('packaged skill invocation routing', () => {
     }
   });
 
+  it('ships the zero skill in the standard packaged skill catalog', () => {
+    const skillPath = path.join(
+      workflowsDir,
+      'skills',
+      'standard',
+      'zero',
+      'SKILL.md',
+    );
+    const skillContent = fs.readFileSync(skillPath, 'utf8');
+
+    expect(fs.existsSync(skillPath)).toBe(true);
+    expect(skillContent).toContain('name: zero');
+    expect(skillContent).toContain('hidden: true');
+    expect(skillContent).toContain('zero search');
+    expect(skillContent).toContain('deployment operator has enabled Zero');
+    expect(skillContent).not.toContain('bakes the CLI into the worker runtime');
+    expect(skillContent).toContain('org-scoped');
+  });
+
   it('ships beta chore skills in the standard packaged skill catalog', () => {
     for (const skillName of betaChoreSkillNames) {
       expect(

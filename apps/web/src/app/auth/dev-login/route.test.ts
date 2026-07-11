@@ -10,6 +10,7 @@ const { envMock, mockBootstrapWebRuntimeEnv, mockIsWebServerBindExposed } =
       APP_ENV: 'development',
       R_APP_URL: 'http://localhost:3000',
       WEB_DEV_LOGIN_EMAIL: 'local@roomote.dev',
+      WEB_DEV_LOGIN_ENABLED: 'true' as string | undefined,
       R_ALLOWED_EMAILS: undefined as string | undefined,
       ENCRYPTION_KEY: 'local-roomote-encryption-key-0001',
     },
@@ -21,9 +22,12 @@ vi.mock('@/lib/server/bootstrap-runtime-env', () => ({
   bootstrapWebRuntimeEnv: mockBootstrapWebRuntimeEnv,
 }));
 
-vi.mock('@/lib/server/env', () => ({
+vi.mock('@/lib/server/env', async () => ({
   Env: envMock,
   isWebServerBindExposed: mockIsWebServerBindExposed,
+  isEnvFlagEnabled: (
+    await vi.importActual<typeof import('@roomote/env')>('@roomote/env')
+  ).isEnvFlagEnabled,
   getEncryptionKey: () => envMock.ENCRYPTION_KEY,
   getBetterAuthSecret: () => envMock.ENCRYPTION_KEY,
 }));
@@ -72,6 +76,7 @@ describe('GET /auth/dev-login', () => {
     envMock.APP_ENV = 'development';
     envMock.R_APP_URL = 'http://localhost:3000';
     envMock.WEB_DEV_LOGIN_EMAIL = 'local@roomote.dev';
+    envMock.WEB_DEV_LOGIN_ENABLED = 'true';
     envMock.R_ALLOWED_EMAILS = undefined;
     mockIsWebServerBindExposed.mockReturnValue(false);
     await deleteDevLoginRows();
@@ -302,6 +307,20 @@ describe('GET /auth/dev-login', () => {
     'is not available in %s app envs',
     async (appEnv) => {
       envMock.APP_ENV = appEnv;
+
+      const response = await GET(
+        new NextRequest('http://localhost:3000/auth/dev-login'),
+      );
+
+      expect(response.status).toBe(404);
+      expect(response.headers.get('set-cookie')).toBeNull();
+    },
+  );
+
+  it.each([undefined, '', 'false', '0'])(
+    'is not available when WEB_DEV_LOGIN_ENABLED is %j',
+    async (flagValue) => {
+      envMock.WEB_DEV_LOGIN_ENABLED = flagValue;
 
       const response = await GET(
         new NextRequest('http://localhost:3000/auth/dev-login'),

@@ -27,10 +27,12 @@ import {
   taskPullRequests,
   githubUserMappings,
   environments,
+  taskInferenceUsageEvents,
   desc,
   eq,
   inArray,
   isNull,
+  sql,
 } from '@roomote/db/server';
 
 import {
@@ -45,6 +47,7 @@ import {
   type AnalyticsFilterOptionsResponse,
   type AnalyticsFilters,
   type AnalyticsGranularity,
+  type AnalyticsMetric,
   type AnalyticsObject,
   type AnalyticsSeries,
   type PullRequestAnalyticsOverviewResponse,
@@ -52,8 +55,10 @@ import {
   type TimePeriodFilter,
   ANALYTICS_OBJECT_CONFIG,
   getDefaultAnalyticsGranularity,
+  getDefaultAnalyticsMetric,
   getDefaultAnalyticsViewBy,
   isValidAnalyticsGranularity,
+  isValidAnalyticsMetric,
   isValidAnalyticsViewBy,
 } from '@/types';
 
@@ -87,6 +92,7 @@ const SOURCE_ORDER = [
   'GitHub',
   'GitLab',
   'Gitea',
+  'Bitbucket',
   'Azure DevOps',
   'Linear',
   'Web',
@@ -408,6 +414,8 @@ function mapTaskSource(surface: TaskSurface | null | undefined) {
       return 'GitLab';
     case 'gitea':
       return 'Gitea';
+    case 'bitbucket':
+      return 'Bitbucket';
     case 'ado':
       return 'Azure DevOps';
     case 'linear':
@@ -625,10 +633,22 @@ function buildFilterOptions<TRow extends AnalyticsRow>(
   };
 }
 
+function resolveAnalyticsMetric(
+  object: AnalyticsObject,
+  requestedMetric: AnalyticsMetric | undefined,
+): AnalyticsMetric {
+  if (isValidAnalyticsMetric(object, requestedMetric)) {
+    return requestedMetric;
+  }
+
+  return getDefaultAnalyticsMetric(object);
+}
+
 function buildChartData(
   rows: AnalyticsRow[],
   object: AnalyticsObject,
   requestedViewBy: AnalyticsDimension,
+  metric: AnalyticsMetric,
   timePeriod: TimePeriodFilter | undefined,
   granularity: AnalyticsGranularity,
   now: Date,
@@ -684,6 +704,7 @@ function buildChartData(
   }
 
   const series: AnalyticsSeries[] = [...seriesTotals.entries()]
+    .filter(([, value]) => value.total > 0)
     .sort((left, right) => {
       const leftLabel = left[1].label;
       const rightLabel = right[1].label;
@@ -731,6 +752,7 @@ function buildChartData(
   return {
     object,
     viewBy,
+    metric,
     series,
     buckets,
     total: rows.reduce((sum, row) => sum + row.value, 0),
@@ -1029,20 +1051,107 @@ function buildPullRequestAnalyticsSummary(
   };
 }
 
+type TaskInferenceUsageTotals = {
+  totalTokens: number;
+  costUsd: number;
+};
+
+async function getTaskInferenceUsageTotalsByTaskIds(
+  taskIds: string[],
+): Promise<Record<string, TaskInferenceUsageTotals>> {
+  if (taskIds.length === 0) {
+    return {};
+  }
+
+  const results = await db
+    .select({
+      taskId: taskInferenceUsageEvents.taskId,
+      totalTokens: sql<number>`coalesce(sum(${taskInferenceUsageEvents.totalTokens}), 0)::bigint`,
+      costMicroUsd: sql<number>`coalesce(sum(${taskInferenceUsageEvents.costMicroUsd}), 0)::bigint`,
+    })
+    .from(taskInferenceUsageEvents)
+    .where(inArray(taskInferenceUsageEvents.taskId, taskIds))
+    .groupBy(taskInferenceUsageEvents.taskId);
+
+  const usageByTaskId: Record<string, TaskInferenceUsageTotals> = {};
+
+  for (const row of results) {
+    usageByTaskId[row.taskId] = {
+      totalTokens: Number(row.totalTokens ?? 0),
+      costUsd: Number(row.costMicroUsd ?? 0) / 1_000_000,
+    };
+  }
+
+  return usageByTaskId;
+}
+
+function getTaskMetricValue(
+  metric: AnalyticsMetric,
+  usage: TaskInferenceUsageTotals | undefined,
+): number {
+  switch (metric) {
+    case 'tokens':
+      return usage?.totalTokens ?? 0;
+    case 'cost':
+      return usage?.costUsd ?? 0;
+    case 'tasks':
+    default:
+      return 1;
+  }
+}
+
+function formatTaskMetricDetailValue(
+  metric: AnalyticsMetric,
+  usage: TaskInferenceUsageTotals | undefined,
+): string {
+  switch (metric) {
+    case 'tokens':
+      return String(usage?.totalTokens ?? 0);
+    case 'cost':
+      return (usage?.costUsd ?? 0).toFixed(2);
+    case 'tasks':
+    default:
+      return '1';
+  }
+}
+
 async function getTaskAnalyticsRows(
   auth: UserAuthSuccess,
   timePeriod: TimePeriodFilter | undefined,
   now: Date,
+  metric: AnalyticsMetric,
 ): Promise<AnalyticsRow[]> {
   const taskRows = await getTaskAnalyticsBaseRows(auth, timePeriod, now);
+  const usageByTaskId =
+    metric === 'tasks'
+      ? {}
+      : await getTaskInferenceUsageTotalsByTaskIds(
+          taskRows.map((task) => task.id),
+        );
 
   return taskRows.map((task) => {
     const sourceLabel = mapTaskSource(task.surface);
+    const usage = usageByTaskId[task.id];
+    const value = getTaskMetricValue(metric, usage);
+    const values: Record<string, string> = {
+      date: formatAnalyticsDateTime(task.timestamp),
+      user: task.userDimension.label,
+      project: task.projectLabel,
+      source: sourceLabel,
+      taskTitle: task.title,
+      task: 'View task',
+    };
+
+    if (metric === 'tokens') {
+      values.tokens = formatTaskMetricDetailValue(metric, usage);
+    } else if (metric === 'cost') {
+      values.cost = formatTaskMetricDetailValue(metric, usage);
+    }
 
     return {
       id: task.id,
       timestamp: task.timestamp,
-      value: 1,
+      value,
       dimensions: {
         user: task.userDimension,
         project: createLabelBackedDimensionValue(task.projectLabel),
@@ -1050,14 +1159,7 @@ async function getTaskAnalyticsRows(
       },
       details: {
         id: task.id,
-        values: {
-          date: formatAnalyticsDateTime(task.timestamp),
-          user: task.userDimension.label,
-          project: task.projectLabel,
-          source: sourceLabel,
-          taskTitle: task.title,
-          task: 'View task',
-        },
+        values,
         links: {
           task: `/task/${task.id}`,
         },
@@ -1329,10 +1431,11 @@ async function getAnalyticsRows(
   object: AnalyticsObject,
   timePeriod: TimePeriodFilter | undefined,
   now: Date,
+  metric: AnalyticsMetric = getDefaultAnalyticsMetric(object),
 ) {
   switch (object) {
     case 'tasks':
-      return getTaskAnalyticsRows(auth, timePeriod, now);
+      return getTaskAnalyticsRows(auth, timePeriod, now, metric);
     case 'pullRequests':
       return getPullRequestAnalyticsRows(auth, timePeriod, now);
   }
@@ -1340,10 +1443,11 @@ async function getAnalyticsRows(
 
 function getAnalyticsDetailsColumns(
   object: AnalyticsObject,
+  metric: AnalyticsMetric = getDefaultAnalyticsMetric(object),
 ): AnalyticsDetailsColumn[] {
   switch (object) {
-    case 'tasks':
-      return [
+    case 'tasks': {
+      const columns: AnalyticsDetailsColumn[] = [
         { key: 'date', label: 'Date' },
         { key: 'user', label: 'User' },
         { key: 'project', label: 'Environment' },
@@ -1351,6 +1455,15 @@ function getAnalyticsDetailsColumns(
         { key: 'taskTitle', label: 'Task Title' },
         { key: 'task', label: 'Task Link' },
       ];
+
+      if (metric === 'tokens') {
+        columns.splice(5, 0, { key: 'tokens', label: 'Tokens' });
+      } else if (metric === 'cost') {
+        columns.splice(5, 0, { key: 'cost', label: 'Cost (USD)' });
+      }
+
+      return columns;
+    }
     case 'pullRequests':
       return [
         { key: 'date', label: 'Date' },
@@ -1370,17 +1483,20 @@ export async function getAnalyticsChartData(
   input: {
     object: AnalyticsObject;
     viewBy: AnalyticsDimension;
+    metric?: AnalyticsMetric;
     filters?: AnalyticsFilters;
     timePeriod?: TimePeriodFilter;
     granularity?: AnalyticsGranularity;
   },
   now: Date = new Date(),
 ): Promise<AnalyticsChartResponse> {
+  const metric = resolveAnalyticsMetric(input.object, input.metric);
   const rows = await getAnalyticsRows(
     auth,
     input.object,
     input.timePeriod,
     now,
+    metric,
   );
   const filteredRows = applyDimensionFilters(rows, input.filters ?? {});
   const granularity = getResolvedGranularity(
@@ -1392,6 +1508,7 @@ export async function getAnalyticsChartData(
     filteredRows,
     input.object,
     input.viewBy,
+    metric,
     input.timePeriod,
     granularity,
     now,
@@ -1414,12 +1531,14 @@ export async function getPullRequestAnalyticsOverview(
     input.timePeriod,
     input.granularity,
   );
+  const metric = getDefaultAnalyticsMetric('pullRequests');
 
   return {
     chart: buildChartData(
       filteredRows,
       'pullRequests',
       input.viewBy,
+      metric,
       input.timePeriod,
       granularity,
       now,
@@ -1461,17 +1580,20 @@ export async function getAnalyticsExportData(
   input: {
     object: AnalyticsObject;
     viewBy: AnalyticsDimension;
+    metric?: AnalyticsMetric;
     filters?: AnalyticsFilters;
     timePeriod?: TimePeriodFilter;
     granularity?: AnalyticsGranularity;
   },
   now: Date = new Date(),
 ): Promise<AnalyticsExportResponse> {
+  const metric = resolveAnalyticsMetric(input.object, input.metric);
   const rows = await getAnalyticsRows(
     auth,
     input.object,
     input.timePeriod,
     now,
+    metric,
   );
   const filteredRows = applyDimensionFilters(rows, input.filters ?? {});
   const viewBy = isValidAnalyticsViewBy(input.object, input.viewBy)
@@ -1484,7 +1606,7 @@ export async function getAnalyticsExportData(
   return {
     object: input.object,
     viewBy,
-    columns: getAnalyticsDetailsColumns(input.object),
+    columns: getAnalyticsDetailsColumns(input.object, metric),
     rows: sortedRows.map((row) => row.details),
     total: sortedRows.reduce((sum, row) => sum + row.value, 0),
   };
@@ -1495,6 +1617,7 @@ export async function getAnalyticsDetails(
   input: {
     object: AnalyticsObject;
     viewBy: AnalyticsDimension;
+    metric?: AnalyticsMetric;
     filters?: AnalyticsFilters;
     timePeriod?: TimePeriodFilter;
     granularity?: AnalyticsGranularity;
@@ -1503,11 +1626,13 @@ export async function getAnalyticsDetails(
   },
   now: Date = new Date(),
 ): Promise<AnalyticsDetailsResponse> {
+  const metric = resolveAnalyticsMetric(input.object, input.metric);
   const rows = await getAnalyticsRows(
     auth,
     input.object,
     input.timePeriod,
     now,
+    metric,
   );
   const filteredRows = applyDimensionFilters(rows, input.filters ?? {});
   const viewBy = isValidAnalyticsViewBy(input.object, input.viewBy)
@@ -1534,7 +1659,7 @@ export async function getAnalyticsDetails(
     object: input.object,
     bucketKey: input.bucketKey,
     seriesKey: input.seriesKey,
-    columns: getAnalyticsDetailsColumns(input.object),
+    columns: getAnalyticsDetailsColumns(input.object, metric),
     rows: matchingRows.map((row) => row.details),
     total: matchingRows.reduce((sum, row) => sum + row.value, 0),
   };

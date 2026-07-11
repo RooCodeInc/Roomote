@@ -17,23 +17,37 @@ import {
   createMcpProxy,
   McpProxyError,
   resolveActingUserId,
+  resolveActingUserIdOrNull,
 } from './proxy-utils';
 
 async function resolveOAuthAccessToken(
   mcpId: string,
   mcpUrl: string,
-  userId: string,
+  userId: string | null,
 ): Promise<{
   accessToken: string | null;
 }> {
   const connectionScope = getMcpIntegrationConnectionScope(mcpId);
+  const connectionOwnerFilter =
+    connectionScope === 'deployment'
+      ? isNull(mcpConnections.userId)
+      : userId
+        ? eq(mcpConnections.userId, userId)
+        : null;
+
+  // A user-scoped integration cannot resolve a connection without a human
+  // actor to look up.
+  if (!connectionOwnerFilter) {
+    return {
+      accessToken: null,
+    };
+  }
+
   const connection = await db.query.mcpConnections.findFirst({
     where: and(
       eq(mcpConnections.mcpId, mcpId),
       eq(mcpConnections.enabled, true),
-      connectionScope === 'deployment'
-        ? isNull(mcpConnections.userId)
-        : eq(mcpConnections.userId, userId),
+      connectionOwnerFilter,
     ),
   });
 
@@ -87,7 +101,14 @@ export function createIntegrationMcpProxy(
     // Integration OAuth MCPs resolve acting-user credentials directly.
     validateTaskRunToken: async () => null,
     resolveCredentials: async (auth) => {
-      const actingUserId = await resolveActingUserId(auth);
+      // Deployment-scoped integrations use an org-wide connection, so runs
+      // without a human actor (deployment service principal jobs) can still
+      // use them. User-scoped integrations require the acting human whose
+      // credentials the call runs as.
+      const actingUserId =
+        getMcpIntegrationConnectionScope(integration) === 'deployment'
+          ? await resolveActingUserIdOrNull(auth)
+          : await resolveActingUserId(auth);
 
       let accessToken: string | null;
       let disabledToolNames: string[] | null = null;

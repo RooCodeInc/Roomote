@@ -1,0 +1,113 @@
+---
+title: Bitbucket
+icon: 'https://api.iconify.design/simple-icons:bitbucket.svg?color=currentColor'
+description: Configure Bitbucket Cloud repository sync and pull request webhooks for Roomote.
+---
+
+Bitbucket Cloud support uses a deployment-owned Atlassian API token paired with
+the Atlassian account email. This MVP covers Bitbucket Cloud only. Bitbucket
+Server and Data Center are not supported yet.
+
+Repository sync can also create pull request webhooks, allowing Review Code
+automation and `@roomote` pull request comments to work for synced Bitbucket
+Cloud repositories.
+
+Use `<public-url>` below for your stable public Roomote URL.
+
+## Create an Atlassian API token
+
+Create a dedicated Bitbucket Cloud bot or service account and give it access to
+the workspaces or repositories Roomote should use. In that account's
+[Atlassian account settings](https://id.atlassian.com/manage-profile/security/api-tokens),
+choose **Create API token with scopes**, select **Bitbucket** as the app, and
+grant these scopes:
+
+| Scope | Needed for |
+| ----- | ---------- |
+| read:repository:bitbucket and write:repository:bitbucket | cloning, branch creation, and commits |
+| read:pullrequest:bitbucket and write:pullrequest:bitbucket | pull request workflows and comments |
+| read:webhook:bitbucket and write:webhook:bitbucket | automatic webhook setup during repository sync |
+| read:workspace:bitbucket | workspace discovery during repository sync |
+| read:user:bitbucket | identity validation when saving credentials |
+
+Save the token and the Atlassian account email in setup, deployment env vars,
+or local `.env.local`:
+
+```sh
+BITBUCKET_TOKEN=<atlassian-api-token>
+BITBUCKET_USERNAME=<atlassian-account-email>
+```
+
+Optional values:
+
+```sh
+BITBUCKET_BASE_URL=https://bitbucket.org
+BITBUCKET_WEBHOOK_SECRET=<webhook-secret>
+```
+
+`BITBUCKET_USERNAME` is required with `BITBUCKET_TOKEN` and holds the Atlassian
+account email that owns the token (Bitbucket pairs the two for REST auth). For
+git-over-HTTPS, Roomote automatically uses Bitbucket's static
+`x-bitbucket-api-token-auth` user, so no extra configuration is needed.
+`BITBUCKET_BASE_URL` defaults to `https://bitbucket.org`. Only Bitbucket Cloud
+is accepted; other hosts are rejected.
+
+## Sync repositories
+
+After the Bitbucket values are available, open Settings, go to the Environments
+page, and use the Source Control section's Bitbucket sync button. Roomote lists
+repositories from the Bitbucket Cloud API and stores them as Bitbucket
+repository rows.
+
+Bitbucket-backed tasks clone from the synced repository row, so sync must run
+before launching a Bitbucket-backed task.
+
+After repository sync, Roomote best-effort creates or refreshes a repository
+webhook for each synced Bitbucket repository. The webhook target is:
+
+```text
+<public-url>/api/webhooks/bitbucket
+```
+
+If only loopback Roomote URLs are configured, webhook setup is skipped and
+repository sync still succeeds. If `BITBUCKET_WEBHOOK_SECRET` is missing,
+Roomote generates and persists one as an encrypted deployment environment
+variable.
+
+## Enable review automation
+
+Bitbucket pull request reviews use the same Review Code automation targeting
+model as GitHub, GitLab, and Gitea. After syncing repositories, associate the
+Bitbucket repository with the intended environment and enable Review Code
+automation for that target.
+
+Open or reopened pull request events enqueue initial review tasks. Pull request
+update events enqueue delta reviews. `@roomote` comments on Bitbucket pull
+requests route into the existing PR owner task when possible, or enqueue a new
+review task.
+
+## Optional personal account linking (OAuth)
+
+Users can link their personal Bitbucket account for comment-triggered work when
+a Bitbucket OAuth consumer is configured:
+
+```sh
+BITBUCKET_CLIENT_ID=<oauth-client-id>
+BITBUCKET_CLIENT_SECRET=<oauth-client-secret>
+```
+
+These credentials are optional. Without them, deployment-token repository sync,
+webhooks, and Review Code automation still work. With them configured, a
+Bitbucket row can appear under Personal settings for linked accounts.
+
+## Current limits
+
+- Bitbucket Cloud only. Server and Data Center are not supported.
+- There is no Bitbucket App installation flow comparable to the GitHub App.
+
+## Verify setup
+
+1. sync Bitbucket repositories from Settings
+2. create or update an environment from a synced repository
+3. start a small task and confirm Roomote can clone the repository
+4. open or update a pull request and confirm configured review automation runs

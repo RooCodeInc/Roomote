@@ -74,16 +74,16 @@ describe('UserProfileSection', () => {
     render(
       <UserProfileSection
         profile={{
-          email: 'matt@example.com',
+          email: 'ada@example.com',
           imageUrl: '',
-          name: 'Matt User',
+          name: 'Ada User',
         }}
       />,
     );
 
     expect(screen.getByText('Profile')).toBeInTheDocument();
-    expect(screen.getByText('Matt User')).toBeInTheDocument();
-    expect(screen.getByText('matt@example.com')).toBeInTheDocument();
+    expect(screen.getByText('Ada User')).toBeInTheDocument();
+    expect(screen.getByText('ada@example.com')).toBeInTheDocument();
     expect(screen.queryByLabelText('Password')).not.toBeInTheDocument();
     expect(
       screen.queryByRole('button', { name: 'Edit' }),
@@ -120,9 +120,9 @@ describe('UserProfileSection', () => {
       <UserProfileSection
         canChangePassword={true}
         profile={{
-          email: 'matt@example.com',
+          email: 'ada@example.com',
           imageUrl: '',
-          name: 'Matt User',
+          name: 'Ada User',
         }}
       />,
     );
@@ -134,8 +134,8 @@ describe('UserProfileSection', () => {
 
     fireEvent.click(screen.getByRole('button', { name: 'Edit' }));
 
-    expect(screen.getByLabelText('Name')).toHaveValue('Matt User');
-    expect(screen.getByLabelText('Email')).toHaveValue('matt@example.com');
+    expect(screen.getByLabelText('Name')).toHaveValue('Ada User');
+    expect(screen.getByLabelText('Email')).toHaveValue('ada@example.com');
     expect(screen.getByLabelText('Current password')).toBeInTheDocument();
     expect(screen.getByLabelText('New password')).toBeInTheDocument();
     expect(screen.getByLabelText('Confirm password')).toBeInTheDocument();
@@ -146,9 +146,9 @@ describe('UserProfileSection', () => {
       <UserProfileSection
         canChangePassword={true}
         profile={{
-          email: 'matt@example.com',
+          email: 'ada@example.com',
           imageUrl: '',
-          name: 'Matt User',
+          name: 'Ada User',
         }}
       />,
     );
@@ -191,9 +191,9 @@ describe('UserProfileSection', () => {
       <UserProfileSection
         canChangePassword={true}
         profile={{
-          email: 'matt@example.com',
+          email: 'ada@example.com',
           imageUrl: '',
-          name: 'Matt User',
+          name: 'Ada User',
         }}
       />,
     );
@@ -218,9 +218,9 @@ describe('UserProfileSection', () => {
       <UserProfileSection
         canChangePassword={true}
         profile={{
-          email: 'matt@example.com',
+          email: 'ada@example.com',
           imageUrl: '',
-          name: 'Matt User',
+          name: 'Ada User',
         }}
       />,
     );
@@ -245,9 +245,9 @@ describe('UserProfileSection', () => {
       <UserProfileSection
         canChangePassword={true}
         profile={{
-          email: 'matt@example.com',
+          email: 'ada@example.com',
           imageUrl: '',
-          name: 'Matt User',
+          name: 'Ada User',
         }}
       />,
     );

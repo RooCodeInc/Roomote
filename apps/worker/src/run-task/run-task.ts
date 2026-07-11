@@ -59,6 +59,7 @@ import {
   activateSkillsFolder,
   resolvePackagedSkillsFolder,
 } from './agent-home';
+import { installZeroCli } from '../commands/setup/agent-clis';
 
 import { createHarness } from './create-harness';
 import { createActorScopedMcpRefresher } from './actor-scoped-mcp-refresh';
@@ -485,7 +486,6 @@ function getQueuedSnapshotResumeLinearMessages(
     : [];
 }
 
-const PLAN_MODE_FLAG = FeatureFlag.PlanMode;
 const SLACK_PROOF_AUTO_POST_FLAG = FeatureFlag.SlackProofAutoPost;
 const BACKGROUND_SUBAGENTS_FLAG = FeatureFlag.BackgroundSubagents;
 
@@ -623,12 +623,36 @@ export const runTask = async ({
     const hasInitialImages = Boolean(images?.length);
 
     const homeDir = runtimeEnv.HOME ?? sanitizedEnv.HOME ?? '';
+
+    // Admin opt-in for Zero: only install the CLI / activate the skill when
+    // Settings > Integrations has Zero enabled for the deployment.
+    let zeroIntegrationEnabled = false;
+
+    try {
+      zeroIntegrationEnabled = await sdk.mcpConnections.isOrgEnabled('zero');
+    } catch (error) {
+      logger.warn(
+        `[runTask] Failed to check Zero integration enablement: ${error instanceof Error ? error.message : String(error)}`,
+      );
+    }
+
+    if (zeroIntegrationEnabled) {
+      try {
+        await installZeroCli(logger);
+      } catch (error) {
+        logger.warn(
+          `[runTask] Failed to install Zero CLI: ${error instanceof Error ? error.message : String(error)}`,
+        );
+      }
+    }
+
     const skillsActivated = activateSkillsFolder({
       homeDir,
       sourceHomeDir: workerHomeDir,
       skillsFolderName: selectedSkillsFolder,
       manualSkills: environmentConfig?.manualSkills,
       repoLocalSkills,
+      excludeSkillNames: zeroIntegrationEnabled ? undefined : ['zero'],
     });
 
     if (skillsActivated) {
@@ -650,18 +674,6 @@ export const runTask = async ({
     } catch (error) {
       logger.warn(
         `[runTask] Failed to fetch user MCP server configs: ${error instanceof Error ? error.message : String(error)}`,
-      );
-    }
-
-    try {
-      const planModeEnabled = await sdk.featureFlags.evaluate(PLAN_MODE_FLAG);
-
-      if (planModeEnabled) {
-        runtimeEnv.ROOMOTE_PLAN_MODE = 'true';
-      }
-    } catch (error) {
-      logger.warn(
-        `[runTask] Failed to evaluate PlanMode feature flag: ${error instanceof Error ? error.message : String(error)}`,
       );
     }
 

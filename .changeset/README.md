@@ -10,9 +10,12 @@ For user-visible or operator-visible changes that should show up in the changelo
 pnpm changeset
 ```
 
-When prompted for packages, pick any `@roomote/*` package — the selection only
-carries the bump level; the release script reads the highest level across all
-pending changesets and applies it to the single product version. Choose:
+When prompted for packages, pick a single package — prefer `@roomote/web`. The
+frontmatter only carries the bump level (workspace package versions are frozen);
+the release script reads the highest level across all pending changesets and
+applies it to the single product version. Prefer one package line over a multi-
+package map so the file does not look like a package-level change inventory.
+Choose:
 
 - **patch** for bug fixes and small non-breaking changes
 - **minor** for new capabilities that stay backward compatible
