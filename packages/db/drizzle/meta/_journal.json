@@ -50,6 +50,13 @@
       "when": 1783716055364,
       "tag": "0006_schema_hardening",
       "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1783736898276,
+      "tag": "0007_shiny_garia",
+      "breakpoints": true
     }
   ]
 }
