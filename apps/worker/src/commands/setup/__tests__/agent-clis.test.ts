@@ -216,7 +216,7 @@ describe('installZeroCli', () => {
     expect(mockWriteFileSync).not.toHaveBeenCalled();
   });
 
-  it('installs only the zero package when missing', async () => {
+  it('installs zero into its own prefix so npm cannot prune the shared sandbox packages', async () => {
     mockExeca
       .mockResolvedValueOnce(versionResult(MISE_NPM_PATH))
       .mockRejectedValueOnce(new Error('spawn zero ENOENT'))
@@ -232,7 +232,7 @@ describe('installZeroCli', () => {
       [
         'install',
         '--prefix',
-        '/sandbox',
+        '/sandbox/zero-cli',
         '--no-save',
         '--no-package-lock',
         `@zeroxyz/cli@${DEFAULT_ZERO_CLI_VERSION}`,
@@ -243,7 +243,7 @@ describe('installZeroCli', () => {
     );
     expect(mockWriteFileSync).toHaveBeenCalledWith(
       path.join(os.homedir(), '.local', 'bin', 'zero'),
-      '#!/bin/bash\nexec "/sandbox/node_modules/.bin/zero" "$@"\n',
+      '#!/bin/bash\nexec "/sandbox/zero-cli/node_modules/.bin/zero" "$@"\n',
       'utf8',
     );
   });

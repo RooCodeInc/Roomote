@@ -49,3 +49,14 @@ export function getZeroCliPackageSpec(
 ): string {
   return `${ZERO_CLI_PACKAGE_NAME}@${resolveExpectedZeroCliVersion(env)}`;
 }
+
+/**
+ * The Zero CLI must install into its own npm prefix: `npm install --no-save`
+ * reifies the prefix's node_modules down to just the requested package, so
+ * sharing the sandbox root would delete opencode-ai/node-pty (and vice versa).
+ */
+export function resolveZeroCliInstallRoot(
+  runtimePaths: WorkerRuntimePaths,
+): string {
+  return `${runtimePaths.sandboxRootDir}/zero-cli`;
+}
