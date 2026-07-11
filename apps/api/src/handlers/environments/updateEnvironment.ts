@@ -20,6 +20,7 @@ import {
   attachEnvironmentIdToTaskRun,
   getEnvironmentRepositoryConfigError,
   isEnvironmentNameUniqueViolation,
+  resolveEnvironmentWriteUserId,
 } from './createEnvironment';
 
 function duplicateEnvironmentNameResponse(
@@ -36,12 +37,12 @@ export async function updateEnvironment(
   c: Context<{ Variables: Variables & { mcpAuth: McpAuth } }>,
 ): Promise<Response> {
   const auth = c.get('mcpAuth');
+  const userId = await resolveEnvironmentWriteUserId(auth);
 
-  if (!auth.userId) {
+  if (!userId) {
     return c.json({ error: 'User context required' }, 403);
   }
 
-  const userId = auth.userId;
   const id = c.req.param('id');
 
   if (!id) {
