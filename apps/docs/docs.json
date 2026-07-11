@@ -60,10 +60,11 @@
             "root": "source-control",
             "expanded": true,
             "pages": [
-              "providers/source-control/github",
-              "providers/source-control/gitlab",
+              "providers/source-control/azure-devops",
+              "providers/source-control/bitbucket",
               "providers/source-control/gitea",
-              "providers/source-control/azure-devops"
+              "providers/source-control/github",
+              "providers/source-control/gitlab"
             ]
           },
           {

@@ -624,7 +624,7 @@ export const tasks = pgTable(
     ),
     check(
       'tasks_surface_check',
-      sql`${table.surface} in ('web', 'api', 'slack', 'teams', 'telegram', 'linear', 'github', 'gitlab', 'gitea', 'ado', 'system')`,
+      sql`${table.surface} in ('web', 'api', 'slack', 'teams', 'telegram', 'linear', 'github', 'gitlab', 'gitea', 'ado', 'bitbucket', 'system')`,
     ),
     check(
       'tasks_trigger_check',
@@ -852,7 +852,7 @@ export const taskPullRequests = pgTable(
 
     check(
       'task_pull_requests_source_control_provider_check',
-      sql`${table.sourceControlProvider} in ('github', 'gitlab', 'gitea', 'ado')`,
+      sql`${table.sourceControlProvider} in ('github', 'gitlab', 'gitea', 'ado', 'bitbucket')`,
     ),
   ],
 );
@@ -1786,7 +1786,7 @@ export const repositories = pgTable(
     ),
     check(
       'repositories_source_control_provider_check',
-      sql`${table.sourceControlProvider} in ('github', 'gitlab', 'gitea', 'ado')`,
+      sql`${table.sourceControlProvider} in ('github', 'gitlab', 'gitea', 'ado', 'bitbucket')`,
     ),
     check(
       'repositories_github_shape_check',
@@ -1803,6 +1803,10 @@ export const repositories = pgTable(
     check(
       'repositories_ado_shape_check',
       sql`${table.sourceControlProvider} != 'ado' OR ${table.externalRepoId} IS NOT NULL`,
+    ),
+    check(
+      'repositories_bitbucket_shape_check',
+      sql`${table.sourceControlProvider} != 'bitbucket' OR ${table.externalRepoId} IS NOT NULL`,
     ),
   ],
 );
@@ -1882,7 +1886,7 @@ export const pullRequestFacts = pgTable(
     ),
     check(
       'pull_request_facts_source_control_provider_check',
-      sql`${table.sourceControlProvider} in ('github', 'gitlab', 'gitea', 'ado')`,
+      sql`${table.sourceControlProvider} in ('github', 'gitlab', 'gitea', 'ado', 'bitbucket')`,
     ),
   ],
 );

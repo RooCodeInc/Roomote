@@ -65,6 +65,7 @@ export function getPrBodyAttributionLine({
     | 'github'
     | 'gitlab'
     | 'gitea'
+    | 'bitbucket'
     | 'ado';
   slackTeamDomain?: string;
   slackTeamId?: string;
@@ -147,6 +148,7 @@ function buildPrBodyAttributionLine({
     | 'github'
     | 'gitlab'
     | 'gitea'
+    | 'bitbucket'
     | 'ado';
   slackTeamDomain?: string;
   slackTeamId?: string;

@@ -76,6 +76,7 @@ export async function resolveInvocationIdentities(): Promise<
     buildGenericInvocationIdentity('linear', 'Linear'),
     buildGenericInvocationIdentity('gitlab', 'GitLab'),
     buildGenericInvocationIdentity('gitea', 'Gitea'),
+    buildGenericInvocationIdentity('bitbucket', 'Bitbucket'),
     buildGenericInvocationIdentity('ado', 'Azure DevOps'),
   ];
 }

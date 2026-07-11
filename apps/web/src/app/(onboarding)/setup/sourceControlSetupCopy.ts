@@ -28,6 +28,12 @@ const SOURCE_CONTROL_SETUP_COPY: Record<
     creationHint:
       'Create the token with repository access on the instance Roomote should use. Prefer a bot or service account that can administer repository webhooks; Roomote syncs repositories and configures pull request webhooks automatically.',
   },
+  bitbucket: {
+    creationHref: 'https://bitbucket.org/account/settings/app-passwords/',
+    setupLabel: 'Bitbucket app password',
+    creationHint:
+      'Create the app password with repository, pull request, and webhook scopes. Prefer a bot or service account that can administer repository webhooks; Roomote syncs repositories and configures pull request webhooks automatically. The Bitbucket username associated with the app password is required.',
+  },
   ado: {
     creationHref: 'https://dev.azure.com/_usersSettings/tokens',
     setupLabel: 'Azure DevOps personal access token',

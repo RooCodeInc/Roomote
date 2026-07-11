@@ -87,6 +87,7 @@ const SOURCE_ORDER = [
   'GitHub',
   'GitLab',
   'Gitea',
+  'Bitbucket',
   'Azure DevOps',
   'Linear',
   'Web',
@@ -408,6 +409,8 @@ function mapTaskSource(surface: TaskSurface | null | undefined) {
       return 'GitLab';
     case 'gitea':
       return 'Gitea';
+    case 'bitbucket':
+      return 'Bitbucket';
     case 'ado':
       return 'Azure DevOps';
     case 'linear':

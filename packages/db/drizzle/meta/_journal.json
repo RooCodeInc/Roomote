@@ -57,6 +57,13 @@
       "when": 1783720000000,
       "tag": "0007_canonical_r_env_vars",
       "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "7",
+      "when": 1783736898276,
+      "tag": "0008_shiny_garia",
+      "breakpoints": true
     }
   ]
 }

@@ -96,6 +96,7 @@ type StartedFromBrandIcon =
   | 'github'
   | 'gitlab'
   | 'gitea'
+  | 'bitbucket'
   | 'ado'
   | 'telegram'
   | 'teams';
@@ -107,6 +108,7 @@ const SOURCE_CONTROL_BRAND_ICONS: Record<
   github: 'github',
   gitlab: 'gitlab',
   gitea: 'gitea',
+  bitbucket: 'bitbucket',
   ado: 'ado',
 };
 
@@ -114,6 +116,7 @@ const SOURCE_CONTROL_SURFACES: ReadonlySet<string> = new Set([
   'github',
   'gitlab',
   'gitea',
+  'bitbucket',
   'ado',
 ]);
 

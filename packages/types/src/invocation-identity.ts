@@ -8,6 +8,7 @@ export const invocationProviders = [
   'linear',
   'gitlab',
   'gitea',
+  'bitbucket',
   'ado',
 ] as const;
 

@@ -9,6 +9,7 @@ const sourceControlHosts = {
   github: 'github.com',
   gitlab: 'gitlab.com',
   gitea: 'gitea.com',
+  bitbucket: 'bitbucket.org',
   ado: 'dev.azure.com',
 } as const;
 
