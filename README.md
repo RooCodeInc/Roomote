@@ -65,7 +65,8 @@ that host; see [deploy/coolify/README.md](deploy/coolify/README.md).
 
 Render deploys the maintained Blueprint ([render.yaml](render.yaml)) with
 managed Postgres and Key Value (Redis) plus hosted sandboxes such as Modal,
-E2B, or Daytona. Docker sandboxes are not available there; see
+E2B, or Daytona. Docker sandboxes are not available there. The deploy button
+below tracks the stable `main` image channel; see
 [deploy/render/README.md](deploy/render/README.md).
 
 [![Deploy to Render](https://render.com/images/deploy-to-render-button.svg)](https://render.com/deploy?repo=https://github.com/RooCodeInc/Roomote)
