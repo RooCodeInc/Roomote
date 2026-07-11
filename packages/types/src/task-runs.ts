@@ -125,6 +125,30 @@ export type TaskInitiator =
     };
 
 /**
+ * Resolve the Roomote user linked to a task initiator, or null when the
+ * launch has no resolved human (automation initiators and unmapped external
+ * senders).
+ *
+ * This value seeds `task_runs.actingUserId`, which drives actor-scoped
+ * credential resolution (user API keys, user MCP connections, MCP proxy
+ * actor checks), so launch paths must derive it through this single helper
+ * rather than re-implementing the initiator-shape logic.
+ */
+export function getTaskInitiatorLinkedUserId(
+  initiator: TaskInitiator,
+): string | null {
+  if (initiator.kind === 'automation') {
+    return null;
+  }
+
+  if ('userId' in initiator) {
+    return initiator.userId;
+  }
+
+  return initiator.matchedUserId ?? null;
+}
+
+/**
  * TaskPayloadKind
  *
  * Runtime payload dispatch key for task runs. This only
