@@ -9,13 +9,6 @@ import {
  * Defines default values and optional overrides for all feature flags
  */
 export const FEATURE_FLAG_CONFIG: FeatureFlagConfigMap = {
-  [FeatureFlag.PlanMode]: {
-    // On by default for every deployment; explicit `plan_mode: false`
-    // metadata remains an opt-out kill switch.
-    defaultValue: true,
-    metadataKey: 'plan_mode',
-    description: 'Enable plan mode, which keeps planning turns read-only',
-  },
   [FeatureFlag.SlackEvalLauncher]: {
     defaultValue: false,
     metadataKey: 'slack_eval_launcher',

@@ -650,7 +650,6 @@ function createAdvisorAgentConfig(
     description:
       'Consulting advisor the coding agent can ask for help when it is stuck, has repeated failed attempts, or needs a second opinion on approach or debugging.',
     mode: 'subagent',
-    hidden: true,
     model,
     ...(reasoningOptions ? { options: reasoningOptions } : {}),
     prompt: ROOMOTE_OPENCODE_ADVISOR_AGENT_PROMPT,
@@ -787,7 +786,7 @@ function createJudgeModelInstructions(): string {
 
 function createAdvisorModelInstructions(): string {
   return [
-    `A hidden OpenCode \`${ROOMOTE_OPENCODE_ADVISOR_AGENT_NAME}\` subagent is always configured as consulting support for the active coding agent.`,
+    `An OpenCode \`${ROOMOTE_OPENCODE_ADVISOR_AGENT_NAME}\` subagent is always configured as consulting support for the active coding agent.`,
     '',
     'When `R_PLANNING_MODEL` is configured, the advisor uses that advisor model. Otherwise it falls back to the active coding model, running at the advisor reasoning level (defaults to high) for deeper analysis.',
     '',

@@ -3,7 +3,6 @@ import { FeatureFlag } from '@roomote/feature-flags';
 import type { UserResource } from '@/types';
 
 export const mockFeatureFlags: Record<FeatureFlag, boolean> = {
-  [FeatureFlag.PlanMode]: true,
   [FeatureFlag.SlackEvalLauncher]: false,
   [FeatureFlag.ShowDebugUISetting]: false,
   [FeatureFlag.SlackProofAutoPost]: false,

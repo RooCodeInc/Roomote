@@ -677,7 +677,6 @@ describe('opencode-server bootstrap', () => {
     expect(baseConfig.agent?.advisor).toEqual({
       description: expect.stringContaining('stuck'),
       mode: 'subagent',
-      hidden: true,
       model: 'openrouter/anthropic/claude-opus-4.7',
       options: { reasoning: { effort: 'high' } },
       prompt: expect.stringContaining('coding advisor support'),
@@ -735,7 +734,6 @@ describe('opencode-server bootstrap', () => {
 
     expect(baseConfig.agent?.advisor).toMatchObject({
       mode: 'subagent',
-      hidden: true,
       model: 'test-provider/main-model',
       options: { reasoningEffort: 'high' },
     });

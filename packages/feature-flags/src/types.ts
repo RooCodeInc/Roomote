@@ -3,7 +3,6 @@
  */
 
 export enum FeatureFlag {
-  PlanMode = 'PlanMode',
   SlackEvalLauncher = 'SlackEvalLauncher',
   ShowDebugUISetting = 'ShowDebugUISetting',
   SlackProofAutoPost = 'SlackProofAutoPost',
@@ -87,7 +86,6 @@ export type FeatureFlagContext =
     };
 
 export interface MetadataRecord {
-  plan_mode?: boolean;
   slack_eval_launcher?: boolean;
   show_debug_ui_setting?: boolean;
   show_debug_ui?: boolean;

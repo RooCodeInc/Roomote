@@ -3012,7 +3012,7 @@ export class OpenCodeServerHarness
 
     this.activeWorkflowSkill = transition.nextSkill;
 
-    if (transition.queueContinuation && this.isPlanModeEnabled()) {
+    if (transition.queueContinuation) {
       this.enqueuePlanExitContinuation();
     }
   }
@@ -3042,22 +3042,13 @@ export class OpenCodeServerHarness
     });
   }
 
-  private isPlanModeEnabled(): boolean {
-    return (
-      this.commandEnv?.ROOMOTE_PLAN_MODE === '1' ||
-      this.commandEnv?.ROOMOTE_PLAN_MODE === 'true'
-    );
-  }
-
   /**
    * Prompts only switch onto Roomote's generated read-mostly `architect`
-   * agent when both the planning workflow skill is active and plan mode is
-   * enabled for the task runtime. Everything else uses the default `build`
-   * agent.
+   * agent while the planning workflow skill is active. Everything else uses
+   * the default `build` agent.
    */
   private resolvePromptAgent(): string {
-    return this.isPlanModeEnabled() &&
-      this.activeWorkflowSkill === PLAN_WORKFLOW_SKILL
+    return this.activeWorkflowSkill === PLAN_WORKFLOW_SKILL
       ? OPENCODE_ARCHITECT_AGENT
       : OPENCODE_BUILD_AGENT;
   }

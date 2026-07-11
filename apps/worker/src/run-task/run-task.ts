@@ -486,7 +486,6 @@ function getQueuedSnapshotResumeLinearMessages(
     : [];
 }
 
-const PLAN_MODE_FLAG = FeatureFlag.PlanMode;
 const SLACK_PROOF_AUTO_POST_FLAG = FeatureFlag.SlackProofAutoPost;
 const BACKGROUND_SUBAGENTS_FLAG = FeatureFlag.BackgroundSubagents;
 
@@ -675,18 +674,6 @@ export const runTask = async ({
     } catch (error) {
       logger.warn(
         `[runTask] Failed to fetch user MCP server configs: ${error instanceof Error ? error.message : String(error)}`,
-      );
-    }
-
-    try {
-      const planModeEnabled = await sdk.featureFlags.evaluate(PLAN_MODE_FLAG);
-
-      if (planModeEnabled) {
-        runtimeEnv.ROOMOTE_PLAN_MODE = 'true';
-      }
-    } catch (error) {
-      logger.warn(
-        `[runTask] Failed to evaluate PlanMode feature flag: ${error instanceof Error ? error.message : String(error)}`,
       );
     }
 
