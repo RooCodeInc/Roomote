@@ -106,11 +106,18 @@ export function Home({
   const { isDebugUIVisible } = useShowDebugUI();
   const canSelectBranch = isDebugUIVisible;
 
+  // Keep option order identical to the setup catalog so the first fallback
+  // matches the first visible Sandbox provider row.
+  const catalogComputeProviders = SETUP_COMPUTE_PROVIDER_CATALOG.map(
+    (descriptor) => descriptor.provider,
+  );
   const computeProviderOptions =
     availableComputeProviders === undefined
-      ? SETUP_COMPUTE_PROVIDER_CATALOG.map((descriptor) => descriptor.provider)
+      ? catalogComputeProviders
       : availableComputeProviders.length > 0
-        ? availableComputeProviders
+        ? catalogComputeProviders.filter((provider) =>
+            availableComputeProviders.includes(provider),
+          )
         : [defaultComputeProvider];
   const computeProviderDescriptors = SETUP_COMPUTE_PROVIDER_CATALOG.filter(
     (descriptor) => computeProviderOptions.includes(descriptor.provider),

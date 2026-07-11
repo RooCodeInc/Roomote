@@ -829,6 +829,35 @@ describe('Home', () => {
     });
   });
 
+  it('falls back to the first catalog-ordered available provider', async () => {
+    render(
+      <Home
+        initialPlaceholderIndex={0}
+        defaultComputeProvider="daytona"
+        // Server may return providers in a non-catalog order; Home should
+        // still prefer setup-catalog display order for the initial selection.
+        availableComputeProviders={['docker', 'e2b', 'modal']}
+      />,
+    );
+
+    expect(screen.getByLabelText('Sandbox provider')).toHaveTextContent(
+      'Modal',
+    );
+
+    fireEvent.click(
+      screen.getByRole('button', { name: 'Use single-repo environment' }),
+    );
+    fireEvent.click(screen.getByRole('button', { name: 'Submit prompt' }));
+
+    await waitFor(() => {
+      expect(mockCreateStandardTaskRun).toHaveBeenCalledWith(
+        expect.objectContaining({
+          computeProvider: 'modal',
+        }),
+      );
+    });
+  });
+
   it('announces routing progress while auto-routing is pending', async () => {
     let resolveRoute:
       | ((value: typeof routedEnvironmentSuggestion) => void)

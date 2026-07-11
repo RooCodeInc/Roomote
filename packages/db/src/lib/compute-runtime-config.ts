@@ -2,6 +2,7 @@ import { and, eq, inArray, isNull } from 'drizzle-orm';
 import {
   getDefaultAvailableComputeProvider,
   getSetupComputeProvider,
+  SETUP_COMPUTE_PROVIDER_CATALOG,
   SETUP_COMPUTE_PROVIDER_IDS,
   SHARED_WORKER_IMAGE_ENV_VAR,
   resolveDerivedModalBaseImageRef,
@@ -70,9 +71,11 @@ export async function listConfiguredComputeProviders(
     runtimeEnv.EXCLUDED_COMPUTE_PROVIDERS,
   );
 
+  // Preserve setup-catalog display order so callers that fall back to the first
+  // entry match the home dropdown ordering (modal, e2b, daytona, docker).
   const providers: ComputeProvider[] = [];
 
-  for (const provider of SETUP_COMPUTE_PROVIDER_IDS) {
+  for (const { provider } of SETUP_COMPUTE_PROVIDER_CATALOG) {
     if (excludedProviders.has(provider)) {
       continue;
     }

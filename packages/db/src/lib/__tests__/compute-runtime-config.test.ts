@@ -183,4 +183,20 @@ describe('listConfiguredComputeProviders', () => {
 
     expect(providers).toEqual(['docker']);
   });
+
+  it('returns configured providers in setup catalog display order', async () => {
+    const providers = await listConfiguredComputeProviders({
+      runtimeEnv: {
+        MODAL_TOKEN_ID: 'id',
+        MODAL_TOKEN_SECRET: 'secret',
+        MODAL_BASE_IMAGE_REF: 'registry.example.com/image:tag',
+        E2B_API_KEY: 'e2b-key',
+        E2B_TEMPLATE_ID: 'template',
+      },
+      executor: makeExecutor([]),
+    });
+
+    // Catalog order is modal, e2b, daytona, docker — not SETUP_COMPUTE_PROVIDER_IDS.
+    expect(providers).toEqual(['modal', 'e2b', 'docker']);
+  });
 });
