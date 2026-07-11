@@ -30,7 +30,7 @@
   "navigation": {
     "groups": [
       {
-        "group": "Getting Started",
+        "group": "Getting started",
         "pages": ["index", "self-hosting"]
       },
       {
@@ -38,10 +38,10 @@
         "pages": ["how-roomote-works", "use-cases", "tasks", "file-attachments"]
       },
       {
-        "group": "Provider Configuration",
+        "group": "Provider configuration",
         "pages": [
           {
-            "group": "Models and Inference",
+            "group": "Models and inference",
             "root": "models",
             "pages": []
           },
@@ -56,7 +56,7 @@
             ]
           },
           {
-            "group": "Source Control",
+            "group": "Source control",
             "root": "source-control",
             "expanded": true,
             "pages": [
@@ -105,7 +105,7 @@
         ]
       },
       {
-        "group": "Roomote Configuration",
+        "group": "Roomote configuration",
         "pages": [
           "environments",
           "agent-guidance",

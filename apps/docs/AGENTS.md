@@ -68,6 +68,9 @@ Iconify does not provide the logo.
 
 - `docs.json` is the navigation and branding source of truth. When you add,
   rename, or remove a page, update its `navigation` entry in the same change.
+- Use sentence case for sidebar group labels and page `title` frontmatter
+  (capitalize the first word and proper nouns only; keep product and brand
+  names as written).
 - Pages are MDX files referenced by file name (without extension).
 - Internal links use root-relative paths (`/environments`, not `/docs/...`).
 - Brand assets (`roomote.css`, `logo/`, `favicon.svg`, `fonts/`) live in this
