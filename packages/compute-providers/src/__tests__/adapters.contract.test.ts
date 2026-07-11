@@ -125,6 +125,7 @@ describe('compute provider adapter contracts', () => {
         uploadFiles: vi.fn().mockResolvedValue(undefined),
       },
       delete: vi.fn().mockResolvedValue(undefined),
+      _experimental_createSnapshot: vi.fn().mockResolvedValue(undefined),
     };
 
     daytonaCreateMock.mockResolvedValue(daytonaSandbox);
@@ -144,8 +145,8 @@ describe('compute provider adapter contracts', () => {
       },
     });
 
-    expect(client.capabilities.supportsSnapshots).toBe(false);
-    expect(client.capabilities.supportsResume).toBe(false);
+    expect(client.capabilities.supportsSnapshots).toBe(true);
+    expect(client.capabilities.supportsResume).toBe(true);
     expect(client.capabilities.supportsCommandOutputStreaming).toBe(true);
     expect(client.capabilities.supportsCommandOutputLookup).toBe(true);
 
@@ -234,16 +235,45 @@ describe('compute provider adapter contracts', () => {
     const status = await client.getInstanceStatus({ instanceId: 'dtn-1' });
     expect(status.status).toBe('running');
 
-    expect(() => client.createSnapshot({ instanceId: 'dtn-1' })).toThrow(
-      'does not support operation: createSnapshot',
+    const snapshot = await client.createSnapshot({ instanceId: 'dtn-1' });
+    expect(snapshot.snapshotId).toMatch(/^roomote-run-snap-dtn-1-/);
+    expect(daytonaSandbox._experimental_createSnapshot).toHaveBeenCalledWith(
+      snapshot.snapshotId,
+      20 * 60,
+    );
+    // Snapshot path destroys the source sandbox after capture.
+    expect(daytonaSandbox.delete).toHaveBeenCalledTimes(1);
+
+    const resumeSandbox = {
+      ...daytonaSandbox,
+      id: 'dtn-resume',
+      delete: vi.fn().mockResolvedValue(undefined),
+      getPreviewLink: vi.fn().mockResolvedValue({
+        sandboxId: 'dtn-resume',
+        url: 'https://3000-dtn-resume.proxy.test',
+      }),
+    };
+    daytonaCreateMock.mockResolvedValueOnce(resumeSandbox);
+
+    const resumed = await client.resumeFromSnapshot({
+      sourceSnapshotId: snapshot.snapshotId,
+      ports: [3000],
+    });
+    expect(resumed).toEqual({
+      instanceId: 'dtn-resume',
+      status: 'running',
+      sourceSnapshotId: snapshot.snapshotId,
+      domains: { '3000': 'https://3000-dtn-resume.proxy.test' },
+    });
+    expect(daytonaCreateMock).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        snapshot: snapshot.snapshotId,
+        public: true,
+      }),
     );
 
-    expect(() =>
-      client.resumeFromSnapshot({ sourceSnapshotId: 'snap-1' }),
-    ).toThrow('does not support operation: resumeFromSnapshot');
-
-    await client.destroyInstance({ instanceId: 'dtn-1' });
-    expect(daytonaSandbox.delete).toHaveBeenCalledTimes(1);
+    await client.destroyInstance({ instanceId: 'dtn-resume' });
+    expect(resumeSandbox.delete).toHaveBeenCalledTimes(1);
   });
 
   it('e2b adapter satisfies create/run/stream/status/destroy contract', async () => {

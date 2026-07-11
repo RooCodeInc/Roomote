@@ -30,12 +30,16 @@ import type {
   StreamCommandOutputInput,
   WriteFileInput,
 } from '../types';
-import { unsupported } from '../errors';
 import { raceWithAbort, sleepWithSignal, throwIfAborted } from '../modal/abort';
 
 const DAYTONA_SANDBOX_CACHE_TTL_MS = 30 * 60_000;
 
 const DAYTONA_DETACHED_EXIT_GRACE_PERIOD_MS = 1_000;
+
+/** Product filesystem snapshots can be slow; mirror Modal's 20-minute budget. */
+const DAYTONA_SNAPSHOT_TIMEOUT_SECONDS = 20 * 60;
+
+const DAYTONA_PRODUCT_SNAPSHOT_NAME_PREFIX = 'roomote-run-snap';
 
 const DEFAULT_DAYTONA_COMMAND_USER = 'roomote';
 
@@ -559,16 +563,171 @@ export class DaytonaClient implements ComputeProviderClient {
     return { domains: domains ?? {} };
   }
 
-  public createSnapshot(
-    _input: CreateSnapshotInput,
+  public async createSnapshot(
+    input: CreateSnapshotInput,
   ): Promise<CreateSnapshotResult> {
-    return unsupported(this.vendor, 'createSnapshot');
+    throwIfAborted(input.signal);
+
+    const snapshotName = deriveDaytonaProductSnapshotName(input.instanceId);
+
+    console.log(
+      `[DaytonaClient] Creating snapshot for ${input.instanceId} ${JSON.stringify(
+        {
+          snapshotName,
+          timeoutSeconds: DAYTONA_SNAPSHOT_TIMEOUT_SECONDS,
+        },
+      )}`,
+    );
+
+    const sandbox = await this.getSandbox(input.instanceId, input.signal);
+
+    try {
+      await raceWithAbort({
+        promise: sandbox._experimental_createSnapshot(
+          snapshotName,
+          DAYTONA_SNAPSHOT_TIMEOUT_SECONDS,
+        ),
+        signal: input.signal,
+        abortMessage: `Creating snapshot for ${input.instanceId} was aborted`,
+        onLateResolve: async () => {
+          console.warn(
+            `[DaytonaClient] Snapshot completed after local abort for ${input.instanceId}; destroying sandbox ${JSON.stringify(
+              { snapshotName },
+            )}`,
+          );
+          await this.destroySandboxAfterSnapshot(input.instanceId);
+        },
+      });
+    } catch (error) {
+      if (isSandboxUnavailableError(error)) {
+        this.invalidateSandboxCache(input.instanceId);
+      }
+
+      console.error(
+        `[DaytonaClient] Failed to create snapshot ${JSON.stringify({
+          instanceId: input.instanceId,
+          snapshotName,
+          error: formatError(error),
+        })}`,
+      );
+
+      throw error;
+    }
+
+    console.log(
+      `[DaytonaClient] Snapshot created: ${snapshotName}; destroying sandbox ${input.instanceId}`,
+    );
+
+    await this.destroySandboxAfterSnapshot(input.instanceId);
+
+    return { snapshotId: snapshotName };
   }
 
-  public resumeFromSnapshot(
-    _input: ResumeInstanceInput,
+  public async resumeFromSnapshot(
+    input: ResumeInstanceInput,
   ): Promise<CreatedInstance> {
-    return unsupported(this.vendor, 'resumeFromSnapshot');
+    throwIfAborted(input.signal);
+
+    console.log(
+      `[DaytonaClient] resumeFromSnapshot starting ${JSON.stringify({
+        sourceSnapshotId: input.sourceSnapshotId,
+        ports: input.ports,
+        tags: input.tags,
+      })}`,
+    );
+
+    const labels = normalizeLabels({
+      ...(input.metadata ?? {}),
+      ...(input.tags ?? {}),
+    });
+
+    let sandbox: DaytonaSandbox;
+
+    try {
+      // Product snapshots are named Daytona snapshots bootable via create(...).
+      sandbox = await raceWithAbort({
+        promise: this.sdk.create({
+          snapshot: input.sourceSnapshotId,
+          public: true,
+          ...(labels ? { labels } : {}),
+          ...(this.config.timeoutMs
+            ? {
+                autoStopInterval: Math.ceil(this.config.timeoutMs / 60_000),
+              }
+            : {}),
+        }),
+        signal: input.signal,
+        abortMessage: `Resuming a Daytona sandbox from snapshot ${input.sourceSnapshotId} was aborted`,
+        onLateResolve: async (lateSandbox) => {
+          await this.cleanupSandboxAfterFailure(
+            lateSandbox,
+            'resume_from_snapshot_late_abort',
+          );
+        },
+      });
+    } catch (error) {
+      console.error(
+        `[DaytonaClient] Failed to resume sandbox from snapshot ${JSON.stringify(
+          {
+            sourceSnapshotId: input.sourceSnapshotId,
+            error: formatError(error),
+          },
+        )}`,
+      );
+
+      throw error;
+    }
+
+    try {
+      DaytonaClient.sandboxCache.set(sandbox.id, sandbox);
+
+      const domains = await this.resolvePreviewDomains(
+        sandbox,
+        input.ports,
+        input.signal,
+      );
+
+      console.log(
+        `[DaytonaClient] resumeFromSnapshot complete ${JSON.stringify({
+          sandboxId: sandbox.id,
+          sourceSnapshotId: input.sourceSnapshotId,
+          domains,
+        })}`,
+      );
+
+      return {
+        instanceId: sandbox.id,
+        status: 'running',
+        sourceSnapshotId: input.sourceSnapshotId,
+        domains,
+      };
+    } catch (error) {
+      await this.cleanupSandboxAfterFailure(
+        sandbox,
+        'resume_from_snapshot_post_create',
+      );
+
+      throw error;
+    }
+  }
+
+  private async destroySandboxAfterSnapshot(instanceId: string): Promise<void> {
+    try {
+      const sandbox = await this.getSandbox(instanceId);
+      await sandbox.delete();
+    } catch (error) {
+      // Snapshot itself succeeded; a leftover sandbox can be cleaned up later.
+      console.error(
+        `[DaytonaClient] Failed to destroy sandbox after snapshot ${JSON.stringify(
+          {
+            instanceId,
+            error: formatError(error),
+          },
+        )}`,
+      );
+    } finally {
+      this.invalidateSandboxCache(instanceId);
+    }
   }
 
   private async resolvePreviewDomains(
@@ -732,6 +891,20 @@ function parseDaytonaCommandId(commandId: string): {
       separatorIndex + DAYTONA_COMMAND_ID_SEPARATOR.length,
     ),
   };
+}
+
+/**
+ * Product task/env snapshots must never collide with the worker base snapshot
+ * (`roomote-worker-*` / DAYTONA_SNAPSHOT_NAME).
+ */
+export function deriveDaytonaProductSnapshotName(instanceId: string): string {
+  const sanitizedInstance = instanceId
+    .toLowerCase()
+    .replace(/[^a-z0-9._-]/g, '-')
+    .slice(0, 24);
+  const suffix = randomUUID().replace(/-/g, '').slice(0, 12);
+
+  return `${DAYTONA_PRODUCT_SNAPSHOT_NAME_PREFIX}-${sanitizedInstance}-${suffix}`;
 }
 
 function normalizeLabels(

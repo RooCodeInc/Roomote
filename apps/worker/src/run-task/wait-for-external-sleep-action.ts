@@ -56,7 +56,7 @@ export async function waitForExternalSleepAction({
     return { claimed: false, completed: false };
   }
 
-  // Non-snapshot providers (Daytona) exit via destroy, never via snapshot.
+  // Non-snapshot providers exit via destroy, never via snapshot.
   const isResumable =
     isResumableTaskPayloadKind(taskRun.payloadKind) &&
     isSnapshotCapableComputeProvider(taskRun.vendor);

@@ -154,9 +154,10 @@ async function createSleepCheckClient(provider: ComputeProvider) {
 }
 
 /**
- * Whether the sleep action for this job can be a snapshot. Non-snapshot
- * providers (Daytona) always fall through to the destroy paths, even for
- * job types that would be resumable on snapshot-capable providers.
+ * Whether the sleep action for this job can be a snapshot. Providers that are
+ * not snapshot-capable (for example Docker) always fall through to the destroy
+ * paths, even for job types that would be resumable on snapshot-capable
+ * providers such as Modal, E2B, and Daytona.
  */
 function isSnapshotResumableSleepCandidate(job: SleepCheckJob): boolean {
   return (

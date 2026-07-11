@@ -45,6 +45,9 @@ const BLOCKED_USER_FACING_ENV_KEYS = new Set([
   'AUTH_TOKEN',
   'TRPC_URL',
   'R_APP_URL',
+  // Legacy alias the controller injects for pre-rename snapshot workers;
+  // scrub it from task processes the same as R_APP_URL.
+  'ROOMOTE_APP_URL',
   'JOB_AUTH_PRIVATE_KEY',
   'JOB_AUTH_PUBLIC_KEY',
   'PREVIEW_AUTH_PUBLIC_KEY',
