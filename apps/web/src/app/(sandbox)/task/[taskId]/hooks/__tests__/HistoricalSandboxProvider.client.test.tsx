@@ -94,8 +94,8 @@ describe('HistoricalSandboxProvider', () => {
         {
           id: 'user-1',
           userId: 'user-1',
-          userName: 'Matt',
-          userEmail: 'matt@example.com',
+          userName: 'Ada',
+          userEmail: 'ada@example.com',
           userImageUrl: null,
           taskId: 'task-123',
           ts: 1,

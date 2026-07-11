@@ -8,7 +8,7 @@ const mockRechartsState = vi.hoisted(() => ({
   tooltipProps: null as Record<string, unknown> | null,
   barProps: [] as Array<Record<string, unknown>>,
   tooltipPayload: [
-    { name: 'Raphi Winkler', value: 2, color: '#ff9900' },
+    { name: 'Radia Perlman', value: 2, color: '#ff9900' },
     { name: 'John Richmond', value: 1, color: '#3366ff' },
   ] as Array<{ name: string; value: number; color: string }>,
 }));
@@ -61,7 +61,7 @@ const CHART: AnalyticsChartResponse = {
   viewBy: 'user',
   total: 3,
   series: [
-    { key: 'raphi', label: 'Raphi Winkler', total: 2 },
+    { key: 'radia', label: 'Radia Perlman', total: 2 },
     { key: 'john', label: 'John Richmond', total: 1 },
   ],
   buckets: [
@@ -70,7 +70,7 @@ const CHART: AnalyticsChartResponse = {
       label: 'Mar 27',
       total: 3,
       segments: {
-        raphi: 2,
+        radia: 2,
         john: 1,
       },
     },
@@ -138,7 +138,7 @@ describe('AnalyticsStackedBarChart', () => {
     mockRechartsState.tooltipProps = null;
     mockRechartsState.barProps = [];
     mockRechartsState.tooltipPayload = [
-      { name: 'Raphi Winkler', value: 2, color: '#ff9900' },
+      { name: 'Radia Perlman', value: 2, color: '#ff9900' },
       { name: 'John Richmond', value: 1, color: '#3366ff' },
     ];
   });
@@ -207,9 +207,9 @@ describe('AnalyticsStackedBarChart', () => {
 
   it('sorts user tooltip labels alphabetically', () => {
     mockRechartsState.tooltipPayload = [
-      { name: 'Raphi Winkler', value: 2, color: '#ff9900' },
-      { name: 'Chris Estreich', value: 4, color: '#8250df' },
-      { name: 'Dan Riccio', value: 3, color: '#6e7781' },
+      { name: 'Radia Perlman', value: 2, color: '#ff9900' },
+      { name: 'Edsger Dijkstra', value: 4, color: '#8250df' },
+      { name: 'Grace Hopper', value: 3, color: '#6e7781' },
     ];
 
     const { container } = render(
@@ -233,7 +233,7 @@ describe('AnalyticsStackedBarChart', () => {
       container.querySelectorAll('.scroll-thin .truncate'),
     ).map((element) => element.textContent);
 
-    expect(names).toEqual(['Chris Estreich', 'Dan Riccio', 'Raphi Winkler']);
+    expect(names).toEqual(['Edsger Dijkstra', 'Grace Hopper', 'Radia Perlman']);
   });
 
   it('keeps status tooltip labels in status order', () => {
@@ -321,7 +321,7 @@ describe('AnalyticsStackedBarChart', () => {
         chart={{
           ...CHART,
           series: [
-            { key: 'user:user_123', label: 'Bruno Bergher', total: 2 },
+            { key: 'user:user_123', label: 'Alan Turing', total: 2 },
             { key: 'github:hannesrudolph', label: '@hannesrudolph', total: 1 },
           ],
           buckets: [
@@ -354,7 +354,7 @@ describe('AnalyticsStackedBarChart', () => {
     ).toEqual([
       {
         dataKey: 'user:user_123',
-        name: 'Bruno Bergher',
+        name: 'Alan Turing',
       },
       {
         dataKey: 'github:hannesrudolph',

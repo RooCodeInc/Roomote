@@ -8,13 +8,13 @@ describe('wrapCommunicationMessage', () => {
     expect(
       wrapCommunicationMessage('teams', {
         ts: 'activity-1',
-        user: 'Matt Rubens',
+        user: 'Ada Lovelace',
         channel: '19:conversation@thread.v2',
         threadTs: 'activity-root',
         text: 'Please also update the docs',
       }),
     ).toBe(
-      '<communication_message provider="teams" ts="activity-1" author="Matt Rubens" channel="19:conversation@thread.v2" thread="activity-root">\nPlease also update the docs\n</communication_message>',
+      '<communication_message provider="teams" ts="activity-1" author="Ada Lovelace" channel="19:conversation@thread.v2" thread="activity-root">\nPlease also update the docs\n</communication_message>',
     );
   });
 

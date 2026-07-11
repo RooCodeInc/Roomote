@@ -4,13 +4,13 @@ import { Avatar, getInitials } from './avatar';
 
 describe('getInitials', () => {
   it('uses the first letters of up to two name parts', () => {
-    expect(getInitials('Matt Rubens')).toBe('MR');
-    expect(getInitials('Bruno')).toBe('B');
+    expect(getInitials('Grace Hopper')).toBe('GH');
+    expect(getInitials('Alan')).toBe('A');
     expect(getInitials('  Ada  Lovelace  Byron ')).toBe('AL');
   });
 
   it('falls back to the first email character when name is missing', () => {
-    expect(getInitials(null, 'matt@roomote.test')).toBe('M');
+    expect(getInitials(null, 'grace@roomote.test')).toBe('G');
     expect(getInitials('   ', 'local@roomote.dev')).toBe('L');
   });
 
@@ -23,11 +23,15 @@ describe('getInitials', () => {
 describe('Avatar', () => {
   it('renders initials when no image is available', () => {
     const { container } = render(
-      <Avatar name="Matt Rubens" email="matt@roomote.test" alt="Matt Rubens" />,
+      <Avatar
+        name="Grace Hopper"
+        email="grace@roomote.test"
+        alt="Grace Hopper"
+      />,
     );
 
-    expect(container.firstChild).toHaveAttribute('aria-label', 'Matt Rubens');
-    expect(screen.getByText('MR')).toBeInTheDocument();
+    expect(container.firstChild).toHaveAttribute('aria-label', 'Grace Hopper');
+    expect(screen.getByText('GH')).toBeInTheDocument();
     expect(document.querySelector('img')).toBeNull();
   });
 
@@ -42,8 +46,8 @@ describe('Avatar', () => {
     render(
       <Avatar
         imageUrl="https://example.com/avatar.png"
-        name="Matt Rubens"
-        alt="Matt Rubens"
+        name="Grace Hopper"
+        alt="Grace Hopper"
       />,
     );
 
@@ -51,15 +55,15 @@ describe('Avatar', () => {
     expect(image).not.toBeNull();
     expect(image).toHaveAttribute('src', 'https://example.com/avatar.png');
     expect(image).toHaveAttribute('alt', '');
-    expect(screen.queryByText('MR')).not.toBeInTheDocument();
+    expect(screen.queryByText('GH')).not.toBeInTheDocument();
   });
 
   it('falls back to initials when the image fails to load', () => {
     render(
       <Avatar
         imageUrl="https://example.com/missing.png"
-        name="Matt Rubens"
-        alt="Matt Rubens"
+        name="Grace Hopper"
+        alt="Grace Hopper"
       />,
     );
 
@@ -68,8 +72,8 @@ describe('Avatar', () => {
     fireEvent.error(image!);
 
     expect(document.querySelector('img')).toBeNull();
-    expect(screen.getByText('MR')).toBeInTheDocument();
-    expect(screen.queryByText('Matt Rubens')).not.toBeInTheDocument();
+    expect(screen.getByText('GH')).toBeInTheDocument();
+    expect(screen.queryByText('Grace Hopper')).not.toBeInTheDocument();
   });
 
   it('falls back to initials when the image is already complete and broken', async () => {
@@ -99,16 +103,16 @@ describe('Avatar', () => {
       render(
         <Avatar
           imageUrl="https://example.com/cached-404.png"
-          name="Matt Rubens"
-          alt="Matt Rubens"
+          name="Grace Hopper"
+          alt="Grace Hopper"
         />,
       );
 
       await waitFor(() => {
-        expect(screen.getByText('MR')).toBeInTheDocument();
+        expect(screen.getByText('GH')).toBeInTheDocument();
       });
       expect(document.querySelector('img')).toBeNull();
-      expect(screen.queryByText('Matt Rubens')).not.toBeInTheDocument();
+      expect(screen.queryByText('Grace Hopper')).not.toBeInTheDocument();
     } finally {
       if (completeDescriptor) {
         Object.defineProperty(

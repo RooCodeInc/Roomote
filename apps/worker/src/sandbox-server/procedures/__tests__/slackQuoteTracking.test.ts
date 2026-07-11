@@ -211,7 +211,7 @@ describe('trackLatestUserMessageForSlackThreadQuote', () => {
     await trackLatestUserMessageForSlackThreadQuote({
       runId: 1,
       text: wrappedMessage,
-      userName: 'Matt Rubens',
+      userName: 'Ada Lovelace',
       logPrefix: 'testProcedure',
     });
 
@@ -223,7 +223,7 @@ describe('trackLatestUserMessageForSlackThreadQuote', () => {
       {
         runId: 1,
         text: '@roomote please fix the failing CI test',
-        userName: 'Matt Rubens',
+        userName: 'Ada Lovelace',
       },
     );
   });
@@ -237,7 +237,7 @@ describe('trackLatestUserMessageForSlackThreadQuote', () => {
     await trackLatestUserMessageForSlackThreadQuote({
       runId: 1,
       text: malformedMessage,
-      userName: 'Matt Rubens',
+      userName: 'Ada Lovelace',
       logPrefix: 'testProcedure',
     });
 
@@ -249,7 +249,7 @@ describe('trackLatestUserMessageForSlackThreadQuote', () => {
       {
         runId: 1,
         text: 'This envelope is missing the requested-follow-up block so it will not fully parse.',
-        userName: 'Matt Rubens',
+        userName: 'Ada Lovelace',
       },
     );
   });

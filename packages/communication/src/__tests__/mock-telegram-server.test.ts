@@ -26,16 +26,16 @@ function baseState(): MockTelegramState {
       first_name: 'Roomote',
     },
     chats: [
-      { id: 111000111, type: 'private', first_name: 'Dan' },
+      { id: 111000111, type: 'private', first_name: 'Grace' },
       { id: -100222000222, type: 'supergroup', title: 'roomote-dev' },
     ],
-    users: [{ id: 111000111, first_name: 'Dan', username: 'dan_mock' }],
+    users: [{ id: 111000111, first_name: 'Grace', username: 'grace_mock' }],
     messages: [
       {
         message_id: 1000,
         chat_id: '111000111',
         date: 1_750_000_000,
-        from: { id: 111000111, first_name: 'Dan', username: 'dan_mock' },
+        from: { id: 111000111, first_name: 'Grace', username: 'grace_mock' },
         text: 'please look into the flaky login test',
         reactions: [],
       },
@@ -409,8 +409,8 @@ describe('MockTelegramServer', () => {
     const first = await server.dispatch({
       kind: 'message',
       message: {
-        chat: { id: 111000111, type: 'private', first_name: 'Dan' },
-        from: { id: 111000111, first_name: 'Dan', username: 'dan_mock' },
+        chat: { id: 111000111, type: 'private', first_name: 'Grace' },
+        from: { id: 111000111, first_name: 'Grace', username: 'grace_mock' },
         text: '/new fix the flaky login test',
       },
     });
@@ -440,8 +440,8 @@ describe('MockTelegramServer', () => {
     const second = await server.dispatch({
       kind: 'message',
       message: {
-        chat: { id: 111000111, type: 'private', first_name: 'Dan' },
-        from: { id: 111000111, first_name: 'Dan' },
+        chat: { id: 111000111, type: 'private', first_name: 'Grace' },
+        from: { id: 111000111, first_name: 'Grace' },
         text: 'thanks!',
       },
     });

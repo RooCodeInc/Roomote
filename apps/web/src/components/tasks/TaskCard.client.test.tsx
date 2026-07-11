@@ -140,8 +140,8 @@ function createTask(overrides?: Partial<TaskCardTask>): TaskCardTask {
     timestamp: Date.now() / 1000,
     user: {
       id: 'user-1',
-      name: 'Matt Rubens',
-      email: 'matt@roomote.test',
+      name: 'Ada Lovelace',
+      email: 'ada@roomote.test',
       imageUrl: 'https://example.com/avatar.png',
     },
     taskRun: {
@@ -172,11 +172,11 @@ describe('TaskCard', () => {
       />,
     );
 
-    expect(screen.getByText('Matt Rubens')).toBeInTheDocument();
+    expect(screen.getByText('Ada Lovelace')).toBeInTheDocument();
     expect(screen.getByText('started a task')).toBeInTheDocument();
     expect(screen.queryByText(/with Agent/i)).not.toBeInTheDocument();
     expect(screen.queryByText(/completed/i)).not.toBeInTheDocument();
-    expect(screen.getByRole('img', { name: 'Matt Rubens' })).toHaveAttribute(
+    expect(screen.getByRole('img', { name: 'Ada Lovelace' })).toHaveAttribute(
       'src',
       'https://example.com/avatar.png',
     );
@@ -258,8 +258,8 @@ describe('TaskCard', () => {
         task={createTask({
           user: {
             id: 'user-3',
-            name: 'Matt Rubens',
-            email: 'matt@roomote.test',
+            name: 'Ada Lovelace',
+            email: 'ada@roomote.test',
             imageUrl: '',
           },
         })}
@@ -269,9 +269,9 @@ describe('TaskCard', () => {
       />,
     );
 
-    expect(screen.getByText('Matt Rubens')).toBeInTheDocument();
+    expect(screen.getByText('Ada Lovelace')).toBeInTheDocument();
     expect(screen.queryByRole('img')).not.toBeInTheDocument();
-    expect(screen.getByText('MR')).toBeInTheDocument();
+    expect(screen.getByText('AL')).toBeInTheDocument();
   });
 
   it('shows relative time from the last activity timestamp when present', () => {

@@ -15,7 +15,9 @@
     "chats": [
       { "id": -100222000222, "type": "supergroup", "title": "roomote-dev" }
     ],
-    "users": [{ "id": 111000111, "first_name": "Dan", "username": "dan_mock" }]
+    "users": [
+      { "id": 111000111, "first_name": "Grace", "username": "grace_mock" }
+    ]
   },
   "events": [
     {
@@ -32,8 +34,8 @@
           },
           "from": {
             "id": 111000111,
-            "first_name": "Dan",
-            "username": "dan_mock"
+            "first_name": "Grace",
+            "username": "grace_mock"
           },
           "text": "just chatting with the team, nothing for the bot here"
         }
@@ -53,8 +55,8 @@
           },
           "from": {
             "id": 111000111,
-            "first_name": "Dan",
-            "username": "dan_mock"
+            "first_name": "Grace",
+            "username": "grace_mock"
           },
           "text": "@roomote_mock_bot !fast which env var stores the Telegram bot token?"
         }

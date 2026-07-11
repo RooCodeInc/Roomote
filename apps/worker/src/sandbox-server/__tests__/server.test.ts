@@ -119,7 +119,7 @@ describe('sandbox server transports', () => {
       const response = await fetch(`http://127.0.0.1:${sandbox.port}/ws/trpc`, {
         method: 'OPTIONS',
         headers: {
-          Origin: 'https://roomote-matt.ngrok.app',
+          Origin: 'https://roomote-example.ngrok.app',
           'Access-Control-Request-Method': 'GET',
           'Access-Control-Request-Private-Network': 'true',
         },

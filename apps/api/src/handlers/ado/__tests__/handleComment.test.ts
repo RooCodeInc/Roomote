@@ -349,8 +349,8 @@ describe('handleAdoComment', () => {
         comment: {
           author: {
             id: 'ado-user-2',
-            uniqueName: 'dan@roomote.onmicrosoft.com',
-            displayName: 'Dan Riccio',
+            uniqueName: 'grace@roomote.onmicrosoft.com',
+            displayName: 'Grace Hopper',
           },
         },
       }),

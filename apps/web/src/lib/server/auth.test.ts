@@ -155,15 +155,15 @@ describe('getAuth', () => {
         return Response.json({
           authenticatedUser: {
             id: 'connection-user-guid',
-            providerDisplayName: 'Matt Rubens',
-            uniqueName: 'Matt@Roomote.OnMicrosoft.com',
+            providerDisplayName: 'Ada Lovelace',
+            uniqueName: 'Ada@Roomote.OnMicrosoft.com',
           },
         });
       }
 
       return Response.json({
-        displayName: 'Matt Rubens',
-        emailAddress: 'matt@roomote.onmicrosoft.com',
+        displayName: 'Ada Lovelace',
+        emailAddress: 'ada@roomote.onmicrosoft.com',
         id: 'profile-user-guid',
       });
     });
@@ -204,10 +204,10 @@ describe('getAuth', () => {
     // connectionData id — that id namespace never matches the org identity id
     // Azure DevOps delivers as the comment author on PR webhooks.
     expect(profile).toEqual({
-      email: 'matt@roomote.onmicrosoft.com',
+      email: 'ada@roomote.onmicrosoft.com',
       emailVerified: false,
-      id: 'matt@roomote.onmicrosoft.com',
-      name: 'Matt Rubens',
+      id: 'ada@roomote.onmicrosoft.com',
+      name: 'Ada Lovelace',
     });
   });
 });
