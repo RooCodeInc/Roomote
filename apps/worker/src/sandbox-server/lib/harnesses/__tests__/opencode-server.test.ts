@@ -982,138 +982,8 @@ describe('OpenCodeServerHarness', () => {
     }
   });
 
-  it('keeps using the build agent after the primary session loads the plan skill when plan mode is disabled', async () => {
+  it('switches to the architect agent after the primary session loads the plan skill', async () => {
     const { client, harness } = createHarness(new FakeOpenCodeServerClient());
-
-    try {
-      await connectHarness(harness, client);
-
-      expect(
-        harness.sendCommand({
-          commandName: TaskCommandName.StartNewTask,
-          data: {
-            text: 'Plan the rollout.',
-            visibleInTranscript: true,
-            source: 'web',
-          },
-        }),
-      ).toBe(true);
-
-      await vi.waitFor(() => {
-        expect(client.promptAsync).toHaveBeenCalledTimes(1);
-      });
-
-      // The routing turn itself starts on the default build agent.
-      expect(client.promptAsync.mock.calls[0]?.[0]).toMatchObject({
-        request: { agent: 'build' },
-      });
-
-      // A skill load from a child (subagent) session never changes the
-      // primary session's agent.
-      await client.emit({
-        type: 'message.part.updated',
-        properties: {
-          part: {
-            id: 'skill_part_child',
-            sessionID: 'ses_child',
-            messageID: 'msg_child',
-            type: 'tool',
-            callID: 'skill_call_child',
-            tool: 'skill',
-            state: {
-              status: 'completed',
-              input: { name: 'plan-repo-implementation' },
-              title: 'Load skill',
-            },
-          },
-        },
-      });
-
-      await client.emit({
-        type: 'message.part.updated',
-        properties: {
-          part: {
-            id: 'skill_part_1',
-            sessionID: 'ses_1',
-            messageID: 'msg_1',
-            type: 'tool',
-            callID: 'skill_call_1',
-            tool: 'skill',
-            state: {
-              status: 'completed',
-              input: { name: 'plan-repo-implementation' },
-              title: 'Load skill',
-            },
-          },
-        },
-      });
-
-      expect(
-        harness.sendCommand({
-          commandName: TaskCommandName.SendMessage,
-          data: {
-            text: 'Sounds good, keep planning.',
-            autoSteerWhenQueued: true,
-            visibleInTranscript: true,
-          },
-        }),
-      ).toBe(true);
-
-      await vi.waitFor(() => {
-        expect(client.promptAsync).toHaveBeenCalledTimes(2);
-      });
-
-      expect(client.promptAsync.mock.calls[1]?.[0]).toMatchObject({
-        request: { agent: 'build' },
-      });
-
-      // Loading another packaged workflow skill switches back to build.
-      await client.emit({
-        type: 'message.part.updated',
-        properties: {
-          part: {
-            id: 'skill_part_2',
-            sessionID: 'ses_1',
-            messageID: 'msg_2',
-            type: 'tool',
-            callID: 'skill_call_2',
-            tool: 'skill',
-            state: {
-              status: 'completed',
-              input: { name: 'implement-changes' },
-              title: 'Load skill',
-            },
-          },
-        },
-      });
-
-      expect(
-        harness.sendCommand({
-          commandName: TaskCommandName.SendMessage,
-          data: {
-            text: 'Now build it.',
-            autoSteerWhenQueued: true,
-            visibleInTranscript: true,
-          },
-        }),
-      ).toBe(true);
-
-      await vi.waitFor(() => {
-        expect(client.promptAsync).toHaveBeenCalledTimes(3);
-      });
-
-      expect(client.promptAsync.mock.calls[2]?.[0]).toMatchObject({
-        request: { agent: 'build' },
-      });
-    } finally {
-      harness.dispose();
-    }
-  });
-
-  it('switches to the architect agent after the primary session loads the plan skill when plan mode is enabled', async () => {
-    const { client, harness } = createHarness(new FakeOpenCodeServerClient(), {
-      commandEnv: { ROOMOTE_PLAN_MODE: 'true' },
-    });
 
     try {
       await connectHarness(harness, client);
@@ -1245,9 +1115,7 @@ describe('OpenCodeServerHarness', () => {
   });
 
   it('auto-submits one hidden continuation on the build agent after an in-flight plan turn loads implement-changes', async () => {
-    const { client, harness } = createHarness(new FakeOpenCodeServerClient(), {
-      commandEnv: { ROOMOTE_PLAN_MODE: 'true' },
-    });
+    const { client, harness } = createHarness(new FakeOpenCodeServerClient());
     const runtimeOutputEvents: AcpMessage[] = [];
 
     harness.subscribeRuntimeOutput((event) => runtimeOutputEvents.push(event));
@@ -1383,76 +1251,6 @@ describe('OpenCodeServerHarness', () => {
             ),
           ),
       ).toBe(false);
-    } finally {
-      harness.dispose();
-    }
-  });
-
-  it('does not queue a plan-exit continuation when plan mode is disabled', async () => {
-    const { client, harness } = createHarness(new FakeOpenCodeServerClient());
-
-    try {
-      await connectHarness(harness, client);
-
-      expect(
-        harness.sendCommand({
-          commandName: TaskCommandName.StartNewTask,
-          data: {
-            text: 'Plan the rollout.',
-            visibleInTranscript: true,
-            source: 'web',
-          },
-        }),
-      ).toBe(true);
-
-      await vi.waitFor(() => {
-        expect(client.promptAsync).toHaveBeenCalledTimes(1);
-      });
-
-      for (const skillName of [
-        'plan-repo-implementation',
-        'implement-changes',
-      ]) {
-        await client.emit({
-          type: 'message.part.updated',
-          properties: {
-            part: {
-              id: `skill_part_${skillName}`,
-              sessionID: 'ses_1',
-              messageID: 'msg_skill',
-              type: 'tool',
-              callID: `call_${skillName}`,
-              tool: 'skill',
-              state: {
-                status: 'completed',
-                input: { name: skillName },
-                title: 'Load skill',
-              },
-            },
-          },
-        });
-      }
-
-      client.message.mockResolvedValueOnce(createFinalAssistantMessage());
-      await client.emit({
-        type: 'message.updated',
-        properties: {
-          info: {
-            id: 'msg_1',
-            sessionID: 'ses_1',
-            role: 'assistant',
-            time: { completed: 1 },
-          },
-        },
-      });
-      await client.emit({
-        type: 'session.idle',
-        properties: { sessionID: 'ses_1' },
-      });
-
-      // The turn ends without a queued continuation: only the original
-      // prompt was submitted.
-      expect(client.promptAsync).toHaveBeenCalledTimes(1);
     } finally {
       harness.dispose();
     }

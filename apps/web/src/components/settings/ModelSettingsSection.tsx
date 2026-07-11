@@ -237,14 +237,14 @@ const TASK_MODEL_ROLE_CONFIGS: readonly TaskModelRoleConfig[] = [
   },
   {
     role: 'planning',
-    label: 'Planning model',
+    label: 'Advisor model',
     description:
-      'Used for plan-mode turns while the planning workflow is active.',
+      'Used for plan-mode turns in the planning workflow and for the advisor subagent that coding tasks consult when they need help.',
     icon: ScrollText,
     modelEnvVarName: 'R_PLANNING_MODEL',
     reasoningEnvVarName: 'R_PLANNING_MODEL_REASONING_EFFORT',
-    placeholder: 'Select a planning model',
-    reasoningAriaLabel: 'Planning model reasoning level',
+    placeholder: 'Select an advisor model',
+    reasoningAriaLabel: 'Advisor model reasoning level',
     allowSameAsCoding: true,
   },
 ];

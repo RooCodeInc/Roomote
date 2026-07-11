@@ -63,6 +63,8 @@ const ROOMOTE_OPENCODE_VISUAL_AGENT_NAME = 'visual';
 
 const ROOMOTE_OPENCODE_JUDGE_AGENT_NAME = 'judge';
 
+const ROOMOTE_OPENCODE_ADVISOR_AGENT_NAME = 'advisor';
+
 const ROOMOTE_OPENCODE_EXPLORE_AGENT_NAME = 'explore';
 const OPENCODE_GENERAL_AGENT_NAME = 'general';
 
@@ -71,6 +73,9 @@ const ROOMOTE_OPENCODE_VISUAL_MODEL_INSTRUCTIONS_FILE_NAME =
 
 const ROOMOTE_OPENCODE_JUDGE_MODEL_INSTRUCTIONS_FILE_NAME =
   'roomote-opencode-judge-model-instructions.md';
+
+const ROOMOTE_OPENCODE_ADVISOR_MODEL_INSTRUCTIONS_FILE_NAME =
+  'roomote-opencode-advisor-model-instructions.md';
 
 const ROOMOTE_OPENCODE_PROOF_RUNNER_INSTRUCTIONS_FILE_NAME =
   'roomote-opencode-proof-runner-instructions.md';
@@ -102,6 +107,20 @@ const ROOMOTE_OPENCODE_JUDGE_AGENT_PROMPT = [
   'Focus on request satisfaction, missing requirements, logic risks, edge cases, and mismatches between the plan and what was built. If the plan is incomplete or stale relative to the implementation, say so explicitly.',
   '',
   'Do not edit files, run shell commands, launch other agents, or make final product decisions. Keep your response focused on review findings and verdicts for the parent agent.',
+].join('\n');
+
+const ROOMOTE_OPENCODE_ADVISOR_AGENT_PROMPT = [
+  'You are Roomote coding advisor support.',
+  '',
+  'The parent coding agent consults you when it is stuck or needs help: repeated failed attempts, a confusing bug, an uncertain approach or design decision, or conflicting constraints.',
+  '',
+  'Start from the context the parent provides: the goal, what was tried, exact errors or failing output, and the relevant files. Read additional repository files when needed to ground your advice, but keep exploration targeted to the question.',
+  '',
+  'Return concrete, actionable guidance: 1) your diagnosis or best hypotheses, 2) the recommended approach and why, 3) specific next steps the parent can execute, 4) any risks or alternatives worth considering. Prefer a single clear recommendation over a menu of options.',
+  '',
+  'If the provided context is insufficient to advise confidently, say exactly what evidence would disambiguate the situation.',
+  '',
+  'Do not edit files, run shell commands, launch other agents, or make final product decisions. Keep your response focused on advice the parent agent can act on.',
 ].join('\n');
 
 const ROOMOTE_OPENCODE_ARCHITECT_AGENT_PROMPT = [
@@ -623,6 +642,36 @@ function createJudgeAgentConfig(
   };
 }
 
+function createAdvisorAgentConfig(
+  model: string,
+  reasoningOptions?: Record<string, unknown> | null,
+): Record<string, unknown> {
+  return {
+    description:
+      'Consulting advisor the coding agent can ask for help when it is stuck, has repeated failed attempts, or needs a second opinion on approach or debugging.',
+    mode: 'subagent',
+    model,
+    ...(reasoningOptions ? { options: reasoningOptions } : {}),
+    prompt: ROOMOTE_OPENCODE_ADVISOR_AGENT_PROMPT,
+    permission: {
+      read: 'allow',
+      list: 'allow',
+      glob: 'allow',
+      grep: 'allow',
+      external_directory: 'allow',
+      webfetch: 'allow',
+      edit: 'deny',
+      bash: 'deny',
+      task: 'deny',
+      todowrite: 'deny',
+      lsp: 'deny',
+      skill: 'deny',
+      question: 'deny',
+    },
+    tools: { ...SLACK_POSTING_TOOL_EXCLUSIONS },
+  };
+}
+
 // Note: the architect agent deliberately keeps the Slack-posting tools. It is
 // a primary (parent-session) agent that owns plan-mode turns end to end, so
 // it must be able to reply to the originating Slack thread itself.
@@ -732,6 +781,22 @@ function createJudgeModelInstructions(): string {
     'Treat the judge response as review input for the parent workflow. Keep orchestration, code changes, and final user-facing decisions in the parent agent.',
     '',
     "Do not paste the judge's full output into chat or any user-facing reply. The judge verdict is internal review material; surface at most a brief, parent-authored summary of the actionable outcome (what was fixed or what still needs attention), never the raw review dump.",
+  ].join('\n');
+}
+
+function createAdvisorModelInstructions(): string {
+  return [
+    `An OpenCode \`${ROOMOTE_OPENCODE_ADVISOR_AGENT_NAME}\` subagent is always configured as consulting support for the active coding agent.`,
+    '',
+    'When `R_PLANNING_MODEL` is configured, the advisor uses that advisor model. Otherwise it falls back to the active coding model, running at the advisor reasoning level (defaults to high) for deeper analysis.',
+    '',
+    `When you are stuck or need help — repeated failed fix attempts, a confusing bug, an uncertain approach or design decision, or conflicting constraints — delegate one focused consultation to the \`${ROOMOTE_OPENCODE_ADVISOR_AGENT_NAME}\` subagent with the Task tool before grinding through more blind attempts.`,
+    '',
+    'Give the advisor a complete brief: the goal, what you already tried, the exact errors or failing output, and the relevant file paths. The advisor can read the repository but cannot run commands, so include runtime evidence it cannot gather itself.',
+    '',
+    'Treat the advisor response as internal guidance for the parent workflow. Verify its recommendations against the repository before acting on them, and keep orchestration, code changes, and final user-facing decisions in the parent agent.',
+    '',
+    "Do not paste the advisor's full output into chat or any user-facing reply. Surface at most a brief, parent-authored summary of the direction taken.",
   ].join('\n');
 }
 
@@ -872,6 +937,22 @@ function resolveModelBackedOpenCodeConfig(
         : null,
     ),
   };
+  // The advisor subagent shares the planning/advisor model role. It defaults
+  // to the coding model when no advisor model is configured, and the advisor
+  // reasoning level (default high) applies in either case so consultations
+  // run with deeper reasoning than ordinary coding turns.
+  const advisorModel = planningModel ?? effectiveCodingModel;
+  const advisorAgent = {
+    [ROOMOTE_OPENCODE_ADVISOR_AGENT_NAME]: createAdvisorAgentConfig(
+      advisorModel,
+      planningModelReasoningEffort
+        ? buildOpenCodeModelReasoningOptions(
+            advisorModel,
+            planningModelReasoningEffort,
+          )
+        : null,
+    ),
+  };
   const exploreEffectiveModel = exploreModel ?? effectiveCodingModel;
   const exploreAgent =
     exploreModel || exploreModelReasoningEffort
@@ -917,6 +998,7 @@ function resolveModelBackedOpenCodeConfig(
   const agent = {
     ...(visualAgent ?? {}),
     ...judgeAgent,
+    ...advisorAgent,
     ...(exploreAgent ?? {}),
     ...architectAgent,
     ...generalAgent,
@@ -1122,6 +1204,19 @@ export function generateOpenCodeConfig({
       'utf8',
     );
     instructions.push(judgeModelInstructionsPath);
+  }
+
+  if (operatorAgent[ROOMOTE_OPENCODE_ADVISOR_AGENT_NAME]) {
+    const advisorModelInstructionsPath = path.join(
+      openCodeConfigDir,
+      ROOMOTE_OPENCODE_ADVISOR_MODEL_INSTRUCTIONS_FILE_NAME,
+    );
+    fs.writeFileSync(
+      advisorModelInstructionsPath,
+      createAdvisorModelInstructions(),
+      'utf8',
+    );
+    instructions.push(advisorModelInstructionsPath);
   }
 
   const proofBrowserTarget = runtimeEnv.ROOMOTE_PROOF_BROWSER_TARGET?.trim();

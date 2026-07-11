@@ -864,7 +864,7 @@ export async function updateTaskModelSettingsCommand(
     normalizedPlanningModelId !== null &&
     !knownModelIds.has(normalizedPlanningModelId)
   ) {
-    fieldErrors.planningModelId = 'Choose a valid planning model.';
+    fieldErrors.planningModelId = 'Choose a valid advisor model.';
   }
 
   const codingManagedByEnv = isConfiguredEnvValue(process.env.R_MODEL);

@@ -279,6 +279,10 @@ describe('opencode-server bootstrap', () => {
       openCodeConfigDir,
       'roomote-opencode-judge-model-instructions.md',
     );
+    const advisorModelInstructionsPath = path.join(
+      openCodeConfigDir,
+      'roomote-opencode-advisor-model-instructions.md',
+    );
     const systemPromptPath = path.join(
       openCodeConfigDir,
       'roomote-opencode-system-prompt.md',
@@ -289,6 +293,7 @@ describe('opencode-server bootstrap', () => {
     expect(config.instructions).toEqual([
       developerInstructionsPath,
       judgeModelInstructionsPath,
+      advisorModelInstructionsPath,
     ]);
     expect(fs.readFileSync(developerInstructionsPath, 'utf8')).toBe(
       'Use the task tools.',
@@ -327,6 +332,10 @@ describe('opencode-server bootstrap', () => {
       openCodeConfigDir,
       'roomote-opencode-judge-model-instructions.md',
     );
+    const advisorModelInstructionsPath = path.join(
+      openCodeConfigDir,
+      'roomote-opencode-advisor-model-instructions.md',
+    );
 
     expect(baseConfig.agent?.visual).toMatchObject({
       description: expect.stringContaining('images'),
@@ -345,6 +354,7 @@ describe('opencode-server bootstrap', () => {
     expect(config.instructions).toEqual([
       visualModelInstructionsPath,
       judgeModelInstructionsPath,
+      advisorModelInstructionsPath,
     ]);
     expect(fs.readFileSync(visualModelInstructionsPath, 'utf8')).toContain(
       'visual',
@@ -380,6 +390,10 @@ describe('opencode-server bootstrap', () => {
       openCodeConfigDir,
       'roomote-opencode-judge-model-instructions.md',
     );
+    const advisorModelInstructionsPath = path.join(
+      openCodeConfigDir,
+      'roomote-opencode-advisor-model-instructions.md',
+    );
 
     expect(baseConfig.agent?.judge).toEqual({
       description:
@@ -412,7 +426,10 @@ describe('opencode-server bootstrap', () => {
       ),
     });
     expect(config.agent).toEqual(baseConfig.agent);
-    expect(config.instructions).toEqual([judgeModelInstructionsPath]);
+    expect(config.instructions).toEqual([
+      judgeModelInstructionsPath,
+      advisorModelInstructionsPath,
+    ]);
     expect(fs.readFileSync(judgeModelInstructionsPath, 'utf8')).toContain(
       'judge',
     );
@@ -450,6 +467,12 @@ describe('opencode-server bootstrap', () => {
       'opencode',
       'roomote-opencode-judge-model-instructions.md',
     );
+    const advisorModelInstructionsPath = path.join(
+      homeDir,
+      '.config',
+      'opencode',
+      'roomote-opencode-advisor-model-instructions.md',
+    );
 
     expect(baseConfig.agent?.judge).toEqual({
       description:
@@ -481,7 +504,10 @@ describe('opencode-server bootstrap', () => {
       ),
     });
     expect(config.agent).toEqual(baseConfig.agent);
-    expect(config.instructions).toEqual([judgeModelInstructionsPath]);
+    expect(config.instructions).toEqual([
+      judgeModelInstructionsPath,
+      advisorModelInstructionsPath,
+    ]);
     expect(fs.readFileSync(judgeModelInstructionsPath, 'utf8')).toContain(
       'falls back to the active coding model',
     );
@@ -616,6 +642,104 @@ describe('opencode-server bootstrap', () => {
       options: { reasoningEffort: 'high' },
     });
     expect(baseConfig.agent?.architect).not.toHaveProperty('model');
+  });
+
+  it('configures a hidden advisor subagent with the advisor model when a planning model is configured', async () => {
+    const { prepareOpenCodeCommandEnv } =
+      await import('../opencode-server/bootstrap');
+
+    const homeDir = createTempHome();
+
+    const { commandEnv: runtimeEnv } = await prepareOpenCodeCommandEnv({
+      runtimeEnv: {
+        ...createDirectHarnessRuntimeEnv(homeDir),
+        R_PLANNING_MODEL: 'openrouter/anthropic/claude-opus-4.7',
+        R_PLANNING_MODEL_REASONING_EFFORT: 'high',
+      },
+      workspacePath: '/tmp/workspace',
+      logger: createLogger(),
+    });
+
+    const baseConfig = JSON.parse(readOpenCodeConfig(homeDir)) as {
+      agent?: Record<string, unknown>;
+    };
+    const config = readRoomoteOpenCodeOverlay(runtimeEnv) as {
+      agent?: Record<string, unknown>;
+      instructions?: string[];
+    };
+    const advisorModelInstructionsPath = path.join(
+      homeDir,
+      '.config',
+      'opencode',
+      'roomote-opencode-advisor-model-instructions.md',
+    );
+
+    expect(baseConfig.agent?.advisor).toEqual({
+      description: expect.stringContaining('stuck'),
+      mode: 'subagent',
+      model: 'openrouter/anthropic/claude-opus-4.7',
+      options: { reasoning: { effort: 'high' } },
+      prompt: expect.stringContaining('coding advisor support'),
+      permission: {
+        read: 'allow',
+        list: 'allow',
+        glob: 'allow',
+        grep: 'allow',
+        external_directory: 'allow',
+        webfetch: 'allow',
+        edit: 'deny',
+        bash: 'deny',
+        task: 'deny',
+        todowrite: 'deny',
+        lsp: 'deny',
+        skill: 'deny',
+        question: 'deny',
+      },
+      tools: slackPostingToolExclusions,
+    });
+    expect(config.agent).toEqual(baseConfig.agent);
+    expect(config.instructions).toContain(advisorModelInstructionsPath);
+    expect(fs.readFileSync(advisorModelInstructionsPath, 'utf8')).toContain(
+      'advisor',
+    );
+    expect(fs.readFileSync(advisorModelInstructionsPath, 'utf8')).toContain(
+      'delegate one focused consultation',
+    );
+  });
+
+  it('configures a hidden advisor subagent with the coding model at the advisor reasoning level when no planning model is configured', async () => {
+    const { prepareOpenCodeCommandEnv } =
+      await import('../opencode-server/bootstrap');
+
+    const homeDir = createTempHome();
+
+    await prepareOpenCodeCommandEnv({
+      runtimeEnv: {
+        ...createDirectHarnessRuntimeEnv(homeDir),
+        R_PLANNING_MODEL_REASONING_EFFORT: 'high',
+      },
+      workspacePath: '/tmp/workspace',
+      logger: createLogger(),
+    });
+
+    const baseConfig = JSON.parse(readOpenCodeConfig(homeDir)) as {
+      agent?: Record<string, unknown>;
+    };
+    const advisorModelInstructionsPath = path.join(
+      homeDir,
+      '.config',
+      'opencode',
+      'roomote-opencode-advisor-model-instructions.md',
+    );
+
+    expect(baseConfig.agent?.advisor).toMatchObject({
+      mode: 'subagent',
+      model: 'test-provider/main-model',
+      options: { reasoningEffort: 'high' },
+    });
+    expect(fs.readFileSync(advisorModelInstructionsPath, 'utf8')).toContain(
+      'falls back to the active coding model',
+    );
   });
 
   it('applies configured reasoning levels as per-model provider options and scrubs the env vars', async () => {
@@ -839,6 +963,7 @@ describe('opencode-server bootstrap', () => {
 
     expect(baseConfig.agent).toEqual({
       judge: expect.objectContaining({ model: 'test-provider/main-model' }),
+      advisor: expect.objectContaining({ model: 'test-provider/main-model' }),
       architect: expect.objectContaining({ mode: 'primary' }),
       general: { tools: slackPostingToolExclusions },
     });
@@ -849,6 +974,12 @@ describe('opencode-server bootstrap', () => {
         '.config',
         'opencode',
         'roomote-opencode-judge-model-instructions.md',
+      ),
+      path.join(
+        homeDir,
+        '.config',
+        'opencode',
+        'roomote-opencode-advisor-model-instructions.md',
       ),
     ]);
     expect(fs.existsSync(visualModelInstructionsPath)).toBe(false);
@@ -881,6 +1012,9 @@ describe('opencode-server bootstrap', () => {
 
     expect(baseConfig.agent).toEqual({
       judge: expect.objectContaining({ model: 'test-provider/override-model' }),
+      advisor: expect.objectContaining({
+        model: 'test-provider/override-model',
+      }),
       architect: expect.objectContaining({ mode: 'primary' }),
       general: { tools: slackPostingToolExclusions },
     });
@@ -981,6 +1115,12 @@ describe('opencode-server bootstrap', () => {
       'opencode',
       'roomote-opencode-judge-model-instructions.md',
     );
+    const advisorModelInstructionsPath = path.join(
+      homeDir,
+      '.config',
+      'opencode',
+      'roomote-opencode-advisor-model-instructions.md',
+    );
     const proofRunnerAgent = config.agent?.['proof-runner'] as {
       prompt?: string;
     };
@@ -1024,6 +1164,7 @@ describe('opencode-server bootstrap', () => {
     );
     expect(config.instructions).toEqual([
       judgeModelInstructionsPath,
+      advisorModelInstructionsPath,
       proofRunnerInstructionsPath,
     ]);
     expect(fs.readFileSync(proofRunnerInstructionsPath, 'utf8')).toContain(
@@ -1060,6 +1201,7 @@ describe('opencode-server bootstrap', () => {
 
     expect(config.agent).toEqual({
       judge: expect.objectContaining({ model: 'test-provider/main-model' }),
+      advisor: expect.objectContaining({ model: 'test-provider/main-model' }),
       architect: expect.objectContaining({ mode: 'primary' }),
       general: { tools: slackPostingToolExclusions },
     });
@@ -1069,6 +1211,12 @@ describe('opencode-server bootstrap', () => {
         '.config',
         'opencode',
         'roomote-opencode-judge-model-instructions.md',
+      ),
+      path.join(
+        homeDir,
+        '.config',
+        'opencode',
+        'roomote-opencode-advisor-model-instructions.md',
       ),
     ]);
     expect(fs.existsSync(proofRunnerInstructionsPath)).toBe(false);
@@ -1098,10 +1246,11 @@ describe('opencode-server bootstrap', () => {
 
     expect(config.agent?.visual).toMatchObject({ mode: 'subagent' });
     expect(config.agent?.judge).toMatchObject({ mode: 'subagent' });
+    expect(config.agent?.advisor).toMatchObject({ mode: 'subagent' });
     expect(config.agent?.['proof-runner']).toMatchObject({
       mode: 'subagent',
     });
-    expect(config.instructions).toHaveLength(3);
+    expect(config.instructions).toHaveLength(4);
   });
 
   it('excludes the Slack-posting tools from every generated subagent and the built-in general agent', async () => {
@@ -1128,6 +1277,7 @@ describe('opencode-server bootstrap', () => {
     for (const agentName of [
       'visual',
       'judge',
+      'advisor',
       'explore',
       'proof-runner',
       'general',
