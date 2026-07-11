@@ -87,12 +87,12 @@ const defaultEnv = {
   R_SLACK_SIGNING_SECRET: process.env.R_SLACK_SIGNING_SECRET,
 
   // Linear app credentials:
-  LINEAR_CLIENT_ID: process.env.LINEAR_CLIENT_ID,
-  LINEAR_CLIENT_SECRET: process.env.LINEAR_CLIENT_SECRET,
-  LINEAR_REDIRECT_URI: publicUrl
+  R_LINEAR_CLIENT_ID: process.env.R_LINEAR_CLIENT_ID,
+  R_LINEAR_CLIENT_SECRET: process.env.R_LINEAR_CLIENT_SECRET,
+  R_LINEAR_REDIRECT_URI: publicUrl
     ? `${publicUrl}/api/linear/callback`
     : undefined,
-  LINEAR_WEBHOOK_SECRET: process.env.LINEAR_WEBHOOK_SECRET,
+  R_LINEAR_WEBHOOK_SECRET: process.env.R_LINEAR_WEBHOOK_SECRET,
 
   ...openCodeEnv,
 };

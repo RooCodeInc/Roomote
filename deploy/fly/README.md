@@ -44,7 +44,7 @@ other PaaS-shaped paths, see [deploy/railway](../railway/README.md) and
   presigned artifact URLs directly, and `fly storage create` provisions the
   bucket, so there is no MinIO service to run.
 - **No openssl provisioning step.** The config sets
-  `ROOMOTE_AUTO_GENERATE_KEYS=true`, so Roomote generates the `JOB_AUTH_*` /
+  `R_AUTO_GENERATE_KEYS=true`, so Roomote generates the `JOB_AUTH_*` /
   `PREVIEW_AUTH_*` P-256 keypairs at first boot and persists them encrypted
   (with `ENCRYPTION_KEY`) in Postgres. The remaining secrets are random
   strings set once with `fly secrets set`.
@@ -151,14 +151,14 @@ Machine, and all app services honor the shared `PORT=8080`.
 
 Everything sensitive is a Fly secret, set once for the app:
 
-| Secret                                     | Source                                     |
-| ------------------------------------------ | ------------------------------------------ |
-| `DATABASE_URL`                             | `fly mpg attach`                           |
-| `REDIS_URL`                                | printed by `fly redis create`              |
-| `S3_ACCESS_KEY_ID`, `S3_SECRET_ACCESS_KEY` | printed by `fly storage create`            |
-| `ENCRYPTION_KEY`, `ARTIFACT_SIGNING_KEY`   | `openssl rand -base64 32`                  |
-| `DASHBOARD_PASSWORD`                       | `openssl rand -base64 24`                  |
-| `SETUP_TOKEN`                              | `openssl rand -hex 16` (gates `/setup`)    |
+| Secret                                     | Source                                  |
+| ------------------------------------------ | --------------------------------------- |
+| `DATABASE_URL`                             | `fly mpg attach`                        |
+| `REDIS_URL`                                | printed by `fly redis create`           |
+| `S3_ACCESS_KEY_ID`, `S3_SECRET_ACCESS_KEY` | printed by `fly storage create`         |
+| `ENCRYPTION_KEY`, `ARTIFACT_SIGNING_KEY`   | `openssl rand -base64 32`               |
+| `DASHBOARD_PASSWORD`                       | `openssl rand -base64 24`               |
+| `SETUP_TOKEN`                              | `openssl rand -hex 16` (gates `/setup`) |
 
 Notes:
 
@@ -177,13 +177,13 @@ Notes:
   are stored encrypted in Postgres. Setting them as secrets still works and
   takes precedence, but is unnecessary.
 - Leave `JOB_AUTH_*` and `PREVIEW_AUTH_*` unset —
-  `ROOMOTE_AUTO_GENERATE_KEYS=true` manages them. If you later provide
+  `R_AUTO_GENERATE_KEYS=true` manages them. If you later provide
   explicit values, they take precedence over the persisted keypairs.
 - Leave `PREVIEW_PROXY_BASE_URL` and `PREVIEW_DOMAINS` unset unless you
   enable live previews. Roomote boots without them; previews report as not
   configured in **Settings → Live Previews** until set.
 - Changing secrets on a deployed app restarts its Machines; `fly secrets
-  set --stage` defers that to the next deploy.
+set --stage` defers that to the next deploy.
 
 ## The artifact bucket
 
@@ -295,8 +295,8 @@ preview proxy cannot share it. Run the proxy as a second Fly app instead:
 
 2. Point `previews.<your-domain>` and `*.previews.<your-domain>` at the
    previews app and add both certificates (`fly certs add -a <app>-previews
-   previews.<your-domain>` and `fly certs add -a <app>-previews
-   '*.previews.<your-domain>'`; the wildcard needs the DNS challenge from
+previews.<your-domain>` and `fly certs add -a <app>-previews
+'*.previews.<your-domain>'`; the wildcard needs the DNS challenge from
    Fly's certificate docs).
 3. On the **main** app, set `PREVIEW_PROXY_BASE_URL`,
    `NEXT_PUBLIC_PREVIEW_PROXY_BASE_URL`, and `PREVIEW_DOMAINS` to

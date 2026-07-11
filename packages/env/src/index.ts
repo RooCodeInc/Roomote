@@ -90,7 +90,7 @@ const serverSchema = {
   R_PUBLIC_URL: z.string().url().optional(),
   R_APP_URL: z.string().min(1),
   // Anonymous telemetry + version checks (Ping service).
-  ROOMOTE_PING_BASE_URL: z.string().url().default('https://ping.roomote.dev'),
+  R_PING_BASE_URL: z.string().url().default('https://ping.roomote.dev'),
   // Force-enable telemetry in environments that would otherwise stay silent
   // (development / builds without RELEASE_VERSION). Testing escape hatch.
   ROOMOTE_FORCE_TELEMETRY: z.string().optional(),
@@ -112,7 +112,7 @@ const serverSchema = {
   R_MODEL_ENV_KEYS: z.string().min(1).optional(),
   DATABASE_URL: z.string().min(1),
   REDIS_URL: z.string().min(1),
-  ROOMOTE_AUTO_GENERATE_KEYS: z.string().optional(),
+  R_AUTO_GENERATE_KEYS: z.string().optional(),
   JOB_AUTH_PRIVATE_KEY: emptyStringDefault(),
   JOB_AUTH_PUBLIC_KEY: emptyStringDefault(),
   PREVIEW_AUTH_PRIVATE_KEY: emptyStringDefault(),
@@ -150,17 +150,17 @@ const serverSchema = {
   R_TEAMS_BOT_NAME: z.string().min(1).optional(),
   R_TEAMS_BOT_TOKEN_ENDPOINT: z.string().url().optional(),
   R_TEAMS_BOT_OAUTH_SCOPE: z.string().min(1).optional(),
-  TELEGRAM_BOT_TOKEN: z.string().min(1).optional(),
-  TELEGRAM_WEBHOOK_SECRET: z.string().min(1).optional(),
-  TELEGRAM_BOT_USERNAME: z.string().min(1).optional(),
+  R_TELEGRAM_BOT_TOKEN: z.string().min(1).optional(),
+  R_TELEGRAM_WEBHOOK_SECRET: z.string().min(1).optional(),
+  R_TELEGRAM_BOT_USERNAME: z.string().min(1).optional(),
   TELEGRAM_API_BASE_URL: z.string().url().default('https://api.telegram.org'),
   R_MICROSOFT_CLIENT_ID: z.string().min(1).optional(),
   R_MICROSOFT_CLIENT_SECRET: z.string().min(1).optional(),
   R_MICROSOFT_TENANT_ID: z.string().min(1).optional(),
-  LINEAR_CLIENT_ID: z.string().min(1).optional(),
-  LINEAR_CLIENT_SECRET: z.string().min(1).optional(),
-  LINEAR_WEBHOOK_SECRET: z.string().min(1).optional(),
-  LINEAR_REDIRECT_URI: z.string().min(1).optional(),
+  R_LINEAR_CLIENT_ID: z.string().min(1).optional(),
+  R_LINEAR_CLIENT_SECRET: z.string().min(1).optional(),
+  R_LINEAR_WEBHOOK_SECRET: z.string().min(1).optional(),
+  R_LINEAR_REDIRECT_URI: z.string().min(1).optional(),
   DASHBOARD_PASSWORD: z.string().min(1),
   SETUP_TOKEN: z.string().min(1).optional(),
   // Dedicated Better Auth session-signing secret. Optional: falls back to
@@ -339,7 +339,7 @@ const OPTIONAL_NON_EMPTY_KEYS = new Set([
   'R_APP_ENV',
   'R_PUBLIC_URL',
   'R_APP_URL',
-  'ROOMOTE_AUTO_GENERATE_KEYS',
+  'R_AUTO_GENERATE_KEYS',
   'S3_AUTO_CREATE_BUCKET',
   'SANDBOX_OIDC_PRIVATE_KEY',
   'SANDBOX_OIDC_PUBLIC_KEY',
@@ -348,7 +348,7 @@ const OPTIONAL_NON_EMPTY_KEYS = new Set([
   'WORKER_RELEASE_CHANNEL',
   'WORKER_RELEASE_VERSION',
   'RELEASE_VERSION',
-  'ROOMOTE_PING_BASE_URL',
+  'R_PING_BASE_URL',
   'SLACK_UNFURL_ALLOWED_DOMAINS',
   'ROUTER_DEBUG_CHANNEL_ID',
   'R_TEAMS_BOT_APP_ID',
@@ -357,18 +357,18 @@ const OPTIONAL_NON_EMPTY_KEYS = new Set([
   'R_TEAMS_BOT_NAME',
   'R_TEAMS_BOT_TOKEN_ENDPOINT',
   'R_TEAMS_BOT_OAUTH_SCOPE',
-  'TELEGRAM_BOT_TOKEN',
-  'TELEGRAM_WEBHOOK_SECRET',
-  'TELEGRAM_BOT_USERNAME',
+  'R_TELEGRAM_BOT_TOKEN',
+  'R_TELEGRAM_WEBHOOK_SECRET',
+  'R_TELEGRAM_BOT_USERNAME',
   'R_SLACK_CLIENT_ID',
   'R_SLACK_CLIENT_SECRET',
   'R_MICROSOFT_CLIENT_ID',
   'R_MICROSOFT_CLIENT_SECRET',
   'R_MICROSOFT_TENANT_ID',
-  'LINEAR_CLIENT_ID',
-  'LINEAR_CLIENT_SECRET',
-  'LINEAR_WEBHOOK_SECRET',
-  'LINEAR_REDIRECT_URI',
+  'R_LINEAR_CLIENT_ID',
+  'R_LINEAR_CLIENT_SECRET',
+  'R_LINEAR_WEBHOOK_SECRET',
+  'R_LINEAR_REDIRECT_URI',
   'ARTIFACT_SIGNING_KEY_PREVIOUS',
   'SETUP_TOKEN',
   'API_DEBUG_LOGS',
@@ -441,7 +441,7 @@ export function isEnvFlagEnabled(value: string | undefined): boolean {
 
 /**
  * Whether the deployment opted into generating missing auth keypairs at boot
- * and persisting them in the database (`ROOMOTE_AUTO_GENERATE_KEYS=true`).
+ * and persisting them in the database (`R_AUTO_GENERATE_KEYS=true`).
  */
 export function isAutoGenerateKeysEnabled(value: string | undefined): boolean {
   return isEnvFlagEnabled(value);
@@ -449,14 +449,14 @@ export function isAutoGenerateKeysEnabled(value: string | undefined): boolean {
 
 /**
  * Whether missing auth keypairs are generated-and-persisted at boot: when
- * `ROOMOTE_AUTO_GENERATE_KEYS=true`, or implicitly for `APP_ENV=development`
+ * `R_AUTO_GENERATE_KEYS=true`, or implicitly for `APP_ENV=development`
  * (excluding `NODE_ENV=test`, so importing a service entrypoint in a unit test
  * does not trigger database work). Production and preview must supply real keys.
  */
 export function shouldAutoGenerateAuthKeypairs(
   processEnv: NodeJS.ProcessEnv,
 ): boolean {
-  if (isAutoGenerateKeysEnabled(processEnv.ROOMOTE_AUTO_GENERATE_KEYS)) {
+  if (isAutoGenerateKeysEnabled(processEnv.R_AUTO_GENERATE_KEYS)) {
     return true;
   }
   return (
@@ -541,7 +541,7 @@ export function assertSecureBootBinding(
 }
 
 type AuthKeypairEnv = Partial<Record<AuthKeypairEnvKey, string>> & {
-  ROOMOTE_AUTO_GENERATE_KEYS?: string;
+  R_AUTO_GENERATE_KEYS?: string;
   APP_ENV?: string;
 };
 
@@ -561,7 +561,7 @@ function assertAuthKeypairEnv(
   // Development auto-generates missing keypairs at boot (see
   // shouldAutoGenerateAuthKeypairs); production and preview must supply them.
   if (
-    isAutoGenerateKeysEnabled(env.ROOMOTE_AUTO_GENERATE_KEYS) ||
+    isAutoGenerateKeysEnabled(env.R_AUTO_GENERATE_KEYS) ||
     env.APP_ENV === 'development'
   ) {
     return;
@@ -579,7 +579,7 @@ function assertAuthKeypairEnv(
   throw new Error(
     `${missingKeys.join(', ')} must be configured. Provide base64-encoded ` +
       'P-256 PEM keys (see SELF_HOSTING.md), or set ' +
-      'ROOMOTE_AUTO_GENERATE_KEYS=true to let Roomote generate the keypairs ' +
+      'R_AUTO_GENERATE_KEYS=true to let Roomote generate the keypairs ' +
       'at first startup and persist them in the database.',
   );
 }

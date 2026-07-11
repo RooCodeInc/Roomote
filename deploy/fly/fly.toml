@@ -34,7 +34,7 @@
 #   presigned artifact URLs directly, so no S3 service or public bucket
 #   domain is needed and S3_AUTO_CREATE_BUCKET stays unset (the bucket is
 #   created by `fly storage create`).
-# - No openssl provisioning step. `ROOMOTE_AUTO_GENERATE_KEYS=true` makes
+# - No openssl provisioning step. `R_AUTO_GENERATE_KEYS=true` makes
 #   Roomote generate the `JOB_AUTH_*`/`PREVIEW_AUTH_*` P-256 keypairs at
 #   first boot and persist them encrypted (with `ENCRYPTION_KEY`) in
 #   Postgres. The remaining secrets are random strings set once with
@@ -80,7 +80,7 @@ swap_size_mb = 512
   R_APP_ENV = 'production'
   PORT = '8080'
   ROOMOTE_DOCKER_LOAD_ENV_FILE = 'false'
-  ROOMOTE_AUTO_GENERATE_KEYS = 'true'
+  R_AUTO_GENERATE_KEYS = 'true'
   DEFAULT_COMPUTE_PROVIDER = 'modal'
   EXCLUDED_COMPUTE_PROVIDERS = 'docker'
   # The single canonical-origin knob: the URL users browse. To attach a

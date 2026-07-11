@@ -27,7 +27,7 @@ other PaaS paths, see [deploy/railway](../railway/README.md) and
   credentials. The Blueprint sets `EXCLUDED_COMPUTE_PROVIDERS=docker` so the
   unusable provider never appears in setup or sandbox selection.
 - **No openssl provisioning step.** The Blueprint sets
-  `ROOMOTE_AUTO_GENERATE_KEYS=true`, so Roomote generates the `JOB_AUTH_*` /
+  `R_AUTO_GENERATE_KEYS=true`, so Roomote generates the `JOB_AUTH_*` /
   `PREVIEW_AUTH_*` P-256 keypairs at first boot and persists them encrypted
   (with `ENCRYPTION_KEY`) in Postgres. Every other secret is a
   `generateValue: true` variable that Render generates at deploy time.
@@ -179,7 +179,7 @@ under Environment Groups in the Render dashboard, where you can read
 ```sh
 R_APP_ENV=production
 ROOMOTE_DOCKER_LOAD_ENV_FILE=false
-ROOMOTE_AUTO_GENERATE_KEYS=true
+R_AUTO_GENERATE_KEYS=true
 ENCRYPTION_KEY=<generateValue>
 ARTIFACT_SIGNING_KEY=<generateValue>
 DASHBOARD_PASSWORD=<generateValue>
@@ -242,7 +242,7 @@ Notes:
   are stored encrypted in Postgres. Setting them as env vars still works
   and takes precedence, but is unnecessary.
 - Leave `JOB_AUTH_*` and `PREVIEW_AUTH_*` unset —
-  `ROOMOTE_AUTO_GENERATE_KEYS=true` manages them. If you later provide
+  `R_AUTO_GENERATE_KEYS=true` manages them. If you later provide
   explicit env values, they take precedence over the persisted keypairs.
 - Leave `PREVIEW_PROXY_BASE_URL` and `PREVIEW_DOMAINS` unset unless you
   enable live previews. Roomote boots without them; previews report as not

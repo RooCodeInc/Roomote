@@ -279,7 +279,7 @@ export async function generatePrompt({
             : undefined,
         telegramBotUsername:
           nonSlackChatProvider === 'telegram'
-            ? (Env.TELEGRAM_BOT_USERNAME ?? undefined)
+            ? (Env.R_TELEGRAM_BOT_USERNAME ?? undefined)
             : undefined,
         teamsConversationId:
           nonSlackChatProvider === 'teams'

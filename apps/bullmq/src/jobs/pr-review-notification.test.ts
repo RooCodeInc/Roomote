@@ -60,7 +60,7 @@ vi.mock('@roomote/env', () => ({
   Env: {
     R_TEAMS_BOT_APP_ID: 'teams-app',
     R_TEAMS_BOT_APP_PASSWORD: 'teams-secret',
-    TELEGRAM_BOT_TOKEN: 'telegram-token',
+    R_TELEGRAM_BOT_TOKEN: 'telegram-token',
   },
 }));
 

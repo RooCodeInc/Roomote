@@ -360,14 +360,14 @@ export async function getClientInformation(
 
   if (
     connection.mcpId === 'linear' &&
-    typeof process.env.LINEAR_CLIENT_ID === 'string' &&
-    process.env.LINEAR_CLIENT_ID &&
-    typeof process.env.LINEAR_CLIENT_SECRET === 'string' &&
-    process.env.LINEAR_CLIENT_SECRET
+    typeof process.env.R_LINEAR_CLIENT_ID === 'string' &&
+    process.env.R_LINEAR_CLIENT_ID &&
+    typeof process.env.R_LINEAR_CLIENT_SECRET === 'string' &&
+    process.env.R_LINEAR_CLIENT_SECRET
   ) {
     return {
-      client_id: process.env.LINEAR_CLIENT_ID,
-      client_secret: process.env.LINEAR_CLIENT_SECRET,
+      client_id: process.env.R_LINEAR_CLIENT_ID,
+      client_secret: process.env.R_LINEAR_CLIENT_SECRET,
       token_endpoint_auth_method: 'client_secret_post',
     };
   }

@@ -32,7 +32,7 @@ Compose paths in [SELF_HOSTING.md](../../SELF_HOSTING.md) instead.
   credentials. The template sets `EXCLUDED_COMPUTE_PROVIDERS=docker` so the
   unusable provider never appears in setup or sandbox selection.
 - **No openssl provisioning step.** The template sets
-  `ROOMOTE_AUTO_GENERATE_KEYS=true`, so Roomote generates the `JOB_AUTH_*` /
+  `R_AUTO_GENERATE_KEYS=true`, so Roomote generates the `JOB_AUTH_*` /
   `PREVIEW_AUTH_*` P-256 keypairs at first boot and persists them encrypted
   (with `ENCRYPTION_KEY`) in Postgres. Every other secret is a random string
   that Railway's `${{secret(n)}}` template function generates.
@@ -103,16 +103,16 @@ follow the image.
 
 `<channel>` below is `main` or `develop`, per template.
 
-| Railway service | Source                            | Start command                                      | Public domain              | Healthcheck        |
-| --------------- | --------------------------------- | -------------------------------------------------- | -------------------------- | ------------------ |
-| `Postgres`      | Railway managed PostgreSQL        | —                                                  | no                         | managed            |
-| `Redis`         | Railway managed Redis             | —                                                  | no                         | managed            |
-| `minio`         | pinned `minio/minio` + `/data`    | `minio server /data --console-address :9001`       | yes (HTTP proxy port 9000) | —                  |
-| `web`           | `roomote-app:<channel>`           | `/roomote/.docker/app/entrypoint.sh web`           | yes (HTTP proxy port 8080) | `/health`          |
-| `api`           | `roomote-app:<channel>`           | `/roomote/.docker/app/entrypoint.sh api`           | yes (HTTP proxy port 8080) | `/health/liveness` |
-| `controller`    | `roomote-app:<channel>`           | `/roomote/.docker/app/entrypoint.sh controller`    | no                         | —                  |
-| `bullmq`        | `roomote-app:<channel>`           | `/roomote/.docker/app/entrypoint.sh bullmq`        | no                         | —                  |
-| `preview-proxy` | `roomote-app:<channel>`           | `/roomote/.docker/app/entrypoint.sh preview-proxy` | yes (HTTP proxy port 8080) | `/health`          |
+| Railway service | Source                         | Start command                                      | Public domain              | Healthcheck        |
+| --------------- | ------------------------------ | -------------------------------------------------- | -------------------------- | ------------------ |
+| `Postgres`      | Railway managed PostgreSQL     | —                                                  | no                         | managed            |
+| `Redis`         | Railway managed Redis          | —                                                  | no                         | managed            |
+| `minio`         | pinned `minio/minio` + `/data` | `minio server /data --console-address :9001`       | yes (HTTP proxy port 9000) | —                  |
+| `web`           | `roomote-app:<channel>`        | `/roomote/.docker/app/entrypoint.sh web`           | yes (HTTP proxy port 8080) | `/health`          |
+| `api`           | `roomote-app:<channel>`        | `/roomote/.docker/app/entrypoint.sh api`           | yes (HTTP proxy port 8080) | `/health/liveness` |
+| `controller`    | `roomote-app:<channel>`        | `/roomote/.docker/app/entrypoint.sh controller`    | no                         | —                  |
+| `bullmq`        | `roomote-app:<channel>`        | `/roomote/.docker/app/entrypoint.sh bullmq`        | no                         | —                  |
+| `preview-proxy` | `roomote-app:<channel>`        | `/roomote/.docker/app/entrypoint.sh preview-proxy` | yes (HTTP proxy port 8080) | `/health`          |
 
 Railway's custom start command **bypasses the image entrypoint** and executes
 the command directly, so the full `/roomote/.docker/app/entrypoint.sh <service>`
@@ -144,7 +144,7 @@ api:
 ```sh
 R_APP_ENV=production
 ROOMOTE_DOCKER_LOAD_ENV_FILE=false
-ROOMOTE_AUTO_GENERATE_KEYS=true
+R_AUTO_GENERATE_KEYS=true
 ENCRYPTION_KEY=${{secret(32)}}
 ARTIFACT_SIGNING_KEY=${{secret(32)}}
 DASHBOARD_PASSWORD=${{secret(24)}}
@@ -154,7 +154,7 @@ S3_REGION=us-east-1
 S3_BUCKET_ARTIFACTS=roomote-artifacts
 S3_AUTO_CREATE_BUCKET=true
 SETUP_TOKEN=${{secret(32)}}
-ROOMOTE_PING_BASE_URL=https://ping.openmote.dev
+R_PING_BASE_URL=https://ping.openmote.dev
 PREVIEW_PROXY_BASE_URL=
 NEXT_PUBLIC_PREVIEW_PROXY_BASE_URL=
 PREVIEW_DOMAINS=
@@ -173,7 +173,7 @@ web, bullmq, and preview-proxy (identical block):
 ```sh
 R_APP_ENV=${{api.R_APP_ENV}}
 ROOMOTE_DOCKER_LOAD_ENV_FILE=${{api.ROOMOTE_DOCKER_LOAD_ENV_FILE}}
-ROOMOTE_AUTO_GENERATE_KEYS=${{api.ROOMOTE_AUTO_GENERATE_KEYS}}
+R_AUTO_GENERATE_KEYS=${{api.R_AUTO_GENERATE_KEYS}}
 ENCRYPTION_KEY=${{api.ENCRYPTION_KEY}}
 ARTIFACT_SIGNING_KEY=${{api.ARTIFACT_SIGNING_KEY}}
 DASHBOARD_PASSWORD=${{api.DASHBOARD_PASSWORD}}
@@ -182,7 +182,7 @@ S3_ACCESS_KEY_ID=${{api.S3_ACCESS_KEY_ID}}
 S3_REGION=${{api.S3_REGION}}
 S3_BUCKET_ARTIFACTS=${{api.S3_BUCKET_ARTIFACTS}}
 SETUP_TOKEN=${{api.SETUP_TOKEN}}
-ROOMOTE_PING_BASE_URL=${{api.ROOMOTE_PING_BASE_URL}}
+R_PING_BASE_URL=${{api.R_PING_BASE_URL}}
 PREVIEW_PROXY_BASE_URL=${{api.PREVIEW_PROXY_BASE_URL}}
 NEXT_PUBLIC_PREVIEW_PROXY_BASE_URL=${{api.NEXT_PUBLIC_PREVIEW_PROXY_BASE_URL}}
 PREVIEW_DOMAINS=${{api.PREVIEW_DOMAINS}}
@@ -244,7 +244,7 @@ Notes:
   are prompted for the token, which the operator copies from the api
   service's Variables tab in the deployed project. The URL form
   `/setup?token=<value>` also works.
-- `ROOMOTE_PING_BASE_URL` is the endpoint for Roomote's anonymous analytics
+- `R_PING_BASE_URL` is the endpoint for Roomote's anonymous analytics
   and version checks (the image default is `https://ping.roomote.dev`; the
   template points at the openmote ping service). Admins can opt out of
   anonymous analytics in the setup wizard or **Settings → Misc**; version
@@ -256,7 +256,7 @@ Notes:
   filled in on api (see
   [Enabling live previews](#enabling-live-previews-optional)).
 - Leave `JOB_AUTH_*` and `PREVIEW_AUTH_*` unset —
-  `ROOMOTE_AUTO_GENERATE_KEYS=true` manages them. If you later provide
+  `R_AUTO_GENERATE_KEYS=true` manages them. If you later provide
   explicit env values, they take precedence over the persisted keypairs.
 
 ## The artifact bucket

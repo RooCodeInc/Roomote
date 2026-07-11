@@ -128,9 +128,9 @@ function resolveRoomoteTarget(
 
   const secretSource = roomoteTarget.secretToken
     ? 'config'
-    : 'Env.TELEGRAM_WEBHOOK_SECRET';
+    : 'Env.R_TELEGRAM_WEBHOOK_SECRET';
   const secretToken =
-    roomoteTarget.secretToken ?? Env.TELEGRAM_WEBHOOK_SECRET ?? '';
+    roomoteTarget.secretToken ?? Env.R_TELEGRAM_WEBHOOK_SECRET ?? '';
 
   console.info(`Using Telegram webhook secret from ${secretSource}.`);
 

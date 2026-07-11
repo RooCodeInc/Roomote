@@ -37,7 +37,7 @@
 #   EXCLUDED_COMPUTE_PROVIDERS=docker hides the unusable provider.
 # - Zero required deploy-time inputs. Modal tokens and model provider keys
 #   are entered in the /setup wizard after first boot and stored encrypted
-#   in Postgres. Auth keypairs come from ROOMOTE_AUTO_GENERATE_KEYS=true.
+#   in Postgres. Auth keypairs come from R_AUTO_GENERATE_KEYS=true.
 #   The one optional deploy-time prompt is R_APP_URL on api (see the
 #   annotation on that variable): deployers who already own a domain
 #   override the pre-filled default with https://<their-domain> before the
@@ -73,7 +73,7 @@
 #   generate it. The operator copies the value from the api service's
 #   Variables tab and pastes it into the wizard's token step (the URL form
 #   /setup?token=<value> also works).
-# - ROOMOTE_PING_BASE_URL points the anonymous-analytics and version-check
+# - R_PING_BASE_URL points the anonymous-analytics and version-check
 #   pings at the openmote ping service (the code default is
 #   https://ping.roomote.dev). Admins can opt out of analytics in the setup
 #   wizard or Settings -> Misc; version checks ignore that setting.
@@ -128,7 +128,7 @@ services:
     env:
       R_APP_ENV: production
       ROOMOTE_DOCKER_LOAD_ENV_FILE: 'false'
-      ROOMOTE_AUTO_GENERATE_KEYS: 'true'
+      R_AUTO_GENERATE_KEYS: 'true'
       ENCRYPTION_KEY: ${{secret(32)}}
       ARTIFACT_SIGNING_KEY: ${{secret(32)}}
       DASHBOARD_PASSWORD: ${{secret(24)}}
@@ -146,7 +146,7 @@ services:
       NEXT_PUBLIC_PREVIEW_PROXY_BASE_URL: ''
       PREVIEW_DOMAINS: ''
       SETUP_TOKEN: ${{secret(32)}} # gates /setup; required outside local dev (see design notes)
-      ROOMOTE_PING_BASE_URL: https://ping.openmote.dev # anonymous-analytics / version-check pings
+      R_PING_BASE_URL: https://ping.openmote.dev # anonymous-analytics / version-check pings
       DEFAULT_COMPUTE_PROVIDER: modal
       EXCLUDED_COMPUTE_PROVIDERS: docker
       DATABASE_URL: ${{Postgres.DATABASE_URL}}
@@ -181,7 +181,7 @@ services:
     env: &app_service_env
       R_APP_ENV: ${{api.R_APP_ENV}}
       ROOMOTE_DOCKER_LOAD_ENV_FILE: ${{api.ROOMOTE_DOCKER_LOAD_ENV_FILE}}
-      ROOMOTE_AUTO_GENERATE_KEYS: ${{api.ROOMOTE_AUTO_GENERATE_KEYS}}
+      R_AUTO_GENERATE_KEYS: ${{api.R_AUTO_GENERATE_KEYS}}
       ENCRYPTION_KEY: ${{api.ENCRYPTION_KEY}}
       ARTIFACT_SIGNING_KEY: ${{api.ARTIFACT_SIGNING_KEY}}
       DASHBOARD_PASSWORD: ${{api.DASHBOARD_PASSWORD}}
@@ -190,7 +190,7 @@ services:
       S3_REGION: ${{api.S3_REGION}}
       S3_BUCKET_ARTIFACTS: ${{api.S3_BUCKET_ARTIFACTS}}
       SETUP_TOKEN: ${{api.SETUP_TOKEN}}
-      ROOMOTE_PING_BASE_URL: ${{api.ROOMOTE_PING_BASE_URL}}
+      R_PING_BASE_URL: ${{api.R_PING_BASE_URL}}
       # Empty until previews are enabled; the web client builds preview
       # links from NEXT_PUBLIC_PREVIEW_PROXY_BASE_URL, so the references
       # live in the shared block rather than only on preview-proxy.

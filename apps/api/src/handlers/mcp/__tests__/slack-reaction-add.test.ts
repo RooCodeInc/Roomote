@@ -101,7 +101,7 @@ vi.mock('@roomote/env', async (importOriginal) => {
     Env: {
       R_APP_URL: 'https://app.example.com',
       ARTIFACT_SIGNING_KEY: '12345678901234567890123456789012',
-      TELEGRAM_BOT_TOKEN: 'telegram-token',
+      R_TELEGRAM_BOT_TOKEN: 'telegram-token',
     },
   };
 });

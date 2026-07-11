@@ -127,7 +127,7 @@ function hasPublicUrlCallbackMismatch(): DiagnosticsStatus {
   const publicUrl = Env.R_PUBLIC_URL ?? Env.R_APP_URL;
   const callbackUrls = [
     Env.SLACK_REDIRECT_URI,
-    Env.LINEAR_REDIRECT_URI,
+    Env.R_LINEAR_REDIRECT_URI,
     Env.R_TEAMS_BOT_TOKEN_ENDPOINT,
   ].filter(present);
 
@@ -151,8 +151,8 @@ function hasWebhookSecretConfigured(): DiagnosticsStatus {
     Env.GITLAB_WEBHOOK_SECRET,
     Env.GITLAB_WEBHOOK_SIGNING_TOKEN,
     Env.R_SLACK_SIGNING_SECRET,
-    Env.TELEGRAM_WEBHOOK_SECRET,
-    Env.LINEAR_WEBHOOK_SECRET,
+    Env.R_TELEGRAM_WEBHOOK_SECRET,
+    Env.R_LINEAR_WEBHOOK_SECRET,
   ].some(present)
     ? 'yes'
     : 'no';
@@ -338,7 +338,7 @@ async function getProviderDiagnostics() {
   }
   if (
     (telegramMappings[0]?.total ?? 0) > 0 ||
-    present(Env.TELEGRAM_BOT_TOKEN)
+    present(Env.R_TELEGRAM_BOT_TOKEN)
   ) {
     comms.push('telegram');
   }

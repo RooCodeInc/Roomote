@@ -136,7 +136,8 @@ describe('ecosystem.config.js', () => {
       R_APP_URL: 'https://roomote-matt.ngrok.app',
       SLACK_REDIRECT_URI: 'https://roomote-matt.ngrok.app/api/slack/callback',
       SLACK_AUTH_URI: 'https://roomote-matt.ngrok.app/api/slack/auth',
-      LINEAR_REDIRECT_URI: 'https://roomote-matt.ngrok.app/api/linear/callback',
+      R_LINEAR_REDIRECT_URI:
+        'https://roomote-matt.ngrok.app/api/linear/callback',
     });
   });
 

@@ -461,7 +461,7 @@ describe('redactControlPlaneEnvVars', () => {
         E2B_API_KEY: 'e2b',
         DAYTONA_API_KEY: 'daytona',
         R_SLACK_SIGNING_SECRET: 'slack',
-        TELEGRAM_BOT_TOKEN: 'tg',
+        R_TELEGRAM_BOT_TOKEN: 'tg',
         DASHBOARD_PASSWORD: 'dash',
         DATABASE_URL: 'postgres://x',
         S3_SECRET_ACCESS_KEY: 's3',

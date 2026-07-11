@@ -297,10 +297,10 @@ linear.post('/', async (c) => {
 
   // Verify webhook signature
   const signature = headers['linear-signature'] ?? '';
-  const webhookSecret = Env.LINEAR_WEBHOOK_SECRET;
+  const webhookSecret = Env.R_LINEAR_WEBHOOK_SECRET;
 
   if (!webhookSecret) {
-    console.error('[LinearWebhook] LINEAR_WEBHOOK_SECRET not configured');
+    console.error('[LinearWebhook] R_LINEAR_WEBHOOK_SECRET not configured');
     return c.json({ error: 'Webhook secret not configured' }, { status: 500 });
   }
 

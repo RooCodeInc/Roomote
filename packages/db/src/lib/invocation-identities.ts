@@ -49,7 +49,7 @@ export async function resolveInvocationIdentities(): Promise<
     deploymentEnvVars,
   );
   const telegramUsername = readConfiguredValue(
-    'TELEGRAM_BOT_USERNAME',
+    'R_TELEGRAM_BOT_USERNAME',
     deploymentEnvVars,
   );
   const configuredTeamsBotName = readConfiguredValue(

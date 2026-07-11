@@ -209,7 +209,7 @@ describe('comms commands', () => {
         saveCommsAuthConfigCommand(buildMockAuth(), {
           provider: 'telegram',
           values: {
-            TELEGRAM_BOT_TOKEN: 'bot-token',
+            R_TELEGRAM_BOT_TOKEN: 'bot-token',
           },
         }),
       ).resolves.toEqual({
@@ -224,8 +224,8 @@ describe('comms commands', () => {
   describe('telegram status', () => {
     it('reflects persisted Telegram values as saved', async () => {
       mockGetPersistedEnvironmentVariableNames.mockResolvedValue([
-        'TELEGRAM_BOT_TOKEN',
-        'TELEGRAM_WEBHOOK_SECRET',
+        'R_TELEGRAM_BOT_TOKEN',
+        'R_TELEGRAM_WEBHOOK_SECRET',
       ]);
 
       const status = await getCommsStatusCommand(buildMockAuth());

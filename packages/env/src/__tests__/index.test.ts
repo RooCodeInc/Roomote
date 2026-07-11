@@ -390,7 +390,7 @@ describe('Env', () => {
     }
   });
 
-  it('requires auth keypairs in production without ROOMOTE_AUTO_GENERATE_KEYS', () => {
+  it('requires auth keypairs in production without R_AUTO_GENERATE_KEYS', () => {
     const previousSkipEnvValidation = process.env.SKIP_ENV_VALIDATION;
     const runtimeEnv = { ...productionCoreEnv };
 
@@ -400,7 +400,7 @@ describe('Env', () => {
 
     try {
       expect(() => createRoomoteEnv(runtimeEnv)).toThrow(
-        /JOB_AUTH_PRIVATE_KEY, JOB_AUTH_PUBLIC_KEY.*ROOMOTE_AUTO_GENERATE_KEYS/s,
+        /JOB_AUTH_PRIVATE_KEY, JOB_AUTH_PUBLIC_KEY.*R_AUTO_GENERATE_KEYS/s,
       );
     } finally {
       if (previousSkipEnvValidation === undefined) {
@@ -437,11 +437,11 @@ describe('Env', () => {
     }
   });
 
-  it('allows missing auth keypairs in production when ROOMOTE_AUTO_GENERATE_KEYS is enabled', () => {
+  it('allows missing auth keypairs in production when R_AUTO_GENERATE_KEYS is enabled', () => {
     const previousSkipEnvValidation = process.env.SKIP_ENV_VALIDATION;
     const runtimeEnv: Record<string, string | undefined> = {
       ...productionCoreEnv,
-      ROOMOTE_AUTO_GENERATE_KEYS: 'true',
+      R_AUTO_GENERATE_KEYS: 'true',
     };
 
     delete runtimeEnv.SKIP_ENV_VALIDATION;
@@ -560,17 +560,17 @@ describe('Env', () => {
       R_TEAMS_BOT_NAME: '',
       R_TEAMS_BOT_TOKEN_ENDPOINT: '',
       R_TEAMS_BOT_OAUTH_SCOPE: '',
-      TELEGRAM_BOT_TOKEN: '',
-      TELEGRAM_WEBHOOK_SECRET: '',
-      TELEGRAM_BOT_USERNAME: '',
+      R_TELEGRAM_BOT_TOKEN: '',
+      R_TELEGRAM_WEBHOOK_SECRET: '',
+      R_TELEGRAM_BOT_USERNAME: '',
       R_SLACK_CLIENT_ID: '',
       R_SLACK_CLIENT_SECRET: '',
       R_MICROSOFT_CLIENT_ID: '',
       R_MICROSOFT_CLIENT_SECRET: '',
       R_MICROSOFT_TENANT_ID: '',
-      LINEAR_CLIENT_ID: '',
-      LINEAR_CLIENT_SECRET: '',
-      LINEAR_WEBHOOK_SECRET: '',
+      R_LINEAR_CLIENT_ID: '',
+      R_LINEAR_CLIENT_SECRET: '',
+      R_LINEAR_WEBHOOK_SECRET: '',
       S3_PRESIGN_ENDPOINT: '',
     };
 
@@ -582,13 +582,13 @@ describe('Env', () => {
       expect(env.R_PUBLIC_URL).toBeUndefined();
       expect(env.R_TEAMS_BOT_APP_ID).toBeUndefined();
       expect(env.R_TEAMS_BOT_NAME).toBeUndefined();
-      expect(env.TELEGRAM_BOT_TOKEN).toBeUndefined();
-      expect(env.TELEGRAM_WEBHOOK_SECRET).toBeUndefined();
-      expect(env.TELEGRAM_BOT_USERNAME).toBeUndefined();
+      expect(env.R_TELEGRAM_BOT_TOKEN).toBeUndefined();
+      expect(env.R_TELEGRAM_WEBHOOK_SECRET).toBeUndefined();
+      expect(env.R_TELEGRAM_BOT_USERNAME).toBeUndefined();
       expect(env.R_SLACK_CLIENT_ID).toBeUndefined();
       expect(env.R_MICROSOFT_CLIENT_ID).toBeUndefined();
       expect(env.R_MICROSOFT_TENANT_ID).toBeUndefined();
-      expect(env.LINEAR_CLIENT_ID).toBeUndefined();
+      expect(env.R_LINEAR_CLIENT_ID).toBeUndefined();
       expect(env.S3_PRESIGN_ENDPOINT).toBeUndefined();
     } finally {
       if (previousSkipEnvValidation === undefined) {
@@ -805,11 +805,11 @@ describe('shouldAutoGenerateAuthKeypairs', () => {
     ).toBe(false);
   });
 
-  it('is true for production when ROOMOTE_AUTO_GENERATE_KEYS is set', () => {
+  it('is true for production when R_AUTO_GENERATE_KEYS is set', () => {
     expect(
       shouldAutoGenerateAuthKeypairs({
         R_APP_ENV: 'production',
-        ROOMOTE_AUTO_GENERATE_KEYS: 'true',
+        R_AUTO_GENERATE_KEYS: 'true',
       } as NodeJS.ProcessEnv),
     ).toBe(true);
   });
@@ -828,7 +828,7 @@ describe('shouldAutoGenerateAuthKeypairs', () => {
       shouldAutoGenerateAuthKeypairs({
         R_APP_ENV: 'development',
         NODE_ENV: 'test',
-        ROOMOTE_AUTO_GENERATE_KEYS: 'true',
+        R_AUTO_GENERATE_KEYS: 'true',
       } as NodeJS.ProcessEnv),
     ).toBe(true);
   });

@@ -134,7 +134,7 @@ describe('bootstrapGeneratedAuthKeypairs', () => {
   beforeEach(cleanup);
   afterAll(cleanup);
 
-  it('is a no-op in production without ROOMOTE_AUTO_GENERATE_KEYS', async () => {
+  it('is a no-op in production without R_AUTO_GENERATE_KEYS', async () => {
     const processEnv: NodeJS.ProcessEnv = { R_APP_ENV: 'production' };
 
     await expect(bootstrapGeneratedAuthKeypairs({ processEnv })).resolves.toBe(
@@ -163,7 +163,7 @@ describe('bootstrapGeneratedAuthKeypairs', () => {
 
   it('writes resolved keypairs into the process env when enabled', async () => {
     const processEnv: NodeJS.ProcessEnv = {
-      ROOMOTE_AUTO_GENERATE_KEYS: 'true',
+      R_AUTO_GENERATE_KEYS: 'true',
     };
 
     await expect(bootstrapGeneratedAuthKeypairs({ processEnv })).resolves.toBe(
@@ -176,7 +176,7 @@ describe('bootstrapGeneratedAuthKeypairs', () => {
 
     // A second boot loads the same persisted values.
     const secondBootEnv: NodeJS.ProcessEnv = {
-      ROOMOTE_AUTO_GENERATE_KEYS: 'true',
+      R_AUTO_GENERATE_KEYS: 'true',
     };
     await expect(
       bootstrapGeneratedAuthKeypairs({ processEnv: secondBootEnv }),
@@ -189,7 +189,7 @@ describe('bootstrapGeneratedAuthKeypairs', () => {
 
   it('keeps env-provided keypairs untouched', async () => {
     const processEnv: NodeJS.ProcessEnv = {
-      ROOMOTE_AUTO_GENERATE_KEYS: 'true',
+      R_AUTO_GENERATE_KEYS: 'true',
       JOB_AUTH_PRIVATE_KEY: 'env-job-private',
       JOB_AUTH_PUBLIC_KEY: 'env-job-public',
       PREVIEW_AUTH_PRIVATE_KEY: 'env-preview-private',
@@ -230,7 +230,7 @@ describe('bootstrapGeneratedAuthKeypairs pending-migration retries', () => {
       calls: () => calls,
       options: {
         processEnv: {
-          ROOMOTE_AUTO_GENERATE_KEYS: 'true',
+          R_AUTO_GENERATE_KEYS: 'true',
         } as NodeJS.ProcessEnv,
         log: (message: string) => {
           logs.push(message);

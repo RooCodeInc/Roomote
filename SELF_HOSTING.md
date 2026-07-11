@@ -186,6 +186,16 @@ cp .env.production.example .env.production
 Do not commit real env files. Shell exports take precedence over values in
 these files.
 
+Naming follows three rules: Roomote-owned operator configuration uses the
+`R_*` prefix (`R_APP_URL`, `R_MODEL`, `R_GITHUB_*`, `R_SLACK_*`,
+`R_TELEGRAM_*`, `R_LINEAR_*`, `R_AUTO_GENERATE_KEYS`, …); conventional
+infrastructure names stay unchanged (`DATABASE_URL`, `REDIS_URL`, `S3_*`,
+`NODE_ENV`); and third-party provider credentials keep the provider's own
+names (`MODAL_*`, `E2B_*`, `DAYTONA_*`, `ANTHROPIC_API_KEY`, …). Remaining
+`ROOMOTE_*` names are internal plumbing or installer/upgrade machinery kept
+for compatibility — see "Environment Variable Naming" in
+[deploy/README.md](deploy/README.md) for the exceptions list.
+
 ## Public URLs
 
 Roomote needs one stable public app origin for auth callbacks, webhooks, and
@@ -212,8 +222,8 @@ The production Compose overlay derives these runtime URLs:
 
 | Runtime key              | Value                                      |
 | ------------------------ | ------------------------------------------ |
-| `R_PUBLIC_URL`     | `https://$ROOMOTE_APP_DOMAIN`              |
-| `R_APP_URL`        | `https://$ROOMOTE_APP_DOMAIN`              |
+| `R_PUBLIC_URL`           | `https://$ROOMOTE_APP_DOMAIN`              |
+| `R_APP_URL`              | `https://$ROOMOTE_APP_DOMAIN`              |
 | `TRPC_URL`               | `https://$ROOMOTE_APP_DOMAIN/_roomote-api` |
 | `PREVIEW_PROXY_BASE_URL` | `https://$ROOMOTE_PREVIEW_DOMAIN`          |
 | `PREVIEW_DOMAINS`        | `$ROOMOTE_PREVIEW_DOMAIN`                  |
@@ -336,9 +346,9 @@ sign-on later. After that, bring in teammates with invite links from
 password), or configure one of these providers so your whole Slack workspace
 or Microsoft tenant can sign in:
 
-| Provider        | Env vars                                                                                                       | Redirect URL                                               |
-| --------------- | -------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------- |
-| Slack           | `R_SLACK_CLIENT_ID`, `R_SLACK_CLIENT_SECRET`                                             | `<public-url>/api/auth/oauth2/callback/slack`              |
+| Provider        | Env vars                                                                      | Redirect URL                                               |
+| --------------- | ----------------------------------------------------------------------------- | ---------------------------------------------------------- |
+| Slack           | `R_SLACK_CLIENT_ID`, `R_SLACK_CLIENT_SECRET`                                  | `<public-url>/api/auth/oauth2/callback/slack`              |
 | Microsoft Teams | `R_MICROSOFT_CLIENT_ID`, `R_MICROSOFT_CLIENT_SECRET`, `R_MICROSOFT_TENANT_ID` | `<public-url>/api/auth/oauth2/callback/microsoft-entra-id` |
 
 You can restrict access with:
@@ -482,7 +492,7 @@ openssl rand -hex 16    # SETUP_TOKEN
 If the deployment platform cannot run `openssl` during provisioning (for
 example PaaS platforms such as Railway or Render), leave the four
 `JOB_AUTH_*`/`PREVIEW_AUTH_*` values unset and set
-`ROOMOTE_AUTO_GENERATE_KEYS=true` instead. Roomote then generates the P-256
+`R_AUTO_GENERATE_KEYS=true` instead. Roomote then generates the P-256
 keypairs once at first startup, stores them encrypted with `ENCRYPTION_KEY` in
 the database, and reuses them on every later boot. Env-provided key values
 always take precedence. The random string secrets (`ENCRYPTION_KEY`,

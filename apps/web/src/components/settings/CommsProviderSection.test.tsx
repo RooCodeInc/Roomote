@@ -458,8 +458,8 @@ function buildTelegramProvider(
     label: 'Telegram',
     fields: [
       {
-        envVarName: 'TELEGRAM_BOT_TOKEN',
-        acceptedEnvVarNames: ['TELEGRAM_BOT_TOKEN'],
+        envVarName: 'R_TELEGRAM_BOT_TOKEN',
+        acceptedEnvVarNames: ['R_TELEGRAM_BOT_TOKEN'],
         label: 'Telegram Bot Token',
         secret: true,
         runtimeSatisfied: false,
@@ -467,8 +467,8 @@ function buildTelegramProvider(
         satisfiedByEnvVarName: null,
       },
       {
-        envVarName: 'TELEGRAM_WEBHOOK_SECRET',
-        acceptedEnvVarNames: ['TELEGRAM_WEBHOOK_SECRET'],
+        envVarName: 'R_TELEGRAM_WEBHOOK_SECRET',
+        acceptedEnvVarNames: ['R_TELEGRAM_WEBHOOK_SECRET'],
         label: 'Telegram Webhook Secret',
         secret: true,
         runtimeSatisfied: false,
@@ -476,8 +476,8 @@ function buildTelegramProvider(
         satisfiedByEnvVarName: null,
       },
       {
-        envVarName: 'TELEGRAM_BOT_USERNAME',
-        acceptedEnvVarNames: ['TELEGRAM_BOT_USERNAME'],
+        envVarName: 'R_TELEGRAM_BOT_USERNAME',
+        acceptedEnvVarNames: ['R_TELEGRAM_BOT_USERNAME'],
         label: 'Telegram Bot Username',
         required: false,
         runtimeSatisfied: false,

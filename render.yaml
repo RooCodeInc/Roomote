@@ -41,7 +41,7 @@
 #   EXCLUDED_COMPUTE_PROVIDERS=docker hides the unusable provider.
 # - Zero deploy-time inputs. Modal tokens and model provider keys are
 #   entered in the /setup wizard after first boot and stored encrypted in
-#   Postgres. Auth keypairs come from ROOMOTE_AUTO_GENERATE_KEYS=true.
+#   Postgres. Auth keypairs come from R_AUTO_GENERATE_KEYS=true.
 # - The api service must be publicly reachable: hosted-sandbox workers and
 #   GitHub webhooks call `TRPC_URL` directly. MinIO is public too because
 #   presigned artifact URLs (`S3_PRESIGN_ENDPOINT`) must be reachable from
@@ -205,7 +205,7 @@ envVarGroups:
         value: production
       - key: ROOMOTE_DOCKER_LOAD_ENV_FILE
         value: 'false'
-      - key: ROOMOTE_AUTO_GENERATE_KEYS
+      - key: R_AUTO_GENERATE_KEYS
         value: 'true'
       - key: ENCRYPTION_KEY
         generateValue: true
