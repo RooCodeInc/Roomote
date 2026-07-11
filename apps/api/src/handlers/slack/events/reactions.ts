@@ -36,7 +36,7 @@ import { apiLogger } from '../../../logging.js';
 import { cancelOrphanedWorkItemRunBestEffort } from '../../tasks/orphaned-work-item-run.js';
 import {
   SLACK_SETUP_SUGGESTION_LOCK_PREFIX,
-  TASK_SUGGESTION_AGENT_TYPES,
+  TASK_SUGGESTION_TYPES,
 } from '../constants.js';
 import type { SlackWebhookContext } from '../context.js';
 import {
@@ -82,19 +82,19 @@ const TASK_SUGGESTION_REACTION_MAX_ATTEMPTS = Math.ceil(
 
 /**
  * Reaction-launchable suggestion types tracked on the suggestion_card's
- * `metadata.suggestionType`. Mirrors the old agentType filter — only
- * setup-onboarding and suggested-tasks cards launch from a reaction.
+ * `metadata.suggestionType`. Only setup-onboarding and suggested-tasks
+ * cards launch from a reaction.
  */
 function getLaunchableSuggestionType(
   metadata: Record<string, unknown> | null | undefined,
-): (typeof TASK_SUGGESTION_AGENT_TYPES)[number] | null {
+): (typeof TASK_SUGGESTION_TYPES)[number] | null {
   const suggestionType = metadata?.suggestionType;
 
   if (
     typeof suggestionType === 'string' &&
-    (TASK_SUGGESTION_AGENT_TYPES as readonly string[]).includes(suggestionType)
+    (TASK_SUGGESTION_TYPES as readonly string[]).includes(suggestionType)
   ) {
-    return suggestionType as (typeof TASK_SUGGESTION_AGENT_TYPES)[number];
+    return suggestionType as (typeof TASK_SUGGESTION_TYPES)[number];
   }
 
   return null;
@@ -425,7 +425,7 @@ async function launchTaskSuggestionTaskFromReaction({
     investigationContext: workItem.investigationContext,
     readinessMessage:
       suggestionWorkspace.readinessMessage ?? workItem.readinessMessage,
-    agentType: suggestionType,
+    suggestionType,
     category: workItem.category,
     priority: workItem.priority,
     targetRepositoryFullName: suggestionSlackTargetRepositoryFullName,

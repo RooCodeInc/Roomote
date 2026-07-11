@@ -213,6 +213,9 @@ const serverSchema = {
   ROOMOTE_ALLOWED_EMAILS: z.string().optional(),
   PREVIEW_TOKEN_TTL_SECONDS: z.coerce.number().int().positive().default(3600),
   SLACK_API_TIMEOUT_MS: z.coerce.number().int().positive().default(10_000),
+  // How long recorded webhook payloads are kept before the WebhookCleanup
+  // scheduled job (apps/bullmq) deletes them.
+  WEBHOOK_RETENTION_DAYS: z.coerce.number().int().positive().default(30),
   API_EXTERNAL_REQUEST_TIMEOUT_MS: z.coerce
     .number()
     .int()

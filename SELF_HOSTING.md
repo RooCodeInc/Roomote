@@ -81,6 +81,7 @@ roomote status              # service health
 roomote logs [service...]   # follow logs
 roomote setup-url           # re-print the tokenized /setup link
 roomote upgrade [version]   # upgrade or roll back by image tag
+roomote rollback            # return to the release before the last upgrade
 roomote backup              # encrypted recovery bundle in /opt/roomote/backups
 roomote restore <f> --yes   # restore configuration and data onto this host
 ```
@@ -115,6 +116,21 @@ restores the original `.env`, repopulates empty data volumes, pins the recorded
 image digests, restores PostgreSQL, and starts the recorded release. A wrong
 passphrase, checksum failure, missing local-MinIO data, or unavailable image
 identity fails before restored services are started.
+
+`roomote upgrade` first creates an encrypted pre-upgrade backup bundle under
+`/opt/roomote/backups` (skip with `--skip-backup`; supply a passphrase with
+`--backup-passphrase-file` or `ROOMOTE_BACKUP_PASSPHRASE`, otherwise one is
+generated next to the bundle). It then pulls the new images and applies
+database migrations before replacing any running service. Migrations apply in
+a single transaction, so a migration failure rolls the schema back, restores
+the previous deployment configuration, and leaves the previous release
+running. Because every schema change must keep the previous release working
+(see the compatibility policy in `deploy/README.md`), a bad release can be
+undone with `roomote rollback`, which re-deploys the release recorded before
+the last upgrade without touching the database; the pre-upgrade bundle plus
+`roomote restore` is the last-resort path that also rewinds data. The running
+application and schema versions are visible under Settings -> Deployment ->
+Diagnostics.
 
 `roomote upgrade` prunes old Roomote images after a successful upgrade. It
 keeps the current release plus the newest local Roomote image tags for a total

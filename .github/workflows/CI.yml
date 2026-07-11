@@ -186,35 +186,74 @@ jobs:
       - name: Restore an encrypted bundle onto empty volumes
         run: bash deploy/host/tests/backup-restore.integration.sh
 
-  docker-build:
-    name: Docker Build (${{ matrix.app }})
+  upgrade-compatibility:
+    name: Upgrade Compatibility
     needs: changes
     if: ${{ needs.changes.outputs.docs_only != 'true' }}
     runs-on: blacksmith-4vcpu-ubuntu-2404
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - name: Setup environment
+        uses: ./.github/actions/setup-environment
+        with:
+          frozen-lockfile: 'true'
+          node-version: ${{ env.NODE_VERSION }}
+          pnpm-version: ${{ env.PNPM_VERSION }}
+      # Boots the previous published release from GHCR, applies this branch's
+      # migrations to it, and requires the previous release to stay healthy on
+      # the candidate schema (the expand/contract policy in deploy/README.md).
+      - name: Apply candidate migrations to the previous release
+        env:
+          BASELINE_CHANNEL: ${{ github.base_ref || github.ref_name }}
+        run: bash deploy/ci/upgrade-compatibility.sh
+
+  docker-build:
+    name: Docker Build (${{ matrix.app }}, ${{ matrix.arch }})
+    needs: changes
+    if: ${{ needs.changes.outputs.docs_only != 'true' }}
+    runs-on: ${{ matrix.runner }}
     strategy:
       fail-fast: false
+      # Each arch builds natively, mirroring the publish workflow (no QEMU:
+      # rustc segfaults under emulation, rust-lang/rust#147026).
       matrix:
         include:
           - app: app
             dockerfile: .docker/app/Dockerfile
             target: runtime-app
+            arch: amd64
+            runner: blacksmith-4vcpu-ubuntu-2404
+          - app: app
+            dockerfile: .docker/app/Dockerfile
+            target: runtime-app
+            arch: arm64
+            runner: blacksmith-4vcpu-ubuntu-2404-arm
           - app: worker
             dockerfile: apps/worker/Dockerfile
             target: runtime
+            arch: amd64
+            runner: blacksmith-4vcpu-ubuntu-2404
+          - app: worker
+            dockerfile: apps/worker/Dockerfile
+            target: runtime
+            arch: arm64
+            runner: blacksmith-4vcpu-ubuntu-2404-arm
     steps:
       - name: Checkout code
         uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
       - name: Validate production Compose security contract
-        if: matrix.app == 'app'
+        if: matrix.app == 'app' && matrix.arch == 'amd64'
         run: deploy/scripts/validate-compose-security.sh
       - name: Set up Docker builder
         uses: useblacksmith/setup-docker-builder@47a5d0102cc44712a17a633c2599f755008cc40e # v1
-      - name: Build ${{ matrix.app }} Dockerfile
+      - name: Build ${{ matrix.app }} Dockerfile (${{ matrix.arch }})
         uses: useblacksmith/build-push-action@fb9e3e6a9299c78462bfadd0d93352c316adc9b8 # v2
         with:
           context: .
           file: ${{ matrix.dockerfile }}
           target: ${{ matrix.target }}
+          platforms: linux/${{ matrix.arch }}
           push: false
           build-args: APP_ENV=development
 

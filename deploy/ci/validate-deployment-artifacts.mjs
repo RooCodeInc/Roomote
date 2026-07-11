@@ -255,6 +255,8 @@ for (const script of [
   'deploy/scripts/roomote-deploy',
   'deploy/scripts/upgrade.sh',
   'deploy/ci/deployment-smoke.sh',
+  'deploy/ci/upgrade-compatibility.sh',
+  'deploy/host/tests/backup-restore.integration.sh',
 ]) {
   execFileSync('bash', ['-n', join(root, script)], { stdio: 'pipe' });
 }

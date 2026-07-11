@@ -140,7 +140,7 @@ describe('handleAdoComment', () => {
       status: 'ok',
       targets: [
         {
-          id: 'ado:pr_reviewer:repo-1',
+          id: 'ado:pr_review:repo-1',
           settings: null,
           repositoryIds: ['repo-1'],
           userId: 'user-1',

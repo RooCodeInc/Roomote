@@ -55,7 +55,7 @@ function mockDb(impl: (...args: unknown[]) => unknown) {
 
 const baseValues = {
   title: 'Test Task',
-  provider: 'anthropic',
+  modelProvider: 'anthropic',
   model: 'claude-sonnet-4-20250514',
   timestamp: 1_700_000_000,
   workflow: 'standard',

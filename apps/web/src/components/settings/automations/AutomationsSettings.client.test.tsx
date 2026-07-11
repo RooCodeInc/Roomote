@@ -6,7 +6,7 @@ import {
 
 import {
   buildAutomationSettingsSaveInput,
-  buildSaveStateForAgent,
+  buildSaveStateForAutomation,
   mergeServerStatePreservingDirtySections,
   type FormState,
 } from './formState';
@@ -183,7 +183,7 @@ describe('Automations selection helpers', () => {
       suggesterInstructions: '',
     };
 
-    const saveState = buildSaveStateForAgent(
+    const saveState = buildSaveStateForAutomation(
       currentFormState,
       currentSavedState,
       'suggester',
@@ -208,7 +208,7 @@ describe('Automations selection helpers', () => {
       announcerFrequency: 'off',
     };
 
-    const saveState = buildSaveStateForAgent(
+    const saveState = buildSaveStateForAutomation(
       currentFormState,
       currentSavedState,
       'suggester',
@@ -241,7 +241,7 @@ describe('Automations selection helpers', () => {
       managerSlackChannel: '#managers',
     };
 
-    const saveState = buildSaveStateForAgent(
+    const saveState = buildSaveStateForAutomation(
       currentFormState,
       currentSavedState,
       'channelAutoStart',
@@ -320,7 +320,7 @@ describe('Automations selection helpers', () => {
 
     expect(saveInput).toEqual(
       expect.objectContaining({
-        savingAgent: 'announcer',
+        savingAutomation: 'announcer',
         announcerFrequency: 'daily',
         announcerSlackChannel: '#announcements',
         announcerInstructions: 'Keep the summary short.',
@@ -436,7 +436,7 @@ describe('Automations selection helpers', () => {
       ],
     };
 
-    const saveState = buildSaveStateForAgent(
+    const saveState = buildSaveStateForAutomation(
       currentFormState,
       currentSavedState,
       'channelAutoStart',
@@ -471,7 +471,7 @@ describe('Automations selection helpers', () => {
         announcerFrequency: 'off',
       };
 
-      const saveState = buildSaveStateForAgent(
+      const saveState = buildSaveStateForAutomation(
         currentFormState,
         currentSavedState,
         automation.id,

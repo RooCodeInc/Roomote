@@ -35,18 +35,18 @@ import { cn } from '@/lib/utils';
 import { useTRPC } from '@/trpc/client';
 
 import {
-  type AgentType,
+  type AutomationId,
   type AnnouncerFrequency,
   buildAutomationSettingsSaveInput,
   type ChannelAutoStartFormRow,
   type ConflictResolverFrequency,
   type DependabotTriageFrequency,
   type FormState,
-  isAgentDirty,
+  isAutomationDirty,
   type ManagerStatsFrequency,
-  mergeAgentFields,
+  mergeAutomationFields,
   mergeServerStatePreservingDirtySections,
-  resetAgentFields,
+  resetAutomationFields,
   type ReviewerEnvironmentScope,
   type SentryTriageFrequency,
   type SuggesterFrequency,
@@ -175,7 +175,7 @@ type SlackChannelOption = {
 };
 
 type AutomationDefinition = {
-  id: AgentType;
+  id: AutomationId;
   label: string;
   description: string;
   icon: ComponentType<{ className?: string }>;
@@ -261,7 +261,7 @@ const TRIGGERABLE_AUTOMATION_SCHEDULE_LABELS = {
 } as const;
 
 function getAutomationDefinition(
-  agentId: AgentType,
+  automationId: AutomationId,
   automationKey: keyof typeof TRIGGERABLE_AUTOMATION_DESCRIPTIONS,
   icon: ComponentType<{ className?: string }>,
 ): AutomationDefinition {
@@ -273,7 +273,7 @@ function getAutomationDefinition(
   }
 
   return {
-    id: agentId,
+    id: automationId,
     label: descriptor.label,
     description: TRIGGERABLE_AUTOMATION_DESCRIPTIONS[automationKey],
     icon,
@@ -355,7 +355,7 @@ const SCHEDULE_ONLY_AUTOMATIONS_BY_ID = Object.fromEntries(
   (typeof SCHEDULE_ONLY_BACKGROUND_AUTOMATION_LIST)[number]
 >;
 
-const AUTOMATION_DEFINITIONS: Record<AgentType, AutomationDefinition> = {
+const AUTOMATION_DEFINITIONS: Record<AutomationId, AutomationDefinition> = {
   channelAutoStart: {
     id: 'channelAutoStart',
     label: 'Auto-respond to Slack channels',
@@ -415,7 +415,7 @@ const AUTOMATION_DEFINITIONS: Record<AgentType, AutomationDefinition> = {
   },
 };
 
-const HASH_ALIAS_TO_AGENT_ID: Record<string, AgentType> = {
+const HASH_ALIAS_TO_AUTOMATION_ID: Record<string, AutomationId> = {
   'auto-respond-channels': 'channelAutoStart',
   autorespondchannels: 'channelAutoStart',
   'auto-start-tasks': 'channelAutoStart',
@@ -450,8 +450,8 @@ const HASH_ALIAS_TO_AGENT_ID: Record<string, AgentType> = {
   'platform-issue-alerts': 'platformIssueAlerts',
 };
 
-const AUTOMATION_RUN_KEYS_BY_AGENT: Partial<
-  Record<AgentType, BackgroundAutomationKey>
+const AUTOMATION_RUN_KEYS_BY_ID: Partial<
+  Record<AutomationId, BackgroundAutomationKey>
 > = {
   conflictResolver: 'conflict_resolver',
   suggester: 'suggester',
@@ -503,7 +503,7 @@ function buildScheduleOnlyAutomationDirtyState(params: {
     SCHEDULE_ONLY_BACKGROUND_AUTOMATION_LIST.map((automation) => [
       automation.id,
       params.formState && params.savedState
-        ? isAgentDirty(params.formState, params.savedState, automation.id)
+        ? isAutomationDirty(params.formState, params.savedState, automation.id)
         : false,
     ]),
   ) as Record<ScheduleOnlyBackgroundAutomationId, boolean>;
@@ -678,14 +678,14 @@ function mapSettingsToFormState(
   };
 }
 
-export function resolveAutomationHashTarget(hash: string): AgentType | null {
+export function resolveAutomationHashTarget(hash: string): AutomationId | null {
   const normalized = hash.trim().replace(/^#/, '').toLowerCase();
 
   if (!normalized) {
     return null;
   }
 
-  return HASH_ALIAS_TO_AGENT_ID[normalized] ?? null;
+  return HASH_ALIAS_TO_AUTOMATION_ID[normalized] ?? null;
 }
 
 export function buildSlackWorkflowLaunchUrl(
@@ -1441,8 +1441,10 @@ export function AutomationsSettings() {
   const [managerSlackChannelId, setManagerSlackChannelId] = useState<
     string | null
   >(null);
-  const [savingAgent, setSavingAgent] = useState<AgentType | null>(null);
-  const [openAgentIds, setOpenAgentIds] = useState<Set<AgentType>>(
+  const [savingAutomation, setSavingAutomation] = useState<AutomationId | null>(
+    null,
+  );
+  const [openAutomationIds, setOpenAutomationIds] = useState<Set<AutomationId>>(
     () => new Set(),
   );
   const [isEditingManagerChannel, setIsEditingManagerChannel] = useState(false);
@@ -1543,10 +1545,10 @@ export function AutomationsSettings() {
   const updateMutation = useMutation(
     trpc.automations.updateSettings.mutationOptions({
       onSuccess: (result) => {
-        const automationLabel = savingAgent
-          ? AUTOMATION_DEFINITIONS[savingAgent].label
+        const automationLabel = savingAutomation
+          ? AUTOMATION_DEFINITIONS[savingAutomation].label
           : null;
-        setSavingAgent(null);
+        setSavingAutomation(null);
 
         if (!result.success) {
           setFieldErrors(result.fieldErrors);
@@ -1559,7 +1561,7 @@ export function AutomationsSettings() {
           }
 
           if (result.fieldErrors.managerSlackChannel) {
-            setOpenAgentIds((prev) => {
+            setOpenAutomationIds((prev) => {
               if (prev.has('managerChannel')) {
                 return prev;
               }
@@ -1574,7 +1576,7 @@ export function AutomationsSettings() {
             result.fieldErrors.channelAutoStartSlackChannels ||
             result.fieldErrors.channelAutoStartInstructions
           ) {
-            setOpenAgentIds((prev) => {
+            setOpenAutomationIds((prev) => {
               if (prev.has('channelAutoStart')) {
                 return prev;
               }
@@ -1588,7 +1590,7 @@ export function AutomationsSettings() {
         }
 
         setFieldErrors({});
-        if (savingAgent === 'suggester') {
+        if (savingAutomation === 'suggester') {
           const nextRoutingPreview = result.suggesterRoutingPreview ?? null;
           setSuggesterRoutingPreview(nextRoutingPreview);
           setIsEditingSuggesterRouting(
@@ -1627,13 +1629,13 @@ export function AutomationsSettings() {
           reviewer: result.reviewer,
         });
         setFormState((prev) =>
-          savingAgent && prev
-            ? mergeAgentFields(prev, mapped, savingAgent)
+          savingAutomation && prev
+            ? mergeAutomationFields(prev, mapped, savingAutomation)
             : mapped,
         );
         setSavedState((prev) =>
-          savingAgent && prev
-            ? mergeAgentFields(prev, mapped, savingAgent)
+          savingAutomation && prev
+            ? mergeAutomationFields(prev, mapped, savingAutomation)
             : mapped,
         );
 
@@ -1641,7 +1643,7 @@ export function AutomationsSettings() {
           queryKey: trpc.automations.getSettings.queryKey(),
         });
 
-        if (savingAgent === 'managerChannel') {
+        if (savingAutomation === 'managerChannel') {
           setIsEditingManagerChannel(false);
           setIsEnteringCustomManagerChannel(false);
         }
@@ -1653,10 +1655,10 @@ export function AutomationsSettings() {
         );
       },
       onError: (error) => {
-        const automationLabel = savingAgent
-          ? AUTOMATION_DEFINITIONS[savingAgent].label
+        const automationLabel = savingAutomation
+          ? AUTOMATION_DEFINITIONS[savingAutomation].label
           : null;
-        setSavingAgent(null);
+        setSavingAutomation(null);
         toast.error(
           automationLabel
             ? `Failed to save ${automationLabel} settings: ${error.message}`
@@ -1731,17 +1733,33 @@ export function AutomationsSettings() {
     }
 
     return {
-      channelAutoStart: isAgentDirty(formState, savedState, 'channelAutoStart'),
-      managerChannel: isAgentDirty(formState, savedState, 'managerChannel'),
-      managerStats: isAgentDirty(formState, savedState, 'managerStats'),
-      sentryTriage: isAgentDirty(formState, savedState, 'sentryTriage'),
-      dependabotTriage: isAgentDirty(formState, savedState, 'dependabotTriage'),
+      channelAutoStart: isAutomationDirty(
+        formState,
+        savedState,
+        'channelAutoStart',
+      ),
+      managerChannel: isAutomationDirty(
+        formState,
+        savedState,
+        'managerChannel',
+      ),
+      managerStats: isAutomationDirty(formState, savedState, 'managerStats'),
+      sentryTriage: isAutomationDirty(formState, savedState, 'sentryTriage'),
+      dependabotTriage: isAutomationDirty(
+        formState,
+        savedState,
+        'dependabotTriage',
+      ),
       ...scheduleOnlyAutomationDirtyState,
-      reviewer: isAgentDirty(formState, savedState, 'reviewer'),
-      conflictResolver: isAgentDirty(formState, savedState, 'conflictResolver'),
-      suggester: isAgentDirty(formState, savedState, 'suggester'),
-      announcer: isAgentDirty(formState, savedState, 'announcer'),
-      platformIssueAlerts: isAgentDirty(
+      reviewer: isAutomationDirty(formState, savedState, 'reviewer'),
+      conflictResolver: isAutomationDirty(
+        formState,
+        savedState,
+        'conflictResolver',
+      ),
+      suggester: isAutomationDirty(formState, savedState, 'suggester'),
+      announcer: isAutomationDirty(formState, savedState, 'announcer'),
+      platformIssueAlerts: isAutomationDirty(
         formState,
         savedState,
         'platformIssueAlerts',
@@ -1754,12 +1772,12 @@ export function AutomationsSettings() {
   const automationStatusByKey = settingsQuery.data?.automationStatus;
 
   const renderDebugRunsSection = useCallback(
-    (agent: AgentType) => {
+    (automationId: AutomationId) => {
       if (!showAutomationDebugRuns) {
         return null;
       }
 
-      const automationKey = AUTOMATION_RUN_KEYS_BY_AGENT[agent];
+      const automationKey = AUTOMATION_RUN_KEYS_BY_ID[automationId];
 
       if (!automationKey) {
         return null;
@@ -1776,47 +1794,50 @@ export function AutomationsSettings() {
   );
 
   const saveAgent = useCallback(
-    (agent: AgentType) => {
+    (automationId: AutomationId) => {
       if (!formState || !savedState) {
         return;
       }
 
       setFieldErrors({});
-      setSavingAgent(agent);
+      setSavingAutomation(automationId);
 
       updateMutation.mutate(
-        buildAutomationSettingsSaveInput(formState, savedState, agent),
+        buildAutomationSettingsSaveInput(formState, savedState, automationId),
       );
     },
     [formState, savedState, updateMutation],
   );
 
   const resetAgent = useCallback(
-    (agent: AgentType) => {
+    (automationId: AutomationId) => {
       if (!formState || !savedState) {
         return;
       }
 
-      if (agent === 'managerChannel') {
+      if (automationId === 'managerChannel') {
         setIsEnteringCustomManagerChannel(false);
       }
 
-      setFormState(resetAgentFields(formState, savedState, agent));
+      setFormState(resetAutomationFields(formState, savedState, automationId));
     },
     [formState, savedState],
   );
 
-  const setAgentOpen = useCallback((agent: AgentType, open: boolean) => {
-    setOpenAgentIds((prev) => {
-      const next = new Set(prev);
-      if (open) {
-        next.add(agent);
-      } else {
-        next.delete(agent);
-      }
-      return next;
-    });
-  }, []);
+  const setAutomationOpen = useCallback(
+    (automationId: AutomationId, open: boolean) => {
+      setOpenAutomationIds((prev) => {
+        const next = new Set(prev);
+        if (open) {
+          next.add(automationId);
+        } else {
+          next.delete(automationId);
+        }
+        return next;
+      });
+    },
+    [],
+  );
 
   const setScheduleOnlyAutomationFrequency = useCallback(
     (
@@ -1848,7 +1869,7 @@ export function AutomationsSettings() {
       return;
     }
 
-    setOpenAgentIds((prev) => {
+    setOpenAutomationIds((prev) => {
       if (prev.has(target)) {
         return prev;
       }
@@ -2101,33 +2122,33 @@ export function AutomationsSettings() {
     suggester: suggesterIsEnabled,
     announcer: announcerIsEnabled,
     platformIssueAlerts: isPlatformIssueAlertsEnabled(formState),
-  } satisfies Record<AgentType, boolean>;
+  } satisfies Record<AutomationId, boolean>;
 
-  const isAgentSaving = (agent: AgentType) =>
-    updateMutation.isPending && savingAgent === agent;
+  const isAutomationSaving = (automationId: AutomationId) =>
+    updateMutation.isPending && savingAutomation === automationId;
 
   const isRunDisabled = (
-    agent: AgentType,
+    automationId: AutomationId,
     isEnabled: boolean,
     isBlocked = false,
   ) =>
     isAutomationRunDisabled({
       isEnabled,
-      isDirty: isDirty[agent],
-      isSaving: isAgentSaving(agent),
+      isDirty: isDirty[automationId],
+      isSaving: isAutomationSaving(automationId),
       isTriggering: triggerMutation.isPending,
       isBlocked,
     });
 
   const getRunTooltip = (
-    agent: AgentType,
+    automationId: AutomationId,
     isEnabled: boolean,
     blockedReason?: string | null,
   ) =>
     getAutomationRunTooltip({
       isEnabled,
-      isDirty: isDirty[agent],
-      isSaving: isAgentSaving(agent),
+      isDirty: isDirty[automationId],
+      isSaving: isAutomationSaving(automationId),
       blockedReason,
     });
   const slackAutomationsDisabled = !managerChannelConfigured;
@@ -2237,15 +2258,17 @@ export function AutomationsSettings() {
 
             <AutomationCard
               automation={AUTOMATION_DEFINITIONS.channelAutoStart}
-              isOpen={openAgentIds.has('channelAutoStart')}
-              onOpenChange={(open) => setAgentOpen('channelAutoStart', open)}
+              isOpen={openAutomationIds.has('channelAutoStart')}
+              onOpenChange={(open) =>
+                setAutomationOpen('channelAutoStart', open)
+              }
               iconEnabled={iconEnabled.channelAutoStart}
               footer={
                 <AutomationFooter
                   isDirty={isDirty.channelAutoStart}
                   isPending={
                     updateMutation.isPending &&
-                    savingAgent === 'channelAutoStart'
+                    savingAutomation === 'channelAutoStart'
                   }
                   onSave={() => saveAgent('channelAutoStart')}
                   onReset={() => resetAgent('channelAutoStart')}
@@ -2469,7 +2492,7 @@ export function AutomationsSettings() {
                       isDirty={isDirty.managerChannel}
                       isPending={
                         updateMutation.isPending &&
-                        savingAgent === 'managerChannel'
+                        savingAutomation === 'managerChannel'
                       }
                       onSave={() => saveAgent('managerChannel')}
                       onReset={() => {
@@ -2511,8 +2534,8 @@ export function AutomationsSettings() {
 
           <AutomationCard
             automation={AUTOMATION_DEFINITIONS.managerStats}
-            isOpen={openAgentIds.has('managerStats')}
-            onOpenChange={(open) => setAgentOpen('managerStats', open)}
+            isOpen={openAutomationIds.has('managerStats')}
+            onOpenChange={(open) => setAutomationOpen('managerStats', open)}
             iconEnabled={iconEnabled.managerStats}
             debugSection={renderDebugRunsSection('managerStats')}
             runAction={
@@ -2538,7 +2561,8 @@ export function AutomationsSettings() {
               <AutomationFooter
                 isDirty={isDirty.managerStats}
                 isPending={
-                  updateMutation.isPending && savingAgent === 'managerStats'
+                  updateMutation.isPending &&
+                  savingAutomation === 'managerStats'
                 }
                 onSave={() => saveAgent('managerStats')}
                 onReset={() => resetAgent('managerStats')}
@@ -2592,8 +2616,8 @@ export function AutomationsSettings() {
           <>
             <AutomationCard
               automation={AUTOMATION_DEFINITIONS.sentryTriage}
-              isOpen={openAgentIds.has('sentryTriage')}
-              onOpenChange={(open) => setAgentOpen('sentryTriage', open)}
+              isOpen={openAutomationIds.has('sentryTriage')}
+              onOpenChange={(open) => setAutomationOpen('sentryTriage', open)}
               iconEnabled={iconEnabled.sentryTriage}
               debugSection={renderDebugRunsSection('sentryTriage')}
               runAction={
@@ -2624,7 +2648,8 @@ export function AutomationsSettings() {
                 <AutomationFooter
                   isDirty={isDirty.sentryTriage}
                   isPending={
-                    updateMutation.isPending && savingAgent === 'sentryTriage'
+                    updateMutation.isPending &&
+                    savingAutomation === 'sentryTriage'
                   }
                   saveDisabled={sentryTriageSaveDisabled}
                   onSave={() => saveAgent('sentryTriage')}
@@ -2764,8 +2789,10 @@ export function AutomationsSettings() {
 
             <ScheduledAutomationCard
               automation={AUTOMATION_DEFINITIONS.dependabotTriage}
-              isOpen={openAgentIds.has('dependabotTriage')}
-              onOpenChange={(open) => setAgentOpen('dependabotTriage', open)}
+              isOpen={openAutomationIds.has('dependabotTriage')}
+              onOpenChange={(open) =>
+                setAutomationOpen('dependabotTriage', open)
+              }
               iconEnabled={iconEnabled.dependabotTriage}
               debugSection={renderDebugRunsSection('dependabotTriage')}
               runTooltip={getRunTooltip(
@@ -2783,7 +2810,8 @@ export function AutomationsSettings() {
               }
               isDirty={isDirty.dependabotTriage}
               isPending={
-                updateMutation.isPending && savingAgent === 'dependabotTriage'
+                updateMutation.isPending &&
+                savingAutomation === 'dependabotTriage'
               }
               onSave={() => saveAgent('dependabotTriage')}
               onReset={() => resetAgent('dependabotTriage')}
@@ -2845,8 +2873,10 @@ export function AutomationsSettings() {
                 <AutomationCard
                   key={automation.id}
                   automation={AUTOMATION_DEFINITIONS[automation.id]}
-                  isOpen={openAgentIds.has(automation.id)}
-                  onOpenChange={(open) => setAgentOpen(automation.id, open)}
+                  isOpen={openAutomationIds.has(automation.id)}
+                  onOpenChange={(open) =>
+                    setAutomationOpen(automation.id, open)
+                  }
                   iconEnabled={iconEnabled[automation.id]}
                   debugSection={renderDebugRunsSection(automation.id)}
                   runAction={
@@ -2880,7 +2910,7 @@ export function AutomationsSettings() {
                       isDirty={isDirty[automation.id]}
                       isPending={
                         updateMutation.isPending &&
-                        savingAgent === automation.id
+                        savingAutomation === automation.id
                       }
                       onSave={() => saveAgent(automation.id)}
                       onReset={() => resetAgent(automation.id)}
@@ -2947,8 +2977,8 @@ export function AutomationsSettings() {
 
           <AutomationCard
             automation={AUTOMATION_DEFINITIONS.suggester}
-            isOpen={openAgentIds.has('suggester')}
-            onOpenChange={(open) => setAgentOpen('suggester', open)}
+            isOpen={openAutomationIds.has('suggester')}
+            onOpenChange={(open) => setAutomationOpen('suggester', open)}
             iconEnabled={iconEnabled.suggester}
             disabled={slackAutomationsDisabled}
             debugSection={renderDebugRunsSection('suggester')}
@@ -2972,7 +3002,7 @@ export function AutomationsSettings() {
               <AutomationFooter
                 isDirty={isDirty.suggester}
                 isPending={
-                  updateMutation.isPending && savingAgent === 'suggester'
+                  updateMutation.isPending && savingAutomation === 'suggester'
                 }
                 onSave={() => saveAgent('suggester')}
                 onReset={() => resetAgent('suggester')}
@@ -3224,8 +3254,8 @@ If unclear, send to manager channel.`}
 
           <AutomationCard
             automation={AUTOMATION_DEFINITIONS.announcer}
-            isOpen={openAgentIds.has('announcer')}
-            onOpenChange={(open) => setAgentOpen('announcer', open)}
+            isOpen={openAutomationIds.has('announcer')}
+            onOpenChange={(open) => setAutomationOpen('announcer', open)}
             iconEnabled={iconEnabled.announcer}
             disabled={slackAutomationsDisabled}
             debugSection={renderDebugRunsSection('announcer')}
@@ -3249,7 +3279,7 @@ If unclear, send to manager channel.`}
               <AutomationFooter
                 isDirty={isDirty.announcer}
                 isPending={
-                  updateMutation.isPending && savingAgent === 'announcer'
+                  updateMutation.isPending && savingAutomation === 'announcer'
                 }
                 onSave={() => saveAgent('announcer')}
                 onReset={() => resetAgent('announcer')}
@@ -3329,14 +3359,14 @@ If unclear, send to manager channel.`}
 
           <AutomationCard
             automation={AUTOMATION_DEFINITIONS.reviewer}
-            isOpen={openAgentIds.has('reviewer')}
-            onOpenChange={(open) => setAgentOpen('reviewer', open)}
+            isOpen={openAutomationIds.has('reviewer')}
+            onOpenChange={(open) => setAutomationOpen('reviewer', open)}
             iconEnabled={iconEnabled.reviewer}
             footer={
               <AutomationFooter
                 isDirty={isDirty.reviewer}
                 isPending={
-                  updateMutation.isPending && savingAgent === 'reviewer'
+                  updateMutation.isPending && savingAutomation === 'reviewer'
                 }
                 onSave={() => saveAgent('reviewer')}
                 onReset={() => resetAgent('reviewer')}
@@ -3472,8 +3502,8 @@ If unclear, send to manager channel.`}
 
           <AutomationCard
             automation={AUTOMATION_DEFINITIONS.conflictResolver}
-            isOpen={openAgentIds.has('conflictResolver')}
-            onOpenChange={(open) => setAgentOpen('conflictResolver', open)}
+            isOpen={openAutomationIds.has('conflictResolver')}
+            onOpenChange={(open) => setAutomationOpen('conflictResolver', open)}
             iconEnabled={iconEnabled.conflictResolver}
             debugSection={renderDebugRunsSection('conflictResolver')}
             runAction={
@@ -3504,7 +3534,8 @@ If unclear, send to manager channel.`}
               <AutomationFooter
                 isDirty={isDirty.conflictResolver}
                 isPending={
-                  updateMutation.isPending && savingAgent === 'conflictResolver'
+                  updateMutation.isPending &&
+                  savingAutomation === 'conflictResolver'
                 }
                 onSave={() => saveAgent('conflictResolver')}
                 onReset={() => resetAgent('conflictResolver')}

@@ -170,13 +170,13 @@ export async function collectInstanceReportStats(
       .groupBy(tasks.harness),
     db
       .select({
-        provider: tasks.provider,
+        provider: tasks.modelProvider,
         model: tasks.model,
         total: count(),
       })
       .from(tasks)
       .where(gte(tasks.createdAt, since))
-      .groupBy(tasks.provider, tasks.model),
+      .groupBy(tasks.modelProvider, tasks.model),
     db
       .select({
         input: sum(taskInferenceUsageEvents.inputTokens),

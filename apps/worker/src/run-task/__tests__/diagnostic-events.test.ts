@@ -51,6 +51,14 @@ describe('redactSecrets', () => {
     expect(output).toContain('api_key: [redacted]');
   });
 
+  it('keeps an identifying prefix on hash-shaped values', () => {
+    const sha = 'a1b2c3d4e5f6a7b8c9d0a1b2c3d4e5f6a7b8c9d0';
+    const output = redactSecrets(`checked out commit ${sha}`);
+
+    expect(output).toContain('a1b2c3d4…[redacted]');
+    expect(output).not.toContain(sha);
+  });
+
   it('leaves ordinary log text alone', () => {
     const text =
       'OpenCode server exited with code 137 after 512s; last request POST /session/prompt';
@@ -96,6 +104,24 @@ describe('createDiagnosticEventRecorder', () => {
     expect(call.details.exitCode).toBe(137);
     expect((call.details.stderrTail as string).length).toBeLessThan(4_100);
     expect(call.details.stderrTail as string).toContain('[truncated]');
+  });
+
+  it('does not let caller details override the recorder kind', () => {
+    const recorder = createDiagnosticEventRecorder({
+      runId: 7,
+      logger: createLogger(),
+    });
+
+    recorder.record({
+      kind: 'harness_exit',
+      message: 'ok',
+      details: { kind: 'spoofed' },
+    });
+
+    const call = mockRecordEvent.mock.calls[0]?.[0] as {
+      details: Record<string, unknown>;
+    };
+    expect(call.details.kind).toBe('harness_exit');
   });
 
   it('never throws when persistence fails', async () => {

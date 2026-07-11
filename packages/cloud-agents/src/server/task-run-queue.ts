@@ -61,7 +61,7 @@ import type { MetadataRecord } from '@roomote/feature-flags/server';
 import { type Redis, getRedis } from '@roomote/redis';
 import { captureEvent } from '@roomote/telemetry/server';
 import { generateTaskRunTitle, hasDeterministicTaskRunTitle } from '../utils';
-import { DEFAULT_STANDARD_TASK_PROVIDER } from '../task-runtime-defaults';
+import { DEFAULT_STANDARD_TASK_MODEL_PROVIDER } from '../task-runtime-defaults';
 import { evaluateCommitAuthor } from './authorship-rules';
 import { findLatestGithubIdentityForUser } from './commit-author';
 import { resolveEffectiveHarnessModelState } from './harness-model-overrides';
@@ -1323,7 +1323,7 @@ async function enqueueFreshLaunch(
         linearIssueId: input.channels?.linearIssueId ?? null,
         linearOrganizationId: input.channels?.linearOrganizationId ?? null,
         harness: targetHarness,
-        provider: DEFAULT_STANDARD_TASK_PROVIDER,
+        modelProvider: DEFAULT_STANDARD_TASK_MODEL_PROVIDER,
         model: effectiveTaskModel,
         title,
         ...(hasDeterministicTaskRunTitle(taskWithHarnessOverrides.type)

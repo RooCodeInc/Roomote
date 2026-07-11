@@ -326,7 +326,7 @@ const SCHEDULE_ONLY_BACKGROUND_AUTOMATION_FREQUENCY_SCHEMA = z.enum(
   SCHEDULE_ONLY_BACKGROUND_AUTOMATION_FREQUENCIES,
 );
 
-const UPDATE_SETTINGS_SAVING_AGENT_VALUES = [
+const UPDATE_SETTINGS_SAVING_AUTOMATION_VALUES = [
   'channelAutoStart',
   'managerChannel',
   'managerStats',
@@ -376,8 +376,8 @@ const automationsRouter = createRouter({
   updateSettings: protectedProcedure
     .input(
       z.object({
-        savingAgent: createStringEnumSchema(
-          UPDATE_SETTINGS_SAVING_AGENT_VALUES,
+        savingAutomation: createStringEnumSchema(
+          UPDATE_SETTINGS_SAVING_AUTOMATION_VALUES,
         ),
         reviewerEnabled: z.boolean(),
         reviewerEnvironmentScope: z.enum(['all', 'specific']),

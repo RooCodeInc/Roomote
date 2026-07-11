@@ -47,7 +47,7 @@ export function buildGitHubMentionFollowUpRequest({
     'A GitHub pull request comment mentioned Roomote and this run is the new dedicated follow-up task for that PR.',
     'Use the current PR context below and keep the work scoped to this repository and pull request.',
     'If the triggering comment is only gratitude or other non-actionable conversation, reply briefly on GitHub if useful and conclude with a no-op result instead of inventing follow-up work.',
-    'Use the normal Standard Task initial routing rules to choose the correct starting workflow for the current request:',
+    'Use the standard workflow initial routing rules to choose the correct starting skill for the current request:',
     '- `implement-changes` for actionable PR follow-up work, including code, docs, tests, config, prompt, or routing changes',
     '- `plan-repo-implementation` for planning or scoping requests that should stay non-mutating',
     '- `explain-repo-code` for explanation-only requests about the current PR',

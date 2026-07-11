@@ -25,6 +25,7 @@ import {
   refreshSnapshotsJob,
   pullRequestAnalyticsSyncJob,
   instancePingJob,
+  webhookCleanupJob,
 } from './scheduled-jobs';
 
 const QUEUE_NAME = 'scheduled-jobs';
@@ -139,6 +140,11 @@ async function createJobs(queue: Queue): Promise<void> {
     { every: 24 * 60 * 60 * 1000 }, // Every 24 hours.
   );
 
+  await queue.upsertJobScheduler(
+    ScheduledJobName.WebhookCleanup,
+    { every: 24 * 60 * 60 * 1000 }, // Every 24 hours.
+  );
+
   const schedulers = await queue.getJobSchedulers();
   console.log('[createJobs] getJobSchedulers ->', schedulers);
 }
@@ -162,6 +168,8 @@ const runJobs = async (job: ScheduledJob): Promise<void> => {
       return pullRequestAnalyticsSyncJob(job.data ?? {});
     case ScheduledJobName.InstancePing:
       return instancePingJob();
+    case ScheduledJobName.WebhookCleanup:
+      return webhookCleanupJob();
     default:
       throw new Error(`Unknown job type: ${job.name}`);
   }

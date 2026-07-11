@@ -20,12 +20,18 @@ const SECRET_PATTERNS: RegExp[] = [
   /\bBearer\s+[A-Za-z0-9._~+/-]{8,}=*/gi,
   // JWTs.
   /\beyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{5,}/g,
-  // Long opaque hex/base64 runs (token-shaped strings).
-  /\b[A-Fa-f0-9]{40,}\b/g,
-  /\b[A-Za-z0-9+/]{48,}={0,2}\b/g,
   // key=value / key: value assignments for credential-ish names, including
   // prefixed forms like DATABASE_PASSWORD or GITHUB_TOKEN.
   /([\w-]*(?:token|secret|password|passwd|api[_-]?key|authorization))(\s*[:=]\s*)\S+/gi,
+];
+
+// Long opaque hex/base64 runs are token-shaped, but they are also what git
+// SHAs and content digests look like — post-mortem evidence this rail exists
+// to preserve. These keep an 8-character prefix: enough to identify a commit
+// or digest, far too little to reconstruct a credential.
+const HASH_SHAPED_PATTERNS: RegExp[] = [
+  /\b[A-Fa-f0-9]{40,}\b/g,
+  /\b[A-Za-z0-9+/]{48,}={0,2}\b/g,
 ];
 
 export function redactSecrets(text: string): string {
@@ -40,6 +46,13 @@ export function redactSecrets(text: string): string {
 
       return '[redacted]';
     });
+  }
+
+  for (const pattern of HASH_SHAPED_PATTERNS) {
+    redacted = redacted.replace(
+      pattern,
+      (match) => `${match.slice(0, 8)}…[redacted]`,
+    );
   }
 
   return redacted;
@@ -85,7 +98,7 @@ function sanitizeDetailValue(value: unknown, depth: number): unknown {
   return String(value);
 }
 
-interface DiagnosticEventRecorder {
+export interface DiagnosticEventRecorder {
   record(input: {
     kind: string;
     message: string;
@@ -101,11 +114,13 @@ export function createDiagnosticEventRecorder(options: {
     record(input) {
       try {
         const details = {
-          kind: input.kind,
           ...(sanitizeDetailValue(input.details ?? {}, 0) as Record<
             string,
             unknown
           >),
+          // Last so a caller-supplied details.kind can never override the
+          // recorder's classification.
+          kind: input.kind,
         };
 
         void sdk.taskRuns
