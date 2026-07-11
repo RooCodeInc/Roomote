@@ -103,10 +103,10 @@ import type { TaskRun } from '@roomote/db/server';
 import type { PrReviewActivityEvent } from '../pr-review-notification';
 
 import {
+  collectCiChecks,
   gatherPrReviewTriageContext,
   preparePrReviewNotificationDelivery,
   recordPrReviewNotificationDeliveryBestEffort,
-  shortenPrReviewCheckName,
   triagePrReviewActivity,
 } from '../pr-review-notification-delivery';
 
@@ -217,8 +217,8 @@ describe('preparePrReviewNotificationDelivery', () => {
     });
     const prompt = mockGenerateObject.mock.calls[0]?.[0]?.prompt as string;
 
-    expect(prompt).toContain('- Lint: success');
-    expect(prompt).toContain('- Tests: success');
+    expect(prompt).toContain('- CI / Lint: success');
+    expect(prompt).toContain('- CI / Tests: success');
   });
 
   it('passes one line per check status into the triage LLM context', async () => {
@@ -246,8 +246,8 @@ describe('preparePrReviewNotificationDelivery', () => {
 
     const prompt = mockGenerateObject.mock.calls[0]?.[0]?.prompt as string;
 
-    expect(prompt).toContain('- Lint: failure');
-    expect(prompt).toContain('- Tests: success');
+    expect(prompt).toContain('- CI / Lint: failure');
+    expect(prompt).toContain('- CI / Tests: success');
     expect(prompt).toContain('- legacy-ci: failure');
     expect(mockFormatMessage).toHaveBeenCalledWith({
       repository: 'owner/repo',
@@ -371,8 +371,8 @@ describe('triagePrReviewActivity', () => {
           '<!-- roomote-review-summary sha=abc mode=initial -->\n<!-- roomote-review-checklist:start -->\n- [ ] `apps/api/src/foo.ts:10` - Handle null actor ids\n- [ ] `apps/api/src/bar.ts:20` - Rename the helper to match its return shape\n<!-- roomote-review-checklist:end -->',
         ciStatus: {
           checks: [
-            { name: 'Lint', status: 'success' },
-            { name: 'Tests', status: 'success' },
+            { name: 'CI / Lint', status: 'success' },
+            { name: 'CI / Tests', status: 'success' },
           ],
         },
       },
@@ -387,8 +387,8 @@ describe('triagePrReviewActivity', () => {
     expect(prompt).toContain('Rename the helper to match its return shape');
     expect(prompt).not.toContain('- Latest automated review status:');
     expect(prompt).toContain('Current pull request state:');
-    expect(prompt).toContain('- Lint: success');
-    expect(prompt).toContain('- Tests: success');
+    expect(prompt).toContain('- CI / Lint: success');
+    expect(prompt).toContain('- CI / Tests: success');
   });
 
   it('returns a skip decision when the model says the activity is not worth notifying', async () => {
@@ -471,8 +471,8 @@ describe('gatherPrReviewTriageContext', () => {
         '<!-- roomote-review-summary sha=abc mode=initial -->\n<!-- roomote-review-status:start -->\n**All 1 issue addressed.** [See task](https://example.com)\n<!-- roomote-review-status:end -->',
       ciStatus: {
         checks: [
-          { name: 'Lint', status: 'success' },
-          { name: 'Tests', status: 'success' },
+          { name: 'CI / Lint', status: 'success' },
+          { name: 'CI / Tests', status: 'success' },
         ],
       },
     });
@@ -497,7 +497,7 @@ describe('gatherPrReviewTriageContext', () => {
     });
 
     expect(context.ciStatus).toEqual({
-      checks: [{ name: 'Tests', status: 'pending' }],
+      checks: [{ name: 'CI / Tests', status: 'pending' }],
     });
   });
 
@@ -522,8 +522,8 @@ describe('gatherPrReviewTriageContext', () => {
 
     expect(context.ciStatus).toEqual({
       checks: [
-        { name: 'Lint', status: 'success' },
-        { name: 'Tests', status: 'success' },
+        { name: 'CI / Lint', status: 'success' },
+        { name: 'CI / Tests', status: 'success' },
       ],
     });
   });
@@ -564,10 +564,43 @@ describe('gatherPrReviewTriageContext', () => {
   });
 });
 
-describe('CI status helpers', () => {
-  it('shortens matrix-style check names to the leaf segment', () => {
-    expect(shortenPrReviewCheckName('CI / Lint')).toBe('Lint');
-    expect(shortenPrReviewCheckName('unit-tests')).toBe('unit-tests');
+describe('collectCiChecks', () => {
+  it('keeps distinct checks that share a leaf name segment', () => {
+    expect(
+      collectCiChecks({
+        checkRuns: [
+          {
+            name: 'CI / Lint',
+            status: 'completed',
+            conclusion: 'failure',
+          },
+          {
+            name: 'Docs / Lint',
+            status: 'completed',
+            conclusion: 'success',
+          },
+        ],
+        statusContexts: [],
+      }),
+    ).toEqual([
+      { name: 'CI / Lint', status: 'failure' },
+      { name: 'Docs / Lint', status: 'success' },
+    ]);
+  });
+
+  it('prefers the more severe status when the same full check name collides', () => {
+    expect(
+      collectCiChecks({
+        checkRuns: [
+          {
+            name: 'CI / Lint',
+            status: 'completed',
+            conclusion: 'success',
+          },
+        ],
+        statusContexts: [{ context: 'CI / Lint', state: 'failure' }],
+      }),
+    ).toEqual([{ name: 'CI / Lint', status: 'failure' }]);
   });
 });
 

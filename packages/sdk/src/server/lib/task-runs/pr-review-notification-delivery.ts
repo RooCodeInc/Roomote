@@ -78,24 +78,6 @@ export type PreparedPrReviewNotification =
   | { post: true; route: PrReviewNotificationRoute; text: string }
   | { post: false; reason: 'no_conversation_route' | 'not_worth_notifying' };
 
-/**
- * Prefer the leaf name from matrix-style check titles like "CI / Lint".
- */
-export function shortenPrReviewCheckName(name: string): string {
-  const trimmed = name.trim();
-
-  if (!trimmed) {
-    return trimmed;
-  }
-
-  const leaf = trimmed
-    .split(/\s*\/\s*/)
-    .pop()
-    ?.trim();
-
-  return leaf && leaf.length > 0 ? leaf : trimmed;
-}
-
 function mapCheckRunToStatus({
   status,
   conclusion,
@@ -144,7 +126,48 @@ function mapCombinedStatusToCheckStatus(
   }
 }
 
-function collectCiChecks({
+/**
+ * Higher values win when the same full check name appears more than once
+ * (re-runs or overlapping classic status contexts).
+ */
+function ciCheckStatusSeverity(status: PrReviewCiCheckStatus): number {
+  switch (status) {
+    case 'failure':
+    case 'error':
+      return 4;
+    case 'pending':
+      return 3;
+    case 'cancelled':
+      return 2;
+    case 'neutral':
+    case 'skipped':
+      return 1;
+    case 'success':
+      return 0;
+  }
+}
+
+function upsertCiCheck(
+  checksByName: Map<string, PrReviewCiCheck>,
+  name: string,
+  status: PrReviewCiCheckStatus,
+): void {
+  const existing = checksByName.get(name);
+
+  if (
+    !existing ||
+    ciCheckStatusSeverity(status) > ciCheckStatusSeverity(existing.status)
+  ) {
+    checksByName.set(name, { name, status });
+  }
+}
+
+/**
+ * Collect per-check CI lines keyed by the full check/context name so distinct
+ * matrix jobs that share a leaf segment stay separate (e.g. `CI / Lint` vs
+ * `Docs / Lint`).
+ */
+export function collectCiChecks({
   checkRuns,
   statusContexts,
 }: {
@@ -161,22 +184,19 @@ function collectCiChecks({
   const checksByName = new Map<string, PrReviewCiCheck>();
 
   for (const run of checkRuns) {
-    const name = shortenPrReviewCheckName(run.name);
+    const name = run.name.trim();
 
     if (!name) {
       continue;
     }
 
-    checksByName.set(name, {
-      name,
-      status: mapCheckRunToStatus(run),
-    });
+    upsertCiCheck(checksByName, name, mapCheckRunToStatus(run));
   }
 
   for (const item of statusContexts) {
-    const name = shortenPrReviewCheckName(item.context);
+    const name = item.context.trim();
 
-    if (!name || checksByName.has(name)) {
+    if (!name) {
       continue;
     }
 
@@ -186,7 +206,7 @@ function collectCiChecks({
       continue;
     }
 
-    checksByName.set(name, { name, status: mapped });
+    upsertCiCheck(checksByName, name, mapped);
   }
 
   return [...checksByName.values()];
