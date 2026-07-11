@@ -435,6 +435,19 @@ export async function startAutoRoutedSlackTask({
         channel,
         messageTs: threadId,
       })) ?? null;
+    // `actingUserId` drives actor-scoped credential resolution (user MCP
+    // connections, MCP proxy actor checks), so seed it only from an initiator
+    // the webhook handler actually resolved to a Roomote user. Automation
+    // initiators (bot-authored channel auto-start) and unmapped human senders
+    // leave it unset until a mapped follow-up sender arrives; a mapped human
+    // initiator becomes the run's acting user immediately so their task gets
+    // integration MCP access from the first turn.
+    const initiatorLinkedUserId =
+      initiator.kind === 'user'
+        ? 'userId' in initiator
+          ? initiator.userId
+          : (initiator.matchedUserId ?? null)
+        : null;
     const taskRun = await startSlackAppMentionTask({
       initiator,
       trigger,
@@ -464,7 +477,7 @@ export async function startAutoRoutedSlackTask({
       latestOwnBotReplyTs: latestOwnBotReply?.ts,
       webPath,
       slackConversationUrl: slackConversationUrl ?? undefined,
-      skipInitialActingUser: true,
+      skipInitialActingUser: !initiatorLinkedUserId,
       ...(existingMessageTs
         ? {
             queuedStartedMessage: {
