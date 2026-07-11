@@ -263,6 +263,7 @@ export const SETUP_COMPUTE_PROVIDER_CATALOG = [
     description:
       'Hosted Daytona sandboxes with snapshot support and API-key-only onboarding.',
     supportsSnapshots: true,
+    comment: 'Recommended',
     fields: [
       {
         envVarName: 'DAYTONA_API_KEY',
