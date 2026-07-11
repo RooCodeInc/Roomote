@@ -203,6 +203,18 @@ function buildAuthorizationHeader(username: string, token: string): string {
   return `Basic ${Buffer.from(`${username}:${token}`).toString('base64')}`;
 }
 
+/**
+ * Static username Bitbucket Cloud accepts for git-over-HTTPS when the secret
+ * is an Atlassian API token. API tokens pair with the Atlassian account email
+ * for REST calls, but git rejects the email form, so git credentials must use
+ * this documented static user instead.
+ */
+export const BITBUCKET_API_TOKEN_GIT_USERNAME = 'x-bitbucket-api-token-auth';
+
+export function getBitbucketGitUsername(username: string): string {
+  return username.includes('@') ? BITBUCKET_API_TOKEN_GIT_USERNAME : username;
+}
+
 function stripUuidBraces(value: string): string {
   return value.replace(/^\{|\}$/g, '');
 }
@@ -374,14 +386,12 @@ async function resolveAuthIdentity({
     };
   }
 
-  // Bitbucket App Passwords require the account username. Discover it from
-  // /user when the operator did not configure BITBUCKET_USERNAME — use a
-  // provisional "x" username is not valid for Basic auth discovery, so require
-  // username for the first call path only when we already have one. Instead,
-  // try OAuth-style Bearer if Basic username is missing? Cloud App Passwords
-  // need username. Force username environment for basic auth.
+  // Bitbucket Cloud Basic auth needs an identity alongside the secret: the
+  // Atlassian account email for API tokens, or the account username for
+  // legacy app passwords. There is no discovery endpoint that works without
+  // it, so the value must be configured up front.
   throw new Error(
-    'BITBUCKET_USERNAME is required with BITBUCKET_TOKEN (Bitbucket App Password username).',
+    'BITBUCKET_USERNAME is required with BITBUCKET_TOKEN. Set it to the Atlassian account email that owns the API token (or the Bitbucket username for a legacy app password).',
   );
 }
 
@@ -458,7 +468,7 @@ export async function validateBitbucketToken({
       return {
         status: 'invalid',
         error:
-          'Bitbucket rejected the token. Confirm the App Password is active and has repository access.',
+          'Bitbucket rejected the credentials. Pair an Atlassian API token with the Atlassian account email (legacy app passwords pair with the Bitbucket username), and confirm the token is active with repository access.',
       };
     }
 
@@ -1200,7 +1210,7 @@ export async function createTaskRunBitbucketCredentials(
     credentials: repositoriesList.map((repository) => ({
       host,
       repositoryFullName: repository.fullName,
-      username: auth.username,
+      username: getBitbucketGitUsername(auth.username),
       token: auth.token,
       originBaseUrl: auth.baseUrl,
     })),

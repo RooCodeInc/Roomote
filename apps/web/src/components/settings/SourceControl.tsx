@@ -93,7 +93,7 @@ const TOKEN_PROVIDER_UI = {
   },
   bitbucket: {
     accessibleResource: 'repositories',
-    credentialName: 'app password',
+    credentialName: 'API token',
     repositoryTarget: '_bitbucket',
   },
   ado: {

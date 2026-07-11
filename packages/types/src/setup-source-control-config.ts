@@ -311,13 +311,13 @@ function buildProviderFields(
         {
           envVarName: 'BITBUCKET_TOKEN',
           acceptedEnvVarNames: ['BITBUCKET_TOKEN'],
-          label: 'Bitbucket App Password',
+          label: 'Bitbucket API Token',
           secret: true,
         },
         {
           envVarName: 'BITBUCKET_USERNAME',
           acceptedEnvVarNames: ['BITBUCKET_USERNAME'],
-          label: 'Bitbucket Username',
+          label: 'Atlassian Account Email',
         },
         {
           envVarName: 'BITBUCKET_BASE_URL',
