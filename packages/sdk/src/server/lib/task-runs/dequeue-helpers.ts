@@ -152,6 +152,48 @@ export async function fetchEnvVars(
   );
 }
 
+/**
+ * Legacy aliases for workers frozen inside sandbox snapshots created before
+ * the R_* env rename: those builds read the old ROOMOTE_* names from the
+ * task env delivered at dequeue/resume. Applied only to worker-bound env.
+ * Remove once pre-rename snapshots have aged out (see the matching
+ * ROOMOTE_APP_URL alias in @roomote/compute-providers worker-env).
+ */
+const LEGACY_MODEL_RUNTIME_ENV_ALIASES: Record<string, string> = {
+  R_MODEL: 'ROOMOTE_MODEL',
+  R_SMALL_MODEL: 'ROOMOTE_SMALL_MODEL',
+  R_VISION_MODEL: 'ROOMOTE_VISION_MODEL',
+  R_CODE_REVIEW_MODEL: 'ROOMOTE_CODE_REVIEW_MODEL',
+  R_EXPLORE_MODEL: 'ROOMOTE_EXPLORE_MODEL',
+  R_PLANNING_MODEL: 'ROOMOTE_PLANNING_MODEL',
+  R_MODEL_REASONING_EFFORT: 'ROOMOTE_MODEL_REASONING_EFFORT',
+  R_SMALL_MODEL_REASONING_EFFORT: 'ROOMOTE_SMALL_MODEL_REASONING_EFFORT',
+  R_VISION_MODEL_REASONING_EFFORT: 'ROOMOTE_VISION_MODEL_REASONING_EFFORT',
+  R_CODE_REVIEW_MODEL_REASONING_EFFORT:
+    'ROOMOTE_CODE_REVIEW_MODEL_REASONING_EFFORT',
+  R_EXPLORE_MODEL_REASONING_EFFORT: 'ROOMOTE_EXPLORE_MODEL_REASONING_EFFORT',
+  R_PLANNING_MODEL_REASONING_EFFORT: 'ROOMOTE_PLANNING_MODEL_REASONING_EFFORT',
+  R_MODEL_ENV_KEYS: 'ROOMOTE_MODEL_ENV_KEYS',
+};
+
+function withLegacySnapshotModelEnvAliases(
+  env: Record<string, string>,
+): Record<string, string> {
+  const aliased = { ...env };
+
+  for (const [canonical, legacy] of Object.entries(
+    LEGACY_MODEL_RUNTIME_ENV_ALIASES,
+  )) {
+    const value = aliased[canonical];
+
+    if (value !== undefined && aliased[legacy] === undefined) {
+      aliased[legacy] = value;
+    }
+  }
+
+  return aliased;
+}
+
 export async function fetchResolvedRuntimeEnvVars(
   deploymentEnvVars?: Record<string, string>,
   options?: {
@@ -166,10 +208,10 @@ export async function fetchResolvedRuntimeEnvVars(
 
   return redactControlPlaneEnvVars(
     redactSourceControlProviderEnvVars(
-      {
+      withLegacySnapshotModelEnvAliases({
         ...envVars,
         ...resolvedModelRuntimeEnv,
-      },
+      }),
       options?.sourceControlProvider,
     ),
   );

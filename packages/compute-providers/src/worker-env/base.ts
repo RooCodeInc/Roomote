@@ -105,6 +105,10 @@ export function buildBaseWorkerEnv({
     // operate in.
     ...(process.env.APP_ENV && {
       R_APP_ENV: process.env.APP_ENV,
+      // Legacy alias: pre-rename snapshot workers read ROOMOTE_APP_ENV and
+      // would otherwise fall back to development behavior. Remove with the
+      // ROOMOTE_APP_URL alias below once pre-rename snapshots have aged out.
+      ROOMOTE_APP_ENV: process.env.APP_ENV,
     }),
     ...(sandboxExpiresAtMs !== undefined && {
       SANDBOX_EXPIRES_AT_MS: String(sandboxExpiresAtMs),
