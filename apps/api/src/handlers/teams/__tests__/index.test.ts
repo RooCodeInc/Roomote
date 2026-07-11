@@ -25,6 +25,7 @@ const {
   queueCommunicationMessageMock,
   redisSetMock,
   routeTaskMock,
+  setTrustedRunActingUserMock,
   shouldRouteUnmentionedReplyMock,
   teamsInstallationsTable,
   teamsUserMappingsTable,
@@ -76,6 +77,7 @@ const {
   queueCommunicationMessageMock: vi.fn(),
   redisSetMock: vi.fn(),
   routeTaskMock: vi.fn(),
+  setTrustedRunActingUserMock: vi.fn(),
   shouldRouteUnmentionedReplyMock: vi.fn(),
   teamsInstallationsTable: {
     installationKey: 'installationKey',
@@ -106,6 +108,7 @@ vi.mock('@roomote/redis', () => ({
 
 vi.mock('@roomote/db/server', () => ({
   and: vi.fn((...conditions: unknown[]) => ({ and: conditions })),
+  setTrustedRunActingUser: setTrustedRunActingUserMock,
   resolveTeamsBotRuntimeCredentials: vi.fn(async () => ({
     botAppId: envMock.TEAMS_BOT_APP_ID?.trim() || null,
     botAppPassword: envMock.TEAMS_BOT_APP_PASSWORD?.trim() || null,
@@ -446,6 +449,10 @@ describe('Teams webhook handler', () => {
       channel: '19:conversation@thread.v2',
       threadTs: 'activity-root',
     });
+    expect(setTrustedRunActingUserMock).toHaveBeenCalledWith({
+      runId: 77,
+      userId: 'mapped-user-1',
+    });
   });
 
   it('queues untagged Teams thread replies for matching active task runs using the root thread id', async () => {
@@ -716,6 +723,10 @@ describe('Teams webhook handler', () => {
       ts: 'activity-2',
       channel: '19:conversation@thread.v2',
       threadTs: 'activity-root',
+    });
+    expect(setTrustedRunActingUserMock).toHaveBeenCalledWith({
+      runId: 77,
+      userId: 'microsoft-user-1',
     });
   });
 
