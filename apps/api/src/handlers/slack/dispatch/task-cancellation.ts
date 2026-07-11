@@ -18,6 +18,7 @@ import {
 } from '@roomote/db/server';
 
 import { stopTaskRun } from '../../tasks/task-stop.js';
+import { lookupSlackUserMapping } from '../helpers/user-mapping.js';
 
 type CancelableTaskRunTarget = Parameters<typeof stopTaskRun>[0]['run'] & {
   taskId: string | null;
@@ -127,8 +128,17 @@ export async function handleTaskCancellation(
       return;
     }
 
+    // Prefer the canceling Slack user's linked Roomote account for the
+    // sandbox stop token when present; otherwise stopTaskRun falls back to
+    // the run actor or a deployment-principal token.
+    const cancelerMapping = await lookupSlackUserMapping({
+      slackUserId: payload.user.id,
+      teamId: payload.team.id,
+    });
+
     const stopResult = await stopTaskRun({
       run: cancelableTaskRun,
+      authUserId: cancelerMapping.activeMapping?.userId ?? null,
       allowDirectCancelWithoutSandbox: true,
       cancelledBy: {
         ...(payload.user.name ? { name: payload.user.name } : {}),

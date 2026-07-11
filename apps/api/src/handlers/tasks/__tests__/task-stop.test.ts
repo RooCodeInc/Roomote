@@ -109,6 +109,31 @@ describe('stopTaskRun', () => {
     );
   });
 
+  it('stops a running sandbox with a deployment-principal token when no human actor is known', async () => {
+    // Slack/Telegram cancel buttons often fire while actingUserId is still
+    // null on chat-started runs; cancel must still mint a principal run token.
+    const run = {
+      id: 7,
+      status: RunStatus.Running,
+      sandboxServerUrl: 'https://sandbox.example',
+      actingUserId: null,
+    };
+
+    const result = await stopTaskRun({
+      run,
+      cancelledBy: { name: 'alice', source: 'slack' },
+    });
+
+    expect(result).toEqual({ success: true, mode: 'sandbox_stop' });
+    expect(mockWithSandboxServerRpcClient).toHaveBeenCalledWith(
+      expect.objectContaining({
+        runId: 7,
+        userId: null,
+        sandboxServerUrl: 'https://sandbox.example',
+      }),
+    );
+  });
+
   it('persists cancel intent even when the sandbox stop RPC fails', async () => {
     const run = {
       id: 7,
