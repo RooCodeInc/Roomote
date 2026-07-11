@@ -103,8 +103,6 @@ import type { TaskRun } from '@roomote/db/server';
 import type { PrReviewActivityEvent } from '../pr-review-notification';
 
 import {
-  appendPrReviewCiStatusSentence,
-  formatPrReviewCiStatusSentence,
   gatherPrReviewTriageContext,
   preparePrReviewNotificationDelivery,
   recordPrReviewNotificationDeliveryBestEffort,
@@ -215,11 +213,16 @@ describe('preparePrReviewNotificationDelivery', () => {
       prUrl: 'https://github.com/owner/repo/pull/42',
       provider: 'slack',
       summary:
-        'alice approved [owner/repo#42](https://github.com/owner/repo/pull/42). CI is green.',
+        'alice approved [owner/repo#42](https://github.com/owner/repo/pull/42).',
     });
+    expect(mockGenerateObject).toHaveBeenCalledWith(
+      expect.objectContaining({
+        prompt: expect.stringContaining('- CI overall status: success'),
+      }),
+    );
   });
 
-  it('appends a failed check sentence with the failed check name', async () => {
+  it('passes failed check name into the triage LLM context', async () => {
     mockListCheckRunsForRef.mockResolvedValue({
       data: {
         check_runs: [
@@ -242,12 +245,18 @@ describe('preparePrReviewNotificationDelivery', () => {
       events,
     });
 
-    expect(mockFormatMessage).toHaveBeenCalledWith(
-      expect.objectContaining({
-        summary:
-          'alice approved [owner/repo#42](https://github.com/owner/repo/pull/42). Lint failed - should I take a look?',
-      }),
-    );
+    const prompt = mockGenerateObject.mock.calls[0]?.[0]?.prompt as string;
+
+    expect(prompt).toContain('- CI overall status: failure');
+    expect(prompt).toContain('- Failed check name: Lint');
+    expect(mockFormatMessage).toHaveBeenCalledWith({
+      repository: 'owner/repo',
+      prNumber: 42,
+      prUrl: 'https://github.com/owner/repo/pull/42',
+      provider: 'slack',
+      summary:
+        'alice approved [owner/repo#42](https://github.com/owner/repo/pull/42).',
+    });
   });
 
   it('skips without triage when no conversation route can be resolved', async () => {
@@ -342,7 +351,7 @@ describe('triagePrReviewActivity', () => {
       'do not omit the platform name on these self-review messages',
     );
     expect(system).toContain(
-      'do not mention CI, checks, builds, lint, or pipeline status',
+      'when "Current pull request state" (or a CI block) includes CI overall',
     );
   });
 
@@ -360,7 +369,7 @@ describe('triagePrReviewActivity', () => {
         latestReviewStatus: '2 issues outstanding.',
         latestReviewSummaryComment:
           '<!-- roomote-review-summary sha=abc mode=initial -->\n<!-- roomote-review-checklist:start -->\n- [ ] `apps/api/src/foo.ts:10` - Handle null actor ids\n- [ ] `apps/api/src/bar.ts:20` - Rename the helper to match its return shape\n<!-- roomote-review-checklist:end -->',
-        ciStatusSentence: 'CI is green.',
+        ciStatus: { overall: 'success', failedCheckName: null },
       },
     });
 
@@ -372,7 +381,8 @@ describe('triagePrReviewActivity', () => {
     expect(prompt).toContain('Handle null actor ids');
     expect(prompt).toContain('Rename the helper to match its return shape');
     expect(prompt).not.toContain('- Latest automated review status:');
-    expect(prompt).not.toContain('Current pull request state:');
+    expect(prompt).toContain('Current pull request state:');
+    expect(prompt).toContain('- CI overall status: success');
   });
 
   it('returns a skip decision when the model says the activity is not worth notifying', async () => {
@@ -453,11 +463,11 @@ describe('gatherPrReviewTriageContext', () => {
       latestReviewStatus: 'All 1 issue addressed. See task',
       latestReviewSummaryComment:
         '<!-- roomote-review-summary sha=abc mode=initial -->\n<!-- roomote-review-status:start -->\n**All 1 issue addressed.** [See task](https://example.com)\n<!-- roomote-review-status:end -->',
-      ciStatusSentence: 'CI is green.',
+      ciStatus: { overall: 'success', failedCheckName: null },
     });
   });
 
-  it('includes a pending CI sentence when checks are still running', async () => {
+  it('includes pending CI status when checks are still running', async () => {
     mockListCheckRunsForRef.mockResolvedValue({
       data: {
         check_runs: [
@@ -475,10 +485,13 @@ describe('gatherPrReviewTriageContext', () => {
       prNumber: request.prNumber,
     });
 
-    expect(context.ciStatusSentence).toBe('Tests are still running.');
+    expect(context.ciStatus).toEqual({
+      overall: 'pending',
+      failedCheckName: null,
+    });
   });
 
-  it('treats empty combined status as unavailable so green Actions check runs report green', async () => {
+  it('treats empty combined status as unavailable so green Actions check runs report success', async () => {
     mockListCheckRunsForRef.mockResolvedValue({
       data: {
         check_runs: [
@@ -497,10 +510,13 @@ describe('gatherPrReviewTriageContext', () => {
       prNumber: request.prNumber,
     });
 
-    expect(context.ciStatusSentence).toBe('CI is green.');
+    expect(context.ciStatus).toEqual({
+      overall: 'success',
+      failedCheckName: null,
+    });
   });
 
-  it('skips CI sentence for non-GitHub source-control providers', async () => {
+  it('skips CI status for non-GitHub source-control providers', async () => {
     const context = await gatherPrReviewTriageContext({
       taskRun,
       repository: request.repository,
@@ -508,7 +524,7 @@ describe('gatherPrReviewTriageContext', () => {
       sourceControlProvider: 'gitlab',
     });
 
-    expect(context.ciStatusSentence).toBeNull();
+    expect(context.ciStatus).toBeNull();
     expect(mockPullsGet).not.toHaveBeenCalled();
     expect(mockListCheckRunsForRef).not.toHaveBeenCalled();
     expect(mockGetCombinedStatusForRef).not.toHaveBeenCalled();
@@ -531,7 +547,7 @@ describe('gatherPrReviewTriageContext', () => {
       unresolvedThreadCount: null,
       latestReviewStatus: null,
       latestReviewSummaryComment: null,
-      ciStatusSentence: null,
+      ciStatus: null,
     });
   });
 });
@@ -540,48 +556,6 @@ describe('CI status helpers', () => {
   it('shortens matrix-style check names to the leaf segment', () => {
     expect(shortenPrReviewCheckName('CI / Lint')).toBe('Lint');
     expect(shortenPrReviewCheckName('unit-tests')).toBe('unit-tests');
-  });
-
-  it('formats green, pending, and failed CI sentences', () => {
-    expect(
-      formatPrReviewCiStatusSentence({
-        overall: 'success',
-        failedCheckName: null,
-      }),
-    ).toBe('CI is green.');
-    expect(
-      formatPrReviewCiStatusSentence({
-        overall: 'pending',
-        failedCheckName: null,
-      }),
-    ).toBe('Tests are still running.');
-    expect(
-      formatPrReviewCiStatusSentence({
-        overall: 'failure',
-        failedCheckName: 'Lint',
-      }),
-    ).toBe('Lint failed - should I take a look?');
-    expect(
-      formatPrReviewCiStatusSentence({
-        overall: 'failure',
-        failedCheckName: null,
-      }),
-    ).toBe('CI failed - should I take a look?');
-  });
-
-  it('appends CI status unless the summary already mentions CI', () => {
-    expect(
-      appendPrReviewCiStatusSentence('Alice approved the PR.', 'CI is green.'),
-    ).toBe('Alice approved the PR. CI is green.');
-    expect(
-      appendPrReviewCiStatusSentence(
-        'Alice approved and CI is green already.',
-        'CI is green.',
-      ),
-    ).toBe('Alice approved and CI is green already.');
-    expect(
-      appendPrReviewCiStatusSentence('Alice approved', 'CI is green.'),
-    ).toBe('Alice approved. CI is green.');
   });
 });
 

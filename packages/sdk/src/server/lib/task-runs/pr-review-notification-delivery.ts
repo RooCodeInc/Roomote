@@ -39,8 +39,6 @@ const FAILED_CHECK_CONCLUSIONS = new Set([
   'timed_out',
   'startup_failure',
 ]);
-const CI_MENTION_PATTERN =
-  /\b(ci|checks?|tests?|lint|build|pipeline)\b[\s\S]{0,40}\b(green|pass(?:ed|ing)?|fail(?:ed|ing)?|running|pending|broken)\b|\b(green|pass(?:ed|ing)?|fail(?:ed|ing)?|running|pending|broken)\b[\s\S]{0,40}\b(ci|checks?|tests?|lint|build|pipeline)\b/i;
 
 const prReviewTriageResponseSchema = z.object({
   worthNotifying: z.boolean(),
@@ -60,10 +58,10 @@ export type PrReviewTriageContext = {
   latestReviewStatus: string | null;
   latestReviewSummaryComment: string | null;
   /**
-   * Short user-facing sentence about current CI check state on the PR head,
-   * ready to append to the chat notification when present.
+   * Resolved CI check state for the PR head, when available. Fed into the
+   * triage LLM so the chat message can mention CI naturally.
    */
-  ciStatusSentence: string | null;
+  ciStatus: PrReviewCiStatus | null;
 };
 
 type PrReviewTriageDecision =
@@ -90,60 +88,6 @@ export function shortenPrReviewCheckName(name: string): string {
     ?.trim();
 
   return leaf && leaf.length > 0 ? leaf : trimmed;
-}
-
-/**
- * Turn a resolved CI overall status into a short chat sentence.
- */
-export function formatPrReviewCiStatusSentence(
-  status: PrReviewCiStatus,
-): string {
-  switch (status.overall) {
-    case 'success':
-      return 'CI is green.';
-    case 'pending':
-      return 'Tests are still running.';
-    case 'failure':
-    case 'error': {
-      const checkName = status.failedCheckName?.trim();
-
-      if (checkName) {
-        return `${checkName} failed - should I take a look?`;
-      }
-
-      return 'CI failed - should I take a look?';
-    }
-  }
-}
-
-/**
- * Append a CI status sentence to an LLM notification summary, skipping when
- * the summary already talks about CI so we do not double-mention it.
- */
-export function appendPrReviewCiStatusSentence(
-  summary: string,
-  ciStatusSentence: string | null | undefined,
-): string {
-  const trimmedSummary = summary.trim();
-  const sentence = ciStatusSentence?.trim();
-
-  if (!sentence) {
-    return trimmedSummary;
-  }
-
-  if (CI_MENTION_PATTERN.test(trimmedSummary)) {
-    return trimmedSummary;
-  }
-
-  if (
-    trimmedSummary.endsWith('.') ||
-    trimmedSummary.endsWith('?') ||
-    trimmedSummary.endsWith('!')
-  ) {
-    return `${trimmedSummary} ${sentence}`;
-  }
-
-  return `${trimmedSummary}. ${sentence}`;
 }
 
 function mergeCiOverallStatus(
@@ -219,11 +163,11 @@ function summarizeCheckRuns(
 }
 
 /**
- * Resolve a short CI status sentence for the PR head using GitHub check runs
- * and the classic combined commit status. Non-GitHub providers currently return
- * null; failures to fetch status are treated as unavailable, not as red CI.
+ * Resolve CI check state for the PR head using GitHub check runs and the
+ * classic combined commit status. Non-GitHub providers currently return null;
+ * failures to fetch status are treated as unavailable, not as red CI.
  */
-async function fetchPrReviewCiStatusSentence({
+async function fetchPrReviewCiStatus({
   taskRun,
   repository,
   prNumber,
@@ -233,7 +177,7 @@ async function fetchPrReviewCiStatusSentence({
   repository: string;
   prNumber: number;
   sourceControlProvider?: SourceControlProvider;
-}): Promise<string | null> {
+}): Promise<PrReviewCiStatus | null> {
   const provider = normalizeSourceControlProvider(sourceControlProvider);
 
   if (provider !== 'github') {
@@ -333,11 +277,11 @@ async function fetchPrReviewCiStatusSentence({
       return null;
     }
 
-    return formatPrReviewCiStatusSentence({
+    return {
       overall,
       failedCheckName:
         checkSummary?.failedCheckName ?? failedStatusContext ?? null,
-    });
+    };
   } catch (error) {
     console.warn(
       `[PrReviewNotification] Could not resolve CI status for ${repository}#${prNumber}: ${
@@ -425,8 +369,12 @@ any feedback. Rules:
 - when there is nothing actionable, do not add a question or call to action
 - never claim that any changes were made in response to the feedback, and do
   not promise follow-up actions
-- do not mention CI, checks, builds, lint, or pipeline status; a short sentence
-  about the current CI state is appended separately after your summary
+- when "Current pull request state" (or a CI block) includes CI overall
+  status, weave one short natural sentence about that CI state into the chat
+  message; examples that fit common cases: "CI is green.", "Tests are still
+  running.", or "{failed check name} failed - should I take a look?" for a
+  named failure (use the failed check name when one is given)
+- never invent CI status when those fields are absent
 - do not mention this triage step or that the input was parsed
 - if "worthNotifying" is false, "summary" may be an empty string
 
@@ -472,7 +420,7 @@ async function fetchPrDiscussionSignals({
   taskRun: TaskRun;
   repository: string;
   prNumber: number;
-}): Promise<Omit<PrReviewTriageContext, 'ciStatusSentence'>> {
+}): Promise<Omit<PrReviewTriageContext, 'ciStatus'>> {
   const result = await readSourceControlPullRequestForTaskRun({
     taskRun,
     input: {
@@ -535,7 +483,7 @@ export async function gatherPrReviewTriageContext({
   prNumber: number;
   sourceControlProvider?: SourceControlProvider;
 }): Promise<PrReviewTriageContext> {
-  const [discussionResult, ciStatusSentence] = await Promise.all([
+  const [discussionResult, ciStatus] = await Promise.all([
     (async () => {
       try {
         return await fetchPrDiscussionSignals({
@@ -558,7 +506,7 @@ export async function gatherPrReviewTriageContext({
         };
       }
     })(),
-    fetchPrReviewCiStatusSentence({
+    fetchPrReviewCiStatus({
       taskRun,
       repository,
       prNumber,
@@ -568,8 +516,22 @@ export async function gatherPrReviewTriageContext({
 
   return {
     ...discussionResult,
-    ciStatusSentence,
+    ciStatus,
   };
+}
+
+function buildCiContextLines(context: PrReviewTriageContext): string[] {
+  if (!context.ciStatus) {
+    return [];
+  }
+
+  const lines = [`- CI overall status: ${context.ciStatus.overall}`];
+
+  if (context.ciStatus.failedCheckName) {
+    lines.push(`- Failed check name: ${context.ciStatus.failedCheckName}`);
+  }
+
+  return lines;
 }
 
 function buildContextLines(
@@ -577,15 +539,22 @@ function buildContextLines(
   options?: { containsSelfReviewResult?: boolean },
 ): string[] {
   const lines: string[] = [];
+  const ciLines = buildCiContextLines(context);
 
   if (options?.containsSelfReviewResult) {
-    return context.latestReviewSummaryComment
-      ? [
-          '',
-          'Latest Roomote review summary comment (verbatim):',
-          context.latestReviewSummaryComment,
-        ]
-      : [];
+    if (context.latestReviewSummaryComment) {
+      lines.push(
+        '',
+        'Latest Roomote review summary comment (verbatim):',
+        context.latestReviewSummaryComment,
+      );
+    }
+
+    if (ciLines.length > 0) {
+      lines.push('', 'Current pull request state:', ...ciLines);
+    }
+
+    return lines;
   }
 
   if (context.unresolvedThreadCount !== null) {
@@ -602,9 +571,7 @@ function buildContextLines(
     );
   }
 
-  if (context.ciStatusSentence !== null) {
-    lines.push(`- Current CI checks: ${context.ciStatusSentence}`);
-  }
+  lines.push(...ciLines);
 
   return lines.length > 0 ? ['', 'Current pull request state:', ...lines] : [];
 }
@@ -712,10 +679,7 @@ export async function preparePrReviewNotificationDelivery({
       prNumber: request.prNumber,
       prUrl: request.prUrl,
       provider: route.provider,
-      summary: appendPrReviewCiStatusSentence(
-        triage.summary,
-        context.ciStatusSentence,
-      ),
+      summary: triage.summary,
     }),
   };
 }
