@@ -4,9 +4,9 @@ icon: 'https://api.iconify.design/simple-icons:bitbucket.svg?color=currentColor'
 description: Configure Bitbucket Cloud repository sync and pull request webhooks for Roomote.
 ---
 
-Bitbucket Cloud support uses a deployment-owned app password and username. This
-MVP covers Bitbucket Cloud only. Bitbucket Server and Data Center are not
-supported yet.
+Bitbucket Cloud support uses a deployment-owned Atlassian API token paired with
+the Atlassian account email. This MVP covers Bitbucket Cloud only. Bitbucket
+Server and Data Center are not supported yet.
 
 Repository sync can also create pull request webhooks, allowing Review Code
 automation and `@roomote` pull request comments to work for synced Bitbucket
@@ -14,24 +14,28 @@ Cloud repositories.
 
 Use `<public-url>` below for your stable public Roomote URL.
 
-## Create a Bitbucket app password
+## Create an Atlassian API token
 
 Create a dedicated Bitbucket Cloud bot or service account and give it access to
-the workspaces or repositories Roomote should use. Create an app password with
-these scopes:
+the workspaces or repositories Roomote should use. In that account's
+[Atlassian account settings](https://id.atlassian.com/manage-profile/security/api-tokens),
+choose **Create API token with scopes**, select **Bitbucket** as the app, and
+grant these scopes:
 
 | Scope | Needed for |
 | ----- | ---------- |
-| repository:read and repository:write | cloning, branch creation, and commits |
-| pullrequest:read and pullrequest:write | pull request workflows and comments |
-| webhook | automatic webhook setup during repository sync |
+| read:repository:bitbucket and write:repository:bitbucket | cloning, branch creation, and commits |
+| read:pullrequest:bitbucket and write:pullrequest:bitbucket | pull request workflows and comments |
+| read:webhook:bitbucket and write:webhook:bitbucket | automatic webhook setup during repository sync |
+| read:workspace:bitbucket | workspace discovery during repository sync |
+| read:user:bitbucket | identity validation when saving credentials |
 
-Save the token, username, and optional base URL in setup, deployment env vars,
+Save the token and the Atlassian account email in setup, deployment env vars,
 or local `.env.local`:
 
 ```sh
-BITBUCKET_TOKEN=<bitbucket-app-password>
-BITBUCKET_USERNAME=<bitbucket-username>
+BITBUCKET_TOKEN=<atlassian-api-token>
+BITBUCKET_USERNAME=<atlassian-account-email>
 ```
 
 Optional values:
@@ -41,8 +45,10 @@ BITBUCKET_BASE_URL=https://bitbucket.org
 BITBUCKET_WEBHOOK_SECRET=<webhook-secret>
 ```
 
-`BITBUCKET_USERNAME` is required with `BITBUCKET_TOKEN` (it is the Bitbucket
-account username paired with the app password for Basic auth).
+`BITBUCKET_USERNAME` is required with `BITBUCKET_TOKEN` and holds the Atlassian
+account email that owns the token (Bitbucket pairs the two for REST auth). For
+git-over-HTTPS, Roomote automatically uses Bitbucket's static
+`x-bitbucket-api-token-auth` user, so no extra configuration is needed.
 `BITBUCKET_BASE_URL` defaults to `https://bitbucket.org`. Only Bitbucket Cloud
 is accepted; other hosts are rejected.
 

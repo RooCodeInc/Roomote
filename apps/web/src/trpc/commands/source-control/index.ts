@@ -735,7 +735,7 @@ export async function assertValidSourceControlConfigInput(params: {
 
     if (!nextBitbucketUsername) {
       throw new Error(
-        'BITBUCKET_USERNAME is required with BITBUCKET_TOKEN for Bitbucket Cloud App Password authentication.',
+        'BITBUCKET_USERNAME is required with BITBUCKET_TOKEN. Set it to the Atlassian account email that owns the API token.',
       );
     }
 

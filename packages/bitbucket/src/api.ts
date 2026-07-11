@@ -76,6 +76,18 @@ const bitbucketPaginatedRepositoriesSchema = z.object({
   next: z.string().nullable().optional(),
 });
 
+const bitbucketWorkspaceMembershipSchema = z.object({
+  workspace: z.object({
+    slug: z.string().optional(),
+    uuid: z.string().optional(),
+  }),
+});
+
+const bitbucketPaginatedWorkspaceMembershipsSchema = z.object({
+  values: z.array(bitbucketWorkspaceMembershipSchema),
+  next: z.string().nullable().optional(),
+});
+
 const bitbucketUserSchema = z.object({
   uuid: z.string().optional(),
   account_id: z.string().optional(),
@@ -201,6 +213,18 @@ export function buildBitbucketApiBaseUrl(baseUrl: string): string {
 
 function buildAuthorizationHeader(username: string, token: string): string {
   return `Basic ${Buffer.from(`${username}:${token}`).toString('base64')}`;
+}
+
+/**
+ * Static username Bitbucket Cloud accepts for git-over-HTTPS when the secret
+ * is an Atlassian API token. API tokens pair with the Atlassian account email
+ * for REST calls, but git rejects the email form, so git credentials must use
+ * this documented static user instead.
+ */
+export const BITBUCKET_API_TOKEN_GIT_USERNAME = 'x-bitbucket-api-token-auth';
+
+export function getBitbucketGitUsername(username: string): string {
+  return username.includes('@') ? BITBUCKET_API_TOKEN_GIT_USERNAME : username;
 }
 
 function stripUuidBraces(value: string): string {
@@ -374,14 +398,11 @@ async function resolveAuthIdentity({
     };
   }
 
-  // Bitbucket App Passwords require the account username. Discover it from
-  // /user when the operator did not configure BITBUCKET_USERNAME — use a
-  // provisional "x" username is not valid for Basic auth discovery, so require
-  // username for the first call path only when we already have one. Instead,
-  // try OAuth-style Bearer if Basic username is missing? Cloud App Passwords
-  // need username. Force username environment for basic auth.
+  // Bitbucket Cloud REST auth pairs the API token with the Atlassian account
+  // email. There is no discovery endpoint that works without it, so the value
+  // must be configured up front.
   throw new Error(
-    'BITBUCKET_USERNAME is required with BITBUCKET_TOKEN (Bitbucket App Password username).',
+    'BITBUCKET_USERNAME is required with BITBUCKET_TOKEN. Set it to the Atlassian account email that owns the API token.',
   );
 }
 
@@ -458,7 +479,7 @@ export async function validateBitbucketToken({
       return {
         status: 'invalid',
         error:
-          'Bitbucket rejected the token. Confirm the App Password is active and has repository access.',
+          'Bitbucket rejected the credentials. Confirm the API token is active, is paired with the Atlassian account email that owns it, and includes the read:user:bitbucket scope alongside repository access.',
       };
     }
 
@@ -487,36 +508,73 @@ export async function listBitbucketRepositories({
     fetchImpl,
   });
 
-  const repositoriesList: BitbucketRepository[] = [];
-  let nextUrl: string | null = buildBitbucketApiUrl(
+  // Bitbucket removed all cross-workspace listings on April 14, 2026
+  // (changelog CHANGE-2770): GET /2.0/repositories?role=..., /2.0/workspaces,
+  // and /2.0/user/permissions/workspaces all return 410 Gone. The only
+  // supported membership enumeration is the newer GET /2.0/user/workspaces;
+  // repositories must then be listed per workspace.
+  const workspaceSlugs: string[] = [];
+  let workspacesUrl: string | null = buildBitbucketApiUrl(
     auth.apiBaseUrl,
-    '/repositories',
-    {
-      role: 'member',
-      pagelen: BITBUCKET_REPOSITORIES_PER_PAGE,
-    },
+    '/user/workspaces',
+    { pagelen: BITBUCKET_REPOSITORIES_PER_PAGE },
   );
 
-  while (nextUrl) {
+  while (workspacesUrl) {
     const {
       data,
-    }: { data: z.infer<typeof bitbucketPaginatedRepositoriesSchema> } =
-      await requestBitbucketJson({
-        apiBaseUrl: auth.apiBaseUrl,
-        fetchImpl,
-        username: auth.username,
-        token: auth.token,
-        schema: bitbucketPaginatedRepositoriesSchema,
-        absoluteUrl: nextUrl,
-      });
+    }: {
+      data: z.infer<typeof bitbucketPaginatedWorkspaceMembershipsSchema>;
+    } = await requestBitbucketJson({
+      apiBaseUrl: auth.apiBaseUrl,
+      fetchImpl,
+      username: auth.username,
+      token: auth.token,
+      schema: bitbucketPaginatedWorkspaceMembershipsSchema,
+      absoluteUrl: workspacesUrl,
+    });
 
-    repositoriesList.push(...data.values);
+    for (const membership of data.values) {
+      const slug = membership.workspace.slug?.trim();
 
-    if (stopAfter !== undefined && repositoriesList.length >= stopAfter) {
-      return repositoriesList.slice(0, stopAfter);
+      if (slug) {
+        workspaceSlugs.push(slug);
+      }
     }
 
-    nextUrl = data.next ?? null;
+    workspacesUrl = data.next ?? null;
+  }
+
+  const repositoriesList: BitbucketRepository[] = [];
+
+  for (const workspaceSlug of workspaceSlugs) {
+    let nextUrl: string | null = buildBitbucketApiUrl(
+      auth.apiBaseUrl,
+      `/repositories/${encodeURIComponent(workspaceSlug)}`,
+      { pagelen: BITBUCKET_REPOSITORIES_PER_PAGE },
+    );
+
+    while (nextUrl) {
+      const {
+        data,
+      }: { data: z.infer<typeof bitbucketPaginatedRepositoriesSchema> } =
+        await requestBitbucketJson({
+          apiBaseUrl: auth.apiBaseUrl,
+          fetchImpl,
+          username: auth.username,
+          token: auth.token,
+          schema: bitbucketPaginatedRepositoriesSchema,
+          absoluteUrl: nextUrl,
+        });
+
+      repositoriesList.push(...data.values);
+
+      if (stopAfter !== undefined && repositoriesList.length >= stopAfter) {
+        return repositoriesList.slice(0, stopAfter);
+      }
+
+      nextUrl = data.next ?? null;
+    }
   }
 
   return repositoriesList;
@@ -1200,7 +1258,7 @@ export async function createTaskRunBitbucketCredentials(
     credentials: repositoriesList.map((repository) => ({
       host,
       repositoryFullName: repository.fullName,
-      username: auth.username,
+      username: getBitbucketGitUsername(auth.username),
       token: auth.token,
       originBaseUrl: auth.baseUrl,
     })),
