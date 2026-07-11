@@ -19,6 +19,9 @@ const ENV_VAR_NAMES = [
   'R_TEAMS_BOT_TENANT_ID',
   'R_TEAMS_BOT_TOKEN_ENDPOINT',
   'R_TEAMS_BOT_OAUTH_SCOPE',
+  'R_MICROSOFT_CLIENT_ID',
+  'R_MICROSOFT_CLIENT_SECRET',
+  'R_MICROSOFT_TENANT_ID',
 ] as const;
 
 describe('resolveTeamsBotRuntimeCredentials', () => {
@@ -50,7 +53,20 @@ describe('resolveTeamsBotRuntimeCredentials', () => {
     expect(resolveEffectiveDeploymentEnvVarsMock).not.toHaveBeenCalled();
   });
 
-  it('does not fall back to the Microsoft sign-in app saved from the settings UI', async () => {
+  it('falls back to the Microsoft sign-in app from process env without a dedicated bot pair', async () => {
+    vi.stubEnv('R_MICROSOFT_CLIENT_ID', 'signin-id');
+    vi.stubEnv('R_MICROSOFT_CLIENT_SECRET', 'signin-secret');
+    vi.stubEnv('R_MICROSOFT_TENANT_ID', 'signin-tenant');
+
+    await expect(resolveTeamsBotRuntimeCredentials()).resolves.toMatchObject({
+      botAppId: 'signin-id',
+      botAppPassword: 'signin-secret',
+      botTenantId: 'signin-tenant',
+      source: 'microsoft_auth',
+    });
+  });
+
+  it('falls back to the Microsoft sign-in app saved from the settings UI', async () => {
     resolveEffectiveDeploymentEnvVarsMock.mockResolvedValue({
       R_MICROSOFT_CLIENT_ID: 'signin-id',
       R_MICROSOFT_CLIENT_SECRET: 'signin-secret',
@@ -58,22 +74,24 @@ describe('resolveTeamsBotRuntimeCredentials', () => {
     });
 
     await expect(resolveTeamsBotRuntimeCredentials()).resolves.toMatchObject({
-      botAppId: null,
-      botAppPassword: null,
-      botTenantId: null,
-      source: null,
+      botAppId: 'signin-id',
+      botAppPassword: 'signin-secret',
+      botTenantId: 'signin-tenant',
+      source: 'microsoft_auth',
     });
   });
 
   it('never mixes a Teams bot id with a Microsoft sign-in secret', async () => {
+    // Bot app id without its password: the pair is incomplete, so the
+    // Microsoft trio is used as a unit instead.
     vi.stubEnv('R_TEAMS_BOT_APP_ID', 'bot-id');
     vi.stubEnv('R_MICROSOFT_CLIENT_ID', 'signin-id');
     vi.stubEnv('R_MICROSOFT_CLIENT_SECRET', 'signin-secret');
 
     await expect(resolveTeamsBotRuntimeCredentials()).resolves.toMatchObject({
-      botAppId: null,
-      botAppPassword: null,
-      source: null,
+      botAppId: 'signin-id',
+      botAppPassword: 'signin-secret',
+      source: 'microsoft_auth',
     });
   });
 
@@ -100,8 +118,8 @@ describe('resolveTeamsBotRuntimeCredentials', () => {
 
   it('caches database-backed lookups until invalidated', async () => {
     resolveEffectiveDeploymentEnvVarsMock.mockResolvedValue({
-      R_TEAMS_BOT_APP_ID: 'bot-id',
-      R_TEAMS_BOT_APP_PASSWORD: 'bot-secret',
+      R_MICROSOFT_CLIENT_ID: 'signin-id',
+      R_MICROSOFT_CLIENT_SECRET: 'signin-secret',
     });
 
     await resolveTeamsBotRuntimeCredentials();
