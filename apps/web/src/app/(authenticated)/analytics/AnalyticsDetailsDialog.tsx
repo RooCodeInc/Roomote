@@ -2,7 +2,12 @@
 
 import Link from 'next/link';
 
-import type { AnalyticsDetailsResponse, AnalyticsObject } from '@/types';
+import type {
+  AnalyticsDetailsResponse,
+  AnalyticsMetric,
+  AnalyticsObject,
+} from '@/types';
+import { formatInferenceCost, formatTokens } from '@/lib/formatters';
 import { useIsMobile } from '@/hooks/useIsMobile';
 import {
   Button,
@@ -24,6 +29,7 @@ import {
 
 type AnalyticsDetailsDialogProps = {
   object: AnalyticsObject;
+  metric?: AnalyticsMetric;
   open: boolean;
   bucketLabel: string;
   seriesLabel: string;
@@ -52,6 +58,21 @@ function truncateTitleLabel(value: string, maxLength = 36) {
   return value.length > maxLength ? `${value.slice(0, maxLength - 1)}…` : value;
 }
 
+function formatDetailsMetricTotal(
+  metric: AnalyticsMetric | undefined,
+  total: number,
+) {
+  switch (metric) {
+    case 'tokens':
+      return formatTokens(total);
+    case 'cost':
+      return `$${formatInferenceCost(total * 1_000_000)}`;
+    case 'tasks':
+    default:
+      return String(total);
+  }
+}
+
 function getDetailsDisplayValue(
   object: AnalyticsObject,
   columnKey: string,
@@ -59,6 +80,18 @@ function getDetailsDisplayValue(
 ) {
   if (object === 'tasks' && columnKey === 'taskTitle') {
     return truncateTitleLabel(value, TASK_TITLE_CELL_MAX_LENGTH);
+  }
+
+  if (object === 'tasks' && columnKey === 'tokens') {
+    const tokens = Number(value);
+    return Number.isFinite(tokens) ? formatTokens(tokens) : value;
+  }
+
+  if (object === 'tasks' && columnKey === 'cost') {
+    const costUsd = Number(value);
+    return Number.isFinite(costUsd)
+      ? `$${formatInferenceCost(costUsd * 1_000_000)}`
+      : value;
   }
 
   return value;
@@ -104,6 +137,7 @@ function DetailsCell({
 
 export function AnalyticsDetailsDialog({
   object,
+  metric = 'tasks',
   open,
   bucketLabel,
   seriesLabel,
@@ -224,7 +258,9 @@ export function AnalyticsDetailsDialog({
             <div className="flex items-center justify-between gap-3 border-t border-border/60 px-4 py-3 text-sm">
               <div className="flex items-center gap-2">
                 <span className="text-muted-foreground">Total</span>
-                <span className="font-medium">{data?.total ?? 0}</span>
+                <span className="font-medium">
+                  {formatDetailsMetricTotal(metric, data?.total ?? 0)}
+                </span>
               </div>
 
               <Button

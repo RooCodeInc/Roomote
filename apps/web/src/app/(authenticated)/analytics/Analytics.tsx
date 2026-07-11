@@ -9,13 +9,17 @@ import {
   type AnalyticsDimension,
   type AnalyticsFilters,
   type AnalyticsGranularity,
+  type AnalyticsMetric,
   type AnalyticsObject,
   type TimePeriodFilter,
   ANALYTICS_OBJECT_CONFIG,
+  getAnalyticsAxisLabel,
   getAvailableAnalyticsGranularities,
   getDefaultAnalyticsGranularity,
+  getDefaultAnalyticsMetric,
   getDefaultAnalyticsViewBy,
   isValidAnalyticsGranularity,
+  isValidAnalyticsMetric,
   isValidAnalyticsViewBy,
   analyticsObjects,
   parseTimePeriodParam,
@@ -109,6 +113,10 @@ export function Analytics({
   const viewBy = isValidAnalyticsViewBy(object, requestedViewBy)
     ? requestedViewBy
     : getDefaultAnalyticsViewBy(object);
+  const requestedMetric = searchParams.get('metric');
+  const metric = isValidAnalyticsMetric(object, requestedMetric)
+    ? requestedMetric
+    : getDefaultAnalyticsMetric(object);
   const granularity = isValidAnalyticsGranularity(timePeriod, granularityParam)
     ? (granularityParam as AnalyticsGranularity)
     : getDefaultAnalyticsGranularity(timePeriod);
@@ -119,6 +127,7 @@ export function Analytics({
     {
       object,
       viewBy,
+      metric,
       filters,
       timePeriod,
       granularity,
@@ -147,6 +156,7 @@ export function Analytics({
       ? {
           object,
           viewBy,
+          metric,
           filters,
           timePeriod,
           granularity,
@@ -157,6 +167,7 @@ export function Analytics({
   );
 
   const config = ANALYTICS_OBJECT_CONFIG[object];
+  const axisLabel = getAnalyticsAxisLabel(object, metric);
   const chart =
     object === 'pullRequests'
       ? pullRequestOverviewQuery.data?.chart
@@ -218,6 +229,7 @@ export function Analytics({
         params.set('object', nextObject);
       }
       params.set('viewBy', getDefaultAnalyticsViewBy(nextObject));
+      params.delete('metric');
       for (const key of analyticsFilterKeys) {
         params.delete(key);
       }
@@ -230,6 +242,17 @@ export function Analytics({
     resetSelection();
     updateParams((params) => {
       params.set('viewBy', nextViewBy);
+    });
+  };
+
+  const handleMetricChange = (nextMetric: AnalyticsMetric) => {
+    resetSelection();
+    updateParams((params) => {
+      if (nextMetric === getDefaultAnalyticsMetric(object)) {
+        params.delete('metric');
+      } else {
+        params.set('metric', nextMetric);
+      }
     });
   };
 
@@ -295,6 +318,7 @@ export function Analytics({
         trpc.analytics.export.queryOptions({
           object,
           viewBy,
+          metric,
           filters,
           timePeriod,
           granularity,
@@ -365,8 +389,10 @@ export function Analytics({
             <AnalyticsControlRow
               object={object}
               viewBy={chart?.viewBy ?? viewBy}
+              metric={chart?.metric ?? metric}
               timePeriod={timePeriod}
               onViewByChange={handleViewByChange}
+              onMetricChange={handleMetricChange}
               onTimePeriodChange={handleTimePeriodChange}
             />
           </div>
@@ -381,7 +407,7 @@ export function Analytics({
 
           <div className="overflow-hidden bg-card p-4">
             <AnalyticsStackedBarChart
-              axisLabel={config.axisLabel}
+              axisLabel={axisLabel}
               chart={chart}
               granularity={granularity}
               availableGranularities={availableGranularities}
@@ -397,6 +423,7 @@ export function Analytics({
 
       <AnalyticsDetailsDialog
         object={object}
+        metric={metric}
         open={selectedSegment !== null}
         bucketLabel={selectedSegment?.bucketLabel ?? ''}
         seriesLabel={selectedSegment?.seriesLabel ?? ''}

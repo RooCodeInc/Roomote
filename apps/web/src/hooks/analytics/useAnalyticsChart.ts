@@ -6,6 +6,7 @@ import type {
   AnalyticsDimension,
   AnalyticsFilters,
   AnalyticsGranularity,
+  AnalyticsMetric,
   AnalyticsObject,
   TimePeriodFilter,
 } from '@/types';
@@ -15,6 +16,7 @@ export function useAnalyticsChart(
   input: {
     object: AnalyticsObject;
     viewBy: AnalyticsDimension;
+    metric?: AnalyticsMetric;
     filters?: AnalyticsFilters;
     timePeriod?: TimePeriodFilter;
     granularity?: AnalyticsGranularity;

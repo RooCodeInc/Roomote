@@ -111,4 +111,68 @@ describe('AnalyticsDetailsDialog', () => {
 
     expect(screen.getByText(longPullRequestTitle)).toBeInTheDocument();
   });
+
+  it('formats cost totals with currency rounding in the footer', () => {
+    render(
+      <AnalyticsDetailsDialog
+        {...BASE_PROPS}
+        object="tasks"
+        metric="cost"
+        data={{
+          object: 'tasks',
+          bucketKey: '2026-03-10',
+          seriesKey: 'app',
+          columns: [
+            { key: 'date', label: 'Date' },
+            { key: 'cost', label: 'Cost (USD)' },
+          ],
+          rows: [
+            {
+              id: 'row-1',
+              values: {
+                date: 'Mar 10',
+                cost: '12.34',
+              },
+            },
+          ],
+          total: 12.340000000000002,
+        }}
+      />,
+    );
+
+    // Footer total and per-row cost cell both use currency formatting.
+    expect(screen.getAllByText('$12.34').length).toBeGreaterThanOrEqual(1);
+  });
+
+  it('formats token totals in the footer', () => {
+    render(
+      <AnalyticsDetailsDialog
+        {...BASE_PROPS}
+        object="tasks"
+        metric="tokens"
+        data={{
+          object: 'tasks',
+          bucketKey: '2026-03-10',
+          seriesKey: 'app',
+          columns: [
+            { key: 'date', label: 'Date' },
+            { key: 'tokens', label: 'Tokens' },
+          ],
+          rows: [
+            {
+              id: 'row-1',
+              values: {
+                date: 'Mar 10',
+                tokens: '1500',
+              },
+            },
+          ],
+          total: 1500,
+        }}
+      />,
+    );
+
+    // Footer total and per-row tokens cell both use compact token formatting.
+    expect(screen.getAllByText('1.5K').length).toBeGreaterThanOrEqual(1);
+  });
 });
