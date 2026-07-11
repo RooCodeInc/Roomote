@@ -213,7 +213,7 @@ describe('prepareComputeProvisioningStart', () => {
         provider: 'daytona',
         label: 'Daytona',
         description: '',
-        supportsSnapshots: false,
+        supportsSnapshots: true,
         runtimeConfigSatisfied: false,
         savedConfigSatisfied: false,
         configSatisfied: false,

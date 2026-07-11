@@ -17,16 +17,16 @@ export type ComputeProvider = (typeof computeProviders)[number];
 export const snapshotCapableComputeProviders = [
   'modal',
   'e2b',
+  'daytona',
 ] as const satisfies readonly ComputeProvider[];
 
 /**
  * Providers whose machine lifecycle is managed by the scheduled sleep-check
  * pipeline. Snapshot-capable providers get snapshot-or-destroy handling;
- * other managed providers (Daytona) are always destroyed on sleep.
+ * non-snapshot managed providers are always destroyed on sleep.
  */
 export const sleepCheckManagedComputeProviders = [
   ...snapshotCapableComputeProviders,
-  'daytona',
 ] as const satisfies readonly ComputeProvider[];
 
 export const isComputeProvider = (

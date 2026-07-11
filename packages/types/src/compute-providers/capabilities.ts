@@ -46,8 +46,8 @@ export const DAYTONA_CAPABILITIES: ComputeProviderCapabilities = {
   supportsCommandExecution: true,
   supportsCommandOutputStreaming: true,
   supportsCommandOutputLookup: true,
-  supportsSnapshots: false,
-  supportsResume: false,
+  supportsSnapshots: true,
+  supportsResume: true,
   supportsFileWrite: true,
 };
 

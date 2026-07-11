@@ -55,15 +55,18 @@ function truncateLaunchOutput(value: string | undefined): string | undefined {
     : trimmed;
 }
 
-function buildDetachedWorkerExitError(result: {
-  exitCode: number | null;
-  commandId?: string;
-  stdout?: string;
-  stderr?: string;
-}): DetachedWorkerLaunchError {
+function buildDetachedWorkerExitError(
+  command: string,
+  result: {
+    exitCode: number | null;
+    commandId?: string;
+    stdout?: string;
+    stderr?: string;
+  },
+): DetachedWorkerLaunchError {
   const stdout = truncateLaunchOutput(result.stdout);
   const stderr = truncateLaunchOutput(result.stderr);
-  const message = `Detached "worker run" exited immediately with code ${result.exitCode}`;
+  const message = `Detached "worker ${command}" exited immediately with code ${result.exitCode}`;
 
   return new DetachedWorkerLaunchError(message, {
     commandId: result.commandId ?? null,
@@ -71,6 +74,32 @@ function buildDetachedWorkerExitError(result: {
     ...(stdout ? { stdout } : {}),
     ...(stderr ? { stderr } : {}),
   });
+}
+
+function getWorkerLaunchCommand(
+  taskRun: TaskRun,
+): 'snapshot' | 'resume' | 'run' {
+  return taskRun.payloadKind === TaskPayloadKind.SnapshotEnvironment
+    ? 'snapshot'
+    : taskRun.payloadKind === TaskPayloadKind.SnapshotResume
+      ? 'resume'
+      : 'run';
+}
+
+function getWorkerLaunchArgs(taskRun: TaskRun, machineId: string): string[] {
+  const command = getWorkerLaunchCommand(taskRun);
+
+  return taskRun.payloadKind === TaskPayloadKind.SnapshotEnvironment
+    ? [
+        'snapshot',
+        '--task-run-id',
+        taskRun.id.toString(),
+        '--environment-id',
+        taskRun.payload.environmentId ?? '',
+        '--sandbox-id',
+        machineId,
+      ]
+    : [command, taskRun.id.toString()];
 }
 
 export async function spawnDaytonaWorker(
@@ -101,20 +130,9 @@ export async function spawnDaytonaWorker(
     daytonaTags,
   } = config;
 
-  // Daytona does not support environment or task snapshots yet, so snapshot
-  // task run kinds cannot run on this provider.
-  if (
-    taskRun.payloadKind === TaskPayloadKind.SnapshotEnvironment ||
-    taskRun.payloadKind === TaskPayloadKind.SnapshotResume
-  ) {
-    throw new NonRetryableSpawnError(
-      `Daytona provider does not support ${taskRun.payloadKind} task run kinds`,
-    );
-  }
-
   const environmentId = taskRun.payload.environmentId;
 
-  const { namedPorts, environmentConfig } =
+  const { namedPorts, environmentSnapshotId, environmentConfig } =
     await getNamedPortsForTaskRun(taskRun);
 
   const shouldEnableAuthBypass = shouldEnableAuthBypassForTaskRun({
@@ -130,10 +148,50 @@ export async function spawnDaytonaWorker(
     ? resolveAuthBypassHeaderName(environmentConfig)
     : undefined;
 
+  let launchOptions:
+    | { launchMode: 'fresh' }
+    | { launchMode: 'environment_snapshot'; sourceSnapshotId: string }
+    | { launchMode: 'task_snapshot'; sourceSnapshotId: string };
+
+  if (taskRun.payloadKind === TaskPayloadKind.SnapshotResume) {
+    const snapshotId = taskRun.sourceSnapshotId;
+
+    if (!snapshotId) {
+      throw new NonRetryableSpawnError(
+        `SnapshotResume task run #${taskRun.id} missing sourceSnapshotId`,
+      );
+    }
+
+    launchOptions = {
+      launchMode: 'task_snapshot',
+      sourceSnapshotId: snapshotId,
+    };
+  } else if (taskRun.payloadKind === TaskPayloadKind.SnapshotEnvironment) {
+    // Environment snapshot refreshes must rebuild from the configured base
+    // worker snapshot instead of inheriting the previous environment snapshot.
+    launchOptions = { launchMode: 'fresh' };
+  } else {
+    const snapshotId =
+      taskRun.sourceSnapshotId ?? environmentSnapshotId ?? undefined;
+
+    launchOptions = snapshotId
+      ? { launchMode: 'environment_snapshot', sourceSnapshotId: snapshotId }
+      : { launchMode: 'fresh' };
+  }
+
+  if (
+    taskRun.payloadKind === TaskPayloadKind.SnapshotEnvironment &&
+    !taskRun.payload.environmentId
+  ) {
+    throw new Error(
+      `SnapshotEnvironment task run #${taskRun.id} missing environmentId in payload`,
+    );
+  }
+
   console.log(
     `[spawnDaytonaWorker] Creating Daytona instance for task run #${taskRun.id}... ${JSON.stringify(
       {
-        launchMode: 'fresh',
+        ...launchOptions,
         namedPorts: namedPorts.map((p) => p.name),
       },
     )}`,
@@ -142,8 +200,11 @@ export async function spawnDaytonaWorker(
   const createMachineStart = Date.now();
 
   const mutationContext = {
-    launchMode: 'fresh',
-    sourceSnapshotId: null,
+    launchMode: launchOptions.launchMode,
+    sourceSnapshotId:
+      'sourceSnapshotId' in launchOptions
+        ? launchOptions.sourceSnapshotId
+        : null,
     ports: namedPorts.map(({ port }) => port),
   } as const;
 
@@ -172,7 +233,7 @@ export async function spawnDaytonaWorker(
   await stampTaskRunMilestone({
     runId: taskRun.id,
     field: 'provisionStartedAt',
-    launchMode: 'fresh',
+    launchMode: launchOptions.launchMode,
   }).catch((error) => {
     console.warn(
       `[spawnDaytonaWorker] Failed to stamp provisionStartedAt for task run #${taskRun.id}: ${error instanceof Error ? error.message : String(error)}`,
@@ -192,9 +253,11 @@ export async function spawnDaytonaWorker(
     bootstrapTimeoutMs: 120_000,
     computeClient,
     onMutation: recordMutation,
+    ...launchOptions,
   });
 
-  const args = ['run', taskRun.id.toString()];
+  const workerCommand = getWorkerLaunchCommand(taskRun);
+  const args = getWorkerLaunchArgs(taskRun, machine.machineId);
 
   try {
     await updateTaskRunMachine({
@@ -207,7 +270,7 @@ export async function spawnDaytonaWorker(
       explicitPrimaryPortName: getPrimaryPortFromConfig(
         environmentConfig?.ports,
       )?.name,
-      sourceSnapshotId: null,
+      sourceSnapshotId: mutationContext.sourceSnapshotId,
       authBypassValue,
       authBypassHeaderName,
     });
@@ -230,13 +293,13 @@ export async function spawnDaytonaWorker(
         computeProvider: 'daytona',
         computeProviderId: machine.machineId,
         runId: taskRun.id,
-        context: 'Fresh Daytona launch',
+        context: 'Daytona launch',
       });
     }
 
     console.log(
       `[spawnDaytonaWorker] Daytona instance created for task run #${taskRun.id} in ${Date.now() - createMachineStart}ms ${JSON.stringify(
-        { machineId: machine.machineId },
+        { machineId: machine.machineId, launchMode: launchOptions.launchMode },
       )}`,
     );
 
@@ -245,7 +308,7 @@ export async function spawnDaytonaWorker(
       operation: 'run_command',
       eventType: 'started',
       instanceId: machine.machineId,
-      message: `Calling runCommand to launch detached worker run for Daytona instance ${machine.machineId}.`,
+      message: `Calling runCommand to launch detached worker ${workerCommand} for Daytona instance ${machine.machineId}.`,
       details: buildComputeProviderMutationDetails(mutationContext, {
         command: 'worker',
         args,
@@ -273,7 +336,7 @@ export async function spawnDaytonaWorker(
     });
 
     if (result.exitCode !== null && result.exitCode !== 0) {
-      throw buildDetachedWorkerExitError(result);
+      throw buildDetachedWorkerExitError(workerCommand, result);
     }
 
     await recordMutation({
@@ -281,7 +344,7 @@ export async function spawnDaytonaWorker(
       operation: 'run_command',
       eventType: 'completed',
       instanceId: machine.machineId,
-      message: `runCommand launched detached worker run for Daytona instance ${machine.machineId}.`,
+      message: `runCommand launched detached worker ${workerCommand} for Daytona instance ${machine.machineId}.`,
       details: buildComputeProviderMutationDetails(mutationContext, {
         command: 'worker',
         args,
