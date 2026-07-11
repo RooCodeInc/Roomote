@@ -1,0 +1,209 @@
+import { Hono } from 'hono';
+
+import type { AuthTokenContext, RunTokenContext } from '@roomote/types';
+
+import type { Variables } from '../../../types';
+import { mcpAuthMiddleware } from '../../mcp/middleware';
+import { createEnvironment } from '../createEnvironment';
+import { updateEnvironment } from '../updateEnvironment';
+
+const {
+  mockTaskRunFindFirst,
+  mockRepositoriesFindMany,
+  mockEnvironmentsFindFirst,
+  mockCreateSnapshot,
+  mockEnvironmentInsertValues,
+} = vi.hoisted(() => ({
+  mockTaskRunFindFirst: vi.fn(),
+  mockRepositoriesFindMany: vi.fn().mockResolvedValue([]),
+  mockEnvironmentsFindFirst: vi.fn().mockResolvedValue(null),
+  mockCreateSnapshot: vi.fn(),
+  mockEnvironmentInsertValues: vi.fn(),
+}));
+
+vi.mock('@roomote/db/server', async (importOriginal) => {
+  const original = await importOriginal<typeof import('@roomote/db/server')>();
+
+  const tx = {
+    insert: () => ({
+      values: (values: Record<string, unknown>) => {
+        mockEnvironmentInsertValues(values);
+        return {
+          returning: async () => [{ id: 'env-new' }],
+        };
+      },
+    }),
+  };
+
+  return {
+    ...original,
+    createEnvironmentConfigVersionSnapshot: mockCreateSnapshot,
+    db: {
+      query: {
+        taskRuns: {
+          findFirst: mockTaskRunFindFirst,
+        },
+        environments: {
+          findFirst: mockEnvironmentsFindFirst,
+        },
+        repositories: {
+          findMany: mockRepositoriesFindMany,
+        },
+      },
+      transaction: async (callback: (tx: unknown) => Promise<unknown>) =>
+        callback(tx),
+    },
+  };
+});
+
+function createApp(authContext?: AuthTokenContext | RunTokenContext) {
+  const app = new Hono<{ Variables: Variables }>();
+
+  app.use('*', async (c, next) => {
+    if (authContext) {
+      c.set('authContext', authContext);
+    }
+    await next();
+  });
+  app.use('*', mcpAuthMiddleware);
+  app.post('/environments', createEnvironment);
+  app.patch('/environments/:id', updateEnvironment);
+
+  return app;
+}
+
+function deploymentRunToken(): RunTokenContext {
+  return {
+    runId: 42,
+    userId: null,
+    principal: 'deployment',
+    tokenType: 'run',
+    version: 1,
+  };
+}
+
+/**
+ * Requests with an invalid JSON body: reaching the 400 body validation
+ * proves the user-context gate passed, without mocking the full write path.
+ */
+function invalidBodyRequest(method: 'POST' | 'PATCH', path: string): Request {
+  return new Request(`http://localhost${path}`, {
+    method,
+    body: 'not-json',
+    headers: { 'content-type': 'application/json' },
+  });
+}
+
+describe.each([
+  ['createEnvironment', 'POST', '/environments'],
+  ['updateEnvironment', 'PATCH', '/environments/env-1'],
+] as const)('%s user-context gate', (_name, method, path) => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it('rejects a deployment-principal run token with no live acting user', async () => {
+    mockTaskRunFindFirst.mockResolvedValueOnce({ actingUserId: null });
+
+    const app = createApp(deploymentRunToken());
+    const response = await app.request(invalidBodyRequest(method, path));
+
+    expect(response.status).toBe(403);
+    await expect(response.json()).resolves.toEqual({
+      error: 'User context required',
+    });
+  });
+
+  it('accepts a deployment-principal run token once a live acting user is attached', async () => {
+    // Slack-started runs are minted as the deployment principal; follow-up
+    // delivery later attaches the linked human to task_runs.actingUserId.
+    mockTaskRunFindFirst.mockResolvedValueOnce({ actingUserId: 'user-live' });
+
+    const app = createApp(deploymentRunToken());
+    const response = await app.request(invalidBodyRequest(method, path));
+
+    expect(response.status).toBe(400);
+  });
+
+  it('rejects a run token whose task run no longer exists and has no mint-time user', async () => {
+    mockTaskRunFindFirst.mockResolvedValueOnce(null);
+
+    const app = createApp(deploymentRunToken());
+    const response = await app.request(invalidBodyRequest(method, path));
+
+    expect(response.status).toBe(403);
+  });
+
+  it('prefers the live acting user but falls back to the mint-time claim', async () => {
+    mockTaskRunFindFirst.mockResolvedValueOnce({ actingUserId: null });
+
+    const app = createApp({
+      runId: 42,
+      userId: 'user-mint',
+      principal: 'user',
+      tokenType: 'run',
+      version: 1,
+    });
+    const response = await app.request(invalidBodyRequest(method, path));
+
+    expect(response.status).toBe(400);
+  });
+
+  it('accepts a user auth token', async () => {
+    const app = createApp({
+      userId: 'user-1',
+      tokenType: 'auth',
+      version: 1,
+    });
+    const response = await app.request(invalidBodyRequest(method, path));
+
+    expect(response.status).toBe(400);
+    expect(mockTaskRunFindFirst).not.toHaveBeenCalled();
+  });
+});
+
+describe('createEnvironment attribution', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockEnvironmentsFindFirst.mockResolvedValue(null);
+    mockRepositoriesFindMany.mockResolvedValue([]);
+  });
+
+  it('attributes the write to the live acting user over the mint-time claim', async () => {
+    // First lookup: live-actor resolution. Second lookup: the post-create
+    // attachEnvironmentIdToTaskRun payload sync, which can no-op.
+    mockTaskRunFindFirst
+      .mockResolvedValueOnce({ actingUserId: 'user-live' })
+      .mockResolvedValueOnce(null);
+
+    const app = createApp({
+      runId: 42,
+      userId: 'user-mint',
+      principal: 'user',
+      tokenType: 'run',
+      version: 1,
+    });
+
+    const response = await app.request(
+      new Request('http://localhost/environments', {
+        method: 'POST',
+        body: JSON.stringify({
+          config: {
+            name: 'Attribution Test',
+            repositories: [{ repository: 'acme/app' }],
+          },
+        }),
+        headers: { 'content-type': 'application/json' },
+      }),
+    );
+
+    expect(response.status).toBe(200);
+    expect(mockEnvironmentInsertValues).toHaveBeenCalledWith(
+      expect.objectContaining({ createdByUserId: 'user-live' }),
+    );
+    expect(mockCreateSnapshot).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({ createdByUserId: 'user-live' }),
+    );
+  });
+});
