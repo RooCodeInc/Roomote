@@ -9,6 +9,7 @@ import {
   NON_TASK_INFERENCE_SURFACES,
 } from '@roomote/cloud-agents/server/non-task-provider-usage';
 import type { TaskRun } from '@roomote/db/server';
+import { createTaskRunGitHubToken, getOctokit } from '@roomote/github';
 import { setLatestSlackBotReply, trackSlackBotReply } from '@roomote/slack';
 import {
   ACP_ENVELOPE_EVENT_TYPES,
@@ -33,17 +34,40 @@ import {
 const PR_REVIEW_TRIAGE_TIMEOUT_MS = 30_000;
 const PR_REVIEW_TRIAGE_MAX_OUTPUT_TOKENS = 512;
 const MAX_REVIEW_STATUS_LENGTH = 300;
+const FAILED_CHECK_CONCLUSIONS = new Set([
+  'failure',
+  'timed_out',
+  'startup_failure',
+]);
+const CI_MENTION_PATTERN =
+  /\b(ci|checks?|tests?|lint|build|pipeline)\b[\s\S]{0,40}\b(green|pass(?:ed|ing)?|fail(?:ed|ing)?|running|pending|broken)\b|\b(green|pass(?:ed|ing)?|fail(?:ed|ing)?|running|pending|broken)\b[\s\S]{0,40}\b(ci|checks?|tests?|lint|build|pipeline)\b/i;
 
 const prReviewTriageResponseSchema = z.object({
   worthNotifying: z.boolean(),
   summary: z.string(),
 });
 
+export type PrReviewCiOverallStatus =
+  | 'success'
+  | 'pending'
+  | 'failure'
+  | 'error';
+
+export type PrReviewCiStatus = {
+  overall: PrReviewCiOverallStatus;
+  failedCheckName: string | null;
+};
+
 export type PrReviewTriageContext = {
   resolvedThreadCount: number | null;
   unresolvedThreadCount: number | null;
   latestReviewStatus: string | null;
   latestReviewSummaryComment: string | null;
+  /**
+   * Short user-facing sentence about current CI check state on the PR head,
+   * ready to append to the chat notification when present.
+   */
+  ciStatusSentence: string | null;
 };
 
 type PrReviewTriageDecision =
@@ -53,6 +77,274 @@ type PrReviewTriageDecision =
 export type PreparedPrReviewNotification =
   | { post: true; route: PrReviewNotificationRoute; text: string }
   | { post: false; reason: 'no_conversation_route' | 'not_worth_notifying' };
+
+/**
+ * Prefer the leaf name from matrix-style check titles like "CI / Lint".
+ */
+export function shortenPrReviewCheckName(name: string): string {
+  const trimmed = name.trim();
+
+  if (!trimmed) {
+    return trimmed;
+  }
+
+  const leaf = trimmed
+    .split(/\s*\/\s*/)
+    .pop()
+    ?.trim();
+
+  return leaf && leaf.length > 0 ? leaf : trimmed;
+}
+
+/**
+ * Turn a resolved CI overall status into a short chat sentence.
+ */
+export function formatPrReviewCiStatusSentence(
+  status: PrReviewCiStatus,
+): string {
+  switch (status.overall) {
+    case 'success':
+      return 'CI is green.';
+    case 'pending':
+      return 'Tests are still running.';
+    case 'failure':
+    case 'error': {
+      const checkName = status.failedCheckName?.trim();
+
+      if (checkName) {
+        return `${checkName} failed - should I take a look?`;
+      }
+
+      return 'CI failed - should I take a look?';
+    }
+  }
+}
+
+/**
+ * Append a CI status sentence to an LLM notification summary, skipping when
+ * the summary already talks about CI so we do not double-mention it.
+ */
+export function appendPrReviewCiStatusSentence(
+  summary: string,
+  ciStatusSentence: string | null | undefined,
+): string {
+  const trimmedSummary = summary.trim();
+  const sentence = ciStatusSentence?.trim();
+
+  if (!sentence) {
+    return trimmedSummary;
+  }
+
+  if (CI_MENTION_PATTERN.test(trimmedSummary)) {
+    return trimmedSummary;
+  }
+
+  if (
+    trimmedSummary.endsWith('.') ||
+    trimmedSummary.endsWith('?') ||
+    trimmedSummary.endsWith('!')
+  ) {
+    return `${trimmedSummary} ${sentence}`;
+  }
+
+  return `${trimmedSummary}. ${sentence}`;
+}
+
+function mergeCiOverallStatus(
+  left: PrReviewCiOverallStatus | null,
+  right: PrReviewCiOverallStatus | null,
+): PrReviewCiOverallStatus | null {
+  if (left === 'failure' || right === 'failure') {
+    return 'failure';
+  }
+
+  if (left === 'error' || right === 'error') {
+    return 'error';
+  }
+
+  if (left === 'pending' || right === 'pending') {
+    return 'pending';
+  }
+
+  if (left === 'success' || right === 'success') {
+    return 'success';
+  }
+
+  return null;
+}
+
+function overallFromCombinedState(
+  state: string | null | undefined,
+): PrReviewCiOverallStatus | null {
+  switch (state) {
+    case 'success':
+      return 'success';
+    case 'pending':
+      return 'pending';
+    case 'failure':
+      return 'failure';
+    case 'error':
+      return 'error';
+    default:
+      return null;
+  }
+}
+
+function summarizeCheckRuns(
+  checkRuns: Array<{
+    name: string;
+    status: string;
+    conclusion: string | null;
+  }>,
+): Pick<PrReviewCiStatus, 'overall' | 'failedCheckName'> | null {
+  if (checkRuns.length === 0) {
+    return null;
+  }
+
+  const failed = checkRuns.find(
+    (run) =>
+      run.status === 'completed' &&
+      run.conclusion !== null &&
+      FAILED_CHECK_CONCLUSIONS.has(run.conclusion),
+  );
+
+  if (failed) {
+    return {
+      overall: 'failure',
+      failedCheckName: shortenPrReviewCheckName(failed.name) || null,
+    };
+  }
+
+  if (checkRuns.some((run) => run.status !== 'completed')) {
+    return { overall: 'pending', failedCheckName: null };
+  }
+
+  return { overall: 'success', failedCheckName: null };
+}
+
+/**
+ * Resolve a short CI status sentence for the PR head using GitHub check runs
+ * and the classic combined commit status. Non-GitHub providers currently return
+ * null; failures to fetch status are treated as unavailable, not as red CI.
+ */
+export async function fetchPrReviewCiStatusSentence({
+  taskRun,
+  repository,
+  prNumber,
+  sourceControlProvider,
+}: {
+  taskRun: TaskRun;
+  repository: string;
+  prNumber: number;
+  sourceControlProvider?: SourceControlProvider;
+}): Promise<string | null> {
+  const provider = normalizeSourceControlProvider(sourceControlProvider);
+
+  if (provider !== 'github') {
+    return null;
+  }
+
+  const [owner, repo] = repository.split('/');
+
+  if (!owner || !repo) {
+    return null;
+  }
+
+  try {
+    const token = await createTaskRunGitHubToken(taskRun);
+    const octokit = getOctokit(token);
+
+    const { data: pullRequest } = await octokit.rest.pulls.get({
+      owner,
+      repo,
+      pull_number: prNumber,
+    });
+    const headSha =
+      typeof pullRequest.head?.sha === 'string' ? pullRequest.head.sha : null;
+
+    if (!headSha) {
+      return null;
+    }
+
+    let checkSummary: ReturnType<typeof summarizeCheckRuns> = null;
+    let combinedOverall: PrReviewCiOverallStatus | null = null;
+    let failedStatusContext: string | null = null;
+
+    try {
+      const { data } = await octokit.rest.checks.listForRef({
+        owner,
+        repo,
+        ref: headSha,
+        per_page: 100,
+      });
+
+      checkSummary = summarizeCheckRuns(
+        data.check_runs.map((run) => ({
+          name: run.name,
+          status: run.status,
+          conclusion: run.conclusion,
+        })),
+      );
+    } catch (error) {
+      console.warn(
+        `[PrReviewNotification] Failed to list check runs for ${repository}#${prNumber}: ${
+          error instanceof Error ? error.message : String(error)
+        }`,
+      );
+    }
+
+    try {
+      const { data: combined } =
+        await octokit.rest.repos.getCombinedStatusForRef({
+          owner,
+          repo,
+          ref: headSha,
+        });
+
+      combinedOverall = overallFromCombinedState(combined.state);
+
+      if (combinedOverall === 'failure' || combinedOverall === 'error') {
+        const failed =
+          combined.statuses?.find(
+            (status) => status.state === 'failure' || status.state === 'error',
+          ) ?? null;
+
+        if (failed?.context) {
+          failedStatusContext = shortenPrReviewCheckName(failed.context);
+        }
+      }
+    } catch (error) {
+      console.warn(
+        `[PrReviewNotification] Failed to fetch combined status for ${repository}#${prNumber}: ${
+          error instanceof Error ? error.message : String(error)
+        }`,
+      );
+    }
+
+    const overall = mergeCiOverallStatus(
+      checkSummary?.overall ?? null,
+      combinedOverall,
+    );
+
+    if (!overall) {
+      return null;
+    }
+
+    return formatPrReviewCiStatusSentence({
+      overall,
+      failedCheckName:
+        checkSummary?.failedCheckName ?? failedStatusContext ?? null,
+    });
+  } catch (error) {
+    console.warn(
+      `[PrReviewNotification] Could not resolve CI status for ${repository}#${prNumber}: ${
+        error instanceof Error ? error.message : String(error)
+      }`,
+    );
+
+    return null;
+  }
+}
 
 const PR_REVIEW_TRIAGE_SYSTEM_PROMPT = `
 You triage pull-request review activity from a source-control platform
@@ -130,6 +422,8 @@ any feedback. Rules:
 - when there is nothing actionable, do not add a question or call to action
 - never claim that any changes were made in response to the feedback, and do
   not promise follow-up actions
+- do not mention CI, checks, builds, lint, or pipeline status; a short sentence
+  about the current CI state is appended separately after your summary
 - do not mention this triage step or that the input was parsed
 - if "worthNotifying" is false, "summary" may be an empty string
 
@@ -175,7 +469,7 @@ async function fetchPrDiscussionSignals({
   taskRun: TaskRun;
   repository: string;
   prNumber: number;
-}): Promise<PrReviewTriageContext> {
+}): Promise<Omit<PrReviewTriageContext, 'ciStatusSentence'>> {
   const result = await readSourceControlPullRequestForTaskRun({
     taskRun,
     input: {
@@ -231,27 +525,48 @@ export async function gatherPrReviewTriageContext({
   taskRun,
   repository,
   prNumber,
+  sourceControlProvider,
 }: {
   taskRun: TaskRun;
   repository: string;
   prNumber: number;
+  sourceControlProvider?: SourceControlProvider;
 }): Promise<PrReviewTriageContext> {
-  try {
-    return await fetchPrDiscussionSignals({ taskRun, repository, prNumber });
-  } catch (error) {
-    console.warn(
-      `[PrReviewNotification] Could not fetch PR discussion signals for ${repository}#${prNumber}: ${
-        error instanceof Error ? error.message : String(error)
-      }`,
-    );
+  const [discussionResult, ciStatusSentence] = await Promise.all([
+    (async () => {
+      try {
+        return await fetchPrDiscussionSignals({
+          taskRun,
+          repository,
+          prNumber,
+        });
+      } catch (error) {
+        console.warn(
+          `[PrReviewNotification] Could not fetch PR discussion signals for ${repository}#${prNumber}: ${
+            error instanceof Error ? error.message : String(error)
+          }`,
+        );
 
-    return {
-      resolvedThreadCount: null,
-      unresolvedThreadCount: null,
-      latestReviewStatus: null,
-      latestReviewSummaryComment: null,
-    };
-  }
+        return {
+          resolvedThreadCount: null,
+          unresolvedThreadCount: null,
+          latestReviewStatus: null,
+          latestReviewSummaryComment: null,
+        };
+      }
+    })(),
+    fetchPrReviewCiStatusSentence({
+      taskRun,
+      repository,
+      prNumber,
+      sourceControlProvider,
+    }),
+  ]);
+
+  return {
+    ...discussionResult,
+    ciStatusSentence,
+  };
 }
 
 function buildContextLines(
@@ -282,6 +597,10 @@ function buildContextLines(
     lines.push(
       `- Latest automated review status: ${context.latestReviewStatus}`,
     );
+  }
+
+  if (context.ciStatusSentence !== null) {
+    lines.push(`- Current CI checks: ${context.ciStatusSentence}`);
   }
 
   return lines.length > 0 ? ['', 'Current pull request state:', ...lines] : [];
@@ -366,6 +685,7 @@ export async function preparePrReviewNotificationDelivery({
     taskRun,
     repository: request.repository,
     prNumber: request.prNumber,
+    sourceControlProvider: request.sourceControlProvider,
   });
   const triage = await triagePrReviewActivity({
     taskId: request.taskId,
@@ -389,7 +709,10 @@ export async function preparePrReviewNotificationDelivery({
       prNumber: request.prNumber,
       prUrl: request.prUrl,
       provider: route.provider,
-      summary: triage.summary,
+      summary: appendPrReviewCiStatusSentence(
+        triage.summary,
+        context.ciStatusSentence,
+      ),
     }),
   };
 }

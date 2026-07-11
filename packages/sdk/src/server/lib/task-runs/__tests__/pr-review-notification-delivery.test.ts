@@ -6,6 +6,10 @@ const {
   mockRecordTaskMessageEnvelope,
   mockTrackSlackBotReply,
   mockSetLatestSlackBotReply,
+  mockCreateTaskRunGitHubToken,
+  mockPullsGet,
+  mockListCheckRunsForRef,
+  mockGetCombinedStatusForRef,
 } = vi.hoisted(() => ({
   mockGenerateObject: vi.fn(),
   mockReadSourceControlPullRequest: vi.fn(),
@@ -14,6 +18,10 @@ const {
   mockRecordTaskMessageEnvelope: vi.fn(),
   mockTrackSlackBotReply: vi.fn(),
   mockSetLatestSlackBotReply: vi.fn(),
+  mockCreateTaskRunGitHubToken: vi.fn(),
+  mockPullsGet: vi.fn(),
+  mockListCheckRunsForRef: vi.fn(),
+  mockGetCombinedStatusForRef: vi.fn(),
 }));
 
 vi.mock('@roomote/cloud-agents/server/non-task-provider-usage', () => ({
@@ -72,13 +80,35 @@ vi.mock('@roomote/slack', () => ({
   setLatestSlackBotReply: mockSetLatestSlackBotReply,
 }));
 
+vi.mock('@roomote/github', () => ({
+  createTaskRunGitHubToken: (...args: unknown[]) =>
+    mockCreateTaskRunGitHubToken(...args),
+  getOctokit: () => ({
+    rest: {
+      pulls: {
+        get: (...args: unknown[]) => mockPullsGet(...args),
+      },
+      checks: {
+        listForRef: (...args: unknown[]) => mockListCheckRunsForRef(...args),
+      },
+      repos: {
+        getCombinedStatusForRef: (...args: unknown[]) =>
+          mockGetCombinedStatusForRef(...args),
+      },
+    },
+  }),
+}));
+
 import type { TaskRun } from '@roomote/db/server';
 import type { PrReviewActivityEvent } from '../pr-review-notification';
 
 import {
+  appendPrReviewCiStatusSentence,
+  formatPrReviewCiStatusSentence,
   gatherPrReviewTriageContext,
   preparePrReviewNotificationDelivery,
   recordPrReviewNotificationDeliveryBestEffort,
+  shortenPrReviewCheckName,
   triagePrReviewActivity,
 } from '../pr-review-notification-delivery';
 
@@ -105,6 +135,22 @@ const events: PrReviewActivityEvent[] = [
 ];
 
 const eventsWithoutSelfReview: PrReviewActivityEvent[] = events.slice(0, 2);
+
+function mockGreenCiChecks() {
+  mockCreateTaskRunGitHubToken.mockResolvedValue('github-token');
+  mockPullsGet.mockResolvedValue({ data: { head: { sha: 'abc123' } } });
+  mockListCheckRunsForRef.mockResolvedValue({
+    data: {
+      check_runs: [
+        { name: 'CI / Lint', status: 'completed', conclusion: 'success' },
+        { name: 'CI / Tests', status: 'completed', conclusion: 'success' },
+      ],
+    },
+  });
+  mockGetCombinedStatusForRef.mockResolvedValue({
+    data: { state: 'success', statuses: [] },
+  });
+}
 
 describe('preparePrReviewNotificationDelivery', () => {
   beforeEach(() => {
@@ -143,6 +189,7 @@ describe('preparePrReviewNotificationDelivery', () => {
       },
     });
     mockFormatMessage.mockReturnValue('formatted-message');
+    mockGreenCiChecks();
   });
 
   it('prepares a routed, formatted delivery from the shared SDK flow', async () => {
@@ -167,8 +214,35 @@ describe('preparePrReviewNotificationDelivery', () => {
       prUrl: 'https://github.com/owner/repo/pull/42',
       provider: 'slack',
       summary:
-        'alice approved [owner/repo#42](https://github.com/owner/repo/pull/42).',
+        'alice approved [owner/repo#42](https://github.com/owner/repo/pull/42). CI is green.',
     });
+  });
+
+  it('appends a failed check sentence with the failed check name', async () => {
+    mockListCheckRunsForRef.mockResolvedValue({
+      data: {
+        check_runs: [
+          { name: 'CI / Lint', status: 'completed', conclusion: 'failure' },
+          { name: 'CI / Tests', status: 'completed', conclusion: 'success' },
+        ],
+      },
+    });
+    mockGetCombinedStatusForRef.mockResolvedValue({
+      data: { state: 'failure', statuses: [] },
+    });
+
+    await preparePrReviewNotificationDelivery({
+      taskRun,
+      request,
+      events,
+    });
+
+    expect(mockFormatMessage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        summary:
+          'alice approved [owner/repo#42](https://github.com/owner/repo/pull/42). Lint failed - should I take a look?',
+      }),
+    );
   });
 
   it('skips without triage when no conversation route can be resolved', async () => {
@@ -262,6 +336,9 @@ describe('triagePrReviewActivity', () => {
     expect(system).toContain(
       'do not omit the platform name on these self-review messages',
     );
+    expect(system).toContain(
+      'do not mention CI, checks, builds, lint, or pipeline status',
+    );
   });
 
   it('includes the latest Roomote review summary comment verbatim for self-review results', async () => {
@@ -278,6 +355,7 @@ describe('triagePrReviewActivity', () => {
         latestReviewStatus: '2 issues outstanding.',
         latestReviewSummaryComment:
           '<!-- roomote-review-summary sha=abc mode=initial -->\n<!-- roomote-review-checklist:start -->\n- [ ] `apps/api/src/foo.ts:10` - Handle null actor ids\n- [ ] `apps/api/src/bar.ts:20` - Rename the helper to match its return shape\n<!-- roomote-review-checklist:end -->',
+        ciStatusSentence: 'CI is green.',
       },
     });
 
@@ -354,6 +432,7 @@ describe('gatherPrReviewTriageContext', () => {
       ],
       warnings: [],
     });
+    mockGreenCiChecks();
   });
 
   it('collects thread counts and the latest review status', async () => {
@@ -369,13 +448,50 @@ describe('gatherPrReviewTriageContext', () => {
       latestReviewStatus: 'All 1 issue addressed. See task',
       latestReviewSummaryComment:
         '<!-- roomote-review-summary sha=abc mode=initial -->\n<!-- roomote-review-status:start -->\n**All 1 issue addressed.** [See task](https://example.com)\n<!-- roomote-review-status:end -->',
+      ciStatusSentence: 'CI is green.',
     });
+  });
+
+  it('includes a pending CI sentence when checks are still running', async () => {
+    mockListCheckRunsForRef.mockResolvedValue({
+      data: {
+        check_runs: [
+          { name: 'CI / Tests', status: 'in_progress', conclusion: null },
+        ],
+      },
+    });
+    mockGetCombinedStatusForRef.mockResolvedValue({
+      data: { state: 'pending', statuses: [] },
+    });
+
+    const context = await gatherPrReviewTriageContext({
+      taskRun,
+      repository: request.repository,
+      prNumber: request.prNumber,
+    });
+
+    expect(context.ciStatusSentence).toBe('Tests are still running.');
+  });
+
+  it('skips CI sentence for non-GitHub source-control providers', async () => {
+    const context = await gatherPrReviewTriageContext({
+      taskRun,
+      repository: request.repository,
+      prNumber: request.prNumber,
+      sourceControlProvider: 'gitlab',
+    });
+
+    expect(context.ciStatusSentence).toBeNull();
+    expect(mockPullsGet).not.toHaveBeenCalled();
+    expect(mockListCheckRunsForRef).not.toHaveBeenCalled();
+    expect(mockGetCombinedStatusForRef).not.toHaveBeenCalled();
   });
 
   it('degrades to null signals when gathering fails', async () => {
     mockReadSourceControlPullRequest.mockRejectedValue(
       new Error('github unavailable'),
     );
+    mockPullsGet.mockRejectedValue(new Error('github unavailable'));
 
     const context = await gatherPrReviewTriageContext({
       taskRun,
@@ -388,7 +504,57 @@ describe('gatherPrReviewTriageContext', () => {
       unresolvedThreadCount: null,
       latestReviewStatus: null,
       latestReviewSummaryComment: null,
+      ciStatusSentence: null,
     });
+  });
+});
+
+describe('CI status helpers', () => {
+  it('shortens matrix-style check names to the leaf segment', () => {
+    expect(shortenPrReviewCheckName('CI / Lint')).toBe('Lint');
+    expect(shortenPrReviewCheckName('unit-tests')).toBe('unit-tests');
+  });
+
+  it('formats green, pending, and failed CI sentences', () => {
+    expect(
+      formatPrReviewCiStatusSentence({
+        overall: 'success',
+        failedCheckName: null,
+      }),
+    ).toBe('CI is green.');
+    expect(
+      formatPrReviewCiStatusSentence({
+        overall: 'pending',
+        failedCheckName: null,
+      }),
+    ).toBe('Tests are still running.');
+    expect(
+      formatPrReviewCiStatusSentence({
+        overall: 'failure',
+        failedCheckName: 'Lint',
+      }),
+    ).toBe('Lint failed - should I take a look?');
+    expect(
+      formatPrReviewCiStatusSentence({
+        overall: 'failure',
+        failedCheckName: null,
+      }),
+    ).toBe('CI failed - should I take a look?');
+  });
+
+  it('appends CI status unless the summary already mentions CI', () => {
+    expect(
+      appendPrReviewCiStatusSentence('Alice approved the PR.', 'CI is green.'),
+    ).toBe('Alice approved the PR. CI is green.');
+    expect(
+      appendPrReviewCiStatusSentence(
+        'Alice approved and CI is green already.',
+        'CI is green.',
+      ),
+    ).toBe('Alice approved and CI is green already.');
+    expect(
+      appendPrReviewCiStatusSentence('Alice approved', 'CI is green.'),
+    ).toBe('Alice approved. CI is green.');
   });
 });
 
