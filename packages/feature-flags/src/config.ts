@@ -10,52 +10,61 @@ import {
  */
 export const FEATURE_FLAG_CONFIG: FeatureFlagConfigMap = {
   [FeatureFlag.PlanMode]: {
+    name: 'Read-only planning',
     defaultValue: false,
     metadataKey: 'plan_mode',
-    description: 'Enable plan mode, which keeps planning turns read-only',
+    description:
+      'Let agents create implementation plans without changing files.',
   },
   [FeatureFlag.SlackEvalLauncher]: {
+    name: 'Custom Slack task launches',
     defaultValue: false,
     metadataKey: 'slack_eval_launcher',
     description:
-      'Enable the internal-only Slack `!eval` launcher for regular task launches with model, reasoning, and branch or SHA overrides',
+      'Use !eval in Slack to launch tasks with a specific model, reasoning level, branch, or commit.',
   },
   [FeatureFlag.ShowDebugUISetting]: {
+    name: 'Debug controls',
     defaultValue: false,
     metadataKey: 'show_debug_ui_setting',
     description:
-      'Show the internal-only Personal Settings toggle for the user-level debug UI preference',
+      'Let users show additional troubleshooting information from Personal settings.',
   },
 
   [FeatureFlag.SlackProofAutoPost]: {
+    name: 'Post visual proof to Slack',
     defaultValue: false,
     metadataKey: 'slack_proof_auto_post',
     description:
-      'Auto-post trusted built-in visual proof back into the originating Slack thread for Slack-started tasks',
+      'Post task screenshots and recordings to the Slack thread where the task started.',
   },
 
   [FeatureFlag.SuggestionRouting]: {
+    name: 'Grouped idea suggestions',
     defaultValue: false,
     metadataKey: 'suggestion_routing',
     description:
-      'Enable grouped Slack routing and route-specific planning for the Suggest Ideas automation',
+      'Group Slack suggestions by destination and create a tailored plan for each group.',
   },
 
   [FeatureFlag.VisualProofAutoScreencast]: {
+    name: 'Automatic proof recordings',
     defaultValue: false,
     metadataKey: 'visual_proof_auto_screencast',
     description:
-      'Allow capture-visual-proof to auto-classify screencast-only or both when the proof claim is temporal',
+      'Record a screencast when visual proof needs to show an interaction or change over time.',
   },
 
   [FeatureFlag.AuthorshipRules]: {
+    name: 'Task authorship rules',
     defaultValue: () => process.env.NODE_ENV === 'development',
     metadataKey: 'authorship_rules',
     description:
-      'Gate the deployment-level authorship rules engine: the effective author / PR owner resolution stamped at enqueue time and the settings surface for authoring natural-language rules. When off, enqueue leaves the effective-authorship columns null so tasks keep default attribution behavior.',
+      'Set task authors and pull request owners with workspace-wide rules.',
   },
 
   [FeatureFlag.BackgroundSubagents]: {
+    name: 'Background helper agents',
     // Off by default: proof capture runs foreground and before delivery, so
     // the judge pass and the PR ship with the screenshots already verified.
     // Background delivery proved unreliable in dogfood — models repeatedly
@@ -66,7 +75,7 @@ export const FEATURE_FLAG_CONFIG: FeatureFlagConfigMap = {
     metadataKey: 'background_subagents',
     legacyMetadataKeys: ['opencode_background_subagents'],
     description:
-      'Enable background subagents so the Task tool can launch subagents asynchronously via its background flag, and standard-task delivery ships the PR before visual proof instead of blocking on it. Off by default: proof runs foreground, before delivery.',
+      'Let helper agents run asynchronously so pull requests can be delivered while visual proof is still being captured.',
   },
 };
 

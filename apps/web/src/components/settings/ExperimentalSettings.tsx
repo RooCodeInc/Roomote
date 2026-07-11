@@ -9,12 +9,6 @@ import { Skeleton, Switch } from '@/components/system';
 import { Section } from '@/components/settings';
 import type { ExperimentalFlag } from '@/trpc/commands/feature-flags';
 
-function prettifyFlagId(id: string): string {
-  return id
-    .replace(/([a-z])([A-Z])/g, '$1 $2')
-    .replace(/([A-Z]+)([A-Z][a-z])/g, '$1 $2');
-}
-
 export function ExperimentalSettings() {
   const trpc = useTRPC();
   const queryClient = useQueryClient();
@@ -38,9 +32,7 @@ export function ExperimentalSettings() {
         value: nextValue,
       });
       queryClient.setQueryData<ExperimentalFlag[]>(queryKey, updated);
-      toast.success(
-        `${prettifyFlagId(flag.id)} ${nextValue ? 'enabled' : 'disabled'}`,
-      );
+      toast.success(`${flag.name} ${nextValue ? 'enabled' : 'disabled'}`);
     } catch (error) {
       queryClient.setQueryData<ExperimentalFlag[]>(queryKey, previous);
       toast.error(
@@ -74,10 +66,10 @@ export function ExperimentalSettings() {
       {flagsQuery.data.map((flag) => (
         <Section
           key={flag.id}
-          title={prettifyFlagId(flag.id)}
+          title={flag.name}
           action={
             <Switch
-              aria-label={`Toggle ${prettifyFlagId(flag.id)}`}
+              aria-label={`Toggle ${flag.name}`}
               checked={flag.value}
               disabled={updateMutation.isPending}
               onCheckedChange={(checked) =>

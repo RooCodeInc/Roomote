@@ -21,6 +21,11 @@ export type FeatureFlagValue =
 
 export interface FeatureFlagConfig<T extends FeatureFlagValue = boolean> {
   /**
+   * User-facing name shown in settings
+   */
+  name: string;
+
+  /**
    * The default value to use if the flag is not set in metadata
    */
   defaultValue: T | (() => T);
@@ -43,7 +48,7 @@ export interface FeatureFlagConfig<T extends FeatureFlagValue = boolean> {
   legacyMetadataKeys?: string[];
 
   /**
-   * Optional description for documentation
+   * Optional user-facing description
    */
   description?: string;
 

@@ -93,6 +93,7 @@ describe('feature-flags commands', () => {
     expect(flags[0]).toEqual(
       expect.objectContaining({
         id: expect.any(String),
+        name: expect.any(String),
         metadataKey: expect.any(String),
         description: expect.any(String),
         value: expect.any(Boolean),

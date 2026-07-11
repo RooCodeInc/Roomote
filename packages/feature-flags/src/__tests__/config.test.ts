@@ -5,6 +5,8 @@ describe('FEATURE_FLAG_CONFIG', () => {
   it('has a config entry for every FeatureFlag enum value', () => {
     for (const flag of Object.values(FeatureFlag)) {
       expect(FEATURE_FLAG_CONFIG[flag]).toBeDefined();
+      expect(FEATURE_FLAG_CONFIG[flag].name).toBeTruthy();
+      expect(FEATURE_FLAG_CONFIG[flag].description).toBeTruthy();
       expect(FEATURE_FLAG_CONFIG[flag].metadataKey).toBeDefined();
     }
   });

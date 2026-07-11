@@ -17,6 +17,7 @@ type DeploymentMetadataRecord = Record<string, unknown>;
 
 export type ExperimentalFlag = {
   id: FeatureFlag;
+  name: string;
   metadataKey: string;
   description: string;
   value: boolean;
@@ -52,6 +53,7 @@ function buildExperimentalFlags(
 
     return {
       id: flag,
+      name: config.name,
       metadataKey,
       description: config.description ?? '',
       value: evaluateFeatureFlagFromMetadata(flag, metadataRecord),
