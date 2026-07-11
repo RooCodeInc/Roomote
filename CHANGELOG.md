@@ -2,6 +2,12 @@
 
 This file tracks product releases for Roomote (single monorepo version). Automated release entries are prepended by `pnpm run version`.
 
+## 0.0.4 (2026-07-11)
+
+### Patch changes
+
+- Ship the post-0.0.3 develop backlog toward production, including Daytona environment/task snapshot resume with legacy env aliases, default-deny API authorization, R_* public env canonicalization, CI status in PR review feedback replies, sandbox provider UX fixes, and other already-merged fixes.
+
 ## 0.0.3 (2026-07-11)
 
 ### Patch changes
