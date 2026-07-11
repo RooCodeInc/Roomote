@@ -114,9 +114,11 @@ credentials are needed. MinIO comes from Docker Hub.
 
 ## Image channel and versions
 
-The Blueprint tracks the mutable **`:develop`** alias, which the publish
-workflow moves to every new develop build (releases also move `:latest`).
-Nothing else in the Blueprint encodes a version:
+The Blueprint tracks the mutable **`:main`** alias (stable main-branch
+builds), which the publish workflow moves on every build of `main`
+(releases also move `:latest`). This matches the stable channel used by
+the Railway deploy button. Nothing else in the Blueprint encodes a
+version:
 
 - The images bake `RELEASE_VERSION` at build time, and the app derives
   `DOCKER_WORKER_IMAGE` and `MODAL_BASE_IMAGE_REF` from it when those are
@@ -126,10 +128,10 @@ Nothing else in the Blueprint encodes a version:
   constant.
 
 Render does not redeploy when a mutable alias moves. To pick up a new
-develop build, redeploy the four app services from the dashboard (Manual
+main build, redeploy the four app services from the dashboard (Manual
 Deploy → Deploy latest reference). To pin instead (recommended for
 production deployments): put the same immutable tag (`v*` or
-`develop-<sha>`) in the four app-service `image.url` fields. No other edits
+`main-<sha>`) in the four app-service `image.url` fields. No other edits
 are needed — the derived values follow the image.
 
 MinIO is the exception: the Blueprint pins it to an immutable `RELEASE.*`
@@ -144,10 +146,10 @@ deliberately, ideally right after a disk backup.
 | `roomote-postgres`   | Postgres  | Render managed PostgreSQL 17 | no                        | managed              |
 | `roomote-redis`      | Key Value | Render managed (Redis API)   | no (empty `ipAllowList`)  | managed              |
 | `roomote-minio`      | web       | `minio/minio` + disk `/data` | yes (routed to port 9000) | `/minio/health/live` |
-| `roomote-api`        | web       | `roomote-app:develop`        | yes                       | `/health/liveness`   |
-| `roomote-web`        | web       | `roomote-app:develop`        | yes                       | `/health`            |
-| `roomote-controller` | worker    | `roomote-app:develop`        | no                        | —                    |
-| `roomote-bullmq`     | worker    | `roomote-app:develop`        | no                        | —                    |
+| `roomote-api`        | web       | `roomote-app:main`           | yes                       | `/health/liveness`   |
+| `roomote-web`        | web       | `roomote-app:main`           | yes                       | `/health`            |
+| `roomote-controller` | worker    | `roomote-app:main`           | no                        | —                    |
+| `roomote-bullmq`     | worker    | `roomote-app:main`           | no                        | —                    |
 
 Render's `dockerCommand` **bypasses the image entrypoint** and executes the
 command directly, so every app service uses the full
@@ -341,7 +343,7 @@ Live previews need a wildcard domain, which requires a domain you control:
 
 ## Upgrades, backups, and costs
 
-- **Upgrade a deployment on `:develop`** by redeploying the four app
+- **Upgrade a deployment on `:main`** by redeploying the four app
   services — they pull the current alias, and everything version-coupled
   derives from the new image. On an immutable pin, bump the tag in the four
   `image.url` fields first (via Blueprint sync or the dashboard). The api
