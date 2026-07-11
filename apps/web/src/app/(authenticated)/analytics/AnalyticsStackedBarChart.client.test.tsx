@@ -59,6 +59,7 @@ vi.mock('recharts', async () => {
 const CHART: AnalyticsChartResponse = {
   object: 'pullRequests',
   viewBy: 'user',
+  metric: 'tasks',
   total: 3,
   series: [
     { key: 'radia', label: 'Radia Perlman', total: 2 },
@@ -80,6 +81,7 @@ const CHART: AnalyticsChartResponse = {
 const STATUS_CHART: AnalyticsChartResponse = {
   object: 'pullRequests',
   viewBy: 'status',
+  metric: 'tasks',
   total: 4,
   series: [
     { key: 'Closed', label: 'Closed', total: 1 },
@@ -105,6 +107,7 @@ const STATUS_CHART: AnalyticsChartResponse = {
 const PALETTE_CHART: AnalyticsChartResponse = {
   object: 'tasks',
   viewBy: 'user',
+  metric: 'tasks',
   total: 28,
   series: [
     { key: 'series-1', label: 'Series 1', total: 1 },

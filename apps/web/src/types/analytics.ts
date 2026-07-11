@@ -6,6 +6,11 @@ export const analyticsObjects = ['tasks', 'pullRequests'] as const;
 export const analyticsObjectSchema = z.enum(analyticsObjects);
 export type AnalyticsObject = z.infer<typeof analyticsObjectSchema>;
 
+/** Y-axis metric for the Tasks analytics chart. PR analytics is always count. */
+export const analyticsMetrics = ['tasks', 'tokens', 'cost'] as const;
+export const analyticsMetricSchema = z.enum(analyticsMetrics);
+export type AnalyticsMetric = z.infer<typeof analyticsMetricSchema>;
+
 const analyticsDimensions = [
   'user',
   'project',
@@ -38,6 +43,7 @@ export type AnalyticsFilters = z.infer<typeof analyticsFiltersSchema>;
 export const analyticsChartInputSchema = z.object({
   object: analyticsObjectSchema,
   viewBy: analyticsDimensionSchema,
+  metric: analyticsMetricSchema.optional(),
   filters: analyticsFiltersSchema.optional(),
   timePeriod: timePeriodFilterSchema.optional(),
   granularity: analyticsGranularitySchema.optional(),
@@ -52,6 +58,7 @@ export const analyticsFilterOptionsInputSchema = z.object({
 export const analyticsDetailsInputSchema = z.object({
   object: analyticsObjectSchema,
   viewBy: analyticsDimensionSchema,
+  metric: analyticsMetricSchema.optional(),
   filters: analyticsFiltersSchema.optional(),
   timePeriod: timePeriodFilterSchema.optional(),
   granularity: analyticsGranularitySchema.optional(),
@@ -62,6 +69,7 @@ export const analyticsDetailsInputSchema = z.object({
 export const analyticsExportInputSchema = z.object({
   object: analyticsObjectSchema,
   viewBy: analyticsDimensionSchema,
+  metric: analyticsMetricSchema.optional(),
   filters: analyticsFiltersSchema.optional(),
   timePeriod: timePeriodFilterSchema.optional(),
   granularity: analyticsGranularitySchema.optional(),
@@ -95,6 +103,7 @@ export type AnalyticsChartBucket = {
 export type AnalyticsChartResponse = {
   object: AnalyticsObject;
   viewBy: AnalyticsDimension;
+  metric: AnalyticsMetric;
   series: AnalyticsSeries[];
   buckets: AnalyticsChartBucket[];
   total: number;
@@ -161,6 +170,8 @@ export const ANALYTICS_OBJECT_CONFIG = {
     filterDimensions: ['user', 'project', 'source'] as AnalyticsDimension[],
     viewByDimensions: ['user', 'project', 'source'] as AnalyticsDimension[],
     defaultViewBy: 'user' as AnalyticsDimension,
+    supportedMetrics: ['tasks', 'tokens', 'cost'] as readonly AnalyticsMetric[],
+    defaultMetric: 'tasks' as AnalyticsMetric,
   },
   pullRequests: {
     label: 'PRs',
@@ -178,6 +189,8 @@ export const ANALYTICS_OBJECT_CONFIG = {
       'author',
     ] as AnalyticsDimension[],
     defaultViewBy: 'user' as AnalyticsDimension,
+    supportedMetrics: ['tasks'] as readonly AnalyticsMetric[],
+    defaultMetric: 'tasks' as AnalyticsMetric,
   },
 } as const satisfies Record<
   AnalyticsObject,
@@ -187,6 +200,8 @@ export const ANALYTICS_OBJECT_CONFIG = {
     filterDimensions: AnalyticsDimension[];
     viewByDimensions: AnalyticsDimension[];
     defaultViewBy: AnalyticsDimension;
+    supportedMetrics: readonly AnalyticsMetric[];
+    defaultMetric: AnalyticsMetric;
   }
 >;
 
@@ -197,6 +212,18 @@ export const ANALYTICS_DIMENSION_LABELS: Record<AnalyticsDimension, string> = {
   status: 'Status',
   repo: 'Repo',
   author: 'Author',
+};
+
+export const ANALYTICS_METRIC_LABELS: Record<AnalyticsMetric, string> = {
+  tasks: 'Tasks',
+  tokens: 'Tokens',
+  cost: 'Cost',
+};
+
+export const ANALYTICS_METRIC_AXIS_LABELS: Record<AnalyticsMetric, string> = {
+  tasks: 'Tasks',
+  tokens: 'Tokens',
+  cost: 'Cost (USD)',
 };
 
 export const ANALYTICS_GRANULARITY_LABELS: Record<
@@ -237,6 +264,36 @@ export function isValidAnalyticsViewBy(
   return ANALYTICS_OBJECT_CONFIG[object].viewByDimensions.includes(
     viewBy as AnalyticsDimension,
   );
+}
+
+export function getDefaultAnalyticsMetric(
+  object: AnalyticsObject,
+): AnalyticsMetric {
+  return ANALYTICS_OBJECT_CONFIG[object].defaultMetric;
+}
+
+export function isValidAnalyticsMetric(
+  object: AnalyticsObject,
+  metric: string | null | undefined,
+): metric is AnalyticsMetric {
+  if (!metric) {
+    return false;
+  }
+
+  return ANALYTICS_OBJECT_CONFIG[object].supportedMetrics.includes(
+    metric as AnalyticsMetric,
+  );
+}
+
+export function getAnalyticsAxisLabel(
+  object: AnalyticsObject,
+  metric: AnalyticsMetric = getDefaultAnalyticsMetric(object),
+): string {
+  if (object === 'pullRequests') {
+    return ANALYTICS_OBJECT_CONFIG.pullRequests.axisLabel;
+  }
+
+  return ANALYTICS_METRIC_AXIS_LABELS[metric];
 }
 
 export function getAvailableAnalyticsGranularities(

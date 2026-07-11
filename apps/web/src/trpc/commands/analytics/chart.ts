@@ -5,6 +5,7 @@ import type {
   AnalyticsDimension,
   AnalyticsFilters,
   AnalyticsGranularity,
+  AnalyticsMetric,
   AnalyticsObject,
   TimePeriodFilter,
 } from '@/types';
@@ -14,6 +15,7 @@ export async function getAnalyticsChartCommand(
   input: {
     object: AnalyticsObject;
     viewBy: AnalyticsDimension;
+    metric?: AnalyticsMetric;
     filters?: AnalyticsFilters;
     timePeriod?: TimePeriodFilter;
     granularity?: AnalyticsGranularity;

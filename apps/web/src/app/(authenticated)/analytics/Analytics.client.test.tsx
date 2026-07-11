@@ -10,6 +10,7 @@ const state = vi.hoisted(() => ({
 const EMPTY_CHART = {
   object: 'pullRequests' as const,
   viewBy: 'user' as const,
+  metric: 'tasks' as const,
   total: 0,
   series: [],
   buckets: [],

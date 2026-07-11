@@ -8,8 +8,10 @@ describe('AnalyticsControlRow', () => {
       <AnalyticsControlRow
         object="pullRequests"
         viewBy="user"
+        metric="tasks"
         timePeriod={30}
         onViewByChange={vi.fn()}
+        onMetricChange={vi.fn()}
         onTimePeriodChange={vi.fn()}
       />,
     );
@@ -23,5 +25,26 @@ describe('AnalyticsControlRow', () => {
     ).toBeInTheDocument();
     expect(screen.queryByText('Time range')).not.toBeInTheDocument();
     expect(screen.queryByText('Granularity')).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole('combobox', { name: 'Metric' }),
+    ).not.toBeInTheDocument();
+  });
+
+  it('renders a metric selector for tasks analytics', () => {
+    render(
+      <AnalyticsControlRow
+        object="tasks"
+        viewBy="user"
+        metric="tokens"
+        timePeriod={7}
+        onViewByChange={vi.fn()}
+        onMetricChange={vi.fn()}
+        onTimePeriodChange={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByRole('combobox', { name: 'Metric' })).toHaveTextContent(
+      'Tokens',
+    );
   });
 });
