@@ -56,6 +56,7 @@ COPY packages/env/package.json ./packages/env/
 COPY packages/feature-flags/package.json ./packages/feature-flags/
 COPY packages/github/package.json ./packages/github/
 COPY packages/gitea/package.json ./packages/gitea/
+COPY packages/bitbucket/package.json ./packages/bitbucket/
 COPY packages/gitlab/package.json ./packages/gitlab/
 COPY packages/linear/package.json ./packages/linear/
 COPY packages/redis/package.json ./packages/redis/
