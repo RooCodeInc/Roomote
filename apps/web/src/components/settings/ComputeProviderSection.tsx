@@ -13,6 +13,9 @@ import {
 
 import { getComputeCredentialsHint } from '@/app/(onboarding)/setup/computeSetupCopy';
 import {
+  Alert,
+  AlertCircle,
+  AlertDescription,
   Badge,
   BrandIcon,
   Button,
@@ -182,6 +185,7 @@ export function ComputeProviderSection({
       !field.savedSatisfied,
   );
   const provisioningRunning = provisioning?.status === 'building';
+  const provisioningFailed = provisioning?.status === 'failed';
   // Credentials are already satisfied when a save can still start or retry
   // auto-provisioning without retyping values (existing installs that later
   // gain a registry-qualified worker image).
@@ -417,6 +421,23 @@ export function ComputeProviderSection({
               <EnvVarsInfoNote runtimeConfigured={runtimeConfigured} />
             )}
 
+            {provisioningFailed && (
+              <Alert variant="destructive" className="max-w-xl">
+                <AlertCircle />
+                <AlertDescription>
+                  {provisioning?.error
+                    ? `Provisioning failed: ${provisioning.error}`
+                    : 'Provisioning failed. Save to retry.'}
+                </AlertDescription>
+              </Alert>
+            )}
+
+            {provisioningRunning && (
+              <p className="max-w-xl text-sm text-muted-foreground">
+                Provisioning the worker base image. This can take a few minutes.
+              </p>
+            )}
+
             {(hasSavedValues ||
               hasEditableFields ||
               canRetryProvisioning ||
@@ -450,9 +471,9 @@ export function ComputeProviderSection({
                       {savePending
                         ? 'Saving...'
                         : provisioningRunning
-                          ? 'Saving...'
+                          ? 'Provisioning...'
                           : canRetryProvisioning && !hasPendingValueChanges
-                            ? 'Save'
+                            ? 'Retry provisioning'
                             : 'Save'}
                       {savePending || provisioningRunning ? <Spinner /> : null}
                     </Button>
