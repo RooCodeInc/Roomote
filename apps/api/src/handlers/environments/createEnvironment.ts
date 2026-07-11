@@ -89,9 +89,11 @@ function extractRunId(auth: McpAuth): number | null {
  *
  * This live-actor resolution is deliberately scoped to environment writes,
  * where the resolved user only feeds deployment-scoped attribution
- * (`createdByUserId`). The task-control handlers (launchTask, sendMessage,
- * steerMessage, task-stop) act *as* a user and intentionally keep their
- * stricter mint-time/user gating.
+ * (`createdByUserId`). Task-control handlers that act *as* a user
+ * (launchTask, sendMessage, steerMessage) intentionally keep stricter
+ * mint-time/user gating. task-stop deliberately allows a missing human
+ * claim and mints a deployment-principal run token so chat cancel can
+ * stop active sandboxes without a mint-time acting user.
  */
 export async function resolveEnvironmentWriteUserId(
   auth: McpAuth,

@@ -205,11 +205,11 @@ describe('injectEnvVars', () => {
     it('falls back to the process env preview-proxy base URL', async () => {
       const envVars: Record<string, string> = {};
 
-      process.env.PREVIEW_PROXY_BASE_URL = 'https://preview.openmote.dev';
+      process.env.PREVIEW_PROXY_BASE_URL = 'https://preview.roomote.dev';
 
       await injectEnvVars(envVars);
 
-      expect(envVars.PREVIEW_DOMAINS).toBe('preview.openmote.dev');
+      expect(envVars.PREVIEW_DOMAINS).toBe('preview.roomote.dev');
     });
 
     it('does not set PREVIEW_DOMAINS without a preview-proxy base URL', async () => {

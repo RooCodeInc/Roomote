@@ -6,11 +6,18 @@ import {
 } from '../getBitbucketAutomationTargets';
 
 describe('getBitbucketAutomationTargets helpers', () => {
-  it('prefers nickname for display username', () => {
+  it('prefers username over nickname for login matching', () => {
     expect(
       getBitbucketUsername({
         nickname: 'nick',
         username: 'user',
+        display_name: 'Display',
+      }),
+    ).toBe('user');
+
+    expect(
+      getBitbucketUsername({
+        nickname: 'nick',
         display_name: 'Display',
       }),
     ).toBe('nick');

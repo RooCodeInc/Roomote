@@ -2,6 +2,15 @@
 
 This file tracks product releases for Roomote (single monorepo version). Automated release entries are prepended by `pnpm run version`.
 
+## 0.1.1 (2026-07-11)
+
+### Patch changes
+
+- Bitbucket pull request @mentions now look up active review tasks only within the Bitbucket source-control provider and prefer stable account id/uuid for bot self-detection (with username preferred over nickname), so comment routing is less likely to hit the wrong provider’s task or loop on bot self-replies when nickname and username differ.
+- Settings → Misc → Diagnostics stacks each label above its value on small screens, so timestamps, versions, and hashes stay readable instead of wrapping one character per line in the old two-column layout.
+- GitHub pull request provenance footers (“Follow up by mentioning @…”) now use the deployment’s configured GitHub App slug at write time when one is set, instead of hardcoding `@roomote` whenever prompt-time resolution fell through to the schema default.
+- The one-click Deploy to Render Blueprint now pulls `ghcr.io/roocodeinc/roomote-app:main` for app services instead of `:develop`, so new Render installs track the stable main image channel (aligned with Railway’s primary deploy button).
+
 ## 0.1.0 (2026-07-11)
 
 ### Minor changes

@@ -38,7 +38,7 @@ describe('assessBrowserOrigin', () => {
     it('rejects a custom domain the deployment was not told about', () => {
       expect(
         assessBrowserOrigin({
-          browserOrigin: 'https://app.openmote.example.dev',
+          browserOrigin: 'https://app.roomote.example.dev',
           roomoteAppUrl: 'https://web-production-1234.up.railway.example.app',
         }),
       ).toEqual({

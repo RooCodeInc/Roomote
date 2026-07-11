@@ -161,7 +161,7 @@ describe('steered-task history reconstruction', () => {
     const store = createAcpStore();
 
     // Mirrors the persisted envelope stream of a real steered task
-    // (openmote task 190holbb4xm2k): initial hidden prompt, a first turn
+    // (observed production task 190holbb4xm2k): initial hidden prompt, a first turn
     // with interleaved empty assistant messages and a final answer, a
     // visible follow-up, a second turn, a steer, and the steered answer.
     store.getState()._mergeAcpHistory(envelopeFixture());
@@ -256,7 +256,7 @@ describe('steered-task history reconstruction', () => {
     const store = createAcpStore();
     const fixture = envelopeFixture();
 
-    // Simulate the corruption observed on live sessions (openmote task
+    // Simulate the corruption observed on live sessions (production task
     // 190holbb4xm2k, 2026-07-09): the in-memory transcript collapsed to just
     // the initial prompt and the latest answer while the server still held
     // every envelope.

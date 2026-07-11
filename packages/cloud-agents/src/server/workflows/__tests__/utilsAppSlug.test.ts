@@ -42,18 +42,18 @@ describe('findReusableReviewSummaryComment', () => {
   });
 
   it('does not reuse summaries from an unrelated bot', () => {
-    const comment = makeReviewSummaryComment('openmote[bot]');
+    const comment = makeReviewSummaryComment('acme[bot]');
 
     expect(findReusableReviewSummaryComment([comment])).toBeUndefined();
   });
 
   it('recognizes the database-configured app slug bot once cached', () => {
     setConfiguredGitHubAppSlugCache({
-      value: 'openmote',
+      value: 'acme',
       expiresAt: Date.now() + 60_000,
     });
 
-    const comment = makeReviewSummaryComment('openmote[bot]');
+    const comment = makeReviewSummaryComment('acme[bot]');
 
     expect(findReusableReviewSummaryComment([comment])).toBe(comment);
   });
@@ -71,7 +71,7 @@ describe('getPrBodyAttributionLine', () => {
 
   it('mentions the database-configured app slug once cached', () => {
     setConfiguredGitHubAppSlugCache({
-      value: 'openmote',
+      value: 'acme',
       expiresAt: Date.now() + 60_000,
     });
 
@@ -80,7 +80,7 @@ describe('getPrBodyAttributionLine', () => {
       taskUrl: 'https://app.roomote.dev/tasks/123',
     });
 
-    expect(line).toContain('@openmote');
+    expect(line).toContain('@acme');
     expect(line).not.toContain('@newmote');
   });
 });
