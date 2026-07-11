@@ -147,8 +147,9 @@ function mockGreenCiChecks() {
       ],
     },
   });
+  // GitHub returns pending with an empty statuses list for Actions-only repos.
   mockGetCombinedStatusForRef.mockResolvedValue({
-    data: { state: 'success', statuses: [] },
+    data: { state: 'pending', statuses: [], total_count: 0 },
   });
 }
 
@@ -228,7 +229,11 @@ describe('preparePrReviewNotificationDelivery', () => {
       },
     });
     mockGetCombinedStatusForRef.mockResolvedValue({
-      data: { state: 'failure', statuses: [] },
+      data: {
+        state: 'failure',
+        total_count: 1,
+        statuses: [{ state: 'failure', context: 'legacy-ci' }],
+      },
     });
 
     await preparePrReviewNotificationDelivery({
@@ -461,7 +466,7 @@ describe('gatherPrReviewTriageContext', () => {
       },
     });
     mockGetCombinedStatusForRef.mockResolvedValue({
-      data: { state: 'pending', statuses: [] },
+      data: { state: 'pending', statuses: [], total_count: 0 },
     });
 
     const context = await gatherPrReviewTriageContext({
@@ -471,6 +476,28 @@ describe('gatherPrReviewTriageContext', () => {
     });
 
     expect(context.ciStatusSentence).toBe('Tests are still running.');
+  });
+
+  it('treats empty combined status as unavailable so green Actions check runs report green', async () => {
+    mockListCheckRunsForRef.mockResolvedValue({
+      data: {
+        check_runs: [
+          { name: 'CI / Lint', status: 'completed', conclusion: 'success' },
+          { name: 'CI / Tests', status: 'completed', conclusion: 'success' },
+        ],
+      },
+    });
+    mockGetCombinedStatusForRef.mockResolvedValue({
+      data: { state: 'pending', statuses: [], total_count: 0 },
+    });
+
+    const context = await gatherPrReviewTriageContext({
+      taskRun,
+      repository: request.repository,
+      prNumber: request.prNumber,
+    });
+
+    expect(context.ciStatusSentence).toBe('CI is green.');
   });
 
   it('skips CI sentence for non-GitHub source-control providers', async () => {

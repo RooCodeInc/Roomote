@@ -297,7 +297,14 @@ async function fetchPrReviewCiStatusSentence({
           ref: headSha,
         });
 
-      combinedOverall = overallFromCombinedState(combined.state);
+      // GitHub returns `state: "pending"` with an empty statuses list when a
+      // repo only uses Actions check runs (no classic commit statuses). Treat
+      // that empty combined status as unavailable so green check runs are not
+      // overridden as still-running.
+      combinedOverall =
+        combined.total_count > 0
+          ? overallFromCombinedState(combined.state)
+          : null;
 
       if (combinedOverall === 'failure' || combinedOverall === 'error') {
         const failed =
