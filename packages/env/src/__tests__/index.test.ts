@@ -132,7 +132,7 @@ describe('Env', () => {
   });
 
   it('requires an explicit opt-in for unbounded Docker task disks', () => {
-    const runtimeEnv = {
+    const runtimeEnv: NodeJS.ProcessEnv = {
       ...process.env,
       DOCKER_WORKER_ALLOW_UNBOUNDED_DISK: 'true',
     };
