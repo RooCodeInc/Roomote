@@ -27,9 +27,18 @@ export const snapshotCapableComputeProviders = [
 ] as const satisfies readonly ComputeProvider[];
 
 /**
+ * Providers that can retain and reconnect to the same suspended instance.
+ * Unlike snapshots, standby handles are single-instance and are not safe to
+ * use as reusable environment templates.
+ */
+export const standbyResumeCapableComputeProviders = [
+  'blaxel',
+] as const satisfies readonly ComputeProvider[];
+
+/**
  * Providers whose machine lifecycle is managed by the scheduled sleep-check
- * pipeline. Snapshot-capable providers get snapshot-or-destroy handling;
- * non-snapshot managed providers are always destroyed on sleep.
+ * pipeline. Snapshot-capable providers create immutable snapshots, standby
+ * providers retain their instance, and other managed providers are destroyed.
  */
 export const sleepCheckManagedComputeProviders = [
   ...snapshotCapableComputeProviders,
@@ -54,6 +63,20 @@ export const isSnapshotCapableComputeProvider = (
   snapshotCapableComputeProviders.includes(
     provider as (typeof snapshotCapableComputeProviders)[number],
   );
+
+export const isStandbyResumeCapableComputeProvider = (
+  provider: string | null | undefined,
+): provider is ComputeProvider =>
+  standbyResumeCapableComputeProviders.includes(
+    provider as (typeof standbyResumeCapableComputeProviders)[number],
+  );
+
+/** Providers that can preserve a resumable task across its sleep boundary. */
+export const isTaskResumeCapableComputeProvider = (
+  provider: string | null | undefined,
+): provider is ComputeProvider =>
+  isSnapshotCapableComputeProvider(provider) ||
+  isStandbyResumeCapableComputeProvider(provider);
 
 /**
  * Worker runtime labels. `sandbox` denotes the shared hosted-sandbox

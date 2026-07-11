@@ -30,6 +30,22 @@ export interface ResumeInstanceInput extends CreateInstanceInput {
   sourceSnapshotId: string;
 }
 
+export interface EnterStandbyInput {
+  instanceId: string;
+  commandId?: string;
+  signal?: AbortSignal;
+}
+
+export interface EnterStandbyResult {
+  /** Opaque single-instance handle used to reconnect to this standby. */
+  resumeHandle: string;
+  usageObservation?: ComputeUsageObservation;
+}
+
+export interface ResumeFromStandbyInput extends CreateInstanceInput {
+  resumeHandle: string;
+}
+
 export interface CreatedInstance {
   instanceId: string;
   status?: ComputeInstanceStatus;
@@ -183,6 +199,8 @@ export interface ComputeProviderClient {
     input: FindSnapshotBySourceInstanceInput,
   ): Promise<SourceInstanceSnapshot | null>;
   resumeFromSnapshot(input: ResumeInstanceInput): Promise<CreatedInstance>;
+  enterStandby?(input: EnterStandbyInput): Promise<EnterStandbyResult>;
+  resumeFromStandby?(input: ResumeFromStandbyInput): Promise<CreatedInstance>;
 }
 
 export interface ModalConfig {

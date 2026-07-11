@@ -41,13 +41,27 @@ export async function spawnBlaxelWorker(
     blaxelTags?: Record<string, string>;
   },
 ): Promise<{ machineId: string; sandboxCmdId?: string }> {
-  if (
-    taskRun.payloadKind === TaskPayloadKind.SnapshotEnvironment ||
-    taskRun.payloadKind === TaskPayloadKind.SnapshotResume
-  ) {
+  if (taskRun.payloadKind === TaskPayloadKind.SnapshotEnvironment) {
     throw new NonRetryableSpawnError(
       'Blaxel does not support Roomote environment snapshots',
     );
+  }
+
+  let launchOptions:
+    | { launchMode: 'fresh' }
+    | { launchMode: 'task_standby'; resumeHandle: string };
+  if (taskRun.payloadKind === TaskPayloadKind.SnapshotResume) {
+    if (!taskRun.sourceSnapshotId) {
+      throw new NonRetryableSpawnError(
+        `SnapshotResume task run #${taskRun.id} missing sourceSnapshotId`,
+      );
+    }
+    launchOptions = {
+      launchMode: 'task_standby',
+      resumeHandle: taskRun.sourceSnapshotId,
+    };
+  } else {
+    launchOptions = { launchMode: 'fresh' };
   }
 
   const { namedPorts, environmentConfig } =
@@ -64,8 +78,9 @@ export async function spawnBlaxelWorker(
     : undefined;
   const environmentId = taskRun.payload.environmentId;
   const mutationContext = {
-    launchMode: 'fresh' as const,
-    sourceSnapshotId: null,
+    launchMode: launchOptions.launchMode,
+    sourceSnapshotId:
+      'resumeHandle' in launchOptions ? launchOptions.resumeHandle : null,
     ports: namedPorts.map(({ port }) => port),
   };
   const recordMutation = createComputeProviderMutationEventRecorder(
@@ -87,7 +102,7 @@ export async function spawnBlaxelWorker(
   await stampTaskRunMilestone({
     runId: taskRun.id,
     field: 'provisionStartedAt',
-    launchMode: 'fresh',
+    launchMode: launchOptions.launchMode,
   });
   const machine = await createBlaxelMachine({
     blaxelApiKey: config.blaxelApiKey,
@@ -102,8 +117,10 @@ export async function spawnBlaxelWorker(
     bootstrapTimeoutMs: 120_000,
     computeClient,
     onMutation: recordMutation,
+    ...launchOptions,
   });
 
+  let launchedCommandId: string | undefined;
   try {
     await updateTaskRunMachine({
       taskRun,
@@ -115,7 +132,7 @@ export async function spawnBlaxelWorker(
       explicitPrimaryPortName: getPrimaryPortFromConfig(
         environmentConfig?.ports,
       )?.name,
-      sourceSnapshotId: null,
+      sourceSnapshotId: machine.sourceSnapshotId ?? null,
       authBypassValue,
       authBypassHeaderName,
     });
@@ -131,7 +148,10 @@ export async function spawnBlaxelWorker(
         computeProvider: 'blaxel',
         computeProviderId: machine.machineId,
         runId: taskRun.id,
-        context: 'Fresh Blaxel launch',
+        context:
+          launchOptions.launchMode === 'task_standby'
+            ? 'Standby-resumed Blaxel launch'
+            : 'Fresh Blaxel launch',
       });
     }
 
@@ -164,6 +184,7 @@ export async function spawnBlaxelWorker(
       detached: true,
       signal: AbortSignal.timeout(60_000),
     });
+    launchedCommandId = result.commandId;
     if (result.exitCode !== null && result.exitCode !== 0) {
       throw new Error(
         `Detached Blaxel worker exited with code ${result.exitCode}: ${result.stderr ?? result.stdout ?? 'no output'}`,
@@ -191,11 +212,27 @@ export async function spawnBlaxelWorker(
       ...(result.commandId ? { sandboxCmdId: result.commandId } : {}),
     };
   } catch (error) {
-    await computeClient
-      .destroyInstance({ instanceId: machine.machineId })
-      .catch((cleanupError) => {
-        console.error('[spawnBlaxelWorker] Cleanup failed', cleanupError);
-      });
+    if (launchOptions.launchMode === 'task_standby') {
+      // This is the only copy of the task's mutable state. Preserve it for a
+      // controller retry instead of applying the fresh-launch cleanup rule.
+      await computeClient
+        .enterStandby?.({
+          instanceId: machine.machineId,
+          commandId: launchedCommandId,
+        })
+        .catch((cleanupError) => {
+          console.error(
+            '[spawnBlaxelWorker] Failed to restore standby after resume failure',
+            cleanupError,
+          );
+        });
+    } else {
+      await computeClient
+        .destroyInstance({ instanceId: machine.machineId })
+        .catch((cleanupError) => {
+          console.error('[spawnBlaxelWorker] Cleanup failed', cleanupError);
+        });
+    }
     throw error;
   }
 }

@@ -68,12 +68,14 @@ const {
   blaxelGetMock,
   blaxelListMock,
   blaxelDeleteMock,
+  blaxelUpdateTtlMock,
   blaxelSettingsMock,
 } = vi.hoisted(() => ({
   blaxelCreateMock: vi.fn(),
   blaxelGetMock: vi.fn(),
   blaxelListMock: vi.fn(),
   blaxelDeleteMock: vi.fn(),
+  blaxelUpdateTtlMock: vi.fn(),
   blaxelSettingsMock: vi.fn(),
 }));
 
@@ -84,6 +86,7 @@ vi.mock('@blaxel/core', () => ({
     get: blaxelGetMock,
     list: blaxelListMock,
     delete: blaxelDeleteMock,
+    updateTtl: blaxelUpdateTtlMock,
   },
 }));
 
@@ -115,6 +118,9 @@ describe('compute provider adapter contracts', () => {
         createIfNotExists: vi.fn().mockImplementation(async (preview) => ({
           spec: { url: `https://${preview.spec.port}.blaxel.test` },
         })),
+        create: vi.fn().mockImplementation(async (preview) => ({
+          spec: { url: `https://${preview.spec.port}.blaxel.test` },
+        })),
       },
       process: {
         exec: vi.fn().mockResolvedValue({
@@ -130,6 +136,7 @@ describe('compute provider adapter contracts', () => {
           stderr: '',
         }),
         logs: vi.fn().mockResolvedValue('hello'),
+        stop: vi.fn().mockResolvedValue(undefined),
       },
       fs: { writeBinary: vi.fn().mockResolvedValue(undefined) },
     };
@@ -141,6 +148,7 @@ describe('compute provider adapter contracts', () => {
       },
     });
     blaxelDeleteMock.mockResolvedValue(undefined);
+    blaxelUpdateTtlMock.mockResolvedValue(sandbox);
 
     const client = createComputeProviderClient({
       provider: 'blaxel',
@@ -156,6 +164,8 @@ describe('compute provider adapter contracts', () => {
       workspace: 'workspace',
     });
     expect(client.capabilities.supportsSnapshots).toBe(false);
+    expect(client.capabilities.supportsStandbyResume).toBe(true);
+    expect(client.capabilities.supportsResume).toBe(true);
 
     const created = await client.createInstance({ ports: [3000] });
     expect(created.domains).toEqual({
@@ -204,6 +214,34 @@ describe('compute provider adapter contracts', () => {
     await expect(
       client.createSnapshot({ instanceId: created.instanceId }),
     ).rejects.toThrow('does not support Roomote snapshots');
+    await expect(
+      client.enterStandby?.({
+        instanceId: created.instanceId,
+        commandId: 'cmd-1',
+      }),
+    ).resolves.toEqual({ resumeHandle: created.instanceId });
+    expect(blaxelUpdateTtlMock).toHaveBeenCalledWith(created.instanceId, '7d');
+    expect(sandbox.process.stop).toHaveBeenCalledWith('cmd-1');
+
+    await expect(
+      client.resumeFromStandby?.({
+        resumeHandle: created.instanceId,
+        ports: [3000],
+      }),
+    ).resolves.toMatchObject({
+      instanceId: created.instanceId,
+      sourceSnapshotId: created.instanceId,
+      status: 'running',
+      domains: { '3000': 'https://3000.blaxel.test' },
+    });
+    expect(blaxelUpdateTtlMock).toHaveBeenLastCalledWith(
+      created.instanceId,
+      '120s',
+    );
+    expect(sandbox.previews.create).toHaveBeenCalledWith(
+      expect.objectContaining({ metadata: { name: 'port-3000' } }),
+      true,
+    );
     await client.destroyInstance({ instanceId: created.instanceId });
     expect(blaxelDeleteMock).toHaveBeenCalledWith(created.instanceId);
   });

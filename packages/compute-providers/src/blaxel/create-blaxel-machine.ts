@@ -1,4 +1,8 @@
-import { type NamedPort, SANDBOX_FILES_DIR } from '@roomote/types';
+import {
+  type ComputeProviderLaunchMode,
+  type NamedPort,
+  SANDBOX_FILES_DIR,
+} from '@roomote/types';
 
 import { generateProxyPorts, getExposedPorts } from '../environment-machine';
 import { createComputeProviderClient } from '../factory';
@@ -17,7 +21,12 @@ const WORKER_TARBALL_PATH = `${SANDBOX_FILES_DIR}/worker.tar.gz`;
 
 type BlaxelLifecycleClient = Pick<
   ComputeProviderClient,
-  'vendor' | 'createInstance' | 'writeFiles' | 'runCommand' | 'destroyInstance'
+  | 'vendor'
+  | 'createInstance'
+  | 'resumeFromStandby'
+  | 'writeFiles'
+  | 'runCommand'
+  | 'destroyInstance'
 >;
 
 export interface CreateBlaxelMachineOptions {
@@ -40,11 +49,19 @@ export interface CreateBlaxelMachineOptions {
 export interface BlaxelMachine {
   machineId: string;
   proxyPorts: Record<string, number>;
+  sourceSnapshotId?: string;
   domain: (port: number) => string;
 }
 
+export type BlaxelLaunchOptions =
+  | { launchMode: 'fresh'; resumeHandle?: undefined }
+  | { launchMode: 'task_standby'; resumeHandle: string };
+
+export type CreateBlaxelMachineParams = CreateBlaxelMachineOptions &
+  BlaxelLaunchOptions;
+
 export async function createBlaxelMachine(
-  options: CreateBlaxelMachineOptions,
+  options: CreateBlaxelMachineParams,
 ): Promise<BlaxelMachine> {
   const proxyPorts =
     options.proxyPorts ?? generateProxyPorts(options.namedPorts);
@@ -54,9 +71,12 @@ export async function createBlaxelMachine(
     : options.signal;
   throwIfAborted(createSignal);
 
-  const release = options.localTarballPath
-    ? loadLocalWorkerReleaseWithVersion(options.localTarballPath)
-    : await getWorkerRelease();
+  const release =
+    options.launchMode === 'fresh'
+      ? options.localTarballPath
+        ? loadLocalWorkerReleaseWithVersion(options.localTarballPath)
+        : await getWorkerRelease()
+      : undefined;
   const computeClient =
     options.computeClient ??
     createComputeProviderClient({
@@ -78,42 +98,80 @@ export async function createBlaxelMachine(
     | undefined;
   for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
     try {
+      const operation = options.resumeHandle
+        ? 'resume_from_standby'
+        : 'create_instance';
       await options.onMutation?.({
         provider: 'blaxel',
-        operation: 'create_instance',
+        operation,
         eventType: 'started',
-        message: 'Calling createInstance for Blaxel sandbox.',
-        details: { attempt, launchMode: 'fresh', ports },
-      });
-      created = await computeClient.createInstance({
-        ports,
-        tags: options.tags,
-        metadata: {
-          workerReleaseTag: `worker-v${release.version}`,
-          ...(options.timeoutMs
-            ? { timeoutMs: String(options.timeoutMs) }
-            : {}),
+        message: options.resumeHandle
+          ? `Calling resumeFromStandby for Blaxel sandbox ${options.resumeHandle}.`
+          : 'Calling createInstance for Blaxel sandbox.',
+        details: {
+          attempt,
+          launchMode: options.launchMode as ComputeProviderLaunchMode,
+          sourceSnapshotId: options.resumeHandle ?? null,
+          ports,
         },
-        signal: createSignal,
       });
+      if (options.resumeHandle) {
+        if (!computeClient.resumeFromStandby) {
+          throw new Error(
+            'Blaxel compute client does not support standby resume',
+          );
+        }
+        created = await computeClient.resumeFromStandby({
+          resumeHandle: options.resumeHandle,
+          ports,
+          tags: options.tags,
+          signal: createSignal,
+        });
+      } else {
+        created = await computeClient.createInstance({
+          ports,
+          tags: options.tags,
+          metadata: {
+            ...(release
+              ? { workerReleaseTag: `worker-v${release.version}` }
+              : {}),
+            ...(options.timeoutMs
+              ? { timeoutMs: String(options.timeoutMs) }
+              : {}),
+          },
+          signal: createSignal,
+        });
+      }
       await options.onMutation?.({
         provider: 'blaxel',
-        operation: 'create_instance',
+        operation,
         eventType: 'completed',
         instanceId: created.instanceId,
-        message: `createInstance completed for Blaxel sandbox ${created.instanceId}.`,
-        details: { attempt, launchMode: 'fresh', ports },
+        message: `${
+          options.resumeHandle ? 'resumeFromStandby' : 'createInstance'
+        } completed for Blaxel sandbox ${created.instanceId}.`,
+        details: {
+          attempt,
+          launchMode: options.launchMode as ComputeProviderLaunchMode,
+          sourceSnapshotId: options.resumeHandle ?? null,
+          ports,
+        },
       });
       break;
     } catch (error) {
       await options.onMutation?.({
         provider: 'blaxel',
-        operation: 'create_instance',
+        operation: options.resumeHandle
+          ? 'resume_from_standby'
+          : 'create_instance',
         eventType: 'failed',
-        message: 'createInstance failed for Blaxel sandbox.',
+        message: `${
+          options.resumeHandle ? 'resumeFromStandby' : 'createInstance'
+        } failed for Blaxel sandbox.`,
         details: {
           attempt,
-          launchMode: 'fresh',
+          launchMode: options.launchMode as ComputeProviderLaunchMode,
+          sourceSnapshotId: options.resumeHandle ?? null,
           ports,
           error: error instanceof Error ? error.message : String(error),
         },
@@ -124,63 +182,74 @@ export async function createBlaxelMachine(
   }
   if (!created) throw new Error('Failed to create Blaxel sandbox');
 
-  const bootstrapSignal = options.bootstrapTimeoutMs
-    ? AbortSignal.timeout(options.bootstrapTimeoutMs)
-    : options.signal;
-  try {
-    const { files } = loadSandboxBootstrapFiles(SANDBOX_FILES_DIR);
-    files.push({ path: WORKER_TARBALL_PATH, content: release.archive });
-    await options.onMutation?.({
-      provider: 'blaxel',
-      operation: 'write_files',
-      eventType: 'started',
-      instanceId: created.instanceId,
-      message: `Calling writeFiles for Blaxel sandbox ${created.instanceId}.`,
-      details: { launchMode: 'fresh', ports, fileCount: files.length },
-    });
-    await computeClient.writeFiles({
-      instanceId: created.instanceId,
-      files,
-      signal: bootstrapSignal,
-    });
-    await options.onMutation?.({
-      provider: 'blaxel',
-      operation: 'write_files',
-      eventType: 'completed',
-      instanceId: created.instanceId,
-      message: `writeFiles completed for Blaxel sandbox ${created.instanceId}.`,
-      details: { launchMode: 'fresh', ports, fileCount: files.length },
-    });
-    const install = await computeClient.runCommand({
-      instanceId: created.instanceId,
-      cmd: 'bash',
-      args: [INSTALL_SCRIPT_PATH],
-      // Blaxel's injected sandbox API runs commands as root even when the
-      // source image declares USER roomote. Point HOME back at the worker
-      // user's mise config so the image's pinned Node toolchain is active.
-      env: {
-        HOME: '/home/roomote',
-        WORKER_RELEASE_ARCHIVE_PATH: WORKER_TARBALL_PATH,
-      },
-      signal: bootstrapSignal,
-    });
-    if (install.exitCode !== 0) {
-      throw new Error(
-        `Blaxel worker install failed with exit code ${install.exitCode}: ${install.stderr ?? install.stdout ?? 'no output'}`,
-      );
-    }
-  } catch (error) {
-    await computeClient
-      .destroyInstance({ instanceId: created.instanceId })
-      .catch((cleanupError) => {
-        console.error('[createBlaxelMachine] Cleanup failed', cleanupError);
+  if (release) {
+    const bootstrapSignal = options.bootstrapTimeoutMs
+      ? AbortSignal.timeout(options.bootstrapTimeoutMs)
+      : options.signal;
+    try {
+      const { files } = loadSandboxBootstrapFiles(SANDBOX_FILES_DIR);
+      files.push({ path: WORKER_TARBALL_PATH, content: release.archive });
+      await options.onMutation?.({
+        provider: 'blaxel',
+        operation: 'write_files',
+        eventType: 'started',
+        instanceId: created.instanceId,
+        message: `Calling writeFiles for Blaxel sandbox ${created.instanceId}.`,
+        details: {
+          launchMode: options.launchMode,
+          ports,
+          fileCount: files.length,
+        },
       });
-    throw error;
+      await computeClient.writeFiles({
+        instanceId: created.instanceId,
+        files,
+        signal: bootstrapSignal,
+      });
+      await options.onMutation?.({
+        provider: 'blaxel',
+        operation: 'write_files',
+        eventType: 'completed',
+        instanceId: created.instanceId,
+        message: `writeFiles completed for Blaxel sandbox ${created.instanceId}.`,
+        details: {
+          launchMode: options.launchMode,
+          ports,
+          fileCount: files.length,
+        },
+      });
+      const install = await computeClient.runCommand({
+        instanceId: created.instanceId,
+        cmd: 'bash',
+        args: [INSTALL_SCRIPT_PATH],
+        // Blaxel's injected sandbox API runs commands as root even when the
+        // source image declares USER roomote. Point HOME back at the worker
+        // user's mise config so the image's pinned Node toolchain is active.
+        env: {
+          HOME: '/home/roomote',
+          WORKER_RELEASE_ARCHIVE_PATH: WORKER_TARBALL_PATH,
+        },
+        signal: bootstrapSignal,
+      });
+      if (install.exitCode !== 0) {
+        throw new Error(
+          `Blaxel worker install failed with exit code ${install.exitCode}: ${install.stderr ?? install.stdout ?? 'no output'}`,
+        );
+      }
+    } catch (error) {
+      await computeClient
+        .destroyInstance({ instanceId: created.instanceId })
+        .catch((cleanupError) => {
+          console.error('[createBlaxelMachine] Cleanup failed', cleanupError);
+        });
+      throw error;
+    }
   }
 
   return {
     machineId: created.instanceId,
     proxyPorts,
+    ...(options.resumeHandle ? { sourceSnapshotId: options.resumeHandle } : {}),
     domain: (port) => {
       const domain = created.domains?.[String(port)];
       if (!domain) {

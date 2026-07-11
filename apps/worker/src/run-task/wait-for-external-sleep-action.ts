@@ -3,7 +3,7 @@ import pWaitFor from 'p-wait-for';
 import {
   isExitedRunStatus,
   isSleepCheckManagedComputeProvider,
-  isSnapshotCapableComputeProvider,
+  isTaskResumeCapableComputeProvider,
   isResumableTaskPayloadKind,
 } from '@roomote/types';
 import { type DequeuedTaskRun, sdk } from '@roomote/sdk/client';
@@ -56,10 +56,11 @@ export async function waitForExternalSleepAction({
     return { claimed: false, completed: false };
   }
 
-  // Non-snapshot providers exit via destroy, never via snapshot.
+  // Resumable providers complete via either an immutable snapshot or a
+  // provider-native standby handle. Other providers exit via destroy.
   const isResumable =
     isResumableTaskPayloadKind(taskRun.payloadKind) &&
-    isSnapshotCapableComputeProvider(taskRun.vendor);
+    isTaskResumeCapableComputeProvider(taskRun.vendor);
   let sleepRequested = false;
 
   try {

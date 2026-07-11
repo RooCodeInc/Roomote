@@ -18,6 +18,8 @@ import type {
   CreatedInstance,
   DestroyInstanceInput,
   DestroyInstanceResult,
+  EnterStandbyInput,
+  EnterStandbyResult,
   GetCommandOutputInput,
   GetInstanceDomainsInput,
   GetInstanceDomainsResult,
@@ -26,6 +28,7 @@ import type {
   InstanceSummary,
   ListInstancesInput,
   ResumeInstanceInput,
+  ResumeFromStandbyInput,
   RunCommandInput,
   RunCommandResult,
   StreamCommandOutputInput,
@@ -36,6 +39,7 @@ const STREAM_POLL_INTERVAL_MS = 1_000;
 const WORKLOAD_READY_RETRY_BUDGET_MS = 60_000;
 const WORKLOAD_READY_INITIAL_DELAY_MS = 500;
 const WORKLOAD_READY_MAX_DELAY_MS = 30_000;
+const BLAXEL_STANDBY_TTL = '7d';
 
 export class BlaxelClient implements ComputeProviderClient {
   public readonly vendor: ComputeProvider = 'blaxel';
@@ -146,6 +150,69 @@ export class BlaxelClient implements ComputeProviderClient {
       if (!isNotFound(error)) throw error;
     }
     return {};
+  }
+
+  public async enterStandby(
+    input: EnterStandbyInput,
+  ): Promise<EnterStandbyResult> {
+    throwIfAborted(input.signal);
+
+    await raceWithAbort({
+      promise: SandboxInstance.updateTtl(input.instanceId, BLAXEL_STANDBY_TTL),
+      signal: input.signal,
+      abortMessage: `Extending standby TTL for Blaxel sandbox ${input.instanceId} was aborted`,
+    });
+
+    if (input.commandId) {
+      const sandbox = await this.getSandbox(input.instanceId, input.signal);
+      try {
+        await retryWorkloadUnavailable({
+          operation: () =>
+            raceWithAbort({
+              promise: sandbox.process.stop(input.commandId!),
+              signal: input.signal,
+              abortMessage: `Stopping worker ${input.commandId} in Blaxel sandbox ${input.instanceId} was aborted`,
+            }),
+          signal: input.signal,
+          description: `stopping worker ${input.commandId} in Blaxel sandbox ${input.instanceId}`,
+        });
+      } catch (error) {
+        // The worker may have completed between the scheduler deciding to put
+        // the sandbox on standby and the stop request reaching Blaxel.
+        if (!isNotFound(error)) throw error;
+      }
+    }
+
+    return { resumeHandle: input.instanceId };
+  }
+
+  public async resumeFromStandby(
+    input: ResumeFromStandbyInput,
+  ): Promise<CreatedInstance> {
+    throwIfAborted(input.signal);
+
+    await raceWithAbort({
+      promise: SandboxInstance.updateTtl(
+        input.resumeHandle,
+        this.ttl() ?? null,
+      ),
+      signal: input.signal,
+      abortMessage: `Restoring active TTL for Blaxel sandbox ${input.resumeHandle} was aborted`,
+    });
+    const sandbox = await this.getSandbox(input.resumeHandle, input.signal);
+    const domains = await this.createPreviewDomains(
+      sandbox,
+      input.ports ?? [],
+      input.signal,
+      true,
+    );
+
+    return {
+      instanceId: input.resumeHandle,
+      sourceSnapshotId: input.resumeHandle,
+      status: 'running',
+      domains,
+    };
   }
 
   public async getInstanceDomains(
@@ -305,14 +372,23 @@ export class BlaxelClient implements ComputeProviderClient {
     sandbox: SandboxInstance,
     ports: number[],
     signal?: AbortSignal,
+    refresh = false,
   ): Promise<Record<string, string>> {
     const domains: Record<string, string> = {};
     for (const port of ports) {
       const preview = await raceWithAbort({
-        promise: sandbox.previews.createIfNotExists({
-          metadata: { name: `port-${port}` },
-          spec: { port, public: true, ttl: this.ttl() },
-        }),
+        promise: refresh
+          ? sandbox.previews.create(
+              {
+                metadata: { name: `port-${port}` },
+                spec: { port, public: true, ttl: this.ttl() },
+              },
+              true,
+            )
+          : sandbox.previews.createIfNotExists({
+              metadata: { name: `port-${port}` },
+              spec: { port, public: true, ttl: this.ttl() },
+            }),
         signal,
         abortMessage: `Creating Blaxel preview for port ${port} was aborted`,
       });

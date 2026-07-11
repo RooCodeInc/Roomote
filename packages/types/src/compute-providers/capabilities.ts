@@ -14,6 +14,8 @@ export interface ComputeProviderCapabilities {
   supportsCommandOutputStreaming: boolean;
   supportsCommandOutputLookup: boolean;
   supportsSnapshots: boolean;
+  /** Can retain and later reconnect to the same suspended instance. */
+  supportsStandbyResume: boolean;
   supportsResume: boolean;
   supportsFileWrite: boolean;
 }
@@ -25,6 +27,7 @@ export const DOCKER_CAPABILITIES: ComputeProviderCapabilities = {
   supportsCommandOutputStreaming: false,
   supportsCommandOutputLookup: false,
   supportsSnapshots: false,
+  supportsStandbyResume: false,
   supportsResume: false,
   supportsFileWrite: false,
 };
@@ -36,6 +39,7 @@ export const MODAL_CAPABILITIES: ComputeProviderCapabilities = {
   supportsCommandOutputStreaming: false,
   supportsCommandOutputLookup: false,
   supportsSnapshots: true,
+  supportsStandbyResume: false,
   supportsResume: true,
   supportsFileWrite: true,
 };
@@ -47,6 +51,7 @@ export const DAYTONA_CAPABILITIES: ComputeProviderCapabilities = {
   supportsCommandOutputStreaming: true,
   supportsCommandOutputLookup: true,
   supportsSnapshots: true,
+  supportsStandbyResume: false,
   supportsResume: true,
   supportsFileWrite: true,
 };
@@ -58,6 +63,7 @@ export const E2B_CAPABILITIES: ComputeProviderCapabilities = {
   supportsCommandOutputStreaming: true,
   supportsCommandOutputLookup: true,
   supportsSnapshots: true,
+  supportsStandbyResume: false,
   supportsResume: true,
   supportsFileWrite: true,
 };
@@ -69,7 +75,8 @@ export const BLAXEL_CAPABILITIES: ComputeProviderCapabilities = {
   supportsCommandOutputStreaming: true,
   supportsCommandOutputLookup: true,
   supportsSnapshots: false,
-  supportsResume: false,
+  supportsStandbyResume: true,
+  supportsResume: true,
   supportsFileWrite: true,
 };
 
