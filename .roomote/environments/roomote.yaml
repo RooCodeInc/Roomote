@@ -44,15 +44,6 @@ repositories:
         run: mise install node@22.20.0 && mise exec node@22.20.0 -- npm install -g mint
         timeout: 600
         continue_on_error: true
-      # Hosting deployments forward their own deploy context into sandboxes as
-      # R_APP_ENV (usually `production`), and the sandbox shell env re-exports
-      # it. Guard the export so the inline R_APP_ENV=development on the dev
-      # server commands below is not clobbered, otherwise the web app disables
-      # dev login and local development secret defaults.
-      - name: Keep inline app-env vars from being clobbered by sandbox shell env
-        run: sed -i 's/^export R_APP_ENV=/[ -n "${R_APP_ENV:-}" ] || export R_APP_ENV=/; s/^export APP_ENV=/[ -n "${APP_ENV:-}" ] || export APP_ENV=/; s/^export ROOMOTE_APP_ENV=/[ -n "${ROOMOTE_APP_ENV:-}" ] || export ROOMOTE_APP_ENV=/' "$HOME/.roomote/env.sh" || true
-        timeout: 600
-        continue_on_error: true
       - name: Write local env overrides
         run: printf 'DATABASE_URL=postgresql://postgres@localhost:5432/roomote_development\nREDIS_URL=redis://localhost:16379\nR_APP_ENV=development\nWEB_DEV_LOGIN_ENABLED=true\n' > .env.local
         timeout: 600
