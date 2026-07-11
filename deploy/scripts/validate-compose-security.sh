@@ -70,7 +70,7 @@ jq -e '
   ][] | . as $key | $root.services["preview-proxy"].environment[$key] == null] | all) and
   ([[
     "JOB_AUTH_PRIVATE_KEY", "JOB_AUTH_PUBLIC_KEY", "PREVIEW_AUTH_PRIVATE_KEY",
-    "PREVIEW_AUTH_PUBLIC_KEY", "S3_SECRET_ACCESS_KEY", "OPENAI_API_KEY",
+    "PREVIEW_AUTH_PUBLIC_KEY", "S3_SECRET_ACCESS_KEY",
     "R_GITHUB_CLIENT_SECRET", "R_SLACK_CLIENT_SECRET"
   ][] | . as $key | $root.services.bullmq.environment[$key] == null] | all) and
   ([[
@@ -80,8 +80,8 @@ jq -e '
   (.services.api.environment.ANTHROPIC_API_KEY != null) and
   (.services.bullmq.environment.OPENAI_API_KEY != null) and
   ((.services["db-migrate"].environment | keys | sort) == [
-    "DATABASE_URL", "NODE_ENV", "ROOMOTE_DOCKER_LOAD_ENV_FILE", "ROOMOTE_SERVICE",
-    "R_APP_ENV"
+    "APP_ENV", "DATABASE_URL", "NODE_ENV", "ROOMOTE_DOCKER_LOAD_ENV_FILE",
+    "ROOMOTE_SERVICE", "R_APP_ENV"
   ])
 ' "$rendered_config" >/dev/null
 

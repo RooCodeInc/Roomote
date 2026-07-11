@@ -29,9 +29,8 @@ describe('buildSetupSourceControlStatus', () => {
     );
 
     expect(
-      github?.fields.find(
-        (field) => field.envVarName === 'R_GITHUB_APP_SLUG',
-      )?.savedValue,
+      github?.fields.find((field) => field.envVarName === 'R_GITHUB_APP_SLUG')
+        ?.savedValue,
     ).toBe('runtime-slug');
     expect(
       github?.fields.find((field) => field.envVarName === 'R_GITHUB_CLIENT_ID')

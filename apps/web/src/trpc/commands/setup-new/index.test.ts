@@ -296,9 +296,9 @@ describe('setup-new auth config commands', () => {
     await saveSetupBootstrapAuthConfigCommand({
       provider: 'slack',
       values: {
-        SLACK_CLIENT_ID: 'client-id',
-        SLACK_CLIENT_SECRET: 'client-secret',
-        SLACK_SIGNING_SECRET: 'signing-secret',
+        R_SLACK_CLIENT_ID: 'client-id',
+        R_SLACK_CLIENT_SECRET: 'client-secret',
+        R_SLACK_SIGNING_SECRET: 'signing-secret',
       },
     });
 

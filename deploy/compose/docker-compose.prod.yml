@@ -10,11 +10,16 @@ x-roomote-app-image: &roomote-app-image ${IMAGE_REGISTRY:-ghcr.io}/${IMAGE_NAMES
 
 x-roomote-base-env: &roomote-base-env
   NODE_ENV: production
-  R_APP_ENV: ${R_APP_ENV:-production}
+  # Dual-write APP_ENV / ROOMOTE_* aliases keep the previous release bootable
+  # against this expand-window compose file during upgrade compatibility.
+  R_APP_ENV: ${R_APP_ENV:-${APP_ENV:-production}}
+  APP_ENV: ${R_APP_ENV:-${APP_ENV:-production}}
   ROOMOTE_DOCKER_LOAD_ENV_FILE: 'false'
   HOST: 0.0.0.0
   R_APP_URL: https://${ROOMOTE_APP_DOMAIN:?ROOMOTE_APP_DOMAIN is required}
+  ROOMOTE_APP_URL: https://${ROOMOTE_APP_DOMAIN:?ROOMOTE_APP_DOMAIN is required}
   R_PUBLIC_URL: https://${ROOMOTE_APP_DOMAIN:?ROOMOTE_APP_DOMAIN is required}
+  ROOMOTE_PUBLIC_URL: https://${ROOMOTE_APP_DOMAIN:?ROOMOTE_APP_DOMAIN is required}
   TRPC_URL: ${TRPC_URL:-https://${ROOMOTE_APP_DOMAIN:?ROOMOTE_APP_DOMAIN is required}/_roomote-api}
 
 x-roomote-inference-env: &roomote-inference-env
@@ -66,8 +71,6 @@ x-roomote-web-env: &roomote-web-env
   NEXT_PUBLIC_PREVIEW_PROXY_BASE_URL: https://${ROOMOTE_PREVIEW_DOMAIN:?ROOMOTE_PREVIEW_DOMAIN is required}
   PREVIEW_DOMAINS: ${ROOMOTE_PREVIEW_DOMAIN:?ROOMOTE_PREVIEW_DOMAIN is required}
   R_ALLOWED_EMAILS: ${R_ALLOWED_EMAILS:-}
-  R_R_SLACK_CLIENT_ID: ${R_R_SLACK_CLIENT_ID:-}
-  R_R_SLACK_CLIENT_SECRET: ${R_R_SLACK_CLIENT_SECRET:-}
   R_GITHUB_APP_SLUG: ${R_GITHUB_APP_SLUG:-}
   SETUP_TOKEN: ${SETUP_TOKEN:-}
   R_GITHUB_APP_ID: ${R_GITHUB_APP_ID:-}
@@ -325,7 +328,8 @@ services:
     environment:
       ROOMOTE_SERVICE: db-migrate
       NODE_ENV: production
-      R_APP_ENV: ${R_APP_ENV:-production}
+      R_APP_ENV: ${R_APP_ENV:-${APP_ENV:-production}}
+      APP_ENV: ${R_APP_ENV:-${APP_ENV:-production}}
       ROOMOTE_DOCKER_LOAD_ENV_FILE: 'false'
       DATABASE_URL: ${DATABASE_URL:-postgres://postgres:roomote-postgres-password@postgres:5432/roomote}
 
