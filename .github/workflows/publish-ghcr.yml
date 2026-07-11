@@ -170,6 +170,7 @@ jobs:
         shell: bash
         env:
           EXTRA_TAG: ${{ needs.prepare.outputs.extra_tag }}
+          CANDIDATE_VERSION: ${{ needs.prepare.outputs.version }}
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -euo pipefail
@@ -189,6 +190,22 @@ jobs:
             if [ "$baseline" = 'v0.0.1' ]; then
               echo "Latest release is legacy v0.0.1 (no images); skipping upgrade validation." >&2
               baseline=''
+            fi
+            # Manual dispatch can re-publish an older version while a newer
+            # release is latest. Validating baseline→candidate would then be
+            # a downgrade dressed up as an upgrade (newer migrations, older
+            # code), so only keep the upgrade leg when the candidate is
+            # strictly newer than the baseline.
+            if [ -n "$baseline" ]; then
+              case "$CANDIDATE_VERSION" in
+                v[0-9]*)
+                  newest="$(printf '%s\n%s\n' "$baseline" "$CANDIDATE_VERSION" | sort -V | tail -n1)"
+                  if [ "$CANDIDATE_VERSION" = "$baseline" ] || [ "$newest" != "$CANDIDATE_VERSION" ]; then
+                    echo "Candidate $CANDIDATE_VERSION is not newer than latest release $baseline; skipping upgrade validation for re-publish." >&2
+                    baseline=''
+                  fi
+                  ;;
+              esac
             fi
           fi
           # Never let anything that is not a known channel or v* release tag
