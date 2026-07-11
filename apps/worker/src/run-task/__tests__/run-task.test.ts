@@ -457,7 +457,7 @@ describe('runTask', () => {
       expect.objectContaining({
         mcpTaskEnv: expect.objectContaining({
           ROOMOTE_CLOUD_TOKEN: 'cloud-token',
-          ROOMOTE_APP_URL: 'https://api.example.test',
+          R_APP_URL: 'https://api.example.test',
           ROOMOTE_PLATFORM_API_URL: 'https://web.example.test',
           ROOMOTE_TASK_ID: 'task-152',
         }),
@@ -3361,8 +3361,8 @@ describe('runTask', () => {
         result: null,
       } as never,
       envVars: {
-        ROOMOTE_MODEL: 'provider-id/model-id',
-        ROOMOTE_SMALL_MODEL: 'provider-id/small-model-id',
+        R_MODEL: 'provider-id/model-id',
+        R_SMALL_MODEL: 'provider-id/small-model-id',
       },
       workspacePath: '/tmp/workspace',
       prompt: '',
@@ -3395,8 +3395,8 @@ describe('runTask', () => {
       expect.objectContaining({
         developerInstructionsContent: undefined,
         runtimeEnv: expect.objectContaining({
-          ROOMOTE_MODEL: 'provider-id/model-id',
-          ROOMOTE_SMALL_MODEL: 'provider-id/small-model-id',
+          R_MODEL: 'provider-id/model-id',
+          R_SMALL_MODEL: 'provider-id/small-model-id',
         }),
       }),
     );
@@ -3440,9 +3440,9 @@ describe('runTask', () => {
           PATH: '/usr/bin',
         })),
         buildOpenCodeHarnessEnv: vi.fn(() => ({
-          ROOMOTE_MODEL: 'openrouter/openai/gpt-5.4',
-          ROOMOTE_SMALL_MODEL: 'openrouter/openai/gpt-5.4-mini',
-          ROOMOTE_MODEL_ENV_KEYS: 'CUSTOM_PROVIDER_API_KEY',
+          R_MODEL: 'openrouter/openai/gpt-5.4',
+          R_SMALL_MODEL: 'openrouter/openai/gpt-5.4-mini',
+          R_MODEL_ENV_KEYS: 'CUSTOM_PROVIDER_API_KEY',
           OPENROUTER_API_KEY: 'openrouter-key',
           CUSTOM_PROVIDER_API_KEY: 'custom-key',
           JOB_AUTH_PRIVATE_KEY: 'do-not-forward',
@@ -3454,9 +3454,9 @@ describe('runTask', () => {
       expect.objectContaining({
         developerInstructionsContent: undefined,
         runtimeEnv: expect.objectContaining({
-          ROOMOTE_MODEL: 'openrouter/openai/gpt-5.4',
-          ROOMOTE_SMALL_MODEL: 'openrouter/openai/gpt-5.4-mini',
-          ROOMOTE_MODEL_ENV_KEYS: 'CUSTOM_PROVIDER_API_KEY',
+          R_MODEL: 'openrouter/openai/gpt-5.4',
+          R_SMALL_MODEL: 'openrouter/openai/gpt-5.4-mini',
+          R_MODEL_ENV_KEYS: 'CUSTOM_PROVIDER_API_KEY',
           OPENROUTER_API_KEY: 'openrouter-key',
           CUSTOM_PROVIDER_API_KEY: 'custom-key',
         }),

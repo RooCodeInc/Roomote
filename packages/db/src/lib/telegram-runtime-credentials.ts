@@ -15,9 +15,9 @@ let cachedCredentials: {
 
 function readProcessEnvCredentials(): TelegramRuntimeCredentials {
   return {
-    botToken: process.env.TELEGRAM_BOT_TOKEN?.trim() || null,
-    webhookSecret: process.env.TELEGRAM_WEBHOOK_SECRET?.trim() || null,
-    botUsername: process.env.TELEGRAM_BOT_USERNAME?.trim() || null,
+    botToken: process.env.R_TELEGRAM_BOT_TOKEN?.trim() || null,
+    webhookSecret: process.env.R_TELEGRAM_WEBHOOK_SECRET?.trim() || null,
+    botUsername: process.env.R_TELEGRAM_BOT_USERNAME?.trim() || null,
   };
 }
 
@@ -44,14 +44,16 @@ export async function resolveTelegramRuntimeCredentials(): Promise<TelegramRunti
   const deploymentEnvVars = await resolveEffectiveDeploymentEnvVars();
   const value: TelegramRuntimeCredentials = {
     botToken:
-      fromEnv.botToken || deploymentEnvVars.TELEGRAM_BOT_TOKEN?.trim() || null,
+      fromEnv.botToken ||
+      deploymentEnvVars.R_TELEGRAM_BOT_TOKEN?.trim() ||
+      null,
     webhookSecret:
       fromEnv.webhookSecret ||
-      deploymentEnvVars.TELEGRAM_WEBHOOK_SECRET?.trim() ||
+      deploymentEnvVars.R_TELEGRAM_WEBHOOK_SECRET?.trim() ||
       null,
     botUsername:
       fromEnv.botUsername ||
-      deploymentEnvVars.TELEGRAM_BOT_USERNAME?.trim() ||
+      deploymentEnvVars.R_TELEGRAM_BOT_USERNAME?.trim() ||
       null,
   };
 

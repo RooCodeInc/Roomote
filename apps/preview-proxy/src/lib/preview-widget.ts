@@ -10,7 +10,7 @@ export const PREVIEW_WIDGET = `
   try { isInIframe = window.self !== window.top; } catch (e) { isInIframe = true; }
 
   // Extract taskId from hostname ({taskId}-{portName}.{domain}) and build task URL
-  var roomoteAppUrl = '__ROOMOTE_APP_URL__';
+  var roomoteAppUrl = '__R_APP_URL__';
   var roomoteLogoUrl = roomoteAppUrl + '/logos/r.svg';
   var hostParts = location.hostname.split('.');
   if (hostParts.length > 1) {

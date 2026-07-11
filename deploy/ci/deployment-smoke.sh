@@ -99,7 +99,7 @@ setup_token="$(openssl rand -hex 24)"
 write_env() {
   local version="$1"
   cat >"$env_file" <<EOF
-APP_ENV=production
+R_APP_ENV=production
 ARTIFACT_SIGNING_KEY=$artifact_signing_key
 CADDY_HTTP_PORT=18080
 CADDY_HTTPS_PORT=18443
@@ -122,7 +122,7 @@ IMAGE_NAMESPACE=roomote
 IMAGE_REGISTRY=localhost
 JOB_AUTH_PRIVATE_KEY=$job_private
 JOB_AUTH_PUBLIC_KEY=$job_public
-NEXT_PUBLIC_GITHUB_APP_SLUG=deployment-ci
+R_GITHUB_APP_SLUG=deployment-ci
 POSTGRES_DB=roomote
 POSTGRES_PASSWORD=roomote-postgres-password
 POSTGRES_USER=postgres
@@ -130,7 +130,7 @@ PREVIEW_AUTH_PRIVATE_KEY=$preview_private
 PREVIEW_AUTH_PUBLIC_KEY=$preview_public
 REDIS_URL=redis://redis:6379
 ROOMOTE_APP_DOMAIN=roomote.localhost
-ROOMOTE_APP_URL=http://roomote.localhost
+R_APP_URL=http://roomote.localhost
 ROOMOTE_DEFAULT_NETWORK=$default_network
 ROOMOTE_PREVIEW_DOMAIN=preview.roomote.localhost
 ROOMOTE_VERSION=$version
@@ -154,7 +154,7 @@ build_candidate_images() {
   docker buildx build --load \
     --platform "$platform" \
     --target runtime-app \
-    --build-arg APP_ENV=production \
+    --build-arg R_APP_ENV=production \
     --build-arg "RELEASE_VERSION=$candidate_version" \
     --tag "localhost/roomote/roomote-app:$candidate_version" \
     --file "$repo_root/.docker/app/Dockerfile" \

@@ -22,7 +22,7 @@ export function getCallbackHost(request: NextRequest) {
   // actually reach (e.g. the ngrok or self-host public domain) instead of
   // https://localhost:13000 or http://0.0.0.0:3000.
   if (INTERNAL_HOSTNAMES.has(url.hostname)) {
-    return `${Env.ROOMOTE_APP_URL}${url.pathname}${url.search}`;
+    return `${Env.R_APP_URL}${url.pathname}${url.search}`;
   }
 
   return request.url;

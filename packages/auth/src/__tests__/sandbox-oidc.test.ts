@@ -14,7 +14,7 @@ import {
 vi.mock('@roomote/env', () => ({
   Env: {
     NODE_ENV: 'test',
-    ROOMOTE_APP_URL: 'https://app.roomote.test',
+    R_APP_URL: 'https://app.roomote.test',
     TRPC_URL: 'https://app.roomote.test/_roomote-api/',
   },
 }));

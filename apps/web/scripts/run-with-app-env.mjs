@@ -35,17 +35,15 @@ const defaultEnv =
     : 'production';
 
 const resolveAppEnv = () => {
-  for (const value of [process.env.APP_ENV, process.env.ROOMOTE_APP_ENV]) {
-    switch ((value ?? '').trim().toLowerCase()) {
-      case 'development':
-        return 'development';
-      case 'preview':
-        return 'preview';
-      case 'production':
-        return 'production';
-      default:
-        break;
-    }
+  switch ((process.env.R_APP_ENV ?? '').trim().toLowerCase()) {
+    case 'development':
+      return 'development';
+    case 'preview':
+      return 'preview';
+    case 'production':
+      return 'production';
+    default:
+      break;
   }
 
   return defaultEnv;
@@ -77,7 +75,7 @@ const result = spawnSync(
   ],
   {
     stdio: 'inherit',
-    env: { ...process.env, APP_ENV: appEnv },
+    env: { ...process.env, R_APP_ENV: appEnv },
   },
 );
 

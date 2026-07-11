@@ -83,7 +83,7 @@ function getAppVersion(): string | undefined {
 }
 
 function getPingBaseUrl(): string {
-  return Env.ROOMOTE_PING_BASE_URL.replace(/\/+$/, '');
+  return Env.R_PING_BASE_URL.replace(/\/+$/, '');
 }
 
 /**

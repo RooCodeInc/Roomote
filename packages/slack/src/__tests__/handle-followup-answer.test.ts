@@ -179,7 +179,7 @@ function buildPayload(
 
 describe('handleFollowupAnswer', () => {
   const fetchMock = vi.fn();
-  const taskOrigin = process.env.ROOMOTE_APP_URL || 'http://localhost:13000';
+  const taskOrigin = process.env.R_APP_URL || 'http://localhost:13000';
   const consoleErrorMock = vi
     .spyOn(console, 'error')
     .mockImplementation(() => undefined);

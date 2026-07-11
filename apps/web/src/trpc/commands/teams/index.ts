@@ -25,7 +25,7 @@ type TeamsIntegrationStatus = {
 function getTeamsWebhookUrl() {
   return new URL(
     '/api/webhooks/teams',
-    Env.ROOMOTE_PUBLIC_URL ?? Env.ROOMOTE_APP_URL,
+    Env.R_PUBLIC_URL ?? Env.R_APP_URL,
   ).toString();
 }
 
@@ -52,7 +52,7 @@ export async function getTeamsIntegrationStatusCommand(
   return {
     botConfigured: Boolean(credentials.botAppId && credentials.botAppPassword),
     botUsesTenantSpecificTokenFlow: Boolean(credentials.botTenantId),
-    botUsesMicrosoftAuthFallback: credentials.source === 'microsoft_auth',
+    botUsesMicrosoftAuthFallback: false,
     microsoftAuthConfigured: Boolean(
       authProviderConfig.microsoftClientId &&
       authProviderConfig.microsoftClientSecret &&

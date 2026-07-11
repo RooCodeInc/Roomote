@@ -49,7 +49,7 @@ function getLinkedAccountsSettingsUrl(
   try {
     return new URL(
       `/settings?service=${sourceControlCommentProviderCopy[provider].settingsQuery}`,
-      Env.ROOMOTE_APP_URL,
+      Env.R_APP_URL,
     ).toString();
   } catch {
     return null;

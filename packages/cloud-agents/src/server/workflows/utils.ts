@@ -26,7 +26,7 @@ import { Schemas, getEffectiveGitHubAppSlug } from '@roomote/github';
 import { buildSlackThreadPromptBlocks } from '../../utils';
 import type { ResolvedTaskCommitAuthor } from '../commit-author';
 
-const DEFAULT_GITHUB_APP_SLUG = 'roomote';
+const DEFAULT_R_GITHUB_APP_SLUG = 'roomote';
 
 export function resolveConflictResolverLabel(
   conflictResolverLabel?: string,
@@ -181,7 +181,7 @@ function buildPrBodyAttributionLine({
     ? escapeValue(resolvedSlackConversationUrl)
     : undefined;
   const appMention = getGitHubAppMention(
-    githubAppSlug?.trim() || DEFAULT_GITHUB_APP_SLUG,
+    githubAppSlug?.trim() || DEFAULT_R_GITHUB_APP_SLUG,
   );
   const isChatSurface =
     taskSurface === 'slack' ||

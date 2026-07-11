@@ -118,7 +118,7 @@ export function ProviderSetupInstructions({
         <InstructionUrl heading="Messaging endpoint" url={teamsWebhookUrl} />
         <InstructionText heading="Teams app package">
           then download the app package below and upload it in Teams. Dedicated
-          TEAMS_BOT_* env vars override these values for the bot.
+          R_TEAMS_BOT_* env vars override these values for the bot.
         </InstructionText>
       </div>
     );

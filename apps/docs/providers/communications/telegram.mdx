@@ -20,23 +20,23 @@ Message `@BotFather` in Telegram and create or select a bot. Save the bot
 token and username in Roomote setup or env vars:
 
 ```sh
-TELEGRAM_BOT_TOKEN=<botfather-token>
-TELEGRAM_BOT_USERNAME=<bot-username-without-at>
+R_TELEGRAM_BOT_TOKEN=<botfather-token>
+R_TELEGRAM_BOT_USERNAME=<bot-username-without-at>
 ```
 
-`TELEGRAM_BOT_USERNAME` is optional for webhook delivery, but recommended so
+`R_TELEGRAM_BOT_USERNAME` is optional for webhook delivery, but recommended so
 Roomote can show the correct `@username` and `https://t.me/<username>` link in
 setup and getting-started guidance.
 
 Generate a random webhook secret and save it too:
 
 ```sh
-TELEGRAM_WEBHOOK_SECRET=<random-secret>
+R_TELEGRAM_WEBHOOK_SECRET=<random-secret>
 ```
 
 Restart Roomote after changing Telegram env vars. Inbound webhooks are accepted
 only when Telegram sends the matching `X-Telegram-Bot-Api-Secret-Token`
-header, and outbound replies use `TELEGRAM_BOT_TOKEN`.
+header, and outbound replies use `R_TELEGRAM_BOT_TOKEN`.
 
 ## Register the webhook
 
@@ -44,7 +44,7 @@ With Roomote running and `<public-url>` pointing at the Roomote web/API server,
 register the Telegram webhook:
 
 ```sh
-curl -sS "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/setWebhook" \
+curl -sS "https://api.telegram.org/bot${R_TELEGRAM_BOT_TOKEN}/setWebhook" \
   -H "content-type: application/json" \
   -d '{
     "url": "<public-url>/api/webhooks/telegram",
@@ -53,7 +53,7 @@ curl -sS "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/setWebhook" \
   }'
 ```
 
-Use the same value for `secret_token` and `TELEGRAM_WEBHOOK_SECRET`.
+Use the same value for `secret_token` and `R_TELEGRAM_WEBHOOK_SECRET`.
 
 ## Account linking
 

@@ -35,7 +35,7 @@ vi.mock('@roomote/env', async (importOriginal) => {
     ...actual,
     Env: {
       ...actual.Env,
-      ROOMOTE_APP_URL: 'https://app.roomote.example',
+      R_APP_URL: 'https://app.roomote.example',
     },
   };
 });

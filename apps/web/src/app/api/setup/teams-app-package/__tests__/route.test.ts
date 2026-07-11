@@ -2,8 +2,8 @@ import { GET } from '../route';
 
 vi.mock('@/lib/server', () => ({
   Env: {
-    ROOMOTE_PUBLIC_URL: 'https://roomote.example.com',
-    ROOMOTE_APP_URL: 'https://roomote.example.com',
+    R_PUBLIC_URL: 'https://roomote.example.com',
+    R_APP_URL: 'https://roomote.example.com',
   },
 }));
 

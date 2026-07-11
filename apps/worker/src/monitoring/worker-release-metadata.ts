@@ -53,7 +53,7 @@ function resolveWorkerReleaseChannel(
     return explicitChannel;
   }
 
-  const appEnv = env.ROOMOTE_APP_ENV?.trim() || env.APP_ENV?.trim();
+  const appEnv = env.R_APP_ENV?.trim() || env.APP_ENV?.trim();
 
   return appEnv === 'preview' ? 'preview' : 'stable';
 }

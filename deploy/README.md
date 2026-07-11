@@ -21,7 +21,7 @@ A host installed by either path can be upgraded by either tool: `roomote
 upgrade` on the host mirrors the `roomote-deploy upgrade` remote sequence.
 
 Four PaaS-shaped paths run the same published images with
-`ROOMOTE_AUTO_GENERATE_KEYS=true` instead of installer-generated keypairs:
+`R_AUTO_GENERATE_KEYS=true` instead of installer-generated keypairs:
 
 - [`railway/`](railway/README.md) — managed Railway deployment with managed
   Postgres/Redis and hosted sandboxes (Modal/E2B/Daytona) instead of the
@@ -70,7 +70,7 @@ dropped capabilities, per-service env contracts, and a Docker socket proxy
 reachable only from the controller service.
 
 Do not deploy `latest`. Pushes to `develop` automatically publish
-`develop-<short-sha>` image tags built with `APP_ENV=preview` for preview soak
+`develop-<short-sha>` image tags built with `R_APP_ENV=preview` for preview soak
 deployments. Production releases use immutable `v*` tags; pushing a `v*` tag or
 manually dispatching the GHCR workflow publishes that explicit version. Use the
 same tag for create and upgrade commands.
@@ -117,9 +117,9 @@ The file must include the required production values from
 - `ENCRYPTION_KEY`
 - `ARTIFACT_SIGNING_KEY`
 - `DASHBOARD_PASSWORD`
-- `NEXT_PUBLIC_GITHUB_APP_SLUG`
+- `R_GITHUB_APP_SLUG`
 
-Model provider values such as `ROOMOTE_MODEL` and `ROOMOTE_SMALL_MODEL` are
+Model provider values such as `R_MODEL` and `R_SMALL_MODEL` are
 optional env-level overrides. Leave them unset when task models are managed
 through Roomote runtime settings.
 
@@ -157,8 +157,8 @@ main    -> ~/.config/roomote-deploy/roomote-production.env
 Both files can start from `.env.production.example`; the distinction is the
 deployment target and secret set, not a different Compose schema.
 
-Set `APP_ENV=preview` in the develop env file. Production can omit `APP_ENV` or
-set `APP_ENV=production`; both run with `NODE_ENV=production` because the
+Set `R_APP_ENV=preview` in the develop env file. Production can omit `R_APP_ENV` or
+set `R_APP_ENV=production`; both run with `NODE_ENV=production` because the
 containers are production-built images.
 
 The signing keys come from the operator, not from DigitalOcean. Generate two
@@ -182,9 +182,58 @@ openssl rand -base64 32 # ARTIFACT_SIGNING_KEY
 openssl rand -base64 24 # DASHBOARD_PASSWORD
 ```
 
-`GITHUB_APP_PRIVATE_KEY` is the exception: download it from the GitHub App
+`R_GITHUB_APP_PRIVATE_KEY` is the exception: download it from the GitHub App
 settings page and store the raw PEM with newlines escaped as `\n`, not as
 base64.
+
+## Environment Variable Naming
+
+Operator-facing environment variables follow three naming categories:
+
+1. **`R_*` for Roomote-owned configuration.** Anything Roomote itself defines
+   and an operator is expected to set — app URLs, model role overrides,
+   Roomote's own registered integration-app credentials (GitHub App, Slack app,
+   Microsoft/Teams app, Telegram bot, Linear app), allowed emails, and boot
+   knobs such as `R_AUTO_GENERATE_KEYS`.
+2. **Conventional infrastructure names stay conventional.** `DATABASE_URL`,
+   `REDIS_URL`, `S3_*`, `NODE_ENV`, `HOST`, `PORT`, and similar
+   ecosystem-standard names are not prefixed; tooling and platforms expect
+   them as-is.
+3. **Third-party provider credentials keep the provider's standard names.**
+   `MODAL_*`, `E2B_*`, `DAYTONA_*`, `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, and
+   other keys issued by an external service keep the names that service's own
+   documentation uses.
+
+**Internal-plumbing carve-out:** variables Roomote sets for its own processes
+— and that operators never configure — are not part of the naming contract and
+keep their `ROOMOTE_*` names. This covers service wiring (`ROOMOTE_SERVICE`,
+`ROOMOTE_ENV_FILE`, `ROOMOTE_DOCKER_LOAD_ENV_FILE`), worker/sandbox task
+context (`ROOMOTE_TASK_ID` and friends), internal service auth
+(`ROOMOTE_AUTH_BYPASS_HEADER_NAME`, `ROOMOTE_AUTH_BYPASS_VALUE`), and debug
+escape hatches (`ROOMOTE_FORCE_TELEMETRY`,
+`ROOMOTE_ALLOW_INSECURE_LOCAL_KEYS`).
+
+**Explicit exceptions** — operator-visible names that intentionally keep the
+`ROOMOTE_*` prefix:
+
+- `ROOMOTE_APP_DOMAIN`, `ROOMOTE_PREVIEW_DOMAIN`, `ROOMOTE_VERSION` —
+  installer-written `.env` interpolation keys consumed by the host CLI, Caddy,
+  and the upgrade-compatibility CI lane; renaming them would break N-1
+  upgrades.
+- `ROOMOTE_PREVIOUS_VERSION`, `ROOMOTE_BACKUP_PASSPHRASE`,
+  `ROOMOTE_IMAGE_RETENTION_RELEASES` — host CLI upgrade/backup/prune state and
+  knobs, owned by the same installer machinery.
+- `ROOMOTE_WORKER_IMAGE_REPO` — read at runtime by the previous release while
+  both releases run during the upgrade expand window, so it cannot be renamed
+  without breaking mirrored-registry worker resolution mid-upgrade.
+- `ROOMOTE_ENVIRONMENTS_DIR`, `ROOMOTE_ENVIRONMENTS_YAML` —
+  declarative-environments inputs; rename deferred until it can ship with its
+  own compatibility window.
+
+The `APP_ENV` / `ROOMOTE_APP_URL` / `ROOMOTE_PUBLIC_URL` aliases in
+`deploy/compose/docker-compose.prod.yml` are not exceptions: they are a
+temporary dual-write shim that keeps the previous release bootable during the
+upgrade expand window and will be removed once the N-1 window passes.
 
 ## DNS
 

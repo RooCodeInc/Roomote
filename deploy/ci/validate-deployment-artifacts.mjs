@@ -31,7 +31,7 @@ function commandText(command) {
 
 const composeEnv = {
   ...process.env,
-  APP_ENV: 'production',
+  R_APP_ENV: 'production',
   ARTIFACT_SIGNING_KEY: 'deployment-ci-artifact-signing-key',
   CADDY_HTTP_PORT: '18080',
   CADDY_HTTPS_PORT: '18443',
@@ -45,11 +45,12 @@ const composeEnv = {
   IMAGE_REGISTRY: 'localhost',
   JOB_AUTH_PRIVATE_KEY: 'deployment-ci-job-private-key',
   JOB_AUTH_PUBLIC_KEY: 'deployment-ci-job-public-key',
-  NEXT_PUBLIC_GITHUB_APP_SLUG: 'deployment-ci',
+  R_GITHUB_APP_SLUG: 'deployment-ci',
   PREVIEW_AUTH_PRIVATE_KEY: 'deployment-ci-preview-private-key',
   PREVIEW_AUTH_PUBLIC_KEY: 'deployment-ci-preview-public-key',
   REDIS_URL: 'redis://redis:6379',
   ROOMOTE_APP_DOMAIN: 'roomote.localhost',
+  R_APP_URL: 'http://roomote.localhost',
   ROOMOTE_PREVIEW_DOMAIN: 'preview.roomote.localhost',
   ROOMOTE_VERSION: 'deployment-ci',
   S3_ACCESS_KEY_ID: 'roomote',

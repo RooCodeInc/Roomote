@@ -17,11 +17,9 @@ let cachedCredentials: {
 /**
  * Resolve the Teams bot credentials the way operators configure them: real
  * environment variables always win per variable, values saved from the
- * settings UI (encrypted deployment env vars) fill gaps, and when no
- * dedicated `TEAMS_BOT_*` pair is configured the Microsoft sign-in app
- * doubles as the bot app — a single Entra app registration can serve both
- * roles. Resolved values are cached briefly so webhook-path callers do not
- * hit the database on every activity.
+ * settings UI (encrypted deployment env vars) fill gaps. Resolved values are
+ * cached briefly so webhook-path callers do not hit the database on every
+ * activity.
  */
 export async function resolveTeamsBotRuntimeCredentials(): Promise<TeamsBotRuntimeCredentials> {
   const fromEnv = resolveTeamsBotRuntimeCredentialsFromEnv(process.env);

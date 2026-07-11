@@ -89,7 +89,7 @@ export async function githubPrReviewFollowUp({
       })
     : undefined;
 
-  const revertCommitBaseUrl = `${Env.ROOMOTE_APP_URL}/revert-commit?repo=${fullName}&prNumber=${prNumber}`;
+  const revertCommitBaseUrl = `${Env.R_APP_URL}/revert-commit?repo=${fullName}&prNumber=${prNumber}`;
   const taskContext = {
     repository: fullName,
     pull_request_number: prNumber,

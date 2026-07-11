@@ -47,17 +47,17 @@ const DEFAULT_ROOMOTE_API_PORT = '13001';
 const DEFAULT_ROOMOTE_BULLMQ_PORT = '13002';
 const DEFAULT_ROOMOTE_PREVIEW_PROXY_PORT = '18081';
 const TEAMS_BOT_ENV_KEYS = [
-  'TEAMS_BOT_APP_ID',
-  'TEAMS_BOT_APP_PASSWORD',
-  'TEAMS_BOT_TENANT_ID',
-  'TEAMS_BOT_TOKEN_ENDPOINT',
-  'TEAMS_BOT_OAUTH_SCOPE',
+  'R_TEAMS_BOT_APP_ID',
+  'R_TEAMS_BOT_APP_PASSWORD',
+  'R_TEAMS_BOT_TENANT_ID',
+  'R_TEAMS_BOT_TOKEN_ENDPOINT',
+  'R_TEAMS_BOT_OAUTH_SCOPE',
 ] as const;
 const TEAMS_BOT_REQUIRED_ENV_KEYS = [
-  'TEAMS_BOT_APP_ID',
-  'TEAMS_BOT_APP_PASSWORD',
+  'R_TEAMS_BOT_APP_ID',
+  'R_TEAMS_BOT_APP_PASSWORD',
 ] as const;
-const DEFAULT_TEAMS_BOT_OAUTH_SCOPE = 'https://api.botframework.com/.default';
+const DEFAULT_R_TEAMS_BOT_OAUTH_SCOPE = 'https://api.botframework.com/.default';
 
 interface Pm2Process {
   name: string;
@@ -423,14 +423,14 @@ async function getRuntimeEnv({
 }
 
 function checkPublicUrl(env: Record<string, string | undefined>): DoctorCheck {
-  const publicUrl = env.ROOMOTE_PUBLIC_URL ?? process.env.ROOMOTE_PUBLIC_URL;
+  const publicUrl = env.R_PUBLIC_URL ?? process.env.R_PUBLIC_URL;
 
   if (!publicUrl) {
     return {
       name: 'Public callback URL',
       status: 'warn',
       detail:
-        'ROOMOTE_PUBLIC_URL not found in current shell, PM2 web env, or self-host web container env',
+        'R_PUBLIC_URL not found in current shell, PM2 web env, or self-host web container env',
     };
   }
 
@@ -491,18 +491,15 @@ function checkAuthProviders(
 
   checkProvider({
     name: 'Slack',
-    requiredKeyGroups: [
-      ['ROOMOTE_AUTH_SLACK_CLIENT_ID', 'SLACK_CLIENT_ID'],
-      ['ROOMOTE_AUTH_SLACK_CLIENT_SECRET', 'SLACK_CLIENT_SECRET'],
-    ],
+    requiredKeyGroups: [['R_SLACK_CLIENT_ID'], ['R_SLACK_CLIENT_SECRET']],
     incompleteLabel: 'client ID/secret pair',
   });
   checkProvider({
     name: 'Microsoft Teams',
     requiredKeyGroups: [
-      ['ROOMOTE_AUTH_MICROSOFT_CLIENT_ID'],
-      ['ROOMOTE_AUTH_MICROSOFT_CLIENT_SECRET'],
-      ['ROOMOTE_AUTH_MICROSOFT_TENANT_ID'],
+      ['R_MICROSOFT_CLIENT_ID'],
+      ['R_MICROSOFT_CLIENT_SECRET'],
+      ['R_MICROSOFT_TENANT_ID'],
     ],
     incompleteLabel: 'client ID/secret/tenant set',
   });
@@ -563,7 +560,7 @@ function getTeamsBotConfigState(env: Record<string, string | undefined>): {
   const missingRequiredKeys = TEAMS_BOT_REQUIRED_ENV_KEYS.filter(
     (key) => !configEnv[key]?.trim(),
   );
-  const tokenEndpoint = configEnv.TEAMS_BOT_TOKEN_ENDPOINT?.trim();
+  const tokenEndpoint = configEnv.R_TEAMS_BOT_TOKEN_ENDPOINT?.trim();
 
   if (tokenEndpoint) {
     try {
@@ -574,7 +571,8 @@ function getTeamsBotConfigState(env: Record<string, string | undefined>): {
         configuredBotKeys,
         missingRequiredKeys,
         tokenEndpoint,
-        tokenEndpointError: 'TEAMS_BOT_TOKEN_ENDPOINT must be an absolute URL',
+        tokenEndpointError:
+          'R_TEAMS_BOT_TOKEN_ENDPOINT must be an absolute URL',
       };
     }
   }
@@ -630,7 +628,7 @@ function checkTeamsBotConfig(
   return {
     name: 'Teams bot config',
     status: 'pass',
-    detail: configEnv.TEAMS_BOT_TENANT_ID
+    detail: configEnv.R_TEAMS_BOT_TENANT_ID
       ? 'bot app ID/password configured with tenant-specific token flow'
       : 'bot app ID/password configured',
   };
@@ -673,13 +671,14 @@ async function checkTeamsBotTokenExchange(
 
   const endpoint =
     tokenEndpoint ??
-    getDefaultTeamsBotTokenEndpoint(configEnv.TEAMS_BOT_TENANT_ID);
+    getDefaultTeamsBotTokenEndpoint(configEnv.R_TEAMS_BOT_TENANT_ID);
   const body = new URLSearchParams({
     grant_type: 'client_credentials',
-    client_id: configEnv.TEAMS_BOT_APP_ID!.trim(),
-    client_secret: configEnv.TEAMS_BOT_APP_PASSWORD!.trim(),
+    client_id: configEnv.R_TEAMS_BOT_APP_ID!.trim(),
+    client_secret: configEnv.R_TEAMS_BOT_APP_PASSWORD!.trim(),
     scope:
-      configEnv.TEAMS_BOT_OAUTH_SCOPE?.trim() || DEFAULT_TEAMS_BOT_OAUTH_SCOPE,
+      configEnv.R_TEAMS_BOT_OAUTH_SCOPE?.trim() ||
+      DEFAULT_R_TEAMS_BOT_OAUTH_SCOPE,
   });
 
   try {
@@ -756,14 +755,14 @@ async function checkTeamsAppCallback(
     };
   }
 
-  const publicUrl = configEnv.ROOMOTE_PUBLIC_URL?.trim();
+  const publicUrl = configEnv.R_PUBLIC_URL?.trim();
 
   if (!publicUrl) {
     return {
       name: 'Teams app callback',
       status: 'warn',
       detail:
-        'ROOMOTE_PUBLIC_URL is required to configure the Azure Bot messaging endpoint',
+        'R_PUBLIC_URL is required to configure the Azure Bot messaging endpoint',
     };
   }
 
@@ -775,7 +774,7 @@ async function checkTeamsAppCallback(
     return {
       name: 'Teams app callback',
       status: 'warn',
-      detail: 'ROOMOTE_PUBLIC_URL must be an absolute HTTPS URL',
+      detail: 'R_PUBLIC_URL must be an absolute HTTPS URL',
     };
   }
 
@@ -820,13 +819,13 @@ function checkModelProviders(
   env: Record<string, string | undefined>,
 ): DoctorCheck {
   const configEnv = Object.keys(env).length > 0 ? env : process.env;
-  const model = configEnv.ROOMOTE_MODEL?.trim();
+  const model = configEnv.R_MODEL?.trim();
 
   if (!model) {
     return {
       name: 'Model config',
       status: 'warn',
-      detail: 'local tasks need ROOMOTE_MODEL',
+      detail: 'local tasks need R_MODEL',
     };
   }
 
@@ -836,13 +835,13 @@ function checkModelProviders(
     return {
       name: 'Model config',
       status: 'fail',
-      detail: 'ROOMOTE_MODEL must use provider/model format',
+      detail: 'R_MODEL must use provider/model format',
     };
   }
 
   const providerKeyCandidates = getModelProviderEnvKeyCandidates({
     providerId: provider,
-    configuredEnvKeys: configEnv.ROOMOTE_MODEL_ENV_KEYS,
+    configuredEnvKeys: configEnv.R_MODEL_ENV_KEYS,
   });
   const hasProviderKey = providerKeyCandidates.some((key) =>
     Boolean(configEnv[key]?.trim()),
@@ -854,15 +853,15 @@ function checkModelProviders(
       status: 'warn',
       detail:
         providerKeyCandidates.length > 0
-          ? `ROOMOTE_MODEL configured; missing ${providerKeyCandidates.join(' or ')}`
-          : 'ROOMOTE_MODEL configured; set ROOMOTE_MODEL_ENV_KEYS for this provider key',
+          ? `R_MODEL configured; missing ${providerKeyCandidates.join(' or ')}`
+          : 'R_MODEL configured; set R_MODEL_ENV_KEYS for this provider key',
     };
   }
 
   return {
     name: 'Model config',
     status: 'pass',
-    detail: `ROOMOTE_MODEL configured with ${provider} credentials`,
+    detail: `R_MODEL configured with ${provider} credentials`,
   };
 }
 

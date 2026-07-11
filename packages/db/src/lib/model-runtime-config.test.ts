@@ -63,8 +63,8 @@ describe('resolveEffectiveModelRuntimeEnv', () => {
 
     const env = await resolveEffectiveModelRuntimeEnv({
       runtimeEnv: {
-        ROOMOTE_MODEL: 'openai/gpt-5.4',
-        ROOMOTE_VISION_MODEL: 'openai/gpt-5.5',
+        R_MODEL: 'openai/gpt-5.4',
+        R_VISION_MODEL: 'openai/gpt-5.5',
         OPENAI_API_KEY: 'sk-runtime',
       },
       deploymentEnvVars: {
@@ -74,15 +74,15 @@ describe('resolveEffectiveModelRuntimeEnv', () => {
     });
 
     expect(env).toEqual({
-      ROOMOTE_MODEL: 'openai/gpt-5.4',
-      ROOMOTE_VISION_MODEL: 'openai/gpt-5.5',
-      ROOMOTE_MODEL_REASONING_EFFORT: 'medium',
-      ROOMOTE_SMALL_MODEL_REASONING_EFFORT: 'low',
-      ROOMOTE_VISION_MODEL_REASONING_EFFORT: 'low',
-      ROOMOTE_CODE_REVIEW_MODEL_REASONING_EFFORT: 'high',
-      ROOMOTE_EXPLORE_MODEL_REASONING_EFFORT: 'low',
-      ROOMOTE_PLANNING_MODEL_REASONING_EFFORT: 'high',
-      ROOMOTE_MODEL_ENV_KEYS: 'OPENAI_API_KEY',
+      R_MODEL: 'openai/gpt-5.4',
+      R_VISION_MODEL: 'openai/gpt-5.5',
+      R_MODEL_REASONING_EFFORT: 'medium',
+      R_SMALL_MODEL_REASONING_EFFORT: 'low',
+      R_VISION_MODEL_REASONING_EFFORT: 'low',
+      R_CODE_REVIEW_MODEL_REASONING_EFFORT: 'high',
+      R_EXPLORE_MODEL_REASONING_EFFORT: 'low',
+      R_PLANNING_MODEL_REASONING_EFFORT: 'high',
+      R_MODEL_ENV_KEYS: 'OPENAI_API_KEY',
       OPENAI_API_KEY: 'sk-runtime',
     });
   });
@@ -109,13 +109,13 @@ describe('resolveEffectiveModelRuntimeEnv', () => {
 
     expect(mockEnvironmentVariablesFindMany).toHaveBeenCalledTimes(1);
     expect(env).toEqual({
-      ROOMOTE_MODEL: 'anthropic/claude-sonnet-4',
-      ROOMOTE_MODEL_REASONING_EFFORT: 'medium',
-      ROOMOTE_SMALL_MODEL_REASONING_EFFORT: 'low',
-      ROOMOTE_CODE_REVIEW_MODEL_REASONING_EFFORT: 'high',
-      ROOMOTE_EXPLORE_MODEL_REASONING_EFFORT: 'low',
-      ROOMOTE_PLANNING_MODEL_REASONING_EFFORT: 'high',
-      ROOMOTE_MODEL_ENV_KEYS: 'ANTHROPIC_API_KEY',
+      R_MODEL: 'anthropic/claude-sonnet-4',
+      R_MODEL_REASONING_EFFORT: 'medium',
+      R_SMALL_MODEL_REASONING_EFFORT: 'low',
+      R_CODE_REVIEW_MODEL_REASONING_EFFORT: 'high',
+      R_EXPLORE_MODEL_REASONING_EFFORT: 'low',
+      R_PLANNING_MODEL_REASONING_EFFORT: 'high',
+      R_MODEL_ENV_KEYS: 'ANTHROPIC_API_KEY',
       ANTHROPIC_API_KEY: 'sk-persisted',
     });
   });
@@ -137,19 +137,19 @@ describe('resolveEffectiveModelRuntimeEnv', () => {
     });
 
     expect(env).toEqual({
-      ROOMOTE_MODEL: 'openrouter/openai/gpt-5.4',
-      ROOMOTE_SMALL_MODEL: 'openrouter/z-ai/glm-5.2',
-      ROOMOTE_MODEL_REASONING_EFFORT: 'medium',
-      ROOMOTE_SMALL_MODEL_REASONING_EFFORT: 'low',
-      ROOMOTE_CODE_REVIEW_MODEL_REASONING_EFFORT: 'high',
-      ROOMOTE_EXPLORE_MODEL_REASONING_EFFORT: 'low',
-      ROOMOTE_PLANNING_MODEL_REASONING_EFFORT: 'high',
-      ROOMOTE_MODEL_ENV_KEYS: 'OPENROUTER_API_KEY',
+      R_MODEL: 'openrouter/openai/gpt-5.4',
+      R_SMALL_MODEL: 'openrouter/z-ai/glm-5.2',
+      R_MODEL_REASONING_EFFORT: 'medium',
+      R_SMALL_MODEL_REASONING_EFFORT: 'low',
+      R_CODE_REVIEW_MODEL_REASONING_EFFORT: 'high',
+      R_EXPLORE_MODEL_REASONING_EFFORT: 'low',
+      R_PLANNING_MODEL_REASONING_EFFORT: 'high',
+      R_MODEL_ENV_KEYS: 'OPENROUTER_API_KEY',
       OPENROUTER_API_KEY: 'sk-openrouter',
     });
   });
 
-  it('prefers the ROOMOTE_SMALL_MODEL env var over the persisted small model', async () => {
+  it('prefers the R_SMALL_MODEL env var over the persisted small model', async () => {
     mockDeploymentSettingsFindFirst.mockResolvedValue({
       runtimeModelConfig: {
         roomoteModel: 'openrouter/openai/gpt-5.4',
@@ -160,7 +160,7 @@ describe('resolveEffectiveModelRuntimeEnv', () => {
 
     const env = await resolveEffectiveModelRuntimeEnv({
       runtimeEnv: {
-        ROOMOTE_SMALL_MODEL: 'openrouter/anthropic/claude-sonnet-4',
+        R_SMALL_MODEL: 'openrouter/anthropic/claude-sonnet-4',
         OPENROUTER_API_KEY: 'sk-runtime',
       },
       deploymentEnvVars: {
@@ -169,13 +169,13 @@ describe('resolveEffectiveModelRuntimeEnv', () => {
     });
 
     expect(env).toMatchObject({
-      ROOMOTE_MODEL: 'openrouter/openai/gpt-5.4',
-      ROOMOTE_SMALL_MODEL: 'openrouter/anthropic/claude-sonnet-4',
+      R_MODEL: 'openrouter/openai/gpt-5.4',
+      R_SMALL_MODEL: 'openrouter/anthropic/claude-sonnet-4',
       OPENROUTER_API_KEY: 'sk-runtime',
     });
   });
 
-  it('omits ROOMOTE_SMALL_MODEL when neither env nor persisted small model is set', async () => {
+  it('omits R_SMALL_MODEL when neither env nor persisted small model is set', async () => {
     mockDeploymentSettingsFindFirst.mockResolvedValue({
       runtimeModelConfig: {
         roomoteModel: 'openrouter/openai/gpt-5.4',
@@ -191,8 +191,8 @@ describe('resolveEffectiveModelRuntimeEnv', () => {
       },
     });
 
-    expect(env).not.toHaveProperty('ROOMOTE_SMALL_MODEL');
-    expect(env).not.toHaveProperty('ROOMOTE_VISION_MODEL');
+    expect(env).not.toHaveProperty('R_SMALL_MODEL');
+    expect(env).not.toHaveProperty('R_VISION_MODEL');
   });
 
   it('falls back to persisted roomoteVisionModel when the env var is absent', async () => {
@@ -212,15 +212,15 @@ describe('resolveEffectiveModelRuntimeEnv', () => {
     });
 
     expect(env).toEqual({
-      ROOMOTE_MODEL: 'openrouter/openai/gpt-5.4',
-      ROOMOTE_VISION_MODEL: 'openrouter/z-ai/glm-5.2',
-      ROOMOTE_MODEL_REASONING_EFFORT: 'medium',
-      ROOMOTE_SMALL_MODEL_REASONING_EFFORT: 'low',
-      ROOMOTE_VISION_MODEL_REASONING_EFFORT: 'low',
-      ROOMOTE_CODE_REVIEW_MODEL_REASONING_EFFORT: 'high',
-      ROOMOTE_EXPLORE_MODEL_REASONING_EFFORT: 'low',
-      ROOMOTE_PLANNING_MODEL_REASONING_EFFORT: 'high',
-      ROOMOTE_MODEL_ENV_KEYS: 'OPENROUTER_API_KEY',
+      R_MODEL: 'openrouter/openai/gpt-5.4',
+      R_VISION_MODEL: 'openrouter/z-ai/glm-5.2',
+      R_MODEL_REASONING_EFFORT: 'medium',
+      R_SMALL_MODEL_REASONING_EFFORT: 'low',
+      R_VISION_MODEL_REASONING_EFFORT: 'low',
+      R_CODE_REVIEW_MODEL_REASONING_EFFORT: 'high',
+      R_EXPLORE_MODEL_REASONING_EFFORT: 'low',
+      R_PLANNING_MODEL_REASONING_EFFORT: 'high',
+      R_MODEL_ENV_KEYS: 'OPENROUTER_API_KEY',
       OPENROUTER_API_KEY: 'sk-openrouter',
     });
   });
@@ -244,15 +244,15 @@ describe('resolveEffectiveModelRuntimeEnv', () => {
     });
 
     expect(env).toEqual({
-      ROOMOTE_MODEL: 'openrouter/openai/gpt-5.4',
-      ROOMOTE_CODE_REVIEW_MODEL: 'openrouter/z-ai/glm-5.2',
-      ROOMOTE_EXPLORE_MODEL: 'openrouter/openai/gpt-5.4-mini',
-      ROOMOTE_MODEL_REASONING_EFFORT: 'medium',
-      ROOMOTE_SMALL_MODEL_REASONING_EFFORT: 'low',
-      ROOMOTE_CODE_REVIEW_MODEL_REASONING_EFFORT: 'high',
-      ROOMOTE_EXPLORE_MODEL_REASONING_EFFORT: 'low',
-      ROOMOTE_PLANNING_MODEL_REASONING_EFFORT: 'high',
-      ROOMOTE_MODEL_ENV_KEYS: 'OPENROUTER_API_KEY',
+      R_MODEL: 'openrouter/openai/gpt-5.4',
+      R_CODE_REVIEW_MODEL: 'openrouter/z-ai/glm-5.2',
+      R_EXPLORE_MODEL: 'openrouter/openai/gpt-5.4-mini',
+      R_MODEL_REASONING_EFFORT: 'medium',
+      R_SMALL_MODEL_REASONING_EFFORT: 'low',
+      R_CODE_REVIEW_MODEL_REASONING_EFFORT: 'high',
+      R_EXPLORE_MODEL_REASONING_EFFORT: 'low',
+      R_PLANNING_MODEL_REASONING_EFFORT: 'high',
+      R_MODEL_ENV_KEYS: 'OPENROUTER_API_KEY',
       OPENROUTER_API_KEY: 'sk-openrouter',
     });
   });
@@ -276,14 +276,14 @@ describe('resolveEffectiveModelRuntimeEnv', () => {
     });
 
     expect(env).toEqual({
-      ROOMOTE_MODEL: 'openrouter/openai/gpt-5.4',
-      ROOMOTE_EXPLORE_MODEL: 'anthropic/claude-haiku-4',
-      ROOMOTE_MODEL_REASONING_EFFORT: 'medium',
-      ROOMOTE_SMALL_MODEL_REASONING_EFFORT: 'low',
-      ROOMOTE_CODE_REVIEW_MODEL_REASONING_EFFORT: 'high',
-      ROOMOTE_EXPLORE_MODEL_REASONING_EFFORT: 'low',
-      ROOMOTE_PLANNING_MODEL_REASONING_EFFORT: 'high',
-      ROOMOTE_MODEL_ENV_KEYS: 'OPENROUTER_API_KEY,ANTHROPIC_API_KEY',
+      R_MODEL: 'openrouter/openai/gpt-5.4',
+      R_EXPLORE_MODEL: 'anthropic/claude-haiku-4',
+      R_MODEL_REASONING_EFFORT: 'medium',
+      R_SMALL_MODEL_REASONING_EFFORT: 'low',
+      R_CODE_REVIEW_MODEL_REASONING_EFFORT: 'high',
+      R_EXPLORE_MODEL_REASONING_EFFORT: 'low',
+      R_PLANNING_MODEL_REASONING_EFFORT: 'high',
+      R_MODEL_ENV_KEYS: 'OPENROUTER_API_KEY,ANTHROPIC_API_KEY',
       OPENROUTER_API_KEY: 'sk-openrouter',
       ANTHROPIC_API_KEY: 'sk-anthropic',
     });
@@ -308,20 +308,20 @@ describe('resolveEffectiveModelRuntimeEnv', () => {
     });
 
     expect(env).toEqual({
-      ROOMOTE_MODEL: 'openrouter/openai/gpt-5.4',
-      ROOMOTE_PLANNING_MODEL: 'anthropic/claude-opus-4.7',
-      ROOMOTE_MODEL_REASONING_EFFORT: 'medium',
-      ROOMOTE_SMALL_MODEL_REASONING_EFFORT: 'low',
-      ROOMOTE_CODE_REVIEW_MODEL_REASONING_EFFORT: 'high',
-      ROOMOTE_EXPLORE_MODEL_REASONING_EFFORT: 'low',
-      ROOMOTE_PLANNING_MODEL_REASONING_EFFORT: 'high',
-      ROOMOTE_MODEL_ENV_KEYS: 'OPENROUTER_API_KEY,ANTHROPIC_API_KEY',
+      R_MODEL: 'openrouter/openai/gpt-5.4',
+      R_PLANNING_MODEL: 'anthropic/claude-opus-4.7',
+      R_MODEL_REASONING_EFFORT: 'medium',
+      R_SMALL_MODEL_REASONING_EFFORT: 'low',
+      R_CODE_REVIEW_MODEL_REASONING_EFFORT: 'high',
+      R_EXPLORE_MODEL_REASONING_EFFORT: 'low',
+      R_PLANNING_MODEL_REASONING_EFFORT: 'high',
+      R_MODEL_ENV_KEYS: 'OPENROUTER_API_KEY,ANTHROPIC_API_KEY',
       OPENROUTER_API_KEY: 'sk-openrouter',
       ANTHROPIC_API_KEY: 'sk-anthropic',
     });
   });
 
-  it('prefers the ROOMOTE_PLANNING_MODEL env var over the persisted planning model', async () => {
+  it('prefers the R_PLANNING_MODEL env var over the persisted planning model', async () => {
     mockDeploymentSettingsFindFirst.mockResolvedValue({
       runtimeModelConfig: {
         roomoteModel: 'openrouter/openai/gpt-5.4',
@@ -331,7 +331,7 @@ describe('resolveEffectiveModelRuntimeEnv', () => {
 
     const env = await resolveEffectiveModelRuntimeEnv({
       runtimeEnv: {
-        ROOMOTE_PLANNING_MODEL: 'openrouter/anthropic/claude-opus-4.7',
+        R_PLANNING_MODEL: 'openrouter/anthropic/claude-opus-4.7',
       },
       deploymentEnvVars: {
         OPENROUTER_API_KEY: 'sk-openrouter',
@@ -339,13 +339,13 @@ describe('resolveEffectiveModelRuntimeEnv', () => {
     });
 
     expect(env).toMatchObject({
-      ROOMOTE_MODEL: 'openrouter/openai/gpt-5.4',
-      ROOMOTE_PLANNING_MODEL: 'openrouter/anthropic/claude-opus-4.7',
+      R_MODEL: 'openrouter/openai/gpt-5.4',
+      R_PLANNING_MODEL: 'openrouter/anthropic/claude-opus-4.7',
       OPENROUTER_API_KEY: 'sk-openrouter',
     });
   });
 
-  it('prefers the ROOMOTE_CODE_REVIEW_MODEL env var over the persisted code review model', async () => {
+  it('prefers the R_CODE_REVIEW_MODEL env var over the persisted code review model', async () => {
     mockDeploymentSettingsFindFirst.mockResolvedValue({
       runtimeModelConfig: {
         roomoteModel: 'openrouter/openai/gpt-5.4',
@@ -357,7 +357,7 @@ describe('resolveEffectiveModelRuntimeEnv', () => {
 
     const env = await resolveEffectiveModelRuntimeEnv({
       runtimeEnv: {
-        ROOMOTE_CODE_REVIEW_MODEL: 'openrouter/anthropic/claude-sonnet-4',
+        R_CODE_REVIEW_MODEL: 'openrouter/anthropic/claude-sonnet-4',
       },
       deploymentEnvVars: {
         OPENROUTER_API_KEY: 'sk-openrouter',
@@ -365,13 +365,13 @@ describe('resolveEffectiveModelRuntimeEnv', () => {
     });
 
     expect(env).toMatchObject({
-      ROOMOTE_MODEL: 'openrouter/openai/gpt-5.4',
-      ROOMOTE_CODE_REVIEW_MODEL: 'openrouter/anthropic/claude-sonnet-4',
+      R_MODEL: 'openrouter/openai/gpt-5.4',
+      R_CODE_REVIEW_MODEL: 'openrouter/anthropic/claude-sonnet-4',
       OPENROUTER_API_KEY: 'sk-openrouter',
     });
   });
 
-  it('prefers the ROOMOTE_EXPLORE_MODEL env var over the persisted explore model', async () => {
+  it('prefers the R_EXPLORE_MODEL env var over the persisted explore model', async () => {
     mockDeploymentSettingsFindFirst.mockResolvedValue({
       runtimeModelConfig: {
         roomoteModel: 'openrouter/openai/gpt-5.4',
@@ -381,7 +381,7 @@ describe('resolveEffectiveModelRuntimeEnv', () => {
 
     const env = await resolveEffectiveModelRuntimeEnv({
       runtimeEnv: {
-        ROOMOTE_EXPLORE_MODEL: 'openrouter/anthropic/claude-haiku-4',
+        R_EXPLORE_MODEL: 'openrouter/anthropic/claude-haiku-4',
       },
       deploymentEnvVars: {
         OPENROUTER_API_KEY: 'sk-openrouter',
@@ -389,8 +389,8 @@ describe('resolveEffectiveModelRuntimeEnv', () => {
     });
 
     expect(env).toMatchObject({
-      ROOMOTE_MODEL: 'openrouter/openai/gpt-5.4',
-      ROOMOTE_EXPLORE_MODEL: 'openrouter/anthropic/claude-haiku-4',
+      R_MODEL: 'openrouter/openai/gpt-5.4',
+      R_EXPLORE_MODEL: 'openrouter/anthropic/claude-haiku-4',
       OPENROUTER_API_KEY: 'sk-openrouter',
     });
   });
@@ -413,7 +413,7 @@ describe('resolveEffectiveModelRuntimeEnv', () => {
 
     const env = await resolveEffectiveModelRuntimeEnv({
       runtimeEnv: {
-        ROOMOTE_MODEL_REASONING_EFFORT: 'xhigh',
+        R_MODEL_REASONING_EFFORT: 'xhigh',
       },
       deploymentEnvVars: {
         OPENROUTER_API_KEY: 'sk-openrouter',
@@ -421,13 +421,13 @@ describe('resolveEffectiveModelRuntimeEnv', () => {
     });
 
     expect(env).toMatchObject({
-      ROOMOTE_MODEL_REASONING_EFFORT: 'xhigh',
-      ROOMOTE_SMALL_MODEL_REASONING_EFFORT: 'medium',
-      ROOMOTE_CODE_REVIEW_MODEL_REASONING_EFFORT: 'high',
-      ROOMOTE_EXPLORE_MODEL_REASONING_EFFORT: 'xhigh',
-      ROOMOTE_PLANNING_MODEL_REASONING_EFFORT: 'high',
+      R_MODEL_REASONING_EFFORT: 'xhigh',
+      R_SMALL_MODEL_REASONING_EFFORT: 'medium',
+      R_CODE_REVIEW_MODEL_REASONING_EFFORT: 'high',
+      R_EXPLORE_MODEL_REASONING_EFFORT: 'xhigh',
+      R_PLANNING_MODEL_REASONING_EFFORT: 'high',
     });
-    expect(env).not.toHaveProperty('ROOMOTE_VISION_MODEL_REASONING_EFFORT');
+    expect(env).not.toHaveProperty('R_VISION_MODEL_REASONING_EFFORT');
   });
 
   it('falls back to role defaults when configured reasoning values are invalid', async () => {
@@ -443,7 +443,7 @@ describe('resolveEffectiveModelRuntimeEnv', () => {
 
     const env = await resolveEffectiveModelRuntimeEnv({
       runtimeEnv: {
-        ROOMOTE_SMALL_MODEL_REASONING_EFFORT: 'nonsense',
+        R_SMALL_MODEL_REASONING_EFFORT: 'nonsense',
       },
       deploymentEnvVars: {
         OPENROUTER_API_KEY: 'sk-openrouter',
@@ -451,10 +451,10 @@ describe('resolveEffectiveModelRuntimeEnv', () => {
     });
 
     expect(env).toMatchObject({
-      ROOMOTE_MODEL_REASONING_EFFORT: 'medium',
-      ROOMOTE_SMALL_MODEL_REASONING_EFFORT: 'low',
-      ROOMOTE_EXPLORE_MODEL_REASONING_EFFORT: 'low',
-      ROOMOTE_PLANNING_MODEL_REASONING_EFFORT: 'high',
+      R_MODEL_REASONING_EFFORT: 'medium',
+      R_SMALL_MODEL_REASONING_EFFORT: 'low',
+      R_EXPLORE_MODEL_REASONING_EFFORT: 'low',
+      R_PLANNING_MODEL_REASONING_EFFORT: 'high',
     });
   });
 
@@ -494,14 +494,12 @@ describe('resolveEffectiveModelRuntimeEnv', () => {
       },
     });
 
-    expect(env).not.toHaveProperty('ROOMOTE_MODEL_REASONING_EFFORT');
-    expect(env).not.toHaveProperty('ROOMOTE_SMALL_MODEL_REASONING_EFFORT');
-    expect(env).not.toHaveProperty('ROOMOTE_VISION_MODEL_REASONING_EFFORT');
-    expect(env).not.toHaveProperty(
-      'ROOMOTE_CODE_REVIEW_MODEL_REASONING_EFFORT',
-    );
-    expect(env).not.toHaveProperty('ROOMOTE_EXPLORE_MODEL_REASONING_EFFORT');
-    expect(env).not.toHaveProperty('ROOMOTE_PLANNING_MODEL_REASONING_EFFORT');
+    expect(env).not.toHaveProperty('R_MODEL_REASONING_EFFORT');
+    expect(env).not.toHaveProperty('R_SMALL_MODEL_REASONING_EFFORT');
+    expect(env).not.toHaveProperty('R_VISION_MODEL_REASONING_EFFORT');
+    expect(env).not.toHaveProperty('R_CODE_REVIEW_MODEL_REASONING_EFFORT');
+    expect(env).not.toHaveProperty('R_EXPLORE_MODEL_REASONING_EFFORT');
+    expect(env).not.toHaveProperty('R_PLANNING_MODEL_REASONING_EFFORT');
   });
 
   it('infers provider keys from coding, helper, and vision models', async () => {
@@ -523,17 +521,16 @@ describe('resolveEffectiveModelRuntimeEnv', () => {
     });
 
     expect(env).toEqual({
-      ROOMOTE_MODEL: 'openrouter/openai/gpt-5.4',
-      ROOMOTE_SMALL_MODEL: 'anthropic/claude-haiku-4',
-      ROOMOTE_VISION_MODEL: 'openai/gpt-5.5',
-      ROOMOTE_MODEL_REASONING_EFFORT: 'medium',
-      ROOMOTE_SMALL_MODEL_REASONING_EFFORT: 'low',
-      ROOMOTE_VISION_MODEL_REASONING_EFFORT: 'low',
-      ROOMOTE_CODE_REVIEW_MODEL_REASONING_EFFORT: 'high',
-      ROOMOTE_EXPLORE_MODEL_REASONING_EFFORT: 'low',
-      ROOMOTE_PLANNING_MODEL_REASONING_EFFORT: 'high',
-      ROOMOTE_MODEL_ENV_KEYS:
-        'OPENROUTER_API_KEY,ANTHROPIC_API_KEY,OPENAI_API_KEY',
+      R_MODEL: 'openrouter/openai/gpt-5.4',
+      R_SMALL_MODEL: 'anthropic/claude-haiku-4',
+      R_VISION_MODEL: 'openai/gpt-5.5',
+      R_MODEL_REASONING_EFFORT: 'medium',
+      R_SMALL_MODEL_REASONING_EFFORT: 'low',
+      R_VISION_MODEL_REASONING_EFFORT: 'low',
+      R_CODE_REVIEW_MODEL_REASONING_EFFORT: 'high',
+      R_EXPLORE_MODEL_REASONING_EFFORT: 'low',
+      R_PLANNING_MODEL_REASONING_EFFORT: 'high',
+      R_MODEL_ENV_KEYS: 'OPENROUTER_API_KEY,ANTHROPIC_API_KEY,OPENAI_API_KEY',
       OPENROUTER_API_KEY: 'sk-openrouter',
       ANTHROPIC_API_KEY: 'sk-anthropic',
       OPENAI_API_KEY: 'sk-openai',
@@ -559,9 +556,9 @@ describe('resolveEffectiveModelRuntimeEnv', () => {
     });
 
     expect(env).toMatchObject({
-      ROOMOTE_MODEL: 'amazon-bedrock/global.anthropic.claude-sonnet-5',
-      ROOMOTE_SMALL_MODEL: 'google-vertex/gemini-3.5-flash',
-      ROOMOTE_MODEL_ENV_KEYS:
+      R_MODEL: 'amazon-bedrock/global.anthropic.claude-sonnet-5',
+      R_SMALL_MODEL: 'google-vertex/gemini-3.5-flash',
+      R_MODEL_ENV_KEYS:
         'AWS_BEARER_TOKEN_BEDROCK,AWS_REGION,GOOGLE_APPLICATION_CREDENTIALS,GOOGLE_VERTEX_PROJECT,GOOGLE_VERTEX_LOCATION',
       AWS_BEARER_TOKEN_BEDROCK: 'bedrock-key',
       AWS_REGION: 'us-west-2',

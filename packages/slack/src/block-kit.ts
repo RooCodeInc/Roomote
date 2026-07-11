@@ -1014,7 +1014,7 @@ export async function showTaskConfiguration({
               type: 'section',
               text: {
                 type: 'mrkdwn',
-                text: `Please go to <${Env.ROOMOTE_APP_URL}/settings/environments|your ${PRODUCT_NAME} environment settings> and create an environment with at least one repository, then ping me back here again.`,
+                text: `Please go to <${Env.R_APP_URL}/settings/environments|your ${PRODUCT_NAME} environment settings> and create an environment with at least one repository, then ping me back here again.`,
               },
             },
           ],
@@ -1043,7 +1043,7 @@ export async function showTaskConfiguration({
             taskDescription,
             {
               userId: userMapping.userId,
-              apiBaseUrl: Env.ROOMOTE_APP_URL,
+              apiBaseUrl: Env.R_APP_URL,
             },
           );
 

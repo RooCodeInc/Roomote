@@ -19,7 +19,7 @@ export const TEST_HOST = `${TEST_TASK_ID}-web.roomote-preview.dev`;
 type MockConfig = {
   PORT: string;
   NODE_ENV: 'test';
-  ROOMOTE_APP_URL: string;
+  R_APP_URL: string;
   PREVIEW_TOKEN_TTL_SECONDS: string;
   PREVIEW_AUTH_COOKIE_NAME: string;
   PREVIEW_PROXY_SUBDOMAIN_SUFFIX: string | undefined;
@@ -28,7 +28,7 @@ type MockConfig = {
 export const mockConfig: MockConfig = {
   PORT: '0',
   NODE_ENV: 'test',
-  ROOMOTE_APP_URL: 'https://api.example.com',
+  R_APP_URL: 'https://api.example.com',
   PREVIEW_TOKEN_TTL_SECONDS: '3600',
   PREVIEW_AUTH_COOKIE_NAME: 'preview_auth',
   PREVIEW_PROXY_SUBDOMAIN_SUFFIX: undefined,

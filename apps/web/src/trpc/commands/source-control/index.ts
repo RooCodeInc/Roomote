@@ -212,11 +212,11 @@ function getSourceControlWebhookUrl(
   provider: 'gitlab' | 'gitea' | 'bitbucket' | 'ado',
 ): string | null {
   // Match the GitHub App manifest behavior: prefer TRPC_URL, but fall back
-  // to ROOMOTE_APP_URL when TRPC_URL is a loopback address that token-backed
+  // to R_APP_URL when TRPC_URL is a loopback address that token-backed
   // source-control providers cannot reach.
   const trpcUrl = new URL(Env.TRPC_URL);
   const webhookBaseUrl = isLoopbackHostname(trpcUrl.hostname)
-    ? Env.ROOMOTE_APP_URL
+    ? Env.R_APP_URL
     : Env.TRPC_URL;
 
   if (isLoopbackHostname(new URL(webhookBaseUrl).hostname)) {

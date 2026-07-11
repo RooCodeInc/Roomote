@@ -13,7 +13,7 @@ import {
 import { db, eq, users } from '@roomote/db/server';
 import { isShowDebugUIEnabledFromMetadata } from '@roomote/feature-flags';
 
-const DEFAULT_LOCAL_ROOMOTE_APP_URL = 'http://localhost:13000';
+const DEFAULT_LOCAL_R_APP_URL = 'http://localhost:13000';
 
 export {
   AUTO_RESPOND_CHANNELS_SETTINGS_HASH,
@@ -35,7 +35,7 @@ export type SlackAutomationSettingsMessage = {
 function buildAutomationsSettingsUrl(hash?: string) {
   const url = new URL(
     '/automations',
-    process.env.ROOMOTE_APP_URL || DEFAULT_LOCAL_ROOMOTE_APP_URL,
+    process.env.R_APP_URL || DEFAULT_LOCAL_R_APP_URL,
   );
 
   if (hash) {

@@ -73,19 +73,16 @@ function buildSourceControlSetup(
         repositoryCount: 0,
         fields: [
           {
-            envVarName: 'NEXT_PUBLIC_GITHUB_APP_SLUG',
-            acceptedEnvVarNames: [
-              'NEXT_PUBLIC_GITHUB_APP_SLUG',
-              'GITHUB_APP_SLUG',
-            ],
+            envVarName: 'R_GITHUB_APP_SLUG',
+            acceptedEnvVarNames: ['R_GITHUB_APP_SLUG'],
             label: 'GitHub App Slug',
             runtimeSatisfied: false,
             savedSatisfied: false,
             satisfiedByEnvVarName: null,
           },
           {
-            envVarName: 'GITHUB_APP_ID',
-            acceptedEnvVarNames: ['GITHUB_APP_ID'],
+            envVarName: 'R_GITHUB_APP_ID',
+            acceptedEnvVarNames: ['R_GITHUB_APP_ID'],
             label: 'GitHub App ID',
             runtimeSatisfied: false,
             savedSatisfied: false,

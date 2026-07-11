@@ -38,9 +38,9 @@ function buildGitHubAppJwt(): string {
     {
       iat: now,
       exp: now + 300,
-      iss: Env.GITHUB_APP_ID,
+      iss: Env.R_GITHUB_APP_ID,
     },
-    normalizeGitHubAppPrivateKey(Env.GITHUB_APP_PRIVATE_KEY),
+    normalizeGitHubAppPrivateKey(Env.R_GITHUB_APP_PRIVATE_KEY),
     { algorithm: 'RS256' },
   );
 }

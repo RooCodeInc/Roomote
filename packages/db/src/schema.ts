@@ -2551,7 +2551,7 @@ export const environmentVariablesRelations = relations(
  *
  * Deployment-owned secrets that Roomote generates and persists itself, such
  * as the auto-generated job/preview auth keypairs created at first boot when
- * `ROOMOTE_AUTO_GENERATE_KEYS=true`. Unlike `environment_variables`, rows here
+ * `R_AUTO_GENERATE_KEYS=true`. Unlike `environment_variables`, rows here
  * are written by the runtime before any user exists, so there is no user
  * attribution.
  */

@@ -6,7 +6,7 @@
  * redirect URIs silently downgrade to http:// and token exchanges fail with
  * redirect-mismatch errors (e.g. Entra AADSTS500112).
  *
- * When a request is addressed to the canonical `ROOMOTE_APP_URL` host, the
+ * When a request is addressed to the canonical `R_APP_URL` host, the
  * configured URL is authoritative for the scheme — rewrite the header to
  * match. Requests to other hosts (localhost, preview domains) pass through
  * untouched.

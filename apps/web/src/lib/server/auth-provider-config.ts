@@ -35,20 +35,18 @@ export type ResolvedAuthProviderConfig = {
 function readConfiguredValue(
   runtimeEnv: Partial<Record<string, string | undefined>>,
   deploymentEnvVars: Record<string, string>,
-  ...keys: string[]
+  key: string,
 ): string | undefined {
-  for (const key of keys) {
-    const runtimeValue = runtimeEnv[key]?.trim();
+  const runtimeValue = runtimeEnv[key]?.trim();
 
-    if (runtimeValue) {
-      return runtimeValue;
-    }
+  if (runtimeValue) {
+    return runtimeValue;
+  }
 
-    const deploymentValue = deploymentEnvVars[key]?.trim();
+  const deploymentValue = deploymentEnvVars[key]?.trim();
 
-    if (deploymentValue) {
-      return deploymentValue;
-    }
+  if (deploymentValue) {
+    return deploymentValue;
   }
 
   return undefined;
@@ -72,36 +70,31 @@ export async function resolveAuthProviderConfig(
     (await resolveEffectiveDeploymentEnvVars({ executor }));
 
   const slackClientId =
-    readConfiguredValue(
-      runtimeEnv,
-      deploymentEnvVars,
-      'SLACK_CLIENT_ID',
-      'ROOMOTE_AUTH_SLACK_CLIENT_ID',
-    ) ?? null;
+    readConfiguredValue(runtimeEnv, deploymentEnvVars, 'R_SLACK_CLIENT_ID') ??
+    null;
   const slackClientSecret =
     readConfiguredValue(
       runtimeEnv,
       deploymentEnvVars,
-      'SLACK_CLIENT_SECRET',
-      'ROOMOTE_AUTH_SLACK_CLIENT_SECRET',
+      'R_SLACK_CLIENT_SECRET',
     ) ?? null;
   const microsoftClientId =
     readConfiguredValue(
       runtimeEnv,
       deploymentEnvVars,
-      'ROOMOTE_AUTH_MICROSOFT_CLIENT_ID',
+      'R_MICROSOFT_CLIENT_ID',
     ) ?? null;
   const microsoftClientSecret =
     readConfiguredValue(
       runtimeEnv,
       deploymentEnvVars,
-      'ROOMOTE_AUTH_MICROSOFT_CLIENT_SECRET',
+      'R_MICROSOFT_CLIENT_SECRET',
     ) ?? null;
   const microsoftTenantId =
     readConfiguredValue(
       runtimeEnv,
       deploymentEnvVars,
-      'ROOMOTE_AUTH_MICROSOFT_TENANT_ID',
+      'R_MICROSOFT_TENANT_ID',
     ) ?? null;
   const gitlabClientId =
     readConfiguredValue(runtimeEnv, deploymentEnvVars, 'GITLAB_CLIENT_ID') ??
@@ -142,12 +135,7 @@ export async function resolveAuthProviderConfig(
     readConfiguredValue(runtimeEnv, deploymentEnvVars, 'ADO_CLIENT_SECRET') ??
     null;
   const adoTenantId =
-    readConfiguredValue(
-      runtimeEnv,
-      deploymentEnvVars,
-      'ADO_TENANT_ID',
-      'ROOMOTE_AUTH_MICROSOFT_TENANT_ID',
-    ) ?? null;
+    readConfiguredValue(runtimeEnv, deploymentEnvVars, 'ADO_TENANT_ID') ?? null;
   const adoOrganization =
     readConfiguredValue(runtimeEnv, deploymentEnvVars, 'ADO_ORGANIZATION') ??
     null;
@@ -204,8 +192,8 @@ export async function resolveAuthProviderConfig(
       adoTenantId,
       adoOrganization,
       adoBaseUrl,
-      roomoteAllowedEmails: Env.ROOMOTE_ALLOWED_EMAILS ?? null,
-      roomoteAppUrl: Env.ROOMOTE_APP_URL,
+      roomoteAllowedEmails: Env.R_ALLOWED_EMAILS ?? null,
+      roomoteAppUrl: Env.R_APP_URL,
     }),
   };
 }

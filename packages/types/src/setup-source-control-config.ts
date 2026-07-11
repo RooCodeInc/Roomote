@@ -139,38 +139,35 @@ function buildProviderFields(
     case 'github':
       return [
         {
-          envVarName: 'NEXT_PUBLIC_GITHUB_APP_SLUG',
-          acceptedEnvVarNames: [
-            'NEXT_PUBLIC_GITHUB_APP_SLUG',
-            'GITHUB_APP_SLUG',
-          ],
+          envVarName: 'R_GITHUB_APP_SLUG',
+          acceptedEnvVarNames: ['R_GITHUB_APP_SLUG'],
           label: 'GitHub App Slug',
         },
         {
-          envVarName: 'GITHUB_APP_ID',
-          acceptedEnvVarNames: ['GITHUB_APP_ID'],
+          envVarName: 'R_GITHUB_APP_ID',
+          acceptedEnvVarNames: ['R_GITHUB_APP_ID'],
           label: 'GitHub App ID',
         },
         {
-          envVarName: 'GITHUB_APP_PRIVATE_KEY',
-          acceptedEnvVarNames: ['GITHUB_APP_PRIVATE_KEY'],
+          envVarName: 'R_GITHUB_APP_PRIVATE_KEY',
+          acceptedEnvVarNames: ['R_GITHUB_APP_PRIVATE_KEY'],
           label: 'GitHub App Private Key',
           secret: true,
         },
         {
-          envVarName: 'GITHUB_CLIENT_ID',
-          acceptedEnvVarNames: ['GITHUB_CLIENT_ID'],
+          envVarName: 'R_GITHUB_CLIENT_ID',
+          acceptedEnvVarNames: ['R_GITHUB_CLIENT_ID'],
           label: 'GitHub OAuth Client ID',
         },
         {
-          envVarName: 'GITHUB_CLIENT_SECRET',
-          acceptedEnvVarNames: ['GITHUB_CLIENT_SECRET'],
+          envVarName: 'R_GITHUB_CLIENT_SECRET',
+          acceptedEnvVarNames: ['R_GITHUB_CLIENT_SECRET'],
           label: 'GitHub OAuth Client Secret',
           secret: true,
         },
         {
-          envVarName: 'GITHUB_WEBHOOK_SECRET',
-          acceptedEnvVarNames: ['GITHUB_WEBHOOK_SECRET'],
+          envVarName: 'R_GITHUB_WEBHOOK_SECRET',
+          acceptedEnvVarNames: ['R_GITHUB_WEBHOOK_SECRET'],
           label: 'GitHub Webhook Secret',
           secret: true,
         },
@@ -297,10 +294,7 @@ function buildProviderFields(
         },
         {
           envVarName: 'ADO_TENANT_ID',
-          acceptedEnvVarNames: [
-            'ADO_TENANT_ID',
-            'ROOMOTE_AUTH_MICROSOFT_TENANT_ID',
-          ],
+          acceptedEnvVarNames: ['ADO_TENANT_ID'],
           label: 'Microsoft Entra Tenant ID',
           required: false,
         },

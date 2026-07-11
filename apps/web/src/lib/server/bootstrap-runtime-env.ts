@@ -23,7 +23,7 @@ async function runBootstrapWebRuntimeEnv(): Promise<WebRuntimeEnv> {
       await import('@roomote/db/server');
     await initializeDb(webEnv.DATABASE_URL);
 
-    // When ROOMOTE_AUTO_GENERATE_KEYS is enabled, resolve auto-generated
+    // When R_AUTO_GENERATE_KEYS is enabled, resolve auto-generated
     // auth keypairs from the database (generating them at first boot) and
     // rebuild the web env so token signing observes the resolved keys.
     if (await bootstrapGeneratedAuthKeypairs()) {

@@ -10,7 +10,7 @@ function buildAppUrl(
   path: string,
   { source, medium = 'link', campaign }: UtmParams,
 ): string {
-  return `${Env.ROOMOTE_APP_URL}${path}?utm_source=${source}&utm_medium=${medium}&utm_campaign=${encodeURIComponent(campaign)}`;
+  return `${Env.R_APP_URL}${path}?utm_source=${source}&utm_medium=${medium}&utm_campaign=${encodeURIComponent(campaign)}`;
 }
 
 export function getTaskUrl({

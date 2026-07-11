@@ -82,14 +82,14 @@ export async function listTaskArtifacts(
         contentType: artifact.contentType,
         size: artifact.size,
         createdAt: artifact.createdAt,
-        viewUrl: `${Env.ROOMOTE_APP_URL}/task/${taskId}/artifacts/${artifact.path}?v=${artifact.version}`,
+        viewUrl: `${Env.R_APP_URL}/task/${taskId}/artifacts/${artifact.path}?v=${artifact.version}`,
       };
 
       if (artifact.contentType.startsWith('image/')) {
         entry.rawUrl = buildSignedArtifactRawUrl({
           artifactId: artifact.id,
           ts: rawUrlTs,
-          apiBaseUrl: Env.ROOMOTE_APP_URL,
+          apiBaseUrl: Env.R_APP_URL,
           signingKey: getArtifactSigningKey(),
         });
       }

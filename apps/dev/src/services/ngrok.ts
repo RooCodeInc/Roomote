@@ -106,7 +106,7 @@ export class NgrokService {
     port: number;
     verbose: boolean;
   }): Promise<PublicUrlResolution> {
-    const configuredUrl = process.env.ROOMOTE_PUBLIC_URL?.trim();
+    const configuredUrl = process.env.R_PUBLIC_URL?.trim();
 
     if (configuredUrl) {
       const publicUrl = this.normalizePublicUrl(configuredUrl);
@@ -133,9 +133,7 @@ export class NgrokService {
       };
     }
 
-    throw new Error(
-      'ROOMOTE_PUBLIC_URL is required for local Roomote callbacks.',
-    );
+    throw new Error('R_PUBLIC_URL is required for local Roomote callbacks.');
   }
 
   private static async ensureManagedWebTunnel({
@@ -213,12 +211,12 @@ export class NgrokService {
       url = new URL(value);
     } catch {
       throw new Error(
-        `ROOMOTE_PUBLIC_URL must be a valid absolute URL. Received: ${value}`,
+        `R_PUBLIC_URL must be a valid absolute URL. Received: ${value}`,
       );
     }
 
     if (url.protocol !== 'https:') {
-      throw new Error('ROOMOTE_PUBLIC_URL must use https.');
+      throw new Error('R_PUBLIC_URL must use https.');
     }
 
     url.pathname = url.pathname.replace(/\/+$/, '') || '/';
@@ -308,7 +306,7 @@ export class NgrokService {
       if (endpointAlreadyOnline?.[1]) {
         return (
           `ngrok says ${endpointAlreadyOnline[1]} is already online. ` +
-          'Stop the existing tunnel in ngrok or set ROOMOTE_PUBLIC_URL to that URL if it already points at this checkout.'
+          'Stop the existing tunnel in ngrok or set R_PUBLIC_URL to that URL if it already points at this checkout.'
         );
       }
 

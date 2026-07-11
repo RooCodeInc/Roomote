@@ -95,7 +95,7 @@ async function postTelegramNotification({
   route: Extract<PrReviewNotificationRoute, { provider: 'telegram' }>;
   text: string;
 }): Promise<void> {
-  if (!Env.TELEGRAM_BOT_TOKEN) {
+  if (!Env.R_TELEGRAM_BOT_TOKEN) {
     console.warn(
       '[PrReviewNotification] Telegram bot token is not configured, skipping',
     );
@@ -103,7 +103,7 @@ async function postTelegramNotification({
   }
 
   const provider = new TelegramCommunicationProvider({
-    botToken: Env.TELEGRAM_BOT_TOKEN,
+    botToken: Env.R_TELEGRAM_BOT_TOKEN,
   });
 
   await provider.postMessage({

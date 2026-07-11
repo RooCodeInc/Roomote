@@ -311,9 +311,9 @@ export async function getLinkedMicrosoftTeamsAccountCommand(
   auth: UserAuthSuccess,
 ) {
   const configured = Boolean(
-    Env.ROOMOTE_AUTH_MICROSOFT_CLIENT_ID &&
-    Env.ROOMOTE_AUTH_MICROSOFT_CLIENT_SECRET &&
-    Env.ROOMOTE_AUTH_MICROSOFT_TENANT_ID,
+    Env.R_MICROSOFT_CLIENT_ID &&
+    Env.R_MICROSOFT_CLIENT_SECRET &&
+    Env.R_MICROSOFT_TENANT_ID,
   );
 
   const account = await db.query.authAccounts.findFirst({

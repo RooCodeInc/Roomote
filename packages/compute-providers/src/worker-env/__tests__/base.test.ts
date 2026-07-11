@@ -1,6 +1,6 @@
 vi.mock('@roomote/env', () => ({
   Env: {
-    ROOMOTE_APP_URL: 'https://web.roomote.example.com',
+    R_APP_URL: 'https://web.roomote.example.com',
     TRPC_URL: 'https://api.roomote.example.com',
   },
 }));
@@ -15,12 +15,12 @@ describe('buildBaseWorkerEnv', () => {
     delete process.env.PREVIEW_PROXY_BASE_URL;
     delete process.env.JOB_AUTH_PRIVATE_KEY;
     delete process.env.JOB_AUTH_PUBLIC_KEY;
-    delete process.env.ROOMOTE_MODEL;
-    delete process.env.ROOMOTE_SMALL_MODEL;
-    delete process.env.ROOMOTE_VISION_MODEL;
-    delete process.env.ROOMOTE_CODE_REVIEW_MODEL;
-    delete process.env.ROOMOTE_EXPLORE_MODEL;
-    delete process.env.ROOMOTE_MODEL_ENV_KEYS;
+    delete process.env.R_MODEL;
+    delete process.env.R_SMALL_MODEL;
+    delete process.env.R_VISION_MODEL;
+    delete process.env.R_CODE_REVIEW_MODEL;
+    delete process.env.R_EXPLORE_MODEL;
+    delete process.env.R_MODEL_ENV_KEYS;
   });
 
   afterEach(() => {
@@ -33,7 +33,7 @@ describe('buildBaseWorkerEnv', () => {
       extraEnv: {},
     });
 
-    expect(env.ROOMOTE_APP_URL).toBe('https://web.roomote.example.com');
+    expect(env.R_APP_URL).toBe('https://web.roomote.example.com');
     expect(env.TRPC_URL).toBe('https://api.roomote.example.com');
     expect(env.PREVIEW_PROXY_BASE_URL).toBeUndefined();
   });
@@ -76,12 +76,12 @@ describe('buildBaseWorkerEnv', () => {
   });
 
   it('forwards deployment model config and provider keys to workers', () => {
-    process.env.ROOMOTE_MODEL = 'openrouter/openai/gpt-5.4';
-    process.env.ROOMOTE_SMALL_MODEL = 'openrouter/openai/gpt-5.4-mini';
-    process.env.ROOMOTE_VISION_MODEL = 'openrouter/openai/gpt-5.5';
-    process.env.ROOMOTE_CODE_REVIEW_MODEL = 'openrouter/openai/gpt-5.5';
-    process.env.ROOMOTE_EXPLORE_MODEL = 'openrouter/openai/gpt-5.4-mini';
-    process.env.ROOMOTE_MODEL_ENV_KEYS = 'CUSTOM_PROVIDER_API_KEY';
+    process.env.R_MODEL = 'openrouter/openai/gpt-5.4';
+    process.env.R_SMALL_MODEL = 'openrouter/openai/gpt-5.4-mini';
+    process.env.R_VISION_MODEL = 'openrouter/openai/gpt-5.5';
+    process.env.R_CODE_REVIEW_MODEL = 'openrouter/openai/gpt-5.5';
+    process.env.R_EXPLORE_MODEL = 'openrouter/openai/gpt-5.4-mini';
+    process.env.R_MODEL_ENV_KEYS = 'CUSTOM_PROVIDER_API_KEY';
     process.env.OPENROUTER_API_KEY = 'openrouter-key';
     process.env.CUSTOM_PROVIDER_API_KEY = 'custom-provider-key';
 
@@ -90,18 +90,18 @@ describe('buildBaseWorkerEnv', () => {
       extraEnv: {},
     });
 
-    expect(env.ROOMOTE_MODEL).toBe('openrouter/openai/gpt-5.4');
-    expect(env.ROOMOTE_SMALL_MODEL).toBe('openrouter/openai/gpt-5.4-mini');
-    expect(env.ROOMOTE_VISION_MODEL).toBe('openrouter/openai/gpt-5.5');
-    expect(env.ROOMOTE_CODE_REVIEW_MODEL).toBe('openrouter/openai/gpt-5.5');
-    expect(env.ROOMOTE_EXPLORE_MODEL).toBe('openrouter/openai/gpt-5.4-mini');
-    expect(env.ROOMOTE_MODEL_ENV_KEYS).toBe('CUSTOM_PROVIDER_API_KEY');
+    expect(env.R_MODEL).toBe('openrouter/openai/gpt-5.4');
+    expect(env.R_SMALL_MODEL).toBe('openrouter/openai/gpt-5.4-mini');
+    expect(env.R_VISION_MODEL).toBe('openrouter/openai/gpt-5.5');
+    expect(env.R_CODE_REVIEW_MODEL).toBe('openrouter/openai/gpt-5.5');
+    expect(env.R_EXPLORE_MODEL).toBe('openrouter/openai/gpt-5.4-mini');
+    expect(env.R_MODEL_ENV_KEYS).toBe('CUSTOM_PROVIDER_API_KEY');
     expect(env.OPENROUTER_API_KEY).toBe('openrouter-key');
     expect(env.CUSTOM_PROVIDER_API_KEY).toBe('custom-provider-key');
   });
 
   it('forwards Vercel AI Gateway credentials through the shared provider key list', () => {
-    process.env.ROOMOTE_MODEL = 'vercel/openai/gpt-5.4';
+    process.env.R_MODEL = 'vercel/openai/gpt-5.4';
     process.env.AI_GATEWAY_API_KEY = 'vercel-key';
 
     const env = buildBaseWorkerEnv({
@@ -109,7 +109,7 @@ describe('buildBaseWorkerEnv', () => {
       extraEnv: {},
     });
 
-    expect(env.ROOMOTE_MODEL).toBe('vercel/openai/gpt-5.4');
+    expect(env.R_MODEL).toBe('vercel/openai/gpt-5.4');
     expect(env.AI_GATEWAY_API_KEY).toBe('vercel-key');
   });
 });

@@ -31,8 +31,8 @@ const {
     mockCreateInstallationAccessToken,
     mockEnv: {
       NODE_ENV: 'development',
-      GITHUB_APP_ID: 'default-app-id',
-      GITHUB_APP_PRIVATE_KEY: 'default-private-key',
+      R_GITHUB_APP_ID: 'default-app-id',
+      R_GITHUB_APP_PRIVATE_KEY: 'default-private-key',
     },
     mockFindActiveInstallations: vi.fn(),
     mockFindInstallation: vi.fn(),
@@ -89,8 +89,8 @@ describe('resolveGitHubAppCredentials', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockEnv.NODE_ENV = 'development';
-    mockEnv.GITHUB_APP_ID = 'default-app-id';
-    mockEnv.GITHUB_APP_PRIVATE_KEY = 'default-private-key';
+    mockEnv.R_GITHUB_APP_ID = 'default-app-id';
+    mockEnv.R_GITHUB_APP_PRIVATE_KEY = 'default-private-key';
   });
 
   it('preserves explicit GitHub App credentials', () => {
@@ -118,8 +118,8 @@ describe('resolveGitHubAppCredentials', () => {
 describe('resolveRuntimeGitHubAppCredentials', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    mockEnv.GITHUB_APP_ID = 'default-app-id';
-    mockEnv.GITHUB_APP_PRIVATE_KEY = 'default-private-key';
+    mockEnv.R_GITHUB_APP_ID = 'default-app-id';
+    mockEnv.R_GITHUB_APP_PRIVATE_KEY = 'default-private-key';
     mockResolveDeploymentEnvVar.mockResolvedValue(null);
   });
 
@@ -138,9 +138,9 @@ describe('resolveRuntimeGitHubAppCredentials', () => {
 
   it('resolves deployment env vars before falling back to Env', async () => {
     mockResolveDeploymentEnvVar.mockImplementation(async (name: string) =>
-      name === 'GITHUB_APP_ID'
+      name === 'R_GITHUB_APP_ID'
         ? 'db-app-id'
-        : name === 'GITHUB_APP_PRIVATE_KEY'
+        : name === 'R_GITHUB_APP_PRIVATE_KEY'
           ? 'db-private-key'
           : null,
     );
@@ -159,8 +159,8 @@ describe('resolveRuntimeGitHubAppCredentials', () => {
   });
 
   it('fails clearly when no GitHub App credentials are configured', async () => {
-    mockEnv.GITHUB_APP_ID = '';
-    mockEnv.GITHUB_APP_PRIVATE_KEY = '';
+    mockEnv.R_GITHUB_APP_ID = '';
+    mockEnv.R_GITHUB_APP_PRIVATE_KEY = '';
 
     await expect(resolveRuntimeGitHubAppCredentials()).rejects.toThrow(
       'GitHub App credentials are not configured.',
@@ -171,8 +171,8 @@ describe('resolveRuntimeGitHubAppCredentials', () => {
 describe('createGitHubToken', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    mockEnv.GITHUB_APP_ID = '';
-    mockEnv.GITHUB_APP_PRIVATE_KEY = '';
+    mockEnv.R_GITHUB_APP_ID = '';
+    mockEnv.R_GITHUB_APP_PRIVATE_KEY = '';
     mockFindActiveInstallations.mockResolvedValue([
       {
         installationId: 12345,
@@ -183,9 +183,9 @@ describe('createGitHubToken', () => {
     });
     mockJwtSign.mockReturnValue('app-jwt');
     mockResolveDeploymentEnvVar.mockImplementation(async (name: string) =>
-      name === 'GITHUB_APP_ID'
+      name === 'R_GITHUB_APP_ID'
         ? 'db-app-id'
-        : name === 'GITHUB_APP_PRIVATE_KEY'
+        : name === 'R_GITHUB_APP_PRIVATE_KEY'
           ? 'db-private-key'
           : null,
     );

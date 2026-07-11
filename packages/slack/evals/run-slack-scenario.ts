@@ -98,7 +98,7 @@ const server = new MockSlackServer({
   state: substitute(scenario.state) as MockSlackState,
   roomoteTarget: {
     webhookUrl: values.webhook!,
-    signingSecret: process.env.SLACK_SIGNING_SECRET ?? '',
+    signingSecret: process.env.R_SLACK_SIGNING_SECRET ?? '',
   },
 });
 const baseUrl = await server.start(Number.parseInt(values.port!, 10));

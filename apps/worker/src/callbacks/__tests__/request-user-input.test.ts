@@ -169,18 +169,18 @@ describe('formatRequestUserInputPrompt', () => {
 });
 
 describe('buildRequestUserInputTaskUrl', () => {
-  const originalRoomoteAppUrl = process.env.ROOMOTE_APP_URL;
+  const originalRoomoteAppUrl = process.env.R_APP_URL;
   const localOrigin = 'http://localhost:13000';
 
   beforeEach(() => {
-    process.env.ROOMOTE_APP_URL = localOrigin;
+    process.env.R_APP_URL = localOrigin;
   });
 
   afterAll(() => {
     if (originalRoomoteAppUrl === undefined) {
-      delete process.env.ROOMOTE_APP_URL;
+      delete process.env.R_APP_URL;
     } else {
-      process.env.ROOMOTE_APP_URL = originalRoomoteAppUrl;
+      process.env.R_APP_URL = originalRoomoteAppUrl;
     }
   });
 

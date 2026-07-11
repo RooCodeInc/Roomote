@@ -36,7 +36,7 @@ function isManagerMcpSetupReason(
 }
 
 function buildManagerMcpSetupConfigureUrl(serviceId: string): string {
-  const url = new URL('/settings/integrations', Env.ROOMOTE_APP_URL);
+  const url = new URL('/settings/integrations', Env.R_APP_URL);
   url.searchParams.set('service', serviceId);
   url.searchParams.set('source', 'slack-manager-integration-setup');
   return url.toString();

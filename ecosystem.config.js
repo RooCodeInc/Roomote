@@ -21,12 +21,12 @@ const DEFAULT_OPENCODE_PROVIDER_ENV_KEYS = [
   'GOOGLE_VERTEX_LOCATION',
 ];
 const OPENCODE_RUNTIME_ENV_KEYS = [
-  'ROOMOTE_MODEL',
-  'ROOMOTE_SMALL_MODEL',
-  'ROOMOTE_VISION_MODEL',
-  'ROOMOTE_CODE_REVIEW_MODEL',
-  'ROOMOTE_EXPLORE_MODEL',
-  'ROOMOTE_MODEL_ENV_KEYS',
+  'R_MODEL',
+  'R_SMALL_MODEL',
+  'R_VISION_MODEL',
+  'R_CODE_REVIEW_MODEL',
+  'R_EXPLORE_MODEL',
+  'R_MODEL_ENV_KEYS',
   'OPENCODE_COMMAND',
   'OPENCODE_PTY_PYTHON_COMMAND',
 ];
@@ -36,10 +36,9 @@ const localPorts = {
   bullmq: Number(process.env.ROOMOTE_BULLMQ_PORT || 13002),
   previewProxy: Number(process.env.ROOMOTE_PREVIEW_PROXY_PORT || 18081),
 };
-const publicUrl = process.env.ROOMOTE_PUBLIC_URL;
+const publicUrl = process.env.R_PUBLIC_URL;
 
-const configuredModelProviderEnvKeysValue =
-  process.env.ROOMOTE_MODEL_ENV_KEYS || '';
+const configuredModelProviderEnvKeysValue = process.env.R_MODEL_ENV_KEYS || '';
 const configuredModelProviderEnvKeys = configuredModelProviderEnvKeysValue
   ? configuredModelProviderEnvKeysValue
       .split(/[,\s]+/u)
@@ -64,36 +63,36 @@ const defaultEnv = {
   DOCKER_WORKER_PLATFORM:
     process.env.DOCKER_WORKER_PLATFORM ||
     (process.arch === 'arm64' ? 'linux/arm64' : 'linux/amd64'),
-  ROOMOTE_PUBLIC_URL: publicUrl,
-  ROOMOTE_APP_URL: publicUrl,
+  R_PUBLIC_URL: publicUrl,
+  R_APP_URL: publicUrl,
   // Set by `pnpm dev` to `<public-url>/_roomote-api` so workers on hosted
   // compute providers reach the API through the Caddy dev edge, matching
   // the deployed TRPC_URL contract.
   TRPC_URL: process.env.TRPC_URL,
 
   // GitHub app credentials:
-  NEXT_PUBLIC_GITHUB_APP_SLUG: process.env.NEXT_PUBLIC_GITHUB_APP_SLUG,
-  GITHUB_APP_ID: process.env.GITHUB_APP_ID,
-  GITHUB_APP_PRIVATE_KEY: process.env.GITHUB_APP_PRIVATE_KEY,
-  GITHUB_CLIENT_ID: process.env.GITHUB_CLIENT_ID,
-  GITHUB_CLIENT_SECRET: process.env.GITHUB_CLIENT_SECRET,
-  GITHUB_WEBHOOK_SECRET: process.env.GITHUB_WEBHOOK_SECRET,
+  R_GITHUB_APP_SLUG: process.env.R_GITHUB_APP_SLUG,
+  R_GITHUB_APP_ID: process.env.R_GITHUB_APP_ID,
+  R_GITHUB_APP_PRIVATE_KEY: process.env.R_GITHUB_APP_PRIVATE_KEY,
+  R_GITHUB_CLIENT_ID: process.env.R_GITHUB_CLIENT_ID,
+  R_GITHUB_CLIENT_SECRET: process.env.R_GITHUB_CLIENT_SECRET,
+  R_GITHUB_WEBHOOK_SECRET: process.env.R_GITHUB_WEBHOOK_SECRET,
 
   // Slack app credentials:
   SLACK_APP_ID: process.env.SLACK_APP_ID,
-  SLACK_CLIENT_ID: process.env.SLACK_CLIENT_ID,
-  SLACK_CLIENT_SECRET: process.env.SLACK_CLIENT_SECRET,
+  R_SLACK_CLIENT_ID: process.env.R_SLACK_CLIENT_ID,
+  R_SLACK_CLIENT_SECRET: process.env.R_SLACK_CLIENT_SECRET,
   SLACK_REDIRECT_URI: publicUrl ? `${publicUrl}/api/slack/callback` : undefined,
   SLACK_AUTH_URI: publicUrl ? `${publicUrl}/api/slack/auth` : undefined,
-  SLACK_SIGNING_SECRET: process.env.SLACK_SIGNING_SECRET,
+  R_SLACK_SIGNING_SECRET: process.env.R_SLACK_SIGNING_SECRET,
 
   // Linear app credentials:
-  LINEAR_CLIENT_ID: process.env.LINEAR_CLIENT_ID,
-  LINEAR_CLIENT_SECRET: process.env.LINEAR_CLIENT_SECRET,
-  LINEAR_REDIRECT_URI: publicUrl
+  R_LINEAR_CLIENT_ID: process.env.R_LINEAR_CLIENT_ID,
+  R_LINEAR_CLIENT_SECRET: process.env.R_LINEAR_CLIENT_SECRET,
+  R_LINEAR_REDIRECT_URI: publicUrl
     ? `${publicUrl}/api/linear/callback`
     : undefined,
-  LINEAR_WEBHOOK_SECRET: process.env.LINEAR_WEBHOOK_SECRET,
+  R_LINEAR_WEBHOOK_SECRET: process.env.R_LINEAR_WEBHOOK_SECRET,
 
   ...openCodeEnv,
 };

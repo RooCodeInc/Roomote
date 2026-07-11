@@ -33,5 +33,5 @@ export function setConfiguredGitHubAppSlugCache(
  * misclassifying the deployment's own bot login.
  */
 export function getEffectiveGitHubAppSlug(): string {
-  return configuredAppSlugCache?.value ?? Env.NEXT_PUBLIC_GITHUB_APP_SLUG;
+  return configuredAppSlugCache?.value ?? Env.R_GITHUB_APP_SLUG;
 }

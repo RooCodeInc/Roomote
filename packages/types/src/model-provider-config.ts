@@ -232,7 +232,7 @@ export const SETUP_MODEL_PROVIDER_CATALOG = [
     // Provider id matches the models.dev/opencode `amazon-bedrock` provider
     // so `amazon-bedrock/<model>` slugs resolve at runtime. Auth uses a
     // Bedrock API key (bearer token); operators using ambient AWS access
-    // keys can forward them with `ROOMOTE_MODEL_ENV_KEYS` instead.
+    // keys can forward them with `R_MODEL_ENV_KEYS` instead.
     id: 'amazon-bedrock',
     label: 'Amazon Bedrock',
     envVarName: 'AWS_BEARER_TOKEN_BEDROCK',
@@ -778,7 +778,7 @@ export function buildSetupModelStatus(input: {
   const persistedModelConfig = normalizeDeploymentModelConfig(
     input.persistedModelConfig,
   );
-  const runtimeRoomoteModel = normalizeOptionalString(runtimeEnv.ROOMOTE_MODEL);
+  const runtimeRoomoteModel = normalizeOptionalString(runtimeEnv.R_MODEL);
   const runtimeRoomoteModelSatisfied = runtimeRoomoteModel !== null;
   const runtimeProviderId =
     resolveModelProviderIdFromModel(runtimeRoomoteModel);

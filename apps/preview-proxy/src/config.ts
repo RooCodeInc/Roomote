@@ -5,7 +5,7 @@ const envSchema = z.object({
     .enum(['development', 'production', 'test'])
     .default('development'),
   PORT: z.string().default('8081'),
-  ROOMOTE_APP_URL: z.string().default('http://localhost:13000'),
+  R_APP_URL: z.string().default('http://localhost:13000'),
   JOB_AUTH_PUBLIC_KEY: z.string().optional(),
   PREVIEW_TOKEN_TTL_SECONDS: z.string().default('3600'),
   DATABASE_URL: z
@@ -39,13 +39,8 @@ function getConfig(): z.infer<typeof envSchema> {
     throw new Error('Invalid environment configuration');
   }
 
-  if (
-    result.data.NODE_ENV === 'production' &&
-    !process.env.ROOMOTE_APP_URL?.trim()
-  ) {
-    throw new Error(
-      'ROOMOTE_APP_URL must be configured explicitly in production',
-    );
+  if (result.data.NODE_ENV === 'production' && !process.env.R_APP_URL?.trim()) {
+    throw new Error('R_APP_URL must be configured explicitly in production');
   }
 
   if (

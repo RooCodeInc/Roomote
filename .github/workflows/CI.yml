@@ -289,7 +289,7 @@ jobs:
           target: ${{ matrix.target }}
           platforms: linux/${{ matrix.arch }}
           push: false
-          build-args: APP_ENV=development
+          build-args: R_APP_ENV=development
 
   deployment-config:
     name: Deployment artifacts

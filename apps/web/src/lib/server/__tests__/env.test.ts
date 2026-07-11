@@ -162,7 +162,7 @@ describe('web server Env wrapper', () => {
   it('defaults dotenvx bootstrap to the local env file when APP_ENV is unset', async () => {
     process.env.NEXT_RUNTIME = 'nodejs';
     delete process.env.APP_ENV;
-    delete process.env.ROOMOTE_APP_ENV;
+    delete process.env.R_APP_ENV;
 
     const { initializeWebRuntimeEnv } = await import('../env');
 

@@ -43,8 +43,8 @@ const MASKED_VALUE = '•••••••••••••••••••�
 
 const MICROSOFT_SETUP_HIDDEN_ENV_VAR_NAMES = new Set([
   ...Object.keys(MICROSOFT_SINGLE_APP_TEAMS_BOT_FIELD_SOURCES),
-  'TEAMS_BOT_TOKEN_ENDPOINT',
-  'TEAMS_BOT_OAUTH_SCOPE',
+  'R_TEAMS_BOT_TOKEN_ENDPOINT',
+  'R_TEAMS_BOT_OAUTH_SCOPE',
 ]);
 
 export function getSetupVisibleFields(provider: ProviderStatus | null) {

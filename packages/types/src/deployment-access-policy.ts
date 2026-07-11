@@ -12,7 +12,7 @@
  *   a system invite.
  *
  * This policy record only stores the Slack workspace anchor, captured from
- * the first signed-in Slack user's ID token. The ROOMOTE_ALLOWED_EMAILS env
+ * the first signed-in Slack user's ID token. The R_ALLOWED_EMAILS env
  * var remains an additional operator-owned restriction on top.
  */
 

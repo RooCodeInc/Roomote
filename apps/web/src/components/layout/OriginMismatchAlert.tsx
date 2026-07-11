@@ -14,7 +14,7 @@ import { useTRPC } from '@/trpc/client';
 /**
  * Warns when the browser is on an origin the auth layer will reject — the
  * typical cause is a custom domain that was attached without updating
- * ROOMOTE_APP_URL. Rendered on the pre-auth surfaces (setup wizard and
+ * R_APP_URL. Rendered on the pre-auth surfaces (setup wizard and
  * sign-in) so operators see the fix before sign-in fails with 403
  * "Invalid origin". Renders nothing while loading, on error, or when the
  * origin is trusted.
@@ -60,8 +60,8 @@ export function OriginMismatchAlert() {
         </p>
         <p>
           Either continue at the configured URL, or set{' '}
-          <span className="font-mono">ROOMOTE_APP_URL={browserOrigin}</span> on
-          this deployment and redeploy the app services.
+          <span className="font-mono">R_APP_URL={browserOrigin}</span> on this
+          deployment and redeploy the app services.
         </p>
       </AlertDescription>
     </Alert>
