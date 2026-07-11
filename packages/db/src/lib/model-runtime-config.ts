@@ -142,24 +142,24 @@ export async function resolveEffectiveModelRuntimeEnv(
     ]);
   const persistedRuntimeModelConfig = runtimeModelConfig;
   const resolvedRoomoteModel =
-    normalizeConfiguredValue(runtimeEnv.ROOMOTE_MODEL) ??
+    normalizeConfiguredValue(runtimeEnv.R_MODEL) ??
     normalizeConfiguredValue(persistedRuntimeModelConfig.roomoteModel);
   const resolvedRoomoteSmallModel =
-    normalizeConfiguredValue(runtimeEnv.ROOMOTE_SMALL_MODEL) ??
+    normalizeConfiguredValue(runtimeEnv.R_SMALL_MODEL) ??
     normalizeConfiguredValue(persistedRuntimeModelConfig.roomoteSmallModel);
   const resolvedRoomoteVisionModel =
-    normalizeConfiguredValue(runtimeEnv.ROOMOTE_VISION_MODEL) ??
+    normalizeConfiguredValue(runtimeEnv.R_VISION_MODEL) ??
     normalizeConfiguredValue(persistedRuntimeModelConfig.roomoteVisionModel);
   const resolvedRoomoteCodeReviewModel =
-    normalizeConfiguredValue(runtimeEnv.ROOMOTE_CODE_REVIEW_MODEL) ??
+    normalizeConfiguredValue(runtimeEnv.R_CODE_REVIEW_MODEL) ??
     normalizeConfiguredValue(
       persistedRuntimeModelConfig.roomoteCodeReviewModel,
     );
   const resolvedRoomoteExploreModel =
-    normalizeConfiguredValue(runtimeEnv.ROOMOTE_EXPLORE_MODEL) ??
+    normalizeConfiguredValue(runtimeEnv.R_EXPLORE_MODEL) ??
     normalizeConfiguredValue(persistedRuntimeModelConfig.roomoteExploreModel);
   const resolvedRoomotePlanningModel =
-    normalizeConfiguredValue(runtimeEnv.ROOMOTE_PLANNING_MODEL) ??
+    normalizeConfiguredValue(runtimeEnv.R_PLANNING_MODEL) ??
     normalizeConfiguredValue(persistedRuntimeModelConfig.roomotePlanningModel);
   // Roomote applies per-role reasoning defaults when no explicit level is
   // configured, but only for models that are not known to lack configurable
@@ -176,16 +176,14 @@ export async function resolveEffectiveModelRuntimeEnv(
     return catalogModel?.metadata?.supportsReasoning !== false;
   };
   const resolvedRoomoteModelReasoningEffort =
-    normalizeConfiguredReasoningEffort(
-      runtimeEnv.ROOMOTE_MODEL_REASONING_EFFORT,
-    ) ??
+    normalizeConfiguredReasoningEffort(runtimeEnv.R_MODEL_REASONING_EFFORT) ??
     persistedRuntimeModelConfig.roomoteModelReasoningEffort ??
     (modelSupportsReasoning(resolvedRoomoteModel)
       ? DEFAULT_MODEL_ROLE_REASONING_EFFORTS.coding
       : undefined);
   const resolvedRoomoteSmallModelReasoningEffort =
     normalizeConfiguredReasoningEffort(
-      runtimeEnv.ROOMOTE_SMALL_MODEL_REASONING_EFFORT,
+      runtimeEnv.R_SMALL_MODEL_REASONING_EFFORT,
     ) ??
     persistedRuntimeModelConfig.roomoteSmallModelReasoningEffort ??
     (modelSupportsReasoning(resolvedRoomoteSmallModel ?? resolvedRoomoteModel)
@@ -193,7 +191,7 @@ export async function resolveEffectiveModelRuntimeEnv(
       : undefined);
   const resolvedRoomoteVisionModelReasoningEffort =
     normalizeConfiguredReasoningEffort(
-      runtimeEnv.ROOMOTE_VISION_MODEL_REASONING_EFFORT,
+      runtimeEnv.R_VISION_MODEL_REASONING_EFFORT,
     ) ??
     persistedRuntimeModelConfig.roomoteVisionModelReasoningEffort ??
     (resolvedRoomoteVisionModel &&
@@ -202,7 +200,7 @@ export async function resolveEffectiveModelRuntimeEnv(
       : undefined);
   const resolvedRoomoteCodeReviewModelReasoningEffort =
     normalizeConfiguredReasoningEffort(
-      runtimeEnv.ROOMOTE_CODE_REVIEW_MODEL_REASONING_EFFORT,
+      runtimeEnv.R_CODE_REVIEW_MODEL_REASONING_EFFORT,
     ) ??
     persistedRuntimeModelConfig.roomoteCodeReviewModelReasoningEffort ??
     (modelSupportsReasoning(
@@ -212,7 +210,7 @@ export async function resolveEffectiveModelRuntimeEnv(
       : undefined);
   const resolvedRoomoteExploreModelReasoningEffort =
     normalizeConfiguredReasoningEffort(
-      runtimeEnv.ROOMOTE_EXPLORE_MODEL_REASONING_EFFORT,
+      runtimeEnv.R_EXPLORE_MODEL_REASONING_EFFORT,
     ) ??
     persistedRuntimeModelConfig.roomoteExploreModelReasoningEffort ??
     (modelSupportsReasoning(resolvedRoomoteExploreModel ?? resolvedRoomoteModel)
@@ -220,7 +218,7 @@ export async function resolveEffectiveModelRuntimeEnv(
       : undefined);
   const resolvedRoomotePlanningModelReasoningEffort =
     normalizeConfiguredReasoningEffort(
-      runtimeEnv.ROOMOTE_PLANNING_MODEL_REASONING_EFFORT,
+      runtimeEnv.R_PLANNING_MODEL_REASONING_EFFORT,
     ) ??
     persistedRuntimeModelConfig.roomotePlanningModelReasoningEffort ??
     (modelSupportsReasoning(
@@ -229,7 +227,7 @@ export async function resolveEffectiveModelRuntimeEnv(
       ? DEFAULT_MODEL_ROLE_REASONING_EFFORTS.planning
       : undefined);
   const runtimeRoomoteModelEnvKeys = normalizeConfiguredValue(
-    runtimeEnv.ROOMOTE_MODEL_ENV_KEYS,
+    runtimeEnv.R_MODEL_ENV_KEYS,
   );
   const providerKeyNames = resolveProviderKeyNames({
     runtimeRoomoteModelEnvKeys,
@@ -277,51 +275,50 @@ export async function resolveEffectiveModelRuntimeEnv(
     : null;
 
   return {
-    ...(resolvedRoomoteModel && { ROOMOTE_MODEL: resolvedRoomoteModel }),
+    ...(resolvedRoomoteModel && { R_MODEL: resolvedRoomoteModel }),
     ...(resolvedRoomoteSmallModel && {
-      ROOMOTE_SMALL_MODEL: resolvedRoomoteSmallModel,
+      R_SMALL_MODEL: resolvedRoomoteSmallModel,
     }),
     ...(resolvedRoomoteVisionModel && {
-      ROOMOTE_VISION_MODEL: resolvedRoomoteVisionModel,
+      R_VISION_MODEL: resolvedRoomoteVisionModel,
     }),
     ...(resolvedRoomoteCodeReviewModel && {
-      ROOMOTE_CODE_REVIEW_MODEL: resolvedRoomoteCodeReviewModel,
+      R_CODE_REVIEW_MODEL: resolvedRoomoteCodeReviewModel,
     }),
     ...(resolvedRoomoteExploreModel && {
-      ROOMOTE_EXPLORE_MODEL: resolvedRoomoteExploreModel,
+      R_EXPLORE_MODEL: resolvedRoomoteExploreModel,
     }),
     ...(resolvedRoomotePlanningModel && {
-      ROOMOTE_PLANNING_MODEL: resolvedRoomotePlanningModel,
+      R_PLANNING_MODEL: resolvedRoomotePlanningModel,
     }),
     ...(resolvedRoomoteModelReasoningEffort && {
-      ROOMOTE_MODEL_REASONING_EFFORT: resolvedRoomoteModelReasoningEffort,
+      R_MODEL_REASONING_EFFORT: resolvedRoomoteModelReasoningEffort,
     }),
     ...(resolvedRoomoteSmallModelReasoningEffort && {
-      ROOMOTE_SMALL_MODEL_REASONING_EFFORT:
-        resolvedRoomoteSmallModelReasoningEffort,
+      R_SMALL_MODEL_REASONING_EFFORT: resolvedRoomoteSmallModelReasoningEffort,
     }),
     ...(resolvedRoomoteVisionModelReasoningEffort && {
-      ROOMOTE_VISION_MODEL_REASONING_EFFORT:
+      R_VISION_MODEL_REASONING_EFFORT:
         resolvedRoomoteVisionModelReasoningEffort,
     }),
     ...(resolvedRoomoteCodeReviewModelReasoningEffort && {
-      ROOMOTE_CODE_REVIEW_MODEL_REASONING_EFFORT:
+      R_CODE_REVIEW_MODEL_REASONING_EFFORT:
         resolvedRoomoteCodeReviewModelReasoningEffort,
     }),
     ...(resolvedRoomoteExploreModelReasoningEffort && {
-      ROOMOTE_EXPLORE_MODEL_REASONING_EFFORT:
+      R_EXPLORE_MODEL_REASONING_EFFORT:
         resolvedRoomoteExploreModelReasoningEffort,
     }),
     ...(resolvedRoomotePlanningModelReasoningEffort && {
-      ROOMOTE_PLANNING_MODEL_REASONING_EFFORT:
+      R_PLANNING_MODEL_REASONING_EFFORT:
         resolvedRoomotePlanningModelReasoningEffort,
     }),
     ...(runtimeRoomoteModelEnvKeys && {
-      ROOMOTE_MODEL_ENV_KEYS: runtimeRoomoteModelEnvKeys,
+      R_MODEL_ENV_KEYS: runtimeRoomoteModelEnvKeys,
     }),
     ...(!runtimeRoomoteModelEnvKeys &&
       providerKeyNames.length > 0 && {
-        ROOMOTE_MODEL_ENV_KEYS: providerKeyNames.join(','),
+        R_MODEL_ENV_KEYS: providerKeyNames.join(','),
       }),
     ...resolvedProviderKeyValues,
     ...(injectedOpenCodeAuthContent && {

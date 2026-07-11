@@ -14,7 +14,7 @@ describe('api sentry monitoring', () => {
     vi.clearAllMocks();
     delete process.env.API_SENTRY_DSN;
     delete process.env.SENTRY_DSN;
-    delete process.env.ROOMOTE_APP_ENV;
+    delete process.env.R_APP_ENV;
     delete process.env.APP_ENV;
     delete process.env.NODE_ENV;
   });

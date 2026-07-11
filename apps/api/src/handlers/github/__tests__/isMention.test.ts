@@ -6,7 +6,7 @@ vi.mock('@roomote/env', async (importOriginal) => {
   return {
     ...actual,
     Env: {
-      NEXT_PUBLIC_GITHUB_APP_SLUG: 'roomote',
+      R_GITHUB_APP_SLUG: 'roomote',
     },
   };
 });

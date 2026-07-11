@@ -54,7 +54,7 @@ const REQUEST_USER_INPUT_ALREADY_RECEIVED_TEXT =
 function buildSlackRequestUserInputTaskUrl(
   activeRun: ActiveSlackTaskRun,
 ): string {
-  const origin = Env.ROOMOTE_APP_URL;
+  const origin = Env.R_APP_URL;
   const payload =
     activeRun.payload && typeof activeRun.payload === 'object'
       ? (activeRun.payload as { webPath?: unknown })

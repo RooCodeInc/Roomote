@@ -279,7 +279,7 @@ export async function generatePrompt({
             : undefined,
         telegramBotUsername:
           nonSlackChatProvider === 'telegram'
-            ? (Env.TELEGRAM_BOT_USERNAME ?? undefined)
+            ? (Env.R_TELEGRAM_BOT_USERNAME ?? undefined)
             : undefined,
         teamsConversationId:
           nonSlackChatProvider === 'teams'
@@ -292,7 +292,7 @@ export async function generatePrompt({
         teamsTenantId: teamsTenantId ?? undefined,
         teamsBotAppId:
           nonSlackChatProvider === 'teams'
-            ? (Env.TEAMS_BOT_APP_ID ?? undefined)
+            ? (Env.R_TEAMS_BOT_APP_ID ?? undefined)
             : undefined,
         interactiveMode: taskSpec.payload.bootstrap?.interactiveMode,
         requestFormat,

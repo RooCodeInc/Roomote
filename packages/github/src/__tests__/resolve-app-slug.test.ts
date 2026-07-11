@@ -13,7 +13,7 @@ vi.mock('@roomote/env', async (importOriginal) => {
 
   return {
     ...actual,
-    Env: { NEXT_PUBLIC_GITHUB_APP_SLUG: 'roomote' },
+    Env: { R_GITHUB_APP_SLUG: 'roomote' },
   };
 });
 
@@ -41,22 +41,15 @@ describe('resolveConfiguredGitHubAppSlug', () => {
     expect(mockResolveDeploymentEnvVar).toHaveBeenCalledTimes(1);
   });
 
-  it('falls back to the GITHUB_APP_SLUG alias', async () => {
-    mockResolveDeploymentEnvVar
-      .mockResolvedValueOnce(null)
-      .mockResolvedValueOnce('openmote');
+  it('resolves the canonical R_GITHUB_APP_SLUG deployment env var', async () => {
+    mockResolveDeploymentEnvVar.mockResolvedValueOnce('openmote');
 
     const { resolveConfiguredGitHubAppSlug } =
       await import('../resolve-app-slug');
 
     await expect(resolveConfiguredGitHubAppSlug()).resolves.toBe('openmote');
-    expect(mockResolveDeploymentEnvVar).toHaveBeenNthCalledWith(
-      1,
-      'NEXT_PUBLIC_GITHUB_APP_SLUG',
-    );
-    expect(mockResolveDeploymentEnvVar).toHaveBeenNthCalledWith(
-      2,
-      'GITHUB_APP_SLUG',
+    expect(mockResolveDeploymentEnvVar).toHaveBeenCalledWith(
+      'R_GITHUB_APP_SLUG',
     );
   });
 
@@ -69,8 +62,7 @@ describe('resolveConfiguredGitHubAppSlug', () => {
     await expect(resolveConfiguredGitHubAppSlug()).resolves.toBe('roomote');
     await expect(resolveConfiguredGitHubAppSlug()).resolves.toBe('roomote');
 
-    // Two aliases checked on each of the two calls.
-    expect(mockResolveDeploymentEnvVar).toHaveBeenCalledTimes(4);
+    expect(mockResolveDeploymentEnvVar).toHaveBeenCalledTimes(2);
   });
 
   it('re-resolves after the cache expires', async () => {

@@ -129,8 +129,8 @@ export class PM2Service {
       env: {
         ...process.env,
         ...(options.publicUrl && {
-          ROOMOTE_PUBLIC_URL: options.publicUrl,
-          ROOMOTE_APP_URL: options.publicUrl,
+          R_PUBLIC_URL: options.publicUrl,
+          R_APP_URL: options.publicUrl,
         }),
         USE_WORKER_RELEASE: options.useRelease ? 'true' : 'false',
         ...(options.useRelease && {

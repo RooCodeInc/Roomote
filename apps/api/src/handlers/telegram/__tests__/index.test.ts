@@ -47,10 +47,10 @@ const {
   environmentsFindFirstMock: vi.fn(),
   getAvailableEnvironmentsMock: vi.fn(),
   envMock: {
-    ROOMOTE_APP_URL: 'https://app.example.com',
-    TELEGRAM_BOT_TOKEN: 'bot-token' as string | undefined,
-    TELEGRAM_BOT_USERNAME: 'roomote_bot' as string | undefined,
-    TELEGRAM_WEBHOOK_SECRET: 'secret' as string | undefined,
+    R_APP_URL: 'https://app.example.com',
+    R_TELEGRAM_BOT_TOKEN: 'bot-token' as string | undefined,
+    R_TELEGRAM_BOT_USERNAME: 'roomote_bot' as string | undefined,
+    R_TELEGRAM_WEBHOOK_SECRET: 'secret' as string | undefined,
     TRPC_URL: 'https://api.example.com' as string | undefined,
   },
   getTaskUrlMock: vi.fn(() => 'https://app.example.com/task/task-new'),
@@ -217,9 +217,9 @@ vi.mock('@roomote/db/server', () => ({
   },
   resolveEffectiveDeploymentEnvVars: vi.fn(async () => ({})),
   resolveTelegramRuntimeCredentials: vi.fn(async () => ({
-    botToken: envMock.TELEGRAM_BOT_TOKEN ?? null,
-    webhookSecret: envMock.TELEGRAM_WEBHOOK_SECRET ?? null,
-    botUsername: envMock.TELEGRAM_BOT_USERNAME ?? null,
+    botToken: envMock.R_TELEGRAM_BOT_TOKEN ?? null,
+    webhookSecret: envMock.R_TELEGRAM_WEBHOOK_SECRET ?? null,
+    botUsername: envMock.R_TELEGRAM_BOT_USERNAME ?? null,
   })),
 }));
 
@@ -332,10 +332,10 @@ describe('Telegram webhook handler', () => {
     telegramMappingsFindFirstMock.mockReset();
     consumeLinkCodeMock.mockReset();
 
-    envMock.ROOMOTE_APP_URL = 'https://app.example.com';
-    envMock.TELEGRAM_BOT_TOKEN = 'bot-token';
-    envMock.TELEGRAM_BOT_USERNAME = 'roomote_bot';
-    envMock.TELEGRAM_WEBHOOK_SECRET = 'secret';
+    envMock.R_APP_URL = 'https://app.example.com';
+    envMock.R_TELEGRAM_BOT_TOKEN = 'bot-token';
+    envMock.R_TELEGRAM_BOT_USERNAME = 'roomote_bot';
+    envMock.R_TELEGRAM_WEBHOOK_SECRET = 'secret';
     envMock.TRPC_URL = 'https://api.example.com';
     redisSetMock.mockResolvedValue('OK');
     redisDelMock.mockResolvedValue(1);

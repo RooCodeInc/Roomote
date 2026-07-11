@@ -542,7 +542,7 @@ describe('SourceControl settings', () => {
       { provider: 'gitea', configSatisfied: true },
       // configSatisfied covers required fields only, so ADO stays
       // unconfigured even when the optional ADO_TENANT_ID is satisfied via
-      // the ROOMOTE_AUTH_MICROSOFT_TENANT_ID fallback.
+      // the R_MICROSOFT_TENANT_ID fallback.
       { provider: 'ado', configSatisfied: false },
     ];
 

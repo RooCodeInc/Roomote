@@ -400,12 +400,10 @@ describe('ModelSettingsSection', () => {
     expect(screen.queryByText('Env-managed')).toBeNull();
     expect(screen.queryByText('Reasoning env-managed')).toBeNull();
     expect(
-      screen.getByLabelText('Default coding model is managed by ROOMOTE_MODEL'),
+      screen.getByLabelText('Default coding model is managed by R_MODEL'),
     ).toBeInTheDocument();
     expect(
-      screen.getByLabelText(
-        'Planning model is managed by ROOMOTE_PLANNING_MODEL',
-      ),
+      screen.getByLabelText('Planning model is managed by R_PLANNING_MODEL'),
     ).toBeInTheDocument();
   });
 
@@ -431,12 +429,12 @@ describe('ModelSettingsSection', () => {
     expect(screen.queryByText('Reasoning env-managed')).toBeNull();
     expect(
       screen.getByLabelText(
-        'Default coding model reasoning is managed by ROOMOTE_MODEL_REASONING_EFFORT',
+        'Default coding model reasoning is managed by R_MODEL_REASONING_EFFORT',
       ),
     ).toBeInTheDocument();
     expect(
       screen.getByLabelText(
-        'Planning model reasoning is managed by ROOMOTE_PLANNING_MODEL_REASONING_EFFORT',
+        'Planning model reasoning is managed by R_PLANNING_MODEL_REASONING_EFFORT',
       ),
     ).toBeInTheDocument();
   });
@@ -455,13 +453,11 @@ describe('ModelSettingsSection', () => {
       ),
     ).toBeInTheDocument();
     expect(
-      screen.queryByLabelText(
-        'Default coding model is managed by ROOMOTE_MODEL',
-      ),
+      screen.queryByLabelText('Default coding model is managed by R_MODEL'),
     ).not.toBeInTheDocument();
     expect(
       screen.queryByLabelText(
-        'Default coding model reasoning is managed by ROOMOTE_MODEL_REASONING_EFFORT',
+        'Default coding model reasoning is managed by R_MODEL_REASONING_EFFORT',
       ),
     ).not.toBeInTheDocument();
   });

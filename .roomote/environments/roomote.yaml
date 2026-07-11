@@ -45,7 +45,7 @@ repositories:
         timeout: 600
         continue_on_error: true
       - name: Write local env overrides
-        run: printf 'DATABASE_URL=postgresql://postgres@localhost:5432/roomote_development\nREDIS_URL=redis://localhost:16379\nAPP_ENV=development\n' > .env.local
+        run: printf 'DATABASE_URL=postgresql://postgres@localhost:5432/roomote_development\nREDIS_URL=redis://localhost:16379\nR_APP_ENV=development\n' > .env.local
         timeout: 600
         continue_on_error: false
       - name: Create development database
@@ -65,7 +65,7 @@ repositories:
         timeout: 600
         continue_on_error: false
       - name: Write test environment file
-        run: printf 'DATABASE_URL=postgresql://postgres@localhost:5432/roomote_test\nNODE_ENV=test\nAPP_ENV=development\nROOMOTE_APP_URL=http://localhost:3000\n' > .env.test
+        run: printf 'DATABASE_URL=postgresql://postgres@localhost:5432/roomote_test\nNODE_ENV=test\nR_APP_ENV=development\nR_APP_URL=http://localhost:3000\n' > .env.test
         timeout: 600
         continue_on_error: false
       - name: Apply test database schema
@@ -83,25 +83,25 @@ repositories:
         timeout: 600
         continue_on_error: true
       - name: Start API server
-        run: PORT=13001 APP_ENV=development pnpm --filter @roomote/api dev
+        run: PORT=13001 R_APP_ENV=development pnpm --filter @roomote/api dev
         timeout: 600
         continue_on_error: true
         detached: true
         logfile: /tmp/roomote-api.log
       - name: Start Next.js web dev server
-        run: PORT=3000 APP_ENV=development pnpm --filter @roomote/web dev
+        run: PORT=3000 R_APP_ENV=development pnpm --filter @roomote/web dev
         timeout: 600
         continue_on_error: false
         detached: true
         logfile: /tmp/roomote-web.log
       - name: Start BullMQ worker
-        run: PORT=13002 APP_ENV=development pnpm --filter @roomote/bullmq dev
+        run: PORT=13002 R_APP_ENV=development pnpm --filter @roomote/bullmq dev
         timeout: 600
         continue_on_error: true
         detached: true
         logfile: /tmp/roomote-bullmq.log
       - name: Start controller
-        run: APP_ENV=development TRPC_URL="${ROOMOTE_API_HOST:-http://localhost:13001}" ROOMOTE_APP_URL="${ROOMOTE_WEB_HOST:-http://localhost:3000}" ROOMOTE_PUBLIC_URL="${ROOMOTE_WEB_HOST:-http://localhost:3000}" pnpm --filter @roomote/controller dev
+        run: R_APP_ENV=development TRPC_URL="${ROOMOTE_API_HOST:-http://localhost:13001}" R_APP_URL="${ROOMOTE_WEB_HOST:-http://localhost:3000}" R_PUBLIC_URL="${ROOMOTE_WEB_HOST:-http://localhost:3000}" pnpm --filter @roomote/controller dev
         timeout: 600
         continue_on_error: true
         detached: true

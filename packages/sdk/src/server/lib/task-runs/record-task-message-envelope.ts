@@ -154,7 +154,7 @@ function getPlatformIssueReportFromToolPayload(
 }
 
 function buildPlatformIssueTaskUrl(taskId: string): string {
-  const url = new URL(`/task/${taskId}`, process.env.ROOMOTE_APP_URL);
+  const url = new URL(`/task/${taskId}`, process.env.R_APP_URL);
 
   url.searchParams.set('utm_source', 'slack');
   url.searchParams.set('utm_medium', 'integration');
@@ -305,7 +305,7 @@ function getRequestedDeploymentEnvVarsFromToolResult(
 }
 
 function buildSlackWebPathUrl(webPath: string, campaign: string): string {
-  const url = new URL(webPath, process.env.ROOMOTE_APP_URL);
+  const url = new URL(webPath, process.env.R_APP_URL);
 
   url.searchParams.set('utm_source', 'slack');
   url.searchParams.set('utm_medium', 'link');

@@ -10,15 +10,15 @@ describe('CONTROL_PLANE_ENV_VAR_NAMES', () => {
     for (const name of [
       'MODAL_TOKEN_SECRET',
       'E2B_API_KEY',
-      'GITHUB_APP_PRIVATE_KEY',
-      'GITHUB_WEBHOOK_SECRET',
+      'R_GITHUB_APP_PRIVATE_KEY',
+      'R_GITHUB_WEBHOOK_SECRET',
       'GITLAB_WEBHOOK_SECRET',
       'GITLAB_CLIENT_SECRET',
-      'ROOMOTE_AUTH_MICROSOFT_CLIENT_SECRET',
-      'SLACK_SIGNING_SECRET',
-      'TEAMS_BOT_APP_PASSWORD',
-      'TELEGRAM_BOT_TOKEN',
-      'LINEAR_CLIENT_SECRET',
+      'R_MICROSOFT_CLIENT_SECRET',
+      'R_SLACK_SIGNING_SECRET',
+      'R_TEAMS_BOT_APP_PASSWORD',
+      'R_TELEGRAM_BOT_TOKEN',
+      'R_LINEAR_CLIENT_SECRET',
       'ENCRYPTION_KEY',
       'JOB_AUTH_PRIVATE_KEY',
       'DASHBOARD_PASSWORD',
@@ -31,8 +31,8 @@ describe('CONTROL_PLANE_ENV_VAR_NAMES', () => {
 
   it('includes non-secret provider identifiers for defense-in-depth', () => {
     for (const name of [
-      'GITHUB_APP_ID',
-      'GITHUB_CLIENT_ID',
+      'R_GITHUB_APP_ID',
+      'R_GITHUB_CLIENT_ID',
       'GITLAB_CLIENT_ID',
       'SLACK_APP_ID',
     ]) {

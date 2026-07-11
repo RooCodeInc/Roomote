@@ -23,7 +23,7 @@
 #   the raw socket; the controller reaches its allowed API sections over the
 #   docker-api network. Hosted sandboxes (modal/e2b/daytona) are a config-only
 #   swap; see "Task execution" in README.md.
-# - No openssl provisioning step. `ROOMOTE_AUTO_GENERATE_KEYS=true` makes
+# - No openssl provisioning step. `R_AUTO_GENERATE_KEYS=true` makes
 #   Roomote generate the `JOB_AUTH_*`/`PREVIEW_AUTH_*` P-256 keypairs at
 #   first boot and persist them encrypted (with `ENCRYPTION_KEY`) in
 #   Postgres.
@@ -44,9 +44,9 @@ x-roomote-app-image: &roomote-app-image ghcr.io/roocodeinc/roomote-app:develop
 # Shared by every app service. Coolify resolves the same magic variable to
 # the same generated value in each service of this resource.
 x-roomote-shared-env: &roomote-shared-env
-  APP_ENV: production
+  R_APP_ENV: production
   ROOMOTE_DOCKER_LOAD_ENV_FILE: 'false'
-  ROOMOTE_AUTO_GENERATE_KEYS: 'true'
+  R_AUTO_GENERATE_KEYS: 'true'
   ENCRYPTION_KEY: ${SERVICE_BASE64_64_ENCRYPTIONKEY}
   ARTIFACT_SIGNING_KEY: ${SERVICE_BASE64_64_ARTIFACTSIGNING}
   DASHBOARD_PASSWORD: ${SERVICE_PASSWORD_DASHBOARD}
@@ -59,8 +59,8 @@ x-roomote-shared-env: &roomote-shared-env
   DEFAULT_COMPUTE_PROVIDER: docker
   DATABASE_URL: postgres://postgres:${SERVICE_PASSWORD_POSTGRES}@postgres:5432/roomote
   REDIS_URL: redis://redis:6379
-  ROOMOTE_APP_URL: ${SERVICE_URL_WEB}
-  ROOMOTE_PUBLIC_URL: ${SERVICE_URL_WEB}
+  R_APP_URL: ${SERVICE_URL_WEB}
+  R_PUBLIC_URL: ${SERVICE_URL_WEB}
   TRPC_URL: ${SERVICE_URL_API}
   S3_ENDPOINT: http://minio:9000
   S3_PRESIGN_ENDPOINT: ${SERVICE_URL_MINIO}

@@ -187,10 +187,10 @@ export function StepAuthEnvVars({
       ? 'https://your-deployment-url'
       : window.location.origin;
   const teamsBotAppIdField = selectedProvider?.fields.find(
-    (field) => field.envVarName === 'TEAMS_BOT_APP_ID',
+    (field) => field.envVarName === 'R_TEAMS_BOT_APP_ID',
   );
   const teamsBotNameField = selectedProvider?.fields.find(
-    (field) => field.envVarName === 'TEAMS_BOT_NAME',
+    (field) => field.envVarName === 'R_TEAMS_BOT_NAME',
   );
   const enteredTeamsBotAppId =
     isMicrosoftProvider && teamsBotAppIdField
@@ -214,8 +214,8 @@ export function StepAuthEnvVars({
   const teamsBotAppIdStored = isMicrosoftProvider
     ? selectedProvider.fields.some(
         (field) =>
-          (field.envVarName === 'TEAMS_BOT_APP_ID' ||
-            field.envVarName === 'ROOMOTE_AUTH_MICROSOFT_CLIENT_ID') &&
+          (field.envVarName === 'R_TEAMS_BOT_APP_ID' ||
+            field.envVarName === 'R_MICROSOFT_CLIENT_ID') &&
           (field.runtimeSatisfied || field.savedSatisfied),
       )
     : false;

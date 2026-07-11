@@ -27,7 +27,7 @@ other PaaS paths, see [deploy/railway](../railway/README.md) and
   credentials. The Blueprint sets `EXCLUDED_COMPUTE_PROVIDERS=docker` so the
   unusable provider never appears in setup or sandbox selection.
 - **No openssl provisioning step.** The Blueprint sets
-  `ROOMOTE_AUTO_GENERATE_KEYS=true`, so Roomote generates the `JOB_AUTH_*` /
+  `R_AUTO_GENERATE_KEYS=true`, so Roomote generates the `JOB_AUTH_*` /
   `PREVIEW_AUTH_*` P-256 keypairs at first boot and persists them encrypted
   (with `ENCRYPTION_KEY`) in Postgres. Every other secret is a
   `generateValue: true` variable that Render generates at deploy time.
@@ -43,7 +43,7 @@ other PaaS paths, see [deploy/railway](../railway/README.md) and
   `https://<hostname>` string, so each app service receives host-only
   references (`ROOMOTE_WEB_HOST`, `ROOMOTE_API_HOST`, `ROOMOTE_MINIO_HOST`,
   `ROOMOTE_MINIO_HOSTPORT`) and the image's entrypoint dispatcher derives
-  the URL-shaped variables (`ROOMOTE_APP_URL`, `TRPC_URL`, `S3_ENDPOINT`,
+  the URL-shaped variables (`R_APP_URL`, `TRPC_URL`, `S3_ENDPOINT`,
   `S3_PRESIGN_ENDPOINT`) from them when they are unset.
 - **The setup wizard is token-gated by default.** `onrender.com` domains are
   publicly reachable, so the Blueprint generates `SETUP_TOKEN`. Copy it from
@@ -177,9 +177,9 @@ under Environment Groups in the Render dashboard, where you can read
 `SETUP_TOKEN` and `DASHBOARD_PASSWORD` after the first deploy):
 
 ```sh
-APP_ENV=production
+R_APP_ENV=production
 ROOMOTE_DOCKER_LOAD_ENV_FILE=false
-ROOMOTE_AUTO_GENERATE_KEYS=true
+R_AUTO_GENERATE_KEYS=true
 ENCRYPTION_KEY=<generateValue>
 ARTIFACT_SIGNING_KEY=<generateValue>
 DASHBOARD_PASSWORD=<generateValue>
@@ -209,7 +209,7 @@ and the image's entrypoint dispatcher composes the URL-shaped values from
 those host references at startup (explicitly set values always win):
 
 ```sh
-ROOMOTE_APP_URL=https://$ROOMOTE_WEB_HOST
+R_APP_URL=https://$ROOMOTE_WEB_HOST
 TRPC_URL=https://$ROOMOTE_API_HOST
 S3_ENDPOINT=http://$ROOMOTE_MINIO_HOSTPORT
 S3_PRESIGN_ENDPOINT=https://$ROOMOTE_MINIO_HOST
@@ -227,9 +227,9 @@ to fetching GitHub worker releases, which do not exist for `develop` builds.
 
 Notes:
 
-- `ROOMOTE_APP_URL` is composed from the web service's hostname — it is the
-  origin users browse. Do not set `ROOMOTE_PUBLIC_URL` — it is optional and
-  the app falls back to `ROOMOTE_APP_URL` everywhere it would apply. See
+- `R_APP_URL` is composed from the web service's hostname — it is the
+  origin users browse. Do not set `R_PUBLIC_URL` — it is optional and
+  the app falls back to `R_APP_URL` everywhere it would apply. See
   [Attaching a custom domain](#attaching-a-custom-domain).
 - Leave `DOCKER_WORKER_IMAGE` and `MODAL_BASE_IMAGE_REF` **unset**. The app
   derives both from the `RELEASE_VERSION` baked into the running image, so
@@ -242,7 +242,7 @@ Notes:
   are stored encrypted in Postgres. Setting them as env vars still works
   and takes precedence, but is unnecessary.
 - Leave `JOB_AUTH_*` and `PREVIEW_AUTH_*` unset —
-  `ROOMOTE_AUTO_GENERATE_KEYS=true` manages them. If you later provide
+  `R_AUTO_GENERATE_KEYS=true` manages them. If you later provide
   explicit env values, they take precedence over the persisted keypairs.
 - Leave `PREVIEW_PROXY_BASE_URL` and `PREVIEW_DOMAINS` unset unless you
   enable live previews. Roomote boots without them; previews report as not
@@ -277,7 +277,7 @@ allowed to create buckets (the api only logs a warning when creation fails).
 3. Create the founding admin account (email/password works immediately;
    Slack or Microsoft sign-in can be added later).
 4. Connect GitHub with **Create GitHub App** — the manifest flow derives the
-   callback and webhook URLs from `ROOMOTE_APP_URL` and `TRPC_URL`, so no
+   callback and webhook URLs from `R_APP_URL` and `TRPC_URL`, so no
    manual URL entry is needed.
 5. Enter the sandbox provider credentials (Modal token pair for the default)
    and the model provider key when the wizard asks. When swapping to E2B or
@@ -289,14 +289,14 @@ allowed to create buckets (the api only logs a warning when creation fails).
 
 ## Attaching a custom domain
 
-The Blueprint boots on `onrender.com` domains, and `ROOMOTE_APP_URL` — the
+The Blueprint boots on `onrender.com` domains, and `R_APP_URL` — the
 origin users browse — is composed from the web service's
 `RENDER_EXTERNAL_HOSTNAME`. Render does **not** change that variable when
 you attach a custom domain (it is always the service's `onrender.com`
 hostname), so the app keeps treating the generated domain as canonical. The
 symptom is a working dashboard that rejects signup, login, and OAuth flows
 with `403 {"error":"Invalid origin"}`: the browser sends the custom domain
-as its `Origin`, and the auth layer only trusts `ROOMOTE_APP_URL`.
+as its `Origin`, and the auth layer only trusts `R_APP_URL`.
 
 The explicit fix:
 

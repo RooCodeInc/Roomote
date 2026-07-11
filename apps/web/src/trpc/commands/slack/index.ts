@@ -94,33 +94,25 @@ function assertAdminResult(auth: UserAuthSuccess) {
 
 async function resolveSlackOAuthConfig() {
   const deploymentEnvVars = await resolveEffectiveDeploymentEnvVars();
-  const readConfiguredValue = (...keys: string[]) => {
-    for (const key of keys) {
-      const runtimeValue = process.env[key]?.trim();
+  const readConfiguredValue = (key: string) => {
+    const runtimeValue = process.env[key]?.trim();
 
-      if (runtimeValue) {
-        return runtimeValue;
-      }
+    if (runtimeValue) {
+      return runtimeValue;
+    }
 
-      const deploymentValue = deploymentEnvVars[key]?.trim();
+    const deploymentValue = deploymentEnvVars[key]?.trim();
 
-      if (deploymentValue) {
-        return deploymentValue;
-      }
+    if (deploymentValue) {
+      return deploymentValue;
     }
 
     return '';
   };
 
   return {
-    clientId: readConfiguredValue(
-      'SLACK_CLIENT_ID',
-      'ROOMOTE_AUTH_SLACK_CLIENT_ID',
-    ),
-    clientSecret: readConfiguredValue(
-      'SLACK_CLIENT_SECRET',
-      'ROOMOTE_AUTH_SLACK_CLIENT_SECRET',
-    ),
+    clientId: readConfiguredValue('R_SLACK_CLIENT_ID'),
+    clientSecret: readConfiguredValue('R_SLACK_CLIENT_SECRET'),
     appId: readConfiguredValue('SLACK_APP_ID'),
   };
 }

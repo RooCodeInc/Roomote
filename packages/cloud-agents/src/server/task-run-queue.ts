@@ -273,9 +273,9 @@ function resolveCodeReviewModelId(
   persistedConfig: import('@roomote/types').DeploymentModelConfig,
 ): string | null {
   const envCodeReviewModel = isConfiguredEnvValue(
-    process.env.ROOMOTE_CODE_REVIEW_MODEL,
+    process.env.R_CODE_REVIEW_MODEL,
   )
-    ? process.env.ROOMOTE_CODE_REVIEW_MODEL!.trim()
+    ? process.env.R_CODE_REVIEW_MODEL!.trim()
     : null;
 
   return envCodeReviewModel ?? persistedConfig.roomoteCodeReviewModel;

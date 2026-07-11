@@ -23,8 +23,8 @@ vi.mock('@roomote/sdk/server', () => ({
 
 vi.mock('@roomote/env', () => ({
   Env: {
-    TEAMS_BOT_APP_ID: 'teams-app-id',
-    TEAMS_BOT_APP_PASSWORD: 'teams-app-password',
+    R_TEAMS_BOT_APP_ID: 'teams-app-id',
+    R_TEAMS_BOT_APP_PASSWORD: 'teams-app-password',
   },
 }));
 

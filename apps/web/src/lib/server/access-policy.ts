@@ -163,7 +163,7 @@ type SignInAccessDecision =
  * invite token, and — as the system invite — anyone presenting a valid
  * SETUP_TOKEN while initial deployment setup remains open (or, in local
  * development only, signing in while setup is open without one). The
- * ROOMOTE_ALLOWED_EMAILS env var stays an additional operator-owned
+ * R_ALLOWED_EMAILS env var stays an additional operator-owned
  * restriction on top.
  */
 export async function evaluateSignInAccess({
@@ -173,7 +173,7 @@ export async function evaluateSignInAccess({
   userId: string;
   email: string | null | undefined;
 }): Promise<SignInAccessDecision> {
-  if (!isRoomoteEmailAllowed(email, Env.ROOMOTE_ALLOWED_EMAILS)) {
+  if (!isRoomoteEmailAllowed(email, Env.R_ALLOWED_EMAILS)) {
     return { allowed: false };
   }
 
@@ -266,7 +266,7 @@ export async function isNewAuthUserEmailAllowed(
   email: string | null | undefined,
   { isCredentialSignUp = false }: { isCredentialSignUp?: boolean } = {},
 ): Promise<boolean> {
-  if (!isRoomoteEmailAllowed(email, Env.ROOMOTE_ALLOWED_EMAILS)) {
+  if (!isRoomoteEmailAllowed(email, Env.R_ALLOWED_EMAILS)) {
     return false;
   }
 

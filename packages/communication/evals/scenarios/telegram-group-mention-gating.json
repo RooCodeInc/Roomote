@@ -1,6 +1,6 @@
 {
   "name": "telegram-group-mention-gating",
-  "description": "In a group chat, a message without a bot mention must be ignored while a subsequent @roomote_mock_bot mention becomes task entry. Requires TELEGRAM_BOT_USERNAME=roomote_mock_bot on the API server.",
+  "description": "In a group chat, a message without a bot mention must be ignored while a subsequent @roomote_mock_bot mention becomes task entry. Requires R_TELEGRAM_BOT_USERNAME=roomote_mock_bot on the API server.",
   "criteria": [
     "The bot posted no reply to the first (unmentioned) group message.",
     "The bot acknowledged or replied to the second message that mentions @roomote_mock_bot in chat -100222000222.",

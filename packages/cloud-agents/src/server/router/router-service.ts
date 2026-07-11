@@ -20,7 +20,7 @@ import type {
   RoutingTaskModelSelection,
   WorkspaceResponse,
 } from './types';
-import { ROOMOTE_SMALL_MODEL_LABEL, PLATFORM_WORKSPACE_VALUE } from './types';
+import { R_SMALL_MODEL_LABEL, PLATFORM_WORKSPACE_VALUE } from './types';
 import { gatherContextFromConfiguredMcps } from './mcp-gather';
 import { callRouterMcpTool } from './mcp-tool-call';
 import { FOLLOWUP_PROMPT } from './prompts/followup-prompt';
@@ -329,8 +329,7 @@ async function runRoutingDecision(
     forceDisablePlatformWorkspace?: boolean;
   },
 ): Promise<InternalRoutingResult> {
-  const routingModel =
-    context.routingModel?.trim() || ROOMOTE_SMALL_MODEL_LABEL;
+  const routingModel = context.routingModel?.trim() || R_SMALL_MODEL_LABEL;
 
   try {
     const promptContext = context;
@@ -581,8 +580,7 @@ export async function routeTask(
 export async function routeGitHubTask(
   context: RoutingContext,
 ): Promise<GitHubRoutingDecision> {
-  const routingModel =
-    context.routingModel?.trim() || ROOMOTE_SMALL_MODEL_LABEL;
+  const routingModel = context.routingModel?.trim() || R_SMALL_MODEL_LABEL;
 
   if (context.source.type !== 'github') {
     return {

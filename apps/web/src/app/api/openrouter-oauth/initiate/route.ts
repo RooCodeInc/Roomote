@@ -33,7 +33,7 @@ function withSetupRedirect(
 
 export async function GET() {
   const webEnv = await bootstrapWebRuntimeEnv();
-  const webUrl = webEnv.ROOMOTE_APP_URL;
+  const webUrl = webEnv.R_APP_URL;
 
   const authResult = await authorize();
   if (!authResult.success || !authResult.isAdmin) {

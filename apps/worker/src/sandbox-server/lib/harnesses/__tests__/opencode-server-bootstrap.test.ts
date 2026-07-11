@@ -58,8 +58,8 @@ describe('opencode-server bootstrap', () => {
   ): Record<string, string> {
     return {
       HOME: homeDir,
-      ROOMOTE_MODEL: 'test-provider/main-model',
-      ROOMOTE_SMALL_MODEL: 'test-provider/small-model',
+      R_MODEL: 'test-provider/main-model',
+      R_SMALL_MODEL: 'test-provider/small-model',
       PROVIDER_API_KEY: 'provider-key',
     };
   }
@@ -305,7 +305,7 @@ describe('opencode-server bootstrap', () => {
     const { commandEnv: runtimeEnv } = await prepareOpenCodeCommandEnv({
       runtimeEnv: {
         ...createDirectHarnessRuntimeEnv(homeDir),
-        ROOMOTE_VISION_MODEL: 'test-provider/vision-model',
+        R_VISION_MODEL: 'test-provider/vision-model',
       },
       workspacePath: '/tmp/workspace',
       logger: createLogger(),
@@ -349,7 +349,7 @@ describe('opencode-server bootstrap', () => {
     expect(fs.readFileSync(visualModelInstructionsPath, 'utf8')).toContain(
       'visual',
     );
-    expect(runtimeEnv).not.toHaveProperty('ROOMOTE_VISION_MODEL');
+    expect(runtimeEnv).not.toHaveProperty('R_VISION_MODEL');
   });
 
   it('configures a hidden judge subagent when the code review model is configured', async () => {
@@ -361,8 +361,8 @@ describe('opencode-server bootstrap', () => {
     const { commandEnv: runtimeEnv } = await prepareOpenCodeCommandEnv({
       runtimeEnv: {
         ...createDirectHarnessRuntimeEnv(homeDir),
-        ROOMOTE_CODE_REVIEW_MODEL: 'test-provider/review-model',
-        ROOMOTE_CODE_REVIEW_MODEL_REASONING_EFFORT: 'high',
+        R_CODE_REVIEW_MODEL: 'test-provider/review-model',
+        R_CODE_REVIEW_MODEL_REASONING_EFFORT: 'high',
       },
       workspacePath: '/tmp/workspace',
       logger: createLogger(),
@@ -419,9 +419,9 @@ describe('opencode-server bootstrap', () => {
     expect(fs.readFileSync(judgeModelInstructionsPath, 'utf8')).toContain(
       'Keep judge tool use minimal and targeted.',
     );
-    expect(runtimeEnv).not.toHaveProperty('ROOMOTE_CODE_REVIEW_MODEL');
+    expect(runtimeEnv).not.toHaveProperty('R_CODE_REVIEW_MODEL');
     expect(runtimeEnv).not.toHaveProperty(
-      'ROOMOTE_CODE_REVIEW_MODEL_REASONING_EFFORT',
+      'R_CODE_REVIEW_MODEL_REASONING_EFFORT',
     );
   });
 
@@ -562,8 +562,8 @@ describe('opencode-server bootstrap', () => {
     const { commandEnv: runtimeEnv } = await prepareOpenCodeCommandEnv({
       runtimeEnv: {
         ...createDirectHarnessRuntimeEnv(homeDir),
-        ROOMOTE_PLANNING_MODEL: 'openrouter/anthropic/claude-opus-4.7',
-        ROOMOTE_PLANNING_MODEL_REASONING_EFFORT: 'high',
+        R_PLANNING_MODEL: 'openrouter/anthropic/claude-opus-4.7',
+        R_PLANNING_MODEL_REASONING_EFFORT: 'high',
       },
       workspacePath: '/tmp/workspace',
       logger: createLogger(),
@@ -584,10 +584,8 @@ describe('opencode-server bootstrap', () => {
     // The built-in plan agent no longer receives a Roomote override.
     expect(baseConfig.agent?.plan).toBeUndefined();
     expect(config.agent).toEqual(baseConfig.agent);
-    expect(runtimeEnv).not.toHaveProperty('ROOMOTE_PLANNING_MODEL');
-    expect(runtimeEnv).not.toHaveProperty(
-      'ROOMOTE_PLANNING_MODEL_REASONING_EFFORT',
-    );
+    expect(runtimeEnv).not.toHaveProperty('R_PLANNING_MODEL');
+    expect(runtimeEnv).not.toHaveProperty('R_PLANNING_MODEL_REASONING_EFFORT');
   });
 
   it('applies planning reasoning to the architect agent when no planning model is configured', async () => {
@@ -599,7 +597,7 @@ describe('opencode-server bootstrap', () => {
     await prepareOpenCodeCommandEnv({
       runtimeEnv: {
         ...createDirectHarnessRuntimeEnv(homeDir),
-        ROOMOTE_PLANNING_MODEL_REASONING_EFFORT: 'high',
+        R_PLANNING_MODEL_REASONING_EFFORT: 'high',
       },
       workspacePath: '/tmp/workspace',
       logger: createLogger(),
@@ -629,10 +627,10 @@ describe('opencode-server bootstrap', () => {
     const { commandEnv: runtimeEnv } = await prepareOpenCodeCommandEnv({
       runtimeEnv: {
         ...createDirectHarnessRuntimeEnv(homeDir),
-        ROOMOTE_VISION_MODEL: 'openrouter/openai/gpt-vision',
-        ROOMOTE_MODEL_REASONING_EFFORT: 'high',
-        ROOMOTE_SMALL_MODEL_REASONING_EFFORT: 'low',
-        ROOMOTE_VISION_MODEL_REASONING_EFFORT: 'medium',
+        R_VISION_MODEL: 'openrouter/openai/gpt-vision',
+        R_MODEL_REASONING_EFFORT: 'high',
+        R_SMALL_MODEL_REASONING_EFFORT: 'low',
+        R_VISION_MODEL_REASONING_EFFORT: 'medium',
       },
       workspacePath: '/tmp/workspace',
       logger: createLogger(),
@@ -656,15 +654,11 @@ describe('opencode-server bootstrap', () => {
       reasoning: { effort: 'medium' },
     });
 
-    expect(runtimeEnv).not.toHaveProperty('ROOMOTE_MODEL_REASONING_EFFORT');
+    expect(runtimeEnv).not.toHaveProperty('R_MODEL_REASONING_EFFORT');
+    expect(runtimeEnv).not.toHaveProperty('R_SMALL_MODEL_REASONING_EFFORT');
+    expect(runtimeEnv).not.toHaveProperty('R_VISION_MODEL_REASONING_EFFORT');
     expect(runtimeEnv).not.toHaveProperty(
-      'ROOMOTE_SMALL_MODEL_REASONING_EFFORT',
-    );
-    expect(runtimeEnv).not.toHaveProperty(
-      'ROOMOTE_VISION_MODEL_REASONING_EFFORT',
-    );
-    expect(runtimeEnv).not.toHaveProperty(
-      'ROOMOTE_CODE_REVIEW_MODEL_REASONING_EFFORT',
+      'R_CODE_REVIEW_MODEL_REASONING_EFFORT',
     );
   });
 
@@ -677,9 +671,9 @@ describe('opencode-server bootstrap', () => {
     const { commandEnv: runtimeEnv, model } = await prepareOpenCodeCommandEnv({
       runtimeEnv: {
         HOME: homeDir,
-        ROOMOTE_MODEL: 'openrouter/z-ai/glm-5.2:nitro',
-        ROOMOTE_SMALL_MODEL: 'openrouter/openai/gpt-5.4-mini:floor',
-        ROOMOTE_MODEL_REASONING_EFFORT: 'high',
+        R_MODEL: 'openrouter/z-ai/glm-5.2:nitro',
+        R_SMALL_MODEL: 'openrouter/openai/gpt-5.4-mini:floor',
+        R_MODEL_REASONING_EFFORT: 'high',
       },
       workspacePath: '/tmp/workspace',
       logger: createLogger(),
@@ -763,7 +757,7 @@ describe('opencode-server bootstrap', () => {
     const { commandEnv: runtimeEnv, model } = await prepareOpenCodeCommandEnv({
       runtimeEnv: {
         HOME: homeDir,
-        ROOMOTE_MODEL: 'openrouter/z-ai/glm-5.2:nitro',
+        R_MODEL: 'openrouter/z-ai/glm-5.2:nitro',
       },
       workspacePath: '/tmp/workspace',
       logger: createLogger(),
@@ -794,9 +788,9 @@ describe('opencode-server bootstrap', () => {
     const { commandEnv: runtimeEnv } = await prepareOpenCodeCommandEnv({
       runtimeEnv: {
         ...createDirectHarnessRuntimeEnv(homeDir),
-        ROOMOTE_CODE_REVIEW_MODEL: 'test-provider/review-model',
-        ROOMOTE_MODEL_REASONING_EFFORT: 'medium',
-        ROOMOTE_CODE_REVIEW_MODEL_REASONING_EFFORT: 'xhigh',
+        R_CODE_REVIEW_MODEL: 'test-provider/review-model',
+        R_MODEL_REASONING_EFFORT: 'medium',
+        R_CODE_REVIEW_MODEL_REASONING_EFFORT: 'xhigh',
       },
       workspacePath: '/tmp/workspace',
       logger: createLogger(),
@@ -811,7 +805,7 @@ describe('opencode-server bootstrap', () => {
       'review-model': { options: { reasoningEffort: 'xhigh' } },
       'main-model': { options: { reasoningEffort: 'medium' } },
     });
-    expect(runtimeEnv).not.toHaveProperty('ROOMOTE_CODE_REVIEW_MODEL');
+    expect(runtimeEnv).not.toHaveProperty('R_CODE_REVIEW_MODEL');
   });
 
   it('does not add a visual subagent when the vision model matches the coding model', async () => {
@@ -823,7 +817,7 @@ describe('opencode-server bootstrap', () => {
     const { commandEnv: runtimeEnv } = await prepareOpenCodeCommandEnv({
       runtimeEnv: {
         ...createDirectHarnessRuntimeEnv(homeDir),
-        ROOMOTE_VISION_MODEL: 'test-provider/main-model',
+        R_VISION_MODEL: 'test-provider/main-model',
       },
       workspacePath: '/tmp/workspace',
       logger: createLogger(),
@@ -858,7 +852,7 @@ describe('opencode-server bootstrap', () => {
       ),
     ]);
     expect(fs.existsSync(visualModelInstructionsPath)).toBe(false);
-    expect(runtimeEnv).not.toHaveProperty('ROOMOTE_VISION_MODEL');
+    expect(runtimeEnv).not.toHaveProperty('R_VISION_MODEL');
   });
 
   it('does not add a visual subagent when the vision model matches a task model override', async () => {
@@ -870,7 +864,7 @@ describe('opencode-server bootstrap', () => {
     const { commandEnv: runtimeEnv } = await prepareOpenCodeCommandEnv({
       runtimeEnv: {
         ...createDirectHarnessRuntimeEnv(homeDir),
-        ROOMOTE_VISION_MODEL: 'test-provider/override-model',
+        R_VISION_MODEL: 'test-provider/override-model',
       },
       workspacePath: '/tmp/workspace',
       model: 'test-provider/override-model',
@@ -892,7 +886,7 @@ describe('opencode-server bootstrap', () => {
     });
     expect(config.agent).toEqual(baseConfig.agent);
     expect(config.model).toBe('test-provider/override-model');
-    expect(runtimeEnv).not.toHaveProperty('ROOMOTE_VISION_MODEL');
+    expect(runtimeEnv).not.toHaveProperty('R_VISION_MODEL');
   });
 
   it('overrides the built-in explore agent when an explore model is configured', async () => {
@@ -904,8 +898,8 @@ describe('opencode-server bootstrap', () => {
     const { commandEnv: runtimeEnv } = await prepareOpenCodeCommandEnv({
       runtimeEnv: {
         ...createDirectHarnessRuntimeEnv(homeDir),
-        ROOMOTE_EXPLORE_MODEL: 'openrouter/anthropic/claude-haiku-4',
-        ROOMOTE_EXPLORE_MODEL_REASONING_EFFORT: 'high',
+        R_EXPLORE_MODEL: 'openrouter/anthropic/claude-haiku-4',
+        R_EXPLORE_MODEL_REASONING_EFFORT: 'high',
       },
       workspacePath: '/tmp/workspace',
       logger: createLogger(),
@@ -920,10 +914,8 @@ describe('opencode-server bootstrap', () => {
       options: { reasoning: { effort: 'high' } },
       tools: slackPostingToolExclusions,
     });
-    expect(runtimeEnv).not.toHaveProperty('ROOMOTE_EXPLORE_MODEL');
-    expect(runtimeEnv).not.toHaveProperty(
-      'ROOMOTE_EXPLORE_MODEL_REASONING_EFFORT',
-    );
+    expect(runtimeEnv).not.toHaveProperty('R_EXPLORE_MODEL');
+    expect(runtimeEnv).not.toHaveProperty('R_EXPLORE_MODEL_REASONING_EFFORT');
   });
 
   it('configures a visual subagent when the vision model differs from a task model override', async () => {
@@ -935,7 +927,7 @@ describe('opencode-server bootstrap', () => {
     const { commandEnv: runtimeEnv } = await prepareOpenCodeCommandEnv({
       runtimeEnv: {
         ...createDirectHarnessRuntimeEnv(homeDir),
-        ROOMOTE_VISION_MODEL: 'test-provider/main-model',
+        R_VISION_MODEL: 'test-provider/main-model',
       },
       workspacePath: '/tmp/workspace',
       model: 'test-provider/override-model',
@@ -956,7 +948,7 @@ describe('opencode-server bootstrap', () => {
     });
     expect(config.agent).toEqual(baseConfig.agent);
     expect(config.model).toBe('test-provider/override-model');
-    expect(runtimeEnv).not.toHaveProperty('ROOMOTE_VISION_MODEL');
+    expect(runtimeEnv).not.toHaveProperty('R_VISION_MODEL');
   });
 
   it('configures a hidden proof-runner subagent when a proof browser target is provided', async () => {
@@ -1092,7 +1084,7 @@ describe('opencode-server bootstrap', () => {
     const { commandEnv: runtimeEnv } = await prepareOpenCodeCommandEnv({
       runtimeEnv: {
         ...createDirectHarnessRuntimeEnv(homeDir),
-        ROOMOTE_VISION_MODEL: 'test-provider/vision-model',
+        R_VISION_MODEL: 'test-provider/vision-model',
         ROOMOTE_PROOF_BROWSER_TARGET: 'http://localhost:3000/',
       },
       workspacePath: '/tmp/workspace',
@@ -1121,8 +1113,8 @@ describe('opencode-server bootstrap', () => {
     const { commandEnv: runtimeEnv } = await prepareOpenCodeCommandEnv({
       runtimeEnv: {
         ...createDirectHarnessRuntimeEnv(homeDir),
-        ROOMOTE_VISION_MODEL: 'test-provider/vision-model',
-        ROOMOTE_EXPLORE_MODEL: 'test-provider/explore-model',
+        R_VISION_MODEL: 'test-provider/vision-model',
+        R_EXPLORE_MODEL: 'test-provider/explore-model',
         ROOMOTE_PROOF_BROWSER_TARGET: 'http://localhost:3000/',
       },
       workspacePath: '/tmp/workspace',
@@ -1166,13 +1158,13 @@ describe('opencode-server bootstrap', () => {
       await prepareOpenCodeCommandEnv({
         runtimeEnv: {
           ...createDirectHarnessRuntimeEnv(homeDir),
-          ROOMOTE_VISION_MODEL: 'vision-model-without-provider',
+          R_VISION_MODEL: 'vision-model-without-provider',
         },
         workspacePath: '/tmp/workspace',
         logger: createLogger(),
       }).catch((error: unknown) => {
         expect(String(error)).toMatch(
-          /ROOMOTE_VISION_MODEL must use provider\/model format/u,
+          /R_VISION_MODEL must use provider\/model format/u,
         );
         return null;
       }),

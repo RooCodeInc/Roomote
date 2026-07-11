@@ -12,7 +12,7 @@ import type {
 const TASK_URL_PATH_PREFIX = '/task/' as const;
 
 function getProductIconUrl(): string {
-  return `${Env.ROOMOTE_APP_URL}/android-chrome-192x192.png`;
+  return `${Env.R_APP_URL}/android-chrome-192x192.png`;
 }
 
 /**

@@ -49,7 +49,7 @@ function buildSlackRequestUserInputTaskUrl(params: {
   taskId: string | null | undefined;
   payload?: unknown;
 }): string {
-  const origin = Env.ROOMOTE_APP_URL;
+  const origin = Env.R_APP_URL;
   const payload =
     params.payload && typeof params.payload === 'object'
       ? (params.payload as { webPath?: unknown })

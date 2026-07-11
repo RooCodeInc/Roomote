@@ -79,9 +79,9 @@ COPY apps/bullmq ./apps/bullmq/
 COPY apps/preview-proxy ./apps/preview-proxy/
 COPY apps/worker ./apps/worker/
 
-ARG APP_ENV
+ARG R_APP_ENV
 ARG RELEASE_VERSION
-ENV APP_ENV=${APP_ENV}
+ENV R_APP_ENV=${R_APP_ENV}
 ENV RELEASE_VERSION=${RELEASE_VERSION}
 
 # ---------------------------------------------------------------------------
@@ -93,7 +93,7 @@ FROM base AS build-web
 ENV NODE_ENV=production
 ENV NEXT_TELEMETRY_DISABLED=1
 ENV PORT=3000
-ENV ROOMOTE_APP_URL=http://localhost:13000
+ENV R_APP_URL=http://localhost:13000
 ENV TRPC_URL=http://api:3001
 ENV DATABASE_URL=postgres://postgres:password@postgres:5432/roomote_development
 ENV REDIS_URL=redis://redis:6379
@@ -266,9 +266,9 @@ COPY .docker/run-with-dotenvx.sh ./.docker/
 COPY .docker/app/entrypoint.sh ./.docker/app/entrypoint.sh
 RUN chmod +x /roomote/.docker/app/entrypoint.sh
 
-ARG APP_ENV
+ARG R_APP_ENV
 ARG RELEASE_VERSION
-ENV APP_ENV=${APP_ENV}
+ENV R_APP_ENV=${R_APP_ENV}
 ENV RELEASE_VERSION=${RELEASE_VERSION}
 ENV NODE_ENV=production
 ENV NEXT_TELEMETRY_DISABLED=1

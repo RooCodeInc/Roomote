@@ -35,7 +35,7 @@ const OPENCODE_SDK_SERVER_READY_FETCH_TIMEOUT_MS = 1_000;
 function buildModelBackedOpenCodeConfigContent(
   env: NodeJS.ProcessEnv = process.env,
 ): string | undefined {
-  const rawModel = env.ROOMOTE_MODEL?.trim();
+  const rawModel = env.R_MODEL?.trim();
 
   if (!rawModel) {
     return undefined;
@@ -47,15 +47,15 @@ function buildModelBackedOpenCodeConfigContent(
   // contain.
   const variantAliases = new Map<string, OpenRouterVariantModelAlias>();
   const model = collectOpenRouterVariantModelAlias(variantAliases, rawModel);
-  const rawSmallModel = env.ROOMOTE_SMALL_MODEL?.trim();
+  const rawSmallModel = env.R_SMALL_MODEL?.trim();
   const smallModel = rawSmallModel
     ? collectOpenRouterVariantModelAlias(variantAliases, rawSmallModel)
     : undefined;
   const modelReasoningEffort = normalizeOptionalReasoningEffort(
-    env.ROOMOTE_MODEL_REASONING_EFFORT?.trim(),
+    env.R_MODEL_REASONING_EFFORT?.trim(),
   );
   const smallModelReasoningEffort = normalizeOptionalReasoningEffort(
-    env.ROOMOTE_SMALL_MODEL_REASONING_EFFORT?.trim(),
+    env.R_SMALL_MODEL_REASONING_EFFORT?.trim(),
   );
 
   // Reasoning levels are configured per default-model role, so they are only

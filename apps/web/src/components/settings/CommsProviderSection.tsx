@@ -420,12 +420,12 @@ function TeamsBotStatus() {
         .
       </>
     ) : (
-      'Bot configured for incoming Teams messages. Add ROOMOTE_AUTH_MICROSOFT_* env vars to enable personal account linking.'
+      'Bot configured for incoming Teams messages. Add R_MICROSOFT_* env vars to enable personal account linking.'
     )
   ) : (
     <>
-      Add TEAMS_BOT_APP_ID and TEAMS_BOT_APP_PASSWORD, then set the Azure Bot
-      messaging endpoint to{' '}
+      Add R_TEAMS_BOT_APP_ID and R_TEAMS_BOT_APP_PASSWORD, then set the Azure
+      Bot messaging endpoint to{' '}
       <span className="break-all font-mono">
         {teamsStatus?.webhookUrl ?? '/api/webhooks/teams'}
       </span>
@@ -570,10 +570,10 @@ export function CommsProviderSection({
     provider.id === 'slack' && !showManualSlackValues && !hasConfiguredValues;
 
   const teamsBotAppIdField = provider.fields.find(
-    (field) => field.envVarName === 'TEAMS_BOT_APP_ID',
+    (field) => field.envVarName === 'R_TEAMS_BOT_APP_ID',
   );
   const teamsBotNameField = provider.fields.find(
-    (field) => field.envVarName === 'TEAMS_BOT_NAME',
+    (field) => field.envVarName === 'R_TEAMS_BOT_NAME',
   );
   const enteredTeamsBotAppId =
     isMicrosoftProvider && teamsBotAppIdField
@@ -597,8 +597,8 @@ export function CommsProviderSection({
   const teamsBotAppIdStored = isMicrosoftProvider
     ? provider.fields.some(
         (field) =>
-          (field.envVarName === 'TEAMS_BOT_APP_ID' ||
-            field.envVarName === 'ROOMOTE_AUTH_MICROSOFT_CLIENT_ID') &&
+          (field.envVarName === 'R_TEAMS_BOT_APP_ID' ||
+            field.envVarName === 'R_MICROSOFT_CLIENT_ID') &&
           (field.runtimeSatisfied || field.savedSatisfied),
       )
     : false;

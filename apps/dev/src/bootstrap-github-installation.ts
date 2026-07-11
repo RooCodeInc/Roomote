@@ -27,7 +27,7 @@ function parseArguments(): ScriptOptions {
     .requiredOption('--user-id <id>', 'user ID of the installing user')
     .option(
       '--app-id <id>',
-      'GitHub App ID (defaults to GITHUB_APP_ID env var)',
+      'GitHub App ID (defaults to R_GITHUB_APP_ID env var)',
     )
     .option(
       '--repos <names>',
@@ -83,7 +83,7 @@ async function main() {
       }
       console.log(`App ID override requested: ${appId}`);
       console.log(
-        'Note: App ID override is validated but sync uses GITHUB_APP_ID from env.',
+        'Note: App ID override is validated but sync uses R_GITHUB_APP_ID from env.',
       );
     }
 

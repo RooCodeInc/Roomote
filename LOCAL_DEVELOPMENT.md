@@ -11,7 +11,7 @@ checkout. If you want to operate Roomote for a team, start with the public
 | macOS | Latest | This guide is optimized for macOS. Apple Silicon runs the task worker natively (no amd64 emulation). |
 | Docker Desktop | Latest | Provides Docker Engine and Compose for local services. |
 | mise | Latest | Manages the repository toolchain. |
-| ngrok | Latest | Optional, only when `ROOMOTE_PUBLIC_URL` uses an ngrok domain. |
+| ngrok | Latest | Optional, only when `R_PUBLIC_URL` uses an ngrok domain. |
 | OpenCode CLI | Latest | Required to run tasks and server-side model calls. Install with `npm install -g opencode-ai`. |
 | Python 3 | Latest | Required by the server-side OpenCode CLI helper. Install with `brew install python` if `python3` is missing. |
 
@@ -42,10 +42,10 @@ cp .env.local.example .env.local
 
 Useful local values:
 
-- `ROOMOTE_PUBLIC_URL` - stable public HTTPS URL for OAuth and webhook
+- `R_PUBLIC_URL` - stable public HTTPS URL for OAuth and webhook
   callbacks. If this is an ngrok domain, `pnpm dev` starts and reuses
   `ngrok http --url=<domain> 13000` for you.
-- `ROOMOTE_MODEL` - required for local tasks. Use a models.dev-style
+- `R_MODEL` - required for local tasks. Use a models.dev-style
   `provider/model` id and expose the matching provider API key.
 - source-control provider credentials - configured during `/setup`, or
   preconfigured in `.env.local` when boot-time env vars should satisfy setup.
@@ -53,7 +53,7 @@ Useful local values:
 A minimal model setup looks like this:
 
 ```sh
-ROOMOTE_MODEL=openrouter/anthropic/claude-sonnet-4
+R_MODEL=openrouter/anthropic/claude-sonnet-4
 OPENROUTER_API_KEY=...
 ```
 
@@ -71,11 +71,11 @@ communications providers, source-control callbacks, or Linear webhooks.
 
 `pnpm dev` resolves one canonical public URL before starting services:
 
-1. If `ROOMOTE_PUBLIC_URL` is set to an ngrok domain, Roomote starts or reuses
+1. If `R_PUBLIC_URL` is set to an ngrok domain, Roomote starts or reuses
    `ngrok http --url=<domain> 13000`.
-2. If `ROOMOTE_PUBLIC_URL` is set to any other HTTPS URL, Roomote uses it
+2. If `R_PUBLIC_URL` is set to any other HTTPS URL, Roomote uses it
    without starting ngrok.
-3. If `ROOMOTE_PUBLIC_URL` is missing, startup fails before services start.
+3. If `R_PUBLIC_URL` is missing, startup fails before services start.
 
 ngrok is convenient but not required. Any public HTTPS endpoint that reaches
 port `13000` works, including Cloudflare Tunnel, Tailscale Funnel, a reverse
@@ -238,7 +238,7 @@ pnpm eval:router:share
 
 Eval configs and datasets live in `packages/cloud-agents/evals/router/`.
 They are not run in CI by default. Runtime routing, title generation, and
-summaries use `ROOMOTE_SMALL_MODEL`, falling back to `ROOMOTE_MODEL`. Set
+summaries use `R_SMALL_MODEL`, falling back to `R_MODEL`. Set
 `ROUTER_EVAL_PROVIDER`, `ROUTER_FOLLOWUP_EVAL_PROVIDER`, or
 `AUTHORSHIP_RULES_EVAL_PROVIDER` to test a different promptfoo provider.
 
@@ -255,7 +255,7 @@ pnpm db:down && pnpm db:up
 
 - Start from an empty `.env.local` when debugging core local startup.
 - Copy `.env.local.example` only for overrides or integration credentials.
-- If `pnpm dev` fails while starting ngrok, check that `ROOMOTE_PUBLIC_URL`
+- If `pnpm dev` fails while starting ngrok, check that `R_PUBLIC_URL`
   matches your assigned ngrok domain and that ngrok has an auth token.
 - If task creation hangs during classification or title generation, verify
   `python3` is available and that this succeeds:

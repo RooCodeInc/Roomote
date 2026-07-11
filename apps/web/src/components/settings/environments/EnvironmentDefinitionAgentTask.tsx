@@ -590,5 +590,5 @@ function getEnvironmentDefinitionAuthFailureHint({
     return null;
   }
 
-  return 'The environment definition agent could not authenticate with the configured model provider. Check ROOMOTE_MODEL, ROOMOTE_SMALL_MODEL, ROOMOTE_VISION_MODEL, and the matching provider API key env vars, then retry.';
+  return 'The environment definition agent could not authenticate with the configured model provider. Check R_MODEL, R_SMALL_MODEL, R_VISION_MODEL, and the matching provider API key env vars, then retry.';
 }

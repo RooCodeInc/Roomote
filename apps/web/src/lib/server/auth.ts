@@ -695,7 +695,7 @@ async function createAuth(authProviderConfig: ResolvedAuthProviderConfig) {
     appName: 'Roomote',
     baseURL: getBetterAuthBaseUrlConfig({
       previewDomainsRaw: process.env.PREVIEW_DOMAINS,
-      roomoteAppUrl: Env.ROOMOTE_APP_URL,
+      roomoteAppUrl: Env.R_APP_URL,
     }),
     secret: getBetterAuthSecret(),
     database: drizzleAdapter(db, {
@@ -820,10 +820,7 @@ export async function handleAuthRequest(request: Request) {
   await bootstrapWebRuntimeEnv();
 
   const auth = await getAuth();
-  const normalizedRequest = withCanonicalForwardedProto(
-    request,
-    Env.ROOMOTE_APP_URL,
-  );
+  const normalizedRequest = withCanonicalForwardedProto(request, Env.R_APP_URL);
 
   // Expose the visitor's invite cookie to the database hooks above, which
   // otherwise have no access to the request.

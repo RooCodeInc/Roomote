@@ -455,13 +455,13 @@ describe('redactControlPlaneEnvVars', () => {
       redactControlPlaneEnvVars({
         // Control-plane secrets that must never reach the sandbox.
         ENCRYPTION_KEY: 'enc',
-        GITHUB_APP_PRIVATE_KEY: 'app-key',
+        R_GITHUB_APP_PRIVATE_KEY: 'app-key',
         JOB_AUTH_PRIVATE_KEY: 'job-key',
         MODAL_TOKEN_SECRET: 'modal',
         E2B_API_KEY: 'e2b',
         DAYTONA_API_KEY: 'daytona',
-        SLACK_SIGNING_SECRET: 'slack',
-        TELEGRAM_BOT_TOKEN: 'tg',
+        R_SLACK_SIGNING_SECRET: 'slack',
+        R_TELEGRAM_BOT_TOKEN: 'tg',
         DASHBOARD_PASSWORD: 'dash',
         DATABASE_URL: 'postgres://x',
         S3_SECRET_ACCESS_KEY: 's3',
@@ -469,9 +469,9 @@ describe('redactControlPlaneEnvVars', () => {
         GITLAB_WEBHOOK_SECRET: 'gl-webhook',
         GITLAB_CLIENT_SECRET: 'gl-client',
         // Derived from the sign-in auth catalog.
-        ROOMOTE_AUTH_MICROSOFT_CLIENT_SECRET: 'ms',
+        R_MICROSOFT_CLIENT_SECRET: 'ms',
         // Teams bot secret (hand-listed bot integration).
-        TEAMS_BOT_APP_PASSWORD: 'teams',
+        R_TEAMS_BOT_APP_PASSWORD: 'teams',
         // Legitimate task + model env that must be preserved.
         OPENAI_API_KEY: 'sk-test',
         ANTHROPIC_API_KEY: 'sk-ant',

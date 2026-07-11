@@ -20,7 +20,7 @@ Telegram has no threads: conversation continuity is inferred from **chat id (+ f
 | Mock state endpoint           | `http://127.0.0.1:3013/mock/state`                          |
 | Mock event replay endpoint    | `http://127.0.0.1:3013/mock/events`                         |
 | Example scenario              | `packages/communication/scripts/mock-telegram.example.json` |
-| Webhook secret source         | `Env.TELEGRAM_WEBHOOK_SECRET` from dotenvx                  |
+| Webhook secret source         | `Env.R_TELEGRAM_WEBHOOK_SECRET` from dotenvx                |
 | Mock bot identity             | `roomote_mock_bot` (id `7000000001`)                        |
 | Mock linked user              | Telegram user id `111000111` (`dan_mock`)                   |
 
@@ -52,13 +52,13 @@ Messages from unlinked senders are acked and dropped (`telegram_sender_not_linke
 The API resolves Telegram credentials from real env vars first (`resolveTelegramRuntimeCredentials`, cached ~30s). Set these in the API server's environment (or `.env.local`) before it starts:
 
 ```bash
-TELEGRAM_BOT_TOKEN=7000000001:mock-telegram-token   # any value; the harness accepts all tokens unless acceptedBotTokens is set
-TELEGRAM_WEBHOOK_SECRET=<any-shared-secret>          # harness reads the same var via dotenvx, so signatures match automatically
-TELEGRAM_BOT_USERNAME=roomote_mock_bot               # required for group-mention and /new@bot gating scenarios
-TELEGRAM_API_BASE_URL=http://127.0.0.1:3013          # reroutes ALL outbound Bot API calls to the harness
+R_TELEGRAM_BOT_TOKEN=7000000001:mock-telegram-token   # any value; the harness accepts all tokens unless acceptedBotTokens is set
+R_TELEGRAM_WEBHOOK_SECRET=<any-shared-secret>         # harness reads the same var via dotenvx, so signatures match automatically
+R_TELEGRAM_BOT_USERNAME=roomote_mock_bot              # required for group-mention and /new@bot gating scenarios
+TELEGRAM_API_BASE_URL=http://127.0.0.1:3013           # reroutes ALL outbound Bot API calls to the harness
 ```
 
-Without `TELEGRAM_WEBHOOK_SECRET` the webhook returns 503; with a mismatched secret it returns 401.
+Without `R_TELEGRAM_WEBHOOK_SECRET` the webhook returns 503; with a mismatched secret it returns 401.
 
 ## Step 3: Create a scenario file
 

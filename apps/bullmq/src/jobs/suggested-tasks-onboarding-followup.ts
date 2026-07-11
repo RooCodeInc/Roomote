@@ -50,7 +50,7 @@ export function buildSuggestedTasksSettingsUrl(utm?: {
   source: string;
   campaign: string;
 }): string {
-  const url = new URL('/automations', Env.ROOMOTE_APP_URL);
+  const url = new URL('/automations', Env.R_APP_URL);
 
   if (utm) {
     url.searchParams.set('utm_source', utm.source);

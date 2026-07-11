@@ -1,7 +1,7 @@
 import { NextRequest } from 'next/server';
 
 const mockEnvState = vi.hoisted(() => ({
-  ROOMOTE_APP_URL: 'https://roomote.203-0-113-7.sslip.io',
+  R_APP_URL: 'https://roomote.203-0-113-7.sslip.io',
 }));
 
 vi.mock('../env', () => ({

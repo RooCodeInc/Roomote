@@ -1,14 +1,14 @@
 import { assessBrowserOrigin } from '../browser-origin-trust';
 
 describe('assessBrowserOrigin', () => {
-  const originalAppEnv = process.env.APP_ENV;
+  const originalAppEnv = process.env.R_APP_ENV;
   const originalPreviewDomains = process.env.PREVIEW_DOMAINS;
 
   afterEach(() => {
     if (originalAppEnv === undefined) {
-      delete process.env.APP_ENV;
+      delete process.env.R_APP_ENV;
     } else {
-      process.env.APP_ENV = originalAppEnv;
+      process.env.R_APP_ENV = originalAppEnv;
     }
 
     if (originalPreviewDomains === undefined) {
@@ -20,7 +20,7 @@ describe('assessBrowserOrigin', () => {
 
   describe('in production', () => {
     beforeEach(() => {
-      process.env.APP_ENV = 'production';
+      process.env.R_APP_ENV = 'production';
     });
 
     it('trusts only the exact canonical origin', () => {
@@ -68,7 +68,7 @@ describe('assessBrowserOrigin', () => {
 
   describe('outside production', () => {
     beforeEach(() => {
-      process.env.APP_ENV = 'development';
+      process.env.R_APP_ENV = 'development';
     });
 
     it('trusts the canonical host', () => {

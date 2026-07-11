@@ -198,7 +198,7 @@ async function buildAboutMePayload(options: {
     requestedOperation: options.operation,
     product: {
       name: PRODUCT_NAME,
-      appUrl: Env.ROOMOTE_APP_URL,
+      appUrl: Env.R_APP_URL,
       docsUrl: getDefaultDocsUrl(Env.APP_ENV ?? 'development'),
     },
     deployment: {

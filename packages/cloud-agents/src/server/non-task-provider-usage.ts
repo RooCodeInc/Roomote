@@ -67,8 +67,8 @@ function parseOpenCodeConfigJson(value: string): Record<string, unknown> {
 }
 
 export function resolveOpenCodeSmallModel(): string | undefined {
-  const configuredSmallModel = process.env.ROOMOTE_SMALL_MODEL?.trim();
-  const configuredModel = process.env.ROOMOTE_MODEL?.trim();
+  const configuredSmallModel = process.env.R_SMALL_MODEL?.trim();
+  const configuredModel = process.env.R_MODEL?.trim();
 
   if (configuredSmallModel || configuredModel) {
     return configuredSmallModel || configuredModel;
@@ -203,13 +203,13 @@ async function resolveNonTaskModelRuntime(model?: string): Promise<{
 
   const resolvedModel =
     requestedModel ||
-    resolvedModelRuntimeEnv.ROOMOTE_SMALL_MODEL ||
-    resolvedModelRuntimeEnv.ROOMOTE_MODEL ||
+    resolvedModelRuntimeEnv.R_SMALL_MODEL ||
+    resolvedModelRuntimeEnv.R_MODEL ||
     resolveOpenCodeSmallModel();
 
   if (!resolvedModel) {
     throw new Error(
-      'Model configuration is required for non-task model calls. Set ROOMOTE_MODEL to a provider/model ID.',
+      'Model configuration is required for non-task model calls. Set R_MODEL to a provider/model ID.',
     );
   }
 

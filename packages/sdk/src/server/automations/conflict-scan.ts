@@ -357,7 +357,7 @@ export async function conflictScanJob(
               );
 
               try {
-                const commentBody = `I see some merge conflicts here. [Working on them now...](${Env.ROOMOTE_APP_URL}/task/${launchResult.taskId})`;
+                const commentBody = `I see some merge conflicts here. [Working on them now...](${Env.R_APP_URL}/task/${launchResult.taskId})`;
                 await octokit.rest.issues.createComment({
                   owner,
                   repo: repoName,

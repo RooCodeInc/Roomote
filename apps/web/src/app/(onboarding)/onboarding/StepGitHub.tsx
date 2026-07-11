@@ -11,20 +11,15 @@ import { StepCompletedBadge } from '../setup/StepCompletedBadge';
 import { StepTitle } from '../setup/StepTitle';
 
 export function StepGitHub({
+  githubAppSlug,
   onContinue,
   previousStepCompleted,
-  githubAppSlug,
 }: {
+  githubAppSlug: string;
   onContinue: () => void;
   previousStepCompleted?: string;
-  githubAppSlug?: string;
 }) {
-  // The server-resolved slug covers deployments whose app slug lives only in
-  // the database (the /setup manifest flow); the inlined build-time env value
-  // is the fallback for the hosted product.
-  const githubAppMention = getGitHubAppMention(
-    githubAppSlug || process.env.NEXT_PUBLIC_GITHUB_APP_SLUG || 'roomote',
-  );
+  const githubAppMention = getGitHubAppMention(githubAppSlug);
   const authenticateGitHubAccount = useAuthenticateGitHubAccount({
     onSuccess: (result) => {
       if (result.success) {

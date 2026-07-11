@@ -17,7 +17,7 @@ const {
 }));
 
 vi.mock('@roomote/env', () => ({
-  Env: { TRPC_URL: null, ROOMOTE_APP_URL: 'http://localhost:3000' },
+  Env: { TRPC_URL: null, R_APP_URL: 'http://localhost:3000' },
 }));
 
 vi.mock('@roomote/cloud-agents/server', () => ({

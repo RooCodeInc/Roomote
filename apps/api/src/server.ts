@@ -104,7 +104,7 @@ export function installApiObservedFetch(): void {
     fetchImpl: observedFetchImpl,
     log: createSingleLineWarnLogger(),
     internalHosts: buildInternalRequestHosts([
-      Env.ROOMOTE_APP_URL,
+      Env.R_APP_URL,
       Env.TRPC_URL,
       Env.PREVIEW_PROXY_BASE_URL,
     ]),

@@ -96,7 +96,7 @@ vi.mock('@roomote/env', async (importOriginal) => {
     ...actual,
     Env: {
       APP_ENV: 'production',
-      ROOMOTE_APP_URL: 'https://app.example.com',
+      R_APP_URL: 'https://app.example.com',
       TRPC_URL: 'https://api.example.com',
     },
   };

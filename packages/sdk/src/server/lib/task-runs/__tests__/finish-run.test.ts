@@ -664,7 +664,7 @@ describe('finishRun', () => {
     });
 
     it('posts a setup thread reply with a /setup link when setup onboarding completes', async () => {
-      const origin = process.env.ROOMOTE_APP_URL || 'http://localhost:13000';
+      const origin = process.env.R_APP_URL || 'http://localhost:13000';
       const job = makeRun(
         {
           payloadKind: TaskPayloadKind.SlackAppMention,
@@ -704,7 +704,7 @@ describe('finishRun', () => {
     });
 
     it('posts a setup thread reply when setup onboarding becomes idle with a linked environment', async () => {
-      const origin = process.env.ROOMOTE_APP_URL || 'http://localhost:13000';
+      const origin = process.env.R_APP_URL || 'http://localhost:13000';
       const job = makeRun(
         {
           payloadKind: TaskPayloadKind.SlackAppMention,
@@ -815,7 +815,7 @@ describe('finishRun', () => {
     });
 
     it('falls back to a generic setup completion message when no project name is available', async () => {
-      const origin = process.env.ROOMOTE_APP_URL || 'http://localhost:13000';
+      const origin = process.env.R_APP_URL || 'http://localhost:13000';
       const job = makeRun(
         {
           payloadKind: TaskPayloadKind.SlackAppMention,
@@ -855,7 +855,7 @@ describe('finishRun', () => {
     });
 
     it('posts a setup thread reply for resumed setup snapshot runs by reading sibling runs of the task', async () => {
-      const origin = process.env.ROOMOTE_APP_URL || 'http://localhost:13000';
+      const origin = process.env.R_APP_URL || 'http://localhost:13000';
       const resumedRun = makeRun(
         {
           id: 2,
@@ -911,7 +911,7 @@ describe('finishRun', () => {
     });
 
     it('posts a setup thread reply for an idle resume when the linked environment lives on a sibling run', async () => {
-      const origin = process.env.ROOMOTE_APP_URL || 'http://localhost:13000';
+      const origin = process.env.R_APP_URL || 'http://localhost:13000';
       const resumedRun = makeRun(
         {
           id: 2,
@@ -1583,7 +1583,7 @@ describe('finishRun', () => {
     });
 
     it('posts a setup /setup thread reply when setup onboarding fails', async () => {
-      const origin = process.env.ROOMOTE_APP_URL || 'http://localhost:13000';
+      const origin = process.env.R_APP_URL || 'http://localhost:13000';
       const job = makeRun(
         {
           payloadKind: TaskPayloadKind.SlackAppMention,

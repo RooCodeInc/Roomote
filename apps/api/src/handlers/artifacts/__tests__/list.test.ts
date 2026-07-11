@@ -34,7 +34,7 @@ vi.mock('@roomote/sdk/server', () => ({
 
 vi.mock('@roomote/env', () => ({
   Env: {
-    ROOMOTE_APP_URL: 'https://app.example.com',
+    R_APP_URL: 'https://app.example.com',
     ARTIFACT_SIGNING_KEY: 'signing-key',
   },
   getArtifactSigningKey: () => 'signing-key',

@@ -110,9 +110,7 @@ export async function postTaskSuggestionStartedMessage(params: {
     readinessNote,
   } = params;
 
-  const taskUrl = taskId
-    ? new URL(`/task/${taskId}`, Env.ROOMOTE_APP_URL)
-    : null;
+  const taskUrl = taskId ? new URL(`/task/${taskId}`, Env.R_APP_URL) : null;
 
   if (taskUrl) {
     taskUrl.searchParams.set('utm_source', 'slack');

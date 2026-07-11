@@ -44,7 +44,7 @@ other PaaS-shaped paths, see [deploy/railway](../railway/README.md) and
   presigned artifact URLs directly, and `fly storage create` provisions the
   bucket, so there is no MinIO service to run.
 - **No openssl provisioning step.** The config sets
-  `ROOMOTE_AUTO_GENERATE_KEYS=true`, so Roomote generates the `JOB_AUTH_*` /
+  `R_AUTO_GENERATE_KEYS=true`, so Roomote generates the `JOB_AUTH_*` /
   `PREVIEW_AUTH_*` P-256 keypairs at first boot and persists them encrypted
   (with `ENCRYPTION_KEY`) in Postgres. The remaining secrets are random
   strings set once with `fly secrets set`.
@@ -151,20 +151,20 @@ Machine, and all app services honor the shared `PORT=8080`.
 
 Everything sensitive is a Fly secret, set once for the app:
 
-| Secret                                     | Source                                     |
-| ------------------------------------------ | ------------------------------------------ |
-| `DATABASE_URL`                             | `fly mpg attach`                           |
-| `REDIS_URL`                                | printed by `fly redis create`              |
-| `S3_ACCESS_KEY_ID`, `S3_SECRET_ACCESS_KEY` | printed by `fly storage create`            |
-| `ENCRYPTION_KEY`, `ARTIFACT_SIGNING_KEY`   | `openssl rand -base64 32`                  |
-| `DASHBOARD_PASSWORD`                       | `openssl rand -base64 24`                  |
-| `SETUP_TOKEN`                              | `openssl rand -hex 16` (gates `/setup`)    |
+| Secret                                     | Source                                  |
+| ------------------------------------------ | --------------------------------------- |
+| `DATABASE_URL`                             | `fly mpg attach`                        |
+| `REDIS_URL`                                | printed by `fly redis create`           |
+| `S3_ACCESS_KEY_ID`, `S3_SECRET_ACCESS_KEY` | printed by `fly storage create`         |
+| `ENCRYPTION_KEY`, `ARTIFACT_SIGNING_KEY`   | `openssl rand -base64 32`               |
+| `DASHBOARD_PASSWORD`                       | `openssl rand -base64 24`               |
+| `SETUP_TOKEN`                              | `openssl rand -hex 16` (gates `/setup`) |
 
 Notes:
 
-- `ROOMOTE_APP_URL` is the **single canonical-origin knob**: it is the URL
-  users browse. Do not set `ROOMOTE_PUBLIC_URL` — it is optional and the app
-  falls back to `ROOMOTE_APP_URL` everywhere it would apply. See
+- `R_APP_URL` is the **single canonical-origin knob**: it is the URL
+  users browse. Do not set `R_PUBLIC_URL` — it is optional and the app
+  falls back to `R_APP_URL` everywhere it would apply. See
   [Attaching a custom domain](#attaching-a-custom-domain).
 - Leave `DOCKER_WORKER_IMAGE` and `MODAL_BASE_IMAGE_REF` **unset**. The app
   derives both from the `RELEASE_VERSION` baked into the running image, so
@@ -177,13 +177,13 @@ Notes:
   are stored encrypted in Postgres. Setting them as secrets still works and
   takes precedence, but is unnecessary.
 - Leave `JOB_AUTH_*` and `PREVIEW_AUTH_*` unset —
-  `ROOMOTE_AUTO_GENERATE_KEYS=true` manages them. If you later provide
+  `R_AUTO_GENERATE_KEYS=true` manages them. If you later provide
   explicit values, they take precedence over the persisted keypairs.
 - Leave `PREVIEW_PROXY_BASE_URL` and `PREVIEW_DOMAINS` unset unless you
   enable live previews. Roomote boots without them; previews report as not
   configured in **Settings → Live Previews** until set.
 - Changing secrets on a deployed app restarts its Machines; `fly secrets
-  set --stage` defers that to the next deploy.
+set --stage` defers that to the next deploy.
 
 ## The artifact bucket
 
@@ -211,7 +211,7 @@ workers. Pre-create the bucket, or set `S3_AUTO_CREATE_BUCKET=true` in
 3. Create the founding admin account (email/password works immediately;
    Slack or Microsoft sign-in can be added later).
 4. Connect GitHub with **Create GitHub App** — the manifest flow derives the
-   callback and webhook URLs from `ROOMOTE_APP_URL` and `TRPC_URL`, so no
+   callback and webhook URLs from `R_APP_URL` and `TRPC_URL`, so no
    manual URL entry is needed.
 5. Enter the sandbox provider credentials (Modal token pair for the default)
    and the model provider key when the wizard asks. When swapping to E2B or
@@ -223,7 +223,7 @@ workers. Pre-create the bucket, or set `S3_AUTO_CREATE_BUCKET=true` in
 
 ## Attaching a custom domain
 
-The app boots on its `fly.dev` hostname, and `ROOMOTE_APP_URL` — the origin
+The app boots on its `fly.dev` hostname, and `R_APP_URL` — the origin
 users browse — is stamped into `fly.toml` at launch. Adding a certificate
 alone does not change what the app treats as canonical; the symptom of a
 mismatch is a working dashboard that rejects signup, login, and OAuth flows
@@ -231,7 +231,7 @@ with `403 {"error":"Invalid origin"}`.
 
 1. Point a CNAME (or A/AAAA from `fly ips list`) at the app and run
    `fly certs add app.example.com`.
-2. In `fly.toml`, set `ROOMOTE_APP_URL = 'https://app.example.com'` and run
+2. In `fly.toml`, set `R_APP_URL = 'https://app.example.com'` and run
    `fly deploy`.
 
 Everything derived from the canonical origin follows: auth origins, OAuth
@@ -295,8 +295,8 @@ preview proxy cannot share it. Run the proxy as a second Fly app instead:
 
 2. Point `previews.<your-domain>` and `*.previews.<your-domain>` at the
    previews app and add both certificates (`fly certs add -a <app>-previews
-   previews.<your-domain>` and `fly certs add -a <app>-previews
-   '*.previews.<your-domain>'`; the wildcard needs the DNS challenge from
+previews.<your-domain>` and `fly certs add -a <app>-previews
+'*.previews.<your-domain>'`; the wildcard needs the DNS challenge from
    Fly's certificate docs).
 3. On the **main** app, set `PREVIEW_PROXY_BASE_URL`,
    `NEXT_PUBLIC_PREVIEW_PROXY_BASE_URL`, and `PREVIEW_DOMAINS` to

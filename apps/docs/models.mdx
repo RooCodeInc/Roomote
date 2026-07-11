@@ -98,7 +98,7 @@ platform, secret manager, or local development shell.
 At minimum, set a default coding model and the matching provider key:
 
 ```sh
-ROOMOTE_MODEL=openrouter/anthropic/claude-sonnet-4
+R_MODEL=openrouter/anthropic/claude-sonnet-4
 OPENROUTER_API_KEY=...
 ```
 
@@ -106,26 +106,26 @@ The provider is the first segment of the model ID. Direct-provider access uses
 the provider's normal key:
 
 ```sh
-ROOMOTE_MODEL=anthropic/claude-sonnet-4
+R_MODEL=anthropic/claude-sonnet-4
 ANTHROPIC_API_KEY=...
 ```
 
 You can also split model roles with env vars:
 
 ```sh
-ROOMOTE_SMALL_MODEL=openrouter/openai/gpt-4.1-mini
-ROOMOTE_VISION_MODEL=openrouter/openai/gpt-5.6-sol
-ROOMOTE_CODE_REVIEW_MODEL=openrouter/openai/gpt-5.6-sol
-ROOMOTE_EXPLORE_MODEL=openrouter/openai/gpt-5.6-luna
+R_SMALL_MODEL=openrouter/openai/gpt-4.1-mini
+R_VISION_MODEL=openrouter/openai/gpt-5.6-sol
+R_CODE_REVIEW_MODEL=openrouter/openai/gpt-5.6-sol
+R_EXPLORE_MODEL=openrouter/openai/gpt-5.6-luna
 ```
 
 Roomote automatically forwards common provider keys to task workers, including
 OpenRouter, Vercel AI Gateway, OpenAI, Anthropic, Google Gemini, Mistral,
 Moonshot, MiniMax, OpenCode, Amazon Bedrock, Google Vertex AI, and xAI keys.
-Use `ROOMOTE_MODEL_ENV_KEYS` when a provider key uses a custom env var name:
+Use `R_MODEL_ENV_KEYS` when a provider key uses a custom env var name:
 
 ```sh
-ROOMOTE_MODEL_ENV_KEYS=CUSTOM_PROVIDER_API_KEY
+R_MODEL_ENV_KEYS=CUSTOM_PROVIDER_API_KEY
 CUSTOM_PROVIDER_API_KEY=...
 ```
 

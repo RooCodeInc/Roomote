@@ -11,7 +11,7 @@ const {
   buildRootMessageMock,
 } = vi.hoisted(() => ({
   envMock: {
-    TELEGRAM_BOT_TOKEN: 'bot-token' as string | undefined,
+    R_TELEGRAM_BOT_TOKEN: 'bot-token' as string | undefined,
   },
   findTelegramPrimaryChatIdMock: vi.fn(),
   insertMock: vi.fn(),
@@ -41,7 +41,7 @@ vi.mock('@roomote/db/server', () => ({
     sql: [Array.from(strings), values],
   })),
   resolveTelegramRuntimeCredentials: vi.fn(async () => ({
-    botToken: envMock.TELEGRAM_BOT_TOKEN ?? null,
+    botToken: envMock.R_TELEGRAM_BOT_TOKEN ?? null,
     webhookSecret: null,
     botUsername: null,
   })),
@@ -82,7 +82,7 @@ function buildSuggestion(id: string, title: string) {
 describe('postScheduledSuggestionsToTelegram', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    envMock.TELEGRAM_BOT_TOKEN = 'bot-token';
+    envMock.R_TELEGRAM_BOT_TOKEN = 'bot-token';
     findTelegramPrimaryChatIdMock.mockResolvedValue('8846357662');
     insertMock.mockReturnValue({ values: insertValuesMock });
     insertValuesMock.mockReturnValue({

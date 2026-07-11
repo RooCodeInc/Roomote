@@ -837,7 +837,7 @@ async function postTeamsDirectMessageBestEffort(input: {
 }
 
 function buildTeamsAccountLinkPromptText(authToken: string): string {
-  const accountLinkUrl = new URL('/api/teams/auth', Env.ROOMOTE_APP_URL);
+  const accountLinkUrl = new URL('/api/teams/auth', Env.R_APP_URL);
   accountLinkUrl.searchParams.set('state', authToken);
 
   return buildAccountLinkPromptText({
@@ -1061,9 +1061,9 @@ async function resumeTeamsTaskFromSnapshot(input: {
 function createDelegatedTeamsGraphTokenProvider(
   userId: string,
 ): (() => Promise<string>) | null {
-  const clientId = Env.ROOMOTE_AUTH_MICROSOFT_CLIENT_ID;
-  const clientSecret = Env.ROOMOTE_AUTH_MICROSOFT_CLIENT_SECRET;
-  const tenantId = Env.ROOMOTE_AUTH_MICROSOFT_TENANT_ID;
+  const clientId = Env.R_MICROSOFT_CLIENT_ID;
+  const clientSecret = Env.R_MICROSOFT_CLIENT_SECRET;
+  const tenantId = Env.R_MICROSOFT_TENANT_ID;
 
   if (!clientId || !clientSecret || !tenantId) {
     return null;
@@ -1253,7 +1253,7 @@ async function startNewTeamsTask(input: {
     ...(input.queuedMessage.images?.length
       ? { images: input.queuedMessage.images }
       : {}),
-    apiBaseUrl: Env.TRPC_URL ?? Env.ROOMOTE_APP_URL,
+    apiBaseUrl: Env.TRPC_URL ?? Env.R_APP_URL,
   });
   const routingDecision = await routeTask(routingContext);
 

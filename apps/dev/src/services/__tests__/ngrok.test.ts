@@ -70,8 +70,8 @@ describe('NgrokService.resolvePublicUrl', () => {
     process.env = originalEnv;
   });
 
-  it('uses an explicit ROOMOTE_PUBLIC_URL without starting ngrok', async () => {
-    process.env.ROOMOTE_PUBLIC_URL =
+  it('uses an explicit R_PUBLIC_URL without starting ngrok', async () => {
+    process.env.R_PUBLIC_URL =
       'https://roomote.example.com/some/path?ignored=true';
 
     await expect(
@@ -89,7 +89,7 @@ describe('NgrokService.resolvePublicUrl', () => {
 
   it('starts a configured static ngrok web tunnel', async () => {
     vi.useFakeTimers();
-    process.env.ROOMOTE_PUBLIC_URL = 'https://static-roomote.ngrok.app';
+    process.env.R_PUBLIC_URL = 'https://static-roomote.ngrok.app';
     let fetchCount = 0;
     vi.mocked(execa)
       .mockResolvedValueOnce({} as Awaited<ReturnType<typeof execa>>)
@@ -154,7 +154,7 @@ describe('NgrokService.resolvePublicUrl', () => {
   });
 
   it('reuses a configured static ngrok tunnel when it is already running', async () => {
-    process.env.ROOMOTE_PUBLIC_URL = 'https://static-roomote.ngrok.app';
+    process.env.R_PUBLIC_URL = 'https://static-roomote.ngrok.app';
     vi.mocked(execa)
       .mockResolvedValueOnce({} as Awaited<ReturnType<typeof execa>>)
       .mockResolvedValueOnce({
@@ -198,13 +198,13 @@ describe('NgrokService.resolvePublicUrl', () => {
     );
   });
 
-  it('requires ROOMOTE_PUBLIC_URL', async () => {
+  it('requires R_PUBLIC_URL', async () => {
     await expect(
       NgrokService.resolvePublicUrl({
         port: 13000,
         verbose: false,
       }),
-    ).rejects.toThrow('ROOMOTE_PUBLIC_URL is required');
+    ).rejects.toThrow('R_PUBLIC_URL is required');
 
     expect(execa).not.toHaveBeenCalled();
   });

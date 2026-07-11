@@ -83,9 +83,9 @@ export async function GET(request: NextRequest) {
     if (!authResult.success) {
       // Redirect to sign-in with return URL.
       // IMPORTANT: In local dev behind ngrok, Next may construct `request.url` using
-      // `localhost:3000` as the host. Use ROOMOTE_APP_URL as the canonical host
+      // `localhost:3000` as the host. Use R_APP_URL as the canonical host
       // for redirects so auth happens on the public ngrok URL.
-      const appBaseUrl = new URL(Env.ROOMOTE_APP_URL);
+      const appBaseUrl = new URL(Env.R_APP_URL);
 
       const returnUrl = new URL(request.url);
       returnUrl.protocol = appBaseUrl.protocol;

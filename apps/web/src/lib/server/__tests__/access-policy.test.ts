@@ -9,7 +9,7 @@ const {
   mockDbSelect: vi.fn(),
   mockDbUpdate: vi.fn(),
   mockEnvState: {
-    ROOMOTE_ALLOWED_EMAILS: undefined as string | undefined,
+    R_ALLOWED_EMAILS: undefined as string | undefined,
     SETUP_TOKEN: undefined as string | undefined,
   },
   mockProviderConfig: {
@@ -119,8 +119,8 @@ function resetMocks() {
   // Default to local development so tokenless bootstrap is permitted unless a
   // test explicitly simulates a non-local deployment.
   vi.stubEnv('NODE_ENV', 'development');
-  vi.stubEnv('APP_ENV', 'development');
-  mockEnvState.ROOMOTE_ALLOWED_EMAILS = undefined;
+  vi.stubEnv('R_APP_ENV', 'development');
+  mockEnvState.R_ALLOWED_EMAILS = undefined;
   mockEnvState.SETUP_TOKEN = undefined;
   mockInviteState.requestToken = null;
   mockInviteState.usableInvite = null;
@@ -151,7 +151,7 @@ describe('evaluateSignInAccess', () => {
   beforeEach(resetMocks);
 
   it('denies when the env allowlist rejects the email', async () => {
-    mockEnvState.ROOMOTE_ALLOWED_EMAILS = 'only@example.com';
+    mockEnvState.R_ALLOWED_EMAILS = 'only@example.com';
 
     await expect(
       evaluateSignInAccess({ userId: 'user-1', email: 'other@example.com' }),
@@ -273,7 +273,7 @@ describe('evaluateSignInAccess', () => {
   });
 
   it('admits the first sign-in in local development when no setup token is configured', async () => {
-    vi.stubEnv('APP_ENV', 'development');
+    vi.stubEnv('R_APP_ENV', 'development');
     queueWhereLimitSelect([]); // hasAnyOtherRealAppUser
 
     await expect(
@@ -282,7 +282,7 @@ describe('evaluateSignInAccess', () => {
   });
 
   it('treats local tokenless Microsoft setup as bootstrap before org membership', async () => {
-    vi.stubEnv('APP_ENV', 'development');
+    vi.stubEnv('R_APP_ENV', 'development');
     queueWhereLimitSelect([]); // hasAnyOtherRealAppUser
 
     await expect(
@@ -292,7 +292,7 @@ describe('evaluateSignInAccess', () => {
   });
 
   it('denies the first sign-in on a non-local deployment when no setup token is configured', async () => {
-    vi.stubEnv('APP_ENV', 'production');
+    vi.stubEnv('R_APP_ENV', 'production');
     queueWhereLimitSelect([]); // hasExistingAppUser
     queueWhereSelect([]); // accounts
 
@@ -301,9 +301,9 @@ describe('evaluateSignInAccess', () => {
     ).resolves.toEqual({ allowed: false });
   });
 
-  it('fails closed for NODE_ENV=production even when APP_ENV is unset', async () => {
+  it('fails closed for NODE_ENV=production even when R_APP_ENV is unset', async () => {
     vi.stubEnv('NODE_ENV', 'production');
-    vi.stubEnv('APP_ENV', undefined);
+    vi.stubEnv('R_APP_ENV', undefined);
     queueWhereLimitSelect([]); // hasExistingAppUser
     queueWhereSelect([]); // accounts
 
@@ -398,20 +398,20 @@ describe('canVisitorSignUp', () => {
   });
 
   it('is true while setup is open without a setup token in local development', async () => {
-    vi.stubEnv('APP_ENV', 'development');
+    vi.stubEnv('R_APP_ENV', 'development');
 
     await expect(canVisitorSignUp()).resolves.toBe(true);
   });
 
   it('is false on a non-local deployment without a setup token', async () => {
-    vi.stubEnv('APP_ENV', 'production');
+    vi.stubEnv('R_APP_ENV', 'production');
 
     await expect(canVisitorSignUp()).resolves.toBe(false);
   });
 
-  it('is false when only NODE_ENV=production is set (APP_ENV unset)', async () => {
+  it('is false when only NODE_ENV=production is set (R_APP_ENV unset)', async () => {
     vi.stubEnv('NODE_ENV', 'production');
-    vi.stubEnv('APP_ENV', undefined);
+    vi.stubEnv('R_APP_ENV', undefined);
 
     await expect(canVisitorSignUp()).resolves.toBe(false);
   });
