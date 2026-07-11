@@ -10,10 +10,18 @@ const {
   useModelsForFilterMock,
   usePullRequestsForFilterMock,
 } = vi.hoisted(() => ({
-  useUsersForFilterMock: vi.fn(() => ({ data: [] })),
-  useRepositoriesForFilterMock: vi.fn(() => ({ data: [] })),
-  useModelsForFilterMock: vi.fn(() => ({ data: [] })),
-  usePullRequestsForFilterMock: vi.fn(() => ({ data: [] })),
+  useUsersForFilterMock: vi.fn(() => ({
+    data: [] as Array<{ value: string; label: string; subLabel?: string }>,
+  })),
+  useRepositoriesForFilterMock: vi.fn(() => ({
+    data: [] as Array<{ value: string; label: string; subLabel?: string }>,
+  })),
+  useModelsForFilterMock: vi.fn(() => ({
+    data: [] as Array<{ value: string; label: string; subLabel?: string }>,
+  })),
+  usePullRequestsForFilterMock: vi.fn(() => ({
+    data: [] as Array<{ value: string; label: string; subLabel?: string }>,
+  })),
 }));
 
 vi.mock('@/hooks/filters', () => ({
@@ -114,6 +122,30 @@ describe('TaskFilters', () => {
       timePeriod: 'all',
       search: '',
     });
+  });
+
+  it('groups the user filter into Users and Automations sections', () => {
+    useUsersForFilterMock.mockReturnValue({
+      data: [
+        { value: 'user-2', label: 'Alex' },
+        { value: 'automation:pr_review', label: 'PR Review' },
+        { value: 'user-1', label: 'You Name' },
+        {
+          value: 'automation:conflict_resolver',
+          label: 'Conflict Resolver',
+        },
+      ],
+    });
+
+    const { getByText, queryByText } = render(<TaskFilters {...baseProps} />);
+
+    expect(getByText('Any User')).toBeInTheDocument();
+    expect(getByText('Users')).toBeInTheDocument();
+    expect(getByText('Automations')).toBeInTheDocument();
+    expect(getByText('Alex')).toBeInTheDocument();
+    expect(getByText('PR Review')).toBeInTheDocument();
+    expect(getByText('Conflict Resolver')).toBeInTheDocument();
+    expect(queryByText('Automation')).not.toBeInTheDocument();
   });
 
   it('renders all task workflows when the task-type filter is visible', () => {

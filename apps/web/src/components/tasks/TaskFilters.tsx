@@ -8,7 +8,10 @@ import {
   DEFAULT_VISIBLE_TASK_WORKFLOWS,
   HIDDEN_TASK_WORKFLOWS,
 } from '@/lib/task-categories';
-import { formatAutomationLabel } from '@/lib/task-creator-filter';
+import {
+  formatAutomationLabel,
+  parseCreatorFilterValue,
+} from '@/lib/task-creator-filter';
 import { cn } from '@/lib/utils';
 
 import {
@@ -129,6 +132,21 @@ export const TaskFilters = ({
     timePeriod,
   });
 
+  const { humanUserOptions, automationUserOptions } = useMemo(() => {
+    const humans: typeof userOptions = [];
+    const automations: typeof userOptions = [];
+
+    for (const option of userOptions) {
+      if (parseCreatorFilterValue(option.value).kind === 'automation') {
+        automations.push(option);
+      } else {
+        humans.push(option);
+      }
+    }
+
+    return { humanUserOptions: humans, automationUserOptions: automations };
+  }, [userOptions]);
+
   const { data: rawRepositories = [] } = useRepositoriesForFilter({
     userId: userIdForOptionQueries,
     category,
@@ -246,8 +264,29 @@ export const TaskFilters = ({
             >
               Any User
             </DropdownMenuCheckboxItem>
-            {userOptions.length > 0 && <DropdownMenuSeparator />}
-            {userOptions.map((user) => (
+            {humanUserOptions.length > 0 && (
+              <>
+                <DropdownMenuSeparator />
+                <DropdownMenuLabel>Users</DropdownMenuLabel>
+              </>
+            )}
+            {humanUserOptions.map((user) => (
+              <DropdownMenuCheckboxItem
+                key={user.value}
+                onClick={() => onUserChange(user.value)}
+                checked={effectiveUserId === user.value}
+                className="cursor-pointer"
+              >
+                <span className="truncate">{user.label}</span>
+              </DropdownMenuCheckboxItem>
+            ))}
+            {automationUserOptions.length > 0 && (
+              <>
+                <DropdownMenuSeparator />
+                <DropdownMenuLabel>Automations</DropdownMenuLabel>
+              </>
+            )}
+            {automationUserOptions.map((user) => (
               <DropdownMenuCheckboxItem
                 key={user.value}
                 onClick={() => onUserChange(user.value)}
