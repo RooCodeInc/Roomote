@@ -24,6 +24,7 @@ import {
 import { decryptSecrets } from '@roomote/db/encryption';
 import { createTaskRunWorkerGitHubToken } from '@roomote/github';
 import { createTaskRunScopedGitLabTokens } from '@roomote/gitlab';
+import { createTaskRunBitbucketCredentials } from '@roomote/bitbucket';
 import { createTaskRunGiteaCredentials } from '@roomote/gitea';
 import { createTaskRunAdoCredentials } from '@roomote/ado';
 import {
@@ -83,9 +84,11 @@ export function redactSourceControlProviderEnvVars(
       ? ['GITLAB_TOKEN']
       : sourceControlProvider === 'gitea'
         ? ['GITEA_TOKEN']
-        : sourceControlProvider === 'ado'
-          ? ['ADO_TOKEN']
-          : [];
+        : sourceControlProvider === 'bitbucket'
+          ? ['BITBUCKET_TOKEN']
+          : sourceControlProvider === 'ado'
+            ? ['ADO_TOKEN']
+            : [];
   const shouldRedact = providerTokenEnvVars.some(
     (envVar) => envVars[envVar] !== undefined,
   );
@@ -330,6 +333,22 @@ async function createProviderToken(
         provider,
         token: '',
         envVar: 'GITEA_TOKEN',
+        envVars: {},
+        gitProxyCredentials: credentials.credentials.map((credential) => ({
+          ...credential,
+          provider,
+        })),
+        source: 'app',
+        expiresAt: null,
+      };
+    }
+    case 'bitbucket': {
+      const credentials = await createTaskRunBitbucketCredentials(taskRun);
+
+      return {
+        provider,
+        token: '',
+        envVar: 'BITBUCKET_TOKEN',
         envVars: {},
         gitProxyCredentials: credentials.credentials.map((credential) => ({
           ...credential,

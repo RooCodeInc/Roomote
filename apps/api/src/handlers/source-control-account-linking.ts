@@ -1,7 +1,12 @@
 import { Env } from '@roomote/env';
 import { PRODUCT_NAME } from '@roomote/types';
 
-type SourceControlCommentProvider = 'github' | 'gitlab' | 'gitea' | 'ado';
+type SourceControlCommentProvider =
+  | 'github'
+  | 'gitlab'
+  | 'gitea'
+  | 'bitbucket'
+  | 'ado';
 
 const sourceControlCommentProviderCopy = {
   github: {
@@ -18,6 +23,11 @@ const sourceControlCommentProviderCopy = {
     accountLabel: 'Gitea',
     commentSurface: 'pull request comments',
     settingsQuery: 'gitea',
+  },
+  bitbucket: {
+    accountLabel: 'Bitbucket',
+    commentSurface: 'pull request comments',
+    settingsQuery: 'bitbucket',
   },
   ado: {
     accountLabel: 'Azure DevOps',
@@ -57,7 +67,12 @@ export function buildSourceControlAccountLinkRequiredMessage(
     : 'Settings -> Linked Accounts';
   const linkInstruction = `Link it from ${settingsText} and then mention me again.`;
 
-  if (provider === 'gitlab' || provider === 'gitea' || provider === 'ado') {
+  if (
+    provider === 'gitlab' ||
+    provider === 'gitea' ||
+    provider === 'bitbucket' ||
+    provider === 'ado'
+  ) {
     return `I saw the mention, but I need your ${copy.accountLabel} account linked to ${PRODUCT_NAME} before ${copy.commentSurface} can start work here. ${linkInstruction} If ${copy.accountLabel} is missing from Linked Accounts, ask an admin to add the ${copy.accountLabel} OAuth client credentials in Settings -> Environments -> Source Control first.`;
   }
 

@@ -7,6 +7,7 @@ export { controllerHealth } from './health/controller';
 export { github } from './github';
 export { gitlab } from './gitlab';
 export { gitea } from './gitea';
+export { bitbucket } from './bitbucket';
 export { ado } from './ado';
 export { slack } from './slack';
 export { linear } from './linear';

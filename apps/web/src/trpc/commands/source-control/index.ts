@@ -1,6 +1,7 @@
 import { randomBytes } from 'node:crypto';
 
 import * as Ado from '@roomote/ado';
+import * as Bitbucket from '@roomote/bitbucket';
 import * as Gitea from '@roomote/gitea';
 import * as GitLab from '@roomote/gitlab';
 import {
@@ -113,6 +114,8 @@ type GitLabWebhookSetupSummary =
   WebhookSetupSummary<GitLab.GitLabWebhookEnsureResult>;
 type GiteaWebhookSetupSummary =
   WebhookSetupSummary<Gitea.GiteaWebhookEnsureResult>;
+type BitbucketWebhookSetupSummary =
+  WebhookSetupSummary<Bitbucket.BitbucketWebhookEnsureResult>;
 type AdoWebhookSetupSummary =
   WebhookSetupSummary<Ado.AdoServiceHookEnsureResult>;
 
@@ -206,7 +209,7 @@ async function configureScopedProviderWebhooks<
 }
 
 function getSourceControlWebhookUrl(
-  provider: 'gitlab' | 'gitea' | 'ado',
+  provider: 'gitlab' | 'gitea' | 'bitbucket' | 'ado',
 ): string | null {
   // Match the GitHub App manifest behavior: prefer TRPC_URL, but fall back
   // to ROOMOTE_APP_URL when TRPC_URL is a loopback address that token-backed
@@ -345,6 +348,63 @@ async function configureGiteaWebhooks(
   });
 }
 
+async function resolveOrCreateBitbucketWebhookSecret(
+  actorUserId: string,
+): Promise<string> {
+  const existingSecret = await resolveDeploymentEnvVar(
+    'BITBUCKET_WEBHOOK_SECRET',
+  );
+
+  if (existingSecret?.trim()) {
+    return existingSecret.trim();
+  }
+
+  const generatedSecret = randomBytes(32).toString('hex');
+
+  await upsertDeploymentEnvironmentVariables(db, {
+    userId: actorUserId,
+    values: [{ name: 'BITBUCKET_WEBHOOK_SECRET', value: generatedSecret }],
+  });
+
+  return generatedSecret;
+}
+
+async function configureBitbucketWebhooks(
+  actorUserId: string,
+  repositories: { id: string; fullName: string }[],
+): Promise<BitbucketWebhookSetupSummary> {
+  const webhookUrl = getSourceControlWebhookUrl('bitbucket');
+
+  if (!webhookUrl) {
+    return {
+      status: 'skipped',
+      reason:
+        'No publicly reachable Roomote URL is configured, so Bitbucket webhooks were not set up.',
+    };
+  }
+
+  return configureScopedProviderWebhooks({
+    webhookUrl,
+    repositories,
+    toTarget: (repository) => [{ repositoryFullName: repository.fullName }],
+    removeWebhooks: ({ targets, webhookUrl }) =>
+      Bitbucket.removeBitbucketWebhooksForRepositories({
+        repositories: targets,
+        webhookUrl,
+      }),
+    ensureWebhooks: ({ targets, webhookUrl, secretToken }) =>
+      Bitbucket.ensureBitbucketWebhooksForRepositories({
+        repositories: targets,
+        webhookUrl,
+        secretToken,
+      }),
+    resolveSecretToken: resolveOrCreateBitbucketWebhookSecret,
+    actorUserId,
+    logPrefix: '[configureBitbucketWebhooks]',
+    removalDescription: 'remove webhooks from unmapped repositories',
+  });
+}
+
 async function resolveOrCreateAdoWebhookSecret(
   actorUserId: string,
 ): Promise<string> {
@@ -467,6 +527,23 @@ export async function syncRepositoriesCommand(
           syncResult.repositories,
         ).catch(
           (error: unknown): GiteaWebhookSetupSummary => ({
+            status: 'skipped',
+            reason: error instanceof Error ? error.message : String(error),
+          }),
+        );
+
+        return { ...syncResult, webhooks };
+      }
+      case 'bitbucket': {
+        const syncResult = await Bitbucket.syncBitbucketRepositories({
+          userId: auth.userId,
+        });
+
+        const webhooks = await configureBitbucketWebhooks(
+          auth.userId,
+          syncResult.repositories,
+        ).catch(
+          (error: unknown): BitbucketWebhookSetupSummary => ({
             status: 'skipped',
             reason: error instanceof Error ? error.message : String(error),
           }),
@@ -613,6 +690,10 @@ export async function assertValidSourceControlConfigInput(params: {
     params.provider === 'gitea'
       ? params.values?.['GITEA_TOKEN']?.trim()
       : undefined;
+  const nextBitbucketToken =
+    params.provider === 'bitbucket'
+      ? params.values?.['BITBUCKET_TOKEN']?.trim()
+      : undefined;
   const nextAdoToken =
     params.provider === 'ado'
       ? params.values?.['ADO_TOKEN']?.trim()
@@ -640,6 +721,28 @@ export async function assertValidSourceControlConfigInput(params: {
     const validation = await Gitea.validateGiteaToken({
       token: nextGiteaToken,
       baseUrl: nextGiteaBaseUrl,
+    });
+
+    if (validation.status === 'invalid') {
+      throw new Error(validation.error);
+    }
+  }
+
+  if (nextBitbucketToken) {
+    const nextBitbucketUsername =
+      params.values?.['BITBUCKET_USERNAME']?.trim() ??
+      (await Bitbucket.resolveBitbucketUsername());
+
+    if (!nextBitbucketUsername) {
+      throw new Error(
+        'BITBUCKET_USERNAME is required with BITBUCKET_TOKEN for Bitbucket Cloud App Password authentication.',
+      );
+    }
+
+    const validation = await Bitbucket.validateBitbucketToken({
+      token: nextBitbucketToken,
+      username: nextBitbucketUsername,
+      baseUrl: params.values?.['BITBUCKET_BASE_URL']?.trim() || undefined,
     });
 
     if (validation.status === 'invalid') {

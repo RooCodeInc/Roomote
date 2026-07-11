@@ -45,6 +45,7 @@
   "dependencies": {
     "@roomote/ado": "workspace:^",
     "@roomote/auth": "workspace:^",
+    "@roomote/bitbucket": "workspace:^",
     "@roomote/cloud-agents": "workspace:^",
     "@roomote/communication": "workspace:^",
     "@roomote/compute-providers": "workspace:^",

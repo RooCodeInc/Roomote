@@ -5,6 +5,12 @@ import {
   resolveAdoToken,
 } from '@roomote/ado';
 import {
+  buildBitbucketApiBaseUrl,
+  resolveBitbucketBaseUrl,
+  resolveBitbucketToken,
+  resolveBitbucketUsername,
+} from '@roomote/bitbucket';
+import {
   buildGiteaApiBaseUrl,
   resolveGiteaBaseUrl,
   resolveGiteaToken,
@@ -179,6 +185,34 @@ const giteaPullRequestSchema = z
   .passthrough();
 const giteaPullRequestListSchema = z.array(giteaPullRequestSchema);
 
+const bitbucketPullRequestSchema = z
+  .object({
+    id: z.number().int(),
+    title: z.string().optional(),
+    description: z.string().nullable().optional(),
+    draft: z.boolean().optional(),
+    links: z
+      .object({
+        html: z.object({ href: z.string().url().optional() }).optional(),
+      })
+      .optional(),
+    source: z
+      .object({
+        branch: z.object({ name: z.string().optional() }).optional(),
+      })
+      .optional(),
+    destination: z
+      .object({
+        branch: z.object({ name: z.string().optional() }).optional(),
+      })
+      .optional(),
+  })
+  .passthrough();
+const bitbucketPullRequestListSchema = z.object({
+  values: z.array(bitbucketPullRequestSchema),
+  next: z.string().url().optional().nullable(),
+});
+
 const adoPullRequestSchema = z
   .object({
     pullRequestId: z.number().int(),
@@ -242,6 +276,14 @@ export async function createOrUpdateSourceControlPullRequestForTaskRun({
         });
       case 'gitea':
         return createOrUpdateGiteaPullRequest({
+          input,
+          repository,
+          provider,
+          createDraft,
+          fetchImpl,
+        });
+      case 'bitbucket':
+        return createOrUpdateBitbucketPullRequest({
           input,
           repository,
           provider,
@@ -718,6 +760,176 @@ async function createOrUpdateGiteaPullRequest({
   };
 }
 
+async function createOrUpdateBitbucketPullRequest({
+  input,
+  repository,
+  provider,
+  createDraft,
+  fetchImpl,
+}: {
+  input: SourceControlPullRequestMutationInput;
+  repository: RepositoryRow;
+  provider: 'bitbucket';
+  createDraft: boolean;
+  fetchImpl: FetchImpl;
+}): Promise<SourceControlPullRequestMutationResult> {
+  const token = await resolveBitbucketToken();
+  if (!token) {
+    throw new Error(
+      'BITBUCKET_TOKEN is required to create Bitbucket pull requests.',
+    );
+  }
+
+  const username = await resolveBitbucketUsername();
+  if (!username) {
+    throw new Error(
+      'BITBUCKET_USERNAME is required to create Bitbucket pull requests.',
+    );
+  }
+
+  const baseUrl = await resolveBitbucketBaseUrl();
+  const [workspace, repo] = splitRepositoryFullName(
+    repository.fullName,
+    provider,
+  );
+  const apiBaseUrl = buildBitbucketApiBaseUrl(baseUrl);
+  const tokenHeader = {
+    name: 'Authorization',
+    value: `Basic ${Buffer.from(`${username}:${token}`, 'utf8').toString('base64')}`,
+  };
+  const existingPullRequests = await listBitbucketPullRequests({
+    apiBaseUrl,
+    workspace,
+    repo,
+    input,
+    tokenHeader,
+    fetchImpl,
+  });
+
+  assertUnambiguousExistingPullRequest(
+    input,
+    existingPullRequests.map(
+      (pullRequest) => pullRequest.destination?.branch?.name,
+    ),
+  );
+
+  const existing = existingPullRequests[0];
+  const targetBranch = existing
+    ? resolveTargetBranchForUpdate(input, existing.destination?.branch?.name)
+    : requireTargetBranchForCreate(input);
+
+  const pullRequest = existing
+    ? await requestJson({
+        fetchImpl,
+        method: 'PUT',
+        url: buildApiUrl(
+          apiBaseUrl,
+          `/repositories/${encodeURIComponent(workspace)}/${encodeURIComponent(
+            repo,
+          )}/pullrequests/${existing.id}`,
+          {},
+        ),
+        tokenHeader,
+        body: {
+          title: input.title,
+          description: input.body,
+        },
+        schema: bitbucketPullRequestSchema,
+      })
+    : await requestJson({
+        fetchImpl,
+        method: 'POST',
+        url: buildApiUrl(
+          apiBaseUrl,
+          `/repositories/${encodeURIComponent(workspace)}/${encodeURIComponent(
+            repo,
+          )}/pullrequests`,
+          {},
+        ),
+        tokenHeader,
+        body: {
+          title: input.title,
+          description: input.body,
+          source: { branch: { name: input.sourceBranch } },
+          destination: { branch: { name: targetBranch } },
+          draft: createDraft,
+        },
+        schema: bitbucketPullRequestSchema,
+      });
+
+  const number = pullRequest.id;
+  const host = new URL(baseUrl).host;
+
+  return {
+    success: true,
+    action: existing ? 'updated' : 'created',
+    provider,
+    repositoryFullName: repository.fullName,
+    number,
+    url:
+      pullRequest.links?.html?.href ??
+      buildPullRequestUrl({
+        provider,
+        host,
+        repositoryFullName: repository.fullName,
+        number,
+      }),
+    title: pullRequest.title ?? input.title,
+    targetBranch,
+    draft: Boolean(pullRequest.draft) || isDraftTitle(pullRequest.title),
+    warnings: buildUnsupportedWarnings(input, provider),
+  };
+}
+
+async function listBitbucketPullRequests({
+  apiBaseUrl,
+  workspace,
+  repo,
+  input,
+  tokenHeader,
+  fetchImpl,
+}: {
+  apiBaseUrl: string;
+  workspace: string;
+  repo: string;
+  input: SourceControlPullRequestMutationInput;
+  tokenHeader: { name: string; value: string };
+  fetchImpl: FetchImpl;
+}) {
+  const matches: z.infer<typeof bitbucketPullRequestSchema>[] = [];
+  const enoughMatches = input.targetBranch ? 1 : 2;
+  let nextUrl: string | null = buildApiUrl(
+    apiBaseUrl,
+    `/repositories/${encodeURIComponent(workspace)}/${encodeURIComponent(
+      repo,
+    )}/pullrequests`,
+    { state: 'OPEN', pagelen: 50 },
+  );
+
+  while (nextUrl && matches.length < enoughMatches) {
+    const page: z.infer<typeof bitbucketPullRequestListSchema> =
+      await requestJson({
+        fetchImpl,
+        url: nextUrl,
+        tokenHeader,
+        schema: bitbucketPullRequestListSchema,
+      });
+
+    matches.push(
+      ...page.values.filter(
+        (pullRequest: z.infer<typeof bitbucketPullRequestSchema>) =>
+          pullRequest.source?.branch?.name === input.sourceBranch &&
+          (!input.targetBranch ||
+            pullRequest.destination?.branch?.name === input.targetBranch),
+      ),
+    );
+
+    nextUrl = page.next ?? null;
+  }
+
+  return matches;
+}
+
 const GITEA_PULLS_PAGE_SIZE = 50;
 const GITEA_PULLS_MAX_PAGES = 40;
 
@@ -1020,9 +1232,14 @@ function buildUnsupportedWarnings(
 ): string[] {
   const warnings: string[] = [];
 
-  if (provider === 'gitea' && input.labels.length > 0) {
+  if (
+    (provider === 'gitea' || provider === 'bitbucket') &&
+    input.labels.length > 0
+  ) {
     warnings.push(
-      'Gitea label assignment is not supported by the provider-neutral pull request tool yet.',
+      `${getSourceControlProviderLabel(
+        provider,
+      )} label assignment is not supported by the provider-neutral pull request tool yet.`,
     );
   }
 

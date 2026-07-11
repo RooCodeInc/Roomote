@@ -62,6 +62,7 @@ export const TASK_SURFACES = [
   'github',
   'gitlab',
   'gitea',
+  'bitbucket',
   'ado',
   'system',
 ] as const;

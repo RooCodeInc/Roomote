@@ -5,6 +5,7 @@ export const sourceControlProviders = [
   'gitlab',
   'gitea',
   'ado',
+  'bitbucket',
 ] as const;
 
 export const sourceControlProviderSchema = z.enum(sourceControlProviders);
@@ -20,7 +21,8 @@ export type SourceControlTokenEnvVar =
   | 'GH_TOKEN'
   | 'GITLAB_TOKEN'
   | 'GITEA_TOKEN'
-  | 'ADO_TOKEN';
+  | 'ADO_TOKEN'
+  | 'BITBUCKET_TOKEN';
 
 export type SourceControlGitCredential = {
   host: string;
@@ -85,6 +87,13 @@ export const sourceControlProviderDescriptors = {
     label: 'Azure DevOps',
     defaultHost: 'dev.azure.com',
     tokenEnvVar: 'ADO_TOKEN',
+    connectionMode: 'token',
+  },
+  bitbucket: {
+    provider: 'bitbucket',
+    label: 'Bitbucket',
+    defaultHost: 'bitbucket.org',
+    tokenEnvVar: 'BITBUCKET_TOKEN',
     connectionMode: 'token',
   },
 } as const satisfies Record<
@@ -183,6 +192,8 @@ export function buildPullRequestUrl({
       return `https://${host}/${repositoryFullName}/-/merge_requests/${number}`;
     case 'gitea':
       return `https://${host}/${repositoryFullName}/pulls/${number}`;
+    case 'bitbucket':
+      return `https://${host}/${repositoryFullName}/pull-requests/${number}`;
     case 'ado': {
       const [organization, project, ...repositoryParts] =
         repositoryFullName.split('/');
@@ -314,6 +325,23 @@ export function parsePullRequestUrl(
       provider: 'gitea',
       host: parsed.hostname,
       repositoryFullName: pathParts.slice(0, pullsIndex).join('/'),
+      number,
+    };
+  }
+
+  const pullRequestsIndex = pathParts.indexOf('pull-requests');
+
+  if (pullRequestsIndex >= 2 && pullRequestsIndex + 1 < pathParts.length) {
+    const number = Number(pathParts[pullRequestsIndex + 1]);
+
+    if (!Number.isInteger(number)) {
+      return null;
+    }
+
+    return {
+      provider: 'bitbucket',
+      host: parsed.hostname,
+      repositoryFullName: pathParts.slice(0, pullRequestsIndex).join('/'),
       number,
     };
   }

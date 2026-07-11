@@ -21,6 +21,9 @@ export type ResolvedAuthProviderConfig = {
   giteaClientId: string | null;
   giteaClientSecret: string | null;
   giteaBaseUrl: string | null;
+  bitbucketClientId: string | null;
+  bitbucketClientSecret: string | null;
+  bitbucketBaseUrl: string | null;
   adoClientId: string | null;
   adoClientSecret: string | null;
   adoTenantId: string | null;
@@ -121,6 +124,18 @@ export async function resolveAuthProviderConfig(
   const giteaBaseUrl =
     readConfiguredValue(runtimeEnv, deploymentEnvVars, 'GITEA_BASE_URL') ??
     null;
+  const bitbucketClientId =
+    readConfiguredValue(runtimeEnv, deploymentEnvVars, 'BITBUCKET_CLIENT_ID') ??
+    null;
+  const bitbucketClientSecret =
+    readConfiguredValue(
+      runtimeEnv,
+      deploymentEnvVars,
+      'BITBUCKET_CLIENT_SECRET',
+    ) ?? null;
+  const bitbucketBaseUrl =
+    readConfiguredValue(runtimeEnv, deploymentEnvVars, 'BITBUCKET_BASE_URL') ??
+    null;
   const adoClientId =
     readConfiguredValue(runtimeEnv, deploymentEnvVars, 'ADO_CLIENT_ID') ?? null;
   const adoClientSecret =
@@ -160,6 +175,9 @@ export async function resolveAuthProviderConfig(
     giteaClientId,
     giteaClientSecret,
     giteaBaseUrl,
+    bitbucketClientId,
+    bitbucketClientSecret,
+    bitbucketBaseUrl,
     adoClientId,
     adoClientSecret,
     adoTenantId,
@@ -178,6 +196,9 @@ export async function resolveAuthProviderConfig(
       giteaClientId,
       giteaClientSecret,
       giteaBaseUrl,
+      bitbucketClientId,
+      bitbucketClientSecret,
+      bitbucketBaseUrl,
       adoClientId,
       adoClientSecret,
       adoTenantId,

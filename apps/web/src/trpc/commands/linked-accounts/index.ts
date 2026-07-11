@@ -32,6 +32,10 @@ function formatGiteaLinkedAccountDisplayName(accountId: string) {
   return `Gitea user ${accountId}`;
 }
 
+function formatBitbucketLinkedAccountDisplayName(accountId: string) {
+  return `Bitbucket user ${accountId}`;
+}
+
 function formatAdoLinkedAccountDisplayName(accountId: string) {
   return `Azure DevOps user ${accountId}`;
 }
@@ -136,6 +140,34 @@ export async function getLinkedGiteaAccountCommand(auth: UserAuthSuccess) {
       ? {
           accountId: account.accountId,
           displayName: formatGiteaLinkedAccountDisplayName(account.accountId),
+        }
+      : null,
+  };
+}
+
+export async function getLinkedBitbucketAccountCommand(auth: UserAuthSuccess) {
+  const config = await resolveAuthProviderConfig();
+  const account = await db.query.authAccounts.findFirst({
+    where: and(
+      eq(authAccounts.userId, auth.userId),
+      eq(authAccounts.providerId, 'bitbucket'),
+    ),
+    orderBy: [desc(authAccounts.updatedAt)],
+    columns: {
+      accountId: true,
+    },
+  });
+
+  return {
+    configured: Boolean(
+      config.bitbucketClientId && config.bitbucketClientSecret,
+    ),
+    account: account
+      ? {
+          accountId: account.accountId,
+          displayName: formatBitbucketLinkedAccountDisplayName(
+            account.accountId,
+          ),
         }
       : null,
   };
