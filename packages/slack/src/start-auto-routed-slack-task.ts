@@ -4,6 +4,7 @@ import {
   AGENT_DISPLAY_NAME,
   type ChannelAutoStartLaunchMode,
   DEFAULT_CHANNEL_AUTO_START_LAUNCH_MODE,
+  getTaskInitiatorLinkedUserId,
   type ReasoningEffort,
   type TaskInitiator,
   type TaskTrigger,
@@ -442,12 +443,7 @@ export async function startAutoRoutedSlackTask({
     // leave it unset until a mapped follow-up sender arrives; a mapped human
     // initiator becomes the run's acting user immediately so their task gets
     // integration MCP access from the first turn.
-    const initiatorLinkedUserId =
-      initiator.kind === 'user'
-        ? 'userId' in initiator
-          ? initiator.userId
-          : (initiator.matchedUserId ?? null)
-        : null;
+    const initiatorLinkedUserId = getTaskInitiatorLinkedUserId(initiator);
     const taskRun = await startSlackAppMentionTask({
       initiator,
       trigger,

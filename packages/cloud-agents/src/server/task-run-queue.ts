@@ -20,6 +20,7 @@ import {
   DEFAULT_DELEGATED_KEEPALIVE_MS,
   DEFAULT_KEEPALIVE_MS,
   DEFAULT_LAUNCH_CODING_HARNESS,
+  getTaskInitiatorLinkedUserId,
   getUserDisplayName,
   getPrimaryPortFromConfig,
   isConfiguredEnvValue,
@@ -891,18 +892,6 @@ function getRunLockScope(taskRun: TaskRun): string | null {
   return null;
 }
 
-function getInitiatorLinkedUserId(initiator: TaskInitiator): string | null {
-  if (initiator.kind === 'automation') {
-    return null;
-  }
-
-  if ('userId' in initiator) {
-    return initiator.userId;
-  }
-
-  return initiator.matchedUserId ?? null;
-}
-
 type TaskInitiatorColumns = {
   initiatorKind: 'user' | 'automation';
   initiatorUserId: string | null;
@@ -1162,7 +1151,7 @@ async function enqueueFreshLaunch(
 ): Promise<TaskRun> {
   const { task, initiator, workflow, surface, trigger } = input;
   const visibility: TaskVisibility = input.visibility ?? 'visible';
-  const linkedUserId = getInitiatorLinkedUserId(initiator);
+  const linkedUserId = getTaskInitiatorLinkedUserId(initiator);
 
   await assertUserIsNotDeleted(linkedUserId);
 
