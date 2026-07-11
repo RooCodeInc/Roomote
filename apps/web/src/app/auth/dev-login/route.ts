@@ -10,6 +10,7 @@ import { isRoomoteEmailAllowed } from '@/lib/server/auth-allowlist';
 import {
   Env,
   getBetterAuthSecret,
+  isEnvFlagEnabled,
   isWebServerBindExposed,
 } from '@/lib/server/env';
 
@@ -38,13 +39,18 @@ function getRequestOrigin(request: NextRequest): string {
   return request.nextUrl.origin;
 }
 
-// Dev login is an unauthenticated admin backdoor, so it must only exist in
-// development app envs. APP_ENV=preview covers hosted preview/staging
-// deployments, which are internet-facing and must not expose it; sandbox
-// previews run `pnpm dev` and resolve to APP_ENV=development. It is also
+// Dev login is an unauthenticated admin backdoor, so it must be explicitly
+// opted into with WEB_DEV_LOGIN_ENABLED=true and only exists in development
+// app envs. The explicit flag is defense-in-depth: APP_ENV resolution falls
+// back to `development` when unset, so an implicit-development deployment
+// (or a sandbox that inherits a stray app env) never exposes dev login by
+// accident. APP_ENV=preview covers hosted preview/staging deployments, which
+// are internet-facing and must not expose it; local `pnpm dev` and the
+// dev-enabled sandbox environment set the flag explicitly. It is also
 // disabled on a non-loopback bind as defense-in-depth.
 function isDevLoginEnabled(): boolean {
   return (
+    isEnvFlagEnabled(Env.WEB_DEV_LOGIN_ENABLED) &&
     process.env.NODE_ENV !== 'production' &&
     Env.APP_ENV === 'development' &&
     !isWebServerBindExposed()

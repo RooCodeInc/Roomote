@@ -126,7 +126,16 @@ const app = (name, opts = {}) => ({
 
 const apps = [
   app('api', { env: { ...env, PORT: String(localPorts.api) } }),
-  app('web', { env: { ...env, PORT: String(localPorts.web) } }),
+  app('web', {
+    env: {
+      ...env,
+      PORT: String(localPorts.web),
+      // Dev login requires an explicit opt-in on top of the development app
+      // env. `pnpm dev` is the intended local flow, so enable it here unless
+      // the operator overrides it.
+      WEB_DEV_LOGIN_ENABLED: process.env.WEB_DEV_LOGIN_ENABLED || 'true',
+    },
+  }),
   app('preview-proxy', {
     env: { ...env, PORT: String(localPorts.previewProxy) },
   }),

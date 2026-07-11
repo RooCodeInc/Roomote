@@ -12,6 +12,7 @@ import {
   assertSecureBootBinding as sharedAssertSecureBootBinding,
   getWebBundledEnvFilePaths as getSharedWebBundledEnvFilePaths,
   getWebEnvFilePaths as getSharedWebEnvFilePaths,
+  isEnvFlagEnabled,
   isExposedBindHost,
   rehydrateEnv as rehydrateSharedEnv,
   setSecretProvider,
@@ -196,6 +197,7 @@ export {
   getArtifactSigningKey,
   getArtifactSigningKeyPrevious,
   getBetterAuthSecret,
+  isEnvFlagEnabled,
   resolveAppEnv,
 };
 
