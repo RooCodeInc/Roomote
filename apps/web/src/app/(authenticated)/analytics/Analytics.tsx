@@ -423,6 +423,7 @@ export function Analytics({
 
       <AnalyticsDetailsDialog
         object={object}
+        metric={metric}
         open={selectedSegment !== null}
         bucketLabel={selectedSegment?.bucketLabel ?? ''}
         seriesLabel={selectedSegment?.seriesLabel ?? ''}
