@@ -82,7 +82,7 @@ describe('isMention', () => {
   describe('with a database-configured app slug', () => {
     beforeEach(() => {
       setConfiguredGitHubAppSlugCache({
-        value: 'openmote',
+        value: 'roomote-roomote',
         expiresAt: Date.now() + 60_000,
       });
     });
@@ -94,7 +94,7 @@ describe('isMention', () => {
     it('detects mentions of the configured slug', () => {
       expect(
         isMention({
-          body: 'Hey @openmote can you take a look?',
+          body: 'Hey @roomote-roomote can you take a look?',
           user: { login: 'testuser' },
         }),
       ).toBe(true);
@@ -112,8 +112,8 @@ describe('isMention', () => {
     it('returns false for comments authored by the configured bot', () => {
       expect(
         isMention({
-          body: 'Hey @openmote can you take a look?',
-          user: { login: 'openmote[bot]' },
+          body: 'Hey @roomote-roomote can you take a look?',
+          user: { login: 'roomote-roomote[bot]' },
         }),
       ).toBe(false);
     });

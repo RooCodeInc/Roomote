@@ -276,7 +276,7 @@ describe('queuePrReviewActivityNotification', () => {
 const TERMINAL_SUMMARY_BODY = [
   '<!-- roomote-review-summary sha=f0c89ce4 mode=initial -->',
   '<!-- roomote-review-status:start -->',
-  '1 minor doc note; no blocking issues. [See task](https://openmote.dev/task/x)',
+  '1 minor doc note; no blocking issues. [See task](https://roomote.dev/task/x)',
   '<!-- roomote-review-status:end -->',
   '<!-- roomote-review-checklist:start -->',
   '- [ ] Update the doc comment',
@@ -286,7 +286,7 @@ const TERMINAL_SUMMARY_BODY = [
 const IN_PROGRESS_SUMMARY_BODY = [
   '<!-- roomote-review-summary sha=f0c89ce4 mode=initial -->',
   '<!-- roomote-review-status:start -->',
-  'Reviewing the PR now. [See task](https://openmote.dev/task/x)',
+  'Reviewing the PR now. [See task](https://roomote.dev/task/x)',
   '<!-- roomote-review-status:end -->',
 ].join('\n');
 
@@ -372,12 +372,12 @@ describe('buildPrReviewSummaryNotification', () => {
 // Regression: a deployment whose GitHub App was created through the /setup
 // flow keeps its slug in the encrypted environment_variables table, so the
 // process env falls back to `roomote` while the bot posts under the
-// configured slug (e.g. openmote[bot]). The identity helpers must honor the
+// configured slug (e.g. acme[bot]). The identity helpers must honor the
 // resolved slug or every review-summary notification is silently dropped.
 describe('with a database-configured app slug', () => {
   beforeEach(() => {
     setConfiguredGitHubAppSlugCache({
-      value: 'openmote',
+      value: 'acme',
       expiresAt: Date.now() + 60_000,
     });
   });
@@ -388,12 +388,12 @@ describe('with a database-configured app slug', () => {
 
   it('builds a review_summary event for the configured bot login', () => {
     const notification = buildPrReviewSummaryNotification(
-      summaryPayload({ login: 'openmote[bot]' }),
+      summaryPayload({ login: 'acme[bot]' }),
     );
 
     expect(notification?.input.event).toMatchObject({
       kind: 'review_summary',
-      authorLogin: 'openmote[bot]',
+      authorLogin: 'acme[bot]',
       roomoteAuthored: true,
     });
   });
@@ -409,12 +409,12 @@ describe('with a database-configured app slug', () => {
   it('marks new review threads from the configured bot as roomote-authored', () => {
     expect(
       buildPrReviewActivityNotificationInput(
-        reviewCommentPayload({ login: 'openmote[bot]' }),
+        reviewCommentPayload({ login: 'acme[bot]' }),
       ),
     ).toMatchObject({
       event: {
         kind: 'review_comment',
-        authorLogin: 'openmote[bot]',
+        authorLogin: 'acme[bot]',
         roomoteAuthored: true,
       },
     });
@@ -423,7 +423,10 @@ describe('with a database-configured app slug', () => {
   it('skips replies to existing review threads from the configured bot', () => {
     expect(
       buildPrReviewActivityNotificationInput(
-        reviewCommentPayload({ login: 'openmote[bot]', inReplyToId: 99 }),
+        reviewCommentPayload({
+          login: 'acme[bot]',
+          inReplyToId: 99,
+        }),
       ),
     ).toBeNull();
   });
@@ -431,7 +434,7 @@ describe('with a database-configured app slug', () => {
   it('skips review comments that mention the configured slug', () => {
     expect(
       buildPrReviewActivityNotificationInput(
-        reviewCommentPayload({ body: '@openmote fix this' }),
+        reviewCommentPayload({ body: '@acme fix this' }),
       ),
     ).toBeNull();
   });

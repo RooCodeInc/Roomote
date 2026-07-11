@@ -20,12 +20,12 @@ describe('chat message copy builders', () => {
     expect(
       buildAccountLinkConnectCopy({
         providerName: 'Slack',
-        productName: 'Openmote',
+        productName: 'Roomote',
       }),
     ).toMatchObject({
-      fallbackText: 'Hi! Let me help you get started with Openmote.',
+      fallbackText: 'Hi! Let me help you get started with Roomote.',
       requirementText:
-        'To get started, I need to link your Slack and Openmote accounts.',
+        'To get started, I need to link your Slack and Roomote accounts.',
       identityBenefits: [
         'Associate tasks with you',
         'Access your configured agents',
@@ -39,11 +39,11 @@ describe('chat message copy builders', () => {
     expect(
       buildAccountLinkPromptText({
         providerName: 'Microsoft Teams',
-        productName: 'Openmote',
-        accountLinkUrl: 'https://openmote.dev/api/teams/auth?state=abc',
+        productName: 'Roomote',
+        accountLinkUrl: 'https://roomote.dev/api/teams/auth?state=abc',
       }),
     ).toBe(
-      "I need to link your Microsoft Teams and Openmote accounts before I can start tasks for you.\n\nOpen [this Microsoft Teams link](https://openmote.dev/api/teams/auth?state=abc) and I'll continue your original request after you sign in.",
+      "I need to link your Microsoft Teams and Roomote accounts before I can start tasks for you.\n\nOpen [this Microsoft Teams link](https://roomote.dev/api/teams/auth?state=abc) and I'll continue your original request after you sign in.",
     );
   });
 
@@ -98,9 +98,9 @@ describe('chat message copy builders', () => {
     expect(
       buildTaskLaunchAcknowledgementText({
         workspaceDisplayName: 'App',
-        taskUrl: 'https://openmote.dev/task/123',
+        taskUrl: 'https://roomote.dev/task/123',
       }),
-    ).toBe('Started a task in App: [open task](https://openmote.dev/task/123)');
+    ).toBe('Started a task in App: [open task](https://roomote.dev/task/123)');
 
     expect(
       buildTaskLaunchAcknowledgementText({
@@ -119,50 +119,50 @@ describe('chat message copy builders', () => {
     expect(
       buildSnapshotResumeAcknowledgementText({
         surfaceName: 'Teams thread',
-        taskUrl: 'https://openmote.dev/task/123',
+        taskUrl: 'https://roomote.dev/task/123',
       }),
     ).toBe(
-      'I found the previous task for this Teams thread and reconnected it here: [the task](https://openmote.dev/task/123).',
+      'I found the previous task for this Teams thread and reconnected it here: [the task](https://roomote.dev/task/123).',
     );
   });
 
   it('builds thread reply footer text with caller link formatting', () => {
     expect(
       buildThreadReplyFooterText({
-        taskUrl: 'https://openmote.dev/task/123',
+        taskUrl: 'https://roomote.dev/task/123',
       }),
-    ).toBe('_Reply or use the [web app](https://openmote.dev/task/123)._');
+    ).toBe('_Reply or use the [web app](https://roomote.dev/task/123)._');
 
     expect(
       buildThreadReplyFooterText({
-        taskUrl: 'https://openmote.dev/task/123',
+        taskUrl: 'https://roomote.dev/task/123',
         explicitMentionRequired: true,
       }),
     ).toBe(
-      '_Reply with @-mention or use the [web app](https://openmote.dev/task/123)._',
+      '_Reply with @-mention or use the [web app](https://roomote.dev/task/123)._',
     );
 
     expect(
       buildThreadReplyFooterText({
-        taskUrl: 'https://openmote.dev/task/123',
+        taskUrl: 'https://roomote.dev/task/123',
         linkedPr: {
           prNumber: 7,
           prUrl: 'https://github.com/org/repo/pull/7',
         },
-        livePreviewUrl: 'https://preview.openmote.dev',
+        livePreviewUrl: 'https://preview.roomote.dev',
       }),
     ).toBe(
-      '_Working on [PR #7](https://github.com/org/repo/pull/7), [live preview](https://preview.openmote.dev), reply or use the [web app](https://openmote.dev/task/123)._',
+      '_Working on [PR #7](https://github.com/org/repo/pull/7), [live preview](https://preview.roomote.dev), reply or use the [web app](https://roomote.dev/task/123)._',
     );
 
     expect(
       buildThreadReplyFooterText({
-        taskUrl: 'https://openmote.dev/task/123',
-        livePreviewUrl: 'https://preview.openmote.dev',
+        taskUrl: 'https://roomote.dev/task/123',
+        livePreviewUrl: 'https://preview.roomote.dev',
         formatLink: (label, url) => `<${url}|${label}>`,
       }),
     ).toBe(
-      '_Working on a <https://preview.openmote.dev|live preview>, reply or use the <https://openmote.dev/task/123|web app>._',
+      '_Working on a <https://preview.roomote.dev|live preview>, reply or use the <https://roomote.dev/task/123|web app>._',
     );
   });
 

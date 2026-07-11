@@ -74,7 +74,7 @@
 #   Variables tab and pastes it into the wizard's token step (the URL form
 #   /setup?token=<value> also works).
 # - R_PING_BASE_URL points the anonymous-analytics and version-check
-#   pings at the openmote ping service (the code default is
+#   pings at the Roomote ping service (the code default is
 #   https://ping.roomote.dev). Admins can opt out of analytics in the setup
 #   wizard or Settings -> Misc; version checks ignore that setting.
 # - Live previews ship disabled but ready: the preview-proxy service is in
@@ -146,7 +146,7 @@ services:
       NEXT_PUBLIC_PREVIEW_PROXY_BASE_URL: ''
       PREVIEW_DOMAINS: ''
       SETUP_TOKEN: ${{secret(32)}} # gates /setup; required outside local dev (see design notes)
-      R_PING_BASE_URL: https://ping.openmote.dev # anonymous-analytics / version-check pings
+      R_PING_BASE_URL: https://ping.roomote.dev # anonymous-analytics / version-check pings
       DEFAULT_COMPUTE_PROVIDER: modal
       EXCLUDED_COMPUTE_PROVIDERS: docker
       DATABASE_URL: ${{Postgres.DATABASE_URL}}

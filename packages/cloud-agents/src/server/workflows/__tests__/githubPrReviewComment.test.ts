@@ -14,15 +14,15 @@ const MARKER = (sha: string, mode = 'initial') =>
   `<!-- roomote-review-summary sha=${sha} mode=${mode} -->`;
 
 const IN_PROGRESS_INITIAL =
-  'Reviewing the PR now. <a href="https://openmote.dev/task/x" target="_blank" rel="noopener noreferrer">Follow</a>';
+  'Reviewing the PR now. <a href="https://roomote.dev/task/x" target="_blank" rel="noopener noreferrer">Follow</a>';
 
 const IN_PROGRESS_SYNC = 'Re-reviewing new commits now.';
 
 const COMPLETION =
-  'No code issues found. [See task](https://openmote.dev/task/x)';
+  'No code issues found. [See task](https://roomote.dev/task/x)';
 
 describe('buildTerminalReviewStatus', () => {
-  const url = 'https://openmote.dev/task/abc';
+  const url = 'https://roomote.dev/task/abc';
 
   it('completed outcome includes a See task link', () => {
     expect(
