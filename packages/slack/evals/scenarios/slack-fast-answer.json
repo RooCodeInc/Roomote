@@ -21,14 +21,14 @@
         "name": "product-debug",
         "type": "public_channel",
         "isMember": true,
-        "members": ["UDAN", "BROOMOTE"]
+        "members": ["UGRACE", "BROOMOTE"]
       }
     ],
     "users": [
       { "id": "BROOMOTE", "name": "roomote", "displayName": "Roomote" },
       {
-        "id": "UDAN",
-        "name": "dan",
+        "id": "UGRACE",
+        "name": "grace",
         "displayName": "Grace Hopper",
         "email": "local@roomote.dev"
       }
@@ -44,7 +44,7 @@
         "event": {
           "type": "app_mention",
           "channel": "C123ABC456",
-          "user": "UDAN",
+          "user": "UGRACE",
           "text": "<@BROOMOTE> !fast What does HTTP status code 429 mean, and what is the standard way for a client to respond to it?",
           "ts": "$TS1",
           "channel_type": "channel"

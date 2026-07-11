@@ -495,7 +495,7 @@ describe('sendMessageToTask', () => {
     mockFindLatestTaskRun.mockResolvedValue(createActiveRun());
     mockUserFindFirst.mockResolvedValue({
       name: 'Ada Lovelace',
-      email: 'matt@example.com',
+      email: 'ada@example.com',
     });
 
     const result = await sendMessageToTask({
@@ -549,7 +549,7 @@ describe('sendMessageToTask', () => {
     mockFindLatestTaskRun.mockResolvedValue(createActiveRun());
     mockUserFindFirst.mockResolvedValue({
       name: 'Ada Lovelace',
-      email: 'matt@example.com',
+      email: 'ada@example.com',
     });
 
     const result = await steerMessageToTask({

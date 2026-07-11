@@ -19,7 +19,7 @@
         "name": "product-debug",
         "type": "public_channel",
         "isMember": true,
-        "members": ["UDAN", "UROOMOTE"]
+        "members": ["UGRACE", "UROOMOTE"]
       }
     ],
     "users": [
@@ -29,8 +29,8 @@
         "displayName": "Roomote"
       },
       {
-        "id": "UDAN",
-        "name": "dan",
+        "id": "UGRACE",
+        "name": "grace",
         "displayName": "Grace Hopper",
         "email": "local@roomote.dev"
       }
@@ -44,7 +44,7 @@
       "event": {
         "type": "app_mention",
         "channel": "C123ABC456",
-        "user": "UDAN",
+        "user": "UGRACE",
         "text": "<@UROOMOTE> !fast what file handles Slack mentions?",
         "ts": "1710000000.000100",
         "channel_type": "channel"

@@ -13,8 +13,10 @@
       "username": "roomote_mock_bot",
       "first_name": "Roomote"
     },
-    "chats": [{ "id": 111000111, "type": "private", "first_name": "Dan" }],
-    "users": [{ "id": 111000111, "first_name": "Dan", "username": "dan_mock" }]
+    "chats": [{ "id": 111000111, "type": "private", "first_name": "Grace" }],
+    "users": [
+      { "id": 111000111, "first_name": "Grace", "username": "grace_mock" }
+    ]
   },
   "events": [
     {
@@ -24,11 +26,11 @@
         "updateId": "$U1",
         "message": {
           "message_id": "$M1",
-          "chat": { "id": 111000111, "type": "private", "first_name": "Dan" },
+          "chat": { "id": 111000111, "type": "private", "first_name": "Grace" },
           "from": {
             "id": 111000111,
-            "first_name": "Dan",
-            "username": "dan_mock"
+            "first_name": "Grace",
+            "username": "grace_mock"
           },
           "text": "!fast what file handles Telegram webhooks?"
         }
