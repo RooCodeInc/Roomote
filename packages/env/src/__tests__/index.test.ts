@@ -565,6 +565,7 @@ describe('Env', () => {
       R_TELEGRAM_BOT_USERNAME: '',
       R_SLACK_CLIENT_ID: '',
       R_SLACK_CLIENT_SECRET: '',
+      R_SLACK_SIGNING_SECRET: '',
       R_MICROSOFT_CLIENT_ID: '',
       R_MICROSOFT_CLIENT_SECRET: '',
       R_MICROSOFT_TENANT_ID: '',
@@ -586,6 +587,7 @@ describe('Env', () => {
       expect(env.R_TELEGRAM_WEBHOOK_SECRET).toBeUndefined();
       expect(env.R_TELEGRAM_BOT_USERNAME).toBeUndefined();
       expect(env.R_SLACK_CLIENT_ID).toBeUndefined();
+      expect(env.R_SLACK_SIGNING_SECRET).toBeUndefined();
       expect(env.R_MICROSOFT_CLIENT_ID).toBeUndefined();
       expect(env.R_MICROSOFT_TENANT_ID).toBeUndefined();
       expect(env.R_LINEAR_CLIENT_ID).toBeUndefined();
