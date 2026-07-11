@@ -398,12 +398,11 @@ async function resolveAuthIdentity({
     };
   }
 
-  // Bitbucket Cloud Basic auth needs an identity alongside the secret: the
-  // Atlassian account email for API tokens, or the account username for
-  // legacy app passwords. There is no discovery endpoint that works without
-  // it, so the value must be configured up front.
+  // Bitbucket Cloud REST auth pairs the API token with the Atlassian account
+  // email. There is no discovery endpoint that works without it, so the value
+  // must be configured up front.
   throw new Error(
-    'BITBUCKET_USERNAME is required with BITBUCKET_TOKEN. Set it to the Atlassian account email that owns the API token (or the Bitbucket username for a legacy app password).',
+    'BITBUCKET_USERNAME is required with BITBUCKET_TOKEN. Set it to the Atlassian account email that owns the API token.',
   );
 }
 
@@ -480,7 +479,7 @@ export async function validateBitbucketToken({
       return {
         status: 'invalid',
         error:
-          'Bitbucket rejected the credentials. Pair an Atlassian API token with the Atlassian account email (legacy app passwords pair with the Bitbucket username), and confirm the token is active and includes the read:user:bitbucket scope alongside repository access.',
+          'Bitbucket rejected the credentials. Confirm the API token is active, is paired with the Atlassian account email that owns it, and includes the read:user:bitbucket scope alongside repository access.',
       };
     }
 

@@ -8,13 +8,6 @@ Bitbucket Cloud support uses a deployment-owned Atlassian API token paired with
 the Atlassian account email. This MVP covers Bitbucket Cloud only. Bitbucket
 Server and Data Center are not supported yet.
 
-<Note>
-  Bitbucket Cloud app passwords are deprecated. Atlassian runs scheduled
-  brownouts from June 9, 2026 and removes app passwords permanently on July 28,
-  2026. Existing app-password configurations keep working until then, but new
-  setups should use API tokens with scopes.
-</Note>
-
 Repository sync can also create pull request webhooks, allowing Review Code
 automation and `@roomote` pull request comments to work for synced Bitbucket
 Cloud repositories.
@@ -52,12 +45,10 @@ BITBUCKET_BASE_URL=https://bitbucket.org
 BITBUCKET_WEBHOOK_SECRET=<webhook-secret>
 ```
 
-`BITBUCKET_USERNAME` is required with `BITBUCKET_TOKEN`. For API tokens it is
-the Atlassian account email that owns the token (Bitbucket pairs it with the
-token for REST Basic auth). For git-over-HTTPS, Roomote automatically uses
-Bitbucket's static `x-bitbucket-api-token-auth` user, so no extra configuration
-is needed. Legacy app passwords keep the old semantics until Atlassian removes
-them: set `BITBUCKET_USERNAME` to the Bitbucket account username instead.
+`BITBUCKET_USERNAME` is required with `BITBUCKET_TOKEN` and holds the Atlassian
+account email that owns the token (Bitbucket pairs the two for REST auth). For
+git-over-HTTPS, Roomote automatically uses Bitbucket's static
+`x-bitbucket-api-token-auth` user, so no extra configuration is needed.
 `BITBUCKET_BASE_URL` defaults to `https://bitbucket.org`. Only Bitbucket Cloud
 is accepted; other hosts are rejected.
 

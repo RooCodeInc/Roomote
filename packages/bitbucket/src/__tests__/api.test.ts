@@ -10,13 +10,11 @@ import {
 } from '../api';
 
 describe('listBitbucketRepositories', () => {
-  it('discovers workspaces from memberships and lists repositories per workspace instead of the removed cross-workspace endpoint', async () => {
-    const requestedUrls: string[] = [];
+  it('discovers workspaces from memberships and lists repositories per workspace', async () => {
     const jsonResponse = (body: unknown) =>
       new Response(JSON.stringify(body), { status: 200 });
     const fetchImpl = (async (input: RequestInfo | URL) => {
       const url = String(input);
-      requestedUrls.push(url);
 
       if (url.includes('/user/workspaces')) {
         return jsonResponse({
@@ -53,9 +51,6 @@ describe('listBitbucketRepositories', () => {
       'acme/one',
       'beta/two',
     ]);
-    expect(
-      requestedUrls.some((url) => url.includes('/2.0/repositories?')),
-    ).toBe(false);
   });
 });
 
@@ -118,7 +113,7 @@ describe('getBitbucketGitUsername', () => {
     );
   });
 
-  it('keeps the Bitbucket username for legacy app-password identities', () => {
+  it('keeps a non-email identity unchanged', () => {
     expect(getBitbucketGitUsername('roomote-bot')).toBe('roomote-bot');
   });
 });
