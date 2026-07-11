@@ -11,8 +11,11 @@ vi.mock('@roomote/db/server', () => ({
 }));
 
 vi.mock('@roomote/compute-providers', () => ({
+  buildBlaxelWorkerImage: vi.fn(),
   buildE2bWorkerTemplate: vi.fn(),
   registerDaytonaWorkerSnapshot: vi.fn(),
+  deriveBlaxelWorkerImageName: (imageRef: string) =>
+    `roomote-worker-${imageRef.slice(imageRef.lastIndexOf(':') + 1)}`,
   deriveE2bWorkerTemplateRef: (imageRef: string) =>
     `roomote-worker:${imageRef.slice(imageRef.lastIndexOf(':') + 1)}`,
   deriveDaytonaWorkerSnapshotName: (imageRef: string) =>

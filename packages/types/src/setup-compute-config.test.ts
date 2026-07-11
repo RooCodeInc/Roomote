@@ -158,6 +158,12 @@ describe('buildSetupComputeStatus', () => {
     expect(isAutoProvisionedComputeArtifactField(daytonaSnapshot!)).toBe(true);
     expect(isComputeOperatorEditableField(daytonaSnapshot!)).toBe(false);
 
+    const blaxelImage = status.providers
+      .find((provider) => provider.provider === 'blaxel')
+      ?.fields.find((field) => field.envVarName === 'BLAXEL_IMAGE');
+    expect(isAutoProvisionedComputeArtifactField(blaxelImage!)).toBe(true);
+    expect(isComputeOperatorEditableField(blaxelImage!)).toBe(false);
+
     const modalToken = status.providers
       .find((provider) => provider.provider === 'modal')
       ?.fields.find((field) => field.envVarName === 'MODAL_TOKEN_ID');
@@ -197,6 +203,7 @@ describe('buildSetupComputeStatus', () => {
       'modal',
       'e2b',
       'daytona',
+      'blaxel',
       'docker',
     ]);
     // The shared worker image is not hosted-ready with no configuration.
@@ -536,8 +543,22 @@ describe('buildSetupComputeStatus', () => {
       // provisionable during setup from the registry-qualified worker image.
       daytona: true,
       e2b: true,
+      // Blaxel can build its sandbox image from the registry-qualified worker
+      // image during setup, just like E2B and Daytona provision artifacts.
+      blaxel: true,
       docker: true,
     });
+
+    const withBlaxelImage = buildSetupComputeStatus({
+      runtimeEnv: {
+        BLAXEL_IMAGE: 'sandbox/roomote-worker:version',
+      },
+    });
+    expect(
+      withBlaxelImage.providers.find(
+        (provider) => provider.provider === 'blaxel',
+      )?.infrastructureSatisfied,
+    ).toBe(true);
 
     const withoutInfrastructure = buildSetupComputeStatus({});
 
@@ -552,6 +573,7 @@ describe('buildSetupComputeStatus', () => {
       modal: false,
       daytona: false,
       e2b: false,
+      blaxel: false,
       docker: true,
     });
 
@@ -574,6 +596,7 @@ describe('buildSetupComputeStatus', () => {
       modal: true,
       daytona: true,
       e2b: true,
+      blaxel: false,
       docker: true,
     });
   });
@@ -762,7 +785,7 @@ describe('getDefaultAvailableComputeProvider', () => {
   it('falls back to docker when every provider is excluded', () => {
     expect(
       getDefaultAvailableComputeProvider(
-        new Set(['docker', 'modal', 'daytona', 'e2b']),
+        new Set(['docker', 'modal', 'daytona', 'e2b', 'blaxel']),
       ),
     ).toBe('docker');
   });

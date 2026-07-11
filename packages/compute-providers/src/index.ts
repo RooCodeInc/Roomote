@@ -13,3 +13,5 @@ export * from './adapters/daytona';
 export * from './daytona';
 export * from './adapters/e2b';
 export * from './e2b';
+export * from './adapters/blaxel';
+export * from './blaxel';

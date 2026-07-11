@@ -302,6 +302,23 @@ const computeProviderUsagePolicies: Record<
       };
     },
   },
+  blaxel: {
+    async deriveUsage(context) {
+      await recordComputeProviderUsageSampleIfPresent({
+        context,
+        provider: 'blaxel',
+        source: 'worker_blaxel_cgroup_poll',
+      });
+
+      return {
+        activeCpuDurationMs: context.inputActiveCpuDurationMs,
+        observedMemoryMibMilliseconds:
+          context.inputObservedMemoryMibMilliseconds,
+        detailPatch: {},
+        preferredMeasurementSource: 'roomote_observation',
+      };
+    },
+  },
 };
 
 function resolveMeasurementSource(input: {

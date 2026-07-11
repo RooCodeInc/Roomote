@@ -40,6 +40,7 @@ const BRAND_ICON_BY_PROVIDER: Record<ComputeProvider, string> = {
   docker: 'docker',
   daytona: 'daytona',
   e2b: 'e2b',
+  blaxel: 'blaxel',
 };
 
 type ComputeProviderStatus = SetupComputeStatus['providers'][number];
@@ -176,7 +177,7 @@ export function ComputeProviderSection({
   const credentialsHint = getComputeCredentialsHint(provider.provider);
 
   // Env-only fields the deployment provisions itself once credentials are
-  // saved (the E2B worker template build, the Daytona snapshot registration).
+  // saved (E2B template build, Daytona snapshot registration, or Blaxel image build).
   const provisionableEnvOnlyFields = provider.fields.filter(
     (field) =>
       isAutoProvisionedComputeArtifactField(field) &&

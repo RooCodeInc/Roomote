@@ -2,6 +2,7 @@ export function IntegrationName({ href, icon, name }) {
   const manualIcons = {
     daytona: '/logo/integrations/daytona.svg',
     e2b: '/logo/integrations/e2b.svg',
+    blaxel: '/logo/integrations/blaxel.svg',
   };
   const iconSrc =
     manualIcons[icon] ??

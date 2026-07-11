@@ -7,6 +7,7 @@ const {
   mockSpawnDockerWorker,
   mockSpawnE2bWorker,
   mockSpawnModalWorker,
+  mockSpawnBlaxelWorker,
 } = vi.hoisted(() => ({
   mockEnv: {
     MODAL_TOKEN_ID: 'modal-token-id',
@@ -41,12 +42,17 @@ const {
     E2B_DOMAIN: undefined,
     E2B_TEMPLATE_ID: 'roomote-worker-template',
     E2B_MAX_SANDBOX_TIMEOUT_MS: 3_600_000,
+    BL_API_KEY: 'blaxel-key',
+    BL_WORKSPACE: 'roomote',
+    BLAXEL_IMAGE: 'ghcr.io/roomote/worker:test',
+    BLAXEL_REGION: 'us-pdx-1',
   } as Record<string, string | number | boolean | undefined>,
   mockFindOrg: vi.fn(),
   mockSpawnDaytonaWorker: vi.fn(),
   mockSpawnDockerWorker: vi.fn(),
   mockSpawnE2bWorker: vi.fn(),
   mockSpawnModalWorker: vi.fn(),
+  mockSpawnBlaxelWorker: vi.fn(),
 }));
 
 const { mockFinishRun } = vi.hoisted(() => ({
@@ -91,6 +97,7 @@ vi.mock('../compute-providers', () => ({
   spawnDockerWorker: (...args: unknown[]) => mockSpawnDockerWorker(...args),
   spawnE2bWorker: (...args: unknown[]) => mockSpawnE2bWorker(...args),
   spawnModalWorker: (...args: unknown[]) => mockSpawnModalWorker(...args),
+  spawnBlaxelWorker: (...args: unknown[]) => mockSpawnBlaxelWorker(...args),
 }));
 
 import { RoomoteController } from '../RoomoteController';
@@ -128,6 +135,10 @@ describe('RoomoteController', () => {
     mockEnv.E2B_DOMAIN = undefined;
     mockEnv.E2B_TEMPLATE_ID = 'roomote-worker-template';
     mockEnv.E2B_MAX_SANDBOX_TIMEOUT_MS = 3_600_000;
+    mockEnv.BL_API_KEY = 'blaxel-key';
+    mockEnv.BL_WORKSPACE = 'roomote';
+    mockEnv.BLAXEL_IMAGE = 'ghcr.io/roomote/worker:test';
+    mockEnv.BLAXEL_REGION = 'us-pdx-1';
     mockSpawnDockerWorker.mockResolvedValue({ containerId: 'worker-47' });
   });
 
@@ -381,6 +392,40 @@ describe('RoomoteController', () => {
     ).rejects.toThrow('E2B_API_KEY is required to spawn E2B workers');
 
     expect(mockSpawnE2bWorker).not.toHaveBeenCalled();
+  });
+
+  it('spawns Blaxel workers when Blaxel is selected', async () => {
+    const controller = new RoomoteController('production');
+    await (
+      controller as unknown as {
+        spawnFreshWorker: (
+          taskRun: TaskRun,
+          authToken: string,
+          deploymentSlug: string,
+          timeoutMs: number,
+          provider: 'blaxel',
+        ) => Promise<void>;
+      }
+    ).spawnFreshWorker(
+      { id: 54, payload: { environmentId: 'env_123' } } as TaskRun,
+      'auth-token',
+      'roomote',
+      60_000,
+      'blaxel',
+    );
+
+    expect(mockSpawnBlaxelWorker).toHaveBeenCalledWith(
+      expect.objectContaining({ id: 54 }),
+      'auth-token',
+      expect.objectContaining({
+        blaxelApiKey: 'blaxel-key',
+        blaxelWorkspace: 'roomote',
+        blaxelImage: 'ghcr.io/roomote/worker:test',
+        blaxelRegion: 'us-pdx-1',
+        blaxelTimeoutMs: 60_000,
+        deploymentSlug: 'roomote',
+      }),
+    );
   });
 
   it('rejects partial Modal private registry config on startup', () => {

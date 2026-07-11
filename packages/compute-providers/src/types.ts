@@ -262,6 +262,21 @@ export interface E2bConfig {
   timeoutMs?: number;
 }
 
+export interface BlaxelConfig {
+  /** Blaxel API key (`BL_API_KEY`). */
+  apiKey: string;
+  /** Blaxel workspace name (`BL_WORKSPACE`). */
+  workspace: string;
+  /** Worker-compatible sandbox image (`BLAXEL_IMAGE`). */
+  image: string;
+  /** Optional Blaxel deployment region (`BLAXEL_REGION`). */
+  region?: string;
+  /** Sandbox memory allocation in MiB. */
+  memoryMiB?: number;
+  /** Maximum sandbox lifetime in milliseconds. */
+  timeoutMs?: number;
+}
+
 export type ComputeProviderFactoryOptions = (
   | {
       provider: 'modal';
@@ -278,6 +293,10 @@ export type ComputeProviderFactoryOptions = (
   | {
       provider: 'e2b';
       config?: E2bConfig;
+    }
+  | {
+      provider: 'blaxel';
+      config?: BlaxelConfig;
     }
 ) & {
   /**

@@ -75,7 +75,8 @@
               "providers/compute/docker",
               "providers/compute/modal",
               "providers/compute/e2b",
-              "providers/compute/daytona"
+              "providers/compute/daytona",
+              "providers/compute/blaxel"
             ]
           },
           "environment-variables"

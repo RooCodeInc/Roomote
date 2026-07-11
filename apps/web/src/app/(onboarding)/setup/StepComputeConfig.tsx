@@ -195,7 +195,8 @@ export function StepComputeConfig({
   const credentialFields =
     selectedProvider?.fields.filter(isComputeCredentialField) ?? [];
   // Operator-editable infrastructure only (Modal base image, domain/region).
-  // Auto-provisioned E2B template / Daytona snapshot IDs are not form inputs.
+  // Auto-provisioned E2B template, Daytona snapshot, and Blaxel image refs are
+  // not form inputs.
   const advancedInfraFields =
     selectedProvider?.fields.filter(
       (field) =>
@@ -210,7 +211,7 @@ export function StepComputeConfig({
     selectedProvider?.fields.some(isComputeInfrastructureField) ?? false;
   const workerImage = computeSetup.workerImage;
   const workerImageValue = values[SHARED_WORKER_IMAGE_ENV_VAR]?.trim() ?? '';
-  // Local tags (e.g. roomote-worker:local) satisfy Docker but not E2B/Daytona
+  // Local tags (e.g. roomote-worker:local) satisfy Docker but not hosted
   // provisioning — only registry-qualified refs are hosted-ready.
   const submittedHostedWorkerImageReady =
     deriveModalBaseImageRefDefault(workerImageValue) !== null;
@@ -536,7 +537,15 @@ export function StepComputeConfig({
         ) : null}
       </div>
 
-      <div className="flex flex-col gap-2 sm:flex-row sm:items-center mt-8">
+      {awaitingTemplateBuild ? (
+        <p className="text-sm text-muted-foreground mt-8">
+          Provisioning the worker base image. This can take a few minutes.
+        </p>
+      ) : null}
+
+      <div
+        className={`flex flex-col gap-2 sm:flex-row sm:items-center ${awaitingTemplateBuild ? 'mt-2' : 'mt-8'}`}
+      >
         {onBack ? (
           <Button
             type="button"

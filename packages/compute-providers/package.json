@@ -34,6 +34,7 @@
     "clean": "rimraf .turbo"
   },
   "dependencies": {
+    "@blaxel/core": "0.3.0",
     "@daytonaio/sdk": "^0.190.1",
     "@roomote/env": "workspace:^",
     "@roomote/types": "workspace:^",

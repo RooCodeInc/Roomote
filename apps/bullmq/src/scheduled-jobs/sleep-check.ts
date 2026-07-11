@@ -146,6 +146,11 @@ async function createSleepCheckClient(provider: ComputeProvider) {
         provider: 'e2b',
         envFallback: await resolveComputeProviderEnvValues('e2b'),
       });
+    case 'blaxel':
+      return createComputeProviderClient({
+        provider: 'blaxel',
+        envFallback: await resolveComputeProviderEnvValues('blaxel'),
+      });
     default:
       throw new Error(
         `Sleep check has no compute client for provider "${provider}"`,

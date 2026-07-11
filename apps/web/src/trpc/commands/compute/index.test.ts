@@ -136,6 +136,10 @@ describe('compute commands', () => {
     'DAYTONA_SNAPSHOT_NAME',
     'DAYTONA_API_URL',
     'DAYTONA_TARGET',
+    'BL_API_KEY',
+    'BL_WORKSPACE',
+    'BLAXEL_IMAGE',
+    'BLAXEL_REGION',
     'DOCKER_WORKER_IMAGE',
     'RELEASE_VERSION',
   ];
