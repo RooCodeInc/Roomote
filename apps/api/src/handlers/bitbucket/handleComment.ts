@@ -6,6 +6,7 @@ import {
 import {
   createBitbucketPullRequestComment,
   getBitbucketDeploymentUser,
+  normalizeBitbucketLinkedAccountKey,
 } from '@roomote/bitbucket';
 import {
   type TaskPayload,
@@ -22,6 +23,7 @@ import {
 } from '../tasks/sendMessageToTask';
 import {
   getBitbucketAutomationTargets,
+  getBitbucketUserAccountKey,
   getBitbucketUsername,
   isRoomoteBitbucketUsername,
 } from './getBitbucketAutomationTargets';
@@ -34,6 +36,7 @@ import {
   getBitbucketPullRequestNumber,
   getBitbucketPullRequestUrl,
   type BitbucketPullRequestCommentWebhook,
+  type BitbucketWebhookUser,
 } from './types';
 
 const BITBUCKET_MENTION_HANDLE = '@roomote';
@@ -47,12 +50,39 @@ function isBitbucketMention(commentBody: string): boolean {
   return commentBody.toLowerCase().includes(BITBUCKET_MENTION_HANDLE);
 }
 
-async function isDeploymentTokenAuthor(username: string): Promise<boolean> {
+async function isDeploymentTokenAuthor(
+  author: BitbucketWebhookUser | undefined,
+): Promise<boolean> {
   try {
     const deploymentUser = await getBitbucketDeploymentUser();
 
+    if (!deploymentUser) {
+      return false;
+    }
+
+    const authorKey = getBitbucketUserAccountKey(author);
+
+    if (authorKey) {
+      if (
+        deploymentUser.accountId &&
+        normalizeBitbucketLinkedAccountKey(deploymentUser.accountId) ===
+          authorKey
+      ) {
+        return true;
+      }
+
+      if (
+        deploymentUser.uuid &&
+        normalizeBitbucketLinkedAccountKey(deploymentUser.uuid) === authorKey
+      ) {
+        return true;
+      }
+    }
+
+    const username = getBitbucketUsername(author);
+
     return (
-      !!deploymentUser &&
+      !!username &&
       deploymentUser.login.toLowerCase() === username.toLowerCase()
     );
   } catch (error) {
@@ -216,7 +246,7 @@ export async function handleBitbucketComment(
 
   if (
     isRoomoteBitbucketUsername(commenter) ||
-    (await isDeploymentTokenAuthor(commenter))
+    (await isDeploymentTokenAuthor(payload.comment.user ?? payload.actor))
   ) {
     return { status: 'ok', message: 'roomote_authored_comment' };
   }
@@ -326,6 +356,7 @@ export async function handleBitbucketComment(
       repoFullName,
       prNumber,
       headSha,
+      sourceControlProvider: 'bitbucket',
     });
 
     if (activeReview?.taskId) {
