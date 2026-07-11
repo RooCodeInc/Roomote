@@ -14,6 +14,7 @@ const {
   mockQueuePrReviewActivityNotification,
   mockQueuePrReviewSummaryNotification,
   mockRecordWebhook,
+  mockResolveConfiguredGitHubAppSlug,
   mockResolveDeploymentEnvVar,
   mockUpdateTaskPrStatus,
   mockUpsertGitHubPullRequestFactFromWebhook,
@@ -40,6 +41,7 @@ const {
   mockQueuePrReviewActivityNotification: vi.fn(),
   mockQueuePrReviewSummaryNotification: vi.fn(),
   mockRecordWebhook: vi.fn(),
+  mockResolveConfiguredGitHubAppSlug: vi.fn(),
   mockResolveDeploymentEnvVar: vi.fn(),
   mockUpdateTaskPrStatus: vi.fn(),
   mockUpsertGitHubPullRequestFactFromWebhook: vi.fn(),
@@ -87,6 +89,7 @@ vi.mock('@roomote/db/server', () => ({
 
 vi.mock('@roomote/github', () => ({
   isRepoSkipped: mockIsRepoSkipped,
+  resolveConfiguredGitHubAppSlug: mockResolveConfiguredGitHubAppSlug,
 }));
 
 vi.mock('@roomote/sdk/server', () => ({
@@ -167,12 +170,14 @@ describe('github webhook router', () => {
     mockQueuePrReviewActivityNotification.mockReset();
     mockQueuePrReviewSummaryNotification.mockReset();
     mockRecordWebhook.mockReset();
+    mockResolveConfiguredGitHubAppSlug.mockReset();
     mockResolveDeploymentEnvVar.mockReset();
     mockUpdateTaskPrStatus.mockReset();
     mockUpsertGitHubPullRequestFactFromWebhook.mockReset();
     mockVerifyAndReceive.mockReset();
 
     mockIsRepoSkipped.mockReturnValue(false);
+    mockResolveConfiguredGitHubAppSlug.mockResolvedValue('roomote');
     mockResolveDeploymentEnvVar.mockResolvedValue('test-secret');
     mockHandlePrComment.mockResolvedValue({ status: 'ok' });
     mockRecordWebhook.mockImplementation(
@@ -312,6 +317,24 @@ describe('github webhook router', () => {
     );
     expect(webhooksConstructorParams).toEqual([{ secret: 'db-only-secret' }]);
     expect(mockHandlePushConflictCheck).toHaveBeenCalled();
+  });
+
+  it('refreshes the configured app slug before dispatching handlers', async () => {
+    const response = await app.request('http://localhost/api/webhooks/github', {
+      method: 'POST',
+      headers: {
+        'x-github-delivery': 'delivery-slug',
+        'x-github-event': 'push',
+        'x-hub-signature-256': 'sha256=test',
+      },
+      body: JSON.stringify({ ref: 'refs/heads/main' }),
+    });
+
+    expect(response.status).toBe(200);
+    expect(mockResolveConfiguredGitHubAppSlug).toHaveBeenCalledTimes(1);
+    expect(
+      mockResolveConfiguredGitHubAppSlug.mock.invocationCallOrder[0],
+    ).toBeLessThan(mockVerifyAndReceive.mock.invocationCallOrder[0]!);
   });
 
   it('returns 401 without processing when no webhook secret is configured', async () => {

@@ -47,6 +47,17 @@ function emptyStringDefault() {
   return z.string().default('');
 }
 
+function dockerSize() {
+  return z.string().regex(/^\d+(?:\.\d+)?[kmgt]?b?$/i, 'Invalid Docker size');
+}
+
+function optInBoolean() {
+  return z
+    .enum(['true', 'false', '1', '0'])
+    .default('false')
+    .transform((value) => value === 'true' || value === '1');
+}
+
 const serverSchema = {
   R_APP_ENV: z.enum(['development', 'preview', 'production']).optional(),
   APP_ENV: z.enum(['development', 'preview', 'production']).optional(),
@@ -68,6 +79,14 @@ const serverSchema = {
     .default(process.arch === 'arm64' ? 'linux/arm64' : 'linux/amd64'),
   DOCKER_WORKER_NETWORK: z.string().min(1).optional(),
   DOCKER_WORKER_RELEASE_PATH: z.string().min(1).optional(),
+  DOCKER_WORKER_CPU_LIMIT: z.coerce.number().positive().default(2),
+  DOCKER_WORKER_MEMORY_LIMIT: dockerSize().default('4g'),
+  DOCKER_WORKER_PIDS_LIMIT: z.coerce.number().int().positive().default(512),
+  DOCKER_WORKER_DISK_LIMIT: dockerSize().default('20g'),
+  DOCKER_WORKER_ALLOW_UNBOUNDED_DISK: optInBoolean(),
+  DOCKER_WORKER_LOG_MAX_SIZE: dockerSize().default('10m'),
+  DOCKER_WORKER_LOG_MAX_FILES: z.coerce.number().int().positive().default(3),
+  DOCKER_WORKER_EGRESS_POLICY: z.enum(['internet', 'none']).default('internet'),
   R_PUBLIC_URL: z.string().url().optional(),
   R_APP_URL: z.string().min(1),
   // Anonymous telemetry + version checks (Ping service).
@@ -194,6 +213,9 @@ const serverSchema = {
   R_ALLOWED_EMAILS: z.string().optional(),
   PREVIEW_TOKEN_TTL_SECONDS: z.coerce.number().int().positive().default(3600),
   SLACK_API_TIMEOUT_MS: z.coerce.number().int().positive().default(10_000),
+  // How long recorded webhook payloads are kept before the WebhookCleanup
+  // scheduled job (apps/bullmq) deletes them.
+  WEBHOOK_RETENTION_DAYS: z.coerce.number().int().positive().default(30),
   API_EXTERNAL_REQUEST_TIMEOUT_MS: z.coerce
     .number()
     .int()

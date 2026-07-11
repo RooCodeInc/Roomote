@@ -21,6 +21,7 @@ vi.mock('@roomote/github', () => ({
   Schemas: {
     isRoomoteGitHubLogin: vi.fn(() => false),
   },
+  getEffectiveGitHubAppSlug: vi.fn(() => 'roomote'),
   getInstallationOctokit: mockGetInstallationOctokit,
 }));
 

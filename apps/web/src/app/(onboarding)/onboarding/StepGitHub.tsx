@@ -20,7 +20,6 @@ export function StepGitHub({
   previousStepCompleted?: string;
 }) {
   const githubAppMention = getGitHubAppMention(githubAppSlug);
-
   const authenticateGitHubAccount = useAuthenticateGitHubAccount({
     onSuccess: (result) => {
       if (result.success) {

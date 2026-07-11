@@ -2,7 +2,7 @@ import { Hono } from 'hono';
 import { Webhooks } from '@octokit/webhooks';
 
 import { resolveDeploymentEnvVar } from '@roomote/db/server';
-import { isRepoSkipped } from '@roomote/github';
+import { isRepoSkipped, resolveConfiguredGitHubAppSlug } from '@roomote/github';
 import {
   updateTaskPrStatus,
   upsertGitHubPullRequestFactFromWebhook,
@@ -460,6 +460,12 @@ github.post('/', async (c) => {
     );
 
     const payload = await c.req.text();
+
+    // The event handlers classify logins synchronously (mention detection,
+    // bot-identity checks); refresh the configured app slug first so an app
+    // created through the /setup flow is recognized as ourselves.
+    await resolveConfiguredGitHubAppSlug();
+
     await webhooks.verifyAndReceive({ id, name, signature, payload });
     return c.json({ message: 'webhook_processed' });
   } catch (error) {

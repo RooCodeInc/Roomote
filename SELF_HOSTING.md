@@ -7,14 +7,14 @@ below.
 
 ## Deployment Modes
 
-| Mode                       | Command                            | Use case                                                                                                   |
-| -------------------------- | ---------------------------------- | ---------------------------------------------------------------------------------------------------------- |
-| One-command install        | `curl get.roomote.dev \| bash`     | Fresh server, guided browser setup, published images (start here)                                          |
-| Local development          | `pnpm dev`                         | Fast source edits with PM2-managed local services                                                          |
-| Single-host production     | `docker compose ... up -d --build` | Put web, API, controller, queues, preview proxy, and Caddy on one host                                     |
+| Mode                       | Command                            | Use case                                                                                                     |
+| -------------------------- | ---------------------------------- | ------------------------------------------------------------------------------------------------------------ |
+| One-command install        | `curl get.roomote.dev \| bash`     | Fresh server, guided browser setup, published images (start here)                                            |
+| Local development          | `pnpm dev`                         | Fast source edits with PM2-managed local services                                                            |
+| Single-host production     | `docker compose ... up -d --build` | Put web, API, controller, queues, preview proxy, and Caddy on one host                                       |
 | Railway (PaaS)             | Railway template                   | Managed platform deploy with hosted sandboxes; see [deploy/railway](deploy/railway/README.md)                |
 | Render (PaaS)              | Render Blueprint                   | Managed platform deploy with hosted sandboxes; see [deploy/render](deploy/render/README.md)                  |
-| Coolify (self-hosted PaaS) | Docker Compose resource            | Run the published images on a Coolify-managed server; see [deploy/coolify](deploy/coolify/README.md)       |
+| Coolify (self-hosted PaaS) | Docker Compose resource            | Run the published images on a Coolify-managed server; see [deploy/coolify](deploy/coolify/README.md)         |
 | Fly.io (PaaS)              | `flyctl` + maintained `fly.toml`   | One Fly app with managed Postgres/Redis/storage and hosted sandboxes; see [deploy/fly](deploy/fly/README.md) |
 
 The application stack is web, API, controller, BullMQ, preview proxy,
@@ -81,9 +81,56 @@ roomote status              # service health
 roomote logs [service...]   # follow logs
 roomote setup-url           # re-print the tokenized /setup link
 roomote upgrade [version]   # upgrade or roll back by image tag
-roomote backup              # pg_dump into /opt/roomote/backups
-roomote restore <f> --yes   # restore a dump (overwrites the database)
+roomote rollback            # return to the release before the last upgrade
+roomote backup              # encrypted recovery bundle in /opt/roomote/backups
+roomote restore <f> --yes   # restore configuration and data onto this host
 ```
+
+The backup command prompts twice for a passphrase. It creates a versioned,
+encrypted `.roomote` bundle containing the PostgreSQL dump, `/opt/roomote/.env`
+(including encryption and signing keys), the Compose and Caddy configuration,
+local MinIO artifacts, schema metadata, and exact container image digests.
+Keep the passphrase outside the host in a secret manager. For unattended use,
+pass a root-readable file with `--passphrase-file`; do not put the passphrase
+on the command line.
+
+Add `--include-redis` when queued tasks, BullMQ schedules, sessions, and
+transient integration state must survive host loss. Without it, restore clears
+Redis so old transient state cannot conflict with the restored database.
+
+Backup establishes an application-quiesced consistency point: it stops web,
+API, controller, BullMQ, preview proxy, and active Docker task workers before
+dumping PostgreSQL and snapshotting local MinIO and optional Redis. Schedule it
+during a maintenance window. The Compose services restart when backup
+finishes; interrupted Docker tasks may be recovered by the normal orphaned-task
+flow.
+
+For external S3-compatible storage, the bundle records the endpoint and bucket
+but does not copy objects. Back up and restore that bucket using the storage
+provider before starting Roomote on the replacement host.
+
+To recover a completely new server, run the one-command installer first, copy
+the bundle onto the host, then run `roomote restore <bundle> --yes`. Restore
+decrypts and verifies every bundled file before stopping the new installation,
+restores the original `.env`, repopulates empty data volumes, pins the recorded
+image digests, restores PostgreSQL, and starts the recorded release. A wrong
+passphrase, checksum failure, missing local-MinIO data, or unavailable image
+identity fails before restored services are started.
+
+`roomote upgrade` first creates an encrypted pre-upgrade backup bundle under
+`/opt/roomote/backups` (skip with `--skip-backup`; supply a passphrase with
+`--backup-passphrase-file` or `ROOMOTE_BACKUP_PASSPHRASE`, otherwise one is
+generated next to the bundle). It then pulls the new images and applies
+database migrations before replacing any running service. Migrations apply in
+a single transaction, so a migration failure rolls the schema back, restores
+the previous deployment configuration, and leaves the previous release
+running. Because every schema change must keep the previous release working
+(see the compatibility policy in `deploy/README.md`), a bad release can be
+undone with `roomote rollback`, which re-deploys the release recorded before
+the last upgrade without touching the database; the pre-upgrade bundle plus
+`roomote restore` is the last-resort path that also rewinds data. The running
+application and schema versions are visible under Settings -> Deployment ->
+Diagnostics.
 
 `roomote upgrade` prunes old Roomote images after a successful upgrade. It
 keeps the current release plus the newest local Roomote image tags for a total
@@ -118,7 +165,9 @@ For production-style use, also prepare:
 - An app domain, for example `roomote.example.com`.
 - A preview domain plus wildcard DNS, for example
   `preview.roomote.example.com` and `*.preview.roomote.example.com`.
-- A backup plan for Postgres, Redis, and MinIO volumes.
+- A tested encrypted `roomote backup` schedule and an off-host copy of both the
+  bundle and its separately stored passphrase.
+- A provider-level object backup when using external S3-compatible storage.
 
 ## Environment Files
 
@@ -509,11 +558,19 @@ using Docker sandboxes. That overlay:
 
 - builds the `DOCKER_WORKER_IMAGE` from `apps/worker/Dockerfile`;
 - mounts `/var/run/docker.sock` into the controller;
-- sets `DOCKER_WORKER_NETWORK=roomote_worker` so worker containers join a
-  dedicated network that reaches the API, controller, and preview proxy but not
+- sets `DOCKER_WORKER_NETWORK=roomote_worker` as the trusted-service discovery
+  network; each worker receives its own network containing only that worker,
+  the API, and the optional preview proxy when enabled, never sibling tasks,
   Postgres, Redis, or MinIO;
+- enforces CPU, memory, PID, supported writable-layer quotas, and log limits
+  and blocks private and cloud metadata ranges under the default `internet`
+  egress policy;
 - points `DOCKER_WORKER_RELEASE_PATH` at the controller image's packaged worker
   release archive.
+
+Docker tasks fail closed when the host storage driver cannot enforce
+`DOCKER_WORKER_DISK_LIMIT`. Set `DOCKER_WORKER_ALLOW_UNBOUNDED_DISK=true` only
+when the host already provides an equivalent storage quota outside Docker.
 
 Docker sandboxes are the simplest single-host deployment path:
 

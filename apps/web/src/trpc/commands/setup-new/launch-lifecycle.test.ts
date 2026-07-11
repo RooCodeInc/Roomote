@@ -175,13 +175,17 @@ describe('launchQueuedSetupTasksIfReady (fenced onboarding-queue launch)', () =>
     launchClaimedAt?: Date | null;
     sourceWorkItemId?: string | null;
     launchedTaskId?: string | null;
+    selectedByUserId?: string | null;
   }): Promise<string> {
     const [row] = await db
       .insert(workItems)
       .values({
         kind: 'onboarding',
         sourceTaskId: setupOnboardingTaskId,
-        selectedByUserId,
+        selectedByUserId:
+          overrides?.selectedByUserId === undefined
+            ? selectedByUserId
+            : overrides.selectedByUserId,
         sourceWorkItemId: overrides?.sourceWorkItemId ?? null,
         title: 'Queued onboarding task',
         executionPrompt: 'Do the queued onboarding work.',
@@ -231,6 +235,8 @@ describe('launchQueuedSetupTasksIfReady (fenced onboarding-queue launch)', () =>
         launchedAt: workItems.launchedAt,
         targetEnvironmentId: workItems.targetEnvironmentId,
         dismissedAt: workItems.dismissedAt,
+        failedAt: workItems.failedAt,
+        launchError: workItems.launchError,
       })
       .from(workItems)
       .where(eq(workItems.id, id))
@@ -517,6 +523,34 @@ describe('launchQueuedSetupTasksIfReady (fenced onboarding-queue launch)', () =>
       expect(warnSpy).toHaveBeenCalledWith(
         expect.stringContaining('enqueue failed'),
       );
+    } finally {
+      warnSpy.mockRestore();
+    }
+  });
+
+  it('terminally fails an orphaned item instead of retrying it', async () => {
+    const onboardingId = await seedOnboardingItem({
+      sortOrder: 0,
+      selectedByUserId: null,
+    });
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+
+    try {
+      await launch();
+
+      const row = await readRow(onboardingId);
+      expect(row?.status).toBe('failed');
+      expect(row?.failedAt).not.toBeNull();
+      expect(row?.launchError).toBe('Queued setup task has no selecting user.');
+      expect(row?.launchClaimedAt).toBeNull();
+      expect(mockEnqueueTask).not.toHaveBeenCalled();
+
+      // Failed work items are not claimable, so later readiness passes leave
+      // the item terminal instead of producing an infinite retry loop.
+      await launch();
+      expect(mockEnqueueTask).not.toHaveBeenCalled();
+      expect((await readRow(onboardingId))?.status).toBe('failed');
+      expect(warnSpy).toHaveBeenCalledTimes(1);
     } finally {
       warnSpy.mockRestore();
     }

@@ -11,6 +11,8 @@ vi.mock('@roomote/env', async (importOriginal) => {
   };
 });
 
+import { setConfiguredGitHubAppSlugCache } from '@roomote/github';
+
 import { isMention } from '../isMention';
 
 describe('isMention', () => {
@@ -75,5 +77,45 @@ describe('isMention', () => {
         user: null,
       }),
     ).toBe(false);
+  });
+
+  describe('with a database-configured app slug', () => {
+    beforeEach(() => {
+      setConfiguredGitHubAppSlugCache({
+        value: 'openmote',
+        expiresAt: Date.now() + 60_000,
+      });
+    });
+
+    afterEach(() => {
+      setConfiguredGitHubAppSlugCache(null);
+    });
+
+    it('detects mentions of the configured slug', () => {
+      expect(
+        isMention({
+          body: 'Hey @openmote can you take a look?',
+          user: { login: 'testuser' },
+        }),
+      ).toBe(true);
+    });
+
+    it('ignores mentions of the default slug when another slug is configured', () => {
+      expect(
+        isMention({
+          body: 'Hey @roomote can you take a look?',
+          user: { login: 'testuser' },
+        }),
+      ).toBe(false);
+    });
+
+    it('returns false for comments authored by the configured bot', () => {
+      expect(
+        isMention({
+          body: 'Hey @openmote can you take a look?',
+          user: { login: 'openmote[bot]' },
+        }),
+      ).toBe(false);
+    });
   });
 });

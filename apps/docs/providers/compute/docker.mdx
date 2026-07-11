@@ -36,6 +36,16 @@ DOCKER_WORKER_IMAGE=roomote-worker:local
 DOCKER_WORKER_PLATFORM=linux/amd64
 DOCKER_WORKER_NETWORK=roomote_worker
 DOCKER_WORKER_RELEASE_PATH=/roomote/releases/worker-current.tar.gz
+DOCKER_WORKER_CPU_LIMIT=2
+DOCKER_WORKER_MEMORY_LIMIT=4g
+DOCKER_WORKER_PIDS_LIMIT=512
+DOCKER_WORKER_DISK_LIMIT=20g
+DOCKER_WORKER_ALLOW_UNBOUNDED_DISK=false
+DOCKER_WORKER_LOG_MAX_SIZE=10m
+DOCKER_WORKER_LOG_MAX_FILES=3
+# internet allows public egress but blocks private/metadata ranges
+# none disables external egress entirely
+DOCKER_WORKER_EGRESS_POLICY=internet
 ```
 
 Local development builds `roomote-worker:local` automatically. Self-hosted
@@ -45,6 +55,37 @@ containers.
 
 For production deployments, prefer an immutable registry-qualified worker image
 tag when workers need a published image instead of a local tag.
+
+## Resource and network isolation
+
+Every Docker task receives a dedicated bridge network. In Compose deployments,
+Roomote attaches the API and, when enabled, the optional preview proxy to that
+network; sibling task containers and datastore containers are not reachable.
+The controller reconciles replacement API and preview-proxy containers onto
+running task networks, removes empty task networks periodically, and reaps
+stale provisioning containers after a restart.
+
+Workers default to 2 CPUs, 4 GiB of memory with no additional swap, 512 PIDs,
+a requested 20 GiB writable-layer quota, and three 10 MiB JSON log files. The
+variables above can tune those bounds. Writable-layer quotas require a Docker
+storage driver that supports `--storage-opt size`. When the driver rejects that
+option, Roomote refuses to start the task rather than allowing untrusted code to
+consume the host disk. Configure a quota-capable Docker data root. Operators
+that enforce an equivalent host-level quota can explicitly set
+`DOCKER_WORKER_ALLOW_UNBOUNDED_DISK=true`; Roomote then logs a warning and
+starts without `--storage-opt size`.
+
+The default `internet` egress policy allows public repository and tool access
+while installing immutable blackhole routes for private, shared-address, and
+cloud metadata ranges (including AWS/GCP/Azure, Alibaba, and Oracle endpoints).
+The task's own, more-specific network route still reaches its API and preview
+proxy peers. In networked self-host deployments, direct connections to the
+Docker bridge gateway are also blocked without disrupting its use as the
+public-egress next hop. Local development blocks metadata ranges but retains
+private and gateway access because its API runs on the host. The worker never
+receives the network-administration capability needed to remove the policy. Set
+`DOCKER_WORKER_EGRESS_POLICY=none` for tasks that need only the Roomote API and
+preview proxy.
 
 ## Security notes
 
@@ -70,6 +111,7 @@ repositories.
   and configure a worker image for self-hosted production.
 - **The task cannot reach Roomote services.** Check `DOCKER_WORKER_NETWORK` and
   the Compose network used by the API and controller.
-- **Tasks slow down the app.** Docker tasks share the deployment host's CPU,
-  memory, disk, and network. Use hosted sandboxes or a larger host for heavier
-  workloads.
+- **A worker reports that its disk limit is unsupported.** Configure a Docker
+  storage driver with per-container writable-layer quota support. Only set
+  `DOCKER_WORKER_ALLOW_UNBOUNDED_DISK=true` when an equivalent host-level quota
+  is already enforced.

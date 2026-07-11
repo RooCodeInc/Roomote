@@ -27,11 +27,11 @@ export const SLACK_FAST_AGENT_LOCK_PREFIX = 'slack:fast-agent-lock:';
 export const SLACK_SETUP_SUGGESTION_LOCK_PREFIX =
   'slack:setup-suggestion-reaction:';
 export const LEADING_FAST_COMMAND_MENTION_PATTERN = /^\s*<@[^>]+>[\s,:;.-]*/;
-const SETUP_ONBOARDING_SUGGESTION_AGENT_TYPE = 'setup_onboarding';
-const SUGGESTED_TASKS_AGENT_TYPE = 'suggested_tasks';
-export const TASK_SUGGESTION_AGENT_TYPES = [
-  SETUP_ONBOARDING_SUGGESTION_AGENT_TYPE,
-  SUGGESTED_TASKS_AGENT_TYPE,
+const SETUP_ONBOARDING_SUGGESTION_TYPE = 'setup_onboarding';
+const SUGGESTED_TASKS_SUGGESTION_TYPE = 'suggested_tasks';
+export const TASK_SUGGESTION_TYPES = [
+  SETUP_ONBOARDING_SUGGESTION_TYPE,
+  SUGGESTED_TASKS_SUGGESTION_TYPE,
 ] as const;
 export const SETUP_ONBOARDING_SUGGESTION_METADATA_EVENT_TYPE =
   'roomote.setup_onboarding_suggestion';

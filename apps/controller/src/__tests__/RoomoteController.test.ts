@@ -25,6 +25,14 @@ const {
     DOCKER_WORKER_PLATFORM: 'linux/amd64',
     DOCKER_WORKER_NETWORK: undefined,
     DOCKER_WORKER_RELEASE_PATH: undefined,
+    DOCKER_WORKER_CPU_LIMIT: 2,
+    DOCKER_WORKER_MEMORY_LIMIT: '4g',
+    DOCKER_WORKER_PIDS_LIMIT: 512,
+    DOCKER_WORKER_DISK_LIMIT: '20g',
+    DOCKER_WORKER_ALLOW_UNBOUNDED_DISK: false,
+    DOCKER_WORKER_LOG_MAX_SIZE: '10m',
+    DOCKER_WORKER_LOG_MAX_FILES: 3,
+    DOCKER_WORKER_EGRESS_POLICY: 'internet',
     DAYTONA_API_KEY: 'daytona-key',
     DAYTONA_API_URL: undefined,
     DAYTONA_TARGET: undefined,
@@ -33,7 +41,7 @@ const {
     E2B_DOMAIN: undefined,
     E2B_TEMPLATE_ID: 'roomote-worker-template',
     E2B_MAX_SANDBOX_TIMEOUT_MS: 3_600_000,
-  } as Record<string, string | number | undefined>,
+  } as Record<string, string | number | boolean | undefined>,
   mockFindOrg: vi.fn(),
   mockSpawnDaytonaWorker: vi.fn(),
   mockSpawnDockerWorker: vi.fn(),
@@ -78,6 +86,7 @@ vi.mock('@roomote/sdk/server', () => ({
 }));
 
 vi.mock('../compute-providers', () => ({
+  cleanupStaleDockerSandboxes: vi.fn().mockResolvedValue(undefined),
   spawnDaytonaWorker: (...args: unknown[]) => mockSpawnDaytonaWorker(...args),
   spawnDockerWorker: (...args: unknown[]) => mockSpawnDockerWorker(...args),
   spawnE2bWorker: (...args: unknown[]) => mockSpawnE2bWorker(...args),
@@ -103,6 +112,14 @@ describe('RoomoteController', () => {
     mockEnv.DOCKER_WORKER_PLATFORM = 'linux/amd64';
     mockEnv.DOCKER_WORKER_NETWORK = undefined;
     mockEnv.DOCKER_WORKER_RELEASE_PATH = undefined;
+    mockEnv.DOCKER_WORKER_CPU_LIMIT = 2;
+    mockEnv.DOCKER_WORKER_MEMORY_LIMIT = '4g';
+    mockEnv.DOCKER_WORKER_PIDS_LIMIT = 512;
+    mockEnv.DOCKER_WORKER_DISK_LIMIT = '20g';
+    mockEnv.DOCKER_WORKER_ALLOW_UNBOUNDED_DISK = false;
+    mockEnv.DOCKER_WORKER_LOG_MAX_SIZE = '10m';
+    mockEnv.DOCKER_WORKER_LOG_MAX_FILES = 3;
+    mockEnv.DOCKER_WORKER_EGRESS_POLICY = 'internet';
     mockEnv.DAYTONA_API_KEY = 'daytona-key';
     mockEnv.DAYTONA_API_URL = undefined;
     mockEnv.DAYTONA_TARGET = undefined;
@@ -153,6 +170,14 @@ describe('RoomoteController', () => {
         platform: 'linux/amd64',
         network: 'roomote_default',
         dockerTimeoutMs: 60_000,
+        cpuLimit: 2,
+        memoryLimit: '4g',
+        pidsLimit: 512,
+        diskLimit: '20g',
+        allowUnboundedDisk: false,
+        logMaxSize: '10m',
+        logMaxFiles: 3,
+        egressPolicy: 'internet',
       }),
     );
   });

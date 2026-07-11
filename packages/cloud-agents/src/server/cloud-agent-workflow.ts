@@ -26,6 +26,7 @@ import {
   getDeploymentPrAction,
 } from '@roomote/db/server';
 import { Env } from '@roomote/env';
+import { resolveConfiguredGitHubAppSlug } from '@roomote/github';
 import { getRedis } from '@roomote/redis';
 
 import { githubPrReview } from './workflows/githubPrReview';
@@ -65,6 +66,12 @@ export async function generatePrompt({
     taskId: taskRun.taskId,
     utm: { campaign: taskRun.payloadKind, source: 'github-comment' },
   });
+
+  // The workflow prompt builders classify logins synchronously (bot-identity
+  // checks, review-summary comment reuse, PR attribution mentions); refresh
+  // the configured app slug first so an app created through the /setup flow
+  // is recognized as ourselves.
+  await resolveConfiguredGitHubAppSlug();
 
   const taskRow = await db.query.tasks.findFirst({
     where: eq(tasks.id, taskRun.taskId),

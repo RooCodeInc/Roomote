@@ -340,9 +340,26 @@ async function getGitHubOAuthUser({
     }
   | { success: false; error: string }
 > {
+  const [clientId, clientSecret] = await Promise.all([
+    resolveDeploymentEnvVar('R_GITHUB_CLIENT_ID'),
+    resolveDeploymentEnvVar('R_GITHUB_CLIENT_SECRET'),
+  ]);
+
+  if (!clientId || !clientSecret) {
+    console.error(
+      `[${context}] GitHub App OAuth credentials are not configured.`,
+    );
+
+    return {
+      success: false,
+      error:
+        'GitHub App OAuth credentials are not configured for this deployment.',
+    };
+  }
+
   const params = new URLSearchParams({
-    client_id: Env.R_GITHUB_CLIENT_ID,
-    client_secret: Env.R_GITHUB_CLIENT_SECRET,
+    client_id: clientId,
+    client_secret: clientSecret,
     code,
   });
 
@@ -775,9 +792,19 @@ export async function startAuthenticateGitHubAccountCommand(
   state?: Record<string, string>,
 ): Promise<{ success: true; url: string } | { success: false; error: string }> {
   try {
+    const clientId = await resolveDeploymentEnvVar('R_GITHUB_CLIENT_ID');
+
+    if (!clientId) {
+      return {
+        success: false,
+        error:
+          'Configure a GitHub App for this deployment before linking your GitHub account. Create one or enter its credentials first.',
+      };
+    }
+
     const baseUrl = Env.R_APP_URL;
     const params = new URLSearchParams({
-      client_id: Env.R_GITHUB_CLIENT_ID,
+      client_id: clientId,
       scope: 'read:user',
       state: encodeRecord({ ...(state ?? {}), mode: 'auth' }),
     });

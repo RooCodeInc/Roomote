@@ -65,6 +65,8 @@ vi.mock('@roomote/cloud-agents/server', () => ({
     ),
 }));
 
+import { setConfiguredGitHubAppSlugCache } from '@roomote/github';
+
 import {
   buildPrReviewActivityNotificationInput,
   buildPrReviewSummaryNotification,
@@ -124,6 +126,7 @@ describe('buildPrReviewActivityNotificationInput', () => {
       repository: 'owner/repo',
       prNumber: 42,
       prUrl: 'https://github.com/owner/repo/pull/42',
+      sourceControlProvider: 'github',
       event: {
         kind: 'review',
         authorLogin: 'alice',
@@ -174,6 +177,7 @@ describe('buildPrReviewActivityNotificationInput', () => {
       repository: 'owner/repo',
       prNumber: 42,
       prUrl: 'https://github.com/owner/repo/pull/42',
+      sourceControlProvider: 'github',
       event: {
         kind: 'review_comment',
         authorLogin: 'bob',
@@ -238,6 +242,7 @@ describe('queuePrReviewActivityNotification', () => {
       repository: 'owner/repo',
       prNumber: 42,
       prUrl: 'https://github.com/owner/repo/pull/42',
+      sourceControlProvider: 'github',
       event: {
         kind: 'review',
         authorLogin: 'alice',
@@ -322,6 +327,7 @@ describe('buildPrReviewSummaryNotification', () => {
       repository: 'owner/repo',
       prNumber: 42,
       prUrl: 'https://github.com/owner/repo/pull/42',
+      sourceControlProvider: 'github',
       event: {
         kind: 'review_summary',
         authorLogin: 'roomote[bot]',
@@ -359,6 +365,74 @@ describe('buildPrReviewSummaryNotification', () => {
   it('skips non-PR issue comments', () => {
     expect(
       buildPrReviewSummaryNotification(summaryPayload({ isPr: false })),
+    ).toBeNull();
+  });
+});
+
+// Regression: a deployment whose GitHub App was created through the /setup
+// flow keeps its slug in the encrypted environment_variables table, so the
+// process env falls back to `roomote` while the bot posts under the
+// configured slug (e.g. openmote[bot]). The identity helpers must honor the
+// resolved slug or every review-summary notification is silently dropped.
+describe('with a database-configured app slug', () => {
+  beforeEach(() => {
+    setConfiguredGitHubAppSlugCache({
+      value: 'openmote',
+      expiresAt: Date.now() + 60_000,
+    });
+  });
+
+  afterEach(() => {
+    setConfiguredGitHubAppSlugCache(null);
+  });
+
+  it('builds a review_summary event for the configured bot login', () => {
+    const notification = buildPrReviewSummaryNotification(
+      summaryPayload({ login: 'openmote[bot]' }),
+    );
+
+    expect(notification?.input.event).toMatchObject({
+      kind: 'review_summary',
+      authorLogin: 'openmote[bot]',
+      roomoteAuthored: true,
+    });
+  });
+
+  it('still skips summary-shaped comments from unrelated bots', () => {
+    expect(
+      buildPrReviewSummaryNotification(
+        summaryPayload({ login: 'othermote[bot]' }),
+      ),
+    ).toBeNull();
+  });
+
+  it('marks new review threads from the configured bot as roomote-authored', () => {
+    expect(
+      buildPrReviewActivityNotificationInput(
+        reviewCommentPayload({ login: 'openmote[bot]' }),
+      ),
+    ).toMatchObject({
+      event: {
+        kind: 'review_comment',
+        authorLogin: 'openmote[bot]',
+        roomoteAuthored: true,
+      },
+    });
+  });
+
+  it('skips replies to existing review threads from the configured bot', () => {
+    expect(
+      buildPrReviewActivityNotificationInput(
+        reviewCommentPayload({ login: 'openmote[bot]', inReplyToId: 99 }),
+      ),
+    ).toBeNull();
+  });
+
+  it('skips review comments that mention the configured slug', () => {
+    expect(
+      buildPrReviewActivityNotificationInput(
+        reviewCommentPayload({ body: '@openmote fix this' }),
+      ),
     ).toBeNull();
   });
 });

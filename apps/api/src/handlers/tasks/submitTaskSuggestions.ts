@@ -60,7 +60,7 @@ import { buildScheduledSuggestionRootMessage } from './scheduled-suggestion-root
 import {
   hasTrackedSetupSuggestionMessages,
   scheduleSuggestedTasksFollowupBestEffort,
-  SETUP_ONBOARDING_SUGGESTION_AGENT_TYPE,
+  SETUP_ONBOARDING_SUGGESTION_TYPE,
 } from './setup-suggestion-lifecycle';
 import { postScheduledSuggestionsToTelegram } from '../telegram/automation-suggestions';
 import { postScheduledSuggestionsToTeams } from '../teams/automation-suggestions';
@@ -141,8 +141,8 @@ type PreparedTaskSuggestion = {
   readinessMessage: string | null;
 };
 
-type SuggestionAgentType =
-  | typeof SETUP_ONBOARDING_SUGGESTION_AGENT_TYPE
+type TaskSuggestionType =
+  | typeof SETUP_ONBOARDING_SUGGESTION_TYPE
   | 'suggested_tasks'
   | 'sentry_triage'
   | 'dependabot_triage'
@@ -151,7 +151,7 @@ type SuggestionAgentType =
   | 'ci_failure_triage';
 
 type SuggestionCardMessageRow = {
-  suggestionType: SuggestionAgentType;
+  suggestionType: TaskSuggestionType;
   messageTs: string;
   channelId: string;
   workItemId: string;
@@ -568,7 +568,7 @@ async function postTaskSuggestionsThreadToSlack(params: {
   slackBotAccessToken: string;
   slackChannelId: string;
   createdByUserId: string | null;
-  agentType: SuggestionAgentType;
+  suggestionType: TaskSuggestionType;
   rootText: string;
   automationLabel?: string | null;
   automationSettingsHash?: string;
@@ -648,7 +648,7 @@ async function postTaskSuggestionsThreadToSlack(params: {
 
   const suggestionMessageRows: SuggestionCardMessageRow[] = [];
   const useSharedSuggestionFormatting = usesSharedScheduledSuggestionSlackModel(
-    params.agentType,
+    params.suggestionType,
   );
 
   for (const suggestion of params.suggestions) {
@@ -679,7 +679,7 @@ async function postTaskSuggestionsThreadToSlack(params: {
 
     if (useSharedSuggestionFormatting) {
       const sharedOptions = getSharedScheduledSuggestionSlackTextOptions(
-        params.agentType,
+        params.suggestionType,
       );
       // The fallback `text` keeps the footer inline; the rich `blocks` split it
       // into a small muted Slack `context` block so the bottom line renders as
@@ -732,7 +732,7 @@ async function postTaskSuggestionsThreadToSlack(params: {
     }
 
     suggestionMessageRows.push({
-      suggestionType: params.agentType,
+      suggestionType: params.suggestionType,
       messageTs,
       channelId: params.slackChannelId,
       workItemId: suggestion.id,
@@ -810,7 +810,7 @@ async function postSetupTaskSuggestionsToSlack(params: {
     slackBotAccessToken: slackInstallation.botAccessToken,
     slackChannelId: slackChannel,
     createdByUserId,
-    agentType: SETUP_ONBOARDING_SUGGESTION_AGENT_TYPE,
+    suggestionType: SETUP_ONBOARDING_SUGGESTION_TYPE,
     rootText: introText,
     suggestions,
     insertSuggestionMessages: async (suggestionMessageRows) => {
@@ -939,7 +939,7 @@ async function postSuggestedTasksSummaryToSlack(params: {
       .where(
         and(
           eq(trackedMessages.kind, 'suggestion_card'),
-          sql`${trackedMessages.metadata} ->> 'suggestionType' = ${slackConfig.agentType}`,
+          sql`${trackedMessages.metadata} ->> 'suggestionType' = ${slackConfig.suggestionType}`,
           sql`${trackedMessages.metadata} ->> 'suggestionKey' LIKE ${`${params.sourceTaskId}:%`}`,
         ),
       )
@@ -962,7 +962,7 @@ async function postSuggestedTasksSummaryToSlack(params: {
       slackBotAccessToken: slackInstallation.botAccessToken,
       slackChannelId: channel.channelId,
       createdByUserId,
-      agentType: slackConfig.agentType,
+      suggestionType: slackConfig.suggestionType,
       rootText: buildAutomationRootSummaryText({
         summaryText: rootMessage.summaryText,
         actionFooterText: rootMessage.actionFooterText,

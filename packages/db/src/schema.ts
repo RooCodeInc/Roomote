@@ -550,7 +550,10 @@ export const tasks = pgTable(
 
     harnessSessionId: text('harness_session_id'), // Assigned by Harness.
 
-    provider: text('provider').notNull(),
+    // Inference provider that served this task's LLM, paired with `model`.
+    // Renamed from the ambiguous `provider` (this deployment also has
+    // source-control, communication, and compute providers).
+    modelProvider: text('model_provider').notNull(),
     title: text('title').notNull(),
     titleEditedByUserAt: timestamp('title_edited_by_user_at'),
     llmTitleCheckpoint: integer('llm_title_checkpoint').notNull().default(0),
@@ -609,6 +612,44 @@ export const tasks = pgTable(
     check(
       'tasks_initiator_shape_check',
       sql`(${table.initiatorKind} = 'user' AND ${table.initiatorAutomation} IS NULL AND (${table.initiatorUserId} IS NOT NULL OR ${table.actorExternalId} IS NOT NULL)) OR (${table.initiatorKind} = 'automation' AND ${table.initiatorAutomation} IS NOT NULL AND ${table.initiatorUserId} IS NULL)`,
+    ),
+    // Durable classification vocabularies. Source of truth: the exported
+    // constants in @roomote/types (TASK_WORKFLOWS, TASK_SURFACES, ...);
+    // schema-constraints.test.ts asserts every constant value is accepted so
+    // the lists below cannot silently drift. Extending a vocabulary requires
+    // updating the constant, this check, and a migration.
+    check(
+      'tasks_workflow_check',
+      sql`${table.workflow} in ('standard', 'pr_review', 'pr_conflict_resolve', 'scan', 'mcp_recommendations', 'setup_onboarding', 'env_snapshot', 'eval')`,
+    ),
+    check(
+      'tasks_surface_check',
+      sql`${table.surface} in ('web', 'api', 'slack', 'teams', 'telegram', 'linear', 'github', 'gitlab', 'gitea', 'ado', 'system')`,
+    ),
+    check(
+      'tasks_trigger_check',
+      sql`${table.trigger} in ('message', 'webhook', 'schedule', 'manual')`,
+    ),
+    check(
+      'tasks_visibility_check',
+      sql`${table.visibility} in ('visible', 'hidden')`,
+    ),
+    check(
+      'tasks_state_check',
+      sql`${table.state} in ('active', 'completed', 'failed', 'canceled')`,
+    ),
+    check('tasks_harness_check', sql`${table.harness} in ('opencode-server')`),
+    check(
+      'tasks_requested_work_kind_check',
+      sql`${table.requestedWorkKind} in ('question', 'plan', 'implement', 'unknown')`,
+    ),
+    check(
+      'tasks_requested_work_kind_source_check',
+      sql`${table.requestedWorkKindSource} in ('explicit_bootstrap', 'task_tool', 'llm_classifier', 'inherited', 'system_default')`,
+    ),
+    check(
+      'tasks_commit_author_kind_check',
+      sql`${table.commitAuthorKind} IS NULL OR ${table.commitAuthorKind} in ('roomote', 'user', 'external')`,
     ),
   ],
 );
@@ -1004,6 +1045,13 @@ export const taskRuns = pgTable(
     index('task_runs_source_run_id_idx').on(table.sourceRunId),
     index('task_runs_first_assistant_output_at_idx').on(
       table.firstAssistantOutputAt,
+    ),
+    // Durable classification vocabularies; see the tasks table checks. Source
+    // of truth: RUN_KINDS / codingHarnesses in @roomote/types.
+    check('task_runs_kind_check', sql`${table.kind} in ('fresh', 'resume')`),
+    check(
+      'task_runs_harness_check',
+      sql`${table.harness} in ('opencode-server')`,
     ),
   ],
 );
@@ -1720,12 +1768,20 @@ export const repositories = pgTable(
     uniqueIndex('repositories_deployment_github_repo_unique').on(
       table.githubRepoId,
     ),
-    uniqueIndex('repositories_provider_external_repo_unique').on(
+    // Host participates in repository identity: self-managed GitLab/Gitea/ADO
+    // instances can legitimately reuse the same fullName or externalRepoId, so
+    // uniqueness is scoped to (provider, host, ...). NULL hosts (historical,
+    // un-backfilled rows) are coalesced to '' so they keep colliding with each
+    // other exactly like before host joined the key -- a plain column index
+    // would treat NULLs as distinct and silently weaken the constraint.
+    uniqueIndex('repositories_provider_host_external_repo_unique').on(
       table.sourceControlProvider,
+      sql`coalesce(${table.host}, '')`,
       table.externalRepoId,
     ),
-    uniqueIndex('repositories_provider_full_name_unique').on(
+    uniqueIndex('repositories_provider_host_full_name_unique').on(
       table.sourceControlProvider,
+      sql`coalesce(${table.host}, '')`,
       table.fullName,
     ),
     check(
@@ -2353,7 +2409,7 @@ export type ManagerMcpSetupNotificationReason =
   | 'deployment_disabled'
   | 'deployment_auth_required';
 
-export type BackgroundAgentSuggestionType =
+export type SuggestionType =
   | 'setup_onboarding'
   | 'suggested_tasks'
   | 'sentry_triage'
@@ -2462,12 +2518,11 @@ export const environmentVariables = pgTable(
     userId: text('user_id').references(() => users.id, { onDelete: 'cascade' }),
     name: text('name').notNull(),
     value: encryptedJson<string>('value').notNull(),
-    createdByUserId: text('created_by_user_id')
-      .notNull()
-      .references(() => users.id),
-    lastUpdatedByUserId: text('last_updated_by_user_id')
-      .notNull()
-      .references(() => users.id),
+    // Null denotes a system/bootstrap write performed before a user exists.
+    createdByUserId: text('created_by_user_id').references(() => users.id),
+    lastUpdatedByUserId: text('last_updated_by_user_id').references(
+      () => users.id,
+    ),
     createdAt: timestamp('created_at').notNull().defaultNow(),
     updatedAt: timestamp('updated_at').notNull().defaultNow(),
   },
@@ -2520,7 +2575,7 @@ export const webhooks = pgTable(
   'webhooks',
   {
     id: uuid('id').primaryKey().defaultRandom(),
-    deliveryId: text('delivery_id').notNull().unique(),
+    deliveryId: text('delivery_id').notNull(),
     provider: text('provider').notNull(),
     event: text('event').notNull(),
     payload: jsonb('payload').notNull(),
@@ -2530,7 +2585,16 @@ export const webhooks = pgTable(
     createdAt: timestamp('created_at').notNull().defaultNow(),
   },
   (table) => [
-    index('webhooks_provider_idx').on(table.provider),
+    // Delivery ids are only unique within a provider (GitHub GUIDs, Linear
+    // delivery ids, sha256-of-body fallbacks, ...), so dedupe per provider
+    // instead of globally. The recordWebhook helpers rely on this via an
+    // untargeted ON CONFLICT DO NOTHING.
+    uniqueIndex('webhooks_provider_delivery_id_unique').on(
+      table.provider,
+      table.deliveryId,
+    ),
+    // No separate provider index: the unique index above leads with provider
+    // and serves provider-only scans.
     index('webhooks_event_idx').on(table.event),
     index('webhooks_created_at_idx').on(table.createdAt),
     check(

@@ -610,7 +610,7 @@ describe('createOpenCodeSdkFetch', () => {
 });
 
 describe('non-task OpenCode image packaging', () => {
-  it('keeps OpenCode in the worker image and out of control-plane images', () => {
+  it('pins the same OpenCode version in the worker and control-plane inference images', () => {
     const appDockerfile = fs.readFileSync(
       new URL('../../../../../.docker/app/Dockerfile', import.meta.url),
       'utf8',
@@ -624,7 +624,24 @@ describe('non-task OpenCode image packaging', () => {
       DEFAULT_OPENCODE_CLI_VERSION,
     );
     expect(workerDockerfile).toContain('"opencode-ai@${OPENCODE_CLI_VERSION}"');
-    expect(getOpenCodeCliVersionArg(appDockerfile)).toBeUndefined();
-    expect(appDockerfile).not.toContain('opencode-ai@');
+
+    // Non-task inference (routing, summaries, automation planning) starts a
+    // managed OpenCode SDK server in-process, so control-plane services that
+    // execute those workflows carry the CLI too — at the same pinned version
+    // the SDK expects — but only via the shared inference base stage.
+    expect(getOpenCodeCliVersionArg(appDockerfile)).toBe(
+      DEFAULT_OPENCODE_CLI_VERSION,
+    );
+
+    const inferenceBaseStage = appDockerfile
+      .split(/^FROM /mu)
+      .find((stage) =>
+        stage.startsWith('runtime-base AS runtime-inference-base'),
+      );
+
+    expect(inferenceBaseStage).toContain(
+      '"opencode-ai@${OPENCODE_CLI_VERSION}"',
+    );
+    expect(appDockerfile.match(/opencode-ai@/gu)).toHaveLength(1);
   });
 });

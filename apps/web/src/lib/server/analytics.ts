@@ -826,6 +826,10 @@ function isRoomotePullRequestAuthor(login: string | null) {
 }
 
 async function getRoomotePullRequestMetadataByKey(_auth: UserAuthSuccess) {
+  // isRoomotePullRequestAuthor classifies logins synchronously from the
+  // cached configured app slug.
+  await GitHub.resolveConfiguredGitHubAppSlug();
+
   const results = await db
     .select({
       taskId: taskPullRequests.taskId,

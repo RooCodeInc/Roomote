@@ -22,8 +22,7 @@ import {
   desc,
   asc,
 } from '@roomote/db/server';
-import { Env } from '@roomote/env';
-import { Schemas } from '@roomote/github';
+import { Schemas, getEffectiveGitHubAppSlug } from '@roomote/github';
 import { buildSlackThreadPromptBlocks } from '../../utils';
 import type { ResolvedTaskCommitAuthor } from '../commit-author';
 
@@ -52,7 +51,7 @@ export function getPrBodyAttributionLine({
   teamsMessageId,
   teamsTenantId,
   teamsBotAppId,
-  githubAppSlug = Env.R_GITHUB_APP_SLUG,
+  githubAppSlug = getEffectiveGitHubAppSlug(),
   escapeDoubleQuotes = false,
 }: {
   attribution: ResolvedTaskCommitAuthor;
@@ -566,7 +565,10 @@ function isRoomoteIssueCommentAuthor(user: {
 }): boolean {
   const normalizedLogin = user.login.toLowerCase();
   const appSlugs = new Set([
-    (Env.R_GITHUB_APP_SLUG || DEFAULT_R_GITHUB_APP_SLUG).toLowerCase(),
+    // The effective slug prefers the database-configured value cached by
+    // resolveConfiguredGitHubAppSlug (refreshed at workflow entry) so
+    // deployments configured through the /setup flow recognize their own bot.
+    getEffectiveGitHubAppSlug().toLowerCase(),
     'roomote',
     'roomote-dev',
   ]);

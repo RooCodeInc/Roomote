@@ -156,26 +156,67 @@ jobs:
           pnpm-version: 10.29.3
       - name: Set up Docker builder
         uses: useblacksmith/setup-docker-builder@47a5d0102cc44712a17a633c2599f755008cc40e # v1
+      # The smoke test pulls the previous published release from GHCR as its
+      # upgrade baseline. The packages are public today, but authenticate
+      # anyway so a visibility change cannot silently break the release gate.
+      - name: Log in to GHCR
+        uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
       - name: Resolve previous published channel
         id: baseline
         shell: bash
         env:
           EXTRA_TAG: ${{ needs.prepare.outputs.extra_tag }}
+          CANDIDATE_VERSION: ${{ needs.prepare.outputs.version }}
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -euo pipefail
           baseline="$EXTRA_TAG"
-          if [ "$baseline" = 'latest' ]; then
-            baseline="$(gh api "repos/$GITHUB_REPOSITORY/releases/latest" --jq .tag_name 2>/dev/null || true)"
-            # v0.0.1 predates the current migration baseline. Use the prior
-            # main candidate for the first gated release; later releases use
-            # the immediately preceding immutable release tag.
-            if [ -z "$baseline" ] || [ "$baseline" = 'v0.0.1' ]; then
-              baseline='main'
+          if [ "$baseline" != 'develop' ]; then
+            # Release-channel runs (tag, main, manual dispatch) validate the
+            # upgrade path from the previous published release. gh prints the
+            # 404 error body to stdout, so only trust the output when the call
+            # succeeds; capturing it with `|| true` is how a JSON blob once
+            # became a docker tag.
+            if ! baseline="$(gh api "repos/$GITHUB_REPOSITORY/releases/latest" --jq .tag_name 2>/dev/null)"; then
+              baseline=''
             fi
-          elif [ -z "$baseline" ]; then
-            baseline='main'
+            # v0.0.1 predates the release pipeline and has no images. With no
+            # usable previous release, skip upgrade validation entirely: the
+            # smoke test still verifies a fresh install of the candidate.
+            if [ "$baseline" = 'v0.0.1' ]; then
+              echo "Latest release is legacy v0.0.1 (no images); skipping upgrade validation." >&2
+              baseline=''
+            fi
+            # Manual dispatch can re-publish an older version while a newer
+            # release is latest. Validating baseline→candidate would then be
+            # a downgrade dressed up as an upgrade (newer migrations, older
+            # code), so only keep the upgrade leg when the candidate is
+            # strictly newer than the baseline.
+            if [ -n "$baseline" ]; then
+              case "$CANDIDATE_VERSION" in
+                v[0-9]*)
+                  newest="$(printf '%s\n%s\n' "$baseline" "$CANDIDATE_VERSION" | sort -V | tail -n1)"
+                  if [ "$CANDIDATE_VERSION" = "$baseline" ] || [ "$newest" != "$CANDIDATE_VERSION" ]; then
+                    echo "Candidate $CANDIDATE_VERSION is not newer than latest release $baseline; skipping upgrade validation for re-publish." >&2
+                    baseline=''
+                  fi
+                  ;;
+              esac
+            fi
           fi
+          # Never let anything that is not a known channel or v* release tag
+          # reach `docker pull`.
+          case "$baseline" in
+            '' | develop | v[0-9]*) ;;
+            *)
+              echo "Ignoring unexpected baseline '$baseline'; skipping upgrade validation." >&2
+              baseline=''
+              ;;
+          esac
           echo "version=$baseline" >> "$GITHUB_OUTPUT"
       - name: Exercise deployment lifecycle
         env:
@@ -183,9 +224,14 @@ jobs:
           CANDIDATE_VERSION: ${{ needs.prepare.outputs.version }}
         run: pnpm deployment:smoke
 
+  # Builds run concurrently with the acceptance gate: the gate builds its own
+  # local images for the smoke test, so nothing here depends on it. The gate
+  # instead blocks `publish` — builds only push untagged per-arch digests, and
+  # nothing is consumable until publish assembles the tagged manifests, so a
+  # failed gate still prevents any image from shipping.
   build:
     name: Build ${{ matrix.app }} (${{ matrix.arch }})
-    needs: [prepare, deployment-acceptance]
+    needs: prepare
     if: ${{ needs.prepare.outputs.docs_only != 'true' }}
     runs-on: ${{ matrix.runner }}
     permissions:
@@ -208,78 +254,6 @@ jobs:
             dockerfile: .docker/app/Dockerfile
             target: runtime-app
             image: roomote-app
-            arch: arm64
-            runner: blacksmith-4vcpu-ubuntu-2404-arm
-          - app: web
-            dockerfile: .docker/app/Dockerfile
-            target: runtime-web
-            image: roomote-web
-            arch: amd64
-            runner: blacksmith-4vcpu-ubuntu-2404
-          - app: web
-            dockerfile: .docker/app/Dockerfile
-            target: runtime-web
-            image: roomote-web
-            arch: arm64
-            runner: blacksmith-4vcpu-ubuntu-2404-arm
-          - app: api
-            dockerfile: .docker/app/Dockerfile
-            target: runtime-api
-            image: roomote-api
-            arch: amd64
-            runner: blacksmith-4vcpu-ubuntu-2404
-          - app: api
-            dockerfile: .docker/app/Dockerfile
-            target: runtime-api
-            image: roomote-api
-            arch: arm64
-            runner: blacksmith-4vcpu-ubuntu-2404-arm
-          - app: controller
-            dockerfile: .docker/app/Dockerfile
-            target: runtime-controller
-            image: roomote-controller
-            arch: amd64
-            runner: blacksmith-4vcpu-ubuntu-2404
-          - app: controller
-            dockerfile: .docker/app/Dockerfile
-            target: runtime-controller
-            image: roomote-controller
-            arch: arm64
-            runner: blacksmith-4vcpu-ubuntu-2404-arm
-          - app: bullmq
-            dockerfile: .docker/app/Dockerfile
-            target: runtime-bullmq
-            image: roomote-bullmq
-            arch: amd64
-            runner: blacksmith-4vcpu-ubuntu-2404
-          - app: bullmq
-            dockerfile: .docker/app/Dockerfile
-            target: runtime-bullmq
-            image: roomote-bullmq
-            arch: arm64
-            runner: blacksmith-4vcpu-ubuntu-2404-arm
-          - app: preview-proxy
-            dockerfile: .docker/app/Dockerfile
-            target: runtime-preview-proxy
-            image: roomote-preview-proxy
-            arch: amd64
-            runner: blacksmith-4vcpu-ubuntu-2404
-          - app: preview-proxy
-            dockerfile: .docker/app/Dockerfile
-            target: runtime-preview-proxy
-            image: roomote-preview-proxy
-            arch: arm64
-            runner: blacksmith-4vcpu-ubuntu-2404-arm
-          - app: migrate
-            dockerfile: .docker/app/Dockerfile
-            target: runtime-migrate
-            image: roomote-migrate
-            arch: amd64
-            runner: blacksmith-4vcpu-ubuntu-2404
-          - app: migrate
-            dockerfile: .docker/app/Dockerfile
-            target: runtime-migrate
-            image: roomote-migrate
             arch: arm64
             runner: blacksmith-4vcpu-ubuntu-2404-arm
           - app: worker
@@ -343,7 +317,7 @@ jobs:
 
   publish:
     name: Publish ${{ matrix.app }} manifest
-    needs: [prepare, build]
+    needs: [prepare, build, deployment-acceptance]
     runs-on: blacksmith-4vcpu-ubuntu-2404
     permissions:
       contents: read
@@ -354,18 +328,6 @@ jobs:
         include:
           - app: app
             image: roomote-app
-          - app: web
-            image: roomote-web
-          - app: api
-            image: roomote-api
-          - app: controller
-            image: roomote-controller
-          - app: bullmq
-            image: roomote-bullmq
-          - app: preview-proxy
-            image: roomote-preview-proxy
-          - app: migrate
-            image: roomote-migrate
           - app: worker
             image: roomote-worker
     steps:
@@ -412,6 +374,80 @@ jobs:
 
           docker buildx imagetools create "${tag_args[@]}" "${digest_refs[@]}"
           docker buildx imagetools inspect "$IMAGE:$VERSION"
+
+  # Product v* tags: only publish the GitHub Release after multi-arch images for
+  # both roomote-app and roomote-worker exist at :$version, so self-host install
+  # (releases/latest) never points at a tag whose images are not ready yet.
+  create-github-release:
+    name: Create GitHub Release
+    runs-on: blacksmith-4vcpu-ubuntu-2404
+    needs: [prepare, publish]
+    if: ${{ github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v') && needs.prepare.outputs.docs_only != 'true' }}
+    permissions:
+      contents: write
+      packages: read
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          token: ${{ secrets.RELEASE_BOT_TOKEN || secrets.GITHUB_TOKEN }}
+          fetch-depth: 0
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
+
+      - name: Log in to GHCR
+        uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Publish GitHub Release for product tag
+        env:
+          GH_TOKEN: ${{ secrets.RELEASE_BOT_TOKEN || secrets.GITHUB_TOKEN }}
+          VERSION: ${{ needs.prepare.outputs.version }}
+          OWNER: ${{ needs.prepare.outputs.owner }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          : "${VERSION:?version is required}"
+          tag="$VERSION"
+          case "$tag" in
+            v*) ;;
+            *)
+              echo "Expected a v* product tag, got: $tag" >&2
+              exit 1
+              ;;
+          esac
+
+          version_no_v="${tag#v}"
+          for image in roomote-app roomote-worker; do
+            ref="${REGISTRY}/${OWNER}/${image}:${VERSION}"
+            echo "Verifying image exists: $ref"
+            docker buildx imagetools inspect "$ref" >/dev/null
+          done
+
+          if gh release view "$tag" >/dev/null 2>&1; then
+            echo "GitHub Release $tag already exists; skip."
+            exit 0
+          fi
+
+          notes_file="$(mktemp)"
+          node scripts/release/extract-changelog-section.mjs "$version_no_v" > "$notes_file" || true
+          if [ ! -s "$notes_file" ]; then
+            printf 'Roomote %s\n' "$tag" > "$notes_file"
+          fi
+
+          gh release create "$tag" \
+            --title "Roomote $tag" \
+            --notes-file "$notes_file" \
+            --target "$(git rev-parse HEAD)" \
+            --latest
+
+          rm -f "$notes_file"
+          echo "Published GitHub Release $tag (images ready)"
 
   notify-ops:
     name: Notify ops repository

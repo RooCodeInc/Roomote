@@ -109,6 +109,10 @@ DATABASE_URL=postgres://postgres:roomote-postgres-password@postgres:5432/roomote
 DEFAULT_COMPUTE_PROVIDER=docker
 DEPLOYMENT_CI_POSTGRES_PORT=$postgres_port
 DEPLOYMENT_CI_REDIS_PORT=$redis_port
+# CI runners are ephemeral and their Docker storage drivers cannot enforce
+# --storage-opt size quotas, so accept unbounded writable layers here. Real
+# deployments keep the fail-closed default.
+DOCKER_WORKER_ALLOW_UNBOUNDED_DISK=true
 DOCKER_WORKER_IMAGE=localhost/roomote/roomote-worker:$version
 DOCKER_WORKER_NETWORK=$worker_network
 DOCKER_WORKER_PLATFORM=$platform
@@ -149,6 +153,7 @@ build_candidate_images() {
   printf 'Building candidate app image (%s)\n' "$platform"
   docker buildx build --load \
     --platform "$platform" \
+    --target runtime-app \
     --build-arg R_APP_ENV=production \
     --build-arg "RELEASE_VERSION=$candidate_version" \
     --tag "localhost/roomote/roomote-app:$candidate_version" \
@@ -188,6 +193,11 @@ start_stack() {
 }
 
 verify_stack() {
+  # 'candidate' (default) also asserts the runtime tools the current code
+  # ships in its control-plane images; 'baseline' skips those, because the
+  # previous release predates whatever tooling the candidate introduced and
+  # must only prove it still runs.
+  local release="${1:-candidate}"
   local migration_container migration_exit
   migration_container="$(compose ps --all --quiet db-migrate)"
   [ -n "$migration_container" ] || {
@@ -205,6 +215,18 @@ verify_stack() {
   compose exec -T web curl -fsS --max-time 10 "http://127.0.0.1:3000/setup?token=$setup_token" >/dev/null
   compose exec -T controller curl -fsS --max-time 5 http://api:3001/health/controller >/dev/null
   compose exec -T bullmq curl -fsS --max-time 5 http://127.0.0.1:3002/admin/health >/dev/null
+
+  if [ "$release" = 'candidate' ]; then
+    # Execute OpenCode (not just locate it) as the container user: startup
+    # writes state under HOME, so this catches images the runtime user cannot
+    # actually run it in. Note the Compose stack mounts a fresh tmpfs over
+    # /tmp, so root-owned HOME artifacts baked into the image layer are masked
+    # here and only bite hosts that run the raw image (e.g. Railway); that
+    # case is prevented at the Dockerfile layer instead.
+    compose exec -T api sh -ceu 'command -v gh >/dev/null; opencode --version >/dev/null'
+    compose exec -T web sh -ceu 'opencode --version >/dev/null'
+    compose exec -T bullmq sh -ceu 'opencode --version >/dev/null'
+  fi
 }
 
 write_marker() {
@@ -235,7 +257,7 @@ validate_upgrade_and_rollback() {
 
   write_env baseline
   start_stack
-  verify_stack
+  verify_stack baseline
   write_marker
 
   printf 'Upgrading previous release to candidate\n'
@@ -247,7 +269,7 @@ validate_upgrade_and_rollback() {
   printf 'Rolling back candidate to previous release\n'
   write_env baseline
   start_stack
-  verify_stack
+  verify_stack baseline
   verify_marker
 
   printf 'Returning stack to candidate after rollback probe\n'

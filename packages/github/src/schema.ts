@@ -1,5 +1,6 @@
 import { z } from 'zod';
-import { Env } from '@roomote/env';
+
+import { getEffectiveGitHubAppSlug } from './app-slug';
 
 /**
  * PullRequest
@@ -117,7 +118,7 @@ export type ReviewComment = z.infer<typeof reviewCommentSchema>;
 export const isRoomoteGitHubLogin = (login: string) => {
   const normalizedLogin = login.toLowerCase();
   const appSlugs = new Set([
-    Env.R_GITHUB_APP_SLUG.toLowerCase(),
+    getEffectiveGitHubAppSlug().toLowerCase(),
     'roomote',
     'roomote-dev',
   ]);

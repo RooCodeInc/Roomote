@@ -11,9 +11,9 @@ import {
   upsertAutomation,
   users,
 } from '@roomote/db/server';
+import { getEffectiveGitHubAppSlug } from '@roomote/github';
 
 import type { UserAuthSuccess } from '@/types';
-import { Env } from '@/lib/server/env';
 
 import { assertAdmin } from './feature-gates';
 
@@ -49,18 +49,15 @@ function normalizeGitHubLogins(logins: string[]): string[] {
   );
 }
 
-let roomoteReviewerLogins: string[] | null = null;
-
 function getRoomoteReviewerLogins(): string[] {
-  // Keep Env access out of module evaluation so Next.js instrumentation can
-  // bootstrap the Node.js runtime before server routes import this module.
-  if (!roomoteReviewerLogins) {
-    roomoteReviewerLogins = normalizeGitHubLogins(
-      getRoomoteManagedGitHubLogins(Env.R_GITHUB_APP_SLUG),
-    );
-  }
-
-  return roomoteReviewerLogins;
+  // Computed per call rather than memoized: the configured slug can be
+  // resolved from the database after this module is imported (see
+  // resolveConfiguredGitHubAppSlug), and env access stays out of module
+  // evaluation so Next.js instrumentation can bootstrap the Node.js runtime
+  // before server routes import this module.
+  return normalizeGitHubLogins(
+    getRoomoteManagedGitHubLogins(getEffectiveGitHubAppSlug()),
+  );
 }
 
 export function mapReviewerSettingsToBackgroundSettings(

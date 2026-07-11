@@ -5,7 +5,6 @@ import {
   deploymentSettings,
   eq,
   isNull,
-  ne,
   not,
   slackInstallations,
   users,
@@ -24,7 +23,6 @@ import { isSetupBootstrapOpen } from './setup-bootstrap';
 import { isSetupTokenValid } from './setup-token';
 
 const DEFAULT_DEPLOYMENT_ID = 'default';
-const SETUP_BOOTSTRAP_USER_ID = 'setup-bootstrap-user';
 const SLACK_TEAM_ID_CLAIM = 'https://slack.com/team_id';
 const MICROSOFT_ENTRA_PROVIDER_ID = 'microsoft-entra-id';
 
@@ -98,13 +96,11 @@ async function hasExistingAppUser(userId: string): Promise<boolean> {
   return existingUser != null;
 }
 
-async function hasAnyOtherRealAppUser(userId: string): Promise<boolean> {
+async function hasAnyOtherAppUser(userId: string): Promise<boolean> {
   const [existingUser] = await db
     .select({ id: users.id })
     .from(users)
-    .where(
-      and(ne(users.id, SETUP_BOOTSTRAP_USER_ID), not(eq(users.id, userId))),
-    )
+    .where(not(eq(users.id, userId)))
     .limit(1);
 
   return existingUser != null;
@@ -200,7 +196,7 @@ export async function evaluateSignInAccess({
     setupBootstrapOpen &&
     !Env.SETUP_TOKEN &&
     isSetupTokenValid(undefined) &&
-    !(await hasAnyOtherRealAppUser(userId))
+    !(await hasAnyOtherAppUser(userId))
   ) {
     return { allowed: true, via: 'bootstrap' };
   }

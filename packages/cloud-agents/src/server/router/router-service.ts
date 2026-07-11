@@ -6,6 +6,7 @@ import {
   getTaskModelOptionById,
   isTaskModelIdAllowed,
 } from '@roomote/types';
+import { resolveConfiguredGitHubAppSlug } from '@roomote/github';
 
 import type {
   FollowUpClassification,
@@ -71,7 +72,7 @@ interface InternalRoutingResult {
   workspaceRemapped: boolean;
 }
 
-type GeneralistRoutingBuildResult =
+type StandardTaskRoutingBuildResult =
   | {
       status: 'meta_question';
       reasoning: string;
@@ -219,10 +220,10 @@ function resolveRoutedTaskModel(
   };
 }
 
-function buildGeneralistRoutingResult(
+function buildStandardTaskRoutingResult(
   response: WorkspaceResponse,
   context: RoutingContext,
-): GeneralistRoutingBuildResult {
+): StandardTaskRoutingBuildResult {
   const workspace = mapWorkspace(response.workspaceValue, context);
   const workspaceRemapped = wasWorkspaceRemapped(
     response.workspaceValue,
@@ -349,7 +350,7 @@ async function runRoutingDecision(
     );
 
     if (responseResult.response) {
-      const built = buildGeneralistRoutingResult(
+      const built = buildStandardTaskRoutingResult(
         responseResult.response,
         promptContext,
       );
@@ -589,6 +590,11 @@ export async function routeGitHubTask(
   }
 
   try {
+    // The routing prompt embeds the deployment's bot handle synchronously;
+    // refresh the configured app slug first so an app created through the
+    // /setup flow is addressed by its own slug.
+    await resolveConfiguredGitHubAppSlug();
+
     const { object: response } = await generateTrackedNonTaskObject({
       userId: context.routingActor?.userId,
       surface: NON_TASK_INFERENCE_SURFACES.routerGitHubRouting,

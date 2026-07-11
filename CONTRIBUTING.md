@@ -1,19 +1,22 @@
 # Contributing
 
-Roomote is early in its public project shape. We welcome focused fixes,
-documentation improvements, and small integration/runtime improvements that are
-easy to review.
+Roomote is early in its public project shape. Right now, the most valuable
+contribution is a **well-written issue**, not a pull request. Maintainers
+triage issues actively, and a clear bug report or focused feature request
+helps far more than an unrequested diff.
 
 ## Before You Start
 
-- Open a well-scoped issue before starting code changes. Roomote currently
-  prefers well-written issues over unsolicited pull requests.
-- If you want to contribute code, first describe the problem, proposed approach,
-  and relevant self-hosting context in an issue or existing discussion.
-- Pull requests without a clear issue, maintainer discussion, or focused
-  reproduction may be closed so maintainers can keep triage high-signal.
-- Keep pull requests small and scoped.
-- Include tests or a clear manual validation note when changing behavior.
+- Roomote does not generally accept unsolicited community pull requests.
+  Please do not open a PR unless a maintainer has explicitly invited it in an
+  issue or discussion.
+- The best way to help: open a well-scoped issue with reproduction steps,
+  expected vs actual behavior, and your deployment context. The issue forms
+  walk you through what maintainers need.
+- Pull requests without a maintainer invitation or a clear linked issue will
+  likely be closed without review so triage stays high-signal.
+- When a PR has been invited: keep it small and scoped, link the issue, and
+  include tests or a clear manual validation note when changing behavior.
 
 ## Developer Setup
 
@@ -27,6 +30,37 @@ pnpm test
 
 Use the narrower package-level test commands from `AGENTS.md` when a full suite
 is not necessary.
+
+## Product releases
+
+Roomote ships a **single product version** for the monorepo (not per-package npm
+releases). [Changesets](https://github.com/changesets/changesets) files are the
+authoring format for bump level + release notes; workspace `package.json`
+versions are frozen and never bumped. The canonical version is
+the root `package.json` field and is published as GitHub Release / tag `vX.Y.Z`.
+
+Optional contributor entrypoint when your change should show up in the changelog:
+
+```sh
+pnpm changeset
+```
+
+Any `@roomote/*` package selection is equivalent — only the bump level is read.
+See [`.changeset/README.md`](.changeset/README.md).
+
+### How a release ships
+
+1. Merge work to `develop` (squash). When pending changesets exist, automation
+   opens a **Release Roomote** Version PR that bumps the root version and
+   `CHANGELOG.md` (nothing else).
+2. When the product version is untagged, automation cuts a frozen
+   `release/vX.Y.Z` branch at the version-bump commit and opens or refreshes a
+   **Promote `vX.Y.Z` to production** PR (`release/vX.Y.Z` → `main`). Work
+   merged to `develop` after the version bump waits for the next release.
+3. Merge that promote PR with a **merge commit** (branch rules on `main` allow
+   merge only; `develop` stays squash-only). Tagging (`vX.Y.Z`), GHCR image
+   publish (`latest`), and the GitHub Release follow from `main` / tag workflows.
+   Product tagging requires the `RELEASE_BOT_TOKEN` repository secret.
 
 ## Contributor License Agreement
 

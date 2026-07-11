@@ -69,6 +69,7 @@ vi.stubGlobal('fetch', mockFetch);
 
 import {
   finishCreateGitHubAppManifestCommand,
+  startAuthenticateGitHubAccountCommand,
   startCreateGitHubInstallationCommand,
   startCreateGitHubAppManifestCommand,
 } from './mutations';
@@ -431,5 +432,54 @@ describe('GitHub App manifest commands', () => {
     });
     expect(mockDbTransaction).not.toHaveBeenCalled();
     expect(mockUpsertDeploymentEnvironmentVariables).not.toHaveBeenCalled();
+  });
+});
+
+describe('startAuthenticateGitHubAccountCommand', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it('builds the authorize URL from the deployment-resolved client id', async () => {
+    mockResolveDeploymentEnvVar.mockImplementation(async (name: string) =>
+      name === 'GITHUB_CLIENT_ID' ? 'Iv1.resolved-client' : null,
+    );
+
+    const result = await startAuthenticateGitHubAccountCommand(
+      buildMockAuth(),
+      { redirect: '/settings?tab=account' },
+    );
+
+    expect(result.success).toBe(true);
+
+    if (!result.success) {
+      return;
+    }
+
+    const url = new URL(result.url);
+    expect(`${url.origin}${url.pathname}`).toBe(
+      'https://github.com/login/oauth/authorize',
+    );
+    expect(url.searchParams.get('client_id')).toBe('Iv1.resolved-client');
+    expect(url.searchParams.get('scope')).toBe('read:user');
+    expect(url.searchParams.get('redirect_uri')).toBe(
+      'https://roomote.example.com/github/callback',
+    );
+    expect(decodeRecord(url.searchParams.get('state') ?? '')).toEqual({
+      redirect: '/settings?tab=account',
+      mode: 'auth',
+    });
+  });
+
+  it('refuses to link an account when no GitHub App client id is configured', async () => {
+    mockResolveDeploymentEnvVar.mockResolvedValue(null);
+
+    const result = await startAuthenticateGitHubAccountCommand(buildMockAuth());
+
+    expect(result).toEqual({
+      success: false,
+      error:
+        'Configure a GitHub App for this deployment before linking your GitHub account. Create one or enter its credentials first.',
+    });
   });
 });

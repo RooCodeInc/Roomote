@@ -60,9 +60,57 @@ The installer also sets up the `roomote` host CLI for common operations:
 
 ```sh
 roomote upgrade   # pull and roll out newer images
-roomote backup    # back up the database and configuration
+roomote rollback  # return to the release before the last upgrade
+roomote backup    # create an encrypted deployment recovery bundle
 roomote logs      # tail service logs
 ```
+
+`roomote backup` prompts for a passphrase and writes a versioned `.roomote`
+bundle under `/opt/roomote/backups`. The bundle contains PostgreSQL, the
+deployment configuration and encryption/signing keys, local MinIO artifacts,
+schema metadata, and the exact deployed image identities. Store the passphrase
+separately in your secret manager; the backup cannot be restored without it.
+
+Use `roomote backup --include-redis` when queued work, BullMQ schedules,
+sessions, and other transient Redis state must survive. Backups briefly stop
+application writers (and active Docker task workers) so the included stores
+share a documented consistency point. If object storage is external, the
+bundle records its endpoint and bucket but does not copy its objects; keep a
+provider-level backup of that bucket.
+
+Restore only after installing Roomote on the replacement host:
+
+```sh
+roomote restore /path/to/backup.roomote --yes
+```
+
+Restore verifies the encrypted bundle and checksums before replacing any
+state, restores the original `.env` (including `ENCRYPTION_KEY`), repopulates
+empty PostgreSQL/MinIO/Redis volumes, and starts the recorded Roomote release.
+
+## Upgrades and rollback
+
+`roomote upgrade` is designed so a bad release cannot strand your deployment:
+
+- **A backup comes first.** Every upgrade creates an encrypted pre-upgrade
+  bundle under `/opt/roomote/backups` before anything changes. Pass a
+  passphrase with `--backup-passphrase-file` (or `ROOMOTE_BACKUP_PASSPHRASE`);
+  otherwise one is generated and stored next to the bundle. Use
+  `--skip-backup` to opt out.
+- **Migrations run before services are replaced.** Database migrations apply
+  in a single transaction while the previous release keeps serving. If a
+  migration fails, the schema rolls back, the previous configuration is
+  restored, and the previous release stays up.
+- **Rollback is one command.** Every release's schema keeps the previous
+  release working, so `roomote rollback` re-deploys the prior release without
+  touching the database. `roomote upgrade <tag>` does the same for any
+  retained tag, and restoring the pre-upgrade bundle is the last-resort path
+  that also rewinds data.
+
+The supported rollback target is the release immediately before the current
+one. Check the running application version and applied schema migration at any
+time under **Settings → Deployment → Diagnostics**; both are also recorded in
+every backup bundle's manifest.
 
 ## Deployment modes
 

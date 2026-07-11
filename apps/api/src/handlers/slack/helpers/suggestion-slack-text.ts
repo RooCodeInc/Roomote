@@ -20,21 +20,21 @@ type SuggestionSeededTextOptions = {
   statusLabel?: 'started' | 'accepted';
 };
 
-const SHARED_SCHEDULED_SUGGESTION_AGENT_TYPES = new Set(['suggested_tasks']);
+const SHARED_SCHEDULED_SUGGESTION_TYPES = new Set(['suggested_tasks']);
 
 export function usesSharedScheduledSuggestionSlackModel(
-  agentType?: string | null,
+  suggestionType?: string | null,
 ): boolean {
   return (
-    typeof agentType === 'string' &&
-    SHARED_SCHEDULED_SUGGESTION_AGENT_TYPES.has(agentType)
+    typeof suggestionType === 'string' &&
+    SHARED_SCHEDULED_SUGGESTION_TYPES.has(suggestionType)
   );
 }
 
 export function getSharedScheduledSuggestionSlackTextOptions(
-  agentType?: string | null,
+  suggestionType?: string | null,
 ): SuggestionSlackTextOptions | undefined {
-  if (!usesSharedScheduledSuggestionSlackModel(agentType)) {
+  if (!usesSharedScheduledSuggestionSlackModel(suggestionType)) {
     return undefined;
   }
 
@@ -45,9 +45,9 @@ export function getSharedScheduledSuggestionSlackTextOptions(
 }
 
 export function getSharedScheduledSuggestionSeededTextOptions(
-  agentType?: string | null,
+  suggestionType?: string | null,
 ): SuggestionSeededTextOptions | undefined {
-  if (!usesSharedScheduledSuggestionSlackModel(agentType)) {
+  if (!usesSharedScheduledSuggestionSlackModel(suggestionType)) {
     return undefined;
   }
 

@@ -462,7 +462,7 @@ describe('Home', () => {
     expect(mockPush).not.toHaveBeenCalledWith('/tasks');
   });
 
-  it('launches Standard Task without a cloud agent id for routed workspaces', async () => {
+  it('launches a standard task run without an agent identity for routed workspaces', async () => {
     mockRouteHomeTask.mockResolvedValue(routedEnvironmentSuggestion);
 
     render(<Home initialPlaceholderIndex={0} />);

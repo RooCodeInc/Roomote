@@ -73,6 +73,7 @@ export * from './lib/repositories';
 export * from './lib/telemetry-ids';
 export * from './lib/instance-report';
 export * from './lib/invocation-identities';
+export * from './lib/webhook-retention';
 
 export {
   users,
@@ -179,7 +180,7 @@ export {
 export * from './fixtures/factories/index';
 
 export type {
-  BackgroundAgentSuggestionType,
+  SuggestionType,
   ManagerMcpSetupNotificationReason,
   EnvironmentConfigVersionSource,
 } from './schema';

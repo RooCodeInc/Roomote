@@ -5,7 +5,7 @@
 # stack under /opt/roomote.
 set -euo pipefail
 
-install_root='/opt/roomote'
+install_root="${ROOMOTE_INSTALL_ROOT:-/opt/roomote}"
 env_file="$install_root/.env"
 compose_file="$install_root/docker-compose.prod.yml"
 
@@ -17,12 +17,17 @@ Commands:
   status                 Show the state of every Roomote service
   logs [service...]      Follow logs (default: web api controller caddy)
   setup-url              Print the /setup link with the setup token
-  upgrade [version]      Upgrade (or roll back) to an image tag; defaults to
-                         the latest GitHub release
+  upgrade [version] [options]
+                         Upgrade (or roll back) to an image tag; defaults to
+                         the latest GitHub release. Creates an encrypted
+                         pre-upgrade backup and applies database migrations
+                         before replacing services (see roomote upgrade --help)
                          Set ROOMOTE_IMAGE_RETENTION_RELEASES to control how
                          many Roomote release tags are kept after upgrade
-  backup                 Dump the Postgres database into /opt/roomote/backups
-  restore <file> --yes   Restore a dump, OVERWRITING the current database
+  rollback               Re-deploy the release that was running before the
+                         last upgrade
+  backup [options]       Create an encrypted deployment backup bundle
+  restore <file> --yes   Restore a bundle, OVERWRITING deployment state
   restart [service...]   Restart services (default: all)
   down                   Stop the stack
   up                     Start the stack
@@ -38,12 +43,186 @@ log() {
   printf '==> %s\n' "$*"
 }
 
-[ "$(id -u)" -eq 0 ] || die "run as root (sudo roomote ...)"
+if [ "$(id -u)" -ne 0 ]; then
+  [ "${ROOMOTE_TEST_MODE:-}" = 'true' ] && [ "$install_root" != '/opt/roomote' ] || die "run as root (sudo roomote ...)"
+fi
 [ -f "$env_file" ] || die "$env_file not found; is Roomote installed on this host?"
 [ -f "$compose_file" ] || die "$compose_file not found; re-run the installer"
 
 compose() {
   docker compose --env-file "$env_file" -f "$compose_file" "$@"
+}
+
+backup_usage() {
+  cat <<'EOF'
+usage: roomote backup [options]
+
+Options:
+  --include-redis          Include an application-quiesced Redis snapshot
+  --passphrase-file <file> Read the encryption passphrase from a file
+  --output <file>          Write the bundle to this path
+
+ROOMOTE_BACKUP_PASSPHRASE may be used instead of --passphrase-file. If neither
+is set, an interactive terminal is required.
+EOF
+}
+
+upgrade_usage() {
+  cat <<'EOF'
+usage: roomote upgrade [version] [options]
+
+Options:
+  --skip-backup                   Do not create a pre-upgrade backup bundle
+  --backup-passphrase-file <file> Encrypt the pre-upgrade backup with this
+                                  passphrase instead of a generated one
+
+ROOMOTE_BACKUP_PASSPHRASE may be used instead of --backup-passphrase-file.
+Without either, upgrade generates a passphrase and stores it next to the
+bundle under /opt/roomote/backups; move both off-host if the bundle should
+also serve as a disaster-recovery copy.
+EOF
+}
+
+restore_usage() {
+  cat <<'EOF'
+usage: roomote restore <bundle> --yes [options]
+
+Options:
+  --passphrase-file <file> Read the encryption passphrase from a file
+  --yes                    Confirm replacement of configuration and data
+
+ROOMOTE_BACKUP_PASSPHRASE may be used instead of --passphrase-file. If neither
+is set, an interactive terminal is required.
+EOF
+}
+
+make_passphrase_file() {
+  local supplied_file="${1:-}"
+  local mode="${2:-read}"
+  local first second
+
+  if [ -n "$supplied_file" ]; then
+    [ -f "$supplied_file" ] || die "passphrase file not found: $supplied_file"
+    [ -s "$supplied_file" ] || die "passphrase file is empty: $supplied_file"
+    printf '%s' "$supplied_file"
+    return
+  fi
+
+  if [ -n "${ROOMOTE_BACKUP_PASSPHRASE:-}" ]; then
+    [ ${#ROOMOTE_BACKUP_PASSPHRASE} -ge 12 ] || die "ROOMOTE_BACKUP_PASSPHRASE must be at least 12 characters"
+    supplied_file="$(mktemp)"
+    chmod 600 "$supplied_file"
+    printf '%s' "$ROOMOTE_BACKUP_PASSPHRASE" >"$supplied_file"
+    printf '%s' "$supplied_file"
+    return
+  fi
+
+  [ -r /dev/tty ] || die "provide --passphrase-file or ROOMOTE_BACKUP_PASSPHRASE"
+  printf 'Backup passphrase: ' >/dev/tty
+  IFS= read -r -s first </dev/tty
+  printf '\n' >/dev/tty
+  [ ${#first} -ge 12 ] || die "backup passphrase must be at least 12 characters"
+
+  if [ "$mode" = "confirm" ]; then
+    printf 'Confirm backup passphrase: ' >/dev/tty
+    IFS= read -r -s second </dev/tty
+    printf '\n' >/dev/tty
+    [ "$first" = "$second" ] || die "backup passphrases did not match"
+  fi
+
+  supplied_file="$(mktemp)"
+  chmod 600 "$supplied_file"
+  printf '%s' "$first" >"$supplied_file"
+  printf '%s' "$supplied_file"
+}
+
+json_escape() {
+  local value="$1"
+  value="${value//\\/\\\\}"
+  value="${value//\"/\\\"}"
+  value="${value//$'\n'/\\n}"
+  value="${value//$'\r'/\\r}"
+  value="${value//$'\t'/\\t}"
+  printf '%s' "$value"
+}
+
+compose_network_name() {
+  local network
+  network="$(read_env_value ROOMOTE_COMPOSE_NETWORK)"
+  printf '%s' "${network:-roomote_default}"
+}
+
+is_local_postgres() {
+  local database_url profiles
+  database_url="$(read_env_value DATABASE_URL)"
+  profiles="$(read_env_value COMPOSE_PROFILES)"
+  [[ "$database_url" == *'@postgres:'* || ",$profiles," == *',local-postgres,'* ]]
+}
+
+is_local_minio() {
+  local endpoint
+  endpoint="$(read_env_value S3_ENDPOINT)"
+  case "${endpoint:-http://minio:9000}" in
+    http://minio:9000 | https://minio:9000) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
+container_volume_name() {
+  local service="$1"
+  local destination="$2"
+  local container_id volume
+
+  container_id="$(compose ps -aq "$service")"
+  [ -n "$container_id" ] || die "could not find the $service container"
+  volume="$(docker inspect --format "{{range .Mounts}}{{if eq .Destination \"$destination\"}}{{.Name}}{{end}}{{end}}" "$container_id")"
+  [ -n "$volume" ] || die "could not find the $service volume mounted at $destination"
+  printf '%s' "$volume"
+}
+
+archive_volume() {
+  local volume="$1"
+  local staging_dir="$2"
+  local archive_name="$3"
+
+  docker run --rm \
+    --volume "$volume:/source:ro" \
+    --volume "$staging_dir:/backup" \
+    --env "ARCHIVE_NAME=$archive_name" \
+    --env "BACKUP_UID=$(id -u)" \
+    --env "BACKUP_GID=$(id -g)" \
+    redis:7-alpine sh -c \
+    'tar -C /source -cf "/backup/$ARCHIVE_NAME" . && chown "$BACKUP_UID:$BACKUP_GID" "/backup/$ARCHIVE_NAME" && chmod 600 "/backup/$ARCHIVE_NAME"'
+}
+
+restore_volume() {
+  local volume="$1"
+  local staging_dir="$2"
+  local archive_name="${3:-}"
+
+  if [ -n "$archive_name" ]; then
+    docker run --rm \
+      --volume "$volume:/target" \
+      --volume "$staging_dir:/backup:ro" \
+      redis:7-alpine sh -c "rm -rf /target/* /target/.[!.]* /target/..?*; tar -C /target -xf /backup/$archive_name"
+  else
+    docker run --rm \
+      --volume "$volume:/target" \
+      redis:7-alpine sh -c 'rm -rf /target/* /target/.[!.]* /target/..?*'
+  fi
+}
+
+postgres_command() {
+  local input_file="${1:-}"
+  shift || true
+
+  if [ -n "$input_file" ]; then
+    docker run --rm --network "$(compose_network_name)" --env-file "$env_file" -i \
+      postgres:17.5@sha256:aadf2c0696f5ef357aa7a68da995137f0cf17bad0bf6e1f17de06ae5c769b302 sh -c "$*" <"$input_file"
+  else
+    docker run --rm --network "$(compose_network_name)" --env-file "$env_file" \
+      postgres:17.5@sha256:aadf2c0696f5ef357aa7a68da995137f0cf17bad0bf6e1f17de06ae5c769b302 sh -c "$*"
+  fi
 }
 
 github_curl() {
@@ -256,10 +435,65 @@ resolve_latest_version() {
   printf '%s' "$latest"
 }
 
+# Encrypted pre-upgrade backup so every upgrade has a restore-tested rollback
+# point. Reuses cmd_backup, so the bundle format and consistency guarantees
+# match a manual `roomote backup`.
+pre_upgrade_backup() {
+  local previous_version="$1"
+  local passphrase_arg="$2"
+  local bundle passphrase_file
+
+  mkdir -p "$install_root/backups"
+  bundle="$install_root/backups/pre-upgrade-${previous_version:-unknown}-$(date +%F-%H%M%S).roomote"
+  log "Creating a pre-upgrade backup (skip with roomote upgrade --skip-backup)"
+  if [ -n "$passphrase_arg" ]; then
+    cmd_backup --passphrase-file "$passphrase_arg" --output "$bundle"
+  elif [ -n "${ROOMOTE_BACKUP_PASSPHRASE:-}" ]; then
+    cmd_backup --output "$bundle"
+  else
+    # No operator passphrase: generate one and keep it beside the bundle.
+    # Both stay in the host's existing trust domain (like /opt/roomote/.env);
+    # move them off-host to double as a disaster-recovery copy.
+    passphrase_file="$bundle.passphrase"
+    (umask 077 && openssl rand -base64 32 >"$passphrase_file")
+    log "Generated backup passphrase file $passphrase_file"
+    cmd_backup --passphrase-file "$passphrase_file" --output "$bundle"
+  fi
+  log "Pre-upgrade backup written to $bundle"
+}
+
 cmd_upgrade() {
-  local version="${1:-}"
+  local version=''
+  local skip_backup='false'
+  local backup_passphrase_arg=''
   local repo image_registry image_namespace previous_worker_image worker_image
-  local modal_base_image_ref fetch_ref app_domain
+  local modal_base_image_ref fetch_ref app_domain previous_version
+
+  while [ "$#" -gt 0 ]; do
+    case "$1" in
+      --skip-backup)
+        skip_backup='true'
+        shift
+        ;;
+      --backup-passphrase-file)
+        backup_passphrase_arg="${2:-}"
+        shift 2
+        ;;
+      --help | -h)
+        upgrade_usage
+        return
+        ;;
+      --*)
+        upgrade_usage >&2
+        die "unknown upgrade option: $1"
+        ;;
+      *)
+        [ -z "$version" ] || die "only one upgrade version may be given"
+        version="$1"
+        shift
+        ;;
+    esac
+  done
 
   repo="$(read_env_value ROOMOTE_REPO)"
   repo="${repo:-RooCodeInc/Roomote}"
@@ -268,6 +502,27 @@ cmd_upgrade() {
     log "Resolving the latest Roomote release"
     version="$(resolve_latest_version "$repo")"
     [ -n "$version" ] || die "could not resolve a release tag from github.com/$repo; pass a version explicitly"
+  fi
+
+  previous_version="$(read_env_value ROOMOTE_VERSION)"
+  if [ "$skip_backup" = 'true' ]; then
+    log "Skipping the pre-upgrade backup (--skip-backup)"
+  else
+    pre_upgrade_backup "$previous_version" "$backup_passphrase_arg"
+  fi
+
+  # Keep a copy of the current deployment files so a failed migration can put
+  # the previous release's configuration back exactly as it was. Deliberately
+  # not a local: the EXIT trap must still see it after bash unwinds function
+  # scope on a set -e failure in a nested call.
+  mkdir -p "$install_root/backups"
+  upgrade_rollback_dir="$(mktemp -d "$install_root/backups/.upgrade-staging.XXXXXX")"
+  chmod 700 "$upgrade_rollback_dir"
+  trap 'rm -rf "${upgrade_rollback_dir:-}"' EXIT
+  install -m 600 "$env_file" "$upgrade_rollback_dir/.env"
+  install -m 600 "$compose_file" "$upgrade_rollback_dir/docker-compose.prod.yml"
+  if [ -f "$install_root/caddy/Caddyfile" ]; then
+    install -m 600 "$install_root/caddy/Caddyfile" "$upgrade_rollback_dir/Caddyfile"
   fi
 
   image_registry="$(read_env_value IMAGE_REGISTRY)"
@@ -290,6 +545,11 @@ cmd_upgrade() {
   fetch_deploy_file "$repo" "$fetch_ref" deploy/caddy/Caddyfile "$install_root/caddy/Caddyfile"
 
   set_env_value ROOMOTE_VERSION "$version"
+  # Recorded for `roomote rollback`; skipped for same-version re-runs so a
+  # retry cannot overwrite the real rollback target with itself.
+  if [ -n "$previous_version" ] && [ "$previous_version" != "$version" ]; then
+    set_env_value ROOMOTE_PREVIOUS_VERSION "$previous_version"
+  fi
   set_env_value TRPC_URL "https://$app_domain/_roomote-api"
   set_env_value IMAGE_REGISTRY "$image_registry"
   set_env_value IMAGE_NAMESPACE "$image_namespace"
@@ -314,6 +574,22 @@ cmd_upgrade() {
   log "Pulling images for $version"
   docker pull "$worker_image"
   compose pull
+  # Migrations run before any running service is replaced. Drizzle applies
+  # all pending migrations in a single transaction, so a failure here rolls
+  # the schema back and the previous release keeps serving.
+  log "Applying database migrations for $version before replacing services"
+  if ! compose run --rm db-migrate; then
+    log "Migration failed; restoring the previous deployment configuration"
+    install -m 600 "$upgrade_rollback_dir/.env" "$env_file"
+    install -m 600 "$upgrade_rollback_dir/docker-compose.prod.yml" "$compose_file"
+    if [ -f "$upgrade_rollback_dir/Caddyfile" ]; then
+      install -m 600 "$upgrade_rollback_dir/Caddyfile" "$install_root/caddy/Caddyfile"
+    fi
+    compose start controller || true
+    die "database migrations for $version failed and were rolled back; the previous release${previous_version:+ ($previous_version)} is still running"
+  fi
+  rm -rf "$upgrade_rollback_dir"
+  trap - EXIT
   log "Starting Roomote $version"
   compose up -d --wait --wait-timeout 600
   systemctl enable roomote-compose.service >/dev/null 2>&1 || true
@@ -324,42 +600,406 @@ cmd_upgrade() {
   log "Upgrade to $version complete"
 }
 
-cmd_backup() {
-  local backup_file
-  backup_file="backups/backup-$(date +%F-%H%M%S).sql"
-  mkdir -p "$install_root/backups"
+# Emergency path back to the release recorded by the last upgrade. Skips the
+# pre-upgrade backup on purpose: the bundle from the failed upgrade already
+# exists, and a backup against an unhealthy stack could block the rollback.
+cmd_rollback() {
+  local previous_version
 
-  log "Dumping database to $install_root/$backup_file"
-  docker run --rm --network roomote_default --env-file "$env_file" \
-    postgres:17.5@sha256:aadf2c0696f5ef357aa7a68da995137f0cf17bad0bf6e1f17de06ae5c769b302 sh -c 'pg_dump --clean --if-exists --no-owner --no-privileges "$DATABASE_URL"' \
-    >"$install_root/$backup_file"
-  log "Backup written to $install_root/$backup_file"
+  [ "$#" -eq 0 ] || die "usage: roomote rollback"
+  previous_version="$(read_env_value ROOMOTE_PREVIOUS_VERSION)"
+  [ -n "$previous_version" ] || die "no previous release recorded in $env_file; run 'roomote upgrade <version>' with an explicit tag instead"
+  log "Rolling back to the previously deployed release $previous_version"
+  cmd_upgrade "$previous_version" --skip-backup
+}
+
+stop_task_workers() {
+  local worker_ids worker_network
+  worker_network="$(read_env_value DOCKER_WORKER_NETWORK)"
+  worker_network="${worker_network:-roomote_worker}"
+  worker_ids="$(docker ps --filter "network=$worker_network" --format '{{.ID}} {{.Names}}' | awk '$2 ~ /^roomote-worker-/ { print $1 }')"
+  if [ -n "$worker_ids" ]; then
+    log "Stopping active task worker containers for a consistent backup"
+    # shellcheck disable=SC2086
+    docker stop --timeout 30 $worker_ids
+  fi
+}
+
+collect_image_identities() {
+  local output_file="$1"
+  local references_file ref digest image_id worker_image
+  references_file="$(mktemp)"
+
+  compose config --images >"$references_file"
+  worker_image="$(read_env_value DOCKER_WORKER_IMAGE)"
+  [ -z "$worker_image" ] || printf '%s\n' "$worker_image" >>"$references_file"
+
+  : >"$output_file"
+  while IFS= read -r ref; do
+    [ -n "$ref" ] || continue
+    docker image inspect "$ref" >/dev/null 2>&1 || die "image $ref is not present; pull it before creating a recovery backup"
+    digest="$(docker image inspect --format '{{range .RepoDigests}}{{println .}}{{end}}' "$ref" | head -n 1)"
+    image_id="$(docker image inspect --format '{{.Id}}' "$ref")"
+    [ -n "$digest" ] || die "image $ref has no repository digest and cannot be recovered on a fresh host"
+    printf '%s|%s|%s\n' "$ref" "$digest" "$image_id" >>"$output_file"
+  done < <(sort -u "$references_file")
+  rm -f "$references_file"
+}
+
+restore_image_identities() {
+  local identities_file="$1"
+  local ref digest image_id
+
+  while IFS='|' read -r ref digest image_id; do
+    [ -n "$ref" ] || continue
+    [ -n "$digest" ] || die "backup has no restorable digest for image $ref ($image_id)"
+    log "Restoring image identity $digest"
+    docker pull "$digest"
+    docker tag "$digest" "$ref"
+  done <"$identities_file"
+}
+
+cmd_backup() {
+  local include_redis='false'
+  local passphrase_arg=''
+  local output_file=''
+  local generated_passphrase='false'
+  local passphrase_file staging_dir schema_version roomote_version
+  local storage_mode storage_included s3_endpoint s3_bucket
+  local minio_volume redis_volume created_at
+  local services_stopped='false'
+
+  while [ "$#" -gt 0 ]; do
+    case "$1" in
+      --include-redis)
+        include_redis='true'
+        shift
+        ;;
+      --passphrase-file)
+        passphrase_arg="${2:-}"
+        shift 2
+        ;;
+      --output)
+        output_file="${2:-}"
+        shift 2
+        ;;
+      --help | -h)
+        backup_usage
+        return
+        ;;
+      *)
+        backup_usage >&2
+        die "unknown backup option: $1"
+        ;;
+    esac
+  done
+
+  command -v openssl >/dev/null 2>&1 || die "openssl is required"
+  command -v sha256sum >/dev/null 2>&1 || die "sha256sum is required"
+  mkdir -p "$install_root/backups"
+  if [ -z "$output_file" ]; then
+    output_file="$install_root/backups/backup-$(date +%F-%H%M%S).roomote"
+  elif [[ "$output_file" != /* ]]; then
+    output_file="$PWD/$output_file"
+  fi
+  mkdir -p "$(dirname -- "$output_file")"
+  [ ! -e "$output_file" ] || die "backup output already exists: $output_file"
+
+  if [ -z "$passphrase_arg" ]; then
+    generated_passphrase='true'
+  fi
+  passphrase_file="$(make_passphrase_file "$passphrase_arg" confirm)"
+  staging_dir="$(mktemp -d "$install_root/backups/.backup-staging.XXXXXX")"
+  chmod 700 "$staging_dir"
+
+  cleanup_backup() {
+    if [ "$services_stopped" = 'true' ]; then
+      log "Restarting Roomote after interrupted backup"
+      compose up -d --wait --wait-timeout 600 || true
+    fi
+    rm -rf "$staging_dir"
+    if [ "$generated_passphrase" = 'true' ]; then
+      rm -f "$passphrase_file"
+    fi
+  }
+  trap cleanup_backup EXIT
+
+  mkdir -p "$staging_dir/config/caddy"
+  install -m 600 "$env_file" "$staging_dir/config/.env"
+  install -m 600 "$compose_file" "$staging_dir/config/docker-compose.prod.yml"
+  if [ -f "$install_root/caddy/Caddyfile" ]; then
+    install -m 600 "$install_root/caddy/Caddyfile" "$staging_dir/config/caddy/Caddyfile"
+  fi
+  if [ -f "$install_root/deployment.env" ]; then
+    install -m 600 "$install_root/deployment.env" "$staging_dir/config/deployment.env"
+  fi
+  collect_image_identities "$staging_dir/images.txt"
+
+  log "Quiescing Roomote application writers"
+  compose stop web api controller bullmq preview-proxy
+  stop_task_workers
+  services_stopped='true'
+
+  log "Dumping PostgreSQL"
+  postgres_command '' 'pg_dump --clean --if-exists --no-owner --no-privileges "$DATABASE_URL"' \
+    >"$staging_dir/postgres.sql"
+  schema_version="$(postgres_command '' 'psql "$DATABASE_URL" -Atqc "SELECT hash FROM drizzle.__drizzle_migrations ORDER BY created_at DESC LIMIT 1"' 2>/dev/null || true)"
+  schema_version="${schema_version:-unknown}"
+
+  s3_endpoint="$(read_env_value S3_ENDPOINT)"
+  s3_bucket="$(read_env_value S3_BUCKET_ARTIFACTS)"
+  s3_endpoint="${s3_endpoint:-http://minio:9000}"
+  s3_bucket="${s3_bucket:-roomote-artifacts}"
+  if is_local_minio; then
+    storage_mode='local-minio'
+    storage_included='true'
+    log "Snapshotting the local MinIO volume"
+    compose stop minio
+    minio_volume="$(container_volume_name minio /data)"
+    archive_volume "$minio_volume" "$staging_dir" minio-data.tar
+  else
+    storage_mode='external-bucket'
+    storage_included='false'
+    log "Recording external object storage; bucket contents remain operator-managed"
+  fi
+
+  if [ "$include_redis" = 'true' ]; then
+    log "Snapshotting Redis after application writers were stopped"
+    compose exec -T redis redis-cli SAVE >/dev/null
+    compose stop redis
+    redis_volume="$(container_volume_name redis /data)"
+    archive_volume "$redis_volume" "$staging_dir" redis-data.tar
+  fi
+
+  roomote_version="$(read_env_value ROOMOTE_VERSION)"
+  created_at="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+  cat >"$staging_dir/manifest.json" <<EOF
+{
+  "format": "roomote-backup",
+  "formatVersion": 1,
+  "createdAt": "$(json_escape "$created_at")",
+  "roomoteVersion": "$(json_escape "${roomote_version:-unknown}")",
+  "schemaVersion": "$(json_escape "$schema_version")",
+  "consistency": "application writers stopped before PostgreSQL, object storage, and Redis snapshots",
+  "configurationIncluded": true,
+  "imageIdentitiesFile": "images.txt",
+  "storage": {
+    "mode": "$(json_escape "$storage_mode")",
+    "endpoint": "$(json_escape "$s3_endpoint")",
+    "bucket": "$(json_escape "$s3_bucket")",
+    "objectsIncluded": $storage_included
+  },
+  "redis": {
+    "included": $include_redis,
+    "consistency": "application-quiesced volume snapshot"
+  }
+}
+EOF
+
+  (
+    trap - EXIT
+    cd "$staging_dir"
+    find . -type f ! -name SHA256SUMS -print0 | sort -z | xargs -0 sha256sum >SHA256SUMS
+  )
+
+  log "Encrypting backup bundle"
+  tar -C "$staging_dir" -czf - . |
+    openssl enc -aes-256-cbc -salt -pbkdf2 -iter 200000 -md sha256 \
+      -pass "file:$passphrase_file" -out "$output_file"
+  chmod 600 "$output_file"
+
+  log "Restarting Roomote"
+  compose up -d --wait --wait-timeout 600
+  services_stopped='false'
+  rm -rf "$staging_dir"
+  if [ "$generated_passphrase" = 'true' ]; then
+    rm -f "$passphrase_file"
+  fi
+  trap - EXIT
+  log "Encrypted deployment backup written to $output_file"
+}
+
+validate_archive_paths() {
+  local archive_file="$1"
+  local entry
+
+  while IFS= read -r entry; do
+    case "$entry" in
+      /* | ../* | */../* | */..) die "backup contains an unsafe archive path: $entry" ;;
+    esac
+  done < <(tar -tzf "$archive_file")
+
+  if tar -tvzf "$archive_file" | awk 'substr($1, 1, 1) != "-" && substr($1, 1, 1) != "d" { bad = 1 } END { exit bad }'; then
+    return
+  fi
+  die "backup contains unsupported links or special files"
+}
+
+validate_volume_archive() {
+  local archive_file="$1"
+  local entry
+
+  while IFS= read -r entry; do
+    case "$entry" in
+      /* | ../* | */../* | */..) die "volume snapshot contains an unsafe archive path: $entry" ;;
+    esac
+  done < <(tar -tf "$archive_file")
+
+  if tar -tvf "$archive_file" | awk 'substr($1, 1, 1) != "-" && substr($1, 1, 1) != "d" { bad = 1 } END { exit bad }'; then
+    return
+  fi
+  die "volume snapshot contains unsupported links or special files"
 }
 
 cmd_restore() {
-  local backup_file="${1:-}"
-  local confirmed="${2:-}"
+  local backup_file=''
+  local confirmed='false'
+  local passphrase_arg=''
+  local generated_passphrase='false'
+  local passphrase_file staging_dir encrypted_tar
+  local redis_included='false'
+  local local_minio_included='false'
+  local redis_volume minio_volume
 
-  [ -n "$backup_file" ] || die "usage: roomote restore <file> --yes"
-  [ -f "$backup_file" ] || die "backup file not found: $backup_file"
-  [ "$confirmed" = "--yes" ] || die "restore OVERWRITES the database; add --yes to confirm"
+  while [ "$#" -gt 0 ]; do
+    case "$1" in
+      --yes | -y)
+        confirmed='true'
+        shift
+        ;;
+      --passphrase-file)
+        passphrase_arg="${2:-}"
+        shift 2
+        ;;
+      --help | -h)
+        restore_usage
+        return
+        ;;
+      --*)
+        restore_usage >&2
+        die "unknown restore option: $1"
+        ;;
+      *)
+        [ -z "$backup_file" ] || die "only one backup bundle may be restored"
+        backup_file="$1"
+        shift
+        ;;
+    esac
+  done
 
-  # Quiesce the app services so live connections are not killed mid-restore
-  # and nothing writes to the database while the dump loads.
-  log "Stopping app services during the restore"
-  compose stop web api controller bullmq preview-proxy
+  [ -n "$backup_file" ] || die "usage: roomote restore <bundle> --yes"
+  [ -f "$backup_file" ] || die "backup bundle not found: $backup_file"
+  [ "$confirmed" = 'true' ] || die "restore OVERWRITES configuration and data; add --yes to confirm"
+  command -v openssl >/dev/null 2>&1 || die "openssl is required"
+  command -v sha256sum >/dev/null 2>&1 || die "sha256sum is required"
 
-  log "Dropping and recreating the public schema"
-  docker run --rm --network roomote_default --env-file "$env_file" \
-    postgres:17.5@sha256:aadf2c0696f5ef357aa7a68da995137f0cf17bad0bf6e1f17de06ae5c769b302 sh -c 'psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -c "DROP SCHEMA IF EXISTS public CASCADE; CREATE SCHEMA public;"'
+  if [ -z "$passphrase_arg" ]; then
+    generated_passphrase='true'
+  fi
+  passphrase_file="$(make_passphrase_file "$passphrase_arg" read)"
+  staging_dir="$(mktemp -d "$install_root/backups/.restore-staging.XXXXXX")"
+  chmod 700 "$staging_dir"
+  encrypted_tar="$staging_dir/bundle.tar.gz"
 
-  log "Restoring $backup_file"
-  docker run --rm --network roomote_default --env-file "$env_file" -i \
-    postgres:17.5@sha256:aadf2c0696f5ef357aa7a68da995137f0cf17bad0bf6e1f17de06ae5c769b302 sh -c 'psql "$DATABASE_URL" -v ON_ERROR_STOP=1' \
-    <"$backup_file"
+  cleanup_restore() {
+    rm -rf "$staging_dir"
+    if [ "$generated_passphrase" = 'true' ]; then
+      rm -f "$passphrase_file"
+    fi
+  }
+  trap cleanup_restore EXIT
 
-  log "Restarting app services"
+  log "Decrypting and validating backup before changing the deployment"
+  if ! openssl enc -d -aes-256-cbc -pbkdf2 -iter 200000 -md sha256 \
+    -pass "file:$passphrase_file" -in "$backup_file" -out "$encrypted_tar"; then
+    die "could not decrypt backup (wrong passphrase or damaged bundle)"
+  fi
+  validate_archive_paths "$encrypted_tar"
+  tar -xzf "$encrypted_tar" --no-same-owner --no-same-permissions -C "$staging_dir"
+  rm -f "$encrypted_tar"
+
+  [ -f "$staging_dir/manifest.json" ] || die "backup manifest is missing"
+  [ -f "$staging_dir/SHA256SUMS" ] || die "backup checksums are missing"
+  [ -f "$staging_dir/postgres.sql" ] || die "PostgreSQL dump is missing"
+  [ -f "$staging_dir/config/.env" ] || die "deployment configuration is missing"
+  [ -f "$staging_dir/config/docker-compose.prod.yml" ] || die "deployment Compose file is missing"
+  [ -f "$staging_dir/images.txt" ] || die "image identities are missing"
+  grep -Eq '"format"[[:space:]]*:[[:space:]]*"roomote-backup"' "$staging_dir/manifest.json" || die "not a Roomote backup bundle"
+  grep -Eq '"formatVersion"[[:space:]]*:[[:space:]]*1([,[:space:]]|$)' "$staging_dir/manifest.json" || die "unsupported Roomote backup format version"
+  (trap - EXIT; cd "$staging_dir" && sha256sum -c SHA256SUMS)
+
+  if awk '
+    /"redis"[[:space:]]*:/ { in_redis = 1; next }
+    in_redis && /"included"[[:space:]]*:[[:space:]]*true/ { found = 1; exit }
+    in_redis && /}/ { exit }
+    END { exit !found }
+  ' "$staging_dir/manifest.json"; then
+    [ -f "$staging_dir/redis-data.tar" ] || die "Redis is marked as included but its snapshot is missing"
+    validate_volume_archive "$staging_dir/redis-data.tar"
+    redis_included='true'
+  fi
+  if grep -Eq '"mode"[[:space:]]*:[[:space:]]*"local-minio"' "$staging_dir/manifest.json"; then
+    [ -f "$staging_dir/minio-data.tar" ] || die "local MinIO data is missing"
+    validate_volume_archive "$staging_dir/minio-data.tar"
+    local_minio_included='true'
+  elif grep -Eq '"mode"[[:space:]]*:[[:space:]]*"external-bucket"' "$staging_dir/manifest.json"; then
+    log "This backup references external object storage; ensure its bucket is available before continuing"
+  else
+    die "backup has an unsupported object storage mode"
+  fi
+
+  log "Restoring recorded container image identities"
+  restore_image_identities "$staging_dir/images.txt"
+
+  log "Stopping the existing deployment"
+  stop_task_workers
+  compose down
+
+  log "Restoring deployment configuration and release metadata"
+  install -m 600 "$staging_dir/config/.env" "$env_file"
+  install -m 600 "$staging_dir/config/docker-compose.prod.yml" "$compose_file"
+  if [ -f "$staging_dir/config/caddy/Caddyfile" ]; then
+    mkdir -p "$install_root/caddy"
+    install -m 600 "$staging_dir/config/caddy/Caddyfile" "$install_root/caddy/Caddyfile"
+  fi
+  if [ -f "$staging_dir/config/deployment.env" ]; then
+    install -m 600 "$staging_dir/config/deployment.env" "$install_root/deployment.env"
+  fi
+
+  compose create redis minio >/dev/null
+  redis_volume="$(container_volume_name redis /data)"
+  if [ "$redis_included" = 'true' ]; then
+    log "Restoring Redis snapshot"
+    restore_volume "$redis_volume" "$staging_dir" redis-data.tar
+  else
+    log "Redis was not included; clearing transient queue and session state"
+    restore_volume "$redis_volume" "$staging_dir"
+  fi
+
+  if [ "$local_minio_included" = 'true' ]; then
+    minio_volume="$(container_volume_name minio /data)"
+    log "Restoring local MinIO artifacts"
+    restore_volume "$minio_volume" "$staging_dir" minio-data.tar
+  fi
+
+  log "Starting deployment infrastructure"
+  if is_local_postgres; then
+    compose up -d --wait --wait-timeout 600 postgres redis minio
+  else
+    compose up -d --wait --wait-timeout 600 redis minio
+  fi
+
+  log "Restoring PostgreSQL"
+  postgres_command '' 'psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -c "DROP SCHEMA IF EXISTS public CASCADE; CREATE SCHEMA public;"'
+  postgres_command "$staging_dir/postgres.sql" 'psql "$DATABASE_URL" -v ON_ERROR_STOP=1'
+
+  log "Starting the restored Roomote release"
   compose up -d --wait --wait-timeout 600
+  rm -rf "$staging_dir"
+  if [ "$generated_passphrase" = 'true' ]; then
+    rm -f "$passphrase_file"
+  fi
+  trap - EXIT
   log "Restore complete"
 }
 
@@ -371,6 +1011,7 @@ case "$command" in
   logs) cmd_logs "$@" ;;
   setup-url) cmd_setup_url "$@" ;;
   upgrade) cmd_upgrade "$@" ;;
+  rollback) cmd_rollback "$@" ;;
   backup) cmd_backup "$@" ;;
   restore) cmd_restore "$@" ;;
   restart) compose restart "$@" ;;
