@@ -66,6 +66,10 @@ x-roomote-env: &roomote-env
   R_GITHUB_APP_SLUG: ${R_GITHUB_APP_SLUG:-}
   SETUP_TOKEN: ${SETUP_TOKEN:-}
   DEFAULT_COMPUTE_PROVIDER: ${DEFAULT_COMPUTE_PROVIDER:-docker}
+  BL_API_KEY: ${BL_API_KEY:-}
+  BL_WORKSPACE: ${BL_WORKSPACE:-}
+  BLAXEL_IMAGE: ${BLAXEL_IMAGE:-}
+  BLAXEL_REGION: ${BLAXEL_REGION:-}
   # Declarative environment provisioning: point ROOMOTE_ENVIRONMENTS_DIR at a
   # directory of environment YAML files mounted into the api container (for
   # example `- ./environments:/roomote/environments:ro` on the api service),

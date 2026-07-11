@@ -1594,8 +1594,8 @@ export async function saveSetupNewComputeConfigCommand(
         }
       }
 
-      // Provisionable providers' base images (the E2B worker template, the
-      // Daytona worker snapshot) cannot be derived like the Modal base image
+      // Provisionable providers' base images (the E2B worker template,
+      // Daytona worker snapshot, or Blaxel sandbox image) cannot be derived like the Modal base image
       // — they are artifacts inside the operator's provider account. Manual
       // form overrides are not accepted; process env or auto-provisioning
       // owns them. When a registry-qualified worker image exists, the save
@@ -1605,10 +1605,15 @@ export async function saveSetupNewComputeConfigCommand(
 
       if (isSetupProvisionableComputeProvider(input.provider)) {
         const provisionableProvider = input.provider;
-        const artifactEnvVar =
-          provisionableProvider === 'e2b'
-            ? 'E2B_TEMPLATE_ID'
-            : 'DAYTONA_SNAPSHOT_NAME';
+        const artifactEnvVar = providerStatus.fields.find((field) =>
+          isAutoProvisionedComputeArtifactField(field),
+        )?.envVarName;
+
+        if (!artifactEnvVar) {
+          throw new Error(
+            `${providerStatus.label} has no provisionable artifact field.`,
+          );
+        }
         const provisioning = await prepareComputeProvisioningStart({
           provider: provisionableProvider,
           providerStatus,

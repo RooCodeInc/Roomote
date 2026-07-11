@@ -62,6 +62,17 @@ export const E2B_CAPABILITIES: ComputeProviderCapabilities = {
   supportsFileWrite: true,
 };
 
+export const BLAXEL_CAPABILITIES: ComputeProviderCapabilities = {
+  supportsCreateInstance: true,
+  supportsDestroyInstance: true,
+  supportsCommandExecution: true,
+  supportsCommandOutputStreaming: true,
+  supportsCommandOutputLookup: true,
+  supportsSnapshots: false,
+  supportsResume: false,
+  supportsFileWrite: true,
+};
+
 export function getComputeProviderCapabilities(
   provider: ComputeProvider,
 ): ComputeProviderCapabilities {
@@ -74,6 +85,8 @@ export function getComputeProviderCapabilities(
       return DAYTONA_CAPABILITIES;
     case 'e2b':
       return E2B_CAPABILITIES;
+    case 'blaxel':
+      return BLAXEL_CAPABILITIES;
     default: {
       const _exhaustive: never = provider;
       throw new Error(`Unsupported provider: ${_exhaustive}`);

@@ -15,6 +15,7 @@ const BRAND_ICON_BY_PROVIDER = {
   docker: 'docker',
   daytona: 'daytona',
   e2b: 'e2b',
+  blaxel: 'blaxel',
 } satisfies Record<ComputeProvider, string>;
 
 export function StepComputeProvider({

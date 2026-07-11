@@ -11,6 +11,7 @@ import {
   spawnDaytonaWorker,
   spawnDockerWorker,
   spawnE2bWorker,
+  spawnBlaxelWorker,
   spawnModalWorker,
 } from './compute-providers';
 
@@ -177,6 +178,27 @@ export class RoomoteController extends BaseController {
           // clamp to the configured ceiling; sleep-check's provider-timeout
           // backstop reads the real deadline and winds the task run down first.
           e2bTimeoutMs: Math.min(timeoutMs, Env.E2B_MAX_SANDBOX_TIMEOUT_MS),
+          localTarballPath: this.localWorkerReleasePath,
+        });
+        return;
+      }
+      case 'blaxel': {
+        const blaxelApiKey = resolvedEnv.BL_API_KEY;
+        const blaxelWorkspace = resolvedEnv.BL_WORKSPACE;
+        const blaxelImage = resolvedEnv.BLAXEL_IMAGE;
+        if (!blaxelApiKey || !blaxelWorkspace || !blaxelImage) {
+          throw new Error(
+            'BL_API_KEY, BL_WORKSPACE, and BLAXEL_IMAGE are required to spawn Blaxel workers',
+          );
+        }
+        await spawnBlaxelWorker(taskRun, authToken, {
+          deploymentSlug,
+          blaxelTags: this.buildSandboxTags(),
+          blaxelApiKey,
+          blaxelWorkspace,
+          blaxelImage,
+          blaxelRegion: resolvedEnv.BLAXEL_REGION,
+          blaxelTimeoutMs: timeoutMs,
           localTarballPath: this.localWorkerReleasePath,
         });
         return;

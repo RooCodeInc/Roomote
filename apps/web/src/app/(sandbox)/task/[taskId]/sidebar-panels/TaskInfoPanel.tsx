@@ -70,6 +70,7 @@ const SANDBOX_PROVIDER_LABELS = {
   modal: 'Modal',
   daytona: 'Daytona',
   e2b: 'E2B',
+  blaxel: 'Blaxel',
 } satisfies Record<ComputeProvider, string>;
 
 const SANDBOX_PROVIDER_ICONS = {
@@ -77,6 +78,7 @@ const SANDBOX_PROVIDER_ICONS = {
   modal: CloudIcon,
   daytona: CloudIcon,
   e2b: CloudIcon,
+  blaxel: CloudIcon,
 } satisfies Record<ComputeProvider, typeof CloudIcon>;
 
 function formatStartedAt(startedAt: Date | null): string {

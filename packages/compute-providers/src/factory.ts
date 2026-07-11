@@ -8,6 +8,7 @@ import {
 import type {
   ComputeProviderClient,
   ComputeProviderFactoryOptions,
+  BlaxelConfig,
   DaytonaConfig,
   E2bConfig,
   ModalConfig,
@@ -18,6 +19,7 @@ import {
   DockerClient,
   DaytonaClient,
   E2bClient,
+  BlaxelClient,
 } from './adapters';
 
 const MODAL_DEFAULT_MEMORY_LIMIT_MIB = SANDBOX_DEFAULT_MEMORY_MIB * 2;
@@ -193,6 +195,26 @@ export function createComputeProviderClient(
       };
 
       return new E2bClient(config);
+    }
+
+    case 'blaxel': {
+      const apiKey = options.config?.apiKey ?? envValue('BL_API_KEY');
+      const workspace = options.config?.workspace ?? envValue('BL_WORKSPACE');
+      const image = options.config?.image ?? envValue('BLAXEL_IMAGE');
+      const region = envValue('BLAXEL_REGION');
+
+      assertDefined(apiKey, 'Missing BL_API_KEY');
+      assertDefined(workspace, 'Missing BL_WORKSPACE');
+      assertDefined(image, 'Missing BLAXEL_IMAGE');
+
+      const config: BlaxelConfig = {
+        ...(options.config ?? {}),
+        apiKey,
+        workspace,
+        image,
+        ...(options.config?.region === undefined && region ? { region } : {}),
+      };
+      return new BlaxelClient(config);
     }
 
     default: {

@@ -5,14 +5,22 @@ import type {
   SVGProps,
 } from 'react';
 import { fireEvent, render, screen } from '@testing-library/react';
-import type { ComputeProvider, SetupComputeStatus } from '@roomote/types';
+import {
+  createEmptySetupNewState,
+  type ComputeProvider,
+  type SetupComputeStatus,
+} from '@roomote/types';
+
+const { mockSetupStatus } = vi.hoisted(() => ({
+  mockSetupStatus: { current: null as unknown },
+}));
 
 vi.mock('@tanstack/react-query', () => ({
   useMutation: () => ({
     mutateAsync: vi.fn(),
     isPending: false,
   }),
-  useQuery: () => ({ data: null }),
+  useQuery: () => ({ data: mockSetupStatus.current }),
   useQueryClient: () => ({
     invalidateQueries: vi.fn(),
   }),
@@ -140,6 +148,10 @@ function buildComputeSetup(
 }
 
 describe('StepComputeConfig', () => {
+  beforeEach(() => {
+    mockSetupStatus.current = null;
+  });
+
   it('lets hosted provider advanced overrides be opened when the worker image is editable', () => {
     render(
       <StepComputeConfig
@@ -238,6 +250,76 @@ describe('StepComputeConfig', () => {
     ).toBeInTheDocument();
     expect(
       screen.getByRole('button', { name: /continue|save and continue/i }),
+    ).toBeDisabled();
+  });
+
+  it('shows the provisioning state for a Blaxel image build', async () => {
+    mockSetupStatus.current = {
+      setupNewState: {
+        ...createEmptySetupNewState(),
+        computeProvider: 'blaxel',
+        blaxelImageBuild: {
+          status: 'building',
+          imageRef: 'ghcr.io/roomote/worker:v1',
+          templateRef: 'roomote-worker-abc123',
+          error: null,
+          startedAt: new Date().toISOString(),
+          finishedAt: null,
+        },
+      },
+    };
+
+    const blaxel = {
+      ...buildHostedProvider('blaxel'),
+      provider: 'blaxel' as const,
+      label: 'Blaxel',
+      fields: [
+        {
+          envVarName: 'BL_API_KEY',
+          label: 'Blaxel API Key',
+          secret: true,
+          category: 'credential' as const,
+          runtimeSatisfied: false,
+          savedSatisfied: true,
+          defaultSatisfied: false,
+          setupProvisionable: false,
+        },
+        {
+          envVarName: 'BL_WORKSPACE',
+          label: 'Blaxel Workspace',
+          category: 'credential' as const,
+          runtimeSatisfied: false,
+          savedSatisfied: true,
+          defaultSatisfied: false,
+          setupProvisionable: false,
+        },
+        {
+          envVarName: 'BLAXEL_IMAGE',
+          label: 'Worker Image',
+          category: 'infrastructure' as const,
+          runtimeSatisfied: false,
+          savedSatisfied: false,
+          defaultSatisfied: false,
+          setupProvisionable: true,
+        },
+      ],
+    };
+
+    render(
+      <StepComputeConfig
+        computeSetup={buildComputeSetup({ providers: [blaxel] })}
+        selectedProviderId="blaxel"
+        onContinue={vi.fn()}
+      />,
+    );
+
+    expect(
+      await screen.findByText(
+        'Provisioning the worker base image. This can take a few minutes.',
+      ),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole('button', { name: /Provisioning/i }),
     ).toBeDisabled();
   });
 });

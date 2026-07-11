@@ -29,8 +29,16 @@ import {
   eq,
   inArray,
   sandboxOidcTargets,
+  resolveComputeProviderEnvValues,
   sql,
 } from '@roomote/db/server';
+
+async function createConfiguredComputeClient(provider: ComputeProvider) {
+  return createComputeProviderClient({
+    provider,
+    envFallback: await resolveComputeProviderEnvValues(provider),
+  });
+}
 
 const SANDBOX_OIDC_REFRESH_CLAIM_DELAY_MS = 2 * 60 * 1000;
 const SANDBOX_OIDC_REFRESH_MACHINE_BATCH_SIZE = 50;
@@ -355,9 +363,7 @@ async function removeSandboxOidcFiles(params: {
     return;
   }
 
-  const client = createComputeProviderClient({
-    provider: params.computeProvider,
-  });
+  const client = await createConfiguredComputeClient(params.computeProvider);
   const script = `set -eu\nrm -f -- ${params.tokenFiles
     .map((file) => shellEscape(file))
     .join(' ')}`;
@@ -379,9 +385,7 @@ async function isDeadOrMissingSandboxOidcInstance(params: {
   computeProvider: ComputeProvider;
   computeProviderId: string;
 }): Promise<boolean> {
-  const client = createComputeProviderClient({
-    provider: params.computeProvider,
-  });
+  const client = await createConfiguredComputeClient(params.computeProvider);
 
   try {
     const status = await client.getInstanceStatus({
@@ -603,9 +607,7 @@ export async function primeSandboxOidcTargets(
 
   assertSandboxOidcAvailable();
 
-  const client = createComputeProviderClient({
-    provider: input.computeProvider,
-  });
+  const client = await createConfiguredComputeClient(input.computeProvider);
   const existingRows = await db.query.sandboxOidcTargets.findMany({
     where: and(
       eq(sandboxOidcTargets.computeProvider, input.computeProvider),

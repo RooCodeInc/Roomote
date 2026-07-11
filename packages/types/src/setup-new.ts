@@ -8,8 +8,8 @@ import {
 import type { SourceControlProvider } from './source-control';
 
 /**
- * Progress of a setup-time worker base-image provisioning run (the E2B
- * worker template build or the Daytona snapshot registration). The run
+ * Progress of a setup-time worker base-image provisioning run (an E2B
+ * template build, Daytona snapshot registration, or Blaxel image build). The run
  * executes detached in the web process after the provider's config is
  * saved, so a `building` entry older than
  * {@link SETUP_COMPUTE_PROVISIONING_STALE_MS} is treated as failed (the
@@ -18,7 +18,7 @@ import type { SourceControlProvider } from './source-control';
 export type SetupNewComputeProvisioningState = {
   status: 'building' | 'succeeded' | 'failed';
   imageRef: string;
-  /** Provider-side artifact reference (E2B template ref, Daytona snapshot name). */
+  /** Provider-side artifact reference (template, snapshot, or image ref). */
   templateRef: string | null;
   error: string | null;
   startedAt: string;
@@ -71,6 +71,7 @@ export function presentSetupNewComputeProvisioning(
 export const SETUP_COMPUTE_PROVISIONING_STATE_FIELDS = {
   e2b: 'e2bTemplateBuild',
   daytona: 'daytonaSnapshotBuild',
+  blaxel: 'blaxelImageBuild',
 } as const satisfies Partial<Record<ComputeProvider, keyof SetupNewState>>;
 
 export type SetupProvisionableComputeProvider =
@@ -117,6 +118,7 @@ export type SetupNewState = {
   suggestionGenerationTriggeredAt: string | null;
   e2bTemplateBuild: SetupNewComputeProvisioningState | null;
   daytonaSnapshotBuild: SetupNewComputeProvisioningState | null;
+  blaxelImageBuild: SetupNewComputeProvisioningState | null;
   lastInteractedByUserId: string | null;
 };
 
@@ -144,6 +146,7 @@ export function createEmptySetupNewState(): SetupNewState {
     suggestionGenerationTriggeredAt: null,
     e2bTemplateBuild: null,
     daytonaSnapshotBuild: null,
+    blaxelImageBuild: null,
     lastInteractedByUserId: null,
   };
 }

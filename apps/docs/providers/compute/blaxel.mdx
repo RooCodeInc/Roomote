@@ -1,0 +1,61 @@
+---
+title: Blaxel
+icon: '/logo/integrations/blaxel.svg'
+description: Run Roomote tasks in Blaxel perpetual sandboxes.
+---
+
+Blaxel is a hosted sandbox provider. Roomote creates a sandbox from the worker
+image, installs the current worker release, exposes task ports through Blaxel
+preview URLs, and starts the task worker as a keep-alive process.
+
+## When to use Blaxel
+
+Use Blaxel when task work should run outside the Roomote host and you want
+provider-managed microVMs with automatic standby and fast wake-up. Blaxel does
+not currently support Roomote environment snapshots; snapshot-based task and
+environment workflows remain available with Modal, E2B, and Daytona.
+
+## Configuration
+
+Create a key from the [Blaxel API keys page](https://app.blaxel.ai/profile/security),
+then add Blaxel from **Settings > Sandboxes** or provide:
+
+```sh
+BL_API_KEY=...
+BL_WORKSPACE=my-workspace
+```
+
+When you save the credentials, Roomote automatically imports the configured
+Roomote worker image and builds a [Blaxel sandbox image](https://docs.blaxel.ai/Sandboxes/Templates).
+The build injects Blaxel's sandbox API and saves the resulting immutable
+`sandbox/name:version` reference as `BLAXEL_IMAGE`. You may still provide
+`BLAXEL_IMAGE` through the process environment to use a prebuilt image.
+
+You can optionally select a region:
+
+```sh
+BLAXEL_REGION=us-pdx-1
+```
+
+## Runtime behavior
+
+- Roomote requests a Blaxel TTL matching the task timeout.
+- Each exposed port receives a public Blaxel preview URL. Roomote's preview
+  proxy remains the user-facing authentication layer.
+- The detached worker process uses Blaxel keep-alive while the task is active.
+- Roomote's sleep-check lifecycle destroys the sandbox when the task finishes.
+
+## Verify setup
+
+1. Save the API key and workspace name, then wait for image provisioning to finish.
+2. Select Blaxel as the default sandbox provider.
+3. Start a small task and confirm logs reach the task view.
+4. Start a web app and verify its preview link.
+
+## Common issues
+
+- **Authentication fails.** Confirm the API key belongs to `BL_WORKSPACE`.
+- **The sandbox remains unavailable.** Confirm `BLAXEL_IMAGE` is a Blaxel-built
+  `sandbox/name:version` image, not a raw Docker registry reference.
+- **A preview has no URL.** Confirm the configured workspace can create public
+  sandbox previews and that the requested ports are valid.

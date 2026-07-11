@@ -611,9 +611,16 @@ E2B_TEMPLATE_ID=...
 DEFAULT_COMPUTE_PROVIDER=daytona
 DAYTONA_API_KEY=...
 DAYTONA_SNAPSHOT_NAME=...
+
+# Blaxel
+DEFAULT_COMPUTE_PROVIDER=blaxel
+BL_API_KEY=...
+BL_WORKSPACE=...
+# Optional prebuilt Blaxel image override
+BLAXEL_IMAGE=sandbox/roomote-worker:<version>
 ```
 
-`E2B_TEMPLATE_ID` and `DAYTONA_SNAPSHOT_NAME` can also be provisioned
+`E2B_TEMPLATE_ID`, `DAYTONA_SNAPSHOT_NAME`, and `BLAXEL_IMAGE` can also be provisioned
 automatically during setup when a registry-qualified `DOCKER_WORKER_IMAGE`
 is configured — the setup wizard and the Settings → Sandboxes page build the
 worker base artifact in your provider account after credentials are saved.

@@ -6,7 +6,13 @@ import { SANDBOX_FILES_DIR } from './worker-runtime';
  * Determines which infrastructure vendor will execute the task run.
  */
 
-export const computeProviders = ['modal', 'docker', 'daytona', 'e2b'] as const;
+export const computeProviders = [
+  'modal',
+  'docker',
+  'daytona',
+  'e2b',
+  'blaxel',
+] as const;
 
 export type ComputeProvider = (typeof computeProviders)[number];
 
@@ -27,6 +33,7 @@ export const snapshotCapableComputeProviders = [
  */
 export const sleepCheckManagedComputeProviders = [
   ...snapshotCapableComputeProviders,
+  'blaxel',
 ] as const satisfies readonly ComputeProvider[];
 
 export const isComputeProvider = (
@@ -101,6 +108,11 @@ export const E2B_WORKER_RUNTIME_PATHS: RuntimePathsWithoutEnvironment =
     ...SANDBOX_WORKER_RUNTIME_PATHS,
   });
 
+export const BLAXEL_WORKER_RUNTIME_PATHS: RuntimePathsWithoutEnvironment =
+  Object.freeze({
+    ...SANDBOX_WORKER_RUNTIME_PATHS,
+  });
+
 export const LOCAL_WORKER_RUNTIME_PATHS: RuntimePathsWithoutEnvironment =
   Object.freeze({
     ...SANDBOX_WORKER_RUNTIME_PATHS,
@@ -115,6 +127,7 @@ const RUNTIME_PATHS_BY_ENVIRONMENT: Record<
   docker: SANDBOX_WORKER_RUNTIME_PATHS,
   daytona: DAYTONA_WORKER_RUNTIME_PATHS,
   e2b: E2B_WORKER_RUNTIME_PATHS,
+  blaxel: BLAXEL_WORKER_RUNTIME_PATHS,
   local: LOCAL_WORKER_RUNTIME_PATHS,
 };
 

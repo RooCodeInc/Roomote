@@ -244,6 +244,7 @@ describe('setup-new auth config commands', () => {
     mockTxSelect.mockReset();
     process.env.E2B_TEMPLATE_ID = '';
     process.env.DAYTONA_SNAPSHOT_NAME = '';
+    process.env.BLAXEL_IMAGE = '';
 
     mockDbTransaction.mockImplementation(async (callback) => {
       const tx = {
@@ -630,6 +631,7 @@ describe('setup-new compute config commands', () => {
     vi.unstubAllEnvs();
     delete process.env.E2B_TEMPLATE_ID;
     delete process.env.DAYTONA_SNAPSHOT_NAME;
+    delete process.env.BLAXEL_IMAGE;
   });
 
   it('commits Local Docker as the runtime default when it is chosen', async () => {
