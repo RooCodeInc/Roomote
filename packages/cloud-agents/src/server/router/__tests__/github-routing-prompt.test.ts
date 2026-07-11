@@ -47,7 +47,7 @@ describe('buildGitHubRoutingPrompt', () => {
   describe('with a database-configured app slug', () => {
     beforeEach(() => {
       setConfiguredGitHubAppSlugCache({
-        value: 'roomote-roomote',
+        value: 'acme',
         expiresAt: Date.now() + 60_000,
       });
     });
@@ -59,7 +59,7 @@ describe('buildGitHubRoutingPrompt', () => {
     it('addresses the configured bot handle instead of the process-env slug', () => {
       const prompt = buildGitHubRoutingPrompt();
 
-      expect(prompt).toContain('mentions @roomote-roomote');
+      expect(prompt).toContain('mentions @acme');
       expect(prompt).not.toContain('@newmote');
     });
   });

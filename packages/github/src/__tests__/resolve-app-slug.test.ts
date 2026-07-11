@@ -28,32 +28,26 @@ describe('resolveConfiguredGitHubAppSlug', () => {
   });
 
   it('resolves the configured slug and caches non-empty values', async () => {
-    mockResolveDeploymentEnvVar.mockResolvedValueOnce('roomote-roomote');
+    mockResolveDeploymentEnvVar.mockResolvedValueOnce('acme');
 
     const { resolveConfiguredGitHubAppSlug } =
       await import('../resolve-app-slug');
     const { getEffectiveGitHubAppSlug } = await import('../app-slug');
 
-    await expect(resolveConfiguredGitHubAppSlug()).resolves.toBe(
-      'roomote-roomote',
-    );
-    expect(getEffectiveGitHubAppSlug()).toBe('roomote-roomote');
+    await expect(resolveConfiguredGitHubAppSlug()).resolves.toBe('acme');
+    expect(getEffectiveGitHubAppSlug()).toBe('acme');
 
-    await expect(resolveConfiguredGitHubAppSlug()).resolves.toBe(
-      'roomote-roomote',
-    );
+    await expect(resolveConfiguredGitHubAppSlug()).resolves.toBe('acme');
     expect(mockResolveDeploymentEnvVar).toHaveBeenCalledTimes(1);
   });
 
   it('resolves the canonical R_GITHUB_APP_SLUG deployment env var', async () => {
-    mockResolveDeploymentEnvVar.mockResolvedValueOnce('roomote-roomote');
+    mockResolveDeploymentEnvVar.mockResolvedValueOnce('acme');
 
     const { resolveConfiguredGitHubAppSlug } =
       await import('../resolve-app-slug');
 
-    await expect(resolveConfiguredGitHubAppSlug()).resolves.toBe(
-      'roomote-roomote',
-    );
+    await expect(resolveConfiguredGitHubAppSlug()).resolves.toBe('acme');
     expect(mockResolveDeploymentEnvVar).toHaveBeenCalledWith(
       'R_GITHUB_APP_SLUG',
     );
@@ -73,41 +67,33 @@ describe('resolveConfiguredGitHubAppSlug', () => {
 
   it('re-resolves after the cache expires', async () => {
     vi.useFakeTimers();
-    mockResolveDeploymentEnvVar.mockResolvedValue('roomote-roomote');
+    mockResolveDeploymentEnvVar.mockResolvedValue('acme');
 
     const { resolveConfiguredGitHubAppSlug } =
       await import('../resolve-app-slug');
 
-    await expect(resolveConfiguredGitHubAppSlug()).resolves.toBe(
-      'roomote-roomote',
-    );
+    await expect(resolveConfiguredGitHubAppSlug()).resolves.toBe('acme');
     vi.advanceTimersByTime(61_000);
-    await expect(resolveConfiguredGitHubAppSlug()).resolves.toBe(
-      'roomote-roomote',
-    );
+    await expect(resolveConfiguredGitHubAppSlug()).resolves.toBe('acme');
 
     expect(mockResolveDeploymentEnvVar).toHaveBeenCalledTimes(2);
   });
 
   it('keeps the last known slug when the database is unavailable', async () => {
     vi.useFakeTimers();
-    mockResolveDeploymentEnvVar.mockResolvedValueOnce('roomote-roomote');
+    mockResolveDeploymentEnvVar.mockResolvedValueOnce('acme');
 
     const { resolveConfiguredGitHubAppSlug } =
       await import('../resolve-app-slug');
 
-    await expect(resolveConfiguredGitHubAppSlug()).resolves.toBe(
-      'roomote-roomote',
-    );
+    await expect(resolveConfiguredGitHubAppSlug()).resolves.toBe('acme');
 
     vi.advanceTimersByTime(61_000);
     mockResolveDeploymentEnvVar.mockRejectedValueOnce(
       new Error('database unavailable'),
     );
 
-    await expect(resolveConfiguredGitHubAppSlug()).resolves.toBe(
-      'roomote-roomote',
-    );
+    await expect(resolveConfiguredGitHubAppSlug()).resolves.toBe('acme');
   });
 
   it('falls back to the process-env slug when resolution fails cold', async () => {

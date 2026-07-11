@@ -172,7 +172,7 @@ describe('preparePrReviewNotificationDelivery', () => {
       issueComments: [
         {
           id: 'c1',
-          author: 'roomote-roomote[bot]',
+          author: 'roomote[bot]',
           body: '<!-- roomote-review-summary sha=abc mode=initial -->\n<!-- roomote-review-status:start -->\n**All 1 issue addressed.** [See task](https://example.com)\n<!-- roomote-review-status:end -->',
           createdAt: null,
           url: null,
@@ -445,7 +445,7 @@ describe('gatherPrReviewTriageContext', () => {
       issueComments: [
         {
           id: 'c1',
-          author: 'roomote-roomote[bot]',
+          author: 'roomote[bot]',
           body: '<!-- roomote-review-summary sha=abc mode=initial -->\n<!-- roomote-review-status:start -->\n**All 1 issue addressed.** [See task](https://example.com)\n<!-- roomote-review-status:end -->',
           createdAt: null,
           url: null,
