@@ -79,6 +79,56 @@ export function getGitHubAppMention(slug: string): string {
 }
 
 /**
+ * Leading Roomote PR provenance blockquote:
+ * `> Created by Roomote. ...` or `> Opened on behalf of <name>. ...`
+ * (including the historical "from an unlinked ..." attribution form).
+ */
+const PR_BODY_ATTRIBUTION_LINE_RE =
+  /^(>\s*(?:Created by Roomote(?: from an unlinked [^.]+)?\.|Opened on behalf of .+?\.)\s*)(.*)$/;
+
+/**
+ * Rewrite follow-up app mentions in the Roomote PR-body attribution line so
+ * they always use the deployment-configured GitHub App slug (for example
+ * `@roomote-roomote`) instead of a stale hostname default like `@roomote`.
+ *
+ * Only the leading attribution blockquote is rewritten; other body text that
+ * happens to mention `@roomote` is left unchanged.
+ */
+export function normalizePrBodyAttributionAppMention(
+  body: string,
+  githubAppSlug: string,
+): string {
+  const normalizedSlug = githubAppSlug.trim();
+
+  if (!normalizedSlug) {
+    return body;
+  }
+
+  const mention = getGitHubAppMention(normalizedSlug);
+  const firstNewline = body.indexOf('\n');
+  const firstLine = firstNewline === -1 ? body : body.slice(0, firstNewline);
+  const remainder = firstNewline === -1 ? '' : body.slice(firstNewline);
+  const match = firstLine.match(PR_BODY_ATTRIBUTION_LINE_RE);
+
+  if (!match) {
+    return body;
+  }
+
+  const prefix = match[1] ?? '';
+  const instruction = match[2] ?? '';
+  const rewrittenInstruction = instruction.replace(
+    /(mention(?:ing)?\s+)@([A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?)/g,
+    `$1${mention}`,
+  );
+
+  if (rewrittenInstruction === instruction) {
+    return body;
+  }
+
+  return `${prefix}${rewrittenInstruction}${remainder}`;
+}
+
+/**
  * Hosted-product GitHub App slugs Roomote always treats as its own bots.
  * Custom deployments still add their configured slug via helpers below.
  */
