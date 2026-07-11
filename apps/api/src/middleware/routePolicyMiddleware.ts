@@ -1,3 +1,5 @@
+import { createHash } from 'node:crypto';
+
 import type { Context } from 'hono';
 import { createMiddleware } from 'hono/factory';
 
@@ -9,9 +11,23 @@ import {
   findRoutePolicyRule,
   type RoutePolicyClass,
   type RoutePolicyRule,
+  type RouteRateLimit,
 } from '../route-policies';
 
 const RATE_LIMIT_REDIS_TIMEOUT_MS = 500;
+
+/**
+ * Atomically increments the window counter and arms its TTL in one round
+ * trip, so a partial failure can never leave an orphaned counter without an
+ * expiry.
+ */
+const RATE_LIMIT_INCREMENT_LUA = `
+local current = redis.call('INCR', KEYS[1])
+if current == 1 then
+  redis.call('EXPIRE', KEYS[1], ARGV[1])
+end
+return current
+`;
 
 type RoutePolicyRejection = {
   status: 401 | 403;
@@ -68,6 +84,34 @@ export function evaluateRoutePolicy(
   }
 }
 
+function rejectionResponse(
+  c: Context<{ Variables: Variables }>,
+  rule: RoutePolicyRule,
+  rejection: RoutePolicyRejection,
+): Response {
+  if (rule.errorFormat === 'json-rpc') {
+    // Match the JSON-RPC error envelope the MCP handlers emit themselves
+    // (see `handlers/mcp/proxy-utils.ts`) so Streamable HTTP clients that
+    // parse the body see a consistent shape.
+    return c.json(
+      {
+        jsonrpc: '2.0',
+        id: null,
+        error: {
+          code: rejection.status === 401 ? -32001 : -32000,
+          message:
+            rejection.status === 401
+              ? 'Unauthorized: missing or invalid bearer token'
+              : `Forbidden: ${rejection.body.error}`,
+        },
+      },
+      rejection.status,
+    );
+  }
+
+  return c.json(rejection.body, rejection.status);
+}
+
 function resolveClientKey(c: Context<{ Variables: Variables }>): string {
   return (
     c.req.header('fly-client-ip') ??
@@ -75,6 +119,48 @@ function resolveClientKey(c: Context<{ Variables: Variables }>): string {
     c.req.header('x-real-ip') ??
     'unknown'
   );
+}
+
+/**
+ * Derive the bucket key for a `state-token` limit from the `state` string
+ * field of the JSON body. Hono caches the parsed body, so the handler can
+ * still read it afterwards. Requests without a usable state token share a
+ * fallback bucket; the handler rejects them as invalid anyway, and the
+ * shared bucket keeps that garbage bounded.
+ */
+async function resolveStateTokenKey(
+  c: Context<{ Variables: Variables }>,
+): Promise<string> {
+  let state: unknown;
+
+  try {
+    const body: unknown = await c.req.json();
+    state =
+      body && typeof body === 'object' && !Array.isArray(body)
+        ? (body as { state?: unknown }).state
+        : undefined;
+  } catch {
+    return 'malformed-body';
+  }
+
+  if (typeof state !== 'string' || state.trim() === '') {
+    return 'missing-state';
+  }
+
+  // Hash so the secret token never appears in Redis keys.
+  return createHash('sha256').update(state.trim()).digest('hex');
+}
+
+function resolveRateLimitBucketKey(
+  c: Context<{ Variables: Variables }>,
+  rateLimit: RouteRateLimit,
+): Promise<string> | string {
+  switch (rateLimit.keySource) {
+    case 'client':
+      return resolveClientKey(c);
+    case 'state-token':
+      return resolveStateTokenKey(c);
+  }
 }
 
 function withTimeout<T>(promise: Promise<T>, timeoutMs: number): Promise<T> {
@@ -97,43 +183,36 @@ function withTimeout<T>(promise: Promise<T>, timeoutMs: number): Promise<T> {
 }
 
 /**
- * Fixed-window per-client rate limit backed by Redis. Fails open on Redis
- * errors or slowness so a cache outage cannot take down webhook ingestion.
+ * Fixed-window rate limit backed by Redis. Fails open on Redis errors or
+ * slowness so a cache outage cannot take down webhook ingestion.
  */
 async function isRateLimited(
+  c: Context<{ Variables: Variables }>,
   rule: RoutePolicyRule,
-  clientKey: string,
+  rateLimit: RouteRateLimit,
 ): Promise<boolean> {
-  const rateLimit = rule.rateLimit;
-
-  if (!rateLimit) {
-    return false;
-  }
-
   try {
+    const bucketKey = await resolveRateLimitBucketKey(c, rateLimit);
     const redis = getRedis();
     const windowStart = Math.floor(
       Date.now() / (rateLimit.windowSeconds * 1000),
     );
-    const key = `api:route-rate-limit:${rule.name}:${clientKey}:${windowStart}`;
+    const key = `api:route-rate-limit:${rule.name}:${rateLimit.keySource}:${bucketKey}:${windowStart}`;
 
     const count = await withTimeout(
-      (async () => {
-        const value = await redis.incr(key);
-
-        if (value === 1) {
-          await redis.expire(key, rateLimit.windowSeconds);
-        }
-
-        return value;
-      })(),
+      redis.eval(
+        RATE_LIMIT_INCREMENT_LUA,
+        1,
+        key,
+        String(rateLimit.windowSeconds),
+      ) as Promise<number>,
       RATE_LIMIT_REDIS_TIMEOUT_MS,
     );
 
     return count > rateLimit.limit;
   } catch (error) {
     console.warn(
-      `[RoutePolicy] Rate limit check failed open for ${rule.name}: ${
+      `[RoutePolicy] Rate limit check failed open for ${rule.name}:${rateLimit.keySource}: ${
         error instanceof Error ? error.message : String(error)
       }`,
     );
@@ -158,14 +237,16 @@ export const routePolicyMiddleware = createMiddleware<{
     return c.json({ error: 'not_found' }, 404);
   }
 
-  if (rule.rateLimit && (await isRateLimited(rule, resolveClientKey(c)))) {
-    return c.json({ error: 'rate_limited' }, 429);
+  for (const rateLimit of rule.rateLimits ?? []) {
+    if (await isRateLimited(c, rule, rateLimit)) {
+      return c.json({ error: 'rate_limited' }, 429);
+    }
   }
 
   const rejection = evaluateRoutePolicy(rule.policy, c.get('authContext'));
 
   if (rejection) {
-    return c.json(rejection.body, rejection.status);
+    return rejectionResponse(c, rule, rejection);
   }
 
   await next();

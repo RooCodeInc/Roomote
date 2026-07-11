@@ -34,8 +34,21 @@ export type RoutePolicyClass =
   | 'authenticated'
   | 'admin';
 
+/**
+ * How a rate limit derives its bucket key:
+ * - `client`: best-effort client IP from proxy headers. Server-to-server
+ *   callers that send none of those headers collapse into one shared bucket,
+ *   so client-keyed limits must be sized as global ceilings, not per-user
+ *   quotas.
+ * - `state-token`: SHA-256 of the `state` string field in the JSON request
+ *   body. Legitimate callers use a fresh single-use token per flow, so they
+ *   never share a bucket; repeated hammering of one token is throttled.
+ */
+export type RouteRateLimitKeySource = 'client' | 'state-token';
+
 export type RouteRateLimit = {
-  /** Maximum requests allowed per client per window. */
+  keySource: RouteRateLimitKeySource;
+  /** Maximum requests allowed per bucket per window. */
   limit: number;
   windowSeconds: number;
 };
@@ -52,11 +65,18 @@ export type RoutePolicyRule = {
       };
   policy: RoutePolicyClass;
   /**
-   * Optional per-client rate limit enforced centrally before the handler
-   * runs. Fails open when Redis is unavailable so a cache outage cannot take
-   * down webhook ingestion.
+   * Optional rate limits enforced centrally before the handler runs; every
+   * listed limit must pass. Fails open when Redis is unavailable so a cache
+   * outage cannot take down webhook ingestion.
    */
-  rateLimit?: RouteRateLimit;
+  rateLimits?: readonly RouteRateLimit[];
+  /**
+   * Body shape for centrally-emitted rejections. MCP surfaces speak JSON-RPC
+   * over Streamable HTTP, so their clients get a JSON-RPC error envelope
+   * (matching the in-handler rejections in `handlers/mcp/proxy-utils.ts`)
+   * instead of the plain `{ error }` shape.
+   */
+  errorFormat?: 'plain' | 'json-rpc';
 };
 
 /**
@@ -64,10 +84,13 @@ export type RoutePolicyRule = {
  * providers (GitHub, Slack, Linear, ...) stay far below this; the limit blunts
  * unauthenticated flooding of the public entry points.
  */
-const WEBHOOK_RATE_LIMIT: RouteRateLimit = {
-  limit: 1200,
-  windowSeconds: 60,
-};
+const WEBHOOK_RATE_LIMITS: readonly RouteRateLimit[] = [
+  {
+    keySource: 'client',
+    limit: 1200,
+    windowSeconds: 60,
+  },
+];
 
 /**
  * Ordered rule table; the first matching rule wins. Keep more specific rules
@@ -108,14 +131,24 @@ export const ROUTE_POLICY_RULES: readonly RoutePolicyRule[] = [
     policy: 'public',
   },
 
-  // Teams OAuth resume: called by the web app after account linking to
-  // resume a pending Teams conversation. Authenticated by a single-use state
-  // token in the body, so it gets a strict brute-force rate limit.
+  // Teams OAuth resume: called server-to-server by the web app after account
+  // linking to resume a pending Teams conversation, authenticated by a
+  // single-use random-UUID state token in the body. The primary limit is
+  // keyed on the state token so concurrent legitimate users (who all arrive
+  // from the web app's egress IP with distinct tokens) never share a bucket,
+  // while hammering any one token is throttled. Guessing across the 122-bit
+  // token space is cryptographically infeasible either way. The client-keyed
+  // limit is a deliberately high global volumetric ceiling (far above any
+  // plausible legitimate account-linking rate) because the web app sends no
+  // client-identifying headers and would collapse into one bucket.
   {
     name: 'webhook-teams-auth-resume',
     match: { type: 'exact', path: '/api/webhooks/teams/auth/resume' },
     policy: 'webhook',
-    rateLimit: { limit: 30, windowSeconds: 60 },
+    rateLimits: [
+      { keySource: 'state-token', limit: 10, windowSeconds: 60 },
+      { keySource: 'client', limit: 300, windowSeconds: 60 },
+    ],
   },
 
   // Signature-authenticated webhook entry points. Each handler verifies the
@@ -124,49 +157,49 @@ export const ROUTE_POLICY_RULES: readonly RoutePolicyRule[] = [
     name: 'webhook-github',
     match: { type: 'prefix', path: '/api/webhooks/github' },
     policy: 'webhook',
-    rateLimit: WEBHOOK_RATE_LIMIT,
+    rateLimits: WEBHOOK_RATE_LIMITS,
   },
   {
     name: 'webhook-gitlab',
     match: { type: 'prefix', path: '/api/webhooks/gitlab' },
     policy: 'webhook',
-    rateLimit: WEBHOOK_RATE_LIMIT,
+    rateLimits: WEBHOOK_RATE_LIMITS,
   },
   {
     name: 'webhook-gitea',
     match: { type: 'prefix', path: '/api/webhooks/gitea' },
     policy: 'webhook',
-    rateLimit: WEBHOOK_RATE_LIMIT,
+    rateLimits: WEBHOOK_RATE_LIMITS,
   },
   {
     name: 'webhook-ado',
     match: { type: 'prefix', path: '/api/webhooks/ado' },
     policy: 'webhook',
-    rateLimit: WEBHOOK_RATE_LIMIT,
+    rateLimits: WEBHOOK_RATE_LIMITS,
   },
   {
     name: 'webhook-slack',
     match: { type: 'prefix', path: '/api/webhooks/slack' },
     policy: 'webhook',
-    rateLimit: WEBHOOK_RATE_LIMIT,
+    rateLimits: WEBHOOK_RATE_LIMITS,
   },
   {
     name: 'webhook-linear',
     match: { type: 'prefix', path: '/api/webhooks/linear' },
     policy: 'webhook',
-    rateLimit: WEBHOOK_RATE_LIMIT,
+    rateLimits: WEBHOOK_RATE_LIMITS,
   },
   {
     name: 'webhook-teams',
     match: { type: 'prefix', path: '/api/webhooks/teams' },
     policy: 'webhook',
-    rateLimit: WEBHOOK_RATE_LIMIT,
+    rateLimits: WEBHOOK_RATE_LIMITS,
   },
   {
     name: 'webhook-telegram',
     match: { type: 'prefix', path: '/api/webhooks/telegram' },
     policy: 'webhook',
-    rateLimit: WEBHOOK_RATE_LIMIT,
+    rateLimits: WEBHOOK_RATE_LIMITS,
   },
 
   // Router-facing MCP endpoints: accept user auth tokens (LLM router
@@ -175,6 +208,7 @@ export const ROUTE_POLICY_RULES: readonly RoutePolicyRule[] = [
     name: 'mcp-routing',
     match: { type: 'prefix', path: '/api/mcp-routing' },
     policy: 'authenticated',
+    errorFormat: 'json-rpc',
   },
 
   // Worker/agent MCP surface. `mcpAuthMiddleware` and the per-integration
@@ -183,6 +217,7 @@ export const ROUTE_POLICY_RULES: readonly RoutePolicyRule[] = [
     name: 'mcp',
     match: { type: 'prefix', path: '/api/mcp' },
     policy: 'authenticated',
+    errorFormat: 'json-rpc',
   },
 
   // Task run log streaming: run tokens are scoped to their own run inside

@@ -3,7 +3,7 @@ import type { Context, Next } from 'hono';
 import type { Variables } from '../types';
 
 const redisState = vi.hoisted(() => ({
-  incrResult: 1,
+  counters: new Map<string, number>(),
   shouldThrow: false,
 }));
 
@@ -13,17 +13,41 @@ vi.mock('@roomote/redis', async (importOriginal) => {
   return {
     ...actual,
     getRedis: () => ({
-      incr: async () => {
+      // In-memory stand-in for the atomic INCR+EXPIRE rate limit script.
+      eval: async (_script: string, _numKeys: number, key: string) => {
         if (redisState.shouldThrow) {
           throw new Error('redis unavailable');
         }
 
-        return redisState.incrResult;
+        const next = (redisState.counters.get(key) ?? 0) + 1;
+        redisState.counters.set(key, next);
+        return next;
       },
-      expire: async () => 1,
+      get: async () => null,
     }),
   };
 });
+
+/**
+ * Seed a rate-limit bucket for the current and next fixed windows so a
+ * request issued immediately afterwards cannot slip into a fresh window.
+ */
+function seedRateLimitBucket(
+  ruleName: string,
+  keySource: string,
+  bucketKey: string,
+  windowSeconds: number,
+  count: number,
+): void {
+  const windowStart = Math.floor(Date.now() / (windowSeconds * 1000));
+
+  for (const window of [windowStart, windowStart + 1]) {
+    redisState.counters.set(
+      `api:route-rate-limit:${ruleName}:${keySource}:${bucketKey}:${window}`,
+      count,
+    );
+  }
+}
 
 vi.mock('../middleware', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../middleware')>();
@@ -61,7 +85,7 @@ import { evaluateRoutePolicy } from '../middleware/routePolicyMiddleware';
 
 describe('route policy enforcement', () => {
   beforeEach(() => {
-    redisState.incrResult = 1;
+    redisState.counters.clear();
     redisState.shouldThrow = false;
   });
 
@@ -122,16 +146,33 @@ describe('route policy enforcement', () => {
       });
     });
 
-    it('rejects unauthenticated MCP task requests centrally', async () => {
-      const response = await createApiApp().request(
+    it('rejects unauthenticated MCP requests centrally with a JSON-RPC error envelope', async () => {
+      const jsonRpcUnauthorized = {
+        jsonrpc: '2.0',
+        id: null,
+        error: {
+          code: -32001,
+          message: 'Unauthorized: missing or invalid bearer token',
+        },
+      };
+
+      const mcpResponse = await createApiApp().request(
         'http://localhost/api/mcp/tasks',
         { method: 'POST', body: '{}' },
       );
 
-      expect(response.status).toBe(401);
-      await expect(response.json()).resolves.toEqual({
-        error: 'authentication_required',
-      });
+      expect(mcpResponse.status).toBe(401);
+      await expect(mcpResponse.json()).resolves.toEqual(jsonRpcUnauthorized);
+
+      const mcpRoutingResponse = await createApiApp().request(
+        'http://localhost/api/mcp-routing/roomote',
+        { method: 'POST', body: '{}' },
+      );
+
+      expect(mcpRoutingResponse.status).toBe(401);
+      await expect(mcpRoutingResponse.json()).resolves.toEqual(
+        jsonRpcUnauthorized,
+      );
     });
 
     it('lets run-token requests through to handler-level run scoping', async () => {
@@ -217,13 +258,15 @@ describe('route policy enforcement', () => {
     });
 
     it('rate limits webhook entry points per client', async () => {
-      redisState.incrResult = 100_000;
+      // No client-identifying headers, so the bucket key falls back to
+      // 'unknown'. Seed it past the 1200/min webhook ceiling.
+      seedRateLimitBucket('webhook-linear', 'client', 'unknown', 60, 100_000);
 
       const response = await createApiApp().request(
-        'http://localhost/api/webhooks/teams/auth/resume',
+        'http://localhost/api/webhooks/linear',
         {
           method: 'POST',
-          body: JSON.stringify({ state: 'state-token' }),
+          body: '{}',
           headers: { 'content-type': 'application/json' },
         },
       );
@@ -232,6 +275,55 @@ describe('route policy enforcement', () => {
       await expect(response.json()).resolves.toEqual({
         error: 'rate_limited',
       });
+    });
+
+    it('keys the Teams auth resume limit on the state token, not the caller', async () => {
+      const app = createApiApp();
+
+      const requestResume = (state: string) =>
+        app.request('http://localhost/api/webhooks/teams/auth/resume', {
+          method: 'POST',
+          body: JSON.stringify({ state }),
+          headers: { 'content-type': 'application/json' },
+        });
+
+      // Hammering one token trips its 10/min bucket...
+      for (let attempt = 1; attempt <= 10; attempt += 1) {
+        const response = await requestResume('repeated-token');
+
+        // The mocked Redis has no pending token stored, so admitted
+        // requests reach the handler and fail there with 404.
+        expect(response.status).toBe(404);
+      }
+
+      const throttled = await requestResume('repeated-token');
+      expect(throttled.status).toBe(429);
+
+      // ...while other tokens (concurrent legitimate users arriving from
+      // the same web-app egress with no client headers) stay unaffected.
+      const otherToken = await requestResume('different-token');
+      expect(otherToken.status).toBe(404);
+    });
+
+    it('applies a high global client ceiling to Teams auth resume', async () => {
+      seedRateLimitBucket(
+        'webhook-teams-auth-resume',
+        'client',
+        'unknown',
+        60,
+        100_000,
+      );
+
+      const response = await createApiApp().request(
+        'http://localhost/api/webhooks/teams/auth/resume',
+        {
+          method: 'POST',
+          body: JSON.stringify({ state: 'fresh-token' }),
+          headers: { 'content-type': 'application/json' },
+        },
+      );
+
+      expect(response.status).toBe(429);
     });
 
     it('fails open when the rate limit backend errors', async () => {
