@@ -802,6 +802,33 @@ describe('Home', () => {
     expect(screen.getByLabelText('Sandbox provider')).toBeInTheDocument();
   });
 
+  it('uses only configured sandbox providers for selection and launch', async () => {
+    render(
+      <Home
+        initialPlaceholderIndex={0}
+        defaultComputeProvider="e2b"
+        availableComputeProviders={['modal']}
+      />,
+    );
+
+    expect(screen.getByLabelText('Sandbox provider')).toHaveTextContent(
+      'Modal',
+    );
+
+    fireEvent.click(
+      screen.getByRole('button', { name: 'Use single-repo environment' }),
+    );
+    fireEvent.click(screen.getByRole('button', { name: 'Submit prompt' }));
+
+    await waitFor(() => {
+      expect(mockCreateStandardTaskRun).toHaveBeenCalledWith(
+        expect.objectContaining({
+          computeProvider: 'modal',
+        }),
+      );
+    });
+  });
+
   it('announces routing progress while auto-routing is pending', async () => {
     let resolveRoute:
       | ((value: typeof routedEnvironmentSuggestion) => void)

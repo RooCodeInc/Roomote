@@ -6,7 +6,10 @@ vi.mock('../../encryption', () => ({
   decryptSecrets: (...args: unknown[]) => mockDecryptSecrets(...args),
 }));
 
-import { resolveComputeProviderEnvValues } from '../compute-runtime-config';
+import {
+  listConfiguredComputeProviders,
+  resolveComputeProviderEnvValues,
+} from '../compute-runtime-config';
 
 type Executor = NonNullable<
   Parameters<typeof resolveComputeProviderEnvValues>[1]
@@ -149,5 +152,35 @@ describe('resolveComputeProviderEnvValues', () => {
     });
 
     expect(values.MODAL_BASE_IMAGE_REF).toBeUndefined();
+  });
+});
+
+describe('listConfiguredComputeProviders', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockDecryptSecrets.mockImplementation(async (value) => value);
+  });
+
+  it('returns only non-excluded providers with required configuration', async () => {
+    const providers = await listConfiguredComputeProviders({
+      runtimeEnv: {
+        MODAL_TOKEN_ID: 'id',
+        MODAL_TOKEN_SECRET: 'secret',
+        MODAL_BASE_IMAGE_REF: 'registry.example.com/image:tag',
+        EXCLUDED_COMPUTE_PROVIDERS: 'docker',
+      },
+      executor: makeExecutor([]),
+    });
+
+    expect(providers).toEqual(['modal']);
+  });
+
+  it('includes docker when it is not excluded', async () => {
+    const providers = await listConfiguredComputeProviders({
+      runtimeEnv: {},
+      executor: makeExecutor([]),
+    });
+
+    expect(providers).toEqual(['docker']);
   });
 });
