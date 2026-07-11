@@ -468,7 +468,7 @@ export async function validateBitbucketToken({
       return {
         status: 'invalid',
         error:
-          'Bitbucket rejected the credentials. Pair an Atlassian API token with the Atlassian account email (legacy app passwords pair with the Bitbucket username), and confirm the token is active with repository access.',
+          'Bitbucket rejected the credentials. Pair an Atlassian API token with the Atlassian account email (legacy app passwords pair with the Bitbucket username), and confirm the token is active and includes the read:user:bitbucket scope alongside repository access.',
       };
     }
 

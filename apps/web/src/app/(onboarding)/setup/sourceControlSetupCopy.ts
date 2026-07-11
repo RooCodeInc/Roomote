@@ -32,7 +32,7 @@ const SOURCE_CONTROL_SETUP_COPY: Record<
     creationHref: 'https://id.atlassian.com/manage-profile/security/api-tokens',
     setupLabel: 'Bitbucket API token',
     creationHint:
-      'Create an API token with scopes covering repository, pull request, and webhook read/write. Prefer a bot or service account that can administer repository webhooks; Roomote syncs repositories and configures pull request webhooks automatically. The Atlassian account email that owns the API token is required.',
+      'Create an API token with scopes covering repository, pull request, and webhook read/write, plus user read (read:user:bitbucket) so Roomote can validate the credentials. Prefer a bot or service account that can administer repository webhooks; Roomote syncs repositories and configures pull request webhooks automatically. The Atlassian account email that owns the API token is required.',
   },
   ado: {
     creationHref: 'https://dev.azure.com/_usersSettings/tokens',
