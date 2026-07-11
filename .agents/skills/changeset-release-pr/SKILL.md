@@ -83,7 +83,8 @@ One file per logical release note, `.changeset/<descriptive-slug>.md`:
 One concise, user-facing summary of the change.
 ```
 
-- The package name only carries the bump level — any `@roomote/*` package works; `'@roomote/web'` is the conventional pick.
+- **Frontmatter is bump-level only.** Always use exactly one package line: `'@roomote/web': <major|minor|patch>`. Do **not** list multiple packages, invent package maps from the PR diff, or try to mirror changed workspaces — workspace package versions are frozen, and `scripts/release/lib.mjs` ignores package names entirely (it only reads each note’s highest level for CHANGELOG grouping and the max level across notes for the root product bump). Listing real packages still looks like an inaccurate accounting in review.
+- Preview the next product version with standard semver/`scripts/release` math before writing the PR body: from `X.Y.Z`, **patch → X.Y.(Z+1)**, **minor → X.(Y+1).0**, **major → (X+1).0.0**. Example: `0.0.4` + minor = **`0.1.0`**, not `0.0.5`.
 - Each summary becomes **one CHANGELOG bullet**, and the release script collapses all whitespace to a single line. Write one tight paragraph; no headings, lists, or line breaks that matter.
 - Write for a user or operator reading release notes: lead with what changed or what now works, name the surface (e.g. "Settings → Sandboxes", "Slack tasks"), and mention the previous broken behavior for fixes. See any existing `.changeset/*.md` file for tone.
 - Group closely related PRs into one note when they ship a single user-facing story; otherwise keep notes separate.
@@ -104,3 +105,5 @@ Commit only the new `.changeset/*.md` files on a feature branch and open a PR ag
 - Do not create the "Release Roomote" Version PR or the Promote PR manually.
 - Ask for the bump level when it was not specified; recommend one, but let the user decide.
 - Do not write notes for changes that already have a pending changeset, and do not pad the changelog with internal noise.
+- Do not multi-package-attribute changesets or free-associate package names with PR file paths; always emit a single `'@roomote/web': <level>` frontmatter line.
+- When stating the expected next version in a release PR body or chat, use the actual scripted bump (`scripts/release/lib.mjs` `computeNextVersion` / ordinary semver: minor zeros the patch).
