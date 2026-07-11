@@ -76,6 +76,18 @@ const bitbucketPaginatedRepositoriesSchema = z.object({
   next: z.string().nullable().optional(),
 });
 
+const bitbucketWorkspaceMembershipSchema = z.object({
+  workspace: z.object({
+    slug: z.string().optional(),
+    uuid: z.string().optional(),
+  }),
+});
+
+const bitbucketPaginatedWorkspaceMembershipsSchema = z.object({
+  values: z.array(bitbucketWorkspaceMembershipSchema),
+  next: z.string().nullable().optional(),
+});
+
 const bitbucketUserSchema = z.object({
   uuid: z.string().optional(),
   account_id: z.string().optional(),
@@ -497,36 +509,72 @@ export async function listBitbucketRepositories({
     fetchImpl,
   });
 
-  const repositoriesList: BitbucketRepository[] = [];
-  let nextUrl: string | null = buildBitbucketApiUrl(
+  // The cross-workspace GET /2.0/repositories?role=... listing was removed by
+  // Bitbucket on April 14, 2026 (changelog CHANGE-2770) and now returns 410
+  // Gone. Repositories must be listed per workspace, with workspaces
+  // discovered from the caller's memberships.
+  const workspaceSlugs: string[] = [];
+  let workspacesUrl: string | null = buildBitbucketApiUrl(
     auth.apiBaseUrl,
-    '/repositories',
-    {
-      role: 'member',
-      pagelen: BITBUCKET_REPOSITORIES_PER_PAGE,
-    },
+    '/user/permissions/workspaces',
+    { pagelen: BITBUCKET_REPOSITORIES_PER_PAGE },
   );
 
-  while (nextUrl) {
+  while (workspacesUrl) {
     const {
       data,
-    }: { data: z.infer<typeof bitbucketPaginatedRepositoriesSchema> } =
-      await requestBitbucketJson({
-        apiBaseUrl: auth.apiBaseUrl,
-        fetchImpl,
-        username: auth.username,
-        token: auth.token,
-        schema: bitbucketPaginatedRepositoriesSchema,
-        absoluteUrl: nextUrl,
-      });
+    }: {
+      data: z.infer<typeof bitbucketPaginatedWorkspaceMembershipsSchema>;
+    } = await requestBitbucketJson({
+      apiBaseUrl: auth.apiBaseUrl,
+      fetchImpl,
+      username: auth.username,
+      token: auth.token,
+      schema: bitbucketPaginatedWorkspaceMembershipsSchema,
+      absoluteUrl: workspacesUrl,
+    });
 
-    repositoriesList.push(...data.values);
+    for (const membership of data.values) {
+      const slug = membership.workspace.slug?.trim();
 
-    if (stopAfter !== undefined && repositoriesList.length >= stopAfter) {
-      return repositoriesList.slice(0, stopAfter);
+      if (slug) {
+        workspaceSlugs.push(slug);
+      }
     }
 
-    nextUrl = data.next ?? null;
+    workspacesUrl = data.next ?? null;
+  }
+
+  const repositoriesList: BitbucketRepository[] = [];
+
+  for (const workspaceSlug of workspaceSlugs) {
+    let nextUrl: string | null = buildBitbucketApiUrl(
+      auth.apiBaseUrl,
+      `/repositories/${encodeURIComponent(workspaceSlug)}`,
+      { pagelen: BITBUCKET_REPOSITORIES_PER_PAGE },
+    );
+
+    while (nextUrl) {
+      const {
+        data,
+      }: { data: z.infer<typeof bitbucketPaginatedRepositoriesSchema> } =
+        await requestBitbucketJson({
+          apiBaseUrl: auth.apiBaseUrl,
+          fetchImpl,
+          username: auth.username,
+          token: auth.token,
+          schema: bitbucketPaginatedRepositoriesSchema,
+          absoluteUrl: nextUrl,
+        });
+
+      repositoriesList.push(...data.values);
+
+      if (stopAfter !== undefined && repositoriesList.length >= stopAfter) {
+        return repositoriesList.slice(0, stopAfter);
+      }
+
+      nextUrl = data.next ?? null;
+    }
   }
 
   return repositoriesList;

@@ -5,8 +5,59 @@ import {
   buildBitbucketApiBaseUrl,
   buildBitbucketRepositoryValues,
   getBitbucketGitUsername,
+  listBitbucketRepositories,
   normalizeBitbucketLinkedAccountKey,
 } from '../api';
+
+describe('listBitbucketRepositories', () => {
+  it('discovers workspaces from memberships and lists repositories per workspace instead of the removed cross-workspace endpoint', async () => {
+    const requestedUrls: string[] = [];
+    const jsonResponse = (body: unknown) =>
+      new Response(JSON.stringify(body), { status: 200 });
+    const fetchImpl = (async (input: RequestInfo | URL) => {
+      const url = String(input);
+      requestedUrls.push(url);
+
+      if (url.includes('/user/permissions/workspaces')) {
+        return jsonResponse({
+          values: [
+            { workspace: { slug: 'acme' } },
+            { workspace: { slug: 'beta' } },
+          ],
+        });
+      }
+
+      if (url.includes('/repositories/acme')) {
+        return jsonResponse({
+          values: [{ uuid: '{r1}', name: 'one', full_name: 'acme/one' }],
+        });
+      }
+
+      if (url.includes('/repositories/beta')) {
+        return jsonResponse({
+          values: [{ uuid: '{r2}', name: 'two', full_name: 'beta/two' }],
+        });
+      }
+
+      throw new Error(`unexpected Bitbucket API url: ${url}`);
+    }) as typeof fetch;
+
+    const repositories = await listBitbucketRepositories({
+      token: 'api-token',
+      username: 'bot@example.com',
+      baseUrl: 'https://bitbucket.org',
+      fetchImpl,
+    });
+
+    expect(repositories.map((repository) => repository.full_name)).toEqual([
+      'acme/one',
+      'beta/two',
+    ]);
+    expect(
+      requestedUrls.some((url) => url.includes('/2.0/repositories?')),
+    ).toBe(false);
+  });
+});
 
 describe('buildBitbucketApiBaseUrl', () => {
   it('maps bitbucket.org product host to the Cloud 2.0 API host', () => {
