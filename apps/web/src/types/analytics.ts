@@ -7,7 +7,7 @@ export const analyticsObjectSchema = z.enum(analyticsObjects);
 export type AnalyticsObject = z.infer<typeof analyticsObjectSchema>;
 
 /** Y-axis metric for the Tasks analytics chart. PR analytics is always count. */
-export const analyticsMetrics = ['tasks', 'tokens', 'cost'] as const;
+const analyticsMetrics = ['tasks', 'tokens', 'cost'] as const;
 export const analyticsMetricSchema = z.enum(analyticsMetrics);
 export type AnalyticsMetric = z.infer<typeof analyticsMetricSchema>;
 
@@ -220,7 +220,7 @@ export const ANALYTICS_METRIC_LABELS: Record<AnalyticsMetric, string> = {
   cost: 'Cost',
 };
 
-export const ANALYTICS_METRIC_AXIS_LABELS: Record<AnalyticsMetric, string> = {
+const ANALYTICS_METRIC_AXIS_LABELS: Record<AnalyticsMetric, string> = {
   tasks: 'Tasks',
   tokens: 'Tokens',
   cost: 'Cost (USD)',
