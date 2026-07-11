@@ -92,8 +92,12 @@ describe('WorkerEnv', () => {
       // System base
       expect(env.HOME).toBe('/home/testuser');
       expect(env.PATH).toBe('/usr/bin:/usr/local/bin');
-      expect(env.APP_ENV).toBe('development');
-      expect(env.R_APP_ENV).toBe('development');
+
+      // The deployment's app env is worker-internal and must never leak into
+      // user-facing processes (it would clobber sandbox dev-server overrides).
+      expect(env).not.toHaveProperty('APP_ENV');
+      expect(env).not.toHaveProperty('R_APP_ENV');
+      expect(env).not.toHaveProperty('ROOMOTE_APP_ENV');
 
       // Service env
       expect(env.POSTGRES_URL).toBe('postgres://localhost:5432/db');
@@ -291,8 +295,10 @@ describe('WorkerEnv', () => {
       // System base vars are present
       expect(userEnv.HOME).toBe('/home/worker');
       expect(userEnv.LC_ALL).toBe('C.UTF-8');
-      expect(userEnv.APP_ENV).toBe('production');
-      expect(userEnv.R_APP_ENV).toBe('production');
+      // The deployment app env stays worker-internal only
+      expect(userEnv).not.toHaveProperty('APP_ENV');
+      expect(userEnv).not.toHaveProperty('R_APP_ENV');
+      expect(userEnv).not.toHaveProperty('ROOMOTE_APP_ENV');
       expect(env.appEnv).toBe('production');
     });
 
@@ -397,8 +403,8 @@ describe('WorkerEnv', () => {
 
       expect(env.appEnv).toBe('preview');
       expect(processEnv.APP_ENV).toBeUndefined();
-      expect(env.buildUserFacingEnv().APP_ENV).toBe('preview');
-      expect(env.buildUserFacingEnv().R_APP_ENV).toBe('preview');
+      expect(env.buildUserFacingEnv()).not.toHaveProperty('APP_ENV');
+      expect(env.buildUserFacingEnv()).not.toHaveProperty('R_APP_ENV');
     });
 
     it('should throw if required env vars are not set', () => {
@@ -467,6 +473,7 @@ describe('WorkerEnv', () => {
         TRPC_URL: 'https://trpc.example.com',
         R_APP_URL: 'https://api.example.com',
         R_APP_ENV: 'production',
+        ROOMOTE_APP_ENV: 'production',
         JOB_AUTH_PRIVATE_KEY: 'outer-job-private-key',
         PREVIEW_AUTH_PUBLIC_KEY: 'outer-public-key',
         PREVIEW_AUTH_COOKIE_NAME: 'preview_auth',
@@ -493,6 +500,7 @@ describe('WorkerEnv', () => {
       expect(fakeProcessEnv.PREVIEW_PROXY_BASE_URL).toBeUndefined();
       expect(fakeProcessEnv.PREVIEW_PROXY_SUBDOMAIN_SUFFIX).toBeUndefined();
       expect(fakeProcessEnv.R_APP_ENV).toBeUndefined();
+      expect(fakeProcessEnv.ROOMOTE_APP_ENV).toBeUndefined();
 
       // AUTH_TOKEN is intentionally kept — the SDK tRPC client reads it
       // from process.env on every request.
