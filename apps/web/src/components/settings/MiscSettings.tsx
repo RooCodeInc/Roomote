@@ -137,9 +137,12 @@ export function MiscSettings() {
               {settingsQuery.data.diagnostics.sections.map((section) => (
                 <section className="space-y-2" key={section.title}>
                   <h3 className="text-sm font-semibold">{section.title}</h3>
-                  <dl className="grid grid-cols-[16rem_minmax(0,1fr)] gap-x-3 gap-y-1.5 text-sm">
+                  <dl className="space-y-3 text-sm">
                     {section.items.map((item) => (
-                      <div className="contents" key={item.label}>
+                      <div
+                        className="grid grid-cols-1 gap-0.5 sm:grid-cols-[minmax(0,16rem)_minmax(0,1fr)] sm:gap-x-3 sm:gap-y-1.5"
+                        key={item.label}
+                      >
                         <dt className="text-foreground">{item.label}</dt>
                         <dd className="break-words font-mono">{item.value}</dd>
                       </div>
