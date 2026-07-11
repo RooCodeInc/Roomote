@@ -34,22 +34,28 @@ import {
 const PR_REVIEW_TRIAGE_TIMEOUT_MS = 30_000;
 const PR_REVIEW_TRIAGE_MAX_OUTPUT_TOKENS = 512;
 const MAX_REVIEW_STATUS_LENGTH = 300;
-const FAILED_CHECK_CONCLUSIONS = new Set([
-  'failure',
-  'timed_out',
-  'startup_failure',
-]);
 
 const prReviewTriageResponseSchema = z.object({
   worthNotifying: z.boolean(),
   summary: z.string(),
 });
 
-type PrReviewCiOverallStatus = 'success' | 'pending' | 'failure' | 'error';
+type PrReviewCiCheckStatus =
+  | 'success'
+  | 'pending'
+  | 'failure'
+  | 'error'
+  | 'cancelled'
+  | 'skipped'
+  | 'neutral';
+
+type PrReviewCiCheck = {
+  name: string;
+  status: PrReviewCiCheckStatus;
+};
 
 type PrReviewCiStatus = {
-  overall: PrReviewCiOverallStatus;
-  failedCheckName: string | null;
+  checks: PrReviewCiCheck[];
 };
 
 export type PrReviewTriageContext = {
@@ -58,7 +64,7 @@ export type PrReviewTriageContext = {
   latestReviewStatus: string | null;
   latestReviewSummaryComment: string | null;
   /**
-   * Resolved CI check state for the PR head, when available. Fed into the
+   * Per-check CI state for the PR head, when available. Fed into the
    * triage LLM so the chat message can mention CI naturally.
    */
   ciStatus: PrReviewCiStatus | null;
@@ -90,32 +96,40 @@ export function shortenPrReviewCheckName(name: string): string {
   return leaf && leaf.length > 0 ? leaf : trimmed;
 }
 
-function mergeCiOverallStatus(
-  left: PrReviewCiOverallStatus | null,
-  right: PrReviewCiOverallStatus | null,
-): PrReviewCiOverallStatus | null {
-  if (left === 'failure' || right === 'failure') {
-    return 'failure';
-  }
-
-  if (left === 'error' || right === 'error') {
-    return 'error';
-  }
-
-  if (left === 'pending' || right === 'pending') {
+function mapCheckRunToStatus({
+  status,
+  conclusion,
+}: {
+  status: string;
+  conclusion: string | null;
+}): PrReviewCiCheckStatus {
+  if (status !== 'completed') {
     return 'pending';
   }
 
-  if (left === 'success' || right === 'success') {
-    return 'success';
+  switch (conclusion) {
+    case 'success':
+      return 'success';
+    case 'failure':
+    case 'timed_out':
+    case 'startup_failure':
+      return 'failure';
+    case 'cancelled':
+      return 'cancelled';
+    case 'skipped':
+      return 'skipped';
+    case 'neutral':
+      return 'neutral';
+    case 'action_required':
+      return 'failure';
+    default:
+      return 'pending';
   }
-
-  return null;
 }
 
-function overallFromCombinedState(
+function mapCombinedStatusToCheckStatus(
   state: string | null | undefined,
-): PrReviewCiOverallStatus | null {
+): PrReviewCiCheckStatus | null {
   switch (state) {
     case 'success':
       return 'success';
@@ -130,36 +144,52 @@ function overallFromCombinedState(
   }
 }
 
-function summarizeCheckRuns(
+function collectCiChecks({
+  checkRuns,
+  statusContexts,
+}: {
   checkRuns: Array<{
     name: string;
     status: string;
     conclusion: string | null;
-  }>,
-): Pick<PrReviewCiStatus, 'overall' | 'failedCheckName'> | null {
-  if (checkRuns.length === 0) {
-    return null;
+  }>;
+  statusContexts: Array<{
+    context: string;
+    state: string;
+  }>;
+}): PrReviewCiCheck[] {
+  const checksByName = new Map<string, PrReviewCiCheck>();
+
+  for (const run of checkRuns) {
+    const name = shortenPrReviewCheckName(run.name);
+
+    if (!name) {
+      continue;
+    }
+
+    checksByName.set(name, {
+      name,
+      status: mapCheckRunToStatus(run),
+    });
   }
 
-  const failed = checkRuns.find(
-    (run) =>
-      run.status === 'completed' &&
-      run.conclusion !== null &&
-      FAILED_CHECK_CONCLUSIONS.has(run.conclusion),
-  );
+  for (const item of statusContexts) {
+    const name = shortenPrReviewCheckName(item.context);
 
-  if (failed) {
-    return {
-      overall: 'failure',
-      failedCheckName: shortenPrReviewCheckName(failed.name) || null,
-    };
+    if (!name || checksByName.has(name)) {
+      continue;
+    }
+
+    const mapped = mapCombinedStatusToCheckStatus(item.state);
+
+    if (!mapped) {
+      continue;
+    }
+
+    checksByName.set(name, { name, status: mapped });
   }
 
-  if (checkRuns.some((run) => run.status !== 'completed')) {
-    return { overall: 'pending', failedCheckName: null };
-  }
-
-  return { overall: 'success', failedCheckName: null };
+  return [...checksByName.values()];
 }
 
 /**
@@ -206,9 +236,12 @@ async function fetchPrReviewCiStatus({
       return null;
     }
 
-    let checkSummary: ReturnType<typeof summarizeCheckRuns> = null;
-    let combinedOverall: PrReviewCiOverallStatus | null = null;
-    let failedStatusContext: string | null = null;
+    let checkRuns: Array<{
+      name: string;
+      status: string;
+      conclusion: string | null;
+    }> = [];
+    let statusContexts: Array<{ context: string; state: string }> = [];
 
     try {
       const { data } = await octokit.rest.checks.listForRef({
@@ -218,13 +251,11 @@ async function fetchPrReviewCiStatus({
         per_page: 100,
       });
 
-      checkSummary = summarizeCheckRuns(
-        data.check_runs.map((run) => ({
-          name: run.name,
-          status: run.status,
-          conclusion: run.conclusion,
-        })),
-      );
+      checkRuns = data.check_runs.map((run) => ({
+        name: run.name,
+        status: run.status,
+        conclusion: run.conclusion,
+      }));
     } catch (error) {
       console.warn(
         `[PrReviewNotification] Failed to list check runs for ${repository}#${prNumber}: ${
@@ -241,24 +272,16 @@ async function fetchPrReviewCiStatus({
           ref: headSha,
         });
 
-      // GitHub returns `state: "pending"` with an empty statuses list when a
-      // repo only uses Actions check runs (no classic commit statuses). Treat
-      // that empty combined status as unavailable so green check runs are not
-      // overridden as still-running.
-      combinedOverall =
-        combined.total_count > 0
-          ? overallFromCombinedState(combined.state)
-          : null;
+      // GitHub returns an empty statuses list for Actions-only repos. Only
+      // include classic commit statuses when total_count is positive.
+      if (combined.total_count > 0) {
+        statusContexts = (combined.statuses ?? []).flatMap((status) => {
+          if (!status.context) {
+            return [];
+          }
 
-      if (combinedOverall === 'failure' || combinedOverall === 'error') {
-        const failed =
-          combined.statuses?.find(
-            (status) => status.state === 'failure' || status.state === 'error',
-          ) ?? null;
-
-        if (failed?.context) {
-          failedStatusContext = shortenPrReviewCheckName(failed.context);
-        }
+          return [{ context: status.context, state: status.state }];
+        });
       }
     } catch (error) {
       console.warn(
@@ -268,20 +291,13 @@ async function fetchPrReviewCiStatus({
       );
     }
 
-    const overall = mergeCiOverallStatus(
-      checkSummary?.overall ?? null,
-      combinedOverall,
-    );
+    const checks = collectCiChecks({ checkRuns, statusContexts });
 
-    if (!overall) {
+    if (checks.length === 0) {
       return null;
     }
 
-    return {
-      overall,
-      failedCheckName:
-        checkSummary?.failedCheckName ?? failedStatusContext ?? null,
-    };
+    return { checks };
   } catch (error) {
     console.warn(
       `[PrReviewNotification] Could not resolve CI status for ${repository}#${prNumber}: ${
@@ -369,12 +385,11 @@ any feedback. Rules:
 - when there is nothing actionable, do not add a question or call to action
 - never claim that any changes were made in response to the feedback, and do
   not promise follow-up actions
-- when "Current pull request state" (or a CI block) includes CI overall
-  status, weave one short natural sentence about that CI state into the chat
-  message; examples that fit common cases: "CI is green.", "Tests are still
-  running.", or "{failed check name} failed - should I take a look?" for a
-  named failure (use the failed check name when one is given)
-- never invent CI status when those fields are absent
+- when "Current pull request state" includes CI check lines (for example
+  "- Lint: success"), use those live per-check statuses when mentioning CI;
+  keep it short (one brief sentence for green/pending/failed CI overall),
+  and name a specific failed check when one is listed as failure
+- never invent CI status when those check lines are absent
 - do not mention this triage step or that the input was parsed
 - if "worthNotifying" is false, "summary" may be an empty string
 
@@ -521,17 +536,13 @@ export async function gatherPrReviewTriageContext({
 }
 
 function buildCiContextLines(context: PrReviewTriageContext): string[] {
-  if (!context.ciStatus) {
+  if (!context.ciStatus || context.ciStatus.checks.length === 0) {
     return [];
   }
 
-  const lines = [`- CI overall status: ${context.ciStatus.overall}`];
-
-  if (context.ciStatus.failedCheckName) {
-    lines.push(`- Failed check name: ${context.ciStatus.failedCheckName}`);
-  }
-
-  return lines;
+  return context.ciStatus.checks.map(
+    (check) => `- ${check.name}: ${check.status}`,
+  );
 }
 
 function buildContextLines(

@@ -215,14 +215,13 @@ describe('preparePrReviewNotificationDelivery', () => {
       summary:
         'alice approved [owner/repo#42](https://github.com/owner/repo/pull/42).',
     });
-    expect(mockGenerateObject).toHaveBeenCalledWith(
-      expect.objectContaining({
-        prompt: expect.stringContaining('- CI overall status: success'),
-      }),
-    );
+    const prompt = mockGenerateObject.mock.calls[0]?.[0]?.prompt as string;
+
+    expect(prompt).toContain('- Lint: success');
+    expect(prompt).toContain('- Tests: success');
   });
 
-  it('passes failed check name into the triage LLM context', async () => {
+  it('passes one line per check status into the triage LLM context', async () => {
     mockListCheckRunsForRef.mockResolvedValue({
       data: {
         check_runs: [
@@ -247,8 +246,9 @@ describe('preparePrReviewNotificationDelivery', () => {
 
     const prompt = mockGenerateObject.mock.calls[0]?.[0]?.prompt as string;
 
-    expect(prompt).toContain('- CI overall status: failure');
-    expect(prompt).toContain('- Failed check name: Lint');
+    expect(prompt).toContain('- Lint: failure');
+    expect(prompt).toContain('- Tests: success');
+    expect(prompt).toContain('- legacy-ci: failure');
     expect(mockFormatMessage).toHaveBeenCalledWith({
       repository: 'owner/repo',
       prNumber: 42,
@@ -351,7 +351,7 @@ describe('triagePrReviewActivity', () => {
       'do not omit the platform name on these self-review messages',
     );
     expect(system).toContain(
-      'when "Current pull request state" (or a CI block) includes CI overall',
+      'when "Current pull request state" includes CI check lines',
     );
   });
 
@@ -369,7 +369,12 @@ describe('triagePrReviewActivity', () => {
         latestReviewStatus: '2 issues outstanding.',
         latestReviewSummaryComment:
           '<!-- roomote-review-summary sha=abc mode=initial -->\n<!-- roomote-review-checklist:start -->\n- [ ] `apps/api/src/foo.ts:10` - Handle null actor ids\n- [ ] `apps/api/src/bar.ts:20` - Rename the helper to match its return shape\n<!-- roomote-review-checklist:end -->',
-        ciStatus: { overall: 'success', failedCheckName: null },
+        ciStatus: {
+          checks: [
+            { name: 'Lint', status: 'success' },
+            { name: 'Tests', status: 'success' },
+          ],
+        },
       },
     });
 
@@ -382,7 +387,8 @@ describe('triagePrReviewActivity', () => {
     expect(prompt).toContain('Rename the helper to match its return shape');
     expect(prompt).not.toContain('- Latest automated review status:');
     expect(prompt).toContain('Current pull request state:');
-    expect(prompt).toContain('- CI overall status: success');
+    expect(prompt).toContain('- Lint: success');
+    expect(prompt).toContain('- Tests: success');
   });
 
   it('returns a skip decision when the model says the activity is not worth notifying', async () => {
@@ -463,7 +469,12 @@ describe('gatherPrReviewTriageContext', () => {
       latestReviewStatus: 'All 1 issue addressed. See task',
       latestReviewSummaryComment:
         '<!-- roomote-review-summary sha=abc mode=initial -->\n<!-- roomote-review-status:start -->\n**All 1 issue addressed.** [See task](https://example.com)\n<!-- roomote-review-status:end -->',
-      ciStatus: { overall: 'success', failedCheckName: null },
+      ciStatus: {
+        checks: [
+          { name: 'Lint', status: 'success' },
+          { name: 'Tests', status: 'success' },
+        ],
+      },
     });
   });
 
@@ -486,12 +497,11 @@ describe('gatherPrReviewTriageContext', () => {
     });
 
     expect(context.ciStatus).toEqual({
-      overall: 'pending',
-      failedCheckName: null,
+      checks: [{ name: 'Tests', status: 'pending' }],
     });
   });
 
-  it('treats empty combined status as unavailable so green Actions check runs report success', async () => {
+  it('includes one line per Actions check without empty classic statuses', async () => {
     mockListCheckRunsForRef.mockResolvedValue({
       data: {
         check_runs: [
@@ -511,8 +521,10 @@ describe('gatherPrReviewTriageContext', () => {
     });
 
     expect(context.ciStatus).toEqual({
-      overall: 'success',
-      failedCheckName: null,
+      checks: [
+        { name: 'Lint', status: 'success' },
+        { name: 'Tests', status: 'success' },
+      ],
     });
   });
 
