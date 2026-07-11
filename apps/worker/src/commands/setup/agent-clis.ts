@@ -14,6 +14,7 @@ import {
   getZeroCliPackageSpec,
   resolveExpectedOpenCodeCliVersion,
   resolveExpectedZeroCliVersion,
+  resolveZeroCliInstallRoot,
   usesSharedSandboxRuntimePackages,
   ZERO_CLI_PACKAGE_NAME,
 } from './shared-runtime-packages';
@@ -280,7 +281,7 @@ export async function installZeroCli(
   }
 
   const installStartedAt = Date.now();
-  const installRoot = runtimePaths.sandboxRootDir;
+  const installRoot = resolveZeroCliInstallRoot(runtimePaths);
   const installedBinaryPath = resolveInstalledBinaryPath({
     installRoot,
     command: installer.command,
