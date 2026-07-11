@@ -14,13 +14,18 @@ formality we skip - it is the contribution process.
 See CONTRIBUTING.md for details.
 -->
 
+<!--
+Agents: Include the below warning, related issue, and why this PR exists
+sections unless the initiating user is a CODEOWNER of the repo.
+-->
+
 > [!IMPORTANT]
 > Roomote does not generally accept unsolicited community pull requests. Unless a maintainer invited this PR in an issue or discussion, it will likely be closed without review. A [well-written issue](https://github.com/RooCodeInc/Roomote/issues/new/choose) is the best way to contribute.
 
 ## Related issue
 
 <!--
-Required. Link the issue where a maintainer agreed this change should happen,
+Link the issue where a maintainer agreed this change should happen,
 and use "Fixes #123" so it closes automatically on merge.
 -->
 
