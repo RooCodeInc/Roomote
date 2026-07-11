@@ -92,6 +92,7 @@ type GitHubAppManifest = {
     contents: 'write';
     deployments: 'read';
     issues: 'write';
+    merge_queues: 'read';
     metadata: 'read';
     pull_requests: 'write';
     statuses: 'read';
@@ -238,6 +239,7 @@ function buildGitHubAppManifest(): GitHubAppManifest {
       contents: 'write',
       deployments: 'read',
       issues: 'write',
+      merge_queues: 'read',
       metadata: 'read',
       pull_requests: 'write',
       statuses: 'read',

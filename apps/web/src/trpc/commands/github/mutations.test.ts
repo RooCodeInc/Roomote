@@ -147,6 +147,7 @@ describe('GitHub App manifest commands', () => {
         contents: 'write',
         deployments: 'read',
         issues: 'write',
+        merge_queues: 'read',
         metadata: 'read',
         pull_requests: 'write',
         statuses: 'read',
