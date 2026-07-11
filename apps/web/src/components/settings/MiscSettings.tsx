@@ -26,6 +26,17 @@ function getBugReportUrl(diagnostics: string): string {
   return url.toString();
 }
 
+function formatBuildLabel(version: string | null, gitCommitSha: string | null) {
+  const parts: string[] = [];
+  if (version) {
+    parts.push(version);
+  }
+  if (gitCommitSha) {
+    parts.push(gitCommitSha.slice(0, 7));
+  }
+  return parts.length > 0 ? parts.join(' · ') : null;
+}
+
 export function MiscSettings() {
   const trpc = useTRPC();
   const queryClient = useQueryClient();
@@ -73,6 +84,9 @@ export function MiscSettings() {
     );
   }
 
+  const { build, diagnostics, anonymousAnalyticsEnabled } = settingsQuery.data;
+  const buildLabel = formatBuildLabel(build.version, build.gitCommitSha);
+
   return (
     <div className="space-y-4">
       <Section title="Feedback" icon={Mail}>
@@ -80,7 +94,7 @@ export function MiscSettings() {
         <div className="flex flex-wrap gap-2">
           <Button asChild variant="outline" size="sm">
             <a
-              href={getBugReportUrl(settingsQuery.data.diagnostics.plainText)}
+              href={getBugReportUrl(diagnostics.plainText)}
               rel="noreferrer"
               target="_blank"
             >
@@ -105,7 +119,7 @@ export function MiscSettings() {
         <div className="flex gap-3">
           <Switch
             aria-label="Toggle anonymous analytics"
-            checked={settingsQuery.data.anonymousAnalyticsEnabled}
+            checked={anonymousAnalyticsEnabled}
             disabled={updateMutation.isPending}
             onCheckedChange={(checked) => void handleToggle(checked === true)}
           />
@@ -130,11 +144,11 @@ export function MiscSettings() {
             <CopyIconButton
               aria-label="Copy diagnostics"
               className="absolute right-2 top-2"
-              content={settingsQuery.data.diagnostics.plainText}
+              content={diagnostics.plainText}
               tooltip="Copy diagnostics"
             />
             <div className="space-y-6">
-              {settingsQuery.data.diagnostics.sections.map((section) => (
+              {diagnostics.sections.map((section) => (
                 <section className="space-y-2" key={section.title}>
                   <h3 className="text-sm font-semibold">{section.title}</h3>
                   <dl className="grid grid-cols-[16rem_minmax(0,1fr)] gap-x-3 gap-y-1.5 text-sm">
@@ -151,6 +165,18 @@ export function MiscSettings() {
           </div>
         </div>
       </Section>
+
+      {buildLabel ? (
+        <p
+          className="pt-2 text-center text-xs text-muted-foreground/60 font-mono select-all"
+          title={
+            [build.version, build.gitCommitSha].filter(Boolean).join(' · ') ||
+            undefined
+          }
+        >
+          {buildLabel}
+        </p>
+      ) : null}
     </div>
   );
 }

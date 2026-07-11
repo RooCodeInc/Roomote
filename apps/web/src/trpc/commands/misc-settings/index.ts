@@ -1,3 +1,6 @@
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
+
 import {
   count,
   db,
@@ -45,6 +48,13 @@ export type DeploymentDiagnostics = {
   plainText: string;
 };
 
+export type DeploymentBuildInfo = {
+  /** RELEASE_VERSION baked into the deployment, when available. */
+  version: string | null;
+  /** Git commit SHA from Vercel/GitHub deploy metadata, when available. */
+  gitCommitSha: string | null;
+};
+
 export type MiscSettings = {
   /** The admin-controlled opt-out setting (default: enabled). */
   anonymousAnalyticsEnabled: boolean;
@@ -54,6 +64,8 @@ export type MiscSettings = {
    * still editable so it applies once the deployment runs a real release.
    */
   telemetryEnvAllowed: boolean;
+  /** Subtle version / commit display for the Deployment settings footer. */
+  build: DeploymentBuildInfo;
   diagnostics: DeploymentDiagnostics;
 };
 
@@ -372,6 +384,43 @@ function buildPlainTextReport(sections: DeploymentDiagnosticsSection[]) {
     .join('\n\n');
 }
 
+function tryReadRootPackageVersion(): string | null {
+  try {
+    // Web runtime cwd is typically apps/web; monorepo root is two levels up.
+    const candidates = [
+      join(process.cwd(), 'package.json'),
+      join(process.cwd(), '..', '..', 'package.json'),
+    ];
+
+    for (const candidate of candidates) {
+      const parsed = JSON.parse(readFileSync(candidate, 'utf8')) as {
+        name?: string;
+        version?: string;
+      };
+      const version = parsed.version?.trim();
+      if (parsed.name === 'roomote' && version) {
+        return version;
+      }
+    }
+  } catch {
+    // Ignore missing package metadata; version stays null for the footer.
+  }
+
+  return null;
+}
+
+const rootPackageVersion = tryReadRootPackageVersion();
+
+function getDeploymentBuildInfo(): DeploymentBuildInfo {
+  const version = Env.RELEASE_VERSION?.trim() || rootPackageVersion || null;
+  const gitCommitSha =
+    process.env.VERCEL_GIT_COMMIT_SHA?.trim() ||
+    process.env.GITHUB_SHA?.trim() ||
+    null;
+
+  return { version, gitCommitSha };
+}
+
 async function collectDeploymentDiagnostics(): Promise<DeploymentDiagnostics> {
   const generatedAt = new Date().toISOString();
   const runtimeDiagnostics = getWebRuntimeEnvDiagnostics();
@@ -403,8 +452,8 @@ async function collectDeploymentDiagnostics(): Promise<DeploymentDiagnostics> {
         {
           label: 'Git commit',
           value:
-            process.env.VERCEL_GIT_COMMIT_SHA ??
-            process.env.GITHUB_SHA ??
+            process.env.VERCEL_GIT_COMMIT_SHA?.trim() ||
+            process.env.GITHUB_SHA?.trim() ||
             'Unknown',
         },
         {
@@ -553,6 +602,7 @@ export async function getMiscSettingsCommand(
     anonymousAnalyticsEnabled:
       isAnonymousAnalyticsEnabledFromMetadata(metadata),
     telemetryEnvAllowed: isTelemetryEnvAllowed(),
+    build: getDeploymentBuildInfo(),
     diagnostics,
   };
 }
@@ -594,6 +644,7 @@ export async function setAnonymousAnalyticsCommand(
     anonymousAnalyticsEnabled:
       isAnonymousAnalyticsEnabledFromMetadata(nextMetadata),
     telemetryEnvAllowed: isTelemetryEnvAllowed(),
+    build: getDeploymentBuildInfo(),
     diagnostics: await collectDeploymentDiagnostics(),
   };
 }
