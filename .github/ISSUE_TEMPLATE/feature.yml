@@ -6,7 +6,7 @@ body:
   - type: markdown
     attributes:
       value: |
-        Roomote currently prefers well-written issues over unsolicited pull requests. Please describe the problem and product shape before proposing implementation details.
+        Roomote does not generally accept unsolicited community pull requests — a well-written issue is the right way to propose a change. Please describe the problem and product shape before proposing implementation details.
   - type: checkboxes
     id: preflight
     attributes:
