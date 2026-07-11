@@ -70,7 +70,7 @@ dropped capabilities, per-service env contracts, and a Docker socket proxy
 reachable only from the controller service.
 
 Do not deploy `latest`. Pushes to `develop` automatically publish
-`develop-<short-sha>` image tags built with `APP_ENV=preview` for preview soak
+`develop-<short-sha>` image tags built with `R_APP_ENV=preview` for preview soak
 deployments. Production releases use immutable `v*` tags; pushing a `v*` tag or
 manually dispatching the GHCR workflow publishes that explicit version. Use the
 same tag for create and upgrade commands.

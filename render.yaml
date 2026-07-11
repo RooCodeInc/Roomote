@@ -201,7 +201,7 @@ envVarGroups:
   # services referencing the group see the same value.
   - name: roomote-shared
     envVars:
-      - key: APP_ENV
+      - key: R_APP_ENV
         value: production
       - key: ROOMOTE_DOCKER_LOAD_ENV_FILE
         value: 'false'

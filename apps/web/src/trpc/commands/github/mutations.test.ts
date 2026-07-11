@@ -442,7 +442,7 @@ describe('startAuthenticateGitHubAccountCommand', () => {
 
   it('builds the authorize URL from the deployment-resolved client id', async () => {
     mockResolveDeploymentEnvVar.mockImplementation(async (name: string) =>
-      name === 'GITHUB_CLIENT_ID' ? 'Iv1.resolved-client' : null,
+      name === 'R_GITHUB_CLIENT_ID' ? 'Iv1.resolved-client' : null,
     );
 
     const result = await startAuthenticateGitHubAccountCommand(
