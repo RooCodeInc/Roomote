@@ -151,6 +151,13 @@ export const MCP_SETUP_INTEGRATION_METADATA: Record<
       'Build persistent deployment-wide memory across tasks over time',
     ],
   },
+  zero: {
+    capabilities: [
+      'Search free external capability catalog when native tools fall short',
+      'Call paid APIs through the zero CLI using the workspace Zero wallet',
+      'Authenticate and fund Zero through the MCP connector when needed',
+    ],
+  },
 };
 
 const MANUAL_SETUP_MCP_INTEGRATIONS: AvailableSetupMcpIntegration[] = [

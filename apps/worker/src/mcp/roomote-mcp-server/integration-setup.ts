@@ -127,6 +127,14 @@ Supermemory uses OAuth:
 
 Once connected, I can save shared memories and recall relevant context from earlier tasks using the workspace's connected Supermemory account. Memories are stored in that Supermemory account, so anything I save is visible to everyone in the workspace.
 
+# Zero
+
+Zero uses a CLI in the runtime (capability discovery and paid calls), connected once for the deployment:
+1. A deployment operator enables Zero from Settings > Integrations.
+2. That operator connects Zero once for the workspace via OAuth.
+
+Only after Zero is enabled for the deployment do I install the zero CLI for that task and activate the packaged Zero skill. The Zero MCP connection is for authentication and funding. Capability spend comes from the workspace-connected Zero wallet, not a separate Roomote-managed wallet.
+
 # Unsupported Built-in Integrations And Feature Requests
 
 If a user asks about a service that is not a built-in Roomote integration today (for example Datadog), say that it is not supported as a built-in right now.

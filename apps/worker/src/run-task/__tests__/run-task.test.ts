@@ -32,6 +32,7 @@ const {
   mkdirSyncMock,
   recordSandboxPromptSlackTurnStartMock,
   writeFileSyncMock,
+  installZeroCliMock,
 } = vi.hoisted(() => ({
   activateSkillsFolderMock: vi.fn(() => false),
   awaitSubprocessMock: vi.fn().mockResolvedValue(undefined),
@@ -85,6 +86,7 @@ const {
   mkdirSyncMock: vi.fn(),
   recordSandboxPromptSlackTurnStartMock: vi.fn(),
   writeFileSyncMock: vi.fn(),
+  installZeroCliMock: vi.fn().mockResolvedValue(undefined),
 }));
 
 vi.mock('node:fs', () => ({
@@ -223,6 +225,10 @@ vi.mock('../resolve-status', () => ({
 
 vi.mock('../completion', () => ({
   getDefaultKeepaliveMs: vi.fn(() => 60_000),
+}));
+
+vi.mock('../../commands/setup/agent-clis', () => ({
+  installZeroCli: installZeroCliMock,
 }));
 
 vi.mock('../agent-home', () => ({
@@ -3504,10 +3510,13 @@ describe('runTask', () => {
       } as never,
     });
 
+    expect(isOrgEnabledMock).toHaveBeenCalledWith('zero');
+    expect(installZeroCliMock).not.toHaveBeenCalled();
     expect(activateSkillsFolderMock).toHaveBeenCalledWith(
       expect.objectContaining({
         homeDir: '/tmp/workspace/.roomote-runtime-home',
         sourceHomeDir: '/tmp/home',
+        excludeSkillNames: ['zero'],
       }),
     );
     expect(createHarnessMock).toHaveBeenCalledWith(

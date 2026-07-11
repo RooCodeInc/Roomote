@@ -11,13 +11,19 @@ import { formatDurationMs } from './logging';
 import { resolveNpmInstallCommand } from './npm-install-command';
 import {
   getSharedSandboxRuntimePackageSpecs,
+  getZeroCliPackageSpec,
   resolveExpectedOpenCodeCliVersion,
+  resolveExpectedZeroCliVersion,
   usesSharedSandboxRuntimePackages,
+  ZERO_CLI_PACKAGE_NAME,
 } from './shared-runtime-packages';
 export {
   DEFAULT_OPENCODE_CLI_VERSION,
+  DEFAULT_ZERO_CLI_VERSION,
   ROOMOTE_BAKED_OPENCODE_CLI_VERSION_ENV,
+  ROOMOTE_BAKED_ZERO_CLI_VERSION_ENV,
   ROOMOTE_OPENCODE_CLI_VERSION_ENV,
+  ROOMOTE_ZERO_CLI_VERSION_ENV,
 } from './shared-runtime-packages';
 
 type Installer = {
@@ -38,6 +44,16 @@ function getInstallers(env: NodeJS.ProcessEnv = process.env): Installer[] {
       packageName: 'opencode-ai',
     },
   ];
+}
+
+function getZeroInstaller(env: NodeJS.ProcessEnv = process.env): Installer {
+  return {
+    command: 'zero',
+    expectedVersion: resolveExpectedZeroCliVersion(env),
+    label: 'Zero CLI',
+    installMethod: 'npm',
+    packageName: ZERO_CLI_PACKAGE_NAME,
+  };
 }
 
 function parseInstalledCliVersion(output: string): string | null {
@@ -226,5 +242,105 @@ export async function installAgentClis(logger: StartupLogger): Promise<void> {
 
       throw error;
     }
+  }
+}
+
+type ZeroCliInstallLogger =
+  | StartupLogger
+  | Pick<Console, 'log' | 'info' | 'warn' | 'error'>;
+
+function resolveZeroCliInstallDebugChannel(
+  logger: ZeroCliInstallLogger,
+): Pick<Console, 'log' | 'error'> {
+  if ('debug' in logger) {
+    return logger.debug;
+  }
+
+  return logger;
+}
+
+/**
+ * Installs the Zero CLI only when the Zero integration is admin-enabled for
+ * the deployment. Kept out of unconditional setup so non-Zero sandboxes never
+ * pay for the package or surface the binary.
+ */
+export async function installZeroCli(
+  logger: ZeroCliInstallLogger,
+): Promise<void> {
+  const debug = resolveZeroCliInstallDebugChannel(logger);
+  const npmInstallCommand = await resolveNpmInstallCommand();
+  const runtimePaths = resolveWorkerRuntimePaths({
+    existsSync: fs.existsSync,
+  });
+  const installer = getZeroInstaller();
+  const installedVersion = await readInstalledCliVersion(installer.command);
+
+  if (installedVersion === installer.expectedVersion) {
+    return;
+  }
+
+  const installStartedAt = Date.now();
+  const installRoot = runtimePaths.sandboxRootDir;
+  const installedBinaryPath = resolveInstalledBinaryPath({
+    installRoot,
+    command: installer.command,
+  });
+
+  try {
+    debug.log(
+      installedVersion
+        ? `${installer.label} version mismatch (${installedVersion}); installing ${installer.expectedVersion}`
+        : `${installer.label} missing; installing ${installer.expectedVersion}`,
+    );
+
+    fs.mkdirSync(installRoot, { recursive: true });
+
+    await execa(
+      npmInstallCommand.command,
+      [
+        ...npmInstallCommand.argsPrefix,
+        'install',
+        '--prefix',
+        installRoot,
+        '--no-save',
+        '--no-package-lock',
+        getZeroCliPackageSpec(process.env),
+      ],
+      {
+        stdin: 'ignore',
+      },
+    );
+
+    const installedBinaryVersion =
+      await readInstalledCliVersion(installedBinaryPath);
+
+    if (installedBinaryVersion !== installer.expectedVersion) {
+      throw new Error(
+        `expected ${installer.expectedVersion} at ${installedBinaryPath}, found ${installedBinaryVersion ?? 'unknown'}`,
+      );
+    }
+
+    ensureCliWrapperForInstaller({
+      installer,
+      binaryPath: installedBinaryPath,
+    });
+
+    const validatedVersion = await readInstalledCliVersion(installer.command);
+
+    if (validatedVersion !== installer.expectedVersion) {
+      throw new Error(
+        `expected ${installer.expectedVersion} from ${installer.command} --version, found ${validatedVersion ?? 'unknown'}`,
+      );
+    }
+
+    debug.log(
+      `${installer.label} installed at ${validatedVersion} in ${formatDurationMs(Date.now() - installStartedAt)}`,
+    );
+  } catch (error) {
+    debug.error(
+      `Failed to install ${installer.label}: ${error instanceof Error ? error.message : String(error)}`,
+    );
+
+    throw error;
   }
 }

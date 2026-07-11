@@ -175,6 +175,11 @@ interface ActivateSkillsFolderOptions {
   skillsFolderName: string;
   manualSkills?: EnvironmentManualSkill[];
   repoLocalSkills?: RepoLocalSkill[];
+  /**
+   * Packaged skill directory names to keep out of the task skill catalog.
+   * Existing matching runtime entries are removed when present.
+   */
+  excludeSkillNames?: Iterable<string>;
 }
 
 function replaceMaterializedSkillEntry({
@@ -296,6 +301,7 @@ export function activateSkillsFolder({
   skillsFolderName,
   manualSkills,
   repoLocalSkills,
+  excludeSkillNames,
 }: ActivateSkillsFolderOptions): boolean {
   const normalizedName = normalizePackagedFolderName(skillsFolderName);
 
@@ -322,12 +328,24 @@ export function activateSkillsFolder({
   const sourceEntries = fs.readdirSync(sourceSkillsDir, {
     withFileTypes: true,
   });
+  const excludedSkillNames = new Set(
+    Array.from(excludeSkillNames ?? [], (skillName) => skillName.trim()).filter(
+      Boolean,
+    ),
+  );
   const materializedSkillNames = new Set<string>();
 
   for (const entry of sourceEntries) {
+    const destinationPath = path.join(targetSkillsDir, entry.name);
+
+    if (excludedSkillNames.has(entry.name)) {
+      fs.rmSync(destinationPath, { recursive: true, force: true });
+      continue;
+    }
+
     replaceMaterializedSkillEntry({
       sourcePath: path.join(sourceSkillsDir, entry.name),
-      destinationPath: path.join(targetSkillsDir, entry.name),
+      destinationPath,
     });
     materializedSkillNames.add(entry.name);
   }

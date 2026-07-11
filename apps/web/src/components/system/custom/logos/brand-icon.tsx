@@ -108,6 +108,30 @@ function SupermemoryIcon({
   );
 }
 
+function ZeroIcon({
+  name,
+  className,
+  isDecorative,
+}: {
+  name: string;
+  className?: string;
+  isDecorative: boolean;
+}) {
+  return (
+    <svg
+      viewBox="0 0 32 32"
+      role={isDecorative ? undefined : 'img'}
+      aria-hidden={isDecorative || undefined}
+      aria-label={isDecorative ? undefined : name}
+      focusable="false"
+      fill="currentColor"
+      className={className}
+    >
+      <path d="M16 2.5c7.456 0 13.5 6.044 13.5 13.5S23.456 29.5 16 29.5 2.5 23.456 2.5 16 8.544 2.5 16 2.5Zm0 4c-5.247 0-9.5 4.253-9.5 9.5s4.253 9.5 9.5 9.5 9.5-4.253 9.5-9.5-4.253-9.5-9.5-9.5Zm4.95 4.05-9.9 9.9a1.25 1.25 0 0 0 1.768 1.768l9.9-9.9a1.25 1.25 0 1 0-1.768-1.768Z" />
+    </svg>
+  );
+}
+
 function PylonIcon({
   name,
   className,
@@ -358,6 +382,12 @@ export function BrandIcon({ icon, name, className }: BrandIconProps) {
         className={className}
         isDecorative={isDecorative}
       />
+    );
+  }
+
+  if (icon === 'zero') {
+    return (
+      <ZeroIcon name={name} className={className} isDecorative={isDecorative} />
     );
   }
 

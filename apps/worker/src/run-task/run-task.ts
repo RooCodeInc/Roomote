@@ -59,6 +59,7 @@ import {
   activateSkillsFolder,
   resolvePackagedSkillsFolder,
 } from './agent-home';
+import { installZeroCli } from '../commands/setup/agent-clis';
 
 import { createHarness } from './create-harness';
 import { createActorScopedMcpRefresher } from './actor-scoped-mcp-refresh';
@@ -623,12 +624,36 @@ export const runTask = async ({
     const hasInitialImages = Boolean(images?.length);
 
     const homeDir = runtimeEnv.HOME ?? sanitizedEnv.HOME ?? '';
+
+    // Admin opt-in for Zero: only install the CLI / activate the skill when
+    // Settings > Integrations has Zero enabled for the deployment.
+    let zeroIntegrationEnabled = false;
+
+    try {
+      zeroIntegrationEnabled = await sdk.mcpConnections.isOrgEnabled('zero');
+    } catch (error) {
+      logger.warn(
+        `[runTask] Failed to check Zero integration enablement: ${error instanceof Error ? error.message : String(error)}`,
+      );
+    }
+
+    if (zeroIntegrationEnabled) {
+      try {
+        await installZeroCli(logger);
+      } catch (error) {
+        logger.warn(
+          `[runTask] Failed to install Zero CLI: ${error instanceof Error ? error.message : String(error)}`,
+        );
+      }
+    }
+
     const skillsActivated = activateSkillsFolder({
       homeDir,
       sourceHomeDir: workerHomeDir,
       skillsFolderName: selectedSkillsFolder,
       manualSkills: environmentConfig?.manualSkills,
       repoLocalSkills,
+      excludeSkillNames: zeroIntegrationEnabled ? undefined : ['zero'],
     });
 
     if (skillsActivated) {

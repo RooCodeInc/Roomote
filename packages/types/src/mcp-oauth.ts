@@ -426,6 +426,35 @@ export const MCP_INTEGRATIONS: McpIntegration[] = [
       'Never save task status or progress notes, code snippets or file contents, secrets or credentials, or anything easily rederivable from the repository. Most tasks should save nothing. An explicit durable preference or correction stated by the user is the strongest signal that a memory is worth saving.',
     ].join('\n'),
   },
+  {
+    id: 'zero',
+    name: 'Zero',
+    url: 'https://mcp.zero.xyz',
+    description: `Enable Zero so this deployment can discover and pay for external capabilities from ${PRODUCT_NAME} tasks`,
+    icon: 'zero',
+    connectionScope: 'deployment',
+    serverMode: 'upstream_proxy',
+    oauthScopes: [
+      'tools:call',
+      'capabilities:read',
+      'sessions:create',
+      'wallet:spend',
+    ],
+    homepageCard: {
+      priority: 70,
+      label: 'Connect Zero so agents can discover paid capabilities',
+      buttonLabel: 'Connect',
+    },
+    instructions: [
+      'Zero is available because a deployment operator connected it: the `zero` CLI and skill are installed for this task, and the Zero MCP connector handles authentication and funding.',
+      '',
+      'Prefer the `zero` CLI for the capability loop: `zero search` → `zero get` → `zero fetch` → `zero review`. Use the Zero MCP tools when the skill requires them for auth or funding.',
+      '',
+      'Capability spend comes from the deployment-connected Zero wallet. Search is free; paid fetches spend from that wallet. Set `--max-pay` on unfamiliar paid calls.',
+      '',
+      'Read the packaged `zero` skill before first use for auth, spend caps, and sandbox session exchange details.',
+    ].join('\n'),
+  },
 ];
 
 export function getMcpIntegration(id: string): McpIntegration | undefined {
