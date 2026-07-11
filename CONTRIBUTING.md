@@ -1,19 +1,22 @@
 # Contributing
 
-Roomote is early in its public project shape. We welcome focused fixes,
-documentation improvements, and small integration/runtime improvements that are
-easy to review.
+Roomote is early in its public project shape. Right now, the most valuable
+contribution is a **well-written issue**, not a pull request. Maintainers
+triage issues actively, and a clear bug report or focused feature request
+helps far more than an unrequested diff.
 
 ## Before You Start
 
-- Open a well-scoped issue before starting code changes. Roomote currently
-  prefers well-written issues over unsolicited pull requests.
-- If you want to contribute code, first describe the problem, proposed approach,
-  and relevant self-hosting context in an issue or existing discussion.
-- Pull requests without a clear issue, maintainer discussion, or focused
-  reproduction may be closed so maintainers can keep triage high-signal.
-- Keep pull requests small and scoped.
-- Include tests or a clear manual validation note when changing behavior.
+- Roomote does not generally accept unsolicited community pull requests.
+  Please do not open a PR unless a maintainer has explicitly invited it in an
+  issue or discussion.
+- The best way to help: open a well-scoped issue with reproduction steps,
+  expected vs actual behavior, and your deployment context. The issue forms
+  walk you through what maintainers need.
+- Pull requests without a maintainer invitation or a clear linked issue will
+  likely be closed without review so triage stays high-signal.
+- When a PR has been invited: keep it small and scoped, link the issue, and
+  include tests or a clear manual validation note when changing behavior.
 
 ## Developer Setup
 
