@@ -27,6 +27,7 @@ const {
   redisSetMock,
   routeTaskMock,
   setLatestInboundMessageIdMock,
+  setTrustedRunActingUserMock,
   stopTaskRunMock,
   updateMock,
   updateReturningMock,
@@ -64,6 +65,7 @@ const {
   redisSetMock: vi.fn(),
   routeTaskMock: vi.fn(),
   setLatestInboundMessageIdMock: vi.fn(),
+  setTrustedRunActingUserMock: vi.fn(),
   stopTaskRunMock: vi.fn(),
   updateMock: vi.fn(),
   updateReturningMock: vi.fn(),
@@ -86,6 +88,7 @@ vi.mock('@roomote/redis', () => ({
 
 vi.mock('@roomote/db/server', () => ({
   and: vi.fn((...conditions: unknown[]) => ({ and: conditions })),
+  setTrustedRunActingUser: setTrustedRunActingUserMock,
   authUsers: {
     id: 'authUserId',
   },
@@ -605,6 +608,10 @@ describe('Telegram webhook handler', () => {
       77,
       '456',
     );
+    expect(setTrustedRunActingUserMock).toHaveBeenCalledWith({
+      runId: 77,
+      userId: 'launch-owner-1',
+    });
   });
 
   it('starts new Telegram tasks as the linked sender', async () => {
@@ -1346,6 +1353,10 @@ describe('Telegram webhook handler', () => {
       55,
       expect.objectContaining({ userId: 'linked-user-9' }),
     );
+    expect(setTrustedRunActingUserMock).toHaveBeenCalledWith({
+      runId: 55,
+      userId: 'linked-user-9',
+    });
   });
 
   it('does not attribute a stale linked mapping that points at a removed user', async () => {
