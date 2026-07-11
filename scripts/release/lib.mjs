@@ -114,10 +114,7 @@ export function readCurrentProductVersion(repoRoot) {
  * @param {string} newSection markdown for one release (starts with `## …`)
  * @returns {string}
  */
-export function insertChangelogSection(
-  existingChangelogMarkdown,
-  newSection,
-) {
+export function insertChangelogSection(existingChangelogMarkdown, newSection) {
   const section = newSection.replace(/^\s+/, '').replace(/\s*$/, '\n');
 
   if (!existingChangelogMarkdown.includes('# Changelog')) {
@@ -146,9 +143,7 @@ export function insertChangelogSection(
   }
   const header = headerLines.join('\n').replace(/\s*$/, '') + '\n\n';
   const rest = lines.slice(firstRelease).join('\n').replace(/^\s*/, '');
-  let next = rest
-    ? `${header}${section}\n${rest}`
-    : `${header}${section}`;
+  let next = rest ? `${header}${section}\n${rest}` : `${header}${section}`;
   next = next.replace(/\n{3,}/g, '\n\n');
   if (!next.endsWith('\n')) next += '\n';
   return next;
@@ -292,7 +287,10 @@ export function applyProductVersion(repoRoot, options = {}) {
     : CHANGELOG_HEADER;
   writeFileSync(
     changelogPath,
-    insertChangelogSection(existing, buildChangelogSection(pending, next, date)),
+    insertChangelogSection(
+      existing,
+      buildChangelogSection(pending, next, date),
+    ),
   );
 
   root.version = next;
