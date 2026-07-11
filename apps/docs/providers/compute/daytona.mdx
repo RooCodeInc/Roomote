@@ -5,8 +5,8 @@ description: Run Roomote tasks on Daytona-hosted sandboxes from a registered wor
 ---
 
 Daytona is a hosted sandbox provider with straightforward API-key setup.
-Roomote starts task sandboxes from a registered worker snapshot and destroys
-them when they are no longer needed.
+Roomote starts task sandboxes from a registered worker snapshot, and supports
+environment and task-level filesystem snapshots for faster resume flows.
 
 ## When to use Daytona
 
@@ -15,7 +15,7 @@ Use Daytona when:
 - task work should run outside the Roomote host
 - you want hosted sandboxes with simple credential setup
 - you can provide a Daytona API key
-- snapshot resume support is not required for your workflow
+- environment setup caching or task sleep/resume via snapshots is useful
 
 ## Configuration
 
@@ -44,16 +44,25 @@ DAYTONA_TARGET=...
 Use `DAYTONA_API_URL` for custom Daytona endpoints. Use `DAYTONA_TARGET` when
 your account or deployment needs a specific target or region.
 
-## Worker snapshot expectations
+## Worker snapshot vs product snapshots
 
-The Daytona snapshot should contain the Roomote worker runtime: system
+Daytona uses the word "snapshot" for two Roomote concepts:
+
+1. **Worker base snapshot** (`DAYTONA_SNAPSHOT_NAME`) — the baked Roomote
+   worker image registered once per worker image tag. Fresh sandboxes boot from
+   this base.
+2. **Product snapshots** — filesystem captures of a running task or environment
+   setup, stored as named Daytona snapshots and used for env caching and
+   sleep/resume (same product behavior as Modal and E2B).
+
+The worker base snapshot should contain the Roomote worker runtime: system
 packages, browser tooling, language tools, command helpers, and the worker
 bootstrap used to connect back to Roomote.
 
 Settings and setup only collect the API key — not a snapshot name field.
-Roomote registers the snapshot from the worker image during setup when needed.
-For production, keep the worker image or snapshot name pinned so task startup
-is predictable.
+Roomote registers the worker snapshot from the worker image during setup when
+needed. For production, keep the worker image or base snapshot name pinned so
+task startup is predictable.
 
 ## Verify setup
 
