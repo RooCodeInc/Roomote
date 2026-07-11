@@ -104,18 +104,33 @@ export class BlaxelClient implements ComputeProviderClient {
       }),
       signal: input.signal,
       abortMessage: `Creating Blaxel sandbox ${name} was aborted`,
+      onLateResolve: async (lateSandbox) => {
+        await this.cleanupSandboxAfterFailure(
+          lateSandbox.metadata.name || name,
+          'create_instance_late_abort',
+        );
+      },
     });
-    await raceWithAbort({
-      promise: sandbox.wait({ maxWait: 180_000 }),
-      signal: input.signal,
-      abortMessage: `Waiting for Blaxel sandbox ${name} was aborted`,
-    });
-    const domains = await this.createPreviewDomains(
-      sandbox,
-      input.ports ?? [],
-      input.signal,
-    );
-    return { instanceId: name, status: 'running', domains };
+
+    try {
+      await raceWithAbort({
+        promise: sandbox.wait({ maxWait: 180_000 }),
+        signal: input.signal,
+        abortMessage: `Waiting for Blaxel sandbox ${name} was aborted`,
+      });
+      const domains = await this.createPreviewDomains(
+        sandbox,
+        input.ports ?? [],
+        input.signal,
+      );
+      return { instanceId: name, status: 'running', domains };
+    } catch (error) {
+      await this.cleanupSandboxAfterFailure(
+        name,
+        'create_instance_post_create',
+      );
+      throw error;
+    }
   }
 
   public async destroyInstance(
@@ -159,7 +174,11 @@ export class BlaxelClient implements ComputeProviderClient {
         env: input.env,
         workingDir: input.cwd,
         waitForCompletion: !input.detached,
-        ...(input.detached ? { keepAlive: true, timeout: 0 } : { timeout: 60 }),
+        // Disable Blaxel's default provider-side timeout. Callers bound
+        // synchronous execution through their AbortSignal, while detached
+        // worker processes remain alive until Roomote tears down the sandbox.
+        timeout: 0,
+        ...(input.detached ? { keepAlive: true } : {}),
         ...(input.onOutput
           ? {
               onStdout: (data: string) =>
@@ -261,6 +280,25 @@ export class BlaxelClient implements ComputeProviderClient {
     return this.config.timeoutMs
       ? `${Math.ceil(this.config.timeoutMs / 1_000)}s`
       : undefined;
+  }
+
+  private async cleanupSandboxAfterFailure(
+    instanceId: string,
+    context: string,
+  ): Promise<void> {
+    try {
+      await SandboxInstance.delete(instanceId);
+    } catch (error) {
+      if (isNotFound(error)) return;
+      console.error(
+        `[BlaxelClient] Failed to clean up sandbox after ${context} ${JSON.stringify(
+          {
+            instanceId,
+            error: error instanceof Error ? error.message : String(error),
+          },
+        )}`,
+      );
+    }
   }
 
   private async createPreviewDomains(

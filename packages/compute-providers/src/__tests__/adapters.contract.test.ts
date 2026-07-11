@@ -177,7 +177,10 @@ describe('compute provider adapter contracts', () => {
       }),
     ).resolves.toMatchObject({ exitCode: 0, stdout: 'hello' });
     expect(sandbox.process.exec).toHaveBeenCalledWith(
-      expect.objectContaining({ command: `'echo' 'it'"'"'s safe'` }),
+      expect.objectContaining({
+        command: `'echo' 'it'"'"'s safe'`,
+        timeout: 0,
+      }),
     );
 
     await client.writeFiles({
@@ -203,6 +206,60 @@ describe('compute provider adapter contracts', () => {
     ).rejects.toThrow('does not support Roomote snapshots');
     await client.destroyInstance({ instanceId: created.instanceId });
     expect(blaxelDeleteMock).toHaveBeenCalledWith(created.instanceId);
+  });
+
+  it('cleans up a Blaxel sandbox when readiness fails after creation', async () => {
+    const sandbox = {
+      metadata: { name: 'roomote-blaxel-failed' },
+      wait: vi.fn().mockRejectedValue(new Error('deployment failed')),
+    };
+    blaxelCreateMock.mockResolvedValue(sandbox);
+    blaxelDeleteMock.mockResolvedValue(undefined);
+
+    const client = createComputeProviderClient({
+      provider: 'blaxel',
+      config: {
+        apiKey: 'key',
+        workspace: 'workspace',
+        image: 'sandbox/roomote-worker:version',
+      },
+    });
+
+    await expect(client.createInstance({})).rejects.toThrow(
+      'deployment failed',
+    );
+    const createdName = blaxelCreateMock.mock.calls[0]?.[0]?.name;
+    expect(createdName).toEqual(expect.any(String));
+    expect(blaxelDeleteMock).toHaveBeenCalledWith(createdName);
+  });
+
+  it('cleans up a Blaxel sandbox that resolves after create is aborted', async () => {
+    let resolveCreate!: (sandbox: { metadata: { name: string } }) => void;
+    blaxelCreateMock.mockReturnValue(
+      new Promise((resolve) => {
+        resolveCreate = resolve;
+      }),
+    );
+    blaxelDeleteMock.mockResolvedValue(undefined);
+
+    const client = createComputeProviderClient({
+      provider: 'blaxel',
+      config: {
+        apiKey: 'key',
+        workspace: 'workspace',
+        image: 'sandbox/roomote-worker:version',
+      },
+    });
+    const controller = new AbortController();
+    const createPromise = client.createInstance({ signal: controller.signal });
+
+    controller.abort();
+    await expect(createPromise).rejects.toMatchObject({ name: 'AbortError' });
+
+    resolveCreate({ metadata: { name: 'roomote-blaxel-late' } });
+    await vi.waitFor(() => {
+      expect(blaxelDeleteMock).toHaveBeenCalledWith('roomote-blaxel-late');
+    });
   });
 
   it('retries Blaxel file writes while the workload data plane is starting', async () => {
