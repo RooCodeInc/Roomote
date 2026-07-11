@@ -145,8 +145,8 @@ describe('resolveOpenCodeSmallModel', () => {
   it('uses the deployment small model when configured', () => {
     process.env = {
       ...originalEnv,
-      ROOMOTE_MODEL: 'openrouter/anthropic/claude-sonnet-4',
-      ROOMOTE_SMALL_MODEL: 'openrouter/openai/gpt-4.1-mini',
+      R_MODEL: 'openrouter/anthropic/claude-sonnet-4',
+      R_SMALL_MODEL: 'openrouter/openai/gpt-4.1-mini',
     };
 
     expect(resolveOpenCodeSmallModel()).toBe('openrouter/openai/gpt-4.1-mini');
@@ -155,9 +155,9 @@ describe('resolveOpenCodeSmallModel', () => {
   it('falls back to the deployment task model', () => {
     process.env = {
       ...originalEnv,
-      ROOMOTE_MODEL: 'openrouter/anthropic/claude-sonnet-4',
+      R_MODEL: 'openrouter/anthropic/claude-sonnet-4',
     };
-    delete process.env.ROOMOTE_SMALL_MODEL;
+    delete process.env.R_SMALL_MODEL;
 
     expect(resolveOpenCodeSmallModel()).toBe(
       'openrouter/anthropic/claude-sonnet-4',
@@ -169,8 +169,8 @@ describe('resolveOpenCodeSmallModel', () => {
       ...originalEnv,
     };
     mockResolveEffectiveModelRuntimeEnv.mockResolvedValue({
-      ROOMOTE_MODEL: 'openrouter/z-ai/glm-5.2',
-      ROOMOTE_SMALL_MODEL: 'openrouter/openai/gpt-5.4',
+      R_MODEL: 'openrouter/z-ai/glm-5.2',
+      R_SMALL_MODEL: 'openrouter/openai/gpt-5.4',
       OPENROUTER_API_KEY: 'test-key',
     });
     sessionPromptMock.mockResolvedValue({
@@ -247,13 +247,13 @@ describe('resolveOpenCodeSmallModel', () => {
     };
     mockResolveEffectiveModelRuntimeEnv
       .mockResolvedValueOnce({
-        ROOMOTE_MODEL: 'openrouter/z-ai/glm-5.2',
-        ROOMOTE_SMALL_MODEL: 'openrouter/openai/gpt-5.4',
+        R_MODEL: 'openrouter/z-ai/glm-5.2',
+        R_SMALL_MODEL: 'openrouter/openai/gpt-5.4',
         OPENROUTER_API_KEY: 'test-key',
       })
       .mockResolvedValueOnce({
-        ROOMOTE_MODEL: 'openrouter/z-ai/glm-5.2',
-        ROOMOTE_SMALL_MODEL: 'openrouter/z-ai/glm-5.2',
+        R_MODEL: 'openrouter/z-ai/glm-5.2',
+        R_SMALL_MODEL: 'openrouter/z-ai/glm-5.2',
         OPENROUTER_API_KEY: 'test-key',
       });
     sessionPromptMock.mockResolvedValue({
@@ -299,8 +299,8 @@ describe('resolveOpenCodeSmallModel', () => {
       OPENCODE_SDK_SERVER_URL: 'http://127.0.0.1:4096',
     };
     mockResolveEffectiveModelRuntimeEnv.mockResolvedValue({
-      ROOMOTE_MODEL: 'openrouter/z-ai/glm-5.2',
-      ROOMOTE_SMALL_MODEL: 'openrouter/openai/gpt-5.4',
+      R_MODEL: 'openrouter/z-ai/glm-5.2',
+      R_SMALL_MODEL: 'openrouter/openai/gpt-5.4',
     });
     sessionPromptMock.mockResolvedValue({
       data: {
@@ -388,7 +388,7 @@ describe('resolveOpenCodeSmallModel', () => {
       OPENCODE_SDK_SERVER_URL: 'http://127.0.0.1:4096',
     };
     mockResolveEffectiveModelRuntimeEnv.mockResolvedValue({
-      ROOMOTE_MODEL: 'openrouter/z-ai/glm-5.2',
+      R_MODEL: 'openrouter/z-ai/glm-5.2',
     });
     sessionPromptMock.mockResolvedValue({
       data: {
@@ -421,7 +421,7 @@ describe('resolveOpenCodeSmallModel', () => {
       OPENCODE_SDK_SERVER_URL: 'http://127.0.0.1:4096',
     };
     mockResolveEffectiveModelRuntimeEnv.mockResolvedValue({
-      ROOMOTE_MODEL: 'openrouter/z-ai/glm-5.2',
+      R_MODEL: 'openrouter/z-ai/glm-5.2',
     });
     sessionPromptMock.mockResolvedValue({
       data: undefined,
@@ -454,8 +454,8 @@ describe('resolveOpenCodeSmallModel', () => {
       OPENCODE_SDK_SERVER_URL: 'http://127.0.0.1:4096',
     };
     mockResolveEffectiveModelRuntimeEnv.mockResolvedValue({
-      ROOMOTE_MODEL: 'openrouter/z-ai/glm-5.2',
-      ROOMOTE_SMALL_MODEL: 'openrouter/openai/gpt-5.4',
+      R_MODEL: 'openrouter/z-ai/glm-5.2',
+      R_SMALL_MODEL: 'openrouter/openai/gpt-5.4',
     });
     sessionPromptMock.mockResolvedValue({
       data: {
@@ -508,7 +508,7 @@ describe('resolveOpenCodeSmallModel', () => {
       OPENCODE_SDK_SERVER_URL: 'http://127.0.0.1:4096',
     };
     mockResolveEffectiveModelRuntimeEnv.mockResolvedValue({
-      ROOMOTE_MODEL: 'openrouter/z-ai/glm-5.2',
+      R_MODEL: 'openrouter/z-ai/glm-5.2',
     });
     sessionPromptMock.mockResolvedValue({
       data: {
@@ -542,7 +542,7 @@ describe('resolveOpenCodeSmallModel', () => {
       OPENCODE_SDK_SERVER_URL: 'http://127.0.0.1:4096',
     };
     mockResolveEffectiveModelRuntimeEnv.mockResolvedValue({
-      ROOMOTE_MODEL: 'openrouter/openai/gpt-5.4',
+      R_MODEL: 'openrouter/openai/gpt-5.4',
       OPENROUTER_API_KEY: 'test-key',
     });
     sessionPromptMock.mockResolvedValue({

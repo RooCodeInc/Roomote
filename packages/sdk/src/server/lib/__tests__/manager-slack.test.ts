@@ -25,7 +25,7 @@ import {
 } from '../manager-slack';
 
 describe('manager slack helpers', () => {
-  const originalApiUrl = process.env.ROOMOTE_APP_URL;
+  const originalApiUrl = process.env.R_APP_URL;
 
   function mockMetadataLookup(
     result:
@@ -42,16 +42,16 @@ describe('manager slack helpers', () => {
   }
 
   beforeEach(() => {
-    process.env.ROOMOTE_APP_URL = 'https://app.example.com';
+    process.env.R_APP_URL = 'https://app.example.com';
     mockDbSelect.mockReset();
     mockEq.mockClear();
   });
 
   afterEach(() => {
     if (originalApiUrl === undefined) {
-      delete process.env.ROOMOTE_APP_URL;
+      delete process.env.R_APP_URL;
     } else {
-      process.env.ROOMOTE_APP_URL = originalApiUrl;
+      process.env.R_APP_URL = originalApiUrl;
     }
   });
 

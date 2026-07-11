@@ -78,7 +78,7 @@ import {
 } from '../slack-conversation-log';
 import { buildManagerSlackSettingsUrl } from '../manager-slack';
 
-const DEFAULT_LOCAL_ROOMOTE_APP_URL = 'http://localhost:13000';
+const DEFAULT_LOCAL_R_APP_URL = 'http://localhost:13000';
 const DEFAULT_DEPLOYMENT_ID = 'default';
 
 /**
@@ -1166,7 +1166,7 @@ function getSlackProjectNameFromPayload(payload: unknown): string | null {
 function buildSlackWebPathUrl(webPath: string, campaign: string): string {
   const url = new URL(
     webPath,
-    process.env.ROOMOTE_APP_URL || DEFAULT_LOCAL_ROOMOTE_APP_URL,
+    process.env.R_APP_URL || DEFAULT_LOCAL_R_APP_URL,
   );
 
   url.searchParams.set('utm_source', 'slack');

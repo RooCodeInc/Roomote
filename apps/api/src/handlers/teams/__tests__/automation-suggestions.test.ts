@@ -25,7 +25,7 @@ const {
 }));
 
 vi.mock('@roomote/env', () => ({
-  Env: { ROOMOTE_APP_URL: 'https://app.example.com' },
+  Env: { R_APP_URL: 'https://app.example.com' },
 }));
 
 vi.mock('@roomote/db/server', () => ({

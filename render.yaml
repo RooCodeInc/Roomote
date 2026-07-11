@@ -22,7 +22,7 @@
 #   service receives host-only references (`ROOMOTE_WEB_HOST`,
 #   `ROOMOTE_API_HOST`, `ROOMOTE_MINIO_HOST`, `ROOMOTE_MINIO_HOSTPORT`) and
 #   the entrypoint dispatcher composes the URL-shaped variables
-#   (`ROOMOTE_APP_URL`, `TRPC_URL`, `S3_ENDPOINT`, `S3_PRESIGN_ENDPOINT`)
+#   (`R_APP_URL`, `TRPC_URL`, `S3_ENDPOINT`, `S3_PRESIGN_ENDPOINT`)
 #   from them when they are unset. The cross-service references use
 #   Render's `fromService` + `envVarKey` form against the Render-provided
 #   `RENDER_EXTERNAL_HOSTNAME`; the first-boot verification in
@@ -41,7 +41,7 @@
 #   EXCLUDED_COMPUTE_PROVIDERS=docker hides the unusable provider.
 # - Zero deploy-time inputs. Modal tokens and model provider keys are
 #   entered in the /setup wizard after first boot and stored encrypted in
-#   Postgres. Auth keypairs come from ROOMOTE_AUTO_GENERATE_KEYS=true.
+#   Postgres. Auth keypairs come from R_AUTO_GENERATE_KEYS=true.
 # - The api service must be publicly reachable: hosted-sandbox workers and
 #   GitHub webhooks call `TRPC_URL` directly. MinIO is public too because
 #   presigned artifact URLs (`S3_PRESIGN_ENDPOINT`) must be reachable from
@@ -201,11 +201,11 @@ envVarGroups:
   # services referencing the group see the same value.
   - name: roomote-shared
     envVars:
-      - key: APP_ENV
+      - key: R_APP_ENV
         value: production
       - key: ROOMOTE_DOCKER_LOAD_ENV_FILE
         value: 'false'
-      - key: ROOMOTE_AUTO_GENERATE_KEYS
+      - key: R_AUTO_GENERATE_KEYS
         value: 'true'
       - key: ENCRYPTION_KEY
         generateValue: true

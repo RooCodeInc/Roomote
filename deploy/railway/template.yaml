@@ -37,8 +37,8 @@
 #   EXCLUDED_COMPUTE_PROVIDERS=docker hides the unusable provider.
 # - Zero required deploy-time inputs. Modal tokens and model provider keys
 #   are entered in the /setup wizard after first boot and stored encrypted
-#   in Postgres. Auth keypairs come from ROOMOTE_AUTO_GENERATE_KEYS=true.
-#   The one optional deploy-time prompt is ROOMOTE_APP_URL on api (see the
+#   in Postgres. Auth keypairs come from R_AUTO_GENERATE_KEYS=true.
+#   The one optional deploy-time prompt is R_APP_URL on api (see the
 #   annotation on that variable): deployers who already own a domain
 #   override the pre-filled default with https://<their-domain> before the
 #   first deploy instead of editing the variable after hitting 403
@@ -48,8 +48,8 @@
 # - Both published images are public on GHCR: Railway pulls roomote-app and
 #   hosted-sandbox builders pull roomote-worker anonymously, so no registry
 #   credentials are needed.
-# - ROOMOTE_APP_URL on api is the single canonical-origin knob; the other
-#   app services reference ${{api.ROOMOTE_APP_URL}}. Note api's own value
+# - R_APP_URL on api is the single canonical-origin knob; the other
+#   app services reference ${{api.R_APP_URL}}. Note api's own value
 #   is itself a reference (https://${{web.RAILWAY_PUBLIC_DOMAIN}}), so this
 #   is a reference to a reference. Verified working on a scratch deploy
 #   (2026-07-08): the app services receive the resolved URL, not a literal
@@ -60,10 +60,10 @@
 #   the multi-service edit when changing domains. Do NOT flatten the
 #   ${{api.*}} references to raw values in the Composer — that silently
 #   breaks the one-variable custom-domain edit. A custom domain is either set
-#   at deploy time through the ROOMOTE_APP_URL prompt or attached later as
+#   at deploy time through the R_APP_URL prompt or attached later as
 #   a one-variable edit; see "Attaching a custom domain" in README.md.
-#   ROOMOTE_PUBLIC_URL is intentionally not set — the app falls
-#   back to ROOMOTE_APP_URL wherever it would apply. Railway does not
+#   R_PUBLIC_URL is intentionally not set — the app falls
+#   back to R_APP_URL wherever it would apply. Railway does not
 #   update RAILWAY_PUBLIC_DOMAIN when a custom domain is attached, and
 #   browsing an origin the app was not told about fails auth with 403
 #   "Invalid origin".
@@ -73,13 +73,13 @@
 #   generate it. The operator copies the value from the api service's
 #   Variables tab and pastes it into the wizard's token step (the URL form
 #   /setup?token=<value> also works).
-# - ROOMOTE_PING_BASE_URL points the anonymous-analytics and version-check
+# - R_PING_BASE_URL points the anonymous-analytics and version-check
 #   pings at the openmote ping service (the code default is
 #   https://ping.roomote.dev). Admins can opt out of analytics in the setup
 #   wizard or Settings -> Misc; version checks ignore that setting.
 # - Live previews ship disabled but ready: the preview-proxy service is in
 #   the template and boots healthy with the PREVIEW_* variables empty (it
-#   only hard-requires ROOMOTE_APP_URL, DATABASE_URL, and REDIS_URL, all in
+#   only hard-requires R_APP_URL, DATABASE_URL, and REDIS_URL, all in
 #   the shared block). Enabling previews needs a customer-owned wildcard
 #   custom domain plus the three PREVIEW_* values on api; see "Enabling
 #   live previews" in README.md. The PREVIEW_* variables on api are empty
@@ -126,9 +126,9 @@ services:
     public_domain: http proxy port 8080 # hosted workers and GitHub webhooks call this origin
     healthcheck_path: /health/liveness
     env:
-      APP_ENV: production
+      R_APP_ENV: production
       ROOMOTE_DOCKER_LOAD_ENV_FILE: 'false'
-      ROOMOTE_AUTO_GENERATE_KEYS: 'true'
+      R_AUTO_GENERATE_KEYS: 'true'
       ENCRYPTION_KEY: ${{secret(32)}}
       ARTIFACT_SIGNING_KEY: ${{secret(32)}}
       DASHBOARD_PASSWORD: ${{secret(24)}}
@@ -146,7 +146,7 @@ services:
       NEXT_PUBLIC_PREVIEW_PROXY_BASE_URL: ''
       PREVIEW_DOMAINS: ''
       SETUP_TOKEN: ${{secret(32)}} # gates /setup; required outside local dev (see design notes)
-      ROOMOTE_PING_BASE_URL: https://ping.openmote.dev # anonymous-analytics / version-check pings
+      R_PING_BASE_URL: https://ping.openmote.dev # anonymous-analytics / version-check pings
       DEFAULT_COMPUTE_PROVIDER: modal
       EXCLUDED_COMPUTE_PROVIDERS: docker
       DATABASE_URL: ${{Postgres.DATABASE_URL}}
@@ -165,7 +165,7 @@ services:
       # this with https://app.example.com — then, after deploying, add that
       # domain to the web service, finish DNS setup, and open /setup on the
       # custom domain."
-      ROOMOTE_APP_URL: https://${{web.RAILWAY_PUBLIC_DOMAIN}}
+      R_APP_URL: https://${{web.RAILWAY_PUBLIC_DOMAIN}}
       TRPC_URL: https://${{api.RAILWAY_PUBLIC_DOMAIN}}
       S3_ENDPOINT: http://${{minio.RAILWAY_PRIVATE_DOMAIN}}:9000
       S3_PRESIGN_ENDPOINT: https://${{minio.RAILWAY_PUBLIC_DOMAIN}}
@@ -179,9 +179,9 @@ services:
     public_domain: http proxy port 8080 # this is the app origin users open
     healthcheck_path: /health
     env: &app_service_env
-      APP_ENV: ${{api.APP_ENV}}
+      R_APP_ENV: ${{api.R_APP_ENV}}
       ROOMOTE_DOCKER_LOAD_ENV_FILE: ${{api.ROOMOTE_DOCKER_LOAD_ENV_FILE}}
-      ROOMOTE_AUTO_GENERATE_KEYS: ${{api.ROOMOTE_AUTO_GENERATE_KEYS}}
+      R_AUTO_GENERATE_KEYS: ${{api.R_AUTO_GENERATE_KEYS}}
       ENCRYPTION_KEY: ${{api.ENCRYPTION_KEY}}
       ARTIFACT_SIGNING_KEY: ${{api.ARTIFACT_SIGNING_KEY}}
       DASHBOARD_PASSWORD: ${{api.DASHBOARD_PASSWORD}}
@@ -190,7 +190,7 @@ services:
       S3_REGION: ${{api.S3_REGION}}
       S3_BUCKET_ARTIFACTS: ${{api.S3_BUCKET_ARTIFACTS}}
       SETUP_TOKEN: ${{api.SETUP_TOKEN}}
-      ROOMOTE_PING_BASE_URL: ${{api.ROOMOTE_PING_BASE_URL}}
+      R_PING_BASE_URL: ${{api.R_PING_BASE_URL}}
       # Empty until previews are enabled; the web client builds preview
       # links from NEXT_PUBLIC_PREVIEW_PROXY_BASE_URL, so the references
       # live in the shared block rather than only on preview-proxy.
@@ -201,7 +201,7 @@ services:
       EXCLUDED_COMPUTE_PROVIDERS: ${{api.EXCLUDED_COMPUTE_PROVIDERS}}
       DATABASE_URL: ${{Postgres.DATABASE_URL}}
       REDIS_URL: ${{Redis.REDIS_URL}}
-      ROOMOTE_APP_URL: ${{api.ROOMOTE_APP_URL}}
+      R_APP_URL: ${{api.R_APP_URL}}
       TRPC_URL: ${{api.TRPC_URL}}
       S3_ENDPOINT: ${{api.S3_ENDPOINT}}
       S3_PRESIGN_ENDPOINT: ${{api.S3_PRESIGN_ENDPOINT}}

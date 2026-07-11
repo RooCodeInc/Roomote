@@ -1,19 +1,31 @@
 import { getDefaultDocsUrl, resolveAppEnv } from './app-env';
 
 describe('resolveAppEnv', () => {
-  it('maps APP_ENV and ROOMOTE_APP_ENV values', () => {
+  it('maps canonical R_APP_ENV values', () => {
     expect(
       resolveAppEnv({
         NODE_ENV: 'test',
-        APP_ENV: 'preview',
+        R_APP_ENV: 'preview',
       } as NodeJS.ProcessEnv),
     ).toBe('preview');
     expect(
       resolveAppEnv({
         NODE_ENV: 'test',
-        ROOMOTE_APP_ENV: 'production',
+        R_APP_ENV: 'production',
       } as NodeJS.ProcessEnv),
     ).toBe('production');
+  });
+
+  it('ignores legacy APP_ENV values', () => {
+    expect(
+      resolveAppEnv(
+        {
+          NODE_ENV: 'test',
+          APP_ENV: 'preview',
+        } as NodeJS.ProcessEnv,
+        'development',
+      ),
+    ).toBe('development');
   });
 });
 

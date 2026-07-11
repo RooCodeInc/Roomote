@@ -54,7 +54,7 @@ describe('WorkerEnv', () => {
       expect(env).not.toHaveProperty('TRPC_URL');
       expect(env).not.toHaveProperty('PREVIEW_PROXY_BASE_URL');
       expect(env).not.toHaveProperty('PREVIEW_AUTH_PUBLIC_KEY');
-      expect(env).not.toHaveProperty('ROOMOTE_APP_URL');
+      expect(env).not.toHaveProperty('R_APP_URL');
     });
   });
 
@@ -93,7 +93,7 @@ describe('WorkerEnv', () => {
       expect(env.HOME).toBe('/home/testuser');
       expect(env.PATH).toBe('/usr/bin:/usr/local/bin');
       expect(env.APP_ENV).toBe('development');
-      expect(env.ROOMOTE_APP_ENV).toBe('development');
+      expect(env.R_APP_ENV).toBe('development');
 
       // Service env
       expect(env.POSTGRES_URL).toBe('postgres://localhost:5432/db');
@@ -111,7 +111,7 @@ describe('WorkerEnv', () => {
       expect(env).not.toHaveProperty('TRPC_URL');
       expect(env).not.toHaveProperty('PREVIEW_AUTH_PUBLIC_KEY');
       expect(env).not.toHaveProperty('PREVIEW_PROXY_BASE_URL');
-      expect(env).not.toHaveProperty('ROOMOTE_APP_URL');
+      expect(env).not.toHaveProperty('R_APP_URL');
     });
 
     it('should keep launcher model env available only for harnesses', () => {
@@ -120,20 +120,20 @@ describe('WorkerEnv', () => {
         PATH: '/usr/bin',
         AUTH_TOKEN: 'secret-token',
         TRPC_URL: 'https://trpc.example.com',
-        ROOMOTE_APP_URL: 'https://api.example.com',
-        ROOMOTE_MODEL: 'openrouter/openai/gpt-5.4',
-        ROOMOTE_SMALL_MODEL: 'openrouter/openai/gpt-5.4-mini',
-        ROOMOTE_VISION_MODEL: 'openrouter/openai/gpt-5.5',
-        ROOMOTE_CODE_REVIEW_MODEL: 'openrouter/openai/gpt-5.5',
-        ROOMOTE_EXPLORE_MODEL: 'openrouter/openai/gpt-5.4-mini',
-        ROOMOTE_PLANNING_MODEL: 'openrouter/anthropic/claude-opus-4.7',
-        ROOMOTE_MODEL_REASONING_EFFORT: 'medium',
-        ROOMOTE_SMALL_MODEL_REASONING_EFFORT: 'low',
-        ROOMOTE_VISION_MODEL_REASONING_EFFORT: 'low',
-        ROOMOTE_CODE_REVIEW_MODEL_REASONING_EFFORT: 'high',
-        ROOMOTE_EXPLORE_MODEL_REASONING_EFFORT: 'low',
-        ROOMOTE_PLANNING_MODEL_REASONING_EFFORT: 'high',
-        ROOMOTE_MODEL_ENV_KEYS: 'CUSTOM_PROVIDER_API_KEY',
+        R_APP_URL: 'https://api.example.com',
+        R_MODEL: 'openrouter/openai/gpt-5.4',
+        R_SMALL_MODEL: 'openrouter/openai/gpt-5.4-mini',
+        R_VISION_MODEL: 'openrouter/openai/gpt-5.5',
+        R_CODE_REVIEW_MODEL: 'openrouter/openai/gpt-5.5',
+        R_EXPLORE_MODEL: 'openrouter/openai/gpt-5.4-mini',
+        R_PLANNING_MODEL: 'openrouter/anthropic/claude-opus-4.7',
+        R_MODEL_REASONING_EFFORT: 'medium',
+        R_SMALL_MODEL_REASONING_EFFORT: 'low',
+        R_VISION_MODEL_REASONING_EFFORT: 'low',
+        R_CODE_REVIEW_MODEL_REASONING_EFFORT: 'high',
+        R_EXPLORE_MODEL_REASONING_EFFORT: 'low',
+        R_PLANNING_MODEL_REASONING_EFFORT: 'high',
+        R_MODEL_ENV_KEYS: 'CUSTOM_PROVIDER_API_KEY',
         OPENROUTER_API_KEY: 'openrouter-key',
         CUSTOM_PROVIDER_API_KEY: 'custom-key',
         JOB_AUTH_PRIVATE_KEY: 'do-not-forward',
@@ -142,46 +142,34 @@ describe('WorkerEnv', () => {
       env.setRuntimeEnv({ GH_TOKEN: 'gh-token' });
 
       const userEnv = env.buildUserFacingEnv();
-      expect(userEnv).not.toHaveProperty('ROOMOTE_MODEL');
-      expect(userEnv).not.toHaveProperty('ROOMOTE_SMALL_MODEL');
-      expect(userEnv).not.toHaveProperty('ROOMOTE_VISION_MODEL');
-      expect(userEnv).not.toHaveProperty('ROOMOTE_CODE_REVIEW_MODEL');
-      expect(userEnv).not.toHaveProperty('ROOMOTE_EXPLORE_MODEL');
-      expect(userEnv).not.toHaveProperty('ROOMOTE_PLANNING_MODEL');
-      expect(userEnv).not.toHaveProperty('ROOMOTE_MODEL_REASONING_EFFORT');
-      expect(userEnv).not.toHaveProperty(
-        'ROOMOTE_PLANNING_MODEL_REASONING_EFFORT',
-      );
+      expect(userEnv).not.toHaveProperty('R_MODEL');
+      expect(userEnv).not.toHaveProperty('R_SMALL_MODEL');
+      expect(userEnv).not.toHaveProperty('R_VISION_MODEL');
+      expect(userEnv).not.toHaveProperty('R_CODE_REVIEW_MODEL');
+      expect(userEnv).not.toHaveProperty('R_EXPLORE_MODEL');
+      expect(userEnv).not.toHaveProperty('R_PLANNING_MODEL');
+      expect(userEnv).not.toHaveProperty('R_MODEL_REASONING_EFFORT');
+      expect(userEnv).not.toHaveProperty('R_PLANNING_MODEL_REASONING_EFFORT');
       expect(userEnv).not.toHaveProperty('OPENROUTER_API_KEY');
 
       const openCodeEnv = env.buildOpenCodeHarnessEnv();
-      expect(openCodeEnv.ROOMOTE_MODEL).toBe('openrouter/openai/gpt-5.4');
-      expect(openCodeEnv.ROOMOTE_SMALL_MODEL).toBe(
+      expect(openCodeEnv.R_MODEL).toBe('openrouter/openai/gpt-5.4');
+      expect(openCodeEnv.R_SMALL_MODEL).toBe('openrouter/openai/gpt-5.4-mini');
+      expect(openCodeEnv.R_VISION_MODEL).toBe('openrouter/openai/gpt-5.5');
+      expect(openCodeEnv.R_CODE_REVIEW_MODEL).toBe('openrouter/openai/gpt-5.5');
+      expect(openCodeEnv.R_EXPLORE_MODEL).toBe(
         'openrouter/openai/gpt-5.4-mini',
       );
-      expect(openCodeEnv.ROOMOTE_VISION_MODEL).toBe(
-        'openrouter/openai/gpt-5.5',
-      );
-      expect(openCodeEnv.ROOMOTE_CODE_REVIEW_MODEL).toBe(
-        'openrouter/openai/gpt-5.5',
-      );
-      expect(openCodeEnv.ROOMOTE_EXPLORE_MODEL).toBe(
-        'openrouter/openai/gpt-5.4-mini',
-      );
-      expect(openCodeEnv.ROOMOTE_PLANNING_MODEL).toBe(
+      expect(openCodeEnv.R_PLANNING_MODEL).toBe(
         'openrouter/anthropic/claude-opus-4.7',
       );
-      expect(openCodeEnv.ROOMOTE_MODEL_REASONING_EFFORT).toBe('medium');
-      expect(openCodeEnv.ROOMOTE_SMALL_MODEL_REASONING_EFFORT).toBe('low');
-      expect(openCodeEnv.ROOMOTE_VISION_MODEL_REASONING_EFFORT).toBe('low');
-      expect(openCodeEnv.ROOMOTE_CODE_REVIEW_MODEL_REASONING_EFFORT).toBe(
-        'high',
-      );
-      expect(openCodeEnv.ROOMOTE_EXPLORE_MODEL_REASONING_EFFORT).toBe('low');
-      expect(openCodeEnv.ROOMOTE_PLANNING_MODEL_REASONING_EFFORT).toBe('high');
-      expect(openCodeEnv.ROOMOTE_MODEL_ENV_KEYS).toBe(
-        'CUSTOM_PROVIDER_API_KEY',
-      );
+      expect(openCodeEnv.R_MODEL_REASONING_EFFORT).toBe('medium');
+      expect(openCodeEnv.R_SMALL_MODEL_REASONING_EFFORT).toBe('low');
+      expect(openCodeEnv.R_VISION_MODEL_REASONING_EFFORT).toBe('low');
+      expect(openCodeEnv.R_CODE_REVIEW_MODEL_REASONING_EFFORT).toBe('high');
+      expect(openCodeEnv.R_EXPLORE_MODEL_REASONING_EFFORT).toBe('low');
+      expect(openCodeEnv.R_PLANNING_MODEL_REASONING_EFFORT).toBe('high');
+      expect(openCodeEnv.R_MODEL_ENV_KEYS).toBe('CUSTOM_PROVIDER_API_KEY');
       expect(openCodeEnv.OPENROUTER_API_KEY).toBe('openrouter-key');
       expect(openCodeEnv.CUSTOM_PROVIDER_API_KEY).toBe('custom-key');
       expect(openCodeEnv).not.toHaveProperty('JOB_AUTH_PRIVATE_KEY');
@@ -283,8 +271,8 @@ describe('WorkerEnv', () => {
         JOB_AUTH_PUBLIC_KEY: 'job-pk-data',
         PREVIEW_PROXY_BASE_URL: 'https://preview.example.com',
         PREVIEW_AUTH_PUBLIC_KEY: 'pk-data',
-        ROOMOTE_APP_URL: 'https://api.example.com',
-        ROOMOTE_APP_ENV: 'production',
+        R_APP_URL: 'https://api.example.com',
+        R_APP_ENV: 'production',
       } as NodeJS.ProcessEnv);
 
       // Worker secrets are accessible via accessors
@@ -298,13 +286,13 @@ describe('WorkerEnv', () => {
       expect(userEnv).not.toHaveProperty('AUTH_TOKEN');
       expect(userEnv).not.toHaveProperty('TRPC_URL');
       expect(userEnv).not.toHaveProperty('PREVIEW_AUTH_PUBLIC_KEY');
-      expect(userEnv).not.toHaveProperty('ROOMOTE_APP_URL');
+      expect(userEnv).not.toHaveProperty('R_APP_URL');
 
       // System base vars are present
       expect(userEnv.HOME).toBe('/home/worker');
       expect(userEnv.LC_ALL).toBe('C.UTF-8');
       expect(userEnv.APP_ENV).toBe('production');
-      expect(userEnv.ROOMOTE_APP_ENV).toBe('production');
+      expect(userEnv.R_APP_ENV).toBe('production');
       expect(env.appEnv).toBe('production');
     });
 
@@ -321,8 +309,8 @@ describe('WorkerEnv', () => {
         SKIP_ENV_VALIDATION: '1',
         AUTH_TOKEN: 'secret-token',
         TRPC_URL: 'https://trpc.example.com',
-        ROOMOTE_APP_URL: 'https://api.example.com',
-        ROOMOTE_APP_ENV: 'preview',
+        R_APP_URL: 'https://api.example.com',
+        R_APP_ENV: 'preview',
         JOB_AUTH_PRIVATE_KEY: Buffer.from(privateKey).toString('base64'),
         JOB_AUTH_PUBLIC_KEY: Buffer.from(publicKey).toString('base64'),
         PREVIEW_AUTH_PUBLIC_KEY: 'outer-preview-key',
@@ -335,7 +323,7 @@ describe('WorkerEnv', () => {
       expect(fakeProcessEnv.JOB_AUTH_PUBLIC_KEY).toBeUndefined();
       expect(fakeProcessEnv.PREVIEW_AUTH_PUBLIC_KEY).toBeUndefined();
       expect(fakeProcessEnv.PREVIEW_PROXY_BASE_URL).toBeUndefined();
-      expect(fakeProcessEnv.ROOMOTE_APP_ENV).toBeUndefined();
+      expect(fakeProcessEnv.R_APP_ENV).toBeUndefined();
 
       expect(env.jobAuthPublicKey).toBe(
         Buffer.from(publicKey).toString('base64'),
@@ -401,7 +389,7 @@ describe('WorkerEnv', () => {
         PATH: '/usr/bin',
         AUTH_TOKEN: 'my-auth-token',
         TRPC_URL: 'https://trpc.example.com',
-        ROOMOTE_APP_URL: 'https://api.example.com',
+        R_APP_URL: 'https://api.example.com',
         APP_ENV: 'preview',
       } as NodeJS.ProcessEnv;
 
@@ -410,7 +398,7 @@ describe('WorkerEnv', () => {
       expect(env.appEnv).toBe('preview');
       expect(processEnv.APP_ENV).toBeUndefined();
       expect(env.buildUserFacingEnv().APP_ENV).toBe('preview');
-      expect(env.buildUserFacingEnv().ROOMOTE_APP_ENV).toBe('preview');
+      expect(env.buildUserFacingEnv().R_APP_ENV).toBe('preview');
     });
 
     it('should throw if required env vars are not set', () => {
@@ -436,7 +424,7 @@ describe('WorkerEnv', () => {
           AUTH_TOKEN: 'token',
           TRPC_URL: 'https://trpc.example.com',
         } as NodeJS.ProcessEnv),
-      ).toThrow('ROOMOTE_APP_URL is not set');
+      ).toThrow('R_APP_URL is not set');
     });
 
     it('should include MISE_* vars in system base', () => {
@@ -445,7 +433,7 @@ describe('WorkerEnv', () => {
         PATH: '/usr/bin',
         AUTH_TOKEN: 'token',
         TRPC_URL: 'https://trpc.example.com',
-        ROOMOTE_APP_URL: 'https://api.example.com',
+        R_APP_URL: 'https://api.example.com',
         MISE_DATA_DIR: '/home/worker/.local/share/mise',
         MISE_CACHE_DIR: '/home/worker/.cache/mise',
       } as NodeJS.ProcessEnv);
@@ -461,7 +449,7 @@ describe('WorkerEnv', () => {
         PATH: '/usr/bin:/usr/local/bin',
         AUTH_TOKEN: 'token',
         TRPC_URL: 'https://trpc.example.com',
-        ROOMOTE_APP_URL: 'https://api.example.com',
+        R_APP_URL: 'https://api.example.com',
       } as NodeJS.ProcessEnv);
 
       const userEnv = env.buildUserFacingEnv();
@@ -477,8 +465,8 @@ describe('WorkerEnv', () => {
         PATH: '/usr/bin',
         AUTH_TOKEN: 'secret-token',
         TRPC_URL: 'https://trpc.example.com',
-        ROOMOTE_APP_URL: 'https://api.example.com',
-        ROOMOTE_APP_ENV: 'production',
+        R_APP_URL: 'https://api.example.com',
+        R_APP_ENV: 'production',
         JOB_AUTH_PRIVATE_KEY: 'outer-job-private-key',
         PREVIEW_AUTH_PUBLIC_KEY: 'outer-public-key',
         PREVIEW_AUTH_COOKIE_NAME: 'preview_auth',
@@ -504,7 +492,7 @@ describe('WorkerEnv', () => {
       expect(fakeProcessEnv.JOB_AUTH_PUBLIC_KEY).toBeUndefined();
       expect(fakeProcessEnv.PREVIEW_PROXY_BASE_URL).toBeUndefined();
       expect(fakeProcessEnv.PREVIEW_PROXY_SUBDOMAIN_SUFFIX).toBeUndefined();
-      expect(fakeProcessEnv.ROOMOTE_APP_ENV).toBeUndefined();
+      expect(fakeProcessEnv.R_APP_ENV).toBeUndefined();
 
       // AUTH_TOKEN is intentionally kept — the SDK tRPC client reads it
       // from process.env on every request.
@@ -514,7 +502,7 @@ describe('WorkerEnv', () => {
       expect(fakeProcessEnv.HOME).toBe('/home/worker');
       expect(fakeProcessEnv.PATH).toBeDefined();
       expect(fakeProcessEnv.TRPC_URL).toBe('https://trpc.example.com');
-      expect(fakeProcessEnv.ROOMOTE_APP_URL).toBe('https://api.example.com');
+      expect(fakeProcessEnv.R_APP_URL).toBe('https://api.example.com');
     });
   });
 
@@ -525,7 +513,7 @@ describe('WorkerEnv', () => {
         PATH: '/usr/bin',
         AUTH_TOKEN: 'token',
         TRPC_URL: 'https://internal-worker-trpc.example.com',
-        ROOMOTE_APP_URL: 'https://internal-api.example.com',
+        R_APP_URL: 'https://internal-api.example.com',
       } as NodeJS.ProcessEnv);
 
       // User project can set its own TRPC_URL without conflict

@@ -125,7 +125,7 @@ async function createArtifactRecord(
     },
   );
 
-  const viewUrl = `${Env.ROOMOTE_APP_URL}/task/${taskId}/artifacts/${path}?v=${artifact.version}`;
+  const viewUrl = `${Env.R_APP_URL}/task/${taskId}/artifacts/${path}?v=${artifact.version}`;
   const response: {
     id: string;
     version: number;
@@ -145,7 +145,7 @@ async function createArtifactRecord(
     response.rawUrl = buildSignedArtifactRawUrl({
       artifactId: artifact.id,
       ts: currentEpochSeconds(),
-      apiBaseUrl: Env.ROOMOTE_APP_URL,
+      apiBaseUrl: Env.R_APP_URL,
       signingKey: getArtifactSigningKey(),
     });
   }

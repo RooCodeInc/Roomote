@@ -186,7 +186,7 @@ export async function submitMcpRecommendations(
         setupNewState.lastInteractedByUserId ??
         null,
       recommendations: filteredRecommendations,
-      appBaseUrl: Env.ROOMOTE_APP_URL,
+      appBaseUrl: Env.R_APP_URL,
       targetEnvironmentId: payload?.environmentId ?? null,
     });
 

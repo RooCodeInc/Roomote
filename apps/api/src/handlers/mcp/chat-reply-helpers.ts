@@ -86,7 +86,7 @@ export async function buildThreadReplyImages(params: {
       url: buildSignedArtifactRawUrl({
         artifactId: artifact.id,
         ts,
-        apiBaseUrl: Env.ROOMOTE_APP_URL,
+        apiBaseUrl: Env.R_APP_URL,
         signingKey: getArtifactSigningKey(),
       }),
       altText: basename(artifact.path) || 'attachment',

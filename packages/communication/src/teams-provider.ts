@@ -742,11 +742,11 @@ function resolveTeamsReactionEmoji(name: string): string | undefined {
 }
 
 export type TeamsBotEnvConfig = {
-  TEAMS_BOT_APP_ID?: string;
-  TEAMS_BOT_APP_PASSWORD?: string;
-  TEAMS_BOT_TENANT_ID?: string;
-  TEAMS_BOT_TOKEN_ENDPOINT?: string;
-  TEAMS_BOT_OAUTH_SCOPE?: string;
+  R_TEAMS_BOT_APP_ID?: string;
+  R_TEAMS_BOT_APP_PASSWORD?: string;
+  R_TEAMS_BOT_TENANT_ID?: string;
+  R_TEAMS_BOT_TOKEN_ENDPOINT?: string;
+  R_TEAMS_BOT_OAUTH_SCOPE?: string;
 };
 
 /**
@@ -756,23 +756,23 @@ export type TeamsBotEnvConfig = {
 export function createTeamsCommunicationProviderFromEnv(
   env: TeamsBotEnvConfig,
 ): TeamsCommunicationProvider | null {
-  if (!env.TEAMS_BOT_APP_ID || !env.TEAMS_BOT_APP_PASSWORD) {
+  if (!env.R_TEAMS_BOT_APP_ID || !env.R_TEAMS_BOT_APP_PASSWORD) {
     return null;
   }
 
   return new TeamsCommunicationProvider({
-    appId: env.TEAMS_BOT_APP_ID,
-    appPassword: env.TEAMS_BOT_APP_PASSWORD,
-    ...(env.TEAMS_BOT_TENANT_ID
+    appId: env.R_TEAMS_BOT_APP_ID,
+    appPassword: env.R_TEAMS_BOT_APP_PASSWORD,
+    ...(env.R_TEAMS_BOT_TENANT_ID
       ? {
-          tenantId: env.TEAMS_BOT_TENANT_ID,
+          tenantId: env.R_TEAMS_BOT_TENANT_ID,
         }
       : {}),
-    ...(env.TEAMS_BOT_TOKEN_ENDPOINT
-      ? { tokenEndpoint: env.TEAMS_BOT_TOKEN_ENDPOINT }
+    ...(env.R_TEAMS_BOT_TOKEN_ENDPOINT
+      ? { tokenEndpoint: env.R_TEAMS_BOT_TOKEN_ENDPOINT }
       : {}),
-    ...(env.TEAMS_BOT_OAUTH_SCOPE
-      ? { oauthScope: env.TEAMS_BOT_OAUTH_SCOPE }
+    ...(env.R_TEAMS_BOT_OAUTH_SCOPE
+      ? { oauthScope: env.R_TEAMS_BOT_OAUTH_SCOPE }
       : {}),
   });
 }

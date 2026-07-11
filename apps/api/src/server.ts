@@ -28,6 +28,7 @@ import { createSingleLineWarnLogger } from './logging';
 import { captureApiException } from './monitoring/sentry';
 import {
   requestObservabilityMiddleware,
+  routePolicyMiddleware,
   tokenAuthMiddleware,
 } from './middleware';
 import {
@@ -103,7 +104,7 @@ export function installApiObservedFetch(): void {
     fetchImpl: observedFetchImpl,
     log: createSingleLineWarnLogger(),
     internalHosts: buildInternalRequestHosts([
-      Env.ROOMOTE_APP_URL,
+      Env.R_APP_URL,
       Env.TRPC_URL,
       Env.PREVIEW_PROXY_BASE_URL,
     ]),
@@ -155,6 +156,12 @@ export function createApiApp(): ApiApp {
 
     return tokenAuth(c, next);
   });
+
+  // Central default-deny authorization gate: every request must match a
+  // declared route policy (see route-policies.ts) and satisfy it before any
+  // handler runs. Registered after token auth so validated auth contexts are
+  // available for enforcement.
+  app.use('*', routePolicyMiddleware);
 
   if (Env.NODE_ENV !== 'development') {
     app.use(

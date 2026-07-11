@@ -6,3 +6,6 @@ contact_links:
   - name: Questions and discussions
     url: https://github.com/RooCodeInc/Roomote/discussions
     about: Use discussions for open-ended questions, design ideas, and support threads that are not actionable bug reports.
+  - name: Want to contribute?
+    url: https://github.com/RooCodeInc/Roomote/blob/develop/CONTRIBUTING.md
+    about: Roomote does not generally accept unsolicited community pull requests. The most helpful contribution is a well-written issue; see CONTRIBUTING.md before writing code.

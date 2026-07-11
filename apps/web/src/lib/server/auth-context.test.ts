@@ -98,7 +98,7 @@ vi.mock('./bootstrap-runtime-env', () => ({
 
 vi.mock('./env', () => ({
   Env: {
-    ROOMOTE_ALLOWED_EMAILS: '',
+    R_ALLOWED_EMAILS: '',
   },
 }));
 

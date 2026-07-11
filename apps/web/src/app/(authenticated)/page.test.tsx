@@ -5,13 +5,16 @@ const { mockHome } = vi.hoisted(() => ({
     ({
       initialPlaceholderIndex,
       defaultComputeProvider,
+      availableComputeProviders,
     }: {
       initialPlaceholderIndex: number;
       defaultComputeProvider: string;
+      availableComputeProviders: string[];
     }) => (
       <div
         data-home-placeholder-index={initialPlaceholderIndex}
         data-home-compute-provider={defaultComputeProvider}
+        data-home-available-providers={availableComputeProviders.join(',')}
       />
     ),
   ),
@@ -23,6 +26,9 @@ vi.mock('./home/Home', () => ({
 
 vi.mock('@roomote/db/server', () => ({
   resolveDefaultComputeProvider: vi.fn().mockResolvedValue('modal'),
+  listConfiguredComputeProviders: vi
+    .fn()
+    .mockResolvedValue(['modal', 'docker']),
 }));
 
 vi.mock('@/lib/server/bootstrap-runtime-env', () => ({
@@ -47,10 +53,12 @@ describe('Authenticated home page', () => {
       expect.objectContaining({
         initialPlaceholderIndex: 4,
         defaultComputeProvider: 'modal',
+        availableComputeProviders: ['modal', 'docker'],
       }),
       undefined,
     );
     expect(html).toContain('data-home-placeholder-index="4"');
     expect(html).toContain('data-home-compute-provider="modal"');
+    expect(html).toContain('data-home-available-providers="modal,docker"');
   });
 });

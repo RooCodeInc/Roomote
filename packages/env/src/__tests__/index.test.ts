@@ -22,8 +22,8 @@ const LOCAL_ARTIFACT_SIGNING_KEY = 'local-roomote-artifact-signing-key-1';
 
 const productionCoreEnv: NodeJS.ProcessEnv = {
   NODE_ENV: 'production',
-  APP_ENV: 'production',
-  ROOMOTE_APP_URL: 'https://roomote.example.com',
+  R_APP_ENV: 'production',
+  R_APP_URL: 'https://roomote.example.com',
   TRPC_URL: 'https://api.roomote.example.com',
   DATABASE_URL: 'postgres://postgres:password@postgres:5432/roomote',
   REDIS_URL: 'redis://redis:6379',
@@ -42,7 +42,7 @@ const productionCoreEnv: NodeJS.ProcessEnv = {
   ARTIFACT_SIGNING_KEY: '12345678901234567890123456789012',
   PREVIEW_PROXY_BASE_URL: 'https://preview.roomote.example.com',
   PREVIEW_DOMAINS: 'preview.roomote.example.com',
-  NEXT_PUBLIC_GITHUB_APP_SLUG: 'roomote-dev',
+  R_GITHUB_APP_SLUG: 'roomote-dev',
 };
 
 describe('Env', () => {
@@ -102,19 +102,19 @@ describe('Env', () => {
       expect(env.DOCKER_WORKER_LOG_MAX_SIZE).toBe('10m');
       expect(env.DOCKER_WORKER_LOG_MAX_FILES).toBe(3);
       expect(env.DOCKER_WORKER_EGRESS_POLICY).toBe('internet');
-      expect(env.ROOMOTE_MODEL).toBeUndefined();
-      expect(env.ROOMOTE_SMALL_MODEL).toBeUndefined();
-      expect(env.ROOMOTE_VISION_MODEL).toBeUndefined();
-      expect(env.ROOMOTE_CODE_REVIEW_MODEL).toBeUndefined();
-      expect(env.ROOMOTE_EXPLORE_MODEL).toBeUndefined();
-      expect(env.ROOMOTE_PLANNING_MODEL).toBeUndefined();
-      expect(env.ROOMOTE_MODEL_REASONING_EFFORT).toBeUndefined();
-      expect(env.ROOMOTE_SMALL_MODEL_REASONING_EFFORT).toBeUndefined();
-      expect(env.ROOMOTE_VISION_MODEL_REASONING_EFFORT).toBeUndefined();
-      expect(env.ROOMOTE_CODE_REVIEW_MODEL_REASONING_EFFORT).toBeUndefined();
-      expect(env.ROOMOTE_EXPLORE_MODEL_REASONING_EFFORT).toBeUndefined();
-      expect(env.ROOMOTE_PLANNING_MODEL_REASONING_EFFORT).toBeUndefined();
-      expect(env.ROOMOTE_MODEL_ENV_KEYS).toBeUndefined();
+      expect(env.R_MODEL).toBeUndefined();
+      expect(env.R_SMALL_MODEL).toBeUndefined();
+      expect(env.R_VISION_MODEL).toBeUndefined();
+      expect(env.R_CODE_REVIEW_MODEL).toBeUndefined();
+      expect(env.R_EXPLORE_MODEL).toBeUndefined();
+      expect(env.R_PLANNING_MODEL).toBeUndefined();
+      expect(env.R_MODEL_REASONING_EFFORT).toBeUndefined();
+      expect(env.R_SMALL_MODEL_REASONING_EFFORT).toBeUndefined();
+      expect(env.R_VISION_MODEL_REASONING_EFFORT).toBeUndefined();
+      expect(env.R_CODE_REVIEW_MODEL_REASONING_EFFORT).toBeUndefined();
+      expect(env.R_EXPLORE_MODEL_REASONING_EFFORT).toBeUndefined();
+      expect(env.R_PLANNING_MODEL_REASONING_EFFORT).toBeUndefined();
+      expect(env.R_MODEL_ENV_KEYS).toBeUndefined();
       expect(env.S3_ENDPOINT).toBe('http://localhost:19000');
       expect(env.S3_PRESIGN_ENDPOINT).toBe('http://localhost:19000');
       expect(env.S3_REGION).toBe('us-east-1');
@@ -132,11 +132,14 @@ describe('Env', () => {
   });
 
   it('requires an explicit opt-in for unbounded Docker task disks', () => {
+    const runtimeEnv: NodeJS.ProcessEnv = {
+      ...process.env,
+      DOCKER_WORKER_ALLOW_UNBOUNDED_DISK: 'true',
+    };
+    delete runtimeEnv.SKIP_ENV_VALIDATION;
+
     expect(
-      createRoomoteEnv({
-        ...process.env,
-        DOCKER_WORKER_ALLOW_UNBOUNDED_DISK: 'true',
-      }).DOCKER_WORKER_ALLOW_UNBOUNDED_DISK,
+      createRoomoteEnv(runtimeEnv).DOCKER_WORKER_ALLOW_UNBOUNDED_DISK,
     ).toBe(true);
   });
 
@@ -219,47 +222,45 @@ describe('Env', () => {
   it('accepts explicit model config overrides', () => {
     const env = createRoomoteEnv({
       ...process.env,
-      ROOMOTE_MODEL: 'openrouter/openai/gpt-5.4',
-      ROOMOTE_SMALL_MODEL: 'openrouter/openai/gpt-5.4-mini',
-      ROOMOTE_VISION_MODEL: 'openrouter/openai/gpt-5.5',
-      ROOMOTE_CODE_REVIEW_MODEL: 'openrouter/openai/gpt-5.5',
-      ROOMOTE_EXPLORE_MODEL: 'openrouter/openai/gpt-5.4-mini',
-      ROOMOTE_PLANNING_MODEL: 'openrouter/anthropic/claude-opus-4.7',
-      ROOMOTE_MODEL_REASONING_EFFORT: 'medium',
-      ROOMOTE_SMALL_MODEL_REASONING_EFFORT: 'low',
-      ROOMOTE_VISION_MODEL_REASONING_EFFORT: 'low',
-      ROOMOTE_CODE_REVIEW_MODEL_REASONING_EFFORT: 'high',
-      ROOMOTE_EXPLORE_MODEL_REASONING_EFFORT: 'low',
-      ROOMOTE_PLANNING_MODEL_REASONING_EFFORT: 'high',
-      ROOMOTE_MODEL_ENV_KEYS: 'CUSTOM_PROVIDER_API_KEY',
+      R_MODEL: 'openrouter/openai/gpt-5.4',
+      R_SMALL_MODEL: 'openrouter/openai/gpt-5.4-mini',
+      R_VISION_MODEL: 'openrouter/openai/gpt-5.5',
+      R_CODE_REVIEW_MODEL: 'openrouter/openai/gpt-5.5',
+      R_EXPLORE_MODEL: 'openrouter/openai/gpt-5.4-mini',
+      R_PLANNING_MODEL: 'openrouter/anthropic/claude-opus-4.7',
+      R_MODEL_REASONING_EFFORT: 'medium',
+      R_SMALL_MODEL_REASONING_EFFORT: 'low',
+      R_VISION_MODEL_REASONING_EFFORT: 'low',
+      R_CODE_REVIEW_MODEL_REASONING_EFFORT: 'high',
+      R_EXPLORE_MODEL_REASONING_EFFORT: 'low',
+      R_PLANNING_MODEL_REASONING_EFFORT: 'high',
+      R_MODEL_ENV_KEYS: 'CUSTOM_PROVIDER_API_KEY',
     });
 
-    expect(env.ROOMOTE_MODEL).toBe('openrouter/openai/gpt-5.4');
-    expect(env.ROOMOTE_SMALL_MODEL).toBe('openrouter/openai/gpt-5.4-mini');
-    expect(env.ROOMOTE_VISION_MODEL).toBe('openrouter/openai/gpt-5.5');
-    expect(env.ROOMOTE_CODE_REVIEW_MODEL).toBe('openrouter/openai/gpt-5.5');
-    expect(env.ROOMOTE_EXPLORE_MODEL).toBe('openrouter/openai/gpt-5.4-mini');
-    expect(env.ROOMOTE_PLANNING_MODEL).toBe(
-      'openrouter/anthropic/claude-opus-4.7',
-    );
-    expect(env.ROOMOTE_MODEL_REASONING_EFFORT).toBe('medium');
-    expect(env.ROOMOTE_SMALL_MODEL_REASONING_EFFORT).toBe('low');
-    expect(env.ROOMOTE_VISION_MODEL_REASONING_EFFORT).toBe('low');
-    expect(env.ROOMOTE_CODE_REVIEW_MODEL_REASONING_EFFORT).toBe('high');
-    expect(env.ROOMOTE_EXPLORE_MODEL_REASONING_EFFORT).toBe('low');
-    expect(env.ROOMOTE_PLANNING_MODEL_REASONING_EFFORT).toBe('high');
-    expect(env.ROOMOTE_MODEL_ENV_KEYS).toBe('CUSTOM_PROVIDER_API_KEY');
+    expect(env.R_MODEL).toBe('openrouter/openai/gpt-5.4');
+    expect(env.R_SMALL_MODEL).toBe('openrouter/openai/gpt-5.4-mini');
+    expect(env.R_VISION_MODEL).toBe('openrouter/openai/gpt-5.5');
+    expect(env.R_CODE_REVIEW_MODEL).toBe('openrouter/openai/gpt-5.5');
+    expect(env.R_EXPLORE_MODEL).toBe('openrouter/openai/gpt-5.4-mini');
+    expect(env.R_PLANNING_MODEL).toBe('openrouter/anthropic/claude-opus-4.7');
+    expect(env.R_MODEL_REASONING_EFFORT).toBe('medium');
+    expect(env.R_SMALL_MODEL_REASONING_EFFORT).toBe('low');
+    expect(env.R_VISION_MODEL_REASONING_EFFORT).toBe('low');
+    expect(env.R_CODE_REVIEW_MODEL_REASONING_EFFORT).toBe('high');
+    expect(env.R_EXPLORE_MODEL_REASONING_EFFORT).toBe('low');
+    expect(env.R_PLANNING_MODEL_REASONING_EFFORT).toBe('high');
+    expect(env.R_MODEL_ENV_KEYS).toBe('CUSTOM_PROVIDER_API_KEY');
   });
 
   it('supplies self-hosted local defaults outside production', () => {
     const previousSkipEnvValidation = process.env.SKIP_ENV_VALIDATION;
     const runtimeEnv: NodeJS.ProcessEnv = {
       NODE_ENV: 'development',
-      APP_ENV: 'development',
+      R_APP_ENV: 'development',
     };
 
     delete runtimeEnv.SKIP_ENV_VALIDATION;
-    delete runtimeEnv.ROOMOTE_APP_URL;
+    delete runtimeEnv.R_APP_URL;
     delete runtimeEnv.TRPC_URL;
     delete runtimeEnv.DATABASE_URL;
     delete runtimeEnv.REDIS_URL;
@@ -269,7 +270,7 @@ describe('Env', () => {
     try {
       const env = createRoomoteEnv(runtimeEnv);
 
-      expect(env.ROOMOTE_APP_URL).toBe('http://localhost:13000');
+      expect(env.R_APP_URL).toBe('http://localhost:13000');
       expect(env.TRPC_URL).toBe('http://localhost:13001');
       expect(env.DATABASE_URL).toBe(
         'postgres://postgres:password@localhost:15432/roomote_development',
@@ -313,7 +314,7 @@ describe('Env', () => {
       NODE_ENV: 'production',
       APP_ENV: 'production',
       ROOMOTE_SERVICE: 'controller',
-      ROOMOTE_APP_URL: 'https://roomote.example.com',
+      R_APP_URL: 'https://roomote.example.com',
       TRPC_URL: 'https://api.roomote.example.com',
       DATABASE_URL: 'postgres://postgres:password@postgres:5432/roomote',
       REDIS_URL: 'redis://redis:6379',
@@ -335,7 +336,7 @@ describe('Env', () => {
       NODE_ENV: 'production',
       APP_ENV: 'production',
       ROOMOTE_SERVICE: 'preview-proxy',
-      ROOMOTE_APP_URL: 'https://roomote.example.com',
+      R_APP_URL: 'https://roomote.example.com',
       DATABASE_URL: 'postgres://postgres:password@postgres:5432/roomote',
       REDIS_URL: 'redis://redis:6379',
       JOB_AUTH_PUBLIC_KEY: 'job-public-key',
@@ -355,15 +356,16 @@ describe('Env', () => {
       NODE_ENV: 'production',
       APP_ENV: 'production',
       ROOMOTE_SERVICE: 'controller',
-      ROOMOTE_APP_URL: 'https://roomote.example.com',
-      TRPC_URL: 'https://api.roomote.example.com',
+      R_APP_URL: 'https://roomote.example.com',
       DATABASE_URL: 'postgres://postgres:password@postgres:5432/roomote',
       REDIS_URL: 'redis://redis:6379',
       JOB_AUTH_PUBLIC_KEY: 'job-public-key',
       ENCRYPTION_KEY: '12345678901234567890123456789012',
     };
 
-    expect(() => createRoomoteEnv(runtimeEnv)).toThrow(/JOB_AUTH_PRIVATE_KEY/);
+    expect(() => createRoomoteEnv(runtimeEnv)).toThrow(
+      'Invalid environment variables',
+    );
   });
 
   it('does not require preview runtime settings for production startup', () => {
@@ -388,7 +390,7 @@ describe('Env', () => {
     }
   });
 
-  it('requires auth keypairs in production without ROOMOTE_AUTO_GENERATE_KEYS', () => {
+  it('requires auth keypairs in production without R_AUTO_GENERATE_KEYS', () => {
     const previousSkipEnvValidation = process.env.SKIP_ENV_VALIDATION;
     const runtimeEnv = { ...productionCoreEnv };
 
@@ -398,7 +400,7 @@ describe('Env', () => {
 
     try {
       expect(() => createRoomoteEnv(runtimeEnv)).toThrow(
-        /JOB_AUTH_PRIVATE_KEY, JOB_AUTH_PUBLIC_KEY.*ROOMOTE_AUTO_GENERATE_KEYS/s,
+        /JOB_AUTH_PRIVATE_KEY, JOB_AUTH_PUBLIC_KEY.*R_AUTO_GENERATE_KEYS/s,
       );
     } finally {
       if (previousSkipEnvValidation === undefined) {
@@ -413,7 +415,7 @@ describe('Env', () => {
     const previousSkipEnvValidation = process.env.SKIP_ENV_VALIDATION;
     const runtimeEnv: NodeJS.ProcessEnv = {
       NODE_ENV: 'development',
-      APP_ENV: 'development',
+      R_APP_ENV: 'development',
     };
 
     delete runtimeEnv.SKIP_ENV_VALIDATION;
@@ -435,11 +437,11 @@ describe('Env', () => {
     }
   });
 
-  it('allows missing auth keypairs in production when ROOMOTE_AUTO_GENERATE_KEYS is enabled', () => {
+  it('allows missing auth keypairs in production when R_AUTO_GENERATE_KEYS is enabled', () => {
     const previousSkipEnvValidation = process.env.SKIP_ENV_VALIDATION;
     const runtimeEnv: Record<string, string | undefined> = {
       ...productionCoreEnv,
-      ROOMOTE_AUTO_GENERATE_KEYS: 'true',
+      R_AUTO_GENERATE_KEYS: 'true',
     };
 
     delete runtimeEnv.SKIP_ENV_VALIDATION;
@@ -469,22 +471,22 @@ describe('Env', () => {
     const runtimeEnv = { ...productionCoreEnv };
 
     delete runtimeEnv.SKIP_ENV_VALIDATION;
-    delete runtimeEnv.GITHUB_APP_ID;
-    delete runtimeEnv.GITHUB_APP_PRIVATE_KEY;
-    delete runtimeEnv.GITHUB_CLIENT_ID;
-    delete runtimeEnv.GITHUB_CLIENT_SECRET;
-    delete runtimeEnv.GITHUB_WEBHOOK_SECRET;
+    delete runtimeEnv.R_GITHUB_APP_ID;
+    delete runtimeEnv.R_GITHUB_APP_PRIVATE_KEY;
+    delete runtimeEnv.R_GITHUB_CLIENT_ID;
+    delete runtimeEnv.R_GITHUB_CLIENT_SECRET;
+    delete runtimeEnv.R_GITHUB_WEBHOOK_SECRET;
     delete runtimeEnv.SLACK_APP_ID;
-    delete runtimeEnv.SLACK_CLIENT_ID;
-    delete runtimeEnv.SLACK_CLIENT_SECRET;
+    delete runtimeEnv.R_SLACK_CLIENT_ID;
+    delete runtimeEnv.R_SLACK_CLIENT_SECRET;
     delete runtimeEnv.SLACK_REDIRECT_URI;
     delete runtimeEnv.SLACK_AUTH_URI;
-    delete runtimeEnv.SLACK_SIGNING_SECRET;
+    delete runtimeEnv.R_SLACK_SIGNING_SECRET;
 
     try {
       const env = createRoomoteEnv(runtimeEnv);
 
-      expect(env.GITHUB_APP_ID).toBe('');
+      expect(env.R_GITHUB_APP_ID).toBe('');
       expect(env.SLACK_APP_ID).toBe('');
     } finally {
       if (previousSkipEnvValidation === undefined) {
@@ -495,7 +497,7 @@ describe('Env', () => {
     }
   });
 
-  it('derives SLACK_AUTH_URI from ROOMOTE_APP_URL when unset or empty', () => {
+  it('derives SLACK_AUTH_URI from R_APP_URL when unset or empty', () => {
     const previousSkipEnvValidation = process.env.SKIP_ENV_VALIDATION;
 
     const unsetEnv = { ...productionCoreEnv };
@@ -505,14 +507,14 @@ describe('Env', () => {
     const emptyEnv: NodeJS.ProcessEnv = {
       ...unsetEnv,
       SLACK_AUTH_URI: '',
-      ROOMOTE_APP_URL: 'https://roomote.example.com/',
+      R_APP_URL: 'https://roomote.example.com/',
     };
 
     try {
       expect(createRoomoteEnv(unsetEnv).SLACK_AUTH_URI).toBe(
         'https://roomote.example.com/api/slack/auth',
       );
-      // Trailing slashes on ROOMOTE_APP_URL must not produce a double slash.
+      // Trailing slashes on R_APP_URL must not produce a double slash.
       expect(createRoomoteEnv(emptyEnv).SLACK_AUTH_URI).toBe(
         'https://roomote.example.com/api/slack/auth',
       );
@@ -551,24 +553,25 @@ describe('Env', () => {
     const previousSkipEnvValidation = process.env.SKIP_ENV_VALIDATION;
     const runtimeEnv: Record<string, string | undefined> = {
       ...productionCoreEnv,
-      ROOMOTE_PUBLIC_URL: '',
-      TEAMS_BOT_APP_ID: '',
-      TEAMS_BOT_APP_PASSWORD: '',
-      TEAMS_BOT_TENANT_ID: '',
-      TEAMS_BOT_NAME: '',
-      TEAMS_BOT_TOKEN_ENDPOINT: '',
-      TEAMS_BOT_OAUTH_SCOPE: '',
-      TELEGRAM_BOT_TOKEN: '',
-      TELEGRAM_WEBHOOK_SECRET: '',
-      TELEGRAM_BOT_USERNAME: '',
-      ROOMOTE_AUTH_SLACK_CLIENT_ID: '',
-      ROOMOTE_AUTH_SLACK_CLIENT_SECRET: '',
-      ROOMOTE_AUTH_MICROSOFT_CLIENT_ID: '',
-      ROOMOTE_AUTH_MICROSOFT_CLIENT_SECRET: '',
-      ROOMOTE_AUTH_MICROSOFT_TENANT_ID: '',
-      LINEAR_CLIENT_ID: '',
-      LINEAR_CLIENT_SECRET: '',
-      LINEAR_WEBHOOK_SECRET: '',
+      R_PUBLIC_URL: '',
+      R_TEAMS_BOT_APP_ID: '',
+      R_TEAMS_BOT_APP_PASSWORD: '',
+      R_TEAMS_BOT_TENANT_ID: '',
+      R_TEAMS_BOT_NAME: '',
+      R_TEAMS_BOT_TOKEN_ENDPOINT: '',
+      R_TEAMS_BOT_OAUTH_SCOPE: '',
+      R_TELEGRAM_BOT_TOKEN: '',
+      R_TELEGRAM_WEBHOOK_SECRET: '',
+      R_TELEGRAM_BOT_USERNAME: '',
+      R_SLACK_CLIENT_ID: '',
+      R_SLACK_CLIENT_SECRET: '',
+      R_SLACK_SIGNING_SECRET: '',
+      R_MICROSOFT_CLIENT_ID: '',
+      R_MICROSOFT_CLIENT_SECRET: '',
+      R_MICROSOFT_TENANT_ID: '',
+      R_LINEAR_CLIENT_ID: '',
+      R_LINEAR_CLIENT_SECRET: '',
+      R_LINEAR_WEBHOOK_SECRET: '',
       S3_PRESIGN_ENDPOINT: '',
     };
 
@@ -577,16 +580,17 @@ describe('Env', () => {
     try {
       const env = createRoomoteEnv(runtimeEnv);
 
-      expect(env.ROOMOTE_PUBLIC_URL).toBeUndefined();
-      expect(env.TEAMS_BOT_APP_ID).toBeUndefined();
-      expect(env.TEAMS_BOT_NAME).toBeUndefined();
-      expect(env.TELEGRAM_BOT_TOKEN).toBeUndefined();
-      expect(env.TELEGRAM_WEBHOOK_SECRET).toBeUndefined();
-      expect(env.TELEGRAM_BOT_USERNAME).toBeUndefined();
-      expect(env.ROOMOTE_AUTH_SLACK_CLIENT_ID).toBeUndefined();
-      expect(env.ROOMOTE_AUTH_MICROSOFT_CLIENT_ID).toBeUndefined();
-      expect(env.ROOMOTE_AUTH_MICROSOFT_TENANT_ID).toBeUndefined();
-      expect(env.LINEAR_CLIENT_ID).toBeUndefined();
+      expect(env.R_PUBLIC_URL).toBeUndefined();
+      expect(env.R_TEAMS_BOT_APP_ID).toBeUndefined();
+      expect(env.R_TEAMS_BOT_NAME).toBeUndefined();
+      expect(env.R_TELEGRAM_BOT_TOKEN).toBeUndefined();
+      expect(env.R_TELEGRAM_WEBHOOK_SECRET).toBeUndefined();
+      expect(env.R_TELEGRAM_BOT_USERNAME).toBeUndefined();
+      expect(env.R_SLACK_CLIENT_ID).toBeUndefined();
+      expect(env.R_SLACK_SIGNING_SECRET).toBeUndefined();
+      expect(env.R_MICROSOFT_CLIENT_ID).toBeUndefined();
+      expect(env.R_MICROSOFT_TENANT_ID).toBeUndefined();
+      expect(env.R_LINEAR_CLIENT_ID).toBeUndefined();
       expect(env.S3_PRESIGN_ENDPOINT).toBeUndefined();
     } finally {
       if (previousSkipEnvValidation === undefined) {
@@ -601,15 +605,15 @@ describe('Env', () => {
     const previousSkipEnvValidation = process.env.SKIP_ENV_VALIDATION;
     const runtimeEnv: Record<string, string | undefined> = {
       ...productionCoreEnv,
-      ROOMOTE_AUTH_MICROSOFT_CLIENT_ID: 'microsoft-client-id',
-      ROOMOTE_AUTH_MICROSOFT_CLIENT_SECRET: 'microsoft-client-secret',
+      R_MICROSOFT_CLIENT_ID: 'microsoft-client-id',
+      R_MICROSOFT_CLIENT_SECRET: 'microsoft-client-secret',
     };
 
     delete runtimeEnv.SKIP_ENV_VALIDATION;
 
     try {
       expect(() => createRoomoteEnv(runtimeEnv)).toThrow(
-        /ROOMOTE_AUTH_MICROSOFT_TENANT_ID/,
+        /R_MICROSOFT_TENANT_ID/,
       );
     } finally {
       if (previousSkipEnvValidation === undefined) {
@@ -646,16 +650,16 @@ describe('Env', () => {
 });
 
 describe('resolveAppEnv', () => {
-  it('prefers explicit APP_ENV values', () => {
-    expect(resolveAppEnv({ APP_ENV: 'preview' } as NodeJS.ProcessEnv)).toBe(
+  it('prefers explicit R_APP_ENV values', () => {
+    expect(resolveAppEnv({ R_APP_ENV: 'preview' } as NodeJS.ProcessEnv)).toBe(
       'preview',
     );
   });
 
-  it('maps ROOMOTE_APP_ENV values when APP_ENV is unset', () => {
-    expect(
-      resolveAppEnv({ ROOMOTE_APP_ENV: 'preview' } as NodeJS.ProcessEnv),
-    ).toBe('preview');
+  it('ignores legacy APP_ENV values', () => {
+    expect(resolveAppEnv({ APP_ENV: 'preview' } as NodeJS.ProcessEnv)).toBe(
+      'development',
+    );
   });
 
   it('falls back to the provided default', () => {
@@ -692,10 +696,10 @@ describe('getDefaultRoomoteAppUrl', () => {
 
   it('requires explicit web configuration outside development', () => {
     expect(() => getDefaultRoomoteAppUrl('preview')).toThrow(
-      'ROOMOTE_APP_URL must be configured explicitly for preview',
+      'R_APP_URL must be configured explicitly for preview',
     );
     expect(() => getDefaultRoomoteAppUrl('production')).toThrow(
-      'ROOMOTE_APP_URL must be configured explicitly for production',
+      'R_APP_URL must be configured explicitly for production',
     );
   });
 });
@@ -790,7 +794,7 @@ describe('shouldAutoGenerateAuthKeypairs', () => {
   it('is true for development without the explicit flag', () => {
     expect(
       shouldAutoGenerateAuthKeypairs({
-        APP_ENV: 'development',
+        R_APP_ENV: 'development',
       } as NodeJS.ProcessEnv),
     ).toBe(true);
   });
@@ -798,16 +802,16 @@ describe('shouldAutoGenerateAuthKeypairs', () => {
   it('is false for production without the explicit flag', () => {
     expect(
       shouldAutoGenerateAuthKeypairs({
-        APP_ENV: 'production',
+        R_APP_ENV: 'production',
       } as NodeJS.ProcessEnv),
     ).toBe(false);
   });
 
-  it('is true for production when ROOMOTE_AUTO_GENERATE_KEYS is set', () => {
+  it('is true for production when R_AUTO_GENERATE_KEYS is set', () => {
     expect(
       shouldAutoGenerateAuthKeypairs({
-        APP_ENV: 'production',
-        ROOMOTE_AUTO_GENERATE_KEYS: 'true',
+        R_APP_ENV: 'production',
+        R_AUTO_GENERATE_KEYS: 'true',
       } as NodeJS.ProcessEnv),
     ).toBe(true);
   });
@@ -815,7 +819,7 @@ describe('shouldAutoGenerateAuthKeypairs', () => {
   it('is false in development under NODE_ENV=test without the flag', () => {
     expect(
       shouldAutoGenerateAuthKeypairs({
-        APP_ENV: 'development',
+        R_APP_ENV: 'development',
         NODE_ENV: 'test',
       } as NodeJS.ProcessEnv),
     ).toBe(false);
@@ -824,9 +828,9 @@ describe('shouldAutoGenerateAuthKeypairs', () => {
   it('still honors the explicit flag under NODE_ENV=test', () => {
     expect(
       shouldAutoGenerateAuthKeypairs({
-        APP_ENV: 'development',
+        R_APP_ENV: 'development',
         NODE_ENV: 'test',
-        ROOMOTE_AUTO_GENERATE_KEYS: 'true',
+        R_AUTO_GENERATE_KEYS: 'true',
       } as NodeJS.ProcessEnv),
     ).toBe(true);
   });

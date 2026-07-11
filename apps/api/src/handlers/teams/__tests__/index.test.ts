@@ -25,6 +25,7 @@ const {
   queueCommunicationMessageMock,
   redisSetMock,
   routeTaskMock,
+  setTrustedRunActingUserMock,
   shouldRouteUnmentionedReplyMock,
   teamsInstallationsTable,
   teamsUserMappingsTable,
@@ -39,21 +40,15 @@ const {
   buildTeamsRoutingContextMock: vi.fn(),
   enqueueTaskMock: vi.fn(),
   envMock: {
-    TEAMS_BOT_APP_ID: 'bot-app-id' as string | undefined,
-    TEAMS_BOT_APP_PASSWORD: 'bot-secret' as string | undefined,
-    TEAMS_BOT_TENANT_ID: undefined as string | undefined,
-    TEAMS_BOT_TOKEN_ENDPOINT: undefined as string | undefined,
-    TEAMS_BOT_OAUTH_SCOPE: undefined as string | undefined,
-    ROOMOTE_APP_URL: 'https://app.example.com',
-    ROOMOTE_AUTH_MICROSOFT_CLIENT_ID: 'microsoft-client-id' as
-      | string
-      | undefined,
-    ROOMOTE_AUTH_MICROSOFT_CLIENT_SECRET: 'microsoft-client-secret' as
-      | string
-      | undefined,
-    ROOMOTE_AUTH_MICROSOFT_TENANT_ID: 'microsoft-tenant-id' as
-      | string
-      | undefined,
+    R_TEAMS_BOT_APP_ID: 'bot-app-id' as string | undefined,
+    R_TEAMS_BOT_APP_PASSWORD: 'bot-secret' as string | undefined,
+    R_TEAMS_BOT_TENANT_ID: undefined as string | undefined,
+    R_TEAMS_BOT_TOKEN_ENDPOINT: undefined as string | undefined,
+    R_TEAMS_BOT_OAUTH_SCOPE: undefined as string | undefined,
+    R_APP_URL: 'https://app.example.com',
+    R_MICROSOFT_CLIENT_ID: 'microsoft-client-id' as string | undefined,
+    R_MICROSOFT_CLIENT_SECRET: 'microsoft-client-secret' as string | undefined,
+    R_MICROSOFT_TENANT_ID: 'microsoft-tenant-id' as string | undefined,
     TRPC_URL: 'https://api.example.com',
   },
   fetchMessageImageDataUrlsMock: vi.fn(),
@@ -76,6 +71,7 @@ const {
   queueCommunicationMessageMock: vi.fn(),
   redisSetMock: vi.fn(),
   routeTaskMock: vi.fn(),
+  setTrustedRunActingUserMock: vi.fn(),
   shouldRouteUnmentionedReplyMock: vi.fn(),
   teamsInstallationsTable: {
     installationKey: 'installationKey',
@@ -106,14 +102,15 @@ vi.mock('@roomote/redis', () => ({
 
 vi.mock('@roomote/db/server', () => ({
   and: vi.fn((...conditions: unknown[]) => ({ and: conditions })),
+  setTrustedRunActingUser: setTrustedRunActingUserMock,
   resolveTeamsBotRuntimeCredentials: vi.fn(async () => ({
-    botAppId: envMock.TEAMS_BOT_APP_ID?.trim() || null,
-    botAppPassword: envMock.TEAMS_BOT_APP_PASSWORD?.trim() || null,
-    botTenantId: envMock.TEAMS_BOT_TENANT_ID?.trim() || null,
-    botTokenEndpoint: envMock.TEAMS_BOT_TOKEN_ENDPOINT?.trim() || null,
-    botOauthScope: envMock.TEAMS_BOT_OAUTH_SCOPE?.trim() || null,
+    botAppId: envMock.R_TEAMS_BOT_APP_ID?.trim() || null,
+    botAppPassword: envMock.R_TEAMS_BOT_APP_PASSWORD?.trim() || null,
+    botTenantId: envMock.R_TEAMS_BOT_TENANT_ID?.trim() || null,
+    botTokenEndpoint: envMock.R_TEAMS_BOT_TOKEN_ENDPOINT?.trim() || null,
+    botOauthScope: envMock.R_TEAMS_BOT_OAUTH_SCOPE?.trim() || null,
     source:
-      envMock.TEAMS_BOT_APP_ID && envMock.TEAMS_BOT_APP_PASSWORD
+      envMock.R_TEAMS_BOT_APP_ID && envMock.R_TEAMS_BOT_APP_PASSWORD
         ? 'teams_bot'
         : null,
   })),
@@ -315,10 +312,10 @@ function createJwtPayload(payload: Record<string, unknown>) {
 describe('Teams webhook handler', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    envMock.TEAMS_BOT_APP_ID = 'bot-app-id';
-    envMock.ROOMOTE_AUTH_MICROSOFT_CLIENT_ID = 'microsoft-client-id';
-    envMock.ROOMOTE_AUTH_MICROSOFT_CLIENT_SECRET = 'microsoft-client-secret';
-    envMock.ROOMOTE_AUTH_MICROSOFT_TENANT_ID = 'microsoft-tenant-id';
+    envMock.R_TEAMS_BOT_APP_ID = 'bot-app-id';
+    envMock.R_MICROSOFT_CLIENT_ID = 'microsoft-client-id';
+    envMock.R_MICROSOFT_CLIENT_SECRET = 'microsoft-client-secret';
+    envMock.R_MICROSOFT_TENANT_ID = 'microsoft-tenant-id';
     findFirstMock.mockResolvedValue({
       id: 77,
       status: 'running',
@@ -445,6 +442,10 @@ describe('Teams webhook handler', () => {
       ts: 'activity-2',
       channel: '19:conversation@thread.v2',
       threadTs: 'activity-root',
+    });
+    expect(setTrustedRunActingUserMock).toHaveBeenCalledWith({
+      runId: 77,
+      userId: 'mapped-user-1',
     });
   });
 
@@ -716,6 +717,10 @@ describe('Teams webhook handler', () => {
       ts: 'activity-2',
       channel: '19:conversation@thread.v2',
       threadTs: 'activity-root',
+    });
+    expect(setTrustedRunActingUserMock).toHaveBeenCalledWith({
+      runId: 77,
+      userId: 'microsoft-user-1',
     });
   });
 

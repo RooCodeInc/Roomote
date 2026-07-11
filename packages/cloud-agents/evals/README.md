@@ -21,8 +21,8 @@ The authorship evaluations ensure the authorship-rules compiler correctly:
 ## Prerequisites
 
 Ensure your promptfoo provider credentials are available in the environment
-loaded by dotenvx. Runtime routing uses `ROOMOTE_SMALL_MODEL`, falling back
-to `ROOMOTE_MODEL`; these evals are standalone promptfoo suites.
+loaded by dotenvx. Runtime routing uses `R_SMALL_MODEL`, falling back
+to `R_MODEL`; these evals are standalone promptfoo suites.
 
 Provider ids default to `openrouter:anthropic/claude-haiku-4.5`. Override them
 with `ROUTER_EVAL_PROVIDER`, `ROUTER_FOLLOWUP_EVAL_PROVIDER`, or

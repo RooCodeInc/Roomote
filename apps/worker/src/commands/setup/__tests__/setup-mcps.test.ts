@@ -185,7 +185,7 @@ describe('resolveBuiltInMcpServers', () => {
       mcpServers: resolveBuiltInMcpServers(
         {
           ROOMOTE_CLOUD_TOKEN: 'test-cloud-token',
-          ROOMOTE_APP_URL: 'https://api.test.com',
+          R_APP_URL: 'https://api.test.com',
         },
         {
           userMcpServers: {
@@ -215,14 +215,14 @@ describe('resolveBuiltInMcpServers', () => {
     expect(linearConfig.headers.Authorization).toBe('Bearer test-cloud-token');
   });
 
-  it('falls back to ROOMOTE_APP_URL for proxied Linear MCP when TRPC_URL is not set', () => {
+  it('falls back to R_APP_URL for proxied Linear MCP when TRPC_URL is not set', () => {
     delete process.env.TRPC_URL;
 
     const parsed = {
       mcpServers: resolveBuiltInMcpServers(
         {
           ROOMOTE_CLOUD_TOKEN: 'test-cloud-token',
-          ROOMOTE_APP_URL: 'https://api.test.com/',
+          R_APP_URL: 'https://api.test.com/',
         },
         {
           userMcpServers: {
@@ -246,7 +246,7 @@ describe('resolveBuiltInMcpServers', () => {
       mcpServers: resolveBuiltInMcpServers(
         {
           ROOMOTE_CLOUD_TOKEN: 'test-cloud-token',
-          ROOMOTE_APP_URL: 'https://api.test.com',
+          R_APP_URL: 'https://api.test.com',
         },
         { userMcpServers: {} },
       ),
@@ -267,7 +267,7 @@ describe('resolveBuiltInMcpServers', () => {
     const parsed = {
       mcpServers: resolveBuiltInMcpServers(
         {
-          ROOMOTE_APP_URL: 'https://api.test.com',
+          R_APP_URL: 'https://api.test.com',
         },
         {
           userMcpServers: {
@@ -292,7 +292,7 @@ describe('resolveBuiltInMcpServers', () => {
       mcpServers: resolveBuiltInMcpServers(
         {
           ROOMOTE_CLOUD_TOKEN: 'roomote-run-token',
-          ROOMOTE_APP_URL: 'https://api.test.com/',
+          R_APP_URL: 'https://api.test.com/',
         },
         {
           userMcpServers: {
@@ -331,7 +331,7 @@ describe('resolveBuiltInMcpServers', () => {
       mcpServers: resolveBuiltInMcpServers(
         {
           ROOMOTE_CLOUD_TOKEN: 'roomote-run-token',
-          ROOMOTE_APP_URL: 'https://api.test.com/',
+          R_APP_URL: 'https://api.test.com/',
           ROOMOTE_AUTH_BYPASS_HEADER_NAME: 'x-roomote-bypass',
           ROOMOTE_AUTH_BYPASS_VALUE: 'bypass-token',
         },
@@ -363,7 +363,7 @@ describe('resolveBuiltInMcpServers', () => {
       mcpServers: resolveBuiltInMcpServers(
         {
           ROOMOTE_CLOUD_TOKEN: 'roomote-run-token',
-          ROOMOTE_APP_URL: 'https://api.test.com/',
+          R_APP_URL: 'https://api.test.com/',
         },
         {
           userMcpServers: {
@@ -407,7 +407,7 @@ describe('resolveBuiltInMcpServers', () => {
       mcpServers: resolveBuiltInMcpServers(
         {
           ROOMOTE_CLOUD_TOKEN: 'roomote-run-token',
-          ROOMOTE_APP_URL: 'https://api.test.com/',
+          R_APP_URL: 'https://api.test.com/',
         },
         {
           userMcpServers: {
@@ -444,7 +444,7 @@ describe('resolveBuiltInMcpServers', () => {
       mcpServers: resolveBuiltInMcpServers(
         {
           ROOMOTE_CLOUD_TOKEN: 'roomote-run-token',
-          ROOMOTE_APP_URL: 'https://api.test.com/',
+          R_APP_URL: 'https://api.test.com/',
           ROOMOTE_AUTH_BYPASS_HEADER_NAME: 'x-roomote-bypass',
           ROOMOTE_AUTH_BYPASS_VALUE: 'bypass-token',
         },
@@ -478,7 +478,7 @@ describe('resolveBuiltInMcpServers', () => {
       mcpServers: resolveBuiltInMcpServers(
         {
           ROOMOTE_CLOUD_TOKEN: 'roomote-run-token',
-          ROOMOTE_APP_URL: 'https://api.test.com/',
+          R_APP_URL: 'https://api.test.com/',
         },
         {
           userMcpServers: {
@@ -524,7 +524,7 @@ describe('resolveBuiltInMcpServers', () => {
       mcpServers: resolveBuiltInMcpServers(
         {
           ROOMOTE_CLOUD_TOKEN: 'roomote-run-token',
-          ROOMOTE_APP_URL: 'https://api.test.com/',
+          R_APP_URL: 'https://api.test.com/',
         },
         {
           userMcpServers: {
@@ -563,7 +563,7 @@ describe('resolveBuiltInMcpServers', () => {
       mcpServers: resolveBuiltInMcpServers(
         {
           ROOMOTE_CLOUD_TOKEN: 'roomote-run-token',
-          ROOMOTE_APP_URL: 'https://api.test.com/',
+          R_APP_URL: 'https://api.test.com/',
         },
         {
           userMcpServers: {
@@ -604,7 +604,7 @@ describe('resolveBuiltInMcpServers', () => {
       mcpServers: resolveBuiltInMcpServers(
         {
           ROOMOTE_CLOUD_TOKEN: 'roomote-run-token',
-          ROOMOTE_APP_URL: 'https://api.test.com',
+          R_APP_URL: 'https://api.test.com',
         },
         {
           userMcpServers: {
@@ -632,7 +632,7 @@ describe('resolveBuiltInMcpServers', () => {
       mcpServers: resolveBuiltInMcpServers(
         {
           ROOMOTE_CLOUD_TOKEN: 'roomote-run-token',
-          ROOMOTE_APP_URL: 'https://api.test.com',
+          R_APP_URL: 'https://api.test.com',
         },
         {
           userMcpServers: {
@@ -660,7 +660,7 @@ describe('resolveBuiltInMcpServers', () => {
       mcpServers: resolveBuiltInMcpServers(
         {
           ROOMOTE_CLOUD_TOKEN: 'roomote-run-token',
-          ROOMOTE_APP_URL: 'https://api.test.com',
+          R_APP_URL: 'https://api.test.com',
         },
         {
           userMcpServers: {
@@ -688,7 +688,7 @@ describe('resolveBuiltInMcpServers', () => {
       mcpServers: resolveBuiltInMcpServers(
         {
           ROOMOTE_CLOUD_TOKEN: 'roomote-run-token',
-          ROOMOTE_APP_URL: 'https://api.test.com',
+          R_APP_URL: 'https://api.test.com',
         },
         {
           userMcpServers: {
@@ -716,7 +716,7 @@ describe('resolveBuiltInMcpServers', () => {
       mcpServers: resolveBuiltInMcpServers(
         {
           ROOMOTE_CLOUD_TOKEN: 'roomote-run-token',
-          ROOMOTE_APP_URL: 'https://api.test.com',
+          R_APP_URL: 'https://api.test.com',
         },
         {
           userMcpServers: {
@@ -740,7 +740,7 @@ describe('resolveBuiltInMcpServers', () => {
   it('injects task env vars into the roomote MCP', () => {
     const taskEnv = {
       ROOMOTE_CLOUD_TOKEN: 'test-cloud-token',
-      ROOMOTE_APP_URL: 'https://api.test.com',
+      R_APP_URL: 'https://api.test.com',
       ROOMOTE_WORKSPACE_PATH: '/workspace',
       ROOMOTE_TASK_ID: 'task-123',
       ROOMOTE_AUTH_BYPASS_HEADER_NAME: 'x-bypass-roomote-auth',
@@ -763,7 +763,7 @@ describe('resolveBuiltInMcpServers', () => {
       }
     ).env;
     expect(roomoteEnv.ROOMOTE_CLOUD_TOKEN).toBe('test-cloud-token');
-    expect(roomoteEnv.ROOMOTE_APP_URL).toBe('https://api.test.com');
+    expect(roomoteEnv.R_APP_URL).toBe('https://api.test.com');
     expect(roomoteEnv.ROOMOTE_WORKSPACE_PATH).toBe('/workspace');
     expect(roomoteEnv.ROOMOTE_TASK_ID).toBe('task-123');
     expect(roomoteEnv.ROOMOTE_AUTH_BYPASS_HEADER_NAME).toBe(

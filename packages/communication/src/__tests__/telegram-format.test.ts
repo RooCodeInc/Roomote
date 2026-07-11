@@ -54,8 +54,8 @@ describe('markdownToTelegramHtml', () => {
 
   it('does not italicize snake_case identifiers', () => {
     expect(
-      markdownToTelegramHtml('set TELEGRAM_BOT_TOKEN and my_var_name'),
-    ).toBe('set TELEGRAM_BOT_TOKEN and my_var_name');
+      markdownToTelegramHtml('set R_TELEGRAM_BOT_TOKEN and my_var_name'),
+    ).toBe('set R_TELEGRAM_BOT_TOKEN and my_var_name');
   });
 
   it('italicizes whole lines wrapped in underscores (footer style)', () => {

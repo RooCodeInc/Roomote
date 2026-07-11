@@ -56,7 +56,7 @@ describe('api live server integration', () => {
     expect(response.status).toBe(401);
     expect(response.headers.get('content-type')).toContain('application/json');
     await expect(response.json()).resolves.toEqual({
-      error: 'Unauthorized request',
+      error: 'authentication_required',
     });
   });
 

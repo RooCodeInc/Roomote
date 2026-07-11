@@ -76,7 +76,7 @@ describe('environment-variables commands', () => {
     it('rejects reserved comms provider variable names', async () => {
       await expect(
         createEnvVarCommand(buildMockAuth(), {
-          name: 'SLACK_CLIENT_SECRET',
+          name: 'R_SLACK_CLIENT_SECRET',
           value: 'secret',
         }),
       ).rejects.toThrow(
@@ -87,7 +87,7 @@ describe('environment-variables commands', () => {
     it('rejects alternate accepted comms variable names', async () => {
       await expect(
         createEnvVarCommand(buildMockAuth(), {
-          name: 'ROOMOTE_AUTH_SLACK_CLIENT_ID',
+          name: 'R_SLACK_CLIENT_ID',
           value: 'client-id',
         }),
       ).rejects.toThrow(

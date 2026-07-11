@@ -17,6 +17,6 @@ export function resolveApiBaseUrl(explicit?: string): string | null {
   return (
     normalizeApiBaseUrl(explicit) ??
     normalizeApiBaseUrl(Env.TRPC_URL) ??
-    normalizeApiBaseUrl(Env.ROOMOTE_APP_URL)
+    normalizeApiBaseUrl(Env.R_APP_URL)
   );
 }

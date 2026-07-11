@@ -130,7 +130,7 @@ export async function GET(
 ) {
   const { connectionId } = await params;
   const webEnv = await bootstrapWebRuntimeEnv();
-  const webUrl = webEnv.ROOMOTE_APP_URL;
+  const webUrl = webEnv.R_APP_URL;
   const requestUrl = new URL(request.url);
   const redirectPath =
     sanitizeRedirectPath(requestUrl.searchParams.get('redirectTo')) ??
@@ -188,7 +188,7 @@ export async function GET(
       discoverOAuthEndpoints(integration.url),
       discoverOAuthProtectedResourceMetadata(integration.url),
     ]);
-    const redirectUri = `${webEnv.ROOMOTE_APP_URL}/api/mcp-oauth/callback`;
+    const redirectUri = `${webEnv.R_APP_URL}/api/mcp-oauth/callback`;
     const requestedScope = getRequestedScope(
       protectedResourceMetadata?.scopes_supported ??
         serverMetadata.scopes_supported,

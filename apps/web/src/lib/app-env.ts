@@ -23,7 +23,7 @@ export function resolveAppEnv(
   env: NodeJS.ProcessEnv = process.env,
   fallback: AppEnv = 'development',
 ): AppEnv {
-  const candidates = [env.APP_ENV, env.ROOMOTE_APP_ENV];
+  const candidates = [env.R_APP_ENV];
 
   for (const candidate of candidates) {
     const normalized = normalizeAppEnvCandidate(candidate);

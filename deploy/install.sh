@@ -469,7 +469,7 @@ else
   # hex keeps the password safe to interpolate into the DATABASE_URL.
   postgres_password="$(openssl rand -hex 24)"
 
-  set_env_value APP_ENV production
+  set_env_value R_APP_ENV production
   set_env_value POSTGRES_PASSWORD "$postgres_password"
   set_env_value DATABASE_URL "postgres://postgres:$postgres_password@postgres:5432/roomote"
   set_env_value REDIS_URL 'redis://redis:6379'

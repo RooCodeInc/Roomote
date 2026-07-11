@@ -3,7 +3,7 @@ import { Env } from '@roomote/env';
 /** Configured browser origins allowed to call the API with credentials. */
 function buildAllowedApiOrigins(): Set<string> {
   const origins = new Set<string>();
-  for (const url of [Env.ROOMOTE_APP_URL, Env.ROOMOTE_PUBLIC_URL]) {
+  for (const url of [Env.R_APP_URL, Env.R_PUBLIC_URL]) {
     if (!url) {
       continue;
     }

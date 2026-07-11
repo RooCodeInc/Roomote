@@ -203,9 +203,43 @@ jobs:
       # Boots the previous published release from GHCR, applies this branch's
       # migrations to it, and requires the previous release to stay healthy on
       # the candidate schema (the expand/contract policy in deploy/README.md).
+      #
+      # develop-based runs validate against the continuously published
+      # `develop` channel. main-based runs (promote PRs) validate against the
+      # previous published *release* rather than the raw `main` channel alias:
+      # before the first release ships there is no usable baseline at all, and
+      # the gate skips instead of booting a known-incompatible image.
+      - name: Resolve upgrade baseline
+        id: baseline
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          BASE_CHANNEL: ${{ github.base_ref || github.ref_name }}
+        run: |
+          set -euo pipefail
+          baseline="$BASE_CHANNEL"
+          if [ "$baseline" = 'main' ]; then
+            # gh prints the 404 error body to stdout; only trust the output
+            # when the call succeeds.
+            if ! baseline="$(gh api "repos/$GITHUB_REPOSITORY/releases/latest" --jq .tag_name 2>/dev/null)"; then
+              baseline=''
+            fi
+            # v0.0.1 predates the release pipeline and has no images.
+            if [ "$baseline" = 'v0.0.1' ]; then
+              baseline=''
+            fi
+            case "$baseline" in
+              '' | v[0-9]*) ;;
+              *)
+                echo "Ignoring unexpected baseline '$baseline'; skipping upgrade validation." >&2
+                baseline=''
+                ;;
+            esac
+          fi
+          echo "channel=$baseline" >> "$GITHUB_OUTPUT"
       - name: Apply candidate migrations to the previous release
         env:
-          BASELINE_CHANNEL: ${{ github.base_ref || github.ref_name }}
+          BASELINE_CHANNEL: ${{ steps.baseline.outputs.channel }}
         run: bash deploy/ci/upgrade-compatibility.sh
 
   docker-build:
@@ -255,7 +289,7 @@ jobs:
           target: ${{ matrix.target }}
           platforms: linux/${{ matrix.arch }}
           push: false
-          build-args: APP_ENV=development
+          build-args: R_APP_ENV=development
 
   deployment-config:
     name: Deployment artifacts

@@ -1,4 +1,8 @@
-import { type NamedPort, SANDBOX_FILES_DIR } from '@roomote/types';
+import {
+  type ComputeProviderLaunchMode,
+  type NamedPort,
+  SANDBOX_FILES_DIR,
+} from '@roomote/types';
 
 import { createComputeProviderClient } from '../factory';
 import { generateProxyPorts, getExposedPorts } from '../environment-machine';
@@ -29,7 +33,12 @@ const WORKER_TARBALL_PATH = `${DAYTONA_FILES_DIR}/worker.tar.gz`;
 
 type DaytonaLifecycleClient = Pick<
   ComputeProviderClient,
-  'vendor' | 'createInstance' | 'writeFiles' | 'runCommand' | 'destroyInstance'
+  | 'vendor'
+  | 'createInstance'
+  | 'resumeFromSnapshot'
+  | 'writeFiles'
+  | 'runCommand'
+  | 'destroyInstance'
 >;
 
 export interface CreateDaytonaMachineOptions {
@@ -59,18 +68,23 @@ export interface CreateDaytonaMachineOptions {
   onMutation?: ComputeProviderMutationObserver;
 }
 
+export type DaytonaLaunchOptions =
+  | { launchMode: 'fresh'; sourceSnapshotId?: undefined }
+  | { launchMode: 'environment_snapshot'; sourceSnapshotId: string }
+  | { launchMode: 'task_snapshot'; sourceSnapshotId: string };
+
+export type CreateDaytonaMachineParams = CreateDaytonaMachineOptions &
+  DaytonaLaunchOptions;
+
 export interface DaytonaMachine {
   machineId: string;
   proxyPorts?: Record<string, number>;
+  sourceSnapshotId?: string;
   domain: (port: number) => string;
 }
 
-/**
- * Daytona machines only support fresh launches today: no environment or task
- * snapshots. Callers gate snapshot job types before reaching this helper.
- */
 export async function createDaytonaMachine(
-  options: CreateDaytonaMachineOptions,
+  options: CreateDaytonaMachineParams,
 ): Promise<DaytonaMachine> {
   const {
     daytonaApiKey,
@@ -82,6 +96,8 @@ export async function createDaytonaMachine(
     timeoutMs,
     proxyPorts: proxyPortsOverride,
     localTarballPath,
+    launchMode,
+    sourceSnapshotId,
     createInstanceTimeoutMs,
     bootstrapTimeoutMs,
     tags,
@@ -98,12 +114,13 @@ export async function createDaytonaMachine(
 
   let tarball: Buffer | undefined;
   let version: string | undefined;
+  const shouldInstallShippedRuntime = launchMode !== 'task_snapshot';
 
-  if (localTarballPath) {
+  if (shouldInstallShippedRuntime && localTarballPath) {
     const localRelease = loadLocalWorkerReleaseWithVersion(localTarballPath);
     tarball = localRelease.archive;
     version = localRelease.version;
-  } else {
+  } else if (shouldInstallShippedRuntime) {
     const release = await getWorkerRelease();
     tarball = release.archive;
     version = release.version;
@@ -119,14 +136,16 @@ export async function createDaytonaMachine(
       : ports;
 
   const mutationContext = {
-    launchMode: 'fresh' as const,
-    sourceSnapshotId: null,
+    launchMode: launchMode as ComputeProviderLaunchMode,
+    sourceSnapshotId: sourceSnapshotId ?? null,
     ports: effectivePorts ?? [],
   };
 
   console.log(
     `[createDaytonaMachine] Starting ${JSON.stringify({
       hasLocalTarball: !!localTarballPath,
+      hasSourceSnapshot: !!sourceSnapshotId,
+      launchMode,
       workerReleaseTag,
       effectivePorts,
       proxyPorts,
@@ -162,37 +181,59 @@ export async function createDaytonaMachine(
     throwIfAborted(createInstanceSignal);
 
     console.log(
-      `[createDaytonaMachine] Attempt ${attempt}/${MAX_RETRIES}: createInstance`,
+      `[createDaytonaMachine] Attempt ${attempt}/${MAX_RETRIES}: ${sourceSnapshotId ? 'resumeFromSnapshot' : 'createInstance'}`,
     );
 
     try {
+      const operation = sourceSnapshotId
+        ? 'resume_from_snapshot'
+        : 'create_instance';
+
       await onMutation?.({
         provider: 'daytona',
-        operation: 'create_instance',
+        operation,
         eventType: 'started',
-        message: 'Calling createInstance for Daytona instance.',
+        message:
+          operation === 'resume_from_snapshot'
+            ? `Calling resumeFromSnapshot for Daytona instance from snapshot ${sourceSnapshotId}.`
+            : 'Calling createInstance for Daytona instance.',
         details: buildComputeProviderMutationDetails(
           { ...mutationContext, attempt },
           {},
         ),
       });
 
-      const instance = await computeClient.createInstance({
-        ports: effectivePorts,
-        tags,
-        metadata: {
-          ...(workerReleaseTag ? { workerReleaseTag } : {}),
-          ...(timeoutMs ? { timeoutMs: String(timeoutMs) } : {}),
-        },
-        signal: createInstanceSignal,
-      });
+      const instance = sourceSnapshotId
+        ? await computeClient.resumeFromSnapshot({
+            sourceSnapshotId,
+            ports: effectivePorts,
+            tags,
+            metadata: {
+              ...(workerReleaseTag ? { workerReleaseTag } : {}),
+              ...(timeoutMs ? { timeoutMs: String(timeoutMs) } : {}),
+            },
+            signal: createInstanceSignal,
+          })
+        : await computeClient.createInstance({
+            ports: effectivePorts,
+            tags,
+            metadata: {
+              ...(workerReleaseTag ? { workerReleaseTag } : {}),
+              ...(timeoutMs ? { timeoutMs: String(timeoutMs) } : {}),
+            },
+            signal: createInstanceSignal,
+          });
 
       await onMutation?.({
         provider: 'daytona',
-        operation: 'create_instance',
+        operation,
         eventType: 'completed',
         instanceId: instance.instanceId,
-        message: `createInstance completed for Daytona instance ${instance.instanceId}.`,
+        message: `${
+          operation === 'resume_from_snapshot'
+            ? 'resumeFromSnapshot'
+            : 'createInstance'
+        } completed for Daytona instance ${instance.instanceId}.`,
         details: buildComputeProviderMutationDetails(
           { ...mutationContext, attempt },
           {},
@@ -208,6 +249,7 @@ export async function createDaytonaMachine(
         `[createDaytonaMachine] Instance created ${JSON.stringify({
           instanceId: instance.instanceId,
           domains: instance.domains,
+          sourceSnapshotId: instance.sourceSnapshotId,
         })}`,
       );
 
@@ -215,9 +257,13 @@ export async function createDaytonaMachine(
     } catch (error) {
       await onMutation?.({
         provider: 'daytona',
-        operation: 'create_instance',
+        operation: sourceSnapshotId
+          ? 'resume_from_snapshot'
+          : 'create_instance',
         eventType: 'failed',
-        message: 'createInstance failed for Daytona instance.',
+        message: `${
+          sourceSnapshotId ? 'resumeFromSnapshot' : 'createInstance'
+        } failed for Daytona instance.`,
         details: buildComputeProviderMutationDetails(
           { ...mutationContext, attempt },
           {
@@ -268,6 +314,25 @@ export async function createDaytonaMachine(
 
   if (!createdMachine) {
     throw new Error('Failed to create Daytona instance');
+  }
+
+  if (!shouldInstallShippedRuntime) {
+    return {
+      machineId: createdMachine.instanceId,
+      proxyPorts,
+      ...(sourceSnapshotId ? { sourceSnapshotId } : {}),
+      domain: (port: number) => {
+        const fromResponse = createdMachine.domains?.[port.toString()];
+
+        if (fromResponse) {
+          return fromResponse;
+        }
+
+        throw new Error(
+          `No Daytona preview link resolved for port ${port} on ${createdMachine.instanceId}`,
+        );
+      },
+    };
   }
 
   // Start the bootstrap timeout only after instance creation succeeds, so cold
@@ -428,6 +493,7 @@ export async function createDaytonaMachine(
   return {
     machineId: createdMachine.instanceId,
     proxyPorts,
+    ...(sourceSnapshotId ? { sourceSnapshotId } : {}),
     domain: (port: number) => {
       const fromResponse = createdMachine.domains?.[port.toString()];
 

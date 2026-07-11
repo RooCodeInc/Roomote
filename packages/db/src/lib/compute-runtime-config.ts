@@ -2,6 +2,7 @@ import { and, eq, inArray, isNull } from 'drizzle-orm';
 import {
   getDefaultAvailableComputeProvider,
   getSetupComputeProvider,
+  SETUP_COMPUTE_PROVIDER_CATALOG,
   SETUP_COMPUTE_PROVIDER_IDS,
   SHARED_WORKER_IMAGE_ENV_VAR,
   resolveDerivedModalBaseImageRef,
@@ -32,6 +33,64 @@ async function loadPersistedRuntimeComputeConfig(
   });
 
   return normalizeDeploymentComputeConfig(deployment?.runtimeComputeConfig);
+}
+
+async function isComputeProviderConfigured(
+  provider: ComputeProvider,
+  options: {
+    runtimeEnv?: Partial<Record<string, string | undefined>>;
+    executor?: DatabaseOrTransaction;
+  } = {},
+): Promise<boolean> {
+  const resolvedEnvValues = await resolveComputeProviderEnvValues(provider, {
+    runtimeEnv: options.runtimeEnv,
+    executor: options.executor,
+  });
+  const requiredEnvVarNames = getSetupComputeProvider(provider)
+    .fields.filter(isRequiredComputeField)
+    .map((field) => field.envVarName);
+
+  return requiredEnvVarNames.every((envVarName) =>
+    Boolean(resolvedEnvValues[envVarName]?.trim()),
+  );
+}
+
+/**
+ * Lists sandbox providers that are both not excluded and fully configured for
+ * task launch. Used by surfaces that let users pick a compute backend.
+ */
+export async function listConfiguredComputeProviders(
+  options: {
+    runtimeEnv?: Partial<Record<string, string | undefined>>;
+    executor?: DatabaseOrTransaction;
+  } = {},
+): Promise<ComputeProvider[]> {
+  const runtimeEnv = options.runtimeEnv ?? process.env;
+  const executor = options.executor ?? db;
+  const excludedProviders = parseExcludedComputeProviders(
+    runtimeEnv.EXCLUDED_COMPUTE_PROVIDERS,
+  );
+
+  // Preserve setup-catalog display order so callers that fall back to the first
+  // entry match the home dropdown ordering (modal, e2b, daytona, docker).
+  const providers: ComputeProvider[] = [];
+
+  for (const { provider } of SETUP_COMPUTE_PROVIDER_CATALOG) {
+    if (excludedProviders.has(provider)) {
+      continue;
+    }
+
+    if (
+      await isComputeProviderConfigured(provider, {
+        runtimeEnv,
+        executor,
+      })
+    ) {
+      providers.push(provider);
+    }
+  }
+
+  return providers;
 }
 
 /**
@@ -73,25 +132,13 @@ export async function resolveDefaultComputeProvider(
       (provider) => !excludedProviders.has(provider),
     )
       .filter((provider) => provider !== 'docker')
-      .map(async (provider) => {
-        const resolvedEnvValues = await resolveComputeProviderEnvValues(
-          provider,
-          {
-            runtimeEnv,
-            executor: options.executor ?? db,
-          },
-        );
-        const requiredEnvVarNames = getSetupComputeProvider(provider)
-          .fields.filter(isRequiredComputeField)
-          .map((field) => field.envVarName);
-
-        return {
-          provider,
-          configSatisfied: requiredEnvVarNames.every((envVarName) =>
-            resolvedEnvValues[envVarName]?.trim(),
-          ),
-        };
-      }),
+      .map(async (provider) => ({
+        provider,
+        configSatisfied: await isComputeProviderConfigured(provider, {
+          runtimeEnv,
+          executor: options.executor ?? db,
+        }),
+      })),
   );
 
   return getDefaultAvailableComputeProvider(

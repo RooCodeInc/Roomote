@@ -48,7 +48,7 @@ export function resolveRoomoteDeployMarkerEnv(
 
   return {
     roomote_app_env:
-      readTrimmedEnvValue(env, 'ROOMOTE_APP_ENV') ||
+      readTrimmedEnvValue(env, 'R_APP_ENV') ||
       readTrimmedEnvValue(env, 'APP_ENV') ||
       readTrimmedEnvValue(env, 'NODE_ENV') ||
       undefined,

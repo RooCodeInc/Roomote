@@ -29,7 +29,7 @@ function resolveApiSentryDsn(): string | undefined {
 
 function resolveApiSentryEnvironment(): string | undefined {
   return (
-    process.env.ROOMOTE_APP_ENV?.trim() ||
+    process.env.R_APP_ENV?.trim() ||
     process.env.APP_ENV?.trim() ||
     process.env.NODE_ENV?.trim() ||
     'development'

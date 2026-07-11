@@ -434,7 +434,7 @@ describe('getModelProviderEnvKeyCandidates', () => {
     expect(DEFAULT_MODEL_PROVIDER_ENV_KEYS).toContain('GEMINI_API_KEY');
     // Ambient AWS access keys are intentionally NOT forwarded by default so a
     // controller's own infrastructure credentials never leak into sandboxes;
-    // operators opt in with ROOMOTE_MODEL_ENV_KEYS.
+    // operators opt in with R_MODEL_ENV_KEYS.
     expect(DEFAULT_MODEL_PROVIDER_ENV_KEYS).not.toContain('AWS_ACCESS_KEY_ID');
     expect(DEFAULT_MODEL_PROVIDER_ENV_KEYS).not.toContain(
       'AWS_SECRET_ACCESS_KEY',
@@ -461,7 +461,7 @@ describe('buildSetupModelStatus', () => {
   it('treats runtime env as the highest-precedence satisfied setup source', () => {
     const status = buildSetupModelStatus({
       runtimeEnv: {
-        ROOMOTE_MODEL: 'openai/gpt-5.4',
+        R_MODEL: 'openai/gpt-5.4',
         OPENAI_API_KEY: 'sk-runtime',
       },
       persistedModelConfig: {
@@ -544,7 +544,7 @@ describe('buildSetupModelStatus', () => {
   it('resolves the vercel provider from a runtime AI Gateway model id', () => {
     const status = buildSetupModelStatus({
       runtimeEnv: {
-        ROOMOTE_MODEL: 'vercel/anthropic/claude-sonnet-4',
+        R_MODEL: 'vercel/anthropic/claude-sonnet-4',
         AI_GATEWAY_API_KEY: 'vck-runtime',
       },
     });
@@ -595,7 +595,7 @@ describe('buildSetupModelStatus', () => {
 
   it('treats a runtime openai/ model as satisfied when ChatGPT is connected', () => {
     const status = buildSetupModelStatus({
-      runtimeEnv: { ROOMOTE_MODEL: 'openai/gpt-5.4' },
+      runtimeEnv: { R_MODEL: 'openai/gpt-5.4' },
       chatgptConnected: true,
     });
 
@@ -625,7 +625,7 @@ describe('buildSetupModelStatus', () => {
   it('resolves the requesty provider from a runtime Requesty model id', () => {
     const status = buildSetupModelStatus({
       runtimeEnv: {
-        ROOMOTE_MODEL: 'requesty/anthropic/claude-sonnet-4',
+        R_MODEL: 'requesty/anthropic/claude-sonnet-4',
         REQUESTY_API_KEY: 'rty-runtime',
       },
     });
@@ -645,7 +645,7 @@ describe('buildSetupModelStatus', () => {
   it('resolves the baseten provider from a runtime Baseten model id', () => {
     const status = buildSetupModelStatus({
       runtimeEnv: {
-        ROOMOTE_MODEL: 'baseten/moonshotai/Kimi-K2.7-Code',
+        R_MODEL: 'baseten/moonshotai/Kimi-K2.7-Code',
         BASETEN_API_KEY: 'btn-runtime',
       },
     });
@@ -665,7 +665,7 @@ describe('buildSetupModelStatus', () => {
   it('resolves the togetherai provider from a runtime Together AI model id', () => {
     const status = buildSetupModelStatus({
       runtimeEnv: {
-        ROOMOTE_MODEL: 'togetherai/deepseek-ai/DeepSeek-V4-Pro',
+        R_MODEL: 'togetherai/deepseek-ai/DeepSeek-V4-Pro',
         TOGETHER_API_KEY: 'tgr-runtime',
       },
     });

@@ -65,7 +65,7 @@ const TELEGRAM_WEBHOOK_REQUIRED_UPDATES = ['message', 'callback_query'];
 const TELEGRAM_BOT_API_TIMEOUT_MS = 5_000;
 
 function buildExpectedTelegramWebhookUrl(): string {
-  return new URL('/api/webhooks/telegram', Env.ROOMOTE_APP_URL).toString();
+  return new URL('/api/webhooks/telegram', Env.R_APP_URL).toString();
 }
 
 function createTelegramBotApiFetch(): typeof fetch {
@@ -219,29 +219,30 @@ function withTelegramProvider(
         label: 'Telegram',
         fields: [
           buildField({
-            envVarName: 'TELEGRAM_BOT_TOKEN',
+            envVarName: 'R_TELEGRAM_BOT_TOKEN',
             label: 'Telegram Bot Token',
             secret: true,
           }),
           buildField({
-            envVarName: 'TELEGRAM_WEBHOOK_SECRET',
+            envVarName: 'R_TELEGRAM_WEBHOOK_SECRET',
             label: 'Telegram Webhook Secret',
             secret: true,
           }),
           buildField({
-            envVarName: 'TELEGRAM_BOT_USERNAME',
+            envVarName: 'R_TELEGRAM_BOT_USERNAME',
             label: 'Telegram Bot Username',
             required: false,
           }),
         ],
         runtimeSatisfied:
-          isRuntime('TELEGRAM_BOT_TOKEN') &&
-          isRuntime('TELEGRAM_WEBHOOK_SECRET'),
+          isRuntime('R_TELEGRAM_BOT_TOKEN') &&
+          isRuntime('R_TELEGRAM_WEBHOOK_SECRET'),
         savedSatisfied:
-          isSaved('TELEGRAM_BOT_TOKEN') && isSaved('TELEGRAM_WEBHOOK_SECRET'),
+          isSaved('R_TELEGRAM_BOT_TOKEN') &&
+          isSaved('R_TELEGRAM_WEBHOOK_SECRET'),
         setupSatisfied:
-          isSatisfied('TELEGRAM_BOT_TOKEN') &&
-          isSatisfied('TELEGRAM_WEBHOOK_SECRET'),
+          isSatisfied('R_TELEGRAM_BOT_TOKEN') &&
+          isSatisfied('R_TELEGRAM_WEBHOOK_SECRET'),
         telegramWebhook,
       },
     ],
@@ -290,21 +291,21 @@ export async function saveCommsAuthConfigCommand(
           label: 'Telegram',
           fields: [
             {
-              envVarName: 'TELEGRAM_BOT_TOKEN',
-              acceptedEnvVarNames: ['TELEGRAM_BOT_TOKEN'],
+              envVarName: 'R_TELEGRAM_BOT_TOKEN',
+              acceptedEnvVarNames: ['R_TELEGRAM_BOT_TOKEN'],
               label: 'Telegram Bot Token',
               secret: true,
             },
             {
-              envVarName: 'TELEGRAM_WEBHOOK_SECRET',
-              acceptedEnvVarNames: ['TELEGRAM_WEBHOOK_SECRET'],
+              envVarName: 'R_TELEGRAM_WEBHOOK_SECRET',
+              acceptedEnvVarNames: ['R_TELEGRAM_WEBHOOK_SECRET'],
               label: 'Telegram Webhook Secret',
               secret: true,
               required: false,
             },
             {
-              envVarName: 'TELEGRAM_BOT_USERNAME',
-              acceptedEnvVarNames: ['TELEGRAM_BOT_USERNAME'],
+              envVarName: 'R_TELEGRAM_BOT_USERNAME',
+              acceptedEnvVarNames: ['R_TELEGRAM_BOT_USERNAME'],
               label: 'Telegram Bot Username',
               required: false,
             },
@@ -389,15 +390,15 @@ export async function saveCommsAuthConfigCommand(
 
     if (input.provider === 'telegram') {
       const telegramWebhookSecret =
-        input.values?.TELEGRAM_WEBHOOK_SECRET?.trim() ??
+        input.values?.R_TELEGRAM_WEBHOOK_SECRET?.trim() ??
         (providerStatus.fields.find(
-          (field) => field.envVarName === 'TELEGRAM_WEBHOOK_SECRET',
+          (field) => field.envVarName === 'R_TELEGRAM_WEBHOOK_SECRET',
         )?.savedSatisfied
           ? undefined
           : createTelegramWebhookSecret());
       if (telegramWebhookSecret) {
         valuesToSave.push({
-          name: 'TELEGRAM_WEBHOOK_SECRET',
+          name: 'R_TELEGRAM_WEBHOOK_SECRET',
           value: telegramWebhookSecret,
         });
       }
@@ -457,9 +458,9 @@ export async function clearCommsAuthConfigCommand(
     input.provider === 'telegram'
       ? {
           fields: [
-            { acceptedEnvVarNames: ['TELEGRAM_BOT_TOKEN'] },
-            { acceptedEnvVarNames: ['TELEGRAM_WEBHOOK_SECRET'] },
-            { acceptedEnvVarNames: ['TELEGRAM_BOT_USERNAME'] },
+            { acceptedEnvVarNames: ['R_TELEGRAM_BOT_TOKEN'] },
+            { acceptedEnvVarNames: ['R_TELEGRAM_WEBHOOK_SECRET'] },
+            { acceptedEnvVarNames: ['R_TELEGRAM_BOT_USERNAME'] },
           ],
         }
       : getSetupAuthProvider(input.provider);

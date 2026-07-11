@@ -142,29 +142,25 @@ function resolveRuntimeModelStatus(options: {
   settingsDefaultModelId: string;
   persisted: DeploymentModelConfig;
 }): TaskModelSettingsRuntimeStatus {
-  const envCodingModel = isConfiguredEnvValue(process.env.ROOMOTE_MODEL)
-    ? process.env.ROOMOTE_MODEL!.trim()
+  const envCodingModel = isConfiguredEnvValue(process.env.R_MODEL)
+    ? process.env.R_MODEL!.trim()
     : null;
-  const envHelperModel = isConfiguredEnvValue(process.env.ROOMOTE_SMALL_MODEL)
-    ? process.env.ROOMOTE_SMALL_MODEL!.trim()
+  const envHelperModel = isConfiguredEnvValue(process.env.R_SMALL_MODEL)
+    ? process.env.R_SMALL_MODEL!.trim()
     : null;
-  const envVisionModel = isConfiguredEnvValue(process.env.ROOMOTE_VISION_MODEL)
-    ? process.env.ROOMOTE_VISION_MODEL!.trim()
+  const envVisionModel = isConfiguredEnvValue(process.env.R_VISION_MODEL)
+    ? process.env.R_VISION_MODEL!.trim()
     : null;
   const envCodeReviewModel = isConfiguredEnvValue(
-    process.env.ROOMOTE_CODE_REVIEW_MODEL,
+    process.env.R_CODE_REVIEW_MODEL,
   )
-    ? process.env.ROOMOTE_CODE_REVIEW_MODEL!.trim()
+    ? process.env.R_CODE_REVIEW_MODEL!.trim()
     : null;
-  const envExploreModel = isConfiguredEnvValue(
-    process.env.ROOMOTE_EXPLORE_MODEL,
-  )
-    ? process.env.ROOMOTE_EXPLORE_MODEL!.trim()
+  const envExploreModel = isConfiguredEnvValue(process.env.R_EXPLORE_MODEL)
+    ? process.env.R_EXPLORE_MODEL!.trim()
     : null;
-  const envPlanningModel = isConfiguredEnvValue(
-    process.env.ROOMOTE_PLANNING_MODEL,
-  )
-    ? process.env.ROOMOTE_PLANNING_MODEL!.trim()
+  const envPlanningModel = isConfiguredEnvValue(process.env.R_PLANNING_MODEL)
+    ? process.env.R_PLANNING_MODEL!.trim()
     : null;
   const persistedCodingModel = options.persisted.roomoteModel;
   const persistedHelperModel = options.persisted.roomoteSmallModel;
@@ -218,7 +214,7 @@ function resolveRuntimeModelStatus(options: {
       source: codingSource,
       managedByEnv: envCodingModel !== null,
       ...resolveRuntimeReasoningStatus(
-        'ROOMOTE_MODEL_REASONING_EFFORT',
+        'R_MODEL_REASONING_EFFORT',
         options.persisted.roomoteModelReasoningEffort,
       ),
     },
@@ -228,7 +224,7 @@ function resolveRuntimeModelStatus(options: {
       source: helperSource,
       managedByEnv: envHelperModel !== null,
       ...resolveRuntimeReasoningStatus(
-        'ROOMOTE_SMALL_MODEL_REASONING_EFFORT',
+        'R_SMALL_MODEL_REASONING_EFFORT',
         options.persisted.roomoteSmallModelReasoningEffort,
       ),
     },
@@ -238,7 +234,7 @@ function resolveRuntimeModelStatus(options: {
       source: visionSource,
       managedByEnv: envVisionModel !== null,
       ...resolveRuntimeReasoningStatus(
-        'ROOMOTE_VISION_MODEL_REASONING_EFFORT',
+        'R_VISION_MODEL_REASONING_EFFORT',
         options.persisted.roomoteVisionModelReasoningEffort,
       ),
     },
@@ -248,7 +244,7 @@ function resolveRuntimeModelStatus(options: {
       source: codeReviewSource,
       managedByEnv: envCodeReviewModel !== null,
       ...resolveRuntimeReasoningStatus(
-        'ROOMOTE_CODE_REVIEW_MODEL_REASONING_EFFORT',
+        'R_CODE_REVIEW_MODEL_REASONING_EFFORT',
         options.persisted.roomoteCodeReviewModelReasoningEffort,
       ),
     },
@@ -258,7 +254,7 @@ function resolveRuntimeModelStatus(options: {
       source: exploreSource,
       managedByEnv: envExploreModel !== null,
       ...resolveRuntimeReasoningStatus(
-        'ROOMOTE_EXPLORE_MODEL_REASONING_EFFORT',
+        'R_EXPLORE_MODEL_REASONING_EFFORT',
         options.persisted.roomoteExploreModelReasoningEffort,
       ),
     },
@@ -268,7 +264,7 @@ function resolveRuntimeModelStatus(options: {
       source: planningSource,
       managedByEnv: envPlanningModel !== null,
       ...resolveRuntimeReasoningStatus(
-        'ROOMOTE_PLANNING_MODEL_REASONING_EFFORT',
+        'R_PLANNING_MODEL_REASONING_EFFORT',
         options.persisted.roomotePlanningModelReasoningEffort,
       ),
     },
@@ -871,37 +867,28 @@ export async function updateTaskModelSettingsCommand(
     fieldErrors.planningModelId = 'Choose a valid planning model.';
   }
 
-  const codingManagedByEnv = isConfiguredEnvValue(process.env.ROOMOTE_MODEL);
-  const helperManagedByEnv = isConfiguredEnvValue(
-    process.env.ROOMOTE_SMALL_MODEL,
-  );
-  const visionManagedByEnv = isConfiguredEnvValue(
-    process.env.ROOMOTE_VISION_MODEL,
-  );
+  const codingManagedByEnv = isConfiguredEnvValue(process.env.R_MODEL);
+  const helperManagedByEnv = isConfiguredEnvValue(process.env.R_SMALL_MODEL);
+  const visionManagedByEnv = isConfiguredEnvValue(process.env.R_VISION_MODEL);
   const codeReviewManagedByEnv = isConfiguredEnvValue(
-    process.env.ROOMOTE_CODE_REVIEW_MODEL,
+    process.env.R_CODE_REVIEW_MODEL,
   );
-  const exploreManagedByEnv = isConfiguredEnvValue(
-    process.env.ROOMOTE_EXPLORE_MODEL,
-  );
+  const exploreManagedByEnv = isConfiguredEnvValue(process.env.R_EXPLORE_MODEL);
   const planningManagedByEnv = isConfiguredEnvValue(
-    process.env.ROOMOTE_PLANNING_MODEL,
+    process.env.R_PLANNING_MODEL,
   );
   const codingReasoningManagedByEnv =
-    resolveEnvReasoningEffort('ROOMOTE_MODEL_REASONING_EFFORT') !== null;
+    resolveEnvReasoningEffort('R_MODEL_REASONING_EFFORT') !== null;
   const helperReasoningManagedByEnv =
-    resolveEnvReasoningEffort('ROOMOTE_SMALL_MODEL_REASONING_EFFORT') !== null;
+    resolveEnvReasoningEffort('R_SMALL_MODEL_REASONING_EFFORT') !== null;
   const visionReasoningManagedByEnv =
-    resolveEnvReasoningEffort('ROOMOTE_VISION_MODEL_REASONING_EFFORT') !== null;
+    resolveEnvReasoningEffort('R_VISION_MODEL_REASONING_EFFORT') !== null;
   const codeReviewReasoningManagedByEnv =
-    resolveEnvReasoningEffort('ROOMOTE_CODE_REVIEW_MODEL_REASONING_EFFORT') !==
-    null;
+    resolveEnvReasoningEffort('R_CODE_REVIEW_MODEL_REASONING_EFFORT') !== null;
   const exploreReasoningManagedByEnv =
-    resolveEnvReasoningEffort('ROOMOTE_EXPLORE_MODEL_REASONING_EFFORT') !==
-    null;
+    resolveEnvReasoningEffort('R_EXPLORE_MODEL_REASONING_EFFORT') !== null;
   const planningReasoningManagedByEnv =
-    resolveEnvReasoningEffort('ROOMOTE_PLANNING_MODEL_REASONING_EFFORT') !==
-    null;
+    resolveEnvReasoningEffort('R_PLANNING_MODEL_REASONING_EFFORT') !== null;
 
   if (Object.keys(fieldErrors).length > 0) {
     return {

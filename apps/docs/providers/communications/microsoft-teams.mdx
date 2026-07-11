@@ -28,9 +28,9 @@ Create a Microsoft Entra app registration:
 6. save the client ID, secret value, and tenant ID in Roomote setup or env vars
 
 ```sh
-ROOMOTE_AUTH_MICROSOFT_CLIENT_ID=...
-ROOMOTE_AUTH_MICROSOFT_CLIENT_SECRET=...
-ROOMOTE_AUTH_MICROSOFT_TENANT_ID=...
+R_MICROSOFT_CLIENT_ID=...
+R_MICROSOFT_CLIENT_SECRET=...
+R_MICROSOFT_TENANT_ID=...
 ```
 
 Roomote enables Microsoft sign-in only when all three values are present.
@@ -61,13 +61,13 @@ these bot values automatically from the Microsoft app values. If you configure
 with env vars instead, set:
 
 ```sh
-TEAMS_BOT_APP_ID=<microsoft-app-id>
-TEAMS_BOT_APP_PASSWORD=<client-secret>
-TEAMS_BOT_TENANT_ID=<tenant-id>
-TEAMS_BOT_NAME=<bot-display-name>
+R_TEAMS_BOT_APP_ID=<microsoft-app-id>
+R_TEAMS_BOT_APP_PASSWORD=<client-secret>
+R_TEAMS_BOT_TENANT_ID=<tenant-id>
+R_TEAMS_BOT_NAME=<bot-display-name>
 ```
 
-`TEAMS_BOT_NAME` is optional, but recommended when your Teams app is not named
+`R_TEAMS_BOT_NAME` is optional, but recommended when your Teams app is not named
 Roomote. Roomote uses it in generated Teams app packages and user-facing
 invocation guidance.
 
@@ -75,8 +75,8 @@ Advanced token overrides are available when your tenant or cloud environment
 requires custom Bot Framework token settings:
 
 ```sh
-TEAMS_BOT_TOKEN_ENDPOINT=<token-endpoint-url>
-TEAMS_BOT_OAUTH_SCOPE=<oauth-scope>
+R_TEAMS_BOT_TOKEN_ENDPOINT=<token-endpoint-url>
+R_TEAMS_BOT_OAUTH_SCOPE=<oauth-scope>
 ```
 
 Restart Roomote after changing Teams env vars.
@@ -101,7 +101,7 @@ readiness, and enables all three messaging scopes:
 - **Group chat** - group-chat messages that mention the bot start tasks
 
 If you prefer to build the app package yourself in the Developer Portal, add a
-bot capability that uses the same Microsoft App ID as `TEAMS_BOT_APP_ID` and
+bot capability that uses the same Microsoft App ID as `R_TEAMS_BOT_APP_ID` and
 include the bot entry in the manifest:
 
 ```json
@@ -125,7 +125,7 @@ include the bot entry in the manifest:
   },
   "bots": [
     {
-      "botId": "<TEAMS_BOT_APP_ID>",
+      "botId": "<R_TEAMS_BOT_APP_ID>",
       "scopes": ["personal", "team", "groupChat"],
       "supportsFiles": true,
       "isNotificationOnly": false

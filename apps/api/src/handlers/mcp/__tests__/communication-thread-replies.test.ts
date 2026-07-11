@@ -11,7 +11,7 @@ const {
   withThreadReplyFooterLockMock,
 } = vi.hoisted(() => ({
   buildThreadReplyImagesMock: vi.fn(),
-  envMock: { ROOMOTE_APP_URL: 'https://app.example.com' },
+  envMock: { R_APP_URL: 'https://app.example.com' },
   getLatestInboundMessageIdMock: vi.fn(),
   postMessageMock: vi.fn(),
   sendChatActionMock: vi.fn(),

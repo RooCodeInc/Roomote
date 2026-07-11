@@ -10,12 +10,12 @@ import {
 } from '../environment-machine';
 
 const originalTrpcUrl = process.env.TRPC_URL;
-const originalRoomoteAppUrl = process.env.ROOMOTE_APP_URL;
+const originalRoomoteAppUrl = process.env.R_APP_URL;
 
 describe('getNamedPortsForEnvironment', () => {
   beforeEach(() => {
     delete process.env.TRPC_URL;
-    delete process.env.ROOMOTE_APP_URL;
+    delete process.env.R_APP_URL;
   });
 
   afterAll(() => {
@@ -26,9 +26,9 @@ describe('getNamedPortsForEnvironment', () => {
     }
 
     if (originalRoomoteAppUrl === undefined) {
-      delete process.env.ROOMOTE_APP_URL;
+      delete process.env.R_APP_URL;
     } else {
-      process.env.ROOMOTE_APP_URL = originalRoomoteAppUrl;
+      process.env.R_APP_URL = originalRoomoteAppUrl;
     }
   });
 

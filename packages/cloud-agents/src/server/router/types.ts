@@ -17,7 +17,7 @@ export const SLACK_AUTO_CONFIRM_TIMEOUT_MS = 30_000;
  */
 export const LINEAR_AUTO_CONFIRM_TIMEOUT_MS = 120_000;
 
-export const ROOMOTE_SMALL_MODEL_LABEL = 'roomote-small-model';
+export const R_SMALL_MODEL_LABEL = 'roomote-small-model';
 
 /**
  * Maximum length for task descriptions to prevent excessive token usage.

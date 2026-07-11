@@ -198,9 +198,7 @@ export const server = http.createServer(async (req, res) => {
           'Content-Type': 'application/javascript',
           'Cache-Control': 'public, max-age=300',
         });
-        res.end(
-          PREVIEW_WIDGET.replace('__ROOMOTE_APP_URL__', config.ROOMOTE_APP_URL),
-        );
+        res.end(PREVIEW_WIDGET.replace('__R_APP_URL__', config.R_APP_URL));
         return;
       }
 

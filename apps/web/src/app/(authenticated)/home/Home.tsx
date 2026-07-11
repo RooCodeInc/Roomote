@@ -77,14 +77,27 @@ const DEFAULT_FORM_VALUES: CreateTaskFormValues = {
   port: undefined,
 };
 
+function resolveInitialComputeProvider(
+  defaultComputeProvider: ComputeProvider,
+  availableComputeProviders: readonly ComputeProvider[],
+): ComputeProvider {
+  if (availableComputeProviders.includes(defaultComputeProvider)) {
+    return defaultComputeProvider;
+  }
+
+  return availableComputeProviders[0] ?? defaultComputeProvider;
+}
+
 type HomeProps = {
   initialPlaceholderIndex: number;
   defaultComputeProvider?: ComputeProvider;
+  availableComputeProviders?: readonly ComputeProvider[];
 };
 
 export function Home({
   initialPlaceholderIndex,
   defaultComputeProvider = 'docker',
+  availableComputeProviders,
 }: HomeProps) {
   const router = useRouter();
   const githubInstallations = useGitHubInstallations();
@@ -93,7 +106,26 @@ export function Home({
   const { isDebugUIVisible } = useShowDebugUI();
   const canSelectBranch = isDebugUIVisible;
 
-  const initialComputeProvider = defaultComputeProvider;
+  // Keep option order identical to the setup catalog so the first fallback
+  // matches the first visible Sandbox provider row.
+  const catalogComputeProviders = SETUP_COMPUTE_PROVIDER_CATALOG.map(
+    (descriptor) => descriptor.provider,
+  );
+  const computeProviderOptions =
+    availableComputeProviders === undefined
+      ? catalogComputeProviders
+      : availableComputeProviders.length > 0
+        ? catalogComputeProviders.filter((provider) =>
+            availableComputeProviders.includes(provider),
+          )
+        : [defaultComputeProvider];
+  const computeProviderDescriptors = SETUP_COMPUTE_PROVIDER_CATALOG.filter(
+    (descriptor) => computeProviderOptions.includes(descriptor.provider),
+  );
+  const initialComputeProvider = resolveInitialComputeProvider(
+    defaultComputeProvider,
+    computeProviderOptions,
+  );
 
   const searchParams = useSearchParams();
   const promptParam = searchParams.get('prompt') ?? '';
@@ -583,7 +615,7 @@ export function Home({
                   <SelectValue placeholder="Backend" />
                 </SelectTrigger>
                 <SelectContent>
-                  {SETUP_COMPUTE_PROVIDER_CATALOG.map((descriptor) => (
+                  {computeProviderDescriptors.map((descriptor) => (
                     <SelectItem
                       key={descriptor.provider}
                       value={descriptor.provider}

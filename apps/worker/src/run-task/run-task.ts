@@ -571,7 +571,7 @@ export const runTask = async ({
       ...deploymentEnvVars,
       ...sanitizedEnv,
       ...openCodeHarnessEnv,
-      ROOMOTE_APP_URL: workerEnv.roomoteAppUrl,
+      R_APP_URL: workerEnv.roomoteAppUrl,
       ROOMOTE_PLATFORM_API_URL: workerEnv.trpcUrl,
       ROOMOTE_WORKSPACE_PATH: workspacePath,
       ROOMOTE_CLOUD_TOKEN: workerEnv.authToken,

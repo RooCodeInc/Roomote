@@ -128,11 +128,11 @@ function normalizeApiBaseUrl(raw: string | undefined): string | undefined {
 function resolveApiBaseUrl(
   taskEnv: Record<string, string> | undefined,
 ): string | undefined {
-  // Prefer TRPC_URL (API origin) when available. ROOMOTE_APP_URL may point
+  // Prefer TRPC_URL (API origin) when available. R_APP_URL may point
   // at the web app domain in some environments.
   return (
     normalizeApiBaseUrl(process.env.TRPC_URL) ??
-    normalizeApiBaseUrl(taskEnv?.ROOMOTE_APP_URL)
+    normalizeApiBaseUrl(taskEnv?.R_APP_URL)
   );
 }
 
@@ -225,7 +225,7 @@ export function resolveBuiltInMcpServers(
   // These are only available when called from runTask() with taskEnv.
   const roomoteEnvKeys = [
     'ROOMOTE_CLOUD_TOKEN',
-    'ROOMOTE_APP_URL',
+    'R_APP_URL',
     'ROOMOTE_PLATFORM_API_URL',
     'ROOMOTE_WORKSPACE_PATH',
     'ROOMOTE_TASK_ID',

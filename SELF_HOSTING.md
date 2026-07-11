@@ -186,15 +186,25 @@ cp .env.production.example .env.production
 Do not commit real env files. Shell exports take precedence over values in
 these files.
 
+Naming follows three rules: Roomote-owned operator configuration uses the
+`R_*` prefix (`R_APP_URL`, `R_MODEL`, `R_GITHUB_*`, `R_SLACK_*`,
+`R_TELEGRAM_*`, `R_LINEAR_*`, `R_AUTO_GENERATE_KEYS`, …); conventional
+infrastructure names stay unchanged (`DATABASE_URL`, `REDIS_URL`, `S3_*`,
+`NODE_ENV`); and third-party provider credentials keep the provider's own
+names (`MODAL_*`, `E2B_*`, `DAYTONA_*`, `ANTHROPIC_API_KEY`, …). Remaining
+`ROOMOTE_*` names are internal plumbing or installer/upgrade machinery kept
+for compatibility — see "Environment Variable Naming" in
+[deploy/README.md](deploy/README.md) for the exceptions list.
+
 ## Public URLs
 
 Roomote needs one stable public app origin for auth callbacks, webhooks, and
 links sent from Slack or GitHub.
 
-For local development, set `ROOMOTE_PUBLIC_URL`:
+For local development, set `R_PUBLIC_URL`:
 
 ```sh
-ROOMOTE_PUBLIC_URL=https://your-static-ngrok-domain.ngrok.app
+R_PUBLIC_URL=https://your-static-ngrok-domain.ngrok.app
 ```
 
 If that URL is an ngrok domain, `pnpm dev` starts and reuses
@@ -212,8 +222,8 @@ The production Compose overlay derives these runtime URLs:
 
 | Runtime key              | Value                                      |
 | ------------------------ | ------------------------------------------ |
-| `ROOMOTE_PUBLIC_URL`     | `https://$ROOMOTE_APP_DOMAIN`              |
-| `ROOMOTE_APP_URL`        | `https://$ROOMOTE_APP_DOMAIN`              |
+| `R_PUBLIC_URL`           | `https://$ROOMOTE_APP_DOMAIN`              |
+| `R_APP_URL`              | `https://$ROOMOTE_APP_DOMAIN`              |
 | `TRPC_URL`               | `https://$ROOMOTE_APP_DOMAIN/_roomote-api` |
 | `PREVIEW_PROXY_BASE_URL` | `https://$ROOMOTE_PREVIEW_DOMAIN`          |
 | `PREVIEW_DOMAINS`        | `$ROOMOTE_PREVIEW_DOMAIN`                  |
@@ -234,18 +244,18 @@ hostname, and opt previews in at the deployment and environment levels.
 Task execution requires a models.dev-style model id:
 
 ```sh
-ROOMOTE_MODEL=openrouter/anthropic/claude-sonnet-4
+R_MODEL=openrouter/anthropic/claude-sonnet-4
 OPENROUTER_API_KEY=...
 ```
 
-Set `ROOMOTE_SMALL_MODEL` for routing, title generation, summaries, and
+Set `R_SMALL_MODEL` for routing, title generation, summaries, and
 other lightweight calls:
 
 ```sh
-ROOMOTE_SMALL_MODEL=openrouter/openai/gpt-4.1-mini
+R_SMALL_MODEL=openrouter/openai/gpt-4.1-mini
 ```
 
-Set `ROOMOTE_VISION_MODEL` when image understanding and visual information
+Set `R_VISION_MODEL` when image understanding and visual information
 extraction should use a different model from the active coding model. Roomote
 configures a hidden OpenCode `visual` subagent only when this model differs
 from the effective coding model for the task, and asks the parent agent to
@@ -253,24 +263,24 @@ delegate screenshot, diagram, chart, rendered-document, and other visual
 inspection through it:
 
 ```sh
-ROOMOTE_VISION_MODEL=openrouter/openai/gpt-5.6-sol
+R_VISION_MODEL=openrouter/openai/gpt-5.6-sol
 ```
 
-Set `ROOMOTE_CODE_REVIEW_MODEL` when pull request and merge request review
+Set `R_CODE_REVIEW_MODEL` when pull request and merge request review
 tasks, implementation judge passes, and other code-review-oriented analysis
 should use a different model from the active coding model. When unset, those
 review flows fall back to the default coding model:
 
 ```sh
-ROOMOTE_CODE_REVIEW_MODEL=openrouter/openai/gpt-5.6-sol
+R_CODE_REVIEW_MODEL=openrouter/openai/gpt-5.6-sol
 ```
 
-Set `ROOMOTE_EXPLORE_MODEL` when read-only codebase exploration through the
+Set `R_EXPLORE_MODEL` when read-only codebase exploration through the
 OpenCode `explore` subagent should use a different model from the active coding
 model. When unset, exploration falls back to the task's active coding model:
 
 ```sh
-ROOMOTE_EXPLORE_MODEL=openrouter/openai/gpt-5.6-luna
+R_EXPLORE_MODEL=openrouter/openai/gpt-5.6-luna
 ```
 
 The provider is the first segment of the model id. Roomote forwards these
@@ -286,11 +296,11 @@ common provider keys into worker containers:
 - `OPENCODE_API_KEY`
 
 If your provider uses another env var name, list it in
-`ROOMOTE_MODEL_ENV_KEYS`:
+`R_MODEL_ENV_KEYS`:
 
 ```sh
-ROOMOTE_MODEL=custom-provider/custom-model
-ROOMOTE_MODEL_ENV_KEYS=CUSTOM_PROVIDER_API_KEY
+R_MODEL=custom-provider/custom-model
+R_MODEL_ENV_KEYS=CUSTOM_PROVIDER_API_KEY
 CUSTOM_PROVIDER_API_KEY=...
 ```
 
@@ -336,15 +346,15 @@ sign-on later. After that, bring in teammates with invite links from
 password), or configure one of these providers so your whole Slack workspace
 or Microsoft tenant can sign in:
 
-| Provider        | Env vars                                                                                                       | Redirect URL                                               |
-| --------------- | -------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------- |
-| Slack           | `ROOMOTE_AUTH_SLACK_CLIENT_ID`, `ROOMOTE_AUTH_SLACK_CLIENT_SECRET`                                             | `<public-url>/api/auth/oauth2/callback/slack`              |
-| Microsoft Teams | `ROOMOTE_AUTH_MICROSOFT_CLIENT_ID`, `ROOMOTE_AUTH_MICROSOFT_CLIENT_SECRET`, `ROOMOTE_AUTH_MICROSOFT_TENANT_ID` | `<public-url>/api/auth/oauth2/callback/microsoft-entra-id` |
+| Provider        | Env vars                                                                      | Redirect URL                                               |
+| --------------- | ----------------------------------------------------------------------------- | ---------------------------------------------------------- |
+| Slack           | `R_SLACK_CLIENT_ID`, `R_SLACK_CLIENT_SECRET`                                  | `<public-url>/api/auth/oauth2/callback/slack`              |
+| Microsoft Teams | `R_MICROSOFT_CLIENT_ID`, `R_MICROSOFT_CLIENT_SECRET`, `R_MICROSOFT_TENANT_ID` | `<public-url>/api/auth/oauth2/callback/microsoft-entra-id` |
 
 You can restrict access with:
 
 ```sh
-ROOMOTE_ALLOWED_EMAILS=you@example.com,teammate@example.com
+R_ALLOWED_EMAILS=you@example.com,teammate@example.com
 ```
 
 ### Roles
@@ -365,7 +375,7 @@ docker compose exec postgres \
   "UPDATE users SET role = 'admin' WHERE email = 'you@example.com';"
 ```
 
-Slack sign-in can reuse `SLACK_CLIENT_ID` and `SLACK_CLIENT_SECRET` from the
+Slack sign-in can reuse `R_SLACK_CLIENT_ID` and `R_SLACK_CLIENT_SECRET` from the
 Slack integration app if you use one Slack app for both sign-in and bot events.
 The `/setup` Slack step is the preferred path: choose **Create Slack app from
 manifest**, create the prefilled app in Slack, then paste the generated Client
@@ -397,12 +407,12 @@ Use manual env vars when you already have a GitHub App or when production/shared
 self-host secret management should own the values:
 
 ```sh
-NEXT_PUBLIC_GITHUB_APP_SLUG=<github-app-slug>
-GITHUB_APP_ID=<app-id>
-GITHUB_APP_PRIVATE_KEY="-----BEGIN RSA PRIVATE KEY-----\n...\n-----END RSA PRIVATE KEY-----"
-GITHUB_CLIENT_ID=<client-id>
-GITHUB_CLIENT_SECRET=<client-secret>
-GITHUB_WEBHOOK_SECRET=<webhook-secret>
+R_GITHUB_APP_SLUG=<github-app-slug>
+R_GITHUB_APP_ID=<app-id>
+R_GITHUB_APP_PRIVATE_KEY="-----BEGIN RSA PRIVATE KEY-----\n...\n-----END RSA PRIVATE KEY-----"
+R_GITHUB_CLIENT_ID=<client-id>
+R_GITHUB_CLIENT_SECRET=<client-secret>
+R_GITHUB_WEBHOOK_SECRET=<webhook-secret>
 ```
 
 The detailed GitHub manifest and manual permission checklist is in
@@ -430,9 +440,9 @@ Slack URL:
 Required integration env vars:
 
 ```sh
-SLACK_CLIENT_ID=...
-SLACK_CLIENT_SECRET=...
-SLACK_SIGNING_SECRET=...
+R_SLACK_CLIENT_ID=...
+R_SLACK_CLIENT_SECRET=...
+R_SLACK_SIGNING_SECRET=...
 ```
 
 `SLACK_APP_ID` is optional for manual preconfiguration. Roomote saves Slack's
@@ -482,7 +492,7 @@ openssl rand -hex 16    # SETUP_TOKEN
 If the deployment platform cannot run `openssl` during provisioning (for
 example PaaS platforms such as Railway or Render), leave the four
 `JOB_AUTH_*`/`PREVIEW_AUTH_*` values unset and set
-`ROOMOTE_AUTO_GENERATE_KEYS=true` instead. Roomote then generates the P-256
+`R_AUTO_GENERATE_KEYS=true` instead. Roomote then generates the P-256
 keypairs once at first startup, stores them encrypted with `ENCRYPTION_KEY` in
 the database, and reuses them on every later boot. Env-provided key values
 always take precedence. The random string secrets (`ENCRYPTION_KEY`,
@@ -515,7 +525,7 @@ via env or from **Settings → Live Previews**.
 `SETUP_TOKEN` protects the pre-auth `/setup` bootstrap wizard, which admits the
 deployment's first admin. Until initial setup completes, the wizard rejects
 visitors who do not present the token via `/setup?token=<value>` or the token
-entry step. **It is required on every non-local deployment** (any `APP_ENV`
+entry step. **It is required on every non-local deployment** (any `R_APP_ENV`
 other than `development`): if it is unset, first-admin bootstrap stays closed
 and `/setup` blocks on the token step until you configure one — this prevents
 an attacker who reaches the URL before you from claiming the founding admin

@@ -3,7 +3,7 @@
   "roomoteTarget": {
     "webhookUrl": "http://localhost:4000/api/webhooks/slack"
   },
-  "_note": "roomoteTarget.signingSecret defaults to Env.SLACK_SIGNING_SECRET from the dotenvx-loaded environment when omitted.",
+  "_note": "roomoteTarget.signingSecret defaults to Env.R_SLACK_SIGNING_SECRET from the dotenvx-loaded environment when omitted.",
   "state": {
     "team": {
       "id": "TROOMOTE",

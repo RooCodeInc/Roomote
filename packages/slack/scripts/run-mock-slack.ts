@@ -118,8 +118,9 @@ function resolveRoomoteTarget(
 
   const signingSecretSource = roomoteTarget.signingSecret
     ? 'config'
-    : 'Env.SLACK_SIGNING_SECRET';
-  const signingSecret = roomoteTarget.signingSecret ?? Env.SLACK_SIGNING_SECRET;
+    : 'Env.R_SLACK_SIGNING_SECRET';
+  const signingSecret =
+    roomoteTarget.signingSecret ?? Env.R_SLACK_SIGNING_SECRET;
 
   console.info(`Using Roomote signing secret from ${signingSecretSource}.`);
 

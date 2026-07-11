@@ -112,7 +112,7 @@ async function resumeLinearReplay(input: {
   }
 
   if ('taskId' in runResult) {
-    const baseUrl = process.env.ROOMOTE_APP_URL;
+    const baseUrl = process.env.R_APP_URL;
     if (baseUrl) {
       await linearClient.updateSessionExternalUrls(sessionId, [
         { label: 'Open task', url: `${baseUrl}/task/${runResult.taskId}` },

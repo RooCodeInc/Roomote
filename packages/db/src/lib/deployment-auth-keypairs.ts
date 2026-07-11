@@ -14,7 +14,7 @@ import { deploymentSecrets } from '../schema';
 /**
  * Boot-time auto-generation for the deployment auth keypairs.
  *
- * When `ROOMOTE_AUTO_GENERATE_KEYS=true` and the `JOB_AUTH_*` /
+ * When `R_AUTO_GENERATE_KEYS=true` and the `JOB_AUTH_*` /
  * `PREVIEW_AUTH_*` env vars are not provided, Roomote generates the P-256
  * keypairs once, persists them encrypted in `deployment_secrets`, and loads
  * them back into the process env on every subsequent boot. Env-provided
@@ -134,7 +134,7 @@ export async function ensureGeneratedAuthKeypairs(
       throw new Error(
         `${pair.privateKeyName} and ${pair.publicKeyName} must be provided ` +
           'together. Set both env vars, or unset both to let ' +
-          'ROOMOTE_AUTO_GENERATE_KEYS manage the keypair.',
+          'R_AUTO_GENERATE_KEYS manage the keypair.',
       );
     }
 
@@ -211,7 +211,7 @@ export async function ensureGeneratedAuthKeypairs(
 }
 
 /**
- * Boot hook for long-lived services: when `ROOMOTE_AUTO_GENERATE_KEYS=true`,
+ * Boot hook for long-lived services: when `R_AUTO_GENERATE_KEYS=true`,
  * resolve any missing auth keypairs (loading persisted ones or generating
  * new ones), write them into `processEnv`, and rebuild the shared `Env`
  * singleton so lazy consumers observe the resolved keys.

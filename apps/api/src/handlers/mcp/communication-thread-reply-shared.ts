@@ -57,7 +57,7 @@ function buildThreadReplyTaskUrl(
   provider: CommunicationThreadReplyProvider,
   taskId: string,
 ): string {
-  const url = new URL(`${Env.ROOMOTE_APP_URL}/task/${taskId}`);
+  const url = new URL(`${Env.R_APP_URL}/task/${taskId}`);
 
   url.searchParams.set('utm_source', provider);
   url.searchParams.set('utm_medium', 'link');

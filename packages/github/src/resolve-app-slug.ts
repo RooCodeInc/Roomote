@@ -30,9 +30,7 @@ export async function resolveConfiguredGitHubAppSlug(): Promise<string> {
   }
 
   try {
-    const slug =
-      (await resolveDeploymentEnvVar('NEXT_PUBLIC_GITHUB_APP_SLUG')) ??
-      (await resolveDeploymentEnvVar('GITHUB_APP_SLUG'));
+    const slug = await resolveDeploymentEnvVar('R_GITHUB_APP_SLUG');
 
     setConfiguredGitHubAppSlugCache({
       value: slug,

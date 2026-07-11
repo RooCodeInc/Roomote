@@ -116,8 +116,8 @@ export function resolveGitHubAppCredentials(
   }
 
   return {
-    appId: Env.GITHUB_APP_ID,
-    privateKey: Env.GITHUB_APP_PRIVATE_KEY,
+    appId: Env.R_GITHUB_APP_ID,
+    privateKey: Env.R_GITHUB_APP_PRIVATE_KEY,
   };
 }
 
@@ -129,8 +129,8 @@ export async function resolveRuntimeGitHubAppCredentials(
   }
 
   const [appId, privateKey] = await Promise.all([
-    resolveDeploymentEnvVar('GITHUB_APP_ID'),
-    resolveDeploymentEnvVar('GITHUB_APP_PRIVATE_KEY'),
+    resolveDeploymentEnvVar('R_GITHUB_APP_ID'),
+    resolveDeploymentEnvVar('R_GITHUB_APP_PRIVATE_KEY'),
   ]);
 
   if (appId && privateKey) {

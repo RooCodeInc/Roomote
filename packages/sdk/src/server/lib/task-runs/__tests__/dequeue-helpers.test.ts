@@ -8,6 +8,7 @@ const {
   mockCreateTaskRunScopedGitLabTokens,
   mockCreateTaskRunGiteaCredentials,
   mockCreateTaskRunAdoCredentials,
+  mockResolveEffectiveModelRuntimeEnv,
 } = vi.hoisted(() => ({
   mockDecryptSecrets: vi.fn(),
   mockEnvironmentVariablesFindMany: vi.fn(),
@@ -15,6 +16,7 @@ const {
   mockCreateTaskRunScopedGitLabTokens: vi.fn(),
   mockCreateTaskRunGiteaCredentials: vi.fn(),
   mockCreateTaskRunAdoCredentials: vi.fn(),
+  mockResolveEffectiveModelRuntimeEnv: vi.fn(),
 }));
 
 vi.mock('@roomote/db/encryption', () => ({
@@ -45,6 +47,8 @@ vi.mock('@roomote/db/server', () => ({
   // fall through to the GitHub default. Provider-stamped payloads never reach
   // it. Individual tests override with mockResolvedValueOnce when needed.
   resolveWorkspaceSourceControlProvider: vi.fn(async () => undefined),
+  resolveEffectiveModelRuntimeEnv: (...args: unknown[]) =>
+    mockResolveEffectiveModelRuntimeEnv(...args),
   inArray: vi.fn(),
   markTaskStartParallelCountEndedAt: vi.fn(),
   resolveTaskAttribution: vi.fn(),
@@ -81,6 +85,7 @@ import { resolveWorkspaceSourceControlProvider } from '@roomote/db/server';
 
 import {
   createSourceControlTokenForTaskRun,
+  fetchResolvedRuntimeEnvVars,
   redactControlPlaneEnvVars,
   redactSourceControlProviderEnvVars,
 } from '../dequeue-helpers';
@@ -455,13 +460,13 @@ describe('redactControlPlaneEnvVars', () => {
       redactControlPlaneEnvVars({
         // Control-plane secrets that must never reach the sandbox.
         ENCRYPTION_KEY: 'enc',
-        GITHUB_APP_PRIVATE_KEY: 'app-key',
+        R_GITHUB_APP_PRIVATE_KEY: 'app-key',
         JOB_AUTH_PRIVATE_KEY: 'job-key',
         MODAL_TOKEN_SECRET: 'modal',
         E2B_API_KEY: 'e2b',
         DAYTONA_API_KEY: 'daytona',
-        SLACK_SIGNING_SECRET: 'slack',
-        TELEGRAM_BOT_TOKEN: 'tg',
+        R_SLACK_SIGNING_SECRET: 'slack',
+        R_TELEGRAM_BOT_TOKEN: 'tg',
         DASHBOARD_PASSWORD: 'dash',
         DATABASE_URL: 'postgres://x',
         S3_SECRET_ACCESS_KEY: 's3',
@@ -469,9 +474,9 @@ describe('redactControlPlaneEnvVars', () => {
         GITLAB_WEBHOOK_SECRET: 'gl-webhook',
         GITLAB_CLIENT_SECRET: 'gl-client',
         // Derived from the sign-in auth catalog.
-        ROOMOTE_AUTH_MICROSOFT_CLIENT_SECRET: 'ms',
+        R_MICROSOFT_CLIENT_SECRET: 'ms',
         // Teams bot secret (hand-listed bot integration).
-        TEAMS_BOT_APP_PASSWORD: 'teams',
+        R_TEAMS_BOT_APP_PASSWORD: 'teams',
         // Legitimate task + model env that must be preserved.
         OPENAI_API_KEY: 'sk-test',
         ANTHROPIC_API_KEY: 'sk-ant',
@@ -493,5 +498,43 @@ describe('redactControlPlaneEnvVars', () => {
   it('returns the same object when no instance secrets are present', () => {
     const envVars = { OPENAI_API_KEY: 'sk-test', MY_APP_CONFIG: 'value' };
     expect(redactControlPlaneEnvVars(envVars)).toBe(envVars);
+  });
+});
+
+describe('fetchResolvedRuntimeEnvVars', () => {
+  it('mirrors resolved model env to legacy ROOMOTE_* aliases for pre-rename snapshot workers', async () => {
+    mockResolveEffectiveModelRuntimeEnv.mockResolvedValueOnce({
+      R_MODEL: 'anthropic/claude-test',
+      R_MODEL_REASONING_EFFORT: 'high',
+      R_MODEL_ENV_KEYS: 'ANTHROPIC_API_KEY',
+      ANTHROPIC_API_KEY: 'sk-ant',
+    });
+
+    const envVars = await fetchResolvedRuntimeEnvVars({
+      MY_APP_CONFIG: 'value',
+    });
+
+    expect(envVars).toMatchObject({
+      R_MODEL: 'anthropic/claude-test',
+      ROOMOTE_MODEL: 'anthropic/claude-test',
+      R_MODEL_REASONING_EFFORT: 'high',
+      ROOMOTE_MODEL_REASONING_EFFORT: 'high',
+      R_MODEL_ENV_KEYS: 'ANTHROPIC_API_KEY',
+      ROOMOTE_MODEL_ENV_KEYS: 'ANTHROPIC_API_KEY',
+      MY_APP_CONFIG: 'value',
+    });
+  });
+
+  it('does not overwrite an explicitly configured legacy name', async () => {
+    mockResolveEffectiveModelRuntimeEnv.mockResolvedValueOnce({
+      R_MODEL: 'anthropic/claude-test',
+    });
+
+    const envVars = await fetchResolvedRuntimeEnvVars({
+      ROOMOTE_MODEL: 'operator/explicit',
+    });
+
+    expect(envVars.ROOMOTE_MODEL).toBe('operator/explicit');
+    expect(envVars.R_MODEL).toBe('anthropic/claude-test');
   });
 });

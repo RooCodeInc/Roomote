@@ -40,10 +40,13 @@ const SYSTEM_KEYS = [
 
 // Capture worker-only config from the launcher, then scrub it from process.env
 // so nested application commands do not inherit it accidentally.
-const WORKER_INTERNAL_CONFIG_KEYS = ['ROOMOTE_APP_ENV', 'APP_ENV'];
+const WORKER_INTERNAL_CONFIG_KEYS = ['R_APP_ENV', 'APP_ENV'];
 const BLOCKED_USER_FACING_ENV_KEYS = new Set([
   'AUTH_TOKEN',
   'TRPC_URL',
+  'R_APP_URL',
+  // Legacy alias the controller injects for pre-rename snapshot workers;
+  // scrub it from task processes the same as R_APP_URL.
   'ROOMOTE_APP_URL',
   'JOB_AUTH_PRIVATE_KEY',
   'JOB_AUTH_PUBLIC_KEY',
@@ -53,19 +56,19 @@ const BLOCKED_USER_FACING_ENV_KEYS = new Set([
   'PREVIEW_PROXY_SUBDOMAIN_SUFFIX',
 ]);
 const MODEL_RUNTIME_ENV_KEYS = [
-  'ROOMOTE_MODEL',
-  'ROOMOTE_SMALL_MODEL',
-  'ROOMOTE_VISION_MODEL',
-  'ROOMOTE_CODE_REVIEW_MODEL',
-  'ROOMOTE_EXPLORE_MODEL',
-  'ROOMOTE_PLANNING_MODEL',
-  'ROOMOTE_MODEL_REASONING_EFFORT',
-  'ROOMOTE_SMALL_MODEL_REASONING_EFFORT',
-  'ROOMOTE_VISION_MODEL_REASONING_EFFORT',
-  'ROOMOTE_CODE_REVIEW_MODEL_REASONING_EFFORT',
-  'ROOMOTE_EXPLORE_MODEL_REASONING_EFFORT',
-  'ROOMOTE_PLANNING_MODEL_REASONING_EFFORT',
-  'ROOMOTE_MODEL_ENV_KEYS',
+  'R_MODEL',
+  'R_SMALL_MODEL',
+  'R_VISION_MODEL',
+  'R_CODE_REVIEW_MODEL',
+  'R_EXPLORE_MODEL',
+  'R_PLANNING_MODEL',
+  'R_MODEL_REASONING_EFFORT',
+  'R_SMALL_MODEL_REASONING_EFFORT',
+  'R_VISION_MODEL_REASONING_EFFORT',
+  'R_CODE_REVIEW_MODEL_REASONING_EFFORT',
+  'R_EXPLORE_MODEL_REASONING_EFFORT',
+  'R_PLANNING_MODEL_REASONING_EFFORT',
+  'R_MODEL_ENV_KEYS',
   'OPENCODE_CONFIG_CONTENT',
   'OPENCODE_COMMAND',
   OPENCODE_AUTH_CONTENT_ENV_VAR_NAME,
@@ -85,7 +88,7 @@ function buildLauncherOpenCodeEnv(
 
   const providerKeys = new Set([
     ...DEFAULT_MODEL_PROVIDER_ENV_KEYS,
-    ...parseModelProviderEnvKeys(processEnv.ROOMOTE_MODEL_ENV_KEYS),
+    ...parseModelProviderEnvKeys(processEnv.R_MODEL_ENV_KEYS),
   ]);
 
   for (const key of providerKeys) {
@@ -198,7 +201,7 @@ export class WorkerEnv {
     }
 
     // Extract worker infrastructure secrets.
-    const requiredVars = ['AUTH_TOKEN', 'TRPC_URL', 'ROOMOTE_APP_URL'] as const;
+    const requiredVars = ['AUTH_TOKEN', 'TRPC_URL', 'R_APP_URL'] as const;
 
     for (const key of requiredVars) {
       if (!processEnv[key]) {
@@ -214,8 +217,8 @@ export class WorkerEnv {
       previewProxySubdomainSuffix: processEnv.PREVIEW_PROXY_SUBDOMAIN_SUFFIX,
       previewAuthPublicKey: processEnv.PREVIEW_AUTH_PUBLIC_KEY,
       previewAuthCookieName: processEnv.PREVIEW_AUTH_COOKIE_NAME,
-      roomoteAppUrl: processEnv.ROOMOTE_APP_URL!,
-      appEnv: processEnv.ROOMOTE_APP_ENV ?? processEnv.APP_ENV,
+      roomoteAppUrl: processEnv.R_APP_URL!,
+      appEnv: processEnv.R_APP_ENV ?? processEnv.APP_ENV,
     };
 
     const env = new WorkerEnv({
@@ -309,7 +312,7 @@ export class WorkerEnv {
       ...(this.workerConfig.appEnv
         ? {
             APP_ENV: this.workerConfig.appEnv,
-            ROOMOTE_APP_ENV: this.workerConfig.appEnv,
+            R_APP_ENV: this.workerConfig.appEnv,
           }
         : {}),
       ...this.serviceEnv,

@@ -22,8 +22,8 @@ vi.mock('@roomote/sdk/server', () => ({
 
 vi.mock('@/lib/server', () => ({
   Env: {
-    ROOMOTE_PUBLIC_URL: 'https://roomote.example.com',
-    ROOMOTE_APP_URL: 'https://app.example.com',
+    R_PUBLIC_URL: 'https://roomote.example.com',
+    R_APP_URL: 'https://app.example.com',
   },
 }));
 
@@ -38,7 +38,7 @@ function buildCredentials(
     botAppId: string | null;
     botAppPassword: string | null;
     botTenantId: string | null;
-    source: 'teams_bot' | 'microsoft_auth' | null;
+    source: 'teams_bot' | null;
   }> = {},
 ) {
   return {

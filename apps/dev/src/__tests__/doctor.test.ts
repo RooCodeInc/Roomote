@@ -100,14 +100,14 @@ function mockExeca({
   ports?: MockPorts;
 } = {}) {
   const webEnv = {
-    ROOMOTE_PUBLIC_URL: publicUrl,
+    R_PUBLIC_URL: publicUrl,
     ...(includeDefaultAuth
       ? {
-          ROOMOTE_AUTH_SLACK_CLIENT_ID: 'slack-client-id',
-          ROOMOTE_AUTH_SLACK_CLIENT_SECRET: 'slack-client-secret',
+          R_SLACK_CLIENT_ID: 'slack-client-id',
+          R_SLACK_CLIENT_SECRET: 'slack-client-secret',
         }
       : {}),
-    ROOMOTE_MODEL: 'openrouter/openai/gpt-5.4',
+    R_MODEL: 'openrouter/openai/gpt-5.4',
     OPENROUTER_API_KEY: 'openrouter-key',
     ...getPortEnv(ports),
     ...extraWebEnv,
@@ -217,7 +217,7 @@ describe('runDoctor', () => {
   it('recognizes Vercel AI Gateway credentials from the shared provider metadata', async () => {
     mockExeca({
       extraWebEnv: {
-        ROOMOTE_MODEL: 'vercel/openai/gpt-5.4',
+        R_MODEL: 'vercel/openai/gpt-5.4',
         OPENROUTER_API_KEY: undefined,
         AI_GATEWAY_API_KEY: 'vercel-key',
       },
@@ -229,7 +229,7 @@ describe('runDoctor', () => {
       expect.objectContaining({
         name: 'Model config',
         status: 'pass',
-        detail: 'ROOMOTE_MODEL configured with vercel credentials',
+        detail: 'R_MODEL configured with vercel credentials',
       }),
     );
   });
@@ -238,9 +238,9 @@ describe('runDoctor', () => {
     mockExeca({
       includeDefaultAuth: false,
       extraWebEnv: {
-        ROOMOTE_AUTH_MICROSOFT_CLIENT_ID: 'microsoft-client-id',
-        ROOMOTE_AUTH_MICROSOFT_CLIENT_SECRET: 'microsoft-client-secret',
-        ROOMOTE_AUTH_MICROSOFT_TENANT_ID: 'microsoft-tenant-id',
+        R_MICROSOFT_CLIENT_ID: 'microsoft-client-id',
+        R_MICROSOFT_CLIENT_SECRET: 'microsoft-client-secret',
+        R_MICROSOFT_TENANT_ID: 'microsoft-tenant-id',
       },
     });
 
@@ -259,8 +259,8 @@ describe('runDoctor', () => {
     mockExeca({
       includeDefaultAuth: false,
       extraWebEnv: {
-        ROOMOTE_AUTH_MICROSOFT_CLIENT_ID: 'microsoft-client-id',
-        ROOMOTE_AUTH_MICROSOFT_CLIENT_SECRET: 'microsoft-client-secret',
+        R_MICROSOFT_CLIENT_ID: 'microsoft-client-id',
+        R_MICROSOFT_CLIENT_SECRET: 'microsoft-client-secret',
       },
     });
 
@@ -278,7 +278,7 @@ describe('runDoctor', () => {
   it('warns when Teams bot config is missing required credentials', async () => {
     mockExeca({
       extraWebEnv: {
-        TEAMS_BOT_APP_ID: 'teams-bot-app-id',
+        R_TEAMS_BOT_APP_ID: 'teams-bot-app-id',
       },
     });
 
@@ -288,7 +288,7 @@ describe('runDoctor', () => {
       expect.objectContaining({
         name: 'Teams bot config',
         status: 'warn',
-        detail: 'incomplete Teams bot config; missing TEAMS_BOT_APP_PASSWORD',
+        detail: 'incomplete Teams bot config; missing R_TEAMS_BOT_APP_PASSWORD',
       }),
     );
   });
@@ -296,9 +296,9 @@ describe('runDoctor', () => {
   it('warns when the Teams bot token endpoint is not an absolute URL', async () => {
     mockExeca({
       extraWebEnv: {
-        TEAMS_BOT_APP_ID: 'teams-bot-app-id',
-        TEAMS_BOT_APP_PASSWORD: 'teams-bot-secret',
-        TEAMS_BOT_TOKEN_ENDPOINT: 'not-a-url',
+        R_TEAMS_BOT_APP_ID: 'teams-bot-app-id',
+        R_TEAMS_BOT_APP_PASSWORD: 'teams-bot-secret',
+        R_TEAMS_BOT_TOKEN_ENDPOINT: 'not-a-url',
       },
     });
 
@@ -308,7 +308,7 @@ describe('runDoctor', () => {
       expect.objectContaining({
         name: 'Teams bot config',
         status: 'warn',
-        detail: 'TEAMS_BOT_TOKEN_ENDPOINT must be an absolute URL',
+        detail: 'R_TEAMS_BOT_TOKEN_ENDPOINT must be an absolute URL',
       }),
     );
   });
@@ -316,9 +316,9 @@ describe('runDoctor', () => {
   it('checks live Teams bot token exchange and public callback reachability', async () => {
     mockExeca({
       extraWebEnv: {
-        TEAMS_BOT_APP_ID: 'teams-bot-app-id',
-        TEAMS_BOT_APP_PASSWORD: 'teams-bot-secret',
-        TEAMS_BOT_TENANT_ID: 'teams-tenant-id',
+        R_TEAMS_BOT_APP_ID: 'teams-bot-app-id',
+        R_TEAMS_BOT_APP_PASSWORD: 'teams-bot-secret',
+        R_TEAMS_BOT_TENANT_ID: 'teams-tenant-id',
       },
     });
 
@@ -355,8 +355,8 @@ describe('runDoctor', () => {
     mockFetch(200, { teamsTokenStatus: 401 });
     mockExeca({
       extraWebEnv: {
-        TEAMS_BOT_APP_ID: 'teams-bot-app-id',
-        TEAMS_BOT_APP_PASSWORD: 'teams-bot-secret',
+        R_TEAMS_BOT_APP_ID: 'teams-bot-app-id',
+        R_TEAMS_BOT_APP_PASSWORD: 'teams-bot-secret',
       },
     });
 
@@ -375,8 +375,8 @@ describe('runDoctor', () => {
     mockFetch(200, { teamsCallbackStatus: 404 });
     mockExeca({
       extraWebEnv: {
-        TEAMS_BOT_APP_ID: 'teams-bot-app-id',
-        TEAMS_BOT_APP_PASSWORD: 'teams-bot-secret',
+        R_TEAMS_BOT_APP_ID: 'teams-bot-app-id',
+        R_TEAMS_BOT_APP_PASSWORD: 'teams-bot-secret',
       },
     });
 
@@ -416,10 +416,10 @@ describe('runDoctor', () => {
                 env:
                   name === 'roomote-web'
                     ? {
-                        ROOMOTE_PUBLIC_URL: 'https://roomote-matt.ngrok.app',
-                        ROOMOTE_AUTH_SLACK_CLIENT_ID: 'slack-client-id',
-                        ROOMOTE_AUTH_SLACK_CLIENT_SECRET: 'slack-client-secret',
-                        ROOMOTE_MODEL: 'openrouter/openai/gpt-5.4',
+                        R_PUBLIC_URL: 'https://roomote-matt.ngrok.app',
+                        R_SLACK_CLIENT_ID: 'slack-client-id',
+                        R_SLACK_CLIENT_SECRET: 'slack-client-secret',
+                        R_MODEL: 'openrouter/openai/gpt-5.4',
                       }
                     : {},
               },
@@ -437,7 +437,7 @@ describe('runDoctor', () => {
       expect.objectContaining({
         name: 'Model config',
         status: 'warn',
-        detail: 'ROOMOTE_MODEL configured; missing OPENROUTER_API_KEY',
+        detail: 'R_MODEL configured; missing OPENROUTER_API_KEY',
       }),
     );
   });
@@ -560,7 +560,7 @@ describe('runDoctor', () => {
                 env:
                   name === 'roomote-web'
                     ? {
-                        ROOMOTE_PUBLIC_URL: 'https://roomote-matt.ngrok.app',
+                        R_PUBLIC_URL: 'https://roomote-matt.ngrok.app',
                       }
                     : {},
               },
@@ -571,11 +571,11 @@ describe('runDoctor', () => {
 
       throw new Error(`Unexpected command: ${command} ${args?.join(' ')}`);
     });
-    delete process.env.ROOMOTE_AUTH_SLACK_CLIENT_ID;
-    delete process.env.ROOMOTE_AUTH_SLACK_CLIENT_SECRET;
-    delete process.env.SLACK_CLIENT_ID;
-    delete process.env.SLACK_CLIENT_SECRET;
-    delete process.env.ROOMOTE_MODEL;
+    delete process.env.R_SLACK_CLIENT_ID;
+    delete process.env.R_SLACK_CLIENT_SECRET;
+    delete process.env.R_SLACK_CLIENT_ID;
+    delete process.env.R_SLACK_CLIENT_SECRET;
+    delete process.env.R_MODEL;
 
     const checks = await runDoctor();
 
@@ -588,7 +588,7 @@ describe('runDoctor', () => {
   });
 
   it('warns when an auth provider has only a client ID or secret configured', async () => {
-    process.env.ROOMOTE_AUTH_SLACK_CLIENT_SECRET = 'shell-secret';
+    process.env.R_SLACK_CLIENT_SECRET = 'shell-secret';
 
     mockedExeca.mockImplementation(async (command, args) => {
       if (command === 'docker') {
@@ -614,9 +614,9 @@ describe('runDoctor', () => {
                 env:
                   name === 'roomote-web'
                     ? {
-                        ROOMOTE_PUBLIC_URL: 'https://roomote-matt.ngrok.app',
-                        ROOMOTE_AUTH_SLACK_CLIENT_ID: 'slack-client-id',
-                        ROOMOTE_MODEL: 'openrouter/openai/gpt-5.4',
+                        R_PUBLIC_URL: 'https://roomote-matt.ngrok.app',
+                        R_SLACK_CLIENT_ID: 'slack-client-id',
+                        R_MODEL: 'openrouter/openai/gpt-5.4',
                         OPENROUTER_API_KEY: 'openrouter-key',
                       }
                     : {},

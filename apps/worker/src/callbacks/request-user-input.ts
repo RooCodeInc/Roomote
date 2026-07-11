@@ -46,7 +46,7 @@ export function buildRequestUserInputTaskUrl(
     typeof webPath === 'string' && webPath.startsWith('/') ? webPath : null;
   const url = new URL(
     normalizedWebPath ?? `/task/${taskRun.taskId}`,
-    process.env.ROOMOTE_APP_URL,
+    process.env.R_APP_URL,
   );
 
   url.searchParams.set('utm_source', source);

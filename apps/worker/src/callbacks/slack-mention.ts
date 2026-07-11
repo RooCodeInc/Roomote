@@ -154,7 +154,7 @@ export const slackMentionCallbacks: RunTaskCallbacks = {
       // Build a single task URL that includes preview params for the primary service.
       const taskUrlObj = new URL(
         `/task/${taskRun.taskId}`,
-        process.env.ROOMOTE_APP_URL,
+        process.env.R_APP_URL,
       );
       taskUrlObj.searchParams.set('utm_source', 'slack');
       taskUrlObj.searchParams.set('utm_medium', 'link');

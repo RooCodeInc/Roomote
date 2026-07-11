@@ -6,6 +6,10 @@ const {
   mockRecordTaskMessageEnvelope,
   mockTrackSlackBotReply,
   mockSetLatestSlackBotReply,
+  mockCreateTaskRunGitHubToken,
+  mockPullsGet,
+  mockListCheckRunsForRef,
+  mockGetCombinedStatusForRef,
 } = vi.hoisted(() => ({
   mockGenerateObject: vi.fn(),
   mockReadSourceControlPullRequest: vi.fn(),
@@ -14,6 +18,10 @@ const {
   mockRecordTaskMessageEnvelope: vi.fn(),
   mockTrackSlackBotReply: vi.fn(),
   mockSetLatestSlackBotReply: vi.fn(),
+  mockCreateTaskRunGitHubToken: vi.fn(),
+  mockPullsGet: vi.fn(),
+  mockListCheckRunsForRef: vi.fn(),
+  mockGetCombinedStatusForRef: vi.fn(),
 }));
 
 vi.mock('@roomote/cloud-agents/server/non-task-provider-usage', () => ({
@@ -72,10 +80,30 @@ vi.mock('@roomote/slack', () => ({
   setLatestSlackBotReply: mockSetLatestSlackBotReply,
 }));
 
+vi.mock('@roomote/github', () => ({
+  createTaskRunGitHubToken: (...args: unknown[]) =>
+    mockCreateTaskRunGitHubToken(...args),
+  getOctokit: () => ({
+    rest: {
+      pulls: {
+        get: (...args: unknown[]) => mockPullsGet(...args),
+      },
+      checks: {
+        listForRef: (...args: unknown[]) => mockListCheckRunsForRef(...args),
+      },
+      repos: {
+        getCombinedStatusForRef: (...args: unknown[]) =>
+          mockGetCombinedStatusForRef(...args),
+      },
+    },
+  }),
+}));
+
 import type { TaskRun } from '@roomote/db/server';
 import type { PrReviewActivityEvent } from '../pr-review-notification';
 
 import {
+  collectCiChecks,
   gatherPrReviewTriageContext,
   preparePrReviewNotificationDelivery,
   recordPrReviewNotificationDeliveryBestEffort,
@@ -105,6 +133,23 @@ const events: PrReviewActivityEvent[] = [
 ];
 
 const eventsWithoutSelfReview: PrReviewActivityEvent[] = events.slice(0, 2);
+
+function mockGreenCiChecks() {
+  mockCreateTaskRunGitHubToken.mockResolvedValue('github-token');
+  mockPullsGet.mockResolvedValue({ data: { head: { sha: 'abc123' } } });
+  mockListCheckRunsForRef.mockResolvedValue({
+    data: {
+      check_runs: [
+        { name: 'CI / Lint', status: 'completed', conclusion: 'success' },
+        { name: 'CI / Tests', status: 'completed', conclusion: 'success' },
+      ],
+    },
+  });
+  // GitHub returns pending with an empty statuses list for Actions-only repos.
+  mockGetCombinedStatusForRef.mockResolvedValue({
+    data: { state: 'pending', statuses: [], total_count: 0 },
+  });
+}
 
 describe('preparePrReviewNotificationDelivery', () => {
   beforeEach(() => {
@@ -143,6 +188,7 @@ describe('preparePrReviewNotificationDelivery', () => {
       },
     });
     mockFormatMessage.mockReturnValue('formatted-message');
+    mockGreenCiChecks();
   });
 
   it('prepares a routed, formatted delivery from the shared SDK flow', async () => {
@@ -161,6 +207,48 @@ describe('preparePrReviewNotificationDelivery', () => {
       },
       text: 'formatted-message',
     });
+    expect(mockFormatMessage).toHaveBeenCalledWith({
+      repository: 'owner/repo',
+      prNumber: 42,
+      prUrl: 'https://github.com/owner/repo/pull/42',
+      provider: 'slack',
+      summary:
+        'alice approved [owner/repo#42](https://github.com/owner/repo/pull/42).',
+    });
+    const prompt = mockGenerateObject.mock.calls[0]?.[0]?.prompt as string;
+
+    expect(prompt).toContain('- CI / Lint: success');
+    expect(prompt).toContain('- CI / Tests: success');
+  });
+
+  it('passes one line per check status into the triage LLM context', async () => {
+    mockListCheckRunsForRef.mockResolvedValue({
+      data: {
+        check_runs: [
+          { name: 'CI / Lint', status: 'completed', conclusion: 'failure' },
+          { name: 'CI / Tests', status: 'completed', conclusion: 'success' },
+        ],
+      },
+    });
+    mockGetCombinedStatusForRef.mockResolvedValue({
+      data: {
+        state: 'failure',
+        total_count: 1,
+        statuses: [{ state: 'failure', context: 'legacy-ci' }],
+      },
+    });
+
+    await preparePrReviewNotificationDelivery({
+      taskRun,
+      request,
+      events,
+    });
+
+    const prompt = mockGenerateObject.mock.calls[0]?.[0]?.prompt as string;
+
+    expect(prompt).toContain('- CI / Lint: failure');
+    expect(prompt).toContain('- CI / Tests: success');
+    expect(prompt).toContain('- legacy-ci: failure');
     expect(mockFormatMessage).toHaveBeenCalledWith({
       repository: 'owner/repo',
       prNumber: 42,
@@ -262,6 +350,9 @@ describe('triagePrReviewActivity', () => {
     expect(system).toContain(
       'do not omit the platform name on these self-review messages',
     );
+    expect(system).toContain(
+      'when "Current pull request state" includes CI check lines',
+    );
   });
 
   it('includes the latest Roomote review summary comment verbatim for self-review results', async () => {
@@ -278,6 +369,12 @@ describe('triagePrReviewActivity', () => {
         latestReviewStatus: '2 issues outstanding.',
         latestReviewSummaryComment:
           '<!-- roomote-review-summary sha=abc mode=initial -->\n<!-- roomote-review-checklist:start -->\n- [ ] `apps/api/src/foo.ts:10` - Handle null actor ids\n- [ ] `apps/api/src/bar.ts:20` - Rename the helper to match its return shape\n<!-- roomote-review-checklist:end -->',
+        ciStatus: {
+          checks: [
+            { name: 'CI / Lint', status: 'success' },
+            { name: 'CI / Tests', status: 'success' },
+          ],
+        },
       },
     });
 
@@ -289,7 +386,9 @@ describe('triagePrReviewActivity', () => {
     expect(prompt).toContain('Handle null actor ids');
     expect(prompt).toContain('Rename the helper to match its return shape');
     expect(prompt).not.toContain('- Latest automated review status:');
-    expect(prompt).not.toContain('Current pull request state:');
+    expect(prompt).toContain('Current pull request state:');
+    expect(prompt).toContain('- CI / Lint: success');
+    expect(prompt).toContain('- CI / Tests: success');
   });
 
   it('returns a skip decision when the model says the activity is not worth notifying', async () => {
@@ -354,6 +453,7 @@ describe('gatherPrReviewTriageContext', () => {
       ],
       warnings: [],
     });
+    mockGreenCiChecks();
   });
 
   it('collects thread counts and the latest review status', async () => {
@@ -369,13 +469,84 @@ describe('gatherPrReviewTriageContext', () => {
       latestReviewStatus: 'All 1 issue addressed. See task',
       latestReviewSummaryComment:
         '<!-- roomote-review-summary sha=abc mode=initial -->\n<!-- roomote-review-status:start -->\n**All 1 issue addressed.** [See task](https://example.com)\n<!-- roomote-review-status:end -->',
+      ciStatus: {
+        checks: [
+          { name: 'CI / Lint', status: 'success' },
+          { name: 'CI / Tests', status: 'success' },
+        ],
+      },
     });
+  });
+
+  it('includes pending CI status when checks are still running', async () => {
+    mockListCheckRunsForRef.mockResolvedValue({
+      data: {
+        check_runs: [
+          { name: 'CI / Tests', status: 'in_progress', conclusion: null },
+        ],
+      },
+    });
+    mockGetCombinedStatusForRef.mockResolvedValue({
+      data: { state: 'pending', statuses: [], total_count: 0 },
+    });
+
+    const context = await gatherPrReviewTriageContext({
+      taskRun,
+      repository: request.repository,
+      prNumber: request.prNumber,
+    });
+
+    expect(context.ciStatus).toEqual({
+      checks: [{ name: 'CI / Tests', status: 'pending' }],
+    });
+  });
+
+  it('includes one line per Actions check without empty classic statuses', async () => {
+    mockListCheckRunsForRef.mockResolvedValue({
+      data: {
+        check_runs: [
+          { name: 'CI / Lint', status: 'completed', conclusion: 'success' },
+          { name: 'CI / Tests', status: 'completed', conclusion: 'success' },
+        ],
+      },
+    });
+    mockGetCombinedStatusForRef.mockResolvedValue({
+      data: { state: 'pending', statuses: [], total_count: 0 },
+    });
+
+    const context = await gatherPrReviewTriageContext({
+      taskRun,
+      repository: request.repository,
+      prNumber: request.prNumber,
+    });
+
+    expect(context.ciStatus).toEqual({
+      checks: [
+        { name: 'CI / Lint', status: 'success' },
+        { name: 'CI / Tests', status: 'success' },
+      ],
+    });
+  });
+
+  it('skips CI status for non-GitHub source-control providers', async () => {
+    const context = await gatherPrReviewTriageContext({
+      taskRun,
+      repository: request.repository,
+      prNumber: request.prNumber,
+      sourceControlProvider: 'gitlab',
+    });
+
+    expect(context.ciStatus).toBeNull();
+    expect(mockPullsGet).not.toHaveBeenCalled();
+    expect(mockListCheckRunsForRef).not.toHaveBeenCalled();
+    expect(mockGetCombinedStatusForRef).not.toHaveBeenCalled();
   });
 
   it('degrades to null signals when gathering fails', async () => {
     mockReadSourceControlPullRequest.mockRejectedValue(
       new Error('github unavailable'),
     );
+    mockPullsGet.mockRejectedValue(new Error('github unavailable'));
 
     const context = await gatherPrReviewTriageContext({
       taskRun,
@@ -388,7 +559,48 @@ describe('gatherPrReviewTriageContext', () => {
       unresolvedThreadCount: null,
       latestReviewStatus: null,
       latestReviewSummaryComment: null,
+      ciStatus: null,
     });
+  });
+});
+
+describe('collectCiChecks', () => {
+  it('keeps distinct checks that share a leaf name segment', () => {
+    expect(
+      collectCiChecks({
+        checkRuns: [
+          {
+            name: 'CI / Lint',
+            status: 'completed',
+            conclusion: 'failure',
+          },
+          {
+            name: 'Docs / Lint',
+            status: 'completed',
+            conclusion: 'success',
+          },
+        ],
+        statusContexts: [],
+      }),
+    ).toEqual([
+      { name: 'CI / Lint', status: 'failure' },
+      { name: 'Docs / Lint', status: 'success' },
+    ]);
+  });
+
+  it('prefers the more severe status when the same full check name collides', () => {
+    expect(
+      collectCiChecks({
+        checkRuns: [
+          {
+            name: 'CI / Lint',
+            status: 'completed',
+            conclusion: 'success',
+          },
+        ],
+        statusContexts: [{ context: 'CI / Lint', state: 'failure' }],
+      }),
+    ).toEqual([{ name: 'CI / Lint', status: 'failure' }]);
   });
 });
 

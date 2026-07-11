@@ -10,7 +10,16 @@
 set -Eeuo pipefail
 
 repo_root="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../.." && pwd)"
-baseline_channel="${BASELINE_CHANNEL:-develop}"
+baseline_channel="${BASELINE_CHANNEL-develop}"
+
+# An explicitly empty baseline means there is no usable previous release to
+# validate against (bootstrap: nothing published yet). Skip instead of
+# booting a known-incompatible or nonexistent image.
+if [ -z "$baseline_channel" ]; then
+  printf 'No usable previous release baseline; skipping upgrade compatibility.\n'
+  exit 0
+fi
+
 baseline_registry="${BASELINE_IMAGE_REGISTRY:-ghcr.io}"
 baseline_namespace="${BASELINE_IMAGE_NAMESPACE:-roocodeinc}"
 project_name="${COMPOSE_PROJECT_NAME:-roomote-upgrade-ci}"
@@ -21,10 +30,11 @@ worker_network="${DOCKER_WORKER_NETWORK:-${project_name}_worker}"
 temporary_directory="$(mktemp -d)"
 env_file="$temporary_directory/deployment.env"
 
-# Only published channel aliases have a defined previous release. Anything
-# else (workflow_dispatch from a feature branch) validates against develop.
+# Published channel aliases and v* release tags have a defined previous
+# release. Anything else (workflow_dispatch from a feature branch) validates
+# against develop.
 case "$baseline_channel" in
-  develop | main) ;;
+  develop | main | v[0-9]*) ;;
   *)
     printf 'No published channel for %s; using develop as the baseline\n' "$baseline_channel"
     baseline_channel='develop'

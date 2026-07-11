@@ -102,7 +102,7 @@ const server = new MockTelegramServer({
   state: substitute(scenario.state) as MockTelegramState,
   roomoteTarget: {
     webhookUrl: values.webhook!,
-    secretToken: process.env.TELEGRAM_WEBHOOK_SECRET ?? '',
+    secretToken: process.env.R_TELEGRAM_WEBHOOK_SECRET ?? '',
   },
 });
 const baseUrl = await server.start(Number.parseInt(values.port!, 10));

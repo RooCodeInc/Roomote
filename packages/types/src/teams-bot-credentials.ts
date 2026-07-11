@@ -10,21 +10,18 @@ export type TeamsBotRuntimeCredentials = {
 };
 
 export const TEAMS_BOT_CREDENTIAL_ENV_VAR_NAMES = [
-  'TEAMS_BOT_APP_ID',
-  'TEAMS_BOT_APP_PASSWORD',
-  'TEAMS_BOT_TENANT_ID',
-  'TEAMS_BOT_NAME',
-  'TEAMS_BOT_TOKEN_ENDPOINT',
-  'TEAMS_BOT_OAUTH_SCOPE',
-  'ROOMOTE_AUTH_MICROSOFT_CLIENT_ID',
-  'ROOMOTE_AUTH_MICROSOFT_CLIENT_SECRET',
-  'ROOMOTE_AUTH_MICROSOFT_TENANT_ID',
+  'R_TEAMS_BOT_APP_ID',
+  'R_TEAMS_BOT_APP_PASSWORD',
+  'R_TEAMS_BOT_TENANT_ID',
+  'R_TEAMS_BOT_NAME',
+  'R_TEAMS_BOT_TOKEN_ENDPOINT',
+  'R_TEAMS_BOT_OAUTH_SCOPE',
 ] as const;
 
 export const MICROSOFT_SINGLE_APP_TEAMS_BOT_FIELD_SOURCES = {
-  TEAMS_BOT_APP_ID: 'ROOMOTE_AUTH_MICROSOFT_CLIENT_ID',
-  TEAMS_BOT_APP_PASSWORD: 'ROOMOTE_AUTH_MICROSOFT_CLIENT_SECRET',
-  TEAMS_BOT_TENANT_ID: 'ROOMOTE_AUTH_MICROSOFT_TENANT_ID',
+  R_TEAMS_BOT_APP_ID: 'R_MICROSOFT_CLIENT_ID',
+  R_TEAMS_BOT_APP_PASSWORD: 'R_MICROSOFT_CLIENT_SECRET',
+  R_TEAMS_BOT_TENANT_ID: 'R_MICROSOFT_TENANT_ID',
 } as const;
 
 export type TeamsBotInferredFieldEnvVarName =
@@ -41,49 +38,42 @@ function trimmed(value: string | undefined): string | null {
   return value?.trim() || null;
 }
 
-function hasConfiguredValue(
-  env: Partial<Record<string, string | undefined>>,
-  name: string,
-): boolean {
-  return trimmed(env[name]) !== null;
-}
-
 export function resolveTeamsBotCredentialEnvVarNames(input: {
   hasConfiguredEnvVar: (name: string) => boolean;
 }): TeamsBotCredentialEnvVarResolution {
-  const hasTeamsBotAppId = input.hasConfiguredEnvVar('TEAMS_BOT_APP_ID');
+  const hasTeamsBotAppId = input.hasConfiguredEnvVar('R_TEAMS_BOT_APP_ID');
   const hasTeamsBotAppPassword = input.hasConfiguredEnvVar(
-    'TEAMS_BOT_APP_PASSWORD',
+    'R_TEAMS_BOT_APP_PASSWORD',
   );
 
   if (hasTeamsBotAppId && hasTeamsBotAppPassword) {
     return {
       source: 'teams_bot',
       fieldSourceEnvVarNames: {
-        TEAMS_BOT_APP_ID: 'TEAMS_BOT_APP_ID',
-        TEAMS_BOT_APP_PASSWORD: 'TEAMS_BOT_APP_PASSWORD',
-        ...(input.hasConfiguredEnvVar('TEAMS_BOT_TENANT_ID')
-          ? { TEAMS_BOT_TENANT_ID: 'TEAMS_BOT_TENANT_ID' }
+        R_TEAMS_BOT_APP_ID: 'R_TEAMS_BOT_APP_ID',
+        R_TEAMS_BOT_APP_PASSWORD: 'R_TEAMS_BOT_APP_PASSWORD',
+        ...(input.hasConfiguredEnvVar('R_TEAMS_BOT_TENANT_ID')
+          ? { R_TEAMS_BOT_TENANT_ID: 'R_TEAMS_BOT_TENANT_ID' }
           : {}),
       },
     };
   }
 
   const hasMicrosoftClientId = input.hasConfiguredEnvVar(
-    'ROOMOTE_AUTH_MICROSOFT_CLIENT_ID',
+    'R_MICROSOFT_CLIENT_ID',
   );
   const hasMicrosoftClientSecret = input.hasConfiguredEnvVar(
-    'ROOMOTE_AUTH_MICROSOFT_CLIENT_SECRET',
+    'R_MICROSOFT_CLIENT_SECRET',
   );
 
   if (hasMicrosoftClientId && hasMicrosoftClientSecret) {
     return {
       source: 'microsoft_auth',
       fieldSourceEnvVarNames: {
-        TEAMS_BOT_APP_ID: 'ROOMOTE_AUTH_MICROSOFT_CLIENT_ID',
-        TEAMS_BOT_APP_PASSWORD: 'ROOMOTE_AUTH_MICROSOFT_CLIENT_SECRET',
-        ...(input.hasConfiguredEnvVar('ROOMOTE_AUTH_MICROSOFT_TENANT_ID')
-          ? { TEAMS_BOT_TENANT_ID: 'ROOMOTE_AUTH_MICROSOFT_TENANT_ID' }
+        R_TEAMS_BOT_APP_ID: 'R_MICROSOFT_CLIENT_ID',
+        R_TEAMS_BOT_APP_PASSWORD: 'R_MICROSOFT_CLIENT_SECRET',
+        ...(input.hasConfiguredEnvVar('R_MICROSOFT_TENANT_ID')
+          ? { R_TEAMS_BOT_TENANT_ID: 'R_MICROSOFT_TENANT_ID' }
           : {}),
       },
     };
@@ -98,31 +88,19 @@ export function resolveTeamsBotCredentialEnvVarNames(input: {
 export function resolveTeamsBotRuntimeCredentialsFromEnv(
   env: Partial<Record<string, string | undefined>>,
 ): TeamsBotRuntimeCredentials {
-  const botTokenEndpoint = trimmed(env.TEAMS_BOT_TOKEN_ENDPOINT);
-  const botOauthScope = trimmed(env.TEAMS_BOT_OAUTH_SCOPE);
-  const resolution = resolveTeamsBotCredentialEnvVarNames({
-    hasConfiguredEnvVar: (name) => hasConfiguredValue(env, name),
-  });
+  const botTokenEndpoint = trimmed(env.R_TEAMS_BOT_TOKEN_ENDPOINT);
+  const botOauthScope = trimmed(env.R_TEAMS_BOT_OAUTH_SCOPE);
+  const botAppId = trimmed(env.R_TEAMS_BOT_APP_ID);
+  const botAppPassword = trimmed(env.R_TEAMS_BOT_APP_PASSWORD);
 
-  if (resolution.source === 'teams_bot') {
+  if (botAppId && botAppPassword) {
     return {
-      botAppId: trimmed(env.TEAMS_BOT_APP_ID),
-      botAppPassword: trimmed(env.TEAMS_BOT_APP_PASSWORD),
-      botTenantId: trimmed(env.TEAMS_BOT_TENANT_ID),
+      botAppId,
+      botAppPassword,
+      botTenantId: trimmed(env.R_TEAMS_BOT_TENANT_ID),
       botTokenEndpoint,
       botOauthScope,
       source: 'teams_bot',
-    };
-  }
-
-  if (resolution.source === 'microsoft_auth') {
-    return {
-      botAppId: trimmed(env.ROOMOTE_AUTH_MICROSOFT_CLIENT_ID),
-      botAppPassword: trimmed(env.ROOMOTE_AUTH_MICROSOFT_CLIENT_SECRET),
-      botTenantId: trimmed(env.ROOMOTE_AUTH_MICROSOFT_TENANT_ID),
-      botTokenEndpoint,
-      botOauthScope,
-      source: 'microsoft_auth',
     };
   }
 

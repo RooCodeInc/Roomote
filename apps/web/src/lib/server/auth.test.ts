@@ -82,8 +82,8 @@ vi.mock('./bootstrap-runtime-env', () => ({
 vi.mock('./env', () => ({
   Env: {
     ENCRYPTION_KEY: 'test-encryption-key',
-    ROOMOTE_ALLOWED_EMAILS: undefined,
-    ROOMOTE_APP_URL: 'http://localhost:3000',
+    R_ALLOWED_EMAILS: undefined,
+    R_APP_URL: 'http://localhost:3000',
   },
   getEncryptionKey: () => 'test-encryption-key',
   getBetterAuthSecret: () => 'test-better-auth-secret',
