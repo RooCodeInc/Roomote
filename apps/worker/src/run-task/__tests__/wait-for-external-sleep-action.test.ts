@@ -146,6 +146,48 @@ describe('waitForExternalSleepAction', () => {
     expect(findRuntimeStateByIdMock).toHaveBeenCalledWith(789);
   });
 
+  it('waits for BullMQ to retain a resumable Blaxel sandbox on standby', async () => {
+    findRuntimeStateByIdMock
+      .mockResolvedValueOnce({
+        sleepRequestedAt: new Date(),
+        snapshotRequestedAt: null,
+        snapshotCreatedAt: null,
+        snapshotFailedAt: null,
+        error: null,
+        status: RunStatus.Idle,
+      })
+      .mockResolvedValueOnce({
+        sleepRequestedAt: new Date(),
+        snapshotRequestedAt: null,
+        snapshotCreatedAt: new Date(),
+        snapshotFailedAt: null,
+        error: null,
+        status: RunStatus.Completed,
+      });
+
+    const logger = {
+      runId: 790,
+      filePath: '/tmp/test.log',
+      log: vi.fn(),
+      info: vi.fn(),
+      warn: vi.fn(),
+      error: vi.fn(),
+    };
+
+    const result = await waitForExternalSleepAction({
+      taskRun: {
+        id: 790,
+        payloadKind: TaskPayloadKind.StandardTask,
+        vendor: 'blaxel',
+        machineId: 'roomote-blaxel-790',
+      } as never,
+      logger,
+    });
+
+    expect(result).toEqual({ claimed: true, completed: true });
+    expect(findRuntimeStateByIdMock).toHaveBeenCalledWith(790);
+  });
+
   it('skips jobs on non-snapshot-capable providers', async () => {
     const logger = {
       runId: 123,

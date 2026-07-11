@@ -12,8 +12,9 @@ preview URLs, and starts the task worker as a keep-alive process.
 
 Use Blaxel when task work should run outside the Roomote host and you want
 provider-managed microVMs with automatic standby and fast wake-up. Blaxel does
-not currently support Roomote environment snapshots; snapshot-based task and
-environment workflows remain available with Modal, E2B, and Daytona.
+not currently support Roomote environment snapshots, but resumable tasks retain
+their existing Blaxel sandbox on standby. Reusable snapshot-based environment
+workflows remain available with Modal, E2B, and Daytona.
 
 ## Configuration
 
@@ -43,7 +44,17 @@ BLAXEL_REGION=us-pdx-1
 - Each exposed port receives a public Blaxel preview URL. Roomote's preview
   proxy remains the user-facing authentication layer.
 - The detached worker process uses Blaxel keep-alive while the task is active.
-- Roomote's sleep-check lifecycle destroys the sandbox when the task finishes.
+- When a resumable task goes to sleep, Roomote stops its worker, extends the
+  sandbox lifetime to seven days, and lets Blaxel move the sandbox to standby.
+  A follow-up reconnects to the same sandbox and launches a new worker without
+  reinstalling the workspace.
+- Non-resumable workflows are still destroyed when their sleep deadline is
+  reached. A standby sandbox is also deleted when its seven-day resume window
+  expires.
+
+Blaxel standby is intentionally separate from Roomote environment snapshots.
+A standby handle reconnects to one mutable sandbox; it cannot be cloned or
+reused as a clean environment template.
 
 ## Verify setup
 

@@ -751,6 +751,7 @@ export const computeProviderLaunchModes = [
   'fresh',
   'environment_snapshot',
   'task_snapshot',
+  'task_standby',
 ] as const;
 
 export type ComputeProviderLaunchMode =
@@ -759,6 +760,8 @@ export type ComputeProviderLaunchMode =
 export const computeProviderMutationOperations = [
   'create_instance',
   'resume_from_snapshot',
+  'enter_standby',
+  'resume_from_standby',
   'destroy_instance',
   'write_files',
   'run_command',

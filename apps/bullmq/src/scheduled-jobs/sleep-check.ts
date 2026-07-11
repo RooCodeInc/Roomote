@@ -3,7 +3,8 @@ import {
   type TaskPhase,
   RunStatus,
   sleepCheckManagedComputeProviders,
-  isSnapshotCapableComputeProvider,
+  isStandbyResumeCapableComputeProvider,
+  isTaskResumeCapableComputeProvider,
   isResumableTaskPayloadKind,
   ACTIVE_TASK_PHASES,
   SNAPSHOT_CHECK_THRESHOLD_MS,
@@ -29,7 +30,10 @@ import {
   resolveComputeProviderEnvValues,
   syncTaskStateFromRuns,
 } from '@roomote/db/server';
-import { createComputeProviderClient } from '@roomote/compute-providers';
+import {
+  createComputeProviderClient,
+  type ComputeProviderClient,
+} from '@roomote/compute-providers';
 import {
   createSnapshot,
   finishRun,
@@ -73,6 +77,7 @@ type SleepCheckJob = Pick<
   | 'vendor'
   | 'taskId'
   | 'snapshotRequestedAt'
+  | 'sandboxCmdId'
   | 'sleepAt'
   | 'sleepRequestedAt'
   | 'startedAt'
@@ -108,6 +113,7 @@ const SLEEP_CHECK_JOB_COLUMNS = {
   vendor: taskRuns.vendor,
   taskId: taskRuns.taskId,
   snapshotRequestedAt: taskRuns.snapshotRequestedAt,
+  sandboxCmdId: taskRuns.sandboxCmdId,
   sleepAt: taskRuns.sleepAt,
   sleepRequestedAt: taskRuns.sleepRequestedAt,
   startedAt: taskRuns.startedAt,
@@ -159,15 +165,14 @@ async function createSleepCheckClient(provider: ComputeProvider) {
 }
 
 /**
- * Whether the sleep action for this job can be a snapshot. Providers that are
- * not snapshot-capable (for example Docker) always fall through to the destroy
- * paths, even for job types that would be resumable on snapshot-capable
- * providers such as Modal, E2B, and Daytona.
+ * Whether the sleep action can preserve this task through either an immutable
+ * snapshot or a provider-native standby handle. Other providers fall through
+ * to the destroy paths.
  */
-function isSnapshotResumableSleepCandidate(job: SleepCheckJob): boolean {
+function isResumableSleepCandidate(job: SleepCheckJob): boolean {
   return (
     isResumableTaskPayloadKind(job.payloadKind) &&
-    isSnapshotCapableComputeProvider(job.vendor)
+    isTaskResumeCapableComputeProvider(job.vendor)
   );
 }
 
@@ -460,7 +465,7 @@ export const sleepCheckJob = async () => {
   }
 
   console.log(
-    `[sleepCheck] Done. Snapshots=${snapshotted}, shutdowns=${shutDown}, failed=${failed}, total=${candidateJobsByMachineId.size}`,
+    `[sleepCheck] Done. Preserved=${snapshotted}, shutdowns=${shutDown}, failed=${failed}, total=${candidateJobsByMachineId.size}`,
   );
 };
 
@@ -594,6 +599,140 @@ async function claimAndSnapshot(
   }
 }
 
+async function claimAndEnterStandby(
+  job: SleepCheckJob,
+  client: ComputeProviderClient,
+  path: SleepCheckPath,
+): Promise<'completed' | 'skipped' | 'error'> {
+  const requestedAt = new Date();
+  const [claimed] = await db
+    .update(taskRuns)
+    .set({ sleepRequestedAt: requestedAt })
+    .where(
+      and(
+        eq(taskRuns.id, job.id),
+        isNull(taskRuns.sleepRequestedAt),
+        isNull(taskRuns.snapshotRequestedAt),
+        isNull(taskRuns.snapshotId),
+      ),
+    )
+    .returning({ id: taskRuns.id });
+
+  if (!claimed) return 'skipped';
+
+  const recordMutation = createComputeProviderMutationEventRecorder(
+    db,
+    { runId: job.id, taskId: job.taskId },
+    { logPrefix: 'sleepCheck', logger: console },
+  );
+
+  await recordSleepCheckEvent(
+    job,
+    'decision',
+    `Claimed standby handoff for task run #${job.id}.`,
+    {
+      path,
+      decision: 'claim_standby',
+      claimedSleepRequestedAt: requestedAt.toISOString(),
+      ...buildSleepCheckDetails(job),
+    },
+  );
+
+  try {
+    if (!client.enterStandby) {
+      throw new Error(`${job.vendor} client does not support standby`);
+    }
+
+    await recordMutation({
+      provider: job.vendor!,
+      operation: 'enter_standby',
+      eventType: 'started',
+      instanceId: job.machineId!,
+      message: `Entering standby for instance ${job.machineId}.`,
+      details: { path, commandId: job.sandboxCmdId ?? null },
+    });
+    const result = await client.enterStandby({
+      instanceId: job.machineId!,
+      commandId: job.sandboxCmdId ?? undefined,
+    });
+    await recordMutation({
+      provider: job.vendor!,
+      operation: 'enter_standby',
+      eventType: 'completed',
+      instanceId: job.machineId!,
+      message: `Instance ${job.machineId} is ready to enter standby.`,
+      details: { path, resumeHandle: result.resumeHandle },
+    });
+
+    const completedAt = new Date();
+    await db.transaction(async (tx) => {
+      await tx
+        .update(taskRuns)
+        .set({
+          snapshotId: result.resumeHandle,
+          snapshotCreatedAt: completedAt,
+          snapshotFailedAt: null,
+          sleepAt: null,
+          taskPhase: null,
+          status: RunStatus.Completed,
+          completedAt,
+        })
+        .where(eq(taskRuns.id, job.id));
+      await syncTaskStateFromRuns(tx, job.taskId);
+      await markTaskStartParallelCountEndedAt(tx, {
+        runId: job.id,
+        endedAt: completedAt,
+      });
+    });
+
+    await recordSleepCheckEvent(
+      job,
+      'completed',
+      `Retained Blaxel sandbox ${job.machineId} on standby for task run #${job.id}.`,
+      {
+        path,
+        decision: 'standby_completed',
+        resumeHandle: result.resumeHandle,
+        ...buildSleepCheckDetails(job),
+      },
+    );
+
+    return 'completed';
+  } catch (error) {
+    await db
+      .update(taskRuns)
+      .set({ sleepRequestedAt: null })
+      .where(eq(taskRuns.id, job.id))
+      .catch(() => {});
+
+    await recordSleepCheckEvent(
+      job,
+      'failed',
+      `Standby handoff failed for task run #${job.id}.`,
+      {
+        path,
+        decision: 'standby_failed',
+        clearedSleepRequestedAt: true,
+        error: error instanceof Error ? error.message : String(error),
+        ...buildSleepCheckDetails(job),
+      },
+    );
+    return 'error';
+  }
+}
+
+async function claimResumableSleep(
+  job: SleepCheckJob,
+  client: ComputeProviderClient,
+  path: SleepCheckPath,
+): Promise<boolean> {
+  if (isStandbyResumeCapableComputeProvider(job.vendor)) {
+    return (await claimAndEnterStandby(job, client, path)) === 'completed';
+  }
+
+  return (await claimAndSnapshot(job, path)) === 'enqueued';
+}
+
 /**
  * Merge candidate jobs by machine ID while keeping the newest row per category.
  */
@@ -660,7 +799,7 @@ async function handleTimedSleepCandidate(params: {
   client: ReturnType<typeof createComputeProviderClient>;
 }): Promise<{ snapshotted: number; shutDown: number; failed: number }> {
   const { job, path, status, timeoutRemainingMs, client } = params;
-  const isResumable = isSnapshotResumableSleepCandidate(job);
+  const isResumable = isResumableSleepCandidate(job);
   const sleepRequestedAt = new Date();
 
   if (status === 'snapshotting') {
@@ -766,10 +905,14 @@ async function handleTimedSleepCandidate(params: {
   }
 
   if (isResumable) {
-    const result = await claimAndSnapshot(job, path);
+    const preserved = await claimResumableSleep(job, client, path);
 
-    if (result === 'enqueued') {
-      console.log(`[sleepCheck] Enqueued snapshot for task run #${job.id}`);
+    if (preserved) {
+      console.log(
+        isStandbyResumeCapableComputeProvider(job.vendor)
+          ? `[sleepCheck] Retained standby for task run #${job.id}`
+          : `[sleepCheck] Enqueued snapshot for task run #${job.id}`,
+      );
       return { snapshotted: 1, shutDown: 0, failed: 0 };
     }
 
@@ -969,7 +1112,7 @@ async function handleHeartbeatRecoveryCandidate(params: {
   config: HeartbeatRecoveryConfig;
 }): Promise<{ snapshotted: number; failed: number }> {
   const { job, status, client, config } = params;
-  const isResumable = isSnapshotResumableSleepCandidate(job);
+  const isResumable = isResumableSleepCandidate(job);
 
   if (status === 'snapshotting') {
     await recordSnapshotInProgressDecision({
@@ -1036,9 +1179,13 @@ async function handleHeartbeatRecoveryCandidate(params: {
   }
 
   if (isResumable) {
-    const result = await claimAndSnapshot(job, config.path);
-    if (result === 'enqueued') {
-      console.warn(config.snapshottedConsoleMessage(job.id));
+    const preserved = await claimResumableSleep(job, client, config.path);
+    if (preserved) {
+      console.warn(
+        isStandbyResumeCapableComputeProvider(job.vendor)
+          ? `[sleepCheck] Retained standby for ${describeSleepCheckPath(config.path).toLowerCase()} task run #${job.id}`
+          : config.snapshottedConsoleMessage(job.id),
+      );
       return { snapshotted: 1, failed: 0 };
     }
 
