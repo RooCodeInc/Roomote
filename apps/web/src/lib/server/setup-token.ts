@@ -24,8 +24,9 @@ function safeEquals(a: string, b: string): boolean {
  * guard matters because `APP_ENV` is optional and `resolveAppEnv()` falls back
  * to `'development'` when it and the Vercel signals are all unset, so a
  * deployment that only set `NODE_ENV=production` would otherwise re-open
- * tokenless bootstrap. Mirrors the dev-login gate (`NODE_ENV !== 'production'`
- * plus an explicit development app env).
+ * tokenless bootstrap. Mirrors the app-env portion of the dev-login gate
+ * (`NODE_ENV !== 'production'` plus an explicit development app env); dev
+ * login additionally requires its own WEB_DEV_LOGIN_ENABLED opt-in.
  */
 function isTokenlessBootstrapAllowed(): boolean {
   return (
