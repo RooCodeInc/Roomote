@@ -184,7 +184,7 @@ describe('Teams activity helpers', () => {
     const parsed = parseTeamsActivity({
       type: 'message',
       id: 'activity-2',
-      text: '<at>Roomote</at>&nbsp;ask <at>Matt Rubens</at> about this',
+      text: '<at>Roomote</at>&nbsp;ask <at>Ada Lovelace</at> about this',
       recipient: {
         id: '28:bot',
         name: 'Roomote',
@@ -204,10 +204,10 @@ describe('Teams activity helpers', () => {
         },
         {
           type: 'mention',
-          text: '<at>Matt Rubens</at>',
+          text: '<at>Ada Lovelace</at>',
           mentioned: {
             id: '29:user',
-            name: 'Matt Rubens',
+            name: 'Ada Lovelace',
           },
         },
       ],
@@ -221,7 +221,7 @@ describe('Teams activity helpers', () => {
     expect(
       teamsActivityToQueuedCommunicationMessage(parsed.data),
     ).toMatchObject({
-      text: 'ask @Matt Rubens about this',
+      text: 'ask @Ada Lovelace about this',
     });
   });
 

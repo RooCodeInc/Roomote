@@ -79,7 +79,7 @@ const USER_FIXTURES: Record<string, AvailableSpecificUser[]> = {
   brunoOnly: [
     {
       userId: 'user-bruno',
-      displayName: 'Bruno Bergher',
+      displayName: 'Alan Turing',
       githubLogin: 'brunobergher',
       githubUserId: 101,
     },
@@ -95,7 +95,7 @@ const USER_FIXTURES: Record<string, AvailableSpecificUser[]> = {
   brunoAlice: [
     {
       userId: 'user-bruno',
-      displayName: 'Bruno Bergher',
+      displayName: 'Alan Turing',
       githubLogin: 'brunobergher',
       githubUserId: 101,
     },
@@ -109,7 +109,7 @@ const USER_FIXTURES: Record<string, AvailableSpecificUser[]> = {
   brunoSam: [
     {
       userId: 'user-bruno',
-      displayName: 'Bruno Bergher',
+      displayName: 'Alan Turing',
       githubLogin: 'brunobergher',
       githubUserId: 101,
     },
@@ -123,7 +123,7 @@ const USER_FIXTURES: Record<string, AvailableSpecificUser[]> = {
   defaultWithSam: [
     {
       userId: 'user-bruno',
-      displayName: 'Bruno Bergher',
+      displayName: 'Alan Turing',
       githubLogin: 'brunobergher',
       githubUserId: 101,
     },

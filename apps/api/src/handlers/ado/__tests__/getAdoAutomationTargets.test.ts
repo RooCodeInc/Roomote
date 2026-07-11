@@ -250,8 +250,8 @@ describe('isRoomoteAdoIdentity', () => {
     // Regression: a bare `@roomote` substring check treated every user in a
     // `roomote.*` Entra tenant as Roomote's own bot and dropped their
     // mentions.
-    expect(isRoomoteAdoIdentity('dan@roomote.onmicrosoft.com')).toBe(false);
+    expect(isRoomoteAdoIdentity('grace@roomote.onmicrosoft.com')).toBe(false);
     expect(isRoomoteAdoIdentity('alice@roomote.dev')).toBe(false);
-    expect(isRoomoteAdoIdentity('Dan Riccio')).toBe(false);
+    expect(isRoomoteAdoIdentity('Grace Hopper')).toBe(false);
   });
 });

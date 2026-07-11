@@ -50,7 +50,7 @@ export function isRoomoteAdoIdentity(identityName: string): boolean {
   // Match Roomote's own bot by its identity name/handle only. A bare
   // `@roomote` substring check also matched every human whose Azure DevOps
   // uniqueName is an email in a `roomote.*` tenant (e.g.
-  // `dan@roomote.onmicrosoft.com`), which silently dropped their `@roomote`
+  // `grace@roomote.onmicrosoft.com`), which silently dropped their `@roomote`
   // PR comment mentions. The comment path additionally guards against
   // Roomote's own posts with `isDeploymentTokenAuthor`, which resolves the
   // exact deployment identity rather than guessing from the name.

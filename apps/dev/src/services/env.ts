@@ -129,7 +129,7 @@ export class EnvService {
           'domain, Cloudflare Tunnel, Tailscale Funnel, or your own domain). For\n' +
           'an ngrok domain, pnpm dev starts and reuses the tunnel for you:\n' +
           '\n' +
-          'R_PUBLIC_URL=https://roomote-matt.ngrok.app\n',
+          'R_PUBLIC_URL=https://your-ngrok-domain.ngrok.app\n',
       );
     }
 

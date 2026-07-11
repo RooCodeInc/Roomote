@@ -140,7 +140,7 @@ describe('executeTaskRun', () => {
 
     workerEnvFromProcessEnvMock.mockReturnValue({
       authToken: 'run-token-123',
-      trpcUrl: 'https://api-cte.ngrok.dev',
+      trpcUrl: 'https://api-example.ngrok.dev',
       appEnv: 'development',
       setRuntimeEnv: vi.fn(),
       buildUserFacingEnv: vi.fn(() => ({

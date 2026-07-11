@@ -15,14 +15,14 @@ describe('forwarded-message-context', () => {
     const context = formatSlackForwardedMessageContext([
       {
         ts: '1776819983.463289',
-        author_id: 'U01TE3R72D9',
-        channel_id: 'C08NY3HU5AR',
+        author_id: 'U0EXAMPLE01',
+        channel_id: 'C0EXAMPLE01',
         is_msg_unfurl: true,
         is_share: true,
         from_url:
-          'https://roomote.slack.com/archives/C08NY3HU5AR/p1776819983463289',
-        text: 'congratulations on the new direction.',
-        author_name: 'Elliott Fouts',
+          'https://example.slack.com/archives/C0EXAMPLE01/p1776819983463289',
+        text: 'excited about the roadmap update.',
+        author_name: 'Annie Easley',
         footer: 'Slack Conversation',
       },
     ]);
@@ -31,11 +31,11 @@ describe('forwarded-message-context', () => {
       [
         'Forwarded Slack message:',
         'Context:',
-        '- Author: Elliott Fouts',
-        '- Channel: C08NY3HU5AR',
-        '- Source: https://roomote.slack.com/archives/C08NY3HU5AR/p1776819983463289',
+        '- Author: Annie Easley',
+        '- Channel: C0EXAMPLE01',
+        '- Source: https://example.slack.com/archives/C0EXAMPLE01/p1776819983463289',
         'Text:',
-        'congratulations on the new direction.',
+        'excited about the roadmap update.',
       ].join('\n'),
     );
   });

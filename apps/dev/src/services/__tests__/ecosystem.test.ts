@@ -125,19 +125,20 @@ describe('ecosystem.config.js', () => {
   it('uses R_PUBLIC_URL as the local app callback base', () => {
     process.env = {
       ...originalEnv,
-      R_PUBLIC_URL: 'https://roomote-matt.ngrok.app',
+      R_PUBLIC_URL: 'https://roomote-example.ngrok.app',
     };
 
     const apps = loadEcosystemApps();
     const webApp = apps.find((app) => app.name === 'roomote-web');
 
     expect(webApp?.env).toMatchObject({
-      R_PUBLIC_URL: 'https://roomote-matt.ngrok.app',
-      R_APP_URL: 'https://roomote-matt.ngrok.app',
-      SLACK_REDIRECT_URI: 'https://roomote-matt.ngrok.app/api/slack/callback',
-      SLACK_AUTH_URI: 'https://roomote-matt.ngrok.app/api/slack/auth',
+      R_PUBLIC_URL: 'https://roomote-example.ngrok.app',
+      R_APP_URL: 'https://roomote-example.ngrok.app',
+      SLACK_REDIRECT_URI:
+        'https://roomote-example.ngrok.app/api/slack/callback',
+      SLACK_AUTH_URI: 'https://roomote-example.ngrok.app/api/slack/auth',
       R_LINEAR_REDIRECT_URI:
-        'https://roomote-matt.ngrok.app/api/linear/callback',
+        'https://roomote-example.ngrok.app/api/linear/callback',
     });
   });
 

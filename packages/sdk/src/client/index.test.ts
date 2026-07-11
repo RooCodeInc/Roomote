@@ -332,7 +332,7 @@ describe('createWorkerFetchWithRetry', () => {
     });
 
     const response = await workerFetch(
-      'https://web-dan.ngrok.dev/_roomote-api/trpc/taskRuns.dequeue?batch=1',
+      'https://web-example.ngrok.dev/_roomote-api/trpc/taskRuns.dequeue?batch=1',
       {
         method: 'POST',
         body: '{"0":{"json":{"runId":68}}}',

@@ -365,7 +365,7 @@ describe('router helpers', () => {
   it('includes Roomote lookup support only for Slack permalink references', () => {
     expect(
       shouldIncludeRoomoteRouterLookup(
-        'https://roomote.slack.com/archives/C08NY3HU5AR/p1776819983463289',
+        'https://example.slack.com/archives/C0EXAMPLE01/p1776819983463289',
       ),
     ).toBe(true);
     expect(

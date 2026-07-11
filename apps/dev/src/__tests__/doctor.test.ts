@@ -83,7 +83,7 @@ function mockFetch(
 function mockExeca({
   containers = ['roomote-postgres', 'roomote-redis', 'roomote-minio'],
   pm2Status = 'online',
-  publicUrl = 'https://roomote-matt.ngrok.app',
+  publicUrl = 'https://roomote-example.ngrok.app',
   publicUrlLocation = 'nested',
   runtimeTooling = true,
   includeDefaultAuth = true,
@@ -203,7 +203,7 @@ describe('runDoctor', () => {
       expect.objectContaining({
         name: 'Public callback URL',
         status: 'pass',
-        detail: 'https://roomote-matt.ngrok.app',
+        detail: 'https://roomote-example.ngrok.app',
       }),
     );
     expect(checks).toContainEqual(
@@ -337,7 +337,7 @@ describe('runDoctor', () => {
         name: 'Teams app callback',
         status: 'pass',
         detail: expect.stringContaining(
-          'Azure Bot messaging endpoint https://roomote-matt.ngrok.app/api/webhooks/teams',
+          'Azure Bot messaging endpoint https://roomote-example.ngrok.app/api/webhooks/teams',
         ),
       }),
     );
@@ -346,7 +346,7 @@ describe('runDoctor', () => {
       expect.objectContaining({ method: 'POST' }),
     );
     expect(global.fetch).toHaveBeenCalledWith(
-      'https://roomote-matt.ngrok.app/api/webhooks/teams',
+      'https://roomote-example.ngrok.app/api/webhooks/teams',
       expect.objectContaining({ method: 'POST', body: '{}' }),
     );
   });
@@ -416,7 +416,7 @@ describe('runDoctor', () => {
                 env:
                   name === 'roomote-web'
                     ? {
-                        R_PUBLIC_URL: 'https://roomote-matt.ngrok.app',
+                        R_PUBLIC_URL: 'https://roomote-example.ngrok.app',
                         R_SLACK_CLIENT_ID: 'slack-client-id',
                         R_SLACK_CLIENT_SECRET: 'slack-client-secret',
                         R_MODEL: 'openrouter/openai/gpt-5.4',
@@ -535,7 +535,7 @@ describe('runDoctor', () => {
   });
 
   it('warns when sign-in and model providers are not configured yet', async () => {
-    mockExeca({ publicUrl: 'https://roomote-matt.ngrok.app' });
+    mockExeca({ publicUrl: 'https://roomote-example.ngrok.app' });
     mockedExeca.mockImplementation(async (command, args) => {
       if (command === 'docker') {
         return {
@@ -560,7 +560,7 @@ describe('runDoctor', () => {
                 env:
                   name === 'roomote-web'
                     ? {
-                        R_PUBLIC_URL: 'https://roomote-matt.ngrok.app',
+                        R_PUBLIC_URL: 'https://roomote-example.ngrok.app',
                       }
                     : {},
               },
@@ -614,7 +614,7 @@ describe('runDoctor', () => {
                 env:
                   name === 'roomote-web'
                     ? {
-                        R_PUBLIC_URL: 'https://roomote-matt.ngrok.app',
+                        R_PUBLIC_URL: 'https://roomote-example.ngrok.app',
                         R_SLACK_CLIENT_ID: 'slack-client-id',
                         R_MODEL: 'openrouter/openai/gpt-5.4',
                         OPENROUTER_API_KEY: 'openrouter-key',

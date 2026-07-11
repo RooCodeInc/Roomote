@@ -494,7 +494,7 @@ describe('sendMessageToTask', () => {
   it('passes the resolved display name to the worker for GitHub PR follow-up sendPrompt messages', async () => {
     mockFindLatestTaskRun.mockResolvedValue(createActiveRun());
     mockUserFindFirst.mockResolvedValue({
-      name: 'Matt Rubens',
+      name: 'Ada Lovelace',
       email: 'matt@example.com',
     });
 
@@ -512,7 +512,7 @@ describe('sendMessageToTask', () => {
     expect(mockTrackLatestUserMessageForSlackQuote).not.toHaveBeenCalled();
     expect(mockSendPromptMutate).toHaveBeenCalledWith({
       prompt: '<github-pr-follow-up>Route this through the existing PR task.',
-      userName: 'Matt Rubens',
+      userName: 'Ada Lovelace',
     });
   });
 
@@ -548,7 +548,7 @@ describe('sendMessageToTask', () => {
   it('skips API-side Slack quote tracking for GitHub PR follow-up steering messages but passes the resolved display name to the worker', async () => {
     mockFindLatestTaskRun.mockResolvedValue(createActiveRun());
     mockUserFindFirst.mockResolvedValue({
-      name: 'Matt Rubens',
+      name: 'Ada Lovelace',
       email: 'matt@example.com',
     });
 
@@ -567,7 +567,7 @@ describe('sendMessageToTask', () => {
     expect(mockUserFindFirst).toHaveBeenCalledWith(expect.anything());
     expect(mockSteerTaskMutate).toHaveBeenCalledWith({
       prompt: '<github-pr-follow-up>Route this through the existing PR task.',
-      userName: 'Matt Rubens',
+      userName: 'Ada Lovelace',
     });
   });
 

@@ -440,11 +440,11 @@ describe('MockSlackServer', () => {
             id: 'C123ABC456',
             name: 'product-debug',
             isMember: true,
-            members: ['UDAN', 'UROOMOTE'],
+            members: ['UGRACE', 'UROOMOTE'],
           },
         ],
         users: [
-          { id: 'UDAN', name: 'dan', displayName: 'Dan Riccio' },
+          { id: 'UGRACE', name: 'grace', displayName: 'Grace Hopper' },
           { id: 'UROOMOTE', name: 'roomote', displayName: 'Roomote' },
         ],
       },
@@ -465,7 +465,7 @@ describe('MockSlackServer', () => {
       expect(firstPageResponse.status).toBe(200);
       await expect(firstPageResponse.json()).resolves.toEqual({
         ok: true,
-        members: ['UDAN'],
+        members: ['UGRACE'],
         response_metadata: { next_cursor: '1' },
       });
 
@@ -499,11 +499,11 @@ describe('MockSlackServer', () => {
             id: 'C123ABC456',
             name: 'product-debug',
             isMember: false,
-            members: ['UDAN', 'UROOMOTE'],
+            members: ['UGRACE', 'UROOMOTE'],
           },
         ],
         users: [
-          { id: 'UDAN', name: 'dan', displayName: 'Dan Riccio' },
+          { id: 'UGRACE', name: 'grace', displayName: 'Grace Hopper' },
           { id: 'UROOMOTE', name: 'roomote', displayName: 'Roomote' },
         ],
       },
