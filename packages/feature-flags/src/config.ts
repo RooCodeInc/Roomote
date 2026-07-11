@@ -14,21 +14,21 @@ export const FEATURE_FLAG_CONFIG: FeatureFlagConfigMap = {
     defaultValue: false,
     metadataKey: 'plan_mode',
     description:
-      'Let agents create implementation plans without changing files.',
+      'On: planning stays read-only. Off: agents can continue from planning into implementation.',
   },
   [FeatureFlag.SlackEvalLauncher]: {
     name: 'Custom Slack task launches',
     defaultValue: false,
     metadataKey: 'slack_eval_launcher',
     description:
-      'Use !eval in Slack to launch tasks with a specific model, reasoning level, branch, or commit.',
+      'On: !eval launches Slack tasks with custom model, reasoning, and Git options. Off: the command reports that it is unavailable.',
   },
   [FeatureFlag.ShowDebugUISetting]: {
     name: 'Debug controls',
     defaultValue: false,
     metadataKey: 'show_debug_ui_setting',
     description:
-      'Let users show additional troubleshooting information from Personal settings.',
+      'On: users can enable troubleshooting details in Personal settings. Off: the debug option is hidden.',
   },
 
   [FeatureFlag.SlackProofAutoPost]: {
@@ -36,7 +36,7 @@ export const FEATURE_FLAG_CONFIG: FeatureFlagConfigMap = {
     defaultValue: false,
     metadataKey: 'slack_proof_auto_post',
     description:
-      'Post task screenshots and recordings to the Slack thread where the task started.',
+      'On: visual proof is posted to the Slack thread where the task started. Off: proof is not posted automatically.',
   },
 
   [FeatureFlag.SuggestionRouting]: {
@@ -44,7 +44,7 @@ export const FEATURE_FLAG_CONFIG: FeatureFlagConfigMap = {
     defaultValue: false,
     metadataKey: 'suggestion_routing',
     description:
-      'Group Slack suggestions by destination and create a tailored plan for each group.',
+      'On: idea suggestions can be grouped across Slack channels, with a plan for each group. Off: all suggestions go to the manager channel.',
   },
 
   [FeatureFlag.VisualProofAutoScreencast]: {
@@ -52,7 +52,7 @@ export const FEATURE_FLAG_CONFIG: FeatureFlagConfigMap = {
     defaultValue: false,
     metadataKey: 'visual_proof_auto_screencast',
     description:
-      'Record a screencast when visual proof needs to show an interaction or change over time.',
+      'On: visual proof can automatically use recordings when screenshots are not enough. Off: automatic proof uses screenshots.',
   },
 
   [FeatureFlag.AuthorshipRules]: {
@@ -60,7 +60,7 @@ export const FEATURE_FLAG_CONFIG: FeatureFlagConfigMap = {
     defaultValue: () => process.env.NODE_ENV === 'development',
     metadataKey: 'authorship_rules',
     description:
-      'Set task authors and pull request owners with workspace-wide rules.',
+      'On: workspace rules set task authors and pull request owners. Off: default attribution applies.',
   },
 
   [FeatureFlag.BackgroundSubagents]: {
@@ -75,7 +75,7 @@ export const FEATURE_FLAG_CONFIG: FeatureFlagConfigMap = {
     metadataKey: 'background_subagents',
     legacyMetadataKeys: ['opencode_background_subagents'],
     description:
-      'Let helper agents run asynchronously so pull requests can be delivered while visual proof is still being captured.',
+      'On: helper agents can run asynchronously, so pull requests may arrive before visual proof. Off: visual proof finishes before delivery.',
   },
 };
 
