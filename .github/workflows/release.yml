@@ -51,13 +51,19 @@ jobs:
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
 
           branch='changeset-release/develop'
+
+          close_stale_version_pr() {
+            local existing
+            existing="$(gh pr list --base develop --head "$branch" --state open --json number --jq '.[0].number // empty')"
+            if [ -n "$existing" ]; then
+              gh pr close "$existing" --comment 'No versionable changesets remain on develop; closing this stale Version PR.' --delete-branch || true
+            fi
+          }
+
           pending="$(find .changeset -maxdepth 1 -type f -name '*.md' ! -iname 'README.md' 2>/dev/null | wc -l | tr -d ' ')"
 
           if [ "${pending:-0}" -eq 0 ]; then
-            existing="$(gh pr list --base develop --head "$branch" --state open --json number --jq '.[0].number // empty')"
-            if [ -n "$existing" ]; then
-              gh pr close "$existing" --comment 'No pending changesets remain on develop; closing this stale Version PR.' --delete-branch || true
-            fi
+            close_stale_version_pr
             echo "No pending changesets; nothing to version."
             exit 0
           fi
@@ -71,7 +77,9 @@ jobs:
           git add package.json CHANGELOG.md .changeset
           if git diff --cached --quiet; then
             # Changeset files exist but none carry a valid bump (for example
-            # an empty changeset); there is nothing to version yet.
+            # an empty changeset); there is nothing to version yet, and any
+            # previously opened Version PR no longer reflects a real release.
+            close_stale_version_pr
             echo "No versionable changesets; nothing to commit."
             exit 0
           fi

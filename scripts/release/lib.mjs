@@ -90,8 +90,8 @@ export function parsePendingChangesets(repoRoot) {
 }
 
 /**
- * Read a representative current product version from the fixed group.
- * Prefers root package.json when it has a version, else first workspace package.
+ * Read the current product version: the root package.json version, falling
+ * back to the first workspace package that carries one.
  */
 export function readCurrentProductVersion(repoRoot) {
   const rootPkg = readJson(join(repoRoot, 'package.json'));
